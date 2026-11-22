@@ -6,6 +6,7 @@
 // CI — green queues the round with nothing asked of the owner (B-255, S-BTN-230); a verdict
 // written on one PR moves the whole change to `reviewed`; one PR merged leaves it
 // short of `merged`; both merged ends it. Node only: it writes a real repository and runs git.
+import { keepLegacyPrPlacement } from '../lib/legacy-pr-course';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -51,6 +52,7 @@ beforeEach(async () => {
   dir = mkdtempSync(join(tmpdir(), 'baton-s106-'));
   for (const a of [['init', '-q', '-b', 'main'], ['config', 'user.email', 's106@test'], ['config', 'user.name', 's106'], ['remote', 'add', 'origin', 'https://github.com/o/docs.git']]) git(...a);
   expect(await initMain([], { root: dir, log: () => {} })).toBe(0);
+  keepLegacyPrPlacement(dir);
   mkdirSync(join(dir, 'tickets'), { recursive: true });
   writeFileSync(join(dir, 'tickets', 'a1.md'), '---\nid: A-1\ntitle: Change the site and the SDK\nrepos: [o/site, o/sdk]\n---\n');
   writeFileSync(join(dir, 'tickets', 'b1.md'), '---\nid: B-1\ntitle: Done long ago\nstatus: done\nrepos: [o/old]\n---\n');

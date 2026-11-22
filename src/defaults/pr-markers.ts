@@ -25,6 +25,8 @@ export interface BranchCommit {
   parent: string | null;
   /** Its tree is its first parent's: it changes nothing — a marker's shape. */
   empty: boolean;
+  pusher?: string;
+  baseOnly?: boolean;
   message: string;
 }
 

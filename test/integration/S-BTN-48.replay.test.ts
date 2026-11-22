@@ -155,7 +155,7 @@ export async function close() { return 'https://example.test/close'; }
     });
     return new Runner({
       api, home: this.dir, repository: 'docs', hostname: 'vm-a', harness: 'opencode', session,
-      courses: [{ course: 'create-pr', version: 1 }], stateFile: join(tmpdir(), `baton-s48-${session}.json`),
+      courses: [{ course: 'create-pr', version: 3 }], stateFile: join(tmpdir(), `baton-s48-${session}.json`),
       beatEvery: 60_000, log: () => {},
     });
   }
@@ -343,7 +343,7 @@ describe('S-BTN-48 replay: a recorded run re-run without a claim', () => {
     writeFileSync(join(repo.dir, 'plan.txt'), 'the plan as the run read it\n');
     const planSha = repo.commit('the plan');
     const uri = `git:immediately-run/docs@${planSha}:plan.txt`;
-    const { secret } = await register('vm-a', { courses: [{ repository: 'docs', course: 'create-pr', version: 1 }] });
+    const { secret } = await register('vm-a', { courses: [{ repository: 'docs', course: 'create-pr', version: 3 }] });
     const claim = await claimItem('vm-a', secret, { ticket_id: 'docs:T-1' });
     const started = await advance('vm-a', secret, claim.json.claim_id, {
       leg: 'implement',

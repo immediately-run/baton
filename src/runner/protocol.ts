@@ -14,7 +14,7 @@ import { resolveLeg, resolveStation } from '../core/graph';
 export type LegResult =
   | { reached: string; next?: string | null; bars?: string[]; session?: string; not_before?: number; outputs?: unknown[] }
   | { suspend: true; reached: string; next?: string | null; detail?: string; outputs?: unknown[] }
-  | { end: 'done'; reached: string; detail?: string; outputs?: unknown[] }
+  | { end: 'done'; reached: string; next?: string | null; detail?: string; outputs?: unknown[] }
   | { release: string; reached: string; next?: string | null };
 
 /** The `released:` reasons a script may choose itself (§6.5): the runner's own are
@@ -26,7 +26,7 @@ export const SCRIPT_RELEASE_REASONS = ['stale-board', 'cannot-finish:transient',
 /** What the runner does with a validated result. */
 export type Decision =
   | { kind: 'advance'; reached: string; leg: string; bars: string[]; session?: string; notBefore?: number; outputs?: unknown[] }
-  | { kind: 'done'; reached: string; detail?: string; outputs?: unknown[] }
+  | { kind: 'done'; reached: string; next?: string | null; detail?: string; outputs?: unknown[] }
   | { kind: 'suspend'; reached: string; next: string | null; detail?: string; outputs?: unknown[] }
   | { kind: 'release'; reason: string; reached: string; next: string | null };
 
@@ -81,7 +81,9 @@ export function decide(result: unknown, g: Graph, legName: string, from: string)
   if ('end' in result) {
     const reached = resolved(result.reached);
     if (!rests.has(reached)) return bug(`ends at ${result.reached}, which is not ${from} or an outcome of ${leg}`);
-    return { kind: 'done', reached, ...(result.detail != null ? { detail: result.detail } : {}), ...outputsOf(result) };
+    const next = def.reconciles ? nextLeaving(result.next, reached) : null;
+    if (def.reconciles && ((result.next != null && next == null) || (next == null && !g.ends.has(reached)))) return bug('reconcile must name a continuation except at an end');
+    return { kind: 'done', reached, ...(def.reconciles ? { next } : {}), ...(result.detail != null ? { detail: result.detail } : {}), ...outputsOf(result) };
   }
   if ('release' in result) {
     if (!(SCRIPT_RELEASE_REASONS as readonly string[]).includes(result.release)) {

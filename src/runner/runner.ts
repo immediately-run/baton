@@ -2303,6 +2303,7 @@ export class Runner {
         const ctx: Record<string, unknown> = resuming ? resuming.ctx : {
           ticket: { id: ticket, path: claim.path ?? null, home: this.o.repository, ...(typeof claim.version === 'string' && claim.version !== '' ? { version: claim.version } : {}), ...(ticketFile != null ? { file: ticketFile } : {}) },
           claim: { id: claimId, nonce: claim.nonce, station: at },
+          ...(typeof claim.displaced === 'string' ? { displaced: claim.displaced, evidence: claim.evidence ?? [] } : {}),
           leg: legName, run, ...(runId ? { run_id: runId } : {}),
           snapshot: { sha: claim.snapshot_sha, path: gitPath, next: nextLegs },
           // B-127: the owner-signed commits a verified board post named — where the repository
@@ -2385,7 +2386,7 @@ export class Runner {
           }
           const reason = abort.reason ?? `suspended:${at}`;
           // A released end points at no evidence (§6.5); the marker close wrote is in git.
-          return await this.finish(claimId, { end_reason: reason, reached, ...(next != null ? { next } : {}) }, await this.callHandoff(script, ctx));
+          return await this.finish(claimId, { end_reason: reason, reached, ...(next != null ? { next } : {}), ...(legName === 'review' && closed && /#(?:issuecomment|pullrequestreview)-\d+$/.test(closed) ? { verdict_ref: closed } : {}) }, await this.callHandoff(script, ctx));
         }
         if (outcome.kind === 'crashed') {
           // R-BTN-144 (B-170): the leg's own error text leaves masked — a provider-auth message
@@ -2414,7 +2415,7 @@ export class Runner {
         if (verdict.kind === 'done') {
           // A done end carries no hand-off (R-BTN-44 writes one for suspensions and releases);
           // the closing marker and the resume record are its record.
-          const done = { end_reason: 'done', reached: verdict.reached, ...(verdict.detail ? { detail: verdict.detail } : {}), ...(verdict.outputs ? { outputs: verdict.outputs } : {}), ...(closed ? { ended_at_sha: closed } : {}) };
+          const done = { end_reason: 'done', reached: verdict.reached, ...(verdict.next !== undefined ? { next: verdict.next } : {}), ...(verdict.detail ? { detail: verdict.detail } : {}), ...(verdict.outputs ? { outputs: verdict.outputs } : {}), ...(closed ? { ended_at_sha: closed } : {}) };
           return await this.finish(claimId, done, null);
         }
         if (verdict.kind === 'suspend' || verdict.kind === 'release') {
@@ -2425,6 +2426,7 @@ export class Runner {
             ...(verdict.kind === 'suspend' && verdict.outputs ? { outputs: verdict.outputs } : {}),
             ...(verdict.kind === 'suspend' && verdict.detail ? { detail: verdict.detail } : {}),
             ...(verdict.kind === 'suspend' && closed ? { ended_at_sha: closed } : {}),
+            ...(verdict.kind === 'release' && legName === 'review' && closed && /#(?:issuecomment|pullrequestreview)-\d+$/.test(closed) ? { verdict_ref: closed } : {}),
           }, await this.callHandoff(script, ctx));
         }
         // The go-on decision: the advance carries the result's bars on the edge (R-BTN-63) and

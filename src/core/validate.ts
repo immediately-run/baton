@@ -638,6 +638,7 @@ export interface End {
   next: string | null;
   detail: string | null;
   ended_at_sha: string | null;
+  verdict_ref: string | null;
   /** `released:<reason>` naming no §6.5 reason: an owner bar's (R-BTN-67), checked by the claims. */
   owner_bar: boolean;
   /** R-BTN-126 (B-104's branch): a `released:blocked` end's failed prerequisite — `capability`,
@@ -783,6 +784,8 @@ export function checkEnd(body: unknown): End {
   const ptr = b.ended_at_sha;
   if (ptr !== undefined && ptr !== null && !isPointer(ptr)) bad('ended_at_sha', 'must be a commit sha or an https URL of at most 1000 characters');
   const sha = (ptr as string | undefined | null) ?? null;
+  const verdict = b.verdict_ref;
+  if (verdict != null && (typeof verdict !== 'string' || !isHttpsPointer(verdict) || !/#(?:issuecomment|pullrequestreview)-\d+$/.test(verdict))) bad('verdict_ref', 'must be a verdict comment or review URL');
   if (status! === 'released' && sha) bad('ended_at_sha', 'only a completed end points at its evidence');
   // R-BTN-126 (B-104's branch): a blocked end names the prerequisite that failed — `capability`
   // with a holding the runner declares and says it lost. The other kinds are the blocked-end
@@ -813,7 +816,7 @@ export function checkEnd(body: unknown): End {
     spawned = b.spawned as string[];
     if (reason === 'done') bad('spawned', 'a done end spawns nothing — its open children are superseded by the close (R-BTN-86, R-BTN-168)');
   }
-  return { end_reason: reason, status: status!, suspended_at, reached: reached ?? suspended_at, next, detail, ended_at_sha: sha, owner_bar: ownerBar, prerequisite, outputs: checkOutputs(b.outputs), scope_exceeded: checkScopeReport(b.scope_exceeded), exit_status: optional(b.exit_status, exitStatus) ?? null, session_url: carriedSessionUrl(b.session_url), spawned, local_order: checkLocalOrder(b.local_order) };
+  return { end_reason: reason, status: status!, suspended_at, reached: reached ?? suspended_at, next, detail, ended_at_sha: sha, verdict_ref: typeof verdict === 'string' ? verdict : null, owner_bar: ownerBar, prerequisite, outputs: checkOutputs(b.outputs), scope_exceeded: checkScopeReport(b.scope_exceeded), exit_status: optional(b.exit_status, exitStatus) ?? null, session_url: carriedSessionUrl(b.session_url), spawned, local_order: checkLocalOrder(b.local_order) };
 }
 
 /** B-248 (R-BTN-202): a local order's provenance, as the advance or end that reports the leg

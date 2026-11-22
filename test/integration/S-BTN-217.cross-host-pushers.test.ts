@@ -4,6 +4,7 @@
 // forge reports can push to the PR's base, read on that repository's own forge with that host's
 // token. Must hold: a verdict by an author who can neither push nor is listed is not read; one
 // by a listed pusher is. Node only: it writes a real repository and runs git.
+import { keepLegacyPrPlacement } from '../lib/legacy-pr-course';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -74,6 +75,7 @@ beforeEach(async () => {
     sync_keys: [{ public_key: syncKey.publicKey, role: 'sync' }], owner_keys: [owner.publicKey], cut_over: true,
   })).status).toBe(200);
   expect(await initMain(['--course', 'create-pr'], { root: dir, log: () => {} })).toBe(0);
+  keepLegacyPrPlacement(dir);
   const batonJson = join(dir, '.baton', 'baton.json');
   const config = JSON.parse(readFileSync(batonJson, 'utf8')) as Record<string, unknown>;
   writeFileSync(batonJson, JSON.stringify({ ...config, baton_url: ORIGIN, repos: { mono: 'acme/monorepo' }, ticket_prefix: 'LIN' }, null, 2));

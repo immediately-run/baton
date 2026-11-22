@@ -12,6 +12,7 @@ import { BatonError, CLIENT_HEADER, errorResponse, json, servedClientVersions, w
 import { checkPayload, DEFAULT_COURSE, resolveParents, retiredBoardFields, rowFor, rowForTicket, rowHash, stationOf, type BoardPayload, type PostedStation, type TicketRow } from './board';
 import { Stations, type Seen } from './stations';
 import { Questions } from './questions';
+import { OutsideWork, isOutsideWork, EVIDENCE_TYPE } from './outsideWork';
 import { Conditions } from './conditions';
 import { Admin, SESSION_COOKIE, SESSION_MS } from './admin';
 import { familyOf } from '../shared/baton.mjs';
@@ -97,6 +98,7 @@ export class BatonCore {
   readonly provenance: Provenance;
   /** §6.4 (R-BTN-116): the person legs' questions, their answers and their expiry. */
   readonly questions: Questions;
+  readonly outsideWork: OutsideWork;
   /** §7.1 (R-BTN-160, R-BTN-195; B-234): the raised conditions — the report route, the
    *  Needs-you list, and the run's end closing its open `interact`. */
   readonly conditions: Conditions;
@@ -195,6 +197,9 @@ export class BatonCore {
       queued: (ticket) => this.queues.touch(ticket), reevaluate: (ticket) => this.blocks.write([ticket]), isHeld: (ticket) => this.blocks.isHeld(ticket),
       linkBases: (ticket) => this.blocks.linkBases(ticket), answersFrom: (repo) => this.policies.current(repo)?.policy.inputs.answers ?? 'git',
       dispatch: (kind, ticketId) => want({ repository: repositoryOf(ticketId), kind }) });
+    this.outsideWork = new OutsideWork({ store, now: () => this.now(), graph: (repo, course) => this.stations.graph(repo, course),
+      record: (id, row) => this.history.record(id, row), held: (id) => this.blocks.isHeld(id), changed: (id) => this.blocks.write([id]),
+      admits: (repo, type) => this.policies.current(repo)?.policy.attestations[type]?.includes('sync') ?? (type === EVIDENCE_TYPE) });
     // B-234 (R-BTN-160, R-BTN-195): the raised conditions — a course's own vocabulary decides a
     // disposition (never the runner's word), a `suspend` url keeps only under R-BTN-92's link
     // bases (as a question's), and the Needs-you and list reads a delivery runner polls.
@@ -204,7 +209,7 @@ export class BatonCore {
       schema: (repo, id) => this.courses.schema(repo, id), intake: (repo, course) => this.queues.intake(repo, course),
       dispatch: (kind, ticketId) => want({ repository: repositoryOf(ticketId), kind }) ,
       policies: this.policies, forgeOf: (repo) => this.registry.get(repo)?.forge ?? 'github', scope: this.scope, deprecated: this.deprecated,
-      conditions: this.conditions, sessionHosts: () => this.instance.sessionHosts() });
+      conditions: this.conditions, sessionHosts: () => this.instance.sessionHosts(), outsideWork: this.outsideWork });
     this.cutover = new Cutover({ store, now: () => this.now(), held: (ticket) => this.blocks.held(ticket, true) });
     this.stats = new Stats(store, this.queues);
     this.mirror = new Mirror({ store, now: () => this.now(), held: (ticket) => this.blocks.held(ticket, true) });
@@ -467,6 +472,7 @@ export class BatonCore {
         stage = 'questions';
         this.questions.applyPending();
         this.questions.expireDue(this.now());
+        this.outsideWork.pending();
         stage = 'unblocked';
         this.takeUnblocked();
         // R-BTN-80: lapsed leases and due reminders queue again; old closed notices go.
@@ -613,7 +619,8 @@ export class BatonCore {
           const { repo: { id: repo }, req: signed } = await this.verifySync(req, 'sync');
           // R-BTN-62 (Release): a run that will not post gives its number back; only the
           // outstanding number is voided, so a stale release voids nothing.
-          const release = ((await readJson(signed).catch(() => null)) as { release?: unknown } | null)?.release;
+          const request = (await readJson(signed).catch(() => null)) as { release?: unknown; outside_work?: unknown } | null;
+          const release = request?.release;
           if (release !== undefined) {
             if (!Number.isSafeInteger(release)) throw new BatonError('invalid-params', 'release must be the number this credential was handed (R-BTN-62)');
             this.observations.release(repo, release as number);
@@ -634,7 +641,8 @@ export class BatonCore {
           // B-182 (R-BTN-140): and the effective `code_repos`, each entry with its forge, host,
           // ids and web_base, and the owners' `pushers` host-qualified — what the fact adapter
           // reads each repository by, and whose words count there.
-          return json({ ...this.observations.observe(repo), bars: this.admin.bars([repo], this.now(), true).map(({ repository_id: _r, ...b }) => b), code_repos: codeReposOf(this.store, repo), pushers: pushersOf(this.store, repo), ...this.claims.syncRecord(repo), versions: this.ticketVersions(repo), signing_keys: await this.admin.signingKeys(repo), require_signed_control: !!this.sql<{ flag: number }>('SELECT require_signed_control AS flag FROM repositories WHERE id = ?', repo)[0]?.flag });
+          const observation = this.observations.observe(repo);
+          return json({ ...observation, ...(request?.outside_work === true ? this.outsideWorkRecord(repo, observation.sha) : {}), bars: this.admin.bars([repo], this.now(), true).map(({ repository_id: _r, ...b }) => b), code_repos: codeReposOf(this.store, repo), pushers: pushersOf(this.store, repo), ...this.claims.syncRecord(repo), versions: this.ticketVersions(repo), signing_keys: await this.admin.signingKeys(repo), require_signed_control: !!this.sql<{ flag: number }>('SELECT require_signed_control AS flag FROM repositories WHERE id = ?', repo)[0]?.flag });
         }
         if (req.method === 'POST' && url.pathname === '/v1/sync/board') {
           const { repo, req: signed } = await this.verifySync(req, 'sync');
@@ -1774,7 +1782,7 @@ export class BatonCore {
       // `answer:` — applied as the leg's arrival (R-BTN-39), which may move the ticket before
       // the blocks are re-evaluated below.
       this.questions.posted(r, p.tickets ?? [], new Set(stations.keys()));
-      this.questions.attestations(r, p.attestations ?? []);
+      this.applyBoardAttestations(r, p.attestations ?? []);
       // B-129 (R-BTN-85, both values): a post whose ticket frontmatter says `available` while
       // the ticket is past its course's start — the snapshot implying a position Baton has
       // moved past, the false `available`/`prs: []` of the 2026-10-27 release — is a
@@ -2152,11 +2160,54 @@ export class BatonCore {
     // R-BTN-116: a refresh carries the tickets' questions and the run's attestations like a new
     // head (§4.4) — each is idempotent, so a re-post of the same question or answer moves nothing.
     this.questions.posted(r, (p.tickets ?? []).filter((t) => live.has(t.id)), new Set(stations.keys()));
-    this.questions.attestations(r, p.attestations ?? []);
+    this.applyBoardAttestations(r, held ? (p.attestations ?? []).filter((a) => !isOutsideWork(a)) : p.attestations ?? []);
     // A refresh's stations carry `needs` and `decisions` too (R-BTN-76, R-BTN-78); a refresh that
     // materialized (B-183) recounts for what its rows moved, as a new head does.
     this.applyBlocks(r, stations, wrote?.upserted ?? [], legsBefore, !!wrote && wrote.deleted > 0);
     return seen;
+  }
+
+  private applyBoardAttestations(repo: string, attestations: NonNullable<BoardPayload['attestations']>) {
+    this.questions.attestations(repo, attestations.filter((a) => !isOutsideWork(a)));
+    this.outsideWork.posted(repo, attestations.filter(isOutsideWork));
+    this.outsideWork.pending(repo);
+  }
+
+  private outsideWorkRecord(repo: string, sha: string | null) {
+    const positions = this.sql<{ ticket: string; station: string; path: string; path_len: number; next_leg: string | null; changed_at: number }>(`
+      SELECT t.local_id AS ticket, s.station, s.path, s.path_len, s.next_leg, s.changed_at
+        FROM ticket_stations s JOIN tickets t ON t.id = s.ticket_id
+        WHERE t.repository_id = ? AND NOT EXISTS (SELECT 1 FROM closed_tickets x WHERE x.ticket_id = t.id)`, repo);
+    const refs = this.sql<{ ticket: string; leg: string; ref: string }>(`
+      SELECT t.local_id AS ticket, l.leg, l.evidence AS ref FROM claim_legs l JOIN claims c ON c.id = l.claim_id JOIN tickets t ON t.id = c.ticket_id
+        WHERE t.repository_id = ? AND l.evidence IS NOT NULL
+      UNION
+      SELECT t.local_id, COALESCE((SELECT leg FROM claim_legs WHERE claim_id = c.id ORDER BY seq DESC LIMIT 1), c.offered_leg), c.ended_at_sha
+        FROM claims c JOIN tickets t ON t.id = c.ticket_id WHERE t.repository_id = ? AND c.ended_at_sha != ''
+      UNION
+      SELECT t.local_id, 'reported-pr', p.value
+        FROM claims c JOIN tickets t ON t.id = c.ticket_id, json_each(c.resume_json, '$.prs') p
+        WHERE t.repository_id = ? AND p.type = 'text'`, repo, repo, repo);
+    const group = (matches: (r: typeof refs[number]) => boolean) => {
+      const result = new Map<string, Set<string>>();
+      for (const r of refs) if (matches(r)) {
+        const have = result.get(r.ticket) ?? new Set();
+        have.add(r.ref);
+        result.set(r.ticket, have);
+      }
+      return Object.fromEntries([...result].map(([ticket, values]) => [ticket, [...values]]));
+    };
+    return {
+      outside_work: true,
+      observed_at: this.now(),
+      head_accepted_at: sha == null ? null : this.sql<{ received_at: number }>('SELECT received_at FROM board_snapshots WHERE repository_id = ? AND sha = ?', repo, sha)[0]?.received_at ?? null,
+      runner_pushers: JSON.parse(this.sql<{ runner_pushers: string | null }>('SELECT runner_pushers FROM repositories WHERE id = ?', repo)[0]?.runner_pushers ?? 'null'),
+      positions: Object.fromEntries(positions.map(({ ticket, path, ...p }) => [ticket, { ...p, path: JSON.parse(path) }])),
+      verdict_refs: group((r) => /#(?:issuecomment|pullrequestreview)-\d+$/.test(r.ref)),
+      claim_prs: group((r) => /\/pull\/\d+$/.test(r.ref) && r.leg !== 'merge'),
+      claim_shas: group((r) => /^[a-f0-9]{40}$/i.test(r.ref)),
+      merge_refs: group((r) => r.leg === 'merge'),
+    };
   }
 
   /** Each of the repository's tickets' queued leg (R-BTN-83), by qualified id. */

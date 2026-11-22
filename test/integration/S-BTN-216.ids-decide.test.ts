@@ -4,6 +4,7 @@
 // entry, and nothing is posted — the re-created path gains no reach; a `repos:` repository the
 // home's list does not name is not read at all (R-BTN-140's reach). Node only: it writes a real
 // repository and runs git.
+import { keepLegacyPrPlacement } from '../lib/legacy-pr-course';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -72,6 +73,7 @@ beforeEach(async () => {
     sync_keys: [{ public_key: syncKey.publicKey, role: 'sync' }], owner_keys: [owner.publicKey], cut_over: true,
   })).status).toBe(200);
   expect(await initMain(['--course', 'create-pr'], { root: dir, log: () => {} })).toBe(0);
+  keepLegacyPrPlacement(dir);
   const batonJson = join(dir, '.baton', 'baton.json');
   const config = JSON.parse(readFileSync(batonJson, 'utf8')) as Record<string, unknown>;
   writeFileSync(batonJson, JSON.stringify({ ...config, baton_url: ORIGIN, repos: { mono: 'acme/monorepo' }, ticket_prefix: 'LIN' }, null, 2));

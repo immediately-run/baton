@@ -125,8 +125,8 @@ export function staticViolations(k: KitInput): KitViolation[] {
     const all = asRecord(asRecord(k.proposed).legs);
     const legs = Object.keys(all);
     const scripts = k.legScripts.map((x) => x.name);
-    // A person's leg (R-BTN-116) is answered, never run: it needs no script (B-257's `confirm`).
-    const runs = legs.filter((x) => asRecord(all[x]).kind !== 'person');
+    // Person and fact legs are answered or applied by core, never run by a script.
+    const runs = legs.filter((x) => asRecord(all[x]).kind !== 'person' && !asRecord(all[x]).arrives);
     for (const l of runs.filter((x) => !scripts.includes(x))) out.push({ rule: 'legs-scripts', message: `leg ${l} has no legs/${l}.mjs` });
     for (const s of scripts.filter((x) => !legs.includes(x))) out.push({ rule: 'legs-scripts', message: `legs/${s}.mjs is no leg of the course` });
     // §6.13: "The test kit fails a script without all three" (round 1, 1-A-9).
@@ -341,7 +341,7 @@ export function shortestRoute(g: Graph): Step[] | null {
       for (const [leg, l] of [...g.legs].sort(([a], [b]) => (a < b ? -1 : 1))) {
         // A person's leg is answered, never advanced into (R-BTN-116, rule person): the generic
         // run is a runner's, so its route takes runner legs alone (B-257's `confirm`).
-        if (!l.from.includes(s) || l.person) continue;
+        if (!l.from.includes(s) || l.person || l.arrives || l.reconciles) continue;
         for (const to of l.to) if (!prev.has(to)) { prev.set(to, { from: s, step: { leg, reached: to } }); next.push(to); }
       }
     }
@@ -463,7 +463,8 @@ export async function noopViolations(k: KitInput): Promise<KitViolation[]> {
     standard = undefined; // a source that is not a name: the sync's to refuse, not the kit's
   }
   if (standard?.reads !== 'prs') return [];
-  const startLeg = graphOf(k.proposed).startLeg;
+  const graph = graphOf(k.proposed);
+  const startLeg = graph.startLeg;
   const script = join(k.root, '.baton', 'courses', k.course, 'legs', `${startLeg}.mjs`);
   if (!existsSync(script)) return []; // a missing script is the legs-scripts rule's own failure
   const dir = mkdtempSync(join(tmpdir(), 'baton-kit-noop-'));
@@ -484,6 +485,9 @@ export async function noopViolations(k: KitInput): Promise<KitViolation[]> {
     if (typeof run !== 'function') return []; // a script that exports no run is the legs-scripts rule's
     try {
       const result = await (run as (ctx: unknown) => Promise<unknown>)({ ticket: { id: `${REPO}:KIT-1`, home: REPO }, leg: startLeg, checkout: dir, snapshot: { sha } });
+      // Create-spec can wait for the owner to finish the conversation without claiming a PR opened.
+      const answer = asRecord(result);
+      if (standard.id === 'create-spec' && answer.suspend === true && answer.reached === graph.start && answer.next === startLeg) return [];
       return [{ rule: 'no-op', message: `legs/${startLeg}.mjs returned ${JSON.stringify(result)} for an agent_command that exits 0 with no PR — the course opens PRs, so its start leg must verify one on the forge before returning its position, failing the leg naming what it looked for (B-81)` }];
     } catch {
       return []; // the leg refused the no-op: what B-81 asks

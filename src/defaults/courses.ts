@@ -256,6 +256,7 @@ const CREATE_PR: BuiltIn = {
     // offered the leg: the position below is what a holder would report if one ever ran it by hand.
     adjudicate: { ask: { name: 'adjudication', values: ['merge', 'owner'] }, position: "{ ...(answer === 'owner' ? { suspend: true } : {}), reached: 'adjudicated', next: 'merge', adjudication: answer }" },
     merge: { position: "{ reached: 'merged', next: null }" },
+    reconcile: { position: 'null' },
   },
   skill: 'baton-create-pr',
 };
@@ -271,6 +272,7 @@ export const BUILT_INS: BuiltIn[] = [
     legs: {
       // Changes: the next round waits on the author's push, so the claim suspends.
       review: { ask: VERDICT, position: "{ ...(answer === 'approve' ? {} : { suspend: true }), reached: answer === 'approve' ? 'approved' : 'changes-requested', next: answer === 'approve' ? null : 'review', verdict: answer }" },
+      reconcile: { position: 'null' },
       conclude: { position: "{ reached: 'concluded', next: null }" },
     },
     skill: 'baton-review-pr',
@@ -357,6 +359,7 @@ export const BUILT_INS: BuiltIn[] = [
       // the claim suspends until they do.
       adjudicate: { ask: { name: 'adjudication', values: ['merge', 'owner'] }, position: "{ ...(answer === 'owner' ? { suspend: true } : {}), reached: 'adjudicated', next: 'merge', adjudication: answer }" },
       merge: { position: "{ reached: 'merged', next: null }" },
+      reconcile: { position: 'null' },
     },
     skill: 'baton-create-spec',
   },

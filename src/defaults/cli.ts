@@ -17,6 +17,9 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { BatonApi, BatonRefusal, envAuth, type Auth, type Transport } from '../runner/api';
 import { HARNESS_AGENTS, type Harness } from '../runner/harness';
 import { syncOnce } from '../shared/batonSync.mjs';
+import { graphOf } from '../core/graph';
+import { validateCourse } from '../core/course';
+import { outsideAttestations, type MentionCommit, type OutsideRecord } from './outside-work';
 import { DEFAULT_URL } from '../../cli/baton.mjs';
 import { API_KEY, signingKey } from '../../cli/sign.mjs';
 import { DEFAULT_BRANCH_PATTERN, matchPatterns, sameRepo as sameRepoName, ticketOwns, type BatonRecord, type CodeRepoEntry, type PrFact, type StationsResult } from './course-pr';
@@ -171,7 +174,8 @@ const defaultSkill = (course: string): string => `baton-${course}`;
  * them where the spec says rather than discovering them. Never `min_worker_version`: init
  * writes the new name only; the window is on the read (above). */
 function courseEntry(course: string, legs: string[]): Required<Omit<CourseEntry, 'previous_branch_pattern' | 'source' | 'min_worker_version'>> {
-  return { id: course, version: 1, min_runner_version: 1, skill: defaultSkill(course), step_kinds: legs, branch_pattern: DEFAULT_BRANCH_PATTERN, protocol_files: [] };
+  const version = course === 'create-pr' ? 3 : ['review-pr', 'create-spec'].includes(course) ? 2 : 1;
+  return { id: course, version, min_runner_version: version === 1 ? 1 : 2, skill: defaultSkill(course), step_kinds: legs, branch_pattern: DEFAULT_BRANCH_PATTERN, protocol_files: [] };
 }
 
 export interface SyncArgs {
@@ -183,6 +187,7 @@ export interface SyncArgs {
   /** `--latest <branch>`: after the observation, fetch that branch and check it out detached, so
    * a slow run for an older push posts the newest board (§7.1 step 2). The workflow passes it. */
   latest?: string;
+  backfillMentions?: number;
   /** A CI identity token's place. It serves only a sync with no `syncKey` (B-88): a registered
    * sync key signs, and a CI token beside it is never spent. */
   token?: string;
@@ -232,6 +237,11 @@ export function parseSyncArgs(argv: string[], env: NodeJS.ProcessEnv = process.e
     else if (a === '--url') out.url = value();
     else if (a === '--facts') out.factsFile = value();
     else if (a === '--latest') out.latest = value();
+    else if (a === '--backfill-mentions') {
+      const since = value();
+      out.backfillMentions = Date.parse(since);
+      if (!Number.isFinite(out.backfillMentions)) throw new Error('--backfill-mentions needs a date or timestamp');
+    }
     else if (a === '--token') out.token = value();
     else if (a === '--busy-retry') {
       const v = value();
@@ -261,6 +271,7 @@ function stationsResult(value: unknown, from: string): StationsResult {
 /** What one reading of the repository posts (§7.1): every field but the protocol's own. */
 interface Board {
   payload: { registry: Record<string, unknown>[]; tickets: TicketsResult['tickets']; closed: TicketsResult['closed']; stations: StationsResult['stations']; markers: StationsResult['markers']; course_data: Record<string, unknown>;
+    attestations?: ReturnType<typeof outsideAttestations>;
     /** B-183 (§4.4): the ticket source's declaration. */
     source: { kind: 'markdown' | 'custom'; versions?: 'pinned' | 'current'; cli: string }; }
   /** A ticket's status at this reading for §6.7's confirmations: its file's, `live`, or null once closed. */
@@ -359,12 +370,13 @@ async function readBoard(root: string, batonJson: BatonJson, args: SyncArgs, log
   // (bug-report, draft-ticket, decision) needs no forge token. A course's own sync.mjs may read
   // them, so it gets them too.
   const readsPrsOf = (c: CourseEntry): boolean => existsSync(syncMjsOf(c.id)) || builtIn(c.id)?.reads === 'prs';
-  const readsPrs = courses.some(readsPrsOf);
+  const outside = record?.outside;
+  const readsPrs = courses.some(readsPrsOf) || (!!outside && result.tickets.some((t) => !closedIds.has(t.id)));
   // The other repositories a live ticket on a PR-reading course names in `repos:` (B-29): its PRs
   // may be there, and a home with none (docs) is the usual case.
   // Each with the tickets naming it, so a repository the token cannot read is named with them.
   const siblings = new Map<string, { repository: string; tickets: string[] }>();
-  for (const c of courses.filter(readsPrsOf)) {
+  for (const c of courses.filter((c) => outside || readsPrsOf(c))) {
     for (const t of result.tickets.filter((x) => x.course_id === c.id && !closedIds.has(x.id))) {
       for (const r of t.repos ?? []) {
         if (repository != null && sameRepoName(r, repository)) continue;
@@ -374,7 +386,15 @@ async function readBoard(root: string, batonJson: BatonJson, args: SyncArgs, log
       }
     }
   }
-  const facts: PrFact[] = args.factsFile ? (JSON.parse(readFileSync(args.factsFile, 'utf8')) as PrFact[]) : readsPrs ? await githubFacts(root, log, owns, [...siblings.values()], { codeRepos: record?.code_repos, pushers: record?.pushers }) : [];
+  const mentionSince = outside ? args.backfillMentions ?? outside.head_accepted_at : null;
+  const facts: PrFact[] = args.factsFile ? (JSON.parse(readFileSync(args.factsFile, 'utf8')) as PrFact[]) : readsPrs ? await githubFacts(root, log, owns, [...siblings.values()], { codeRepos: record?.code_repos, pushers: record?.pushers, outside, mentionSince }) : [];
+  const commits: MentionCommit[] = [];
+  if (outside && mentionSince != null) {
+    const range = args.backfillMentions != null || !outside.sha ? ['HEAD', `--since-as-filter=${new Date(mentionSince).toISOString()}`] : [`${outside.sha}..HEAD`];
+    const shas = git(root, 'rev-list', '--first-parent', ...range).split('\n').filter(Boolean);
+    for (const sha of shas) commits.push({ sha, message: gitRaw(root, 'show', '-s', '--format=%B', sha),
+      paths: gitRaw(root, 'diff-tree', '--first-parent', '-m', '--root', '--no-commit-id', '--name-only', '-r', '-z', sha).split('\0').filter(Boolean) });
+  }
   // B-110: the plain-git half of the fact reading. A fact whose adapter read no commits (a facts
   // file, a forge with no adapter) gets its open branch's commits from the checkout's own git —
   // no forge, no `gh` — so the run-tests gate's markers are read the same way (`commitsOf`). Only
@@ -413,12 +433,13 @@ async function readBoard(root: string, batonJson: BatonJson, args: SyncArgs, log
   const markers: StationsResult['markers'] = [];
   const courseData: Record<string, unknown> = {};
   const registry: Record<string, unknown>[] = [];
+  const attestations: ReturnType<typeof outsideAttestations> = [];
   for (const c of courses) {
     const courseFile = join(root, '.baton', 'courses', c.id, 'course.json');
     if (!existsSync(courseFile)) throw new Error(`.baton/courses/${c.id}/course.json is missing — run \`baton repo init --course ${c.id}\``);
     const course = JSON.parse(readFileSync(courseFile, 'utf8')) as { legs?: Record<string, unknown> };
     const branchPatterns = [c.branch_pattern ?? DEFAULT_BRANCH_PATTERN, ...(c.previous_branch_pattern ? [c.previous_branch_pattern] : [])];
-    const fnCtx = { ...ctx, course: c.id, repository, tickets: result.tickets.filter((t) => t.course_id === c.id), closed: closedIds, done: doneIds, facts, branchPatterns, graph: course, ...(record ? { baton: record } : {}) };
+    const fnCtx = { ...ctx, course: c.id, repository, tickets: result.tickets.filter((t) => t.course_id === c.id), closed: closedIds, done: doneIds, facts, branchPatterns, graph: course, ...(record ? { baton: record } : {}), positions: outside?.positions };
     const syncMjs = syncMjsOf(c.id);
     if (c.source) checkSource(c, readFileSync(courseFile, 'utf8'), existsSync(syncMjs));
     const standard = builtIn(c.id);
@@ -435,6 +456,11 @@ async function readBoard(root: string, batonJson: BatonJson, args: SyncArgs, log
     const out = stationsResult(await fn(fnCtx), existsSync(syncMjs) ? `.baton/courses/${c.id}/sync.mjs` : `the ${standard!.id} default`);
     Object.assign(stations, out.stations);
     markers.push(...out.markers);
+    if (outside && !validateCourse(course).length) attestations.push(...outsideAttestations({
+      tickets: fnCtx.tickets.filter((t) => !closedIds.has(t.id)), facts, graph: graphOf(course), patterns: matchPatterns(branchPatterns), repository,
+      record: outside, commits, mentionSince, ticketDir: settings.items ?? 'tickets', ownPr: owns,
+      filingCommit: (path) => git(root, 'log', '--diff-filter=A', '--format=%H', '--', path).split('\n').filter(Boolean).at(-1) ?? null,
+    }));
     courseData[c.id] = out.course_data;
     registry.push({
       ...courseSchemas(root, c.id),
@@ -482,12 +508,14 @@ async function readBoard(root: string, batonJson: BatonJson, args: SyncArgs, log
     }
     if (found) controlField = { control: { keys: signingKeys.map((k) => k.fingerprint), groups: found.groups, unsigned: clampUnsignedList(found.unsigned) } };
   }
+  if (attestations.length > 100) throw new Error(`outside work found ${attestations.length} attestations, over the board limit of 100; refusing to advance the observation window with a partial reading`);
   return {
     // B-183 (§4.4): the source's declaration — `kind`, how it reads (`versions`) and the CLI
     // that posts — beside its tickets, each stamped with its `version` and `key` above.
     payload: {
       source: { kind: sourceKind, ...(sourceVersions ? { versions: sourceVersions } : {}), cli: cliVersion() },
       registry, tickets: result.tickets, closed: result.closed, stations, markers, course_data: courseData, ...controlField,
+      ...(attestations.length ? { attestations } : {}),
     },
     statusOf: (id) => (closedIds.has(id) ? null : status.get(id) ?? null),
   };
@@ -728,8 +756,9 @@ export async function syncMain(args: SyncArgs): Promise<number> {
     // judge its store's read against.
     observe: async () => {
       const o = await asResult(async () => {
-        const got = await api.observation();
+        const got = await api.observation(true);
         record = {
+          ...(got.outside_work === true ? { outside: got as unknown as OutsideRecord } : {}),
           answers: Array.isArray(got.answers) ? got.answers : [],
           legs: Array.isArray(got.legs) ? got.legs : [],
           ...(got.versions && typeof got.versions === 'object' ? { versions: got.versions as Record<string, string> } : {}),
@@ -876,9 +905,9 @@ const GRAPHQL_BATCH = 25;
  * covered the REST read. */
 const PR_DETAIL = `fragment D on PullRequest {
   head: commits(last: 1) { nodes { commit { oid checkSuites(first: 10) { pageInfo { hasNextPage } nodes { checkRuns(first: 100, filterBy: { checkType: LATEST }) { pageInfo { hasNextPage } nodes { status conclusion } } } } } } }
-  commits(first: 100) { pageInfo { hasNextPage } nodes { commit { oid committedDate message tree { oid } parents(first: 1) { nodes { oid tree { oid } } } } } }
-  reviews(first: 100) { pageInfo { hasNextPage } nodes { author { login } authorAssociation state submittedAt body } }
-  comments(first: 100) { pageInfo { hasNextPage } nodes { author { login } authorAssociation createdAt body } }
+  commits(first: 100) { pageInfo { hasNextPage } nodes { commit { oid committedDate message committer { user { login } } tree { oid } parents(first: 2) { nodes { oid tree { oid } } } } } }
+  reviews(first: 100) { pageInfo { hasNextPage } nodes { author { login } authorAssociation state submittedAt body url commit { oid } } }
+  comments(first: 100) { pageInfo { hasNextPage } nodes { author { login } authorAssociation createdAt body url } }
 }`;
 
 /** The GraphQL query reading `numbers`' detail in one repository, each PR under alias `p<n>`. */
@@ -910,7 +939,7 @@ function githubConn(host: string): { host: string; rest: string; graphql: string
     : { host, rest: `https://${host}/api/v3`, graphql: `https://${host}/api/graphql` };
 }
 
-export async function githubFacts(root: string, log: (l: string) => void, owns: (pr: { number: number; head: string; repository: string }) => boolean, siblings: { repository: string; tickets: string[] }[] = [], obs: { codeRepos?: CodeRepoEntry[]; pushers?: { host: string; id: string }[] } = {}): Promise<PrFact[]> {
+export async function githubFacts(root: string, log: (l: string) => void, owns: (pr: { number: number; head: string; repository: string }) => boolean, siblings: { repository: string; tickets: string[] }[] = [], obs: { codeRepos?: CodeRepoEntry[]; pushers?: { host: string; id: string }[]; outside?: OutsideRecord; mentionSince?: number | null } = {}): Promise<PrFact[]> {
   const slug = remoteSlug(root);
   if (slug == null) throw new Error(`${root} has no origin remote to read PRs from — pass --facts <file> for recorded facts`);
   // B-182 (first slice): a plain-git home has no forge, so no adapter reads it (R-BTN-96) — only
@@ -1099,14 +1128,19 @@ export async function githubFacts(root: string, log: (l: string) => void, owns: 
     // B-182 (R-BTN-138): the ids decide at every read. The forge's own ids for the repository
     // are compared with the entry's; a mismatch — a path re-created by someone else — fails the
     // sync naming the entry, so the re-created path never gains reach.
+    let defaultBranch: string | undefined;
     if (entry != null) {
-      const res = (await (await get(conn, `${conn.rest}/repos/${repo}`)).json()) as { id?: unknown; owner?: { id?: unknown } };
+      const res = (await (await get(conn, `${conn.rest}/repos/${repo}`)).json()) as { id?: unknown; owner?: { id?: unknown }; default_branch?: string };
+      defaultBranch = res.default_branch;
       const seen = `${String(res.id ?? '?')}/${String(res.owner?.id ?? '?')}`;
-      if (String(res.id ?? '') !== entry.repo_id || String(res.owner?.id ?? '') !== entry.owner_id) {
+      if (entry && (String(res.id ?? '') !== entry.repo_id || String(res.owner?.id ?? '') !== entry.owner_id)) {
         throw new Error(`GitHub (${entry.host}) reports ids ${seen} for ${repo}, but its code_repos entry holds ${entry.repo_id}/${entry.owner_id} — the path was re-created or moved; the sync fails rather than read the wrong repository (R-BTN-138: the ids decide)`);
       }
     }
     const listed = await list(conn, repo, tickets);
+    if (obs.outside && !entry && listed.some((pr) => pr.base?.ref != null)) {
+      defaultBranch = ((await (await get(conn, `${conn.rest}/repos/${repo}`)).json()) as { default_branch?: string }).default_branch;
+    }
     // Only a PR a live ticket owns needs its detail read; any other PR places no ticket and is
     // recorded from the list alone, so the requests a run makes grow with the live tickets, not
     // with the repository's history. A closed unmerged PR a live ticket owns is read too:
@@ -1125,10 +1159,20 @@ export async function githubFacts(root: string, log: (l: string) => void, owns: 
       }
       for (const pr of batch) detail.set(pr.number, await detailOf(conn, repo, pr, data?.repository?.[`p${pr.number}`]));
     }
-    return listed.map((pr) => {
+    return Promise.all(listed.map(async (pr) => {
       const state: PrFact['state'] = pr.merged_at ? 'merged' : pr.state === 'closed' ? 'closed' : 'open';
-      return { number: pr.number, head: pr.head.ref, state, ...(detail.get(pr.number) ?? { pushedAt: 0, checks: [], reviews: [] }), repository: repo, ...(typeof pr.html_url === 'string' ? { url: pr.html_url } : {}) };
-    });
+      const fact: PrFact = { number: pr.number, head: pr.head.ref, state, ...(detail.get(pr.number) ?? { pushedAt: 0, checks: [], reviews: [] }), repository: repo, ...(typeof pr.html_url === 'string' ? { url: pr.html_url } : {}) };
+      if (obs.outside) {
+        const mergedAt = Date.parse(pr.merged_at);
+        const mention = obs.mentionSince != null && mergedAt > obs.mentionSince && mergedAt <= obs.outside.observed_at;
+        const same = pr.head.repo != null && pr.head.repo.id === pr.base?.repo?.id;
+        const trusted = same && pr.base?.ref != null && pr.base.ref === defaultBranch && (detail.has(pr.number) || mention)
+          && (await trustedOnly(conn, repo, [{ login: pr.user?.login, userId: pr.user?.id, association: pr.author_association }])).length > 0;
+        Object.assign(fact, { pusher: trusted, author: pr.user?.login, headSha: pr.head.sha, base: pr.base?.ref, defaultBranch, mergeSha: trusted ? pr.merge_commit_sha : undefined,
+          mergedAt, title: pr.title, body: pr.body });
+      }
+      return fact;
+    }));
   }
 
   /** One PR's facts from its GraphQL node, mapped exactly as the REST lists are; a connection
@@ -1148,19 +1192,21 @@ export async function githubFacts(root: string, log: (l: string) => void, owns: 
     // B-110: the commits themselves too — sha, first parent, whether the tree changed, message —
     // for the run-tests gate's markers, which the station function counts only as the evidence
     // Baton recorded (a counted marker is no push; anything else is, whatever its message).
-    type CommitNode = { oid: string; at: string; message: string; tree: string | null; parent: string | null; parentTree: string | null };
+    type CommitNode = { oid: string; at: string; message: string; tree: string | null; parent: string | null; parentTree: string | null; parents: number; secondTree?: string; pusher?: string };
     const commitNodes: CommitNode[] = node.commits.pageInfo.hasNextPage
       ? (await all<any>(conn, `/repos/${repo}/pulls/${pr.number}/commits`)).map((c: any) => ({
-        oid: c.sha, at: c.commit.committer.date, message: c.commit.message, tree: c.commit.tree?.sha ?? null, parent: c.parents?.[0]?.sha ?? null, parentTree: null,
+        oid: c.sha, at: c.commit.committer.date, message: c.commit.message, tree: c.commit.tree?.sha ?? null, parent: c.parents?.[0]?.sha ?? null, parentTree: null, parents: c.parents?.length ?? 0, pusher: c.committer?.login,
       }))
       : node.commits.nodes.map((c: any) => ({
         oid: c.commit.oid, at: c.commit.committedDate, message: c.commit.message, tree: c.commit.tree?.oid ?? null,
         parent: c.commit.parents?.nodes?.[0]?.oid ?? null, parentTree: c.commit.parents?.nodes?.[0]?.tree?.oid ?? null,
+        parents: c.commit.parents?.nodes?.length ?? 0, secondTree: c.commit.parents?.nodes?.[1]?.tree?.oid, pusher: c.commit.committer?.user?.login,
       }));
     const treeOf = new Map(commitNodes.map((c) => [c.oid, c.tree]));
     const commits: BranchCommit[] = commitNodes.map((c) => {
       const parentTree = c.parentTree ?? (c.parent ? treeOf.get(c.parent) ?? null : null);
-      return { sha: c.oid, at: Date.parse(c.at), parent: c.parent, empty: c.tree != null && parentTree != null && c.tree === parentTree, message: c.message ?? '' };
+      return { sha: c.oid, at: Date.parse(c.at), parent: c.parent, empty: c.tree != null && parentTree != null && c.tree === parentTree, message: c.message ?? '',
+        ...(obs.outside ? { pusher: c.pusher, baseOnly: c.parents > 1 ? true : false } : {}) };
     });
     const pushes = commits.map((c) => c.at);
     // A verdict counts only from someone who can push to the repository (R-BTN-139) — never a
@@ -1168,13 +1214,13 @@ export async function githubFacts(root: string, log: (l: string) => void, owns: 
     // immutable id is the owners' `pushers`' other way to count, consulted before any
     // collaborator read (the GraphQL mapping has no numeric id to carry; `idOf` reads it).
     const reviews = (await trustedOnly(conn, repo, node.reviews.pageInfo.hasNextPage
-      ? (await all<any>(conn, `/repos/${repo}/pulls/${pr.number}/reviews`)).map((r) => ({ login: r.user?.login, userId: r.user?.id, association: r.author_association, state: r.state, at: r.submitted_at, body: r.body }))
-      : node.reviews.nodes.map((r: any) => ({ login: r.author?.login, association: r.authorAssociation, state: r.state, at: r.submittedAt, body: r.body }))))
-      .map((r: any) => ({ author: r.login ?? '?', state: r.state, submittedAt: Date.parse(r.at), body: r.body ?? '' }));
+      ? (await all<any>(conn, `/repos/${repo}/pulls/${pr.number}/reviews`)).map((r) => ({ login: r.user?.login, userId: r.user?.id, association: r.author_association, state: r.state, at: r.submitted_at, body: r.body, url: r.html_url, headSha: r.commit_id }))
+      : node.reviews.nodes.map((r: any) => ({ login: r.author?.login, association: r.authorAssociation, state: r.state, at: r.submittedAt, body: r.body, url: r.url, headSha: r.commit?.oid }))))
+      .map((r: any) => ({ author: r.login ?? '?', state: r.state, submittedAt: Date.parse(r.at), body: r.body ?? '', ...(obs.outside ? { url: r.url, headSha: r.headSha } : {}) }));
     const comments = (await trustedOnly(conn, repo, node.comments.pageInfo.hasNextPage
-      ? (await all<any>(conn, `/repos/${repo}/issues/${pr.number}/comments`)).map((c) => ({ login: c.user?.login, userId: c.user?.id, association: c.author_association, at: c.created_at, body: c.body }))
-      : node.comments.nodes.map((c: any) => ({ login: c.author?.login, association: c.authorAssociation, at: c.createdAt, body: c.body }))))
-      .map((c: any) => ({ author: c.login ?? '?', state: 'COMMENTED' as const, submittedAt: Date.parse(c.at), body: c.body ?? '' }));
+      ? (await all<any>(conn, `/repos/${repo}/issues/${pr.number}/comments`)).map((c) => ({ login: c.user?.login, userId: c.user?.id, association: c.author_association, at: c.created_at, body: c.body, url: c.html_url }))
+      : node.comments.nodes.map((c: any) => ({ login: c.author?.login, association: c.authorAssociation, at: c.createdAt, body: c.body, url: c.url }))))
+      .map((c: any) => ({ author: c.login ?? '?', state: 'COMMENTED' as const, submittedAt: Date.parse(c.at), body: c.body ?? '', ...(obs.outside ? { url: c.url } : {}) }));
     return { pushedAt: Math.max(0, ...pushes), pushes, checks, reviews: [...reviews, ...comments], commits };
   }
 
@@ -1184,7 +1230,7 @@ export async function githubFacts(root: string, log: (l: string) => void, owns: 
   async function list(conn: { host: string; rest: string; graphql: string; token: string }, repo: string, tickets: string[]): Promise<any[]> {
     try {
       const author = process.env.BATON_PR_AUTHOR;
-      if (author) return await byAuthor(conn, repo, author);
+      if (author && !obs.outside) return await byAuthor(conn, repo, author);
       return await all<any>(conn, `/repos/${repo}/pulls?state=all`);
     } catch (e) {
       const { status, limited } = e as { status?: number; limited?: boolean };
@@ -1294,6 +1340,7 @@ const AGENT_WRAPPER_ENV = 'BATON_AGENT_WRAPPER';
  * convention puts it. */
 export function stubSource(b: BuiltIn, course: string, leg: string): string {
   const { ask, position, verify, pushes, delivered } = b.legs[leg];
+  const reconcile = leg === 'reconcile';
   // A leg whose close writes a line on a PR may name that PR after its answer (B-29): a ticket's
   // PRs may sit in other repositories, and its home may have none.
   const names = b.reads === 'prs' && COMMENTING_LEGS.has(leg);
@@ -1347,7 +1394,8 @@ const newestWrite = (p, depth = 0) => {
 // reads it from the error (\`e.stderr\`); nothing else of git's rides the log unasked.
 const gitRun = (cmd, args, opts = {}) => execFileSync(cmd, args, { encoding: 'utf8', timeout: GIT_BOUND_MS, killSignal: 'SIGKILL', env: { ...process.env, ...GIT_ENV }, stdio: ['ignore', 'pipe', 'pipe'], ...opts });${ask ? `
 import { requireAnswer } from ${JSON.stringify(source('answer.ts'))};` : ''}
-import { ${closeFrom[0]} } from ${JSON.stringify(source(closeFrom[1]))};${closeHelpers}${verify ? `
+import { ${closeFrom[0]} } from ${JSON.stringify(source(closeFrom[1]))};${closeHelpers}${reconcile ? `
+import { reconcileAnswer, ticketRepositories } from ${JSON.stringify(source('pr-verify.ts'))};` : ''}${verify ? `
 import { verifyPrOpen, ticketRepositories${delivered ? ', findDelivered, verifyDelivered, deliveredDetail' : ''} } from ${JSON.stringify(source('pr-verify.ts'))};` : ''}${pushes ? `
 import { DEFAULT_BRANCH_PATTERN, branchMatches, matchPatterns } from ${JSON.stringify(source('course-pr.ts'))};
 import { bareTicketId } from ${JSON.stringify(source('ticket-state.ts'))};${verify ? '' : `
@@ -1415,7 +1463,7 @@ async function standard(ctx) {
   // resolves no route; a repository that picks its model at run time writes a leg override
   // (R-BTN-131) that reads its own configuration or the instance views (R-BTN-99).
   const agentWords = splitWords(settingsCommand);
-  const agentCommand = agentWords.join(' ');${verify ? `
+  const agentCommand = agentWords.join(' ');${verify || reconcile ? `
   // What this leg's verification looks for (B-81): the course's branch patterns, as the
   // snapshot's settings carry them, and the repositories the ticket's repos: names — the
   // ticket file is the checkout's own copy, the one the agent may have just added its PR to.
@@ -1452,7 +1500,8 @@ ${pushes ? `  // B-231: run from the gate's red (pr-open, fixed), this leg must 
 ` : ''}  const courseSha = typeof ctx.signed_control?.course === 'string' && ctx.signed_control.course !== '' ? ctx.signed_control.course : sha;
   const rel = ${JSON.stringify(`.baton/courses/${course}/legs/${leg}.md`)};
   const present = gitRun('git', ['-C', ctx.checkout, 'ls-tree', '--name-only', courseSha, '--', rel]).trim() !== '';
-  const text = present ? gitRun('git', ['-C', ctx.checkout, 'show', courseSha + ':' + rel], { maxBuffer: ${AGENT_OUTPUT_MAX} }) : null;
+  let text = present ? gitRun('git', ['-C', ctx.checkout, 'show', courseSha + ':' + rel], { maxBuffer: ${AGENT_OUTPUT_MAX} }) : null;
+${reconcile ? `  text = (text ?? '') + '\\n\\nClaim context (references only): ' + JSON.stringify({ station: ctx.claim.station, displaced: ctx.displaced, evidence: ctx.evidence }) + '\\n';` : ''}
   const dir = text == null ? null : mkdtempSync(join(tmpdir(), 'baton-leg-'));
   const instructions = dir == null ? '' : join(dir, ${JSON.stringify(`${leg}.md`)});
   if (dir != null) writeFileSync(instructions, text);
@@ -1605,7 +1654,12 @@ ${pushes ? `  // B-231: run from the gate's red (pr-open, fixed), this leg must 
   // last said, as a non-zero exit's does — on 2026-11-16 seven implement legs ended "exited 0,
   // but no open PR" with nothing to say why, their sandboxes gone with the claim.
   const said = lastOutput(out, errOut);
-  const failed = (e) => new Error((e instanceof Error ? e.message : String(e)) + (said !== '' ? '; the agent\\'s last output:\\n  ' + said : '; the agent printed nothing'));${pushes ? `
+  const failed = (e) => new Error((e instanceof Error ? e.message : String(e)) + (said !== '' ? '; the agent\\'s last output:\\n  ' + said : '; the agent printed nothing'));${reconcile ? `
+  try {
+    const graph = JSON.parse(gitRun('git', ['-C', ctx.checkout, 'show', courseSha + ':' + ${JSON.stringify(`.baton/courses/${course}/course.json`)}]));
+    return reconcileAnswer(out, { checkout: ctx.checkout, ticket: ctx.ticket, ticketText, repositories: ticketRepositories(ticketText, settings.repos), branchPatterns: patterns,
+      branch: ticketsBranch(ctx.checkout, ctx.default_branch ?? null), from: ctx.claim.station, displaced: ctx.displaced, to: graph.legs.reconcile.reconciles.to }, legRun);
+  } catch (e) { throw failed(e); }` : ''}${pushes ? `
   if (headsBefore !== '' && prHeads() === headsBefore) {
     throw failed('the ${leg} leg pushed nothing: ' + headsBefore.split('\\n').map((l) => l.split('\\t')[1].slice('refs/heads/'.length) + ' at ' + l.slice(0, 10)).join(', ') + ' is the head the run-tests gate tested red, unchanged — no fix, no position (B-231)');
   }` : ''}${names ? `
@@ -1643,7 +1697,7 @@ ${verify ? `  try { await verifyPrOpen({ checkout: ctx.checkout, ticket: ctx.tic
 // repository's default branch — the claim answer's \`default_branch\`, which the runner puts in
 // BATON_DEFAULT_BRANCH — where a marker leg's line goes, whatever branch this checkout is on.
 const closeCtx2 = (ctx) => ({ ...ctx, ...(ctx.default_branch == null && typeof process.env.BATON_DEFAULT_BRANCH === 'string' && process.env.BATON_DEFAULT_BRANCH !== '' ? { default_branch: process.env.BATON_DEFAULT_BRANCH } : {}) });
-export const close = (ctx, result) => ${closeFrom[0]}(closeCtx2(ctx), result);
+export const close = (ctx, result) => ${reconcile ? 'null' : `${closeFrom[0]}(closeCtx2(ctx), result)`};
 export async function handoff() { return null; }
 `;
 }
@@ -1870,7 +1924,7 @@ const instructionsOf = (course: string, leg: string): string =>
 /** The legs of a standard course a runner runs, each with a stub and instructions: every leg
  *  but a person's (R-BTN-116, B-257's `confirm`), which no runner is offered and no script runs. */
 const runnerLegs = (b: BuiltIn): string[] =>
-  Object.entries(b.course.legs as Record<string, { kind?: unknown }>).filter(([, l]) => l?.kind !== 'person').map(([leg]) => leg);
+  Object.entries(b.course.legs as Record<string, { kind?: unknown; arrives?: unknown }>).filter(([, l]) => l?.kind !== 'person' && !l?.arrives).map(([leg]) => leg);
 
 /** A leg stub, bundled with its `close`: from source in a checkout, else build:cli's copy. The
  * run-tests gate (B-110) generates its own kind — no agent, the script itself. */

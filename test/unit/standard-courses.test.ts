@@ -36,7 +36,7 @@ describe('the standard courses (R-BTN-131)', () => {
       it('every leg has a stub and shipped instructions, and nothing else is shipped', () => {
         // A person's leg (R-BTN-116; create-pr's `confirm`, B-257) is answered, never run: no
         // stub, no instructions.
-        const legs = Object.entries(b.course.legs as Record<string, { kind?: string }>).filter(([, l]) => l.kind !== 'person').map(([l]) => l).sort();
+        const legs = Object.entries(b.course.legs as Record<string, { kind?: string; arrives?: object }>).filter(([, l]) => l.kind !== 'person' && !l.arrives).map(([l]) => l).sort();
         expect(Object.keys(b.legs).sort()).toEqual(legs);
         expect(readdirSync(instructionsDir(b.id)).sort()).toEqual(legs.map((l) => `${l}.md`));
         for (const l of legs) expect(readFileSync(join(instructionsDir(b.id), `${l}.md`), 'utf8')).toMatch(new RegExp(`^# ${b.id} · ${l} — `));
@@ -44,6 +44,7 @@ describe('the standard courses (R-BTN-131)', () => {
 
       it('every stub returns an edge for every answer: reached is one of the leg\'s outcomes, next leaves it, null only at an end', () => {
         for (const [leg, stub] of Object.entries(b.legs)) {
+          if (leg === 'reconcile') continue; // S-BTN-309 exercises its evidence-dependent results.
           // B-110's test gate is not a static expression over an answer: the stub reads the
           // claim's station and the script's exit at run time (no agent), so the kit checks its
           // two outcomes at both stations it may run from — each an edge of the course.
@@ -77,6 +78,7 @@ describe('the standard courses (R-BTN-131)', () => {
 
       it('every leg that can reach an end tells its agent to close the ticket: the sync reads only status: done (R-BTN-74)', () => {
         for (const [leg, stub] of Object.entries(b.legs)) {
+          if (leg === 'reconcile') continue; // S-BTN-309 exercises its evidence-dependent results.
           if (stub.tests) continue; // B-110: no agent runs the gate, and it reaches no end
           const ends = (stub.ask?.values ?? [undefined]).some((answer) => {
             const pos = new Function('answer', 'ctx', `return (${stub.position});`)(answer, { run: 1 }) as { reached: string };
@@ -107,6 +109,7 @@ describe('the standard courses (R-BTN-131)', () => {
     ]);
     for (const b of BUILT_INS) {
       for (const [leg, stub] of Object.entries(b.legs)) {
+          if (leg === 'reconcile') continue; // S-BTN-309 exercises its evidence-dependent results.
         if (stub.tests) continue; // B-110: the gate suspends nothing — it advances green or red
         for (const answer of stub.ask?.values ?? [undefined]) {
           // A first run's position (B-110: create-pr's review suspends only on its last round,
@@ -200,6 +203,7 @@ describe('the standard courses (R-BTN-131)', () => {
   it('create-pr\'s implement stub verifies its PR on the forge before claiming it, and no other leg or course does (B-81)', () => {
     for (const b of BUILT_INS) {
       for (const [leg, stub] of Object.entries(b.legs)) {
+          if (leg === 'reconcile') continue; // S-BTN-309 exercises its evidence-dependent results.
         expect(stub.verify, `${b.id}/${leg}`).toBe(b.id === 'create-pr' && leg === 'implement' ? 'pr' : undefined);
       }
     }

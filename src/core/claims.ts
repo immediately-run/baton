@@ -12,7 +12,8 @@ import { afterFailure, countsAsFailed, nonRetryableClass, resumeRecord, type Res
 import { checkAccept, checkAdvance, checkClaim, checkConfirm, checkDecisionAnswer, checkEnd, checkOverride, checkResolve, isGrantedKey, type ClaimPreference, type End, type Output } from './validate';
 import { ceilingIn, repositoryOf, transcriptReposOf } from './registry';
 import { GATE_CODES, gatesFor, type GateContext, type GateLeg, type GateTicket, type GateVerdict, type Phase } from './gates';
-import { extendsPath, leaves, resolveLeg, resolveStation, runsOf, type Graph, type Step } from './graph';
+import { extendsPath, leaves, modelsOutsideWork, resolveLeg, resolveStation, runsOf, type Graph, type Step } from './graph';
+import type { OutsideWork } from './outsideWork';
 import { baseChain, PATTERN_STEPS_MAX, unboundedAt, validate, type Schema } from '../shared/schema.mjs';
 import type { Seen, Stations } from './stations';
 import { meetsRequiredBar, requiredBarCovers, type Admin } from './admin';
@@ -47,6 +48,7 @@ export interface Ctx {
   random?: Random;
   /** Where each ticket is, and its course's graph (R-BTN-70). */
   stations: Stations;
+  outsideWork?: Pick<OutsideWork, 'displaced' | 'capture' | 'evidence' | 'finish' | 'queue' | 'pending'>;
   /** The owners' bars and settings (R-BTN-66, R-BTN-67). */
   admin: Admin;
   /** §12: ask for the ticket's repository's sync or mirror to be dispatched once this
@@ -524,7 +526,7 @@ export class Claims {
     const noChainFrom = [...new Set((def?.noChainFrom ?? []).map((l) => (g ? resolveLeg(g, l) ?? l : l)))];
     // R-BTN-120: the file's own `requires.capabilities`, which rule 4 reads beside the clause.
     // R-BTN-116: whether the leg is a person's, which rule `person` refuses at a claim or an advance.
-    return { name: leg, state: n?.state ?? null, bars: [...new Set([...posted, ...(withRunner ? this.ownerBarTags(item, leg, phase) : [])])], noChainFrom, isolation: def?.isolation ?? null, requires: def?.requires ?? [], person: def?.person ?? false };
+    return { name: leg, state: n?.state ?? null, bars: [...new Set([...posted, ...(withRunner ? this.ownerBarTags(item, leg, phase) : [])])], noChainFrom, isolation: def?.isolation ?? null, requires: def?.requires ?? [], person: def?.person || !!def?.arrives };
   }
 
   /** R-BTN-106: the legs `credential` has run on the ticket, in this claim or an earlier one —
@@ -1292,6 +1294,7 @@ export class Claims {
       throw e;
     }
     const id = this.rows<{ id: number }>('SELECT last_insert_rowid() AS id')[0].id;
+    if (st.next_leg && this.stations.graph(item.repository, item.course)?.legs.get(st.next_leg)?.reconciles) this.c.outsideWork?.capture(item.id, id);
     this.event('claimed', `runner:${runnerId}`, { request_id: b.request_id, station: st.station, leg: st.next_leg }, item.id, id);
     if (b.rationale !== null) this.c.history?.record(item.id, { kind: 'claimed', claim_id: id, runner_id: runnerId, leg: st.next_leg, rationale_json: b.rationale });
     // R-BTN-178: the claim's seats, for the leg it is for — the set as rule 4 matched it here,
@@ -1367,11 +1370,14 @@ export class Claims {
     // the signatures against keys the post did not choose.
     const briefRow = this.rows<{ brief: string | null }>('SELECT brief FROM tickets WHERE id = ?', c.ticket_id)[0];
     const brief = briefRow?.brief ? JSON.parse(briefRow.brief) as { signed: boolean; signer?: string; commit: string } : null;
+    const displaced = c.offered_leg && c.course_id && this.stations.graph(repo, c.course_id)?.legs.get(c.offered_leg)?.reconciles
+      ? this.c.outsideWork?.displaced(c.ticket_id) : undefined;
     return {
       claim_id: c.id, ticket_id: c.ticket_id, course_id: c.course_id, course_version: courseVersion,
       ...(legState ? { leg_state: legState } : {}),
       ...(brief ? { brief } : {}),
       station: c.station, legs: c.offered_leg ? [c.offered_leg] : [], next: this.nextLegs(c.ticket_id, c.station),
+      ...(displaced ? { displaced: displaced.leg, evidence: this.c.outsideWork?.evidence(c.ticket_id, id) ?? [] } : {}),
       // B-134: the ticket's scope — its home and its `repos:` — as lowercased forge paths. The
       // runner audits each leg's pushes against this and reports what falls outside.
       ...(this.c.scope ? { scope: this.c.scope.scopeOf(c.ticket_id) } : {}),
@@ -1509,6 +1515,7 @@ export class Claims {
       if (!b.reached) throw new BatonError('invalid-params', `reached: required while ${running} runs — one of ${outcomes.join(', ')}`);
       const reached = resolveStation(g, b.reached);
       if (!reached || !outcomes.includes(reached)) throw offGraph(`${running} cannot reach ${b.reached}`);
+      this.checkPosition(c.ticket_id, g, running, station, reached, leg);
       at = reached;
     } else {
       if (b.reached && resolveStation(g, b.reached) !== station) throw offGraph(`the claim is at ${station}, running nothing`);
@@ -1519,6 +1526,9 @@ export class Claims {
       }
     }
     if (!leaves(g, leg, at)) throw offGraph(`${leg} does not leave ${at}`);
+    if (g.legs.get(leg)?.reconciles && (run || c.offered_leg !== leg || !this.c.outsideWork?.displaced(c.ticket_id))) {
+      throw offGraph(`${leg} can only start from its own evidence claim`);
+    }
     // R-BTN-153 (B-175): an arrival at a station the owners' conclusions map holds is the check
     // command's verdict or the agent's word — only the command's may be a success. The arrival
     // alone is judged: a finished leg's `reached`, never the station a leg merely leaves (a
@@ -1574,6 +1584,7 @@ export class Claims {
       const link = this.rows<{ session_url: string | null }>('SELECT session_url FROM claim_legs WHERE claim_id = ? AND seq = ?', claimId, run.seq)[0]?.session_url ?? null;
       this.c.history?.record(f.ticket, { kind: 'leg-finished', ...f.row, reached: at, next_leg: leg,
         ...(b.evidence || link ? { detail: { ...(b.evidence ? { evidence: b.evidence } : {}), ...(link ? { session_url: link } : {}) } } : {}) });
+      if (modelsOutsideWork(g)) this.c.outsideWork?.finish(c.ticket_id, c.id, g, { leg: resolveLeg(g, run.leg)!, reached: at }, leg);
       // B-134: the finished leg's scope audit, reported on the advance that finishes it — the
       // actions outside the claim's ticket scope raise their findings (and their hold) here,
       // and the report's dropped count (entries that failed their shape, actions beyond its
@@ -1670,7 +1681,7 @@ export class Claims {
       }
       throw new BatonError('claim-ended', `the claim already ended (${c.status}: ${c.end_reason})`);
     }
-    const { reached, finished } = this.restingAt(c, e);
+    const { reached, finished: traversed } = this.restingAt(c, e);
     // R-BTN-113 (B-4): the end may carry the session link of the leg it finishes — stored on the
     // running run's row as a heartbeat's is; one that fails the rule, or one carried by an end
     // that runs no leg, is dropped and logged, never a refused end.
@@ -1688,6 +1699,15 @@ export class Claims {
     // R-BTN-109: a completed end that finishes its leg arrives at `reached` and meets its entry. A
     // release is not checked: it is how the runner gives up a leg whose outputs fail (R-BTN-82).
     const g = c.course_id ? this.stations.graph(repositoryOf(c.ticket_id), c.course_id) : null;
+    const endingRun = this.runningLeg(c.id);
+    const leg = g && endingRun ? resolveLeg(g, endingRun.leg) : null;
+    const reconcile = leg && g?.legs.get(leg)?.reconciles;
+    const finished = reconcile ? e.end_reason === 'done' : traversed || (!!leg && !!g && modelsOutsideWork(g) && e.reached != null
+      && e.status === 'completed' && g.legs.get(leg)?.to.includes(reached));
+    if (g && leg && modelsOutsideWork(g) && finished && e.status === 'completed') {
+      this.checkPosition(c.ticket_id, g, leg, c.station, reached, e.next);
+      this.c.outsideWork?.finish(c.ticket_id, c.id, g, { leg, reached }, e.next);
+    }
     if (e.status === 'completed' && finished && g) this.checkEntry(repositoryOf(c.ticket_id), g, reached, e.outputs);
     else if (e.status === 'completed') this.checkOutputValues(repositoryOf(c.ticket_id), e.outputs);
     // R-BTN-153 (B-175): a `done` end's `reached` is what the owners' conclusions map reads
@@ -1720,8 +1740,21 @@ export class Claims {
     // R-BTN-202 (B-248): an end finishing a leg run under a local order records its provenance
     // on the end's event, as an advance does.
     const localOrder = e.local_order && finished ? { leg: this.runningLeg(c.id)?.leg ?? null, ...e.local_order } : null;
-    this.finish(c.id, c.ticket_id, e.status, e.end_reason, `runner:${runnerId}`, { ended_at_sha: e.ended_at_sha, detail: e.detail, reached, finished, evidence: e.ended_at_sha, next: e.next, localOrder });
+    this.finish(c.id, c.ticket_id, e.status, e.end_reason, `runner:${runnerId}`, { ended_at_sha: e.ended_at_sha, detail: e.detail, reached, finished, evidence: e.ended_at_sha ?? (endingRun?.leg === 'review' ? e.verdict_ref : null), next: e.next, localOrder });
     return { ok: true, ...(sessionUrlDropped != null ? { session_url_dropped: sessionUrlDropped } : {}) };
+  }
+
+  private checkPosition(id: string, g: Graph, leg: string, from: string, reached: string, next: string | null) {
+    const d = g.legs.get(leg);
+    if (!d?.reconciles) {
+      if (!modelsOutsideWork(g)) return;
+      if (next == null || (leaves(g, next, reached) && !g.legs.get(next)?.reconciles && !g.legs.get(next)?.arrives)) return;
+    } else {
+      const saved = this.c.outsideWork?.displaced(id);
+      if (saved?.station === from && ((reached === from && next === saved.leg)
+        || (Object.hasOwn(d.reconciles, reached) && d.reconciles[reached] === next))) return;
+    }
+    throw new BatonError('not-eligible', `${leg} cannot queue ${next ?? 'an end'} at ${reached}`, { rule: 1, rule_code: 'off-graph' });
   }
 
   /** R-BTN-126 (round 1, B9): the invalid blocked end, recorded in its own committed
@@ -1865,7 +1898,7 @@ export class Claims {
       this.exec('UPDATE claim_legs SET to_station = ?, finished_at = ?, evidence = ? WHERE claim_id = ? AND seq = ?', reached, now, opts.evidence ?? null, claimId, run.seq);
     } else if (run) {
       // A reap, a stale-board release or an end at the leg's `from`: the leg was given up.
-      this.exec('UPDATE claim_legs SET abandoned_at = ? WHERE claim_id = ? AND seq = ?', now, claimId, run.seq);
+      this.exec('UPDATE claim_legs SET abandoned_at = ?, evidence = ? WHERE claim_id = ? AND seq = ?', now, opts.evidence ?? null, claimId, run.seq);
     }
     if (run) {
       // B-234 (R-BTN-195): the run ended, finished or given up — its open `interact` closes.
@@ -1907,6 +1940,7 @@ export class Claims {
     this.c.blocks?.held(ticketId, false);
     if (status === 'completed') this.confirmByClosure(claimId);
     else this.applyRetryPolicy(claimId, ticketId, reason);
+    this.c.outsideWork?.pending(undefined, ticketId);
   }
 
   // ── attempts, retries and holds (§6.10, §8; R3-1217) ────────────────────────────────────
@@ -2075,6 +2109,7 @@ export class Claims {
     this.upsertOverride(item, actor, { hold: 0, hold_reason: null, retry_after: null });
     this.event('override', actor, { hold: 0 }, item);
     this.c.blocks?.answer(item, 'baton:retries');
+    this.c.outsideWork?.pending(undefined, item);
   }
 
   /**

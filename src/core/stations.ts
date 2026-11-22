@@ -6,7 +6,7 @@
 // staleness and regression from it (claims.ts).
 import { nonScheduling } from './stateVersion';
 import { logEvent } from './db';
-import { extendsPath, graphOf, leaves, onGraph, resolveLeg, type Graph, type Step } from './graph';
+import { extendsPath, graphOf, leaves, modelsOutsideWork, onGraph, resolveLeg, type Graph, type Step } from './graph';
 import type { PostedStation } from './board';
 import type { Store } from './ports';
 import { meetsRequiredBar, requiredBarCovers, type RequiredBar } from './admin';
@@ -106,14 +106,26 @@ export class Stations {
     // others stays true while the loop runs.
     const stored = this.storedOf(repo);
     const required = this.c.requiredBars?.(repo) ?? [];
-    for (const [local, st] of stations) {
+    for (const [local, given] of stations) {
       const id = qualify(repo, local);
       const t = stored.get(id);
       if (!t) continue;
       const g = this.graph(repo, t.course_id);
-      const unknown = !g ? 'no course in force' : this.unknownNames(g, st);
       const prevRow = t.station;
       const prev = prevRow ? (JSON.parse(prevRow.path) as Step[]) : null;
+      // PR facts can describe readiness but cannot bypass the course's outside-work edges.
+      let st = given;
+      if (g && modelsOutsideWork(g)) {
+        const station = prevRow?.station ?? g.start;
+        const next_leg = prevRow ? prevRow.next_leg : g.startLeg;
+        const old = t.next.find((n) => n.leg === next_leg);
+        const posted = given.station === station ? given.next.find((n) => n.leg === next_leg) : undefined;
+        st = { ...given, station, next_leg, path: prev ?? [], next_source: (prevRow?.next_source ?? 'course') as PostedStation['next_source'],
+          handoff_url: prevRow?.handoff_url ?? null, next: next_leg == null ? [] : [posted ?? {
+            leg: next_leg, state: old?.state === 'waiting' ? 'waiting' : 'ready', waiting_on: old?.waiting_on ?? null,
+          }] };
+      }
+      const unknown = !g ? 'no course in force' : this.unknownNames(g, st);
       if (unknown) {
         this.clear(id);
         // Once per distinct fault, not on every snapshot that repeats it (the sync posts every
@@ -295,6 +307,9 @@ export class Stations {
                    to_end = excluded.to_end, next_leg = excluded.next_leg, next_source = excluded.next_source, handoff_url = excluded.handoff_url,
                    snapshot_sha = excluded.snapshot_sha, observation = excluded.observation`,
         id, ...row, sha, observation);
+      if (!stored || stored.station !== st.station || stored.path !== row[1] || stored.next_leg !== st.next_leg) {
+        this.exec('UPDATE ticket_stations SET changed_at = ? WHERE ticket_id = ?', at, id);
+      }
     }
     // R-BTN-116, R-BTN-167: a person leg's expiry instant. Set when the person leg becomes the
     // queued leg — the row above just changed, or no instant is held yet — counting from this

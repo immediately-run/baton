@@ -9,8 +9,60 @@
 // what is pushed. What cannot be verified fails the leg naming what was looked for; the stub
 // reports, never retries (R-BTN-131). Pure over injected commands, so tests drive it with no
 // forge; the stub binds `gh` and `git`. Course code in the CLI, never core (§2b).
-import { branchMatches, matchPatterns } from './course-pr';
+import { branchMatches, matchPatterns, ticketOwns, verdictOf } from './course-pr';
 import { parseFrontmatter } from './tickets-markdown';
+
+export function reconcileAnswer(out: string, ask: PrOpenAsk & {
+  ticketText: string | null; from: string; displaced: string; to: Record<string, string | null>; branch: string;
+}, run: PrExec) {
+  const line = out.trim().split('\n').at(-1)?.trim() ?? '';
+  if (/^unchanged\s+\S/.test(line)) return { end: 'done', reached: ask.from, next: ask.displaced };
+  const home = originSlug(run, ask.checkout);
+  const repos = [home, ...(ask.repositories ?? [])].map((r) => r?.toLowerCase());
+  const readPr = (ref: string, owned: boolean) => {
+    const m = /^https:\/\/([\w.-]+)\/([\w.-]+\/[\w.-]+)\/pull\/(\d+)(?:#(issuecomment|pullrequestreview)-(\d+))?$/.exec(ref);
+    if (!m || !repos.includes(m[2].toLowerCase())) throw new Error('name a PR in the ticket repositories');
+    const remote = run('git', ['remote', 'get-url', 'origin'], ask.checkout);
+    const host = /^(?:https?:\/\/|ssh:\/\/(?:[^@/]+@)?|[^@/]+@)([\w.-]+)[/:]/.exec(remote)?.[1];
+    if (m[1] !== host) throw new Error('PR is not on the checkout forge');
+    const repo = `${m[1]}/${m[2]}`;
+    const api = (path: string) => JSON.parse(run('gh', ['api', '--hostname', m[1], `repos/${m[2]}/${path}`], ask.checkout));
+    const pr = JSON.parse(run('gh', ['pr', 'view', m[3], '--repo', repo, '--json', 'state,headRefName,headRefOid,baseRefName,mergeCommit,updatedAt'], ask.checkout));
+    if (pr.baseRefName !== api('').default_branch) throw new Error('PR does not target the default branch');
+    const prs = parseFrontmatter(ask.ticketText ?? '')?.prs;
+    if (owned && !ticketOwns({ id: bareId(ask.ticket), repos: ask.repositories ?? [], course: { prs: Array.isArray(prs) ? prs : [] } },
+      { number: Number(m[3]), head: pr.headRefName, repository: m[2] }, matchPatterns(ask.branchPatterns), home)) throw new Error('PR is not mapped to this ticket');
+    return { pr, m, api };
+  };
+  const delivered = /^delivered\s+(\S+)\s+(\S.*)$/.exec(line);
+  if (delivered && ask.to.delivered === 'confirm') {
+    const shas = delivered[1].split(',').map((ref) => {
+      if (/^[a-f0-9]{7,40}$/i.test(ref)) return ref;
+      const { pr, m } = readPr(ref, false);
+      if (m[4] || pr.state !== 'MERGED' || !pr.mergeCommit?.oid) throw new Error('delivered requires a merged PR or commit');
+      if (m[2].toLowerCase() !== home?.toLowerCase()) return null; // The sibling's forge verified its default-branch merge.
+      return String(pr.mergeCommit.oid);
+    }).filter((sha): sha is string => sha != null);
+    const checked = shas.length ? verifyDelivered({ checkout: ask.checkout, branch: ask.branch, shas }, run) : [];
+    return { end: 'done', reached: 'delivered', next: 'confirm', detail: deliveredDetail(checked.length ? checked : delivered[1].split(','), delivered[2]) };
+  }
+  const at = /^at\s+(\S+)\s+(\S+)/.exec(line);
+  if (!at || !Object.hasOwn(ask.to, at[1]) || at[1] === 'delivered') throw new Error('expected unchanged <reason>, at <station> <ref>, or delivered <refs> <evidence>');
+  const station = at[1];
+  const { pr, m, api } = readPr(at[2], true);
+  if (station === 'merged' ? pr.state !== 'MERGED' : station !== 'concluded' && pr.state !== 'OPEN') throw new Error(`PR does not support ${station}`);
+  if (station === 'concluded' && pr.state === 'OPEN') throw new Error('PR is still open');
+  if (['reviewed', 'approved', 'changes-requested'].includes(station)) {
+    if (m[4] !== 'pullrequestreview') throw new Error('name a review on the current PR head');
+    const review = api(`pulls/${m[3]}/reviews/${m[5]}`);
+    const verdict = verdictOf({ author: review.user?.login, body: review.body, state: review.state, submittedAt: Date.parse(review.submitted_at) });
+    const access = /^[\w-]+$/.test(review.user?.login ?? '') && api(`collaborators/${review.user.login}/permission`).permission;
+    if (!['write', 'maintain', 'admin'].includes(access) || review.commit_id !== pr.headRefOid || verdict !== (station === 'changes-requested' ? 'changes' : 'approve')) {
+      throw new Error('review is not a qualifying verdict on the current PR head');
+    }
+  }
+  return { end: 'done', reached: station, next: ask.to[station] };
+}
 
 /** What the verification runs: `git` and `gh` in the checkout, answering trimmed stdout and
  * throwing on any non-zero exit — `course-markers`' `exec` shape, bound by the stub. */

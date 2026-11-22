@@ -210,9 +210,9 @@ New inputs, each read by the sync and judged by Baton:
 
 ## Exit criteria
 
-- [ ] `npm test` passes, with S-BTN-309's test file naming its §15 row.
-- [ ] `npm run typecheck` passes.
-- [ ] `node cli/baton.mjs test-course . create-pr` reports no violations, as does each other
+- [x] `npm test` passes, with S-BTN-309's test file naming its §15 row.
+- [x] `npm run typecheck` passes.
+- [x] `node cli/baton.mjs test-course . create-pr` reports no violations, as does each other
   changed course in a fixture repository.
 
 ## Status
@@ -220,3 +220,14 @@ New inputs, each read by the sync and judged by Baton:
 _filed 2026-11-21._ From the owner's rulings in the supervising session on bering, after B-166.
 Revised the same day after two adversarial reviews and the owner's choices on them, and again when
 the owner made reconciliation a leg of each course.
+
+**Implementation note:** S-BTN-309's machine-key board case conflicts with R-BTN-93's existing
+sync authorization and S-BTN-55/S-BTN-156. This change keeps runner keys unable to post boards;
+it does not implement the machine-key accept-and-strip case. The owner should resolve the spec
+conflict before changing that authorization boundary.
+
+The live outside-work adapter is GitHub-only. Commit attribution currently uses the GitHub
+committer login, not an independent record of who pushed. Claim exclusions use recorded pointers;
+when a merge leg reports only checkout `HEAD`, that may not identify the forge's merge commit.
+If one observation exceeds the board's 100-attestation limit, sync refuses it rather than advancing
+the window and dropping evidence. Use a narrower backfill window where applicable.

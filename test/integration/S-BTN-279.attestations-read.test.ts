@@ -45,7 +45,7 @@ describe('S-BTN-279 the attestations read (B-213)', () => {
       { id: expect.any(Number), type: 'std:decision@1', subject: { ticket: 'docs:G' }, value: { leg: 'decide', option: 'hold' },
         writer: { credential: null, class: 'sync' }, domain: null, at: T0, lapses_at: null, revoked_at: null },
     ]);
-    expect(res.json).toMatchObject({ types: ['std:decision@1'], not_built: { store: 'B-146', session_write: 'B-76' } });
+    expect(res.json).toMatchObject({ types: ['std:decision@1', 'std:arrival@1', 'std:evidence@1'], not_built: { store: 'B-146', session_write: 'B-76' } });
     expect('next_cursor' in res.json).toBe(false);
     // Nothing of ops' is here, and ops holds none.
     expect((await readSession(f.cookie, '/v1/repositories/ops/attestations')).json.attestations).toEqual([]);

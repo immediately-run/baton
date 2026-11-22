@@ -9,6 +9,7 @@
 // course that reads no PR facts keeps `leg_state: branch`; the registry carries each course's
 // `facts` (R-BTN-134) and the claim's scope resolves `repos:` through the list. Node only: it
 // writes a real repository and runs git.
+import { keepLegacyPrPlacement } from '../lib/legacy-pr-course';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -89,6 +90,7 @@ beforeEach(async () => {
   })).status).toBe(200);
   // The scaffold: create-pr (a PR course) and bug-report (a marker course, no PR facts).
   expect(await initMain(['--course', 'create-pr'], { root: dir, log: () => {} })).toBe(0);
+  keepLegacyPrPlacement(dir);
   expect(await initMain(['--course', 'bug-report'], { root: dir, log: () => {} })).toBe(0);
   const batonJson = join(dir, '.baton', 'baton.json');
   const config = JSON.parse(readFileSync(batonJson, 'utf8')) as Record<string, unknown>;

@@ -428,15 +428,15 @@ export class Questions {
       { leg, reached: option.reached }];
     // The legs leaving the outcome it reached, in the file's order: the ticket waits at the
     // station, `next_source: baton` (R-BTN-83), and the next snapshot places it properly.
-    const next = [...g.legs.entries()].filter(([, l]) => l.from.includes(option.reached)).map(([name]) => name);
+    const next = [...g.legs.entries()].filter(([, l]) => !l.arrives && !l.reconciles && l.from.includes(option.reached)).map(([name]) => name);
     // §6.4: the expiry instant is set when the person leg becomes the queued leg — a Baton move
     // is one of the ways it becomes queued ("at a route that queues it", R-BTN-83), so a settle
     // that queues another person leg with `expires` arms its clock itself, counting from this
     // moment; any other queued leg has none.
     const nextDef = next[0] != null ? g.legs.get(next[0]) : undefined;
     const expiresAt = nextDef?.person && nextDef.expires != null ? now + nextDef.expires.afterS * 1000 : null;
-    this.exec(`UPDATE ticket_stations SET station = ?, path = ?, path_len = ?, to_end = ?, next_leg = ?, next_source = 'baton', person_expires_at = ?
-               WHERE ticket_id = ?`, option.reached, JSON.stringify(path), path.length, g.toEnd.get(option.reached) ?? 0, next[0] ?? null, expiresAt, id);
+    this.exec(`UPDATE ticket_stations SET station = ?, path = ?, path_len = ?, to_end = ?, next_leg = ?, next_source = 'baton', person_expires_at = ?, changed_at = ?
+               WHERE ticket_id = ?`, option.reached, JSON.stringify(path), path.length, g.toEnd.get(option.reached) ?? 0, next[0] ?? null, expiresAt, now, id);
     this.exec('DELETE FROM ticket_next_legs WHERE ticket_id = ?', id);
     for (const name of next) {
       this.exec(`INSERT INTO ticket_next_legs (ticket_id, leg, state, ready_since) VALUES (?, ?, 'ready', ?)

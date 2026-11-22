@@ -80,7 +80,7 @@ function makeRunner(log: string[]): Runner {
   const runner = new Runner({
     api, home: dir, repository: 'docs', hostname: 'vm-a', harness: 'opencode',
     capabilities: [...capabilitiesOf(['agent-venue'])],
-    session: `s203-${Date.now()}`, courses: [{ course: 'create-pr', version: 1 }], stateFile: join(tmpdir(), `baton-s203-${process.pid}-${Date.now()}.json`),
+    session: `s203-${Date.now()}`, courses: [{ course: 'create-pr', version: 3 }], stateFile: join(tmpdir(), `baton-s203-${process.pid}-${Date.now()}.json`),
     beatEvery: 60_000, log: (l) => log.push(l),
   });
   return runner;

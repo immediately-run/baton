@@ -114,7 +114,7 @@ class Repo {
     });
     return new Runner({
       api, home: this.dir, repository: 'docs', hostname: 'vm-a', harness: 'opencode', session,
-      courses: [{ course: 'create-pr', version: 1 }], stateFile: join(tmpdir(), `baton-s226-${session}.json`),
+      courses: [{ course: 'create-pr', version: 3 }], stateFile: join(tmpdir(), `baton-s226-${session}.json`),
       beatEvery: 60_000, log: () => {},
     });
   }

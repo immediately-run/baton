@@ -35,7 +35,7 @@ import { defaultBranch } from './request';
 import { DEFAULT_URL } from '../../cli/baton.mjs';
 import { remoteSlug, ownRepositoryId } from './cli';
 import { builtIn, DEFAULT_COURSE } from './courses';
-import { holderRefusal, readTicketPosition, Undetermined, type BatonPosition } from './tickets-baton';
+import { holderRefusal, readDoneTickets, readTicketPosition, Undetermined, type BatonPosition } from './tickets-baton';
 import { batonTarget, fallbackNote, floorFor, nextMain, parseKind, takeNumber } from './sequences';
 
 /** The most tries one command makes when the default branch moves under it: the stopgap's. */
@@ -959,6 +959,9 @@ export async function ticketsCheckMain(argv: string[], io: TicketsIo = {}): Prom
   let prBase: string | null = null;
   let claimedStatusOnly = false;
   let forgePath: string | null = null;
+  let offline = io.offline;
+  let identity = io.identity;
+  let url = io.url;
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const value = (): string => {
@@ -971,12 +974,20 @@ export async function ticketsCheckMain(argv: string[], io: TicketsIo = {}): Prom
     else if (a === '--pr') prBase = value();
     else if (a === '--claimed-status-only') claimedStatusOnly = true;
     else if (a === '--forge') forgePath = value();
+    else if (a === '--offline') offline = true;
+    else if (a === '-i') identity = value();
+    else if (a === '--url') url = value();
     else throw new Error(`${a}: not a flag of baton tickets check`);
   }
   // The settings first: a repository with none has no page to judge, and the check says so.
   const settings = readTicketSettings(root);
   const lines: string[] = [];
-  const code = await checkTicketsMain(['--repo', root], { log: (l) => lines.push(l) });
+  const target = quiet || offline ? null : batonTarget(root, { identity, url });
+  const { keyFile, repository, url: boardUrl } = target ?? {};
+  const code = await checkTicketsMain(['--repo', root], {
+    log: (l) => lines.push(l),
+    ...(keyFile && repository && boardUrl ? { boardDone: () => readDoneTickets({ url: boardUrl, keyFile, repository, fetchImpl: io.fetchImpl }) } : {}),
+  });
   const page = pageFinding(root, settings);
   const last = lines.pop() ?? '';
   const tickets = Number(/(\d+) ticket\(s\)/.exec(last)?.[1] ?? 0);
@@ -1099,6 +1110,7 @@ export function ticketsHelp(): string[] {
     '                   any live status; --pr adds a pull request; --note is a release\'s "what is left"',
     'baton tickets done <id> [--pr URL]            done, moved to archive/',
     'baton tickets check [--repo DIR] [--quiet]    check the tickets without posting them',
+    '  With -i KEY or BATON_KEY_FILE, report live files for board-done tickets; --offline skips this read.',
     '                   --pr BASE [--claimed-status-only] [--forge FILE]',
     '                                                  also print the computed ticket-PR view',
     '                   against BASE (fields, body and brief diffs, provenance, the status-only',
