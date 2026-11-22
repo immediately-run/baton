@@ -9,7 +9,10 @@
 // stops trusted runners. Policy reads are unsigned and runner pins no longer gate claims.
 import { describe, it, expect, beforeEach, inject } from 'vitest';
 import { call as hostCall } from '#host';
-import { cutover, keyCall, ORIGIN, payload, rows, setAdminKeys, setClock, setHumanKeys, syncCall, syncToken, tick, withCore } from '../helpers';
+import {
+  cutover, keyCall, ORIGIN, payload, rows, setAdminKeys, setClock, setHumanKeys, syncCall, syncToken, tick,
+  withCore, setGrantRole, setOwnerAttestation, setRepositoryGrantTrust,
+} from '../helpers';
 import { makeKey, sshsig, signedRequest, type TestKey } from '../lib/sshKeys';
 
 const board = inject('board');
@@ -96,7 +99,7 @@ async function protectedSigned() {
   // whose key MEETS hardware — a FIDO attestation. B-136's attestation routes are not built, so
   // the scenario writes the column as its check would (the way it writes the checker's role);
   // without it the apply is refused `unsatisfiable-approvers`.
-  await rows('UPDATE repository_owners SET fido_attestation = ? WHERE fingerprint = ?', 'att:human-key-1', human.fingerprint);
+  await setOwnerAttestation(human.fingerprint, 'att:human-key-1');
   // The break-glass key is an owner too — marked `human_only` like every key BATON_HUMAN_KEYS
   // lists — so it can act on the owner routes (which an owner key alone holds) whose human-only
   // lists it alone satisfies under `hardware`.
@@ -110,7 +113,7 @@ async function protectedSigned() {
 
 async function makeChecker() {
   expect((await keyCall(owner, '/v1/owner/ops/grants', { public_key: checkerKey.publicKey, hostname: 'checker-host', capabilities: ['agent-venue'] })).status).toBe(200);
-  await rows('UPDATE runner_grants SET role = ? WHERE credential_id = ? AND repository_id = ?', 'protection-checker', checkerKey.fingerprint, 'ops');
+  await setGrantRole('ops', 'protection-checker', checkerKey.fingerprint);
   const created = Math.floor((await withCore((c) => c.now())) / 1000);
   await hostCall(await signedRequest(checkerKey, ORIGIN + '/v1/runner/heartbeat', {
     created, body: JSON.stringify({ hostname: 'checker-host', session_name: 'checker', harness: 'opencode', kind: 'vm', billing: {}, capabilities: [], tier_ceiling: 'critical', lease_timeout_s: 900, secret_hash: await sha256Of(CHECKER_SECRET), courses: [] }),
@@ -274,7 +277,7 @@ describe('S-BTN-190 guarantees and floors', () => {
 
   it('ignores a legacy runner policy pin without gating claims or opening a condition', async () => {
     await protectedSigned();
-    await rows('UPDATE runner_grants SET trust_level = ?, trust_domain = ? WHERE credential_id = ? AND repository_id = ?', 'trusted', 'runner-host', runnerKey.fingerprint, 'ops');
+    await setRepositoryGrantTrust('ops', 'trusted', 'runner-host', runnerKey.fingerprint);
     const beat = await runnerBeat('runner-secret', { policy_pins: [{ repository: 'ops', hash: 'e'.repeat(64) }] });
     expect(beat.status).toBe(200);
     expect(beat.json).not.toHaveProperty('policies');

@@ -18,6 +18,7 @@
 // open), and three failed rounds post `review-rounds-3`, which the owner answers through Baton —
 // `round` granting one review run, the fourth round asking `review-rounds-4`, `owner` parking
 // it. Node only: it writes a real repository and runs git.
+import { GitRepo } from '../lib/gitRepo';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -29,21 +30,16 @@ import { initMain, parseSyncArgs, syncMain } from '../../src/defaults/cli';
 const init = (root: string, ...argv: string[]) => initMain(argv, { root, log: () => {} });
 import type { PrFact } from '../../src/defaults/course-pr';
 import type { BranchCommit } from '../../src/defaults/pr-markers';
-import { ORIGIN, keyCall, register, rows, setAdminKeys, setClock, syncToken } from '../helpers';
+import { ORIGIN, keyCall, register, rows, setAdminKeys, setClock, syncToken, seedClaim, seedClaimLeg } from '../helpers';
 import { makeKey } from '../lib/sshKeys';
 
 const T0 = Date.parse('2026-10-16T12:00:00Z');
 
 /** The fixture repository: a git tree with a tickets/ wiki, no course code of its own. */
-class Repo {
-  readonly dir: string;
+class DefaultsBoard extends GitRepo {
   facts: PrFact[] = [];
   constructor() {
-    this.dir = mkdtempSync(join(tmpdir(), 'baton-s43-'));
-    const g = (...a: string[]) => execFileSync('git', ['-C', this.dir, ...a], { encoding: 'utf8', stdio: 'ignore' });
-    g('init', '-q', '-b', 'main');
-    g('config', 'user.email', 'relay@test');
-    g('config', 'user.name', 'relay test');
+    super('baton-43-');
     mkdirSync(join(this.dir, 'tickets'), { recursive: true });
     this.write('tickets/first.md', '---\nid: T-1\ntitle: First\ntier: routine\nmystery: unknown-field\n---\n');
     this.write('tickets/second.md', '---\nid: T-2\ntitle: Second\ndepends_on: [T-1]\n---\n');
@@ -55,14 +51,8 @@ class Repo {
     this.write('tickets/noid.md', '---\ntitle: no id here\n---\n');
     this.write('tickets/notes.txt', 'not markdown\n');
   }
-  write(path: string, text: string): void {
-    writeFileSync(join(this.dir, path), text);
-  }
-  commit(): string {
-    execFileSync('git', ['-C', this.dir, 'add', '-A'], { stdio: 'ignore' });
-    execFileSync('git', ['-C', this.dir, 'commit', '--allow-empty', '-qm', 'wiki'], { stdio: 'ignore' });
-    return execFileSync('git', ['-C', this.dir, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
-  }
+
+  commit(message = 'wiki'): string { return super.commit(message); }
   /** One sync: recorded facts, the harness's sync credential, the local host's transport. */
   async sync(...extra: string[]): Promise<void> {
     const facts = join(this.dir, '.baton', 'facts.json');
@@ -73,13 +63,13 @@ class Repo {
   }
 }
 
-let repo: Repo;
+let repo: DefaultsBoard;
 beforeEach(async () => {
   await setClock(T0);
-  repo = new Repo();
+  repo = new DefaultsBoard();
   gateRunner = null;
 });
-afterEach(() => rmSync(repo.dir, { recursive: true, force: true }));
+afterEach(() => repo.dispose());
 
 type StationRow = { station: string; next_leg: string | null };
 type NextRow = { leg: string; state: string; waiting_on: string | null };
@@ -128,9 +118,15 @@ async function recorded(...gates: Gate[]): Promise<void> {
   gateRunner ??= (await register('vm-a')).id;
   for (const g of gates) {
     if ((await rows('SELECT 1 FROM claims WHERE request_id = ?', `gate:${g.nonce}`)).length) continue;
-    await rows(`INSERT INTO claims (ticket_id, runner_id, request_id, nonce, snapshot_sha, claimed_at, status, ended_at, end_reason) VALUES ('docs:T-1', ?, ?, ?, '', 0, 'released', 1, 'released:requested')`, gateRunner, `gate:${g.nonce}`, g.nonce);
+    await seedClaim({
+      ticket_id: 'docs:T-1', runner_id: gateRunner, request_id: `gate:${g.nonce}`, nonce: g.nonce, snapshot_sha: '',
+      claimed_at: 0, status: 'released', ended_at: 1, end_reason: 'released:requested',
+    });
     const [{ id }] = await rows<{ id: number }>('SELECT id FROM claims WHERE request_id = ?', `gate:${g.nonce}`);
-    await rows(`INSERT INTO claim_legs (claim_id, seq, leg, from_station, to_station, started_at, started_observation, finished_at, evidence) VALUES (?, 1, 'run-tests', 'pr-open', 'pr-open', 0, 0, 1, ?)`, id, g.sha);
+    await seedClaimLeg({
+      claim_id: id, seq: 1, leg: 'run-tests', from_station: 'pr-open', to_station: 'pr-open', started_at: 0,
+      started_observation: 0, finished_at: 1, evidence: g.sha,
+    });
   }
 }
 

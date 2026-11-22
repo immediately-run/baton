@@ -1,7 +1,11 @@
 // B-287: mixed busy/idle polling, a cold indexed decision, unchanged snapshots and paged UI.
 import { beforeEach, describe, expect, it } from 'vitest';
 import { schedulingVersion } from '../../src/core/stateVersion';
-import { Git, HOST, adminSession, beat, call, claimItem, cutover, register, rows, runnerCall, sessionCall, setAdminKeys, setClock, withCore } from '../helpers';
+import {
+  Git, HOST, adminSession, beat, call, claimItem, cutover, register, rows, runnerCall, sessionCall, setAdminKeys,
+  setClock, withCore, clearTicketRequirements, setTicketRankIn, seedClaim, seedMessage, seedTicketOverride,
+  seedTicketOverrideIn,
+} from '../helpers';
 import { makeKey } from '../lib/sshKeys';
 
 const T0 = Date.parse('2026-11-19T12:00:00Z');
@@ -109,7 +113,7 @@ describe('S-BTN-243 bounded reads without changing matching', { timeout: 120_000
     expect((await beat('vm-a', idle.secret, { tags: ['new-tag'] })).status).toBe(200);
     expect(await version()).toBeGreaterThan(v);
     await sameProjection();
-    await rows("DELETE FROM ticket_requires WHERE ticket_id = 'docs:T-1'");
+    await clearTicketRequirements('docs:T-1');
     const accepted = await measure(() => claimItem('vm-a', idle.secret));
     expect(accepted.value.json.ticket_id).toBe('docs:T-1');
     if (HOST === 'cloudflare') {
@@ -125,8 +129,11 @@ describe('S-BTN-243 bounded reads without changing matching', { timeout: 120_000
     const w = await register('vm-a');
     await runnerCall('/v1/runner/state', { cred: 'vm-a', secret: w.secret });
     const h = (await rows<{ n: number }>("SELECT last_handed_out + 1 AS n FROM board_head WHERE repository_id='docs'"))[0];
-    await rows(`INSERT INTO claims(ticket_id, runner_id, request_id, nonce, snapshot_sha, claimed_at, status, end_reason, ended_at, confirmed_at, ended_at_sha, end_observation)
-      VALUES ('docs:A', ?, 'previous', 'n', ?, ?, 'completed', 'suspended:reviewed', ?, ?, ?, ?)`, w.id, git.head, T0, T0, T0, git.head, h.n);
+    await seedClaim({
+      ticket_id: 'docs:A', runner_id: w.id, request_id: 'previous', nonce: 'n', snapshot_sha: git.head,
+      claimed_at: T0, status: 'completed', end_reason: 'suspended:reviewed', ended_at: T0, confirmed_at: T0,
+      ended_at_sha: git.head, end_observation: h.n,
+    });
     await git.refresh(); // observation equals the end: not fresh enough yet
     expect((await claimItem('vm-a', w.secret)).json.code).toBe('no-eligible-ticket');
     const v = await version();
@@ -145,14 +152,14 @@ describe('S-BTN-243 bounded reads without changing matching', { timeout: 120_000
     const before = await version();
     await withCore((c) => {
       expect(() => c.store.transaction(() => {
-        c.store.exec("UPDATE tickets SET rank = -100 WHERE id = 'docs:B'");
-        c.store.exec("INSERT INTO ticket_overrides(ticket_id, hold, set_by, set_at) VALUES ('docs:A', 1, 'test', 0)");
+        setTicketRankIn(c.store, 'docs:B', -100);
+        seedTicketOverrideIn(c.store, { ticket_id: 'docs:A', hold: 1, set_by: 'test', set_at: 0 });
         throw new Error('rollback');
       })).toThrow('rollback');
     });
     expect(await version()).toBe(before);
     await sameProjection();
-    await rows("INSERT INTO ticket_overrides(ticket_id, hold, set_by, set_at) VALUES ('docs:A', 1, 'test', 0)");
+    await seedTicketOverride({ ticket_id: 'docs:A', hold: 1, set_by: 'test', set_at: 0 });
     await sameProjection();
     expect(await rows("SELECT ticket_id FROM ready_tickets WHERE ticket_id='docs:A'")).toEqual([]);
     await rows("UPDATE ticket_overrides SET hold=0, retry_after=? WHERE ticket_id='docs:A'", T0+1000);
@@ -205,7 +212,7 @@ describe('S-BTN-243 bounded reads without changing matching', { timeout: 120_000
     const first = await sessionCall(cookie, path);
     expect(((await first.json()) as { tickets: unknown[] }).tickets).toHaveLength(30);
     const tag = first.headers.get('ETag')!;
-    await rows("INSERT INTO messages(kind, from_runner_id, to_runner_id, sent_at, status, payload_json) VALUES ('status_report', ?, ?, ?, 'pending', '{}')", w.id, w.id, T0);
+    await seedMessage({ kind: 'status_report', from_runner_id: w.id, to_runner_id: w.id, sent_at: T0, status: 'pending', payload_json: '{}' });
     expect((await sessionCall(cookie, path, { headers: { 'If-None-Match': tag } })).status).toBe(304);
     expect((await call(path, { headers: { 'If-None-Match': tag } })).status).toBe(401);
     await rows(`WITH RECURSIVE k(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM k WHERE i<3000)

@@ -8,7 +8,11 @@
 // is refused while either is held. The recommendation clauses — each repository in its own
 // hook's or default order, the per-group limit with 60 ready docs legs — are R3-1232's.
 import { describe, it, expect, inject, beforeEach } from 'vitest';
-import { beat, captureDispatches, claimItem, claimRow, course, cutover, endClaim, ORIGIN, ownerCall, payload, recommended, register, rows, setClock, syncCall, syncToken, withCore, runnerCall, stateView } from '../helpers';
+import {
+  beat, captureDispatches, claimItem, claimRow, course, cutover, endClaim, ORIGIN, ownerCall, payload,
+  recommended, register, rows, setClock, syncCall, syncToken, withCore, runnerCall, stateView,
+  setRepositoryWeight, setTranscriptRepositories,
+} from '../helpers';
 
 const board = inject('board');
 const sha = board.shas;
@@ -110,7 +114,7 @@ describe('S-BTN-26 two repositories (registry half)', () => {
     expect(firstOps).toBeGreaterThan(0);
     expect(got.slice(firstOps).every((t) => t.startsWith('ops:'))).toBe(true);
     expect(got.slice(firstOps)).toEqual(['ops:R3-9001', 'ops:T-1']); // ops' own order within it
-    await rows(`UPDATE repositories SET weight = 200 WHERE id = 'ops'`);
+    await setRepositoryWeight('ops', 200);
     expect((await candidates()).slice(0, 2)).toEqual(['ops:R3-9001', 'ops:T-1']);
   });
 
@@ -158,7 +162,7 @@ describe('S-BTN-26 two repositories (registry half)', () => {
   });
 
   it('§6.8: a transcript pointer names one of its claim’s own repository’s transcript repositories', async () => {
-    await rows(`UPDATE repositories SET transcript_repos = '["immediately-run/ops-sessions"]' WHERE id = 'ops'`);
+    await setTranscriptRepositories('ops', '["immediately-run/ops-sessions"]');
     const { secret } = await register('vm-a', BOTH);
     await cutover(1, 'ops');
     await claimItem('vm-a', secret, { ticket_id: 'ops:R3-9001' });
@@ -168,8 +172,8 @@ describe('S-BTN-26 two repositories (registry half)', () => {
   });
 
   it('a repository that names no transcript repositories keeps the defaults when another names its own', async () => {
-    await rows(`UPDATE repositories SET transcript_repos = '["immediately-run/docs-sessions"]' WHERE id = 'docs'`);
-    await rows(`UPDATE repositories SET transcript_repos = '[]' WHERE id = 'ops'`);
+    await setTranscriptRepositories('docs', '["immediately-run/docs-sessions"]');
+    await setTranscriptRepositories('ops', '[]');
     const { secret } = await register('vm-a', BOTH);
     await cutover(1, 'ops');
     await claimItem('vm-a', secret, { ticket_id: 'ops:R3-9001' });
@@ -179,7 +183,7 @@ describe('S-BTN-26 two repositories (registry half)', () => {
   });
 
   it('a pointer reported before the claim is linked only if the claim’s repository allows it', async () => {
-    await rows(`UPDATE repositories SET transcript_repos = '["immediately-run/ops-sessions"]' WHERE id = 'ops'`);
+    await setTranscriptRepositories('ops', '["immediately-run/ops-sessions"]');
     const { secret } = await register('vm-a', BOTH);
     await cutover(1, 'ops');
     await beat('vm-a', secret, { ...BOTH, transcripts: [{ repo: 'immediately-run/claude-sessions', path: 'cc/a.jsonl' }, { repo: 'immediately-run/ops-sessions', path: 'cc/b.jsonl' }] });
@@ -191,7 +195,7 @@ describe('S-BTN-26 two repositories (registry half)', () => {
     const { id } = await register('vm-a', BOTH);
     await cutover(1, 'docs');
     await cutover(1, 'ops');
-    await rows(`UPDATE repositories SET weight = 100 WHERE id = 'ops'`);
+    await setRepositoryWeight('ops', 100);
     const got = await recommended(id);
     // Each repository's first candidate comes before either's second.
     expect(got.slice(0, 2).sort()).toEqual(['docs:R3-9001', 'ops:R3-9001']);

@@ -16,7 +16,11 @@
 // their indexes (migration 0063), and on the Cloudflare host the view's reads stay under the
 // ticket's 500-row target on that harness state.
 import { describe, it, expect, beforeEach } from 'vitest';
-import { Git, HOST, adminSession, cutover, register, rows, sessionCall, setAdminKeys, setClock, withCore, keyCall } from '../helpers';
+import {
+  Git, HOST, adminSession, cutover, register, rows, sessionCall, setAdminKeys, setClock, withCore, keyCall,
+  setRunnerLastSeen, setRunnerReaped, seedActivity, seedClaim, seedMessage, seedPendingTranscript,
+  seedRunnerCourse, seedTranscript,
+} from '../helpers';
 import { makeKey, type TestKey } from '../lib/sshKeys';
 import { transcriptUrl } from '../../src/core/links';
 
@@ -123,32 +127,37 @@ async function sameAsBefore(session: string, now: number) {
 let n = 0;
 async function claim(runner: number, ticket: string, claimedAt: number, endedAt: number | null) {
   n++;
-  await rows(`INSERT INTO claims (ticket_id, runner_id, request_id, nonce, snapshot_sha, claimed_at, status, ended_at, end_reason)
-              VALUES (?, ?, ?, ?, '', ?, ?, ?, ?)`, ticket, runner, `b250:${n}`, `n${n}`, claimedAt, endedAt == null ? 'active' : 'released', endedAt,
-  endedAt == null ? null : 'released:owner');
+  await seedClaim({
+    ticket_id: ticket, runner_id: runner, request_id: `b250:${n}`, nonce: `n${n}`, snapshot_sha: '',
+    claimed_at: claimedAt, status: endedAt == null ? 'active' : 'released', ended_at: endedAt,
+    end_reason: endedAt == null ? null : 'released:owner',
+  });
   return (await rows<{ id: number }>('SELECT MAX(id) AS id FROM claims'))[0].id;
 }
 
 /** An open activity; `kind` names its id, so a tie's winner is visible in the served row. */
 async function activity(runner: number, claimId: number | null, id: string, started: number, received: number, ended: number | null = null) {
-  await rows(`INSERT INTO activities (runner_id, id, claim_id, kind, label, source, started_at, ended_at, outcome, received_at)
-              VALUES (?, ?, ?, ?, ?, 'skill', ?, ?, ?, ?)`, runner, id, claimId, claimId == null ? 'orient' : 'implement', id, started, ended, ended == null ? null : 'succeeded', received);
+  await seedActivity({
+    runner_id: runner, id, claim_id: claimId, kind: claimId == null ? 'orient' : 'implement', label: id,
+    source: 'skill', started_at: started, ended_at: ended, outcome: ended == null ? null : 'succeeded',
+    received_at: received,
+  });
 }
 
 async function transcript(runner: number, claimId: number | null, path: string, at: number, pushed: number | null = null) {
   if (claimId == null) {
-    await rows(`INSERT INTO pending_transcripts (runner_id, repo, path, role, first_seen_at, last_pushed_at) VALUES (?, ?, ?, 'session', ?, ?)`,
-      runner, TRANSCRIPTS, path, at, pushed);
+    await seedPendingTranscript({ runner_id: runner, repo: TRANSCRIPTS, path, role: 'session', first_seen_at: at, last_pushed_at: pushed });
     return;
   }
-  await rows(`INSERT INTO transcripts (runner_id, claim_id, repo, path, role, first_seen_at, last_pushed_at) VALUES (?, ?, ?, ?, 'session', ?, ?)`,
-    runner, claimId, TRANSCRIPTS, path, at, pushed);
+  await seedTranscript({ runner_id: runner, claim_id: claimId, repo: TRANSCRIPTS, path, role: 'session', first_seen_at: at, last_pushed_at: pushed });
 }
 
 /** A `status_report` the dashboard reads, addressed as §9.4 shapes one. */
 async function report(runner: number, at: number, text: string) {
-  await rows(`INSERT INTO messages (kind, payload_json, from_runner_id, to_runner_id, sent_at, delivered_at, acknowledged_at, status)
-              VALUES ('status_report', ?, ?, ?, ?, ?, ?, 'acknowledged')`, JSON.stringify({ text }), runner, runner, at, at, at);
+  await seedMessage({
+    kind: 'status_report', payload_json: JSON.stringify({ text }), from_runner_id: runner, to_runner_id: runner,
+    sent_at: at, delivered_at: at, acknowledged_at: at, status: 'acknowledged',
+  });
 }
 
 /** A fleet's worth of bare old runners: rows R-BTN-3 keeps, seen 40 days ago, half reaped —
@@ -192,7 +201,7 @@ async function fill(runner: number, tickets: string[]) {
   await transcript(runner, null, `claude-code/pending-older-${runner}.jsonl`, T0 - 3 * H);
   await report(runner, T0 - 4 * H, 'first');
   await report(runner, T0 - 30 * 60_000, 'second');
-  await rows(`INSERT INTO runner_courses (runner_id, repository_id, course_id, version) VALUES (?, 'docs', 'unregistered', 9)`, runner);
+  await seedRunnerCourse({ runner_id: runner, repository_id: 'docs', course_id: 'unregistered', version: 9 });
 }
 
 let admin: TestKey;
@@ -219,9 +228,9 @@ describe('B-250 the Runners view in one read per list', { timeout: 180_000 }, ()
     const gone = await register('mac');
     await sameAsBefore(session, T0);
     await fill(a.id, tickets.slice(0, 3));
-    await rows(`UPDATE runners SET last_seen_at = ? WHERE id = ?`, T0 - 2 * H, b.id); // lapsed, holding nothing
+    await setRunnerLastSeen(b.id, T0 - 2 * H); // lapsed, holding nothing
     await fill(gone.id, tickets.slice(3, 6));
-    await rows('UPDATE runners SET reaped_at = ? WHERE id = ?', T0 - 1, gone.id);
+    await setRunnerReaped(gone.id, T0 - 1);
     // The lapsed runner's only open activities are a tied pair — the tie decides its served row.
     await activity(b.id, null, 'b-tie-z', T0 - H, T0 - H);
     await activity(b.id, null, 'b-tie-a', T0 - H, T0 - H);
@@ -254,7 +263,7 @@ describe('B-250 the Runners view in one read per list', { timeout: 180_000 }, ()
     expect(s.runners[2].claims).toEqual([]);
     // Later: the lease lapses on the held claims too — the alarm has not run (B-229's window).
     await setClock(T0 + 21 * H);
-    await rows('UPDATE runners SET last_seen_at = ? WHERE id = ?', T0 + 21 * H, a.id);
+    await setRunnerLastSeen(a.id, T0 + 21 * H);
     session = await adminSession(admin); // a session lives 4 hours (R-BTN-155)
     await sameAsBefore(session, T0 + 21 * H);
     // However many runners were ever registered: the rows R-BTN-3 keeps are served the same.

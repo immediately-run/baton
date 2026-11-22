@@ -13,7 +13,10 @@
 // export — nothing of either is in the code yet; the PR body says so. Runs on both hosts.
 import { describe, it, expect, beforeEach, inject } from 'vitest';
 import { call as hostCall } from '#host';
-import { cutover, course, keyCall, ORIGIN, payload, rows, setAdminKeys, setClock, setHumanKeys, syncCall, withCore } from '../helpers';
+import {
+  cutover, course, keyCall, ORIGIN, payload, rows, setAdminKeys, setClock, setHumanKeys, syncCall, withCore,
+  revokeRunnerGrants, setGrantRole, setGrantTrust,
+} from '../helpers';
 import { makeKey, sshsig, signedRequest, type TestKey } from '../lib/sshKeys';
 import { COOPERATIVE, PLAIN_GIT, legStateOf } from '../../src/core/policy';
 
@@ -248,8 +251,8 @@ describe('S-BTN-189 the repository policy', () => {
     for (const [k, host] of [[r1, 'runner-1-host'], [r2, 'runner-2-host']] as const) {
       expect((await keyCall(owner, `/v1/owner/ops/grants`, { public_key: k.publicKey, hostname: host, capabilities: ['agent-venue'] })).status).toBe(200);
     }
-    await rows(`UPDATE runner_grants SET trust_level = 'trusted', trust_domain = 'host-a' WHERE credential_id = ?`, r1.fingerprint);
-    await rows(`UPDATE runner_grants SET trust_level = 'untrusted', trust_domain = 'host-a' WHERE credential_id = ?`, r2.fingerprint);
+    await setGrantTrust(r1.fingerprint, 'trusted', 'host-a');
+    await setGrantTrust(r2.fingerprint, 'untrusted', 'host-a');
     const { version, doc } = await policyRow('ops').then((r) => ({ version: r.version, doc: JSON.parse(r.policy_json) }));
     // grants.trusted_domain: separate — the trusted grant's domain is shared with another grant,
     // untrusted included (round 1, finding 6: the untrusted one was skipped before).
@@ -263,7 +266,7 @@ describe('S-BTN-189 the repository policy', () => {
     // The second grant gone, a courier in a domain of its own — registered once per ask, two
     // rows — does not refuse the change against itself: a courier is not a grant, and one
     // courier is one courier.
-    await rows(`UPDATE runner_grants SET revoked_at = ? WHERE credential_id = ?`, Date.now(), r2.fingerprint);
+    await revokeRunnerGrants(r2.fingerprint, Date.now());
     const courier = await makeKey('ssh-ed25519', 'courier');
     expect((await as(owner, '/v1/owner/ops/couriers', { public_key: courier.publicKey, asks: ['owner', 'hi'], trust_level: 'untrusted', trust_domain: 'host-b' })).status).toBe(200);
     const ok = await as(owner, '/v1/owner/ops/policy', { base_version: version, policy: { ...doc, grants: { ...doc.grants, one_per_domain: true, trusted_domain: 'separate' } } }, 'PUT');
@@ -331,7 +334,7 @@ async function addHumanOwner(repository: string) {
  *  (R-BTN-180 — the role's own routes are B-147's, so the scenario writes it as its grant). */
 async function makeChecker(repository: string) {
   expect((await keyCall(owner, `/v1/owner/${repository}/grants`, { public_key: checkerKey.publicKey, hostname: 'checker-host', capabilities: ['agent-venue'] })).status).toBe(200);
-  await rows('UPDATE runner_grants SET role = ? WHERE credential_id = ? AND repository_id = ?', 'protection-checker', checkerKey.fingerprint, repository);
+  await setGrantRole(repository, 'protection-checker', checkerKey.fingerprint);
 }
 
 /** The checker's heartbeat, carrying its protection report. */

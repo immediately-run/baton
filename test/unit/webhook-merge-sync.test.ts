@@ -9,7 +9,7 @@
 // tick after a late one.
 import { describe, it, expect } from 'vitest';
 import { Webhooks, SYNC_STALE_MS } from '../../src/core/webhook';
-import { armedAt, captureDispatches, withCore } from '../helpers';
+import { armedAt, captureDispatches, withCore, retireRepositoryIn, setSyncDispatchTimeIn, seedWebhookSyncIn } from '../helpers';
 
 /** A delivery of `repository`'s, its id fresh each call so the 24-hour memory drops none. */
 const d = (over: Record<string, unknown> = {}) => ({ event: 'pull_request', id: `d-${Math.random()}`, repository: 'immediately-run/baton', merged: true, ...over }) as never;
@@ -57,7 +57,7 @@ describe('S-BTN-167 a merge dispatches the sync', () => {
     const B = 1_800_000_000_000;
     await withCore(async (c) => {
       // A fresh instance registers baton and docs; docs' own stamp is 20 minutes old.
-      c.store.exec(`INSERT INTO webhook_syncs (repository_id, last_dispatch_at) VALUES ('docs', ?)`, B - 20 * 60_000);
+      seedWebhookSyncIn(c.store, { repository_id: 'docs', last_dispatch_at: B - 20 * 60_000 });
       c.now = () => B;
       // A push to this repository dispatches this repository's sync — the delivery is not a
       // merge, and before B-89 it left `webhook_syncs` empty, so nothing backed it up.
@@ -106,7 +106,7 @@ describe('S-BTN-167 a merge dispatches the sync', () => {
       }
       c.store.exec(`INSERT INTO webhook_syncs (repository_id, last_dispatch_at) VALUES ('docs', ?), ('ops', ?), ('gone', ?), ('baton', ?)`,
         B - 11 * 60_000, B - 9 * 60_000, B - 11 * 60_000, B - 11 * 60_000);
-      c.store.exec(`UPDATE repositories SET retired_at = 1 WHERE id = 'gone'`);
+      retireRepositoryIn(c.store, 'gone', 1);
       c.now = () => B;
       const sent = await captureDispatches();
       await c.alarm();
@@ -144,7 +144,7 @@ describe('S-BTN-167 a merge dispatches the sync', () => {
     });
     await withCore(async (c) => {
       // A fresh instance: its own baton row, ten minutes old at B.
-      c.store.exec(`UPDATE webhook_syncs SET last_dispatch_at = ${B - SYNC_STALE_MS} WHERE repository_id = 'baton'`);
+      setSyncDispatchTimeIn(c.store, 'baton', B - SYNC_STALE_MS);
       const sent = await captureDispatches();
       // Armed for the stale instant, not for a minute later: the tick at ten minutes exactly
       // sends nothing, and the alarm waits one millisecond — the first `now` the `<` holds.

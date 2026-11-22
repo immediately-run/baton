@@ -9,6 +9,8 @@
 // markdown source is pinned: each ticket's version is its file's blob id at the posted commit, an
 // unrelated commit changes no version and stales no claim, and a refresh writes no ticket row.
 // The board's half is S-BTN-206's, on both hosts.
+import { runnerApi, testRunner } from '../lib/runnerRig';
+import { GitRepo } from '../lib/gitRepo';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs';
@@ -17,7 +19,6 @@ import { join } from 'node:path';
 import { call as hostCall } from '#host';
 import { initMain, parseSyncArgs, syncMain } from '../../src/defaults/cli';
 import { Runner } from '../../src/runner/runner';
-import { BatonApi } from '../../src/runner/api';
 import { ORIGIN, TOKENS, claimRow, claimItem, cutover, observe, register, rows, setClock, syncToken } from '../helpers';
 
 const T0 = Date.parse('2026-11-06T12:00:00Z');
@@ -60,19 +61,13 @@ export default {
 
 /** One scaffolded repository, as S-BTN-43's: git, an origin, `baton repo init`, no course code of
  *  its own — plus (when `tracker` is set) the fixture source and its store file outside git. */
-class Repo {
-  readonly dir: string;
+class VersionedTickets extends GitRepo {
   readonly store: string;
   private readonly tracker: boolean;
   constructor(tracker: boolean) {
+    super('baton-207-', { origin: 'https://github.com/immediately-run/docs.git' });
     this.tracker = tracker;
-    this.dir = mkdtempSync(join(tmpdir(), tracker ? 'baton-s203t-' : 'baton-s203m-'));
-    this.store = join(mkdtempSync(join(tmpdir(), 'baton-s203-store-')), 'store.json');
-    const g = (...a: string[]) => execFileSync('git', ['-C', this.dir, ...a], { encoding: 'utf8', stdio: 'ignore' });
-    g('init', '-q', '-b', 'main');
-    g('config', 'user.email', 'relay@test');
-    g('config', 'user.name', 'relay test');
-    g('remote', 'add', 'origin', 'https://github.com/immediately-run/docs.git');
+    this.store = join(this.root, 'store.json');
     mkdirSync(join(this.dir, 'tickets'), { recursive: true });
     if (tracker) {
       writeFileSync(join(this.dir, 'tickets', 'README.md'), 'the tickets wiki\n');
@@ -80,11 +75,10 @@ class Repo {
       writeFileSync(join(this.dir, 'tickets', 'one.mdx'), '---\nid: T-1\ntitle: One\ntier: routine\n---\nThe body.\n');
       writeFileSync(join(this.dir, 'tickets', 'two.mdx'), '---\nid: T-2\ntitle: Two\ntier: routine\n---\nAnother body.\n');
     }
-    this.tracker = tracker;
   }
 
   /** `baton repo init`, the fixture source and the runnable leg: everything after the tree. */
-  async setup(): Promise<Repo> {
+  async setup(): Promise<VersionedTickets> {
     expect(await initMain([], { root: this.dir, log: () => {} })).toBe(0);
     if (this.tracker) writeFileSync(join(this.dir, '.baton', 'tickets.mjs'), trackerSource(this.store));
     // A leg the runner can run: it writes its marker and ends the claim, so one claim is one leg.
@@ -110,18 +104,9 @@ export async function close() { return 'https://example.test/close'; }
   readStore(): { rev: number; tickets: Record<string, unknown>[] } {
     return JSON.parse(readFileSync(this.store, 'utf8')) as { rev: number; tickets: Record<string, unknown>[] };
   }
-  commit(message = 'wiki'): string {
-    const g = (...a: string[]) => execFileSync('git', ['-C', this.dir, ...a], { encoding: 'utf8', stdio: 'ignore' });
-    g('add', '-A');
-    g('commit', '--allow-empty', '-qm', message);
-    return execFileSync('git', ['-C', this.dir, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
-  }
-  blob(path: string): string {
-    return execFileSync('git', ['-C', this.dir, 'rev-parse', `HEAD:${path}`], { encoding: 'utf8' }).trim();
-  }
-  head(): string {
-    return execFileSync('git', ['-C', this.dir, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
-  }
+  commit(message = 'wiki'): string { return super.commit(message); }
+
+  head(): string { return this.sha(); }
   /** One sync: no facts, the harness's sync credential, the local host's transport. Its logged
    *  outcome line, for assertions. */
   async sync(): Promise<string> {
@@ -135,33 +120,28 @@ export async function close() { return 'https://example.test/close'; }
   }
   /** The runner over this home, as S-BTN-147's: one session, one credential. */
   runner(session: string): Runner {
-    const api = new BatonApi({
-      url: ORIGIN,
-      transport: (req) => hostCall(req),
-      auth: (_m, _u, _b, secret) => ({ Authorization: `Bearer ${TOKENS['vm-a']}`, ...(secret ? { 'X-Runner-Secret': secret } : {}) }),
-    });
-    return new Runner({
-      api, home: this.dir, repository: 'docs', hostname: 'vm-a', harness: 'opencode', session,
+    const api = runnerApi();
+    return testRunner({
+      api, home: this.dir, session,
       courses: [{ course: 'create-pr', version: 1 }], stateFile: join(tmpdir(), `baton-s203-${session}.json`),
-      beatEvery: 60_000, log: () => {},
-    });
+      beatEvery: 60_000, });
   }
 }
 
-let repo: Repo;
-const repos: Repo[] = [];
+let repo: VersionedTickets;
+const repos: VersionedTickets[] = [];
 beforeEach(async () => {
   await setClock(T0);
   await cutover();
 });
 afterEach(() => {
-  for (const r of repos) rmSync(r.dir, { recursive: true, force: true });
+  for (const r of repos) r.dispose();
   repos.length = 0;
 });
 
 describe('S-BTN-207 ticket versions through the sync and the runner', () => {
   it('a current-source ticket edited with no commit reaches the board in a refresh; a new one boards the same way', async () => {
-    repo = new Repo(true);
+    repo = new VersionedTickets(true);
     repos.push(repo);
     await repo.setup();
     expect(await repo.sync()).toMatch(/^exit 0: baton: advanced at /);
@@ -186,7 +166,7 @@ describe('S-BTN-207 ticket versions through the sync and the runner', () => {
   });
 
   it('a claim whose ticket changed before the leg starts releases stale-board; one whose ticket did not change runs', async () => {
-    repo = new Repo(true);
+    repo = new VersionedTickets(true);
     repos.push(repo);
     await repo.setup();
     await repo.sync();
@@ -215,7 +195,7 @@ describe('S-BTN-207 ticket versions through the sync and the runner', () => {
   });
 
   it('a fixture source whose store read is behind the board refuses: the run fails and posts nothing', async () => {
-    repo = new Repo(true);
+    repo = new VersionedTickets(true);
     repos.push(repo);
     await repo.setup();
     await repo.sync();
@@ -237,7 +217,7 @@ describe('S-BTN-207 ticket versions through the sync and the runner', () => {
   });
 
   it('the markdown source is pinned: a ticket’s version is its file’s blob id, an unrelated commit changes no version and stales no claim', async () => {
-    repo = new Repo(false);
+    repo = new VersionedTickets(false);
     repos.push(repo);
     await repo.setup();
     await repo.sync();

@@ -3,7 +3,9 @@
 // server, the hold and legacy branches, and the dashboard's Running / Timeline / Needs you data.
 import { describe, it, expect, inject, beforeEach } from 'vitest';
 import {
-  beat, claimItem, claimRow, cutover, endClaim, ORIGIN, ownerCall, payload, register, rows, setClock, syncCall, withCore, runnerCall, tick, refresh, recommended, seedClaim, stateView } from '../helpers';
+  beat, claimItem, claimRow, cutover, endClaim, ORIGIN, ownerCall, payload, register, rows, setClock, syncCall,
+  withCore, runnerCall, tick, refresh, recommended, seedClaim, stateView, seedRunner, seedTicketOverride,
+} from '../helpers';
 
 const board = inject('board');
 const sha = board.shas;
@@ -242,7 +244,7 @@ describe('the holder query takes only an item id', () => {
 
 describe('§7.2 rules 2 and 8 through the server', () => {
   it('rule 2 is advice (R-BTN-45, S-BTN-24): past the expedite lane’s bound an expedited claim is accepted and records the override', async () => {
-    for (const t of ['R3-9001', 'R3-9002', 'R3-9004']) await rows(`INSERT INTO ticket_overrides (ticket_id, expedite, set_by, set_at) VALUES (?, 1, 'owner:test', 0)`, `docs:${t}`);
+    for (const t of ['R3-9001', 'R3-9002', 'R3-9004']) await seedTicketOverride({ ticket_id: `docs:${t}`, expedite: 1, set_by: 'owner:test', set_at: 0 });
     const a = await register('vm-a');
     const b = await register('vm-b');
     const t = await register('test');
@@ -274,18 +276,23 @@ describe('§7.2 rules 2 and 8 through the server', () => {
 describe('the hold override and legacy claims', () => {
   it('a hold override takes an item out of the candidates and gatesFor agrees', async () => {
     const { id, secret } = await register('vm-a');
-    await rows(`INSERT INTO ticket_overrides (ticket_id, hold, hold_reason, set_by, set_at) VALUES ('docs:R3-9001', 1, 'owner', 'owner:test', 0)`);
+    await seedTicketOverride({ ticket_id: 'docs:R3-9001', hold: 1, hold_reason: 'owner', set_by: 'owner:test', set_at: 0 });
     expect(await recommended(id)).toEqual(['docs:R3-9002']);
     expect((await claimItem('vm-a', secret, { ticket_id: 'docs:R3-9001' })).json).toMatchObject({ code: 'not-eligible', rule: 3 });
   });
 
   it('a legacy claim is reaped at its reap_after, never by silence, and is not "another live holder"', async () => {
     await rows(`INSERT INTO credentials (id, hostname, allowed_capabilities) VALUES ('legacy', 'legacy', '[]') ON CONFLICT (id) DO NOTHING`);
-    await rows(`INSERT INTO runners (hostname, session_name, secret_hash, credential_id, harness, kind, tier_ceiling, lease_timeout_ms, settings_hash, first_seen_at, last_seen_at)
-                VALUES ('legacy', 'docs:R3-9001', '', 'legacy', 'claude-code', 'legacy', 'critical', 0, '', 0, 0)`);
+    await seedRunner({
+      hostname: 'legacy', session_name: 'docs:R3-9001', secret_hash: '', credential_id: 'legacy',
+      harness: 'claude-code', kind: 'legacy', tier_ceiling: 'critical', lease_timeout_ms: 0, settings_hash: '',
+      first_seen_at: 0, last_seen_at: 0,
+    });
     const lw = (await rows<{ id: number }>(`SELECT id FROM runners WHERE kind = 'legacy'`))[0].id;
-    await rows(`INSERT INTO claims (ticket_id, runner_id, request_id, nonce, snapshot_sha, claimed_at, status, reap_after)
-                VALUES ('docs:R3-9001', ?, 'legacy:R3-9001', 'abc123', '', 0, 'active', ?)`, lw, T0 + 7 * 24 * H);
+    await seedClaim({
+      ticket_id: 'docs:R3-9001', runner_id: lw, request_id: 'legacy:R3-9001', nonce: 'abc123', snapshot_sha: '',
+      claimed_at: 0, status: 'active', reap_after: T0 + 7 * 24 * H,
+    });
     expect(await (await runnerCall('/v1/runner/tickets/docs:R3-9001/holder', { cred: 'vm-b' })).json()).toEqual({ held_by_other: false, fence_pending: false });
     await alarmAt(T0 + 7 * 24 * H - 1);
     expect(await rows(`SELECT status FROM claims WHERE runner_id = ?`, lw)).toEqual([{ status: 'active' }]);

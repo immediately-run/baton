@@ -8,6 +8,7 @@
 // `baton tickets check` once edited, and written again by `init --force`. The exhaustive cases —
 // every refusal, the retry, the settings — are test/unit/tickets.test.ts's. Node only: it writes a
 // real repository and runs git and the CLI.
+import { GitRepo } from '../lib/gitRepo';
 import { describe, it, expect, afterEach } from 'vitest';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -30,14 +31,10 @@ const tmp = (prefix: string): string => {
 };
 const git = (dir: string, ...a: string[]): string => execFileSync('git', ['-C', dir, ...a], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 
-class Repo {
-  readonly dir = tmp('baton-s189-');
-  readonly bare = tmp('baton-s189-origin-');
+class TicketCommands extends GitRepo {
+
   constructor() {
-    execFileSync('git', ['init', '-q', '--bare', '-b', 'main', this.bare], { stdio: 'ignore' });
-    for (const a of [['init', '-q', '-b', 'main'], ['config', 'user.email', 's189@test'], ['config', 'user.name', 's189'], ['remote', 'add', 'origin', this.bare]]) {
-      execFileSync('git', ['-C', this.dir, ...a], { stdio: 'ignore' });
-    }
+    super('baton-189-', { origin: true });
   }
   /** `.baton/baton.json` and a project page, committed and pushed to the origin's main. */
   publish(settings: Record<string, unknown> = {}): void {
@@ -68,7 +65,7 @@ class Repo {
 
 describe('S-BTN-189 the ticket commands', () => {
   it('new, claim, set and done: one commit each on the origin’s main, the caller’s tree untouched', () => {
-    const repo = new Repo();
+    const repo = new TicketCommands();
     repo.publish();
     git(repo.dir, 'checkout', '-q', '-b', 'my-work');
     writeFileSync(join(repo.dir, 'draft.txt'), 'uncommitted\n');
@@ -124,7 +121,7 @@ describe('S-BTN-189 the ticket commands', () => {
   }, 120_000);
 
   it('repo init writes the page, check reports an edited copy, and init --force writes it again', async () => {
-    const repo = new Repo();
+    const repo = new TicketCommands();
     const said: string[] = [];
     await initMain(['--course', 'create-pr'], { root: repo.dir, log: (l) => said.push(l) });
     expect(said).toContain('baton: tickets/HOW-TICKETS-WORK.md — how tickets work in this repository, generated');
@@ -153,7 +150,7 @@ describe('S-BTN-189 the ticket commands', () => {
   }, 60_000);
 
   it('claim refuses a ticket citing a rule amended since it was filed, until --rules-reread', () => {
-    const repo = new Repo();
+    const repo = new TicketCommands();
     // The scaffold and a ticket citing R-BTN-50, dated 2026-10-29; then a history entry of
     // 2026-11-01 naming R-BTN-50.
     mkdirSync(join(repo.dir, 'tickets'), { recursive: true });

@@ -5,7 +5,7 @@ import { describe, it, expect } from 'vitest';
 import { env } from 'cloudflare:test';
 import { RunnerApi } from '../../src/core/runnerApi';
 import { makeKey } from '../lib/sshKeys';
-import { rows, SSH_KEYS, withCore } from '../helpers';
+import { rows, SSH_KEYS, withCore, revokeCredential, seedCredentialIn } from '../helpers';
 
 const entry = (k: { publicKey: string }, name: string) => ({ key: k.publicKey, name, allowed_capabilities: ['none'] });
 const api = (c: { store: never }, keys: unknown, now = 1_000) =>
@@ -51,8 +51,10 @@ describe('BATON_KEYS (R3-1239)', () => {
   it('a key an owner granted is never the seed’s to revoke (round 1, 1-B-1)', async () => {
     const granted = await makeKey('ssh-ed25519', 'vm-granted');
     await withCore(async (c) => {
-      c.store.exec(`INSERT INTO credentials (id, hostname, allowed_capabilities, kind, public_key, created_by) VALUES (?, 'vm-granted', '[]', 'runner', ?, 'owner:SHA256:x')`,
-        granted.fingerprint, granted.publicKey.split(' ').slice(0, 2).join(' '));
+      seedCredentialIn(c.store, {
+        id: granted.fingerprint, hostname: 'vm-granted', allowed_capabilities: '[]', kind: 'runner',
+        public_key: granted.publicKey.split(' ').slice(0, 2).join(' '), created_by: 'owner:SHA256:x',
+      });
       await api(c as never, []).seedKeys();
       expect(c.runners.publicKey(granted.fingerprint)).not.toBeNull();
     });
@@ -71,7 +73,7 @@ describe('BATON_KEYS (R3-1239)', () => {
       }
     });
     expect(await state()).toBeNull();
-    await rows(`UPDATE credentials SET revoked_at = 1 WHERE id = ?`, SSH_KEYS['vm-ed'].fingerprint);
+    await revokeCredential(SSH_KEYS['vm-ed'].fingerprint, 1);
     await reseed([entry(SSH_KEYS['vm-ed'], 'vm-ed'), entry(SSH_KEYS['vm-p256'], 'vm-p256')]);
     expect(await state()).toEqual({ revoked_listed: [SSH_KEYS['vm-ed'].fingerprint] });
     await reseed('{not json');

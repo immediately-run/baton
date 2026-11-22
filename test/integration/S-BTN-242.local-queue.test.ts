@@ -9,12 +9,13 @@
 // through the ordinary claim, and a refusal drops it; an order waits while no claim answer has
 // said the repository requires no owner-signed control. Node only: it spawns the legs' child
 // processes and runs git.
+import { runnerApi, testRunner, until } from '../lib/runnerRig';
+import { GitRepo } from '../lib/gitRepo';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { BatonApi } from '../../src/runner/api';
 import { Runner } from '../../src/runner/runner';
 import { LocalQueue, queueMain, queuePath } from '../../src/runner/queue';
 import { checkAdvance, checkEnd } from '../../src/core/validate';
@@ -50,33 +51,20 @@ export async function handoff(ctx) {
 `;
 }
 
-class Home {
-  readonly dir: string;
+class QueuedRelay extends GitRepo {
   head: string | null = null;
   constructor() {
-    this.dir = mkdtempSync(join(tmpdir(), 'baton-home-242-'));
-    const g = (...a: string[]) => execFileSync('git', ['-C', this.dir, ...a], { stdio: 'ignore' });
-    g('init', '-q', '-b', 'main');
-    g('config', 'user.email', 'relay@test');
-    g('config', 'user.name', 'relay test');
+    super('baton-242-');
     this.write('.baton/courses/relay/course.json', `${JSON.stringify(relay, null, 2)}\n`);
     this.write('.baton/baton.json', `${JSON.stringify({ course: 'relay', skills_version: 3 }, null, 2)}\n`);
   }
-  write(path: string, text: string): void {
-    const file = join(this.dir, path);
-    mkdirSync(dirname(file), { recursive: true });
-    writeFileSync(file, text);
-  }
+
   leg(name: string, run: string): void {
     this.write(`.baton/courses/relay/legs/${name}.mjs`, legFile(run));
   }
-  sha(): string {
-    return execFileSync('git', ['-C', this.dir, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
-  }
+
   commit(): string {
-    execFileSync('git', ['-C', this.dir, 'add', '.baton'], { stdio: 'ignore' });
-    execFileSync('git', ['-C', this.dir, 'commit', '--no-gpg-sign', '-q', '-m', 'legs'], { stdio: 'ignore' });
-    return this.sha();
+    return super.commit('legs', ['.baton']);
   }
   async post(stations: Record<string, unknown>, tickets: unknown[] = [ticket('T-1', { course_id: 'relay' })]): Promise<void> {
     const sha = this.sha();
@@ -93,7 +81,7 @@ class Home {
   }
 }
 
-let home: Home;
+let home: QueuedRelay;
 let scratch: string;
 let queue: LocalQueue;
 let n = 0;
@@ -104,31 +92,17 @@ const lines: string[] = [];
 const runners: Runner[] = [];
 
 function makeRunner(): Runner {
-  const api = new BatonApi({
-    url: 'https://baton.test',
-    transport: (req) => down
+  const api = runnerApi({ url: 'https://baton.test', transport: (req) => down
       ? Promise.resolve(new Response(JSON.stringify({ code: 'internal', message: 'internal error' }), { status: 500, headers: { 'Content-Type': 'application/json' } }))
-      : hostCall(req),
-    auth: (_m, _u, _b, secret) => ({ Authorization: `Bearer ${TOKENS['vm-a']}`, ...(secret ? { 'X-Runner-Secret': secret } : {}) }),
-  });
-  const runner = new Runner({
-    api, home: home.dir, repository: 'docs', hostname: 'vm-a', harness: 'opencode',
-    session: `runner-242-${++n}`, courses: [{ course: 'relay', version: 3 }],
+      : hostCall(req) });
+  const runner = testRunner({
+    api, home: home.dir, session: `runner-242-${++n}`, courses: [{ course: 'relay', version: 3 }],
     stateFile: join(scratch, `state-${n}.json`), beatEvery: 40,
     // The runner's own wall clock: its idle wait counts beats on it.
     now: () => Date.now(), log: (l) => lines.push(l), queue,
   });
   runners.push(runner);
   return runner;
-}
-
-async function until(q: () => boolean): Promise<void> {
-  const end = Date.now() + 20_000;
-  while (Date.now() < end) {
-    if (q()) return;
-    await new Promise((r) => setTimeout(r, 10));
-  }
-  throw new Error('condition never became true in 20 s');
 }
 
 const legs = () => {
@@ -140,7 +114,7 @@ const legs = () => {
 
 beforeEach(async () => {
   await setClock(T0);
-  home = new Home();
+  home = new QueuedRelay();
   scratch = mkdtempSync(join(tmpdir(), 'baton-242-'));
   queue = new LocalQueue(queuePath(scratch, home.dir));
   down = false;
@@ -150,7 +124,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   for (const r of runners.splice(0)) r.stop();
-  rmSync(home.dir, { recursive: true, force: true });
+  home.dispose();
   rmSync(scratch, { recursive: true, force: true });
 });
 

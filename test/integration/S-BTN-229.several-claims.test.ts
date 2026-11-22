@@ -2,7 +2,10 @@
 // runner's declared `concurrency` and its grant's `max_claims` — the heartbeat's `claims`, its
 // claim-named `session_urls`, `legs_finished` and `fenced` list, and per-claim reaps and fences.
 import { describe, it, expect, inject, beforeEach } from 'vitest';
-import { beat, claimItem, claimRow, cutover, ORIGIN, ownerCall, payload, register, rows, setClock, syncCall, tick } from '../helpers';
+import {
+  grantRunnerConcurrency, beat, claimItem, claimRow, cutover, ORIGIN, ownerCall, payload, register, rows,
+  setClock, syncCall, tick, seedClaimLeg,
+} from '../helpers';
 
 const board = inject('board');
 const T0 = Date.parse('2026-10-13T12:00:00Z');
@@ -17,22 +20,11 @@ beforeEach(async () => {
   await cutover();
 });
 
-/** Bind the runner's credential by an owner's grant on docs with `max_claims` (as `owner grant
- *  add --max-claims` stores it), the grant covering what it declares. */
-async function grant(runnerId: number, maxClaims: number) {
-  const [{ credential_id }] = await rows<{ credential_id: string }>('SELECT credential_id FROM runners WHERE id = ?', runnerId);
-  const caps = (await rows<{ capability: string }>('SELECT capability FROM runner_capabilities WHERE runner_id = ?', runnerId)).map((r) => r.capability);
-  await rows(`UPDATE credentials SET created_by = 'owner:owner@example.com' WHERE id = ?`, credential_id);
-  await rows(`INSERT INTO runner_grants (credential_id, repository_id, capabilities, max_tier, max_claims, granted_by, granted_at)
-              VALUES (?, 'docs', ?, NULL, ?, 'owner:owner@example.com', 0)
-              ON CONFLICT (credential_id, repository_id) DO UPDATE SET max_claims = excluded.max_claims`, credential_id, JSON.stringify(caps), maxClaims);
-}
-
 describe('S-BTN-229: a runner holds several claims, up to R-BTN-4\'s bound', () => {
   it('the lower of concurrency and the grant\'s max_claims; the heartbeat answers every claim; raising the grant admits one more', async () => {
     const a = await register('vm-a', { concurrency: 3, capabilities: CAPS });
     expect(await rows('SELECT concurrency FROM runners WHERE id = ?', a.id)).toEqual([{ concurrency: 3 }]);
-    await grant(a.id, 2);
+    await grantRunnerConcurrency(a.id, 2);
     const first = await claimItem('vm-a', a.secret);
     const second = await claimItem('vm-a', a.secret);
     expect([first.status, second.status]).toEqual([200, 200]);
@@ -47,7 +39,7 @@ describe('S-BTN-229: a runner holds several claims, up to R-BTN-4\'s bound', () 
     // A bare session_url names no claim among several: dropped, never a refused beat.
     expect((await beat('vm-a', a.secret, { concurrency: 3, capabilities: CAPS, session_url: 'https://claude.ai/code/x' })).json.session_url_dropped).toMatch(/several/);
 
-    await grant(a.id, 3);
+    await grantRunnerConcurrency(a.id, 3);
     expect((await claimItem('vm-a', a.secret)).status).toBe(200);
     expect(await claimItem('vm-a', a.secret)).toMatchObject({ status: 409, json: { rule: 'max-claims', held: 3 } });
   });
@@ -64,7 +56,7 @@ describe('S-BTN-229: a runner holds several claims, up to R-BTN-4\'s bound', () 
 
   it('one claim\'s force-reap fences that claim alone; the fenced list clears it; silence reaps every claim', async () => {
     const a = await register('vm-a', { concurrency: 2, capabilities: CAPS });
-    await grant(a.id, 2);
+    await grantRunnerConcurrency(a.id, 2);
     const one = (await claimItem('vm-a', a.secret)).json;
     const two = (await claimItem('vm-a', a.secret)).json;
     expect(await (await owner(`/v1/ui/claims/${one.claim_id}/reap`, { confirm: true })).json()).toEqual({ ok: true, fence_pending: true });
@@ -84,11 +76,11 @@ describe('S-BTN-229: a runner holds several claims, up to R-BTN-4\'s bound', () 
 
   it('session_urls and legs_finished land on their own claims\' runs', async () => {
     const a = await register('vm-a', { concurrency: 2 });
-    await grant(a.id, 2);
+    await grantRunnerConcurrency(a.id, 2);
     const one = (await claimItem('vm-a', a.secret)).json;
     const two = (await claimItem('vm-a', a.secret)).json;
     for (const c of [one, two]) {
-      await rows(`INSERT INTO claim_legs (claim_id, seq, leg, from_station, started_at, started_observation) VALUES (?, 1, ?, ?, ?, 0)`, c.claim_id, c.legs?.[0] ?? 'implement', c.station, T0);
+      await seedClaimLeg({ claim_id: c.claim_id, seq: 1, leg: c.legs?.[0] ?? 'implement', from_station: c.station, started_at: T0, started_observation: 0 });
     }
     await beat('vm-a', a.secret, { concurrency: 2, session_urls: [
       { claim_id: one.claim_id, url: 'https://claude.ai/code/one' },

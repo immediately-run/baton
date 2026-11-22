@@ -8,7 +8,7 @@ import { branchMatches } from '../../src/core/claims';
 import { checkRegistry } from '../../src/core/courses';
 import type { DispatchTarget } from '../../src/core/ports';
 import { dispatchWorkflow } from '../../src/core/mirror';
-import { rows, withCore } from '../helpers';
+import { rows, withCore, retireRepositoryIn, setUnblockedTriggerIn } from '../helpers';
 
 const OPS = { id: 'ops', github: 'immediately-run/ops', default_branch: 'trunk', sync_workflow: '.github/workflows/sync.yml' };
 const claimsOf = (repository: string, workflow: string, branch = 'trunk') =>
@@ -86,7 +86,7 @@ describe('the registry', () => {
       expect(() => c.registry.forSync(claimsOf('immediately-run/ops', 'sync.yml'), 'mirror')).toThrow(forbidden);
       // A workflow ref naming another repository's file does not pass for this one's.
       expect(() => c.registry.forSync({ ...claimsOf('immediately-run/ops', 'sync.yml'), job_workflow_ref: 'immediately-run/docs/.github/workflows/sync.yml@refs/heads/trunk' }, 'sync')).toThrow(forbidden);
-      c.store.exec(`UPDATE repositories SET retired_at = 1 WHERE id = 'ops'`);
+      retireRepositoryIn(c.store, 'ops', 1);
       expect(() => c.registry.forSync(claimsOf('immediately-run/ops', 'sync.yml'), 'sync')).toThrow(forbidden);
       expect(c.registry.all().map((r) => r.id)).toEqual(['baton', 'docs']);
     });
@@ -116,10 +116,10 @@ describe('the registry', () => {
       (c as unknown as { ports: { dispatch: { send: (t: DispatchTarget) => Promise<boolean> } } }).ports.dispatch = { send: async (t) => (got.push(t), true) };
       // No trigger set: nothing to send.
       expect(await c.dispatcher({ repository: 'docs', kind: 'unblocked', tickets })).toBe(false);
-      c.store.exec(`UPDATE repositories SET unblocked_trigger = ? WHERE id = 'docs'`, JSON.stringify({ kind: 'github-app', workflow: '.github/workflows/baton-unblocked.yml' }));
+      setUnblockedTriggerIn(c.store, 'docs', JSON.stringify({ kind: 'github-app', workflow: '.github/workflows/baton-unblocked.yml' }));
       expect(await c.dispatcher({ repository: 'docs', kind: 'unblocked', tickets })).toBe(true);
       // GitLab's and Gitea's adapters are R3-1263's: not sent.
-      c.store.exec(`UPDATE repositories SET unblocked_trigger = ? WHERE id = 'ops'`, JSON.stringify({ kind: 'gitlab-trigger', project_id: 7, ref: 'trunk' }));
+      setUnblockedTriggerIn(c.store, 'ops', JSON.stringify({ kind: 'gitlab-trigger', project_id: 7, ref: 'trunk' }));
       expect(await c.dispatcher({ repository: 'ops', kind: 'unblocked', tickets })).toBe(false);
       return got;
     });
