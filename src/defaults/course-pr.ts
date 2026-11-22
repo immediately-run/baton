@@ -92,7 +92,8 @@ export const CREATE_PR_COURSE = {
     // B-110: review also leaves `reviewed` — the owner's `round` answer grants exactly one more
     // round on the same head (the answer itself carries the run, §6.8; the round's verdict is
     // its marker, and a round still asking for changes comes straight back to the owner).
-    review: { from: ['pr-open', 'fixed', 'reviewed'], to: 'reviewed', max_runs: 3, label: 'Review round' },
+    // B-30 (S-BTN-63): review cannot be claimed or chained by a credential that wrote the change.
+    review: { from: ['pr-open', 'fixed', 'reviewed'], to: 'reviewed', max_runs: 3, no_chain_from: ['implement', 'fix'], label: 'Review round' },
     fix: { from: ['reviewed', 'pr-open', 'fixed'], to: 'fixed', max_runs: 30, label: 'Fix or answer the findings' },
     adjudicate: { from: ['reviewed'], to: 'adjudicated', label: 'The owner answers the third round' },
     merge: { from: ['reviewed', 'adjudicated'], to: 'merged', label: 'Merge and close the ticket' },

@@ -66,6 +66,10 @@
       ],
       "to": "reviewed",
       "max_runs": 8,
+      "no_chain_from": [
+        "implement",
+        "fix"
+      ],
       "label": "Review round"
     },
     "fix": {

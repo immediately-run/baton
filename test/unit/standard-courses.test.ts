@@ -133,6 +133,17 @@ describe('the standard courses (R-BTN-131)', () => {
     expect(text).toContain('Your word alone never closes the ticket');
   });
 
+  it("create-pr's shipped and home reviews require independent credentials and a different model when available (B-30, S-BTN-63)", () => {
+    const home = join(__dirname, '..', '..', '.baton', 'courses', 'create-pr');
+    const owned = JSON.parse(readFileSync(join(home, 'course.json'), 'utf8'));
+    expect(owned.legs.review.no_chain_from).toEqual(['implement', 'fix']);
+    expect(builtIn('create-pr')!.course.legs.review).toMatchObject({ no_chain_from: ['implement', 'fix'] });
+    for (const dir of [instructionsDir('create-pr'), join(home, 'legs')]) {
+      const text = readFileSync(join(dir, 'review.md'), 'utf8');
+      expect(text, dir).toMatch(/Use a different model from those used for\s+`implement` and `fix` on this ticket whenever your runner offers one/);
+    }
+  });
+
   it("create-pr's implement and fix instructions carry the shared-file rule, and this repository's own .baton copies with them (B-102)", () => {
     const rule = "never edits a file another ticket's leg may edit";
     for (const leg of ['implement', 'fix']) {
