@@ -29,6 +29,9 @@ import { join, relative, dirname, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse as parseYaml } from 'yaml';
 import { compile, createProcessor } from '@mdx-js/mdx';
+import { referenceProblems } from './lib/wiki-references.mjs';
+import { frontmatterBlock } from './lib/stripFrontmatter.mjs';
+import { exceptionProblems } from './lib/check-exceptions.mjs';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -168,7 +171,8 @@ async function checkBundle(root) {
   return { pages: files.length, tickets: tickets.size };
 }
 
-const declared = JSON.parse(readFileSync(join(REPO, 'package.json'), 'utf8'))['immediately.run']?.content;
+const pkg = JSON.parse(readFileSync(join(REPO, 'package.json'), 'utf8'));
+const declared = pkg['immediately.run']?.content;
 const roots = process.argv.length > 2 ? process.argv.slice(2) : [declared ?? []].flat().map((d) => join(REPO, d));
 if (!roots.length) { console.error('check-wiki: package.json declares no "immediately.run".content bundles'); process.exit(1); }
 
@@ -176,6 +180,22 @@ const summary = [];
 for (const root of roots) {
   const { pages: n, tickets: t } = await checkBundle(resolve(root));
   summary.push(`${relative(REPO, resolve(root)) || root}: ${n} page(s)${t ? `, ${t} ticket(s)` : ''}`);
+}
+if (process.argv.length === 2) {
+  // These are paths in example checkouts, the runtime, or other repositories, not this tree.
+  const nonRepo = JSON.parse(readFileSync(join(REPO, 'scripts/wiki-non-repo-paths.json'), 'utf8'));
+  const seen = new Set();
+  for (const file of [join(REPO, 'README.md'), join(REPO, 'AGENTS.md'), ...pages(join(REPO, 'docs/context')), ...pages(join(REPO, 'spec/BATON_SPEC')), join(REPO, 'spec/BATON_SPEC.md')]) {
+    const text = readFileSync(file, 'utf8');
+    const fm = frontmatterBlock(text);
+    const body = '\n'.repeat(fm.split('\n').length - 1) + text.slice(fm.length);
+    for (const { line, path, message } of referenceProblems(REPO, file, body, pkg.scripts)) {
+      const key = `${relative(REPO, file)} ${path}`;
+      if (path && Object.hasOwn(nonRepo, key)) seen.add(key);
+      else fail(file, `line ${line}: ${message}`);
+    }
+  }
+  errors.push(...exceptionProblems('non-repository path', seen, nonRepo));
 }
 if (errors.length) {
   for (const e of errors) console.error(`✗ ${e}`);

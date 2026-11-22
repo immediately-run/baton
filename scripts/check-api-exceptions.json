@@ -1,0 +1,51 @@
+{
+  "routes": {
+    "specifiedOnly": {
+      "POST /v1/forges/{}/notify": "B-277"
+    },
+    "builtOnly": {
+      "GET /v1/courier/decisions": "B-277",
+      "GET /v1/owner/{}/signing-keys": "B-277",
+      "GET /v1/sync/head": "B-277",
+      "GET /v1/ui/session": "B-277",
+      "POST /v1/courier/notices/claim": "B-277",
+      "POST /v1/courier/notices/{}": "B-277",
+      "POST /v1/owner/{}/couriers": "B-277",
+      "POST /v1/owner/{}/dependency-consents": "B-277",
+      "POST /v1/owner/{}/policy/floors": "B-277",
+      "POST /v1/sync/dependencies": "B-277",
+      "POST /v1/sync/foreign-claim": "B-277"
+    }
+  },
+  "tables": {
+    "specifiedOnly": {
+      "leg_attempts": "B-277",
+      "leg_outputs": "B-277",
+      "reconcile_displaced": "B-277",
+      "ticket_depends": "B-277",
+      "ticket_evidence": "B-277"
+    },
+    "builtOnly": {
+      "adoptions": "B-277",
+      "code_repos": "B-277",
+      "couriers": "B-277",
+      "course_refusals": "B-277",
+      "decision_answers": "B-277",
+      "dependency_consents": "B-277",
+      "deprecated_fields": "B-277",
+      "human_keys": "B-277",
+      "notices": "B-277",
+      "pending_transcripts": "B-277",
+      "policy_conditions": "B-277",
+      "policy_floors": "B-277",
+      "policy_pins": "B-277",
+      "protection_reports": "B-277",
+      "reviewer_agents": "B-277",
+      "runner_couriers": "B-277",
+      "signed_control": "B-277",
+      "spawned_children": "B-277",
+      "ticket_decisions": "B-277",
+      "webhook_dispatch": "B-277"
+    }
+  }
+}
