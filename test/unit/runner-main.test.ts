@@ -14,6 +14,9 @@ import { HARNESS_AGENTS, AGENT_PROMPT } from '../../src/runner/harness';
 import { splitWords } from '../../src/defaults/agent-words';
 import { envAuth } from '../../src/runner/api';
 import { advanceHome, courseOf, dropCourse, freshSecret, holdHome, legNeeds, loadCourse, readHead } from '../../src/runner/home';
+import { ClaimRun } from '../../src/runner/claimRun';
+import { Sidecar } from '../../src/runner/sidecar';
+import { StateFile } from '../../src/runner/state';
 import { declarationFrom } from '../../src/runner/runner';
 import { validateCourse } from '../../src/core/course';
 
@@ -282,7 +285,7 @@ describe('the grant\'s declaration (B-86)', () => {
     expect([...new Set(needs)].sort()).toEqual(['authentication', 'create-pr', 'credential:DEPLOY_TOKEN', 'drivable-browser', 'llm-call', 'vpn:corp']);
     expect(needs).not.toContain('deployer');
     // A declaration carrying the role meets every need the role carries — the never-eligible
-    // line (runner.ts `reportEligibility`) compares needs with `capabilitiesOf(declared)`.
+    // line (sidecar.ts `reportEligibility`) compares needs with `capabilitiesOf(declared)`.
     const held = capabilitiesOf(['agent-venue']);
     expect([...new Set(needs)].filter((n) => !held.has(n))).toEqual(['vpn:corp', 'credential:DEPLOY_TOKEN']);
     expect(legNeeds(dir, '', 'no-such-course')).toEqual([]);
@@ -661,14 +664,6 @@ describe('the first beat (B-93, S-BTN-159: a runner start says what it does, and
     mkdirSync(home);
     const r = new Runner({ api, home, repository: 'docs', hostname: 'vm-a', harness: 'opencode', session: 'fresh',
       courses: [{ course: 'create-pr', version: 1 }], stateFile: join(home, 'fresh.json'), beatEvery: 60_000, log });
-    const state: Record<string, unknown> = { runner_id: null, claim: null };
-    const live = r as unknown as { state: Record<string, unknown> };
-    live.state = {
-      get: () => state,
-      set: (patch: Record<string, unknown>) => { Object.assign(state, patch); },
-      // A spool nobody wrote: the beat takes nothing, and its remove is the runner's own no-op.
-      spool: join(home, 'spool.jsonl'),
-    };
     return r;
   };
 
@@ -747,8 +742,7 @@ describe('the first beat (B-93, S-BTN-159: a runner start says what it does, and
     const { api, calls, refuseWith } = registeringApi();
     refuseWith(() => new BatonRefusal('unauthenticated', undefined, 'no runner holds this secret', 401));
     const r = runFresh(api, (l) => lines.push(l));
-    const live = r as unknown as { state: Record<string, unknown> };
-    live.state = { get: () => ({ runner_id: 7, claim: null, declared: ['agent-venue'], sent: null }), set: () => {}, spool: live.state.spool };
+    (r as unknown as { state: StateFile }).state.set({ runner_id: 7, declared: ['agent-venue'] });
     expect(await r.runOnce()).toBeNull();
     expect(calls.heartbeats).toBeGreaterThanOrEqual(1);
     expect(lines.some((l) => l.includes('no claim (no runner holds this secret)'))).toBe(true);
@@ -831,9 +825,9 @@ describe('the first beat (B-93, S-BTN-159: a runner start says what it does, and
     const r = runFresh(api, (l) => lines.push(l));
     // A runner the state names, its declaration settled as a previous beat left it, so runOnce has
     // no reason to beat of its own.
-    const live = r as unknown as { state: { get(): Record<string, unknown>; set(p: Record<string, unknown>): void; spool: string }; sent: string[] };
-    live.state = { get: () => ({ runner_id: 7, claim: null, declared: [] }), set: () => {}, spool: live.state.spool };
-    live.sent = [];
+    const live = r as unknown as { state: StateFile; sidecar: { sent: string[] } };
+    live.state.set({ runner_id: 7, declared: [] });
+    live.sidecar.sent = [];
 
     const beat = (r as unknown as { tick(): Promise<void> }).tick(); // in flight, not awaited
     expect(await r.runOnce()).toBeNull();
@@ -863,13 +857,7 @@ describe('the first beat (B-93, S-BTN-159: a runner start says what it does, and
     } as unknown as BatonApi;
     // A runner the state names already: the registration's own exemption does not reach it.
     const r = runFresh(api, (l) => lines.push(l));
-    const live = r as unknown as { state: { get(): Record<string, unknown>; set(p: Record<string, unknown>): void; spool: string } };
-    const answered: Record<string, unknown> = { runner_id: 7, claim: null };
-    live.state = {
-      get: () => answered,
-      set: (patch: Record<string, unknown>) => { Object.assign(answered, patch); },
-      spool: live.state.spool,
-    };
+    (r as unknown as { state: StateFile }).state.set({ runner_id: 7 });
     answer = rejecting(replayed);
     await r.runOnce();
     // B-86's once-per-declaration line first (an unsettled runner's first answered beat), then
@@ -908,13 +896,7 @@ describe('the first beat (B-93, S-BTN-159: a runner start says what it does, and
     } as unknown as BatonApi;
     const r = runFresh(api, (l) => lines.push(l));
     // A runner its state names already (a session resumed, or a beat before this attempt).
-    const live = r as unknown as { state: { get(): Record<string, unknown>; set(p: Record<string, unknown>): void; spool: string } };
-    const answered: Record<string, unknown> = { runner_id: 7, claim: null };
-    live.state = {
-      get: () => answered,
-      set: (patch: Record<string, unknown>) => { Object.assign(answered, patch); },
-      spool: live.state.spool,
-    };
+    (r as unknown as { state: StateFile }).state.set({ runner_id: 7 });
     await r.runOnce();
     expect(asked).toEqual([null]); // the server chooses in the claim transaction
     // B-86's own once-per-declaration line, and nothing else: no refusal was due, and none was logged.
@@ -988,7 +970,8 @@ describe('S-BTN-200 a leg that ends reaps its process group (R-BTN-72)', () => {
     // The state sidecar the loop would own, as the fixtures above hand it over.
     const state: Record<string, unknown> = { runner_id: 1, claim: null };
     (r as unknown as { state: unknown }).state = { get: () => state, set: () => {}, spool: join(dir, 'spool.jsonl') };
-    (r as unknown as { inflight: unknown }).inflight = { claimId: 1, ticket: 'baton:B-x', child: null };
+    const claim = (r as unknown as { makeRun(path: string): ClaimRun }).makeRun(dir);
+    (claim as unknown as { inflight: unknown }).inflight = { claimId: 1, ticket: 'baton:B-x', child: null };
     // A leg that finishes cleanly while leaving a process behind on purpose — a held lock, a
     // background check: a child of the wrapper, in its process group, that never exits alone.
     const stray = join(dir, 'stray.pid');
@@ -1001,7 +984,7 @@ export async function run(ctx) {
   return { echoed: ctx.leg };
 }
 `);
-    const leg = (r as unknown as { runLeg(course: { scripts: Map<string, string> }, leg: string, ctx: Record<string, unknown>, scratch: string): Promise<{ kind: string; result: unknown }> });
+    const leg = (claim as unknown as { runLeg(course: { scripts: Map<string, string> }, leg: string, ctx: Record<string, unknown>, scratch: string): Promise<{ kind: string; result: unknown }> });
     const out = await leg.runLeg({ scripts: new Map([['implement', script]]) }, 'implement', { leg: 'implement' }, join(dir, 'scratch'));
     expect(out).toEqual({ kind: 'ok', result: { echoed: 'implement' } });
     const pid = Number(readFileSync(stray, 'utf8'));
@@ -1030,7 +1013,7 @@ describe('a leg\'s output leaves the runner masked (B-170, R-BTN-144 class 7)', 
 
   /** A Runner over a temp home with the state sidecar stubbed out, as the fixtures above hand
    *  it over, running legs through the real builtin executor and wrapper. */
-  const maskRunner = (lines: string[], state: Record<string, unknown>, beatEvery = 60_000): { r: Runner; home: string } => {
+  const maskRunner = (lines: string[], state: Record<string, unknown>, beatEvery = 60_000): { r: ClaimRun; home: string } => {
     const dir = mkdtempSync(join(tmpdir(), 'baton-170-sink-'));
     mkdirSync(join(dir, 'scratch'), { recursive: true });
     const api = {
@@ -1042,10 +1025,11 @@ describe('a leg\'s output leaves the runner masked (B-170, R-BTN-144 class 7)', 
     const r = new Runner({ api, home: dir, repository: 'docs', hostname: 'vm-a', harness: 'opencode', session: 'b170-sink',
       courses: [], stateFile: join(dir, 's.json'), beatEvery, log: (l) => lines.push(l), verbose: true, maskEnv: ['BATON170_TEST_VENDOR'] });
     (r as unknown as { state: unknown }).state = { get: () => state, set: () => {}, spool: join(dir, 'spool.jsonl') };
-    (r as unknown as { inflight: unknown }).inflight = { claimId: 1, ticket: 'baton:B-x', child: null };
-    return { r, home: dir };
+    const claim = (r as unknown as { makeRun(path: string): ClaimRun }).makeRun(dir);
+    (claim as unknown as { inflight: unknown }).inflight = { claimId: 1, ticket: 'baton:B-x', child: null };
+    return { r: claim, home: dir };
   };
-  const legOf = (r: Runner) => (r as unknown as { runLeg(course: { scripts: Map<string, string>; scratch?: string }, leg: string, ctx: Record<string, unknown>, scratch: string): Promise<{ kind: string; result?: unknown; error?: string }> });
+  const legOf = (r: ClaimRun) => (r as unknown as { runLeg(course: { scripts: Map<string, string>; scratch?: string }, leg: string, ctx: Record<string, unknown>, scratch: string): Promise<{ kind: string; result?: unknown; error?: string }> });
 
   it('the leg\'s stderr goes through the class 7 sink: whole, split and mask_env values, a bearer token, and a held tail the call\'s end releases', async () => {
     const saved = ENV_NAMES.map((n) => [n, process.env[n]] as const);
@@ -1353,4 +1337,58 @@ describe('baton run --home: a name resolves to its checkout (B-121)', () => {
       rmSync(config, { recursive: true, force: true });
     }
   });
+});
+
+it('S-BTN-229: a heartbeat fences only the omitted claim and confirms the other run\'s session link', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'baton-claim-run-'));
+  try {
+    const stateFile = join(home, 'runner.json');
+    const state = new StateFile(stateFile);
+    const heartbeat = vi.fn(async (_body: Record<string, unknown>) => ({
+      runner_id: 1, incarnation: 1, lease_timeout_s: 900, claims: [{ id: 2 }],
+    }));
+    const api = { heartbeat } as unknown as BatonApi;
+    const options = {
+      api, home, repository: 'docs', courses: [], stateFile, beatEvery: 50,
+      verbose: false, now: () => 1_000, log: () => {},
+    };
+    const live: ClaimRun[] = [];
+    const sidecar = new Sidecar({ ...options, hostname: 'vm-a', session: 'test', harness: 'opencode', concurrency: 2 },
+      state, null, () => ({ live, persisted: [], epoch: 2, pendingRequests: 0 }), () => {});
+    const stop = vi.fn(async () => {});
+    const executor = { source: 'test', stop, start: vi.fn(), end: vi.fn(), exec: vi.fn() };
+    const host = { ensureLegLocks: async () => true, savePlace: vi.fn(), retire: vi.fn(), isStopping: () => false, isDraining: () => false };
+    const make = (id: number) => {
+      const run = new ClaimRun(join(home, String(id)), options, state, executor, sidecar, host);
+      const ticket = `docs:T-${id}`;
+      const kill = vi.fn();
+      run.claimId = id;
+      run.ticket = ticket;
+      run.inflight = { claimId: id, ticket, course: {} as never, legAt: 0, leg: null, waiters: [],
+        child: { running: { kill, write: vi.fn(), result: Promise.resolve({ status: 0, stdout: '', stderr: '' }) } } };
+      const handle = { session_id: `run-${id}` };
+      run.session = { handle, checkout: run.checkout };
+      run.legSessionUrl = `https://example.test/run/${id}`;
+      run.sessionLinkSeq = 1;
+      live.push(run);
+      return { run, kill, handle };
+    };
+    const a = make(1);
+    const b = make(2);
+
+    await sidecar.tick();
+
+    expect(heartbeat).toHaveBeenCalledWith(expect.objectContaining({ session_urls: [
+      { claim_id: 1, url: a.run.legSessionUrl }, { claim_id: 2, url: b.run.legSessionUrl },
+    ] }));
+    expect(a.kill).toHaveBeenCalledOnce();
+    expect(a.run.lost).toBe(true);
+    expect(stop.mock.calls).toEqual([[a.handle, 'lease-lost']]);
+    expect(b.kill).not.toHaveBeenCalled();
+    expect(b.run.session?.handle).toBe(b.handle);
+    expect(b.run.sessionLinkLanded).toBe(true);
+    expect(state.get().lease_lost).toBe(false);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
 });
