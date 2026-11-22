@@ -5,12 +5,36 @@
 // read at its version agrees), and a `git:` pointer's slug. The advance's `run_inputs` shape
 // (§13.5 `leg_run_inputs`) is checked beside checkAdvance's; the whole replay runs in
 // S-BTN-48's integration test, over a real repository.
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+import { spawn, type ChildProcess } from 'node:child_process';
+import { EventEmitter } from 'node:events';
+import { builtinExecutor } from '../../src/runner/executor';
 import { compareRead, parseReplayArgs, pickRun, replayEnvironment, replayMain, slugOf, type RecordedRun } from '../../src/runner/replay';
 import { checkAdvance, checkRunInputs } from '../../src/core/validate';
 import { graphOf } from '../../src/core/graph';
 
 const ENV = { BATON_HOME: '/home/leg/docs', BATON_URL: 'https://baton.test', PATH: '/usr/bin', LANG: 'C', TERM: 'xterm' };
+
+vi.mock(import('node:child_process'), async (original) => ({ ...await original(), spawn: vi.fn() }));
+
+it('S-BTN-48: replay receives the final wrapper output even when exit precedes pipe drain', async () => {
+  const child = Object.assign(new EventEmitter(), {
+    stdin: new EventEmitter(), stdout: new EventEmitter(), stderr: new EventEmitter(),
+  });
+  vi.mocked(spawn).mockReturnValueOnce(child as unknown as ChildProcess);
+  const executor = builtinExecutor();
+  const handle = await executor.start({ brief: { kind: 'leg', session_id: 'replay', checkout: '.', paths: [], wrapper: 'legProcess.mjs', env: {} } });
+  const onStderr = vi.fn();
+  const { result } = executor.exec(handle, ['node', 'legProcess.mjs'], { cwd: '.', onStderr });
+  const outcome = '\n{"ok":true,"result":{"version":"one"}}\n';
+  child.emit('exit', 0, null);
+  child.stdout.emit('data', Buffer.from(outcome));
+  child.stderr.emit('data', Buffer.from('final diagnostic'));
+  child.emit('close', 0, null);
+
+  expect(await result).toEqual({ status: 0, stdout: outcome, stderr: 'final diagnostic' });
+  expect(onStderr).toHaveBeenCalledExactlyOnceWith('final diagnostic');
+});
 
 describe('parseReplayArgs: the flags, unknown ones refused', () => {
   const key = ['/home/leg/owner.key'];
