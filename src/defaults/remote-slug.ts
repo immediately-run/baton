@@ -3,6 +3,8 @@
 // bundle can resolve a named home without the whole of cli.ts beside it: the function, its git
 // helper and its failure shape moved here from cli.ts, which re-exports it unchanged.
 import { execFileSync } from 'node:child_process';
+import { slugOfUrl } from './forges/remote';
+export { slugOfUrl } from './forges/remote';
 
 const git = (root: string, ...a: string[]): string => execFileSync('git', ['-C', root, ...a], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, LC_ALL: 'C' } }).trim();
 
@@ -26,19 +28,6 @@ interface GitFailure { status?: number | null; stderr?: string | Uint8Array }
  * captured stderr, because those are failures the operator must see, and a null slug would make
  * a broken checkout indistinguishable from an origin-less one. Only `git remote get-url`'s own
  * two answers about the absence of a remote go quiet. */
-/** `owner/name` of a remote URL — the parse a remote's own URL gets below (the scp form's
- * `git@host:` and the user-less `host:owner/name` and the `https://host/` prefix stripped,
- * `.git` dropped, the proxy's `git/` folded away): exported for the caller that holds the
- * URL itself rather than a remote's name (request.ts's PR, opened on the remote the request
- * was pushed to, round 1). */
-export const slugOfUrl = (url: string): string =>
-  url
-    .replace(/^git@[^:]+:/, '')
-    .replace(/^https?:\/\/[^/]+\//, '')
-    .replace(/^[A-Za-z0-9][A-Za-z0-9.-]*\.[A-Za-z0-9-]+:(?=[^/])/, '')
-    .replace(/\.git$/, '')
-    .replace(/^git\/(?=[^/]+\/[^/]+$)/, '');
-
 export function remoteSlug(root: string, remote: string = 'origin'): string | null {
   try {
     // The proxy's `…/git/owner/name` form drops its `git/` — only when `owner/name` follows, so an

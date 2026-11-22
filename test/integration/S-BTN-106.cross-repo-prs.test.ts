@@ -49,7 +49,7 @@ beforeEach(async () => {
   minutes = 0;
   await setClock(T0);
   dir = mkdtempSync(join(tmpdir(), 'baton-s106-'));
-  for (const a of [['init', '-q', '-b', 'main'], ['config', 'user.email', 's106@test'], ['config', 'user.name', 's106'], ['remote', 'add', 'origin', 'https://github.com/o/docs.git']]) git(...a);
+  for (const a of [['init', '-q', '-b', 'main'], ['config', 'user.email', 's106@test'], ['config', 'user.name', 's106'], ['remote', 'add', 'origin', 'https://github.com/immediately-run/docs.git']]) git(...a);
   expect(await initMain([], { root: dir, log: () => {} })).toBe(0);
   mkdirSync(join(dir, 'tickets'), { recursive: true });
   writeFileSync(join(dir, 'tickets', 'a1.md'), '---\nid: A-1\ntitle: Change the site and the SDK\nrepos: [o/site, o/sdk]\n---\n');
@@ -68,11 +68,11 @@ afterEach(() => {
 
 describe('S-BTN-106 a ticket\'s PRs in other repositories', () => {
   it('reads the repositories the live ticket names, places it from their PRs, and reads them together as one change', async () => {
-    github = { '/repos/o/docs/pulls?state=all': [], '/repos/o/site/pulls?state=all': [pull(3)], '/repos/o/sdk/pulls?state=all': [pull(3)], ...detail('o/site', 3), ...detail('o/sdk', 3) };
+    github = { '/repos/immediately-run/docs/pulls?state=all': [], '/repos/o/site/pulls?state=all': [pull(3)], '/repos/o/sdk/pulls?state=all': [pull(3)], ...detail('o/site', 3), ...detail('o/sdk', 3) };
     await sync();
     // The home and the two repositories A-1 names — never the closed ticket's o/old.
     const repoOf = (k: string) => (k.startsWith('graphql ') ? k.split(' ')[1] : k.split('/').slice(2, 4).join('/'));
-    expect([...new Set(asked.map(repoOf))].sort()).toEqual(['o/docs', 'o/sdk', 'o/site']);
+    expect([...new Set(asked.map(repoOf))].sort()).toEqual(['immediately-run/docs', 'o/sdk', 'o/site']);
     // Each owned PR's detail is one GraphQL query for its repository, never four REST reads (B-35).
     expect(asked.filter((k) => k.startsWith('graphql ')).sort()).toEqual(['graphql o/sdk 3', 'graphql o/site 3']);
     expect(asked.filter((k) => /\/(pulls|issues)\/3\/|\/check-runs/.test(k))).toEqual([]);

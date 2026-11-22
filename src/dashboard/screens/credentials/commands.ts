@@ -5,6 +5,8 @@
 // own, and `argv` is one worked instance of the line the test hands to the CLI's parser.
 // `-i <key>` (the signing key) is left off every line: each screen's note says whose key signs.
 
+import { DEFAULT_FORGE } from '../../../core/forges';
+
 export interface Command {
   /** The line as the screen draws it. */
   line: string;
@@ -39,7 +41,7 @@ export const COMMANDS = {
   requiredBarsSet: { line: 'baton owner settings <repository> --required-bar <leg> --course <course> --tag-prefix <prefix> [--except <a,b>]', role: 'owner', argv: ['settings', 'docs', '--required-bar', '*', '--course', 'c', '--tag-prefix', 'family:', '--except', 'a,b'] },
   requiredBarsClear: { line: 'baton owner settings <repository> --no-required-bars', role: 'owner', argv: ['settings', 'docs', '--no-required-bars'] },
   // ── tenant (an administrator's key) ──
-  repoAdd: { line: 'baton admin repo add <forge path> --owner-key <public key> [--id <id>] [--forge <forge>] [--default-branch <branch>] [--tiers <a,b>] [--weight <n>]', role: 'admin', argv: ['repo', 'add', 'org/name', '--owner-key', KEY, '--id', 'name', '--forge', 'github', '--default-branch', 'main', '--tiers', 'a,b', '--weight', '1'] },
+  repoAdd: { line: 'baton admin repo add <forge path> --owner-key <public key> [--id <id>] [--forge <forge>] [--default-branch <branch>] [--tiers <a,b>] [--weight <n>]', role: 'admin', argv: ['repo', 'add', 'org/name', '--owner-key', KEY, '--id', 'name', '--forge', DEFAULT_FORGE, '--default-branch', 'main', '--tiers', 'a,b', '--weight', '1'] },
   repoSet: { line: 'baton admin repo set <repository> [--weight <n>] [--tiers <a,b>] [--web-base <url>] [--add-owner-key <public key>]', role: 'admin', argv: ['repo', 'set', 'docs', '--weight', '1', '--tiers', 'a,b', '--web-base', 'https://example.org/o/n', '--add-owner-key', KEY] },
   repoRetire: { line: 'baton admin repo retire <repository>', role: 'admin', argv: ['repo', 'retire', 'docs'] },
   readingSet: { line: 'baton admin resource set <instance> --available | --unavailable [--until <time>] [--valid-for <duration>] [--detail <json>]', role: 'admin', argv: ['resource', 'set', 'acct:one', '--unavailable', '--until', '2026-01-01T00:00:00Z', '--valid-for', '1h', '--detail', '{"used":1}'] },

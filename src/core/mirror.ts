@@ -142,7 +142,7 @@ export type { Workflow };
 export async function dispatchWorkflow(token: string | undefined, target: DispatchTarget): Promise<boolean> {
   if (!token) return false;
   try {
-    const res = await fetch(`https://api.github.com/repos/${target.github}/actions/workflows/${target.workflow}/dispatches`, {
+    const res = await fetch(`https://api.github.com/repos/${target.path}/actions/workflows/${target.workflow}/dispatches`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json', 'User-Agent': 'baton', 'Content-Type': 'application/json' },
       body: JSON.stringify(target.inputs ? { ref: target.ref, inputs: target.inputs } : { ref: target.ref }),

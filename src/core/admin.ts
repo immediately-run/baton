@@ -1,3 +1,4 @@
+import { FORGES, FORGE_SHAPES, WORKFLOW_PATH, hasPrs } from './forges';
 // admin.ts — Baton's administration, the one set of validated functions behind `/v1/admin/*`,
 // `/v1/owner/{repository}/*` and `POST /v1/login`, which `baton admin` and `baton owner` call on
 // either host (BATON_SPEC §10.6 R-BTN-57/-58, R-BTN-66/-67, R-BTN-16). Every limit the owners
@@ -13,7 +14,7 @@ import { COURSE_ID, HOSTNAME, INSTANCE_NAME, SESSION_TOKEN, TAG, checkAsks, chec
 import { REMIND_AFTER_S, type Notices } from './notices';
 import { parseTranscriptRepo } from './links';
 import { checkCodeRepos, checkPushers, codeReposOf, crossHostEntries, homeForgeOf, pushersOf, writeCodeRepos, type CodeRepo } from './codeRepos';
-import { checkRegistration, retiredPath, seedEntries, tierPosition, type Registration, type Registry } from './registry';
+import { checkRegistration, defaultForgeDispatch, retiredPath, seedEntries, tierPosition, type Registration, type Registry } from './registry';
 import { graphOf, resolveLeg, type Graph } from './graph';
 import { humanOnlyList, type ApproverEntry, type ApproverFacts, type Policies } from './policy';
 import type { Config, Store } from './ports';
@@ -449,7 +450,7 @@ export class Admin {
         this.exec('UPDATE repositories SET remote = ?, web_base = ?, ci_identity = ?, sync_workflow = ?, mirror_workflow = ?, dispatch = ? WHERE id = ?',
           linked.remote, linked.web_base, linked.ci_identity ? JSON.stringify(linked.ci_identity) : null, linked.sync_workflow, linked.mirror_workflow,
           // The App serves github.com alone, as at registration.
-          linked.forge === 'github' && linked.web_base?.toLowerCase() === `https://github.com/${linked.github.toLowerCase()}` ? '{"kind":"github-app"}' : null, id);
+          defaultForgeDispatch(linked), id);
       }
       this.event(actor, { act: 'repository-changed', repository: id, ...(weight !== undefined ? { weight } : {}), ...(tiers ? { tiers } : {}),
         ...(add.length ? { sync_keys_added: add.length } : {}), ...(remove.length ? { sync_keys_removed: remove } : {}),
@@ -1053,7 +1054,7 @@ export class Admin {
       codeRepos = checkCodeRepos(b.code_repos, home);
       // B-182 point 7 (R-BTN-188): no human identity or floor while a code repository sits on
       // another host — here, an entry being added while one stands is the refused order.
-      const homeHost = home.forge === 'git' ? null : home.host;
+      const homeHost = hasPrs(home.forge) ? home.host : null;
       const cross = codeRepos.find((e) => homeHost == null || e.host !== homeHost);
       if (cross) {
         const cur = this.c.policies?.current(repository);
@@ -1406,11 +1407,11 @@ function checkTrigger(v: unknown): Record<string, unknown> {
   const t = v as Record<string, unknown>;
   if (t.kind === 'github-app') {
     only(t, ['kind', 'workflow'], 'unblocked_trigger');
-    if (typeof t.workflow !== 'string' || !/^\.github\/workflows\/[A-Za-z0-9._-]{1,100}\.ya?ml$/.test(t.workflow)) bad('unblocked_trigger.workflow', 'must be a path under .github/workflows/');
+    if (typeof t.workflow !== 'string' || !WORKFLOW_PATH.test(t.workflow)) bad('unblocked_trigger.workflow', 'must be a path under .github/workflows/');
   } else if (t.kind === 'gitlab-trigger') {
     only(t, ['kind', 'project_id', 'ref'], 'unblocked_trigger');
     if (!Number.isSafeInteger(t.project_id) || typeof t.ref !== 'string' || !/^[A-Za-z0-9._/-]{1,100}$/.test(t.ref)) bad('unblocked_trigger', 'needs project_id and ref');
-  } else if (t.kind === 'gitea') {
+  } else if (FORGES.some((f) => FORGE_SHAPES[f].dispatch === t.kind)) {
     only(t, ['kind', 'workflow', 'ref'], 'unblocked_trigger');
     if (typeof t.workflow !== 'string' || !/^[A-Za-z0-9._/-]{1,200}$/.test(t.workflow) || typeof t.ref !== 'string' || !/^[A-Za-z0-9._/-]{1,100}$/.test(t.ref)) bad('unblocked_trigger', 'needs workflow and ref');
   } else {

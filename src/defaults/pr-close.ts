@@ -27,12 +27,15 @@
 //   the sync counts only as the evidence Baton recorded for the claim. No comment anywhere: the
 //   marker is git's, so a plain-git repository reads the same gate with no forge at all.
 // `baton repo init` bundles this into each leg stub, so a stub imports nothing at run time.
+import { PR_URL } from '../core/forges';
+import { forgeClient } from './forges';
+import { targetOf, targetPr, type RegisteredTargets } from './forges/targets';
 import { closeTicket, exec } from './ticket-state';
 
 /** What `close` runs: `git` or `gh`, in the checkout, answering stdout. Tests inject it. */
 export type Exec = (cmd: 'git' | 'gh', args: string[], cwd: string) => string;
 
-export interface CloseCtx {
+export interface CloseCtx extends RegisteredTargets {
   checkout: string;
   ticket: { id: string; path?: string | null; home?: string | null };
   leg: string;
@@ -43,10 +46,6 @@ export interface CloseCtx {
    *  `origin/HEAD`, else `main` (`ticketsBranch`). */
   default_branch?: string | null;
 }
-
-/** A pull-request URL a leg may name for its line (B-29); the stubs build their check from its
- * source. (`prRefs` reads `prs:` entries more loosely: a `/files` or `#…` tail is still the PR.) */
-export const PR_URL = /^https?:\/\/[^\s/]+\/[^\s/]+\/[^\s/]+\/pull\/\d+$/;
 
 /** The legs whose close writes a line on a PR — `commentLine`'s — and so may name the PR. */
 export const COMMENTING_LEGS: ReadonlySet<string> = new Set(['review', 'adjudicate', 'conclude']);
@@ -89,6 +88,21 @@ export async function prClose(ctx: CloseCtx, result: { reached?: string; next?: 
     // On the PR the agent named (B-29: a ticket's PRs may be in other repositories, and its home
     // may have none); else `gh pr comment` with no number, on the checkout branch's PR.
     if (result?.pr != null && !(typeof result.pr === 'string' && PR_URL.test(result.pr))) throw new Error(`the ${ctx.leg} leg named no PR URL to write on, got ${JSON.stringify(result.pr)}`);
+    if (ctx.forge_home) {
+      const opts = { run, checkout: ctx.checkout };
+      if (typeof result.pr === 'string') {
+        const named = targetPr(ctx, result.pr);
+        if (!named) throw new Error('the named PR does not belong to a registered forge repository');
+        return forgeClient(named.repo, opts).comment(named.number, body);
+      }
+      const repo = targetOf(ctx);
+      if (!repo) throw new Error('the checkout’s repository has no PR conversation');
+      const client = forgeClient(repo, opts);
+      const branch = run('git', ['branch', '--show-current'], ctx.checkout);
+      const matches = (await client.listOpenPrs()).filter((p) => branch !== '' && p.headRefName === branch);
+      if (matches.length !== 1) throw new Error('the checkout branch does not name exactly one open PR');
+      return client.comment(matches[0].number, body);
+    }
     return run('gh', ['pr', 'comment', ...(typeof result?.pr === 'string' ? [result.pr] : []), '--body', body], ctx.checkout);
   }
   if (typeof result?.reached !== 'string' || result.reached === '') throw new Error(`the ${ctx.leg} leg returned no station reached`);

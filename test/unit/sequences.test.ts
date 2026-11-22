@@ -4,7 +4,7 @@
 // — the fallback that says itself (no key, no answer, --offline), `new`'s PR-first landing with
 // the forge asked through `gh`, `--direct`'s protected-refusal fallback, and R-BTN-190's reserved
 // namespace `baton-ticket/*` no `branch_pattern` may match.
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { createServer } from 'node:http';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -49,7 +49,7 @@ function repo(files: Record<string, string>, bareAt?: string): string {
 const ticket = (id: string, status = 'available'): string => `---\ntitle: "${id} — t"\nid: ${id}\nstatus: ${status}\ntags: [roadmap-item]\ntopics: [baton]\nowns: {}\nprs: []\ndepends_on: []\n---\n\nBody.\n`;
 
 /** A stand-in Baton answering the sequence route with a real counter, recording what it was asked. */
-async function standIn(): Promise<{ url: string; asked: string[]; close: () => void }> {
+async function standIn(home?: { forge: string; path: string; webBase: string }): Promise<{ url: string; asked: string[]; close: () => void }> {
   const asked: string[] = [];
   const counters = new Map<string, number>();
   const server = createServer((req, res) => {
@@ -69,7 +69,7 @@ async function standIn(): Promise<{ url: string; asked: string[]; close: () => v
       const n = Math.max(counters.get(kind) ?? 0, Number.isFinite(floor) ? floor : 0) + 1;
       counters.set(kind, n);
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ ok: true, kind, number: n }));
+      res.end(JSON.stringify({ ok: true, kind, number: n, home }));
     });
   });
   await new Promise<void>((done) => server.listen(0, '127.0.0.1', done));
@@ -237,19 +237,18 @@ describe('baton tickets new: the PR-first landing and --direct (B-176)', () => {
     }
   });
 
-  it('on a github origin, gh pr create opens the PR and its URL is printed; a gh that fails keeps the branch', async () => {
-    // The bare origin lives at a path whose name says github.com: git works locally, and the
-    // CLI's forge detection reads the host from the remote's own URL.
-    const nest = mkdtempSync(join(tmpdir(), 'baton-seq-gh-'));
-    scratch.push(nest);
-    const dir = repo({ 'tickets/B-3.mdx': ticket('B-3') }, join(nest, 'github.com', 'ops'));
+  it('on a registered GitHub repository, gh pr create opens the PR and its URL is printed; a gh that fails keeps the branch', async () => {
+    // The bare origin is local; the sequence response supplies the registered forge.
+    const dir = repo({ 'tickets/B-3.mdx': ticket('B-3') });
     const bin = mkdtempSync(join(tmpdir(), 'baton-seq-bin-'));
     scratch.push(bin);
     writeFileSync(join(bin, 'gh'), '#!/bin/sh\necho "https://github.com/immediately-run/ops/pull/9"\n');
     execFileSync('chmod', ['+x', join(bin, 'gh')], { stdio: 'ignore' });
-    const baton = await standIn();
+    const baton = await standIn({ forge: 'github', path: 'immediately-run/ops', webBase: 'https://github.com/immediately-run/ops' });
     const path = process.env.PATH;
     process.env.PATH = `${bin}:${path}`;
+    vi.stubEnv('GH_TOKEN', undefined);
+    vi.stubEnv('GITHUB_TOKEN', undefined);
     try {
       const r = await run(dir, { url: baton.url, identity: keyFile() }, '--title', 'Fourth', '--project', 'baton');
       expect(r.code).toBe(0);
@@ -260,9 +259,10 @@ describe('baton tickets new: the PR-first landing and --direct (B-176)', () => {
       const failed = await run(dir, { url: baton.url, identity: keyFile() }, '--title', 'Fifth', '--project', 'baton');
       expect(failed.code).toBe(0);
       expect(failed.out).toEqual(['✓ tickets: file B-5 — Fifth', '  branch: baton-ticket/B-5 — pushed for a person to merge']);
-      expect(failed.err.join('\n')).toMatch(/gh could not open the PR for baton-ticket\/B-5/);
+      expect(failed.err.join('\n')).toMatch(/the forge could not open the PR for baton-ticket\/B-5/);
       expect(at(dir, 'baton-ticket/B-5', 'tickets/B-5.mdx')).toContain('id: B-5');
     } finally {
+      vi.unstubAllEnvs();
       process.env.PATH = path;
       baton.close();
     }

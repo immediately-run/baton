@@ -66,7 +66,7 @@ export interface Workflow {
   tickets?: unknown[];
 }
 export interface DispatchTarget {
-  github: string;
+  path: string;
   /** The workflow file's name, as `actions/workflows/{workflow}/dispatches` takes it. */
   workflow: string;
   ref: string;

@@ -8,14 +8,15 @@ import { parseSshKey } from './auth';
 import { logEvent } from './db';
 import type { Config, Store } from './ports';
 import { REPOSITORY_ID, TIER_NAME } from './validate';
-import { FORGES, isForgePath, isWebBase, parseTranscriptRepo, type Forge } from './links';
+import { isForgePath, isWebBase, parseTranscriptRepo, type Forge } from './links';
+
+import { DEFAULT_FORGE, FORGES, FORGE_SHAPES, forgeForCi, WORKFLOW_PATH, hasPrs, isForge } from './forges';
 
 export { REPOSITORY_ID, TICKET_ID, qualify, repositoryOf, localOf } from './validate';
 
 /** A default branch, registered by the administrator: stricter than any branch a push may name
  *  (GIT_BRANCH), as it goes unencoded into the dashboard's GitHub links. */
 const BRANCH = /^(?!.*\.\.)[A-Za-z0-9._/-]{1,100}$/;
-const WORKFLOW = /^\.github\/workflows\/[A-Za-z0-9._-]{1,100}\.ya?ml$/;
 const TIER = TIER_NAME;
 const DEFAULT_TIERS = ['routine', 'judgement', 'critical'];
 
@@ -112,24 +113,26 @@ export function checkRegistration(v: unknown, at = 'repository'): Registration {
     : Number.isInteger(r.weight) && (r.weight as number) >= 0 && (r.weight as number) <= 10_000 ? (r.weight as number) : bad(`${at}.weight`, 'must be an integer from 0 to 10000');
   if (r.cut_over !== undefined && typeof r.cut_over !== 'boolean') bad(`${at}.cut_over`, 'must be true or false');
   // R-BTN-92: the forge, its path's grammar, the remote, the page every link is built from.
-  const forge = (r.forge ?? 'github') as Forge;
-  if (!(FORGES as readonly string[]).includes(forge)) bad(`${at}.forge`, `must be one of ${FORGES.join(', ')}`);
-  const github = typeof r.github === 'string' && isForgePath(forge, r.github) ? r.github : bad(`${at}.github`, `must be a ${forge} forge path (owner/name${forge === 'gitlab' ? ', up to four segments' : ''})`);
-  const webBase = r.web_base !== undefined ? r.web_base : forge === 'github' ? `https://github.com/${github}` : undefined;
-  if (forge === 'git' ? webBase != null : typeof webBase !== 'string' || !isWebBase(forge, webBase, github)) {
-    bad(`${at}.web_base`, forge === 'git' ? 'a git repository has none' : 'must be https://<host>[:<port>]/<forge path>, with no userinfo, query or fragment');
+  const named = r.forge ?? DEFAULT_FORGE;
+  const forge = isForge(named) ? named : bad(`${at}.forge`, `must be one of ${FORGES.join(', ')}`);
+  const github = typeof r.github === 'string' && isForgePath(forge, r.github) ? r.github : bad(`${at}.github`, `must be a ${forge} forge path (owner/name${FORGE_SHAPES[forge].depth[1] > 2 ? ', up to four segments' : ''})`);
+  const origin = FORGE_SHAPES[forge].defaultOrigin;
+  const defaultBase = origin && `${origin}/${github}`;
+  const webBase = r.web_base !== undefined ? r.web_base : defaultBase ?? undefined;
+  if (!hasPrs(forge) ? webBase != null : typeof webBase !== 'string' || !isWebBase(forge, webBase, github)) {
+    bad(`${at}.web_base`, !hasPrs(forge) ? 'a git repository has none' : 'must be https://<host>[:<port>]/<forge path>, with no userinfo, query or fragment');
   }
-  const remote = r.remote !== undefined ? r.remote : forge === 'github' ? `https://github.com/${github}.git` : undefined;
+  const remote = r.remote !== undefined ? r.remote : defaultBase ? `${defaultBase}.git` : undefined;
   // No credential ever reaches SQLite (R-BTN-94): an https remote has no userinfo, an ssh one a user
   // name at most (round 1, 1-A-5, 1-B-2).
   if (typeof remote !== 'string' || remote.length > 500
     || !/^(https:\/\/[A-Za-z0-9.-]+(:\d+)?\/|ssh:\/\/([A-Za-z0-9._-]+@)?[A-Za-z0-9.-]+(:\d+)?\/|[A-Za-z0-9._-]+@[A-Za-z0-9.-]+:)[^\s\\@?#\u0000-\u001f\u007f]+$/.test(remote)) {
     bad(`${at}.remote`, 'must be an https:// URL with no userinfo, an ssh:// URL, or user@host:path — never a credential');
   }
-  const syncWorkflow = r.sync_workflow == null ? '' : str('sync_workflow', WORKFLOW);
+  const syncWorkflow = r.sync_workflow == null ? '' : str('sync_workflow', WORKFLOW_PATH);
   // GitHub Actions workflows and the App serve github.com alone (R-BTN-92): another forge, or a
   // GitHub Enterprise host, has none (round 1, 1-A-0, 1-A-6, 1-B-0).
-  const onGithubCom = forge === 'github' && typeof webBase === 'string' && webBase.toLowerCase() === `https://github.com/${github.toLowerCase()}`;
+  const onGithubCom = defaultBase != null && typeof webBase === 'string' && webBase.toLowerCase() === defaultBase.toLowerCase();
   if ((syncWorkflow || r.mirror_workflow != null) && !onGithubCom) bad(`${at}.sync_workflow`, 'workflows are GitHub Actions on github.com only');
   // A mirror workflow posts with the Actions identity; a repository of sync keys has its mirror key
   // instead (round 2, 2-A-0).
@@ -153,7 +156,7 @@ export function checkRegistration(v: unknown, at = 'repository'): Registration {
     sync_keys: keys,
     default_branch: str('default_branch', BRANCH),
     sync_workflow: syncWorkflow,
-    mirror_workflow: r.mirror_workflow == null ? null : str('mirror_workflow', WORKFLOW),
+    mirror_workflow: r.mirror_workflow == null ? null : str('mirror_workflow', WORKFLOW_PATH),
     weight,
     tiers,
     transcript_repos: transcript,
@@ -165,18 +168,18 @@ export function checkRegistration(v: unknown, at = 'repository'): Registration {
  *  `github-actions` (the shape every registration had before R3-1262); a GitLab one names its
  *  issuer; `null` means sync keys only. */
 function checkCiIdentity(v: unknown, forge: Forge, syncWorkflow: string, at: string): CiIdentity | null {
-  if (v === undefined) return forge === 'github' && syncWorkflow ? { kind: 'github-actions' } : null;
+  if (v === undefined) return FORGE_SHAPES[forge].ci === 'github-actions' && syncWorkflow ? { kind: 'github-actions' } : null;
   if (v === null) {
     if (syncWorkflow) bad(at, 'a sync_workflow needs the github-actions identity');
     return null;
   }
   const o = v as Record<string, unknown>;
   if (o && o.kind === 'github-actions' && Object.keys(o).length === 1) {
-    if (forge !== 'github' || !syncWorkflow) bad(at, 'github-actions needs a github repository and its sync_workflow');
+    if (FORGE_SHAPES[forge].ci !== o.kind || !syncWorkflow) bad(at, 'github-actions needs a github repository and its sync_workflow');
     return { kind: 'github-actions' };
   }
   if (o && o.kind === 'gitlab-ci' && typeof o.issuer === 'string' && (o.mirror === undefined || typeof o.mirror === 'boolean') && Object.keys(o).every((k) => ['kind', 'issuer', 'mirror'].includes(k))) {
-    if (forge !== 'gitlab') bad(at, 'gitlab-ci needs a gitlab repository');
+    if (FORGE_SHAPES[forge].ci !== o.kind) bad(at, 'gitlab-ci needs a gitlab repository');
     if (syncWorkflow) bad(at, 'sync_workflow is the github-actions identity\'s');
     let u: URL | null = null;
     try {
@@ -188,6 +191,19 @@ function checkCiIdentity(v: unknown, forge: Forge, syncWorkflow: string, at: str
     return { kind: 'gitlab-ci', issuer: o.issuer, mirror: o.mirror === true };
   }
   return bad(at, "must be {kind: 'github-actions'} or {kind: 'gitlab-ci', issuer, mirror?}");
+}
+
+function usesDefaultForgeOrigin(r: Pick<Repository, 'forge' | 'github' | 'web_base'>): boolean {
+  const origin = FORGE_SHAPES[r.forge].defaultOrigin;
+  return origin !== null && r.web_base?.toLowerCase() === `${origin}/${r.github.toLowerCase()}`;
+}
+
+export function defaultForgeDispatch(r: Pick<Repository, 'forge' | 'github' | 'web_base'>): string | null {
+  return usesDefaultForgeOrigin(r) ? JSON.stringify({ kind: FORGE_SHAPES[r.forge].dispatch }) : null;
+}
+
+export function forgeCoordinates(r: Pick<Repository, 'forge' | 'github' | 'web_base'>) {
+  return { forge: r.forge, path: r.github, webBase: r.web_base };
 }
 
 /** §6.8: the transcript repositories, for a repository that has named none yet. */
@@ -250,7 +266,7 @@ export class Registry {
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       r.id, r.github, r.forge, r.remote, r.web_base, r.ci_identity ? JSON.stringify(r.ci_identity) : null,
       // The App serves github.com alone (round 2, 2-A-4).
-      r.forge === 'github' && r.web_base?.toLowerCase() === `https://github.com/${r.github.toLowerCase()}` ? '{"kind":"github-app"}' : null,
+      defaultForgeDispatch(r),
       r.default_branch, r.sync_workflow, r.mirror_workflow, r.weight, JSON.stringify(r.transcript_repos), JSON.stringify(r.tiers),
       r.cut_over ? this.c.now() : null);
     this.c.store.exec('INSERT INTO board_head (repository_id, sha) VALUES (?, NULL) ON CONFLICT (repository_id) DO NOTHING', r.id);
@@ -394,7 +410,7 @@ export class Registry {
    *  audience names — `mirror` only where the identity says the repository has a GitLab mirror. */
   forGitlab(c: { issuer: string; project_path: string; ref: string; ref_type: string; role: 'sync' | 'mirror' }, role: 'sync' | 'mirror'): Repository {
     const row = this.rows<RepoRow>(
-      `SELECT ${REPO_COLUMNS} FROM repositories WHERE github = ? COLLATE NOCASE AND forge = 'gitlab' AND retired_at IS NULL`, c.project_path)[0];
+      `SELECT ${REPO_COLUMNS} FROM repositories WHERE github = ? COLLATE NOCASE AND forge = ? AND retired_at IS NULL`, c.project_path, forgeForCi('gitlab-ci'))[0];
     const ci = row?.ci_identity ? (JSON.parse(row.ci_identity) as CiIdentity) : null;
     if (!row || ci?.kind !== 'gitlab-ci' || ci.issuer !== c.issuer) throw new BatonError('forbidden', 'the GitLab token is from a project this Baton does not serve');
     if (c.ref_type !== 'branch' || c.ref !== row.default_branch) throw new BatonError('forbidden', `the GitLab token is not from ${row.github}'s default branch`);
@@ -408,8 +424,8 @@ export class Registry {
    *  on that branch. Anything else is `forbidden`. */
   forSync(claims: SyncClaims, role: 'sync' | 'mirror'): Repository {
     const row = this.rows<RepoRow>(
-      `SELECT ${REPO_COLUMNS} FROM repositories WHERE github = ? COLLATE NOCASE AND forge = 'github'
-       AND lower(web_base) = 'https://github.com/' || lower(github) AND retired_at IS NULL`, claims.repository)[0];
+      `SELECT ${REPO_COLUMNS} FROM repositories WHERE github = ? COLLATE NOCASE AND forge = ?
+       AND lower(web_base) = ? || '/' || lower(github) AND retired_at IS NULL`, claims.repository, DEFAULT_FORGE, FORGE_SHAPES[DEFAULT_FORGE].defaultOrigin)[0];
     if (!row) throw new BatonError('forbidden', 'the OIDC token is from a repository this Baton does not serve');
     const branch = `refs/heads/${row.default_branch}`;
     const workflow = role === 'sync' ? row.sync_workflow : row.mirror_workflow;

@@ -883,6 +883,9 @@ export class ClaimRun {
       // legs, B-96's review round 2): the stub hands it to the close, so a marker line goes
       // to the branch the sync reads whatever branch this checkout is on.
       ...(typeof claim.default_branch === 'string' && claim.default_branch !== '' ? { default_branch: claim.default_branch } : {}),
+      ...(Array.isArray(claim.scope) ? { scope: claim.scope } : {}),
+      ...(claim.forge_home ? { forge_home: claim.forge_home } : {}),
+      ...(Array.isArray(claim.forge_repositories) ? { forge_repositories: claim.forge_repositories } : {}),
       handoff: handoffUrl, resume, advice,
       checkout: this.checkout, session: state.session,
       state: this.o.stateFile, runner: this.state.get().runner_id,

@@ -34,6 +34,12 @@ const GH013_SECRETS = [
 const NO_TICKETS_BY_PUSH = ['remote: error: this repository wants no tickets by push', ' ! [remote rejected]        HEAD -> main (pre-receive hook declined)'];
 
 /** One throwaway repository: a bare origin, `.baton/` listing create-spec, and `tickets/`. */
+function forgeRemote(dir: string, name: string, local: string, path: string) {
+  const url = `https://github.com/${path}.git`;
+  git(dir, 'config', `remote.${name}.url`, url);
+  git(dir, 'config', `url.${local}.insteadOf`, url);
+}
+
 function repo(): { dir: string; origin: string } {
   const root = mkdtempSync(join(tmpdir(), 'baton-b174-'));
   const origin = join(root, 'origin.git');
@@ -49,6 +55,7 @@ function repo(): { dir: string; origin: string } {
   git(dir, 'add', '-A');
   git(dir, 'commit', '-q', '-m', 'base');
   git(dir, 'push', '-q', 'origin', 'main');
+  forgeRemote(dir, 'origin', origin, 'immediately-run/baton');
   return { dir, origin };
 }
 
@@ -255,6 +262,7 @@ describe('B-174: the protected default branch, decided by the forge’s answer (
 
   it('a git forge and any other refusal are git’s own words, nothing opened, non-zero', async () => {
     const noAdapter = repo();
+    git(noAdapter.dir, 'remote', 'set-url', 'origin', noAdapter.origin);
     const beforeNoAdapter = git(noAdapter.origin, 'rev-parse', 'main');
     // The origin is a local path and --forge names nothing: no adapter, whatever the words say.
     const gh = refuseOnce(dirs, 'HEAD:refs/heads/main', GH006);
@@ -262,6 +270,7 @@ describe('B-174: the protected default branch, decided by the forge’s answer (
     await expect(refusing(gh.bin, () => fileRequest(readRequestPlan(noAdapter.dir, 'create-spec', SENTENCE), { fetchImpl: pr.fetchImpl })))
       .rejects.toThrow('the push was refused: remote: error: GH006: Protected branch update failed for refs/heads/main.');
     // --forge git says so by name, on a github.com origin too.
+    forgeRemote(noAdapter.dir, 'origin', noAdapter.origin, 'immediately-run/baton');
     const named = refuseOnce(dirs, 'HEAD:refs/heads/main', GH006);
     await expect(refusing(named.bin, () => fileRequest(readRequestPlan(noAdapter.dir, 'create-spec', SENTENCE), { forge: 'git', fetchImpl: pr.fetchImpl })))
       .rejects.toThrow('the push was refused:');
@@ -307,7 +316,8 @@ describe('B-174: the protected default branch, decided by the forge’s answer (
     git(dir, 'remote', 'add', 'upstream', upstream);
     git(dir, 'push', '-q', 'upstream', 'main');
     const shim = refuseOnce(dirs, 'HEAD:refs/heads/main', GH006);
-    const pr = prAnswer();
+    forgeRemote(dir, 'upstream', upstream, 'immediately-run/upstream');
+    const pr = prAnswer('https://github.com/immediately-run/upstream/pull/7');
     const filed = await refusing(shim.bin, () =>
       fileRequest(readRequestPlan(dir, 'create-spec', SENTENCE), { remote: 'upstream', forge: 'github', env: { GITHUB_TOKEN: 'tok' }, fetchImpl: pr.fetchImpl }),
     );
@@ -317,7 +327,7 @@ describe('B-174: the protected default branch, decided by the forge’s answer (
     expect(git(origin, 'for-each-ref', '--format=%(refname:short)', 'refs/heads/baton-request/*').trim()).toBe('');
     expect(git(upstream, 'show', '--name-only', '--format=%s', 'refs/heads/baton-request/B-1').split('\n'))
       .toEqual(['B-1: request — Decide the export format, so two implementations agree — create-spec', '', 'tickets/B-1.mdx']);
-    expect(pr.calls[0].url).toBe(`https://api.github.com/repos/${upstream.replace(/\.git$/, '')}/pulls`);
+    expect(pr.calls[0].url).toBe('https://api.github.com/repos/immediately-run/upstream/pulls');
   });
 
   it('a listing that fails, and a head that vanishes before its fetch, cost their ids nothing — and each says one line', async () => {

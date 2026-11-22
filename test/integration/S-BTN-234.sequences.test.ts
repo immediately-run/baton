@@ -12,7 +12,7 @@
 // fallback and the reserved `branch_pattern`); no `branch_pattern` matches `baton-ticket/*`
 // (R-BTN-190, the unit half). The CLI's half runs on the local host alone: it writes a real
 // repository and runs git and the CLI.
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -234,7 +234,15 @@ class Repo {
     await setClock(Date.now());
     const out: string[] = [];
     const err: string[] = [];
-    const fetchImpl: typeof fetch = (input, init) => hostCall(new Request(input, init));
+    const fetchImpl: typeof fetch = (input, init) => {
+      if (String(input) === 'https://api.github.com/repos/immediately-run/ops/pulls') {
+        const head = JSON.parse(String(init?.body)).head;
+        const number = Number(/^baton-ticket\/B-(\d+)$/.exec(head)?.[1]);
+        if (!number) throw new Error(`unexpected PR branch ${head}`);
+        return Promise.resolve(Response.json({ html_url: `https://github.com/immediately-run/ops/pull/${number}` }, { status: 201 }));
+      }
+      return hostCall(new Request(input, init));
+    };
     const code = await ticketsMain(argv, { root: this.dir, log: (l) => out.push(l), warn: (l) => err.push(l), fetchImpl });
     return { code, out, err };
   }
@@ -268,6 +276,8 @@ let keyFile: string;
 beforeEach(async () => {
   minutes = 0;
   repo = HOST === 'local' ? onNode() : null;
+  if (repo) vi.stubEnv('GITHUB_TOKEN', 'fixture-token');
+  if (repo) vi.stubEnv('GH_TOKEN', undefined);
   if (repo != null) {
     const pair = keyPair('owner');
     keyFile = pair.file;
@@ -276,6 +286,7 @@ beforeEach(async () => {
   }
 });
 afterEach(() => {
+  vi.unstubAllEnvs();
   if (!repo) return;
   rmSync(repo.dir, { recursive: true, force: true });
   rmSync(repo.bare, { recursive: true, force: true });
@@ -297,8 +308,8 @@ describe('S-BTN-234 the CLI half: new asks Baton first and files through a PR (B
 
     const filed = await repo.tickets('new', '--title', 'First', '--project', 'baton', '-i', keyFile, '--url', ORIGIN);
     if (filed.code !== 0 || filed.err.length) throw new Error(`new exited ${filed.code}: ${filed.err.join('\n')}`);
-    // The git forge has no PR to ask for: the branch is the answer, printed for a person to merge.
-    expect(filed.out).toEqual(['✓ tickets: file B-1 — First', '  branch: baton-ticket/B-1 — pushed for a person to merge']);
+    // The local remote is a transport fixture; the registration chooses the PR client.
+    expect(filed.out).toEqual(['✓ tickets: file B-1 — First', '  PR: https://github.com/immediately-run/ops/pull/1']);
     // The default branch is exactly as it was, and the filing branch carries the ticket alone.
     expect(execFileSync('git', ['-C', repo.bare, 'rev-parse', 'main'], { encoding: 'utf8' }).trim()).toBe(before);
     expect(execFileSync('git', ['-C', repo.bare, 'show', '--name-only', '--format=%s', 'baton-ticket/B-1'], { encoding: 'utf8' }).trim().split('\n'))

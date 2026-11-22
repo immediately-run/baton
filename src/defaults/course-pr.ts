@@ -1,3 +1,5 @@
+import { parsePrUrl, type PrForge } from '../core/forges';
+import type { ForgeRegistration } from './forges/types';
 // course-pr.ts — the station functions of the standard courses that read PRs (BATON_SPEC §2f
 // R-BTN-74, R-BTN-131): `create-pr` (and `pr`, the name it replaced), `review-pr` and
 // `create-spec` — where each ticket is, from git and PR facts alone (`create-spec` reads, beside
@@ -379,6 +381,7 @@ function adjudicationOf(fact: PrFact): 'merge' | 'owner' | null {
  *  `Claims.syncRecord`): the owner's answers to the decisions the sync posted, and the legs
  *  claims finished with an evidence pointer — what a marker in git is judged against. */
 export interface BatonRecord {
+  home?: ForgeRegistration;
   /** Each answer's time is Baton's clock: a `round` answer opens a round of its own on the head
    *  the third round refused, its verdict a round apart from the one before it. */
   answers?: { ticket: string; decision: string; answer: string; answered_at?: number }[];
@@ -404,7 +407,7 @@ export interface BatonRecord {
 /** One `code_repos` entry as the observation hands it to the sync (R-BTN-140, B-182). */
 export interface CodeRepoEntry {
   path: string;
-  forge: 'github' | 'gitlab' | 'gitea';
+  forge: PrForge;
   host: string;
   repo_id: string;
   owner_id: string;
@@ -586,8 +589,13 @@ export function prRefs(prs: unknown[], home?: string | null): { repository: stri
   for (const p of prs) {
     const text = String(p).trim();
     if (/^#?\d+$/.test(text)) out.push({ repository: home ?? null, number: text.replace(/^#/, '') });
-    const m = /^https?:\/\/[^/]+\/([^/]+\/[^/]+)\/pull\/(\d+)(?:[/#?].*)?$/.exec(text);
-    if (m) out.push({ repository: m[1], number: m[2] });
+    let url = text.replace(/[?#].*$/, '');
+    // Old ticket links may name a tab on the PR. Trim only trailing segments until the shape fits.
+    for (let i = 0; i < 8 && url.startsWith('http'); i++) {
+      const ref = parsePrUrl(url);
+      if (ref) { out.push({ repository: ref.path, number: ref.number }); break; }
+      url = url.slice(0, url.lastIndexOf('/'));
+    }
   }
   return out;
 }

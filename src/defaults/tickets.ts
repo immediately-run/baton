@@ -1,3 +1,7 @@
+import { forgeClient, legacyProtectedRefusal, prRepo } from './forges';
+import { fromRemote } from './forges/targets';
+import type { ForgeRegistration } from './forges/types';
+import { exec as boundedExec } from './ticket-state';
 // tickets.ts — `baton tickets new | claim | set | done | check` (B-112, BATON_SPEC §2f R-BTN-74,
 // §4.2 R-BTN-74, R-BTN-31's scenarios): the ticket commands, once, in the CLI every ticket
 // repository already depends on — where `scripts/ticket.mjs` (this repository and fieldhouse) and
@@ -50,16 +54,7 @@ const today = (): string => new Date().toISOString().slice(0, 10);
  *  a hook's or a protected branch's says `[remote rejected]`, and no re-read fixes that. */
 const movedOnPush = (detail: string): boolean => /non-fast-forward|fetch first|stale info/.test(detail);
 
-/** The forge's own words for a push refused because the branch is protected (R-BTN-74, the
- *  B-174 Decision's list): GitHub's `GH006` and a `GH013` ruleset refusal, GitLab's and Gitea's
- *  messages, and the protected-branch hook's. Read from the forge's answer, never from the
- *  policy — the one refusal whose answer is another landing. A `GH013` counts only while its
- *  words name a pull-request or update rule (§5.8): GitHub's secret push protection answers
- *  `GH013` too, and its refusal is not a protected branch's — the same content would be refused
- *  on the PR branch just the same. */
-export const protectedPush = (detail: string): boolean =>
-  /GH006|protected branch/i.test(detail) ||
-  (/GH013/.test(detail) && /pull request|update rule/i.test(detail) && !/secret/i.test(detail));
+export const protectedPush = legacyProtectedRefusal;
 
 const detailOf = (e: unknown): string => {
   const err = e as { status?: unknown; stderr?: string | Uint8Array; message?: string };
@@ -606,6 +601,7 @@ export async function newTicket(root: string, io: TicketsIo, t: NewTicket): Prom
   // lost or fresh Baton never reissues a number git holds. A Baton that cannot answer leaves
   // today's scan at the head the filing lands on, and says so.
   let given: string | null = null;
+  let registration: ForgeRegistration | undefined;
   if (io.offline) {
     warn("… id by the next-free scan (--offline): the number may collide with a branch's, and the duplicate check at merge is the backstop");
   } else {
@@ -618,6 +614,7 @@ export async function newTicket(root: string, io: TicketsIo, t: NewTicket): Prom
       try {
         const took = await takeNumber({ url: target.url, keyFile: target.keyFile, repository: target.repository, kind: kind.kind, floor, ...(io.fetchImpl ? { fetchImpl: io.fetchImpl } : {}) });
         given = `${kind.prefix}-${took.number}`;
+        registration = took.home;
       } catch (e) {
         warn(`… ${fallbackNote(e instanceof Error ? e.message : String(e))}`);
       }
@@ -740,38 +737,22 @@ export async function newTicket(root: string, io: TicketsIo, t: NewTicket): Prom
       }
     }
   };
-  /** The forge `origin` names: `github` where its host is `github.com`, else a plain `git`
-   *  remote — the adapter list is R-BTN-131's; the GitHub one is built here, and B-174 builds
-   *  the rest. */
-  const forgeOf = (): 'github' | 'git' => {
-    try {
-      return /github\.com/.test(git(root, 'remote', 'get-url', remote)) ? 'github' : 'git';
-    } catch {
-      return 'git';
-    }
+  const remoteUrl = () => {
+    try { return git(root, 'remote', 'get-url', remote); } catch { return remote; }
   };
-  /** The PR a filing branch carries, asked of the forge with the caller's own credential
-   *  (`gh`, the same credential pr-verify reads); a `git` forge — and a forge that does not
-   *  answer — keeps the pushed branch as the answer, printed for a person to merge (value 8). */
-  const askForge = (o: { branch: string; id: string; message: string }): void => {
-    if (forgeOf() === 'github') {
-      const body = [
-        `Files ${o.id} (baton tickets new).`,
-        '',
-        'The ticket becomes claimable when this PR merges, after `check:tickets` has run on it.',
-      ].join('\n');
+  // Registration describes origin, not an arbitrary --remote override.
+  const repo = registration && remote === 'origin' ? prRepo(registration) : fromRemote(remoteUrl());
+  const client = repo ? forgeClient(repo, { run: boundedExec, checkout: root, fetchImpl: io.fetchImpl }) : null;
+  const askForge = async (o: { branch: string; id: string; message: string }): Promise<void> => {
+    if (client) {
+      const body = `Files ${o.id} (baton tickets new).\n\nThe ticket becomes claimable when this PR merges, after \`check:tickets\` has run on it.`;
       try {
-        const out = execFileSync('gh', ['pr', 'create', '--head', o.branch, '--title', o.message, '--body', body],
-          { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
-        const url = out.split('\n').filter(Boolean).at(-1) ?? '';
-        if (/^https?:\/\//.test(url)) {
-          log(`✓ ${o.message}`);
-          log(`  PR: ${url}`);
-          return;
-        }
-        warn(`… the forge answered no PR URL for ${o.branch}: ${out.slice(0, 200) || 'nothing'} — the branch is pushed`);
+        const url = await client.openPr({ head: o.branch, base: branch, title: o.message, body });
+        log(`✓ ${o.message}`);
+        log(`  PR: ${url}`);
+        return;
       } catch (e) {
-        warn(`… gh could not open the PR for ${o.branch} (${detailOf(e).trim().split('\n').filter(Boolean).at(-1) ?? 'no reason given'}) — the branch is pushed`);
+        warn(`… the forge could not open the PR for ${o.branch}: ${detailOf(e).trim().split('\n').filter(Boolean).at(-1) ?? 'no reason given'} — the branch is pushed`);
       }
     }
     log(`✓ ${o.message}`);
@@ -781,7 +762,7 @@ export async function newTicket(root: string, io: TicketsIo, t: NewTicket): Prom
     // The PR landing first (the owner's 2026-11-03 ruling): the id is unique before any push,
     // so the branch is the filing, and a person — and `check:tickets` — sees it before it lands.
     const landed = landThroughPr();
-    askForge(landed);
+    await askForge(landed);
     return landed.id;
   }
   // `--direct` keeps today's one commit pushed straight to the default branch, reverse mentions
@@ -794,10 +775,10 @@ export async function newTicket(root: string, io: TicketsIo, t: NewTicket): Prom
     });
   } catch (e) {
     const detail = (e as { detail?: string }).detail;
-    if (detail == null || !protectedPush(detail)) throw e;
+    if (detail == null || !(client ? client.protectedRefusal(detail) : !registration && protectedPush(detail))) throw e;
     warn(`… the default branch refused the push as protected — filing through a PR instead`);
     const landed = landThroughPr();
-    askForge(landed);
+    await askForge(landed);
     return landed.id;
   }
   log(`✓ tickets: file ${filed} — ${title}`);

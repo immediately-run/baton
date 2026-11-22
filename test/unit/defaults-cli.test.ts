@@ -771,6 +771,49 @@ describe('baton repo init, through the built CLI', () => {
     }
   });
 
+  it('S-BTN-231: create-pr verifies and comments on a registered Gitea PR with no gh on PATH', async () => {
+    const settingsFile = join(root, '.baton', 'baton.json');
+    const scaffolded = readFileSync(settingsFile, 'utf8');
+    const bin = mkdtempSync(join(tmpdir(), 'baton-no-gh-'));
+    const realGit = execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim();
+    writeFileSync(join(bin, 'git'), `#!/bin/sh\nexec ${JSON.stringify(realGit)} "$@"\n`, { mode: 0o755 });
+    writeFileSync(join(bin, 'agent'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+    const page = 'https://tea.example/o/r/pulls/9';
+    const fetchFake = vi.fn<typeof fetch>();
+    let exists = false;
+    fetchFake.mockImplementation(async (url, init) => {
+      expect(new Headers(init?.headers).get('Authorization')).toBe('token fake');
+      if (String(url) === 'https://tea.example/api/v1/repos/o/r/issues/9/comments') {
+        expect(JSON.parse(String(init?.body)).body).toContain('baton:verdict approve');
+        return Response.json({ id: 12 });
+      }
+      expect(String(url)).toMatch(/^https:\/\/tea\.example\/api\/v1\/repos\/o\/r\/pulls\?state=open/);
+      return Response.json(exists ? [{ number: 9, head: { ref: 'claude/A-1-kit', sha: 'a'.repeat(40) } }] : []);
+    });
+    try {
+      writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(scaffolded), agent_command: 'agent' }));
+      const snapshot = { sha: commitAll(root) };
+      vi.stubEnv('PATH', bin);
+      vi.stubEnv('GITEA_TOKEN', 'fake');
+      vi.stubGlobal('fetch', fetchFake);
+      const ctx = { ticket: { id: 'A-1' }, checkout: root, snapshot, forge_home: { forge: 'gitea', path: 'o/r', webBase: 'https://tea.example/o/r' }, scope: ['o/r'] };
+      const stub = await load(join(root, '.baton', 'courses', 'create-pr', 'legs', 'implement.mjs'));
+      await expect(stub.run(ctx)).rejects.toThrow(/no open PR/);
+      exists = true;
+      expect(await stub.run(ctx)).toEqual({ reached: 'pr-open', next: 'run-tests' });
+      const review = await load(join(root, '.baton', 'courses', 'create-pr', 'legs', 'review.mjs'));
+      await expect(review.close({ ...ctx, leg: 'review' }, { verdict: 'approve', pr: page })).resolves.toBe(`${page}#issuecomment-12`);
+      await expect(review.close({ ...ctx, leg: 'review' }, { verdict: 'approve', pr: page.replace('tea.example', 'other.example') })).rejects.toThrow(/registered forge repository/);
+      expect(fetchFake).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.unstubAllGlobals();
+      vi.unstubAllEnvs();
+      writeFileSync(settingsFile, scaffolded);
+      commitAll(root);
+      rmSync(bin, { recursive: true, force: true });
+    }
+  });
+
   it('the implement stub takes a delivered answer only for a commit on the default branch: delivered, confirm next, the commit its evidence (B-257, S-BTN-232)', async () => {
     const g = (...a: string[]) => execFileSync('git', ['-C', root, ...a], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
     const origin = mkdtempSync(join(tmpdir(), 'baton-delivered-origin-'));

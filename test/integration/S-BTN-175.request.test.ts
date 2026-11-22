@@ -198,6 +198,9 @@ describe('S-BTN-175 the request', () => {
     const before = execFileSync('git', ['-C', repo.bare, 'rev-parse', 'main'], { encoding: 'utf8' }).trim();
 
     const bin = refuseMain(repo.bare);
+    const url = 'https://github.com/immediately-run/docs.git';
+    execFileSync('git', ['-C', repo.dir, 'config', `url.${repo.bare}.insteadOf`, url]);
+    execFileSync('git', ['-C', repo.dir, 'config', 'remote.origin.url', url]);
     const pr = prFetch('https://github.com/immediately-run/docs/pull/7');
     const out: string[] = [];
     const path = process.env.PATH;
@@ -257,6 +260,9 @@ describe('S-BTN-175 the request', () => {
 
     // The same request again, the credential now set and the PR injected: `baton-request/B-1` is
     // present and still open, so the request takes the NEXT free id — B-2, its own branch.
+    const url = 'https://github.com/immediately-run/docs.git';
+    execFileSync('git', ['-C', repo.dir, 'config', `url.${repo.bare}.insteadOf`, url]);
+    execFileSync('git', ['-C', repo.dir, 'config', 'remote.origin.url', url]);
     const pr = prFetch('https://github.com/immediately-run/docs/pull/9');
     const out: string[] = [];
     const path = process.env.PATH;

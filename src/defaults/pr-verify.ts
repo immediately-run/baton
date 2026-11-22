@@ -9,6 +9,8 @@
 // what is pushed. What cannot be verified fails the leg naming what was looked for; the stub
 // reports, never retries (R-BTN-131). Pure over injected commands, so tests drive it with no
 // forge; the stub binds `gh` and `git`. Course code in the CLI, never core (§2b).
+import { forgeClient, listCli } from './forges';
+import { targetOf, type RegisteredTargets } from './forges/targets';
 import { branchMatches, matchPatterns } from './course-pr';
 import { parseFrontmatter } from './tickets-markdown';
 
@@ -17,7 +19,7 @@ import { parseFrontmatter } from './tickets-markdown';
 export type PrExec = (cmd: 'git' | 'gh', args: string[], cwd: string) => string;
 
 /** What `verifyPrOpen` is asked: where to look, and for whose PR. */
-export interface PrOpenAsk {
+export interface PrOpenAsk extends RegisteredTargets {
   checkout: string;
   /** The claim's ticket, its id repository-qualified (`docs:B-1`, R-BTN-51). */
   ticket: { id: string; home?: string | null };
@@ -44,7 +46,7 @@ export function ticketRepositories(text: string | null, reposMap?: Record<string
   const fm = text == null ? null : parseFrontmatter(text);
   const names = Array.isArray(fm?.repos) ? fm!.repos : fm?.repos == null || fm!.repos === '' ? [] : [fm!.repos];
   return names
-    .map((r) => (typeof r === 'string' && /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(r) ? r : reposMap?.[r]))
+    .map((r) => (typeof r === 'string' && /^[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+){1,3}$/.test(r) ? r : reposMap?.[r]))
     .filter((r): r is string => typeof r === 'string' && r !== '');
 }
 
@@ -100,10 +102,10 @@ const ancestor = (a: string, b: string, run: PrExec, checkout: string): boolean 
  * forge nothing answers fails the leg: what cannot be verified is not reported. Reading the
  * forge over `gh` — the credentials the agent itself opened the PR with — this is course code's
  * own read of the forge, never core's (§2b). */
-export function verifyPrOpen(ask: PrOpenAsk, run: PrExec): void {
+export async function verifyPrOpen(ask: PrOpenAsk, run: PrExec): Promise<void> {
   const id = bareId(ask.ticket);
   const patterns = matchPatterns(ask.branchPatterns).map((p) => p.replace(/\{ticket\}/g, id));
-  const slug = originSlug(run, ask.checkout);
+  const slug = ask.forge_home?.path ?? originSlug(run, ask.checkout);
   // A `repos:` entry naming the checkout's own repository is the home, read first below — not a
   // sibling read twice and named twice ("exists in immediately-run/baton or immediately-run/baton",
   // 2026-11-16's failures, B-256).
@@ -111,32 +113,20 @@ export function verifyPrOpen(ask: PrOpenAsk, run: PrExec): void {
   const label = (repo: string | null): string => repo ?? slug ?? 'the checkout’s repository';
   /** One repository's matching open PRs, or the error that says it could not be read (the
    * command's own message: `gh pr list …` is the only call this makes). */
-  const of = (repo: string | null): PrListItem[] => {
-    const args = ['pr', 'list', '--state', 'open', '--limit', '300', '--json', 'number,headRefName,headRefOid', ...(repo ? ['--repo', repo] : [])];
-    let text: string;
-    try {
-      text = run('gh', args, ask.checkout);
-    } catch (e) {
-      throw new Error(msg(e));
-    }
-    let prs: unknown;
-    try {
-      prs = JSON.parse(text);
-    } catch {
-      prs = null;
-    }
-    if (!Array.isArray(prs)) throw new Error(`gh pr list${repo ? ` --repo ${repo}` : ''} answered no PR list: ${text.slice(0, 200)}`);
-    return prs.filter((p): p is PrListItem => p != null && typeof p === 'object' && typeof (p as PrListItem).headRefName === 'string' && patterns.some((pat) => branchMatches(pat, (p as PrListItem).headRefName as string)));
+  const of = async (repo: string | null): Promise<PrListItem[]> => {
+    const target = targetOf(ask, repo ?? undefined);
+    const prs = target
+      ? await forgeClient(target, { run, checkout: ask.checkout }).listOpenPrs()
+      : ask.forge_home
+        ? [] // Plain git, or outside the registry's effective code repositories.
+        : listCli((args) => run('gh', args, ask.checkout), repo ?? undefined);
+    return prs.filter((p) => patterns.some((pat) => branchMatches(pat, p.headRefName)));
   };
-  // Every repository the ticket reads, home first: its PR is the usual one, and the checkout
-  // comparison below reads only it. A repository that cannot be read is named, never guessed.
-  const found = [null, ...siblings].map((repo) => {
-    try {
-      return { repo, prs: of(repo) as PrListItem[] | null, error: null as string | null };
-    } catch (e) {
-      return { repo, prs: null as PrListItem[] | null, error: msg(e) as string | null };
-    }
-  });
+  const found: { repo: string | null; prs: PrListItem[] | null; error: string | null }[] = [];
+  for (const repo of [null, ...siblings]) {
+    try { found.push({ repo, prs: await of(repo), error: null }); }
+    catch (e) { found.push({ repo, prs: null, error: msg(e) }); }
+  }
   // The checkout's branch, when it feeds a matching home PR, is the head that PR shows — equal,
   // or behind a PR that moved past it; a head the PR does not contain is work the forge lacks
   // (B-81: the review reads what is pushed).

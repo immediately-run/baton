@@ -1,3 +1,4 @@
+import { isForge } from './forges';
 // ownerState.ts — owner state exported and imported (BATON_SPEC §4.8 R-BTN-88; R3-1258): the
 // state git does not hold, moved between Batons. Baton rebuilds tickets and readiness from git;
 // owner state lives only in SQLite, and the tenant's administrator moves it — freeze, seal,
@@ -224,7 +225,7 @@ export class OwnerState {
       if (!str(r.id) || !REPOSITORY_ID.test(r.id)) bad('repositories row', `id ${JSON.stringify(r.id)} is not a repository id`);
       if (r.retired_at == null && !str(r.github)) bad('repositories row', `${r.id}: a live row names its forge path`);
       if (r.retired_at != null && !(str(r.github) && r.github.startsWith('~retired/'))) bad('repositories row', `${r.id}: a retired row is tombstoned`);
-      if (!str(r.forge) || !['github', 'gitlab', 'gitea', 'git'].includes(r.forge)) bad('repositories row', `${r.id}: forge is unknown`);
+      if (!isForge(r.forge)) bad('repositories row', `${r.id}: forge is unknown`);
     }
     const repoIds = new Set((sections.repositories ?? []).map((r) => r.id));
     for (const r of sections.repository_owners ?? []) {

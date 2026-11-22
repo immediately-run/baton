@@ -1,3 +1,4 @@
+import { DEFAULT_FORGE } from './forges';
 // baton.ts — Baton's core (BATON_SPEC §3, §3a R-BTN-55): every table, every write, the routing
 // of the API behind the front (front.ts), and the alarm. It names no platform: a host hands it
 // the ports (ports.ts) — the Durable Object on Cloudflare (src/cloudflare/), a Node process
@@ -41,7 +42,7 @@ import { Capacity, RequestRing, adjustCounts } from './capacity';
 import { OwnerState } from './ownerState';
 import { checkBlockedOn, checkNoticeClaim } from './validate';
 import { checkResync } from './validate';
-import { Registry, TICKET_ID, qualify, repositoryOf, tierPosition, type Repository, type SyncClaims } from './registry';
+import { forgeCoordinates, Registry, TICKET_ID, qualify, repositoryOf, tierPosition, type Repository, type SyncClaims } from './registry';
 import { codeReposOf, pushersOf } from './codeRepos';
 import { Policies, sha256HexSync } from './policy';
 import { Scope } from './scope';
@@ -203,7 +204,7 @@ export class BatonCore {
     this.claims = new Claims({ store, now: () => this.now(), random: (n) => this.random(n), stations: this.stations, admin: this.admin, blocks: this.blocks, history: this.history,
       schema: (repo, id) => this.courses.schema(repo, id), intake: (repo, course) => this.queues.intake(repo, course),
       dispatch: (kind, ticketId) => want({ repository: repositoryOf(ticketId), kind }) ,
-      policies: this.policies, forgeOf: (repo) => this.registry.get(repo)?.forge ?? 'github', scope: this.scope, deprecated: this.deprecated,
+      policies: this.policies, forgeOf: (repo) => this.registry.get(repo)?.forge ?? DEFAULT_FORGE, scope: this.scope, deprecated: this.deprecated,
       conditions: this.conditions, sessionHosts: () => this.instance.sessionHosts() });
     this.cutover = new Cutover({ store, now: () => this.now(), held: (ticket) => this.blocks.held(ticket, true) });
     this.stats = new Stats(store, this.queues);
@@ -301,11 +302,11 @@ export class BatonCore {
       if (t?.kind !== 'github-app' || !t.workflow) return false;
       // R-BTN-94 (B-168): Baton reads no workflow file — one declaring no manual dispatch, or no
       // `tickets` input, is the forge's to refuse at dispatch, and the refusal is logged below.
-      target = { github: repo.github, workflow: t.workflow.slice(t.workflow.lastIndexOf('/') + 1), ref: repo.default_branch, inputs: { tickets: JSON.stringify(wf.tickets ?? []) } };
+      target = { path: repo.github, workflow: t.workflow.slice(t.workflow.lastIndexOf('/') + 1), ref: repo.default_branch, inputs: { tickets: JSON.stringify(wf.tickets ?? []) } };
     } else {
       const path = wf.kind === 'sync' ? repo.sync_workflow : repo.mirror_workflow;
       if (!path) return false;
-      target = { github: repo.github, workflow: path.slice(path.lastIndexOf('/') + 1), ref: repo.default_branch };
+      target = { path: repo.github, workflow: path.slice(path.lastIndexOf('/') + 1), ref: repo.default_branch };
     }
     try {
       return await this.ports.dispatch.send(target);
@@ -348,7 +349,7 @@ export class BatonCore {
     const raw = req.headers.get('X-Baton-Sync');
     if (!raw) throw new BatonError('unauthenticated', 'no sync principal');
     const claims = JSON.parse(raw) as SyncCredential;
-    const repo = claims.kind === 'gitlab' ? this.registry.forGitlab(claims, role) : this.registry.forSync(claims, role);
+    const repo = claims.kind === 'gitlab-ci' ? this.registry.forGitlab(claims, role) : this.registry.forSync(claims, role);
     return { repo, req };
   }
 
@@ -634,7 +635,8 @@ export class BatonCore {
           // B-182 (R-BTN-140): and the effective `code_repos`, each entry with its forge, host,
           // ids and web_base, and the owners' `pushers` host-qualified — what the fact adapter
           // reads each repository by, and whose words count there.
-          return json({ ...this.observations.observe(repo), bars: this.admin.bars([repo], this.now(), true).map(({ repository_id: _r, ...b }) => b), code_repos: codeReposOf(this.store, repo), pushers: pushersOf(this.store, repo), ...this.claims.syncRecord(repo), versions: this.ticketVersions(repo), signing_keys: await this.admin.signingKeys(repo), require_signed_control: !!this.sql<{ flag: number }>('SELECT require_signed_control AS flag FROM repositories WHERE id = ?', repo)[0]?.flag });
+          const home = this.registry.get(repo)!;
+          return json({ ...this.observations.observe(repo), home: forgeCoordinates(home), bars: this.admin.bars([repo], this.now(), true).map(({ repository_id: _r, ...b }) => b), code_repos: codeReposOf(this.store, repo), pushers: pushersOf(this.store, repo), ...this.claims.syncRecord(repo), versions: this.ticketVersions(repo), signing_keys: await this.admin.signingKeys(repo), require_signed_control: !!this.sql<{ flag: number }>('SELECT require_signed_control AS flag FROM repositories WHERE id = ?', repo)[0]?.flag });
         }
         if (req.method === 'POST' && url.pathname === '/v1/sync/board') {
           const { repo, req: signed } = await this.verifySync(req, 'sync');
@@ -1518,7 +1520,8 @@ export class BatonCore {
       }
     }
     const take = checkSequenceTake(body);
-    return json(this.sequences.next(repo, kind, take.floor, actor, take.forTicket));
+    const home = this.registry.get(repo)!;
+    return json({ ...this.sequences.next(repo, kind, take.floor, actor, take.forTicket), home: forgeCoordinates(home) });
   }
 
   /** A ticket in a path: a qualified id (R-BTN-47) of a registered repository. A malformed

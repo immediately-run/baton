@@ -1,3 +1,4 @@
+import { hasPrs } from './forges';
 // policy.ts — the repository policy (BATON_SPEC §12.8 R-BTN-188, R-BTN-189, B-145): the knobs,
 // their schemas, the presets, the guarantees computed over a version, the approver lists, the
 // floors, and the store side — the append-only `repository_policies` log, `policy_floors`, the
@@ -275,7 +276,7 @@ export function validatePolicyDocument(input: unknown, opts: { forge: Forge }): 
   // R-BTN-188 (a repository with no forge cannot use them, R-BTN-92): `leg_state: forge`, a
   // `forge-check` deliverer (check runs are GitHub's, R-BTN-115) and `ci-identity` in
   // `inputs.board` (CI identity tokens are GitHub's and GitLab's, R-BTN-156).
-  if (opts.forge === 'git') {
+  if (!hasPrs(opts.forge)) {
     if (v.leg_state === 'forge') bad('policy.leg_state', "a git repository has no forge conversation: 'branch' or unset");
     if (board.includes('ci-identity')) bad('policy.inputs.board', "a git repository has no CI identity: 'ci-identity' is a forge's");
     if (outboxForgeCheck.deliverers.length) bad('policy.outbox.forge-check.deliverers', 'a git repository has no check runs to check: no forge-check deliverer');
@@ -443,7 +444,7 @@ export type PresetName = keyof typeof PRESETS;
  *  (R-BTN-190: where state lives follows where the PRs are read). */
 export function policyForPreset(name: PresetName, forge: Forge): PolicyDocument {
   const doc = structuredClone(PRESETS[name]);
-  if (forge !== 'git') return doc;
+  if (hasPrs(forge)) return doc;
   const board = doc.inputs.board.filter((b) => b !== 'ci-identity');
   return { ...doc, inputs: { ...doc.inputs, board: board.length ? board : ['sync-key'] }, outbox: { ...doc.outbox, 'forge-check': { deliverers: [], trust: 'any' } } };
 }
@@ -456,7 +457,7 @@ export function policyForPreset(name: PresetName, forge: Forge): PolicyDocument 
  *  conversation is not where any PR lives). */
 export function legStateOf(policy: PolicyDocument, forge: Forge, courseReadsPrs = false): 'forge' | 'branch' {
   if (policy.leg_state !== undefined) return policy.leg_state;
-  return forge !== 'git' || courseReadsPrs ? 'forge' : 'branch';
+  return hasPrs(forge) || courseReadsPrs ? 'forge' : 'branch';
 }
 
 // ── the guarantees (R-BTN-189's table) ──────────────────────────────────────────────────
@@ -583,7 +584,7 @@ export class Policies {
    *  `preset` column alone (R-BTN-188: nowhere else is a preset name stored). */
   ensure(repository: string, forge: Forge): void {
     if (this.rows('SELECT 1 FROM repository_policies WHERE repository_id = ? AND version = 1', repository).length) return;
-    const preset: PresetName = forge === 'git' ? 'plain-git' : 'cooperative';
+    const preset: PresetName = !hasPrs(forge) ? 'plain-git' : 'cooperative';
     const doc = policyForPreset(preset, forge);
     this.exec('INSERT INTO repository_policies (repository_id, version, policy_json, hash, previous_hash, changed_by, approver, preset, at) VALUES (?, 1, ?, ?, NULL, ?, NULL, ?, ?)',
       repository, canonicalJson(doc), hashOfDocument(doc), 'server', preset, this.c.now());

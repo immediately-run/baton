@@ -1,3 +1,4 @@
+import { DEFAULT_FORGE, FORGE_SHAPES } from './forges';
 // scope.ts — a leg's scope audit (B-134, OWASP ASI10 hole 7): what a leg may touch is its
 // ticket's home and `repos:` entries, and two halves report what a leg did outside it.
 //
@@ -154,7 +155,7 @@ export class Scope {
     // delivery's want is mapped to, matched the same way.
     const repo = this.rows<{ id: string; runner_pushers: string | null }>(
       `SELECT id, runner_pushers FROM repositories
-       WHERE retired_at IS NULL AND forge = 'github' AND lower(web_base) = 'https://github.com/' || lower(github) AND lower(github) = ?`, full)[0];
+       WHERE retired_at IS NULL AND forge = ? AND lower(web_base) = ? || '/' || lower(github) AND lower(github) = ?`, DEFAULT_FORGE, FORGE_SHAPES[DEFAULT_FORGE].defaultOrigin, full)[0];
     if (!repo?.runner_pushers) return;
     let pushers: string[] = [];
     try {

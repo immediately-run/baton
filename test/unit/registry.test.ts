@@ -104,8 +104,8 @@ describe('the registry', () => {
       return got;
     });
     expect(sent).toEqual([
-      { github: 'immediately-run/ops', workflow: 'sync.yml', ref: 'trunk' },
-      { github: 'immediately-run/docs', workflow: 'baton-mirror.yml', ref: 'main' }]);
+      { path: 'immediately-run/ops', workflow: 'sync.yml', ref: 'trunk' },
+      { path: 'immediately-run/docs', workflow: 'baton-mirror.yml', ref: 'main' }]);
   });
 
   it('an unblocked dispatch sends the owners’ workflow with one `tickets` input; a trigger it cannot send is false (R-BTN-77)', async () => {
@@ -123,7 +123,7 @@ describe('the registry', () => {
       expect(await c.dispatcher({ repository: 'ops', kind: 'unblocked', tickets })).toBe(false);
       return got;
     });
-    expect(sent).toEqual([{ github: 'immediately-run/docs', workflow: 'baton-unblocked.yml', ref: 'main', inputs: { tickets: JSON.stringify(tickets) } }]);
+    expect(sent).toEqual([{ path: 'immediately-run/docs', workflow: 'baton-unblocked.yml', ref: 'main', inputs: { tickets: JSON.stringify(tickets) } }]);
   });
 
   it('dispatchWorkflow posts `inputs` only when the target has them', async () => {
@@ -135,9 +135,9 @@ describe('the registry', () => {
       return new Response(null, { status: 204 });
     });
     try {
-      expect(await dispatchWorkflow('tok', { github: 'immediately-run/docs', workflow: 'baton-unblocked.yml', ref: 'main', inputs: { tickets: '[]' } })).toBe(true);
-      expect(await dispatchWorkflow('tok', { github: 'immediately-run/docs', workflow: 'baton-mirror.yml', ref: 'main' })).toBe(true);
-      expect(await dispatchWorkflow(undefined, { github: 'immediately-run/docs', workflow: 'baton-mirror.yml', ref: 'main' })).toBe(false);
+      expect(await dispatchWorkflow('tok', { path: 'immediately-run/docs', workflow: 'baton-unblocked.yml', ref: 'main', inputs: { tickets: '[]' } })).toBe(true);
+      expect(await dispatchWorkflow('tok', { path: 'immediately-run/docs', workflow: 'baton-mirror.yml', ref: 'main' })).toBe(true);
+      expect(await dispatchWorkflow(undefined, { path: 'immediately-run/docs', workflow: 'baton-mirror.yml', ref: 'main' })).toBe(false);
     } finally {
       vi.unstubAllGlobals();
     }

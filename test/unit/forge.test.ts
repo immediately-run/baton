@@ -4,8 +4,10 @@
 // that opens the request's PR with the caller's forge credential. Pure: the refusals are git's
 // recorded stderr, the PR answers an injected fetch — the pushed branches and real git are
 // request-protected.test.ts's, through the command itself.
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { forgeApi, hostOf, NAMED_FORGES, openRequestPr, protectedRefusal, requestForge, tokenOf } from '../../src/defaults/forge';
+import { forgeReader } from '../../src/defaults/forges';
+import { FORGE_SHAPES } from '../../src/core/forges';
 
 /** git's stderr from a refused push, as each forge writes it over the `remote:` lines. */
 const REFUSALS = {
@@ -128,12 +130,13 @@ describe('opening the request’s PR with the caller’s forge credential', () =
       ['gitlab', 'https://gitlab.com/api/v4/projects/immediately-run%2Fbaton/merge_requests', { title: 'T', source_branch: 'baton-request/B-1', target_branch: 'main' }, 'web_url'],
       ['gitea', 'https://gitea.com/api/v1/repos/immediately-run/baton/pulls', { title: 'T', head: 'baton-request/B-1', base: 'main' }, 'html_url'],
     ] as const) {
-      const { seen, fetchImpl } = answer(201, { [wants]: `https://forge/pr/7` });
+      const prUrl = `https://${forge}.com/immediately-run/baton/${forge === 'gitlab' ? '-/merge_requests' : forge === 'gitea' ? 'pulls' : 'pull'}/7`;
+      const { seen, fetchImpl } = answer(201, { [wants]: prUrl });
       const got = await openRequestPr({ forge, host: forge === 'github' ? 'github.com' : `${forge}.com`, repo: 'immediately-run/baton', head: 'baton-request/B-1', base: 'main', title: 'T' }, 'tok', fetchImpl);
-      expect(got).toBe('https://forge/pr/7');
+      expect(got).toBe(prUrl);
       expect(seen[0].method).toBe('POST');
       expect(seen[0].url).toBe(url);
-      expect(seen[0].headers.get('authorization')).toBe('Bearer tok');
+      expect(seen[0].headers.get('authorization')).toBe(forge === 'gitea' ? 'token tok' : 'Bearer tok');
       expect(JSON.parse(await seen[0].text())).toEqual(body);
     }
   });
@@ -156,13 +159,51 @@ describe('opening the request’s PR with the caller’s forge credential', () =
     };
     await expect(
       openRequestPr({ forge: 'github', host: 'github.com', repo: 'immediately-run/baton', head: 'baton-request/B-3', base: 'main', title: 'T' }, 'tok', unreachable),
-    ).rejects.toThrow('github (github.com) was not reached opening the PR from baton-request/B-3: fetch failed — the request is pushed on baton-request/B-3; open the PR yourself');
+    ).rejects.toThrow('github (github.com) could not open the PR from baton-request/B-3: github was not reached — the request is pushed on baton-request/B-3; open the PR yourself');
   });
 
   it('a refusal is one line naming the forge, its answer, and the branch that is pushed', async () => {
     const { fetchImpl } = answer(403, { message: 'Resource not accessible by integration' });
     await expect(
       openRequestPr({ forge: 'github', host: 'github.com', repo: 'immediately-run/baton', head: 'baton-request/B-2', base: 'main', title: 'T' }, 'tok', fetchImpl),
-    ).rejects.toThrow('github (github.com) answered 403 opening the PR from baton-request/B-2: Resource not accessible by integration — the request is pushed on baton-request/B-2; open the PR yourself');
+    ).rejects.toThrow('github (github.com) could not open the PR from baton-request/B-2: github answered 403 at /repos/immediately-run/baton/pulls — the request is pushed on baton-request/B-2; open the PR yourself');
   });
+});
+
+// S-BTN-231, S-BTN-106: each wire format serves the same course contract.
+it.each(['github', 'gitlab', 'gitea'] as const)('%s client opens, lists, comments, reads facts, and recognizes protection', async (forge) => {
+  const path = forge === 'gitlab' ? 'o/group/r' : 'o/r';
+  const host = `${forge}.example`;
+  const base = `https://${host}/${path}`;
+  const page = `${base}${FORGE_SHAPES[forge].pr}9`;
+  const branch = 'claude/B-273-test';
+  const sha = 'a'.repeat(40);
+  const gl = forge === 'gitlab';
+  const pr = gl ? { iid: 9, source_branch: branch, sha, state: 'opened', web_url: page }
+    : { number: 9, head: { ref: branch, sha }, state: 'open', html_url: page };
+  const end = gl ? '/merge_requests' : '/pulls';
+  const fetchImpl = vi.fn<typeof fetch>().mockImplementation(async (input, init) => {
+    const url = new URL(String(input));
+    expect(url.host).toBe(host);
+    expect(init?.redirect).toBe('error');
+    expect(new Headers(init?.headers).get('Authorization')).toBe(forge === 'gitea' ? 'token fake' : 'Bearer fake');
+    if (url.pathname.endsWith(end)) return Response.json(init?.method === 'POST' ? pr : [pr]);
+    if (init?.method === 'POST') return Response.json(gl ? { id: 2 } : { html_url: `${page}#issuecomment-2` });
+    throw new Error(`unexpected request ${url}`);
+  });
+  // GitHub's existing reader takes fetch from the sync runtime.
+  vi.stubGlobal('fetch', fetchImpl);
+  try {
+    const connect = forgeReader({ log: () => {}, owns: () => false, pushers: [] });
+    const client = connect({ forge, path, webBase: base }, { env: { [tokenOf(forge)]: 'fake' }, fetchImpl });
+    expect(await client.openPr({ head: branch, base: 'main', title: 'Test' })).toBe(page);
+    expect(await client.listOpenPrs()).toEqual([{ number: 9, headRefName: branch, headRefOid: sha }]);
+    expect(await client.comment(9, 'baton: verdict')).toBe(`${page}${gl ? '#note_2' : '#issuecomment-2'}`);
+    expect(await client.facts({ tickets: [] })).toEqual([{ number: 9, head: branch, repository: path, state: 'open', url: page, pushedAt: 0, checks: [], reviews: [] }]);
+    expect(client.protectedRefusal(gl ? 'not allowed to push code to protected branches' : forge === 'gitea' ? 'not allowed to push to protected branch' : 'GH006')).toBe(true);
+    expect(client.protectedRefusal('access denied')).toBe(false);
+    expect(fetchImpl).toHaveBeenCalledTimes(4);
+  } finally {
+    vi.unstubAllGlobals();
+  }
 });
