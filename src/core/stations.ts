@@ -7,7 +7,7 @@
 import { nonScheduling } from './stateVersion';
 import { logEvent } from './db';
 import { extendsPath, graphOf, leaves, onGraph, resolveLeg, type Graph, type Step } from './graph';
-import type { PostedStation } from './board';
+import { missingQueuedLeg, type PostedStation } from './board';
 import type { Store } from './ports';
 import { meetsRequiredBar, requiredBarCovers, type RequiredBar } from './admin';
 import { qualify } from './validate';
@@ -168,6 +168,19 @@ export class Stations {
         qualify(repo, c.id), c.as, observation, at, parent);
     }
     return seen;
+  }
+
+  /** R-BTN-83 (S-BTN-312): read the final placement, including any move by a sync attestation. */
+  missingNext(repo: string): Set<string> {
+    const missing = new Set<string>();
+    for (const row of this.rows<{ id: string; course_id: string; station: string; next_leg: null }>(
+      `SELECT t.id, t.course_id, s.station, s.next_leg FROM tickets t JOIN ticket_stations s ON s.ticket_id = t.id
+       WHERE t.repository_id = ? AND s.next_leg IS NULL
+         AND NOT EXISTS (SELECT 1 FROM closed_tickets c WHERE c.ticket_id = t.id)`, repo)) {
+      const g = this.graph(repo, row.course_id);
+      if (g?.stations.has(row.station) && missingQueuedLeg(row, g.ends)) missing.add(row.id);
+    }
+    return missing;
   }
 
   /** Every live ticket of the repository with its stored station, next legs and bars (B-241).

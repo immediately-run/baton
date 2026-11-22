@@ -193,6 +193,7 @@ export class BatonCore {
     // a sync is asked (R-BTN-73) — and what it may not apply it records, never refusing (R-BTN-39).
     this.questions = new Questions({ store, now: () => this.now(), graph: (repo, course) => this.stations.graph(repo, course), history: this.history,
       queued: (ticket) => this.queues.touch(ticket), reevaluate: (ticket) => this.blocks.write([ticket]), isHeld: (ticket) => this.blocks.isHeld(ticket),
+      closeMissingNext: (ticket, at) => this.conditions.closeMissingNext(ticket, at),
       linkBases: (ticket) => this.blocks.linkBases(ticket), answersFrom: (repo) => this.policies.current(repo)?.policy.inputs.answers ?? 'git',
       dispatch: (kind, ticketId) => want({ repository: repositoryOf(ticketId), kind }) });
     // B-234 (R-BTN-160, R-BTN-195): the raised conditions — a course's own vocabulary decides a
@@ -1775,6 +1776,7 @@ export class BatonCore {
       // the blocks are re-evaluated below.
       this.questions.posted(r, p.tickets ?? [], new Set(stations.keys()));
       this.questions.attestations(r, p.attestations ?? []);
+      this.conditions.missingNext(r, this.stations.missingNext(r), at);
       // B-129 (R-BTN-85, both values): a post whose ticket frontmatter says `available` while
       // the ticket is past its course's start — the snapshot implying a position Baton has
       // moved past, the false `available`/`prs: []` of the 2026-10-27 release — is a
@@ -2153,6 +2155,7 @@ export class BatonCore {
     // head (§4.4) — each is idempotent, so a re-post of the same question or answer moves nothing.
     this.questions.posted(r, (p.tickets ?? []).filter((t) => live.has(t.id)), new Set(stations.keys()));
     this.questions.attestations(r, p.attestations ?? []);
+    this.conditions.missingNext(r, this.stations.missingNext(r), at);
     // A refresh's stations carry `needs` and `decisions` too (R-BTN-76, R-BTN-78); a refresh that
     // materialized (B-183) recounts for what its rows moved, as a new head does.
     this.applyBlocks(r, stations, wrote?.upserted ?? [], legsBefore, !!wrote && wrote.deleted > 0);

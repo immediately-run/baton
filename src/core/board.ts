@@ -10,6 +10,11 @@ import { checkRegistry, COURSE_ID, type RegistryEntry } from './courses';
 import { ASKS, COURSE_ID as LEG_ID, DECISION_GRANT_MAX, DECISION_ID, DECISION_OPTION, DECISION_OPTIONS_MAX, DECISION_QUESTION, DECISIONS_MAX, DEPENDENCY_ID, isHttpsPointer, LOCAL_ID, NEEDS_MAX, SESSION_NAME, TAG, HOLDING_TYPE, HOLDING_VALUE, repositoryOf } from './validate';
 import type { Step } from './graph';
 
+/** R-BTN-83: a placed ticket at a known non-end station needs a queued leg, not just readiness. */
+export function missingQueuedLeg(st: Pick<PostedStation, 'station' | 'next_leg'>, ends: ReadonlySet<string>): boolean {
+  return st.next_leg === null && !ends.has(st.station);
+}
+
 /** One factory-state item, as the sync posts it (`docs/scripts/factory-state.mjs`). Only the
  *  keys named here are read; anything else in the item is ignored. */
 export interface StateItem {
@@ -997,4 +1002,3 @@ export function resolveParents(
   }
   return { parentOf, invalid };
 }
-

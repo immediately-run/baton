@@ -955,8 +955,8 @@ module baton {
   // set of families on the writing legs — course logic is nondeterministic, R-BTN-50) and each
   // ticket's queued leg: one of the legs leaving the station git shows, or none ("") exactly
   // when no leg leaves it — at an end, or where max_runs leaves none. R-BTN-83 requires a `next`
-  // at every station but an end, and `locate` infers one for work without a pair; what core does
-  // with a post that breaks this is not yet specified (round 2, 2-r2-4; ticket B-27).
+  // at every station but an end, and `locate` infers one for work without a pair. This model
+  // assumes a conforming sync; the missing-next condition is covered by S-BTN-312 on both hosts.
   // Which leg is the course's to say (R-BTN-83: the holder's `next`, a re-route or the start leg).
   pure def queuedValid(git: str -> List[str], queued: str -> str): bool =
     git.keys().forall(t => if (nextLegs(git.get(t)).size() == 0) queued.get(t) == ""
