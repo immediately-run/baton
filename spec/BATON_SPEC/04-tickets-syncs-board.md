@@ -627,11 +627,12 @@ The fingerprint stores no ticket content and is an optimization, never authority
     keys (R-BTN-57). A digest checks integrity,
     not the authority of the source. Signed requests with `created` at or before the source's
     `sealed_at` are refused `unauthenticated`. Ticket-scoped rows wait in `pending_owner_state`
-    until the first snapshot that creates their ticket; one the repository's first snapshot does
-    not post is dropped and logged. A further move before that snapshot exports those pending
-    rows too. A pending Baton-owned position is restored, and its outgoing legs rebuilt from
-    the course in force, before that snapshot's placements are judged (R-BTN-39). The event
-    sequence continues from `events_seq`.
+    until the ticket is posted for an override, or placed for a Baton-owned position. A pending
+    row whose ticket is absent from a snapshot that materializes the ticket set is dropped and
+    logged. A further move exports rows that are still pending. Before the first accepted
+    placement on the current or new head is judged (R-BTN-39), Baton restores the pending
+    position and rebuilds its outgoing legs from the course in force. Until then the ticket is
+    not offered (§4.4). The event sequence continues from `events_seq`.
   - **Moving a Baton**:
     1. **freeze** (`baton admin freeze`, `POST /v1/admin/freeze`; `baton_settings.frozen_at`,
        event `frozen`): new claims and owner writes are refused `frozen`;

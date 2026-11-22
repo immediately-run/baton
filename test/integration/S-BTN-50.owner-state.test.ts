@@ -111,7 +111,7 @@ describe('S-BTN-50 owner state exported (R3-1258)', () => {
     expect(await rows('SELECT * FROM human_keys ORDER BY fingerprint')).toEqual(keys);
   });
 
-  it('keeps a person-leg arrival claimable across two moves and a stale first post', async () => {
+  it.each(['first post', 'refresh', 'new head'])('restores a person-leg arrival across two moves on a stale placement at %s', async (when) => {
     const person = {
       ...roadmapPr,
       legs: { ...roadmapPr.legs, decide: { from: ['reviewed'], to: ['adjudicated'], kind: 'person', asks: 'owner' } },
@@ -143,11 +143,23 @@ describe('S-BTN-50 owner state exported (R3-1258)', () => {
     expect((await adminPost('/v1/admin/import', secondBackup)).status).toBe(200);
     const target = new Git().add('A', { question }, stale);
     target.registry = registry;
-    expect((await target.post()).status).toBe(200);
+    if (when === 'first post') {
+      expect((await target.post()).status).toBe(200);
+    } else {
+      expect((await target.post({ stations: {} })).status).toBe(200);
+    }
+    const runner = await register('vm-a', { courses: [{ repository: 'docs', course: 'roadmap-pr', version: 4 }] });
+    if (when !== 'first post') {
+      const unplaced = await claimItem('vm-a', runner.secret);
+      expect(unplaced.json.code).toBe('no-eligible-ticket');
+      expect(await rows('SELECT * FROM ticket_stations WHERE ticket_id = ?', 'docs:A')).toEqual([]);
+      expect(await rows('SELECT kind FROM pending_owner_state WHERE ticket_id = ?', 'docs:A')).toEqual([{ kind: 'station' }]);
+      const placedPost = when === 'refresh' ? await target.refresh() : await target.post();
+      expect(placedPost.status).toBe(200);
+    }
     expect(await rows('SELECT station, next_source FROM ticket_stations WHERE ticket_id = ?', 'docs:A'))
       .toEqual([{ station: 'adjudicated', next_source: 'baton' }]);
     expect(await rows('SELECT * FROM pending_owner_state')).toEqual([]);
-    const runner = await register('vm-a', { courses: [{ repository: 'docs', course: 'roadmap-pr', version: 4 }] });
     const claim = await claimItem('vm-a', runner.secret);
     expect(claim.status, JSON.stringify(claim.json)).toBe(200);
     expect(claim.json).toMatchObject({ ticket_id: 'docs:A', station: 'adjudicated', legs: ['merge'] });

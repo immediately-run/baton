@@ -19,12 +19,12 @@ import type { Store } from './ports';
 export const OWNER_STATE_FORMAT = 'baton.owner-state/v1';
 
 /** One exported section: its table, deterministic order, and whether its rows wait in
- *  `pending_owner_state` for the first snapshot that creates their ticket. */
+ *  `pending_owner_state` until the ticket is posted (and, for positions, placed). */
 export interface Section {
   table: string;
   /** The column list of the ORDER BY, the table's key in order. */
   order: string;
-  /** §4.8: ticket-scoped rows an import holds back until their ticket's first snapshot. */
+  /** §4.8: ticket-scoped rows an import holds back until their ticket is posted or placed. */
   ticketScoped?: { kind: 'override' | 'station' };
 }
 
@@ -382,7 +382,7 @@ export class OwnerState {
 
   /** Step 4 (§4.8): the import — one transaction, into an empty Baton of the same schema, every
    *  row through the write path's validation; ticket-scoped rows wait in `pending_owner_state`
-   *  for the first snapshot that creates their ticket; the event sequence continues from
+   *  until their ticket is posted or placed; the event sequence continues from
    *  `events_seq`; runners' `last_seen_at` is 0 (they resume unkeyed). A sealed source's
    *  `sealed_at` becomes the new instance's floor for signed `created` (§11.1: a pre-seal
    *  replay reaches nothing). */
@@ -423,10 +423,7 @@ export class OwnerState {
           ...named.map((c) => (row[c] instanceof ArrayBuffer ? new Uint8Array(row[c] as ArrayBuffer) : row[c])));
       }
     };
-    // Ticket-scoped rows wait (§4.8): the first snapshot that creates their ticket applies them;
-    // the repository's first snapshot drops and logs the ones it does not post. The marker the
-    // snapshot reads is the setting below.
-    const awaiting: Record<string, true> = {};
+    // Ticket-scoped rows wait for the ticket to be posted or placed (§4.8).
     for (const s of SECTIONS) {
       if (!s.ticketScoped) continue;
       for (const row of b.sections?.[s.table] ?? []) {
@@ -434,10 +431,8 @@ export class OwnerState {
         const repo = ticket.slice(0, ticket.indexOf(':'));
         this.c.store.exec('INSERT INTO pending_owner_state (repository_id, ticket_id, kind, key, row_json) VALUES (?, ?, ?, ?, ?) ON CONFLICT (repository_id, ticket_id, kind, key) DO UPDATE SET row_json = excluded.row_json',
           repo, ticket, s.ticketScoped.kind, '', canonical(row));
-        awaiting[repo] = true;
       }
     }
-    if (Object.keys(awaiting).length) this.setSetting('pending_first_snapshot', JSON.stringify(Object.keys(awaiting).sort()));
     for (const s of SECTIONS) {
       if (s.ticketScoped) continue;
       const rows = (b.sections?.[s.table] ?? []).map((r) => (s.table === 'runners' ? { ...r, last_seen_at: 0, last_activity_at: 0 } : r));
@@ -486,19 +481,15 @@ export class OwnerState {
     return Number.isSafeInteger(n) && n > 0 ? n : null;
   }
 
-  /** §4.8: apply the pending ticket-scoped rows the post's live tickets answer to, inside the
-   *  transaction that accepted it. The repository's first snapshot since the import is the
-   *  judge: a pending row whose ticket it does not post is dropped and logged, and the rest
-   *  wait no longer than their own ticket's first appearance. */
-  applyPending(repository: string, postedLive: ReadonlySet<string>, at: number): void {
+  /** §4.8: apply imported overrides to live tickets, but keep positions pending until a post
+   *  places them (S-BTN-50). Only a post that materializes the ticket set can drop absent rows. */
+  applyPending(repository: string, live: ReadonlySet<string>, placements: ReadonlyMap<string, unknown>, at: number, dropAbsent: boolean): void {
     const pending = this.rows<{ ticket_id: string; kind: string; key: string; row_json: string }>(
       'SELECT ticket_id, kind, key, row_json FROM pending_owner_state WHERE repository_id = ?', repository);
-    if (!pending.length) return;
-    const awaiting = new Set(JSON.parse(this.setting('pending_first_snapshot') ?? '[]') as string[]);
-    const first = awaiting.has(repository);
     for (const row of pending) {
       const local = row.ticket_id.slice(repository.length + 1);
-      if (postedLive.has(local)) {
+      if (live.has(local)) {
+        if (row.kind === 'station' && !placements.has(local)) continue;
         // The override's columns, as the export held them; the table's own keys decide the row.
         const value = JSON.parse(row.row_json) as Record<string, unknown>;
         if (row.kind === 'override') {
@@ -514,15 +505,11 @@ export class OwnerState {
           this.c.restoreNext(repository, row.ticket_id, String(value.station), value.next_leg as string | null, at);
         }
         this.c.store.exec('DELETE FROM pending_owner_state WHERE repository_id = ? AND ticket_id = ? AND kind = ? AND key = ?', repository, row.ticket_id, row.kind, row.key);
-      } else if (first) {
-        // §4.8: one the repository's first snapshot does not post is dropped and logged.
+      } else if (dropAbsent) {
+        // Do not attach a removed ticket's pending state to a later reuse of its ID.
         this.c.store.exec('DELETE FROM pending_owner_state WHERE repository_id = ? AND ticket_id = ? AND kind = ? AND key = ?', repository, row.ticket_id, row.kind, row.key);
         logEvent(this.c.store, at, 'imported', 'server', { act: 'pending-dropped', ticket: row.ticket_id, kind: row.kind }, row.ticket_id, null, repository);
       }
-    }
-    if (first) {
-      awaiting.delete(repository);
-      this.setSetting('pending_first_snapshot', awaiting.size ? JSON.stringify([...awaiting].sort()) : null);
     }
   }
 }
