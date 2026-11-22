@@ -17,7 +17,7 @@ import { Admin, SESSION_COOKIE, SESSION_MS } from './admin';
 import { familyOf } from '../shared/baton.mjs';
 import { fitsTier, TIERS } from '../shared/vocabulary.mjs';
 import { clientVersionOf } from '../shared/versions.mjs';
-import { RunnerApi } from './runnerApi';
+import { RunnerApi, sha256Hex } from './runnerApi';
 import { parseAdminKeys, parseSshKey, verifyApiKey, verifyRequest, withBody, type SyncCredential } from './auth';
 import { Claims } from './claims';
 import { forgeScope } from './forgeScope';
@@ -861,7 +861,11 @@ export class BatonCore {
     }
     const { cred } = await this.verifySigned(req);
     if ((await this.admin.adminFingerprints()).has(cred)) throw new BatonError('forbidden', 'an administrator key is never a runner key');
-    forgeScope(this.store, this.now(), match[2], cred);
+    const secret = req.headers.get('X-Runner-Secret');
+    if (!secret) throw new BatonError('unauthenticated', 'X-Runner-Secret is required after the first heartbeat');
+    const secretHash = await this.outside(() => sha256Hex(secret));
+    // Proof is a read, not a heartbeat. It must not revive or extend the session it proves.
+    forgeScope(this.store, this.now(), match[2], { credential: cred, secretHash });
     return new Response(null, { status: 204 });
   }
 

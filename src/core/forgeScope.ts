@@ -5,7 +5,7 @@ import { scopePaths } from './scope';
 import { checkForgeRun } from './validate';
 
 /** S-BTN-310: unlike the scope audit, this read never authorizes by-name reach. */
-export function forgeScope(store: Store, now: number, run: string, runner?: string) {
+export function forgeScope(store: Store, now: number, run: string, session?: { credential: string; secretHash: string }) {
   checkForgeRun(run);
   const row = store.exec<{ repository_id: string; github: string; repos: string; valid_until: number }>(`
     SELECT p.id AS repository_id, p.github, t.repos,
@@ -18,10 +18,8 @@ export function forgeScope(store: Store, now: number, run: string, runner?: stri
       AND c.status = 'active' AND w.reaped_at IS NULL AND k.kind = 'runner'
       AND k.revoked_at IS NULL AND g.revoked_at IS NULL AND p.retired_at IS NULL
       AND p.forge = 'github' AND lower(p.web_base) = 'https://github.com/' || lower(p.github)
-      AND (? IS NULL OR k.id = ?)
-      AND NOT EXISTS (SELECT 1 FROM messages m WHERE m.to_runner_id = w.id AND m.kind = 'release'
-        AND m.status IN ('pending', 'delivered') AND json_extract(m.payload_json, '$.ticket_id') = t.id)
-  `, run, runner ?? null, runner ?? null).toArray()[0];
+      AND (? IS NULL OR (k.id = ? AND w.secret_hash = ?))
+  `, run, session?.credential ?? null, session?.credential ?? null, session?.secretHash ?? null).toArray()[0];
   if (!row || row.valid_until <= now) throw new BatonError('not-found', 'no active forge scope for this run');
   const listed = codeReposOf(store, row.repository_id);
   const paths = scopePaths({ ...row, forge: 'github' }, listed.map((entry) => entry.path));

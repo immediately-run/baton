@@ -1,5 +1,5 @@
 import { expect, inject, it } from 'vitest';
-import { hbBody, keyCall, ORIGIN, payload, cutover, setAdminKeys, setClock, sha256, syncCall, withCore } from '../helpers';
+import { hbBody, keyCall, adminSession, sessionCall, ORIGIN, payload, cutover, setAdminKeys, setClock, sha256, syncCall, withCore } from '../helpers';
 import { makeKey, signedRequest, type TestKey } from '../lib/sshKeys';
 import { call } from '#host';
 import type { Config } from '../../src/core/ports';
@@ -26,15 +26,24 @@ it('S-BTN-310: only the holder can prove a run; only the broker can read its liv
     expect((await syncCall('/v1/sync/board', payload(board.shas.A, null, snapshot))).status).toBe(200);
     await cutover(1, 'docs');
     const secret = 'secret-k';
-    const runnerCall = async (key: TestKey, path: string, body?: unknown) => {
+    const runnerCall = async (key: TestKey, path: string, body?: unknown, session: string | null = secret) => {
       const created = Math.floor((await withCore((c) => c.now())) / 1000);
       return call(await signedRequest(key, ORIGIN + path, { created,
-        body: body === undefined ? undefined : JSON.stringify(body), headers: { 'X-Runner-Secret': secret } }));
+        body: body === undefined ? undefined : JSON.stringify(body), headers: session ? { 'X-Runner-Secret': session } : {} }));
     };
+    let runnerId = 0;
     for (const [key, hostname] of [[runner, 'k-host'], [other, 'other-host']] as const) {
       expect((await keyCall(owner, '/v1/owner/docs/grants', { public_key: key.publicKey, hostname, capabilities: ['agent-venue'] })).status).toBe(200);
-      expect((await runnerCall(key, '/v1/runner/heartbeat', hbBody('vm-a', { hostname, secret_hash: await sha256(secret) }))).status).toBe(200);
+      const beat = await runnerCall(key, '/v1/runner/heartbeat', hbBody('vm-a', { hostname, secret_hash: await sha256(secret) }));
+      expect(beat.status).toBe(200);
+      if (key === runner) runnerId = (await beat.json() as { runner_id: number }).runner_id;
     }
+    const second = 'secret-second-session';
+    const secondBeat = await runnerCall(runner, '/v1/runner/heartbeat', hbBody('vm-a', {
+      hostname: 'k-host', session_name: 'second-session', secret_hash: await sha256(second),
+    }), second);
+    expect(secondBeat.status).toBe(200);
+    expect((await secondBeat.json() as { runner_id: number }).runner_id).not.toBe(runnerId);
     const claimed = await runnerCall(runner, '/v1/runner/claim', { request_id: 'req-b131', ticket_id: 'docs:R3-9001' });
     expect(claimed.status).toBe(200);
     const { claim_id } = await claimed.json() as { claim_id: number };
@@ -44,6 +53,8 @@ it('S-BTN-310: only the holder can prove a run; only the broker can read its liv
     const scope = `/v1/forge-scope/broker/${run_id}`;
     const proof = `/v1/forge-scope/runner/${run_id}`;
     expect((await runnerCall(runner, proof)).status).toBe(204);
+    expect((await runnerCall(runner, proof, undefined, second)).status).toBe(404);
+    expect((await runnerCall(runner, proof, undefined, null)).status).toBe(401);
     expect((await runnerCall(other, proof)).status).toBe(404);
     expect((await runnerCall(runner, scope)).status).toBe(401);
     expect((await runnerCall(broker, proof)).status).toBe(401);
@@ -53,6 +64,19 @@ it('S-BTN-310: only the holder can prove a run; only the broker can read its liv
     expect(await read.json()).toEqual({ repositories: [
       { path: 'immediately-run/docs', id: null }, { path: 'immediately-run/fieldhouse', id: '123' },
     ], valid_until: expect.any(Number) });
+    const requested = await sessionCall(await adminSession(admin), '/v1/ui/messages', { method: 'POST',
+      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind: 'release', to_runner_id: runnerId,
+        payload: { ticket_id: 'docs:R3-9001', reason: 'requested' } }) });
+    expect(requested.status).toBe(200);
+    const { id } = await requested.json() as { id: number };
+    expect((await runnerCall(broker, scope)).status).toBe(200);
+    const delivered = await runnerCall(runner, '/v1/runner/heartbeat', hbBody('vm-a', { hostname: 'k-host' }));
+    expect((await delivered.json() as { messages: unknown[] }).messages).toContainEqual(expect.objectContaining({ id, kind: 'release' }));
+    expect((await runnerCall(broker, scope)).status).toBe(200);
+    expect((await runnerCall(runner, `/v1/runner/messages/${id}/ack`, {})).status).toBe(200);
+    expect((await runnerCall(broker, scope)).status).toBe(200);
+    await setClock(now + 899_000);
+    expect((await runnerCall(runner, proof)).status).toBe(204);
     await setClock(now + 901_000);
     expect((await runnerCall(broker, scope)).status).toBe(404);
     await setClock(now + 1000);

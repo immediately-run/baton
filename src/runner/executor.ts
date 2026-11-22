@@ -54,6 +54,8 @@ export interface Brief {
 
 export interface StartOptions {
   brief: Brief;
+  /** Fresh proof for this live run only, available solely to the host-pinned executor. */
+  forgeProof?: () => Record<string, string>;
   /** The leg's executor data (R-BTN-107): opaque to Baton, the executor's to validate. */
   executor?: Record<string, unknown> | null;
   inputs?: unknown[];
