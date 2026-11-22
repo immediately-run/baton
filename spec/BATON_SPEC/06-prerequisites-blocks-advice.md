@@ -486,8 +486,8 @@ never refuses, and acting against it is accepted and recorded `advice-overridden
   `delivered` in the same transaction, and returns again every delivered message not yet
   acknowledged, so a lost response loses none; the runner acts on a message `id` once, then
   acknowledges. A ring (R-BTN-91) only prompts that heartbeat.
-- **`release`.** The runner stops the leg at its next safe point — at once for `requested`,
-  `floor` and `owner-cancel` (R-BTN-119) — leaves its work in git with the hand-off (R-BTN-44),
+- **`release`.** The runner stops the leg as R-BTN-119 describes, leaves its work in git with
+  the hand-off (R-BTN-44),
   ends the claim `released:<reason>` (§9) and acknowledges. A delivered `release` unacknowledged
   for 2 hours is reaped by the alarm with a fence (R-BTN-19); a `leg-timeout` release is reaped
   as R-BTN-90 says.

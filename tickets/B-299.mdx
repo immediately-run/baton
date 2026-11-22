@@ -126,6 +126,12 @@ setting, a CI workflow or a deploy.
 
 ## Status
 
+_2026-11-22 — spec rulings proposed for owner confirmation._ B-299 retains the live ancestry
+check, runner credential stripping and masking classes 1–2 for its code phase. B-46 retains
+credential scoping, `BATON_RESUME`, class 3 and the off-branch condition; B-79 retains the fixed
+fence deadline and pending condition. B-9 retains Stop work and gains the CLI command. B-184
+should use the executor-owned stop mechanism and R-BTN-145's bound, not a prescribed ladder.
+
 _filed 2026-11-20._ From the adversarial review of PR #299 (the spec simplification of
 2026-11-19), findings A4-8 to A4-11 and the fix round's list for §8 and §9. Related: B-46
 (item 2), B-79, B-9, B-184, B-189 (items 7 and 10), B-263 (removes `runner.ts`'s

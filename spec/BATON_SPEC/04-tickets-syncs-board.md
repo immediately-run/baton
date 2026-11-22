@@ -486,8 +486,7 @@ The fingerprint stores no ticket content and is an optimization, never authority
     `version` as the board holds it, and how its source reads (`ticket_source`: `{kind,
     versions}`; absent when the board declared no source, and `version` is `''` when the board
     holds none).
-    Before preparing any tree at the sha, the runner checks it is on the registered default
-    branch (R-BTN-143, else `released:off-branch`). If `git cat-file -e <snapshot_sha>` fails or
+    R-BTN-143 governs verification of the snapshot's ancestry. If `git cat-file -e <snapshot_sha>` fails or
     the file is absent, it fetches the default branch once, then releases `stale-board` if it is
     still missing.
   - The runner reads the ticket from `origin/<default branch>:<path>`, never the working tree,

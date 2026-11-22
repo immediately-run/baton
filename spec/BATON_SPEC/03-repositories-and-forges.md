@@ -65,8 +65,8 @@ route, with the events and fields the table lists for it, is
     Afterwards every rule reads live repositories only: a retired one has no dispatch,
     credential, owner, policy or count, and every call naming it is `not-found`, as for one never
     registered. Its rows stay, read-only, for administrators' reads. Two things stay live while
-    one of its claims is fence-pending: the fence itself — the alarm clears it at its
-    `fence_deadline`, an administrator may clear it, the seal waits for it (R-BTN-19, R-BTN-88),
+    one of its claims is fence-pending: the fence itself — cleared as R-BTN-19 specifies, and
+    the seal waits for it (R-BTN-88),
     and the old holder's heartbeat, whose retired course is dropped rather than refused
     (R-BTN-3), can still report `fenced` — and the holder queries, which keep answering for its
     former path (R-BTN-7, R-BTN-138). Its id is never registered again in the tenant (`conflict`);
@@ -403,4 +403,3 @@ route, with the events and fields the table lists for it, is
     home is G or whose `repos:` entry for G has reach (R-BTN-140), and names only
     tickets of repositories the asking key is granted on; any other match answers
     `held_by_other: true`, with no ids.
-

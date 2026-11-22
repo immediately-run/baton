@@ -165,8 +165,9 @@ section that are not built are in [the proposal page](../proposals/checks-and-ex
     R-BTN-74); the claim (id, nonce, the station the leg leaves); the leg and its run number;
     `replay` (R-BTN-84); the newest hand-off document and the resume record (R-BTN-24); advice;
     Baton's position and the latest snapshot's readiness; `checkout` (working directory); the
-    `session` token the previous leg returned; and an `AbortSignal` whose reason is `lease-lost`
-    (stop at once) or `release` (stop at the next safe point). Apart from that signal it is JSON: it carries no
+    `session` token the previous leg returned; and an `AbortSignal` whose reason is `release`
+    (including a course change) or `regressed`. A lost lease stops the session without sending
+    an abort reason. Apart from that signal it is JSON: it carries no
     function, and a leg raises a condition on its channel (R-BTN-106).
   - **First leg** is the queued leg the claim response names (R-BTN-83), started by the first
     `advance`; a first `advance` into any other leg is refused `not-eligible`, rule `not-queued`.
@@ -260,13 +261,14 @@ section that are not built are in [the proposal page](../proposals/checks-and-ex
     - `start({brief, executor, inputs, channel}) → handle` starts a session. `brief` holds the
       session's kind, the ticket, the leg, the checkout and the paths the session reads, the
       leg environment (R-BTN-144), and, as hints, whether the leg is `autonomous` (R-BTN-195)
-      and `reads_only` (R-BTN-183) — never the claim id, the runner secret or a Baton
-      credential. `channel` is the address of the leg's channel (R-BTN-106). A handle may name
+      and `reads_only` (R-BTN-183). The claim id and runner secret are not brief fields;
+      credential inheritance is governed by R-BTN-144. `channel` is the address of the leg's
+      channel (R-BTN-106). A handle may name
       the session's link, which the runner reports as R-BTN-113 says.
     - `exec(handle, argv, {cwd, timeout_s, stdin}) → {status, stdout, stderr}` runs a command
       where the session runs; the call's stdin stays open for further lines until it ends.
-    - `stop(handle, reason)` stops the session by R-BTN-119's ladder within R-BTN-145's bound:
-      the guarantee is the executor's to keep.
+    - `stop(handle, reason)` stops the session within R-BTN-145's bound. The executor chooses
+      how to stop it; `builtin` kills its process groups immediately when called.
     - `end(handle) → {status, result}` waits for the session's end. A session that does not exit
       when its agent is done, one a person can join, ends at the result posted on its channel,
       after which the runner calls `stop` (R-BTN-195).
@@ -347,18 +349,20 @@ section that are not built are in [the proposal page](../proposals/checks-and-ex
 
 ### 8.4 Where and how a leg runs
 
-- **R-BTN-143 (a runner runs only code the default branch holds).** Before reading any file at a
-  claim's `snapshot_sha` — `course.json`, `.baton/baton.json`, a leg script or override, a leg's
-  instructions — the runner checks `git merge-base --is-ancestor <snapshot_sha>
-  refs/baton/<repository>/default`, its own ref of the **registered** default branch the claim
-  response names, never the checkout's `origin` configuration.
-  - On failure it makes one bounded `git fetch origin <default_branch>` into that ref and checks
-    again; a second failure reads nothing and ends `released:off-branch`, which raises
-    `baton.off-branch` with the sha and its `posted_by` and records a sync want (R-BTN-94).
+- **R-BTN-143 (a runner runs only code the default branch holds).** Before reading any file at
+  the recorded `snapshot_sha`, `baton leg replay` checks `git merge-base --is-ancestor <snapshot_sha>
+  refs/baton/<repository>/default`, its own ref of the **registered** default branch Baton
+  names, not a branch selected by the checkout. On failure it makes one bounded fetch
+  into that ref and checks again. A second failure refuses replay. `--against <sha>` may select
+  another commit to run; the check is on the recorded sha.
   - The runner checks no second ancestry: Baton's record of the head is trusted (§12.8).
-  - The rule binds `baton runner start` and `baton leg replay`'s recorded sha, not
-    `--against <sha>`.
-- **R-BTN-133 (repository code runs through the wrapper).** R-BTN-143 runs first. No repository
+  - **Not built ([B-299](../../tickets/B-299.mdx)).** Before reading any file at a claim's
+    snapshot, `baton runner start` must make the same check against the registered default
+    branch from the home's remote. On a second failure it reads nothing there and ends
+    `released:off-branch` (§9.4).
+  - **Not built:** the `baton.off-branch` condition ([B-46](../../tickets/B-46.mdx)) and the
+    off-branch sync want ([B-57](../../tickets/B-57.mdx), R-BTN-94).
+- **R-BTN-133 (repository code runs through the wrapper).** R-BTN-143 governs snapshot reads. No repository
   code loads in the runner's process.
   - **The wrapper** `legProcess.mjs`, the CLI's own, which the executor makes available where
     its sessions run, runs every call into a script — `run`, `close`, `handoff`, a ticket
@@ -378,11 +382,14 @@ section that are not built are in [the proposal page](../proposals/checks-and-ex
     TypeScript and the leg module `@immediately-run/baton/leg`, are not built
     ([proposal](../proposals/checks-and-executors.md)).
 - **R-BTN-144 (a leg's environment, and the one list of what is masked).**
-  - **The runner's own credentials.** At start the runner reads `BATON_KEY`, `BATON_KEY_FILE`,
-    `BATON_TOKEN` and any API key once, keeps them in memory or its own 0600 key file, and
-    deletes them from its environment before loading any repository code. No session the
-    executor starts inherits them.
-  - **What a leg's environment holds.** These `BATON_*` names are the only ones:
+  - **The runner's own credentials.** The reference runner currently passes its environment to
+    legs, including `BATON_KEY`, `BATON_KEY_FILE` and `BATON_TOKEN` if set (the token can be
+    an API key). **Not built ([B-299](../../tickets/B-299.mdx)):** remove those variables after
+    capturing the authentication configuration and before loading repository code, so leg
+    sessions do not inherit them. Removing a key file's path from the environment does not
+    prevent a leg from reading that file if its executor permits it.
+  - **What a leg's environment holds.** The runner inherits host variables, including git,
+    forge and model-provider credentials and `SSH_AUTH_SOCK`, and sets these leg values:
 
     | Variable | Value |
     |---|---|
@@ -391,20 +398,21 @@ section that are not built are in [the proposal page](../proposals/checks-and-ex
     | `BATON_SOCKET` | the address of the leg's channel (R-BTN-106) |
     | `BATON_RUN_ID` | the run's `run_id` (R-BTN-63) |
     | `BATON_SESSION_ID` | the run's session id (R-BTN-123) |
-    | `BATON_ACTIVITY` | set for a child session started under an activity (§9.9) |
-    | `BATON_RESUME` | path of a JSON file holding earlier claimants' text — resume records, end details, hand-off documents — which reaches a leg only as data, never inside its instructions |
-    | `<NAME>` for `credential:<NAME>` | present only when the leg's `requires`, after role expansion (R-BTN-121), names it; every other declared `credential:` variable is removed |
-    | git, forge and model-provider credentials, `SSH_AUTH_SOCK` | kept, and masked in output (classes 4 and 7 below) |
+    | `BATON_AGENT_COMMAND` | command from `--harness`, a fallback when snapshot settings name no agent command |
+    | `BATON_VERBOSE` | `1` when the runner is verbose |
+    | `BATON_DEFAULT_BRANCH` | the claim's default branch, when supplied |
 
-    A course may not declare a `credential:` name that is `PATH`, `HOME`, `SSH_AUTH_SOCK`,
-    begins `BATON_`, or is a variable the runner keeps; the course file is held (R-BTN-69).
-  - **Masking.** Before any byte of a leg's output leaves the runner, the runner replaces each
-    exact occurrence of these with `***`:
-    1. the runner secret (the claim nonce is public and authenticates nothing);
+    **Not built:** `BATON_ACTIVITY` for child activities (R3-1214, §9.9), `BATON_RESUME` for a
+    path to earlier claimants' text, and scoping `credential:<NAME>` variables to the leg's
+    `requires` ([B-46](../../tickets/B-46.mdx)). The latter includes refusing course declarations
+    of reserved environment names.
+  - **Masking.** The runner replaces matches with `***`. Classes 5–7 are built; class 7 can
+    cover values from other classes when their environment names match.
+    1. the runner secret (the claim nonce is public and authenticates nothing) — not built ([B-299](../../tickets/B-299.mdx));
     2. the runner's Baton credentials (`BATON_KEY`, the contents of the file `BATON_KEY_FILE`
-       names, `BATON_TOKEN`, an API key);
-    3. the value of every declared `credential:<NAME>` variable, given to the leg or not;
-    4. the git and forge tokens the runner holds;
+       names, `BATON_TOKEN`, an API key) — dedicated masking not built ([B-299](../../tickets/B-299.mdx));
+    3. the value of every declared `credential:<NAME>` variable, given to the leg or not — not built ([B-46](../../tickets/B-46.mdx));
+    4. the git and forge tokens the runner holds — dedicated masking not built ([B-131](../../tickets/B-131.mdx));
     5. by pattern, every bearer prefix Baton issues or reserves — `brt_`, `bak_`, `bmcp_`, `bps_` and `bds_`
        (§12.1), and `bmo_`, `bmr_` and `bor_` (`BATON_MCP_OAUTH_SPEC` §12) — followed by
        `[A-Za-z0-9_-]*`;
@@ -428,14 +436,13 @@ section that are not built are in [the proposal page](../proposals/checks-and-ex
   release, a lost lease, the runner's exit — or its call returns, every process
   it started is gone within 30 s. The executor's `stop` keeps this (R-BTN-107).
 - **R-BTN-119 (stopping a running leg).** Baton kills nothing; it asks the runner.
-  - A `release` with reason `requested` (an owner's release message, the dashboard's **Stop
-    leg**, `baton leg stop`, a delegated key's `leg.stop`, R-BTN-130), `owner-cancel` (Cancel:
-    hold plus release, §6) or `floor` (R-BTN-189) reaches the runner at its next heartbeat. For
-    these three the runner stops the leg at once, by its executor's `stop`: interrupt,
-    terminate after 10 s, kill after 25 s.
-  - It then calls `close` and `handoff`, and ends `released:<reason>`; no output of the stopped
-    leg is reported.
-  - Every other release reason stops the leg at its next safe point (§9.4).
+  - A `release` reaches the runner on a heartbeat. It sends one abort line to the running leg
+    call, if attached, and gives the leg a safe point to stop. If the leg does not exit during
+    the 30-second grace, the runner stops it; the executor owns the stop mechanism (R-BTN-107).
+    There is no separate signal ladder for `requested`, `owner-cancel` or `floor`.
+  - If Baton has already ended the claim, the lost-claim path stops the leg without a hand-off
+    (R-BTN-6). Otherwise the runner settles the release (§9.4).
+  - **Not built:** `baton leg stop` ([B-9](../../tickets/B-9.mdx)).
 
 ### 8.5 A running leg's output
 

@@ -31,7 +31,7 @@ Designs for this section that are not built are on the proposal page
     home changes a sourced course only through its leg instructions and leg overrides
     (R-BTN-131).
   - **Every reader goes through the snapshot.** The sync reads `.baton/` at the commit it posts
-    (R-BTN-105), the runner at the claim's `snapshot_sha` after R-BTN-143's check, and
+    (R-BTN-105), the runner at the claim's `snapshot_sha` (see R-BTN-143), and
     re-verification at the commit it verifies (R-BTN-5), so all three use the same bytes.
     Station functions and ticket sources run through the wrapper (R-BTN-133) in a read-only
     worktree of that commit, never in `ctx.checkout`.
@@ -403,8 +403,8 @@ Designs for this section that are not built are on the proposal page
     capability, `human-operator` or `none`. A course may not declare a type named `runner` or
     `human-operator`.
   - **Built-ins:** `human-operator`, a runner's own statement that a person operates it, and
-    the type `runner` (R-BTN-133). `credential:<NAME>` names an environment variable a leg
-    receives only when it requires it (R-BTN-144).
+    the type `runner` (R-BTN-133). For the proposed `credential:<NAME>` environment scoping,
+    see R-BTN-144.
   - A course's types and roles are served with its course file and shown on the **Courses**
     view, which lists every type two courses define differently.
   - **The runner declares what it has** when it starts. A capability it declares with a lock
