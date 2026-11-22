@@ -187,7 +187,8 @@ export class BatonCore {
       dispatchSync: (repository) => want({ repository, kind: 'sync' }), fleetChanged: () => this.blocks.recount(), notices: this.notices,
       policies: this.policies, humanBreakGlass: () => this.humanBreakGlass(), reapForRetire: (repository, actor) => this.claims.retireReaps(repository, actor),
       conditionsForRetire: (repository) => this.conditions.retired(repository) });
-    this.stations = new Stations({ store, now: () => this.now(), requiredBars: (repo) => this.admin.requiredBars(repo), history: this.history });
+    this.stations = new Stations({ store, now: () => this.now(), requiredBars: (repo) => this.admin.requiredBars(repo), history: this.history,
+      missingNext: (repo, tickets, at) => this.conditions.missingNext(repo, tickets, at) });
     // R-BTN-116: a person leg's question and answer. Its arrival moves the ticket as a claim's
     // does — the queues' membership follows (R-BTN-79), the blocks are re-evaluated (R-BTN-75),
     // a sync is asked (R-BTN-73) — and what it may not apply it records, never refusing (R-BTN-39).

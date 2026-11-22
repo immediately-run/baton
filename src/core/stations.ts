@@ -7,7 +7,7 @@
 import { nonScheduling } from './stateVersion';
 import { logEvent } from './db';
 import { extendsPath, graphOf, leaves, onGraph, resolveLeg, type Graph, type Step } from './graph';
-import type { PostedStation } from './board';
+import { missingQueuedLeg, type PostedStation } from './board';
 import type { Store } from './ports';
 import { meetsRequiredBar, requiredBarCovers, type RequiredBar } from './admin';
 import { qualify } from './validate';
@@ -45,7 +45,8 @@ function batonWait(on: string | null | undefined): boolean {
 export class Stations {
   private graphs = new Map<string, Graph | null>();
 
-  constructor(private readonly c: { store: Store; now: () => number; requiredBars?: (repo: string) => RequiredBar[]; history?: History }) {}
+  constructor(private readonly c: { store: Store; now: () => number; requiredBars?: (repo: string) => RequiredBar[]; history?: History;
+    missingNext?: (repo: string, tickets: ReadonlySet<string>, at: number) => void }) {}
 
   private rows<T>(q: string, ...p: unknown[]): T[] {
     return this.c.store.exec<T>(q, ...p).toArray();
@@ -97,6 +98,7 @@ export class Stations {
    */
   apply(repo: string, sha: string, observation: number, stations: Map<string, PostedStation>, closed: { id: string; as: 'done' | 'withdrawn' }[], at: number, closingParents?: ReadonlyMap<string, string | null>): Map<string, Seen> {
     const seen = new Map<string, Seen>();
+    const missing = new Set<string>();
     // The reading that placed every station row before this one (R-BTN-62): a row this post
     // leaves unchanged keeps its own, older `observation`, so the repository's stands for it.
     const placedBefore = this.rows<{ n: number | null }>('SELECT stations_observation AS n FROM board_head WHERE repository_id = ?', repo)[0]?.n ?? 0;
@@ -140,6 +142,7 @@ export class Stations {
         const asFar = ours == null
           || (onGraph(g!, st.path) && st.path.length >= prev!.length && (g!.toEnd.get(st.station) ?? Infinity) <= ours);
         if (!asFar) {
+          if (missingQueuedLeg(prevRow, g!.ends)) missing.add(id);
           seen.set(id, { station: prevRow.station, path: prev!, prev, bars: st.bars });
           continue;
         }
@@ -150,6 +153,7 @@ export class Stations {
       const fine = prev ? extendsPath(g!, prev, st.path, g!.start) || st.path.length < prev.length : onGraph(g!, st.path);
       if (!fine) this.offGraph(repo, id, { observation, why: prev ? 'the path does not extend the previous one by edges' : 'the path does not follow the course file from its start', path: st.path, previous: prev });
       this.write(id, g!, st, sha, observation, at, required, t);
+      if (missingQueuedLeg(st, g!.ends)) missing.add(id);
       // R-BTN-81: git moved the ticket and no claim said so — someone else's work.
       if (prevRow && (prevRow.station !== st.station || prevRow.path !== JSON.stringify(st.path)) && !this.claimMoved(id, st.station, Math.max(prevRow.observation, placedBefore))) {
         this.c.history?.record(id, { kind: 'git-moved', reached: st.station, next_leg: st.next_leg, detail: { from: prevRow.station, to: st.station, path: st.path, observation, next_source: st.next_source } });
@@ -157,6 +161,7 @@ export class Stations {
       seen.set(id, { station: st.station, path: st.path, prev, bars: st.bars });
     }
     for (const c of closed) {
+      missing.delete(qualify(repo, c.id));
       // The first snapshot to report a closure stands (R-BTN-10 compares its observation).
       // R-BTN-86: the relation outlives the close — the parent the closing ticket's row held,
       // passed by the materialization that just dropped it (or read from the row a held
@@ -167,6 +172,7 @@ export class Stations {
       this.exec('INSERT INTO closed_tickets (ticket_id, closed_as, observation, closed_at, parent) VALUES (?, ?, ?, ?, ?) ON CONFLICT (ticket_id) DO NOTHING',
         qualify(repo, c.id), c.as, observation, at, parent);
     }
+    this.c.missingNext?.(repo, missing, at);
     return seen;
   }
 
