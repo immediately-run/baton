@@ -2,7 +2,7 @@
 title: "3. Repositories and forges"
 description: "A Baton hands out the tickets of the repositories its administrator registers."
 ---
-## 3. Repositories and forges *(proposal)*
+## 3. Repositories and forges
 
 A Baton hands out the tickets of the repositories its administrator registers. A repository
 lives on a **forge** — GitHub, GitLab, Gitea — or on a plain git server (`git`). Core reads no
@@ -36,7 +36,7 @@ route, with the events and fields the table lists for it, is
 
 ### 3.1 The registry
 
-- **R-BTN-47 (registered repositories).** Baton keeps a registry of repositories
+- **R-BTN-47 (registered repositories).** `status: built` Baton keeps a registry of repositories
   (`repositories`, §13). Each has:
   - an id, `^[a-z][a-z0-9-]{0,39}$`, unique in its tenant (R-BTN-135);
   - its forge, forge path, `remote` and `web_base` (R-BTN-92) and the forge's ids (R-BTN-138);
@@ -102,7 +102,7 @@ route, with the events and fields the table lists for it, is
   - **Repositories a ticket changes** (`repos:`) are filter fields its course reports. They
     need no registration; what they reach is R-BTN-140's.
 
-- **R-BTN-92 (a repository is a forge, a forge path, a remote and a web base).**
+- **R-BTN-92 (a repository is a forge, a forge path, a remote and a web base).** `status: built`
   - **`forge`**: `github`, `gitlab`, `gitea` or `git` (none), fixed for the repository's life.
   - **Forge path** (column `github`): segments of `[A-Za-z0-9_.-]{1,100}`, none `.` or `..`,
     none ending in `.git`, joined by `/`, as many as the forge allows (the adapter table).
@@ -125,7 +125,7 @@ route, with the events and fields the table lists for it, is
     repositories of its own forge host: GitHub's among `github` repositories on `github.com`.
   - The administrator may change `remote` and `web_base` (a move).
 
-- **R-BTN-138 (a forge repository is named by its immutable ids).** A path can be re-created
+- **R-BTN-138 (a forge repository is named by its immutable ids).** `status: built B-45` A path can be re-created
   by someone else after a rename, transfer or deletion; ids cannot.
   - **Registration records the ids** (the adapter table) as decimal strings
     `^[1-9][0-9]{0,19}$` in `forge_repo_id` and `forge_owner_id`, with `forge_host`. A forge
@@ -166,7 +166,7 @@ route, with the events and fields the table lists for it, is
     `repo-renamed` (actor `sync`), `repo-path-changed` or `repo-identified` (actor the
     administrator).
 
-- **R-BTN-61 (merging courses and repositories).** Recommendations order each (repository,
+- **R-BTN-61 (merging courses and repositories).** `status: built` Recommendations order each (repository,
   course) group by the default order (§6), then merge the groups by: (1) expedited first
   (R-BTN-12); (2) the home repository's `weight` (default 100), higher first; (3) the
   candidate's place in its own group; (4) fewer legs to an end; (5) `ready_since`, oldest
@@ -178,7 +178,7 @@ route, with the events and fields the table lists for it, is
 
 ### 3.2 Who may post a board
 
-- **R-BTN-93 (sync keys and the one verifier).** A repository's sync authenticates with a sync
+- **R-BTN-93 (sync keys and the one verifier).** `status: built` A repository's sync authenticates with a sync
   key, a CI identity token (R-BTN-15) or a machine key granted on the repository (R-BTN-102,
   R-BTN-146). A board post from a class the policy's `inputs.board` excludes (`sync-key`,
   `ci-identity`, `machine`; R-BTN-188) is refused `forbidden`.
@@ -200,7 +200,7 @@ route, with the events and fields the table lists for it, is
     true, or it has a `mirror`-role sync key. Only sync keys and CI tokens act as the mirror
     (§16).
 
-- **R-BTN-15 / R-BTN-156 (CI identity tokens).** `ci_identity` (§13) is NULL (sync keys only),
+- **R-BTN-15 / R-BTN-156 (CI identity tokens).** `status: built` `status: built` `ci_identity` (§13) is NULL (sync keys only),
   `{kind: 'github-actions'}` or `{kind: 'gitlab-ci', issuer, mirror}`. A token is verified in
   the Worker. Its audience is `BATON_ORIGIN` (R-BTN-56; GitLab's adds `#sync`), its ids equal the stored ones
   (R-BTN-138), and it comes from a run on the default branch:
@@ -224,7 +224,7 @@ route, with the events and fields the table lists for it, is
 
 ### 3.3 Triggering a sync
 
-- **R-BTN-94 (Baton dispatches a sync after the commit that wants one).** Where this
+- **R-BTN-94 (Baton dispatches a sync after the commit that wants one).** `status: partly B-152` Where this
   specification says Baton dispatches a sync, the object records the dispatch in the transaction
   that causes it — a claim, an `advance`, an end, a person's answer held in Baton, an owner bar
   set or lifted, an owners' `required_bars` change, a forge notification — once per repository
@@ -261,7 +261,7 @@ route, with the events and fields the table lists for it, is
   - **The mirror.** Legacy, removed with its code (R-BTN-193). Baton dispatches the
     `mirror_workflow` for the events a mirror writes and at a seal; a mirror run acknowledges
     what it read with the `GET /v1/sync/events` it ends with (§16).
-- **R-BTN-73 / R-BTN-95 (forge notifications are only triggers).** A notification has Baton
+- **R-BTN-73 / R-BTN-95 (forge notifications are only triggers).** `status: built` `status: built` A notification has Baton
   dispatch a sync (R-BTN-94); it never computes or carries state. Baton reads from it only the fields the adapter
   table lists.
   - **Routes.** Each forge's route and verifier are the adapter table's; a `git` repository has
@@ -296,7 +296,7 @@ route, with the events and fields the table lists for it, is
   - The default workflow's `schedule` stays as a trigger independent of the App; no rule assumes
     it fires.
 
-- **R-BTN-105 (a sync reads the commit it syncs; a plain server needs nothing).**
+- **R-BTN-105 (a sync reads the commit it syncs; a plain server needs nothing).** `status: built`
   - **Every input from the commit.** A sync reads tickets, `.baton/`, each course's
     `course.json` and `sync.mjs`, and the ticket source from the commit it posts — the remote
     default branch's head as just fetched — in a detached worktree of the whole commit (never
@@ -313,7 +313,7 @@ route, with the events and fields the table lists for it, is
 
 ### 3.4 Reading the forge
 
-- **R-BTN-96 (course facts come from an adapter per forge).** The CLI reads PR facts for every
+- **R-BTN-96 (course facts come from an adapter per forge).** `status: built B-29` The CLI reads PR facts for every
   course (R-BTN-203), not only one whose `entry.json` declares `facts: ["prs"]` (R-BTN-134),
   through a **fact adapter** chosen
   by the forge of the repository it reads — the home's by the home's, each code repository's by
@@ -332,7 +332,7 @@ route, with the events and fields the table lists for it, is
   - The `branch` course, which reads the home repository's git alone, is not built:
     [the proposal](../proposals/branch-course.md).
 
-- **R-BTN-139 (on a forge, only pushers' writes count).** The fact adapter marks every PR,
+- **R-BTN-139 (on a forge, only pushers' writes count).** `status: built B-46 B-119` The fact adapter marks every PR,
   comment, review and approval `pusher` or not, once per sync run. Standard station functions
   read only pushers' facts; the adapter exports `pusher` to a course's own `sync.mjs`; whatever
   station function runs, the CLI drops every posted marker and output whose author is not a
@@ -356,7 +356,7 @@ route, with the events and fields the table lists for it, is
     cannot be read does not count. Permissions are cached per author per run and re-read every
     sync, so a verdict whose author lost push stops counting from the next snapshot on.
 
-- **R-BTN-140 (code repositories are the owners' list).** The owner setting `code_repos` lists
+- **R-BTN-140 (code repositories are the owners' list).** `status: built` The owner setting `code_repos` lists
   forge repositories, each on the forge and host its entry names: an entry is `{path, forge?,
   host?}`, and omitted `forge` and `host` are the home's — on a `git` home both are required
   (`invalid-params`, naming the entry). Baton stores `{path, forge, host, repo_id, owner_id,
@@ -386,7 +386,7 @@ route, with the events and fields the table lists for it, is
   - `POST /v1/sync/observation` hands the sync the effective `code_repos` (entries with their
     ids), the policy's `repos.unlisted` (`repos_unlisted`) and `pushers`.
 
-- **R-BTN-141 (a branch pattern's grammar and reach).**
+- **R-BTN-141 (a branch pattern's grammar and reach).** `status: partly B-46 B-141`
   - `branch_pattern` and `previous_branch_pattern` (R-BTN-51): a literal prefix of 1–64
     characters of `[A-Za-z0-9._/-]` ending in `/` or `-`; `{ticket}` exactly once, optionally
     beside `{repository}` with a literal separator; then nothing, or one separator from

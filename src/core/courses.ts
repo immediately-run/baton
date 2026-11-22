@@ -281,7 +281,7 @@ export class Courses {
         ? [{ rule: 'bound', path: '', message: `the course file is over ${COURSE_FILE_MAX_BYTES} bytes` }]
         : validateCourse(e.course);
       if (!violations.length) violations.push(...this.ownSchemaViolations(repo, e, meter));
-      // R-BTN-67: a file that no longer has a leg an owner's required bar names — by its name or a
+      // R-BTN-67, R-BTN-142: a file missing a leg an owner's required bar names — by its name or a
       // `renamed_from` — is held until an owner updates or drops the bar.
       if (!violations.length) {
         const g = graphOf(e.course);

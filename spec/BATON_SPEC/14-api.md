@@ -2,7 +2,7 @@
 title: "14. API"
 description: "The routes Baton serves, each with its caller, body and response."
 ---
-## 14. API *(proposal)*
+## 14. API
 
 The routes Baton serves, each with its caller, body and response. Under `/v1`, an unmatched
 request is `404 not-found`. A row cites the rules that own its behaviour, bounds and

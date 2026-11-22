@@ -2,7 +2,7 @@
 title: "9. Claims"
 description: "A claim is a fenced lease on one ticket."
 ---
-## 9. Claims *(partly built — B-11, B-21, B-38, B-39, B-46, R3-1213)*
+## 9. Claims
 
 A claim is a fenced lease on one ticket. Baton owns it outright, as it owns the ticket's course
 history and position (R-BTN-39); the ticket's content and closure are git's (R-BTN-35). A claim
@@ -10,7 +10,7 @@ is `active` until it ends `completed`, `released` or `reaped`.
 
 ### 9.1 The lock and claiming
 
-- **R-BTN-4 (the lock).** At most one `active` claim per ticket, enforced by a partial unique
+- **R-BTN-4 (the lock).** `status: built` At most one `active` claim per ticket, enforced by a partial unique
   index. A claim holds one ticket through a run of its legs. A runner holds at most the lower of two
   numbers at once, counting its active claims across every repository:
   - its **`concurrency`**, which its heartbeat declares (§8.1): an integer from 1 to 32, default
@@ -52,14 +52,14 @@ is `active` until it ends `completed`, `released` or `reaped`.
     accepts and never reads.
   - The reply carries the run's `run_id`, the leg's resolved inputs (R-BTN-82) and Baton's
     advice flags; the course's own advice is `rank.mjs`'s (R-BTN-98).
-- **R-BTN-38 (legs are stateless at their boundaries).** Each leg reads its input from, and
+- **R-BTN-38 (legs are stateless at their boundaries).** `status: built` Each leg reads its input from, and
   leaves its output in, the ticket's repositories and their changes. Nothing a leg needs travels
   through a session's context, so any session can run any leg whose input is in place. What git
   does not carry goes in the hand-off document (R-BTN-44).
 
 ### 9.2 Holding: the lease and the fence
 
-- **R-BTN-6 (fencing).** The sidecar records `last_ok`, the time its last accepted heartbeat
+- **R-BTN-6 (fencing).** `status: built` The sidecar records `last_ok`, the time its last accepted heartbeat
   left. The lease is **lost** when `now − last_ok ≥ lease_timeout − 4 min`, and the sidecar then
   marks it lost in its state file. A lost lease, or a heartbeat response that no longer lists the
   claim, means the session no longer holds the ticket. On reconnecting, a sidecar whose lease
@@ -72,7 +72,7 @@ is `active` until it ends `completed`, `released` or `reaped`.
   - A heartbeat refused `session-taken`, `runner-reaped` or `forbidden` marks the lease lost at
     once. `rate-limited` and `quota` do not: the sidecar backs off and retries, but an unaccepted
     heartbeat never renews `last_ok`.
-- **R-BTN-26 (every fence check computes the lease itself).** The lease-lost flag is a
+- **R-BTN-26 (every fence check computes the lease itself).** `status: built` The lease-lost flag is a
   shortcut. Each harness hook and the `pre-push` hook computes R-BTN-6's condition from the
   state file and the **wall clock** (never a monotonic clock), and treats the lease as lost when
   it holds or when the flag is set. When the state file is missing or unreadable while the
@@ -101,14 +101,14 @@ is `active` until it ends `completed`, `released` or `reaped`.
   key and following former paths (R-BTN-141). A branch that maps to tickets of two repositories
   sharing a local id is refused if either is held; a course whose ids may collide puts
   `{repository}` in its pattern.
-- **R-BTN-7 (status writes are fenced against holders).** A tool that writes a ticket's status
+- **R-BTN-7 (status writes are fenced against holders).** `status: built` A tool that writes a ticket's status
   to git first asks `GET /v1/runner/tickets/{ticket}/holder` and is refused (`not-holder`, exit
   10) only when another runner's active claim holds the ticket or a reaped claim on it is
   fence-pending. With no active claim the write proceeds.
 
 ### 9.3 Suspending and handing off
 
-- **R-BTN-40 (suspend, don't wait on the lease).** The holder decides whether to go on. It
+- **R-BTN-40 (suspend, don't wait on the lease).** `status: built B-47 B-274` The holder decides whether to go on. It
   **suspends** at the station it reached — writes the hand-off, makes sure its last leg left its
   evidence, ends `suspended:<station>` (R-BTN-71) — when a gate or `max_runs` refuses its
   `advance`, when advice says a line the next leg needs is short and it has no better evidence,
@@ -118,7 +118,7 @@ is `active` until it ends `completed`, `released` or `reaped`.
   station each heartbeat, for up to **30 minutes**, then suspends. The ticket then waits unheld
   and is recommended again, to any eligible runner. A suspension is a completed end, never a
   failed attempt.
-- **R-BTN-44 (the hand-off document).** Every suspension or release — except a lost lease —
+- **R-BTN-44 (the hand-off document).** `status: built` Every suspension or release — except a lost lease —
   leaves a hand-off document, written by the leg script's `handoff(ctx)` for a
   successor with none of this session's context: what is done and where; what the next leg
   must do; decisions made and alternatives rejected, with reasons; what the environment needed
@@ -190,7 +190,7 @@ A claim ends with `POST /v1/runner/claims/{id}/end`. Its body, stated here once:
   the dashboard (`POST /v1/ui/claims/{id}/reap`, confirmed per R-BTN-155), shown the runner's
   last-seen and last-activity times. The next claimant concludes from what git holds and the
   resume record.
-- **R-BTN-19 (fence before re-issue).** A claim reaped while its runner was **alive** — a
+- **R-BTN-19 (fence before re-issue).** `status: built` A claim reaped while its runner was **alive** — a
   force-reap (a retirement's included, R-BTN-47), an unacknowledged-release reap, a `leg-timeout`
   reap — is `fence_pending` with its `fence_incarnation` and `fence_deadline`, the reap instant
   plus the runner's `lease_timeout_ms`. Such a reap sets no `reaped_at`: the runner's next
@@ -218,7 +218,7 @@ A claim ends with `POST /v1/runner/claims/{id}/end`. Its body, stated here once:
 
 ### 9.6 Confirming an end
 
-- **R-BTN-10 (confirmation by observation).** A completed end is **unconfirmed** until a
+- **R-BTN-10 (confirmation by observation).** `status: built` A completed end is **unconfirmed** until a
   snapshot observed after it is accepted (R-BTN-62), so the next claim's readiness is computed
   from facts read after the end. The end's position stands from the moment Baton records it
   (R-BTN-39); confirmation checks its evidence, not where it put the ticket. It is confirmed by
@@ -246,7 +246,7 @@ A claim ends with `POST /v1/runner/claims/{id}/end`. Its body, stated here once:
 
 ### 9.8 Resuming and replaying
 
-- **R-BTN-24 (the resume record).** On every claim end, a suspension included, Baton writes the
+- **R-BTN-24 (the resume record).** `status: built` On every claim end, a suspension included, Baton writes the
   claim's `resume_json` from its activities (the runner drains its spool before calling `end`,
   and a close accepted in §9.9's grace that carries `resume` rewrites it): every `resume` object
   an activity's detail carried (the one nested key allowed, §12), the last activity and its
@@ -258,13 +258,13 @@ A claim ends with `POST /v1/runner/claims/{id}/end`. Its body, stated here once:
     R-BTN-144).
   - The ticket history read (R-BTN-81) serves the records pruned to its *reader*, so a claim
     through git continues the change (R-BTN-74).
-- **R-BTN-25 (idempotent side effects).** Every side effect is keyed by the ticket so a later
+- **R-BTN-25 (idempotent side effects).** `status: built` Every side effect is keyed by the ticket so a later
   attempt finds the earlier one's work: before creating a branch the claimant continues an
   existing remote branch matching the course's `branch_pattern` (current or previous) for this
   ticket, including one the resume record names — a resume record naming any other branch is
   ignored; before opening a change it reuses an open one from that branch. The activities that
   push or open a change record the branch and change in their detail's `resume`.
-- **R-BTN-84 (any leg run can be replayed).** `baton leg replay <ticket> <leg> [--run <n>]
+- **R-BTN-84 (any leg run can be replayed).** `status: built B-42` `baton leg replay <ticket> <leg> [--run <n>]
   [--against <sha>]` re-runs one recorded run on a runner, without a claim and writing nothing to
   Baton.
   - It reads the run from the ticket's history (snapshot sha, contract version) and its inputs
@@ -312,7 +312,7 @@ A claim ends with `POST /v1/runner/claims/{id}/end`. Its body, stated here once:
   - The **current activity** is the newest open one; the heartbeat and a `status_report` (§6)
     return it. `started_at`/`ended_at` are the runner's clock and order activities within a
     claim; `received_at` is Baton's. No lease logic reads activity times.
-- **R-BTN-20 (the archiver reports what it wrote).** A harness's transcript archiver appends each
+- **R-BTN-20 (the archiver reports what it wrote).** `status: built` A harness's transcript archiver appends each
   `(repo, path, pushed_at)` it pushes to the session's spool; the sidecar reports it on the next
   heartbeat. Baton never derives a path by convention, and keeps every path a session reports;
   the dashboard links the newest.
