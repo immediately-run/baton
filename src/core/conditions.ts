@@ -104,6 +104,12 @@ export class Conditions {
     }
   }
 
+  /** R-BTN-163 (S-BTN-312): close only this ticket's missing-next notice when its cause ends. */
+  closeMissingNext(ticket: string, at: number): void {
+    this.exec(`UPDATE conditions SET outcome = 'closed', closed_at = ?, closed_how = 'cause-ended'
+               WHERE ticket_id = ? AND type = ? AND outcome = 'open'`, at, ticket, MISSING_NEXT);
+  }
+
   /**
    * `POST /v1/runner/claims/{id}/conditions` (R-BTN-160): the report a runner sends once its
    * channel check passed, holding filter fields only — never the subject or body, which stay

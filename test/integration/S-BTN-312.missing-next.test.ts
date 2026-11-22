@@ -9,6 +9,18 @@ const NOW = Date.parse('2026-11-22T12:00:00Z');
 const TYPE = 'baton.missing-next';
 const path: [string, string][] = [['implement', 'pr-open']];
 
+function decisionBoard() {
+  const git = new Git().add('DECIDED', {}, placed('reviewed', [...path, ['review', 'reviewed']], [['decide', 'ready']], { next_leg: null }));
+  git.registry = [course(3, 3, { course: {
+    ...roadmapPr,
+    legs: {
+      ...roadmapPr.legs,
+      decide: { from: ['reviewed'], to: ['adjudicated'], kind: 'person', asks: 'owner' },
+    },
+  } })];
+  return git;
+}
+
 describe('S-BTN-312 a board post missing a queued leg', () => {
   it('keeps the board, reports only the stuck tickets and settles the condition on later posts', async () => {
     await setClock(NOW);
@@ -74,14 +86,7 @@ describe('S-BTN-312 a board post missing a queued leg', () => {
 
   it.each(['post', 'refresh'] as const)('settles a %s against the placement after its decision attestation', async (method) => {
     await setClock(NOW);
-    const git = new Git().add('DECIDED', {}, placed('reviewed', [...path, ['review', 'reviewed']], [['decide', 'ready']], { next_leg: null }));
-    git.registry = [course(3, 3, { course: {
-      ...roadmapPr,
-      legs: {
-        ...roadmapPr.legs,
-        decide: { from: ['reviewed'], to: ['adjudicated'], kind: 'person', asks: 'owner' },
-      },
-    } })];
+    const git = decisionBoard();
     expect((await git.post()).status).toBe(200);
     const conditions = () => rows('SELECT outcome FROM conditions WHERE type = ? AND ticket_id = ?', TYPE, 'docs:DECIDED');
     expect(await conditions()).toEqual([{ outcome: 'open' }]);
@@ -96,6 +101,35 @@ describe('S-BTN-312 a board post missing a queued leg', () => {
     expect((await git.refresh(answer)).status).toBe(200);
     expect((await git.refresh(answer)).status).toBe(200);
     expect(await conditions()).toEqual([{ outcome: 'closed' }]);
+  });
+
+  it('closes only the answered ticket\'s missing-next notice without a follow-up sync', async () => {
+    await setClock(NOW);
+    const admin = await makeKey('ssh-ed25519', 'admin');
+    const owner = await makeKey('ssh-ed25519', 'owner');
+    await setAdminKeys(admin);
+    expect((await keyCall(admin, '/v1/admin/repositories', { id: 'docs', owner_keys_add: [owner.publicKey] })).status).toBe(200);
+    const git = decisionBoard().add('STUCK', {}, placed('pr-open', path, [['review', 'ready']], { next_leg: null }));
+    expect((await git.post()).status).toBe(200);
+    await cutover(NOW);
+
+    const needsYou = async () => {
+      const read = await signed(owner, '/v1/repositories/docs/needs-you', { method: 'GET' });
+      expect(read.status).toBe(200);
+      return read.json.conditions;
+    };
+    expect(await needsYou()).toEqual(['DECIDED', 'STUCK'].map((id) => expect.objectContaining({ ticket_id: `docs:${id}`, type: TYPE })));
+
+    await setClock(NOW + 60_000);
+    const answer = await signed(owner, '/v1/repositories/docs/attestations', { body: {
+      type: 'std:decision@1', subject: { ticket: 'DECIDED' }, value: { leg: 'decide', option: 'adjudicated' },
+    } });
+    expect(answer).toMatchObject({ status: 200, json: { ok: true, reached: 'adjudicated' } });
+    expect(await rows('SELECT station, next_leg FROM ticket_stations WHERE ticket_id = ?', 'docs:DECIDED'))
+      .toEqual([{ station: 'adjudicated', next_leg: 'merge' }]);
+    expect(await needsYou()).toEqual([expect.objectContaining({ ticket_id: 'docs:STUCK', type: TYPE })]);
+    expect(await rows('SELECT outcome, closed_at, closed_how FROM conditions WHERE type = ? AND ticket_id = ?', TYPE, 'docs:DECIDED'))
+      .toEqual([{ outcome: 'closed', closed_at: NOW + 60_000, closed_how: 'cause-ended' }]);
   });
 
   it('reprocesses an unchanged refresh after upgrade and preserves the retention index', async () => {
