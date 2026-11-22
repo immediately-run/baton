@@ -1,7 +1,7 @@
 // B-139 / R-BTN-134: read Git objects, never a cached working tree or filters.
 import { execFile, execFileSync } from 'node:child_process';
-import { randomBytes } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { createHash, randomBytes } from 'node:crypto';
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { COURSE_ID } from '../core/course';
 import { GIT_NONINTERACTIVE_ENV } from './ticket-state';
@@ -78,13 +78,34 @@ export async function fetchCourse(src: CourseSource, cache: string): Promise<Cou
   }
 }
 
-export function writeCourseTree(dir: string, files: CourseFile[]): void {
+export function writeCourseTree(dir: string, files: CourseFile[], seal = true): Record<string, string> {
+  const dirs = new Set([dir]);
+  const blobs: Record<string, string> = Object.create(null);
   for (const file of files) {
     if (!file.regular || !file.path.split('/').every((part) => /^[\w.@+-]+$/.test(part) && part !== '.' && part !== '..')) {
       throw new Error(`unsupported course tree entry ${JSON.stringify(file.path)}: expected a regular file`);
     }
     const to = join(dir, file.path);
     mkdirSync(dirname(to), { recursive: true });
-    writeFileSync(to, file.read(), { mode: 0o444, flag: 'wx' });
+    for (let parent = dirname(to); parent !== dir; parent = dirname(parent)) dirs.add(parent);
+    const bytes = file.read();
+    writeFileSync(to, bytes, { mode: 0o444, flag: 'wx' });
+    blobs[file.path] = createHash('sha256').update(bytes).digest('hex');
   }
+  if (seal) for (const path of dirs) chmodSync(path, 0o555);
+  return blobs;
+}
+
+/** Only the owner of the scratch tree unseals it, and only to dispose of it. */
+export function dropCourseTree(dir: string): void {
+  if (existsSync(dir) && lstatSync(dir).isDirectory()) {
+    const unseal = (path: string): void => {
+      chmodSync(path, 0o700);
+      for (const entry of readdirSync(path, { withFileTypes: true })) {
+        if (entry.isDirectory()) unseal(join(path, entry.name));
+      }
+    };
+    unseal(dir);
+  }
+  rmSync(dir, { recursive: true, force: true });
 }

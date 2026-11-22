@@ -632,7 +632,7 @@ async function readFrom(root: string, course: string, opts: { base?: string | nu
         await writeStub(source.standard, leg, join(sourceDir, 'legs', `${leg}.mjs`));
         writeFileSync(join(sourceDir, 'legs', `${leg}.md`), instructionsOf(course, leg));
       }
-    } else if (source.files) writeCourseTree(sourceDir, source.files);
+    } else if (source.files) writeCourseTree(sourceDir, source.files, false);
   }
   const file = join(dir, 'course.json');
   if (!source && !existsSync(file)) throw new Error(`${file}: no such course file`);
@@ -652,7 +652,7 @@ async function readFrom(root: string, course: string, opts: { base?: string | nu
     const otherFile = join(otherDir, 'course.json');
     const src = typeof other.source === 'string' && scratch ? await resolveSource(id, other.source, scratch) : null;
     const schemaDir = src ? mkdtempSync(join(scratch!, 'schemas-')) : otherDir;
-    if (src?.files) writeCourseTree(schemaDir, src.files.filter((f) => f.path.startsWith('schemas/')));
+    if (src?.files) writeCourseTree(schemaDir, src.files.filter((f) => f.path.startsWith('schemas/')), false);
     others.push({ id, file: src ? JSON.parse(src.graph) : existsSync(otherFile) ? JSON.parse(readFileSync(otherFile, 'utf8')) : null,
       schemas: schemasIn(schemaDir, id).schemas ?? [], versions: versionsOf({ courses: [{ ...src?.entry, ...other }] }, id) });
   }

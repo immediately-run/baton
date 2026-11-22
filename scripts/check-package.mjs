@@ -83,10 +83,17 @@ try {
     const settings = JSON.parse(readFileSync(join(repo, '.baton', 'baton.json'), 'utf8'));
     const want = `github/${build.repository}/${build.commit}/create-pr`;
     if (settings.courses?.[0]?.source !== want) fail(`init named the source ${settings.courses?.[0]?.source}, not ${want}`);
-    for (const f of ['.baton/courses/create-pr/course.json', '.baton/courses/create-pr/legs/implement.mjs', '.baton/courses/create-pr/legs/implement.md', '.github/workflows/baton-sync.yml', '.baton/leg-wrapper.example']) {
+    for (const f of ['.github/workflows/baton-sync.yml', '.baton/leg-wrapper.example']) {
       if (!existsSync(join(repo, f))) fail(`the installed \`baton repo init\` wrote no ${f}`);
     }
     if (!readFileSync(join(repo, '.github', 'workflows', 'baton-sync.yml'), 'utf8').includes(`ref: ${build.commit}`)) fail('the sync workflow does not pin the commit the package was built from');
+    if (existsSync(join(repo, '.baton/courses/create-pr'))) fail('the installed init copied a sourced course into the home');
+    execFileSync('git', ['-C', repo, 'add', '.baton']);
+    execFileSync('git', ['-C', repo, '-c', 'user.name=Package check', '-c', 'user.email=package@example.test', 'commit', '-qm', 'course entry']);
+    const show = spawnSync(join(app, 'node_modules', '.bin', 'baton'), ['course', 'show', 'create-pr', 'implement'], { cwd: repo, env, encoding: 'utf8' });
+    if (show.status !== 0 || !['course.json', 'legs/implement.mjs', 'legs/implement.md'].every((name) => show.stdout.includes(`--- ${name} ---`))) {
+      fail(`the installed CLI did not show the bundled course:\n${show.stdout}${show.stderr}`);
+    }
   }
 
   process.stdout.write(`check-package OK — ${pkg.name}@${pkg.version}: ${files.length} files, ${Math.round(packed.size / 1024)} KB packed; the installed bin runs${build.dirty ? '; init refuses a modified-tree build' : `; init scaffolds create-pr at ${build.commit.slice(0, 10)}`}\n`);

@@ -12,7 +12,7 @@ import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { graphOf, legCapabilities, type Graph } from '../core/graph';
 import { builtInSource, resolveSource, runnerLegs, writeStub } from '../defaults/cli';
-import { writeCourseTree } from '../defaults/course-tree';
+import { dropCourseTree, writeCourseTree } from '../defaults/course-tree';
 
 /** B-94: the bound on every git the runner itself runs. The heartbeat path reads the snapshot
  * here (`ensureSha`, `courseOf`, `loadCourse`), and a state file lock, a hook or a stalled
@@ -36,6 +36,8 @@ export function git(home: string, args: string[], timeoutMs: number = GIT_TIMEOU
 export interface CourseLoad {
   course: string;
   sourced?: true;
+  fetched?: Record<string, string>;
+  legacy?: true;
   graph: Graph;
   /** The extracted `legs/<leg>.mjs` of the snapshot, by leg name — file paths on disk. */
   scripts: Map<string, string>;
@@ -184,6 +186,7 @@ export async function loadCourse(home: string, sha: string, course: string, sett
     const graph = graphOf(JSON.parse(resolved.graph));
     const scratch = mkdtempSync(join(tmpdir(), 'baton-legs-'));
     const scripts = new Map<string, string>();
+    let fetched: CourseLoad['fetched'];
     try {
       if (resolved.standard) {
         for (const leg of runnerLegs(resolved.standard)) {
@@ -193,13 +196,13 @@ export async function loadCourse(home: string, sha: string, course: string, sett
         }
       } else if (resolved.files) {
         const dir = join(scratch, 'source');
-        writeCourseTree(dir, resolved.files);
+        fetched = writeCourseTree(dir, resolved.files);
         for (const { path } of resolved.files) {
           const leg = /^legs\/([a-z][a-z0-9-]*)\.mjs$/.exec(path)?.[1];
           if (leg) scripts.set(leg, join(dir, path));
         }
       }
-      return { course, sourced: true, graph, scripts, scratch };
+      return { course, sourced: true, fetched, legacy: resolved.legacy, graph, scripts, scratch };
     } catch (e) {
       dropCourse(scratch);
       throw e;
@@ -299,7 +302,12 @@ function needsOf(parsed: { capability_roles?: unknown; legs?: Record<string, any
 
 /** Drop a claim's scratch directory. */
 export function dropCourse(scratch: string): void {
+  dropCourseTree(join(scratch, 'source'));
   rmSync(scratch, { recursive: true, force: true });
+}
+
+export function sourceContext(course: CourseLoad) {
+  return { ...(course.sourced ? { sourced_course: true as const } : {}), ...(course.fetched ? { fetched_course: { id: course.course, blobs: course.fetched, legacy: course.legacy } } : {}) };
 }
 
 /** The scratch directory the runner itself uses for a claim's ctx and result files. */

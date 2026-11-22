@@ -24,7 +24,7 @@ import { commitsOf, type BranchCommit } from './pr-markers';
 import { COMMENTING_LEGS, PR_URL as PR_URL_RE } from './pr-close';
 import { GIT_SHA } from '../core/validate';
 import { parseSource, printSource } from './course-source';
-import { courseFiles, coursePath, fetchCourse, isOverride, writeCourseTree, type CourseFile } from './course-tree';
+import { courseFiles, coursePath, dropCourseTree, fetchCourse, isOverride, writeCourseTree, type CourseFile } from './course-tree';
 import { stampMarkdownVersions } from './ticket-versions';
 import { closeTicket, closesByTicket, closesOfCommits, exec, machineOf, setMachineKeys, stationsTickets, ticketsBranch, CLOSE_TIMEOUT_MS, GIT_NONINTERACTIVE_ENV, RUN_TESTS_TIMEOUT_MS } from './ticket-state';
 
@@ -282,7 +282,7 @@ export interface ResolvedDep {
  *  live tickets name against their boards — the read a sync makes after its number, as every
  *  input it posts is (§4.3); its doneness joins `done`, so each course's station function gates
  *  on a cross-repository dependency as on a local one (R-BTN-120). */
-async function readBoard(root: string, batonJson: BatonJson, args: SyncArgs, log: (l: string) => void, record?: BatonRecord, resolveDeps?: (ids: readonly string[]) => Promise<readonly ResolvedDep[]>): Promise<Board> {
+async function readBoard(root: string, at: string, batonJson: BatonJson, args: SyncArgs, log: (l: string) => void, record?: BatonRecord, resolveDeps?: (ids: readonly string[]) => Promise<readonly ResolvedDep[]>): Promise<Board> {
   const settings: MarkdownSettings = { items: batonJson.items, default_course: batonJson.default_course, repos: batonJson.repos };
 
   // The ticket source: the repository's own, else the markdown default. B-183 (R-BTN-74): a
@@ -344,7 +344,6 @@ async function readBoard(root: string, batonJson: BatonJson, args: SyncArgs, log
   // Every live ticket's course must be one this repository lists (R-BTN-74: a ticket on a course
   // with no station function fails the sync — nothing is posted).
   const homeEntries = batonJson.courses ?? [{ id: batonJson.default_course ?? DEFAULT_COURSE, version: 1 }];
-  const at = git(root, 'rev-parse', 'HEAD');
   const sources = new Map<string, Awaited<ReturnType<typeof resolveSource>>>();
   const courses: CourseEntry[] = [];
   for (const c of homeEntries) {
@@ -444,9 +443,15 @@ async function readBoard(root: string, batonJson: BatonJson, args: SyncArgs, log
     let label = c.source ?? `.baton/courses/${c.id}/sync.mjs`;
     if (src?.files) {
       const dir = mkdtempSync(join(args.sourceCache!, 'stations-'));
-      writeCourseTree(dir, src.files);
-      schemas = schemasIn(dir, c.id);
-      fn = () => sourceStations(dir, fnCtx);
+      fn = () => {
+        try {
+          writeCourseTree(dir, src.files!);
+          schemas = schemasIn(dir, c.id);
+          return sourceStations(dir, fnCtx);
+        } finally {
+          dropCourseTree(dir);
+        }
+      };
     } else if (!src && existsSync(syncMjs)) {
       const mod = (await import(`${pathToFileURL(syncMjs).href}?at=${git(root, 'rev-parse', 'HEAD')}`)) as { default?: { stations?: StationFn } };
       if (typeof mod.default?.stations !== 'function') throw new Error(`.baton/courses/${c.id}/sync.mjs default-exports no stations(ctx)`);
@@ -526,6 +531,9 @@ function cliVersion(): string {
 
 export class CourseSourceUnavailable extends Error {}
 
+const LEGACY_CREATE_PR = 'create-pr-17ae8cce.mjs';
+const sourceFileOfLegacyStation = () => source(`legacy/${LEGACY_CREATE_PR}`);
+
 export function builtInSource(id: string, source: string): BuiltIn | undefined {
   const src = parseSource(source);
   if (src.course !== id) throw new Error(`${source} names course ${src.course}; a source names the course of its own id`);
@@ -537,7 +545,7 @@ export function builtInSource(id: string, source: string): BuiltIn | undefined {
 }
 
 export async function resolveSource(id: string, source: string, cache: string): Promise<{
-  graph: string; entry: Partial<CourseEntry> & { facts?: string[] }; standard?: BuiltIn; files?: CourseFile[];
+  graph: string; entry: Partial<CourseEntry> & { facts?: string[] }; standard?: BuiltIn; files?: CourseFile[]; legacy?: true;
 }> {
   const standard = builtInSource(id, source);
   if (standard) return { graph: courseFileText(standard), entry: {}, standard };
@@ -546,6 +554,14 @@ export async function resolveSource(id: string, source: string, cache: string): 
     const text = (path: string): string | undefined => files.find((f) => f.path === path && f.regular)?.read().toString('utf8');
     const graph = text('course.json');
     if (graph === undefined) throw new Error(`${coursePath(id)}/course.json is missing`);
+    // This deployed pin predates portable station modules. Its station function was
+    // bundled from that exact revision, and is usable only after ancestry verification.
+    if (source.toLowerCase() === 'github/immediately-run/baton/17ae8cce1411b71c413a123e54e4030b967a6e13/create-pr' &&
+        !files.some((file) => file.path === 'sync.mjs')) {
+      const file = fromSource() ? sourceFileOfLegacyStation() : prebuilt('legacy', LEGACY_CREATE_PR);
+      files.push({ path: 'sync.mjs', regular: true, read: () => readFileSync(file) });
+      return { graph, entry: { facts: ['prs'] }, files, legacy: true };
+    }
     return { graph, entry: JSON.parse(text('entry.json') ?? '{}'), files };
   } catch (e) {
     throw new CourseSourceUnavailable(`cannot load ${source}; CLI commit ${cliSelf()?.sha ?? '(unknown)'}: ${(e as Error).message}`);
@@ -807,7 +823,7 @@ async function syncWithSources(args: SyncArgs & { sourceCache: string }): Promis
       // B-113: the qualified dependencies of other repositories resolve against their boards —
       // one read after the number, its doneness joining the `done` the station functions gate on.
       const at = git(root, 'rev-parse', 'HEAD');
-      board = await readBoard(root, JSON.parse(gitRaw(root, 'show', `${at}:.baton/baton.json`)) as BatonJson, args, log, record, async (ids) => {
+      board = await readBoard(root, at, JSON.parse(gitRaw(root, 'show', `${at}:.baton/baton.json`)) as BatonJson, args, log, record, async (ids) => {
         const answer = await api.dependencies([...ids]);
         return (Array.isArray(answer.dependencies) ? answer.dependencies : []).map((d) => ({ ticket: String(d.ticket), done: d.done === true }));
       });
@@ -1954,10 +1970,12 @@ export async function prebuildDefaults(dist: string, build: { repository: string
     files++;
   }
   await bundleSource(WRAPPERS.tickets(DEFAULT_COURSE), join(out, 'tickets.mjs'));
+  mkdirSync(join(out, 'legacy'), { recursive: true });
+  copyFileSync(sourceFileOfLegacyStation(), join(out, 'legacy', LEGACY_CREATE_PR));
   // B-95's worked example, beside the stubs: init writes it into .baton/ as leg-wrapper.example.
   copyFileSync(join(packageRoot(), '.baton', WRAPPER_EXAMPLE), join(out, WRAPPER_EXAMPLE));
   writeFileSync(join(dist, 'build.json'), `${JSON.stringify(build, null, 2)}\n`);
-  return files + 3;
+  return files + 4;
 }
 
 /** The CLI's own version, for the workflow's pin: `owner/name@<commit>` of the checkout this

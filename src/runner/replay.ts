@@ -39,7 +39,7 @@ import { DEFAULT_URL } from '../../cli/baton.mjs';
 import { requestCredential, signHeaders } from '../../cli/sign.mjs';
 import { bareTicketId } from '../defaults/ticket-state';
 import { digestOfRead, MARKDOWN_SOURCE } from '../defaults/ticket-versions';
-import { dropCourse, git, loadCourse, extractTicketSource, type CourseLoad } from './home';
+import { dropCourse, git, loadCourse, extractTicketSource, sourceContext, type CourseLoad } from './home';
 import { loadExecutor, type Executor, type Handle } from './executor';
 import { maskLegOutput, readMaskEnv, runnerConfigPath, secretValues } from './mask';
 
@@ -381,7 +381,7 @@ export async function replayMain(argv: string[], io: ReplayIo = {}): Promise<num
     const worktree = join(mkdtempSync(join(tmpdir(), 'baton-replay-')), 'checkout');
     git(a.home, ['worktree', 'add', '--detach', '--quiet', worktree, checkoutSha]);
     try {
-      const ran = await runOnce(executor, replayEnv, { repository: a.repository, home: a.home, worktree, script, run, ticketId, leg: a.leg, secrets, timeoutS: a.timeoutS, say });
+      const ran = await runOnce(executor, replayEnv, { repository: a.repository, home: a.home, worktree, script, course, run, ticketId, leg: a.leg, secrets, timeoutS: a.timeoutS, say });
       report.ran = ran.outcome;
       report.would_have_written = ran.writes;
       report.close = 'not called (R-BTN-84): the runner records what it would have written, and writes nothing';
@@ -398,7 +398,7 @@ export async function replayMain(argv: string[], io: ReplayIo = {}): Promise<num
         const againstWorktree = join(mkdtempSync(join(tmpdir(), 'baton-replay-')), 'checkout');
         git(a.home, ['worktree', 'add', '--detach', '--quiet', againstWorktree, checkoutSha]);
         try {
-          const other = await runOnce(executor, replayEnv, { repository: a.repository, home: a.home, worktree: againstWorktree, script: againstScript, run, ticketId, leg: a.leg, secrets, timeoutS: a.timeoutS, say, against: a.against });
+          const other = await runOnce(executor, replayEnv, { repository: a.repository, home: a.home, worktree: againstWorktree, script: againstScript, course: againstCourse, run, ticketId, leg: a.leg, secrets, timeoutS: a.timeoutS, say, against: a.against });
           report.against = {
             sha: a.against, ran: other.outcome, would_have_written: other.writes,
             same: JSON.stringify(other.outcome) === JSON.stringify(ran.outcome) && JSON.stringify(other.writes) === JSON.stringify(ran.writes),
@@ -558,7 +558,7 @@ function worktreeSha(home: string, run: RecordedRun, say: (l: string) => void): 
  *  `ctx.replay` set (R-BTN-84): the recorded facts as the run held them, the worktree as its
  *  checkout, no close. Its would-be writes are the worktree's changes. */
 async function runOnce(executor: Executor, env: Record<string, string>, o: {
-  repository: string; home: string; worktree: string; script: string; run: RecordedRun; ticketId: string; leg: string;
+  repository: string; home: string; worktree: string; script: string; course: CourseLoad; run: RecordedRun; ticketId: string; leg: string;
   secrets: readonly string[]; timeoutS: number; say: (l: string) => void; against?: string;
 }): Promise<{ outcome: { ok: boolean; result?: unknown; error?: string }; writes: string[] }> {
   const sessionId = `${o.run.run_id ?? `claim-${o.run.claim}`}.replay`;
@@ -567,7 +567,7 @@ async function runOnce(executor: Executor, env: Record<string, string>, o: {
     handle = await executor.start({
       brief: {
         kind: 'leg', session_id: sessionId, ...(o.run.run_id ? { run_id: o.run.run_id } : {}), ticket: o.ticketId, leg: o.leg,
-        snapshot_sha: o.run.snapshot_sha, checkout: o.worktree, paths: [dirname(o.script)], wrapper: LEG_PROCESS, env,
+        snapshot_sha: o.against ?? o.run.snapshot_sha, checkout: o.worktree, paths: [o.course.scratch], wrapper: LEG_PROCESS, env,
       },
     });
   } catch (e) {
@@ -581,7 +581,8 @@ async function runOnce(executor: Executor, env: Record<string, string>, o: {
     ticket: { id: o.ticketId, home: o.repository, ...(o.run.ticket?.version ? { version: o.run.ticket.version } : {}) },
     claim: { id: o.run.claim, nonce: null, station: o.run.from ?? null },
     leg: o.leg, run: o.run.run, ...(o.run.run_id ? { run_id: o.run.run_id } : {}),
-    snapshot: { sha: o.run.snapshot_sha, path: [], next: [] },
+    snapshot: { sha: o.against ?? o.run.snapshot_sha, path: [], next: [] },
+    ...sourceContext(o.course),
     checkout: o.worktree, session: sessionId,
   };
   try {

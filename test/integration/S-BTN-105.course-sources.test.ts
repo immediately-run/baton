@@ -1,14 +1,16 @@
 // S-BTN-105 / S-BTN-310 (B-139): sourced scripts and graph, home overrides, no home copies.
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { execFileSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, readdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { chmodSync, existsSync, mkdirSync, readdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { call as hostCall } from '#host';
 import { initMain, parseSyncArgs, showCourseMain, syncMain } from '../../src/defaults/cli';
-import { dropCourse, loadCourse } from '../../src/runner/home';
-import { ORIGIN, register, rows, setClock, syncToken } from '../helpers';
+import { dropCourse, loadCourse, sourceContext } from '../../src/runner/home';
+import { BatonApi } from '../../src/runner/api';
+import { Runner } from '../../src/runner/runner';
+import { cutover, ORIGIN, register, rows, setClock, syncToken, TOKENS } from '../helpers';
 
 const T0 = Date.parse('2026-10-18T12:00:00Z');
 const ROOT = resolve(import.meta.dirname, '../..');
@@ -167,8 +169,13 @@ export async function run(ctx, standard) {
       mkdirSync(join(courseDir, 'legs'), { recursive: true });
       writeFileSync(join(courseDir, 'course.json'), JSON.stringify({ start: 'filed', start_leg: 'implement', end: ['done'], stations: { filed: {}, done: {} }, legs: { implement: { from: ['filed'], to: 'done' } } }));
       writeFileSync(join(courseDir, 'entry.json'), '{"skill":"fetched-skill"}');
-      writeFileSync(join(courseDir, 'sync.mjs'), 'export function stations() { return { stations: {}, markers: [], course_data: null }; }');
-      writeFileSync(join(courseDir, 'legs', 'implement.mjs'), 'export const run = () => ({ reached: "done" });');
+      writeFileSync(join(courseDir, 'sync.mjs'), `export function stations() {
+  return { stations: { 'T-1': { station: 'filed', path: [], next_leg: 'implement', next_source: 'marker', next: [{ leg: 'implement', state: 'ready' }], bars: {} } }, markers: [], course_data: null };
+}`);
+      writeFileSync(join(courseDir, 'legs', 'implement.md'), 'source instructions');
+      writeFileSync(join(courseDir, 'legs', 'implement.mjs'), `import { readFileSync } from 'node:fs';
+export const run = (ctx) => ({ reached: 'done', text: readFileSync(ctx.instructions, 'utf8') });
+export const close = () => 'source close';`);
       remote('add', '.baton');
       remote('commit', '-qm', 'course');
       const pin = remote('rev-parse', 'HEAD');
@@ -180,14 +187,47 @@ export async function run(ctx, standard) {
       settings.courses[0].source = `github/fixture/course/${pin}/create-pr`;
       writeFileSync(settingsFile(), JSON.stringify(settings));
       const sha = commit();
+      await cutover();
+      await sync();
+      const legs = join(dir, '.baton', 'courses', 'create-pr', 'legs');
+      writeFileSync(join(legs, 'implement.md'), 'home instructions');
+      writeFileSync(join(legs, 'implement.run.mjs'), 'export async function run(ctx, standard) { return { ...await standard(ctx), override: true }; }');
+      const overridden = commit();
+      writeFileSync(join(legs, 'implement.md'), 'uncommitted instructions');
       const loaded = await loadCourse(dir, sha, 'create-pr');
       try {
-        expect((await import(pathToFileURL(loaded.scripts.get('implement')!).href)).run()).toEqual({ reached: 'done' });
+        const script = loaded.scripts.get('implement')!;
+        const run = (call: string, at: string, signed_control?: Record<string, string>) => {
+          const ctx = { ...sourceContext(loaded), snapshot: { sha: at }, signed_control, checkout: dir, leg: 'implement' };
+          return JSON.parse(spawnSync(process.execPath, [join(ROOT, 'src/runner/legProcess.mjs'), call, script], {
+            input: `${JSON.stringify([ctx])}\n`, encoding: 'utf8',
+          }).stdout.trim());
+        };
+        expect(statSync(join(loaded.scratch, 'source', 'legs')).mode & 0o777).toBe(0o555);
+        expect(run('run', sha).result).toEqual({ reached: 'done', text: 'source instructions' });
+        expect(run('run', overridden).result).toEqual({ reached: 'done', text: 'home instructions', override: true });
+        expect(run('run', overridden, { course: sha, overrides: sha }).result).toEqual({ reached: 'done', text: 'source instructions' });
+        expect(run('close', overridden).result).toBe('source close');
+        chmodSync(script, 0o644);
+        writeFileSync(script, 'export const run = () => "wrong bytes";');
+        chmodSync(script, 0o444);
+        expect(run('close', overridden)).toMatchObject({ ok: false, error: expect.stringMatching(/verified source file .* changed/) });
       } finally {
         dropCourse(loaded.scratch);
       }
       remote('symbolic-ref', 'HEAD', 'refs/heads/unrelated');
       await expect(loadCourse(dir, sha, 'create-pr')).rejects.toThrow(new RegExp(`${pin}.*CLI commit ${SHA}.*not an ancestor`));
+      const runner = new Runner({
+        api: new BatonApi({ url: ORIGIN, transport: hostCall, auth: (_m, _u, _b, secret) => ({ Authorization: `Bearer ${TOKENS['vm-a']}`, ...(secret ? { 'X-Runner-Secret': secret } : {}) }) }),
+        home: dir, repository: 'docs', hostname: 'vm-a', harness: 'opencode', session: 's105-source',
+        courses: [{ course: 'create-pr', version: 1 }], stateFile: join(dir, '.git', 'runner-test.json'), beatEvery: 60_000, log: () => {},
+      });
+      git('update-ref', 'refs/baton/docs/default', sha);
+      try {
+        expect(await runner.runOnce()).toMatchObject({ end_reason: 'released:cannot-finish:capability', reached: 'filed' });
+      } finally {
+        runner.stop();
+      }
     } finally {
       for (const [k, v] of Object.entries(env)) {
         if (v === undefined) delete process.env[k]; else process.env[k] = v;

@@ -25,7 +25,7 @@ import { checkRaise, dispositionOf, errorClassOf, SEVERITIES, type ConditionDecl
 import type { ScopeAction } from '../core/scope';
 import { BatonApi, BatonRefusal, batonUnreachable } from './api';
 import { outsideScope, pushesBetween, readRefState, type RefState } from './audit';
-import { advanceHome, claimScratch, courseOf, dropCourse, ensureSha, extractTicketSource, freshSecret, git, loadCourse, prepareClone, readHead, type CourseLoad } from './home';
+import { advanceHome, claimScratch, courseOf, dropCourse, ensureSha, extractTicketSource, freshSecret, git, loadCourse, prepareClone, readHead, sourceContext, type CourseLoad } from './home';
 import { builtinExecutor, type Executor, type Handle, type Running, type SessionKind } from './executor';
 import { LegChannel, channelPath, type ChannelAnswer, type ChannelRequest } from './channel';
 import { MIN_SECRET_BYTES, createLegMasker, failureDetail, maskLegOutput, namesASecret, secretValues } from './mask';
@@ -1661,7 +1661,7 @@ export class Runner {
           local_order: { by: order.by, ran_at: ranAt },
           leg, run: runNumber(course.graph, [], leg, []),
           snapshot: { sha, path: [], next: [] },
-          ...(course.sourced ? { sourced_course: true } : {}),
+          ...sourceContext(course),
           handoff: null, resume: null, advice: null,
           checkout: this.o.home, session: null,
           state: this.o.stateFile, runner: this.state.get().runner_id,
@@ -2161,7 +2161,10 @@ export class Runner {
       }
     } catch (e) {
       this.log(`baton: the claim's course would not load (${msg(e)})`);
-      if (e instanceof CourseSourceUnavailable) return await this.finish(claimId, { end_reason: 'released:cannot-finish:capability', reached: claim.station, detail: msg(e), ...(claim.legs?.[0] ? { next: claim.legs[0] } : {}) }, null);
+      if (e instanceof CourseSourceUnavailable) {
+        const detail = msg(e).replace(/[\p{Cc}<>{}]/gu, ' ').slice(0, 200);
+        return await this.finish(claimId, { end_reason: 'released:cannot-finish:capability', reached: claim.station, detail, ...(claim.legs?.[0] ? { next: claim.legs[0] } : {}) }, null);
+      }
       return await this.finish(claimId, { end_reason: 'released:stale-board', reached: claim.station, ...(claim.legs?.[0] ? { next: claim.legs[0] } : {}) }, null);
     }
     // R-BTN-72 (B-188): a claim beside others works in a clone of its own — its own git dir, put
@@ -2309,7 +2312,7 @@ export class Runner {
           claim: { id: claimId, nonce: claim.nonce, station: at },
           leg: legName, run, ...(runId ? { run_id: runId } : {}),
           snapshot: { sha: claim.snapshot_sha, path: gitPath, next: nextLegs },
-          ...(course.sourced ? { sourced_course: true } : {}),
+          ...sourceContext(course),
           // B-127: the owner-signed commits a verified board post named — where the repository
           // requires signed control, the legs read `agent_command` and the overrides at these
           // (and the course itself — the graph, these scripts — loaded at the `course` one),
