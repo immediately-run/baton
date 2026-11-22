@@ -1,7 +1,8 @@
 // B-276 / R-BTN-30: rule metadata and scenario evidence. Both spec:index and check:spec
 // consume this ledger; neither reads the generated index as evidence.
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { lstatSync, readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { join } from 'node:path';
 
 export const PENDING = 'spec/scenarios-pending.json';
@@ -14,13 +15,27 @@ const isScenarioTest = (path) => path.startsWith('test/') && TEST_FILE.test(path
 const SOURCE = /^(src|cli|scripts)\/.*\.(?:[cm]?[jt]sx?|sql)$/;
 
 export const citedIds = (text) => new Set(text.match(/\bR-BTN-\d+\b/g));
-const namedScenarios = (text) => new Set(text.match(/\bS-BTN-\d+\b/g));
 export const fileScenario = (name) => /^(S-BTN-\d+)\.(?:.*\.)?test\.[cm]?[jt]sx?$/.exec(name)?.[1] ?? null;
 
 function testScenarios(path, text) {
-  const ids = namedScenarios(text);
+  const ids = new Set();
   const inName = fileScenario(path.split('/').at(-1));
   if (inName) ids.add(inName);
+  if (!text.includes('S-BTN-')) return ids;
+  // Read literal test/suite titles, not comments, fixtures, or expected values.
+  const ts = createRequire(import.meta.url)('typescript');
+  const source = ts.createSourceFile(path, text, ts.ScriptTarget.Latest);
+  const walk = (node) => {
+    if (ts.isCallExpression(node)) {
+      const { expression: callee, arguments: [title] } = node;
+      if (ts.isIdentifier(callee) && /^(test|it|describe)$/.test(callee.text)
+        && title && (ts.isStringLiteral(title) || ts.isNoSubstitutionTemplateLiteral(title))) {
+        for (const id of title.text.match(/\bS-BTN-\d+\b/g) ?? []) ids.add(id);
+      }
+    }
+    ts.forEachChild(node, walk);
+  };
+  walk(source);
   return ids;
 }
 
@@ -50,22 +65,30 @@ export function ruleDefinitions(spec) {
 
 export const definedIds = (spec) => new Set([...ruleDefinitions(spec).values()].flatMap((h) => h.ids));
 
+/** A scenario or gate names itself in the first cell. Outer pipes are optional. */
+export function verificationRow(line) {
+  const cells = line.trim().split(/(?<!\\)\|/);
+  if (cells[0] === '') cells.shift();
+  if (cells.at(-1) === '') cells.pop();
+  if (cells.length < 2) return null;
+  const name = /^([SG]-BTN-\d+)\b(.*)$/.exec(cells[0].trim());
+  return name && { id: name[1], title: name[2].trim(), rules: citedIds(cells.at(-1)) };
+}
+
 function scenarioRules(spec) {
-  const table = spec.split(/^#{1,3} /m).find((section) => section.startsWith('Scenarios\n')) ?? '';
-  return new Map([...table.matchAll(/^\| *(S-BTN-\d+)\b.*\|([^|\n]*)\|[ \t]*$/gm)]
-    .map(([, id, rules]) => [id, citedIds(rules)]));
+  const rows = spec.split('\n').map(verificationRow);
+  return new Map(rows.filter((row) => row?.id.startsWith('S-')).map(({ id, rules }) => [id, rules]));
 }
 
 export const scenarioIds = (spec) => new Set(scenarioRules(spec).keys());
 
+const gitAt = (root, args) => execFileSync('git', args, { cwd: root, encoding: 'utf8', maxBuffer: 1 << 24, stdio: ['ignore', 'pipe', 'pipe'] });
+
 export function codeTexts(root) {
-  const files = (dir) => existsSync(join(root, dir)) ? readdirSync(join(root, dir), { withFileTypes: true }).flatMap((entry) => {
-    if (entry.name.startsWith('.') || entry.name === 'node_modules') return [];
-    const path = `${dir}/${entry.name}`;
-    if (entry.isDirectory()) return files(path);
-    return entry.isFile() && /\.(?:[cm]?[jt]sx?|qnt|sql|md)$/.test(path) ? [path] : [];
-  }) : [];
-  return ['src', 'test', 'model', 'cli', 'scripts'].flatMap(files).sort()
+  // Stage new evidence files before generating; read working-tree edits to tracked files.
+  const paths = gitAt(root, ['ls-files', '-z', '--cached', '--', 'src', 'test', 'model', 'cli', 'scripts']).split('\0');
+  return [...new Set(paths)].sort()
+    .filter((path) => /\.(?:[cm]?[jt]sx?|qnt|sql|md)$/.test(path) && lstatSync(join(root, path), { throwIfNoEntry: false })?.isFile())
     .map((path) => [path, readFileSync(join(root, path), 'utf8')]);
 }
 
@@ -114,7 +137,7 @@ export function pendingIds(raw) {
 /** Read the default branch's list, not the branch being checked. At first landing the
  * default branch has no list yet: derive its exact gaps from its committed tests. */
 export function basePending(root, base, verificationPath) {
-  const git = (...args) => execFileSync('git', args, { cwd: root, encoding: 'utf8', maxBuffer: 1 << 24 });
+  const git = (...args) => gitAt(root, args);
   const tree = git('ls-tree', '-r', '--name-only', base, '--', PENDING, 'test').trim().split('\n');
   if (tree.includes(PENDING)) return pendingIds(git('show', `${base}:${PENDING}`));
   const scenarios = scenarioIds(git('show', `${base}:${verificationPath}`));
@@ -122,6 +145,22 @@ export function basePending(root, base, verificationPath) {
     for (const id of testScenarios(path, git('show', `${base}:${path}`))) scenarios.delete(id);
   }
   return scenarios;
+}
+
+/** On Actions pushes to main, origin/main already points at the new tree. Fetch only the
+ * previous tip if the depth-one checkout lacks it. PRs use the workflow's fetched base. */
+export function pendingBaseRef(root, env = process.env) {
+  if (env.GITHUB_ACTIONS !== 'true' || env.GITHUB_EVENT_NAME !== 'push' || env.GITHUB_REF !== 'refs/heads/main') return 'origin/main';
+  const { before } = JSON.parse(readFileSync(env.GITHUB_EVENT_PATH, 'utf8'));
+  if (typeof before !== 'string' || !/^[a-f0-9]{40}$/.test(before) || /^0+$/.test(before)) {
+    throw new Error('main push event has no valid previous commit');
+  }
+  try {
+    gitAt(root, ['cat-file', '-e', `${before}^{commit}`]);
+  } catch {
+    gitAt(root, ['fetch', '--no-tags', '--depth=1', 'origin', before]);
+  }
+  return before;
 }
 
 export function ledgerProblems(ledger, archived, pending, baseline) {

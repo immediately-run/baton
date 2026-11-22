@@ -95,6 +95,14 @@ describe('check-spec', () => {
       'R-BTN-5 no longer has a patch note: remove it from PATCH_NOTES_ALLOWED',
     ]);
   });
+
+  it('still rejects an opening patch note after rule status tokens', () => {
+    const spec = '- **R-BTN-5 / R-BTN-6 (gates).** `status: built` `status: partly` *Except under the policy.* Body.';
+    const plain = '- **R-BTN-7 (plain).** `status: built` Body with an *emphasis*.';
+    expect([...check(`${spec}\n${plain}`, [], new Set())]).toEqual([
+      'R-BTN-5 opens with an italic patch note: rewrite the rule so its body says it',
+    ]);
+  });
 });
 
 /** A unit spec-tools.mjs returns (a plain .mjs script, so typed here). */

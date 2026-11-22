@@ -6,6 +6,7 @@
 // frontmatter spec:index writes; every reader takes the body, and line numbers stay the file's.
 import { describe, it, expect } from 'vitest';
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 // @ts-expect-error a plain .mjs script, no types
@@ -20,6 +21,7 @@ const ROOT = resolve(import.meta.dirname, '..', '..');
 
 function fixture(parts: Record<string, string>): string {
   const root = mkdtempSync(join(tmpdir(), 'baton-spec-'));
+  execFileSync('git', ['init', '-q'], { cwd: root });
   mkdirSync(join(root, 'spec', 'BATON_SPEC'), { recursive: true });
   for (const [name, text] of Object.entries(parts)) writeFileSync(join(root, 'spec', 'BATON_SPEC', name), text);
   return root;
@@ -27,7 +29,7 @@ function fixture(parts: Record<string, string>): string {
 
 const FRONT = '# Spec\n\n## Contents\n\n| § | Title |\n';
 const ONE = '## 1. One *(proposal)*\n\n### 1.1 Sub\n\n- **R-BTN-1 (one home per fact).** Each fact.\n- **R-BTN-2 / R-BTN-3 (two at once).** Both.\n';
-const TWO = '## 2. Two\n\n| S-BTN-907 a scenario | steps | expected |\n| G-BTN-9 | a gate |\n';
+const TWO = '## 2. Two\n\n| S-BTN-907 a scenario | steps | expected\n| G-BTN-9 | a gate |\n';
 
 /** Each part's text as spec:index leaves it: its generated frontmatter, then its body. */
 function paged(parts: Record<string, string>): Record<string, string> {
@@ -132,7 +134,7 @@ describe('spec-files (B-179)', () => {
       '01-one.md': '## 1. One\n\n- **R-BTN-1 / R-BTN-2 (both).** `status: built B-276` `status: partly` Text.\n\n### Scenarios\n\n| S-BTN-907 a scenario | steps | R-BTN-2 |\n',
     });
     const parts = specParts(root);
-    const evidence = [['src/a.ts', '// R-BTN-1'], ['test/unit/one.test.ts', '// S-BTN-907']];
+    const evidence = [['src/a.ts', '// R-BTN-1'], ['test/unit/one.test.ts', "it('S-BTN-907 a scenario', () => {})"]];
     const text = indexText(parts, ruleLedger(joinParts(parts), evidence));
     expect(text).toContain('| built | B-276 | `src/a.ts` | — |');
     expect(text).toContain('| partly | — | — | `test/unit/one.test.ts` |');

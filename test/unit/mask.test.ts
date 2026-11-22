@@ -6,7 +6,7 @@
 import { describe, it, expect } from 'vitest';
 import { BEARER_TOKEN, KEY_HOLD, createMasker, maskSecrets } from '../../src/shared/mask.mjs';
 
-describe('B-169 the masking pattern', () => {
+describe('B-169 the masking pattern (S-BTN-98, redaction slice)', () => {
   it('masks every bearer prefix Baton issues, each with its own characters', () => {
     for (const token of ['brt_abc-DEF_9', 'bak_0123456789abcdef_' + 'a'.repeat(64), 'bmcp_xyz', 'bps_0123456789abcdef_secret', 'bds_0123456789abcdef_secret', 'bmo_client', 'bmr_refresh-1_2', 'bor_resource']) {
       expect(maskSecrets(`x ${token} y`)).toBe('x *** y');

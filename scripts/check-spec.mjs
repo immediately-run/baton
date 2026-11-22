@@ -27,7 +27,7 @@ import { fileURLToPath } from 'node:url';
 import { patchNotes } from './spec-tools.mjs';
 import { joinParts, layoutProblems, specParts } from './spec-files.mjs';
 import { stripFrontmatter } from './lib/stripFrontmatter.mjs';
-import { basePending, citedIds, codeTexts, definedIds, fileScenario, ledgerProblems, PENDING, pendingIds, ruleLedger, scenarioIds } from './spec-ledger.mjs';
+import { basePending, citedIds, codeTexts, definedIds, fileScenario, ledgerProblems, PENDING, pendingBaseRef, pendingIds, ruleLedger, scenarioIds } from './spec-ledger.mjs';
 
 export { citedIds, definedIds, fileScenario, scenarioIds };
 
@@ -182,10 +182,10 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const ledger = ruleLedger(spec, code);
   try {
     const pending = pendingIds(readFileSync(join(REPO, PENDING), 'utf8'));
-    const baseline = basePending(REPO, 'origin/main', 'spec/BATON_SPEC/15-verification.md');
+    const baseline = basePending(REPO, pendingBaseRef(REPO), 'spec/BATON_SPEC/15-verification.md');
     problems.push(...ledgerProblems(ledger, archived, pending, baseline));
   } catch (e) {
-    problems.push(`could not check the pending list against origin/main: ${e.message}`);
+    problems.push(`could not check the pending list against the default-branch baseline: ${e.message}`);
   }
   problems.push(...layoutProblems(REPO, undefined, undefined, ledger));
   for (const w of problems.warnings) console.warn(`! ${w}`);

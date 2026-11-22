@@ -123,7 +123,7 @@ Designs for this section that are not built are on the proposal page
   discarded until the next run. Core recommends a `ready` leg and never computes readiness. The
   claim response, every heartbeat and every `advance` response show the holder Baton's station,
   path and queued leg, and the latest snapshot's readiness.
-- **R-BTN-83 (a leg ends in a position: the station it reached and the leg it queues).** `status: built`
+- **R-BTN-83 (a leg ends in a position: the station it reached and the leg it queues).** `status: partly`
   - **Outcomes.** A leg's `to` lists its possible outcomes; which one a run reached is the
     holder's report, its evidence in git.
   - **The pair.** Every finishing leg reports a **position** `(reached, next)`: `reached` one

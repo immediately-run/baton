@@ -22,9 +22,10 @@ description: "BATON_SPEC — 15. Verification: the model, the harness, scenarios
   fails on any error or any route over its latency budget, and reports the figures it reached
   (G-BTN-77).
 - **R-BTN-30 (scenarios are tested or pending by name).** `status: built B-276` Each `S-BTN-<n>` scenario has a test
-  under `test/` that names its id in the filename or source, or is listed by id in
+  under `test/` that names its id in the filename or a literal test or suite title, or is listed by id in
   [`spec/scenarios-pending.json`](../scenarios-pending.json). `npm run check:spec` checks both and
-  refuses pending additions against the default branch. When a scenario gains a test or is
+  refuses pending additions against the default branch (its previous tip on a push to that branch).
+  When a scenario gains a test or is
   retired, remove its pending entry. A gate
   `G-BTN-<n>` is an invariant the implementation must establish, proved by the scenarios or
   tests its row names. Every scenario that has a test passes on the hosts it runs on (G-BTN-37).

@@ -33,7 +33,7 @@ import { execFileSync } from 'node:child_process';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { frontmatterBlock } from './lib/stripFrontmatter.mjs';
-import { codeTexts, ruleDefinitions, ruleLedger } from './spec-ledger.mjs';
+import { codeTexts, ruleDefinitions, ruleLedger, verificationRow } from './spec-ledger.mjs';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -188,11 +188,6 @@ export function moveProof(before, parts) {
   return { ok: joined === body, before: sha256(body), after: sha256(joined), parts: parts.length };
 }
 
-// A scenario row names itself in its first cell (`| S-BTN-7 a scenario |`). A gate row has the id
-// alone there and its statement in the second, which the index does not repeat: it restates no
-// rule, so a gate is listed by id and file only.
-const ROW = /^\| *([SG]-BTN-\d+)\b *([^|]*)\|/;
-
 /** The index's text, generated from the parts. */
 export function indexText(parts, ledger = ruleLedger(joinParts(parts), [])) {
   const out = [
@@ -243,8 +238,8 @@ export function indexText(parts, ledger = ruleLedger(joinParts(parts), [])) {
         }
         continue;
       }
-      const row = ROW.exec(line);
-      if (row) ids.push({ id: row[1], title: row[2].trim().replace(/\*\*/g, ''), path: p.path });
+      const row = verificationRow(line);
+      if (row) ids.push({ id: row.id, title: row.title.replace(/\*\*/g, ''), path: p.path });
     }
     offset += lines.length - (p.text.endsWith('\n') ? 1 : 0);
     flush();
