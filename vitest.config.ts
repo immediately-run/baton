@@ -156,7 +156,7 @@ export default defineConfig({
           globalSetup: ['./test/global-setup.ts'],
           setupFiles: ['./test/setup.ts'],
           include: ['test/**/*.test.ts'],
-          exclude: [...NODE_ONLY, ...LOAD_TEST, 'test/ui/**'],
+          exclude: [...NODE_ONLY, ...LOAD_TEST, 'test/ui/**', 'test/unit/local-event-archive.test.ts'],
         },
       },
       {
@@ -167,7 +167,7 @@ export default defineConfig({
           environment: 'node',
           globalSetup: ['./test/global-setup.ts'],
           setupFiles: ['./test/setup.ts'],
-          include: ['test/integration/**/*.test.ts', 'test/unit/mirror.test.ts', 'test/unit/runner-protocol.test.ts', ...(RUN_LOAD_TEST ? LOAD_TEST : []), ...NODE_ONLY, ...SCRIPT_TESTS],
+          include: ['test/integration/**/*.test.ts', 'test/unit/mirror.test.ts', 'test/unit/runner-protocol.test.ts', 'test/unit/local-event-archive.test.ts', ...(RUN_LOAD_TEST ? LOAD_TEST : []), ...NODE_ONLY, ...SCRIPT_TESTS],
           exclude: [...configDefaults.exclude, ...QUINT_TESTS],
           provide: { localConfig: { ...testVars(wranglerVars()), ...bindings } },
         },

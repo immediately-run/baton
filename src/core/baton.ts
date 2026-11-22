@@ -163,7 +163,7 @@ export class BatonCore {
     // R-BTN-80, R-BTN-81: a decision's notices are queued and closed with it, and its history row written.
     this.notices = new Notices({ store, now: () => this.now() });
     this.history = new History({ store, now: () => this.now() });
-    this.retention = new Retention({ store, now: () => this.now() });
+    this.retention = new Retention({ store, now: () => this.now(), sealed: () => this.ownerState.sealedAt() != null });
     // B-4 (§13.1, R-BTN-113): the instance settings, before the runner calls and the claims that
     // read the session-host allowlist.
     this.instance = new InstanceSettings({ store, now: () => this.now(), config: ports.config });
@@ -475,10 +475,6 @@ export class BatonCore {
         // R-BTN-81: the history of tickets closed 90 days ago goes.
         stage = 'history.purge';
         this.history.purge();
-        // R-BTN-149 (B-238): old events, snapshots and runner declarations, and the purged
-        // tickets' claims — a batch a tick, each step through its index.
-        stage = 'retention';
-        this.retention.prune();
         // §12.8 (B-145, R-BTN-189): a protection report that lapsed past its 24 hours stops
         // feeding `no-runner-lands` — every repository with floors is re-judged, and a newly
         // broken one stops offering claims and releases its running ones.
@@ -502,6 +498,8 @@ export class BatonCore {
     await this.armBy(this.questions.nextDue());
     // R-BTN-90 (B-234): the earliest armed claim deadline, so a run's clock wakes the alarm.
     await this.armBy(this.claims.nextDeadline());
+    // R-BTN-149: archive old events before pruning. Storage I/O never spans a SQL transaction.
+    await this.retention.prune(this.ports.archiveEvents);
     // B-229: a reap that could not be written fails the tick only now, after its work: the
     // failure reaches the host's log naming each claim, and the next tick tries it again.
     if (unreaped.length) throw new Error(`the alarm could not reap ${unreaped.length} claim(s): ${unreaped.join('; ')}`);

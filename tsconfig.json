@@ -37,6 +37,7 @@
     "src/defaults",
     "test/hosts/local.ts",
     "test/unit/local-queue.test.ts",
+    "test/unit/local-event-archive.test.ts",
     "test/integration/S-BTN-204.runner-half.test.ts",
     "test/integration/S-BTN-209.executor-sources.test.ts",
     "test/integration/S-BTN-210.exec-calls.test.ts",

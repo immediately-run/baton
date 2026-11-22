@@ -11,11 +11,13 @@
 // bindings are refused: only the test harness, in-process, may set them.
 import { readFileSync } from 'node:fs';
 import { isIP } from 'node:net';
+import { resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { parseAdminKeys } from '../core/auth';
 import { BatonError } from '../core/http';
 import type { AccessIdentities, Config } from '../core/ports';
 import { LocalHost } from './host';
+import { fileEventArchive } from './eventArchive';
 import { serve } from './server';
 import { openStore } from './store';
 
@@ -74,11 +76,16 @@ export async function main(argv: string[]) {
       'admin-keys': { type: 'string' },
       'access-identities': { type: 'string' },
       'github-webhook-secret': { type: 'string' },
+      'event-archive': { type: 'string' },
       'signing-key': { type: 'string' }, // Retired; accept old launch commands without reading the file.
       config: { type: 'string' },
     },
   });
   if (!values.db) throw new Error('--db <path> is required (the SQLite file; created if absent)');
+  const archive = values['event-archive'];
+  if (archive !== undefined && (!archive.trim() || resolve(archive) === resolve(values.db))) {
+    throw new Error('--event-archive must name a separate NDJSON file');
+  }
   const port = Number(values.port);
   if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error('--port must be a port number');
   // The origin is the OIDC audience and the dashboard's Origin (R-BTN-56): it must be the
@@ -104,7 +111,8 @@ export async function main(argv: string[]) {
   // R-BTN-55: the GitHub App's webhook secret, from the file `--github-webhook-secret` names
   // (a file, so the secret is in no process list); it wins over a --config value.
   if (values['github-webhook-secret']) config.BATON_GITHUB_WEBHOOK_SECRET = readFileSync(values['github-webhook-secret'], 'utf8').trim();
-  const host = new LocalHost({ store, config, adminKeys: adminKeysFrom(values['admin-keys']), accessIdentities: accessIdentitiesFrom(values['access-identities']) });
+  const host = new LocalHost({ store, config, adminKeys: adminKeysFrom(values['admin-keys']), accessIdentities: accessIdentitiesFrom(values['access-identities']),
+    archiveEvents: archive ? fileEventArchive(archive) : undefined });
   await host.start();
   const server = serve(host, origin);
   server.listen(port, values.host, () => console.log(`baton: serving ${origin} from ${values.db}`));

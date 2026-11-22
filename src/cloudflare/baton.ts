@@ -6,6 +6,7 @@ import { DurableObject } from 'cloudflare:workers';
 import { BatonCore } from '../core/baton';
 import { dispatchWorkflow } from '../core/mirror';
 import { parseAdminKeys } from '../core/auth';
+import { sha256HexSync } from '../core/policy';
 import type { Cursor, Row, SqlValue, Store } from '../core/ports';
 
 /** `ctx.storage` as the core's Store: the same synchronous SQLite, unchanged. */
@@ -22,9 +23,18 @@ export class Baton extends DurableObject<Env> {
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
+    const archive = env.BATON_EVENT_ARCHIVE;
     this.core = new BatonCore({
       store: durableStore(ctx.storage),
       scheduler: { get: () => ctx.storage.getAlarm(), set: (at) => ctx.storage.setAlarm(at) },
+      archiveEvents: archive && (async (parts) => {
+        // Immutable parts bound each write and make an identical retry use the same key.
+        for (const { repository, day, ndjson } of parts) {
+          const key = `events/${repository}/${day}/${sha256HexSync(ndjson)}.ndjson`;
+          const written = await archive.put(key, ndjson, { httpMetadata: { contentType: 'application/x-ndjson' } });
+          if (!written) throw new Error(`R2 did not acknowledge ${key}`);
+        }
+      }),
       config: env,
       dispatch: { send: (target) => dispatchWorkflow(env.GITHUB_DISPATCH_TOKEN, target), defer: (work) => ctx.waitUntil(work) },
       adminKeys: { list: () => parseAdminKeys(env.BATON_ADMIN_KEYS ?? '') },

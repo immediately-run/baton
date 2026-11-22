@@ -1,16 +1,17 @@
 // retention.ts — R-BTN-149's retention (BATON_SPEC §2; B-238): the alarm's prunes of what Baton
 // would otherwise keep forever. Each tick deletes at most `RETENTION_BATCH` rows, oldest first:
-//   1. repository `events` older than 90 days below every live mirror's `mirror_acked_seq`;
+//   1. exported repository `events` older than 90 days below every live mirror's `mirror_acked_seq`;
 //   2. `board_snapshots` older than 90 days, never a repository's head;
 //   3. the capability, tag and course rows of runners unseen for 30 days — the runner rows stay
 //      (R-BTN-3);
 //   4. the claims of tickets whose history R-BTN-81 purged, with their legs, activities and the
 //      rows that hang off them — a claim an event, a condition or a scope finding still names
 //      waits for it, so its events go first (step 1).
-// Every step finds its rows through an index (0053) and reads a row or two when there is nothing
-// to delete: the retention must not cost more than it saves (B-238).
+// Every step finds its rows through an index (0053).
 import { HELD_CLAIMS_SQL } from './blocks';
-import type { Store } from './ports';
+import { groupBy } from './db';
+import { eventPage, type EventRow } from './mirror';
+import type { EventArchive, EventArchivePart, Store } from './ports';
 
 /** B-238: the rows one tick deletes, at most, across the steps. */
 export const RETENTION_BATCH = 1000;
@@ -31,16 +32,12 @@ const CLAIM_ROWS = ['leg_run_inputs', 'claim_legs', 'activities', 'transcripts',
 export interface Ctx {
   store: Store;
   now: () => number;
-}
-
-export interface Pruned {
-  events: number;
-  snapshots: number;
-  runner_rows: number;
-  claims: number;
+  sealed: () => boolean;
 }
 
 export class Retention {
+  private pruning = false;
+
   constructor(private readonly c: Ctx) {}
 
   private rows<T>(q: string, ...p: unknown[]): T[] {
@@ -48,17 +45,26 @@ export class Retention {
   }
 
   /** The alarm's share: one batch across the four steps, in order. */
-  prune(batch = RETENTION_BATCH): Pruned {
+  async prune(archive: EventArchive | undefined, batch = RETENTION_BATCH): Promise<void> {
+    if (this.pruning || this.c.sealed()) return;
+    this.pruning = true;
     const now = this.c.now();
-    let left = batch;
-    const events = this.events(now, left);
-    left -= events;
-    const snapshots = left > 0 ? this.snapshots(now, left) : 0;
-    left -= snapshots;
-    const runner_rows = left > 0 ? this.runners(now, left) : 0;
-    left -= runner_rows;
-    const claims = left > 0 ? this.claims(now, left) : 0;
-    return { events, snapshots, runner_rows, claims };
+    let exported: number[] = [];
+    try {
+      if (archive) exported = await this.exportEvents(archive, now, batch);
+    } finally {
+      try {
+        // No transaction spans the archive I/O. A seal or a new mirror may have arrived.
+        if (!this.c.sealed()) this.c.store.transaction(() => {
+          let left = batch - this.deleteEvents(exported, now);
+          if (left > 0) left -= this.snapshots(now, left);
+          if (left > 0) left -= this.runners(now, left);
+          if (left > 0) this.claims(now, left);
+        });
+      } finally {
+        this.pruning = false;
+      }
+    }
   }
 
   /** The lowest acknowledged cursor among the live repositories with a mirror (a workflow or a
@@ -70,17 +76,43 @@ export class Retention {
               OR EXISTS (SELECT 1 FROM sync_keys k WHERE k.repository_id = r.id AND k.role = 'mirror' AND k.revoked_at IS NULL))`)[0]?.b ?? null;
   }
 
-  /** Step 1, through `events_retention`. The oldest old event is read first: none, or one a
-   *  mirror has not acknowledged, ends the step at one row. Otherwise at most `n` index rows are
-   *  read, oldest first, and those below the bound go. */
-  private events(now: number, n: number): number {
+  private eventBound(): number {
+    // SQLite's event rowids are not AUTOINCREMENT. Keep the last one as a cursor watermark.
+    const last = this.rows<{ seq: number }>('SELECT MAX(seq) AS seq FROM events')[0]?.seq ?? 0;
+    return Math.min(last, this.mirrorBound() ?? last);
+  }
+
+  /** Select a bounded batch through `events_retention`, then archive it before any deletion. */
+  private async exportEvents(archive: EventArchive, now: number, n: number): Promise<number[]> {
     const cutoff = now - EVENTS_KEEP_MS;
-    const bound = this.mirrorBound() ?? Number.MAX_SAFE_INTEGER;
-    const front = this.rows<{ seq: number }>(`SELECT seq FROM events WHERE repository_id IS NOT NULL AND at < ? ORDER BY at LIMIT 1`, cutoff)[0];
-    if (!front || front.seq >= bound) return 0;
+    const bound = this.eventBound();
+    if (bound <= 0) return [];
+    const rows = this.rows<EventRow & { repository_id: string }>(
+      `SELECT * FROM (SELECT seq, at, kind, ticket_id, claim_id, actor, detail_json, repository_id FROM events
+         WHERE repository_id IS NOT NULL AND at < ? ORDER BY at, seq LIMIT ?) WHERE seq < ?`, cutoff, n, bound);
+    if (!rows.length) return [];
+    const parts: EventArchivePart[] = [];
+    for (const [repository, events] of groupBy(rows, 'repository_id')) {
+      for (const [day, sameDay] of groupBy(events.map((e) => ({ ...e, day: new Date(e.at).toISOString().slice(0, 10) })), 'day')) {
+        // Unlike the HTTP feed the archive includes every kind, including Baton-only events.
+        const page = eventPage(this.c.store, repository, sameDay.sort((a, b) => a.seq - b.seq), 0);
+        parts.push({ repository, day, ndjson: JSON.stringify({ repository, ...page }) + '\n' });
+      }
+    }
+    try {
+      await archive(parts);
+    } catch (e) {
+      throw new Error(`event archive failed: ${e instanceof Error ? e.message : String(e)}`, { cause: e });
+    }
+    return rows.map((row) => row.seq);
+  }
+
+  private deleteEvents(exported: number[], now: number): number {
+    if (!exported.length) return 0;
     return this.rows(
-      `DELETE FROM events WHERE seq IN (SELECT seq FROM (SELECT seq FROM events WHERE repository_id IS NOT NULL AND at < ? ORDER BY at LIMIT ?) WHERE seq < ?)
-       RETURNING seq`, cutoff, n, bound).length;
+      `DELETE FROM events WHERE seq IN (SELECT value FROM json_each(?))
+         AND repository_id IS NOT NULL AND at < ? AND seq < ? RETURNING seq`,
+      JSON.stringify(exported), now - EVENTS_KEEP_MS, this.eventBound()).length;
   }
 
   /** Step 2, through `board_snapshots_received`: a head's snapshot is skipped, never deleted. */

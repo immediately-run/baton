@@ -369,7 +369,7 @@ For development and CI (BATON_SPEC §3a): the same core, on a SQLite file. It ne
 later (`node:sqlite` without a flag).
 
 ```
-npm run start:local -- --db ./baton.db --port 8787 [--origin <url>] [--admin-keys <file>] [--github-webhook-secret <file>] [--config <file>]
+npm run start:local -- --db ./baton.db --port 8787 [--origin <url>] [--admin-keys <file>] [--github-webhook-secret <file>] [--config <file>] [--event-archive <file>]
 ```
 
 - `--origin` is the instance's own origin (default `http://<host>:<port>`): the OIDC audience,
@@ -400,6 +400,21 @@ Edit on the account, plus Zone: Read and Workers Routes: Edit on the `immediatel
 
 With a sibling docs checkout present, the suite also fails when `src/shared/` or the board
 fixtures have drifted from docs.
+
+### Event archive
+
+Event deletion is off by default (R-BTN-149). To enable it on Cloudflare, bind a private R2
+bucket as `BATON_EVENT_ARCHIVE` with `[[r2_buckets]]` in the deployment's Wrangler configuration.
+Use one bucket per instance and do not expire the archived objects. Each tick adds bounded
+NDJSON parts under `events/<repository>/<UTC day>/` rather than rewriting a daily object.
+On the local host, pass `--event-archive <file>` to append and sync to a separate private NDJSON
+file in an existing directory on durable storage. Do not share that file between instances.
+
+Each line is a mirror feed page (`events`, `next`, `cutover_at`) plus its `repository`.
+The event records use the feed's projection, including for kinds the live feed omits.
+For replay, collect the pages for the repository, order events by `seq`, and deduplicate by
+`seq`: storage can acknowledge a batch even if the alarm did not get to delete it. A local
+append interrupted by a crash can leave an incomplete line; the next tick retries those rows.
 
 ## Moving a Baton (R-BTN-88)
 
