@@ -149,7 +149,10 @@ export default defineConfig({
         // B-91: `testVars` — the same vars, no seeded owner keys, and the test Access audience
         // and owner. The bindings come last: miniflare's merge lets the second argument win, as
         // the local project's spread does.
-        plugins: [cloudflareTest(async () => ({ wrangler: { configPath: './wrangler.toml' }, miniflare: { bindings: { ...testVars(wranglerVars()), ...bindings } } }))],
+        plugins: [cloudflareTest(async () => ({
+          wrangler: { configPath: './wrangler.toml' },
+          miniflare: { bindings: { ...testVars(wranglerVars()), ...bindings }, r2Buckets: ['BATON_EVENT_ARCHIVE'] },
+        }))],
         resolve: { alias: host('cloudflare') },
         test: {
           name: 'cloudflare',

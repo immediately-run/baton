@@ -6,7 +6,7 @@
 // the claims of a ticket whose history R-BTN-81 purged go with their legs and activities once
 // their events have gone — an open ticket's claims stay (R-BTN-24, R-BTN-106). Runs on both hosts.
 import { describe, it, expect, afterEach, beforeEach } from 'vitest';
-import { Git, advance, claimItem, cutover, endClaim, mirrorCall, register, rows, setClock, tick, withCore, runnerCall } from '../helpers';
+import { Git, HOST, advance, claimItem, cutover, endClaim, mirrorCall, register, rows, setClock, tick, withCore, runnerCall } from '../helpers';
 import type { EventArchive, Ports } from '../../src/core/ports';
 
 const T0 = Date.parse('2026-08-01T12:00:00Z');
@@ -29,7 +29,6 @@ async function quietAlarm() {
 afterEach(async () => {
   await withCore((c) => {
     if (scheduler) (c as unknown as { ports: { scheduler: Scheduler } }).ports.scheduler = scheduler;
-    (c as unknown as { ports: Ports }).ports.archiveEvents = undefined;
   });
   scheduler = null;
 });
@@ -108,12 +107,43 @@ describe('S-BTN-244 R-BTN-149 retention', () => {
   });
 
   it('keeps old acknowledged events when no archive is configured', async () => {
+    await withCore((c) => { (c as unknown as { ports: Ports }).ports.archiveEvents = undefined; });
     const before = await rows('SELECT seq FROM events WHERE repository_id IS NOT NULL ORDER BY seq');
     expect(before.length).toBeGreaterThan(0);
     await setClock(T0 + 91 * DAY);
     await ack(await maxSeq());
     await tick();
     expect(await rows('SELECT seq FROM events WHERE repository_id IS NOT NULL AND at = ? ORDER BY seq', T0)).toEqual(before);
+  });
+
+  it.runIf((HOST as string) === 'local')('releases the local queue during archive I/O and rechecks the mirror cursor', async () => {
+    await rows(`INSERT INTO events (at, kind, actor, detail_json, repository_id) VALUES (?, 'admin', 'test', '{}', 'docs')`, T0);
+    await setClock(T0 + 91 * DAY);
+    await ack(await maxSeq());
+    const oldRows = () => rows('SELECT seq FROM events WHERE repository_id IS NOT NULL AND at = ? ORDER BY seq', T0);
+    const before = await oldRows();
+    expect(before.length).toBeGreaterThan(1);
+    let started!: () => void;
+    let release!: () => void;
+    const archiving = new Promise<void>((resolve) => { started = resolve; });
+    const archived = new Promise<void>((resolve) => { release = resolve; });
+    let writes = 0;
+    await useArchive(async () => { writes++; started(); await archived; });
+    const pruning = tick();
+    await Promise.race([archiving, pruning]);
+    let ran = false;
+    const nextTurn = rows(`UPDATE repositories SET mirror_acked_seq = 0 WHERE id = 'docs'`).then(() => { ran = true; });
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(ran).toBe(true);
+      await tick();
+      expect(writes).toBe(1);
+      expect(await oldRows()).toEqual(before);
+    } finally {
+      release();
+      await Promise.all([pruning, nextTurn]);
+    }
+    expect(await oldRows()).toEqual(before);
   });
 
   it('after archive failure retains all events; the retry exports the mirror format and deletes only that batch', async () => {

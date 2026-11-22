@@ -163,7 +163,7 @@ export class BatonCore {
     // R-BTN-80, R-BTN-81: a decision's notices are queued and closed with it, and its history row written.
     this.notices = new Notices({ store, now: () => this.now() });
     this.history = new History({ store, now: () => this.now() });
-    this.retention = new Retention({ store, now: () => this.now(), sealed: () => this.ownerState.sealedAt() != null });
+    this.retention = new Retention({ store, now: () => this.now(), sealed: () => this.ownerState.sealedAt() != null, outside: this.outside });
     // B-4 (§13.1, R-BTN-113): the instance settings, before the runner calls and the claims that
     // read the session-host allowlist.
     this.instance = new InstanceSettings({ store, now: () => this.now(), config: ports.config });

@@ -405,16 +405,20 @@ fixtures have drifted from docs.
 
 Event deletion is off by default (R-BTN-149). To enable it on Cloudflare, bind a private R2
 bucket as `BATON_EVENT_ARCHIVE` with `[[r2_buckets]]` in the deployment's Wrangler configuration.
-Use one bucket per instance and do not expire the archived objects. Each tick adds bounded
-NDJSON parts under `events/<repository>/<UTC day>/` rather than rewriting a daily object.
+Use one bucket per instance and do not expire the archived objects. Each tick appends NDJSON
+pages to `events/<repository>/<UTC day>.ndjson` by conditionally replacing the daily object.
+If a write fails (including if the daily object exceeds R2's single-write limit), the entire
+event batch stays in SQLite.
 On the local host, pass `--event-archive <file>` to append and sync to a separate private NDJSON
-file in an existing directory on durable storage. Do not share that file between instances.
+file in an existing directory on durable storage. Existing files must not grant group or
+other access. Do not share the file between instances or point it at SQLite files.
 
 Each line is a mirror feed page (`events`, `next`, `cutover_at`) plus its `repository`.
 The event records use the feed's projection, including for kinds the live feed omits.
 For replay, collect the pages for the repository, order events by `seq`, and deduplicate by
 `seq`: storage can acknowledge a batch even if the alarm did not get to delete it. A local
-append interrupted by a crash can leave an incomplete line; the next tick retries those rows.
+append interrupted by a crash can leave an incomplete final line; the next append removes
+that tail before retrying the rows.
 
 ## Moving a Baton (R-BTN-88)
 

@@ -33,6 +33,7 @@ export interface Ctx {
   store: Store;
   now: () => number;
   sealed: () => boolean;
+  outside: <T>(work: () => Promise<T>) => Promise<T>;
 }
 
 export class Retention {
@@ -100,7 +101,7 @@ export class Retention {
       }
     }
     try {
-      await archive(parts);
+      await this.c.outside(() => archive(parts));
     } catch (e) {
       throw new Error(`event archive failed: ${e instanceof Error ? e.message : String(e)}`, { cause: e });
     }

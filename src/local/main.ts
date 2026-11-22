@@ -112,7 +112,7 @@ export async function main(argv: string[]) {
   // (a file, so the secret is in no process list); it wins over a --config value.
   if (values['github-webhook-secret']) config.BATON_GITHUB_WEBHOOK_SECRET = readFileSync(values['github-webhook-secret'], 'utf8').trim();
   const host = new LocalHost({ store, config, adminKeys: adminKeysFrom(values['admin-keys']), accessIdentities: accessIdentitiesFrom(values['access-identities']),
-    archiveEvents: archive ? fileEventArchive(archive) : undefined });
+    archiveEvents: archive ? fileEventArchive(archive, values.db === ':memory:' ? null : resolve(values.db)) : undefined });
   await host.start();
   const server = serve(host, origin);
   server.listen(port, values.host, () => console.log(`baton: serving ${origin} from ${values.db}`));
