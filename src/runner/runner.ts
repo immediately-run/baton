@@ -1193,12 +1193,17 @@ export class Runner {
    *  environment its literals came from. */
   private wrapperCall(h: Handle, call: string, script: string, args: unknown[], timeout_s?: number, sink?: () => ReturnType<Runner['legSink']>): Running {
     const leg = sink?.();
+    // R-BTN-144 (S-BTN-119): the call's slot and its class 7 set are bound here, as the call
+    // starts, not read through `cur` as each line arrives: a set assigned or replaced while the
+    // call streams (the slot's next leg) never masks this call's lines.
+    const slot = this.cur;
+    const secrets = slot.legSecrets;
     return this.executor.exec(h, ['node', LEG_PROCESS, call, script], {
       cwd: this.checkout, stdin: `${JSON.stringify(args)}\n`, ...(timeout_s ? { timeout_s } : {}),
       // R-BTN-144: what a leg's stderr carries leaves masked — class 5 and class 6 by the shared
       // pattern, the leg's own class 7 set with it while its run streams, and by the drain after.
       // B-108: a drained line is leg activity either way — the beat's liveness line counts it.
-      onStderr: leg ? (l: string) => { this.legLineAt = Date.now(); leg.onStderr(l); } : this.verbose ? (l: string) => { this.legLineAt = Date.now(); this.log(maskLegOutput(`baton: ${call}: ${l}`, this.legSecrets)); } : undefined,
+      onStderr: leg ? (l: string) => { slot.legLineAt = this.now(); leg.onStderr(l); } : this.verbose ? (l: string) => { slot.legLineAt = this.now(); this.log(maskLegOutput(`baton: ${call}: ${l}`, secrets)); } : undefined,
     });
   }
 

@@ -107,6 +107,37 @@ export function createLegMasker(secrets: readonly string[]) {
   const literals = [...new Set(secrets.map((secret) => secret.replace(/\r\n/g, '\n').replace(/\r?\n$/, '')).filter((secret) => secret !== ''))];
   const block = createMasker();
   let held = '';
+  // Whether the held bytes all lie inside a literal already masked in the head that went: a hold
+  // the next line disproves then has nothing of its own to leave — its bytes left as that `***`.
+  let heldMasked = false;
+  /** `text` cut at the tail `holdLiteralTail` holds, its head masked — and never cut inside a
+   *  whole literal the text already holds. The tail is chosen on the raw text, so one literal's
+   *  last bytes can be the start of another (`…9f2c71` before a value spelt `1abc…`); masking
+   *  the head alone would leave the first literal's head in clear (the flaky S-BTN-119 run of
+   *  2026-11-22: `vendor: vendor-credential-9f2c7`). The occurrence the cut crosses leaves as
+   *  `***` with the head, and its bytes past the cut are held only as the next literal's start. */
+  const cut = (text: string): { head: string; tail: string; masked: boolean } => {
+    const { head, tail } = holdLiteralTail(text, literals);
+    if (tail === '') return { head: maskLiterals(head, literals), tail, masked: false };
+    const at = head.length;
+    // Every occurrence of every literal in the whole text, merged where they overlap: the run
+    // the cut falls strictly inside, if any, is one masked unit.
+    const spans: Array<[number, number]> = [];
+    for (const literal of literals) {
+      for (let i = text.indexOf(literal); i >= 0; i = text.indexOf(literal, i + 1)) spans.push([i, i + literal.length]);
+    }
+    spans.sort((a, b) => a[0] - b[0]);
+    let start = -1;
+    let end = -1;
+    for (const [s, e] of spans) {
+      if (start >= 0 && s < end) { end = Math.max(end, e); continue; }
+      if (start >= 0 && start < at && at < end) break;
+      start = s;
+      end = e;
+    }
+    if (!(start >= 0 && start < at && at < end)) return { head: maskLiterals(head, literals), tail, masked: false };
+    return { head: `${maskLiterals(text.slice(0, start), literals)}***`, tail, masked: end >= text.length };
+  };
   return {
     push(line: string): string {
       const said: string[] = [];
@@ -121,24 +152,30 @@ export function createLegMasker(secrets: readonly string[]) {
         const opens = joined.filter((j) => j.split.tail !== '').sort((a, b) => b.split.tail.length - a.split.tail.length);
         const best = completes[0] ?? opens[0];
         if (best) {
-          said.push(block.push(maskLiterals(best.split.head, literals)));
-          held = best.split.tail;
+          const next = cut(best.text);
+          said.push(block.push(next.head));
+          held = next.tail;
+          heldMasked = next.masked;
           return said.filter(Boolean).join('\n');
         }
-        said.push(block.push('***'));
+        if (!heldMasked) said.push(block.push('***'));
         held = '';
+        heldMasked = false;
       }
-      const { head, tail } = holdLiteralTail(line, literals);
-      said.push(block.push(maskLiterals(head, literals)));
-      held = tail;
+      const next = cut(line);
+      said.push(block.push(next.head));
+      held = next.tail;
+      heldMasked = next.masked;
       return said.filter(Boolean).join('\n');
     },
     flush(): string {
       const said: string[] = [];
       if (held !== '') {
         held = '';
-        // The stream ended inside what may be a literal: those bytes leave masked, not verbatim.
-        said.push(block.push('***'));
+        // The stream ended inside what may be a literal: those bytes leave masked, not verbatim
+        // — unless they already left as the `***` of a literal the head held whole.
+        if (!heldMasked) said.push(block.push('***'));
+        heldMasked = false;
       }
       said.push(block.flush());
       return said.filter(Boolean).join('\n');

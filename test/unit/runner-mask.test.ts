@@ -101,6 +101,34 @@ describe('class 7 by name (R-BTN-144)', () => {
     expect(trailing.flush()).toBe('***');
   });
 
+  it('S-BTN-119: a whole literal whose last bytes start another literal is masked whole, never cut by the hold', () => {
+    // The flaky run of 2026-11-22: the tests' runner ran inside a leg whose environment held a
+    // value starting with the last byte of the one printed, so the hold cut inside the printed
+    // literal and its head left in clear (`vendor: vendor-credential-9f2c7`, `whole key: sk-…`).
+    const vendor = 'vendor-credential-9f2c71';
+    const other = '1abcdef0123456';
+    const sink = createLegMasker([vendor, other]);
+    expect(sink.push(`vendor: ${vendor}`)).toBe('vendor: ***');
+    // The held `1` was the masked literal's own byte: a line that does not complete `other`
+    // leaves as it is, with no stray `***` of its own.
+    expect(sink.push('next line')).toBe('next line');
+    // Held across a key's tail that starts another, at the stream's end: nothing left in clear.
+    expect(sink.push(`whole: ${vendor}`)).toBe('whole: ***');
+    expect(sink.flush()).toBe('');
+    // And when the next line does complete the overlapping literal, it is masked too — neither
+    // value's bytes reach the log.
+    const both = createLegMasker([vendor, other]);
+    expect(both.push(`v ${vendor}`)).toBe('v ***');
+    expect(both.push(`${other.slice(1)} after`)).toBe('*** after');
+    // Several bytes of overlap, the key masked whole on its line in either order of the set.
+    for (const set of [[KEY, 'lMnZZZZZZZ'], ['lMnZZZZZZZ', KEY]]) {
+      const s = createLegMasker(set);
+      const said = [s.push(`whole key: ${KEY}`), s.push('token: x'), s.flush()].join('\n');
+      expect(said).toBe('whole key: ***\ntoken: x\n');
+      expect(said).not.toContain(KEY.slice(0, 14));
+    }
+  });
+
   it('classes 5 and 6 are masked through the sink, and a `$&` secret with them', () => {
     const sink = createLegMasker(['pa$$w0rd$&x$1y']);
     expect(sink.push('Authorization: Bearer bmr_abc123DEF')).toBe('Authorization: Bearer ***');
