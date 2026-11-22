@@ -6,8 +6,9 @@ export declare const KEY_BEGIN: RegExp;
 export declare const KEY_END: RegExp;
 export declare const KEY_HOLD: number;
 
-/** `text` with every class-6 key block masked whole, then every class-5 token. */
+/** `text` with every class-6 key block masked whole. */
 export declare function maskKeys(text: string): string;
+export declare function maskBearerTokens(text: string): string;
 export declare function maskSecrets(text: string): string;
 
 export interface Masker {
@@ -17,4 +18,4 @@ export interface Masker {
   flush(): string;
 }
 
-export declare function createMasker(): Masker;
+export declare function createMasker(maskLine?: (line: string, endsAtKey: boolean) => string): Masker;

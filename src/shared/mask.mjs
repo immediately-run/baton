@@ -46,10 +46,14 @@ export function maskKeys(text) {
 
 /** `text`, with every class-5 and class-6 occurrence replaced by `***`. */
 export function maskSecrets(text) {
+  return maskBearerTokens(maskKeys(text));
+}
+
+export function maskBearerTokens(text) {
   // A fresh pattern per call, so nothing a previous replacement left in a shared `lastIndex` can
   // move where this one starts.
   const tokens = new RegExp(BEARER_TOKEN.source, 'g');
-  return maskKeys(text).replace(tokens, '***');
+  return text.replace(tokens, '***');
 }
 
 /** R-BTN-144 class 6 across a stream, which a line-at-a-time sink cannot do: from a `BEGIN`
@@ -57,8 +61,9 @@ export function maskSecrets(text) {
  *  then — a key printed over several lines never leaves piece by piece. `push` takes one line
  *  (the sink's unit) and returns the lines that may leave now, joined by `\n` (`''` while a
  *  block is held); `flush` returns `***` for a block the stream ended inside of. Class 5 is
- *  masked on every line as it leaves, and a token never spans a line. */
-export function createMasker() {
+ *  masked on every line as it leaves. `maskLine` can mask literals in non-key text; it sees
+ *  `endsAtKey` on the prefix of a BEGIN line so it can finish any pending literal there. */
+export function createMasker(maskLine = (line, _endsAtKey) => line) {
   const out = [];
   let held = false;
   let bytes = 0;
@@ -74,11 +79,12 @@ export function createMasker() {
         if (KEY_END.test(line) || bytes >= KEY_HOLD) release();
       } else {
         const open = line.search(KEY_BEGIN);
-        if (open < 0) out.push(maskSecrets(line));
+        if (open < 0) out.push(maskBearerTokens(maskLine(line, false)));
         else {
           // What is not key material on the `BEGIN` line (`key: …`) leaves with it, and the
           // block holds from that line on, never answered now.
-          if (open > 0) out.push(maskSecrets(line.slice(0, open)).replace(/\s+$/, ''));
+          const before = maskBearerTokens(maskLine(line.slice(0, open), true)).replace(/\s+$/, '');
+          if (before) out.push(before);
           held = true;
           bytes = line.length;
         }

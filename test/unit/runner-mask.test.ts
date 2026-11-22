@@ -110,6 +110,22 @@ describe('class 7 by name (R-BTN-144)', () => {
     expect(sink.push('-----END OPENSSH PRIVATE KEY-----')).toBe('***');
     expect(sink.flush()).toBe('');
   });
+
+  it('recognizes private-key banners before masking overlapping literals (S-BTN-119)', () => {
+    const begin = '-----BEGIN OPENSSH PRIVATE KEY-----';
+    const end = '-----END OPENSSH PRIVATE KEY-----';
+    const body = 'synthetic-key-body';
+    const after = 'normal output resumes';
+    for (const secret of ['-synthetic-local-value', 'PRIVATE KEY']) {
+      const sink = createLegMasker([secret]);
+      expect(sink.push(begin)).toBe('');
+      expect(sink.push(body)).toBe('');
+      expect(sink.push(end)).toBe('***');
+      expect(sink.push(after)).toBe(after);
+      expect(sink.flush()).toBe('');
+      expect(maskLegOutput([begin, body, end, after].join('\n'), [secret])).toBe(`***\n***\n***\n${after}`);
+    }
+  });
 });
 
 describe('a failed leg\'s end detail (B-256, S-BTN-231, §9.4)', () => {
