@@ -52,7 +52,7 @@ The last five rows were added on 2026-11-20 from the fix round of PR #299, each 
 code that day.
 
 **Spec:** [BATON_SPEC §12.8](../spec/BATON_SPEC/12-security.md#sec-12-8) ([R-BTN-188](../spec/BATON_SPEC/12-security.md#sec-12-8), [R-BTN-189](../spec/BATON_SPEC/12-security.md#sec-12-8), [R-BTN-180](../spec/BATON_SPEC/12-security.md#sec-12-8), [R-BTN-185](../spec/BATON_SPEC/12-security.md#sec-12-8), [R-BTN-186](../spec/BATON_SPEC/12-security.md#sec-12-8)), [§7.8](../spec/BATON_SPEC/07-conditions.md#sec-7-8)
-([R-BTN-171](../spec/BATON_SPEC/07-conditions.md#sec-7-8)), [§3.4](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-4) ([R-BTN-140](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-4)), [§13](../spec/BATON_SPEC/13-data-model.md#sec-13), [§14](../spec/BATON_SPEC/14-api.md#sec-14), [§15](../spec/BATON_SPEC/15-verification.md#sec-15) ([S-BTN-189](../spec/BATON_SPEC/15-verification.md#scenarios), [S-BTN-190](../spec/BATON_SPEC/15-verification.md#scenarios), [S-BTN-192](../spec/BATON_SPEC/15-verification.md#scenarios)).
+([R-BTN-171](../spec/BATON_SPEC/07-conditions.md#sec-7-8)), [§3.4](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-4) ([R-BTN-140](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-4)), [§13](../spec/BATON_SPEC/13-data-model.md#sec-13), [§14](../spec/BATON_SPEC/14-api.md#sec-14), [§15](../spec/BATON_SPEC/15-verification.md#sec-15) ([S-BTN-197](../spec/BATON_SPEC/15-verification.md#scenarios), [S-BTN-190](../spec/BATON_SPEC/15-verification.md#scenarios), [S-BTN-192](../spec/BATON_SPEC/15-verification.md#scenarios)).
 
 ## Plan
 
@@ -60,9 +60,9 @@ code that day.
    moves to the spec": the spec was just rewritten to what the owner ruled, and the code is
    older. For each row the PR either confirms that, or amends §12.8 to keep the code's knob.
    The rows where the code may be right and the owner decides:
-   - **floors.** Named floors with `remove_by` let a floor be removed by a `human` where
-     `approvers.policy` is `owner`. §12.8's one list cannot say that. Keep `remove_by`, or drop
-     it and state that shortening `floors` needs `approvers.policy` as it stood.
+   - **floors.** The old removal path checks both `remove_by` and `approvers.policy`.
+     Shortening `floors` needs the prior `approvers.policy`; R-BTN-189 refuses conversion
+     if that gate cannot preserve the old restriction across later versions.
    - **pins.** `policy_pins` records what a runner last saw; R-BTN-188 says a runner pins
      nothing. Remove the table and the pin check, or state what the pin is for.
    - **`leg_state`** (R-BTN-190, where leg state lives) and **`refs.legs`**, which the `branch`
@@ -72,8 +72,8 @@ code that day.
    - **the guarantees.** `trusted-domain-separate` and `human-gates-hardware` are in the code
      and not in R-BTN-189's table. A floor may name either today (`POST …/policy/floors`
      validates against `GUARANTEE_NAMES`), so removing a name needs the stored floors read
-     first: a floor naming a removed guarantee stops the migration, as the invariant below
-     says for a broken one.
+     first. Use R-BTN-189's successor mapping and refusal rules; a floor without a successor
+     stops the migration.
    - **the signed read.** B-160 item 3 removes the signature, the hashes and `policy_pins`
      on the owner's ruling of 2026-11-01. [B-160](archive/B-160.mdx) has landed; do not
      reintroduce the removed fields or add the migration's effective hash to claims.
@@ -92,18 +92,20 @@ code that day.
    `protected-signed` with one line naming the new word. Update `cli/baton.mjs`'s `KNOBS`.
 4. **Stored versions.** `repository_policies` is an append-only log of documents with their
    hashes. A new migration (number from `node cli/baton.mjs tickets next migration --for
-   B-293`) does not rewrite a stored version. The reader maps an old document to the new shape
-   (a renamed knob renamed, a removed knob dropped, a `courier` writer read as `runner` only if
-   the spec PR says so, otherwise dropped), and each repository's next policy write stores the
+   B-293`) does not rewrite a stored version. Project only the current legacy version as in
+   R-BTN-188, dropping `courier` rather than changing it to `runner`. The next policy write stores the
    new shape. The policy read's effective hash is recomputed over the new shape in one place
    and the change is logged as an `admin` event per repository. Stored hashes and links remain
-   unchanged. `policy_floors` rows become the `floors` knob or stay, by step 1.
+   unchanged. Keep live `policy_floors` backing rows until the new document is materialized;
+   preserve them through export and import as required by R-BTN-88.
 5. **Tests.** S-BTN-197 (the policy scenario, formerly numbered S-BTN-189), S-BTN-190 and
    S-BTN-192 are rewritten to the ruled names. New cases:
-   every preset's document validates and yields the guarantees R-BTN-189's table says; a stored
-   old-shape version reads back in the new shape with the same guarantees held or broken as
-   before the migration (a table-driven test over each preset and one hand-made document per
-   removed knob); an old knob name on `PUT …/policy` is `invalid-params` naming the knob.
+   every preset's document validates and yields the guarantees R-BTN-189's table says;
+   exercise the R-BTN-188 and R-BTN-189 migration checks in table-driven fixtures (each old
+   preset and a document per removed knob), asserting either preservation of held comparable
+   guarantees and the required audit or atomic refusal with the expected reason. Check
+   historical reads against the stored history, not against the projection. An old knob name
+   on `PUT …/policy` is `invalid-params` naming the knob.
 
 ### Trust
 
@@ -113,9 +115,11 @@ list stood before the change (R-BTN-188), validated in `policy.ts` before any SQ
 the `outbox.source` knob, written the same way. The mapping of a stored version is Baton's own
 code, run on documents their approvers wrote; it may drop or rename, and must never widen: no
 mapped document admits a writer, a deliverer or an approver the stored one did not. The PR
-shows this with the table-driven test of step 5 and a property: for every stored version in a
-copy of the reference deployment's log, the set of held guarantees after mapping is a superset
-of the set before. The owner supplies an offline copy for this check; an implement leg does
+shows this with the table-driven test of step 5 and a dry run on an owner-supplied offline copy
+of the reference deployment's log and backing data. For each current legacy version, check no
+new authority, no loss of a held comparable guarantee, and all floor and approver checks;
+record report-only guarantee losses and any repository that blocks migration. Verify every
+stored version's original hash and chain links stay intact. An implement leg does
 not read a live deployment or use its administrator key. This ticket changes no key, grant,
 floor or approver list on any live repository.
 
@@ -142,7 +146,6 @@ code disagree* (PR #299). Related: B-264 (`repos.unlisted`), B-165 (constant kno
 
 - 2026-11-22, spec-first hand-off: B-293 takes the policy-knob code half of B-165; its
   other simplifications stay with B-165. B-160 already retired signed policy reads and pins.
-  The code and schema migration follow spec approval. The guarantee comparison still needs
-  the owner's ruling: the old `human-gates` can hold with `human_key: any`, unlike the new
-  one, and two retired guarantees have no successor. An old floor is never silently waived
-  to satisfy the comparison.
+  The code and schema migration follow spec approval. The PR proposes R-BTN-189's explicit
+  comparison instead of comparing differently defined guarantees by name; no legacy floor
+  is silently waived.

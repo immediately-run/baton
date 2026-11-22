@@ -597,8 +597,9 @@ The fingerprint stores no ticket content and is an optimization, never authority
     `external_resources`,
     `resource_instances`, `instance_serves`, `capability_capacity`, `check_runners`, `mcp_keys` (hashes only), `instance_settings`, unexpired
     `registration_tokens` (hashes only), open `conditions`, `ticket_timers`, every `repository_policies` version (R-BTN-188, R-BTN-189),
-    and the backing data for any legacy floor projection not yet stored in a policy version
-    (R-BTN-189).
+    and `policy_floors`, the backing rows for live legacy floor projections (R-BTN-189).
+    A schema storing legacy floor rows always includes the `policy_floors` section
+    in the digest, as an empty array when there are no such rows.
   - **Not exported**: claims and their `claim_seats`, events,
     readings (R-BTN-76), sync wants; and, unless `--with-history`, the history, `leg_outputs`
     and `leg_run_inputs`, which an import without them loses.
@@ -608,8 +609,10 @@ The fingerprint stores no ticket content and is an optimization, never authority
     (one role per key, unique names, id grammars, tombstones only on retired rows); the first
     failing row refuses the whole import. It refuses a live repository whose policy versions do
     not chain by `previous_hash` from version 1, or whose export holds no policy; a retired
-    repository's tombstone needs none. Import validates legacy rows using the stored format and
-    checks the current projection after restoring its backing data (R-BTN-188, R-BTN-189).
+    repository's tombstone needs none. Import refuses a missing required `policy_floors`
+    section even with a valid digest and policy hash chain. It validates legacy rows using the
+    stored format. On a schema that uses projection, import checks the current projection after
+    restoring its backing data (R-BTN-188, R-BTN-189).
     Signed requests with `created` at or before the
     source's `sealed_at` are refused `unauthenticated`. Ticket-scoped rows wait in
     `pending_owner_state` until the first snapshot that creates their ticket; one the
