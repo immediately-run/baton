@@ -487,7 +487,7 @@ export function humanOnlyList(list: ApproverEntry[], humanKeys: ReadonlySet<stri
  *  `protection` true, `no-runner-lands` needs the checker's latest report to have matched
  *  within 24 hours; with `protection` undefined the guarantee is judged on the policy alone —
  *  the mode a floor is judged in, the report never being a policy condition. */
-export function guaranteesOf(policy: PolicyDocument, opts: { protection?: boolean; humanKeys?: ReadonlySet<string> } = {}): Record<GuaranteeName, boolean> {
+export function guaranteesOf(policy: PolicyDocument, opts: { protection?: boolean } = {}): Record<GuaranteeName, boolean> {
   const refsLand = admitsOnly(policy.refs.default_branch, ['trusted-runner', 'human'])
     && admitsOnly(policy.refs.tags, ['trusted-runner', 'human'])
     && admitsOnly(policy.refs.other, ['trusted-runner', 'human']);
@@ -498,8 +498,6 @@ export function guaranteesOf(policy: PolicyDocument, opts: { protection?: boolea
     && reported;
   const att = (type: string): WriterClass[] | undefined => policy.attestations[type];
   const attOnly = (type: string, writer: WriterClass) => att(type) !== undefined && att(type)!.every((w) => w === writer);
-  const humans = opts.humanKeys ?? new Set<string>();
-  const gates = humanOnlyList(policy.approvers.members, humans) && humanOnlyList(policy.approvers.trust, humans) && humanOnlyList(policy.approvers.policy, humans);
   return {
     'no-runner-lands': noRunnerLands,
     'control-paths-human': noRunnerLands && policy.paths.control === 'human',
@@ -510,7 +508,9 @@ export function guaranteesOf(policy: PolicyDocument, opts: { protection?: boolea
       && ['std:review@1', 'std:wrote@1', 'std:ran@1'].every((t) => attOnly(t, 'baton')),
     'signed-authorship': noRunnerLands && policy.authorship === 'signed',
     'trusted-domain-separate': policy.grants.trusted_domain === 'separate' && policy.grants.default_trust === 'untrusted',
-    'human-gates': gates && acceptsUnattestedHumanKey(policy.human_key),
+    // Neither custody intent nor an unverified hardware policy establishes R-BTN-189.
+    // Keep both names readable for previously registered floors.
+    'human-gates': false,
     'human-gates-hardware': false,
     'board-from-trusted': noRunnerLands && !policy.inputs.board.includes('machine') && policy.inputs.answers === 'attestation',
   };
@@ -546,10 +546,8 @@ export interface ProtectionReport { repository: string; matched: boolean; readin
 
 /** A repository's live owners, and the human-only keys among them — everything the approver
  *  checks read. `humans` is every fingerprint a `human` entry counts when ACTING: the
- *  repository's `human_only` owners, the tenant's registered human keys, and the host's
- *  BATON_HUMAN_KEYS lines; `breakGlass` is those lines alone (R-BTN-185: the deployment's root
- *  of trust, which satisfies every `human` entry of every repository on the instance, whatever
- *  `human_key` asks, and is the only recovery from a lost key). `humanOwners` is the
+ *  repository's human-only owners and the host's BATON_HUMAN_KEYS lines; `breakGlass` is those
+ *  lines alone, still subject to `human_key` (R-BTN-188). `humanOwners` is the
  *  repository's owners alone that are human keys by their own mark or the tenant's register —
  *  break-glass excluded: R-BTN-188's no-gate rule needs "a `human_only` key meeting the
  *  resulting `human_key` among the repository's owners", so a list a break-glass key alone
@@ -637,7 +635,7 @@ export class Policies {
   /** The guarantees over the current version, the protection report applied. */
   guaranteesFor(repository: string): Record<GuaranteeName, boolean> {
     const cur = this.current(repository);
-    return guaranteesOf(cur?.policy ?? COOPERATIVE, { protection: this.protectionOk(repository), humanKeys: this.facts(repository).humans });
+    return guaranteesOf(cur?.policy ?? COOPERATIVE, { protection: this.protectionOk(repository) });
   }
 
   // ── approvers (R-BTN-188) ──────────────────────────────────────────────────────────────
@@ -645,7 +643,7 @@ export class Policies {
   /** The facts every approver check reads: the repository's live owners (with their human-only
    *  marks) and every fingerprint a `human` entry counts. `breakGlass` — BATON_HUMAN_KEYS'
    *  fingerprints — is passed by the routes that judge an acting credential or a list's
-   *  satisfiability (R-BTN-185); the guarantee computations read the owners' own marks. */
+   *  satisfiability (R-BTN-185). */
   facts(repository: string, breakGlass: ReadonlySet<string> = new Set()): ApproverFacts {
     const owners = new Map(this.rows<{ fingerprint: string; human_only: number }>(
       'SELECT fingerprint, human_only FROM repository_owners WHERE repository_id = ? AND removed_at IS NULL', repository)
@@ -769,7 +767,7 @@ export class Policies {
 
     // The floors (R-BTN-189): judged on the policy alone — the protection report is not a
     // policy condition, so a lapsed or failed report never refuses a change.
-    const nextGuarantees = guaranteesOf(doc, { humanKeys: factsNow.humans });
+    const nextGuarantees = guaranteesOf(doc);
     for (const floor of this.floors(repository)) {
       for (const g of floor.guarantees) {
         if ((GUARANTEE_NAMES as readonly string[]).includes(g) && !nextGuarantees[g as GuaranteeName]) {
@@ -811,7 +809,7 @@ export class Policies {
     logEvent(this.c.store, this.c.now(), 'admin', actor.label, { act: 'policy-changed', repository, from: cur.version, to: version, changed }, null, null, repository);
     // The answer's guarantees are the enforced state of the new version — the protection report
     // counted, as the signed read counts it (the floors above stayed policy-only, R-BTN-189).
-    return { version, hash, changed, guarantees: guaranteesOf(doc, { protection: this.protectionOk(repository), humanKeys: factsNow.humans }) };
+    return { version, hash, changed, guarantees: guaranteesOf(doc, { protection: this.protectionOk(repository) }) };
   }
 
   /** R-BTN-181's store half: a `service:` writer the policy names must hold no owner, runner or
@@ -889,7 +887,7 @@ export class Policies {
     }
     // Refused when a named guarantee's policy conditions are not met now — judged on the policy
     // alone, the report never a policy condition.
-    const now = guaranteesOf(cur.policy, { humanKeys: facts.humans });
+    const now = guaranteesOf(cur.policy);
     for (const g of guarantees) {
       if (!now[g as GuaranteeName]) throw new BatonError('floor-violated', `${g} does not hold now (R-BTN-189)`, { guarantee: g });
     }
@@ -906,7 +904,7 @@ export class Policies {
   brokenUnderFloors(repository: string): { floor: string; guarantee: string }[] {
     const cur = this.current(repository);
     if (!cur) return [];
-    const guarantees = guaranteesOf(cur.policy, { protection: this.protectionOk(repository), humanKeys: this.facts(repository).humans });
+    const guarantees = guaranteesOf(cur.policy, { protection: this.protectionOk(repository) });
     const out: { floor: string; guarantee: string }[] = [];
     for (const floor of this.floors(repository)) {
       for (const g of floor.guarantees) {

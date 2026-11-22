@@ -132,21 +132,18 @@ describe('the repository policy (R-BTN-188, R-BTN-189)', () => {
   });
 
   it('each guarantee holds or breaks as its row says, against the presets', () => {
-    const humans = new Set(['SHA256:' + 'A'.repeat(43)]);
-    const of = (doc: typeof COOPERATIVE, opts: { protection?: boolean } = {}) => guaranteesOf(doc, { humanKeys: humans, ...opts });
+    const of = guaranteesOf;
     // cooperative: every guarantee but trusted-domain-separate is broken (no-runner-lands first).
     const coop = of(COOPERATIVE);
     expect(coop['no-runner-lands']).toBe(false);
     expect(coop['trusted-domain-separate']).toBe(false);
     expect(coop['human-gates']).toBe(false);
-    // protected: all but signed-authorship and human-gates-hardware, judged on the policy alone.
+    // protected: custody intent alone establishes neither human-gates guarantee.
     const prot = of(PROTECTED);
     for (const g of GUARANTEE_NAMES) {
-      const expectHeld = g !== 'signed-authorship' && g !== 'human-gates-hardware';
-      if (g === 'human-gates' || g === 'human-gates-hardware') continue; // covered below with marks
+      const expectHeld = g !== 'signed-authorship' && g !== 'human-gates' && g !== 'human-gates-hardware';
       expect(prot[g], g).toBe(expectHeld);
     }
-    expect(prot['human-gates']).toBe(true); // [human] lists are human-only whatever the marks
     // The preset cannot establish a hardware gate before attestation verification exists.
     const signed = of(PROTECTED_SIGNED);
     for (const g of GUARANTEE_NAMES) expect(signed[g], g).toBe(g !== 'human-gates' && g !== 'human-gates-hardware');
