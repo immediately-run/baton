@@ -49,7 +49,6 @@
     "test/integration/S-BTN-21.machine-lock.test.ts",
     "test/integration/S-BTN-77.runner-half.test.ts",
     "test/integration/S-BTN-229.runner-half.test.ts",
-    "test/unit/check-traces.test.ts",
     "test/unit/test-course.test.ts",
     "test/unit/stats-size.test.ts",
     "test/model/replay.test.ts",

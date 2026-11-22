@@ -1,16 +1,16 @@
 ---
-title: "R3-1254 — Baton model, remainder of R3-1243: exhaustive liveness on a narrowed instance, and blocks, decisions, queues and couriers in the model"
+title: "R3-1254 — Baton design-time model: remaining core transitions and regressions"
 id: R3-1254
 project: baton
 status: in-progress
-updated: 2026-11-02
+updated: 2026-11-22
 repos:
   - baton
 tags:
   - FEAT
   - roadmap-item
 order: 1087
-description: "R3-1243's remainder: make liveness exhaustive on a narrowed instance (TLC timed out on small at 8,187 states), and add blocks, decisions, leg queues and courier notices (R-BTN-75–80, docs#213) to the Quint model with their safety and liveness properties. Requires: none."
+description: "Keep the existing block, retry, decision and fleet regressions, and model the remaining core claim and decision transitions with short safety checks. B-271 supersedes the liveness and proof work."
 topics:
   - baton
 owns: {}
@@ -26,48 +26,24 @@ depends_on:
 [R-BTN-98](../spec/BATON_SPEC/01-what-baton-is.md#sec-1), [§6.1](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-1) [R-BTN-120](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-1), [§7.4](../spec/BATON_SPEC/07-conditions.md#sec-7-4) [R-BTN-122](../spec/BATON_SPEC/07-conditions.md#sec-7-4) and [§6.2](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-2) [R-BTN-126](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-2) (Status); [§15](../spec/BATON_SPEC/15-verification.md#sec-15) [R-BTN-68](../spec/BATON_SPEC/15-verification.md#sec-15);
 `model/README.md`. R-BTN-80 (notices) is retired (`spec/BATON_SPEC_HISTORY.md`).
 
-### Why
+### Remaining scope
 
-baton#10 states four liveness properties but could not check them: Apalache does not support
-fairness, and TLC on `small` explored 8,187 distinct states (971 million generated) in 28
-minutes without finishing — each `syncRead` picks any barred-tag set per ticket, so a state has
-thousands of successors. And the blocks amendment (docs#213, now §6.1–§6.4) adds blocks, decisions, queues and notices, whose
-safety and liveness the model does not yet cover.
-
-### What to build
-
-1. **A liveness instance** (`live` in `instances.qnt`): one ticket, two runners, one sync slot,
-   the sync's barred tags drawn from two fixed sets, git and owner budgets of 1. TLC checks
-   `fencesClear`, `endsResolveWithOwner`, `barsLiftClaimable` and `readyIsClaimed` (as rewritten
-   in baton#10's rounds 2–3) to completion; CI runs it if it stays under 10 minutes, else
-   nightly. Add **`endsResolveBySync`**: under fairness of the sync cycle and with no owner act,
-   every completed end whose evidence landed in git is eventually confirmed (baton#10 3-A-2). From the
-   adjudication of 3-A-0: make `fencesClear` exercise `fenceCleared` (today every fence times
-   out or is pushed past the horizon, so a mutant breaking only `fenceCleared` passes — add
-   fairness of a live fenced runner's heartbeat or a property of its own); state
-   `readyIsClaimed` so it survives two tickets (a runner holding the other ticket forever);
-   and give `ownerResolve` the owner budget.
-2. **Blocks** (R-BTN-75): `blocked_since` as a function of rows and next legs; invariants — a
-   ticket with a free next leg is not blocked; a `ticket` or `decision` block is never claimed
-   past (gate ghost); an `unblocked` event only follows a `blocked` one.
-3. **Decisions and notices** (R-BTN-78, R-BTN-80): a decision posted and answered by syncs;
-   couriers claim, crash (lease lapse), mark sent or failed. Safety: no notice for a closed
-   decision is marked sent; liveness: under fairness of each courier's claim, every open
-   decision's notice is eventually sent to every registered courier.
-4. **Queues** (R-BTN-79): depths and full stations over `roadmap-pr`'s course with
-   `max_queue` on `fix`; invariant — depth equals the unheld tickets waiting; liveness — the
-   review ⇄ fix loop with both bounded never deadlocks (advice only).
-5. **Regressions** for every finding docs#213's gate fixed that the model can express.
+[B-271](B-271.mdx) leaves a design-time simulation and retires the liveness run, proof,
+trace check and report. Keep the existing prerequisite, retry, block and fleet regressions.
+The remaining model work is the core's open-world claims, `no_chain_from`, spawned rows,
+`not_before`, the holder's reported `next`, and Baton-raised decisions and their effects on
+blocks. When a change is modelled, add a deterministic regression or witness for it. Notices,
+queues, sync dispatch and leg deadlines are outside this design-time check.
 
 ### Tests
 
-- `npm run model` gains the new invariants and regression runs; the liveness run as above.
+- `npm run model:quick`: the model's regressions, safety samples and witnesses.
+- `npm test`: implementation scenarios where behaviour changes (R-BTN-31).
 
 ### Exit criteria
 
-- [ ] TLC proves the four liveness properties on `live` to completion
-- [ ] blocks, decisions, notices and queues modelled, with their invariants holding in simulation and Apalache's depth-5 proof
-- [ ] `model/README.md`'s *Checked how* table updated
+- [ ] The remaining core transitions and safety regressions pass `npm run model:quick`.
+- [ ] `model/README.md` states the new scope and bounds.
 
 ## Status
 
@@ -107,11 +83,6 @@ _Items 3 and 4 below changed under the spec since filing: notices gate nothing (
 waits on a delivery", R-BTN-80) and leg queues are a warning (R-BTN-79, revised), so neither
 belongs in the core model; item 2's "a ticket with a free next leg is not blocked" is now the
 queued leg alone (R-BTN-75)._
-
-_Item 1's "CI runs it if it stays under 10 minutes, else nightly" is superseded too: R-BTN-68,
-amended 2026-10-17 at the owner's direction, takes model checking off hosted CI runners. The
-liveness run joins `npm run model:full` on the author's machine, and a PR changing the model
-carries its report, which CI's `model-report` job checks against the PR's head._
 
 _2026-10-19 — part 2a delivered: baton#55, merged as `a46b643` after three review rounds (14
 findings, all fixed; logged in `docs/review/pr-findings.mdx`). Its `model:full` report passed
@@ -181,3 +152,5 @@ _(2026-10-31, a note only, the ticket being in progress: the courier lease model
 
 _(2026-11-01: the spec restructure's part 1 (B-166, the PR `baton-spec-restructure-p1`): a note only, the ticket being in progress: posted decisions, choice stations, light questions, open-world claims and held snapshots left the spec (R-BTN-78, R-BTN-104, R-BTN-148, R-BTN-166, R-BTN-173 retired); `model/lightQuestion.qnt` models retired behaviour and is deleted with B-74's code; the model gains a person leg's expiry, the `cancelling` hold and the forced Resync's head reset.)_
 - 2026-11-02: the spec restructure's part 4 (B-166): every runner granted on a repository now has the same usable instances (R-BTN-76; no `uses`, no `runner` or `host` scope), so the fleet's resource answer is lost only when the repository has no live granted runner or no usable instance (R-BTN-77); the ontology's derived capabilities left the model's input (R-BTN-174, B-167), and a capability's capacity is R-BTN-178's rule 11 (B-106).
+
+_2026-11-22 — B-271 narrows the remaining scope to the design-time check above._

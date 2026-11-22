@@ -1,5 +1,5 @@
 // One deterministic run per defect the BATON_SPEC reviews found, each asserting that the
-// spec as merged does not reach it (R3-1243 "Tests"). `npm run model` runs them.
+// spec as merged does not reach it (R3-1243 "Tests"). `npm run model:quick` runs them.
 module regressions {
   import baton(TICKETS = Set("t1", "t2"), RUNNERS = Set("w1", "w2", "w3"), SLOTS = Set(1, 2),
                MAX_CLAIMS = 6, GIT_BUDGET = 2, OWNER_BUDGET = 2,
@@ -31,7 +31,7 @@ module regressions {
   // has an action. A run whose runners are all dead or fenced, holding claims whose leases have
   // not expired when time reaches MAX_TIME, has no other: the alarm needs time to pass, and a
   // dead runner holding a claim does not restart. Quint's simulator then re-drew that step
-  // forever (seed 1, run 2,938–2,952 of `npm run model`'s 10,000).
+  // forever (seed 1, runs 2,938–2,952 of the original 10,000).
   run timeUpIdlesAtTheBoundTest =
     start.then(claim("w1", "t1")).then(crash("w1")).then(MAX_TIME.reps(_ => tick))
       .expect(st.now == MAX_TIME)
@@ -79,7 +79,7 @@ module regressions {
       .then(endClaim("w1", "suspended", true))
       .then(foreignPush("t1", "review"))
       .then(sync1)
-      .expect(c1.confirmed and c1.station == "pr-open")
+      .expect(c1.confirmed and c1.confirmObs > 0 and c1.station == "pr-open")
 
   // Fifth review B2 / R-BTN-62: a sync numbered before the claim may not judge it.
   run earlyNumberCannotJudgeClaimTest =
@@ -166,7 +166,7 @@ module regressions {
   // Third review B1: the closure of a `done` ticket, seen before /end, confirms it.
   run doneSeenBeforeEndTest =
     start.then(claim("w1", "t1")).then(leg("w1", "implement")).then(leg("w1", "review"))
-      .then(leg("w1", "merge"))
+      .then(leg("w1", "merge")).expect(atEnd(st.gitPath.get("t1")))
       .then(sync1)
       .then(endClaim("w1", "done", true))
       .expect(c1.confirmed)

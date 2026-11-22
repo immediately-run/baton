@@ -36,7 +36,7 @@ and read the transition's `IR_BATON_*` credential names). In a checkout, `node c
 remains the development path — the repository commands (`tickets`, `repo`, `test-course`,
 `request`) and the reads run from it, and the management commands with `--dev`.
 
-`baton run --lock` (R-BTN-178) and its tests (`npm test`, `npm run model:pr`) need util-linux
+`baton run --lock` (R-BTN-178) and its tests (`npm test`) need util-linux
 `flock` on `PATH`; macOS has none — `brew install flock` gives one with the same flags.
 
 ## Layout
@@ -99,9 +99,7 @@ remains the development path — the repository commands (`tickets`, `repo`, `te
 | `cli/` | `baton admin …` and `baton owner …` (`baton.mjs`); `baton decision list` (`decisions.mjs`, R-BTN-163's reader of what waits on a person; its courier half is R-BTN-80's retired sense): one request per command, signed with the key file `-i` names by `ssh-keygen -Y sign` (`sign.mjs`); `baton test-course`, which needs no Baton. The command tree the spec now defines is R-BTN-127's (`baton runner start`, `baton ticket …`, `baton course test`); the built names move to it under B-157 |
 | `src/shared/` | **Vendored** from docs `scripts/lib/` — never edit here (R-BTN-37); `batonSync.mjs` is the board sync's own decision code, which S-BTN-13 drives. Except two of Baton's own, which every part imports: `schema.mjs`, the one validator of leg outputs and readings (R-BTN-108: the subset, the linear-time pattern engine, the refinement check), and `std.mjs`, the `std:` library (R-BTN-110) |
 | `test/unit/`, `test/integration/` | Vitest; `S-BTN-n` scenarios in `integration/`. Project `cloudflare` runs everything in the Workers runtime; project `local` runs every scenario again on the local host, plus the Node-only tests |
-| `test/integration/trace.ts` | R3-1244: every scenario's run on the local host as a trace — one step per request or alarm tick, with the state projection the formal model has — written to `test/.traces/` |
-| `test/model/replay.test.ts` | R3-1244: traces drawn from `model/replay.qnt` drive the core, compared with the model's state at every step |
-| `scripts/check-traces.mjs`, `scripts/check-model-links.mjs` | R3-1244: replay each scenario's trace through `model/baton.qnt` (`npm run traces`); check that every model action and its implementation name each other, with current hashes (`npm run model:links`) |
+| `test/model/interleavings.test.ts` | Seeded interleaving properties over the real core on the local host |
 | `test/hosts/` | The two hosts the harness drives, behind one interface (`#host`) |
 | `test/lib/fixtureRepo.mjs` | The harness's stand-in for `docs/main`: a real bare git repo |
 | `tickets/` | The tickets wiki: Baton's tickets (`tickets/*.mdx`, finished ones in `tickets/archive/`) and their board, opened on immediately.run by Grove (below) |
@@ -109,15 +107,9 @@ remains the development path — the repository commands (`tickets`, `repo`, `te
 
 ## Commands
 
-- `npm test` (the same as `npm run test:no-quint`) — the suite on both hosts, with a fake clock,
-  and `model:links`, without Quint: no model-drawn replay, no `traces`, no `model:quick`. It is
-  all hosted CI, the deploy run and `create-pr`'s `run-tests` gate run (R-BTN-68).
-  `npx vitest --project local` (or `cloudflare`) runs one host; `npm run test:baton` is vitest alone.
-- `npm run test:full` — the suite with Quint: the model-drawn replay, `traces` and `model:quick`
-  (hours on a small machine). Quint runs only on the author's machine, when asked for: in
-  `npm run test:full`, in `npm run model:pr` (about half an hour), whose report a PR
-  that changes what the model checks read (the model, the core, the scenarios, …) carries in its
-  body, and in the weekly `npm run model:full` on `main` (about three hours).
+- `npm test` — the implementation suite on both hosts, with a fake clock. It does not invoke the
+  model. `npx vitest run --project local` (or `cloudflare`) selects one host.
+- `npm run model:quick` — the separate design-time check (R-BTN-68; `model/README.md`).
 - `npm run test:load` — the load test (§15, R-BTN-87): the envelope's mix — 50 runners, 20
   repositories, a 5,000-ticket board post, 1,000,000 seeded history rows, bursts — on the local
   host, failing on any error or route over its latency budget and reporting the figures it
@@ -152,9 +144,6 @@ remains the development path — the repository commands (`tickets`, `repo`, `te
   checkout works — and when `node_modules` does not hold what the lockfile locks for
   `package.json` (a tree restored from an older lockfile), `build:ui` installs the lockfile first
   (`npm ci --ignore-scripts`, B-132), so a stale one heals.
-- `npm run model:links`, `npm run traces` — the code against the formal model (R3-1244; `model/README.md`).
-  `npm run test:full` runs both after the suite, and the model's own checks; `npm run model:pr` and
-  `model:full` run `traces` too, on a fresh set.
 - `node cli/baton.mjs tickets new|claim|set|done` — file, claim and move tickets with git as the
   lock, each one commit pushed straight to the default branch from a throwaway worktree (B-112;
   `baton tickets --help`, and the generated `tickets/HOW-TICKETS-WORK.md`), until Baton claims

@@ -5,7 +5,7 @@
 // beside them. The three files are text the Worker and the local host embed (wrangler.toml's
 // Text rule, scripts/bundle.mjs) and the published CLI embeds too (scripts/build-cli.mjs),
 // exactly as V1's were. dist/ is gitignored, so every path that needs it builds first: pretest,
-// pretest:baton, pretest:no-quint, pretypecheck, predev, prestart:local, prebuild:cli — and
+// pretest:baton, pretypecheck, predev, prestart:local, prebuild:cli — and
 // baton-deploy.yml runs it before `wrangler deploy`.
 //
 // Every pre* hook above runs through here, so this is also where an incomplete node_modules is

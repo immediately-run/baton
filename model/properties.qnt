@@ -7,14 +7,14 @@ module properties {
   const P_MAX_CLAIMS: int
   const P_GIT_BUDGET: int
   const P_OWNER_BUDGET: int
-  // the fleet (R3-1254 part 2b): `sim` carries capabilities and a resource, `small` none
+  // The fleet (R3-1254 part 2b): `sim` carries capabilities and a resource.
   const P_DECLARED: str -> Set[str]
   const P_GRANTED: str -> Set[str]
   const P_REQUIRES: str -> Set[str]
   const P_RESOURCES: Set[str]
   const P_NEEDS: str -> Set[str]
   // R-BTN-178 (B-106): the capabilities with a capacity and each one's capacity — `sim` seats
-  // one to explore rule 11, `small` none (capacity off, the proof's shape unchanged).
+  // one to explore rule 11.
   const P_CAPPED: Set[str]
   const P_SEATCAP: str -> int
   import baton(TICKETS = P_TICKETS, RUNNERS = P_RUNNERS, SLOTS = P_SLOTS,
@@ -30,55 +30,10 @@ module properties {
   action pstep = step
   action pprogress = progressStep
 
-  // The proof's step (B-37): `step` less the actions no state of a one-ticket instance without a
-  // fleet enables, and less the choices only they read — the same transitions, so the same
-  // reachable states, with fewer for Apalache to encode and rule out at every depth. Dropped, each
-  // with the guard that never holds on such an instance (`verifyShape` below, checked with the
-  // invariants, says `small` is one):
-  //   gitDepends, and endBlocked naming a `ticket` — a prerequisite names another ticket;
-  //   declare — a declared set is a subset of DECLARED's, here empty, and must change;
-  //   alarmLive — FLEET is false;
-  //   reading, readingLapses — no RESOURCES;
-  //   endBlockedOn — no REQUIRES and no RESOURCES;
-  //   adminFenceClear — the owner budget is 1 here, spent by the force-reap that raises the
-  //     fence, so the clear (an owner act too) is never enabled.
-  // `npm run model` simulates `safety` with the full `step` on `sim`, which has all of them.
-  action pverify = {
-    nondet w = RUNNERS.oneOf()
-    nondet t = TICKETS.oneOf()
-    nondet leg = LEGS.oneOf()
-    nondet s = SLOTS.oneOf()
-    nondet b = Set(true, false).oneOf()
-    nondet kind = Set("done", "suspended", "release", "fail").oneOf()
-    nondet holderBars = FAMILIES.powerset().oneOf()
-    nondet postBars = TICKETS.setOfMaps(FAMILIES.powerset()).oneOf()
-    nondet picks = TICKETS.setOfMaps(LEGS).oneOf()
-    nondet tag = FAMILIES.oneOf()
-    nondet applies = Set("claim", "claim+advance").oneOf()
-    nondet i = 1.to(MAX_CLAIMS).oneOf()
-    nondet decisionLeg = LEGS.union(Set("")).oneOf()
-    // endBlocked's `decision` kind reads no entry
-    val noDep = { leg: "", other: t, mode: "done", stations: Set() }
-    any {
-      claim(w, t),
-      pushEvidence(w, b), advance(w, leg, holderBars), endClaim(w, kind, b), endBlocked(w, "decision", noDep),
-      heartbeat(w), sleep(w), wake(w), tick, timeUp, alarmReap(i),
-      crash(w), reapDead(w), forceReap(w), fenceCleared(w), fenceTimeout(i),
-      setHold(t, b), setOwnerBar(tag, applies), liftOwnerBars, ownerResolve(i),
-      foreignPush(t, leg), regress(t), withdraw(t), gitDecides(t, decisionLeg, b),
-      retryElapse(t, leg), provisionalLapses(t, leg),
-      syncNumber(s), syncRead(s, postBars, queuedFor(st.gitPath, picks)), syncVoid(s), syncPost(s),
-    }
-  }
-  // What makes `pverify` the same as `step`: one ticket, no fleet, nothing declared, and an
-  // owner budget of 1 — spent by the force-reap that raises a fence, so the clear never has any.
-  // A constant, so it holds in every state or none; the proof checks it beside `safety`.
-  val verifyShape = TICKETS.size() == 1 and not(FLEET) and RUNNERS.forall(w => DECLARED.get(w) == Set()) and OWNER_BUDGET == 1
-
   // R-BTN-4, R-BTN-19, R-BTN-26: at most one live holder per ticket — an active claim, or a
-  // force-reaped one whose runner has not cleared its fence — and one active claim per runner.
+  // force-reaped one whose runner has not cleared its fence. The model schedules
+  // one claim at a time per runner; R-BTN-4 permits several in the implementation.
   val oneLiveHolderPerTicket = TICKETS.forall(t => activeOf(t).size() + fencedOf(t).size() <= 1)
-  val oneClaimPerRunner = RUNNERS.forall(w => runnerClaim(w).size() <= 1)
 
   // R-BTN-62: accepted observations strictly increase; none exceeds what was handed out.
   val observationsIncrease =
@@ -181,14 +136,10 @@ module properties {
     claimsWhere(c => (c.status == "active" or (c.status == "reaped" and c.fencePending))
                      and st.seats.get(c.id).contains(cap)).size() <= SEATCAP.get(cap))
 
-  // `safety` in four groups, so the proof can check them in four processes at once (B-37,
-  // `npm run model:verify`); `safety` is their conjunction, so no property is left out of a split.
-  val safetyA = and { observationsIncrease, oneLiveHolderPerTicket, oneClaimPerRunner, staleOnlyWhenTakenAway, writingLegsBarred }
-  val safetyB = and { confirmationAfterEnd, gatesHeld, noActAfterLoss, noStuckTicket, unblockedFollowsBlocked }
-  val safetyC = and { confirmedIsInGit, regressedOnlyWhenGitRegressed, capabilityRowsCounted, answerLostOwesUnblocked }
-  val safetyD = and { boundedLoops, blockedIsStored, attemptsBounded, blockedEndsBounded, capacityRespected }
-  val safety = and { safetyA, safetyB, safetyC, safetyD }
-
-  // ---- liveness: in liveness.qnt, so the safety proof does not carry the fairness terms ----
-
+  val safety = and {
+    observationsIncrease, oneLiveHolderPerTicket, staleOnlyWhenTakenAway, writingLegsBarred,
+    confirmationAfterEnd, gatesHeld, noActAfterLoss, noStuckTicket, unblockedFollowsBlocked,
+    confirmedIsInGit, regressedOnlyWhenGitRegressed, capabilityRowsCounted, answerLostOwesUnblocked,
+    boundedLoops, blockedIsStored, attemptsBounded, blockedEndsBounded, capacityRespected,
+  }
 }

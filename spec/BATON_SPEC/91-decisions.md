@@ -160,7 +160,7 @@ One line per decision in force; the reasoning and the rejected alternatives in f
 - Chose loopback binding by default for the local host, TLS being the operator's (R-BTN-158).
 - Chose GitLab Developer (30) as the role that can push (R-BTN-139).
 - Chose `pusher` as the one word for a forge author whose words count, `trusted` being the runner role's (R-BTN-139, R-BTN-192).
-- Chose a Quint model checked on the author's machine and against every scenario's trace over hosted CI or tests alone (R-BTN-68).
+- Chose a small design-time Quint check and independent implementation tests over bounded verification, trace comparison and PR reports (R-BTN-68).
 - Chose driven, fake-clock integration scenarios in every behaviour change over unit tests alone (R-BTN-29–R-BTN-31).
 - Chose capabilities matched by name, a runner deciding what its keys and tools amount to, over a capability ontology and route choices evaluated in core (R-BTN-174, R-BTN-98).
 - Chose a capacity on a capability, its seats stored when a leg starts, over seats on resource instances and a `host` resource scope (R-BTN-178, R-BTN-121).

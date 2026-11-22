@@ -34,8 +34,9 @@ by a review.</Lede>
 8. **Baton runs without GitHub.** Any forge, or a plain git server, is enough.
 9. **One codebase, two hosts.** The same core runs on Cloudflare and as a local process; a
    test that passes on one passes on the other.
-10. **The code is checked against the model.** Baton's core matches a formal model, and the
-    tests prove it on every change.
+10. **The model informs the design; tests exercise the code.** A short model check explores the
+    core design. Implementation scenarios and interleaving properties stand on their own;
+    neither check is a proof.
 11. **Baton works with the factory, and belongs to none of it.** The long run is a stack —
     baton, sandbox orchestration (`fc-opencode`), agent harnesses (opencode), the wikis
     (grove) — composing a software factory. Baton must work with each, and be specific to

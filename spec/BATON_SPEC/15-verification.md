@@ -2,7 +2,7 @@
 title: "15. Verification: the model, the harness, scenarios and gates"
 description: "BATON_SPEC — 15. Verification: the model, the harness, scenarios and gates."
 ---
-## 15. Verification: the model, the harness, scenarios and gates *(partly built — B-50)*
+## 15. Verification: the model, the harness, scenarios and gates
 
 - **R-BTN-29 (the harness).** `test/integration/` runs the real Worker and Durable Object locally
   on a fake clock the test advances: R-BTN-32's injected clock, plus a `clock-offset` file the
@@ -32,22 +32,14 @@ description: "BATON_SPEC — 15. Verification: the model, the harness, scenarios
   green with it. A behaviour change without a scenario is incomplete. Legacy, removed with its
   code (R-BTN-193): a session without Baton takes the next free number at merge.
 - **R-BTN-68 (the core is a checked model).**
-  - The core's state machine — claims, fencing, stations and legs, observations, ends and their
-    confirmation, bars and gates — is a Quint model (`model/baton.qnt`), with the sync's output
-    nondeterministic within its contract, so its properties hold for every course.
-  - Safety: one live holder per ticket; no end confirmed by an earlier observation;
-    observations only increase; a claim goes stale only when git takes the ticket back; every
-    gate holds at claim and advance. Liveness: every end is confirmed or flagged; every fence
-    clears; a ready leg with an eligible idle runner is eventually taken.
-  - Every scenario's event log is checked against the model. A change to a requirement the
-    model cites changes the model in the same PR.
-  - CI and the deploy check only the `@impl`/`@model` links (`npm run model:links`); hosted CI
-    runs no Quint. A PR that changes what the checks read carries `npm run model:pr`'s report
-    for its head when a machine to run it is available. The report is advisory, never a merge
-    requirement: the CI job `model-report` is red only for a pasted report that shows a failed
-    check.
-  - `npm run model:full` (simulation, witnesses, model-drawn traces, the proof, the scenario
-    traces) is run by hand. Running it weekly as a Baton series is not built (B-50).
+  - `model/baton.qnt` is a design-time model of claims, fencing, stations and legs, observations,
+    ends and their confirmation, bars and gates. `npm run model:quick` typechecks the model, runs
+    deterministic regressions, samples the safety properties on the `sim` instance, and checks
+    reachability witnesses. CI runs this check when `model/` changes.
+  - The model proves nothing about the design or implementation: its checks are not exhaustive,
+    do not check liveness, and do not compare the model with the code. `npm test` runs the
+    implementation scenarios and a local-host property test of claim, advance, fence and sync
+    interleavings, independently of the model.
 
 ### Scenarios
 

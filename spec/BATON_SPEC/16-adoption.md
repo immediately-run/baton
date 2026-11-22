@@ -18,6 +18,8 @@ elsewhere that serves only it, is deleted when the code is removed.
     tool reports each transition to `POST /v1/runner/shadow-report` (`{transition: claim | set,
     ticket_id, status, nonce, at}`). Baton records and decides nothing; a report its
     constraints refuse is logged `shadow-conflict`.
+  - **Verification.** The legacy cutover has no model proof or trace-check prerequisite; see
+    R-BTN-31 for the implementation scenarios and R-BTN-68 for the design-time check.
   - **The act.** An administrator sends `POST /v1/ui/cutover {repository, confirm: true}`,
     confirmed per R-BTN-155. `GET /v1/runner/mode?repository=` answers `{mode, cutover_at?}`,
     and the heartbeat carries `mode: {<repository>: shadow | cut-over}`.

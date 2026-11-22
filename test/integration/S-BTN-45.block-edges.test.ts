@@ -10,7 +10,7 @@
 // G's leg decision refuses the advance into it, not the claim; H's decision naming a leg it lacks
 // sits on the whole ticket and its `url` is dropped. The 150 unblockings that dispatch 100 entries
 // and `{truncated: 50}` are in test/unit/blocks.test.ts: the formal model cannot replay an instance
-// of 152 tickets (scripts/check-traces.mjs), and the cap is the core's alone.
+// of 152 tickets; the cap belongs to the core, not the design-time model.
 import { describe, it, expect, beforeEach } from 'vitest';
 import { Git, cutover, keyCall, placed, rows, setAdminKeys, setClock, syncCall, syncToken, tick } from '../helpers';
 import { makeKey, type TestKey } from '../lib/sshKeys';

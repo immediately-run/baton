@@ -132,8 +132,9 @@ doorbell. Today Baton's only outbound act is a workflow dispatch, and runners wr
   course's — its `rank.mjs` and its instructions read the readings ([§6.10](../../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-10)). The capability
   ontology and route choices core once evaluated moved out (the owner, 2026-11-01, "Nothing; move
   it out"): the core is small and knows no course.
-- **The formal model names the code.** `model/baton.qnt` and the implementation check
-  each other (`model:links`, traces); a change to what the model checks carries a report.
+- **The formal model is a design tool.** `model/baton.qnt` is sampled with `npm run model:quick`
+  (R-BTN-68). The scenarios and local interleaving property test exercise the implementation
+  independently; neither proves the other.
 
 ## The seams, as contracts
 

@@ -353,10 +353,7 @@ module baton {
   // logs `blocked` or `unblocked` — an end that leaves the ticket blocked logs `blocked` (R-BTN-75
   // as amended by R3-1254: the model found an end blocking silently and the backoff's `unblocked`
   // following with no `blocked` before it)
-  // Not a fold over the tickets: each ticket's update is its own, and Apalache's checker loses a
-  // binding when `blockedIn`'s quantifiers sit inside a fold (key not found: $C$25 in
-  // `model:verify`, R3-1254). `flips` are the tickets whose blocked state changes; `loud` those
-  // of them whose change is logged.
+  // `flips` are the tickets whose blocked state changes; `loud` are those whose changes are logged.
   // R-BTN-77 as amended by R3-1251, `answer_lost`: `lostNow` holds the `resource` rows a recount
   // just dropped only because no live runner is left to answer (`recount`). A ticket they leave
   // unblocked clears silently and remembers them. While the record stands: blocked again on
@@ -446,12 +443,10 @@ module baton {
     (st.syncs.get(s).phase == "numbered" or st.syncs.get(s).phase == "read") and not(st.syncs.get(s).voided)
 
   // ---- init ----
-  // @impl external — an empty Baton, migrated (src/core/baton.ts#start)
   action init = {
     nondet d = RUNNERS.setOfMaps(0.to(MAX_DRIFT)).oneOf()
     initWith(d)
   }
-  // @impl external — an empty Baton, migrated, with each runner's clock drift
   action initWith(d: str -> int): bool = all {
     st' = {
       gitPath: TICKETS.mapBy(t => List()), withdrawn: TICKETS.mapBy(t => false),
@@ -492,8 +487,6 @@ module baton {
   // R-BTN-98 retired the course's claim hook (R-BTN-52's await, rule 12): a claim computes its
   // candidate and checks every gate in one transaction. It is offered the ticket's queued leg
   // (R-BTN-83), and rule 8 is judged on that leg.
-  // @impl src/core/claims.ts#claim
-  // @impl pending — the per-leg `at`/`reached` prerequisites (R-BTN-120, B-10), the per-leg backoff (R-BTN-122, B-11) and provisional rows (R-BTN-126, B-21) as gates
   action claim(w: str, t: str): bool = all {
     runnerFree(w), st.nextId <= MAX_CLAIMS, claimableBy(t, w), rule4(w, t),
     not(seatsFull(t, -1)),                                  // rule 11 (R-BTN-178): a free seat
@@ -525,7 +518,6 @@ module baton {
   // The push is git's, not Baton's: the runner acts on the claim IT believes it holds, so a
   // runner whose lease Baton has reaped can still push — unless its own fence check stops it
   // (R-BTN-26). `actedAfterLoss` records a push for a claim Baton reaped without a fence.
-  // @impl external — the holder pushes to git (R-BTN-8)
   action pushEvidence(w: str, lands: bool): bool = all {
     runnerCanAct(w), not(st.pushed.get(w)),
     val c = st.claims.get(st.localClaim.get(w))
@@ -545,8 +537,6 @@ module baton {
   // owner bars and the holder's own `bars`, and the required bar over posted plus holder bars.
   // The first advance is into the leg the claim was offered (R-BTN-83: `not-queued`). No leg
   // state is checked: the holder's word.
-  // @impl src/core/claims.ts#advance
-  // @impl pending — backoff and provisional rows as advance gates (R-BTN-122, B-11; R-BTN-126, B-21)
   action advance(w: str, leg: str, bars: Set[str]): bool = all {
     runnerCanAct(w), runnerClaim(w).size() == 1,
     val c = theClaim(w)
@@ -589,8 +579,6 @@ module baton {
   // closed, the leg having archived it (§11, R-BTN-72), which Baton cannot see at the end — it
   // confirms a done only by an end station or a closure (R-BTN-10, G-BTN-44). (R3-1244: the
   // scenario traces found the model narrower than the spec here; it required an end station.)
-  // @impl src/core/claims.ts#end
-  // @impl pending — attempts and backoff per leg (R-BTN-122, B-11)
   action endClaim(w: str, kind: str, reached: bool): bool = all {
     runnerCanAct(w), runnerClaim(w).size() == 1,
     val c = theClaim(w)
@@ -625,7 +613,6 @@ module baton {
   // advance into it but is no block. Not a failed attempt, not a run, no backoff: counted, and
   // past MAX_BLOCKED the end holds the ticket (`blocked-exhausted`). (`resource` and
   // `capability` blocked ends: `endBlockedOn`, below.)
-  // @impl pending — `released:blocked` for ticket and decision prerequisites (R-BTN-126, B-21)
   action endBlocked(w: str, kind: str, d: Dep): bool = all {
     runnerCanAct(w), runnerClaim(w).size() == 1, not(st.pushed.get(w)),
     val c = theClaim(w)
@@ -650,7 +637,6 @@ module baton {
   // stores the reading and an `end`-sourced need on the leg; the rows follow in its transaction
   // (R-BTN-75's counts), so the ticket is blocked only when no other live runner can take it.
   // R-BTN-174 (B-167): the declared set shrinks in that same transaction, atomically.
-  // @impl pending — `released:blocked` for capability and resource prerequisites (R-BTN-126, B-21)
   action endBlockedOn(w: str, kind: str, x: str): bool = all {
     runnerCanAct(w), runnerClaim(w).size() == 1, not(st.pushed.get(w)),
     val c = theClaim(w)
@@ -683,22 +669,18 @@ module baton {
   }
 
   // ---- runners dying, and the lease (§6.3, §6.6) ----
-  // @impl external — a runner's machine
   action crash(w: str): bool = all {
     st.up.get(w),
     st' = st.with("up", st.up.set(w, false)),
   }
-  // @impl external — a runner's machine
   action sleep(w: str): bool = all {
     st.up.get(w), not(st.asleep.get(w)),
     st' = st.with("asleep", st.asleep.set(w, true)),
   }
-  // @impl external — a runner's machine
   action wake(w: str): bool = all {
     st.asleep.get(w),
     st' = st.with("asleep", st.asleep.set(w, false)),
   }
-  // @impl external — time
   action tick: bool = all {
     st.now < MAX_TIME,
     st' = st.with("now", st.now + 1),
@@ -708,14 +690,11 @@ module baton {
   // MAX_TIME has no enabled action — the alarm cannot reap a lease without time passing, and a
   // dead runner does not restart while it holds a claim — and Quint's simulator re-draws that
   // step forever instead of ending the run (a 10,000-run `npm run model` that never finished).
-  // @impl external — the model's bound on time
   action timeUp: bool = all {
     st.now >= MAX_TIME,
     st' = st,
   }
   // §6.3: the sidecar's heartbeat renews the lease, and tells the runner what it holds.
-  // @impl src/core/runnerApi.ts#heartbeat
-  // @impl src/core/claims.ts#fenced
   action heartbeat(w: str): bool = all {
     st.up.get(w), not(st.asleep.get(w)),
     st' = beatOf(w, st.declared.get(w)),
@@ -742,14 +721,12 @@ module baton {
   }
   // R-BTN-121: a heartbeat declaring a changed set — a capability whose check failed dropped, or
   // one whose check passes again re-declared (the runner runs its checks; Baton runs nothing).
-  // @impl src/core/runnerApi.ts#heartbeat
   action declare(w: str, decl: Set[str]): bool = all {
     st.up.get(w), not(st.asleep.get(w)), decl.subseteq(DECLARED.get(w)), decl != st.declared.get(w),
     st' = beatOf(w, decl),
   }
   // R-BTN-75: the alarm finds a runner no longer live — silent past its lease timeout, dead or
   // asleep — and recounts the fleet, as it reaps, in the same tick.
-  // @impl src/core/baton.ts#alarm
   action alarmLive: bool = all {
     FLEET, liveIn(st) != st.fleetLive,
     st' = recount(st),
@@ -757,21 +734,17 @@ module baton {
   // R-BTN-76: an instrument's reading of a resource's instance — `unavailable` for READING_TTL,
   // or `available`, which clears a stale `unavailable` early; the instance's state changes and
   // the rows follow.
-  // @impl src/core/resources.ts#post
   action reading(x: str, available: bool): bool = all {
     RESOURCES.contains(x),
     st' = recount(st.with("unavailable", st.unavailable.set(x, if (available) 0 else st.now + READING_TTL))),
   }
   // R-BTN-76: an `unavailable` reading lapses; the alarm drops it and the rows follow.
-  // @impl src/core/resources.ts#alarm
   action readingLapses(x: str): bool = all {
     RESOURCES.contains(x), st.unavailable.get(x) > 0, st.unavailable.get(x) <= st.now,
     st' = recount(st.with("unavailable", st.unavailable.set(x, 0))),
   }
   // R-BTN-4, §6.6: the alarm reaps a claim whose lease ran out — its runner dead or silent; a
   // failed attempt on the claim's leg (§7.4, R-BTN-122), and an end (R-BTN-75).
-  // @impl src/core/claims.ts#alarm
-  // @impl pending — the attempt counted per leg (R-BTN-122, B-11)
   action alarmReap(i: int): bool = all {
     st.claims.keys().contains(i),
     val c = st.claims.get(i)
@@ -786,7 +759,6 @@ module baton {
   }
   // A dead runner restarts once the alarm has reaped its claim and any fence of its own has
   // timed out (below).
-  // @impl external — a runner restarting
   action reapDead(w: str): bool = all {
     not(st.up.get(w)), runnerClaim(w).size() == 0, not(runnerFenced(w)),
     st' = st.with("up", st.up.set(w, true)).with("asleep", st.asleep.set(w, false))
@@ -795,7 +767,6 @@ module baton {
   // R-BTN-19: the owner force-reaps a live runner's claim; the ticket is not re-issued until
   // the runner reports `fence-cleared` (or dies and times out, above). Not a failed attempt
   // (§7.4); fenced, the ticket stays held (R-BTN-75).
-  // @impl src/core/claims.ts#forceReap
   action forceReap(w: str): bool = all {
     st.ownerBudget > 0, st.up.get(w), runnerClaim(w).size() == 1,
     val c = theClaim(w)
@@ -807,7 +778,6 @@ module baton {
   // R-BTN-19: a fence also clears when its runner has been silent past its own timeout — dead
   // or asleep — measured by time, never by knowing it is dead (baton#10 round 2, 2-A-0). The
   // runner is not told; if it wakes, its own fence check (R-BTN-26) must stop it.
-  // @impl src/core/claims.ts#alarm
   action fenceTimeout(i: int): bool = all {
     st.claims.keys().contains(i),
     val c = st.claims.get(i)
@@ -825,7 +795,6 @@ module baton {
   // nothing of the runner. The ticket stops being held (R-BTN-75) and the claim's seats free
   // (R-BTN-178), as at the deadline; the runner may still act until its own lease check
   // (R-BTN-26) stops it, which the model keeps through the runner's own fence check.
-  // @impl src/core/claims.ts#fenceClear
   action adminFenceClear(i: int): bool = all {
     st.ownerBudget > 0,
     st.claims.keys().contains(i),
@@ -838,7 +807,6 @@ module baton {
     },
   }
   // R-BTN-6, R-BTN-26: the runner learns its lease is lost, kills its tool calls and reports.
-  // @impl src/core/claims.ts#fenced
   // In core the report is the heartbeat's `fenced` field, so a runner that was not live is
   // recounted in the same call (round 1 of baton#60, 1-A-1/1-B-1).
   action fenceCleared(w: str): bool = all {
@@ -858,8 +826,6 @@ module baton {
   // A hold, or its lift — which resets the ticket's attempts and blocked ends (R-BTN-122,
   // R-BTN-126) and clears its backoff (R-BTN-78's `retry`; core's lift writes `retry_after:
   // null`), so a lift can log `unblocked`. A hold is no block: it is listed under `other` (R-BTN-75).
-  // @impl src/core/claims.ts#setOverride
-  // @impl pending — the lift resets per-leg counts (R-BTN-122, B-11) and blocked ends (R-BTN-126, B-21)
   action setHold(t: str, h: bool): bool = all {
     st.ownerBudget > 0, st.held.get(t) != h,
     st' = settle(st.with("held", st.held.set(t, h)).with("ownerBudget", st.ownerBudget - 1)
@@ -867,19 +833,16 @@ module baton {
             .with("blockedEnds", if (h) st.blockedEnds else st.blockedEnds.set(t, LEGS.mapBy(l => 0)))
             .with("retryRows", if (h) st.retryRows else st.retryRows.set(t, Set())), Set()),
   }
-  // @impl src/core/admin.ts#setBar
   action setOwnerBar(tag: str, applies: str): bool = all {
     st.ownerBudget > 0,
     st' = st.with("ownerBars", st.ownerBars.union(Set({ tag: tag, applies: applies })))
             .with("ownerBudget", st.ownerBudget - 1),
   }
-  // @impl src/core/admin.ts#liftBar
   action liftOwnerBars: bool = all {
     st.ownerBars.size() > 0,
     st' = st.with("ownerBars", Set()),
   }
   // §9.6: an unconfirmed completion is flagged; the owner confirms it.
-  // @impl src/core/claims.ts#resolve
   action ownerResolve(i: int): bool = all {
     st.claims.keys().contains(i),
     st.claims.get(i).status == "completed", not(st.claims.get(i).confirmed),
@@ -889,28 +852,24 @@ module baton {
   }
 
   // R-BTN-122: the alarm clears a backoff's row at its retry_after; its `unblocked` follows.
-  // @impl pending — the per-leg backoff row and its alarm (R-BTN-122, B-11; core keeps §7.4's per-ticket backoff)
   action retryElapse(t: str, l: str): bool = all {
     st.retryRows.get(t).contains(l), st.retryAfter.get(t).get(l) <= st.now,
     st' = settle(st.with("retryRows", st.retryRows.set(t, st.retryRows.get(t).exclude(Set(l)))), Set()),
   }
   // R-BTN-126: a provisional row no accepted snapshot containing its commit replaced within the
   // hour is dropped (`prerequisite-unconfirmed`). It was no block, so nothing is logged.
-  // @impl pending — the provisional row's hour (R-BTN-126, B-21)
   action provisionalLapses(t: str, l: str): bool = all {
     st.provs.exists(p => p.ticket == t and p.leg == l and p.since + PROV_TTL <= st.now),
     st' = st.with("provs", st.provs.filter(p => not(p.ticket == t and p.leg == l and p.since + PROV_TTL <= st.now))),
   }
 
   // ---- git: any pusher writes anything (R-BTN-66) ----
-  // @impl external — git: any pusher (R-BTN-66)
   action foreignPush(t: str, leg: str): bool = all {
     st.gitBudget > 0, FROM.get(leg).contains(stationOf(st.gitPath.get(t))),
     st' = st.with("gitPath", st.gitPath.set(t, st.gitPath.get(t).append(leg)))
             .with("gitBudget", st.gitBudget - 1),
   }
   // a PR closed, a branch deleted, a review dismissed: the path loses its last leg
-  // @impl external — git: any pusher (R-BTN-66)
   action regress(t: str): bool = {
     val g = st.gitPath.get(t)
     all {
@@ -922,20 +881,17 @@ module baton {
   }
   // A ticket's source gains or loses a `depends_at` entry, or a decision opens or is answered —
   // by anyone, in git (R-BTN-66, R-BTN-78, R-BTN-120).
-  // @impl external — git: the ticket's source (R-BTN-66)
   action gitDepends(t: str, d: Dep, on: bool): bool = all {
     st.gitBudget > 0, d.other != t, st.gitDeps.get(t).contains(d) != on,
     st' = st.with("gitDeps", st.gitDeps.set(t, if (on) st.gitDeps.get(t).union(Set(d)) else st.gitDeps.get(t).exclude(Set(d))))
             .with("gitVersion", st.gitVersion + 1).with("gitBudget", st.gitBudget - 1),
   }
-  // @impl external — git: the ticket's source (R-BTN-66)
   action gitDecides(t: str, leg: str, open: bool): bool = all {
     st.gitBudget > 0, st.gitDecisions.get(t).contains(leg) != open,
     st' = st.with("gitDecisions", if (open) st.gitDecisions.set(t, st.gitDecisions.get(t).union(Set(leg)))
                                   else st.gitDecisions.set(t, st.gitDecisions.get(t).exclude(Set(leg))))
             .with("gitVersion", st.gitVersion + 1).with("gitBudget", st.gitBudget - 1),
   }
-  // @impl external — git: any pusher (R-BTN-66)
   action withdraw(t: str): bool = all {
     st.gitBudget > 0, not(st.withdrawn.get(t)), not(atEnd(st.gitPath.get(t))),
     st' = st.with("withdrawn", st.withdrawn.set(t, true)).with("gitBudget", st.gitBudget - 1),
@@ -943,7 +899,6 @@ module baton {
 
   // ---- the sync: number first, then read, then post (§4.3, R-BTN-62) ----
   // R-BTN-62 as amended 2026-10-15: no number while another is outstanding (`sync-busy`).
-  // @impl src/core/observations.ts#observe
   action syncNumber(s: int): bool = all {
     st.syncs.get(s).phase == "idle", SLOTS.forall(o => not(outstanding(o))),
     st' = st.with("counter", st.counter + 1)
@@ -961,7 +916,6 @@ module baton {
   pure def queuedValid(git: str -> List[str], queued: str -> str): bool =
     git.keys().forall(t => if (nextLegs(git.get(t)).size() == 0) queued.get(t) == ""
                            else nextLegs(git.get(t)).contains(queued.get(t)))
-  // @impl external — the repository's sync reads git and computes the bars and queued legs
   action syncRead(s: int, bars: str -> Set[str], queued: str -> str): bool = all {
     st.syncs.get(s).phase == "numbered", queuedValid(st.gitPath, queued),
     st' = st.with("syncs", st.syncs.set(s, st.syncs.get(s).with("phase", "read")
@@ -1008,18 +962,11 @@ module baton {
 
   // R-BTN-62: Baton voids a number left outstanding too long (10 minutes); the run may still
   // read and post, and its post is refused.
-  // @impl src/core/observations.ts#observe
-  // @impl src/core/observations.ts#use
   action syncVoid(s: int): bool = all {
     outstanding(s),
     st' = st.with("syncs", st.syncs.set(s, st.syncs.get(s).with("voided", true))),
   }
   // A post is accepted whole only when its number is greater than the last accepted.
-  // @impl src/core/baton.ts#board
-  // @impl src/core/observations.ts#use
-  // @impl src/core/claims.ts#judge
-  // @impl src/core/claims.ts#staleBoard
-  // @impl pending — `depends_at` entries posted and their rows kept (R-BTN-120, B-10); provisional rows replaced by a snapshot containing their commit (R-BTN-126, B-21)
   action syncPost(s: int): bool = {
     val r = st.syncs.get(s)
     all {
@@ -1044,7 +991,6 @@ module baton {
     }
   }
 
-  // @impl external — the model's scheduler: every actor
   action step = {
     nondet w = RUNNERS.oneOf()
     nondet t = TICKETS.oneOf()
@@ -1078,7 +1024,6 @@ module baton {
   }
 
   // The happy path's done: once the claim stands at an end station, as the runner ends it (§11).
-  // @impl external — the model's scheduler: endClaim's happy-path case
   action endDoneAtEnd(w: str): bool = all {
     runnerClaim(w).size() == 1,
     val c = theClaim(w)
@@ -1090,7 +1035,6 @@ module baton {
   // regressions — so random runs reach the deep states (merges, fix loops, regressions,
   // confirmations) that the full `step` rarely gets to in 40 steps. Every run of it is a run
   // of `step`, so a violation here is a real one.
-  // @impl external — the model's scheduler: the happy path's actors
   action progressStep = {
     nondet w = RUNNERS.oneOf()
     nondet t = TICKETS.oneOf()

@@ -2,8 +2,8 @@
 title: "B-37 — The model's Apalache proof back to depth 5 within an hour: make small cheaper after R3-1254 part 2's prerequisites"
 id: B-37
 project: baton
-status: available
-updated: 2026-10-19
+status: superseded
+updated: 2026-11-22
 repos:
   - baton
 tags:
@@ -78,3 +78,5 @@ is Apalache's per-transition enabledness queries (25 minutes) and the invariant 
 last state (53 minutes), both over the whole symbolic path. `SIZES.depth` stays 4; the next steps
 need an owner decision: a `small`-only state without the fleet fields (re-stamps every `@model`
 marker), TLC for an exhaustive check of `small`, or a newer Apalache whose `arrays` encoding works.
+
+_2026-11-22 — superseded by [B-271](B-271.mdx): the design-time model no longer has this check._
