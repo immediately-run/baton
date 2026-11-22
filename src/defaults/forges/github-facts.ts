@@ -1,6 +1,7 @@
 import type { CodeRepoEntry, PrFact } from '../course-pr';
 import type { BranchCommit } from '../pr-markers';
 import type { FactContext, FactRead, ForgeRepo } from './types';
+import { sameRepository } from './rest';
 
 /** How long one GitHub or token call may take before the sync fails (§6.3's bound). */
 const FETCH_TIMEOUT_MS = 30_000;
@@ -41,12 +42,6 @@ const PR_DETAIL = `fragment D on PullRequest {
 /** The GraphQL query reading `numbers`' detail in one repository, each PR under alias `p<n>`. */
 const detailQuery = (numbers: number[]): string =>
   `query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { ${numbers.map((n) => `p${n}: pullRequest(number: ${n}) { ...D }`).join(' ')} } }\n${PR_DETAIL}`;
-
-function githubConn(host: string): { host: string; rest: string; graphql: string } {
-  return host === 'github.com'
-    ? { host, rest: 'https://api.github.com', graphql: 'https://api.github.com/graphql' }
-    : { host, rest: `https://${host}/api/v3`, graphql: `https://${host}/api/graphql` };
-}
 
 /** The existing GraphQL detail reader, with one budget and permission cache per sync. */
 export function githubFactReader({ log, owns, pushers: listedPushers }: FactContext) {
@@ -193,8 +188,8 @@ export function githubFactReader({ log, owns, pushers: listedPushers }: FactCont
     }
     return out;
   };
-  return async (target: ForgeRepo, read: FactRead, token: string): Promise<PrFact[]> => {
-    const out = await repoFacts({ ...githubConn(new URL(target.webBase).host), token }, target.path, read.tickets, read.entry);
+  return async (target: ForgeRepo, read: FactRead, token: string, endpoints: { rest: string; graphql: string }): Promise<PrFact[]> => {
+    const out = await repoFacts({ ...endpoints, host: new URL(target.webBase).host, token }, target.path, read.tickets, read.entry);
     log(`baton: read ${out.length} PRs of ${target.path} (${[...requests].map(([host, n]) => `${n} requests of ${host}`).join(', ')})`);
     return out;
   };
@@ -216,7 +211,9 @@ export function githubFactReader({ log, owns, pushers: listedPushers }: FactCont
     // with the repository's history. A closed unmerged PR a live ticket owns is read too:
     // `create-pr` counts it as none (R-BTN-74), but `review-pr` concludes on it, and reads its
     // conclusion line from its comments.
-    const owned = listed.filter((pr) => owns({ number: pr.number, head: pr.head.ref, repository: repo }));
+    const identity = (pr: any) => sameRepository(pr.head?.repo?.id, pr.base?.repo?.id) ||
+      (typeof pr.head?.repo?.node_id === 'string' && pr.head.repo.node_id !== '' && pr.head.repo.node_id === pr.base?.repo?.node_id);
+    const owned = listed.filter((pr) => owns({ number: pr.number, head: pr.head.ref, repository: repo, sameRepository: identity(pr) }));
     const detail = new Map<number, Omit<PrFact, 'number' | 'head' | 'state' | 'repository'>>();
     // The owned PRs' detail, GRAPHQL_BATCH to a query (B-35): one request where REST took four a PR.
     for (let i = 0; i < owned.length; i += GRAPHQL_BATCH) {
@@ -231,7 +228,7 @@ export function githubFactReader({ log, owns, pushers: listedPushers }: FactCont
     }
     return listed.map((pr) => {
       const state: PrFact['state'] = pr.merged_at ? 'merged' : pr.state === 'closed' ? 'closed' : 'open';
-      return { number: pr.number, head: pr.head.ref, state, ...(detail.get(pr.number) ?? { pushedAt: 0, checks: [], reviews: [] }), repository: repo, ...(typeof pr.html_url === 'string' ? { url: pr.html_url } : {}) };
+      return { number: pr.number, head: pr.head.ref, state, ...(detail.get(pr.number) ?? { pushedAt: 0, checks: [], reviews: [] }), sameRepository: identity(pr), repository: repo, ...(typeof pr.html_url === 'string' ? { url: pr.html_url } : {}) };
     });
   }
 
@@ -303,7 +300,7 @@ export function githubFactReader({ log, owns, pushers: listedPushers }: FactCont
   async function byAuthor(conn: { host: string; rest: string; graphql: string; token: string }, repo: string, author: string): Promise<any[]> {
     const query = `query($q: String!, $after: String) { search(query: $q, type: ISSUE, first: 100, after: $after) {
       issueCount pageInfo { hasNextPage endCursor }
-      nodes { ... on PullRequest { number headRefName headRefOid state mergedAt } } } }`;
+      nodes { ... on PullRequest { number url headRefName headRefOid headRepository { id } baseRepository { id } state mergedAt } } } }`;
     const [owner, name] = repo.split('/');
     const out: any[] = [];
     let after: string | null = null;
@@ -313,7 +310,7 @@ export function githubFactReader({ log, owns, pushers: listedPushers }: FactCont
       if ((s?.issueCount ?? 0) > 1000) throw new Error(`GitHub search (${repo}, author ${author}): ${s.issueCount} PRs, past search's 1000 — the sync will not post a truncated reading`);
       for (const n of s?.nodes ?? []) {
         if (n?.number == null) continue;
-        out.push({ number: n.number, head: { ref: n.headRefName, sha: n.headRefOid }, state: n.state === 'OPEN' ? 'open' : 'closed', merged_at: n.mergedAt });
+        out.push({ number: n.number, html_url: n.url, head: { ref: n.headRefName, sha: n.headRefOid, repo: { node_id: n.headRepository?.id } }, base: { repo: { node_id: n.baseRepository?.id } }, state: n.state === 'OPEN' ? 'open' : 'closed', merged_at: n.mergedAt });
       }
       if (!s?.pageInfo?.hasNextPage) return out;
       after = s.pageInfo.endCursor;

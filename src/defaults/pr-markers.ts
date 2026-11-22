@@ -132,3 +132,12 @@ export function commitsOf(run: (args: string[]) => string, range: string[] = ['H
   };
   return rows.map((r) => ({ sha: r.sha, at: r.at, parent: r.parent, empty: r.parent != null && treeOf(r.parent) === r.tree, message: r.message }));
 }
+
+/** GitLab lists commit messages and parents, but not tree IDs. Read the home branch from git
+ *  and use it only if it is still the head the forge reported. */
+export function readHomePrCommits(run: (args: string[]) => string, branch: string, headOid?: string): BranchCommit[] {
+  run(['fetch', '-q', '--no-tags', 'origin', `refs/heads/${branch}`]);
+  const fetched = run(['rev-parse', 'FETCH_HEAD']).trim();
+  if (headOid != null && fetched !== headOid) throw new Error('the branch moved during the forge read');
+  return commitsOf(run, [fetched, '--not', 'HEAD']);
+}

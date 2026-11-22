@@ -28,16 +28,18 @@ export interface OpenPrRef {
   number: number;
   headRefName: string;
   headRefOid: string;
+  sameRepository?: boolean;
 }
 export interface FactRead { tickets: string[]; entry?: CodeRepoEntry }
 export interface FactContext {
   log: (line: string) => void;
-  owns: (pr: { number: number; head: string; repository: string }) => boolean;
+  owns: (pr: Pick<PrFact, 'number' | 'head' | 'repository' | 'sameRepository'>) => boolean;
   pushers: { host: string; id: string }[];
 }
 export interface ForgeClient {
   openPr(pr: OpenPr): Promise<string>;
   listOpenPrs(): Promise<OpenPrRef[]>;
+  listPrs(): Promise<OpenPrRef[]>;
   comment(number: number, body: string): Promise<string>;
   facts(read: FactRead): Promise<PrFact[]>;
   protectedRefusal(detail: string): boolean;

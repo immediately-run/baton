@@ -38,6 +38,7 @@ function forgeRemote(dir: string, name: string, local: string, path: string) {
   const url = `https://github.com/${path}.git`;
   git(dir, 'config', `remote.${name}.url`, url);
   git(dir, 'config', `url.${local}.insteadOf`, url);
+  git(dir, 'config', `url.${url}.insteadOf`, `forge:${path}.git`);
 }
 
 function repo(): { dir: string; origin: string } {
@@ -69,6 +70,14 @@ function refuseOnceEach(dirs: string[], refusals: { to: string; words: string[] 
   // No backticks and no commas in the shell body: the plan's own tests pin every line.
   const shim = [
     '#!/bin/sh',
+    // The local transport rewrite stands in for the actual forge. For the push URL lookup,
+    // give Git the caller's alias and let Git resolve it normally to the forge URL.
+    'if [ "$3 $4 $5" = "remote get-url --push" ]; then',
+    `  url=$(${JSON.stringify(realGit)} -C "$2" config --get "remote.$6.url")`,
+    '  case "$url" in https://github.com/*)',
+    `    exec ${JSON.stringify(realGit)} -C "$2" -c "remote.$6.pushurl=forge:\${url#https://github.com/}" remote get-url --push "$6";;`,
+    '  esac',
+    'fi',
     'n=0',
     'for a in "$@"; do if [ "$a" = "push" ]; then n=1; fi; done',
     'if [ "$n" = "1" ]; then',
@@ -154,7 +163,7 @@ describe('B-174: the protected default branch, decided by the forge’s answer (
     const shim = refuseOnce(dirs, 'HEAD:refs/heads/main', GH006);
     const pr = prAnswer();
     const filed = await refusing(shim.bin, () =>
-      fileRequest(readRequestPlan(dir, 'create-spec', SENTENCE), { forge: 'github', env: { GITHUB_TOKEN: 'tok' }, fetchImpl: pr.fetchImpl }),
+      fileRequest(readRequestPlan(dir, 'create-spec', SENTENCE), { env: { GITHUB_TOKEN: 'tok' }, fetchImpl: pr.fetchImpl }),
     );
     // The branch, not the default branch: the commit is the request's one file, nothing else.
     expect(filed).toMatchObject({ id: 'B-1', onBranch: 'baton-request/B-1', pr: 'https://github.com/immediately-run/baton/pull/7' });

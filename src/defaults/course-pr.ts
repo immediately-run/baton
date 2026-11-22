@@ -18,6 +18,10 @@ export interface PrFact {
   number: number;
   /** The head branch's name. */
   head: string;
+  /** False when the forge cannot establish identical immutable head and base repository IDs. */
+  sameRepository?: boolean;
+  /** The immutable head a local commit read must match, where the forge exposes no tree IDs. */
+  headOid?: string;
   state: 'open' | 'merged' | 'closed';
   /** When the head commit was made, epoch ms (its committer date) — a head newer than the
    * verdict is a push after it: `fixed`. Never the PR's `updated_at`, which a comment moves. */
@@ -628,10 +632,10 @@ const readsRepo = (t: SourceTicket, f: { repository?: string }, home?: string | 
  * is one of ticket `t`'s: listed in its `prs:`, or on a branch one of `patterns` (from
  * `matchPatterns`) maps to it. A PR in another repository is the ticket's only when the ticket
  * names that repository in `repos:` (B-29). */
-export function ticketOwns(t: SourceTicket, pr: { number: number; head: string; repository?: string }, patterns: string[], repository?: string | null): boolean {
+export function ticketOwns(t: SourceTicket, pr: Pick<PrFact, 'number' | 'head' | 'repository' | 'sameRepository'>, patterns: string[], repository?: string | null): boolean {
   if (!readsRepo(t, pr, repository)) return false;
   return prRefs((t.course as { prs?: unknown[] } | undefined)?.prs ?? [], repository).some((r) => refNames(r, pr, repository))
-    || patterns.some((p) => branchMatches(p.replace(/\{ticket\}/g, t.id), pr.head));
+    || (pr.sameRepository !== false && patterns.some((p) => branchMatches(p.replace(/\{ticket\}/g, t.id), pr.head)));
 }
 
 /** A ticket's PRs as one change (B-29): `close` writes each line on one PR, so a verdict, an

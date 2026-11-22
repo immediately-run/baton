@@ -85,6 +85,10 @@ const refuseMain = (origin: string): string => {
   const realGit = execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim();
   const shim = [
     '#!/bin/sh',
+    // The local rewrite fakes transport only, not the push destination seen by the PR client.
+    'if [ "$3 $4 $5 $6" = "remote get-url --push origin" ]; then',
+    `  exec ${JSON.stringify(realGit)} -C "$2" config --get remote.origin.url`,
+    'fi',
     'n=0',
     'for a in "$@"; do if [ "$a" = "push" ]; then n=1; fi; done',
     'if [ "$n" = "1" ]; then',

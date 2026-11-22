@@ -12,7 +12,8 @@
 import { forgeClient, listCli } from './forges';
 import { targetOf, type RegisteredTargets } from './forges/targets';
 import { branchMatches, matchPatterns } from './course-pr';
-import { parseFrontmatter } from './tickets-markdown';
+import type { OpenPrRef } from './forges/types';
+import { parseFrontmatter, resolveTicketRepo, strList } from './tickets-markdown';
 
 /** What the verification runs: `git` and `gh` in the checkout, answering trimmed stdout and
  * throwing on any non-zero exit — `course-markers`' `exec` shape, bound by the stub. */
@@ -44,10 +45,7 @@ const msg = (e: unknown): string => (e instanceof Error ? e.message : String(e))
  * the file; this reads the checkout as the agent left it. */
 export function ticketRepositories(text: string | null, reposMap?: Record<string, string>): string[] {
   const fm = text == null ? null : parseFrontmatter(text);
-  const names = Array.isArray(fm?.repos) ? fm!.repos : fm?.repos == null || fm!.repos === '' ? [] : [fm!.repos];
-  return names
-    .map((r) => (typeof r === 'string' && /^[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+){1,3}$/.test(r) ? r : reposMap?.[r]))
-    .filter((r): r is string => typeof r === 'string' && r !== '');
+  return strList(fm?.repos).map((r) => resolveTicketRepo(r, reposMap)).filter((r): r is string => r !== null);
 }
 
 /** The checkout's repository as its origin names it (`owner/name`), for the failure that names
@@ -67,11 +65,7 @@ function originSlug(run: PrExec, checkout: string): string | null {
 }
 
 /** One PR as `gh pr list --json` answers it. */
-interface PrListItem {
-  number?: unknown;
-  headRefName?: unknown;
-  headRefOid?: unknown;
-}
+type PrListItem = OpenPrRef;
 
 /** Whether git knows `oid` in the checkout (`cat-file -e`): a comparison over an object the
  * checkout never saw — a PR head someone else pushed — is skipped, never guessed. */
@@ -120,7 +114,7 @@ export async function verifyPrOpen(ask: PrOpenAsk, run: PrExec): Promise<void> {
       : ask.forge_home
         ? [] // Plain git, or outside the registry's effective code repositories.
         : listCli((args) => run('gh', args, ask.checkout), repo ?? undefined);
-    return prs.filter((p) => patterns.some((pat) => branchMatches(pat, p.headRefName)));
+    return prs.filter((p) => p.sameRepository !== false && patterns.some((pat) => branchMatches(pat, p.headRefName)));
   };
   const found: { repo: string | null; prs: PrListItem[] | null; error: string | null }[] = [];
   for (const repo of [null, ...siblings]) {

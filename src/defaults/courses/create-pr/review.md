@@ -9,7 +9,7 @@ them and print the verdict after — blocking in the foreground on each: start e
 each test run as a synchronous call and keep acting until it returns; your harness ends your
 process at your final message, so a job left in the background dies orphaned and the round is
 lost — "waiting" or "I'll resume when they land" in an output is always wrong. An output that
-ends on anything else loses the round. Baton writes the verdict line on the PR from it. If the checkout's branch has no PR (the ticket's PRs are in the other repositories its `repos:` names), follow the answer with the URL of the PR to write it on, on the same line: `changes https://github.com/<owner>/<name>/pull/<n>`. The ticket's PRs are one change: review them together, and post your review once, on that PR.
+ends on anything else loses the round. Baton writes the verdict line on the PR from it. If the checkout's branch has no PR (the ticket's PRs are in the other repositories its `repos:` names), follow the answer with the URL of the PR to write it on, on the same line: `changes <PR URL>`. The ticket's PRs are one change: review them together, and post your review once, on that PR.
 
 > **How the stub runs you** — Baton's contract for the `agent_command` author: your command
 > line splits into words as `sh` would (quotes honoured, no substitutions) and executes

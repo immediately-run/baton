@@ -34,7 +34,7 @@ let owner: TestKey;
 
 /** The ids the fake forge reports, and PR routes for one PR on a head LIN-1 owns. */
 const ids = (repo: number, owner: number) => ({ id: repo, owner: { id: owner } });
-const pull = (n: number) => ({ number: n, head: { ref: 'claude/LIN-1-fix', sha: `s${n}` }, state: 'open', merged_at: null });
+const pull = (n: number) => ({ number: n, head: { ref: 'claude/LIN-1-fix', sha: `s${n}`, repo: { id: 17 } }, base: { repo: { id: 17 } }, state: 'open', merged_at: null });
 const detail = (n: number) => ({
   [`/repos/acme/monorepo/commits/s${n}/check-runs`]: { check_runs: [{ conclusion: 'success' }] },
   [`/repos/acme/monorepo/pulls/${n}/commits`]: [{ sha: `c${n}`, commit: { message: 'the work', committer: { date: '2026-11-12T11:00:00Z' } } }],

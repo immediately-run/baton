@@ -22,7 +22,7 @@ import { syncOnce } from '../shared/batonSync.mjs';
 import { DEFAULT_URL } from '../../cli/baton.mjs';
 import { API_KEY, signingKey } from '../../cli/sign.mjs';
 import { DEFAULT_BRANCH_PATTERN, matchPatterns, sameRepo as sameRepoName, ticketOwns, type BatonRecord, type PrFact, type StationsResult } from './course-pr';
-import { commitsOf } from './pr-markers';
+import { readHomePrCommits } from './pr-markers';
 import { COMMENTING_LEGS } from './pr-close';
 import { DEFAULT_FORGE, FORGE_SHAPES, PR_URL as PR_URL_RE } from '../core/forges';
 import { registration } from './forges';
@@ -358,7 +358,7 @@ async function readBoard(root: string, batonJson: BatonJson, args: SyncArgs, log
     patterns: matchPatterns([c.branch_pattern ?? DEFAULT_BRANCH_PATTERN, ...(c.previous_branch_pattern ? [c.previous_branch_pattern] : [])]),
     tickets: result.tickets.filter((t) => t.course_id === c.id && !closedIds.has(t.id)),
   }));
-  const owns = (pr: { number: number; head: string; repository?: string }) => owners.some((o) => o.tickets.some((t) => ticketOwns(t, pr, o.patterns, repository)));
+  const owns = (pr: Pick<PrFact, 'number' | 'head' | 'repository' | 'sameRepository'>) => owners.some((o) => o.tickets.some((t) => ticketOwns(t, pr, o.patterns, repository)));
   const syncMjsOf = (id: string): string => join(root, '.baton', 'courses', id, 'sync.mjs');
   // The forge is read only when a course reads PRs: a repository on the marker courses alone
   // (bug-report, draft-ticket, decision) needs no forge token. A course's own sync.mjs may read
@@ -387,10 +387,9 @@ async function readBoard(root: string, batonJson: BatonJson, args: SyncArgs, log
   // its fact as it is (its gate stays open).
   const boundedGit = (a: string[]): string => execFileSync('git', ['-C', root, ...a], { encoding: 'utf8', timeout: CLOSE_TIMEOUT_MS, killSignal: 'SIGKILL', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, ...GIT_NONINTERACTIVE_ENV, LC_ALL: 'C' } });
   for (const f of facts) {
-    if (f.commits || f.state !== 'open' || (f.repository != null && repository != null && !sameRepoName(f.repository, repository)) || !owns(f)) continue;
+    if (f.commits || f.state !== 'open' || f.sameRepository === false || (f.repository != null && repository != null && !sameRepoName(f.repository, repository)) || !owns(f)) continue;
     try {
-      boundedGit(['fetch', '-q', '--no-tags', 'origin', `refs/heads/${f.head}`]);
-      f.commits = commitsOf(boundedGit, ['FETCH_HEAD', '--not', 'HEAD']);
+      f.commits = readHomePrCommits(boundedGit, f.head, f.headOid);
     } catch (e) {
       log(`baton: ${f.head}'s commits could not be read from git (${e instanceof Error ? e.message.split('\n')[0] : String(e)}) — its gate reads as open`);
     }

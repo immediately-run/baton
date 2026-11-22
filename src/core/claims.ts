@@ -1354,15 +1354,13 @@ export class Claims {
     const handoff = this.rows<{ handoff_url: string | null }>('SELECT handoff_url FROM ticket_stations WHERE ticket_id = ?', c.ticket_id)[0]?.handoff_url ?? null;
     const previous = this.rows<{ id: number; status: string; end_reason: string | null; end_detail: string | null; ended_at: number | null; resume_json: string | null }>(
       `SELECT id, status, end_reason, end_detail, ended_at, resume_json FROM claims WHERE ticket_id = ? AND id < ? AND status != 'active' ORDER BY id DESC`, c.ticket_id, id);
-    // §12.8 (B-145): where state one leg hands the next lives (R-BTN-188's `leg_state` —
-    // B-148 reads it). B-182 (R-BTN-190): a
+    // B-182 (R-BTN-190): a
     // `git` home's claimed ticket on a course that reads PR facts keeps its rounds in its PR's
     // conversation, on whichever forge holds the PR — the course's `facts` (R-BTN-134), as the
     // registry posted it, says whether it reads any.
     const repo = repositoryOf(c.ticket_id);
-    const cur = this.c.policies?.current(repo);
     const readsPrs = c.course_id != null && (this.rows<{ facts: string }>('SELECT facts FROM courses WHERE repository_id = ? AND id = ?', repo, c.course_id)[0]?.facts ?? '[]').includes('"prs"');
-    const legState = cur && this.c.forgeOf ? legStateOf(cur.policy, this.c.forgeOf(repo), readsPrs) : null;
+    const legState = this.c.forgeOf ? legStateOf(this.c.forgeOf(repo), readsPrs) : null;
     // B-127: the brief's mark (item 7 — marked whether or not signed control is required), and,
     // while the repository requires it, the signed-control record the runners load from and
     // verify. `control.required` is Baton's own setting — never the post's word — and its keys

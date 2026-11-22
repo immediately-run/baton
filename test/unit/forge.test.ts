@@ -8,6 +8,9 @@ import { describe, expect, it, vi } from 'vitest';
 import { forgeApi, hostOf, NAMED_FORGES, openRequestPr, protectedRefusal, requestForge, tokenOf } from '../../src/defaults/forge';
 import { forgeReader } from '../../src/defaults/forges';
 import { FORGE_SHAPES } from '../../src/core/forges';
+import { ticketRepositories } from '../../src/defaults/pr-verify';
+import { ticketsMarkdown } from '../../src/defaults/tickets-markdown';
+import { gateOfBranch, readHomePrCommits, verifiedMarkers } from '../../src/defaults/pr-markers';
 
 /** git's stderr from a refused push, as each forge writes it over the `remote:` lines. */
 const REFUSALS = {
@@ -179,8 +182,8 @@ it.each(['github', 'gitlab', 'gitea'] as const)('%s client opens, lists, comment
   const branch = 'claude/B-273-test';
   const sha = 'a'.repeat(40);
   const gl = forge === 'gitlab';
-  const pr = gl ? { iid: 9, source_branch: branch, sha, state: 'opened', web_url: page }
-    : { number: 9, head: { ref: branch, sha }, state: 'open', html_url: page };
+  const pr = gl ? { iid: 9, source_branch: branch, sha, source_project_id: 17, target_project_id: 17, state: 'opened', web_url: page }
+    : { number: 9, head: { ref: branch, sha, repo: { id: 17 }, repo_id: 17 }, base: { repo: { id: 17 }, repo_id: 17 }, state: 'open', html_url: page };
   const end = gl ? '/merge_requests' : '/pulls';
   const fetchImpl = vi.fn<typeof fetch>().mockImplementation(async (input, init) => {
     const url = new URL(String(input));
@@ -197,13 +200,49 @@ it.each(['github', 'gitlab', 'gitea'] as const)('%s client opens, lists, comment
     const connect = forgeReader({ log: () => {}, owns: () => false, pushers: [] });
     const client = connect({ forge, path, webBase: base }, { env: { [tokenOf(forge)]: 'fake' }, fetchImpl });
     expect(await client.openPr({ head: branch, base: 'main', title: 'Test' })).toBe(page);
-    expect(await client.listOpenPrs()).toEqual([{ number: 9, headRefName: branch, headRefOid: sha }]);
+    expect(await client.listOpenPrs()).toEqual([{ number: 9, headRefName: branch, headRefOid: sha, sameRepository: true }]);
     expect(await client.comment(9, 'baton: verdict')).toBe(`${page}${gl ? '#note_2' : '#issuecomment-2'}`);
-    expect(await client.facts({ tickets: [] })).toEqual([{ number: 9, head: branch, repository: path, state: 'open', url: page, pushedAt: 0, checks: [], reviews: [] }]);
+    expect(await client.facts({ tickets: [] })).toEqual([{ number: 9, head: branch, repository: path, state: 'open', url: page, sameRepository: true, ...(forge === 'github' ? {} : { headOid: sha }), pushedAt: 0, checks: [], reviews: [] }]);
     expect(client.protectedRefusal(gl ? 'not allowed to push code to protected branches' : forge === 'gitea' ? 'not allowed to push to protected branch' : 'GH006')).toBe(true);
     expect(client.protectedRefusal('access denied')).toBe(false);
     expect(fetchImpl).toHaveBeenCalledTimes(4);
   } finally {
     vi.unstubAllGlobals();
   }
+});
+
+it('S-BTN-106: sync and verification both resolve a literal subgroup', () => {
+  const text = '---\nid: B-1\nrepos: [o/group/r, alias]\n---\n';
+  const repos = { alias: 'o/r' };
+  expect(ticketRepositories(text, repos)).toEqual(['o/group/r', 'o/r']);
+  expect(ticketsMarkdown([{ path: 'B-1.md', text }], { repos }).tickets[0].repos).toEqual(['o/group/r', 'o/r']);
+});
+
+it('S-BTN-230: a GitLab MR leaves marker trees to git, bound to the observed head', async () => {
+  const content = 'a'.repeat(40), marker = 'b'.repeat(40), tree = 'c'.repeat(40), parent = 'd'.repeat(40);
+  const branch = 'claude/B-1-patch', path = 'o/group/r';
+  const date = '2026-11-22T20:00:00Z';
+  const body = `gate\n\nBaton-Tests: green\nBaton-Tested: ${content}\nBaton-Claim: n1`;
+  const client = forgeReader({ log: () => {}, owns: () => true, pushers: [] })({ forge: 'gitlab', path, webBase: `https://lab.example/${path}` }, {
+    env: { GITLAB_TOKEN: 'fake' },
+    fetchImpl: async (url) => {
+      const endpoint = new URL(String(url)).pathname;
+      if (endpoint.endsWith('/merge_requests')) return Response.json([{ iid: 1, state: 'opened', source_project_id: 17, target_project_id: 17, source_branch: branch, sha: marker, web_url: `https://lab.example/${path}/-/merge_requests/1` }]);
+      if (endpoint.endsWith('/1/commits')) return Response.json([{ id: marker, parent_ids: [content], message: body, committed_date: date }]);
+      if (endpoint.endsWith('/notes') || endpoint.endsWith('/statuses')) return Response.json([]);
+      throw new Error(`unexpected endpoint ${endpoint}`);
+    },
+  });
+  const [fact] = await client.facts({ tickets: ['B-1'] });
+  expect(fact.commits).toBeUndefined();
+  const git = (args: string[]) => {
+    if (args[0] === 'fetch') expect(args.at(-1)).toBe(`refs/heads/${branch}`);
+    else if (args[0] === 'rev-parse') return marker;
+    else if (args[0] === 'log') return `${marker}\x1f${content}\x1f${tree}\x1f20\x1f${body}\x1e${content}\x1f${parent}\x1f${tree}\x1f10\x1fwork\x1e`;
+    return '';
+  };
+  const commits = readHomePrCommits(git, fact.head, fact.headOid);
+  const counted = verifiedMarkers(commits, 'B-1', [{ ticket: 'B-1', leg: 'run-tests', claim_nonce: 'n1', evidence: marker }]);
+  expect(gateOfBranch(commits, counted)).toBe('green');
+  expect(() => readHomePrCommits(git, fact.head, content)).toThrow('the branch moved');
 });

@@ -28,7 +28,7 @@ const commit = () => {
 /** A recorded GitHub: each repository's PR list, and each read PR's detail. */
 let github: Record<string, unknown> = {};
 const asked: string[] = [];
-const pull = (number: number, merged = false) => ({ number, head: { ref: 'claude/A-1-x', sha: `s${number}` }, state: merged ? 'closed' : 'open', merged_at: merged ? '2026-10-18T13:00:00Z' : null });
+const pull = (number: number, merged = false) => ({ number, head: { ref: 'claude/A-1-x', sha: `s${number}`, repo: { id: 17 } }, base: { repo: { id: 17 } }, state: merged ? 'closed' : 'open', merged_at: merged ? '2026-10-18T13:00:00Z' : null });
 const detail = (repo: string, number: number, comments: unknown[] = []) => ({
   [`/repos/${repo}/commits/s${number}/check-runs`]: { check_runs: [{ conclusion: 'success' }] },
   [`/repos/${repo}/pulls/${number}/commits`]: [{ sha: `c${number}w`, commit: { message: 'the work', committer: { date: '2026-10-18T11:00:00Z' } } }],

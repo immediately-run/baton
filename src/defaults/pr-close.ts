@@ -99,8 +99,9 @@ export async function prClose(ctx: CloseCtx, result: { reached?: string; next?: 
       if (!repo) throw new Error('the checkout’s repository has no PR conversation');
       const client = forgeClient(repo, opts);
       const branch = run('git', ['branch', '--show-current'], ctx.checkout);
-      const matches = (await client.listOpenPrs()).filter((p) => branch !== '' && p.headRefName === branch);
-      if (matches.length !== 1) throw new Error('the checkout branch does not name exactly one open PR');
+      const prs = ctx.leg === 'conclude' ? await client.listPrs() : await client.listOpenPrs();
+      const matches = prs.filter((p) => p.sameRepository !== false && branch !== '' && p.headRefName === branch);
+      if (matches.length !== 1) throw new Error('the checkout branch does not name exactly one eligible PR; name its URL explicitly');
       return client.comment(matches[0].number, body);
     }
     return run('gh', ['pr', 'comment', ...(typeof result?.pr === 'string' ? [result.pr] : []), '--body', body], ctx.checkout);

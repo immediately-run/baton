@@ -115,7 +115,7 @@ const refusalWords = (e: unknown): string => {
  *  no remote, and is the URL the request pushed to all the same. */
 const remoteUrl = (root: string, remote: string): string | null => {
   try {
-    return git(root, 'config', '--get', `remote.${remote}.url`);
+    return git(root, 'remote', 'get-url', '--push', remote);
   } catch {
     return remote.trim() !== '' ? remote : null;
   }

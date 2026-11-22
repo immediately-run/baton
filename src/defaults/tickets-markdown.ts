@@ -1,3 +1,5 @@
+import { FORGES } from '../core/forges';
+import { isForgePath } from '../core/links';
 // tickets-markdown.ts — the CLI's default ticket source (BATON_SPEC §2f R-BTN-74): every
 // `*.md`/`*.mdx` file under the `items` setting whose frontmatter carries an `id` is a ticket.
 // Pure over injected file texts, so the sync command reads the tree and this decides; the same
@@ -90,6 +92,12 @@ const str = (v: unknown): string | null => (typeof v === 'string' && v !== '' ? 
  *  signed-control walk reads tags through the same rule as the source itself. */
 export const strList = (v: unknown): string[] => (Array.isArray(v) ? v : v == null || v === '' ? [] : [v]).map(str).filter((x): x is string => x != null);
 
+export function resolveTicketRepo(name: string, aliases?: Record<string, string>): string | null {
+  const valid = (path: string) => FORGES.some((f) => isForgePath(f, path));
+  const path = valid(name) ? name : (aliases && Object.hasOwn(aliases, name) ? aliases[name] : undefined);
+  return typeof path === 'string' && valid(path) ? path : null;
+}
+
 const CLOSED: Record<string, 'done' | 'withdrawn'> = { done: 'done', withdrawn: 'withdrawn', superseded: 'withdrawn', deferred: 'withdrawn' };
 
 /** The markdown source over `files`: the board's `tickets` and `closed`. A duplicate `id`, or
@@ -124,7 +132,7 @@ export function ticketsMarkdown(files: MarkdownFile[], settings: MarkdownSetting
     }
     const tags = strList(fm.tags);
     const names = strList(fm.repos);
-    const resolved = names.map((r) => (/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(r) ? r : settings.repos?.[r] ?? null));
+    const resolved = names.map((r) => resolveTicketRepo(r, settings.repos));
     const unknown = names[resolved.indexOf(null)];
     if (unknown != null || resolved.some((r) => r == null)) {
       throw new Error(`${f.path}: repos names ${unknown}, which the baton.json repos map does not resolve`);

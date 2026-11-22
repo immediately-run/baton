@@ -109,7 +109,7 @@ export interface OutboxRoute {
 }
 
 /** The policy document: every knob the spec's table names, `leg_state` and `human_identity`
- *  alone optional (unset `leg_state` means `forge` where the PRs are read, R-BTN-190; unset
+ *  alone optional (legacy `leg_state` does not choose claim conversation, R-BTN-190; unset
  *  `human_identity` means none). */
 export interface PolicyDocument {
   approvers: { members: ApproverEntry[]; trust: ApproverEntry[]; policy: ApproverEntry[] };
@@ -452,11 +452,8 @@ export function policyForPreset(name: PresetName, forge: Forge): PolicyDocument 
 /** Where state one leg hands the next lives (R-BTN-190 as amended by B-182): `forge` when the
  *  home is on a forge **or** the claimed ticket's course reads PR facts (`facts: ["prs"]`,
  *  R-BTN-134) — a `git` home's PR course among them, its rounds in its PR's conversation on
- *  whichever forge holds the PR — `branch` otherwise. An explicit knob still chooses (a forge
- *  home may force the side branch; a `git` home refuses `forge` in the validator, for its own
- *  conversation is not where any PR lives). */
-export function legStateOf(policy: PolicyDocument, forge: Forge, courseReadsPrs = false): 'forge' | 'branch' {
-  if (policy.leg_state !== undefined) return policy.leg_state;
+ *  whichever forge holds the PR — `branch` otherwise. Legacy policy values do not choose it. */
+export function legStateOf(forge: Forge, courseReadsPrs = false): 'forge' | 'branch' {
   return hasPrs(forge) || courseReadsPrs ? 'forge' : 'branch';
 }
 

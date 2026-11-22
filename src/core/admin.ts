@@ -1405,17 +1405,19 @@ export function checkRetry(v: unknown): RetryPolicy {
 function checkTrigger(v: unknown): Record<string, unknown> {
   if (!isObj(v) || typeof v.kind !== 'string') bad('unblocked_trigger', 'must be a dispatch {kind, …}');
   const t = v as Record<string, unknown>;
-  if (t.kind === 'github-app') {
+  const forge = FORGES.find((f) => FORGE_SHAPES[f].dispatch === t.kind);
+  const shape = forge && FORGE_SHAPES[forge].dispatchInput;
+  if (shape === 'workflow-path') {
     only(t, ['kind', 'workflow'], 'unblocked_trigger');
     if (typeof t.workflow !== 'string' || !WORKFLOW_PATH.test(t.workflow)) bad('unblocked_trigger.workflow', 'must be a path under .github/workflows/');
-  } else if (t.kind === 'gitlab-trigger') {
+  } else if (shape === 'project-ref') {
     only(t, ['kind', 'project_id', 'ref'], 'unblocked_trigger');
     if (!Number.isSafeInteger(t.project_id) || typeof t.ref !== 'string' || !/^[A-Za-z0-9._/-]{1,100}$/.test(t.ref)) bad('unblocked_trigger', 'needs project_id and ref');
-  } else if (FORGES.some((f) => FORGE_SHAPES[f].dispatch === t.kind)) {
+  } else if (shape === 'workflow-ref') {
     only(t, ['kind', 'workflow', 'ref'], 'unblocked_trigger');
     if (typeof t.workflow !== 'string' || !/^[A-Za-z0-9._/-]{1,200}$/.test(t.workflow) || typeof t.ref !== 'string' || !/^[A-Za-z0-9._/-]{1,100}$/.test(t.ref)) bad('unblocked_trigger', 'needs workflow and ref');
   } else {
-    bad('unblocked_trigger.kind', 'must be github-app, gitlab-trigger or gitea');
+    bad('unblocked_trigger.kind', `must be ${FORGES.flatMap((f) => FORGE_SHAPES[f].dispatch ?? []).join(', ')}`);
   }
   return t;
 }
