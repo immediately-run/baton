@@ -21,7 +21,7 @@ import { RunnerApi } from './runnerApi';
 import { parseAdminKeys, parseSshKey, verifyApiKey, verifyRequest, withBody, type SyncCredential } from './auth';
 import { Claims } from './claims';
 import { Cutover } from './cutover';
-import { Mirror } from './mirror';
+import { DISPATCH_REASON_MAX, Mirror } from './mirror';
 import { CAPABILITY_NAME, checkAttestation, checkConfirmations, checkDependenciesRead, checkRepositoryId, checkSequenceTake, COURSE_ID, GIT_BRANCH, GIT_REPO, SEQUENCE_KIND } from './validate';
 import { Courses } from './courses';
 import { Observations } from './observations';
@@ -310,10 +310,9 @@ export class BatonCore {
     try {
       return await this.ports.dispatch.send(target);
     } catch (e) {
-      // R-BTN-94: the forge's refusal, with its reason — identifiers only, never a body (the
-      // refusal's message is the forge's own words, capped like a notice's).
+      // R-BTN-94: identifiers and the adapter's short text reason, never the response payload.
       this.store.transaction(() => logEvent(this.store, this.now(), 'discrepancy', 'baton',
-        { kind: 'dispatch-refused', repository: wf.repository, workflow: wf.kind, reason: (e instanceof Error ? e.message : String(e)).slice(0, 500) },
+        { kind: 'dispatch-refused', repository: wf.repository, workflow: wf.kind, reason: (e instanceof Error ? e.message : String(e)).slice(0, DISPATCH_REASON_MAX) },
         null, null, wf.repository));
       return false;
     }

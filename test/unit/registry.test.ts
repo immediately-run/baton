@@ -144,6 +144,21 @@ describe('the registry', () => {
     expect(urls).toEqual(['https://api.github.com/repos/immediately-run/docs/actions/workflows/baton-unblocked.yml/dispatches', 'https://api.github.com/repos/immediately-run/docs/actions/workflows/baton-mirror.yml/dispatches']);
     expect(bodies).toEqual([{ ref: 'main', inputs: { tickets: '[]' } }, { ref: 'main' }]);
   });
+
+  it.each([
+    ['plain text', () => new Response('<p>Workflow\r\n not found</p>', { status: 404 }), 'HTTP 404: Workflow not found'],
+    ['oversized body', () => new Response('x'.repeat(8193), { status: 404 }), 'HTTP 404'],
+    ['malformed JSON', () => new Response('{', { status: 404, headers: { 'Content-Type': 'application/json' } }), 'HTTP 404'],
+    ['no body', () => new Response(null, { status: 404 }), 'HTTP 404'],
+    ['transport failure', () => { throw new Error('Bearer test-dispatch-credential'); }, 'Could not reach the forge to dispatch the workflow'],
+  ])('dispatchWorkflow reports %s safely', async (_case, reply, reason) => {
+    vi.stubGlobal('fetch', async () => reply());
+    try {
+      await expect(dispatchWorkflow('test-dispatch-credential', { github: 'immediately-run/docs', workflow: 'baton-sync.yml', ref: 'main' })).rejects.toThrow(new Error(reason));
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
 });
 
 describe('branch patterns (R-BTN-51, §6.3)', () => {
@@ -204,4 +219,3 @@ describe('the reserved branch namespaces (R-BTN-190, B-174)', () => {
     expect(checkRegistry([entry(branch_pattern as string)])[0].branch_pattern).toBe(branch_pattern);
   });
 });
-
