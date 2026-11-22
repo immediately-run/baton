@@ -111,8 +111,9 @@ Under `tickets.created: proposed`:
   - Unmet, it is an `attestation` block, `why` one of `missing`, `other-subject`,
     `writer-not-allowed`, `lapsed`, `revoked`, `failed-where`. A gate's block refuses
     a claim and an advance (rule 1); an advice block is advice, as a `resource` one is (R-BTN-75).
-  - The short form of an instance requirement on availability, `requires.resources`, is built
-    and defined in R-BTN-76.
+  - `requires.resources` (R-BTN-76) is the short form of an `instance` requirement on
+    availability, and takes `binds`, `missing` and `writers` with the defaults `advice` and
+    `allow`.
   - The validator refuses a `trusted: true` leg with a requirement that binds as `advice` or
     takes `missing: allow`.
 - **Standard types:**

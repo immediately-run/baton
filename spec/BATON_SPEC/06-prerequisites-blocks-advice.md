@@ -9,9 +9,10 @@ not" from that index, gates claims on the blocks safety needs, and advises on th
 
 Not built, each a design its rule below still states:
 
-- R-BTN-120: a leg's `requires.tickets` ([courses proposal](../proposals/courses.md)), `baton.prerequisite-unmet`,
+- R-BTN-120: a leg's `requires.tickets` and `requires.resources` (the course validator accepts `requires.capabilities`
+  alone, [courses proposal](../proposals/courses.md)), `baton.prerequisite-unmet`,
   `baton.prerequisite-cycle`, the `/prerequisites` route and `baton leg why`.
-- R-BTN-75: the `retry` kind and the `found` and `provisional` columns of
+- R-BTN-75: the `retry` kind and the `found`, `provisional` and `binds` columns of
   `ticket_blocks`. A backoff is a stored `retry_after`, which rule 10 reads.
 - R-BTN-126: the `ticket` and `resource` blocked ends, `LegError`, `baton leg release --blocked`,
   `max_blocked` with its `blocked-exhausted` hold, and `baton.blocked-ends`. A `released:blocked`
@@ -91,7 +92,7 @@ Not built, each a design its rule below still states:
   - **What a row refuses.** Every row refuses a claim and an advance into its leg, and a
     whole-ticket row every leg (rule 1), with three differences: a `capability` row refuses only
     each runner lacking the capability (rule 4); a `retry` row refuses as `backing-off` (rule
-    10); a `resource` row refuses only with `binds: gate` (R-BTN-76).
+    10); a `resource` row is advice and refuses nothing (R-BTN-76).
   - **When rows are written.** A `ticket` row is rewritten when a referenced ticket's station or
     path, or an entry's selection, changes (index `ticket_dependents`); a `capability` row when
     the fleet count crosses zero (below); a `retry` row by a failed attempt (R-BTN-122); a
@@ -238,16 +239,8 @@ Not built, each a design its rule below still states:
     is a `resource` event.
   - **Clearing.** `POST /v1/admin/readings {instance, clear: {source?}}` ends readings of both
     kinds from one instrument or all, logged.
-  - **Course resource prerequisites.** Each `requires.resources` entry names a `resource`, with
-    optional `binds` (`gate` or `advice`, default `advice`), `missing` (`block` or `allow`, default
-    `block` for gates and `allow` for advice), and `writers` (a further filter on the policy's
-    admitted writers). For each usable instance, its newest admitted state reading in force
-    determines whether it is available, unavailable or unknown. An available instance satisfies
-    the requirement; an unknown instance satisfies it only with `missing: allow`. No usable
-    instance is also unknown. An unmet requirement writes a `resource` row with its `binds`
-    and `why`. A claim or advance applies due state expiries before testing this gate.
-  - **Posted resource needs and blocks.** To be removed with their code.
-    - **Needs** — the sync's posted `needs` (joined for the leg)
+  - **The `resource` prerequisite and block.** To be removed with its code.
+    - **Needs** — a leg's `requires.resources` (not built), the sync's posted `needs` (joined for the leg)
       and `end`-sourced needs — are stored in `leg_needs`; an invalid or unregistered name is
       logged and blocks nothing.
     - **Blocked** when at least one live runner is granted on the repository, the repository has

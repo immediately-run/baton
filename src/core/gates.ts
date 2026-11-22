@@ -72,8 +72,9 @@ export interface GateContext {
   lastEndObservation: number;
   /** At an advance, the tags the holder bars from the new leg itself (R-BTN-63). */
   holderBars?: string[];
-  /** R-BTN-75: stored blocks that refuse, including resources bound as gates (`leg` '' for the whole ticket). */
-  blocks?: { kind: string; leg: string; binds?: string | null }[];
+  /** R-BTN-75, R-BTN-78: the ticket's stored `ticket` and `decision` blocks — the kinds that
+   *  refuse (`leg` '' for the whole ticket). `capability` refuses through rule 4; `resource` is advice. */
+  blocks?: { kind: string; leg: string }[];
   /** R-BTN-106: the legs the asking runner's credential has run on the ticket, in any claim
    *  (`claim_legs` through each claim's runner to its credential), as current leg names. */
   ranByKey?: string[];
@@ -129,12 +130,12 @@ export function gatesFor(runner: GateRunner | null, ticket: GateTicket, leg: Gat
   // Rule 1's blocks (R-BTN-75, R-BTN-78): an open dependency refuses a claim; an open decision on
   // the whole ticket or on the leg refuses a claim of it and an advance into it — never fails open.
   const blocks = facts.blocks ?? [];
-  const legBlocked = blocks.some((b) => (b.kind === 'decision' || (b.kind === 'resource' && b.binds === 'gate')) && (b.leg === '' || b.leg === leg.name));
+  const decided = blocks.some((b) => b.kind === 'decision' && (b.leg === '' || b.leg === leg.name));
   if (phase === 'claim') {
     if (leg.state !== 'ready') return refuse(1);
-    if (legBlocked || blocks.some((b) => b.kind === 'ticket')) return refuse(1, 'blocked');
+    if (decided || blocks.some((b) => b.kind === 'ticket')) return refuse(1, 'blocked');
     if (facts.claims.some(claimHolds)) return refuse(3);
-  } else if (legBlocked) {
+  } else if (decided) {
     return refuse(1, 'blocked');
   }
   if (facts.override?.hold) return refuse(3, 'held');

@@ -180,7 +180,7 @@ function checkApproverList(v: unknown, at: string): ApproverEntry[] {
 }
 
 /** A writers list (R-BTN-181): the classes, and one key named `service:<fingerprint>`. */
-export function checkWriters(v: unknown, at: string): WriterClass[] {
+function checkWriters(v: unknown, at: string): WriterClass[] {
   if (!Array.isArray(v) || v.length < 1 || v.length > ENTRIES_MAX) bad(at, `must be a non-empty list of at most ${ENTRIES_MAX} writers`);
   return (v as unknown[]).map((w, i) => {
     if (w === 'human' || w === 'owner' || w === 'baton' || w === 'runner' || w === 'instrument' || w === 'admin') return w;

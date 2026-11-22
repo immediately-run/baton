@@ -172,17 +172,13 @@ export class Resources {
       const unknown = i.repositories.filter((r) => !this.rows('SELECT 1 FROM repositories WHERE id = ? AND retired_at IS NULL', r).length);
       if (unknown.length) throw new BatonError('not-found', `repositories: ${unknown.join(', ')} is not registered`);
       const fresh = !this.rows('SELECT 1 FROM resource_instances WHERE name = ?', i.name).length;
-      const removed = this.servedBy(i.name).filter((r) => !i.serves.includes(r.resource)).map((r) => r.resource);
       this.exec(`INSERT INTO resource_instances (name, repositories) VALUES (?, ?) ON CONFLICT (name) DO UPDATE SET repositories = excluded.repositories`, i.name, JSON.stringify(i.repositories));
       this.exec('DELETE FROM instance_serves WHERE instance = ?', i.name);
       for (const s of i.serves) this.exec('INSERT INTO instance_serves (instance, resource) VALUES (?, ?)', i.name, s);
       // `unknown` from registration: a day of it while a leg needs the instance is Needs you.
       if (fresh) this.exec(`INSERT INTO instance_states (instance, state, changed_at) VALUES (?, 'unknown', ?) ON CONFLICT (instance) DO NOTHING`, i.name, now);
       logEvent(this.c.store, now, 'admin', actor, { act: fresh ? 'instance-added' : 'instance-changed', name: i.name, serves: i.serves, repositories: i.repositories }, null, null, null);
-      this.c.blocks.batch(() => {
-        this.c.blocks.instancesChanged([i.name]);
-        if (removed.length) this.c.blocks.resourceRequirementsChanged({ resources: removed });
-      });
+      this.c.blocks.instancesChanged([i.name]);
       return { ok: true };
     });
   }
@@ -319,10 +315,7 @@ export class Resources {
       if (stored?.state !== s.state) logEvent(this.c.store, now, 'resource', 'baton', { instance: name, state: s.state, ...(s.until != null ? { until: s.until } : {}), ...(stored ? { was: stored.state } : {}) }, null, null, null);
       changed.push(name);
     }
-    this.c.blocks.batch(() => {
-      this.c.blocks.instancesChanged(changed);
-      this.c.blocks.readingsChanged(names.filter((name) => !changed.includes(name)));
-    });
+    this.c.blocks.instancesChanged(changed);
   }
 
   /** The alarm's share: lapsed readings are dropped (every reading in force is kept, R-BTN-101),
@@ -338,12 +331,6 @@ export class Resources {
 
   nextLapse(): number | null {
     return this.rows<{ t: number | null }>(`SELECT MIN(lapses_at) AS t FROM instance_readings WHERE kind = 'state'`)[0]?.t ?? null;
-  }
-
-  /** A claim or advance may arrive before a due alarm. Keep its stored gate inputs current. */
-  expireBeforeGate() {
-    if (!this.rows('SELECT 1 FROM instance_readings WHERE lapses_at <= ? AND kind = ? LIMIT 1', this.c.now(), 'state').length) return;
-    this.c.store.transaction(() => this.alarm());
   }
 
   /** The instances, their states and the readings in force — for the dashboard (§14). */

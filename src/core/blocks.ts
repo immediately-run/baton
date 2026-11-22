@@ -19,15 +19,11 @@ import { underWebBase } from '../shared/links.mjs';
 import type { PostedStation } from './board';
 import type { Store } from './ports';
 import type { History } from './history';
-import { resourceBinding, resourceMissing, type ResourceRequirement } from './course';
-import type { PolicyDocument, WriterClass } from './policy';
 
 export const BLOCK_KINDS = ['ticket', 'capability', 'resource', 'decision'] as const;
 export type BlockKind = (typeof BLOCK_KINDS)[number];
 export interface Block {
   kind: BlockKind; leg?: string; ref: string; since: number; until?: number;
-  binds?: 'gate' | 'advice';
-  why?: string;
   /** B-133: a `decision` block's computed view — the agent's question (shown as such) and the
    *  exact action each option takes, computed by `decisionOptionActions`, never the packet's
    *  summary of itself. Set on the dashboard's read alone (`view`). */
@@ -41,7 +37,7 @@ export interface Cleared { kind: BlockKind; ref: string; leg?: string }
  *  `blocked_since` they cleared (R-BTN-77 as amended by R3-1251). */
 interface LostAnswer { since: number; rows: Cleared[] }
 /** A `ticket_blocks` row as a cause asks for it: `leg` '' is the whole ticket. */
-interface BlockRow { kind: BlockKind; ref: string; leg: string; until: number | null; binds?: Block['binds'] | null; why?: string | null }
+interface BlockRow { kind: BlockKind; ref: string; leg: string; until: number | null }
 /** What one ticket's row rewrites removed and wrote, keyed by `rowKey`, until its evaluation. */
 interface RowChanges { cleared: Map<string, Cleared>; added: Map<string, BlockRow> }
 const rowKey = (r: { kind: BlockKind; ref: string; leg?: string }) => `${r.kind}\u0000${r.ref}\u0000${r.leg ?? ''}`;
@@ -69,7 +65,6 @@ export interface Ctx {
   /** R-BTN-79: whatever is re-evaluated here — the queued leg, the course, the hold — is what
    *  moves a ticket between leg queues, in the same transaction (Queues.touch). */
   queued?: (ticketId: string) => void;
-  readingWriters?: (repo: string) => PolicyDocument['readings'] | undefined;
 }
 
 /** R-BTN-78: the decisions Baton raises itself, each `asks: owner` on the whole ticket, answered in
@@ -140,7 +135,7 @@ export interface RunnerAnswer {
  *  checks their query plans. */
 export const BLOCK_SQL = {
   /** A ticket's rows, by primary key. */
-  rows: 'SELECT kind, leg, ref, since, until, binds, why FROM ticket_blocks WHERE ticket_id = ? ORDER BY kind, ref, leg',
+  rows: 'SELECT kind, leg, ref, since, until FROM ticket_blocks WHERE ticket_id = ? ORDER BY kind, ref, leg',
   /** The tickets with a row on any of the refs, through `blocks_by_ref`. */
   on: 'SELECT DISTINCT ticket_id FROM ticket_blocks WHERE repository_id = ? AND kind = ? AND ref IN (SELECT value FROM json_each(?)) ORDER BY ticket_id',
   /** The tickets with a row of the kind, through `blocks_by_ref`. */
@@ -229,7 +224,7 @@ export class Blocks {
       const want = new Map<string, BlockRow>();
       for (const kind of kinds) for (const r of this.desired(id, t.repository_id, t.blocked_by, kind)) want.set(rowKey(r), r);
       const have = this.rows<BlockRow>(
-        `SELECT kind, ref, leg, until, binds, why FROM ticket_blocks WHERE ticket_id = ? AND kind IN (SELECT value FROM json_each(?))`, id, JSON.stringify(kinds));
+        `SELECT kind, ref, leg, until FROM ticket_blocks WHERE ticket_id = ? AND kind IN (SELECT value FROM json_each(?))`, id, JSON.stringify(kinds));
       const c = into.get(id) ?? { cleared: new Map(), added: new Map() };
       into.set(id, c);
       let changed = false;
@@ -240,13 +235,13 @@ export class Blocks {
           this.exec('DELETE FROM ticket_blocks WHERE ticket_id = ? AND kind = ? AND ref = ? AND leg = ?', id, h.kind, h.ref, h.leg);
           c.cleared.set(key, { kind: h.kind, ref: h.ref, ...(h.leg ? { leg: h.leg } : {}) });
           changed = true;
-        } else if (w.until !== h.until || (w.binds ?? null) !== h.binds || (w.why ?? null) !== h.why) {
-          this.exec('UPDATE ticket_blocks SET until = ?, binds = ?, why = ? WHERE ticket_id = ? AND kind = ? AND ref = ? AND leg = ?', w.until, w.binds ?? null, w.why ?? null, id, h.kind, h.ref, h.leg);
+        } else if (w.until !== h.until) {
+          this.exec('UPDATE ticket_blocks SET until = ? WHERE ticket_id = ? AND kind = ? AND ref = ? AND leg = ?', w.until, id, h.kind, h.ref, h.leg);
         }
         want.delete(key);
       }
       for (const [key, w] of want) {
-        this.exec('INSERT INTO ticket_blocks (repository_id, ticket_id, leg, kind, ref, since, until, binds, why) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)', t.repository_id, id, w.leg, w.kind, w.ref, now, w.until, w.binds ?? null, w.why ?? null);
+        this.exec('INSERT INTO ticket_blocks (repository_id, ticket_id, leg, kind, ref, since, until) VALUES (?, ?, ?, ?, ?, ?, ?)', t.repository_id, id, w.leg, w.kind, w.ref, now, w.until);
         c.added.set(key, w);
         changed = true;
       }
@@ -343,79 +338,15 @@ export class Blocks {
          WHERE r.ticket_id = ? AND COALESCE(f.runners, 0) = 0`, repo, id).map((r) => ({ kind, ref: r.name, leg: '', until: null }));
     }
     if (kind === 'resource') {
-      const explicit = this.resourceRequirements(id);
       // No row while the repository has no live runner or no usable instance: unanswerable, so
       // `no-instance` (R-BTN-76).
-      const legacy = this.rows<{ leg: string; resource: string }>(
+      return this.rows<{ leg: string; resource: string }>(
         `SELECT l.leg, l.resource FROM leg_needs l JOIN resource_fleet f ON f.repository_id = l.repository_id AND f.resource = l.resource
          WHERE l.ticket_id = ? AND f.live_runner = 1 AND f.usable_instances > 0 AND f.open_instances = 0`, id)
-        .filter((n) => !explicit.some((r) => r.leg === n.leg && r.resource === n.resource))
         .map((n) => ({ kind, ref: n.resource, leg: n.leg, until: this.expectedBack(n.resource) }));
-      return [...legacy, ...this.resourceBlocks(repo, explicit)];
     }
     return this.rows<{ decision_id: string; leg: string }>('SELECT decision_id, leg FROM ticket_decisions WHERE ticket_id = ?', id)
       .map((d) => ({ kind, ref: d.decision_id, leg: d.leg, until: null }));
-  }
-
-  private resourceRequirements(id: string): (ResourceRequirement & { leg: string })[] {
-    return this.rows<{ leg: string; req: string }>(`SELECT l.key AS leg, r.value AS req
-      FROM tickets t JOIN courses c ON c.repository_id = t.repository_id AND c.id = t.course_id,
-      json_each(c.course_json, '$.legs') l, json_each(l.value, '$.requires.resources') r
-      WHERE t.id = ?`, id).map(({ leg, req }) => ({ ...(JSON.parse(req) as ResourceRequirement), leg }));
-  }
-
-  private resourceBlocks(repo: string, requirements: (ResourceRequirement & { leg: string })[]): BlockRow[] {
-    if (!requirements.length) return [];
-    const policy = this.c.readingWriters?.(repo);
-    const blocks: BlockRow[] = [];
-    for (const r of requirements) {
-      const writers = (policy && Object.hasOwn(policy, r.resource) ? policy[r.resource] : policy?.['*'])?.writers ?? [];
-      const readings = this.rows<{ instance: string; writer: WriterClass | null; source: string; available: number; until: number | null }>(`
-        SELECT v.instance, d.writer, d.source, d.available, d.until
-        FROM instance_serves v JOIN resource_instances i ON i.name = v.instance
-        JOIN external_resources e ON e.name = v.resource
-        JOIN instance_readings d ON d.instance = v.instance
-        WHERE v.resource = ? AND (e.scope = 'service' OR ? IN (SELECT value FROM json_each(i.repositories)))
-          AND d.kind = 'state' AND d.lapses_at > ?
-        ORDER BY d.observed_at DESC, d.rowid DESC`, r.resource, repo, this.c.now());
-      const states = new Map<string, (typeof readings)[number]>();
-      for (const d of readings) {
-        if (states.has(d.instance) || !d.writer) continue;
-        const identities: WriterClass[] = d.writer === 'instrument' && d.source.startsWith('probe:')
-          ? [d.writer, `service:${d.source.slice(6)}`] : [d.writer];
-        if (identities.some((w) => writers.includes(w)) && (!r.writers || identities.some((w) => r.writers!.includes(w)))) states.set(d.instance, d);
-      }
-      if ([...states.values()].some((d) => d.available)) continue;
-      if (resourceMissing(r) === 'allow' && (!states.size || this.usableInstanceCount(repo, r.resource) > states.size)) continue;
-      const untils = [...states.values()].flatMap((d) => d.until == null ? [] : [d.until]);
-      blocks.push({ kind: 'resource', ref: r.resource, leg: r.leg, binds: resourceBinding(r),
-        why: states.size ? 'unavailable' : readings.length ? 'writer-not-allowed' : 'missing', until: untils.length ? Math.min(...untils) : null });
-    }
-    return blocks;
-  }
-
-  private usableInstanceCount(repo: string, resource: string): number {
-    return this.rows<{ n: number }>(`SELECT COUNT(*) AS n FROM instance_serves v
-      JOIN resource_instances i ON i.name = v.instance JOIN external_resources e ON e.name = v.resource
-      WHERE v.resource = ? AND (e.scope = 'service' OR ? IN (SELECT value FROM json_each(i.repositories)))`, resource, repo)[0].n;
-  }
-
-  /** Refresh explicit course requirements when their readings, registrations or policy change. */
-  resourceRequirementsChanged(filter: { repository?: string; resources?: string[]; includeExisting?: boolean }) {
-    const ids = this.rows<{ id: string }>(`SELECT t.id FROM courses c JOIN tickets t
-      ON t.repository_id = c.repository_id AND t.course_id = c.id
-      WHERE c.repository_id = COALESCE(?, c.repository_id) AND (EXISTS (
-        SELECT 1 FROM json_each(c.course_json, '$.legs') l, json_each(l.value, '$.requires.resources') r
-        WHERE (? IS NULL OR json_extract(r.value, '$.resource') IN (SELECT value FROM json_each(?))))
-        OR (? = 1 AND EXISTS (SELECT 1 FROM ticket_blocks b WHERE b.ticket_id = t.id AND b.kind = 'resource' AND b.binds IS NOT NULL)))`,
-    filter.repository ?? null, filter.resources ? 1 : null, JSON.stringify(filter.resources ?? []), Number(filter.includeExisting ?? false)).map((t) => t.id);
-    if (ids.length) this.write(ids, ['resource']);
-  }
-
-  readingsChanged(instances: string[]) {
-    if (!instances.length) return;
-    const names = this.rows<{ resource: string }>('SELECT DISTINCT resource FROM instance_serves WHERE instance IN (SELECT value FROM json_each(?))', JSON.stringify(instances));
-    if (names.length) this.resourceRequirementsChanged({ resources: names.map((r) => r.resource) });
   }
 
   /** When the first instance of `resource` is expected back: the earliest `until` of its
@@ -903,10 +834,7 @@ export class Blocks {
     this.invalidateRecommend(null);
     // The `until` refresh after the recount finds the rows the recount wrote, so it changes no
     // row today; the batch keeps the evaluation at one if it ever does (R-BTN-75; B-49).
-    this.batch(() => {
-      this.instancesRows(instances);
-      this.readingsChanged(instances);
-    });
+    this.batch(() => this.instancesRows(instances));
   }
 
   private instancesRows(instances: string[]) {
@@ -919,9 +847,9 @@ export class Blocks {
   // ── asking (R-BTN-75, §11) ────────────────────────────────────────────────────────────────
 
   private blockRows(ticketId: string): Block[] {
-    return this.rows<BlockRow & { since: number }>(
+    return this.rows<{ kind: BlockKind; leg: string; ref: string; since: number; until: number | null }>(
       BLOCK_SQL.rows, ticketId)
-      .map(blockView);
+      .map((b) => ({ kind: b.kind, ...(b.leg ? { leg: b.leg } : {}), ref: b.ref, since: b.since, ...(b.until != null ? { until: b.until } : {}) }));
   }
 
   /** One runner's `capability` and `resource` answer for a ticket, computed on the spot: rule 4's
@@ -940,9 +868,7 @@ export class Blocks {
       .filter((r) => !caps.has(r.name)).map((r) => ({ kind: 'capability' as const, ref: r.name, since: now }));
     const info = this.resources();
     const noInstance: RunnerAnswer['noInstance'] = [];
-    const explicit = this.resourceRequirements(ticketId);
     for (const n of this.rows<{ leg: string; resource: string }>('SELECT leg, resource FROM leg_needs WHERE ticket_id = ? ORDER BY leg, resource', ticketId)) {
-      if (explicit.some((r) => r.leg === n.leg && r.resource === n.resource)) continue;
       const r = info.get(n.resource);
       if (!r) continue; // an unregistered name blocks nothing (R-BTN-76)
       const mine = this.usable(repo, n.resource, r);
@@ -997,7 +923,7 @@ export class Blocks {
     let blocked = t.blocked_since != null;
     if (runnerId != null) {
       const mine = this.forRunner(runnerId, ticketId);
-      blocks = [...blocks.filter((b) => b.kind !== 'capability' && (b.kind !== 'resource' || b.binds != null)), ...mine.blocks];
+      blocks = [...blocks.filter((b) => b.kind !== 'capability' && b.kind !== 'resource'), ...mine.blocks];
       for (const n of mine.noInstance) other.push({ kind: 'no-instance', detail: n });
       blocked = !held.length && queued != null && blocks.some((b) => !b.leg || b.leg === queued);
     } else {
@@ -1080,9 +1006,9 @@ export class Blocks {
     // per decision block — each ticket's blocks in `BLOCK_SQL.rows`' order.
     const ids = JSON.stringify(tickets.map((t) => t.id));
     const blocks = new Map<string, Block[]>();
-    for (const b of this.rows<BlockRow & { ticket_id: string; since: number }>(
-      'SELECT ticket_id, kind, leg, ref, since, until, binds, why FROM ticket_blocks WHERE ticket_id IN (SELECT value FROM json_each(?)) ORDER BY ticket_id, kind, ref, leg', ids)) {
-      const row = blockView(b);
+    for (const b of this.rows<{ ticket_id: string; kind: BlockKind; leg: string; ref: string; since: number; until: number | null }>(
+      'SELECT ticket_id, kind, leg, ref, since, until FROM ticket_blocks WHERE ticket_id IN (SELECT value FROM json_each(?)) ORDER BY ticket_id, kind, ref, leg', ids)) {
+      const row = { kind: b.kind, ...(b.leg ? { leg: b.leg } : {}), ref: b.ref, since: b.since, ...(b.until != null ? { until: b.until } : {}) } as Block;
       const list = blocks.get(b.ticket_id);
       if (list) list.push(row);
       else blocks.set(b.ticket_id, [row]);
@@ -1105,9 +1031,4 @@ export class Blocks {
     }));
   }
 
-}
-
-function blockView(b: BlockRow & { since: number }): Block {
-  return { kind: b.kind, ...(b.leg ? { leg: b.leg } : {}), ref: b.ref, since: b.since,
-    ...(b.until != null ? { until: b.until } : {}), ...(b.binds ? { binds: b.binds } : {}), ...(b.why ? { why: b.why } : {}) };
 }

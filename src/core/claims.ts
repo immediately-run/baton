@@ -565,8 +565,8 @@ export class Claims {
       // R-BTN-78: Baton's own decisions refuse nothing advice would not — `baton:retries` sits on a
       // ticket its hold keeps (rule 3), `baton:stalled` on a queued leg posted waiting (rule 1) — so
       // they are left to those rules, whose refusals name the cause; they stay blocks for asking.
-      blocks: this.rows<{ kind: string; leg: string; binds: string | null }>(
-        `SELECT b.kind, b.leg, b.binds FROM ticket_blocks b WHERE b.ticket_id = ? AND (b.kind IN ('ticket', 'decision') OR (b.kind = 'resource' AND b.binds = 'gate'))
+      blocks: this.rows<{ kind: string; leg: string }>(
+        `SELECT b.kind, b.leg FROM ticket_blocks b WHERE b.ticket_id = ? AND b.kind IN ('ticket', 'decision')
            AND NOT (b.kind = 'decision' AND EXISTS (SELECT 1 FROM ticket_decisions d WHERE d.ticket_id = b.ticket_id AND d.decision_id = b.ref AND d.source = 'baton'))`, item.id),
       // R-BTN-178: rule 11's fact — the seats claims other than the asking one hold (a claim's
       // own seat never counts against it, so an advance excludes the advancing claim here).
@@ -674,7 +674,7 @@ export class Claims {
            AND NOT EXISTS (SELECT 1 FROM ticket_overrides o WHERE o.ticket_id = w.id
                            AND (o.hold = 1 OR o.retry_after > :now))                                          -- rules 3, 10
            AND NOT EXISTS (SELECT 1 FROM ticket_blocks k WHERE k.ticket_id = w.id
-                           AND (k.kind = 'ticket' OR ((k.kind = 'decision' OR (k.kind = 'resource' AND k.binds = 'gate')) AND k.leg IN ('', a.leg)))) -- rule 1's blocks
+                           AND (k.kind = 'ticket' OR (k.kind = 'decision' AND k.leg IN ('', a.leg))))         -- rule 1's blocks
            AND (EXISTS (SELECT 1 FROM runner_grants g WHERE g.credential_id = :credential
                         AND g.repository_id = w.repository_id AND g.revoked_at IS NULL)                       -- rule 7
                 OR NOT EXISTS (SELECT 1 FROM runner_grants g2 WHERE g2.credential_id = :credential))          -- an interim credential reaches every repository (B-104, A1)
@@ -776,8 +776,6 @@ export class Claims {
            AND q.last_end_observation < ? AND (q.retry_after IS NULL OR q.retry_after <= ?)
            AND COALESCE(q.tier_position, ?) <= ?
            AND q.leg IN (SELECT value FROM json_each(?))
-           AND NOT EXISTS (SELECT 1 FROM ticket_blocks b WHERE b.ticket_id = q.ticket_id
-             AND b.kind = 'resource' AND b.binds = 'gate' AND b.leg IN ('', q.leg))
            AND NOT EXISTS (SELECT 1 FROM ticket_bars b JOIN runner_tags t ON t.tag = b.tag
              WHERE b.ticket_id = q.ticket_id AND b.leg = q.leg AND t.runner_id = ?)
            AND NOT EXISTS (SELECT 1 FROM ticket_requires r WHERE r.ticket_id = q.ticket_id
@@ -1053,9 +1051,8 @@ export class Claims {
   /** R-BTN-76: the resources that make `leg` of the ticket advice against, for this runner: the
    *  fleet's stored `resource` rows on it, and those its own usable instances are all down for. */
   private resourceAdvice(runnerId: number, ticketId: string, leg: string): string[] {
-    if (!this.c.blocks) return [];
-    const fleet = this.rows<{ ref: string }>(`SELECT ref FROM ticket_blocks WHERE ticket_id = ? AND kind = 'resource' AND leg = ? AND binds IS NOT 'gate'`, ticketId, leg).map((r) => r.ref);
-    if (!this.rows('SELECT 1 FROM leg_needs WHERE ticket_id = ? AND leg = ? LIMIT 1', ticketId, leg).length) return fleet.sort();
+    if (!this.c.blocks || !this.rows('SELECT 1 FROM leg_needs WHERE ticket_id = ? AND leg = ? LIMIT 1', ticketId, leg).length) return [];
+    const fleet = this.rows<{ ref: string }>(`SELECT ref FROM ticket_blocks WHERE ticket_id = ? AND kind = 'resource' AND leg = ?`, ticketId, leg).map((r) => r.ref);
     const mine = this.c.blocks.forRunner(runnerId, ticketId).blocks.filter((b) => b.kind === 'resource' && b.leg === leg).map((b) => b.ref);
     return [...new Set([...fleet, ...mine])].sort();
   }

@@ -177,7 +177,7 @@ export class BatonCore {
         opened: (ticket, ids) => { this.notices.opened(ticket, ids); decisionRows(ticket, ids, 'decision-opened'); },
         closed: (ticket, ids) => { this.notices.closed(ticket, ids); decisionRows(ticket, ids, 'decision-answered'); },
       },
-      queued: (ticket) => this.queues.touch(ticket), readingWriters: (repo) => this.policies.current(repo)?.policy.readings });
+      queued: (ticket) => this.queues.touch(ticket) });
     // R-BTN-79: each leg's queue, counted where membership changes; a leg over its bound warns.
     this.queues = new Queues({ store, now: () => this.now(), held: (ticket) => this.blocks.isHeld(ticket),
       graph: (repo, course) => this.stations.graph(repo, course), notices: this.notices });
@@ -968,7 +968,6 @@ export class BatonCore {
       const runnerId = await this.runners.authRunner(cred, secret, client, legacyName);
       if (m === 'POST' && p === '/v1/runner/claim') {
         const body = await readJson(req);
-        this.resources.expireBeforeGate();
         // B-127 (round 2, the pairing): the claim and the standing signed-control record are
         // read in ONE transaction, and the record it paired with is stored on the claim — the
         // answer serves the claim's own record, and a lost-response replay of the same
@@ -1007,7 +1006,6 @@ export class BatonCore {
       const advance = /^\/v1\/runner\/claims\/(\d+)\/advance$/.exec(p);
       if (m === 'POST' && advance) {
         const body = await readJson(req);
-        this.resources.expireBeforeGate();
         return json(tx(() => this.claims.advance(runnerId, Number(advance[1]), body)));
       }
       if (m === 'POST' && p === '/v1/runner/adopt') {
@@ -1260,11 +1258,7 @@ export class BatonCore {
       if (!repoRow || repoRow.retired_at != null) throw new BatonError('not-found', `${repo} is not registered`);
       const b = await body();
       const breakGlass = await this.humanBreakGlass();
-      return json(this.store.transaction(() => {
-        const result = this.policies.put(repo, b, repoRow.forge, { credential: fp, label: actor }, new Set(breakGlass.keys()));
-        this.blocks.resourceRequirementsChanged({ repository: repo });
-        return result;
-      }));
+      return json(this.store.transaction(() => this.policies.put(repo, b, repoRow.forge, { credential: fp, label: actor }, new Set(breakGlass.keys()))));
     }
     if (m === 'POST' && rest === 'policy/floors') {
       const b = await body();
@@ -1787,7 +1781,7 @@ export class BatonCore {
       this.notePositionDisagreements(r, p, seen, n);
       // R-BTN-75–78: the snapshot's causes — `blocked_by`, `requires`, `needs`, `decisions` and
       // where each ticket is queued — rewrite the changed tickets' blocks in this transaction.
-      const dropped = this.applyBlocks(r, stations, upserted, legsBefore, changed.deleted > 0, p.registry != null);
+      const dropped = this.applyBlocks(r, stations, upserted, legsBefore, changed.deleted > 0);
       if (dropped.length) changed.dropped = dropped.slice(0, 100);
       // A non-fleet repository's fleet fields are ignored, and its answer says so.
       if (this.reference(r, p)) changed.fleet_ignored = true;
@@ -2175,7 +2169,7 @@ export class BatonCore {
    *  its row, its needs or decisions, or its queued leg — rewritten. Returns what it reports: a
    *  need failing the resource rule or naming an unregistered resource, a decision with a reserved
    *  id or a url outside the ticket's repositories (R-BTN-76, R-BTN-78). */
-  private applyBlocks(r: string, stations: Map<string, PostedStation>, upserted: string[], legsBefore: Map<string, string | null>, removed = false, registryPosted = false): string[] {
+  private applyBlocks(r: string, stations: Map<string, PostedStation>, upserted: string[], legsBefore: Map<string, string | null>, removed = false): string[] {
     const live = this.sql<{ local_id: string }>('SELECT local_id FROM tickets WHERE repository_id = ?', r).map((x) => x.local_id);
     const { changed, dropped } = this.blocks.posted(r, stations, live);
     // A closed `baton:stalled`, the recount and the post's own rows are evaluated once, after all
@@ -2190,7 +2184,6 @@ export class BatonCore {
       if (upserted.length || changed.length || removed) this.blocks.recount();
       const moved = [...this.queuedLegs(r)].filter(([id, leg]) => legsBefore.get(id) !== leg).map(([id]) => id);
       this.blocks.write([...upserted, ...changed, ...moved]);
-      if (registryPosted) this.blocks.resourceRequirementsChanged({ repository: r, includeExisting: true });
     });
     return dropped;
   }

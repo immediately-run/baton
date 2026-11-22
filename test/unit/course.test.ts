@@ -62,6 +62,12 @@ describe('validateCourse (R-BTN-69)', () => {
     expect(validateCourse(c)).toEqual([]);
   });
 
+  it('refuses a course resource gate instead of turning readings into a prerequisite (S-BTN-24)', () => {
+    const c = copy();
+    c.legs.review.requires = { resources: [{ resource: 'llm:x', binds: 'gate', missing: 'block' }] };
+    expect(rules(c)).toEqual(['unknown-key legs.review.requires.resources']);
+  });
+
   it('a leg\'s requires and a course\'s capability_roles are checked in shape (R-BTN-120, B-86)', () => {
     const c = copy();
     c.legs.review.requires = { tickets: [] };
@@ -74,7 +80,7 @@ describe('validateCourse (R-BTN-69)', () => {
       'shape capability_roles.empty',
       'shape capability_roles.notList',
       'shape capability_roles.tooMany',
-      'shape legs.deploy.requires.resources.0',
+      'unknown-key legs.deploy.requires.resources',
       'unknown-key legs.review.requires.tickets',
     ]);
     // A requires that is not an object, a capability list that is empty or holds a non-name.
