@@ -3,7 +3,8 @@
 // `.baton/`. It is the local host, not a second implementation: the course file is checked by
 // `validateCourse` and accepted or refused by the core exactly as a sync's post would be, every
 // live ticket's path is replayed under the proposed file, and a generic run — claim, every leg of
-// the shortest route, done, confirmed — goes through the core's own claim, advance and end.
+// the shortest route, done, confirmed — goes through the core's own claim, advance and end,
+// handing off to a fresh credential when independence requires it (S-BTN-63).
 // It needs no access to production. A violation names its rule; none is a pass.
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -12,6 +13,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { validateCourse } from '../core/course';
 import { graphOf, onGraph, resolvePath, signatureOf, type Graph, type Step } from '../core/graph';
+import { BatonError } from '../core/http';
 import { signatureConditions } from '../core/conditionTypes';
 import { checkPayload, DEFAULT_COURSE } from '../core/board';
 import { baseChain, checkSchemaSet, parseSchemaId, POST_STATES_MAX, refinementGaps, type Schema } from '../shared/schema.mjs';
@@ -351,21 +353,24 @@ export function shortestRoute(g: Graph): Step[] | null {
 }
 
 const REPO = 'kit'; // the repository under test, as the kit's own local host registers it
-const CRED = 'test-course';
 const SHA = (n: number) => n.toString(16).padStart(40, '0');
 
 /** The core's verdict, on a fresh in-memory local host: the base file then the proposed one posted
  *  as a sync would post them (accepted, not refused — R-BTN-69), and one generic run of a ticket
  *  along the proposed course's shortest route: claim, each leg, done, confirmed by the next post. */
 export async function coreViolations(k: KitInput): Promise<KitViolation[]> {
+  const proposed = graphOf(k.proposed);
+  const route = shortestRoute(proposed) ?? [];
+  // Each step can need at most one fresh synthetic credential.
+  const credentials = Array.from({ length: Math.max(1, route.length) }, (_, i) => `test-course-${i + 1}`);
   let clock = Date.parse('2026-01-01T00:00:00Z');
   const { store } = openStore(':memory:');
   const host = new LocalHost({
     store, alarm: 'manual',
     config: {
       BATON_ORIGIN: 'http://127.0.0.1', OIDC_ISSUER: '', OIDC_JWKS_URL: '', ACCESS_TEAM_DOMAIN: '', ACCESS_AUD: '', OWNER_EMAILS: '',
-      CREDENTIALS: JSON.stringify({ [CRED]: { hostname: 'test-course', allowed_capabilities: ['agent-venue'] } }),
-      TOKEN_HASHES: JSON.stringify({ [CRED]: 'unused' }),
+      CREDENTIALS: JSON.stringify(Object.fromEntries(credentials.map((cred) => [cred, { hostname: cred, allowed_capabilities: ['agent-venue'] }]))),
+      TOKEN_HASHES: JSON.stringify(Object.fromEntries(credentials.map((cred) => [cred, 'unused']))),
       BATON_REPOSITORIES: JSON.stringify([{ id: REPO, github: 'local/kit', default_branch: 'main', sync_workflow: '.github/workflows/baton-sync.yml' }]),
     },
   });
@@ -390,13 +395,12 @@ export async function coreViolations(k: KitInput): Promise<KitViolation[]> {
     const p = checkPayload({ registry, sha: SHA(++n), parent_sha: n === 1 ? null : SHA(n - 1), tickets, closed, stations, observation });
     return (await core.board(repo, p)) as Record<string, unknown>;
   };
-  const placedAt = (g: Graph, path: Step[]) => {
+  const placedAt = (g: Graph, path: Step[], queued?: string) => {
     const at = path.length ? path[path.length - 1].reached : g.start;
     const next = [...g.legs].filter(([, l]) => l.from.includes(at)).map(([leg]) => ({ leg, state: 'ready' }));
-    return { station: at, path, next_leg: next[0]?.leg ?? null, next_source: 'marker', next, bars: {} };
+    return { station: at, path, next_leg: queued ?? next[0]?.leg ?? null, next_source: 'marker', next, bars: {} };
   };
   try {
-    const proposed = graphOf(k.proposed);
     // The registry of each post: the other listed courses beside the one under test — their
     // files as the working tree holds them — and its own schemas spread in (R-BTN-108).
     const registry = (ownCourse: unknown, v: Versions, schemas: KitSchema[]): unknown[] => [
@@ -405,8 +409,8 @@ export async function coreViolations(k: KitInput): Promise<KitViolation[]> {
     ];
     // The base file first, with the live tickets where it placed them; then the proposed one.
     if (k.base) await post(registry(k.base, k.baseVersions ?? version, []), Object.fromEntries((k.live ?? []).filter((t) => onGraph(graphOf(k.base), t.path)).map((t) => [t.id, placedAt(graphOf(k.base), t.path)])));
-    const route = shortestRoute(proposed) ?? [];
-    await post(registry(k.proposed, version, k.schemas ?? []), { 'KIT-1': placedAt(proposed, []) });
+    const proposedRegistry = registry(k.proposed, version, k.schemas ?? []);
+    await post(proposedRegistry, { 'KIT-1': placedAt(proposed, []) });
     const refused = core.courses.refusals().filter((r) => r.course_id === k.course);
     for (const r of refused) for (const v of r.violations) out.push({ rule: 'accepted', message: `the core refuses the file: ${v.path}: ${v.message} (${v.rule})` });
     if (refused.length) return out;
@@ -416,27 +420,37 @@ export async function coreViolations(k: KitInput): Promise<KitViolation[]> {
     core.store.transaction(() => core.cutover.cutover('test-course', { repository: REPO, confirm: true }));
     const secret = 'test-course-secret';
     const hash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(secret)))].map((b) => b.toString(16).padStart(2, '0')).join('');
-    const hb = await core.runners.heartbeat(CRED, null, { hostname: 'test-course', session_name: 'test-course', harness: 'claude-code', kind: 'vm', capabilities: ['agent-venue'],
-      model_id: 'anthropic/kit',
-      tier_ceiling: 'critical', lease_timeout_s: 3600, secret_hash: hash, courses: [{ repository: REPO, course: k.course, version: version.version }] }) as { runner_id: number };
     const tx = <T>(f: () => T) => core.store.transaction(f);
-    const claim = tx(() => core.claims.claim(hb.runner_id, { request_id: 'test-course-1', ticket_id: `${REPO}:KIT-1` })) as { claim_id?: number; code?: string; message?: string };
-    if (!claim.claim_id) return [{ rule: 'generic-run', message: `the claim at ${proposed.start} was refused: ${claim.code ?? ''} ${claim.message ?? ''}`.trim() }];
+    const take = async (cred: string) => {
+      const { runner_id } = await core.runners.heartbeat(cred, null, { hostname: cred, session_name: 'test-course', harness: 'claude-code', kind: 'vm', capabilities: ['agent-venue'],
+        model_id: 'anthropic/kit', tier_ceiling: 'critical', lease_timeout_s: 3600, secret_hash: hash, courses: [{ repository: REPO, course: k.course, version: version.version }] }) as { runner_id: number };
+      const { claim_id } = tx(() => core.claims.claim(runner_id, { request_id: cred, ticket_id: `${REPO}:KIT-1` })) as { claim_id: number };
+      return { runner_id, claim_id };
+    };
+    let holder = await take(credentials[0]);
     // R-BTN-109: an arrival at a station with an `entry` must carry each output it names — the
     // generic run gives one by pointer (a git: uri the kit's own commit answers for), which the
     // arrival check reads by name and schema as a holder's would be.
     const outputsAt = (station: string) => (proposed.entry.get(station) ?? []).map((r) => ({ name: r.output, schema: r.schema, uri: `git:kit/kit@${SHA(999)}:kit/${r.output}` }));
     let at = proposed.start;
-    for (const step of route) {
+    for (const [i, step] of route.entries()) {
       clock += 60_000;
-      const r = tx(() => core.claims.advance(hb.runner_id, claim.claim_id!, { leg: step.leg, ...(at === proposed.start ? {} : { reached: at, outputs: outputsAt(at) }) })) as { ok?: boolean; code?: string; rule_code?: string };
-      if (!r.ok) return [{ rule: 'generic-run', message: `advance into ${step.leg} from ${at} was refused: ${r.code ?? ''} ${r.rule_code ?? ''}`.trim() }];
+      try {
+        tx(() => core.claims.advance(holder.runner_id, holder.claim_id, { leg: step.leg, ...(i === 0 ? {} : { reached: at, outputs: outputsAt(at) }) }));
+      } catch (e) {
+        if (i === 0 || !(e instanceof BatonError) || e.extra.rule_code !== 'chain') throw e;
+        tx(() => core.claims.end(holder.runner_id, holder.claim_id, { end_reason: `suspended:${at}`, reached: at, next: step.leg, outputs: outputsAt(at) }));
+        const posted = await post(proposedRegistry, { 'KIT-1': placedAt(proposed, route.slice(0, i), step.leg) });
+        if (!posted.confirmed) return [{ rule: 'generic-run', message: `the hand-off at ${at} was not confirmed by a snapshot queuing ${step.leg}` }];
+        holder = await take(credentials[i]);
+        tx(() => core.claims.advance(holder.runner_id, holder.claim_id, { leg: step.leg }));
+      }
       at = step.reached;
     }
     clock += 60_000;
-    const end = tx(() => core.claims.end(hb.runner_id, claim.claim_id!, { end_reason: 'done', reached: at, ended_at_sha: SHA(999), outputs: outputsAt(at) })) as { ok?: boolean; code?: string };
+    const end = tx(() => core.claims.end(holder.runner_id, holder.claim_id, { end_reason: 'done', reached: at, ended_at_sha: SHA(999), outputs: outputsAt(at) })) as { ok?: boolean; code?: string };
     if (!end.ok) return [{ rule: 'generic-run', message: `the done end at ${at} was refused: ${end.code ?? ''}` }];
-    const posted = await post(registry(k.proposed, version, k.schemas ?? []), { 'KIT-1': placedAt(proposed, route) });
+    const posted = await post(proposedRegistry, { 'KIT-1': placedAt(proposed, route) });
     if (!posted.confirmed) out.push({ rule: 'generic-run', message: `the done end at ${at} was not confirmed by a snapshot placing the ticket there` });
   } catch (e) {
     out.push({ rule: 'generic-run', message: `the local host failed: ${(e as Error).message}` });
