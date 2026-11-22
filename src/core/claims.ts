@@ -22,7 +22,7 @@ import type { Row, SqlValue, Store } from './ports';
 import { schedulingVersion } from './stateVersion';
 import { fleetSummary, instanceView, opaque, REPORT_AGE_FROM, REPORTS_FROM, requireFleetScope, type ViewScope } from './runnerViews';
 import type { Resources } from './resources';
-import { REPORT_HORIZON_MS } from './validate';
+import { clampLease, REPORT_HORIZON_MS } from './validate';
 import type { Blocks } from './blocks';
 import type { Conditions } from './conditions';
 import type { History } from './history';
@@ -2667,6 +2667,16 @@ export class Claims {
 
   // ── the alarm's share (§6.6, §7.1, §9) ──────────────────────────────────────────────────
 
+  /** B-249 (§9.5): give held claims a lease from recovery if Baton missed more than their
+   *  runner's lease. Leave actual runner liveness, legacy reaps and existing fences alone. */
+  recoverLeases(now: number, gap: number): void {
+    if (gap <= 1000 * clampLease(0)) return;
+    this.exec(`UPDATE claims SET lease_recovered_at = ? WHERE id IN (
+      SELECT c.id FROM claims c JOIN runners w ON w.id = c.runner_id
+      WHERE c.status = 'active' AND w.kind != 'legacy' AND w.last_seen_at < ? AND w.lease_timeout_ms < ?
+    )`, now, now, gap);
+  }
+
   // @model alarmReap sha256:7bba7960bdfb
   // @model fenceTimeout sha256:2eff55029e93
   alarm(): string[] {
@@ -2690,11 +2700,13 @@ export class Claims {
     // failed attempt §6.10 counts. A claim whose deadline moved on (a newer advance re-armed it)
     // is not due here; the alarm arms at the earliest standing instant.
     this.deadlineDue(now);
-    // Silent runners: reaped at exactly their clamped timeout (R-BTN-9), never by Date.now().
+    // Silent runners: reaped at their clamped timeout (R-BTN-9), measured from recovery
+    // or their last contact, whichever is later.
     const silent = this.rows<{ id: number; ticket_id: string; runner_id: number; kind: string }>(
       `SELECT c.id, c.ticket_id, c.runner_id, w.kind FROM claims c JOIN runners w ON w.id = c.runner_id
-       WHERE c.status = 'active' AND ((w.kind != 'legacy' AND w.last_seen_at + w.lease_timeout_ms <= ?)
-                                      OR (w.kind = 'legacy' AND c.reap_after IS NOT NULL AND c.reap_after <= ?))`, now, now);
+       WHERE c.status = 'active' AND ((w.kind != 'legacy' AND w.last_seen_at + w.lease_timeout_ms <= ?
+                                       AND (c.lease_recovered_at IS NULL OR c.lease_recovered_at + w.lease_timeout_ms <= ?))
+                                      OR (w.kind = 'legacy' AND c.reap_after IS NOT NULL AND c.reap_after <= ?))`, now, now, now);
     for (const c of silent) {
       each(c.id, c.ticket_id, () => {
         this.finish(c.id, c.ticket_id, 'reaped', c.kind === 'legacy' ? 'reaped:legacy' : 'reaped:silent', 'alarm', {});
@@ -2723,7 +2735,10 @@ export class Claims {
       this.exec('UPDATE claims SET fence_pending = 0 WHERE id = ?', c.id);
       // R-BTN-178: the fence deadline releasing, the reaped claim's seats go with it.
       this.exec('DELETE FROM claim_seats WHERE claim_id = ?', c.id);
-      this.exec('UPDATE runners SET reaped_at = ? WHERE id = ? AND reaped_at IS NULL', now, c.runner_id);
+      // A different claim can still have recovery grace. Clearing this fence must not
+      // prevent the runner from ending that claim during its grace.
+      this.exec(`UPDATE runners SET reaped_at = ? WHERE id = ? AND reaped_at IS NULL
+                 AND NOT EXISTS (SELECT 1 FROM claims WHERE runner_id = ? AND status = 'active')`, now, c.runner_id, c.runner_id);
       this.event('fence-cleared', 'alarm', { by: 'timeout' }, c.ticket_id, c.id);
       this.c.blocks?.held(c.ticket_id, false);
     }

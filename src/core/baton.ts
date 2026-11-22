@@ -406,6 +406,19 @@ export class BatonCore {
     if (current == null || at < current) await this.ports.scheduler.set(at);
   }
 
+  /** B-249 (S-BTN-2): a healthy request or reaper turn establishes that Baton could serve.
+   *  Stamp at most once a period. Record any recovery and its stamp in the same transaction. */
+  private recordServing(): void {
+    const now = this.now();
+    const last = this.sql<{ value: string }>(`SELECT value FROM baton_settings WHERE key = 'last_served_at'`)[0];
+    if (last && now - Number(last.value) < ALARM_EVERY_MS) return;
+    if (last) this.claims.recoverLeases(now, now - Number(last.value));
+    this.store.liveness(() => {
+      this.store.exec(`INSERT INTO baton_settings (key, value) VALUES ('last_served_at', ?)
+                       ON CONFLICT (key) DO UPDATE SET value = excluded.value`, String(now));
+    });
+  }
+
   /** §3: the one alarm, every 60 seconds — earlier when a webhook's trailing dispatch or the
    *  webhook path's own backstop is due. */
   // @model alarmLive sha256:6f9056ae3a4b
@@ -434,7 +447,10 @@ export class BatonCore {
     // everything else has run, so the tick's own work is never lost to it.
     let unreaped: string[] = [];
     try {
-      unreaped = this.store.transaction(() => this.claims.alarm());
+      unreaped = this.store.transaction(() => {
+        this.recordServing();
+        return this.claims.alarm();
+      });
     } catch (e) {
       this.pendingDispatch.clear();
       throw new Error(`the alarm's reaper failed: ${e instanceof Error ? e.message : String(e)}`, { cause: e });
@@ -551,7 +567,10 @@ export class BatonCore {
       // An error answer means its transaction rolled back: nothing changed to mirror.
       if (res.ok) {
         // R-BTN-77: the unblocked dispatches this request made due, coalesced per window.
-        this.store.transaction(() => this.takeUnblocked());
+        this.store.transaction(() => {
+          this.recordServing();
+          this.takeUnblocked();
+        });
         this.flushDispatch();
         await this.armBy(this.blocks.nextDue());
         await this.armBy(this.resources.nextLapse());

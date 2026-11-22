@@ -64,6 +64,7 @@ import runnersViewReads from './0063_runners_view_reads.sql';
 import childrenOwnerState from './0064_children_owner_state.sql';
 import readEfficiency from './0065_read_efficiency.sql';
 import runnerViews from './0066_runner_views.sql';
+import leaseRecovery from './0072_lease_recovery.sql';
 import retirePolicyPins from './0070_retire_policy_pins.sql';
 import accessSignIn from './0071_access_sign_in.sql';
 import { isUniqueViolation, logEvent, mintRunId, type Random } from '../core/db';
@@ -212,4 +213,5 @@ export const MIGRATIONS: Migration[] = [
   { id: 66, sql: runnerViews },
   { id: 70, sql: retirePolicyPins },
   { id: 71, sql: accessSignIn },
+  { id: 72, sql: leaseRecovery },
 ];

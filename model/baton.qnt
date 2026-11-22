@@ -770,6 +770,7 @@ module baton {
   }
   // R-BTN-4, §6.6: the alarm reaps a claim whose lease ran out — its runner dead or silent; a
   // failed attempt on the claim's leg (§7.4, R-BTN-122), and an end (R-BTN-75).
+  // The model assumes Baton is serving; host downtime and recovery grace (§9.5) are tested by S-BTN-2.
   // @impl src/core/claims.ts#alarm
   // @impl pending — the attempt counted per leg (R-BTN-122, B-11)
   action alarmReap(i: int): bool = all {
