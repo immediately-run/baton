@@ -1158,11 +1158,11 @@ export class BatonCore {
         return answer;
       });
     } catch (e) {
-      if (e instanceof BatonError && (e.code === 'no-eligible-ticket' || e.code === 'not-eligible')) {
+      if (e instanceof BatonError && (e.code === 'no-eligible-ticket' || e.code === 'not-eligible' || e.code === 'stale-skills')) {
         const seconds = Number(this.ports.config.BATON_IDLE_NOTIFY_AFTER_S);
         const threshold = (Number.isSafeInteger(seconds) && seconds > 0 ? seconds : 1800) * 1000;
         this.store.transaction(() => noteIdle(this.store, runnerId, this.now(), threshold, e.extra.detail as IdleDetail | undefined,
-          (repo, entry) => this.blocks.queueTrigger(repo, entry)));
+          (repo) => this.blocks.queueIdleTrigger(repo)));
       }
       throw e;
     }

@@ -1044,7 +1044,7 @@ export class Claims {
       return !!item?.station?.next_leg && (!w.courses.length || w.courses.some((k) => k.repository === item.repository && k.course === item.course))
         && (this.gate(w, item, item.station.next_leg, 'claim') as { code?: string }).code === GATE_CODES[9];
     })) {
-      throw new BatonError('stale-skills', 'this runner does not declare the ready tickets’ courses at their min_runner_version — it declares an older version or none (R-BTN-22, R-BTN-65)', { rule: 9 });
+      throw new BatonError('stale-skills', 'this runner does not declare the ready tickets’ courses at their min_runner_version — it declares an older version or none (R-BTN-22, R-BTN-65)', { rule: 9, detail: this.idleDetail(w) });
     }
     // R-BTN-4 (B-188): when every repository the runner serves is at its bound, say so — the
     // runner has no room, which is not the same as nothing to do.

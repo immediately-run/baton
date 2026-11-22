@@ -1537,7 +1537,7 @@ export class Runner {
         return null;
       }
       // R-BTN-4 (B-188): `max-claims` among them — the runner is at its bound for now.
-      if (e instanceof BatonRefusal && (e.code === 'not-eligible' || e.code === 'no-eligible-ticket')) {
+      if (e instanceof BatonRefusal && (e.code === 'not-eligible' || e.code === 'no-eligible-ticket' || (e.code === 'stale-skills' && e.detail != null))) {
         if (!this.slots.size) {
           const line = maskLegOutput(`baton: idle — ${e.code}: ${idleReason(e)}`, this.legSecrets);
           if (line !== this.idle?.line) {

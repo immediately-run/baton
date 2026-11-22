@@ -18,18 +18,16 @@ export interface IdleDetail {
 const heldGates = new Set(['attempts-exhausted', 'held', 'unconfirmed-end', 'blocked', 'backing-off', 'awaiting-sync', 'resource']);
 
 export function noteIdle(store: Store, runner: number, now: number, threshold: number, detail: IdleDetail | undefined,
-  notify: (repository: string, entry: unknown) => boolean): void {
-  const episode = store.exec<{ started_at: number; notified: number }>(`SELECT started_at, notified FROM runner_idle WHERE runner_id = ?`, runner).toArray()[0];
-  if (episode?.notified) return;
+  notify: (repository: string) => boolean): void {
+  const episode = store.exec<{ started_at: number; notified_repositories: string }>(`SELECT started_at, notified_repositories FROM runner_idle WHERE runner_id = ?`, runner).toArray()[0];
   if (store.exec(`SELECT 1 FROM claims WHERE runner_id = ? AND status = 'active' LIMIT 1`, runner).toArray().length) return;
   const since = episode?.started_at ?? now;
   if (!episode) store.exec(`INSERT INTO runner_idle (runner_id, started_at) VALUES (?, ?)`, runner, since);
   if (now - since < threshold || !detail) return;
-  let notified = false;
+  const notified = new Set<string>(episode ? JSON.parse(episode.notified_repositories) as string[] : []);
+  const before = notified.size;
   for (const { repository, gates } of detail.repositories) {
-    if (gates.some(({ gate }) => heldGates.has(gate))) {
-      notified = notify(repository, { kind: 'runner-idle', runner_id: runner, idle_since: since, gates }) || notified;
-    }
+    if (!notified.has(repository) && gates.some(({ gate }) => heldGates.has(gate)) && notify(repository)) notified.add(repository);
   }
-  if (notified) store.exec(`UPDATE runner_idle SET notified = 1 WHERE runner_id = ?`, runner);
+  if (notified.size !== before) store.exec(`UPDATE runner_idle SET notified_repositories = ? WHERE runner_id = ?`, JSON.stringify([...notified]), runner);
 }

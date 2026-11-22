@@ -14,6 +14,9 @@ import { join, resolve } from 'node:path';
 import { build } from 'esbuild';
 import { BatonApi, BatonRefusal } from '../../src/runner/api';
 import { Runner } from '../../src/runner/runner';
+import { StateFile } from '../../src/runner/state';
+import { setClock, tick } from '../helpers';
+import { idleFixture } from '../lib/idleFixture';
 import { remoteSlug } from '../../src/defaults/cli';
 
 const ROOT = resolve(import.meta.dirname, '..', '..');
@@ -124,36 +127,45 @@ describe.skipIf(!nodeOnly)('S-BTN-159 a quiet start', () => {
     r.stop();
   });
 
-  it('logs both idle causes once and ends the stretch when the retry is claimed', async () => {
+  it('logs both idle causes once, notifies the owner, and claims the held ticket after the owner retries it', async () => {
+    const { start, w, sent, retry } = await idleFixture();
     const lines: string[] = [];
-    let now = 0;
-    let available = false;
+    let now = start;
     const api = new BatonApi({ url: 'https://baton.invalid', auth: () => ({}), transport: async (req) => {
-      if (new URL(req.url).pathname.endsWith('/heartbeat')) {
-        return Response.json({ runner_id: 7, incarnation: 1, messages: [], sent: (await req.json() as { capabilities: string[] }).capabilities,
-          grant: { capabilities: ['create-pr'] } });
-      }
-      if (available) return Response.json({ claim_id: 42, ticket_id: 'docs:RETRY' });
-      return Response.json({ code: 'no-eligible-ticket', message: 'no ready ticket fits this runner', detail: { repositories: [{ repository: 'docs', gates: [
-        { gate: 'grant-max-tier', count: 1, limit: 'judgement', tickets: ['docs:HIGH'] },
-        { gate: 'attempts-exhausted', count: 1, tickets: ['docs:RETRY'] },
-      ] }] } }, { status: 404 });
+      const res = await w.call(new URL(req.url).pathname, req.body ? await req.json() : undefined, req.method);
+      return Response.json(res.json, { status: res.status });
     } });
-    const runner = start(api, (line) => lines.push(line), { runner_id: 7, claim: null }, () => now);
-    const run = vi.spyOn(runner as unknown as { runInSlot: () => Promise<unknown> }, 'runInSlot').mockResolvedValue(null);
+    const home = mkdtempSync(join(tmpdir(), 'baton-idle-'));
+    const stateFile = join(home, 'runner.json');
+    new StateFile(stateFile).set({ runner_id: w.id, incarnation: 1, secret: w.secret });
+    const runner = new Runner({ api, home, repository: 'docs', hostname: w.hostname, harness: 'opencode', session: 'idle',
+      capabilities: ['agent-venue'], courses: [{ course: 'roadmap-pr', version: 3 }], stateFile, now: () => now, log: (line) => lines.push(line) });
+    // Only the leg execution is stubbed; the claim and retry are real core operations.
+    const run = vi.spyOn(runner as unknown as { runInSlot: (claim: Record<string, unknown>) => Promise<null> }, 'runInSlot').mockResolvedValue(null);
     try {
       expect(await runner.runOnce()).toBeNull();
-      await runner.tick();
-      expect(await runner.runOnce()).toBeNull();
-      expect(lines.filter((l) => l.startsWith('baton: idle'))).toEqual([
-        "baton: idle — no-eligible-ticket: no ready ticket fits this worker: 1 above the grant's max_tier judgement (docs:HIGH), 1 held attempts-exhausted (baton:retries open: docs:RETRY)",
-      ]);
-      now = 30 * 60_000;
-      available = true;
+      for (const minutes of [10, 20, 29, 30, 31]) {
+        now = start + minutes * 60_000;
+        await setClock(now);
+        await runner.tick();
+        expect(await runner.runOnce()).toBeNull();
+        await tick();
+        expect(sent).toHaveLength(minutes < 30 ? 0 : 1);
+      }
+      expect(sent).toEqual([{ kind: 'unblocked', repository: 'docs', tickets: [] }]);
+      expect((await retry()).status).toBe(200);
       await runner.runOnce();
       expect(run).toHaveBeenCalledOnce();
-      expect(lines).toContain('baton: idle for 30m, ended by claim 42');
-    } finally { runner.stop(); }
+      const claim = run.mock.calls[0][0];
+      expect(claim.ticket_id).toBe('docs:RETRY');
+      expect(lines.filter((l) => l.startsWith('baton: idle'))).toEqual([
+        "baton: idle — no-eligible-ticket: no ready ticket fits this worker: 1 held attempts-exhausted (baton:retries open: docs:RETRY), 1 above the grant's max_tier judgement (docs:HIGH)",
+        `baton: idle for 31m, ended by claim ${claim.claim_id}`,
+      ]);
+    } finally {
+      runner.stop();
+      rmSync(home, { recursive: true, force: true });
+    }
   });
 
   it('an origin-less checkout gives null with its stderr empty, in process and through the bundle', () => {
