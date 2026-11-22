@@ -51,7 +51,7 @@
     "test/integration/S-BTN-229.runner-half.test.ts",
     "test/unit/test-course.test.ts",
     "test/unit/stats-size.test.ts",
-    "test/model/replay.test.ts",
+    "test/model/interleavings.test.ts",
     "test/integration/S-BTN-43.defaults.test.ts",
     "test/unit/defaults-cli.test.ts",
     "test/unit/standard-courses.test.ts",

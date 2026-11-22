@@ -30,7 +30,7 @@ depends_on:
 
 [B-271](B-271.mdx) leaves a design-time simulation and retires the liveness run, proof,
 trace check and report. Keep the existing prerequisite, retry, block and fleet regressions.
-The remaining model work is the core's open-world claims, `no_chain_from`, spawned rows,
+The remaining model work is `no_chain_from`, spawned rows,
 `not_before`, the holder's reported `next`, and Baton-raised decisions and their effects on
 blocks. When a change is modelled, add a deterministic regression or witness for it. Notices,
 queues, sync dispatch and leg deadlines are outside this design-time check.
