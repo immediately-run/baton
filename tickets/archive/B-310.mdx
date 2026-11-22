@@ -2,8 +2,8 @@
 title: "B-310 — Sign-in through Cloudflare Access: an email ACCESS_IDENTITIES binds to an administrator key opens that key's session, no terminal (R-BTN-155, S-BTN-308)"
 id: B-310
 project: baton
-status: available
-updated: 2026-11-21
+status: done
+updated: 2026-11-22
 repos:
   - baton
 tags:
@@ -28,9 +28,9 @@ Access*, tested by S-BTN-308. The owner accepted the Access configuration as a s
 trust (R-BTN-57) and an explicit click as the only guard against an agent driving a signed-in
 browser; `docs/security-model.mdx` (reach 3) records the risk.
 
-**Spec:** [BATON_SPEC §11.2](../spec/BATON_SPEC/11-people.md#sec-11-2) ([R-BTN-155](../spec/BATON_SPEC/11-people.md#sec-11-2), [R-BTN-57](../spec/BATON_SPEC/11-people.md#sec-11-2)),
-[§12.4](../spec/BATON_SPEC/12-security.md#sec-12-4) ([R-BTN-16](../spec/BATON_SPEC/12-security.md#sec-12-4)), [§2.1](../spec/BATON_SPEC/02-deployments.md#sec-2-1) (`AccessIdentities`), [§13](../spec/BATON_SPEC/13-data-model.md#sec-13)
-(`dashboard_sessions.access_email_hash`), [§14](../spec/BATON_SPEC/14-api.md#sec-14) (`POST /v1/login`); scenario [S-BTN-308](../spec/BATON_SPEC/15-verification.md#scenarios).
+**Spec:** [BATON_SPEC §11.2](../../spec/BATON_SPEC/11-people.md#sec-11-2) ([R-BTN-155](../../spec/BATON_SPEC/11-people.md#sec-11-2), [R-BTN-57](../../spec/BATON_SPEC/11-people.md#sec-11-2)),
+[§12.4](../../spec/BATON_SPEC/12-security.md#sec-12-4) ([R-BTN-16](../../spec/BATON_SPEC/12-security.md#sec-12-4)), [§2.1](../../spec/BATON_SPEC/02-deployments.md#sec-2-1) (`AccessIdentities`), [§13](../../spec/BATON_SPEC/13-data-model.md#sec-13)
+(`dashboard_sessions.access_email_hash`), [§14](../../spec/BATON_SPEC/14-api.md#sec-14) (`POST /v1/login`); scenario [S-BTN-308](../../spec/BATON_SPEC/15-verification.md#scenarios).
 
 ## Plan
 
