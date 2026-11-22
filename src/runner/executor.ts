@@ -177,17 +177,21 @@ export function builtinExecutor(): Executor {
       const timer = o.timeout_s ? setTimeout(kill, o.timeout_s * 1000) : null;
       timer?.unref?.();
       const result = new Promise<ExecResult>((resolveResult) => {
+        let spawnError: Error | undefined;
         child.on('error', (e) => {
           if (timer) clearTimeout(timer);
-          resolveResult({ status: null, stdout, stderr: stderr + String(e) });
+          spawnError = e;
         });
-        child.on('exit', (code) => {
+        child.on('exit', () => {
           if (timer) clearTimeout(timer);
           // A call's end is its whole group's end (R-BTN-72, R-BTN-145): what the call left
           // behind goes with it.
           kill();
+        });
+        // S-BTN-48: the wrapper's final result can still be in the pipe at process exit.
+        child.on('close', (code) => {
           if (partial && o.onStderr) o.onStderr(partial);
-          resolveResult({ status: code, stdout, stderr });
+          resolveResult({ status: spawnError ? null : code, stdout, stderr: stderr + (spawnError ? String(spawnError) : '') });
         });
       });
       const running: Running = {
