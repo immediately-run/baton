@@ -55,6 +55,21 @@ describe('gatesFor: every gate of the table', () => {
     expect(gatesFor(w, t, l, 'advance', f)).toEqual(atAdvance ? { ok: false, ...atAdvance } : { ok: true });
   });
 
+  it('S-BTN-182 rule trusted checks both kinds and refuses a missing domain or checker', () => {
+    for (const phase of ['claim', 'advance'] as const) {
+      const verdict = (trusted: boolean, mark: { role?: string; domain?: string | null; checker?: boolean }) =>
+        gatesFor(runner({ grants: { docs: { capabilities: [], ...mark } } }), ticket({ requires: [] }), leg({ trusted }), phase, facts());
+      const trusted = { role: 'trusted-runner', domain: 'lab' };
+      const denied = { ok: false, rule: 'trusted', code: 'trusted' };
+      expect(verdict(false, {})).toEqual({ ok: true });
+      expect(verdict(true, trusted)).toEqual({ ok: true });
+      expect(verdict(true, {})).toEqual(denied);
+      expect(verdict(false, trusted)).toEqual(denied);
+      expect(verdict(true, { ...trusted, domain: null })).toEqual(denied);
+      expect(verdict(true, { ...trusted, checker: true })).toEqual(denied);
+    }
+  });
+
   it('rule 11 (R-BTN-178): a seat free, a capability with no capacity, and the asking claim\'s own seat all pass', () => {
     const holds = runner({ declared: ['agent-venue', 'capability:rdp-lab'] });
     // One seat of two held: free.

@@ -79,6 +79,7 @@
 //   baton owner -i KEY resolve REPO TICKET baton:retries|baton:stalled retry|park   (R-BTN-78)
 //   baton owner -i KEY resolve REPO TICKET DECISION OPTION   — a sync-posted decision's answer (B-110: review-rounds-3 round)
 //   baton admin -i KEY repos                                         (B-90: the registry — one signed request, one JSON answer)
+//   baton owner -i KEY grant role REPO FINGERPRINT --role runner|trusted-runner [--domain LABEL] [--checker]
 //   baton owner -i KEY grants REPO                    (B-90: the repository's owners, grants and settings, and the bars in force)
 //   baton board -i KEY REPO                    (B-90: the dashboard's view of one repository — its courses, head, mode, ready tickets)
 //   baton run [--home <checkout|home name>] [--repository ID] [--course ID] [--capabilities a,b] [--beat-every MS]
@@ -512,6 +513,13 @@ export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? 
       return { method: 'GET', path: `/v1/owner/${encodeURIComponent(repoOrHome(positional[0], home))}/grants` };
     }
     if (cmd === 'grant') {
+      if (rest[0] === 'role') {
+        const { flags, positional } = parseArgs(rest.slice(1), ['checker'], ['role', 'domain'], 2);
+        const repo = repoOrHome(positional[0], home);
+        const fp = need(positional[1], 'the key fingerprint');
+        return { method: 'PUT', path: `/v1/owner/${encodeURIComponent(repo)}/grants/${encodeURIComponent(fp)}/role`,
+          body: { role: need(flags.role, '--role runner|trusted-runner'), ...(flags.domain === undefined ? {} : { domain: flags.domain }), checker: !!flags.checker } };
+      }
       const { flags, positional } = parseArgs(rest, [], GRANT_FLAGS, 1);
       return { method: 'POST', path: `/v1/owner/${repoOrHome(positional[0], home)}/grants`, body: grantBody(flags, readKey, {}) };
     }

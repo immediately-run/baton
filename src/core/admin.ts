@@ -746,11 +746,59 @@ export class Admin {
       const caps = expanded;
       this.exec(`INSERT INTO runner_grants (credential_id, repository_id, capabilities, max_tier, max_claims, granted_by, granted_at) VALUES (?, ?, ?, ?, ?, ?, ?)
                  ON CONFLICT (credential_id, repository_id) DO UPDATE SET capabilities = excluded.capabilities, max_tier = excluded.max_tier,
+                   role = CASE WHEN runner_grants.revoked_at IS NULL THEN runner_grants.role END,
+                   checker = CASE WHEN runner_grants.revoked_at IS NULL THEN runner_grants.checker ELSE 0 END,
+                   trust_domain = CASE WHEN runner_grants.revoked_at IS NULL THEN runner_grants.trust_domain END,
+                   trust_set_by = CASE WHEN runner_grants.revoked_at IS NULL THEN runner_grants.trust_set_by END,
                    max_claims = excluded.max_claims, granted_by = excluded.granted_by, granted_at = excluded.granted_at, revoked_at = NULL`,
         key.fingerprint, repository, JSON.stringify(caps), maxTier, maxClaims, actor, this.c.now());
       this.event(actor, { act: 'grant', key: key.fingerprint, repository, capabilities: caps, max_tier: maxTier, max_claims: maxClaims }, repository);
       this.c.fleetChanged?.();
       return { ok: true, fingerprint: key.fingerprint };
+    });
+  }
+
+  /** R-BTN-180 / S-BTN-180: replace the role, domain and checker mark on one live grant. */
+  setGrantRole(actor: string, repository: string, raw: string, body: unknown) {
+    const fingerprint = fingerprintOf(raw, 'fingerprint');
+    const policies = this.c.policies;
+    const cur = policies?.current(repository);
+    const setter = actor.slice('owner:'.length);
+    if (!actor.startsWith('owner:') || !policies || !cur ||
+        !policies.entryMatches(cur.policy.approvers.trust, setter, policies.facts(repository), cur.policy.human_key)) {
+      throw new BatonError('forbidden', 'an approver on approvers.trust (approvers.roles in R-BTN-188) is required');
+    }
+    const b = isObj(body) ? body as Record<string, unknown> : bad('body', 'must be a JSON object');
+    only(b, ['role', 'domain', 'checker'], 'body');
+    const role = b.role === 'runner' || b.role === 'trusted-runner' ? b.role : bad('role', 'must be runner or trusted-runner');
+    const domain = b.domain == null ? null : typeof b.domain === 'string' && /^[A-Za-z0-9_.:-]{1,128}$/.test(b.domain)
+      ? b.domain : bad('domain', 'must be a domain label');
+    const checker = b.checker === undefined || typeof b.checker === 'boolean' ? b.checker === true : bad('checker', 'must be boolean');
+    if (role === 'trusted-runner' && domain === null) bad('domain', 'a trusted runner needs a domain');
+    if (checker && role !== 'trusted-runner') bad('checker', 'a checker must be a trusted runner');
+    return this.c.store.transaction(() => {
+      const grant = this.rows<{ kind: string; public_key: string | null; checker: number; trust_domain: string | null }>(
+        `SELECT c.kind, c.public_key, g.checker, g.trust_domain FROM runner_grants g JOIN credentials c ON c.id = g.credential_id
+         WHERE g.repository_id = ? AND g.credential_id = ? AND g.revoked_at IS NULL AND c.revoked_at IS NULL`, repository, fingerprint)[0];
+      if (!grant) throw new BatonError('not-found', `no grant of ${fingerprint} on ${repository}`);
+      if (role === 'trusted-runner' && (grant.kind !== 'runner' || !grant.public_key || !KEY_FINGERPRINT.test(fingerprint))) bad('role', 'a trusted runner must sign with an SSH key');
+      if (checker && this.rows(`SELECT 1 FROM claims c JOIN runners r ON r.id = c.runner_id
+        WHERE r.credential_id = ? AND c.ticket_id LIKE ? || ':%' AND (c.offered_trusted = 1
+          OR EXISTS (SELECT 1 FROM claim_legs l WHERE l.claim_id = c.id AND l.trusted = 1))`, fingerprint, repository).length) {
+        bad('checker', 'this key has already claimed a trusted leg on the repository');
+      }
+      if (checker && this.rows(`SELECT 1 FROM runner_grants WHERE repository_id = ? AND credential_id != ?
+        AND revoked_at IS NULL AND checker = 1`, repository, fingerprint).length) bad('checker', 'this repository already has a checker');
+      if (domain !== null && this.rows(`SELECT 1 FROM runner_grants WHERE repository_id = ? AND credential_id != ?
+        AND revoked_at IS NULL AND trust_domain = ? AND (checker = 1 OR ? = 1)`, repository, fingerprint, domain, Number(checker)).length) {
+        bad('domain', 'a checker cannot share its domain with another grant');
+      }
+      this.exec(`UPDATE runner_grants SET role = ?, trust_domain = ?, checker = ?, trust_set_by = ?
+        WHERE repository_id = ? AND credential_id = ?`, role, domain, Number(checker), actor, repository, fingerprint);
+      if (grant.checker && (!checker || domain !== grant.trust_domain)) policies.voidProtection(repository, fingerprint);
+      this.event(actor, { act: 'grant-role', key: fingerprint, repository, role, domain, checker }, repository);
+      this.c.fleetChanged?.();
+      return { ok: true };
     });
   }
 
@@ -762,6 +810,7 @@ export class Admin {
     return this.c.store.transaction(() => {
       this.exec('UPDATE runner_grants SET revoked_at = ? WHERE credential_id = ? AND repository_id = ? AND revoked_at IS NULL', this.c.now(), fingerprint, repository);
       if (!this.changed()) throw new BatonError('not-found', `no grant of ${fingerprint} on ${repository}`);
+      this.c.policies?.voidProtection(repository, fingerprint);
       this.event(actor, { act: 'grant-revoked', key: fingerprint, repository }, repository);
       this.c.fleetChanged?.();
       return { ok: true };

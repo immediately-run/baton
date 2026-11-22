@@ -32,6 +32,8 @@ export interface Leg {
   /** R-BTN-116: a person's leg — no runner may take it (rule `person`); it arrives when a person
    *  answers it with a `std:decision@1`. */
   person: boolean;
+  /** R-BTN-182: reserved to trusted runners. */
+  trusted: boolean;
   /** R-BTN-116: who answers a person's leg; null on any other. */
   asks: string | null;
   /** R-BTN-116: a person leg's expiry — unanswered this long, it reaches `reached`; null with none. */
@@ -105,7 +107,7 @@ export function graphOf(json: unknown): Graph {
     capability_roles?: Record<string, string[]>;
     stations: Record<string, { renamed_from?: string | string[]; entry?: { output: string; schema: string }[] }>;
     legs: Record<string, { from: string[]; to: string | string[]; max_runs?: number; max_queue?: number; renamed_from?: string | string[]; no_chain_from?: string[]; isolation?: 'session'; requires?: { capabilities?: string[] };
-      kind?: 'person'; asks?: string; expires?: { after_s: number; reached: string }; replay_safe?: boolean; max_duration?: number; conditions?: string[]; autonomous?: boolean }>;
+      kind?: 'person'; trusted?: boolean; asks?: string; expires?: { after_s: number; reached: string }; replay_safe?: boolean; max_duration?: number; conditions?: string[]; autonomous?: boolean }>;
   };
   const legs = new Map<string, Leg>();
   const legRenames = new Map<string, string>();
@@ -113,7 +115,7 @@ export function graphOf(json: unknown): Graph {
   for (const [id, l] of Object.entries(f.legs)) {
     legs.set(id, { from: [...new Set(l.from)], to: [...new Set(names(l.to))], maxRuns: l.max_runs ?? null, maxQueue: l.max_queue ?? null,
       noChainFrom: [...new Set(l.no_chain_from ?? [])], isolation: l.isolation ?? null, requires: legCapabilities(l.requires, f.capability_roles),
-      person: l.kind === 'person', asks: l.kind === 'person' ? l.asks ?? null : null, expires: l.kind === 'person' && l.expires ? { afterS: l.expires.after_s, reached: l.expires.reached } : null,
+      trusted: l.trusted === true, person: l.kind === 'person', asks: l.kind === 'person' ? l.asks ?? null : null, expires: l.kind === 'person' && l.expires ? { afterS: l.expires.after_s, reached: l.expires.reached } : null,
       replaySafe: l.replay_safe !== false, maxDuration: l.max_duration ?? null,
       conditionTypes: Array.isArray(l.conditions) ? [...new Set(l.conditions)] : null, autonomous: l.autonomous === true });
     for (const old of names(l.renamed_from)) legRenames.set(old, id);

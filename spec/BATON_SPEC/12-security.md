@@ -456,9 +456,8 @@ trusted runners or of the protection checker; a compromised forge; and a comprom
     an API-key credential (`invalid-params`; a trusted runner signs, R-BTN-159); a grant nobody
     marked is a `runner` with no domain. Baton compares domains as labels and verifies nothing
     about them. The route that sets them (`PUT /v1/owner/{repository}/grants/{fingerprint}/role`)
-    is not built ([proposed](../proposals/data-model-and-api.md)): every grant is a `runner`
-    with no domain.
-  - **How runs compare** (proposed with the role route). A run is attributed the domain its
+    replaces the role, domain and mark together; `baton owner grant role` calls it.
+  - **How runs compare.** A run is attributed the domain its
     grant had when the run started (`claim_legs.domain`). Two runs count as **different domains** when their domains differ and
     their runner keys differ; every other pair counts as the same, so no grant becomes
     independent of itself by being re-domained. A grant with a null domain counts toward no
@@ -470,7 +469,7 @@ trusted runners or of the protection checker; a compromised forge; and a comprom
     enforces the classes; Baton states them.
   - **Only the protection checker's report counts.** The **protection checker** is a
     `trusted-runner` grant that the `approvers.roles` approver marks as the repository's checker
-    (the marking and its refusals are proposed with the role route).
+    (at most one checker per repository).
     A marked grant is offered no leg and admitted to no `outbox` class, and Baton refuses to mark
     a grant whose domain is null or carried by another grant of the repository, that has claimed
     a trusted leg, or that delivers a class (`invalid-params`). It reports `{matched,
@@ -549,8 +548,11 @@ trusted runners or of the protection checker; a compromised forge; and a comprom
   a fact leg's arrival comes from the fact reader: a trusted runner whose `service:` key the
   policy names. [Proposed](../proposals/security.md) (B-140).
 - **R-BTN-182 (trusted runners).** A grant role (R-BTN-180), for the legs a course marks
-  `trusted: true`. What a trusted runner claims, runs and re-checks before it acts is
-  [proposed](../proposals/security.md) (B-140).
+  `trusted: true`. Rule `trusted` reserves those legs to that role, excluding the checker, and
+  reserves ordinary legs to ordinary runners. Baton checks the rule on offers, claims, advances
+  and ends that conclude a leg; relinquishing a lease without completing the leg is still allowed.
+  An ordinary CLI runner releases a trusted offer without running it. The dedicated runner's
+  execution, refusal-only override and re-checks are [proposed](../proposals/security.md) (B-140).
 - **R-BTN-183 (what the merge runner merges).** [Proposed](../proposals/security.md) (B-140):
   the reviews, checks, paths and approvals the merge runner requires at a PR's exact head under
   the policy's `merge.*` and `paths.*`.

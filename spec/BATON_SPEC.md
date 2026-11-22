@@ -411,6 +411,8 @@ is stale. Never edit it by hand.
 | S-BTN-172 | the ticket check | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-174 | the create-spec course | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-175 | the request | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-180 | grant roles | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-182 | trusted legs | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-185 | human gates | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-186 | any surface | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-188 | a sync writes only what changed | [`15-verification.md`](BATON_SPEC/15-verification.md) |

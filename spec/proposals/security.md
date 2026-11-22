@@ -201,11 +201,8 @@ the forge through the CLI's own fact adapters (R-BTN-96) and runs no repository 
 
 ## 7. Trusted runners (R-BTN-182, proposed)
 
-R-BTN-182 (proposed) — trusted runners. A grant role (R-BTN-180) that claims only legs its course
-marks `trusted: true` (`merge`, branch deletion, sensitive API calls, each idempotent on its attestation's subject, R-BTN-181) and holds the only
-non-human credential able to perform that leg's action. No other runner is offered a trusted leg
-or may claim, advance or end one (rule `trusted`), and neither is a grant marked `checker`
-(R-BTN-180) or a runner that delivers `forge-check` (R-BTN-115).
+The dedicated runner (R-BTN-182) holds the only non-human credential able to perform the leg's
+action. A runner that delivers `forge-check` (R-BTN-115) cannot take a trusted leg.
 - **It runs no repository code but a trusted leg's override**, which it runs through its
   executor as any leg's code (R-BTN-107), delivering the outbox included (R-BTN-171).
 - **It re-checks at the moment it acts**, against Baton's record: every attestation it relies on

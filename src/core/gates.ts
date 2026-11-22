@@ -16,7 +16,7 @@ export interface GateRunner {
   /** R-BTN-58: the key's grants by repository, each with the capabilities it may use there; null
    *  for a key no owner or administrator granted — a bearer token or a BATON_KEYS seed key, which
    *  keep their interim reach until the seed retires (spec-silent, recorded on R3-1240). */
-  grants: Record<string, { capabilities: string[] }> | null;
+  grants: Record<string, GateGrant & { capabilities: string[] }> | null;
   /** R-BTN-107: the isolation its heartbeat declared; `process` when none. */
   isolation?: 'attached' | 'process' | 'session';
 }
@@ -57,6 +57,7 @@ export interface GateLeg {
   /** R-BTN-116: a person's leg, which no runner may take (rule `person`), at a claim or an
    *  advance. */
   person?: boolean;
+  trusted?: boolean;
 }
 
 export interface GateContext {
@@ -88,7 +89,7 @@ export interface GateContext {
 export type Phase = 'claim' | 'advance';
 
 /** A numbered rule of §7.2, or one §2m names: `chain` (R-BTN-106), `isolation` (R-BTN-107). */
-export type GateRule = keyof typeof GATE_CODES | 'chain' | 'isolation' | 'person';
+export type GateRule = keyof typeof GATE_CODES | 'chain' | 'isolation' | 'person' | 'trusted';
 
 export type GateVerdict = { ok: true } | { ok: false; rule: GateRule; code: string; capability?: string };
 
@@ -105,6 +106,18 @@ export const GATE_CODES = {
   10: 'backing-off',
   11: 'capacity-full',
 } as const;
+
+export interface GateGrant {
+  role?: string | null;
+  domain?: string | null;
+  checker?: boolean;
+}
+
+/** S-BTN-182: a checker runs no leg; a trusted grant without a domain fails closed. */
+export function permitsTrust(grant: GateGrant | null | undefined, trusted: boolean): boolean {
+  if (grant?.checker) return false;
+  return grant?.role === 'trusted-runner' ? trusted && !!grant.domain : !trusted;
+}
 
 const refuse = (rule: GateRule, code: string = typeof rule === 'number' ? GATE_CODES[rule] : rule): GateVerdict => ({ ok: false, rule, code });
 
@@ -145,6 +158,7 @@ export function gatesFor(runner: GateRunner | null, ticket: GateTicket, leg: Gat
     // Rule 7 (R-BTN-58): the key holds a grant for the ticket's repository.
     const grant = runner.grants ? runner.grants[ticket.repository] ?? null : undefined;
     if (grant === null) return refuse(7);
+    if (!permitsTrust(grant, leg.trusted === true)) return refuse('trusted');
 
     // Rule 4 (R-BTN-174): capabilities are matched by name against what the runner has for this
     // repository — its declared holdings, minus what its grant does not admit (R-BTN-58), its

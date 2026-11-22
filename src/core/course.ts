@@ -64,7 +64,7 @@ const STARTS_FROM = new Set(['request']);
 const STATION_KEYS = new Set(['label', 'renamed_from', 'entry']);
 const ENTRY_KEYS = new Set(['output', 'schema']);
 const LEG_KEYS = new Set(['from', 'to', 'label', 'max_runs', 'max_duration', 'max_queue', 'version', 'inputs', 'outputs', 'replay_safe', 'renamed_from',
-  'no_chain_from', 'isolation', 'requires', 'kind', 'asks', 'expires', 'conditions', 'autonomous', 'spawns']);
+  'no_chain_from', 'isolation', 'requires', 'kind', 'asks', 'expires', 'conditions', 'autonomous', 'spawns', 'trusted']);
 /** R-BTN-116: the one kind a leg may be today — `person`, a leg a person answers by a
  *  `std:decision@1`. A `call` leg (R-BTN-165) is not built, so a file carrying one is refused
  *  rather than kept unread. */
@@ -332,6 +332,8 @@ export function validateCourse(json: unknown): CourseViolation[] {
     // `expires`. `asks` and `expires` sit only on a person's leg; a person's leg names who
     // answers. A `call` leg is not built, so any other kind is refused.
     const person = l.kind === 'person';
+    if ('trusted' in l && typeof l.trusted !== 'boolean') add('shape', `${at}.trusted`, 'trusted is true or false');
+    if (person && l.trusted === true) add('shape', `${at}.trusted`, 'a person leg cannot be a trusted runner leg');
     if ('kind' in l && !LEG_KINDS.has(l.kind as string)) add('shape', `${at}.kind`, `kind, when given, is "person" (R-BTN-116); a call leg is not built (R-BTN-165)`);
     if ('asks' in l && (typeof l.asks !== 'string' || !ASKS_LABEL.test(l.asks))) add('shape', `${at}.asks`, `asks is a label of who answers (${ASKS_LABEL.source}, R-BTN-116)`);
     if (person && !('asks' in l)) add('shape', `${at}.asks`, 'a person leg says who answers: asks is required on kind: person (R-BTN-116)');

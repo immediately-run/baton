@@ -622,8 +622,8 @@ export class Policies {
    *  hours that matched, with no open `baton.unprotected` (a report that did not match or
    *  differed from the previous reading, R-BTN-180). */
   protectionOk(repository: string): boolean {
-    const r = this.rows<{ matched: number; at: number }>('SELECT matched, at FROM protection_reports WHERE repository_id = ?', repository)[0];
-    if (!r || !r.matched || this.c.now() - r.at >= PROTECTION_WINDOW_MS) return false;
+    const r = this.rows<{ matched: number; at: number; by: string }>('SELECT matched, at, by FROM protection_reports WHERE repository_id = ?', repository)[0];
+    if (!r || !r.matched || this.c.now() - r.at >= PROTECTION_WINDOW_MS || !this.isProtectionChecker(r.by, repository)) return false;
     return !this.rows('SELECT 1 FROM policy_conditions WHERE repository_id = ? AND type = ? AND ref = ? AND closed_at IS NULL', repository, 'baton.unprotected', '').length;
   }
 
@@ -811,7 +811,8 @@ export class Policies {
       for (const t of this.rows<{ credential_id: string; trust_set_by: string | null }>(
         'SELECT credential_id, trust_set_by FROM runner_grants WHERE repository_id = ? AND revoked_at IS NULL AND trust_set_by IS NOT NULL', repository)) {
         if (!admits(ownerOfTrustSet(t.trust_set_by ?? ''))) {
-          this.exec('UPDATE runner_grants SET trust_level = ?, trust_domain = NULL, model_family = NULL, role = NULL WHERE credential_id = ? AND repository_id = ?', 'untrusted', t.credential_id, repository);
+          this.exec('UPDATE runner_grants SET trust_level = ?, trust_domain = NULL, model_family = NULL, role = NULL, checker = 0, trust_set_by = NULL WHERE credential_id = ? AND repository_id = ?', 'untrusted', t.credential_id, repository);
+          this.voidProtection(repository, t.credential_id);
           cleared.push(`grant:${t.credential_id}`);
         }
       }
@@ -980,7 +981,7 @@ export class Policies {
    *  the next report that repeats the new reading. Returns false when the caller is not the
    *  repository's protection checker (the grant's role names it, R-BTN-180). */
   recordProtection(repository: string, report: { matched: boolean; reading_hash: string; legs?: { count: number; tickets: number } }, credential: string): boolean {
-    if (!this.rows('SELECT 1 FROM runner_grants WHERE credential_id = ? AND repository_id = ? AND revoked_at IS NULL AND role = ?', credential, repository, 'protection-checker').length) return false;
+    if (!this.isProtectionChecker(credential, repository)) return false;
     const prev = this.rows<{ matched: number; reading_hash: string; matched_hash: string | null }>('SELECT matched, reading_hash, matched_hash FROM protection_reports WHERE repository_id = ?', repository)[0];
     this.exec('INSERT INTO protection_reports (repository_id, matched, reading_hash, matched_hash, by, at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (repository_id) DO UPDATE SET matched = excluded.matched, reading_hash = excluded.reading_hash, matched_hash = excluded.matched_hash, by = excluded.by, at = excluded.at',
       repository, report.matched ? 1 : 0, report.reading_hash, report.matched ? report.reading_hash : prev?.matched_hash ?? null, credential, this.c.now());
@@ -999,7 +1000,13 @@ export class Policies {
   /** Whether the runner's credential is the repository's protection checker — the one claimant
    *  exempt from a broken floor (R-BTN-180, R-BTN-189). */
   isProtectionChecker(credential: string, repository: string): boolean {
-    return this.rows('SELECT 1 FROM runner_grants WHERE credential_id = ? AND repository_id = ? AND revoked_at IS NULL AND role = ?', credential, repository, 'protection-checker').length > 0;
+    return this.rows(`SELECT 1 FROM runner_grants g JOIN credentials c ON c.id = g.credential_id
+      WHERE g.credential_id = ? AND g.repository_id = ? AND g.revoked_at IS NULL AND c.revoked_at IS NULL
+      AND c.kind = 'runner' AND c.public_key IS NOT NULL AND c.id GLOB 'SHA256:*' AND g.role = 'trusted-runner' AND g.trust_domain IS NOT NULL AND g.checker = 1`, credential, repository).length > 0;
+  }
+
+  voidProtection(repository: string, credential: string): void {
+    this.exec('DELETE FROM protection_reports WHERE repository_id = ? AND by = ?', repository, credential);
   }
 
   private openCondition(repository: string, type: string, ref: string, detail: Record<string, unknown>): void {

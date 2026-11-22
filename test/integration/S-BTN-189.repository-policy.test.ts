@@ -113,10 +113,11 @@ describe('S-BTN-189 the repository policy', () => {
     expect((await as(owner, '/v1/owner/ops/policy', { base_version: 1, preset: 'protected-signed' }, 'PUT')).json.code).toBe('unsatisfiable-approvers');
     // The protection checker's grant, made while the policy still admits owners (a grant is an
     // `approvers.members` action; under `protected` only a human key makes one).
-    await makeChecker('ops');
+    await grantChecker('ops');
     const applied = await as(human, '/v1/owner/ops/policy', { base_version: 1, preset: 'protected' }, 'PUT');
     expect(applied.status).toBe(200);
     expect(applied.json.changed).toContain('approvers.policy');
+    expect((await as(human, `/v1/owner/ops/grants/${encodeURIComponent(checkerKey.fingerprint)}/role`, { role: 'trusted-runner', domain: 'checker', checker: true }, 'PUT')).status).toBe(200);
     // Before any protection report: every guarantee but signed-authorship and
     // human-gates-hardware holds EXCEPT no-runner-lands and every guarantee including it.
     expect(applied.json.guarantees['no-runner-lands']).toBe(false);
@@ -202,6 +203,10 @@ describe('S-BTN-189 the repository policy', () => {
     // A courier with owner-set trust on the repository (B-145 item 10: set by the
     // approvers.trust approver).
     expect((await as(owner, '/v1/owner/ops/couriers', { public_key: checkerKey.publicKey, asks: ['owner'], trust_level: 'trusted', trust_domain: 'host-a' })).status).toBe(200);
+    const runner = await makeKey('ssh-ed25519', 'owner-set-runner');
+    expect((await as(owner, '/v1/owner/ops/grants', { public_key: runner.publicKey, hostname: 'owner-set-runner', capabilities: [] })).status).toBe(200);
+    const role = `/v1/owner/ops/grants/${encodeURIComponent(runner.fingerprint)}/role`;
+    expect((await as(owner, role, { role: 'trusted-runner', domain: 'checker-domain', checker: true }, 'PUT')).status).toBe(200);
     const before = (await rows<{ trust_level: string; trust_domain: string; trust_set_by: string }>('SELECT trust_level, trust_domain, trust_set_by FROM couriers WHERE repository_id = ? LIMIT 1', 'ops'))[0];
     expect(before.trust_level).toBe('trusted');
     expect(before.trust_domain).toBe('host-a');
@@ -215,6 +220,10 @@ describe('S-BTN-189 the repository policy', () => {
     const after = (await rows<{ trust_level: string; trust_domain: string | null }>('SELECT trust_level, trust_domain FROM couriers WHERE repository_id = ? LIMIT 1', 'ops'))[0];
     expect(after.trust_level).toBe('untrusted');
     expect(after.trust_domain).toBeNull();
+    expect(await rows('SELECT role, trust_domain, checker, trust_set_by FROM runner_grants WHERE credential_id = ?', runner.fingerprint))
+      .toEqual([{ role: null, trust_domain: null, checker: 0, trust_set_by: null }]);
+    expect((await as(owner, role, { role: 'trusted-runner', domain: 'x' }, 'PUT')).json.code).toBe('forbidden');
+    expect((await as(human, role, { role: 'trusted-runner', domain: 'x' }, 'PUT')).status).toBe(200);
     expect((await rows(`SELECT detail_json FROM events WHERE kind = 'admin' AND json_extract(detail_json, '$.act') = 'policy-trust-cleared'`)).length).toBe(1);
   });
 
@@ -327,11 +336,8 @@ async function addHumanOwner(repository: string) {
   expect((await rows<{ human_only: number }>('SELECT human_only FROM repository_owners WHERE fingerprint = ?', human.fingerprint))[0].human_only).toBe(1);
 }
 
-/** Make `checkerKey` the repository's protection checker: a grant with the checker role
- *  (R-BTN-180 — the role's own routes are B-147's, so the scenario writes it as its grant). */
-async function makeChecker(repository: string) {
+async function grantChecker(repository: string) {
   expect((await keyCall(owner, `/v1/owner/${repository}/grants`, { public_key: checkerKey.publicKey, hostname: 'checker-host', capabilities: ['agent-venue'] })).status).toBe(200);
-  await rows('UPDATE runner_grants SET role = ? WHERE credential_id = ? AND repository_id = ?', 'protection-checker', checkerKey.fingerprint, repository);
 }
 
 /** The checker's heartbeat, carrying its protection report. */

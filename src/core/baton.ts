@@ -1238,6 +1238,8 @@ export class BatonCore {
     // observation serves its own credential).
     if (m === 'GET' && rest === 'signing-keys') return json({ keys: await this.admin.signingKeys(repo) });
     if (m === 'POST' && rest === 'grants') return json(await this.admin.grant(actor, repo, await body(), 'owner'));
+    const grantRole = /^grants\/([^/]+)\/role$/.exec(rest);
+    if (m === 'PUT' && grantRole) return json(this.admin.setGrantRole(actor, repo, seg(grantRole[1]), await body()));
     const rg = /^grants\/([^/]+)\/revoke$/.exec(rest);
     if (m === 'POST' && rg) return json(await this.admin.revokeGrant(actor, repo, seg(rg[1])));
     if (m === 'POST' && rest === 'owners') return json(await this.admin.owners(actor, repo, await body()));

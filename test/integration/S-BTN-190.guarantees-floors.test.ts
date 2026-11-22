@@ -94,23 +94,23 @@ async function protectedSigned() {
   await as(owner, '/v1/owner/ops/owners', { public_key: human.publicKey });
   // R-BTN-188 (round 1, finding 2): `protected-signed`'s `human_key: hardware` needs an owner
   // whose key MEETS hardware — a FIDO attestation. B-136's attestation routes are not built, so
-  // the scenario writes the column as its check would (the way it writes the checker's role);
+  // the scenario writes the column as its check would;
   // without it the apply is refused `unsatisfiable-approvers`.
   await rows('UPDATE repository_owners SET fido_attestation = ? WHERE fingerprint = ?', 'att:human-key-1', human.fingerprint);
   // The break-glass key is an owner too — marked `human_only` like every key BATON_HUMAN_KEYS
   // lists — so it can act on the owner routes (which an owner key alone holds) whose human-only
   // lists it alone satisfies under `hardware`.
   expect((await keyCall(admin, '/v1/admin/repositories', { id: 'ops', owner_keys_add: [breakGlass.publicKey] })).status).toBe(200);
-  await makeChecker();
+  await grantChecker();
   const { version } = await current();
   const out = await as(human, '/v1/owner/ops/policy', { base_version: version, preset: 'protected-signed' }, 'PUT');
   expect(out.status).toBe(200);
+  expect((await as(human, `/v1/owner/ops/grants/${encodeURIComponent(checkerKey.fingerprint)}/role`, { role: 'trusted-runner', domain: 'checker', checker: true }, 'PUT')).status).toBe(200);
   return out;
 }
 
-async function makeChecker() {
+async function grantChecker() {
   expect((await keyCall(owner, '/v1/owner/ops/grants', { public_key: checkerKey.publicKey, hostname: 'checker-host', capabilities: ['agent-venue'] })).status).toBe(200);
-  await rows('UPDATE runner_grants SET role = ? WHERE credential_id = ? AND repository_id = ?', 'protection-checker', checkerKey.fingerprint, 'ops');
   const created = Math.floor((await withCore((c) => c.now())) / 1000);
   await hostCall(await signedRequest(checkerKey, ORIGIN + '/v1/runner/heartbeat', {
     created, body: JSON.stringify({ hostname: 'checker-host', session_name: 'checker', harness: 'opencode', kind: 'vm', billing: {}, capabilities: [], tier_ceiling: 'critical', lease_timeout_s: 900, secret_hash: await sha256Of(CHECKER_SECRET), courses: [] }),
