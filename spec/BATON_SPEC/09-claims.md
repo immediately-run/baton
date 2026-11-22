@@ -171,14 +171,18 @@ A claim ends with `POST /v1/runner/claims/{id}/end`. Its body, stated here once:
 | reaped, actor `alarm:unacked-release` | `reaped` | a delivered `release` unacknowledged for 2 hours | no |
 | reaped, actor `alarm:leg-timeout` | `reaped` | a delivered `leg-timeout` release unacknowledged for 15 minutes | as `leg-timeout` |
 
-- Explicit validation of `floor` as a release end reason is not built ([B-299](../../tickets/B-299.mdx)); the validator currently accepts it through the owner-bar reason spelling.
+- Baton writes `released:floor` directly when it releases a claim under R-BTN-189. Explicit
+  acceptance as a runner end reason is not built ([B-299](../../tickets/B-299.mdx)). The
+  parser classifies a runner's `released:floor` as an owner-bar reason, so the end route
+  rejects it unless the repository has a bar with reason `floor`.
 - The `cannot-finish` classes are core's built-in `interrupt` types `error.<class>` (R-BTN-160);
   a course's own `interrupt` type travels in `error`. What a failed attempt or a non-retryable
   class triggers is R-BTN-122's.
 - **A release** pushes the work done so far, then `close`, then `handoff` (R-BTN-72), except as
   R-BTN-119 and R-BTN-44 say. A holder told to release (a `release` message, §6) stops as
   R-BTN-119 describes, ends `released:<reason>` and acknowledges.
-- Every end records a sync want (R-BTN-94), so confirmation never waits for an unrelated push.
+- Every end requests a sync dispatch under R-BTN-94. This is not a persistent sync want
+  (not built, R-BTN-94; [B-57](../../tickets/B-57.mdx)).
 
 ### 9.5 Reaping and the fence
 

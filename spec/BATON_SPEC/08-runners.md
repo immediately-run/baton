@@ -267,8 +267,8 @@ section that are not built are in [the proposal page](../proposals/checks-and-ex
       the session's link, which the runner reports as R-BTN-113 says.
     - `exec(handle, argv, {cwd, timeout_s, stdin}) → {status, stdout, stderr}` runs a command
       where the session runs; the call's stdin stays open for further lines until it ends.
-    - `stop(handle, reason)` stops the session within R-BTN-145's bound. The executor chooses
-      how to stop it; `builtin` kills its process groups immediately when called.
+    - `stop(handle, reason)` stops the session. The executor chooses how to stop it;
+      R-BTN-145 governs the total time, including the runner's handling before this call.
     - `end(handle) → {status, result}` waits for the session's end. A session that does not exit
       when its agent is done, one a person can join, ends at the result posted on its channel,
       after which the runner calls `stop` (R-BTN-195).
@@ -394,13 +394,17 @@ section that are not built are in [the proposal page](../proposals/checks-and-ex
     | Variable | Value |
     |---|---|
     | `BATON_PARENT` | the CLI runner's runner id |
-    | `BATON_STATE` | path of the read-only state view (no runner secret) |
+    | `BATON_STATE` | path of the runner's local state file, which contains the runner secret |
     | `BATON_SOCKET` | the address of the leg's channel (R-BTN-106) |
     | `BATON_RUN_ID` | the run's `run_id` (R-BTN-63) |
     | `BATON_SESSION_ID` | the run's session id (R-BTN-123) |
     | `BATON_AGENT_COMMAND` | command from `--harness`, a fallback when snapshot settings name no agent command |
     | `BATON_VERBOSE` | `1` when the runner is verbose |
     | `BATON_DEFAULT_BRANCH` | the claim's default branch, when supplied |
+
+    A leg is expected to treat the state file as read-only, but mode `0600` does not isolate
+    it from a leg running as the same user with access to that path. Output masking does not
+    limit file access.
 
     **Not built:** `BATON_ACTIVITY` for child activities (R3-1214, §9.9), `BATON_RESUME` for a
     path to earlier claimants' text, and scoping `credential:<NAME>` variables to the leg's
@@ -432,13 +436,19 @@ section that are not built are in [the proposal page](../proposals/checks-and-ex
   - **Replay** (R-BTN-84) builds its environment from an allowlist: `PATH`, `LANG`, `TZ`,
     `TERM`, an isolated `HOME`, the read-only clone credential `runner.json`
     `replay_clone_credential` if configured, and names in `runner.json` `replay_env` or `--env`.
-- **R-BTN-145 (every process a leg starts is stopped with it).** When a leg stops — Stop, a
-  release, a lost lease, the runner's exit — or its call returns, every process
-  it started is gone within 30 s. The executor's `stop` keeps this (R-BTN-107).
+- **R-BTN-145 (every process a leg starts is stopped with it).** Every process the leg started
+  must be gone within 30 s of the runner receiving a stop or release or detecting a lost lease,
+  or of the runner exiting or the leg call returning. This is an end-to-end bound, including
+  any grace period and executor cleanup (R-BTN-107). The `builtin` executor kills the call's
+  process group on exit or when asked to stop. **Not built:** enforcement of the end-to-end
+  bound for release and for processes outside the call's group (B-184, B-9).
 - **R-BTN-119 (stopping a running leg).** Baton kills nothing; it asks the runner.
   - A `release` reaches the runner on a heartbeat. It sends one abort line to the running leg
-    call, if attached, and gives the leg a safe point to stop. If the leg does not exit during
-    the 30-second grace, the runner stops it; the executor owns the stop mechanism (R-BTN-107).
+    call, if attached, and gives the leg a safe point to stop. The reference runner starts its
+    30-second grace timer when a poll sees the pending abort, not at receipt of the release.
+    If the leg is still running when the timer expires, the runner kills the active call, if
+    any, and awaits the executor's `stop` (R-BTN-107). The timer does not bound the preceding
+    poll delay or the subsequent cleanup, so it does not enforce R-BTN-145's deadline.
     There is no separate signal ladder for `requested`, `owner-cancel` or `floor`.
   - If Baton has already ended the claim, the lost-claim path stops the leg without a hand-off
     (R-BTN-6). Otherwise the runner settles the release (§9.4).

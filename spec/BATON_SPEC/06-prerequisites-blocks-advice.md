@@ -525,8 +525,8 @@ Which model a leg uses, through which key, and how it reacts to a reading is cou
     holder's repository (R-BTN-99). Claims are serialized in the tenant's object, so the first
     to take a free seat holds it.
   - **Releasing.** An `advance` rewrites the claim's `claim_seats` for the leg it starts, and
-    the claim's end deletes them. A reap releases its seats at the reap, a fence-pending one
-    (R-BTN-19) at `fence-cleared` or the fence deadline.
+    the claim's end deletes them. A reap releases its seats at the reap unless the fence is
+    pending, in which case the seats are released at `fence-cleared` (R-BTN-19).
   - **Seats are no blocks.** A leg rule 11 would refuse is not recommended (§6.6) nor listed in
     `launch-candidates` (R-BTN-99), and `baton leg why` answers `full` for it. Seats write no
     block row and send no `unblocked`: an idle runner finds the leg at its next claim attempt
