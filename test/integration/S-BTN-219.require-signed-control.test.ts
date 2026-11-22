@@ -73,7 +73,7 @@ async function sync(): Promise<{ code: number; lines: string[] }> {
 /** A runner against this test's Baton (S-BTN-26's shape), its log captured. */
 function makeRunner(log: string[]): Runner {
   const api = new BatonApi({
-    url: 'https://baton.test',
+    url: ORIGIN,
     transport: (req) => hostCall(req),
     auth: (_m, _u, _b, secret) => ({ Authorization: `Bearer ${TOKENS['vm-a']}`, ...(secret ? { 'X-Runner-Secret': secret } : {}) }),
   });

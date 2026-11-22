@@ -119,7 +119,7 @@ const logs: string[][] = [];
 function makeRunner(cred: keyof typeof TOKENS, over: Partial<RunnerOptions> = {}): Runner {
   const stateFile = join(tmpdir(), `baton-s21l-${process.pid}-${++n}.json`);
   const api = new BatonApi({
-    url: 'https://baton.test',
+    url: ORIGIN,
     transport: (req) => hostCall(req),
     auth: (_m, _u, _b, secret) => ({ Authorization: `Bearer ${TOKENS[cred]}`, ...(secret ? { 'X-Runner-Secret': secret } : {}) }),
   });

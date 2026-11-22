@@ -16,7 +16,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import roadmapPr from '../fixtures/courses/roadmap-pr/course.json';
-import { course as courseEntry, cutover, Git, keyCall, placed, register, rows, setAdminKeys, setClock, syncCall, tick, ticket, TOKENS } from '../helpers';
+import { ORIGIN, course as courseEntry, cutover, Git, keyCall, placed, register, rows, setAdminKeys, setClock, syncCall, tick, ticket, TOKENS } from '../helpers';
 import { makeKey } from '../lib/sshKeys';
 import { Runner } from '../../src/runner/runner';
 import { BatonApi } from '../../src/runner/api';
@@ -192,7 +192,7 @@ beforeEach(async () => {
 
 const newRunner = (home: string, log: (l: string) => void, over: Record<string, unknown> = {}, onBeat?: (body: Record<string, any>) => void) => new Runner({
   api: new BatonApi({
-    url: 'https://baton.test',
+    url: ORIGIN,
     transport: async (req) => {
       // §7.5 R-BTN-90 (B-234): the beats a run's finish went out on, for the assertions below.
       if (onBeat && new URL(req.url).pathname === '/v1/runner/heartbeat') onBeat(await req.clone().json() as Record<string, any>);

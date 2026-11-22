@@ -4,6 +4,7 @@
 // server answers as the Worker does; a local start refuses the test bindings.
 import { describe, it, expect, inject, beforeEach } from 'vitest';
 import type { AddressInfo } from 'node:net';
+import { request } from 'node:http';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -139,22 +140,41 @@ describe('the local host', () => {
     await new Promise<void>((r) => server.listen(0, '127.0.0.1', () => r()));
     try {
       const port = (server.address() as AddressInfo).port;
-      const refused = await fetch(`${origin}:${port}/v1/runner/heartbeat`, { method: 'POST', headers: client, body: '{}' });
+      const authority = 'BATON.IMMEDIATELY.RUN:443';
+      const http = (path: string, { method = 'GET', headers = {}, body }: {
+        method?: string; headers?: Record<string, string>; body?: string;
+      } = {}) => new Promise<Response>((resolve, reject) => {
+        const req = request(`${origin}:${port}${path}`, { method, headers: {
+          Host: authority, ...headers, ...(body === undefined ? {} : { 'Content-Length': String(Buffer.byteLength(body)) }),
+        } }, async (res) => {
+          try {
+            const chunks: Buffer[] = [];
+            for await (const chunk of res) chunks.push(chunk);
+            resolve(new Response(Buffer.concat(chunks).toString(), { status: res.statusCode, headers: new Headers(res.headers as Record<string, string>) }));
+          } catch (e) { reject(e); }
+        });
+        req.on('error', reject);
+        req.end(body);
+      });
+      const wrongHost = await http('/', { headers: { Host: 'foreign.example', 'X-Forwarded-Host': authority } });
+      expect(wrongHost.status).toBe(404);
+      await wrongHost.body?.cancel();
+      const refused = await http('/v1/runner/heartbeat', { method: 'POST', headers: client, body: '{}' });
       expect(refused.status).toBe(401);
       expect(await refused.json()).toMatchObject({ code: 'unauthenticated' });
       for (const [k, v] of Object.entries(SECURITY_HEADERS)) expect(refused.headers.get(k)).toBe(v);
       const secret = 'secret-http';
-      const ok = await fetch(`${origin}:${port}/v1/runner/heartbeat`, {
+      const ok = await http('/v1/runner/heartbeat', {
         method: 'POST',
         headers: { ...client, Authorization: 'Bearer tok-vm-a', 'Content-Type': 'application/json' },
         body: JSON.stringify(hbBody('vm-a', { secret_hash: await sha256(secret) })),
       });
       expect(ok.status).toBe(200);
       // A target that looks like another authority stays a path, as on the Worker.
-      const odd = await fetch(`${origin}:${port}//x/v1/sync/head`, { headers: client });
+      const odd = await http('//x/v1/sync/head', { headers: client });
       expect([odd.status, ((await odd.json()) as { code: string }).code]).toEqual([404, 'not-found']);
       // A body over the limit is refused with the §11 envelope and the security headers.
-      const big = await fetch(`${origin}:${port}/v1/runner/heartbeat`, { method: 'POST', headers: client, body: 'x'.repeat(MAX_BODY + 1) }).catch(() => null);
+      const big = await http('/v1/runner/heartbeat', { method: 'POST', headers: client, body: 'x'.repeat(MAX_BODY + 1) }).catch(() => null);
       expect(big).not.toBeNull();
       if (big) {
         expect(big.status).toBe(400);

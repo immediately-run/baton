@@ -25,6 +25,11 @@ const PLATFORM = [
 ];
 
 describe('the host boundary (R-BTN-55)', () => {
+  it('the core may name public tenant screens and reads, but not the shell handshake (G-BTN-131)', () => {
+    const shell = /x-baton-tenant|tenant_id|tenantId|tenant-mismatch|idFromName|from\s+['"][^'"]*\/shell\//i;
+    expect(files(join(ROOT, 'src/core')).filter((p) => shell.test(code(p))).map((p) => relative(ROOT, p))).toEqual([]);
+  });
+
   it('src/core/ imports nothing from Cloudflare or either host, and reads no ctx', () => {
     const hits = files(join(ROOT, 'src/core')).flatMap((p) => {
       const text = code(p);

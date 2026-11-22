@@ -7,6 +7,7 @@ import { BatonCore } from '../core/baton';
 import { dispatchWorkflow } from '../core/mirror';
 import { parseAdminKeys } from '../core/auth';
 import type { Cursor, Row, SqlValue, Store } from '../core/ports';
+import { acceptTenant, boundTenant, TENANT_ID } from '../shell/tenant';
 
 /** `ctx.storage` as the core's Store: the same synchronous SQLite, unchanged. */
 export function durableStore(storage: DurableObjectStorage): Store {
@@ -34,11 +35,15 @@ export class Baton extends DurableObject<Env> {
     ctx.blockConcurrencyWhile(() => this.core.start());
   }
 
-  fetch(req: Request): Promise<Response> {
+  async fetch(req: Request): Promise<Response> {
+    const admission = acceptTenant(this.core.store, req, TENANT_ID);
+    if (admission instanceof Response) return admission;
+    // An alarm that fired before the first handshake did no work. Run it once bound.
+    if (admission === 'new' && await this.ctx.storage.getAlarm() === null) await this.ctx.storage.setAlarm(this.core.now());
     return this.core.fetch(req);
   }
 
   alarm(): Promise<void> {
-    return this.core.alarm();
+    return boundTenant(this.core.store) === TENANT_ID ? this.core.alarm() : Promise.resolve();
   }
 }

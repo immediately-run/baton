@@ -88,7 +88,7 @@ async function post(ids: string[]): Promise<void> {
 
 function makeRunner(over: Record<string, unknown> = {}, beats?: Record<string, any>[]): Runner {
   const api = new BatonApi({
-    url: 'https://baton.test',
+    url: ORIGIN,
     transport: async (req) => {
       if (down) throw new Error('the network is down');
       const beat = new URL(req.url).pathname === '/v1/runner/heartbeat';

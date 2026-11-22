@@ -6,6 +6,7 @@ import { front } from '../core/front';
 import { dispatchWorkflow } from '../core/mirror';
 import type { AccessIdentities, AdminKeys, Config, Scheduler, Store } from '../core/ports';
 import { RequestQueue } from './queue';
+import { acceptTenant, boundTenant, foreignHost, forTenant, servesHost, TENANT_ID } from '../shell/tenant';
 
 export interface LocalOptions {
   store: Store;
@@ -51,7 +52,7 @@ export class LocalHost {
 
   constructor(private readonly opts: LocalOptions) {
     const fire = opts.alarm === 'manual' ? null : () => {
-      this.queue.run(() => this.core.alarm()).catch((e) => console.error('baton: alarm failed', e));
+      this.tick().catch((e) => console.error('baton: alarm failed', e));
     };
     this.scheduler = new TimerScheduler(() => this.core.now(), fire);
     this.core = new BatonCore({
@@ -77,14 +78,23 @@ export class LocalHost {
   }
 
   /** A request from outside, answered as the Worker answers it. */
-  handle(req: Request): Promise<Response> {
-    return front(req, this.opts.config, (r) => this.queue.run(() => this.core.fetch(r)),
+  async handle(req: Request): Promise<Response> {
+    if (!servesHost(req, this.opts.config.BATON_ORIGIN)) return foreignHost();
+    return front(req, this.opts.config, (r) => this.queue.run(async () => {
+      const forwarded = forTenant(r, TENANT_ID);
+      const admission = acceptTenant(this.opts.store, forwarded, TENANT_ID);
+      if (admission instanceof Response) return admission;
+      if (admission === 'new' && await this.scheduler.get() === null) await this.scheduler.set(this.core.now());
+      return this.core.fetch(forwarded);
+    }),
       async () => (await this.core.admin.adminFingerprints()).size > 0);
   }
 
   /** One alarm tick now, in its turn. */
   tick(): Promise<void> {
-    return this.queue.run(() => this.core.alarm());
+    return this.queue.run(async () => {
+      if (boundTenant(this.opts.store) === TENANT_ID) await this.core.alarm();
+    });
   }
 
   /** Stop the alarm and let started dispatches finish. */

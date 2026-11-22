@@ -281,7 +281,7 @@ let runner: Runner | null = null;
 function makeRunner(): Runner {
   const stateFile = join(tmpdir(), `baton-s202-runner-${process.pid}-${++n}.json`);
   const api = new BatonApi({
-    url: 'https://baton.test',
+    url: ORIGIN,
     transport: (req) => hostCall(req),
     auth: (_m, _u, _b, secret) => ({ Authorization: `Bearer ${TOKENS['vm-a']}`, ...(secret ? { 'X-Runner-Secret': secret } : {}) }),
   });

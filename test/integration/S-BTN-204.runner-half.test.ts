@@ -7,7 +7,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { keyCall, payload, course, rows, setAdminKeys, setClock, syncCall, cutover, TOKENS } from '../helpers';
+import { ORIGIN, keyCall, payload, course, rows, setAdminKeys, setClock, syncCall, cutover, TOKENS } from '../helpers';
 import { makeKey } from '../lib/sshKeys';
 import { Runner } from '../../src/runner/runner';
 import { BatonApi } from '../../src/runner/api';
@@ -58,7 +58,7 @@ export async function close() { return 'https://example.test/close'; }
       }))).status).toBe(200);
 
       const api = new BatonApi({
-        url: 'https://baton.test',
+        url: ORIGIN,
         transport: (req) => hostCall(req),
         auth: (_m, _u, _b, secret) => ({ Authorization: `Bearer ${TOKENS['vm-a']}`, ...(secret ? { 'X-Runner-Secret': secret } : {}) }),
       });

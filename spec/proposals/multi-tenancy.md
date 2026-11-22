@@ -15,15 +15,9 @@ are labels here; each stays defined in §2.
 
 R-BTN-135 (proposed):
 
-- **Object names.** The tenant's object is `idFromName(<tenant id>)`; every other object it uses
-  is `idFromName('<tenant id>/<kind>/<key>')`. A tenant id matches `^[a-z][a-z0-9-]{0,31}$`, is
-  never reused, and retiring a tenant deletes its objects' storage. Each Cloudflare deployment's
-  first tenant, and every local host, is `baton`.
-- **Handshake.** The shell (shared code in `src/shell/`) strips any client-supplied
-  `x-baton-tenant` header and sends the tenant id in it. The object records the id in
-  `baton_settings.tenant_id` at its first request and refuses a request whose id differs or is
-  absent with `forbidden`, logged for the operator as `tenant-mismatch`, not as a tenant event.
-  The alarm does nothing until an id is recorded.
+- **Tenant ids.** [R-BTN-135](../BATON_SPEC/02-deployments.md#sec-2-2) defines the object names
+  and handshake. A tenant id matches `^[a-z][a-z0-9-]{0,31}$`, is never reused, and retiring
+  a tenant deletes its objects' storage.
 - **The router.** A deployment serving several tenants maps each host, one to one, to a tenant
   record (id, origin, secrets) the operator holds, and adds per-tenant caps: requests
   (`rate-limited` with `retry_after_s`), row writes and storage (`quota` until the day turns or

@@ -107,6 +107,13 @@ process for development and CI. Nothing crosses a tenant.
     view, event, notice, export or stream spans two tenants. Names are unique within a tenant
     only; "per Baton" counters are per tenant; Baton never asks whether something exists in
     another tenant.
+  - **Object names.** The tenant's object is `idFromName(<tenant id>)`; any other object it
+    uses is `idFromName('<tenant id>/<kind>/<key>')`, through the same naming helper. The first
+    Cloudflare tenant and every local host use `baton`.
+  - **Handshake.** The shell replaces any client-supplied `x-baton-tenant` with its own id.
+    The object records the id in `baton_settings.tenant_id` at its first accepted request
+    and refuses an absent or different id with `forbidden`, logged for the operator as
+    `tenant-mismatch`, not a tenant event. The alarm does no work until the id is recorded.
   - **Core is tenant-blind.** No `src/core/` function takes a tenant id; core reads only the
     shell's ports (R-BTN-55) and the host's `Config` (R-BTN-136).
   - A deployment serving several tenants is a router in front of this and changes no rule here.
@@ -234,4 +241,3 @@ process for development and CI. Nothing crosses a tenant.
     non-zero naming the code. Neither marks a lease lost at once, but an unanswered heartbeat
     still runs the lease clock (G-BTN-4). `too-large` is reported, never retried. A capped forge
     webhook is a lost trigger, covered by the sync's other triggers (R-BTN-94).
-

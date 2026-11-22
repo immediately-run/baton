@@ -112,7 +112,7 @@ const runners: Runner[] = [];
 function makeRunner(over: Record<string, unknown> = {}): Runner {
   const stateFile = join(tmpdir(), `baton-runner-${process.pid}-${++n}.json`);
   const api = new BatonApi({
-    url: 'https://baton.test',
+    url: ORIGIN,
     transport: (req) => hostCall(req),
     auth: (_m, _u, _b, secret) => ({ Authorization: `Bearer ${TOKENS['vm-a']}`, ...(secret ? { 'X-Runner-Secret': secret } : {}) }),
   });
@@ -767,7 +767,7 @@ describe('S-BTN-41 the runner', () => {
     const lines: string[] = [];
     const apiFor = (secret: string) => {
       const other = new BatonApi({
-        url: 'https://baton.test',
+        url: ORIGIN,
         transport: (req) => hostCall(req),
         auth: (_m, _u, _b, s) => ({ Authorization: `Bearer ${TOKENS['vm-a']}`, ...(s ? { 'X-Runner-Secret': s } : {}) }),
       });

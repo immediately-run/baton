@@ -19,7 +19,7 @@ import { Runner } from '../../src/runner/runner';
 import { LocalQueue, queueMain, queuePath } from '../../src/runner/queue';
 import { checkAdvance, checkEnd } from '../../src/core/validate';
 import { call as hostCall } from '#host';
-import { course, cutover, placed, rows, setClock, syncCall, ticket, TOKENS } from '../helpers';
+import { ORIGIN, course, cutover, placed, rows, setClock, syncCall, ticket, TOKENS } from '../helpers';
 import relay from '../fixtures/courses/relay/course.json';
 
 const T0 = Date.parse('2026-11-19T12:00:00Z');
@@ -105,7 +105,7 @@ const runners: Runner[] = [];
 
 function makeRunner(): Runner {
   const api = new BatonApi({
-    url: 'https://baton.test',
+    url: ORIGIN,
     transport: (req) => down
       ? Promise.resolve(new Response(JSON.stringify({ code: 'internal', message: 'internal error' }), { status: 500, headers: { 'Content-Type': 'application/json' } }))
       : hostCall(req),

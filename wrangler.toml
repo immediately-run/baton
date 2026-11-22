@@ -2,6 +2,8 @@
 name = "baton"
 main = "src/cloudflare/worker.ts"
 compatibility_date = "2026-09-01"
+workers_dev = false
+preview_urls = false
 routes = [{ pattern = "baton.immediately.run/*", zone_name = "immediately.run" }]
 
 [[durable_objects.bindings]]
@@ -43,4 +45,3 @@ BATON_REPOSITORIES = '[{"id":"docs","github":"immediately-run/docs","default_bra
 
 [observability]
 enabled = false
-

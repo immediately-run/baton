@@ -2,13 +2,14 @@
 // Object, fixed name, as the core behind it.
 import { front } from '../core/front';
 import { adminFingerprints, parseAdminKeys } from '../core/auth';
+import { foreignHost, forTenant, objectId, servesHost, TENANT_ID } from '../shell/tenant';
 
 export { Baton } from './baton';
 
 export default {
   fetch(req: Request, env: Env): Promise<Response> {
-    const baton = env.BATON.get(env.BATON.idFromName('baton'));
-    return front(req, env, (r) => baton.fetch(r),
+    if (!servesHost(req, env.BATON_ORIGIN)) return Promise.resolve(foreignHost());
+    return front(req, env, (r) => env.BATON.get(objectId(env.BATON, TENANT_ID)).fetch(forTenant(r, TENANT_ID)),
       async () => (await adminFingerprints(parseAdminKeys(env.BATON_ADMIN_KEYS ?? ''))).size > 0);
   },
 } satisfies ExportedHandler<Env>;

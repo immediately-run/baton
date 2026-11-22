@@ -17,7 +17,7 @@ import { Runner } from '../../src/runner/runner';
 import { declareCourses, servedCourses } from '../../src/runner/main';
 import { capabilitiesOf } from '../../src/shared/vocabulary.mjs';
 import { call as hostCall } from '#host';
-import { course, cutover, placed, rows, setClock, syncCall, ticket, TOKENS } from '../helpers';
+import { ORIGIN, course, cutover, placed, rows, setClock, syncCall, ticket, TOKENS } from '../helpers';
 import roadmapPr from '../fixtures/courses/roadmap-pr/course.json';
 import chore from '../fixtures/courses/chore/course.json';
 
@@ -101,7 +101,7 @@ const runners: Runner[] = [];
 /** A runner against this test's Baton, heartbeating as credential vm-a, serving `courses`. */
 function makeRunner(courses: { course: string; version: number }[], over: Record<string, unknown> = {}): Runner {
   const api = new BatonApi({
-    url: 'https://baton.test',
+    url: ORIGIN,
     transport: (req) => hostCall(req),
     auth: (_m, _u, _b, secret) => ({ Authorization: `Bearer ${TOKENS['vm-a']}`, ...(secret ? { 'X-Runner-Secret': secret } : {}) }),
   });
