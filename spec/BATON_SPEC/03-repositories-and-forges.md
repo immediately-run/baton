@@ -179,8 +179,8 @@ route, with the events and fields the table lists for it, is
 ### 3.2 Who may post a board
 
 - **R-BTN-93 (sync keys and the one verifier).** A repository's sync authenticates with a sync
-  key, a CI identity token (R-BTN-15) or a machine key granted on the repository (R-BTN-102,
-  R-BTN-146). A board post from a class the policy's `inputs.board` excludes (`sync-key`,
+  key or a CI identity token (R-BTN-15); see R-BTN-102 for the unbuilt machine-key input. A
+  board post from a class the policy's `inputs.board` excludes (`sync-key`,
   `ci-identity`, `machine`; R-BTN-188) is refused `forbidden`.
   - **A sync key** is an SSH key of R-BTN-13's types in one `sync_keys` row: exactly one
     repository and one role. Owners add and revoke it
@@ -193,8 +193,8 @@ route, with the events and fields the table lists for it, is
     configuration in which only default-branch runs can read it.
   - **`verifySync(req) → {repository, role}`** is the only check. It refuses `unauthenticated`
     (no credential, bad signature, unknown or revoked key, a token that fails) or `forbidden`
-    (another role, a key that is no sync credential, a machine key whose grant does not sync
-    there). Every `/v1/sync/*` route uses only its answer.
+    (another role or a key that is no sync credential). Every `/v1/sync/*` route uses only its
+    answer.
   - **The mirror.** Legacy, removed with its code (R-BTN-193). A sync key's role is `sync` or
     `mirror`; a repository has a mirror when it has a `mirror_workflow`, `ci_identity.mirror` is
     true, or it has a `mirror`-role sync key. Only sync keys and CI tokens act as the mirror
@@ -279,10 +279,12 @@ route, with the events and fields the table lists for it, is
     and of each registered repository whose `code_repos` lists it. A `pull_request` delivery
     triggers one only when it is a merge (`pull_request.merged` is `true`), whatever its base branch.
   - **The push record.** A GitHub push delivery to a branch is recorded for ticket provenance
-    (R-BTN-194): `sender.id`, `sender.login`, `ref`, `before`, `after` and each commit's `id`
-    with its `added`, `removed` and `modified` paths, up to 30 commits and 600 paths. A push past
-    the bounds is remembered `truncated` with no paths, and one that does not parse is not
-    recorded; what either changed reads as `pusher-unknown`, and the delivery still triggers. The
+    (R-BTN-194) and control notices (R-BTN-187): `sender.id`, `sender.login`, `ref`, `before`,
+    `after`, `forced` and each commit's `id` with its `added`, `removed` and `modified` paths,
+    up to 30 commits and 600 paths. A delivery past the bounds is remembered `truncated` with no
+    paths. A forced push, an unknown `forced` flag, a missing destination commit or missing path
+    lists also make the record `truncated`, keeping any paths actually supplied within the bounds.
+    A delivery that does not parse is not recorded. The delivery still triggers a sync. The
     record lives 24 hours.
   - **Findings.** From the delivery's own fields, reading no repository content: a push by a
     worker pusher of the owners' `runner_pushers` setting to a repository no open claim's scope
@@ -403,4 +405,3 @@ route, with the events and fields the table lists for it, is
     home is G or whose `repos:` entry for G has reach (R-BTN-140), and names only
     tickets of repositories the asking key is granted on; any other match answers
     `held_by_other: true`, with no ids.
-

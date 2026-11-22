@@ -648,7 +648,20 @@ export class BatonCore {
         }
         if (req.method === 'POST' && url.pathname === '/v1/sync/board') {
           const { repo, req: signed, issuer } = await this.verifySync(req, 'sync');
-          this.observations.charge(issuer, 'board');
+          const release = (body: unknown) => {
+            const n = (body as { observation?: unknown } | null)?.observation;
+            if (Number.isSafeInteger(n)) this.observations.release(repo.id, n as number, issuer);
+          };
+          try {
+            this.observations.charge(issuer, 'board');
+          } catch (e) {
+            // R-BTN-62: even a rate-limited post uses the number it carries. Don't parse a
+            // throttled request that cannot have a reservation to return.
+            if (e instanceof BatonError && e.code === 'rate-limited' && this.observations.heldBy(repo.id, issuer)) {
+              release(await readJson(signed).catch(() => null));
+            }
+            throw e;
+          }
           const body = await readJson(signed);
           // B-168: the part-4 retired fields the post carries, read before `checkPayload` drops
           // them from the body.
@@ -661,8 +674,7 @@ export class BatonCore {
           } catch (e) {
             // A refused post uses its number too (R-BTN-62), malformed or not, so the sync's
             // next run is not held off as busy for ten minutes.
-            const n = (body as { observation?: unknown } | null)?.observation;
-            if (Number.isSafeInteger(n)) this.observations.release(repo.id, n as number, issuer);
+            release(body);
             throw e;
           }
           // …read as absent, and logged once per repository's sync credential, field and day

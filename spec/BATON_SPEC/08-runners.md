@@ -115,9 +115,12 @@ section that are not built are in [the proposal page](../proposals/checks-and-ex
   (credential kind `runner`, SSH) may, on each repository where it holds a grant (R-BTN-146),
   with ordinary signed requests:
   - **work** (R-BTN-58);
-  - **sync** — `/v1/sync/*` with `?repository=<id>` in the signed query, role `sync` only, no
-    runner secret — unless the policy's `inputs.board` excludes `machine` (R-BTN-188);
   - **report readings** (R-BTN-101).
+
+  **Sync is not built for machine keys.** The proposed input would use `/v1/sync/*` with
+  `?repository=<id>` in the signed query, an active grant, role `sync` only, no runner secret,
+  and require `machine` in `inputs.board` (R-BTN-188). Listing `machine` does not currently
+  authorize a runner key to sync.
 
   Every snapshot records its credential (`board_snapshots.posted_by`). A machine key is never an
   owner or administrator key, and neither is a machine key. API-key runners (R-BTN-159) work

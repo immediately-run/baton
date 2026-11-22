@@ -78,6 +78,7 @@ export interface PushDelivery {
   before: string;
   after: string;
   commits: { sha: string; paths: string[] }[];
+  /** The recorded paths do not account for the whole head transition. */
   truncated?: boolean;
 }
 
@@ -193,17 +194,18 @@ function pickPush(payload: unknown): PushDelivery | undefined {
   const commits = at(payload, 'commits');
   if (commits !== undefined && !Array.isArray(commits)) return undefined;
   const base = { sender_id: senderId, ...(login ? { sender_login: login } : {}), ref, before, after };
-  if (commits === undefined) return { ...base, commits: [] };
-  if ((commits as unknown[]).length > PUSH_COMMITS_MAX) return { ...base, commits: [], truncated: true };
+  if (!Array.isArray(commits) || commits.length > PUSH_COMMITS_MAX) return { ...base, commits: [], truncated: true };
+  // A force push can discard changes not represented by the paths of the new commits.
+  let incomplete = at(payload, 'forced') !== false;
   const out: { sha: string; paths: string[] }[] = [];
   let paths = 0;
-  for (const c of commits as unknown[]) {
+  for (const c of commits) {
     const sha = str(at(c, 'id'));
     if (!sha || !SHA40.test(sha)) return undefined;
     const list: string[] = [];
     for (const key of ['added', 'removed', 'modified'] as const) {
       const v = at(c, key);
-      if (v === undefined || v === null) continue;
+      if (v === undefined || v === null) { incomplete = true; continue; }
       if (!Array.isArray(v) || !v.every((x) => typeof x === 'string' && x.length > 0 && x.length <= MAX_PATH)) return undefined;
       list.push(...v as string[]);
     }
@@ -211,7 +213,7 @@ function pickPush(payload: unknown): PushDelivery | undefined {
     if (paths > PUSH_PATHS_MAX) return { ...base, commits: [], truncated: true };
     out.push({ sha, paths: [...new Set(list)] });
   }
-  return { ...base, commits: out };
+  return { ...base, commits: out, ...(incomplete || !out.some((c) => c.sha === after) ? { truncated: true } : {}) };
 }
 
 interface Registered { id: string; github: string; sync_workflow: string; mirror_workflow: string | null }

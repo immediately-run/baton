@@ -8,6 +8,17 @@ import type { PolicyDocument } from '../../src/core/policy';
 const T0 = Date.parse('2026-11-21T12:00:00Z');
 const RESERVE = '/v1/sync/observation';
 const BOARD = '/v1/sync/board';
+const sha = (n: number) => n.toString(16).padStart(40, '0');
+
+function push(before: string | null, after: string, commit: Record<string, unknown>, forced = false) {
+  return webhookCall('push', {
+    ref: 'refs/heads/main', before, after, forced,
+    repository: { full_name: 'immediately-run/docs', id: 5 },
+    pusher: { name: 'worker' }, sender: { id: 42, login: 'worker' },
+    head_commit: { author: { email: 'owner@example.com' } },
+    commits: [{ id: after, added: [], removed: [], modified: [], ...commit }],
+  });
+}
 
 beforeEach(() => setClock(T0));
 
@@ -32,8 +43,9 @@ async function policy(patch: (doc: PolicyDocument) => void) {
 describe('S-BTN-310 board boundary', () => {
   it('rejects machine posts and a CI identity excluded by the board policy', async () => {
     const key = await addKey();
+    expect((await keyCall(SSH_KEYS['vm-ed'], `${BOARD}?repository=docs`, {})).status).toBe(403);
     await policy((doc) => { doc.inputs.board = ['sync-key']; });
-    expect((await keyCall(SSH_KEYS['vm-ed'], BOARD, {})).status).toBe(403);
+    expect((await keyCall(SSH_KEYS['vm-ed'], `${BOARD}?repository=docs`, {})).status).toBe(403);
     expect((await syncCall(BOARD, { observation: 1 })).status).toBe(403);
     expect((await keyCall(key, RESERVE, {})).status).toBe(200);
   });
@@ -80,18 +92,32 @@ describe('S-BTN-310 board boundary', () => {
       .toEqual([{ repository_id: 'docs', issuer: 'ci:docs', lapses: 2, at: T0 + 20 * 60_000 }]);
   });
 
+  it('uses only the matching issuer’s observation on a rate-limited post', async () => {
+    const key = await addKey();
+    await withCore((c) => {
+      const { fingerprint } = c.store.exec<{ fingerprint: string }>('SELECT fingerprint FROM sync_keys WHERE repository_id = ?', 'docs').one();
+      for (let i = 0; i < SYNC_HOURLY_LIMIT; i++) {
+        c.observations.charge(fingerprint, 'board');
+        c.observations.charge('ci:docs', 'board');
+      }
+    });
+    const reserved = await observe();
+    expect(reserved.status).toBe(200);
+    const { observation } = reserved.json;
+    const body = (n: number) => new Git().body(sha(1), null, { observation: n });
+    expect((await keyCall(key, BOARD, body(observation))).status).toBe(429);
+    expect((await syncCall(BOARD, body(observation + 1))).status).toBe(429);
+    expect((await keyCall(key, RESERVE, {})).json.code).toBe('sync-busy');
+    expect(await syncCall(BOARD, body(observation))).toMatchObject({ status: 429 });
+    expect(await keyCall(key, RESERVE, {})).toMatchObject({ status: 200, json: { observation: observation + 1 } });
+  });
+
   it('reports delivery paths absent from the board and never treats missing paths as unchanged', async () => {
     const owner = await policy((doc) => { doc.paths.control = 'human'; });
     const git = new Git();
     expect((await git.post()).status).toBe(200);
-    const after = '2'.padStart(40, '0');
-    await webhookCall('push', {
-      ref: 'refs/heads/main', before: git.head, after,
-      repository: { full_name: 'immediately-run/docs', id: 5 },
-      pusher: { name: 'worker' }, sender: { id: 42, login: 'worker' },
-      head_commit: { author: { email: 'owner@example.com' } },
-      commits: [{ id: after, added: ['.github/new.yml'], removed: ['ops/AGENTS.md'], modified: ['.baton/baton.json'] }],
-    });
+    const after = sha(2);
+    await push(git.head, after, { added: ['.github/new.yml'], removed: ['ops/AGENTS.md'], modified: ['.baton/baton.json'] });
     expect((await git.post()).status).toBe(200);
     await setClock(T0 + 60_000);
     expect((await git.post()).status).toBe(200);
@@ -99,6 +125,24 @@ describe('S-BTN-310 board boundary', () => {
     expect(notices).toMatchObject([
       { sha: git.head, changes: [], unrecorded: 'pusher-unknown' },
       { sha: after, changes: ['.github/new.yml', 'ops/AGENTS.md', '.baton/baton.json'].map((path) => ({ path, pusher: 'worker', pusher_id: 42, commit: after })) },
+    ]);
+    expect(notices[1]).not.toHaveProperty('unrecorded');
+
+    await setClock(T0 + 120_000);
+    await push(git.head, sha(4), { removed: null, modified: undefined });
+    expect((await git.post()).status).toBe(200);
+    await setClock(T0 + 180_000);
+    await push(git.head, sha(5), {}, true);
+    expect((await git.post()).status).toBe(200);
+    const incomplete = (await keyCall(owner, '/v1/repositories/docs/needs-you')).json.listings.sync_control_changes;
+    expect(incomplete.slice(0, 2)).toMatchObject([sha(5), sha(4)].map((sha) => ({ sha, changes: [], unrecorded: 'pusher-unknown' })));
+
+    await setClock(T0 + 240_000);
+    await push(git.head, after, {}, true);
+    expect((await git.post({ sha: after })).status).toBe(200);
+    const returned = (await keyCall(owner, '/v1/repositories/docs/needs-you')).json.listings.sync_control_changes;
+    expect(returned.filter((n: { sha: string }) => n.sha === after)).toMatchObject([
+      { from: sha(5), sha: after, changes: [], unrecorded: 'pusher-unknown', at: T0 + 240_000 },
     ]);
   });
 });

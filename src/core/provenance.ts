@@ -69,12 +69,10 @@ export class Provenance {
         repository, ref, at)[0];
       if (!d) break;
       let commits: PushRow['commits'] = [];
-      if (!d.truncated) {
-        try {
-          commits = JSON.parse(d.commits_json) as PushRow['commits'];
-        } catch {
-          commits = [];
-        }
+      try {
+        commits = JSON.parse(d.commits_json) as PushRow['commits'];
+      } catch {
+        commits = [];
       }
       traced.push({ before_sha: d.before_sha, sender_id: d.sender_id, sender_login: d.sender_login, commits, truncated: d.truncated, received_at: d.received_at });
       at = d.before_sha;
@@ -133,7 +131,7 @@ export class Provenance {
     }
     if (!unrecorded && !changes.length) return;
     this.c.store.exec(`INSERT INTO sync_control_changes (repository_id, sha, detail_json, at) VALUES (?, ?, ?, ?)
-      ON CONFLICT (repository_id, sha) DO NOTHING`, repo, to, JSON.stringify({ changes, omitted,
+      ON CONFLICT (repository_id, sha) DO UPDATE SET detail_json = excluded.detail_json, at = excluded.at`, repo, to, JSON.stringify({ from, changes, omitted,
       ...(unrecorded ? { unrecorded: PUSHER_UNKNOWN } : {}) }), at);
   }
 

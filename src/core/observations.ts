@@ -73,7 +73,13 @@ export class Observations {
     });
   }
 
-  /** Debit a post before reading its body, including posts that are ultimately refused. */
+  /** Whether a refused post from this issuer might carry the outstanding number. */
+  heldBy(repo: string, issuer: string): boolean {
+    const h = this.row(repo);
+    return h.handed_out_at !== null && h.observation_issuer === issuer;
+  }
+
+  /** Debit a request before interpreting it, including posts that are ultimately refused. */
   charge(issuer: string, kind: 'observation' | 'board'): void {
     const hour = Math.floor(this.c.now() / HOUR_MS);
     const used = this.c.store.exec<{ used: number }>(`INSERT INTO sync_quota (issuer, kind, hour, used) VALUES (?, ?, ?, 1)
