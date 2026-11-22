@@ -211,6 +211,9 @@ describe('B-240 Running and Timeline in joined queries', { timeout: 120_000 }, (
     expect(urls.filter((u: string | null) => u == null)).toHaveLength(4);
     // Later: the window moves past the ended claims and a lane's runner falls silent.
     await setClock(T0 + 21 * H);
+    // This is elapsed time on a serving Baton, not a 21-hour outage. Stand in for the
+    // intervening service ticks without running the reaper over the test's fixture.
+    await rows("UPDATE baton_settings SET value = ? WHERE key = 'last_served_at'", String(T0 + 21 * H - 60_000));
     await rows('UPDATE runners SET last_seen_at = ? WHERE id = ?', T0 + 21 * H, a.id);
     session = await adminSession(admin); // a session lives 4 hours (R-BTN-155)
     await sameAsBefore(session, T0 + 21 * H);

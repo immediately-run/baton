@@ -34,6 +34,8 @@ const BARS_MISMATCH_LISTED_MS = 24 * 3_600_000;
 const RELEASE_ACK_MS = 2 * 3_600_000; // §9: a delivered release unacknowledged for 2 h reaps the claim
 export const UNCONFIRMED_FLAG_MS = 6 * 3_600_000; // §6.7
 export const STALLED_MS = 2 * 3_600_000; // §14 Running: alive but no activity for 2 h
+/** §9.5: grace changes the silence-reap deadline, not the runner's last heartbeat. */
+export const CLAIM_LEASE_END_SQL = 'MAX(w.last_seen_at, COALESCE(c.lease_recovered_at, w.last_seen_at)) + w.lease_timeout_ms';
 /** §7.5 R-BTN-90: what a `leg_finished` heartbeat re-arms a still-armed deadline to — now plus
  *  40 minutes, once per leg run, so finishing is never the end. */
 const LEG_FINISH_REARM_MS = 40 * 60_000;
@@ -2144,18 +2146,13 @@ export class Claims {
    *  alarm would end, so its `lease_ends_at` is null. Claims on tickets git has dropped stay
    *  (R-BTN-35) — matched by the repository's qualified-id prefix. */
   holdersOf(repo: string) {
-    return this.rows<{ ticket_id: string; runner_id: number; hostname: string; session_name: string; kind: string; last_seen_at: number; lease_timeout_ms: number }>(
-      `SELECT c.ticket_id, c.runner_id, w.hostname, w.session_name, w.kind, w.last_seen_at, w.lease_timeout_ms
+    return this.rows<{ ticket_id: string; runner_id: number; hostname: string; session_name: string; lease_ends_at: number | null }>(
+      `SELECT c.ticket_id, c.runner_id, w.hostname, w.session_name,
+              CASE WHEN w.kind != 'legacy' THEN ${CLAIM_LEASE_END_SQL} END AS lease_ends_at
        FROM claims c JOIN runners w ON w.id = c.runner_id
        WHERE c.status = 'active' AND (c.ticket_id IN (SELECT id FROM tickets WHERE repository_id = ?) OR c.ticket_id LIKE ?)
        ORDER BY c.claimed_at, c.id`,
-      repo, `${repo}:%`).map((c) => ({
-      ticket_id: c.ticket_id,
-      runner_id: c.runner_id,
-      hostname: c.hostname,
-      session_name: c.session_name,
-      lease_ends_at: c.kind === 'legacy' ? null : c.last_seen_at + c.lease_timeout_ms,
-    }));
+      repo, `${repo}:%`);
   }
 
   /** The ticket's ended claims' resume records (R-BTN-24), pruned to what a claimant picking
@@ -2275,7 +2272,7 @@ export class Claims {
     const now = this.c.now();
     const alive = w.kind !== 'legacy' && now - w.last_seen_at < w.lease_timeout_ms;
     this.finish(c.id, c.ticket_id, 'reaped', 'reaped:owner', `owner:${owner}`, { fence: alive ? { incarnation: w.incarnation } : null });
-    if (!alive) this.exec('UPDATE runners SET reaped_at = ? WHERE id = ? AND reaped_at IS NULL', now, w.id);
+    if (!alive) this.markRunnerReaped(w.id, now);
     return { ok: true, fence_pending: alive };
   }
 
@@ -2317,7 +2314,7 @@ export class Claims {
        WHERE c.status = 'active' AND substr(c.ticket_id, 1, length(?) + 1) = ? || ':' ORDER BY c.id`, repository, repository)) {
       const alive = c.kind !== 'legacy' && now - c.last_seen_at < c.lease_timeout_ms;
       this.finish(c.id, c.ticket_id, 'reaped', 'reaped:owner', actor, { fence: alive ? { incarnation: c.incarnation } : null });
-      if (!alive) this.exec('UPDATE runners SET reaped_at = ? WHERE id = ? AND reaped_at IS NULL', now, c.runner_id);
+      if (!alive) this.markRunnerReaped(c.runner_id, now);
     }
   }
 
@@ -2667,6 +2664,12 @@ export class Claims {
 
   // ── the alarm's share (§6.6, §7.1, §9) ──────────────────────────────────────────────────
 
+  /** R-BTN-4: runner-wide invalidation cannot fence a sibling that still holds its claim. */
+  private markRunnerReaped(runnerId: number, now: number) {
+    this.exec(`UPDATE runners SET reaped_at = ? WHERE id = ? AND reaped_at IS NULL
+               AND NOT EXISTS (SELECT 1 FROM claims WHERE runner_id = ? AND status = 'active')`, now, runnerId, runnerId);
+  }
+
   /** B-249 (§9.5): give held claims a lease from recovery if Baton missed more than their
    *  runner's lease. Leave actual runner liveness, legacy reaps and existing fences alone. */
   recoverLeases(now: number, gap: number): void {
@@ -2704,13 +2707,12 @@ export class Claims {
     // or their last contact, whichever is later.
     const silent = this.rows<{ id: number; ticket_id: string; runner_id: number; kind: string }>(
       `SELECT c.id, c.ticket_id, c.runner_id, w.kind FROM claims c JOIN runners w ON w.id = c.runner_id
-       WHERE c.status = 'active' AND ((w.kind != 'legacy' AND w.last_seen_at + w.lease_timeout_ms <= ?
-                                       AND (c.lease_recovered_at IS NULL OR c.lease_recovered_at + w.lease_timeout_ms <= ?))
-                                      OR (w.kind = 'legacy' AND c.reap_after IS NOT NULL AND c.reap_after <= ?))`, now, now, now);
+       WHERE c.status = 'active' AND ((w.kind != 'legacy' AND ${CLAIM_LEASE_END_SQL} <= ?)
+                                      OR (w.kind = 'legacy' AND c.reap_after IS NOT NULL AND c.reap_after <= ?))`, now, now);
     for (const c of silent) {
       each(c.id, c.ticket_id, () => {
         this.finish(c.id, c.ticket_id, 'reaped', c.kind === 'legacy' ? 'reaped:legacy' : 'reaped:silent', 'alarm', {});
-        this.exec('UPDATE runners SET reaped_at = ? WHERE id = ? AND reaped_at IS NULL', now, c.runner_id);
+        this.markRunnerReaped(c.runner_id, now);
       });
     }
     // §9: a release delivered 2 h ago and still unacknowledged reaps the claim, fenced: the
@@ -2735,10 +2737,7 @@ export class Claims {
       this.exec('UPDATE claims SET fence_pending = 0 WHERE id = ?', c.id);
       // R-BTN-178: the fence deadline releasing, the reaped claim's seats go with it.
       this.exec('DELETE FROM claim_seats WHERE claim_id = ?', c.id);
-      // A different claim can still have recovery grace. Clearing this fence must not
-      // prevent the runner from ending that claim during its grace.
-      this.exec(`UPDATE runners SET reaped_at = ? WHERE id = ? AND reaped_at IS NULL
-                 AND NOT EXISTS (SELECT 1 FROM claims WHERE runner_id = ? AND status = 'active')`, now, c.runner_id, c.runner_id);
+      this.markRunnerReaped(c.runner_id, now);
       this.event('fence-cleared', 'alarm', { by: 'timeout' }, c.ticket_id, c.id);
       this.c.blocks?.held(c.ticket_id, false);
     }
@@ -2778,7 +2777,7 @@ export class Claims {
   running(now: number) {
     const active = this.rows<Row>(
       `SELECT c.id, c.ticket_id, c.runner_id, c.claimed_at, c.nonce, w.hostname, w.session_name, w.last_seen_at, w.last_activity_at,
-              w.lease_timeout_ms, w.kind, wi.title,
+              w.lease_timeout_ms, w.kind, wi.title, CASE WHEN w.kind != 'legacy' THEN ${CLAIM_LEASE_END_SQL} END AS reap_at,
               (SELECT l.leg FROM claim_legs l WHERE l.claim_id = c.id AND l.finished_at IS NULL AND l.abandoned_at IS NULL
                 ORDER BY l.seq DESC LIMIT 1) AS leg,
               (SELECT l.session_url FROM claim_legs l WHERE l.claim_id = c.id AND l.finished_at IS NULL AND l.abandoned_at IS NULL
@@ -2799,7 +2798,6 @@ export class Claims {
       return {
         ...c,
         alive,
-        reap_at: c.kind === 'legacy' ? null : (c.last_seen_at as number) + (c.lease_timeout_ms as number),
         stalled: alive && (c.last_activity_at == null ? now - (c.claimed_at as number) : now - (c.last_activity_at as number)) > STALLED_MS,
         events: events.get(c.id as number) ?? [],
         activities: activities.get(c.id as number) ?? [],

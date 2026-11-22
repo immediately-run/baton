@@ -87,11 +87,12 @@ export function holdLiteralTail(text: string, literals: readonly string[]): { he
 
 /** Redact matches against the unsplit line, but emit only the head. A match can
  *  cross the cut when its suffix is also the start of another literal. */
-function maskLiteralHead({ head, tail }: { head: string; tail: string }, literals: readonly string[]): string {
-  if (!tail) return maskLiterals(head, literals);
+function maskLiteralHead({ head, tail }: { head: string; tail: string }, literals: readonly string[], heldLength = 0): string {
+  if (!tail && !heldLength) return maskLiterals(head, literals);
   if (!head) return '';
   const text = head + tail;
   const matches: { start: number; end: number }[] = [];
+  if (heldLength) matches.push({ start: 0, end: Math.min(heldLength, head.length) });
   for (const literal of literals) {
     for (let start = text.indexOf(literal); start !== -1 && start < head.length; start = text.indexOf(literal, start + 1)) {
       matches.push({ start, end: Math.min(start + literal.length, head.length) });
@@ -139,11 +140,14 @@ export function createLegMasker(secrets: readonly string[]) {
         // literal wins; else the one that keeps one open the longest; else the hold was never a
         // literal's start, and its bytes leave masked — never verbatim.
         const joined = [held + line, `${held}\n${line}`].map((text) => ({ text, split: holdLiteralTail(text, literals) }));
-        const completes = joined.filter((j) => literals.some((literal) => j.text.includes(literal)));
-        const opens = joined.filter((j) => j.split.tail !== '').sort((a, b) => b.split.tail.length - a.split.tail.length);
-        const best = completes[0] ?? opens[0];
+        const completes = joined.find(({ text }) => literals.some((literal) => {
+          const start = text.indexOf(literal, Math.max(0, held.length - literal.length + 1));
+          return start !== -1 && start < held.length;
+        }));
+        const opens = joined.filter((j) => j.split.head.length < held.length).sort((a, b) => b.split.tail.length - a.split.tail.length);
+        const best = completes ?? opens[0];
         if (best) {
-          said.push(block.push(maskLiteralHead(best.split, literals)));
+          said.push(block.push(maskLiteralHead(best.split, literals, held.length)));
           held = best.split.tail;
           return said.filter(Boolean).join('\n');
         }
