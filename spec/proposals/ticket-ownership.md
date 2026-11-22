@@ -38,9 +38,25 @@ Settled 2026-11-22; not reopened by a review.
    the only writer.
 2. **One owner per field.** No field has two authorities, so no field needs a conflict rule
    between them ([The two kinds of field](#the-two-kinds-of-field)).
-3. **Baton ids always.** Every ticket carries Baton's id (`B-n`, [R-BTN-199](../BATON_SPEC/04-tickets-syncs-board.md#sec-4-3)'s
-   allocator), whatever store holds it; a store that mints keys of its own (`PROJ-123`) has its
-   key recorded beside Baton's, never in its place.
+3. **Baton ids always** (confirmed 2026-11-22, after the question "why not the tracker's own
+   id?"). Every ticket's identity is Baton's id (`B-n`, [R-BTN-199](../BATON_SPEC/04-tickets-syncs-board.md#sec-4-3)'s
+   allocator), whatever store holds it. For a Dibber store that is the only id: the one Baton
+   allocated is the file's name. A store that mints keys of its own (`PROJ-123`, `ENG-42`,
+   `#123`) has its key recorded beside Baton's, never in its place, for two reasons:
+   - **The store's key does not exist yet when Baton needs one.** A ticket Baton originates
+     must have its id at once — the command prints it, the dashboard opens its session, its
+     first branch is named for it — while the store's key exists only once a writer, holding a
+     credential Baton does not, has created the issue.
+   - **A store's key can change.** Trackers rename keys when an issue moves (another project,
+     another team, another repository), and an id is written where nothing renames it: branch
+     names, commit messages, PR titles, other tickets' `depends_on`, Baton's history. Trackers
+     keep a stable internal id of their own for the same reason.
+
+   **Shown and typed as the store's key.** Wherever a store's key exists, Baton's surfaces show
+   it first (`ENG-42 (B-41)`), and every command and read that takes a ticket accepts either, so
+   a team that lives in its tracker need not learn Baton's ids. The store also keeps a copy of
+   Baton's id on the issue, so an import after a lost Baton finds the same id again; it is the
+   one Baton-owned fact a store holds, read back only on import.
 4. **Course and tier are the store's.** They are properties of the work, written by whoever files
    the ticket and changed where the store changes things. `requires` is taken to be the same
    kind, as a gate input like tier; the owner has not ruled on it separately.
