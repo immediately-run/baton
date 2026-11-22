@@ -741,33 +741,33 @@ export class Claims {
    * The projection contains runner-independent facts; all runner gates remain authoritative.
    * JSON parameters below are small request-local sets, expanded once, never stored documents
    * expanded for every candidate. Page cursors live only for this synchronous decision. */
-  candidates(w: RunnerFacts, page = 0, rule9 = true, wanted: string[] | null = null, skipExpedited?: ReadonlySet<string>): Candidate[] {
+  candidates(w: RunnerFacts, page = 0, rule9 = true, wanted: string[] | null = null, skipExpedited?: ReadonlySet<string>, batch = 50): Candidate[] {
     if (this.reference) return this.referenceCandidates(w, page, rule9);
     const groups = this.rows<{ repository_id: string; course_id: string; weight: number; min_runner_version: number; observation: number; tiers: string }>(
       `SELECT k.repository_id, k.id AS course_id, p.weight, k.min_runner_version, h.observation, p.tiers
        FROM courses k JOIN repositories p ON p.id = k.repository_id JOIN board_head h ON h.repository_id = p.id
        WHERE p.cutover_at IS NOT NULL AND p.retired_at IS NULL ORDER BY k.repository_id, k.id`);
     const out: Candidate[] = [];
-    const holdings = capabilitiesOf(w.declared);
+    const effectiveCaps = `SELECT capability FROM runner_effective_caps WHERE runner_id = ? AND repository_id IN ('', ?)`;
     for (const g of groups) {
       const key = `${g.repository_id}\u0000${g.course_id}`;
       if (wanted && !wanted.includes(key)) continue;
       const grant = w.grants?.[g.repository_id];
       if (w.grants && !grant) continue;
-      const admitted = new Set(grant?.capabilities ?? []);
-      const caps = JSON.stringify([...holdings].filter((c) => !grant || c.startsWith('runner:') || admitted.has(c) || admitted.has(`${c.split(':')[0]}:*`)));
       const tiers = JSON.parse(g.tiers) as string[];
       const ceiling = tiers.indexOf(this.ceiling(w, g.repository_id));
       const r9 = w.courses.some((k) => k.repository === g.repository_id && k.course === g.course_id && k.version >= g.min_runner_version) ? 1 : 0;
       if (rule9 && !r9) continue;
+      // The first read still supplies the full stale-skills probe for an old course.
+      const size = r9 ? batch : 50;
       const legs = this.rows<{ leg: string }>(`SELECT l.leg FROM course_legs l
         WHERE l.repository_id = ? AND l.course_id = ? AND l.person = 0
         AND NOT EXISTS (SELECT 1 FROM course_leg_capabilities c
           WHERE c.repository_id = l.repository_id AND c.course_id = l.course_id AND c.leg = l.leg
-          AND c.capability NOT IN (SELECT value FROM json_each(?)))`, g.repository_id, g.course_id, caps).map((l) => l.leg);
+          AND c.capability NOT IN (${effectiveCaps}))`, g.repository_id, g.course_id, w.id, g.repository_id).map((l) => l.leg);
       if (!legs.length) continue;
       const prior = page > 0 ? this.cache?.candidatePages.get(key) : undefined;
-      if (prior && prior.count < page * 50) continue;
+      if (prior && prior.count < page * size) continue;
       const after = prior ? `AND (-q.expedite, q.to_end, q.rank IS NULL, COALESCE(q.rank, 0), COALESCE(q.ready_since, -1), q.ticket_id) > (?, ?, ?, ?, ?, ?)` : '';
       const found = this.rows<Omit<Candidate, 'n' | 'r9' | 'weight'> & { rank: number | null }>(
         `SELECT q.ticket_id AS id, q.repository_id, q.course_id, q.expedite, q.to_end, q.rank, q.ready_since
@@ -779,18 +779,18 @@ export class Claims {
            AND NOT EXISTS (SELECT 1 FROM ticket_bars b JOIN runner_tags t ON t.tag = b.tag
              WHERE b.ticket_id = q.ticket_id AND b.leg = q.leg AND t.runner_id = ?)
            AND NOT EXISTS (SELECT 1 FROM ticket_requires r WHERE r.ticket_id = q.ticket_id
-             AND r.name NOT IN (SELECT value FROM json_each(?)))
+             AND r.name NOT IN (${effectiveCaps}))
            ${skipExpedited?.has(key) ? 'AND -q.expedite = 0' : ''} ${after}
          ORDER BY -q.expedite, q.to_end, q.rank IS NULL, COALESCE(q.rank, 0), COALESCE(q.ready_since, -1), q.ticket_id
-         LIMIT 50${page > 0 && !prior ? ' OFFSET ?' : ''}`,
+         LIMIT ?${page > 0 && !prior ? ' OFFSET ?' : ''}`,
         g.repository_id, g.course_id, g.observation, this.c.now(), tiers.length - 1, ceiling,
-        JSON.stringify(legs), w.id, caps, ...(prior?.cursor ?? []), ...(page > 0 && !prior ? [page * 50] : []));
+        JSON.stringify(legs), w.id, w.id, g.repository_id, ...(prior?.cursor ?? []), size, ...(page > 0 && !prior ? [page * size] : []));
       const last = found.at(-1);
       if (last) this.cache?.candidatePages.set(key, {
         cursor: [-last.expedite, last.to_end, Number(last.rank == null), last.rank ?? 0, last.ready_since ?? -1, last.id],
-        count: page * 50 + found.length,
+        count: page * size + found.length,
       });
-      out.push(...found.map((r, i) => ({ ...r, weight: g.weight, r9, n: page * 50 + i + 1 })));
+      out.push(...found.map((r, i) => ({ ...r, weight: g.weight, r9, n: page * size + i + 1 })));
     }
     return out;
   }
@@ -826,21 +826,24 @@ export class Claims {
     const unsignedBlocked = this.unsignedControlBlocked();
     const full = this.expediteActive() >= EXPEDITE_BOUND;
     const lazy = !this.reference;
-    for (let page = 0; all || page < 4; page++) {
+    // B-239: for a small prefix, don't read 50 candidates before checking the first ten.
+    // Keep the same 200-candidate horizon and full-lane pagination.
+    const batch = lazy && !all && !full && limit <= 10 ? 10 : 50;
+    for (let page = 0; all || page < 200 / batch; page++) {
       const wanted = page === 0 ? null : [...groups].filter(([, g]) => !g.done && (all
         ? !lazy || g.passed[0] < limit
         : !g.cut && g.rows.length < limit)).map(([k]) => k);
       if (wanted && !wanted.length) break;
       let read: Candidate[];
       if (page === 0 && lazy) {
-        const all = this.candidates(w, 0, false);
+        const all = this.candidates(w, 0, false, null, undefined, batch);
         if (out) out.page0 = all;
         read = all.filter((r) => r.r9);
       } else {
         // With the lane full, expedited rows are the first sorted run. Once it cannot
         // contribute more to the merged prefix, page only the unexpedited run.
         const skipExpedited = all && full && lazy ? new Set(wanted?.filter((k) => groups.get(k)!.passed[1] >= limit)) : undefined;
-        read = this.candidates(w, page, false, wanted, skipExpedited);
+        read = this.candidates(w, page, false, wanted, skipExpedited, batch);
       }
       const counts = new Map<string, number>();
       for (const c of read) {
@@ -868,7 +871,7 @@ export class Claims {
           g.passed[run]++;
         }
       }
-      for (const [key, g] of groups) if ((counts.get(key) ?? 0) < 50) g.done = true;
+      for (const [key, g] of groups) if ((counts.get(key) ?? 0) < batch) g.done = true;
     }
     // Rule 2 (advice): past the lane's bound an expedited ticket loses its lane — it sorts as an
     // unexpedited one in the default order — before its group's places are numbered, so R-BTN-61's
@@ -1018,7 +1021,10 @@ export class Claims {
     }
     if (wanted) return this.decideNamed(w, wanted);
     const read: { page0?: Candidate[] } = {};
-    const recs = this.recommend(w, 50, read);
+    // With room in the expedite lane, the first of the ordered merge is also
+    // the first of the longer floor fallback. Don't gate 50 tickets to claim it.
+    const prefix = !this.reference && this.expediteActive() < EXPEDITE_BOUND ? this.recommend(w, 1, read) : null;
+    const recs = prefix && (!prefix.length || this.canOffer(prefix[0].ticket_id, w)) ? prefix : this.recommend(w, 50, read);
     // §12.8 (B-145): a recommended ticket is offered only where the floor rule lets it be — the
     // first one that is not on a stopped repository.
     const first = recs.find((r) => this.canOffer(r.ticket_id, w))
@@ -1265,12 +1271,12 @@ export class Claims {
     const now = this.c.now();
     // R-BTN-4 (B-188): up to the runner's bound — its `concurrency` here, each repository's grant
     // in `decide` — never one claim per runner.
-    this.refuseFull(this.runner(runnerId), null);
+    const w = this.runner(runnerId);
+    this.refuseFull(w, null);
     // B-237 (R-BTN-196): an idle runner asking again with nothing changed gets the same refusal.
     const idle = b.ticket_id || b.prefer ? null : this.idleHit(runnerId);
     if (idle?.refusal) throw idle.refusal;
     const version = schedulingVersion(this.c.store);
-    const w = this.runner(runnerId);
     const { item, advice } = this.decideNoting(w, b.ticket_id, version, b.prefer);
     const rationale = b.rationale === null ? undefined : JSON.parse(b.rationale) as unknown;
     const savedAdvice = rationale === undefined ? advice : { ...advice, rationale };
