@@ -246,8 +246,8 @@ export class Registry {
       bad('repository', `${r.id} (${r.github}) is already registered`);
     }
     this.c.store.exec(
-      `INSERT INTO repositories (id, github, forge, remote, web_base, ci_identity, dispatch, default_branch, sync_workflow, mirror_workflow, weight, transcript_repos, tiers, cutover_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO repositories (id, github, forge, remote, web_base, ci_identity, dispatch, default_branch, sync_workflow, mirror_workflow, weight, transcript_repos, tiers, cutover_at, insertion_order)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, (SELECT COALESCE(MAX(insertion_order), 0) + 1 FROM repositories))`,
       r.id, r.github, r.forge, r.remote, r.web_base, r.ci_identity ? JSON.stringify(r.ci_identity) : null,
       // The App serves github.com alone (round 2, 2-A-4).
       r.forge === 'github' && r.web_base?.toLowerCase() === `https://github.com/${r.github.toLowerCase()}` ? '{"kind":"github-app"}' : null,
@@ -374,7 +374,7 @@ export class Registry {
    *  interim, so it is the one a deployment registered first (docs, the board these tables came
    *  from), and no other repository's sync can rewrite what every repository's claims read. */
   fleetRepository(): string | null {
-    return this.rows<{ id: string }>('SELECT id FROM repositories WHERE retired_at IS NULL ORDER BY rowid LIMIT 1')[0]?.id ?? null;
+    return this.rows<{ id: string }>('SELECT id FROM repositories WHERE retired_at IS NULL ORDER BY insertion_order LIMIT 1')[0]?.id ?? null;
   }
 
   /** §6.8: the repositories a transcript pointer under one of `repo`'s claims may name — its

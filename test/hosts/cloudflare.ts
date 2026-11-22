@@ -2,9 +2,9 @@
 // Runner and its Durable Object in workerd, through @cloudflare/vitest-plugin.
 import { env, reset as resetStorage, runInDurableObject } from 'cloudflare:test';
 import { exports } from 'cloudflare:workers';
-import type { Baton } from '../../src/cloudflare/baton';
+import { durableStore, type Baton } from '../../src/cloudflare/baton';
 import type { BatonCore } from '../../src/core/baton';
-import type { Config } from '../../src/core/ports';
+import type { Config, Store } from '../../src/core/ports';
 import { RECOMMENDED_CLIENT } from '../../src/core/http';
 
 export const HOST = 'cloudflare';
@@ -38,6 +38,11 @@ export function raw(req: Request): Promise<Response> {
 /** Run `fn` with the object's core, inside the object. */
 export function withCore<T>(fn: (core: BatonCore) => T | Promise<T>): Promise<T> {
   return runInDurableObject(stub(), (o: Baton) => fn(o.core));
+}
+
+/** The host adapter without core's versioning or the trace recorder. */
+export function withStore<T>(fn: (store: Store) => T): Promise<T> {
+  return runInDurableObject(stub(), (_o: Baton, state) => fn(durableStore(state.storage)));
 }
 
 /** One alarm tick, run directly. Not `runDurableObjectAlarm`: the fake clock sits behind the

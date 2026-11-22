@@ -3,7 +3,7 @@
 // (vitest.config.ts provides them; a local start refuses them).
 import { inject } from 'vitest';
 import type { BatonCore } from '../../src/core/baton';
-import type { Config } from '../../src/core/ports';
+import type { Config, Store } from '../../src/core/ports';
 import { RECOMMENDED_CLIENT } from '../../src/core/http';
 import { LocalHost } from '../../src/local/host';
 import { openStore } from '../../src/local/store';
@@ -72,6 +72,16 @@ function parse(text: string | undefined): unknown {
 /** Run `fn` with the core, in its turn in the queue. */
 export function withCore<T>(fn: (core: BatonCore) => T | Promise<T>): Promise<T> {
   return host.queue.run(() => fn(host.core));
+}
+
+/** The host adapter without core's versioning or the trace recorder. */
+export async function withStore<T>(fn: (store: Store) => T): Promise<T> {
+  const { db, store } = openStore(':memory:');
+  try {
+    return fn(store);
+  } finally {
+    db.close();
+  }
 }
 
 /** One alarm tick, in its turn — its commits are steps of the trace too (R3-1244). */
