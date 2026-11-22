@@ -182,7 +182,8 @@ export class BatonCore {
     this.queues = new Queues({ store, now: () => this.now(), held: (ticket) => this.blocks.isHeld(ticket),
       graph: (repo, course) => this.stations.graph(repo, course), notices: this.notices });
     this.resources = new Resources({ store, now: () => this.now(), blocks: this.blocks, deprecated: this.deprecated });
-    this.admin = new Admin({ store, now: () => this.now(), registry: this.registry, adminKeys: () => ports.adminKeys.list(), origin: ports.config.BATON_ORIGIN,
+    this.admin = new Admin({ store, now: () => this.now(), registry: this.registry, adminKeys: () => ports.adminKeys.list(),
+      accessIdentities: () => ports.accessIdentities?.read() ?? '', origin: ports.config.BATON_ORIGIN,
       dispatchSync: (repository) => want({ repository, kind: 'sync' }), fleetChanged: () => this.blocks.recount(), notices: this.notices,
       policies: this.policies, humanBreakGlass: () => this.humanBreakGlass(), reapForRetire: (repository, actor) => this.claims.retireReaps(repository, actor),
       conditionsForRetire: (repository) => this.conditions.retired(repository) });
@@ -699,9 +700,9 @@ export class BatonCore {
       if (read) return read;
       if (url.pathname.startsWith('/v1/admin/') || url.pathname.startsWith('/v1/owner/')) return await this.adminRoute(req, url);
       if (req.method === 'POST' && url.pathname === '/v1/login') {
-        // R-BTN-57, R-BTN-16: the one-time link's token for the session cookie — `__Host-`,
+        // R-BTN-155, R-BTN-16: exchange a link token or verified Access email for the session cookie — `__Host-`,
         // host-only, Secure, HttpOnly, SameSite=Strict, at most 12 hours.
-        const value = await this.admin.login(await readJson(req));
+        const value = await this.admin.login(await readJson(req), req.headers.get('X-Baton-Access-Email'));
         const res = json({ ok: true });
         res.headers.set('Set-Cookie', `${SESSION_COOKIE}=${value}; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=${SESSION_MS / 1000}`);
         return res;
