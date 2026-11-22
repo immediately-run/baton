@@ -1,7 +1,7 @@
 import type { BatonCore } from '../baton';
 import { BatonError, json, readJson } from '../http';
 import { SESSION_COOKIE } from '../admin';
-import { checkAttestation, checkResync } from '../validate';
+import { checkAccept, checkAttestation, checkResync } from '../validate';
 import { consentRoute } from '../dependencies';
 import { logEvent } from '../db';
 import { liveRepoParam, pathSegment, qualifiedTicket, ticketOf } from './kit';
@@ -122,15 +122,21 @@ export async function dashboardWriteRoute(core: Pick<BatonCore, 'store' | 'runne
   }
   const adoption = /^\/v1\/ui\/adoptions\/([^/]+)\/confirm$/.exec(p);
   if (adoption) {
-    const ticket = qualifiedTicket(core, adoption[1]);
+    const { id: ticket, repository } = qualifiedTicket(adoption[1]);
     const body = await readJson(req);
-    return json(tx(() => core.cutover.confirmAdoption(owner, ticket, body)));
+    return json(tx(() => {
+      liveRepoParam(core.registry, repository);
+      return core.cutover.confirmAdoption(owner, ticket, body);
+    }));
   }
   const override = /^\/v1\/ui\/overrides\/([^/]+)$/.exec(p);
   if (override) {
-    const ticket = qualifiedTicket(core, override[1]);
+    const { id: ticket, repository } = qualifiedTicket(override[1]);
     const body = await readJson(req);
-    return json(tx(() => core.claims.setOverride(owner, ticket, body)));
+    return json(tx(() => {
+      liveRepoParam(core.registry, repository);
+      return core.claims.setOverride(owner, ticket, body);
+    }));
   }
   // B-134: an owner resolves a scope finding — the acknowledgement that it was looked at.
   // In the transaction, like every neighbouring `/v1/ui` mutation, so the resolution and
@@ -144,8 +150,11 @@ export async function dashboardWriteRoute(core: Pick<BatonCore, 'store' | 'runne
     }));
   }
   if (p === '/v1/ui/board/accept') {
-    const body = await readJson(req);
-    return json(tx(() => core.claims.acceptHeld(owner, body)));
+    const input = checkAccept(await readJson(req));
+    return json(tx(() => {
+      liveRepoParam(core.registry, input.repository);
+      return core.claims.acceptHeld(owner, input);
+    }));
   }
   // B-201 (`repo.resync`; R-BTN-73): a session asks the repository's sync to run now — the
   // dispatch a webhook delivery sends, logged with who asked, at most one per repository per

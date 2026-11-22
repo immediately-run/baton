@@ -6,7 +6,7 @@ import { repositoryOf } from '../registry';
 import { requireFleetScope, runnerViewResponse } from '../runnerViews';
 import type { Courier } from '../notices';
 import { authenticated, verifySigned } from './principal';
-import { liveRepoParam, requireGrant, runnerSecret, qualifiedTicket } from './kit';
+import { holderTicket, liveRepoParam, requireGrant, runnerSecret } from './kit';
 
 type RunnerAuthCore = Parameters<typeof authenticated>[0] & Pick<BatonCore, 'admin'>;
 type RunnerCore = Pick<BatonCore, 'store' | 'registry' | 'runners' | 'claims' | 'sql' | 'admin' | 'now' | 'queues' | 'resources' | 'cutover' | 'conditions'>;
@@ -77,7 +77,7 @@ export async function runnerRoute(core: RunnerCore, req: Request, url: URL, prin
     if (m === 'GET' && holder) {
       // R-BTN-7: callable with the token alone (the witness has no sidecar); with a secret, the
       // caller's own claim is not "another".
-      const item = qualifiedTicket(core, holder[1]);
+      const item = holderTicket(core.registry, holder[1]);
       const caller = secret ? await core.runners.authRunner(cred, secret, client, legacyName) : null;
       return json(core.claims.holder(caller, item));
     }

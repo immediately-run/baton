@@ -218,4 +218,3 @@ export function stateView(core: StateViewCore) {
     capacity: core.capacity.view(figures),
   };
 }
-

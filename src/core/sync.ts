@@ -53,6 +53,7 @@ export async function board(core: BoardPostCore, repo: Repository, p: BoardPaylo
   }
 }
 
+// @model syncPost sha256:231806fa206f
 async function boardPost(core: BoardPostCore, repo: Repository, p: BoardPayload, hashRows: typeof rowsFor) {
   const r = repo.id;
   // R-BTN-62: the post's number is used first, whatever becomes of the post; an older reading

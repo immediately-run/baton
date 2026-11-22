@@ -9,7 +9,7 @@ import { groupBy, isUniqueViolation, logEvent, mintRunId, randomHex, type Random
 import type { Deprecated } from './deprecated';
 import { fitsTier, capabilitiesOf, TIERS } from '../shared/vocabulary.mjs';
 import { afterFailure, countsAsFailed, nonRetryableClass, resumeRecord, type ResumeActivity } from './attempts';
-import { checkAccept, checkAdvance, checkClaim, checkConfirm, checkDecisionAnswer, checkEnd, checkOverride, checkResolve, isGrantedKey, type ClaimPreference, type End, type Output } from './validate';
+import { checkAdvance, checkClaim, checkConfirm, checkDecisionAnswer, checkEnd, checkOverride, checkResolve, isGrantedKey, type ClaimPreference, type End, type Output } from './validate';
 import { ceilingIn, repositoryOf, transcriptReposOf } from './registry';
 import { GATE_CODES, gatesFor, type GateContext, type GateLeg, type GateTicket, type GateVerdict, type Phase } from './gates';
 import { extendsPath, leaves, resolveLeg, resolveStation, runsOf, type Graph, type Step } from './graph';
@@ -2349,8 +2349,7 @@ export class Claims {
 
   /** `POST /v1/ui/board/accept`: the owner accepts a held history; the sync's next force post
    *  of it then becomes the head (§7.1). */
-  acceptHeld(owner: string, body: unknown) {
-    const { repository, sha } = checkAccept(body);
+  acceptHeld(owner: string, { repository, sha }: { repository: string; sha: string }) {
     const held = this.rows<{ accepted_at: number | null }>('SELECT accepted_at FROM held_snapshots WHERE repository_id = ? AND sha = ?', repository, sha)[0];
     if (!held) throw new BatonError('not-found', 'no such held history');
     if (held.accepted_at == null) {

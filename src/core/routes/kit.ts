@@ -39,9 +39,10 @@ export function runnerSecret(req: Request) {
   return { secret: current ?? legacy, legacyName: legacy != null };
 }
 
-/** A ticket in a path: a qualified id (R-BTN-47) of a registered repository. A malformed
- *  escape is the caller's error, never a 500. */
-export function qualifiedTicket(core: { registry: Pick<Registry, 'get'> }, raw: string): string {
+const qualifiedTicketError = 'ticket: must be a ticket id, <repository>:<id>, of a registered repository';
+
+/** Parse the path id; callers decide whether the repository must be live. */
+export function qualifiedTicket(raw: string): { id: string; repository: string } {
   let id = '';
   try {
     id = decodeURIComponent(raw);
@@ -49,6 +50,13 @@ export function qualifiedTicket(core: { registry: Pick<Registry, 'get'> }, raw: 
     // falls through to the refusal
   }
   const m = TICKET_ID.exec(id);
-  if (!m || !core.registry.get(m[1])) throw new BatonError('invalid-params', 'ticket: must be a ticket id, <repository>:<id>, of a registered repository');
+  if (!m) throw new BatonError('invalid-params', qualifiedTicketError);
+  return { id, repository: m[1] };
+}
+
+/** R-BTN-47: the holder query may still read a retired repository. */
+export function holderTicket(registry: Pick<Registry, 'get'>, raw: string): string {
+  const { id, repository } = qualifiedTicket(raw);
+  if (!registry.get(repository)) throw new BatonError('invalid-params', qualifiedTicketError);
   return id;
 }
