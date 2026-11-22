@@ -427,7 +427,7 @@ export const ACTIONS: Action[] = [
     effect: 'read', http: { method: 'GET', path: '/v1/admin/settings' }, callers: [ADMIN, SESSION_ADMIN], input: NONE,
   },
   {
-    id: 'admin.tenant', summary: 'The tenant’s live counts and request rates against the capacity envelope, the day’s usage, and what needs an administrator.',
+    id: 'admin.tenant', summary: 'The instance’s live counts and request rates against the capacity envelope, the day’s usage, and what needs an administrator.',
     effect: 'read', http: { method: 'GET', path: '/v1/admin/tenant' }, callers: [ADMIN, SESSION_ADMIN], input: NONE,
   },
   {

@@ -6,7 +6,7 @@ import { front } from '../core/front';
 import { dispatchWorkflow } from '../core/mirror';
 import type { AccessIdentities, AdminKeys, Config, Scheduler, Store } from '../core/ports';
 import { RequestQueue } from './queue';
-import { acceptTenant, boundTenant, foreignHost, forTenant, servesHost, TENANT_ID } from '../shell/tenant';
+import { acceptTenant, admitTenantAlarm, foreignHost, forTenant, prepareTenantStore, servesHost, TENANT_ID } from '../shell/tenant';
 
 export interface LocalOptions {
   store: Store;
@@ -74,12 +74,22 @@ export class LocalHost {
 
   /** Migrations and the first alarm, before any request (§3). */
   start(): Promise<void> {
-    return this.queue.run(() => this.core.start());
+    return this.queue.run(async () => {
+      prepareTenantStore(this.opts.store, () => this.core.migrate());
+      await this.core.start();
+    });
+  }
+
+  refuseHost(pathname: string): Response {
+    return foreignHost(pathname, this.opts.config);
   }
 
   /** A request from outside, answered as the Worker answers it. */
   async handle(req: Request): Promise<Response> {
-    if (!servesHost(req, this.opts.config.BATON_ORIGIN)) return foreignHost();
+    if (!servesHost(req, this.opts.config.BATON_ORIGIN)) {
+      if (req.body && !req.bodyUsed) req.body.cancel().catch(() => {});
+      return this.refuseHost(new URL(req.url).pathname);
+    }
     return front(req, this.opts.config, (r) => this.queue.run(async () => {
       const forwarded = forTenant(r, TENANT_ID);
       const admission = acceptTenant(this.opts.store, forwarded, TENANT_ID);
@@ -93,7 +103,7 @@ export class LocalHost {
   /** One alarm tick now, in its turn. */
   tick(): Promise<void> {
     return this.queue.run(async () => {
-      if (boundTenant(this.opts.store) === TENANT_ID) await this.core.alarm();
+      if (admitTenantAlarm(this.opts.store)) await this.core.alarm();
     });
   }
 

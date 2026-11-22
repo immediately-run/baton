@@ -7,7 +7,7 @@ import { BatonCore } from '../core/baton';
 import { dispatchWorkflow } from '../core/mirror';
 import { parseAdminKeys } from '../core/auth';
 import type { Cursor, Row, SqlValue, Store } from '../core/ports';
-import { acceptTenant, boundTenant, TENANT_ID } from '../shell/tenant';
+import { acceptTenant, admitTenantAlarm, prepareTenantStore, TENANT_ID } from '../shell/tenant';
 
 /** `ctx.storage` as the core's Store: the same synchronous SQLite, unchanged. */
 export function durableStore(storage: DurableObjectStorage): Store {
@@ -23,8 +23,9 @@ export class Baton extends DurableObject<Env> {
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
+    const store = durableStore(ctx.storage);
     this.core = new BatonCore({
-      store: durableStore(ctx.storage),
+      store,
       scheduler: { get: () => ctx.storage.getAlarm(), set: (at) => ctx.storage.setAlarm(at) },
       config: env,
       dispatch: { send: (target) => dispatchWorkflow(env.GITHUB_DISPATCH_TOKEN, target), defer: (work) => ctx.waitUntil(work) },
@@ -32,7 +33,10 @@ export class Baton extends DurableObject<Env> {
       accessIdentities: { read: () => env.ACCESS_IDENTITIES ?? '' },
     });
     // The object refuses to serve until every migration is applied (§3), and keeps one alarm.
-    ctx.blockConcurrencyWhile(() => this.core.start());
+    ctx.blockConcurrencyWhile(async () => {
+      prepareTenantStore(store, () => this.core.migrate());
+      await this.core.start();
+    });
   }
 
   async fetch(req: Request): Promise<Response> {
@@ -44,6 +48,6 @@ export class Baton extends DurableObject<Env> {
   }
 
   alarm(): Promise<void> {
-    return boundTenant(this.core.store) === TENANT_ID ? this.core.alarm() : Promise.resolve();
+    return admitTenantAlarm(this.core.store) ? this.core.alarm() : Promise.resolve();
   }
 }

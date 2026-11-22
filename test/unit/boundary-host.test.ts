@@ -4,6 +4,7 @@
 import { describe, it, expect } from 'vitest';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
+import ts from 'typescript';
 
 const ROOT = resolve(import.meta.dirname, '../..');
 
@@ -24,10 +25,30 @@ const PLATFORM = [
   /from\s+['"]\.\.?\/(\.\.\/)*(cloudflare|local)\b/,
 ];
 
+const PUBLIC_TENANT_NAMES: Record<string, string[]> = {
+  'actions.ts': ['admin.tenant', '/v1/admin/tenant'],
+  'reads/tenant.ts': ['admin.tenant'],
+  'reads/index.ts': ['./tenant'],
+  'screens.ts': ['repositories', 'instances', 'resources', 'capacities', 'settings', 'state', 'sessions'].map((name) => `tenant/${name}`),
+};
+
+function namesTenantBoundary(name: string, text: string): boolean {
+  const allowed = PUBLIC_TENANT_NAMES[name] ?? [];
+  const source = ts.createSourceFile(name, text, ts.ScriptTarget.Latest);
+  function visit(node: ts.Node): true | undefined {
+    if (ts.isIdentifier(node) && /tenant|^idFromName$/i.test(node.text)) return true;
+    if (ts.isStringLiteralLike(node) && !allowed.includes(node.text) && /tenant|^idFromName$|^\..*\/shell\//i.test(node.text)) return true;
+    return ts.forEachChild(node, visit);
+  }
+  return visit(source) === true;
+}
+
 describe('the host boundary (R-BTN-55)', () => {
   it('the core may name public tenant screens and reads, but not the shell handshake (G-BTN-131)', () => {
-    const shell = /x-baton-tenant|tenant_id|tenantId|tenant-mismatch|idFromName|from\s+['"][^'"]*\/shell\//i;
-    expect(files(join(ROOT, 'src/core')).filter((p) => shell.test(code(p))).map((p) => relative(ROOT, p))).toEqual([]);
+    const core = join(ROOT, 'src/core');
+    const hits = files(core).map((p) => relative(core, p)).filter((name) => namesTenantBoundary(name, readFileSync(join(core, name), 'utf8')));
+    expect(hits).toEqual([]);
+    expect(namesTenantBoundary('actions.ts', "const action = 'admin.tenant'; function run(tenant: string) {}")).toBe(true);
   });
 
   it('src/core/ imports nothing from Cloudflare or either host, and reads no ctx', () => {

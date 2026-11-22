@@ -136,7 +136,7 @@ function registry(cx: ReadCtx, withRetired: boolean) {
  *  declaring no course at all (R-BTN-22; the ones below one course's version are that
  *  repository's listing). Each is the list its own module answers `stateView()` with — the
  *  same function, never a second query. */
-function tenant(cx: ReadCtx) {
+function instanceOverview(cx: ReadCtx) {
   const figures = cx.core.capacityFigures();
   const now = cx.now();
   return {
@@ -183,7 +183,7 @@ async function sessions(cx: ReadCtx, own: string | null) {
   };
 }
 
-export const TENANT_READS: ReadRoute[] = [
+export const INSTANCE_READS: ReadRoute[] = [
   // The registry rows carry each repository's mode and queues: the clock's.
   { action: 'admin.repo.list', clock: true, run: (cx, call) => registry(cx, call.url.searchParams.get('retired') === '1') },
   { action: 'admin.capacity.list', run: (cx, call) => capacities(cx, call.url.searchParams.get('capability') ?? undefined) },
@@ -192,7 +192,7 @@ export const TENANT_READS: ReadRoute[] = [
   { action: 'admin.resource.list', run: (cx) => resources(cx) },
   { action: 'admin.settings.show', run: (cx) => cx.core.instance.view() },
   // The rates are the object's own measurement, which moves no state version: never conditional.
-  { action: 'admin.tenant', etag: false, run: (cx) => tenant(cx) },
+  { action: 'admin.tenant', etag: false, run: instanceOverview },
   // `current` is the calling session's own, and two sessions of one key share a caller key:
   // never conditional.
   { action: 'admin.session.list', etag: false, run: (cx, call) => sessions(cx, call.principal.kind === 'session' ? call.req.headers.get('X-Baton-Session') : null) },

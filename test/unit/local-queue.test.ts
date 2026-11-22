@@ -14,7 +14,8 @@ import { RequestQueue } from '../../src/local/queue';
 import { MAX_BODY, serve } from '../../src/local/server';
 import { openStore } from '../../src/local/store';
 import { accessIdentitiesFrom, adminKeysFrom, concreteHost, localConfig, main } from '../../src/local/main';
-import { RECOMMENDED_CLIENT, SECURITY_HEADERS } from '../../src/core/http';
+import { RECOMMENDED_CLIENT, SECURITY_HEADERS, servedClientVersions, VERSIONS_HEADER } from '../../src/core/http';
+import { clientVersionsValue } from '../../src/shared/versions.mjs';
 
 const board = inject('board');
 const later = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -156,8 +157,9 @@ describe('the local host', () => {
         req.on('error', reject);
         req.end(body);
       });
-      const wrongHost = await http('/', { headers: { Host: 'foreign.example', 'X-Forwarded-Host': authority } });
+      const wrongHost = await http('/v1/sync/head', { headers: { Host: 'foreign.example', 'X-Forwarded-Host': authority } });
       expect(wrongHost.status).toBe(404);
+      expect(wrongHost.headers.get(VERSIONS_HEADER)).toBe(clientVersionsValue(servedClientVersions(inject('localConfig'))));
       await wrongHost.body?.cancel();
       const refused = await http('/v1/runner/heartbeat', { method: 'POST', headers: client, body: '{}' });
       expect(refused.status).toBe(401);

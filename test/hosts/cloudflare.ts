@@ -47,6 +47,11 @@ export function tick(): Promise<void> {
   return withCore((c) => c.alarm());
 }
 
+/** Exercise the adapter's admission check, regardless of the runtime's alarm clock. */
+export function tickHost(): Promise<void> {
+  return runInDurableObject(stub(), (o: Baton) => o.alarm());
+}
+
 /** Every test starts from an empty Baton. */
 export function reset(): Promise<void> {
   return resetStorage();

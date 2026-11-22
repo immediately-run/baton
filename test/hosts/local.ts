@@ -79,6 +79,8 @@ export function tick(): Promise<void> {
   return origins.run({ kind: 'alarm' }, () => host.tick());
 }
 
+export const tickHost = tick;
+
 /** Every test starts from an empty Baton: a new in-memory database. */
 export async function reset(): Promise<void> {
   await host.stop();

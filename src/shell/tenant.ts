@@ -1,6 +1,7 @@
 // R-BTN-135: object naming and the internal handshake live outside the core.
-import { errorResponse, withSecurityHeaders } from '../core/http';
-import type { Store } from '../core/ports';
+import { frontResponse } from '../core/front';
+import { errorResponse } from '../core/http';
+import type { Config, Store } from '../core/ports';
 
 export const TENANT_ID = 'baton';
 const HEADER = 'X-Baton-Tenant';
@@ -10,8 +11,8 @@ export function objectId<T>(namespace: { idFromName(name: string): T }, tenant: 
   return namespace.idFromName(part ? `${tenant}/${part.kind}/${part.key}` : tenant);
 }
 
-export function foreignHost(): Response {
-  return withSecurityHeaders(errorResponse('not-found', 'no such host'));
+export function foreignHost(pathname: string, config: Config): Response {
+  return frontResponse(pathname, config, errorResponse('not-found', 'no such host'));
 }
 
 export function servesHost(req: Request, origin: string): boolean {
@@ -35,7 +36,34 @@ export function forTenant(req: Request, tenant: string): Request {
 }
 
 export function boundTenant(store: Pick<Store, 'exec'>): string | undefined {
-  return store.exec<{ value: string }>("SELECT value FROM baton_settings WHERE key = 'tenant_id'").toArray()[0]?.value;
+  return setting(store, 'tenant_id');
+}
+
+function setting(store: Pick<Store, 'exec'>, key: string): string | undefined {
+  return store.exec<{ value: string }>('SELECT value FROM baton_settings WHERE key = ?', key).toArray()[0]?.value;
+}
+
+/** Mark new storage atomically with schema creation so a restart before any request is not
+ *  mistaken for an upgrade from the pre-handshake deployment. */
+export function prepareTenantStore(store: Store, migrate: () => void): void {
+  if (store.exec("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'baton_settings'").toArray().length) return;
+  store.transaction(() => {
+    migrate();
+    store.exec("INSERT INTO baton_settings (key, value) VALUES ('tenant_handshake_required', '1')");
+  });
+}
+
+export function admitTenantAlarm(store: Store): boolean {
+  const bound = boundTenant(store);
+  if (bound !== undefined) return bound === TENANT_ID;
+  if (setting(store, 'tenant_handshake_required') !== undefined) return false;
+  // One-time upgrade of the existing single-tenant store. No request supplies this value.
+  bind(store, TENANT_ID);
+  return true;
+}
+
+function bind(store: Pick<Store, 'exec'>, id: string): void {
+  store.exec("INSERT INTO baton_settings (key, value) VALUES ('tenant_id', ?)", id);
 }
 
 /** Both shells serialize this synchronous check with the object or queue's other writes. */
@@ -48,6 +76,6 @@ export function acceptTenant(store: Pick<Store, 'exec'>, req: Request, expected:
     return errorResponse('forbidden', 'tenant mismatch');
   }
   if (bound !== undefined) return 'existing';
-  store.exec("INSERT INTO baton_settings (key, value) VALUES ('tenant_id', ?)", presented);
+  bind(store, presented);
   return 'new';
 }

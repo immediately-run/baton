@@ -338,7 +338,18 @@ function forward(req: Request, to: Forward, principal: Record<string, string>): 
  *  or a stranger reads. Until the first answer teaches it, the code's own default — the raise
  *  reaches every isolate with the first request it forwards. `min` it never learns: the floor
  *  is the code's constant (the env's own word under the test bindings), never the store's. */
-let learnedRecommended: string | null = null;
+const learnedRecommended = new WeakMap<Config, string>();
+
+function frontVersions(env: Config) {
+  const floor = servedClientVersions(env);
+  return { min: floor.min, recommended: maxVersion(learnedRecommended.get(env) ?? floor.recommended, floor.min) };
+}
+
+/** Finish an answer without consulting the core, including a refusal before routing. */
+export function frontResponse(pathname: string, env: Config, res: Response): Response {
+  if (pathname.startsWith('/v1/')) res = withClientVersions(res, frontVersions(env));
+  return withSecurityHeaders(res);
+}
 
 /** A request from outside, answered: both hosts' entry point. Every answer leaves with the
  *  security headers and, when its route decided so, `Cache-Control: no-store` (R-BTN-16). */
@@ -352,15 +363,15 @@ export async function front(req: Request, env: Config, to: Forward, hasAdmin: ()
   // constant (a test binding raises it for the suite, §13a); `recommended` is what the front has
   // learned of the instance's raise, the code's default until an answer teaches it, never below
   // the floor.
-  const floor = servedClientVersions(env);
-  const served = { min: floor.min, recommended: maxVersion(learnedRecommended ?? floor.recommended, floor.min) };
-  const api = new URL(req.url).pathname.startsWith('/v1/');
+  const { pathname } = new URL(req.url);
+  const api = pathname.startsWith('/v1/');
   if (api) {
+    const served = frontVersions(env);
     const client = clientVersionOf(req.headers.get(CLIENT_HEADER)) ?? '0.0.0';
     if (compareVersions(client, served.min) < 0) {
       if (req.body && !req.bodyUsed) req.body.cancel().catch(() => {});
       const e = clientTooOld(client, served.min, served.recommended);
-      return withSecurityHeaders(noStore(withClientVersions(errorResponse(e.code, e.message, e.extra), served)));
+      return frontResponse(pathname, env, noStore(errorResponse(e.code, e.message, e.extra)));
     }
   }
   try {
@@ -377,8 +388,7 @@ export async function front(req: Request, env: Config, to: Forward, hasAdmin: ()
   // from what it serves.
   if (api) {
     const stated = parseClientVersions(res.headers.get(VERSIONS_HEADER));
-    if (stated) learnedRecommended = stated.recommended;
-    res = withClientVersions(res, served);
+    if (stated) learnedRecommended.set(env, stated.recommended);
   }
-  return withSecurityHeaders(cache === 'private' ? noStore(res) : res);
+  return frontResponse(pathname, env, cache === 'private' ? noStore(res) : res);
 }
