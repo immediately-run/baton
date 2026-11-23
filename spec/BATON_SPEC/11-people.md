@@ -92,8 +92,9 @@ built; their design is [the people and dashboard proposal](../proposals/people-a
     (R-BTN-128), and the whole state in one request, `GET /v1/admin/state`, built of the
     functions the entity reads use (R-BTN-179), with no session. Each act is an `admin` event.
   - **Grants and owners.** Making or changing a grant, changing a key's hostname and adding an
-    owner are `approvers.members` actions (R-BTN-188). An administrator's request is `forbidden`
-    where that list is human-only: an administrator key carries no `human_only` mark (§12.1).
+    owner are `approvers.members` actions (R-BTN-188). An administrator key's request is
+    `forbidden` where that list is human-only, since it carries no `human_only` mark (§12.1); an
+    administrator's session is a human (R-BTN-185).
   - **Revocation.** An administrator revokes any key at once but an administrator's. Revoking
     an owner key removes it from every repository it owns, the last owner included (an
     administrator then adds one with `owner_keys_add`), and revoking a member key removes it
@@ -330,8 +331,8 @@ built; their design is [the people and dashboard proposal](../proposals/people-a
     carries that key's role: it may call every action the key may call through the CLI, on the
     same scope, but the key-only acts (R-BTN-186), and no other (R-BTN-129); it never opens,
     extends or confirms a session, its own included. An owner's or member's session reaches only
-    the repositories its key still owns or is a member of. A session writes as its key's role,
-    never as `human` (R-BTN-185).
+    the repositories its key still owns or is a member of. A session writes as its key's role
+    and as `human`: a person using the dashboard is a human (R-BTN-185).
   - **Authentication first, then one role.** A sign-in authenticates the person, then opens a
     session for one key the person holds. Where the person holds keys of more than one role, or
     of one role more than once, the page asks which after authenticating and before any session

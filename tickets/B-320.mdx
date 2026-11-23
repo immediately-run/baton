@@ -58,7 +58,7 @@ rule wins.
    `std:decision@1` for a person leg whose `asks` label is in its `answers` (R-BTN-116 says
    which legs take an answer), as writer `member`; another label, or any other type, is `forbidden`. The `cooperative` and default
    policies admit `member` for `std:decision@1`; `protected` admits `human` alone (R-BTN-188's
-   table). The conditions read's `answerable` (`src/core/reads/conditions.ts`, `answerWord`)
+   table), which a member's session meets and a member key does not (R-BTN-185). The conditions read's `answerable` (`src/core/reads/conditions.ts`, `answerWord`)
    says yes for such a member and names the label otherwise.
 5. **Revocation.** `admin key revoke` of a member key removes it from every repository in the
    same transaction and ends its sessions (R-BTN-57).

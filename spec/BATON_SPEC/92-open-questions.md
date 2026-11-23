@@ -28,21 +28,20 @@ description: "BATON_SPEC — Open questions."
   `sk-` user-presence flag? Refusing closes that gap; it locks out holders who chose an API key,
   which R-BTN-159 makes their trade. Until it is decided, any key of the session's role confirms.
 
-- **A human-only act on every surface (R-BTN-185, R-BTN-186).** A session writes as its key's
-  role, never `human`, so where the policy counts a person's answer from `human` alone
-  (`protected`), or an `approvers.*` list is human-only, the dashboard cannot take the act, and a
-  delegated key never can over MCP. R-BTN-186 makes that a defect unless it is mechanical. The
-  recommendation: a human-only act taken in a session carries a proof of presence by the
-  human-only identity for that one act — a WebAuthn assertion by a passkey or security key
-  registered to it, over the action and its parameters — and MCP hands the act to that proof
-  instead of refusing it. Until it is decided, the CLI with the human-only key is the one path.
+- **A human act over MCP (R-BTN-185, R-BTN-186).** A dashboard session is a human; a delegated
+  key never is, so where the policy counts a person's answer from `human` alone (`protected`), or
+  an `approvers.*` list is human-only, MCP cannot take the act. R-BTN-186 makes that a defect
+  unless it is mechanical. The recommendation: MCP hands such an act to the person — a dashboard
+  page that shows it and takes it as a session does, with R-BTN-185's security-key touch under
+  `hardware` — instead of refusing it.
 - **A confirmation channel without a terminal (R-BTN-155).** A session's authority-changing
   act is confirmed by its key through a channel other than the session; the proposal's channel
   is the CLI (`baton admin confirm`, `baton owner confirm`), which a person signed in through
   Access may not have at hand. Confirming stays required whatever is decided. The
   recommendation: a WebAuthn assertion by a passkey or security key registered to the session's
   key, over the action and its parameters, made in the page but checked against a key the
-  session cannot register or replace; the CLI code stays for keys with no passkey.
+  session cannot register or replace — the same assertion R-BTN-185 asks under `hardware`; the
+  CLI code stays for keys with no passkey.
 - **Members' Access lines (R-BTN-155, R-BTN-204).** Only whoever controls the deployment writes
   `ACCESS_IDENTITIES`, so a member who signs in through Access needs an administrator as well as
   an owner. Should an owner bind a member's email to the member's key in Baton's state, for that

@@ -3,7 +3,7 @@ title: "B-213 — Attestations: GET …/attestations lists a repository's typed 
 id: B-213
 project: baton-ui-v2
 status: available
-updated: 2026-11-09
+updated: 2026-11-23
 repos:
   - baton
 tags:
@@ -26,7 +26,7 @@ depends_on:
 
 **Spec:** [BATON_SPEC §12.8](../spec/BATON_SPEC/12-security.md#sec-12-8) ([R-BTN-181](../spec/BATON_SPEC/12-security.md#sec-12-8):
 attestations, their writers, lapses, `attestation.add` and `attestation.revoke`; [R-BTN-185](../spec/BATON_SPEC/12-security.md#sec-12-8):
-a session is `owner`, never `human`; [R-BTN-180](../spec/BATON_SPEC/12-security.md#sec-12-8):
+a session writes as `human` beside its key's role; [R-BTN-180](../spec/BATON_SPEC/12-security.md#sec-12-8):
 the grant's domain), [§11.4](../spec/BATON_SPEC/11-people.md#sec-11-4) (the `allowed` rule as
 B-191 amends it; [R-BTN-155](../spec/BATON_SPEC/11-people.md#sec-11-4): an attestation is not a confirmed action), [§5.5](../spec/BATON_SPEC/05-courses.md#sec-5-5)
 ([R-BTN-112](../spec/BATON_SPEC/05-courses.md#sec-5-5): a value with a view is drawn by the `ui`
@@ -73,7 +73,7 @@ The §14 row first, then the code.
 
 - No policy read in the client: `writable_types` is the server's word; the control is drawn on
   it and the server decides again on the call.
-- No `human` attestation from a session (R-BTN-185); no revoke from a session.
+- No `human` attestation beyond what R-BTN-185 gives a session (its role's acts, with a security-key touch under `hardware`); no revoke from a session.
 - No value rendered as markup: `View` or pretty-printed text only.
 
 ### Trust
@@ -86,7 +86,7 @@ The §14 row first, then the code.
 
 ### Invariants
 
-- **A session writes as `owner`, never `human`** (R-BTN-185); **an attestation is not confirmed**
+- **A session writes as `human` beside its key's role** (R-BTN-185); **an attestation is not confirmed**
   (R-BTN-155).
 - **Text, never markup** (§12.3); **an owner's session, its repositories** (R-BTN-155); **both
   hosts** (R-BTN-55).
@@ -117,3 +117,10 @@ session's write path); R-BTN-181's field name `at` and its writer list used._
 _(2026-11-20: the spec simplification of 2026-11-19 (baton#299; `spec/BATON_SPEC_HISTORY.md`, that date) removed per-run domains on the owner's ruling: an attestation carries no run label. The description, the spec line, item 1's row shape and the table's columns are rewritten to the grant's domain alone.)_
 
 _(2026-11-20: rules re-read: R-BTN-180)_
+
+_(2026-11-23: the owner ruled that a person using the dashboard is a human (R-BTN-185, amended):
+every person's session writes as `human` beside its role and matches a `human` approver entry,
+with a security-key touch per act under `hardware` (B-322). Clauses above that keep `human` from
+a session are rewritten where this ticket states them.)_
+
+_(2026-11-23: rules re-read: R-BTN-185, R-BTN-188)_

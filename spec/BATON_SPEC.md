@@ -287,7 +287,7 @@ is stale. Never edit it by hand.
 | R-BTN-182 | trusted runners | [`12-security.md`](BATON_SPEC/12-security.md) |
 | R-BTN-183 | what the merge runner merges | [`12-security.md`](BATON_SPEC/12-security.md) |
 | R-BTN-184 | protected paths | [`12-security.md`](BATON_SPEC/12-security.md) |
-| R-BTN-185 | human-only credentials | [`12-security.md`](BATON_SPEC/12-security.md) |
+| R-BTN-185 | human-only credentials and human sessions | [`12-security.md`](BATON_SPEC/12-security.md) |
 | R-BTN-186 | authority by credential, not channel | [`12-security.md`](BATON_SPEC/12-security.md) |
 | R-BTN-187 | what Baton trusts from a board post | [`12-security.md`](BATON_SPEC/12-security.md) |
 | R-BTN-188 | the repository policy | [`12-security.md`](BATON_SPEC/12-security.md) |
@@ -496,6 +496,7 @@ is stale. Never edit it by hand.
 | S-BTN-313 | repository members | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-314 | one session per tab, its role chosen after sign-in | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-315 | a session is as capable as its key | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-316 | a person on the dashboard is a human | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 
 ## Gates
 

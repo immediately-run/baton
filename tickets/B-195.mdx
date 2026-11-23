@@ -72,10 +72,11 @@ The §14 rows first, then the code.
 4. **A session writes an owner's or member's attestation.** `POST
    /v1/repositories/{repository}/attestations` accepts a dashboard session — the front resolves
    the cookie and the tab's `Baton-Session` on it under R-BTN-16's checks, as B-192 does for
-   GETs — with the writer recorded as its key's role, `owner` or `member` (R-BTN-181; a member's
-   only for a `std:decision@1` whose leg's `asks` label it holds, R-BTN-204, with B-320); an
-   administrator's session is refused here (it is no owner, and
-   R-BTN-185 keeps `human` from a session). The route's existing key path is unchanged. A
+   GETs — with the writers recorded as `human` and its key's role, `owner` or `member`
+   (R-BTN-181, R-BTN-185: a person using the dashboard is a human; a member's only for a
+   `std:decision@1` whose leg's `asks` label it holds, R-BTN-204, with B-320); an
+   administrator's session is refused a person's answer (R-BTN-181). R-BTN-185's
+   security-key touch under `hardware` is B-322's. The route's existing key path is unchanged. A
    session's `std:decision@1` for a queued person leg is the person leg's answer (R-BTN-116).
    Not a confirmed action (R-BTN-155).
 
@@ -100,7 +101,7 @@ The §14 rows first, then the code.
 ### Invariants
 
 - **R-BTN-163**: severity then age; one-step resolving. **R-BTN-116**: an answer is a
-  `std:decision@1`. **R-BTN-185**: a session writes as its key's role, `owner` or `member`, never `human`.
+  `std:decision@1`. **R-BTN-185**: a session writes as `human` and as its key's role.
 - **R-BTN-155**: nothing here is confirmed. **An owner's session, its repositories**.
   **Both hosts** (R-BTN-55).
 

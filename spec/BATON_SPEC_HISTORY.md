@@ -18,12 +18,13 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
 
 ## Changelog
 
-- **2026-11-23 — Every person role on the dashboard: members, sessions per role and per tab
-  (R-BTN-155, R-BTN-204, R-BTN-186).**
+- **2026-11-23 — Every person role on the dashboard: members, sessions per role and per tab, a
+  person on the dashboard a human (R-BTN-155, R-BTN-204, R-BTN-186, R-BTN-185).**
   Rules changed: R-BTN-155 (rewritten), R-BTN-186, R-BTN-181, R-BTN-116, R-BTN-129, R-BTN-127,
   R-BTN-57, R-BTN-159, R-BTN-16, the policy table's `attestations` default, §11's preamble,
   §12.1, §13.2, §14; S-BTN-308, G-BTN-57. Added: R-BTN-204, S-BTN-313, S-BTN-314, S-BTN-315,
-  G-BTN-174; S-BTN-270, S-BTN-278, S-BTN-279, R-BTN-191, §12.2, `human-gates`; four open
+  G-BTN-174, S-BTN-316; S-BTN-270, S-BTN-278, S-BTN-279, R-BTN-185, R-BTN-188, R-BTN-191,
+  §12.2, `human-gates`; four open
   questions; two Decisions entries changed, one replaced, one added. The
   owner, 2026-11-23, on finding that the dashboard could not answer a person leg ("This page cannot
   answer it — an administrator's session answers no person leg"): "this is fundamentally
@@ -67,6 +68,15 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   its key route), with R-BTN-16, §12.1 and §14 rewritten to match; the header rule scoped to
   `/v1/` requests; each of the rest. The owner's promise is narrowed by the key-only acts and the
   confirmation, which the owner should weigh: they keep a stolen session from outliving its key.
+  The owner, 2026-11-23, on the open question of human-only acts from the dashboard: "I think a
+  human using the dashboard should be considered a human." Asked which sessions, the owner chose
+  every person's session — administrator's, owner's and member's, however it was opened — over a
+  human-only key's session alone and over Access sign-ins alone, accepting that an agent holding
+  an owner key and a browser can open a session by code and act as the human; and, where a
+  repository's `human_key` is `hardware`, a security-key touch per human act, over the session
+  alone, so `human-gates` stays true. R-BTN-185 now says so; R-BTN-181's `human` writer, R-BTN-188's
+  `human` approver entry, R-BTN-57, §12.1, S-BTN-278, S-BTN-313, the Decisions entry on human-only
+  credentials and the open question (now MCP's alone) follow; S-BTN-316 added; B-322 builds it.
 
 - **2026-11-23 — Tiers retired (§6.6 gate 5, R-BTN-66).**
   Rules changed: R-BTN-5, R-BTN-9, R-BTN-34, R-BTN-35, R-BTN-50, R-BTN-58, R-BTN-66, R-BTN-74,
