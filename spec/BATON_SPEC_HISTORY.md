@@ -104,7 +104,8 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   several homes, and S-BTN-124's trigger. Fixed: each, R-BTN-188 now the one home of which session
   matches which approver entry and R-BTN-155 of when a request is a session's. A member reads the
   repository reads, the board and a leg's runs, but not the owners' grants or policy log — narrower
-  than "reads everything" in the option the owner chose, and left for the owner to widen.
+  than "reads everything" in the option the owner chose; asked, the owner accepted it ("your
+  proposal is accepted on this", 2026-11-23).
 
 - **2026-11-23 — Tiers retired (§6.6 gate 5, R-BTN-66).**
   Rules changed: R-BTN-5, R-BTN-9, R-BTN-34, R-BTN-35, R-BTN-50, R-BTN-58, R-BTN-66, R-BTN-74,

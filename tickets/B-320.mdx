@@ -53,8 +53,8 @@ rule wins.
 3. **Reads.** A member key is a *reader* of its repositories (§14), and reads the board and a
    leg's runs, which §14 lists for a member; `GET /v1/repositories` lists its own. Not the owners'
    grants or policy log, which list the repository's credentials and the policy's history
-   (R-BTN-204; the owner's brief said "reads everything", and this narrowing is the spec PR's,
-   flagged for the owner). Nothing else: every owner, administrator and runner
+   (R-BTN-204; the owner's brief said "reads everything", and the owner accepted this narrowing
+   on 2026-11-23). Nothing else: every owner, administrator and runner
    route is `forbidden` to it.
 4. **The answer.** `POST …/attestations` takes a member key's or member's session's
    `std:decision@1` for a person leg whose `asks` label is in its `answers` (R-BTN-116 says
