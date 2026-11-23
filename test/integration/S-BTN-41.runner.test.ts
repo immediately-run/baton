@@ -20,7 +20,7 @@ import { dirname, join, resolve } from 'node:path';
 import { BatonApi, BatonRefusal } from '../../src/runner/api';
 import { Runner, legActivity, newestWrite } from '../../src/runner/runner';
 import { legNeeds, readHead } from '../../src/runner/home';
-import { capabilitiesOf } from '../../src/shared/vocabulary.mjs';
+import { capabilitiesOf } from '../../src/vendor/vocabulary.mjs';
 import { call as hostCall } from '#host';
 import { course, cutover, ORIGIN, ownerCall, placed, rows, setClock, syncCall, ticket, TOKENS } from '../helpers';
 import relay from '../fixtures/courses/relay/course.json';

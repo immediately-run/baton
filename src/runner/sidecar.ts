@@ -1,7 +1,7 @@
 // The runner's heartbeat cadence, lease and spool delivery (R-BTN-6, R-BTN-26).
 import { appendFileSync, readdirSync, readFileSync, renameSync, rmSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
-import { capabilitiesOf } from '../shared/vocabulary.mjs';
+import { capabilitiesOf } from '../vendor/vocabulary.mjs';
 import { BatonRefusal } from './api';
 import type { MachineLocks } from './machineLocks';
 import type { RunnerOptions } from './runner';
