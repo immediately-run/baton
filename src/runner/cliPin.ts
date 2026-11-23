@@ -5,10 +5,10 @@
 // released copy (no working tree) names the commit its `dist/build.json` was built from, and is
 // unpinned only when that build was dirty, for no commit holds its files. Reported, never
 // refused: nothing gates on it, and a state that cannot be read is said so, never guessed.
+import { git } from '../defaults/git';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { workingTreeOf } from '../../cli/baton.mjs';
-import { git } from './home';
+import { workingTreeOf } from '../client/version.mjs';
 
 /** What the runner reports about its own CLI — the heartbeat `profile`'s `cli` key and the
  *  start line's subject. `kind` says how the pinning was read; it stays here, for the line's

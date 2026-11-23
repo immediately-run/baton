@@ -5,9 +5,10 @@
 // call that cannot reach Baton throws. R-BTN-197 (B-254): every call says which client it is
 // (`Baton-Client`), and the served versions each answer names are warned on — once at start and
 // again whenever they change.
+import type { AdvanceAnswer, BeatAnswer, ClaimAnswer } from '../shared/runner-wire';
 import { readFileSync } from 'node:fs';
-import { API_KEY, signHeaders, signingKey } from '../../cli/sign.mjs';
-import { clientVersion } from '../../cli/version.mjs';
+import { API_KEY, signHeaders, signingKey } from '../client/sign.mjs';
+import { clientVersion } from '../client/version.mjs';
 import { compareVersions, parseClientVersions } from '../shared/versions.mjs';
 
 /** §6.3: every heartbeat request — and every call a fence depends on — has a 30-second timeout. */
@@ -50,7 +51,7 @@ export interface ApiOptions {
   kind?: string;
 }
 
-// The SSHSIG signing itself is cli/sign.mjs's (the one `baton admin` uses — the same verifier
+// The SSHSIG signing itself is src/client/sign.mjs's (the one `baton admin` uses — the same verifier
 // shape docs' batonSign.mjs implements); imported, never copied.
 
 /** The auth a production runner uses: the machine's key (`BATON_KEY_FILE`, or `BATON_KEY`,
@@ -97,7 +98,7 @@ export class BatonApi {
     this.secret = s;
   }
 
-  private async call(method: string, path: string, body?: unknown): Promise<Record<string, any>> {
+  private async call<T = Record<string, any>>(method: string, path: string, body?: unknown): Promise<T> {
     const url = new URL(path, this.o.url).toString();
     const text = body === undefined ? '' : JSON.stringify(body);
     const headers = new Headers(this.o.auth(method, url, text, this.secret));
@@ -126,7 +127,7 @@ export class BatonApi {
       throw new BatonRefusal(code, typeof json?.rule_code === 'string' ? json.rule_code : undefined,
         typeof json?.message === 'string' ? json.message : `${method} ${path}: ${res.status}`, res.status, versions);
     }
-    return json ?? {};
+    return (json ?? {}) as T;
   }
 
   /** R-BTN-197: `baton: this <kind> is <version>; Baton recommends <recommended> and refuses
@@ -146,7 +147,7 @@ export class BatonApi {
     }
   }
 
-  heartbeat(body: Record<string, unknown>): Promise<Record<string, any>> {
+  heartbeat(body: Record<string, unknown>): Promise<BeatAnswer> {
     return this.call('POST', '/v1/runner/heartbeat', body);
   }
   /** §11: the sorted legs this runner may take — what an idle runner asks for (R-BTN-45). */
@@ -178,10 +179,10 @@ export class BatonApi {
   board(body: Record<string, unknown>): Promise<Record<string, any>> {
     return this.call('POST', '/v1/sync/board', body);
   }
-  claim(body: { request_id: string; ticket_id?: string }): Promise<Record<string, any>> {
+  claim(body: { request_id: string; ticket_id?: string }): Promise<ClaimAnswer> {
     return this.call('POST', '/v1/runner/claim', body);
   }
-  advance(claimId: number, body: { reached?: string; leg: string; bars?: string[]; evidence?: string; outputs?: unknown[]; taken?: { choice: string; alternative: string; dead: string[] }[]; run_inputs?: { ticket?: { version: string; read_digest: string }; inputs: unknown[] }; head_sha?: string | null; session_url?: string; local_order?: { by: string; ran_at: string } }): Promise<Record<string, any>> {
+  advance(claimId: number, body: { reached?: string; leg: string; bars?: string[]; evidence?: string; outputs?: unknown[]; taken?: { choice: string; alternative: string; dead: string[] }[]; run_inputs?: { ticket?: { version: string; read_digest: string }; inputs: unknown[] }; head_sha?: string | null; session_url?: string; local_order?: { by: string; ran_at: string } }): Promise<AdvanceAnswer> {
     return this.call('POST', `/v1/runner/claims/${claimId}/advance`, body);
   }
   end(claimId: number, body: Record<string, unknown>): Promise<Record<string, any>> {

@@ -17,6 +17,7 @@
 //
 // A refusal is thrown, and the CLI prints it as one `baton: …` line, exit 2 — B-111's check keeps
 // its own exit 1 for a finding.
+import { git, gitText } from './git';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -32,7 +33,7 @@ import { appendStatus, filingDate, firstCommit, historyEntries, rereadMismatch, 
 import { ticketsMarkdown, type MarkdownFile } from './tickets-markdown';
 import { claimMismatch, formatTicket, ticketPathsUnder, ticketPrView } from '../shared/ticketPr.mjs';
 import { defaultBranch } from './request';
-import { DEFAULT_URL } from '../../cli/baton.mjs';
+import { DEFAULT_URL } from '../client/config.mjs';
 import { remoteSlug, ownRepositoryId } from './cli';
 import { builtIn, DEFAULT_COURSE } from './courses';
 import { holderRefusal, readTicketPosition, Undetermined, type BatonPosition } from './tickets-baton';
@@ -41,8 +42,6 @@ import { batonTarget, fallbackNote, floorFor, nextMain, parseKind, takeNumber } 
 /** The most tries one command makes when the default branch moves under it: the stopgap's. */
 export const TICKET_TRIES = 6;
 
-const git = (root: string, ...a: string[]): string =>
-  execFileSync('git', ['-C', root, ...a], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, LC_ALL: 'C' } }).trim();
 
 const today = (): string => new Date().toISOString().slice(0, 10);
 
@@ -138,12 +137,12 @@ function transact(root: string, io: TicketsIo, describe: string, change: (dir: s
   const trailers = (io.trailers ?? process.env.TICKET_TRAILERS ?? '').trim();
   const requireTrailers = io.requireTrailers ?? process.env.TICKET_REQUIRE_TRAILERS === '1';
   for (let attempt = 1; attempt <= TICKET_TRIES; attempt++) {
-    git(root, 'fetch', '-q', remote, branch);
+    gitText(root, 'fetch', '-q', remote, branch);
     const dir = mkdtempSync(join(tmpdir(), 'baton-tickets-'));
     try {
       // The head the push must extend: the commit the fetch just brought, never a stale
       // remote-tracking ref that would be refused as no fast-forward on every try.
-      git(root, 'worktree', 'add', '-q', '--detach', dir, 'FETCH_HEAD');
+      gitText(root, 'worktree', 'add', '-q', '--detach', dir, 'FETCH_HEAD');
       const { message, write, move } = change(dir);
       const written = new Set(write.map((w) => w.path));
       for (const m of move) {
@@ -159,7 +158,7 @@ function transact(root: string, io: TicketsIo, describe: string, change: (dir: s
       }
       // The paths this command touched, and nothing else: the worktree is a fresh checkout of
       // the fetched head, so nothing else in it is this command's to commit.
-      git(dir, 'add', '-A', '--', ...new Set([...write.map((w) => w.path), ...move.map((m) => m.from)]));
+      gitText(dir, 'add', '-A', '--', ...new Set([...write.map((w) => w.path), ...move.map((m) => m.from)]));
       // Nothing to record is a lost race too — a peer pushed this same change first — so it is
       // the next try's, not a failure.
       // Asked, not parsed from a failure: `git diff --cached --quiet` exits 0 when the index
@@ -167,7 +166,7 @@ function transact(root: string, io: TicketsIo, describe: string, change: (dir: s
       // looks like — a rewrite that lands the same bytes.
       const staged = (() => {
         try {
-          git(dir, 'diff', '--cached', '--quiet');
+          gitText(dir, 'diff', '--cached', '--quiet');
           return false;
         } catch {
           return true;
@@ -180,10 +179,10 @@ function transact(root: string, io: TicketsIo, describe: string, change: (dir: s
       }
       // The message git commits is the command's with its trailers (B-16); the success line
       // below prints the command's own subject, which the trailers never touch.
-      git(dir, 'commit', '-q', '-m', ticketCommitMessage(message, trailers, requireTrailers));
+      gitText(dir, 'commit', '-q', '-m', ticketCommitMessage(message, trailers, requireTrailers));
       try {
-        git(dir, 'push', '-q', remote, `HEAD:refs/heads/${branch}`);
-        if (!io.quiet) log(`✓ ${message.split('\n')[0]} — pushed as ${git(dir, 'rev-parse', '--short', 'HEAD')}`);
+        gitText(dir, 'push', '-q', remote, `HEAD:refs/heads/${branch}`);
+        if (!io.quiet) log(`✓ ${message.split('\n')[0]} — pushed as ${gitText(dir, 'rev-parse', '--short', 'HEAD')}`);
         return;
       } catch (e) {
         const detail = detailOf(e);
@@ -200,7 +199,7 @@ function transact(root: string, io: TicketsIo, describe: string, change: (dir: s
       }
     } finally {
       try {
-        git(root, 'worktree', 'remove', '--force', dir);
+        gitText(root, 'worktree', 'remove', '--force', dir);
       } catch {
         rmSync(dir, { recursive: true, force: true });
       }
@@ -454,7 +453,7 @@ function isDoneElsewhere(dir: string, id: string): boolean {
   const remote = dependencyRemote(readSettingsJson(dir).repos ?? {}, repository);
   const clone = mkdtempSync(join(tmpdir(), 'baton-dep-'));
   try {
-    execFileSync('git', ['clone', '-q', '--depth', '1', remote, clone], { stdio: ['ignore', 'ignore', 'pipe'], env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } });
+    git(null, ['clone', '-q', '--depth', '1', '--', remote, clone], { stdio: ['ignore', 'ignore', 'pipe'] });
     const items = ((JSON.parse(readFileSync(join(clone, '.baton', 'baton.json'), 'utf8')) as { items?: string }).items ?? 'tickets').replace(/\/$/, '');
     const found = locate(items, local, (path) => existsSync(join(clone, path)));
     if (!found) throw new Error(`depends_on names ${id}, which is neither live nor archived on ${remote} (B-113)`);
@@ -642,7 +641,7 @@ export async function newTicket(root: string, io: TicketsIo, t: NewTicket): Prom
     // its `baton-request/<ID>` branch holds its id, and no allocator hands it out again. The head
     // the filing sits on is the worktree's own (the fetched default branch).
     const scanned = (): string => {
-      const openRequests = openRequestNumbers(dir, remote, items, prefix, git(dir, 'rev-parse', 'HEAD'), io.warn);
+      const openRequests = openRequestNumbers(dir, remote, items, prefix, gitText(dir, 'rev-parse', 'HEAD'), io.warn);
       return `${prefix}${Math.max(nextNumber(files, settings, prefix), ...openRequests.map((n) => n + 1))}`;
     };
     const id = given?.startsWith(prefix) ? given : scanned();
@@ -703,20 +702,20 @@ export async function newTicket(root: string, io: TicketsIo, t: NewTicket): Prom
    *  leftover branch or a reissue after lost state, not a scan that never ran (round 1,
    *  should-fix 4); any other refusal is git's own words, never a collision claim. */
   const landThroughPr = (): { id: string; branch: string; message: string } => {
-    git(root, 'fetch', '-q', remote, branch);
+    gitText(root, 'fetch', '-q', remote, branch);
     const dir = mkdtempSync(join(tmpdir(), 'baton-tickets-'));
     try {
-      git(root, 'worktree', 'add', '-q', '--detach', dir, 'FETCH_HEAD');
+      gitText(root, 'worktree', 'add', '-q', '--detach', dir, 'FETCH_HEAD');
       const { id, message, write } = buildFiling(dir, false);
       const sideBranch = `baton-ticket/${id}`;
       for (const w of write) {
         mkdirSync(dirname(join(dir, w.path)), { recursive: true });
         writeFileSync(join(dir, w.path), w.text);
       }
-      git(dir, 'add', '--', ...write.map((w) => w.path));
-      git(dir, 'commit', '-q', '-m', message);
+      gitText(dir, 'add', '--', ...write.map((w) => w.path));
+      gitText(dir, 'commit', '-q', '-m', message);
       try {
-        git(dir, 'push', '-q', remote, `HEAD:refs/heads/${sideBranch}`);
+        gitText(dir, 'push', '-q', remote, `HEAD:refs/heads/${sideBranch}`);
       } catch (e) {
         const detail = detailOf(e);
         // The refusal's own words, whole: git's summary lines say nothing a person can act on.
@@ -734,7 +733,7 @@ export async function newTicket(root: string, io: TicketsIo, t: NewTicket): Prom
       return { id, branch: sideBranch, message };
     } finally {
       try {
-        git(root, 'worktree', 'remove', '--force', dir);
+        gitText(root, 'worktree', 'remove', '--force', dir);
       } catch {
         rmSync(dir, { recursive: true, force: true });
       }
@@ -745,7 +744,7 @@ export async function newTicket(root: string, io: TicketsIo, t: NewTicket): Prom
    *  the rest. */
   const forgeOf = (): 'github' | 'git' => {
     try {
-      return /github\.com/.test(git(root, 'remote', 'get-url', remote)) ? 'github' : 'git';
+      return /github\.com/.test(gitText(root, 'remote', 'get-url', remote)) ? 'github' : 'git';
     } catch {
       return 'git';
     }
@@ -998,8 +997,8 @@ function ticketPrFindings(root: string, settings: TicketSettings, base: string |
   if (base == null) return 0;
   // Trimmed stdout for shas, paths and logs; RAW for `show` — a file's bytes are the view's
   // input, and a trimmed trailing newline would read as a body change.
-  const run = (...a: string[]): string => execFileSync('git', ['-C', root, ...a], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, LC_ALL: 'C' } }).trim();
-  const raw = (...a: string[]): string => execFileSync('git', ['-C', root, ...a], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, LC_ALL: 'C' } });
+  const run = (...args: string[]) => gitText(root, ...args);
+  const raw = (...args: string[]) => git(root, args);
   let mergeBase: string;
   try {
     mergeBase = run('merge-base', base, 'HEAD');
@@ -1010,10 +1009,7 @@ function ticketPrFindings(root: string, settings: TicketSettings, base: string |
   // NUL-separated with quoting off: a path with a non-ASCII byte, `"` or `\` is emitted QUOTED
   // by git's default settings, fails the prefix test and so hides from the computed view — the
   // exact failure B-133 exists to prevent.
-  const paths = ticketPathsUnder(settings.items ?? 'tickets', execFileSync(
-    'git', ['-C', root, '-c', 'core.quotepath=false', 'diff', '--name-only', '--no-renames', '-z', mergeBase],
-    { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, LC_ALL: 'C' } },
-  ).split('\0').filter(Boolean));
+  const paths = ticketPathsUnder(settings.items ?? 'tickets', raw('-c', 'core.quotepath=false', 'diff', '--name-only', '--no-renames', '-z', mergeBase).split('\0').filter(Boolean));
   const read = (rev: string, path: string): string | undefined => {
     try {
       return raw('show', `${rev}:${path}`);

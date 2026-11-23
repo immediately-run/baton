@@ -9,6 +9,8 @@
 // presence of this leg's heading: trust nothing the agent touched, check everything the
 // machine reads (the owner's decision, 2026-10-22). Course code in the CLI, never core (§2b).
 import { execFileSync } from 'node:child_process';
+import { GIT_NONINTERACTIVE_ENV } from '../client/git-env.mjs';
+import { git } from './git';
 import { rmSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
 import type { PostedStation } from '../core/board';
@@ -81,16 +83,6 @@ export const CLOSE_TIMEOUT_MS = 120_000;
  * took about 14½ (2 vCPUs), too close to the bound for a suite that only grows. */
 export const RUN_TESTS_TIMEOUT_MS = 1_800_000;
 
-/** B-94: git's environment for every call the close and the runner's own git make —
- * non-interactive by construction, so a credential prompt or an ssh host-key question can never
- * wait on a terminal the runner does not have: no terminal prompt from git itself, and ssh in
- * batch mode, failing rather than asking. One definition (B-94's review round 1): the runner
- * and the generated stubs import it from here. */
-export const GIT_NONINTERACTIVE_ENV: Record<string, string> = {
-  GIT_TERMINAL_PROMPT: '0',
-  GIT_SSH_COMMAND: 'ssh -o BatchMode=yes -o ConnectTimeout=20',
-};
-
 /** The real command runner every standard course's `close` uses; tests inject their own. B-94: it
  * is bounded — a command still running at its bound is killed with SIGKILL and its failure
  * thrown (Node reports it as a timeout error) — and never interactive. */
@@ -100,7 +92,7 @@ export const exec = (
   cwd: string,
   opts: { env?: Record<string, string>; input?: string; timeoutMs?: number } = {},
 ): string =>
-  execFileSync(cmd, args, {
+  cmd === 'git' ? git(null, args, { ...opts, cwd, timeoutMs: opts.timeoutMs ?? CLOSE_TIMEOUT_MS }).trim() : execFileSync(cmd, args, {
     cwd, encoding: 'utf8', timeout: opts.timeoutMs ?? CLOSE_TIMEOUT_MS, killSignal: 'SIGKILL',
     ...(opts.input != null ? { input: opts.input } : { stdio: ['ignore', 'pipe', 'pipe'] }),
     env: { ...process.env, ...GIT_NONINTERACTIVE_ENV, ...opts.env },

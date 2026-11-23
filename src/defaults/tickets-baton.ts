@@ -23,8 +23,8 @@
 // key cannot sign runner routes, and the board's `holders` has already answered the ticket's own
 // lock, so that one read is skipped, not fatal.
 import { readFileSync } from 'node:fs';
-import { send } from '../../cli/baton.mjs';
-import { requestCredential } from '../../cli/sign.mjs';
+import { send } from '../client/send.mjs';
+import { requestCredential } from '../client/sign.mjs';
 
 /** One live claim on a ticket, as the board's `holders` answers it (B-129). */
 export interface Holder {

@@ -29,17 +29,17 @@
 // The pure half (`parseReplayArgs`, `pickRun`, `replayEnvironment`, `compareRead`, `slugOf`) is
 // unit-tested in test/unit/runner-replay.test.ts; the whole is exercised end-to-end by S-BTN-48
 // against the local host, over a real repository.
-import { execFileSync } from 'node:child_process';
+import { git, gitBuffer } from '../defaults/git';
 import { createHash } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { DEFAULT_URL } from '../../cli/baton.mjs';
-import { requestCredential, signHeaders } from '../../cli/sign.mjs';
+import { DEFAULT_URL } from '../client/config.mjs';
+import { requestCredential, signHeaders } from '../client/sign.mjs';
 import { bareTicketId } from '../defaults/ticket-state';
 import { digestOfRead, MARKDOWN_SOURCE } from '../defaults/ticket-versions';
-import { dropCourse, git, loadCourse, extractTicketSource, type CourseLoad } from './home';
+import { dropCourse, loadCourse, extractTicketSource, type CourseLoad } from './home';
 import { loadExecutor, type Executor, type Handle } from './executor';
 import { maskLegOutput, readMaskEnv, runnerConfigPath, secretValues } from './mask';
 
@@ -245,7 +245,7 @@ const sha256 = (bytes: Buffer | string): string => `sha256:${createHash('sha256'
 /** One git command's bytes as a Buffer (a path's bytes at a commit are not text). */
 function gitBytes(home: string, args: string[]): Buffer | null {
   try {
-    return execFileSync('git', ['-C', home, ...args], { encoding: 'buffer', maxBuffer: 16 << 20, timeout: 30_000, killSignal: 'SIGKILL' }) as Buffer;
+    return gitBuffer(home, args);
   } catch {
     return null;
   }

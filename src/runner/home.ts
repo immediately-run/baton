@@ -4,32 +4,13 @@
 // sha is missing; then `git show` reads blobs straight from the object store. Leg scripts are
 // extracted per claim into a scratch directory, so a course change between two claims needs no
 // restart and the fresh `import()` the wrapper does is of the snapshot's bytes.
-import { execFile, execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { graphOf, legCapabilities, type Graph } from '../core/graph';
-
-/** B-94: the bound on every git the runner itself runs. The heartbeat path reads the snapshot
- * here (`ensureSha`, `courseOf`, `loadCourse`), and a state file lock, a hook or a stalled
- * filesystem must never hold the event loop past a beat — a runner that stops beating while its
- * process lives is a claim lost silently. */
-export const GIT_TIMEOUT_MS = 30_000;
-
-// B-94: git's non-interactive environment is defined once, beside the close's bound — the
-// runner's git and the generated stubs import it from there.
-import { GIT_NONINTERACTIVE_ENV } from '../defaults/ticket-state';
-
-/** One git command in the home checkout; throws with stderr when it fails, and is killed at
- * `timeoutMs` (default `GIT_TIMEOUT_MS`, under a beat) when it cannot answer (B-94). */
-export function git(home: string, args: string[], timeoutMs: number = GIT_TIMEOUT_MS): string {
-  return execFileSync('git', ['-C', home, ...args], {
-    encoding: 'utf8', maxBuffer: 16 << 20, timeout: timeoutMs, killSignal: 'SIGKILL',
-    env: { ...process.env, ...GIT_NONINTERACTIVE_ENV },
-  });
-}
+import { git, gitAsync } from '../defaults/git';
 
 export interface CourseLoad {
   course: string;
@@ -128,16 +109,6 @@ export function advanceHome(home: string, sha: string, defaultBranch: string | n
  *  asynchronously, so the event loop, and with it the beat, never waits on it. */
 export const CLONE_TIMEOUT_MS = 10 * 60_000;
 
-/** One git command, asynchronously, bounded and non-interactive like `git` (B-94). */
-function gitAsync(cwd: string | null, args: string[], timeoutMs: number = CLONE_TIMEOUT_MS): Promise<string> {
-  return new Promise((resolve, reject) => {
-    execFile('git', cwd ? ['-C', cwd, ...args] : args, {
-      encoding: 'utf8', maxBuffer: 16 << 20, timeout: timeoutMs, killSignal: 'SIGKILL',
-      env: { ...process.env, ...GIT_NONINTERACTIVE_ENV },
-    }, (e, stdout, stderr) => (e ? reject(new Error(`git ${args[0]}: ${String(stderr || e.message).trim().slice(0, 300)}`)) : resolve(stdout)));
-  });
-}
-
 /** R-BTN-72, R-BTN-4 (B-188): a claim's own checkout when the runner holds several — a separate
  *  `git clone` of the home with its own git directory (never a worktree sharing refs), kept at
  *  `dir` and reused by the next claim there. Its `origin` is the home's (so its pushes go where
@@ -150,24 +121,24 @@ export async function prepareClone(home: string, dir: string, sha: string, branc
   if (!existsSync(join(dir, '.git'))) {
     rmSync(dir, { recursive: true, force: true });
     mkdirSync(dirname(dir), { recursive: true });
-    await gitAsync(null, ['clone', '-q', '--no-checkout', home, dir]);
+    await gitAsync(null, ['clone', '-q', '--no-checkout', home, dir], CLONE_TIMEOUT_MS);
   }
   let origin = '';
   try {
-    origin = (await gitAsync(home, ['remote', 'get-url', 'origin'])).trim();
+    origin = (await gitAsync(home, ['remote', 'get-url', 'origin'], CLONE_TIMEOUT_MS)).trim();
   } catch {
     origin = ''; // a home with no origin: the clone's origin stays the home
   }
-  await gitAsync(dir, ['remote', 'set-url', 'origin', origin || home]);
-  await gitAsync(dir, ['fetch', '-q', '--no-tags', home, '+refs/heads/*:refs/baton/home/heads/*', '+refs/remotes/*:refs/baton/home/remotes/*']);
+  await gitAsync(dir, ['remote', 'set-url', 'origin', origin || home], CLONE_TIMEOUT_MS);
+  await gitAsync(dir, ['fetch', '-q', '--no-tags', home, '+refs/heads/*:refs/baton/home/heads/*', '+refs/remotes/*:refs/baton/home/remotes/*'], CLONE_TIMEOUT_MS);
   try {
-    await gitAsync(dir, ['rev-parse', '--verify', '--quiet', `${sha}^{commit}`]);
+    await gitAsync(dir, ['rev-parse', '--verify', '--quiet', `${sha}^{commit}`], CLONE_TIMEOUT_MS);
   } catch {
     // The snapshot is in the home's objects but on no ref there (a fetched FETCH_HEAD): by id.
-    await gitAsync(dir, ['fetch', '-q', '--no-tags', home, sha]);
+    await gitAsync(dir, ['fetch', '-q', '--no-tags', home, sha], CLONE_TIMEOUT_MS);
   }
-  await gitAsync(dir, ['checkout', '-q', '-f', '-B', branch ?? 'baton-claim', sha]);
-  await gitAsync(dir, ['clean', '-fdq']);
+  await gitAsync(dir, ['checkout', '-q', '-f', '-B', branch ?? 'baton-claim', sha], CLONE_TIMEOUT_MS);
+  await gitAsync(dir, ['clean', '-fdq'], CLONE_TIMEOUT_MS);
 }
 
 /** Load a claim's course from the snapshot: the graph, and every leg script the snapshot's

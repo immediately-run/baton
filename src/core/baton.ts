@@ -5,6 +5,7 @@
 // request's writes are one transaction, so the compare-and-set below needs no lock. Requests
 // reach it only through the front, which has verified the principal — all but a signed
 // request's key, signature, clock and nonce, which only the core can check (verifySigned).
+import type { ClaimAnswer } from '../shared/runner-wire';
 import { MIGRATIONS } from '../migrations';
 import { versionedStore, clockBucket, ifNoneMatch, nonScheduling, schedulingVersion, type VersionedStore } from './stateVersion';
 import { runnerViewResponse, requireFleetScope } from './runnerViews';
@@ -1890,7 +1891,7 @@ export class BatonCore {
    *  changes what a runner refuses, not what it runs. With the setting off, `{}`: nothing is
    *  gated, and the ticket's brief mark rides its row as ever. A group missing (`read` null or
    *  absent) is the fail-closed case — no signed version — and the runner treats it so. */
-  private async claimControl(ticket: string, claimId: number): Promise<{ control?: unknown }> {
+  private async claimControl(ticket: string, claimId: number): Promise<Pick<ClaimAnswer, 'control'>> {
     if (!ticket.includes(':')) return {};
     const repo = repositoryOf(ticket);
     if (!this.sql<{ flag: number }>('SELECT require_signed_control AS flag FROM repositories WHERE id = ?', repo)[0]?.flag) return {};
