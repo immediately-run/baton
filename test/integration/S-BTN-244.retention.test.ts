@@ -116,7 +116,11 @@ describe('S-BTN-244 R-BTN-149 retention', () => {
     expect(await rows('SELECT seq FROM events WHERE repository_id IS NOT NULL AND at = ? ORDER BY seq', T0)).toEqual(before);
   });
 
-  it.runIf((HOST as string) === 'local')('releases the local queue during archive I/O and rechecks the mirror cursor', async () => {
+  it.runIf((HOST as string) === 'local')('prunes snapshots during archive I/O without a second export, then rechecks the mirror cursor', async () => {
+    const expired = git.head;
+    expect((await git.post()).status).toBe(200);
+    expect(git.head).not.toBe(expired);
+    const snapshots = () => count(`SELECT COUNT(*) AS n FROM board_snapshots WHERE repository_id = 'docs' AND sha = ?`, expired);
     await rows(`INSERT INTO events (at, kind, actor, detail_json, repository_id) VALUES (?, 'admin', 'test', '{}', 'docs')`, T0);
     await setClock(T0 + 91 * DAY);
     await ack(await maxSeq());
@@ -128,17 +132,25 @@ describe('S-BTN-244 R-BTN-149 retention', () => {
     const archiving = new Promise<void>((resolve) => { started = resolve; });
     const archived = new Promise<void>((resolve) => { release = resolve; });
     let writes = 0;
-    await useArchive(async () => { writes++; started(); await archived; });
+    await useArchive(async () => {
+      if (++writes !== 1) return;
+      started();
+      await archived;
+    });
     const pruning = tick();
     await Promise.race([archiving, pruning]);
     let ran = false;
-    const nextTurn = rows(`UPDATE repositories SET mirror_acked_seq = 0 WHERE id = 'docs'`).then(() => { ran = true; });
+    const nextTurn = snapshots().then((n) => { ran = true; return n; });
     try {
       await new Promise((resolve) => setTimeout(resolve, 0));
       expect(ran).toBe(true);
+      expect(await nextTurn).toBe(1);
+      // The batch is still eligible: only the in-flight guard prevents a second export.
       await tick();
       expect(writes).toBe(1);
+      expect(await snapshots()).toBe(0);
       expect(await oldRows()).toEqual(before);
+      await rows(`UPDATE repositories SET mirror_acked_seq = 0 WHERE id = 'docs'`);
     } finally {
       release();
       await Promise.all([pruning, nextTurn]);

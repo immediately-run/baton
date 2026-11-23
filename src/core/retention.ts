@@ -37,7 +37,7 @@ export interface Ctx {
 }
 
 export class Retention {
-  private pruning = false;
+  private archivingEvents = false;
 
   constructor(private readonly c: Ctx) {}
 
@@ -47,12 +47,14 @@ export class Retention {
 
   /** The alarm's share: one batch across the four steps, in order. */
   async prune(archive: EventArchive | undefined, batch = RETENTION_BATCH): Promise<void> {
-    if (this.pruning || this.c.sealed()) return;
-    this.pruning = true;
+    if (this.c.sealed()) return;
+    // An overlapping alarm can spend its batch on non-event cleanup while archive I/O is pending.
+    const eventArchive = this.archivingEvents ? undefined : archive;
+    if (eventArchive) this.archivingEvents = true;
     const now = this.c.now();
     let exported: number[] = [];
     try {
-      if (archive) exported = await this.exportEvents(archive, now, batch);
+      if (eventArchive) exported = await this.exportEvents(eventArchive, now, batch);
     } finally {
       try {
         // No transaction spans the archive I/O. A seal or a new mirror may have arrived.
@@ -63,7 +65,7 @@ export class Retention {
           if (left > 0) this.claims(now, left);
         });
       } finally {
-        this.pruning = false;
+        if (eventArchive) this.archivingEvents = false;
       }
     }
   }
