@@ -26,14 +26,14 @@ One line per decision in force; the reasoning and the rejected alternatives in f
 - Chose a grant's role and a domain label as the whole of a grant's trust, over a separate trust level, a model family or a separate-domain guarantee (R-BTN-180, R-BTN-183).
 - Chose to state that review is no security gate, `independent-review` requiring two reviews from distinct domains and nothing about model families (R-BTN-183, R-BTN-189).
 - Chose trusted runners that hold the only credential for a sensitive leg's action, re-check its attestations against Baton's record and trust Baton (R-BTN-182, R-BTN-189).
-- Chose that ticket `tier` is not a protected input, while no runner above the VM level serves a repository that runners below it push (R-BTN-184).
+- Chose no tiers: a ticket's difficulty gates no claim, and a ticket that needs a particular runner requires a capability it holds (§6.6 rule 4, R-BTN-45).
 - Chose provenance alone, each ticket served with who last pushed its body, over a `control-changed` notice (R-BTN-194, R-BTN-66).
 - Chose to verify no commit signature anywhere: who may land a path is the policy's, and who wrote one is the forge's pusher record (R-BTN-66, R-BTN-133, R-BTN-194, R-BTN-107).
 - Chose to make a break-glass change visible as an `out-of-course` finding, refusing nothing, and only where the policy protects control paths (§12.9).
 - Chose the policy knob `repos.unlisted` over one rule for every repository: a `cooperative` home resolves `repos:` by name, a `protected` one reaches only its list (R-BTN-140, R-BTN-188).
 - Chose to run checks only on the repository's own branches over a sandbox for forks' code (R-BTN-114).
 - Chose to answer a `baton.*` condition only through Baton's own authenticated surfaces, never a delegated key, and to count from Baton's own traversal record (R-BTN-163, R-BTN-63).
-- Chose no core default timers per tier: timers are the course's (R-BTN-167).
+- Chose no core default timers: timers are the course's (R-BTN-167).
 - Chose to keep dependencies within one repository (R-BTN-120).
 - Chose to leave reviewer-independence seats and tags as cooperative checks (R-BTN-60, R-BTN-66).
 - Chose a Cloudflare Durable Object over SQLite on a home server (§2).

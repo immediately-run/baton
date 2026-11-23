@@ -109,7 +109,7 @@ numbers.
 
     | field | posted as |
     |---|---|
-    | `id`, `title`, `tier`, `parent` (R-BTN-86), `not_before` (R-BTN-89) | the same |
+    | `id`, `title`, `parent` (R-BTN-86), `not_before` (R-BTN-89) | the same |
     | `status` | `done` → `closed` as done; `withdrawn`, `superseded`, `deferred` → `closed` as withdrawn; any other → live, in `display.status` |
     | `course` | `course_id` (default `default_course`, else `create-pr`) |
     | `requires` | capability names, expanded |
@@ -156,7 +156,7 @@ numbers.
     The `_filed` line, `tags: [request]` and the `rules re-read` notes are claims anyone who
     can push can write; the check and the claim verify their form alone.
   - **`baton ticket new`** (R-BTN-127) `--title T [--description D] [--project ID]
-    [--depends-on A,B] [--tags X,Y] [--tier T] [--order N] [--repos a,b] [--course C]
+    [--depends-on A,B] [--tags X,Y] [--order N] [--repos a,b] [--course C]
     [--body-file F] [--trust T] [--invariants I] [--direct] [-i KEY] [--url URL] [--offline]`
     files one ticket under an id from R-BTN-199.
     - It writes the conventional body unless `--body-file` names one: `**Brief:**`, `**Spec:**`,
@@ -398,7 +398,7 @@ The fingerprint stores no ticket content and is an optimization, never authority
                course: <course.json with its schemas>,           -- R-BTN-69, R-BTN-108
                step_kinds, branch_pattern, previous_branch_pattern? }],
   tickets:  [{ id,                                               -- local id
-               course_id, version?, key?, path?, title, tier?,    -- version: R-BTN-74; key: R-BTN-147
+               course_id, version?, key?, path?, title,          -- version: R-BTN-74; key: R-BTN-147
                requires[], expedite, repos[], rank?,             -- requires expanded; repos are forge paths
                parent?, not_before?,                             -- R-BTN-86, R-BTN-89
                depends_at?: [{ ticket, at | reached | done, leg? }],   -- R-BTN-120
@@ -501,12 +501,11 @@ The fingerprint stores no ticket content and is an optimization, never authority
     **current** source reads it as the store holds it now (`read(id, {})`), and a different
     version releases `stale-board`. A source that declares `versions` and exports no `read`
     releases `stale-board` too. A source that declares neither is not re-verified by version.
-  - **Re-verification of readiness.** The runner then checks the tier fits its ceiling and
-    runs the course's `sync.mjs` (through the wrapper, from a verified tree at the claim's
-    commit, R-BTN-133) on the ticket and its PRs at the fetched head. Its readiness must show
+  - **Re-verification of readiness.** The runner then runs the course's `sync.mjs` (through the
+    wrapper, from a verified tree at the claim's commit, R-BTN-133) on the ticket and its PRs at the fetched head. Its readiness must show
     the offered leg leaving the claim's station as Baton holds it (the claim response's
     station, `path_len` and queued leg, R-BTN-39); the ticket's position never comes from the
-    source. A ticket closed, archived or re-tiered, or the leg not offered there, releases
+    source. A ticket closed or archived, or the leg not offered there, releases
     `stale-board`. A ticket with no file — a `changes` check ticket (R-BTN-114) — is
     re-verified against the claim response's station and queued leg instead.
   - After this check, a version that moves under the claim is read again as R-BTN-198 says.

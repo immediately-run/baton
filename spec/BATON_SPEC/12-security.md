@@ -48,7 +48,7 @@ repository, its owners and administrators, except where a route's rule narrows t
   `grants`, `mcp_keys` and `settings`, and the bars in force or scheduled, R-BTN-146, each grant also naming
   the `other_repositories` its key holds); and
   `GET /v1/repositories/{repository}/board` (the repository reads' principals: the repository,
-  its `ready` tickets and `ready_by_tier`, `granted_capabilities`, the repository's live claims
+  its `ready` tickets, `granted_capabilities`, the repository's live claims
   as `holders` — each with its holder and when its lease ends (null for a legacy claim) — and `server_time`). A key outside the route's role is refused as this
   section says — `forbidden`, or `unauthenticated` for a key Baton does not know. The CLI's
   `baton admin repo list`, `baton owner grant list <repository>` and `baton repo board

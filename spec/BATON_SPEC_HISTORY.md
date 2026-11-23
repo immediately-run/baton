@@ -18,6 +18,27 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
 
 ## Changelog
 
+- **2026-11-23 — Tiers retired (§6.6 gate 5, R-BTN-66).**
+  Rules changed: R-BTN-5, R-BTN-35, R-BTN-50, R-BTN-58, R-BTN-66, R-BTN-74, R-BTN-127,
+  R-BTN-159, R-BTN-179, R-BTN-196, the heartbeat (§8), the board post (§4.4), §6.6, §13.1–§13.4,
+  §14; S-BTN-24, S-BTN-39, S-BTN-69, S-BTN-260, S-BTN-296, G-BTN-66; two Decisions entries. The
+  owner, 2026-11-23: "If possible, I would like to get rid of tiers entirely." A tier
+  (`routine`, `judgement`, `critical`, R3-1193) routed a ticket to a runner on a strong enough
+  model line: gate 5 refused a runner whose ceiling, the lower of its declared `tier_ceiling` and
+  its grant's `max_tier`, sat below the ticket's place on the repository's ladder. No runner
+  declared a ceiling and no course read a tier, so every runner sat at the top and the gate
+  refused only a tier off the ladder: on 2026-11-23 six tickets filed as `normal` or `high`
+  showed "nobody can take it — above-tier-ceiling" until #388 removed their `tier:` lines. A tier
+  was never a protected input (the retired Decisions entry), so it bounded nothing an owner
+  could rely on. Removed: gate 5 and its code `above-tier-ceiling`, the repository's `tiers`
+  ladder, the heartbeat's `tier_ceiling` and `tier_ceilings`, the grant's and the proposed
+  tokens' and check-runners' `max_tier`, a ticket's `tier` in the board post and every read,
+  the tickets list's `?tier=` filter, the board's `ready_by_tier`, staleness by a re-tier, and
+  the runner's tier check at re-verification. A ticket that needs a particular runner requires
+  a capability that runner holds (§6.6 rule 4), which an owner grants. Gate numbers are stable,
+  so 5 is left unused. A markdown ticket's `tier:` line is one of the fields its source ignores
+  (R-BTN-74), so the tickets that carry one need no edit.
+
 - **2026-11-21 — Sign-in through Cloudflare Access (R-BTN-155, R-BTN-57, S-BTN-308).**
   Rules changed: R-BTN-155, R-BTN-57, R-BTN-16, R-BTN-149, R-BTN-185, R-BTN-188; G-BTN-144, S-BTN-124. The
   owner approved it on 2026-11-21: a person Cloudflare Access has verified reaches a dashboard
@@ -3899,6 +3920,13 @@ The simplification of 2026-11-19 moved the scenarios and gates of unbuilt design
 
 Each entry is a transition the specification no longer describes. The code keeps the old form
 working until the stated condition holds, then removes it.
+
+- **Tier fields from older clients (2026-11-23).** A board post's ticket `tier`, a heartbeat's
+  `tier_ceiling` and `tier_ceilings`, and a grant's `max_tier` are accepted and dropped, never
+  refused, until no registered sync, runner or CLI sends one; the columns that held them are
+  dropped by a migration. A runner whose CLI still checks a ticket's tier at re-verification
+  reads it from the ticket's file: a tier on the default ladder fits its default top ceiling,
+  and one off the ladder releases `stale-board` until that runner's CLI moves.
 
 - **One claim per runner on the heartbeat (B-188, 2026-11-17).** The heartbeat answer keeps
   `claim` — the runner's oldest active claim, or null — beside `claims`, and reads the bare

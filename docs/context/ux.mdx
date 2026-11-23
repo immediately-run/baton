@@ -52,11 +52,11 @@ and walks each rule.
    after a run of failures, backoffs, refusals for one reason — has a multi-select and a bulk
    control. A filter by reason ("held: attempts exhausted") is enough to select them all. One
    confirmation covers the batch, and the result names each ticket that did not change, and why.
-3. **Every domain word on screen explains itself.** A tier (`critical`, `judgement`, `routine`), a
-   station, a leg, a gate code (`awaiting-sync`, `above-tier-ceiling`), a condition kind:
-   each carries its one-sentence meaning from [the vocabulary](vocabulary.mdx), inline or on
-   hover, and where it matters, its consequence ("only runners whose ceiling is critical take
-   it"). An internal code is never the only text.
+3. **Every domain word on screen explains itself.** A capability, a station, a leg, a gate code
+   (`awaiting-sync`, `missing-capability`), a condition kind: each carries its one-sentence
+   meaning from [the vocabulary](vocabulary.mdx), inline or on hover, and where it matters, its
+   consequence ("only runners granted `npm-publish` take it"). An internal code is never the
+   only text.
 4. **Every blocked state says why, who can clear it, and offers the control.** "Held — three
    failed attempts (gateway unreachable). You can lift it: [Lift]", not "held". "Waiting for a
    sync — the next one runs on a push or at …; [Resync now]", not `awaiting-sync`. When no one
@@ -87,7 +87,7 @@ Each gap needs its own ticket; these rules alone do not close them.
   lifted one ticket page at a time (rule 2). On 2026-11-21 the owner lifted 31
   `attempts-exhausted` holds with a pasted console script.
 - **Throughput (question 4):** no read or screen counts finished work over time.
-- **Explaining terms (rule 3):** tiers, stations and gate codes are drawn as bare codes.
+- **Explaining terms (rule 3):** capabilities, stations and gate codes are drawn as bare codes.
 - **Signing in (rule 1):** only an administrator's one-time link exists, minted from the CLI
   (R-BTN-57). The owner's sign-in (B-76) is not built, and an identity Cloudflare Access has
   verified does not open a session. Accepting that identity is a security-model decision for
