@@ -14,7 +14,6 @@ import { Stations, type Seen } from './stations';
 import { Questions } from './questions';
 import { Conditions } from './conditions';
 import { Admin, SESSION_COOKIE, SESSION_MS } from './admin';
-import { familyOf } from '../shared/baton.mjs';
 import { fitsTier, TIERS } from '../shared/vocabulary.mjs';
 import { clientVersionOf } from '../shared/versions.mjs';
 import { RunnerApi } from './runnerApi';
@@ -1732,7 +1731,7 @@ export class BatonCore {
 
     // Hash every row before the transaction: the digest is async, the transaction is not.
     const rows = await this.rowsFor(repo, p);
-    const changed: { upserted: number; deleted: number; renumbered?: { from: string; to: string; key: string }[]; confirmed?: number; stale_released?: number; courses_refused?: string[]; fleet_ignored?: boolean; dropped?: string[] } = { upserted: 0, deleted: 0 };
+    const changed: { upserted: number; deleted: number; renumbered?: { from: string; to: string; key: string }[]; confirmed?: number; stale_released?: number; courses_refused?: string[]; dropped?: string[] } = { upserted: 0, deleted: 0 };
     this.store.transaction(() => {
       // The row hashes were awaited after the number was used, so another run may have posted
       // meanwhile: this reading must still be the newest, over the head it was judged against.
@@ -1785,8 +1784,6 @@ export class BatonCore {
       // where each ticket is queued — rewrite the changed tickets' blocks in this transaction.
       const dropped = this.applyBlocks(r, stations, upserted, legsBefore, changed.deleted > 0);
       if (dropped.length) changed.dropped = dropped.slice(0, 100);
-      // A non-fleet repository's fleet fields are ignored, and its answer says so.
-      if (this.reference(r, p)) changed.fleet_ignored = true;
       this.store.exec('INSERT INTO board_snapshots (repository_id, sha, parent_sha, received_at, ticket_count) VALUES (?, ?, ?, ?, ?) ON CONFLICT (repository_id, sha) DO NOTHING', r, p.sha, p.parent_sha, at, ticketCount);
       this.store.exec('INSERT INTO board_head (repository_id, sha) VALUES (?, ?) ON CONFLICT (repository_id) DO UPDATE SET sha = excluded.sha', r, p.sha);
       // B-127: the post's signed-control record stands for the repository (the latest post's
@@ -2234,33 +2231,6 @@ export class BatonCore {
     for (const c of inForce) this.queues.coursed(r, c);
     this.queues.retain(r, inForce);
     return refused;
-  }
-
-  /** The reference data the sync posts with every snapshot (§7.3, §7.4): the reviewer catalog
-   *  and matrix. Each table is a copy of a docs file, never edited here, so it is rewritten
-   *  whole. The model tables' blocks — `providers`, `prices` — are gone (B-142): what they
-   *  carried is a reading or a course rule (§6.3, R-BTN-76), and a sync that still posts them
-   *  is accepted with the fields ignored.
-   *  Returns whether the payload carried fleet data this repository may not write. */
-  private reference(repo: string, p: BoardPayload): boolean {
-    const exec = (q: string, ...a: unknown[]) => this.store.exec(q, ...a);
-    // §6.8, R-BTN-66: a repository's transcript repositories are its owners' setting, never read
-    // from a board post (R3-1240); a sync that still sends them is not refused for it.
-    // The rest is the instance's: only the fleet repository writes it (interim, R3-1231 2b).
-    const carries = p.matrix != null || p.reviewers != null;
-    if (this.registry.fleetRepository() !== repo) return carries;
-    const catalog = p.reviewers ?? p.matrix?.agents;
-    if (catalog && p.matrix) {
-      exec('DELETE FROM reviewer_agents');
-      for (const [name, a] of Object.entries(catalog)) {
-        exec('INSERT INTO reviewer_agents (name, reviews_on, family, bills, models) VALUES (?, ?, ?, ?, ?)',
-          name, a.reviews_on, familyOf(a.reviews_on, p.matrix) ?? 'unknown', JSON.stringify(a.bills), a.models ? JSON.stringify(a.models) : null);
-      }
-    }
-    // Rule 8 (R-BTN-27) reads the whole matrix (rows, seats, costs) and the posted catalog.
-    if (p.matrix) exec(`INSERT INTO baton_settings (key, value) VALUES ('reviewer_matrix', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value`, JSON.stringify(p.matrix));
-    if (p.reviewers) exec(`INSERT INTO baton_settings (key, value) VALUES ('reviewer_catalog', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value`, JSON.stringify(p.reviewers));
-    return false;
   }
 
   private event(repo: string, kind: string, detail: unknown, at: number) {
