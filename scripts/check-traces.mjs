@@ -523,6 +523,14 @@ function quintTest(file) {
   });
 }
 
+/** Only retry compile errors located in generated runs, not in the shared import or model. */
+function isRunCompileError(stderr, file) {
+  if (!/^error: (?:parsing|typechecking) failed$/m.test(stderr)) return false;
+  const locations = [...stderr.matchAll(/^  at (.+):(\d+):\d+$/gm)];
+  return locations.length > 0 && locations.every(([, source, line]) =>
+    resolve(ROOT, source) === file && Number(line) > header({}).split('\n').length - 1);
+}
+
 async function checkGroup(group, report) {
   mkdirSync(OUT, { recursive: true });
   const dir = mkdtempSync(join(OUT, 'batch-'));
@@ -536,7 +544,17 @@ async function checkGroup(group, report) {
     const passed = new Map(runs.map(([, ok, failed]) => [ok ?? failed, !!ok]));
     if (runs.length !== group.length || !group.every((_, i) => passed.has(testName(i))) ||
         code !== ([...passed.values()].every(Boolean) ? 0 : 1)) {
-      const error = `Quint returned incomplete or inconsistent batch results (exit ${code})\n${(stdout + stderr).slice(-1500)}`;
+      const runCompileError = code === 1 && runs.length === 0 && isRunCompileError(stderr, file);
+      if (runCompileError && group.length > 1) {
+        const mid = Math.floor(group.length / 2);
+        // Keep retries inside the worker's slot; only branches that fail to compile split again.
+        await checkGroup(group.slice(0, mid), report);
+        await checkGroup(group.slice(mid), report);
+        return;
+      }
+      const summary = runCompileError ? 'Quint could not compile the generated trace run'
+        : 'Quint returned incomplete or inconsistent batch results';
+      const error = `${summary} (exit ${code})\n${(stdout + stderr).slice(-1500)}`;
       for (const t of group) {
         t.result.failure = { error };
         report(t.result);

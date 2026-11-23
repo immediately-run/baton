@@ -79,6 +79,25 @@ describe('check-traces rejects what the model forbids, naming the step', () => {
     expect(modules).toEqual(['batch.qnt', 'trace1.prefix.qnt', 'trace1.prefix.qnt', 'trace1.step.qnt']);
   }, QUINT_CASE_MS);
 
+  itQuint('S-BTN-39: a generated run that does not compile cannot reject its batch mates', async () => {
+    const file = (name: string, claimObs: number) => writeTrace(name, trace([
+      [req('POST', '/v1/runner/claim'), (p) => ({ ...p, claims: { 1: claim({ claimObs }) } })],
+    ]));
+    const good = file('compiles', 1);
+    // The recorder round-trips this Number, but its exponent notation is not a Quint integer.
+    const bad = file('does-not-compile', 1e21);
+    expect(translate(readTrace(good)).consts).toEqual(translate(readTrace(bad)).consts);
+    vi.mocked(spawn).mockClear();
+    const report = vi.fn();
+    const [accepted, broken] = await checkTraces([good, bad], report);
+    expect(accepted).toMatchObject({ ok: true, checked: 3, end: null });
+    expect(broken).toMatchObject({ ok: false, checked: 3, end: null, failure: { error: expect.stringContaining('QNT000') } });
+    expect(broken.failure).not.toHaveProperty('actionRefused');
+    expect(report.mock.calls).toEqual([[accepted], [broken]]);
+    expect(vi.mocked(spawn).mock.calls.map(([, args]) => args?.[2]?.split('/').at(-1)))
+      .toEqual(['batch.qnt', 'batch.qnt', 'batch.qnt']);
+  }, QUINT_CASE_MS);
+
   itQuint('an end confirmed by an observation not above its own: rejected at the post that claims it', async () => {
     const steps = trace([
       [req('POST', '/v1/runner/claim'), (p) => ({ ...p, claims: { 1: claim() } })],
@@ -105,17 +124,53 @@ describe('check-traces rejects what the model forbids, naming the step', () => {
   }, QUINT_CASE_MS);
 });
 
-it('groups recorder output by model instance, including runner tags and the claim bound', () => {
+function instanceFiles() {
   const taggedClaim = (tag: string) => trace([[req('POST', '/v1/runner/claim'), (p) => ({
     ...p, runners: { 1: [tag] }, claims: { 1: claim() },
   })]]);
-  const a = translate(readTrace(writeTrace('family-a', taggedClaim('family:a'))));
-  const aAgain = translate(readTrace(writeTrace('family-a-again', taggedClaim('family:a'))));
-  const b = translate(readTrace(writeTrace('family-b', taggedClaim('family:b'))));
-  const unclaimed = translate(readTrace(writeTrace('no-claims', trace([]))));
+  return [
+    writeTrace('family-a', taggedClaim('family:a')),
+    writeTrace('family-b', taggedClaim('family:b')),
+    writeTrace('no-claims', trace([])),
+    writeTrace('family-a-again', taggedClaim('family:a')),
+  ];
+}
+
+it('groups recorder output by model instance, including runner tags and the claim bound', () => {
+  const [a, b, unclaimed, aAgain] = instanceFiles().map((file) => translate(readTrace(file)));
   expect(a.consts.TAGS).not.toBe(b.consts.TAGS);
   expect(a.consts.MAX_CLAIMS).not.toBe(unclaimed.consts.MAX_CLAIMS);
   expect(groupTraces([a, b, unclaimed, aAgain])).toEqual([[a, aAgain], [b], [unclaimed]]);
+});
+
+itQuint('dispatches each recorder-derived instance to its own Quint module', async () => {
+  const files = instanceFiles();
+  vi.mocked(spawn).mockClear();
+  const results = await checkTraces(files);
+  expect(results.map((r: { file: string; ok: boolean }) => [r.file, r.ok]))
+    .toEqual(files.map((file) => [file, true]));
+  const modules = vi.mocked(spawn).mock.calls.map(([, args]) => args?.[2]);
+  expect(modules).toHaveLength(3);
+  expect(new Set(modules).size).toBe(3);
+}, QUINT_CASE_MS);
+
+it('reports a shared model compile error without splitting the batch or bisecting a trace', async () => {
+  const [first, , , second] = instanceFiles();
+  const real = await vi.importActual<typeof import('node:child_process')>('node:child_process');
+  const mockedSpawn = vi.mocked(spawn);
+  mockedSpawn.mockClear();
+  mockedSpawn.mockImplementationOnce(() => real.spawn(process.execPath, ['-e', `
+    console.error(' Error [QNT000]: invalid model');
+    console.error('  at model/baton.qnt:100:1');
+    console.error('error: typechecking failed');
+    process.exitCode = 1;
+  `]));
+  const results = await checkTraces([first, second]);
+  expect(mockedSpawn).toHaveBeenCalledTimes(1);
+  for (const result of results) {
+    expect(result).toMatchObject({ ok: false, failure: { error: expect.stringContaining('incomplete or inconsistent batch results') } });
+    expect(result.failure).not.toHaveProperty('actionRefused');
+  }
 });
 
 // each case checks one trace through the model; the first also pays for loading it, which outgrew
