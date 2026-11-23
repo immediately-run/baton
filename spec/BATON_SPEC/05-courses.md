@@ -21,8 +21,8 @@ Designs for this section that are not built are on the proposal page
     its station function `sync.mjs` (R-BTN-74), `rank.mjs` (R-BTN-98), `schemas/<name>@<n>.json`
     (R-BTN-108) and leg overrides (R-BTN-131). A standard course (R-BTN-131) with no `sync.mjs`
     runs the CLI's station function for it; any other course without one fails the sync.
-  - **A source** is `courses[].source` = `<provider>/<namespace>/<repository>/<commit>/<course>`:
-    `<commit>` is all 40 hex characters, never a branch or tag, and `github` is the only
+  - **A source** is `courses[].source` = `<provider>/<namespace>/<repository>/<ref>/<course>`:
+    `<ref>` is defined by R-BTN-131, and `github` is the only
     provider. The short `id` is the name tickets, rows, rule 9 and branch patterns use. A course
     with no `source` is the repository's own. A source names the CLI's own repository; any other
     is refused.
@@ -37,7 +37,7 @@ Designs for this section that are not built are on the proposal page
     worktree of that commit, never in `ctx.checkout`.
   - **`baton repo init`** (R-BTN-127) scaffolds a standard course: its files, its `courses[]`
     entry with the source at the CLI's own commit, and the sync workflow, which pins the CLI by
-    version. Re-run with a newer CLI it moves the pin and each source together. It never
+    version. Re-run with a newer CLI it moves the pin and each pinned source together (R-BTN-131). It never
     overwrites the home's leg instructions or overrides. With no `--course` it takes
     `default_course`, else `create-pr`.
   - **Trust.** Naming a source adopts its code with the rights of where it runs: the station
@@ -487,6 +487,17 @@ Designs for this section that are not built are on the proposal page
     facts it reads and the lines it writes — is stated in
     [the standard courses](../../docs/standard-courses.mdx) and the course's own files. The
     bullets below bind the CLI and the runner for every course.
+  - **Source refs.** The default is the CLI's full 40-hex commit; a pinned source must match
+    the CLI's commit. `baton repo init --course <id> --source-branch <branch>` writes an unpinned
+    source instead, leaving the workflow's CLI pinned. A branch uses only `[A-Za-z0-9._/-]`, has
+    no `..`, is a valid Git branch name, and is not 40 hex characters. Tags are not sources.
+    Each sync resolves the branch to its head once and uses that commit's graph and station
+    function (R-BTN-134). An unresolved branch fails the sync, naming the branch, without falling
+    back. The post carries `course_sources`, keyed by course id with `{branch, sha}`; the snapshot
+    and Sync read show the latest accepted resolution read at that home commit. The sync logs
+    `course <id> follows branch <b> (unpinned): resolved to <sha10>` and the generated workflow
+    annotates it. The runner still uses the home's committed graph at the claim's snapshot
+    (R-BTN-22), never re-resolving the source branch.
   - **Request courses.** A course whose file carries `starts_from: request` is entered by
     `baton ticket request "<one sentence>" --course <course>` (R-BTN-127); no other course is.
     The command files one ticket (R-BTN-74's source): the id from R-BTN-199's allocator, the

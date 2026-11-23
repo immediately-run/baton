@@ -384,10 +384,18 @@ form: provider, owner, repository, commit, then the course.
 The commit is the CLI's own, the one that wrote the files, so the name always means one graph.
 The sync holds the course to it: if `.baton/courses/create-pr/course.json` differs from that
 commit's, nothing is posted until `npx baton repo init --course create-pr --force` restores it.
-Upgrading is re-running `init` with a newer CLI: it moves the workflow's pin and every course's
+Upgrading is re-running `init` with a newer CLI: it moves the workflow's pin and each pinned course's
 source together, rewriting the course files and leg scripts and keeping your instructions and
 overrides. For now a source names the CLI's own repository; a course from another repository is
 refused as not supported yet.
+
+During development, `baton repo init --course create-pr --source-branch main` can follow a
+branch instead. Each sync resolves the branch anew, checks the home's committed graph against
+that exact source commit, and logs an unpinned warning. The Sync read shows the branch and
+commit used. A missing branch or a changed graph that hasn't been scaffolded into the home
+fails the sync; to update the files, run init with `--force` and the same `--source-branch`
+using the CLI at the resolved commit. Following a branch trusts everyone who can push to it.
+Keep the default commit pin for a protected home.
 
 ## Overriding a leg
 

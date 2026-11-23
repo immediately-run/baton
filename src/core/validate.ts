@@ -524,6 +524,13 @@ export function checkShadowReport(body: unknown) {
 
 const REQUEST_ID = /^[A-Za-z0-9._:-]{8,128}$/;
 export const GIT_SHA = /^[0-9a-f]{40}$/;
+
+/** A course source's branch: the restricted alphabet and Git's ref component rules. */
+export function isSourceBranch(ref: unknown): ref is string {
+  return typeof ref === 'string' && ref.length > 0 && ref !== 'HEAD' && !/[^A-Za-z0-9._/-]/.test(ref)
+    && !/^[0-9a-f]{40}$/i.test(ref) && !ref.startsWith('-') && !ref.endsWith('.') && !ref.includes('..')
+    && ref.split('/').every((part) => part && !part.startsWith('.') && !part.endsWith('.lock'));
+}
 /** §6.5: the `released:` reasons, exactly. */
 export const RELEASE_END_REASONS = ['blocked', 'stale-board', 'cannot-finish:transient', 'cannot-finish:capability', 'cannot-finish:spec', 'cannot-finish:contract-output', 'cannot-finish:contract-input',
   'lease-lost', 'requested', 'owner-cancel', 'provider-suspended', 'provider-exhausted', 'course-changed', 'leg-timeout'] as const;

@@ -1693,7 +1693,12 @@ export class BatonCore {
         if (!this.observations.newest(r, n)) throw new BatonError('stale-observation', `a newer reading than ${n} was accepted while this post was judged; take a new number and retry (R-BTN-62)`);
         if (this.headOf(r) !== head) throw new BatonError('head-moved', `the head moved to ${this.headOf(r) ?? 'unset'} while this post was judged; re-read it and retry`);
         this.observations.accept(r, n);
-        if (readAtHead) this.rememberSource(r, p);
+        if (readAtHead) {
+          this.rememberSource(r, p);
+          const sources = p.course_sources ? JSON.stringify(p.course_sources) : null;
+          this.store.exec(`UPDATE board_snapshots SET course_sources_json = ?
+            WHERE repository_id = ? AND sha = ? AND course_sources_json IS NOT ?`, sources, r, p.sha, sources);
+        }
         // B-127: the record rides a refresh too (the latest post's word stands); the head has not
         // moved, so no `unsigned-control` event is raised for it again.
         this.applyControl(r, p, at, head);
@@ -1784,7 +1789,10 @@ export class BatonCore {
       // where each ticket is queued — rewrite the changed tickets' blocks in this transaction.
       const dropped = this.applyBlocks(r, stations, upserted, legsBefore, changed.deleted > 0);
       if (dropped.length) changed.dropped = dropped.slice(0, 100);
-      this.store.exec('INSERT INTO board_snapshots (repository_id, sha, parent_sha, received_at, ticket_count) VALUES (?, ?, ?, ?, ?) ON CONFLICT (repository_id, sha) DO NOTHING', r, p.sha, p.parent_sha, at, ticketCount);
+      this.store.exec(`INSERT INTO board_snapshots (repository_id, sha, parent_sha, received_at, ticket_count, course_sources_json) VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT (repository_id, sha) DO UPDATE SET course_sources_json = excluded.course_sources_json
+        WHERE board_snapshots.course_sources_json IS NOT excluded.course_sources_json`,
+        r, p.sha, p.parent_sha, at, ticketCount, p.course_sources ? JSON.stringify(p.course_sources) : null);
       this.store.exec('INSERT INTO board_head (repository_id, sha) VALUES (?, ?) ON CONFLICT (repository_id) DO UPDATE SET sha = excluded.sha', r, p.sha);
       // B-127: the post's signed-control record stands for the repository (the latest post's
       // word on what counts), and a post that moved the head onto unsigned control inputs —

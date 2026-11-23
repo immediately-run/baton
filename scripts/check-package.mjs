@@ -70,7 +70,7 @@ try {
   }
 
   // `baton repo init` (G1 of the 2026-10-19 gap run): the installed package scaffolds create-pr
-  // with no checkout and no esbuild, naming the commit it was built from as the course's source.
+  // with no checkout, naming the commit it was built from as the course's source.
   const build = JSON.parse(readFileSync(join(app, 'node_modules', '@immediately-run', 'baton', 'dist', 'build.json'), 'utf8'));
   if (build.dirty && process.env.CI) fail(`the package was built from a modified tree (${build.commit}); CI builds a clean one`);
   const repo = join(dir, 'repo');

@@ -1,4 +1,4 @@
-import { boundedJson } from './validate';
+import { boundedJson, GIT_SHA, isSourceBranch } from './validate';
 // board.ts — what a board snapshot becomes in the `tickets` cache (BATON_SPEC §4, §7.1,
 // R-BTN-33/35). Pure: the core does the SQL, on either host. Only filter fields survive — an item's
 // body, Status notes, exit criteria and PR list never reach Baton; the dashboard links each
@@ -156,6 +156,8 @@ export interface BoardPayload {
   course_data?: Record<string, unknown>;
   /** The course registry (R-BTN-48, §7.1); absent, the courses in force stay. */
   registry?: RegistryEntry[];
+  /** R-BTN-131: branch-backed courses and the exact source commits used by this reading. */
+  course_sources?: Record<string, { branch: string; sha: string }>;
   /** §6.8: the transcript repositories from `baton.json`; absent, the defaults stand. */
   transcript_repos?: string[];
   /** §4.4 (R-BTN-191): the sync's attestations, this run's observation. Only `std:decision@1` —
@@ -318,6 +320,15 @@ export function checkPayload(body: unknown, repo?: string): BoardPayload {
   if (p.course_data !== undefined) {
     if (!isObj(p.course_data)) throw new BatonError('invalid-params', 'course_data must be keyed by course');
     boundedJson(p.course_data, 'course_data', 65_536);
+  }
+  if (p.course_sources !== undefined) {
+    if (!isObj(p.course_sources)) throw new BatonError('invalid-params', 'course_sources must be keyed by course');
+    boundedJson(p.course_sources, 'course_sources', 65_536);
+    for (const [id, v] of Object.entries(p.course_sources)) {
+      if (!COURSE_ID.test(id) || !isObj(v) || Object.keys(v).length !== 2 || !isSourceBranch(v.branch) || typeof v.sha !== 'string' || !GIT_SHA.test(v.sha)) {
+        throw new BatonError('invalid-params', `course_sources: expected a course id and {branch, sha} with a valid branch and a full commit`);
+      }
+    }
   }
   if (p.tickets !== undefined) {
     if (p.state !== undefined || p.ready !== undefined) throw new BatonError('invalid-params', 'a post is either the normative tickets or the interim state.items, not both');

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // build-cli.mjs — the `baton` CLI as one prebuilt module for the published package. A checkout
 // runs cli/baton.mjs and bundles each TypeScript subcommand on demand (scripts/baton-run.mjs,
-// scripts/baton-cli.mjs, scripts/bundle.mjs), which needs esbuild, a devDependency. Here each of
+// scripts/baton-cli.mjs, scripts/bundle.mjs). Here each of
 // those three is swapped for its TypeScript source, so dist/baton.mjs runs with dependencies only.
 import { build } from 'esbuild';
 import { execFileSync } from 'node:child_process';
@@ -59,7 +59,7 @@ await build({
 // The runner spawns its leg process by path (src/runner/claimRun.ts LEG_PROCESS), beside the bundle.
 copyFileSync(join(ROOT, 'src/runner/legProcess.mjs'), join(OUT, 'legProcess.mjs'));
 
-// What `baton repo init` writes, prebuilt (a package has no src/ and no esbuild), and the commit
+// What `baton repo init` writes, prebuilt (a package has no src/), and the commit
 // it was built from, which the package names as its courses' source and its workflow's pin
 // (src/defaults/cli.ts cliPin). A modified tree is recorded as such, and that package pins nothing.
 const git = (...a) => execFileSync('git', ['-C', ROOT, ...a], { encoding: 'utf8' }).trim();

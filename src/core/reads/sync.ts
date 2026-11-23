@@ -68,12 +68,13 @@ export const SYNC_READS: ReadRoute[] = [
       const administrator = isAdministrator(call.principal);
 
       const h = cx.sql<{ sha: string | null; observation: number; last_handed_out: number; handed_out_at: number | null; source_kind: string | null; source_versions: string | null;
-        parent_sha: string | null; received_at: number | null; ticket_count: number | null }>(
-        `SELECT h.sha, h.observation, h.last_handed_out, h.handed_out_at, h.source_kind, h.source_versions, s.parent_sha, s.received_at, s.ticket_count
+        parent_sha: string | null; received_at: number | null; ticket_count: number | null; course_sources_json: string | null }>(
+        `SELECT h.sha, h.observation, h.last_handed_out, h.handed_out_at, h.source_kind, h.source_versions, s.parent_sha, s.received_at, s.ticket_count, s.course_sources_json
          FROM board_head h LEFT JOIN board_snapshots s ON s.repository_id = h.repository_id AND s.sha = h.sha WHERE h.repository_id = ?`, repository)[0] ?? null;
       const head = h?.sha
         ? { sha: h.sha, parent_sha: h.parent_sha, received_at: h.received_at, ticket_count: h.ticket_count, observation: h.observation,
-            source: h.source_kind ? { kind: h.source_kind, versions: h.source_versions } : null }
+            source: h.source_kind ? { kind: h.source_kind, versions: h.source_versions } : null,
+            ...(h.course_sources_json ? { course_sources: JSON.parse(h.course_sources_json) } : {}) }
         : null;
       // R-BTN-62: the number handed out and not yet posted, with its age; past ten minutes it
       // is void, and the next sync is handed the next one.
