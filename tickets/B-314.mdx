@@ -1,0 +1,61 @@
+---
+title: "B-314 — Runners pick up course version changes without a restart, and may restart themselves at a claim boundary"
+id: B-314
+project: baton
+status: available
+updated: 2026-11-22
+repos:
+  - baton
+tags:
+  - roadmap-item
+tier: normal
+description: "The runner reads the course versions it declares once at startup, so raising min_runner_version refuses it claims (stale-skills) until a person restarts it. Re-read them each time the home moves to a snapshot and declare them in the next heartbeat; optionally (--restart-when-behind) exit at a claim boundary with code 75 when the runner's own CLI is behind, for a looping launcher to start it on the new code."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the owner, 2026-11-22: "It's a problem that the runners need to drain when the course changes. Can we consider ways we could update courses without having to restart the runner?" Then, on the two proposals: "yes". Context: that morning the supervisor drained bering's two runners to pick up `create-pr` version 2 (#342; `docs/interventions.mdx`, 2026-11-22 06:42). Most of the drain was not needed, and the ticket removes the rest.
+
+**What already works.** A claim's course is the claim's own snapshot. The runner fast-forwards its home checkout to the claim's commit (`advanceHome`, `src/runner/home.ts`; R-BTN-34) and loads the course file, leg scripts and instructions at that commit (`loadCourse`, `src/runner/runner.ts`). A new graph or leg therefore applies from the next claim without a restart.
+
+**What does not.** Two things still need a restart:
+- **The declared versions.** The runner reads the course versions it declares (`courses`, §14) once, at startup (`servedCourses`, `src/runner/main.ts`), and sends that list on every heartbeat. When a change raises `min_runner_version`, Rule 9 refuses the runner new claims (`stale-skills`) until a person restarts it.
+- **The runner's own code.** A change to the CLI, or to the executor pin in the host's environment, takes effect only in a new process.
+
+**Spec:** [BATON_SPEC §5.7](../spec/BATON_SPEC/05-courses.md#sec-5-7) ([R-BTN-22](../spec/BATON_SPEC/05-courses.md#sec-5-7), Rule 9), [§8.3](../spec/BATON_SPEC/08-runners.md#sec-8-3) ([R-BTN-72](../spec/BATON_SPEC/08-runners.md#sec-8-3)), [§4](../spec/BATON_SPEC/04-tickets-syncs-board.md) ([R-BTN-34](../spec/BATON_SPEC/04-tickets-syncs-board.md)).
+
+## Plan
+
+1. **Spec (R-BTN-22, Rule 9).** Change "reads each course's `version` from its checkout at startup" to: at startup, and again each time it brings the home checkout to a snapshot (a claim, or the bounded fetch between claims). The next heartbeat declares what it read. A held claim still finishes under the protocol it started with (Rule 9 is checked at a claim, never at an `advance`), so re-reading changes nothing mid-claim.
+2. **Runner: re-read the versions.** After every `advanceHome` and every between-claims fetch (`src/runner/main.ts`'s bounded fetch), re-run `servedCourses` on the home checkout and replace `this.o.courses`. Log the change: `baton: course create-pr now version 2 (was 1)`.
+   - A course that has disappeared from `.baton/baton.json` is no longer declared.
+   - A home that is ahead of `main`, diverged or edited keeps its last good list and logs why, as `advanceHome` already does.
+3. **Runner: restart itself at a claim boundary (optional, behind a flag).** `baton runner start --restart-when-behind`: when the runner holds no claim and its own CLI checkout is behind its tracking branch's tip, it exits with a distinct code (`75`, "restart requested") instead of claiming again, logging why. A launcher that loops on that code (bering's `start-runner.sh`, documented in the runbook) starts it again on the new code. It never interrupts a leg, because it is the drain's graceful path (SIGTERM) chosen by the runner itself. It is off by default; with it off, nothing changes. Executor re-pins are the host's: the launcher re-reads its environment on each loop.
+4. **Tests.** A new scenario (`baton tickets next scenario`):
+   - a runner declares version 1 and its home moves to a commit with version 2 between claims; the next heartbeat declares 2, and a claim that Rule 9 would refuse at 1 is granted;
+   - a claim held across the change finishes under version 1;
+   - a home that is ahead or edited keeps the old list and logs the reason;
+   - with the flag, a runner whose CLI checkout is behind exits 75 at a claim boundary and never mid-leg; without it, it keeps claiming.
+
+### Trust
+
+The versions come from the home checkout the runner already trusts for the course itself (R-BTN-34). A runner can only declare what its own checkout says, and Baton's gates are unchanged. The self-restart reads only the runner's own CLI checkout and exits; it fetches no code it would not have on a manual restart.
+
+### Invariants
+
+- **Rule 9 is checked at a claim, never at an `advance`.** Unchanged.
+- **One clock (R-BTN-32).** Any time the change logs or compares comes from the runner's clock.
+- **A leg is never interrupted** by a re-read or a self-restart.
+
+## Exit criteria
+
+- [ ] `npm test` passes, with the new scenario's test file naming its §15 row.
+- [ ] `npm run typecheck` passes.
+- [ ] Raising a course's `min_runner_version` on `main` needs no runner restart on bering: the next claim is granted.
+
+## Status
+
+_filed 2026-11-22._

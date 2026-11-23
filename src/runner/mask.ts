@@ -37,16 +37,69 @@ export function secretValues(env: Record<string, string | undefined>, maskEnv: r
   return [...out];
 }
 
-/** One class 7 literal as a pattern: every occurrence of `secret`, as it stands. */
-const literalOf = (secret: string): RegExp => new RegExp(secret.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g');
+/** The smallest period of `literal`: the least shift at which it overlaps itself (KMP's failure
+ *  function). Two of its occurrences that overlap start a multiple of it apart in a run, so a
+ *  periodic run is covered in one step rather than one per occurrence. */
+const periodOf = (literal: string): number => {
+  const fail = new Array<number>(literal.length + 1).fill(0);
+  fail[0] = -1;
+  for (let i = 1, k = 0; i < literal.length; i++) {
+    while (k > 0 && literal[i] !== literal[k]) k = fail[k];
+    if (literal[i] === literal[k]) k++;
+    fail[i + 1] = k;
+  }
+  return literal.length - fail[literal.length];
+};
+
+/** Where in `text` any class 7 literal stands: every occurrence of every literal, as sorted,
+ *  disjoint `[start, end)` runs — occurrences that overlap are one run, whichever literal each is,
+ *  so a literal inside, or overlapping, another is masked with it in one piece, in any order of
+ *  the set. Memory stays linear in the runs: a periodic run (`aaaa…` against `aaaa`) is taken
+ *  whole, never one occurrence at a time. */
+export function literalSpans(text: string, literals: readonly string[]): Array<[number, number]> {
+  const found: Array<[number, number]> = [];
+  for (const literal of literals) {
+    const n = literal.length;
+    if (n === 0) continue;
+    const p = periodOf(literal);
+    let from = 0;
+    while (from <= text.length - n) {
+      const i = text.indexOf(literal, from);
+      if (i < 0) break;
+      // The text goes on with the literal's period: every window `p` further is an occurrence.
+      let j = i + n;
+      while (j < text.length && text.charCodeAt(j) === text.charCodeAt(j - p)) j++;
+      const end = i + n + Math.floor((j - i - n) / p) * p;
+      const last = found.length > 0 && found[found.length - 1][0] <= i ? found[found.length - 1] : null;
+      if (last && i < last[1]) last[1] = Math.max(last[1], end);
+      else found.push([i, end]);
+      // An occurrence starting before `end - n + 1` ends inside the run already found.
+      from = Math.max(i + 1, end - n + 1);
+    }
+  }
+  found.sort((a, b) => a[0] - b[0]);
+  const runs: Array<[number, number]> = [];
+  for (const [s, e] of found) {
+    const last = runs[runs.length - 1];
+    if (last && s < last[1]) last[1] = Math.max(last[1], e);
+    else runs.push([s, e]);
+  }
+  return runs;
+}
 
 /** `text` with every class-7 literal replaced by `***` — the literals alone: class 6 belongs to
  *  whoever sees the whole stream (a block is held line by line), so a line on its way into the
- *  block stream is masked of its literals, never of a block it may be part of. */
+ *  block stream is masked of its literals, never of a block it may be part of. One pass over the
+ *  merged runs (`literalSpans`), so one literal inside or overlapping another leaves nothing of
+ *  either, whatever order the environment listed them in. */
 const maskLiterals = (text: string, literals: readonly string[]): string => {
-  let out = text;
-  for (const secret of literals) out = out.replace(literalOf(secret), () => '***');
-  return out;
+  let out = '';
+  let at = 0;
+  for (const [s, e] of literalSpans(text, literals)) {
+    out += `${text.slice(at, s)}***`;
+    at = e;
+  }
+  return out + text.slice(at);
 };
 
 /** `text` with every class-5, class-6 and class-7 occurrence replaced by `***`. */
@@ -95,6 +148,15 @@ export function holdLiteralTail(text: string, literals: readonly string[]): { he
  *  one) or shows it will never complete — and a hold that never completes leaves as `***`,
  *  never verbatim, for its bytes may be the literal's own.
  *
+ *  Three rules keep every byte of a literal out of the log (S-BTN-119):
+ *  - the hold never cuts a literal the text holds whole: the run of literals the cut crosses
+ *    leaves as `***` with the head, and its bytes past the cut are held only as the next
+ *    literal's possible start (a value's last bytes can begin another's: `…9f2c71`, `1abc…`);
+ *  - held bytes are masked whatever the next line does — the hold is one masked run with any
+ *    literal it is part of — and bytes that already left as such a `***` never leave again,
+ *    neither in clear nor as a second `***` of their own;
+ *  - literals are masked as merged runs (`literalSpans`), never one after another.
+ *
  *  A literal the line framing split can re-form two ways, and both are tried: with the `\n` the
  *  framing ate (a newline inside the value) and without it (the value wrapped across the line).
  *  `push` takes one line (never with its `\n`: the stream's own) and returns what may leave
@@ -106,40 +168,78 @@ export function createLegMasker(secrets: readonly string[]) {
   // the boundary the framing hands back as `\n` alone.
   const literals = [...new Set(secrets.map((secret) => secret.replace(/\r\n/g, '\n').replace(/\r?\n$/, '')).filter((secret) => secret !== ''))];
   const block = createMasker();
+  // What is held back, unlogged: a tail some literal may still extend.
   let held = '';
+  // How many of `held`'s leading bytes already left, as part of a `***` (a literal the hold's
+  // cut crossed): those bytes leave again as nothing, never in clear and never as more `***`.
+  let gone = 0;
+  const said: string[] = [];
+  const out = (text: string) => {
+    for (const line of text.split('\n')) said.push(block.push(line));
+  };
+  /** Take `text` — the held bytes first (`hold` of them, `gone` of those already left), then the
+   *  new ones — emit all of it but the tail a literal may still extend, and hold that. The held
+   *  bytes are one masked run, merged with any literal they are part of; a run wholly of bytes
+   *  that already left emits nothing. */
+  const take = (text: string, hold: number, left: number) => {
+    const { tail } = holdLiteralTail(text, literals);
+    const cut = text.length - tail.length;
+    const runs = literalSpans(text, literals);
+    if (hold > 0) {
+      runs.unshift([0, hold]);
+      runs.sort((a, b) => a[0] - b[0]);
+      for (let i = 1; i < runs.length; i++) {
+        if (runs[i][0] < runs[i - 1][1]) {
+          runs[i - 1][1] = Math.max(runs[i - 1][1], runs[i][1]);
+          runs.splice(i--, 1);
+        }
+      }
+    }
+    let text_ = '';
+    let at = 0;
+    let nextGone = 0;
+    for (const [s, e] of runs) {
+      if (s >= cut) break;
+      // The run's bytes this push lets go: masked, unless every one of them already left.
+      const emitsNew = !(s === 0 && Math.min(e, cut) <= left);
+      text_ += text.slice(at, s) + (emitsNew ? '***' : '');
+      at = Math.min(e, cut);
+      if (e > cut) nextGone = emitsNew ? e - cut : Math.max(0, left - cut);
+    }
+    text_ += text.slice(at, cut);
+    if (text_ !== '' || cut > 0) out(text_);
+    held = tail;
+    gone = Math.min(nextGone, tail.length);
+  };
   return {
     push(line: string): string {
-      const said: string[] = [];
-      if (held !== '') {
-        // The line before ended inside a literal, and this line may complete it: with the
-        // boundary the framing ate (`held\nline` — a newline inside the value) or without it
-        // (`heldline` — the value wrapped across the line). The candidate that completes a
-        // literal wins; else the one that keeps one open the longest; else the hold was never a
-        // literal's start, and its bytes leave masked — never verbatim.
-        const joined = [held + line, `${held}\n${line}`].map((text) => ({ text, split: holdLiteralTail(text, literals) }));
-        const completes = joined.filter((j) => literals.some((literal) => j.text.includes(literal)));
-        const opens = joined.filter((j) => j.split.tail !== '').sort((a, b) => b.split.tail.length - a.split.tail.length);
-        const best = completes[0] ?? opens[0];
-        if (best) {
-          said.push(block.push(maskLiterals(best.split.head, literals)));
-          held = best.split.tail;
-          return said.filter(Boolean).join('\n');
-        }
-        said.push(block.push('***'));
-        held = '';
+      said.length = 0;
+      if (held === '') {
+        take(line, 0, 0);
+      } else {
+        // The line before ended inside what may be a literal, and this line may complete it:
+        // with the boundary the framing ate (`held\nline` — a newline inside the value) or
+        // without it (`heldline` — the value wrapped across the line). The candidate a literal
+        // crosses the boundary of wins; else the one whose hold stays open the longest; else the
+        // hold was never a literal's start, and leaves masked, before the line on its own.
+        const h = held.length;
+        const joined = [held + line, `${held}\n${line}`];
+        const crosses = joined.find((text) => literalSpans(text, literals).some(([s, e]) => s < h && e > h));
+        const open = joined
+          .map((text) => ({ text, tail: holdLiteralTail(text, literals).tail }))
+          .filter((j) => j.tail !== '' && j.text.length - j.tail.length < h)
+          .sort((a, b) => b.tail.length - a.tail.length)[0]?.text;
+        take(crosses ?? open ?? `${held}\n${line}`, h, gone);
       }
-      const { head, tail } = holdLiteralTail(line, literals);
-      said.push(block.push(maskLiterals(head, literals)));
-      held = tail;
       return said.filter(Boolean).join('\n');
     },
     flush(): string {
-      const said: string[] = [];
-      if (held !== '') {
-        held = '';
-        // The stream ended inside what may be a literal: those bytes leave masked, not verbatim.
-        said.push(block.push('***'));
-      }
+      said.length = 0;
+      // The stream ended inside what may be a literal: those bytes leave masked, not verbatim —
+      // unless every one of them already left as the `***` of a literal the head held whole.
+      if (held !== '' && gone < held.length) said.push(block.push('***'));
+      held = '';
+      gone = 0;
       said.push(block.flush());
       return said.filter(Boolean).join('\n');
     },

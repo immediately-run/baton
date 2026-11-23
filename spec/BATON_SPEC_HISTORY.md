@@ -4021,8 +4021,6 @@ working until the stated condition holds, then removes it.
   `refused_couriers`, the `pool` credential, `worker_couriers`, the grant's and token's
   `courier` flag and role), and `GET /v1/courier/decisions`. After it they are dropped; only
   `forge-check` notices remain.
-- **Hook residue (R-BTN-98).** The code still carries the `HookRunner` port and cites R-BTN-52 and
-  R-BTN-59; `hook-failed` survives only in a CHECK constraint. Remove when next touched.
 - **The docs deployment's own migration** of `skills_version` to each course's `version`, with
   the `Skills-Version:` trailer as an alias (R-BTN-22), belongs to docs' `BATON_DOCS_DEPLOYMENT`.
   Cutover itself — shadow reports, the legacy-claim import and adoption — stays in the
@@ -8107,4 +8105,3 @@ asserting signatures Baton cannot see (N10); F1 and N1 stated as the deployment'
 Fieldhouse does (R-FH-3; review legs without command execution, VM resets); the host repository
 writable by the human-only identity only (N2, fieldhouse#7); the rest recorded under Open
 questions.)*
-

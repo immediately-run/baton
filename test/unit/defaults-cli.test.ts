@@ -24,7 +24,7 @@ import { prClose, verdictLine, type Exec } from '../../src/defaults/pr-close';
 import { splitWords } from '../../src/defaults/agent-words';
 import { ticketsMarkdown } from '../../src/defaults/tickets-markdown';
 import { stampMarkdownVersions } from '../../src/defaults/ticket-versions';
-import { syncOnce } from '../../src/shared/batonSync.mjs';
+import { syncOnce } from '../../src/vendor/batonSync.mjs';
 
 const ROOT = resolve(import.meta.dirname, '../..');
 const CLI = join(ROOT, 'cli', 'baton.mjs');

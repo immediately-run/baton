@@ -559,12 +559,12 @@ const FLOOR_NAME = /^[a-z][a-z0-9-]{0,39}$/;
 export const PROTECTION_WINDOW_MS = 24 * 3_600_000;
 
 export class Policies {
-  /** Baton's own callback: a floored guarantee broke on `repository`, and every running claim
-   *  on a ticket that reaches it is released `released:floor` (R-BTN-189) — the claims' half
-   *  lives in claims.ts, wired by the core like every other cross-link. */
-  releaseForFloor: ((repository: string) => void) | null = null;
-
-  constructor(private readonly c: { store: Store; now: () => number }) {}
+  constructor(private readonly c: {
+    store: Store;
+    now: () => number;
+    /** R-BTN-189: a broken floor releases the running claims on tickets that reach it. */
+    releaseForFloor: (repository: string) => void;
+  }) {}
 
   private rows<T = Record<string, unknown>>(q: string, ...p: unknown[]): T[] {
     return this.c.store.exec<T>(q, ...p).toArray() as T[];
@@ -947,7 +947,7 @@ export class Policies {
   enforceFloors(): void {
     this.raiseLapsedReports();
     for (const r of this.rows<{ id: string }>('SELECT DISTINCT repository_id AS id FROM policy_floors')) {
-      if (this.brokenUnderFloors(r.id).length) this.releaseForFloor?.(r.id);
+      if (this.brokenUnderFloors(r.id).length) this.c.releaseForFloor(r.id);
     }
   }
 

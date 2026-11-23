@@ -101,6 +101,85 @@ describe('class 7 by name (R-BTN-144)', () => {
     expect(trailing.flush()).toBe('***');
   });
 
+  it('S-BTN-119: a whole literal whose last bytes start another literal is masked whole, never cut by the hold', () => {
+    // The flaky run of 2026-11-22: the tests' runner ran inside a leg whose environment held a
+    // value starting with the last byte of the one printed, so the hold cut inside the printed
+    // literal and its head left in clear (`vendor: vendor-credential-9f2c7`, `whole key: sk-…`).
+    const vendor = 'vendor-credential-9f2c71';
+    const other = '1abcdef0123456';
+    const sink = createLegMasker([vendor, other]);
+    expect(sink.push(`vendor: ${vendor}`)).toBe('vendor: ***');
+    // The held `1` was the masked literal's own byte: a line that does not complete `other`
+    // leaves as it is, with no stray `***` of its own.
+    expect(sink.push('next line')).toBe('next line');
+    // Held across a key's tail that starts another, at the stream's end: nothing left in clear.
+    expect(sink.push(`whole: ${vendor}`)).toBe('whole: ***');
+    expect(sink.flush()).toBe('');
+    // And when the next line does complete the overlapping literal, it is masked too — neither
+    // value's bytes reach the log.
+    const both = createLegMasker([vendor, other]);
+    expect(both.push(`v ${vendor}`)).toBe('v ***');
+    expect(both.push(`${other.slice(1)} after`)).toBe('*** after');
+    // Several bytes of overlap, the key masked whole on its line in either order of the set.
+    for (const set of [[KEY, 'lMnZZZZZZZ'], ['lMnZZZZZZZ', KEY]]) {
+      const s = createLegMasker(set);
+      const said = [s.push(`whole key: ${KEY}`), s.push('token: x'), s.flush()].join('\n');
+      expect(said).toBe('whole key: ***\ntoken: x\n');
+      expect(said).not.toContain(KEY.slice(0, 14));
+    }
+  });
+
+  it('S-BTN-119: held bytes that already left as *** never leave again — whatever the next line completes or opens', () => {
+    const run = (set: string[], lines: string[]) => {
+      const sink = createLegMasker(set);
+      return [...lines.map((l) => sink.push(l)), sink.flush()].join('\n');
+    };
+    const vendor = 'vendor-credential-9f2c71';
+    // The next line completes a literal: the held bytes (the first one's last) are not put back.
+    expect(run([vendor, '1abcdef0123456'], [`vendor: ${vendor}`, `again: ${vendor}`])).toBe('vendor: ***\nagain: ***\n');
+    expect(run([KEY, 'GhIjKlMnZZZZ'], [`whole key: ${KEY}`, `again: ${KEY}`])).toBe('whole key: ***\nagain: ***\n');
+    // The next line opens a hold of its own.
+    const opens = run([KEY, 'GhIjKlMnZZZZ'], [`whole key: ${KEY}`, 'next: sk-ant', 'x']);
+    expect(opens).not.toContain('GhIjKlMn');
+    expect(opens).not.toContain('sk-ant');
+    // A periodic literal: 16 of its 17 bytes were held after it left whole.
+    const a17 = 'a'.repeat(17);
+    expect(run([a17, '020gh2daf0'], [`p ${a17}`, 'q 020gh2daf0'])).toBe('p ***\nq ***\n');
+    // Part of the hold left with the first literal and part did not: the part that did not
+    // leaves masked, never in clear.
+    const partly = run([vendor, 'c71Xyz-00000'], [`v ${vendor}Xy`, `z-1 and ${vendor}`]);
+    for (const piece of ['c71', 'Xy', vendor.slice(0, -3)]) expect(partly).not.toContain(piece);
+    expect(partly).toContain('z-1 and ***');
+  });
+
+  it('S-BTN-119: a literal inside, or overlapping, another is masked as one run, in either order of the set', () => {
+    for (const [set, text] of [
+      [['ABCDEFGHIJ', 'ABCDEFGHIJKLMNOP'], 'x ABCDEFGHIJKLMNOP y'],
+      [['ABCDEFGHIJKLMNOP', 'ABCDEFGHIJ'], 'x ABCDEFGHIJKLMNOP y'],
+      [['AAAAxyzw12', 'xyzw12345678'], 'x AAAAxyzw12345678 y'],
+      [['xyzw12345678', 'AAAAxyzw12'], 'x AAAAxyzw12345678 y'],
+      [['hunter2hunter2', 'postgres://u:hunter2hunter2@db.internal/prod'], 'x postgres://u:hunter2hunter2@db.internal/prod y'],
+    ] as Array<[string[], string]>) {
+      expect(maskLegOutput(text, set)).toBe('x *** y');
+      const sink = createLegMasker(set);
+      expect([sink.push(text), sink.flush()].join('\n')).toBe('x *** y\n');
+    }
+    // A literal repeated back to back is one run: nothing between them to keep.
+    expect(maskLegOutput(`${KEY}${KEY} ${KEY}`, [KEY])).toBe('*** ***');
+  });
+
+  it('S-BTN-119: a long run of a periodic literal is masked in linear time and memory', () => {
+    const set = [...Array.from({ length: 20 }, (_, i) => 'a'.repeat(8 + i)), `${'a'.repeat(30)}b`];
+    const line = 'a'.repeat(4 << 20);
+    const t = performance.now();
+    const sink = createLegMasker(set);
+    const said = [sink.push(line), sink.flush()].join('\n');
+    // Generous: about 0.3 s here; the quadratic span list took 4 s and 1.9 GB for a quarter of this.
+    expect(performance.now() - t).toBeLessThan(10_000);
+    expect(said).not.toMatch(/a/);
+    expect(maskLegOutput(`x ${line} y`, set)).toBe('x *** y');
+  }, 30_000);
+
   it('classes 5 and 6 are masked through the sink, and a `$&` secret with them', () => {
     const sink = createLegMasker(['pa$$w0rd$&x$1y']);
     expect(sink.push('Authorization: Bearer bmr_abc123DEF')).toBe('Authorization: Bearer ***');

@@ -355,10 +355,11 @@ describe('S-BTN-222 (the runner half): the channel checks a raise (R-BTN-160, R-
         courses: [{ course: 'roadmap-pr', version: 3 }], stateFile, beatEvery: 60_000, log: () => {},
       });
       // A live claim's shape, as the raise handler reads it; the run holds no link.
-      (r as unknown as { inflight: unknown }).inflight = { claimId: 1, ticket: 'docs:X', course: null, leg: 'implement', legAt: 0, child: null, waiters: [] };
+      const claim = (r as unknown as { makeRun(path: string): unknown }).makeRun(home);
+      (claim as { inflight: unknown }).inflight = { claimId: 1, ticket: 'docs:X', course: null, leg: 'implement', legAt: 0, child: null, waiters: [] };
       const course = { course: 'roadmap-pr', graph: graphOf(COURSE), scripts: new Map(), scratch: home };
       const ctx = { ticket: { id: 'docs:X' }, claim: { id: 1 } };
-      const ask = (req: Record<string, unknown>) => (r as unknown as { onChannel(req: unknown, course: unknown, leg: string, ctx: unknown): Promise<{ ok: boolean; error?: string }> }).onChannel(req, course, 'implement', ctx);
+      const ask = (req: Record<string, unknown>) => (claim as { onChannel(req: unknown, course: unknown, leg: string, ctx: unknown): Promise<{ ok: boolean; error?: string }> }).onChannel(req, course, 'implement', ctx);
 
       expect(await ask({ op: 'raise', type: 'interact', subject: 'join' })).toMatchObject({ ok: false, error: expect.stringContaining('session link') });
       expect(await ask({ op: 'raise', type: 'baton.retries', subject: 'x' })).toMatchObject({ ok: false, error: expect.stringContaining("core's alone") });
