@@ -17,7 +17,7 @@ import { checkPayload, DEFAULT_COURSE } from '../core/board';
 import { baseChain, checkSchemaSet, parseSchemaId, POST_STATES_MAX, refinementGaps, type Schema } from '../shared/schema.mjs';
 import { stdSchema } from '../shared/std.mjs';
 import { builtIn } from '../defaults/courses';
-import { courseSchemas } from '../defaults/cli';
+import { courseSchemas } from '../defaults/sync';
 import { parseSource } from '../defaults/course-source';
 import { LocalHost } from './host';
 import { openStore } from './store';

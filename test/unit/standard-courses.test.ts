@@ -16,6 +16,7 @@ import { graphOf, onGraph, type Step } from '../../src/core/graph';
 import { checkCourse, shortestRoute, type KitInput } from '../../src/local/testCourse';
 import { APPROVAL_STAGES, BUILT_INS, DEFAULT_COURSE, SPEC_TO_TICKETS_COURSE, buildAppWaits, builtIn, scaffoldable } from '../../src/defaults/courses';
 import { CREATE_SPEC_COURSE, stationsSpec, type PrFact, type PrGraph } from '../../src/defaults/course-pr';
+import { positionOf } from '../../src/defaults/stub-config';
 import { ticketsMarkdown, type SourceTicket } from '../../src/defaults/tickets-markdown';
 
 const instructionsDir = (id: string) => join(__dirname, '..', '..', 'src', 'defaults', 'courses', id);
@@ -62,7 +63,7 @@ describe('the standard courses (R-BTN-131)', () => {
           // queues the owner's adjudicate on its last round — so each is checked at a first run
           // and at the file's last.
           for (const answer of answers) for (const run of [1, 3]) {
-            const pos = new Function('answer', 'ctx', `return (${stub.position});`)(answer, { run }) as { reached: string; next: string | null; [k: string]: unknown };
+            const pos = positionOf(stub, answer, run);
             // A suspension may rest where the leg started (R-BTN-71: a give-up), which the file's
             // `to` does not list; every other reached station is an outcome. S-BTN-174 drives
             // create-spec's such stubs end to end.
@@ -79,7 +80,7 @@ describe('the standard courses (R-BTN-131)', () => {
         for (const [leg, stub] of Object.entries(b.legs)) {
           if (stub.tests) continue; // B-110: no agent runs the gate, and it reaches no end
           const ends = (stub.ask?.values ?? [undefined]).some((answer) => {
-            const pos = new Function('answer', 'ctx', `return (${stub.position});`)(answer, { run: 1 }) as { reached: string };
+            const pos = positionOf(stub, answer, 1);
             return b.course.end.includes(pos.reached);
           });
           if (ends) expect(readFileSync(join(instructionsDir(b.id), `${leg}.md`), 'utf8'), `${b.id}/${leg}`).toMatch(/`?status:`? to `?done`?/);
@@ -111,7 +112,7 @@ describe('the standard courses (R-BTN-131)', () => {
         for (const answer of stub.ask?.values ?? [undefined]) {
           // A first run's position (B-110: create-pr's review suspends only on its last round,
           // queuing the owner's adjudicate — defaults-cli.test.ts drives that).
-          const pos = new Function('answer', 'ctx', `return (${stub.position});`)(answer, { run: 1 }) as { suspend?: boolean };
+          const pos = positionOf(stub, answer, 1);
           const key = [b.id, leg, answer].filter(Boolean).join(' ');
           expect(pos.suspend === true, key).toBe(waits.has(key));
         }

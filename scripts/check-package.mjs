@@ -35,7 +35,7 @@ try {
   const app = join(dir, 'app');
   execFileSync('mkdir', [app]);
   writeFileSync(join(app, 'package.json'), JSON.stringify({ name: 'consumer', private: true }));
-  execFileSync('npm', ['install', '--no-audit', '--no-fund', '--silent', join(dir, packed.filename)], { cwd: app, stdio: ['ignore', 'ignore', 'inherit'] });
+  execFileSync('npm', ['install', '--ignore-scripts', '--no-audit', '--no-fund', '--silent', join(dir, packed.filename)], { cwd: app, stdio: ['ignore', 'ignore', 'inherit'] });
 
   // The runner bundle and its leg wrapper load: `run` reaches its credential check (§6.4) and
   // stops there, so nothing contacts a Baton. The environment is cleared of any real credential.
@@ -87,6 +87,16 @@ try {
       if (!existsSync(join(repo, f))) fail(`the installed \`baton repo init\` wrote no ${f}`);
     }
     if (!readFileSync(join(repo, '.github', 'workflows', 'baton-sync.yml'), 'utf8').includes(`ref: ${build.commit}`)) fail('the sync workflow does not pin the commit the package was built from');
+    const check = () => spawnSync(join(app, 'node_modules', '.bin', 'baton'), ['repo', 'init', '--check'], { cwd: repo, env, encoding: 'utf8' });
+    const clean = check();
+    if (clean.status !== 0 || !/6 leg stubs match/.test(clean.stdout)) fail(`the installed CLI did not check its pinned stubs:\n${clean.stdout}${clean.stderr}`);
+    const stub = join(repo, '.baton', 'courses', 'create-pr', 'legs', 'implement.mjs');
+    const edited = 'throw new Error("the check must not execute this");\n';
+    writeFileSync(stub, edited);
+    const drift = check();
+    if (drift.status !== 1 || !/implement\.mjs differs from github\//.test(drift.stdout) || readFileSync(stub, 'utf8') !== edited) {
+      fail(`the installed CLI did not report drift read-only:\n${drift.stdout}${drift.stderr}`);
+    }
   }
 
   process.stdout.write(`check-package OK — ${pkg.name}@${pkg.version}: ${files.length} files, ${Math.round(packed.size / 1024)} KB packed; the installed bin runs${build.dirty ? '; init refuses a modified-tree build' : `; init scaffolds create-pr at ${build.commit.slice(0, 10)}`}\n`);

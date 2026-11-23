@@ -33,7 +33,7 @@ import { ticketsMarkdown, type MarkdownFile } from './tickets-markdown';
 import { claimMismatch, formatTicket, ticketPathsUnder, ticketPrView } from '../shared/ticketPr.mjs';
 import { defaultBranch } from './request';
 import { DEFAULT_URL } from '../../cli/baton.mjs';
-import { remoteSlug, ownRepositoryId } from './cli';
+import { remoteSlug, ownRepositoryId } from './remote-slug';
 import { builtIn, DEFAULT_COURSE } from './courses';
 import { holderRefusal, readTicketPosition, Undetermined, type BatonPosition } from './tickets-baton';
 import { batonTarget, fallbackNote, floorFor, nextMain, parseKind, takeNumber } from './sequences';

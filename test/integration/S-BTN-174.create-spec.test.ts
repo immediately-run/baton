@@ -23,6 +23,7 @@ import { join } from 'node:path';
 import { call as hostCall } from '#host';
 import { initMain, parseSyncArgs, syncMain } from '../../src/defaults/cli';
 import type { PrFact } from '../../src/defaults/course-pr';
+import { positionOf } from '../../src/defaults/stub-config';
 import { BUILT_INS } from '../../src/defaults/courses';
 import { closesOfHistory } from '../../src/defaults/ticket-state';
 import { prClose } from '../../src/defaults/pr-close';
@@ -140,7 +141,9 @@ describe('S-BTN-174 the create-spec course', () => {
       // `{ suspend: true, reached: 'requested', next: 'converse' }` (BUILT_INS): the claim ends at
       // `requested` and nothing else moves; the one record the leg leaves is its close's marker.
       const spec = BUILT_INS.find((b) => b.id === 'create-spec')!;
-      const stub = new Function('answer', `return (${spec.legs.converse.position});`)(undefined) as { suspend: boolean; reached: string; next: string };
+      const converseLeg = spec.legs.converse;
+      if (converseLeg.tests) throw new Error('converse is an agent leg');
+      const stub = positionOf(converseLeg);
       expect(stub).toEqual({ suspend: true, reached: 'requested', next: 'converse' });
       await repo.close('converse', { reached: 'requested', next: 'review' });
       // The line the close wrote is the one `parseMarkers` reads back — the ticket bare, at the
@@ -181,7 +184,9 @@ describe('S-BTN-174 the create-spec course', () => {
       await repo.sync();
       expect(await stationOf('SPEC-1')).toMatchObject({ station: 'reviewed', next_leg: 'address', path_len: 2 });
       expect(await nextOf('SPEC-1')).toEqual([{ leg: 'address', state: 'ready', waiting_on: null }]);
-      const addressStub = new Function('answer', `return (${spec.legs.address.position});`)(undefined) as { suspend: boolean; reached: string; next: string };
+      const addressLeg = spec.legs.address;
+      if (addressLeg.tests) throw new Error('address is an agent leg');
+      const addressStub = positionOf(addressLeg);
       expect(addressStub).toEqual({ suspend: true, reached: 'reviewed', next: 'address' });
 
       // The round's claim ends and its close writes the round's marker: `address` waits on the

@@ -99,12 +99,21 @@ export const exec = (
   args: string[],
   cwd: string,
   opts: { env?: Record<string, string>; input?: string; timeoutMs?: number } = {},
+): string => execRaw(cmd, args, cwd, opts).trim();
+
+/** The same bound for snapshot reads and scripts that need untrimmed stdout. */
+export const execRaw = (
+  cmd: string,
+  args: string[],
+  cwd: string | undefined,
+  opts: { env?: Record<string, string>; input?: string; timeoutMs?: number; maxBuffer?: number } = {},
 ): string =>
   execFileSync(cmd, args, {
     cwd, encoding: 'utf8', timeout: opts.timeoutMs ?? CLOSE_TIMEOUT_MS, killSignal: 'SIGKILL',
+    ...(opts.maxBuffer != null ? { maxBuffer: opts.maxBuffer } : {}),
     ...(opts.input != null ? { input: opts.input } : { stdio: ['ignore', 'pipe', 'pipe'] }),
     env: { ...process.env, ...GIT_NONINTERACTIVE_ENV, ...opts.env },
-  }).trim();
+  });
 
 /** The bare ticket id a close names: the sync reads ids as the repository's ticket files carry
  * them (`B-1`), while a claim's `ctx.ticket.id` is repository-qualified (`docs:B-1`, R-BTN-51). */

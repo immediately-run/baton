@@ -1,10 +1,7 @@
-// remote-slug.ts — `owner/name` of a checkout's `origin` remote, the one git fact both the
-// sync defaults (cli.ts) and the CLI's homes (homes.ts, B-121) read. A leaf, so the runner's
-// bundle can resolve a named home without the whole of cli.ts beside it: the function, its git
-// helper and its failure shape moved here from cli.ts, which re-exports it unchanged.
 import { execFileSync } from 'node:child_process';
 
-const git = (root: string, ...a: string[]): string => execFileSync('git', ['-C', root, ...a], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, LC_ALL: 'C' } }).trim();
+// Use git's C catalog so callers can distinguish missing data from a broken checkout.
+export const git = (root: string, ...a: string[]): string => execFileSync('git', ['-C', root, ...a], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, LC_ALL: 'C' } }).trim();
 
 interface GitFailure { status?: number | null; stderr?: string | Uint8Array }
 

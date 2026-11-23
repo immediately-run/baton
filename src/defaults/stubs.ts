@@ -1,0 +1,147 @@
+// Build standalone leg modules and ejected defaults (R-BTN-131), for init and for npm pack.
+import { copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs';
+import { join } from 'node:path';
+import { BUILT_INS, DEFAULT_COURSE, type BuiltIn } from './courses';
+import { fromSource, packageRoot, prebuilt } from './repo-source';
+import { OVERRIDE_SUFFIX, type StubConfig } from './stub-config';
+
+/** A stable entry name and working directory keep the bundle bytes independent of the checkout
+ * path and of whether init or prepack built them. The runner can load the resulting file alone. */
+async function bundleSource(contents: string): Promise<Buffer> {
+  const { build } = await import('esbuild');
+  const result = await build({
+    absWorkingDir: packageRoot(), stdin: { contents, sourcefile: 'baton-default-entry.ts', resolveDir: packageRoot() },
+    write: false, bundle: true, platform: 'node', format: 'esm', target: 'node22', logLevel: 'warning',
+  });
+  return Buffer.from(result.outputFiles[0].contents);
+}
+
+function stubSource(b: BuiltIn, leg: string): string {
+  const config: StubConfig = {
+    course: b.id, leg, reads: b.reads, spec: b.legs[leg],
+    overridePath: `.baton/courses/${b.id}/legs/${leg}${OVERRIDE_SUFFIX}`,
+  };
+  return `import { makeLeg } from './src/defaults/stub-runtime.ts';
+export const { run, close, handoff } = makeLeg(${JSON.stringify(config)});
+`;
+}
+
+/** The wrappers an ejection bundles: a working file calling the CLI's default through the same
+ * interface the sync calls a repository's own file with, ready to edit (the bundle's top is the
+ * default's own source). The stations wrapper is the course's own standard course's. */
+const WRAPPERS: Record<'tickets' | 'stations', (course: string) => string> = {
+  tickets: () => `import { readItems } from './src/defaults/read-items.ts';
+import { ticketsMarkdown } from './src/defaults/tickets-markdown.ts';
+import { stampMarkdownVersions, readTicketBlob } from './src/defaults/ticket-versions.ts';
+export default {
+  // The same signature the sync calls a repository's own source with: edit freely.
+  // B-183 (R-BTN-74): this source is pinned — a ticket is read at its version — and each
+  // ticket's version is its file's blob id at the commit the sync posts, so an unrelated
+  // commit changes no ticket's version. A ticket whose file is not at the commit is posted
+  // with no version.
+  versions: 'pinned',
+  async tickets(ctx) {
+    const files = readItems(ctx.root, ctx.settings.items);
+    return stampMarkdownVersions(ctx.root, ticketsMarkdown(files, ctx.settings), ctx.settings.items);
+  },
+  // The ticket's blob at its version (§4.5): what the runner reads, exactly as it reads the
+  // file at the claim's snapshot today. \`checkout\` is the runner's home checkout.
+  async read(id, { version, checkout } = {}) {
+    return { version, ticket: readTicketBlob(checkout ?? process.cwd(), version) };
+  },
+};
+`,
+  stations: (course) => `import { builtIn } from './src/defaults/courses.ts';
+export default {
+  // The same signature the sync calls a repository's own function with: edit freely. ctx carries
+  // the course's tickets, the PR facts, the closing markers and the course file. Returns
+  // {stations, markers, course_data} (R-BTN-74).
+  async stations(ctx) {
+    return builtIn(${JSON.stringify(course)}).stations(ctx);
+  },
+};
+`,
+};
+
+/** The file `init --override <leg>` seeds: a `run` that calls the course's own, which the
+ * repository then edits. It owns the file; init never rewrites it. */
+export function overrideSource(b: BuiltIn, leg: string): string {
+  const spec = b.legs[leg];
+  const { ask, tests } = spec;
+  return `// The \`${leg}\` leg of the \`${b.id}\` course as this repository implements it (BATON_SPEC R-BTN-131).
+// \`baton repo init --override ${leg}\` wrote it; it is yours, and init never rewrites it. The standard
+// leg script beside it (${leg}.mjs) loads this file from the claim's snapshot and calls its \`run\` in
+// place of its own, keeping its own \`close\`, so the closing marker the course reads is always the
+// standard one.
+//
+// run(ctx, standard): \`ctx\` is the leg's context (ticket, checkout, snapshot, leg, claim, …);
+// \`standard\` is the course's own run — ${tests
+    ? 'for this leg (B-110), the deterministic test script itself on the PR branch\u2019s head: no agent runs, the script\u2019s exit is the verdict, and the close pushes the branch\u2019s Baton-Tests marker'
+    : 'the repository\u2019s agent_command with the leg\u2019s instructions'}.
+// Return a position that is an edge of the course, the shape \`standard\` returns:
+//   ${tests ? "{ reached: <'pr-open' | 'fixed', the claim's station>, next: 'review' | 'fix', tests: 'green' | 'red', branch, tested, marker } — the close pushes \`marker\`, an empty-tree commit on \`tested\` (call \`standard\` for it)" : spec.ask ? 'the position for the checked answer' : JSON.stringify(spec.position)}${ask ? `
+// where \`answer\` is the ${ask.name}: ${ask.values.join(' or ')}.` : ''}
+// This file is loaded alone, from the snapshot: import only node: built-ins.
+export async function run(ctx, standard) {
+  return standard(ctx);
+}
+`;
+}
+
+/** The worked example of `agent_wrapper` (B-95): a `tee` to `.baton/logs/<ticket>-<leg>.log`,
+ * shipped but never used until the repository names it in `baton.json`. */
+export const WRAPPER_EXAMPLE = 'leg-wrapper.example';
+export const wrapperExample = (): string =>
+  readFileSync(fromSource() ? join(packageRoot(), '.baton', WRAPPER_EXAMPLE) : prebuilt(WRAPPER_EXAMPLE), 'utf8');
+
+/** The instructions shipped for one leg of a standard course (R-BTN-131), the Markdown `init`
+ * copies into the repository, which owns them from then on. */
+export const instructionsOf = (course: string, leg: string): string =>
+  readFileSync(fromSource() ? join(packageRoot(), 'src', 'defaults', 'courses', course, `${leg}.md`) : prebuilt('courses', course, `${leg}.md`), 'utf8');
+
+/** The legs of a standard course a runner runs, each with a stub and instructions: every leg
+ *  but a person's (R-BTN-116, B-257's `confirm`), which no runner is offered and no script runs. */
+export const runnerLegs = (b: BuiltIn): string[] =>
+  Object.entries(b.course.legs as Record<string, { kind?: unknown }>).filter(([, l]) => l?.kind !== 'person').map(([leg]) => leg);
+
+/** The source bytes init writes and --check expects: build from this checkout, or read the
+ * published package's prebuilt copy. Never load the repository's own stub to compare it. */
+export async function stubBytes(b: BuiltIn, leg: string): Promise<Buffer> {
+  return fromSource() ? bundleSource(stubSource(b, leg)) : readFileSync(prebuilt('stubs', b.id, `${leg}.mjs`));
+}
+
+/** An ejected default (`--eject`): from source in a checkout, else build:cli's copy. */
+export async function writeWrapper(kind: 'tickets' | 'stations', course: string, abs: string): Promise<void> {
+  if (fromSource()) writeFileSync(abs, await bundleSource(WRAPPERS[kind](course)));
+  else copyFileSync(kind === 'tickets' ? prebuilt('tickets.mjs') : prebuilt('stations', `${course}.mjs`), abs);
+}
+
+/** What build:cli writes into `dist/` for an installed package: every standard course's leg
+ * stubs and instructions, the eject wrappers, and `build.json` naming the commit built. The
+ * files are the ones init would write from this checkout at `commit`. */
+export async function prebuildDefaults(dist: string, build: { repository: string; commit: string; dirty?: boolean }): Promise<number> {
+  const out = join(dist, 'defaults');
+  rmSync(out, { recursive: true, force: true });
+  let files = 0;
+  for (const b of BUILT_INS) {
+    mkdirSync(join(out, 'stubs', b.id), { recursive: true });
+    for (const leg of runnerLegs(b)) {
+      writeFileSync(join(out, 'stubs', b.id, `${leg}.mjs`), await stubBytes(b, leg));
+      files++;
+      const md = join(packageRoot(), 'src', 'defaults', 'courses', b.id, `${leg}.md`);
+      if (existsSync(md)) {
+        mkdirSync(join(out, 'courses', b.id), { recursive: true });
+        copyFileSync(md, join(out, 'courses', b.id, `${leg}.md`));
+        files++;
+      }
+    }
+    mkdirSync(join(out, 'stations'), { recursive: true });
+    writeFileSync(join(out, 'stations', `${b.id}.mjs`), await bundleSource(WRAPPERS.stations(b.id)));
+    files++;
+  }
+  writeFileSync(join(out, 'tickets.mjs'), await bundleSource(WRAPPERS.tickets(DEFAULT_COURSE)));
+  // B-95's worked example, beside the stubs: init writes it into .baton/ as leg-wrapper.example.
+  copyFileSync(join(packageRoot(), '.baton', WRAPPER_EXAMPLE), join(out, WRAPPER_EXAMPLE));
+  writeFileSync(join(dist, 'build.json'), `${JSON.stringify(build, null, 2)}\n`);
+  return files + 3;
+}

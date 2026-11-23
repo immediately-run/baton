@@ -113,8 +113,9 @@
 //
 //   baton repo sync [--root DIR] [--url URL] [--latest BRANCH] [--facts FILE] [--sync-key FILE] [--busy-retry S]
 //   baton repo init [--course C] [--agent opencode|claude-code] [--agent-command CMD] [--override LEG]…
-//   baton repo migrate-markers [--root DIR]   — the one-time fold of the retired .baton/markers.jsonl into the tickets (B-100)
 //                   [--eject tickets|stations] [--pin owner/name@commit] [--force]
+//   baton repo init --check [--course C]   — compare generated leg stubs to their pinned source
+//   baton repo migrate-markers [--root DIR]   — the one-time fold of the retired .baton/markers.jsonl into the tickets (B-100)
 //                — a repository's own sync and scaffold (§2f R-BTN-74, R-BTN-131)
 //   baton tickets new --title T [--description D] [--project ID] [--depends-on A,B] [--tags X,Y]
 //                [--tier T] [--order N] [--repos a,b] [--course C] [--body-file F] [--trust T] [--invariants I]

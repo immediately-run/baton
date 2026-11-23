@@ -586,6 +586,54 @@ describe('baton repo init, through the built CLI', () => {
   }, 120_000);
   afterAll(() => rmSync(root, { recursive: true, force: true }));
 
+  it('checks pinned stubs read-only, reporting modified and missing files but ignoring overrides (S-BTN-105)', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'baton-check-stubs-'));
+    try {
+      baton(dir, 'repo', 'init', '--override', 'implement');
+      baton(dir, 'repo', 'init', '--course', 'decision');
+      const legs = join(dir, '.baton/courses/create-pr/legs');
+      const override = join(legs, 'implement.run.mjs');
+      writeFileSync(override, 'throw new Error("check must not load overrides");\n');
+      expect(baton(dir, 'repo', 'init', '--check')).toContain('8 leg stubs match their pinned sources');
+      const changed = 'throw new Error("check must not load stubs");\n';
+      writeFileSync(join(legs, 'implement.mjs'), changed);
+      rmSync(join(legs, 'run-tests.mjs'));
+
+      const log: string[] = [];
+      const workflow = join(dir, '.github/workflows/baton-sync.yml');
+      const workflowBefore = readFileSync(workflow);
+      const settings = join(dir, '.baton/baton.json');
+      const settingsBefore = readFileSync(settings);
+      expect(await initMain(['--check'], { root: dir, log: (line) => log.push(line) })).toBe(1);
+      expect(log).toEqual([
+        expect.stringContaining(`create-pr/legs/implement.mjs differs from ${sourceOf('create-pr')}`),
+        expect.stringContaining(`create-pr/legs/run-tests.mjs is missing (pinned to ${sourceOf('create-pr')})`),
+      ]);
+      expect(readFileSync(join(legs, 'implement.mjs'), 'utf8')).toBe(changed);
+      expect(existsSync(join(legs, 'run-tests.mjs'))).toBe(false);
+      expect(readFileSync(workflow)).toEqual(workflowBefore);
+      expect(readFileSync(settings)).toEqual(settingsBefore);
+      expect(baton(dir, 'repo', 'init', '--check', '--course', 'decision')).toContain('2 leg stubs match');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 30_000);
+
+  it('asks for the pinned CLI instead of claiming drift against a different commit (S-BTN-105)', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'baton-check-pin-'));
+    try {
+      mkdirSync(join(dir, '.baton'));
+      const source = `github/${OTHER_PIN.replace('@', '/')}/create-pr`;
+      writeFileSync(join(dir, '.baton/baton.json'), JSON.stringify({ courses: [{ id: 'create-pr', version: 1, source }] }));
+      const log: string[] = [];
+      expect(await initMain(['--check'], { root: dir, log: (line) => log.push(line) })).toBe(1);
+      expect(log).toEqual([`baton: cannot check create-pr against ${source} — use a Baton CLI built from that pin`]);
+      expect(existsSync(join(dir, '.baton/courses'))).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('writes the settings with every R-BTN-51 course field, the course file, the pinned workflow and the tickets directory', () => {
     const settings = JSON.parse(readFileSync(join(root, '.baton', 'baton.json'), 'utf8'));
     // B-83: a fresh scaffold names a real agent — the opencode command by default, never the
@@ -722,10 +770,10 @@ describe('baton repo init, through the built CLI', () => {
     // scaffold's agent_command is B-83's real opencode command — which must not run mid-test —
     // so the settings name a no-op, committed at the snapshot the stub reads.
     // B-94 (review round 1): every git and gh call the generated stub makes is bounded and
-    // non-interactive — the same bound and environment the close uses, injected at generation.
+    // non-interactive — the same bounded command helper the close uses.
     for (const leg of legs) {
       const text2 = readFileSync(join(root, '.baton', 'courses', 'create-pr', 'legs', leg), 'utf8');
-      expect(text2, leg).toContain('timeout: GIT_BOUND_MS');
+      expect(text2, leg).toContain('timeout: opts.timeoutMs ?? CLOSE_TIMEOUT_MS');
       expect(text2, leg).toContain('killSignal');
       expect(text2, leg).toContain('GIT_TERMINAL_PROMPT');
     }
@@ -2370,10 +2418,6 @@ describe('baton repo init --course, the standard courses (R-BTN-131)', () => {
       expect(await conclude.run({ ticket: { id: 'R-1' }, checkout: root, snapshot })).toEqual({ reached: 'concluded', next: null, pr: 'https://github.com/o/site/pull/7' });
       process.env.OUTCOME = 'summary posted';
       expect(await conclude.run({ ticket: { id: 'R-1' }, checkout: root, snapshot })).toEqual({ reached: 'concluded', next: null });
-      // A marker course's stub closes through markerClose; a PR course's through prClose (the
-      // stub wraps either to hand the default branch in, so the source is what names it).
-      expect(stubSourceOf(root, 'bug-report', 'trace')).toContain('closeTicket(closeCtx2(');
-      expect(stubSourceOf(root, 'review-pr', 'conclude')).toContain('prClose(closeCtx2(');
     } finally {
       delete process.env.OUTCOME;
       writeFileSync(instructions, shipped);
@@ -2457,9 +2501,7 @@ describe('course sources and leg overrides (B-33)', () => {
   it('--override seeds legs/<leg>.run.mjs calling the course’s own run; a leg the course lacks is refused before anything is written', () => {
     const seeded = readFileSync(join(legs(), 'review.run.mjs'), 'utf8');
     expect(seeded).toContain('export async function run(ctx, standard) {\n  return standard(ctx);\n}');
-    // B-110 round 1: a changes verdict on the last round (the file's `max_runs`, or one the owner
-    // granted past it) queues the owner's adjudicate and suspends, never a fix.
-    expect(seeded).toContain("{ ...(answer !== 'approve' && (ctx.run ?? 1) >= 3 ? { suspend: true } : {}), reached: 'reviewed', next: answer === 'approve' ? 'merge' : (ctx.run ?? 1) >= 3 ? 'adjudicate' : 'fix', verdict: answer }");
+    expect(seeded).toContain('where `answer` is the verdict: approve or changes');
     expect(() => baton(root, 'repo', 'init', '--pin', PIN, '--override', 'deploy')).toThrow(/--override deploy: create-pr has no such leg — its legs are implement, run-tests, review, fix, adjudicate, merge/);
     expect(existsSync(join(legs(), 'deploy.run.mjs'))).toBe(false);
   });
@@ -2525,17 +2567,17 @@ export async function run(ctx, standard) {
   writeFileSync(join(ctx.checkout, 'override.ran'), ctx.leg);
   return { ...(await standard(ctx)), reached: 'reviewed' };
 }
+export async function close() { throw new Error('override close must not run'); }
 `);
       const snapshot = { sha: commitAll(root) };
       rmSync(join(root, 'override.ran'), { force: true });
       const stub = await load(script);
       expect(await stub.run({ ticket: { id: 'A-1' }, checkout: root, snapshot, leg: 'review' })).toEqual({ reached: 'reviewed', next: 'fix', verdict: 'changes' });
       expect(readFileSync(join(root, 'override.ran'), 'utf8')).toBe('review');
-      // The course's close is what the stub exports, whatever the override adds: the stub
-      // wraps it to hand the default branch in (so its name is 'close'), and the override's
-      // own close is not it.
-      expect(typeof stub.close).toBe('function');
-      expect(readFileSync(script, 'utf8')).toContain('prClose(closeCtx2(');
+      // The PR close still owns verification, even when the override exports a close.
+      await expect(stub.close({ ticket: { id: 'A-1' }, checkout: root, leg: 'review' }, {
+        reached: 'reviewed', next: 'fix', verdict: 'changes', pr: 'not a PR URL',
+      })).rejects.toThrow('the review leg named no PR URL to write on');
       // An override exporting no run fails the leg, naming the file.
       writeFileSync(override, 'export const nothing = 1;\n');
       const broken = { sha: commitAll(root) };
