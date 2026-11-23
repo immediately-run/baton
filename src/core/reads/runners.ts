@@ -14,6 +14,7 @@
 // B-184): a runner's `executor`, a run's `executor_digest`, `environment` and `instance`. The
 // answer says so in `not_built` instead of inventing them. A run's `log_dir` is the column as
 // stored (`claim_legs.leg_log_dir`), which nothing writes yet (B-23).
+import { isLive, leaseEndsAt } from '../runnerLiveness';
 import { BatonError } from '../http';
 import { transcriptUrl } from '../links';
 import { graphOf, type Graph } from '../graph';
@@ -206,7 +207,7 @@ export function runnerRows(cx: ReadCtx, repo: string, only: number | null = null
   const profiles = new Map<number, unknown>();
   const rows = raw.map((w): RunnerRow => {
     const mine = claims.get(w.id) ?? [];
-    const leaseEnds = w.kind === 'legacy' ? null : w.last_seen_at + w.lease_timeout_ms;
+    const leaseEnds = w.kind === 'legacy' ? null : leaseEndsAt(w);
     const here = mine.filter((c) => c.ticket_id.startsWith(prefix)).map((c): RunnerClaim => {
       const a = activity.get(c.id);
       return {
@@ -224,7 +225,7 @@ export function runnerRows(cx: ReadCtx, repo: string, only: number | null = null
     profiles.set(w.id, parsed<unknown>(w.profile_json, null));
     return {
       runner_id: w.id, hostname: w.hostname, session_name: w.session_name,
-      alive: w.reaped_at == null && now - w.last_seen_at < w.lease_timeout_ms,
+      alive: isLive(w, now),
       last_seen_at: w.last_seen_at, last_activity_at: w.last_activity_at, reaped_at: w.reaped_at,
       harness: w.harness, kind: w.kind, isolation: w.isolation,
       tier_ceilings: parsed<Record<string, string>>(w.tier_ceilings, {}),
