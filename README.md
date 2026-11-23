@@ -394,7 +394,10 @@ whose writers you trust.
 ## Deploying
 
 `.github/workflows/baton-deploy.yml` runs the suite and then `wrangler deploy` (production,
-`baton.immediately.run`) on every push to `main`. There is no staging instance: a home
+`baton.immediately.run`) on every push to `main` that changes more than ticket files — read
+against the last commit it deployed (`scripts/ci-scope.mjs`), so a ticket-status commit neither
+runs the suite nor deploys, and a code change a ticket push displaced from the queue still
+does. There is no staging instance: a home
 repository binds to one Baton, and every registered one binds to production (B-224). It needs
 the `CLOUDFLARE_API_TOKEN` secret in the `production` environment (R3-1208): Workers Scripts:
 Edit on the account, plus Zone: Read and Workers Routes: Edit on the `immediately.run` zone.
@@ -431,8 +434,8 @@ first sync. The tenant's administrator drives it (BATON_SPEC §4.8):
 ## Releasing the CLI
 
 A release is a PR that bumps `version` in `package.json` (and its two copies at the root of
-`package-lock.json`: `npm install --package-lock-only`), merged to `main`. `ci.yml`'s `release`
-job then waits for a reviewer's approval in the `npm` environment, tags `v<version>`, and runs
+`package-lock.json`: `npm install --package-lock-only`), merged to `main`. `ci.yml` runs on `main` only for a push that changes `package.json`, and
+its `release` job starts only when that version is not on npm yet; it then waits for a reviewer's approval in the `npm` environment, tags `v<version>`, and runs
 `npm publish` by OIDC trusted publishing, with provenance; no npm token exists. A version npm
 already has is skipped, so a merge without a bump publishes nothing. `npm run check:package`
 (in CI on every PR) packs the tarball, installs it in an empty directory and runs its `baton`.
