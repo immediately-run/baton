@@ -502,8 +502,8 @@ The fingerprint stores no ticket content and is an optimization, never authority
     version releases `stale-board`. A source that declares `versions` and exports no `read`
     releases `stale-board` too. A source that declares neither is not re-verified by version.
   - **Re-verification of readiness.** The runner then runs the course's `sync.mjs` (through the
-    wrapper, from a verified tree at the claim's commit, R-BTN-133) on the ticket and its PRs at the fetched head. Its readiness must show
-    the offered leg leaving the claim's station as Baton holds it (the claim response's
+    wrapper, from a verified tree at the claim's commit, R-BTN-133) on the ticket and its PRs
+    at the fetched head. Its readiness must show the offered leg leaving the claim's station as Baton holds it (the claim response's
     station, `path_len` and queued leg, R-BTN-39); the ticket's position never comes from the
     source. A ticket closed or archived, or the leg not offered there, releases
     `stale-board`. A ticket with no file — a `changes` check ticket (R-BTN-114) — is
