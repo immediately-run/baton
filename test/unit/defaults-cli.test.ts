@@ -655,8 +655,8 @@ describe('baton repo init, through the built CLI', () => {
       writeFileSync(runtime, readFileSync(runtime, 'utf8').replaceAll('BATON_INSTRUCTIONS', 'EXAMPLE_INSTRUCTIONS'));
       for (const args of [['--course', 'decision', '--force', '--pin', PIN], ['--check']]) {
         const result = run(...args);
-        expect(result.status).toBe(1);
         expect(result.stderr).toContain('CLI checkout has modified build inputs');
+        expect(result.status).toBe(2); // CLI usage/error exit, not a reported drift finding.
       }
       expect([readFileSync(settings, 'utf8'), readFileSync(stub, 'utf8')]).toEqual(before);
     } finally {
