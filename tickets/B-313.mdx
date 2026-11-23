@@ -3,12 +3,11 @@ title: "B-313 — Leg activity from the executor: the liveness line and heartbea
 id: B-313
 project: baton
 status: available
-updated: 2026-11-21
+updated: 2026-11-23
 repos:
   - baton
 tags:
   - roadmap-item
-tier: normal
 description: "Under a non-builtin executor (Fieldhouse E2B) the runner's liveness line reads the host's opencode/Claude stores, which legs in a sandbox never write — every leg reads days idle — and the heartbeat never sends last_activity_at, so every claim over 2 h reads stalled. Add an optional executor activity(handle) to R-BTN-107, use it in R-BTN-72's line and send it as last_activity_at; host stores only under builtin; this.now() not Date.now()."
 topics:
   - baton

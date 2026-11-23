@@ -3,12 +3,11 @@ title: "B-314 — Runners pick up course version changes without a restart, and 
 id: B-314
 project: baton
 status: available
-updated: 2026-11-22
+updated: 2026-11-23
 repos:
   - baton
 tags:
   - roadmap-item
-tier: normal
 description: "The runner reads the course versions it declares once at startup, so raising min_runner_version refuses it claims (stale-skills) until a person restarts it. Re-read them each time the home moves to a snapshot and declare them in the next heartbeat; optionally (--restart-when-behind) exit at a claim boundary with code 75 when the runner's own CLI is behind, for a looping launcher to start it on the new code."
 topics:
   - baton
