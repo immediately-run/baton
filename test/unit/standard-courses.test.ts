@@ -154,6 +154,24 @@ describe('the standard courses (R-BTN-131)', () => {
     }
   });
 
+  it("create-pr's implement and fix instructions keep pre-existing failures out of ticket fixes in both copies (B-317, S-BTN-230 for external CI)", () => {
+    const home = join(__dirname, '..', '..', '.baton', 'courses', 'create-pr', 'legs');
+    const implement = readFileSync(join(instructionsDir('create-pr'), 'implement.md'), 'utf8');
+    const fix = readFileSync(join(instructionsDir('create-pr'), 'fix.md'), 'utf8');
+    expect(readFileSync(join(home, 'implement.md'), 'utf8')).toBe(implement);
+    expect(readFileSync(join(home, 'fix.md'), 'utf8')).toBe(fix);
+    expect(implement).toMatch(/clean checkout of the base[\s\S]*push and open the PR anyway/);
+    expect(implement).toMatch(/\*\*Pre-existing failures\*\*:[\s\S]*first failing line[\s\S]*base commit/);
+    expect(implement).toContain('Never fix an unrelated failure');
+    expect(implement).toContain('the run-tests leg is the gate');
+    expect(implement).not.toContain('Push only once they pass');
+    expect(fix).toContain('clean checkout of the current base');
+    expect(fix).toMatch(/still fails on the current base[\s\S]*change nothing[\s\S]*Comment on the PR/);
+    expect(fix).toMatch(/base has moved and already fixes the failure[\s\S]*merge the default branch into the PR branch/);
+    expect(fix).toContain('same rule applies to a red CI check in another repository');
+    expect(fix).toContain('Fix a failure that also fails on the base inside this PR');
+  });
+
   it("the review legs' instructions name every added or upgraded dependency with its publisher and age (B-132)", () => {
     for (const file of [
       join(instructionsDir('create-pr'), 'review.md'),

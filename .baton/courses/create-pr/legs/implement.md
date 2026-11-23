@@ -89,7 +89,14 @@ Fix whatever the answers expose before you push.
   An earlier attempt's branch for this ticket is continued, not replaced.
 - Implement what the ticket says, with its tests. A behaviour change without a test that would
   fail without it is not finished.
-- Run the repository's checks yourself. Push only once they pass.
+- Run the repository's checks yourself. Fix failures your change causes before you push.
+- **A failure that also fails on the base is not yours.** Re-run the same command with the same
+  install in a clean checkout of the base (`git worktree add --detach <tmp> origin/<default branch>`),
+  never in your own tree. If the same failure occurs there, push and open the PR anyway.
+  In the PR body, under **Pre-existing failures**: name the test, its first failing line and the
+  base commit you reproduced it on.
+- **Never fix an unrelated failure** in the ticket's PR, even a one-line fix. It belongs to the
+  ticket or PR that owns that code. Say in your last lines that the default branch is red and where.
 - **Install dependencies with hygiene** (B-132): from the lockfile only — `npm ci`, never an
   `npm install` that rewrites it — unless the ticket itself asks for a dependency change; and
   with lifecycle scripts off (`npm ci --ignore-scripts`: pass the flag every time — never
@@ -124,8 +131,10 @@ of every repository the ticket names, and reads them together, as one change.
   aggregate; a release note belongs in the PR body.
 - Merge, approve or review your own PR; later legs do that.
 - Leave the PR without a pushed head: the review reads what is pushed.
+- Hold back a push because a check fails on the base too: the run-tests leg is the gate, and
+  unpushed work is lost when the leg's environment ends.
 - Exit without a PR and without saying why. Whatever stops you — the ticket already delivered,
-  a stop the repository's rules name, checks you cannot get green, a push or `gh pr create`
+  a stop the repository's rules name, a failure your change causes that you cannot fix, a push or `gh pr create`
   that fails, a model or provider that refuses (balance, quota, rate limit) — your last lines
   say what it was, in plain words: an exit with no PR fails the leg, and those lines are all
   that is kept of it (B-256). Your process exits 0 whatever you say, so saying it is the only
