@@ -2,8 +2,22 @@
 import { copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { BUILT_INS, DEFAULT_COURSE, type BuiltIn } from './courses';
-import { fromSource, packageRoot, prebuilt } from './repo-source';
+import { cliPin, fromSource, packageRoot, prebuilt } from './repo-source';
+import { git } from './remote-slug';
 import { OVERRIDE_SUFFIX, type StubConfig } from './stub-config';
+
+// HEAD alone identifies the CLI, not the inputs esbuild will read from the checkout.
+// Include ignored files here: a local module can change resolution without being tracked.
+const changedStubInputs = (): string => git(packageRoot(), 'status', '--porcelain', '--untracked-files=all', '--ignored=matching', '--',
+  'src', 'cli', 'scripts', 'package.json', 'package-lock.json', 'tsconfig*.json', '.baton/leg-wrapper.example');
+
+export function requireCleanStubInputs(): void {
+  if (!fromSource()) {
+    cliPin(); // A package's recorded dirty bit applies even if --pin was given explicitly.
+  } else if (changedStubInputs()) {
+    throw new Error('the Baton CLI checkout has modified build inputs; use a clean checkout of the pinned commit to write or check standard stubs');
+  }
+}
 
 /** A stable entry name and working directory keep the bundle bytes independent of the checkout
  * path and of whether init or prepack built them. The runner can load the resulting file alone. */
@@ -142,6 +156,6 @@ export async function prebuildDefaults(dist: string, build: { repository: string
   writeFileSync(join(out, 'tickets.mjs'), await bundleSource(WRAPPERS.tickets(DEFAULT_COURSE)));
   // B-95's worked example, beside the stubs: init writes it into .baton/ as leg-wrapper.example.
   copyFileSync(join(packageRoot(), '.baton', WRAPPER_EXAMPLE), join(out, WRAPPER_EXAMPLE));
-  writeFileSync(join(dist, 'build.json'), `${JSON.stringify(build, null, 2)}\n`);
+  writeFileSync(join(dist, 'build.json'), `${JSON.stringify(changedStubInputs() ? { ...build, dirty: true } : build, null, 2)}\n`);
   return files + 3;
 }

@@ -7,7 +7,7 @@
 // Node only: init writes a real tree and runs git.
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest';
 import { execFile, execFileSync, spawnSync } from 'node:child_process';
-import { chmodSync, copyFileSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -627,12 +627,77 @@ describe('baton repo init, through the built CLI', () => {
       writeFileSync(join(dir, '.baton/baton.json'), JSON.stringify({ courses: [{ id: 'create-pr', version: 1, source }] }));
       const log: string[] = [];
       expect(await initMain(['--check'], { root: dir, log: (line) => log.push(line) })).toBe(1);
-      expect(log).toEqual([`baton: cannot check create-pr against ${source} — use a Baton CLI built from that pin`]);
+      expect(log).toEqual([`baton: cannot check create-pr against ${source} — use the CLI at that pin if it supports --check; older pins cannot be checked until upgraded`]);
       expect(existsSync(join(dir, '.baton/courses'))).toBe(false);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it('refuses to write or check pinned stubs from modified CLI build inputs (S-BTN-105)', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'baton-check-inputs-'));
+    try {
+      const checkout = join(dir, 'cli');
+      const home = join(dir, 'home');
+      execFileSync('git', ['clone', '-q', '--shared', ROOT, checkout]);
+      execFileSync('git', ['-C', checkout, 'remote', 'set-url', 'origin', `https://github.com/${SELF.slug}.git`]);
+      symlinkSync(join(ROOT, 'node_modules'), join(checkout, 'node_modules'), 'dir');
+      mkdirSync(home);
+      const run = (...args: string[]) => spawnSync('node', [join(checkout, 'cli/baton.mjs'), 'repo', 'init', ...args], {
+        cwd: home, encoding: 'utf8', env: { ...process.env, BATON_HOME: home },
+      });
+      expect(run('--course', 'decision').status).toBe(0);
+      expect(run('--check').stdout).toContain('2 leg stubs match');
+      const settings = join(home, '.baton/baton.json');
+      const stub = join(home, '.baton/courses/decision/legs/prepare.mjs');
+      const before = [readFileSync(settings, 'utf8'), readFileSync(stub, 'utf8')];
+      const runtime = join(checkout, 'src/defaults/stub-runtime.ts');
+      writeFileSync(runtime, readFileSync(runtime, 'utf8').replaceAll('BATON_INSTRUCTIONS', 'EXAMPLE_INSTRUCTIONS'));
+      for (const args of [['--course', 'decision', '--force', '--pin', PIN], ['--check']]) {
+        const result = run(...args);
+        expect(result.status).toBe(1);
+        expect(result.stderr).toContain('CLI checkout has modified build inputs');
+      }
+      expect([readFileSync(settings, 'utf8'), readFileSync(stub, 'utf8')]).toEqual(before);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 30_000);
+
+  it('rejects nested names and symlinks even when their target bytes match (S-BTN-105)', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'baton-check-paths-'));
+    try {
+      baton(dir, 'repo', 'init', '--course', 'decision');
+      const legs = join(dir, '.baton/courses/decision/legs');
+      const stub = join(legs, 'prepare.mjs');
+      const nested = join(legs, 'z/nested');
+      mkdirSync(nested, { recursive: true });
+      copyFileSync(stub, join(nested, 'prepare.mjs'));
+      const log: string[] = [];
+      const check = () => initMain(['--check'], { root: dir, log: (line) => log.push(line) });
+      expect(await check()).toBe(1);
+      expect(log).toEqual([expect.stringContaining('z/nested/prepare.mjs shadows a standard leg stub')]);
+
+      rmSync(join(nested, 'prepare.mjs'));
+      const target = join(dir, 'same-bytes.mjs');
+      renameSync(stub, target);
+      symlinkSync(target, stub);
+      log.length = 0;
+      expect(await check()).toBe(1);
+      expect(log).toEqual([expect.stringContaining('legs/prepare.mjs is not a regular file')]);
+
+      rmSync(stub);
+      renameSync(target, stub);
+      const moved = join(dir, 'moved-legs');
+      renameSync(legs, moved);
+      symlinkSync(moved, legs, 'dir');
+      log.length = 0;
+      expect(await check()).toBe(1);
+      expect(log).toEqual([expect.stringContaining('decision/legs is not a regular directory')]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 30_000);
 
   it('writes the settings with every R-BTN-51 course field, the course file, the pinned workflow and the tickets directory', () => {
     const settings = JSON.parse(readFileSync(join(root, '.baton', 'baton.json'), 'utf8'));

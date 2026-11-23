@@ -1,5 +1,5 @@
 // `baton repo init` (R-BTN-74, R-BTN-131): scaffold standard courses and check their stubs.
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { DEFAULT_URL } from '../../cli/baton.mjs';
 import { HARNESS_AGENTS, type Harness } from '../runner/harness';
@@ -8,7 +8,7 @@ import { parseSource, printSource } from './course-source';
 import { DEFAULT_COURSE, builtIn, scaffoldable, type BuiltIn } from './courses';
 import { cliPin, cliSelf, courseFileText, defaultSkill, parsePin, sameRepo, type BatonJson, type CourseEntry } from './repo-source';
 import { OVERRIDE_SUFFIX } from './stub-config';
-import { instructionsOf, overrideSource, runnerLegs, stubBytes, wrapperExample, WRAPPER_EXAMPLE, writeWrapper } from './stubs';
+import { instructionsOf, overrideSource, requireCleanStubInputs, runnerLegs, stubBytes, wrapperExample, WRAPPER_EXAMPLE, writeWrapper } from './stubs';
 import { readTicketSettings } from './tickets-config';
 import { PAGE_NAME, ticketsPage } from './tickets-page';
 
@@ -21,7 +21,19 @@ function courseEntry(course: string, legs: string[]): Required<Omit<CourseEntry,
   return { id: course, version: 1, min_runner_version: 1, skill: defaultSkill(course), step_kinds: legs, branch_pattern: DEFAULT_BRANCH_PATTERN, protocol_files: [] };
 }
 
-/** Compare installed stubs to the recorded course source without loading or writing them. */
+/** The first non-directory component, including symlinks the runner cannot traverse in Git. */
+function nonDirectory(root: string, rel: string): string | null {
+  let path = '';
+  for (const part of rel.split('/')) {
+    path = path ? `${path}/${part}` : part;
+    const stat = lstatSync(join(root, path), { throwIfNoEntry: false });
+    if (!stat) return null;
+    if (!stat.isDirectory()) return path;
+  }
+  return null;
+}
+
+/** Compare working-tree stubs to the recorded source, without loading or writing them. */
 async function checkStubs(root: string, settings: BatonJson | null, named: string | null, log: (line: string) => void): Promise<number> {
   const sourced = (settings?.courses ?? []).filter((c) => c.source != null && (named == null || c.id === named));
   if (!sourced.length) {
@@ -34,24 +46,48 @@ async function checkStubs(root: string, settings: BatonJson | null, named: strin
   for (const c of sourced) {
     const src = parseSource(c.source!);
     const b = builtIn(c.id);
-    if (b?.id !== c.id || src.course !== c.id || !self || !sameRepo(src, self) || src.ref !== self.sha) {
+    if (b?.id !== c.id || src.course !== c.id) {
       failed = true;
-      log(`baton: cannot check ${c.id} against ${c.source} — use a Baton CLI built from that pin`);
+      log(`baton: cannot check ${c.id} against ${c.source} — not a supported standard course source`);
       continue;
     }
-    for (const leg of runnerLegs(b)) {
-      const rel = `.baton/courses/${c.id}/legs/${leg}.mjs`;
-      let actual: Buffer;
-      try {
-        actual = readFileSync(join(root, rel));
-      } catch (e) {
-        if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e;
+    if (!self || !sameRepo(src, self) || src.ref !== self.sha) {
+      failed = true;
+      log(`baton: cannot check ${c.id} against ${c.source} — use the CLI at that pin if it supports --check; older pins cannot be checked until upgraded`);
+      continue;
+    }
+    requireCleanStubInputs();
+    const legs = `.baton/courses/${c.id}/legs`;
+    const badPath = nonDirectory(root, legs);
+    if (badPath) {
+      log(`baton: ${badPath} is not a regular directory (pinned to ${c.source})`);
+      failed = true;
+      continue;
+    }
+    const dir = join(root, legs);
+    const names = new Map(runnerLegs(b).map((leg) => [`${leg}.mjs`, leg]));
+    // The runner extracts recursively and keys by basename, but init installs only top-level stubs.
+    const nested = existsSync(dir) ? readdirSync(dir, { recursive: true, withFileTypes: true }) : [];
+    for (const entry of nested) {
+      if (entry.parentPath === dir || entry.isDirectory() || !names.has(entry.name)) continue;
+      log(`baton: ${relative(root, join(entry.parentPath, entry.name))} shadows a standard leg stub (pinned to ${c.source})`);
+      failed = true;
+    }
+    for (const [name, leg] of names) {
+      const rel = `${legs}/${name}`;
+      const stat = lstatSync(join(root, rel), { throwIfNoEntry: false });
+      if (!stat) {
         log(`baton: ${rel} is missing (pinned to ${c.source})`);
         failed = true;
         continue;
       }
+      if (!stat.isFile()) {
+        log(`baton: ${rel} is not a regular file (pinned to ${c.source})`);
+        failed = true;
+        continue;
+      }
       checked++;
-      if (!actual.equals(await stubBytes(b, leg))) {
+      if (!readFileSync(join(root, rel)).equals(await stubBytes(b, leg))) {
         log(`baton: ${rel} differs from ${c.source}`);
         failed = true;
       }
@@ -205,6 +241,7 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
     refusePin(courses);
     const movedHere = courses.filter(moves).map((c) => c.id);
     if (movedHere.length) {
+      requireCleanStubInputs();
       writeFileSync(settingsPath, `${JSON.stringify({ ...existing, courses: courses.map((c) => (moves(c) ? { ...c, source: sourceOf(c.id)! } : c)) }, null, 2)}\n`);
       for (const id of movedHere) await scaffold(builtIn(id)!, true);
       log(`baton: ${movedHere.join(', ')} now from ${self!.sha.slice(0, 10)}`);
@@ -214,6 +251,7 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
     return 0;
   }
   const b = scaffoldable(course);
+  requireCleanStubInputs();
   for (const leg of overrides) {
     if (!runnerLegs(b).includes(leg)) throw new Error(`--override ${leg}: ${b.id} has no such leg — its legs are ${runnerLegs(b).join(', ')}`);
   }

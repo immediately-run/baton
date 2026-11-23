@@ -389,11 +389,13 @@ source together, rewriting the course files and leg scripts and keeping your ins
 overrides. For now a source names the CLI's own repository; a course from another repository is
 refused as not supported yet.
 
-Run `baton repo init --check` with the CLI built from the recorded source commit to check the
-generated leg scripts. It reports changed or missing stubs without rewriting or executing them;
-instructions and `.run.mjs` overrides are yours and are not compared. Add `--course <id>` to
-check one pinned course rather than all of them. A mismatch or a pin this CLI cannot check exits
-nonzero.
+Run `baton repo init --check` with the CLI built from the recorded source commit (or a source
+checkout with unmodified build inputs) to compare the generated leg scripts in the working tree.
+It reports changed, missing or non-regular stubs, and nested scripts that share a standard stub's
+name. It does not rewrite or execute them. Instructions and `.run.mjs` overrides are yours and
+are not compared. Add `--course <id>` to check one pinned course rather than all of them.
+A mismatch or a pin this CLI cannot check exits nonzero. A pin that predates `--check` cannot be
+verified by this command: upgrade the course with `baton repo init` before checking it.
 
 ## Overriding a leg
 
