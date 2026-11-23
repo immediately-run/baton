@@ -17,7 +17,8 @@
 // their indexes (migration 0063), and on the Cloudflare host the view's reads stay under the
 // ticket's 500-row target on that harness state.
 import { describe, it, expect, beforeEach } from 'vitest';
-import { Git, HOST, adminSession, cutover, register, rows, sessionCall, setAdminKeys, setClock, withCore, keyCall } from '../helpers';
+import { Git, HOST, adminSession, cutover, register, rows, setAdminKeys, setClock, withCore, keyCall } from '../helpers';
+import { readSession } from '../lib/needsYouFixture';
 import { makeKey, type TestKey } from '../lib/sshKeys';
 import { transcriptUrl } from '../../src/core/links';
 
@@ -154,15 +155,15 @@ async function report(runner: number, at: number, text: string) {
               VALUES ('status_report', ?, ?, ?, ?, ?, ?, 'acknowledged')`, JSON.stringify({ text }), runner, runner, at, at, at);
 }
 
-/** A fleet's worth of bare old runners: rows R-BTN-3 keeps, seen 40 days ago, half reaped —
- *  what R-BTN-149's retention has already stripped of declarations (B-238). */
-async function oldRunners(count: number, at = T0 - 40 * 24 * H) {
+/** Bare retained runners by default: seen 40 days ago, half reaped, without declarations. */
+async function seedRunners(count: number, live = false) {
+  const at = live ? T0 : T0 - 40 * 24 * H;
   await rows(`WITH RECURSIVE k(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM k WHERE i < ?)
               INSERT INTO runners (hostname, session_name, secret_hash, credential_id, harness, kind, tier_ceiling,
                                    tier_ceilings, lease_timeout_ms, settings_hash, first_seen_at, last_seen_at, reaped_at)
-              SELECT 'old-' || k.i, 's-' || k.i, 'x-' || k.i, 'vm-a', 'opencode', 'vm', 'critical', '{}', 900000, '', ${at}, ${at},
-                     CASE WHEN k.i % 2 = 0 THEN ${at + 60_000} ELSE NULL END
-              FROM k`, count);
+              SELECT 'extra-' || k.i, 's-' || k.i, 'x-' || k.i, 'vm-a', 'opencode', 'vm', 'critical', '{}', 900000, '', ?, ?,
+                     CASE WHEN k.i % 2 = 0 THEN ? ELSE NULL END
+              FROM k`, count, at, at, live ? null : at + 60_000);
 }
 
 /** What one rich runner holds: two active claims claimed at one instant, two open activities
@@ -260,17 +261,35 @@ describe('B-250 the Runners view in one read per list', { timeout: 180_000 }, ()
       expect(w.last_report).toBeNull();
     }
     expect(s.runners[2].claims).toEqual([]);
+    // S-BTN-170: the dashboard and admin state agree at lease equality and after renewal.
+    const dashboardHistory = async (fleetRow: typeof s.runners[number]) => {
+      const path = '/v1/repositories/docs/runners';
+      const list = await readSession(session, path);
+      const detail = await readSession(session, `${path}/${b.id}`);
+      expect([list.status, detail.status]).toEqual([200, 200]);
+      const row = list.json.runners.find((w: any) => w.runner_id === b.id);
+      expect(row).toMatchObject({
+        alive: fleetRow.alive,
+        transcript_url: fleetRow.transcript_url,
+        last_report: fleetRow.last_report && {
+          payload: JSON.parse(fleetRow.last_report.payload_json), sent_at: fleetRow.last_report.sent_at,
+        },
+      });
+      expect(detail.json.runner).toMatchObject(row);
+    };
+    await dashboardHistory(s.runners[2]);
     await rows('UPDATE runners SET last_seen_at = ? WHERE id = ?', T0, b.id);
     const renewed = await sameAsBefore(session, T0);
     expect(renewed.runners[2].transcript_url).toBe(transcriptUrl(TRANSCRIPTS, 'claude-code/b-pending-a.jsonl'));
     expect(JSON.parse(renewed.runners[2].last_report.payload_json).text).toBe('before expiry');
+    await dashboardHistory(renewed.runners[2]);
     // Later: the lease lapses on the held claims too — the alarm has not run (B-229's window).
     await setClock(T0 + 21 * H);
     await rows('UPDATE runners SET last_seen_at = ? WHERE id = ?', T0 + 21 * H, a.id);
     session = await adminSession(admin); // a session lives 4 hours (R-BTN-155)
     await sameAsBefore(session, T0 + 21 * H);
     // However many runners were ever registered: the rows R-BTN-3 keeps are served the same.
-    await oldRunners(300);
+    await seedRunners(300);
     const big = await sameAsBefore(session, T0 + 21 * H);
     expect(big.runners).toHaveLength(303);
     // The tie cases the scenarios hold: the two open activities at one instant and the
@@ -286,7 +305,7 @@ describe('B-250 the Runners view in one read per list', { timeout: 180_000 }, ()
     await state(session); // the session's first read does its own one-time work
     for (let i = 1; i < 10; i++) await register('vm-b', { session_name: `extra-${i}` }); // with vm-a: the criterion's ten runners
     const small = await quiet(session);
-    await oldRunners(290); // ten live and 290 unseen: the criterion's 300
+    await seedRunners(290); // ten live and 290 unseen: the criterion's 300
     const large = await quiet(session);
     const smallView = viewStatements(small);
     const largeView = viewStatements(large);
@@ -363,6 +382,29 @@ describe('B-250 the Runners view in one read per list', { timeout: 180_000 }, ()
       expect(after[2]).toBeLessThanOrEqual(before[2] + 2);
       expect(after.reduce((a, b) => a + b, 0)).toBeLessThanOrEqual(12);
     }
+
+    // R-BTN-87's 50 is a target, not a cap. Populate each lookup for 50 more live runners.
+    await seedRunners(50, true);
+    await rows(`INSERT INTO claims (ticket_id, runner_id, request_id, nonce, snapshot_sha, claimed_at, status, ended_at)
+      SELECT ?, id, 'history-' || id, 'test', '', ?, 'released', ? FROM runners WHERE hostname GLOB 'extra-*'`, tickets[2], T0 - H, T0);
+    await rows(`INSERT INTO transcripts (runner_id, claim_id, repo, path, role, first_seen_at)
+      SELECT c.runner_id, c.id, ?, 'linked-' || c.runner_id, 'session', ? FROM claims c WHERE c.ticket_id = ?`, TRANSCRIPTS, T0, tickets[2]);
+    await rows(`INSERT INTO pending_transcripts (runner_id, repo, path, role, first_seen_at)
+      SELECT id, ?, 'pending-' || id, 'session', ? FROM runners WHERE hostname GLOB 'extra-*'`, TRANSCRIPTS, T0);
+    await rows(`INSERT INTO messages (kind, from_runner_id, to_runner_id, sent_at, status, payload_json)
+      SELECT 'status_report', id, id, ?, 'acknowledged', '{"text":"extra"}' FROM runners WHERE hostname GLOB 'extra-*'`, T0);
+    const fleet = await state(session);
+    const alive = fleet.state.runners.filter((w: any) => w.alive);
+    expect(alive).toHaveLength(51);
+    expect(fleet.state.runners).toHaveLength(52);
+    expect(fleet.state.runners).toEqual(served(await oldRunnersView(T0)).map((w: any) => w.alive ? w : { ...w, transcript_url: null, last_report: null }));
+    const fleetHistory = historyStatements(fleet.log);
+    expect(fleetHistory).toHaveLength(3);
+    for (const l of fleetHistory) expect(l.params).toEqual([JSON.stringify(alive.map((w: any) => w.id))]);
+    if (HOST === 'cloudflare') {
+      const total = fleetHistory.reduce((sum, l) => sum + l.cursor.rowsRead!, 0);
+      expect(total).toBeLessThanOrEqual(12 * alive.length);
+    }
   });
 
   it.runIf(HOST === 'cloudflare')('reads within the target on the B-240 harness state with 300 old runners', async () => {
@@ -370,7 +412,7 @@ describe('B-250 the Runners view in one read per list', { timeout: 180_000 }, ()
     const b = await register('vm-b');
     await fill(a.id, tickets.slice(0, 3));
     await fill(b.id, tickets.slice(3, 6));
-    await oldRunners(300);
+    await seedRunners(300);
     await state(session); // the session's first read does its own one-time work
     const log = await quiet(session);
     // The Runners view's own statements and rows: 300 old runners cost their 300 rows (the

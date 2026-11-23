@@ -7,8 +7,8 @@
 //
 // What a poll costs (B-196 item 3): a constant number of statements however many runner rows
 // the repository ever had — one read of the rows, then one read per kind of detail over the
-// rows that are neither reaped nor unseen for the longest window, by id list. A reaped runner,
-// and one unseen past that window, is listed from its own columns alone.
+// rows that are neither reaped nor unseen for the longest window, by id list. Latest
+// transcripts and reports are narrower: only the live subset gets them (S-BTN-243).
 //
 // Not served, because the core does not hold them yet (R-BTN-107's executor declaration,
 // B-184): a runner's `executor`, a run's `executor_digest`, `environment` and `instance`. The
@@ -164,7 +164,8 @@ export function runnerRows(cx: ReadCtx, repo: string, only: number | null = null
     const best = activity.get(a.claim_id);
     if (!best || a.started_at > best.started_at || (a.started_at === best.started_at && a.received_at > best.received_at)) activity.set(a.claim_id, a);
   }
-  const { transcript, reports } = runnerLatest(cx.sql, ids);
+  const liveIds = JSON.stringify(raw.filter((w) => isLive(w, now)).map((w) => w.id));
+  const { transcript, reports } = runnerLatest(cx.sql, liveIds);
   // A runner reaped within the longest window: the newest claim here its reap ended — one
   // statement over those few; an older reap is told from `reaped_at` alone.
   const reapedIds = JSON.stringify(raw.filter((w) => w.reaped_at != null && now - w.reaped_at <= WINDOW_MAX_MS).map((w) => w.id));

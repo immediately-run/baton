@@ -37,6 +37,12 @@ counts?}`, timestamps as epoch milliseconds, its filters as query parameters, an
 `invalid-params`. The reads that existed keep their paging: `history`'s `?before=&limit=`,
 `blocked`'s and `conditions`' own `?cursor=`.
 
+**Runner history fields.** The repository runner reads and the `runners` section of
+`GET /v1/admin/state` give every alive runner in their roster its latest `transcript_url`
+and `last_report` when present. Both fields are `null` for runners not alive under R-BTN-3.
+The history lookups read a bounded number of rows per live runner, independent of retained
+history size. This does not limit the roster or change retention.
+
 **Errors** are `{ok: false, code, message}`, with these codes. A code with no rule is described
 here; every other cause is its rule's.
 

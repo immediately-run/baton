@@ -1,8 +1,8 @@
 type Pointer = { runner_id: number; repo: string; path: string; t: number };
 type Report = { runner_id: number; payload_json: string | null; sent_at: number };
 
-/** S-BTN-243: one indexed top-1 lookup per selected runner in each history table.
- *  The caller chooses which runners get these fields; no history is removed. */
+/** S-BTN-243: one indexed top-1 lookup per live runner in each history table, independent
+ *  of its history depth. Each caller supplies the live IDs from its own roster. */
 export function runnerLatest(sql: <T>(query: string, ids: string) => T[], ids: string) {
   const transcript = new Map<number, Pointer>();
   const reports = new Map<number, Report>();
