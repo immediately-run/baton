@@ -93,7 +93,7 @@ The §14 rows first, then the code.
   are untrusted text validated on the raise (R-BTN-160, §12.3).
 - **`answerable` and `allowed`** — computed by `authorize` with the session as principal; hints
   for drawing, decided again on the call.
-- **The session's attestation** — the cookie under R-BTN-16's checks; writer `owner` or `member`, bounded by
+- **The session's attestation** — the cookie under R-BTN-16's checks; writers `human` and `owner` or `member` (R-BTN-185), bounded by
   the policy's writer list; `type`, `subject` and `value` validated as any attestation.
 - **The redirect** — a lookup within the session's repositories; a miss serves the shell, and
   nothing outside them is revealed.

@@ -73,7 +73,7 @@ The §14 row first, then the code.
 
 - No policy read in the client: `writable_types` is the server's word; the control is drawn on
   it and the server decides again on the call.
-- No `human` attestation beyond what R-BTN-185 gives a session (its role's acts, with a security-key touch under `hardware`); no revoke from a session.
+- No `human` attestation or revocation beyond what R-BTN-185 gives a session (its role's acts, with a security-key touch under `hardware`); a revocation from a session is `attestation.revoke` under the same rule.
 - No value rendered as markup: `View` or pretty-printed text only.
 
 ### Trust

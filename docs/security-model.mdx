@@ -36,7 +36,10 @@ Two corrections from the adversarial review (2026-10-27, *Review* below) bound t
   account and keys, so every gate that asks for "the owner" (ruleset bypass, code-owner
   approval, environment approval, an owner pusher, an owner signature) is passable by an
   injected session (reach 3). A gate is human only when it needs a credential no agent session
-  holds: a touch-required hardware key and an approval identity in no session (B-136). On this
+  holds: a touch-required hardware key and an approval identity in no session (B-136). Since
+  2026-11-23 a person's dashboard session is a human to Baton (R-BTN-185), so under `human_key:
+  any` a gate a session meets is human only as far as the dashboard's sign-in keeps agents out;
+  under `hardware` each such act also takes a security key's touch, which keeps it human. On this
   page, "owner-approved" means that human-only identity; "owner-signed" names the commit signatures
   BATON_SPEC stopped reading on 2026-11-19 (mitigation C), kept below as the record of the review.
 
@@ -121,7 +124,7 @@ For irfldhv1's homes (`fieldhouse`, `docs`, `baton`, `hq`), as of 2026-10-27:
 | Claude Code sessions | host (`local`) or below (`cloud`) | the owner's account, or the Claude GitHub App. That puts human-level credentials in sessions below the human level: a credential crossing downward under Axiom 6, and the root of reach 3 (B-136) |
 | GitHub Actions workflows | the workflow's | `GITHUB_TOKEN` and the repository's secrets |
 | Any other org member or installed App with `write` | theirs | their grant |
-| Whoever can make Cloudflare Access assert an email `ACCESS_IDENTITIES` binds | theirs | not push, but the bound administrator key's dashboard session (R-BTN-155): reach 3 |
+| Whoever can make Cloudflare Access assert an email `ACCESS_IDENTITIES` binds | theirs | not push, but a dashboard session of each key the email is bound to — an administrator's, an owner's or a member's — which is also a human (R-BTN-155, R-BTN-185): reach 3 |
 | Any runner's Baton machine key | VM | not push, but a board post (R-BTN-102, the `cooperative` policy's `inputs.board` admits `machine`): reach 7 |
 
 Every VM shares one GitHub identity, so a push cannot be traced to a slot from git alone,
@@ -252,7 +255,10 @@ credentials, it passes every owner gate on this page (*The decision*), signing i
 
 **Sign-in through Cloudflare Access widens this reach to the dashboard** (R-BTN-155; the owner
 accepted it on 2026-11-21, choosing an explicit click over freshness or factor rules). An email
-`ACCESS_IDENTITIES` binds to an administrator key opens that key's session with no key in hand.
+`ACCESS_IDENTITIES` binds to an administrator's, owner's or member's key opens that key's session
+with no key in hand, and since 2026-11-23 that session is a human (R-BTN-185), so it also meets
+human-only lists and answers where only a human's answer counts, a security key's touch required
+only where `human_key` is `hardware`.
 So an injected session that can drive a browser already signed in to Access (Claude in Chrome
 acts in the person's own Chrome) clicks "Sign in with Cloudflare Access" and holds an
 administrator's session for its lifetime. An assertion is also a bearer until it expires: Baton

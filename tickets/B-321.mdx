@@ -9,7 +9,7 @@ repos:
 tags:
   - roadmap-item
 tier: judgement
-description: "R-BTN-186: an action is available on every surface to the principals its callers list. Ten acts exist only as dashboard routes (`/v1/ui/claims/{id}/reap`, `…/fence-clear`, `…/confirm`, `…/release`, `/v1/ui/adoptions/{claim}/confirm`, `/v1/ui/scope/{id}/resolve`, `/v1/ui/board/accept`, `/v1/ui/cutover`, `/v1/ui/resync`, and `/v1/ui/messages`' `status_request` and `wind-down`) with no key route and no `baton` command, so an administrator without a browser cannot take them. Give each a key route under `/v1/admin/*` (or `/v1/owner/{repository}/*` where its rule lets an owner act) calling the same core function, and a command in R-BTN-127's tree; amend §14 and R-BTN-127 in the same PR. G-BTN-174 and S-BTN-315 then hold both ways."
+description: "R-BTN-186: an action is available on every surface to the principals its callers list. Ten acts exist only as dashboard routes (`/v1/ui/claims/{id}/reap`, `…/fence-clear`, `…/confirm`, `…/release`, `/v1/ui/adoptions/{claim}/confirm`, `/v1/ui/scope/{id}/resolve`, `/v1/ui/board/accept`, `/v1/ui/cutover`, `/v1/ui/resync`, and `/v1/ui/messages`' `status_request` and `wind-down`) with no key route and no `baton` command, so an administrator without a browser cannot take them; and `ticket hold|unhold|expedite` and `leg stop`, listed in R-BTN-127, have no key route to call. Give each a key route under `/v1/admin/*` (or `/v1/owner/{repository}/*` where its rule lets an owner act) calling the same core function, and a command in R-BTN-127's tree; amend §14 and R-BTN-127 in the same PR. G-BTN-174 and S-BTN-315 then hold both ways."
 topics:
   - baton
 owns: {}
@@ -36,7 +36,11 @@ that into R-BTN-186's surface rule found these acts reachable only from the dash
    `admin claim confirm|release`, `admin adoption confirm`, `owner scope resolve` or `admin …`
    per its rule, `admin repo accept-post`, `admin repo cutover`, a resync dispatch, `runner status` and
    `runner wind-down` or their owners' forms), with `--json`.
-3. The §14 rows and R-BTN-127's rows in the same PR, and the ux page's *Session-only acts* gap
+3. Key routes for `ticket.hold`, `ticket.unhold`, `ticket.expedite` (today only `POST
+   /v1/ui/overrides/{ticket}`, `src/core/actions.ts` callers `SESSION_ANY`) and `leg.stop` (today
+   `POST /v1/ui/messages` `release`), whose commands R-BTN-127 already lists, so those commands
+   have a route to call.
+4. The §14 rows and R-BTN-127's rows in the same PR, and the ux page's *Session-only acts* gap
    removed.
 
 ### Trust

@@ -10,7 +10,7 @@ tags:
   - roadmap-item
 order: 1125
 tier: judgement
-description: "Build BATON_SPEC R-BTN-155's sessions for every person role (R-BTN-186: the dashboard carries each role the CLI does): an owner's and a member's session as an administrator's is, each as capable as its key; Cloudflare Access lines binding an email to several keys of any person role, with the key chosen after authentication (`choose`, then `{access: true, key}`); one session per browser tab, bound to the one cookie and named by the tab's `Baton-Session` header, `GET /v1/login` listing the browser's sessions for a new tab; S-BTN-314, S-BTN-315, G-BTN-174. Also the owner sessions as first filed: sign-in codes per role (`POST /v1/login {role}`, `baton owner open`, `POST /v1/owner/login-links`), a session row with its role, minting key and repositories, the `owner-session` principal of R-BTN-129 scoped to the repositories the key still owns and never an administrator, confirmation by the minting key (`POST /v1/owner/confirm`), and `owner.sessions.revoke`; `admin.key.revoke` removing an owner key from every repository (its sessions and MCP keys ending) and refusing an administrator's key `invalid-params` (R-BTN-57), and `baton admin keys set` refusing a line whose key holds another role, a host loading one anyway treating it as no administrator and raising `baton.admin-key-conflict` (§12.1). S-BTN-32, S-BTN-124, S-BTN-126, G-BTN-57, G-BTN-144. Requires: none."
+description: "Build BATON_SPEC R-BTN-155's sessions for every person role (R-BTN-186: the dashboard carries each role the CLI does): an administrator's, an owner's and a member's session, each as capable as its key but R-BTN-186's key-only acts, calling its actions at their key routes; sign-in codes with no role, bound by `baton admin|owner|member open` and taking the binding key's role; Cloudflare Access lines binding an email to several keys of any person role, the key chosen after authentication (`choose`, then `{access: true, key}`); one session per browser tab under one cookie whose value is replaced at every sign-in (a replaced value in use ends the browser's sessions), each tab naming its session in `Baton-Session`; logout of a tab or the whole browser; the key's confirmation of authority-changing session acts; `owner.sessions.revoke`; `admin.key.revoke` removing an owner or member key from every repository and refusing an administrator's key `invalid-params` (R-BTN-57); `baton admin keys set` refusing a line whose key holds another role, a host loading one anyway raising `baton.admin-key-conflict` (§12.1). S-BTN-32, S-BTN-124, S-BTN-126, S-BTN-314, S-BTN-315, G-BTN-57, G-BTN-144, G-BTN-174. Requires: B-25."
 topics:
   - baton
 owns: {}
@@ -50,14 +50,16 @@ None: a checkout, a terminal and a browser.
    its key stops owning and ends when none remains, or
    when an administrator revokes the key (R-BTN-57); `POST /v1/owner/sessions/revoke`
    (`owner.sessions.revoke`, destructive).
-3. The `owner-session` principal in `authorize` (R-BTN-129): only entries whose `callers` list
-   it, on its repositories; never an administrator's action. `GET /v1/ui/state` filtered to its
-   repositories; `/v1/ui/messages` (only `release` and `status_request`, holder checked) and
-   `/v1/ui/resync` (built by B-201, scoped by this rule), `/v1/ui/overrides/{ticket}` and `POST /v1/ui/conditions/{condition}/resolve`
-   on its repositories; the administrator-only `/v1/ui/*` routes refuse it.
-4. Confirmation by the minting key only: `baton owner confirm` and `POST /v1/owner/confirm`
-   (`baton admin confirm` likewise restricted to the administrator key that minted the
-   session); R-BTN-155's one confirmed-action list.
+3. The `session` principal carrying its key's role in `authorize` (R-BTN-129): an owner's or
+   member's session takes only the actions its role's key may, on its key's repositories, at
+   their key routes (item 9); never an administrator's action. The `/v1/ui/*` rows §14 narrows
+   to `session (administrator)` or `(administrator, owner)` refuse the others; each id-taking
+   `/v1/ui/*` route acts only within the session's repositories and answers another
+   repository's id as an unknown one.
+4. Confirmation by the session's key only, through another channel: `baton owner confirm` and
+   `POST /v1/owner/confirm`, `baton admin confirm` and `POST /v1/admin/confirm` (and a member's
+   when one of its acts needs it), the confirming key the session's own; the acts R-BTN-155's
+   *Authority-changing acts* names.
 5. The V2 dashboard's shell does this (BATON-UI-V2: B-206 draws by the session's role, B-207
    draws only the session's registry entries); no V1 change — B-193 removes V1.
 6. **Revoking keys** (R-BTN-57, adv-4 M1): `admin.key.revoke` (`revokeKey` in
@@ -79,8 +81,9 @@ None: a checkout, a terminal and a browser.
    migration, with item 2's columns); `POST /v1/login` answers `session_id`, the shell keeps it in
    `sessionStorage` and sends `Baton-Session` on every request, and the front authorizes a
    session request only when the header names a live session bound to the cookie. Every sign-in
-   sets a new cookie value and rebinds the browser's live sessions to it; the cookie lives as
-   long as its longest session. A tab with no session id signs in; nothing lists sessions to it.
+   sets a new cookie value and rebinds the browser's live sessions to it (`dashboard_cookies`,
+   §13.2); the cookie lives as long as its longest session; a request carrying a replaced value
+   ends every session of that browser. A tab with no session id signs in; nothing lists sessions to it.
    `ui.logout` ends the tab's session; `{all: true}` ends every session bound to the cookie and
    clears it. Members' sessions land with B-320; build the role as data, not an owner special
    case.

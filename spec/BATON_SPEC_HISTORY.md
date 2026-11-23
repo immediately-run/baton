@@ -23,9 +23,12 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   Rules changed: R-BTN-155 (rewritten), R-BTN-186, R-BTN-181, R-BTN-116, R-BTN-129, R-BTN-127,
   R-BTN-57, R-BTN-159, R-BTN-16, the policy table's `attestations` default, §11's preamble,
   §12.1, §13.2, §14; S-BTN-308, G-BTN-57. Added: R-BTN-204, S-BTN-313, S-BTN-314, S-BTN-315,
-  G-BTN-174, S-BTN-316; S-BTN-270, S-BTN-278, S-BTN-279, R-BTN-185, R-BTN-188, R-BTN-191,
-  §12.2, `human-gates`; four open
-  questions; two Decisions entries changed, one replaced, one added. The
+  G-BTN-174, S-BTN-316; four open questions; one Decisions entry added. Also changed: S-BTN-124,
+  S-BTN-185, S-BTN-250, S-BTN-270, S-BTN-276, S-BTN-278, S-BTN-279, R-BTN-185, R-BTN-188,
+  R-BTN-191, §12.2, §12.8's deployment list, `human-gates`, three Decisions entries changed and
+  one replaced, the linked proposals (people and dashboard, data model and API, security) and
+  `docs/security-model.mdx`. The new ids and B-320–B-322 were taken by R-BTN-199's offline scan,
+  the session holding no Baton key; the duplicate check at merge is their guard. The
   owner, 2026-11-23, on finding that the dashboard could not answer a person leg ("This page cannot
   answer it — an administrator's session answers no person leg"): "this is fundamentally
   incompatible with Baton's promise that MCP, CLI and the dashboard UI are all equivalent baton
@@ -79,6 +82,29 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   alone, so `human-gates` stays true. R-BTN-185 now says so; R-BTN-181's `human` writer, R-BTN-188's
   `human` approver entry, R-BTN-57, §12.1, S-BTN-278, S-BTN-313, the Decisions entry on human-only
   credentials and the open question (now MCP's alone) follow; S-BTN-316 added; B-322 builds it.
+  Review, round two (the owner: "yes" to a second round): the same two kinds of fresh reviewer, on
+  the whole branch. Security found that the hardware touch could come from a software
+  authenticator registered by any human-only key, was replayable and bound to no person, and that
+  untouched `human` attestations would count after a switch to `hardware`; that §14 set the
+  cookie only for a browser with none; that a cookie thief could rotate the victim out; that an
+  administrator's session could freeze and seal the tenant unconfirmed; that id-taking `/v1/ui`
+  routes had no repository scope; a stale administrator clause; and an existence oracle in the
+  condition redirect. Fixed: the credential registered for one person's key by an owning
+  human-only key meeting `human_key`, with attestation; a one-time two-minute challenge Baton
+  issues (`POST /v1/ui/human-challenge`) with origin and relying-party checks; `touched`
+  recorded, an untouched `human` counting only under `any`; a new cookie value at every sign-in
+  and a replaced value in use ending the browser's sessions (`dashboard_cookies`); freeze, unfreeze
+  and seal confirmed; id-taking `/v1/ui` routes scoped and foreign ids answered as unknown; the
+  redirect only for `Sec-Fetch-Site` `same-origin` or `none`. Consistency found three scenarios the
+  diff had not touched (S-BTN-185, S-BTN-276, S-BTN-250), approver entries patched rather than
+  rewritten, a member reading grants through the new *session* default, three designs of the
+  touch, the replaced cookie value specified two ways, B-76 contradicting itself, proposals
+  behind, one writer class for two writers, revocation from a session, four more acts with
+  commands but no key route (hold, unhold, expedite, Stop), the security model page, facts in
+  several homes, and S-BTN-124's trigger. Fixed: each, R-BTN-188 now the one home of which session
+  matches which approver entry and R-BTN-155 of when a request is a session's. A member reads the
+  repository reads, the board and a leg's runs, but not the owners' grants or policy log — narrower
+  than "reads everything" in the option the owner chose, and left for the owner to widen.
 
 - **2026-11-23 — Tiers retired (§6.6 gate 5, R-BTN-66).**
   Rules changed: R-BTN-5, R-BTN-9, R-BTN-34, R-BTN-35, R-BTN-50, R-BTN-58, R-BTN-66, R-BTN-74,

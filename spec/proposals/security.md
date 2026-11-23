@@ -320,9 +320,10 @@ Under `human_key: hardware` Baton accepts only a hardware-backed key requiring P
 
 - **What is signed is shown first.** The CLI prints the canonical fields and the computed view
   before signing. Under `human_key: hardware`, it also requires a short code derived from them,
-  typed on the machine the key is plugged into. The dashboard may only prepare an approval that the
-  CLI signs; a WebAuthn assertion is a human gate only with an authenticator registered by a
-  `human_only` signature, attested and allowlisted under `hardware`.
+  typed on the machine the key is plugged into. A dashboard session is a human, and under
+  `hardware` its human act carries a WebAuthn assertion as R-BTN-185 says: an authenticator
+  registered for the session's key by a `human_only` signature, attested and allowlisted, answering
+  a one-time challenge Baton issued for the act.
 
 ## 11. Per-key limits on the board (R-BTN-187, proposed)
 

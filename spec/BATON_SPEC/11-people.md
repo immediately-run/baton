@@ -142,8 +142,9 @@ built; their design is [the people and dashboard proposal](../proposals/people-a
     removing a member are `approvers.members` actions (R-BTN-188). A member key is an SSH or API
     key (R-BTN-159) holding the `member` role (§12.1); being a member of one repository confers
     nothing on another, and one key may be a member of several.
-  - **What a member may do.** A member calls the reads §14 lists for a *reader* of its repository,
-    and answers a person leg whose `asks` label (R-BTN-116) is one of its `answers`,
+  - **What a member may do.** A member calls the reads §14 lists for a *reader* of its repository
+    and for a member (the board and a leg's runs among them; not the owners' grants and policy
+    log, which list the repository's credentials and the policy's history), and answers a person leg whose `asks` label (R-BTN-116) is one of its `answers`,
     as writer `member` (R-BTN-181). It holds no other action: no grant, owner, hold, bar,
     override, resolve, route, sync, setting, policy or credential.
   - **The label is the course's.** A leg's `asks` label is written in its course file, so which
@@ -155,8 +156,8 @@ built; their design is [the people and dashboard proposal](../proposals/people-a
     remove` there; its revocation everywhere is R-BTN-57's, and its sessions' end R-BTN-155's.
     Its acts are recorded as `member:<fingerprint>`.
   - **Where its answers count.** Where the policy's `attestations` entry for `std:decision@1`
-    admits `member` (R-BTN-188): the `cooperative` default does; a policy stored before members
-    existed does once an owner adds `member` to it.
+    admits `member` (R-BTN-188, whose table gives the presets' defaults); a policy stored before
+    members existed admits it once an owner adds `member` to it.
 
 ### 11.3 The actions, the CLI and MCP
 
@@ -329,10 +330,10 @@ built; their design is [the people and dashboard proposal](../proposals/people-a
   - **Every person signs in, and a session is one key's.** An administrator (R-BTN-57), an owner
     (R-BTN-58) and a member (R-BTN-204) each sign in to the dashboard. A session is one key's and
     carries that key's role: it may call every action the key may call through the CLI, on the
-    same scope, but the key-only acts (R-BTN-186), and no other (R-BTN-129); it never opens,
-    extends or confirms a session, its own included. An owner's or member's session reaches only
-    the repositories its key still owns or is a member of. A session writes as its key's role
-    and as `human`: a person using the dashboard is a human (R-BTN-185).
+    same scope, but R-BTN-186's key-only acts, and no other (R-BTN-129). An owner's or member's
+    session reaches only
+    the repositories its key still owns or is a member of. A session is also a human
+    (R-BTN-185).
   - **Authentication first, then one role.** A sign-in authenticates the person, then opens a
     session for one key the person holds. Where the person holds keys of more than one role, or
     of one role more than once, the page asks which after authenticating and before any session

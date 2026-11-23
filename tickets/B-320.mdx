@@ -50,9 +50,11 @@ rule wins.
    true}` — each an `approvers.members` action (R-BTN-188); `answers` labels validated against
    R-BTN-116's `asks` pattern. `baton owner member add|answers|remove` (R-BTN-127).
    `GET /v1/owner/{repository}/grants` lists `members`.
-3. **Reads.** A member key is a *reader* of its repositories (§14): the reads whose caller is
-   *reader*, and `GET /v1/repositories` listing its own — not the board, leg runs, grants or the
-   policy log, whose callers are narrower. Nothing else: every owner, administrator and runner
+3. **Reads.** A member key is a *reader* of its repositories (§14), and reads the board and a
+   leg's runs, which §14 lists for a member; `GET /v1/repositories` lists its own. Not the owners'
+   grants or policy log, which list the repository's credentials and the policy's history
+   (R-BTN-204; the owner's brief said "reads everything", and this narrowing is the spec PR's,
+   flagged for the owner). Nothing else: every owner, administrator and runner
    route is `forbidden` to it.
 4. **The answer.** `POST …/attestations` takes a member key's or member's session's
    `std:decision@1` for a person leg whose `asks` label is in its `answers` (R-BTN-116 says
