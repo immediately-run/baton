@@ -677,3 +677,51 @@ Entry shape: **When** · **Host** · **Tickets** · **Why it was needed** · **R
   - Implement and fix instructions should push past a failure that also fails on `main`, and
     never fix an unrelated failure inside a ticket's PR (ticket filed).
   - The executor should salvage unpushed commits (ticket filed).
+
+## 2026-11-22 09:20 – 2026-11-23 10:50 — implement legs stopped for owner decisions; the rulings were written into the tickets
+
+- **Host:** bering (runner-1 and runner-2)
+- **Tickets:** B-27, B-270, B-286, B-299 (with R3-1268)
+- **Why it was needed:** four implement legs stopped, correctly, on a question their ticket left to the owner:
+  - B-27: refuse a board post whose ticket has no queued leg, or keep it and raise a condition;
+  - B-270: bound the Runners view by retention, or by serving the latest only for recently-seen runners;
+  - B-286: who owns `baton.mjs`;
+  - B-299: confirm the ten runner-spec rows proposed in #339.
+
+  Each stopped leg counted as a failed attempt. A ticket whose ruling had not landed on `main` was claimed again and stopped again (B-27 twice, B-270 three times). B-286 also ran once more and went through to merge (#379, a move of the vendored files to `src/vendor/` with docs kept as the source) before its question was answered.
+- **Resolution:** the supervisor put each question to the owner and wrote the answer into the ticket, in a PR the owner merged (or authorized):
+  - B-27: accept the post and raise a condition (#346);
+  - B-270: bounded serving (#368);
+  - B-299: all ten rows confirmed, row 5 on condition that the masker itself stays with B-316 (#383);
+  - R3-1268: Baton owns `baton.mjs`, so #312 is to be rebased over #379 (#383).
+
+  B-27 was then built and merged. #383 was merged with its `test` check red: the failure was `S-BTN-41` on `main` (next entry), not the ticket text, but the merge should have waited (see lessons).
+- **Autonomous handling:** a leg that stops for an owner decision should end as a raised condition that waits for an answer (R-BTN-163), not a failed attempt that is retried before the answer lands. A ticket that names an open owner decision should not be claimable until it is answered. *No ticket yet.*
+
+## 2026-11-22 13:20 – 2026-11-23 04:50 — fix legs edited files outside their tickets
+
+- **Host:** bering
+- **Tickets:** B-244 (#352), B-249 (#353), B-278 (#371), B-282 (#374)
+- **Why it was needed:**
+  - **The masker.** After the flaky masking test (2026-11-22 13:50 entry) turned their `run-tests` red, the `fix` legs of B-244 and B-249 each patched `src/runner/mask.ts` inside their own PRs. B-278's PR (a SQL dialect lint) also rewrote `mask.ts`, the vendored `src/shared/mask.mjs` and `src/runner/executor.ts`, and its `run-tests` failed a different test each round. That is a shared write target across separate tickets, and an edit to vendored files.
+  - **Dependencies.** B-282 (ESLint) changes `package-lock.json`, but `run-tests` links the home checkout's `node_modules` (installed from `main`'s lockfile) into the tested tree (`.baton/courses/create-pr/legs/run-tests.mjs:241`). Its `fix` leg worked around this inside the ticket, in `scripts/build-ui.mjs`.
+- **Resolution:** a scope note on #352, #353 and #371 asking the next `fix` leg to restore the out-of-scope files to `main` (the masker belongs to #354 and B-316). B-282's workaround was left for its review to judge.
+- **Autonomous handling:**
+  - B-317 (#362, merged): implement and fix legs push past a failure that also fails on `main`, and never fix an unrelated failure inside a ticket's PR.
+  - `run-tests` should `npm ci` in the tested tree when its lockfile differs from the home's. *No ticket yet;* the owner has not answered whether to make the change.
+
+## 2026-11-23 08:50–13:00 — runners idle for hours: a false "merged", a starved sync, a red `main`
+
+- **Host:** bering (runner-2 idle from 08:50, runner-1 from 09:15; both alive and heartbeating, with no claim)
+- **Tickets:** B-259 (#357), B-318 (#384)
+- **Why it was needed:** three faults together.
+  1. **A false "merged".** B-259's merge agent rightly refused to merge #357 (CI red twice on `S-BTN-41.runner.test.ts:295`) and said so. But the merge leg returns `{reached: "merged"}` whenever the agent exits 0 (`merge.mjs:511`), so Baton ended the claim "done at merged" with the PR open. The unconfirmed completion now holds B-259.
+  2. **A starved sync.** `baton-sync.yml`'s `*/15` schedule ran about 5 times in 24 h, and R-BTN-94's alarm dispatch has not fired since 2026-11-10. Parked tickets get their next leg only when a sync posts, so with no push to `main` the runners found nothing to claim.
+  3. **A red `main`.** `S-BTN-41` ("a short wait that never clears suspends after 30 minutes") now fails on `main`, so every PR's `test` check is red, ticket-only PRs included (#383, #384). No CI run on `main` has completed (each is cancelled or pending), so nothing showed it.
+- **Resolution:**
+  - **Syncs:** the supervisor dispatched the sync by hand (09:22 and 10:00 UTC); both posted.
+  - **Merge leg:** at the owner's word, #385 (merged, `a26608c3`) makes the merge leg verify with the forge that the ticket's PRs are merged before it reports `merged`.
+  - **Sync schedule:** B-318 (#384, open: its `test` is red on `S-BTN-41`) lays out the options. Its first step is diagnosing why R-BTN-94's alarm dispatch is not firing.
+  - **#326 (old B-23) closed** at the owner's word: #380 rewrote B-23.
+  - **B-259:** releasing its claim and lifting any holds on B-270 and B-299 are session actions. The supervisor gave the owner a console script; not yet run.
+- **Autonomous handling:** #385 for (1); B-318 for (2); (3) needs a ticket or a fix (owner asked; not yet answered). A runner idle while tickets are parked should raise a condition (the intervention-sessions proposal's `baton.no-runner` / `baton.unclaimable`).
