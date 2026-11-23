@@ -7,8 +7,9 @@ import { capabilitiesOf, fitsTier } from '../shared/vocabulary.mjs';
 
 /** Who asks: the runner as its heartbeat declared it (§5, R-BTN-60). */
 export interface GateRunner {
-  /** Capability and role names as declared. */
-  declared: string[];
+  declared?: string[];
+  /** Database-backed callers pass the expanded rows, minus any holdings lost since the heartbeat. */
+  holdings?: ReadonlySet<string>;
   /** Its ceiling in the ticket's repository's ladder, resolved by the caller (R-BTN-66). */
   tier_ceiling: string;
   tags: string[];
@@ -154,7 +155,7 @@ export function gatesFor(runner: GateRunner | null, ticket: GateTicket, leg: Gat
     // only (§12.5), `human-operator` included as the literal R-BTN-121 compares — rule 6 is
     // retired, so it is met by declaring it and granted like any capability (R-BTN-121 as
     // amended).
-    const held = capabilitiesOf(runner.declared);
+    const held = runner.holdings ?? capabilitiesOf(runner.declared);
     const granted = grant ? new Set(grant.capabilities) : null;
     // R-BTN-58: a grant entry `<type>:*` admits every holding of that type.
     const admits = (capability: string) => granted ? granted.has(capability) || granted.has(`${capability.split(':')[0]}:*`) : true;

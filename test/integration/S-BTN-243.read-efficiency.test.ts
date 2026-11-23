@@ -1,7 +1,7 @@
 // B-287: mixed busy/idle polling, a cold indexed decision, unchanged snapshots and paged UI.
 import { beforeEach, describe, expect, it } from 'vitest';
 import { schedulingVersion } from '../../src/core/stateVersion';
-import { Git, HOST, adminSession, beat, call, captureDispatches, claimItem, cutover, register, rows, runnerCall, sessionCall, setAdminKeys, setClock, webhookCall, withCore } from '../helpers';
+import { Git, HOST, adminSession, beat, call, captureDispatches, claimItem, cutover, endClaim, register, rows, runnerCall, sessionCall, setAdminKeys, setClock, webhookCall, withCore } from '../helpers';
 import { makeKey } from '../lib/sshKeys';
 
 const T0 = Date.parse('2026-11-19T12:00:00Z');
@@ -165,6 +165,55 @@ describe('S-BTN-243 bounded reads without changing matching', { timeout: 120_000
     }
   });
 
+  it('S-BTN-92: a blocked end removes only the lost holding of a role, for named and automatic claims', async () => {
+    const git = new Git().add('WORK').add('AUTH', { requires: ['authentication'] }).add('LLM', { requires: ['llm-call'] });
+    expect((await git.post()).status).toBe(200);
+    await cutover();
+    const w = await register('vm-a', { capabilities: ['agent-venue'] });
+    const recs = async () => {
+      const res = await runnerCall('/v1/runner/recommendations', { secret: w.secret });
+      expect(res.status).toBe(200);
+      return (await res.json() as { recommendations: { ticket_id: string }[] }).recommendations.map((r) => r.ticket_id);
+    };
+    expect(await recs()).toContain('docs:AUTH');
+    const held = await claimItem('vm-a', w.secret, { ticket_id: 'docs:WORK' });
+    expect(held.status).toBe(200);
+    expect(await endClaim('vm-a', w.secret, held.json.claim_id, {
+      end_reason: 'released:blocked', prerequisite: { kind: 'capability', ref: 'authentication' },
+    })).toMatchObject({ status: 200 });
+    expect(await recs()).toEqual(['docs:LLM']);
+    expect(await claimItem('vm-a', w.secret, { ticket_id: 'docs:AUTH' })).toMatchObject({ json: { rule: 4, rule_code: 'missing-capability' } });
+    expect(await claimItem('vm-a', w.secret)).toMatchObject({ status: 200, json: { ticket_id: 'docs:LLM' } });
+    expect((await beat('vm-a', w.secret, { capabilities: ['agent-venue'] })).status).toBe(200);
+    expect(await rows("SELECT capability FROM runner_effective_caps WHERE runner_id = ? AND capability = 'authentication'", w.id)).toEqual([{ capability: 'authentication' }]);
+  });
+
+  it('S-BTN-243: the saturated expedite lane keeps the two runs in default rank order', async () => {
+    const { git, idle } = await busyBoard();
+    for (let i = 1; i <= 180; i++) git.add(`T-${i}`, { rank: i, expedite: i <= 6 && i % 2 === 0 });
+    git.add('HOLD-1', { expedite: true }).add('HOLD-2', { expedite: true });
+    expect((await git.post()).status).toBe(200);
+    for (const [cred, id] of [['mac', 'HOLD-1'], ['test', 'HOLD-2']] as const) {
+      const holder = await register(cred);
+      expect(await claimItem(cred, holder.secret, { ticket_id: `docs:${id}` })).toMatchObject({ status: 200 });
+    }
+    const recommendation = () => runnerCall('/v1/runner/recommendations', { secret: idle.secret });
+    const read = await measure(recommendation);
+    expect(read.value.status).toBe(200);
+    const body = await read.value.json() as { recommendations: { ticket_id: string; flags: string[] }[] };
+    expect(body.recommendations.map((r) => r.ticket_id)).toEqual(Array.from({ length: 10 }, (_, i) => `docs:T-${i+1}`));
+    expect(body.recommendations[1].flags).toEqual(['expedite-bound']);
+    await withCore((c) => { c.claims.reference = true; });
+    try { expect(await (await recommendation()).json()).toEqual(body); }
+    finally { await withCore((c) => { c.claims.reference = false; }); }
+    const claim = await measure(() => claimItem('vm-a', idle.secret));
+    expect(claim.value).toMatchObject({ status: 200, json: { ticket_id: 'docs:T-1' } });
+    if (HOST === 'cloudflare') {
+      expect(read.read, 'full lane recommendation rows_read').toBeLessThanOrEqual(300);
+      expect(claim.read, 'full lane claim rows_read').toBeLessThanOrEqual(300);
+    }
+  });
+
   it('S-BTN-57: stops paging saturated runs in all-mode, even when the full lane merges two runs', async () => {
     const git = new Git().add('HOLD-1', { expedite: true }).add('HOLD-2', { expedite: true });
     for (let i = 1; i <= 650; i++) {
@@ -189,6 +238,13 @@ describe('S-BTN-243 bounded reads without changing matching', { timeout: 120_000
 
   it('keeps an idle answer across busy activities and identical snapshots, and measures cold and warm reads', async () => {
     const { git, idle, busy, held } = await busyBoard();
+    const idleReader = await register('mac');
+    await runnerCall('/v1/runner/state', { cred: 'mac', secret: idleReader.secret });
+    await git.refresh();
+    await git.refresh();
+    const rec = await measure(() => runnerCall('/v1/runner/recommendations', { cred: 'mac', secret: idleReader.secret }));
+    expect(rec.value.status).toBe(200);
+    expect(await rec.value.json()).toEqual({ recommendations: [] });
     const cold = await measure(() => claimItem('vm-a', idle.secret));
     expect(cold.value.json.code).toBe('no-eligible-ticket');
     const v = await version();
@@ -206,11 +262,13 @@ describe('S-BTN-243 bounded reads without changing matching', { timeout: 120_000
     const indexed = cold.log.find((e) => e.sql.includes('FROM ready_tickets q'))!;
     expect(indexed).toBeDefined();
     const plan = await rows<{ detail: string }>(`EXPLAIN QUERY PLAN ${indexed.sql}`, ...indexed.params);
-    expect(plan.some((p) => p.detail.includes('ready_tickets_order'))).toBe(true);
+    expect(plan.some((p) => p.detail.includes('COVERING INDEX ready_tickets_order'))).toBe(true);
     expect(plan.some((p) => p.detail.includes('TEMP B-TREE'))).toBe(false);
     if (HOST === 'cloudflare') {
       // Includes the observation response's mandatory 181 ticket versions, not just board POST.
-      expect(cold.read).toBeLessThan(750);
+      expect(rec.read, 'no-match recommendation rows_read').toBeLessThanOrEqual(300);
+      expect(cold.read, 'no-match claim rows_read').toBeLessThanOrEqual(300);
+      expect(indexed.cursor.rowsRead, 'candidate query rows_read').toBeLessThanOrEqual(200);
       expect(warm.read).toBeLessThan(60);
       expect(sync.read).toBeLessThan(350);
       expect(sync.written).toBeLessThan(20);
@@ -220,9 +278,9 @@ describe('S-BTN-243 bounded reads without changing matching', { timeout: 120_000
     expect((await beat('vm-a', idle.secret, { tags: ['new-tag'] })).status).toBe(200);
     expect(await version()).toBeGreaterThan(v);
     await sameProjection();
-    await rows("DELETE FROM ticket_requires WHERE ticket_id = 'docs:T-1'");
+    await rows("DELETE FROM ticket_requires WHERE ticket_id = 'docs:T-180'");
     const accepted = await measure(() => claimItem('vm-a', idle.secret));
-    expect(accepted.value.json.ticket_id).toBe('docs:T-1');
+    expect(accepted.value.json.ticket_id).toBe('docs:T-180');
     if (HOST === 'cloudflare') {
       expect(accepted.read).toBeLessThan(800);
       expect(accepted.written).toBeLessThan(150);

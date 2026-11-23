@@ -69,6 +69,7 @@ import runnerViews from './0066_runner_views.sql';
 import retirePolicyPins from './0070_retire_policy_pins.sql';
 import accessSignIn from './0071_access_sign_in.sql';
 import eligibilityInputs from './0077_eligibility_inputs.sql';
+import readyRequirements from './0078_ready_requirements.sql';
 import { isUniqueViolation, logEvent, mintRunId, type Random } from '../core/db';
 import type { Store } from '../core/ports';
 
@@ -218,4 +219,5 @@ export const MIGRATIONS: Migration[] = [
   { id: 75, sql: coreConditions },
   { id: 76, sql: retireReviewerSettings },
   { id: 77, sql: eligibilityInputs },
+  { id: 78, sql: readyRequirements },
 ];
