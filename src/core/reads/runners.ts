@@ -15,6 +15,7 @@
 // answer says so in `not_built` instead of inventing them. A run's `log_dir` is the column as
 // stored (`claim_legs.leg_log_dir`), which nothing writes yet (B-23).
 import { isLive, leaseEndsAt } from '../runnerLiveness';
+import { runnerLatest } from '../runnerLatest';
 import { BatonError } from '../http';
 import { transcriptUrl } from '../links';
 import { graphOf, type Graph } from '../graph';
@@ -163,22 +164,7 @@ export function runnerRows(cx: ReadCtx, repo: string, only: number | null = null
     const best = activity.get(a.claim_id);
     if (!best || a.started_at > best.started_at || (a.started_at === best.started_at && a.received_at > best.received_at)) activity.set(a.claim_id, a);
   }
-  // §6.8: the newest transcript pointer of each runner, linked ones before pending ones at a tie.
-  const transcript = new Map<number, { repo: string; path: string; t: number }>();
-  for (const t of of<{ runner_id: number; repo: string; path: string; t: number }>(
-    `SELECT runner_id, repo, path, COALESCE(last_pushed_at, first_seen_at) AS t FROM transcripts
-     WHERE id IN (SELECT (SELECT t.id FROM transcripts t WHERE t.runner_id = j.value ORDER BY COALESCE(t.last_pushed_at, t.first_seen_at) DESC, t.repo, t.path, t.claim_id LIMIT 1) FROM json_each(?) j)`, ids)) transcript.set(t.runner_id, t);
-  for (const t of of<{ runner_id: number; repo: string; path: string; t: number }>(
-    `SELECT runner_id, repo, path, COALESCE(last_pushed_at, first_seen_at) AS t FROM pending_transcripts
-     WHERE rowid IN (SELECT (SELECT t.rowid FROM pending_transcripts t WHERE t.runner_id = j.value ORDER BY COALESCE(t.last_pushed_at, t.first_seen_at) DESC, t.repo, t.path LIMIT 1) FROM json_each(?) j)`, ids)) {
-    const best = transcript.get(t.runner_id);
-    if (!best || t.t > best.t) transcript.set(t.runner_id, t);
-  }
-  // §6.9: the newest status report of each runner — the reply a status request produces.
-  const reports = new Map(of<{ runner_id: number; payload_json: string | null; sent_at: number }>(
-    `SELECT from_runner_id AS runner_id, payload_json, sent_at FROM messages
-     WHERE id IN (SELECT (SELECT m.id FROM messages m WHERE m.kind = 'status_report' AND m.from_runner_id = j.value ORDER BY m.id DESC LIMIT 1) FROM json_each(?) j)`, ids)
-    .map((m) => [m.runner_id, m]));
+  const { transcript, reports } = runnerLatest(cx.sql, ids);
   // A runner reaped within the longest window: the newest claim here its reap ended — one
   // statement over those few; an older reap is told from `reaped_at` alone.
   const reapedIds = JSON.stringify(raw.filter((w) => w.reaped_at != null && now - w.reaped_at <= WINDOW_MAX_MS).map((w) => w.id));

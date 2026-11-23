@@ -11,7 +11,8 @@
 // same instant, two pointers of one heartbeat's instant told out of lexical order beside a
 // pending pointer at that instant — the lexically first linked path wins, the union read's own
 // tie rule — an older pending pointer, a lapsed lease with the claim
-// still held, a reaped runner, a course no repository registered, 300 unseen runners). The
+// still held, a reaped runner, a course no repository registered, 300 unseen runners). B-270
+// (S-BTN-243) now omits the latest transcript and report for runners outside the live set. The
 // statement count no longer grows with the runners, the lookups search
 // their indexes (migration 0063), and on the Cloudflare host the view's reads stay under the
 // ticket's 500-row target on that harness state.
@@ -60,11 +61,12 @@ const VIEW_SQL = [
   /FROM runner_courses f LEFT JOIN courses/,
   /FROM claims WHERE status = 'active' ORDER BY claimed_at, id$/,
   /FROM activities WHERE ended_at IS NULL$/,
-  /AS t FROM transcripts$/,
-  /AS t FROM pending_transcripts$/,
-  /FROM messages WHERE kind = 'status_report'$/,
+  /AS t FROM transcripts\b/,
+  /AS t FROM pending_transcripts\b/,
+  /AS runner_id, payload_json, sent_at FROM messages\b/,
 ];
 const viewStatements = (log: Captured[]) => log.filter((l) => VIEW_SQL.some((re) => re.test(l.sql)));
+const historyStatements = (log: Captured[]) => log.filter((l) => VIEW_SQL.slice(-3).some((re) => re.test(l.sql)));
 
 /** The fewest statements of three state reads: an alarm workerd runs meanwhile (the test clock
  *  is behind the real one) adds its own statements to the capture, never takes any away. */
@@ -114,7 +116,8 @@ const served = (x: unknown) => JSON.parse(JSON.stringify(x));
 
 async function sameAsBefore(session: string, now: number) {
   const { state: s } = await state(session);
-  expect(s.runners).toEqual(served(await oldRunnersView(now)));
+  const expected = (await oldRunnersView(now)).map((w) => w.alive ? w : { ...w, transcript_url: null, last_report: null });
+  expect(s.runners).toEqual(served(expected));
   return s;
 }
 
@@ -219,16 +222,18 @@ describe('B-250 the Runners view in one read per list', { timeout: 180_000 }, ()
     const gone = await register('mac');
     await sameAsBefore(session, T0);
     await fill(a.id, tickets.slice(0, 3));
-    await rows(`UPDATE runners SET last_seen_at = ? WHERE id = ?`, T0 - 2 * H, b.id); // lapsed, holding nothing
+    const [{ lease_timeout_ms: lease }] = await rows<{ lease_timeout_ms: number }>('SELECT lease_timeout_ms FROM runners WHERE id = ?', b.id);
+    await rows(`UPDATE runners SET last_seen_at = ? WHERE id = ?`, T0 - lease, b.id); // exactly lapsed, holding nothing
     await fill(gone.id, tickets.slice(3, 6));
     await rows('UPDATE runners SET reaped_at = ? WHERE id = ?', T0 - 1, gone.id);
     // The lapsed runner's only open activities are a tied pair — the tie decides its served row.
     await activity(b.id, null, 'b-tie-z', T0 - H, T0 - H);
     await activity(b.id, null, 'b-tie-a', T0 - H, T0 - H);
     // Its pointers wait as pending ones (it holds no claim): two of one heartbeat's instant,
-    // told out of lexical order — the lexically first is served.
+    // told out of lexical order. Both are hidden until the runner is live again.
     await transcript(b.id, null, 'claude-code/b-pending-z.jsonl', T0 - H);
     await transcript(b.id, null, 'claude-code/b-pending-a.jsonl', T0 - H);
+    await report(b.id, T0 - H, 'before expiry');
     const s = await sameAsBefore(session, T0);
     // The state exercises what it claims to: an alive runner with two claims at one instant,
     // a lapsed one, a reaped one, and the lists' orders and latests.
@@ -250,8 +255,15 @@ describe('B-250 the Runners view in one read per list', { timeout: 180_000 }, ()
     expect(JSON.parse(s.runners[1].last_report.payload_json).text).toBe('second');
     expect(s.runners[0].activity.id).toBe('newer'); // the reaped runner's open activity is served as it was
     expect(['b-tie-a', 'b-tie-z']).toContain(s.runners[2].activity.id); // one tied row, the same one both reads pick
-    expect(s.runners[2].transcript_url).toBe(transcriptUrl(TRANSCRIPTS, 'claude-code/b-pending-a.jsonl')); // the pending pair's instant: the lexically first
+    for (const w of [s.runners[0], s.runners[2]]) {
+      expect(w.transcript_url).toBeNull();
+      expect(w.last_report).toBeNull();
+    }
     expect(s.runners[2].claims).toEqual([]);
+    await rows('UPDATE runners SET last_seen_at = ? WHERE id = ?', T0, b.id);
+    const renewed = await sameAsBefore(session, T0);
+    expect(renewed.runners[2].transcript_url).toBe(transcriptUrl(TRANSCRIPTS, 'claude-code/b-pending-a.jsonl'));
+    expect(JSON.parse(renewed.runners[2].last_report.payload_json).text).toBe('before expiry');
     // Later: the lease lapses on the held claims too — the alarm has not run (B-229's window).
     await setClock(T0 + 21 * H);
     await rows('UPDATE runners SET last_seen_at = ? WHERE id = ?', T0 + 21 * H, a.id);
@@ -280,22 +292,77 @@ describe('B-250 the Runners view in one read per list', { timeout: 180_000 }, ()
     const largeView = viewStatements(large);
     expect(smallView.length).toBe(largeView.length);
     expect(smallView.length).toBeLessThanOrEqual(12);
-    // The joined reads, explained: each searches an index and none scans its table — except the
-    // two transcript tables, whose latest-per-runner walk has no key but the runners registered
-    // (the count this ticket removes); it walks each table once, as the per-runner reads did in sum.
+    // The view reads the retained roster and active lists in index order.
     const plans = new Map<string, string[]>();
     for (const l of largeView) {
       const plan = (await rows<{ detail: string }>(`EXPLAIN QUERY PLAN ${l.sql}`, ...l.params)).map((r) => r.detail);
       plans.set(l.sql, plan);
       const table = /FROM (runners|claims|activities|messages|transcripts|pending_transcripts)\b/.exec(l.sql)?.[1]!;
-      if (table === 'transcripts' || table === 'pending_transcripts') continue;
       const scans = plan.filter((d) => d.startsWith(`SCAN ${table}`) && !/USING (COVERING )?INDEX/.test(d));
       expect(scans, `${l.sql}\n${plan.join('\n')}`).toEqual([]);
     }
     expect(plans.get(smallView.find((l) => /FROM runners ORDER BY/.test(l.sql))!.sql)).toContain('SCAN runners USING INDEX runners_by_hostname');
     expect(plans.get(largeView.find((l) => /FROM claims WHERE status/.test(l.sql))!.sql)).toContain('SCAN claims USING INDEX claims_active_by_runner');
     expect(plans.get(largeView.find((l) => /FROM activities WHERE ended_at/.test(l.sql))!.sql)).toContain('SCAN activities USING INDEX activities_open');
-    expect(plans.get(largeView.find((l) => /FROM messages WHERE kind/.test(l.sql))!.sql)).toContain('SCAN messages USING INDEX messages_reports');
+  });
+
+  it('bounds all three latest lookups as live and expired runners accumulate months of history (S-BTN-243)', async () => {
+    const live = await register('vm-a');
+    const expired = await register('vm-b');
+    await rows('UPDATE runners SET last_seen_at = ? WHERE id = ?', T0 - 100 * 24 * H, expired.id);
+    for (const runner of [live, expired]) {
+      const ticket = runner === live ? tickets[0] : tickets[1];
+      const id = await claim(runner.id, ticket, T0 - 100 * 24 * H, T0 - 99 * 24 * H);
+      await transcript(runner.id, id, 'latest-linked', T0 - H, T0);
+      await transcript(runner.id, null, 'latest-pending', T0 - H, T0);
+    }
+    const small = await state(session);
+    const count = 3000;
+    const series = 'WITH RECURSIVE k(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM k WHERE i < ?)';
+    for (const runner of [live, expired]) {
+      await rows(`${series}
+        INSERT INTO transcripts (runner_id, claim_id, repo, path, role, first_seen_at)
+        SELECT c.runner_id, c.id, ?, 'linked-' || i, 'session', ? + i * ? FROM k CROSS JOIN claims c WHERE c.runner_id = ?`,
+        count, TRANSCRIPTS, T0 - 100 * 24 * H, H / 2, runner.id);
+      await rows(`${series}
+        INSERT INTO pending_transcripts (runner_id, repo, path, role, first_seen_at)
+        SELECT ?, ?, 'pending-' || i, 'session', ? + i * ? FROM k`, count, runner.id, TRANSCRIPTS, T0 - 100 * 24 * H, H / 2);
+      await rows(`${series}
+        INSERT INTO messages (kind, from_runner_id, to_runner_id, sent_at, status, payload_json)
+        SELECT 'status_report', ?, ?, ? + i * ?, 'acknowledged', '{"text":"history"}' FROM k`, count, runner.id, runner.id, T0 - 100 * 24 * H, H / 2);
+      // Higher id wins even with a lower sent_at than the last inserted history row.
+      await report(runner.id, T0 - 100 * 24 * H, 'latest');
+    }
+    const large = await state(session);
+    expect(large.state.runners).toEqual(served(await oldRunnersView(T0)).map((w: any) => w.alive ? w : { ...w, transcript_url: null, last_report: null }));
+    expect(large.state.runners).toEqual(small.state.runners.map((w: any) => w.alive ? {
+      ...w, last_report: { payload_json: '{"text":"latest"}', sent_at: T0 - 100 * 24 * H },
+    } : w));
+    for (const table of ['transcripts', 'pending_transcripts', 'messages']) {
+      expect(await rows(`SELECT COUNT(*) AS n FROM ${table}`)).toEqual([{ n: 2 * (count + 1) }]);
+    }
+    const history = historyStatements(large.log);
+    const searches = [
+      /^SEARCH t USING (COVERING )?INDEX transcripts_latest \(runner_id=\?\)$/,
+      /^SEARCH t USING (COVERING )?INDEX pending_transcripts_latest \(runner_id=\?\)$/,
+      /^SEARCH m USING (COVERING )?INDEX messages_reports \(from_runner_id=\?\)$/,
+    ];
+    expect(history).toHaveLength(searches.length);
+    for (const [i, l] of history.entries()) {
+      expect(l.params).toEqual([JSON.stringify([live.id])]);
+      const plan = (await rows<{ detail: string }>(`EXPLAIN QUERY PLAN ${l.sql}`, ...l.params)).map((r) => r.detail);
+      expect(plan, plan.join('\n')).toContainEqual(expect.stringMatching(searches[i]));
+      expect(plan.filter((d) => /^(SCAN (?!j\b)|USE TEMP B-TREE)/.test(d))).toEqual([]);
+    }
+    if (HOST === 'cloudflare') {
+      const cost = (log: Captured[]) => historyStatements(log).map((l) => l.cursor.rowsRead!);
+      // The empty report lookup can now fetch one row; other reads must not grow.
+      const before = cost(small.log);
+      const after = cost(large.log);
+      expect(after.slice(0, 2)).toEqual(before.slice(0, 2));
+      expect(after[2]).toBeLessThanOrEqual(before[2] + 2);
+      expect(after.reduce((a, b) => a + b, 0)).toBeLessThanOrEqual(12);
+    }
   });
 
   it.runIf(HOST === 'cloudflare')('reads within the target on the B-240 harness state with 300 old runners', async () => {

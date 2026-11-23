@@ -166,7 +166,7 @@ here; every other cause is its rule's.
 | `PUT /v1/admin/settings` | admin | `{link_hosts?, session_hosts?, check_app_id?}` | `{ok: true}` | R-BTN-112, R-BTN-113, §12.7 |
 | `POST /v1/admin/login-links` | admin | — | `{url}`, the one-time link | R-BTN-155 |
 | `POST /v1/admin/freeze`, `…/unfreeze`, `…/seal` | admin | — | `{ok: true}`; seal `conflict` naming active or fence-pending claims | R-BTN-88 |
-| `GET /v1/admin/state` | admin | — | the state in one request for a terminal, built by the functions the entity reads use (`stateView()`): `{server_time, repositories, ready, ready_by_tier, held, runners, running, timeline, limits, instance, needs_you, blocked, discrepancies, resources, capacity}`; a session's cookie does not open it | R-BTN-57, R-BTN-179 |
+| `GET /v1/admin/state` | admin | — | the state in one request for a terminal, built by the functions the entity reads use (`stateView()`): `{server_time, repositories, ready, ready_by_tier, held, runners, running, timeline, limits, instance, needs_you, blocked, discrepancies, resources, capacity}`; `runners` keeps every runner row, with `transcript_url` and `last_report` both `null` for runners not alive under R-BTN-3; a session's cookie does not open it | R-BTN-57, R-BTN-179, R-BTN-3 |
 | `GET /v1/admin/export` | admin | `?with_history=1` | `baton.owner-state/v1` | R-BTN-88 |
 | `POST /v1/admin/import` | admin | an export | `{ok: true}`; `conflict`, `invalid-params` | R-BTN-88, R-BTN-158 |
 | **Dashboard** | | | | |

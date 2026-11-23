@@ -6,6 +6,7 @@
 // carry `model_provider_id`, `billing`, `usage` and `rate_limits`, all accepted and ignored,
 // and an unavailable provider is a reading (§6.3, R-BTN-76), never a table core keeps.
 import { isLive, liveRunnerSql, type Lease } from './runnerLiveness';
+import { runnerLatest } from './runnerLatest';
 import { BatonError } from './http';
 import { groupBy, logEvent } from './db';
 import type { Deprecated } from './deprecated';
@@ -880,22 +881,10 @@ export class RunnerApi {
 
   // ── the dashboard's Runners view (§14) ──────────────────────────────────────────────────
 
-  /** Every runner row ever registered (R-BTN-3 keeps them) with its declarations, active
-   *  claims, current activity, latest transcript and latest status report. B-250: one read per
-   *  list, whatever the fleet's size — the per-runner loop this replaced ran about six queries
-   *  for *every* runner, reaped ones included, ~1.9k statements a poll at 300 runners. Each
-   *  read covers a set bounded without the runners' count — the declarations (R-BTN-149's
-   *  retention prunes a runner unseen 30 days), the active claims (`claims_active_by_runner`)
-   *  and open activities (`activities_open`) through their partial indexes, the status reports
-   *  through 0063's `messages_reports` — or a table the per-runner reads already walked in sum
-   *  (the transcripts: a latest-per-runner read keyed by `runner_id` costs the runners
-   *  registered, the very count this view stops paying, so it walks the table once instead).
-   *  The rows are grouped here to the order the per-runner reads served, and the latest of a
-   *  list is kept in code by the key its per-runner `ORDER BY … LIMIT 1` broke ties on — the
-   *  unique `received_at` of an activity, the unique `id` of a report, and, for the
-   *  transcripts, the union read's own arrival order at their fold below. `runners` itself is
-   *  read in its served order through 0063's `runners_by_hostname`: a sort reads every row
-   *  twice on the Cloudflare host. */
+  /** Every runner row ever registered (R-BTN-3), with one read per list (B-250).
+   *  B-270 / S-BTN-243: only live runners get their latest transcript and report. The
+   *  roster is already read for the response; `isLive` selects the same set as a range
+   *  read through `runners_live`, without a second roster query. */
   runnersView(now: number, page?: { repository: string; after: number; limit: number }) {
     const runners = this.rows<Row & Lease & { reaped_at: number | null }>(`SELECT id, hostname, session_name, harness, kind, isolation, model_id, tier_ceiling, tier_ceilings, lease_timeout_ms,
                                        first_seen_at, last_seen_at, last_activity_at, reaped_at, incarnation, profile_json, client_version, legacy_names_at FROM runners ${page ? `w WHERE w.id IN (SELECT DISTINCT runner_id FROM runner_courses WHERE repository_id = ? AND runner_id > ? ORDER BY runner_id LIMIT ?)
@@ -915,37 +904,8 @@ export class RunnerApi {
       if (!best || a.started_at > best.started_at
         || (a.started_at === best.started_at && a.received_at > best.received_at)) activity.set(a.runner_id, a);
     }
-    // §6.8: the latest transcript per runner, by the rule the per-runner union read settled
-    // ties with. That read fed its `ORDER BY t DESC LIMIT 1` sorter the linked table's rows
-    // first and each table in its autoindex's order — `(runner_id, repo, path, claim_id)`,
-    // `(runner_id, repo, path)` — and a sorter keeps the first of a tie, so: a greater t wins,
-    // a tie keeps a linked pointer over a pending one, and within one table the
-    // lexicographically least (repo, path, claim_id). A first heartbeat reports several
-    // pointers at one instant (they share its `first_seen_at`), so the tie is ordinary, and a
-    // walk that kept the first row it saw — rowid order, not the autoindex's — would serve
-    // another transcript_url than the per-runner read did. The fold below walks the linked
-    // table first and replaces the kept pointer only at a strictly greater t or, same table
-    // and instant, a lexicographically smaller (repo, path, claim_id): the old rule exactly.
-    type Pointer = { runner_id: number; repo: string; path: string; claim_id: number; t: number; linked: boolean };
-    const transcript = new Map<number, Pointer>();
-    const latest = (r: Pointer) => {
-      const best = transcript.get(r.runner_id);
-      if (!best || r.t > best.t
-        || (r.t === best.t && r.linked === best.linked
-          && (r.repo < best.repo || (r.repo === best.repo && (r.path < best.path
-            || (r.path === best.path && r.claim_id < best.claim_id)))))) transcript.set(r.runner_id, r);
-    };
-    for (const t of this.rows<{ runner_id: number; repo: string; path: string; claim_id: number; t: number }>(
-      `SELECT runner_id, repo, path, claim_id, COALESCE(last_pushed_at, first_seen_at) AS t FROM transcripts${page ? " WHERE id IN (SELECT (SELECT t.id FROM transcripts t WHERE t.runner_id = j.value ORDER BY COALESCE(t.last_pushed_at, t.first_seen_at) DESC, t.repo, t.path, t.claim_id LIMIT 1) FROM json_each(?) j)" : ""}`, ...(page ? [ids] : []))) latest({ ...t, linked: true });
-    for (const t of this.rows<{ runner_id: number; repo: string; path: string; t: number }>(
-      `SELECT runner_id, repo, path, COALESCE(last_pushed_at, first_seen_at) AS t FROM pending_transcripts${page ? " WHERE rowid IN (SELECT (SELECT t.rowid FROM pending_transcripts t WHERE t.runner_id = j.value ORDER BY COALESCE(t.last_pushed_at, t.first_seen_at) DESC, t.repo, t.path LIMIT 1) FROM json_each(?) j)" : ""}`, ...(page ? [ids] : []))) latest({ ...t, claim_id: 0, linked: false });
-    // §9: the latest status report per runner — `id` decides, never the scan's order.
-    const reports = new Map<number, { payload_json: string | null; sent_at: number; id: number }>();
-    for (const m of this.rows<{ runner_id: number; id: number; payload_json: string | null; sent_at: number }>(
-      `SELECT from_runner_id AS runner_id, id, payload_json, sent_at FROM messages WHERE ${page ? "id IN (SELECT (SELECT m.id FROM messages m WHERE m.kind = 'status_report' AND m.from_runner_id = j.value ORDER BY m.id DESC LIMIT 1) FROM json_each(?) j)" : "kind = 'status_report'"}`, ...(page ? [ids] : []))) {
-      const best = reports.get(m.runner_id);
-      if (!best || m.id > best.id) reports.set(m.runner_id, m);
-    }
+    const liveIds = JSON.stringify(runners.filter((w) => isLive(w, now)).map((w) => w.id));
+    const { transcript, reports } = runnerLatest((q, ids) => this.rows(q, ids), liveIds);
     return runners.map((w) => {
       const id = w.id as number;
       const alive = isLive(w, now);
