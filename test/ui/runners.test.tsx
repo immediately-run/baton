@@ -1,6 +1,6 @@
 // runners.test.tsx — B-211: the runner screens on B-196's reads. The cards group by hostname
 // and order by state within a host; the claim block draws the lease bar; the newest status
-// report is text under its card; Stop sends `release` with no dialog and draws a `forbidden` as
+// report is text under its card; Stop sends a confirmed `release` and draws a `forbidden` as
 // text; an unlisted session link is text; the timeline's bars and nested segments match the
 // fixture, each a focusable group with a name, and the table lists the same rows; a hostile
 // label is text; `?since=` round-trips through the URL.
@@ -96,19 +96,20 @@ describe('the Runners list (B-211 item 1)', () => {
 
     // Controls come from the registry: Stop only where a claim is held, none on a reaped runner.
     const names = (c: HTMLElement) => within(c).queryAllByRole('button').map((b) => b.textContent);
-    expect(names(cards[0])).toEqual(['Status', 'Wind down', 'Stop']);
+    expect(names(cards[0])).toEqual(['Status', 'Wind down', 'Stop…']);
     expect(names(cards[2])).toEqual(['Status', 'Wind down']);
     expect(names(cards[3])).toEqual([]);
   });
 
-  it('Stop sends release in one click, with no dialog, and draws a forbidden as text', async () => {
+  it('Stop sends confirmed release and draws a forbidden as text', async () => {
     const { calls } = mockFetch({ '/v1/repositories/docs/runners': LIST, 'POST /v1/ui/messages': () => refuse('forbidden', `not this runner's ticket ${HOSTILE}`) });
     renderWithShell(<RunnersScreen {...props('repository/runners', { repository: 'docs' })} />, { actions, repos, now: NOW });
     await screen.findByText('4 alive of 5');
     const card = document.querySelector('.runner-card') as HTMLElement;
-    fireEvent.click(within(card).getByRole('button', { name: 'Stop' }));
+    fireEvent.click(within(card).getByRole('button', { name: 'Stop…' }));
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Stop' }));
     await waitFor(() => expect(calls.some((c) => c.method === 'POST')).toBe(true));
-    expect(calls.find((c) => c.method === 'POST')).toMatchObject({ path: '/v1/ui/messages', body: { to_runner_id: 3, kind: 'release', payload: { ticket_id: 'docs:T-1', reason: 'requested' } } });
+    expect(calls.find((c) => c.method === 'POST')).toMatchObject({ path: '/v1/ui/messages', body: { to_runner_id: 3, kind: 'release', confirm: true, payload: { ticket_id: 'docs:T-1', reason: 'requested' } } });
     expect(screen.queryByRole('dialog')).toBeNull();
     await waitFor(() => expect(card.querySelector('.control-refusal')?.textContent).toContain('forbidden'));
     expect(card.querySelector('.control-refusal')!.textContent).toContain(HOSTILE);

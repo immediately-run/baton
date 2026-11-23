@@ -41,6 +41,11 @@ describe('the action table', () => {
     expect(byId('adoption.confirm').ui!.view).toEqual(['repository/sync']);
     for (const a of ACTIONS) if (a.ui) expect([a.id, listsSession(a)]).toEqual([a.id, true]);
   });
+
+  it('S-BTN-100: a destructive entry must declare its required confirmation', () => {
+    const stop: Action = { ...byId('leg.stop'), input: { type: 'object', properties: {} } };
+    expect(checkActions([stop], SCREEN_IDS).errors).toEqual(['leg.stop: destructive actions must require confirm: true']);
+  });
 });
 
 describe('matching a request', () => {
@@ -81,7 +86,7 @@ describe('matching a request', () => {
       expect([p, sessionReadable(p)]).toEqual([p, false]);
     }
     expect(keyReadable('/v1/repositories/docs/courses')).toBe(true);
-    expect(keyReadable('/v1/actions')).toBe(false);
+    expect(keyReadable('/v1/actions')).toBe(true);
   });
 });
 

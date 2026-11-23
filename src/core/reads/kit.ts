@@ -2,7 +2,7 @@
 // caller resolves to, the one authorization of a principal against an action and a repository,
 // and the helpers a list read pages with. See ./index.ts for how to add a read.
 import { BatonError } from '../http';
-import { keyCaller, sessionCaller, type Action, type Caller, type SessionRole } from '../actions';
+import { callerFor, type Action, type ActionPrincipal, type Caller, type SessionRole } from '../actions';
 import { checkCursor, mintCursor, page, PAGE_DEFAULT, type CursorBinding } from '../cursor';
 import { liveness } from '../stateVersion';
 import type { BatonCore } from '../baton';
@@ -67,10 +67,8 @@ export const callerKey = (p: ReadPrincipal): string => (p.kind === 'session' ? `
 
 /** The entry's caller `principal` matches — R-BTN-129's first half of `authorize` — or
  *  `forbidden`: a known caller the action does not list (§12.1). */
-export function authorizeAction(principal: ReadPrincipal, action: Action): Caller {
-  const caller = principal.kind === 'session'
-    ? sessionCaller(action, principal.role)
-    : keyCaller(action, principal.role === 'admin' ? 'administrator' : principal.role);
+export function authorizeAction(principal: ActionPrincipal, action: Action): Caller {
+  const caller = callerFor(action, principal);
   if (!caller) throw new BatonError('forbidden', `${action.id} is not this caller's to call`);
   return caller;
 }

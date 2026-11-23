@@ -49,7 +49,8 @@ import { Deprecated } from './deprecated';
 import { Retention } from './retention';
 import type { DispatchTarget, Ports, Row, SqlValue, Store, Workflow } from './ports';
 import { dispatchRead } from './reads';
-import type { ReadPrincipal } from './reads/kit';
+import { authorizeAction, type ReadPrincipal } from './reads/kit';
+import { matchAction, matchActions } from './actions';
 
 const HELD_AUTO_ACCEPT_MS = 24 * 3_600_000; // §7.1: a held history is accepted after 24 h (R3-1212)
 const RESYNC_WINDOW_MS = 30_000; // B-201: a session's resync, once per repository per R-BTN-73's dispatch window
@@ -715,16 +716,7 @@ export class BatonCore {
         if (!owner && !(await this.admin.adminFingerprints()).size) owner = req.headers.get('X-Baton-Owner');
         if (!owner) throw new BatonError('unauthenticated', 'the dashboard session ended or is unknown');
         if (req.method === 'GET' && url.pathname === '/v1/ui/session') return json({ ok: true });
-        // B-206 (R-BTN-155, `ui.logout`): a session's own end — its row is revoked and the
-        // cookie cleared, with the attributes it was set with (R-BTN-16). The caller is the
-        // principal just resolved; nothing but its own session is named or ended.
-        if (req.method === 'POST' && url.pathname === '/v1/ui/logout') {
-          await readJson(req); // R-BTN-16's JSON body, read whole; it names nothing
-          await this.admin.endSession(req.headers.get('X-Baton-Session'));
-          const res = json({ ok: true });
-          res.headers.set('Set-Cookie', `${SESSION_COOKIE}=; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=0`);
-          return res;
-        }
+        return await this.dashboardWrite(req, url, owner);
       }
       // R-BTN-181's envelope (§14), B-7's slice: `POST /v1/repositories/{repository}/attestations`
       // with a `std:decision@1` — a person's answer to the ticket's queued person leg
@@ -771,7 +763,7 @@ export class BatonCore {
         const out = this.resources.post({ kind: 'probe', fingerprint: signed.cred }, await readJson(signed.req), null);
         return json(out);
       }
-      const routed = await this.runnerRoute(req, url, owner);
+      const routed = await this.runnerRoute(req, url);
       if (routed) return routed;
       throw new BatonError('not-found', `no route ${req.method} ${url.pathname}`);
     } catch (e) {
@@ -895,7 +887,7 @@ export class BatonCore {
    *  `X-Baton-Credential` (a bearer token's credential, verified), `X-Baton-Signed` (a signed
    *  request's keyid, pre-checked; verifySigned finishes it here) or `X-Baton-Owner` (the Access
    *  email); it strips all of them from every incoming request first. */
-  private async runnerRoute(req: Request, url: URL, owner: string | null): Promise<Response | null> {
+  private async runnerRoute(req: Request, url: URL): Promise<Response | null> {
     const p = url.pathname;
     const m = req.method;
     let cred = req.headers.get('X-Baton-Credential');
@@ -1061,71 +1053,67 @@ export class BatonCore {
       }
       return null;
     }
-    if (p.startsWith('/v1/ui/') && m === 'POST') {
-      if (!owner) throw new BatonError('unauthenticated', 'no owner principal');
-      if (p === '/v1/ui/messages') {
-        const body = await readJson(req);
+    return null;
+  }
+
+  /** Dispatch a session write by action id, not by a second copy of the route. */
+  private async dashboardWrite(req: Request, url: URL, owner: string): Promise<Response> {
+    const { method } = req;
+    const p = url.pathname;
+    if (method !== 'POST' || matchActions(method, p).length === 0) throw new BatonError('not-found', `no route ${method} ${p}`);
+    const body = await readJson(req);
+    const hit = matchAction(method, p, body);
+    if (!hit) throw new BatonError('invalid-params', 'the body must select exactly one action');
+    authorizeAction({ kind: 'session', role: 'administrator' }, hit.action);
+    const confirm = (body as { confirm?: unknown } | null)?.confirm;
+    if (hit.action.effect === 'destructive' && confirm !== true) {
+      throw new BatonError('confirm-required', `${hit.action.id} requires confirm: true`);
+    }
+    const tx = <T>(f: () => T): T => this.store.transaction(f);
+    const numeric = (name: string): number => {
+      const raw = hit.params[name];
+      if (!/^\d+$/.test(raw)) throw new BatonError('not-found', `no route ${method} ${p}`);
+      return Number(raw);
+    };
+    switch (hit.action.id) {
+      case 'ui.logout': {
+        await this.admin.endSession(req.headers.get('X-Baton-Session'));
+        const res = json({ ok: true });
+        res.headers.set('Set-Cookie', `${SESSION_COOKIE}=; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=0`);
+        return res;
+      }
+      case 'leg.stop':
+      case 'runner.status-request':
+      case 'runner.wind-down':
         return json(tx(() => this.runners.sendMessage(owner, body)));
+      case 'claim.force-reap':
+        return json(tx(() => this.claims.forceReap(owner, numeric('claim'), body)));
+      case 'claim.fence-clear':
+        return json(tx(() => this.claims.fenceClear(owner, numeric('claim'), body)));
+      case 'claim.confirm':
+      case 'claim.release': {
+        const action = hit.action.id === 'claim.confirm' ? 'confirm' : 'release';
+        return json(tx(() => this.claims.resolve(owner, numeric('claim'), { action, confirm })));
       }
-      const reap = /^\/v1\/ui\/claims\/(\d+)\/reap$/.exec(p);
-      if (reap) {
-        const body = await readJson(req);
-        return json(tx(() => this.claims.forceReap(owner, Number(reap[1]), body)));
-      }
-      // R-BTN-19: an administrator's fence clear, in one transaction with its seats' release
-      // (R-BTN-178) and its event. A dashboard session's principal is an administrator's — the
-      // only key a session is minted from — so the route itself needs no further check.
-      const fenceClear = /^\/v1\/ui\/claims\/(\d+)\/fence-clear$/.exec(p);
-      if (fenceClear) {
-        const body = await readJson(req);
-        return json(tx(() => this.claims.fenceClear(owner, Number(fenceClear[1]), body)));
-      }
-      // B-222 (R-BTN-10, §9.6): the completion's confirm and its release, each a route of its
-      // own over `claims.resolve`. V1's one route taking `{action}` is retired (B-203).
-      const completion = /^\/v1\/ui\/claims\/(\d+)\/(confirm|release)$/.exec(p);
-      if (completion) {
-        const body = await readJson(req);
-        // `confirm` is the caller's own word (§12.2): `checkResolve` refuses a body without it.
-        const confirm = (body as { confirm?: unknown } | null)?.confirm;
-        return json(tx(() => this.claims.resolve(owner, Number(completion[1]), { action: completion[2], confirm })));
-      }
-      if (p === '/v1/ui/cutover') {
-        const body = await readJson(req);
+      case 'repo.cutover':
         return json(tx(() => this.cutover.cutover(owner, body)));
-      }
-      const adoption = /^\/v1\/ui\/adoptions\/([^/]+)\/confirm$/.exec(p);
-      if (adoption) {
-        const ticket = this.ticketParam(adoption[1]);
-        const body = await readJson(req);
-        return json(tx(() => this.cutover.confirmAdoption(owner, ticket, body)));
-      }
-      const override = /^\/v1\/ui\/overrides\/([^/]+)$/.exec(p);
-      if (override) {
-        const ticket = this.ticketParam(override[1]);
-        const body = await readJson(req);
-        return json(tx(() => this.claims.setOverride(owner, ticket, body)));
-      }
-      // B-134: an owner resolves a scope finding — the acknowledgement that it was looked at.
-      // In the transaction, like every neighbouring `/v1/ui` mutation, so the resolution and
-      // its `scope-resolved` event land together.
-      const finding = /^\/v1\/ui\/scope\/(\d+)\/resolve$/.exec(p);
-      if (finding) {
-        const id = Number(finding[1]);
+      case 'adoption.confirm':
+        return json(tx(() => this.cutover.confirmAdoption(owner, this.ticketParam(hit.params.ticket), body)));
+      case 'ticket.hold':
+      case 'ticket.unhold':
+      case 'ticket.expedite':
+        return json(tx(() => this.claims.setOverride(owner, this.ticketParam(hit.params.ticket), body)));
+      case 'scope.resolve': {
+        const id = numeric('finding');
         return json(tx(() => {
           if (!this.scope.resolve(id, `owner:${owner}`)) throw new BatonError('not-found', `no open scope finding ${id}`);
           return { ok: true };
         }));
       }
-      if (p === '/v1/ui/board/accept') {
-        const body = await readJson(req);
+      case 'repo.accept-post':
         return json(tx(() => this.claims.acceptHeld(owner, body)));
-      }
-      // B-201 (`repo.resync`; R-BTN-73): a session asks the repository's sync to run now — the
-      // dispatch a webhook delivery sends, logged with who asked, at most one per repository per
-      // dispatch window. Nothing of the board moves here: the sync posts, and R-BTN-11 judges
-      // its post. A forced resync is not built and is refused by name (`checkResync`).
-      if (p === '/v1/ui/resync') {
-        const { repository } = checkResync(await readJson(req));
+      case 'repo.resync': {
+        const { repository } = checkResync(body);
         const repo = this.registry.live(repository);
         if (!repo) throw new BatonError('forbidden', 'this repository is not yours or does not exist');
         if (!repo.sync_workflow) throw new BatonError('conflict', `${repository} registers no sync workflow: Baton has nothing to dispatch for it`);
@@ -1142,8 +1130,9 @@ export class BatonCore {
         this.syncNow([repository]);
         return json({ ok: true });
       }
+      default:
+        throw new BatonError('not-found', `no route ${method} ${p}`);
     }
-    return null;
   }
 
   /**

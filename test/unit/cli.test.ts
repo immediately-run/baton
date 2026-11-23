@@ -334,6 +334,21 @@ describe('send: signed with a key file, verified by Baton', () => {
     // The owner-key flag reads the public line from its file, as it reads an SSH public key.
     expect(plan('admin', ['repo', 'add', 'o/r', '--owner-key', `${file}.pub`]).body.owner_keys).toEqual([line]);
   });
+
+  it('S-BTN-100: baton help with an API key prints the server’s action list', async () => {
+    const file = join(dir, 'help.key');
+    await setAdminKeys(createApiKey(file, 'help'));
+    const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation((url, init) => hostCall(new Request(url, init)));
+    const write = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    try {
+      expect(await main(['help', '-i', file, '--url', ORIGIN])).toBe(0);
+      expect(write.mock.calls.map(([text]) => String(text)).join('')).toContain('admin.repo.list');
+      expect(write.mock.calls.map(([text]) => String(text)).join('')).not.toContain('owner.grant.list');
+    } finally {
+      write.mockRestore();
+      fetch.mockRestore();
+    }
+  });
 });
 
 describe('a redirect or a non-JSON answer is a refusal, never success (B-80)', () => {

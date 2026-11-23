@@ -52,7 +52,7 @@ describe('S-BTN-262 the completion’s confirm and release (B-222)', () => {
     const before = await stateOf('T-1');
     expect([before.state, before.detail.claim_id]).toEqual(['unconfirmed', claim]);
     // It names its own confirmation (§12.2).
-    expect((await post(`/v1/ui/claims/${claim}/confirm`, {})).status).toBe(400);
+    expect((await post(`/v1/ui/claims/${claim}/confirm`, {})).status).toBe(428);
     expect((await claimRow(claim)).confirmed_at).toBeNull();
     const done = await post(`/v1/ui/claims/${claim}/confirm`, { confirm: true });
     expect([done.status, done.json]).toEqual([200, { ok: true }]);
@@ -68,7 +68,7 @@ describe('S-BTN-262 the completion’s confirm and release (B-222)', () => {
 
   it('release releases one, and the ticket is offered again', async () => {
     const claim = await completion('T-2');
-    expect((await post(`/v1/ui/claims/${claim}/release`, { confirm: false })).status).toBe(400);
+    expect((await post(`/v1/ui/claims/${claim}/release`, { confirm: false })).status).toBe(428);
     const done = await post(`/v1/ui/claims/${claim}/release`, { confirm: true });
     expect([done.status, done.json]).toEqual([200, { ok: true }]);
     expect(await claimRow(claim)).toMatchObject({ status: 'released', end_reason: 'released:requested', confirmed_at: null });

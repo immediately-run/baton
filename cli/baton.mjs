@@ -311,6 +311,10 @@ function devFlagPositions(argv) {
  */
 export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? p : readFileSync(p, 'utf8').trim()), readJson = (p) => readFileSync(p, 'utf8'), home = null) {
   const [cmd, ...rest] = argv;
+  if (role === 'help') {
+    parseArgs(argv, [], [], 0);
+    return { method: 'GET', path: '/v1/actions' };
+  }
   if (role === 'blocked') {
     // R-BTN-75: a GET any key granted on the repository, an owner of it or an administrator signs.
     const { flags, positional } = parseArgs(argv, ['transitive'], ['on', 'repository'], 1);
@@ -1341,7 +1345,11 @@ export async function main(argv) {
     process.stdout.write(`baton: owner state written to ${p.file} (mode 0600) — events_seq ${json.events_seq}, ${Object.keys(json.sections).length} sections\n`);
     return 0;
   }
-  if (role === 'admin' && args[0] === 'open' && json?.url) process.stdout.write(`${json.url}\n`);
+  if (role === 'help' && status >= 200 && status < 300) {
+    if (!Array.isArray(json?.actions)) throw new Error('Baton did not return an action list');
+    for (const { id, summary } of json.actions) process.stdout.write(`${id} — ${summary}\n`);
+  }
+  else if (role === 'admin' && args[0] === 'open' && json?.url) process.stdout.write(`${json.url}\n`);
   else if (role === 'ticket' && args[0] === 'show' && json && status >= 200 && status < 300) {
     // B-126 (R-BTN-194): the provenance first — a privileged session sees whose words steer the
     // ticket before it reads anything else of it.

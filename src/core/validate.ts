@@ -1135,12 +1135,13 @@ export function checkDecisionAnswer(body: unknown):
   return { decision: b.decision as 'baton:retries' | 'baton:stalled', answer: b.answer as 'retry' | 'park' };
 }
 
-/** §8, §11: `{expedite?, hold?}` — booleans, at least one. */
+/** §8, §11: one of `{expedite}` or `{hold}`, a boolean. */
 export function checkOverride(body: unknown): { expedite?: boolean; hold?: boolean } {
   if (!isObj(body)) bad('body', 'must be a JSON object');
   const b = body as Record<string, unknown>;
+  for (const k of Object.keys(b)) if (k !== 'expedite' && k !== 'hold') bad(`body.${k}`, 'unknown field');
   for (const k of ['expedite', 'hold']) if (b[k] !== undefined && typeof b[k] !== 'boolean') bad(k, 'must be a boolean');
-  if (b.expedite === undefined && b.hold === undefined) bad('body', 'names expedite or hold');
+  if ((b.expedite === undefined) === (b.hold === undefined)) bad('body', 'names exactly one of expedite and hold');
   return { expedite: b.expedite as boolean | undefined, hold: b.hold as boolean | undefined };
 }
 

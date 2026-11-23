@@ -196,13 +196,14 @@ describe('the confirm dialog (B-207 item 4)', () => {
     expect(calls).toHaveLength(0);
   });
 
-  it('Stop is one click: no dialog, no confirm (Decision 3a)', async () => {
+  it('Stop requires confirmation before sending', async () => {
     const { calls } = mockFetch({ 'POST /v1/ui/messages': { id: 1 } });
     renderWithShell(<Controls view={TICKET} target={TARGET} />, { actions: ACTIONS.filter((a) => a.id === 'leg.stop') });
-    fireEvent.click(screen.getByRole('button', { name: 'Stop' }));
-    expect(screen.queryByRole('dialog')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Stop…' }));
+    expect(calls).toHaveLength(0);
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Stop' }));
     await waitFor(() => expect(calls).toHaveLength(1));
-    expect(calls[0].body).toEqual({ to_runner_id: 4, kind: 'release', payload: { ticket_id: 'docs:R3-1', reason: 'requested' } });
+    expect(calls[0].body).toEqual({ to_runner_id: 4, kind: 'release', confirm: true, payload: { ticket_id: 'docs:R3-1', reason: 'requested' } });
   });
 });
 
@@ -272,23 +273,23 @@ describe('B-191’s scenario, the DOM half (B-207 item 6)', () => {
   it('an owner’s entries draw hold, expedite and stop; an administrator’s force-reap too', () => {
     mockFetch({});
     const owner = renderWithShell(<Controls view={TICKET} target={TARGET} />, { actions: actionsFor('owner', { ownsRepository: true }) as Action[] });
-    expect(names()).toEqual(expect.arrayContaining(['Hold a ticket', 'Lift a ticket’s hold', 'Stop']));
+    expect(names()).toEqual(expect.arrayContaining(['Hold a ticket', 'Lift a ticket’s hold', 'Stop…']));
     expect(names()).not.toContain('Force-reap a live claim…');
     owner.unmount();
     renderWithShell(<Controls view={TICKET} target={TARGET} />, { actions: actionsFor('administrator', { ownsRepository: true }) as Action[] });
-    expect(names()).toEqual(expect.arrayContaining(['Hold a ticket', 'Stop', 'Force-reap a live claim…']));
+    expect(names()).toEqual(expect.arrayContaining(['Hold a ticket', 'Stop…', 'Force-reap a live claim…']));
     // The destructive ones, each with a dialog, come last (B-222 placed the fence clear and the
     // completion's confirm and release on this screen too; the ticket's page draws those
     // against their own claims).
     expect(names().indexOf('Force-reap a live claim…')).toBeGreaterThan(names().indexOf('Hold a ticket'));
-    expect(names().slice(names().indexOf('Stop')).every((n) => n === 'Stop' || n!.endsWith('…'))).toBe(true);
+    expect(names().slice(names().indexOf('Stop…')).every((n) => n!.endsWith('…'))).toBe(true);
   });
 
   it('an allowed list without ticket.unhold hides unhold, and draws only what it names', () => {
     mockFetch({});
     const actions = actionsFor('owner', { ownsRepository: true }) as Action[];
     renderWithShell(<Controls view={TICKET} target={TARGET} allowed={['ticket.hold', 'leg.stop']} />, { actions });
-    expect(names()).toEqual(['Hold a ticket', 'Stop']);
+    expect(names()).toEqual(['Hold a ticket', 'Stop…']);
   });
 
   it('draws nothing where the session has no entry for the screen', () => {
