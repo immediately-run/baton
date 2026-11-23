@@ -211,7 +211,7 @@ remains the development path — the repository commands (`tickets`, `repo`, `te
 The repository holds three [Grove](https://github.com/immediately-run/grove) wikis, which
 immediately.run opens: `package.json`'s `"immediately.run": {"content": ["tickets", "docs", "spec"]}`
 lists them, and each folder's `immediately.run.json` opens it with the viewer it names —
-`tickets/` with `immediately-run/baton-board` (B-114), `docs/` and `spec/` with the wiki viewer.
+`tickets/` with `immediately-run/dibber-board` (B-114; renamed from `baton-board`, dibber DIB-18), `docs/` and `spec/` with the wiki viewer.
 
 - **`tickets/`**, the tickets:
   <https://immediately.run/present/github/immediately-run/baton/main/bundle/tickets/home.mdx>.
@@ -221,7 +221,7 @@ lists them, and each folder's `immediately.run.json` opens it with the viewer it
   `starts_from: request` — `create-spec`, `build-app` — is usually filed by `baton request`
   (above), never written by hand. Its frontmatter follows `tickets/item.schema.json`;
   the body is prose for people and agents. The wiki is a plain `render: safe` corpus: its board
-  components are the viewer's, `immediately-run/baton-board`, which `tickets/immediately.run.json`
+  components are the viewer's, `immediately-run/dibber-board`, which `tickets/immediately.run.json`
   names in `opensWith` (B-114) — this repository holds no component code for it.
 - **`docs/`**, the documentation:
   <https://immediately.run/present/github/immediately-run/baton/main/bundle/docs/home.mdx>.
