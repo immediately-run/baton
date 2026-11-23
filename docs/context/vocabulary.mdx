@@ -18,8 +18,8 @@ repositories**: the home's owners list them in `code_repos`
 (a home that lists none reaches them by name where its policy's `repos.unlisted` allows,
 R-BTN-140), and they hold no tickets of their own. What a home covers is its owners' choice; Baton has no word for it.
 
-**Ticket.** A unit of work, filed in its repository's ticket source. Baton knows its id, course,
-tier and requirements, never its body.
+**Ticket.** A unit of work, filed in its repository's ticket source. Baton knows its id, course
+and requirements, never its body.
 
 **Ticket source, reader, writer.** The repository's code that reads its tickets from their store
 and posts them in each sync — the **reader** — and may write to that store: a new ticket, a
@@ -52,7 +52,7 @@ outcomes are the station it left and each station of its `reconciles.to` (R-BTN-
 **course history**, which git never writes.
 
 **Runner.** An agent session on a machine, identified by its key. It declares capabilities,
-a tier ceiling, tags and the courses it can run.
+tags and the courses it can run.
 
 **Capability.** A name a runner declares (`key:anthropic`, `capability:code-generation-llm`) and
 a leg requires; Baton matches the two by name and derives nothing. What the keys and tools a
@@ -79,7 +79,7 @@ the leg's), and a claim past capacity is refused (R-BTN-178). Not the tenant's c
 **Lease, heartbeat, reap, fence.** A claim lives while its runner heartbeats. A silent runner
 is **reaped** at its lease; a **fence** stops a revived runner from writing.
 
-**Gate.** A rule Baton enforces for safety: one holder, capabilities and their capacity, tier, grants, barred
+**Gate.** A rule Baton enforces for safety: one holder, capabilities and their capacity, grants, barred
 tags. Everything else is **advice**.
 
 **Tag, barred tag.** Short strings a course gives runners (`family:glm`). A leg can bar tags,

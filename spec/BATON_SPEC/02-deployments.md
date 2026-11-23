@@ -192,7 +192,7 @@ process for development and CI. Nothing crosses a tenant.
   (R-BTN-76) — and at most 10 minutes; an idle beat then reads a handful of rows. The answer
   remembered is always the one computing it gives (R-BTN-61, R-BTN-72).
   - **What a heartbeat writes.** A live runner's heartbeat writes its liveness only, unless
-    anything it declares (harness, kind, model, tier ceilings, lease timeout, isolation,
+    anything it declares (harness, kind, model, lease timeout, isolation,
     concurrency, profile, capabilities, tags, courses) changed, it re-keys, or it carries
     something to record.
 - **R-BTN-149 (hard caps per repository).** Safety limits at twice the envelope; none refuses
