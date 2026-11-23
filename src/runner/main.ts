@@ -348,6 +348,7 @@ export async function runMain(argv: string[], io: { log?: (l: string) => void; f
   // harness the flag names (the snapshot's settings stay authoritative when they name one: the
   // stub prefers them, and BATON_AGENT_COMMAND only ever fills an absence).
   const agentCommand = named === '' && !a.testHarness ? a.harness.agentCommand : undefined;
+  const hostAdapter = !HARNESS_ADAPTERS.includes(a.harness) ? a.harness : undefined;
   if (agentCommand) say(`baton: .baton/baton.json names no agent_command — the legs will run the ${a.harness.name} command (--harness)`);
   // B-253 (R-BTN-72): the CLI says what its own code is — its commit, and whether a push moves
   // it — before any credential is read, so an operator starting a runner whose key is missing
@@ -452,6 +453,9 @@ export async function runMain(argv: string[], io: { log?: (l: string) => void; f
     apiFor: (secret: string) => { const other = new BatonApi({ url: a.url, transport, auth }, say); other.setSecret(secret); return other; },
     home, repository: a.repository, hostname: a.hostname, harness: a.harness.name, session: a.session,
     activityPaths: (checkout) => harnessActivityPaths(checkout, io.harnesses),
+    ...(hostAdapter ? { agentActivity: (checkout: string) => ({
+      command: hostAdapter.agentCommand, paths: harnessActivityPaths(checkout, [hostAdapter]),
+    }) } : {}),
     tierCeiling: a.tier, ...(a.capabilities ? { capabilities: a.capabilities } : {}),
     courses,
     // B-253 (R-BTN-72): the runner's own statement about its CLI — the start line's subject,

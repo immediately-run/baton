@@ -119,7 +119,7 @@ interface LegExecution {
 }
 
 type ClaimOptions = Pick<RunnerOptions, 'api' | 'home' | 'repository' | 'courses' | 'fetch' |
-  'stateFile' | 'agentCommand' | 'maskEnv' | 'signalGraceMs' | 'auditRefs'> & {
+  'stateFile' | 'agentCommand' | 'agentActivity' | 'maskEnv' | 'signalGraceMs' | 'auditRefs'> & {
   beatEvery: number;
   verbose: boolean;
   now: () => number;
@@ -1138,6 +1138,8 @@ export class ClaimRun {
   private async runLeg(course: CourseLoad, leg: string, ctx: Record<string, unknown>, scratch: string): Promise<LegOutcome> {
     const script = course.scripts.get(leg);
     if (script == null) return { kind: 'missing' };
+    const agentActivity = this.o.agentActivity?.(this.checkout);
+    const runCtx = agentActivity ? { ...ctx, agent_activity: agentActivity } : ctx;
     const tag = randomBytes(4).toString('hex');
     // R-BTN-107 (B-184): the session key — its run id's first session, or a tag when the advance
     // named none.
@@ -1247,7 +1249,7 @@ export class ClaimRun {
       return { kind: 'lease-lost' };
     }
     if (this.o.verbose) this.o.log(`baton: ${leg} runs: node ${basename(LEG_PROCESS)} run ${basename(script)} (session ${sessionId}, executor ${this.executor.source})`);
-    const running = this.wrapperCall(handle, 'run', script, [ctx], undefined, () => sink);
+    const running = this.wrapperCall(handle, 'run', script, [runCtx], undefined, () => sink);
     return await this.awaitLeg(leg, handle, channel, running, sink);
   }
 

@@ -37,6 +37,9 @@ export interface RunnerOptions {
   harness: string;
   /** Host adapters' activity paths; defaults to the built-in adapters. */
   activityPaths?: (checkout: string) => string[];
+  /** S-BTN-41: when the selected adapter isn't bundled in stubs, pass its resolved paths
+   * with the command they belong to, for the claim's actual checkout. */
+  agentActivity?: (checkout: string) => { command: string; paths: string[] };
   session: string;
   /** B-86: what the heartbeat declares — `--capabilities`, which narrows. Absent, the runner asks
    *  once (a beat declaring nothing) and declares the grant the answer carries. */

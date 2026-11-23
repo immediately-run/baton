@@ -59,7 +59,7 @@ export const HARNESS_ADAPTERS: readonly HarnessAdapter[] = [
   {
     name: 'opencode',
     agentCommand: `opencode run --auto --model zai-coding-plan/glm-5.3 ${quotedBriefing}`,
-    activityPaths: (checkout, { createHash, readdirSync, homedir, join, env }) => {
+    activityPaths(checkout, { createHash, readdirSync, homedir, join, env }) {
       const root = join(env.XDG_DATA_HOME || join(homedir(), '.local', 'share'), 'opencode');
       const dashed = checkout.split('/').join('-');
       const paths = [join(root, 'opencode.db'), join(root, 'opencode.db-wal'), join(root, 'opencode.db-shm'), join(root, 'project', dashed)];
@@ -90,9 +90,8 @@ export function harnessActivityPaths(checkout: string, adapters = HARNESS_ADAPTE
   return adapters.flatMap((adapter) => adapter.activityPaths(checkout, { ...activityIO, env: process.env }));
 }
 
-/** Generated stubs run outside the CLI installation. Embed the built-in path functions with
- * their dependencies supplied explicitly; they must not close over CLI module bindings. */
-export function stubActivityAdapters(): string {
-  return `new Map([${HARNESS_ADAPTERS.map(({ agentCommand, activityPaths }) =>
-    `[${JSON.stringify(basename(splitWords(agentCommand)[0]))}, ${activityPaths.toString()}]`).join(',\n')}])`;
+/** Bundled into standard stubs so built-in paths resolve in the executor's environment. */
+export function builtinAgentActivityPaths(command: string, checkout: string): string[] {
+  const adapter = HARNESS_ADAPTERS.find((entry) => basename(splitWords(entry.agentCommand)[0]) === basename(command));
+  return adapter ? harnessActivityPaths(checkout, [adapter]) : [];
 }

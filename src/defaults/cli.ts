@@ -15,7 +15,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { BatonApi, BatonRefusal, envAuth, type Auth, type Transport } from '../runner/api';
-import { HARNESS_ADAPTERS, selectHarness, stubActivityAdapters } from '../runner/harness';
+import { HARNESS_ADAPTERS, selectHarness } from '../runner/harness';
 import { syncOnce } from '../shared/batonSync.mjs';
 import { DEFAULT_URL } from '../../cli/baton.mjs';
 import { API_KEY, signingKey } from '../../cli/sign.mjs';
@@ -1306,13 +1306,12 @@ export function stubSource(b: BuiltIn, course: string, leg: string): string {
   const closeHelpers = b.reads === 'prs' ? `\nimport { ticketsBranch } from ${JSON.stringify(source('ticket-state.ts'))};` : '';
   const values = ask ? ask.values.join(' or ') : '';
   return `import { execFile, execFileSync, spawn } from 'node:child_process';
-import { createHash } from 'node:crypto';
 import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { homedir, tmpdir } from 'node:os';
-import { basename, join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { splitWords } from ${JSON.stringify(source('agent-words.ts'))};
-const activityAdapters = ${stubActivityAdapters()};
+import { builtinAgentActivityPaths } from ${JSON.stringify(source('../runner/harness.ts'))};
 // B-94: every git and gh call this stub makes — the snapshot probes, the override and
 // instructions reads, the forge verification — is bounded and non-interactive, the same bound
 // and environment the close uses, so a wedged call fails the leg within the bound instead of
@@ -1495,7 +1494,12 @@ ${pushes ? `  // B-231: run from the gate's red (pr-open, fixed), this leg must 
   // the agent's activity.
   const startedAt = Date.now();
   const wrapperLog = join(ctx.checkout, '.baton', 'logs', ctx.ticket.id + '-${leg}.log');
-  const storePaths = activityAdapters.get(basename(command))?.(ctx.checkout, { createHash, readdirSync, homedir, join, env: process.env }) ?? [];
+  // A runtime adapter can supply paths as data, but only for the command that actually won.
+  // Match the entire command, not the executable: unrelated agents can share 'node', etc.
+  const activity = ctx.agent_activity;
+  const storePaths = typeof activity?.command === 'string' && activity.command.trim() === settingsCommand.trim()
+    && Array.isArray(activity.paths) && activity.paths.every((path) => typeof path === 'string')
+    ? activity.paths : builtinAgentActivityPaths(command, ctx.checkout);
   // The agent's last output (2026-10-24; B-256): the last lines of both streams, bounded — what a
   // failed leg's error carries, so the runner's log alone can diagnose it, whether the agent
   // exited non-zero or exited 0 and the checks after it failed.
