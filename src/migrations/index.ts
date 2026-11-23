@@ -47,6 +47,7 @@ import checkConclusions from './0045_check_conclusions.sql';
 import ticketProvenance from './0046_ticket_provenance.sql';
 import legRunInputs from './0047_leg_run_inputs.sql';
 import conditions from './0048_conditions.sql';
+import coreConditions from './0075_core_conditions.sql';
 import eventLookups from './0049_event_lookups.sql';
 import alarmIndexes from './0052_alarm_indexes.sql';
 import retention from './0053_retention.sql';
@@ -212,4 +213,5 @@ export const MIGRATIONS: Migration[] = [
   { id: 66, sql: runnerViews },
   { id: 70, sql: retirePolicyPins },
   { id: 71, sql: accessSignIn },
+  { id: 75, sql: coreConditions },
 ];
