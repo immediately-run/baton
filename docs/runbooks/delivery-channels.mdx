@@ -8,10 +8,11 @@ tags: [runbook]
 Use **Needs you** as the source. For a new channel such as email or chat, run a
 delivery process outside Baton, under the repository's control:
 
-1. Poll `GET /v1/repositories/{repository}/conditions?open=1&person=1` with a
-   credential that already has read access to that repository. Follow `next_cursor`
-   until the list is complete. The read returns open conditions and queued person
-   legs; see the [API contract](../../spec/BATON_SPEC/14-api.md).
+1. Poll `GET /v1/repositories/{repository}/needs-you` with a credential that
+   already has read access to that repository. Each response includes open
+   conditions in `conditions` and queued person legs in `questions`, with no
+   pagination. See the [API contract](../../spec/BATON_SPEC/14-api.md) and
+   [S-BTN-276](../../spec/BATON_SPEC/15-verification.md#scenarios).
 2. Pick the entries the channel should deliver. Post a short summary and a link
    back to Baton, the ticket or the joinable session, as appropriate. Keep the
    channel's credentials, retry state and deduplication outside Baton. Use the
