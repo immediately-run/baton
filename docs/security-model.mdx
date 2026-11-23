@@ -133,7 +133,8 @@ Ordered by blast radius, largest first.
 
 ### 0. Baton's server, through its deploy
 
-`baton`'s `.github/workflows/baton-deploy.yml` runs `wrangler deploy` on every push to `main`,
+`baton`'s `.github/workflows/baton-deploy.yml` runs `wrangler deploy` on every push to `main`
+that changes more than ticket files (`scripts/ci-scope.mjs`),
 with `CLOUDFLARE_API_TOKEN` (Workers Scripts edit on the whole Cloudflare account) from the
 `production` environment. The worker identity pushes `baton`, which is public, so no push ruleset
 can protect it. One push, to `src/` or to the lockfile the deploy job installs, deploys the server
