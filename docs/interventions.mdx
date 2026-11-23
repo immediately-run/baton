@@ -646,3 +646,34 @@ Entry shape: **When** · **Host** · **Tickets** · **Why it was needed** · **R
   The board should show a review round's verdict, not only the station, so "reviewed" is never
   read as "approved"; and the queue could prefer finishing parked tickets over starting new ones.
   *No ticket yet* for either.
+
+## 2026-11-22 13:50–17:25 — a flaky masking test was a real leak of secrets into runner logs; fixed, rolled out, rotation filed
+
+- **Host:** bering (both runners)
+- **Tickets:** B-239, B-244, B-249 (their `run-tests` and implement legs hit it); the fix is #354;
+  the rotation is FLDH-64 (fieldhouse #52)
+- **Why it was needed:** from 13:50 UTC, `run-tests` legs on unrelated PRs (B-244, B-249) went red
+  on `test/unit/runner-main.test.ts`'s class-7 masking test, a different secret unmasked each time.
+  B-239's implement agent did its work, hit the same failure on untouched `main`, and did not push.
+  The leg instructions forbid pushing with failing checks, and the work was lost with its sandbox.
+  An agent found the cause: `createLegMasker` (`src/runner/mask.ts`) cut its held tail inside a
+  secret whenever another masked value began with that secret's last 1–3 characters, so all but
+  those characters went to the runner log and leg log in clear. The test flickered because it
+  copies the host's environment. So **bering's runner logs and leg archive may hold partial
+  credentials**. The `fix` legs of B-244 and B-249 each patched `mask.ts` inside their own PRs.
+- **Resolution:**
+  - #354 was fixed and twice adversarially reviewed (with fuzzing: 0 leaks for one-line secrets in
+    about 1.2M cases; secrets with newlines remain a follow-up). The owner merged it (`44080032`)
+    at 16:58 UTC.
+  - At the owner's word the runners were drained (SIGTERM, 17:00), and `baton-cli` moved to
+    `44080032`. Fieldhouse moved to `09f1015` (#51, view-only before the agent starts). The
+    executor was re-pinned to `df2b7cc7…`, checked against a fresh copy (`runner.env.bak-20261122`
+    kept). The live leg-page check passed 24/24, and the runners restarted at 17:25 UTC.
+  - B-244's and B-249's PRs (#352, #353) got a note to drop their `mask.ts` changes.
+  - The owner asked for the credential rotation as a ticket (FLDH-64, human operator only) and a
+    reminder on 2026-11-23. The supervisor read no log for secrets and touched no credential.
+- **Autonomous handling:** a masking test that copies the host environment hid a real leak behind
+  flakiness. The masker now has fuzzed tests (follow-ups in a ticket of their own).
+  - Implement and fix instructions should push past a failure that also fails on `main`, and
+    never fix an unrelated failure inside a ticket's PR (ticket filed).
+  - The executor should salvage unpushed commits (ticket filed).
