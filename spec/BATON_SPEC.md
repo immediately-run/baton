@@ -89,9 +89,9 @@ is stale. Never edit it by hand.
 | | 9.8 Resuming and replaying | R-BTN-24, R-BTN-25, R-BTN-84 |
 | | 9.9 Activities and transcripts | R-BTN-20 |
 | [`10-checks.md`](BATON_SPEC/10-checks.md) | **10. Checks** | R-BTN-114, R-BTN-153, R-BTN-115 |
-| [`11-people.md`](BATON_SPEC/11-people.md) | **11. People: administrators, owners and their surfaces** | — |
+| [`11-people.md`](BATON_SPEC/11-people.md) | **11. People: administrators, owners, members and their surfaces** | — |
 | | 11.1 Keys | R-BTN-13, R-BTN-159 |
-| | 11.2 Administrators and owners | R-BTN-57, R-BTN-58 |
+| | 11.2 Administrators, owners and members | R-BTN-57, R-BTN-58, R-BTN-204 |
 | | 11.3 The actions, the CLI and MCP | R-BTN-129, R-BTN-127, R-BTN-197, R-BTN-130 |
 | | 11.4 The dashboard | R-BTN-155 |
 | [`12-security.md`](BATON_SPEC/12-security.md) | **12. Security** | — |
@@ -305,6 +305,7 @@ is stale. Never edit it by hand.
 | R-BTN-201 | a launcher starts sessions; Baton reserves nothing for them | [`08-runners.md`](BATON_SPEC/08-runners.md) |
 | R-BTN-202 | a runner's local queue; local orders while Baton is unreachable | [`08-runners.md`](BATON_SPEC/08-runners.md) |
 | R-BTN-203 | work done outside Baton | [`04-tickets-syncs-board.md`](BATON_SPEC/04-tickets-syncs-board.md) |
+| R-BTN-204 | repository members | [`11-people.md`](BATON_SPEC/11-people.md) |
 
 ## Scenarios
 
@@ -492,6 +493,9 @@ is stale. Never edit it by hand.
 | S-BTN-308 | sign-in through Cloudflare Access | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-309 | work done outside Baton | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-312 | a board post missing a queued leg | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-313 | repository members | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-314 | one session per tab, its role chosen after sign-in | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-315 | a session is as capable as its key | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 
 ## Gates
 
@@ -617,3 +621,4 @@ is stale. Never edit it by hand.
 | G-BTN-168 | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | G-BTN-169 | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | G-BTN-172 | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-174 | [`15-verification.md`](BATON_SPEC/15-verification.md) |

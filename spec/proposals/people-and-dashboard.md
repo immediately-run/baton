@@ -208,9 +208,11 @@ BATON_SPEC's sections are named with a rule or as `§11.3`, `§12.2`.
     | any other destructive action (§12.2), cancel among them | either | its dialog, which sends `confirm: true` |
     | everything else a session may call: a hold, a resync, a status request, resolving a condition (`POST /v1/ui/conditions/{condition}/resolve`, R-BTN-163), a person leg's answer (R-BTN-116), an OAuth request, its status, a denial or an approval naming no destructive action, `ui.logout` | either | nothing |
 
-    An owner's session acts only on its repositories, and an administrator's controls are not
-    drawn for it. The credential, governance and tenant screens are read-only, each naming the
-    CLI command that changes what it shows, and the tenant's export is the CLI's alone.
+    An owner's or member's session acts only on its repositories, and an administrator's
+    controls are not drawn for it. Every screen draws the controls its session's role may call
+    (R-BTN-186): the credential, governance and tenant screens included, each also naming the
+    CLI command that does the same. A member's session holds no action in this table but its
+    answer (R-BTN-204).
 
 ## 4. The screens
 

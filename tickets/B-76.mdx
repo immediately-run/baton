@@ -1,16 +1,16 @@
 ---
-title: "B-76 — Owners sign in to the dashboard"
+title: "B-76 — Owners and members sign in to the dashboard: every person role, the key chosen after authenticating, one session per tab"
 id: B-76
 project: baton
 status: available
-updated: 2026-11-03
+updated: 2026-11-23
 repos:
   - baton
 tags:
   - roadmap-item
 order: 1125
 tier: judgement
-description: "Build BATON_SPEC R-BTN-155's owner sessions: sign-in codes per role (`POST /v1/login {role}`, `baton owner open`, `POST /v1/owner/login-links`), a session row with its role, minting key and repositories, the `owner-session` principal of R-BTN-129 scoped to the repositories the key still owns and never an administrator, confirmation by the minting key (`POST /v1/owner/confirm`), and `owner.sessions.revoke`; `admin.key.revoke` removing an owner key from every repository (its sessions and MCP keys ending) and refusing an administrator's key `invalid-params` (R-BTN-57), and `baton admin keys set` refusing a line whose key holds another role, a host loading one anyway treating it as no administrator and raising `baton.admin-key-conflict` (§12.1). S-BTN-32, S-BTN-124, S-BTN-126, G-BTN-57, G-BTN-144. Requires: none."
+description: "Build BATON_SPEC R-BTN-155's sessions for every person role (R-BTN-186: the dashboard carries each role the CLI does): an owner's and a member's session as an administrator's is, each as capable as its key; Cloudflare Access lines binding an email to several keys of any person role, with the key chosen after authentication (`choose`, then `{access: true, key}`); one session per browser tab, bound to the one cookie and named by the tab's `Baton-Session` header, `GET /v1/login` listing the browser's sessions for a new tab; S-BTN-314, S-BTN-315, G-BTN-174. Also the owner sessions as first filed: sign-in codes per role (`POST /v1/login {role}`, `baton owner open`, `POST /v1/owner/login-links`), a session row with its role, minting key and repositories, the `owner-session` principal of R-BTN-129 scoped to the repositories the key still owns and never an administrator, confirmation by the minting key (`POST /v1/owner/confirm`), and `owner.sessions.revoke`; `admin.key.revoke` removing an owner key from every repository (its sessions and MCP keys ending) and refusing an administrator's key `invalid-params` (R-BTN-57), and `baton admin keys set` refusing a line whose key holds another role, a host loading one anyway treating it as no administrator and raising `baton.admin-key-conflict` (§12.1). S-BTN-32, S-BTN-124, S-BTN-126, G-BTN-57, G-BTN-144. Requires: none."
 topics:
   - baton
 owns: {}
@@ -69,6 +69,18 @@ None: a checkout, a terminal and a browser.
    admin-key reader in `src/core/auth.ts`) treats that key as no administrator and raises
    `baton.admin-key-conflict` (R-BTN-163) for the administrators.
 
+8. **Every person role, the key chosen after authenticating, one session per tab** (R-BTN-155
+   as amended 2026-11-23). `ACCESS_IDENTITIES` binds an email to several keys, one line per
+   pair; `{access: true}` opens the one key an email opens, or answers `choose` and sets
+   nothing; `{access: true, key}` opens the chosen key's session. `dashboard_sessions` is
+   re-keyed by a public `session_id` with `browser_hash`, `role` and `key_fingerprint` (one
+   migration, with item 2's columns); `POST /v1/login` answers `session_id`, the shell keeps it in
+   `sessionStorage` and sends `Baton-Session` on every request, and the front authorizes a
+   session request only when the header names a live session bound to the cookie. A tab with no
+   session id lists `GET /v1/login` and offers each session and a new sign-in. `ui.logout` ends
+   the tab's session only. Members' sessions land with B-320; build the role as data, not an
+   owner special case.
+
 ### Do not
 
 - Give an owner session any administrator action, or another repository's rows.
@@ -84,6 +96,10 @@ None: a checkout, a terminal and a browser.
   confirmed action needs its code.
 - Unit: `baton admin keys set` refuses a line whose key is an owner key; a host started with
   such a line refuses that key's administrator requests and raises `baton.admin-key-conflict`.
+
+- S-BTN-314 (the role choice and per-tab sessions) and S-BTN-315 for the owner role (every owner
+  action through a session, a person leg's answer with B-195's route included); G-BTN-174's
+  check over §14's rows.
 
 ### Exit criteria
 
@@ -108,3 +124,11 @@ _(2026-11-03: R-BTN-155's sign-in binds in two steps (B-172's spec half); item 1
 _(2026-11-03: R-BTN-47's *Retirement* (B-173's spec half) reaches the store this ticket builds — owner sessions: retirement removes the repository from every owner session's reach, ending a session left with none, and a key whose only repositories are retired owns none for sign-in. Whichever of this ticket and B-173 lands second builds that step and adds its S-BTN-198 case.)_
 
 _(2026-11-03: B-172 superseded into item 1: both sign-in routes build R-BTN-155's two steps here, since the administrator's code flow does not exist yet either (today's admin route mints a one-time link).)_
+
+_(2026-11-23: widened by the owner's ruling that the dashboard is as capable as the CLI for every
+person role (R-BTN-186) — "the dashboard should also be available for repo owners and regular users
+as well" and "one session per browser tab / window … If you have several roles then you should
+need to pick one during the sign-in process (post authentication)". Item 8 and its tests added;
+R-BTN-155 rewritten in the same spec PR. Members are B-320's.)_
+
+_(2026-11-23: rules re-read: R-BTN-155, R-BTN-186, R-BTN-129)_

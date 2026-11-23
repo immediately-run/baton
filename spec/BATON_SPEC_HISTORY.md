@@ -18,6 +18,35 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
 
 ## Changelog
 
+- **2026-11-23 — Every person role on the dashboard: members, sessions per role and per tab
+  (R-BTN-155, R-BTN-204, R-BTN-186).**
+  Rules changed: R-BTN-155 (rewritten), R-BTN-186, R-BTN-181, R-BTN-116, R-BTN-129, R-BTN-127,
+  R-BTN-57, R-BTN-159, R-BTN-16, the policy table's `attestations` default, §11's preamble,
+  §12.1, §13.2, §14; S-BTN-308, G-BTN-57. Added: R-BTN-204, S-BTN-313, S-BTN-314, S-BTN-315,
+  G-BTN-174; four open questions; two Decisions entries changed, one replaced, one added. The
+  owner, 2026-11-23, on finding that the dashboard could not answer a person leg ("This page cannot
+  answer it — an administrator's session answers no person leg"): "this is fundamentally
+  incompatible with Baton's promise that MCP, CLI and the dashboard UI are all equivalent baton
+  interfaces each self-sufficient and capable of accomplishing baton-related tasks", and "the
+  dashboard should also be available for repo owners and regular users as well (naturally only
+  allowing the actions these user types may perform)". The owner chose the regular user to be a
+  repository member — a key an owner adds, which reads the repository and answers the person legs
+  whose `asks` labels it holds — over a read-only viewer, forge read access and a runner
+  operator; and chose "one session per browser tab / window — you should be able to sign in as a
+  different role in a different tab. If you have several roles then you should need to pick one
+  during the sign-in process (post authentication)", over one session holding every role. The
+  promise was already R-BTN-186's first sentence; what broke it was that the dashboard carried
+  only an administrator's key, so R-BTN-186 now says a surface carries each person's role and a
+  role it cannot carry is a defect. One cookie stays (R-BTN-16): the browser's sessions are bound
+  to it and each tab names its own in a header, which a cross-origin page cannot send. Replaced:
+  the Decisions entry "a session's controls narrower than the CLI's: the tenant screens
+  read-only, `ticket.route` and `ticket.adopt` the CLI's", which R-BTN-186 contradicts. Left open
+  for the owner: human-only acts from a session and over MCP, confirmations without a terminal,
+  members' Access lines, and MCP for administrators and members. Found and left to tickets: seven
+  session routes have no key route and no CLI command — force-reap, clearing a fence, confirming
+  or releasing a completion, confirming an adoption, resolving a scope finding, accepting a held
+  post and cutover — the same defect the other way (B-321).
+
 - **2026-11-23 — Tiers retired (§6.6 gate 5, R-BTN-66).**
   Rules changed: R-BTN-5, R-BTN-9, R-BTN-34, R-BTN-35, R-BTN-50, R-BTN-58, R-BTN-66, R-BTN-74,
   R-BTN-114, R-BTN-117, R-BTN-127, R-BTN-159, R-BTN-179, R-BTN-196, the board post (§4.4), §6.6,

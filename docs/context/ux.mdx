@@ -88,10 +88,17 @@ Each gap needs its own ticket; these rules alone do not close them.
   `attempts-exhausted` holds with a pasted console script.
 - **Throughput (question 4):** no read or screen counts finished work over time.
 - **Explaining terms (rule 3):** capabilities, stations and gate codes are drawn as bare codes.
-- **Signing in (rule 1):** only an administrator's one-time link exists, minted from the CLI
-  (R-BTN-57). The owner's sign-in (B-76) is not built, and an identity Cloudflare Access has
-  verified does not open a session. Accepting that identity is a security-model decision for
-  the owner: a spec rule tying the Access identity to an owner key.
+- **Signing in (rule 1):** an administrator signs in through Cloudflare Access or a one-time
+  link (R-BTN-155). Owners' and members' sessions, the key chosen after authenticating and one
+  session per tab are specified but not built (B-76, B-320).
+- **Answering a person leg (question 2, rule 1):** the Conditions screen draws each option with
+  its `baton decision answer` line and "This page cannot answer it": no session today is an
+  owner's or a member's, and no session can write the answer (B-76, B-195, B-219, B-320).
+  Where the policy counts only a human-only key's answer, no session can answer even then — an
+  open question (BATON_SPEC Open questions).
+- **Session-only acts (rule 1, the other way):** force-reap, clearing a fence, confirming or
+  releasing a completion, confirming an adoption, resolving a scope finding, accepting a held
+  post and cutover have a dashboard route and no CLI command (R-BTN-186, B-321).
 - **A ticket's history (question 5):** a ticket's page draws its history and attempts, with the
   recorded end reason. But no screen jumps to a ticket by id, and a failed leg's agent's last
   message is only in the host's leg archive.

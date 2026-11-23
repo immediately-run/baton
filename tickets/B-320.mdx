@@ -1,0 +1,105 @@
+---
+title: "B-320 — Repository members: keys an owner adds that read one repository and answer the person legs whose asks labels they hold, on the CLI and the dashboard alike"
+id: B-320
+project: baton
+status: available
+updated: 2026-11-23
+repos:
+  - baton
+tags:
+  - roadmap-item
+tier: judgement
+description: "Build R-BTN-204: the `member` role (§12.1's one role per key), `repository_members` with each member's `answers` labels (one migration), `owner member add|answers|remove` and `POST /v1/owner/{repository}/members` as `approvers.members` actions, the repository reads open to a member, `POST …/attestations` taking a member's `std:decision@1` for a leg whose `asks` label it holds (writer `member`, R-BTN-181; the `cooperative` default admitting it), `admin key revoke` removing a member key everywhere, and members' dashboard sessions on B-76's per-role sessions with B-195's answer path. S-BTN-313, S-BTN-315 for the member role. Requires: B-76, B-195."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-76
+  - B-195
+---
+
+**Brief:** the owner, 2026-11-23: "the dashboard should also be available for repo owners and
+regular users as well (naturally only allowing the actions these user types may perform)", and,
+asked who a regular user is, chose a repository member: "a person an owner adds to a repository
+(bound by Access email or key). Reads everything in that repository and answers person legs whose
+`asks:` label is assigned to them; cannot grant, hold, resolve or change policy."
+
+**Spec:** [BATON_SPEC §11.2](../spec/BATON_SPEC/11-people.md#sec-11-2) ([R-BTN-204](../spec/BATON_SPEC/11-people.md#sec-11-2)),
+[§11.4](../spec/BATON_SPEC/11-people.md#sec-11-4) ([R-BTN-155](../spec/BATON_SPEC/11-people.md#sec-11-4): a member's session),
+[§12.1](../spec/BATON_SPEC/12-security.md#sec-12-1) (the principal row; one role per key),
+[§12.8](../spec/BATON_SPEC/12-security.md#sec-12-8) ([R-BTN-181](../spec/BATON_SPEC/12-security.md#sec-12-8): writer `member`;
+[R-BTN-188](../spec/BATON_SPEC/12-security.md#sec-12-8): `approvers.members` and the `attestations` default;
+[R-BTN-186](../spec/BATON_SPEC/12-security.md#sec-12-8)),
+[§6.4](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-4) ([R-BTN-116](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-4)),
+[§13](../spec/BATON_SPEC/13-data-model.md#sec-13) (`repository_members`), [§14](../spec/BATON_SPEC/14-api.md#sec-14).
+
+**Depends on:** B-76 (sessions carry any person role; build the member's on it), B-195 (a
+session's path onto `POST …/attestations`).
+
+### What to build
+
+Everything below is R-BTN-204 and the rules it cites; where this list and a rule differ, the
+rule wins.
+
+1. **The role and the table.** `repository_members` (one append-only migration); `member` in the
+   one-role-per-key check across `credentials`, `repository_owners`, `repository_members`,
+   `sync_keys` and the administrator set (§12.1), refused `conflict` without naming the role.
+2. **Owner routes and commands.** `POST /v1/owner/{repository}/members` — add `{public_key,
+   answers[]}`, change `{fingerprint, answers[]}`, remove `{fingerprint, remove: true, confirm:
+   true}` — each an `approvers.members` action (R-BTN-188); `answers` labels validated against
+   R-BTN-116's `asks` pattern. `baton owner member add|answers|remove` (R-BTN-127).
+   `GET /v1/owner/{repository}/grants` lists `members`.
+3. **Reads.** A member key is a *reader* of its repositories (§14): every repository read, and
+   `GET /v1/repositories` listing its own. Nothing else: every owner, administrator and runner
+   route is `forbidden` to it.
+4. **The answer.** `POST …/attestations` takes a member key's or member's session's
+   `std:decision@1` for a queued person leg whose `asks` label is in its `answers`, as writer
+   `member`; another label, or any other type, is `forbidden`. The `cooperative` and default
+   policies admit `member` for `std:decision@1`; `protected` admits `human` alone (R-BTN-188's
+   table). The conditions read's `answerable` (`src/core/reads/conditions.ts`, `answerWord`)
+   says yes for such a member and names the label otherwise.
+5. **Revocation.** `admin key revoke` of a member key removes it from every repository in the
+   same transaction and ends its sessions (R-BTN-57).
+6. **The dashboard.** A member's session (B-76) is drawn the repository screens with no controls
+   but the answer on the person legs it may answer (S-BTN-307's rule: only the caller's actions).
+
+### Trust
+
+- **A member's key and `answers`** — written only by an owner's `approvers.members` action
+  (R-BTN-188), validated in `src/core/validate.ts` before any SQL: the public key by R-BTN-13 or
+  R-BTN-159, each label by R-BTN-116's `asks` pattern.
+- **A member's answer** — authenticated by the request (its signature, bearer or session,
+  R-BTN-155), admitted only where the policy's `attestations` entry names `member` and its
+  `answers` hold the leg's label; the `std:decision@1` value validated as any answer.
+
+### Invariants
+
+- **One role per key** (§12.1): a member key holds no other role; the check runs in the
+  transaction that adds it.
+- **R-BTN-186**: a member does the same on the CLI and the dashboard, and nothing more on either.
+- **R-BTN-181, R-BTN-188**: whose answer counts is the policy's; a member writes only as `member`.
+- **Both hosts** (R-BTN-55); migrations append-only.
+
+### Do not
+
+- Give a member any action R-BTN-204 does not list, on any surface.
+- Let a member's answer count where the policy does not admit `member`.
+
+### Tests
+
+- S-BTN-313 on both hosts; S-BTN-315 for the member role; S-BTN-307 extended with a member's
+  session; G-BTN-57's member clause.
+
+### Exit criteria
+
+- [ ] S-BTN-313 passes on both hosts, and S-BTN-315 for the member role
+- [ ] `npm test`, `npm run typecheck`, `npm run check:spec`, `npm run check:wiki` and
+  `npm run check:tickets` green
+
+## Status
+
+_filed 2026-11-23._
+
+_(Filed with the spec PR that adds R-BTN-204. Number taken by the offline scan: the
+filing session held no Baton key.)_

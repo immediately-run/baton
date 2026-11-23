@@ -31,14 +31,15 @@ stated once, in the rule it cites.
 | Instrument (probe) | `/v1/probe/*` | SSH-signed | post readings of any registered instance (R-BTN-101) |
 | Registration token (proposed, R-BTN-117) | `POST /v1/register` | `Authorization: Baton-Token <token>` | register one credential within its scope (R-BTN-117, R-BTN-157) |
 | Administrator | `/v1/admin/*`; any claim's leg runs | a `BATON_ADMIN_KEYS` line, SSH-signed or API key | R-BTN-57 |
-| Dashboard session | `/v1/ui/*`, and the `GET`s §14 lists a session on | the session cookie (R-BTN-155) | as `session` (R-BTN-129), an administrator's session: every action §14 lists `session` on. Outside `/v1/ui/*` a session reads only: the request is the session's when it carries the cookie and no key (§14). Owners' sessions and confirmation codes are proposed ([people and dashboard, §3](../proposals/people-and-dashboard.md#3-sign-in-sessions-and-confirmed-actions)) |
+| Dashboard session | `/v1/ui/*`, `POST …/attestations`, and the `GET`s §14 lists a session on | the session cookie with the tab's `Baton-Session` (R-BTN-155) | as `session` carrying its key's role (R-BTN-129): an administrator's, an owner's or a member's, each every action §14 lists a session of its role on, on its key's scope. Outside `/v1/ui/*` a session writes only a person's answer and attestations as its role's writer (R-BTN-181), and otherwise reads: the request is the session's when it carries the cookie and no key (§14). Owners' and members' sessions are not built (B-76, B-320); confirmation codes are proposed ([people and dashboard, §3](../proposals/people-and-dashboard.md#3-sign-in-sessions-and-confirmed-actions)) |
+| Repository member | the repository's reads; `POST …/attestations` as writer `member` | a member key, SSH-signed or API key | R-BTN-204 |
 | Repository owner | `/v1/owner/{repository}/*`; the repository's reads and leg runs | an owner key, SSH-signed or API key | R-BTN-58 |
 | Human-only key | `POST /v1/human-keys`; `POST`, `DELETE …/attestations` as writer `human`; as an owner, or as a break-glass line on every repository it satisfies (R-BTN-188), the owner's routes | an SSH key registered `human_only` (R-BTN-185), on an owner key or a key of no other role | open human gates (R-BTN-185), `human-key.add` and `human-key.revoke` among them; as an owner, R-BTN-58; never through a session, which is `owner` |
 | MCP key (a delegated key; proposed, [people and dashboard, §2](../proposals/people-and-dashboard.md#2-mcp)) | `POST /v1/mcp` only | bearer `bmcp_…` | as `owner` on one repository, narrowed to the ids listed at minting: R-BTN-186, R-BTN-130 |
 | Public | `POST /v1/login`, the dashboard shell's three assets — its page, its one script, its one stylesheet | none, or on `POST /v1/login` a verified Cloudflare Access assertion (R-BTN-155) | start a sign-in |
 
 The repository reads (`GET /v1/repositories/{repository}/…`) are open to any key granted on the
-repository, its owners and administrators, except where a route's rule narrows them.
+repository, its owners, its members and administrators, except where a route's rule narrows them.
 
 - **R-BTN-179 (the state is readable with a key).** What the dashboard's state answers is
   answered to a signed key too, by the same queries — one request, one JSON answer:
@@ -57,19 +58,20 @@ repository, its owners and administrators, except where a route's rule narrows t
   and is null for a key no grant binds there, an owner's or an administrator's included.
 
 - **One role per key.** In a tenant every key holds exactly one role: administrator, owner,
-  runner, check-runner, instrument, sync or mirror; `human_only` is a mark, not a role, carried
+  member, runner, check-runner, instrument, sync or mirror; `human_only` is a mark, not a role, carried
   by an owner key or by a key of no other role (R-BTN-185). Registering a key that holds
   another role is refused `conflict`, whatever its kind (SSH or API); the refusal does not name
   the role. A machine key whose every grant is pending and was never accepted holds no role yet,
   so a grant naming any public key reserves nothing; its acceptance is checked as a
   registration. `baton admin keys set` refuses a line whose key holds another role, and a host
-  that loads one anyway treats it as no administrator and raises `baton.admin-key-conflict`. Administrator and owner
-  keys are never machine keys. The rule holds within a tenant; another tenant may hold the same
+  that loads one anyway treats it as no administrator and raises `baton.admin-key-conflict`. Administrator, owner and
+  member keys are never machine keys. The rule holds within a tenant; another tenant may hold the same
   public key (R-BTN-137).
 - **Bearer secrets.** API keys (`bak_`) are stored only as hashes, are valid in one tenant, and
   are compared over their full digests in constant time; so is every forge and webhook MAC. A
-  one-time sign-in link's token and a dashboard session's value (64 hexadecimal characters
-  each, no prefix; R-BTN-155) are stored only as hashes and found by their hash. The prefixed
+  one-time sign-in link's token and the dashboard cookie's value (64 hexadecimal characters
+  each, no prefix; R-BTN-155) are stored only as hashes and found by their hash; a session's
+  `session_id` is no secret, and authenticates nothing without the cookie. The prefixed
   secrets of designs not built — registration tokens (`brt_`), MCP keys (`bmcp_`), pending
   sign-ins (`bps_`) and prefixed sessions (`bds_`) — are proposed
   ([people and dashboard](../proposals/people-and-dashboard.md),
@@ -163,8 +165,8 @@ Every value below is validated on write; a value over its cap is refused `invali
 
 - **R-BTN-16 (same-site with the product).** A Baton may share its registrable domain with
   origins that run untrusted code. So, on every host:
-  - **Cookies.** Baton sets one cookie and reads no other: the dashboard session
-    `__Host-baton_session` (12 hours, R-BTN-155), `__Host-` prefixed, host-only, `Secure`,
+  - **Cookies.** Baton sets one cookie and reads no other: the dashboard's
+    `__Host-baton_session` (12 hours, R-BTN-155), to which a browser's sessions are bound, `__Host-` prefixed, host-only, `Secure`,
     `HttpOnly` and `SameSite=Strict`, so no other origin on the domain can set or shadow it. A
     second cookie, for a pending sign-in by code, is proposed
     ([people and dashboard, §3](../proposals/people-and-dashboard.md#3-sign-in-sessions-and-confirmed-actions)).
@@ -180,8 +182,11 @@ Every value below is validated on write; a value over its cap is refused `invali
   - **Every session request.** Any request a dashboard session authorizes, reads included,
     carries an `Origin` equal to the origin when it carries one, and `Sec-Fetch-Site:
     same-origin` when it carries that header, else `forbidden`.
-  - **Sessions.** `/v1/ui/*` requires a dashboard session of an administrator key (R-BTN-155). Outside `/v1/ui/*` a session authenticates only the `GET`s §14 lists it on —
-    the reads it shares with the keys — and no write.
+  - **Sessions.** `/v1/ui/*` requires a dashboard session, the cookie with the tab's
+    `Baton-Session` header (R-BTN-155), of a role §14 lists on the route. Baton answers no CORS
+    preflight, so no other origin sends that header. Outside `/v1/ui/*` a session authenticates
+    only the `GET`s §14 lists it on — the reads it shares with the keys — and `POST
+    …/attestations` as its role's writer (R-BTN-181).
     Cloudflare Access may stand in front of the dashboard; Baton never requires it and never reads
     its cookie. Baton verifies the assertion Access forwards, and that assertion alone
     authenticates `/v1/ui/*` only while no administrator key is configured (R-BTN-155). Where
@@ -346,7 +351,7 @@ trusted runners or of the protection checker; a compromised forge; and a comprom
     | `outbox.source` — `{deliverers}`: which grant roles may deliver the source kinds, from `runner` alone | `{deliverers: [runner]}` | `{deliverers: []}` | | Baton | R-BTN-171 |
     | `inputs.board` — who may post the board, from `sync-key`, `ci-identity`, `machine` | all three | `[sync-key, ci-identity]` | | Baton | R-BTN-93, R-BTN-102, R-BTN-187 |
     | `repos.unlisted` — whether a home that lists no `code_repos` reaches its tickets' `repos:` entries by name: `by-name` or `none`; a stored version naming none reads as `by-name` | `by-name` | `none` | | Baton, the sync | R-BTN-140 |
-    | `attestations` — `{<type>: writers}`: whose attestations about work count; an absent type admits no writer, except `std:evidence@1`, which a policy stored before it existed admits from `sync` (R-BTN-203) | each `std:` type's standard writer (R-BTN-181), `runner` for the holder's `std:arrival@1` and a deliverer's `std:effect@1`, `sync` for the `std:git.*` types, `std:arrival@1`, `std:evidence@1` and `std:decision@1` (R-BTN-191); `std:checks@1` absent until the owner names a check-runner's key (R-BTN-114) | as `cooperative`, except that `std:arrival@1` admits the fact reader's `service:` key once the owner names it (R-BTN-192) and never `sync`, and `std:decision@1` admits `human` alone | | Baton, trusted runners | R-BTN-181 |
+    | `attestations` — `{<type>: writers}`: whose attestations about work count; an absent type admits no writer, except `std:evidence@1`, which a policy stored before it existed admits from `sync` (R-BTN-203) | each `std:` type's standard writer (R-BTN-181), `runner` for the holder's `std:arrival@1` and a deliverer's `std:effect@1`, `sync` for the `std:git.*` types, `std:arrival@1`, `std:evidence@1` and `std:decision@1` (R-BTN-191), `member` for `std:decision@1` (R-BTN-204); `std:checks@1` absent until the owner names a check-runner's key (R-BTN-114) | as `cooperative`, except that `std:arrival@1` admits the fact reader's `service:` key once the owner names it (R-BTN-192) and never `sync`, and `std:decision@1` admits `human` alone | | Baton, trusted runners | R-BTN-181 |
     | `readings` — `{<resource> \| "*": {writers}}`: whose readings count for this repository; `*` covers every resource not listed; an absent entry admits no writer | `{"*": {writers: every writer R-BTN-76 lets report}}` | as `cooperative` | | Baton | R-BTN-76, R-BTN-181 |
     | `floors` — the guarantees no change to this policy may break | no value | no value | no value | Baton | R-BTN-189 |
 
@@ -496,7 +501,8 @@ trusted runners or of the protection checker; a compromised forge; and a comprom
   attestation about a resource instance is a **reading** (R-BTN-76).
   - **Writers.** Baton records an attestation's writer from the credential that posted it:
     - `human`: a `human_only` key (R-BTN-185);
-    - `owner`: any owner key or owner session, an owner's agent included;
+    - `owner`: any owner key or owner's session, an owner's agent included;
+    - `member`: a member key or member's session (R-BTN-204);
     - `baton`: Baton itself, from events it verified;
     - `instrument`: an instrument key; `runner`: a runner credential, a trusted runner's included;
       `admin`: an administrator;
@@ -509,10 +515,12 @@ trusted runners or of the protection checker; a compromised forge; and a comprom
     carries no signature of its own. It counts only while its writer's key, and for a `baton`
     attestation the attested runner key, is unrevoked.
   - **A person's answer.** `POST /v1/repositories/{repository}/attestations` (`baton decision
-    answer`, the dashboard; R-BTN-127) takes a `std:decision@1` (R-BTN-116) from an owner key of
-    the repository or a human-only key; where the policy admits only `human` for the type, an
-    owner key's is refused `forbidden`. An administrator's key and a delegated key write none
-    (R-BTN-57, R-BTN-130).
+    answer`, the dashboard; R-BTN-127) takes a `std:decision@1` (R-BTN-116) from an owner of the
+    repository, a member whose `answers` hold the leg's `asks` label (R-BTN-204) or a human-only
+    key, each by its key or, for an owner or a member, its session (R-BTN-155); where the policy
+    does not admit the writer for the type — under `human` alone, every owner's and member's — it
+    is refused `forbidden`, as is a member's answer to a label it does not hold. An
+    administrator's key or session and a delegated key write none (R-BTN-57, R-BTN-130).
   - **Whose attestations count is the policy's to say** (R-BTN-188), never the course's. Baton
     admits, for a type `merge` or a trusted leg acts on, only `human`, `baton` and
     `service:<fingerprint>` keys the owner names — never an owner key or an ordinary runner
@@ -580,7 +588,10 @@ trusted runners or of the protection checker; a compromised forge; and a comprom
     list.
 - **R-BTN-186 (authority by credential, not channel).** An action is available on every surface (the
   CLI, the API, the dashboard, MCP) to the principals its `callers` list (R-BTN-129), and to no other;
-  a surface lacks an action only for a mechanical reason the registry names.
+  a surface lacks an action only for a mechanical reason the registry names. A surface carries
+  each person's role: the CLI by the person's key, the dashboard by a session of that key, for an
+  administrator, an owner and a member alike (R-BTN-155). A role a surface cannot carry is no
+  mechanical reason: it is a defect in that surface.
   - **A delegated key** (an MCP key, R-BTN-130) acts as an owner of its repository, never as
     `human`, for the actions listed at its minting, and may **tighten, and undo its own
     tightenings**: add a hold or a bar, stop a leg, cancel a ticket; and lift a hold it set or a

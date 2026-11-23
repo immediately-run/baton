@@ -1,0 +1,67 @@
+---
+title: "B-321 — Every session-only act gets its key route and CLI command: force-reap, clearing a fence, confirming or releasing a completion, confirming an adoption, resolving a scope finding, accepting a held post, cutover"
+id: B-321
+project: baton
+status: available
+updated: 2026-11-23
+repos:
+  - baton
+tags:
+  - roadmap-item
+tier: judgement
+description: "R-BTN-186: an action is available on every surface to the principals its callers list. Seven acts exist only as dashboard routes (`/v1/ui/claims/{id}/reap`, `…/fence-clear`, `…/confirm`, `…/release`, `/v1/ui/adoptions/{claim}/confirm`, `/v1/ui/scope/{id}/resolve`, `/v1/ui/board/accept`, `/v1/ui/cutover`) with no key route and no `baton` command, so an administrator without a browser cannot take them. Give each a key route under `/v1/admin/*` (or `/v1/owner/{repository}/*` where its rule lets an owner act) calling the same core function, and a command in R-BTN-127's tree; amend §14 and R-BTN-127 in the same PR. G-BTN-174 and S-BTN-315 then hold both ways."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the owner, 2026-11-23: MCP, the CLI and the dashboard are "equivalent baton interfaces
+each self-sufficient and capable of accomplishing baton-related tasks". The spec PR that wrote
+that into R-BTN-186's surface rule found these seven acts reachable only from the dashboard.
+
+**Spec:** [BATON_SPEC §12.8](../spec/BATON_SPEC/12-security.md#sec-12-8) ([R-BTN-186](../spec/BATON_SPEC/12-security.md#sec-12-8)),
+[§11.3](../spec/BATON_SPEC/11-people.md#sec-11-3) ([R-BTN-127](../spec/BATON_SPEC/11-people.md#sec-11-3), [R-BTN-129](../spec/BATON_SPEC/11-people.md#sec-11-3)),
+[§14](../spec/BATON_SPEC/14-api.md#sec-14); each act's own rule: [§9](../spec/BATON_SPEC/09-claims.md#sec-9) (force-reap),
+[R-BTN-19](../spec/BATON_SPEC/09-claims.md#sec-9-5) (fence), [R-BTN-10](../spec/BATON_SPEC/09-claims.md#sec-9-6) (completion),
+[R-BTN-28](../spec/BATON_SPEC/16-adoption.md#sec-16-1) (cutover, adoption), [§12.9](../spec/BATON_SPEC/12-security.md#sec-12-9) (scope), [R-BTN-11](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-3) (a held post).
+
+### What to build
+
+1. For each act, a key route whose callers are the principals the act's rule names (an
+   administrator for all but those a rule gives an owner), calling the function the `/v1/ui`
+   route calls — one implementation, two routes. Destructive ones take `confirm: true` (§12.2).
+2. A command for each in R-BTN-127's table (`admin claim reap`, `admin claim fence-clear`,
+   `admin claim confirm|release`, `admin adoption confirm`, `owner scope resolve` or `admin …`
+   per its rule, `admin repo accept-post`, `admin repo cutover`), with `--json`.
+3. The §14 rows and R-BTN-127's rows in the same PR, and the ux page's *Session-only acts* gap
+   removed.
+
+### Trust
+
+- No new input: each key route takes the body its session route takes, validated by the same
+  function, and authenticated by a key the act's rule names.
+
+### Invariants
+
+- **R-BTN-186**: one implementation per act; the session route and the key route call it alike.
+- **§12.2**: a destructive act takes `confirm: true` on every route.
+- **Both hosts** (R-BTN-55).
+
+### Tests
+
+- Each act through its key route on both hosts, with the same effect and refusals as its session
+  route; S-BTN-315's check that every session action has a key route.
+
+### Exit criteria
+
+- [ ] every `/v1/ui/*` write has a key route and a command, or the registry names why not
+- [ ] `npm test`, `npm run typecheck`, `npm run check:spec` and `npm run check:tickets` green
+
+## Status
+
+_filed 2026-11-23._
+
+_(Filed with the spec PR for every person role on the dashboard. Number taken by the
+offline scan: the filing session held no Baton key.)_

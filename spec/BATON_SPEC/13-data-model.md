@@ -65,18 +65,20 @@ behaviour, bounds and defaults. The tables of designs not built yet are in
 ### 13.2 Credentials and sign-in
 
 Administrator keys are the host's `BATON_ADMIN_KEYS` value, never a row (R-BTN-57). One role per
-key holds across `credentials`, `repository_owners`, `sync_keys` and the administrator set,
+key holds across `credentials`, `repository_owners`, `repository_members`, `sync_keys` and the
+administrator set,
 checked in the transaction that adds or first accepts a key (§12.1).
 
 | Table | Key | Columns | Purpose |
 |---|---|---|---|
 | `credentials` | `id` (fingerprint) | `kind` (`runner` — a machine key; `probe` — an instrument key), `public_key` (an SSH public key or an API key's public line; unique), `label`, `hostname` (machine keys; unique among live ones), `expires_at`, `last_used_at`, `created_by`, `revoked_at` | Every key but owners', sync keys and administrators' (R-BTN-13, R-BTN-102, R-BTN-117, R-BTN-159) |
 | `repository_owners` | `(repository_id, fingerprint)` | `public_key`, `human_only`, `fido_attestation`, `added_by`, `added_at`, `removed_at` | Owner keys (R-BTN-58, R-BTN-185) |
+| `repository_members` | `(repository_id, fingerprint)` | `public_key`, `answers` JSON (the `asks` labels it answers), `added_by`, `added_at`, `changed_by`, `changed_at`, `removed_at` | Member keys (R-BTN-204); not built (B-320) |
 | `runner_grants` | `(credential_id, repository_id)` | `capabilities` JSON (expanded), `sync`, `role`, `checker` (0/1), `domain` (a label; NULL when unset), `max_claims`, `set_by` (the credential that set the role, mark and domain), `granted_by`, `granted_at`, `accepted_at` (NULL while pending), `revoked_at` | What a machine key may do where (R-BTN-4, R-BTN-58, R-BTN-146, R-BTN-180, R-BTN-188) |
 | `grant_capabilities` | `(credential_id, repository_id, capability_pattern)` | — | A grant's capabilities as rows, derived from `runner_grants.capabilities` in the statement that writes it (§6.6 rule 4) |
 | `sync_keys` | `fingerprint` | `repository_id`, `role`, `public_key` (unique), `added_by`, `added_at`, `revoked_at` | Sync keys, one repository each (R-BTN-93) |
 | `repository_policies` | `(repository_id, version)` | `policy_json` (its `floors` list a field), `hash`, `previous_hash`, `changed_by`, `approver`, `preset`, `at` | Each policy version, append-only (R-BTN-188, R-BTN-189) |
-| `dashboard_sessions` | `id_hash` (SHA-256 of the cookie value) | `admin_key`, `access_email_hash` (SHA-256 of the Access email; NULL for a link's session), `created_at`, `expires_at`, `revoked_at` | A dashboard session (R-BTN-155) |
+| `dashboard_sessions` | `id` (the `session_id` a tab sends, 128 random bits; no secret) | `browser_hash` (SHA-256 of the cookie value it is bound to), `role` (`administrator`, `owner` or `member`), `key_fingerprint`, `access_email_hash` (SHA-256 of the Access email; NULL for a link's session), `created_at`, `expires_at`, `revoked_at` | A dashboard session, one tab's (R-BTN-155); an owner's or member's repositories are its key's, read on every request. Today's table is keyed by `id_hash` with `admin_key` alone; the per-tab and per-role columns are B-76's migration |
 | `login_links` | `token_hash` (SHA-256 of the link's token) | `admin_key`, `expires_at`, `used_at` | A one-time sign-in link (R-BTN-155) |
 | `request_nonces` | `(key_fingerprint, nonce)` | `seen_at` | Replay cache for every signed request (R-BTN-13) |
 | `webhook_deliveries` | `delivery_id` | `received_at` | Deliveries seen (R-BTN-73) |
