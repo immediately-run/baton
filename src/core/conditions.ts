@@ -31,10 +31,10 @@ export interface Ctx {
   now: () => number;
   /** The course file's graph, as the registry holds it (Stations.graph, cached per post). */
   graph: (repo: string, course: string) => Graph | null;
-  history?: History;
+  history: Pick<History, 'record'>;
   /** R-BTN-92's link bases for a ticket: a `suspend` raise's `url` is kept only under one of
    *  them, as a question's is. */
-  linkBases?: (ticketId: string) => string[];
+  linkBases: (ticketId: string) => string[];
 }
 
 /** One condition row, as the table holds it. */
@@ -100,7 +100,7 @@ export class Conditions {
         this.exec(`INSERT INTO conditions (repository_id, ticket_id, type, disposition, raised_at) VALUES (?, ?, ?, 'notify', ?)`, repo, ticket, MISSING_NEXT, at);
       }
       logEvent(this.c.store, at, 'condition', 'baton', { ticket, type: MISSING_NEXT, disposition: 'notify' }, ticket, null, repo);
-      this.c.history?.record(ticket, { kind: 'condition', detail: { type: MISSING_NEXT, disposition: 'notify' } });
+      this.c.history.record(ticket, { kind: 'condition', detail: { type: MISSING_NEXT, disposition: 'notify' } });
     }
   }
 
@@ -159,7 +159,7 @@ export class Conditions {
       this.exec(`UPDATE conditions SET outcome = 'superseded', closed_at = ?, closed_how = 'superseded'
                  WHERE run_id = ? AND (type = 'interact' OR type LIKE 'interact.%') AND outcome = 'open'`, now, run.run_id);
     } else if (disposition === 'suspend' && b.url != null) {
-      url = (this.c.linkBases?.(c.ticket_id) ?? []).some((base) => b.url!.startsWith(base)) ? b.url : null;
+      url = this.c.linkBases(c.ticket_id).some((base) => b.url!.startsWith(base)) ? b.url : null;
     }
     const restarts = b.restarts ?? {};
     // R-BTN-160's closing table, this slice's rows: an unbound leg-raised `notify` (warning and
@@ -179,7 +179,7 @@ export class Conditions {
     logEvent(this.c.store, now, 'condition', `runner:${runnerId}`,
       { ticket: c.ticket_id, leg: run.leg, run_id: run.run_id, type: b.type, disposition, ...(b.severity !== 'normal' ? { severity: b.severity } : {}), ...(url ? { url } : {}) },
       c.ticket_id, claimId, repo);
-    this.c.history?.record(c.ticket_id, { kind: 'condition', claim_id: claimId, leg: run.leg, run_id: run.run_id, detail: { type: b.type, disposition, ...(b.severity !== 'normal' ? { severity: b.severity } : {}), ...(url ? { url } : {}) } });
+    this.c.history.record(c.ticket_id, { kind: 'condition', claim_id: claimId, leg: run.leg, run_id: run.run_id, detail: { type: b.type, disposition, ...(b.severity !== 'normal' ? { severity: b.severity } : {}), ...(url ? { url } : {}) } });
     return { ok: true, condition_id: id, disposition };
   }
 

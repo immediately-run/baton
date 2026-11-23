@@ -138,8 +138,7 @@ export class BatonCore {
     this.registry = new Registry({ store, now: () => this.now(), ensurePolicy: (repository, forge) => this.policies.ensure(repository, forge) });
     // §12.8 (B-145): the policy store, before everything that reads a knob — the claims' floor
     // rule, the heartbeat's reports and pins, the owner routes' approver checks.
-    this.policies = new Policies({ store, now: () => this.now() });
-    this.policies.releaseForFloor = (repository) => this.claims.releaseForFloor(repository);
+    this.policies = new Policies({ store, now: () => this.now(), releaseForFloor: (repository) => this.claims.releaseForFloor(repository) });
     // R3-1258: the capacity envelope (R-BTN-87) and owner state (R-BTN-88), each one module
     // with the store and the clock alone.
     this.capacity = new Capacity({ store, now: () => this.now(), config: ports.config });

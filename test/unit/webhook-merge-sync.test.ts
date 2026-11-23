@@ -25,7 +25,7 @@ const stamps = (c: { store: { exec(q: string): { toArray(): unknown[] } } }) =>
 describe('S-BTN-167 a merge dispatches the sync', () => {
   it('a merge of the repository’s own dispatches its sync, whatever its mode; one that is no merge dispatches nothing', async () => {
     await withCore(async (c) => {
-      const w = new Webhooks({ store: c.store, now: () => 0 });
+      const w = new Webhooks({ store: c.store, scope: c.scope, now: () => 0 });
       expect(w.receive(d())).toEqual({ outcome: 'dispatched', now: ['baton'], trailing: [] });
       expect(w.receive(d({ merged: false }))).toEqual({ outcome: 'not-a-merge' });
       // A delivery with no `merged` at all is no merge either.
@@ -61,7 +61,7 @@ describe('S-BTN-167 a merge dispatches the sync', () => {
       c.now = () => B;
       // A push to this repository dispatches this repository's sync — the delivery is not a
       // merge, and before B-89 it left `webhook_syncs` empty, so nothing backed it up.
-      const w = new Webhooks({ store: c.store, now: () => B });
+      const w = new Webhooks({ store: c.store, scope: c.scope, now: () => B });
       expect(w.receive(d({ event: 'push', repository: 'immediately-run/baton', merged: undefined, pusher: 'p', author_email: 'p@x' })))
         .toEqual({ outcome: 'dispatched', now: ['baton'], trailing: [] });
       expect(stamps(c)).toEqual([`baton@${B}`, `docs@${B - 20 * 60_000}`]);
@@ -80,14 +80,14 @@ describe('S-BTN-167 a merge dispatches the sync', () => {
       // and docs' is one millisecond past at the alarm's armed instant. (Read as the row's own
       // stamp, which both hosts compare — round 4's host note at the top of this file.)
       const docs = (c.store.exec(`SELECT last_dispatch_at AS at FROM webhook_syncs WHERE repository_id = 'docs'`).toArray() as { at: number }[])[0].at;
-      expect(new Webhooks({ store: c.store, now: () => docs + SYNC_STALE_MS }).dueSync()).toEqual([]);
-      expect(new Webhooks({ store: c.store, now: () => docs + SYNC_STALE_MS + 1 }).dueSync()).toEqual(['docs']);
+      expect(new Webhooks({ store: c.store, scope: c.scope, now: () => docs + SYNC_STALE_MS }).dueSync()).toEqual([]);
+      expect(new Webhooks({ store: c.store, scope: c.scope, now: () => docs + SYNC_STALE_MS + 1 }).dueSync()).toEqual(['docs']);
     });
   });
 
   it('a second merge inside R-BTN-73’s 30 seconds is the window’s trailing dispatch', async () => {
     await withCore(async (c) => {
-      const at = (now: number) => new Webhooks({ store: c.store, now: () => now });
+      const at = (now: number) => new Webhooks({ store: c.store, scope: c.scope, now: () => now });
       expect(at(0).receive(d())).toEqual({ outcome: 'dispatched', now: ['baton'], trailing: [] });
       expect(at(10_000).receive(d())).toEqual({ outcome: 'dispatched', now: [], trailing: ['baton'] });
       expect(at(30_000).dueTrailing()).toEqual(['baton']);
@@ -129,7 +129,7 @@ describe('S-BTN-167 a merge dispatches the sync', () => {
     const B = Math.ceil(Date.now() / 1000) * 1000 + 600_000;
     await withCore(async (c) => {
       c.store.exec(`INSERT INTO webhook_syncs (repository_id, last_dispatch_at) VALUES ('baton', ${B - SYNC_STALE_MS})`);
-      const at = (now: number) => new Webhooks({ store: c.store, now: () => now });
+      const at = (now: number) => new Webhooks({ store: c.store, scope: c.scope, now: () => now });
       // A row exactly ten minutes old does not send: `now - SYNC_STALE_MS` is its own stamp.
       expect(at(B - 1).dueSync()).toEqual([]);
       expect(at(B).dueSync()).toEqual([]);
