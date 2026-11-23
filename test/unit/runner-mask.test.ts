@@ -189,6 +189,23 @@ describe('class 7 by name (R-BTN-144)', () => {
     expect(sink.push('-----END OPENSSH PRIVATE KEY-----')).toBe('***');
     expect(sink.flush()).toBe('');
   });
+
+  it.each(['-synthetic-fixture', 'OPENSSH PRIVATE'])('S-BTN-119: key banners survive literal matching with %s', (literal) => {
+    const sink = createLegMasker([literal]);
+    expect(sink.push('key: -----BEGIN OPENSSH PRIVATE KEY-----')).toBe('key:');
+    expect(sink.push('synthetic-key-body')).toBe('');
+    expect(sink.push('-----END OPENSSH PRIVATE KEY-----')).toBe('***');
+    expect(sink.push('after the key')).toBe('after the key');
+    expect(sink.flush()).toBe('');
+  });
+
+  it('S-BTN-119: masking a block does not break a literal that extends past it', () => {
+    const end = '-----END OPENSSH PRIVATE KEY-----';
+    const sink = createLegMasker(['-----\ncontinuation']);
+    expect(sink.push('-----BEGIN OPENSSH PRIVATE KEY-----')).toBe('');
+    expect(sink.push(end)).toBe('***');
+    expect(sink.push('continuation done')).toBe('*** done');
+  });
 });
 
 describe('a failed leg\'s end detail (B-256, S-BTN-231, §9.4)', () => {

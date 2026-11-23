@@ -11,7 +11,7 @@
 import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { createMasker, maskSecrets } from '../shared/mask.mjs';
+import { createKeyBoundary, maskBearerTokens, maskSecrets } from '../shared/mask.mjs';
 
 /** R-BTN-144 class 7: the name endings the environment decides, compared case-sensitively. */
 export const SECRET_NAME_SUFFIXES = ['_KEY', '_TOKEN', '_SECRET', '_PASSWORD', '_PAT'];
@@ -138,11 +138,9 @@ export function holdLiteralTail(text: string, literals: readonly string[]): { he
   return { head: text, tail: '' };
 }
 
-/** R-BTN-144 across a stream, which a line-at-a-time sink cannot do. Class 6's key block is
- *  `src/shared/mask.mjs`'s stream (`createMasker`: a block's lines are held until its `END` line
- *  or `KEY_HOLD` bytes, and classes 5 and 6 are masked on every line as it leaves) — each line
- *  is masked of its class-7 literals and handed to that stream, never the other way round: a
- *  block's body lines must reach the holder as they came, or the holder never sees the block.
+/** R-BTN-144 across a stream, which a line-at-a-time sink cannot do. The shared class-6
+ *  classifier sees original lines: a literal or its held tail must not change a key banner.
+ *  Only text outside a key block can leave, after class-7 literals and class-5 bearers are masked.
  *  Class 7 is masked here, as each line is handed on: the tail `holdLiteralTail` says a literal
  *  still extends is held back, unlogged, until the next line completes the literal (masked as
  *  one) or shows it will never complete — and a hold that never completes leaves as `***`,
@@ -167,23 +165,20 @@ export function createLegMasker(secrets: readonly string[]) {
   // `\n`), so one is dropped and the value is masked where it stands; a `\r\n` inside a value is
   // the boundary the framing hands back as `\n` alone.
   const literals = [...new Set(secrets.map((secret) => secret.replace(/\r\n/g, '\n').replace(/\r?\n$/, '')).filter((secret) => secret !== ''))];
-  const block = createMasker();
+  const block = createKeyBoundary();
   // What is held back, unlogged: a tail some literal may still extend.
   let held = '';
   // How many of `held`'s leading bytes already left, as part of a `***` (a literal the hold's
   // cut crossed): those bytes leave again as nothing, never in clear and never as more `***`.
   let gone = 0;
   const said: string[] = [];
-  const out = (text: string) => {
-    for (const line of text.split('\n')) said.push(block.push(line));
-  };
   /** Take `text` — the held bytes first (`hold` of them, `gone` of those already left), then the
    *  new ones — emit all of it but the tail a literal may still extend, and hold that. The held
    *  bytes are one masked run, merged with any literal they are part of; a run wholly of bytes
    *  that already left emits nothing. */
-  const take = (text: string, hold: number, left: number) => {
+  const take = (text: string, hold: number, left: number, visible?: number) => {
     const { tail } = holdLiteralTail(text, literals);
-    const cut = text.length - tail.length;
+    const cut = Math.min(text.length - tail.length, visible ?? text.length);
     const runs = literalSpans(text, literals);
     if (hold > 0) {
       runs.unshift([0, hold]);
@@ -207,15 +202,21 @@ export function createLegMasker(secrets: readonly string[]) {
       if (e > cut) nextGone = emitsNew ? e - cut : Math.max(0, left - cut);
     }
     text_ += text.slice(at, cut);
-    if (text_ !== '' || cut > 0) out(text_);
+    for (const line of text_.split('\n')) {
+      if (line !== '') said.push(maskBearerTokens(visible === undefined ? line : line.trimEnd()));
+    }
     held = tail;
-    gone = Math.min(nextGone, tail.length);
+    // Keep checking raw tails across key lines for class 7, but the block marker already
+    // accounts for those bytes (including any literal tail held back from the opening line).
+    gone = visible === undefined ? Math.min(nextGone, tail.length) : tail.length;
   };
   return {
     push(line: string): string {
       said.length = 0;
+      const { prefix, marker } = block.push(line);
+      const visible = (text: string) => prefix ? text.length - line.length + prefix : prefix;
       if (held === '') {
-        take(line, 0, 0);
+        take(line, 0, 0, visible(line));
       } else {
         // The line before ended inside what may be a literal, and this line may complete it:
         // with the boundary the framing ate (`held\nline` — a newline inside the value) or
@@ -229,18 +230,20 @@ export function createLegMasker(secrets: readonly string[]) {
           .map((text) => ({ text, tail: holdLiteralTail(text, literals).tail }))
           .filter((j) => j.tail !== '' && j.text.length - j.tail.length < h)
           .sort((a, b) => b.tail.length - a.tail.length)[0]?.text;
-        take(crosses ?? open ?? `${held}\n${line}`, h, gone);
+        const text = crosses ?? open ?? `${held}\n${line}`;
+        take(text, h, gone, visible(text));
       }
+      if (marker) said.push('***');
       return said.filter(Boolean).join('\n');
     },
     flush(): string {
       said.length = 0;
       // The stream ended inside what may be a literal: those bytes leave masked, not verbatim —
       // unless every one of them already left as the `***` of a literal the head held whole.
-      if (held !== '' && gone < held.length) said.push(block.push('***'));
+      if (held !== '' && gone < held.length) said.push('***');
       held = '';
       gone = 0;
-      said.push(block.flush());
+      if (block.flush()) said.push('***');
       return said.filter(Boolean).join('\n');
     },
   };
