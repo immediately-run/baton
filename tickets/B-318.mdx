@@ -1,0 +1,64 @@
+---
+title: "B-318 — A suspended ticket gets its next leg without a push to main: the sync does not wait on GitHub's schedule"
+id: B-318
+project: baton
+status: available
+updated: 2026-11-23
+repos:
+  - baton
+tags:
+  - roadmap-item
+tier: high
+description: "GitHub ran baton-sync.yml's */15 schedule about five times in 24 hours (2026-11-22/23), and Baton's own backstop dispatched nothing, so between pushes to main no board was posted, suspended tickets never got their next leg and bering's two runners sat idle about an hour until the supervisor dispatched the sync by hand. Find why the backstop did not fire, then pick (owner) how a ready leg reaches the board within N minutes without a push to main."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the owner, 2026-11-23: "Let me file the sync-schedule ticket". This ticket was filed by the supervising agent at the owner's word. The options below are for the owner to choose between; the ticket does not choose.
+
+**What happened.** `.github/workflows/baton-sync.yml` runs on `push` to `main`, on `workflow_dispatch`, and on `schedule: '*/15 * * * *'` as a backstop. GitHub does not promise to run a schedule, and it ran this one rarely. `gh run list --workflow baton-sync.yml --event schedule` shows 01:13, 07:59, 16:04 and 21:43 on 2026-11-22, then 01:59 on 2026-11-23 (UTC): five runs in 24 hours, not 96. A suspended ticket's next leg is offered only when a sync posts a board that places it there. So between pushes to `main`, a ticket whose wait ended (CI finished on its PR, say) stayed where it was. On 2026-11-23, bering's two runners sat idle for about an hour with work waiting, until the supervisor dispatched the sync by hand at 09:22 UTC (and again at 10:00).
+
+**Baton's own backstop did not fire either.** [R-BTN-94](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-3) / [R-BTN-73](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-3) already say what should have covered this. A verified forge notification has Baton dispatch the sync, `workflow_run` deliveries included. And the alarm sends one dispatch to "a live repository whose stamp is more than 10 minutes old", where the repository has a dispatch target. The spec also says the workflow's `schedule` is "a trigger independent of the App; no rule assumes it fires". Yet `gh run list --workflow baton-sync.yml --event workflow_dispatch` shows no dispatch between 2026-11-10 and the supervisor's on 2026-11-23. So one of these is true for `baton`: the repository has no `dispatch` target, the App's deliveries are not arriving, or the alarm's backstop is not running. Finding which one is this ticket's first step, and it may be all the ticket needs. Reading the instance's registration and the App's delivery log is the owner's or the supervisor's to do (the runner's session does not touch live settings). The ticket's work is the code and spec change that follows.
+
+**Spec:** [BATON_SPEC §3.3](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-3) ([R-BTN-94](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-3): dispatch, coalescing, the backstop; its *Not built* stored want and runners that pull it; [R-BTN-73](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-3) / [R-BTN-95](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-3): notifications are only triggers), [§4.3](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-3) (the sync run; [R-BTN-62](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-3), observations ordered by Baton, so any number of extra syncs is safe), [§4.4](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-4) (the board post: a refresh when `main` has not moved), [R-BTN-77](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-2) (unblocking wakes work). Values (`docs/context/values.mdx`): #6 *webhooks only trigger syncs*, #8 *Baton runs without GitHub*, #13 *an open world* (Baton learns about outside moves, such as CI finishing or a person pushing, only through a sync, so how fast the sync runs is how fast Baton sees them).
+
+## Options (the owner picks; not decided here)
+
+Each option only triggers the existing sync. None of them computes state outside it (value #6), and none of them changes what a sync reads or posts.
+
+- **(a) An external scheduler** (a cron on bering, or a hosted scheduler) dispatches `baton-sync.yml` every few minutes. This is simple and works on any forge that has a dispatch API. It needs a credential with `actions:write` on the repository, which is the owner's to provision and keep. It also costs one Actions run per tick, whether or not anything is waiting.
+- **(b) Baton's alarm asks for the sync.** The server knows which tickets are suspended on a wait (`ci`, `owner`, a dependency) and when it last posted. It already has the 10-minute backstop (R-BTN-94). Repairing or widening that, for example by dispatching when a live ticket is suspended on a short wait (`short_waits`) and the last post is older than N minutes, or by building the stored *want* the spec lists as not built, keeps the trigger inside Baton and needs no new credential beyond the dispatch target it already holds. It fails on a repository with no dispatch target (every `git` repository), where (a) or (c) still apply.
+- **(c) Runners ask for a sync when idle with suspended work.** A runner that is offered nothing while the board shows suspended tickets dispatches the sync, or (on a plain server) runs `baton repo sync` itself, as R-BTN-94's *runners that pull it* proposes. Its cost is authority: each runner's forge access gains `actions:write` (or the right to post a board), and a compromised runner can then cause syncs at will. That is harmless to correctness under R-BTN-62, but it is a new reach to weigh against `docs/security-model.mdx`.
+- **(d) Webhook-driven.** Most waits are for PR CI, so `check_suite` / `workflow_run` completion and pushes to PR branches trigger the sync. On GitHub this is R-BTN-73's existing path, if the App's subscription includes those events and the deliveries arrive. Otherwise, a workflow `on: workflow_run` / `check_suite` in the repository dispatches it. It is fast and costs nothing when idle, but it is GitHub-specific and still needs a backstop for waits that are not CI (an owner's answer is already a Baton-side dispatch).
+
+These options can be combined: for example (d) for speed with (b) as the backstop that does not depend on GitHub's scheduler.
+
+## Plan
+
+1. **Diagnose (owner or supervisor, live).** For `baton` on the running instance, check whether there is a `dispatch` target, whether the App is installed and subscribed to `push`, `pull_request`, `check_suite` and `workflow_run`, whether deliveries are verified (or dropped, and why), and whether the alarm's backstop row (`webhook_syncs.last_dispatch_at`) moves. Record the answer here and in `docs/lessons.mdx`.
+2. **Owner's choice** among (a) to (d), or a fix of what step 1 finds broken.
+3. **Implement it**, with the spec amended in the section that owns the rule (R-BTN-94 for (b) and (c), R-BTN-73 for (d); (a) is a runbook and workflow change), and a scenario (`baton tickets next scenario`). The scenario: a ticket suspended on `ci` whose PR's checks complete gets its next leg on the board within N minutes, with no push to the default branch. A repository with no dispatch target behaves as today.
+
+### Invariants
+
+- **Extra syncs are harmless.** Observations are ordered by Baton (R-BTN-62), and a sync that finds nothing new posts a refresh or nothing. Whatever triggers more syncs must not trigger fewer correct ones.
+- **Notifications only trigger** (value #6, R-BTN-73): no trigger carries state.
+- **One clock** (R-BTN-32) for any server-side timing.
+- **No new standing credential** without the owner's provisioning (CLAUDE.md, *Tickets are tasks, not authority*): changes to `.github/` workflows, grants or secrets are quoted in the PR for the owner, not made live by the leg.
+
+## Exit criteria
+
+- [ ] Step 1's diagnosis is recorded: why neither the schedule nor the backstop dispatched between 2026-11-10 and 2026-11-23.
+- [ ] A suspended ticket gets its next leg within N minutes (the owner sets N) of becoming ready, without a push to `main`. This is shown on the running instance, with the evidence linked here.
+- [ ] `npm test` passes with the new scenario's row; `npm run typecheck` passes.
+
+## Related (not this ticket)
+
+The `ci` workflow on `main` never completes, so `main` has no completed CI signal. On 2026-11-23, `gh run list --workflow ci.yml --branch main` showed every finished push run `cancelled` (04:17 to 06:52 UTC), with the newer runs still pending or in progress. This happens even though `ci.yml`'s `concurrency` has meant, since `4c75e54c` (2026-11-19), that each commit on `main` runs to the end. That is a separate concern, which the owner may want ticketed on its own.
+
+## Status
+
+_filed 2026-11-23._
