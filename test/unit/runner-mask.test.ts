@@ -4,11 +4,14 @@
 // values they stand for, the masking of one string, the stream sink a leg's output goes through
 // line by line, and where `runner.json` is read from. The runner's own half — which environment it
 // masks, the wiring of the sink and of the failure texts a leg leaves — is in runner-main.test.ts.
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+import { spawn } from 'node:child_process';
+import { EventEmitter } from 'node:events';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { builtinExecutor } from '../../src/runner/executor';
+import { PassThrough } from 'node:stream';
+import { builtinExecutor, type ExecOptions } from '../../src/runner/executor';
 import {
   FAILURE_DETAIL_MAX, MIN_SECRET_BYTES, SECRET_NAME_EXACT, SECRET_NAME_SUFFIXES, createLegMasker, failureDetail, holdLiteralTail,
   maskLegOutput, namesASecret, readMaskEnv, runnerConfigPath, secretValues, underBatonDirectory,
@@ -16,6 +19,8 @@ import {
 
 const KEY = 'sk-ant-api03-AbCdEfGhIjKlMn';
 const PAT = 'github_pat_11ABCDEFG0123456789';
+
+vi.mock('node:child_process', { spy: true });
 
 function maskLines(literals: string[], lines: string[]): string {
   const sink = createLegMasker(literals);
@@ -272,15 +277,15 @@ describe('class 7 by name (R-BTN-144)', () => {
 });
 
 describe('S-BTN-119: builtin executor framing', () => {
-  async function execute(script: string, onStderr: (line: string) => void, replyTo?: string) {
+  async function execute(script: string, onStderr: NonNullable<ExecOptions['onStderr']>, replyTo?: string) {
     const executor = builtinExecutor();
     const cwd = process.cwd();
     const handle = await executor.start({ brief: {
       kind: 'leg', session_id: 'framing', checkout: cwd, paths: [], wrapper: '', env: {},
     } });
     const running = executor.exec(handle, ['node', '-e', script], {
-      cwd, timeout_s: 5, onStderr(line) {
-        onStderr(line);
+      cwd, timeout_s: 5, onStderr(line, frame) {
+        onStderr(line, frame);
         if (line === replyTo) running.write('continue');
       },
     });
@@ -291,34 +296,93 @@ describe('S-BTN-119: builtin executor framing', () => {
     }
   }
 
-  it.each([1, 2, 3])('decodes both pipes across byte offset %i of a four-byte character', async (offset) => {
+  it.each([1, 2, 3])('decodes stderr across byte offset %i of a four-byte character', async (offset) => {
     const value = 'test-value-\u{1f30d}-tail';
     const split = 'test-value-'.length + offset;
     const lines: string[] = [];
     const result = await execute(`
       const { writeSync } = require('node:fs');
       const bytes = Buffer.from(${JSON.stringify(value)});
-      writeSync(1, bytes.subarray(0, ${split}));
       writeSync(2, Buffer.concat([Buffer.from('ready\\n'), bytes.subarray(0, ${split})]));
       process.stdin.once('data', () => {
-        writeSync(1, bytes.subarray(${split}));
         writeSync(2, bytes.subarray(${split}));
         process.exit(0);
       });
     `, (line) => lines.push(line), 'ready');
-    expect(result).toEqual({ status: 0, stdout: value, stderr: `ready\n${value}` });
+    expect(result).toEqual({ status: 0, stdout: '', stderr: `ready\n${value}` });
     expect(maskLines([value], lines)).toBe('ready\n***');
   });
 
-  it('strips only the CR of CRLF when delivering stderr lines', async () => {
+  it('keeps CRLF framing available to the masker without rendering a framing CR', async () => {
     const lines: string[] = [];
     const value = 'first\r\nsecond';
     const text = `x ${value} y\r\nsafe\r\nfinal\r`;
-    const result = await execute(`process.stderr.write(${JSON.stringify(text)})`, (line) => lines.push(line));
+    const frames: Array<'\n' | '\r\n' | undefined> = [];
+    const result = await execute(`process.stderr.write(${JSON.stringify(text)})`, (line, frame) => {
+      lines.push(line);
+      frames.push(frame);
+    });
     expect(result).toEqual({ status: 0, stdout: '', stderr: text });
     expect(lines).toEqual(['x first', 'second y', 'safe', 'final\r']);
-    expect(maskLines([value], lines)).toBe('x \n*** y\nsafe\nfinal\r');
-    expect(maskLines(['first\nsecond'], lines)).toBe('x \n*** y\nsafe\nfinal\r');
+    expect(frames).toEqual(['\r\n', '\r\n', '\r\n', undefined]);
+    for (const literal of [value, 'first\nsecond', 'first\rsecond', 'firstsecond']) {
+      const sink = createLegMasker([literal]);
+      const output = lines.map((line, i) => sink.push(line, frames[i]));
+      expect([...output, sink.flush()].filter(Boolean).join('\n'), JSON.stringify(literal))
+        .toBe('x \n*** y\nsafe\nfinal\r');
+    }
+  });
+
+  // Drive the executor's real data listeners without relying on how the OS batches writes.
+  function mockChild() {
+    const child = Object.assign(new EventEmitter(), {
+      stdin: new PassThrough(), stdout: new PassThrough(), stderr: new PassThrough(),
+    });
+    vi.mocked(spawn).mockReturnValueOnce(child as unknown as ReturnType<typeof spawn>);
+    let closed = 0;
+    for (const pipe of [child.stdout, child.stderr]) {
+      pipe.on('close', () => { if (++closed === 2) child.emit('close', 0); });
+    }
+    return child;
+  }
+
+  it.each([1, 2, 3])('decodes stdout across byte offset %i of a four-byte character', async (offset) => {
+    const child = mockChild();
+    const result = execute('', () => {});
+    await Promise.resolve(); // let execute attach the builtin's pipe listeners
+    const value = 'test-value-\u{1f30d}-tail';
+    const bytes = Buffer.from(value);
+    const split = 'test-value-'.length + offset;
+    child.stdout.write(bytes.subarray(0, split));
+    child.stdout.write(bytes.subarray(split));
+    child.emit('exit', 0);
+    child.stdout.destroy();
+    child.stderr.destroy();
+    expect(await result).toEqual({ status: 0, stdout: value, stderr: '' });
+  });
+
+  it('bounds the drain when inherited pipes stay open after exit and finalizes received bytes', async () => {
+    vi.useFakeTimers();
+    try {
+      const child = mockChild();
+      const lines: string[] = [];
+      const result = execute('', (line) => lines.push(line));
+      await Promise.resolve();
+      let settled = false;
+      void result.then(() => { settled = true; });
+      child.emit('exit', 0); // the call is gone; a pipe owner still hasn't closed either pipe
+      child.stdout.write(Buffer.concat([Buffer.from('out'), Buffer.from([0xf0, 0x9f])]));
+      child.stderr.write(Buffer.concat([Buffer.from('ready\nerr'), Buffer.from([0xe2, 0x82])]));
+      await vi.advanceTimersByTimeAsync(999);
+      expect(settled).toBe(false);
+      expect(lines).toEqual(['ready']);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(settled).toBe(true);
+      expect(await result).toEqual({ status: 0, stdout: 'out\ufffd', stderr: 'ready\nerr\ufffd' });
+      expect(lines).toEqual(['ready', 'err\ufffd']);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('flushes an incomplete final code point before resolving the call', async () => {

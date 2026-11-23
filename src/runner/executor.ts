@@ -69,8 +69,8 @@ export interface ExecOptions {
   stdin?: string;
   /** Extra environment for this call, over the session's. */
   env?: Record<string, string>;
-  /** Each stderr line as it arrives (the runner's verbose drain, B-108). */
-  onStderr?: (line: string) => void;
+  /** Each stderr line as it arrives (B-108). The frame, when supplied, is not in `line`. */
+  onStderr?: (line: string, frame?: '\n' | '\r\n') => void;
 }
 
 export interface ExecResult {
@@ -169,7 +169,8 @@ export function builtinExecutor(): Executor {
         partial += text;
         let at;
         while ((at = partial.indexOf('\n')) >= 0) {
-          o.onStderr(partial.slice(0, at).replace(/\r$/, ''));
+          const crlf = at > 0 && partial[at - 1] === '\r';
+          o.onStderr(partial.slice(0, crlf ? at - 1 : at), crlf ? '\r\n' : '\n');
           partial = partial.slice(at + 1);
         }
       };

@@ -169,7 +169,7 @@ function createBoundaryMatcher(literal: string) {
   const fail = prefixTable(n, (i) => literal.charCodeAt(i));
   let prefixes = new Map<number, number>();
   return {
-    push(line: string, offset: number, boundary: boolean) {
+    push(line: string, offset: number, boundary: '' | '\n' | '\r\n') {
       const end = offset + line.length;
       const next = new Map<number, number>();
       let first = end;
@@ -181,7 +181,8 @@ function createBoundaryMatcher(literal: string) {
       };
       for (let k = tailLength(line, literal, fail); k > 0; k = fail[k]) keep(k, end - k);
 
-      if (boundary && literal[0] === '\n') prefixes.set(0, offset);
+      const crlf = boundary === '\r\n';
+      if (boundary && (literal[0] === '\n' || (crlf && literal[0] === '\r'))) prefixes.set(0, offset);
       if (prefixes.size > 0) {
         // Comparing the line separately at every active prefix is quadratic on repeats.
         const overlap = lineOverlaps(line, literal);
@@ -196,7 +197,12 @@ function createBoundaryMatcher(literal: string) {
         };
         for (const [k, start] of prefixes) {
           if (k > 0) extend(k, start); // a wrapped value: omit the framing boundary
-          if (literal[k] === '\n') extend(k + 1, start); // a newline inside the value
+          if (boundary && literal[k] === '\n') extend(k + 1, start);
+          if (crlf && literal[k] === '\r') {
+            // The CR may belong to the literal, whether the LF does or not.
+            extend(k + 1, start);
+            if (literal[k + 1] === '\n') extend(k + 2, start);
+          }
         }
       }
       prefixes = next;
@@ -225,21 +231,21 @@ function createBoundaryMatcher(literal: string) {
  *    neither in clear nor as a second `***` of their own;
  *  - literals are masked as merged runs (`literalSpans`), never one after another.
  *
- *  Both interpretations of each line boundary stay live until disproved: with the `\n` the
- *  framing ate (a newline inside the value), or without it (the value wrapped across the line).
- *  Match spans refer to the same line content either way, so mask their union.
+ *  Boundary interpretations stay live until disproved: with the newline the framing ate, or
+ *  without it (the value wrapped). CRLF also admits the CR as literal data before a wrap.
+ *  Match spans refer to the same line content in each interpretation, so mask their union.
  *  `push` takes one line (never with its `\n`: the stream's own) and returns what may leave
  *  now, joined by `\n` — `''` while a block, or a tail, is held; `flush` returns the rest at
  *  the stream's end: the `***` a held tail leaves and an unclosed block's. */
 export function createLegMasker(secrets: readonly string[]) {
-  // A value's own trailing line ending never arrives (the sink's unit is the line without its
-  // `\n`), so one is dropped and the value is masked where it stands; a `\r\n` inside a value is
-  // the boundary the framing hands back as `\n` alone.
-  const literals = [...new Set(secrets.map((secret) => secret.replace(/\r\n/g, '\n').replace(/\n$/, '')).filter((secret) => secret !== ''))];
+  // Keep raw CR as a matchable character, as well as the LF spelling for normalized output.
+  // Drop a final LF so a value can be masked without waiting for another line.
+  const literals = [...new Set(secrets.flatMap((secret) => [secret, secret.replace(/\r\n/g, '\n')])
+    .map((secret) => secret.replace(/\n$/, '')).filter((secret) => secret !== ''))];
   const block = createMasker();
   const matchers = literals.map(createBoundaryMatcher);
   let offset = 0;
-  let boundary = false;
+  let boundary: '' | '\n' | '\r\n' = '';
   // What is held back, unlogged: a tail some literal may still extend.
   let held = '';
   // How many of `held`'s leading bytes already left, as part of a `***` (a literal the hold's
@@ -286,12 +292,12 @@ export function createLegMasker(secrets: readonly string[]) {
     held = text.slice(cut);
     gone = Math.min(nextGone, held.length);
     offset = end;
-    boundary = true;
   };
   return {
-    push(line: string): string {
+    push(line: string, frame: '\n' | '\r\n' = '\n'): string {
       said.length = 0;
       take(line);
+      boundary = frame;
       return said.filter(Boolean).join('\n');
     },
     flush(): string {
@@ -302,7 +308,7 @@ export function createLegMasker(secrets: readonly string[]) {
       held = '';
       gone = 0;
       offset = 0;
-      boundary = false;
+      boundary = '';
       for (const matcher of matchers) matcher.reset();
       said.push(block.flush());
       return said.filter(Boolean).join('\n');

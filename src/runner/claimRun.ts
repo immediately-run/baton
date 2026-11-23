@@ -10,7 +10,7 @@ import type { ScopeAction } from '../core/scope';
 import { BatonRefusal, batonUnreachable } from './api';
 import { outsideScope, pushesBetween, readRefState, type RefState } from './audit';
 import { advanceHome, claimScratch, courseOf, dropCourse, ensureSha, extractTicketSource, git, loadCourse, prepareClone, readHead, type CourseLoad } from './home';
-import type { Executor, Handle, Running, SessionKind } from './executor';
+import type { ExecOptions, Executor, Handle, Running, SessionKind } from './executor';
 import { LegChannel, channelPath, type ChannelAnswer, type ChannelRequest } from './channel';
 import { MIN_SECRET_BYTES, createLegMasker, failureDetail, maskLegOutput, namesASecret, secretValues } from './mask';
 import { decide, refusalKind, runNumber, shortWaitSpent, waitState } from './protocol';
@@ -369,11 +369,11 @@ export class ClaimRun {
    *  one literal, and the sink writes to the runner's log, which is what a leg log reads
    *  (R-BTN-128): the masked bytes are what leaves the runner. `release` is the call's end — the
    *  wrapper's outcome line rides the stream's last writes, so what it held goes first. */
-  private legSink(secrets: readonly string[]): { onStderr: (line: string) => void; release: () => void } {
+  private legSink(secrets: readonly string[]): { onStderr: NonNullable<ExecOptions['onStderr']>; release: () => void } {
     const sink = createLegMasker(secrets);
     return {
-      onStderr: (line) => {
-        const out = sink.push(line);
+      onStderr: (line, frame) => {
+        const out = sink.push(line, frame);
         if (out !== '') this.o.log(out);
       },
       release: () => {
@@ -400,7 +400,7 @@ export class ClaimRun {
       // R-BTN-144: what a leg's stderr carries leaves masked — class 5 and class 6 by the shared
       // pattern, the leg's own class 7 set with it while its run streams, and by the drain after.
       // B-108: a drained line is leg activity either way — the beat's liveness line counts it.
-      onStderr: leg ? (l: string) => { this.legLineAt = this.o.now(); leg.onStderr(l); } : this.o.verbose ? (l: string) => { this.legLineAt = this.o.now(); this.o.log(maskLegOutput(`baton: ${call}: ${l}`, secrets)); } : undefined,
+      onStderr: leg ? (l, frame) => { this.legLineAt = this.o.now(); leg.onStderr(l, frame); } : this.o.verbose ? (l: string) => { this.legLineAt = this.o.now(); this.o.log(maskLegOutput(`baton: ${call}: ${l}`, secrets)); } : undefined,
     });
   }
 
