@@ -36,7 +36,7 @@ section that are not built are in [the proposal page](../proposals/checks-and-ex
   |---|---|
   | `hostname`, `session_name` | the runner's identity (R-BTN-3) |
   | `secret_hash`, `rekey` | on first contact or a re-key (R-BTN-14) |
-  | `harness` | `opencode` or `claude-code` |
+  | `harness` | a name the runner declares, `^[a-z0-9][a-z0-9-]{0,63}$`; Baton records it as a label and derives no capabilities or behavior from it |
   | `kind` | `vm`, `local` or `cloud`: a label no rule reads |
   | `model_id` | optional; a label no rule reads |
   | `capabilities` | the declared capabilities, roles and holdings (R-BTN-121, R-BTN-174) |

@@ -13,7 +13,7 @@ import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { courseSchemas, githubFacts, initMain, parseSyncArgs, plainGitRemote, remoteSlug, syncMain, syncWorkflow } from '../../src/defaults/cli';
 import type { Transport } from '../../src/runner/api';
-import { HARNESS_AGENTS } from '../../src/runner/harness';
+import { selectHarness } from '../../src/runner/harness';
 import { createHash } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { githubFake } from '../githubFake';
@@ -590,7 +590,7 @@ describe('baton repo init, through the built CLI', () => {
     const settings = JSON.parse(readFileSync(join(root, '.baton', 'baton.json'), 'utf8'));
     // B-83: a fresh scaffold names a real agent — the opencode command by default, never the
     // bare `echo` stub.
-    expect(settings.agent_command).toBe(HARNESS_AGENTS.opencode);
+    expect(settings.agent_command).toBe(selectHarness('opencode')?.agentCommand);
     // B-84: the command runs with no shell — it names the BATON_* environment the stub sets
     // (nothing expands), carries no redirection, and splits into the argv the stub spawns.
     expect(settings.agent_command).toContain('BATON_INSTRUCTIONS');
@@ -656,7 +656,7 @@ describe('baton repo init, through the built CLI', () => {
     // BATON_* environment (no shell expands it, B-84) — and init prints it for the unfamiliar.
     const def = scaffold();
     try {
-      expect(def.command).toBe(HARNESS_AGENTS.opencode);
+      expect(def.command).toBe(selectHarness('opencode')?.agentCommand);
       expect(def.command).toContain('--model zai-coding-plan/glm-5.3');
       expect(def.command).toContain('BATON_INSTRUCTIONS');
       expect(def.command).not.toMatch(/[<>|]/); // no redirection: the stub closes stdin itself
@@ -666,7 +666,7 @@ describe('baton repo init, through the built CLI', () => {
     }
     const cc = scaffold('--agent', 'claude-code');
     try {
-      expect(cc.command).toBe(HARNESS_AGENTS['claude-code']);
+      expect(cc.command).toBe(selectHarness('claude-code')?.agentCommand);
       expect(cc.command).toContain('--permission-mode bypassPermissions');
       expect(cc.said).toContain(cc.command);
     } finally {
@@ -692,11 +692,11 @@ describe('baton repo init, through the built CLI', () => {
     try {
       const command = (): string => (JSON.parse(readFileSync(join(old.dir, '.baton', 'baton.json'), 'utf8')) as { agent_command: string }).agent_command;
       const replaced = baton(old.dir, 'repo', 'init', '--pin', PIN);
-      expect(command()).toBe(HARNESS_AGENTS.opencode);
+      expect(command()).toBe(selectHarness('opencode')?.agentCommand);
       expect(replaced).toContain('no-op stub');
-      expect(replaced).toContain(HARNESS_AGENTS.opencode);
+      expect(replaced).toContain(selectHarness('opencode')?.agentCommand);
       baton(old.dir, 'repo', 'init', '--pin', PIN, '--agent', 'claude-code');
-      expect(command()).toBe(HARNESS_AGENTS['claude-code']);
+      expect(command()).toBe(selectHarness('claude-code')?.agentCommand);
       baton(old.dir, 'repo', 'init', '--pin', PIN, '--agent-command', 'mine');
       expect(command()).toBe('mine');
       const kept = baton(old.dir, 'repo', 'init', '--pin', PIN);

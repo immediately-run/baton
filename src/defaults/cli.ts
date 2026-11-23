@@ -15,7 +15,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { BatonApi, BatonRefusal, envAuth, type Auth, type Transport } from '../runner/api';
-import { HARNESS_AGENTS, type Harness } from '../runner/harness';
+import { HARNESS_ADAPTERS, selectHarness, stubActivityAdapters } from '../runner/harness';
 import { syncOnce } from '../shared/batonSync.mjs';
 import { DEFAULT_URL } from '../../cli/baton.mjs';
 import { API_KEY, signingKey } from '../../cli/sign.mjs';
@@ -1312,6 +1312,7 @@ import { homedir, tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { splitWords } from ${JSON.stringify(source('agent-words.ts'))};
+const activityAdapters = ${stubActivityAdapters()};
 // B-94: every git and gh call this stub makes — the snapshot probes, the override and
 // instructions reads, the forge verification — is bounded and non-interactive, the same bound
 // and environment the close uses, so a wedged call fails the leg within the bound instead of
@@ -1494,22 +1495,7 @@ ${pushes ? `  // B-231: run from the gate's red (pr-open, fixed), this leg must 
   // the agent's activity.
   const startedAt = Date.now();
   const wrapperLog = join(ctx.checkout, '.baton', 'logs', ctx.ticket.id + '-${leg}.log');
-  const agentBin = basename(command);
-  const storePaths = [];
-  if (agentBin === 'opencode' || agentBin === 'claude') {
-    const dataHome = process.env.XDG_DATA_HOME && process.env.XDG_DATA_HOME !== '' ? process.env.XDG_DATA_HOME : join(homedir(), '.local', 'share');
-    const dashed = ctx.checkout.split('/').join('-');
-    if (agentBin === 'opencode') {
-      const root = join(dataHome, 'opencode');
-      storePaths.push(join(root, 'opencode.db'), join(root, 'opencode.db-wal'), join(root, 'opencode.db-shm'), join(root, 'project', dashed));
-      const key = createHash('sha1').update(ctx.checkout).digest('hex');
-      let instances = [];
-      try { instances = readdirSync(join(root, 'snapshot')); } catch { /* none yet */ }
-      for (const i of instances) storePaths.push(join(root, 'snapshot', i, key));
-    } else {
-      storePaths.push(join(process.env.CLAUDE_CONFIG_DIR && process.env.CLAUDE_CONFIG_DIR !== '' ? process.env.CLAUDE_CONFIG_DIR : join(homedir(), '.claude'), 'projects', dashed));
-    }
-  }
+  const storePaths = activityAdapters.get(basename(command))?.(ctx.checkout, { createHash, readdirSync, homedir, join, env: process.env }) ?? [];
   // The agent's last output (2026-10-24; B-256): the last lines of both streams, bounded — what a
   // failed leg's error carries, so the runner's log alone can diagnose it, whether the agent
   // exited non-zero or exited 0 and the checks after it failed.
@@ -1966,7 +1952,7 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
   let eject: 'tickets' | 'stations' | null = null;
   let pin: string | null = null;
   let force = false;
-  let agent: Harness = 'opencode';
+  let agent = selectHarness('opencode')!;
   let agentNamed = false;
   let agentCommand: string | null = null;
   const overrides: string[] = [];
@@ -1983,8 +1969,9 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
     else if (a === '--override') overrides.push(value());
     else if (a === '--agent') {
       const v = value();
-      if (v !== 'opencode' && v !== 'claude-code') throw new Error('--agent: opencode or claude-code');
-      agent = v;
+      const adapter = selectHarness(v);
+      if (!adapter) throw new Error(`--agent: ${HARNESS_ADAPTERS.map((entry) => entry.name).join(' or ')}`);
+      agent = adapter;
       agentNamed = true;
     } else if (a === '--agent-command') agentCommand = value();
     else if (a === '--eject') {
@@ -2115,7 +2102,7 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
     // is replaced by the default harness's command, and any other named command — the
     // repository's own — is kept.
     const was = typeof existing.agent_command === 'string' ? existing.agent_command : '';
-    const now = agentCommand ?? (agentNamed || was === 'echo' ? HARNESS_AGENTS[agent] : null);
+    const now = agentCommand ?? (agentNamed || was === 'echo' ? agent.agentCommand : null);
     if (now != null && now !== was) settings.agent_command = now;
     commandMoved = now != null && now !== was;
     if (!listed || force || moved.length || commandMoved) {
@@ -2128,7 +2115,7 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
     // B-83: a fresh repository names a real agent from the start — the chosen harness's command,
     // printed below for the unfamiliar. The bare `echo` stub is written only when named
     // explicitly, never by default.
-    const chosen = agentCommand ?? HARNESS_AGENTS[agent];
+    const chosen = agentCommand ?? agent.agentCommand;
     if (chosen === 'echo' && agentCommand !== 'echo') {
       throw new Error('baton repo init refuses to write the no-op agent_command "echo" — pass --agent opencode or --agent claude-code for a real command, or --agent-command echo to name the stub explicitly');
     }

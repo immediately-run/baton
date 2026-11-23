@@ -34,7 +34,9 @@ export interface RunnerOptions {
   repository: string;
   /** The runner's hostname — the credential's registered name (§6.4). */
   hostname: string;
-  harness: 'opencode' | 'claude-code';
+  harness: string;
+  /** Host adapters' activity paths; defaults to the built-in adapters. */
+  activityPaths?: (checkout: string) => string[];
   session: string;
   /** B-86: what the heartbeat declares — `--capabilities`, which narrows. Absent, the runner asks
    *  once (a beat declaring nothing) and declares the grant the answer carries. */

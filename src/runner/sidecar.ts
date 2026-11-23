@@ -30,7 +30,7 @@ export function declarationFrom(held: string[]): string[] {
 }
 
 type SidecarOptions = Pick<RunnerOptions, 'api' | 'apiFor' | 'stateFile' | 'hostname' | 'session' |
-  'harness' | 'capabilities' | 'tierCeiling' | 'profile' | 'testHarness' | 'courses' | 'repository' | 'legNeeds'> & {
+  'harness' | 'activityPaths' | 'capabilities' | 'tierCeiling' | 'profile' | 'testHarness' | 'courses' | 'repository' | 'legNeeds'> & {
   beatEvery: number;
   concurrency: number;
   now: () => number;
@@ -410,7 +410,7 @@ export class Sidecar {
       // detector: the stub concludes its agent; this line only makes the wait visible.
       if (running.running && running.leg != null) {
         const leg = running.leg;
-        const signals = [...legActivity(x.checkout, running.ticket, leg), ...(x.legLineAt != null ? [{ name: 'drained-line', at: x.legLineAt }] : [])];
+        const signals = [...legActivity(x.checkout, running.ticket, leg, this.o.activityPaths), ...(x.legLineAt != null ? [{ name: 'drained-line', at: x.legLineAt }] : [])];
         const newest = signals.reduce((a, b) => (b.at > a.at ? b : a));
         this.o.log(`baton: ${running.ticket}'s ${leg} has run ${ageWords(this.o.now() - running.legAt)}; newest activity ${newest.at > 0 ? `${ageWords(this.o.now() - newest.at)} ago (${newest.name})` : 'not seen'}`);
       }

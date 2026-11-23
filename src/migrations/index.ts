@@ -67,6 +67,7 @@ import readEfficiency from './0065_read_efficiency.sql';
 import runnerViews from './0066_runner_views.sql';
 import retirePolicyPins from './0070_retire_policy_pins.sql';
 import accessSignIn from './0071_access_sign_in.sql';
+import harnessNames from './0076_harness_names.sql';
 import { isUniqueViolation, logEvent, mintRunId, type Random } from '../core/db';
 import type { Store } from '../core/ports';
 
@@ -214,4 +215,5 @@ export const MIGRATIONS: Migration[] = [
   { id: 70, sql: retirePolicyPins },
   { id: 71, sql: accessSignIn },
   { id: 75, sql: coreConditions },
+  { id: 76, sql: harnessNames },
 ];

@@ -12,13 +12,15 @@
 // session's claim is refused, since it carries BATON_PARENT, and leg sessions register no
 // runner of their own; an `unblocked` message is acknowledged. Node only: it spawns the legs'
 // child processes and runs git.
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { BatonApi, BatonRefusal } from '../../src/runner/api';
 import { Runner, legActivity, newestWrite } from '../../src/runner/runner';
+import { runMain } from '../../src/runner/main';
+import { HARNESS_ADAPTERS, type HarnessAdapter } from '../../src/runner/harness';
 import { legNeeds, readHead } from '../../src/runner/home';
 import { capabilitiesOf } from '../../src/shared/vocabulary.mjs';
 import { call as hostCall } from '#host';
@@ -170,6 +172,45 @@ afterEach(async () => {
 });
 
 describe('S-BTN-41 the runner', () => {
+  it('registers a third harness adapter and uses its command to claim and run a leg (B-284)', async () => {
+    home.write('.baton/third-agent.mjs', `console.log('third harness ran');\n`);
+    home.leg('build', `const [cmd, script] = process.env.BATON_AGENT_COMMAND.split(' ');
+      ev(ctx, execFileSync(cmd, [script], { cwd: ctx.checkout, encoding: 'utf8' }).trim());
+      return { suspend: true, reached: 'built', next: 'check' };`);
+    home.commit();
+    await home.post({ 'T-1': placed('filed', [], [['build', 'ready']]) });
+    const third: HarnessAdapter = {
+      name: 'third-agent', agentCommand: 'node .baton/third-agent.mjs',
+      activityPaths: () => [], usage: () => ({ records: [], children: [] }),
+    };
+    vi.stubEnv('BATON_PARENT', undefined);
+    vi.stubEnv('BATON_TOKEN', TOKENS['vm-a']);
+    vi.stubEnv('BATON_KEY', undefined);
+    vi.stubEnv('BATON_KEY_FILE', undefined);
+    vi.stubEnv('HOME', home.dir);
+    const handlers = new Set(process.listeners('SIGTERM'));
+    let finished = false;
+    const running = runMain([
+      '--harness', third.name, '--home', home.dir, '--hostname', 'vm-a', '--session', 'third-harness',
+      '--url', 'https://baton.test', '--repository', 'docs', '--executor', 'builtin', '--beat-every', '50',
+    ], { harnesses: [...HARNESS_ADAPTERS, third], transport: hostCall, fetch: () => {}, log: () => {} })
+      .then((code) => ({ code }), (error: unknown) => ({ error }))
+      .finally(() => { finished = true; });
+    const drain = process.listeners('SIGTERM').find((handler) => !handlers.has(handler)) as ((s: NodeJS.Signals) => void) | undefined;
+    try {
+      expect(drain).toBeDefined();
+      await until(async () => {
+        if (finished) throw new Error('runner stopped before completing its leg');
+        return rows("SELECT id FROM claims WHERE end_reason = 'suspended:built'");
+      });
+      expect(await rows('SELECT harness FROM runners WHERE session_name = ?', 'third-harness')).toEqual([{ harness: third.name }]);
+      expect(home.evidence()).toContain('third harness ran');
+    } finally {
+      if (!finished) drain?.('SIGTERM');
+      try { expect(await running).toEqual({ code: 0 }); } finally { vi.unstubAllEnvs(); }
+    }
+  }, 30_000);
+
   it('claims a ticket and takes the leg each result names, never inferring one', async () => {
     home.leg('build', `out(ctx, { leg: 'build', parent: process.env.BATON_PARENT ?? null, hasState: !!process.env.BATON_STATE, hasOldMarkers: !!(process.env.IR_BATON_PARENT || process.env.IR_BATON_STATE), session: ctx.session ?? null, run: ctx.run });
   return { reached: 'built', next: 'check', session: 's-1' };`);
