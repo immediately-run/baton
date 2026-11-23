@@ -296,11 +296,8 @@ Not built, each a design its rule below still states:
   - **The answer** is a `std:decision@1` attestation (R-BTN-191), `{id, leg, option, reached,
     ref?, answered_by?, commit?}`: `leg` a `kind: person` leg leaving Baton's station, `option` one
     of its options, `reached` the outcome that option names, `id` the question's when one is
-    posted. It is written by the person — an owner, a member whose `answers` hold the leg's
-    `asks` label (R-BTN-204) or a human-only key, through `baton decision answer` (R-BTN-127) or
-    the dashboard's Needs-you entry, each where the policy's `attestations` entry for
-    `std:decision@1` admits its writer (a session writes as its key's role, never `human`,
-    R-BTN-185); never by an administrator or a delegated key (R-BTN-57, R-BTN-186) — or attested by the sync from the answer the ticket shows (the markdown
+    posted. It is written by a person R-BTN-181's *A person's answer* admits, through `baton
+    decision answer` (R-BTN-127) or the dashboard's Needs-you entry — or attested by the sync from the answer the ticket shows (the markdown
     source's `answer:` field, R-BTN-74), where the policy's entry admits `sync`. Under
     `protected` the entry admits `human` alone, so an answer in git does not count there
     (R-BTN-191). An answer naming a leg that is not a person's, an `option` the leg does not

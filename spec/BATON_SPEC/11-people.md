@@ -141,14 +141,21 @@ built; their design is [the people and dashboard proposal](../proposals/people-a
     removing a member are `approvers.members` actions (R-BTN-188). A member key is an SSH or API
     key (R-BTN-159) holding the `member` role (§12.1); being a member of one repository confers
     nothing on another, and one key may be a member of several.
-  - **What a member may do.** A member reads its repository as the repository reads' principals
-    do (§14), and answers a person leg whose `asks` label (R-BTN-116) is one of its `answers`,
+  - **What a member may do.** A member calls the reads §14 lists for a *reader* of its repository,
+    and answers a person leg whose `asks` label (R-BTN-116) is one of its `answers`,
     as writer `member` (R-BTN-181). It holds no other action: no grant, owner, hold, bar,
     override, resolve, route, sync, setting, policy or credential.
+  - **The label is the course's.** A leg's `asks` label is written in its course file, so which
+    member's answer counts is as strong as that file: where courses are a control path that lands
+    only by a human's approval (R-BTN-184), so is the label; elsewhere a pusher who can change the
+    course can change who answers, as it can change the course's legs (§12's *Pushers are
+    legitimate*).
   - **Ending.** A member key stops acting for a repository at its next call after `owner member
-    remove` there, and for every repository after `baton admin key revoke` (R-BTN-57). Its
-    sessions lose each repository it leaves (R-BTN-155). Its acts are recorded as
-    `member:<fingerprint>`.
+    remove` there; its revocation everywhere is R-BTN-57's, and its sessions' end R-BTN-155's.
+    Its acts are recorded as `member:<fingerprint>`.
+  - **Where its answers count.** Where the policy's `attestations` entry for `std:decision@1`
+    admits `member` (R-BTN-188): the `cooperative` default does; a policy stored before members
+    existed does once an owner adds `member` to it.
 
 ### 11.3 The actions, the CLI and MCP
 
@@ -280,7 +287,7 @@ built; their design is [the people and dashboard proposal](../proposals/people-a
   | `admin freeze`, `admin unfreeze`, `admin seal`, `admin export [--with-history]`, `admin import <file>` | freeze, seal, export, import | R-BTN-88 |
   | `admin state` | the state in one request | R-BTN-57, R-BTN-179 |
   | `admin open` | an administrator's dashboard sign-in | R-BTN-155 |
-  | `owner open`, `admin confirm <code>`, `owner confirm <code>`, `admin sessions revoke --all`, `owner sessions revoke` | sign-in by code, confirmations and session revocation (proposed: [people and dashboard](../proposals/people-and-dashboard.md#3-sign-in-sessions-and-confirmed-actions)) | R-BTN-155 |
+  | `owner open`, `member open`, `admin confirm <code>`, `owner confirm <code>`, `admin sessions revoke --all`, `owner sessions revoke` | sign-in by code, confirmations and session revocation (proposed: [people and dashboard](../proposals/people-and-dashboard.md#3-sign-in-sessions-and-confirmed-actions)) | R-BTN-155 |
   | `owner mcp-key create <repository> --name <name> [--actions read \| <id>,…] [--ttl <days>]`, `owner mcp-key revoke <repository> <name>` | MCP keys (proposed: [people and dashboard](../proposals/people-and-dashboard.md#2-mcp)) | R-BTN-130 |
 
 - **R-BTN-197 (Baton states the client versions it serves).**
@@ -321,7 +328,8 @@ built; their design is [the people and dashboard proposal](../proposals/people-a
   - **Every person signs in, and a session is one key's.** An administrator (R-BTN-57), an owner
     (R-BTN-58) and a member (R-BTN-204) each sign in to the dashboard. A session is one key's and
     carries that key's role: it may call every action the key may call through the CLI, on the
-    same scope, and no other (R-BTN-129, R-BTN-186); an owner's or member's session reaches only
+    same scope, but the key-only acts (R-BTN-186), and no other (R-BTN-129); it never opens,
+    extends or confirms a session, its own included. An owner's or member's session reaches only
     the repositories its key still owns or is a member of. A session writes as its key's role,
     never as `human` (R-BTN-185).
   - **Authentication first, then one role.** A sign-in authenticates the person, then opens a
@@ -358,33 +366,52 @@ built; their design is [the people and dashboard proposal](../proposals/people-a
       authorizes also checks its line: the session ends as soon as the line binding its email to
       its key leaves `ACCESS_IDENTITIES`. Baton reads no assertion after the sign-in, so ending
       the Access session does not end Baton's.
-  - **One session per tab.** A sign-in opens a session for the tab that signed in. Another tab of
-    the same browser signs in as another key, or the same one, without ending the first.
-    - The browser holds one cookie, `__Host-baton_session` (R-BTN-16), set at its first sign-in;
-      each session is bound to that cookie. `POST /v1/login` answers the opened session's
-      `session_id`, which is no secret: the page keeps it in the tab's `sessionStorage` and sends
-      it as `Baton-Session: <session_id>` on every request.
-    - A request is a session's only when it carries the cookie and a `Baton-Session` naming a
-      live session bound to it; one without the other is `unauthenticated`.
-    - A tab with no session id — a new tab, or one whose session ended — is offered the browser's
-      live sessions, each by its role, key and repositories (`GET /v1/login`, the cookie alone),
-      to continue as one, and a new sign-in.
-    - `POST /v1/ui/logout` ends the tab's own session; the browser's others stay.
+  - **One session per tab; the browser is the security unit.** A sign-in opens a session for the
+    tab that signed in. Another tab of the same browser signs in as another key, or the same one,
+    without ending the first. The tabs keep a person's roles apart in the page, not from each
+    other: whoever holds the browser's cookie holds every session bound to it.
+    - The browser holds one cookie, `__Host-baton_session` (R-BTN-16). Every sign-in sets a new
+      value and rebinds the browser's live sessions to it, so a value read before a sign-in opens
+      none of the sessions after it; the cookie lives as long as the longest of them.
+      `POST /v1/login` answers the opened session's `session_id`, which is no secret: the page
+      keeps it in the tab's `sessionStorage` and sends it as `Baton-Session: <session_id>` on
+      every request.
+    - A request under `/v1/` carrying no signature and no `Authorization` header is a session's
+      only when it carries the cookie and a `Baton-Session` naming a live session bound to it;
+      one without the other is `unauthenticated`. A signed or bearer request is its key's,
+      whatever cookie it carries (R-BTN-16). A page load sends no header: the dashboard's pages
+      need no session, and `GET /conditions/{id}` redirects for any session bound to the cookie
+      whose repositories hold the id (R-BTN-163).
+    - A tab with no session id — a new tab, or one whose session ended — signs in; Baton lists no
+      session to a tab that has not.
+    - `POST /v1/ui/logout` ends the tab's own session; `{all: true}` ends every session bound to
+      the cookie and clears it, and the page offers it beside the other.
   - **Sessions.** A session lives 12 hours. It ends as soon as its key leaves its role, checked on
     every request: an administrator's when the key leaves `BATON_ADMIN_KEYS`; an owner's or
     member's when its key owns, or is a member of, no live repository, losing each repository its
     key leaves before then (R-BTN-58, R-BTN-204, R-BTN-47); any session when its key is revoked
-    (R-BTN-57). It calls `/v1/ui/*` and reads the `GET`s §14 lists a session on (§14, R-BTN-16);
-    a destructive action carries `confirm: true` (§12.2). Link tokens and the cookie's value are
+    (R-BTN-57).
+  - **Where a session calls.** A session calls an action at the action's own route, the one its
+    key would call — `/v1/owner/{repository}/*`, `/v1/admin/*`, `POST …/attestations`, the
+    repository reads — and the core authorizes it as its key's role (R-BTN-129); `/v1/ui/*`
+    holds only the acts with no key route. A destructive action carries `confirm: true`
+    (§12.2).
+  - **Authority-changing acts are confirmed by the key.** A session's act that an `approvers.*`
+    list governs (R-BTN-188), or that adds, changes or removes an owner, a member, a grant or
+    another credential, takes effect only once the session's key confirms it through a channel
+    other than that session ([the proposal's confirmation code](../proposals/people-and-dashboard.md#3-sign-in-sessions-and-confirmed-actions)).
+    Until a confirmation is built, such an act is taken with the key, and its control is drawn
+    disabled, naming the command. Link tokens and the cookie's value are
     stored as hashes (§12.1).
   - **Cloudflare Access, with no administrator key.** While `BATON_ADMIN_KEYS` names no key, a
     request to `/v1/ui/*` is authenticated by a verified Cloudflare Access
     assertion alone (verified as above, for an email in `OWNER_EMAILS`; `ACCESS_IDENTITIES` plays
     no part). Once an administrator key is configured, only a session authenticates `/v1/ui/*`
     (R-BTN-16).
-  - **Not built:** owners' and members' sessions, the role chosen after authentication and one
-    session per tab (B-76, B-320); sign-in by a code the key holder confirms, session revocation
-    and confirmation codes
+  - **Not built:** owners' and members' sessions, the role chosen after authentication, one
+    session per tab and signing out of the browser (B-76, B-320); sign-in by a code the key
+    holder confirms (`baton admin open`, `owner open` or `member open` binding it with that key,
+    the session that key's), session revocation and confirmation codes
     ([the proposal, §3](../proposals/people-and-dashboard.md#3-sign-in-sessions-and-confirmed-actions);
     B-76, B-206).
 
@@ -395,7 +422,7 @@ built; their design is [the people and dashboard proposal](../proposals/people-a
   - `/` is `root`.
   - Under `/repositories/{repository}`: `/board`, `/tickets`, `/tickets/{ticket}`, `/goals`,
     `/courses`, `/courses/{course}`, `/conditions`, `/conditions/{condition}`, `/runners`,
-    `/runners/{runner}`, `/grants`, `/owners`, `/tokens`, `/mcp-keys`, `/sync-keys`,
+    `/runners/{runner}`, `/grants`, `/owners`, `/members`, `/tokens`, `/mcp-keys`, `/sync-keys`,
     `/check-runners`, `/policy`, `/settings`, `/bars`, `/consents`, `/attestations`, `/sync`.
   - The tenant screens, an administrator's session only: `/repositories`, `/instances`,
     `/resources`, `/capacities`, `/settings`, `/state`, `/sessions`.

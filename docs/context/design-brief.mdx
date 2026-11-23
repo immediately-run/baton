@@ -58,14 +58,17 @@ away on the strip, and each screen is one entity.
 ## What it does
 
 Expedite, hold, cancel (a hold plus a release message), stop a leg, request a runner's status,
-resync a repository, resolve a condition and answer a person's leg (where the policy admits an
-`owner` writer; else the entry names `baton decision answer`) — an owner's session on its
-repositories, an administrator's everywhere; force-reap (with confirmation), confirm an adoption,
+resync a repository and resolve a condition — an owner's session on its repositories, an
+administrator's everywhere; answer a person's leg — an owner's session, or a member's holding the
+leg's `asks` label, where the policy admits its writer ([R-BTN-181](../../spec/BATON_SPEC/12-security.md#sec-12-8)), the
+`baton decision answer` line drawn beside the buttons; force-reap (with confirmation), confirm an adoption,
 confirm or release an unconfirmed completion, force a resync onto a rewritten head, and cut over a
 repository — an administrator's only (BATON_SPEC [R-BTN-155](../../spec/BATON_SPEC/11-people.md#sec-11-4)). Every control is a registry action
-behind the same `authorize` as the CLI and the API ([R-BTN-129](../../spec/BATON_SPEC/11-people.md#sec-11-3)). Repositories, owners, grants,
-probes, owner bars and required bars are shown read-only, each screen naming the CLI command
-that changes it.
+behind the same `authorize` as the CLI and the API ([R-BTN-129](../../spec/BATON_SPEC/11-people.md#sec-11-3)). Every screen draws the controls
+its session's role may call, as the CLI offers them ([R-BTN-186](../../spec/BATON_SPEC/12-security.md#sec-12-8)), each also naming its CLI command:
+repositories, owners, members, grants, probes and bars included. Opening sessions, confirming,
+minting bearer credentials and export stay with the key, and authority-changing acts wait for the
+key's confirmation ([R-BTN-155](../../spec/BATON_SPEC/11-people.md#sec-11-4)).
 
 ## Constraints a design must keep
 

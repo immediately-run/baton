@@ -35,17 +35,19 @@ None: a checkout, a terminal and a browser.
 
 ### What to build
 
-1. Sign-in per role: `/login?as=administrator|owner`, `POST /v1/login {role}` writing a
-   `login_codes` row with its `role`; `baton owner open` and `POST /v1/owner/login-links`
-   signed by an owner key bind only an owner row (`POST /v1/admin/login-links` only an
-   administrator row; any other code `not-found`), in R-BTN-155's two steps: `{code}` answers
-   `{role, client_addr, age_s}` and binds nothing, `baton owner open` prints it and asks
-   `bind? [y/N]` (no `--yes`), and `{code, confirm: true}` binds. The administrator's route
+1. Sign-in by code, the role the binding key's (R-BTN-155: authentication first, then the
+   role): `/login` sends `POST /v1/login {code_request: true}`, writing a `login_codes` row with
+   no role; `baton admin open`, `baton owner open` or `baton member open` binds it through
+   `POST /v1/admin/login-links`, `/v1/owner/login-links` or `/v1/member/login-links` signed by a
+   key of that role, and the session is that key's, in R-BTN-155's two steps: `{code}` answers
+   `{role, client_addr, age_s}` — the role the binding would give — and binds nothing, the
+   command prints it and asks `bind? [y/N]` (no `--yes`), and `{code, confirm: true}` binds. The administrator's route
    and `baton admin open` take the same two steps (B-172's items, folded in here), replacing
    today's one-time login link (`src/core/admin.ts` `loginLink`). A `not-found` at either step
    is no failed verification. S-BTN-124's preview cases.
-2. `dashboard_sessions` gains `role`, `key_fingerprint` and `repositories` (one new migration);
-   an owner's session drops a repository its key stops owning and ends when none remains, or
+2. `dashboard_sessions` gains `role` and `key_fingerprint` (one new migration, with item 8's);
+   an owner's session reads its key's repositories on every request, so it drops a repository
+   its key stops owning and ends when none remains, or
    when an administrator revokes the key (R-BTN-57); `POST /v1/owner/sessions/revoke`
    (`owner.sessions.revoke`, destructive).
 3. The `owner-session` principal in `authorize` (R-BTN-129): only entries whose `callers` list
@@ -76,10 +78,21 @@ None: a checkout, a terminal and a browser.
    re-keyed by a public `session_id` with `browser_hash`, `role` and `key_fingerprint` (one
    migration, with item 2's columns); `POST /v1/login` answers `session_id`, the shell keeps it in
    `sessionStorage` and sends `Baton-Session` on every request, and the front authorizes a
-   session request only when the header names a live session bound to the cookie. A tab with no
-   session id lists `GET /v1/login` and offers each session and a new sign-in. `ui.logout` ends
-   the tab's session only. Members' sessions land with B-320; build the role as data, not an
-   owner special case.
+   session request only when the header names a live session bound to the cookie. Every sign-in
+   sets a new cookie value and rebinds the browser's live sessions to it; the cookie lives as
+   long as its longest session. A tab with no session id signs in; nothing lists sessions to it.
+   `ui.logout` ends the tab's session; `{all: true}` ends every session bound to the cookie and
+   clears it. Members' sessions land with B-320; build the role as data, not an owner special
+   case.
+9. **A session calls its actions at their key routes** (R-BTN-155 *Where a session calls*,
+   R-BTN-16, §14's *Routes a session shares with the keys*). The front resolves the cookie and
+   `Baton-Session` on any `/v1/` route carrying no signature and no bearer, and the core
+   authorizes the session as its key's role through the same check as the key. Refuse R-BTN-186's
+   key-only acts to every session (login links, code binding, confirmations, minting an API key,
+   a registration token or an MCP key, export and import). An act an `approvers.*` list governs,
+   or that changes an owner, a member, a grant or a credential, answers `202 {confirm_code}` and
+   waits for the key's confirmation (item 4); until item 4 lands, it is refused to a session and
+   its control is drawn disabled, naming the command. S-BTN-315 and G-BTN-174.
 
 ### Do not
 

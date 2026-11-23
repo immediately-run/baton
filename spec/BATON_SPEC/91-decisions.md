@@ -147,7 +147,7 @@ One line per decision in force; the reasoning and the rejected alternatives in f
 - Chose check courses whose verdict is a command's exit status, the forge's own check runs being enough for `merge.checks: required` (R-BTN-114, R-BTN-153, R-BTN-183).
 - Chose either an SSH key or an API key for every administrator, owner and runner, over one kind per role (R-BTN-13, R-BTN-159).
 - Chose administrator keys anchored in the deployment's secret and owner and runner keys in SQLite behind a signed API, over keys in git or Cloudflare Access as identity; Access only binds an email to a key's session (R-BTN-57, R-BTN-155).
-- Chose dashboard sessions for every person role — administrator, owner and member — each one key's and carrying its role, scoped to what that key still holds, one per browser tab, the key chosen after authentication where the person holds several, over an administrator-only dashboard and over one session holding every role (R-BTN-155, R-BTN-129).
+- Chose dashboard sessions for every person role — administrator, owner and member — each one key's and carrying its role, scoped to what that key still holds, one per browser tab with the browser as the security unit, the key chosen after authentication where the person holds several, over an administrator-only dashboard and over one session holding every role (R-BTN-155, R-BTN-129).
 - Chose to keep a ticket's holds, cancel, attempts and backoff when it leaves the board and to restore them if its id returns (R-BTN-12).
 - Chose capabilities on each repository's grant over capabilities on the key (R-BTN-58).
 - Chose one machine key that may work, sync and report readings, syncing only where a grant opts in, over one role per machine key (R-BTN-102, R-BTN-146).
@@ -184,7 +184,7 @@ One line per decision in force; the reasoning and the rejected alternatives in f
 - Chose to run a trusted leg's override through the runner's executor, the deployment keeping it from the trusted runner's credential, over Baton sandboxing it (R-BTN-182, §12.8).
 - Chose the dashboard as a walk down the entity tree, one entity per screen, its controls the registry actions `ui.view` places there, over standalone console screens (R-BTN-129, §11.4).
 - Chose React and TypeScript with a build step, one bundle loading nothing from another origin, over a dependency-free dashboard (§12.3, §11.4).
-- Chose a session as capable as its key: every action its key's role may call through the CLI is a session's too, on the same scope, Stop one click, over a dashboard whose screens defer some actions to the CLI (R-BTN-155, R-BTN-186, R-BTN-119).
+- Chose a session as capable as its key: every action its key's role may call through the CLI is a session's too, on the same scope, but the key-only acts (opening or confirming a session, minting a bearer credential, export and import), its authority-changing acts confirmed by the key, Stop one click, over a dashboard whose screens defer some actions to the CLI (R-BTN-155, R-BTN-186, R-BTN-119).
 - Chose `baton ticket new` PR-first, the filing branch asked of the forge before any push to the default branch, `--direct` keeping the push (R-BTN-74, R-BTN-199).
 - Chose a person joining the leg's own agent session, asked by an `interact` condition, over pausing or answering such requests in Baton (R-BTN-195, R-BTN-69, R-BTN-107).
 - Chose a floor and a recommendation of client versions, stated on every response, over a single required version or an auto-updating CLI (R-BTN-197).

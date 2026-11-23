@@ -23,7 +23,8 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   Rules changed: R-BTN-155 (rewritten), R-BTN-186, R-BTN-181, R-BTN-116, R-BTN-129, R-BTN-127,
   R-BTN-57, R-BTN-159, R-BTN-16, the policy table's `attestations` default, §11's preamble,
   §12.1, §13.2, §14; S-BTN-308, G-BTN-57. Added: R-BTN-204, S-BTN-313, S-BTN-314, S-BTN-315,
-  G-BTN-174; four open questions; two Decisions entries changed, one replaced, one added. The
+  G-BTN-174; S-BTN-270, S-BTN-278, S-BTN-279, R-BTN-191, §12.2, `human-gates`; four open
+  questions; two Decisions entries changed, one replaced, one added. The
   owner, 2026-11-23, on finding that the dashboard could not answer a person leg ("This page cannot
   answer it — an administrator's session answers no person leg"): "this is fundamentally
   incompatible with Baton's promise that MCP, CLI and the dashboard UI are all equivalent baton
@@ -42,10 +43,30 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   the Decisions entry "a session's controls narrower than the CLI's: the tenant screens
   read-only, `ticket.route` and `ticket.adopt` the CLI's", which R-BTN-186 contradicts. Left open
   for the owner: human-only acts from a session and over MCP, confirmations without a terminal,
-  members' Access lines, and MCP for administrators and members. Found and left to tickets: seven
+  members' Access lines, and MCP for administrators and members. Found and left to tickets: ten
   session routes have no key route and no CLI command — force-reap, clearing a fence, confirming
   or releasing a completion, confirming an adoption, resolving a scope finding, accepting a held
-  post and cutover — the same defect the other way (B-321).
+  post, cutover, a resync dispatch, a status request and wind-down — the same defect the other
+  way (B-321). Review, round one: two fresh reviewers given the diff, one for consistency, one
+  for security. Security found that "a session may do what its key may" let a session mint
+  sessions, confirm its own acts, and mint API, registration and MCP credentials that outlive it,
+  and take the tenant's export; that authority-changing acts lost their confirmation; that a
+  cookie set once and a tab listing the browser's sessions let one tab reach another's role; that
+  logout left the browser's other sessions; that `approvers.members` did not list members; and
+  that a member's reach follows the course file's `asks` label. Fixed: R-BTN-186's key-only acts
+  (opening or confirming a session, minting a bearer credential, export and import); R-BTN-155's
+  confirmation of authority-changing acts by the key through another channel, CLI-only until one
+  is built; a new cookie value at every sign-in, no session listing, `logout {all: true}`, and the
+  browser named the security unit; the `approvers.members` row; R-BTN-204's statement that the
+  label is as strong as the course file. Consistency found that the rules let a session do its
+  key's writes but routed it only to `/v1/ui/*` and reads; that §14's *session* left six rows with
+  no caller; S-BTN-270, S-BTN-278 and S-BTN-279 contradicting the amendment; the header rule
+  breaking the condition redirect's page load; no sign-in for a member but Access; §12.2, R-BTN-191,
+  `human-gates`, §13.2 and the design brief behind; facts stated in several places; and three
+  more session-only acts. Fixed: R-BTN-155's *Where a session calls* (a session calls an action at
+  its key route), with R-BTN-16, §12.1 and §14 rewritten to match; the header rule scoped to
+  `/v1/` requests; each of the rest. The owner's promise is narrowed by the key-only acts and the
+  confirmation, which the owner should weigh: they keep a stolen session from outliving its key.
 
 - **2026-11-23 — Tiers retired (§6.6 gate 5, R-BTN-66).**
   Rules changed: R-BTN-5, R-BTN-9, R-BTN-34, R-BTN-35, R-BTN-50, R-BTN-58, R-BTN-66, R-BTN-74,

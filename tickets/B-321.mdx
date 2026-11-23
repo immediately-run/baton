@@ -1,5 +1,5 @@
 ---
-title: "B-321 — Every session-only act gets its key route and CLI command: force-reap, clearing a fence, confirming or releasing a completion, confirming an adoption, resolving a scope finding, accepting a held post, cutover"
+title: "B-321 — Every session-only act gets its key route and CLI command: force-reap, clearing a fence, confirming or releasing a completion, confirming an adoption, resolving a scope finding, accepting a held post, cutover, a resync dispatch, a status request and wind-down"
 id: B-321
 project: baton
 status: available
@@ -9,7 +9,7 @@ repos:
 tags:
   - roadmap-item
 tier: judgement
-description: "R-BTN-186: an action is available on every surface to the principals its callers list. Seven acts exist only as dashboard routes (`/v1/ui/claims/{id}/reap`, `…/fence-clear`, `…/confirm`, `…/release`, `/v1/ui/adoptions/{claim}/confirm`, `/v1/ui/scope/{id}/resolve`, `/v1/ui/board/accept`, `/v1/ui/cutover`) with no key route and no `baton` command, so an administrator without a browser cannot take them. Give each a key route under `/v1/admin/*` (or `/v1/owner/{repository}/*` where its rule lets an owner act) calling the same core function, and a command in R-BTN-127's tree; amend §14 and R-BTN-127 in the same PR. G-BTN-174 and S-BTN-315 then hold both ways."
+description: "R-BTN-186: an action is available on every surface to the principals its callers list. Ten acts exist only as dashboard routes (`/v1/ui/claims/{id}/reap`, `…/fence-clear`, `…/confirm`, `…/release`, `/v1/ui/adoptions/{claim}/confirm`, `/v1/ui/scope/{id}/resolve`, `/v1/ui/board/accept`, `/v1/ui/cutover`, `/v1/ui/resync`, and `/v1/ui/messages`' `status_request` and `wind-down`) with no key route and no `baton` command, so an administrator without a browser cannot take them. Give each a key route under `/v1/admin/*` (or `/v1/owner/{repository}/*` where its rule lets an owner act) calling the same core function, and a command in R-BTN-127's tree; amend §14 and R-BTN-127 in the same PR. G-BTN-174 and S-BTN-315 then hold both ways."
 topics:
   - baton
 owns: {}
@@ -19,7 +19,7 @@ depends_on: []
 
 **Brief:** the owner, 2026-11-23: MCP, the CLI and the dashboard are "equivalent baton interfaces
 each self-sufficient and capable of accomplishing baton-related tasks". The spec PR that wrote
-that into R-BTN-186's surface rule found these seven acts reachable only from the dashboard.
+that into R-BTN-186's surface rule found these acts reachable only from the dashboard.
 
 **Spec:** [BATON_SPEC §12.8](../spec/BATON_SPEC/12-security.md#sec-12-8) ([R-BTN-186](../spec/BATON_SPEC/12-security.md#sec-12-8)),
 [§11.3](../spec/BATON_SPEC/11-people.md#sec-11-3) ([R-BTN-127](../spec/BATON_SPEC/11-people.md#sec-11-3), [R-BTN-129](../spec/BATON_SPEC/11-people.md#sec-11-3)),
@@ -34,7 +34,8 @@ that into R-BTN-186's surface rule found these seven acts reachable only from th
    route calls — one implementation, two routes. Destructive ones take `confirm: true` (§12.2).
 2. A command for each in R-BTN-127's table (`admin claim reap`, `admin claim fence-clear`,
    `admin claim confirm|release`, `admin adoption confirm`, `owner scope resolve` or `admin …`
-   per its rule, `admin repo accept-post`, `admin repo cutover`), with `--json`.
+   per its rule, `admin repo accept-post`, `admin repo cutover`, a resync dispatch, `runner status` and
+   `runner wind-down` or their owners' forms), with `--json`.
 3. The §14 rows and R-BTN-127's rows in the same PR, and the ux page's *Session-only acts* gap
    removed.
 

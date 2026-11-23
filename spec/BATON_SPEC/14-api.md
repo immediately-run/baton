@@ -18,10 +18,11 @@ updates its `last_seen_at`. A destructive action takes `confirm: true` in its bo
 answer `rate-limited` or `quota` (R-BTN-135). Every request carries `Baton-Client` and every
 response `Baton-Client-Versions` (R-BTN-197).
 
-**Reads a session shares with the keys.** Every `GET` under **Repository reads**, and the
-owner's `GET …/grants` and `GET …/policy/log`, also answers a dashboard session — an
-administrator's on every live repository, an owner's or member's on its key's — with the entry, query and JSON a key gets
-(R-BTN-179). The request is the session's when it carries the session cookie and neither a
+**Routes a session shares with the keys.** A route whose callers include a key's role also
+answers a session of that role (R-BTN-155), on its key's scope — an administrator's on every live
+repository — with the entry, query and JSON the key gets (R-BTN-179), R-BTN-186's key-only acts
+and the routes R-BTN-179 keeps to a key (`GET /v1/admin/state`) excepted. The request is the
+session's when it carries the session cookie with a `Baton-Session` header and neither a
 signature nor an `Authorization` header; a signed request or a bearer is that key's and its
 cookie decides nothing (R-BTN-16). On these reads a repository the caller cannot read —
 unowned, ungranted, unregistered or retired — answers `forbidden` for every principal; an
@@ -81,9 +82,9 @@ here; every other cause is its rule's.
   R-BTN-186's; a row does not repeat them.
 - *admin*: a key in the administrator set. R-BTN-188 says which administrator writes a
   repository's policy closes.
-- *session*: a dashboard session (R-BTN-155), same-origin JSON (R-BTN-16), of every role whose
-  key may take the row's action on its key route (R-BTN-186); `session (administrator)`, `session
-  (owner)` or `session (owner, member)` where a row narrows it.
+- *session*: a dashboard session (R-BTN-155) of any role, same-origin JSON (R-BTN-16), unless
+  the row narrows it — `session (administrator)`, `session (administrator, owner)`; on a key's
+  route a session of each role the row's key callers name is a caller as well (above).
 - *sync*: the repository's sync credential — a sync key, a CI identity token, or a machine key
   naming `?repository=` (R-BTN-93, R-BTN-102).
 - *instrument*: an instrument key.
@@ -133,11 +134,11 @@ here; every other cause is its rule's.
 | `POST /v1/repositories/{repository}/sequences/{kind}/next` | reader, or sync | `{floor?, for?}`, or an empty body; a body that is not JSON is `invalid-params` | `{kind, number}` | R-BTN-199 |
 | **Owner** | | | | |
 | `POST /v1/owner/{repository}/tickets/{ticket}/resolve` | owner | `{restart, condition_id?}`; `condition_id` required when the ticket has more than one open condition taking a restart | `{ok: true}`; `invalid-params` for a restart the condition does not offer | R-BTN-163 |
-| `POST /v1/repositories/{repository}/attestations` | an owner key, a member key, a `human_only` key, or session (owner, member) | `{type, subject, value, nonce, lapses_at?}`; the writer is the credential, a session's its key's role (writer `owner` or `member`); a member writes only a `std:decision@1` for a leg whose `asks` label it answers | `{id}` | R-BTN-116, R-BTN-181, R-BTN-185, R-BTN-191, R-BTN-204 |
+| `POST /v1/repositories/{repository}/attestations` | an owner key, a member key or a `human_only` key | `{type, subject, value, nonce, lapses_at?}`; the writer is the credential, a session's its key's role; who may write a person's answer is R-BTN-181's | `{id}` | R-BTN-116, R-BTN-181, R-BTN-185, R-BTN-191, R-BTN-204 |
 | `POST /v1/owner/{repository}/grants` | owner | `{public_key, hostname?, label?, capabilities[], max_claims?, confirm_span?}`, or `{name, api_key: true, capabilities[], max_claims?}` | `{ok, pending: true}`; `{api_key}` once for the second form; `conflict` | R-BTN-4, R-BTN-58, R-BTN-117, R-BTN-146 |
 | `POST /v1/owner/{repository}/grants/{fingerprint}/revoke` | owner | `{confirm: true}` | `{ok: true}` | R-BTN-58 |
 | `GET /v1/owner/{repository}/grants` | owner, session | — | `{repository, owners: [{repository_id, fingerprint, kind: ssh \| api, human_only, added_by, added_at}], grants: [{credential_id, hostname, label, repository_id, capabilities, max_claims, role, domain, set_by, granted_by, granted_at, other_repositories[]}], settings, bars: [{…, set_by}], sync_keys: [{fingerprint, role, added_by, added_at}], dependency_consents: [{repository, granted_by, granted_at}], members: [{fingerprint, kind: ssh \| api, answers[], added_by, added_at}], not_built: {<kind>: <the rule or ticket that builds it>}, server_time}`; a key is listed by its fingerprint, never its line | R-BTN-93, R-BTN-146, R-BTN-179 |
-| `POST /v1/owner/{repository}/members` | owner, session (owner) | `{public_key, answers[]}` to add; `{fingerprint, answers[]}` to change; `{fingerprint, remove: true, confirm: true}` | `{ok: true}`; `conflict` for a key holding another role (§12.1); not built (B-320) | R-BTN-204 |
+| `POST /v1/owner/{repository}/members` | owner | `{public_key, answers[]}` to add; `{fingerprint, answers[]}` to change; `{fingerprint, remove: true, confirm: true}` | `{ok: true}`; `conflict` for a key holding another role (§12.1); not built (B-320) | R-BTN-204 |
 | `POST /v1/owner/{repository}/owners` | owner | `{public_key}` to add; `{fingerprint, remove: true, confirm: true}` | `{ok: true}`; `conflict` | R-BTN-58 |
 | `POST /v1/owner/{repository}/bars` | owner | `{course, tag, legs?, applies, starts_at?, ends_at?, release_holders?, reason}` | `{id}` | R-BTN-67 |
 | `POST /v1/owner/{repository}/bars/{id}/lift` | owner | — | `{ok: true}` | R-BTN-67, R-BTN-186 |
@@ -175,13 +176,12 @@ here; every other cause is its rule's.
 | `POST /v1/admin/import` | admin | an export | `{ok: true}`; `conflict`, `invalid-params` | R-BTN-88, R-BTN-158 |
 | **Dashboard** | | | | |
 | `POST /v1/login` | none, or a verified Cloudflare Access assertion | `{token}` or `{access: true, key?}`, exactly one (else `invalid-params`); `key` a fingerprint from `choose` | `{ok: true, session_id, role}` and the session cookie, when the browser has none; `{choose: [{fingerprint, role, repositories}]}` and no cookie where the assertion's email opens several keys and names none (per-role and per-tab sessions not built: B-76); else `unauthenticated` (or `unavailable`) and no cookie | R-BTN-155 |
-| `GET /v1/login` | the session cookie alone | — | `{sessions: [{session_id, role, key_fingerprint, repositories, via, expires_at}]}`: the live sessions bound to the browser's cookie, for a tab to continue as one; not built (B-76) | R-BTN-155 |
-| `POST /v1/ui/logout` | session | `{}` | `{ok: true}`; the tab's own session ends (`ui.logout`), and the cookie is cleared when no session of the browser remains | R-BTN-155 |
-| `POST /v1/ui/messages` | session | `{to_runner_id, kind: "release" \| "status_request" \| "wind-down", payload}`; Stop is `{kind: "release", payload: {ticket_id, reason: "requested"}}` | `{id}`; `forbidden` for a `release` whose ticket `to_runner_id` does not hold; any other kind `invalid-params` | §6, R-BTN-119 |
-| `POST /v1/ui/overrides/{ticket}` | session | `{expedite}` or `{hold}` | `{ok: true}` | §6 |
-| `POST /v1/ui/board/accept` | session | `{repository, sha}` | `{ok: true}` (`repo.accept-post`); `not-found` for no such held history | R-BTN-11 |
-| `POST /v1/ui/resync` | session | `{repository}` | `{ok: true}` (`repo.resync`): the repository's sync workflow is dispatched, as a delivery dispatches it; `conflict` within 30 seconds of the last one or with no sync workflow registered; `invalid-params` for `force` or `sha` | R-BTN-73, R-BTN-94 |
-| `POST /v1/ui/scope/{id}/resolve` | session | `{}` | `{ok: true}`; `not-found` for none open | §12.9 |
+| `POST /v1/ui/logout` | session | `{}` or `{all: true}` | `{ok: true}`; the tab's own session ends (`ui.logout`), and the cookie is cleared when no session of the browser remains; `all` ends every session bound to the cookie and clears it (not built: B-76) | R-BTN-155 |
+| `POST /v1/ui/messages` | session (administrator, owner) | `{to_runner_id, kind: "release" \| "status_request" \| "wind-down", payload}`; Stop is `{kind: "release", payload: {ticket_id, reason: "requested"}}` | `{id}`; `forbidden` for a `release` whose ticket `to_runner_id` does not hold; any other kind `invalid-params` | §6, R-BTN-119 |
+| `POST /v1/ui/overrides/{ticket}` | session (administrator, owner) | `{expedite}` or `{hold}` | `{ok: true}` | §6 |
+| `POST /v1/ui/board/accept` | session (administrator) | `{repository, sha}` | `{ok: true}` (`repo.accept-post`); `not-found` for no such held history | R-BTN-11 |
+| `POST /v1/ui/resync` | session (administrator, owner) | `{repository}` | `{ok: true}` (`repo.resync`): the repository's sync workflow is dispatched, as a delivery dispatches it; `conflict` within 30 seconds of the last one or with no sync workflow registered; `invalid-params` for `force` or `sha` | R-BTN-73, R-BTN-94 |
+| `POST /v1/ui/scope/{id}/resolve` | session (administrator, owner) | `{}` | `{ok: true}`; `not-found` for none open | §12.9 |
 | `POST /v1/ui/claims/{id}/reap` | session (administrator) | `{confirm: true}` | `{ok: true}` | §9 |
 | `POST /v1/ui/claims/{id}/fence-clear` | session (administrator) | `{confirm: true}` | `{ok: true}`; `conflict` when the claim's fence is not pending | R-BTN-19 |
 | `POST /v1/ui/claims/{id}/confirm`, `…/release` | session (an administrator's) | `{confirm: true}` | `{ok: true}`; `not-found` for a claim that is no unconfirmed completion. Each acts at once, as `…/reap` does: the confirmation code of R-BTN-155 is not built (B-76) | R-BTN-10 |

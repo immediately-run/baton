@@ -20,7 +20,7 @@ behaviour, bounds and defaults. The tables of designs not built yet are in
   `repositories.id`; `credential_id` and `fingerprint` are a key's fingerprint (`SHA256:…` for an
   SSH key, `bak_<id>` for an API key); `runner_id` and `claim_id` are integers.
 - An actor column (`set_by`, `added_by`, `granted_by`, `created_by`, `actor`) holds
-  `admin:<fp>`, `owner:<fp>`, `runner:<id>`, `runner:<fp>` (a runner key with no runner session
+  `admin:<fp>`, `owner:<fp>`, `member:<fp>`, `runner:<id>`, `runner:<fp>` (a runner key with no runner session
   behind the call), `sync`, `alarm` (or `alarm:<reason>`, e.g. `alarm:leg-timeout`) or `server`.
 - When a ticket leaves the board (closed or dropped), exactly its board rows are deleted:
   `tickets`, `ticket_requires`, `ticket_depends`, `ticket_stations`, `ticket_next_legs`,
@@ -71,7 +71,7 @@ checked in the transaction that adds or first accepts a key (§12.1).
 
 | Table | Key | Columns | Purpose |
 |---|---|---|---|
-| `credentials` | `id` (fingerprint) | `kind` (`runner` — a machine key; `probe` — an instrument key), `public_key` (an SSH public key or an API key's public line; unique), `label`, `hostname` (machine keys; unique among live ones), `expires_at`, `last_used_at`, `created_by`, `revoked_at` | Every key but owners', sync keys and administrators' (R-BTN-13, R-BTN-102, R-BTN-117, R-BTN-159) |
+| `credentials` | `id` (fingerprint) | `kind` (`runner` — a machine key; `probe` — an instrument key), `public_key` (an SSH public key or an API key's public line; unique), `label`, `hostname` (machine keys; unique among live ones), `expires_at`, `last_used_at`, `created_by`, `revoked_at` | Every key but owners', members', sync keys and administrators' (R-BTN-13, R-BTN-102, R-BTN-117, R-BTN-159) |
 | `repository_owners` | `(repository_id, fingerprint)` | `public_key`, `human_only`, `fido_attestation`, `added_by`, `added_at`, `removed_at` | Owner keys (R-BTN-58, R-BTN-185) |
 | `repository_members` | `(repository_id, fingerprint)` | `public_key`, `answers` JSON (the `asks` labels it answers), `added_by`, `added_at`, `changed_by`, `changed_at`, `removed_at` | Member keys (R-BTN-204); not built (B-320) |
 | `runner_grants` | `(credential_id, repository_id)` | `capabilities` JSON (expanded), `sync`, `role`, `checker` (0/1), `domain` (a label; NULL when unset), `max_claims`, `set_by` (the credential that set the role, mark and domain), `granted_by`, `granted_at`, `accepted_at` (NULL while pending), `revoked_at` | What a machine key may do where (R-BTN-4, R-BTN-58, R-BTN-146, R-BTN-180, R-BTN-188) |

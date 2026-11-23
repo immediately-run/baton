@@ -471,7 +471,7 @@ is stale. Never edit it by hand.
 | S-BTN-275 | one condition | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-276 | what waits on a person | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-277 | the address of a condition | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| S-BTN-278 | a session writes no attestation | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-278 | who writes a person's answer | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-279 | the attestations read | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-280 | the mirror's view | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-281 | a session's resync and accept | [`15-verification.md`](BATON_SPEC/15-verification.md) |

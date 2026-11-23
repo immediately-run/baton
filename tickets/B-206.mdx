@@ -10,7 +10,7 @@ tags:
   - roadmap-item
 order: 1205
 tier: judgement
-description: "The second shell ticket of BATON-UI-V2: the mockup's frame (sidebar with the brand, the entries and their counts, the freshness line; a main column with a page header), the two components every screen renders a value through — Text (string coercion only) and View (R-BTN-112's ui renderer: its node tree mapped to React elements, schemas fetched once per id from B-217's repo.schemas) — sign-in per role: /login?as=… runs R-BTN-155's code flow, and any screen that answers unauthenticated draws the same sign-in in place, with the key choice where the person holds several, keeping its URL; and POST /v1/ui/logout (ui.logout), which §14 lists and no code serves. No router, polling or entity screen yet. Requires: B-193, B-192, B-204, B-217, B-76."
+description: "The second shell ticket of BATON-UI-V2: the mockup's frame (sidebar with the brand, the entries and their counts, the freshness line; a main column with a page header), the two components every screen renders a value through — Text (string coercion only) and View (R-BTN-112's ui renderer: its node tree mapped to React elements, schemas fetched once per id from B-217's repo.schemas) — sign-in: /login runs R-BTN-155's code flow, the role the binding key's, and any screen that answers unauthenticated draws the same sign-in in place, with the key choice where the person holds several, keeping its URL; and POST /v1/ui/logout (ui.logout), which §14 lists and no code serves. No router, polling or entity screen yet. Requires: B-193, B-192, B-204, B-217, B-76."
 topics:
   - baton
 owns: {}
@@ -58,13 +58,13 @@ logout and revoke"; the logout route is built here and B-46's item cites this ti
    `{tag, cls, text, children}`; `View` maps that tree to React elements with text children only
    — no `innerHTML`, no ref'd container. A schema the read does not know, or one with no view,
    falls back to pretty-printed JSON as text (§12.3).
-4. **Sign-in.** `/login?as=administrator|owner` heads itself by role and runs R-BTN-155's steps:
-   `POST /v1/login {role}`, show the eight-character code with the one CLI line that binds it
-   (`baton admin open` or `baton owner open`), poll `{poll: true}` every two seconds, and on
+4. **Sign-in.** `/login` runs R-BTN-155's steps (B-76 item 1): `POST /v1/login {code_request:
+   true}`, show the eight-character code with the CLI lines that bind it (`baton admin open`,
+   `baton owner open` or `baton member open`, the session taking the binding key's role), poll `{poll: true}` every two seconds, and on
    the session cookie go to `/`. On any screen whose read answers `unauthenticated`, the shell
    draws the same sign-in in place — Cloudflare Access where the instance has it, the code
-   sign-in otherwise, then the key choice R-BTN-155 asks for where the person holds several, and
-   in a new tab the browser's live sessions to continue as — keeps the URL it is on and
+   sign-in otherwise, then the key choice R-BTN-155 asks for where the person holds several —
+   keeps the URL it is on and
    continues there once signed in; no return URL is carried in a
    query (an open-redirect surface).
 5. **`POST /v1/ui/logout`** (`ui.logout`): §14 lists it and no code serves it; build it — the

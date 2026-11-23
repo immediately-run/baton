@@ -36,11 +36,13 @@ description: "BATON_SPEC — Open questions."
   human-only identity for that one act — a WebAuthn assertion by a passkey or security key
   registered to it, over the action and its parameters — and MCP hands the act to that proof
   instead of refusing it. Until it is decided, the CLI with the human-only key is the one path.
-- **Confirmed actions without a terminal (R-BTN-155).** The proposal confirms a session's
-  authority-changing act by its minting key through the CLI (`baton admin confirm`, `baton owner
-  confirm`), which a person signed in through Access may not have at hand. The recommendation:
-  the same per-act WebAuthn proof, by a passkey registered to the session's key, confirms in the
-  page; the CLI code stays for keys with no passkey.
+- **A confirmation channel without a terminal (R-BTN-155).** A session's authority-changing
+  act is confirmed by its key through a channel other than the session; the proposal's channel
+  is the CLI (`baton admin confirm`, `baton owner confirm`), which a person signed in through
+  Access may not have at hand. Confirming stays required whatever is decided. The
+  recommendation: a WebAuthn assertion by a passkey or security key registered to the session's
+  key, over the action and its parameters, made in the page but checked against a key the
+  session cannot register or replace; the CLI code stays for keys with no passkey.
 - **Members' Access lines (R-BTN-155, R-BTN-204).** Only whoever controls the deployment writes
   `ACCESS_IDENTITIES`, so a member who signs in through Access needs an administrator as well as
   an owner. Should an owner bind a member's email to the member's key in Baton's state, for that
