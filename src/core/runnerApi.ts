@@ -15,7 +15,7 @@ import { ticketRepositories } from './codeRepos';
 import { DEFAULT_TRANSCRIPT_REPOS, repositoryOf, transcriptReposOf } from './registry';
 
 export { DEFAULT_TRANSCRIPT_REPOS };
-import { capabilitiesOf } from '../shared/vocabulary.mjs';
+import { capabilitiesOf } from '../vendor/vocabulary.mjs';
 import { compareVersions } from '../shared/versions.mjs';
 import {
   REPORT_HORIZON_MS, REPORT_KEYS_MAX, checkAck, checkActivity, checkHeartbeat, checkMessage, checkShadowReport, bad, HOSTNAME, isGrantedKey,

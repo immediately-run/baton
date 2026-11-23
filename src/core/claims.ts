@@ -8,7 +8,7 @@ import { BatonError } from './http';
 import { sessionLinkWhy, transcriptUrl } from './links';
 import { groupBy, isUniqueViolation, logEvent, mintRunId, randomHex, type Random } from './db';
 import type { Deprecated } from './deprecated';
-import { fitsTier, capabilitiesOf, TIERS } from '../shared/vocabulary.mjs';
+import { fitsTier, capabilitiesOf, TIERS } from '../vendor/vocabulary.mjs';
 import { afterFailure, countsAsFailed, nonRetryableClass, resumeRecord, type ResumeActivity } from './attempts';
 import { checkAccept, checkAdvance, checkClaim, checkConfirm, checkDecisionAnswer, checkEnd, checkOverride, checkResolve, isGrantedKey, type ClaimPreference, type End, type Output } from './validate';
 import { ceilingIn, repositoryOf, transcriptReposOf } from './registry';

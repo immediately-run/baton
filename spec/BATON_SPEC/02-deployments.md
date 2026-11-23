@@ -39,10 +39,12 @@ process for development and CI. Nothing crosses a tenant.
 - **Code.** Schema migrations are numbered and append-only; the object refuses to serve until
   all are applied. There is no staging instance: a home repository binds to one Baton
   (R-BTN-56).
-- **R-BTN-37 (shared modules are vendored by hash).** The Worker imports byte-identical copies
-  of the pure modules it shares with another repository from `src/shared/`, listed in
-  `src/shared/manifest.json` with the commit they came from and each file's SHA-256. The suite
-  checks every copy against the manifest and fails on drift. Code with course meaning (`locate`,
+- **R-BTN-37 (shared modules are vendored by hash).** Baton keeps byte-identical copies in
+  `src/vendor/`. The source is `immediately-run/docs`: `scripts/lib/baton.mjs`,
+  `scripts/lib/vocabulary.mjs`, `scripts/lib/sessionUsage.mjs`, `scripts/lib/batonSync.mjs`,
+  and `scripts/lib/ticketPr.mjs`. `src/vendor/manifest.json` records the source commit and
+  each file's SHA-256. The suite checks every copy against the manifest and fails on drift.
+  Code with course meaning (`locate`,
   ranking, activity matchers) is never vendored: the sync posts its results, and core compares
   strings and integers only.
 - **R-BTN-32 (one clock, with a production-inert test seam).** Every component reads time
@@ -234,4 +236,3 @@ process for development and CI. Nothing crosses a tenant.
     non-zero naming the code. Neither marks a lease lost at once, but an unanswered heartbeat
     still runs the lease clock (G-BTN-4). `too-large` is reported, never retried. A capped forge
     webhook is a lost trigger, covered by the sync's other triggers (R-BTN-94).
-

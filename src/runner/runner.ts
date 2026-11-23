@@ -2,7 +2,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { writeSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
-import { batonNow } from '../shared/baton.mjs';
+import { batonNow } from '../vendor/baton.mjs';
 import type { LocalQueue } from './queue';
 import type { RefState } from './audit';
 import { BatonApi, BatonRefusal, batonUnreachable } from './api';
