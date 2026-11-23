@@ -140,9 +140,8 @@ export function holdLiteralTail(text: string, literals: readonly string[]): { he
 
 /** R-BTN-144 across a stream, which a line-at-a-time sink cannot do. Class 6's key block is
  *  `src/shared/mask.mjs`'s stream (`createMasker`: a block's lines are held until its `END` line
- *  or `KEY_HOLD` bytes, and classes 5 and 6 are masked on every line as it leaves) — each line
- *  is masked of its class-7 literals and handed to that stream, never the other way round: a
- *  block's body lines must reach the holder as they came, or the holder never sees the block.
+ *  or `KEY_HOLD` bytes). Recognize boundaries on the original lines, before a class-7 hold or
+ *  replacement can change a delimiter. Apply class 7 and then class 5 to the remaining text.
  *  Class 7 is masked here, as each line is handed on: the tail `holdLiteralTail` says a literal
  *  still extends is held back, unlogged, until the next line completes the literal (masked as
  *  one) or shows it will never complete — and a hold that never completes leaves as `***`,
@@ -167,16 +166,11 @@ export function createLegMasker(secrets: readonly string[]) {
   // `\n`), so one is dropped and the value is masked where it stands; a `\r\n` inside a value is
   // the boundary the framing hands back as `\n` alone.
   const literals = [...new Set(secrets.map((secret) => secret.replace(/\r\n/g, '\n').replace(/\r?\n$/, '')).filter((secret) => secret !== ''))];
-  const block = createMasker();
   // What is held back, unlogged: a tail some literal may still extend.
   let held = '';
   // How many of `held`'s leading bytes already left, as part of a `***` (a literal the hold's
   // cut crossed): those bytes leave again as nothing, never in clear and never as more `***`.
   let gone = 0;
-  const said: string[] = [];
-  const out = (text: string) => {
-    for (const line of text.split('\n')) said.push(block.push(line));
-  };
   /** Take `text` — the held bytes first (`hold` of them, `gone` of those already left), then the
    *  new ones — emit all of it but the tail a literal may still extend, and hold that. The held
    *  bytes are one masked run, merged with any literal they are part of; a run wholly of bytes
@@ -207,41 +201,36 @@ export function createLegMasker(secrets: readonly string[]) {
       if (e > cut) nextGone = emitsNew ? e - cut : Math.max(0, left - cut);
     }
     text_ += text.slice(at, cut);
-    if (text_ !== '' || cut > 0) out(text_);
     held = tail;
     gone = Math.min(nextGone, tail.length);
+    // A restored line boundary can outlive the held bytes on either side of it.
+    return text_.includes('\n') ? text_.split('\n').filter(Boolean).join('\n') : text_;
   };
+  const block = createMasker((line: string) => {
+    if (held === '') return take(line, 0, 0);
+    // The line before ended inside what may be a literal, and this line may complete it:
+    // with the boundary the framing ate (`held\nline` — a newline inside the value) or
+    // without it (`heldline` — the value wrapped across the line). The candidate a literal
+    // crosses the boundary of wins; else the one whose hold stays open the longest; else the
+    // hold was never a literal's start, and leaves masked, before the line on its own.
+    const h = held.length;
+    const joined = [held + line, `${held}\n${line}`];
+    const crosses = joined.find((text) => literalSpans(text, literals).some(([s, e]) => s < h && e > h));
+    const open = joined
+      .map((text) => ({ text, tail: holdLiteralTail(text, literals).tail }))
+      .filter((j) => j.tail !== '' && j.text.length - j.tail.length < h)
+      .sort((a, b) => b.tail.length - a.tail.length)[0]?.text;
+    return take(crosses ?? open ?? `${held}\n${line}`, h, gone);
+  });
   return {
-    push(line: string): string {
-      said.length = 0;
-      if (held === '') {
-        take(line, 0, 0);
-      } else {
-        // The line before ended inside what may be a literal, and this line may complete it:
-        // with the boundary the framing ate (`held\nline` — a newline inside the value) or
-        // without it (`heldline` — the value wrapped across the line). The candidate a literal
-        // crosses the boundary of wins; else the one whose hold stays open the longest; else the
-        // hold was never a literal's start, and leaves masked, before the line on its own.
-        const h = held.length;
-        const joined = [held + line, `${held}\n${line}`];
-        const crosses = joined.find((text) => literalSpans(text, literals).some(([s, e]) => s < h && e > h));
-        const open = joined
-          .map((text) => ({ text, tail: holdLiteralTail(text, literals).tail }))
-          .filter((j) => j.tail !== '' && j.text.length - j.tail.length < h)
-          .sort((a, b) => b.tail.length - a.tail.length)[0]?.text;
-        take(crosses ?? open ?? `${held}\n${line}`, h, gone);
-      }
-      return said.filter(Boolean).join('\n');
-    },
+    push: block.push,
     flush(): string {
-      said.length = 0;
       // The stream ended inside what may be a literal: those bytes leave masked, not verbatim —
       // unless every one of them already left as the `***` of a literal the head held whole.
-      if (held !== '' && gone < held.length) said.push(block.push('***'));
+      const tail = gone < held.length ? '***' : '';
       held = '';
       gone = 0;
-      said.push(block.flush());
-      return said.filter(Boolean).join('\n');
+      return [tail, block.flush()].filter(Boolean).join('\n');
     },
   };
 }

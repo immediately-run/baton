@@ -59,4 +59,18 @@ describe('B-169 the masking pattern', () => {
     expect(mid.push('MIIE')).toBe('');
     expect(mid.push('-----END RSA PRIVATE KEY-----')).toBe('***');
   });
+
+  it('S-BTN-98: gives the line masker only text outside a private-key block', () => {
+    const seen: string[] = [];
+    const m = createMasker((line: string) => {
+      seen.push(line);
+      return line.toLowerCase();
+    });
+    expect(m.push('KEY: -----BEGIN RSA PRIVATE KEY-----')).toBe('key:');
+    expect(m.push('placeholder')).toBe('');
+    expect(m.push('-----END RSA PRIVATE KEY-----')).toBe('***');
+    expect(m.push('DONE')).toBe('done');
+    expect(seen).toEqual(['KEY: ', 'DONE']);
+    expect(m.flush()).toBe('');
+  });
 });
