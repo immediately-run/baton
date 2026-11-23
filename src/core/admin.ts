@@ -375,7 +375,7 @@ export class Admin {
    *  its sync keys, and — for a repository registered before owners existed (BATON_REPOSITORIES'
    *  seed; spec-silent, recorded on R3-1240) — owner keys. Everything else is its registration's. */
   private async changeRepository(actor: string, id: string, b: Record<string, unknown>) {
-    only(b, ['id', 'weight', 'tiers', 'sync_keys_add', 'sync_keys_remove', 'owner_keys_add', ...LINK_FIELDS], 'body');
+    only(b, ['id', 'weight', 'tiers', 'sync_keys_add', 'sync_keys_remove', 'confirm', 'owner_keys_add', ...LINK_FIELDS], 'body');
     // A change names something to change; an empty one is a caller's mistake (round 3, 3-A-1).
     if (Object.keys(b).length === 1) bad('body', 'a change names at least one field besides id');
     const newOwners = b.owner_keys_add === undefined ? [] : await this.ownerKeys(b.owner_keys_add, 'owner_keys_add');
@@ -390,6 +390,8 @@ export class Admin {
       ? (b.sync_keys_add as { public_key: string; role: 'sync' | 'mirror' }[]) : bad('sync_keys_add', 'must be at most 4 {public_key, role: sync|mirror}');
     const remove = b.sync_keys_remove === undefined ? [] : Array.isArray(b.sync_keys_remove) && b.sync_keys_remove.length <= 4
       ? b.sync_keys_remove.map((f, i) => fingerprintOf(f, `sync_keys_remove[${i}]`)) : bad('sync_keys_remove', 'must be at most 4 fingerprints');
+    if (remove.length && b.confirm !== true) throw new BatonError('confirm-required', 'revoking sync keys takes confirm: true');
+    if (!remove.length && b.confirm !== undefined) bad('confirm', 'only with sync_keys_remove');
     // §11's remote, web_base, ci_identity and workflows: the whole registration they leave behind is
     // checked as a registration is — never the forge or forge path (R-BTN-92; round 2, 2-A-4).
     let linked: Registration | null = null;
@@ -569,7 +571,8 @@ export class Admin {
    *  with it, so its next call is refused. An administrator key is revoked by editing the secret.
    *  R-BTN-188 (B-145): refused while an approver list or a floor's `remove_by` the key alone
    *  satisfies would be left with no live credential. */
-  async revokeKey(actor: string, raw: string) {
+  async revokeKey(actor: string, raw: string, body: unknown) {
+    this.confirmRevoke(body);
     // A key's fingerprint, or a bearer-token credential's id while tokens serve (R3-1239).
     const fingerprint = KEY_FINGERPRINT.test(raw) || TOKEN_CREDENTIAL.test(raw) ? raw : bad('fingerprint', 'must be a key fingerprint, SHA256:…, or a token credential’s id');
     // The pool's reserved credential has no key to revoke (R-BTN-103).
@@ -768,7 +771,8 @@ export class Admin {
   }
 
   /** `POST /v1/owner/{repository}/grants/{fingerprint}/revoke`: this repository's grant only. */
-  async revokeGrant(actor: string, repository: string, raw: string) {
+  async revokeGrant(actor: string, repository: string, raw: string, body: unknown) {
+    this.confirmRevoke(body);
     const fingerprint = fingerprintOf(raw, 'fingerprint');
     // B-145 item 12: revoking a runner key is an `approvers.members` action too.
     this.requireMembersApprover(repository, actor.slice(actor.indexOf(':') + 1), 'owner', await this.breakGlassSet());
@@ -783,6 +787,12 @@ export class Admin {
 
   // ── owners (R-BTN-58) ───────────────────────────────────────────────────────────────────
 
+  private confirmRevoke(body: unknown): void {
+    if (!isObj(body)) return bad('body', 'must be a JSON object');
+    if (body.confirm !== true) throw new BatonError('confirm-required', 'revocation takes confirm: true');
+    only(body, ['confirm'], 'body');
+  }
+
   /** `POST /v1/owner/{repository}/owners`: `{public_key}` adds an owner, `{fingerprint, remove:
    *  true}` removes one — never the last, and never leaving an approver list or a floor's
    *  `remove_by` no live credential can satisfy (R-BTN-188). */
@@ -792,7 +802,8 @@ export class Admin {
     // B-145 item 12: adding and removing owners is an `approvers.members` action.
     this.requireMembersApprover(repository, actor.slice(actor.indexOf(':') + 1), 'owner', await this.breakGlassSet());
     if (b.remove === true) {
-      only(b, ['fingerprint', 'remove'], 'body');
+      only(b, ['fingerprint', 'remove', 'confirm'], 'body');
+      if (b.confirm !== true) throw new BatonError('confirm-required', 'removing an owner takes confirm: true');
       const fp = fingerprintOf(b.fingerprint, 'fingerprint');
       const facts = await this.factsWithout(repository, null);
       return this.c.store.transaction(() => {

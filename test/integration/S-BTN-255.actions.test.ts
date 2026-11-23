@@ -83,8 +83,10 @@ describe('S-BTN-255 the session’s actions (B-204)', () => {
     expect(a.status).toBe(200);
     expect(o.status).toBe(200);
     expect(a.json.actions.map((entry: ListedAction) => entry.id)).toContain('admin.repo.list');
+    expect(a.json.actions.map((entry: ListedAction) => entry.id)).toContain('admin.freeze');
     expect(o.json.actions.map((entry: ListedAction) => entry.id)).toContain('condition.list');
     expect(o.json.actions.map((entry: ListedAction) => entry.id)).not.toContain('admin.repo.list');
+    expect(o.json.actions.map((entry: ListedAction) => entry.id)).not.toContain('admin.freeze');
     for (const [result, principal] of [[a, 'administrator'], [o, 'owner']] as const) {
       expect(result.json.session).toBeNull();
       for (const entry of result.json.actions as ListedAction[]) {
@@ -99,7 +101,11 @@ describe('S-BTN-255 the session’s actions (B-204)', () => {
     const signed = await read(owner, '/v1/actions');
     const bearer = await apiKeyCall(api.key, '/v1/actions');
     expect(bearer).toEqual(signed);
-    expect((await keyCall(owner, '/v1/owner/docs/owners', { fingerprint: api.fingerprint, remove: true })).status).toBe(200);
+    const remove = { fingerprint: api.fingerprint, remove: true };
+    expect(await keyCall(owner, '/v1/owner/docs/owners', remove)).toMatchObject({ status: 428, json: { code: 'confirm-required' } });
+    expect(await keyCall(owner, '/v1/owner/docs/owners', { ...remove, confirm: 'true' })).toMatchObject({ status: 428, json: { code: 'confirm-required' } });
+    expect(await apiKeyCall(api.key, '/v1/actions')).toEqual(bearer);
+    expect((await keyCall(owner, '/v1/owner/docs/owners', { ...remove, confirm: true })).status).toBe(200);
     expect(await apiKeyCall(api.key, '/v1/actions')).toMatchObject({ status: 401, json: { code: 'unauthenticated' } });
   });
 

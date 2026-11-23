@@ -126,6 +126,10 @@ export const ACTIONS: Action[] = [
     effect: 'read', http: { method: 'GET', path: '/v1/actions' },
     callers: [ADMIN, OWNER_INSTANCE, RUNNER_INSTANCE, SESSION_ANY], input: NONE,
   },
+  {
+    id: 'admin.freeze', summary: 'Freeze new claims and owner writes before moving the instance.',
+    effect: 'write', http: { method: 'POST', path: '/v1/admin/freeze' }, callers: [ADMIN], input: NONE,
+  },
 
   // ── the repository reads a session shares with the keys (B-192, B-217) ──
   {

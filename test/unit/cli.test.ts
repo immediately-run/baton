@@ -119,7 +119,7 @@ describe('plan: one request per command', () => {
   it('owner commands, the required bars in their groups', () => {
     expect(plan('owner', ['grant', 'docs', '--key', PUB, '--capabilities', 'agent-venue', '--max-tier', 'routine'], key))
       .toEqual({ method: 'POST', path: '/v1/owner/docs/grants', body: { public_key: PUB, capabilities: ['agent-venue'], max_tier: 'routine' } });
-    expect(plan('owner', ['owners', 'docs', '--remove', 'SHA256:x'], key).body).toEqual({ fingerprint: 'SHA256:x', remove: true });
+    expect(plan('owner', ['owners', 'docs', '--remove', 'SHA256:x'], key).body).toEqual({ fingerprint: 'SHA256:x', remove: true, confirm: true });
     expect(plan('owner', ['bar', 'docs', '--course', '*', '--tag', 'account:go_plus', '--applies', 'claim', '--starts-at', '2026-10-16T13:00:00Z', '--reason', 'go-quota', '--release-holders'], key).body)
       .toEqual({ course: '*', tag: 'account:go_plus', applies: 'claim', starts_at: Date.parse('2026-10-16T13:00:00Z'), release_holders: true, reason: 'go-quota' });
     expect(plan('owner', ['bar', 'lift', 'docs', '7'], key).path).toBe('/v1/owner/docs/bars/7/lift');
@@ -243,7 +243,7 @@ describe('plan: one request per command', () => {
     expect(plan('admin', ['repo', 'add', 'o/r', '--sync-key', PUB, '--owner-key', PUB], key).body.sync_keys).toEqual([{ public_key: PUB, role: 'sync' }]);
     expect(plan('admin', ['repo', 'set', 'docs', '--remote', 'git@github.com:o/r.git', '--sync-workflow', 'none', '--ci-identity', 'none', '--add-owner-key', PUB,
       '--add-sync-key', PUB, '--remove-sync-key', 'SHA256:x'], key).body).toEqual({
-      id: 'docs', remote: 'git@github.com:o/r.git', sync_workflow: null, ci_identity: null, owner_keys_add: [PUB], sync_keys_add: [{ public_key: PUB, role: 'sync' }], sync_keys_remove: ['SHA256:x'],
+      id: 'docs', remote: 'git@github.com:o/r.git', sync_workflow: null, ci_identity: null, owner_keys_add: [PUB], sync_keys_add: [{ public_key: PUB, role: 'sync' }], sync_keys_remove: ['SHA256:x'], confirm: true,
     });
     expect(() => plan('admin', ['repo', 'set', 'docs'], key)).toThrow('at least one change');
     expect(() => plan('admin', ['repo', 'set', 'docs', '--remot', 'x'], key)).toThrow('--remot: not a flag');
@@ -341,9 +341,24 @@ describe('send: signed with a key file, verified by Baton', () => {
     const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation((url, init) => hostCall(new Request(url, init)));
     const write = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
     try {
-      expect(await main(['help', '-i', file, '--url', ORIGIN])).toBe(0);
+      await expect(main(['help', '-i', join(dir, 'missing'), '--url', ORIGIN])).rejects.toThrow('released CLI only');
+      await expect(main(['help', '--identity', '--dev', '--url', ORIGIN])).rejects.toThrow('released CLI only');
+      expect(fetch).not.toHaveBeenCalled();
+      expect(await main(['help', '-i', file, '--url', ORIGIN, '--dev'])).toBe(0);
       expect(write.mock.calls.map(([text]) => String(text)).join('')).toContain('admin.repo.list');
       expect(write.mock.calls.map(([text]) => String(text)).join('')).not.toContain('owner.grant.list');
+      write.mockClear();
+      expect(await main(['help', '--json', '--dev', '-i', file, '--url', ORIGIN])).toBe(0);
+      expect(JSON.parse(String(write.mock.calls[0][0])).actions).toEqual(expect.arrayContaining([expect.objectContaining({ id: 'admin.repo.list' })]));
+      fetch.mockClear();
+      write.mockClear();
+      expect(await main(['help'])).toBe(0);
+      expect(await main(['help', 'ticket'])).toBe(0);
+      expect(write.mock.calls.map(([text]) => String(text)).join('')).toContain('baton ticket history TICKET | show TICKET');
+      write.mockClear();
+      expect(await main(['help', '--json'])).toBe(0);
+      expect(JSON.parse(String(write.mock.calls[0][0])).topics).toHaveProperty('ticket');
+      expect(fetch).not.toHaveBeenCalled();
     } finally {
       write.mockRestore();
       fetch.mockRestore();

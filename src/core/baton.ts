@@ -1180,7 +1180,11 @@ export class BatonCore {
       // R-BTN-88 (§4.8, R3-1258): the move — freeze, unfreeze, seal, export, import. An
       // administrator's alone, and the writes a freeze refuses do not touch them: the
       // administrator drives the move through it.
-      if (m === 'POST' && p === '/v1/admin/freeze') return json(this.store.transaction(() => this.ownerState.freeze(actor)));
+      const action = matchAction(m, p)?.action;
+      if (action?.id === 'admin.freeze') {
+        authorizeAction({ kind: 'key', role: 'admin' }, action);
+        return json(this.store.transaction(() => this.ownerState.freeze(actor)));
+      }
       if (m === 'POST' && p === '/v1/admin/unfreeze') return json(this.store.transaction(() => this.ownerState.unfreeze(actor)));
       if (m === 'POST' && p === '/v1/admin/seal') {
         // §4.8: a refused seal still dispatches the lagging mirrors' workflows (R-BTN-94) — the
@@ -1204,7 +1208,7 @@ export class BatonCore {
         return json(await this.admin.grant(actor, repo, b, 'admin'));
       }
       const revoke = /^\/v1\/admin\/keys\/([^/]+)\/revoke$/.exec(p);
-      if (m === 'POST' && revoke) return json(await this.admin.revokeKey(actor, seg(revoke[1])));
+      if (m === 'POST' && revoke) return json(await this.admin.revokeKey(actor, seg(revoke[1]), signed.req.body ? await body() : {}));
       if (m === 'POST' && p === '/v1/admin/login-links') return json(await this.admin.loginLink(fp));
       throw new BatonError('not-found', `no route ${m} ${p}`);
     }
@@ -1228,7 +1232,7 @@ export class BatonCore {
     if (m === 'GET' && rest === 'signing-keys') return json({ keys: await this.admin.signingKeys(repo) });
     if (m === 'POST' && rest === 'grants') return json(await this.admin.grant(actor, repo, await body(), 'owner'));
     const rg = /^grants\/([^/]+)\/revoke$/.exec(rest);
-    if (m === 'POST' && rg) return json(await this.admin.revokeGrant(actor, repo, seg(rg[1])));
+    if (m === 'POST' && rg) return json(await this.admin.revokeGrant(actor, repo, seg(rg[1]), signed.req.body ? await body() : {}));
     if (m === 'POST' && rest === 'owners') return json(await this.admin.owners(actor, repo, await body()));
     // B-113 (R-BTN-140's precedent): the repository's owners' consent to another repository's
     // tickets depending on theirs — the consent a dependency on a less visible repository needs

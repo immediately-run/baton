@@ -80,9 +80,12 @@ describe('R-BTN-57: administrators', () => {
   });
 
   it('revoking an unknown key is not-found; a revoked key is never granted again', async () => {
-    expect(await code(adm('/keys/SHA256%3Annnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn/revoke', {}))).toBe('not-found');
+    expect(await code(adm('/keys/SHA256%3Annnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn/revoke', { confirm: true }))).toBe('not-found');
     await own('/grants', { public_key: runner.publicKey, hostname: 'w-host', capabilities: [] });
-    expect(await code(adm(`/keys/${encodeURIComponent(runner.fingerprint)}/revoke`, {}))).toBe(200);
+    const fp = encodeURIComponent(runner.fingerprint);
+    expect(await code(adm(`/keys/${fp}/revoke`, {}))).toBe('confirm-required');
+    expect(await code(own(`/grants/${fp}/revoke`, { confirm: false }))).toBe('confirm-required');
+    expect(await code(adm(`/keys/${fp}/revoke`, { confirm: true }))).toBe(200);
     expect(await code(own('/grants', { public_key: runner.publicKey, capabilities: [] }))).toBe('conflict');
   });
 
@@ -126,7 +129,7 @@ describe('R-BTN-58: owners', () => {
   });
 
   it('a grant on a retired repository is not-found; a key whose only repository it was owns none (B-173)', async () => {
-    expect(await code(own(`/grants/${encodeURIComponent(runner.fingerprint)}/revoke`, {}))).toBe('not-found');
+    expect(await code(own(`/grants/${encodeURIComponent(runner.fingerprint)}/revoke`, { confirm: true }))).toBe('not-found');
     const opsOwner = await makeKey('ssh-ed25519', 'ops-owner');
     await adm('/repositories', { ...REGISTER, owner_keys: [opsOwner.publicKey] });
     await adm('/repositories', { id: 'ops', retire: true, confirm: true });
@@ -137,11 +140,11 @@ describe('R-BTN-58: owners', () => {
   });
 
   it('owners: never the last; removing a non-owner is not-found', async () => {
-    expect(await code(own('/owners', { fingerprint: owner.fingerprint, remove: true }))).toBe('conflict');
-    expect(await code(own('/owners', { fingerprint: 'SHA256:nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn', remove: true }))).toBe('not-found');
+    expect(await code(own('/owners', { fingerprint: owner.fingerprint, remove: true, confirm: true }))).toBe('conflict');
+    expect(await code(own('/owners', { fingerprint: 'SHA256:nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn', remove: true, confirm: true }))).toBe('not-found');
     const second = await makeKey('ssh-ed25519', 'second');
     expect(await code(own('/owners', { public_key: second.publicKey }))).toBe(200);
-    expect(await code(own('/owners', { fingerprint: owner.fingerprint, remove: true }))).toBe(200);
+    expect(await code(own('/owners', { fingerprint: owner.fingerprint, remove: true, confirm: true }))).toBe(200);
     // A key that owns nothing is no principal at all.
     expect(await code(own('/bars', { course: '*', tag: 'a:b', applies: 'claim', reason: 'x' }))).toBe('unauthenticated');
   });
@@ -237,7 +240,7 @@ describe('round 1: one role per key, revocations that stay, bars that name what 
   it('an owner key an administrator revoked is never added back by another owner (1-A-3)', async () => {
     const second = await makeKey('ssh-ed25519', 'second');
     await own('/owners', { public_key: second.publicKey });
-    expect(await code(adm(`/keys/${encodeURIComponent(second.fingerprint)}/revoke`, {}))).toBe(200);
+    expect(await code(adm(`/keys/${encodeURIComponent(second.fingerprint)}/revoke`, { confirm: true }))).toBe(200);
     expect(await code(own('/owners', { public_key: second.publicKey }))).toBe('conflict');
     expect(await code(keyCall(second, '/v1/owner/docs/bars', { course: '*', tag: 'a:b', applies: 'claim', reason: 'x' }))).toBe('unauthenticated');
   });
@@ -297,7 +300,7 @@ describe('round 2', () => {
 
   it('an administrator’s revoke of a token credential survives a later CREDENTIALS/TOKEN_HASHES edit (2-A-2)', async () => {
     const w = await register('vm-a');
-    expect(await code(adm('/keys/vm-a/revoke', {}))).toBe(200);
+    expect(await code(adm('/keys/vm-a/revoke', { confirm: true }))).toBe(200);
     const hb = () => runnerCall('/v1/runner/heartbeat', { cred: 'vm-a', secret: w.secret, body: hbBody('vm-a') });
     const refused = (await hb()).status;
     expect(refused).not.toBe(200);
@@ -309,9 +312,9 @@ describe('round 2', () => {
 
   it('every fingerprint is checked before SQL (2-A-3)', async () => {
     const junk = `<b>${'x'.repeat(5000)}</b>`;
-    expect(await code(adm(`/keys/${encodeURIComponent(junk)}/revoke`, {}))).toBe('invalid-params');
-    expect(await code(own(`/grants/${encodeURIComponent(junk)}/revoke`, {}))).toBe('invalid-params');
-    expect(await code(own('/owners', { fingerprint: junk, remove: true }))).toBe('invalid-params');
+    expect(await code(adm(`/keys/${encodeURIComponent(junk)}/revoke`, { confirm: true }))).toBe('invalid-params');
+    expect(await code(own(`/grants/${encodeURIComponent(junk)}/revoke`, { confirm: true }))).toBe('invalid-params');
+    expect(await code(own('/owners', { fingerprint: junk, remove: true, confirm: true }))).toBe('invalid-params');
     expect(await code(adm('/repositories', { id: 'docs', sync_keys_remove: [junk] }))).toBe('invalid-params');
     expect(await rows(`SELECT count(*) AS n FROM events WHERE detail_json LIKE '%<b>%'`)).toEqual([{ n: 0 }]);
   });
