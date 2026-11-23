@@ -10,6 +10,7 @@ import { readFileSync } from 'node:fs';
 import { API_KEY, signHeaders, signingKey } from '../client/sign.mjs';
 import { clientVersion } from '../client/version.mjs';
 import { compareVersions, parseClientVersions } from '../shared/versions.mjs';
+import { isAdvanceAnswer, isBeatAnswer, isClaimAnswer, record } from './replies';
 
 /** §6.3: every heartbeat request — and every call a fence depends on — has a 30-second timeout. */
 export const CALL_TIMEOUT_MS = 30_000;
@@ -98,7 +99,9 @@ export class BatonApi {
     this.secret = s;
   }
 
-  private async call<T = Record<string, any>>(method: string, path: string, body?: unknown): Promise<T> {
+  private async call(method: string, path: string, body?: unknown): Promise<Record<string, any>>;
+  private async call<T>(method: string, path: string, body: unknown, check: (v: unknown) => v is T): Promise<T>;
+  private async call(method: string, path: string, body?: unknown, check?: (v: unknown) => boolean): Promise<unknown> {
     const url = new URL(path, this.o.url).toString();
     const text = body === undefined ? '' : JSON.stringify(body);
     const headers = new Headers(this.o.auth(method, url, text, this.secret));
@@ -112,13 +115,12 @@ export class BatonApi {
       throw new BatonUnreachable(e instanceof Error ? e.message : String(e), { cause: e });
     }
     this.warnVersions(res.headers.get('Baton-Client-Versions'));
-    let json: Record<string, any> | null = null;
+    let raw: unknown;
     try {
-      json = (await res.json()) as Record<string, any>;
-    } catch {
-      json = null;
-    }
+      raw = await res.json();
+    } catch { /* Non-JSON refusals still report their status; typed successes fail below. */ }
     if (!res.ok) {
+      const json = record(raw) ? raw : null;
       const code = typeof json?.code === 'string' ? json.code : 'unavailable';
       // R-BTN-197: the one refusal a client below min gets names the versions it compares.
       const versions = [json?.client, json?.min, json?.recommended].every((v) => typeof v === 'string')
@@ -127,7 +129,8 @@ export class BatonApi {
       throw new BatonRefusal(code, typeof json?.rule_code === 'string' ? json.rule_code : undefined,
         typeof json?.message === 'string' ? json.message : `${method} ${path}: ${res.status}`, res.status, versions);
     }
-    return (json ?? {}) as T;
+    if (check && !check(raw)) throw new Error(`baton: ${method} ${path}: malformed successful reply`);
+    return raw ?? {};
   }
 
   /** R-BTN-197: `baton: this <kind> is <version>; Baton recommends <recommended> and refuses
@@ -148,7 +151,7 @@ export class BatonApi {
   }
 
   heartbeat(body: Record<string, unknown>): Promise<BeatAnswer> {
-    return this.call('POST', '/v1/runner/heartbeat', body);
+    return this.call('POST', '/v1/runner/heartbeat', body, isBeatAnswer);
   }
   /** §11: the sorted legs this runner may take — what an idle runner asks for (R-BTN-45). */
   recommendations(limit = 10): Promise<Record<string, any>> {
@@ -180,10 +183,10 @@ export class BatonApi {
     return this.call('POST', '/v1/sync/board', body);
   }
   claim(body: { request_id: string; ticket_id?: string }): Promise<ClaimAnswer> {
-    return this.call('POST', '/v1/runner/claim', body);
+    return this.call('POST', '/v1/runner/claim', body, isClaimAnswer);
   }
   advance(claimId: number, body: { reached?: string; leg: string; bars?: string[]; evidence?: string; outputs?: unknown[]; taken?: { choice: string; alternative: string; dead: string[] }[]; run_inputs?: { ticket?: { version: string; read_digest: string }; inputs: unknown[] }; head_sha?: string | null; session_url?: string; local_order?: { by: string; ran_at: string } }): Promise<AdvanceAnswer> {
-    return this.call('POST', `/v1/runner/claims/${claimId}/advance`, body);
+    return this.call('POST', `/v1/runner/claims/${claimId}/advance`, body, isAdvanceAnswer);
   }
   end(claimId: number, body: Record<string, unknown>): Promise<Record<string, any>> {
     return this.call('POST', `/v1/runner/claims/${claimId}/end`, body);

@@ -1444,3 +1444,34 @@ it('S-BTN-229: a finishing heartbeat fences only the omitted claim and skips its
     rmSync(home, { recursive: true, force: true });
   }
 });
+
+
+const replyApi = (response: Response) => new BatonApi({ url: 'https://baton.test', auth: () => ({}), transport: async () => response });
+const minimalClaim = { claim_id: 1, ticket_id: 'docs:T-1', station: 'filed', legs: ['implement'], nonce: 'nonce', snapshot_sha: 'sha' };
+const legacyBeat = {
+  runner_id: 1, incarnation: 1, bars: [], stale_courses: [], mode: {}, server_time: 10,
+  claim: { id: 1, ticket_id: 'docs:T-1', nonce: 'nonce', claimed_at: 5 }, messages: [],
+};
+
+describe('S-BTN-41 runner reply boundary', () => {
+  const calls = [
+    { name: 'claim', call: (a: BatonApi) => a.claim({ request_id: 'test' }), malformed: { ...minimalClaim, legs: [{}] } },
+    { name: 'heartbeat', call: (a: BatonApi) => a.heartbeat({}), malformed: { ...legacyBeat, claims: [{ id: '1' }] } },
+    { name: 'advance', call: (a: BatonApi) => a.advance(1, { leg: 'implement' }), malformed: { ok: true, next: [{ leg: 2 }] } },
+  ];
+  it.each(calls)('rejects HTML, empty objects and invalid fields from $name', async ({ call, malformed }) => {
+    for (const response of [new Response('<h1>Not Baton</h1>'), Response.json({}), Response.json(malformed)]) {
+      await expect(call(replyApi(response))).rejects.toThrow('malformed successful reply');
+    }
+  });
+
+  it('does not treat a heartbeat without a claim view as an empty claim view', async () => {
+    await expect(replyApi(Response.json({ ...legacyBeat, claim: undefined })).heartbeat({})).rejects.toThrow('malformed successful reply');
+  });
+
+  it('accepts a single-claim heartbeat and claim/advance replies before optional fields existed', async () => {
+    await expect(replyApi(Response.json(legacyBeat)).heartbeat({})).resolves.toEqual(legacyBeat);
+    await expect(replyApi(Response.json(minimalClaim)).claim({ request_id: 'test' })).resolves.toEqual(minimalClaim);
+    await expect(replyApi(Response.json({ ok: true, station: 'filed' })).advance(1, { leg: 'implement' })).resolves.toEqual({ ok: true, station: 'filed' });
+  });
+});

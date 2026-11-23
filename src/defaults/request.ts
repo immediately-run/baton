@@ -25,7 +25,7 @@
 // `branch_pattern`, R-BTN-190), opening a PR from it with the caller's forge credential. A `git`
 // forge and any other refusal are the operator's, in git's own words (R-BTN-74).
 
-import { gitText } from './git';
+import { gitText } from './git.mjs';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';

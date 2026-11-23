@@ -10,7 +10,7 @@
 // machine reads (the owner's decision, 2026-10-22). Course code in the CLI, never core (§2b).
 import { execFileSync } from 'node:child_process';
 import { GIT_NONINTERACTIVE_ENV } from '../client/git-env.mjs';
-import { git } from './git';
+import { git } from './git.mjs';
 import { rmSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
 import type { PostedStation } from '../core/board';

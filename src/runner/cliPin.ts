@@ -5,7 +5,7 @@
 // released copy (no working tree) names the commit its `dist/build.json` was built from, and is
 // unpinned only when that build was dirty, for no commit holds its files. Reported, never
 // refused: nothing gates on it, and a state that cannot be read is said so, never guessed.
-import { git } from '../defaults/git';
+import { git } from '../defaults/git.mjs';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { workingTreeOf } from '../client/version.mjs';

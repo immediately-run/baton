@@ -14,7 +14,7 @@ import { exec, closeTicket, CLOSE_TIMEOUT_MS, RUN_TESTS_TIMEOUT_MS } from '../..
 import { testsClose } from '../../src/defaults/pr-close';
 import { testsStubSource } from '../../src/defaults/cli';
 import { builtIn } from '../../src/defaults/courses';
-import { git, GIT_TIMEOUT_MS } from '../../src/defaults/git';
+import { git, gitAsync, GIT_TIMEOUT_MS } from '../../src/defaults/git.mjs';
 import { GIT_NONINTERACTIVE_ENV } from '../../src/client/git-env.mjs';
 import { BEAT_MS, Runner } from '../../src/runner/runner';
 import type { BatonApi } from '../../src/runner/api';
@@ -139,6 +139,36 @@ describe('the runner’s own git is bounded and non-interactive (B-94)', () => {
       expect(() => git(dir, ['-c', 'credential.helper=', 'credential', 'fill'], {
         input: 'protocol=https\nhost=example.invalid\n\n',
       })).toThrow(/terminal prompts disabled/);
+    } finally {
+      vi.unstubAllEnvs();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('preserves configured SSH transports and uses batch mode only for the default (S-BTN-41)', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'baton-ssh-transport-'));
+    const repo = join(dir, 'repo');
+    const ssh = (file: string, expected: string) => writeFileSync(file,
+      `#!/bin/sh\n${expected}\nexec git-upload-pack '${repo}'\n`, { mode: 0o755 });
+    const transport = join(dir, 'configured-ssh');
+    const remote = ['ls-remote', 'ssh://example.invalid/repo'];
+    try {
+      vi.stubEnv('PATH', `${dir}:${process.env.PATH}`);
+      vi.stubEnv('GIT_CONFIG_NOSYSTEM', '1');
+      vi.stubEnv('GIT_CONFIG_GLOBAL', '/dev/null');
+      vi.stubEnv('GIT_SSH_COMMAND', undefined);
+      vi.stubEnv('GIT_SSH', undefined);
+      git(null, ['init', '--bare', '-q', repo]);
+      ssh(join(dir, 'ssh'), '[ "$1 $2 $3 $4" = "-o BatchMode=yes -o ConnectTimeout=20" ] || exit 1');
+      expect(git(repo, remote)).toBe('');
+      ssh(transport, '[ "$1" = configured ] || exit 1');
+      writeFileSync(join(dir, 'ssh'), '#!/bin/sh\nexit 1\n');
+      git(repo, ['config', 'core.sshCommand', `${transport} configured`]);
+      expect(git(repo, remote)).toBe('');
+      await expect(gitAsync(repo, remote, 5_000)).resolves.toBe('');
+      git(repo, ['config', 'core.sshCommand', 'false']);
+      vi.stubEnv('GIT_SSH_COMMAND', `${transport} configured`);
+      expect(git(repo, remote)).toBe('');
     } finally {
       vi.unstubAllEnvs();
       rmSync(dir, { recursive: true, force: true });

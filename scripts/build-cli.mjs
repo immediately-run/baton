@@ -4,15 +4,17 @@
 // scripts/baton-cli.mjs, scripts/bundle.mjs), which needs esbuild, a devDependency. Here each of
 // those three is swapped for its TypeScript source, so dist/baton.mjs runs with dependencies only.
 import { build } from 'esbuild';
-import { gitText } from '../src/defaults/git.ts';
+import { gitText } from '../src/defaults/git.mjs';
 import { CLI_ENTRIES, entryExports } from './cli-entries.mjs';
-import { copyFileSync, mkdirSync, rmSync } from 'node:fs';
+import { copyFileSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { LOCAL_LOADERS, dashboardScriptAsText } from './bundle.mjs';
+import { checkCliDispatch } from './check-cli-dispatch.mjs';
 
 const ROOT = resolve(import.meta.dirname, '..');
 const OUT = join(ROOT, 'dist');
 const src = (path) => JSON.stringify(join(ROOT, path));
+checkCliDispatch(readFileSync(join(ROOT, 'cli/baton.mjs'), 'utf8'));
 
 /** Each on-demand bundler cli/baton.mjs imports, as the module it would have bundled. */
 const PREBUILT = {

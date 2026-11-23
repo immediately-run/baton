@@ -11,7 +11,7 @@
 // the caller's repository: the heads' objects are fetched with an empty refmap, so nothing
 // lands but FETCH_HEAD and the object store. A leaf, like remote-slug.ts: request.ts and
 // tickets.ts are bundled separately and both allocate ids.
-import { gitText } from './git';
+import { gitText } from './git.mjs';
 
 /** The side branch a request's commit lands on when the forge refuses the default branch
  *  (R-BTN-131): `baton-request/<ID>`, outside every `branch_pattern` (R-BTN-190). */

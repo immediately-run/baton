@@ -29,7 +29,7 @@
 // The pure half (`parseReplayArgs`, `pickRun`, `replayEnvironment`, `compareRead`, `slugOf`) is
 // unit-tested in test/unit/runner-replay.test.ts; the whole is exercised end-to-end by S-BTN-48
 // against the local host, over a real repository.
-import { git, gitBuffer } from '../defaults/git';
+import { git, gitBuffer } from '../defaults/git.mjs';
 import { createHash } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';

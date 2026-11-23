@@ -2,7 +2,7 @@
 // sync defaults (cli.ts) and the CLI's homes (homes.ts, B-121) read. A leaf, so the runner's
 // bundle can resolve a named home without the whole of cli.ts beside it: the function, its git
 // helper and its failure shape moved here from cli.ts, which re-exports it unchanged.
-import { gitText } from './git';
+import { gitText } from './git.mjs';
 
 interface GitFailure { status?: number | null; stderr?: string | Uint8Array }
 

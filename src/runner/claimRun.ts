@@ -1,5 +1,5 @@
 // One claim's checkout, executor session, verification and course progression.
-import { git } from '../defaults/git';
+import { git } from '../defaults/git.mjs';
 import { randomBytes } from 'node:crypto';
 import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';

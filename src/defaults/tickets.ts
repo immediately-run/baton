@@ -17,7 +17,7 @@
 //
 // A refusal is thrown, and the CLI prints it as one `baton: …` line, exit 2 — B-111's check keeps
 // its own exit 1 for a finding.
-import { git, gitText } from './git';
+import { git, gitText } from './git.mjs';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';

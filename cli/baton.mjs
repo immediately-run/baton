@@ -171,7 +171,7 @@
 //
 // The URL is `--url`, else BATON_URL, else the home in force's origin (B-121), else
 // https://baton.immediately.run.
-import { git } from '../src/defaults/git.ts';
+import { git } from '../src/defaults/git.mjs';
 import { createHash, randomBytes } from 'node:crypto';
 import { existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';

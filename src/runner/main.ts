@@ -7,7 +7,7 @@
 // half (`parseRunArgs`, `declareCourses`, `servedCourses`, `envAuth`) is unit-tested in
 // test/unit/runner-main.test.ts; the wiring is exercised end-to-end by S-BTN-41 against the
 // local host.
-import { git, gitText } from '../defaults/git';
+import { git, gitText } from '../defaults/git.mjs';
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, writeSync } from 'node:fs';
 import { homedir, hostname } from 'node:os';
 import { join } from 'node:path';

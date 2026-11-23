@@ -11,7 +11,7 @@
 // an incidental edit; the amendments are the history file's dated entries. Pure over the texts it
 // is given, apart from the git readers at the bottom, so the decisions are tested without a
 // repository. Course code in the CLI, never core (§2b).
-import { git } from './git';
+import { git } from './git.mjs';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { CLOSE_TIMEOUT_MS } from './ticket-state';

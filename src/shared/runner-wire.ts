@@ -7,16 +7,16 @@ export type NextLegs = { leg: string; state: string; waiting_on?: string }[];
 export interface ClaimAnswer {
   claim_id: number;
   ticket_id: string;
-  course_id: string | null;
-  course_version: number | null;
+  course_id?: string | null;
+  course_version?: number | null;
   station: string;
   legs: string[];
-  next: NextLegs;
-  path: string | null;
+  next?: NextLegs;
+  path?: string | null;
   nonce: string;
   snapshot_sha: string;
-  version: string;
-  ticket_source?: { kind: string; versions: string | null };
+  version?: string;
+  ticket_source?: { kind: string; versions: string | null } | null;
   leg_state?: 'forge' | 'branch';
   scope?: string[];
   brief?: { signed: boolean; signer?: string; commit: string };
@@ -25,7 +25,7 @@ export interface ClaimAnswer {
   handoff_url?: string;
   control?: { required: boolean; keys: string[]; register_moved?: boolean; [group: string]: unknown };
   advice?: unknown;
-  previous_attempts: {
+  previous_attempts?: {
     claim_id: number;
     status: string;
     end_reason: string | null;
@@ -45,18 +45,29 @@ export interface BeatClaim {
   leg?: string;
   deadline_at?: number;
   git?: unknown;
-  activity: { id: string; kind: string; label: string | null; started_at: number; claim_id: number | null } | null;
+  activity?: { id: string; kind: string; label: string | null; started_at: number; claim_id: number | null } | null;
+}
+
+export interface BeatMessage {
+  id: number;
+  kind: string;
+  payload?: {
+    reason?: string;
+    ticket_id?: string;
+    tickets?: { ticket_id: string; cleared: { kind: string; ref: string; leg?: string }[] }[];
+  } | null;
+  sent_at: number;
 }
 
 export interface BeatAnswer {
   runner_id: number;
-  worker_id: number;
+  worker_id?: number;
   incarnation: number;
-  lease_timeout_s: number;
+  lease_timeout_s?: number;
   grant?: { capabilities: string[] };
   claims?: BeatClaim[]; // Older servers return only `claim`.
-  claim: BeatClaim | null;
-  messages: { id: number; kind: string; payload?: { reason?: string; ticket_id?: string } | null; sent_at: number }[];
+  claim?: BeatClaim | null;
+  messages: BeatMessage[];
   bars: unknown[];
   stale_courses: { repository: string; course: string; version: number | null; min_runner_version: number | null }[];
   mode: Record<string, 'shadow' | 'cut-over'>;
@@ -73,10 +84,10 @@ export interface BeatAnswer {
 
 export interface AdvanceAnswer {
   ok: true;
-  station: string;
-  next: NextLegs;
-  run_id: string;
-  seq: number;
+  station?: string;
+  next?: NextLegs;
+  run_id?: string;
+  seq?: number;
   session_url_dropped?: string;
   advice?: unknown;
 }

@@ -13,7 +13,7 @@
 // after the ticket answered for it (filed, or re-read) is reported — a count and a line each,
 // never a finding, so a ruling cannot turn every older ticket's pull request red.
 // Course code in the CLI, never core (§2b): defaults import core, never the reverse.
-import { git } from './git';
+import { git } from './git.mjs';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';

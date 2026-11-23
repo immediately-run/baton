@@ -9,7 +9,7 @@
 // Course code in the CLI, never core (§2b). Reached through the esbuild bundle
 // (scripts/baton-cli.mjs), the way `baton run` reaches src/runner.
 
-import { git, gitText } from './git';
+import { git, gitText } from './git.mjs';
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';

@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { graphOf, legCapabilities, type Graph } from '../core/graph';
-import { git, gitAsync } from '../defaults/git';
+import { git, gitAsync } from '../defaults/git.mjs';
 
 export interface CourseLoad {
   course: string;

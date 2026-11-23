@@ -7,7 +7,7 @@
 // wrapper `baton repo init --eject tickets` writes, so an ejected copy posts and reads versions
 // the same way; the runner also falls back to it for a repository with no source of its own.
 import { createHash } from 'node:crypto';
-import { git } from './git';
+import { git } from './git.mjs';
 import type { TicketSource, TicketsResult } from './tickets-markdown';
 
 /** Every file's blob id under `dir` at `rev` (default `HEAD`): one `git ls-tree -r`, parsed —

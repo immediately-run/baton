@@ -5,7 +5,7 @@
 // live ticket's path is replayed under the proposed file, and a generic run — claim, every leg of
 // the shortest route, done, confirmed — goes through the core's own claim, advance and end.
 // It needs no access to production. A violation names its rule; none is a pass.
-import { git as runGit } from '../defaults/git';
+import { git as runGit } from '../defaults/git.mjs';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';

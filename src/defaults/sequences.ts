@@ -10,7 +10,7 @@
 // SAYS so (R-BTN-131): the duplicate-id refusal stays the backstop for that path, and a branch
 // merging main before it merges and renumbering if main took the number for the rest.
 
-import { gitText } from './git';
+import { gitText } from './git.mjs';
 import { join, resolve } from 'node:path';
 import { send } from '../client/send.mjs';
 import { DEFAULT_URL } from '../client/config.mjs';

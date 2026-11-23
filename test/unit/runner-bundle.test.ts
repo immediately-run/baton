@@ -9,6 +9,8 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { checkCliDispatch } from '../../scripts/check-cli-dispatch.mjs';
+import { CLI_ENTRIES } from '../../scripts/cli-entries.mjs';
 
 const ROOT = resolve(import.meta.dirname, '../..');
 
@@ -29,6 +31,28 @@ function runLegVia(wrapper: string): unknown {
 }
 
 describe('S-BTN-41 the runner from its bundle (R-BTN-72)', () => {
+  it('runs the checkout CLI without loading native TypeScript', () => {
+    const home = mkdtempSync(join(tmpdir(), 'baton-checkout-cli-'));
+    try {
+      const result = spawnSync(process.execPath, ['--no-experimental-strip-types', 'cli/baton.mjs', 'home', 'list'], {
+        cwd: ROOT, env: { PATH: process.env.PATH, HOME: home }, encoding: 'utf8',
+      });
+      expect(result.stderr).toBe('');
+      expect(result.status).toBe(0);
+      expect(result.stdout).toContain('no homes configured');
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects a command missing from the export table before building the package', () => {
+    const cli = readFileSync(join(ROOT, 'cli/baton.mjs'), 'utf8');
+    const entries = { ...CLI_ENTRIES, 'baton-run.mjs': CLI_ENTRIES['baton-run.mjs'].map(({ entry, exports }) => ({
+      entry, exports: exports.filter((name) => name !== 'queueCommand'),
+    })) };
+    expect(() => checkCliDispatch(cli, entries)).toThrow(/baton-run\.mjs.*queueCommand/);
+  });
+
   it("a checkout's .local bundle runs a leg", () => {
     // Importing it bundles, as `baton run` from a checkout does.
     const entry = JSON.stringify(join(ROOT, 'scripts', 'baton-run.mjs'));
