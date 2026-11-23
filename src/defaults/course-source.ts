@@ -35,7 +35,7 @@ export function parseSource(s: string): CourseSource {
   for (const [what, v] of [['namespace', namespace], ['repository', repository]] as const) {
     if (!NAME.test(v) || v === '.' || v === '..') throw new Error(`${s}: ${what} ${v || '(none)'} is not a repository name`);
   }
-  const pinned = GIT_SHA.test(ref.toLowerCase());
+  const pinned = GIT_SHA.test(ref);
   if (!pinned && !isSourceBranch(ref)) throw new Error(`${s}: ${ref || '(none)'} is not a full commit or a valid branch name`);
   if (!COURSE_ID.test(course)) throw new Error(`${s}: ${course || '(none)'} is not a course id`);
   return { provider, namespace, repository, ref, pinned, course };

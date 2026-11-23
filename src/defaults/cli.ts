@@ -282,7 +282,8 @@ export interface ResolvedDep {
  *  live tickets name against their boards — the read a sync makes after its number, as every
  *  input it posts is (§4.3); its doneness joins `done`, so each course's station function gates
  *  on a cross-repository dependency as on a local one (R-BTN-120). */
-async function readBoard(root: string, batonJson: BatonJson, args: SyncArgs, log: (l: string) => void, record?: BatonRecord, resolveDeps?: (ids: readonly string[]) => Promise<readonly ResolvedDep[]>): Promise<Board> {
+async function readBoard(root: string, home: { sha: string; config: string }, args: SyncArgs, log: (l: string) => void, record?: BatonRecord, resolveDeps?: (ids: readonly string[]) => Promise<readonly ResolvedDep[]>): Promise<Board> {
+  const batonJson = JSON.parse(home.config) as BatonJson;
   const settings: MarkdownSettings = { items: batonJson.items, default_course: batonJson.default_course, repos: batonJson.repos };
 
   // The ticket source: the repository's own, else the markdown default. B-183 (R-BTN-74): a
@@ -357,6 +358,11 @@ async function readBoard(root: string, batonJson: BatonJson, args: SyncArgs, log
     if (!existsSync(file)) throw new Error(`${rel} is missing — run \`baton repo init --course ${c.id}\``);
     const text = readFileSync(file, 'utf8');
     const standard = c.source ? await checkSource(c, text, existsSync(join(root, '.baton', 'courses', c.id, 'sync.mjs')), async (src) => {
+      // Opting into branch code and selecting the runner's graph both require a home commit.
+      if (gitRaw(root, 'show', `${home.sha}:.baton/baton.json`) !== home.config) {
+        throw new Error('.baton/baton.json differs from the home commit — commit the course source before syncing');
+      }
+      if (gitRaw(root, 'show', `${home.sha}:${rel}`) !== text) throw new Error(`${rel} differs from the home commit — commit the course file before syncing`);
       // Courses sharing a branch in this reading share one resolution, even if it moves now.
       let resolved = branches.get(src.ref);
       if (!resolved) {
@@ -364,8 +370,6 @@ async function readBoard(root: string, batonJson: BatonJson, args: SyncArgs, log
         branches.set(src.ref, resolved);
       }
       log(`course ${c.id} follows branch ${src.ref} (unpinned): resolved to ${resolved.sha.slice(0, 10)}`);
-      // The runner loads the graph from the home snapshot, never from the moving branch.
-      if (gitRaw(root, 'show', `HEAD:${rel}`) !== text) throw new Error(`${rel} differs from the home commit — commit the course file before syncing`);
       courseSources[c.id] = { branch: src.ref, sha: resolved.sha };
       return resolved;
     }) : builtIn(c.id);
@@ -538,7 +542,7 @@ async function checkSource(c: CourseEntry, courseText: string, ownSyncMjs: boole
   if (!sameRepo(src, self)) {
     throw new Error(`${at}: a course from ${src.namespace}/${src.repository} is not supported yet — only this CLI's repository, ${self.namespace}/${self.repository}`);
   }
-  if (src.pinned && src.ref.toLowerCase() !== self.sha) {
+  if (src.pinned && src.ref !== self.sha) {
     throw new Error(`${at} is at ${src.ref.slice(0, 10)}, and this CLI is at ${self.sha.slice(0, 10)} — re-run \`baton repo init\` with the CLI at the workflow's pin, which moves both`);
   }
   if (ownSyncMjs) throw new Error(`${at}: .baton/courses/${c.id}/sync.mjs would replace the source's station function — remove it, or remove \`source\` to own the course`);
@@ -781,19 +785,26 @@ export async function syncMain(args: SyncArgs): Promise<number> {
         git(root, 'fetch', '-q', 'origin', args.latest);
         git(root, 'checkout', '-q', '--detach', 'FETCH_HEAD');
       }
-      // baton.json too is read at the commit posted.
+      const sha = git(root, 'rev-parse', 'HEAD');
       // B-113: the qualified dependencies of other repositories resolve against their boards —
       // one read after the number, its doneness joining the `done` the station functions gate on.
-      board = await readBoard(root, JSON.parse(readFileSync(batonJsonPath, 'utf8')) as BatonJson, args, log, record, async (ids) => {
+      board = await readBoard(root, { sha, config: readFileSync(batonJsonPath, 'utf8') }, args, log, record, async (ids) => {
         const answer = await api.dependencies([...ids]);
         return (Array.isArray(answer.dependencies) ? answer.dependencies : []).map((d) => ({ ticket: String(d.ticket), done: d.done === true }));
       });
-      return git(root, 'rev-parse', 'HEAD');
+      return sha;
     },
     readHead: () => asResult(() => api.head()),
-    post: (body: Record<string, unknown>) => {
+    post: async (body: Record<string, unknown>) => {
       held = null;
-      return asResult(() => api.board(body));
+      return asResult(async () => {
+        try {
+          return await api.board(body);
+        } catch (e) {
+          if (e instanceof BatonRefusal && e.code === 'conflict') log(`baton: ${e.message}`);
+          throw e;
+        }
+      });
     },
     isAncestor: async (a: string, b: string) => {
       try {
@@ -2097,7 +2108,7 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
     if (!c.source || !self) return false;
     const src = parseSource(c.source);
     // An entry whose source names another course than its id is the sync's to refuse, not init's to move.
-    return src.pinned && sameRepo(src, self) && src.ref.toLowerCase() !== self.sha && src.course === c.id && builtIn(src.course) != null;
+    return src.pinned && sameRepo(src, self) && src.ref !== self.sha && src.course === c.id && builtIn(src.course) != null;
   };
   /** The sources name this CLI's repository at its commit, whose registry writes the files; a
    * workflow pinned to another repository or commit would run a CLI that refuses them

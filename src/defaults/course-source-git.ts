@@ -13,10 +13,14 @@ import { CLOSE_TIMEOUT_MS, GIT_NONINTERACTIVE_ENV } from './ticket-state';
 export async function readBranchSource(src: CourseSource): Promise<{ sha: string; builtIn: typeof builtIn }> {
   if (!isSourceBranch(src.ref)) throw new Error(`invalid course source branch ${JSON.stringify(src.ref)}`);
   const repo = `${src.namespace}/${src.repository}`;
+  const env: NodeJS.ProcessEnv = { ...process.env, ...GIT_NONINTERACTIVE_ENV, LC_ALL: 'C' };
+  // `-C` does not override Git's repository-local environment (e.g. from a caller's hook).
+  const local = execFileSync('git', ['rev-parse', '--local-env-vars'], { encoding: 'utf8', timeout: CLOSE_TIMEOUT_MS });
+  for (const name of local.trim().split('\n')) delete env[name];
   const dir = mkdtempSync(join(tmpdir(), 'baton-course-source-'));
   const git = (...args: string[]) => execFileSync('git', ['-C', dir, '-c', 'core.hooksPath=/dev/null', ...args], {
     encoding: 'utf8', timeout: CLOSE_TIMEOUT_MS, killSignal: 'SIGKILL', stdio: ['ignore', 'pipe', 'pipe'],
-    env: { ...process.env, ...GIT_NONINTERACTIVE_ENV, LC_ALL: 'C' },
+    env,
   }).trim();
   try {
     git('init', '-q', '--template=');

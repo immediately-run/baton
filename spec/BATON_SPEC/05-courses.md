@@ -494,7 +494,9 @@ Designs for this section that are not built are on the proposal page
     Each sync resolves the branch to its head once and uses that commit's graph and station
     function (R-BTN-134). An unresolved branch fails the sync, naming the branch, without falling
     back. The post carries `course_sources`, keyed by course id with `{branch, sha}`; the snapshot
-    and Sync read show the latest accepted resolution read at that home commit. The sync logs
+    and Sync read show the latest accepted resolution read at that home commit. If the resolved
+    station function changes the course's `facts`, Baton refuses a same-home refresh: the home
+    commit must advance to apply the new registry. The sync logs
     `course <id> follows branch <b> (unpinned): resolved to <sha10>` and the generated workflow
     annotates it. The runner still uses the home's committed graph at the claim's snapshot
     (R-BTN-22), never re-resolving the source branch.

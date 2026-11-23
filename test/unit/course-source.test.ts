@@ -27,7 +27,7 @@ describe('course sources (B-33)', () => {
     expect(() => parseSource(`gitlab/immediately-run/baton/${SHA}/create-pr`)).toThrow('provider gitlab — a source names github');
     expect(() => parseSource(`github/../baton/${SHA}/create-pr`)).toThrow('namespace .. is not a repository name');
     expect(() => parseSource(`github/immediately-run/a b/${SHA}/create-pr`)).toThrow('repository a b is not a repository name');
-    for (const ref of ['', 'release//next', 'release/../main', 'release/.hidden', 'release/a.lock', '-main', 'main.', 'main\n', 'main@{1}', 'main:other', 'main*']) {
+    for (const ref of ['', SHA.toUpperCase(), 'release//next', 'release/../main', 'release/.hidden', 'release/a.lock', '-main', 'main.', 'main\n', 'main@{1}', 'main:other', 'main*']) {
       expect(() => parseSource(`github/immediately-run/baton/${ref}/create-pr`)).toThrow('not a full commit or a valid branch name');
     }
     expect(() => parseSource(`github/immediately-run/baton/${SHA}/Create-PR`)).toThrow('Create-PR is not a course id');

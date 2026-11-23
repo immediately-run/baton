@@ -1692,6 +1692,18 @@ export class BatonCore {
         // rows with this older reading's and drop every ticket it added.
         if (!this.observations.newest(r, n)) throw new BatonError('stale-observation', `a newer reading than ${n} was accepted while this post was judged; take a new number and retry (R-BTN-62)`);
         if (this.headOf(r) !== head) throw new BatonError('head-moved', `the head moved to ${this.headOf(r) ?? 'unset'} while this post was judged; re-read it and retry`);
+        if (readAtHead && p.course_sources) {
+          // A branch can change the facts it reads without changing its graph. A refresh does
+          // not apply the registry, so don't accept stations or provenance with different facts.
+          for (const entry of p.registry ?? []) {
+            if (!Object.hasOwn(p.course_sources, entry.id)) continue;
+            const current = this.sql<{ facts: string }>('SELECT facts FROM courses WHERE repository_id = ? AND id = ?', r, entry.id)[0];
+            const facts = JSON.parse(current?.facts ?? '[]') as string[];
+            if (facts.length !== entry.facts.length || !facts.every((fact) => entry.facts.includes(fact))) {
+              throw new BatonError('conflict', `course ${entry.id}'s branch changed which facts it reads — advance the home commit before syncing`);
+            }
+          }
+        }
         this.observations.accept(r, n);
         if (readAtHead) {
           this.rememberSource(r, p);

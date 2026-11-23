@@ -395,6 +395,10 @@ that exact source commit, and logs an unpinned warning. The Sync read shows the 
 commit used. A missing branch or a changed graph that hasn't been scaffolded into the home
 fails the sync; to update the files, run init with `--force` and the same `--source-branch`
 using the CLI at the resolved commit. Following a branch trusts everyone who can push to it.
+Commit the source selection before syncing. If the new station function changes which facts it
+reads, advance the home commit so Baton can accept the new registry. Branch fetches work with
+public sources by default; a private source needs separate Git read access configured outside the
+checkout. The sync's forge API token and the CLI checkout's local credentials are not reused.
 Keep the default commit pin for a protected home.
 
 ## Overriding a leg
