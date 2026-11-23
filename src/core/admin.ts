@@ -970,7 +970,7 @@ export class Admin {
 
   /** `POST /v1/owner/{repository}/bars`: an owner bar `{course, tag, legs?, applies, starts_at?,
    *  ends_at?, release_holders?, reason}`; named legs need a named course. */
-  // @model setOwnerBar sha256:82527aa95b44
+  // @model setOwnerBar sha256:e24e5c4e9847
   setBar(actor: string, repository: string, body: unknown) {
     if (!isObj(body)) bad('body', 'must be a JSON object');
     const b = body as Record<string, unknown>;
@@ -1008,7 +1008,7 @@ export class Admin {
   }
 
   /** `POST /v1/owner/{repository}/bars/{id}/lift`. */
-  // @model liftOwnerBars sha256:67a7770a9c79
+  // @model liftOwnerBars sha256:265e1205262f
   liftBar(actor: string, repository: string, id: number) {
     return this.c.store.transaction(() => {
       this.exec('UPDATE owner_bars SET lifted_at = ? WHERE id = ? AND repository_id = ? AND lifted_at IS NULL', this.c.now(), id, repository);

@@ -178,6 +178,7 @@ module baton {
     endObs: int,
     regressed: bool,     // regressed_since IS NOT NULL (§5.3)
     endedRegressed: bool,
+    named: bool,         // R-BTN-10: the end named an `ended_at_sha` — the holder pushed its running leg
     confirmed: bool,
     confirmObs: int,     // the observation that confirmed it; -1 for the owner
     fencePending: bool,  // R-BTN-19: reaped while its runner was alive
@@ -509,7 +510,7 @@ module baton {
               station: stationOf(st.posted.get(t)), leg: "", startBars: Set(),
               startPath: st.posted.get(t), finished: List(),
               claimObs: st.counter, endObs: -1, regressed: false, endedRegressed: false,
-              confirmed: false, confirmObs: -1, fencePending: false,
+              named: false, confirmed: false, confirmObs: -1, fencePending: false,
               leaseUntil: st.now + TIMEOUT, gateViolation: violated }))
             .with("seats", st.seats.put(st.nextId, seatSet(t)))
             .with("nextId", st.nextId + 1)
@@ -605,6 +606,7 @@ module baton {
                 .with("leg", "")
                 .with("status", if (kind == "release" or kind == "fail") "released" else "completed")
                 .with("kind", kind).with("endObs", st.counter).with("endedRegressed", c.regressed)
+                .with("named", st.pushed.get(w))              // R-BTN-10: ended_at_sha, the commit it pushed
                 .with("regressed", false)                     // §4: regressed_since clears at the end
                 .with("confirmed", closedEarly)
                 .with("confirmObs", if (closedEarly) st.lastAccepted else -1)))
@@ -996,9 +998,13 @@ module baton {
       else c
     } else if (c.status == "completed" and not(c.confirmed) and obs > c.endObs) {
       // a done by an end station, or by the ticket's absence from a later snapshot (G-BTN-44); a
-      // withdrawn ticket posts no path, so it confirms no suspension (R3-1244's model-based
-      // tests found the model reading a withdrawn ticket's last path)
+      // suspension that named no commit by the snapshot's acceptance alone — its position is
+      // Baton's (R-BTN-39), git shows none (R-BTN-10); one that named a commit by path extension,
+      // standing in for the sync's `std:git.evidence@1` (pending). A withdrawn ticket posts no
+      // path, so it confirms no named suspension (R3-1244's model-based tests found the model
+      // reading a withdrawn ticket's last path)
       val ok = if (c.kind == "done") atEnd(snap) or gone
+               else if (not(c.named)) true
                else not(gone) and (c.endedRegressed or extendsPath(expected(c), snap))
       if (ok) c.with("confirmed", true).with("confirmObs", obs) else c
     } else if (c.status == "completed" and not(c.confirmed) and c.kind == "done"

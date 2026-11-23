@@ -181,6 +181,16 @@ module regressions {
       .then(ownerResolve(1))
       .expect(ticketClaimable("t1"))
 
+  // R-BTN-10 (bering, 2026-11-23: 47 review suspensions never confirmed): a suspension that
+  // named no commit is confirmed by the next accepted snapshot, though git shows no path for it —
+  // the position is Baton's alone (R-BTN-39).
+  run unnamedSuspensionConfirmedBySnapshotTest =
+    start.then(claim("w1", "t1")).then(advance("w1", "implement", NONE))
+      .then(endClaim("w1", "suspended", false))
+      .expect(not(c1.named) and not(c1.confirmed))
+      .then(sync1)
+      .expect(c1.confirmed and ticketClaimable("t1"))
+
   // R-BTN-19: a force-reaped ticket is not re-issued until the live runner clears its fence.
   run forceReapFencesTest =
     start.then(claim("w1", "t1")).then(forceReap("w1")).then(sync1)
