@@ -393,7 +393,8 @@ trusted runners or of the protection checker; a compromised forge; and a comprom
     registering a `human_only` key with the tenant makes it an owner of nothing. A delegated key
     (R-BTN-186) matches no entry. A list is **human-only** when every entry is `human` or names a
     `human_only` key; an action whose list is human-only is a **human gate**, for administrators
-    too: an administrator performs it only with a `human_only` key the list admits.
+    too: an administrator performs it only with a `human_only` key the list admits, or in a
+    session (R-BTN-185).
   - **No gate without a key to open it.** Baton refuses a list no live credential can satisfy: a
     `key:` entry for a revoked, suspended or unknown key does not count, and a human-only list
     needs a `human_only` key meeting the resulting `human_key` among the repository's owners.
@@ -586,16 +587,25 @@ trusted runners or of the protection checker; a compromised forge; and a comprom
     no guarantee claims it as a human gate (`human-gates`, R-BTN-189).
   - **A session is a human.** Every administrator's, owner's and member's session (R-BTN-155)
     acts as `human` beside its key's role: its attestations are recorded with writer `human` and
-    its role, a policy entry admitting either counts them, and it satisfies a human-only
+    its role, and whether the act carried the touch below; a policy entry admitting either
+    counts them, an untouched one as `human` only while the repository's `human_key` is `any`, and it satisfies a human-only
     `approvers.*` list for the actions its role may call. It gains no action its role lacks.
     Baton cannot tell a browser a person drives from one an agent drives, so whoever can open a
     session — through Cloudflare Access, a one-time link, or a code a key binds — can act as a
     human; under `any` that is a promise about the deployment's sign-in, as a human-only key's
     custody is.
   - **Under `hardware`**, a session's human act — one that counts only because the session is
-    `human` — also carries a WebAuthn assertion, over the action and its parameters, by a
-    security key registered with a human-only key's signature; without one it is refused
-    `forbidden`. The registration and the assertion are not built (B-322).
+    `human` — also carries a WebAuthn assertion; without a valid one it is refused `forbidden`.
+    - **The credential** is registered for one key of a person role by a human-only key's
+      signature, that human-only key an owner of the repository (or a break-glass line,
+      R-BTN-188) meeting its `human_key`, and with an attestation that meets what `hardware`
+      requires of a human-only key (B-136). It is suspended and revoked with its signing key.
+    - **The assertion** answers a challenge Baton issued for that session, action and
+      parameters, used once and valid for two minutes; Baton checks its relying party against
+      the tenant's host, its origin against `BATON_ORIGIN`, its type and user presence, and that
+      the credential is registered for the session's key.
+
+    The registration and the assertion are not built (B-322).
   - **The owner's agent** is a principal (§12.1): an owner key not `human_only`, used without a
     session. It acts as `owner`, never as `human`. An OAuth approval is no session and satisfies
     no human-only `approvers.*` list.

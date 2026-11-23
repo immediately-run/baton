@@ -373,16 +373,21 @@ built; their design is [the people and dashboard proposal](../proposals/people-a
     other: whoever holds the browser's cookie holds every session bound to it.
     - The browser holds one cookie, `__Host-baton_session` (R-BTN-16). Every sign-in sets a new
       value and rebinds the browser's live sessions to it, so a value read before a sign-in opens
-      none of the sessions after it; the cookie lives as long as the longest of them.
+      none of the sessions after it; the cookie lives as long as the longest of them. Baton
+      keeps the hashes of the values a browser's cookie replaced while any of its sessions
+      lives, and a request carrying one ends every session bound to that browser: a replaced
+      value in use means two holders, and neither keeps the sessions.
       `POST /v1/login` answers the opened session's `session_id`, which is no secret: the page
       keeps it in the tab's `sessionStorage` and sends it as `Baton-Session: <session_id>` on
-      every request.
+      every request. Link
+      tokens and the cookie's values are stored as hashes (§12.1).
     - A request under `/v1/` carrying no signature and no `Authorization` header is a session's
       only when it carries the cookie and a `Baton-Session` naming a live session bound to it;
       one without the other is `unauthenticated`. A signed or bearer request is its key's,
       whatever cookie it carries (R-BTN-16). A page load sends no header: the dashboard's pages
-      need no session, and `GET /conditions/{id}` redirects for any session bound to the cookie
-      whose repositories hold the id (R-BTN-163).
+      need no session, and `GET /conditions/{id}` redirects, when its `Sec-Fetch-Site` is
+      `same-origin` or `none` or absent, for any session bound to the cookie whose repositories
+      hold the id (R-BTN-163); any other request gets the shell.
     - A tab with no session id — a new tab, or one whose session ended — signs in; Baton lists no
       session to a tab that has not.
     - `POST /v1/ui/logout` ends the tab's own session; `{all: true}` ends every session bound to
@@ -394,16 +399,18 @@ built; their design is [the people and dashboard proposal](../proposals/people-a
     (R-BTN-57).
   - **Where a session calls.** A session calls an action at the action's own route, the one its
     key would call — `/v1/owner/{repository}/*`, `/v1/admin/*`, `POST …/attestations`, the
-    repository reads — and the core authorizes it as its key's role (R-BTN-129); `/v1/ui/*`
-    holds only the acts with no key route. A destructive action carries `confirm: true`
-    (§12.2).
+    repository reads — and the core authorizes it as its key's role (R-BTN-129). `/v1/ui/*`
+    holds the acts §14 lists there; one that is also a key route's action is that action, under
+    the same rules. A `/v1/ui/*` route naming a ticket, claim, runner or finding acts only within
+    the session's repositories, and answers for another repository's id as for an unknown one
+    (§12's *No existence oracle*). A destructive action carries `confirm: true` (§12.2).
   - **Authority-changing acts are confirmed by the key.** A session's act that an `approvers.*`
-    list governs (R-BTN-188), or that adds, changes or removes an owner, a member, a grant or
-    another credential, takes effect only once the session's key confirms it through a channel
+    list governs (R-BTN-188), that adds, changes or removes an owner, a member, a grant or
+    another credential, or that freezes, unfreezes or seals the tenant (R-BTN-88), takes effect
+    only once the session's key confirms it through a channel
     other than that session ([the proposal's confirmation code](../proposals/people-and-dashboard.md#3-sign-in-sessions-and-confirmed-actions)).
     Until a confirmation is built, such an act is taken with the key, and its control is drawn
-    disabled, naming the command. Link tokens and the cookie's value are
-    stored as hashes (§12.1).
+    disabled, naming the command.
   - **Cloudflare Access, with no administrator key.** While `BATON_ADMIN_KEYS` names no key, a
     request to `/v1/ui/*` is authenticated by a verified Cloudflare Access
     assertion alone (verified as above, for an email in `OWNER_EMAILS`; `ACCESS_IDENTITIES` plays
