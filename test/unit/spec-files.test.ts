@@ -8,9 +8,7 @@ import { describe, it, expect } from 'vitest';
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-// @ts-expect-error a plain .mjs script, no types
 import { SPEC_DIR, SPEC_INDEX, indexText, joinParts, layoutProblems, locate, moveProof, part, partFrontmatter, partProblems, specParts } from '../../scripts/spec-files.mjs';
-// @ts-expect-error a plain .mjs script, no types
 import { impact, readSpecAt } from '../../scripts/spec-tools.mjs';
 
 type Part = { name: string; path: string; text: string; frontmatter?: string; offset?: number };

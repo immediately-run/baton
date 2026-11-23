@@ -427,7 +427,7 @@ async function readRuns(a: ReplayArgs, io: ReplayIo): Promise<{ runs: RecordedRu
   const path = `/v1/repositories/${encodeURIComponent(a.repository)}/tickets/${encodeURIComponent(a.ticket)}/legs/${encodeURIComponent(a.leg)}/runs`;
   const target = new URL(path, a.url).toString();
   const cred = requestCredential(a.key);
-  const headers = cred.bearer ? { Authorization: `Bearer ${cred.bearer}` } : signHeaders({ method: 'GET', url: target, body: '', key: cred.key });
+  const headers = cred.bearer !== undefined ? { Authorization: `Bearer ${cred.bearer}` } : signHeaders({ method: 'GET', url: target, body: '', key: cred.key });
   const transport = io.transport ?? ((req) => fetch(req));
   const res = await transport(new Request(target, { method: 'GET', headers, signal: AbortSignal.timeout(30_000) }));
   const json = await res.json().catch(() => null) as { runs?: RecordedRun[]; default_branch?: string; message?: string } | null;

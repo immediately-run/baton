@@ -36,7 +36,7 @@ describe('plan: one request per command', () => {
       method: 'POST', path: '/v1/admin/repositories', body: { id: 'ops', retire: true, confirm: true },
       confirm: { question: 'retire ops? everything scoped to it ends — sessions, keys, grants, claims — and its id is never registered again', yes: false },
     });
-    expect(plan('admin', ['repo', 'retire', 'ops', '--yes'], key).confirm.yes).toBe(true);
+    expect(plan('admin', ['repo', 'retire', 'ops', '--yes'], key).confirm?.yes).toBe(true);
     expect(plan('admin', ['grant', 'docs', '--key', PUB, '--hostname', 'h', '--capabilities', 'human-operator'], key).body)
       .toEqual({ repository: 'docs', public_key: PUB, hostname: 'h', capabilities: ['human-operator'] });
     expect(plan('admin', ['revoke', 'SHA256:a/b'], key).path).toBe('/v1/admin/keys/SHA256%3Aa%2Fb/revoke');

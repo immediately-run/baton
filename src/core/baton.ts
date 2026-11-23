@@ -14,7 +14,7 @@ import { Stations, type Seen } from './stations';
 import { Questions } from './questions';
 import { Conditions } from './conditions';
 import { Admin, SESSION_COOKIE, SESSION_MS } from './admin';
-import { familyOf } from '../shared/baton.mjs';
+import { batonNow, familyOf } from '../shared/baton.mjs';
 import { fitsTier, TIERS } from '../shared/vocabulary.mjs';
 import { clientVersionOf } from '../shared/versions.mjs';
 import { RunnerApi } from './runnerApi';
@@ -128,7 +128,7 @@ export class BatonCore {
   readonly outside: <T>(work: () => Promise<T>) => Promise<T>;
 
   constructor(private readonly ports: Ports) {
-    this.now = ports.clock ?? (() => Date.now());
+    this.now = ports.clock ?? batonNow;
     this.random = ports.random ?? systemRandom;
     this.store = versionedStore(ports.store);
     this.dispatcher = (wf) => this.sendDispatch(wf);

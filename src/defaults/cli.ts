@@ -526,7 +526,7 @@ function checkSource(c: CourseEntry, courseText: string, ownSyncMjs: boolean): v
 }
 
 /** A Baton call through the vendored sync's `{ok, code}` shape: a refusal is its code, never a throw. */
-async function asResult(call: () => Promise<Record<string, any>>): Promise<Record<string, any>> {
+async function asResult<T extends object>(call: () => Promise<T>): Promise<({ ok: true } & T) | { ok: false; code: string }> {
   try {
     return { ok: true, ...(await call()) };
   } catch (e) {
@@ -781,7 +781,9 @@ export async function syncMain(args: SyncArgs): Promise<number> {
     sleep,
   });
   const retryS = args.busyRetryS ?? BUSY_RETRY_S;
-  let { outcome, steps, next } = await once();
+  const first = await once();
+  let { steps, next } = first;
+  let outcome: typeof first.outcome | 'busy:again' = first.outcome;
   // `busy` alone is still `busy` (a run with the retry turned off, whose log says one was never
   // tried); `busy:again` is the one retry holding too — both exit non-zero below. The wait is the
   // retry's alone: a run's own `unavailable` backoff inside `syncOnce` is unchanged.

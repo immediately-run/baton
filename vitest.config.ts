@@ -11,6 +11,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { makeKey } from './test/lib/sshKeys.ts';
+import type { Config } from './src/core/ports.ts';
 
 /** The test credentials (R-BTN-13): tokens, their hashes and their policy — the shapes the
  *  TOKEN_HASHES and CREDENTIALS Worker secrets take in production (R3-1208). The `test`
@@ -169,7 +170,7 @@ export default defineConfig({
           setupFiles: ['./test/setup.ts'],
           include: ['test/integration/**/*.test.ts', 'test/unit/mirror.test.ts', 'test/unit/runner-protocol.test.ts', ...(RUN_LOAD_TEST ? LOAD_TEST : []), ...NODE_ONLY, ...SCRIPT_TESTS],
           exclude: [...configDefaults.exclude, ...QUINT_TESTS],
-          provide: { localConfig: { ...testVars(wranglerVars()), ...bindings } },
+          provide: { localConfig: { ...testVars(wranglerVars()), ...bindings } as Config },
         },
       },
       {

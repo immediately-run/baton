@@ -257,8 +257,8 @@ describe('the home in force: --home, then BATON_HOME, then default (S-BTN-225\'s
     // settings reads the home for the repository — the PUT path and the code-repos resolver
     // one and the same repository (round 1 left both on need(positional[0])).
     expect(plan('owner', ['settings', '--no-required-bars'], undefined, undefined, home)).toEqual({ method: 'PUT', path: '/v1/owner/fieldhouse/settings', body: { required_bars: [] } });
-    expect(plan('owner', ['settings', '--code-repos', 'a/b'], undefined, undefined, home).resolveCodeRepos).toEqual({ repository: 'fieldhouse', offline: null });
-    expect(plan('owner', ['settings', 'docs', '--code-repos', 'a/b'], undefined, undefined, home).resolveCodeRepos).toEqual({ repository: 'docs', offline: null });
+    expect(plan('owner', ['settings', '--code-repos', 'a/b'], undefined, undefined, home)).toHaveProperty('resolveCodeRepos', { repository: 'fieldhouse', offline: null });
+    expect(plan('owner', ['settings', 'docs', '--code-repos', 'a/b'], undefined, undefined, home)).toHaveProperty('resolveCodeRepos', { repository: 'docs', offline: null });
     // Without a home in force, the old refusals stand — the shapes are not re-read.
     expect(() => plan('owner', ['bar', 'lift', 'B-7'])).toThrow('the bar id is required');
     expect(() => plan('owner', ['courier', 'revoke', 'SHA256:abc'])).toThrow('the key fingerprint is required');

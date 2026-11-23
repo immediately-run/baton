@@ -1,3 +1,4 @@
+/// <reference path="./provided.d.ts" />
 // global-setup.ts — runs in Node before the Workers tests (R-BTN-29). It builds the fixture
 // git repository, takes its shas and ancestry from real git, and checks the committed inputs
 // the Worker-side tests read against their sources wherever a sibling docs checkout exists:

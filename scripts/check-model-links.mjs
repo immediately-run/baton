@@ -22,9 +22,11 @@ const MODEL = 'model/baton.qnt';
 /** The model's actions: name → { text, impls: [{file, fn} | {external}] }, from the module's
  *  top level. An action's text runs from its `action` line to the line before the next
  *  top-level declaration or comment. */
+/** @param {string} src */
 export function modelActions(src) {
   const lines = src.split('\n');
   const top = /^ {2}(\/\/|action |pure |def |val |type |var |const |run |temporal |\})/;
+  /** @type {Map<string, {text: string, line: number, impls: {file?: string, fn?: string, external?: boolean, pending?: string}[]}>} */
   const actions = new Map();
   for (let i = 0; i < lines.length; i++) {
     const m = /^ {2}action (\w+)/.exec(lines[i]);
@@ -45,12 +47,15 @@ export function modelActions(src) {
   return actions;
 }
 
+/** @param {string} text */
 export const hashOf = (text) => createHash('sha256').update(text).digest('hex').slice(0, 12);
 
 /** Every top-level declaration of the module: name → text (round 1, 1-A-6). */
+/** @param {string} src */
 export function declarations(src) {
   const lines = src.split('\n');
   const top = /^ {2}(\/\/|action |pure |def |val |type |var |const |run |temporal |\})/;
+  /** @type {Map<string, string>} */
   const decls = new Map();
   for (let i = 0; i < lines.length; i++) {
     const m = /^ {2}(?:pure def|def|pure val|val|action|type|var|const) (\w+)/.exec(lines[i]);
@@ -67,6 +72,7 @@ export function declarations(src) {
 /** The text an action's meaning rests on: its own, and every declaration it reaches — the helpers,
  *  the gates, the judge, the course and the state's type — each once, in name order. A change to
  *  any of them changes the hash, so the functions that implement the action are re-checked. */
+/** @param {string} name @param {ReadonlyMap<string, string>} decls */
 export function closureText(name, decls) {
   const seen = new Set([name]);
   const queue = [name];
@@ -78,6 +84,7 @@ export function closureText(name, decls) {
 }
 
 /** The leading comment of `fn` in `src` (a method or function), or null when it is not there. */
+/** @param {string} src @param {string} fn */
 export function leadingComment(src, fn) {
   const lines = src.split('\n');
   const def = new RegExp(`^\\s*(export\\s+)?(async\\s+)?(function\\s+)?(private\\s+|public\\s+)?(async\\s+)?${fn}\\s*(<[^>]*>)?\\(`);
@@ -90,6 +97,7 @@ export function leadingComment(src, fn) {
 
 /** The function whose leading comment holds the text at `offset`, or null: the first line after
  *  the comment block, when it declares a function or method. */
+/** @param {string} src @param {number} offset */
 export function stampedFunction(src, offset) {
   const lines = src.split('\n');
   let k = src.slice(0, offset).split('\n').length - 1;
@@ -142,6 +150,7 @@ export function check(root = ROOT) {
 
 /** The run's listing of the model ahead of the code: one line per pending note, `not built` when
  *  the action names no implementing function, `partly built` when it names one beside the note. */
+/** @param {ReturnType<typeof modelActions>} actions */
 export function pendingLines(actions) {
   const out = [];
   for (const [n, a] of actions) {

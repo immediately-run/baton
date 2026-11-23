@@ -1,0 +1,25 @@
+{
+  "extends": "./tsconfig.local.json",
+  "compilerOptions": {
+    "types": [
+      "node",
+      "@cloudflare/workers-types",
+      "@cloudflare/vitest-plugin/types"
+    ],
+    "paths": {
+      "#host": [
+        "./test/hosts/cloudflare.ts"
+      ]
+    },
+    "lib": [
+      "es2023"
+    ]
+  },
+  "include": [
+    "test"
+  ],
+  "exclude": [
+    "test/ui",
+    "test/global-setup.ts"
+  ]
+}

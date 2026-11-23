@@ -309,6 +309,12 @@ function devFlagPositions(argv) {
  * `homesContext` — supplying the repository a missing positional REPO or bare ticket id reads
  * in; a positional REPO or a qualified id always wins over it.
  */
+/** @param {string} role
+ * @param {string[]} argv
+ * @param {(path: string) => string} [readKey]
+ * @param {(path: string) => string} [readJson]
+ * @param {{repository: string | null, names: string[]} | null} [home]
+ */
 export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? p : readFileSync(p, 'utf8').trim()), readJson = (p) => readFileSync(p, 'utf8'), home = null) {
   const [cmd, ...rest] = argv;
   if (role === 'blocked') {
@@ -720,6 +726,11 @@ export function pushersSpec(value) {
  *  home's forge and host — read from its registration, one signed GET — and each entry's ids are
  *  read from its forge with the operator's token for that host (GITHUB_TOKEN, GITLAB_TOKEN,
  *  GITEA_TOKEN), or taken from the `--forge-ids` the spec already folded in. */
+/** @param {string} url
+ * @param {string} keyFile
+ * @param {{path: string, forge?: string | null, host?: string | null, repo_id?: number | string | null, owner_id?: number | string | null}[]} entries
+ * @param {{repository?: string, fetchImpl?: BatonFetch, env?: NodeJS.ProcessEnv}} [options]
+ */
 export async function resolveCodeRepos(url, keyFile, entries, { repository, fetchImpl = fetch, env = process.env } = {}) {
   let home = null;
   if (entries.some((e) => e.forge == null || e.host == null)) {
@@ -828,12 +839,18 @@ const redirectAnswered = (target, status, to) => new Error(
  *  stdout stays its own. `client` names the version for a test (a CLI this code never shipped
  *  as); a command's own requests are always `clientVersion()`'s. */
 let saidClientVersions = false;
+/** @typedef {(url: string, init: RequestInit) => Promise<Response>} BatonFetch */
+/** @param {string} url
+ * @param {{path: string, method: string, body?: unknown}} p
+ * @param {string} keyFile
+ * @param {BatonFetch} [fetchImpl]
+ */
 export async function send(url, p, keyFile, fetchImpl = fetch, client = clientVersion()) {
   const cred = requestCredential(keyFile);
   const target = new URL(p.path, url).toString();
   // A GET carries no body; its digest is of the empty one.
   const body = p.method === 'GET' ? undefined : JSON.stringify(p.body ?? {});
-  const auth = cred.bearer ? { Authorization: `Bearer ${cred.bearer}` } : signHeaders({ method: p.method, url: target, body, key: cred.key });
+  const auth = cred.bearer !== undefined ? { Authorization: `Bearer ${cred.bearer}` } : signHeaders({ method: p.method, url: target, body, key: cred.key });
   const headers = { 'Baton-Client': client, ...(body === undefined ? {} : { 'Content-Type': 'application/json' }), ...auth };
   // A Baton that does not answer in 30 seconds is reported, never waited on for ever (round 3, 3-A-5).
   let res;
@@ -939,6 +956,7 @@ async function decisionList(argv) {
  * the tests check the request without a Baton. `homeRepository` (B-121) is the home in force's
  * repository, which a bare local id reads in; a qualified id wins over it.
  */
+/** @param {string} ticket @param {string} option @param {string | null} [ref] @param {string | null} [homeRepository] */
 export function answerPlan(ticket, option, ref, homeRepository = null) {
   const s = String(ticket);
   const i = s.indexOf(':');

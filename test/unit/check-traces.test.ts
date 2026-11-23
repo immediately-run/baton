@@ -62,8 +62,8 @@ describe('check-traces rejects what the model forbids, naming the step', () => {
     const r = await check('hold-then-claim', trace([[req('POST', `/v1/ui/overrides/${T}`), held], [req('POST', '/v1/runner/claim'), claimed]]));
     expect(r.ok).toBe(false);
     // the model refuses the claim: its gates fail on the hold
-    expect(r.failure).toMatchObject({ step: 3, label: 'POST /v1/runner/claim → 200', actionRefused: true });
-    expect(r.failure.actions).toContain('claim("w1", "docs:T-1")');
+    expect('failure' in r && r.failure).toMatchObject({ step: 3, label: 'POST /v1/runner/claim → 200', actionRefused: true });
+    expect('failure' in r && 'actions' in r.failure && r.failure.actions).toContain('claim("w1", "docs:T-1")');
   }, QUINT_CASE_MS);
 
   itQuint('an end confirmed by an observation not above its own: rejected at the post that claims it', async () => {
@@ -87,8 +87,8 @@ describe('check-traces rejects what the model forbids, naming the step', () => {
     ] as Step[];
     const r = await check('confirmed-by-older', stale);
     expect(r.ok).toBe(false);
-    expect(r.failure).toMatchObject({ step: 5 });
-    expect(r.failure.fields).toContain('claim 1 confirmed');
+    expect('failure' in r && r.failure).toMatchObject({ step: 5 });
+    expect('failure' in r && 'fields' in r.failure && r.failure.fields).toContain('claim 1 confirmed');
   }, QUINT_CASE_MS);
 });
 
@@ -100,7 +100,7 @@ describe('check-traces rejects each step round 1 found accepted (round 2, 2-r2-1
   const rejected = async (name: string, rest: [Step['origin'], (p: Projection) => Projection][], reason: string) => {
     const r = await check(name, trace(rest));
     expect(r.ok).toBe(false);
-    expect(r.failure.reason).toContain(reason);
+    expect('failure' in r && 'reason' in r.failure && r.failure.reason).toContain(reason);
     return r;
   };
   const claimReq = req('POST', '/v1/runner/claim');
@@ -193,9 +193,9 @@ describe('model:links reads `@impl pending` notes (R3-1254 part 2, round 1, 1-B-
     const root = copy();
     const { errors, actions } = checkLinks(root);
     expect(errors).toEqual([]);
-    expect(actions.get('endBlocked').impls).toEqual([{ pending: expect.stringContaining('B-21') }]);
+    expect(actions.get('endBlocked')?.impls).toEqual([{ pending: expect.stringContaining('B-21') }]);
     // syncPost is partly built: its implementing functions keep their stamps checked
-    expect(actions.get('syncPost').impls.some((im: { pending?: string }) => im.pending)).toBe(true);
+    expect(actions.get('syncPost')?.impls.some((im: { pending?: string }) => im.pending)).toBe(true);
     const file = join(root, 'src/core/baton.ts');
     const src = readFileSync(file, 'utf8');
     writeFileSync(file, src.replace(/@model syncPost sha256:[0-9a-f]{12}/, '@model syncPost sha256:000000000000'));

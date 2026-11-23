@@ -61,6 +61,7 @@ const qSet = (xs) => (xs.length ? `Set(${[...new Set(xs)].sort().map(q).join(', 
 const sameSet = (a, b) => JSON.stringify([...new Set(a)].sort()) === JSON.stringify([...new Set(b)].sort());
 
 /** The model's `kind` for an end reason (§6.5). */
+/** @param {string | null | undefined} endReason */
 export function kindOf(endReason) {
   if (endReason == null) return '';
   if (endReason === 'done') return 'done';
@@ -509,6 +510,7 @@ function quintTest(file) {
 }
 
 /** Check one trace file: `{ok, checked, total, end, failure}`. */
+/** @param {string} file */
 export async function checkTrace(file, tag = basename(file).replace(/\W+/g, '_').slice(0, 60)) {
   const trace = readTrace(file);
   const t = translate(trace);
@@ -581,7 +583,10 @@ function traceFiles(args) {
 export const SCOPE = join(ROOT, 'test', 'integration', 'trace-scope.json');
 const keyOf = (r) => `${r.scenario} › ${r.test}`;
 
-/** The scope errors for accepted results against the allowlist; `whole` also checks stale entries. */
+/** The scope errors for accepted results against the allowlist; `whole` also checks stale entries.
+ * @param {readonly {scenario: string, test: string, ok: boolean, checked: number, end?: {index: number, reason: string} | null}[]} results
+ * @param {Record<string, {at: number, reason: string}>} scope
+ */
 export function scopeErrors(results, scope, whole = true) {
   const errors = [];
   const seen = new Set();

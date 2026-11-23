@@ -182,7 +182,7 @@ describe('S-BTN-207 ticket versions through the sync and the runner', () => {
     expect(after[0].version).toMatch(/^6:/);
     expect(after[0].version).not.toBe(before[0].version);
     // The store's digest moved with the edit: the same rev would still change the version.
-    expect((await observe()).json.versions['T-100']).toBe(after[0].version);
+    expect((await observe()).json.versions?.['T-100']).toBe(after[0].version);
   });
 
   it('a claim whose ticket changed before the leg starts releases stale-board; one whose ticket did not change runs', async () => {

@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 
 /** The version of the package this CLI ships in — the pin the B-138 refusal names. `cli/` reads
  *  the checkout's package.json, the bundled `dist/` the package's own; null when neither reads. */
+/** @returns {string | null} */
 export function packageVersion() {
   try {
     return JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'package.json'), 'utf8')).version ?? null;

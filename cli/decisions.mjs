@@ -18,6 +18,7 @@ export const plain = (v) => String(v).replace(/[\u0000-\u001f\u007f-\u009f\u2028
 /** One decision as lines of text: `<ticket> — <title>`, its question, and its link. B-133: each
  *  option prints its COMPUTED action — what the answer does — beside the packet's question, so
  *  the owner reads what runs, never only the agent's summary of it. */
+/** @param {Decision} d */
 export function formatDecision(d) {
   const lines = [`${plain(d.ticket)} — ${plain(d.title)}`, `  decision ${plain(d.decision.id)} (asks ${plain(d.decision.asks)})`];
   if (d.decision.question) lines.push(`  ${plain(d.decision.question)}`);
@@ -44,6 +45,14 @@ function refused(what, res) {
  * decision was answered meanwhile is answered `closed` — already done, not an error. Returns how
  * many it wrote.
  */
+/** @typedef {{ticket: string, title: string, repository?: string, unblocks?: string[], notice_state?: string | null,
+ * decision: {id: string, asks: string, question?: string, url?: string, options?: {id: string, action?: string}[]}}} Decision
+ */
+/** @typedef {(method: 'GET' | 'POST', path: string, body?: Record<string, unknown>) => Promise<{
+ * status: number, json: {decisions?: Decision[], notices?: (Decision & {notice_id: string})[], code?: string, message?: string} | null
+ * }>} CourierRequest
+ */
+/** @param {CourierRequest} request @param {(text: string) => void} write */
 export async function listOnce(request, write, { all = false } = {}) {
   if (all) {
     const res = await request('GET', '/v1/courier/decisions');
@@ -64,6 +73,10 @@ export async function listOnce(request, write, { all = false } = {}) {
 
 /** `--watch`: a pass now and then once a minute, until `signal` aborts. A pass that fails — Baton
  *  unreachable, a refusal — is reported through `warn` and the next minute's pass tries again. */
+/** @param {CourierRequest} request
+ * @param {(text: string) => void} write
+ * @param {{signal?: AbortSignal, sleep?: (ms: number) => Promise<unknown>, warn?: (text: string) => void}} [options]
+ */
 export async function watch(request, write, { signal, sleep = (ms) => new Promise((r) => setTimeout(r, ms)), warn = (text) => write(text) } = {}) {
   while (!signal?.aborted) {
     try {
