@@ -7,20 +7,20 @@ find out which before anything else:
   head and it failed. This happens after `implement` too, before any review round: making the
   tests green is fixing. The newest commit on the PR branch is the gate's empty marker,
   `baton: tests red for <ticket>`; its message names the script that failed and its last lines
-  (`git log -1 --format=%B origin/<the branch>`). Reproduce the failure, fix the cause, push.
-  There is no review finding to answer.
+  (`git log -1 --format=%B origin/<the branch>`). Follow *A red gate* below. There is no review
+  finding to answer.
 - **A PR's CI is red in another repository.** A PR in a repository the ticket's `repos:` names
   is gated by its own CI, not by the marker: a check on its head concluded red (failed,
   cancelled, timed out). Read which and why (`gh pr checks <the PR URL>`, then the failing run's
-  log), reproduce it, fix the cause and push to that PR's branch. There is no marker and no
-  review finding.
+  log), then follow *A red gate* below in that PR's repository. There is no marker and no review
+  finding.
 - **The last review round asked for changes** on the ticket's PRs: one per repository its
   `repos:` names, besides this one, and the review may have posted its findings on any of them.
   When you finish, every finding of that round is closed: fixed in a pushed commit, or answered
   on its own thread.
 
-The ticket's file is `$BATON_TICKET_FILE`. Either way, your push is tested again by the gate
-before the next round reviews it.
+The ticket's file is `$BATON_TICKET_FILE`. Any push is tested again by the gate before the next
+round reviews it.
 
 > **How the stub runs you** — Baton's contract for the `agent_command` author: your command
 > line splits into words as `sh` would (quotes honoured, no substitutions) and executes
@@ -38,11 +38,28 @@ before the next round reviews it.
 
 ## A red gate
 
-- Read the marker's failure first: the script, its exit, its last lines. Run the same script
-  yourself (`npm run <script>` in the checkout) and see it fail before you change anything.
-- Fix the cause, not the test: never skip, disable or weaken a test, and never make the gate's
-  script itself do less.
-- Push one commit carrying the fix; the gate runs on it next.
+- Read the failure first: the script, its exit, its last lines. Reproduce it on the PR branch
+  (`npm run <script>` for the home gate). Before changing anything, fetch and run the same check
+  with the same install in a clean checkout of the current base, separate from the PR worktree.
+  The same rule applies to a red CI check in another repository: use that PR's base and check.
+- Compare individual failures, not the check's exit status. If the base reports A and the PR
+  reports A and B, leave A alone and fix B before ending. If an earlier failure prevents a check
+  from reaching later tests, run those tests separately on both trees where possible; do not
+  assume tests you could not reach pass.
+- For each failure that still occurs on the current base, change nothing for it. Comment on the
+  PR with the failing check or test, the first failing line, the PR head you tested and the base
+  commit you reproduced it on. Make the hand-off explicit: the gate stays red and this failure
+  needs a fix in the base's own ticket or PR. If the same head, base commit and failure already
+  have that hand-off, link the existing comment in your output instead of posting it again.
+- If the base has moved and already fixes a failure (it reproduces on the earlier base but
+  passes on the current one), merge the default branch into the PR branch and push the merge
+  with any other fixes for that repository. Add commits; never rebase.
+- For each PR failure that does not reproduce on the base and was not already fixed there, fix
+  the PR's cause, not the test: never skip, disable or weaken a test, and never make the gate's
+  script itself do less. Push one commit carrying those fixes; the gate runs again on the
+  pushed head.
+- After handling all failures, report any that still reproduce on the default branch and where.
+  If there is nothing to fix or merge, do not push just to trigger the gate again.
 
 ## For each finding, most severe first
 
@@ -70,6 +87,7 @@ before the next round reviews it.
 
 - A leg never edits a file another ticket's leg may edit — no CHANGELOG, no index, no
   aggregate; a release note belongs in the PR body.
+- Fix a failure that also fails on the base inside this PR.
 - Skip, disable or weaken a test to get green.
 - Rewrite the branch's history; add commits.
-- Merge.
+- Merge the PR.

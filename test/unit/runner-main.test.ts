@@ -163,6 +163,14 @@ describe('the agent_command a runner runs (B-83)', () => {
     expect(splitWords(HARNESS_AGENTS['claude-code']).at(-1)).toBe(AGENT_PROMPT);
   });
 
+  it('leaves completion criteria to the leg instructions in both briefings (B-317)', () => {
+    const settings = JSON.parse(readFileSync(join(__dirname, '..', '..', '.baton', 'baton.json'), 'utf8'));
+    for (const prompt of [AGENT_PROMPT, splitWords(settings.agent_command).at(-1)]) {
+      expect(prompt).toContain('When you have met the completion criteria in the leg instructions, exit immediately.');
+      expect(prompt).not.toContain('the checks green');
+    }
+  });
+
   it('settings naming no agent_command drive from --harness, the command logged; a named one is left to the settings', async () => {
     const none = homeWith(null);
     const named = homeWith('my-agent');
