@@ -427,10 +427,13 @@ Designs for this section that are not built are on the proposal page
   - **`min_runner_version`** is raised only when a runner on an older version would misbehave;
     a change to `rank.mjs` raises it only when the course needs every runner to rank alike
     (R-BTN-98).
-  - **Rule 9.** The runner reads each course's `version` from its checkout at startup and
-    declares it (`courses`, §14). A runner declaring a ticket's course below
-    `min_runner_version` gets no new claim on it (`stale-skills`); the dashboard shows it needing
-    a restart from a pulled checkout. Rule 9 is checked at a claim, never at an `advance`, so a
+  - **Rule 9.** The runner reads each course's `version` from its home checkout at startup and
+    whenever it brings the home to a snapshot: for a claim (R-BTN-34), or after a bounded fetch
+    of the default branch with no claim held. The next heartbeat declares the refreshed list
+    (`courses`, §14), omitting courses the home no longer declares. An ahead, diverged or
+    edited home is left alone; the runner logs why and keeps its last good list. A runner declaring
+    a ticket's course below `min_runner_version` gets no new claim on it (`stale-skills`).
+    Rule 9 is checked at a claim, never at an `advance`, so a
     held claim finishes under its protocol. It gates a course's protocol, never runner features,
     which are `runner:` capabilities (R-BTN-133).
 - **R-BTN-64 (in-flight tickets survive a course change).** Where a ticket is, is Baton's

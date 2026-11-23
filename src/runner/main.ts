@@ -14,8 +14,8 @@ import { join } from 'node:path';
 import { DEFAULT_URL } from '../../cli/baton.mjs';
 import { BatonApi, envAuth } from './api';
 import { HARNESS_AGENTS, type Harness } from './harness';
-import { holdHome, legNeeds, readHead } from './home';
-import { cliPinLines, cliProfile, readCliPin } from './cliPin';
+import { advanceHome, git, holdHome, legNeeds, readHead } from './home';
+import { cliBehind, cliPinLines, cliProfile, readCliPin } from './cliPin';
 import { GIT_NONINTERACTIVE_ENV } from '../defaults/ticket-state';
 import { Runner, stampLine, withTimestamps } from './runner';
 import { loadExecutor } from './executor';
@@ -61,6 +61,7 @@ export interface RunArgs {
    *  1 to 32, default 1 (one claim in the home checkout, as before); each claim beside another
    *  works in a clone of its own. */
   concurrency: number;
+  restartWhenBehind: boolean;
 }
 
 /** `baton run [--harness opencode|claude-code] [--home <checkout|home name>] [--url <url>] [--session <id>]
@@ -76,7 +77,7 @@ export function parseRunArgs(argv: string[], env: NodeJS.ProcessEnv = process.en
     session: env.BATON_SESSION ?? `run-${Math.random().toString(16).slice(2, 10)}`,
     repository: env.BATON_REPOSITORY ?? 'docs', hostname: env.BATON_HOSTNAME ?? hostname(),
     tier: 'critical', capabilities: null, beatEvery: 2 * 60_000, testHarness: false, verbose: false, locks: {},
-    executor: env.BATON_EXECUTOR ?? 'builtin', concurrency: 1,
+    executor: env.BATON_EXECUTOR ?? 'builtin', concurrency: 1, restartWhenBehind: false,
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -91,6 +92,7 @@ export function parseRunArgs(argv: string[], env: NodeJS.ProcessEnv = process.en
       out.harness = v;
     } else if (a === '--test-harness') out.testHarness = true;
     else if (a === '--verbose') out.verbose = true;
+    else if (a === '--restart-when-behind') out.restartWhenBehind = true;
     else if (a === '--home') out.home = value();
     else if (a === '--url') out.url = value();
     else if (a === '--session') out.session = value();
@@ -130,10 +132,10 @@ export function parseRunArgs(argv: string[], env: NodeJS.ProcessEnv = process.en
  * the courses served, and absent it the runner serves every course its home declares (B-103).
  * Printed before any credential or network work, and the exit is 0. */
 export const RUN_USAGE = [
-  'usage: baton run [--harness opencode|claude-code] [--home <checkout|home name>] [--url <url>] [--session <id>]',
+  'usage: baton runner start (or baton run) [--harness opencode|claude-code] [--home <checkout|home name>] [--url <url>] [--session <id>]',
   '                 [--repository <id>] [--hostname <name>] [--tier <tier>] [--capabilities a,b]',
   '                 [--beat-every <ms>] [--course <id>] [--executor <source>] [--concurrency <k>]',
-  '                 [--test-harness] [--verbose]',
+  '                 [--test-harness] [--verbose] [--restart-when-behind]',
   '',
   'Runs this machine\'s runner: it heartbeats, claims a ticket of a course its home checkout',
   'declares and runs each claim\'s legs one at a time. --home names a checkout, or a home of',
@@ -151,6 +153,7 @@ export const RUN_USAGE = [
   '                      each claim\'s legs run one at a time, claims side by side, each beside',
   '                      another in a clone of the home of its own. The owner\'s grant bounds it',
   '                      (--max-claims).',
+  '  --restart-when-behind  exit 75 between claims if this CLI is behind its local tracking ref.',
   '  --lock cap=path     one machine\'s singleton (R-BTN-178), repeatable: the capability is declared',
   '                      only while this runner holds an exclusive lock on the file, and it takes',
   '                      the lock before a claim for, or the advance into, a leg requiring it.',
@@ -188,7 +191,7 @@ const homeVersion = (home: string): number | null => {
 export function declareCourses(home: string): { course: string; version: number }[] {
   const batonJson = settingsOf(home, '.baton/baton.json');
   const version = homeVersion(home);
-  if (batonJson && Array.isArray(batonJson.courses) && batonJson.courses.length) {
+  if (batonJson && Array.isArray(batonJson.courses)) {
     const named: { course: string; version: number | null }[] = [];
     for (const c of batonJson.courses as Record<string, unknown>[]) {
       if (typeof c.id !== 'string' || (c.version !== undefined && typeof c.version !== 'number')) throw new Error('.baton/baton.json courses[] entries must be {id, version?, ...}');
@@ -216,11 +219,14 @@ export function declareCourses(home: string): { course: string; version: number 
  * one runner loads each claim's course from the snapshot and serves several courses from one
  * checkout; its only limit is one leg at a time (rule 3, §6.13). The flag is a loud refusal when
  * it names a course the home does not declare — the one thing the runner cannot serve. */
-export function servedCourses(home: string, chosen?: string): { course: string; version: number }[] {
+export function servedCourses(home: string, chosen?: string, refreshing = false): { course: string; version: number }[] {
   const declared = declareCourses(home);
   if (chosen == null) return declared;
   const one = declared.find((c) => c.course === chosen);
-  if (!one) throw new Error(`--course ${chosen}: the home checkout declares ${declared.map((c) => c.course).join(', ')}`);
+  if (!one) {
+    if (refreshing) return [];
+    throw new Error(`--course ${chosen}: the home checkout declares ${declared.map((c) => c.course).join(', ')}`);
+  }
   return [one];
 }
 
@@ -258,14 +264,33 @@ export function queueCommand(argv: string[]): number {
  * can never cost the lease it was fetching for. */
 export const FETCH_TIMEOUT_MS = 20_000;
 
-export function fetchMain(home: string, log: (l: string) => void = () => {}): void {
+export function fetchMain(home: string, log: (l: string) => void = () => {}, branch = 'main'): boolean {
   try {
-    execFileSync('git', ['-C', home, 'fetch', 'origin', 'main'], {
+    execFileSync('git', ['-C', home, 'fetch', 'origin', `refs/heads/${branch}`], {
       stdio: 'ignore', timeout: FETCH_TIMEOUT_MS, killSignal: 'SIGKILL', env: { ...process.env, ...GIT_NONINTERACTIVE_ENV },
     });
+    return true;
   } catch (e) {
     log(`baton: the snapshot fetch failed (${e instanceof Error ? e.message : String(e)})`);
+    return false;
   }
+}
+
+/** Only idle runners move the shared home towards a newly fetched default branch. */
+export function refreshHome(home: string, log: (l: string) => void): boolean {
+  let branch = 'main';
+  try {
+    branch = git(home, ['symbolic-ref', '--short', '-q', 'refs/remotes/origin/HEAD']).trim().replace(/^origin\//, '');
+  } catch { /* older clones need not have origin/HEAD */ }
+  if (!fetchMain(home, log, branch)) return false;
+  let stays: string | null;
+  try {
+    stays = advanceHome(home, 'FETCH_HEAD', branch);
+  } catch (e) {
+    stays = `the fast-forward failed (${e instanceof Error ? e.message : String(e)})`;
+  }
+  if (stays) log(`baton: keeping the last course declaration: ${stays}`);
+  return stays == null;
 }
 
 /** The `agent_command` the home checkout's `.baton/baton.json` names ('' when it names none,
@@ -353,7 +378,8 @@ export async function runMain(argv: string[], io: { log?: (l: string) => void; f
   // it — before any credential is read, so an operator starting a runner whose key is missing
   // still learns the code is unpinned. The same statement rides every heartbeat as
   // `profile.cli`: reported, never a refusal.
-  const cli = readCliPin(fileURLToPath(import.meta.url));
+  const cliFile = fileURLToPath(import.meta.url);
+  const cli = readCliPin(cliFile);
   for (const line of cliPinLines(cli)) say(line);
   const auth = envAuth(process.env, (material) => {
     const file = join(cacheDir(), 'key');
@@ -392,6 +418,7 @@ export async function runMain(argv: string[], io: { log?: (l: string) => void; f
   let exitCode = 0;
   let stopping = false;
   let hardStop: NodeJS.Timeout | null = null;
+  let lastHomeNotice = '';
   const codeOf = (signal: NodeJS.Signals): number => (signal === 'SIGINT' ? 130 : signal === 'SIGHUP' ? 129 : 143);
   const onSignal = (signal: NodeJS.Signals) => {
     // 2026-10-24: SIGTERM drains — the current leg completes, the claim ends at its boundary,
@@ -453,6 +480,16 @@ export async function runMain(argv: string[], io: { log?: (l: string) => void; f
     home, repository: a.repository, hostname: a.hostname, harness: a.harness, session: a.session,
     tierCeiling: a.tier, ...(a.capabilities ? { capabilities: a.capabilities } : {}),
     courses,
+    readCourses: () => servedCourses(home, a.course, true),
+    refreshHome: () => {
+      const ok = refreshHome(home, (line) => {
+        if (line !== lastHomeNotice) say(line);
+        lastHomeNotice = line;
+      });
+      if (ok) lastHomeNotice = '';
+      return ok;
+    },
+    ...(a.restartWhenBehind ? { restartReason: () => cliBehind(cliFile, cli) } : {}),
     // B-253 (R-BTN-72): the runner's own statement about its CLI — the start line's subject,
     // carried on every heartbeat as `profile.cli`.
     profile: cliProfile(cli),
@@ -462,7 +499,7 @@ export async function runMain(argv: string[], io: { log?: (l: string) => void; f
     // B-86: the legs the runner's courses require, from the home checkout's working tree — what
     // a never-eligible runner says it lacks at startup. B-103: every served course's legs, as each
     // of them must declare by its own version (rule 9 per course).
-    legNeeds: () => courses.flatMap((c) => legNeeds(home, readHead(home), c.course)),
+    legNeeds: (served) => served.flatMap((c) => legNeeds(home, readHead(home), c.course)),
     stateFile: join(cacheDir(), `${a.session}.json`),
     // R-BTN-202 (B-248): the home's local work queue, shared with `baton queue` and its other runners.
     queue: new LocalQueue(queuePath(cacheDir(), home)),
@@ -474,7 +511,8 @@ export async function runMain(argv: string[], io: { log?: (l: string) => void; f
     ...(a.concurrency !== 1 ? { concurrency: a.concurrency } : {}),
   });
   try {
-    await runner.work();
+    const result = await runner.work();
+    if (!exitCode) exitCode = result;
   } finally {
     process.off('SIGINT', onSignal);
     process.off('SIGTERM', onSignal);

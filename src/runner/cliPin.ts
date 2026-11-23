@@ -56,6 +56,25 @@ export function readCliPin(cliFile: string): CliPin {
   }
 }
 
+/** Compare the code loaded at startup with its local tracking ref. The launcher, not the
+ *  runner, fetches/updates the CLI and decides whether to start another process. */
+export function cliBehind(cliFile: string, started: CliPin): string | null {
+  if (started.kind !== 'branch' || !started.commit) return null;
+  const tree = workingTreeOf(cliFile);
+  if (tree == null) return null;
+  try {
+    if (git(tree, ['symbolic-ref', '--short', '-q', 'HEAD']).trim() !== started.ref) return null;
+    const upstream = git(tree, ['for-each-ref', '--count=1', '--format=%(upstream)', `refs/heads/${started.ref}`]).trim();
+    if (!upstream) return null;
+    const tip = git(tree, ['rev-parse', '--verify', '--quiet', `${upstream}^{commit}`]).trim();
+    if (tip === started.commit) return null;
+    git(tree, ['merge-base', '--is-ancestor', started.commit, tip]);
+    return `CLI ${started.commit.slice(0, 10)} is behind ${upstream} at ${tip.slice(0, 10)}; restart requested`;
+  } catch {
+    return null;
+  }
+}
+
 /** A released copy (B-138's tree-less CLI): the commit `dist/build.json` was built from — the
  *  package's flat `dist/`, the module beside it — with the package's `version` as its ref. A
  *  build from a modified tree pins nothing: `dirty` is the build's own word that no commit

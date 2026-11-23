@@ -142,6 +142,12 @@ section that are not built are in [the proposal page](../proposals/checks-and-ex
   at its own interval (R-BTN-77). Each attempt is one claim request and reads no
   recommendations, which are for a caller choosing work (§6.6). A claim that waits (R-BTN-40, R-BTN-195) holds only
   its own place, never the runner's other claims.
+  - **Restart requested.** With `--restart-when-behind`, at a claim boundary with no claims
+    held, the runner compares its loaded CLI checkout commit with its branch's local tracking ref.
+    If strictly behind, it logs why and takes the graceful drain path, exiting `75` instead
+    of taking another claim. Without the flag it keeps claiming. Released and detached CLIs
+    have no tracking branch to check. Updating the CLI, choosing the executor pin and launching
+    another process belong to the host.
   - **Course directory** (R-BTN-69, R-BTN-134):
 
     ```

@@ -111,10 +111,10 @@ export function ensureSha(home: string, sha: string, fetch: () => void): boolean
 export function advanceHome(home: string, sha: string, defaultBranch: string | null): string | null {
   const head = git(home, ['rev-parse', 'HEAD']).trim();
   const target = git(home, ['rev-parse', `${sha}^{commit}`]).trim();
-  if (head === target) return null;
   const branch = (() => { try { return git(home, ['symbolic-ref', '--short', '-q', 'HEAD']).trim(); } catch { return ''; } })();
-  if (defaultBranch == null || branch !== defaultBranch) return `the home is on ${branch || 'a detached HEAD'}, not ${defaultBranch ?? 'the default branch'}`;
+  if (branch !== defaultBranch && (defaultBranch !== null || head !== target)) return `the home is on ${branch || 'a detached HEAD'}, not ${defaultBranch ?? 'the default branch'}`;
   if (git(home, ['status', '--porcelain', '--untracked-files=no']).trim() !== '') return 'the home has tracked changes';
+  if (head === target) return null;
   try {
     git(home, ['merge-base', '--is-ancestor', head, target]);
   } catch {

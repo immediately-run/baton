@@ -59,6 +59,8 @@ describe('parseRunArgs', () => {
     expect(() => parseRunArgs(['--lock', 'mcp:chrome'], {})).toThrow('<capability>=<path>');
     // Verbose logging (2026-10-23): timestamps, the claim's id and nonce, the leg's command.
     expect(parseRunArgs(['--verbose'], {}).verbose).toBe(true);
+    expect(parseRunArgs([], {}).restartWhenBehind).toBe(false);
+    expect(parseRunArgs(['--restart-when-behind'], {}).restartWhenBehind).toBe(true);
   });
 });
 

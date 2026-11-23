@@ -307,6 +307,21 @@ BATON_KEY_FILE=~/.ssh/baton_worker BATON_REPOSITORY=baton \
 Check: the dashboard's Workers view shows the machine heartbeating, and the log's first lines say
 what it declares (`baton: declaring … — the grant's capabilities`).
 
+**Course updates do not require a restart.** Between claims the runner fetches the home's
+default branch and fast-forwards a clean home. It declares the new versions on the next
+heartbeat, before claiming again; a held claim finishes under its original protocol. If the
+runner logs that the home is ahead, diverged, on another branch, or has tracked changes, fix
+the checkout before expecting it to declare the new versions.
+
+**CLI updates are separate.** For a host-managed CLI checkout, `baton runner start
+--restart-when-behind` returns `75` once the loaded CLI commit is behind its local tracking ref
+and all claims have ended. A launcher (such as bering's host-managed `start-runner.sh`) must keep
+that ref current, loop only on `75`, fast-forward the CLI checkout and rebuild if needed, then
+re-read the host environment (including `BATON_EXECUTOR`) and start a new process. Stop the loop
+if the update fails. The runner does not update or relaunch its own CLI. The pinned release used
+by this repository's `scripts/start-runner.sh` has no tracking branch; update its release pin
+through the usual operator process.
+
 ## 6. Cut over
 
 On the dashboard, under the `baton` repository, choose **Cut over** and confirm twice. From then
