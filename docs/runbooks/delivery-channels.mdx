@@ -1,0 +1,25 @@
+---
+title: Adding a delivery channel
+description: Deliver Needs you entries from a repository-owned process without extending Baton's legacy notice queue.
+nav: Delivery channels
+tags: [runbook]
+---
+
+Use **Needs you** as the source. For a new channel such as email or chat, run a
+delivery process outside Baton, under the repository's control:
+
+1. Poll `GET /v1/repositories/{repository}/conditions?open=1&person=1` with a
+   credential that already has read access to that repository. Follow `next_cursor`
+   until the list is complete. The read returns open conditions and queued person
+   legs; see the [API contract](../../spec/BATON_SPEC/14-api.md).
+2. Pick the entries the channel should deliver. Post a short summary and a link
+   back to Baton, the ticket or the joinable session, as appropriate. Keep the
+   channel's credentials, retry state and deduplication outside Baton. Use the
+   condition ID or the queued question's identity to avoid resending on every poll.
+3. Leave answers and resolutions on their existing paths. Sending a message does
+   not close a condition or answer a person's leg.
+
+Do not add notice kinds, courier registrations or heartbeat courier declarations
+for new channels. The legacy notice and courier paths stay in place for existing
+callers until [B-67](../../tickets/B-67.mdx) finishes the migration. Handler courses
+and the outbox are [proposed, not built](../../spec/proposals/conditions.md).
