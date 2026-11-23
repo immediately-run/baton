@@ -162,12 +162,16 @@ describe('the standard courses (R-BTN-131)', () => {
     expect(readFileSync(join(home, 'fix.md'), 'utf8')).toBe(fix);
     expect(implement).toMatch(/clean checkout of the base[\s\S]*push and open the PR anyway/);
     expect(implement).toMatch(/\*\*Pre-existing failures\*\*:[\s\S]*first failing line[\s\S]*base commit/);
+    expect(implement).toMatch(/base commit you reproduced it on\. When you confirm such a failure, say in your last lines that\s+the default branch is red/);
+    expect(implement).toMatch(/Fix failures your change causes before you push, even if the same check also reports a\s+pre-existing failure/);
     expect(implement).toContain('Never fix an unrelated failure');
     expect(implement).toContain('the run-tests leg is the gate');
     expect(implement).not.toContain('Push only once they pass');
     expect(fix).toContain('clean checkout of the current base');
-    expect(fix).toMatch(/still fails on the current base[\s\S]*change nothing[\s\S]*Comment on the PR/);
-    expect(fix).toMatch(/base has moved and already fixes the failure[\s\S]*merge the default branch into the PR branch/);
+    expect(fix).toMatch(/If the base reports A and the PR\s+reports A and B, leave A alone and fix B before ending/);
+    expect(fix).toMatch(/failure that still occurs on the current base, change nothing for it\. Comment on the\s+PR/);
+    expect(fix).toMatch(/same head, base commit and failure already\s+have that hand-off, link the existing comment in your output instead of posting it again/);
+    expect(fix).toMatch(/base has moved and already fixes a failure[^]*?merge the default branch into the PR branch and push the merge\s+with any other fixes for that repository\. Add commits; never rebase\./);
     expect(fix).toContain('same rule applies to a red CI check in another repository');
     expect(fix).toContain('Fix a failure that also fails on the base inside this PR');
   });

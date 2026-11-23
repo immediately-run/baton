@@ -89,14 +89,17 @@ Fix whatever the answers expose before you push.
   An earlier attempt's branch for this ticket is continued, not replaced.
 - Implement what the ticket says, with its tests. A behaviour change without a test that would
   fail without it is not finished.
-- Run the repository's checks yourself. Fix failures your change causes before you push.
+- Run the repository's checks yourself. Compare individual failures, not the check's exit status.
+  Fix failures your change causes before you push, even if the same check also reports a
+  pre-existing failure.
 - **A failure that also fails on the base is not yours.** Re-run the same command with the same
   install in a clean checkout of the base (`git worktree add --detach <tmp> origin/<default branch>`),
   never in your own tree. If the same failure occurs there, push and open the PR anyway.
   In the PR body, under **Pre-existing failures**: name the test, its first failing line and the
-  base commit you reproduced it on.
+  base commit you reproduced it on. When you confirm such a failure, say in your last lines that
+  the default branch is red and where, before any required machine-read answer line.
 - **Never fix an unrelated failure** in the ticket's PR, even a one-line fix. It belongs to the
-  ticket or PR that owns that code. Say in your last lines that the default branch is red and where.
+  ticket or PR that owns that code.
 - **Install dependencies with hygiene** (B-132): from the lockfile only — `npm ci`, never an
   `npm install` that rewrites it — unless the ticket itself asks for a dependency change; and
   with lifecycle scripts off (`npm ci --ignore-scripts`: pass the flag every time — never

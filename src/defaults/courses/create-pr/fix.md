@@ -42,15 +42,24 @@ round reviews it.
   (`npm run <script>` for the home gate). Before changing anything, fetch and run the same check
   with the same install in a clean checkout of the current base, separate from the PR worktree.
   The same rule applies to a red CI check in another repository: use that PR's base and check.
-- If it still fails on the current base, change nothing for it. Comment on the PR naming the
-  failure and the base commit you reproduced it on. End by saying the default branch is red and
-  where, so the gate's red is read as the base's failure.
-- If the base has moved and already fixes the failure (it reproduces on the earlier base but
-  passes on the current one), merge the default branch into the PR branch and push. Add commits;
-  never rebase. The gate runs again on the pushed head.
-- If it passes on the base and is not a pre-existing failure fixed there, fix the PR's cause,
-  not the test: never skip, disable or weaken a test, and never make the gate's script itself do
-  less. Push one commit carrying the fix; the gate runs on it next.
+- Compare individual failures, not the check's exit status. If the base reports A and the PR
+  reports A and B, leave A alone and fix B before ending. If an earlier failure prevents a check
+  from reaching later tests, run those tests separately on both trees where possible; do not
+  assume tests you could not reach pass.
+- For each failure that still occurs on the current base, change nothing for it. Comment on the
+  PR with the failing check or test, the first failing line, the PR head you tested and the base
+  commit you reproduced it on. Make the hand-off explicit: the gate stays red and this failure
+  needs a fix in the base's own ticket or PR. If the same head, base commit and failure already
+  have that hand-off, link the existing comment in your output instead of posting it again.
+- If the base has moved and already fixes a failure (it reproduces on the earlier base but
+  passes on the current one), merge the default branch into the PR branch and push the merge
+  with any other fixes for that repository. Add commits; never rebase.
+- For each PR failure that does not reproduce on the base and was not already fixed there, fix
+  the PR's cause, not the test: never skip, disable or weaken a test, and never make the gate's
+  script itself do less. Push one commit carrying those fixes; the gate runs again on the
+  pushed head.
+- After handling all failures, report any that still reproduce on the default branch and where.
+  If there is nothing to fix or merge, do not push just to trigger the gate again.
 
 ## For each finding, most severe first
 
