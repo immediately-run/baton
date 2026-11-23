@@ -51,8 +51,10 @@ export interface LegStub {
   position: string;
   /** The stub verifies its outcome on the forge before returning its position (B-81): an open
    * PR on a branch the course's patterns map to the ticket, its head what the checkout pushed.
-   * The agent's exit 0 is not the leg's outcome. */
-  verify?: 'pr';
+   * The agent's exit 0 is not the leg's outcome. `merged`: every PR of the ticket on such a
+   * branch merged and none open (R-BTN-131) — a merge agent that exits 0 without merging fails
+   * the leg rather than report `merged`. */
+  verify?: 'pr' | 'merged';
   /** B-110: the deterministic test gate — no agent runs; the stub itself executes the course's
    *  `test_script` on the PR's head and the close pushes the branch's `Baton-Tests` marker. */
   tests?: true;
@@ -255,7 +257,10 @@ const CREATE_PR: BuiltIn = {
     // (`baton owner resolve … merge|owner|round`). No agent reproduces anything, so no runner is
     // offered the leg: the position below is what a holder would report if one ever ran it by hand.
     adjudicate: { ask: { name: 'adjudication', values: ['merge', 'owner'] }, position: "{ ...(answer === 'owner' ? { suspend: true } : {}), reached: 'adjudicated', next: 'merge', adjudication: answer }" },
-    merge: { position: "{ reached: 'merged', next: null }" },
+    // R-BTN-131: the stub reads the forge before it reports `merged` — every PR of the ticket
+    // merged, none open. On 2026-11-23 B-259's merge agent rightly refused PR #357 over red CI and
+    // exited 0; the leg said `merged` and Baton ended the claim done with the PR open.
+    merge: { position: "{ reached: 'merged', next: null }", verify: 'merged' },
   },
   skill: 'baton-create-pr',
 };

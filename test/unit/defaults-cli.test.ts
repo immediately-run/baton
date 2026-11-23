@@ -771,6 +771,39 @@ describe('baton repo init, through the built CLI', () => {
     }
   });
 
+  it('the merge stub reports merged only when the forge shows the ticket\'s PR merged: an agent that exits 0 with the PR open fails the leg (R-BTN-131, S-BTN-231)', async () => {
+    const settingsFile = join(root, '.baton', 'baton.json');
+    const scaffolded = readFileSync(settingsFile, 'utf8');
+    // A gh answering `--state open` and `--state merged` from the files beside it.
+    const fakeBin = mkdtempSync(join(tmpdir(), 'baton-fakegh-'));
+    writeFileSync(join(fakeBin, 'gh'), '#!/bin/sh\ncase "$*" in *"--state open"*) cat "$(dirname "$0")/open" ;; *) cat "$(dirname "$0")/merged" ;; esac\n');
+    chmodSync(join(fakeBin, 'gh'), 0o755);
+    const path = process.env.PATH;
+    process.env.PATH = `${fakeBin}:${path}`;
+    try {
+      // The B-259 shape (2026-11-23): the agent refuses to merge over red CI, says so, exits 0.
+      writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(scaffolded), agent_command: 'sh -c "echo CI is red twice on S-BTN-41, not merging PR 9"' }));
+      const snapshot = { sha: commitAll(root) };
+      const stub = await load(join(root, '.baton', 'courses', 'create-pr', 'legs', 'merge.mjs'));
+      const ctx = { ticket: { id: 'A-1' }, leg: 'merge', checkout: root, snapshot };
+      writeFileSync(join(fakeBin, 'open'), JSON.stringify([{ number: 9, headRefName: 'claude/A-1-kit' }]));
+      writeFileSync(join(fakeBin, 'merged'), '[]');
+      await expect(stub.run(ctx)).rejects.toThrow(/the merge agent exited 0, but A-1’s PR #9 \(claude\/A-1-kit\) is still open — not merged[^\n]*; the agent's last output:\n {2}CI is red twice on S-BTN-41, not merging PR 9$/);
+      // Merged, none open: the position.
+      writeFileSync(join(fakeBin, 'open'), '[]');
+      writeFileSync(join(fakeBin, 'merged'), JSON.stringify([{ number: 9, headRefName: 'claude/A-1-kit' }]));
+      expect(await stub.run(ctx)).toEqual({ reached: 'merged', next: null });
+      // Nothing merged and nothing open: no merge to report.
+      writeFileSync(join(fakeBin, 'merged'), '[]');
+      await expect(stub.run(ctx)).rejects.toThrow(/no merged PR on a branch matching claude\/A-1-\* for ticket A-1/);
+    } finally {
+      process.env.PATH = path;
+      rmSync(fakeBin, { recursive: true, force: true });
+      writeFileSync(settingsFile, scaffolded);
+      commitAll(root);
+    }
+  });
+
   it('the implement stub takes a delivered answer only for a commit on the default branch: delivered, confirm next, the commit its evidence (B-257, S-BTN-232)', async () => {
     const g = (...a: string[]) => execFileSync('git', ['-C', root, ...a], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
     const origin = mkdtempSync(join(tmpdir(), 'baton-delivered-origin-'));

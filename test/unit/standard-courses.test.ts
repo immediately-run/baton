@@ -197,10 +197,11 @@ describe('the standard courses (R-BTN-131)', () => {
     expect(builtIn('epic')).toBeUndefined();
   });
 
-  it('create-pr\'s implement stub verifies its PR on the forge before claiming it, and no other leg or course does (B-81)', () => {
+  it('create-pr\'s implement stub verifies its PR open and its merge stub every PR merged on the forge before claiming either, and no other leg or course does (B-81, R-BTN-131)', () => {
+    const want: Record<string, string> = { 'create-pr/implement': 'pr', 'create-pr/merge': 'merged' };
     for (const b of BUILT_INS) {
       for (const [leg, stub] of Object.entries(b.legs)) {
-        expect(stub.verify, `${b.id}/${leg}`).toBe(b.id === 'create-pr' && leg === 'implement' ? 'pr' : undefined);
+        expect(stub.verify, `${b.id}/${leg}`).toBe(want[`${b.id}/${leg}`]);
       }
     }
   });

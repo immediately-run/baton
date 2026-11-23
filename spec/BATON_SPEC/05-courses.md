@@ -512,8 +512,9 @@ Designs for this section that are not built are on the proposal page
       received as it would an exit's. The bounds are the course's.
     - The answer is the last line of the agent's output that begins with one of the course's
       values as a whole word, with at most one PR URL after it. No such line fails the leg.
-    - A stub whose leg claims a PR verifies it on the forge before it reports a position. A
-      stub reports failure and never retries.
+    - A stub whose leg claims a PR verifies it on the forge before it reports a position: an
+      opened PR open, a merged change every PR of the ticket merged and none open. A stub
+      reports failure and never retries.
   - **Overrides replace `run`, never `close`.** A home's `legs/<leg>.run.<ext>` exports
     `run(ctx, standard)`; the leg script loads it at the claim's snapshot and calls it instead
     of its own `run`, keeping its own `close`. Its position must be an edge. An override keeps
