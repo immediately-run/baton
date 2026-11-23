@@ -8,7 +8,7 @@
     ],
     "paths": {
       "#host": [
-        "./test/hosts/cloudflare.ts"
+        "./test/hosts/contract.d.ts"
       ]
     },
     "lib": [

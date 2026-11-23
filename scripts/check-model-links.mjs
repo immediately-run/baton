@@ -108,6 +108,7 @@ export function stampedFunction(src, offset) {
 }
 
 export function check(root = ROOT) {
+  /** @type {string[]} */
   const errors = [];
   const src = readFileSync(join(root, MODEL), 'utf8');
   const actions = modelActions(src);

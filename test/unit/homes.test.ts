@@ -239,7 +239,7 @@ describe('the home in force: --home, then BATON_HOME, then default (S-BTN-225\'s
     expect(plan('owner', ['grants'], undefined, undefined, { repository: 'fieldhouse', names: [] }).path).toBe('/v1/owner/fieldhouse/grants');
     expect(plan('owner', ['revoke', 'SHA256:abc'], undefined, undefined, { repository: 'fieldhouse', names: [] }).path).toBe('/v1/owner/fieldhouse/grants/SHA256%3Aabc/revoke');
     expect(plan('owner', ['resolve', 'B-5', 'baton:stalled', 'retry'], undefined, undefined, { repository: 'fieldhouse', names: [] }).path).toBe('/v1/owner/fieldhouse/tickets/fieldhouse%3AB-5/resolve');
-    expect(plan('admin', ['grant', '--key', 'ssh-ed25519 AAAA', '--capabilities', 'a'], undefined, undefined, { repository: 'fieldhouse', names: [] }).body.repository).toBe('fieldhouse');
+    expect(plan('admin', ['grant', '--key', 'ssh-ed25519 AAAA', '--capabilities', 'a'], undefined, undefined, { repository: 'fieldhouse', names: [] }).body?.repository).toBe('fieldhouse');
     // With no home in force, the bare id keeps its old refusal.
     expect(() => plan('ticket', ['show', 'B-5'])).toThrow('the ticket is <repository>:<id>');
   });

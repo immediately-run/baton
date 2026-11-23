@@ -196,9 +196,12 @@ const UNITS = { m: 60_000, h: 3_600_000, d: 86_400_000 };
 /** argv after the command: flags (each `--name value`, or a bare boolean) and positionals. The
  *  `--required-bar` groups keep their order, so each takes the flags that follow it. With
  *  `allowed`, a flag the command does not take is refused — never silently dropped (round 3, 3-A-1). */
+/** @param {readonly string[]} argv @param {readonly string[]} [booleans] @param {readonly string[] | null} [allowed] */
 export function parseArgs(argv, booleans = [], allowed = null, positionals = Infinity) {
+  /** @type {Record<string, string | true | undefined>} */
   const flags = {};
   const positional = [];
+  /** @type {{leg: string, course?: string, except?: string, 'tag-prefix'?: string}[]} */
   const groups = [];
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -261,6 +264,7 @@ const time = (v, what) => {
   if (!Number.isFinite(t)) throw new Error(`${what}: not a date (${v})`);
   return t;
 };
+/** @param {string} v */
 export function duration(v) {
   const m = /^(\d+)([mhd])$/.exec(v);
   if (!m) throw new Error(`a duration is like 30m, 1h or 2d, not ${v}`);
@@ -314,6 +318,7 @@ function devFlagPositions(argv) {
  * @param {(path: string) => string} [readKey]
  * @param {(path: string) => string} [readJson]
  * @param {{repository: string | null, names: string[]} | null} [home]
+ * @returns {{method: string, path: string, body?: Record<string, unknown>, file?: string, readFile?: string, confirm?: {question: string, yes: boolean}, preflight?: {method: string, path: string, question: string}, yes?: boolean, resolveCodeRepos?: {repository: string, offline: {repo_id: string, owner_id: string} | null}}}
  */
 export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? p : readFileSync(p, 'utf8').trim()), readJson = (p) => readFileSync(p, 'utf8'), home = null) {
   const [cmd, ...rest] = argv;
@@ -636,6 +641,9 @@ const GRANT_FLAGS = ['key', 'hostname', 'label', 'capabilities', 'max-tier', 'ma
 
 /** §12.2's ask under a destructive action: `--yes` answers the prompt beforehand; without a
  *  TTY the command refuses rather than prompt a pipe. `out` and `in` are injected for the test. */
+/** @typedef {{write(text: string): unknown}} PromptOutput */
+/** @typedef {{isTTY?: boolean, once(event: 'data', listener: (data: unknown) => void): unknown}} PromptInput */
+/** @param {string} question @param {boolean} yes @param {PromptOutput} out @param {PromptInput} input */
 export async function confirmAsk(question, yes, out, input) {
   if (yes) return true;
   if (!input.isTTY) {
@@ -652,6 +660,8 @@ export async function confirmAsk(question, yes, out, input) {
 /** R-BTN-178's confirm (B-106): print every course whose legs require the capability, with the
  *  type's definition in each, then ask. `--yes` answers beforehand; without a TTY the command
  *  refuses rather than prompt a pipe. `out` and `in` are injected for the test. */
+/** @param {{ requiring?: readonly {repository: string, course: string, version: number, legs: string[], type?: {description?: string, values?: string} | null}[], capacities?: readonly {capability: string, capacity: number | null, set_at: number, set_by: string}[] } | null} answer
+ * @param {string} question @param {boolean} yes @param {PromptOutput} out @param {PromptInput} input */
 export async function confirmCapacity(answer, question, yes, out, input) {
   const requiring = Array.isArray(answer?.requiring) ? answer.requiring : [];
   if (requiring.length) {
@@ -683,6 +693,7 @@ function jsonArg(v, readJson) {
  *  resolver fills them from the home's registration); a well-known host implies its forge.
  *  `--forge-ids <repo>,<owner>` supplies the ids offline for one entry; otherwise `main`
  *  reads them from the entry's forge before the PUT goes out. Pure, beside `plan`. */
+/** @param {string} value @param {string | null} [forgeIds] */
 export function codeReposSpec(value, forgeIds = null) {
   const known = { 'github.com': 'github', 'gitlab.com': 'gitlab', 'gitea.com': 'gitea' };
   let offline = null;
@@ -710,6 +721,7 @@ export function codeReposSpec(value, forgeIds = null) {
 }
 
 /** B-182 (R-BTN-139): `--pushers` — `id[@host]`, a comma list; a host-less entry is the home's. */
+/** @param {string} value */
 export function pushersSpec(value) {
   return list(value).map((raw) => {
     const at = raw.lastIndexOf('@');
@@ -730,6 +742,7 @@ export function pushersSpec(value) {
  * @param {string} keyFile
  * @param {{path: string, forge?: string | null, host?: string | null, repo_id?: number | string | null, owner_id?: number | string | null}[]} entries
  * @param {{repository?: string, fetchImpl?: BatonFetch, env?: NodeJS.ProcessEnv}} [options]
+ * @returns {Promise<{path: string, forge: string, host: string, repo_id: string | number, owner_id: string | number}[]>}
  */
 export async function resolveCodeRepos(url, keyFile, entries, { repository, fetchImpl = fetch, env = process.env } = {}) {
   let home = null;
@@ -814,6 +827,7 @@ function grantBody(flags, readKey, extra) {
  *  anywhere. FILE (mode 0600) holds the key, for `-i FILE` or a runner's BATON_KEY_FILE;
  *  FILE.pub holds its public line — what BATON_ADMIN_KEYS lists, `--owner-key FILE.pub` or
  *  `--key FILE.pub` registers. */
+/** @param {string} file */
 export function createApiKey(file, comment = '') {
   if (existsSync(file) || existsSync(`${file}.pub`)) throw new Error(`${file} or ${file}.pub already exists`);
   const key = `bak_${randomBytes(8).toString('hex')}_${randomBytes(32).toString('hex')}`;
@@ -844,6 +858,7 @@ let saidClientVersions = false;
  * @param {{path: string, method: string, body?: unknown}} p
  * @param {string} keyFile
  * @param {BatonFetch} [fetchImpl]
+ * @returns {Promise<{status: number, json: unknown, text: string}>}
  */
 export async function send(url, p, keyFile, fetchImpl = fetch, client = clientVersion()) {
   const cred = requestCredential(keyFile);
@@ -893,6 +908,7 @@ function warnClientVersions(headerValue, client) {
 }
 
 /** The base a course change is judged against: `--base`, else the remote's default branch. */
+/** @param {string} root */
 export function defaultBase(root) {
   for (const ref of ['origin/HEAD', 'origin/main']) {
     try {
@@ -1006,6 +1022,7 @@ const canonical = (v) => Array.isArray(v) ? `[${v.map(canonical).join(',')}]`
 
 /** The knobs a change from `oldDoc` to `newDoc` touches — `baton owner policy diff` (pure, so
  *  the tests check it alone). */
+/** @param {unknown} oldDoc @param {unknown} newDoc */
 export function policyDiff(oldDoc, newDoc) {
   return POLICY_KNOBS.filter((k) => canonical(knobOf(oldDoc, k)) !== canonical(knobOf(newDoc, k)));
 }
@@ -1130,6 +1147,7 @@ async function homesContext(flag, explicitUrl = null) {
 /** The one management path's exit: 0 when Baton answered its JSON, 1 when the answer was not
  *  Baton's — a refusal, or a 2xx body that is not JSON (B-80) — and any error thrown up to the
  *  caller (the CLI prints `baton: …` and exits 2). Exported for the tests of that contract. */
+/** @param {string[]} argv @returns {Promise<number>} */
 export async function main(argv) {
   // B-138: an owner or administrator key signs with the code that reads it, so the CLI that
   // takes one is a pinned release — never a git working tree, whose code a push (a branch a leg

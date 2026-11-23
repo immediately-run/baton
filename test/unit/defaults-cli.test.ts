@@ -2101,7 +2101,7 @@ describe('githubFacts (R-BTN-96’s GitHub adapter) against a recorded GitHub', 
     vi.stubGlobal('fetch', async (url: string, init?: { body?: string }) => {
       const res = await real(url, init);
       if (!url.endsWith('/graphql')) return res;
-      const body = await res.json<{data: {repository: {p1: {head: {nodes: {commit: unknown}[]}}}}}>();
+      const body: { data: { repository: { p1: { head: { nodes: { commit: unknown }[] } } } } } = await res.json();
       body.data.repository.p1.head.nodes[0].commit = { oid: 'older', checkSuites: null };
       return Response.json(body);
     });

@@ -11,13 +11,16 @@ async function rules(filePath, source) {
 
 describe('ESLint policy (B-282)', () => {
   it('rejects a direct clock read in core, not in a test clock fixture (R-BTN-32)', async () => {
-    expect(await rules('src/core/example.ts', "Date.now(); Date['now']();")).toEqual(['no-restricted-syntax', 'no-restricted-syntax']);
+    for (const read of ['Date.now()', "Date['now']()", 'globalThis.Date.now()', 'globalThis[`Date`][`now`]()']) {
+      expect(await rules('src/core/example.ts', read)).toEqual(['no-restricted-syntax']);
+    }
+    expect(await rules('src/core/example.ts', 'other.Date.now(); globalThis.performance.now(); this.now();')).toEqual([]);
     expect(await rules('test/unit/example.test.ts', 'Date.now();')).toEqual([]);
   });
 
   it('rejects markup APIs, explicit any, loose equality, var and unreassigned let', async () => {
-    expect(await rules('src/dashboard/example.tsx', 'el.innerHTML; el["innerHTML"]; <div dangerouslySetInnerHTML={x} />;')).toEqual([
-      'no-restricted-syntax', 'no-restricted-syntax', 'no-restricted-syntax',
+    expect(await rules('src/dashboard/example.tsx', 'el.innerHTML; el["innerHTML"]; el[`innerHTML`]; <div dangerouslySetInnerHTML={x} />;')).toEqual([
+      'no-restricted-syntax', 'no-restricted-syntax', 'no-restricted-syntax', 'no-restricted-syntax',
     ]);
     expect(await rules('src/core/example.ts', 'var x: any; let y = 1; x == y;')).toEqual([
       'no-var', '@typescript-eslint/no-explicit-any', 'prefer-const', 'eqeqeq',

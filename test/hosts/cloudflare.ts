@@ -6,7 +6,10 @@ import { exports } from 'cloudflare:workers';
 import type { Baton } from '../../src/cloudflare/baton';
 import type { BatonCore } from '../../src/core/baton';
 import type { Config } from '../../src/core/ports';
+import type { AssertHost } from './contract';
 import { RECOMMENDED_CLIENT } from '../../src/core/http';
+
+type _Host = AssertHost<typeof import('./cloudflare')>;
 
 export const HOST: 'cloudflare' | 'local' = 'cloudflare';
 export const config: Config = env;

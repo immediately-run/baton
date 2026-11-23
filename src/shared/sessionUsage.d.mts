@@ -4,7 +4,7 @@ export const LEDGER_HEADER: string;
 export const LEDGER_RULE: string;
 
 type Tokens = Record<typeof TOKEN_KEYS[number], number>;
-interface UsageRecord extends Tokens { id?: string; at: string | null; model: string; scope: string }
+interface UsageRecord extends Tokens { id?: string; at: string | null | undefined; model: string; scope: string }
 interface Bucket extends Tokens { calls: number; model: string; scope: string }
 interface Price extends Partial<Tokens> {
   match: string;
@@ -18,12 +18,12 @@ interface Commit { at: string; subject: string; added?: string }
 export function claudeRecords(text: string, scope?: string): UsageRecord[];
 export function claudeSubagentScope(metaText: string): string;
 export function opencodeRecords(exported: { messages?: readonly unknown[] } | null | undefined, scope?: string): { records: UsageRecord[]; children: { sessionId: string; scope: string }[] };
-export function inWindow<T extends { at: string | null }>(records: readonly T[], since: string | null, through: string): T[];
-export function isOffPeak(at: string | null, entry: Price | null | undefined): boolean;
+export function inWindow<T extends { at: string | null | undefined }>(records: readonly T[], since: string | null, through: string): T[];
+export function isOffPeak(at: string | null | undefined, entry: Price | null | undefined): boolean;
 export function aggregate(records: readonly UsageRecord[], prices?: Prices | null): Bucket[];
 export function priceFor(model: string, prices: Prices | null | undefined): Price | null;
 export function costOf(bucket: Tokens & { model: string }, prices: Prices | null | undefined): number | null;
-export function firstCall(records: readonly { at: string | null }[]): string | null;
+export function firstCall(records: readonly { at: string | null | undefined }[]): string | null;
 export function toRows(buckets: readonly Bucket[], context: { through: string; firstCall?: string | null; session: string; harness: string; item: string }, prices: Prices | null, options?: { withholdModel?: boolean }): string[];
 export function parseLedger(text: string): LedgerRow[];
 export function lastCheckpoint(rows: readonly LedgerRow[], session: string): string | null;

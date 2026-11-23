@@ -33,7 +33,7 @@
     "pretest:baton": "npm run build:ui",
     "test:load": "npm run build:ui && BATON_SKIP_QUINT=1 BATON_LOAD_TEST=1 vitest run test/load/ --project local",
     "test:no-quint": "npm test",
-    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.local.json && tsc --noEmit -p tsconfig.dashboard.json && tsc --noEmit -p tsconfig.test.json",
+    "typecheck": "node scripts/typecheck.mjs",
     "pretypecheck": "npm run build:ui",
     "build:ui": "node scripts/build-ui.mjs",
     "build:cli": "node scripts/build-cli.mjs",

@@ -63,7 +63,7 @@ describe('check-traces rejects what the model forbids, naming the step', () => {
     expect(r.ok).toBe(false);
     // the model refuses the claim: its gates fail on the hold
     expect('failure' in r && r.failure).toMatchObject({ step: 3, label: 'POST /v1/runner/claim → 200', actionRefused: true });
-    expect('failure' in r && 'actions' in r.failure && r.failure.actions).toContain('claim("w1", "docs:T-1")');
+    expect(r.failure && 'actions' in r.failure && r.failure.actions).toContain('claim("w1", "docs:T-1")');
   }, QUINT_CASE_MS);
 
   itQuint('an end confirmed by an observation not above its own: rejected at the post that claims it', async () => {
@@ -88,7 +88,7 @@ describe('check-traces rejects what the model forbids, naming the step', () => {
     const r = await check('confirmed-by-older', stale);
     expect(r.ok).toBe(false);
     expect('failure' in r && r.failure).toMatchObject({ step: 5 });
-    expect('failure' in r && 'fields' in r.failure && r.failure.fields).toContain('claim 1 confirmed');
+    expect(r.failure && 'fields' in r.failure && r.failure.fields).toContain('claim 1 confirmed');
   }, QUINT_CASE_MS);
 });
 
@@ -100,7 +100,7 @@ describe('check-traces rejects each step round 1 found accepted (round 2, 2-r2-1
   const rejected = async (name: string, rest: [Step['origin'], (p: Projection) => Projection][], reason: string) => {
     const r = await check(name, trace(rest));
     expect(r.ok).toBe(false);
-    expect('failure' in r && 'reason' in r.failure && r.failure.reason).toContain(reason);
+    expect(r.failure && 'reason' in r.failure && r.failure.reason).toContain(reason);
     return r;
   };
   const claimReq = req('POST', '/v1/runner/claim');

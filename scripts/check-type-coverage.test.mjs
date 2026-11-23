@@ -1,9 +1,12 @@
 // B-282: each TypeScript source belongs to one project's root set. An import can still bring
 // it into another project's program, e.g. the local host checking portable core on Node.
 import { execFileSync } from 'node:child_process';
-import { dirname, relative, resolve } from 'node:path';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { relative, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import ts from 'typescript';
+import { readProjects } from './lib/typeProjects.mjs';
 
 const root = resolve(import.meta.dirname, '..');
 
@@ -17,15 +20,8 @@ function coverageProblems(sources, projects) {
   ]);
 }
 
-function projectFiles(path) {
-  const file = resolve(root, path);
-  const { config, error } = ts.readConfigFile(file, ts.sys.readFile);
-  const parsed = !error && ts.parseJsonConfigFileContent(config, ts.sys, dirname(file), undefined, file);
-  const errors = error ? [error] : parsed.errors;
-  if (errors.length) {
-    throw new Error(`${path}: ${errors.map((d) => ts.flattenDiagnosticMessageText(d.messageText, '\n')).join('\n')}`);
-  }
-  return parsed.fileNames.map((name) => relative(root, name));
+function compiledRoots(directory) {
+  return [...readProjects(directory)].map(([name, config]) => [name, config.fileNames.map((file) => relative(directory, file))]);
 }
 
 describe('TypeScript project coverage (B-282)', () => {
@@ -34,9 +30,23 @@ describe('TypeScript project coverage (B-282)', () => {
       cwd: root, encoding: 'utf8',
     }).split('\0').filter(Boolean))];
     const sources = paths.filter((path) => /\.(?:[cm]?ts|tsx)$/.test(path) && ts.sys.fileExists(resolve(root, path)));
-    const projects = paths.filter((path) => /^tsconfig(?:\.[\w-]+)?\.json$/.test(path));
     expect(sources.length).toBeGreaterThan(0);
-    expect(coverageProblems(sources, projects.map((path) => [path, projectFiles(path)]))).toEqual([]);
+    expect(coverageProblems(sources, compiledRoots(root))).toEqual([]);
+  });
+
+  it('does not count a file owned only by a config that typecheck does not run', () => {
+    const scratch = mkdtempSync(resolve(tmpdir(), 'baton-tsconfig-'));
+    try {
+      for (const [project] of compiledRoots(root)) {
+        writeFileSync(resolve(scratch, project), JSON.stringify({ files: [`${project}.ts`] }));
+        writeFileSync(resolve(scratch, `${project}.ts`), 'export {};');
+      }
+      writeFileSync(resolve(scratch, 'tsconfig.probe.json'), '{"files":["probe.ts"]}');
+      writeFileSync(resolve(scratch, 'probe.ts'), 'const value: number = "wrong";');
+      expect(coverageProblems(['probe.ts'], compiledRoots(scratch))).toEqual(['probe.ts: not included by any tsconfig']);
+    } finally {
+      rmSync(scratch, { recursive: true, force: true });
+    }
   });
 
   it('reports both missing files and duplicate owners', () => {

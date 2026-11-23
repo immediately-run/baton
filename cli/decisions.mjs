@@ -13,6 +13,7 @@ export const WATCH_EVERY_MS = 60_000;
  * retitle or rewrite the terminal — become U+FFFD. Titles and links passed Baton's §10.4 checks,
  * and are still printed as data, never as instructions to the terminal.
  */
+/** @param {unknown} v */
 export const plain = (v) => String(v).replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, '\uFFFD');
 
 /** One decision as lines of text: `<ticket> — <title>`, its question, and its link. B-133: each

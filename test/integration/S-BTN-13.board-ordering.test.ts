@@ -17,7 +17,7 @@ const sha = board.shas;
 const labelOf = (s: string | null) => (Object.entries(sha).find(([, v]) => v === s)?.[0] ?? null) as Label | null;
 const isAncestor = async (a: string, b: string) => board.ancestry[`${labelOf(a)}<${labelOf(b)}`] === true;
 
-const readHead = async () => (await (await syncCall('/v1/sync/head')).json<Head>()) as Head;
+const readHead = async (): Promise<Head> => (await syncCall('/v1/sync/head')).json();
 const post = async (body: unknown) => {
   const res = await syncCall('/v1/sync/board', body);
   const json = (await res.json()) as Record<string, unknown>;

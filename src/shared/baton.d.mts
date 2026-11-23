@@ -15,7 +15,12 @@ interface Runner {
   courses?: readonly { repository: string; course: string; version: number }[];
 }
 interface Item { id: string; repository: string; course: string; tier?: string | null; requires?: readonly string[] | null; expedite?: boolean }
-interface Context {
+type ReviewMatrix = Matrix & { agents: Record<string, Agent> };
+type ReviewContext =
+  | { lastEndReason?: null; matrix?: ReviewMatrix }
+  // An arbitrary reason can select the legacy review-capacity path, which needs a matrix.
+  | { lastEndReason: string | null; matrix: ReviewMatrix };
+type Context = ReviewContext & {
   now?: number;
   claims?: readonly Claim[];
   override?: { hold?: boolean | number; retry_after?: number | null } | null;
@@ -23,12 +28,10 @@ interface Context {
   minRunnerVersion?: number;
   expediteActive?: number;
   expediteBound?: number;
-  lastEndReason?: string | null;
   authorFamilies?: readonly (string | null)[];
   catalog?: Record<string, Agent>;
-  matrix?: Matrix & { agents: Record<string, Agent> };
   tiers?: readonly string[];
-}
+};
 export const RULE_CODES: Readonly<Record<2 | 3 | 4 | 5 | 7 | 8 | 9 | 10, string>>;
 type Refusal = { rule: keyof typeof RULE_CODES; code: string };
 export function batonNow(): number;

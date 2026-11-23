@@ -18,8 +18,9 @@ const fileName = {
 
 const camel = '[a-z][a-zA-Z0-9]*';
 const kebab = '[a-z0-9]+(?:-[a-z0-9]+)*';
+const memberNamed = (name, at = '') => `:matches([${at}computed=false][${at}property.name="${name}"], [${at}computed=true][${at}property.type="Literal"][${at}property.value="${name}"], [${at}computed=true][${at}property.type="TemplateLiteral"][${at}property.expressions.length=0][${at}property.quasis.0.value.cooked="${name}"])`;
 const markup = {
-  selector: 'MemberExpression[computed=false][property.name="innerHTML"], MemberExpression[computed=true][property.value="innerHTML"], JSXAttribute[name.name="dangerouslySetInnerHTML"]',
+  selector: `MemberExpression${memberNamed('innerHTML')}, JSXAttribute[name.name="dangerouslySetInnerHTML"]`,
   message: 'Render text, not markup; use textContent or React text nodes.',
 };
 
@@ -52,7 +53,7 @@ export default defineConfig([
     files: ['src/core/**/*'],
     rules: {
       'no-restricted-syntax': ['error', markup, {
-        selector: 'MemberExpression[object.name="Date"][computed=false][property.name="now"], MemberExpression[object.name="Date"][computed=true][property.value="now"]',
+        selector: `MemberExpression${memberNamed('now')}:matches([object.name="Date"], [object.type="MemberExpression"][object.object.name="globalThis"]${memberNamed('Date', 'object.')})`,
         message: 'Use the injected clock (R-BTN-32), not Date.now.',
       }],
     },

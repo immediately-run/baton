@@ -20,7 +20,7 @@ const sync = (next: Label) => syncOnce(sha[next], {
     const o = await observe();
     return o.status === 200 ? o.json : { ok: false, code: o.json.code ?? `HTTP ${o.status}` };
   },
-  readHead: async () => (await syncCall('/v1/sync/head')).json<Head>(),
+  readHead: async (): Promise<Head> => (await syncCall('/v1/sync/head')).json(),
   post: async (body: unknown) => {
     const res = await syncCall('/v1/sync/board', body);
     const json = (await res.json()) as Record<string, unknown>;

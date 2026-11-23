@@ -38,6 +38,7 @@ const stationOf = (path) => path.reduce((_, l) => TO[l], START);
 const COURSE = JSON.parse(readFileSync(join(ROOT, 'test', 'fixtures', 'courses', 'roadmap-pr', 'course.json'), 'utf8'));
 
 // ── ITF back to JSON ─────────────────────────────────────────────────────────────────────
+/** @param {unknown} v @returns {unknown} */
 export function fromItf(v) {
   if (Array.isArray(v)) return v.map(fromItf);
   if (v && typeof v === 'object') {
@@ -49,6 +50,9 @@ export function fromItf(v) {
   return v;
 }
 
+/** @typedef {{kind: import('../test/integration/trace').Step['kind'], now: number, method?: string, path?: string, status?: number, body?: unknown, response?: unknown, state: import('../test/integration/trace').Projection}} TraceStep */
+/** @typedef {{scenario: string, test: string, steps: TraceStep[]}} Trace */
+/** @param {string} file @returns {Trace} */
 export function readTrace(file) {
   const t = JSON.parse(readFileSync(file, 'utf8'));
   return { scenario: t['#meta']?.source ?? basename(dirname(file)), test: t['#meta']?.description ?? basename(file), steps: t.states.map((s) => ({ ...s['#meta'], state: fromItf(s.baton) })) };
@@ -106,6 +110,10 @@ function requiredLegs(required) {
  * expect: [[name, expr]] }], end: { index, reason } | null }`: `end` is the first step the model
  * has no action for; the steps before it are the trace's checked part.
  */
+/** @typedef {{index: number, label: string, actions: string[], expect: string[][]}} ModelStep */
+/** @typedef {{index: number, reason: string}} Stop */
+/** @typedef {{consts: Record<string, string | number>, steps: ModelStep[], end: Stop | null, reject?: Stop & {label: string}, total: number}} Translation */
+/** @param {{steps: readonly TraceStep[]}} trace @returns {Translation} */
 export function translate(trace) {
   const states = trace.steps.map((s) => s.state);
   const empty = { counter: 0, lastAccepted: 0, outstanding: false, tickets: {}, claims: {}, held: {}, ownerBars: [], runners: {}, required: [], courseFile: null };
@@ -482,6 +490,7 @@ const chain = (steps, upto, withExpect = true) => {
 };
 
 /** The Quint module that replays `t` (translate's result) whole. */
+/** @param {Pick<Translation, 'consts' | 'steps'>} t */
 export function quintModule(t) {
   return `${header(t.consts)}  run traceTest =\n${chain(t.steps, t.steps.length)}\n}\n`;
 }
@@ -500,7 +509,7 @@ function stepModule(t, i, only) {
 }
 
 function quintTest(file) {
-  return new Promise((done) => {
+  return new Promise(/** @param {(result: {ok: boolean, out: string}) => void} done */ (done) => {
     const p = spawn('npx', ['quint', 'test', file, '--main=replay', '--backend=typescript', '--max-samples=1'], { cwd: ROOT });
     let out = '';
     p.stdout.on('data', (d) => (out += d));
@@ -510,7 +519,8 @@ function quintTest(file) {
 }
 
 /** Check one trace file: `{ok, checked, total, end, failure}`. */
-/** @param {string} file */
+/** @typedef {{error: string} | {step: number, label: string, actions: string[], actionRefused: boolean, fields: string[], reason?: string}} Failure */
+/** @param {string} file @returns {Promise<{file: string, scenario: string, test: string, checked: number, total: number, end: Stop | null, ok: boolean, failure?: Failure}>} */
 export async function checkTrace(file, tag = basename(file).replace(/\W+/g, '_').slice(0, 60)) {
   const trace = readTrace(file);
   const t = translate(trace);
