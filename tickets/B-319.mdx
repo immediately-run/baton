@@ -8,7 +8,7 @@ repos:
   - baton
 tags:
   - roadmap-item
-tier: normal
+tier: judgement
 description: "When Sign in with Cloudflare Access is refused, /login shows one sentence, 'No verified Cloudflare Access email is bound to an administrator key', for five different causes: the Worker has no ACCESS_TEAM_DOMAIN or ACCESS_AUD, no Access assertion reached /v1/login, the assertion did not verify, the email has no ACCESS_IDENTITIES line, or the line names a key not in BATON_ADMIN_KEYS. On 2026-11-23 the cause was the first, and finding it meant reading the code. Send a reason with the unauthenticated refusal and draw one sentence for each, still never naming the email and still not saying whether an email has a line."
 topics:
   - baton
