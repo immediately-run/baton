@@ -97,7 +97,8 @@ remains the development path — the repository commands (`tickets`, `repo`, `te
 | `src/dashboard/` | The dashboard (BATON-UI-V2), in React 19 and TypeScript with no other runtime dependency: a walk down the entity tree — sign in, pick a repository, then one entity a screen. `app/` is the frame, the router, the sign-in and the controls drawn from the registry; `screens/` one folder per entity (`root`, `board`, `tickets`, `goals`, `courses`, `conditions`, `runners`, `credentials`, `governance`, `attestations`, `sync`, `tenant`), each registered in `screens/index.ts` under its id in `src/core/screens.ts` and kept to `screens/README.md`'s contract; `lib/` the shared pieces (`Text` and `View`, the polling store, the link rule). Every screen draws its entity's reads (`src/core/reads/`) and the registry entries `ui.view` places on it — never the whole state. Built by `npm run build:ui` (esbuild) into `src/dashboard/dist/` (gitignored): one bundle served as text by both hosts (R-BTN-55), never Workers assets |
 | `test/ui/` | The dashboard's tests (vitest project `ui`, jsdom): each screen over a mocked `fetch`, the source gate (no markup-parsing API under `src/dashboard/**`, §12.3), hostile values through the real screens (S-BTN-76) and a screen drawing only its caller's actions (S-BTN-307) |
 | `cli/` | `baton admin …` and `baton owner …` (`baton.mjs`); `baton decision list` (`decisions.mjs`, R-BTN-163's reader of what waits on a person; its courier half is R-BTN-80's retired sense): one request per command, signed with the key file `-i` names by `ssh-keygen -Y sign` (`sign.mjs`); `baton test-course`, which needs no Baton. The command tree the spec now defines is R-BTN-127's (`baton runner start`, `baton ticket …`, `baton course test`); the built names move to it under B-157 |
-| `src/shared/` | **Vendored** from docs `scripts/lib/` — never edit here (R-BTN-37); `batonSync.mjs` is the board sync's own decision code, which S-BTN-13 drives. Except two of Baton's own, which every part imports: `schema.mjs`, the one validator of leg outputs and readings (R-BTN-108: the subset, the linear-time pattern engine, the refinement check), and `std.mjs`, the `std:` library (R-BTN-110) |
+| `src/shared/` | Baton-owned modules used across components, including `schema.mjs`, the one validator of leg outputs and readings (R-BTN-108), and `std.mjs`, the `std:` library (R-BTN-110) |
+| `src/vendor/` | Byte-identical copies from docs (R-BTN-37); never edit the copies here. `batonSync.mjs` is the board sync's decision code, which S-BTN-13 drives |
 | `test/unit/`, `test/integration/` | Vitest; `S-BTN-n` scenarios in `integration/`. Project `cloudflare` runs everything in the Workers runtime; project `local` runs every scenario again on the local host, plus the Node-only tests |
 | `test/integration/trace.ts` | R3-1244: every scenario's run on the local host as a trace — one step per request or alarm tick, with the state projection the formal model has — written to `test/.traces/` |
 | `test/model/replay.test.ts` | R3-1244: traces drawn from `model/replay.qnt` drive the core, compared with the model's state at every step |
@@ -198,9 +199,9 @@ remains the development path — the repository commands (`tickets`, `repo`, `te
   repository command, not an API call: the push triggers the sync, the board places the ticket, and
   the next claim starts the course. The course's file must say `starts_from: request`.
   `docs/standard-courses.mdx` has the pattern.
-- `npm run vendor` — re-copy the files `src/shared/manifest.json` lists (`baton.mjs`, `vocabulary.mjs`,
+- `npm run vendor` — re-copy the files `src/vendor/manifest.json` lists (`baton.mjs`, `vocabulary.mjs`,
   `sessionUsage.mjs`, `batonSync.mjs`, `ticketPr.mjs`) from a sibling `../docs`
-  checkout (or `DOCS_DIR`) and rewrite `src/shared/manifest.json`. Do this in a PR here after
+  checkout (or `DOCS_DIR`) and rewrite `src/vendor/manifest.json`. Do this in a PR here after
   docs changes any of them.
 - `npm run fixtures` — regenerate `test/fixtures/boards.json` with the real docs
   `factory-state` code.
@@ -398,7 +399,7 @@ repository binds to one Baton, and every registered one binds to production (B-2
 the `CLOUDFLARE_API_TOKEN` secret in the `production` environment (R3-1208): Workers Scripts:
 Edit on the account, plus Zone: Read and Workers Routes: Edit on the `immediately.run` zone.
 
-With a sibling docs checkout present, the suite also fails when `src/shared/` or the board
+With a sibling docs checkout present, the suite also fails when `src/vendor/` copies or the board
 fixtures have drifted from docs.
 
 ## Moving a Baton (R-BTN-88)

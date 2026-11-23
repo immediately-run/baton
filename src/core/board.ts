@@ -3,7 +3,7 @@ import { boundedJson } from './validate';
 // R-BTN-33/35). Pure: the core does the SQL, on either host. Only filter fields survive — an item's
 // body, Status notes, exit criteria and PR list never reach Baton; the dashboard links each
 // item to its file on GitHub instead.
-import { capabilitiesOf } from '../shared/vocabulary.mjs';
+import { capabilitiesOf } from '../vendor/vocabulary.mjs';
 import { parseTranscriptRepo } from './links';
 import { BatonError } from './http';
 import { checkRegistry, COURSE_ID, type RegistryEntry } from './courses';
