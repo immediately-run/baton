@@ -12,12 +12,13 @@ import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileS
 import { homedir, hostname } from 'node:os';
 import { join } from 'node:path';
 import { DEFAULT_URL } from '../../cli/baton.mjs';
+import { checkDeclaredCourses } from '../core/validate';
 import { BatonApi, envAuth } from './api';
 import { HARNESS_AGENTS, type Harness } from './harness';
 import { advanceHome, git, holdHome, legNeeds, readHead } from './home';
 import { cliBehind, cliPinLines, cliProfile, readCliPin } from './cliPin';
 import { GIT_NONINTERACTIVE_ENV } from '../defaults/ticket-state';
-import { Runner, stampLine, withTimestamps } from './runner';
+import { Runner, stampLine, withTimestamps, type RunnerOptions } from './runner';
 import { loadExecutor } from './executor';
 import { readMaskEnv, runnerConfigPath, underBatonDirectory } from './mask';
 import { runnerHome } from '../defaults/homes';
@@ -163,21 +164,22 @@ export const RUN_USAGE = [
 /** B-86: whether the arguments ask for the usage — `--help` or `-h`, anywhere in them. */
 export const asksHelp = (argv: string[]): boolean => argv.includes('--help') || argv.includes('-h');
 
-/** A home checkout's settings files, as JSON (null for one that is absent or not JSON —
- *  `declareCourses` names that failure its own way). */
+/** A missing settings file is not the same as an unreadable or malformed declaration. */
 function settingsOf(home: string, path: string): Record<string, unknown> | null {
   try {
-    return JSON.parse(readFileSync(join(home, path), 'utf8')) as Record<string, unknown>;
-  } catch {
-    return null;
+    const value = JSON.parse(readFileSync(join(home, path), 'utf8'));
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('expected a JSON object');
+    return value;
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw new Error(`${path}: ${e instanceof Error ? e.message : String(e)}`);
   }
 }
 
 /** The version the home checkout names for every course it declares: `.baton/baton.json`'s
  *  `skills_version` first, then docs' interim `scripts/data/baton.json`; null when neither does. */
-const homeVersion = (home: string): number | null => {
-  const batonJson = settingsOf(home, '.baton/baton.json');
-  if (batonJson && typeof batonJson.skills_version === 'number') return batonJson.skills_version;
+const homeVersion = (home: string, batonJson: Record<string, unknown> | null): number | null => {
+  if (typeof batonJson?.skills_version === 'number') return batonJson.skills_version;
   const data = settingsOf(home, 'scripts/data/baton.json');
   return typeof data?.skills_version === 'number' ? data.skills_version : null;
 };
@@ -188,27 +190,31 @@ const homeVersion = (home: string): number | null => {
  * runner refuses to guess a version it cannot find — a wrong declaration silences rule 9.
  * B-103: an entry that names no version (`{"courses": [{"id": "create-spec"}]}`) is served at
  * the version the home names — skills_version is every course's version — never at a guess. */
-export function declareCourses(home: string): { course: string; version: number }[] {
-  const batonJson = settingsOf(home, '.baton/baton.json');
-  const version = homeVersion(home);
-  if (batonJson && Array.isArray(batonJson.courses)) {
+export function declareCourses(home: string, batonJson = settingsOf(home, '.baton/baton.json'), inferLegacy = true): RunnerOptions['courses'] {
+  if (batonJson?.courses !== undefined) {
+    if (!Array.isArray(batonJson.courses)) throw new Error('.baton/baton.json courses must be an array');
     const named: { course: string; version: number | null }[] = [];
+    let fallback: number | null | undefined;
     for (const c of batonJson.courses as Record<string, unknown>[]) {
-      if (typeof c.id !== 'string' || (c.version !== undefined && typeof c.version !== 'number')) throw new Error('.baton/baton.json courses[] entries must be {id, version?, ...}');
-      named.push({ course: c.id, version: typeof c.version === 'number' ? c.version : version });
+      if (!c || typeof c.id !== 'string' || (c.version !== undefined && typeof c.version !== 'number')) throw new Error('.baton/baton.json courses[] entries must be {id, version?, ...}');
+      if (c.version === undefined && fallback === undefined) fallback = homeVersion(home, batonJson);
+      named.push({ course: c.id, version: typeof c.version === 'number' ? c.version : fallback ?? null });
     }
     const missing = named.filter((c) => c.version == null).map((c) => c.course);
     if (missing.length) throw new Error(`the home checkout names no course version for ${missing.join(', ')} (.baton/baton.json courses[] or skills_version, or scripts/data/baton.json)`);
     return named.map((c) => ({ course: c.course, version: c.version as number }));
   }
   if (typeof batonJson?.course === 'string') {
+    const version = homeVersion(home, batonJson);
     if (version == null) throw new Error('the home checkout names no course version (.baton/baton.json courses[] or skills_version, or scripts/data/baton.json)');
     return [{ course: batonJson.course, version }];
   }
+  if (!inferLegacy) return [];
   const coursesDir = join(home, '.baton', 'courses');
   if (!existsSync(coursesDir)) throw new Error(`${home} has no .baton/courses`);
   const listed = readdirSync(coursesDir).filter((d) => existsSync(join(coursesDir, d, 'course.json')));
   if (listed.length !== 1) throw new Error(`the home checkout runs ${listed.length} courses and .baton/baton.json names none: ${listed.join(', ')}`);
+  const version = homeVersion(home, batonJson);
   if (version == null) throw new Error('the home checkout names no course version (.baton/baton.json courses[] or skills_version, or scripts/data/baton.json)');
   return [{ course: listed[0], version }];
 }
@@ -219,8 +225,11 @@ export function declareCourses(home: string): { course: string; version: number 
  * one runner loads each claim's course from the snapshot and serves several courses from one
  * checkout; its only limit is one leg at a time (rule 3, §6.13). The flag is a loud refusal when
  * it names a course the home does not declare — the one thing the runner cannot serve. */
-export function servedCourses(home: string, chosen?: string, refreshing = false): { course: string; version: number }[] {
-  const declared = declareCourses(home);
+export function servedCourses(home: string, chosen?: string): RunnerOptions['courses'] {
+  return selectCourses(declareCourses(home), chosen, false);
+}
+
+function selectCourses(declared: RunnerOptions['courses'], chosen: string | undefined, refreshing: boolean): RunnerOptions['courses'] {
   if (chosen == null) return declared;
   const one = declared.find((c) => c.course === chosen);
   if (!one) {
@@ -228,6 +237,20 @@ export function servedCourses(home: string, chosen?: string, refreshing = false)
     throw new Error(`--course ${chosen}: the home checkout declares ${declared.map((c) => c.course).join(', ')}`);
   }
   return [one];
+}
+
+/** Once the home uses explicit declarations, removing them must not revive leftover directories. */
+export function courseReader(home: string, repository: string, chosen?: string): () => RunnerOptions['courses'] {
+  let inferLegacy = true;
+  let refreshing = false;
+  return () => {
+    const config = settingsOf(home, '.baton/baton.json');
+    const next = selectCourses(declareCourses(home, config, inferLegacy), chosen, refreshing);
+    checkDeclaredCourses(next.map((course) => ({ ...course, repository })));
+    if (config?.courses !== undefined || typeof config?.course === 'string') inferLegacy = false;
+    refreshing = true;
+    return next;
+  };
 }
 
 /** R-BTN-144 class 7 (B-170): the names `runner.json` `mask_env` lists for this runner's host,
@@ -278,10 +301,20 @@ export function fetchMain(home: string, log: (l: string) => void = () => {}, bra
 
 /** Only idle runners move the shared home towards a newly fetched default branch. */
 export function refreshHome(home: string, log: (l: string) => void): boolean {
-  let branch = 'main';
+  let branch: string | undefined;
   try {
-    branch = git(home, ['symbolic-ref', '--short', '-q', 'refs/remotes/origin/HEAD']).trim().replace(/^origin\//, '');
-  } catch { /* older clones need not have origin/HEAD */ }
+    branch = git(home, ['symbolic-ref', '-q', 'refs/remotes/origin/HEAD']).trim().match(/^refs\/remotes\/origin\/(.+)$/)?.[1];
+  } catch { /* fetch-only checkouts need not have origin/HEAD */ }
+  if (!branch) {
+    try {
+      branch = git(home, ['ls-remote', '--symref', 'origin', 'HEAD'], FETCH_TIMEOUT_MS)
+        .match(/^ref: refs\/heads\/(.+)\tHEAD$/m)?.[1];
+    } catch { /* log below and keep the last declaration */ }
+    if (!branch) {
+      log('baton: keeping the last course declaration: cannot resolve the default branch of origin');
+      return false;
+    }
+  }
   if (!fetchMain(home, log, branch)) return false;
   let stays: string | null;
   try {
@@ -390,7 +423,8 @@ export async function runMain(argv: string[], io: { log?: (l: string) => void; f
   });
   // Every course the home declares, or the one `--course` narrows to (B-103): refused at startup,
   // loudly, when the flag names one the home does not declare — not per claim.
-  const courses = servedCourses(home, a.course);
+  const readCourses = courseReader(home, a.repository, a.course);
+  const courses = readCourses();
   // R-BTN-144 class 7 (B-170): the names this host's `runner.json` `mask_env` lists are masked
   // with the ones that say a secret by their ending. A repository's own settings file is never
   // read for it: only the runner host's configuration names what its legs must not print. The
@@ -480,7 +514,7 @@ export async function runMain(argv: string[], io: { log?: (l: string) => void; f
     home, repository: a.repository, hostname: a.hostname, harness: a.harness, session: a.session,
     tierCeiling: a.tier, ...(a.capabilities ? { capabilities: a.capabilities } : {}),
     courses,
-    readCourses: () => servedCourses(home, a.course, true),
+    readCourses,
     refreshHome: () => {
       const ok = refreshHome(home, (line) => {
         if (line !== lastHomeNotice) say(line);

@@ -42,7 +42,8 @@ export function readCliPin(cliFile: string): CliPin {
     const commit = git(tree, ['rev-parse', 'HEAD']).trim();
     try {
       // A branch tip: `symbolic-ref` names it — the state the owner's warning is for.
-      return { commit, ref: git(tree, ['symbolic-ref', '--short', '-q', 'HEAD']).trim(), pinned: false, kind: 'branch' };
+      const branch = git(tree, ['symbolic-ref', '-q', 'HEAD']).trim().slice('refs/heads/'.length);
+      return { commit, ref: branch, pinned: false, kind: 'branch' };
     } catch {
       // Detached: a tag names a release; the commit naming itself is a fixed commit either way.
       try {
@@ -63,8 +64,9 @@ export function cliBehind(cliFile: string, started: CliPin): string | null {
   const tree = workingTreeOf(cliFile);
   if (tree == null) return null;
   try {
-    if (git(tree, ['symbolic-ref', '--short', '-q', 'HEAD']).trim() !== started.ref) return null;
-    const upstream = git(tree, ['for-each-ref', '--count=1', '--format=%(upstream)', `refs/heads/${started.ref}`]).trim();
+    const branch = git(tree, ['symbolic-ref', '-q', 'HEAD']).trim();
+    if (branch !== `refs/heads/${started.ref}`) return null;
+    const upstream = git(tree, ['for-each-ref', '--count=1', '--format=%(upstream)', branch]).trim();
     if (!upstream) return null;
     const tip = git(tree, ['rev-parse', '--verify', '--quiet', `${upstream}^{commit}`]).trim();
     if (tip === started.commit) return null;

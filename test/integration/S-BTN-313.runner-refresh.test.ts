@@ -8,9 +8,9 @@ import { call as hostCall } from '#host';
 import { BatonApi } from '../../src/runner/api';
 import { cliBehind, readCliPin } from '../../src/runner/cliPin';
 import { git } from '../../src/runner/home';
-import { refreshHome, servedCourses } from '../../src/runner/main';
+import { courseReader, refreshHome } from '../../src/runner/main';
 import { Runner } from '../../src/runner/runner';
-import { claimItem, course, cutover, placed, register, rows, setClock, syncCall, ticket, TOKENS } from '../helpers';
+import { claimItem, course, cutover, placed, register, rows, setClock, syncCall, syncToken, ticket, TOKENS } from '../helpers';
 import relay from '../fixtures/courses/relay/course.json';
 
 const settings = '.baton/baton.json';
@@ -48,12 +48,12 @@ afterEach(() => {
 const path = (checkout: string, leg: string) => join(checkout, `.baton/courses/relay/legs/${leg}.mjs`);
 const log = (line: string) => lines.push(line);
 
-async function post(sha: string, parent: string | null, version: number, ids: string[]) {
+async function post(sha: string, parent: string | null, version: number, ids: string[], token?: string) {
   const result = await syncCall('/v1/sync/board', {
     sha, parent_sha: parent, registry: [course(version, version, { id: 'relay', course: graph })],
     tickets: ids.map((id) => ticket(id, { course_id: 'relay' })), closed: [],
     stations: Object.fromEntries(ids.map((id) => [id, placed('filed', [], [['build', 'ready']])])),
-  });
+  }, token);
   expect(result.status, await result.text()).toBe(200);
 }
 
@@ -62,9 +62,10 @@ function makeRunner(options: Partial<ConstructorParameters<typeof Runner>[0]> = 
     url: 'https://baton.test', transport: (req) => hostCall(req),
     auth: (_m, _u, _b, secret) => ({ Authorization: `Bearer ${TOKENS['vm-a']}`, ...(secret ? { 'X-Runner-Secret': secret } : {}) }),
   });
+  const readCourses = options.readCourses ?? courseReader(home, 'docs');
   return runner = new Runner({
     api, home, repository: 'docs', hostname: 'vm-a', harness: 'opencode', session: 's313',
-    courses: servedCourses(home), readCourses: () => servedCourses(home), refreshHome: () => refreshHome(home, log),
+    courses: readCourses(), readCourses, refreshHome: () => refreshHome(home, log),
     stateFile: join(dir, 'runner.json'), beatEvery: 100, log, ...options,
   });
 }
@@ -110,7 +111,7 @@ describe('S-BTN-313 refresh course versions and request a restart', () => {
     expect(lines).toContain('baton: course relay now version 2 (was 1)');
   }, 30_000);
 
-  it('refreshes after a claim fast-forward and omits a removed selected course', async () => {
+  it.each(['{"courses":[]}', '{"skills_version":2}'])('refreshes after a claim fast-forward and omits a removed selected course (%s)', async (replacement) => {
     writeCourses(source, 2);
     writeFileSync(path(source, 'build'), built);
     const v2 = commit(source);
@@ -120,17 +121,58 @@ describe('S-BTN-313 refresh course versions and request a restart', () => {
     const r = makeRunner({
       refreshHome: () => refreshBetweenClaims && refreshHome(home, log),
       fetch: () => { git(home, ['fetch', '-q', 'origin', 'main']); },
-      readCourses: () => servedCourses(home, 'relay', true),
+      readCourses: courseReader(home, 'docs', 'relay'),
     });
     expect(await r.runOnce()).toMatchObject({ end_reason: 'suspended:built' });
     await r.tick();
     expect(await rows('SELECT version FROM runner_courses')).toEqual([{ version: 2 }]);
-    writeFileSync(join(source, settings), '{"courses":[]}');
+    writeFileSync(join(source, settings), replacement);
     commit(source);
     refreshBetweenClaims = true;
     expect(await r.runOnce()).toBeNull();
     expect(await rows('SELECT version FROM runner_courses')).toEqual([]);
   }, 30_000);
+
+  it('refreshes a non-main default branch without a local origin/HEAD before applying Rule 9', async () => {
+    git(source, ['branch', '-m', 'trunk']);
+    git(home, ['fetch', '-q', 'origin', 'trunk']);
+    git(home, ['switch', '-q', '--track', 'origin/trunk']);
+    git(home, ['symbolic-ref', '--delete', 'refs/remotes/origin/HEAD']);
+    await rows("UPDATE repositories SET default_branch = 'trunk' WHERE id = 'docs'");
+    const token = await syncToken({ ref: 'refs/heads/trunk', job_workflow_ref: 'immediately-run/docs/.github/workflows/baton-sync.yml@refs/heads/trunk' });
+    const r = makeRunner();
+    writeCourses(source, 2);
+    writeFileSync(path(source, 'build'), built);
+    await post(commit(source), null, 2, ['T-1'], token);
+    expect(await r.runOnce()).toMatchObject({ ticket: 'docs:T-1', end_reason: 'suspended:built' });
+    expect(await rows('SELECT version FROM runner_courses')).toEqual([{ version: 2 }]);
+  });
+
+  it.each([-1, 1.5, 1_000_000_001])('keeps a valid heartbeat and can claim when the refreshed version is %s', async (invalid) => {
+    const r = makeRunner();
+    writeCourses(source, invalid);
+    writeFileSync(path(source, 'build'), built);
+    await post(commit(source), null, 1, ['T-1']);
+    expect(await r.runOnce()).toMatchObject({ ticket: 'docs:T-1', end_reason: 'suspended:built' });
+    expect(await rows('SELECT version FROM runner_courses')).toEqual([{ version: 1 }]);
+    expect(lines.join('\n')).toMatch(/keeping the last course declaration .*courses\[0\]\.version/);
+  });
+
+  it('does not claim when refreshing the shared CLI and home reveals an update', async () => {
+    const cliFile = join(home, 'baton.mjs');
+    // A tag of the same name must not hide the branch's configured upstream.
+    git(home, ['tag', 'main']);
+    const pin = readCliPin(cliFile);
+    const r = makeRunner({ restartReason: () => cliBehind(cliFile, pin) });
+    writeFileSync(path(source, 'build'), built);
+    const sha = commit(source);
+    await post(sha, null, 1, ['T-1']);
+    expect(cliBehind(cliFile, pin)).toBeNull();
+    expect(await r.runOnce()).toBeNull();
+    expect(git(home, ['rev-parse', 'HEAD']).trim()).toBe(sha);
+    expect(await rows('SELECT id FROM claims')).toEqual([]);
+    expect(await r.work()).toBe(75);
+  });
 
   it.each(['ahead', 'diverged', 'edited'] as const)('keeps the last declaration when the home is %s', async (kind) => {
     const r = makeRunner();

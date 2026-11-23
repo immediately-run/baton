@@ -432,13 +432,14 @@ export class Runner {
     await this.sidecar.endEarlierSessions();
     if (this.stopped || this.draining) return null;
     if (this.slots.size === 0 && this.claimsOut === 0 && !this.offlineSlot) {
+      if (this.o.refreshHome?.()) this.refreshCourses();
+      // The home fetch may also move the CLI's upstream when they share a checkout.
       const reason = !this.sidecar.hasPendingEnds && this.o.restartReason?.();
       if (reason) {
         this.restartRequested = true;
         this.drain(reason);
         return null;
       }
-      if (this.o.refreshHome?.()) this.refreshCourses();
     }
     // R-BTN-4 (B-188): no room — the runner holds its bound.
     if (this.slots.size >= this.concurrency) return null;
