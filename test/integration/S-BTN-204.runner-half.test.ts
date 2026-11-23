@@ -7,12 +7,10 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { keyCall, payload, course, rows, setAdminKeys, setClock, syncCall, cutover, TOKENS } from '../helpers';
+import { keyCall, payload, course, rows, setAdminKeys, setClock, syncCall, cutover } from '../helpers';
 import { makeKey } from '../lib/sshKeys';
-import { Runner } from '../../src/runner/runner';
-import { BatonApi } from '../../src/runner/api';
+import { testRunner } from '../lib/runnerRig';
 import roadmapPr from '../fixtures/courses/roadmap-pr/course.json';
-import { call as hostCall } from '#host';
 
 const board = inject('board');
 const T0 = Date.parse('2026-11-09T12:00:00Z');
@@ -57,14 +55,9 @@ export async function close() { return 'https://example.test/close'; }
         registry: [course(3, 3)], state: { items: [{ ...base, id: 'R3-9904', requires: ['none'] }] }, ready: ['R3-9904'],
       }))).status).toBe(200);
 
-      const api = new BatonApi({
-        url: 'https://baton.test',
-        transport: (req) => hostCall(req),
-        auth: (_m, _u, _b, secret) => ({ Authorization: `Bearer ${TOKENS['vm-a']}`, ...(secret ? { 'X-Runner-Secret': secret } : {}) }),
-      });
-      const runner = new Runner({
-        api, home: dir, repository: 'docs', hostname: 'vm-a', harness: 'opencode', capabilities: ['key:zai'],
-        session: 'b185-run-ids', courses: [{ course: 'roadmap-pr', version: 3 }], stateFile, beatEvery: 60_000, log: () => {},
+      const runner = testRunner({
+        home: dir, capabilities: ['key:zai'],
+        session: 'b185-run-ids', courses: [{ course: 'roadmap-pr', version: 3 }], stateFile, beatEvery: 60_000,
       });
       expect(await runner.runOnce()).not.toBeNull();
       runner.stop();

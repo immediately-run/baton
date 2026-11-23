@@ -14,12 +14,11 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { call as hostCall } from '#host';
-import { BatonApi } from '../../src/runner/api';
-import { Runner } from '../../src/runner/runner';
+import { testRunner } from '../lib/runnerRig';
 import { capabilitiesOf } from '../../src/shared/vocabulary.mjs';
 import { initMain, parseSyncArgs, syncMain, type SyncArgs } from '../../src/defaults/cli';
 import {
-  cutover, keyCall, ORIGIN, rows, setAdminKeys, setClock, syncToken, TOKENS, replaceSignedControl, seedHumanKey,
+  cutover, keyCall, ORIGIN, rows, setAdminKeys, setClock, syncToken, replaceSignedControl, seedHumanKey,
   seedRepositoryOwner,
 } from '../helpers';
 import { makeKey, type TestKey } from '../lib/sshKeys';
@@ -74,19 +73,13 @@ async function sync(): Promise<{ code: number; lines: string[] }> {
 }
 
 /** A runner against this test's Baton (S-BTN-26's shape), its log captured. */
-function makeRunner(log: string[]): Runner {
-  const api = new BatonApi({
-    url: 'https://baton.test',
-    transport: (req) => hostCall(req),
-    auth: (_m, _u, _b, secret) => ({ Authorization: `Bearer ${TOKENS['vm-a']}`, ...(secret ? { 'X-Runner-Secret': secret } : {}) }),
-  });
-  const runner = new Runner({
-    api, home: dir, repository: 'docs', hostname: 'vm-a', harness: 'opencode',
+function makeRunner(log: string[]) {
+  return testRunner({
+    home: dir,
     capabilities: [...capabilitiesOf(['agent-venue'])],
     session: `s203-${Date.now()}`, courses: [{ course: 'create-pr', version: 1 }], stateFile: join(tmpdir(), `baton-s203-${process.pid}-${Date.now()}.json`),
     beatEvery: 60_000, log: (l) => log.push(l),
   });
-  return runner;
 }
 
 beforeEach(async () => {

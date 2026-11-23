@@ -20,7 +20,9 @@ import { parseFrontmatter } from '../../src/defaults/tickets-markdown';
 const ROOT = resolve(import.meta.dirname, '..', '..');
 const CLI = join(ROOT, 'cli', 'baton.mjs');
 const dirs: string[] = [];
+const repos: GitRepo[] = [];
 afterEach(() => {
+  while (repos.length) repos.pop()!.dispose();
   while (dirs.length) rmSync(dirs.pop()!, { recursive: true, force: true });
 });
 
@@ -35,6 +37,7 @@ class TicketCommands extends GitRepo {
 
   constructor() {
     super('baton-189-', { origin: true });
+    repos.push(this);
   }
   /** `.baton/baton.json` and a project page, committed and pushed to the origin's main. */
   publish(settings: Record<string, unknown> = {}): void {

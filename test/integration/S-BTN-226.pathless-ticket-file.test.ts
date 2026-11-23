@@ -109,17 +109,19 @@ class PathlessTickets extends GitRepo {
 }
 
 const cleanup: string[] = [];
+const repos: GitRepo[] = [];
 beforeEach(async () => {
   await setClock(T0);
   await cutover();
 });
 afterEach(() => {
+  while (repos.length) repos.pop()!.dispose();
   for (const d of cleanup) rmSync(d, { recursive: true, force: true });
   cleanup.length = 0;
 });
 const repoOf = (tracker: boolean): PathlessTickets => {
   const r = new PathlessTickets(tracker);
-  cleanup.push(r.dir);
+  repos.push(r);
   return r;
 };
 
