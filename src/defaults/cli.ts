@@ -1305,6 +1305,13 @@ export function stubSource(b: BuiltIn, course: string, leg: string): string {
   // close hands the checkout's default branch in itself.)
   const closeHelpers = b.reads === 'prs' ? `\nimport { ticketsBranch } from ${JSON.stringify(source('ticket-state.ts'))};` : '';
   const values = ask ? ask.values.join(' or ') : '';
+  // The forge read before the position (R-BTN-131): `pr` an open PR (B-81), `merged` every PR
+  // of the ticket merged and none open — the merge agent's exit 0 is not a merge.
+  const verifySource = verify === 'merged' ? `  const mergedPrs = (() => { try { return verifyPrsMerged({ checkout: ctx.checkout, ticket: ctx.ticket, branchPatterns: patterns, repositories: ticketRepositories(ticketText, settings.repos) }, legRun); } catch (e) { throw failed(e); } })();
+  if (process.env.BATON_VERBOSE) process.stderr.write('baton: ' + ${JSON.stringify(`${b.id}/${leg}`)} + ' ticket ' + ctx.ticket.id + ': the forge verified ' + mergedPrs.join(', ') + ' merged, none open, on a branch matching ' + patterns.join(' or ') + '\\n');
+` : verify ? `  try { await verifyPrOpen({ checkout: ctx.checkout, ticket: ctx.ticket, branchPatterns: patterns, repositories: ticketRepositories(ticketText, settings.repos) }, legRun); } catch (e) { throw failed(e); }
+  if (process.env.BATON_VERBOSE) process.stderr.write('baton: ' + ${JSON.stringify(`${b.id}/${leg}`)} + ' ticket ' + ctx.ticket.id + ': the forge verified an open PR on a branch matching ' + patterns.join(' or ') + '\\n');
+` : '';
   return `import { execFile, execFileSync, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -1348,7 +1355,7 @@ const newestWrite = (p, depth = 0) => {
 const gitRun = (cmd, args, opts = {}) => execFileSync(cmd, args, { encoding: 'utf8', timeout: GIT_BOUND_MS, killSignal: 'SIGKILL', env: { ...process.env, ...GIT_ENV }, stdio: ['ignore', 'pipe', 'pipe'], ...opts });${ask ? `
 import { requireAnswer } from ${JSON.stringify(source('answer.ts'))};` : ''}
 import { ${closeFrom[0]} } from ${JSON.stringify(source(closeFrom[1]))};${closeHelpers}${verify ? `
-import { verifyPrOpen, ticketRepositories${delivered ? ', findDelivered, verifyDelivered, deliveredDetail' : ''} } from ${JSON.stringify(source('pr-verify.ts'))};` : ''}${pushes ? `
+import { ${verify === 'merged' ? 'verifyPrsMerged' : 'verifyPrOpen'}, ticketRepositories${delivered ? ', findDelivered, verifyDelivered, deliveredDetail' : ''} } from ${JSON.stringify(source('pr-verify.ts'))};` : ''}${pushes ? `
 import { DEFAULT_BRANCH_PATTERN, branchMatches, matchPatterns } from ${JSON.stringify(source('course-pr.ts'))};
 import { bareTicketId } from ${JSON.stringify(source('ticket-state.ts'))};${verify ? '' : `
 import { ticketRepositories } from ${JSON.stringify(source('pr-verify.ts'))};`}` : ''}
@@ -1365,10 +1372,14 @@ import { ticketRepositories } from ${JSON.stringify(source('pr-verify.ts'))};`}`
 // The agent's last line of output must be its ${ask.name}: ${values}. A line that opens with
 // one of them is read as the answer wherever it sits — prose before or after it is the agent's,
 // not a lost round (B-85) — and that line may name one PR URL after the word. A missing or
-// misspelled ${ask.name} still fails the leg, naming what the agent's output ended with.` : ''}${verify ? `
+// misspelled ${ask.name} still fails the leg, naming what the agent's output ended with.` : ''}${verify === 'pr' ? `
 // Before returning its position the stub verifies the leg's outcome on the forge (B-81): an
 // open PR on a branch this course's branch patterns map to the ticket, its head pushed; where
-// it cannot verify, the leg fails naming what it looked for.` : ''}
+// it cannot verify, the leg fails naming what it looked for.` : verify === 'merged' ? `
+// Before returning its position the stub verifies the leg's outcome on the forge (R-BTN-131):
+// every PR on a branch this course's branch patterns map to the ticket merged, none open — an
+// agent that exits 0 without merging (it refused red CI, say) fails the leg naming the open PR
+// and quoting what the agent said, and never reports merged.` : ''}
 // The repository may replace this leg's run, never its close: \`${leg}.run.mjs\` beside this file
 // (\`baton repo init --override ${leg}\`), read at the same snapshot (R-BTN-131) — or, where the
 // repository requires owner-signed control (B-127), at the signed commit the claim's
@@ -1617,9 +1628,7 @@ ${pushes ? `  // B-231: run from the gate's red (pr-open, fixed), this leg must 
   const on = pr;` : `
   const last = (out.trim().split('\\n').at(-1) ?? '').trim();
   const on = ${PR_URL}.test(last) ? last : null;`}
-${verify ? `  try { await verifyPrOpen({ checkout: ctx.checkout, ticket: ctx.ticket, branchPatterns: patterns, repositories: ticketRepositories(ticketText, settings.repos) }, legRun); } catch (e) { throw failed(e); }
-  if (process.env.BATON_VERBOSE) process.stderr.write('baton: ' + ${JSON.stringify(`${b.id}/${leg}`)} + ' ticket ' + ctx.ticket.id + ': the forge verified an open PR on a branch matching ' + patterns.join(' or ') + '\\n');
-` : ''}  return { ...(${position}), ...(on ? { pr: on } : {}), ...(conclusion ? { conclusion } : {}) };` : `${ask ? `
+${verifySource}  return { ...(${position}), ...(on ? { pr: on } : {}), ...(conclusion ? { conclusion } : {}) };` : `${ask ? `
   // The answer (B-85): the last line that opens with the leg's value word, backwards past any
   // prose after it; a missing or misspelled verdict still fails, naming what it read.
   const { answer } = (() => { try { return requireAnswer(out, ${JSON.stringify({ name: ask.name, values: ask.values })}, ${JSON.stringify(leg)}); } catch (e) { throw failed(e); } })();` : `
@@ -1635,9 +1644,7 @@ ${verify ? `  try { await verifyPrOpen({ checkout: ctx.checkout, ticket: ctx.tic
     if (process.env.BATON_VERBOSE) process.stderr.write('baton: ' + ${JSON.stringify(`${b.id}/${leg}`)} + ' ticket ' + ctx.ticket.id + ': delivered at ' + shas.join(', ') + ', on the default branch — a person confirms\\n');
     return { suspend: true, reached: 'delivered', next: 'confirm', delivered: shas[0], detail: deliveredDetail(shas, claimed.evidence), ...(conclusion ? { conclusion } : {}) };
   }` : ''}
-${verify ? `  try { await verifyPrOpen({ checkout: ctx.checkout, ticket: ctx.ticket, branchPatterns: patterns, repositories: ticketRepositories(ticketText, settings.repos) }, legRun); } catch (e) { throw failed(e); }
-  if (process.env.BATON_VERBOSE) process.stderr.write('baton: ' + ${JSON.stringify(`${b.id}/${leg}`)} + ' ticket ' + ctx.ticket.id + ': the forge verified an open PR on a branch matching ' + patterns.join(' or ') + '\\n');
-` : ''}  return { ...(${position}), ...(conclusion ? { conclusion } : {}) };`}
+${verifySource}  return { ...(${position}), ...(conclusion ? { conclusion } : {}) };`}
 }
 // The close's ctx, one line (B-96's review round 2): everything the stub hands back, plus the
 // repository's default branch — the claim answer's \`default_branch\`, which the runner puts in
