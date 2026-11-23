@@ -229,7 +229,7 @@ const parse = (r: RepoRow): Repository => ({ ...r, transcript_repos: JSON.parse(
 const REPO_COLUMNS = 'id, github, forge, remote, web_base, ci_identity, default_branch, sync_workflow, mirror_workflow, weight, transcript_repos, tiers, cutover_at, retired_at, former_paths';
 
 export class Registry {
-  constructor(private readonly c: { store: Store; now: () => number; ensurePolicy?: (repository: string, forge: Forge) => void }) {}
+  constructor(private readonly c: { store: Store; now: () => number; ensurePolicy: (repository: string, forge: Forge) => void }) {}
 
   private rows<T>(q: string, ...p: unknown[]): T[] {
     return this.c.store.exec<T>(q, ...p).toArray();
@@ -256,7 +256,7 @@ export class Registry {
     this.c.store.exec('INSERT INTO board_head (repository_id, sha) VALUES (?, NULL) ON CONFLICT (repository_id) DO NOTHING', r.id);
     // §12.8 (B-145): version 1 with the repository — the `cooperative` preset on a forge,
     // `plain-git` where the forge is git — in the same transaction.
-    this.c.ensurePolicy?.(r.id, r.forge);
+    this.c.ensurePolicy(r.id, r.forge);
     return this.get(r.id)!;
   }
 

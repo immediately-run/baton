@@ -29,23 +29,23 @@ export interface Ctx {
   now: () => number;
   /** The course file's graph, as the registry holds it (Stations.graph, cached per post). */
   graph: (repo: string, course: string) => Graph | null;
-  history?: History;
+  history: Pick<History, 'record'>;
   /** R-BTN-83, R-BTN-79: whatever moves a ticket calls this, so its leg-queue membership follows. */
-  queued?: (ticketId: string) => void;
+  queued: (ticketId: string) => void;
   /** R-BTN-75: a ticket whose queued leg changed has its blocks re-evaluated. */
-  reevaluate?: (ticketId: string) => void;
+  reevaluate: (ticketId: string) => void;
   /** R-BTN-163: a person arrival can end the cause of a missing-next notice. */
-  closeMissingNext?: (ticketId: string, at: number) => void;
+  closeMissingNext: (ticketId: string, at: number) => void;
   /** Rule 3's one definition of a held ticket (Blocks.isHeld); an arrival waits for the hold. */
-  isHeld?: (ticketId: string) => boolean;
+  isHeld: (ticketId: string) => boolean;
   /** R-BTN-92's link bases for a ticket (Blocks.ticketRepos): a question's `url` is kept only
    *  under one of them, as a decision's is. */
-  linkBases?: (ticketId: string) => string[];
+  linkBases: (ticketId: string) => string[];
   /** §12.8 (R-BTN-187): whether an answer read from git counts — the policy's `inputs.answers`
-   *  (R-BTN-116, R-BTN-191). Absent, `git` (the cooperative default). */
-  answersFrom?: (repo: string) => 'git' | 'attestation';
+   *  (R-BTN-116, R-BTN-191). */
+  answersFrom: (repo: string) => 'git' | 'attestation';
   /** R-BTN-73: a move asks its repository for a sync, as an advance does. */
-  dispatch?: (kind: 'sync', ticketId: string) => void;
+  dispatch: (kind: 'sync', ticketId: string) => void;
 }
 
 /** A stored question row, as `ticket_questions` holds it. */
@@ -134,7 +134,7 @@ export class Questions {
         continue;
       }
       const options = q.options ?? [];
-      const url = q.url != null && (this.c.linkBases?.(id) ?? []).some((base) => q.url!.startsWith(base)) ? q.url : null;
+      const url = q.url != null && this.c.linkBases(id).some((base) => q.url!.startsWith(base)) ? q.url : null;
       const have = this.rows<QuestionRow>('SELECT * FROM ticket_questions WHERE ticket_id = ?', id)[0] ?? null;
       // The upsert runs only while a person leg is queued, and a row it finds already answered
       // means the ask is a new one — a second person leg queued, or a bounded loop back to the
@@ -165,7 +165,7 @@ export class Questions {
       // `question-posted` once per id: only a new one logs (§4.4).
       if (have?.question_id !== q.id) {
         logEvent(this.c.store, now, 'question-posted', 'sync', { ticket: id, question: q.id, leg, ...(options.length ? { options } : {}) }, id);
-        this.c.history?.record(id, { kind: 'question-posted', leg, detail: { question: q.id, ...(url ? { url } : {}), ...(q.severity ? { severity: q.severity } : {}) } });
+        this.c.history.record(id, { kind: 'question-posted', leg, detail: { question: q.id, ...(url ? { url } : {}), ...(q.severity ? { severity: q.severity } : {}) } });
       }
     }
   }
@@ -297,7 +297,7 @@ export class Questions {
     }
     // §6.4: where the policy admits it — `inputs.answers: git` — an answer read from git binds;
     // under `attestation` it does not count (R-BTN-191).
-    if (who.by === 'sync' && this.c.answersFrom?.(repo) === 'attestation') {
+    if (who.by === 'sync' && this.c.answersFrom(repo) === 'attestation') {
       this.unapplied(id, leg, { why: 'the policy\'s inputs.answers is attestation: an answer in git does not count (R-BTN-191)' });
       return { reached: station };
     }
@@ -311,7 +311,7 @@ export class Questions {
     // and fails only because a claim holds the ticket waits, kept with its ref, and is applied
     // when the hold ends if it still meets every other condition then (`applyPending`, the
     // alarm's tick after the hold ends); it raises nothing meanwhile.
-    if (this.c.isHeld?.(id)) {
+    if (this.c.isHeld(id)) {
       // The deferred answer waits with the question it was given — never another leg's.
       const mine = stored?.leg === leg ? stored : null;
       this.exec(
@@ -347,7 +347,7 @@ export class Questions {
       `SELECT ticket_id, pending_leg AS leg, pending_option AS option, pending_reached AS reached, pending_by AS by, pending_ref AS ref
         FROM ticket_questions WHERE pending_option IS NOT NULL ORDER BY pending_at, ticket_id`);
     for (const p of due) {
-      if (this.c.isHeld?.(p.ticket_id)) continue;
+      if (this.c.isHeld(p.ticket_id)) continue;
       this.exec(
         `UPDATE ticket_questions SET pending_leg = NULL, pending_option = NULL, pending_reached = NULL,
            pending_by = NULL, pending_ref = NULL, pending_at = NULL WHERE ticket_id = ?`, p.ticket_id);
@@ -383,7 +383,7 @@ export class Questions {
        ORDER BY s.ticket_id`, now);
     let fired = 0;
     for (const d of due) {
-      if (this.c.isHeld?.(d.ticket_id)) continue;
+      if (this.c.isHeld(d.ticket_id)) continue;
       const where = this.where(d.ticket_id);
       if (!where) continue;
       if (where.station.next_leg == null) {
@@ -456,16 +456,16 @@ export class Questions {
       id, leg, now, now, meta.by, option.id, meta.ref);
     if (meta.expired) {
       logEvent(this.c.store, now, 'question-expired', 'baton', { ticket: id, leg, reached: option.reached }, id);
-      this.c.history?.record(id, { kind: 'question-expired', leg, reached: option.reached, next_leg: next[0] ?? null });
+      this.c.history.record(id, { kind: 'question-expired', leg, reached: option.reached, next_leg: next[0] ?? null });
     } else {
       logEvent(this.c.store, now, 'question-answered', meta.by, { ticket: id, leg, option: option.id, answered_by: meta.by }, id);
-      this.c.history?.record(id, { kind: 'fact-arrival', leg, reached: option.reached, next_leg: next[0] ?? null, detail: { option: option.id, answered_by: meta.by, ...(meta.ref ? { ref: meta.ref } : {}) } });
-      this.c.history?.record(id, { kind: 'question-answered', leg, detail: { option: option.id, answered_by: meta.by } });
+      this.c.history.record(id, { kind: 'fact-arrival', leg, reached: option.reached, next_leg: next[0] ?? null, detail: { option: option.id, answered_by: meta.by, ...(meta.ref ? { ref: meta.ref } : {}) } });
+      this.c.history.record(id, { kind: 'question-answered', leg, detail: { option: option.id, answered_by: meta.by } });
     }
-    if (next.length || g.ends.has(option.reached)) this.c.closeMissingNext?.(id, now);
-    this.c.queued?.(id);
-    this.c.reevaluate?.(id);
-    this.c.dispatch?.('sync', id);
+    if (next.length || g.ends.has(option.reached)) this.c.closeMissingNext(id, now);
+    this.c.queued(id);
+    this.c.reevaluate(id);
+    this.c.dispatch('sync', id);
   }
 
   // ── records that raise nothing (R-BTN-39) ───────────────────────────────────────────────
@@ -473,7 +473,7 @@ export class Questions {
   /** An arrival Baton does not apply: an event and a history row, never a refusal (G-BTN-75). */
   private unapplied(id: string, leg: string | null, detail: Record<string, unknown>) {
     logEvent(this.c.store, this.c.now(), 'arrival-unapplied', 'sync', { ticket: id, ...(leg ? { leg } : {}), ...detail }, id);
-    this.c.history?.record(id, { kind: 'arrival-unapplied', leg, detail });
+    this.c.history.record(id, { kind: 'arrival-unapplied', leg, detail });
   }
 
   /** The sync's invalid answer: dropped and logged `answer-invalid` (§6.4). */

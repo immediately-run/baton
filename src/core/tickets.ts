@@ -5,6 +5,7 @@
 // R-BTN-39, blocks R-BTN-75, overrides R-BTN-12, claims R-BTN-10, questions R-BTN-116), and
 // `ticketDetail` adds what one ticket's page draws. Filter fields only (R-BTN-33): no body, note
 // or exit criterion is read. Nothing here writes, and the clock is the caller's `now`.
+import { claimFleetSql, isClaimLeaseLive, leaseEndsAt } from './runnerLiveness';
 import { ATTEMPTS_HOLD_AT } from './attempts';
 import { STALLED_MS } from './claims';
 import { fileUrl, type Forge } from './links';
@@ -182,10 +183,10 @@ export function ticketRows(cx: TicketsCtx, repo: string): TicketRow[] {
   const retryMax = cx.core.admin.retry(repo)?.max_failed ?? ATTEMPTS_HOLD_AT;
 
   const running = (c: Held) => {
-    const alive = c.kind !== 'legacy' && now - c.last_seen_at < c.lease_timeout_ms;
+    const alive = isClaimLeaseLive(c, now);
     return {
       claim_id: c.id, runner_id: c.runner_id, hostname: c.hostname, session_name: c.session_name, leg: c.leg, since: c.claimed_at,
-      lease_ends_at: c.kind === 'legacy' ? null : c.last_seen_at + c.lease_timeout_ms,
+      lease_ends_at: c.kind === 'legacy' ? null : leaseEndsAt(c),
       last_activity_at: c.last_activity_at, alive,
       // §11.4: alive, and no activity for 2 hours (the claim's own age where none was reported).
       stalled: alive && now - (c.last_activity_at ?? c.claimed_at) > STALLED_MS,
@@ -262,7 +263,7 @@ export function countStates(rows: readonly TicketRow[]): Record<string, number> 
 export function liveRunners(cx: TicketsCtx): RunnerName[] {
   return cx.sql<RunnerName>(
     `SELECT w.id AS runner_id, w.hostname, w.session_name FROM runners w JOIN credentials c ON c.id = w.credential_id
-     WHERE w.reaped_at IS NULL AND w.kind != 'legacy' AND w.last_seen_at + w.lease_timeout_ms > ? AND c.revoked_at IS NULL ORDER BY w.hostname, w.session_name, w.id`, cx.now());
+     WHERE ${claimFleetSql()} ORDER BY w.hostname, w.session_name, w.id`, cx.now());
 }
 
 /** The rows given, each `ready` one with its eligible live runners by name — the claim gates
@@ -296,12 +297,12 @@ export function ticketDetail(cx: TicketsCtx, repo: string, id: string, path: str
      FROM claims c JOIN runners w ON w.id = c.runner_id WHERE c.ticket_id = ? AND c.status = 'active'`, id)[0] ?? null;
   const leg = live ? cx.sql<{ leg: string; run_id: string | null; session_url: string | null; leg_log_dir: string | null; started_at: number }>(
     `SELECT leg, run_id, session_url, leg_log_dir, started_at FROM claim_legs WHERE claim_id = ? AND finished_at IS NULL AND abandoned_at IS NULL ORDER BY seq DESC LIMIT 1`, live.id)[0] ?? null : null;
-  const alive = !!live && live.kind !== 'legacy' && now - live.last_seen_at < live.lease_timeout_ms;
+  const alive = !!live && isClaimLeaseLive(live, now);
   const claim = live ? {
     claim_id: live.id, runner_id: live.runner_id, hostname: live.hostname, session_name: live.session_name,
     // The leg it runs; before its first advance, the leg it was offered.
     leg: leg?.leg ?? live.offered_leg ?? null, run_id: leg?.run_id ?? null, leg_started_at: leg?.started_at ?? null, claimed_at: live.claimed_at,
-    lease_ends_at: live.kind === 'legacy' ? null : live.last_seen_at + live.lease_timeout_ms, deadline_at: live.deadline_at,
+    lease_ends_at: live.kind === 'legacy' ? null : leaseEndsAt(live), deadline_at: live.deadline_at,
     // §7.4: the attempt this claim is, against the failed attempts that hold the ticket.
     attempt: failed.length + 1, max_runs: retryMax, next_backoff_until: override?.retry_after ?? null,
     // R-BTN-113: stored only where the session-host rule passed it; R-BTN-128: a directory, as text.
