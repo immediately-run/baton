@@ -66,8 +66,10 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   `human-gates`, §13.2 and the design brief behind; facts stated in several places; and three
   more session-only acts. Fixed: R-BTN-155's *Where a session calls* (a session calls an action at
   its key route), with R-BTN-16, §12.1 and §14 rewritten to match; the header rule scoped to
-  `/v1/` requests; each of the rest. The owner's promise is narrowed by the key-only acts and the
-  confirmation, which the owner should weigh: they keep a stolen session from outliving its key.
+  `/v1/` requests; each of the rest. The key-only acts and the key's confirmation of authority-changing
+  session acts narrow the owner's promise, to keep a stolen session from outliving its key; asked
+  whether to accept both, and whether to run a second review round, the owner answered "Yes and
+  yes" (2026-11-23).
   The owner, 2026-11-23, on the open question of human-only acts from the dashboard: "I think a
   human using the dashboard should be considered a human." Asked which sessions, the owner chose
   every person's session — administrator's, owner's and member's, however it was opened — over a
