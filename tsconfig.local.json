@@ -38,6 +38,7 @@
     "test/integration/S-BTN-226.pathless-ticket-file.test.ts",
     "test/unit/sign.test.ts",
     "test/unit/runner-main.test.ts",
+    "test/unit/executor.test.ts",
     "test/unit/runner-clipin.test.ts",
     "test/unit/runner-bundle.test.ts",
     "test/unit/runner-mask.test.ts",

@@ -181,11 +181,14 @@ export function builtinExecutor(): Executor {
           if (timer) clearTimeout(timer);
           resolveResult({ status: null, stdout, stderr: stderr + String(e) });
         });
-        child.on('exit', (code) => {
+        child.on('exit', () => {
           if (timer) clearTimeout(timer);
           // A call's end is its whole group's end (R-BTN-72, R-BTN-145): what the call left
-          // behind goes with it.
+          // behind goes with it. Do this before waiting on pipes descendants may hold open.
           kill();
+        });
+        child.on('close', (code) => {
+          // The wrapper's final result can still be in the pipe when the child exits.
           if (partial && o.onStderr) o.onStderr(partial);
           resolveResult({ status: code, stdout, stderr });
         });
