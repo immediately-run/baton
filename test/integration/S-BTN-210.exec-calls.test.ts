@@ -5,8 +5,9 @@
 // call reads its arguments from stdin and returns on stdout's last line. (A ticket source's `read`
 // runs the same way in a `source` session: S-BTN-207's runner scenarios exercise it under
 // `builtin`.)
-import { describe, it, expect, beforeEach, inject } from 'vitest';
-import { execFileSync } from 'node:child_process';
+import { describe, it, expect, beforeEach, inject, vi } from 'vitest';
+import { ChildProcess, execFileSync, spawn } from 'node:child_process';
+import { PassThrough } from 'node:stream';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -17,6 +18,8 @@ import { BatonApi } from '../../src/runner/api';
 import { builtinExecutor, type Executor } from '../../src/runner/executor';
 import roadmapPr from '../fixtures/courses/roadmap-pr/course.json';
 import { call as hostCall } from '#host';
+
+vi.mock('node:child_process', { spy: true });
 
 const board = inject('board');
 const T0 = Date.parse('2026-11-09T12:00:00Z');
@@ -54,6 +57,32 @@ function recording(): { executor: Executor; log: { op: string; session: string; 
 }
 
 describe('S-BTN-210: repository code runs only through the executor (R-BTN-107)', () => {
+  it('captures the last stdout and stderr bytes even after the child exits', async () => {
+    const executor = builtinExecutor();
+    const handle = await executor.start({ brief: {
+      kind: 'leg', session_id: 'output-drain', checkout: process.cwd(), paths: [], wrapper: '', env: {},
+    } });
+    const child = new ChildProcess();
+    const stdout = new PassThrough();
+    const stderr = new PassThrough();
+    Object.assign(child, { stdin: new PassThrough(), stdout, stderr });
+    vi.mocked(spawn).mockReturnValueOnce(child);
+    try {
+      const lines: string[] = [];
+      const call = executor.exec(handle, ['node'], {
+        cwd: process.cwd(), timeout_s: 5, onStderr: (line) => lines.push(line),
+      });
+      child.emit('exit', 0, null);
+      stdout.end('{"ok":true}\n');
+      stderr.end('last line');
+      child.emit('close', 0, null);
+      expect(await call.result).toEqual({ status: 0, stdout: '{"ok":true}\n', stderr: 'last line' });
+      expect(lines).toEqual(['last line']);
+    } finally {
+      await executor.stop(handle, 'test');
+    }
+  });
+
   it('each leg starts a session keyed by its run id; run and close are wrapper calls in it, never in the runner\'s process', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'baton-210-'));
     const stateFile = join(tmpdir(), `baton-210-${process.pid}.json`);

@@ -177,17 +177,27 @@ export function builtinExecutor(): Executor {
       const timer = o.timeout_s ? setTimeout(kill, o.timeout_s * 1000) : null;
       timer?.unref?.();
       const result = new Promise<ExecResult>((resolveResult) => {
-        child.on('error', (e) => {
-          if (timer) clearTimeout(timer);
-          resolveResult({ status: null, stdout, stderr: stderr + String(e) });
-        });
-        child.on('exit', (code) => {
+        let drainTimer: ReturnType<typeof setTimeout> | undefined;
+        let spawnError = '';
+        child.once('error', (e) => { spawnError = String(e); });
+        child.once('exit', () => {
           if (timer) clearTimeout(timer);
           // A call's end is its whole group's end (R-BTN-72, R-BTN-145): what the call left
           // behind goes with it.
           kill();
+          // A descendant outside the group can still hold a pipe open. Do not let it keep
+          // the call alive indefinitely after the child has exited.
+          drainTimer = setTimeout(() => {
+            child.stdout!.destroy();
+            child.stderr!.destroy();
+          }, 1000);
+        });
+        // S-BTN-210/S-BTN-48: 'exit' can arrive before the wrapper's final result line.
+        child.once('close', (code) => {
+          if (timer) clearTimeout(timer);
+          clearTimeout(drainTimer);
           if (partial && o.onStderr) o.onStderr(partial);
-          resolveResult({ status: code, stdout, stderr });
+          resolveResult({ status: spawnError ? null : code, stdout, stderr: stderr + spawnError });
         });
       });
       const running: Running = {
