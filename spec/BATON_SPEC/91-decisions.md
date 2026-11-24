@@ -21,10 +21,9 @@ One line per decision in force; the reasoning and the rejected alternatives in f
 - Chose that a claim's branch appends its leg's progress to its own ticket's `## Status` section without a human approval (R-BTN-184).
 - Chose attestations, typed facts a trusted writer makes, as a kind of leg prerequisite, bound by subject and authenticated by the request that posts them (R-BTN-181).
 - Chose continuity, one unbroken chain of attested commit ranges, as the whole of authorship, with no signed authorship (R-BTN-183).
-- Chose review independence as each review being its own `reads_only` run of the exact head, every leg starting in a fresh environment, over comparing writer and reviewer domains or runner keys (R-BTN-183, R-BTN-189).
 - Chose to state each guarantee separately, as a condition over the policy, and let the repository choose (§12.8).
 - Chose trusted runners and untrusted legs, with no security promise under `builtin`, over guarding against a compromised runner with grant roles, domain labels and a protection checker (R-BTN-180, R-BTN-107, §12.8).
-- Chose to state that review is no security gate, `independent-review` requiring two `reads_only` reviews of the exact head and nothing about model families (R-BTN-183, R-BTN-189).
+- Chose to state that review is no security gate, `independent-review` requiring two reviews of the exact head, each its own `reads_only` run in a fresh environment, over comparing writer and reviewer domains, runner keys or model families (R-BTN-183, R-BTN-189).
 - Chose trusted runners that hold the only credential for a sensitive leg's action, re-check its attestations against Baton's record and trust Baton (R-BTN-182, R-BTN-189).
 - Chose capabilities (§6.6 rule 4, R-BTN-121, R-BTN-174) over an ordered tier ladder to send a ticket to particular runners.
 - Chose provenance alone, each ticket served with who last pushed its body, over a `control-changed` notice (R-BTN-194, R-BTN-66).

@@ -336,7 +336,7 @@ a `suspend` would. Only the runner knows the binding, so it reports the raise wi
   a workflow is its own call (R-BTN-94). Each git write, check run or ticket-store write Baton
   intends is an **outbox entry**. A
   **deliverer** — a runner (R-BTN-3) whose host holds the credential the effect needs, on a grant
-  whose role the repository policy's `outbox` admits (R-BTN-188) — claims the entry under a lease,
+  that declares the class, admitted by R-BTN-188's `outbox.source` for a source entry — claims the entry under a lease,
   delivers it and reports it with a `std:effect@1` attestation (R-BTN-191); Baton then confirms it
   by reading the effect back, in a snapshot, wherever the ticket source's reader posts it.
   - **Entries.** Each entry is an `outbox` row: `id` (an integer per repository, increasing),

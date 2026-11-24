@@ -2,13 +2,12 @@
 title: "Proposal: the merge runner, the fact reader, general attestations and the rest of the repository policy's enforcement"
 description: "Unbuilt designs moved out of BATON_SPEC §12.8 and §12.9: the policy's dry run, the protection check per forge, proposed tickets, attestations beyond a person's answer, the fact reader, trusted runners and what the merge runner merges, protected paths, hardware human-only keys, per-key board limits, and the out-of-course finding."
 ---
-**Status:** proposal — not built; moves into BATON_SPEC §12 when built (tickets B-136, B-137, B-140, B-141, B-146, B-147, B-263, B-264, B-268)
+**Status:** proposal — not built; moves into BATON_SPEC §12 when built (tickets B-136, B-137, B-140, B-141, B-146, B-263, B-264, B-268)
 
 Each part names the rule of [BATON_SPEC §12](../BATON_SPEC/12-security.md) it would extend. The
 rule ids stay defined there and are written here as `R-BTN-n (proposed)`. What is built is the
-policy document with its approvers, guarantees and floors, the protection report, human-only
-keys, and a person's answer as an attestation (no route sets a grant's role, domain or checker
-mark); the
+policy document with its approvers, guarantees and floors, human-only keys, and a person's
+answer as an attestation; the
 policy's knobs are stored and computed over, and what enforces `merge.*`, `paths.*`,
 `tickets.created: proposed` and the `std:` types below is this page.
 
@@ -84,7 +83,9 @@ Under `tickets.created: proposed`:
   `human` ones.
 - **Supersession.** A new attestation supersedes an earlier one only when type, subject, writer
   and **attested key** are the same; the attested key is the writer's key, except for a `baton`
-  attestation, whose attested key is the runner key it is about. So two runners' reviews at one head coexist, and each instrument
+  attestation, whose attested key is the runner key it is about, and a `std:review@1`, which
+  supersedes only one of its own run (its `run_id`). So two review runs at one head coexist,
+  whichever runner ran them, and each instrument
   keeps its own latest reading (R-BTN-76). The one exception is the sync's: its attestations
   supersede by type and subject whichever sync credential posted them (R-BTN-191).
 - **Bound by subject, not consumed.** An attestation gates every action on exactly its subject:
@@ -201,9 +202,14 @@ the forge through the CLI's own fact adapters (R-BTN-96) and runs no repository 
 R-BTN-182 (proposed) — trusted runners. A runner whose host holds the only non-human credential
 able to perform the action of a leg its course marks `trusted: true` (`merge`, branch deletion,
 sensitive API calls, each idempotent on its attestation's subject, R-BTN-181), which no leg's
-environment holds (§12.8). Baton routes a trusted leg as any leg, by the capabilities its course
-requires (R-BTN-174); the owner admits that capability only on the grants of runners whose host
-holds the credential (R-BTN-180).
+environment holds (§12.8).
+- **Rule `trusted`.** A trusted leg is offered to, and claimed, advanced and ended by, only a
+  runner whose grant names each capability the leg requires exactly — never through a
+  `<type>:*` pattern or as a `runner:` capability (R-BTN-174), never on a grant a registration
+  token made (R-BTN-117), and only on an SSH key, never an API key (R-BTN-159) — refused `not-eligible`, rule `trusted`, otherwise. The owner names that capability only on the
+  grants of runners whose host holds the credential (R-BTN-180), which Baton cannot check. A
+  course whose `trusted: true` leg requires no capability, or a `credential:` one (whose value
+  R-BTN-144 would hand the override), is held (R-BTN-69).
 - **It runs no repository code but a trusted leg's override**, which it runs through its
   executor as any leg's code (R-BTN-107), delivering the outbox included (R-BTN-171).
 - **It re-checks at the moment it acts**, against Baton's record: every attestation it relies on
@@ -234,8 +240,11 @@ R-BTN-183 (proposed) — what the merge runner merges. At the PR's exact head `H
   PR conversation or, on a `git` repository, to the ticket's leg-state branch, never to the work
   branch (R-BTN-190), so a reviewer never becomes a writer.
 - **Independent review.** `merge.reviews.count` `std:review@1` at `H`, each from its own run (no
-  two with one run id) of a review leg whose claim started at `H`. Every leg starts afresh
-  (§12.8), so a review run carries none of its writer's state: Baton compares no runner, key or
+  two with one run id) of a review leg whose claim started at `H`, and no review run at `H` that
+  ended without approving: one rejection at `H` voids every approval at `H`, so approvals cannot
+  be gathered by running a review again over an unchanged head. Every leg starts afresh (§12.8):
+  a review run starts from the checkout at `H` and its inputs, never from a writer's session or
+  environment, so Baton compares no runner, key or
   domain between a change's writers and its reviewers. A course that wants another credential to
   review as well names the writing legs in the review leg's `no_chain_from` (R-BTN-106), which no
   guarantee requires.

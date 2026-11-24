@@ -73,13 +73,15 @@ and with what is at stake:
 Baton scales from one person running a few agents on their own machine to a software factory with
 a threat model of its own. Both ends run the same core. What differs is the repository's
 **policy**: one versioned document, held in Baton and never read from git, that decides who lands
-on which refs, who approves what, and whose attestations count (BATON_SPEC [R-BTN-188](../../spec/BATON_SPEC/12-security.md#sec-12-8)).
+what, who approves what, and whose attestations count (BATON_SPEC [R-BTN-188](../../spec/BATON_SPEC/12-security.md#sec-12-8)).
 
 - **The simple end.** The `cooperative` preset and the standard courses: leases, courses and the
   live view, for runners that cooperate. At this end, owner bars and positions are a
   coordination record, not a boundary, and no guarantee is required.
 - **The strict end.** The `protected` and `protected-hardware` presets turn the same state into a
-  boundary. Trusted runners (proposed, not built) land only what the policy's attestations allow. Reviews count only
+  boundary, where the deployment keeps repository code out of its runners' reach and gives each
+  leg only credentials confined to its claim; under the default `builtin` executor Baton makes no
+  security promise (BATON_SPEC §12.8). Trusted runners (proposed, not built) land only what the policy's attestations allow. Reviews count only
   as separate `reads_only` runs of the exact head, and human gates are satisfied only by a human-only key. A deployment
   that depends on Baton requires named **guarantees**, such as `control-paths-human`,
   `independent-review`, `tickets-approved` and `human-gates`, and lists them as **floors**. Baton

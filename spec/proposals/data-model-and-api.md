@@ -124,7 +124,7 @@ Runners drain the outbox through the two routes below, never through a claim.
 
 | Route | Caller | Body or query | Response | Rules |
 |---|---|---|---|---|
-| `POST /v1/runner/outbox/claim` | machine, SSH-signed, on a grant whose role the repository policy's `outbox` admits | `{limit?}` (≤ 50) | `{entries: [{repository, id, kind, ticket, fields}]}` of the classes it declared, each leased 10 minutes; a ticket's entries of one class together, in `id` order | R-BTN-171, R-BTN-115 |
+| `POST /v1/runner/outbox/claim` | machine, SSH-signed, on an accepted grant (a source entry only where the policy's `outbox.source` admits `runner`) | `{limit?}` (≤ 50) | `{entries: [{repository, id, kind, ticket, fields}]}` of the classes it declared, each leased 10 minutes; a ticket's entries of one class together, in `id` order | R-BTN-171, R-BTN-115 |
 | `POST /v1/runner/outbox/{repository}/{id}` | the entry's claimer | `{state: "delivered", ref}` (recorded as its `std:effect@1` attestation, R-BTN-191) or `{state: "failed", reason: "transient" \| "refused"}` | `{ok: true}`; `forbidden` for another runner's entry | R-BTN-171 |
 
 ## Checks

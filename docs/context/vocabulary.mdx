@@ -162,7 +162,7 @@ touch credentials or the policy (R-BTN-186, R-BTN-130). No delegated key can be 
 MCP is [proposed, not built](../../spec/proposals/people-and-dashboard.md).
 
 **Policy, preset, guarantee, floor.** A repository's policy is the one versioned document of
-every rule about authority and trust — who lands on which refs, who approves what, whose
+every rule about authority and trust — who lands what, who approves what, whose
 attestations count — held in Baton, never in git. A preset (`cooperative`, `protected`,
 `protected-hardware`) is a set of values an owner applies and then tunes. A guarantee is a named
 condition over the policy; `floors` is the knob listing the guarantees Baton refuses to let any
@@ -174,7 +174,7 @@ by the history, the resume record and leg logs (R-BTN-63).
 
 **Pusher.** A forge author whose words count — a verdict, a marker, an approval — because the
 forge reports they can push the PR's base, or the owners list them in `pushers`. The one sense in
-which a forge author is trusted; "trusted" otherwise names the runner role (R-BTN-139).
+which a forge author is trusted; "trusted" otherwise names a leg property and the runner that runs such a leg (R-BTN-139, R-BTN-182).
 
 **Attestation, reading.** Everything Baton is told about the world: a typed statement it records —
 a review, a check run, a human's approval or answer, a runner's report of where its leg reached,
@@ -189,7 +189,7 @@ command may carry an attestation: an advance moves the lease and reports where t
 
 **Outbox, deliverer** ([proposed, not built](../../spec/proposals/conditions.md)). Every git write, check run and ticket-store write Baton intends — a
 ticket's withdrawal, a merge check, the status a ticket store shows — is an outbox entry; a deliverer, a runner whose host holds the credential the effect
-needs and whose grant role the policy admits, delivers it, and Baton confirms it by reading it
+needs, delivers it, and Baton confirms it by reading it
 back. Baton itself holds no credential that writes git, posts a check or writes a ticket store; a workflow dispatch is
 its own call, made with the App key it holds (R-BTN-94, R-BTN-171).
 
@@ -197,13 +197,10 @@ its own call, made with the App key it holds (R-BTN-94, R-BTN-171).
 read. The fourth noun: Baton **learns** through attestations, **is asked** through commands,
 **acts** through deliverers and its own dispatches, and **answers** in replies.
 
-**Trusted runner.** A runner whose host holds the credential a leg marked `trusted` needs, routed
-to that leg by a capability its grant admits; it runs no repository code but through its
-executor, and acts on attestations alone; the merge runner is the first
-([proposed, not built](../../spec/proposals/security.md)). Every runner is trusted and no leg
-is: no guarantee holds against a compromised runner, and each rests on the deployment keeping
-repository code out of a runner's reach (§12.8). Two reviews are independent because each is
-its own `reads_only` run of the exact head, not by where they ran (R-BTN-183).
+**Trusted runner.** A runner whose host holds the credential a leg marked `trusted` needs and
+whose grant names that leg's capability; the merge runner is the first
+([proposed, not built](../../spec/proposals/security.md)). Runners are trusted and legs are not
+(BATON_SPEC §12.8).
 
 **Protected path.** A path whose changes a trusted runner never merges alone: a computed floor
 (`.baton/`, workflows, agent configuration, tickets) plus the owners' own; control paths land

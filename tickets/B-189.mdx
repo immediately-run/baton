@@ -66,18 +66,22 @@ leg-duration keys to its own git/forge proxy and LLM proxy, which Baton neither 
    `forge-check` refusals) and `REF_WRITERS` and `BOARD_INPUTS`. `outbox.source` stays,
    `[runner]` or `[]`. `paths.control`'s value `trusted-runner` becomes `approval`. The presets
    and `plain-git` become §12.8's columns. A `PUT …/policy` naming a retired knob or value is
-   `invalid-params` naming it.
+   `invalid-params` naming it, and so is `merge.trusted` with `tickets.created: filed`.
 2. **The guarantees rebase; `no-runner-lands` retires.** `guaranteesFor` computes R-BTN-189's
-   five: each rests on `merge.trusted` where it named `no-runner-lands`; `independent-review`
+   five: each but `human-gates` rests on the landing condition (`merge.trusted`,
+   `tickets.created: proposed`, `paths.control` not `any`) where it named `no-runner-lands`; `independent-review`
    holds on `merge.reviews.count` ≥ 2 and `attestations` admitting only `baton` for
    `std:review@1` and `std:wrote@1`; `human-gates` reads `approvers.members` and
-   `approvers.policy`; `board-from-trusted` reads `attestations` alone. A stored version whose
-   `floors` names `no-runner-lands` (or the code's `trusted-domain-separate`) is followed, by
-   the migration, by a version without the name, logged `admin` with both hashes and naming the
+   `approvers.policy`; `board-from-trusted` reads `attestations` alone. A floor naming
+   `no-runner-lands` (or the code's `trusted-domain-separate`) is dropped by the migration in
+   whichever form it is stored when this lands — a `policy_floors` row (the built form, while
+   B-293 has not landed) or a version's `floors` (after it) — by a new version without the name, logged `admin` with both hashes and naming the
    owner's ruling of 2026-11-09 — never a silent edit of a stored version, whose hash chain
    stays; a change naming either afterwards is `invalid-params`. (This is the owner's ruling for
    these two names; B-293's rule that a floor without a successor stops the migration applies
-   to every other name.)
+   to every other name.) A version or `floors` entry naming any guarantee R-BTN-189 does not
+   define is refused `invalid-params`. `std:review@1` supersedes per run id, and one review run
+   at a head that ended without approving voids the approvals at that head (proposal part 8).
 3. **The protection report retires.** The heartbeat's `protection` is ignored, never refused, so
    an older CLI keeps working; `repositories.protection_json`, the 24-hour lapse check and
    `baton.unprotected` go, a migration closing every open `baton.unprotected` condition with a
@@ -91,8 +95,9 @@ leg-duration keys to its own git/forge proxy and LLM proxy, which Baton neither 
    import (R-BTN-88, `src/core/ownerState.ts`) accepts an older export carrying them and ignores
    them. A trusted leg
    is routed by the capability its course requires (R-BTN-174), which the owner admits on the
-   grants of runners whose host holds its credential (R-BTN-180, R-BTN-182); no rule `trusted`
-   and no role route are built.
+   grants of runners whose host holds its credential (R-BTN-180, R-BTN-182); rule `trusted`, as
+   the security proposal's part 7 now defines it over capabilities, is B-140's, and no role
+   route is built.
 5. **The executor's brief carries the claim's reach.** The runner adds to R-BTN-107's `brief`
    the claim's `scope` (§12.9, the claim answer's) and the ticket's `branches`: its course's
    `branch_pattern` with the ticket's id in place and its leg-state branch (R-BTN-190).
@@ -125,12 +130,18 @@ leg-duration keys to its own git/forge proxy and LLM proxy, which Baton neither 
   approvers wrote. It loosens on the owner's ruling, and says so: a repository whose policy
   excluded `machine` from `inputs.board` lets machine keys post its board, one whose `refs.*`
   named writers loses a statement only the forge enforced, and a floor on `no-runner-lands` is
-  dropped. Each is logged `admin` per repository with the knob named.
+  dropped. Each is logged `admin` per repository with the knob named. Two more: a repository
+  floored today on a guarantee that included `no-runner-lands` is broken now (no checker report
+  can exist) and resumes taking claims when this lands if its landing condition holds; and a
+  policy whose `approvers.roles` was stricter than its `approvers.members` loses that
+  difference, a trusted leg's capability being a grant's, under `approvers.members`. The
+  migration names both per repository in its `admin` event.
 - **A heartbeat's `protection`** — ignored; nothing stores or reads it.
 
 ### Invariants
 
-- **R-BTN-183's merge gate** is unchanged.
+- **R-BTN-183's merge gate** keeps every check but independence, which now counts `reads_only`
+  review runs of the exact head with no rejection there.
 - **Baton runs no repository code** (R-BTN-98).
 - **Migrations are append-only** (one new numbered file per change); stored policy versions and
   their hashes are never rewritten, only followed by a new version.

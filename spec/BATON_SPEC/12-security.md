@@ -21,7 +21,7 @@ stated once, in the rule it cites.
 
 | Principal | Routes | Credential | May |
 |---|---|---|---|
-| Runner (machine key) | `/v1/runner/*` | SSH-signed (R-BTN-13) or API key (R-BTN-159), plus the runner secret (R-BTN-14) | heartbeat as its name; claim and act where it holds an active grant (R-BTN-58, R-BTN-146); post readings (R-BTN-101); ask blocks (R-BTN-75); accept or decline its grants, key alone (R-BTN-146); as a signed key, sync a granted repository (R-BTN-102) and deliver outbox entries where the policy admits `runner` (R-BTN-171) |
+| Runner (machine key) | `/v1/runner/*` | SSH-signed (R-BTN-13) or API key (R-BTN-159), plus the runner secret (R-BTN-14) | heartbeat as its name; claim and act where it holds an active grant (R-BTN-58, R-BTN-146); post readings (R-BTN-101); ask blocks (R-BTN-75); accept or decline its grants, key alone (R-BTN-146); as a signed key, sync a granted repository (R-BTN-102) and deliver outbox entries (R-BTN-171; source entries where the policy's `outbox.source` admits `runner`) |
 | Trusted runner | `/v1/runner/*` | a runner's, on a grant that admits the capability a trusted leg requires (R-BTN-180) | a runner's powers; claim, advance and end the trusted legs it is routed (R-BTN-182) |
 | Owner's agent | the owner's routes | an owner key not registered `human_only` | an owner's actions, as `owner`; never a `human` attestation or a human gate (R-BTN-185) |
 | Check-runner | `/v1/runner/*`; `POST …/attestations` as a `service:` key the policy names | SSH-signed, plus the runner secret | heartbeat as its name; claim, advance and end check tickets; report activities and transcripts, write leg logs; where the policy's `attestations` names its key for `std:checks@1`, post that attestation (R-BTN-115); nothing else (R-BTN-114) |
@@ -291,19 +291,22 @@ which Baton cannot observe and checks nothing of (R-BTN-107):
 
 - **No repository code runs in a runner's trust boundary.** Every leg, and every other call into
   repository code, runs through an executor that keeps it from the runner's key, secret, state
-  and credentials.
+  and credentials; and the runner runs no CLI or other code from a checkout it serves.
 - **No leg holds a credential that reaches past its claim.** What a leg may push, open and post
   on a forge is confined, outside the leg, to its claim's ticket branches (R-BTN-107's
   `branches`), those branches' pull requests and their comments, in the repositories of its scope
   (§12.9). No leg holds the merge credential, any other credential of its runner's or of the
-  human, or one that outlives the leg.
+  human, or one that outlives the leg; and no job the forge runs from a ref a leg pushes holds
+  the merge credential or any credential that reaches past the claim.
 - **Every leg starts afresh.** A leg's environment holds nothing of another run's but what the
-  runner hands it: its checkout at the claim's commit and its inputs.
-- **The forge admits only the merge credential and the human identity** (R-BTN-188's
-  `human_identity`) to the default branch and the tags.
+  runner hands it: its checkout at the claim's commit and its inputs, which may carry an earlier
+  run's text (a hand-off, a resume record) as data.
+- **Where the policy sets `merge.trusted`, the forge admits only the merge credential and the
+  human identity** (R-BTN-188's `human_identity`) to the default branch and the tags.
 
-Under the `builtin` executor (R-BTN-107) the first three are not kept, and Baton makes no security
-promise: a guarantee is then a statement about the policy's values, not a protection. The forge's
+Under the `builtin` executor (R-BTN-107), and any other that runs a leg in the runner's trust
+boundary (a home's own executor, one that hands legs to the session hosting the runner), the
+first three are not kept, and Baton makes no security promise: a guarantee is then a statement about the policy's values, not a protection. The forge's
 setup is the deployment owner's; `baton repo protect --print | --check` is a tool a person runs to
 check it ([proposed](../proposals/security.md)), and nothing in Baton reads its result.
 
@@ -313,7 +316,8 @@ told about everything else and verifies none of it:
 
 - how a leg is kept apart and what confines its credentials (R-BTN-107): what a leg ran and
   could reach, a review leg and a trusted leg's override included;
-- where runners and their credentials live, and how their CLI is installed;
+- where runners and their credentials live, and how their CLI is installed; whether a grant that
+  names a trusted leg's capability belongs to a runner whose host holds that leg's credential;
 - custody of a human-only key, of a break-glass line and of the human identity's forge
   credential: an agent session that can use one is, to Baton and to the forge, the human;
 - the forge beyond the default branch and the tags: its secrets, environments and privileged
@@ -375,6 +379,8 @@ confines a leg's credentials; a compromised forge; and a compromised Baton.
   - **`plain-git`** is the `cooperative` column under the name a `git` repository applies
     (R-BTN-92), which may apply `protected` or `protected-hardware` instead.
   - **A policy that could not work is refused** (`invalid-params`, naming the knob):
+    - `merge.trusted` while `tickets.created` is `filed`: a withdrawal would be written to a
+      default branch the forge admits no runner to (§12.8, R-BTN-180);
     - on a repository whose ticket source is ejected (R-BTN-74), an `outbox.source` admitting no
       deliverer; the other way, a snapshot that ejects the source while `outbox.source` admits
       none is refused `snapshot-rejected`, the previous source staying in force;
@@ -411,22 +417,24 @@ confines a leg's credentials; a compromised forge; and a compromised Baton.
 - **R-BTN-189 (guarantees and floors).**
   - **A guarantee** is a named condition over the policy, defined here, and held or broken for
     each version. A deployment defines its own guarantees in its own specification, out of these
-    and of what it enforces itself; Baton knows only these. Each includes the guarantees it rests
-    on.
+    and of what it enforces itself; Baton knows only these. A version or a `floors` entry naming
+    any other guarantee is refused `invalid-params`.
 
     | Guarantee | Promises | Holds when |
     |---|---|---|
-    | `control-paths-human` | no control path (R-BTN-184) changes without a human landing it | `merge.trusted`, and `paths.control` is `human` |
-    | `tickets-approved` | no ticket or goal changes, and no ticket a runner creates is filed, without a human approval of that file: a `std:approval@1`, or the human's merge of the PR carrying it | `merge.trusted`; `paths.tickets` is `approval`; `tickets.created` is `proposed`; `attestations` admits only `human` for `std:approval@1`; and the last accepted post's ticket source is the markdown source (`source.kind: markdown`, R-BTN-74) |
-    | `independent-review` | a change the merge leg lands has at least two reviews of its exact head, each from its own run of a `reads_only` review leg (R-BTN-183); what the human merges by hand, the human has reviewed | `merge.trusted`; `merge.reviews.count` ≥ 2; and `attestations` admits only `baton` for `std:review@1` and `std:wrote@1` |
-    | `human-gates` | no owner's agent session, and no delegated key, changes membership or the policy, and every human approval is made on a hardware key | `approvers.members` and `approvers.policy` are human-only lists, and the repository's `human_key` is `hardware` |
-    | `board-from-trusted` | nothing a trusted leg acts on comes from a board post's word or from git verdicts | `merge.trusted`, and the `attestations` entries admit no `sync` writer for `std:arrival@1` or `std:decision@1`, and only `human` for `std:decision@1` |
+    | `control-paths-human` | no control path (R-BTN-184) changes without a human landing it | the landing condition, and `paths.control` is `human` |
+    | `tickets-approved` | no ticket or goal changes, and no ticket a runner creates is filed, without a human approval of that file: a `std:approval@1`, or the human's merge of the PR carrying it | the landing condition; `paths.tickets` is `approval`; `attestations` admits only `human` for `std:approval@1`; and the last accepted post's ticket source is the markdown source (`source.kind: markdown`, R-BTN-74) |
+    | `independent-review` | a change the merge leg lands has at least two reviews of its exact head, each from its own run of a `reads_only` review leg (R-BTN-183); what the human merges by hand, the human has reviewed | the landing condition; `merge.reviews.count` ≥ 2; and `attestations` admits only `baton` for `std:review@1` and `std:wrote@1` |
+    | `human-gates` | no owner's agent session, and no delegated key, changes membership, a grant's capabilities or the policy, and every human approval is made on a hardware key | `approvers.members` and `approvers.policy` are human-only lists, and the repository's `human_key` is `hardware` |
+    | `board-from-trusted` | nothing a trusted leg acts on comes from a board post's word or from git verdicts | the landing condition, and the `attestations` entries admit no `sync` writer for `std:arrival@1` or `std:decision@1`, and only `human` for `std:decision@1` |
 
     Every guarantee holds against hostile legs, pushers and content where the deployment keeps
     §12.8's duty, within what its knobs' enforcers enforce and nothing §12.8's lists exclude;
-    none holds against a compromised runner. `merge.trusted` is what each rests on: a change
-    reaches the default branch only through the merge leg (R-BTN-183) or the human identity's
-    own merge (R-BTN-180). Against an injected owner's agent, one holds only together with
+    none holds against a compromised runner. Each of the other four rests on the **landing
+    condition** — `merge.trusted`, `tickets.created` is `proposed`, and `paths.control` is not
+    `any` — under which a change reaches the default branch only through the merge leg
+    (R-BTN-183) or the human identity's own merge (R-BTN-180), and the courses and
+    configuration the merge leg's checks rest on never land by those checks alone. Against an injected owner's agent, one holds only together with
     `human-gates`: an `owner` approver can add a member or admit a trusted leg's capability on a
     grant, which no other guarantee constrains. The `protected` preset holds all but
     `human-gates`, and `protected-hardware` all five.
@@ -448,12 +456,16 @@ confines a leg's credentials; a compromised forge; and a compromised Baton.
     held | broken}, floors, check_app_id, at, valid_until}`. `check_app_id` is the instance
     setting (§12.7). The response is unsigned; `valid_until` equals `at` for CLI 0.1.3 and
     0.1.4 compatibility, not as a validity guarantee. A trusted runner and a deployment's
-    audit read the same route, each with its own key.
+    audit read the same route, each with its own key. `held` says the policy's values meet the
+    guarantee's conditions, never that the deployment keeps §12.8's duty, which Baton cannot see:
+    under `builtin` a held guarantee protects nothing.
 - **R-BTN-180 (what lands on the default branch).**
-  - **No runner role and no domain.** Every grant is a runner's. A trusted leg is routed by the
-    capability its course requires (R-BTN-174), which the `approvers.members` approver admits
-    only on the grants of runners whose host holds that leg's credential (R-BTN-182). Baton labels
-    no grant with a domain and compares no two runs by where they ran: review is independent
+  - **No runner role and no domain.** Every grant is a runner's. A trusted leg goes only to a
+    runner whose grant names the capability the leg requires exactly — never through a
+    `<type>:*` pattern, a `runner:` capability or a registration token's grant, and only on a
+  signed key (rule `trusted`, R-BTN-182) — and the
+    `approvers.members` approver names it only on the grants of runners whose host holds that
+    leg's credential, which Baton cannot check (§12.8). Baton labels no grant with a domain and compares no two runs by where they ran: review is independent
     because each review is its own `reads_only` run of the exact head (R-BTN-183).
   - **Nothing requires a leg to write the default branch or a tag.** Claims, status and course
     history are Baton's, and the standard courses commit only on the ticket's branch under every
@@ -491,8 +503,7 @@ confines a leg's credentials; a compromised forge; and a compromised Baton.
     (R-BTN-57, R-BTN-130).
   - **Whose attestations count is the policy's to say** (R-BTN-188), never the course's. Baton
     admits, for a type `merge` or a trusted leg acts on, only `human`, `baton` and
-    `service:<fingerprint>` keys the owner names — never an owner key or an ordinary runner
-    grant; and, for a resource a trusted leg requires, a `readings` entry admitting only
+    `service:<fingerprint>` keys the owner names — never an owner key or a runner grant as such; and, for a resource a trusted leg requires, a `readings` entry admitting only
     `instrument`, `admin` and such `service:` keys. It checks this both ways: a policy change is
     refused when it would admit another writer for a type a current course's trusted leg
     requires, and a course whose trusted leg requires a type the policy admits another writer for

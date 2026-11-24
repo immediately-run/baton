@@ -399,6 +399,11 @@ section that are not built are in [the proposal page](../proposals/checks-and-ex
     | `<NAME>` for `credential:<NAME>` | present only when the leg's `requires`, after role expansion (R-BTN-121), names it; every other declared `credential:` variable is removed |
     | git, forge and model-provider credentials, `SSH_AUTH_SOCK` | kept, and masked in output (classes 4 and 7 below) |
 
+    This is the environment the runner hands its executor (R-BTN-107). Under `builtin` it reaches
+    the leg as listed. An executor that keeps §12.8's duty passes the leg none of the runner's
+    credentials: in place of the kept ones it gives the leg credentials confined to the claim's
+    `scope` and `branches` that end with the leg. A trusted leg requires no `credential:`
+    capability (R-BTN-182), so no trusted runner's credential is ever listed here.
     A course may not declare a `credential:` name that is `PATH`, `HOME`, `SSH_AUTH_SOCK`,
     begins `BATON_`, or is a variable the runner keeps; the course file is held (R-BTN-69).
   - **Masking.** Before any byte of a leg's output leaves the runner, the runner replaces each

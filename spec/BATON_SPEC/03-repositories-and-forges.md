@@ -192,7 +192,7 @@ route, with the events and fields the table lists for it, is
     configuration in which only default-branch runs can read it.
   - **`verifySync(req) → {repository, role}`** is the only check. It refuses `unauthenticated`
     (no credential, bad signature, unknown or revoked key, a token that fails) or `forbidden`
-    (another role, a key that is no sync credential, a machine key whose grant does not sync
+    (another role, a key that is no sync credential, a machine key with no grant
     there). Every `/v1/sync/*` route uses only its answer.
   - **The mirror.** Legacy, removed with its code (R-BTN-193). A sync key's role is `sync` or
     `mirror`; a repository has a mirror when it has a `mirror_workflow`, `ci_identity.mirror` is
@@ -336,7 +336,7 @@ route, with the events and fields the table lists for it, is
   read only pushers' facts; the adapter exports `pusher` to a course's own `sync.mjs`; whatever
   station function runs, the CLI drops every posted marker and output whose author is not a
   pusher, and the sync log counts them per PR. `pusher` is the word for this trust in a forge
-  author; `trusted` is kept for the runner role (R-BTN-182).
+  author; `trusted` is kept for the leg property (R-BTN-182).
   - **PRs that count.** A PR found by `branch_pattern` counts only when its head repository is
     its base repository by id (the adapter table) and its base is the home or a `repos:` entry
     with reach (R-BTN-140). A fork's PR counts only when a pusher names it in `prs:`; its

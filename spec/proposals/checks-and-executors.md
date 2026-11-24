@@ -291,7 +291,7 @@ noticed (R-BTN-46), and the next claimant re-reads git before it writes (R-BTN-2
   - Baton closes the socket when the runner is reaped, re-keys, stops being alive, or its key is
     revoked, and when the Baton seals.
 
-## 5. Grant acceptance, span and registration tokens (R-BTN-146, R-BTN-117, proposed)
+## 5. Grant acceptance and registration tokens (R-BTN-146, R-BTN-117, proposed)
 
 Built: a grant is active from its creation, and `GET /v1/owner/{repository}/grants` lists a
 repository's grants.

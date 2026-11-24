@@ -114,7 +114,7 @@ repository exposes. Per-worker forks would close that by GitHub's design; they s
 with runners you trust, it needs no merge runner, protected branch, proxy or sandbox, and runners
 may land their own work. Baton's part of the guarantee is never to require a runner to write
 protected state, to hold the policy (protected paths, who lands), and to print each forge's
-setting for it. Fieldhouse, where runners are untrusted, sets that policy, registers the
+setting for it. Fieldhouse, where runners are trusted and legs are not, sets that policy, registers the
 guarantees it relies on as a floor (BATON_SPEC [R-BTN-188](../spec/BATON_SPEC/12-security.md#sec-12-8), [R-BTN-189](../spec/BATON_SPEC/12-security.md#sec-12-8)), and supplies what Baton
 cannot observe: the VMs, their resets and where keys live.
 
@@ -490,7 +490,7 @@ credentials.
 Since B-189 (the owner, 2026-11-24) a runner is trusted: a deployment keeps repository code out
 of its trust boundary and gives each leg only credentials confined to its claim (BATON_SPEC
 §12.8), and nothing in Baton guards against a compromised runner. The options that served only
-that (4, 5, 8, 16, and the runner halves of 3 and 17) are marked superseded; the rest keep their
+that (4, 5, 8, 16, and the runner half of 3) are marked superseded; 17 is now part of the duty; the rest keep their
 value against pushers, legs and owner sessions.
 
 The options, cheapest first; 9 to 13 cover a privileged session reading what a runner wrote (reach 3):
@@ -513,7 +513,7 @@ The options, cheapest first; 9 to 13 cover a privileged session reading what a r
 | 14 | Baton's production deploy is a human act: a signed tag or a human-only approval, a scoped Cloudflare token, no secret in the build job | a day | closes reach 0 | B-135 |
 | 15 | A human-only identity: a touch-required hardware signing key, an approval account no session holds, sessions on an identity of their own | a hardware key and an account | makes every owner gate on this page a human gate; without it, reach 3 passes them all | B-136 |
 | 16 | Board posts: `machine` out of the policy's `inputs.board` below the human level, changed paths and signatures computed server-side, per-key limits | a Baton ticket; the setting today | closes reaches 7 and 8 | B-137; the `machine` half superseded by B-189 (a machine key posts the board as any sync credential does); per-key limits kept |
-| 17 | Owners, administrators and runners run a pinned released CLI, never a working tree | a day | closes the owner-key path in reach 1 | B-138; the runner half superseded by B-189, the owner and administrator half kept |
+| 17 | Owners, administrators and runners run a pinned released CLI, never a working tree | a day | closes the owner-key path in reach 1 | B-138; since B-189 also part of BATON_SPEC §12.8's duty: a runner runs no CLI from a checkout it serves |
 | 18 | Owner session transcripts masked before archiving and readable at the human level only | a day | closes a credential crossing downward | FLDH-38 |
 | 19 | Sourced courses run from their source: homes refer to Baton's legs instead of copying them; the sync refuses copies; runners never run a home's copy | a Baton ticket; a prune per home | removes the leg scripts from reach 1, leaving `baton.json`, the overrides and the instructions | B-139 |
 | 20 | The merge runner: only it updates the default branch, by deterministic criteria at the exact approved head, tickets only with a human approval, never a control path (humans land those, outside Baton, for now); customisable per course | a Baton ticket; one protected-branch setting per repository | the core guarantee on every forge and on plain git; closes reaches 1 (configuration), 3 against runners, 4, 5 and 6 on the default branch | B-140 |
