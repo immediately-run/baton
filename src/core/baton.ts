@@ -406,7 +406,7 @@ export class BatonCore {
 
   /** §3: the one alarm, every 60 seconds — earlier when a webhook's trailing dispatch or the
    *  webhook path's own backstop is due. */
-  // @model alarmLive sha256:2d9b7ebc3e4f
+  // @model alarmLive sha256:ed13912c9b0f
   async alarm(): Promise<void> {
     // R-BTN-88 (§4.8, R3-1258): a sealed Baton's alarm idles — it logs nothing and touches
     // nothing; the next period is kept armed (B-229), so the instance that imports this state
@@ -1564,7 +1564,7 @@ export class BatonCore {
    * a rewind to a once-accepted history included — is a fresh hold with a fresh row. The 0001
    * schema's "written once" and "the first force post" describe that one hold.
    */
-  // @model syncPost sha256:2128e0c420ad
+  // @model syncPost sha256:a097d293a2c2
   async board(repo: Repository, p: BoardPayload) {
     // Course graphs are read per post: a registry applied, or a post refused after applying one,
     // must not leave another request reading a graph that is not in force.
@@ -1610,7 +1610,7 @@ export class BatonCore {
         this.observations.accept(r, n);
         const seen = normative ? this.refreshStations(r, p, n, at, null, true) : new Map<string, Seen>();
         this.claims.confirm(confirmations, n);
-        this.claims.judge(r, n, seen);
+        this.claims.judge(r, n, seen, this.claims.evidenceOf(r, p.attestations));
         this.store.exec('UPDATE held_snapshots SET observation = ? WHERE repository_id = ? AND sha = ?', n, r, p.sha);
       });
       // Held once per sha: a repeat (the sync re-posts every 15 minutes) changes nothing, so
@@ -1661,7 +1661,7 @@ export class BatonCore {
           nonScheduling(this.store, () => this.store.exec('UPDATE board_head SET stations_observation = ? WHERE repository_id = ?', n, r));
           this.settleSpawned(r, p, n, at);
           const confirmed = this.claims.confirm(confirmations, n);
-          const judged = this.claims.judge(r, n, seen);
+          const judged = this.claims.judge(r, n, seen, this.claims.evidenceOf(r, p.attestations));
           remember();
           return { ok: true, unchanged: true, ...(p.read_sha === p.sha ? { tickets_upserted: 0, tickets_deleted: 0 } : {}),
             confirmed: confirmed + judged.confirmed, stale_released: judged.stale_released };
@@ -1721,7 +1721,7 @@ export class BatonCore {
         }
         const seen = normative ? this.refreshStations(r, p, n, at, wrote) : new Map<string, Seen>();
         const confirmed = this.claims.confirm(confirmations, n);
-        const judged = this.claims.judge(r, n, seen);
+        const judged = this.claims.judge(r, n, seen, this.claims.evidenceOf(r, p.attestations));
         remember();
         return {
           ok: true, unchanged: true,
@@ -1811,7 +1811,7 @@ export class BatonCore {
       this.observations.accept(r, n);
       const confirmed = this.claims.confirm(confirmations, n);
       // R-BTN-10, R-BTN-35, §2e: git confirms ends, takes tickets away and goes backwards.
-      const judged = this.claims.judge(r, n, seen);
+      const judged = this.claims.judge(r, n, seen, this.claims.evidenceOf(r, p.attestations));
       changed.confirmed = confirmed + judged.confirmed;
       changed.stale_released = judged.stale_released;
       remember();

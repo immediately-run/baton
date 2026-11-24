@@ -16,7 +16,7 @@ import { resolveLeg, resolveStation, type Graph } from './graph';
 import { HELD_CLAIMS_SQL } from './blocks';
 import { validate, PATTERN_STEPS_MAX } from '../shared/schema.mjs';
 import { stdSchema } from '../shared/std.mjs';
-import type { PostedAttestation, PostedQuestion, PostedTicket } from './board';
+import { GIT_EVIDENCE_TYPE, type PostedAttestation, type PostedQuestion, type PostedTicket } from './board';
 import type { History } from './history';
 import type { Store } from './ports';
 
@@ -188,12 +188,14 @@ export class Questions {
    * answer read from git — is an arrival recorded `arrival-unapplied` (R-BTN-39), raising
    * nothing; one that fails only because a claim holds the ticket defers (R-BTN-39), kept with
    * its ref for the hold's end. Any other type is recorded unapplied too: its reader arrives
-   * with B-146 and B-120. An attestation whose `ref` repeats an applied answer's is silent
+   * with B-146 and B-120; `std:git.evidence@1` is the confirmation's (R-BTN-10). An attestation whose `ref` repeats an applied answer's is silent
    * (R-BTN-39's idempotence — the same commit attested by two runs moves the ticket once).
    */
   attestations(repo: string, list: PostedAttestation[]) {
     for (const a of list) {
       const id = qualify(repo, a.ticket);
+      // R-BTN-10: the sync's evidence attestations are read by the confirmation (`Claims.judge`).
+      if (a.type === GIT_EVIDENCE_TYPE) continue;
       if (a.type !== DECISION_TYPE) {
         this.unapplied(id, null, { type: a.type, why: 'a type Baton does not read yet (R-BTN-191)' });
         continue;

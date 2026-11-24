@@ -38,6 +38,7 @@ import { nodeKeygen } from '../shared/commitSign.mjs';
 import type { PostedControl } from '../core/board';
 import { readTicketSettings } from './tickets-config';
 import { ownRepositoryId, remoteSlug } from './remote-slug';
+import { attestEvidence, type EvidenceAttestation, type UnconfirmedEnd } from './evidence';
 import { PAGE_NAME, ticketsPage } from './tickets-page';
 
 // LC_ALL=C on every git call (B-93, round 4): git translates its messages, and the two shapes
@@ -695,6 +696,10 @@ export async function syncMain(args: SyncArgs): Promise<number> {
   const api = new BatonApi({ url, transport: args.transport ?? ((req) => fetch(req)), auth, kind: 'sync' }, log);
   let board: Board | null = null;
   let record: BatonRecord | undefined;
+  // R-BTN-10 (§4.3): the unconfirmed ends that named evidence, as the observation listed them, and
+  // this run's answers for them — read after the number, posted with the board.
+  let unconfirmed: UnconfirmedEnd[] = [];
+  let evidence: EvidenceAttestation[] = [];
   // B-89: `busy` is another run's reading, not this run's post, and R-BTN-62 lets no number this
   // run takes be used while that one is out. So the wait comes before the first `observe`, and
   // the retry is a whole second sync from a fresh number.
@@ -729,6 +734,7 @@ export async function syncMain(args: SyncArgs): Promise<number> {
     observe: async () => {
       const o = await asResult(async () => {
         const got = await api.observation();
+        unconfirmed = Array.isArray(got.unconfirmed) ? (got.unconfirmed as UnconfirmedEnd[]) : [];
         record = {
           answers: Array.isArray(got.answers) ? got.answers : [],
           legs: Array.isArray(got.legs) ? got.legs : [],
@@ -761,6 +767,7 @@ export async function syncMain(args: SyncArgs): Promise<number> {
         const answer = await api.dependencies([...ids]);
         return (Array.isArray(answer.dependencies) ? answer.dependencies : []).map((d) => ({ ticket: String(d.ticket), done: d.done === true }));
       });
+      evidence = unconfirmed.length ? await attestEvidence(unconfirmed, evidencePorts(root, record?.code_repos ?? [], log)) : [];
       return git(root, 'rev-parse', 'HEAD');
     },
     readHead: () => asResult(() => api.head()),
@@ -776,7 +783,7 @@ export async function syncMain(args: SyncArgs): Promise<number> {
         return false; // not an ancestor, or a commit this clone lacks: never "descends"
       }
     },
-    buildPayload: async () => board!.payload,
+    buildPayload: async () => (evidence.length ? { ...board!.payload, attestations: evidence } : board!.payload),
     statusOf: (id: string) => board!.statusOf(id),
     sleep,
   });
@@ -841,6 +848,53 @@ function syncKeyAuth(file: string): Auth {
   // never posted under one credential and half under none.
   signingKey(file);
   return auth;
+}
+
+/** R-BTN-10: what the evidence check reads through — the home checkout's git, and the REST API
+ *  of the GitHub hosts this repository is on (github.com, its home's host, its `code_repos`
+ *  entries'), with the sync's `GITHUB_TOKEN`. Without a token only commits are looked at. */
+function evidencePorts(root: string, codeRepos: readonly CodeRepoEntry[], log: (l: string) => void): Parameters<typeof attestEvidence>[1] {
+  const token = process.env.GITHUB_TOKEN;
+  const slug = remoteSlug(root);
+  let originHost: string | null = null;
+  try {
+    const u = git(root, 'remote', 'get-url', 'origin');
+    originHost = /^https:\/\//.test(u) ? new URL(u).host : (/^[^@]+@([^:]+):/.exec(u)?.[1] ?? null);
+  } catch {
+    originHost = null;
+  }
+  const hosts = new Set<string>(['github.com', ...codeRepos.filter((e) => e.forge === 'github').map((e) => e.host)]);
+  const homeHost = originHost === 'github.com' || (originHost != null && hosts.has(originHost)) ? originHost : null;
+  const hasObject = (sha: string) => {
+    try {
+      execFileSync('git', ['-C', root, 'cat-file', '-e', `${sha}^{commit}`], { stdio: 'ignore' });
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  return {
+    hasCommit: (sha) => {
+      if (hasObject(sha)) return true;
+      try {
+        execFileSync('git', ['-C', root, 'fetch', '-q', 'origin', sha], { stdio: 'ignore', timeout: FETCH_TIMEOUT_MS });
+      } catch {
+        return false;
+      }
+      return hasObject(sha);
+    },
+    home: token && slug && homeHost ? { host: homeHost, slug } : null,
+    hosts: token ? hosts : new Set(),
+    get: async (host, path) => {
+      try {
+        const res = await fetch(`${githubConn(host).rest}${path}`, { headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json', 'User-Agent': 'baton-sync' }, redirect: 'error', signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+        return res.status;
+      } catch {
+        return null;
+      }
+    },
+    log,
+  };
 }
 
 /** GitHub's API origin, REST and GraphQL alike. */
