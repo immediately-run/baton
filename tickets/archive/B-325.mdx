@@ -2,7 +2,7 @@
 title: "B-325 — create-pr's implement and fix legs ask the owner when blocked: deadline_s, autonomous legs, and the instructions to ask"
 id: B-325
 project: baton
-status: available
+status: done
 updated: 2026-11-24
 repos:
   - baton
@@ -20,7 +20,7 @@ depends_on: []
 
 **Brief:** the owner, 2026-11-24 (in a Claude Code session on bering): when a ticket is worked directly in a session, the agent asks the owner questions; a Baton-driven implementation leg never does. Implementation legs should stop for input when they need it, the request reaching the owner on their phone (ntfy) as a link to the leg's opencode session. When nobody answers, the leg waits until Baton takes the claim back at its deadline, and the ticket is picked up again. Hibernating an unanswered leg's sandbox, and reviving it on demand, is the long-term plan, deferred (FIELDHOUSE_SPEC §5.1).
 
-**Spec:** [BATON_SPEC §7.1](../spec/BATON_SPEC/07-conditions.md#sec-7-1) ([R-BTN-195](../spec/BATON_SPEC/07-conditions.md#sec-7-1): an interaction request, `autonomous` legs; [R-BTN-160](../spec/BATON_SPEC/07-conditions.md#sec-7-1)), [§7.5](../spec/BATON_SPEC/07-conditions.md#sec-7-5) ([R-BTN-167](../spec/BATON_SPEC/07-conditions.md#sec-7-5): `deadline_s`; [R-BTN-90](../spec/BATON_SPEC/07-conditions.md#sec-7-5): the deadline takes the claim back), [§7.4](../spec/BATON_SPEC/07-conditions.md#sec-7-4) ([R-BTN-122](../spec/BATON_SPEC/07-conditions.md#sec-7-4): the retry policy routes the failed attempt), [§5.2](../spec/BATON_SPEC/05-courses.md#sec-5-2) ([R-BTN-69](../spec/BATON_SPEC/05-courses.md#sec-5-2): the course file's leg keys), [§5.8](../spec/BATON_SPEC/05-courses.md#sec-5-8) ([R-BTN-131](../spec/BATON_SPEC/05-courses.md#sec-5-8): the standard stubs and their briefing). No rule changes: R-BTN-195 already says how a leg asks. This ticket makes the standard `create-pr` course use it.
+**Spec:** [BATON_SPEC §7.1](../../spec/BATON_SPEC/07-conditions.md#sec-7-1) ([R-BTN-195](../../spec/BATON_SPEC/07-conditions.md#sec-7-1): an interaction request, `autonomous` legs; [R-BTN-160](../../spec/BATON_SPEC/07-conditions.md#sec-7-1)), [§7.5](../../spec/BATON_SPEC/07-conditions.md#sec-7-5) ([R-BTN-167](../../spec/BATON_SPEC/07-conditions.md#sec-7-5): `deadline_s`; [R-BTN-90](../../spec/BATON_SPEC/07-conditions.md#sec-7-5): the deadline takes the claim back), [§7.4](../../spec/BATON_SPEC/07-conditions.md#sec-7-4) ([R-BTN-122](../../spec/BATON_SPEC/07-conditions.md#sec-7-4): the retry policy routes the failed attempt), [§5.2](../../spec/BATON_SPEC/05-courses.md#sec-5-2) ([R-BTN-69](../../spec/BATON_SPEC/05-courses.md#sec-5-2): the course file's leg keys), [§5.8](../../spec/BATON_SPEC/05-courses.md#sec-5-8) ([R-BTN-131](../../spec/BATON_SPEC/05-courses.md#sec-5-8): the standard stubs and their briefing). No rule changes: R-BTN-195 already says how a leg asks. This ticket makes the standard `create-pr` course use it.
 
 **Depends on:** none. The Fieldhouse half, which makes an opencode agent's question raise `interact`, is fieldhouse's FLDH-68 ([fieldhouse#57](https://github.com/immediately-run/fieldhouse/pull/57)). The ntfy delivery runner is FLDH-57 item 3.
 
