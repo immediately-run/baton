@@ -842,11 +842,14 @@ export function calendarDate(v: unknown): string | null {
   return Number.isFinite(t) && new Date(t).toISOString().slice(0, 10) === v ? v : null;
 }
 
+/** Unprefixed hashes predate B-322's untiered row shape. */
+export const TICKET_ROW_HASH_PREFIX = 'v2:';
+
 /** The row's hash: what decides whether an accepted snapshot rewrites it (§7.1). */
 export async function rowHash(row: TicketRow): Promise<string> {
   const bytes = new TextEncoder().encode(JSON.stringify(row));
   const digest = await crypto.subtle.digest('SHA-256', bytes);
-  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
+  return TICKET_ROW_HASH_PREFIX + [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
 // ── §4.6 children (R-BTN-86, R3-1258) ────────────────────────────────────────────────────

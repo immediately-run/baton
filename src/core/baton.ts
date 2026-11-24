@@ -9,7 +9,7 @@ import { MIGRATIONS } from '../migrations';
 import { versionedStore, clockBucket, ifNoneMatch, nonScheduling, schedulingVersion, type VersionedStore } from './stateVersion';
 import { runnerViewResponse, requireFleetScope } from './runnerViews';
 import { BatonError, CLIENT_HEADER, errorResponse, json, servedClientVersions, withClientVersions } from './http';
-import { checkPayload, DEFAULT_COURSE, resolveParents, retiredBoardFields, stripBoardTier, rowFor, rowForTicket, rowHash, stationOf, type BoardPayload, type PostedStation, type TicketRow } from './board';
+import { checkPayload, DEFAULT_COURSE, resolveParents, retiredBoardFields, stripBoardTier, rowFor, rowForTicket, rowHash, stationOf, TICKET_ROW_HASH_PREFIX, type BoardPayload, type PostedStation, type TicketRow } from './board';
 import { Stations, type Seen } from './stations';
 import { Questions } from './questions';
 import { Conditions } from './conditions';
@@ -2010,6 +2010,12 @@ export class BatonCore {
         continue;
       }
       const id = qualify(r, row.id);
+      // B-322 / S-BTN-220: the old hash included a field the migration dropped. On the first
+      // materializing sync, compare the surviving fields rather than inferring a source edit.
+      if (before && !before.row_hash.startsWith(TICKET_ROW_HASH_PREFIX) && this.matchesLegacyRow(id, row, parent)) {
+        this.store.exec('UPDATE tickets SET row_hash = ? WHERE id = ?', hash, id);
+        continue;
+      }
       this.store.exec(
         `INSERT INTO tickets (id, repository_id, local_id, path, title, project, status, node, queue, tags, requires_clause, operator_only,
            depends_on, blocked_by, repos, ord, rank, snapshot_sha, row_hash, since, holder, course_id, expedite, display, version, key, brief, parent, course_fields_json)
@@ -2069,6 +2075,15 @@ export class BatonCore {
     // and dropped — never COUNTed, a growing table being what B-236 refuses to scan.
     if (newTickets || deleted) adjustCounts(this.store, { tickets: newTickets - deleted });
     return { upserted, deleted, renumbered, closingParents };
+  }
+
+  private matchesLegacyRow(id: string, row: TicketRow, parent: string | null): boolean {
+    const { id: _localId, requires, parent: _postedParent, course_fields, brief, ...fields } = row;
+    const stored = this.sql<Record<string, unknown>>('SELECT * FROM tickets WHERE id = ?', id)[0];
+    const projected = { ...fields, parent, course_fields_json: course_fields ?? null, brief: brief ?? null };
+    if (!Object.entries(projected).every(([key, value]) => stored[key] === value)) return false;
+    const names = this.sql<{ name: string }>('SELECT name FROM ticket_requires WHERE ticket_id = ?', id).map(({ name }) => name).sort();
+    return names.length === requires.length && names.every((name, i) => name === requires[i]);
   }
 
   /** B-183 (§4.4, R-BTN-184): a `custom` source that reads only as it is now has no ticket file

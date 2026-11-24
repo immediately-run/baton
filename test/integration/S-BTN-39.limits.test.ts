@@ -54,7 +54,7 @@ beforeEach(async () => {
 
 describe('S-BTN-39 limits agents cannot change', () => {
   it('ignores legacy ceilings and ticket tiers without limiting or releasing a claim', async () => {
-    const k = await makeKey('ssh-ed25519', 'formerly-capped');
+    const k = await makeKey('ssh-ed25519', 'legacy-grant-client');
     const secret = 'tier-test';
     const grant = { public_key: k.publicKey, hostname: 'k-host', capabilities: ['agent-venue'], max_tier: 'judgement' };
     expect((await own('/grants', grant)).status).toBe(200);
@@ -88,6 +88,21 @@ describe('S-BTN-39 limits agents cannot change', () => {
     await setClock(T0 + 60 * DAY_MS);
     expect(await change()).toMatchObject({ status: 400, json: { code: 'invalid-params' } });
     expect((await keyCall(admin, '/v1/admin/repositories', { id: 'docs', weight: 100 })).status).toBe(200);
+  });
+
+  it('keeps the tickets ETag when an ignored filter is seen again (R-BTN-196)', async () => {
+    const path = ORIGIN + '/v1/repositories/docs/tickets?tier=ignored';
+    const read = async (etag?: string) => hostCall(await signedRequest(owner, path, {
+      created: T0 / 1000, headers: etag ? { 'If-None-Match': etag } : {},
+    }));
+    const first = await read();
+    expect(first.status).toBe(200);
+    const etag = first.headers.get('ETag');
+    expect(etag).toBeTruthy();
+    expect((await read(etag!)).status).toBe(304);
+    await setClock(T0 + 1_000);
+    expect((await read(etag!)).status).toBe(304);
+    expect(await rows("SELECT seen_at FROM deprecated_fields WHERE field = 'tickets.tier'")).toEqual([{ seen_at: T0 + 1_000 }]);
   });
   it('an owner bar on every course, claims only, from +1 h: new Go claims are refused, a held one still advances', async () => {
     expect((await own('/bars', { course: '*', tag: 'account:go_plus', applies: 'claim', starts_at: T0 + H, reason: 'go-quota' })).status).toBe(200);
