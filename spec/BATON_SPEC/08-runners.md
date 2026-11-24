@@ -403,7 +403,8 @@ section that are not built are in [the proposal page](../proposals/checks-and-ex
     the leg as listed. An executor that keeps §12.8's duty passes the leg none of the runner's
     credentials: in place of the kept ones it gives the leg credentials confined to the claim's
     `scope` and `branches` that end with the leg. A trusted leg requires no `credential:`
-    capability (R-BTN-182), so no trusted runner's credential is ever listed here.
+    capability (R-BTN-182), so no `credential:` row ever carries a trusted runner's credential;
+    under `builtin` the kept row can, and does, which is one reason Baton promises nothing there.
     A course may not declare a `credential:` name that is `PATH`, `HOME`, `SSH_AUTH_SOCK`,
     begins `BATON_`, or is a variable the runner keeps; the course file is held (R-BTN-69).
   - **Masking.** Before any byte of a leg's output leaves the runner, the runner replaces each

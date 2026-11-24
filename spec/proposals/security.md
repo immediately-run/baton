@@ -17,7 +17,7 @@ policy's knobs are stored and computed over, and what enforces `merge.*`, `paths
 --dry-run`) writes nothing and answers what the change would do: the knobs changed, each
 guarantee held or broken after it, and what the new values would stop — runners delivering the
 source kinds that a new `outbox.source` no longer admits, queued legs whose requirements the new `attestations` entries admit no writer for, tickets on a
-course whose `merge` leg a new `merge.trusted` leaves without a runner whose grant admits its capability (R-BTN-182), and, for a change
+course whose `merge` leg a new `merge.trusted` leaves without a runner whose grant names its capability (rule `trusted`, R-BTN-182), and, for a change
 to `repos.unlisted`, the live tickets whose `repos:` entries lose reach (`stops.unreached`).
 
 ## 2. Checking the forge's protection (§12.8, proposed)
@@ -119,8 +119,10 @@ Under `tickets.created: proposed`:
 - **Standard types:**
   - `std:wrote@1` (writer `baton`): a writing leg's reported commit range `start..head` and its
     runner key;
-  - `std:review@1` (writer `baton`): a review leg the course marks `approves: true` and
-    `reads_only: true` ended `approve` at `head`, with its run id (R-BTN-63);
+  - `std:review@1` (writer `baton`): a run of a review leg the course marks `reads_only: true`
+    and `approves`, started at `head`, that finished at its approving outcome, with its run id
+    (R-BTN-63). `approves: <station>` names that outcome among the leg's `to` (R-BTN-83);
+    `approves: true` means the first station `to` lists;
   - `std:checks@1` (writer `service:<a check-runner's key>`, R-BTN-114): the course's check
     commands, from protected course data, passed at `head` in a check leg's session holding no
     credential (R-BTN-114);
@@ -240,8 +242,9 @@ R-BTN-183 (proposed) — what the merge runner merges. At the PR's exact head `H
   PR conversation or, on a `git` repository, to the ticket's leg-state branch, never to the work
   branch (R-BTN-190), so a reviewer never becomes a writer.
 - **Independent review.** `merge.reviews.count` `std:review@1` at `H`, each from its own run (no
-  two with one run id) of a review leg whose claim started at `H`, and no review run at `H` that
-  ended without approving: one rejection at `H` voids every approval at `H`, so approvals cannot
+  two with one run id) of a review leg whose run started at `H`, and no run of such a leg
+  started at `H` that finished at another of its outcomes — a run abandoned, released or reaped
+  finishes at none and voids nothing: one rejection at `H` voids every approval at `H`, so approvals cannot
   be gathered by running a review again over an unchanged head. Every leg starts afresh (§12.8):
   a review run starts from the checkout at `H` and its inputs, never from a writer's session or
   environment, so Baton compares no runner, key or

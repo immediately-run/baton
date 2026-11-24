@@ -80,16 +80,18 @@ leg-duration keys to its own git/forge proxy and LLM proxy, which Baton neither 
    stays; a change naming either afterwards is `invalid-params`. (This is the owner's ruling for
    these two names; B-293's rule that a floor without a successor stops the migration applies
    to every other name.) A version or `floors` entry naming any guarantee R-BTN-189 does not
-   define is refused `invalid-params`. `std:review@1` supersedes per run id, and one review run
-   at a head that ended without approving voids the approvals at that head (proposal part 8).
-3. **The protection report retires.** The heartbeat's `protection` is ignored, never refused, so
-   an older CLI keeps working; `repositories.protection_json`, the 24-hour lapse check and
+   define is refused `invalid-params`. (Review counting — `std:review@1` superseding per run id,
+   a rejection voiding a head's approvals — is B-146's store and B-140's gate, not built here.)
+3. **The protection report retires.** The heartbeat's `protection` is accepted and ignored, so
+   an older CLI keeps working, until no request has carried it for 30 days, then refused
+   `invalid-params` (the history's *Migrations the implementation still carries*); the
+   `protection_reports` table (§13's `repositories.protection_json`), the 24-hour lapse check and
    `baton.unprotected` go, a migration closing every open `baton.unprotected` condition with a
    logged reason. `baton repo protect --print | --check`, when built
    ([proposed](../spec/proposals/security.md)), stays a tool a person runs that Baton reads
    nothing from.
-4. **Grant trust columns go.** A new migration drops `worker_grants.trust_level`,
-   `trust_domain`, `role` and `trust_set_by` (§13's `role`, `checker`, `domain`, `set_by`) and
+4. **Grant trust columns go.** A new migration drops `runner_grants.trust_level`,
+   `trust_domain`, `role`, `trust_set_by` and `model_family` (§13's `role`, `checker`, `domain`, `set_by`) and
    `claim_legs.domain` if present, after one release in which nothing reads them; the grants
    read (§14, S-BTN-295) stops answering `role`, `domain` and `set_by`, and an owner-state
    import (R-BTN-88, `src/core/ownerState.ts`) accepts an older export carrying them and ignores
@@ -134,8 +136,13 @@ leg-duration keys to its own git/forge proxy and LLM proxy, which Baton neither 
   floored today on a guarantee that included `no-runner-lands` is broken now (no checker report
   can exist) and resumes taking claims when this lands if its landing condition holds; and a
   policy whose `approvers.roles` was stricter than its `approvers.members` loses that
-  difference, a trusted leg's capability being a grant's, under `approvers.members`. The
-  migration names both per repository in its `admin` event.
+  difference, a trusted leg's capability being a grant's, under `approvers.members`. Three more:
+  `independent-review` keeps its name but no longer requires distinct domains, so a deployment
+  floored on it accepts one key writing and reviewing; with `outbox.git` gone any runner
+  declaring the class delivers git entries; and a stored version with `merge.trusted` and
+  `tickets.created: filed`, or over an ejected markdown source, stays in force until its next
+  change, which the new refusal then binds. The migration names each per repository in its
+  `admin` event.
 - **A heartbeat's `protection`** — ignored; nothing stores or reads it.
 
 ### Invariants
@@ -155,11 +162,13 @@ leg-duration keys to its own git/forge proxy and LLM proxy, which Baton neither 
 - Every preset's document validates and yields R-BTN-189's guarantees: `protected` holds all
   but `human-gates`, `protected-hardware` all five, with no grant role, checker or report.
 - A `PUT …/policy` naming `refs.default_branch`, `approvers.roles`, `inputs.board`,
-  `outbox.git` or `paths.control: trusted-runner` is `invalid-params` naming it.
+  `outbox.git` or `paths.control: trusted-runner` is `invalid-params` naming it, as is a new
+  `merge.trusted` with `tickets.created: filed`; a stored one stays in force and is named.
 - A stored version floored on `no-runner-lands` gets one new version without it, logged
   `admin`; the stored version and its hash are unchanged; a later change naming it is refused
   (S-BTN-190).
-- A heartbeat carrying `protection` is accepted and stores nothing; an open
+- A heartbeat carrying `protection` is accepted and stores nothing (and is refused once the
+  30-day sunset passes); an open
   `baton.unprotected` is closed by the migration.
 - A test executor records the brief: `scope` and `branches` match the claim answer and the
   resolved `branch_pattern`.

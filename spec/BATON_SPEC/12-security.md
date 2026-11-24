@@ -291,7 +291,8 @@ which Baton cannot observe and checks nothing of (R-BTN-107):
 
 - **No repository code runs in a runner's trust boundary.** Every leg, and every other call into
   repository code, runs through an executor that keeps it from the runner's key, secret, state
-  and credentials; and the runner runs no CLI or other code from a checkout it serves.
+  and credentials — a source delivery holding only its store's credential for that delivery
+  (R-BTN-171); and the runner runs no CLI or other code from a checkout it serves.
 - **No leg holds a credential that reaches past its claim.** What a leg may push, open and post
   on a forge is confined, outside the leg, to its claim's ticket branches (R-BTN-107's
   `branches`), those branches' pull requests and their comments, in the repositories of its scope
@@ -379,8 +380,9 @@ confines a leg's credentials; a compromised forge; and a compromised Baton.
   - **`plain-git`** is the `cooperative` column under the name a `git` repository applies
     (R-BTN-92), which may apply `protected` or `protected-hardware` instead.
   - **A policy that could not work is refused** (`invalid-params`, naming the knob):
-    - `merge.trusted` while `tickets.created` is `filed`: a withdrawal would be written to a
-      default branch the forge admits no runner to (§12.8, R-BTN-180);
+    - `merge.trusted` while `tickets.created` is `filed`, or while the ticket source is an ejected
+      markdown source (R-BTN-74): a withdrawal or a source delivery would write a default branch
+      the forge admits no runner to (§12.8, R-BTN-180);
     - on a repository whose ticket source is ejected (R-BTN-74), an `outbox.source` admitting no
       deliverer; the other way, a snapshot that ejects the source while `outbox.source` admits
       none is refused `snapshot-rejected`, the previous source staying in force;
@@ -460,13 +462,12 @@ confines a leg's credentials; a compromised forge; and a compromised Baton.
     guarantee's conditions, never that the deployment keeps §12.8's duty, which Baton cannot see:
     under `builtin` a held guarantee protects nothing.
 - **R-BTN-180 (what lands on the default branch).**
-  - **No runner role and no domain.** Every grant is a runner's. A trusted leg goes only to a
-    runner whose grant names the capability the leg requires exactly — never through a
-    `<type>:*` pattern, a `runner:` capability or a registration token's grant, and only on a
-  signed key (rule `trusted`, R-BTN-182) — and the
-    `approvers.members` approver names it only on the grants of runners whose host holds that
-    leg's credential, which Baton cannot check (§12.8). Baton labels no grant with a domain and compares no two runs by where they ran: review is independent
-    because each review is its own `reads_only` run of the exact head (R-BTN-183).
+  - **No runner role and no domain.** Every grant is a runner's. Which runner may take a trusted
+    leg is rule `trusted`'s (R-BTN-182, [proposed](../proposals/security.md)), by the
+    capability the leg requires; the `approvers.members` approver names it only on the grants of
+    runners whose host holds that leg's credential, which Baton cannot check (§12.8). Baton
+    labels no grant with a domain and compares no two runs by where they ran: review is
+    independent because each review is its own `reads_only` run of the exact head (R-BTN-183).
   - **Nothing requires a leg to write the default branch or a tag.** Claims, status and course
     history are Baton's, and the standard courses commit only on the ticket's branch under every
     policy (R-BTN-131). Under `merge.trusted`, no course commits to the default branch and
@@ -535,8 +536,8 @@ confines a leg's credentials; a compromised forge; and a compromised Baton.
 - **R-BTN-192 (the fact reader).** Where the policy admits no `sync` writer for `std:arrival@1`,
   a fact leg's arrival comes from the fact reader: a trusted runner whose `service:` key the
   policy names. [Proposed](../proposals/security.md) (B-140).
-- **R-BTN-182 (trusted runners).** A runner whose grant admits the capability a trusted leg
-  requires (R-BTN-180), for the legs a course marks `trusted: true`; its host holds the leg's
+- **R-BTN-182 (trusted runners).** A runner whose grant names the capability a trusted leg
+  requires exactly (rule `trusted`), for the legs a course marks `trusted: true`; its host holds the leg's
   credential, which no leg's environment ever holds (§12.8). What a trusted runner claims, runs and re-checks before it acts is
   [proposed](../proposals/security.md) (B-140).
 - **R-BTN-183 (what the merge runner merges).** [Proposed](../proposals/security.md) (B-140):

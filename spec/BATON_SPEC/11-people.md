@@ -48,7 +48,8 @@ contents are not built; their design is
   Role, grants, revocation and the one-role rule (§12.1) are the same for both kinds. The kinds
   differ only as this rule says.
   - **Where only an SSH key serves.** Sync, mirror, instrument, check-runner and `human_only`
-    (R-BTN-185) keys are SSH keys; a sync may use a CI identity instead (R-BTN-93). An API-key
+    (R-BTN-185) keys are SSH keys, and so is a runner's that takes a trusted leg (rule
+    `trusted`, R-BTN-182); a sync may use a CI identity instead (R-BTN-93). An API-key
     runner never syncs or delivers (R-BTN-171): `/v1/sync/*`, `/v1/probe/*` and
     `/v1/runner/outbox/*` accept no API key.
   - **The key.** `baton key create FILE` writes `bak_<id>_<secret>` (64 random bits of id, 256

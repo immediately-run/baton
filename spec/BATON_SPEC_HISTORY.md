@@ -82,8 +82,10 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   post the board where `inputs.board` excluded them; `refs.*` statements, which only the forge
   enforced, go; a floor on `no-runner-lands` is dropped; a repository floored on a guarantee
   that included it, broken today for want of a checker report, resumes claims if its landing
-  condition holds; and a policy whose `approvers.roles` was stricter than `approvers.members`
-  loses the difference. Review, round one: two fresh reviewers given the diff found R-BTN-144
+  condition holds; a policy whose `approvers.roles` was stricter than `approvers.members`
+  loses the difference; `independent-review` keeps its name but no longer requires distinct
+  domains, so a deployment floored on it accepts one key writing and reviewing; and with
+  `outbox.git` gone any runner declaring the class delivers git entries. Review, round one: two fresh reviewers given the diff found R-BTN-144
   handing a leg the runner's credentials (now the executor's to replace, and a trusted leg
   requires no `credential:`); trusted legs routable through a wildcard, a `runner:`
   capability, a token's grant or an API key (rule `trusted` re-defined over capabilities); the
@@ -98,7 +100,19 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   domain, span and refs text in §3, §14, five proposals and the context pages; an unknown floor
   name with no rule refusing it; and the placeholder this replaces. Each was checked against the
   text and fixed; the security model's dated supersession notes are kept, the page being a
-  context page with dated rulings throughout.
+  context page with dated rulings throughout. Round two, one fresh reviewer given the diff:
+  rule `trusted` had no builder and two homes (B-140 builds it; R-BTN-180 cites the proposal);
+  "ended without approving" could not be read from Baton's record and counted a crashed run
+  (`approves: <station>` names the approving outcome; abandoned, released and reaped runs void
+  nothing; "whose run started at `H`"); the migration named `repositories.protection_json`
+  and `worker_grants` for the code's `protection_reports` and `runner_grants` and missed
+  `model_family`; B-189 and this history disagreed on the heartbeat's `protection` (a 30-day
+  sunset); three loosenings unlisted (above); R-BTN-182 and the dry run said "admits" for
+  "names exactly"; R-BTN-159's SSH-only list lacked trusted legs; R-BTN-144 claimed no trusted
+  credential reaches a leg under `builtin`; an ejected markdown source's deliveries writing the
+  default branch under `merge.trusted` (now refused, and the duty's first clause names a source
+  delivery's store credential); stale lines in B-137, B-141, B-146, B-147, B-163, B-199 and B-297;
+  and S-BTN-182 cases that tested nothing. Each was checked and fixed.
 
 - **2026-11-24 — Access sign-in refusals name the failed check (R-BTN-155, S-BTN-318).**
   Previously missing settings, missing or unverifiable assertions, and missing administrator
@@ -4023,14 +4037,19 @@ working until the stated condition holds, then removes it.
 
 - **Runner-distrust state (2026-11-24, B-189).** A heartbeat's `protection` is accepted and
   ignored, never refused, until no request has carried it for 30 days, then refused
-  `invalid-params`. A migration drops `repositories.protection_json`, closes every open
-  `baton.unprotected` with a logged reason, and drops the grants' trust columns after one
-  release in which nothing reads them; an owner-state import accepts an older export carrying a
+  `invalid-params`. A migration drops the `protection_reports` table (the spec's
+  `repositories.protection_json`), closes every open `baton.unprotected` with a logged reason,
+  and drops `runner_grants`' `trust_level`, `trust_domain`, `role`, `trust_set_by` and
+  `model_family` after one release in which nothing reads them (the couriers' go with B-293's
+  removal of couriers); an owner-state import accepts an older export carrying a
   grant's role, domain or mark and ignores them. Every floor naming `no-runner-lands` or the
   code's `trusted-domain-separate`, in a `policy_floors` row or a version's `floors`, is dropped
   by one new policy version per repository, made by the migration rather than an approver,
   logged `admin` with both hashes, the knobs dropped, and whether the repository's floors were
-  broken before and hold after; stored versions and their hashes are never rewritten. Stored
+  broken before and hold after; stored versions and their hashes are never rewritten. A stored
+  version with `merge.trusted` and `tickets.created: filed`, or `merge.trusted` over an ejected
+  markdown source, stays in force but is named in that event, and the next change to it must
+  fix it, the refusal applying then. Stored
   `paths.control: trusted-runner` reads as `approval`, and the retired knobs in a stored
   version are ignored when it is read, until the next version drops them.
 

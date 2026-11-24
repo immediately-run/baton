@@ -11,7 +11,7 @@ tags:
   - roadmap-item
 order: 1163
 tier: critical
-description: "The owner, 2026-10-28, as specified in BATON_SPEC §12.8 since 2026-10-31: a merge runner, a runner whose grant admits the capability its `trusted: true` legs require (a role and rule `trusted` retired 2026-11-24, B-189), runs a pinned CLI and no repository code, and merges an exact head when the repository policy allows it, checked from git and from Baton's attestations (R-BTN-182, R-BTN-183, R-BTN-184); it also performs the proposal merge (R-BTN-180), and `baton repo protect` prints and checks the forge protection, a tool a person runs (§12.8; the `refs.*` knobs and the protection checker retired 2026-11-24, B-189). S-BTN-180, S-BTN-182, S-BTN-183, S-BTN-184, S-BTN-191. Requires: a GitHub organisation with a dedicated App, a Gitea instance and a plain git server for the drills."
+description: "The owner, 2026-10-28, as specified in BATON_SPEC §12.8 since 2026-10-31: a merge runner, a runner whose grant admits the capability its `trusted: true` legs require (a role retired 2026-11-24, B-189; rule `trusted` re-defined over exact capabilities and built here), runs a pinned CLI and no repository code, and merges an exact head when the repository policy allows it, checked from git and from Baton's attestations (R-BTN-182, R-BTN-183, R-BTN-184); it also performs the proposal merge (R-BTN-180), and `baton repo protect` prints and checks the forge protection, a tool a person runs (§12.8; the `refs.*` knobs and the protection checker retired 2026-11-24, B-189). S-BTN-180, S-BTN-182, S-BTN-183, S-BTN-184, S-BTN-191. Requires: a GitHub organisation with a dedicated App, a Gitea instance and a plain git server for the drills."
 topics:
   - baton
 owns: {}
@@ -55,12 +55,18 @@ branch).
 
 1. **The merge runner** is a runner whose host holds the merge credential, routed to the legs its
    course marks `trusted: true` (the standard courses' `merge`) by the capability those legs
-   require, which the owner admits only on its grant (R-BTN-174, R-BTN-180, R-BTN-182). It runs a CLI release
+   require, which the owner admits only on its grant (R-BTN-174, R-BTN-180, R-BTN-182). This
+   ticket builds rule `trusted` as the security proposal's part 7 defines it: only an SSH key's
+   grant naming the capability exactly — never by `<type>:*`, a `runner:` capability or a
+   registration token's grant — is offered, claims, advances or ends a trusted leg; a course whose
+   trusted leg requires no capability, or a `credential:` one, is held (S-BTN-182). It runs a CLI release
    installed by tarball integrity (B-138), and executes nothing from the repository: no install,
    build, hook or repository script; it reads git objects and Baton's records only (R-BTN-182).
 2. **What it merges** (R-BTN-183), at the PR's exact head `H`, every rule read from the policy:
    - `merge.reviews`: `count` `std:review@1` at `H`, each from its own run (no two with one run
-     id) of a `reads_only` review leg whose claim started at `H`; no runner, key or domain is
+     id) of a `reads_only` review leg whose run started at `H`, and no run of such a leg started at
+     `H` that finished at another of its outcomes (a run abandoned, released or reaped voids
+     nothing); `std:review@1` supersedes per run id (B-146); no runner, key or domain is
      compared between writers and reviewers;
    - `merge.checks: required`: a `std:checks@1` at `H`, or check runs whose workflow file is on the
      protected default branch with the same blob as at merge time, concluded `success` at `H`
@@ -177,6 +183,6 @@ _2026-11-09: the owner retired R-BTN-182's sandbox requirement for the override 
 
 _(2026-11-20: the spec simplification of 2026-11-19 (baton#299; `spec/BATON_SPEC_HISTORY.md`, that date) moved the unbuilt parts of the design this ticket builds out of the section files, with their rule ids, to proposal pages: trusted runners, what the merge runner merges and protected paths are parts 7, 8 and 9 of [the security proposal](../spec/proposals/security.md), and the fact reader is part 6. S-BTN-183, S-BTN-184, S-BTN-182, S-BTN-180 and S-BTN-191 are no longer rows of the verification section: they are in [the proposals' scenarios](../spec/proposals/scenarios.md), under "The repository policy's enforcement". Each rule keeps its id and a line in its section, which links the page. The pull request that builds this ticket moves the rules it builds back into the section files, and the scenarios and gates it makes pass back into [the verification section](../spec/BATON_SPEC/15-verification.md#sec-15), in the same change. The plan above is unchanged.)_
 
-_(2026-11-24: rewritten in place for B-189's spec PR (`spec/BATON_SPEC_HISTORY.md`, the entry of 2026-11-24), on the owner's rulings of 2026-11-09 and 2026-11-24 that runners are trusted and legs are not. The merge runner is routed by a capability its grant admits, not a trusted-runner role or rule `trusted` (item 1; B-147, superseded, is no longer a dependency); `merge.reviews` counts reviews of the exact head, each its own `reads_only` run, comparing no domain, key or model family (item 2, the struck `authorship: signed` retired earlier); `paths.control`'s `trusted-runner` value is `approval`; the `refs.*` knobs, the protection checker mode, its heartbeat `protection` and `baton.unprotected` are retired — `baton repo protect` is a tool a person runs and Baton reads nothing from it (items 6, 8, the tests and the exit criteria); "a trust domain of its own" is a host holding the merge credential (item 7). Leg state's landed check is the sync's reading alone (B-148).)_
+_(2026-11-24: rewritten in place for B-189's spec PR (`spec/BATON_SPEC_HISTORY.md`, the entry of 2026-11-24), on the owner's rulings of 2026-11-09 and 2026-11-24 that runners are trusted and legs are not. The merge runner is routed by a capability its grant admits, not a trusted-runner role, with rule `trusted` re-defined over exact capabilities and built here (item 1; B-147, superseded, is no longer a dependency); `merge.reviews` counts reviews of the exact head, each its own `reads_only` run, comparing no domain, key or model family (item 2, the struck `authorship: signed` retired earlier); `paths.control`'s `trusted-runner` value is `approval`; the `refs.*` knobs, the protection checker mode, its heartbeat `protection` and `baton.unprotected` are retired — `baton repo protect` is a tool a person runs and Baton reads nothing from it (items 6, 8, the tests and the exit criteria); "a trust domain of its own" is a host holding the merge credential (item 7). Leg state's landed check is the sync's reading alone (B-148).)_
 
 _(2026-11-24: rules re-read: R-BTN-180, R-BTN-182, R-BTN-183, R-BTN-188, R-BTN-189)_

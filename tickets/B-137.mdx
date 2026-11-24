@@ -1,5 +1,5 @@
 ---
-title: "B-137 — Board posts are an attack surface: machine keys out of the policy's inputs.board below the human level, control changes and signatures computed server-side, and rate limits per key (R-BTN-187)"
+title: "B-137 — Board posts are an attack surface: ~~machine keys out of the policy's inputs.board below the human level,~~ control changes and signatures computed server-side, and rate limits per key (R-BTN-187)"
 id: B-137
 project: baton
 status: available
@@ -10,7 +10,7 @@ tags:
   - roadmap-item
 order: 1160
 tier: critical
-description: "Adversarial review findings 4 and 18 (2026-10-27): any runner key can post the board and any leg can read that key, so B-126's detection and B-127's signature check, computed client-side, are computed by the attacker. the policy's `inputs.board` excludes machine keys on homes with runners below the human level; Baton reads control-path changes from push deliveries (the signature half retired 2026-11-19, see Status); observation and post rate limits per key. Requires: none."
+description: "Adversarial review findings 4 and 18 (2026-10-27): any runner key can post the board and any leg can read that key, so B-126's detection and B-127's signature check, computed client-side, are computed by the attacker. ~~the policy's `inputs.board` excludes machine keys on homes with runners below the human level;~~ Baton reads control-path changes from push deliveries (the signature half retired 2026-11-19, see Status); observation and post rate limits per key. Requires: none."
 topics:
   - baton
 owns: {}
