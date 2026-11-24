@@ -712,8 +712,8 @@ Entry shape: **When** · **Host** · **Tickets** · **Why it was needed** · **R
      - On 2026-11-24, 42 tickets sat in this state, B-312 among them.
   2. **Those suspensions were never confirmed.** A review's suspension names no commit, so Baton waited forever for git to confirm it. The ticket showed `unconfirmed` and was offered to nobody: neither a `fix` nor the owner's question. #400 confirms it on the next accepted snapshot, once deployed.
   3. **Held tickets wait on the owner.**
-     - 25 tickets had three `implement` attempts end `released:cannot-finish:transient` within one window on 2026-11-21 (about 12:48–13:32 UTC, B-156 to B-158 among them). Each opened a `baton:retries` decision, which nothing retries without an answer.
-     - 10 more are held at `merged`, with holds from 2026-11-02 to 2026-11-16 that the later `git-moved … merged` did not clear (B-110, B-125, B-129 among them).
+     - 25 tickets are held at `filed` after `implement` attempts ended `released:cannot-finish:transient`. The three sampled (B-156 to B-158) failed within the same 2026-11-21 window, about 12:48–13:32 UTC. Each held ticket opened a `baton:retries` decision, which nothing retries without an answer.
+     - 9 more are held at `merged`, with holds from 2026-11-02 to 2026-11-16 that the later `git-moved … merged` did not clear (B-110, B-125, B-129 among them).
   4. **Red `main` and conflicts.**
      - The merge leg never merges red. The S-BTN-41 flake made PR tests fail (#357, #384) until #392.
      - A conflicting PR is resolved only inside a `fix` or `merge` leg, so a parked PR falls further behind `main` with every merge.
