@@ -617,9 +617,8 @@ export class Admin {
     const login = checkLogin(body);
     const identities = 'access' in login ? parseAccessIdentities(this.c.accessIdentities()) : null;
     const fingerprint = email == null ? undefined : identities?.get(email);
-    if (identities && !fingerprint) throw new BatonError('unauthenticated', 'no verified Access email bound to an administrator key');
     const hash = 'token' in login ? await sha256Hex(login.token) : null;
-    const emailHash = fingerprint && email != null ? await sha256Hex(email) : null;
+    const emailHash = identities && email != null ? await sha256Hex(email) : null;
     const value = randomHex(32);
     const id = await sha256Hex(value);
     const admins = await this.adminFingerprints();
@@ -632,7 +631,7 @@ export class Admin {
         this.exec('UPDATE login_links SET used_at = ? WHERE token_hash = ?', now, hash);
         key = link.admin_key;
       } else {
-        if (!fingerprint || !admins.has(fingerprint)) throw new BatonError('unauthenticated', 'no verified Access email bound to an administrator key');
+        if (!fingerprint || !admins.has(fingerprint)) throw new BatonError('unauthenticated', 'no verified Access email bound to an administrator key', { reason: 'not-bound' });
         key = fingerprint;
         this.event(`admin:${key}`, { act: 'login', via: 'access', email_sha256: emailHash }, null);
       }

@@ -314,12 +314,17 @@ contents are not built; their design is
     emails ASCII and compared ASCII-lowercased, at most one line per email, several emails to
     one key allowed. Whoever controls the deployment sets it (R-BTN-57). An email bound to an
     administrator key gets a session of that key, as its link would open it; that session's key
-    is the line's. An absent, unverified or expired assertion, one with no or a non-ASCII email,
-    and an email bound to no key in `BATON_ADMIN_KEYS` are `unauthenticated` and set no cookie;
-    an unreadable key set is `unavailable`. A value of `ACCESS_IDENTITIES` with a malformed or
-    duplicated line binds nothing: every Access sign-in is `unavailable` until it is fixed, and
-    nothing else is affected. Each sign-in is recorded as an event of its key,
-    `{act: "login", via: "access"}`, with the email's SHA-256, never the email. Each request
+    is the line's. An Access sign-in refusal with `unauthenticated` sets no cookie and carries
+    one `reason`, checked in this order: `not-configured` if either `ACCESS_TEAM_DOMAIN` or
+    `ACCESS_AUD` is absent; `no-assertion` if no assertion reached Baton; `unverified` if the
+    assertion did not verify or lacks a usable ASCII email; `not-bound` if the verified email
+    has no line or its line names a key not in `BATON_ADMIN_KEYS`. Both binding failures have
+    the same answer; no refusal echoes the email. The page explains the reason as text and
+    still offers a one-time link. An unreadable key set is `unavailable`. A value of
+    `ACCESS_IDENTITIES` with a malformed or duplicated line binds nothing: an Access sign-in
+    that reaches the binding check is `unavailable` until it is fixed. Each successful sign-in
+    is recorded as an event of its key, `{act: "login", via: "access"}`, with the email's
+    SHA-256, never the email. Each request
     a session so opened authorizes also checks its line: the session ends as soon as the email
     leaves `ACCESS_IDENTITIES` or its line names another key. Baton reads no assertion after
     the sign-in, so ending the Access session does not end Baton's.
