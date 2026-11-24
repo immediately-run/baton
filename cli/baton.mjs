@@ -17,12 +17,12 @@
 //   baton admin -i KEY repo add <forge path> --owner-key PUB[,PUB…] [--id ID (default: the path's last segment)]
 //                [--forge github|gitlab|gitea|git] [--remote URL] [--web-base URL] [--default-branch main]
 //                [--sync-workflow PATH] [--mirror-workflow PATH] [--ci-identity none|github-actions|gitlab:<issuer>|gitlab-mirror:<issuer>]
-//                [--sync-key PUB[,…]] [--mirror-key PUB[,…]] [--weight N] [--tiers a,b,c] [--cut-over]
-//   baton admin -i KEY repo set ID [--weight N] [--tiers a,b,c] [--remote URL] [--web-base URL]
+//                [--sync-key PUB[,…]] [--mirror-key PUB[,…]] [--weight N] [--cut-over]
+//   baton admin -i KEY repo set ID [--weight N] [--remote URL] [--web-base URL]
 //                [--sync-workflow PATH|none] [--mirror-workflow PATH|none] [--ci-identity …]
 //                [--add-owner-key PUB[,…]] [--add-sync-key PUB[,…]] [--add-mirror-key PUB[,…]] [--remove-sync-key FP[,…]]
 //   baton admin -i KEY repo retire ID [--yes]
-//   baton admin -i KEY grant REPO --key PUB [--hostname H] --capabilities a,b [--max-tier T] [--max-claims N]
+//   baton admin -i KEY grant REPO --key PUB [--hostname H] --capabilities a,b [--max-claims N]
 //   baton admin -i KEY probe add --key PUB --label L
 //   baton admin -i KEY resource add NAME --scope account|service --schema FILE|JSON    (R-BTN-76)
 //   baton admin -i KEY instance add NAME --serves a,b --repositories x,y
@@ -44,7 +44,7 @@
 //                decision (R-BTN-75); `--on decision:*` is every decision waiting on a person
 //   baton admin -i KEY revoke FINGERPRINT                          baton admin -i KEY open
 //   baton admin -i KEY state      — what the dashboard draws, as JSON, read with the key (B-118)
-//   baton owner -i KEY grant REPO --key PUB [--hostname H] --capabilities a,b [--label L] [--max-tier T] [--max-claims N]
+//   baton owner -i KEY grant REPO --key PUB [--hostname H] --capabilities a,b [--label L] [--max-claims N]
 //   baton owner -i KEY revoke REPO FINGERPRINT
 //   baton owner -i KEY owners REPO (--add PUB | --remove FINGERPRINT)
 //   baton owner -i KEY sign [--message TEXT] [--repo DIR] -- <paths>…   (B-127: a commit signed
@@ -117,7 +117,7 @@
 //                   [--eject tickets|stations] [--pin owner/name@commit] [--force]
 //                — a repository's own sync and scaffold (§2f R-BTN-74, R-BTN-131)
 //   baton tickets new --title T [--description D] [--project ID] [--depends-on A,B] [--tags X,Y]
-//                [--tier T] [--order N] [--repos a,b] [--course C] [--body-file F] [--trust T] [--invariants I]
+//                [--order N] [--repos a,b] [--course C] [--body-file F] [--trust T] [--invariants I]
 //                — file one ticket, the next free id under .baton/baton.json's ticket_prefix,
 //                with the conventional body, as one commit pushed to the default branch (B-112)
 //   baton tickets claim <id> [-i KEY] [--url URL] [--offline] [--rules-reread <ids>]
@@ -146,7 +146,7 @@
 //                since they were filed are listed, never a finding (R-BTN-74)
 //   baton tickets --help
 //                — the commands, the tags Baton reads and their meanings, the Requires: clause (B-112)
-//   baton request "<one sentence>" --course C [--repo DIR] [--tier T] [--branch B] [--remote R]
+//   baton request "<one sentence>" --course C [--repo DIR] [--branch B] [--remote R]
 //                [--forge github|gitlab|gitea|git]
 //                — start a course from one sentence, no hand-written ticket (B-98, R-BTN-131):
 //                files ONE request ticket (the sentence as title and description, course: C,
@@ -357,7 +357,7 @@ export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? 
       const [sub, target, ...more] = rest;
       if (sub === 'add') {
         const { flags } = parseArgs(more, ['cut-over'], ['id', 'forge', 'remote', 'web-base', 'default-branch', 'sync-workflow', 'mirror-workflow', 'ci-identity',
-          'sync-key', 'mirror-key', 'weight', 'tiers', 'owner-key'], 0);
+          'sync-key', 'mirror-key', 'weight', 'owner-key'], 0);
         const path = need(target, 'the repository (its forge path, owner/name)');
         const keys = [...(list(flags['sync-key']) ?? []).map((k) => ({ public_key: readKey(k), role: 'sync' })), ...(list(flags['mirror-key']) ?? []).map((k) => ({ public_key: readKey(k), role: 'mirror' }))];
         return { method: 'POST', path: '/v1/admin/repositories', body: {
@@ -365,17 +365,17 @@ export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? 
           ...(flags.forge ? { forge: flags.forge } : {}), ...(flags.remote ? { remote: flags.remote } : {}), ...(flags['web-base'] ? { web_base: flags['web-base'] } : {}),
           ...(flags['sync-workflow'] ? { sync_workflow: flags['sync-workflow'] } : {}), ...(flags['mirror-workflow'] ? { mirror_workflow: flags['mirror-workflow'] } : {}),
           ...(flags['ci-identity'] ? { ci_identity: ciIdentity(flags['ci-identity']) } : {}), ...(keys.length ? { sync_keys: keys } : {}),
-          ...(flags.weight ? { weight: Number(flags.weight) } : {}), ...(flags.tiers ? { tiers: list(flags.tiers) } : {}), ...(flags['cut-over'] ? { cut_over: true } : {}),
+          ...(flags.weight ? { weight: Number(flags.weight) } : {}), ...(flags['cut-over'] ? { cut_over: true } : {}),
           owner_keys: need(list(flags['owner-key']), '--owner-key').map(readKey),
         } };
       }
       if (sub === 'set') {
-        const { flags } = parseArgs(more, [], ['weight', 'tiers', 'remote', 'web-base', 'sync-workflow', 'mirror-workflow', 'ci-identity',
+        const { flags } = parseArgs(more, [], ['weight', 'remote', 'web-base', 'sync-workflow', 'mirror-workflow', 'ci-identity',
           'add-owner-key', 'add-sync-key', 'add-mirror-key', 'remove-sync-key'], 0);
         const add = [...(list(flags['add-sync-key']) ?? []).map((k) => ({ public_key: readKey(k), role: 'sync' })), ...(list(flags['add-mirror-key']) ?? []).map((k) => ({ public_key: readKey(k), role: 'mirror' }))];
         const workflow = (v) => (v === 'none' ? null : v);
         const body = {
-          id: need(target, 'the repository id'), ...(flags.weight ? { weight: Number(flags.weight) } : {}), ...(flags.tiers ? { tiers: list(flags.tiers) } : {}),
+          id: need(target, 'the repository id'), ...(flags.weight ? { weight: Number(flags.weight) } : {}),
           ...(flags.remote ? { remote: flags.remote } : {}), ...(flags['web-base'] ? { web_base: flags['web-base'] } : {}),
           ...(flags['sync-workflow'] ? { sync_workflow: workflow(flags['sync-workflow']) } : {}), ...(flags['mirror-workflow'] ? { mirror_workflow: workflow(flags['mirror-workflow']) } : {}),
           ...(flags['ci-identity'] ? { ci_identity: ciIdentity(flags['ci-identity']) } : {}),
@@ -626,7 +626,7 @@ export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? 
   throw new Error('baton admin … | baton owner … | baton board REPO');
 }
 
-const GRANT_FLAGS = ['key', 'hostname', 'label', 'capabilities', 'max-tier', 'max-claims'];
+const GRANT_FLAGS = ['key', 'hostname', 'label', 'capabilities', 'max-claims'];
 
 /** §12.2's ask under a destructive action: `--yes` answers the prompt beforehand; without a
  *  TTY the command refuses rather than prompt a pipe. `out` and `in` are injected for the test. */
@@ -793,7 +793,7 @@ function ciIdentity(v) {
 function grantBody(flags, readKey, extra) {
   return {
     ...extra, public_key: readKey(need(flags.key, '--key')), ...(flags.hostname ? { hostname: flags.hostname } : {}), ...(flags.label ? { label: flags.label } : {}),
-    capabilities: list(flags.capabilities) ?? [], ...(flags['max-tier'] ? { max_tier: flags['max-tier'] } : {}),
+    capabilities: list(flags.capabilities) ?? [],
     // R-BTN-4 (B-188): how many claims the key's runner may hold at once while claiming here.
     ...(flags['max-claims'] ? { max_claims: Number(flags['max-claims']) } : {}),
   };

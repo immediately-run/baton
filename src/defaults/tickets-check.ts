@@ -157,7 +157,7 @@ export async function checkTickets(root: string, settings: MarkdownSettings = {}
   const counts = { tickets: result.tickets.length, closed: result.closed.length };
 
   // The board post's validation, run here so a pull request fails instead of the sync: the one
-  // throw it makes is one finding — the validator names its field (`tickets[3].tier: …`) — at
+  // throw it makes is one finding — the validator names its field (`tickets[3].requires: …`) — at
   // `board`, or, a cycle, at the first ticket's file, which the author opens.
   // B-113 (§3.1, round 1): this repository's own id spelled qualified reads as the local id
   // alone — in the cycle graph here, in `checkPayload` (which the board's own judgment passes

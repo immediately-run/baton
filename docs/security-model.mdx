@@ -19,7 +19,7 @@ mitigations, with what each costs.</Lede>
   and people with push are trusted with everything git controls.
 - **What agents must not change lives in Baton, not in git** (R-BTN-66): keys, grants and
   capabilities, owner bars and required bars, holds and cancels, `retry`,
-  `pushers`, `code_repos`, tiers and weights. No push changes them.
+  `pushers`, `code_repos`, and weights. No push changes them.
 - **Fieldhouse adds trust levels** (*What Fieldhouse is*, Axioms 4 and 6). A sandbox VM is the
   least trusted level, the host above it, humans at the top, and a credential never crosses
   downward. Agents in VMs write the home repository without approval.
@@ -305,10 +305,6 @@ Every scheduling input in git can be set by a push:
 - `EXPEDITE` (R-BTN-12, from the snapshot) and `order`;
 - a goal's `priority` and `exclusive` (B-122, not built). An `exclusive` goal starves
   every other ticket in its home;
-- `tier` and requirements: a judgement ticket marked routine reaches runners granted only
-  routine work, and a ticket marked `critical` reaches whichever runners serve that tier. If
-  those run on owner machines (Claude Code runners, R-FH-21), a pushed ticket's body reaches the
-  human level by frontmatter (review finding 12; B-127's tier decision depends on option 1);
 - `depends_on`: blocks any ticket;
 - new tickets, and re-filing a held ticket under a new id to escape its hold (R-BTN-12's
   stated residual risk).
@@ -343,7 +339,7 @@ limits; [B-125's runbook](./runbooks/compromised-runner.mdx) starts by revoking 
 
 Baton's own state (R-BTN-66), so a push cannot:
 
-- grant itself a capability or a tier its key does not hold;
+- grant itself a capability its key does not hold;
 - lift an owner bar, clear a hold or an owner's cancel;
 - add a trusted identity;
 - make Baton act on a repository outside `code_repos`;
@@ -375,7 +371,7 @@ roles, teams or Apps. Candidate paths: `.baton/**`, `.github/workflows/**`, `**/
   PR an owner merges.
 - **Where:** GitHub Team plans or above, on private and internal repositories only (GitHub
   Docs, *About rulesets*). That covers `fieldhouse`, `docs` and `hq`, but not `baton`, which is
-  public. Path rules cannot see inside a file: `EXPEDITE`, `tier` and `depends_on` in a
+  public. Path rules cannot see inside a file: `EXPEDITE` and `depends_on` in a
   ticket's frontmatter stay open.
 
 ### B. Required reviews on control paths
@@ -400,7 +396,7 @@ nothing protects a control path. The code stays until B-263 removes it. What fol
 mitigation as it was specified and built.
 
 The sync accepts control inputs only from a commit **signed by an owner key of that
-repository**: `.baton/`, goals and `EXPEDITE`, and ticket `tier` if the owners choose. Owner
+repository**: `.baton/`, goals and `EXPEDITE`. Owner
 keys are SSH keys Baton already holds, and git's SSH commit signatures use the SSHSIG format
 Baton already verifies for signed requests (R-BTN-13).
 Runners load `agent_command`, overrides and `rank.mjs` only from such a commit, by extending
@@ -458,7 +454,7 @@ state (FLDH-25, `immediately-run/runner-hosts`). The home keeps the tickets.
 ### G. Detection
 
 The sync raises a notice when a board post changes a control input (`.baton/`, goals,
-`EXPEDITE`, a ticket's tier) and the push's pusher is not an owner. The pusher comes from the
+`EXPEDITE`) and the push's pusher is not an owner. The pusher comes from the
 forge's push event, not the commit author, which anyone can set.
 
 - **Closes:** nothing. It gives after-the-fact visibility of control changes on the default
@@ -665,12 +661,7 @@ Even with all of the above:
 ## Decisions for the owner
 
 Settled on 2026-10-27: delegated bearer keys never hold credential-management actions (B-124).
-Ticket `tier` is not a signed control input (B-127), **but the review shows that holds only
-while no runner above the VM level serves a home the VM level pushes**: re-opened below. Open:
-
 - Which of A to G to adopt, and in what order.
-- **Tier:** keep option 1 as a hard precondition of the tier decision, or make `tier` a signed
-  control input (review finding 12).
 - **B-136's shape:** a separate GitHub account for approvals, or the owner's account kept out
   of every session with sessions on a lesser identity.
 - **The Axiom 4 amendment** that B-130 needs, and the owner queue it accepts.
@@ -696,7 +687,7 @@ version of this page, five critical. Each is addressed above or in a ticket:
 | 9. `git log` and pusher misattribute | high | interim advice; B-126 |
 | 10. `code_repos` does not bound the identity | high | *What a push cannot reach* |
 | 11. B-123 and B-124 open channels | high | reach 3; *What a push cannot reach*; B-123; B-124 |
-| 12. Tier routes upward | high | reach 5; decisions; B-127 |
+| 12. Tier routes upward (historical) | high | Gate 5 and ticket tiers retired in B-322 |
 | 13. B-127 rollback by merge (reproduced) | medium | C; B-127 |
 | 14. Option 2 overstated | medium | F; table; FLDH-37 |
 | 15. Tags not covered | medium | B-130 |

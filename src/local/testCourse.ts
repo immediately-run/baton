@@ -378,7 +378,7 @@ export async function coreViolations(k: KitInput): Promise<KitViolation[]> {
   // schemas included, read by the same `courseSchemas` (R-BTN-108, R-BTN-134).
   const entry = (id: string, course: unknown, v: Versions, schemas: KitSchema[]) => ({ id, version: v.version, min_runner_version: v.min_runner_version, skill: id,
     course, step_kinds: ['other'], branch_pattern: 'claude/{ticket}-*', ...(schemas.length ? { schemas } : {}) });
-  const ticket = (id: string) => ({ id, course_id: k.course, path: `tickets/${id}.md`, title: id, tier: 'routine', requires: [], operator_only: false,
+  const ticket = (id: string) => ({ id, course_id: k.course, path: `tickets/${id}.md`, title: id, requires: [], operator_only: false,
     expedite: false, depends_on: [], blocked_by: [], repos: [], rank: 1 });
   let n = 0;
   const post = async (registry: unknown[], stations: Record<string, unknown>, closed: { id: string; as: 'done' }[] = []) => {
@@ -418,7 +418,7 @@ export async function coreViolations(k: KitInput): Promise<KitViolation[]> {
     const hash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(secret)))].map((b) => b.toString(16).padStart(2, '0')).join('');
     const hb = await core.runners.heartbeat(CRED, null, { hostname: 'test-course', session_name: 'test-course', harness: 'claude-code', kind: 'vm', capabilities: ['agent-venue'],
       model_id: 'anthropic/kit',
-      tier_ceiling: 'critical', lease_timeout_s: 3600, secret_hash: hash, courses: [{ repository: REPO, course: k.course, version: version.version }] }) as { runner_id: number };
+      lease_timeout_s: 3600, secret_hash: hash, courses: [{ repository: REPO, course: k.course, version: version.version }] }) as { runner_id: number };
     const tx = <T>(f: () => T) => core.store.transaction(f);
     const claim = tx(() => core.claims.claim(hb.runner_id, { request_id: 'test-course-1', ticket_id: `${REPO}:KIT-1` })) as { claim_id?: number; code?: string; message?: string };
     if (!claim.claim_id) return [{ rule: 'generic-run', message: `the claim at ${proposed.start} was refused: ${claim.code ?? ''} ${claim.message ?? ''}`.trim() }];

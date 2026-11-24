@@ -19,7 +19,7 @@ afterEach(() => {
 
 const BODY = '**Brief:** the original brief.\n\n### What to build\n\n- the thing\n';
 const ticket = (over: Record<string, string> = {}, body = BODY): string => {
-  const fm = { id: 'B-1', status: 'in-progress', prs: '[]', updated: '2026-10-27', tier: 'judgement', EXPEDITE: 'false', depends_on: '[]', ...over };
+  const fm = { id: 'B-1', status: 'in-progress', prs: '[]', updated: '2026-10-27', EXPEDITE: 'false', depends_on: '[]', ...over };
   return `---\ntitle: "B-1 — a ticket"\n${Object.entries(fm).map(([k, v]) => `${k}: ${v}`).join('\n')}\n---\n\n${body}`;
 };
 

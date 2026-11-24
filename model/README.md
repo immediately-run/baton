@@ -407,7 +407,7 @@ depth 5 back, and with it the `unblocked` event.
   closed intake are advice — no ticket is held, blocked, refused or reordered for them — and a
   depth only counts what the model's holds and queued legs already are; they leave every
   modelled state as it was (R3-1255; R3-1254 may model them).
-- **Tiers and grants beyond rule 4** (rules 5–7), and **isolation floors** (R-BTN-107): column
+- **Repository grants** (rule 7; rules 5 and 6 are retired), and **isolation floors** (R-BTN-107): column
   comparisons with no interleaving of their own — a leg's `isolation: session` against the
   runner's latest declared mode; matching tests cover them (G-BTN-40, S-BTN-64). Rule 4 is
   modelled (R3-1254 part 2b).

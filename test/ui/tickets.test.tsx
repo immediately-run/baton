@@ -1,6 +1,6 @@
 // tickets.test.tsx — B-209: the Tickets table and the Board, each from fixture reads. The table
 // draws each state's shape and word and its reason band; the tabs carry the read's counts and
-// set `?state=`; `?q=` and `?tier=` round-trip through the URL; no sort control exists; a
+// set `?state=`; `?q=` round-trip through the URL; no sort control exists; a
 // hostile title and hold reason stay text; load-more follows the cursor. The Board's Ready
 // order is the read's, the failed rule is drawn for a ticket nobody can take, Running draws the
 // lease bar, `stalled` and the condition a leg waits on.
@@ -21,13 +21,13 @@ afterEach(() => {
 });
 
 const row = (local: string, state: string, over: Partial<TicketRow> = {}): TicketRow => ({
-  ticket_id: `docs:${local}`, title: `${local} title`, course: 'course-a', tier: 'routine', requires: [], requires_unmet: [], tags: [], order: null, parent: null, expedite: false,
+  ticket_id: `docs:${local}`, title: `${local} title`, course: 'course-a', requires: [], requires_unmet: [], tags: [], order: null, parent: null, expedite: false,
   position: { station: 'station-a', path_len: 0, next_leg: 'leg-a' }, state, reasons: [], detail: {}, ...over,
 });
 
 const ROWS: TicketRow[] = [
   row('READY', 'ready', { eligible_runners: [{ runner_id: 4, hostname: 'host-four', session_name: 'sess-four' }], failed_rule: null, requires: ['cap-a'] }),
-  row('STUCK', 'ready', { eligible_runners: [], failed_rule: 'above-tier-ceiling', tier: 'critical' }),
+  row('STUCK', 'ready', { eligible_runners: [], failed_rule: 'missing-capability' }),
   row('UNCONF', 'unconfirmed', { detail: { claim_id: 9, reported_at: NOW - HOUR, runner_id: 2, hostname: 'host-two' } }),
   row('RUN', 'running', { detail: { claim_id: 7, runner_id: 1, hostname: 'host-one', session_name: 'sess-one', leg: 'leg-b', since: NOW - HOUR, lease_ends_at: NOW + HOUR, last_activity_at: NOW - 3 * HOUR, alive: true, stalled: true, condition_wait: 31 } }),
   row('PERSON', 'waiting-person', { detail: { leg: 'leg-p', question_id: 'q-7' } }),
@@ -43,7 +43,7 @@ const LIST = '/v1/repositories/docs/tickets';
 
 function serve(routes: Record<string, Route> = {}) {
   return mockFetch({
-    '/v1/repositories': repoList([repoRow('docs', { tiers: ['routine', 'judgement', 'critical'] })]),
+    '/v1/repositories': repoList([repoRow('docs')]),
     '/v1/actions': { actions: [] },
     [LIST]: { tickets: ROWS, counts: COUNTS, matched: ROWS.length },
     ...routes,
@@ -65,7 +65,7 @@ describe('the Tickets table (B-209 item 2)', () => {
     serve();
     renderApp('/repositories/docs/tickets');
     const table = await screen.findByRole('table', { name: 'Tickets' });
-    expect(within(table).getAllByRole('columnheader').map((h) => h.textContent)).toEqual(['Ticket', 'State', 'Position', 'Tier', 'Requires']);
+    expect(within(table).getAllByRole('columnheader').map((h) => h.textContent)).toEqual(['Ticket', 'State', 'Position', 'Requires']);
     // The order is the read's: no row is moved.
     expect([...table.querySelectorAll('tr.tk-row th')].map((th) => th.textContent!.split(' ')[0])).toEqual(ROWS.map((r) => r.ticket_id));
     for (const r of ROWS) {
@@ -74,7 +74,7 @@ describe('the Tickets table (B-209 item 2)', () => {
     }
     expect(rowOf('READY').querySelector('a')!.getAttribute('href')).toBe('/repositories/docs/tickets/READY');
     expect(rowOf('READY').classList.contains('tk-has-band')).toBe(false);
-    expect(bandOf('STUCK').textContent).toBe('Nobody can take it — above-tier-ceiling');
+    expect(bandOf('STUCK').textContent).toBe('Nobody can take it — missing-capability');
     expect(bandOf('UNCONF').textContent).toMatch(/^host-two reported it done 1 h ago; no snapshot has confirmed it yet$/);
     expect(bandOf('RUN').textContent).toMatch(/^Stalled — no activity since 3 h ago · Waits on condition 31$/);
     expect(within(bandOf('RUN')).getByRole('link', { name: 'condition 31' }).getAttribute('href')).toBe('/repositories/docs/conditions/31');
@@ -107,12 +107,11 @@ describe('the Tickets table (B-209 item 2)', () => {
     expect(bandOf('HELD').textContent).toBe(`Held by owner:abc: ${HOSTILE} · 2 h ago`);
   });
 
-  it('the tabs carry the read’s counts and set ?state=; ?q= and ?tier= round-trip through the URL', async () => {
+  it('the tabs carry the read’s counts and set ?state=; ?q= round-trip through the URL', async () => {
     const blocked = ROWS.filter((r) => ['held', 'blocked', 'waiting-person', 'backing-off', 'suspended'].includes(r.state));
     const { calls } = serve({
       [`${LIST}?state=blocked`]: { tickets: blocked, counts: COUNTS, matched: blocked.length },
       [`${LIST}?state=blocked&q=dep`]: { tickets: [ROWS[7]], counts: COUNTS, matched: 1 },
-      [`${LIST}?state=blocked&q=dep&tier=judgement`]: { tickets: [], counts: COUNTS, matched: 0 },
     });
     renderApp('/repositories/docs/tickets');
     const tabs = within(await screen.findByRole('tablist', { name: 'Ticket states' }));
@@ -130,27 +129,23 @@ describe('the Tickets table (B-209 item 2)', () => {
     fireEvent.change(screen.getByRole('searchbox', { name: 'Filter by id or title' }), { target: { value: 'dep' } });
     expect(window.location.search).toBe('?state=blocked&q=dep');
     await waitFor(() => expect(screen.getByText('Showing 1 of 1')).toBeDefined());
-    fireEvent.change(document.querySelector('.tk-tier select') as HTMLSelectElement, { target: { value: 'judgement' } });
-    expect(window.location.search).toBe('?state=blocked&q=dep&tier=judgement');
-    expect(await screen.findByText('No ticket matches this view.')).toBeDefined();
-    expect(calls.map((c) => c.path)).toContain(`${LIST}?state=blocked&q=dep&tier=judgement`);
+    expect(calls.map((c) => c.path)).toContain(`${LIST}?state=blocked&q=dep`);
     expect((screen.getByRole('searchbox', { name: 'Filter by id or title' }) as HTMLInputElement).value).toBe('dep');
   });
 
   it('opens on the view its URL names, and follows the cursor on load-more', async () => {
     const { calls } = serve({
-      [`${LIST}?state=ready&q=x&tier=critical`]: { tickets: [ROWS[0]], counts: COUNTS, matched: 2, next_cursor: 'c.1' },
-      [`${LIST}?state=ready&q=x&tier=critical&cursor=c.1`]: { tickets: [ROWS[1]], counts: COUNTS, matched: 2 },
+      [`${LIST}?state=ready&q=x`]: { tickets: [ROWS[0]], counts: COUNTS, matched: 2, next_cursor: 'c.1' },
+      [`${LIST}?state=ready&q=x&cursor=c.1`]: { tickets: [ROWS[1]], counts: COUNTS, matched: 2 },
     });
-    renderApp('/repositories/docs/tickets?state=ready&q=x&tier=critical');
+    renderApp('/repositories/docs/tickets?state=ready&q=x');
     expect(await screen.findByText('Showing 1 of 2')).toBeDefined();
     expect((screen.getByRole('searchbox', { name: 'Filter by id or title' }) as HTMLInputElement).value).toBe('x');
-    expect((document.querySelector('.tk-tier select') as HTMLSelectElement).value).toBe('critical');
     expect(screen.getByRole('tab', { name: /^Ready/ }).getAttribute('aria-selected')).toBe('true');
     fireEvent.click(screen.getByRole('button', { name: 'Load more' }));
     expect(await screen.findByText('Showing 2 of 2')).toBeDefined();
     expect(screen.queryByRole('button', { name: 'Load more' })).toBeNull();
-    expect(calls.some((c) => c.path === `${LIST}?state=ready&q=x&tier=critical&cursor=c.1`)).toBe(true);
+    expect(calls.some((c) => c.path === `${LIST}?state=ready&q=x&cursor=c.1`)).toBe(true);
     // No second read beyond the list (and the shell's two).
     expect([...new Set(calls.map((c) => c.path.split('?')[0]))].sort()).toEqual(['/v1/actions', '/v1/repositories', LIST]);
   });
@@ -170,7 +165,7 @@ describe('the Tickets table (B-209 item 2)', () => {
 describe('the Board (B-209 item 1)', () => {
   const ready = [ROWS[0], ROWS[1]];
   const running = [ROWS[3], row('QUIET', 'running', { detail: { claim_id: 8, runner_id: 2, hostname: 'host-two', session_name: 'host-two', leg: 'leg-c', since: NOW - 600_000, lease_ends_at: NOW + 300_000, alive: true, stalled: false, condition_wait: null } })];
-  const board = (over: object = {}) => ({ ready_by_tier: { routine: ['docs:READY'], judgement: ['docs:READY'], critical: ['docs:READY', 'docs:STUCK'] }, granted_capabilities: null, ...over });
+  const board = (over: object = {}) => ({ granted_capabilities: null, ...over });
   const serveBoard = (routes: Record<string, Route> = {}) => serve({
     '/v1/repositories/docs/board': board(),
     [`${LIST}?state=ready`]: { tickets: ready, counts: COUNTS, matched: 2 },
@@ -187,8 +182,7 @@ describe('the Board (B-209 item 1)', () => {
     expect(within(first).getByRole('link', { name: /host-four/ }).getAttribute('href')).toBe('/repositories/docs/runners/4');
     expect(first.querySelector('[data-label="Requires"]')!.textContent).toBe('cap-a');
     const stuck = table.querySelectorAll('tbody tr')[1] as HTMLElement;
-    expect(stuck.querySelector('[data-label="Who can take it"]')!.textContent).toBe('▲nobody can take it — above-tier-ceiling');
-    expect(document.querySelector('.bd-tiers')!.textContent).toBe('Ready under each tier ceiling: routine 1 · judgement 1 · critical 2');
+    expect(stuck.querySelector('[data-label="Who can take it"]')!.textContent).toBe('▲nobody can take it — missing-capability');
     // No control on the Board.
     expect(document.querySelector('.controls')).toBeNull();
     expect(screen.getByText(/names a grant’s capabilities to the granted runner’s own key/)).toBeDefined();

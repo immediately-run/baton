@@ -150,7 +150,7 @@ const scalar = (v: string): string => {
 /** The request ticket's file (§2f): the sentence as title and description, the course, `available`,
  *  `tags: [request]`; the body names the course and the command that filed it, and its `## Status`
  *  the `_filed` day. */
-export function requestFile(id: string, course: string, sentence: string, tier?: string, date = today()): string {
+export function requestFile(id: string, course: string, sentence: string, date = today()): string {
   return [
     '---',
     `title: ${scalar(`${id} — ${sentence}`)}`,
@@ -159,7 +159,6 @@ export function requestFile(id: string, course: string, sentence: string, tier?:
     `updated: ${date}`,
     'tags:',
     '  - request',
-    ...(tier ? [`tier: ${scalar(tier)}`] : []),
     `course: ${scalar(course)}`,
     `description: ${scalar(sentence)}`,
     'owns: {}',
@@ -279,7 +278,6 @@ export interface RequestOptions {
   branch?: string;
   /** The remote name (`origin`), or its path. */
   remote?: string;
-  tier?: string;
   /** B-174: the forge whose adapter decides the protected-branch fallback (R-BTN-131) — the
    *  `--forge` flag. Unset, the origin's host decides (`github` on github.com; else none). */
   forge?: string;
@@ -334,7 +332,7 @@ export async function fileRequest(plan: RequestPlan, opts: RequestOptions = {}):
       const id = opts.allocated?.startsWith(`${atHead.prefix}-`)
         ? opts.allocated
         : nextId(dir, atHead.items, atHead.prefix, openRequestNumbers(dir, remote, atHead.items, `${atHead.prefix}-`, git(dir, 'rev-parse', 'HEAD'), warn));
-      const text = requestFile(id, atHead.course, plan.sentence, opts.tier, opts.date);
+      const text = requestFile(id, atHead.course, plan.sentence, opts.date);
       const message = requestMessage(id, plan.course, plan.sentence);
       const file = join(dir, atHead.items, `${id}.mdx`);
       mkdirSync(dirname(file), { recursive: true });
@@ -410,7 +408,7 @@ async function fileOnRequestBranch(
     git(dir, 'reset', '-q', '--hard', 'HEAD~1');
     const moved = join(dir, atHead.items, `${taken}.mdx`);
     mkdirSync(dirname(moved), { recursive: true });
-    writeFileSync(moved, requestFile(taken, atHead.course, plan.sentence, opts.tier, opts.date));
+    writeFileSync(moved, requestFile(taken, atHead.course, plan.sentence, opts.date));
     git(dir, 'add', '--', `${atHead.items}/${taken}.mdx`);
     git(dir, 'commit', '-q', '-m', requestCommitMessage(requestMessage(taken, plan.course, plan.sentence), opts.env));
   }
@@ -425,7 +423,7 @@ async function fileOnRequestBranch(
   }
   const filed: Filed = {
     id: taken,
-    text: requestFile(taken, atHead.course, plan.sentence, opts.tier, opts.date),
+    text: requestFile(taken, atHead.course, plan.sentence, opts.date),
     message: requestMessage(taken, plan.course, plan.sentence),
     course: atHead.course,
     start: atHead.start,
@@ -470,7 +468,7 @@ const topOf = (root: string): string | null => {
 };
 
 /**
- * `baton request "<one sentence>" --course <course> [--repo DIR] [--tier T] [--branch B]
+ * `baton request "<one sentence>" --course <course> [--repo DIR] [--branch B]
  * [--remote R] [--forge github|gitlab|gitea|git] [-i KEY] [--url URL] [--offline]` (B-98, B-174,
  * B-176): files ONE request ticket on a course that opts in, as one commit pushed straight to the
  * repository's default branch — the push triggers the sync, the board places the ticket, the next
@@ -494,7 +492,6 @@ export async function requestMain(
   const warn = io.warn ?? ((l: string) => process.stderr.write(`${l}\n`));
   let root = io.root ?? process.env.BATON_HOME ?? process.cwd();
   let course: string | undefined;
-  let tier: string | undefined;
   let branch: string | undefined;
   let remote: string | undefined;
   let forge: string | undefined;
@@ -513,7 +510,7 @@ export async function requestMain(
       break;
     }
     if (a === '--help' || a === '-h') {
-      log('baton request "<one sentence>" --course <id> [--repo DIR] [--tier T] [--branch B] [--remote R] [--forge github|gitlab|gitea|git] [-i KEY] [--url URL] [--offline]');
+      log('baton request "<one sentence>" --course <id> [--repo DIR] [--branch B] [--remote R] [--forge github|gitlab|gitea|git] [-i KEY] [--url URL] [--offline]');
       log('  files one request ticket on a course whose course.json says starts_from: request, commits');
       log('  it to the default branch and pushes it: the push starts the sync, the board places the');
       log('  ticket, the next claim starts the course. -- ends the flags: a sentence may start with -.');
@@ -528,7 +525,6 @@ export async function requestMain(
     }
     if (a === '--course') course = value();
     else if (a === '--repo') root = value();
-    else if (a === '--tier') tier = value();
     else if (a === '--branch') branch = value();
     else if (a === '--remote') remote = value();
     else if (a === '--forge') forge = value();
@@ -587,7 +583,6 @@ export async function requestMain(
       ...(branch ? { branch } : {}),
       ...(remote ? { remote } : {}),
       ...(forge ? { forge } : {}),
-      ...(tier ? { tier } : {}),
       ...(io.date ? { date: io.date } : {}),
       ...(io.env ? { env: io.env } : {}),
       ...(io.fetchImpl ? { fetchImpl: io.fetchImpl } : {}),

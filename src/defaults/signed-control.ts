@@ -54,8 +54,7 @@ export const CONTROL_GROUP_NAMES = Object.keys(CONTROL_GROUPS) as ControlGroup[]
  *  and everything a privileged interactive session loads or executes (security model reach 1;
  *  OWASP ASI05). The ticket frontmatter field `EXPEDITE` is watched as a field, not a path. A
  *  broader list — workflows, dependency manifests, more frontmatter — is B-126's detection
- *  watch; this is the gate's, deliberately narrower (a ticket's `tier` routes no new credentials
- *  and is not one, the owner 2026-10-27). */
+ *  watch; this is the gate's deliberately narrower list. */
 export const SIGNED_CONTROL_PATTERNS = [
   '.baton/**',
   '**/goals/**',

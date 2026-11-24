@@ -109,7 +109,6 @@ export function RunnerCard({ repository, row, now, heading, notBuilt }: { reposi
   const mark = MARK[state];
   const page = pathOrNull('repository/runners/{runner}', { repository, runner: String(row.runner_id) });
   const name = <><Text value={row.hostname} /> / <Text value={row.session_name} /></>;
-  const ceilings = Object.entries(row.tier_ceilings ?? {});
   const idle = state === 'idle';
   // Controls: the registry's entries for the runner's screen; Stop only where a claim is held.
   const target: Record<string, unknown> = { repository, to_runner_id: row.runner_id, ...(row.claim ? { ticket_id: row.claim.ticket_id, reason: 'requested' } : {}) };
@@ -122,7 +121,6 @@ export function RunnerCard({ repository, row, now, heading, notBuilt }: { reposi
     >
       <p className="runner-line">
         <Text mono value={row.harness} /> · <Text mono value={row.kind} /> · <Text mono value={row.isolation} />
-        {ceilings.length ? <> · ceiling {ceilings.map(([repo, tier], i) => <span key={repo}>{i ? ', ' : ''}<Text mono value={tier} /> on <Text mono value={repo} /></span>)}</> : null}
         {' '}· last seen <RelTime at={row.last_seen_at} />
         {row.last_report ? <> · last report <RelTime at={row.last_report.sent_at} /></> : null}
       </p>

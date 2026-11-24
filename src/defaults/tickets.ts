@@ -505,7 +505,6 @@ export function courseStart(root: string, id: string): string | null {
 export interface NewTicket {
   title: string;
   description?: string;
-  tier?: string;
   order?: number;
   repos?: string[];
   tags?: string[];
@@ -828,7 +827,6 @@ function ticketText(o: { id: string; title: string; project: string; settings: T
     'tags:',
     ...tags.map((x) => `  - ${scalar(x)}`),
     ...(t.order != null ? [`order: ${t.order}`] : []),
-    ...(t.tier ? [`tier: ${scalar(t.tier)}`] : []),
     ...(t.course ? [`course: ${scalar(t.course)}`] : []),
     `description: ${scalar(description)}`,
     'topics:',
@@ -1085,7 +1083,7 @@ function gitStderr(e: unknown): string {
 export function ticketsHelp(): string[] {
   return [
     'baton tickets new --title T [--description D] [--project ID] [--depends-on A,B] [--tags X,Y]',
-    '                   [--tier T] [--order N] [--repos a,b] [--course C] [--body-file F]',
+    '                   [--order N] [--repos a,b] [--course C] [--body-file F]',
     '                   [--trust T] [--invariants I] [--direct] [-i KEY] [--url URL] [--offline]',
     'baton tickets next <kind> [--for <ticket>] [-i KEY] [--url URL] [--remote R] [--offline]',
     '                   rule | scenario | gate | migration | ticket[-<prefix>]: the next number of',
@@ -1182,7 +1180,7 @@ export async function ticketsMain(argv: string[], io: TicketsIo = {}): Promise<n
   if (command === 'next') return nextMain(rest, io);
   const COMMON = ['repo', 'branch', 'remote'];
   const allowed: Record<string, string[]> = {
-    new: ['title', 'description', 'project', 'depends-on', 'tags', 'tier', 'order', 'repos', 'course', 'body-file', 'trust', 'invariants', 'direct', 'url', 'offline', ...COMMON],
+    new: ['title', 'description', 'project', 'depends-on', 'tags', 'order', 'repos', 'course', 'body-file', 'trust', 'invariants', 'direct', 'url', 'offline', ...COMMON],
     claim: ['url', 'offline', 'rules-reread', ...COMMON],
     set: ['url', 'offline', 'pr', 'note', 'rules-reread', ...COMMON],
     done: ['url', 'offline', 'pr', ...COMMON],
@@ -1228,7 +1226,6 @@ export async function ticketsMain(argv: string[], io: TicketsIo = {}): Promise<n
     const id = await newTicket(root, at, {
       title: flags.title ?? '',
       ...(flags.description != null ? { description: flags.description } : {}),
-      ...(flags.tier ? { tier: flags.tier } : {}),
       ...(order != null ? { order } : {}),
       ...(flags.repos ? { repos: flags.repos.split(',').map((r) => r.trim()).filter(Boolean) } : {}),
       ...(tags ? { tags } : {}),

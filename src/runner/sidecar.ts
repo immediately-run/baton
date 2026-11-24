@@ -30,7 +30,7 @@ export function declarationFrom(held: string[]): string[] {
 }
 
 type SidecarOptions = Pick<RunnerOptions, 'api' | 'apiFor' | 'stateFile' | 'hostname' | 'session' |
-  'harness' | 'capabilities' | 'tierCeiling' | 'profile' | 'testHarness' | 'courses' | 'readCourses' | 'repository' | 'legNeeds'> & {
+  'harness' | 'capabilities' | 'profile' | 'testHarness' | 'courses' | 'readCourses' | 'repository' | 'legNeeds'> & {
   beatEvery: number;
   concurrency: number;
   now: () => number;
@@ -240,7 +240,7 @@ export class Sidecar {
     const courses = this.courses();
     const body: Record<string, unknown> = {
       hostname: this.o.hostname, session_name: this.o.session, harness: this.o.harness, kind: 'vm',
-      capabilities: declaring, tier_ceiling: this.o.tierCeiling ?? 'critical',
+      capabilities: declaring,
       // B-253 (R-BTN-72): the runner's own statement about itself, opaque — the CLI's pinning
       // under `cli`, on every beat.
       ...(this.o.profile ? { profile: this.o.profile } : {}),

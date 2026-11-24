@@ -16,13 +16,13 @@ describe('parseFrontmatter', () => {
 });
 
 describe('ticketsMarkdown', () => {
-  it('reads every field: course default and override, tier, requires, tags, order, prs, parent, not_before', () => {
+  it('reads every field: course default and override, requires, tags, order, prs, parent, not_before', () => {
     const { tickets, closed } = ticketsMarkdown([
-      file('one.md', 'id: T-1\ntitle: One\ntier: routine\nrequires: [agent-venue]\norder: 2\ntags: [EXPEDITE]\nprs: [7]\nparent: T-0\nnot_before: 1792152000000\nmystery: ignored'),
+      file('one.md', 'id: T-1\ntitle: One\nrequires: [agent-venue]\norder: 2\ntags: [EXPEDITE]\nprs: [7]\nparent: T-0\nnot_before: 1792152000000\nmystery: ignored'),
       file('two.md', 'id: T-2\ncourse: ops'),
     ], { items: 'wiki', default_course: 'pr', repos: { docs: 'immediately-run/docs' } });
     expect(closed).toEqual([]);
-    expect(tickets[0]).toMatchObject({ id: 'T-1', course_id: 'pr', path: 'wiki/one.md', title: 'One', tier: 'routine', requires: ['agent-venue'], expedite: true, operator_only: false, rank: 2, course: { prs: ['7'] }, parent: 'T-0', not_before: '1792152000000' });
+    expect(tickets[0]).toMatchObject({ id: 'T-1', course_id: 'pr', path: 'wiki/one.md', title: 'One', requires: ['agent-venue'], expedite: true, operator_only: false, rank: 2, course: { prs: ['7'] }, parent: 'T-0', not_before: '1792152000000' });
     expect(tickets[1]).toMatchObject({ id: 'T-2', course_id: 'ops', rank: null });
     expect('mystery' in (tickets[0] as unknown as Record<string, unknown>)).toBe(false); // unknown fields ignored
   });
