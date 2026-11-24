@@ -179,7 +179,9 @@ Designs for this section that are not built are on the proposal page
   - **Baton's traversal record counts.** A ticket's runs of each leg and arrivals at each
     station are counted from Baton's own record, under resolved names (R-BTN-64). `max_runs`,
     attempts and retries (R-BTN-122) read these counts, so rewriting a ticket's history in git
-    changes neither its position nor its counts. `max_runs` bounds the runs made without a
+    changes neither its position nor its counts. The `advance` that starts a run also answers
+    its number, `run`: the ticket's runs of that leg, this one included, as `max_runs` counts
+    them; the holder hands it to the leg rather than counting them itself. `max_runs` bounds the runs made without a
     person: a person leg's answer (R-BTN-116), an owner's route or an adopt restarts the count
     of the leg it queues. The traversal record itself is never erased.
   - The holder pushes a leg's evidence before the `advance` that finishes it, and may pass

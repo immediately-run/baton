@@ -20,11 +20,11 @@ depends_on: []
 
 **Found by:** the supervising session, 2026-11-24, on B-324 and B-322 (both ended `suspended:reviewed`, next `adjudicate`, after their second review round while Baton's history records review run 2 of 8). A defect report, not an owner brief.
 
-**Spec:** `spec/BATON_SPEC.md` §5.3 R-BTN-63 (Baton's traversal record counts; `max_runs` reads those counts), §14 (the advance reply), S-BTN-204.
+**Spec:** [BATON_SPEC §5.3](../spec/BATON_SPEC/05-courses.md#sec-5-3) [R-BTN-63](../spec/BATON_SPEC/05-courses.md#sec-5-3) (Baton's traversal record counts; `max_runs` reads those counts), [§14](../spec/BATON_SPEC/14-api.md#sec-14) (the advance reply), [S-BTN-204](../spec/BATON_SPEC/15-verification.md#scenarios).
 
 **Depends on:** none.
 
-**Related:** the review stub's bound read from the course file (filed 2026-11-24 as the ticket after B-323); together they let a create-pr ticket use the rounds its course grants.
+**Related:** B-324 (the review stub's bound read from the course file); together they let a create-pr ticket use the rounds its course grants.
 
 ### What is wrong
 
@@ -38,7 +38,7 @@ The root cause is two homes for one count. Baton already counts a ticket's runs 
 
 1. **The advance reply names the run's number.** The advance that starts a run answers `run`: the ticket's runs of that leg counted as the `max_runs` check counts them, this run included. The runner uses it for `ctx.run`.
 2. **The runner's fallback counts once.** Against a server that does not send `run`, the runner counts `gitPath` alone (it already holds this claim's finished legs), never `gitPath` plus the claim's own legs. A reattached leg keeps its persisted `ctx.run` as today.
-3. **Tests.** A claim that runs review → fix → run-tests → review hands the second review `ctx.run` 2, from the reply and from the fallback; the reply's `run` equals the history row's `run` for the same leg.
+3. **Tests.** A claim whose review rounds alternate with fixes hands them `ctx.run` 1, 2, 3, from the reply and from the fallback; the reply's `run` is the count the `max_runs` refusal reads, and a run an earlier claim abandoned is not one of them (as for `max_runs`; the history row's `run` still counts every row).
 
 ### Exit criteria
 
