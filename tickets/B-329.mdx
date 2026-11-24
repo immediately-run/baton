@@ -1,0 +1,90 @@
+---
+title: "B-329 — OP applies only to a course's operator legs: ticket requirements scoped to legs, operator_legs in the course file, and create-pr's review back to agents"
+id: B-329
+project: operator-work
+status: available
+updated: 2026-11-24
+repos:
+  - baton
+tags:
+  - roadmap-item
+description: "Today the ticket's requires clause joins every leg, so an OP ticket on create-pr needs a human-operator runner for review, merge and confirm too. Accept a posted requirement scoped to legs (ticket_requires.leg); add the course key operator_legs (defaulting per B-327); have the markdown source scope OP to it; set create-pr's to implement and fix. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-327
+---
+
+**Brief:** the owner, 2026-11-24 (the `operator-work` project's brief): a person works the operator
+leg of an operator ticket. Today `OP` also puts the person on the ticket's review, merge and
+confirm.
+
+**Spec:** [the operator-work proposal §3](../spec/proposals/operator-work.md#3-operator-legs-op-scoped-to-the-legs-a-person-works),
+as B-327 places it in [R-BTN-120](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-1),
+[R-BTN-69](../spec/BATON_SPEC/05-courses.md#sec-5-2) and the standard courses
+([§5.8](../spec/BATON_SPEC/05-courses.md#sec-5-8)); R-BTN-74 (the markdown source).
+
+**Depends on:** B-327.
+
+**Used by:** B-330.
+
+### Requires
+
+None.
+
+### What to build
+
+1. **The board post.** A ticket's `requires` entry may be `{capability, legs: [<leg>…]}` as well
+   as a plain name. The snapshot validator checks the shape (`src/core/board.ts`,
+   `src/core/validate.ts`).
+2. **Storage.** A new migration adds `ticket_requires.leg`, where NULL means every leg. A scoped
+   entry writes one row per leg.
+3. **Matching.** Rule 4 joins a leg only with the rows for that leg or NULL, in both mirrors: the
+   claim SQL in `src/core/claims.ts` and `isEligible` in the decision library (G-BTN-40). The
+   blocks writer (`src/core/blocks.ts`) blocks only those legs.
+4. **The course file.** Add `operator_legs`: a list of runner legs, defaulting as B-327 settles.
+   The validator (`src/core/course.ts`) refuses a person leg or an unknown leg (R-BTN-69).
+5. **The markdown source** (`src/defaults/tickets-markdown.ts`, `.baton/tickets.mjs` through
+   `npm run vendor` where vendored) posts `OP` as `human-operator` scoped to the course's
+   `operator_legs`. A frontmatter `requires: [human-operator]` stays unscoped.
+6. **The standard courses:** `create-pr`'s `operator_legs` are `[implement, fix]`, and
+   `review-pr`'s are its start leg. Regenerate `.baton/courses/*`.
+7. **The words.** `baton tickets --help`'s tag table and `HOW-TICKETS-WORK.md`'s `OP` line say
+   "the course's operator legs".
+
+### Trust
+
+- **Leg-scoped `requires` is written by the ticket source, as the unscoped clause is:** any pusher
+  writes it.
+- **Narrowing is a loosening.** A machine-key post that narrows a ticket's `human-operator` to
+  fewer legs is a loosening. `baton.machine-post` names it, where that notice is built; otherwise
+  this ticket says so in its PR.
+- **No new authority.** Who may run which leg is still what runners declare and grants admit.
+
+### Invariants
+
+- **G-BTN-40:** the SQL and the decision library match.
+- **R-BTN-121:** capabilities are compared as strings; scoping adds no expansion.
+- **Migrations are append-only.**
+- **R-BTN-31:** the behaviour change names its scenario.
+
+### Tests
+
+The scenario B-327 numbers:
+
+- an `OP` ticket on `create-pr`: `implement` is refused to an agent runner `missing-capability`;
+  `review` is claimed by one;
+- an unscoped `requires: [human-operator]` still holds every leg;
+- a course naming a person leg in `operator_legs` is refused.
+
+### Exit criteria
+
+- [ ] The scenario passes on both hosts, its trace replayed through the model (rule 4 changes).
+- [ ] `npm test` and `npm run typecheck` are green.
+- [ ] Merged under the review gate.
+
+## Status
+
+_filed 2026-11-24._

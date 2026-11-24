@@ -1,0 +1,95 @@
+---
+title: "B-333 — The dashboard's Operator and Order screens: the operator work with Work in my session and Start a sandboxed session, and the order's page that shows the session link the moment it exists"
+id: B-333
+project: operator-work
+status: available
+updated: 2026-11-24
+repos:
+  - baton
+tags:
+  - roadmap-item
+description: "Two screens. repository/operator draws GET …/operator-work, with a copyable take command and MCP line per row and the operator.order control where the entry is orderable. repository/orders/{order} draws order.show as the order moves: Open session once joinable, Cancel for the requester and owners, polled with the ETag. Both are drawn for an operator's session, and for owners' and administrators'. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-328
+  - B-332
+  - B-206
+  - B-207
+---
+
+**Brief:** the owner, 2026-11-24 (the `operator-work` project's brief): "sign in to Baton (via …
+web UI …) … triggering a sandboxed opencode leg which they immediately get a link to".
+
+**Spec:** [the operator-work proposal §7](../spec/proposals/operator-work.md#7-what-the-dashboard-draws),
+as B-327 places it; [R-BTN-155](../spec/BATON_SPEC/11-people.md#sec-11-4) (screens),
+[R-BTN-129](../spec/BATON_SPEC/11-people.md#sec-11-3) (`ui.view`);
+`docs/context/ux.mdx` and `docs/context/design-brief.mdx`.
+
+**Depends on:**
+
+- B-328 (the operator session);
+- B-332 (the order routes);
+- B-206 and B-207 (baton-ui-v2's shell, its controls and dialogs).
+
+**Used by:** none.
+
+### Requires
+
+None. The UI tests run in `test/ui/`.
+
+### What to build
+
+1. **Operator** (`repository/operator`, `/repositories/{repository}/operator`), added to
+   `src/core/screens.ts` for the roles `operator`, `owner` and `administrator`. It draws
+   `operator.work`.
+   - **Each row:** the ticket, its title, the leg, how long it has waited, and its deadline.
+   - **Work in my session:** shows `baton operator take <repository>:<ticket>` and the line to give
+     an agent running `baton mcp operator`, each copyable.
+   - **Start a sandboxed session:** the `operator.order` control, which B-207 builds from the
+     registry entry, drawn only where the entry is `orderable`. On success it navigates to the
+     order's page.
+   - **A toggle** for `?blocked=1`, which shows each blocked row's blocks.
+2. **Order** (`repository/orders/{order}`). It draws `order.show`: the state as it moves (waiting
+   for a launcher, starting on runner `<host>`, joinable, closed with its outcome), the requester
+   and the ticket.
+   - **Once joinable:** **Open session** links to `session_url` in a new tab, with the attach hint
+     beside it.
+   - **Cancel:** the `order.cancel` control, for the requester and owners.
+   - **Polling:** with the read's ETag (B-205) while the order is open.
+3. **Navigation.** The repository's nav lists Operator for an operator's session. An operator
+   session opens on it.
+
+### Trust
+
+- **What it draws is read text.** Every value is a text node, never markup (§12.3).
+- **The session link is drawn only when `order.show` answers it.** The screen never builds one,
+  and never puts it in the URL or a log.
+
+### Invariants
+
+- **R-BTN-129:** the controls come from the registry's `ui.view`, and no screen carries a rule of
+  its own.
+- **§12.3:** text, never markup.
+- **`docs/context/ux.mdx`'s rules:** a person sees what they can take, and the link the moment it
+  exists, in a few clicks.
+
+### Tests
+
+- **Operator, for an operator's session:** the rows, the take command, and the order control only
+  on an orderable row.
+- **Order:** it moves from waiting to joinable and shows Open session; the link is absent for
+  another operator's session; cancel is drawn for the requester only.
+
+### Exit criteria
+
+- [ ] The UI tests pass.
+- [ ] Screenshots of both screens, light and dark, are in the PR.
+- [ ] `npm test` and `npm run typecheck` are green.
+- [ ] Merged under the review gate.
+
+## Status
+
+_filed 2026-11-24._

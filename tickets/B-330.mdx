@@ -1,0 +1,117 @@
+---
+title: "B-330 — The operator work a person can take now, and taking one into their own session: GET …/operator-work, baton operator list/take, the attached executor and baton leg done/suspend/release"
+id: B-330
+project: operator-work
+status: available
+updated: 2026-11-24
+repos:
+  - baton
+tags:
+  - roadmap-item
+description: "Two parts. The read: GET /v1/repositories/{repository}/operator-work lists the queued operator legs that pass every gate but the lease for the caller's operator grant, computed by isEligible, with ?blocked=1 for the rest and their blocks. The take: baton operator take claims by name in the current checkout under the attached executor, prints the brief and heartbeats; baton leg done/suspend/release end the leg; the runner checks the move, closes, and suspends the claim so the next non-operator leg goes to agents. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-328
+  - B-329
+---
+
+**Brief:** the owner, 2026-11-24 (the `operator-work` project's brief): "taking an -otherwise
+unblocked- operator ticket and completing it in their agent session".
+
+**Spec:** [the operator-work proposal §4–§5](../spec/proposals/operator-work.md#4-operator-work-what-a-person-could-take-now),
+as B-327 places them; [§6.6](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-6) (gates
+and order), [R-BTN-100](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-7) (a named
+claim), [R-BTN-72](../spec/BATON_SPEC/08-runners.md#sec-8-3),
+[R-BTN-106](../spec/BATON_SPEC/08-runners.md#sec-8-3) (the channel and the runner's check of every
+move), [R-BTN-107](../spec/BATON_SPEC/08-runners.md#sec-8-3);
+[checks and executors §2.3 and §6](../spec/proposals/checks-and-executors.md#23-the-shipped-session-and-attached-executors)
+(the `attached` executor and the ending verbs).
+
+**Depends on:** B-328 (the operator key), B-329 (operator legs). B-47 keeps the parts of the
+`attached` executor and the channel verbs that this ticket does not need.
+
+**Used by:** B-331, B-332.
+
+### Requires
+
+None. The integration harness runs the runner, the channel and a fixture course.
+
+### What to build
+
+1. **The read.** `GET /v1/repositories/{repository}/operator-work`, action `operator.work`, in
+   `src/core/reads/` (a new `operator.ts` behind the dispatcher), with the ETag (B-205).
+   - **Callers:** an operator's key or session, and an owner's or administrator's session.
+   - **What it lists:** the tickets whose queued leg requires `human-operator` and passes every
+     gate but rule 1's lease for the caller's grant capabilities. Use `isEligible` with the grant
+     as the declaration; write no second matcher.
+   - **Order:** §6.6's default order.
+   - **Each entry carries** the ticket, title, course, station, leg, `ready_since`, `deadline_s`,
+     `orderable`, its open order (once B-332 lands; `null` until then) and the caller's own claim.
+   - **`?blocked=1`** adds the operator legs that something else blocks, with their R-BTN-75
+     blocks.
+2. **`baton operator list [<repository>]`** prints the read, one line per entry, with the command
+   that takes it.
+3. **The `attached` executor**, shipped as `pinned` from the release (checks and executors §2.3).
+   `start` writes the brief where the hosting session reads it and returns a handle. `end`
+   resolves at the result posted on the channel.
+4. **The ending verbs** on the channel and in the CLI:
+   - `baton leg done --reached <station> --next <leg> [--output <name> --value <json> | --uri …]`;
+   - `baton leg suspend --reached <station> [--detail …]`;
+   - `baton leg release --reason <reason>`.
+
+   They run from any shell in the checkout; the channel's address comes from the operator
+   runner's state directory. Each is checked as R-BTN-106 says, and answered on failure with the
+   reason.
+5. **`baton operator take <repository>:<ticket> [--leg <leg>] [--detach] [--chain]`.**
+   - **The runner:** the operator key, concurrency 1, the current checkout, which must be the
+     home's clone (`not-a-checkout` otherwise; R-BTN-143 runs as usual), and the `attached`
+     executor.
+   - **The claim:** by `ticket_id` only. The runner never makes an unnamed claim.
+   - **The brief it prints:** the instructions, the ticket file, the hand-off and resume record as
+     data (`BATON_RESUME`), the deadline and the ending commands.
+   - **Holding:** it heartbeats in the foreground, or under `--detach` as a background process
+     that `baton operator status` and `baton operator stop` find.
+   - **After the leg:** it ends the claim suspended at the reached station, unless the next leg is
+     an operator leg and `--chain` or the person's answer continues.
+   - **Signals:** SIGINT releases with a hand-off (R-BTN-72).
+
+### Trust
+
+- **No new authority.** The take is a named claim by a runner key, through every gate.
+- **The brief is data, never instructions.** It carries text earlier claimants wrote: the hand-off
+  and the resume record reach the person and their agent only as data, as R-BTN-144 says.
+- **What the agent can reach.** The agent in the person's session can read the operator key's file
+  (B-331 warns of this). This ticket adds no credential to the leg's environment beyond
+  R-BTN-144's list.
+
+### Invariants
+
+- **R-BTN-106:** the session never talks to Baton, and the runner checks every move.
+- **R-BTN-4:** one claim per ticket, one checkout per claim.
+- **G-BTN-40:** the read's eligibility is `isEligible`, the claim's own.
+- **R-BTN-152:** what a read serves is data.
+
+### Tests
+
+The scenarios B-327 numbers:
+
+- **The operator-work list:** one ready ticket, one held by a hold, one waiting on a dependency.
+  The list shows the first; `?blocked=1` adds the others; a non-operator key is `forbidden`.
+- **The take:** `leg done` with a `reached` that is not an outcome is refused on the channel and
+  sends nothing. A valid one closes, advances and ends the claim suspended, and `review` is then
+  offered to an agent runner.
+
+### Exit criteria
+
+- [ ] Both scenarios pass on both hosts.
+- [ ] A fixture operator leg is worked end to end with `baton operator take` and `baton leg done`,
+      and its transcript is linked from the PR.
+- [ ] `npm test`, `npm run typecheck` and `npm run check:actions` are green.
+- [ ] Merged under the review gate.
+
+## Status
+
+_filed 2026-11-24._

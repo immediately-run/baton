@@ -1,0 +1,107 @@
+---
+title: "B-328 — Operators: owners name a person on a repository, the person gets a runner key by token or by their own key, every runner and claim of it names them, and they sign in to the dashboard as an operator"
+id: B-328
+project: operator-work
+status: available
+updated: 2026-11-24
+repos:
+  - baton
+tags:
+  - roadmap-item
+description: "Build the operator principal of B-327's amendment. It covers: repository_operators and baton owner operator add/remove; the operator grant mark with human-operator and max_claims 1 by default; operator registration tokens and baton operator login; operated_by on runners and claims; and the operator session role through the code flow or Cloudflare Access. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-327
+  - B-76
+---
+
+**Brief:** the owner, 2026-11-24 (the `operator-work` project's brief): "It should be possible for
+a user to sign in to Baton (via CLI, web UI or MCP) for interactive operator work."
+
+**Spec:** [the operator-work proposal §1–§2](../spec/proposals/operator-work.md#1-operators-a-persons-own-runner-key),
+as B-327 places it (beside [R-BTN-58](../spec/BATON_SPEC/11-people.md#sec-11-2) and
+[R-BTN-155](../spec/BATON_SPEC/11-people.md#sec-11-4)); R-BTN-117 (registration tokens),
+[R-BTN-102](../spec/BATON_SPEC/08-runners.md#sec-8-2) (machine keys), R-BTN-129 (principals).
+
+**Depends on:** B-327 (the rules), B-76 (owners' code sign-in, whose flow the operator session
+reuses with the role `operator`).
+
+**Used by:** B-330, B-333.
+
+### Requires
+
+None. Cloudflare Access runs with the test key set already used by S-BTN-308.
+
+### What to build
+
+1. **Owners name operators.**
+   - `baton owner operator add <repository> <name> (--key <pubkey|fingerprint> | --token) [--email
+     <addr>] [--capabilities …] [--max-claims n]`, and `remove` and `list`.
+   - Through `src/core/admin.ts`'s one validated path (R-BTN-58), behind the registry actions
+     `owner.operator.add`, `owner.operator.remove` and `owner.operator.list`.
+   - A new migration adds `repository_operators`: the repository, the name, the key fingerprint,
+     the email's SHA-256, and when and by whom it was added.
+2. **The operator key.** Adding an operator by key registers the key as a runner credential, if it
+   is not one, under the hostname `op-<name>`. It writes a grant carrying `operator: <name>`,
+   `human-operator` plus the listed capabilities, and `max_claims` (default 1). `remove` revokes
+   the grant.
+3. **Tokens.** Build the slice of R-BTN-117's registration tokens the operator needs:
+   - `baton owner token create <repository> --operator <name>` mints a token;
+   - `baton operator login --token brt_…` generates an Ed25519 key in `~/.config/baton/operator/`
+     (mode 0600) and registers it inside the token's scope;
+   - one use by default.
+
+   `baton operator login --key <path>` checks an owner-added key against Baton. Both write
+   `~/.config/baton/operator.json`.
+4. **`operated_by`.** Runner rows and claims made by a key with an operator grant record the
+   name. The runners read (B-196), the ticket's history and Board show it.
+5. **The operator session.**
+   - `baton operator open` runs B-76's code flow with the role `operator`, confirmed with the
+     operator key.
+   - Cloudflare Access signs in an email whose hash an operator entry holds, as R-BTN-155's Access
+     sign-in does for an administrator.
+   - The session's role is `operator`: it reads what a key granted on the repository reads, and
+     takes only the operator actions the registry lists for it.
+
+### Trust
+
+- **Who writes an operator entry:** an owner's key or an owner's session (`approvers.members`,
+  R-BTN-188). No push, and no operator.
+- **What a token can make:** a key whose grant lies inside the token's scope (R-BTN-117), never
+  wider.
+- **The operator key is a runner credential.** It is never `human_only` (R-BTN-185) and never
+  `trusted-runner` (R-BTN-182), so it satisfies no human gate wherever an agent can read it.
+- **The email** is matched only against a verified Access assertion, and stored only as its hash.
+
+### Invariants
+
+- **R-BTN-102:** a machine key is never an owner or administrator key.
+- **R-BTN-155:** a session ends when its key loses the role; an operator session ends when the
+  operator entry or its grant goes.
+- **R-BTN-33:** no email is stored in the clear.
+- **Migrations are append-only.**
+
+### Tests
+
+The sign-in scenario B-327 numbers:
+
+- an operator added by token;
+- login generating the key;
+- a second use refused;
+- `operated_by` on the runner and its claim;
+- `remove` ending the operator's session and revoking the grant;
+- an Access sign-in for a listed email, and `not-bound` for any other;
+- an operator session refused every owner action.
+
+### Exit criteria
+
+- [ ] The scenario passes on both hosts.
+- [ ] `npm test`, `npm run typecheck` and `npm run check:actions` are green.
+- [ ] Merged under the review gate.
+
+## Status
+
+_filed 2026-11-24._

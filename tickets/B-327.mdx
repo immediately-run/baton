@@ -1,0 +1,104 @@
+---
+title: "B-327 — Operator work in the spec: operators, operator legs, the operator-work read, the operator runner and orders, numbered and placed"
+id: B-327
+project: operator-work
+status: available
+updated: 2026-11-24
+repos:
+  - baton
+tags:
+  - roadmap-item
+description: "Move spec/proposals/operator-work.md into the sections it extends (§5 operator_legs, §6.1 leg-scoped requires, §8.3 the operator runner and orders, §11 operators and the operator session, §13, §14), give each new rule an R-BTN id and each scenario an S-BTN id, settle the proposal's open decisions with the owner, and amend every rule it lists. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the owner, 2026-11-24 (the `operator-work` project's brief): a person signs in through
+the CLI, the dashboard or MCP, takes an otherwise-unblocked operator ticket, and either works it in
+their own agent session or has a sandboxed opencode leg started, whose link they get at once.
+
+**Spec:** [the operator-work proposal](../spec/proposals/operator-work.md), all of it, and every
+rule its [Amends](../spec/proposals/operator-work.md#amends) lists.
+
+**Depends on:** none.
+
+**Used by:** B-328, B-329.
+
+### Requires
+
+None. The work is spec text and the spec checks.
+
+### What to do
+
+1. **Settle the open decisions first.** The proposal's
+   [Open decisions](../spec/proposals/operator-work.md#open-decisions) are the owner's: the
+   default of `operator_legs`, order expiry, the Fieldhouse half and assignment. Put them to the
+   owner as one decision packet, recommendation first. Write the answers into the amendment, not
+   beside it.
+2. **Place each part in the section that owns it** (`docs/context/spec-writing.mdx`, one home per
+   statement):
+   - operators and the `operator` grant mark beside R-BTN-58 (§11.2);
+   - the operator's session beside R-BTN-155 (§11.4);
+   - the actions and CLI rows in R-BTN-129 and R-BTN-127 (§11.3);
+   - leg-scoped requirements in R-BTN-120 (§6.1);
+   - `operator_legs` in R-BTN-69 (§5.2) and the standard courses (§5.8);
+   - the operator runner beside R-BTN-72, and orders beside R-BTN-201 (§8.3);
+   - the tables in §13 and the routes in §14.
+
+   Parts not built at merge stay in the proposal, marked `(proposed)` as the other proposal pages
+   mark theirs.
+3. **Numbering.** Give each new rule the next free `R-BTN-n`, and each of the proposal's
+   scenarios the next free `S-BTN-n` with its `G-BTN` row where it tests a gate (§15).
+4. **Amend every rule the proposal lists, in place** — no "except" sentences (`npm run
+   check:spec`). Run `npm run spec:impact` on each id touched, and put the checklist in the PR
+   body.
+5. **The words.** Add `Operator`, `Operator leg` and `Order` to `docs/context/vocabulary.mdx`.
+   Add one line per decision to `spec/BATON_SPEC/91-decisions.md`, its rejected alternatives taken
+   from the proposal's
+   [Decisions taken here](../spec/proposals/operator-work.md#decisions-taken-here).
+6. **The ticket guide.** Change the `OP` line of `HOW-TICKETS-WORK.md` where `baton repo init`
+   writes it (`src/defaults/tickets-config.ts`), so `OP` names the course's operator legs.
+7. `npm run spec:index`.
+
+### Do not
+
+- Reopen R-BTN-201's decision that keeps launches out of Baton's outbox: an order is a record and
+  advice.
+- Make `human-operator` something Baton checks (values 12). The operator's name and the order are
+  recorded; nothing is gated on them.
+
+### Trust
+
+**New inputs, as the spec will state them:**
+
+- **Operator entries:** owners' keys only, under `approvers.members` (R-BTN-188).
+- **Orders:** an operator's key or session, bounded and expiring.
+- **A claim's `order`:** a runner's hint, stored and gating nothing.
+- **Leg-scoped `requires`:** the ticket source, which any pusher writes, as the unscoped clause
+  already is. Narrowing it is a loosening that `baton.machine-post` notices.
+
+### Invariants
+
+- **Values 12 / R-BTN-121:** `human-operator` stays a runner's statement that Baton matches and
+  never checks.
+- **R-BTN-201:** Baton reserves nothing for a launch and starts nothing.
+- **R-BTN-186:** no delegated key gains an action. The operator principal is a runner key or an
+  operator session, never a delegated key.
+- **B-312:** a session link is served only to the readers it names, extended by the order's
+  requester and nothing else.
+- **R-BTN-33:** no ticket body or note is stored. Operator emails are stored only as hashes.
+
+### Exit criteria
+
+- [ ] The owner's answers to the four open decisions are recorded in the PR and in the rules.
+- [ ] Every part of the proposal is either a numbered rule in its section or still in the
+      proposal, marked `(proposed)` with its ticket.
+- [ ] `npm run check:spec`, `npm run check:wiki` and `npm test` are green.
+- [ ] Merged under the review gate.
+
+## Status
+
+_filed 2026-11-24._

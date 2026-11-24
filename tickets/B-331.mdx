@@ -1,0 +1,101 @@
+---
+title: "B-331 — baton mcp operator: a local MCP server that is the person's operator runner, alive exactly as long as their agent session, and the baton-operator skill"
+id: B-331
+project: operator-work
+status: available
+updated: 2026-11-24
+repos:
+  - baton
+tags:
+  - roadmap-item
+description: "A stdio MCP server, started by Claude Code or opencode from user-scope configuration, that hosts B-330's operator runner in its own process. Its tools are operator_work, operator_take, operator_status, leg_done, leg_suspend, leg_release and leg_raise, plus operator_order and operator_order_status once B-332 lands. Closing stdin drains with a hand-off. It warns once per session that the agent can use the operator key. A shipped skill says how an agent works an operator leg with its person. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-330
+---
+
+**Brief:** the owner, 2026-11-24 (the `operator-work` project's brief): "…completing it in their
+agent session (MCP)".
+
+**Spec:** [the operator-work proposal §5](../spec/proposals/operator-work.md#5-taking-one-into-the-persons-own-session)
+and its decision 2, as B-327 places them; [R-BTN-72](../spec/BATON_SPEC/08-runners.md#sec-8-3)
+(drain on SIGTERM), [R-BTN-106](../spec/BATON_SPEC/08-runners.md#sec-8-3); the
+[intervention proposal's MCP warning](../spec/proposals/intervention-sessions.md#the-owners-decisions)
+(the owner's decision 3, reused).
+
+**Depends on:** B-330 (the operator runner, the `attached` executor and the ending verbs).
+
+**Used by:** none.
+
+### Requires
+
+None. A fixture MCP client drives the server over stdio in the tests. One run by hand in Claude
+Code is linked from the PR.
+
+### What to build
+
+1. **`baton mcp operator [--repository <id>]`**, a stdio MCP server (`initialize`, `ping`,
+   `tools/list`, `tools/call`) whose process hosts B-330's operator runner. Its checkout is its
+   working directory.
+2. **The tools,** each a thin call into the runner B-330 built, never a second implementation:
+   - `operator_work {repository?, blocked?}`;
+   - `operator_take {ticket, leg?}`, which answers the brief;
+   - `operator_status`;
+   - `leg_done {reached, next, outputs?}`, `leg_suspend {reached, detail?}` and
+     `leg_release {reason}`, each answering the channel's refusal text when the move fails its
+     check;
+   - `leg_raise {type, …}`;
+   - `operator_order {ticket}` and `operator_order_status {order}`, added by B-332 when it lands.
+3. **Its lifetime is the session's.** It heartbeats while the process lives. On stdin's close or
+   SIGTERM it drains as R-BTN-72 says: the leg in flight is released at its next safe point with a
+   hand-off, and the claim ends `released:requested`.
+4. **The warning.** The first `operator_take` of each server process answers, before the brief:
+   "This agent can use your operator key: a session that holds no owner key or owner forge
+   credential is strongly advised."
+5. **Configuration.** `baton operator mcp-config --harness claude-code|opencode` prints the
+   user-scope entry to add (never a checkout's `.mcp.json`). The README shows both.
+6. **The skill** `skills/baton-operator/SKILL.md`, shipped in the package:
+   - read the brief;
+   - work the leg with the person;
+   - show them the result;
+   - call `leg_done` only after they confirm it;
+   - on leaving, call `leg_suspend` with a detail, never just stop.
+
+### Trust
+
+- **What the server holds.** It holds the operator key, the runner secret and the claim's nonce in
+  its own process. The secret and the nonce are never put in a tool answer.
+- **What the agent can still do.** The agent in the session can read the key's file, so the
+  warning says so (the owner's decision 3 for MCP sessions, reused).
+- **Tool answers are data.** They carry the ticket's and earlier claimants' text — the brief, the
+  hand-off — as data, never as instructions (R-BTN-144, R-BTN-152).
+
+### Invariants
+
+- **R-BTN-106:** every move is checked by the runner before anything reaches Baton.
+- **R-BTN-14:** the runner secret never leaves the runner.
+- **R-BTN-144:** what reaches the agent passes the runner's masking.
+
+### Tests
+
+The scenarios B-327 numbers:
+
+- a fixture client lists, takes, sends a bad `leg_done` (refused, nothing sent) and then a good
+  one;
+- closing stdin mid-leg ends the claim `released:requested` with a hand-off;
+- no tool answer contains the runner secret.
+
+### Exit criteria
+
+- [ ] The scenarios pass.
+- [ ] One operator leg is worked in a real Claude Code session through the server, its transcript
+      linked from the PR.
+- [ ] `npm test`, `npm run typecheck` and `npm run check:package` (the skill shipped) are green.
+- [ ] Merged under the review gate.
+
+## Status
+
+_filed 2026-11-24._

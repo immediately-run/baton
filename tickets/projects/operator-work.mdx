@@ -1,0 +1,80 @@
+---
+title: OPERATOR-WORK — a person signs in, takes an operator leg, and works it in their own session or a sandboxed one
+id: operator-work
+status: active
+tags:
+  - project
+description: Operator tickets get a workflow. Owners name operators, each with their own runner key. A person signs in from the CLI, the dashboard or a local MCP server, sees the operator work that is otherwise unblocked, and takes one leg into their own agent session, or orders a sandboxed opencode session whose link they get at once. OP applies only to a course's operator legs.
+kind: project
+nav: Project
+order: 7
+---
+
+_Project entity, filed 2026-11-24 from the owner's request below. The design is
+[`spec/proposals/operator-work.md`](../../spec/proposals/operator-work.md); B-327 amends the spec
+from it, and the rest build it._
+
+**Brief:** the owner, 2026-11-24: "Baton is also missing a good workflow for operator tickets. It
+should be possible for a user to sign in to Baton (via CLI, web UI or MCP) for interactive operator
+work, taking an -otherwise unblocked- operator ticket and completing it in their agent session
+(MCP) or triggering a sandboxed opencode leg which they immediately get a link to so they can
+attach to the session and resolve the operator leg interactively."
+
+**Spec:** [the operator-work proposal](../../spec/proposals/operator-work.md);
+[BATON_SPEC §5.6](../../spec/BATON_SPEC/05-courses.md#sec-5-6) ([R-BTN-121](../../spec/BATON_SPEC/05-courses.md#sec-5-6), `human-operator`),
+[§6.1](../../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-1) ([R-BTN-120](../../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-1)),
+[§7.1](../../spec/BATON_SPEC/07-conditions.md#sec-7-1) ([R-BTN-195](../../spec/BATON_SPEC/07-conditions.md#sec-7-1), `interact`),
+[§8.3](../../spec/BATON_SPEC/08-runners.md#sec-8-3) ([R-BTN-201](../../spec/BATON_SPEC/08-runners.md#sec-8-3), the launcher),
+[§11](../../spec/BATON_SPEC/11-people.md) (keys, grants, sessions).
+
+**Status:** `active`. The tickets are filed and none is built.
+
+## What a person gets
+
+1. **Signing in.** An owner names them an operator, once. `baton operator login` gives them a key;
+   `baton operator open` or Cloudflare Access gives them the dashboard; `baton mcp operator` gives
+   their agent the same key.
+2. **The work.** One read lists the operator legs they could take now: unblocked except for
+   needing a person. The CLI, MCP and the dashboard all show it.
+3. **In their own session.** `operator_take` (MCP) or `baton operator take` (CLI) claims the
+   ticket by name and prints the leg's brief. They work the leg with their agent and finish with
+   `leg_done`; the runner checks the move. The next, non-operator leg goes back to agents.
+4. **In a sandbox.** **Start a sandboxed session** (or `baton operator order`) places an order. The
+   reply links at once to the order's page, which shows the opencode session's link as soon as a
+   launcher's runner starts it. They attach and work the leg there.
+
+## The tickets
+
+Each ticket names its dependencies in its frontmatter. The order of work:
+
+| Ticket | What | After |
+|---|---|---|
+| B-327 | the spec amendment: the proposal's parts moved into §5, §6, §8, §11, §13 and §14, each rule numbered, with its scenarios | — |
+| B-328 | operators: owners name them, operator keys and tokens, `operated_by`, `baton operator login`; the operator's dashboard session | B-327 |
+| B-329 | `OP` applies only to a course's `operator_legs`: leg-scoped ticket requirements | B-327 |
+| B-330 | the operator-work read and `baton operator list/take`, on the `attached` executor and the `baton leg done/suspend/release` verbs | B-328, B-329 |
+| B-331 | `baton mcp operator`: the local MCP server that is the runner, and the `baton-operator` skill | B-330 |
+| B-332 | operator orders: the route, the order's page and link, `launch-candidates`' orders, the claim's `order`, the ordered runner, and a reference launcher | B-330 |
+| B-333 | the dashboard's Operator and Order screens | B-328, B-332, and baton-ui-v2's shell (B-206, B-207) |
+
+## Outside this repository
+
+Fieldhouse's launcher serving orders, and its leg page (R-FH-80) as an order's link, are
+Fieldhouse's work (the proposal's open decision 3). Baton's reference launcher (B-332) covers
+deployments without one.
+
+## Related tickets
+
+- **B-34** (interactive legs launched for the assignee) and **B-117** (the spike on launched
+  sessions): the order is the launch path these name, started by a person rather than by the
+  runner. B-34's `confirmed_by` and assignee routing remain its own.
+- **B-116** (person legs worked in a person's own session): a person leg has no lease. This
+  project's operator legs are runner legs that a person works.
+- **B-47**: B-330 builds the slice of its `attached` executor and ending verbs that operator work
+  needs. B-47 keeps the rest.
+- **B-312** (session links carry a capability): B-332 widens who may read a link to an order's
+  requester.
+
+## Status
+
+_filed 2026-11-24._

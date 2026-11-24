@@ -1,0 +1,134 @@
+---
+title: "B-332 — Operator orders: a person asks for a sandboxed session on one operator leg, gets the order's link at once and the session's link when a launcher's runner starts it"
+id: B-332
+project: operator-work
+status: available
+updated: 2026-11-24
+repos:
+  - baton
+tags:
+  - roadmap-item
+description: "Build the parts of an operator order. The routes are POST, GET and DELETE …/orders. The order is stored in operator_orders with its states and its 15-minute expiry. launch-candidates lists open orders first, and a claim's order hint records the claim. The ordered runner claims only its ticket and runs one leg under a joinable executor. It reports its link at once and raises interact for the leg. The requester reads the link (B-312 widened). Also: baton operator order --wait and a reference launcher (baton launcher --orders --start). Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-330
+---
+
+**Brief:** the owner, 2026-11-24 (the `operator-work` project's brief): "…or triggering a
+sandboxed opencode leg which they immediately get a link to so they can attach to the session and
+resolve the operator leg interactively."
+
+**Spec:** [the operator-work proposal §6](../spec/proposals/operator-work.md#6-taking-one-into-a-sandboxed-session-orders),
+as B-327 places it; [R-BTN-201](../spec/BATON_SPEC/08-runners.md#sec-8-3) and
+[checks and executors §7](../spec/proposals/checks-and-executors.md#7-the-launcher-r-btn-201-proposed)
+(the launcher), [R-BTN-99](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-7)
+(`launch-candidates`), [R-BTN-100](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-7),
+[R-BTN-113](../spec/BATON_SPEC/08-runners.md#sec-8-3) (session links),
+[R-BTN-195](../spec/BATON_SPEC/07-conditions.md#sec-7-1) (`interact`); B-312.
+
+**Depends on:** B-330 (the operator principal's reads and the take). B-312 should land first, or
+alongside: this ticket widens its rule rather than inventing a second one.
+
+**Used by:** B-333.
+
+### Requires
+
+None. A fixture launcher and a fixture executor whose handle names a link stand in for the sandbox.
+No exit criterion needs Fieldhouse.
+
+### What to build
+
+1. **The routes, in `src/core/` with the registry entries:**
+   - `POST /v1/repositories/{repository}/orders {ticket, leg?}` (`operator.order`), with the
+     proposal's refusals;
+   - `GET …/orders/{order}` (`order.show`), with its ETag;
+   - `DELETE …/orders/{order}` (`order.cancel`).
+
+   The CLI is `baton operator order <ticket> [--wait]`, `baton operator orders` and
+   `baton operator cancel <order>`.
+2. **Storage.** A new migration adds `operator_orders`: id `ord_` plus a ULID, the repository, the
+   ticket, the leg, `requested_by`, `created_at`, `expires_at`, `claim_id`, `state` and `outcome`;
+   at most one open order per ticket and five per operator. It also adds `claims.order_id`.
+   - **The alarm** expires `waiting` orders.
+   - **The claim's own transactions** move an order: a claim naming it makes it `starting`; the
+     first stored `session_url` of its leg makes it `joinable`; the claim's end closes it with the
+     end's outcome.
+   - **Another claim** of the ticket closes it `taken`.
+3. **`launch-candidates`** (`src/core/runnerViews.ts`) lists open orders' legs first, each with
+   `order: {id, requested_by}`.
+4. **A claim's `order`** (`POST /v1/runner/claim`): stored when it names an open order of the
+   claimed ticket; otherwise dropped and logged `order-ignored`. It never refuses the claim.
+5. **The ordered runner.** `baton runner start --order <id>` (or `BATON_ORDER`) is the runner a
+   launcher starts. It:
+   - claims only the order's ticket;
+   - runs only its leg, under the host's executor;
+   - heartbeats at once when the executor's handle names the link;
+   - raises `interact` for the leg;
+   - ends its claim at the leg's end, and exits.
+6. **The link to the requester.** `order.show` answers `session_url` to the order's requester (key
+   or session) and to owners' and administrators' sessions; to every other reader it answers
+   `null` with `session_link: true`. This is B-312's rule with one more reader.
+7. **Cancel.** A waiting order closes `cancelled`. A claimed one also queues a `release` message to
+   its claim.
+8. **A reference launcher.** `baton launcher --orders --start '<command>'` polls
+   `launch-candidates` with its ETag and runs the command once per open order, with
+   `BATON_ORDER`, `BATON_TICKET` and `BATON_LEG` set. It keeps R-BTN-201's own record of the
+   starts it made, and holds no credential beyond its own key.
+9. **`baton operator order --wait`** prints the order's URL at once. It polls until `joinable`,
+   then prints the link and the attach hint: the executor's link as given; for a link to a bare
+   `opencode serve`, `opencode attach <url>`.
+
+### Not in this repository
+
+Fieldhouse's launcher serving orders, and its joinable opencode leg page (R-FH-80) as the
+executor's link, are Fieldhouse's work (the proposal's open decision 3). Say in the PR which FLDH
+ticket carries it, or that none is filed yet.
+
+### Trust
+
+- **An order is written by an operator principal.** It is bounded (one per ticket, five per
+  operator), it expires, and it reserves nothing (R-BTN-201).
+- **A claim's `order` is a runner's hint.** It is stored and gates nothing. A wrong one is
+  dropped.
+- **The session link carries a capability** (B-312). It goes to the requester and owners' and
+  administrators' sessions only, and is never logged or exported.
+- **Baton starts nothing and holds no sandbox credential** (R-BTN-201, R-BTN-53). The reference
+  launcher runs the deployment's command with its own key.
+
+### Invariants
+
+- **R-BTN-201:** Baton reserves nothing and records no launch. An order is the person's request,
+  not a launch record.
+- **Values 12:** `human-operator` is declared by the ordered runner and never checked.
+- **R-BTN-4:** one live claim per ticket. An order never holds the lease.
+- **Migrations are append-only.**
+
+### Tests
+
+The scenarios B-327 numbers:
+
+- **An order gets its link:** the reply's `order_url`; `starting`, then `joinable`;
+  `session_url` for the requester and `null` for another operator; an `interact` condition with
+  the same link.
+- **Taken and expired:** an order closes `taken` when another runner claims the ticket; an order
+  with no launcher expires at 15 minutes (the clock set).
+- **Cancelled:** a claimed order cancelled sends a `release` message, and the claim ends
+  `released:requested` with a hand-off.
+- **Refusals:** an order on a leg with no `deadline_s` is refused `not-joinable`; a second order
+  on the same ticket is `conflict`.
+
+### Exit criteria
+
+- [ ] The scenarios pass on both hosts.
+- [ ] One order is served end to end by the reference launcher, starting a local
+      `opencode serve` through a fixture executor, and attached with `opencode attach`. The steps
+      are recorded in the PR.
+- [ ] `npm test`, `npm run typecheck` and `npm run check:actions` are green.
+- [ ] Merged under the review gate.
+
+## Status
+
+_filed 2026-11-24._
