@@ -20,7 +20,11 @@ declaring a capability you no longer hold.
 > completion: a harness that is a client of a background service must keep its session in
 > process (`opencode run --standalone`, or the equivalent) — a client that can exit before its
 > work ends leaves truncated output and an orphaned session posting to a claim that no longer
-> exists (B-84). Your completion is your exit **or your silence** (B-108): the stub stops waiting at the earliest of your exit, fifteen minutes of quiet on every activity signal it can see — your stdout, the wrapper’s log, the harness’s own store — and five hours of the leg, its ceiling; the stdout you left is judged as any exit’s is. A repository's `agent_wrapper` in `.baton/baton.json`, or the host's
+> exists (B-84). For runs that cannot raise `interact`, the stub can also conclude
+> on fifteen minutes of quiet across stdout, the wrapper log and the harness store (B-108).
+> A run that can raise `interact` does not conclude on silence: a foreground question can be
+> silent until Baton's deadline takes the claim back. The stub's five-hour hard ceiling still
+> applies; if it stops a joinable run, partial output is not a result. A repository's `agent_wrapper` in `.baton/baton.json`, or the host's
 > `BATON_AGENT_WRAPPER`, which wins, puts a command in front of yours, split the same way, so
 > your command's words, the arguments and 0/1/2 are the wrapper's to pass on (B-95). Never end
 > with work in flight: the process is the session, and nothing resumes it — wait, in the

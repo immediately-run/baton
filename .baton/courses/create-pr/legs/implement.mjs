@@ -323,6 +323,7 @@ baton: ${ctx.ticket.id} ${ctx.leg}, claim ${ctx.claim?.nonce ?? "?"}`;
 
 // src/defaults/course-pr.ts
 var DEFAULT_BRANCH_PATTERN = "claude/{ticket}-*";
+var CREATE_PR_ASK_DEADLINE_S = 3 * 60 * 60;
 var CREATE_SPEC_COURSE = {
   start: "requested",
   start_leg: "converse",
@@ -626,6 +627,7 @@ async function standard(ctx) {
     }
   }
   const lastOutput = (so, se) => (so + "\n" + se).split("\n").map((l) => l.trimEnd()).filter((l) => l.trim() !== "").slice(-20).join("\n  ");
+  const canInteract = ctx.can_interact === true;
   const received = await new Promise((resolve, reject) => {
     const echo = process.env.BATON_VERBOSE === "1";
     const child = spawn(argv[0], argv.slice(1), {
@@ -688,10 +690,17 @@ async function standard(ctx) {
       if (stopped != null || conclusion2 != null) return;
       const now = Date.now();
       if (now - startedAt >= LEG_CEILING_MS) {
+        if (canInteract) {
+          stopped = "the leg reached its hard ceiling (" + LEG_CEILING_MS + " ms)";
+          clearInterval(watch);
+          child.kill("SIGKILL");
+          return;
+        }
         conclusion2 = { cause: "agent_concluded_absolute", ceiling_ms: LEG_CEILING_MS };
         finishWatch();
         return;
       }
+      if (canInteract) return;
       const all = signals();
       if (all.every(([, at]) => now - at >= AGENT_IDLE_MS)) {
         conclusion2 = { cause: "agent_concluded_idle", idle_ms: AGENT_IDLE_MS, quiet_signals: all.map(([name]) => name) };

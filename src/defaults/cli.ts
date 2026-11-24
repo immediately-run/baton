@@ -1294,6 +1294,7 @@ const AGENT_WRAPPER_ENV = 'BATON_AGENT_WRAPPER';
  * convention puts it. */
 export function stubSource(b: BuiltIn, course: string, leg: string): string {
   const { ask, position, verify, pushes, delivered } = b.legs[leg];
+  const asksOwner = b.id === 'create-pr' && (leg === 'implement' || leg === 'fix');
   // A leg whose close writes a line on a PR may name that PR after its answer (B-29): a ticket's
   // PRs may sit in other repositories, and its home may have none.
   const names = b.reads === 'prs' && COMMENTING_LEGS.has(leg);
@@ -1525,7 +1526,11 @@ ${pushes ? `  // B-231: run from the gate's red (pr-open, fixed), this leg must 
   // failed leg's error carries, so the runner's log alone can diagnose it, whether the agent
   // exited non-zero or exited 0 and the checks after it failed.
   const lastOutput = (so, se) => (so + '\\n' + se).split('\\n').map((l) => l.trimEnd()).filter((l) => l.trim() !== '').slice(-20).join('\\n  ');
-  const received = await new Promise((resolve, reject) => {
+${asksOwner ? `  // S-BTN-222 (B-325): an open harness question can be silent and the stub cannot tell
+  // it from idle, or learn when it was answered. For a run allowed to raise interact, use
+  // Baton's deadline and release rather than inferring completion from silence.
+  const canInteract = ctx.can_interact === true;
+` : ''}  const received = await new Promise((resolve, reject) => {
     const echo = process.env.BATON_VERBOSE === '1';
     const child = spawn(argv[0], argv.slice(1), {
       cwd: ctx.checkout, stdio: ['ignore', 'pipe', 'pipe'],
@@ -1578,12 +1583,20 @@ ${pushes ? `  // B-231: run from the gate's red (pr-open, fixed), this leg must 
     watch = setInterval(() => {
       if (stopped != null || conclusion != null) return;
       const now = Date.now();
-      if (now - startedAt >= LEG_CEILING_MS) {
+      if (now - startedAt >= LEG_CEILING_MS) {${asksOwner ? `
+        if (canInteract) {
+          // The hard ceiling still stops a wedged run, but partial output is not a result.
+          stopped = 'the leg reached its hard ceiling (' + LEG_CEILING_MS + ' ms)';
+          clearInterval(watch);
+          child.kill('SIGKILL');
+          return;
+        }` : ''}
         conclusion = { cause: 'agent_concluded_absolute', ceiling_ms: LEG_CEILING_MS };
         finishWatch();
         return;
       }
-      const all = signals();
+${asksOwner ? `      if (canInteract) return;
+` : ''}      const all = signals();
       if (all.every(([, at]) => now - at >= AGENT_IDLE_MS)) {
         conclusion = { cause: 'agent_concluded_idle', idle_ms: AGENT_IDLE_MS, quiet_signals: all.map(([name]) => name) };
         finishWatch();

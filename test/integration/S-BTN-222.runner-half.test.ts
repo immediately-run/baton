@@ -131,6 +131,7 @@ export async function run(ctx) {
     // joins, nothing is posted, and the leg's own deadline takes the claim back.
     linger: `${prelude}
 export async function run(ctx) {
+  note({ can_interact: ctx.can_interact });
   for (let i = 0; i < 100 && raise('interact') !== 0; i++) await new Promise((r) => setTimeout(r, 100));
   await new Promise(() => {});
 }
@@ -326,6 +327,7 @@ describe('S-BTN-222 (the runner half): the channel checks a raise (R-BTN-160, R-
       expect(await conditionRows('docs:C')).toEqual([
         { type: 'interact', disposition: 'notify', outcome: 'open', url: LINK, closed_how: null },
       ]);
+      expect(said(rec)[0]).toEqual({ can_interact: true });
       // R-BTN-90: the deadline takes the claim back at its instant — a release with reason
       // leg-timeout, delivered by the next beat, the leg stopped at its safe point.
       await setClock(T0 + 61_000);
