@@ -747,9 +747,9 @@ Entry shape: **When** · **Host** · **Tickets** · **Why it was needed** · **R
     administrator key. The supervisor may not use that key, so the owner runs it, one claim
     (B-39's 437) first. B-136 (PR #331 already merged) and B-271 (a `done` end) are left for
     the owner. *Pending: the owner's run.*
-  - `std:git.evidence@1` is built in its own PR: the observation lists each unconfirmed end's
+  - `std:git.evidence@1` is built in #415: the observation lists each unconfirmed end's
     evidence, the sync checks it (a commit in git or on the forge; a comment, review, PR or
     commit URL on a known GitHub host) and attests it, and the server confirms only on
     `found: true` for exactly that evidence.
-- **Autonomous handling:** the `std:git.evidence@1` PR. Until it lands, every parked end that
-  names evidence waits for the owner's confirm. *Handled by that PR once merged.*
+- **Autonomous handling:** #415. Until it lands, every parked end that
+  names evidence waits for the owner's confirm. *Handled by #415 once merged.*
