@@ -7,7 +7,9 @@
 // (before its cutover too); a pull_request that is no merge dispatches nothing; every repository
 // the path dispatches is stamped; the alarm sends exactly the stale repositories, once, never the
 // tick after a late one.
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+import { dispatchWorkflow } from '../../src/core/mirror';
+import type { Ports } from '../../src/core/ports';
 import { Webhooks, SYNC_STALE_MS } from '../../src/core/webhook';
 import { armedAt, captureDispatches, withCore } from '../helpers';
 
@@ -23,6 +25,56 @@ const stamps = (c: { store: { exec(q: string): { toArray(): unknown[] } } }) =>
     .map((r) => `${r.repository_id}@${r.last_dispatch_at}`);
 
 describe('S-BTN-167 a merge dispatches the sync', () => {
+  it('logs a forge-refused dispatch without failing the delivery or undoing its stamp (R-BTN-94)', async () => {
+    const token = 'test-dispatch-credential';
+    const fetch = vi.fn(async (_url: string, init: RequestInit) => Response.json({
+      message: `<b>Invalid ref</b>\n${new Headers(init.headers).get('Authorization')?.slice('Bearer '.length)} ${'x'.repeat(600)}`,
+      documentation_url: 'https://forge.test/dispatch',
+    }, { status: 422 }));
+    vi.stubGlobal('fetch', fetch);
+    try {
+      await withCore(async (c) => {
+        const now = c.now();
+        c.now = () => now;
+        const { ports } = c as unknown as { ports: Pick<Ports, 'dispatch'> };
+        const deferred: Promise<unknown>[] = [];
+        ports.dispatch = { send: (target) => dispatchWorkflow(`${token} \t`, target), defer: (work) => { deferred.push(work); } };
+        const delivery = await c.fetch(header(d({ id: 'refused' })));
+        await Promise.all(deferred);
+        expect(delivery.status).toBe(204);
+        expect(stamps(c)).toEqual([`baton@${c.now()}`]);
+        expect(fetch).toHaveBeenCalledOnce();
+        expect(new Headers(fetch.mock.calls[0][1].headers).get('Authorization')).toBe(`Bearer ${token}`);
+        const events = c.store.exec<{ detail_json: string }>(`SELECT detail_json FROM events WHERE kind = 'discrepancy' AND repository_id = 'baton'`).toArray();
+        expect(events).toHaveLength(1);
+        const detail = JSON.parse(events[0].detail_json);
+        expect(detail).toEqual({ kind: 'dispatch-refused', repository: 'baton', workflow: 'sync', reason: expect.stringMatching(/^HTTP 422: Invalid ref \[redacted\] x+$/) });
+        expect(detail.reason).toHaveLength(500);
+      });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('does not log a transport failure as a forge refusal (R-BTN-94)', async () => {
+    vi.stubGlobal('fetch', async () => { throw new Error('Could not connect'); });
+    try {
+      await withCore(async (c) => {
+        const { ports } = c as unknown as { ports: Pick<Ports, 'dispatch'> };
+        const deferred: Promise<unknown>[] = [];
+        ports.dispatch = {
+          send: (target) => dispatchWorkflow('test-dispatch-credential', target),
+          defer: (work) => { deferred.push(work); },
+        };
+        expect((await c.fetch(header(d({ id: 'transport-failure' })))).status).toBe(204);
+        await Promise.all(deferred);
+        expect(c.store.exec(`SELECT detail_json FROM events WHERE kind = 'discrepancy' AND repository_id = 'baton'`).toArray()).toEqual([]);
+      });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('a merge of the repository’s own dispatches its sync, whatever its mode; one that is no merge dispatches nothing', async () => {
     await withCore(async (c) => {
       const w = new Webhooks({ store: c.store, scope: c.scope, now: () => 0 });

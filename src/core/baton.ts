@@ -20,7 +20,7 @@ import { RunnerApi } from './runnerApi';
 import { parseAdminKeys, parseSshKey, verifyApiKey, verifyRequest, withBody, type SyncCredential } from './auth';
 import { Claims } from './claims';
 import { Cutover } from './cutover';
-import { Mirror } from './mirror';
+import { DispatchRefused, Mirror } from './mirror';
 import { CAPABILITY_NAME, checkAttestation, checkConfirmations, checkDependenciesRead, checkRepositoryId, checkSequenceTake, COURSE_ID, GIT_BRANCH, GIT_REPO, SEQUENCE_KIND } from './validate';
 import { Courses } from './courses';
 import { Observations } from './observations';
@@ -286,8 +286,7 @@ export class BatonCore {
 
   /** §10.3: a repository's sync or mirror workflow, on its default branch. A repository with no
    *  mirror has nothing to dispatch for it; a retired one has nothing at all (R-BTN-47, B-173). A
-   *  dispatch the forge refuses is logged with its reason (R-BTN-94): the want it answers stands
-   *  until a post answers it, so a refusal costs latency, never correctness. */
+   *  dispatch the forge refuses is logged with its reason (R-BTN-94); the sync backstop still applies. */
   private async sendDispatch(wf: Workflow): Promise<unknown> {
     const repo = this.registry.live(wf.repository);
     if (!repo) return false;
@@ -309,10 +308,10 @@ export class BatonCore {
     try {
       return await this.ports.dispatch.send(target);
     } catch (e) {
-      // R-BTN-94: the forge's refusal, with its reason — identifiers only, never a body (the
-      // refusal's message is the forge's own words, capped like a notice's).
+      if (!(e instanceof DispatchRefused)) return false;
+      // R-BTN-94: identifiers and the adapter's short text reason, never the response payload.
       this.store.transaction(() => logEvent(this.store, this.now(), 'discrepancy', 'baton',
-        { kind: 'dispatch-refused', repository: wf.repository, workflow: wf.kind, reason: (e instanceof Error ? e.message : String(e)).slice(0, 500) },
+        { kind: 'dispatch-refused', repository: wf.repository, workflow: wf.kind, reason: e.message },
         null, null, wf.repository));
       return false;
     }
