@@ -55,6 +55,14 @@ export const DEFAULT_BRANCH_PATTERN = 'claude/{ticket}-*';
 
 export const DEFAULT_CREATE_PR_REVIEW_ROUNDS = 3;
 
+export function readReviewDefault(text: string): number {
+  const rounds: unknown = JSON.parse(text).rounds;
+  if (typeof rounds !== 'number' || !Number.isSafeInteger(rounds) || rounds < 1) {
+    throw new Error('review-defaults.json must name a positive integer rounds');
+  }
+  return rounds;
+}
+
 /** The `create-pr` course's graph (R-BTN-131), the docs workflow's: filed → pr-open → reviewed,
  * at most three review rounds with a fix between them, then merged — or, when the third round
  * still asks for changes, adjudicated first (a fresh reader reproduces each open blocking finding)

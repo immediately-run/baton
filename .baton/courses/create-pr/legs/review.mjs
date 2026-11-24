@@ -1,4 +1,4 @@
-// ../../../../../../../../tmp/baton-bundle-9PgUIX/entry.ts
+// ../../../../../../../../tmp/baton-bundle-85CUoo/entry.ts
 import { execFileSync as execFileSync2, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdtempSync, readdirSync, rmSync as rmSync2, statSync, writeFileSync } from "node:fs";
@@ -99,7 +99,13 @@ function requireAnswer(out, ask, leg, opts = {}) {
 }
 
 // src/defaults/course-pr.ts
-var DEFAULT_CREATE_PR_REVIEW_ROUNDS = 3;
+function readReviewDefault(text) {
+  const rounds = JSON.parse(text).rounds;
+  if (typeof rounds !== "number" || !Number.isSafeInteger(rounds) || rounds < 1) {
+    throw new Error("review-defaults.json must name a positive integer rounds");
+  }
+  return rounds;
+}
 
 // src/defaults/ticket-state.ts
 import { execFileSync } from "node:child_process";
@@ -364,7 +370,7 @@ baton: ${ctx.ticket.id} ${ctx.leg}, claim ${ctx.claim?.nonce ?? "?"}`;
   return closeTicket({ ...ctx, heading: false }, result, run2);
 }
 
-// ../../../../../../../../tmp/baton-bundle-9PgUIX/entry.ts
+// ../../../../../../../../tmp/baton-bundle-85CUoo/entry.ts
 var GIT_BOUND_MS = 12e4;
 var GIT_ENV = { "GIT_TERMINAL_PROMPT": "0", "GIT_SSH_COMMAND": "ssh -o BatchMode=yes -o ConnectTimeout=20" };
 var AGENT_IDLE_MS = 9e5;
@@ -417,10 +423,12 @@ async function standard(ctx) {
   const agentWords = splitWords(settingsCommand);
   const agentCommand = agentWords.join(" ");
   const courseSha = typeof ctx.signed_control?.course === "string" && ctx.signed_control.course !== "" ? ctx.signed_control.course : sha;
+  const graphSha = ctx.replay?.against ?? sha;
+  const readCourseFile = (path) => gitRun("git", ["-C", ctx.checkout, "show", graphSha + ":" + path], { maxBuffer: 67108864 });
   const courseFile = ".baton/courses/create-pr/course.json";
-  const graph = ctx.graph ?? JSON.parse(gitRun("git", ["-C", ctx.checkout, "show", courseSha + ":" + courseFile], { maxBuffer: 67108864 }));
+  const graph = ctx.graph ?? JSON.parse(readCourseFile(courseFile));
   const review = graph.legs instanceof Map ? graph.legs.get("review")?.maxRuns : graph.legs?.review?.max_runs;
-  const roundsSpent = (ctx.run ?? 1) >= (review ?? DEFAULT_CREATE_PR_REVIEW_ROUNDS);
+  const roundsSpent = (ctx.run ?? 1) >= (review ?? readReviewDefault(readCourseFile(".baton/courses/create-pr/review-defaults.json")));
   const rel = ".baton/courses/create-pr/legs/review.md";
   const present = gitRun("git", ["-C", ctx.checkout, "ls-tree", "--name-only", courseSha, "--", rel]).trim() !== "";
   const text = present ? gitRun("git", ["-C", ctx.checkout, "show", courseSha + ":" + rel], { maxBuffer: 67108864 }) : null;

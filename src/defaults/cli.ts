@@ -19,7 +19,7 @@ import { HARNESS_AGENTS, type Harness } from '../runner/harness';
 import { syncOnce } from '../vendor/batonSync.mjs';
 import { DEFAULT_URL } from '../../cli/baton.mjs';
 import { API_KEY, signingKey } from '../../cli/sign.mjs';
-import { DEFAULT_BRANCH_PATTERN, matchPatterns, sameRepo as sameRepoName, ticketOwns, type BatonRecord, type CodeRepoEntry, type PrFact, type StationsResult } from './course-pr';
+import { DEFAULT_BRANCH_PATTERN, DEFAULT_CREATE_PR_REVIEW_ROUNDS, matchPatterns, readReviewDefault, sameRepo as sameRepoName, ticketOwns, type BatonRecord, type CodeRepoEntry, type PrFact, type StationsResult } from './course-pr';
 import { commitsOf, type BranchCommit } from './pr-markers';
 import { COMMENTING_LEGS, PR_URL as PR_URL_RE } from './pr-close';
 import { GIT_SHA } from '../core/validate';
@@ -39,6 +39,8 @@ import type { PostedControl } from '../core/board';
 import { readTicketSettings } from './tickets-config';
 import { ownRepositoryId, remoteSlug } from './remote-slug';
 import { PAGE_NAME, ticketsPage } from './tickets-page';
+
+const REVIEW_DEFAULTS_PATH = '.baton/courses/create-pr/review-defaults.json';
 
 // LC_ALL=C on every git call (B-93, round 4): git translates its messages, and the two shapes
 // remoteSlug quiets are matched by their words — under a German catalog 'not a git repository'
@@ -416,11 +418,17 @@ async function readBoard(root: string, batonJson: BatonJson, args: SyncArgs, log
   for (const c of courses) {
     const courseFile = join(root, '.baton', 'courses', c.id, 'course.json');
     if (!existsSync(courseFile)) throw new Error(`.baton/courses/${c.id}/course.json is missing — run \`baton repo init --course ${c.id}\``);
-    const course = JSON.parse(readFileSync(courseFile, 'utf8')) as { legs?: Record<string, unknown> };
+    const text = readFileSync(courseFile, 'utf8');
+    const course = JSON.parse(text) as { legs?: Record<string, { max_runs?: number }> };
+    if (c.id === 'create-pr' && course.legs?.review && course.legs.review.max_runs == null) {
+      const defaults = join(root, REVIEW_DEFAULTS_PATH);
+      // Older scaffolds have no fallback file, and use the same legacy default in their stub.
+      course.legs.review.max_runs = existsSync(defaults) ? readReviewDefault(readFileSync(defaults, 'utf8')) : DEFAULT_CREATE_PR_REVIEW_ROUNDS;
+    }
     const branchPatterns = [c.branch_pattern ?? DEFAULT_BRANCH_PATTERN, ...(c.previous_branch_pattern ? [c.previous_branch_pattern] : [])];
     const fnCtx = { ...ctx, course: c.id, repository, tickets: result.tickets.filter((t) => t.course_id === c.id), closed: closedIds, done: doneIds, facts, branchPatterns, graph: course, ...(record ? { baton: record } : {}) };
     const syncMjs = syncMjsOf(c.id);
-    if (c.source) checkSource(c, readFileSync(courseFile, 'utf8'), existsSync(syncMjs));
+    if (c.source) checkSource(c, text, existsSync(syncMjs));
     const standard = builtIn(c.id);
     let fn: StationFn;
     if (existsSync(syncMjs)) {
@@ -1354,7 +1362,7 @@ const newestWrite = (p, depth = 0) => {
 // reads it from the error (\`e.stderr\`); nothing else of git's rides the log unasked.
 const gitRun = (cmd, args, opts = {}) => execFileSync(cmd, args, { encoding: 'utf8', timeout: GIT_BOUND_MS, killSignal: 'SIGKILL', env: { ...process.env, ...GIT_ENV }, stdio: ['ignore', 'pipe', 'pipe'], ...opts });${ask ? `
 import { requireAnswer } from ${JSON.stringify(source('answer.ts'))};` : ''}
-${reviewBound ? `import { DEFAULT_CREATE_PR_REVIEW_ROUNDS } from ${JSON.stringify(source('course-pr.ts'))};\n` : ''}
+${reviewBound ? `import { readReviewDefault } from ${JSON.stringify(source('course-pr.ts'))};\n` : ''}
 import { ${closeFrom[0]} } from ${JSON.stringify(source(closeFrom[1]))};${closeHelpers}${verify ? `
 import { ${verify === 'merged' ? 'verifyPrsMerged' : 'verifyPrOpen'}, ticketRepositories${delivered ? ', findDelivered, verifyDelivered, deliveredDetail' : ''} } from ${JSON.stringify(source('pr-verify.ts'))};` : ''}${pushes ? `
 import { DEFAULT_BRANCH_PATTERN, branchMatches, matchPatterns } from ${JSON.stringify(source('course-pr.ts'))};
@@ -1462,12 +1470,15 @@ ${pushes ? `  // B-231: run from the gate's red (pr-open, fixed), this leg must 
   const pushTicket = (() => { try { return ctx.ticket?.file ? readFileSync(ctx.ticket.file, 'utf8') : ctx.ticket?.path ? readFileSync(join(ctx.checkout, ctx.ticket.path), 'utf8') : null; } catch { return null; } })();
   const headsBefore = redEdge && ticketRepositories(pushTicket, settings.repos).length === 0 ? prHeads() : '';
 ` : ''}  const courseSha = typeof ctx.signed_control?.course === 'string' && ctx.signed_control.course !== '' ? ctx.signed_control.course : sha;${reviewBound ? `
-  // B-324: a runner may pass the graph; otherwise read the course beside the leg in the
-  // same pinned tree. The runner extracts the stub to scratch, not beside a filesystem copy.
+  // B-324: course.json is board data, not part of the signed executable group. Use
+  // the posted snapshot for its limit; keep scripts and instructions at the signed pin.
+  // Comparison replay selects its own graph while retaining the recorded ticket inputs.
+  const graphSha = ctx.replay?.against ?? sha;
+  const readCourseFile = (path) => gitRun('git', ['-C', ctx.checkout, 'show', graphSha + ':' + path], { maxBuffer: ${AGENT_OUTPUT_MAX} });
   const courseFile = ${JSON.stringify(`.baton/courses/${course}/course.json`)};
-  const graph = ctx.graph ?? JSON.parse(gitRun('git', ['-C', ctx.checkout, 'show', courseSha + ':' + courseFile], { maxBuffer: ${AGENT_OUTPUT_MAX} }));
+  const graph = ctx.graph ?? JSON.parse(readCourseFile(courseFile));
   const review = graph.legs instanceof Map ? graph.legs.get('review')?.maxRuns : graph.legs?.review?.max_runs;
-  const roundsSpent = (ctx.run ?? 1) >= (review ?? DEFAULT_CREATE_PR_REVIEW_ROUNDS);` : ''}
+  const roundsSpent = (ctx.run ?? 1) >= (review ?? readReviewDefault(readCourseFile(${JSON.stringify(REVIEW_DEFAULTS_PATH)})));` : ''}
   const rel = ${JSON.stringify(`.baton/courses/${course}/legs/${leg}.md`)};
   const present = gitRun('git', ['-C', ctx.checkout, 'ls-tree', '--name-only', courseSha, '--', rel]).trim() !== '';
   const text = present ? gitRun('git', ['-C', ctx.checkout, 'show', courseSha + ':' + rel], { maxBuffer: ${AGENT_OUTPUT_MAX} }) : null;
@@ -2058,6 +2069,9 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
   /** One standard course's files; `rewrite` rewrites Baton's (the course file, the leg scripts). */
   const scaffold = async (bi: BuiltIn, rewrite: boolean): Promise<void> => {
     await put(`.baton/courses/${bi.id}/course.json`, (abs) => writeFileSync(abs, courseFileText(bi)), rewrite);
+    if (bi.id === 'create-pr') {
+      await put(REVIEW_DEFAULTS_PATH, (abs) => writeFileSync(abs, `${JSON.stringify({ rounds: DEFAULT_CREATE_PR_REVIEW_ROUNDS }, null, 2)}\n`), rewrite);
+    }
     for (const leg of runnerLegs(bi)) {
       // Each stub is bundled with its `close`, so it imports nothing the runner's scratch copy lacks.
       await put(`.baton/courses/${bi.id}/legs/${leg}.mjs`, (abs) => writeStub(bi, leg, abs), rewrite);
