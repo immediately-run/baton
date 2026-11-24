@@ -677,3 +677,20 @@ Entry shape: **When** · **Host** · **Tickets** · **Why it was needed** · **R
   - Implement and fix instructions should push past a failure that also fails on `main`, and
     never fix an unrelated failure inside a ticket's PR (ticket filed).
   - The executor should salvage unpushed commits (ticket filed).
+
+## 2026-11-23 21:57 UTC — one runner at concurrency 2; it idled because one ticket was claimable and that one sat off the tier ladder
+
+- **Host:** bering
+- **Tickets:** B-319 (the only `ready` ticket, `tier: normal`); the fix is #401
+- **What was done, at the owner's word:**
+  - The bering key's grant was re-issued with `--max-claims 2`, all other fields as before. The released CLI 0.1.4 has no `--max-claims`, so this used `baton-cli owner --dev`. `--concurrency` is a flag of `baton run`, not of the grant.
+  - Both runners were stopped with SIGINT. Neither held a claim.
+  - `baton-cli` moved from `44080032` to `main`'s tip `52baaccc`, as `BATON_CLI_PIN=branch:main` requires. That brings in B-274, one ClaimRun per claim.
+  - One runner was started with `--concurrency 2` (session `run-20261123-225903-r1`). `start-runner.sh` cannot pass that flag, so this used a copy of the script.
+- **Why it did not claim:**
+  - `GET /v1/repositories/baton/tickets?state=ready` listed one ticket: B-319, `failed_rule: above-tier-ceiling`. `tier: normal` is off the ladder, so it fits no runner.
+  - The runner's board read lists 77 "ready" tickets. Most are not claimable:
+    - 55 are `unconfirmed`: an ended claim whose end git has not confirmed. 52 of those are bering's. #400 is the fix.
+    - 36 are `held` for `attempts-exhausted`: each needs `baton owner resolve … retry|park`.
+  - The runner logs nothing on `no-eligible-ticket`, so an idle runner looks the same as a stuck one.
+- **Autonomous handling:** the supervisor reads `?state=ready`'s `failed_rule` first, before the runner code. Follow-up: an idle runner should log, once, why nothing fits.
