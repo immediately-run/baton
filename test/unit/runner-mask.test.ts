@@ -1,13 +1,17 @@
-// S-BTN-98 and S-BTN-119's pure half (B-170; BATON_SPEC §8.4 R-BTN-144, class 7). Class 7 is the
+// BATON_SPEC §15 row S-BTN-119 (environment and masking), and S-BTN-98. Class 7 is the
 // value of every variable whose name ends `_KEY`, `_TOKEN`, `_SECRET`, `_PASSWORD` or `_PAT`, or is
 // `PGPASSWORD`, and of every name `runner.json` `mask_env` lists: this file tests the names, the
 // values they stand for, the masking of one string, the stream sink a leg's output goes through
 // line by line, and where `runner.json` is read from. The runner's own half — which environment it
 // masks, the wiring of the sink and of the failure texts a leg leaves — is in runner-main.test.ts.
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+import { spawn } from 'node:child_process';
+import { EventEmitter } from 'node:events';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { PassThrough } from 'node:stream';
+import { builtinExecutor, type ExecOptions } from '../../src/runner/executor';
 import {
   FAILURE_DETAIL_MAX, MIN_SECRET_BYTES, SECRET_NAME_EXACT, SECRET_NAME_SUFFIXES, createLegMasker, failureDetail, holdLiteralTail,
   maskLegOutput, namesASecret, readMaskEnv, runnerConfigPath, secretValues, underBatonDirectory,
@@ -15,6 +19,13 @@ import {
 
 const KEY = 'sk-ant-api03-AbCdEfGhIjKlMn';
 const PAT = 'github_pat_11ABCDEFG0123456789';
+
+vi.mock('node:child_process', { spy: true });
+
+function maskLines(literals: string[], lines: string[]): string {
+  const sink = createLegMasker(literals);
+  return [...lines.map((line) => sink.push(line)), sink.flush()].filter(Boolean).join('\n');
+}
 
 describe('class 7 by name (R-BTN-144)', () => {
   it('the five endings and PGPASSWORD, exactly as the environment spells them — case-sensitive', () => {
@@ -99,6 +110,80 @@ describe('class 7 by name (R-BTN-144)', () => {
     const trailing = createLegMasker(['endswithnewline\n']);
     expect(trailing.push('token endswithnewline here')).toBe('token *** her');
     expect(trailing.flush()).toBe('***');
+  });
+
+  it('masks the union of boundary matches and keeps unfinished periodic matches open', () => {
+    const set = ['prefix12', 'prefix1\n2-secret-tail-long'];
+    for (const literals of [set, [...set].reverse()]) {
+      expect(maskLines(literals, ['x prefix1', '2-secret-tail-long y'])).toBe('x \n*** y');
+    }
+    expect(maskLines(['ccccccc0', 'cccc0cccc\nc'], ['LHccccccc0cccc', 'cc', 'c0']).replace(/[\n*]/g, '')).toBe('LH');
+    expect(maskLines(['\nleading-value'], ['before', 'leading-value after'])).toBe('before\n*** after');
+    expect(maskLines(['first\r\nsecond'], ['x first', 'second y'])).toBe('x \n*** y');
+  });
+
+  it('does not emit a second mask when a blank line holds already masked bytes again', () => {
+    const sink = createLegMasker(['sample-value1', '1abcdef0123456']);
+    expect(sink.push('value sample-value1')).toBe('value ***');
+    expect(sink.push('')).toBe('');
+    expect(sink.push('unrelated')).toBe('unrelated');
+    expect(sink.flush()).toBe('');
+  });
+
+  it('still masks a disproved one-character hold', () => {
+    expect(maskLines(['some-value'], ['ends', 'unrelated'])).toBe('end\n***\nunrelated');
+  });
+
+  it('holds 300 periodic lines against a 4096-character literal in under one second', () => {
+    const start = performance.now();
+    const said = maskLines(['a'.repeat(4096)], Array<string>(300).fill('a'.repeat(100)));
+    expect(performance.now() - start).toBeLessThan(1000);
+    expect(said).not.toContain('a');
+  });
+
+  it('fuzzes the S-BTN-119 boundary union with a fixed seed', () => {
+    const seed = 0x316_0119;
+    let state = seed;
+    const rand = (n: number) => {
+      state ^= state << 13;
+      state ^= state >>> 17;
+      state ^= state << 5;
+      return (state >>> 0) % n;
+    };
+    for (let i = 0; i < 3_000; i++) {
+      const alphabet = ['a', 'ab', 'abc'][rand(3)];
+      const word = (n: number) => Array.from({ length: n }, () => alphabet[rand(alphabet.length)]).join('');
+      const period = word(1 + rand(4));
+      const text = (period.repeat(12) + word(12)).slice(rand(4));
+      const overlap = 8 + rand(5);
+      // The first two values overlap and cover the entire payload. The third is nested but
+      // may match with a different choice of boundaries from either of its neighbours.
+      const withLF = (s: string, at: number) => `${s.slice(0, at)}\n${s.slice(at)}`;
+      const at = overlap + rand(5);
+      const framed = withLF(text, at);
+      const secrets = [text.slice(0, at + 3), framed.slice(overlap), text.slice(2, 12)];
+      if (rand(2)) secrets[1] = secrets[1].replace('\n', '\r\n');
+      if (rand(2)) secrets.reverse();
+      const lines = ['LEFT!'];
+      let line = '';
+      for (const c of framed) {
+        if (c !== '\n') line += c;
+        if (c === '\n' || rand(4) === 0) {
+          lines.push(line);
+          line = '';
+        }
+      }
+      lines.push(line + '!RIGHT');
+      const detail = JSON.stringify({ seed, i, secrets, lines });
+      const masked = maskLines(secrets, lines);
+      expect(masked.replace(/[\n*]/g, ''), detail).toBe('LEFT!!RIGHT');
+      expect(masked.replace(/\n/g, ''), detail).not.toContain(text);
+
+      // No occurrence and no held suffix: each short fragment ends with a nonliteral
+      // character, so the policy for disproved holds isn't part of this assertion.
+      const clean = Array.from({ length: 4 }, () => `${word(1 + rand(6))}!`);
+      expect(maskLines(secrets, clean), JSON.stringify({ seed, i, secrets, clean })).toBe(clean.join('\n'));
+    }
   });
 
   it('S-BTN-119: a whole literal whose last bytes start another literal is masked whole, never cut by the hold', () => {
@@ -188,6 +273,126 @@ describe('class 7 by name (R-BTN-144)', () => {
     expect(sink.push('AAAA')).toBe('');
     expect(sink.push('-----END OPENSSH PRIVATE KEY-----')).toBe('***');
     expect(sink.flush()).toBe('');
+  });
+});
+
+describe('S-BTN-119: builtin executor framing', () => {
+  async function execute(script: string, onStderr: NonNullable<ExecOptions['onStderr']>, replyTo?: string) {
+    const executor = builtinExecutor();
+    const cwd = process.cwd();
+    const handle = await executor.start({ brief: {
+      kind: 'leg', session_id: 'framing', checkout: cwd, paths: [], wrapper: '', env: {},
+    } });
+    const running = executor.exec(handle, ['node', '-e', script], {
+      cwd, timeout_s: 5, onStderr(line, frame) {
+        onStderr(line, frame);
+        if (line === replyTo) running.write('continue');
+      },
+    });
+    try {
+      return await running.result;
+    } finally {
+      await executor.stop(handle, 'test complete');
+    }
+  }
+
+  it.each([1, 2, 3])('decodes stderr across byte offset %i of a four-byte character', async (offset) => {
+    const value = 'test-value-\u{1f30d}-tail';
+    const split = 'test-value-'.length + offset;
+    const lines: string[] = [];
+    const result = await execute(`
+      const { writeSync } = require('node:fs');
+      const bytes = Buffer.from(${JSON.stringify(value)});
+      writeSync(2, Buffer.concat([Buffer.from('ready\\n'), bytes.subarray(0, ${split})]));
+      process.stdin.once('data', () => {
+        writeSync(2, bytes.subarray(${split}));
+        process.exit(0);
+      });
+    `, (line) => lines.push(line), 'ready');
+    expect(result).toEqual({ status: 0, stdout: '', stderr: `ready\n${value}` });
+    expect(maskLines([value], lines)).toBe('ready\n***');
+  });
+
+  it('keeps CRLF framing available to the masker without rendering a framing CR', async () => {
+    const lines: string[] = [];
+    const value = 'first\r\nsecond';
+    const text = `x ${value} y\r\nsafe\r\nfinal\r`;
+    const frames: Array<'\n' | '\r\n' | undefined> = [];
+    const result = await execute(`process.stderr.write(${JSON.stringify(text)})`, (line, frame) => {
+      lines.push(line);
+      frames.push(frame);
+    });
+    expect(result).toEqual({ status: 0, stdout: '', stderr: text });
+    expect(lines).toEqual(['x first', 'second y', 'safe', 'final\r']);
+    expect(frames).toEqual(['\r\n', '\r\n', '\r\n', undefined]);
+    for (const literal of [value, 'first\nsecond', 'first\rsecond', 'firstsecond']) {
+      const sink = createLegMasker([literal]);
+      const output = lines.map((line, i) => sink.push(line, frames[i]));
+      expect([...output, sink.flush()].filter(Boolean).join('\n'), JSON.stringify(literal))
+        .toBe('x \n*** y\nsafe\nfinal\r');
+    }
+  });
+
+  // Drive the executor's real data listeners without relying on how the OS batches writes.
+  function mockChild() {
+    const child = Object.assign(new EventEmitter(), {
+      stdin: new PassThrough(), stdout: new PassThrough(), stderr: new PassThrough(),
+    });
+    vi.mocked(spawn).mockReturnValueOnce(child as unknown as ReturnType<typeof spawn>);
+    let closed = 0;
+    for (const pipe of [child.stdout, child.stderr]) {
+      pipe.on('close', () => { if (++closed === 2) child.emit('close', 0); });
+    }
+    return child;
+  }
+
+  it.each([1, 2, 3])('decodes stdout across byte offset %i of a four-byte character', async (offset) => {
+    const child = mockChild();
+    const result = execute('', () => {});
+    await Promise.resolve(); // let execute attach the builtin's pipe listeners
+    const value = 'test-value-\u{1f30d}-tail';
+    const bytes = Buffer.from(value);
+    const split = 'test-value-'.length + offset;
+    child.stdout.write(bytes.subarray(0, split));
+    child.stdout.write(bytes.subarray(split));
+    child.emit('exit', 0);
+    child.stdout.destroy();
+    child.stderr.destroy();
+    expect(await result).toEqual({ status: 0, stdout: value, stderr: '' });
+  });
+
+  it('bounds the drain when inherited pipes stay open after exit and finalizes received bytes', async () => {
+    vi.useFakeTimers();
+    try {
+      const child = mockChild();
+      const lines: string[] = [];
+      const result = execute('', (line) => lines.push(line));
+      await Promise.resolve();
+      let settled = false;
+      void result.then(() => { settled = true; });
+      child.emit('exit', 0); // the call is gone; a pipe owner still hasn't closed either pipe
+      child.stdout.write(Buffer.concat([Buffer.from('out'), Buffer.from([0xf0, 0x9f])]));
+      child.stderr.write(Buffer.concat([Buffer.from('ready\nerr'), Buffer.from([0xe2, 0x82])]));
+      await vi.advanceTimersByTimeAsync(999);
+      expect(settled).toBe(false);
+      expect(lines).toEqual(['ready']);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(settled).toBe(true);
+      expect(await result).toEqual({ status: 0, stdout: 'out\ufffd', stderr: 'ready\nerr\ufffd' });
+      expect(lines).toEqual(['ready', 'err\ufffd']);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('flushes an incomplete final code point before resolving the call', async () => {
+    const lines: string[] = [];
+    const result = await execute(`
+      process.stdout.write(Buffer.from([0xf0, 0x9f]));
+      process.stderr.write(Buffer.from([0xe2, 0x82]));
+    `, (line) => lines.push(line));
+    expect(result).toEqual({ status: 0, stdout: '\ufffd', stderr: '\ufffd' });
+    expect(lines).toEqual(['\ufffd']);
   });
 });
 
