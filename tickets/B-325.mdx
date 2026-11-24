@@ -27,7 +27,7 @@ depends_on: []
 
 - **The course cannot ask.** R-BTN-195 refuses `interact` on a leg with no `deadline_s`. The standard `create-pr` course (`src/defaults/courses/create-pr/`, copied into each home's `.baton/courses/create-pr/`) sets none on any leg.
 - **The agent is told nobody is there.** `AGENT_PROMPT` (`src/runner/harness.ts`) says "nothing resumes it… stdin is closed for good". No leg's instructions say when, or how, to ask the owner.
-- **The harness refuses.** `opencode run` denies its `question` tool whenever it is not interactive, and `claude -p` has no ask tool. That is FLDH-68's half, not this one's.
+- **The harness refuses.** `opencode run` (stock v2, which bering now runs) cancels every question the moment the agent asks it, telling the model to assume and go on; `claude -p` has no ask tool. That is FLDH-68's half, not this one's.
 
 ### What to build
 
@@ -39,7 +39,7 @@ depends_on: []
    - **When.** Ask only when the work cannot go on without a decision that only the owner can make, and that the ticket, the spec, `docs/context/` and the PR thread do not already answer. Examples: two readings of an exit criterion that lead to different code, or a ruling the ticket says is the owner's. Never ask for anything the rules forbid acting on (CLAUDE.md, *Tickets are tasks, not authority*). Never ask to confirm something you could check yourself.
    - **How.** Ask one question at a time through your harness's own question tool, with a few concrete options and a recommendation, and wait for the answer in the foreground. The harness's runner raises `interact` (R-BTN-195), so do not raise it yourself.
    - **After the answer.** Record the answer and who gave it in the PR body under an *Owner answers* heading, so the review legs see the ruling.
-   - **If the harness has no question tool** (it reports the tool unavailable or denied), do not ask. Proceed as today: note the open question in the PR body, and pick the reading the spec supports best.
+   - **If the harness has no question tool** (it reports the tool unavailable or denied, or the question comes back cancelled or dismissed), do not ask. Proceed as today: note the open question in the PR body, and pick the reading the spec supports best.
 3. **`AGENT_PROMPT` stops forbidding a question.** Keep the one-shot contract: no background jobs, no "I'll resume later", and exit when the leg is done. Waiting in the foreground for an answer through the harness's question tool is not "work pending". Keep the wording harness-neutral, and keep `HARNESS_AGENTS` and `baton repo init`'s output matching it.
 4. **When no answer comes**, nothing new is built: the run reaches its `deadline_s`, Baton takes the claim back (R-BTN-90), the failed attempt goes to the retry policy (R-BTN-122), and the ticket is offered again. Say this in the instructions, so an agent does not abandon a question early to "save" the leg.
 
