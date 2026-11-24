@@ -380,7 +380,8 @@ out of §7, §10 and §12.8. These remain in sections it did not reach.
   - One heartbeat write (the `uses` deprecation note) runs outside the heartbeat's transaction,
     against CLAUDE.md's rule.
 - **§8.3, the executor interface:** `exec` returns a streaming object, not `{status, stdout,
-  stderr}`; an executor bundle written to the spec loads, then fails on its first call.
+  stderr}`; an executor bundle written to the spec loads, then fails on its first call. The
+  owner ruled on 2026-11-24 that streaming is supported, so the spec follows the code (D13).
   `runner.json`'s `executor` is never read (the code reads `BATON_EXECUTOR`). The snapshot fetch
   always fetches `main`, whatever the claim's default branch. The spool's "within 5 s" and drain
   on exit are not built. Any non-JSON 4xx counts as "unreachable", so a proxy's error page sends
@@ -433,6 +434,7 @@ ticket is named, with why it does not cover the draft. Numbers come from Baton a
 | **D10** | The course validator keeps the rules it states: create-spec's `merge` verifies merged (R-BTN-131); cross-kind `renamed_from` refused (R-BTN-142); unknown keys refused in `capability_types` and condition reports; `.baton/markers.jsonl` out of `pr-close.ts`, `pr-verify.ts` and `docs/standard-courses.mdx`. | B-295 is the deadline name only; B-43 is course sources |
 | **D11** | An anchor sweep, the clean-up B-72 and B-277 assume. Repoint the 174 mismatched `§n R-BTN-m` pairs and the 177 citations of sections that no longer exist; fix the ids cited for what the rule does not say; add the missing anchors in section 3's table; leave migrations alone. Lands before B-277 step 3's check, so that check lands green. | B-72 is retired ids only, and waits on B-67; B-277 adds the check and fixes nothing |
 | **D12** | The spec says built only where it is built, for the sections PR #299 did not reach: section 5's list, headings included. | B-298 is the proposals convention; B-301 and B-302 are §3 and §4 and are extended above; B-276 makes status data but decides no rule |
+| **D13** | **Spec amendment, from the owner's ruling of 2026-11-24: `exec` streams.** R-BTN-107 states `exec(handle, argv, {cwd, timeout_s, stdin, env, onStderr}) → {result, write, kill}`, as `src/runner/executor.ts:64-106` implements it: `result` resolves to `{status, stdout, stderr}`; `write(line)` appends a line to the call's stdin after the first (R-BTN-133's wrapper reads abort reasons there under `run`); `kill()` stops that call's processes; `onStderr` receives each stderr line as it arrives (the verbose drain, D1's masked sink). An executor that cannot stream stdin queues the lines. `executor_api` stays 1, because no executor implements the old shape: Fieldhouse's E2B executor (`fieldhouse/sandbox/e2b/executor/executor.mjs:334`) already returns `{result, write, kill}`. The header comment at `executor.ts:12` that calls this "a deliberate widening of the spec" goes, and `tickets/B-184.mdx:66` gets the same edit. | B-184 builds the executor seam and restates the old shape; it does not amend R-BTN-107. No other ticket or spec page states the shape |
 
 **Supersede or rewrite rather than file:** the twelve tickets in *Open tickets that still
 prescribe a removed design*. **Reopen:** B-285.
@@ -447,6 +449,8 @@ prescribe a removed design*. **Reopen:** B-285.
 - 2026-11-24: **Baton dispatches with a personal token**, not a GitHub App ("If possible, use a
   personal token"). It is possible: the code already does, and webhooks need only the shared
   secret. The spec follows the code under B-301 (*Corrections*).
+- 2026-11-24: **The executor's `exec` streams** ("streaming needs to be supported"). The spec
+  follows the code's `{result, write, kill}` (D13).
 
 **Owner decisions surfaced, still open:**
 
@@ -469,4 +473,3 @@ prescribe a removed design*. **Reopen:** B-285.
   `human_key: any` a human-only list rests on key custody alone (R-BTN-185). Recommended: yes, as
   the code does. The variant exists to be claimed without hardware, and `human-gates-hardware`
   names the stronger promise.
-- Which way §8.3's executor interface goes.
