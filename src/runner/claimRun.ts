@@ -133,6 +133,7 @@ interface ClaimHost {
   retire(run: ClaimRun): void;
   isStopping(): boolean;
   isDraining(): boolean;
+  homeAdvanced?(): void;
 }
 
 /** R-BTN-4: a fresh run owns all of its mutable claim state, including when reattached. */
@@ -701,6 +702,7 @@ export class ClaimRun {
           stays = `the fast-forward failed (${msg(e)})`;
         }
         if (stays) this.o.log(`baton: the home stays at its own commit for ${ticket}, not the snapshot ${String(claim.snapshot_sha).slice(0, 10)}: ${stays}`);
+        else this.host.homeAdvanced?.();
       }
     } catch (e) {
       this.o.log(`baton: the claim's course would not load (${msg(e)})`);

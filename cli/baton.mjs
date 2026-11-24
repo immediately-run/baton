@@ -1237,11 +1237,11 @@ export async function main(argv) {
     const { homeMain } = await import('../scripts/baton-cli.mjs');
     return homeMain(argv.slice(1));
   }
-  if (argv[0] === 'run') {
+  if (argv[0] === 'run' || (argv[0] === 'runner' && argv[1] === 'start')) {
     // §6.13: the runner is TypeScript under src/runner; bundle it (a checkout runs the CLI with
     // its devDependencies), then run it in this process's stead.
     const { runMain } = await import('../scripts/baton-run.mjs');
-    return runMain(argv.slice(1));
+    return runMain(argv.slice(argv[0] === 'run' ? 1 : 2));
   }
   if (argv[0] === 'queue') {
     // R-BTN-202 (B-248): this host's local work queue for the runners on one home — local

@@ -108,6 +108,7 @@ script: setups, values and refusal codes are there and in the rules, not here. A
 | S-BTN-9 owner bar, stop | As S-BTN-8, with `applies: stop`: holders are released, not failed. | R-BTN-67 |
 | S-BTN-11 scheduled bar | A bar scheduled for a window refuses from its start and accepts from its end on Baton's clock, with no sync. | R-BTN-67, R-BTN-32 |
 | S-BTN-15 stale skills | A runner below `min_runner_version` gets no new claim (`stale-skills`) and finishes the one it holds. | R-BTN-22 |
+| S-BTN-313 refresh course versions and request a restart | After a clean home moves to a snapshot, the next heartbeat declares the new course version and Rule 9 lets the next claim through; a held claim finishes on its original protocol. Ahead or edited homes keep the old list. A behind CLI requests exit 75 only with the flag and no claim held. | R-BTN-22, R-BTN-34, R-BTN-72 |
 | S-BTN-33 tags gate | A runner whose tags meet a leg's `barred_tags` is never offered it and is refused `barred-tag` at claim and at `advance`; another runner takes it. | R-BTN-60; *no test* |
 | S-BTN-37 a course changes under a claim | A renamed leg carries its claim, attempts, backoff, timers and held position over; a removed station ends the claim `course-changed`; `stale-skills` follows only a raised `min_runner_version`; an invalid file is refused and raised, the previous kept. | R-BTN-64, R-BTN-142, R-BTN-69 |
 | S-BTN-38 a course measures itself | `/stats` serves a course's times, ends and overrides to a granted key and is `forbidden` to others. | §5.7 |
