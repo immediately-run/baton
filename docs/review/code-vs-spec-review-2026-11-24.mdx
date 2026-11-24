@@ -1,0 +1,432 @@
+---
+title: "Review — the code against the simplified spec, 2026-11-24"
+description: A read of src/, cli/ and the runner scripts against BATON_SPEC as PR #299 cut it on 2026-11-20 and as amended since (tiers, Access sign-in, outside work). Deprecated concepts the code keeps, logic more complex than the current rule, and anchors that are missing, retired or point at old section numbers — each mapped to the open ticket that covers it, with corrections to those tickets and drafts only for what no ticket covers.
+tags: [review]
+order: 57
+---
+
+<Lede>Commissioned by the owner on 2026-11-24: "baton specs were radically simplified … I don't
+think the code base has been updated to reflect the new, simpler specs. Please perform a
+thorough review of how the current code base implements the spec. Identify areas where the code
+retains deprecated concepts or unnecessarily complex logic. Also … record any places in the code
+where there should be an anchor to the appropriate section of a spec file, but this anchor
+comment is missing." And: read the waiting tickets so that no ticket drafted here duplicates
+one already filed.</Lede>
+
+Read at `main` `5758cdb` (2026-11-24). Eight reviewers each read one span of
+`spec/BATON_SPEC/` whole and the code that implements it; one of them rebuilt the schema by
+applying every migration to an in-memory SQLite and diffed it against §13 column by column. A
+mechanical cross-reference of every `R-BTN-n` the code cites against the spec index and the
+history's *Retired requirements* table was run beside them. The eight area reports, with every
+finding at `file:line`, are the [appendix pages](code-vs-spec-2026-11-24/index.md); this page
+is their merge. Findings marked **verified** were re-checked by hand against both the rule text
+and the code; the rest are the reviewers' claims, each of which the reviewer marked confirmed or
+likely.
+
+All 220 open tickets (`available`, `in-progress`, `in-review`, `deferred`; no ticket carries a
+literal `waiting` status) were read for overlap. Nothing here is new work where an open ticket
+already owns the change: such findings are listed as *covered*, and where the ticket's plan is
+wrong or incomplete, as a *correction to* that ticket.
+
+## Summary
+
+PR #299 removed text, not code. Of the fifteen follow-up tickets it filed (B-288 to B-302), one
+is done (B-292, in Fieldhouse); the other fourteen are `available`, as are B-322 (tiers, retired
+2026-11-23) and B-263 (signed control, retired 2026-11-19). So almost everything the spec retired
+since 2026-11-19 is still built and still served. That part is expected and ticketed.
+
+What the tickets do not cover falls in six groups:
+
+1. **Five security-relevant gaps** no ticket names (*Security first*, below).
+2. **Retired concepts outside the removal tickets' file lists**: about thirty places, mostly
+   reads, stats, the dashboard and compatibility shims whose reason has gone.
+3. **Complexity with no owner**: second implementations of one rule (the candidate query, rule
+   4, the schema validator, the conditions store, the repository read), dead code paths and
+   one-valued wire fields.
+4. **Anchors.** About 100 citations of retired ids; 174 places where a `§n` beside an id
+   disagrees with the section that id lives in; 177 citations of sections that no longer exist;
+   about twenty ids cited for something the rule does not say; seven built rules no code cites;
+   and missing citations on load-bearing functions in every area.
+5. **Corrections to open tickets**: B-288's plan, if followed, deletes the live sync
+   dispatcher; B-302's would mark §4 built while R-BTN-203 is not; B-285 is `done` with its
+   courier removal undone; fourteen open tickets still prescribe designs the simplification
+   removed.
+6. **The spec stating as built what is not**, in sections PR #299 did not reach.
+
+## Security first
+
+No open ticket covers these (S4 only in part). S1–S3 were verified by hand against the code; S4
+and S5 are the reviewers' findings.
+
+| # | What | Where | Rule |
+|---|---|---|---|
+| S1 | **A private key's body leaves the runner unmasked on two streams.** `maskKeys` holds no state between calls, and the verbose drain for `close`, `handoff` and the source calls, and replay's `onStderr`, call it once per line: only the `BEGIN` line is masked. Only the leg's `run` stream goes through `createLegMasker`. **verified** | `src/runner/claimRun.ts:405`, `src/runner/replay.ts:573`, `src/shared/mask.mjs:28` | R-BTN-144 class 6: output "is held until the `END` line or 16 KB" |
+| S2 | **`human-gates` holds without hardware keys.** The guarantee checks the three human-only approver lists only; the `human_key: hardware` condition §12.8 puts in it lives in a separate `human-gates-hardware`. A floor naming `human-gates` accepts `human_key: any`. **verified** | `src/core/policy.ts:495-507` | §12.8's guarantees table, `human-gates` |
+| S3 | **The protection report can never be accepted.** It requires a grant with role `protection-checker`, which no route, CLI command or import writes; so `no-runner-lands`, and every guarantee built on it, reads broken on every repository. **verified** | `src/core/policy.ts:983`, `:1002` | R-BTN-180 (the checker mark), R-BTN-188 |
+| S4 | **Refusals name the key's role**, an existence oracle §12.1 forbids. B-76 covers one site, `admin keys set`; the other four are uncovered. | `src/core/admin.ts:228`, `:559`, `:735`, `:883`, `:943` | §12.1: "the refusal does not name the role" |
+| S5 | **An `OP` ticket is claimable by any runner** unless its `requires` names `human-operator`. Rule 6 is retired and `operator_only` is stored and "shown, never read"; R-BTN-132's window says it is read as `human-operator` in rule 4, and nothing does. B-41 phase 1 would close it; it is `available` and unprioritised. **likely** | `src/core/gates.ts:31-33`, `src/core/board.ts:774` | R-BTN-121, R-BTN-132 |
+
+Two more are covered but live today, and worth ordering first in their tickets:
+
+- **Tiers can reap a live runner.** The heartbeat still refuses a `tier_ceiling` off the ladder
+  (`src/core/validate.ts:280`) and an off-ladder `tier_ceilings` entry
+  (`src/core/runnerApi.ts:312`); B-322's transition says these fields are accepted and ignored,
+  because a refused heartbeat reaps. Covered by **B-322**, step 2.
+- **`BATON_STATE` is the runner's real state file, runner secret included**, not the view §8
+  describes. Covered only by B-47, in older wording.
+
+Also: the policy's `readings` entry is parsed and never applied (`src/core/policy.ts`), though
+R-BTN-76 says a repository reads only the readings its policy admits and B-291's trust argument
+relies on it.
+
+## 1. Deprecated concepts the code keeps
+
+### Covered by an open ticket
+
+| Concept | Ticket | What the area reports add |
+|---|---|---|
+| Mirror, cutover, adoption, shadow reports, `legacy` runner and credential kinds | **B-288** | See *Corrections*: the plan deletes `dispatchWorkflow`; misses about a dozen files |
+| Git lock (`claim`/`set`/`done` push-retry, takeover, `--rules-reread`, drop-PR refusal), `position-disagrees`, next-free id scan, `--offline` | **B-178**, **B-289** | — |
+| Checks: `checksSetting`, `checkMap`, `CONCLUSIONS`, `exit_status` verdicts, `outbox.forge-check`, `check_app_id` | **B-290** | Misses `src/core/reads/credentials.ts` (lists check-runners as `not_built`) |
+| `resource` prerequisite and block: `leg_needs`, `resource_fleet`, `answer_lost`, `resourceAdvice`, the post's `needs` | **B-291** | A blocked end can name only a `capability` today, not a resource as its text says |
+| Tiers: gate 5, ladder, `tier_ceiling(s)`, `max_tier`, `tier_position`, `ready_by_tier`, `?tier=`, re-tier staleness, `--tier`, dashboard | **B-322** | Dropping `tier_ceiling` breaks `src/core/cutover.ts:183` unless B-288 lands first |
+| Signed control: `signed-control.ts`, `commitSign.mjs`, `verifyControl`, `control_json`, brief marks, `home-signed` source, `GET …/signing-keys` | **B-263** | The local queue's `control_required` gate (`src/runner/queue.ts`, `runOffline`) is outside its exit grep; because of it a fresh queue never runs an order offline, stricter than R-BTN-202 |
+| Notices and couriers (retired R-BTN-80, R-BTN-103): heartbeat `couriers`, `refused_couriers`, the courier routes | **B-67** | B-285 was meant to remove them and is `done`; see *Corrections* |
+| Posted decisions and the `decision` block kind (retired R-BTN-78) | **B-161**, **B-56** | create-pr's `review-rounds-<n>` and `run-tests-unreachable` run on posted decisions; no ticket moves them to person legs. B-161 points at B-74, which is superseded |
+| Snapshot placement ("git wins"): `next_source` `course`/`marker`/`inferred`, `extendsPath`, backwards detection by path | **B-120**, **B-149** | — |
+| Old worker wire names, `worker_id`, `X-Worker-Secret`, `min_worker_version` | **B-69** | `worker-reaped` is still read by the runner (dead) |
+| `blocked_by`, `operator_only` and the dependency labels | **B-41**, **B-10** | S5 above |
+| Interim board post (`state.items`, posted `confirmations`, "docs until R3-1233") | **B-302** | R3-1233 is superseded; the comments still cite it |
+| `max_duration` for `deadline_s` | **B-295** | Misses `src/runner/claimRun.ts:1435` and `src/dashboard/screens/courses/types.ts:118` |
+| The older policy document (`approvers.trust`, `grants.*`, `authorship`, courier writer, `inputs.answers`, `protected-signed`, named floors) | **B-293** | Also: no `sync` writer class and `runner` refused for every `std:` type, so the spec's own `cooperative` preset is refused; `board-from-trusted` reads the retired `inputs.answers`; `cli/baton.mjs:972` `POLICY_KNOBS` lacks `human_identity`, so `owner policy diff` never reports it (B-293 says the copy matches) |
+| Per-ticket retries with a 1 h / 4 h backoff | **B-11** | — |
+| Leg field `isolation` | **B-70** | — |
+| Interim runner bearer reach | **B-8** | — |
+| Old CLI names (`baton board`, `tickets …`, `request`, `run`, `admin resource set`, `baton blocked`) | **B-157**, **B-23** | — |
+
+### Covered by no open ticket
+
+Grouped by where a ticket would land. **verified** marks those re-checked by hand.
+
+- **Seed and hosts.** `wrangler.toml`'s `BATON_REPOSITORIES` seed registers `docs` with a
+  `mirror_workflow` and no `cut_over` (**verified**): a rebuilt instance undoes ruling 4.
+  `src/local/testCourse.ts` cuts over on every run. `src/local/main.ts:77` accepts and ignores
+  `--signing-key`.
+- **Retired fields still stripped, validated or accepted, with no window that closes them.**
+  The board post's `hooks`, `matrix`, `reviewers` (`src/core/board.ts:305`), its
+  `transcript_repos` validation (`:332`), and its `confirmations`, which the vendored sync still
+  computes from git `status:`; readings' `nonce`/`signature` and the policy's `readings.*.signed`
+  (`src/core/validate.ts:1225`, `:1240`; `src/core/policy.ts:320`); the heartbeat's
+  one-claim-per-runner shape sent beside the list at concurrency 1, the `uses`/`bills` window,
+  the `skills_version` and course-less-runner cases; `BATON_TAKEN`/`BATON_ADVICE` and the
+  retired `taken` field (R-BTN-177); docs' interim `{course}` readers,
+  `scripts/data/baton.json` and the default repository `'docs'` in the runner; about ten "a
+  Baton before B-103/134/185/188" shims; null-`run_id` branches after migration 0038's backfill.
+- **Mirror-only and hook-only residue outside B-288's list.** `src/core/stats.ts` serves
+  `foreign_writes` (a mirror-only event) and `hook_failures: []`, always empty;
+  `DISCREPANCY_SUBS` keeps `foreign-write`, `position-replaced` and `route-overridden`, which
+  nothing emits, and lacks the spec's `output-invalid` (`src/core/history.ts:24`).
+- **Dead tables and codes.** `policy_pins` (retired with B-160, which is done, and no live
+  ticket drops it); the error code `provider-suspended` (`src/core/http.ts:53`), never thrown;
+  `PENDING_COOKIE`, and a dashboard confirmation-code client the server never answers.
+- **Activity kinds of the old roadmap-pr course hard-coded in core.** Fifteen kinds in
+  `ACTIVITY_KINDS` (`src/core/validate.ts:86`), a reviewer parented to the newest open
+  `review-round` (`src/core/runnerApi.ts:767`), and `push`/`review-round` read to build the
+  resume record (`src/core/attempts.ts:77`). §9.9, R-BTN-24 and R-BTN-25 say kinds come from the
+  course's `step_kinds` and core reads no particular kind. **verified**
+- **Retired `.baton/markers.jsonl`** still described in `src/defaults/pr-close.ts`,
+  `pr-verify.ts` and `docs/standard-courses.mdx` (retired by B-100).
+- **`repo migrate-markers`** and the `--scope` retired-word window: commands outside R-BTN-127's
+  table.
+- **Hard-coded deployment names in core.** `DEFAULT_TRANSCRIPT_REPOS` names immediately-run's
+  repositories; §13's default is `[]`.
+
+## 2. Logic more complex than the current rule
+
+| Finding | Where | The current rule | Ticket |
+|---|---|---|---|
+| A second candidate query, production-dead, kept as a test seam; restates the gates and still carries rule 5 and the cutover filter (about 100 lines, plus `reference` branches in five methods) | `src/core/claims.ts:643-743` | §6.6: `isEligible` is "the reference for every rule" | none |
+| Rule 4 (capability admission) in five or six places; a leg's capabilities in three stores | `gates.ts`, `claims.ts`, `capacity.ts`, `blocks.ts` | R-BTN-121, §6.6 rule 4 | none (B-239 stores the inputs, does not merge the code) |
+| `detailSchema.ts`: a second JSON-schema validator (4 KB, 5 levels, no `pattern` or `$ref`) | `src/core/detailSchema.ts` | R-BTN-108: one validator, `src/shared/schema.mjs` | none |
+| `policy_conditions`: a second store for repository `baton.*` conditions, because `conditions.ticket_id` is `NOT NULL` since 0075. No read serves it, so those conditions never reach the conditions list or Needs you | migrations, `src/core/policy.ts` | R-BTN-163 | none; this is a correctness bug |
+| `repositoryRead` re-matches paths after `dispatchRead`: its ticket-show branch is dead, its runner refusal on leg runs unreachable | `src/core/baton.ts:1339` | — | none |
+| `PUT …/policy` re-checks `retired_at` that `adminRoute` already refused | `src/core/baton.ts:1257` vs `:1227` | — | none |
+| Two tables for one coalescing window (`webhook_dispatch`, `webhook_syncs`) | migrations, `src/core/webhook.ts` | R-BTN-94; §13.2 has one table | B-297 lists it as a row to write, not a merge |
+| A retired repository's rows deleted at retirement and filtered again by readers; about 44 raw `retired_at IS NULL` filters beside `Registry.live()`, "the one predicate" | `admin.ts:487`, `webhook.ts:36`, `registry.ts:363`, 15 files | "rules read live repositories only" | none |
+| The held-claim SQL written out about seven times beside `HELD_CLAIMS_SQL` | `claims.ts`, `blocks.ts` | — | none |
+| `Blocks.invalidateRecommend` is a documented no-op, still called | `src/core/blocks.ts:167`, `:242`, `:829` | — | none |
+| The `floor` rule outside `gatesFor` | `src/core/claims.ts:319` | §6.6 | none |
+| `observe()` returns `bars: []`, which the route overwrites | `src/core/observations.ts:29` vs `baton.ts:637` | — | none |
+| A refresh with no `read_sha` kept for pre-B-183 CLIs | `src/core/board.ts:133`, `baton.ts:1680` | §4.3: `read_sha` is the one statement | none |
+| `ticketScoped.kind` has four values; only `override` is used | `src/core/board.ts` | — | none |
+| The ticket-source re-read implemented three times in the runner, with a duplicated `wrapperOutcome`; `recommendations()` and `drainLines` dead; `kind: 'vm'` hard-coded | `src/runner/` | — | none |
+| `start-runner.sh` always passes a hard-coded `--capabilities`, defeating the grant default | `scripts/start-runner.sh` | R-BTN-72 | none |
+| Three grace constants for one stop rule | `src/runner/` | R-BTN-119, R-BTN-145 | **B-299** row 6 |
+| Two copies of the branch matcher, core and defaults | `src/core/courses.ts`, `src/defaults/` | R-BTN-141 | none |
+| Action matchers used only by tests (`matchAction`, `bodyMatches`), with a comment that contradicts R-BTN-129's `404` | `src/core/actions.ts:503` | R-BTN-129 | none |
+| `addProbe` takes and ignores `instances`, so `GET /v1/admin/resources` always shows empty probe instances | `src/core/resources.ts` | — | none |
+| `paths.control: trusted-runner`: a knob value no preset uses and nothing enforces, which still makes `no-runner-lands` hold | `src/core/policy.ts:118`, `:233`, `:489` | R-BTN-184 is proposed | none (B-165 does not name it) |
+
+## 3. Anchors
+
+The code anchors to the spec by citing ids in comments (about 3,100 `R-BTN-n` citations in
+`src/` and `cli/`). Ids are stable and section numbers are not
+([spec writing](../context/spec-writing.mdx), *Reading* 3), and a retired id's citations are
+cleaned up (*Writing* 5). Nothing yet checks either: B-72 turns the retired-id warning into a
+failure once B-67 lands, and B-277 step 3 adds a check of `§n R-BTN-m` pairs. Neither ticket
+repoints what is wrong today, so a check landed as written would fail on `main`.
+
+### Retired ids still cited
+
+`node scripts/check-spec.mjs` warns about all of them; outside tests, the model and migrations
+(which may not be edited):
+
+| Id | Retired | Sites in `src/`, `cli/` | Mostly in |
+|---|---|---|---|
+| R-BTN-80 | notices and couriers, 2026-10-20 | 43 | `admin.ts`, `baton.ts`, `notices.ts`, `queues.ts`, `http.ts`, `validate.ts`, `cli/baton.mjs`, `cli/decisions.mjs` |
+| R-BTN-78 | posted decisions block, 2026-11-01 | 34 | `baton.ts`, `blocks.ts`, `claims.ts`, `stations.ts`, `validate.ts`, `course-pr.ts`, `cli/baton.mjs` |
+| R-BTN-103 | courier pools, 2026-10-20 | 21 | `notices.ts`, `runnerApi.ts`, `front.ts`, `baton.ts`, `admin.ts`, `validate.ts` |
+
+Most go with their code (B-67, B-161). Comments that outlive their code still need repointing,
+as B-72 step 1 lists for the model.
+
+### Section numbers that no longer mean what the comment says
+
+- **174 places** where a `§n` sits beside an id from another section. The largest groups:
+  R-BTN-74 cited as "§2" (12 places; it is §4.2), R-BTN-55 as "§3" (7; §2.1), R-BTN-113 as
+  "§13.1" (6; §8.3), R-BTN-73 as "§7.1" (4; §3.3), R-BTN-13 as "§10.1" (4; §11.1), R-BTN-57 as
+  "§10.6" (3; §11.2). By file: `baton.ts` 15, `claims.ts` 11, `validate.ts` 8, `board.ts` 7,
+  `cli/baton.mjs` 7, `runnerApi.ts` 5.
+- **177 citations of sections that do not exist**: `§6.12` and above (about 30 of `§6.13` in the
+  runner alone), the pre-rewrite `§2a`–`§2h` and `§2m.2`, every `§10.x` (§10 has no subsections
+  now), `§13a`, `§3a`, `§3b`.
+- One comment links into the index: `src/core/gates.ts:51` (`spec/BATON_SPEC.md`), which holds no
+  rule text.
+
+The fix is mechanical: drop the `§` where an id is present (the id is the anchor), and repoint
+it to the id's current section where only a `§` is given.
+
+### Ids cited for what the rule does not say
+
+From the area reports, each checked against the rule text:
+
+- `wait_s` cites R-BTN-162 (a proposal); it is R-BTN-160.
+- `src/core/validate.ts:804-805`, `:818`: "superseded by the close (R-BTN-168)"; R-BTN-168 says
+  Baton supersedes no ticket.
+- R-BTN-23 cited where R-BTN-122 applies (retries); `src/defaults/agent-words.ts` cites R-BTN-74
+  for R-BTN-131.
+- R-BTN-130 cited for cursors; R-BTN-131 for the id scan (R-BTN-199, R-BTN-74); R-BTN-120 for the
+  `Requires:` clause; R-BTN-66 for tiers (retired); R-BTN-61 for `?limit=` (R-BTN-99); R-BTN-184
+  for `tickets-approved` (R-BTN-189, §4.4).
+- "R-BTN-180's request bullet" (`src/defaults/forge.ts`, `src/core/`): no such bullet exists.
+- R-BTN-115 cited for checks it no longer states; R-BTN-155 cited for owners' sessions and
+  confirmation codes that live only in the people-and-dashboard proposal; the session length
+  cites R-BTN-57 instead of R-BTN-155.
+- Comments that describe what is not there: policy "pins" and hashes (B-160 retired them); leg
+  logs, `executor_digest` and `replay_clone_credential` (`src/runner/`); `src/core/ports.ts`
+  documents B-294's break-glass defect as intended; `wrangler.toml`'s Access comment contradicts
+  R-BTN-155 as built on 2026-11-21; `src/core/board.ts` calls the 10,000-ticket limit
+  "spec-silent", which R-BTN-149 now owns; comments still describe rule 6 as live.
+
+### Rules the spec states as built that no code cites
+
+R-BTN-18 (§1), R-BTN-135 and R-BTN-136 (§2.2), R-BTN-141 (§3.4), R-BTN-142 (§5.6), R-BTN-152
+(§6.7), R-BTN-91 and R-BTN-102 (§8), R-BTN-38 (§9.1), R-BTN-158 (§12.5). Each is either built
+without an anchor (R-BTN-141's branch grammar in `src/core/courses.ts`, R-BTN-142's rename
+checks in `course.ts:492`) or not built (R-BTN-158's local host, B-300). R-BTN-203 is cited
+nowhere and is not built (B-311).
+
+### Missing anchors on load-bearing code
+
+The appendix pages list them function by function. The ones that matter most, because they
+are refusals, bounds or security checks:
+
+| Area | Function | Should cite |
+|---|---|---|
+| §3 | branch-pattern grammar and matcher (`courses.ts`), `branchMatches`, `branchHolder` (`claims.ts`) | R-BTN-141, R-BTN-26, R-BTN-140 |
+| §4 | board-post caps (`board.ts:467`, the auth body caps), held and forced posts, owner-state export and import, the head's founded check | R-BTN-149, R-BTN-11, R-BTN-10, R-BTN-88, R-BTN-62 |
+| §5 | `validateCourse`'s leg bounds and rename checks; stub verification in `src/defaults/courses.ts`; `countsAsFailed` (`attempts.ts`) | R-BTN-69, R-BTN-142, R-BTN-131, R-BTN-122 |
+| §6 | `gatesFor` rules 3, 8, 9, 10 and the awaiting-sync check; `expireMessages`, `needsYou`, `checkOverride`, `seatHolders`, `launchCandidates`; `scope.ts` | §6.6 rules by number, R-BTN-163, R-BTN-12, R-BTN-178, R-BTN-99, §12.9 |
+| §8 | bounded git calls, signals, the grant-default declaration, restart and liveness in the runner; the scope audit; `builtin`'s `stop` | R-BTN-72, R-BTN-9, R-BTN-6, R-BTN-123, R-BTN-106, R-BTN-119, R-BTN-145 |
+| §9 | `prefer`/`rationale`; retry, hold and override; `forceReap`, `resolve`; message delivery; `recordReports` | R-BTN-100, R-BTN-122, R-BTN-12, R-BTN-155, R-BTN-119, R-BTN-99 |
+| §11, §12 | sign-in, session and logout in `admin.ts`; `revokeKey`; bars and owners | R-BTN-155, R-BTN-57, R-BTN-67, R-BTN-58 |
+| §2 | tenant naming and the per-tenant objects | R-BTN-135, R-BTN-136 |
+
+One refusal has no rule to cite: the heartbeat refusal for courses of ungranted repositories
+(`src/core/runnerApi.ts:357`). It needs a rule or removal.
+
+## 4. Corrections to open tickets
+
+These change an open ticket's plan, not the work list.
+
+- **B-288.**
+  - Step 3 says "Remove `mirror.ts`", but `src/core/mirror.ts:142` holds `dispatchWorkflow`.
+    That is the one sync dispatcher both hosts import (`src/cloudflare/baton.ts:7`,
+    `src/local/host.ts:6`). **verified** Move it out first.
+  - The plan's file list misses `actions.ts`, `reads/sync.ts`, `reads/repositories.ts`,
+    `reads/conditions.ts`, `reads/credentials.ts`, `http.ts` (`not-cut-over`), `validate.ts`
+    (`checkShadowReport`), `stats.ts` (`foreign_writes`), `local/testCourse.ts`,
+    `wrangler.toml`'s seed, the dashboard's credential screens and
+    `POST /v1/sync/foreign-claim`.
+  - Its step 4 (`IR_BATON_*`) is already done in `src/`. `scripts/start-runner.sh`'s probe
+    remains.
+  - Order it before B-322 (`cutover.ts:183` reads `tier_ceiling`).
+- **B-285** (`done`) titled "notices and couriers", but the heartbeat still reads `hb.couriers`
+  and answers `refused_couriers` (`src/core/runnerApi.ts:443`, `:525`). **verified** Reopen it,
+  or say in B-67 that the courier half is now its own.
+- **B-302** plans to drop "(proposal)" from §4's heading, but R-BTN-203 and most of §4.3's
+  observation fields (`runner_pushers`, `verdict_refs`, `positions`, `claim_prs`) have no code.
+  It also plans to add `stations` to §4.4, which contradicts R-BTN-39 (Baton owns the position).
+  Add R-BTN-149's caps to it: the code answers `invalid-params` rather than `too-large`, raises no
+  `baton.too-large`, caps a signed post at 1 MB rather than 8 MB, and leaves a CI-identity post
+  uncapped.
+- **B-297** is partly stale:
+  - Already done: `held_snapshots`, `ui/board/accept`, `GET admin/capacities`. Already gone:
+    `reviewer_agents`, the policy read's signature fields.
+  - It assigns couriers to B-285.
+  - It misses: two §13 tables no migration creates (`ticket_evidence`, `reconcile_displaced`,
+    for R-BTN-203); about 60 §13 columns that do not exist (forge ids, `kept_json`, grant
+    `domain` and `checker`, condition `ref` and `detail`, ticket-block `found` and `binds`, …);
+    and §14 shape mismatches (`?person=1` and `next_cursor` on the conditions read, `worker_id`
+    on the board read, the admin change form, the resolve body `{decision, answer}` against
+    `{restart}`).
+- **B-299**'s line references predate the split of `src/runner/runner.ts`; rows 1–5 and 9 are
+  still open.
+- **B-301** should take R-BTN-55 and R-BTN-73:
+  - Dispatch uses a `GITHUB_DISPATCH_TOKEN` personal token where the spec describes App
+    installation tokens; the App's id and key appear nowhere in the code.
+  - R-BTN-73 matches by id through `code_repos`; the code matches by path and through tickets'
+    `repos:`, short names included.
+- **B-300** should take the local host's gaps:
+  - An 8 MiB body cap that refuses 25 MiB App deliveries with `invalid-params`.
+  - No `--human-keys`, `--github-app-id`/`--github-app-key` or `baton server start`.
+  - `BATON_HUMAN_KEYS` and `BATON_PLAN_LIMITS` silently dropped from `--config`.
+- **B-293** should take S2, the writer classes, `board-from-trusted` and `POLICY_KNOBS`
+  (section 1). S3 can go there too, or into B-147's successor; see *Drafts*.
+- **B-161** depends on B-74, which is superseded; point it at what replaces B-74, and add
+  create-pr's `review-rounds-<n>`, `run-tests-unreachable` and the option `grants` as person
+  legs.
+- **B-316** (masker follow-ups) is scoped to `createLegMasker`; S1 is the other half. Extend it,
+  or take S1 as D1 below.
+- **B-262** still points at §16.2's rollout plan, which ruling 4 closed.
+
+### Open tickets that still prescribe a removed design
+
+PR #299 re-read 70 live tickets. These were not brought to the rulings, and an agent claiming
+one would rebuild what the owner cut. Each wants `superseded` or a rewrite before it is
+claimable:
+
+| Ticket | Builds | Against |
+|---|---|---|
+| R3-1215, R3-1216, R3-1220, R3-1221 | shadow reports, the shadow week, the cutover act and its verification | ruling 4: docs has cut over (B-288) |
+| B-201, B-220 | the Sync screen's SHADOW banner, Cut over, Confirm adoption | ruling 4 |
+| R3-1265 | mirror runners (`baton repo sync and mirror`) | ruling 4 |
+| B-64 | the outbox's `forge-check` kind and courier delivery | ruling 5 (checks), R-BTN-80 retired |
+| B-67 (phase 4) | "leaves only `forge-check` notices" | ruling 5 |
+| B-155 | a defined `std:checks@1` writer, a deliverer | ruling 5 |
+| B-46 | "checks from an exit status" | ruling 5 (B-290) |
+| B-199 | the `check_runners` field and screen | ruling 5 |
+| B-21, B-245 | resource readings and end-sourced `needs` as blocks | ruling 5 (B-291) |
+| B-147 | trust levels, trust domains, model family on grants and couriers | B-165's rulings of 2026-11-02 |
+| R3-1254 (in progress) | courier notices and decisions in the model | R-BTN-78, R-BTN-80 retired |
+| B-66 | the handler courses `ask`, `deliver`, `announce` | R-BTN-169 retired; the design is in the conditions proposal. A building ticket is fine; its spec citations need repointing to the proposal |
+
+## 5. Where the spec states as built what is not
+
+This is not code drift, but it decides which way each fix goes. PR #299 moved unbuilt designs
+out of §7, §10 and §12.8. These remain in sections it did not reach.
+
+- **§1, §3, §4, §13 and §14 are headed "(proposal)"** though they are mostly built, while parts
+  of them are not.
+- **R-BTN-201** says `launch-candidates` is not built; R-BTN-99, §6.7, §14 and the code have it.
+- **R-BTN-69** lists `arrives` and `reconciles`, and R-BTN-39 and R-BTN-203 describe the
+  reconcile flow, but the validator refuses both fields (B-311). `docs/standard-courses.mdx`,
+  now the shipped contract, lists fact and reconcile legs for `create-pr`, `review-pr` and
+  `create-spec` that the course files do not have. It also still shows `--tier` and the owner
+  round as a posted decision.
+- **§9.7** states per-ticket-and-leg retries with a `leg_attempts` table; there is none (§7's
+  intro says so). §9's "a contract-input end is not a failed attempt": `attempts.ts` counts it.
+- **R-BTN-121**'s check that every leg capability is of a declared type is not built.
+  `capability_types` entries accept unknown keys, so `from: executor` is silently ignored.
+  Condition reports accept `handler`.
+- **R-BTN-131**: create-spec's `merge` stub has no `verify: 'merged'`
+  (`src/defaults/courses.ts:364`). This is a code fix, since the rule is right.
+- **R-BTN-142**: the validator does not refuse a `renamed_from` that crosses kinds.
+- **R-BTN-149**'s caps; **R-BTN-73**'s id matching; **R-BTN-55**'s App tokens (see B-301, B-302
+  above).
+- **R-BTN-138** states forge ids as built; there are none (B-45).
+- **The wire shapes §8.1 and §9.1 call "stated once" disagree with §14 and the code:**
+  - The heartbeat's `reports` is missing from §8.1.
+  - The advance reply's `inputs` and `flags` are not returned.
+  - The heartbeat's per-claim fields are not served.
+  - The claim answer still lists `brief`, and the reconcile `evidence`/`displaced` nothing
+    builds.
+  - §9.1's `unknown-ticket` is never sent.
+  - Claim idempotency is keyed on `request_id` alone, not `(runner_id, request_id)`.
+  - One heartbeat write (the `uses` deprecation note) runs outside the heartbeat's transaction,
+    against CLAUDE.md's rule.
+- **§8.3, the executor interface:** `exec` returns a streaming object, not `{status, stdout,
+  stderr}`; an executor bundle written to the spec loads, then fails on its first call.
+  `runner.json`'s `executor` is never read (the code reads `BATON_EXECUTOR`). The snapshot fetch
+  always fetches `main`, whatever the claim's default branch. The spool's "within 5 s" and drain
+  on exit are not built. Any non-JSON 4xx counts as "unreachable", so a proxy's error page sends
+  the runner offline. The runner and replay fall back to the production origin, where R-BTN-137
+  says there is none.
+- **§11:**
+  - R-BTN-159 says `owner grant add --api-key --name` is built; it is not.
+  - About 25 commands in R-BTN-127's table are unmarked and absent from the CLI.
+  - `owner policy diff` diffs a file, where the table says a stored version.
+  - §11.4 says controls and polling are not built; the dashboard has both.
+  - R-BTN-188 and R-BTN-57 disagree on whether an administrator passes a `key:` approver list.
+- **§6:**
+  - Its "Not built" list omits `not_before` waits (R-BTN-89), posted `depends_at`, the `course:`
+    label prefix and the conditions.
+  - §6.3 describes end-sourced needs as built.
+  - The security proposal still has `requires.resources` and gating `resource` rows, against
+    ruling 5.
+  - Readings may last 24 h in the code against 1 h in the spec; the 8-instrument limit is
+    missing; the one-a-minute limit is per kind, not per instance.
+  - `ticket` rows refuse a claim but not an advance (R-BTN-75).
+  - The capability blocked end does not recount the fleet in its transaction.
+- **§5.7**'s stats rule has no id.
+- **The history's migration register** says the V1 paged lists are served; they were removed on
+  2026-11-20.
+- **R-BTN-199** lists a delegated key among the sequence route's principals; R-BTN-130 says
+  Baton registers none.
+- **R-BTN-88**: the import checks far less than "the write path's validation".
+- **`human` is not built** (`last_written_by.human`, B-264), so no ticket's
+  "**Brief:** the owner …" line can pass CLAUDE.md's test yet. Every brief is a claim until
+  B-264 lands.
+
+## Drafts: only what no open ticket covers
+
+Each was checked against the 220 open tickets by title, description and plan; the nearest
+ticket is named, with why it does not cover the draft. Numbers come from Baton at filing
+(`baton tickets new`); none is filed by this page.
+
+| Draft | What | Nearest open ticket, and why not it |
+|---|---|---|
+| **D1** | Mask class 6 on every runner stream. `wrapperCall`'s drain and replay's `onStderr` go through a stateful masker; one test feeds a key block line by line to each sink. (S1) | B-316 is scoped to `createLegMasker`'s own defects. Fold D1 into B-316 if the owner prefers |
+| **D2** | The policy's guarantees as §12.8 states them. `human-gates` includes `human_key: hardware`; the protection checker's role can be granted (or the guarantee reads its mark, R-BTN-180); the `sync` and `runner` writer classes; `board-from-trusted` reads `attestations`; the readings entry applied. (S2, S3) | B-293 reconciles the knobs and presets, not the guarantee formulas. Fold in if the owner prefers one ticket |
+| **D3** | Refusals that name no role: the five `admin.ts` sites answer the §12.1 form. (S4) | none |
+| **D4** | Activity kinds are the course's. Remove `ACTIVITY_KINDS` and the `review-round` and `push` special cases from core; validate a reported kind against the course's `step_kinds`; build or drop the resume record's `resume` key. | none (B-271 shrinks the model, B-162 moves route choices) |
+| **D5** | One implementation per rule, and no test-only production code. Remove `referenceCandidates` and the `reference` branches; rule 4 through one function; `HELD_CLAIMS_SQL` everywhere; `Registry.live()` for every live-repository filter, and retirement clean-up done once; one branch matcher; drop `invalidateRecommend`, `matchAction`, `bodyMatches`, `recommendations()`, `drainLines`; `repositoryRead`'s dead branches and `PUT …/policy`'s second check. | B-237 and B-243 are performance tickets; B-272 moves code out of `baton.ts` without merging duplicates. D5 can follow B-272 |
+| **D6** | `detailSchema.ts` goes: condition detail validates through `src/shared/schema.mjs` (R-BTN-108). | none |
+| **D7** | Repository conditions reach the conditions list. Merge `policy_conditions` into `conditions` (a nullable `ticket_id`, in a new migration), so repository `baton.*` conditions reach Needs you (R-BTN-163). | none; B-57 lists conditions but assumes one store |
+| **D8** | Close the compatibility windows whose reason is gone: the board post's `hooks`/`matrix`/`reviewers` and `confirmations`; readings' `nonce`/`signature`; the heartbeat's single-claim shape, `uses`/`bills`, `skills_version`, course-less runners; `BATON_TAKEN`/`BATON_ADVICE`/`taken`; the pre-B-103/134/185/188 shims and null-`run_id` branches; `--signing-key`; refreshes without `read_sha`; the interim `{course}` and `scripts/data/baton.json` readers and the default `'docs'`; `worker-reaped`. Each is a Migrations entry with a close, or removed now. | B-69 closes the worker-name window only; B-165 takes knobs, not windows |
+| **D9** | Dead state and one-valued fields: drop `policy_pins`; `hook_failures` and `foreign_writes` from stats; `DISCREPANCY_SUBS`' dead members (add `output-invalid`); `provider-suspended`; `PENDING_COOKIE` and the unanswered confirmation-code client; `addProbe`'s ignored `instances`; `ticketScoped.kind`; `observe()`'s `bars`; one coalescing table (with B-297's row). | B-297 documents tables, it does not remove dead ones |
+| **D10** | The course validator keeps the rules it states: create-spec's `merge` verifies merged (R-BTN-131); cross-kind `renamed_from` refused (R-BTN-142); unknown keys refused in `capability_types` and condition reports; `.baton/markers.jsonl` out of `pr-close.ts`, `pr-verify.ts` and `docs/standard-courses.mdx`. | B-295 is the deadline name only; B-43 is course sources |
+| **D11** | An anchor sweep, the clean-up B-72 and B-277 assume. Repoint the 174 mismatched `§n R-BTN-m` pairs and the 177 citations of sections that no longer exist; fix the ids cited for what the rule does not say; add the missing anchors in section 3's table; leave migrations alone. Lands before B-277 step 3's check, so that check lands green. | B-72 is retired ids only, and waits on B-67; B-277 adds the check and fixes nothing |
+| **D12** | The spec says built only where it is built, for the sections PR #299 did not reach: section 5's list, headings included. | B-298 is the proposals convention; B-301 and B-302 are §3 and §4 and are extended above; B-276 makes status data but decides no rule |
+
+**Supersede or rewrite rather than file:** the twelve tickets in *Open tickets that still
+prescribe a removed design*. **Reopen:** B-285.
+
+**Owner decisions surfaced, none taken here:**
+
+- Whether D1 and D2 fold into B-316 and B-293.
+- Whether `human-gates` keeps a hardware-free variant at all. The code's `human-gates` is the
+  spec's minus hardware.
+- Whether the protection checker is a grant role or a mark.
+- R-BTN-55: App installation tokens, or the personal token the code uses.
+- Which way §8.3's executor interface goes.
