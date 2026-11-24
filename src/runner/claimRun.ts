@@ -1257,7 +1257,11 @@ export class ClaimRun {
       return { kind: 'lease-lost' };
     }
     if (this.o.verbose) this.o.log(`baton: ${leg} runs: node ${basename(LEG_PROCESS)} run ${basename(script)} (session ${sessionId}, executor ${this.executor.source})`);
-    const running = this.wrapperCall(handle, 'run', script, [ctx], undefined, () => sink);
+    // The stub cannot observe a pending harness question or its answer (R-BTN-195).
+    // Give it potential eligibility: a cadence beat can still land the link if startup failed.
+    // The actual raise is checked separately against the link Baton already holds.
+    const canInteract = channel != null && checkRaise('interact', course.graph?.conditionTypes ?? new Map(), this.raisePolicy(course, leg, this.legSessionUrl)).ok;
+    const running = this.wrapperCall(handle, 'run', script, [{ ...ctx, can_interact: canInteract }], undefined, () => sink);
     return await this.awaitLeg(leg, handle, channel, running, sink);
   }
 
@@ -1418,6 +1422,17 @@ export class ClaimRun {
     return { kind: 'ok', result };
   }
 
+  // By default, check what Baton holds, not just what the executor's handle names.
+  private raisePolicy(course: CourseLoad, leg: string, sessionUrl = this.sessionLinkLanded ? this.legSessionUrl : null) {
+    const def = course.graph?.legs.get(leg);
+    return {
+      conditions: def?.conditionTypes ?? null,
+      autonomous: def?.autonomous === true,
+      deadlineS: def?.maxDuration ?? null,
+      sessionUrl,
+    };
+  }
+
   /**
    * B-234 (R-BTN-160, R-BTN-195): one request off the leg run's channel. `raise` is checked as
    * the runner checks a move — on the facts of the leg and its run, from the claim's snapshot —
@@ -1435,19 +1450,8 @@ export class ClaimRun {
     const subject = typeof req.subject === 'string' ? req.subject : '';
     if (subject.trim() === '') return { ok: false, error: 'a raise carries a subject (--subject, R-BTN-160)' };
     const type = typeof req.type === 'string' ? req.type : '';
-    const def = course.graph?.legs.get(leg);
     const declared: Map<string, ConditionDeclaration> = course.graph?.conditionTypes ?? new Map();
-    const verdict = checkRaise(type, declared, {
-      conditions: def?.conditionTypes ?? null,
-      autonomous: def?.autonomous === true,
-      deadlineS: def?.maxDuration ?? null,
-      // R-BTN-113/R-BTN-195: the link BATON holds for this run — the handle's once a beat
-      // carrying it answered, never the handle's alone. Baton sets an `interact`'s url from
-      // the link it holds, so a raise reported before the beat landed it would be refused BY
-      // Baton (`invalid-params`) instead of on this channel, its reason never reaching the
-      // leg — the one refusal R-BTN-195 gives the channel.
-      sessionUrl: this.sessionLinkLanded ? this.legSessionUrl : null,
-    });
+    const verdict = checkRaise(type, declared, this.raisePolicy(course, leg));
     if (!verdict.ok) {
       this.o.log(`baton: ${ticket}'s ${leg} raise of ${type || '(none)'} was refused on the channel: ${verdict.reason}`);
       return { ok: false, error: verdict.reason };

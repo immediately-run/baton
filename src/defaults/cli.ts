@@ -170,8 +170,8 @@ const defaultSkill = (course: string): string => `baton-${course}`;
 /** The `courses` entry `baton repo init` writes: every R-BTN-51 field, so a repository edits
  * them where the spec says rather than discovering them. Never `min_worker_version`: init
  * writes the new name only; the window is on the read (above). */
-function courseEntry(course: string, legs: string[]): Required<Omit<CourseEntry, 'previous_branch_pattern' | 'source' | 'min_worker_version'>> {
-  return { id: course, version: 1, min_runner_version: 1, skill: defaultSkill(course), step_kinds: legs, branch_pattern: DEFAULT_BRANCH_PATTERN, protocol_files: [] };
+function courseEntry(b: BuiltIn): Required<Omit<CourseEntry, 'previous_branch_pattern' | 'source' | 'min_worker_version'>> {
+  return { id: b.id, version: b.version ?? 1, min_runner_version: 1, skill: b.skill, step_kinds: Object.keys(b.course.legs), branch_pattern: DEFAULT_BRANCH_PATTERN, protocol_files: [] };
 }
 
 export interface SyncArgs {
@@ -1294,6 +1294,7 @@ const AGENT_WRAPPER_ENV = 'BATON_AGENT_WRAPPER';
  * convention puts it. */
 export function stubSource(b: BuiltIn, course: string, leg: string): string {
   const { ask, position, verify, pushes, delivered } = b.legs[leg];
+  const asksOwner = b.id === 'create-pr' && (leg === 'implement' || leg === 'fix');
   // A leg whose close writes a line on a PR may name that PR after its answer (B-29): a ticket's
   // PRs may sit in other repositories, and its home may have none.
   const names = b.reads === 'prs' && COMMENTING_LEGS.has(leg);
@@ -1525,7 +1526,11 @@ ${pushes ? `  // B-231: run from the gate's red (pr-open, fixed), this leg must 
   // failed leg's error carries, so the runner's log alone can diagnose it, whether the agent
   // exited non-zero or exited 0 and the checks after it failed.
   const lastOutput = (so, se) => (so + '\\n' + se).split('\\n').map((l) => l.trimEnd()).filter((l) => l.trim() !== '').slice(-20).join('\\n  ');
-  const received = await new Promise((resolve, reject) => {
+${asksOwner ? `  // S-BTN-222 (B-325): an open harness question can be silent and the stub cannot tell
+  // it from idle, or learn when it was answered. For a run allowed to raise interact, use
+  // Baton's deadline and release rather than inferring completion from silence.
+  const canInteract = ctx.can_interact === true;
+` : ''}  const received = await new Promise((resolve, reject) => {
     const echo = process.env.BATON_VERBOSE === '1';
     const child = spawn(argv[0], argv.slice(1), {
       cwd: ctx.checkout, stdio: ['ignore', 'pipe', 'pipe'],
@@ -1578,12 +1583,25 @@ ${pushes ? `  // B-231: run from the gate's red (pr-open, fixed), this leg must 
     watch = setInterval(() => {
       if (stopped != null || conclusion != null) return;
       const now = Date.now();
-      if (now - startedAt >= LEG_CEILING_MS) {
+      if (now - startedAt >= LEG_CEILING_MS) {${asksOwner ? `
+        if (canInteract) {
+          // The wrapper may have exited while a descendant still holds the pipes open.
+          // Neither pipe closure nor partial output is needed to fail at the ceiling.
+          stopped = 'the leg reached its hard ceiling (' + LEG_CEILING_MS + ' ms)';
+          clearInterval(watch);
+          ctx.signal?.removeEventListener('abort', onAbort);
+          child.kill('SIGKILL');
+          child.stdout.destroy();
+          child.stderr.destroy();
+          reject(new Error('the agent was stopped: ' + stopped));
+          return;
+        }` : ''}
         conclusion = { cause: 'agent_concluded_absolute', ceiling_ms: LEG_CEILING_MS };
         finishWatch();
         return;
       }
-      const all = signals();
+${asksOwner ? `      if (canInteract) return;
+` : ''}      const all = signals();
       if (all.every(([, at]) => now - at >= AGENT_IDLE_MS)) {
         conclusion = { cause: 'agent_concluded_idle', idle_ms: AGENT_IDLE_MS, quiet_signals: all.map(([name]) => name) };
         finishWatch();
@@ -2095,7 +2113,7 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
   for (const leg of overrides) {
     if (!runnerLegs(b).includes(leg)) throw new Error(`--override ${leg}: ${b.id} has no such leg — its legs are ${runnerLegs(b).join(', ')}`);
   }
-  const entry = { ...courseEntry(b.id, Object.keys(b.course.legs)), skill: b.skill, ...(sourceOf(b.id) ? { source: sourceOf(b.id)! } : {}) };
+  const entry = { ...courseEntry(b), ...(sourceOf(b.id) ? { source: sourceOf(b.id)! } : {}) };
   let settings: BatonJson;
   let changed: string | null = null;
   let rewriteNamed = force;
