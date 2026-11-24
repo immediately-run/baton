@@ -1585,10 +1585,15 @@ ${asksOwner ? `  // S-BTN-222 (B-325): an open harness question can be silent an
       const now = Date.now();
       if (now - startedAt >= LEG_CEILING_MS) {${asksOwner ? `
         if (canInteract) {
-          // The hard ceiling still stops a wedged run, but partial output is not a result.
+          // The wrapper may have exited while a descendant still holds the pipes open.
+          // Neither pipe closure nor partial output is needed to fail at the ceiling.
           stopped = 'the leg reached its hard ceiling (' + LEG_CEILING_MS + ' ms)';
           clearInterval(watch);
+          ctx.signal?.removeEventListener('abort', onAbort);
           child.kill('SIGKILL');
+          child.stdout.destroy();
+          child.stderr.destroy();
+          reject(new Error('the agent was stopped: ' + stopped));
           return;
         }` : ''}
         conclusion = { cause: 'agent_concluded_absolute', ceiling_ms: LEG_CEILING_MS };

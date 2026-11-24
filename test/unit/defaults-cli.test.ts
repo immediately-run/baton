@@ -1520,6 +1520,48 @@ setInterval(() => {}, 60_000);
     }
   }, 30_000);
 
+  it('a joinable run fails at the ceiling even when a descendant holds the exited wrapper’s pipes (S-BTN-222)', async () => {
+    const settingsFile = join(root, '.baton', 'baton.json');
+    const before = readFileSync(settingsFile, 'utf8');
+    const stub = join(root, '.baton', 'courses', 'create-pr', 'legs', 'implement.mjs');
+    const restore = shrinkBounds(stub, 500, 1_500);
+    const wrapper = join(root, 'pipe-wrapper.mjs');
+    const release = join(root, 'pipe-release');
+    const closed = join(root, 'pipe-closing');
+    const pidFile = join(root, 'pipe-wrapper.pid');
+    const descendant = `
+import { existsSync, writeFileSync } from 'node:fs';
+const limit = Date.now() + 5000;
+const watch = setInterval(() => {
+  if (Date.now() < limit && !existsSync(${JSON.stringify(release)})) return;
+  clearInterval(watch);
+  writeFileSync(${JSON.stringify(closed)}, 'closing');
+}, 25);`;
+    writeFileSync(wrapper, `import { spawn } from 'node:child_process';
+import { writeFileSync } from 'node:fs';
+spawn(process.execPath, ['--input-type=module', '-e', ${JSON.stringify(descendant)}], { stdio: 'inherit' }).unref();
+writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));
+`);
+    try {
+      writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(before), agent_command: `"${process.execPath}" "${wrapper}"` }));
+      const snapshot = { sha: commitAll(root) };
+      const run = (await load(stub)).run;
+      await expect(run({ ticket: { id: 'B-1' }, checkout: root, snapshot, can_interact: true }))
+        .rejects.toThrow('the agent was stopped: the leg reached its hard ceiling');
+      expect(await agentGone(pidFile)).toBe(true);
+      expect(existsSync(closed), 'failure does not wait for inherited pipes to close').toBe(false);
+    } finally {
+      if (existsSync(pidFile)) {
+        writeFileSync(release, 'release');
+        await vi.waitFor(() => expect(existsSync(closed)).toBe(true), { timeout: 5000 });
+      }
+      restore();
+      writeFileSync(settingsFile, before);
+      for (const file of [wrapper, release, closed, pidFile]) rmSync(file, { force: true });
+      commitAll(root);
+    }
+  }, 30_000);
+
   it('the stub prepends the agent_wrapper — the host’s BATON_AGENT_WRAPPER over the file — and the example wrapper passes the answer through with a byte-identical log (B-95)', async () => {
     // A wrapper sees the whole leg command as its arguments. Here it hands them to a reporter
     // (a node script, so nothing in a shell re-splits them), then runs the agent as its own

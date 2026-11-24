@@ -562,7 +562,11 @@ async function standard(ctx) {
         if (canInteract) {
           stopped = "the leg reached its hard ceiling (" + LEG_CEILING_MS + " ms)";
           clearInterval(watch);
+          ctx.signal?.removeEventListener("abort", onAbort);
           child.kill("SIGKILL");
+          child.stdout.destroy();
+          child.stderr.destroy();
+          reject(new Error("the agent was stopped: " + stopped));
           return;
         }
         conclusion2 = { cause: "agent_concluded_absolute", ceiling_ms: LEG_CEILING_MS };

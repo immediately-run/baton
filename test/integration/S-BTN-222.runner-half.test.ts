@@ -192,12 +192,14 @@ beforeEach(async () => {
   stateFile = join(tmpdir(), `baton-222-${process.pid}-${Math.random().toString(16).slice(2)}.json`);
 });
 
-const newRunner = (home: string, log: (l: string) => void, over: Record<string, unknown> = {}, onBeat?: (body: Record<string, any>) => void) => new Runner({
+const newRunner = (home: string, log: (l: string) => void, over: Record<string, unknown> = {}, onBeat?: (body: Record<string, any>) => Response | void) => new Runner({
   api: new BatonApi({
     url: 'https://baton.test',
     transport: async (req) => {
-      // §7.5 R-BTN-90 (B-234): the beats a run's finish went out on, for the assertions below.
-      if (onBeat && new URL(req.url).pathname === '/v1/runner/heartbeat') onBeat(await req.clone().json() as Record<string, any>);
+      if (onBeat && new URL(req.url).pathname === '/v1/runner/heartbeat') {
+        const response = onBeat(await req.clone().json() as Record<string, any>);
+        if (response) return response;
+      }
       return hostCall(req);
     },
     auth: (_m, _u, _b, secret) => ({ Authorization: `Bearer ${TOKENS['vm-a']}`, ...(secret ? { 'X-Runner-Secret': secret } : {}) }),
@@ -226,7 +228,7 @@ describe('S-BTN-222 (the runner half): the channel checks a raise (R-BTN-160, R-
     try {
       const lines: string[] = [];
       const beats: Record<string, any>[] = [];
-      const r = newRunner(home, (l) => lines.push(l), {}, (b) => beats.push(b));
+      const r = newRunner(home, (l) => lines.push(l), {}, (b) => { beats.push(b); });
       r.start(); // the beats: what lands the session link (R-BTN-113) while the leg runs
       const outcome = await r.runOnce(); // implement → review → merge, merge joinable: ends done
       r.stop();
@@ -310,7 +312,7 @@ describe('S-BTN-222 (the runner half): the channel checks a raise (R-BTN-160, R-
     }
   }, 240_000);
 
-  it('a joinable session nobody joins ends leg-timeout at its deadline_s — a failed attempt — and its condition closes with it', async () => {
+  it('a late heartbeat makes a run joinable after startup fails; an unanswered ask ends at its deadline_s', async () => {
     const rec = join(mkdtempSync(join(tmpdir(), 'baton-222-rec-')), 'raises.jsonl');
     const { home, sha } = writeHome(legScripts(rec));
     boardSha = sha;
@@ -319,21 +321,30 @@ describe('S-BTN-222 (the runner half): the channel checks a raise (R-BTN-160, R-
     try {
       const lines: string[] = [];
       const beats: Record<string, any>[] = [];
-      const r = newRunner(home, (l) => lines.push(l), {}, (b) => beats.push(b));
+      const r = newRunner(home, (l) => lines.push(l), {}, (b) => {
+        beats.push(b);
+        // Fail the startup beat and keep the link from landing until the leg has tried to ask.
+        if (b.session_url === LINK && !said(rec).some((x) => x.type === 'interact')) {
+          return new Response('{}', { status: 503 });
+        }
+      });
       r.start(); // the beats: what lands the session link and delivers the deadline's release
       const once = r.runOnce();
       // The ask lands once a beat has carried the link; then the run waits, joined by no one.
       for (let i = 0; i < 300 && !(await conditionRows('docs:C')).length; i++) await new Promise((res) => setTimeout(res, 100));
-      expect(await conditionRows('docs:C')).toEqual([
-        { type: 'interact', disposition: 'notify', outcome: 'open', url: LINK, closed_how: null },
-      ]);
-      expect(said(rec)[0]).toEqual({ can_interact: true });
+      const open = await conditionRows('docs:C');
       // R-BTN-90: the deadline takes the claim back at its instant — a release with reason
       // leg-timeout, delivered by the next beat, the leg stopped at its safe point.
       await setClock(T0 + 61_000);
       await tick();
       const outcome = await once;
       r.stop();
+      expect(lines.some((l) => l.includes('the heartbeat that lands the session link failed'))).toBe(true);
+      expect(said(rec)[0]).toEqual({ can_interact: true });
+      expect(said(rec)[1]).toMatchObject({ type: 'interact', code: 1, err: expect.stringContaining('session link') });
+      expect(open).toEqual([
+        { type: 'interact', disposition: 'notify', outcome: 'open', url: LINK, closed_how: null },
+      ]);
       expect(outcome).toMatchObject({ ticket: 'docs:C', end_reason: 'released:leg-timeout' });
       expect(await rows<{ failed_attempt: number }>('SELECT failed_attempt FROM claims WHERE ticket_id = ? AND end_reason = ?', 'docs:C', 'released:leg-timeout'))
         .toEqual([{ failed_attempt: 1 }]); // §6.10: a failed attempt

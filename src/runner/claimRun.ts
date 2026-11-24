@@ -1258,8 +1258,9 @@ export class ClaimRun {
     }
     if (this.o.verbose) this.o.log(`baton: ${leg} runs: node ${basename(LEG_PROCESS)} run ${basename(script)} (session ${sessionId}, executor ${this.executor.source})`);
     // The stub cannot observe a pending harness question or its answer (R-BTN-195).
-    // Give it the run's eligibility after the link lands, without exposing the link.
-    const canInteract = channel != null && checkRaise('interact', course.graph?.conditionTypes ?? new Map(), this.raisePolicy(course, leg)).ok;
+    // Give it potential eligibility: a cadence beat can still land the link if startup failed.
+    // The actual raise is checked separately against the link Baton already holds.
+    const canInteract = channel != null && checkRaise('interact', course.graph?.conditionTypes ?? new Map(), this.raisePolicy(course, leg, this.legSessionUrl)).ok;
     const running = this.wrapperCall(handle, 'run', script, [{ ...ctx, can_interact: canInteract }], undefined, () => sink);
     return await this.awaitLeg(leg, handle, channel, running, sink);
   }
@@ -1421,14 +1422,14 @@ export class ClaimRun {
     return { kind: 'ok', result };
   }
 
-  private raisePolicy(course: CourseLoad, leg: string) {
+  // By default, check what Baton holds, not just what the executor's handle names.
+  private raisePolicy(course: CourseLoad, leg: string, sessionUrl = this.sessionLinkLanded ? this.legSessionUrl : null) {
     const def = course.graph?.legs.get(leg);
     return {
       conditions: def?.conditionTypes ?? null,
       autonomous: def?.autonomous === true,
       deadlineS: def?.maxDuration ?? null,
-      // Baton sets the condition's URL from the link it holds, not the handle's alone.
-      sessionUrl: this.sessionLinkLanded ? this.legSessionUrl : null,
+      sessionUrl,
     };
   }
 
