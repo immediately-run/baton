@@ -2,8 +2,8 @@
 title: "B-319 — The Access sign-in says which check refused it"
 id: B-319
 project: baton
-status: available
-updated: 2026-11-23
+status: done
+updated: 2026-11-24
 repos:
   - baton
 tags:
@@ -20,7 +20,7 @@ depends_on: []
 
 **Brief:** the owner, 2026-11-23, asked for this ticket ("yes, file the ticket") after signing in to `baton.immediately.run` with Cloudflare Access failed with the sentence above. The cause was that production had no `ACCESS_TEAM_DOMAIN` or `ACCESS_AUD`: `wrangler.toml` sets neither, and a deploy rewrites the Worker's variables from that file. Setting both as secrets fixed it. The page gave no hint of that. It shows the same sentence for every `unauthenticated` answer to `POST /v1/login {access: true}` (`src/dashboard/app/SignIn.tsx`).
 
-**Spec:** [BATON_SPEC §11.4](../spec/BATON_SPEC/11-people.md#sec-11-4) ([R-BTN-155](../spec/BATON_SPEC/11-people.md#sec-11-4), *Sign-in through Cloudflare Access*). The rule lists the refusals and says each is `unauthenticated` and sets no cookie. This ticket amends it to name a `reason` with each.
+**Spec:** [BATON_SPEC §11.4](../../spec/BATON_SPEC/11-people.md#sec-11-4) ([R-BTN-155](../../spec/BATON_SPEC/11-people.md#sec-11-4), *Sign-in through Cloudflare Access*). The rule lists the refusals and says each is `unauthenticated` and sets no cookie. This ticket amends it to name a `reason` with each.
 
 **Depends on:** none.
 
@@ -59,7 +59,7 @@ Out of scope: owners' sign-in and sign-in by code (B-76, B-206), and any change 
 
 ### Invariants
 
-- [R-BTN-155](../spec/BATON_SPEC/11-people.md#sec-11-4): a refusal sets no cookie, the email is never stored and never echoed, and a malformed `ACCESS_IDENTITIES` is `unavailable`.
+- [R-BTN-155](../../spec/BATON_SPEC/11-people.md#sec-11-4): a refusal sets no cookie, the email is never stored and never echoed, and a malformed `ACCESS_IDENTITIES` is `unavailable`.
 - R-BTN-16: inbound principal headers are still stripped, and `/v1/login` still requires a state-changing request from this Baton's own page (`checkStateChanging`).
 - §12.3: the dashboard draws every value as text, with no `innerHTML`.
 - `verifyOwner`'s legacy path, used while `BATON_ADMIN_KEYS` names no key, is unchanged.
