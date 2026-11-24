@@ -112,12 +112,13 @@ describe('S-BTN-308 sign-in through Cloudflare Access', () => {
   });
 
   it('S-BTN-318: the verifier distinguishes missing settings, missing assertions and failed verification', async () => {
-    const request = (assertion?: string) => new Request(`${ORIGIN}/v1/login`, { headers: assertion ? { [ASSERTION]: assertion } : {} });
+    const request = (assertion?: string) => new Request(`${ORIGIN}/v1/login`, { headers: assertion === undefined ? {} : { [ASSERTION]: assertion } });
     const valid = request(await accessToken(EMAIL));
     for (const setting of ['ACCESS_TEAM_DOMAIN', 'ACCESS_AUD'] as const) {
       expect(await verifyAccess(valid, { ...config, [setting]: undefined })).toEqual({ reason: 'not-configured' });
     }
     expect(await verifyAccess(request(), config)).toEqual({ reason: 'no-assertion' });
+    expect(await verifyAccess(request(''), config)).toEqual({ reason: 'unverified' });
     const key = await importJWK(JSON.parse(config.TEST_SIGNING_JWK!), 'ES256');
     for (const token of [await accessToken(EMAIL, { audience: 'other-app' }), await assertion({ email: EMAIL }, '0s').sign(key), await assertion({}, '5m').sign(key)]) {
       expect(await verifyAccess(request(token), config)).toEqual({ reason: 'unverified' });
@@ -131,9 +132,10 @@ describe('S-BTN-308 sign-in through Cloudflare Access', () => {
     for (const [reason, env, assertion] of [
       ['not-configured', { ...config, ACCESS_AUD: undefined }, valid],
       ['no-assertion', config, undefined],
+      ['unverified', config, ' \t '],
       ['unverified', config, await accessToken(EMAIL, { audience: 'other-app' })],
     ] as const) {
-      const headers = assertion ? { ...JSON_HEADERS, [ASSERTION]: assertion } : { ...JSON_HEADERS, 'X-Baton-Access-Email': EMAIL };
+      const headers = assertion === undefined ? { ...JSON_HEADERS, 'X-Baton-Access-Email': EMAIL } : { ...JSON_HEADERS, [ASSERTION]: assertion };
       const req = new Request(`${ORIGIN}/v1/login`, { method: 'POST', headers, body: JSON.stringify({ access: true }) });
       const res = await front(req, { ...env, TEST_MIN_CLIENT: undefined }, to);
       await refused(res.clone(), 401, 'unauthenticated');

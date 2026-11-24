@@ -132,7 +132,8 @@ export async function verifyAccess(req: Request, env: Config): Promise<AccessVer
   const team = env.ACCESS_TEAM_DOMAIN;
   if (!team || !env.ACCESS_AUD) return { reason: 'not-configured' };
   const token = req.headers.get('Cf-Access-Jwt-Assertion');
-  if (!token) return { reason: 'no-assertion' };
+  if (token === null) return { reason: 'no-assertion' };
+  if (token === '') return { reason: 'unverified' };
   try {
     const keys = testKeys(env, env.TEST_ACCESS_JWKS) ?? remote(`https://${team}/cdn-cgi/access/certs`);
     const { payload } = await jwtVerify(token, keys, { issuer: `https://${team}`, audience: env.ACCESS_AUD, requiredClaims: ['exp'] });
