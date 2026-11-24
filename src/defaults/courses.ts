@@ -49,6 +49,8 @@ export interface Ask {
 export interface LegStub {
   ask?: Ask;
   position: string;
+  /** The position uses `roundsSpent`, computed from the course's review limit at run time. */
+  reviewBound?: true;
   /** The stub verifies its outcome on the forge before returning its position (B-81): an open
    * PR on a branch the course's patterns map to the ticket, its head what the checkout pushed.
    * The agent's exit 0 is not the leg's outcome. `merged`: every PR of the ticket on such a
@@ -246,7 +248,7 @@ const CREATE_PR: BuiltIn = {
     // rounds run out (B-110: the run that reaches the file's `max_runs`, or one the owner granted
     // past it): then changes queue `adjudicate`, waiting on the owner, so the claim suspends
     // there rather than spend a fix the owner has not asked for (round 1, finding 6).
-    review: { ask: VERDICT, position: `{ ...(answer !== 'approve' && (ctx.run ?? 1) >= ${CREATE_PR_COURSE.legs.review.max_runs} ? { suspend: true } : {}), reached: 'reviewed', next: answer === 'approve' ? 'merge' : (ctx.run ?? 1) >= ${CREATE_PR_COURSE.legs.review.max_runs} ? 'adjudicate' : 'fix', verdict: answer }` },
+    review: { ask: VERDICT, reviewBound: true, position: "{ ...(answer !== 'approve' && roundsSpent ? { suspend: true } : {}), reached: 'reviewed', next: answer === 'approve' ? 'merge' : roundsSpent ? 'adjudicate' : 'fix', verdict: answer }" },
     // B-110: a fix's push re-opens the gate, so what follows fix is run-tests again — the next
     // round waits on a green head, never on the fix's own word for it.
     // B-231: from the gate's red (pr-open, fixed) a fix that pushed nothing is no fix — the stub

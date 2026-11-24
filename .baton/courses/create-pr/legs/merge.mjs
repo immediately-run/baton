@@ -1,4 +1,4 @@
-// ../../../../../baton-bundle-fGsKLR/entry.ts
+// ../../../../../../../../tmp/baton-bundle-jpePOR/entry.ts
 import { execFileSync as execFileSync2, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, readdirSync, rmSync as rmSync2, statSync, writeFileSync } from "node:fs";
@@ -323,36 +323,6 @@ baton: ${ctx.ticket.id} ${ctx.leg}, claim ${ctx.claim?.nonce ?? "?"}`;
 
 // src/defaults/course-pr.ts
 var DEFAULT_BRANCH_PATTERN = "claude/{ticket}-*";
-var CREATE_SPEC_COURSE = {
-  start: "requested",
-  start_leg: "converse",
-  end: ["merged"],
-  // B-98: a specification is requested, not found — `baton request "<one sentence>" --course
-  // create-spec` files the ticket that starts it.
-  starts_from: "request",
-  short_waits: ["ci"],
-  stations: {
-    requested: { label: "Requested, no PR yet" },
-    "spec-open": { label: "Spec PR open" },
-    reviewed: { label: "Reviewed" },
-    adjudicated: { label: "Open findings adjudicated" },
-    merged: { label: "Merged" }
-  },
-  legs: {
-    converse: { from: ["requested"], to: "spec-open", label: "Design the specification with the owner" },
-    review: { from: ["spec-open"], to: "reviewed", max_runs: 4, label: "Adversarial review round" },
-    address: { from: ["reviewed"], to: "spec-open", max_runs: 3, label: "Address the blocking findings with the owner" },
-    adjudicate: { from: ["reviewed"], to: "adjudicated", label: "Reproduce the findings left open" },
-    merge: { from: ["reviewed", "adjudicated"], to: "merged", label: "Merge and close the ticket" }
-  }
-};
-var SPEC_BOUNDS = {
-  legs: { open: "converse", opened: "spec-open", back: "address", backTo: "spec-open" },
-  back: "address",
-  rounds: CREATE_SPEC_COURSE.legs.review.max_runs,
-  adjudicates: true,
-  gate: false
-};
 function branchMatches(pattern, branch) {
   const p = pattern.toLowerCase();
   const b = branch.toLowerCase();
@@ -442,7 +412,7 @@ function verifyPrsMerged(ask, run2) {
   return merged;
 }
 
-// ../../../../../baton-bundle-fGsKLR/entry.ts
+// ../../../../../../../../tmp/baton-bundle-jpePOR/entry.ts
 var GIT_BOUND_MS = 12e4;
 var GIT_ENV = { "GIT_TERMINAL_PROMPT": "0", "GIT_SSH_COMMAND": "ssh -o BatchMode=yes -o ConnectTimeout=20" };
 var AGENT_IDLE_MS = 9e5;

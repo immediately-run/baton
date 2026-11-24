@@ -1,4 +1,4 @@
-// ../../../../../baton-bundle-QIAeaD/entry.ts
+// ../../../../../../../../tmp/baton-bundle-9PgUIX/entry.ts
 import { execFileSync as execFileSync2, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdtempSync, readdirSync, rmSync as rmSync2, statSync, writeFileSync } from "node:fs";
@@ -97,6 +97,9 @@ function requireAnswer(out, ask, leg, opts = {}) {
   if (opened) throw new Error(`the ${leg} agent's last line names no PR URL after its ${ask.name}`);
   throw new Error(`the ${leg} agent printed no ${ask.name} (${values}) as its last line${last === "" ? " \u2014 its output was empty" : ` \u2014 its last line was ${JSON.stringify(last)}`}`);
 }
+
+// src/defaults/course-pr.ts
+var DEFAULT_CREATE_PR_REVIEW_ROUNDS = 3;
 
 // src/defaults/ticket-state.ts
 import { execFileSync } from "node:child_process";
@@ -361,7 +364,7 @@ baton: ${ctx.ticket.id} ${ctx.leg}, claim ${ctx.claim?.nonce ?? "?"}`;
   return closeTicket({ ...ctx, heading: false }, result, run2);
 }
 
-// ../../../../../baton-bundle-QIAeaD/entry.ts
+// ../../../../../../../../tmp/baton-bundle-9PgUIX/entry.ts
 var GIT_BOUND_MS = 12e4;
 var GIT_ENV = { "GIT_TERMINAL_PROMPT": "0", "GIT_SSH_COMMAND": "ssh -o BatchMode=yes -o ConnectTimeout=20" };
 var AGENT_IDLE_MS = 9e5;
@@ -414,6 +417,10 @@ async function standard(ctx) {
   const agentWords = splitWords(settingsCommand);
   const agentCommand = agentWords.join(" ");
   const courseSha = typeof ctx.signed_control?.course === "string" && ctx.signed_control.course !== "" ? ctx.signed_control.course : sha;
+  const courseFile = ".baton/courses/create-pr/course.json";
+  const graph = ctx.graph ?? JSON.parse(gitRun("git", ["-C", ctx.checkout, "show", courseSha + ":" + courseFile], { maxBuffer: 67108864 }));
+  const review = graph.legs instanceof Map ? graph.legs.get("review")?.maxRuns : graph.legs?.review?.max_runs;
+  const roundsSpent = (ctx.run ?? 1) >= (review ?? DEFAULT_CREATE_PR_REVIEW_ROUNDS);
   const rel = ".baton/courses/create-pr/legs/review.md";
   const present = gitRun("git", ["-C", ctx.checkout, "ls-tree", "--name-only", courseSha, "--", rel]).trim() !== "";
   const text = present ? gitRun("git", ["-C", ctx.checkout, "show", courseSha + ":" + rel], { maxBuffer: 67108864 }) : null;
@@ -557,7 +564,7 @@ async function standard(ctx) {
     }
   })();
   const on = pr;
-  return { ...{ ...answer !== "approve" && (ctx.run ?? 1) >= 3 ? { suspend: true } : {}, reached: "reviewed", next: answer === "approve" ? "merge" : (ctx.run ?? 1) >= 3 ? "adjudicate" : "fix", verdict: answer }, ...on ? { pr: on } : {}, ...conclusion ? { conclusion } : {} };
+  return { ...{ ...answer !== "approve" && roundsSpent ? { suspend: true } : {}, reached: "reviewed", next: answer === "approve" ? "merge" : roundsSpent ? "adjudicate" : "fix", verdict: answer }, ...on ? { pr: on } : {}, ...conclusion ? { conclusion } : {} };
 }
 var closeCtx2 = (ctx) => ({ ...ctx, ...ctx.default_branch == null && typeof process.env.BATON_DEFAULT_BRANCH === "string" && process.env.BATON_DEFAULT_BRANCH !== "" ? { default_branch: process.env.BATON_DEFAULT_BRANCH } : {} });
 var close = (ctx, result) => prClose(closeCtx2(ctx), result);

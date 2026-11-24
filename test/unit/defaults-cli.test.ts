@@ -1043,6 +1043,52 @@ describe('baton repo init, through the built CLI', () => {
     }
   });
 
+  it('uses the course in force for the adjudication bound in both scaffolded and checked-in review stubs (S-BTN-43, B-324)', async () => {
+    const courseDir = join('.baton', 'courses', 'create-pr');
+    const courseFile = join(root, courseDir, 'course.json');
+    const settingsFile = join(root, '.baton', 'baton.json');
+    const before = readFileSync(courseFile, 'utf8');
+    const settings = readFileSync(settingsFile, 'utf8');
+    const shipped = JSON.parse(readFileSync(join(ROOT, courseDir, 'course.json'), 'utf8'));
+    const bound = shipped.legs.review.max_runs;
+    const scratch = mkdtempSync(join(tmpdir(), 'baton-review-legs-'));
+    try {
+      const agent = join(scratch, 'agent.sh');
+      writeFileSync(agent, '#!/bin/sh\necho changes\n', { mode: 0o755 });
+      writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(settings), agent_command: agent }));
+      writeFileSync(courseFile, JSON.stringify(shipped));
+      const snapshot = { sha: commitAll(root) };
+      const omitted = structuredClone(shipped);
+      delete omitted.legs.review.max_runs;
+      writeFileSync(courseFile, JSON.stringify(omitted));
+      const withoutLimit = { sha: commitAll(root) };
+      const ctx = { ticket: { id: 'A-1' }, checkout: root, snapshot };
+      const changes = { reached: 'reviewed', next: 'fix', verdict: 'changes' };
+      const adjudicate = { ...changes, suspend: true, next: 'adjudicate' };
+      for (const [name, repo] of [['scaffolded', root], ['checked-in', ROOT]] as const) {
+        for (const leg of readdirSync(join(repo, courseDir, 'legs')).filter((f) => f.endsWith('.mjs'))) {
+          expect(readFileSync(join(repo, courseDir, 'legs', leg), 'utf8'), `${name} ${leg}`).not.toMatch(/\bmax_runs\s*:\s*\d/);
+        }
+        const file = join(scratch, `${name}.mjs`);
+        copyFileSync(join(repo, courseDir, 'legs', 'review.mjs'), file);
+        const stub = await load(file);
+        expect(await stub.run({ ...ctx, run: 3 }), name).toEqual(changes);
+        expect(await stub.run({ ...ctx, run: bound - 1 }), name).toEqual(changes);
+        expect(await stub.run({ ...ctx, run: bound }), name).toEqual(adjudicate);
+        expect(await stub.run({ ...ctx, snapshot: withoutLimit, run: 3 }), name).toEqual(adjudicate);
+        expect(await stub.run({ ...ctx, snapshot: withoutLimit, signed_control: { course: snapshot.sha }, run: 3 }), name).toEqual(changes);
+        for (const graph of [CREATE_PR_COURSE, graphOf(CREATE_PR_COURSE)]) {
+          expect(await stub.run({ ...ctx, graph, run: 3 }), name).toEqual(adjudicate);
+        }
+      }
+    } finally {
+      writeFileSync(courseFile, before);
+      writeFileSync(settingsFile, settings);
+      commitAll(root);
+      rmSync(scratch, { recursive: true, force: true });
+    }
+  });
+
   it('the stub runs BATON_AGENT_COMMAND — what baton run --harness chose — when the snapshot’s settings name no agent_command; the settings win; neither names the fix (B-83)', async () => {
     const agent = join(root, 'agent.sh');
     writeFileSync(agent, '#!/bin/sh\necho "$1 $2 $3" > "$(dirname "$0")/agent.args"\n');
@@ -2490,9 +2536,6 @@ describe('course sources and leg overrides (B-33)', () => {
   it('--override seeds legs/<leg>.run.mjs calling the course’s own run; a leg the course lacks is refused before anything is written', () => {
     const seeded = readFileSync(join(legs(), 'review.run.mjs'), 'utf8');
     expect(seeded).toContain('export async function run(ctx, standard) {\n  return standard(ctx);\n}');
-    // B-110 round 1: a changes verdict on the last round (the file's `max_runs`, or one the owner
-    // granted past it) queues the owner's adjudicate and suspends, never a fix.
-    expect(seeded).toContain("{ ...(answer !== 'approve' && (ctx.run ?? 1) >= 3 ? { suspend: true } : {}), reached: 'reviewed', next: answer === 'approve' ? 'merge' : (ctx.run ?? 1) >= 3 ? 'adjudicate' : 'fix', verdict: answer }");
     expect(() => baton(root, 'repo', 'init', '--pin', PIN, '--override', 'deploy')).toThrow(/--override deploy: create-pr has no such leg — its legs are implement, run-tests, review, fix, adjudicate, merge/);
     expect(existsSync(join(legs(), 'deploy.run.mjs'))).toBe(false);
   });

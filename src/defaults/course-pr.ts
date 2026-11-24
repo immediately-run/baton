@@ -53,6 +53,8 @@ export interface StationsResult {
 /** R-BTN-51's default `branch_pattern`. */
 export const DEFAULT_BRANCH_PATTERN = 'claude/{ticket}-*';
 
+export const DEFAULT_CREATE_PR_REVIEW_ROUNDS = 3;
+
 /** The `create-pr` course's graph (R-BTN-131), the docs workflow's: filed → pr-open → reviewed,
  * at most three review rounds with a fix between them, then merged — or, when the third round
  * still asks for changes, adjudicated first (a fresh reader reproduces each open blocking finding)
@@ -92,7 +94,7 @@ export const CREATE_PR_COURSE = {
     // B-110: review also leaves `reviewed` — the owner's `round` answer grants exactly one more
     // round on the same head (the answer itself carries the run, §6.8; the round's verdict is
     // its marker, and a round still asking for changes comes straight back to the owner).
-    review: { from: ['pr-open', 'fixed', 'reviewed'], to: 'reviewed', max_runs: 3, label: 'Review round' },
+    review: { from: ['pr-open', 'fixed', 'reviewed'], to: 'reviewed', max_runs: DEFAULT_CREATE_PR_REVIEW_ROUNDS, label: 'Review round' },
     fix: { from: ['reviewed', 'pr-open', 'fixed'], to: 'fixed', max_runs: 30, label: 'Fix or answer the findings' },
     adjudicate: { from: ['reviewed'], to: 'adjudicated', label: 'The owner answers the third round' },
     merge: { from: ['reviewed', 'adjudicated'], to: 'merged', label: 'Merge and close the ticket' },
@@ -307,7 +309,7 @@ interface PrBounds {
  *  review steps, so the red-fix loop the gate opens (B-110: `fix` 30 beside `review` 3) never
  *  spends an adjudication. */
 const boundsOf = (graph: PrGraph): PrBounds => ({
-  legs: CREATE_PR_LEGS, back: 'fix', rounds: graph.legs?.review?.max_runs ?? 3, adjudicates: graph.legs?.adjudicate != null,
+  legs: CREATE_PR_LEGS, back: 'fix', rounds: graph.legs?.review?.max_runs ?? DEFAULT_CREATE_PR_REVIEW_ROUNDS, adjudicates: graph.legs?.adjudicate != null,
   gate: graph.legs?.['run-tests'] != null,
 });
 
@@ -315,10 +317,7 @@ const boundsOf = (graph: PrGraph): PrBounds => ({
  *  back leg, and its rounds are the file's (review 4 — B-110 counts rounds as review steps, so
  *  the fourth review is the one that finds the three address rounds spent, exactly as before).
  *  No gate: `create-spec` keeps its own graph (B-110 revised `create-pr` alone). */
-const SPEC_BOUNDS: PrBounds = {
-  legs: { open: 'converse', opened: 'spec-open', back: 'address', backTo: 'spec-open' },
-  back: 'address', rounds: CREATE_SPEC_COURSE.legs.review.max_runs, adjudicates: true, gate: false,
-};
+const SPEC_LEGS: TimelineLegs = { open: 'converse', opened: 'spec-open', back: 'address', backTo: 'spec-open' };
 
 const at = (station: string, path: Step[], next: PostedStation['next']): PostedStation =>
   ({ station, path, next_leg: next[0]?.leg ?? null, next_source: 'course', handoff_url: null, next, bars: {} });
@@ -795,8 +794,8 @@ export function stationsSpec(ctx: {
   const patterns = matchPatterns(ctx.branchPatterns);
   const done = ctx.done ?? ctx.closed;
   const bounds: PrBounds = {
-    legs: SPEC_BOUNDS.legs, back: SPEC_BOUNDS.back,
-    rounds: graph.legs?.review?.max_runs ?? SPEC_BOUNDS.rounds, adjudicates: graph.legs?.adjudicate != null,
+    legs: SPEC_LEGS, back: SPEC_LEGS.back,
+    rounds: graph.legs?.review?.max_runs ?? CREATE_SPEC_COURSE.legs.review.max_runs, adjudicates: graph.legs?.adjudicate != null,
     gate: false,
   };
   // A malformed close is the history fold's to skip, never this function's.

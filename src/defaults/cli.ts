@@ -1293,7 +1293,7 @@ const AGENT_WRAPPER_ENV = 'BATON_AGENT_WRAPPER';
  * not the leg's outcome. The bundled `close` writes the closing marker where the course's
  * convention puts it. */
 export function stubSource(b: BuiltIn, course: string, leg: string): string {
-  const { ask, position, verify, pushes, delivered } = b.legs[leg];
+  const { ask, position, verify, pushes, delivered, reviewBound } = b.legs[leg];
   // A leg whose close writes a line on a PR may name that PR after its answer (B-29): a ticket's
   // PRs may sit in other repositories, and its home may have none.
   const names = b.reads === 'prs' && COMMENTING_LEGS.has(leg);
@@ -1354,6 +1354,7 @@ const newestWrite = (p, depth = 0) => {
 // reads it from the error (\`e.stderr\`); nothing else of git's rides the log unasked.
 const gitRun = (cmd, args, opts = {}) => execFileSync(cmd, args, { encoding: 'utf8', timeout: GIT_BOUND_MS, killSignal: 'SIGKILL', env: { ...process.env, ...GIT_ENV }, stdio: ['ignore', 'pipe', 'pipe'], ...opts });${ask ? `
 import { requireAnswer } from ${JSON.stringify(source('answer.ts'))};` : ''}
+${reviewBound ? `import { DEFAULT_CREATE_PR_REVIEW_ROUNDS } from ${JSON.stringify(source('course-pr.ts'))};\n` : ''}
 import { ${closeFrom[0]} } from ${JSON.stringify(source(closeFrom[1]))};${closeHelpers}${verify ? `
 import { ${verify === 'merged' ? 'verifyPrsMerged' : 'verifyPrOpen'}, ticketRepositories${delivered ? ', findDelivered, verifyDelivered, deliveredDetail' : ''} } from ${JSON.stringify(source('pr-verify.ts'))};` : ''}${pushes ? `
 import { DEFAULT_BRANCH_PATTERN, branchMatches, matchPatterns } from ${JSON.stringify(source('course-pr.ts'))};
@@ -1460,7 +1461,13 @@ ${pushes ? `  // B-231: run from the gate's red (pr-open, fixed), this leg must 
   // ticket whose PRs are all at home.
   const pushTicket = (() => { try { return ctx.ticket?.file ? readFileSync(ctx.ticket.file, 'utf8') : ctx.ticket?.path ? readFileSync(join(ctx.checkout, ctx.ticket.path), 'utf8') : null; } catch { return null; } })();
   const headsBefore = redEdge && ticketRepositories(pushTicket, settings.repos).length === 0 ? prHeads() : '';
-` : ''}  const courseSha = typeof ctx.signed_control?.course === 'string' && ctx.signed_control.course !== '' ? ctx.signed_control.course : sha;
+` : ''}  const courseSha = typeof ctx.signed_control?.course === 'string' && ctx.signed_control.course !== '' ? ctx.signed_control.course : sha;${reviewBound ? `
+  // B-324: a runner may pass the graph; otherwise read the course beside the leg in the
+  // same pinned tree. The runner extracts the stub to scratch, not beside a filesystem copy.
+  const courseFile = ${JSON.stringify(`.baton/courses/${course}/course.json`)};
+  const graph = ctx.graph ?? JSON.parse(gitRun('git', ['-C', ctx.checkout, 'show', courseSha + ':' + courseFile], { maxBuffer: ${AGENT_OUTPUT_MAX} }));
+  const review = graph.legs instanceof Map ? graph.legs.get('review')?.maxRuns : graph.legs?.review?.max_runs;
+  const roundsSpent = (ctx.run ?? 1) >= (review ?? DEFAULT_CREATE_PR_REVIEW_ROUNDS);` : ''}
   const rel = ${JSON.stringify(`.baton/courses/${course}/legs/${leg}.md`)};
   const present = gitRun('git', ['-C', ctx.checkout, 'ls-tree', '--name-only', courseSha, '--', rel]).trim() !== '';
   const text = present ? gitRun('git', ['-C', ctx.checkout, 'show', courseSha + ':' + rel], { maxBuffer: ${AGENT_OUTPUT_MAX} }) : null;
