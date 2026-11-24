@@ -28,6 +28,10 @@ export default async function setup(project: TestProject) {
   }
   const ancestry: Record<string, boolean> = {};
   for (const x of LABELS) for (const y of LABELS) ancestry[`${x}<${y}`] = repo.isAncestor(repo.shas[x as keyof typeof repo.shas], repo.shas[y as keyof typeof repo.shas]);
+  // The docs-owned snapshot remains pinned byte for byte; scenario fixtures exercise the new wire shape.
+  for (const snapshot of Object.values(committed.states) as { state: { items: { tier?: unknown }[] } }[]) {
+    for (const item of snapshot.state.items) delete item.tier;
+  }
   project.provide('board', { shas: repo.shas, states: committed.states, ancestry });
 
   const manifest = JSON.parse(readFileSync(join(ROOT, 'src/vendor/manifest.json'), 'utf8'));

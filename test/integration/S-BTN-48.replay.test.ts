@@ -39,7 +39,7 @@ export default {
     const store = readStore();
     const tickets = store.tickets.filter((t) => t.status !== 'withdrawn').map((t) => ({
       id: t.id, version: store.rev + ':' + digest(t), key: 'tracker:' + (t.key ?? t.id), course_id: 'create-pr',
-      title: t.title, tier: t.tier ?? 'routine', requires: [], operator_only: false, expedite: false,
+      title: t.title, requires: [], operator_only: false, expedite: false,
       depends_on: [], blocked_by: [], repos: [], rank: t.rank ?? 0,
     }));
     return { tickets, closed: [] };

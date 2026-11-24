@@ -8,10 +8,10 @@ import { BatonError } from './http';
 import { sessionLinkWhy, transcriptUrl } from './links';
 import { groupBy, isUniqueViolation, logEvent, mintRunId, randomHex, type Random } from './db';
 import type { Deprecated } from './deprecated';
-import { fitsTier, capabilitiesOf, TIERS } from '../vendor/vocabulary.mjs';
+import { capabilitiesOf } from '../vendor/vocabulary.mjs';
 import { afterFailure, countsAsFailed, nonRetryableClass, resumeRecord, type ResumeActivity } from './attempts';
 import { checkAccept, checkAdvance, checkClaim, checkConfirm, checkDecisionAnswer, checkEnd, checkOverride, checkResolve, isGrantedKey, type ClaimPreference, type End, type Output } from './validate';
-import { ceilingIn, repositoryOf, transcriptReposOf } from './registry';
+import { repositoryOf, transcriptReposOf } from './registry';
 import { GATE_CODES, gatesFor, type GateContext, type GateLeg, type GateTicket, type GateVerdict, type Phase } from './gates';
 import { extendsPath, leaves, resolveLeg, resolveStation, runsOf, type Graph, type Step } from './graph';
 import { baseChain, PATTERN_STEPS_MAX, unboundedAt, validate, type Schema } from '../shared/schema.mjs';
@@ -82,9 +82,6 @@ interface RunnerFacts {
   id: number;
   kind: string;
   incarnation: number;
-  tier_ceiling: string;
-  /** Per repository (R-BTN-66); `ceilingIn` resolves the one rule 5 compares. */
-  tier_ceilings: Record<string, string>;
   lease_timeout_ms: number;
   last_seen_at: number;
   last_activity_at: number | null;
@@ -97,7 +94,7 @@ interface RunnerFacts {
   /** R-BTN-107: the isolation its last heartbeat declared. */
   isolation: 'attached' | 'process' | 'session';
   /** R-BTN-58: its key's grants by repository, or null for a key no owner granted (gates.ts). */
-  grants: Record<string, { capabilities: string[]; max_tier: number | null; max_claims: number }> | null;
+  grants: Record<string, { capabilities: string[]; max_claims: number }> | null;
   /** R-BTN-4 (B-188): what its last heartbeat declared it can run at once, and the active claims
    *  it holds now. */
   concurrency: number;
@@ -109,7 +106,6 @@ interface ItemFacts {
   repository: string;
   course: string;
   path: string;
-  tier: string | null;
   requires: string[] | null;
   operator_only: boolean;
   expedite: boolean;
@@ -141,7 +137,6 @@ interface Candidate {
 /** B-237: what one recommendation or claim decision reads many times and no write changes
  *  between — the per-request reads, held only while `cached` runs. */
 interface RequestCache {
-  ladder: Map<string, string[]>;
   bars: Map<string, ReturnType<Admin['bars']>>;
   capacity: { capability: string; capacity: number }[] | null;
   head: Map<string, number>;
@@ -250,7 +245,7 @@ export class Claims {
 
   private cached<T>(fn: () => T): T {
     if (this.cache || this.reference) return fn();
-    this.cache = { ladder: new Map(), bars: new Map(), capacity: null, head: new Map(), minVersion: new Map(), unsigned: null, intake: new Map(), item: new Map(), override: new Map(), candidatePages: new Map() };
+    this.cache = { bars: new Map(), capacity: null, head: new Map(), minVersion: new Map(), unsigned: null, intake: new Map(), item: new Map(), override: new Map(), candidatePages: new Map() };
     try {
       return fn();
     } finally {
@@ -358,8 +353,8 @@ export class Claims {
   // ── what matching reads ─────────────────────────────────────────────────────────────────
 
   private runner(id: number): RunnerFacts {
-    const w = this.rows<Omit<RunnerFacts, 'declared' | 'courses' | 'tier_ceilings' | 'tags' | 'grants'> & { tier_ceilings: string; created_by: string | null }>(
-      `SELECT w.id, w.kind, w.incarnation, w.tier_ceiling, w.tier_ceilings, w.lease_timeout_ms, w.last_seen_at, w.last_activity_at, w.credential_id, w.isolation, w.concurrency,
+    const w = this.rows<Omit<RunnerFacts, 'declared' | 'courses' | 'tags' | 'grants'> & { created_by: string | null }>(
+      `SELECT w.id, w.kind, w.incarnation, w.lease_timeout_ms, w.last_seen_at, w.last_activity_at, w.credential_id, w.isolation, w.concurrency,
               (SELECT COUNT(*) FROM claims k WHERE k.runner_id = w.id AND k.status = 'active') AS held, c.created_by
        FROM runners w JOIN credentials c ON c.id = w.credential_id WHERE w.id = ?`, id)[0];
     if (!w) throw new BatonError('unauthenticated', 'no such runner');
@@ -368,7 +363,7 @@ export class Claims {
       'SELECT repository_id AS repository, course_id AS course, version FROM runner_courses WHERE runner_id = ? ORDER BY repository_id, course_id', id);
     const tags = this.rows<{ tag: string }>('SELECT tag FROM runner_tags WHERE runner_id = ? ORDER BY tag', id).map((r) => r.tag);
     const { created_by, ...facts } = w;
-    return { ...facts, tier_ceilings: JSON.parse(w.tier_ceilings) as Record<string, string>, declared, courses, tags, grants: this.grantsOf(w.credential_id, created_by) };
+    return { ...facts, declared, courses, tags, grants: this.grantsOf(w.credential_id, created_by) };
   }
 
   /** R-BTN-58: a granted key's grants in force by repository. A key an owner or administrator
@@ -396,15 +391,15 @@ export class Claims {
       }
       const capabilities = [...set];
       return Object.fromEntries(this.rows<{ id: string }>('SELECT id FROM repositories WHERE retired_at IS NULL')
-        .map((r) => [r.id, { capabilities, max_tier: null, max_claims: 1 }]));
+        .map((r) => [r.id, { capabilities, max_claims: 1 }]));
     }
     const patterns = groupBy(this.rows<{ repository_id: string; capability_pattern: string }>(
       `SELECT c.repository_id, c.capability_pattern FROM grant_capabilities c JOIN runner_grants g
        ON g.credential_id = c.credential_id AND g.repository_id = c.repository_id
        WHERE c.credential_id = ? AND g.revoked_at IS NULL`, credential), 'repository_id');
-    return Object.fromEntries(this.rows<{ repository_id: string; max_tier: number | null; max_claims: number }>(
-      'SELECT repository_id, max_tier, max_claims FROM runner_grants WHERE credential_id = ? AND revoked_at IS NULL', credential)
-      .map((g) => [g.repository_id, { capabilities: (patterns.get(g.repository_id) ?? []).map((c) => c.capability_pattern as string), max_tier: g.max_tier, max_claims: g.max_claims }]));
+    return Object.fromEntries(this.rows<{ repository_id: string; max_claims: number }>(
+      'SELECT repository_id, max_claims FROM runner_grants WHERE credential_id = ? AND revoked_at IS NULL', credential)
+      .map((g) => [g.repository_id, { capabilities: (patterns.get(g.repository_id) ?? []).map((c) => c.capability_pattern as string), max_claims: g.max_claims }]));
   }
 
   /** R-BTN-4 (B-188): the most claims the runner may hold while claiming in `repository` — the
@@ -429,8 +424,8 @@ export class Claims {
     return this.memo(this.cache?.item, id, () => this.readItem(id));
   }
   private readItem(id: string): ItemFacts | null {
-    const r = this.rows<{ id: string; repository_id: string; course_id: string; path: string; tier: string | null; requires_clause: string; operator_only: number; rank: number | null; course_fields_json: string | null; expedite: number; last_written_by: string | null; brief: string | null }>(
-      'SELECT id, repository_id, course_id, path, tier, requires_clause, operator_only, rank, course_fields_json, expedite, last_written_by, brief FROM tickets WHERE id = ?', id)[0];
+    const r = this.rows<{ id: string; repository_id: string; course_id: string; path: string; requires_clause: string; operator_only: number; rank: number | null; course_fields_json: string | null; expedite: number; last_written_by: string | null; brief: string | null }>(
+      'SELECT id, repository_id, course_id, path, requires_clause, operator_only, rank, course_fields_json, expedite, last_written_by, brief FROM tickets WHERE id = ?', id)[0];
     if (!r) return null;
     const requires = r.requires_clause === 'listed'
       ? this.rows<{ name: string }>('SELECT name FROM ticket_requires WHERE ticket_id = ? ORDER BY name', id).map((x) => x.name)
@@ -438,7 +433,7 @@ export class Claims {
     const s = this.rows<{ station: string; path: string; next_leg: string | null; to_end: number; handoff_url: string | null }>(
       'SELECT station, path, next_leg, to_end, handoff_url FROM ticket_stations WHERE ticket_id = ?', id)[0] ?? null;
     return {
-      id: r.id, repository: r.repository_id, course: r.course_id, path: r.path, tier: r.tier, requires, operator_only: !!r.operator_only, rank: r.rank, courseFields: r.course_fields_json,
+      id: r.id, repository: r.repository_id, course: r.course_id, path: r.path, requires, operator_only: !!r.operator_only, rank: r.rank, courseFields: r.course_fields_json,
       expedite: !!r.expedite || !!this.override(id)?.expedite,
       ...((w) => (w ? { last_written_by: w } : {}))(writtenBy(r.last_written_by)),
       ...((b) => (b ? { brief: b } : {}))(briefMark(r.brief)),
@@ -462,7 +457,7 @@ export class Claims {
       'SELECT ticket_id, closed_as FROM closed_tickets WHERE parent = ? ORDER BY ticket_id', id);
     return {
       ticket_id: item.id, repository: item.repository, course_id: r?.course_id ?? item.course, title: r?.title ?? null,
-      path: item.path, tier: item.tier, requires: item.requires ?? [], operator_only: item.operator_only, expedite: item.expedite,
+      path: item.path, requires: item.requires ?? [], operator_only: item.operator_only, expedite: item.expedite,
       rank: item.rank, snapshot_sha: r?.snapshot_sha ?? null,
       parent: r?.parent ?? null,
       children: [
@@ -479,23 +474,6 @@ export class Claims {
   private override(id: string) {
     return this.memo(this.cache?.override, id, () =>
       this.rows<{ expedite: number; hold: number; retry_after: number | null }>('SELECT expedite, hold, retry_after FROM ticket_overrides WHERE ticket_id = ?', id)[0] ?? null);
-  }
-
-  /** A repository's tier ladder, lowest first (R-BTN-66). */
-  private ladder(repo: string): string[] {
-    return this.memo(this.cache?.ladder, repo, () => {
-      const t = this.rows<{ tiers: string }>('SELECT tiers FROM repositories WHERE id = ?', repo)[0]?.tiers;
-      return t ? (JSON.parse(t) as string[]) : [...TIERS];
-    });
-  }
-
-  /** The runner's ceiling in `repo`'s ladder, by name (rule 5). */
-  private ceiling(w: RunnerFacts, repo: string): string {
-    const ladder = this.ladder(repo);
-    const declared = ceilingIn(repo, ladder, w.tier_ceilings, w.tier_ceiling);
-    // R-BTN-58: a grant's max_tier caps what the key may take there.
-    const cap = w.grants?.[repo]?.max_tier;
-    return cap != null && cap < ladder.indexOf(declared) ? ladder[Math.max(0, Math.min(cap, ladder.length - 1))] : declared;
   }
 
   /** The counter's last number handed out for `repo` (R-BTN-62): recorded with a claim, an
@@ -549,7 +527,7 @@ export class Claims {
 
   /** `gatesFor`'s inputs for one ticket (§7.2), from Baton's own tables (R-BTN-33). */
   private gate(w: RunnerFacts | null, item: ItemFacts, leg: string, phase: Phase, opts: { except?: number; holderBars?: string[] } = {}): GateVerdict {
-    const ticket: GateTicket = { repository: item.repository, course: item.course, tier: item.tier, requires: item.requires, operator_only: item.operator_only, tiers: this.ladder(item.repository) };
+    const ticket: GateTicket = { repository: item.repository, course: item.course, requires: item.requires, operator_only: item.operator_only };
     const facts: GateContext = {
       now: this.c.now(),
       claims: this.rows(`SELECT status, confirmed_at, fence_pending FROM claims WHERE ticket_id = ? AND id IS NOT ? AND (status = 'active' OR (status = 'completed' AND confirmed_at IS NULL) OR (status = 'reaped' AND fence_pending = 1))`, item.id, opts.except ?? null),
@@ -572,7 +550,7 @@ export class Claims {
       // own seat never counts against it, so an advance excludes the advancing claim here).
       seats: this.seatFacts(item, leg, opts.except ?? null),
     };
-    return gatesFor(w && { declared: w.declared, tier_ceiling: this.ceiling(w, item.repository), tags: w.tags, courses: w.courses, grants: w.grants, isolation: w.isolation }, ticket, this.postedLeg(item, leg, phase, !!w), phase, facts);
+    return gatesFor(w && { declared: w.declared, tags: w.tags, courses: w.courses, grants: w.grants, isolation: w.isolation }, ticket, this.postedLeg(item, leg, phase, !!w), phase, facts);
   }
 
   /** R-BTN-178: the capabilities rule 4 matched for this leg — the ticket's requires clause and
@@ -643,7 +621,7 @@ export class Claims {
   /**
    * §7.2's candidate query, the mirror of `gatesFor` at a claim: per (repository, course) group,
    * the tickets whose queued leg is ready with none of its posted barred tags on the runner, a
-   * sync since their last end, rules 3, 4, 5 (as a position in the repository's ladder), 6, 9 and
+   * sync since their last end, rules 3, 4, 9 and
    * 10, in the default order — expedite, `to_end`, rank, `ready_since`, id — numbered within the
    * group, and the `page`th 50 of each group. Only cut-over repositories are claimed through Baton.
    * Rule 9 is per group, so it is read after the query (`r9`): `rule9` drops the groups it
@@ -712,11 +690,10 @@ export class Claims {
                                                       OR (NOT EXISTS (SELECT 1 FROM runner_grants g3 WHERE g3.credential_id = :credential)
                                                           AND c.capability IN (SELECT j4.value FROM json_each((SELECT allowed_capabilities
                                                                                                    FROM credentials WHERE id = :credential)) j4)))) h)))
-           AND COALESCE(w.tier_position, json_array_length(p.tiers) - 1)
-               <= json_extract(:ceiling, '$."' || w.repository_id || '"'))                                     -- rule 5, per repository
+         )
        WHERE n > :page * 50 AND n <= (:page + 1) * 50
        ORDER BY repository_id, course_id, n`,
-      { runner: w.id, now: this.c.now(), ceiling: JSON.stringify(this.ceilingPositions(w)), page,
+      { runner: w.id, now: this.c.now(), page,
         heads: JSON.stringify(Object.fromEntries(this.rows<{ r: string; n: number }>('SELECT repository_id AS r, observation AS n FROM board_head').map((h) => [h.r, h.n]))),
         person: JSON.stringify(Object.fromEntries(this.rows<{ r: string; c: string; legs: string }>('SELECT repository_id AS r, id AS c, person_legs_json AS legs FROM courses WHERE person_legs_json IS NOT NULL')
           .map((k) => [`${k.r}/${k.c}`, JSON.parse(k.legs) as unknown]))),
@@ -743,8 +720,8 @@ export class Claims {
    * expanded for every candidate. Page cursors live only for this synchronous decision. */
   candidates(w: RunnerFacts, page = 0, rule9 = true, wanted: string[] | null = null, skipExpedited?: ReadonlySet<string>): Candidate[] {
     if (this.reference) return this.referenceCandidates(w, page, rule9);
-    const groups = this.rows<{ repository_id: string; course_id: string; weight: number; min_runner_version: number; observation: number; tiers: string }>(
-      `SELECT k.repository_id, k.id AS course_id, p.weight, k.min_runner_version, h.observation, p.tiers
+    const groups = this.rows<{ repository_id: string; course_id: string; weight: number; min_runner_version: number; observation: number }>(
+      `SELECT k.repository_id, k.id AS course_id, p.weight, k.min_runner_version, h.observation
        FROM courses k JOIN repositories p ON p.id = k.repository_id JOIN board_head h ON h.repository_id = p.id
        WHERE p.cutover_at IS NOT NULL AND p.retired_at IS NULL ORDER BY k.repository_id, k.id`);
     const out: Candidate[] = [];
@@ -756,8 +733,6 @@ export class Claims {
       if (w.grants && !grant) continue;
       const admitted = new Set(grant?.capabilities ?? []);
       const caps = JSON.stringify([...holdings].filter((c) => !grant || c.startsWith('runner:') || admitted.has(c) || admitted.has(`${c.split(':')[0]}:*`)));
-      const tiers = JSON.parse(g.tiers) as string[];
-      const ceiling = tiers.indexOf(this.ceiling(w, g.repository_id));
       const r9 = w.courses.some((k) => k.repository === g.repository_id && k.course === g.course_id && k.version >= g.min_runner_version) ? 1 : 0;
       if (rule9 && !r9) continue;
       const legs = this.rows<{ leg: string }>(`SELECT l.leg FROM course_legs l
@@ -774,7 +749,6 @@ export class Claims {
          FROM ready_tickets q INDEXED BY ready_tickets_order
          WHERE q.repository_id = ? AND q.course_id = ?
            AND q.last_end_observation < ? AND (q.retry_after IS NULL OR q.retry_after <= ?)
-           AND COALESCE(q.tier_position, ?) <= ?
            AND q.leg IN (SELECT value FROM json_each(?))
            AND NOT EXISTS (SELECT 1 FROM ticket_bars b JOIN runner_tags t ON t.tag = b.tag
              WHERE b.ticket_id = q.ticket_id AND b.leg = q.leg AND t.runner_id = ?)
@@ -783,7 +757,7 @@ export class Claims {
            ${skipExpedited?.has(key) ? 'AND -q.expedite = 0' : ''} ${after}
          ORDER BY -q.expedite, q.to_end, q.rank IS NULL, COALESCE(q.rank, 0), COALESCE(q.ready_since, -1), q.ticket_id
          LIMIT 50${page > 0 && !prior ? ' OFFSET ?' : ''}`,
-        g.repository_id, g.course_id, g.observation, this.c.now(), tiers.length - 1, ceiling,
+        g.repository_id, g.course_id, g.observation, this.c.now(),
         JSON.stringify(legs), w.id, caps, ...(prior?.cursor ?? []), ...(page > 0 && !prior ? [page * 50] : []));
       const last = found.at(-1);
       if (last) this.cache?.candidatePages.set(key, {
@@ -791,16 +765,6 @@ export class Claims {
         count: page * 50 + found.length,
       });
       out.push(...found.map((r, i) => ({ ...r, weight: g.weight, r9, n: page * 50 + i + 1 })));
-    }
-    return out;
-  }
-
-  /** The runner's ceiling's position in every repository's ladder: the query's rule 5. */
-  private ceilingPositions(w: RunnerFacts): Record<string, number> {
-    const out: Record<string, number> = {};
-    for (const r of this.rows<{ id: string; tiers: string }>('SELECT id, tiers FROM repositories WHERE retired_at IS NULL')) {
-      const ladder = JSON.parse(r.tiers) as string[];
-      out[r.id] = ladder.indexOf(this.ceiling(w, r.id));
     }
     return out;
   }
@@ -1071,7 +1035,7 @@ export class Claims {
    *  runner that came closest (the gates' own order; `no-runner` with no runner to ask). A
    *  read: it decides nothing and writes nothing. */
   eligibility(ticketIds: readonly string[], runnerIds: readonly number[]): Map<string, { eligible: number[]; failed_rule: string | null }> {
-    const order = ['not-ready', 'claimed', 'not-granted', 'missing-capability', 'above-tier-ceiling', 'barred-tag', 'chain', 'isolation', 'stale-skills', 'backing-off', 'capacity-full'];
+    const order = ['not-ready', 'claimed', 'not-granted', 'missing-capability', 'barred-tag', 'chain', 'isolation', 'stale-skills', 'backing-off', 'capacity-full'];
     return this.cached(() => {
       const runners = runnerIds.map((id) => this.runner(id));
       const out = new Map<string, { eligible: number[]; failed_rule: string | null }>();
@@ -2118,7 +2082,7 @@ export class Claims {
 
   /** Whether a stale-board release still reads as the runner's own git-first completion: git
    *  shows the item ended (done, superseded, deferred, deprioritized, archived or gone — not a
-   *  re-tier) and nobody has claimed it since. */
+   *  withdrawal) and nobody has claimed it since. */
   private gitEnded(item: string, claimId: number) {
     if (this.rows('SELECT 1 FROM claims WHERE ticket_id = ? AND id > ?', item, claimId).length) return false;
     const it = this.rows<{ status: string }>('SELECT status FROM tickets WHERE id = ?', item)[0];
@@ -2511,7 +2475,7 @@ export class Claims {
    *   `std:git.evidence@1` is built, by a path that extends the claim's expected path by edges, or
    *   by any path when it ended regressed;
    * - R-BTN-35: an active claim from before the reading whose ticket git took away — withdrawn,
-   *   gone without a `done` closure, re-tiered above the holder's ceiling, or (the interim post)
+   *   gone without a `done` closure, or (the interim post)
    *   at a status that ends the item — ends `released:stale-board`; a station that lags never does;
    * - §2e: a path shorter than git's last or the claim's `start_path` sets `regressed_since`, and
    *   a later path that extends the expected one clears it;
@@ -2632,31 +2596,27 @@ export class Claims {
   }
 
   /** R-BTN-35 (git wins), on each accepted snapshot after cutover: an active claim whose ticket
-   *  git took away — withdrawn, gone with no `done` closure, re-tiered above the holder's ceiling,
+   *  git took away — withdrawn, gone with no `done` closure,
    *  or at an interim status that ends the item — ends `released:stale-board`, and the holder is
    *  told. A station that lags the holder's advances is never staleness (§2e). Before cutover git
    *  decides alone and the shadow reports end claims. */
   // @model syncPost sha256:2128e0c420ad
   private staleBoard(repo: string, observation: number) {
     if (!this.rows('SELECT 1 FROM repositories WHERE id = ? AND cutover_at IS NOT NULL', repo).length) return 0;
-    const active = this.rows<{ id: number; ticket_id: string; runner_id: number; tier_ceiling: string; tier_ceilings: string; kind: string }>(
-      `SELECT c.id, c.ticket_id, c.runner_id, w.tier_ceiling, w.tier_ceilings, w.kind FROM claims c JOIN runners w ON w.id = c.runner_id
+    const active = this.rows<{ id: number; ticket_id: string; runner_id: number; kind: string }>(
+      `SELECT c.id, c.ticket_id, c.runner_id, w.kind FROM claims c JOIN runners w ON w.id = c.runner_id
        WHERE c.status = 'active' AND substr(c.ticket_id, 1, length(?) + 1) = ? || ':'
          AND c.claim_observation < ?`, repo, repo, observation); // R-BTN-62: a reading from before the claim cannot judge it
     let n = 0;
-    const ladder = this.ladder(repo);
     for (const c of active) {
-      const it = this.rows<{ status: string; tier: string | null }>('SELECT status, tier FROM tickets WHERE id = ?', c.ticket_id)[0];
+      const it = this.rows<{ status: string }>('SELECT status FROM tickets WHERE id = ?', c.ticket_id)[0];
       const closed = this.rows<{ closed_as: string }>('SELECT closed_as FROM closed_tickets WHERE ticket_id = ?', c.ticket_id)[0]?.closed_as;
-      // A legacy holder declared no ceiling: its claim is never re-tiered away.
-      const ceiling = c.kind === 'legacy' ? ladder[ladder.length - 1] : ceilingIn(repo, ladder, JSON.parse(c.tier_ceilings), c.tier_ceiling);
       // Closed `done` is the holder's own archive, pushed before its end (R-BTN-8): the heartbeat
       // tells it `closed: 'done'` and it ends done, so that is not staleness.
-      const why = !it ? (closed === 'done' ? null : closed === 'withdrawn' ? 'withdrawn' : 'gone or archived') : GIT_ENDS.has(it.status) ? it.status
-        : !fitsTier(it.tier ?? null, ceiling, ladder) ? `re-tiered ${it.tier ?? 'untiered'}` : null;
+      const why = !it ? (closed === 'done' ? null : closed === 'withdrawn' ? 'withdrawn' : 'gone or archived') : GIT_ENDS.has(it.status) ? it.status : null;
       if (!why) continue;
       // R-BTN-85: a ticket closed, gone or at a status git ends it with, while a claim is active on
-      // it — not the holder's own `done` (no disagreement), nor a re-tier (no closure) — is logged
+      // it — not the holder's own `done` (no disagreement) — is logged
       // before git wins.
       if (!it || GIT_ENDS.has(it.status)) {
         this.c.history.discrepancy(c.ticket_id, 'closed-under-claim', { claim_id: c.id, status: 'active', source: 'claim' },

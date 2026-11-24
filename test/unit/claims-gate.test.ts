@@ -170,22 +170,19 @@ describe('§6.5 ends', () => {
     expect((await endClaim('vm-a', secret, c.claim_id, { end_reason: 'released:requested' })).json.code).toBe('claim-ended');
   });
 
-  it('…but not after a re-tier, nor once someone else has claimed the item', async () => {
-    const a = await register('vm-a', { tier_ceiling: 'judgement' });
+  it('…but not once someone else has claimed the item', async () => {
+    const a = await register('vm-a', { });
     const b = await register('vm-b');
     const { json: c } = await claimItem('vm-a', a.secret, { ticket_id: 'docs:R3-9001' });
-    const retiered = items().map((i) => (i.id === 'R3-9001' ? { ...i, tier: 'critical' } : i));
-    await syncCall('/v1/sync/board', payload(fake('b'), sha.A, { ...board.states.A, state: { items: retiered }, ready: board.states.A.ready }));
-    expect((await claimRow(c.claim_id)).end_reason).toBe('released:stale-board');
-    expect((await endClaim('vm-a', a.secret, c.claim_id, { end_reason: 'done', ended_at_sha: fake('b') })).json.code).toBe('claim-ended');
+    await endClaim('vm-a', a.secret, c.claim_id, { end_reason: 'released:requested' });
     // Gone from git, but another runner claimed it in between: still claim-ended.
     await refresh(); // §6.7: claimable again after a reading since the end
     const { json: c2 } = await claimItem('vm-b', b.secret, { ticket_id: 'docs:R3-9001' });
     expect(c2.claim_id).toBeGreaterThan(c.claim_id);
-    const gone = retiered.filter((i) => i.id !== 'R3-9001');
-    await syncCall('/v1/sync/board', payload(fake('c'), fake('b'), { ...board.states.A, state: { items: gone }, ready: ['R3-9002'] }));
+    const gone = items().filter((i) => i.id !== 'R3-9001');
+    await syncCall('/v1/sync/board', payload(fake('c'), sha.A, { ...board.states.A, state: { items: gone }, ready: ['R3-9002'] }));
     expect((await endClaim('vm-a', a.secret, c.claim_id, { end_reason: 'done', ended_at_sha: fake('c') })).json.code).toBe('claim-ended');
-    expect(await claimRow(c.claim_id)).toMatchObject({ status: 'released', end_reason: 'released:stale-board' });
+    expect(await claimRow(c.claim_id)).toMatchObject({ status: 'released', end_reason: 'released:requested' });
   });
 });
 
@@ -281,8 +278,8 @@ describe('the hold override and legacy claims', () => {
 
   it('a legacy claim is reaped at its reap_after, never by silence, and is not "another live holder"', async () => {
     await rows(`INSERT INTO credentials (id, hostname, allowed_capabilities) VALUES ('legacy', 'legacy', '[]') ON CONFLICT (id) DO NOTHING`);
-    await rows(`INSERT INTO runners (hostname, session_name, secret_hash, credential_id, harness, kind, tier_ceiling, lease_timeout_ms, settings_hash, first_seen_at, last_seen_at)
-                VALUES ('legacy', 'docs:R3-9001', '', 'legacy', 'claude-code', 'legacy', 'critical', 0, '', 0, 0)`);
+    await rows(`INSERT INTO runners (hostname, session_name, secret_hash, credential_id, harness, kind, lease_timeout_ms, settings_hash, first_seen_at, last_seen_at)
+                VALUES ('legacy', 'docs:R3-9001', '', 'legacy', 'claude-code', 'legacy', 0, '', 0, 0)`);
     const lw = (await rows<{ id: number }>(`SELECT id FROM runners WHERE kind = 'legacy'`))[0].id;
     await rows(`INSERT INTO claims (ticket_id, runner_id, request_id, nonce, snapshot_sha, claimed_at, status, reap_after)
                 VALUES ('docs:R3-9001', ?, 'legacy:R3-9001', 'abc123', '', 0, 'active', ?)`, lw, T0 + 7 * 24 * H);

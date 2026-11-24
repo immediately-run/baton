@@ -57,8 +57,7 @@ async function runnerAs(key: TestKey, path: string, body?: unknown, secret?: str
 async function up(key: TestKey, hostname: string, name: string, over: Record<string, unknown> = {}) {
   const secret = `secret-${name}`;
   const hb = await runnerAs(key, '/v1/runner/heartbeat', {
-    hostname, session_name: name, harness: 'opencode', kind: 'vm', billing: {}, capabilities: [CAP],
-    tier_ceiling: 'critical', lease_timeout_s: 900, courses: [{ repository: 'docs', course: 'hung-course', version: 1 }],
+    hostname, session_name: name, harness: 'opencode', kind: 'vm', billing: {}, capabilities: [CAP], lease_timeout_s: 900, courses: [{ repository: 'docs', course: 'hung-course', version: 1 }],
     secret_hash: await sha256(secret), ...over,
   });
   expect(hb.status).toBe(200);
@@ -157,8 +156,7 @@ describe('S-BTN-4 hung runner force-reaped (R-BTN-19)', () => {
     // A claim whose fence already cleared — by its sidecar's report — is conflict too.
     await sessionPost(session, `/v1/ui/claims/${c1.json.claim_id}/reap`, { confirm: true });
     const report = await runnerAs(w1, '/v1/runner/heartbeat', {
-      hostname: 'vm-12', session_name: 'w1', harness: 'opencode', kind: 'vm', billing: {}, capabilities: [CAP],
-      tier_ceiling: 'critical', lease_timeout_s: 900, courses: [{ repository: 'docs', course: 'hung-course', version: 1 }],
+      hostname: 'vm-12', session_name: 'w1', harness: 'opencode', kind: 'vm', billing: {}, capabilities: [CAP], lease_timeout_s: 900, courses: [{ repository: 'docs', course: 'hung-course', version: 1 }],
       fenced: { claim_id: c1.json.claim_id, terminated: true },
     }, W1.secret);
     expect(report.status).toBe(200);

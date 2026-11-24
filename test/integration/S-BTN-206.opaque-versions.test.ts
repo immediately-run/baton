@@ -27,7 +27,7 @@ const CURRENT = { source: { kind: 'custom' as const, versions: 'current' as cons
  *  ticket), a stable `key`, an opaque `version` — a store stamp over a digest, the spec's
  *  recommendation (§4.2). */
 const tracked = (id: string, version: string, over: Record<string, unknown> = {}) => ({
-  id, version, key: `linear:issue-${id}`, path: undefined, course_id: 'roadmap-pr', title: `${id} — a tracked ticket`, tier: 'routine', requires: [],
+  id, version, key: `linear:issue-${id}`, path: undefined, course_id: 'roadmap-pr', title: `${id} — a tracked ticket`, requires: [],
   operator_only: false, expedite: false, depends_on: [], blocked_by: [], repos: ['immediately-run/docs'], rank: 0, ...over,
 });
 const FILED = placed('filed', [], [['implement', 'ready']]);
@@ -230,7 +230,7 @@ describe('S-BTN-206 opaque ticket versions', () => {
     const out = await withCore(async (c) => {
       const core = c as unknown as {
         registry: { get(id: string): unknown };
-        rowsFor: (repo: unknown, p: { sha: string }) => Promise<unknown>;
+        rowsFor: (p: { sha: string }) => Promise<unknown>;
         board: (repo: unknown, p: unknown) => Promise<unknown>;
         observations: { observe: (r: string) => { observation: number } };
       };
@@ -240,8 +240,8 @@ describe('S-BTN-206 opaque ticket versions', () => {
       let release!: () => void;
       const gate = new Promise<void>((r) => { release = r; });
       // Hold only the refresh's hashing (its payload's sha is the head); the second run's flows on.
-      core.rowsFor = async (r2, p) => {
-        const hashed = await orig(r2, p);
+      core.rowsFor = async (p) => {
+        const hashed = await orig(p);
         if (p.sha === head) await gate;
         return hashed;
       };

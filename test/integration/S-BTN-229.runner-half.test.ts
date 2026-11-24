@@ -121,8 +121,8 @@ async function grant(r: Runner, maxClaims: number): Promise<void> {
   const [{ id, credential_id }] = await rows<{ id: number; credential_id: string }>('SELECT id, credential_id FROM runners');
   const caps = (await rows<{ capability: string }>('SELECT capability FROM runner_capabilities WHERE runner_id = ?', id)).map((x) => x.capability);
   await rows(`UPDATE credentials SET created_by = 'owner:owner@example.com' WHERE id = ?`, credential_id);
-  await rows(`INSERT INTO runner_grants (credential_id, repository_id, capabilities, max_tier, max_claims, granted_by, granted_at)
-              VALUES (?, 'docs', ?, NULL, ?, 'owner:owner@example.com', 0)`, credential_id, JSON.stringify(caps), maxClaims);
+  await rows(`INSERT INTO runner_grants (credential_id, repository_id, capabilities, max_claims, granted_by, granted_at)
+              VALUES (?, 'docs', ?, ?, 'owner:owner@example.com', 0)`, credential_id, JSON.stringify(caps), maxClaims);
   await r.tick();
 }
 

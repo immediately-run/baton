@@ -69,7 +69,7 @@ describe('S-BTN-285 the repository’s runners (B-196)', () => {
 
     const ra = rowOf(answer, a.id);
     expect(Object.keys(ra).sort()).toEqual(['alive', 'busy_elsewhere', 'capabilities', 'claim', 'claims', 'courses', 'credential', 'granted', 'harness', 'hostname', 'isolation', 'kind',
-      'last_activity_at', 'last_report', 'last_seen_at', 'lease_timeout_s', 'reaped_at', 'reaped_claim', 'runner_id', 'session_name', 'tags', 'tier_ceilings', 'transcript_url']);
+      'last_activity_at', 'last_report', 'last_seen_at', 'lease_timeout_s', 'reaped_at', 'reaped_claim', 'runner_id', 'session_name', 'tags', 'transcript_url']);
     expect(ra).toMatchObject({ hostname: 'host-a', session_name: 's-host-a', alive: true, reaped_at: null, harness: 'opencode', kind: 'vm', lease_timeout_s: 900,
       busy_elsewhere: false, reaped_claim: null });
     expect(ra.credential).toMatchObject({ kind: 'runner', granted: true });

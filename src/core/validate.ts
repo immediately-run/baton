@@ -38,8 +38,6 @@ export const GIT_REPO = /^[A-Za-z0-9-]{1,39}\/[A-Za-z0-9._-]{1,100}$/;
 /** What `git check-ref-format --branch` allows, in short: no control, space, `~ ^ : ? * [ \`,
  *  no `..` or `@{`, at most 255 characters. A legal branch the hook asks about is never refused. */
 export const GIT_BRANCH = /^(?!.*\.\.)(?!.*@\{)(?![/.])(?!.*[/.]$)[^\u0000-\u0020\u007f~^:?*[\\]{1,255}$/;
-/** Repositories one heartbeat may name a tier ceiling for (spec-silent, recorded on R3-1231). */
-export const TIER_CEILINGS_MAX = 64;
 /** A course's `version` and a runner's declared one: non-negative, at most this. */
 export const COURSE_VERSION_MAX = 1_000_000_000;
 /** Courses in one registry, and courses one heartbeat declares (spec-silent, recorded on R3-1231). */
@@ -86,7 +84,6 @@ export const TAGS_MAX = 64;
 export const ACTIVITY_KINDS = ['orient', 'implement', 'local-verify', 'open-pr', 'push', 'ci-wait', 'review-round', 'reviewer',
   'fix-findings', 'adjudicate', 'merge', 'reconcile', 'status-write', 'decision-packet', 'other'] as const;
 export const OUTCOMES = ['succeeded', 'failed', 'cancelled', 'abandoned'] as const;
-export const TIERS = ['routine', 'judgement', 'critical'] as const;
 
 export const bad = (field: string, why: string): never => {
   throw new BatonError('invalid-params', `${field}: ${why}`);
@@ -167,11 +164,8 @@ export interface Heartbeat {
   capabilities: string[];
   /** R-BTN-60: course-defined strings the tag gate matches. */
   tags: string[];
-  tier_ceiling: (typeof TIERS)[number];
   /** R-BTN-107: how the runner isolates a leg — `process` (the default), `attached` or `session`. */
   isolation: 'attached' | 'process' | 'session';
-  /** Per repository (R-BTN-66): `{repository: tier}`, checked against each ladder at the heartbeat. */
-  tier_ceilings: Record<string, string>;
   lease_timeout_s: number;
   /** The courses the runner's checkouts run, at their versions (R-BTN-22, R-BTN-48): rule 9. */
   courses: { repository: string; course: string; version: number }[];
@@ -277,8 +271,6 @@ export function checkHeartbeat(body: unknown, transcriptRepos: string[]): Heartb
   const rawTags = b.tags ?? [];
   if (!Array.isArray(rawTags) || rawTags.length > TAGS_MAX || !rawTags.every((t) => typeof t === 'string' && TAG.test(t))) bad('tags', `must be a list of at most ${TAGS_MAX} tags`);
   const tags = [...new Set(rawTags as string[])];
-  const tier = b.tier_ceiling ?? 'critical'; // absent ⇒ every tier (§5)
-  if (!TIERS.includes(tier as never)) bad('tier_ceiling', `must be one of ${TIERS.join(', ')}`);
   // R-BTN-22: the skills version is each course's version, declared per course; a sidecar that
   // still sends `skills_version` is not refused for it.
   const courses = checkDeclaredCourses(b.courses ?? []);
@@ -318,9 +310,7 @@ export function checkHeartbeat(body: unknown, transcriptRepos: string[]): Heartb
     model_id,
     capabilities,
     tags,
-    tier_ceiling: tier as Heartbeat['tier_ceiling'],
     isolation: (b.isolation ?? 'process') as Heartbeat['isolation'],
-    tier_ceilings: checkTierCeilings(b.tier_ceilings),
     lease_timeout_s: clampLease(b.lease_timeout_s),
     courses,
     last_activity_at: b.last_activity_at as number | undefined,
@@ -342,19 +332,6 @@ export function checkHeartbeat(body: unknown, transcriptRepos: string[]): Heartb
     // heartbeat would stop last_seen_at and get a live runner reaped.
     ...splitTranscripts(transcripts, transcriptRepos),
   };
-}
-
-/** A tier name, as a repository's ladder spells it (R-BTN-66). */
-export const TIER_NAME = /^[a-z][a-z0-9-]{0,39}$/;
-
-function checkTierCeilings(v: unknown): Record<string, string> {
-  if (v === undefined) return {};
-  if (!isObj(v) || Object.keys(v).length > TIER_CEILINGS_MAX) bad('tier_ceilings', `must map at most ${TIER_CEILINGS_MAX} repositories to a tier`);
-  const out: Record<string, string> = {};
-  for (const [repo, tier] of Object.entries(v as object)) {
-    out[checkRepositoryId(repo, `tier_ceilings key ${repo}`)] = matches(TIER_NAME, `tier_ceilings.${repo}`)(tier);
-  }
-  return out;
 }
 
 function splitTranscripts(list: unknown[], allowed: string[]) {

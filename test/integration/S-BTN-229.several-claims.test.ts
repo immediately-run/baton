@@ -23,8 +23,8 @@ async function grant(runnerId: number, maxClaims: number) {
   const [{ credential_id }] = await rows<{ credential_id: string }>('SELECT credential_id FROM runners WHERE id = ?', runnerId);
   const caps = (await rows<{ capability: string }>('SELECT capability FROM runner_capabilities WHERE runner_id = ?', runnerId)).map((r) => r.capability);
   await rows(`UPDATE credentials SET created_by = 'owner:owner@example.com' WHERE id = ?`, credential_id);
-  await rows(`INSERT INTO runner_grants (credential_id, repository_id, capabilities, max_tier, max_claims, granted_by, granted_at)
-              VALUES (?, 'docs', ?, NULL, ?, 'owner:owner@example.com', 0)
+  await rows(`INSERT INTO runner_grants (credential_id, repository_id, capabilities, max_claims, granted_by, granted_at)
+              VALUES (?, 'docs', ?, ?, 'owner:owner@example.com', 0)
               ON CONFLICT (credential_id, repository_id) DO UPDATE SET max_claims = excluded.max_claims`, credential_id, JSON.stringify(caps), maxClaims);
 }
 

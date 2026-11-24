@@ -3,14 +3,12 @@
 // its mirror, and G-BTN-40 checks the two against each other. Everything else Baton says about
 // scheduling — the order, the expedite lane's bound, a course's advice — is advice and never
 // refuses (`advice-overridden`). No rule reads what a leg, a station or a tag means.
-import { capabilitiesOf, fitsTier } from '../vendor/vocabulary.mjs';
+import { capabilitiesOf } from '../vendor/vocabulary.mjs';
 
 /** Who asks: the runner as its heartbeat declared it (§5, R-BTN-60). */
 export interface GateRunner {
   /** Capability and role names as declared. */
   declared: string[];
-  /** Its ceiling in the ticket's repository's ladder, resolved by the caller (R-BTN-66). */
-  tier_ceiling: string;
   tags: string[];
   courses: { repository: string; course: string; version: number }[];
   /** R-BTN-58: the key's grants by repository, each with the capabilities it may use there; null
@@ -25,14 +23,11 @@ export interface GateRunner {
 export interface GateTicket {
   repository: string;
   course: string;
-  tier: string | null;
   /** The clause's names, null with none (rule 4). */
   requires: string[] | null;
   /** Shown, never read: rule 6 is retired (R-BTN-121 as amended, B-104), so an operator-only
    *  ticket is held by rule 4's `human-operator` literal like any capability. */
   operator_only: boolean;
-  /** Its repository's tier ladder, lowest first (R-BTN-66). */
-  tiers: string[];
 }
 
 /** The leg: at a claim the ticket's queued leg as posted; at an advance the leg being started. */
@@ -99,7 +94,6 @@ export const GATE_CODES = {
   3: 'claimed',
   7: 'not-granted',
   4: 'missing-capability',
-  5: 'above-tier-ceiling',
   8: 'barred-tag',
   9: 'stale-skills',
   10: 'backing-off',
@@ -117,7 +111,7 @@ export function claimHolds(c: { status: string; confirmed_at: number | null; fen
 /**
  * Whether `runner` may take `leg` of `ticket` now, at a claim or at an advance, naming the first
  * rule that refuses. At a claim: the leg is ready and a sync has run since the ticket's last end
- * (rule 1), the lease (3), the grant (7), capabilities (4), tier (5), operator-only (6), the
+ * (rule 1), the lease (3), the grant (7), capabilities (4), the
  * barred tags — posted and owner bars — (8), `chain` and `isolation` (§2m), the course version
  * (9) and the backoff (10). At an advance only the rules that bind a holder (§7.2): the hold
  * (3), 4–7, 8 with the holder's own bars and the owner bars that apply at advances joined,
@@ -163,8 +157,6 @@ export function gatesFor(runner: GateRunner | null, ticket: GateTicket, leg: Gat
       if (!held.has(need) || !(need.startsWith('runner:') || admits(need))) return refuse(4);
     }
 
-    // Rule 5: the caller passes the lower of the declared ceiling and the grant's max_tier.
-    if (!fitsTier(ticket.tier, runner.tier_ceiling, ticket.tiers)) return refuse(5);
 
     // Rule 6 is retired (R-BTN-121 as amended): `human-operator` is a runner's own statement,
     // checked by rule 4 like any capability — declared by that name and granted by that name.

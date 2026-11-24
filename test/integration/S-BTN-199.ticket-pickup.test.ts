@@ -45,8 +45,8 @@ beforeEach(async () => {
  *  holder with no lease the alarm would end. */
 async function legacyClaim(ticket: string) {
   await rows(`INSERT INTO credentials (id, hostname, allowed_capabilities, kind) VALUES ('legacy', 'legacy', '[]', 'legacy') ON CONFLICT (id) DO NOTHING`);
-  await rows(`INSERT INTO runners (hostname, session_name, secret_hash, credential_id, harness, kind, tier_ceiling, lease_timeout_ms, settings_hash, first_seen_at, last_seen_at)
-              VALUES ('legacy', ?, 'x', 'legacy', 'claude-code', 'legacy', 'critical', 0, '', ?, ?)`, `item-${ticket.split(':')[1]}`, T0, T0);
+  await rows(`INSERT INTO runners (hostname, session_name, secret_hash, credential_id, harness, kind, lease_timeout_ms, settings_hash, first_seen_at, last_seen_at)
+              VALUES ('legacy', ?, 'x', 'legacy', 'claude-code', 'legacy', 0, '', ?, ?)`, `item-${ticket.split(':')[1]}`, T0, T0);
   const runner = (await rows<{ id: number }>(`SELECT id FROM runners WHERE kind = 'legacy' ORDER BY id DESC LIMIT 1`))[0].id;
   await rows(`INSERT INTO claims (ticket_id, runner_id, request_id, nonce, snapshot_sha, claimed_at, status) VALUES (?, ?, ?, 'abc123', '', ?, 'active')`, ticket, runner, `legacy:${ticket}`, T0);
   return runner;

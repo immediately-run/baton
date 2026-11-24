@@ -62,7 +62,7 @@ beforeEach(async () => {
 /** The fixture repository of the scenario; returns the runners and claims it made. */
 async function fixture() {
   git.add('R', { rank: 1 });
-  git.add('K', { rank: 2, tier: 'critical' });
+  git.add('K', { rank: 2 }, placed('filed', [], [['implement', 'ready']], { bars: { implement: ['family:test'] } }));
   git.add('N', { rank: 12, requires: ['real-iphone'] });
   git.add('RUN1', { rank: 3 });
   git.add('RUN2', { rank: 4 });
@@ -70,17 +70,17 @@ async function fixture() {
   git.add('B', { rank: 6 });
   git.add('BO', { rank: 7 });
   git.add('U', { rank: 8 });
-  git.add('S', { rank: 9, tier: 'critical' }, placed('pr-open', [['implement', 'pr-open']], [['review', 'waiting', 'ci']]));
+  git.add('S', { rank: 9 }, placed('pr-open', [['implement', 'pr-open']], [['review', 'waiting', 'ci']]));
   git.add('P', { rank: 10, question: { id: 'q-1', severity: 'high', options: [{ id: 'ship', reached: 'adjudicated' }] } }, placed('reviewed', REVIEWED, [['decide', 'ready']]));
   git.add('C', { rank: 11 });
   expect((await git.post()).status).toBe(200);
   git.close('C', 'done');
   expect((await git.post()).status).toBe(200);
 
-  // Every runner's ceiling is `routine`: none may take the critical K.
-  const a = await register('vm-a', { tier_ceiling: 'routine' });
-  const b = await register('vm-b', { tier_ceiling: 'routine' });
-  const idle = await register('mac', { tier_ceiling: 'routine' });
+  // Every runner carries a tag barred on K's ready leg.
+  const a = await register('vm-a', { tags: ['family:test'] });
+  const b = await register('vm-b', { tags: ['family:test'] });
+  const idle = await register('mac', { tags: ['family:test'] });
   const run1 = await claimItem('vm-a', a.secret, { ticket_id: 'docs:RUN1' });
   const run2 = await claimItem('vm-b', b.secret, { ticket_id: 'docs:RUN2' });
   expect([run1.status, run2.status]).toEqual([200, 200]);
@@ -126,8 +126,8 @@ describe('S-BTN-260 the tickets list (B-194)', () => {
     expect(state('C')).toEqual(['closed', []]);
 
     const r = byId(answer, 'R');
-    expect(Object.keys(r).sort()).toEqual(['course', 'detail', 'eligible_runners', 'expedite', 'failed_rule', 'order', 'parent', 'position', 'reasons', 'requires', 'requires_unmet', 'state', 'tags', 'ticket_id', 'tier', 'title']);
-    expect([r.title, r.course, r.tier, r.position]).toEqual(['R — a fixture ticket', 'roadmap-pr', 'routine', { station: 'filed', path_len: 0, next_leg: 'implement' }]);
+    expect(Object.keys(r).sort()).toEqual(['course', 'detail', 'eligible_runners', 'expedite', 'failed_rule', 'order', 'parent', 'position', 'reasons', 'requires', 'requires_unmet', 'state', 'tags', 'ticket_id', 'title']);
+    expect([r.title, r.course, r.position]).toEqual(['R — a fixture ticket', 'roadmap-pr', { station: 'filed', path_len: 0, next_leg: 'implement' }]);
 
     const run1 = byId(answer, 'RUN1').detail;
     expect(run1).toMatchObject({ claim_id: f.run1, runner_id: f.a.id, hostname: 'vm-a', session_name: 's-vm-a', leg: 'implement', since: T0, alive: true, stalled: true, condition_wait: null, last_activity_at: T0 - 3 * HOUR });
@@ -168,7 +168,7 @@ describe('S-BTN-260 the tickets list (B-194)', () => {
     expect(r.failed_rule).toBeNull();
     expect(r.eligible_runners).toContainEqual({ runner_id: f.idle.id, hostname: 'owner-mac', session_name: 's-mac' });
     const k = byId(answer, 'K');
-    expect([k.eligible_runners, k.failed_rule]).toEqual([[], 'above-tier-ceiling']);
+    expect([k.eligible_runners, k.failed_rule]).toEqual([[], 'barred-tag']);
     // A row that is not ready carries neither field.
     expect('eligible_runners' in byId(await tickets(), 'HB')).toBe(false);
     // With no live runner at all the list is empty and the word says so.
@@ -177,7 +177,7 @@ describe('S-BTN-260 the tickets list (B-194)', () => {
     expect([none.eligible_runners, none.failed_rule]).toEqual([[], 'no-runner']);
   });
 
-  it('filters by state word, tab, text and tier; counts ignore the filters; a bad query is refused', async () => {
+  it('filters by state word, tab, text; counts ignore the filters; a bad query is refused', async () => {
     await fixture();
     const all = await tickets();
     const blocked = await tickets('?state=blocked');
@@ -192,17 +192,10 @@ describe('S-BTN-260 the tickets list (B-194)', () => {
     expect(ids(await tickets('?q=run'))).toEqual(['RUN1', 'RUN2']);
     expect(ids(await tickets(`?q=${encodeURIComponent('BO — a fixture')}`))).toEqual(['BO']);
     expect(ids(await tickets(`?q=${encodeURIComponent('%')}`))).toEqual([]);
-    // `tier`: a ceiling — the critical ticket is above `routine`; a row with no ticket fits none.
-    const routine = await tickets('?tier=routine');
-    expect(ids(routine)).not.toContain('S');
-    expect(ids(routine)).not.toContain('K');
-    expect(ids(routine)).not.toContain('C');
-    expect(ids(routine)).toContain('R');
-    expect(ids(await tickets('?tier=critical'))).toContain('S');
-    expect(routine.counts).toEqual(all.counts);
-    expect(ids(await tickets('?state=blocked&q=b&tier=routine')).sort()).toEqual(['B', 'BO', 'HB']);
+    expect(ids(await tickets('?tier=nonsense'))).toEqual(ids(all));
+    expect(ids(await tickets('?state=blocked&q=b')).sort()).toEqual(['B', 'BO', 'HB']);
 
-    for (const bad of ['?state=nope', '?tier=zzz', '?bogus=1', '?q=', '?cursor=garbage']) {
+    for (const bad of ['?state=nope', '?bogus=1', '?q=', '?cursor=garbage']) {
       const res = await get(`/v1/repositories/docs/tickets${bad}`);
       expect([bad, res.status, res.json.code]).toEqual([bad, 400, 'invalid-params']);
     }

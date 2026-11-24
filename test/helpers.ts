@@ -175,8 +175,7 @@ export async function signedCall(name: string, path: string, o: Omit<SignOptions
 export function hbBody(cred: keyof typeof TOKENS, over: Record<string, unknown> = {}) {
   return {
     hostname: HOSTS[cred], session_name: `s-${cred}`, harness: 'opencode', kind: 'vm', model_id: 'zai-coding-plan/glm-5.3',
-    capabilities: ['agent-venue'],
-    tier_ceiling: 'critical', lease_timeout_s: 900, courses: [{ repository: 'docs', course: 'roadmap-pr', version: 3 }], ...over,
+    capabilities: ['agent-venue'], lease_timeout_s: 900, courses: [{ repository: 'docs', course: 'roadmap-pr', version: 3 }], ...over,
   };
 }
 
@@ -282,7 +281,7 @@ export function armedAt() {
 
 /** A ticket of §7.1's normative post. */
 export function ticket(id: string, over: Record<string, unknown> = {}) {
-  return { id, course_id: 'roadmap-pr', path: `content/roadmap/${id}.mdx`, title: `${id} — a fixture ticket`, tier: 'routine', requires: [],
+  return { id, course_id: 'roadmap-pr', path: `content/roadmap/${id}.mdx`, title: `${id} — a fixture ticket`, requires: [],
     operator_only: false, expedite: false, depends_on: [], blocked_by: [], repos: ['immediately-run/docs'], rank: 0, ...over };
 }
 

@@ -18,7 +18,6 @@ export type RepositoryRow = {
   web_base: string | null;
   default_branch: string;
   weight: number;
-  tiers: string[];
   /** The courses in force, ids and versions. */
   courses: { id: string; version: number }[];
   /** The head snapshot — its commit, when its post was accepted, and that post's observation
@@ -93,7 +92,7 @@ export function repositoriesAnswer(cx: ReadCtx, principal: ReadPrincipal): Repos
     repositories: repos.map((r) => {
       const h = heads.get(r.id);
       return {
-        id: r.id, github: r.github, forge: r.forge, web_base: r.web_base, default_branch: r.default_branch, weight: r.weight, tiers: r.tiers,
+        id: r.id, github: r.github, forge: r.forge, web_base: r.web_base, default_branch: r.default_branch, weight: r.weight,
         courses: courses.get(r.id) ?? [],
         head: h?.sha ? { sha: h.sha, received_at: h.received_at, observation: h.observation } : null,
         mode: r.cutover_at != null ? 'cut-over' as const : 'shadow' as const,

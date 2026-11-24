@@ -12,7 +12,7 @@ import { call as hostCall } from '#host';
 import roadmapPr from '../fixtures/courses/roadmap-pr/course.json';
 
 const board = inject('board');
-type Item = { id: string; status: string; tier: string | null; tags: string[]; requires: string[] | null; queue: string; node: string };
+type Item = { id: string; status: string; tags: string[]; requires: string[] | null; queue: string; node: string };
 const itemsOf = (label: keyof typeof board.states) => board.states[label].state.items as Item[];
 const sha = board.shas;
 const T0 = Date.parse('2026-10-13T12:00:00Z');
@@ -532,14 +532,13 @@ describe('G-BTN-14: a force-reaped live runner’s item waits for its fence', ()
 
 describe('G-BTN-40: the matching query and gatesFor agree; git overtaking a claim ends it', () => {
   const runners = [
-    { cred: 'vm-a' as const, session: 'venue', over: { capabilities: ['agent-venue'], tier_ceiling: 'critical' } },
-    { cred: 'vm-a' as const, session: 'judge', over: { capabilities: ['agent-venue'], tier_ceiling: 'judgement' } },
-    { cred: 'vm-b' as const, session: 'bare', over: { capabilities: [], tier_ceiling: 'routine' } },
-    { cred: 'mac' as const, session: 'owner', over: { capabilities: ['human-operator', 'agent-venue'], tier_ceiling: 'critical' } },
+    { cred: 'vm-a' as const, session: 'venue', over: { capabilities: ['agent-venue'] } },
+    { cred: 'vm-b' as const, session: 'bare', over: { capabilities: [] } },
+    { cred: 'mac' as const, session: 'owner', over: { capabilities: ['human-operator', 'agent-venue'] } },
     // Rule 9 (R-BTN-65): below roadmap-pr's min_runner_version, and declaring no course at all.
-    { cred: 'vm-b' as const, session: 'stale', over: { capabilities: ['agent-venue'], tier_ceiling: 'critical', courses: [{ repository: 'docs', course: 'roadmap-pr', version: 2 }] } },
-    { cred: 'mac' as const, session: 'nocourse', over: { capabilities: ['agent-venue'], tier_ceiling: 'critical', courses: [] } },
-  ] as { cred: 'vm-a' | 'vm-b' | 'mac'; session: string; over: { capabilities: string[]; tier_ceiling: string; courses?: unknown[] } }[];
+    { cred: 'vm-b' as const, session: 'stale', over: { capabilities: ['agent-venue'], courses: [{ repository: 'docs', course: 'roadmap-pr', version: 2 }] } },
+    { cred: 'mac' as const, session: 'nocourse', over: { capabilities: ['agent-venue'], courses: [] } },
+  ] as { cred: 'vm-a' | 'vm-b' | 'mac'; session: string; over: { capabilities: string[]; courses?: unknown[] } }[];
   const chain: Record<string, (keyof typeof sha)[]> = { A: ['A'], B: ['A', 'B'], C: ['A', 'B', 'C'], D: ['A', 'D'] };
 
   it.each(['A', 'B', 'C', 'D'] as const)('on fixture board %s', async (label) => {
@@ -549,12 +548,12 @@ describe('G-BTN-40: the matching query and gatesFor agree; git overtaking a clai
     for (const w of runners) {
       const { id } = await register(w.cred, { session_name: w.session, ...w.over });
       const decl = w.over.capabilities;
-      const facts = { tier_ceiling: w.over.tier_ceiling, declared: decl, tags: [], grants: null, courses: (w.over.courses ?? [{ repository: 'docs', course: 'roadmap-pr', version: 3 }]) as { repository: string; course: string; version: number }[] };
+      const facts = { declared: decl, tags: [], grants: null, courses: (w.over.courses ?? [{ repository: 'docs', course: 'roadmap-pr', version: 3 }]) as { repository: string; course: string; version: number }[] };
       // The reference: gatesFor over the snapshot's own items, in its ready order — each at its
       // course's start, its start leg ready (the interim post's placement).
       const expected = snap.ready.filter((rid: string) => {
         const it = itemsOf(label).find((x) => x.id === rid)!;
-        const ticket = { repository: 'docs', course: 'roadmap-pr', tier: it.tier, requires: it.requires, operator_only: it.tags.includes('OP') || (it.requires ?? []).includes('human-operator'), tiers: ['routine', 'judgement', 'critical'] };
+        const ticket = { repository: 'docs', course: 'roadmap-pr', requires: it.requires, operator_only: it.tags.includes('OP') || (it.requires ?? []).includes('human-operator') };
         return gatesFor(facts, ticket, { name: 'implement', state: 'ready', bars: [] }, 'claim', { now: T0, claims: [], override: null, minRunnerVersion: 3, headObservation: 1, lastEndObservation: -1 }).ok;
       });
       const got = await recommended(id);
@@ -562,8 +561,7 @@ describe('G-BTN-40: the matching query and gatesFor agree; git overtaking a clai
     }
   });
 
-  // Granted keys (R-BTN-58): rule 4 within the grant, rule 5 under its max_tier, rule 6 by a
-  // granted human-operator, rule 7 where granted — the query's grant clauses against gatesFor
+  // Granted keys (R-BTN-58): rule 4 within the grant, rule 7 where granted — the query's grant clauses against gatesFor
   // (round 1, 1-A-9 / 1-B-9).
   it('on fixture board A, for granted keys', async () => {
     const admin = await makeKey('ssh-ed25519', 'admin');
@@ -572,42 +570,38 @@ describe('G-BTN-40: the matching query and gatesFor agree; git overtaking a clai
     await setAdminKeys(admin);
     expect((await keyCall(admin, '/v1/admin/repositories', { id: 'docs', owner_keys_add: [docsOwner.publicKey] })).status).toBe(200);
     expect((await keyCall(admin, '/v1/admin/repositories', { id: 'ops', github: 'immediately-run/ops', default_branch: 'main', sync_workflow: '.github/workflows/baton-sync.yml', owner_keys: [opsOwner.publicKey] })).status).toBe(200);
-    const TIERS = ['routine', 'judgement', 'critical'];
     const cases = [
-      { name: 'venue-judgement', grants: { docs: { capabilities: ['agent-venue'], max_tier: 'judgement' } }, declared: ['agent-venue'], ceiling: 'critical' },
-      { name: 'llm-only', grants: { docs: { capabilities: ['llm-call'] } }, declared: ['llm-call'], ceiling: 'critical' },
-      { name: 'bare-routine', grants: { docs: { capabilities: [], max_tier: 'routine' } }, declared: [], ceiling: 'critical' },
-      { name: 'operator', grants: { docs: { capabilities: ['agent-venue', 'human-operator'] } }, declared: ['agent-venue', 'human-operator'], ceiling: 'critical' },
-      { name: 'ops-only', grants: { ops: { capabilities: ['agent-venue'] } }, declared: ['agent-venue'], ceiling: 'critical' },
+      { name: 'venue', grants: { docs: { capabilities: ['agent-venue'] } }, declared: ['agent-venue'] },
+      { name: 'llm-only', grants: { docs: { capabilities: ['llm-call'] } }, declared: ['llm-call'] },
+      { name: 'bare', grants: { docs: { capabilities: [] } }, declared: [] },
+      { name: 'operator', grants: { docs: { capabilities: ['agent-venue', 'human-operator'] } }, declared: ['agent-venue', 'human-operator'] },
+      { name: 'ops-only', grants: { ops: { capabilities: ['agent-venue'] } }, declared: ['agent-venue'] },
     ];
     for (const [i, c] of cases.entries()) {
       const key = await makeKey('ssh-ed25519', c.name);
-      for (const [repo, g] of Object.entries(c.grants) as [string, { capabilities: string[]; max_tier?: string }][]) {
-        const r = await keyCall(admin, '/v1/admin/grants', { repository: repo, public_key: key.publicKey, hostname: `g-${i}`, capabilities: g.capabilities, ...(g.max_tier ? { max_tier: g.max_tier } : {}) });
+      for (const [repo, g] of Object.entries(c.grants) as [string, { capabilities: string[] }][]) {
+        const r = await keyCall(admin, '/v1/admin/grants', { repository: repo, public_key: key.publicKey, hostname: `g-${i}`, capabilities: g.capabilities });
         expect([c.name, r.status]).toEqual([c.name, 200]);
       }
       const created = Math.floor((await withCore((x) => x.now())) / 1000);
       // A granted key declares courses only of repositories it is granted on (§10.1).
       const courses = Object.keys(c.grants).map((repository) => ({ repository, course: 'roadmap-pr', version: 3 }));
-      const body = hbBody('vm-a', { hostname: `g-${i}`, session_name: c.name, secret_hash: await sha256(c.name), capabilities: c.declared, tier_ceiling: c.ceiling, courses });
+      const body = hbBody('vm-a', { hostname: `g-${i}`, session_name: c.name, secret_hash: await sha256(c.name), capabilities: c.declared, courses });
       const res = await hostCall(await signedRequest(key, `${ORIGIN}/v1/runner/heartbeat`, { created, body: JSON.stringify(body) }));
       const hb = (await res.json()) as { runner_id: number };
       expect([c.name, res.status]).toEqual([c.name, 200]);
-      const docs = (c.grants as Record<string, { capabilities: string[]; max_tier?: string } | undefined>).docs;
       const grants = Object.fromEntries(Object.entries(c.grants).map(([repo, g]) => [repo, {
         capabilities: [...new Set([...capabilitiesOf(g.capabilities), ...(g.capabilities.includes('human-operator') ? ['human-operator'] : [])])],
       }]));
-      // Rule 5 under the grant's cap: the lower of the declared ceiling and max_tier.
-      const ceiling = docs?.max_tier && TIERS.indexOf(docs.max_tier) < TIERS.indexOf(c.ceiling) ? docs.max_tier : c.ceiling;
-      const facts = { tier_ceiling: ceiling, declared: c.declared, tags: [], grants, courses };
+      const facts = { declared: c.declared, tags: [], grants, courses };
       const expected = board.states.A.ready.filter((rid: string) => {
         const it = itemsOf('A').find((x) => x.id === rid)!;
-        const ticket = { repository: 'docs', course: 'roadmap-pr', tier: it.tier, requires: it.requires, operator_only: it.tags.includes('OP') || (it.requires ?? []).includes('human-operator'), tiers: TIERS };
+        const ticket = { repository: 'docs', course: 'roadmap-pr', requires: it.requires, operator_only: it.tags.includes('OP') || (it.requires ?? []).includes('human-operator') };
         return gatesFor(facts, ticket, { name: 'implement', state: 'ready', bars: [] }, 'claim', { now: T0, claims: [], override: null, minRunnerVersion: 3, headObservation: 1, lastEndObservation: -1 }).ok;
       });
       expect([c.name, await recommended(hb.runner_id)]).toEqual([c.name, expected.map(q)]);
       // Not vacuous: a docs grant with the venue is offered something; an ops-only key nothing of docs'.
-      if (c.name === 'venue-judgement') expect(expected.length).toBeGreaterThan(0);
+      if (c.name === 'venue') expect(expected.length).toBeGreaterThan(0);
       if (c.name === 'ops-only') expect(expected).toEqual([]);
     }
   });
@@ -678,17 +672,16 @@ describe('G-BTN-40: the matching query and gatesFor agree; git overtaking a clai
     ['done', (items: any[]) => items.map((i) => (i.id === 'R3-9002' ? { ...i, status: 'done', node: 'done' } : i))],
     ['superseded', (items: any[]) => items.map((i) => (i.id === 'R3-9002' ? { ...i, status: 'superseded', node: 'superseded' } : i))],
     ['archived (gone from the board)', (items: any[]) => items.filter((i) => i.id !== 'R3-9002')],
-    ['re-tiered above the holder’s ceiling', (items: any[]) => items.map((i) => (i.id === 'R3-9002' ? { ...i, tier: 'critical' } : i))],
-  ])('%s: the claim ends released:stale-board and the holder is told', async (what, mutate) => {
-    const { secret } = await register('vm-a', { tier_ceiling: 'judgement' });
+  ])('%s: the claim ends released:stale-board and the holder is told', async (_what, mutate) => {
+    const { secret } = await register('vm-a', { });
     const { json: c } = await claimItem('vm-a', secret, { ticket_id: 'docs:R3-9002' });
     const res = await syncCall('/v1/sync/board', overtaken(mutate));
     expect(await res.json()).toMatchObject({ ok: true, stale_released: 1 });
     expect(await claimRow(c.claim_id)).toMatchObject({ status: 'released', end_reason: 'released:stale-board' });
     expect((await beat('vm-a', secret)).json.messages.filter((m: { kind: string }) => m.kind !== 'unblocked')).toEqual([expect.objectContaining({ kind: 'release', payload: expect.objectContaining({ ticket_id: 'docs:R3-9002', reason: 'stale-board' }) })]);
-    // R-BTN-85: a closure under the claim is logged before git wins; a re-tier closes nothing.
+    // R-BTN-85: a closure under the claim is logged before git wins.
     const logged = await rows<{ detail_json: string }>(`SELECT detail_json FROM events WHERE kind = 'discrepancy' AND ticket_id = 'docs:R3-9002'`);
-    expect(logged.map((r) => JSON.parse(r.detail_json).sub)).toEqual(what.startsWith('re-tiered') ? [] : ['closed-under-claim']);
+    expect(logged.map((r) => JSON.parse(r.detail_json).sub)).toEqual(['closed-under-claim']);
   });
 
   it('an unchanged item keeps its claim', async () => {

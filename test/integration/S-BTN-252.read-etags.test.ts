@@ -127,7 +127,7 @@ describe('S-BTN-252 the reads’ ETags (B-205)', () => {
     expect(board.status).toBe(200);
     expect(board.headers.get('ETag')).toMatch(/^"[0-9a-f]{64}"$/);
     const body = (await board.json()) as Record<string, unknown>;
-    expect(Object.keys(body).sort()).toEqual(['granted_capabilities', 'holders', 'ready', 'ready_by_tier', 'repository', 'server_time']);
+    expect(Object.keys(body).sort()).toEqual(['granted_capabilities', 'holders', 'ready', 'repository', 'server_time']);
     expect(body.server_time).toBe(T0);
     const direct = await withCore((c) => JSON.stringify(c.boardView('docs', null)));
     expect(JSON.stringify(body)).toBe(direct);

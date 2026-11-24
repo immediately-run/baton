@@ -85,7 +85,7 @@ async function quiet(session: string): Promise<Captured[]> {
 async function oldRunnersView(now: number) {
   const out = [];
   for (const w of await rows<Record<string, any>>(
-    `SELECT id, hostname, session_name, harness, kind, isolation, model_id, tier_ceiling, tier_ceilings, lease_timeout_ms,
+    `SELECT id, hostname, session_name, harness, kind, isolation, model_id, lease_timeout_ms,
             first_seen_at, last_seen_at, last_activity_at, reaped_at, incarnation, profile_json, client_version, legacy_names_at FROM runners ORDER BY hostname, id`)) {
     const id = w.id;
     const alive = w.reaped_at == null && now - w.last_seen_at < w.lease_timeout_ms;
@@ -95,7 +95,6 @@ async function oldRunnersView(now: number) {
     const claims = await rows(`SELECT id, ticket_id, nonce, claimed_at FROM claims WHERE runner_id = ? AND status = 'active' ORDER BY claimed_at, id`, id);
     out.push({
       ...w,
-      tier_ceilings: JSON.parse(w.tier_ceilings),
       profile: w.profile_json == null ? null : JSON.parse(w.profile_json),
       alive,
       capabilities: await rows('SELECT capability, declared FROM runner_capabilities WHERE runner_id = ? ORDER BY capability', id),
@@ -159,9 +158,8 @@ async function report(runner: number, at: number, text: string) {
 async function seedRunners(count: number, live = false) {
   const at = live ? T0 : T0 - 40 * 24 * H;
   await rows(`WITH RECURSIVE k(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM k WHERE i < ?)
-              INSERT INTO runners (hostname, session_name, secret_hash, credential_id, harness, kind, tier_ceiling,
-                                   tier_ceilings, lease_timeout_ms, settings_hash, first_seen_at, last_seen_at, reaped_at)
-              SELECT 'extra-' || k.i, 's-' || k.i, 'x-' || k.i, 'vm-a', 'opencode', 'vm', 'critical', '{}', 900000, '', ?, ?,
+              INSERT INTO runners (hostname, session_name, secret_hash, credential_id, harness, kind, lease_timeout_ms, settings_hash, first_seen_at, last_seen_at, reaped_at)
+              SELECT 'extra-' || k.i, 's-' || k.i, 'x-' || k.i, 'vm-a', 'opencode', 'vm', 900000, '', ?, ?,
                      CASE WHEN k.i % 2 = 0 THEN ? ELSE NULL END
               FROM k`, count, at, at, live ? null : at + 60_000);
 }

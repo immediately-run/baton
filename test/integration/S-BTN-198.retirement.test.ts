@@ -47,8 +47,7 @@ let claimId: number;
 
 /** The granted runner's heartbeat body: a checkout of ops' course. */
 const beatBody = (over: Record<string, unknown> = {}) => ({
-  hostname: 'ops-vm', session_name: 's-ops', harness: 'opencode', kind: 'vm', capabilities: ['agent-venue'],
-  tier_ceiling: 'critical', lease_timeout_s: 900, courses: [{ repository: 'ops', course: 'roadmap-pr', version: 3 }], ...over,
+  hostname: 'ops-vm', session_name: 's-ops', harness: 'opencode', kind: 'vm', capabilities: ['agent-venue'], lease_timeout_s: 900, courses: [{ repository: 'ops', course: 'roadmap-pr', version: 3 }], ...over,
 });
 const beat = (over: Record<string, unknown> = {}) => signed(runner, '/v1/runner/heartbeat', beatBody(over), { 'X-Runner-Secret': secret });
 

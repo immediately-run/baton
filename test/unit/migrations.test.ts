@@ -9,6 +9,46 @@ import type { Store } from '../../src/core/ports';
 
 import { dropDerivedSchema } from '../lib/migrationRewind';
 
+describe('migration 0077: retire tiers (B-322)', () => {
+  it('preserves grants, runners and the ready projection across the upgrade', async () => {
+    const stub = env.BATON.get(env.BATON.idFromName('migrations-0077'));
+    await runInDurableObject(stub, (_o: unknown, state: DurableObjectState) => {
+      const sql = state.storage.sql;
+      sql.exec('PRAGMA foreign_keys = OFF');
+      dropDerivedSchema(sql);
+      for (const o of sql.exec("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%'").toArray()) sql.exec(`DROP TABLE "${o.name}"`);
+      for (const m of MIGRATIONS.filter((x) => x.id <= 76)) sql.exec(m.sql);
+    });
+    await runInDurableObject(stub, (_o: unknown, state: DurableObjectState) => {
+      const sql = state.storage.sql;
+      sql.exec('PRAGMA foreign_keys = ON');
+      sql.exec(`INSERT INTO repositories (id, github, default_branch, sync_workflow) VALUES ('docs', 'o/docs', 'main', 'sync.yml');
+        INSERT INTO credentials (id, hostname, allowed_capabilities, kind) VALUES ('key', 'host', '["agent-venue"]', 'runner');
+        INSERT INTO runner_grants (credential_id, repository_id, capabilities, max_tier, granted_by, granted_at) VALUES ('key', 'docs', '["agent-venue"]', 1, 'owner:k', 1);
+        INSERT INTO runners (id, hostname, session_name, secret_hash, credential_id, harness, kind, tier_ceiling, tier_ceilings, lease_timeout_ms, settings_hash, first_seen_at, last_seen_at)
+          VALUES (7, 'host', 's', 'hash', 'key', 'opencode', 'vm', 'judgement', '{"docs":"judgement"}', 900000, '', 1, 2);
+        INSERT INTO tickets (id, repository_id, local_id, path, title, status, node, queue, tags, requires_clause, depends_on, blocked_by, repos, snapshot_sha, row_hash, tier, tier_position, course_id, rank)
+          VALUES ('docs:A', 'docs', 'A', 'tickets/A.md', 'A', 'available', 'ready-autonomous', 'autonomous', '[]', 'absent', '[]', '[]', '[]', '', 'h', 'critical', 2, 'roadmap-pr', 4);
+        INSERT INTO ticket_stations (ticket_id, station, path, path_len, to_end, next_leg, next_source, snapshot_sha, observation)
+          VALUES ('docs:A', 'filed', '[]', 0, 1, 'implement', 'course', '', 1);
+        INSERT INTO ticket_next_legs (ticket_id, leg, state, ready_since) VALUES ('docs:A', 'implement', 'ready', 1);`);
+      const all = (q: string) => sql.exec(q).toArray();
+      const ready = () => all('SELECT ticket_id, leg, rank, ready_since FROM ready_tickets INDEXED BY ready_tickets_order');
+      expect(ready()).toEqual([{ ticket_id: 'docs:A', leg: 'implement', rank: 4, ready_since: 1 }]);
+      sql.exec(MIGRATIONS.find((m) => m.id === 77)!.sql);
+      expect(ready()).toEqual([{ ticket_id: 'docs:A', leg: 'implement', rank: 4, ready_since: 1 }]);
+      expect(all('SELECT credential_id, capabilities FROM runner_grants')).toEqual([{ credential_id: 'key', capabilities: '["agent-venue"]' }]);
+      expect(all('SELECT id, credential_id FROM runners')).toEqual([{ id: 7, credential_id: 'key' }]);
+      expect(all("SELECT name FROM sqlite_master WHERE sql LIKE '%tier%' AND name NOT LIKE '_cf_%'")).toEqual([]);
+      expect(all('PRAGMA foreign_key_check')).toEqual([]);
+      sql.exec("UPDATE tickets SET rank = 5 WHERE id = 'docs:A'");
+      expect(ready()).toEqual([{ ticket_id: 'docs:A', leg: 'implement', rank: 5, ready_since: 1 }]);
+      sql.exec("UPDATE ticket_next_legs SET state = 'waiting' WHERE ticket_id = 'docs:A'");
+      expect(ready()).toEqual([]);
+    });
+  });
+});
+
 describe('migration 0076: retire reviewer settings (B-285, S-BTN-26)', () => {
   it('drops the old reviewer data without changing other instance settings', async () => {
     const stub = env.BATON.get(env.BATON.idFromName('migrations-0076'));

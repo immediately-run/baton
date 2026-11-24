@@ -44,7 +44,7 @@ async function runnerBeatAs(session: string, secret: string, over: Record<string
   const known = runnerSessions.has(session);
   const res = await hostCall(await signedRequest(runnerKey, ORIGIN + '/v1/runner/heartbeat', {
     created, ...(known ? { headers: { 'X-Runner-Secret': secret } } : {}),
-    body: JSON.stringify({ hostname: 'runner-host', session_name: session, harness: 'opencode', kind: 'vm', billing: {}, capabilities: ['agent-venue'], tier_ceiling: 'critical', lease_timeout_s: 900, ...(known ? {} : { secret_hash: await sha256Of(secret) }), courses: [{ repository: 'ops', course: 'roadmap-pr', version: 3 }], ...over }),
+    body: JSON.stringify({ hostname: 'runner-host', session_name: session, harness: 'opencode', kind: 'vm', billing: {}, capabilities: ['agent-venue'], lease_timeout_s: 900, ...(known ? {} : { secret_hash: await sha256Of(secret) }), courses: [{ repository: 'ops', course: 'roadmap-pr', version: 3 }], ...over }),
   }));
   if (res.status === 200) runnerSessions.add(session);
   return { status: res.status, json: (await res.json()) as Record<string, any> };
@@ -64,7 +64,7 @@ async function checkerBeatAs(session: string, secret: string, repository: string
   // report carries it (round 1, finding 15).
   const res = await hostCall(await signedRequest(checkerKey, ORIGIN + '/v1/runner/heartbeat', {
     created, ...(checkerSessions.has(session) ? { headers: { 'X-Runner-Secret': secret } } : {}),
-    body: JSON.stringify({ hostname: 'checker-host', session_name: session, harness: 'opencode', kind: 'vm', billing: {}, capabilities: [], tier_ceiling: 'critical', lease_timeout_s: 900, ...(checkerSessions.has(session) ? {} : { secret_hash: await sha256Of(secret) }), courses: [], protection: [{ repository, matched, reading_hash: readingHash, legs: { count: 2, tickets: 5 } }] }),
+    body: JSON.stringify({ hostname: 'checker-host', session_name: session, harness: 'opencode', kind: 'vm', billing: {}, capabilities: [], lease_timeout_s: 900, ...(checkerSessions.has(session) ? {} : { secret_hash: await sha256Of(secret) }), courses: [], protection: [{ repository, matched, reading_hash: readingHash, legs: { count: 2, tickets: 5 } }] }),
   }));
   if (res.status === 200) checkerSessions.add(session);
   expect(res.status).toBe(200);
@@ -107,7 +107,7 @@ async function makeChecker() {
   await rows('UPDATE runner_grants SET role = ? WHERE credential_id = ? AND repository_id = ?', 'protection-checker', checkerKey.fingerprint, 'ops');
   const created = Math.floor((await withCore((c) => c.now())) / 1000);
   await hostCall(await signedRequest(checkerKey, ORIGIN + '/v1/runner/heartbeat', {
-    created, body: JSON.stringify({ hostname: 'checker-host', session_name: 'checker', harness: 'opencode', kind: 'vm', billing: {}, capabilities: [], tier_ceiling: 'critical', lease_timeout_s: 900, secret_hash: await sha256Of(CHECKER_SECRET), courses: [] }),
+    created, body: JSON.stringify({ hostname: 'checker-host', session_name: 'checker', harness: 'opencode', kind: 'vm', billing: {}, capabilities: [], lease_timeout_s: 900, secret_hash: await sha256Of(CHECKER_SECRET), courses: [] }),
   }));
   checkerSessions.add('checker');
 }

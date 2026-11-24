@@ -1,3 +1,5 @@
+import { DROP_TIERS_MIGRATION } from '../core/deprecated';
+import dropTiers from './0077_drop_tiers.sql';
 // The numbered schema migrations, applied in order before the object serves (BATON_SPEC §3).
 // A migration is never edited once merged: a change is a new file and a new entry here.
 import init from './0001_init.sql';
@@ -216,4 +218,5 @@ export const MIGRATIONS: Migration[] = [
   { id: 71, sql: accessSignIn },
   { id: 75, sql: coreConditions },
   { id: 76, sql: retireReviewerSettings },
+  { id: DROP_TIERS_MIGRATION, sql: dropTiers },
 ];

@@ -73,7 +73,7 @@ describe('S-BTN-254 the root read (B-204)', () => {
 
     const docs = rowOf(answer, 'docs');
     expect(Object.keys(docs).sort()).toEqual(['courses', 'default_branch', 'discrepancies_7d', 'exclusive_goal', 'forge', 'github', 'head', 'id', 'mode',
-      'needs_you', 'ready', 'runners_alive', 'runners_total', 'running', 'tiers', 'web_base', 'weight']);
+      'needs_you', 'ready', 'runners_alive', 'runners_total', 'running', 'web_base', 'weight']);
     const reg = (registry.json.repositories as Row[]).find((r) => r.id === 'docs')!;
     for (const k of ['id', 'github', 'forge', 'web_base', 'default_branch', 'weight']) expect([k, docs[k]]).toEqual([k, reg[k]]);
     expect(docs.courses).toEqual((reg.courses as Row[]).map((c) => ({ id: c.id, version: c.version })));
@@ -81,7 +81,6 @@ describe('S-BTN-254 the root read (B-204)', () => {
     expect(docs.mode).toBe('cut-over');
     expect(rowOf(answer, 'ops').mode).toBe('shadow');
     expect(rowOf(answer, 'ops').head).toBeNull();
-    expect(Array.isArray(docs.tiers)).toBe(true);
     expect(docs.exclusive_goal).toBeNull();
 
     // An administrator's key: the same rows, and no session.

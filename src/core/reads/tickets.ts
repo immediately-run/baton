@@ -5,7 +5,6 @@
 // CLI reads them) — extended with the ticket's list row and what its page draws. The rows are
 // src/core/tickets.ts's; this module is the query, the page and the caller's `allowed`.
 import { BatonError } from '../http';
-import { fitsTier } from '../../vendor/vocabulary.mjs';
 import { qualify, repositoryOf, TICKET_ID } from '../validate';
 import { sessionCaller, ACTIONS } from '../actions';
 import { countStates, statesOf, ticketDetail, ticketRows, withEligible, TICKET_STATES, TICKET_TABS, type TicketRow } from '../tickets';
@@ -30,8 +29,6 @@ function ticketsAnswer(cx: ReadCtx, call: ReadCall): TicketsAnswer {
   const q = queryOf(call);
   const states = q.state == null ? null : statesOf(q.state);
   if (q.state != null && !states) throw new BatonError('invalid-params', `state: one of ${[...TICKET_STATES, ...Object.keys(TICKET_TABS).filter((t) => !(TICKET_STATES as readonly string[]).includes(t))].join(', ')}`);
-  const ladder = cx.core.registry.get(repo)?.tiers ?? [];
-  if (q.tier != null && !ladder.includes(q.tier)) throw new BatonError('invalid-params', `tier: one of ${ladder.join(', ')}`);
   if (q.q != null && (q.q.length === 0 || q.q.length > Q_MAX)) throw new BatonError('invalid-params', `q: 1 to ${Q_MAX} characters`);
   const after = cursorOf<{ id: string; n: number }>(cx, call);
   if (after != null && !(typeof after === 'object' && typeof after.id === 'string' && Number.isInteger(after.n))) throw new BatonError('invalid-params', 'cursor: not a cursor of this read');
@@ -40,9 +37,7 @@ function ticketsAnswer(cx: ReadCtx, call: ReadCall): TicketsAnswer {
   const needle = q.q?.toLowerCase() ?? null;
   const matched = all.filter((r) =>
     (!states || states.includes(r.state))
-    && (needle == null || r.ticket_id.toLowerCase().includes(needle) || (r.title ?? '').toLowerCase().includes(needle))
-    // A ceiling, as `ready_by_tier` reads it; a row with no ticket behind it (closed, dropped) fits none.
-    && (q.tier == null || (r.title != null && fitsTier(r.tier, q.tier, ladder))));
+    && (needle == null || r.ticket_id.toLowerCase().includes(needle) || (r.title ?? '').toLowerCase().includes(needle)));
   // The page after the cursor's row — by its id where it still stands, else by its ordinal, so
   // a list that moved between two pages neither repeats a page nor ends early.
   let from = 0;

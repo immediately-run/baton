@@ -93,6 +93,13 @@ export async function dispatchRead(cx: ReadCtx, req: Request, url: URL): Promise
     repository = checkRepositoryId(params.repository);
     authorizeRepository(cx, who.principal, repository);
   }
+  // Check before the conditional response and strip before both ETag and cursor scoping.
+  if (hit.action.id === 'repo.tickets' && url.searchParams.has('tier')) {
+    const p = who.principal;
+    const actor = p.kind === 'session' ? `session:${p.id}` : `${p.role === 'runner' ? 'credential' : p.role}:${p.cred}`;
+    cx.core.deprecated.tierFields(cx.now(), actor, ['tickets.tier'], 'tickets list', repository);
+    url.searchParams.delete('tier');
+  }
   const call: ReadCall = { action: hit.action, principal: who.principal, caller, repository, params, url, req: who.req };
   const conditional = route.etag === undefined ? true : route.etag === false ? false : route.etag(call);
   const etag = conditional ? etagOf(cx, call, route) : null;

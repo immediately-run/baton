@@ -40,7 +40,7 @@ export default {
     const store = readStore();
     return { tickets: store.tickets.map((t) => ({
       id: t.id, version: store.rev + ':' + digest(t), key: 'tracker:' + t.id, course_id: 'create-pr',
-      title: t.title, tier: 'routine', requires: [], operator_only: false, expedite: false,
+      title: t.title, requires: [], operator_only: false, expedite: false,
       depends_on: [], blocked_by: [], repos: [], rank: 0,
     })), closed: [] };
   },
