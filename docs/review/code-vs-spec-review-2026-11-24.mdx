@@ -37,7 +37,8 @@ since 2026-11-19 is still built and still served. That part is expected and tick
 
 What the tickets do not cover falls in six groups:
 
-1. **Five security-relevant gaps** no ticket names (*Security first*, below).
+1. **Five security-relevant findings** no ticket names (*Security first*, below). The owner
+   settled one, S2, on 2026-11-24 in the code's favour; the other four stand.
 2. **Retired concepts outside the removal tickets' file lists**: about thirty places, mostly
    reads, stats, the dashboard and compatibility shims whose reason has gone.
 3. **Complexity with no owner**: second implementations of one rule (the candidate query, rule
@@ -61,7 +62,7 @@ and S5 are the reviewers' findings.
 | # | What | Where | Rule |
 |---|---|---|---|
 | S1 | **A private key's body leaves the runner unmasked on two streams.** `maskKeys` holds no state between calls, and the verbose drain for `close`, `handoff` and the source calls, and replay's `onStderr`, call it once per line: only the `BEGIN` line is masked. Only the leg's `run` stream goes through `createLegMasker`. **verified** | `src/runner/claimRun.ts:405`, `src/runner/replay.ts:573`, `src/shared/mask.mjs:28` | R-BTN-144 class 6: output "is held until the `END` line or 16 KB" |
-| S2 | **`human-gates` holds without hardware keys.** The guarantee checks the three human-only approver lists only; the `human_key: hardware` condition §12.8 puts in it lives in a separate `human-gates-hardware`. A floor naming `human-gates` accepts `human_key: any`. **verified** | `src/core/policy.ts:495-507` | §12.8's guarantees table, `human-gates` |
+| S2 | **`human-gates` holds without hardware keys.** The guarantee checks the three human-only approver lists only; the `human_key: hardware` condition §12.8 puts in it lives in a separate `human-gates-hardware`. A floor naming `human-gates` accepts `human_key: any`. **verified**. **Decided by the owner, 2026-11-24: `human-gates` keeps a variant without hardware keys.** The code's split stands and the spec changes (D2a); this is no longer a code defect | `src/core/policy.ts:495-507` | §12.8's guarantees table, `human-gates` |
 | S3 | **The protection report can never be accepted.** It requires a grant with role `protection-checker`, which no route, CLI command or import writes; so `no-runner-lands`, and every guarantee built on it, reads broken on every repository. **verified** | `src/core/policy.ts:983`, `:1002` | R-BTN-180 (the checker mark), R-BTN-188 |
 | S4 | **Refusals name the key's role**, an existence oracle §12.1 forbids. B-76 covers one site, `admin keys set`; the other four are uncovered. | `src/core/admin.ts:228`, `:559`, `:735`, `:883`, `:943` | §12.1: "the refusal does not name the role" |
 | S5 | **An `OP` ticket is claimable by any runner** unless its `requires` names `human-operator`. Rule 6 is retired and `operator_only` is stored and "shown, never read"; R-BTN-132's window says it is read as `human-operator` in rule 4, and nothing does. B-41 phase 1 would close it; it is `available` and unprioritised. **likely** | `src/core/gates.ts:31-33`, `src/core/board.ts:774` | R-BTN-121, R-BTN-132 |
@@ -301,8 +302,9 @@ These change an open ticket's plan, not the work list.
   - An 8 MiB body cap that refuses 25 MiB App deliveries with `invalid-params`.
   - No `--human-keys`, `--github-app-id`/`--github-app-key` or `baton server start`.
   - `BATON_HUMAN_KEYS` and `BATON_PLAN_LIMITS` silently dropped from `--config`.
-- **B-293** should take S2, the writer classes, `board-from-trusted` and `POLICY_KNOBS`
-  (section 1). S3 can go there too, or into B-147's successor; see *Drafts*.
+- **B-293** should take the writer classes, `board-from-trusted` and `POLICY_KNOBS`
+  (section 1). S3 can go there too, or into B-147's successor; see *Drafts*. S2 is now a spec
+  amendment (D2a), not a code change; B-293's reconciliation keeps `human-gates-hardware`.
 - **B-161** depends on B-74, which is superseded; point it at what replaces B-74, and add
   create-pr's `review-rounds-<n>`, `run-tests-unreachable` and the option `grants` as person
   legs.
@@ -407,7 +409,8 @@ ticket is named, with why it does not cover the draft. Numbers come from Baton a
 | Draft | What | Nearest open ticket, and why not it |
 |---|---|---|
 | **D1** | Mask class 6 on every runner stream. `wrapperCall`'s drain and replay's `onStderr` go through a stateful masker; one test feeds a key block line by line to each sink. (S1) | B-316 is scoped to `createLegMasker`'s own defects. Fold D1 into B-316 if the owner prefers |
-| **D2** | The policy's guarantees as §12.8 states them. `human-gates` includes `human_key: hardware`; the protection checker's role can be granted (or the guarantee reads its mark, R-BTN-180); the `sync` and `runner` writer classes; `board-from-trusted` reads `attestations`; the readings entry applied. (S2, S3) | B-293 reconciles the knobs and presets, not the guarantee formulas. Fold in if the owner prefers one ticket |
+| **D2a** | **Spec amendment, from the owner's ruling of 2026-11-24.** `human-gates` keeps a variant without hardware keys: §12.8's table states `human-gates` (the three `approvers.*` lists human-only, any `human_key`) and `human-gates-hardware` (the same, with `human_key: hardware`), as `src/core/policy.ts:506-507` computes them. Reaches R-BTN-189's table and its preset sentence ("`protected` holds all but `human-gates`"), the Decisions line at `91-decisions.md:17`, S-BTN-185 and S-BTN-192, R-BTN-185's break-glass sentence, `docs/context/product.mdx`'s floors list and `docs/security-model.mdx`. The history entry records that this reverses B-164's absorption of 2026-11-02. One question follows for the owner (*Owner decisions*): whether `protected` then claims `human-gates`. | none: the reversal is new. B-293 must keep `human-gates-hardware` when it reconciles the knobs |
+| **D2** | The policy's guarantees as §12.8 states them, apart from S2: the protection checker's role can be granted (or the guarantee reads its mark, R-BTN-180); the `sync` and `runner` writer classes; `board-from-trusted` reads `attestations`; the readings entry applied. (S3) | B-293 reconciles the knobs and presets, not the guarantee formulas. Fold in if the owner prefers one ticket |
 | **D3** | Refusals that name no role: the five `admin.ts` sites answer the §12.1 form. (S4) | none |
 | **D4** | Activity kinds are the course's. Remove `ACTIVITY_KINDS` and the `review-round` and `push` special cases from core; validate a reported kind against the course's `step_kinds`; build or drop the resume record's `resume` key. | none (B-271 shrinks the model, B-162 moves route choices) |
 | **D5** | One implementation per rule, and no test-only production code. Remove `referenceCandidates` and the `reference` branches; rule 4 through one function; `HELD_CLAIMS_SQL` everywhere; `Registry.live()` for every live-repository filter, and retirement clean-up done once; one branch matcher; drop `invalidateRecommend`, `matchAction`, `bodyMatches`, `recommendations()`, `drainLines`; `repositoryRead`'s dead branches and `PUT …/policy`'s second check. | B-237 and B-243 are performance tickets; B-272 moves code out of `baton.ts` without merging duplicates. D5 can follow B-272 |
@@ -422,11 +425,22 @@ ticket is named, with why it does not cover the draft. Numbers come from Baton a
 **Supersede or rewrite rather than file:** the twelve tickets in *Open tickets that still
 prescribe a removed design*. **Reopen:** B-285.
 
-**Owner decisions surfaced, none taken here:**
+**Owner decisions taken:**
 
+- 2026-11-24: **`human-gates` keeps a variant without hardware keys** (the owner, in the session
+  that wrote this review: "Whether human-gates keeps a variant without hardware keys: yes"). The
+  code's two guarantees stand; the spec follows (D2a). This reverses B-164's ruling of
+  2026-11-02, which folded `human-gates-hardware` into `human-gates`.
+
+**Owner decisions surfaced, still open:**
+
+- Whether `protected` claims the hardware-free `human-gates`. The code says yes: the preset's
+  three lists are `['human']`, so `human-gates` holds and `human-gates-hardware` does not. The
+  spec says `protected` "holds all but `human-gates`", for a reason the history records: under
+  `human_key: any` a human-only list rests on key custody alone (R-BTN-185). Recommended: yes, as
+  the code does. The variant exists to be claimed without hardware, and `human-gates-hardware`
+  names the stronger promise.
 - Whether D1 and D2 fold into B-316 and B-293.
-- Whether `human-gates` keeps a hardware-free variant at all. The code's `human-gates` is the
-  spec's minus hardware.
 - Whether the protection checker is a grant role or a mark.
 - R-BTN-55: App installation tokens, or the personal token the code uses.
 - Which way §8.3's executor interface goes.
