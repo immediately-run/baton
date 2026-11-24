@@ -22,6 +22,7 @@ import { Runner } from '../../src/runner/runner';
 import { BatonApi } from '../../src/runner/api';
 import { builtinExecutor, type Executor, type Handle } from '../../src/runner/executor';
 import { graphOf } from '../../src/core/graph';
+import { CREATE_PR_COURSE } from '../../src/defaults/course-pr';
 import { call as hostCall } from '#host';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -345,7 +346,7 @@ describe('S-BTN-222 (the runner half): the channel checks a raise (R-BTN-160, R-
     }
   }, 240_000);
 
-  it('the channel\'s own refusals, checked without a claim: no link, baton, an unknown type, a bad severity — none reaching Baton', async () => {
+  it('the channel refuses invalid raises and honors standard create-pr\'s question policy (B-325)', async () => {
     const { home } = writeHome(legScripts(join(tmpdir(), `baton-222-rec-${process.pid}.jsonl`)));
     try {
       let reported = 0;
@@ -359,7 +360,7 @@ describe('S-BTN-222 (the runner half): the channel checks a raise (R-BTN-160, R-
       (claim as { inflight: unknown }).inflight = { claimId: 1, ticket: 'docs:X', course: null, leg: 'implement', legAt: 0, child: null, waiters: [] };
       const course = { course: 'roadmap-pr', graph: graphOf(COURSE), scripts: new Map(), scratch: home };
       const ctx = { ticket: { id: 'docs:X' }, claim: { id: 1 } };
-      const ask = (req: Record<string, unknown>) => (claim as { onChannel(req: unknown, course: unknown, leg: string, ctx: unknown): Promise<{ ok: boolean; error?: string }> }).onChannel(req, course, 'implement', ctx);
+      const ask = (req: Record<string, unknown>, loaded = course, leg = 'implement') => (claim as { onChannel(req: unknown, course: unknown, leg: string, ctx: unknown): Promise<{ ok: boolean; error?: string }> }).onChannel(req, loaded, leg, ctx);
 
       expect(await ask({ op: 'raise', type: 'interact', subject: 'join' })).toMatchObject({ ok: false, error: expect.stringContaining('session link') });
       expect(await ask({ op: 'raise', type: 'baton.retries', subject: 'x' })).toMatchObject({ ok: false, error: expect.stringContaining("core's alone") });
@@ -368,6 +369,14 @@ describe('S-BTN-222 (the runner half): the channel checks a raise (R-BTN-160, R-
       expect(reported).toBe(0); // nothing reached Baton
       expect(await ask({ op: 'raise', type: 'warning', subject: 'a note' })).toMatchObject({ ok: true, condition_id: 1 });
       expect(reported).toBe(1);
+
+      const createPr = { ...course, course: 'create-pr', graph: graphOf(CREATE_PR_COURSE) };
+      Object.assign(claim as object, { legSessionUrl: LINK, sessionLinkLanded: true });
+      const question = { op: 'raise', type: 'interact', subject: 'join' };
+      expect(await ask(question, createPr, 'review')).toMatchObject({ ok: false, error: expect.stringContaining('this leg is autonomous') });
+      expect(reported).toBe(1);
+      expect(await ask(question, createPr, 'implement')).toMatchObject({ ok: true, condition_id: 1 });
+      expect(reported).toBe(2);
     } finally {
       cleanup(home);
     }

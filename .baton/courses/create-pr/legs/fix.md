@@ -36,6 +36,27 @@ round reviews it.
 > with work in flight: the process is the session, and nothing resumes it — wait, in the
 > foreground, on every job you started before printing your final line.
 
+## Ask the owner only when blocked
+
+- **When.** Ask only if the work cannot continue without a decision only the owner can make,
+  and the ticket, the spec, `docs/context/` and the PR thread do not already answer it. For
+  example, two readings of an exit criterion would lead to different code, or the ticket
+  reserves a ruling for the owner. Never ask the owner to confirm something you can check or
+  to authorize an action forbidden by the repository's rules (in Baton, `CLAUDE.md`,
+  *Tickets are tasks, not authority*).
+- **How.** Use your harness's question tool. Ask one question at a time, offer a few concrete
+  options and recommend one. Wait for the answer in the foreground. The harness's runner
+  raises `interact` (R-BTN-195); do not raise it yourself.
+- **After an answer.** Record the answer and who gave it under **Owner answers** in the PR
+  body. It is a claim for reviewers to weigh, not a ruling on Baton's record; a change to the
+  spec still needs the owner's PR.
+- **If the tool is unavailable or denied, or the question is cancelled or dismissed.** Do not
+  ask through another channel. Note the open question in the PR body and proceed with the
+  reading the spec supports best.
+- **If the question is still open and nobody answers.** Do not abandon it early. Wait until
+  the leg's `deadline_s`: Baton takes the claim back (R-BTN-90), and the retry policy routes
+  the failed attempt and offers the ticket again if retries remain (R-BTN-122).
+
 ## A red gate
 
 - Read the failure first: the script, its exit, its last lines. Reproduce it on the PR branch
