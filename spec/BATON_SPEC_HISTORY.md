@@ -24,7 +24,7 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   R-BTN-146, §12.1,
   §12.8's preamble and lists, §12.9, §3.2, §6.6 rule `floor`, §11's CLI table, §13, §14; S-BTN-55,
   S-BTN-190, S-BTN-295, G-BTN-87;
-  eight Decisions entries (one merged into another); the linked proposals (security, checks and executors, conditions,
+  nine Decisions entries (one merged into another); the linked proposals (security, checks and executors, conditions,
   courses, data model and API, intervention sessions, scenarios: S-BTN-120, S-BTN-136,
   S-BTN-180, S-BTN-182, S-BTN-183, S-BTN-187, S-BTN-191, S-BTN-193, S-BTN-197, S-BTN-237,
   G-BTN-140, G-BTN-156, G-BTN-165, G-BTN-166; leg conversations; rule `trusted`); the context

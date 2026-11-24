@@ -118,7 +118,7 @@ One line per decision in force; the reasoning and the rejected alternatives in f
 - Chose readings as attestations about a resource instance, authenticated by the request that posts them, gate or advice being the requirement's choice (R-BTN-181, R-BTN-76, R-BTN-188).
 - Chose two resource scopes, `service` and `account`, over `runner` and `host` scopes and an administrator's overriding reading (R-BTN-76, R-BTN-40).
 - Chose one versioned policy document per repository, whose knobs presets fill, over landing modes Baton hard-codes (R-BTN-188).
-- Chose guarantees as named conditions over the policy, each including the guarantees it rests on, enforced through the policy's own `floors` list (R-BTN-189).
+- Chose guarantees as named conditions over the policy, enforced through the policy's own `floors` list (R-BTN-189).
 - Chose whose attestations count, and the merge criteria, as policy over course files (R-BTN-181, R-BTN-188).
 - Chose a trusted leg routed by a capability the owner admits on the grants whose host holds its credential, over a trusted-runner grant role (R-BTN-180, R-BTN-182).
 - Chose to leave `refs/baton/*` outside every guarantee and to read nothing from it that a trusted leg acts on (R-BTN-180).
