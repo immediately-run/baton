@@ -55,10 +55,10 @@ requirement's choice; B-140's merge runner, B-141's harness and every trusted le
      `service` and `baton`; the SSHSIG signature over the RFC 8785 canonical JSON in namespace
      `baton-attestation@1`; revoking a `human` attestation a human gate.
    - Supersession only when type, subject, writer and attested key match — a `std:review@1` only
-     by one of its own run id; a `once` attestation
-     consumed by compare-and-swap.
+     by one of its own run id~~; a `once` attestation
+     consumed by compare-and-swap~~ (no use-once bookkeeping: an attestation is bound by its subject).
    - Baton writes `std:wrote@1` ~~, `std:ran@1`~~ and `std:review@1` (with the review run's run id, R-BTN-63) at the `advance` or end that earns
-     them, signed with its attestation key; the subject from values Baton holds, never a runner's
+     them~~, signed with its attestation key~~ (an attestation carries no signature of its own, R-BTN-181); the subject from values Baton holds, never a runner's
      output.
 3. **Readings as attestations.** A reading's `type` is its resource's schema id and its value
    `{available?, until?, detail}`. The reading routes accept `nonce` and `signature`; an API-key

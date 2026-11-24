@@ -401,7 +401,8 @@ section that are not built are in [the proposal page](../proposals/checks-and-ex
 
     This is the environment the runner hands its executor (R-BTN-107). Under `builtin` it reaches
     the leg as listed. An executor that keeps §12.8's duty passes the leg none of the runner's
-    credentials: in place of the kept ones it gives the leg credentials confined to the claim's
+    credentials but the `credential:` values listed, which the owner chose to hand that leg: in
+    place of the kept ones it gives the leg credentials confined to the claim's
     `scope` and `branches` that end with the leg. A trusted leg requires no `credential:`
     capability (R-BTN-182), so no `credential:` row ever carries a trusted runner's credential;
     under `builtin` the kept row can, and does, which is one reason Baton promises nothing there.

@@ -122,7 +122,9 @@ Under `tickets.created: proposed`:
   - `std:review@1` (writer `baton`): a run of a review leg the course marks `reads_only: true`
     and `approves`, started at `head`, that finished at its approving outcome, with its run id
     (R-BTN-63). `approves: <station>` names that outcome among the leg's `to` (R-BTN-83);
-    `approves: true` means the first station `to` lists;
+    `approves: true` means the first station `to` lists. `reads_only` and `approves` are leg
+    fields of the course file, validated at the snapshot (R-BTN-69: an `approves` naming no
+    station of `to` holds the course), built with the merge runner (B-140);
   - `std:checks@1` (writer `service:<a check-runner's key>`, R-BTN-114): the course's check
     commands, from protected course data, passed at `head` in a check leg's session holding no
     credential (R-BTN-114);
@@ -210,8 +212,9 @@ environment holds (§12.8).
   `<type>:*` pattern or as a `runner:` capability (R-BTN-174), never on a grant a registration
   token made (R-BTN-117), and only on an SSH key, never an API key (R-BTN-159) — refused `not-eligible`, rule `trusted`, otherwise. The owner names that capability only on the
   grants of runners whose host holds the credential (R-BTN-180), which Baton cannot check. A
-  course whose `trusted: true` leg requires no capability, or a `credential:` one (whose value
-  R-BTN-144 would hand the override), is held (R-BTN-69).
+  course whose `trusted: true` leg requires no capability, a `runner:` one (which no grant
+  names), or a `credential:` one (whose value R-BTN-144 would hand the override), is held
+  (R-BTN-69).
 - **It runs no repository code but a trusted leg's override**, which it runs through its
   executor as any leg's code (R-BTN-107), delivering the outbox included (R-BTN-171).
 - **It re-checks at the moment it acts**, against Baton's record: every attestation it relies on

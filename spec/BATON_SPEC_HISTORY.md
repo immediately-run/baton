@@ -69,8 +69,8 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   an executor can confine a leg's forge reach; `baton repo protect --print | --check` is a tool
   a person runs, which no rule reads. `no_chain_from` stays a course rule no guarantee requires.
   The built code still has the retired knobs, `no-runner-lands` and the report store; B-189
-  removes them, rewriting every stored policy version whose `floors` names `no-runner-lands`
-  by a new version logged `admin`. Decisions superseded, their text as it stood: "Chose that a
+  removes them, following every stored policy version whose `floors` names `no-runner-lands`
+  with a new version logged `admin`. Decisions superseded, their text as it stood: "Chose that a
   domain that runs a branch's code is one of its writers, so reviewers read the change and never
   run it"; "Chose a grant's role and a domain label as the whole of a grant's trust, over a
   separate trust level, a model family or a separate-domain guarantee"; "Chose a separate
@@ -112,7 +112,14 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   credential reaches a leg under `builtin`; an ejected markdown source's deliveries writing the
   default branch under `merge.trusted` (now refused, and the duty's first clause names a source
   delivery's store credential); stale lines in B-137, B-141, B-146, B-147, B-163, B-199 and B-297;
-  and S-BTN-182 cases that tested nothing. Each was checked and fixed.
+  and S-BTN-182 cases that tested nothing. Each was checked and fixed. Round three, one fresh
+  reviewer: the ejected-source refusal could not be built (Baton cannot tell an ejected source's
+  store; replaced by a statement of the consequence); the duty's source exception did not cover
+  a source's reads; `credential:` values a course requires were forbidden by the duty and handed
+  over by R-BTN-144 (now the duty's named exception); part 7 did not hold a `runner:`-only
+  trusted leg S-BTN-182 expects held; `reads_only` and `approves` had no home or builder (part 4,
+  B-140); B-146 kept use-once consumption and SSHSIG signatures; R-BTN-182's absolute claim
+  under `builtin`; and stale "admits" and "rewriting" wording. Each was checked and fixed.
 
 - **2026-11-24 — Access sign-in refusals name the failed check (R-BTN-155, S-BTN-318).**
   Previously missing settings, missing or unverifiable assertions, and missing administrator
@@ -4047,8 +4054,7 @@ working until the stated condition holds, then removes it.
   by one new policy version per repository, made by the migration rather than an approver,
   logged `admin` with both hashes, the knobs dropped, and whether the repository's floors were
   broken before and hold after; stored versions and their hashes are never rewritten. A stored
-  version with `merge.trusted` and `tickets.created: filed`, or `merge.trusted` over an ejected
-  markdown source, stays in force but is named in that event, and the next change to it must
+  version with `merge.trusted` and `tickets.created: filed` stays in force but is named in that event, and the next change to it must
   fix it, the refusal applying then. Stored
   `paths.control: trusted-runner` reads as `approval`, and the retired knobs in a stored
   version are ignored when it is read, until the next version drops them.

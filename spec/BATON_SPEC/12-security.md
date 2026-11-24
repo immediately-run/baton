@@ -22,7 +22,7 @@ stated once, in the rule it cites.
 | Principal | Routes | Credential | May |
 |---|---|---|---|
 | Runner (machine key) | `/v1/runner/*` | SSH-signed (R-BTN-13) or API key (R-BTN-159), plus the runner secret (R-BTN-14) | heartbeat as its name; claim and act where it holds an active grant (R-BTN-58, R-BTN-146); post readings (R-BTN-101); ask blocks (R-BTN-75); accept or decline its grants, key alone (R-BTN-146); as a signed key, sync a granted repository (R-BTN-102) and deliver outbox entries (R-BTN-171; source entries where the policy's `outbox.source` admits `runner`) |
-| Trusted runner | `/v1/runner/*` | a runner's, on a grant that admits the capability a trusted leg requires (R-BTN-180) | a runner's powers; claim, advance and end the trusted legs it is routed (R-BTN-182) |
+| Trusted runner | `/v1/runner/*` | a runner's SSH key, on a grant that names the capability a trusted leg requires exactly (rule `trusted`, R-BTN-182) | a runner's powers; claim, advance and end the trusted legs it is routed (R-BTN-182) |
 | Owner's agent | the owner's routes | an owner key not registered `human_only` | an owner's actions, as `owner`; never a `human` attestation or a human gate (R-BTN-185) |
 | Check-runner | `/v1/runner/*`; `POST …/attestations` as a `service:` key the policy names | SSH-signed, plus the runner secret | heartbeat as its name; claim, advance and end check tickets; report activities and transcripts, write leg logs; where the policy's `attestations` names its key for `std:checks@1`, post that attestation (R-BTN-115); nothing else (R-BTN-114) |
 | Board sync, mirror | `/v1/sync/*` | the repository's sync or mirror key, or a CI identity token (R-BTN-93, R-BTN-156) | sync: observation numbers and board posts; mirror: read events; both: sync wants (R-BTN-94) |
@@ -291,13 +291,15 @@ which Baton cannot observe and checks nothing of (R-BTN-107):
 
 - **No repository code runs in a runner's trust boundary.** Every leg, and every other call into
   repository code, runs through an executor that keeps it from the runner's key, secret, state
-  and credentials — a source delivery holding only its store's credential for that delivery
-  (R-BTN-171); and the runner runs no CLI or other code from a checkout it serves.
+  and credentials — a call to the ticket source holding only its store's credential for that
+  call, a read credential for a read and a write credential for a delivery (§4.5, R-BTN-171);
+  and the runner runs no CLI or other code from a checkout it serves.
 - **No leg holds a credential that reaches past its claim.** What a leg may push, open and post
   on a forge is confined, outside the leg, to its claim's ticket branches (R-BTN-107's
   `branches`), those branches' pull requests and their comments, in the repositories of its scope
-  (§12.9). No leg holds the merge credential, any other credential of its runner's or of the
-  human, or one that outlives the leg; and no job the forge runs from a ref a leg pushes holds
+  (§12.9). No leg holds the merge credential, any other credential of its runner's — the
+  `credential:` values its course requires and its grant admits excepted, which the owner chose
+  to hand that leg (R-BTN-144) — or the human's, or one that outlives the leg; and no job the forge runs from a ref a leg pushes holds
   the merge credential or any credential that reaches past the claim.
 - **Every leg starts afresh.** A leg's environment holds nothing of another run's but what the
   runner hands it: its checkout at the claim's commit and its inputs, which may carry an earlier
@@ -380,9 +382,11 @@ confines a leg's credentials; a compromised forge; and a compromised Baton.
   - **`plain-git`** is the `cooperative` column under the name a `git` repository applies
     (R-BTN-92), which may apply `protected` or `protected-hardware` instead.
   - **A policy that could not work is refused** (`invalid-params`, naming the knob):
-    - `merge.trusted` while `tickets.created` is `filed`, or while the ticket source is an ejected
-      markdown source (R-BTN-74): a withdrawal or a source delivery would write a default branch
-      the forge admits no runner to (§12.8, R-BTN-180);
+    - `merge.trusted` while `tickets.created` is `filed`: a withdrawal would be written to a
+      default branch the forge admits no runner to (§12.8, R-BTN-180). A custom source whose
+      store is this repository's default branch (an ejected markdown source) cannot deliver there
+      under `merge.trusted` either; Baton cannot tell its store, and R-BTN-171's late conditions
+      report what it fails to write;
     - on a repository whose ticket source is ejected (R-BTN-74), an `outbox.source` admitting no
       deliverer; the other way, a snapshot that ejects the source while `outbox.source` admits
       none is refused `snapshot-rejected`, the previous source staying in force;
@@ -538,7 +542,7 @@ confines a leg's credentials; a compromised forge; and a compromised Baton.
   policy names. [Proposed](../proposals/security.md) (B-140).
 - **R-BTN-182 (trusted runners).** A runner whose grant names the capability a trusted leg
   requires exactly (rule `trusted`), for the legs a course marks `trusted: true`; its host holds the leg's
-  credential, which no leg's environment ever holds (§12.8). What a trusted runner claims, runs and re-checks before it acts is
+  credential, which, where the deployment keeps §12.8's duty, no leg's environment holds. What a trusted runner claims, runs and re-checks before it acts is
   [proposed](../proposals/security.md) (B-140).
 - **R-BTN-183 (what the merge runner merges).** [Proposed](../proposals/security.md) (B-140):
   the reviews, checks, paths and approvals the merge runner requires at a PR's exact head under
