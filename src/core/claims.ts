@@ -1454,6 +1454,13 @@ export class Claims {
     return this.c.sessionHosts();
   }
 
+  /** R-BTN-63: the legs a claim's ticket has run as Baton counts them for `max_runs` — the path
+   *  it held at the claim (`start_path`) and the runs this claim started (B-335: the advance
+   *  reply's `run` reads the same list, so the holder's number and the bound agree). */
+  private legsRan(startPath: string, claimId: number): string[] {
+    return [...(JSON.parse(startPath) as Step[]).map((s) => s.leg), ...this.rows<{ leg: string }>('SELECT leg FROM claim_legs WHERE claim_id = ?', claimId).map((r) => r.leg)];
+  }
+
   /** R-BTN-81: what a leg row of the history carries — the leg's run number on the ticket (its
    *  runs under any claim, this one included), the claim's snapshot and the course's version. */
   private legFacts(claimId: number, leg: string, runId: string | null = null) {
@@ -1481,7 +1488,7 @@ export class Claims {
    * checks the edge (the leg leaves that station), the run limit (its runs in `start_path` and this
    * claim's legs, under current names, R-BTN-64) and the gates that bind a holder, never the leg's
    * state. The first advance starts the leg the claim was offered (R-BTN-83). A refusal changes
-   * nothing. The answer carries the latest snapshot's next legs and the run's id.
+   * nothing. The answer carries the latest snapshot's next legs and the run's id and number (B-335).
    */
   // @model advance sha256:5ed5e60d9293
   advance(runnerId: number, claimId: number, body: unknown) {
@@ -1527,7 +1534,7 @@ export class Claims {
     if (run) this.checkVerdict(repo, c.course_id, at, b.exit_status, false);
     const max = g.legs.get(leg)!.maxRuns;
     if (max != null) {
-      const ran = [...(JSON.parse(c.start_path) as Step[]).map((s) => s.leg), ...this.rows<{ leg: string }>('SELECT leg FROM claim_legs WHERE claim_id = ?', claimId).map((r) => r.leg)];
+      const ran = this.legsRan(c.start_path, claimId);
       // B-110 (§6.8): an owner's granted runs of this leg sit beside its `max_runs` for this
       // ticket alone — the override that carried a `round` adjudication answer. The count itself
       // is the traversal record's (R-BTN-63): a grant buys one round, never a reset.
@@ -1627,7 +1634,9 @@ export class Claims {
     // R-BTN-90: the answer also names the run's `claim_legs.seq` — the runner's `leg_finished`
     // heartbeat (§7.5's finishing half) carries it when the run's script returns. R-BTN-113: a
     // dropped link says so, as a beat's answer does.
-    return { ok: true, station: at, next: this.nextLegs(c.ticket_id, at), run_id: runId, seq, ...(sessionUrlDropped != null ? { session_url_dropped: sessionUrlDropped } : {}) };
+    // B-335 (R-BTN-63): and the run's number — the ticket's runs of the leg, this one included,
+    // counted as the max-runs check above counts them, so the holder never recounts.
+    return { ok: true, station: at, next: this.nextLegs(c.ticket_id, at), run_id: runId, seq, run: runsOf(g, leg, this.legsRan(c.start_path, claimId)), ...(sessionUrlDropped != null ? { session_url_dropped: sessionUrlDropped } : {}) };
   }
 
   /** `POST /v1/runner/claims/{id}/end` (§6.5, R-BTN-8, R-BTN-71). A retried identical end is a no-op. */
