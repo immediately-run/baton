@@ -59,7 +59,7 @@ script: setups, values and refusal codes are there and in the rules, not here. A
 | Scenario | Establishes | Rules |
 |---|---|---|
 | **§1** | | |
-| S-BTN-18 Baton owns the position | Baton's recorded position stands against git: a suspension that named no commit is confirmed by the next accepted snapshot, one whose named commit git does not evidence stays and is flagged unconfirmed, a push that rewrites a held ticket to an earlier station moves nothing and raises nothing, and a person's merge moves the ticket only on a leg that declares a fact arrival, being recorded `arrival-unapplied` otherwise. | R-BTN-39, R-BTN-35, R-BTN-10 |
+| S-BTN-18 Baton owns the position | Baton's recorded position stands against git: a suspension that named no evidence is confirmed by the next accepted snapshot, one that named a commit or URL only by a snapshot carrying the sync's `std:git.evidence@1` for that claim and evidence `found: true` — never by a git path, `found: false` or the clock — and otherwise stays and is flagged unconfirmed, a push that rewrites a held ticket to an earlier station moves nothing and raises nothing, and a person's merge moves the ticket only on a leg that declares a fact arrival, being recorded `arrival-unapplied` otherwise. | R-BTN-39, R-BTN-35, R-BTN-10 |
 | S-BTN-24 advice, not gates | Choosing off Baton's order does not record an override; a claim against other advice (such as a fleet `resource` block) is accepted and records `advice-overridden`; a claim against a gate (a missing capability, a barred tag, a resource requirement that binds as a gate) is refused. | R-BTN-45, R-BTN-75 |
 | S-BTN-28 a course with no reviews | A toy three-station course runs the generic scenarios with no change to Baton, and `src/` passes the boundary test. | R-BTN-48, R-BTN-50 |
 | S-BTN-34 progress is not staleness | A claim that advanced ahead of the sync stays active; a claim ends `stale-board` only when its ticket is taken back; a git rewrite to an earlier station moves nothing and raises nothing. | R-BTN-39, R-BTN-35 |
@@ -377,7 +377,7 @@ Each gate is an invariant, the rule that owns it, and the scenarios or tests tha
 | G-BTN-33 | A claim response carries earlier claims' resume records (R-BTN-24) | S-BTN-5, -23 |
 | G-BTN-38 | No environment variable changes Baton's clock; `clock-offset` is honoured only by a loopback test-harness sidecar (R-BTN-32) | tests |
 | G-BTN-43 | `advance` moves to the next leg in one transaction whenever the gates pass; a refusal changes nothing (R-BTN-63) | S-BTN-17 |
-| G-BTN-44 | A suspension is confirmed by a later path extending it, `done` by an end station or closure under a greater observation; every end writes a resume record and every self-release a hand-off (R-BTN-10, R-BTN-24) | S-BTN-18, -20, -23, -36, -40 |
+| G-BTN-44 | A suspension is confirmed under a greater observation by the sync's `std:git.evidence@1` found for what it named, or by the snapshot alone when it named nothing, `done` by an end station or closure under a greater observation; every end writes a resume record and every self-release a hand-off (R-BTN-10, R-BTN-24) | S-BTN-18, -20, -23, -36, -40 |
 | **§10** | | |
 | G-BTN-93 | To be removed: a `success` check is queued only after a confirmed end, by the owners' conclusions, and no other conclusion passes a required check (R-BTN-153) | S-BTN-68 |
 | G-BTN-103 | To be removed: only check-runner keys claim check tickets (R-BTN-114) | S-BTN-68 |

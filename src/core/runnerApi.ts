@@ -289,8 +289,8 @@ export class RunnerApi {
    *  claim, the messages, the stale courses and the mode. A `uses` a runner still sends is its
    *  retired declaration that it uses account instances (B-168): the heartbeat reads it as
    *  absent, logging `deprecated-field`. */
-  // @model heartbeat sha256:32dad889118d
-  // @model declare sha256:c54f040956e4
+  // @model heartbeat sha256:27844ee91e6c
+  // @model declare sha256:8af9917a77b9
   async heartbeat(credentialId: string, secretHeader: string | null, body: unknown, clientVersion: string | null = null, legacyName = false) {
     // B-168 (R-BTN-76): `uses` is retired — a runner uses the repository's instances, never a set
     // it declares — and read as absent while the history's Migrations entry lasts.

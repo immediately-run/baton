@@ -191,6 +191,16 @@ module regressions {
       .then(sync1)
       .expect(c1.confirmed and ticketClaimable("t1"))
 
+  // R-BTN-10 (bering, 2026-11-24: 44 review suspensions named their verdict comment and waited
+  // on a git path that no longer carries positions): a suspension that named evidence git holds
+  // is confirmed by the next snapshot — the sync attests it found — whatever path git shows.
+  run namedSuspensionConfirmedByEvidenceTest =
+    start.then(claim("w1", "t1")).then(advance("w1", "implement", NONE))
+      .then(pushEvidence("w1", true)).then(endClaim("w1", "suspended", true))
+      .expect(c1.named and c1.found and not(c1.confirmed))
+      .then(sync1)
+      .expect(c1.confirmed and ticketClaimable("t1"))
+
   // R-BTN-19: a force-reaped ticket is not re-issued until the live runner clears its fence.
   run forceReapFencesTest =
     start.then(claim("w1", "t1")).then(forceReap("w1")).then(sync1)
