@@ -295,7 +295,19 @@ These change an open ticket's plan, not the work list.
   still open.
 - **B-301** should take R-BTN-55 and R-BTN-73:
   - Dispatch uses a `GITHUB_DISPATCH_TOKEN` personal token where the spec describes App
-    installation tokens; the App's id and key appear nowhere in the code.
+    installation tokens; the App's id and key appear nowhere in the code. **The owner ruled on
+    2026-11-24 for the personal token**, so the spec follows the code:
+    - §12.7 states one dispatch credential, a fine-grained personal access token of a machine
+      account, with Actions: write and Metadata: read on the registered repositories and their
+      `code_repos`.
+    - R-BTN-55's `GitHubApp` port (`BATON_GITHUB_APP_ID`, `BATON_GITHUB_APP_KEY`) and
+      `baton admin github-app create` (R-BTN-57, unbuilt) go.
+    - The webhook source is any GitHub webhook signed with `BATON_GITHUB_WEBHOOK_SECRET`, as
+      `src/core/front.ts:153` verifies today.
+    - R-BTN-94 and R-BTN-95's per-repository dispatch token in `BATON_FORGE_SECRETS` against
+      the code's one instance token is decided in the same PR.
+    - The stored `dispatch` kind `github-app` (migration 0012) names a credential that no
+      longer exists; rename it through a new migration or keep it as a token.
   - R-BTN-73 matches by id through `code_repos`; the code matches by path and through tickets'
     `repos:`, short names included.
 - **B-300** should take the local host's gaps:
@@ -308,8 +320,8 @@ These change an open ticket's plan, not the work list.
 - **B-161** depends on B-74, which is superseded; point it at what replaces B-74, and add
   create-pr's `review-rounds-<n>`, `run-tests-unreachable` and the option `grants` as person
   legs.
-- **B-316** (masker follow-ups) is scoped to `createLegMasker`; S1 is the other half. Extend it,
-  or take S1 as D1 below.
+- **B-316** (masker follow-ups) is scoped to `createLegMasker`; S1 is the other half, and goes
+  to its own ticket, D1 (the owner, 2026-11-24).
 - **B-262** still points at §16.2's rollout plan, which ruling 4 closed.
 
 ### Open tickets that still prescribe a removed design
@@ -408,9 +420,9 @@ ticket is named, with why it does not cover the draft. Numbers come from Baton a
 
 | Draft | What | Nearest open ticket, and why not it |
 |---|---|---|
-| **D1** | Mask class 6 on every runner stream. `wrapperCall`'s drain and replay's `onStderr` go through a stateful masker; one test feeds a key block line by line to each sink. (S1) | B-316 is scoped to `createLegMasker`'s own defects. Fold D1 into B-316 if the owner prefers |
+| **D1** | Mask class 6 on every runner stream. `wrapperCall`'s drain and replay's `onStderr` go through a stateful masker; one test feeds a key block line by line to each sink. (S1) | B-316 is scoped to `createLegMasker`'s own defects. Its own ticket (the owner, 2026-11-24) |
 | **D2a** | **Spec amendment, from the owner's ruling of 2026-11-24.** `human-gates` keeps a variant without hardware keys: §12.8's table states `human-gates` (the three `approvers.*` lists human-only, any `human_key`) and `human-gates-hardware` (the same, with `human_key: hardware`), as `src/core/policy.ts:506-507` computes them. Reaches R-BTN-189's table and its preset sentence ("`protected` holds all but `human-gates`"), the Decisions line at `91-decisions.md:17`, S-BTN-185 and S-BTN-192, R-BTN-185's break-glass sentence, `docs/context/product.mdx`'s floors list and `docs/security-model.mdx`. The history entry records that this reverses B-164's absorption of 2026-11-02. One question follows for the owner (*Owner decisions*): whether `protected` then claims `human-gates`. | none: the reversal is new. B-293 must keep `human-gates-hardware` when it reconciles the knobs |
-| **D2** | The policy's guarantees as §12.8 states them, apart from S2: the protection checker's role can be granted (or the guarantee reads its mark, R-BTN-180); the `sync` and `runner` writer classes; `board-from-trusted` reads `attestations`; the readings entry applied. (S3) | B-293 reconciles the knobs and presets, not the guarantee formulas. Fold in if the owner prefers one ticket |
+| **D2** | The policy's guarantees as §12.8 states them, apart from S2: the protection checker's role can be granted (or the guarantee reads its mark, R-BTN-180); the `sync` and `runner` writer classes; `board-from-trusted` reads `attestations`; the readings entry applied. (S3) | B-293 reconciles the knobs and presets, not the guarantee formulas. Its own ticket (the owner, 2026-11-24) |
 | **D3** | Refusals that name no role: the five `admin.ts` sites answer the §12.1 form. (S4) | none |
 | **D4** | Activity kinds are the course's. Remove `ACTIVITY_KINDS` and the `review-round` and `push` special cases from core; validate a reported kind against the course's `step_kinds`; build or drop the resume record's `resume` key. | none (B-271 shrinks the model, B-162 moves route choices) |
 | **D5** | One implementation per rule, and no test-only production code. Remove `referenceCandidates` and the `reference` branches; rule 4 through one function; `HELD_CLAIMS_SQL` everywhere; `Registry.live()` for every live-repository filter, and retirement clean-up done once; one branch matcher; drop `invalidateRecommend`, `matchAction`, `bodyMatches`, `recommendations()`, `drainLines`; `repositoryRead`'s dead branches and `PUT …/policy`'s second check. | B-237 and B-243 are performance tickets; B-272 moves code out of `baton.ts` without merging duplicates. D5 can follow B-272 |
@@ -431,8 +443,25 @@ prescribe a removed design*. **Reopen:** B-285.
   that wrote this review: "Whether human-gates keeps a variant without hardware keys: yes"). The
   code's two guarantees stand; the spec follows (D2a). This reverses B-164's ruling of
   2026-11-02, which folded `human-gates-hardware` into `human-gates`.
+- 2026-11-24: **D1 and D2 are tickets of their own**, not folded into B-316 and B-293.
+- 2026-11-24: **Baton dispatches with a personal token**, not a GitHub App ("If possible, use a
+  personal token"). It is possible: the code already does, and webhooks need only the shared
+  secret. The spec follows the code under B-301 (*Corrections*).
 
 **Owner decisions surfaced, still open:**
+
+- Whether the protection checker is a grant role or a mark (S3, D2). A **role** is the one kind a
+  grant is (`runner` or `trusted-runner` today). It decides which legs the grant is offered and
+  which refs it may update. A **mark** is a yes/no flag beside the role, `runner_grants.checker`
+  in §13, set by the same `approvers.roles` approver. R-BTN-180 specifies a mark: only a
+  `trusted-runner` grant with its own domain may carry it; while marked, the grant is offered no
+  leg and delivers nothing; only its `protection` report counts; and clearing the mark voids
+  that report. The code looks for a third role value, `protection-checker`, which nothing sets.
+  Recommended: a role. The exceptions the mark needs ("offered no leg, admitted to no outbox
+  class, exempt from the floor release") then follow from the role, and the simplification
+  review's "one role, two jobs" weld goes. The code already expects a role, so R-BTN-180 changes
+  instead of `policy.ts`. Either way, the role route (B-147's design) must be built before any
+  report counts.
 
 - Whether `protected` claims the hardware-free `human-gates`. The code says yes: the preset's
   three lists are `['human']`, so `human-gates` holds and `human-gates-hardware` does not. The
@@ -440,7 +469,4 @@ prescribe a removed design*. **Reopen:** B-285.
   `human_key: any` a human-only list rests on key custody alone (R-BTN-185). Recommended: yes, as
   the code does. The variant exists to be claimed without hardware, and `human-gates-hardware`
   names the stronger promise.
-- Whether D1 and D2 fold into B-316 and B-293.
-- Whether the protection checker is a grant role or a mark.
-- R-BTN-55: App installation tokens, or the personal token the code uses.
 - Which way §8.3's executor interface goes.
