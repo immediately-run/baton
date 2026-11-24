@@ -694,3 +694,29 @@ Entry shape: **When** · **Host** · **Tickets** · **Why it was needed** · **R
     - 36 are `held` for `attempts-exhausted`: each needs `baton owner resolve … retry|park`.
   - The runner logs nothing on `no-eligible-ticket`, so an idle runner looks the same as a stuck one.
 - **Autonomous handling:** the supervisor reads `?state=ready`'s `failed_rule` first, before the runner code. Follow-up: an idle runner should log, once, why nothing fits.
+  - **Outcome (2026-11-24):** once #401 merged, the runner claimed B-319 and B-320 side by side, then B-322. Concurrency 2 works on bering. Before those claims, its log has 32 `fetch failed` lines (heartbeats and claims that did not reach Baton). It recovered without help. The log has no timestamps, so the outage window is unknown.
+
+## 2026-11-24 — the owner merged every mergeable PR; why the course is not merging them itself
+
+- **Host:** bering (one runner, `--concurrency 2`)
+- **What was done, at the owner's word ("Please merge all mergeable PRs"):**
+  - The supervisor merged 13 PRs, one at a time, each after re-reading its state just before the merge: not a draft, `MERGEABLE`/`CLEAN`, no failing or pending check. They were #392 (the S-BTN-41 lease race), #401, #393 (B-322), #400, #397, #394, #398, #390, #366, #351, #331 and #330.
+  - Six that were clean at the start became conflicting as the others landed: #386, #395, #359, #317, #337 and #399. About 30 runner PRs were already conflicting. #357, #384, #352, #323 and #311 have failing tests, and the drafts were left alone.
+  - Each merge to `main` started `baton-deploy` and cancelled the run before it. The last run (`5ade89aa`, 07:11 UTC) sat `pending` with no jobs. #400's fix is not live until it deploys.
+  - A `git pull` in the owner's checkout fast-forwarded its branch `fix/confirm-suspension-without-sha` to `main`. Nothing was lost: its work was #400, already merged.
+- **Why the course merges almost nothing on its own:** `create-pr` merges only from `reviewed` after an `approve` verdict, or after the owner's `adjudicate` answer. Four things keep tickets from getting there:
+  1. **The review stub still stops at round 3.** On 2026-11-22 the owner raised `review.max_runs` to 8 in `.baton/courses/create-pr/course.json` (entry *2026-11-22 06:42*).
+     - The stub `.baton/courses/create-pr/legs/review.mjs` (last generated 2026-11-21) still hard-codes `(ctx.run ?? 1) >= 3 ? { suspend: true } … 'adjudicate'`. It is generated from `src/defaults/courses.ts` with `CREATE_PR_COURSE.legs.review.max_runs`, which is 3 in `src/defaults/course-pr.ts`.
+     - So every round from the third on that asks for changes ends the claim `suspended:reviewed`, next `adjudicate`, waiting on the owner.
+     - Baton's own station function reads 8 and shows `fix` next. Same course, two different answers.
+     - On 2026-11-24, 42 tickets sat in this state, B-312 among them.
+  2. **Those suspensions were never confirmed.** A review's suspension names no commit, so Baton waited forever for git to confirm it. The ticket showed `unconfirmed` and was offered to nobody: neither a `fix` nor the owner's question. #400 confirms it on the next accepted snapshot, once deployed.
+  3. **Held tickets wait on the owner.**
+     - 25 tickets are held at `filed` after `implement` attempts ended `released:cannot-finish:transient`. The three sampled (B-156 to B-158) failed within the same 2026-11-21 window, about 12:48–13:32 UTC. Each held ticket opened a `baton:retries` decision, which nothing retries without an answer.
+     - 9 more are held at `merged`, with holds from 2026-11-02 to 2026-11-16 that the later `git-moved … merged` did not clear (B-110, B-125, B-129 among them).
+  4. **Red `main` and conflicts.**
+     - The merge leg never merges red. The S-BTN-41 flake made PR tests fail (#357, #384) until #392.
+     - A conflicting PR is resolved only inside a `fix` or `merge` leg, so a parked PR falls further behind `main` with every merge.
+- **Autonomous handling:**
+  - The stub's round bound should come from the course file the stub runs under, not the built-in default, or the two should be checked against each other. *No ticket yet.*
+  - A hold whose ticket git already shows merged should clear itself, or be listed as stale. *No ticket yet.*
