@@ -71,7 +71,15 @@ npx wrangler secret put ACCESS_IDENTITIES < /path/to/access-identities
 ```
 
 Set `ACCESS_TEAM_DOMAIN` to the team hostname (no scheme) and `ACCESS_AUD` to the application's
-audience in the deployment. Cover only Baton's hostname and the dashboard routes named in
+audience with `wrangler secret put`. Set them as secrets so they survive deploys: `wrangler.toml`
+defines neither value and each deploy rewrites the Worker's variables from that file.
+
+```sh
+npx wrangler secret put ACCESS_TEAM_DOMAIN
+npx wrangler secret put ACCESS_AUD
+```
+
+Cover only Baton's hostname and the dashboard routes named in
 [BATON_SPEC §12.4](../../spec/BATON_SPEC/12-security.md#sec-12-4). Set a short Access session duration
 and require a factor no agent session holds, such as a touch-required hardware key. Anyone who can
 make Access assert a bound email can open that administrator's session; see the
