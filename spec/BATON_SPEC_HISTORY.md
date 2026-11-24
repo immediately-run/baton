@@ -18,6 +18,12 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
 
 ## Changelog
 
+- **2026-11-24 — Access sign-in refusals name the failed check (R-BTN-155, S-BTN-318).**
+  Previously missing settings, missing or unverifiable assertions, and missing administrator
+  bindings all drew the same message. Missing Worker settings caused the 2026-11-23 sign-in
+  failure (B-319). The front now answers verification refusals itself; both binding failures
+  still share one answer to avoid revealing whether the verified email has a line.
+
 - **2026-11-23 — Tiers retired (§6.6 gate 5, R-BTN-66).**
   Rules changed: R-BTN-5, R-BTN-9, R-BTN-34, R-BTN-35, R-BTN-50, R-BTN-58, R-BTN-66, R-BTN-74,
   R-BTN-114, R-BTN-117, R-BTN-127, R-BTN-159, R-BTN-179, R-BTN-196, the board post (§4.4), §6.6,
