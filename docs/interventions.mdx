@@ -783,7 +783,7 @@ Entry shape: **When** · **Host** · **Tickets** · **Why it was needed** · **R
     the review stub suspends at `ctx.run >= 3` (B-324's subject), so the second round that
     asked for changes did. It predates B-274.
   - The supervisor first reported both tickets as waiting on the owner's adjudication. They
-    were not: both were `unconfirmed` (#414's entry *2026-11-24 20:00*), and Baton's own station showed
+    were not: both were `unconfirmed` (entry *2026-11-24 20:00*), and Baton's own station showed
     `fix` next. See lessons, *the runner's log is not Baton's state*.
 - **Resolution:**
   - At the owner's word ("fix now"), B-335 was filed (#411) and built in #412: Baton's advance
@@ -819,3 +819,36 @@ Entry shape: **When** · **Host** · **Tickets** · **Why it was needed** · **R
   ticket declares no dependency, so Baton will offer it until it is held.
 - **Autonomous handling:** a ticket's external **Needs:** should be a declared prerequisite
   (R-BTN-120) that keeps it off the board. *No ticket yet.*
+
+## 2026-11-24 20:00 — 44 parked tickets never confirmed: their ends name evidence, and nothing attests it
+
+- **Host:** bering (the runners whose ends wait); the supervisor's checkout on bering
+- **Tickets:** 44 parked at `reviewed`, all `unconfirmed` — B-312, B-39, B-60, R3-1263, B-155,
+  R3-1268, B-55, B-47, B-8, B-10, B-25, B-131, B-136, B-137, B-139, B-141, B-146, B-147, B-293,
+  B-294, B-299, B-300, B-302, B-311, B-239, B-244, B-249, B-258, B-272, B-273, B-276, B-277,
+  B-278, B-279, B-280, B-281, B-282, B-284, B-30, B-315, B-322, B-324, B-42, B-45
+- **Why it was needed:**
+  - #400 (deployed 07:12 UTC) confirms a suspension that named **no** evidence on the next
+    accepted snapshot. Six accepted syncs later none of these was confirmed, and B-322 and
+    B-324 joined them the same day.
+  - A review leg's close posts its verdict with `gh pr comment` and returns the comment's URL;
+    the runner sends whatever close returns as `ended_at_sha`, and the server accepts a commit or
+    an https URL there. A fix or run-tests close returns `HEAD`. So a parked end almost always
+    names evidence: the entry above's "a review's suspension names no commit" was wrong, and
+    #400 fixed a case that barely occurs.
+  - For an end that names evidence, R-BTN-10 wants the sync's `std:git.evidence@1` with
+    `found: true`. Nothing built it — the sync posted no such attestation and the server read
+    none — so `endShown` fell back to a git path, which git no longer carries (R-BTN-39). Every
+    such end waited for the owner.
+- **Resolution:**
+  - At the owner's word, the supervisor wrote a script that confirms the 43 whose PRs are
+    open, through `POST /v1/ui/claims/{id}/confirm` in a dashboard session minted from the
+    administrator key. The supervisor may not use that key, so the owner runs it, one claim
+    (B-39's 437) first. B-136 (PR #331 already merged) and B-271 (a `done` end) are left for
+    the owner. *Pending: the owner's run.*
+  - `std:git.evidence@1` is built in #415: the observation lists each unconfirmed end's
+    evidence, the sync checks it (a commit in git or on the forge; a comment, review, PR or
+    commit URL on a known GitHub host) and attests it, and the server confirms only on
+    `found: true` for exactly that evidence.
+- **Autonomous handling:** #415. Until it lands, every parked end that
+  names evidence waits for the owner's confirm. *Handled by #415 once merged.*

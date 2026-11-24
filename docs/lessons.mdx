@@ -459,3 +459,14 @@ owner a ticket waits on them.** For nine hours the supervisor reported B-322 and
 waiting on the owner's adjudication. Baton held both `unconfirmed`, with `fix` next by its own
 station function; no answer the owner could give would have moved them. What changed: the
 supervisor's idle check reads `?state=` for every state and groups the reasons first.
+
+## 2026-11-24 — a fix for "ends that name nothing" released none of the 44, because they all named something
+
+Evidence: [interventions, 2026-11-24 20:00](interventions.mdx); B-39's history (claim 437, no
+event after 2026-11-21 12:30 across six accepted syncs since #400 deployed).
+
+**Before fixing a confirmation rule, read what the stuck ends actually carry, not what their leg
+is assumed to send.** #400 assumed a review leg names no `ended_at_sha` because it pushes no
+commit; its close returns the PR comment's URL, which the runner sends and the server stores as
+the end's evidence. What changed: the `std:git.evidence@1` attestation R-BTN-10 always required,
+so ends naming a commit or a URL are confirmed by their evidence.
