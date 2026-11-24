@@ -38,7 +38,7 @@ Review finding 1, F4 and F7, and journey "Move from `cooperative` to `protected`
   [the conditions proposal](../spec/proposals/conditions.md); R-BTN-169 is retired): every question expires.
 - `adopt` needs a `human` key under `protected` (R-BTN-39): one ceremony per in-flight ticket
   after a course rename.
-- A trusted-runner deliverer "marks every git entry `failed` with `refused`" on a repository
+- A ~~trusted-runner~~ `git` deliverer "marks every git entry `failed` with `refused`" on a repository
   with its own `tickets.mjs` (R-BTN-171).
 - `baton request` "opens a PR, not a push" (R-BTN-180).
 
@@ -86,3 +86,7 @@ _(2026-11-20: the spec simplification of 2026-11-19 (baton#299; `spec/BATON_SPEC
 _(2026-11-20: the owner cut the check-runner and the forge-check deliverer on 2026-11-19 (`docs/review/spec-simplification-review-2026-11-19.mdx`, ruling 5): item 2's check-runner is struck, and the optional `std:checks@1` "a check-runner the owner names posts" in the note of 2026-11-02 has no writer. B-290 removes what is built of the checks and settles what a merge leg's `std:checks@1` comes from.)_
 
 _(2026-11-20: rules re-read: R-BTN-169, R-BTN-39)_
+
+_(2026-11-24: B-189's spec PR (`spec/BATON_SPEC_HISTORY.md`, the entry of 2026-11-24), on the owner's rulings of 2026-11-09 and 2026-11-24 (runners trusted, legs not) retires the trusted-runner role and the outbox's role-based deliverers: any runner declaring `git` delivers it, and the finding above now reads of a `git` deliverer ([the conditions proposal](../spec/proposals/conditions.md), R-BTN-171).)_
+
+_(2026-11-24: rules re-read: R-BTN-171, R-BTN-188)_

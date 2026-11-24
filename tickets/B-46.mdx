@@ -71,9 +71,9 @@ Split into reviewed PRs along four parts. Each is independent.
    - the `IR_BATON_LEG` tag sweep, with a systemd scope where available;
    - the replay allowlist and `BATON_RESUME`.
 3. **Keys, posts and claims** (R-BTN-146 to R-BTN-152).
-   - Span, the grant's `sync` flag (its only flag), `GET …/grants` and `--confirm-span`.
+   - ~~Span, the grant's `sync` flag (its only flag),~~ `GET …/grants` ~~and `--confirm-span`~~.
    - `head_unfounded`, held posts that only tighten, the `baton.<sub>` conditions those rules
-     raise (`baton.span-changed`, `baton.head-replaced`, `baton.renumbered` and the others they
+     raise (~~`baton.span-changed`,~~ `baton.head-replaced`, `baton.renumbered` and the others they
      name), renumbering, and dropped claims.
    - Open-world `declared` gates, `misdeclared`, and tainted branches.
    - The per-repository caps, observation takeover, and readings and bills bounds.
@@ -147,8 +147,8 @@ Split into reviewed PRs along four parts. Each is independent.
    - **Default-branch membership** (R-BTN-143). The runner checks `snapshot_sha` against its
      own fetched default branch. The claim has no `base_sha` ancestry check (B-160).
    - **Accepting a grant** (R-BTN-146, §12.1, §14; adv-4 m2, m4).
-     - `POST /v1/runner/grants/{repository}/accept` takes `{confirm_span?}`; an acceptance that
-       raises the span without it is `conflict`, listing the repositories that would lose sync.
+     - ~~`POST /v1/runner/grants/{repository}/accept` takes `{confirm_span?}`; an acceptance that
+       raises the span without it is `conflict`, listing the repositories that would lose sync.~~
      - A machine key whose every grant is pending and never accepted holds no role, so a grant
        naming any public key reserves nothing; its acceptance is checked as a registration.
      - The one-role `conflict` (`src/core/admin.ts`) never names the role the key holds.
@@ -197,7 +197,7 @@ adapter's trust and fork mapping from real payload shapes. Item 7's cases, on bo
 - S-BTN-32: a pending grant on a key later added as an owner gives `conflict` without naming the
   role. Its `admin.key.revoke` case is B-76's.
 - Unit: `claude/T-12-1-impl` maps to `T-12-1`, never `T-12`, in every caller of the matcher, and
-  to `T-12` while `T-12-1` is unposted; `accept` without `confirm_span` listing the repositories;
+  to `T-12` while `T-12-1` is unposted; ~~`accept` without `confirm_span` listing the repositories;~~
   no `Cf-Access-Jwt-Assertion` header changes any principal outside `POST /v1/login {access: true}`.
 
 ### Exit criteria
@@ -234,3 +234,7 @@ _(2026-11-20: the spec simplification of 2026-11-19 (baton#299; `spec/BATON_SPEC
 _(2026-11-20: rules re-read: R-BTN-154, R-BTN-146)_
 
 _2026-11-23 — tiers retired (spec/retire-tiers: [BATON_SPEC §6.6](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-6) gate 5, [R-BTN-66](../spec/BATON_SPEC/01-what-baton-is.md#sec-1)): the struck tier clauses are gone from the spec — no ticket tier, runner ceiling, grant `max_tier`, ladder, `ready_by_tier` or `?tier=`. Build the rest without them._
+
+_(2026-11-24: the key span is struck: B-189's spec PR (`spec/BATON_SPEC_HISTORY.md`, the entry of 2026-11-24), on the owner's rulings of 2026-11-09 and 2026-11-24 (runners trusted, legs not) retires the span, a grant's `sync` flag, `confirm_span`/`--confirm-span`, `owner grant flags` and `baton.span-changed` — a key on several repositories syncs each it is granted on (R-BTN-102, R-BTN-146; [the checks-and-executors proposal](../spec/proposals/checks-and-executors.md), part 5). Grant acceptance stays.)_
+
+_(2026-11-24: rules re-read: R-BTN-102, R-BTN-146)_

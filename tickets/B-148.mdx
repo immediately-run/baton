@@ -27,7 +27,7 @@ side branch is fine". Recorded in `spec/BATON_SPEC_HISTORY.md` (baton#148).
 **Spec:** R-BTN-190 (leg state on a per-ticket side branch), R-BTN-131 (the standard courses),
 R-BTN-163 (core `notify` conditions), §12.3 (untrusted text); S-BTN-193, G-BTN-166.
 **Depends on:** B-145 (the `leg_state` knob and `refs.legs`, carried on the claim response),
-B-140 (the merge runner's refusal, the `pre-receive` rule and the protection checker's reading).
+B-140 (the merge runner's refusal and the `pre-receive` rule ~~, and the protection checker's reading~~).
 B-101 writes the review rounds through what this builds.
 
 ### Requires
@@ -62,8 +62,8 @@ and on plain git.
 5. **Detection.** The reading of the default branch's tree for a path segment, at any depth, that
    after NFC normalisation and case folding is `.baton-legs`, posted as `legs_landed: {count,
    tickets}` with the board, `tickets` listing only the repository's existing ticket ids; core
-   raises `baton.leg-state-landed`. Where the repository has a protection checker, only its reading
-   (`protection`'s `legs`, B-140) raises and closes it; elsewhere the sync's does, and the condition
+   raises `baton.leg-state-landed`. ~~Where the repository has a protection checker, only its reading
+   (`protection`'s `legs`, B-140) raises and closes it; elsewhere~~ The sync's reading raises and closes it, and the condition
    says it is advisory. The sync is vendored from docs (`src/shared/batonSync.mjs`): its change is a
    docs PR first, then `npm run vendor` here.
 
@@ -91,3 +91,7 @@ _(filed 2026-10-31 with R-BTN-190.)_
 _(2026-11-02: the spec restructure's part 2 (B-166, the PR `baton-spec-restructure-p2`) drops the `leg_state` knob and `refs.legs`: a `git` repository's leg state is the side branch by R-BTN-190 alone, and `runner`, `trusted-runner` and `human` may push `baton-legs/*` as a constant (R-BTN-180). The dependency on B-145 shrinks to the claim response's `leg_state` field.)_
 
 _(2026-11-20: the spec simplification of 2026-11-19 (baton#299; `spec/BATON_SPEC_HISTORY.md`, that date) moved the unbuilt parts of the design this ticket builds out of the section files, with their rule ids, to proposal pages: the leg-state branch is part 8 of [the courses proposal](../spec/proposals/courses.md). S-BTN-193 and G-BTN-166 are no longer rows of the verification section: they are in [the proposals' scenarios](../spec/proposals/scenarios.md), under "The standard courses as PR record courses, and the leg-state branch". Each rule keeps its id and a line in its section, which links the page. The pull request that builds this ticket moves the rules it builds back into the section files, and the scenarios and gates it makes pass back into [the verification section](../spec/BATON_SPEC/15-verification.md#sec-15), in the same change. The plan above is unchanged.)_
+
+_(2026-11-24: the protection checker's reading is struck: B-189's spec PR (`spec/BATON_SPEC_HISTORY.md`, the entry of 2026-11-24), on the owner's rulings of 2026-11-09 and 2026-11-24 (runners trusted, legs not) retires the protection checker and the heartbeat's `protection`; the sync's `legs_landed` reading alone raises and closes `baton.leg-state-landed`, advisory ([the courses proposal](../spec/proposals/courses.md)). `baton-legs/*` is open to every runner and the human (R-BTN-180), no longer by role.)_
+
+_(2026-11-24: rules re-read: R-BTN-180, R-BTN-190)_

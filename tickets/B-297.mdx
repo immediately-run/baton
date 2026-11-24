@@ -37,10 +37,10 @@ depends_on: []
   read in the code):
   - `board_head.observation_issued_at`: the column is `handed_out_at`
     (`src/migrations/0008_observations.sql:13`).
-  - `runner_grants.checker`, `.domain` and `.set_by`: the columns are `trust_level`,
+  - ~~`runner_grants.checker`, `.domain` and `.set_by`: the columns are `trust_level`,
     `trust_domain`, `role` and `trust_set_by` (`ALTER TABLE worker_grants ADD COLUMN …`; no
     migration adds `checker`). `claim_legs.domain`: no migration adds it. These follow
-    B-293's and B-147's ruling on what a grant carries; the row is written after it.
+    B-293's and B-147's ruling on what a grant carries; the row is written after it.~~
   - Event kinds: §13.8 lists `invalid-pointer`, `not-before-invalid`, `output-unclaimed` and
     `reading-refused`, which the `events` CHECK does not admit
     (`src/migrations/0064_children_owner_state.sql:53-75`); the CHECK admits
@@ -144,3 +144,7 @@ as its own ticket, not documented as intended. The new script reads repository f
 _filed 2026-11-20._ From the spec simplification review of 2026-11-19, section 6 and *Where
 the spec and the code disagree* (PR #299). Related: B-25 (generates §14), B-285, B-67, B-263,
 B-288, B-293, B-11, B-56, B-161, B-160, B-147, B-39, B-302.
+
+_(2026-11-24: the grant-trust row is struck: B-189's spec PR (`spec/BATON_SPEC_HISTORY.md`, the entry of 2026-11-24), on the owner's rulings of 2026-11-09 and 2026-11-24 (runners trusted, legs not) removes `role`, `checker`, `domain` and `set_by` from §13's `runner_grants` and `domain` from `claim_legs`, and B-189 item 4 drops the built `worker_grants` trust columns, so the spec and the schema agree once B-189 is built. B-147 is superseded.)_
+
+_(2026-11-24: rules re-read: R-BTN-180)_
