@@ -180,8 +180,7 @@ route, with the events and fields the table lists for it, is
 
 - **R-BTN-93 (sync keys and the one verifier).** A repository's sync authenticates with a sync
   key, a CI identity token (R-BTN-15) or a machine key granted on the repository (R-BTN-102,
-  R-BTN-146). A board post from a class the policy's `inputs.board` excludes (`sync-key`,
-  `ci-identity`, `machine`; R-BTN-188) is refused `forbidden`.
+  R-BTN-146).
   - **A sync key** is an SSH key of R-BTN-13's types in one `sync_keys` row: exactly one
     repository and one role. Owners add and revoke it
     (`POST /v1/owner/{repository}/sync-keys`, `…/sync-keys/{fingerprint}/revoke`); an

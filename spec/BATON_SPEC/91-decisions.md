@@ -11,7 +11,7 @@ One line per decision in force; the reasoning and the rejected alternatives in f
 
 - Chose Baton as the only lock and the only counter, and git as the record of the work alone; the git-based mechanisms that exist are legacy (R-BTN-193, R-BTN-4, R-BTN-74).
 - Chose standard courses that assume no particular deployment, a factory keeping its own security and quality-assurance courses (R-BTN-131).
-- Chose a protected default branch that only a deterministic merge runner and humans update, over a git proxy, per-worker forks or verified signatures (R-BTN-180, R-BTN-182, R-BTN-183).
+- Chose a protected default branch that only the merge credential and humans update, over per-worker forks or verified signatures, the forge's setup and what confines a leg's forge reach being the deployment's (R-BTN-180, R-BTN-182, R-BTN-183, §12.8).
 - Chose to keep Baton cooperative on one trusted machine and leave enforcement to the deployment (R-BTN-180).
 - Chose that courses and leg logic change by a human's push or merge, and that tickets land only with a human approval (R-BTN-184).
 - Chose human-only credentials for every human gate, used for nothing else and kept from agent sessions; `human-gates` is claimed only where `human_key` is `hardware` (R-BTN-185, R-BTN-189).
@@ -21,10 +21,10 @@ One line per decision in force; the reasoning and the rejected alternatives in f
 - Chose that a claim's branch appends its leg's progress to its own ticket's `## Status` section without a human approval (R-BTN-184).
 - Chose attestations, typed facts a trusted writer makes, as a kind of leg prerequisite, bound by subject and authenticated by the request that posts them (R-BTN-181).
 - Chose continuity, one unbroken chain of attested commit ranges, as the whole of authorship, with no signed authorship (R-BTN-183).
-- Chose that a domain that runs a branch's code is one of its writers, so reviewers read the change and never run it (R-BTN-183).
+- Chose review independence as each review being its own `reads_only` run of the exact head, every leg starting in a fresh environment, over comparing writer and reviewer domains or runner keys (R-BTN-183, R-BTN-189).
 - Chose to state each guarantee separately, as a condition over the policy, and let the repository choose (§12.8).
-- Chose a grant's role and a domain label as the whole of a grant's trust, over a separate trust level, a model family or a separate-domain guarantee (R-BTN-180, R-BTN-183).
-- Chose to state that review is no security gate, `independent-review` requiring two reviews from distinct domains and nothing about model families (R-BTN-183, R-BTN-189).
+- Chose trusted runners and untrusted legs, with no security promise under `builtin`, over guarding against a compromised runner with grant roles, domain labels and a protection checker (R-BTN-180, R-BTN-107, §12.8).
+- Chose to state that review is no security gate, `independent-review` requiring two `reads_only` reviews of the exact head and nothing about model families (R-BTN-183, R-BTN-189).
 - Chose trusted runners that hold the only credential for a sensitive leg's action, re-check its attestations against Baton's record and trust Baton (R-BTN-182, R-BTN-189).
 - Chose capabilities (§6.6 rule 4, R-BTN-121, R-BTN-174) over an ordered tier ladder to send a ticket to particular runners.
 - Chose provenance alone, each ticket served with who last pushed its body, over a `control-changed` notice (R-BTN-194, R-BTN-66).
@@ -114,14 +114,14 @@ One line per decision in force; the reasoning and the rejected alternatives in f
 - Chose retries as the built-in default handler of `error` over a retry course (R-BTN-122).
 - Chose per-leg retry policies bounded by the owners' default, ceiling and floor, a backoff being a prerequisite, over per-repository policies (R-BTN-122).
 - Chose a deadline enforced by a release and then a fence, a timeout being a failed attempt, over stopping a runner from Baton (R-BTN-90, R-BTN-167).
-- Chose one outbox for git writes, check runs and ticket-store writes, delivered by runners the policy admits by role, over a git credential in Baton or a courier key role (R-BTN-171, R-BTN-115).
+- Chose one outbox for git writes, check runs and ticket-store writes, delivered by runners, over a git credential in Baton or a courier key role (R-BTN-171, R-BTN-115).
 - Chose that Baton holds the GitHub App key and the forge trigger tokens and dispatches workflows itself, over a dispatch courier and signed entries (R-BTN-94, R-BTN-171, §12.7).
 - Chose readings as attestations about a resource instance, authenticated by the request that posts them, gate or advice being the requirement's choice (R-BTN-181, R-BTN-76, R-BTN-188).
 - Chose two resource scopes, `service` and `account`, over `runner` and `host` scopes and an administrator's overriding reading (R-BTN-76, R-BTN-40).
 - Chose one versioned policy document per repository, whose knobs presets fill, over landing modes Baton hard-codes (R-BTN-188).
 - Chose guarantees as named conditions over the policy, each including the guarantees it rests on, enforced through the policy's own `floors` list (R-BTN-189).
 - Chose whose attestations count, and the merge criteria, as policy over course files (R-BTN-181, R-BTN-188).
-- Chose a separate protection checker, a trusted runner that merges nothing, over the merge runner holding a credential that can rewrite rulesets (R-BTN-180).
+- Chose a trusted leg routed by a capability the owner admits on the grants whose host holds its credential, over a trusted-runner grant role (R-BTN-180, R-BTN-182).
 - Chose to leave `refs/baton/*` outside every guarantee and to read nothing from it that a trusted leg acts on (R-BTN-180).
 - Chose a `plain-git` preset, the `cooperative` values without what needs a forge, as a new `git` repository's default (R-BTN-188).
 - Chose leg state in the forge's PR conversation where there is a forge and on a per-ticket side branch where there is none, with no knob (R-BTN-190).
@@ -150,7 +150,7 @@ One line per decision in force; the reasoning and the rejected alternatives in f
 - Chose dashboard sessions as one `session` principal carrying its key's role, scoped to what that key still owns, over an administrator-only dashboard (R-BTN-155, R-BTN-129).
 - Chose to keep a ticket's holds, cancel, attempts and backoff when it leaves the board and to restore them if its id returns (R-BTN-12).
 - Chose capabilities on each repository's grant over capabilities on the key (R-BTN-58).
-- Chose one machine key that may work, sync and report readings, syncing only where a grant opts in, over one role per machine key (R-BTN-102, R-BTN-146).
+- Chose one machine key that may work, sync and report readings on every repository where it holds a grant, over one role per machine key (R-BTN-102, R-BTN-146).
 - Chose a pulled sync (Baton records a want; any runner pulls it) and a sync key usable on any forge over forge dispatch alone or a stored bearer secret (R-BTN-93, R-BTN-94).
 - Chose forge webhooks that only trigger a sync over stations built from payloads (R-BTN-73).
 - Chose a merge's `pull_request` delivery and the alarm to dispatch a repository's sync, over the forge's schedule alone (R-BTN-73).
@@ -159,7 +159,7 @@ One line per decision in force; the reasoning and the rejected alternatives in f
 - Chose one tenant per Baton, named by its origin, with a router for many tenants later, over a tenant id on the wire or a shared object (R-BTN-135–R-BTN-138).
 - Chose loopback binding by default for the local host, TLS being the operator's (R-BTN-158).
 - Chose GitLab Developer (30) as the role that can push (R-BTN-139).
-- Chose `pusher` as the one word for a forge author whose words count, `trusted` being the runner role's (R-BTN-139, R-BTN-192).
+- Chose `pusher` as the one word for a forge author whose words count, `trusted` being the leg property's (R-BTN-139, R-BTN-182, R-BTN-192).
 - Chose a Quint model checked on the author's machine and against every scenario's trace over hosted CI or tests alone (R-BTN-68).
 - Chose driven, fake-clock integration scenarios in every behaviour change over unit tests alone (R-BTN-29–R-BTN-31).
 - Chose capabilities matched by name, a runner deciding what its keys and tools amount to, over a capability ontology and route choices evaluated in core (R-BTN-174, R-BTN-98).

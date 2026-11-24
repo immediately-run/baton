@@ -438,10 +438,10 @@ On a `git` repository:
   validator refuses one that does), so
   no reader of `branch_pattern` — a station function, R-BTN-25's continuation, the PR courses'
   mapping, the branch-holder query — ever sees it, and no work branch's name collides with it.
-  `runner`, `trusted-runner` and `human` may push it, a constant no policy changes (R-BTN-180).
+  Every runner and the human may push it, a constant no policy changes (R-BTN-180).
 - **Not a work branch.** A push to it is no write in R-BTN-183's sense: it reports no range, is
   exempt from continuity and foreign-commit resets, and does not make a leg a writing leg
-  (`std:wrote@1`, `std:ran@1`), so a review leg that writes its round stays independent.
+  (`std:wrote@1`), so a review leg that writes its round stays a reader.
 - **Its layout.** Its tree holds only `.baton-legs/<ticket id>/<leg>/<claim nonce>/…`, the
   ticket id byte-equal to the branch's. Each segment below `.baton-legs/<ticket id>/` matches
   `^[a-z0-9][a-z0-9._-]{0,63}$` and none case-folds to a harness configuration file R-BTN-184's
@@ -474,10 +474,8 @@ Under either value:
 - **Detected if it lands anyway.** Such a segment anywhere in the default branch's tree raises
   `baton.leg-state-landed`, a `notify` condition whose `detail` holds the count of entries and the
   ids of the repository's existing tickets among their subdirectory names, never paths or other
-  text. Where the repository has a protection checker (R-BTN-180), only its reading, reported in
-  its heartbeat's `protection` as `legs: {count, tickets}`, raises and closes the condition;
-  elsewhere the sync's reading, posted with the board as `legs_landed: {count, tickets}`, does,
-  and the condition is advisory, since any holder of the sync key can post. The check reads the
+  text. The sync's reading, posted with the board as `legs_landed: {count, tickets}`, raises
+  and closes it, and the condition is advisory, since any holder of the sync key can post. The check reads the
   tree, not history. On plain git, `baton repo protect --print` adds a `pre-receive` rule refusing
   default-branch updates that add such a segment.
 

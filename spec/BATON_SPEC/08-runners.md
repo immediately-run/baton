@@ -52,16 +52,15 @@ section that are not built are in [the proposal page](../proposals/checks-and-ex
   | `fenced` | `[{claim_id, terminated: true}]`, one entry per fenced claim (R-BTN-19) |
   | `transcripts` | at most 50 transcript paths (R-BTN-20) |
   | `couriers` | the repositories and `asks` it delivers notices for |
-  | `protection` | `[{repository, matched, reading_hash}]`, the protection checker's readings (R-BTN-180) |
   | `test_harness` | R-BTN-32 |
 
   - A runner holding one claim may send `session_url`, `leg_finished` and one `fenced` object in
     place of the three lists. Spooled activities go in their own call before the beat (§9.9).
-  - A refused `transcripts`, `couriers` or `protection` entry and a dropped session link
+  - A refused `transcripts` or `couriers` entry and a dropped session link
     (R-BTN-113) are named in the answer and never refuse the heartbeat, since a refused heartbeat
     would get a live runner reaped. A malformed `session_urls` or `legs_finished` entry is dropped
-    unnamed. A malformed `protection` is `invalid-params`, as is a `transcripts`, `couriers` or
-    `protection` list over its bound and a malformed `fenced`.
+    unnamed. A `transcripts` or `couriers` list over its bound, and a malformed `fenced`, is
+    `invalid-params`.
   - **The answer** carries `runner_id`, `incarnation`, `lease_timeout_s` (as clamped),
     `grant: {capabilities}` (R-BTN-72), `claims`, `messages`, `bars` (the owner bars in force,
     R-BTN-67), `stale_courses` (R-BTN-22), `mode` (per repository `shadow` or `cut-over`;
@@ -113,16 +112,15 @@ section that are not built are in [the proposal page](../proposals/checks-and-ex
   with ordinary signed requests:
   - **work** (R-BTN-58);
   - **sync** — `/v1/sync/*` with `?repository=<id>` in the signed query, role `sync` only, no
-    runner secret — unless the policy's `inputs.board` excludes `machine` (R-BTN-188);
+    runner secret;
   - **report readings** (R-BTN-101).
 
   Every snapshot records its credential (`board_snapshots.posted_by`). A machine key is never an
   owner or administrator key, and neither is a machine key. API-key runners (R-BTN-159) work
-  and report readings but never sync. One machine key per tenant (R-BTN-137).
+  and report readings but never sync.
 - **R-BTN-146 (a repository's grants).** A grant is in force from its creation until it is
   revoked. `GET /v1/owner/{repository}/grants` lists the grants in force on the repository. The
-  holder's acceptance of a grant, and the per-repository sync opt-in of a key granted on several
-  repositories (its span), are not built
+  holder's acceptance of a grant is not built
   ([proposal](../proposals/checks-and-executors.md)).
 - **R-BTN-117 (registration tokens).** Not built. The design, an owner-minted token with which
   a session that has no key registers one, is in
@@ -262,7 +260,9 @@ section that are not built are in [the proposal page](../proposals/checks-and-ex
   - **The interface**, `executor_api: 1`:
     - `start({brief, executor, inputs, channel}) → handle` starts a session. `brief` holds the
       session's kind, the ticket, the leg, the checkout and the paths the session reads, the
-      leg environment (R-BTN-144), and, as hints, whether the leg is `autonomous` (R-BTN-195)
+      leg environment (R-BTN-144), the claim's scope (§12.9), the ticket's branches — its
+      course's `branch_pattern` with the ticket's id in place, and its leg-state branch
+      (R-BTN-190) — and, as hints, whether the leg is `autonomous` (R-BTN-195)
       and `reads_only` (R-BTN-183) — never the claim id, the runner secret or a Baton
       credential. `channel` is the address of the leg's channel (R-BTN-106). A handle may name
       the session's link, which the runner reports as R-BTN-113 says.

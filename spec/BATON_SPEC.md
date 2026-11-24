@@ -282,7 +282,7 @@ is stale. Never edit it by hand.
 | R-BTN-174 | capabilities are matched by name; what a runner has is its own statement | [`05-courses.md`](BATON_SPEC/05-courses.md) |
 | R-BTN-178 | a capability with a capacity has that many seats | [`06-prerequisites-blocks-advice.md`](BATON_SPEC/06-prerequisites-blocks-advice.md) |
 | R-BTN-179 | the state is readable with a key | [`12-security.md`](BATON_SPEC/12-security.md) |
-| R-BTN-180 | roles, domains and protection | [`12-security.md`](BATON_SPEC/12-security.md) |
+| R-BTN-180 | what lands on the default branch | [`12-security.md`](BATON_SPEC/12-security.md) |
 | R-BTN-181 | attestations: typed statements about work or about a resource | [`12-security.md`](BATON_SPEC/12-security.md) |
 | R-BTN-182 | trusted runners | [`12-security.md`](BATON_SPEC/12-security.md) |
 | R-BTN-183 | what the merge runner merges | [`12-security.md`](BATON_SPEC/12-security.md) |

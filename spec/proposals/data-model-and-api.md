@@ -188,7 +188,6 @@ Design: BATON_SPEC §12.8's unbuilt parts (B-136, B-146, B-147).
 |---|---|---|---|---|
 | `POST /v1/repositories/{repository}/attestations` | also an owner session (writer `owner`) or a `service` key | as §14 | `{id}` | R-BTN-181 |
 | `DELETE /v1/repositories/{repository}/attestations/{id}` | its writer; for a `human` type, a `human_only` key | `{confirm: true}` | `{ok: true}` | R-BTN-181, R-BTN-185 |
-| `PUT /v1/owner/{repository}/grants/{fingerprint}/role` | an approver on `approvers.roles` | `{role: "runner" \| "trusted-runner", domain?, checker?}` | `{ok: true}`; `invalid-params` for `trusted-runner` on an API key, or a `checker` mark R-BTN-180 refuses | R-BTN-180, R-BTN-188 |
 | `GET /v1/repositories/{repository}/fact-legs` | a trusted runner whose `service:` key the policy names for `std:arrival@1` (the fact reader) | — | `{tickets: [{ticket, station, path_len, leg, fact, waiting_since}]}` | R-BTN-192 |
 
 ## The doorbell
@@ -205,7 +204,7 @@ Design: R-BTN-146 (proposed). The heartbeat response carries `pending_grants[]`.
 
 | Route | Caller | Body or query | Response | Rules |
 |---|---|---|---|---|
-| `POST /v1/runner/grants/{repository}/accept`, `…/decline` | machine alone | accept: `{confirm_span?}` | `{ok, span}`; an acceptance that raises the span without `confirm_span` is `conflict` listing the repositories that would lose sync | R-BTN-146 |
+| `POST /v1/runner/grants/{repository}/accept`, `…/decline` | machine alone | — | `{ok}` | R-BTN-146 |
 | `PUT /v1/owner/{repository}/grants/{fingerprint}/flags` | owner | `{sync}` | `{ok: true}` | R-BTN-146, R-BTN-186 |
 
 ## Code-repository consents

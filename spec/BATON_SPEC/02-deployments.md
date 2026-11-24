@@ -134,9 +134,6 @@ process for development and CI. Nothing crosses a tenant.
   - Baton never refuses a key because another tenant holds it. The one-role rule (R-BTN-57,
     R-BTN-102) and name uniqueness hold within a tenant, and every trust statement speaks only
     for its tenant.
-  - **One machine key per tenant.** A key granted in two tenants lets either tenant's leg
-    scripts sign as it in the other; Baton cannot see that, so a machine serving several
-    Batons runs one runner session and one machine key per Baton.
   - **A runner's origin is its own configuration.** `runner.json` carries `origin`; `--url` and
     `BATON_URL` override it. There is no default origin. `baton repo *` takes `baton_url` from
     `.baton/baton.json` at the commit it syncs (`spool`: the working tree's; `init` writes it), and a sync run by a runner

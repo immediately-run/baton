@@ -18,6 +18,63 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
 
 ## Changelog
 
+- **2026-11-24 — Trusted runners, untrusted legs: the runner-distrust machinery retires (R-BTN-180, R-BTN-189, §12.8; B-189).**
+  Rules changed: R-BTN-180 (retitled *what lands on the default branch*), R-BTN-182, R-BTN-187,
+  R-BTN-188, R-BTN-189, R-BTN-93, R-BTN-102, R-BTN-107, R-BTN-115, R-BTN-137, R-BTN-146, §12.1,
+  §12.8's preamble and lists, §12.9, §6.6 rule `floor`, §11's CLI table, §13, §14; S-BTN-190;
+  seven Decisions entries; the linked proposals (security, checks and executors, conditions,
+  courses, data model and API, intervention sessions, scenarios: S-BTN-120, S-BTN-136,
+  S-BTN-180, S-BTN-187, S-BTN-191, S-BTN-197, S-BTN-237, G-BTN-140, G-BTN-165); the context
+  pages product and vocabulary; `docs/security-model.mdx`. The owner, 2026-11-09: "no-runner-lands
+  is a vestigial structure from when the runner was assumed to be untrusted because it executed
+  repository code unsandboxed. This is not the case any longer, as we have transitioned to
+  keeping the runner outside the sandbox"; and, of the forge, "responsibility of securing the
+  forge also belongs to the Fieldhouse owner. Fieldhouse providing tooling goes above and beyond
+  its own responsibility. It should not try to claim ownership for forge policy"; and, offered
+  that plain Baton under `builtin` makes no security promise, "Ok". The owner, 2026-11-24, on
+  review independence by domain: "This provision seems to be a vestigal structure from the time
+  when baton's runner was executing within the sanbox. The runner is now a trusted component,
+  executing on the host, and all course legs including implement and review are sandboxed (each
+  leg receiving a blank-state separate sandbox). In addition, each leg receives transient
+  local-only git and llm api keys which they can use to communicate with the local proxy backed
+  by llm providers and the git forge. The contamination risk is therefore no longer something
+  that warrants any extra complexity"; and, asked whether those proxies replace forge actions a
+  runner performs for a leg, "Proxy replaces it"; and "if we have git and LLM proxies, I don't
+  think reviews need a separate 3rd party api key. Every leg should get leg-duration keys to be
+  used by sandboxed code." §12.8 assumed a runner may be compromised because it ran repository
+  code in its own trust boundary. With every call into repository code going through an
+  executor (R-BTN-107) and each leg holding only credentials confined to its claim, nothing a
+  push or a leg writes reaches a runner's key or the merge credential, so the machinery that
+  guarded against a runner goes. Retired: the guarantee `no-runner-lands`; the `refs.*`,
+  `approvers.roles`, `outbox.git`, `outbox.forge-check` and `inputs.board` knobs and the refusals
+  that read them; grant roles, domains and the checker mark, with *How runs compare*,
+  `runner_grants.role`, `checker`, `domain` and `set_by`, and `claim_legs.domain`; the
+  protection checker, its heartbeat `protection`, `repositories.protection_json` and
+  `baton.unprotected`; `std:ran@1` and writer domains; the key span, a grant's `sync` flag,
+  `baton.span-changed`, `--confirm-span` and `owner grant flags`; `baton.machine-post`; and §2's
+  one machine key per tenant. What replaces them: §12.8 states the deployment's duty (no
+  repository code in a runner's trust boundary; no leg credential reaching past its claim;
+  every leg starting afresh; the forge admitting only the merge credential and the human
+  identity to the default branch and tags), and says that under `builtin` Baton makes no
+  security promise; the guarantees rest on `merge.trusted` in place of `no-runner-lands`;
+  `independent-review` counts reviews, each its own `reads_only` run of the exact head, and
+  compares no runner, key or domain; a trusted leg is routed by a capability the owner admits on
+  the grants whose host holds its credential; `paths.control`'s `trusted-runner` value is
+  renamed `approval`; R-BTN-107's brief carries the claim's scope and the ticket's branches, so
+  an executor can confine a leg's forge reach; `baton repo protect --print | --check` is a tool
+  a person runs, which no rule reads. `no_chain_from` stays a course rule no guarantee requires.
+  The built code still has the retired knobs, `no-runner-lands` and the report store; B-189
+  removes them, rewriting every stored policy version whose `floors` names `no-runner-lands`
+  by a new version logged `admin`. Decisions superseded, their text as it stood: "Chose that a
+  domain that runs a branch's code is one of its writers, so reviewers read the change and never
+  run it"; "Chose a grant's role and a domain label as the whole of a grant's trust, over a
+  separate trust level, a model family or a separate-domain guarantee"; "Chose a separate
+  protection checker, a trusted runner that merges nothing, over the merge runner holding a
+  credential that can rewrite rulesets"; and the git proxy rejected in "Chose a protected
+  default branch that only a deterministic merge runner and humans update, over a git proxy,
+  per-worker forks or verified signatures", which a deployment may now run to confine its legs.
+  @@REVIEW@@
+
 - **2026-11-24 — Access sign-in refusals name the failed check (R-BTN-155, S-BTN-318).**
   Previously missing settings, missing or unverifiable assertions, and missing administrator
   bindings all drew the same message. Missing Worker settings caused the 2026-11-23 sign-in

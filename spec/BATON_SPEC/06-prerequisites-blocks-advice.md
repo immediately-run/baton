@@ -374,7 +374,7 @@ never refuses, and acting against it is accepted and recorded `advice-overridden
   | 11 | Every capability with a capacity in rule 4's set for the leg has a seat no other claim holds (R-BTN-178) | claim, advance | `capacity-full`, naming the holders where the caller may see them |
   | 13 | No repository of the ticket (home, or a `repos:` entry with reach, R-BTN-140) has a held rename (R-BTN-138) | claim | `rename-held` |
   | `person` | The leg is not a person's (R-BTN-116) | claim, advance | `person` |
-  | `floor` | Every guarantee a floor names holds on every repository the ticket reaches: its home and each `repos:` entry with reach (R-BTN-140, R-BTN-189); the protection checker is exempt | claim, advance | `floor-broken` |
+  | `floor` | Every guarantee a floor names holds on every repository the ticket reaches: its home and each `repos:` entry with reach (R-BTN-140, R-BTN-189) | claim, advance | `floor-broken` |
 
   Rules `chain` (R-BTN-106), `isolation` (R-BTN-107), `entry` (R-BTN-109) and `not-queued`
   (R-BTN-72) are gates too; `trusted` is proposed (R-BTN-182). `isEligible`, in the vendored decision

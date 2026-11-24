@@ -169,11 +169,6 @@ condition over the policy; `floors` is the knob listing the guarantees Baton ref
 change break (§12.8). Baton's own server is trusted: a compromised Baton is recovered, not
 resisted, so nothing is signed for a verifier outside it.
 
-**Role, domain.** What a grant says about its runner's trust: its role (`runner`, or
-`trusted-runner` for the legs marked `trusted`) and its domain, a label whose meaning is the
-deployment's, both set by the policy's `approvers.roles` approver. Two reviews count as independent when
-their domains differ. Baton compares the labels and verifies nothing about them (R-BTN-180).
-
 **Run id.** The opaque id Baton mints for every leg run at its start (`r_` and a ULID), carried
 by the history, the resume record and leg logs (R-BTN-63).
 
@@ -202,9 +197,13 @@ its own call, made with the App key it holds (R-BTN-94, R-BTN-171).
 read. The fourth noun: Baton **learns** through attestations, **is asked** through commands,
 **acts** through deliverers and its own dispatches, and **answers** in replies.
 
-**Trusted runner.** A runner that claims only legs marked `trusted`, runs no repository code, and
-acts on attestations alone; the merge runner is the first
-([proposed, not built](../../spec/proposals/security.md)).
+**Trusted runner.** A runner whose host holds the credential a leg marked `trusted` needs, routed
+to that leg by a capability its grant admits; it runs no repository code but through its
+executor, and acts on attestations alone; the merge runner is the first
+([proposed, not built](../../spec/proposals/security.md)). Every runner is trusted and no leg
+is: no guarantee holds against a compromised runner, and each rests on the deployment keeping
+repository code out of a runner's reach (§12.8). Two reviews are independent because each is
+its own `reads_only` run of the exact head, not by where they ran (R-BTN-183).
 
 **Protected path.** A path whose changes a trusted runner never merges alone: a computed floor
 (`.baton/`, workflows, agent configuration, tickets) plus the owners' own; control paths land

@@ -105,7 +105,7 @@ print its way to `success`.
 
 - R-BTN-115 (proposed): the forge-check deliverer and `forge-check` entries. Baton sends no mail and
   calls no service but a workflow dispatch (R-BTN-94). `forge-check` is the outbox's one kind written to the forge outside git (R-BTN-171), delivered by a
-  runner the policy's `outbox.forge-check` admits (R-BTN-188).
+  runner that declares it.
   - **The forge-check deliverer** is a runner that declares `delivers: [forge-check]` (R-BTN-171).
     - It holds the dedicated **check App**'s private key on its own host; Baton holds no
       credential of the check App, so the merge check is a gate Baton itself cannot satisfy. A
@@ -296,12 +296,10 @@ noticed (R-BTN-46), and the next claimant re-reads git before it writes (R-BTN-2
 Built: a grant is active from its creation, and `GET /v1/owner/{repository}/grants` lists a
 repository's grants.
 
-- R-BTN-146 (proposed): a grant takes effect when the key's holder accepts it; a key on several
-  repositories syncs only where each opts in.
+- R-BTN-146 (proposed): a grant takes effect when the key's holder accepts it.
   - Every grant of an SSH key by fingerprint is **pending** and gives nothing until the holder
     runs `baton runner accept-grant <repository>` (key alone, no runner secret; action
-    `runner.grant.accept`); when acceptance raises the span it lists the repositories that would
-    lose sync and needs `--confirm`. The heartbeat response carries `pending_grants`, and
+    `runner.grant.accept`). The heartbeat response carries `pending_grants`, and
     `baton runner start` prints the accept command for each. Registering with a repository's
     token (R-BTN-117) is acceptance; a grant to an API-key credential is active at creation.
   - `baton runner decline-grant <repository>` (`runner.grant.decline`) revokes a pending grant
@@ -309,16 +307,8 @@ repository's grants.
   - A hostname binds at the key's first acceptance; a first grant declined or never accepted
     releases it. `accepted_at` is set at first activation and cleared by a re-grant after a
     revoke; revoking other grants never activates a pending one.
-  - **Span** = the number of the tenant's repositories where the key holds an active grant. At
-    span 1, R-BTN-102 applies as written. At span ≥ 2 the key syncs a repository only where that
-    grant has `sync: true` (owners set it; default `false`), else `forbidden` (event reason
-    `span`); work, readings and views follow the active grant alone. Going from span 1 to 2
-    keeps the first repository's explicitly set flag, else `false`, and raises
-    `baton.span-changed` on every repository of the key until an owner confirms the flags
-    (`owner.grant.flags`); returning to span 1 restores R-BTN-102's defaults.
-  - `GET /v1/owner/{repository}/grants` lists each key's hostname, span and other repositories
-    (pending marked); `baton owner grant add` prints the span and needs `--confirm-span` when the
-    key holds a grant elsewhere.
+  - `GET /v1/owner/{repository}/grants` lists each key's hostname and other repositories
+    (pending marked).
 - R-BTN-117 (proposed): registration tokens. A repository owner mints a token for a session that has
   no key yet: `baton owner token create <repository> --role runner [--capabilities …]
   [--ttl <d>] [--uses <n>]` (R-BTN-127).
@@ -335,11 +325,6 @@ repository's grants.
   - A token-registered credential lasts until the token's `grant_ttl` (default: the token's TTL)
     or 7 days without an authenticated call, whichever is first; revoking the token revokes every
     credential it registered. The dashboard shows each runner's credential kind and token.
-
-A machine key's sync (R-BTN-102) is then forbidden where its span forbids it. A machine-key post
-that closes a ticket another runner holds, drops a posted bar, or loosens an author's gate (drops
-a `requires` clause, removes a `ticket` block or a decision) raises
-`baton.machine-post` naming the tickets and the key; it is noticed, not stopped.
 
 
 ## 6. The leg's channel verbs and the bounded run (R-BTN-106, proposed)
@@ -388,7 +373,7 @@ itself.
   - **Credentials stay with the launcher.** The launcher holds what its starts need, Baton none
     (R-BTN-53). Where the agent in a session can read the session's runner key, as in a hosted
     agent session, that key is an API key (R-BTN-159), so the session never syncs or delivers,
-    and its grant is `runner`, never `trusted-runner` (R-BTN-182), on the repositories the
+    and its grant admits no trusted leg's capability (R-BTN-182), on the repositories the
     deployment scopes it to.
   - **A session its host may pause.** Its runner declares the lowest lease timeout (R-BTN-9). A
     leg there that needs a person raises `suspend` with `wait_s: 0` (R-BTN-162), so its claim

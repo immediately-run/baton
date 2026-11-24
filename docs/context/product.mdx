@@ -80,8 +80,8 @@ on which refs, who approves what, and whose attestations count (BATON_SPEC [R-BT
   coordination record, not a boundary, and no guarantee is required.
 - **The strict end.** The `protected` and `protected-hardware` presets turn the same state into a
   boundary. Trusted runners (proposed, not built) land only what the policy's attestations allow. Reviews count only
-  from independent domains, and human gates are satisfied only by a human-only key. A deployment
-  that depends on Baton requires named **guarantees**, such as `no-runner-lands`,
+  as separate `reads_only` runs of the exact head, and human gates are satisfied only by a human-only key. A deployment
+  that depends on Baton requires named **guarantees**, such as `control-paths-human`,
   `independent-review`, `tickets-approved` and `human-gates`, and lists them as **floors**. Baton
   then refuses any policy change that would break one of them, and stops the repository while one
   is broken (R-BTN-189).
@@ -107,7 +107,7 @@ to see at a glance what the team is doing and what it needs from a person.
 - **Not a gatekeeper of the work.** Baton never verifies or confines what a runner does. A
   capability, `human-operator` included, is the runner's own statement, which Baton records and
   matches but never grants or checks. A threat that needs a runner stopped belongs to the
-  sandbox, the forge or the credential proxy. The one exception is the trusted-runner merge a
+  sandbox, the forge or the credential proxy. The one exception is the trusted merge leg a
   policy opts into (proposed, not built). A repository chooses to adopt Baton; once it has, Baton's refusals bind every
   runner that uses it, and a runner that ignores them is outside the factory, not stopped by it
   (the owner, 2026-10-22).

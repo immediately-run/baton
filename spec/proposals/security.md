@@ -16,30 +16,30 @@ policy's knobs are stored and computed over, and what enforces `merge.*`, `paths
 
 `PUT /v1/owner/{repository}/policy` with `dry_run: true` (`baton owner policy apply <preset>
 --dry-run`) writes nothing and answers what the change would do: the knobs changed, each
-guarantee held or broken after it, and what the new values would stop — grants whose role the new
-`outbox` no longer admits to a class they deliver or whose null domain now counts toward nothing,
-queued legs whose requirements the new `attestations` entries admit no writer for, tickets on a
-course whose `merge` leg a new `merge.trusted` leaves without a trusted runner, and, for a change
+guarantee held or broken after it, and what the new values would stop — runners delivering the
+source kinds that a new `outbox.source` no longer admits, queued legs whose requirements the new `attestations` entries admit no writer for, tickets on a
+course whose `merge` leg a new `merge.trusted` leaves without a runner whose grant admits its capability (R-BTN-182), and, for a change
 to `repos.unlisted`, the live tickets whose `repos:` entries lose reach (`stops.unreached`).
 
-## 2. The protection check (R-BTN-180, proposed)
+## 2. Checking the forge's protection (§12.8, proposed)
 
-`baton repo protect --print <forge>` prints, from the policy's `refs.*` and `paths.control`, the
-forge setting that enforces them — and, where the owners' `checks` names a course, the required
-status check by name and by the instance's `check_app_id` (R-BTN-115) — and `--check` reads it
-back and reports `{matched, reading_hash}`. It does not match while a `refs.*` class the forge
-cannot restrict excludes any writer, or while the required check names another App. A change
-between runs is detected by comparing each run's reading with the last.
+A tool a person runs, with their own credential, when they choose: the forge's setup is the
+deployment owner's (§12.8), Baton stores no result, and no rule reads one.
+`baton repo protect --print <forge>` prints the forge setting §12.8's duty and the policy's
+`paths.control` need — the default branch and the tags admitting only the merge credential and
+the human identity, and, where the owners' `checks` names a course, the required status check by
+name and by the instance's `check_app_id` (R-BTN-115) — and `--check` reads it back and says
+where it differs, or that the required check names another App.
 
 | Forge | What `--check` reads |
 |---|---|
-| GitHub (an organisation) | the rulesets on branches and tags and their `bypass_actors`, which must be only the identities the policy admits (the trusted runners' App, and the human-only identity); the environments, their reviewers and deployment policies. Rulesets do not cover `refs/baton/*` |
+| GitHub (an organisation) | the rulesets on branches and tags and their `bypass_actors`, which must be only the merge credential's identity and the human-only identity; the environments, their reviewers and deployment policies. Rulesets do not cover `refs/baton/*` |
 | GitLab | protected branches and tags, and who may push them |
 | Gitea, Forgejo | protected branches and tags, and their whitelists |
 | plain `git` | the server's `pre-receive` hook, which keeps a pusher log; never a client-side hook |
 
-On GitHub the read needs a credential that could also rewrite a ruleset; only the protection
-checker holds it, and no merge runner does.
+On GitHub the read needs a credential that could also rewrite a ruleset: the person's own,
+never a runner's.
 
 ## 3. Proposed tickets and the proposal merge (R-BTN-180, proposed)
 
@@ -50,8 +50,7 @@ Under `tickets.created: proposed`:
   not a ticket file a leg writes on its own ticket's branch, which the human's merge of that
   PR files, R-BTN-131),
   and the outbox's git kind (a withdrawal, R-BTN-171), is
-  **proposed, not filed**: Baton queues an outbox entry for it, and a trusted-runner deliverer
-  writes it on a branch `baton/proposed/<ticket>` from the entry's fields or the creating leg's
+  **proposed, not filed**: Baton queues an outbox entry for it, and a runner writes it on a branch `baton/proposed/<ticket>` from the entry's fields or the creating leg's
   typed output, through the CLI's own templates (R-BTN-171), marks the entry `delivered` with
   that commit, and Baton holds only its filter fields (R-BTN-33). It is not claimable, no leg
   reads its body, and the entry is not `confirmed`, until its file lands. Such an entry is late
@@ -85,7 +84,7 @@ Under `tickets.created: proposed`:
   `human` ones.
 - **Supersession.** A new attestation supersedes an earlier one only when type, subject, writer
   and **attested key** are the same; the attested key is the writer's key, except for a `baton`
-  attestation, whose attested key is the runner key it is about. So two runners' reviews at one head coexist, a later `std:ran@1` by one domain never erases another's, and each instrument
+  attestation, whose attested key is the runner key it is about. So two runners' reviews at one head coexist, and each instrument
   keeps its own latest reading (R-BTN-76). The one exception is the sync's: its attestations
   supersede by type and subject whichever sync credential posted them (R-BTN-191).
 - **Bound by subject, not consumed.** An attestation gates every action on exactly its subject:
@@ -117,12 +116,10 @@ Under `tickets.created: proposed`:
   - The validator refuses a `trusted: true` leg with a requirement that binds as `advice` or
     takes `missing: allow`.
 - **Standard types:**
-  - `std:wrote@1` (writer `baton`): a writing leg's reported commit range `start..head`, its
-    domain and its runner key;
-  - `std:ran@1` (writer `baton`): a leg ran the branch's code at `head` in its domain (every
-    writing leg, and any leg its course does not mark `reads_only: true`);
+  - `std:wrote@1` (writer `baton`): a writing leg's reported commit range `start..head` and its
+    runner key;
   - `std:review@1` (writer `baton`): a review leg the course marks `approves: true` and
-    `reads_only: true` ended `approve` at `head`, with its domain;
+    `reads_only: true` ended `approve` at `head`, with its run id (R-BTN-63);
   - `std:checks@1` (writer `service:<a check-runner's key>`, R-BTN-114): the course's check
     commands, from protected course data, passed at `head` in a check leg's session holding no
     credential (R-BTN-114);
@@ -167,7 +164,7 @@ Under `tickets.created: proposed`:
 - **Superseded per writer class.** The sync's attestations supersede by type and subject
   whichever credential posted them (a sync key, the CI identity or a machine key, R-BTN-62,
   R-BTN-93), so a repository's posting credentials never leave two runs' facts side by side;
-  where `inputs.board` admits `machine`, a granted machine key's post therefore replaces the
+  a granted machine key's post therefore replaces the
   CI sync's facts as fully as the CI sync's replaces its.
 
 ## 6. The fact reader (R-BTN-192, proposed)
@@ -201,11 +198,12 @@ the forge through the CLI's own fact adapters (R-BTN-96) and runs no repository 
 
 ## 7. Trusted runners (R-BTN-182, proposed)
 
-R-BTN-182 (proposed) — trusted runners. A grant role (R-BTN-180) that claims only legs its course
-marks `trusted: true` (`merge`, branch deletion, sensitive API calls, each idempotent on its attestation's subject, R-BTN-181) and holds the only
-non-human credential able to perform that leg's action. No other runner is offered a trusted leg
-or may claim, advance or end one (rule `trusted`), and neither is a grant marked `checker`
-(R-BTN-180) or a runner that delivers `forge-check` (R-BTN-115).
+R-BTN-182 (proposed) — trusted runners. A runner whose host holds the only non-human credential
+able to perform the action of a leg its course marks `trusted: true` (`merge`, branch deletion,
+sensitive API calls, each idempotent on its attestation's subject, R-BTN-181), which no leg's
+environment holds (§12.8). Baton routes a trusted leg as any leg, by the capabilities its course
+requires (R-BTN-174); the owner admits that capability only on the grants of runners whose host
+holds the credential (R-BTN-180).
 - **It runs no repository code but a trusted leg's override**, which it runs through its
   executor as any leg's code (R-BTN-107), delivering the outbox included (R-BTN-171).
 - **It re-checks at the moment it acts**, against Baton's record: every attestation it relies on
@@ -217,18 +215,15 @@ or may claim, advance or end one (rule `trusted`), and neither is a grant marked
 - **A course's `legs/<leg>.run.mjs` for a trusted leg may only add refusals.** It runs as any
   leg's code does, through the runner's executor (R-BTN-107), with the computed diff as its only input, and returns `{refuse, reasons}`, `reasons`
   from a closed list with path ids. The CLI applies R-BTN-183 afterwards, whatever it returns.
-- While `no-runner-lands` is broken for a repository (R-BTN-189), every trusted runner stops
-  acting on it, except the protection checker.
 
 ## 8. What the merge runner merges (R-BTN-183, proposed)
 
 R-BTN-183 (proposed) — what the merge runner merges. At the PR's exact head `H`, under the policy's
 `merge` and `paths` (R-BTN-188), except a proposal merge (part 3):
-- **A domain that runs a branch's code is one of its writers.** Every `std:wrote@1` and `std:ran@1`
-  domain of `H`'s chain is a writer domain. A review leg is one its course
-  marks `reads_only: true`; `std:ran@1` follows from the course's declarations, since Baton cannot
-  observe what a leg ran (§12.8). The runner's harness starts a `reads_only` leg's agent with no
-  `--auto` or permission bypass and no configuration from the branch (B-141).
+- **Review legs read the change; they never run it.** A review leg is one its course marks
+  `reads_only: true`. The runner's harness starts a `reads_only` leg's agent with no `--auto` or
+  permission bypass and no configuration from the branch (B-141); Baton cannot observe what a leg
+  ran (§12.8).
 - **Continuity.** A writing claim reports its start head at claim, which must be the last
   attested head (or the merge base for the first leg). The CLI refuses to build on any other tip
   and raises `baton.foreign-commit`. At `advance` the leg reports `start..head` from the objects it
@@ -238,11 +233,12 @@ R-BTN-183 (proposed) — what the merge runner merges. At the PR's exact head `H
   wrote a commit is what the chain of ranges says; commits carry no signature Baton requires. Review rounds go to the
   PR conversation or, on a `git` repository, to the ticket's leg-state branch, never to the work
   branch (R-BTN-190), so a reviewer never becomes a writer.
-- **Independent review.** `merge.reviews.count` `std:review@1` at `H`, each from a domain other
-  than every writer domain of `H` and from a review claim that started at `H`, no two from one
-  domain, runs compared as R-BTN-180's *How runs compare* says. A chain any of whose
-  `std:wrote@1` or `std:ran@1` carries a null domain never merges while `merge.reviews.count` ≥ 1:
-  a writer nobody labelled cannot be told from its reviewers.
+- **Independent review.** `merge.reviews.count` `std:review@1` at `H`, each from its own run (no
+  two with one run id) of a review leg whose claim started at `H`. Every leg starts afresh
+  (§12.8), so a review run carries none of its writer's state: Baton compares no runner, key or
+  domain between a change's writers and its reviewers. A course that wants another credential to
+  review as well names the writing legs in the review leg's `no_chain_from` (R-BTN-106), which no
+  guarantee requires.
 - **Checks**, under `merge.checks: required`. Check runs whose workflow file is on the protected
   default branch with the same blob as at merge time, concluded `success` at `H` (never `neutral` or `skipped`); or a `std:checks@1` at `H` where the owner named its writer
   (R-BTN-181, R-BTN-114). Commit statuses are never read. Checks show that the change's own tests
@@ -252,7 +248,7 @@ R-BTN-183 (proposed) — what the merge runner merges. At the PR's exact head `H
   (modes 120000, 160000) or a `.gitmodules` change anywhere is refused. Paths are matched as `p`
   and `p/`, case-folded and NFC-normalised, against the protected paths.
 - **Protected paths.** Under `paths.control: human`, a control path never merges here; under
-  `trusted-runner`, it merges only with a `std:approval@1` as a ticket path does (R-BTN-184).
+  `approval`, it merges only with a `std:approval@1` as a ticket path does (R-BTN-184).
   Under `paths.tickets: approval`, a ticket or goal path merges only with a `std:approval@1` at
   `H` whose `paths` and `blobs` cover every protected path changed,
   and whose blobs equal those paths' blobs in the merge result; the own-progress exception aside.
@@ -297,7 +293,7 @@ Two classes:
   the forge (the merge's actor equal to the policy's `human_identity`, R-BTN-188, or the pusher
   log) and attests it as the `pr-merged` arrival of `merged-by-hand`, which leaves `human-merge`
   (R-BTN-131, R-BTN-192); Baton records a `pr-merged` whose merge commit is not the presented
-  `H` as a discrepancy (R-BTN-85), the arrival applied all the same. Under `trusted-runner`, the
+  `H` as a discrepancy (R-BTN-85), the arrival applied all the same. Under `approval`, the
   merge runner merges them with a `std:approval@1`; under `any`, they merge as any path does.
 - **Tickets and goals:** under `paths.tickets: approval`, merged by the merge runner with a
   `std:approval@1` (R-BTN-183), or by the human's own merge of a ticket's PR or a request PR
@@ -329,7 +325,7 @@ Under `human_key: hardware` Baton accepts only a hardware-backed key requiring P
 Per-key limits on observation numbers, board posts and concurrent claims, so one key can freeze
 neither the board nor the leases.
 
-Where the policy's `inputs.board` excludes `machine` and its `attestations` entries admit no
+Where the policy's `attestations` entries admit no
 `sync` writer for `std:arrival@1` or `std:decision@1`: what a protection depends on (changed
 paths, foreign commits, a human's merge) is read from git and the forge by trusted runners, never
 from a board post; and the stations a trusted leg acts on are reached from attestations by
@@ -355,7 +351,7 @@ credential is one the forge cannot tell from the human: Baton shows its control-
     head commit, made before the delivery comes in or at any time after, for a ticket whose
     scope covers the repository: the commit a claim on a `trusted: true` leg reported at its
     end (`claims.ended_at_sha`, R-BTN-183), from a runner whose grant on the pushed repository
-    is `trusted-runner`; or the `ref` of a `pr-merged` arrival (R-BTN-192) written by the fact
+    admits the capability that leg requires (R-BTN-182); or the `ref` of a `pr-merged` arrival (R-BTN-192) written by the fact
     reader's `service:` key the pushed repository's policy names, never by `sync`. Nothing
     else accounts: not an open claim, not an arrival naming another of the delivery's commits,
     not a record from a runner or a fact reader another repository's policy admits.
