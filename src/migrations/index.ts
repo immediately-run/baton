@@ -79,6 +79,8 @@ import ticketPrerequisites from './0102_ticket_prerequisites.sql';
 import prerequisiteIdentityAndReady from './0103_prerequisite_identity_and_ready.sql';
 import runnerIdle from './0121_runner_idle.sql';
 import runnerIdleRepositories from './0122_runner_idle_repositories.sql';
+import eligibilityInputs from './0124_eligibility_inputs.sql';
+import readyRequirements from './0125_ready_requirements.sql';
 import { isUniqueViolation, logEvent, mintRunId, type Random } from '../core/db';
 import type { Store } from '../core/ports';
 
@@ -237,5 +239,7 @@ export const MIGRATIONS: Migration[] = [
   { id: 103, sql: prerequisiteIdentityAndReady },
   { id: 121, sql: runnerIdle },
   { id: 122, sql: runnerIdleRepositories },
+  { id: 124, sql: eligibilityInputs },
+  { id: 125, sql: readyRequirements },
   { id: 123, sql: leaseRecovery },
 ];
