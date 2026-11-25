@@ -406,6 +406,24 @@ export class BatonCore {
     if (current == null || at < current) await this.ports.scheduler.set(at);
   }
 
+  /** B-249 (S-BTN-2): a healthy request or reaper turn establishes that Baton could serve.
+   *  Stamp at most once a period. Record any recovery and its stamp in the same transaction;
+   *  only cache the stamp after commit so ordinary conditional polls need no extra read. */
+  private serviceStamp = -Infinity;
+  private recordServing(): number {
+    const now = this.now();
+    if (now - this.serviceStamp < ALARM_EVERY_MS) return this.serviceStamp;
+    const last = this.sql<{ value: string }>(`SELECT value FROM baton_settings WHERE key = 'last_served_at'`)[0];
+    if (last && now - Number(last.value) < ALARM_EVERY_MS) return Number(last.value);
+    // A successful request inside the sampling period may not have moved the stamp.
+    if (last) this.claims.recoverLeases(now, now - Number(last.value) - ALARM_EVERY_MS);
+    this.store.liveness(() => {
+      this.store.exec(`INSERT INTO baton_settings (key, value) VALUES ('last_served_at', ?)
+                       ON CONFLICT (key) DO UPDATE SET value = excluded.value`, String(now));
+    });
+    return now;
+  }
+
   /** §3: the one alarm, every 60 seconds — earlier when a webhook's trailing dispatch or the
    *  webhook path's own backstop is due. */
   // @model alarmLive sha256:9738e53567a4
@@ -434,7 +452,12 @@ export class BatonCore {
     // everything else has run, so the tick's own work is never lost to it.
     let unreaped: string[] = [];
     try {
-      unreaped = this.store.transaction(() => this.claims.alarm());
+      const reaper = this.store.transaction(() => {
+        const stamp = this.recordServing();
+        return { stamp, unreaped: this.claims.alarm() };
+      });
+      this.serviceStamp = reaper.stamp;
+      unreaped = reaper.unreaped;
     } catch (e) {
       this.pendingDispatch.clear();
       throw new Error(`the alarm's reaper failed: ${e instanceof Error ? e.message : String(e)}`, { cause: e });
@@ -551,11 +574,20 @@ export class BatonCore {
       // An error answer means its transaction rolled back: nothing changed to mirror.
       if (res.ok) {
         // R-BTN-77: the unblocked dispatches this request made due, coalesced per window.
-        this.store.transaction(() => this.takeUnblocked());
+        this.serviceStamp = this.store.transaction(() => {
+          const stamp = this.recordServing();
+          this.takeUnblocked();
+          return stamp;
+        });
         this.flushDispatch();
         await this.armBy(this.blocks.nextDue());
         await this.armBy(this.resources.nextLapse());
-      } else this.pendingDispatch.clear();
+      } else {
+        this.pendingDispatch.clear();
+        if (res.status === 304 && this.now() - this.serviceStamp >= ALARM_EVERY_MS) {
+          this.serviceStamp = this.store.transaction(() => this.recordServing());
+        }
+      }
       // R-BTN-2 (R3-1258): the rows this request's transactions wrote, counted into the day's
       // usage — after the response is built, in a quiet write that never counts itself.
       this.recordUsage();
