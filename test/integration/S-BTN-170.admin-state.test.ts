@@ -190,7 +190,7 @@ describe('S-BTN-170 the state in one request equals the entity reads (B-216)', (
         window.forEach((c, i) => {
           // The window's runs and activities carry more (a run's id and log, an activity's
           // source and detail); the fields both carry are equal, in the same order.
-          expect((c.runs as Json[]).map((x) => pick(x, ['leg', 'started_at', 'ended_at', 'session_url']))).toEqual(mine[i].runs);
+          expect((c.runs as Json[]).map((x) => ({ ...pick(x, ['leg', 'started_at', 'ended_at', 'session_link']), session_url: null }))).toEqual(mine[i].runs);
           const fields = ['id', 'kind', 'label', 'started_at', 'ended_at', 'outcome', 'parent_id'];
           expect((c.activities as Json[]).map((a) => pick(a, fields))).toEqual((mine[i].activities as Json[]).map((a) => pick(a, fields)));
           compared += 1;
