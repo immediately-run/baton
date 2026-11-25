@@ -1,20 +1,19 @@
-// S-BTN-189 the ticket commands (BATON_SPEC §15 S-BTN-189, §2f R-BTN-74; B-112): the ticket
-// commands as an operator runs them — `node cli/baton.mjs tickets …`, the CLI's own entry, which
-// bundles src/defaults/tickets.ts as it bundles `repo sync`. Must hold: each command is one commit
-// pushed straight to the bare origin's default branch, the caller's branch and tree untouched; a
-// new ticket takes the next free id under the configured prefix with the skeleton body, and its
-// dependency's `**Used by:**` line names it; a filing the check would refuse lands nothing; and
-// the generated "How tickets work" page is written by `baton repo init`, reported by
-// `baton tickets check` once edited, and written again by `init --force`. The exhaustive cases —
-// every refusal, the retry, the settings — are test/unit/tickets.test.ts's. Node only: it writes a
-// real repository and runs git and the CLI.
+// S-BTN-189 the ticket commands (BATON_SPEC §15 S-BTN-189, §4.2 R-BTN-74; B-112, B-326): the
+// ticket commands as an operator runs them — `node cli/baton.mjs tickets …`, the CLI's own entry.
+// Must hold: ticket files are Dibber's to write — `new`, `claim`, `set` and `done` are refused,
+// each naming its `dibber` command, and nothing lands; `check <id> --claimable` writes nothing and
+// refuses a ticket citing a rule amended since it answered for it until a rules re-read note —
+// the line `dibber set <id> --note "rules re-read: …"` writes — names it; and `baton repo init`
+// writes the generated "How tickets work" page and `.dibber/config.json`, Baton its coordinator.
+// The exhaustive cases are test/unit/tickets-commands.test.ts's. Node only: it writes a real
+// repository and runs git and the CLI.
+
 import { describe, it, expect, afterEach } from 'vitest';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { initMain } from '../../src/defaults/cli';
-import { parseFrontmatter } from '../../src/defaults/tickets-markdown';
 
 const ROOT = resolve(import.meta.dirname, '..', '..');
 const CLI = join(ROOT, 'cli', 'baton.mjs');
@@ -67,74 +66,32 @@ class Repo {
 }
 
 describe('S-BTN-189 the ticket commands', () => {
-  it('new, claim, set and done: one commit each on the origin’s main, the caller’s tree untouched', () => {
+  it('new, claim, set and done are refused naming their dibber commands; nothing lands', () => {
     const repo = new Repo();
     repo.publish();
-    git(repo.dir, 'checkout', '-q', '-b', 'my-work');
-    writeFileSync(join(repo.dir, 'draft.txt'), 'uncommitted\n');
-    const head = git(repo.dir, 'rev-parse', 'HEAD');
-
-    // A request-style filing: the flag's dependency, tags and project, and the skeleton. `new`
-    // lands through a PR by default (B-176); these are `--direct`, the landing this scenario
-    // has always walked — S-BTN-234 walks the PR one.
-    const first = repo.tickets('new', '--direct', '--title', 'First', '--tags', 'EXPEDITE');
-    expect(first).toMatchObject({ status: 0 });
-    expect(first.stdout).toBe('✓ tickets: file B-1 — First\n');
-    const second = repo.tickets('new', '--direct', '--title', 'Second', '--depends-on', 'B-1', '--project', 'baton');
-    expect(second.stdout).toBe('✓ tickets: file B-2 — Second\n');
-
-    // One commit per command, the files of that command alone, and B-1's reverse mention.
-    const log = git(repo.bare, 'log', '--format=%s', 'main').split('\n');
-    expect(log.slice(0, 3)).toEqual(['tickets: file B-2 — Second', 'tickets: file B-1 — First', 'scaffold']);
-    expect(parseFrontmatter(repo.at('tickets/B-1.mdx')!)).toMatchObject({ id: 'B-1', project: 'baton', status: 'available', tags: ['EXPEDITE'] });
-    expect(repo.at('tickets/B-1.mdx')).toContain('**Depends on:** none.');
-    expect(repo.at('tickets/B-1.mdx')).toContain('**Used by:** B-2.');
-    const two = repo.at('tickets/B-2.mdx')!;
-    expect(parseFrontmatter(two)).toMatchObject({ id: 'B-2', project: 'baton', tags: ['roadmap-item'], depends_on: ['B-1'] });
-    expect(two).toContain('**Depends on:** B-1.');
-    for (const line of ['**Brief:** Second', '**Spec:**', '### What to build', '### Tests', '### Exit criteria', '## Status']) expect(two, line).toContain(line);
-
-    // The caller's branch, HEAD and tree are as they were.
-    expect(git(repo.dir, 'rev-parse', 'HEAD')).toBe(head);
-    expect(git(repo.dir, 'symbolic-ref', '--short', 'HEAD')).toBe('my-work');
-    expect(readFileSync(join(repo.dir, 'draft.txt'), 'utf8')).toBe('uncommitted\n');
-
-    // The rest of a session: claim (B-129: with no key in this environment, on git's word
-    // alone — the with-Baton cases are B-129's own suite), a PR, done (archived).
-    expect(repo.tickets('claim', 'B-1', '--offline').stdout).toMatch(/^✓ tickets: claim B-1 \(in progress\) — pushed as /);
-    expect(parseFrontmatter(repo.at('tickets/B-1.mdx') as string)?.status).toBe('in-progress');
-    const url = 'https://github.com/immediately-run/baton/pull/7';
-    expect(repo.tickets('set', 'B-1', 'in-review', '--pr', url).status).toBe(0);
-    expect(parseFrontmatter(repo.at('tickets/B-1.mdx') as string)?.status).toBe('in-review');
-    expect(repo.at('tickets/B-1.mdx')).toContain(`prs:\n  - ${url}`);
-    expect(repo.tickets('done', 'B-1', '--pr', url).status).toBe(0);
-    expect(repo.at('tickets/B-1.mdx')).toBeNull();
-    expect(parseFrontmatter(repo.at('tickets/archive/B-1.mdx')!)).toMatchObject({ id: 'B-1', status: 'done' });
-
-    // A filing the check would refuse lands nothing: B-3 waiting on nothing, but `--body-file`
-    // says otherwise.
-    const body = join(repo.dir, 'body.md');
-    writeFileSync(body, '**Brief:** a third\n\n**Depends on:** B-2.\n');
     const before = git(repo.bare, 'rev-parse', 'main');
-    const refused = repo.tickets('new', '--direct', '--title', 'Third', '--body-file', body);
-    expect(refused.status).toBe(2);
-    expect(refused.stderr).toContain('**Depends on:** names B-2, which --depends-on does not');
+    for (const [verb, argv] of [['new', ['--title', 'First']], ['claim', ['B-1']], ['set', ['B-1', 'in-review']], ['done', ['B-1']]] as const) {
+      const r = repo.tickets(verb, ...argv);
+      expect(r.status).toBe(2);
+      expect(r.stderr).toMatch(new RegExp(`^baton: baton tickets ${verb} is retired — ticket files are Dibber's to write \\(B-326\\): .*dibber `));
+    }
     expect(git(repo.bare, 'rev-parse', 'main')).toBe(before);
-    expect(repo.at('tickets/B-3.mdx')).toBeNull();
-  }, 120_000);
+  }, 60_000);
 
   it('repo init writes the page, check reports an edited copy, and init --force writes it again', async () => {
     const repo = new Repo();
     const said: string[] = [];
     await initMain(['--course', 'create-pr'], { root: repo.dir, log: (l) => said.push(l) });
     expect(said).toContain('baton: tickets/HOW-TICKETS-WORK.md — how tickets work in this repository, generated');
+    expect(said).toContain('baton: .dibber/config.json — written: Dibber writes the ticket files, Baton gives their numbers (coordinator)');
+    expect(JSON.parse(readFileSync(join(repo.dir, '.dibber', 'config.json'), 'utf8'))).toMatchObject({ store: 'tickets', prefix: 'B', coordinator: { next: expect.arrayContaining(['tickets', 'next', 'ticket-<prefix>', '--coordinator']) } });
     const page = join(repo.dir, 'tickets', 'HOW-TICKETS-WORK.md');
     const want = readFileSync(page, 'utf8');
     expect(want).toContain('# How tickets work');
     // The check passes on the repository as init left it, and on this repository's own tickets.
     expect(repo.tickets('check', '--repo', repo.dir).status).toBe(0);
     // An edited copy is one finding, exit 1.
-    writeFileSync(page, want.replace('baton tickets claim <id>', 'claim by hand'));
+    writeFileSync(page, want.replace('dibber claim <id>', 'claim by hand'));
     const edited = repo.tickets('check', '--repo', repo.dir);
     expect(edited.status).toBe(1);
     expect(edited.stdout).toContain('tickets/HOW-TICKETS-WORK.md: differs from the "How tickets work" page this release generates');
@@ -152,7 +109,7 @@ describe('S-BTN-189 the ticket commands', () => {
     expect(out.stdout).toMatch(/(^|\n)baton tickets check: \d+ ticket\(s\), ✓ no findings\n$/);
   }, 60_000);
 
-  it('claim refuses a ticket citing a rule amended since it was filed, until --rules-reread', () => {
+  it('check --claimable refuses a ticket citing a rule amended since it was filed, until a rules re-read note names it', () => {
     const repo = new Repo();
     // The scaffold and a ticket citing R-BTN-50, dated 2026-10-29; then a history entry of
     // 2026-11-01 naming R-BTN-50.
@@ -172,13 +129,17 @@ describe('S-BTN-189 the ticket commands', () => {
     git(repo.dir, 'push', '-q', 'origin', 'HEAD:main');
 
     const before = git(repo.bare, 'rev-parse', 'main');
-    const refused = repo.tickets('claim', 'B-1', '--offline');
-    expect(refused.status).toBe(2);
-    expect(refused.stderr).toContain('B-1 cites rules that spec/BATON_SPEC_HISTORY.md amended after the ticket answered for them (filed 2026-10-29, or a later rules re-read note naming the rule):\n  R-BTN-50 — 2026-11-01 — R-BTN-50: the ruling on prs\n');
+    const refused = repo.tickets('check', 'B-1', '--claimable', '--offline');
+    expect(refused.status).toBe(1);
+    expect(refused.stdout).toContain('B-1: not claimable — B-1 cites rules that spec/BATON_SPEC_HISTORY.md amended after the ticket answered for them (filed 2026-10-29, or a later rules re-read note naming the rule):\n  R-BTN-50 — 2026-11-01 — R-BTN-50: the ruling on prs\n');
+    expect(refused.stdout).toContain('dibber set B-1 --note "rules re-read: R-BTN-50"');
     expect(git(repo.bare, 'rev-parse', 'main')).toBe(before);
-    const claimed = repo.tickets('claim', 'B-1', '--offline', '--rules-reread', 'R-BTN-50');
-    expect(claimed.status).toBe(0);
-    expect(parseFrontmatter(repo.at('tickets/B-1.mdx')!)?.status).toBe('in-progress');
-    expect(repo.at('tickets/B-1.mdx')).toMatch(/## Status\n\n_\(\d{4}-\d{2}-\d{2}: rules re-read at claim: R-BTN-50 \(amended 2026-11-01\)\)_\n$/);
+    // The line `dibber set B-1 --note "rules re-read: R-BTN-50"` writes under ## Status, pushed.
+    writeFileSync(join(repo.dir, 'tickets', 'B-1.mdx'), `${readFileSync(join(repo.dir, 'tickets', 'B-1.mdx'), 'utf8')}\n## Status\n\n_2026-11-02: rules re-read: R-BTN-50._\n`);
+    git(repo.dir, 'commit', '-qam', 'B-1: rules re-read');
+    git(repo.dir, 'push', '-q', 'origin', 'HEAD:main');
+    const claimable = repo.tickets('check', 'B-1', '--claimable', '--offline');
+    expect(claimable.status).toBe(0);
+    expect(claimable.stdout).toContain('claim it with: dibber claim B-1');
   }, 120_000);
 });

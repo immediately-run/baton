@@ -2,9 +2,8 @@
 // ASI09: an owner approves what an agent writes; the words beside the approval are the agent's,
 // so the CHANGE is computed, never summarised by the PR's own description).
 //
-// Pure: the caller reads git and the files (the runners are scripts/check-ticket-pr.mjs in docs
-// and `baton tickets check --pr` in the Baton repository, which vendors this file — R-BTN-37's
-// one-algorithm rule; never edit the vendored copy). Three questions, computed:
+// Pure: the caller reads git and the files. Consumers vendor this source (R-BTN-37)
+// so they and `baton tickets check --pr` compute the same view. Three questions, computed:
 //
 //   which tickets change          the paths under the items directory that differ
 //   what changed in each          frontmatter fields (old → new), and the body — the **Brief:**
@@ -147,7 +146,7 @@ export function ticketId(path, text) {
 }
 
 /**
- * The computed view. `items` is the items directory ("tickets", "content/roadmap"); `base` and
+ * The computed view. `items` is the items directory (e.g. "tickets"); `base` and
  * `head` map repo-relative paths to file text (a path absent from a map was not there);
  * `provenance` maps a path to the commits that changed it since the base, each
  * `{sha, author, committer, date, forge?}` — git's reading, named as such where it is shown,

@@ -237,13 +237,18 @@ describe('B-174: the protected default branch, decided by the forge’s answer (
     const mainNow = git(merged.origin, 'rev-parse', 'main');
     expect(mainNow).toBe(sideHead); // the branch's commit is the default branch's head: merged
     const shim2 = refuseOnce(dirs, 'HEAD:refs/heads/main', GH006);
+    const trailers = 'Claude-Session: test-session';
     const filed2 = await refusing(shim2.bin, () =>
-      fileRequest(readRequestPlan(merged.dir, 'create-spec', SENTENCE), { forge: 'github', env: { GITHUB_TOKEN: 'tok' }, fetchImpl: prAnswer('https://github.com/immediately-run/baton/pull/10').fetchImpl }),
+      fileRequest(readRequestPlan(merged.dir, 'create-spec', SENTENCE), {
+        allocated: 'B-1', forge: 'github', env: { GITHUB_TOKEN: 'tok', TICKET_TRAILERS: trailers },
+        fetchImpl: prAnswer('https://github.com/immediately-run/baton/pull/10').fetchImpl,
+      }),
     );
     expect(filed2).toMatchObject({ id: 'B-2', onBranch: 'baton-request/B-2' });
     // One commit on the default branch's head, the new ticket alone — never the old one.
     expect(git(merged.origin, 'show', '--name-only', '--format=%s', 'refs/heads/baton-request/B-2').split('\n'))
       .toEqual(['B-2: request — Decide the export format, so two implementations agree — create-spec', '', 'tickets/B-2.mdx']);
+    expect(git(merged.origin, 'log', '-1', '--format=%B', 'baton-request/B-2')).toBe(`${filed2.message}\n\n${trailers}`);
     expect(git(merged.origin, 'rev-parse', 'baton-request/B-2^')).toBe(mainNow);
     expect(git(merged.origin, 'rev-parse', 'main')).toBe(mainNow);
   });

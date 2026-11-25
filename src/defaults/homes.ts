@@ -20,7 +20,7 @@ import { readSettingsJson } from './tickets-config';
 import { remoteSlug } from './remote-slug';
 // Where homes.json sits is spelled once, in the CLI's own entry (beside DEFAULT_URL, the other
 // value tickets.ts reads the same way), so the CLI's fast path and this module cannot drift.
-import { homesPath } from '../../cli/baton.mjs';
+import { homesPath } from '../client/config.mjs';
 
 /** One home as homes.json holds it (B-121): the origin its repository's Baton serves (a
  *  checkout's `baton_url`, R-BTN-56), the repository id, and — when the operator named one —

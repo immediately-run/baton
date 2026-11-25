@@ -77,6 +77,11 @@ runs nothing and leaves no marker: it suspends with `review` next, and the sync 
 from that CI. Only a ticket with several PRs at home, which the gate cannot choose between,
 waits on the owner as `run-tests-unreachable`, whose `skip` waives the gate for it.
 
+**Review uses a different credential.** `review` names `implement` and `fix` in `no_chain_from`
+([R-BTN-106](../spec/BATON_SPEC/08-runners.md#sec-8-3)), so passing the test gate never makes
+an authoring credential eligible to review the ticket. The review instructions also require a
+different model when the runner offers one; Baton gates on credentials, not models.
+
 ## A ticket already delivered
 
 An `implement` agent that finds the whole ticket already on the default branch opens no PR and
@@ -89,9 +94,12 @@ evidence and the line as its detail, shown on the ticket's history. There the pe
 `confirm` waits for a direct answer from the owner under Needs you; an answer in git does not
 count. `baton decision answer <repository>:<ticket> confirmed` queues the deterministic `archive`
 leg; `filed` sends it back to `implement` without writing to git and another delivery opens a
-fresh question. `archive` uses the same transaction as `baton tickets done <ticket>` to mark the
-ticket `done`, move it to `archive/`, and rewrite its relative links. The one commit names the
+fresh question. `archive` uses the pinned `dibber done` to mark the ticket `done`, then moves it to
+`archive/` and rewrites its relative links in the same git commit. The commit names the
 latest delivery's commits, and the next sync observes the closure without another person step.
+On upgrade, a legacy git confirmation reopens the owner's question rather than queuing archive.
+If a legacy end truncated its commit list, the archive lists only the complete recorded commit
+ids and explicitly notes that the evidence is incomplete.
 Upgrade Baton before posting the new course, and use a runner that declares
 `runner:claim-evidence` for the archive leg. The agent's word
 alone never closes a ticket. If the commit list cannot fit in the end record, the delivered

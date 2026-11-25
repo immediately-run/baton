@@ -1,3 +1,4 @@
+import { ticketInputs } from './contracts';
 // questions.ts — a person's leg and its question (BATON_SPEC §6.4 R-BTN-116; B-7). The one leg a
 // runner may never take: the course file marks it `kind: "person"` with `asks`, rule `person`
 // refuses every claim and advance, and the ticket waits in its queue until a person answers. The
@@ -16,7 +17,7 @@ import { resolveLeg, resolveStation, type Graph } from './graph';
 import { HELD_CLAIMS_SQL } from './blocks';
 import { validate, PATTERN_STEPS_MAX } from '../shared/schema.mjs';
 import { stdSchema } from '../shared/std.mjs';
-import type { PostedAttestation, PostedQuestion, PostedTicket } from './board';
+import { GIT_EVIDENCE_TYPE, type PostedAttestation, type PostedQuestion, type PostedTicket } from './board';
 import type { History } from './history';
 import type { Store } from './ports';
 
@@ -29,21 +30,24 @@ export interface Ctx {
   now: () => number;
   /** The course file's graph, as the registry holds it (Stations.graph, cached per post). */
   graph: (repo: string, course: string) => Graph | null;
-  history?: History;
+  history: Pick<History, 'record'>;
   /** R-BTN-83, R-BTN-79: whatever moves a ticket calls this, so its leg-queue membership follows. */
-  queued?: (ticketId: string) => void;
+  queued: (ticketId: string) => void;
   /** R-BTN-75: a ticket whose queued leg changed has its blocks re-evaluated. */
-  reevaluate?: (ticketId: string) => void;
+  reevaluate: (ticketId: string) => void;
+  /** R-BTN-163: a person arrival can end the cause of a missing-next notice. */
+  contractWaits?: (repo: string, at: number, ticket: string) => void;
+  closeMissingNext: (ticketId: string, at: number) => void;
   /** Rule 3's one definition of a held ticket (Blocks.isHeld); an arrival waits for the hold. */
-  isHeld?: (ticketId: string) => boolean;
+  isHeld: (ticketId: string) => boolean;
   /** R-BTN-92's link bases for a ticket (Blocks.ticketRepos): a question's `url` is kept only
    *  under one of them, as a decision's is. */
-  linkBases?: (ticketId: string) => string[];
+  linkBases: (ticketId: string) => string[];
   /** §12.8 (R-BTN-187): whether an answer read from git counts — the policy's `inputs.answers`
-   *  (R-BTN-116, R-BTN-191). Absent, `git` (the cooperative default). */
-  answersFrom?: (repo: string) => 'git' | 'attestation';
+   *  (R-BTN-116, R-BTN-191). */
+  answersFrom: (repo: string) => 'git' | 'attestation';
   /** R-BTN-73: a move asks its repository for a sync, as an advance does. */
-  dispatch?: (kind: 'sync', ticketId: string) => void;
+  dispatch: (kind: 'sync', ticketId: string) => void;
 }
 
 /** A stored question row, as `ticket_questions` holds it. */
@@ -80,6 +84,11 @@ export interface QuestionOption {
 function optionAction(g: Graph, station: string): string {
   const next = [...g.legs.entries()].filter(([, l]) => l.from.includes(station)).map(([name, l]) => `${name} (${l.person ? 'a person leg' : 'a runner leg'})`);
   return `moves the ticket to ‘${station}’${next.length ? `, which queues ${next.join(', ')}` : g.ends.has(station) ? ' — the course’s end' : ''}`;
+}
+
+/** A person leg carries only its decision as entry evidence (R-BTN-109). */
+function unmetAnswerEntry(g: Graph, station: string) {
+  return g.entry.get(station)?.find((r) => r.output !== 'answer' || r.schema !== DECISION_TYPE);
 }
 
 /** A `std:decision@1` value as the library's schema shapes it (§5.5). */
@@ -132,7 +141,7 @@ export class Questions {
         continue;
       }
       const options = q.options ?? [];
-      const url = q.url != null && (this.c.linkBases?.(id) ?? []).some((base) => q.url!.startsWith(base)) ? q.url : null;
+      const url = q.url != null && this.c.linkBases(id).some((base) => q.url!.startsWith(base)) ? q.url : null;
       const have = this.rows<QuestionRow>('SELECT * FROM ticket_questions WHERE ticket_id = ?', id)[0] ?? null;
       // The upsert runs only while a person leg is queued, and a row it finds already answered
       // means the ask is a new one — a second person leg queued, or a bounded loop back to the
@@ -163,7 +172,7 @@ export class Questions {
       // `question-posted` once per id: only a new one logs (§4.4).
       if (have?.question_id !== q.id) {
         logEvent(this.c.store, now, 'question-posted', 'sync', { ticket: id, question: q.id, leg, ...(options.length ? { options } : {}) }, id);
-        this.c.history?.record(id, { kind: 'question-posted', leg, detail: { question: q.id, ...(url ? { url } : {}), ...(q.severity ? { severity: q.severity } : {}) } });
+        this.c.history.record(id, { kind: 'question-posted', leg, detail: { question: q.id, ...(url ? { url } : {}), ...(q.severity ? { severity: q.severity } : {}) } });
       }
     }
   }
@@ -186,12 +195,14 @@ export class Questions {
    * answer read from git — is an arrival recorded `arrival-unapplied` (R-BTN-39), raising
    * nothing; one that fails only because a claim holds the ticket defers (R-BTN-39), kept with
    * its ref for the hold's end. Any other type is recorded unapplied too: its reader arrives
-   * with B-146 and B-120. An attestation whose `ref` repeats an applied answer's is silent
+   * with B-146 and B-120; `std:git.evidence@1` is the confirmation's (R-BTN-10). An attestation whose `ref` repeats an applied answer's is silent
    * (R-BTN-39's idempotence — the same commit attested by two runs moves the ticket once).
    */
   attestations(repo: string, list: PostedAttestation[]) {
     for (const a of list) {
       const id = qualify(repo, a.ticket);
+      // R-BTN-10: the sync's evidence attestations are read by the confirmation (`Claims.judge`).
+      if (a.type === GIT_EVIDENCE_TYPE) continue;
       if (a.type !== DECISION_TYPE) {
         this.unapplied(id, null, { type: a.type, why: 'a type Baton does not read yet (R-BTN-191)' });
         continue;
@@ -296,21 +307,18 @@ export class Questions {
     }
     // §6.4: where the policy admits it — `inputs.answers: git` — an answer read from git binds;
     // under `attestation` it does not count (R-BTN-191).
-    if (who.by === 'sync' && this.c.answersFrom?.(repo) === 'attestation') {
+    if (who.by === 'sync' && this.c.answersFrom(repo) === 'attestation') {
       this.unapplied(id, leg, { why: 'the policy\'s inputs.answers is attestation: an answer in git does not count (R-BTN-191)' });
       return { reached: station };
     }
     // R-BTN-109: the station reached takes the answer as its entry, if it asks for anything.
-    for (const r of g.entry.get(option.reached) ?? []) {
-      if (r.output !== 'answer' || r.schema !== DECISION_TYPE) {
-        return bad(`${option.reached}'s entry asks for ${r.output} (${r.schema}); a person leg arrives with answer (${DECISION_TYPE}) alone`);
-      }
-    }
+    const unmetEntry = unmetAnswerEntry(g, option.reached);
+    if (unmetEntry) return bad(`${option.reached}'s entry asks for ${unmetEntry.output} (${unmetEntry.schema}); a person leg arrives with answer (${DECISION_TYPE}) alone`);
     // R-BTN-39: deferred, not refused, while held — an answer that has passed every other check
     // and fails only because a claim holds the ticket waits, kept with its ref, and is applied
     // when the hold ends if it still meets every other condition then (`applyPending`, the
     // alarm's tick after the hold ends); it raises nothing meanwhile.
-    if (this.c.isHeld?.(id)) {
+    if (this.c.isHeld(id)) {
       // The deferred answer waits with the question it was given — never another leg's.
       const mine = stored?.leg === leg ? stored : null;
       this.exec(
@@ -325,7 +333,7 @@ export class Questions {
         stored?.posted_at ?? this.c.now(), leg, option.id, option.reached, who.by, who.ref ?? null, this.c.now());
       return { reached: option.reached, deferred: true };
     }
-    this.settle(repo, id, g, leg, { id: option.id, reached: option.reached }, { by: who.by, ref: who.ref ?? null, expired: false });
+    this.settle(repo, id, g, leg, { id: option.id, reached: option.reached }, { by: who.by, ref: who.ref ?? null, expired: false, question: given });
     return { reached: option.reached };
   }
 
@@ -346,7 +354,7 @@ export class Questions {
       `SELECT ticket_id, pending_leg AS leg, pending_option AS option, pending_reached AS reached, pending_by AS by, pending_ref AS ref
         FROM ticket_questions WHERE pending_option IS NOT NULL ORDER BY pending_at, ticket_id`);
     for (const p of due) {
-      if (this.c.isHeld?.(p.ticket_id)) continue;
+      if (this.c.isHeld(p.ticket_id)) continue;
       this.exec(
         `UPDATE ticket_questions SET pending_leg = NULL, pending_option = NULL, pending_reached = NULL,
            pending_by = NULL, pending_ref = NULL, pending_at = NULL WHERE ticket_id = ?`, p.ticket_id);
@@ -358,7 +366,7 @@ export class Questions {
   }
 
   /** The leg's options: the question's when it has them, else each outcome under its own name. */
-  private optionsOf(g: Graph, leg: string, stored: QuestionRow | null): QuestionOption[] {
+  private optionsOf(g: Graph, leg: string, stored: Pick<QuestionRow, 'leg' | 'options_json'> | null): QuestionOption[] {
     const posted = stored != null && stored.leg === leg ? (JSON.parse(stored.options_json) as QuestionOption[]) : [];
     if (posted.length) return posted;
     return (g.legs.get(leg)?.to ?? []).map((reached) => ({ id: reached, reached }));
@@ -382,7 +390,7 @@ export class Questions {
        ORDER BY s.ticket_id`, now);
     let fired = 0;
     for (const d of due) {
-      if (this.c.isHeld?.(d.ticket_id)) continue;
+      if (this.c.isHeld(d.ticket_id)) continue;
       const where = this.where(d.ticket_id);
       if (!where) continue;
       if (where.station.next_leg == null) {
@@ -423,10 +431,19 @@ export class Questions {
   // ── the arrival itself ───────────────────────────────────────────────────────────────────
 
   /** Move the ticket along its person leg and close its question. The caller's transaction. */
-  private settle(repo: string, id: string, g: Graph, leg: string, option: { id: string | null; reached: string }, meta: { by: string; ref: string | null; expired: boolean }) {
+  private settle(repo: string, id: string, g: Graph, leg: string, option: { id: string | null; reached: string }, meta: { by: string; ref: string | null; expired: boolean; question?: string }) {
     const now = this.c.now();
     const path = [...(JSON.parse(this.rows<{ path: string }>('SELECT path FROM ticket_stations WHERE ticket_id = ?', id)[0]?.path ?? '[]') as { leg: string; reached: string }[]),
       { leg, reached: option.reached }];
+    if (!meta.expired && option.id != null) {
+      const version = this.rows<{ version: number }>(`SELECT c.version FROM courses c JOIN tickets t
+        ON t.repository_id = c.repository_id AND t.course_id = c.id WHERE t.id = ?`, id)[0]?.version ?? 0;
+      const run = this.rows<{ run: number }>('SELECT COALESCE(MAX(run), 0) + 1 AS run FROM leg_outputs WHERE ticket_id = ? AND leg = ?', id, leg)[0].run;
+      const answer: DecisionValue = { id: meta.question ?? '', leg, option: option.id, reached: option.reached };
+      this.exec(`INSERT INTO leg_outputs (ticket_id, leg, run, name, schema, value_json, course_version, leg_version, source, confirmed, recorded_at)
+        VALUES (?, ?, ?, 'answer', ?, ?, ?, ?, 'sync', 1, ?)`, id, leg, run, DECISION_TYPE, JSON.stringify(answer), version, g.legs.get(leg)!.version, now);
+      this.c.history?.record(id, { kind: 'outputs', leg, run, course_version: version, leg_version: g.legs.get(leg)!.version, detail: { names: ['answer'] } });
+    }
     // The legs leaving the outcome it reached, in the file's order: the ticket waits at the
     // station, `next_source: baton` (R-BTN-83), and the next snapshot places it properly.
     const next = [...g.legs.entries()].filter(([, l]) => l.from.includes(option.reached)).map(([name]) => name);
@@ -440,9 +457,11 @@ export class Questions {
                WHERE ticket_id = ?`, option.reached, JSON.stringify(path), path.length, g.toEnd.get(option.reached) ?? 0, next[0] ?? null, expiresAt, id);
     this.exec('DELETE FROM ticket_next_legs WHERE ticket_id = ?', id);
     for (const name of next) {
-      this.exec(`INSERT INTO ticket_next_legs (ticket_id, leg, state, ready_since) VALUES (?, ?, 'ready', ?)
-                 ON CONFLICT (ticket_id, leg) DO UPDATE SET state = 'ready', waiting_on = NULL, waiting_since = NULL, ready_since = excluded.ready_since`, id, name, now);
+      const wait = ticketInputs(this.c.store, id, g, name).wait;
+      this.exec(`INSERT INTO ticket_next_legs (ticket_id, leg, state, waiting_on, waiting_since, ready_since) VALUES (?, ?, ?, ?, ?, ?)`,
+        id, name, wait ? 'waiting' : 'ready', wait ?? null, wait ? now : null, wait ? null : now);
     }
+    this.c.contractWaits?.(repo, now, id);
     // The question closes — answered or expired — and the expiry and any deferred answer with
     // it. The row names the leg the answer actually ran: a person's leg need not be the queued
     // one (R-BTN-39), and the queued one's question is moot once the ticket has moved. A leg
@@ -455,16 +474,17 @@ export class Questions {
       id, leg, now, now, meta.by, option.id, meta.ref);
     if (meta.expired) {
       logEvent(this.c.store, now, 'question-expired', 'baton', { ticket: id, leg, reached: option.reached }, id);
-      this.c.history?.record(id, { kind: 'question-expired', leg, reached: option.reached, next_leg: next[0] ?? null });
+      this.c.history.record(id, { kind: 'question-expired', leg, reached: option.reached, next_leg: next[0] ?? null });
     } else {
       logEvent(this.c.store, now, 'question-answered', meta.by, { ticket: id, leg, option: option.id, answered_by: meta.by }, id);
-      this.c.history?.record(id, { kind: 'fact-arrival', leg, reached: option.reached, next_leg: next[0] ?? null, detail: { option: option.id, answered_by: meta.by, ...(meta.ref ? { ref: meta.ref } : {}) } });
-      this.c.history?.record(id, { kind: 'question-answered', leg, detail: { option: option.id, answered_by: meta.by } });
+      this.c.history.record(id, { kind: 'fact-arrival', leg, reached: option.reached, next_leg: next[0] ?? null, detail: { option: option.id, answered_by: meta.by, ...(meta.ref ? { ref: meta.ref } : {}) } });
+      this.c.history.record(id, { kind: 'question-answered', leg, detail: { option: option.id, answered_by: meta.by } });
     }
     if (next[0] === leg) this.exec('DELETE FROM ticket_questions WHERE ticket_id = ?', id);
-    this.c.queued?.(id);
-    this.c.reevaluate?.(id);
-    this.c.dispatch?.('sync', id);
+    if (next.length || g.ends.has(option.reached)) this.c.closeMissingNext(id, now);
+    this.c.queued(id);
+    this.c.reevaluate(id);
+    this.c.dispatch('sync', id);
   }
 
   // ── records that raise nothing (R-BTN-39) ───────────────────────────────────────────────
@@ -472,7 +492,7 @@ export class Questions {
   /** An arrival Baton does not apply: an event and a history row, never a refusal (G-BTN-75). */
   private unapplied(id: string, leg: string | null, detail: Record<string, unknown>) {
     logEvent(this.c.store, this.c.now(), 'arrival-unapplied', 'sync', { ticket: id, ...(leg ? { leg } : {}), ...detail }, id);
-    this.c.history?.record(id, { kind: 'arrival-unapplied', leg, detail });
+    this.c.history.record(id, { kind: 'arrival-unapplied', leg, detail });
   }
 
   /** The sync's invalid answer: dropped and logged `answer-invalid` (§6.4). */
@@ -481,6 +501,32 @@ export class Questions {
   }
 
   // ── reads ────────────────────────────────────────────────────────────────────────────────
+
+  /** S-BTN-197: the answer paths a policy change can remove. Unlike Needs you, an explicit
+   *  answer may name any person leg leaving the station. A live claim only defers an answer. */
+  answerableLegs(repository: string): { ticket_id: string; leg: string }[] {
+    const tickets = this.rows<{ ticket_id: string; course_id: string; station: string;
+      question_leg: string | null; options_json: string | null; answered_at: number | null }>(
+      `SELECT t.id AS ticket_id, t.course_id, s.station, q.leg AS question_leg, q.options_json, q.answered_at
+       FROM tickets t JOIN ticket_stations s ON s.ticket_id = t.id
+       LEFT JOIN ticket_questions q ON q.ticket_id = t.id
+       WHERE t.repository_id = ? AND NOT EXISTS (SELECT 1 FROM closed_tickets c WHERE c.ticket_id = t.id)
+       ORDER BY t.id`, repository);
+    const out: { ticket_id: string; leg: string }[] = [];
+    for (const t of tickets) {
+      const g = this.c.graph(repository, t.course_id);
+      if (!g) continue;
+      const station = resolveStation(g, t.station) ?? t.station;
+      const question = t.question_leg != null && t.options_json != null ? { leg: t.question_leg, options_json: t.options_json } : null;
+      for (const [leg, def] of g.legs) {
+        if (!def.person || !def.from.includes(station) || (t.question_leg === leg && t.answered_at != null)) continue;
+        if (this.optionsOf(g, leg, question).some(({ reached }) => !unmetAnswerEntry(g, reached))) {
+          out.push({ ticket_id: t.ticket_id, leg });
+        }
+      }
+    }
+    return out;
+  }
 
   /** Where the ticket is and what its course is, as the question's checks read it. */
   private where(id: string): { course: string; station: { station: string; next_leg: string | null } } | null {
@@ -494,7 +540,7 @@ export class Questions {
    *  The row's question is the leg's own: one a previous leg's answer closed names nothing here.
    *  B-133: each option carries its COMPUTED action — the station it reaches and the legs that
    *  leave it, person or runner, from the course graph — beside the packet's words. */
-  needsYou() {
+  needsYou(repository?: string) {
     const waiting = this.rows<{ ticket_id: string; leg: string; person_expires_at: number | null; course_id: string; repository_id: string; title: string;
       question_id: string | null; url: string | null; severity: string | null; options_json: string | null }>(
       `SELECT s.ticket_id, s.next_leg AS leg, s.person_expires_at, t.course_id, t.repository_id, t.title,
@@ -504,7 +550,8 @@ export class Questions {
               CASE WHEN q.leg = s.next_leg THEN q.options_json END AS options_json
        FROM ticket_stations s JOIN tickets t ON t.id = s.ticket_id LEFT JOIN ticket_questions q ON q.ticket_id = s.ticket_id
        WHERE s.next_leg IS NOT NULL AND (q.ticket_id IS NULL OR q.answered_at IS NULL OR q.leg != s.next_leg)
-       ORDER BY t.repository_id, s.ticket_id`);
+       ${repository === undefined ? '' : 'AND t.repository_id = ?'}
+       ORDER BY t.repository_id, s.ticket_id`, ...(repository === undefined ? [] : [repository]));
     const out: { ticket_id: string; leg: string; asks: string | null; title: string; question_id: string | null; url: string | null; severity: string | null; options: (QuestionOption & { action: string })[]; expires_at?: number }[] = [];
     for (const w of waiting) {
       const g = this.c.graph(w.repository_id, w.course_id);

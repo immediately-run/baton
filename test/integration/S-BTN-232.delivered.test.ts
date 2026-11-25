@@ -12,7 +12,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { CREATE_PR_COURSE, stationsPr, type PrGraph } from '../../src/defaults/course-pr';
 import type { RecordedLeg } from '../../src/defaults/pr-markers';
 import type { SourceTicket } from '../../src/defaults/tickets-markdown';
-import { advance, claimItem, claimRow, course, cutover, endClaim, Git, keyCall, observe, placed, register, rows, setAdminKeys, setClock, withCore } from '../helpers';
+import { advance, claimItem, claimRow, course, cutover, endClaim, evidenceFound, Git, keyCall, observe, placed, register, rows, setAdminKeys, setClock, withCore } from '../helpers';
 import { makeKey, type TestKey } from '../lib/sshKeys';
 
 const T0 = Date.parse('2026-11-17T09:00:00Z');
@@ -30,7 +30,10 @@ async function synced(id: string) {
   const legs = (json as { legs?: RecordedLeg[] }).legs ?? [];
   const st = stationsPr({ tickets: [source(id)], facts: [], closed: new Set(), graph: CREATE_PR_COURSE as unknown as PrGraph, baton: { legs } }).stations[id];
   git.place(id, st);
-  const posted = await git.post({ observation: json.observation });
+  // R-BTN-10: the sync attests each listed end's evidence; the delivered commit is in git.
+  const unconfirmed = (json as { unconfirmed?: { ticket: string; claim: number; evidence: string }[] }).unconfirmed ?? [];
+  const attestations = unconfirmed.flatMap((u) => evidenceFound(u.claim, u.evidence, u.ticket).attestations);
+  const posted = await git.post({ observation: json.observation, ...(attestations.length ? { attestations } : {}) });
   return { legs, st, posted };
 }
 const station = (local: string) => rows<{ station: string; next_leg: string | null }>('SELECT station, next_leg FROM ticket_stations WHERE ticket_id = ?', `docs:${local}`);
@@ -68,7 +71,10 @@ describe('S-BTN-232 a ticket already delivered', () => {
     // An outcome, not a failure (R-BTN-122): no failed attempt, no backoff, no hold.
     expect(await rows('SELECT status, failed_attempt, ended_at_sha, end_detail FROM claims WHERE id = ?', claim))
       .toEqual([{ status: 'completed', failed_attempt: 0, ended_at_sha: SHA, end_detail: DETAIL }]);
-    expect(await rows('SELECT 1 FROM ticket_blocks WHERE ticket_id = ?', 'docs:D-1')).toEqual([]);
+    // A later leg can carry a requirement without blocking this delivery or the owner question.
+    expect(await rows('SELECT leg, kind, ref FROM ticket_blocks WHERE ticket_id = ?', 'docs:D-1')).toEqual([
+      { leg: 'archive', kind: 'capability', ref: CAP },
+    ]);
     // Baton's record carries the station the run reached; the station function places the ticket.
     const { legs, st, posted } = await synced('D-1');
     expect(legs).toContainEqual(expect.objectContaining({ ticket: 'D-1', leg: 'implement', evidence: SHA, reached: 'delivered' }));
@@ -130,7 +136,7 @@ describe('S-BTN-232 a ticket already delivered', () => {
     });
   });
 
-  it('queues archive for a legacy owner confirmation when the course changes', async () => {
+  it.each(['owner', 'git'])('queues archive on upgrade only with an owner answer (legacy answer from %s)', async (source) => {
     const { archive: _archive, confirm, ...legs } = CREATE_PR_COURSE.legs;
     const { answer_source: _source, ...oldConfirm } = confirm;
     const { archived: _archived, ...stations } = CREATE_PR_COURSE.stations;
@@ -138,10 +144,22 @@ describe('S-BTN-232 a ticket already delivered', () => {
     expect((await git.post()).status).toBe(200);
     await delivered('D-1');
     expect((await synced('D-1')).posted.status).toBe(200);
-    expect((await answer('D-1', 'confirmed')).status).toBe(200);
+    if (source === 'owner') {
+      expect((await answer('D-1', 'confirmed')).status).toBe(200);
+    } else {
+      expect((await git.post({ attestations: [{ ticket: 'D-1', type: 'std:decision@1', ref: SHA,
+        value: { id: 'legacy-confirm', leg: 'confirm', option: 'confirmed', reached: 'confirmed' } }] })).status).toBe(200);
+    }
     expect(await station('D-1')).toEqual([{ station: 'confirmed', next_leg: null }]);
     git.registry = [course(5, 3, { course: CREATE_PR_COURSE })];
     expect((await synced('D-1')).posted.status).toBe(200);
+    if (source === 'git') {
+      expect(await station('D-1')).toEqual([{ station: 'delivered', next_leg: 'confirm' }]);
+      expect(await withCore((core) => core.questions.needsYou())).toContainEqual(expect.objectContaining({ ticket_id: 'docs:D-1', leg: 'confirm', asks: 'owner' }));
+      expect(await rows(`SELECT 1 FROM ticket_history WHERE ticket_id = 'docs:D-1' AND kind = 'question-answered'
+        AND json_extract(detail_json, '$.answered_by') = 'sync'`)).toHaveLength(1);
+      expect((await answer('D-1', 'confirmed')).status).toBe(200);
+    }
     expect(await station('D-1')).toEqual([{ station: 'confirmed', next_leg: 'archive' }]);
     const w = await archiveRunner();
     expect((await claimItem('vm-b', w.secret, { ticket_id: 'docs:D-1' })).json).toMatchObject({

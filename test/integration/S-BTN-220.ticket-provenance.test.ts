@@ -25,6 +25,7 @@ function pushOf(before: string, after: string, sender: number, login: string, pa
     ref: 'refs/heads/main',
     before,
     after,
+    forced: false,
     repository: { full_name: 'immediately-run/docs', id: 5 },
     pusher: { name: login, email: `${login}@users.noreply.github.com` },
     sender: { id: sender, login, type: 'User' },

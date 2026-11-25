@@ -1,47 +1,129 @@
-// generated archive entry
-import { execFileSync as execFileSync3 } from "node:child_process";
-import { mkdtempSync as mkdtempSync2, readdirSync as readdirSync2, rmSync as rmSync2, statSync, writeFileSync as writeFileSync2 } from "node:fs";
-import { tmpdir as tmpdir2 } from "node:os";
-import { join as join4 } from "node:path";
-import { pathToFileURL } from "node:url";
+// src/defaults/agent-words.ts
+function splitWords(command) {
+  const words = [];
+  const SHELL_SYNTAX = /* @__PURE__ */ new Set(["<", ">", ">>", "<<", "|", "||", "&&", ";", "&", "(", ")"]);
+  let word = "";
+  let started = false;
+  let quoted = false;
+  const take = () => {
+    if (!quoted && SHELL_SYNTAX.has(word)) {
+      throw new Error(
+        `agent_command has '${word}' as a word: the stub runs it with no shell, so redirections, pipes and lists are not executed \u2014 drop it (stdin is already closed for the agent) or quote it if the agent should receive it literally`
+      );
+    }
+    words.push(word);
+    word = "";
+    started = false;
+    quoted = false;
+  };
+  for (let i = 0; i < command.length; i++) {
+    const c = command[i];
+    if (c === " " || c === "	" || c === "\n") {
+      if (started) take();
+      continue;
+    }
+    started = true;
+    if (c === "'") {
+      const end = command.indexOf("'", i + 1);
+      if (end < 0) throw new Error(`agent_command has an unterminated single quote (at character ${i})`);
+      word += command.slice(i + 1, end);
+      quoted = true;
+      i = end;
+    } else if (c === '"') {
+      const open = i;
+      quoted = true;
+      for (i++; ; i++) {
+        if (i >= command.length) throw new Error(`agent_command has an unterminated double quote (at character ${open})`);
+        const d = command[i];
+        if (d === '"') break;
+        if (d === "\\" && i + 1 < command.length && '"\\$`'.includes(command[i + 1])) word += command[++i];
+        else if (d === "\\" && command[i + 1] === "\n") i++;
+        else word += d;
+      }
+    } else if (c === "\\") {
+      if (i + 1 >= command.length) throw new Error("agent_command ends in a backslash with nothing to escape");
+      word += command[++i];
+      quoted = true;
+    } else word += c;
+  }
+  if (started) take();
+  return words;
+}
+
+// src/defaults/dibber.ts
+var DIBBER_VERSION = "0.4.0";
+var DIBBER_PACKAGE = "@immediately-run/dibber";
+var VERSION = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.]{1,32})?$/;
+function dibberVersion(settings) {
+  const v = settings.dibber;
+  if (v == null) return DIBBER_VERSION;
+  if (typeof v !== "string" || !VERSION.test(v)) throw new Error(`.baton/baton.json's dibber is ${JSON.stringify(v)}, not a release version (such as "${DIBBER_VERSION}") \u2014 it pins @immediately-run/dibber, it never names a command`);
+  return v;
+}
+function dibberWords(settings, env = process.env) {
+  const host = env.BATON_DIBBER?.trim();
+  if (host) return splitWords(host);
+  return ["npx", "--yes", `${DIBBER_PACKAGE}@${dibberVersion(settings)}`];
+}
+
+// src/defaults/git.mjs
+import { execFile, execFileSync } from "node:child_process";
+
+// src/client/git-env.mjs
+var GIT_NONINTERACTIVE_ENV = {
+  GIT_TERMINAL_PROMPT: "0",
+  GIT_ASKPASS: "",
+  SSH_ASKPASS: "",
+  GIT_SSH_COMMAND: "ssh -o BatchMode=yes -o ConnectTimeout=20"
+};
+
+// src/defaults/git.mjs
+var GIT_TIMEOUT_MS = 3e4;
+var argv = (root, args) => root == null ? args : ["-C", root, ...args];
+var { GIT_SSH_COMMAND: defaultSsh, ...noPrompts } = GIT_NONINTERACTIVE_ENV;
+var limits = ({ timeoutMs = GIT_TIMEOUT_MS, cwd, env, maxBuffer = 16 << 20 }) => ({
+  cwd,
+  timeout: timeoutMs,
+  killSignal: "SIGKILL",
+  maxBuffer,
+  env: { ...process.env, LC_ALL: "C", ...noPrompts, ...env }
+});
+function sshProbe(root, args) {
+  let i = 0;
+  while (args[i] === "-c" || args[i] === "--config-env" || args[i] === "-C" || args[i]?.startsWith("--config-env=")) {
+    i += args[i].startsWith("--config-env=") ? 1 : 2;
+  }
+  return argv(root, [...args.slice(0, i), "config", "--get", "core.sshCommand"]);
+}
+function gitSync(root, args, limitsOpts, output) {
+  const opts = limits(limitsOpts);
+  const start = performance.now();
+  if (opts.env.GIT_SSH_COMMAND == null && opts.env.GIT_SSH == null) {
+    try {
+      execFileSync("git", sshProbe(root, args), { ...opts, stdio: ["ignore", "ignore", "pipe"] });
+    } catch (e) {
+      if (e.status !== 1) throw e;
+      opts.env.GIT_SSH_COMMAND = defaultSsh;
+    }
+  }
+  opts.timeout -= Math.ceil(performance.now() - start);
+  if (opts.timeout <= 0) throw Object.assign(new Error("git timed out before dispatch"), { code: "ETIMEDOUT" });
+  return execFileSync("git", argv(root, args), { ...opts, ...output });
+}
+function git(root, args, options = {}) {
+  const { input, stdio = [input == null ? "ignore" : "pipe", "pipe", "pipe"] } = options;
+  return gitSync(root, args, options, { encoding: "utf8", stdio, input });
+}
+var gitText = (root, ...args) => git(root, args).trim();
 
 // src/defaults/tickets-transaction.ts
 import { execFileSync as execFileSync2 } from "node:child_process";
-import { existsSync as existsSync3, lstatSync, mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { lstatSync, mkdirSync, mkdtempSync, readFileSync as readFileSync3, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join as join3 } from "node:path";
 
 // src/defaults/course-pr.ts
-var CREATE_SPEC_COURSE = {
-  start: "requested",
-  start_leg: "converse",
-  end: ["merged"],
-  // B-98: a specification is requested, not found — `baton request "<one sentence>" --course
-  // create-spec` files the ticket that starts it.
-  starts_from: "request",
-  short_waits: ["ci"],
-  stations: {
-    requested: { label: "Requested, no PR yet" },
-    "spec-open": { label: "Spec PR open" },
-    reviewed: { label: "Reviewed" },
-    adjudicated: { label: "Open findings adjudicated" },
-    merged: { label: "Merged" }
-  },
-  legs: {
-    converse: { from: ["requested"], to: "spec-open", label: "Design the specification with the owner" },
-    review: { from: ["spec-open"], to: "reviewed", max_runs: 4, label: "Adversarial review round" },
-    address: { from: ["reviewed"], to: "spec-open", max_runs: 3, label: "Address the blocking findings with the owner" },
-    adjudicate: { from: ["reviewed"], to: "adjudicated", label: "Reproduce the findings left open" },
-    merge: { from: ["reviewed", "adjudicated"], to: "merged", label: "Merge and close the ticket" }
-  }
-};
-var SPEC_BOUNDS = {
-  legs: { open: "converse", opened: "spec-open", back: "address", backTo: "spec-open" },
-  back: "address",
-  rounds: CREATE_SPEC_COURSE.legs.review.max_runs,
-  adjudicates: true,
-  gate: false
-};
+var CREATE_PR_ASK_DEADLINE_S = 3 * 60 * 60;
 
 // src/defaults/tickets-markdown.ts
 function parseFrontmatter(text) {
@@ -101,44 +183,10 @@ function resolveDelivered(shas, ref, checkout, run2) {
   });
 }
 
-// src/defaults/ticket-state.ts
-import { execFileSync } from "node:child_process";
-var CLOSE_TIMEOUT_MS = 12e4;
-var GIT_NONINTERACTIVE_ENV = {
-  GIT_TERMINAL_PROMPT: "0",
-  GIT_SSH_COMMAND: "ssh -o BatchMode=yes -o ConnectTimeout=20"
-};
-var exec = (cmd, args, cwd, opts = {}) => execFileSync(cmd, args, {
-  cwd,
-  encoding: "utf8",
-  timeout: opts.timeoutMs ?? CLOSE_TIMEOUT_MS,
-  killSignal: "SIGKILL",
-  ...opts.input != null ? { input: opts.input } : { stdio: ["ignore", "pipe", "pipe"] },
-  env: { ...process.env, ...GIT_NONINTERACTIVE_ENV, ...opts.env }
-}).trim();
-function bareTicketId(ticket) {
-  if (ticket.home && ticket.id.startsWith(`${ticket.home}:`)) return ticket.id.slice(ticket.home.length + 1);
-  const colon = ticket.id.indexOf(":");
-  return colon < 0 ? ticket.id : ticket.id.slice(colon + 1);
-}
-var DEFAULT_TICKETS_BRANCH = "main";
-function ticketsBranch(checkout, named, run2 = exec) {
-  const plain = (b) => typeof b === "string" && /^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(b) && !b.includes("..") && !b.endsWith("/") ? b : null;
-  const given = plain(named);
-  if (given) return given;
-  try {
-    const head = run2("git", ["symbolic-ref", "--short", "refs/remotes/origin/HEAD"], checkout).trim().replace(/^origin\//, "");
-    return plain(head) ?? DEFAULT_TICKETS_BRANCH;
-  } catch {
-    return DEFAULT_TICKETS_BRANCH;
-  }
-}
-
 // src/defaults/tickets-config.ts
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 var NUMBER = "\\d+";
-var GITHUB_PR = /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+$/;
 function readTicketSettings(root, where = root) {
   const path = join(root, ".baton", "baton.json");
   if (!existsSync(path)) throw new Error(`${where} has no .baton/baton.json \u2014 the ticket commands write the tickets a sync reads; run \`baton repo init\` there first`);
@@ -187,43 +235,6 @@ function prefixesOf(prefixes, legacy, allocating) {
   if (map[allocatingPrefix] == null) map[allocatingPrefix] = NUMBER;
   return map;
 }
-function idPattern(settings, prefix) {
-  const source = settings.prefixes[prefix] ?? NUMBER;
-  return new RegExp(`^${prefix}${source.includes("\\d") ? source : `${source}${NUMBER}`}$`);
-}
-function accepts(settings, id) {
-  const prefix = Object.keys(settings.prefixes).filter((p) => id.startsWith(p)).sort((a, b) => b.length - a.length)[0];
-  return prefix != null && idPattern(settings, prefix).test(id);
-}
-
-// src/defaults/tickets-file.ts
-var fenceOf = (text) => {
-  const m = /^---\r?\n([\s\S]*?)\r?\n---(?=\r?\n|$)/.exec(text);
-  return m ? { lines: m[1].split(/\r?\n/), rest: text.slice(m[0].length) } : null;
-};
-function setKey(text, key, value) {
-  const fence = fenceOf(text);
-  if (!fence) throw new Error(`${key}: the file has no frontmatter`);
-  const line = `${key}: ${value}`;
-  const i = fence.lines.findIndex((l) => new RegExp(`^${key}:`).test(l));
-  const lines = i < 0 ? [...fence.lines, line] : fence.lines.map((l, j) => j === i ? line : l);
-  return `---
-${lines.join("\n")}
----${fence.rest}`;
-}
-function addPr(text, url) {
-  const fence = fenceOf(text);
-  if (!fence) throw new Error("the ticket has no frontmatter to add a pull request to");
-  if (fence.lines.some((l) => l.includes(url))) return text;
-  const i = fence.lines.findIndex((l) => /^prs:(?:\s*\[\])?\s*$/.test(l));
-  if (i < 0) throw new Error("the ticket has no prs list to add to");
-  let end = i + 1;
-  while (end < fence.lines.length && /^\s+-\s+/.test(fence.lines[end])) end++;
-  const lines = end > i + 1 ? [...fence.lines.slice(0, end), `  - ${url}`, ...fence.lines.slice(end)] : [...fence.lines.slice(0, i), "prs:", `  - ${url}`, ...fence.lines.slice(i + 1)];
-  return `---
-${lines.join("\n")}
----${fence.rest}`;
-}
 
 // src/defaults/read-items.ts
 import { existsSync as existsSync2, readdirSync, readFileSync as readFileSync2 } from "node:fs";
@@ -236,13 +247,8 @@ function readItems(root, items = "tickets") {
 
 // src/defaults/tickets-transaction.ts
 var TICKET_TRIES = 6;
-var git = (root, ...a) => execFileSync2("git", ["-C", root, ...a], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, LC_ALL: "C" } }).trim();
-var today = () => (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+var git2 = gitText;
 var movedOnPush = (detail) => /non-fast-forward|fetch first|stale info/.test(detail);
-var detailOf = (e) => {
-  const err = e;
-  return typeof err?.stderr === "string" ? err.stderr : err?.stderr ? new TextDecoder().decode(err.stderr) : err?.message ?? String(e);
-};
 function ticketCommitMessage(message, trailers, requireTrailers = false) {
   const lines = trailers.trim();
   if (!lines) {
@@ -253,66 +259,36 @@ function ticketCommitMessage(message, trailers, requireTrailers = false) {
 
 ${lines}`;
 }
-function transact(root, io, describe, change) {
-  const log = io.log ?? ((l) => process.stdout.write(`${l}
-`));
-  const warn = io.warn ?? ((l) => process.stderr.write(`${l}
-`));
-  const remote = io.remote ?? "origin";
-  const branch = io.branch ?? ticketsBranch(root, null);
-  const trailers = (io.trailers ?? process.env.TICKET_TRAILERS ?? "").trim();
-  const requireTrailers = io.requireTrailers ?? process.env.TICKET_REQUIRE_TRAILERS === "1";
+function transact(root, branch, describe, change) {
+  const trailers = (process.env.TICKET_TRAILERS ?? "").trim();
+  const requireTrailers = process.env.TICKET_REQUIRE_TRAILERS === "1";
   for (let attempt = 1; attempt <= TICKET_TRIES; attempt++) {
-    git(root, "fetch", "-q", remote, branch);
+    git2(root, "fetch", "-q", "origin", branch);
     const dir = mkdtempSync(join3(tmpdir(), "baton-tickets-"));
     try {
-      git(root, "worktree", "add", "-q", "--detach", dir, "FETCH_HEAD");
+      git2(root, "worktree", "add", "-q", "--detach", dir, "FETCH_HEAD");
       const changed = change(dir);
       if ("existing" in changed) return changed.existing;
-      const { message, write, move } = changed;
-      const written = new Set(write.map((w) => w.path));
-      for (const m of move) {
-        mkdirSync(dirname(join3(dir, m.to)), { recursive: true });
-        if (written.has(m.to)) rmSync(join3(dir, m.from), { force: true });
-        else renameSync(join3(dir, m.from), join3(dir, m.to));
-      }
-      for (const w of write) {
-        mkdirSync(dirname(join3(dir, w.path)), { recursive: true });
-        writeFileSync(join3(dir, w.path), w.text);
-      }
-      git(dir, "--literal-pathspecs", "add", "-A", "--", .../* @__PURE__ */ new Set([...write.map((w) => w.path), ...move.map((m) => m.from)]));
-      const staged = (() => {
-        try {
-          git(dir, "diff", "--cached", "--quiet");
-          return false;
-        } catch {
-          return true;
-        }
-      })();
-      if (!staged) {
-        if (attempt === TICKET_TRIES) throw new Error(`${describe}: nothing to commit after ${TICKET_TRIES} tries`);
-        warn(`\u2026 ${describe}: nothing to commit \u2014 a peer landed the same change; retrying (${attempt}/${TICKET_TRIES})`);
-        continue;
-      }
-      git(dir, "commit", "-q", "-m", ticketCommitMessage(message, trailers, requireTrailers));
+      const { message, from, to, text } = changed;
+      mkdirSync(dirname(join3(dir, to)), { recursive: true });
+      writeFileSync(join3(dir, to), text, { flag: "wx" });
+      rmSync(join3(dir, from));
+      git2(dir, "--literal-pathspecs", "add", "-A", "--", from, to);
+      git2(dir, "commit", "-q", "-m", ticketCommitMessage(message, trailers, requireTrailers));
       try {
-        git(dir, "push", "-q", remote, `HEAD:refs/heads/${branch}`);
-        if (!io.quiet) log(`\u2713 ${message.split("\n")[0]} \u2014 pushed as ${git(dir, "rev-parse", "--short", "HEAD")}`);
-        return git(dir, "rev-parse", "HEAD");
+        git2(dir, "push", "-q", "origin", `HEAD:refs/heads/${branch}`);
+        return git2(dir, "rev-parse", "HEAD");
       } catch (e) {
-        const detail = detailOf(e);
+        const detail = String(e.stderr || e.message);
         if (!movedOnPush(detail)) {
           const why = detail.trim().split("\n").map((l) => l.trim()).filter((l) => l !== "" && !/^To /.test(l) && !/failed to push some refs/.test(l));
-          const refusal = new Error(`${describe}: the push was refused: ${why.join("; ") || "no reason given"}`);
-          refusal.detail = detail;
-          throw refusal;
+          throw new Error(`${describe}: the push was refused: ${why.join("; ") || "no reason given"}`);
         }
         if (attempt === TICKET_TRIES) throw new Error(`${describe}: push refused ${TICKET_TRIES} times: ${detail.trim().split("\n").at(-1)}`);
-        warn(`\u2026 ${describe}: ${remote}/${branch} moved; retrying on the new head (${attempt}/${TICKET_TRIES})`);
       }
     } finally {
       try {
-        git(root, "worktree", "remove", "--force", dir);
+        git2(root, "worktree", "remove", "--force", dir);
       } catch {
         rmSync(dir, { recursive: true, force: true });
       }
@@ -320,8 +296,6 @@ function transact(root, io, describe, change) {
   }
   throw new Error(`${describe}: no transaction attempt completed`);
 }
-var settingsAt = (dir, remote, branch) => readTicketSettings(dir, `${remote}/${branch}`);
-var acceptedList = (settings) => Object.keys(settings.prefixes).sort().map((p) => `${p}\u2026`).join(", ");
 function regularDirs(root, path, missingOk = false) {
   const parts = path.split("/");
   if (parts.some((part) => !part || part === "." || part === ".." || part.toLowerCase() === ".git")) throw new Error(`invalid ticket directory: ${path}`);
@@ -332,53 +306,192 @@ function regularDirs(root, path, missingOk = false) {
     if (!stat?.isDirectory()) throw new Error(`not a regular ticket directory: ${path}`);
   }
 }
-function archiveTicket(root, io, id, evidence) {
-  const { pr, delivered } = evidence;
-  if (pr != null && !GITHUB_PR.test(pr)) throw new Error(`--pr ${pr} is not a GitHub pull request URL`);
-  const date = io.date ?? today();
-  const remote = io.remote ?? "origin";
-  const branch = io.branch ?? ticketsBranch(root, null);
-  return transact(root, io, `${id} \u2192 done`, (dir) => {
-    const settings = settingsAt(dir, remote, branch);
-    if (!delivered && !accepts(settings, id)) throw new Error(`${id} is not a ticket id of this repository \u2014 its ids are ${acceptedList(settings)}`);
+function doneText(id, target, files, words) {
+  if (!/^[A-Za-z0-9]+-[A-Za-z0-9]+$/.test(id)) throw new Error(`${id}: invalid archive ticket id`);
+  const root = mkdtempSync(join3(tmpdir(), "baton-dibber-archive-"));
+  const selected = join3(root, "tickets", `${id}.md`);
+  try {
+    for (const f of files) {
+      if (!/\.mdx?$/i.test(f.path)) continue;
+      const dest = f.path === target ? selected : join3(root, "tickets", "source", f.path);
+      mkdirSync(dirname(dest), { recursive: true });
+      writeFileSync(dest, f.text);
+    }
+    execFileSync2(words[0], [...words.slice(1), "done", id, "--root", root], {
+      cwd: root,
+      timeout: 3e4,
+      stdio: ["ignore", "pipe", "pipe"],
+      env: { ...process.env, npm_config_ignore_scripts: "true" }
+    });
+    const text = readFileSync3(selected, "utf8");
+    const meta = parseFrontmatter(text);
+    if (meta?.status !== "done" || meta.id !== id) throw new Error(`${id}: Dibber did not mark the ticket done`);
+    return text;
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+function archiveTicket(root, branch, id, delivered) {
+  return transact(root, branch, `${id} \u2192 done`, (dir) => {
+    const settings = readTicketSettings(dir, dir);
     const items = (settings.items ?? "tickets").replace(/\/$/, "");
     regularDirs(dir, items, true);
-    const matches = readItems(dir, items).filter((f) => /\.mdx?$/i.test(f.path) && parseFrontmatter(f.text)?.id === id);
-    if (!matches.length) throw new Error(`${id}: no ${items}/${id}.mdx on ${remote}/${branch}`);
+    const files = readItems(dir, items);
+    const matches = files.filter((f) => /\.mdx?$/i.test(f.path) && parseFrontmatter(f.text)?.id === id);
+    if (!matches.length) throw new Error(`${id}: no ${items}/${id}.mdx on origin/${branch}`);
     if (matches.length !== 1) throw new Error(`${id}: archive cannot identify a single ticket file`);
-    let { path, text } = matches[0];
+    const { path, text } = matches[0];
     const archived = path.startsWith("archive/");
     const from = `${items}/${path}`;
     const to = `${items}/archive/${path}`;
-    if (delivered && delivered.path !== (archived ? `${items}/${path.slice("archive/".length)}` : from)) {
+    if (delivered.path !== (archived ? `${items}/${path.slice("archive/".length)}` : from)) {
       throw new Error(`${id}: archive requires the markdown source's current ticket path`);
     }
-    const shas = delivered ? resolveDelivered(delivered.shas, "HEAD", dir, (_cmd, args, cwd) => git(cwd, ...args)) : [];
+    const shas = resolveDelivered(delivered.shas, "HEAD", dir, (_cmd, args, cwd) => git2(cwd, ...args));
     const subject = `tickets: ${id} done (archived)`;
     const delivery = `Delivered by: ${shas.join(", ")}`;
+    const limitation = "Delivery evidence incomplete: the legacy end record was truncated; unrecorded commits are not listed.";
     if (archived) {
-      if (!delivered || parseFrontmatter(text)?.status !== "done") throw new Error(`${id} is archived (done)`);
-      const existing = git(dir, "--literal-pathspecs", "log", "-1", "--first-parent", "--no-renames", "--diff-filter=A", "--format=%H", "--", from);
+      if (parseFrontmatter(text)?.status !== "done") throw new Error(`${id} is archived (done)`);
+      const existing = git2(dir, "--literal-pathspecs", "log", "-1", "--first-parent", "--no-renames", "--diff-filter=A", "--format=%H", "--", from);
       if (existing) {
-        const [first, , third] = git(dir, "show", "-s", "--format=%B", existing).split("\n");
-        if (first === subject && third === delivery) return { existing };
+        const [first, , third, , note] = git2(dir, "show", "-s", "--format=%B", existing).split("\n");
+        if (first === subject && third === delivery && note === limitation === delivered.truncated) return { existing };
       }
       throw new Error(`${id}: the archive does not record this delivery`);
     }
     regularDirs(dir, dirname(to), true);
     if (lstatSync(join3(dir, to), { throwIfNoEntry: false })) throw new Error(`${id}: archive destination already exists`);
-    text = setKey(setKey(text, "status", "done"), "updated", date);
-    if (pr) text = addPr(text, pr);
-    const body = shas.length ? `
+    const frontmatter = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text)?.[1] ?? "";
+    if ((frontmatter.match(/^status:/gm) ?? []).length > 1) throw new Error(`${id}: duplicate status fields; archive refused`);
+    const message = `${subject}
 
-${delivery}` : pr ? `
+${delivery}${delivered.truncated ? `
 
-${pr}` : "";
-    return { message: `${subject}${body}`, write: [{ path: to, text: deepenRelativeLinks(text) }], move: [{ from, to }] };
+${limitation}` : ""}`;
+    const updated = doneText(id, path, files, delivered.dibber);
+    return { message, from, to, text: deepenRelativeLinks(updated) };
   });
 }
 function deepenRelativeLinks(text) {
   return text.replace(/\]\((\.\.?\/)/g, (_m, lead) => `](${lead === "./" ? "../" : "../../"}`);
+}
+
+// src/shared/schema.mjs
+var SCHEMA_MAX_BYTES = 32 * 1024;
+
+// src/shared/vocabulary.mjs
+var CAPABILITIES = [
+  "authentication",
+  // a signed-in product session (the OAuth round-trip is done)
+  "llm-call",
+  // a working provider round (key + transport, relayed or browser-direct)
+  "create-pr",
+  // a GitHub write identity (fork/branch/PR)
+  "drivable-browser"
+  // an agent-driven Chromium with network/console observation
+];
+var ROLES = {
+  "agent-venue": ["authentication", "llm-call", "create-pr", "drivable-browser"]
+};
+var RESOURCES = [
+  "none",
+  "terraform",
+  "npm-publish",
+  // A NEW package's first publish: the trusted-publisher binding on npmjs.com is set by a
+  // scope admin by hand. A version bump of an existing package is `npm-publish`, which the
+  // agent line holds (bump + merge; CI publishes through OIDC after the release approval).
+  "npm-scope-admin",
+  "mcp-chrome",
+  "local-host",
+  "real-iphone",
+  "gcloud-admin",
+  "github-admin",
+  // BATON_SPEC (2026-10-13): authority on the Cloudflare account behind
+  // baton.immediately.run — Workers, Durable Objects, DNS routes, Access, the plan.
+  "cloudflare-admin",
+  // BATON_SPEC: a session registered with Baton — a runner token for its host and a
+  // running sidecar. Agent-held once the fleet is provisioned (AGENT_HOLDS).
+  "baton-worker",
+  "human-operator",
+  // R3-671/672: the standing venue — a ROLE per the 2026-09-22 model; clause-valid
+  // during the sweep (items still naming it translate to capabilities).
+  "agent-venue"
+];
+var CLAUSE_NAMES = [.../* @__PURE__ */ new Set([...CAPABILITIES, ...Object.keys(ROLES), ...RESOURCES])];
+var AGENT_HOLDS = /* @__PURE__ */ new Set([...CAPABILITIES, "agent-venue", "mcp-chrome", "local-host", "npm-publish", "baton-worker", "none"]);
+
+// src/core/course.ts
+var VOCABULARY = /* @__PURE__ */ new Set([...Object.keys(ROLES), ...Object.values(ROLES).flat(), "human-operator", "none"]);
+var EXPIRES_AFTER_MAX = 30 * 86400;
+
+// src/core/validate.ts
+var REPOSITORY_SRC = "[a-z][a-z0-9-]{0,39}";
+var LOCAL_SRC = "[A-Za-z0-9][A-Za-z0-9._-]{0,63}";
+var REPOSITORY_ID = new RegExp(`^${REPOSITORY_SRC}$`);
+var LOCAL_ID = new RegExp(`^${LOCAL_SRC}$`);
+var TICKET_ID = new RegExp(`^(${REPOSITORY_SRC}):(${LOCAL_SRC})$`);
+var DEPENDENCY_ID = new RegExp(`^(?:${REPOSITORY_SRC}:${LOCAL_SRC}|${LOCAL_SRC})$`);
+var NAME = /^[a-z0-9][a-z0-9-]{0,63}$/;
+var HOLDING_TYPE = "[a-z][a-z0-9-]{0,31}";
+var HOLDING_VALUE = "[A-Za-z0-9:._/@-]{1,128}";
+var HOLDING = new RegExp(`^${HOLDING_TYPE}:${HOLDING_VALUE}$`);
+var REPORT_HORIZON_MS = 6 * 36e5;
+var NUM = "number";
+var BOOL = "boolean";
+var PR = "pr";
+var TEXT = "text";
+var COMMON = { pr: PR, exit_code: NUM, note: TEXT };
+var DETAIL_SCHEMAS = {
+  orient: { ...COMMON },
+  implement: { ...COMMON },
+  "local-verify": { ...COMMON, passed: BOOL },
+  "open-pr": { ...COMMON },
+  push: { ...COMMON, branch: TEXT, sha: TEXT },
+  "ci-wait": { ...COMMON, conclusion: TEXT },
+  "review-round": { ...COMMON, findings: NUM, blocking: NUM, should_fix: NUM, nit: NUM },
+  reviewer: { ...COMMON, agent: TEXT, model: TEXT, substituted_for: TEXT, findings: NUM, blocking: NUM },
+  "fix-findings": { ...COMMON, fixed: NUM, argued: NUM },
+  adjudicate: { ...COMMON, reproduced: BOOL },
+  merge: { ...COMMON, sha: TEXT },
+  reconcile: { ...COMMON, archived: NUM },
+  "status-write": { ...COMMON, status: TEXT, item: TEXT },
+  "decision-packet": { ...COMMON, item: TEXT },
+  other: { ...COMMON }
+};
+var CAPABILITY_NAME = new RegExp(`^(?:${NAME.source}|${HOLDING.source.slice(1, -1)})$`);
+var VALID_FOR = { default_s: 3600, state_s: 24 * 3600, measure_s: 31 * 24 * 3600 };
+
+// src/defaults/output-evidence.ts
+var MAX = 256 * 1024;
+
+// src/defaults/ticket-state.ts
+import { execFileSync as execFileSync3 } from "node:child_process";
+var CLOSE_TIMEOUT_MS = 12e4;
+var exec = (cmd, args, cwd, opts = {}) => cmd === "git" ? git(null, args, { ...opts, cwd, timeoutMs: opts.timeoutMs ?? CLOSE_TIMEOUT_MS }).trim() : execFileSync3(cmd, args, {
+  cwd,
+  encoding: "utf8",
+  timeout: opts.timeoutMs ?? CLOSE_TIMEOUT_MS,
+  killSignal: "SIGKILL",
+  ...opts.input != null ? { input: opts.input } : { stdio: ["ignore", "pipe", "pipe"] },
+  env: { ...process.env, ...GIT_NONINTERACTIVE_ENV, ...opts.env }
+}).trim();
+function bareTicketId(ticket) {
+  if (ticket.home && ticket.id.startsWith(`${ticket.home}:`)) return ticket.id.slice(ticket.home.length + 1);
+  const colon = ticket.id.indexOf(":");
+  return colon < 0 ? ticket.id : ticket.id.slice(colon + 1);
+}
+var DEFAULT_TICKETS_BRANCH = "main";
+function ticketsBranch(checkout, named, run2 = exec) {
+  const plain = (b) => typeof b === "string" && /^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(b) && !b.includes("..") && !b.endsWith("/") ? b : null;
+  const given = plain(named);
+  if (given) return given;
+  try {
+    const head = run2("git", ["symbolic-ref", "--short", "refs/remotes/origin/HEAD"], checkout).trim().replace(/^origin\//, "");
+    return plain(head) ?? DEFAULT_TICKETS_BRANCH;
+  } catch {
+    return DEFAULT_TICKETS_BRANCH;
+  }
 }
 
 // src/defaults/pr-archive.ts
@@ -389,43 +502,28 @@ function archiveClose(ctx, result) {
   }
   const end = ctx.previous_attempts?.find((p) => p.end_reason === "suspended:delivered" && p.legs.some((l) => l.reached === "delivered" && l.outcome === "finished"));
   const first = end?.ended_at_sha;
-  const commits = /^delivered at ([0-9a-f]{10}(?:, [0-9a-f]{10})*)(?:: |$)/.exec(end?.detail ?? "")?.[1]?.split(", ");
+  const detail = end?.detail ?? "";
+  const legacy = /^delivered at ((?:[0-9a-f]{10}, ){14}[0-9a-f]{10}), [0-9a-f]{6}…$/.exec(detail);
+  const commits = (legacy?.[1] ?? /^delivered at ([0-9a-f]{10}(?:, [0-9a-f]{10})*)(?:: |$)/.exec(detail)?.[1])?.split(", ");
   if (!end || end.ended_at == null || end.ended_at > answer.answered_at || !first || !/^[0-9a-f]{40}$/.test(first) || commits?.[0] !== first.slice(0, 10)) {
     throw new Error("archive requires the confirmed delivery's end evidence");
   }
   if (!ctx.ticket.path) throw new Error("archive requires a ticket file in git");
   const branch = ticketsBranch(ctx.checkout, ctx.default_branch);
-  return archiveTicket(ctx.checkout, { branch }, bareTicketId(ctx.ticket), {
-    delivered: { path: ctx.ticket.path, shas: [first, ...commits.slice(1)] }
+  const pin = ctx.signed_control?.agent_command ?? ctx.snapshot?.sha;
+  if (!pin || !/^[0-9a-f]{40}$/.test(pin)) throw new Error("archive requires its snapshot to read the Dibber pin");
+  const settings = JSON.parse(gitText(ctx.checkout, "show", `${pin}:.baton/baton.json`));
+  return archiveTicket(ctx.checkout, branch, bareTicketId(ctx.ticket), {
+    path: ctx.ticket.path,
+    shas: [first, ...commits.slice(1)],
+    truncated: legacy != null,
+    dibber: dibberWords(settings)
   });
 }
 
 // generated archive entry
-var GIT_BOUND_MS = 12e4;
-var GIT_ENV = { "GIT_TERMINAL_PROMPT": "0", "GIT_SSH_COMMAND": "ssh -o BatchMode=yes -o ConnectTimeout=20" };
-var gitRun = (cmd, args, opts = {}) => execFileSync3(cmd, args, { encoding: "utf8", timeout: GIT_BOUND_MS, killSignal: "SIGKILL", env: { ...process.env, ...GIT_ENV }, stdio: ["ignore", "pipe", "pipe"], ...opts });
-async function run(ctx) {
-  const sha = ctx.snapshot?.sha;
-  if (typeof sha !== "string" || sha === "") throw new Error("the leg has no snapshot to read its override at");
-  const readSha = typeof ctx.signed_control?.overrides === "string" && ctx.signed_control.overrides !== "" ? ctx.signed_control.overrides : sha;
-  const rel = ".baton/courses/create-pr/legs/archive.run.mjs";
-  if (gitRun("git", ["-C", ctx.checkout, "ls-tree", "--name-only", readSha, "--", rel]).trim() === "") return standard(ctx);
-  const dir = mkdtempSync2(join4(tmpdir2(), "baton-override-"));
-  try {
-    const file = join4(dir, "archive.run.mjs");
-    writeFileSync2(file, gitRun("git", ["-C", ctx.checkout, "show", readSha + ":" + rel], { maxBuffer: 67108864 }));
-    const mod = await import(pathToFileURL(file).href);
-    if (typeof mod.run !== "function") throw new Error(rel + " exports no run(ctx, standard)");
-    return await mod.run(ctx, standard);
-  } finally {
-    rmSync2(dir, { recursive: true, force: true });
-  }
-}
-async function standard(ctx) {
-  return { reached: "archived", next: null };
-}
-var closeCtx2 = (ctx) => ({ ...ctx, ...ctx.default_branch == null && typeof process.env.BATON_DEFAULT_BRANCH === "string" && process.env.BATON_DEFAULT_BRANCH !== "" ? { default_branch: process.env.BATON_DEFAULT_BRANCH } : {} });
-var close = (ctx, result) => archiveClose(closeCtx2(ctx), result);
+var run = () => ({ reached: "archived", next: null });
+var close = archiveClose;
 async function handoff() {
   return null;
 }
