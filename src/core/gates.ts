@@ -3,7 +3,7 @@
 // its mirror, and G-BTN-40 checks the two against each other. Everything else Baton says about
 // scheduling — the order, the expedite lane's bound, a course's advice — is advice and never
 // refuses (`advice-overridden`). No rule reads what a leg, a station or a tag means.
-import { capabilitiesOf, fitsTier } from '../shared/vocabulary.mjs';
+import { capabilitiesOf, fitsTier } from '../vendor/vocabulary.mjs';
 
 /** Who asks: the runner as its heartbeat declared it (§5, R-BTN-60). */
 export interface GateRunner {
@@ -126,7 +126,7 @@ export function claimHolds(c: { status: string; confirmed_at: number | null; fen
  * and rule 9 is not re-checked, so a course change never strands a claim halfway (R-BTN-22).
  * Rule 11 (R-BTN-178) holds at both: the seats other claims hold, never the asking one's own.
  */
-export function gatesFor(runner: GateRunner, ticket: GateTicket, leg: GateLeg, phase: Phase, facts: GateContext): GateVerdict {
+export function gatesFor(runner: GateRunner | null, ticket: GateTicket, leg: GateLeg, phase: Phase, facts: GateContext): GateVerdict {
   // Rule 1's blocks (R-BTN-75, R-BTN-78): an open dependency refuses a claim; an open decision on
   // the whole ticket or on the leg refuses a claim of it and an advance into it — never fails open.
   const blocks = facts.blocks ?? [];
@@ -140,49 +140,51 @@ export function gatesFor(runner: GateRunner, ticket: GateTicket, leg: GateLeg, p
   }
   if (facts.override?.hold) return refuse(3, 'held');
 
-  // Rule 7 (R-BTN-58): the key holds a grant for the ticket's repository.
-  const grant = runner.grants ? runner.grants[ticket.repository] ?? null : undefined;
-  if (grant === null) return refuse(7);
-
-  // Rule 4 (R-BTN-174): capabilities are matched by name against what the runner has for this
-  // repository — its declared holdings, minus what its grant does not admit (R-BTN-58), its
-  // declared `runner:` capabilities beside them (R-BTN-133). Nothing is derived: a capability
-  // a runner means to offer is one it declares. The leg's own `requires.capabilities` is rule
-  // 4's input beside the ticket's clause (R-BTN-120, B-86); both arrive expanded, capabilities
-  // only (§12.5), `human-operator` included as the literal R-BTN-121 compares — rule 6 is
-  // retired, so it is met by declaring it and granted like any capability (R-BTN-121 as
-  // amended).
-  const held = capabilitiesOf(runner.declared);
-  const granted = grant ? new Set(grant.capabilities) : null;
-  // R-BTN-58: a grant entry `<type>:*` admits every holding of that type.
-  const admits = (capability: string) => granted ? granted.has(capability) || granted.has(`${capability.split(':')[0]}:*`) : true;
-  // R-BTN-178: rule 11 reads the same set — every capability with a capacity in it holds a seat.
   const needs = new Set([...capabilitiesOf(ticket.requires), ...(leg.requires ?? [])]);
-  for (const need of needs) {
-    if (!held.has(need) || !(need.startsWith('runner:') || admits(need))) return refuse(4);
+  if (runner) {
+    // Rule 7 (R-BTN-58): the key holds a grant for the ticket's repository.
+    const grant = runner.grants ? runner.grants[ticket.repository] ?? null : undefined;
+    if (grant === null) return refuse(7);
+
+    // Rule 4 (R-BTN-174): capabilities are matched by name against what the runner has for this
+    // repository — its declared holdings, minus what its grant does not admit (R-BTN-58), its
+    // declared `runner:` capabilities beside them (R-BTN-133). Nothing is derived: a capability
+    // a runner means to offer is one it declares. The leg's own `requires.capabilities` is rule
+    // 4's input beside the ticket's clause (R-BTN-120, B-86); both arrive expanded, capabilities
+    // only (§12.5), `human-operator` included as the literal R-BTN-121 compares — rule 6 is
+    // retired, so it is met by declaring it and granted like any capability (R-BTN-121 as
+    // amended).
+    const held = capabilitiesOf(runner.declared);
+    const granted = grant ? new Set(grant.capabilities) : null;
+    // R-BTN-58: a grant entry `<type>:*` admits every holding of that type.
+    const admits = (capability: string) => granted ? granted.has(capability) || granted.has(`${capability.split(':')[0]}:*`) : true;
+    // R-BTN-178: rule 11 reads the same set — every capability with a capacity in it holds a seat.
+    for (const need of needs) {
+      if (!held.has(need) || !(need.startsWith('runner:') || admits(need))) return refuse(4);
+    }
+
+    // Rule 5: the caller passes the lower of the declared ceiling and the grant's max_tier.
+    if (!fitsTier(ticket.tier, runner.tier_ceiling, ticket.tiers)) return refuse(5);
+
+    // Rule 6 is retired (R-BTN-121 as amended): `human-operator` is a runner's own statement,
+    // checked by rule 4 like any capability — declared by that name and granted by that name.
+
+    const barred = new Set([...leg.bars, ...(phase === 'advance' ? facts.holderBars ?? [] : [])]);
+    if (runner.tags.some((t) => barred.has(t))) return refuse(8);
+
+    // R-BTN-106: the key that ran a leg this one names may not take it — at a claim or an advance.
+    const ran = new Set(facts.ranByKey ?? []);
+    if ((leg.noChainFrom ?? []).some((l) => ran.has(l))) return refuse('chain');
+
+    // R-BTN-107: a leg's isolation floor, against the runner's own word.
+    if (leg.isolation && (runner.isolation ?? 'process') !== leg.isolation) return refuse('isolation');
   }
-
-  // Rule 5: the caller passes the lower of the declared ceiling and the grant's max_tier.
-  if (!fitsTier(ticket.tier, runner.tier_ceiling, ticket.tiers)) return refuse(5);
-
-  // Rule 6 is retired (R-BTN-121 as amended): `human-operator` is a runner's own statement,
-  // checked by rule 4 like any capability — declared by that name and granted by that name.
-
-  const barred = new Set([...leg.bars, ...(phase === 'advance' ? facts.holderBars ?? [] : [])]);
-  if (runner.tags.some((t) => barred.has(t))) return refuse(8);
-
-  // R-BTN-106: the key that ran a leg this one names may not take it — at a claim or an advance.
-  const ran = new Set(facts.ranByKey ?? []);
-  if ((leg.noChainFrom ?? []).some((l) => ran.has(l))) return refuse('chain');
-
-  // R-BTN-107: a leg's isolation floor, against the runner's own word.
-  if (leg.isolation && (runner.isolation ?? 'process') !== leg.isolation) return refuse('isolation');
 
   // Rule `person` (R-BTN-116): a person's leg is answered by a person, never run — no runner may
   // claim it or advance into it, whatever else it holds.
   if (leg.person) return refuse('person');
 
-  if (phase === 'claim') {
+  if (phase === 'claim' && runner) {
     const declared = runner.courses.find((c) => c.repository === ticket.repository && c.course === ticket.course);
     if (!declared || declared.version < facts.minRunnerVersion) return refuse(9);
   }

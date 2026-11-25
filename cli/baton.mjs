@@ -22,7 +22,7 @@
 //                [--sync-workflow PATH|none] [--mirror-workflow PATH|none] [--ci-identity …]
 //                [--add-owner-key PUB[,…]] [--add-sync-key PUB[,…]] [--add-mirror-key PUB[,…]] [--remove-sync-key FP[,…]]
 //   baton admin -i KEY repo retire ID [--yes]
-//   baton admin -i KEY grant REPO --key PUB [--hostname H] --capabilities a,b [--max-tier T] [--max-claims N]
+//   baton admin -i KEY grant REPO --key PUB [--hostname H] --capabilities a,b [--max-tier T] [--max-claims N] [--deliver-interactions]
 //   baton admin -i KEY probe add --key PUB --label L
 //   baton admin -i KEY resource add NAME --scope account|service --schema FILE|JSON    (R-BTN-76)
 //   baton admin -i KEY instance add NAME --serves a,b --repositories x,y
@@ -44,7 +44,7 @@
 //                decision (R-BTN-75); `--on decision:*` is every decision waiting on a person
 //   baton admin -i KEY revoke FINGERPRINT                          baton admin -i KEY open
 //   baton admin -i KEY state      — what the dashboard draws, as JSON, read with the key (B-118)
-//   baton owner -i KEY grant REPO --key PUB [--hostname H] --capabilities a,b [--label L] [--max-tier T] [--max-claims N]
+//   baton owner -i KEY grant REPO --key PUB [--hostname H] --capabilities a,b [--label L] [--max-tier T] [--max-claims N] [--deliver-interactions]
 //   baton owner -i KEY revoke REPO FINGERPRINT
 //   baton owner -i KEY owners REPO (--add PUB | --remove FINGERPRINT)
 //   baton owner -i KEY sign [--message TEXT] [--repo DIR] -- <paths>…   (B-127: a commit signed
@@ -105,6 +105,11 @@
 //                — a person's answer to the ticket's queued person leg, a std:decision@1 (R-BTN-116);
 //                signed with an owner key of the repository or a human-only key; --ref names the
 //                answer for idempotence when it rode a commit (R-BTN-39)
+//
+//   baton queue add <repository>:<id>[@leg] | list | remove <repository>:<id> [--home DIR]
+//                — this host's local work queue for the runners on one home checkout (R-BTN-202):
+//                an order goes first through the ordinary claim while Baton answers, and runs
+//                its leg without a claim only while Baton is unreachable, reported on its return
 //
 //   baton repo sync [--root DIR] [--url URL] [--latest BRANCH] [--facts FILE] [--sync-key FILE] [--busy-retry S]
 //   baton repo init [--course C] [--agent opencode|claude-code] [--agent-command CMD] [--override LEG]…
@@ -393,7 +398,7 @@ export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? 
       throw new Error('baton admin repos | baton admin repo add|set|retire');
     }
     if (cmd === 'grant') {
-      const { flags, positional } = parseArgs(rest, [], GRANT_FLAGS, 1);
+      const { flags, positional } = parseArgs(rest, ['deliver-interactions'], GRANT_FLAGS, 1);
       return { method: 'POST', path: '/v1/admin/grants', body: grantBody(flags, readKey, { repository: repoOrHome(positional[0], home) }) };
     }
     if (cmd === 'probe' && rest[0] === 'add') {
@@ -507,7 +512,7 @@ export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? 
       return { method: 'GET', path: `/v1/owner/${encodeURIComponent(repoOrHome(positional[0], home))}/grants` };
     }
     if (cmd === 'grant') {
-      const { flags, positional } = parseArgs(rest, [], GRANT_FLAGS, 1);
+      const { flags, positional } = parseArgs(rest, ['deliver-interactions'], GRANT_FLAGS, 1);
       return { method: 'POST', path: `/v1/owner/${repoOrHome(positional[0], home)}/grants`, body: grantBody(flags, readKey, {}) };
     }
     if (cmd === 'revoke') {
@@ -791,6 +796,7 @@ function grantBody(flags, readKey, extra) {
     capabilities: list(flags.capabilities) ?? [], ...(flags['max-tier'] ? { max_tier: flags['max-tier'] } : {}),
     // R-BTN-4 (B-188): how many claims the key's runner may hold at once while claiming here.
     ...(flags['max-claims'] ? { max_claims: Number(flags['max-claims']) } : {}),
+    ...(flags['deliver-interactions'] ? { deliver_interactions: true } : {}),
   };
 }
 
@@ -987,11 +993,9 @@ export function policyDiff(oldDoc, newDoc) {
   return POLICY_KNOBS.filter((k) => canonical(knobOf(oldDoc, k)) !== canonical(knobOf(newDoc, k)));
 }
 
-/** `baton owner policy …`: show and diff read the signed policy read (R-BTN-189 — a deployment
- *  verifies its signature against the tenant key it pinned; the CLI shows the fields and the
- *  signature beside them), set and apply compare-and-set on the `--base` version the operator
- *  READ (never a version the CLI fetches itself: a fresh fetch would overwrite a concurrent
- *  change sight unseen, defeating the compare-and-set — round 1, finding 9; `show` names the
+/** `baton owner policy …`: show and diff read the policy, set and apply compare-and-set
+ *  on the `--base` version the operator READ (never a version the CLI fetches itself: a fresh
+ *  fetch would overwrite a concurrent change sight unseen — round 1, finding 9; `show` names the
  *  version), and the floor commands register and remove a deployment's floors. */
 async function policyMain(argv) {
   // `-i KEY` and `--url URL` may sit before the subcommand — `baton owner -i KEY policy show
@@ -1014,7 +1018,6 @@ async function policyMain(argv) {
     const out = await request('GET', `/v1/repositories/${encodeURIComponent(repo)}/policy`);
     if (out.status !== 200) return write(arrived(out.text)), 1;
     write(JSON.stringify(out.json));
-    process.stderr.write(`baton: verify ${out.json.repository}@${out.json.version} against your pinned tenant key (${out.json.kid}); the read lives until ${new Date(out.json.valid_until).toISOString()}\n`);
     return 0;
   }
   if (sub === 'diff') {
@@ -1235,11 +1238,17 @@ export async function main(argv) {
     const { homeMain } = await import('../scripts/baton-cli.mjs');
     return homeMain(argv.slice(1));
   }
-  if (argv[0] === 'run') {
+  if (argv[0] === 'run' || (argv[0] === 'runner' && argv[1] === 'start')) {
     // §6.13: the runner is TypeScript under src/runner; bundle it (a checkout runs the CLI with
     // its devDependencies), then run it in this process's stead.
     const { runMain } = await import('../scripts/baton-run.mjs');
-    return runMain(argv.slice(1));
+    return runMain(argv.slice(argv[0] === 'run' ? 1 : 2));
+  }
+  if (argv[0] === 'queue') {
+    // R-BTN-202 (B-248): this host's local work queue for the runners on one home — local
+    // files only, never a request to Baton.
+    const { queueCommand } = await import('../scripts/baton-run.mjs');
+    return queueCommand(argv.slice(1));
   }
   if (argv[0] === 'leg' && argv[1] === 'replay') {
     // §9.8 R-BTN-84: re-run one recorded leg run without a claim — the replay half of the

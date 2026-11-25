@@ -3,7 +3,7 @@
 // the rewrite; the bound is `roadmap-pr`'s ranking code in docs, and core counts `max_queue`
 // (R-BTN-79). Core's half: the default order applies — expedite, then resume before start
 // (`to_end`), rank, age, id — nothing is flagged, and a runner that claims against the order is
-// accepted and records the override. Runs on both hosts.
+// accepted without recording an override. Runs on both hosts.
 import { describe, it, expect, beforeEach } from 'vitest';
 import { claimItem, cutover, Git, placed, register, rows, setClock, runnerCall } from '../helpers';
 
@@ -24,7 +24,7 @@ beforeEach(async () => {
 });
 
 describe('S-BTN-22 review queue bound', () => {
-  it('core’s default order, nothing flagged; a claim against it is accepted and recorded', async () => {
+  it('core’s default order, nothing flagged; a claim against it is accepted without an override', async () => {
     const w = await register('vm-a');
     const res = await runnerCall('/v1/runner/recommendations?limit=50', { secret: w.secret });
     const recs = ((await res.json()) as { recommendations: { ticket_id: string; station: string; legs: string[]; flags: string[]; score: unknown }[] }).recommendations;
@@ -33,16 +33,16 @@ describe('S-BTN-22 review queue bound', () => {
     expect(recs.map((r) => [r.ticket_id, r.station, r.legs])).toEqual([
       ['docs:M-1', 'reviewed', ['merge']], ['docs:X-1', 'fixed', ['review']],
       ['docs:F-1', 'filed', ['implement']], ['docs:F-2', 'filed', ['implement']], ['docs:F-3', 'filed', ['implement']]]);
-    expect(recs.every((r) => r.flags.length === 0 && r.score === null)).toBe(true);
+    expect(recs.every((r) => r.flags.length === 0 && !('score' in r))).toBe(true);
     // ?limit= applies after the merge.
     const two = (await (await runnerCall('/v1/runner/recommendations?limit=2', { secret: w.secret })).json()) as { recommendations: unknown[] };
     expect(two.recommendations).toHaveLength(2);
     expect((await runnerCall('/v1/runner/recommendations?limit=0', { secret: w.secret })).status).toBe(400);
-    // A runner that starts a new ticket anyway is accepted, the order it went against recorded.
+    // A runner that starts a new ticket anyway is accepted, without a recorded override.
     const c = await claimItem('vm-a', w.secret, { ticket_id: 'docs:F-3' });
     expect(c.status).toBe(200);
-    expect(await rows(`SELECT json_extract(detail_json, '$.overridden[0].place') AS place FROM events WHERE kind = 'advice-overridden' AND claim_id = ?`, c.json.claim_id))
-      .toEqual([{ place: 5 }]);
+    expect(await rows(`SELECT 1 FROM events WHERE kind = 'advice-overridden' AND claim_id = ?`, c.json.claim_id))
+      .toEqual([]);
   });
 
   it('age breaks a tie of station and rank: the leg ready longest first, then the id', async () => {

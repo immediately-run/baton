@@ -7,10 +7,14 @@ order: 15
 
 A course is the route a ticket takes: its stations, and the legs an agent runs between them. A
 repository can write its own, as the docs repository did with `roadmap-pr`, but most need one of
-a handful of routes. Baton's CLI ships eight, and a repository adopts each with one command. They
-are specified in BATON_SPEC [R-BTN-131](../spec/BATON_SPEC/05-courses.md#sec-5-8) and started from the docs repository's skills. They assume
-no particular deployment: a factory whose guarantees rest on its own architecture, such as
-Fieldhouse, writes and keeps the courses that rely on it.
+a handful of routes. Baton's CLI ships eight, and a repository adopts each with one command.
+BATON_SPEC [R-BTN-131](../spec/BATON_SPEC/05-courses.md#sec-5-8) says what a standard course is
+and what binds every course; this page and each course's own files are the courses' contract.
+Each course's stations and edges are its course file: `.baton/courses/<course>/course.json` once
+scaffolded, and `src/defaults/` in the baton repository. They started from the docs repository's
+skills. They assume no particular deployment and run under every preset: a factory whose
+guarantees rest on its own architecture, such as Fieldhouse, writes and keeps the courses that
+rely on it.
 
 | course | what it does | legs | where it ends |
 |---|---|---|---|
@@ -42,7 +46,9 @@ Two things in `create-pr` run without an agent (2026-10-24):
   executable (126), a missing script, or a run longer than the gate's bound fails the leg with no
   marker, and the ticket goes back to the board as an environment failure rather than to `fix`
   (B-230). A `fix` after a red gate must push: one that leaves the PR branch where it was fails
-  its leg instead of sending the same tree back to the gate (B-231). The gate may run 30 times (and `fix` 30 with it) while the review
+  its leg instead of sending the same tree back to the gate (B-231) — unless the ticket's `repos:`
+  names another repository, whose PRs the stub cannot see. A `fix` run from `reviewed` may answer
+  the findings without a push. The gate may run 30 times (and `fix` 30 with it) while the review
   rounds stay at 3: the gate is deterministic and cheap, and spending retries there harms
   nothing the way a wasted review round does. A repository whose suite runs longer than the
   gate's bound raises it in its own copy of the leg script (`baton repo init --course create-pr
@@ -62,10 +68,13 @@ anyone else pushes is a push like any other and re-opens the gate. Nothing in gi
 owner's question either — no trailer, no comment line. The sync reads the branch's commits from
 the forge, or from the checkout's own git on a plain git repository. A PR in another repository
 (the ticket's `repos:` — every PR of a plain-git home's ticket) is gated by its own CI instead:
-every check the forge reports on its head green passes, any concluded red routes to `fix`, and
+every check the forge reports on its head green (`success`, `neutral` or `skipped`) passes, any
+concluded otherwise routes to `fix`, and
 while checks run (or none has reported yet) the round waits on `ci` — never on the owner. A
 ticket with PRs both at home and elsewhere passes only when the home marker and the other PRs'
-CI are both green. Only a ticket with several PRs at home, which the gate cannot choose between,
+CI are both green. With no PR branch at home and a `repos:` naming another repository, the stub
+runs nothing and leaves no marker: it suspends with `review` next, and the sync places the ticket
+from that CI. Only a ticket with several PRs at home, which the gate cannot choose between,
 waits on the owner as `run-tests-unreachable`, whose `skip` waives the gate for it.
 
 ## A ticket already delivered
@@ -81,6 +90,99 @@ evidence and the line as its detail, shown on the ticket's history. There the pe
 it at the end station `confirmed`; `filed` sends it back to `implement`. The agent's word alone
 never closes a ticket. The ticket's file still says what it said; `baton tickets done <ticket>`
 archives it as for any ticket closed by hand.
+
+## Work done outside Baton
+
+Any leg may be done by someone who never claims the ticket (BATON_SPEC
+[R-BTN-203](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-2)). A course models the ways its
+tickets move outside Baton as edges of its own graph: **fact legs** for the hand acts it
+recognises, and a **reconcile leg** for evidence it has to weigh. The PR courses below have both.
+The courses that commit to the default branch have neither yet, so their outside moves are not
+modelled. Each fact leg is a leg no runner claims, with one outcome, arriving when the sync finds
+its fact. Its `from` list is the whole of what that hand act can do:
+
+| course | fact leg | from → to | fact | next | `max_runs` |
+|---|---|---|---|---|---|
+| `create-pr` | `opened-by-hand` | `filed` → `pr-open` | `pr-opened` | `run-tests` | — |
+| `create-pr` | `reviewed-by-hand` | `pr-open`, `fixed`, `reviewed` → `reviewed` | `pr-verdict` | `merge` on approve, `fix` on changes | 3 |
+| `create-pr` | `fixed-by-hand` | `pr-open`, `reviewed`, `fixed` → `fixed` | `pr-pushed` | `run-tests` | 3 |
+| `create-pr` | `merged-by-hand` | `filed`, `pr-open`, `fixed`, `reviewed`, `adjudicated` → `merged` | `pr-merged` | — (an end) | — |
+| `review-pr` | `approved-by-hand` | `requested`, `changes-requested` → `approved` | `pr-verdict`, `verdict: approve` | — (an end) | — |
+| `create-spec` | `opened-by-hand` | `requested` → `spec-open` | `pr-opened` | `review` | — |
+| `create-spec` | `pushed-by-hand` | `reviewed` → `spec-open` | `pr-pushed` | `review` | 3 |
+| `create-spec` | `merged-by-hand` | `requested`, `spec-open`, `reviewed`, `adjudicated` → `merged` | `pr-merged` | — (an end) | — |
+
+- **Open world.** These legs are broad on purpose: a person can review, push or merge at almost
+  any point, and Baton can't stop them (values, #13). A merge from any station ends the ticket at
+  `merged`, whatever the verdict and whether the test gate ran. A factory that needs the gate and
+  the review enforced gates the merge at the forge (branch protection, a required check on Baton's
+  state, Fieldhouse's forge gate) or narrows these `from` lists in its own course file.
+- **A runner's act is never a hand act.** No hand-opened PR, review or push counts while the
+  repository's `runner_pushers` is unset. Once it's set, these don't count:
+  - PRs, verdicts and pushes by those logins;
+  - PRs, commits and verdicts Baton's record shows a claim of the ticket made;
+  - verdicts by the PR's author or a pusher of its head.
+
+  A hand verdict counts only if it is the head's latest verdict and newer than Baton's last move
+  of the ticket, so a runner's later review wins. A push counts only after a changes verdict. A
+  hand merge needs a merged PR in every repository the ticket names, and none open; a merge in only
+  some of them is evidence for the reconcile leg.
+- **A hand act is a run of its fact leg**, toward that leg's `max_runs`, not the runner leg's. Once
+  a fact leg's runs are used up, a further hand act is kept as evidence for the reconcile leg.
+- **A hand act seen while a claim runs isn't kept.** The next sync looks again once the claim
+  ends, so a runner's own pushes and verdicts during its claim never land late as hand acts. A
+  hand act on a held ticket is kept and applied when the hold lifts.
+- **Only the sync's own board** (its sync key or the CI identity) carries hand acts and evidence.
+  A runner's machine key can't.
+
+A repository changes which hand acts its course accepts in its own course file.
+
+## The reconcile leg
+
+Some evidence of outside work fits no fact leg: a pusher's merged PR or commit that names the
+ticket (`mention`), a PR merged where a repository's own course has no `merged-by-hand`
+(`merged-early`), or, where the policy refuses the sync's arrivals, a hand act no fact leg could
+take (`fact`). Baton keeps it, and the course's
+**reconcile leg** (`reconciles`) weighs it. Baton queues that leg in place of the queued one
+(BATON_SPEC [R-BTN-39](../spec/BATON_SPEC/01-what-baton-is.md#sec-1)), never in place of a
+person leg, a suspended leg, or a leg an owner's route, a retry or an expiry placed. The leg's
+`reconciles.to` maps every station it may conclude to the leg queued next:
+
+| course | reconcile leg | from | may conclude (→ next) | `max_runs` |
+|---|---|---|---|---|
+| `create-pr` | `reconcile` | `filed`, `pr-open`, `fixed`, `reviewed`, `adjudicated` | `pr-open` → `run-tests`; `fixed` → `run-tests`; `reviewed` → `merge`; `merged` (an end); `delivered` → `confirm` | 3 |
+| `review-pr` | `reconcile` | `requested`, `changes-requested` | `changes-requested` → `review`; `approved`, `concluded` (ends) | 3 |
+| `create-spec` | `reconcile` | `requested`, `spec-open`, `reviewed`, `adjudicated` | `spec-open` → `review`; `reviewed` → `merge`; `merged` (an end) | 3 |
+
+- **What the agent reads.** The ticket, its exit criteria, Baton's position, the leg it displaced,
+  and each piece of evidence its claim carries (`evidence: [{ref, kind}]`). It runs the exit
+  criteria's checks in its own checkout and writes nothing.
+- **Its answer is its last line:**
+  - `unchanged <reason>`: the ticket stays where it is, and the displaced leg is queued again.
+  - `at <station> <evidence>`: one of the stations in its table row, with that row's next leg,
+    including the station it left (so `at reviewed` from `reviewed` queues `merge`). A station
+    reached by a verdict or a merge names the review or the PR it found. The stub checks it as the
+    fact leg would: the PR is the ticket's, merged, on the default branch, or the verdict is on its
+    head. An unchecked `at merged` fails the leg.
+  - On `create-pr`, `delivered <sha|PR,…> <evidence>`: each named commit or PR must be on the
+    default branch, as the implement leg's `delivered` answer is. `confirm` follows, where a person
+    closes the ticket or sends it back to `implement`.
+- **What it decides.** Where the evidence shows the ticket really is: reviewed and approved
+  outside Baton, merged, or delivered by commits without a PR. It answers from the evidence, not
+  from what the course would have preferred (values, #13). `delivered` without a PR still goes
+  through a person's `confirm`, because no merge shows it; a merge it finds ends the ticket at
+  `merged`. A repository that wants a person to confirm every reconciled close drops `merged`
+  from its reconcile leg's `reconciles.to`.
+- **Runs.** A reconcile leg has three runs per ticket. After that, new evidence waits on the
+  ticket's page. Nothing yet lets a person settle it by hand, since the owner's route and adopt
+  (B-120) aren't built. Evidence counts as weighed only when the leg finishes with an answer; a
+  released or failed run leaves it to be weighed again. If something else moves the ticket while
+  `reconcile` is queued, Baton records the leg it displaces afresh at the new station.
+- **Configuring it.** It's a leg like any other: a repository edits its instructions, overrides
+  its `run` (*Overriding a leg*, below), or changes its `reconciles.to` in the course file.
+- **The other standard courses** (`bug-report`, `draft-ticket`, `decision`, `build-app`,
+  `spec-to-tickets`) have no reconcile leg yet. Evidence for their tickets waits on the ticket's
+  page until one is added.
 
 ## Starting a course from one sentence
 
@@ -99,9 +201,10 @@ npx baton request "Decide the export format, so two implementations agree" --cou
 `baton request "<one sentence>" --course <course> [--repo DIR] [--tier T] [--branch B]` files ONE
 ticket and pushes it:
 
-- `<items>/<ID>.mdx` — `items` from `.baton/baton.json` (default `tickets`), `ID` the next free
-  id under the repository's own prefix, across the folder and its `archive/` — with the sentence as `title` and `description`,
-  `course: <course>`, `status: available` and `tags: [request]`.
+- `<items>/<ID>.mdx` — `items` from `.baton/baton.json` (default `tickets`), `ID` the next number
+  of the repository's own prefix, asked of Baton (R-BTN-199); without Baton, the next free id
+  across the folder, its `archive/` and the open ticket branches — with the sentence as `title`
+  and `description`, `course: <course>`, `status: available` and `tags: [request]`.
 - One commit, `<ID>: request — <the sentence> — <course>`, pushed straight to the default branch —
   `--branch`, else the checkout's `origin/HEAD`, else `main`. It is made in a throwaway worktree at
   the freshly fetched head, so your branch, HEAD and working tree are never touched; and if another
@@ -113,6 +216,14 @@ ready, and the next claim starts the course — `converse` on `create-spec`, `de
 `build-app`, `decompose` on `spec-to-tickets`. Nothing else is needed to begin. It refuses a course the checkout's `.baton/baton.json`
 does not list (the sync would refuse the ticket), and a course without `starts_from: request`. The
 board's own form, for the owner role, is this same command.
+
+Where the default branch is protected and the forge refuses the push, the command pushes the same
+commit to `baton-request/<ID>` — a branch no course's branch pattern may match, so the request's
+PR is never one of the new ticket's PRs — opens a PR from it with your forge credential and
+prints its URL. It knows the refusal by the forge's own message, on GitHub, GitLab and Gitea
+(`--forge` names the forge when the remote's host does not). With no forge credential it prints
+the pushed branch and exits non-zero. On plain git, and for any other refusal, it reports git's
+own words and opens nothing.
 
 ## Adopting one
 
@@ -183,13 +294,26 @@ Three details carry weight:
   for the agent to read itself, and the ticket id, the leg and the checkout ride as the
   arguments after the message.
 - **The prompt spells the last-line contract.** A result-dependent leg's answer is read from the
-  agent's last line; the prompt says so in the words the machine enforces.
+  agent's last line; the prompt says so in the words the machine enforces. The read is tolerant
+  of prose and strict about the answer: scanning back from the last non-blank line, the first
+  line that begins with one of the leg's values as a whole word is the answer, with at most one
+  PR URL after it. A value word in the middle of a line is not an answer, and with no such line
+  the leg fails, naming the value wanted and the last line read.
+- **A claimed PR is checked.** `create-pr`'s `implement` verifies its PR on the forge before it
+  reports: an open PR on a branch the course's branch pattern maps to the ticket, in the checkout's
+  repository or one the ticket's `repos:` names, and the checkout's branch, when it feeds that PR,
+  at a head the PR contains. What cannot be verified fails the leg, naming what was looked for;
+  the stub never retries.
+- **A failed leg says what the agent last said.** A leg that fails after its agent ran names the
+  last lines of the agent's two streams, bounded, or that it printed nothing.
 - **The stub stops waiting at the agent's exit or its silence (B-108).** A finished agent that
   will not exit once cost its claim five hours. The stub's wait now ends at the earliest of the
   agent's exit, fifteen minutes of quiet on every activity signal it can see — the agent's
   stdout, the wrapper's log, the harness's own store — and five hours of the leg, its ceiling.
   Silence past the bound reads as a finished agent: the stub kills it and the stdout it received
-  is judged as any exit's is. A live signal anywhere keeps the wait going, however long. Both
+  is judged as any exit's is, and the leg's result records `agent_concluded_idle` or
+  `agent_concluded_absolute`; Baton is told nothing more than that the leg ended. A live signal
+  anywhere keeps the wait going, however long. Both
   bounds are constants of the leg scripts `repo init` writes; a course whose legs need longer
   raises them in its copy.
 
@@ -202,14 +326,22 @@ its harness, and with no command named, it is the command.
 
 ## How each course finds where a ticket is
 
-- **`create-pr`, `review-pr` and `create-spec` read the forge.** A ticket's PRs are the ones its branch pattern
-  or its `prs:` names. Each review's verdict is a review state or a comment whose first line is
-  `<!-- baton:verdict approve -->` or `<!-- baton:verdict changes -->`. `create-pr`'s adjudication
+- **`create-pr`, `review-pr` and `create-spec` read the forge.** A ticket's PRs are the ones its
+  `prs:` names plus the same-repository PRs, open or merged, whose head matches the course's
+  `branch_pattern` or `previous_branch_pattern`, in the home or a `repos:` repository, and no
+  other. A PR closed unmerged counts as none. Each review's verdict is the forge's review state or
+  a pusher's comment whose first line is
+  `<!-- baton:verdict approve -->` or `<!-- baton:verdict changes -->`: approve queues `merge`,
+  changes queue `fix`, and a push after it reaches `fixed`. `review` waits on `ci` until every
+  open PR's checks finish. `create-pr`'s adjudication
   and `review-pr`'s conclusion are comment lines of the same kind. The leg's `close` writes each
   of these lines from the agent's answer, so the agent never writes them itself. `create-pr`
   also reads its branch's commits for the run-tests gate's markers, each counted only as Baton
   recorded it, and takes the owner's answer after the third round from Baton, never from a line
   ([above](#create-prs-test-gate-and-its-owner-round)).
+- **`review-pr` reviews a PR named in `prs:`.** Each pusher's verdict is a round. After a
+  `changes` verdict the next round waits on the `author` until a push. When the PR closes or the
+  rounds run out, `conclude` is queued, and a pusher's `<!-- baton:concluded -->` is that leg.
 - **A ticket's PRs may be in other repositories.** A ticket that names repositories in its
   `repos:` (docs' roadmap items name the code repositories they change) gets one PR in each, on
   a branch of the same name; its home may get none. The sync reads every repository a live
@@ -278,7 +410,8 @@ The leg's script loads it from the claim's snapshot and calls it in place of its
 keeps its own `close`, so the line the course reads (the review's verdict, the adjudication, a
 marker) is always written the standard way, and the course places the ticket as it would without
 the override. Return the same shape `standard` returns; the file's header says what that is for
-the leg. It is loaded alone, so import only Node built-ins. A difference that is only prose
+the leg. The position it returns must be an edge of the course, or the runner refuses it before
+`close`. It is loaded alone, so import only Node built-ins. A difference that is only prose
 belongs in the leg's `.md` instead.
 
 ## Changing one

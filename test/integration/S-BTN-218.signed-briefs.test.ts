@@ -131,13 +131,12 @@ describe(`S-BTN-218 owner-signed briefs and the signed-control record`, () => {
     expect(detail.changes).toEqual([{ path: '.baton/baton.json', commits: [OTHER_SHA] }]);
     // §14 Needs you lists it — the state answer's own surface (round 1: the notice used to be
     // raised into a view nothing rendered; asserting the events table proved nothing).
-    // §14 Needs you lists it — the state answer's own surface, read as the dashboard does
+    // §14 Needs you lists it — the state answer's own surface, read as a terminal does
     // (round 1: the notice used to be raised into a view nothing rendered; asserting the
     // events table proved nothing about the view).
-    const session = await adminSession(admin);
-    const uiRes = await sessionCall(session, '/v1/ui/state');
-    expect(uiRes.status).toBe(200);
-    const state = (await uiRes.json()) as { needs_you: { unsigned_control: { repository_id: string; changes: { path: string; commits: string[] }[] }[] } };
+    const stateRes = await keyCall(admin, '/v1/admin/state');
+    expect(stateRes.status).toBe(200);
+    const state = stateRes.json as { needs_you: { unsigned_control: { repository_id: string; changes: { path: string; commits: string[] }[] }[] } };
     expect(state.needs_you.unsigned_control.map((u) => [u.repository_id, u.changes])).toEqual([['docs', [{ path: '.baton/baton.json', commits: [OTHER_SHA] }]]]);
     // Round 1 (re-firing): a later head move that changes nothing about the standing unsigned
     // change raises nothing new; the same path under a NEW unsigned commit does.

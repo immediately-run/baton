@@ -2,7 +2,7 @@
 // lease-lost, cannot-finish:transient. Must hold: held attempts-exhausted (the mirror's note and
 // the owner-inbox report are R3-1218's and the witness's); lifting the hold resets the count.
 import { describe, it, expect, inject, beforeEach } from 'vitest';
-import { beat, claimItem, cutover, endClaim, ORIGIN, ownerCall, payload, refresh, register, rows, setClock, syncCall, tick } from '../helpers';
+import { beat, claimItem, cutover, endClaim, ORIGIN, ownerCall, payload, refresh, register, rows, setClock, syncCall, tick, stateView } from '../helpers';
 
 const board = inject('board');
 const T0 = Date.parse('2026-10-13T12:00:00Z');
@@ -38,7 +38,7 @@ describe('S-BTN-6 poisoned item', () => {
 
     expect(await rows(`SELECT hold, hold_reason FROM ticket_overrides WHERE ticket_id = 'docs:R3-9001'`)).toEqual([{ hold: 1, hold_reason: 'attempts-exhausted' }]);
     expect(await rows(`SELECT kind FROM events WHERE kind IN ('attempts-exhausted', 'held')`)).toEqual([{ kind: 'attempts-exhausted' }, { kind: 'held' }]);
-    const state = (await (await ownerCall('/v1/ui/state')).json()) as { needs_you: { held_items: { ticket_id: string; hold_reason: string; attempts: { id: number }[] }[] } };
+    const state = (await stateView()) as { needs_you: { held_items: { ticket_id: string; hold_reason: string; attempts: { id: number }[] }[] } };
     expect(state.needs_you.held_items).toEqual([expect.objectContaining({ ticket_id: 'docs:R3-9001', hold_reason: 'attempts-exhausted' })]);
     expect(state.needs_you.held_items[0].attempts.map((x) => x.id)).toEqual([c1.claim_id, c2.claim_id, c3.claim_id]);
 

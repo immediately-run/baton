@@ -1,0 +1,122 @@
+---
+title: "B-302 — §4 against the code: the owner-state export's real sections (it carries no policy), the board post's stations, and a rule for the held post's 24-hour acceptance"
+id: B-302
+project: baton
+status: available
+updated: 2026-11-20
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1302
+tier: critical
+description: "R-BTN-88 lists nine exported tables the export does not carry, repository_policies among them, and omits two it does carry; so an imported Baton may hold no policy version of the source's. Section 4.4's schema omits the stations field the board post carries and the interim shape core still accepts. A forced post is held and accepted by the alarm after 24 hours, which no rule states. Section 4's heading still reads proposal. Verify what an import does to a repository's policy first, then bring R-BTN-88, section 4.4 and R-BTN-11 and the code together."
+topics:
+  - baton
+  - spec
+  - security
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** three places where §4 and the code disagree, each older than the spec
+simplification and left by its fix round
+([the review](../docs/review/spec-simplification-review-2026-11-19.mdx), *Where the spec and
+the code disagree*). Read in the code on 2026-11-20. The first may be more than a wording
+gap: R-BTN-88 says an export carries every policy version and that import refuses an export
+holding none, and the export's section list has no policy table at all.
+
+**Spec:** [BATON_SPEC §4.8](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-8) ([R-BTN-88](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-8)), [§4.4](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-4), [§4.3](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-3) ([R-BTN-11](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-3)), [§12.8](../spec/BATON_SPEC/12-security.md#sec-12-8) ([R-BTN-188](../spec/BATON_SPEC/12-security.md#sec-12-8), [R-BTN-189](../spec/BATON_SPEC/12-security.md#sec-12-8),
+[R-BTN-185](../spec/BATON_SPEC/12-security.md#sec-12-8)), [§13](../spec/BATON_SPEC/13-data-model.md#sec-13), [§15](../spec/BATON_SPEC/15-verification.md#sec-15) ([S-BTN-50](../spec/BATON_SPEC/15-verification.md#scenarios)).
+
+## The gaps
+
+| # | Rule | The spec says | The code does |
+|---|---|---|---|
+| 1 | R-BTN-88, *Format* | `sections` holds, beside the tables the code exports, `ticket_stations` with the live tickets' position rows and their `claim_legs`, `capability_capacity`, `check_runners`, `mcp_keys`, `instance_settings`, unexpired `registration_tokens`, open `conditions`, `ticket_timers` and every `repository_policies` version | `SECTIONS` is fourteen tables: `repositories`, `repository_owners`, `credentials`, `sync_keys`, `runner_grants`, `runners`, `owner_bars`, `ticket_overrides`, `closed_tickets`, `external_resources`, `resource_instances`, `instance_serves`, `couriers`, `instance_readings` (`src/core/ownerState.ts:35-51`), plus `ticket_history`, `leg_outputs` and `leg_run_inputs` with `--with-history` (`:55-59`). None of the nine is there; `couriers` and `instance_readings` are, and R-BTN-88 lists readings under *Not exported* |
+| 2 | R-BTN-88, *Import* | import refuses an export whose policy versions do not chain from version 1 or that holds no policy | `repository_policies`, `policy_floors` and `human_keys` are named nowhere in `ownerState.ts`. A repository with no policy row is given version 1 from a preset by `Policies.ensure` (`src/core/policy.ts:580-593`) |
+| 3 | §4.4, the schema | the post carries `tickets`, `closed`, `attestations`, `course_data` | `BoardPayload` also has `stations` (`src/core/board.ts:147`), and `checkPayload` still accepts an interim shape, `state.items` and `ready`, "until R3-1233" (`board.ts:290-292`) |
+| 4 | R-BTN-11 | a `force` post is refused `snapshot-rejected` and held for the owner; the head stands | also: the hold is one `held_snapshots` row per sha with a deadline 24 hours after its first post (`HELD_AUTO_ACCEPT_MS`, `src/core/baton.ts:51`, `:1688-1697`); the alarm sets `accepted_at` when it passes (`src/core/claims.ts:2594-2596`), and the next force post of that sha then becomes the head. `POST /v1/ui/board/accept` accepts earlier. No rule gives the number or the clock |
+| 5 | §4's heading | "4. Tickets, syncs and the board *(proposal)*" (`04-tickets-syncs-board.md:5`) | the section is the built design |
+
+## Plan
+
+1. **Row 2 first: find out what an import does to policy, with a test.** On both hosts: a
+   source repository on the `protected` preset with a floor and a human key; freeze, seal,
+   export, import into an empty Baton; read `GET …/policy` there. Three outcomes, and the PR
+   states which it found:
+   - the import carries the policy by a path not in `SECTIONS`: then rows 1 and 2 are wording,
+     and R-BTN-88 names that path;
+   - the imported repository has the seed preset, no floors and no human key: this is a
+     security finding, since moving a tenant silently replaces a protected policy with the
+     default and drops every floor. Stop, tell the owner with the test's output, and fix it in
+     this ticket: `repository_policies` (every version, chained), `policy_floors` and
+     `human_keys` join the export, import validates the chain and refuses an export with a
+     repository and no policy, as the rule already says;
+   - the import fails: say how, and fix as above.
+2. **Row 1: one list.** For each of the nine tables decide with the code, not the rule: a
+   table that holds owner state a move must not lose (`capability_capacity`,
+   `instance_settings`, the policy tables of step 1, `ticket_stations` and the position rows,
+   if they are not rebuilt from the first post) joins `SECTIONS` with its validation in
+   `ownerState.ts`; a table of a design that is not built (`check_runners`, `mcp_keys`,
+   `registration_tokens`, `ticket_timers`, `conditions` if open conditions are not owner
+   state) leaves R-BTN-88 for its proposal. `couriers` goes with B-285 and B-67;
+   `instance_readings` is either exported, and R-BTN-88's *Not exported* loses "readings", or
+   dropped from `SECTIONS`. After the PR the rule's list and `SECTIONS` are equal, and a unit
+   test compares them by reading the rule's list from the section file, so they cannot drift.
+3. **Row 3.** §4.4's schema gains `stations` with its shape and the rule that reads it
+   (R-BTN-70). The interim shape: R3-1233 is done or it is not; if every poster sends the
+   normative shape, delete the branch from `checkPayload` with a test that the old shape is
+   `invalid-params`; if one still sends it, name it in §16 as legacy with its ticket.
+4. **Row 4: state the clock, or remove it.** B-77 rewrites how a held post is accepted (its
+   *Why*: the 24-hour acceptance "could rewind the head by clock"). Until B-77 lands, R-BTN-11
+   says what is built: held per sha, accepted by an administrator on the dashboard or by the
+   alarm 24 hours after the first post, the head moving at the next post of that sha. The
+   sentence "Ordering never depends on a clock" in the same rule is then false as written and
+   is reworded to what it means: which of two posts is newer never depends on a clock. Whether
+   an unattended acceptance should exist at all is B-77's question and the owner's; this
+   ticket only stops the rule being silent about it. `held_snapshots` gets its §13 row in
+   B-297.
+5. **Row 5.** Drop "*(proposal)*" from the heading; `npm run spec:index`.
+6. **Spec mechanics.** History entry with `Rules changed:` R-BTN-88, R-BTN-11; `npm run
+   spec:impact` over both ids and the terms `export`, `import`, `held`, `snapshot-rejected`.
+7. **Tests.** Step 1's round trip, as cases of S-BTN-50. Step 2's list comparison. Step 3's
+   refusal or its legacy note. Row 4 has a test already if S-BTN-13's or R3-1212's cases cover
+   the 24 hours; name it in the PR, or add the case: a held sha is not the head at 23 hours 59
+   minutes and is accepted by the alarm at 24.
+
+### Trust
+
+New inputs: sections of the import file, if step 1 adds the policy tables. An import is an
+administrator's request into an empty Baton (R-BTN-88), and its rows are data the
+administrator carries from another instance: each goes through the write path's validation,
+the policy versions through `policy.ts`'s document check and hash chain, and a floor or a
+human key is imported only for a repository the same file imports. The file's digest proves it
+was not altered after export, not that its source was honest: an administrator importing a
+file is trusted as the administrator is. The risk this ticket exists to remove is the
+opposite direction: an import that loses authority state without saying so. Step 1 is run
+against test instances only; reading the reference deployment's export needs an administrator
+key the owner supplies, and this ticket changes no live policy, floor or key.
+
+### Invariants
+
+- BATON_SPEC [R-BTN-188](../spec/BATON_SPEC/12-security.md#sec-12-8): every policy change needs an approver as the list stood. An import
+  writes the source's versions as they were, with their hashes and `changed_by`; it adds no
+  version of its own and seeds none over them.
+- BATON_SPEC [R-BTN-189](../spec/BATON_SPEC/12-security.md#sec-12-8): a floored guarantee is never broken by a change. After an import
+  every floor of the source is in force, or the import was refused.
+- BATON_SPEC [R-BTN-185](../spec/BATON_SPEC/12-security.md#sec-12-8): a repository's `human_key` survives a move, or the gates that need it
+  would have no key to open them ([R-BTN-188](../spec/BATON_SPEC/12-security.md#sec-12-8), *No gate without a key to open it*).
+- BATON_SPEC [R-BTN-33](../spec/BATON_SPEC/01-what-baton-is.md#sec-1): filter fields only. No table added to the export holds a ticket's
+  body, a note or a PR list.
+- BATON_SPEC [R-BTN-11](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-3): per repository, a snapshot is accepted only on ancestry and a newer
+  observation. Step 4 changes the rule's words, not the compare-and-set.
+- Validate before you write: every imported row passes `src/core/validate.ts` or the import
+  is refused whole, in its one transaction.
+
+## Status
+
+_filed 2026-11-20._ From the adversarial review of PR #299 (the spec simplification of
+2026-11-19): A2-5, A2-6 and the fix round's list for §4. Related: B-77 (held posts), B-297
+(§13 and §14), B-293 (the policy document), B-285 and B-67 (couriers), B-173 (retirement).

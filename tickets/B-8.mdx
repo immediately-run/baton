@@ -3,7 +3,7 @@ title: "B-8 — Baton registration tokens and API keys beside SSH keys"
 id: B-8
 project: baton
 status: available
-updated: 2026-11-03
+updated: 2026-11-23
 repos:
   - baton
 tags:
@@ -36,7 +36,7 @@ Registration tokens let the owner scope what such a session may become; R-BTN-15
 ### What to build
 
 1. **Tokens.** `baton owner token create --repo <id> --role runner [--capabilities …]
-   [--max-tier <t>] [--ttl <d>] [--uses <n>]` and `baton owner token revoke`, in a new
+   ~~[--max-tier <t>]~~ [--ttl <d>] [--uses <n>]` and `baton owner token revoke`, in a new
    migration adding `registration_tokens`. `runner` is the only role: there is no `courier` role
    and no `--asks` (a forge courier registers through `baton owner courier add`, R-BTN-115).
    `--uses` defaults to 1, at most 100; TTL defaults to 7 days, at most 30. Shown once as
@@ -87,3 +87,9 @@ _(2026-10-31: minting registration tokens is an `approvers.members` action (R-BT
 _(2026-11-02: the spec restructure's part 2 (B-166, the PR `baton-spec-restructure-p2`) confirms this ticket's reading: there is no `courier` role at all (B-159); a runner that delivers `forge-check` is a runner whose grant role the policy admits (R-BTN-171).)_
 
 _(2026-11-03: R-BTN-47's *Retirement* (B-173's spec half) reaches the store this ticket builds — registration tokens: retirement exhausts the repository's tokens without revoking the credentials they registered. Whichever of this ticket and B-173 lands second builds that step and adds its S-BTN-198 case.)_
+
+_(2026-11-20: the spec simplification of 2026-11-19 (baton#299; `spec/BATON_SPEC_HISTORY.md`, that date) moved the unbuilt parts of the design this ticket builds out of the section files, with their rule ids, to proposal pages: registration tokens, grant acceptance and a key's span are part 5 of [the checks-and-executors proposal](../spec/proposals/checks-and-executors.md), with their tables and routes under "Registration tokens" and "Grant acceptance and the sync flag" in [the tables-and-routes proposal](../spec/proposals/data-model-and-api.md). Each rule keeps its id and a line in its section, which links the page. The pull request that builds this ticket moves the rules it builds back into the section files, and the scenarios and gates it makes pass back into [the verification section](../spec/BATON_SPEC/15-verification.md#sec-15), in the same change. The plan above is unchanged.)_
+
+_(2026-11-20: rules re-read: R-BTN-117, R-BTN-146)_
+
+_2026-11-23 — tiers retired (spec/retire-tiers: [BATON_SPEC §6.6](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-6) gate 5, [R-BTN-66](../spec/BATON_SPEC/01-what-baton-is.md#sec-1)): the struck tier clauses are gone from the spec — no ticket tier, runner ceiling, grant `max_tier`, ladder, `ready_by_tier` or `?tier=`. Build the rest without them._

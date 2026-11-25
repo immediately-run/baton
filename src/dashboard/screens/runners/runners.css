@@ -1,0 +1,69 @@
+/* runners.css — the runner screens' own pieces (B-211): the card's lines, chips and lease bar,
+   and the timeline. Tokens only; state is a shape and a word before it is a colour. */
+.runners-sum { color: var(--mut); font-size: 13px; margin: 0 0 6px; }
+.runner-card { gap: 9px; }
+.runner-one { max-width: 720px; margin-bottom: 18px; }
+.runner-line, .runner-note { margin: 0; font-size: 12.5px; color: var(--mut); overflow-wrap: anywhere; }
+.runner-note { color: var(--fg); }
+.runner-reap { color: var(--bad); }
+.runner-dead { border-color: var(--line2); background: var(--sunk); }
+.runner-report { display: flex; flex-direction: column; gap: 3px; font-size: 12.5px; }
+
+.chips { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px; }
+.chip { font: 11.5px/1.5 var(--mono); padding: 0 6px; border: 1px dashed var(--line2); border-radius: 999px; color: var(--mut); overflow-wrap: anywhere; }
+.chip-on { border-style: solid; color: var(--fg); }
+.chip-mark { color: var(--ok); font-family: var(--sans); }
+.chips-none { margin: 0; font-size: 12.5px; }
+
+.claim-block { display: flex; flex-direction: column; gap: 6px; padding: 9px 10px; border: 1px solid var(--line); border-radius: var(--radius-s); background: var(--sunk); }
+.runner-dead .claim-block { background: var(--panel); }
+.claim-line { margin: 0; font-size: 13px; overflow-wrap: anywhere; }
+.lease { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--mut); }
+.lease-bar { position: relative; flex: 1 1 80px; height: 6px; border-radius: 3px; background: var(--line); overflow: visible; }
+.lease-fill { height: 100%; border-radius: 3px; background: var(--barline); }
+.lease-now { position: absolute; top: -3px; width: 2px; height: 12px; background: var(--fg); }
+.lease-lapsed .lease-fill { background: var(--bad); }
+.lease-words { white-space: nowrap; }
+
+.window-picker { display: inline-flex; gap: 8px; align-items: baseline; font-size: 13px; }
+.window-picker a { padding: 2px 8px; border: 1px solid var(--line); border-radius: 999px; text-decoration: none; color: var(--mut); }
+.window-picker a.on { border-color: var(--fg); color: var(--fg); font-weight: 600; }
+
+.tl { display: flex; flex-direction: column; gap: 10px; }
+.tl-box { border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); padding: 8px; overflow-x: auto; }
+.tl-svg { display: block; width: 100%; min-width: 640px; height: auto; }
+.tl-lane { fill: var(--sunk); }
+.tl-tick line { stroke: var(--line2); stroke-width: 1; stroke-dasharray: 2 3; }
+.tl-tick text, .tl-now { font: 10px var(--mono); fill: var(--mut); }
+.tl-now { fill: var(--link); }
+.tl-bar, .tl-seg { cursor: pointer; }
+.tl-bar rect { fill: var(--bar); stroke: var(--barline); stroke-width: 1; }
+.tl-bar text { font: 10.5px var(--mono); fill: var(--fg); pointer-events: none; }
+.tl-end-running rect { stroke: var(--ok); stroke-width: 1.5; }
+.tl-end-silent rect { fill: transparent; stroke: var(--warn); stroke-width: 1.5; stroke-dasharray: 4 2; }
+.tl-end-reaped rect { fill: transparent; stroke: var(--bad); stroke-width: 2; }
+.tl-end-suspended rect { stroke-dasharray: 1 2; }
+.tl-end-done rect { fill: transparent; stroke: var(--ok); }
+.tl-seg rect { fill: var(--clay); }
+.tl-seg-open rect { fill: transparent; stroke: var(--clay); stroke-width: 1.5; }
+.tl-seg-failed rect { fill: var(--bad); }
+.tl-seg-failed path { stroke: var(--panel); stroke-width: 1.4; fill: none; }
+.tl-bar:focus-visible rect, .tl-seg:focus-visible rect, .tl-bar[aria-pressed="true"] rect, .tl-seg[aria-pressed="true"] rect { stroke: var(--fg); stroke-width: 2.5; }
+.tl-bar:focus, .tl-seg:focus { outline: none; }
+.tl-legend { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: var(--mut); }
+.tl-key-failed { color: var(--bad); }
+.tl-key.tl-end-reaped { color: var(--bad); }
+.tl-key.tl-end-silent { color: var(--warn); }
+.tl-key.tl-end-running, .tl-key.tl-end-done { color: var(--ok); }
+.tl-panel { border: 1px solid var(--line2); border-radius: var(--radius-s); background: var(--panel); padding: 6px 12px; }
+.tl-hint { margin: 0; font-size: 12.5px; }
+.tl-nested { padding-left: 14px; color: var(--mut); }
+
+@media (max-width: 560px) {
+  /* The phone's timeline is the table (B-211 item 3). */
+  .tl-box, .tl-legend, .tl-hint { display: none; }
+  .window-picker { flex-wrap: wrap; }
+}
+
+.runner-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 14px; align-items: start; }
+@media (max-width: 420px) { .runner-cards { grid-template-columns: minmax(0, 1fr); } }

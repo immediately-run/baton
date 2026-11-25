@@ -1,0 +1,102 @@
+---
+title: "B-295 — One name for a leg's deadline: the course validator accepts deadline_s, as the spec says, and no longer max_duration"
+id: B-295
+project: baton
+status: available
+updated: 2026-11-20
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1295
+tier: routine
+description: "R-BTN-167 names a leg's deadline deadline_s. src/core/course.ts's validator has max_duration in LEG_KEYS and refuses deadline_s as an unknown field; src/core/claims.ts arms the claim's deadline from it. A course written from the spec is refused, and one written from the code contradicts the spec. Accept deadline_s, refuse max_duration by name, and rename the internal field."
+topics:
+  - baton
+  - courses
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** BATON_SPEC [R-BTN-167](../spec/BATON_SPEC/07-conditions.md#sec-7-5) and [§5.2](../spec/BATON_SPEC/05-courses.md#sec-5-2)'s field table name the field `deadline_s` (60 to
+604,800 seconds). `LEG_KEYS` in `src/core/course.ts` lists `max_duration` and not `deadline_s`,
+so the validator bounds `max_duration` (line 283), refuses it on a person leg (line 352), and
+refuses a course file that says `deadline_s` as carrying an unknown field. The deadline itself
+is built: `claims.ts` arms `deadline_at` from the leg's `maxDuration` at the `advance` (its
+comment: "`deadline_s`, the file's `max_duration`"), and `conditionTypes.ts` already calls it
+`deadlineS`. No shipped course in `src/defaults/courses/` uses either name; four test files use
+`max_duration`. Listed in
+[the review](../docs/review/spec-simplification-review-2026-11-19.mdx), *Where the spec and the
+code disagree*. The same sentence names `isolation: "session"`, which the validator also
+accepts and the spec's course file does not list: that field is B-70's, not this ticket's.
+
+**Spec:** [BATON_SPEC §5.2](../spec/BATON_SPEC/05-courses.md#sec-5-2) ([R-BTN-69](../spec/BATON_SPEC/05-courses.md#sec-5-2)), [§7.5](../spec/BATON_SPEC/07-conditions.md#sec-7-5) ([R-BTN-167](../spec/BATON_SPEC/07-conditions.md#sec-7-5), [R-BTN-90](../spec/BATON_SPEC/07-conditions.md#sec-7-5)), [§5.7](../spec/BATON_SPEC/05-courses.md#sec-5-7) ([R-BTN-64](../spec/BATON_SPEC/05-courses.md#sec-5-7)),
+[§15](../spec/BATON_SPEC/15-verification.md#sec-15) ([S-BTN-52](../spec/BATON_SPEC/15-verification.md#scenarios), [S-BTN-222](../spec/BATON_SPEC/15-verification.md#scenarios), [G-BTN-80](../spec/BATON_SPEC/15-verification.md#gates)).
+
+## Plan
+
+1. **Find the files in use.** A course file reaches Baton with a repository's sync and is
+   validated each time, so what matters is the course files on each registered home's default
+   branch. Grep them for `max_duration`: a local read on 2026-11-20 found none under `.baton/`
+   in `baton`, `fieldhouse` or `docs`, and none in `src/defaults/courses/`. Repeat it at each
+   home's head when the PR is opened and put the result in the PR; it decides step 3.
+2. **Validator.** `LEG_KEYS` gains `deadline_s` with `max_duration`'s bound and its person-leg
+   refusal; `graph.ts`'s leg carries `deadlineS`; `claims.ts` and `conditionTypes.ts` read
+   that one field.
+3. **The old name.** If step 1 still finds no course file using it: `max_duration` leaves
+   `LEG_KEYS`, and a file carrying it is refused as R-BTN-69 refuses any unknown key, the
+   message naming `deadline_s`. If one does: the validator reads `max_duration` as `deadline_s`
+   for one release, logs `deprecated-field` once a day per course (the existing
+   `src/core/deprecated.ts`), refuses a file that carries both, and this ticket's Status names
+   the follow-up that removes the read. A refused course file stops that course's tickets from
+   moving until it is fixed, which is why the branch is chosen by the read and not assumed.
+4. **Spec, same PR.** No rule changes if step 3 takes the first branch. If it takes the second,
+   R-BTN-69 gains the one sentence for the deprecated name, with the history entry and `Rules
+   changed: R-BTN-69`; `spec/proposals/courses.md`'s list of refused old fields keeps
+   `max_duration` either way. B-60 and B-67 each name `max_duration` in their plans: a dated
+   note in each says this ticket took the rename. `docs/compared-to-temporal.mdx` line 36
+   says `max_duration`; it changes with the code.
+   *(Added 2026-11-20, from the fix round of PR #299.)* The places that state the name, each
+   read that day, so the PR leaves none behind: the spec's `05-courses.md:87` (R-BTN-69's leg
+   table), `07-conditions.md:26-27` (the "Not built either" entry, which this ticket deletes),
+   `:125`, `:261-263` and `:279-280` (R-BTN-167, R-BTN-90), and S-BTN-52's row; in the code,
+   the validator (`src/core/course.ts:66`, `:283`, `:352`), the graph (`src/core/graph.ts:42`,
+   `:108`, `:117`) and the comments that already say `deadline_s` for the file's
+   `max_duration` (`src/core/claims.ts:1478`, `src/core/attempts.ts:14`,
+   `src/core/conditionTypes.ts:163`, `:196`). `spec/proposals/courses.md` says the validator
+   refuses a leg's `isolation`, while `course.ts:294` accepts `"session"`: that sentence is
+   B-70's to correct, and B-298 lists it.
+5. **Tests.** `course.test.ts`, `condition-types.test.ts` and the two S-BTN-222 tests move to
+   `deadline_s`. New cases in `course.test.ts`: `deadline_s` accepted at 60 and 604,800 and
+   refused at 59, 604,801 and on a person leg; `max_duration` refused naming `deadline_s` (or
+   read and logged, by step 3); both together refused. S-BTN-52's test arms a deadline from a
+   course file that says `deadline_s`.
+
+### Trust
+
+One input changes its name: a leg's `deadline_s` in a course file, written by anyone who can
+push the course's source (reach 5: a pusher can already shorten or remove a deadline) and
+validated by `src/core/course.ts` each time a sync posts the file, before anything is stored. The
+bound is unchanged, so no new value becomes acceptable. The deadline protects Baton's capacity
+and nobody's secrets: a file that drops it leaves the lease and the owner's Stop (R-BTN-9,
+R-BTN-119). Step 1 reads other repositories' course files and edits none: a course file in
+another home that needs the new name is that home's change, by its own ticket.
+
+### Invariants
+
+- BATON_SPEC [R-BTN-69](../spec/BATON_SPEC/05-courses.md#sec-5-2): an unknown course field is refused. After this ticket the set of
+  accepted leg fields is the spec's for the deadline.
+- BATON_SPEC [R-BTN-90](../spec/BATON_SPEC/07-conditions.md#sec-7-5): a deadline fires once per run, as a failed attempt followed by a fenced
+  reap. The arming code changes only the field it reads; [S-BTN-52](../spec/BATON_SPEC/15-verification.md#scenarios) and [G-BTN-80](../spec/BATON_SPEC/15-verification.md#gates) stay green.
+- BATON_SPEC [R-BTN-64](../spec/BATON_SPEC/05-courses.md#sec-5-7): in-flight tickets survive a course change. The rename is of a field,
+  not of a station or a leg, so no claim's `station` or `leg` is rewritten and an armed
+  `deadline_at` stays as armed.
+- BATON_SPEC [R-BTN-116](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-4): a person leg carries no deadline; the refusal moves to the new name.
+- One clock (CLAUDE.md, R-BTN-32): the deadline is computed from `this.now`, as today.
+
+## Status
+
+_filed 2026-11-20._ From the spec simplification review of 2026-11-19, *Where the spec and the
+code disagree* (PR #299). Related: B-60 and B-67 (written when `max_duration` was to be read as
+a timer and then refused), B-70 (the leg's `isolation` field).

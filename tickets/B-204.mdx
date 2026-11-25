@@ -3,14 +3,14 @@ title: "B-204 — The root read and the session's actions: GET /v1/repositories 
 id: B-204
 project: baton-ui-v2
 status: available
-updated: 2026-11-09
+updated: 2026-11-23
 repos:
   - baton
 tags:
   - roadmap-item
 order: 1203
 tier: judgement
-description: "The second API half of BATON-UI-V2: the two reads the shell itself needs. GET /v1/repositories (repo.list) answers the caller's repositories — every registered one for an administrator, the key's own for an owner — each with head, mode, tiers, weight, courses, the sidebar's and strip's counts (running, ready, needs_you, runners alive and total, discrepancies of 7 days) and the exclusive goal if any, plus the session's role at the top level. GET /v1/actions (actions.list) answers a dashboard session its own registry entries with their ui, so the shell draws controls from it and nothing else. Every registry entry a session may call carries ui.view naming its screens from src/core/screens.ts (B-193's table), and check:actions fails a view that names no screen or sits on an entry no session can call. Requires: B-191, B-193, B-25, B-55."
+description: "The second API half of BATON-UI-V2: the two reads the shell itself needs. GET /v1/repositories (repo.list) answers the caller's repositories — every registered one for an administrator, the key's own for an owner — each with head, mode, ~~tiers,~~ weight, courses, the sidebar's and strip's counts (running, ready, needs_you, runners alive and total, discrepancies of 7 days) and the exclusive goal if any, plus the session's role at the top level. GET /v1/actions (actions.list) answers a dashboard session its own registry entries with their ui, so the shell draws controls from it and nothing else. Every registry entry a session may call carries ui.view naming its screens from src/core/screens.ts (B-193's table), and check:actions fails a view that names no screen or sits on an entry no session can call. Requires: B-191, B-193, B-25, B-55."
 topics:
   - baton
 owns: {}
@@ -50,7 +50,7 @@ The §14 rows first, then the code.
    allowed names, so the front, the router (B-221) and the check read one list.
 2. **`GET /v1/repositories`** (`repo.list`, read): callers an administrator key, an owner key,
    and `{principal: "session", roles: ["administrator", "owner"], scope: "instance"}`. Rows: the
-   registry row's `id`, `github`, `forge`, `web_base`, `default_branch`, `weight`, `tiers`,
+   registry row's `id`, `github`, `forge`, `web_base`, `default_branch`, `weight`, ~~`tiers`,~~
    `courses` (ids and versions), `head: {sha, received_at, observation}`, `mode` (`shadow` or
    `cut-over`, R-BTN-28), `running` (live claims), `ready` (ready tickets), `needs_you` (open
    conditions and queued person legs, R-BTN-163 — until B-57 lands this counts conditions only,
@@ -141,3 +141,9 @@ _2026-11-09 — revised after the second review: `screens.ts` moved to B-193; `s
 `runners_total` and `discrepancies_7d` added so one read feeds the sidebar and the strip;
 `ui.view` placed only on entries whose routes exist, the rest by their builders; B-55 added for
 the conditions count; the ETag sentence dropped (B-205 covers every session read)._
+
+_(2026-11-20: the spec simplification of 2026-11-19 (baton#299; `spec/BATON_SPEC_HISTORY.md`, that date) moved the unbuilt parts of the design this ticket builds out of the section files, with their rule ids, to proposal pages: the registry and what is generated from it, MCP's delegated keys, sign-in with owners' sessions, and the screens are parts 1 to 4 of [the people-and-dashboard proposal](../spec/proposals/people-and-dashboard.md), which names this ticket. Each rule keeps its id and a line in its section, which links the page. The pull request that builds this ticket moves the rules it builds back into the section files, and the scenarios and gates it makes pass back into [the verification section](../spec/BATON_SPEC/15-verification.md#sec-15), in the same change. The plan above is unchanged.)_
+
+_(2026-11-20: rules re-read: R-BTN-129, R-BTN-130, R-BTN-155)_
+
+_2026-11-23 — tiers retired (spec/retire-tiers: [BATON_SPEC §6.6](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-6) gate 5, [R-BTN-66](../spec/BATON_SPEC/01-what-baton-is.md#sec-1)): the struck tier clauses are gone from the spec — no ticket tier, runner ceiling, grant `max_tier`, ladder, `ready_by_tier` or `?tier=`. Build the rest without them._

@@ -3,7 +3,7 @@ title: "B-25 — Baton action registry and MCP endpoint: one authorize behind ev
 id: B-25
 project: baton
 status: available
-updated: 2026-11-03
+updated: 2026-11-23
 repos:
   - baton
 tags:
@@ -17,12 +17,11 @@ owns: {}
 prs: []
 depends_on:
   - B-24
-  - B-23
 ---
 
 **Brief:** the owner, 2026-10-17, asked for one registry of the actions an authenticated user can take, the same whether the call comes through Baton's REST API, the CLI or an agent's MCP integration. B-24 specified it (baton#47).
-**Spec:** [BATON_SPEC §11.3](../spec/BATON_SPEC/11-people.md#sec-11-3): [R-BTN-129](../spec/BATON_SPEC/11-people.md#sec-11-3) (the action registry) and [R-BTN-130](../spec/BATON_SPEC/11-people.md#sec-11-3) / [R-BTN-154](../spec/BATON_SPEC/11-people.md#sec-11-3)
-(Baton's MCP endpoint); [§12.1](../spec/BATON_SPEC/12-security.md#sec-12-1) (principals), [§12.2](../spec/BATON_SPEC/12-security.md#sec-12-2) (destructive actions), [§11.4](../spec/BATON_SPEC/11-people.md#sec-11-4) ([R-BTN-155](../spec/BATON_SPEC/11-people.md#sec-11-4):
+**Spec:** [BATON_SPEC §11.3](../spec/BATON_SPEC/11-people.md#sec-11-3): [R-BTN-129](../spec/BATON_SPEC/11-people.md#sec-11-3) (the action registry) and [R-BTN-130](../spec/BATON_SPEC/11-people.md#sec-11-3)
+(Baton's MCP endpoint; R-BTN-154, the second id on that heading, is retired); [§12.1](../spec/BATON_SPEC/12-security.md#sec-12-1) (principals), [§12.2](../spec/BATON_SPEC/12-security.md#sec-12-2) (destructive actions), [§11.4](../spec/BATON_SPEC/11-people.md#sec-11-4) ([R-BTN-155](../spec/BATON_SPEC/11-people.md#sec-11-4):
 confirmed dashboard actions; the Resolve page), [§7.3](../spec/BATON_SPEC/07-conditions.md#sec-7-3) ([R-BTN-163](../spec/BATON_SPEC/07-conditions.md#sec-7-3): `owner.resolve`,
 `condition.list`), [§11.1](../spec/BATON_SPEC/11-people.md#sec-11-1) [R-BTN-159](../spec/BATON_SPEC/11-people.md#sec-11-1) (API keys reach `GET /v1/actions`), [§14](../spec/BATON_SPEC/14-api.md#sec-14).
 **Used by:** B-204 (`GET /v1/actions` for a session, `ui.view` on every entry); B-192 (session callers are registry entries judged by `authorize`).
@@ -39,7 +38,7 @@ R-BTN-129 and R-BTN-130 are specified. This ticket builds them.
    - CLI commands live in a second table.
 2. **One `authorize`.** Every surface calls it: the router, the dashboard, the CLI and MCP.
 3. **Generated surfaces.**
-   - The router and the CLI tree (B-23's) are generated from the registry.
+   - The router and the CLI tree (B-157's) are generated from the registry.
    - `npm run check:actions` fails when a route, command or tool is outside the registry. It also fails when `owner.mcp-key.create`'s callers are anything but `[owner]`, or when an entry outside the closed allowlist carries `mcp`.
 4. **`GET /v1/actions`.** It shows a caller only their own actions. It is authenticated like
    every keyed route: an SSH-key signature or the holder's API key as a bearer
@@ -48,7 +47,7 @@ R-BTN-129 and R-BTN-130 are specified. This ticket builds them.
 5. **Destructive actions.** The listed destructive ids require `confirm: true` on their routes, and the refusal code is `confirm-required`.
 6. **`POST /v1/mcp`.**
    - stateless transport, with `initialize` and the `MCP-Protocol-Version` rule;
-   - the closed allowlist: owner reads, plus `ticket.hold` (`hold: true` only) and `leg.stop` *(amended 2026-10-18, BATON_SPEC [R-BTN-154](../spec/BATON_SPEC/11-people.md#sec-11-3): `ticket.expedite` is not MCP's, and `ticket.unhold` is owner or dashboard only)*;
+   - the closed allowlist: owner reads, plus `ticket.hold` (`hold: true` only) and `leg.stop` *(amended 2026-10-18, BATON_SPEC R-BTN-154, since retired into [R-BTN-130](../spec/BATON_SPEC/11-people.md#sec-11-3): `ticket.expedite` is not MCP's, and `ticket.unhold` is owner or dashboard only)*;
    - no upgrades;
    - pages of at most 256 KB, with `CursorKey`-signed cursors;
    - rate and size bounds;
@@ -58,7 +57,7 @@ R-BTN-129 and R-BTN-130 are specified. This ticket builds them.
    - A key dies with its minter, and is refused (not killed) while `api_keys: false`.
    - `CursorKey` is wired on both hosts: the Worker secret `BATON_CURSOR_KEY`, or `--cursor-key <file>` locally.
 
-- **Hardening** *(added 2026-10-18, R-BTN-140 to R-BTN-155)*: the overrides route serves `ticket.hold`, `ticket.unhold`, `ticket.expedite` and `ticket.cancel` told apart by field and value (R-BTN-129, R-BTN-154); register `ui.logout`, `admin.sessions.revoke` (destructive), `admin.confirm`, `owner.grants.list`, `owner.grants.flags` (a grant's `sync` flag only, R-BTN-146; there is no `courier` flag), `owner.code-repo.consent`, `owner.bars.follow`, `runner.grant.accept` and `runner.grant.decline`.
+- **Hardening** *(added 2026-10-18, R-BTN-140 to R-BTN-155)*: the overrides route serves `ticket.hold`, `ticket.unhold`, `ticket.expedite` and `ticket.cancel` told apart by field and value (R-BTN-129, R-BTN-130); register `ui.logout`, `admin.sessions.revoke` (destructive), `admin.confirm`, `owner.grants.list`, `owner.grants.flags` (a grant's `sync` flag only, R-BTN-146; there is no `courier` flag), `owner.code-repo.consent`, `owner.bars.follow`, `runner.grant.accept` and `runner.grant.decline`.
 - **Conditions and routes** *(2026-10-20)*: register `owner.resolve` (`POST /v1/owner/{repository}/tickets/{ticket}/resolve`; on the dashboard one step, `POST /v1/ui/conditions/{condition}/resolve` from the Resolve page `/conditions/<condition_id>`, never confirmed by code, §11.4, R-BTN-163), `condition.list` (`GET /v1/repositories/{repository}/conditions`) and `owner.route` (`POST /v1/owner/{repository}/tickets/{ticket}/route`); whichever of B-25 and B-56 lands second registers the first two, and whichever of B-25 and B-38 lands second the third. `owner.courier.revoke` stays, for forge couriers.
 
 ### Do not
@@ -92,3 +91,11 @@ _(2026-11-02: the spec restructure's part 3 (B-166, the PR `spec-restructure-han
 _(2026-11-02, part 3's review round one: the owner actions are `owner.owner.add | remove`; `admin repo resync` calls a new destructive key route `POST /v1/admin/repositories/{repository}/resync` (R-BTN-11, §12.2); `human-key.add | revoke` back `baton human-key add | revoke` (R-BTN-185); a caller entry is `{principal, scope, roles?}`; `ticket.resolve` is `delegated: false`.)_
 
 _(2026-11-03: R-BTN-47's *Retirement* (B-173's spec half) reaches the store this ticket builds — MCP keys: retirement revokes every MCP key on the repository. Whichever of this ticket and B-173 lands second builds that step and adds its S-BTN-198 case.)_
+
+_(2026-11-20: the spec simplification of 2026-11-19 (baton#299; `spec/BATON_SPEC_HISTORY.md`, that date) retired R-BTN-154, the second id on R-BTN-130's heading; what a delegated key reaches is R-BTN-186's. The three citations of it are rewritten to R-BTN-130.)_
+
+_(2026-11-20: the spec simplification of 2026-11-19 (baton#299; `spec/BATON_SPEC_HISTORY.md`, that date) moved the unbuilt parts of the design this ticket builds out of the section files, with their rule ids, to proposal pages: the registry file and what is generated from it, and the MCP endpoint with its delegated keys, are parts 1 and 2 of [the people-and-dashboard proposal](../spec/proposals/people-and-dashboard.md); their tables and routes are under "The action registry and MCP" in [the tables-and-routes proposal](../spec/proposals/data-model-and-api.md), and a grant's acceptance and `sync` flag, whose actions item "Hardening" registers, under "Grant acceptance and the sync flag" there and in part 5 of [the checks-and-executors proposal](../spec/proposals/checks-and-executors.md). S-BTN-100, S-BTN-103, G-BTN-120 and G-BTN-122 are no longer rows of the verification section: they are in [the proposals' scenarios](../spec/proposals/scenarios.md), under "The action registry and MCP". Each rule keeps its id and a line in its section, which links the page. The pull request that builds this ticket moves the rules it builds back into the section files, and the scenarios and gates it makes pass back into [the verification section](../spec/BATON_SPEC/15-verification.md#sec-15), in the same change. The plan above is otherwise as the earlier note of this day leaves it.)_
+
+_(2026-11-20: rules re-read: R-BTN-154, R-BTN-130, R-BTN-146)_
+
+_(2026-11-23: no longer depends on B-23. B-23 is rewritten to leg logs; the CLI tree generated from this registry is B-157's, which now depends on this ticket.)_

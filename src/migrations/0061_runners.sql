@@ -42,9 +42,15 @@ DROP INDEX workers_live;
 CREATE INDEX runners_live ON runners(last_seen_at + lease_timeout_ms) WHERE reaped_at IS NULL;
 
 -- SQLite cannot alter a CHECK constraint. Rebuild this one parent while foreign-key checks are
--- deferred; every child still names `credentials`, which exists again before the transaction
--- commits. All columns and rows are preserved, with only the credential kind translated.
-CREATE TABLE credentials_0061 (
+-- deferred. Its rows are set aside, the table is dropped and created again under its own name,
+-- and the rows go back in: the DROP counts every row that names a credential (a runner, a grant,
+-- a notice) as a deferred violation, and only an INSERT of the parent row it names takes that
+-- count back off — a RENAME of a scratch table into place never does, so the commit would fail
+-- and, on a Durable Object, reset the object with this migration unapplied (2026-11-19). All
+-- columns and rows are preserved, with only the credential kind translated.
+CREATE TABLE credentials_0061 AS SELECT * FROM credentials;
+DROP TABLE credentials;
+CREATE TABLE credentials (
   id                   TEXT PRIMARY KEY,
   hostname             TEXT NOT NULL,
   allowed_capabilities TEXT NOT NULL,
@@ -57,13 +63,12 @@ CREATE TABLE credentials_0061 (
   allowed_instances    TEXT NOT NULL DEFAULT '[]',
   revoked_by           TEXT
 );
-INSERT INTO credentials_0061
+INSERT INTO credentials (id, hostname, allowed_capabilities, revoked_at, kind, public_key, created_by, label, allowed_instances, revoked_by)
   SELECT id, hostname, allowed_capabilities, revoked_at,
          CASE kind WHEN 'worker' THEN 'runner' ELSE kind END,
          public_key, created_by, label, allowed_instances, revoked_by
-  FROM credentials;
-DROP TABLE credentials;
-ALTER TABLE credentials_0061 RENAME TO credentials;
+  FROM credentials_0061;
+DROP TABLE credentials_0061;
 CREATE UNIQUE INDEX credentials_public_key ON credentials(public_key) WHERE public_key IS NOT NULL;
 CREATE UNIQUE INDEX credentials_runner_name ON credentials(hostname) WHERE kind = 'runner' AND revoked_at IS NULL;
 

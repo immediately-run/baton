@@ -4,7 +4,7 @@
 // a closed ticket as closed; an advance on an ended claim is claim-ended.
 import { describe, it, expect, beforeEach } from 'vitest';
 import roadmapPr from '../fixtures/courses/roadmap-pr/course.json';
-import { advance, beat, claimItem, course, cutover, endClaim, Git, ownerCall, placed, recommended, register, rows, setClock, syncCall, withCore } from '../helpers';
+import { advance, beat, claimItem, course, cutover, endClaim, Git, ownerCall, placed, recommended, register, rows, setClock, syncCall, withCore, stateView } from '../helpers';
 
 const T0 = Date.parse('2026-10-16T12:00:00Z');
 const REVIEWED: [string, string][] = [['implement', 'pr-open'], ['review', 'reviewed']];
@@ -29,7 +29,7 @@ describe('R-BTN-63: bars the holder declared and the sync does not post', () => 
     await git.refresh();
     expect(await rows(`SELECT claim_id, json_extract(detail_json, '$.declared_only') AS only FROM events WHERE kind = 'bars-mismatch'`)).toEqual([
       { claim_id: c.claim_id, only: '["family:qwen"]' }]);
-    const state = (await (await ownerCall('/v1/ui/state')).json()) as { needs_you: { bars_mismatch: { claim_id: number }[] } };
+    const state = (await stateView()) as { needs_you: { bars_mismatch: { claim_id: number }[] } };
     expect(state.needs_you.bars_mismatch.map((b) => b.claim_id)).toEqual([c.claim_id]);
     // A snapshot that posts no bars for the leg says nothing about them.
     git.place('T-1', placed('reviewed', REVIEWED, [['fix', 'ready']]));
@@ -148,7 +148,7 @@ describe('round 2 fixes', () => {
   });
 
   it('the dashboard’s Ready lists a normative ticket by its ready queued leg (2-A-4)', async () => {
-    const state = (await (await ownerCall('/v1/ui/state')).json()) as { ready: { id: string; station: string; leg: string }[] };
+    const state = (await stateView()) as { ready: { id: string; station: string; leg: string }[] };
     expect(state.ready.map((r) => [r.id, r.station, r.leg])).toEqual([['docs:T-1', 'reviewed', 'fix']]);
   });
 });

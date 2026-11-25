@@ -10,7 +10,7 @@ tags:
   - roadmap-item
 order: 1120
 tier: critical
-description: "Build R-BTN-171 as amended 2026-10-30: every effect Baton intends outside itself is a signed `outbox` row of a `kind` (`handler`, `withdraw`, `answer`, `forge-check`); couriers, keys of their own registered `--delivers git` or `forge-check`, claim entries under a 10-minute lease through `/v1/courier/entries`, deliver them once by id, and mark them; git entries are confirmed by a snapshot, `forge-check` by read-back; late, refused and colliding entries hold the ticket and raise `baton.outbox-late`. The existing `notices` table and `/v1/courier/notices/*` fold into it; there is no `baton.write` leg. Also: core's handlers resolved from the board post's `bindings`, a runner's or the tenant's condition never bound, the source's `withdraw(ticket, reason)` export. S-BTN-136, S-BTN-81, S-BTN-131's binding cases, G-BTN-156. Requires: none."
+description: "Build R-BTN-171 as amended 2026-10-30: every effect Baton intends outside itself is an `outbox` row of a `kind` (`handler`, `withdraw`, `answer`, `forge-check`); couriers, keys of their own registered `--delivers git` or `forge-check`, claim entries under a 10-minute lease through `/v1/courier/entries`, deliver them once by id, and mark them; git entries are confirmed by a snapshot, `forge-check` by read-back; late, refused and colliding entries hold the ticket and raise `baton.outbox-late`. The existing `notices` table and `/v1/courier/notices/*` fold into it; there is no `baton.write` leg. Also: core's handlers resolved from the board post's `bindings`, a runner's or the tenant's condition never bound, the source's `withdraw(ticket, reason)` export. S-BTN-136, S-BTN-81, S-BTN-131's binding cases, G-BTN-156. Requires: none."
 topics:
   - baton
 owns: {}
@@ -23,8 +23,8 @@ depends_on:
 ---
 
 **Brief:** the ticket plan for the current-state spec (PR #71, 2026-10-20), §2's B-64, rescoped by
-the 2026-10-30 amendment (one outbox, couriers; `spec/BATON_SPEC_HISTORY.md`). Baton holds no git
-or forge credential, so the handler tickets of its own conditions (R-BTN-163), the withdrawals of
+the 2026-10-30 amendment (one outbox, couriers; `spec/BATON_SPEC_HISTORY.md`). Baton holds no
+credential for outbox delivery, so the handler tickets of its own conditions (R-BTN-163), the withdrawals of
 superseded tickets (R-BTN-168), promoted light questions' files (R-BTN-173) and check runs
 (R-BTN-115) reach the outside only through a courier.
 **Spec:** [BATON_SPEC §7.8](../spec/BATON_SPEC/07-conditions.md#sec-7-8) [R-BTN-171](../spec/BATON_SPEC/07-conditions.md#sec-7-8) (the outbox and couriers); [§10](../spec/BATON_SPEC/10-checks.md#sec-10) [R-BTN-115](../spec/BATON_SPEC/10-checks.md#sec-10) (the
@@ -59,7 +59,7 @@ and check runs travel through a second queue (`notices`, R3-1256) that does the 
 
 1. **Schema.** A new numbered migration in `src/migrations/` adds the `outbox` table as §13.8
    gives it (`(repository_id, id)`, `id` increasing per repository; `ticket_id`, `kind`
-   `handler|withdraw|answer|forge-check`, `condition_id`, `fields` JSON, `kid`, `signature`,
+   `handler|withdraw|answer|forge-check`, `condition_id`, `fields` JSON,
    `state` `queued|claimed|delivered|skipped|confirmed|dropped`, `credential_id`, `attempts`,
    `not_before`, `queued_at`, `delivered_ref`, `confirmed_at`, `snapshots_since_delivered`), the
    `outbox_due`, `outbox_alarm` and `outbox_pending` indexes, `couriers.delivers`, and `outbox`
@@ -68,8 +68,8 @@ and check runs travel through a second queue (`notices`, R3-1256) that does the 
    `forge-check` entry and drops `notices` (migrations are append-only: a new file, never an edit
    of `0017_notices.sql`).
 2. **Core module `src/core/outbox.ts`**, replacing `src/core/notices.ts`. `queue(kind, ticket,
-   fields, condition?)` in the caller's transaction, signing the entry with the tenant's
-   `SigningKey` (R-BTN-55); `fields` passes a new identifiers-only validator in
+   fields, condition?)` in the caller's transaction, with no signature (B-160); `fields`
+   passes a new identifiers-only validator in
    `src/core/validate.ts` (no free text, §12.3; a `forge-check`'s `summary` is rendered `plain`,
    R-BTN-112). Each queue, delivery and confirmation logs an `outbox {id, kind, state}` event in
    the ticket's history (`src/core/history.ts`).
@@ -113,8 +113,7 @@ and check runs travel through a second queue (`notices`, R3-1256) that does the 
      allows (`forbidden` naming the unmet knob). A policy admitting runners adds the shared
      `forge-check` copy.
 4. **The courier (`src/courier/`, `baton courier run`).** A loop with its own SSH key, outside
-   any runner: claim, verify each entry's signature against the pinned `GET /v1/keys/signing`
-   keys, deliver, mark. The claim carries `{limit?, release}`, refused below the policy's
+   any runner: claim, deliver, mark. Entries are unsigned (B-160). The claim carries `{limit?, release}`, refused below the policy's
    `min_release` (a declaration, not a control). For `git`: fetch the head it writes to (the
    default branch, or under `tickets.created: proposed` the branch `baton/proposed/<ticket>`),
    skip an entry whose file already carries `baton_write: <id>` (or, for `withdraw`, already says
@@ -152,8 +151,9 @@ and check runs travel through a second queue (`notices`, R3-1256) that does the 
 
 ### Do not
 
-- Give Baton or the Worker any git or forge credential, or write git from core: every effect is
-  a courier's delivery of a signed entry.
+- Give Baton or the Worker an outbox delivery credential, or write git from core. A deliverer
+  performs each outbox effect from an unsigned entry. Workflow dispatch is not an outbox effect:
+  Baton holds the dispatch credential and calls the forge directly (R-BTN-94).
 - Let a key deliver that the policy's `outbox` does not admit, or hard-code a rule the policy
   owns (who delivers, trust, release).
 - Store a subject, body or any free text in `fields` beyond a `forge-check`'s rendered `summary`.
@@ -168,11 +168,10 @@ and check runs travel through a second queue (`notices`, R3-1256) that does the 
   lapsed (the next courier writes nothing); a forge-refused push (held `outbox-refused`); a
   condition closing while queued (`dropped`) and while claimed (a `withdraw` follows); an entry
   undelivered 24 h (`baton.outbox-late`); a foreign file at the handler's path (held
-  `outbox-collision`); a runner key registered as a courier (`conflict`); a bad signature
-  (refused by the courier); the outbox policy's cases (a runner key `forbidden`, then admitted;
+  `outbox-collision`); a runner key registered as a courier (`conflict`); the outbox policy's cases (a runner key `forbidden`, then admitted;
   `trust: trusted` against a shared trust domain; `min_release`; an MCP key's policy change refused).
 - **S-BTN-81** and S-BTN-68 unchanged in outcome on the new routes.
-- Unit: entry ordering per ticket; the `fields` validator; the signature; `withdraw` on the
+- Unit: entry ordering per ticket; the `fields` validator; `withdraw` on the
   markdown source; the `baton_write` idempotence check; the three-retry rejected push; the
   `notices` migration.
 - Item 7, on both hosts: S-BTN-131's `baton.output-invalid` filed with its binding taken from the
@@ -201,3 +200,5 @@ _(2026-11-02: the spec restructure's part 2 (B-166, the PR `baton-spec-restructu
 _(2026-11-02: part 2's review round one: `test/integration/S-BTN-126.people-api-keys.test.ts` asserts an API-key runner's refusal at `/v1/courier/deliveries`; when this ticket builds `/v1/runner/outbox/claim`, retarget that assertion to it (an API-key runner never delivers, R-BTN-171, R-BTN-159).)_
 
 _(2026-11-03: R-BTN-47's *Retirement* (B-173's spec half) reaches the store this ticket builds — the outbox: retirement drops the repository's `queued`, `claimed` and `delivered` entries, logging each, ignores a later mark, and owes no cancel leg for its tickets (R-BTN-171). Whichever of this ticket and B-173 lands second builds that step and adds its S-BTN-198 case.)_
+
+_(2026-11-20: the spec simplification of 2026-11-19 (baton#299; `spec/BATON_SPEC_HISTORY.md`, that date) moved the unbuilt parts of the design this ticket builds out of the section files, with their rule ids, to proposal pages: the outbox is part 8 of [the conditions proposal](../spec/proposals/conditions.md), with its tables and routes under "The outbox" in [the tables-and-routes proposal](../spec/proposals/data-model-and-api.md). S-BTN-136, S-BTN-81, G-BTN-156, S-BTN-191 and G-BTN-165 are no longer rows of the verification section: they are in [the proposals' scenarios](../spec/proposals/scenarios.md), under "The outbox", "Checks" and "The repository policy's enforcement". Each rule keeps its id and a line in its section, which links the page. The pull request that builds this ticket moves the rules it builds back into the section files, and the scenarios and gates it makes pass back into [the verification section](../spec/BATON_SPEC/15-verification.md#sec-15), in the same change. The plan above is unchanged.)_

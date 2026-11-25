@@ -3,8 +3,8 @@
 // the never-landed one is flagged at 6 h and never re-issued. The sync is the real decision code
 // (scripts/lib/batonSync.mjs, vendored) over the fixture repository's real ancestry.
 import { describe, it, expect, inject, beforeEach } from 'vitest';
-import { syncOnce } from '../../src/shared/batonSync.mjs';
-import { claimItem, claimRow, cutover, endClaim, observe, ownerCall, payload, register, setClock, syncCall , tick } from '../helpers';
+import { syncOnce } from '../../src/vendor/batonSync.mjs';
+import { claimItem, claimRow, cutover, endClaim, observe, ownerCall, payload, register, setClock, syncCall , tick, stateView } from '../helpers';
 
 const board = inject('board');
 const sha = board.shas;
@@ -62,7 +62,7 @@ describe('S-BTN-12 completion confirmation', () => {
     // nothing is confirmed and nothing is posted.
     expect(await sync('A')).toMatchObject({ outcome: 'confirmed' });
     expect((await claimRow(c.claim_id)).confirmed_at).toBeNull();
-    const needs = async () => ((await (await ownerCall('/v1/ui/state')).json()) as { needs_you: { unconfirmed: { id: number }[] } }).needs_you.unconfirmed;
+    const needs = async () => ((await stateView()) as { needs_you: { unconfirmed: { id: number }[] } }).needs_you.unconfirmed;
     await setClock(T0 + 6 * 3_600_000 - 1);
     expect(await needs()).toEqual([]);
     await setClock(T0 + 6 * 3_600_000);

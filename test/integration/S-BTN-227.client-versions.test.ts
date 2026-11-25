@@ -123,7 +123,7 @@ describe(`S-BTN-227 the client versions Baton serves (${HOST})`, () => {
     await runnerCall('/v1/runner/heartbeat', { cred: 'vm-a', secret, body: hbBody('vm-a'), client: 'baton/0.1.4' });
     expect(await rows('SELECT client_version FROM runners WHERE id = ?', id)).toEqual([{ client_version: '0.1.4' }]);
     // Below the code's recommended (0.1.5) the live runner is listed, with its version.
-    const listed = await withCore((c) => c.uiState().needs_you.stale_clients as { hostname: string; session_name: string; client_version: string; recommended: string }[]);
+    const listed = await withCore((c) => c.stateView().needs_you.stale_clients as { hostname: string; session_name: string; client_version: string; recommended: string }[]);
     expect(listed).toEqual([{ hostname: 'vm-a', session_name: 's-vm-a', client_version: '0.1.4', recommended: '0.1.5' }]);
   });
 

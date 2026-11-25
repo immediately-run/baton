@@ -4,7 +4,7 @@
 // W1's branch and PR; the hand-off is a comment on the primary PR, never in the diff, and Baton
 // holds only its URL. Runs on both hosts.
 import { describe, it, expect, beforeEach } from 'vitest';
-import { advance, claimItem, cutover, endClaim, Git, placed, register, setClock, runnerCall } from '../helpers';
+import { advance, claimItem, cutover, endClaim, evidenceFound, Git, placed, register, setClock, runnerCall } from '../helpers';
 
 const T0 = Date.parse('2026-10-16T12:00:00Z');
 const PR = 'https://github.com/immediately-run/docs/pull/41';
@@ -31,7 +31,8 @@ describe('S-BTN-23 resume from a hand-off document', () => {
     // The round ends; W1's context is spent: it writes the hand-off on the PR and suspends.
     expect((await endClaim('vm-a', w1.secret, c.claim_id, { end_reason: 'suspended:reviewed', reached: 'reviewed', detail: 'context-spent', ended_at_sha: HANDOFF })).status).toBe(200);
     git.place('T-1', placed('reviewed', [['implement', 'pr-open'], ['review', 'reviewed']], [['fix', 'ready'], ['merge', 'waiting', 'findings']], { handoff_url: HANDOFF }));
-    expect(await git.refresh()).toMatchObject({ confirmed: 1 });
+    // The sync finds the hand-off W1 named (R-BTN-10): that, not git's station, confirms the end.
+    expect(await git.refresh(evidenceFound(c.claim_id, HANDOFF))).toMatchObject({ confirmed: 1 });
 
     const w2 = await register('vm-b');
     const { json: r } = await claimItem('vm-b', w2.secret);

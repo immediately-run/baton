@@ -137,7 +137,8 @@ describe('S-BTN-21 capacity (R-BTN-178)', () => {
       { repository: 'docs', course: 'rdp-course', version: 1, legs: ['implement', 'review'], type: { description: 'a thing a leg may need', values: '^[-a-z0-9]{1,64}$' } },
       { repository: 'ops', course: 'rdp-course', version: 1, legs: ['implement', 'review'], type: { description: 'a thing a leg may need', values: '^[-a-z0-9]{1,64}$' } },
     ]);
-    expect(view.json.capacities).toEqual([{ capability: CAP, capacity: 1, set_by: `admin:${admin.fingerprint}`, set_at: T0 }]);
+    // B-202 (S-BTN-297): each capacity also carries the seats held and their claims.
+    expect(view.json.capacities).toEqual([expect.objectContaining({ capability: CAP, capacity: 1, set_by: `admin:${admin.fingerprint}`, set_at: T0 })]);
     // Setting is an admin event (R-BTN-57).
     expect(await rows(`SELECT detail_json FROM events WHERE kind = 'admin' AND json_extract(detail_json, '$.act') = 'capacity-set'`))
       .toEqual([{ detail_json: JSON.stringify({ act: 'capacity-set', capability: CAP, capacity: 1 }) }]);
@@ -271,7 +272,7 @@ describe('S-BTN-21 capacity (R-BTN-178)', () => {
     expect((await claimAs(w3, W3.secret, { ticket_id: 'docs:RDP2' })).status).toBe(409);
     // The dashboard's Needs-you list carries the runner's facts, and the clear — one POST,
     // confirmed — ends the fence now, without the sidecar's report or the deadline.
-    const state = (await (await sessionCall(session, '/v1/ui/state')).json()) as { needs_you: { fence_pending: { id: number; hostname: string; last_seen_at: number; lease_timeout_ms: number }[] } };
+    const state = (await keyCall(admin, '/v1/admin/state')).json as { needs_you: { fence_pending: { id: number; hostname: string; last_seen_at: number; lease_timeout_ms: number }[] } };
     expect(state.needs_you.fence_pending).toEqual([expect.objectContaining({ id: c1.json.claim_id, hostname: 'vm-12', lease_timeout_ms: 900_000 })]);
     const cleared = await sessionCall(session, `/v1/ui/claims/${c1.json.claim_id}/fence-clear`, { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: ORIGIN }, body: JSON.stringify({ confirm: true }) });
     expect(cleared.status).toBe(200);

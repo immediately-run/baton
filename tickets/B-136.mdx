@@ -15,7 +15,9 @@ description: "Adversarial review finding 3 (2026-10-27): every owner gate (rules
 topics:
   - baton
 owns: {}
-prs: []
+prs:
+  - https://github.com/immediately-run/baton/pull/331
+  - https://github.com/immediately-run/fieldhouse/pull/50
 depends_on:
   - B-145
 ---
@@ -76,3 +78,5 @@ credentials); BATON_SPEC [R-BTN-185](../spec/BATON_SPEC/12-security.md#sec-12-8)
 _(2026-10-31: aligned with the repository policy (baton#145): the key is registered with the tenant and becomes an owner only through `approvers.members`; it satisfies human-only approver lists rather than a fixed set of gates; the `hardware` path (item 2) is this ticket's, the registration routes and refusals are B-145's.)_
 
 _(2026-11-19: rules re-read: R-BTN-66, R-BTN-185. Signed control is retired — BATON_SPEC verifies no commit signature (`spec/BATON_SPEC_HISTORY.md`, that date). The scripted check's signed-commit half is struck; the human-only identity and key (R-BTN-185) stand, and B-127 no longer depends on them.)_
+
+_(2026-11-20: the spec simplification of 2026-11-19 (baton#299; `spec/BATON_SPEC_HISTORY.md`, that date) moved the unbuilt parts of the design this ticket builds out of the section files, with their rule ids, to proposal pages: hardware human-only keys are part 10 of [the security proposal](../spec/proposals/security.md), with their tables under "Attestations, roles and fact legs" in [the tables-and-routes proposal](../spec/proposals/data-model-and-api.md). Each rule keeps its id and a line in its section, which links the page. The pull request that builds this ticket moves the rules it builds back into the section files, and the scenarios and gates it makes pass back into [the verification section](../spec/BATON_SPEC/15-verification.md#sec-15), in the same change. The plan above is unchanged.)_

@@ -2,11 +2,10 @@
 // -24, messages, mode and shadow reports.
 import { describe, it, expect, inject, beforeEach } from 'vitest';
 import { env } from 'cloudflare:test';
-import { RunnerApi } from '../../src/core/runnerApi';
-import { beat, call, hbBody, keyCall, ORIGIN, ownerCall, payload, register, rows, seedClaim, setAdminKeys, setClock, sha256, syncCall, runnerCall , tick, withCore } from '../helpers';
+import { runnerAuth } from '../lib/runnerAuth';
+import { beat, call, hbBody, keyCall, ORIGIN, ownerCall, payload, register, rows, seedClaim, setAdminKeys, setClock, sha256, syncCall, runnerCall , tick, withCore, stateView } from '../helpers';
 import { makeKey, signedRequest } from '../lib/sshKeys';
 import { call as hostCall } from '#host';
-import { Deprecated } from '../../src/core/deprecated';
 
 const board = inject('board');
 const T0 = Date.parse('2026-10-13T12:00:00Z');
@@ -218,7 +217,7 @@ describe('G-BTN-23: transcript pointers', () => {
     const claim = await seedClaim(id, 'docs:R3-9001');
     await beat('vm-a', secret, t('immediately-run-worker/session-transcripts', 'vm-a/s.md'));
     expect(await rows('SELECT claim_id, path FROM transcripts WHERE runner_id = ?', id)).toEqual([{ claim_id: claim, path: 'vm-a/s.md' }]);
-    const state = (await (await ownerCall('/v1/ui/state')).json()) as { runners: { id: number; transcript_url: string }[] };
+    const state = (await stateView()) as { runners: { id: number; transcript_url: string }[] };
     expect(state.runners.find((w) => w.id === id)!.transcript_url).toMatch(/^https:\/\/github\.com\/immediately-run(-worker)?\/[a-z-]+\/blob\/HEAD\//);
   });
 });
@@ -353,7 +352,7 @@ describe('round-one review fixes (baton#4)', () => {
     await withCore((o) => {
       const hashes = JSON.parse(env.TOKEN_HASHES!);
       delete hashes['vm-a'];
-      const api = new RunnerApi({ store: o.store, deprecated: new Deprecated(o.store), config: { ...env, TOKEN_HASHES: JSON.stringify(hashes) }, now: () => o.now() });
+      const api = runnerAuth({ store: o.store, config: { ...env, TOKEN_HASHES: JSON.stringify(hashes) }, now: () => o.now() });
       expect(() => api.credential('vm-a')).toThrow(/revoked/);
       expect(() => api.credential('vm-b')).not.toThrow();
     });
@@ -422,7 +421,7 @@ describe('round-one review fixes (baton#4)', () => {
 
   it('B-142: the dashboard state serves neither advisory view — no providers, no suspensions, no runner billing', async () => {
     await register('vm-a');
-    const s = (await (await ownerCall('/v1/ui/state')).json()) as Record<string, unknown>;
+    const s = (await stateView()) as Record<string, unknown>;
     expect(s.providers).toBeUndefined();
     expect(s.suspensions).toBeUndefined();
     expect(s.runners).toEqual([expect.not.objectContaining({ providers: expect.anything(), model_provider_id: expect.anything() })]);
@@ -448,7 +447,7 @@ describe('R-BTN-48: the courses a heartbeat declares', () => {
   it('a runner that declares no course is stale on every registered course, and Needs you lists it', async () => {
     const { id, first } = await register('vm-a', { courses: [] });
     expect(first.stale_courses).toEqual([{ repository: 'docs', course: 'roadmap-pr', version: null, min_runner_version: 3 }]);
-    const state = (await (await ownerCall('/v1/ui/state')).json()) as { needs_you: { stale_skills: { id: number; course_id: string | null }[] } };
+    const state = (await stateView()) as { needs_you: { stale_skills: { id: number; course_id: string | null }[] } };
     expect(state.needs_you.stale_skills).toEqual([expect.objectContaining({ id, course_id: null })]);
   });
 });

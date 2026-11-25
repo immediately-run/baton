@@ -92,8 +92,8 @@ describe('S-BTN-38 a course measures itself', () => {
     await setClock(T0 + 90 * MIN);
     expect((await readAs(docsKey, `/v1/repositories/docs/stats?since=${new Date(T0 + 61 * MIN).toISOString()}`)).json).toMatchObject({ ends: [], suspensions: [], courses: {} });
 
-    // Overridden advice and an off-graph post are counted, with the ticket they name: W3 claims
-    // T-2 over the first recommendation, and the sync then posts a path T-2 could not have run.
+    // An off-graph post is counted, but W3 choosing T-2 over the first recommendation is not
+    // an advice override. The sync posts a path T-2 could not have run.
     await git.refresh(); // a reading after T-1's last end: claimable again, and first in the order
     const w3 = await register('test');
     const { json: c3 } = await claimItem('test', w3.secret, { ticket_id: 'docs:T-2' });
@@ -101,7 +101,7 @@ describe('S-BTN-38 a course measures itself', () => {
     git.place('T-2', placed('reviewed', [['review', 'reviewed']], [['merge', 'ready']]));
     expect(await git.post()).toMatchObject({ status: 200 });
     expect((await readAs(docsKey, `/v1/repositories/docs/stats?since=${new Date(T0 + 61 * MIN).toISOString()}`)).json).toMatchObject({
-      advice_overridden: { count: 1, tickets: ['docs:T-2'] }, off_graph: { count: 1, tickets: ['docs:T-2'] },
+      advice_overridden: { count: 0, tickets: [] }, off_graph: { count: 1, tickets: ['docs:T-2'] },
       // after the refresh T-1's review is claimable again, waiting since its last end at +60, not
       // since it turned ready at +20 (2-r2-1); T-2, held by W3, is no longer counted
       courses: { 'roadmap-pr': { legs: { review: { ready_now: { tickets: 1, oldest_s: 1800 } } } } } });
@@ -111,7 +111,8 @@ describe('S-BTN-38 a course measures itself', () => {
     expect(await readAs(opsKey, '/v1/repositories/docs/stats')).toMatchObject({ status: 403, json: { code: 'forbidden' } });
     expect((await runnerCall('/v1/repositories/docs/stats', { cred: 'vm-a' })).status).toBe(403);
     expect((await hostCall(new Request(`${ORIGIN}/v1/repositories/docs/stats`))).status).toBe(401);
-    expect((await runnerCall('/v1/repositories/nope/stats', { cred: 'vm-a' })).status).toBe(404);
+    // B-192 (S-BTN-250): an unregistered repository is `forbidden`, as one the key is not granted on.
+    expect((await runnerCall('/v1/repositories/nope/stats', { cred: 'vm-a' })).status).toBe(403);
     expect((await readAs(docsKey, '/v1/repositories/docs/stats?since=yesterday')).json).toMatchObject({ code: 'invalid-params' });
     expect(await readAs(docsKey, '/v1/repositories/%zz/stats')).toMatchObject({ status: 400, json: { code: 'invalid-params' } });
   });

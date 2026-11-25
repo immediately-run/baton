@@ -173,3 +173,7 @@ today and an interface change or a broken promise later.
 _2026-10-20 — references repointed to the current-state spec (PR #71). The repository-level `baton.<sub>` conditions above (R-BTN-163): landing before B-57, this ticket lists them under **Needs you** through today's `needsYou()` path and B-57 converts them; after B-57 it raises them directly._
 
 _(2026-10-20: extended for the adversarial review's fixes — `bmcp_` keys count only in the (origin, client IP) failure bucket, adv-4 m8.)_
+
+_(2026-11-20: the spec simplification of 2026-11-19 (baton#299; `spec/BATON_SPEC_HISTORY.md`, that date) moved the unbuilt parts of the design this ticket builds out of the section files, with their rule ids, to proposal pages: the router in front of single-tenant Batons, its handshake and object names are [the multi-tenancy proposal](../spec/proposals/multi-tenancy.md). S-BTN-111, S-BTN-114, G-BTN-130, G-BTN-134 and G-BTN-131 are no longer rows of the verification section: they are in [the proposals' scenarios](../spec/proposals/scenarios.md), under "Multi-tenant deployment and admission limits". Each rule keeps its id and a line in its section, which links the page. The pull request that builds this ticket moves the rules it builds back into the section files, and the scenarios and gates it makes pass back into [the verification section](../spec/BATON_SPEC/15-verification.md#sec-15), in the same change. The plan above is unchanged.)_
+
+_(2026-11-20: rules re-read: R-BTN-135)_

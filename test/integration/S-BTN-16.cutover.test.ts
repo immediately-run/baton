@@ -4,8 +4,7 @@
 // marker and git fallback are R3-1219's.
 import { describe, it, expect, inject, beforeEach } from 'vitest';
 import {
-  beat, claimItem, claimRow, ORIGIN, ownerCall, payload, register, rows, setClock, syncCall, tick, runnerCall,
-} from '../helpers';
+  beat, claimItem, claimRow, ORIGIN, ownerCall, payload, register, rows, setClock, syncCall, tick, runnerCall, stateView } from '../helpers';
 
 const board = inject('board');
 const sha = board.shas;
@@ -87,7 +86,7 @@ describe('S-BTN-16 cutover (server)', () => {
     expect(await asked.json()).toEqual({ claim_id: legacy.id, nonce: legacy.nonce, pending: true });
     // Not moved yet: a public name alone proves nothing.
     expect((await beat('vm-a', mine.secret)).json.claim).toBeNull();
-    const state = (await (await ownerCall('/v1/ui/state')).json()) as { needs_you: { adoptions: { ticket_id: string; session_name: string }[] } };
+    const state = (await stateView()) as { needs_you: { adoptions: { ticket_id: string; session_name: string }[] } };
     expect(state.needs_you.adoptions).toEqual([expect.objectContaining({ ticket_id: 'docs:R3-9001', session_name: 's-vm-a', legacy_session: 's-vm-a' })]);
 
     expect((await owner('/v1/ui/adoptions/docs:R3-9001/confirm', { confirm: true })).status).toBe(200);

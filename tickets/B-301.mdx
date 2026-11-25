@@ -1,0 +1,110 @@
+---
+title: "B-301 — §3 against the code: the owners' sync-key routes, dispatch coalescing and the cut-over filter are settled, and each unbuilt registry and forge rule is marked with the ticket that builds it"
+id: B-301
+project: baton
+status: available
+updated: 2026-11-20
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1301
+tier: judgement
+description: "Section 3 states as built: owners adding and revoking sync keys (only an administrator can), a 30-second coalescing window for every dispatch (only the webhook path has one), dispatch whenever a transaction wants one (non-webhook dispatches go only to a cut-over repository), a machine key syncing (verifySync refuses it), and the forge-id, rename, pusher and unlisted-repository machinery of R-BTN-138 to R-BTN-140 and the GitLab and Gitea dispatch targets, none of which has code. Three have no ticket and are decided here; the rest are marked not built with their builders."
+topics:
+  - baton
+  - spec
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the fix round of the spec simplification's review listed what §3 says that no code
+does, and left it: the text predates the rewrite
+([the review](../docs/review/spec-simplification-review-2026-11-19.mdx), *Where the spec and
+the code disagree*). Each row below was read in `src/` and `cli/` on 2026-11-20. Rows 1 to 3
+have no ticket. Rows 4 to 10 each have a builder; for those the only work is that §3 stops
+stating them as built, the way §6 and §7 now open with a "Not built" list.
+
+**Spec:** [BATON_SPEC §3.1](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-1) ([R-BTN-138](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-1)), [§3.2](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-2) ([R-BTN-93](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-2), [R-BTN-15](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-2)), [§3.3](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-3) ([R-BTN-94](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-3), [R-BTN-73](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-3)),
+[§3.4](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-4) ([R-BTN-139](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-4), [R-BTN-140](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-4)), [§11.3](../spec/BATON_SPEC/11-people.md#sec-11-3) ([R-BTN-127](../spec/BATON_SPEC/11-people.md#sec-11-3)), [§12.1](../spec/BATON_SPEC/12-security.md#sec-12-1), [§12.2](../spec/BATON_SPEC/12-security.md#sec-12-2), [§14](../spec/BATON_SPEC/14-api.md#sec-14).
+
+## The gaps
+
+| # | Rule | The spec says | The code does | Builder |
+|---|---|---|---|---|
+| 1 | R-BTN-93; §12.2's `owner.sync-key.revoke`; R-BTN-127's `owner sync-key add`, `revoke` | owners add and revoke a sync key: `POST /v1/owner/{repository}/sync-keys`, `…/sync-keys/{fingerprint}/revoke` | no such route: `sync-keys` occurs in `src/core/` only as a screen's path (`screens.ts:36`). A sync key is added or removed by an administrator alone, at registration or with `sync_keys_add` and `sync_keys_remove` on the repository change (`src/core/admin.ts:374`, `:398-411`; `baton admin repo … --add-sync-key`, `--remove-sync-key`, `cli/baton.mjs:23`, `:374`) | none (B-199 draws the screen and assumes the commands) |
+| 2 | R-BTN-94, *Coalescing* | dispatches of one workflow coalesce into one per repository and workflow per 30 seconds, with a trailing dispatch | the window (`DISPATCH_WINDOW_MS`, `src/core/webhook.ts:24`) and its `webhook_syncs` row, keyed by repository alone, are the webhook path's. A dispatch a claim, an advance, an end or a bar asks for is de-duplicated only within its own transaction (`pendingDispatch`, `src/core/baton.ts:123`, `:160`) and sent after it | none |
+| 3 | R-BTN-94, first paragraph | Baton dispatches a sync for a claim, an advance, an end, an answer, a bar and a notification | all but the webhook's own and the unblocked trigger are sent only for a repository after its cutover (`flushDispatch`, `src/core/baton.ts:278-285`: `own(wf) or cutoverAt(wf.repository) != null`) | B-288 removes `cutover.ts` and must decide what the filter becomes (added to its plan) |
+| 4 | R-BTN-93, R-BTN-102, the policy's `inputs.board: machine` | a machine key granted on the repository may sync | `verifySync` admits a sync key or a CI identity token and refuses every other key `forbidden` (`src/core/baton.ts:326-352`) | R3-1270 builds it; B-137 and B-189 item 7 would retire it |
+| 5 | R-BTN-138 | `forge_ids_seen` and `baton.forge-ids-mismatch`; a verified rename with `repo-renamed`; `baton.remote-stale`; a held rename, `baton.rename-held` and §6.6's rule 13; `former_paths_remove` | none of these names occurs in `src/` or `cli/` | B-45 |
+| 6 | R-BTN-139 | `baton.pushers-degraded` | no occurrence | B-46 item 1, B-163 |
+| 7 | R-BTN-140 | `repos.unlisted`, `by-name`, `baton.repo-not-listed` | no occurrence | B-264; the knob's place in the policy is B-293's |
+| 8 | R-BTN-94, *Dispatch targets*; the adapter table | targets per forge | `sendDispatch` builds GitHub's only; its own comment leaves GitLab and Gitea to R3-1263 (`src/core/baton.ts:297-298`) | R3-1263 |
+| 9 | R-BTN-73, the per-repository notify route | marked not built by the fix round | answers `not-found` | R3-1264 |
+| 10 | R-BTN-47's retirement paragraph (`03-repositories-and-forges.md:69`) | the alarm clears a fence at its `fence_deadline` | no such column | B-79, with B-299 row 8 |
+
+## Plan
+
+1. **Row 1: decide who manages sync keys, then make the three places agree.** Recommended:
+   build the owners' two routes. R-BTN-93 gives the reason: a sync key is a repository's
+   credential, and its owners already manage the repository's grants and owner keys; today
+   revoking a leaked sync key needs the tenant's administrator. The routes are owner actions
+   under R-BTN-188's `approvers.members` like the other credential changes, with
+   `owner.sync-key.revoke` in §12.2's destructive list as the spec has it, and the CLI gains
+   `baton owner sync-key add|revoke` (B-157's tree). The other answer is to amend R-BTN-93,
+   §12.2, R-BTN-127 and §14 to "an administrator adds and removes sync keys"; then B-199's
+   item naming the owner commands is struck. The spec PR records the owner's choice either way.
+2. **Row 2: amend the spec to the code, unless the owner wants the general window.** State that
+   the 30-second window and its trailing dispatch belong to notification-triggered syncs
+   (R-BTN-73's backstop reads the same row), keyed by repository, and that any other dispatch
+   is sent once per committing transaction. A general window would need a `webhook_syncs` row
+   per workflow and the alarm reading it for every dispatch; nothing reported so far needs it,
+   since a forge already queues workflow runs.
+3. **Row 3** is B-288's: its plan now names `flushDispatch`'s filter. This ticket only checks,
+   when both are open, that R-BTN-94's first paragraph and the code agree after B-288.
+4. **Rows 4 to 10: one "Not built" list at the head of §3**, each entry a rule id, the part
+   that has no code, and its ticket, restating no design. For row 4 the PR also asks the owner
+   which way the rule goes, because two tickets point opposite ways: R3-1270 builds
+   machine-key sync, and B-137 with B-189 item 7 remove machine keys from `inputs.board`. Until
+   that is ruled, §3.2 says a machine key cannot sync and the `machine` value of `inputs.board`
+   admits nobody.
+5. **Spec mechanics.** History entry with `Rules changed:` naming R-BTN-93 and R-BTN-94 (and
+   any other whose sentence changes); `npm run spec:index`; `npm run spec:impact` over the ids
+   and the terms `sync key`, `coalesc`, `dispatch`.
+6. **Tests.** If row 1 is built: an owner adds a sync key and the key posts a board; a second
+   repository's owner cannot; a key that holds another role is `conflict`; a revoked key is
+   `unauthenticated` at its next request; a delegated key is refused the revoke (R-BTN-130).
+   Named under the scenario that covers sync keys today (S-BTN-156), or a new one from `node
+   cli/baton.mjs tickets next scenario --for B-301`. Rows 2 and 4 to 10 change text only.
+
+### Trust
+
+One new input, if row 1 is built: a request that adds or revokes a sync key, written by an
+owner key of that repository and verified as every owner request is (SSH signature, nonce,
+`approvers.members` as the policy stood, R-BTN-188), its body validated in
+`src/core/validate.ts` before any SQL. A sync key is the credential behind reach 7 of
+`docs/security-model.mdx` (whoever holds it posts the board), so the add is a loosening and
+needs the same approver class as a grant; a break-glass line must not reach it without being
+the repository's `human_key` (B-294's finding applies to this route from its first commit).
+Nothing in this ticket reads a sync key's private half, changes a CI workflow or touches a
+deployment's secrets; `baton repo init`'s CI configuration is unchanged.
+
+### Invariants
+
+- BATON_SPEC [R-BTN-93](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-2): `verifySync` is the only check on `/v1/sync/*`, and a key holds one
+  role. The new routes write `sync_keys` rows through the same uniqueness checks the
+  administrator's path uses (`admin.ts:228`).
+- BATON_SPEC [R-BTN-57](../spec/BATON_SPEC/11-people.md#sec-11-2): an administrator key is never a sync's. The owners' add refuses one.
+- BATON_SPEC [R-BTN-188](../spec/BATON_SPEC/12-security.md#sec-12-8): no list is left without a key to satisfy it; revoking a sync key
+  touches no approver list.
+- BATON_SPEC [R-BTN-94](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-3): a dispatch is recorded in the transaction that causes it and sent after
+  the commit. Row 2 changes what the rule says about windows, not when a dispatch is sent.
+- One home per statement: each "Not built" entry cites its rule and ticket and restates
+  nothing.
+
+## Status
+
+_filed 2026-11-20._ From the adversarial review of PR #299 (the spec simplification of
+2026-11-19), the fix round's lists for §3 and §12. Related: B-45, B-46, B-79, B-137, B-163,
+B-189, B-199, B-264, B-288, B-293, B-294, B-299, R3-1263, R3-1264, R3-1270.

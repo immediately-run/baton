@@ -3,7 +3,7 @@ title: "B-77 — Heads, held posts and dropped tickets after the adversarial rev
 id: B-77
 project: baton
 status: available
-updated: 2026-11-01
+updated: 2026-11-23
 repos:
   - baton
 tags:
@@ -101,7 +101,7 @@ deletes a returning ticket's `closed_tickets` row with nothing kept.
    - Its positions (station, path, next leg) and markers are taken as a refresh against the
      current head when its observation is newer.
    - Its gates are applied to current rows only where they tighten: from `tickets[]` a raised
-     tier, added `requires` or `depends_at`; from `stations` tags added to `bars`, added
+     ~~tier,~~ added `requires` or `depends_at`; from `stations` tags added to `bars`, added
      `decisions` and a next leg turned from `ready` to `waiting`; from `registry` a raised
      `min_runner_version`, an added `stream: false`, a lengthened `no_chain_from` or `requires`.
      Nothing is removed or loosened.
@@ -184,3 +184,7 @@ _(filed 2026-10-20 from the coverage audit of the tickets against the spec, for 
 review's fixes to §4.3, §5.3 and §6.8)_
 
 _(2026-11-01: **rescoped** by the spec restructure's part 1 (B-166, the PR `baton-spec-restructure-p1`) on the owner's rulings of 2026-11-01 (B-158 "Remove it", B-165 "Take review's default"): held snapshots, their tightening and acceptance, `behind_confirmed`, `head-replaced`, `baton.held-history`, `baton.station-jump` and `baton.machine-loosened` are retired (R-BTN-11, R-BTN-147). Item by item: 1 (migration) — `board_head.behind_since`, `closed_tickets.kept_json` and `dropped` stay; no `held_snapshots.posted_by`. 2 (the lagging fetch) — the founded check and the `behind` release stay; after 30 minutes behind Baton raises `baton.head-unfounded`, and nothing is posted `force`. 3 (numbers) — unchanged. 4 (held rows) — retired: a post whose `parent_sha` is not the head is `head-moved`, and an administrator's forced Resync (`POST /v1/ui/resync {repository, force: true}`, `baton admin resync --force`) resets the head (`head-reset`) so the next post is a first snapshot's (R-BTN-11). 5 (a held post only tightens) — retired. 6 (arrivals no claim ran) — retired; an arrival Baton does not apply is `arrival-unapplied` and raises nothing (R-BTN-39). 7 (drops and returns) — unchanged, the one part of this ticket left whole. 8 (machine-key loosening) — retired. 9 (the model) — held rows and station jumps leave the model; the reset joins it. Tests: S-BTN-13 and S-BTN-121 are changed to the refusal and the forced Resync; G-BTN-7 and G-BTN-141 are changed; S-BTN-39 stands.)_
+
+_(2026-11-20: the spec simplification of 2026-11-19 (baton#299; `spec/BATON_SPEC_HISTORY.md`, that date) moved the unbuilt parts of the design this ticket builds out of the section files, with their rule ids, to proposal pages: the founded head, lagging fetches and dropped tickets, and the administrator's forced Resync, are parts 4 and 5 of [the tickets-and-sources proposal](../spec/proposals/tickets-and-sources.md). S-BTN-121 is no longer a row of the verification section: it is in [the proposals' scenarios](../spec/proposals/scenarios.md), under "Sync ordering: founded heads, lagging fetches and the forced Resync". S-BTN-13 and G-BTN-141 stay in the verification section, cut to what is built, with their unbuilt part on that page too. Each rule keeps its id and a line in its section, which links the page. The pull request that builds this ticket moves the rules it builds back into the section files, and the scenarios and gates it makes pass back into [the verification section](../spec/BATON_SPEC/15-verification.md#sec-15), in the same change. The plan above is unchanged.)_
+
+_2026-11-23 — tiers retired (spec/retire-tiers: [BATON_SPEC §6.6](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-6) gate 5, [R-BTN-66](../spec/BATON_SPEC/01-what-baton-is.md#sec-1)): the struck tier clauses are gone from the spec — no ticket tier, runner ceiling, grant `max_tier`, ladder, `ready_by_tier` or `?tier=`. Build the rest without them._

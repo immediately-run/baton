@@ -6,6 +6,7 @@ import { env, runInDurableObject } from 'cloudflare:test';
 import { fileUrl, isForgePath, isPullRequestUrl, isWebBase, SESSION_HOSTS, sessionLinkWhy, transcriptUrl } from '../../src/core/links';
 import { underWebBase } from '../../src/shared/links.mjs';
 import { checkRegistration } from '../../src/core/registry';
+import { dropDerivedSchema } from '../lib/migrationRewind';
 import { MIGRATIONS } from '../../src/migrations';
 import { call, gitlabToken, withCore } from '../helpers';
 
@@ -180,6 +181,7 @@ describe('migration 0012 on a deployed database (R3-1262)', () => {
     await runInDurableObject(env.BATON.get(id), (_o: unknown, state: DurableObjectState) => {
       const sql = state.storage.sql;
       sql.exec('PRAGMA foreign_keys = OFF');
+      dropDerivedSchema(sql);
       for (const o of sql.exec("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%'").toArray() as { name: string }[]) sql.exec(`DROP TABLE IF EXISTS "${o.name}"`);
       for (const m of MIGRATIONS.filter((x) => x.id <= 11)) sql.exec(m.sql);
       sql.exec(`INSERT INTO repositories (id, github, default_branch, sync_workflow, mirror_workflow) VALUES ('docs', 'immediately-run/docs', 'main', '.github/workflows/baton-sync.yml', '.github/workflows/baton-mirror.yml')`);

@@ -362,3 +362,125 @@ kept it from production for six hours ([interventions](interventions.mdx), 2026-
 - **The rule that deploy configuration needs the owner lives in CLAUDE.md, which binds an agent
   only as far as it reads it; nothing in create-pr enforces it.** What changed: nothing yet
   (B-135, B-140). *Still true.*
+
+## 2026-11-21 — migration 0061 could not commit on a database in use, and Baton served nothing for two days
+
+From the deploy of `a96ea4ac` (2026-11-19 12:44Z) every request to `baton.immediately.run` failed:
+each start of the Durable Object ran migration 0061 (B-68's worker → runner rename), the request's
+commit failed with `Durable Object was reset and rolled back … FOREIGN KEY constraint failed`, and
+the object went back to 0060 to try again on the next request. Syncs in both repositories read
+`failed:internal … observation: internal` (the last good one was
+[44526772973](https://github.com/immediately-run/baton/actions/runs/44526772973)), and the retries
+spent Workers Free's 100,000 rows written on 2026-11-20, which hid the cause behind a quota error
+until the owner moved to Workers Paid. 0061 rebuilt `credentials` for its CHECK under
+`PRAGMA defer_foreign_keys = ON` by creating `credentials_0061`, dropping `credentials` and renaming
+the copy into place. The DROP counts every runner, grant and notice that names a credential as a
+deferred violation; only an INSERT of the parent row takes that count back off, never a RENAME, so
+the commit fails whenever a credential is in use — and passes on every test database, which held
+none, or ran with foreign keys off (the rewind's `PRAGMA foreign_keys = OFF` stays off for the
+rest of that request).
+
+- **A table rebuild under deferred foreign keys must insert the rows back into a table created
+  under the parent's own name; a migration test must run it on rows that reference the table,
+  in a request of its own with foreign keys on.** What changed: 0061 rebuilds that way, and
+  `test/unit/migrations-0061.test.ts` runs it on a runner and a grant naming a credential, then
+  reads the result in a later request. 0061 was edited in place, against append-only: it had
+  never committed on a populated database, and the fixed one reaches the same schema.
+  *Status: fixed by this entry's PR; deployed when it merges.*
+
+## 2026-11-21 — the gateway's fence dropped the host's own replies
+
+Evidence: [interventions, 2026-11-21 06:36](interventions.mdx); runner logs
+`runner-run-20261121-064346-r1.log` and `-064345-r2.log` on bering.
+
+**A fence on a NATed address must let established replies in: a host-originated connection's
+reply comes back through the input hook addressed to the very address the fence drops.** The
+Fieldhouse gateway's `ip daddr 192.0.2.10 drop` kept new connections out as meant, but also
+dropped every reply to the executor's own gateway check, which runs on the host, so each leg
+failed `the gateway … does not answer` before its session started. The sandboxes' path (DNAT
+then forward) never showed it. What changed: on bering, an
+`ip daddr 192.0.2.10 ct state established,related accept` before the drop; the fieldhouse
+repository's copy still needs it.
+
+## 2026-11-24 — a runner holds the gateway key it read at start
+
+Evidence: [interventions, 2026-11-24 10:19–13:50](interventions.mdx); B-322's run-tests at
+10:19 in `runner-run-20261123-225903-r1.log` on bering.
+
+**Re-issuing a runner's gateway key revokes the copy the running runner holds: after
+`issue-key.sh`, restart the runner, or every leg fails 401 before its session starts.** The
+E2B executor reads `E2B_LEG_GATEWAY_KEY_FILE` once, at start. The key file was rewritten at
+10:13 UTC; the runner kept the revoked key until it was restarted at 13:37. The gateway's
+`/health/liveliness` answered 200 throughout — health says nothing about a key. What changed:
+the runner was restarted; the executor re-reading the file on a 401 has no ticket yet.
+
+## 2026-11-24 — a leg that succeeded failed on its agent's exit code
+
+Evidence: B-322's implement, claim 563 (07:45–08:26 UTC), PR #407; its archive under
+`~/factory/leg-archive/baton/baton_B-322/implement/r_01M868975FM1ZFB030DB7M02EK/`.
+
+**`opencode run` exits 1 whenever any step of the session failed, even one it recovered from,
+and the stub fails a leg on a non-zero exit before it looks for the PR — so finished work is
+recorded as a failure.** Six seconds in, one model step failed (the gateway's
+`TransferEncodingError`); the session retried, worked 40 minutes, opened #407 and ended
+`execution.succeeded`. The fork's `packages/cli/src/run/noninteractive.ts` sets
+`process.exitCode = 1` on `session.step.failed` and never clears it. The stub
+(`src/defaults/cli.ts`, the agent's `close` handler) rejects on any non-zero code, and the
+"last output" it keeps was the failed response's echo of the leg's instructions, not the
+agent's last words. On B-326 at 19:14 the same stub kept the instructions again, though the
+agent had said plainly why it opened no PR. What changed: nothing yet — a non-zero exit should
+be judged by the leg's own checks (the forge's PR, the verdict line), and the kept output
+should be the agent's.
+
+## 2026-11-24 — four failures, one shape: a component recounting or copying a fact another owns
+
+Evidence: [interventions, 2026-11-24 09:45–19:07](interventions.mdx); B-324, B-335 (#412),
+the two lessons above.
+
+**A runner, stub or log line that derives a fact Baton or the course file already holds will
+drift from it; read the owner's value at the moment of use, and test the course as shipped.**
+In one day: the runner recounted a claim's runs (B-335); the review stub carried the round
+bound it was generated with, 3, while the course file said 8 (B-324); the stub took the agent's
+exit code for the leg's outcome while the forge showed the PR; the runner's log named the
+reply's first next leg instead of the one it started. No test runs the checked-in
+`.baton/courses/create-pr` stubs against their `course.json` — the scenario tests use a fixture
+course with `review: 3`, so 3 and 8 never met. What changed: B-335; the rest is proposed — a
+scenario that drives the shipped create-pr stubs through several review rounds with a scripted
+agent (one exiting 1 after opening its PR), and a check that a generated stub carries no
+`max_runs` literal.
+
+## 2026-11-24 — the runner's log is not Baton's state
+
+Evidence: B-322 and B-324, 2026-11-24; the supervisor's reports from 09:45 to 18:56.
+
+**"suspended … next adjudicate" in the runner's log is the stub's word; what Baton will do
+next is in `GET /v1/repositories/<repo>/tickets?state=…`, so read that before telling the
+owner a ticket waits on them.** For nine hours the supervisor reported B-322 and B-324 as
+waiting on the owner's adjudication. Baton held both `unconfirmed`, with `fix` next by its own
+station function; no answer the owner could give would have moved them. What changed: the
+supervisor's idle check reads `?state=` for every state and groups the reasons first.
+
+## 2026-11-24 — a fix for "ends that name nothing" released none of the 44, because they all named something
+
+Evidence: [interventions, 2026-11-24 20:00](interventions.mdx); B-39's history (claim 437, no
+event after 2026-11-21 12:30 across six accepted syncs since #400 deployed).
+
+**Before fixing a confirmation rule, read what the stuck ends actually carry, not what their leg
+is assumed to send.** #400 assumed a review leg names no `ended_at_sha` because it pushes no
+commit; its close returns the PR comment's URL, which the runner sends and the server stores as
+the end's evidence. What changed: the `std:git.evidence@1` attestation R-BTN-10 always required,
+so ends naming a commit or a URL are confirmed by their evidence.
+
+## 2026-11-25 — a sync change merged and deployed is not running until the workflow's pin moves
+
+Evidence: [interventions, 2026-11-24 20:00](interventions.mdx); the `baton sync` run of
+2026-11-25 01:24 UTC (no `baton: evidence` line); `GET /v1/repositories/baton/tickets?state=unconfirmed`
+still counting 54 afterwards.
+
+**A change on the sync's side of the protocol is live only when `.github/workflows/baton-sync.yml`'s
+pinned `ref:` includes it; after merging one, move the pin in the same breath and read the next
+sync's log for the new line.** #415's tests drove `src/defaults/cli.ts` from this tree; the
+workflow ran the CLI at `17ae8cce`, which never read the observation's list, so the deployed server
+waited for attestations no sync sent. Neither could a script stand in: Cloudflare Access fronts
+`/v1/login`, so a dashboard session cannot be minted from a key alone. What changed: the pin moved
+to `d8f10fc0`.

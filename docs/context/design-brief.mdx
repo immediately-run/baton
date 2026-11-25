@@ -26,6 +26,10 @@ The mockup draws the *content* of the screens and their visual language; the das
 
 ## The questions it answers, in priority order
 
+[The UX rules](ux.mdx) own the questions now: the owner's five (2026-11-21) come first, each
+answered from the landing page in at most two clicks. The list below is this brief's, and it
+follows them.
+
 1. **Does anything need me?** Unconfirmed completions, held tickets, open decisions, tickets
    nobody can take, git overruling Baton.
 2. **What is running?** Each active claim: ticket, runner, leg, how long, when its lease runs
@@ -101,9 +105,31 @@ second. Exceptions stand out; the normal case recedes.
 
 ## Where to look
 
-V1 is gone (the owner ruled the transition needs no smoothing, 2026-11-09): the dashboard is
-`src/dashboard/` — React 19 and TypeScript, built by `npm run build:ui` into the one bundle both
-hosts serve at `/dashboard/app.js` — grown by the BATON-UI-V2 tickets (B-191 to B-223; the project
-page is `tickets/projects/baton-ui-v2.mdx`); its data is the entity reads of
-[BATON_SPEC §14](../../spec/BATON_SPEC/14-api.md#sec-14).
-The screens are [BATON_SPEC §11.4](../../spec/BATON_SPEC/11-people.md#sec-11-4).
+V1 is gone (the owner ruled the transition needs no smoothing, 2026-11-09), and so is the one
+state read it polled (B-203, 2026-11-20). The dashboard is `src/dashboard/` — React 19 and
+TypeScript, built by `npm run build:ui` into the one bundle both hosts serve at
+`/dashboard/app.js` — grown by the BATON-UI-V2 tickets (B-191 to B-223; the project page is
+`tickets/projects/baton-ui-v2.mdx`). The screens are
+[BATON_SPEC §11.4](../../spec/BATON_SPEC/11-people.md#sec-11-4).
+
+- **The screens.** `src/core/screens.ts` is the one table of them — id, path and the session
+  role that may open each — read by the front, the client's router and `check:actions`.
+  `src/dashboard/screens/` holds one folder per entity (`tickets/`, `runners/`, `courses/`,
+  `conditions/`, `sync/`, `credentials/`, `governance/`, `attestations/`, `goals/`, `tenant/`,
+  `board/`, `root/`), registered in `screens/index.ts`; `screens/README.md` is the contract a
+  screen keeps. The frame, the router, the sign-in and the controls are `src/dashboard/app/`;
+  the shared pieces (`Text`, `View`, the polling store, the link rule) `src/dashboard/lib/`.
+- **The data.** Every screen draws its entity's reads and nothing else: the entries of
+  `src/core/actions.ts` with `effect: 'read'`, served by `src/core/reads/` (one module per
+  domain; `reads/index.ts` says how to add one) and listed in
+  [BATON_SPEC §14](../../spec/BATON_SPEC/14-api.md#sec-14). A screen's controls are the entries
+  whose `ui.view` names it, as `GET /v1/actions` lists them to the session — never a button the
+  screen knows of itself. `npm run check:actions` holds the two tables together.
+- **What V1's Needs you listed.** Conditions (`GET …/needs-you`) for a repository, State
+  (`GET /v1/admin/tenant`) for the instance, Sync for an adoption; `test/lib/needsYouLedger.ts`
+  is the list, key by key, and S-BTN-305 checks it against the state.
+- **The whole state in one request** is a terminal's: `GET /v1/admin/state`, an administrator's
+  key's alone (`stateView()` in `src/core/baton.ts`; S-BTN-170 holds it equal to the entity
+  reads). No screen reads it.
+- **Text, never markup.** `test/ui/source-gate.test.ts` scans `src/dashboard/**`;
+  `test/ui/S-BTN-76.renderer.test.tsx` draws hostile values through the real screens.

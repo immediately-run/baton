@@ -2,7 +2,7 @@
 // serves the shell at (B-193), the id the registry's `ui.view` names a screen by (R-BTN-129,
 // §11.3) and B-204's check:actions reads, and the session role that may open it — the same table
 // B-221's client router reads, so no second list exists anywhere. Baton's own, so it is not under
-// the vendored `src/shared/`. Pure data and two pure predicates: no import, nothing a host or a
+// `src/vendor/`. Pure data and two pure predicates: no import, nothing a host or a
 // course owns. `/login` is not a screen — R-BTN-155's sign-in page, served by the front beside
 // the tree — and neither is `/conditions/{id}`, B-195's redirect address.
 

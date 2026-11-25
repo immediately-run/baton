@@ -5,24 +5,27 @@
 // whose rows the unique indexes guard. The model tables are gone (B-142): a heartbeat may still
 // carry `model_provider_id`, `billing`, `usage` and `rate_limits`, all accepted and ignored,
 // and an unavailable provider is a reading (§6.3, R-BTN-76), never a table core keeps.
+import { isLive, liveRunnerSql, type Lease } from './runnerLiveness';
+import { runnerLatest } from './runnerLatest';
 import { BatonError } from './http';
 import { groupBy, logEvent } from './db';
 import type { Deprecated } from './deprecated';
 import { NONCE_TTL_MS, parseSshKey } from './auth';
-import { SESSION_HOSTS, isPullRequestUrl, sessionLinkWhy, transcriptUrl } from './links';
+import { isPullRequestUrl, sessionLinkWhy, transcriptUrl } from './links';
 import { ticketRepositories } from './codeRepos';
 import { DEFAULT_TRANSCRIPT_REPOS, repositoryOf, transcriptReposOf } from './registry';
 
 export { DEFAULT_TRANSCRIPT_REPOS };
-import { capabilitiesOf } from '../shared/vocabulary.mjs';
+import { capabilitiesOf } from '../vendor/vocabulary.mjs';
 import { compareVersions } from '../shared/versions.mjs';
 import {
-  checkAck, checkActivity, checkHeartbeat, checkMessage, checkShadowReport, bad, HOSTNAME, isGrantedKey,
+  REPORT_HORIZON_MS, REPORT_KEYS_MAX, checkAck, checkActivity, checkHeartbeat, checkMessage, checkShadowReport, bad, HOSTNAME, isGrantedKey,
   type ActivityReport, type Heartbeat, HOLDING } from './validate';
 import type { Policies } from './policy';
 
 import type { Config, Row, SqlValue, Store } from './ports';
 import { liveness } from './stateVersion';
+import { REPORT_AGE_FROM, REPORTS_FROM } from './runnerViews';
 
 const CLOSE_GRACE_MS = 10 * 60_000; // §6.9: closing updates are accepted 10 minutes after a claim ends
 
@@ -46,31 +49,31 @@ export interface Ctx {
   config: Config;
   now: () => number;
   /** R-BTN-19: a heartbeat's `fenced` report, handed to the claims (R3-1212). */
-  fenced?: (runnerId: number, incarnation: number, claimId: number) => boolean;
+  fenced: (runnerId: number, incarnation: number, claimId: number) => boolean;
   /** §7.5 R-BTN-90 (B-234): a heartbeat's `leg_finished` for its claim's running run, handed to
    *  the claims — the re-arm and the withdrawal, before this beat delivers its messages. */
-  legFinished?: (runnerId: number, claimId: number, seq: number) => void;
+  legFinished: (runnerId: number, claimId: number, seq: number) => void;
   /** §11: where the claim is and what git shows of its ticket (R3-1232), from the claims. */
-  claimView?: (claimId: number) => Record<string, unknown>;
+  claimView: (claimId: number) => Record<string, unknown>;
   /** R-BTN-67: the owner bars in force on the credential's repositories, for the heartbeat's `bars`. */
-  bars?: (now: number, credentialId: string) => unknown[];
+  bars: (now: number, credentialId: string) => unknown[];
   /** R-BTN-103: store the repositories and `asks` a heartbeat delivers notices for (`granted`: the
    *  repositories a machine key works on, null for any other key), returning what was refused. */
-  couriers?: (runnerId: number, granted: string[] | null, entries: { repository: string; asks: string[] }[]) => { repository: string; code: string }[];
+  couriers: (runnerId: number, granted: string[] | null, entries: { repository: string; asks: string[] }[]) => { repository: string; code: string }[];
   /** §12.8 (B-145): the policy store — the protection reports and pins a heartbeat carries
    *  (R-BTN-180, R-BTN-189) and the hashes the answer carries for its repositories. */
-  policies?: Policies;
+  policies: Pick<Policies, 'recordProtection'>;
   /** R-BTN-75: a runner became live or changed what it declares. */
-  fleetChanged?: () => void;
+  fleetChanged: () => void;
   /** R-BTN-75: a shadow report's claim holds its ticket, or no longer does — the claim's start
    *  is silent (R-BTN-77), its end an event that wakes no one (R-BTN-75 as amended by R3-1254,
    *  B-26). */
-  held?: (ticketId: string, silent: boolean) => void;
+  held: (ticketId: string, silent: boolean) => void;
   /** The retired-fields window's one writer (B-168): a heartbeat's `uses`. */
-  deprecated?: Deprecated;
+  deprecated: Pick<Deprecated, 'note'>;
   /** B-4 (R-BTN-113): the instance's session-host allowlist, `instance_settings` first, else the
-   *  deploy's BATON_SESSION_HOSTS. Absent, the config's alone (a unit test's RunnerApi). */
-  sessionHosts?: () => string[];
+   *  deploy's BATON_SESSION_HOSTS. */
+  sessionHosts: () => string[];
 }
 
 export class RunnerApi {
@@ -286,13 +289,13 @@ export class RunnerApi {
    *  claim, the messages, the stale courses and the mode. A `uses` a runner still sends is its
    *  retired declaration that it uses account instances (B-168): the heartbeat reads it as
    *  absent, logging `deprecated-field`. */
-  // @model heartbeat sha256:b4745be87ea5
-  // @model declare sha256:6bcad587d342
+  // @model heartbeat sha256:27844ee91e6c
+  // @model declare sha256:8af9917a77b9
   async heartbeat(credentialId: string, secretHeader: string | null, body: unknown, clientVersion: string | null = null, legacyName = false) {
     // B-168 (R-BTN-76): `uses` is retired — a runner uses the repository's instances, never a set
     // it declares — and read as absent while the history's Migrations entry lasts.
     if (body && typeof body === 'object' && !Array.isArray(body) && (body as { uses?: unknown }).uses !== undefined) {
-      this.c.deprecated?.note(this.c.now(), `credential:${credentialId}`, 'heartbeat.uses', 'heartbeat');
+      this.c.deprecated.note(this.c.now(), `credential:${credentialId}`, 'heartbeat.uses', 'heartbeat');
     }
     const hb = checkHeartbeat(body, this.transcriptRepos());
     // R-BTN-66: a per-repository ceiling names a tier of that registered repository's ladder.
@@ -366,7 +369,7 @@ export class RunnerApi {
 
     let rekeyed = false;
     // R-BTN-75: a runner that was not live before this heartbeat joins the fleet's counts.
-    const was = w ? this.rows<{ live: number }>(`SELECT reaped_at IS NULL AND last_seen_at + lease_timeout_ms > ? AS live FROM runners WHERE id = ?`, now, w.id)[0] : null;
+    const was = w ? this.rows<{ live: number }>(`SELECT ${liveRunnerSql()} AS live FROM runners WHERE id = ?`, now, w.id)[0] : null;
     if (!w) {
       if (!hb.secret_hash) bad('secret_hash', 'the first heartbeat of a session carries its SHA-256');
       this.exec(`INSERT INTO runners (hostname, session_name, secret_hash, credential_id, harness, kind, model_id,
@@ -437,13 +440,14 @@ export class RunnerApi {
     const granted = this.grantedRepos(cred);
     // R-BTN-103: the notices it delivers as a runner courier — a machine key's, on repositories it
     // is granted on; a refused entry never refuses the heartbeat either.
-    const refusedCouriers = [...hb.couriers.refused, ...(this.c.couriers?.(w.id, cred.kind === 'runner' ? granted : null, hb.couriers.entries) ?? [])];
+    const refusedReports = this.recordReports(w.id, granted, hb.reports, now);
+    const refusedCouriers = [...hb.couriers.refused, ...this.c.couriers(w.id, cred.kind === 'runner' ? granted : null, hb.couriers.entries)];
     // §12.8 (B-145, R-BTN-180): only the protection checker's reports feed `no-runner-lands` —
     // a report from anyone else is refused per entry; the sync's and other trusted runners'
     // readings only log a discrepancy, so a granted key's report is logged as one.
     const protectionRefused: { repository: string; code: string }[] = [];
     for (const report of hb.protection) {
-      if (this.c.policies?.recordProtection(report.repository, report, cred.id)) continue;
+      if (this.c.policies.recordProtection(report.repository, report, cred.id)) continue;
       if (this.rows('SELECT 1 FROM runner_grants WHERE credential_id = ? AND repository_id = ? AND revoked_at IS NULL', cred.id, report.repository).length) {
         this.event('discrepancy', `runner:${w.id}`, { kind: 'protection-report', repository: report.repository, matched: report.matched, by: cred.id }, null, null);
         protectionRefused.push({ repository: report.repository, code: 'not-checker' });
@@ -451,17 +455,13 @@ export class RunnerApi {
         protectionRefused.push({ repository: report.repository, code: 'not-granted' });
       }
     }
-    // §12.8 (B-145, R-BTN-189): the policy pins a trusted runner reports — stored per
-    // repository, a differing one holding `baton.policy-unpinned` open (a pin from a grant not
-    // trusted on the repository drives nothing).
-    if (this.c.policies && hb.policy_pins.length) this.c.policies.recordPins(w.id, cred.id, hb.policy_pins, new Set(granted ?? []));
-    if (!was?.live || rewrote) this.c.fleetChanged?.();
+    if (!was?.live || rewrote) this.c.fleetChanged();
     const refused = hb.transcript_refusals;
     const unlinked = this.recordTranscripts(w.id, hb, now);
 
     const fresh = this.rows<{ incarnation: number; lease_timeout_ms: number }>('SELECT incarnation, lease_timeout_ms FROM runners WHERE id = ?', w.id)[0];
     // R-BTN-19: only a heartbeat with the secret (never the hash path) clears a fence.
-    if (secretSeen) for (const f of hb.fenced) this.c.fenced?.(w.id, fresh.incarnation, f.claim_id);
+    if (secretSeen) for (const f of hb.fenced) this.c.fenced(w.id, fresh.incarnation, f.claim_id);
     const claims = this.activeClaims(w.id);
     const mine = new Map(claims.map((c) => [c.id, c]));
     // R-BTN-113 (B-234, B-4): the running leg's session link, stored on its `claim_legs` row (latest
@@ -478,14 +478,16 @@ export class RunnerApi {
     for (const link of links) {
       const claim = mine.get(link.claim_id);
       if (!claim) continue; // a claim this runner no longer holds: its link has nothing to land on
-      const why = sessionLinkWhy(link.url, this.c.sessionHosts?.() ?? SESSION_HOSTS.of(this.c.config));
+      const why = sessionLinkWhy(link.url, this.c.sessionHosts());
       if (why != null) {
         sessionUrlDropped = why;
-        this.event('discrepancy', `runner:${w.id}`, { sub: 'session-url', why, url: link.url.slice(0, 120) }, claim.ticket_id, claim.id);
+        this.event('discrepancy', `runner:${w.id}`, { sub: 'session-url', why }, claim.ticket_id, claim.id);
       } else {
-        // The same link again changes no row (B-237: so a working runner's beat moves no version).
-        this.exec(`UPDATE claim_legs SET session_url = ? WHERE claim_id = ? AND finished_at IS NULL AND abandoned_at IS NULL AND session_url IS NOT ?`,
-          link.url, claim.id, link.url);
+        // The same report from the same incarnation changes no row (B-237).
+        this.exec(`UPDATE claim_legs SET session_url = ?, session_incarnation = ?
+                   WHERE claim_id = ? AND finished_at IS NULL AND abandoned_at IS NULL
+                     AND (session_url IS NOT ? OR session_incarnation IS NOT ?)`,
+          link.url, fresh.incarnation, claim.id, link.url, fresh.incarnation);
       }
     }
     // §7.5 R-BTN-90 (B-234): `leg_finished` is processed before this beat delivers its
@@ -494,11 +496,12 @@ export class RunnerApi {
     // B-188: by claim (`legs_finished`); the bare `leg_finished` is a lone claim's.
     const finished = [...hb.legs_finished];
     if (hb.leg_finished !== undefined && claims.length === 1) finished.push({ claim_id: claims[0].id, seq: hb.leg_finished });
-    for (const f of finished) if (mine.has(f.claim_id)) this.c.legFinished?.(w.id, f.claim_id, f.seq);
+    for (const f of finished) if (mine.has(f.claim_id)) this.c.legFinished(w.id, f.claim_id, f.seq);
     // B-86: the capabilities a runner with no `--capabilities` declares (see `grantCapabilities`).
     const grantCapabilities = this.grantCapabilities(cred, w.id);
     return {
       runner_id: w.id,
+      ...(refusedReports.length ? { reports_refused: refusedReports } : {}),
       // B-68's dual-read window: old runners can finish upgrading from the same answer. B-69
       // removes this alias once `legacy_names_at` shows none remain.
       worker_id: w.id,
@@ -507,38 +510,24 @@ export class RunnerApi {
       grant: { capabilities: grantCapabilities },
       // R-BTN-4 (B-188): every active claim; `claim`, the oldest, stays for runners before B-188.
       ...(() => {
-        const views = claims.map((c) => ({ ...c, ...this.c.claimView?.(c.id), activity: this.currentActivity(w.id, c.id) }));
+        const views = claims.map((c) => ({ ...c, ...this.c.claimView(c.id), activity: this.currentActivity(w.id, c.id) }));
         return { claims: views, claim: views[0] ?? null };
       })(),
       messages: this.deliver(w.id, now),
       // R-BTN-67: the owner bars in force on its repositories, so harness hooks can act on them offline.
-      bars: this.c.bars?.(now, credentialId) ?? [],
+      bars: this.c.bars(now, credentialId),
       // R-BTN-22: the declared courses below their min_runner_version — no new claim on them.
       stale_courses: this.staleCourses(w.id),
       // §11: each repository's mode (R-BTN-28, per repository).
       mode: Object.fromEntries(this.rows<{ id: string; cutover_at: number | null }>('SELECT id, cutover_at FROM repositories WHERE retired_at IS NULL ORDER BY id')
         .map((r) => [r.id, r.cutover_at == null ? 'shadow' : 'cut-over'])),
       server_time: now,
-      // §12.8 (B-145, R-BTN-189): the policy facts of every repository the runner serves — a
-      // map, for a runner's grants and courses reach several.
-      ...(this.c.policies ? { policies: this.policyFacts(granted, hb) } : {}),
       ...(protectionRefused.length ? { protection_refused: protectionRefused } : {}),
       ...(sessionUrlDropped != null ? { session_url_dropped: sessionUrlDropped } : {}),
       ...(refused.length ? { transcripts_refused: refused } : {}),
       ...(refusedCouriers.length ? { refused_couriers: refusedCouriers } : {}),
       ...(unlinked.length ? { transcripts_unlinked: unlinked } : {}),
     };
-  }
-
-  /** §12.8 (B-145, R-BTN-189): the policy facts of the repositories this heartbeat's runner
-   *  serves — its grants', and a bearer's or seed key's the courses it declares. */
-  private policyFacts(granted: string[] | null, hb: Heartbeat): Record<string, { version: number; policy_hash: string; guarantees_hash: string; floors_hash: string }> {
-    const policies = this.c.policies!;
-    const repos = granted ?? [...new Set(hb.courses.map((c) => c.repository))];
-    return Object.fromEntries(repos
-      .map((repository) => [repository, policies.hashesFor(repository)] as const)
-      .filter(([, v]) => v != null)
-      .map(([repository, v]) => [repository, v!]));
   }
 
   /**
@@ -580,6 +569,27 @@ export class RunnerApi {
   private credentialAllowed(id: string): string[] {
     const row = this.rows<{ allowed_capabilities: string }>('SELECT allowed_capabilities FROM credentials WHERE id = ?', id)[0];
     return row ? [...(JSON.parse(row.allowed_capabilities) as string[])] : [];
+  }
+
+  private recordReports(runner: number, grants: string[] | null, reports: Heartbeat['reports'], now: number): number[] {
+    const refused: number[] = [];
+    for (const [i, report] of reports.entries()) {
+      const claim = 'claim_id' in report ? report.claim_id : 0;
+      const held = claim ? this.rows<{ ticket_id: string }>("SELECT ticket_id FROM claims WHERE id = ? AND runner_id = ? AND status = 'active'", claim, runner)[0] : null;
+      const repo = held ? repositoryOf(held.ticket_id) : 'repository' in report ? report.repository : null;
+      if (!repo || (grants && !grants.includes(repo)) || !this.rows('SELECT 1 FROM repositories WHERE id = ? AND retired_at IS NULL', repo).length) {
+        refused.push(i);
+        continue;
+      }
+      const scope = [runner, repo, claim] as const;
+      this.exec(`INSERT INTO runner_reports (runner_id, repository_id, claim_id, key, received_at, payload)
+        VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT DO UPDATE SET received_at = excluded.received_at, payload = excluded.payload`,
+        ...scope, report.key, now, report.payload);
+      this.exec(`DELETE FROM runner_reports WHERE runner_id = ? AND repository_id = ? AND claim_id = ? AND key IN (
+        SELECT key FROM runner_reports WHERE runner_id = ? AND repository_id = ? AND claim_id = ?
+        ORDER BY received_at DESC, rowid DESC LIMIT -1 OFFSET ?)`, ...scope, ...scope, REPORT_KEYS_MAX);
+    }
+    return refused;
   }
 
   /** §3's write budget: capability rows change only with the settings hash. */
@@ -786,6 +796,8 @@ export class RunnerApi {
   /** The expiry of a reaped runner's open messages (§9). R3-1212 adds reaping. */
   alarm() {
     const now = this.c.now();
+    this.exec(`DELETE FROM runner_reports WHERE rowid IN (
+      SELECT rr.rowid FROM ${REPORTS_FROM} WHERE (${REPORT_AGE_FROM}) <= ?)`, now - REPORT_HORIZON_MS);
     // B-236: driven from the open messages (`messages_by_status`), each runner read by its key —
     // never from the reaped runners, whose rows are kept forever (R-BTN-3).
     this.exec(`UPDATE messages SET status = 'expired' WHERE status IN ('pending','delivered')
@@ -832,7 +844,7 @@ export class RunnerApi {
         r.ticket_id, runnerId, `shadow:${runnerId}:${r.ticket_id}:${r.nonce}`, r.nonce!, head, r.at, repo, r.ticket_id, r.ticket_id, r.ticket_id);
       const id = this.rows<{ id: number }>('SELECT last_insert_rowid() AS id')[0].id;
       this.event('claimed', actor, { shadow: true, nonce: r.nonce }, r.ticket_id, id);
-      this.c.held?.(r.ticket_id, true); // a claim's start is silent (R-BTN-77)
+      this.c.held(r.ticket_id, true); // a claim's start is silent (R-BTN-77)
       return { ok: true, claim_id: id };
     }
     // `set`: in-progress and in-review keep the claim — in-review is an activity of an active
@@ -848,7 +860,7 @@ export class RunnerApi {
     this.event('released', actor, { shadow: true, status: r.status }, r.ticket_id, holder.id);
     // The end leaves the ticket unheld: like every end it is never an unblocking, and one that
     // leaves the ticket blocked logs `blocked`, which wakes no one (R3-1254, B-26).
-    this.c.held?.(r.ticket_id, false);
+    this.c.held(r.ticket_id, false);
     return { ok: true, claim_id: holder.id };
   }
 
@@ -871,72 +883,34 @@ export class RunnerApi {
 
   // ── the dashboard's Runners view (§14) ──────────────────────────────────────────────────
 
-  /** Every runner row ever registered (R-BTN-3 keeps them) with its declarations, active
-   *  claims, current activity, latest transcript and latest status report. B-250: one read per
-   *  list, whatever the fleet's size — the per-runner loop this replaced ran about six queries
-   *  for *every* runner, reaped ones included, ~1.9k statements a poll at 300 runners. Each
-   *  read covers a set bounded without the runners' count — the declarations (R-BTN-149's
-   *  retention prunes a runner unseen 30 days), the active claims (`claims_active_by_runner`)
-   *  and open activities (`activities_open`) through their partial indexes, the status reports
-   *  through 0063's `messages_reports` — or a table the per-runner reads already walked in sum
-   *  (the transcripts: a latest-per-runner read keyed by `runner_id` costs the runners
-   *  registered, the very count this view stops paying, so it walks the table once instead).
-   *  The rows are grouped here to the order the per-runner reads served, and the latest of a
-   *  list is kept in code by the key its per-runner `ORDER BY … LIMIT 1` broke ties on — the
-   *  unique `received_at` of an activity, the unique `id` of a report, and, for the
-   *  transcripts, the union read's own arrival order at their fold below. `runners` itself is
-   *  read in its served order through 0063's `runners_by_hostname`: a sort reads every row
-   *  twice on the Cloudflare host. */
-  runnersView(now: number) {
-    const runners = this.rows<Row>(`SELECT id, hostname, session_name, harness, kind, isolation, model_id, tier_ceiling, tier_ceilings, lease_timeout_ms,
-                                       first_seen_at, last_seen_at, last_activity_at, reaped_at, incarnation, profile_json, client_version, legacy_names_at FROM runners ORDER BY hostname, id`);
-    const capabilities = groupBy(this.rows('SELECT runner_id, capability, declared FROM runner_capabilities ORDER BY capability'), 'runner_id');
+  /** Every runner row ever registered (R-BTN-3), with one read per list (B-250).
+   *  B-270 / S-BTN-243: only live runners get their latest transcript and report. The
+   *  roster is already read for the response; `isLive` selects the same set as a range
+   *  read through `runners_live`, without a second roster query. */
+  runnersView(now: number, page?: { repository: string; after: number; limit: number }) {
+    const runners = this.rows<Row & Lease & { reaped_at: number | null }>(`SELECT id, hostname, session_name, harness, kind, isolation, model_id, tier_ceiling, tier_ceilings, lease_timeout_ms,
+                                       first_seen_at, last_seen_at, last_activity_at, reaped_at, incarnation, profile_json, client_version, legacy_names_at FROM runners ${page ? `w WHERE w.id IN (SELECT DISTINCT runner_id FROM runner_courses WHERE repository_id = ? AND runner_id > ? ORDER BY runner_id LIMIT ?)
+                                       ORDER BY w.id` : 'ORDER BY hostname, id'}`, ...(page ? [page.repository, page.after, page.limit] : []));
+    const ids = JSON.stringify(runners.map((r) => r.id));
+    if (!runners.length) return [];
+    const capabilities = groupBy(this.rows(`SELECT runner_id, capability, declared FROM runner_capabilities${page ? ' WHERE runner_id IN (SELECT value FROM json_each(?))' : ''} ORDER BY capability`, ...(page ? [ids] : [])), 'runner_id');
     const courses = groupBy(this.rows(`SELECT f.runner_id, f.repository_id AS repository, f.course_id AS course, f.version, c.min_runner_version
                                        FROM runner_courses f LEFT JOIN courses c ON c.repository_id = f.repository_id AND c.id = f.course_id
-                                       ORDER BY f.repository_id, f.course_id`), 'runner_id');
-    const claims = groupBy(this.rows(`SELECT runner_id, id, ticket_id, nonce, claimed_at FROM claims WHERE status = 'active' ORDER BY claimed_at, id`), 'runner_id');
+                                       ${page ? 'WHERE f.runner_id IN (SELECT value FROM json_each(?))' : ''} ORDER BY f.repository_id, f.course_id`, ...(page ? [ids] : [])), 'runner_id');
+    const claims = groupBy(this.rows(`SELECT runner_id, id, ticket_id, nonce, claimed_at FROM claims WHERE status = 'active'${page ? ' AND runner_id IN (SELECT value FROM json_each(?))' : ''} ORDER BY claimed_at, id`, ...(page ? [ids] : [])), 'runner_id');
     // §9.9: the newest open activity per runner — `received_at` breaks ties and is never served.
     const activity = new Map<number, { id: string; kind: string; label: string | null; started_at: number; claim_id: number | null; received_at: number }>();
     for (const a of this.rows<{ runner_id: number; id: string; kind: string; label: string | null; started_at: number; claim_id: number | null; received_at: number }>(
-      'SELECT runner_id, id, kind, label, started_at, claim_id, received_at FROM activities WHERE ended_at IS NULL')) {
+      `SELECT runner_id, id, kind, label, started_at, claim_id, received_at FROM activities WHERE ended_at IS NULL${page ? ' AND runner_id IN (SELECT value FROM json_each(?))' : ''}`, ...(page ? [ids] : []))) {
       const best = activity.get(a.runner_id);
       if (!best || a.started_at > best.started_at
         || (a.started_at === best.started_at && a.received_at > best.received_at)) activity.set(a.runner_id, a);
     }
-    // §6.8: the latest transcript per runner, by the rule the per-runner union read settled
-    // ties with. That read fed its `ORDER BY t DESC LIMIT 1` sorter the linked table's rows
-    // first and each table in its autoindex's order — `(runner_id, repo, path, claim_id)`,
-    // `(runner_id, repo, path)` — and a sorter keeps the first of a tie, so: a greater t wins,
-    // a tie keeps a linked pointer over a pending one, and within one table the
-    // lexicographically least (repo, path, claim_id). A first heartbeat reports several
-    // pointers at one instant (they share its `first_seen_at`), so the tie is ordinary, and a
-    // walk that kept the first row it saw — rowid order, not the autoindex's — would serve
-    // another transcript_url than the per-runner read did. The fold below walks the linked
-    // table first and replaces the kept pointer only at a strictly greater t or, same table
-    // and instant, a lexicographically smaller (repo, path, claim_id): the old rule exactly.
-    type Pointer = { runner_id: number; repo: string; path: string; claim_id: number; t: number; linked: boolean };
-    const transcript = new Map<number, Pointer>();
-    const latest = (r: Pointer) => {
-      const best = transcript.get(r.runner_id);
-      if (!best || r.t > best.t
-        || (r.t === best.t && r.linked === best.linked
-          && (r.repo < best.repo || (r.repo === best.repo && (r.path < best.path
-            || (r.path === best.path && r.claim_id < best.claim_id)))))) transcript.set(r.runner_id, r);
-    };
-    for (const t of this.rows<{ runner_id: number; repo: string; path: string; claim_id: number; t: number }>(
-      'SELECT runner_id, repo, path, claim_id, COALESCE(last_pushed_at, first_seen_at) AS t FROM transcripts')) latest({ ...t, linked: true });
-    for (const t of this.rows<{ runner_id: number; repo: string; path: string; t: number }>(
-      'SELECT runner_id, repo, path, COALESCE(last_pushed_at, first_seen_at) AS t FROM pending_transcripts')) latest({ ...t, claim_id: 0, linked: false });
-    // §9: the latest status report per runner — `id` decides, never the scan's order.
-    const reports = new Map<number, { payload_json: string | null; sent_at: number; id: number }>();
-    for (const m of this.rows<{ runner_id: number; id: number; payload_json: string | null; sent_at: number }>(
-      `SELECT from_runner_id AS runner_id, id, payload_json, sent_at FROM messages WHERE kind = 'status_report'`)) {
-      const best = reports.get(m.runner_id);
-      if (!best || m.id > best.id) reports.set(m.runner_id, m);
-    }
+    const liveIds = JSON.stringify(runners.filter((w) => isLive(w, now)).map((w) => w.id));
+    const { transcript, reports } = runnerLatest((q, ids) => this.rows(q, ids), liveIds);
     return runners.map((w) => {
       const id = w.id as number;
-      const alive = w.reaped_at == null && now - (w.last_seen_at as number) < (w.lease_timeout_ms as number);
+      const alive = isLive(w, now);
       const claimsList = claims.get(id) ?? [];
       const a = activity.get(id);
       const t = transcript.get(id);

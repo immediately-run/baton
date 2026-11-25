@@ -110,7 +110,7 @@ describe('R-BTN-79: the bound, as a warning', () => {
     // Visible: the repository's stats and the dashboard's courses carry the queue and the intake.
     const stats = await withCore((o) => (o.stats as unknown as { of: (r: string, since: number, now: number) => Record<string, any> }).of('docs', 0, T0));
     expect(stats.courses['roadmap-pr']).toMatchObject({ intake: 'closed', legs: { fix: { queue: { depth: 2, max_queue: 1 } } } });
-    const ui = await (await sessionCall(await adminSession(admin), '/v1/ui/state')).json() as { repositories: { id: string; courses: unknown[] }[] };
+    const ui = (await keyCall(admin, '/v1/admin/state')).json as { repositories: { id: string; courses: unknown[] }[] };
     expect(ui.repositories.find((r) => r.id === 'docs')!.courses).toEqual([expect.objectContaining({ id: 'roadmap-pr', intake: 'closed',
       queues: expect.arrayContaining([{ leg: 'fix', depth: 2, max_queue: 1 }]) })]);
     const [first] = await overNotices();

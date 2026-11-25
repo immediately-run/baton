@@ -11,7 +11,7 @@
 // or lanes, the lookups search their indexes (migration 0055), and on the Cloudflare host a
 // state whose history is out of the window costs rows of its window, not of its history.
 import { describe, it, expect, beforeEach } from 'vitest';
-import { Git, HOST, adminSession, cutover, register, rows, sessionCall, setAdminKeys, setClock, withCore } from '../helpers';
+import { Git, HOST, adminSession, cutover, register, rows, sessionCall, setAdminKeys, setClock, withCore, keyCall } from '../helpers';
 import { makeKey, type TestKey } from '../lib/sshKeys';
 import { transcriptUrl } from '../../src/core/links';
 
@@ -36,9 +36,11 @@ async function state(session: string): Promise<{ state: Record<string, any>; log
     };
   });
   try {
-    const res = await sessionCall(session, '/v1/ui/state');
+    // B-203: the state is `GET /v1/admin/state`'s alone now — the same `stateView()`, read
+    // with the administrator's key the session was minted from.
+    const res = await keyCall(admin, '/v1/admin/state');
     expect(res.status).toBe(200);
-    return { state: (await res.json()) as Record<string, any>, log };
+    return { state: res.json as Record<string, any>, log };
   } finally {
     await withCore((c) => {
       const s = c.store as unknown as { exec: unknown; __b240?: unknown };
@@ -63,6 +65,7 @@ async function oldRunning(now: number) {
     const alive = c.kind !== 'legacy' && now - c.last_seen_at < c.lease_timeout_ms;
     out.push({
       ...c,
+      session_url: null, session_link: c.session_url != null,
       alive,
       reap_at: c.kind === 'legacy' ? null : c.last_seen_at + c.lease_timeout_ms,
       stalled: alive && (c.last_activity_at == null ? now - c.claimed_at : now - c.last_activity_at) > STALLED_MS,
@@ -88,7 +91,7 @@ async function oldTimeline(now: number) {
         activities.push({ ...a, transcript_url: t ? transcriptUrl(t.repo, t.path) : null });
       }
       const runs = (await rows<Record<string, any>>('SELECT leg, started_at, finished_at, abandoned_at, session_url FROM claim_legs WHERE claim_id = ? ORDER BY seq', c.id))
-        .map((r) => ({ leg: r.leg, started_at: r.started_at, ended_at: r.finished_at ?? r.abandoned_at ?? null, session_url: r.session_url }));
+        .map((r) => ({ leg: r.leg, started_at: r.started_at, ended_at: r.finished_at ?? r.abandoned_at ?? null, session_url: null, session_link: r.session_url != null }));
       claims.push({ ...c, runs, activities });
     }
     lanes.push({ ...l, claims });
@@ -249,7 +252,7 @@ describe('B-240 Running and Timeline in joined queries', { timeout: 120_000 }, (
     // and the Runners view's own reads (its claims, its open activities, its latest transcript,
     // now one query per list) are B-250's, not this ticket's.
     const read = (log: Captured[]) => log.filter((l) => /\b(claims|activities|transcripts)\b/.test(l.sql) && !/\bFROM events\b/.test(l.sql) && !/\bWHERE runner_id = \?/.test(l.sql)
-      && !/FROM claims WHERE status = 'active' ORDER BY claimed_at, id$/.test(l.sql) && !/FROM activities WHERE ended_at IS NULL$/.test(l.sql) && !/AS t FROM (pending_)?transcripts$/.test(l.sql))
+      && !/FROM claims WHERE status = 'active' ORDER BY claimed_at, id$/.test(l.sql) && !/FROM activities WHERE ended_at IS NULL$/.test(l.sql) && !/AS t FROM (pending_)?transcripts\b/.test(l.sql))
       .reduce((s, l) => s + (l.cursor.rowsRead ?? 0), 0);
     await state(session); // the session's first read does its own one-time work
     const before = await quiet(session);

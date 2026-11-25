@@ -2,11 +2,11 @@
 // the course declarations a heartbeat needs (rule 9), the credential the environment names and
 // the runner secret's shape. Node only: it writes temp checkouts and runs ssh-keygen.
 import { describe, it, expect, vi } from 'vitest';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { capabilitiesOf } from '../../src/shared/vocabulary.mjs';
+import { capabilitiesOf } from '../../src/vendor/vocabulary.mjs';
 import { asksHelp, declareCourses, fetchMain, hostMaskEnv, parseRunArgs, runMain, servedCourses } from '../../src/runner/main';
 import { drainLines, Runner, withTimestamps } from '../../src/runner/runner';
 import { BatonApi, BatonRefusal } from '../../src/runner/api';
@@ -14,8 +14,12 @@ import { HARNESS_AGENTS, AGENT_PROMPT } from '../../src/runner/harness';
 import { splitWords } from '../../src/defaults/agent-words';
 import { envAuth } from '../../src/runner/api';
 import { advanceHome, courseOf, dropCourse, freshSecret, holdHome, legNeeds, loadCourse, readHead } from '../../src/runner/home';
+import { ClaimRun } from '../../src/runner/claimRun';
+import { Sidecar } from '../../src/runner/sidecar';
+import { StateFile } from '../../src/runner/state';
 import { declarationFrom } from '../../src/runner/runner';
 import { validateCourse } from '../../src/core/course';
+import { graphOf } from '../../src/core/graph';
 
 function home(): string {
   const dir = mkdtempSync(join(tmpdir(), 'baton-main-'));
@@ -55,6 +59,8 @@ describe('parseRunArgs', () => {
     expect(() => parseRunArgs(['--lock', 'mcp:chrome'], {})).toThrow('<capability>=<path>');
     // Verbose logging (2026-10-23): timestamps, the claim's id and nonce, the leg's command.
     expect(parseRunArgs(['--verbose'], {}).verbose).toBe(true);
+    expect(parseRunArgs([], {}).restartWhenBehind).toBe(false);
+    expect(parseRunArgs(['--restart-when-behind'], {}).restartWhenBehind).toBe(true);
   });
 });
 
@@ -157,6 +163,21 @@ describe('the agent_command a runner runs (B-83)', () => {
     // its own: escaped in HARNESS_AGENTS, the no-shell split (B-84) still spawns it whole.
     expect(splitWords(HARNESS_AGENTS.opencode).at(-1)).toBe(AGENT_PROMPT);
     expect(splitWords(HARNESS_AGENTS['claude-code']).at(-1)).toBe(AGENT_PROMPT);
+  });
+
+  it('leaves completion criteria to the leg instructions in both briefings (B-317)', () => {
+    const settings = JSON.parse(readFileSync(join(__dirname, '..', '..', '.baton', 'baton.json'), 'utf8'));
+    const prompt = splitWords(settings.agent_command).at(-1);
+    expect(prompt).toBe(AGENT_PROMPT);
+    expect(AGENT_PROMPT).toContain('When you have met the completion criteria in the leg instructions, exit immediately.');
+    expect(AGENT_PROMPT).not.toContain('the checks green');
+  });
+
+  it('allows permitted questions in the foreground without suspending the one-shot process (B-325, S-BTN-222)', () => {
+    expect(AGENT_PROMPT).toContain('If your leg instructions allow it and only the owner can unblock you');
+    expect(AGENT_PROMPT).toContain("ask through the harness's question tool and wait for the answer in the foreground");
+    expect(AGENT_PROMPT).toContain('if nobody answers, let Baton take the claim back at the leg deadline');
+    expect(AGENT_PROMPT).not.toContain('never write that you are waiting');
   });
 
   it('settings naming no agent_command drive from --harness, the command logged; a named one is left to the settings', async () => {
@@ -282,7 +303,7 @@ describe('the grant\'s declaration (B-86)', () => {
     expect([...new Set(needs)].sort()).toEqual(['authentication', 'create-pr', 'credential:DEPLOY_TOKEN', 'drivable-browser', 'llm-call', 'vpn:corp']);
     expect(needs).not.toContain('deployer');
     // A declaration carrying the role meets every need the role carries — the never-eligible
-    // line (runner.ts `reportEligibility`) compares needs with `capabilitiesOf(declared)`.
+    // line (sidecar.ts `reportEligibility`) compares needs with `capabilitiesOf(declared)`.
     const held = capabilitiesOf(['agent-venue']);
     expect([...new Set(needs)].filter((n) => !held.has(n))).toEqual(['vpn:corp', 'credential:DEPLOY_TOKEN']);
     expect(legNeeds(dir, '', 'no-such-course')).toEqual([]);
@@ -661,14 +682,6 @@ describe('the first beat (B-93, S-BTN-159: a runner start says what it does, and
     mkdirSync(home);
     const r = new Runner({ api, home, repository: 'docs', hostname: 'vm-a', harness: 'opencode', session: 'fresh',
       courses: [{ course: 'create-pr', version: 1 }], stateFile: join(home, 'fresh.json'), beatEvery: 60_000, log });
-    const state: Record<string, unknown> = { runner_id: null, claim: null };
-    const live = r as unknown as { state: Record<string, unknown> };
-    live.state = {
-      get: () => state,
-      set: (patch: Record<string, unknown>) => { Object.assign(state, patch); },
-      // A spool nobody wrote: the beat takes nothing, and its remove is the runner's own no-op.
-      spool: join(home, 'spool.jsonl'),
-    };
     return r;
   };
 
@@ -681,8 +694,8 @@ describe('the first beat (B-93, S-BTN-159: a runner start says what it does, and
   const DECLARED = "baton: declaring agent-venue, create-pr, drivable-browser, llm-call — the grant's capabilities, no --capabilities given";
 
   /** A Baton that answers every call as the first beat's ordering makes it: the heartbeat
-   *  registers the runner, and from then on the recommendation and the claim answer. `refuseWith`
-   *  sets what the recommendation throws — counting each throw, so a case can tell the refusal
+   *  registers the runner before the single claim attempt. `refuseWith`
+   *  sets what the claim attempt throws — counting each throw, so a case can tell the refusal
    *  was reached — or null for none. The heartbeat answers after a turn of the event loop, as a
    *  round trip does: what the quiet start guards is that nothing is asked of Baton while it is
    *  still out. */
@@ -705,14 +718,14 @@ describe('the first beat (B-93, S-BTN-159: a runner start says what it does, and
         order.push('heartbeat:answer');
         return { runner_id: 7, incarnation: 1, messages: [], sent: body.capabilities ?? [], ...grant };
       },
-      recommendations: async () => {
-        order.push(`recommendations(registered:${registered})`);
-        calls.recommendations++;
-        if (refuse) throw refuse(); // the case's own record of the refusal Baton gave
+      recommendations: async () => { calls.recommendations++; throw new Error('automatic polling must not read recommendations'); },
+      claim: async () => {
+        order.push(`claim(registered:${registered})`);
+        calls.claims++;
+        if (refuse) throw refuse();
         if (!registered) throw new BatonRefusal('unauthenticated', undefined, 'no runner holds this secret', 401);
-        return { recommendations: [] };
+        throw new BatonRefusal('no-eligible-ticket', undefined, 'nothing to claim', 409);
       },
-      claim: async () => { order.push('claim'); calls.claims++; throw new BatonRefusal('no-eligible-ticket', undefined, 'nothing to claim', 409); },
     } as unknown as BatonApi;
     return { api, calls, refuseWith: (f: (() => Error) | null) => { refuse = f; } };
   };
@@ -720,8 +733,8 @@ describe('the first beat (B-93, S-BTN-159: a runner start says what it does, and
   it('the registration beat’s refusal is not logged: a quiet start says nothing', async () => {
     const lines: string[] = [];
     const { api, calls, refuseWith } = registeringApi();
-    // The recommendation about to be refused — so an empty `lines` is the refusal swallowed, not
-    // the recommendation skipped: a change that never asks it leaves `refused` 0 and fails here.
+    // The claim attempt about to be refused — so an empty `lines` is the refusal swallowed, not
+    // the claim attempt skipped: a change that never asks it leaves `refused` 0 and fails here.
     let refused = 0;
     refuseWith(() => { refused++; return new BatonRefusal('unauthenticated', undefined, 'no runner holds this secret', 401); });
     const r = runFresh(api, (l) => lines.push(l));
@@ -729,12 +742,11 @@ describe('the first beat (B-93, S-BTN-159: a runner start says what it does, and
     // Two beats, as B-86's grant-driven declaration spends them (#104): the first declares nothing
     // — the registration has no list to widen — and is answered the grant; the declaration then
     // differs from what the server holds (`sent: []`), so one more beat carries it before the
-    // claim, which is what `rewriteSettings` records. Then the recommendation is the stray this
-    // ticket names, and the claim.
-    expect(calls).toEqual({ heartbeats: 2, recommendations: 1, claims: 1 });
+    // claim, which is what `rewriteSettings` records. The claim is the single attempt whose refusal is handled here.
+    expect(calls).toEqual({ heartbeats: 2, recommendations: 0, claims: 1 });
     expect(refused).toBe(1);
     // The one line such a start says: what it declares, from the grant. Nothing else — not
-    // `no recommendation (no runner holds this secret)` on every start.
+    // `no claim (no runner holds this secret)` on every start.
     expect(lines).toEqual(["baton: declaring agent-venue, create-pr, drivable-browser, llm-call — the grant's capabilities, no --capabilities given"]);
     r.stop();
   });
@@ -748,11 +760,10 @@ describe('the first beat (B-93, S-BTN-159: a runner start says what it does, and
     const { api, calls, refuseWith } = registeringApi();
     refuseWith(() => new BatonRefusal('unauthenticated', undefined, 'no runner holds this secret', 401));
     const r = runFresh(api, (l) => lines.push(l));
-    const live = r as unknown as { state: Record<string, unknown> };
-    live.state = { get: () => ({ runner_id: 7, claim: null, declared: ['agent-venue'], sent: null }), set: () => {}, spool: live.state.spool };
+    (r as unknown as { state: StateFile }).state.set({ runner_id: 7, declared: ['agent-venue'] });
     expect(await r.runOnce()).toBeNull();
     expect(calls.heartbeats).toBeGreaterThanOrEqual(1);
-    expect(lines.some((l) => l.includes('no recommendation (no runner holds this secret)'))).toBe(true);
+    expect(lines.some((l) => l.includes('no claim (no runner holds this secret)'))).toBe(true);
     r.stop();
   });
 
@@ -767,18 +778,18 @@ describe('the first beat (B-93, S-BTN-159: a runner start says what it does, and
     expect(await r.runOnce()).toBeNull();
     // The boot beat declares nothing and is answered no grant; it is itself the beat that
     // registers the runner in `registeringApi`; the settle beat it forces is answered no grant
-    // again — then the recommendation is the stray, then the claim.
-    expect(calls).toEqual({ heartbeats: 2, recommendations: 1, claims: 1 });
+    // again — then the single claim is refused.
+    expect(calls).toEqual({ heartbeats: 2, recommendations: 0, claims: 1 });
     expect(lines).toEqual(['baton: the heartbeat answered no grant — the declaration stays unsettled and the next beat asks again (a seed key is granted nothing; a machine key is granted by its owner)']);
     r.stop();
   });
 
   it('a slow boot beat is waited for: nothing is asked before it answers, so nothing is logged', async () => {
     const lines: string[] = [];
-    // What Baton saw, call by call, and whether a runner existed when the recommendation left. A
+    // What Baton saw, call by call, and whether a runner existed when the claim attempt left. A
     // grant-less Baton is the state a fresh credential starts in, and it is also B-86's "no grant
     // yet" answer, which forces no extra beat — but its register beat is still a round trip, and
-    // this one is slow (a further 40 ms), so a recommendation sent beside it would reach Baton
+    // this one is slow (a further 40 ms), so a claim attempt sent beside it would reach Baton
     // first if nothing waited for the answer.
     const order: string[] = [];
     const { api, calls, refuseWith } = registeringApi({}, order);
@@ -793,28 +804,28 @@ describe('the first beat (B-93, S-BTN-159: a runner start says what it does, and
     const r = runFresh(api, (l) => lines.push(l));
     r.start(); // the sidecar's boot beat, not awaited — as `work()` starts it
     expect(await r.runOnce()).toBeNull();
-    // The recommendation went out to a runner whose secret Baton already held, never beside a beat
+    // The claim attempt went out to a runner whose secret Baton already held, never beside a beat
     // still out — the race whose refusal (`no runner holds this secret`, the line this ticket
     // removes) `stray` would otherwise swallow into a quiet log. `refused` proves the
-    // recommendation really was asked, so the quiet below is the refusal handled and not skipped.
-    expect(order.filter((e) => e.startsWith('recommendations')), order.join(' → ')).toEqual(['recommendations(registered:true)']);
-    expect(order.indexOf('recommendations(registered:true)'), order.join(' → ')).toBeGreaterThan(order.indexOf('heartbeat:answer'));
+    // claim attempt really was asked, so the quiet below is the refusal handled and not skipped.
+    expect(order.filter((e) => e.startsWith('claim(')), order.join(' → ')).toEqual(['claim(registered:true)']);
+    expect(order.indexOf('claim(registered:true)'), order.join(' → ')).toBeGreaterThan(order.indexOf('heartbeat:answer'));
     expect(refused).toBe(1);
     // The one line such a start says: the grant is unsettled, said once.
     expect(lines).toEqual(['baton: the heartbeat answered no grant — the declaration stays unsettled and the next beat asks again (a seed key is granted nothing; a machine key is granted by its owner)']);
     // Two beats is what this attempt spends (B-86's settle beat included); the case is the order,
     // not the count.
-    expect(calls.recommendations).toBe(1);
+    expect(calls.recommendations).toBe(0);
     expect(calls.claims).toBe(1);
     r.stop();
   });
 
-  it('a beat in flight before an attempt is finished first: the recommendation follows its answer', async () => {
+  it('a beat in flight before an attempt is finished first: the claim attempt follows its answer', async () => {
     // B-86 settles the declaration before the first claim, so on a fresh session a forced beat
-    // always stands between an in-flight boot beat and the recommendation — which is why the boot
+    // always stands between an in-flight boot beat and the claim attempt — which is why the boot
     // case above cannot lose the race below. This is the shape that can: a registered runner whose
     // declaration is already settled (`sent` current), and a beat still out when the attempt
-    // begins. Without `await this.waitForBeat()` the recommendation leaves beside that beat and
+    // begins. Without `await this.waitForBeat()` the claim attempt leaves beside that beat and
     // Baton's `no runner holds this secret` — the line this ticket removes — is swallowed by
     // `stray`, so nothing in the log would show the race had come back.
     const lines: string[] = [];
@@ -832,23 +843,23 @@ describe('the first beat (B-93, S-BTN-159: a runner start says what it does, and
     const r = runFresh(api, (l) => lines.push(l));
     // A runner the state names, its declaration settled as a previous beat left it, so runOnce has
     // no reason to beat of its own.
-    const live = r as unknown as { state: { get(): Record<string, unknown>; set(p: Record<string, unknown>): void; spool: string }; sent: string[] };
-    live.state = { get: () => ({ runner_id: 7, claim: null, declared: [] }), set: () => {}, spool: live.state.spool };
-    live.sent = [];
+    const live = r as unknown as { state: StateFile; sidecar: { sent: string[] } };
+    live.state.set({ runner_id: 7, declared: [] });
+    live.sidecar.sent = [];
 
     const beat = (r as unknown as { tick(): Promise<void> }).tick(); // in flight, not awaited
     expect(await r.runOnce()).toBeNull();
     await beat;
-    // The recommendation went to Baton only after that beat answered.
-    expect(order.filter((e) => e.startsWith('recommendations')), order.join(' → ')).toEqual(['recommendations(registered:true)']);
-    expect(order.indexOf('recommendations(registered:true)'), order.join(' → ')).toBeGreaterThan(order.indexOf('heartbeat:answer'));
-    expect(calls.recommendations).toBe(1);
+    // The claim attempt went to Baton only after that beat answered.
+    expect(order.filter((e) => e.startsWith('claim(')), order.join(' → ')).toEqual(['claim(registered:true)']);
+    expect(order.indexOf('claim(registered:true)'), order.join(' → ')).toBeGreaterThan(order.indexOf('heartbeat:answer'));
+    expect(calls.recommendations).toBe(0);
     r.stop();
   });
 
   it('only that refusal goes quiet: the other unauthenticated answers still name themselves', async () => {
     const lines: string[] = [];
-    // The recommendation's answer, set per case below.
+    // The claim attempt's answer, set per case below.
     let answer: Error | null = null;
     const rejecting = (message: string) => new BatonRefusal('unauthenticated', undefined, message, 401);
     // `authRunner`'s same code for a replayed nonce (core/runnerApi.ts), the message to tell apart.
@@ -856,31 +867,25 @@ describe('the first beat (B-93, S-BTN-159: a runner start says what it does, and
     const api = {
       setSecret: () => {},
       heartbeat: async (body: Record<string, unknown>) => ({ runner_id: 7, incarnation: 1, messages: [], sent: body.capabilities ?? [], ...GRANT }),
-      recommendations: async () => {
+      recommendations: async () => { throw new Error('unexpected recommendations'); },
+      claim: async () => {
         if (answer) throw answer;
-        return { recommendations: [{ ticket_id: 'B-9' }] };
+        throw new BatonRefusal('no-eligible-ticket', undefined, 'nothing to claim', 409);
       },
-      claim: async () => { throw new BatonRefusal('no-eligible-ticket', undefined, 'nothing to claim', 409); },
     } as unknown as BatonApi;
     // A runner the state names already: the registration's own exemption does not reach it.
     const r = runFresh(api, (l) => lines.push(l));
-    const live = r as unknown as { state: { get(): Record<string, unknown>; set(p: Record<string, unknown>): void; spool: string } };
-    const answered: Record<string, unknown> = { runner_id: 7, claim: null };
-    live.state = {
-      get: () => answered,
-      set: (patch: Record<string, unknown>) => { Object.assign(answered, patch); },
-      spool: live.state.spool,
-    };
+    (r as unknown as { state: StateFile }).state.set({ runner_id: 7 });
     answer = rejecting(replayed);
     await r.runOnce();
     // B-86's once-per-declaration line first (an unsettled runner's first answered beat), then
     // the refusal, which names itself.
-    expect(lines).toEqual([DECLARED, `baton: no recommendation (${replayed})`]);
+    expect(lines).toEqual([DECLARED, `baton: no claim (${replayed})`]);
     // On a registration attempt too: only the ticket's own refusal is the stray, never the code.
     lines.length = 0;
     const fresh = runFresh(api, (l) => lines.push(l));
     await fresh.runOnce();
-    expect(lines).toEqual([DECLARED, `baton: no recommendation (${replayed})`]);
+    expect(lines).toEqual([DECLARED, `baton: no claim (${replayed})`]);
     // And the ticket's refusal, on that same registration attempt, is the one that goes quiet.
     lines.length = 0;
     answer = rejecting('no runner holds this secret');
@@ -900,32 +905,24 @@ describe('the first beat (B-93, S-BTN-159: a runner start says what it does, and
     const api = {
       setSecret: () => {},
       heartbeat: async (body: Record<string, unknown>) => ({ runner_id: 7, incarnation: 1, messages: [], sent: body.capabilities ?? [], ...GRANT }),
-      recommendations: async () => {
-        if (refuseGates) throw new BatonRefusal('not-eligible', undefined, 'every gate refused this runner', 403);
-        return { recommendations: [{ ticket_id: 'B-9' }] };
-      },
+      recommendations: async () => { throw new Error('unexpected recommendations'); },
       claim: async (body: { ticket_id?: string }) => {
-        asked.push(body.ticket_id ?? null); // the recommendation is what the claim asks for
+        asked.push(body.ticket_id ?? null);
+        if (refuseGates) throw new BatonRefusal('not-eligible', undefined, 'every gate refused this runner', 403);
         throw new BatonRefusal('no-eligible-ticket', undefined, 'nothing to claim', 409);
       },
     } as unknown as BatonApi;
     const r = runFresh(api, (l) => lines.push(l));
     // A runner its state names already (a session resumed, or a beat before this attempt).
-    const live = r as unknown as { state: { get(): Record<string, unknown>; set(p: Record<string, unknown>): void; spool: string } };
-    const answered: Record<string, unknown> = { runner_id: 7, claim: null };
-    live.state = {
-      get: () => answered,
-      set: (patch: Record<string, unknown>) => { Object.assign(answered, patch); },
-      spool: live.state.spool,
-    };
+    (r as unknown as { state: StateFile }).state.set({ runner_id: 7 });
     await r.runOnce();
-    expect(asked).toEqual(['B-9']); // a registered runner is recommended for, and its claim asks for the pick
+    expect(asked).toEqual([null]); // the server chooses in the claim transaction
     // B-86's own once-per-declaration line, and nothing else: no refusal was due, and none was logged.
     expect(lines).toEqual([DECLARED]);
     refuseGates = true;
     lines.length = 0;
     await r.runOnce();
-    expect(lines).toEqual(['baton: no recommendation (every gate refused this runner)']);
+    expect(lines).toEqual(['baton: no claim (every gate refused this runner)']);
     r.stop();
   });
 });
@@ -991,7 +988,8 @@ describe('S-BTN-200 a leg that ends reaps its process group (R-BTN-72)', () => {
     // The state sidecar the loop would own, as the fixtures above hand it over.
     const state: Record<string, unknown> = { runner_id: 1, claim: null };
     (r as unknown as { state: unknown }).state = { get: () => state, set: () => {}, spool: join(dir, 'spool.jsonl') };
-    (r as unknown as { inflight: unknown }).inflight = { claimId: 1, ticket: 'baton:B-x', child: null };
+    const claim = (r as unknown as { makeRun(path: string): ClaimRun }).makeRun(dir);
+    (claim as unknown as { inflight: unknown }).inflight = { claimId: 1, ticket: 'baton:B-x', child: null };
     // A leg that finishes cleanly while leaving a process behind on purpose — a held lock, a
     // background check: a child of the wrapper, in its process group, that never exits alone.
     const stray = join(dir, 'stray.pid');
@@ -1004,7 +1002,7 @@ export async function run(ctx) {
   return { echoed: ctx.leg };
 }
 `);
-    const leg = (r as unknown as { runLeg(course: { scripts: Map<string, string> }, leg: string, ctx: Record<string, unknown>, scratch: string): Promise<{ kind: string; result: unknown }> });
+    const leg = (claim as unknown as { runLeg(course: { scripts: Map<string, string> }, leg: string, ctx: Record<string, unknown>, scratch: string): Promise<{ kind: string; result: unknown }> });
     const out = await leg.runLeg({ scripts: new Map([['implement', script]]) }, 'implement', { leg: 'implement' }, join(dir, 'scratch'));
     expect(out).toEqual({ kind: 'ok', result: { echoed: 'implement' } });
     const pid = Number(readFileSync(stray, 'utf8'));
@@ -1033,7 +1031,7 @@ describe('a leg\'s output leaves the runner masked (B-170, R-BTN-144 class 7)', 
 
   /** A Runner over a temp home with the state sidecar stubbed out, as the fixtures above hand
    *  it over, running legs through the real builtin executor and wrapper. */
-  const maskRunner = (lines: string[], state: Record<string, unknown>, beatEvery = 60_000): { r: Runner; home: string } => {
+  const maskRunner = (lines: string[], state: Record<string, unknown>, beatEvery = 60_000): { r: ClaimRun; home: string } => {
     const dir = mkdtempSync(join(tmpdir(), 'baton-170-sink-'));
     mkdirSync(join(dir, 'scratch'), { recursive: true });
     const api = {
@@ -1045,10 +1043,11 @@ describe('a leg\'s output leaves the runner masked (B-170, R-BTN-144 class 7)', 
     const r = new Runner({ api, home: dir, repository: 'docs', hostname: 'vm-a', harness: 'opencode', session: 'b170-sink',
       courses: [], stateFile: join(dir, 's.json'), beatEvery, log: (l) => lines.push(l), verbose: true, maskEnv: ['BATON170_TEST_VENDOR'] });
     (r as unknown as { state: unknown }).state = { get: () => state, set: () => {}, spool: join(dir, 'spool.jsonl') };
-    (r as unknown as { inflight: unknown }).inflight = { claimId: 1, ticket: 'baton:B-x', child: null };
-    return { r, home: dir };
+    const claim = (r as unknown as { makeRun(path: string): ClaimRun }).makeRun(dir);
+    (claim as unknown as { inflight: unknown }).inflight = { claimId: 1, ticket: 'baton:B-x', child: null };
+    return { r: claim, home: dir };
   };
-  const legOf = (r: Runner) => (r as unknown as { runLeg(course: { scripts: Map<string, string>; scratch?: string }, leg: string, ctx: Record<string, unknown>, scratch: string): Promise<{ kind: string; result?: unknown; error?: string }> });
+  const legOf = (r: ClaimRun) => (r as unknown as { runLeg(course: { scripts: Map<string, string>; scratch?: string }, leg: string, ctx: Record<string, unknown>, scratch: string): Promise<{ kind: string; result?: unknown; error?: string }> });
 
   it('the leg\'s stderr goes through the class 7 sink: whole, split and mask_env values, a bearer token, and a held tail the call\'s end releases', async () => {
     const saved = ENV_NAMES.map((n) => [n, process.env[n]] as const);
@@ -1086,6 +1085,86 @@ describe('a leg\'s output leaves the runner masked (B-170, R-BTN-144 class 7)', 
       expect(said).toContain('token: ***');
       // The trailing partial the stream ended on leaves masked, at the call's release.
       expect(said).toContain('tail: ');
+    } finally {
+      for (const [n, v] of saved) {
+        if (v === undefined) delete process.env[n];
+        else process.env[n] = v;
+      }
+      rmSync(home, { recursive: true, force: true });
+    }
+  }, 60_000);
+
+  it('S-BTN-119: a host value that starts with the last bytes of the leg\'s secrets does not cut them — each still leaves whole as ***', async () => {
+    // The flaky failures of 2026-11-22 (B-249, B-244, B-239): `npm test` ran inside a leg, so
+    // the tests' runner spread an environment holding the host's own secrets; one that began with
+    // the vendor value's last byte (`1`) or the key's (`n`) made the sink's hold cut inside the
+    // printed literal, and its head reached the log in clear. Pinned here, not left to the host.
+    const names = [...ENV_NAMES, 'BATON170_TEST_ONE_TOKEN', 'BATON170_TEST_N_TOKEN'];
+    const saved = names.map((n) => [n, process.env[n]] as const);
+    process.env.BATON170_TEST_API_KEY = KEY;
+    process.env.BATON170_TEST_VENDOR = VENDOR;
+    process.env.BATON170_TEST_ONE_TOKEN = `${VENDOR.slice(-1)}abcdef0123456`;
+    process.env.BATON170_TEST_N_TOKEN = `${KEY.slice(-1)}ZZZZZZZZ0123`;
+    const lines: string[] = [];
+    const { r, home } = maskRunner(lines, { runner_id: 1, claim: null });
+    try {
+      const script = join(home, 'leak.mjs');
+      writeFileSync(script, `export async function run() {
+  process.stderr.write('whole key: ' + process.env.BATON170_TEST_API_KEY + '\\n');
+  process.stderr.write('vendor: ' + process.env.BATON170_TEST_VENDOR + '\\n');
+  process.stderr.write('token: brt_abc123XYZ\\n');
+  return { done: true };
+}
+`);
+      const out = await legOf(r).runLeg({ scripts: new Map([['implement', script]]) }, 'implement', { leg: 'implement' }, join(home, 'scratch'));
+      expect(out).toEqual({ kind: 'ok', result: { done: true } });
+      const said = lines.join('\n');
+      for (const secret of [KEY.slice(0, 14), KEY.slice(14, -1), VENDOR.slice(0, -1)]) expect(said, said).not.toContain(secret);
+      expect(said).toContain('whole key: ***');
+      expect(said).toContain('vendor: ***');
+      expect(said).toContain('token: ***');
+    } finally {
+      for (const [n, v] of saved) {
+        if (v === undefined) delete process.env[n];
+        else process.env[n] = v;
+      }
+      rmSync(home, { recursive: true, force: true });
+    }
+  }, 60_000);
+
+  it('S-BTN-119: a drained call masks with the set bound as the call starts, whatever the slot holds when its lines arrive', async () => {
+    const saved = ENV_NAMES.map((n) => [n, process.env[n]] as const);
+    process.env.BATON170_TEST_API_KEY = KEY;
+    process.env.BATON170_TEST_VENDOR = VENDOR;
+    const lines: string[] = [];
+    const { r, home } = maskRunner(lines, { runner_id: 1, claim: null });
+    try {
+      const quiet = join(home, 'quiet.mjs');
+      writeFileSync(quiet, 'export async function run() { return { done: true }; }\n');
+      expect(await legOf(r).runLeg({ scripts: new Map([['implement', quiet]]) }, 'implement', { leg: 'implement' }, join(home, 'scratch'))).toEqual({ kind: 'ok', result: { done: true } });
+      // The handoff starts, then waits; its slot's set is replaced before its line arrives (the
+      // next leg's assignment, or another slot's read through `cur`) — the line must not care.
+      const started = join(home, 'started');
+      const go = join(home, 'go');
+      const noisy = join(home, 'noisy.mjs');
+      writeFileSync(noisy, `import { existsSync, writeFileSync } from 'node:fs';
+export async function handoff() {
+  writeFileSync(${JSON.stringify(started)}, 'here');
+  while (!existsSync(${JSON.stringify(go)})) await new Promise((res) => setTimeout(res, 10));
+  process.stderr.write('handoff drain: ' + process.env.BATON170_TEST_VENDOR + '\\n');
+  return 'https://example.test/noisy';
+}
+`);
+      const handoff = (r as unknown as { callHandoff(script: string, ctx: Record<string, unknown>): Promise<string | null> }).callHandoff(noisy, { leg: 'implement' });
+      const deadline = Date.now() + 20_000;
+      while (Date.now() < deadline && !existsSync(started)) await new Promise((res) => setTimeout(res, 10));
+      expect(existsSync(started)).toBe(true);
+      (r as unknown as { legSecrets: readonly string[] }).legSecrets = [];
+      writeFileSync(go, 'go');
+      expect(await handoff).toBe('https://example.test/noisy');
+      const said = lines.join('\n');
+      expect(said).not.toContain(VENDOR);
+      expect(said).toContain('handoff drain: ***');
     } finally {
       for (const [n, v] of saved) {
         if (v === undefined) delete process.env[n];
@@ -1276,4 +1355,109 @@ describe('baton run --home: a name resolves to its checkout (B-121)', () => {
       rmSync(config, { recursive: true, force: true });
     }
   });
+});
+
+it.each([false, true])('S-BTN-21: a retiring claim reserves its machine lock (release ack: %s)', async (ack) => {
+  const dir = mkdtempSync(join(tmpdir(), 'baton-lock-retire-'));
+  const capability = 'lock:test';
+  const path = join(dir, 'singleton.lock');
+  let allowAck!: () => void;
+  const acked = new Promise<void>((resolveAck) => { allowAck = resolveAck; });
+  const api = { setSecret: vi.fn(), end: vi.fn(async () => {}), ack: vi.fn(() => acked) } as unknown as BatonApi;
+  const runner = new Runner({ api, home: dir, repository: 'docs', hostname: 'vm-a', harness: 'opencode',
+    session: 'lock-retire', courses: [], stateFile: join(dir, 'runner.json'), concurrency: 2,
+    locks: { [capability]: path }, log: () => {} });
+  const a = runner['makeRun'](dir);
+  const b = runner['makeRun'](dir);
+  runner['slots'].add(a);
+  runner['slots'].add(b);
+  const course = { graph: { legs: new Map([['locked', { requires: [capability] }]]) } } as Parameters<Runner['ensureLegLocks']>[2];
+  let ending: Promise<unknown> | undefined;
+  try {
+    expect(await runner['ensureLegLocks'](a, 'locked', course)).toBe(true);
+    expect(spawnSync('flock', ['-n', path, 'true']).status).toBe(1);
+    if (ack) a.receiveRelease(1, 'released:requested');
+    ending = a['finish'](1, { end_reason: 'done' }, null);
+    await Promise.resolve(); // `end` answered; retirement hasn't resumed after `ackEnd`.
+    expect(a.ended).toBe(true);
+    const taking = runner['ensureLegLocks'](b, 'locked', course);
+    allowAck();
+    expect(await taking).toBe(false);
+    await ending;
+    // Once retirement releases A's lock, B can take it again, and an independent flock can't.
+    await vi.waitFor(async () => expect(await runner['ensureLegLocks'](b, 'locked', course)).toBe(true));
+    expect(spawnSync('flock', ['-n', path, 'true']).status).toBe(1);
+  } finally {
+    allowAck();
+    await ending;
+    runner.stop();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+it('S-BTN-229: a finishing heartbeat fences only the omitted claim and skips its settlement hooks', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'baton-claim-run-'));
+  try {
+    const stateFile = join(home, 'runner.json');
+    const state = new StateFile(stateFile);
+    const heartbeat = vi.fn(async (_body: Record<string, unknown>) => ({
+      runner_id: 1, incarnation: 1, lease_timeout_s: 900, claims: [{ id: 2 }],
+    }));
+    const end = vi.fn(async (_id: number, _body: unknown) => {});
+    const api = { heartbeat, end } as unknown as BatonApi;
+    const options = {
+      api, home, repository: 'docs', courses: [], stateFile, beatEvery: 50,
+      verbose: false, now: () => 1_000, log: () => {},
+    };
+    const live: ClaimRun[] = [];
+    const sidecar = new Sidecar({ ...options, hostname: 'vm-a', session: 'test', harness: 'opencode', concurrency: 2 },
+      state, null, () => ({ live, persisted: [], epoch: 2, pendingRequests: 0 }), () => {});
+    const stop = vi.fn(async () => {});
+    const executor = { source: 'test', stop, start: vi.fn(async () => ({ session_id: 'replacement' })), end: vi.fn(),
+      exec: vi.fn(() => ({ kill: vi.fn(), write: vi.fn(), result: Promise.resolve({ status: 0, stdout: '{"ok":true,"result":null}\n', stderr: '' }) })) };
+    const host = { ensureLegLocks: async () => true, savePlace: vi.fn(), retire: vi.fn(), isStopping: () => false, isDraining: () => false };
+    const make = (id: number) => {
+      const run = new ClaimRun(join(home, String(id)), options, state, executor, sidecar, host);
+      const ticket = `docs:T-${id}`;
+      const kill = vi.fn();
+      run.claimId = id;
+      run.ticket = ticket;
+      run.inflight = { claimId: id, ticket, course: {} as never, legAt: 0, leg: null, waiters: [],
+        child: { running: { kill, write: vi.fn(), result: Promise.resolve({ status: 0, stdout: '', stderr: '' }) } } };
+      const handle = { session_id: `run-${id}` };
+      run.session = { handle, checkout: run.checkout };
+      run.legSessionUrl = `https://example.test/run/${id}`;
+      run.sessionLinkSeq = 1;
+      live.push(run);
+      return { run, kill, handle };
+    };
+    const a = make(1);
+    const b = make(2);
+
+    a.run.legSeq = 1;
+    await a.run['reportLegFinished']();
+
+    expect(heartbeat).toHaveBeenCalledWith(expect.objectContaining({
+      legs_finished: [{ claim_id: 1, seq: 1 }],
+      session_urls: [{ claim_id: 1, url: a.run.legSessionUrl }, { claim_id: 2, url: b.run.legSessionUrl }],
+    }));
+    expect(a.kill).toHaveBeenCalledOnce();
+    expect(a.run.lost).toBe(true);
+    expect(stop.mock.calls).toEqual([[a.handle, 'lease-lost']]);
+    expect(b.kill).not.toHaveBeenCalled();
+    expect(b.run.session?.handle).toBe(b.handle);
+    expect(b.run.sessionLinkLanded).toBe(true);
+    expect(state.get().lease_lost).toBe(false);
+
+    const graph = graphOf({ start: 'filed', end: ['done'], stations: { filed: {}, done: {} }, legs: { work: { from: ['filed'], to: 'done' } } });
+    const outcome = await a.run['settleLeg'](1, 'docs:T-1', { course: { graph } } as Parameters<ClaimRun['settleLeg']>[2],
+      { at: 'filed', legName: 'work' } as Parameters<ClaimRun['settleLeg']>[3],
+      { outcome: { kind: 'ok', result: { release: 'cannot-finish:transient', reached: 'filed' } }, pre: null, ctx: {}, script: 'work.mjs', run: 1 });
+    expect(executor.start.mock.calls.length).toBe(0);
+    expect(executor.exec.mock.calls.length).toBe(0);
+    expect(outcome).toMatchObject({ end_reason: 'released:lease-lost', handoff: null });
+    expect(end).toHaveBeenCalledWith(1, expect.objectContaining({ end_reason: 'released:lease-lost' }));
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
 });

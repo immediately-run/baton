@@ -6,7 +6,7 @@
 import { describe, it, expect } from 'vitest';
 import { CREATE_PR_COURSE, REVIEW_PR_COURSE, branchMatches, matchPatterns, prRefs, stationsPr, stationsReviewPr, ticketOwns, type BatonRecord, type PrFact } from '../../src/defaults/course-pr';
 import type { BranchCommit, RecordedLeg } from '../../src/defaults/pr-markers';
-import { deliveredDetail, findDelivered, ticketRepositories, verifyDelivered, verifyPrOpen, type PrExec } from '../../src/defaults/pr-verify';
+import { deliveredDetail, findDelivered, ticketRepositories, verifyDelivered, verifyPrOpen, verifyPrsMerged, type PrExec } from '../../src/defaults/pr-verify';
 import type { SourceTicket as PostedTicket } from '../../src/defaults/tickets-markdown';
 
 const T0 = 1_000_000;
@@ -604,6 +604,45 @@ describe('the implement stub\'s PR verification (B-81)', () => {
     expect(ticketRepositories('---\nid: B-81\n---\n', map)).toEqual([]);
     expect(ticketRepositories(null, map)).toEqual([]);
     expect(ticketRepositories('---\nrepos: [docs]\n---\n')).toEqual([]); // no map, nothing to resolve through
+  });
+});
+
+// S-BTN-231 (R-BTN-131): the merge stub reads the forge before it reports `merged` — every PR of
+// the ticket merged, none open. On 2026-11-23 B-259's merge agent refused PR #357 over red CI and
+// exited 0, and the leg reported `merged` with the PR open.
+describe('the merge stub\'s merged verification (R-BTN-131)', () => {
+  const checkout = '/checkout';
+  /** A scripted forge: per repository (`''` the checkout's own), what `gh pr list --state open`
+   *  and `--state merged` answer; a repository absent fails to read. */
+  const forge = (answers: Record<string, { open: unknown[]; merged: unknown[] }>): PrExec => (cmd, args) => {
+    if (cmd === 'git') {
+      if (args.join(' ') === 'remote get-url origin') return 'https://github.com/immediately-run/baton.git';
+      throw new Error(`git ${args.join(' ')}: not scripted`);
+    }
+    const at = args.indexOf('--repo');
+    const a = answers[at < 0 ? '' : args[at + 1]];
+    if (a === undefined) throw new Error(`gh: cannot read ${at < 0 ? 'home' : args[at + 1]}`);
+    return JSON.stringify(args[args.indexOf('--state') + 1] === 'open' ? a.open : a.merged);
+  };
+  const ask = (over: Partial<Parameters<typeof verifyPrsMerged>[0]> = {}) => ({ checkout, ticket: { id: 'baton:B-259', home: 'baton' }, ...over });
+  const pr = (number: number, headRefName = 'claude/B-259-export') => ({ number, headRefName });
+
+  it('every matching PR merged and none open passes, naming the merged PRs', () => {
+    expect(verifyPrsMerged(ask(), forge({ '': { open: [pr(400, 'claude/B-2590-other')], merged: [pr(357), pr(12, 'claude/B-25-x')] } }))).toEqual(['#357']);
+    expect(verifyPrsMerged(ask({ repositories: ['immediately-run/docs'] }), forge({ '': { open: [], merged: [pr(357)] }, 'immediately-run/docs': { open: [], merged: [pr(9)] } }))).toEqual(['#357', 'immediately-run/docs#9']);
+  });
+
+  it('the agent exited 0 but the PR is still open: the leg fails naming it, never reports merged (B-259)', () => {
+    expect(() => verifyPrsMerged(ask(), forge({ '': { open: [pr(357)], merged: [] } }))).toThrow(
+      'the merge agent exited 0, but B-259’s PR #357 (claude/B-259-export) is still open — not merged; the leg reports merged only when every PR of the ticket is');
+    // One repository merged and another still open is not merged either (B-29).
+    expect(() => verifyPrsMerged(ask({ repositories: ['immediately-run/docs'] }), forge({ '': { open: [], merged: [pr(357)] }, 'immediately-run/docs': { open: [pr(9)], merged: [] } }))).toThrow(/PR immediately-run\/docs#9 \(claude\/B-259-export\) is still open/);
+  });
+
+  it('no merged PR at all, or a forge that does not answer, fails the leg', () => {
+    expect(() => verifyPrsMerged(ask(), forge({ '': { open: [], merged: [] } }))).toThrow(/no merged PR on a branch matching claude\/B-259-\* for ticket B-259 exists in immediately-run\/baton/);
+    expect(() => verifyPrsMerged(ask({ repositories: ['immediately-run/docs'] }), forge({ '': { open: [], merged: [pr(357)] } }))).toThrow(/cannot verify B-259’s PRs merged — immediately-run\/docs \(gh: cannot read immediately-run\/docs\) could not be read/);
+    expect(() => verifyPrsMerged(ask(), () => 'not JSON')).toThrow(/answered no PR list: not JSON/);
   });
 });
 

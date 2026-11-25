@@ -2,8 +2,8 @@
 title: "B-5 — Baton check courses: check-runner keys, owner-held conclusions and the Baton-signed merge check a forge courier delivers"
 id: B-5
 project: baton
-status: available
-updated: 2026-11-03
+status: superseded
+updated: 2026-11-20
 repos:
   - baton
 tags:
@@ -36,24 +36,32 @@ R-BTN-114, R-BTN-115 and R-BTN-153 are specified; this ticket builds them.
 
 ### What to build
 
+**Not to be built as written (the owner, 2026-11-19).** The owner ruled the forge-check deliverer
+cut: items 2 and 3 are struck and nothing replaces them. The simplification that applied the
+ruling also records that the check-runner is not to be built as designed and that what is built
+of check courses goes with its code
+([the checks-and-executors proposal](../spec/proposals/checks-and-executors.md), part 1). Items 1
+and 4 to 7 are not to be built from this list: B-290 removes what is built of the checks and
+settles what a merge's `std:checks@1` comes from once no check-runner exists.
+
 1. **Check tickets** from the `changes` ticket source, `check.<course>.<number>`; a push that
    changes `check.sha` supersedes every claim on the ticket (released `superseded`, R-BTN-168;
    B-65 adds that reason) and restarts it at its start station. Claimable only by a
    check-runner key. Check legs require `runner:session` (R-BTN-107): no `process` or
    `attached` runner takes one (rule 4). Whichever of B-5 and B-70 lands second wires that
    requirement into the check courses.
-2. **The `forge-check` outbox entry** (R-BTN-115, R-BTN-171, on B-64's outbox). Queued only after
+2. ~~**The `forge-check` outbox entry** (R-BTN-115, R-BTN-171, on B-64's outbox). Queued only after
    a sync confirms the end; `fields` `{origin, forge_repo_id, sha, name, conclusion, summary, seq,
    issued_at}`, the conclusion from the owners' `checks` setting and `summary` rendered `plain`;
    signed as every entry is (Ed25519, `BATON_SIGNING_KEY`, `kid`), retired keys still listed. One
    copy per forge courier registered for `forge-check`, plus a shared copy when the policy's
-   `outbox.forge-check` admits runners; a delivered entry is deleted after 7 days.
-3. **The forge courier.** A courier registered `--delivers forge-check` (credential kind `courier`,
+   `outbox.forge-check` admits runners; a delivered entry is deleted after 7 days.~~
+3. ~~**The forge courier.** A courier registered `--delivers forge-check` (credential kind `courier`,
    one role, never a machine key), registered by an approver on `approvers.members` and given its
    trust level by one on `approvers.trust` (B-147); it claims through `POST
    /v1/courier/entries/claim` only if the policy's `outbox.forge-check` admits it, and marks
    `delivered` with the run's `check_id`. An entry not delivered within 15 minutes raises
-   `baton.outbox-late` with `kind: forge-check`; the change stays pending.
+   `baton.outbox-late` with `kind: forge-check`; the change stays pending.~~
 4. **Read-back.** The sync reads the check runs; a run Baton did not issue is the discrepancy
    `check-mismatch` (R-BTN-85) and raises `baton.check-mismatch`.
 5. **Tenancy** *(added 2026-10-18, §2.2 R-BTN-136)*: the entry also carries and signs `origin`
@@ -152,3 +160,7 @@ _(2026-11-02: the owner's ruling on B-175 — the conclusions are `success`, `fa
 _(2026-11-03: R-BTN-47's *Retirement* (B-173's spec half) reaches the store this ticket builds — check-runners: retirement revokes the repository's check-runners. Whichever of this ticket and B-173 lands second builds that step and adds its S-BTN-198 case.)_
 
 - 2026-11-09: B-184's spec amendment retires `runner:session` (R-BTN-133). Check legs now require `checks:withheld-credentials`, of a type the check course declares `"from": "executor"`, which only an executor's `provides` declares — never `runner.json` or the grant — so a `builtin` runner takes none (R-BTN-114, R-BTN-121, R-BTN-107; the owner, 2026-11-09). The verdict command runs by the executor's `exec` in the leg's session (R-BTN-153). Read this ticket's `runner:session` and `isolation` wording as that; re-read R-BTN-114 and R-BTN-153 before building on it.
+
+_(2026-11-20: the spec simplification of 2026-11-19 (baton#299; `spec/BATON_SPEC_HISTORY.md`, that date) applied the owner's ruling of that day to cut the forge-check deliverer ("cut them"). Items 2 and 3 are struck, and the plan opens with what the amendment says of the rest: the check-runner is not to be built as designed, the three check rules read "To be removed with its code", and the design's text is part 1 of [the checks-and-executors proposal](../spec/proposals/checks-and-executors.md), with its tables and routes in [the tables-and-routes proposal](../spec/proposals/data-model-and-api.md) and S-BTN-81, S-BTN-123 and G-BTN-143 in [the proposals' scenarios](../spec/proposals/scenarios.md). B-290 removes what is built of the checks, with the three rules; this ticket is left `available` for the owner to supersede.)_
+
+_(2026-11-20: **superseded** by B-290, on the owner's ruling of 2026-11-19 that the check-runner and the forge-check deliverer are cut (`docs/review/spec-simplification-review-2026-11-19.mdx`, ruling 5; baton#299). Nothing buildable remains. Where each item went: 1 (check tickets from the `changes` source, claimable only by a check-runner key) — nowhere, not to be built; its text is part 1 of `spec/proposals/checks-and-executors.md` until B-290's step 1 deletes it. 2 (the `forge-check` outbox entry) and 3 (the forge courier) — nowhere, struck on 2026-11-19. 4 (read-back and `check-mismatch`) — nowhere: with no deliverer there is no Baton-issued check run to compare. 5 (the entry's signed `origin` and `GET /v1/keys/signing`) — nowhere: signing was removed by the ruling of 2026-11-01 (B-160). 6 (R-BTN-153's hardening) — the part that is built, `checkVerdict` and `exit_status`, is removed by B-290's step 3; the rest nowhere. 7 (the adversarial review's fixes) — nowhere, with `check_runners`; the `superseded_at` mark on a completed claim is B-65's own item and stays there. Exit criteria: S-BTN-68 and G-BTN-93 are deleted by B-290's step 1; S-BTN-81, S-BTN-123 and G-BTN-143 are on `spec/proposals/scenarios.md` and go with the design there; "item 7's cases" and "merged under the review gate" — nowhere, not to be built. Still open, and not lost: what writes `std:checks@1` for `merge.checks: required` once no check-runner exists, which is B-290's step 2 and B-155's item 2. B-6 lists this ticket in `depends_on` and is superseded the same day.)_

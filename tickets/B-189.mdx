@@ -43,7 +43,8 @@ preamble and [§12.1](../spec/BATON_SPEC/12-security.md#sec-12-1), [§10](../spe
 [§7](../spec/BATON_SPEC/07-conditions.md#sec-7) ([R-BTN-171](../spec/BATON_SPEC/07-conditions.md#sec-7-8)), [§13](../spec/BATON_SPEC/13-data-model.md#sec-13), [§14](../spec/BATON_SPEC/14-api.md#sec-14), [§15](../spec/BATON_SPEC/15-verification.md#sec-15), 91-decisions (14, 23,
 26, 28, 30, 31, 114, 121, 128, 129); `docs/security-model.mdx`.
 **Depends on:** B-184 (the executor: repository code never in the runner's process), B-187
-(per-run labels, which `independent-review` counts).
+(superseded 2026-11-20: per-run labels were cut on 2026-11-19, and `independent-review` counts
+grants' domains and runner keys alone).
 **Used by:** FIELDHOUSE_SPEC §5 (R-FH-80, R-FH-83, R-FH-86).
 
 ### What to build
@@ -113,7 +114,7 @@ preamble and [§12.1](../spec/BATON_SPEC/12-security.md#sec-12-1), [§10](../spe
    R-BTN-145's "a hostile leg" survivor hold under `builtin`; §12.9's leg-end audit becomes item
    5's scope check on actions, the forge cross-check staying.
 10. **Kept as cheap defence in depth**, said so in the spec: R-BTN-144's credential stripping and
-   masking classes 1–2, label-reuse checks (B-187), per-key limits (R-BTN-187), fencing.
+   masking classes 1–2, ~~label-reuse checks (B-187),~~ per-key limits (R-BTN-187), fencing.
 11. **`docs/security-model.mdx` is rewritten** around pushers, sandboxed legs and owner sessions:
     reach 1 and the "Hardening against a compromised runner" options that served it are marked
     superseded with this ticket (options 4, 5, 8, 16, and the runner halves of 3 and 17); reaches 0,
@@ -162,3 +163,7 @@ preamble and [§12.1](../spec/BATON_SPEC/12-security.md#sec-12-1), [§10](../spe
 ## Status
 
 _filed 2026-11-09._
+
+_(2026-11-20: the spec simplification of 2026-11-19 (baton#299; `spec/BATON_SPEC_HISTORY.md`, that date) removed per-run domains on the owner's ruling, and B-187 is superseded with nothing in its place. The dependency line is rewritten and item 10's label-reuse checks are struck: there are no run labels. Two runs are different domains only when their domains and their runner keys both differ, so a deployment with one runner credential has no independent review of its own work; where this plan leans on labelled runs for that, it needs the owner's word before it is built.)_
+
+_(2026-11-20: rules re-read: R-BTN-180)_

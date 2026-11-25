@@ -2,8 +2,8 @@
 title: "B-187 — Per-run domains: a listed credential's runs carry single-use labels, which independent review compares beside the grant's domain"
 id: B-187
 project: baton
-status: available
-updated: 2026-11-08
+status: superseded
+updated: 2026-11-20
 repos:
   - baton
 tags:
@@ -129,3 +129,5 @@ _filed 2026-11-08._
 _(2026-11-08: rules re-read: R-BTN-63, R-BTN-106, R-BTN-180, R-BTN-183, R-BTN-188, R-BTN-189)_ — this ticket's spec half is in baton#197; the items above match it.
 
 _2026-11-09: the owner accepted collapsing the weaker `independent-runs` into `independent-review` ("I accept all recommendations"): the split rested on a leg being able to act as its runner. Items and tests rewritten in place; the spec in baton#197 matches. (2026-11-09: rules re-read: R-BTN-189)_
+
+_(2026-11-20: **superseded** by the spec simplification of 2026-11-19 (baton#299; `spec/BATON_SPEC_HISTORY.md`, that date), which applied the owner's ruling of that day to cut per-run domains ("cut them"): `domains.per_run`, the run label and `run_labels` are out of the spec, and none of it was built. Where each item went: 1 (a credential listed in `domains.per_run`, the reported `run_label`) — nowhere, removed. 2 (the label as a field beside the domain) — nowhere, removed: a run is attributed its grant's domain alone. 3 (a label is used once; `run_labels`) — nowhere, removed. 4 (attestations carry the label) — nowhere, removed. 5 (`no_chain_from` for a listed credential) — nowhere, removed: `no_chain_from` compares credentials for every grant. 6 (the label shown on the record) — nowhere, removed. Exit criteria: the spec PR (baton#197) merged, and this amendment takes its text out again; "built as above" — nowhere, not to be built. Nothing replaces what the ticket was for, one credential whose runs review each other: two runs are different domains only when their domains and their runner keys both differ. B-189 lists this ticket in `depends_on`.)_

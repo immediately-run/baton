@@ -2,8 +2,8 @@
 title: "B-6 — [OP] Baton merge check: create the dedicated check GitHub App and pin branch protection to it"
 id: B-6
 project: baton
-status: available
-updated: 2026-11-02
+status: superseded
+updated: 2026-11-20
 repos:
   - baton
 tags:
@@ -30,11 +30,11 @@ R-BTN-115 is specified; this ticket does its operator part.
 
 ### What to build
 
-1. **Operator.** Create the App (checks: write, nothing else), never Baton's own App.
-2. Install it on immediately-run/baton (and docs once it uses check courses), on selected
-   repositories only, never "All repositories".
-3. Hand its private key only to the forge courier's host; record the App id in the repository's settings.
-4. Set branch protection's required check to the check name, pinned to the App's id.
+1. ~~**Operator.** Create the App (checks: write, nothing else), never Baton's own App.~~
+2. ~~Install it on immediately-run/baton (and docs once it uses check courses), on selected
+   repositories only, never "All repositories".~~
+3. ~~Hand its private key only to the forge courier's host; record the App id in the repository's settings.~~
+4. ~~Set branch protection's required check to the check name, pinned to the App's id.~~
 
 ### Do not
 
@@ -58,3 +58,7 @@ _(2026-10-31: registering a courier is an `approvers.members` action (R-BTN-188'
 _(2026-11-01: the dispatch credentials move out of Baton (BATON_SPEC [R-BTN-94](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-3), [R-BTN-171](../spec/BATON_SPEC/07-conditions.md#sec-7-8), B-152): Baton no longer holds `BATON_GITHUB_APP_KEY`; the dispatch App's key is the dispatch courier's. Reusing that App means reusing the courier's key, on the courier's host.)_
 
 _(2026-11-02: the spec restructure's part 2 (B-166, the PR `baton-spec-restructure-p2`) reverses the note of 2026-11-01 on the dispatch App: Baton holds `BATON_GITHUB_APP_KEY` again and dispatches itself (B-160, B-152 superseded). The check App's key goes to the host of the runner that delivers `forge-check`, never to Baton (R-BTN-115, §12.7); step 3 reads so.)_
+
+_(2026-11-20: the owner ruled on 2026-11-19 that the forge-check deliverer and the check-runner are cut (`docs/review/spec-simplification-review-2026-11-19.mdx`, ruling 5; the spec simplification of that date, baton#299). Items 1 to 4 are struck: no check App is created for a deliverer that will not be built, and the rule this ticket serves reads "To be removed with its code". B-290 removes what is built of the checks, with the instance setting `check_app_id`. This ticket is left `available` for the owner to supersede.)_
+
+_(2026-11-20: **superseded** by B-290, on the owner's ruling of 2026-11-19 that the forge-check deliverer is cut (`docs/review/spec-simplification-review-2026-11-19.mdx`, ruling 5; baton#299). Nothing buildable remains. Where each item went: 1 (create the check App), 2 (install it on selected repositories), 3 (hand its key to the deliverer's host and record the App id) and 4 (pin branch protection's required check to the App) — nowhere, not to be done: no deliverer will post a check for the App to carry, and B-290's steps 3 and 4 remove the instance setting `check_app_id` that item 3 would have set. Exit criteria: the S-BTN-68 case against the real repository — nowhere, S-BTN-68 is deleted by B-290's step 1; "merged under the review gate" — nowhere. No App was created and no branch protection was changed under this ticket. What a merge's required check is on a protected repository stays open in B-290's step 2 and B-155.)_

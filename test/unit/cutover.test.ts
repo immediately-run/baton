@@ -2,7 +2,7 @@
 // refusals, the legacy import's name collisions, and adoption requests that went stale.
 import { describe, it, expect, inject, beforeEach } from 'vitest';
 import { calendarDate } from '../../src/core/board';
-import { hbBody, ORIGIN, ownerCall, payload, register, rows, setClock, syncCall, tick, runnerCall } from '../helpers';
+import { hbBody, ORIGIN, ownerCall, payload, register, rows, setClock, syncCall, tick, runnerCall, stateView } from '../helpers';
 
 const board = inject('board');
 const sha = board.shas;
@@ -84,7 +84,7 @@ describe('adoption requests that went stale', () => {
     expect((await runnerCall('/v1/runner/adopt', { secret: a.secret, body: { ticket_id: 'docs:R3-9001' } })).status).toBe(200);
     return a;
   };
-  const adoptions = async () => ((await (await ownerCall('/v1/ui/state')).json()) as { needs_you: { adoptions: unknown[] } }).needs_you.adoptions;
+  const adoptions = async () => ((await stateView()) as { needs_you: { adoptions: unknown[] } }).needs_you.adoptions;
 
   it('a legacy claim that ends takes its request with it: gone from Needs you; confirm is not-found', async () => {
     await setup();

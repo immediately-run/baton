@@ -172,14 +172,14 @@ describe('S-BTN-44 blocks, resources and decisions', { timeout: 30_000 }, () => 
     // After a day blocked on a capability no live runner has, C is under Needs you.
     await setClock(T0 + 26 * H);
     await tick();
-    const state = await withCore((c) => c.uiState());
+    const state = await withCore((c) => c.stateView());
     expect(state.needs_you.blocked_capability).toEqual([expect.objectContaining({ ticket_id: 'docs:C', capability: 'real-iphone' })]);
   });
 
   it('an instance no instrument reports on for a day while a posted leg needs it is under Needs you', async () => {
     await setClock(T0 + 25 * H);
     await tick();
-    const state = await withCore((c) => c.uiState());
+    const state = await withCore((c) => c.stateView());
     expect((state.needs_you.instances_unknown as { instance: string }[]).map((i) => i.instance)).toEqual([GO, GO2]);
   });
 

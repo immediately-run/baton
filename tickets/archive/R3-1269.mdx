@@ -1,0 +1,90 @@
+---
+title: "R3-1269 — Baton serves state: retire hooks; fleet and instance views, launch candidates, and claims with prefer, bills and rationale"
+id: R3-1269
+project: baton
+status: done
+updated: 2026-11-21
+repos:
+  - baton
+tags:
+  - FEAT
+  - roadmap-item
+order: 1100
+tier: critical
+description: "Baton runs no repository code (BATON_SPEC §1 R-BTN-98, §6.7 R-BTN-99–100): drop the hook machinery, serve the fleet and instance views and launch-candidates with ETags, recommendations?all=1, and claims that take prefer entries ({ticket_id, leg?, bills?}), bills and rationale; S-BTN-57, -21, -61, G-BTN-88. Requires: none."
+topics:
+  - baton
+owns: {}
+prs:
+  - https://github.com/immediately-run/baton/pull/315
+depends_on:
+  - R3-1251
+  - R3-1255
+---
+
+**Brief:** the Baton project; the owner, 2026-10-16: Baton only accepts and delivers state; hooks inside the server are retired.
+**Spec:** [BATON_SPEC §1](../../spec/BATON_SPEC/01-what-baton-is.md#sec-1) [R-BTN-98](../../spec/BATON_SPEC/01-what-baton-is.md#sec-1) (what Baton still decides), [§6.7](../../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-7) [R-BTN-99](../../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-7) (the views, ETags, `?all=1`, `launch-candidates`) and [R-BTN-100](../../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-7) (`prefer`, `bills`, `rationale`), [§6.6](../../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-6) (matching), [§13](../../spec/BATON_SPEC/13-data-model.md#sec-13) (`claim_bills`, `board_head.fleet_version`, `instances_version`), [§14](../../spec/BATON_SPEC/14-api.md#sec-14), [§15](../../spec/BATON_SPEC/15-verification.md#sec-15) [S-BTN-21](../../spec/BATON_SPEC/15-verification.md#scenarios), [S-BTN-57](../../spec/BATON_SPEC/15-verification.md#scenarios), [S-BTN-61](../../spec/BATON_SPEC/15-verification.md#scenarios) (shared instances) and [G-BTN-88](../../spec/BATON_SPEC/15-verification.md#gates); the hook residue in `spec/BATON_SPEC_HISTORY.md` (Migrations)
+**Depends on:** R3-1251 (instances and readings, which the instance view serves), R3-1255 (queue depths in the board summary)
+
+### Requires
+
+- none — every exit criterion is a unit test, an integration scenario on both hosts, or a grep.
+
+### Why
+
+R3-1236 would have run course hooks in a Dynamic Worker inside Baton. The owner withdrew that
+on 2026-10-16: a strict sandbox stops hooks doing anything useful while still being an attack
+surface, and claimants, instruments and couriers already run outside Baton. What replaces it
+is Baton serving the state a runner ranks from. Tier: critical — the claim transaction changes
+(`prefer` falls through inside it), and it carries the lease's atomicity.
+
+### What to build
+
+1. `GET /v1/runner/fleet?repository=`, `GET /v1/runner/instances`, `GET /v1/runner/launch-candidates`, signed by the machine key alone, each with an `ETag` from `fleet_version` / `instances_version` plus the key's grant set and the UTC hour; `304` on `If-None-Match`. The fleet view names each runner's capabilities derived for the repository once B-104 has landed (R-BTN-174); until then it names the declared set, as today.
+2. `GET /v1/runner/recommendations?all=1`: every page of each group, at most 500, `truncated` past it; no `score`, `reasons` text beyond Baton's own, or `advice`.
+3. `POST /v1/runner/claim` takes exactly one of `ticket_id`, `prefer` or neither; `prefer` is `[{ticket_id, leg?, bills?}]` (at most 50 known tickets, R-BTN-100 as amended 2026-10-22 — an entry may name the leg it wants and carry its own `bills`); `bills: [{instance, n?}]`; `rationale` (opaque JSON ≤ 4 KB). `advance` takes `bills`. `no-eligible-ticket` carries `refusals: [{ticket_id, code, rule?}]`.
+4. `claim_bills` rewritten at each `advance`, deleted at the end; the instance view lists each instance's active claims billing it (leg, `claimed_at`, `n`, repository; hostname and ticket only where the key is granted), the caller's own hostname's `host` instances included (R-BTN-178); an instance not listing the claim's repository returned in `refused`. A bill takes seats and is refused `instance-busy` past capacity by rule 11 — B-106's to build; until it lands, this ticket counts bills per instance and leaves the seat refusal to whichever lands second.
+5. The version counters bumped in every write R-BTN-99 lists — a heartbeat changing tags, profile or reports; a billing change; an accepted board post; a reading; and, once B-104 has landed, a `runner_derived` change — and by the alarm at lapses, bar starts and ends.
+
+### Architecture — the decisions, named
+
+- **Delete the hook seam that exists**: the `HookRunner` interface and the `hooks?` option in `src/core/ports.ts` and `src/local/host.ts`, and reword the comments that name a hook call as an await (`src/core/baton.ts`, `src/core/ports.ts`, `src/local/queue.ts`) to name only the signature check, and drop the R-BTN-52 and R-BTN-59 citations in `src/` outside migrations (history: "Hook residue"; `hook-failed` stays in its migration's CHECK, which is append-only). Add no `hooks` table; `checkPayload` in `src/core/board.ts` ignores an incoming `hooks` field rather than refusing it, so a docs sync that still posts it keeps working.
+- **`prefer` lives in `Claims.decide` in `src/core/claims.ts`**: it walks the entries in order, calls the same `this.gate(w, item, leg, 'claim')` the named-ticket path uses, and stops at the first pass, all inside the transaction `Claims.claim` already opens. Do not add a second claim path.
+- **Drop the `'order'` entry from `decide`'s `overridden` list**: a claim off Baton's default order is the runner's ranking, not advice overridden (R-BTN-100). Keep `expedite-bound`; resource blocks and `max_queue` join it when R3-1251 and R3-1255 land.
+- **The views are new methods on `Claims`** (`fleetView(repo, key)`, `instanceView(key)`) wired in `src/core/baton.ts`'s `/v1/runner/` block; the ETag is computed in one helper beside them, never per route.
+- **One new numbered migration** in `src/migrations/` for `claim_bills`, `board_head.fleet_version`, `claims.provisional`/`provisional_json` (R3-1271 uses them) and `baton_settings` `instances_version`; register it in `src/migrations/index.ts`.
+- **Do not**: call any repository code; add a recommendation cache; store a runner's estimate; show another repository's ticket id or hostname in the instance view; record `advice-overridden` for a claim that merely differs from Baton's order.
+
+### Tests
+
+- `test/unit/claims.test.ts`: `prefer` takes the first passing entry; all refused returns one refusal per entry; `prefer` with `ticket_id` is `invalid-params`; `bills` with a foreign instance is refused.
+- `test/unit/views.test.ts` (new): the fleet view for a fixture repository holds none of a second repository's claims; the instance view hides another repository's ticket and host; the ETag changes after a grant, a reading and an hour boundary, and not otherwise.
+- Integration: S-BTN-61 (one instance listed by two repositories, measured from both: both
+  repositories see it with no foreign ticket or host; neither reading replaces the other; a key
+  of neither repository `forbidden` and the instance omitted from its view; a bill naming an
+  instance that does not list the claim's repository returned in `refused`), on both hosts —
+  the readings half is built, the bills half is this ticket's (G-BTN-88: billings counted across
+  repositories).
+- Integration: S-BTN-57 and the rewritten S-BTN-21 as `test/integration/S-BTN-57.ranking-on-runner.test.ts` and an updated `S-BTN-21`, on both hosts; S-BTN-24 and S-BTN-22 updated so no assertion reads hook advice.
+
+### Exit criteria
+
+- [ ] `npm run test:baton` green with S-BTN-21, -22, -24, -57 and -61 on both hosts; G-BTN-88 holds
+- [ ] `test/unit/views.test.ts` and `test/unit/claims.test.ts` pass
+- [ ] `git grep -n -i "hookrunner\|hook-refused\|launch-advice" src/` finds nothing
+- [ ] `npm run typecheck` green
+
+## Status
+
+_(filed 2026-10-16; replaces R3-1236)_
+
+_(2026-10-20: extended for the coverage audit — names S-BTN-61 and G-BTN-88, whose bills half this ticket builds.)_
+
+_(2026-10-22: updated for the ontology, route-choice and seats spec (§5.9, §6.10, §6.11) —
+`prefer` entries gain `leg?` and their own `bills` (R-BTN-100); the instance view serves active
+billings with seats and the caller's `host` instances (R-BTN-178, rule 11 arriving with B-106);
+the fleet view and the ETag's bumps gain the ontology's `runner_derived` (R-BTN-174, arriving
+with B-104). Each seam is named inline above; whichever ticket lands second wires its half.)_
+- 2026-11-02: the spec restructure's part 4 (B-166): `claim_bills` and the instance view's billings are gone — it serves each capability with a capacity and the claims holding its seats (R-BTN-178, B-106); the caller's `host` instances and the ontology's `runner_derived` are gone (R-BTN-76, R-BTN-174; B-167, B-168).
+
+_(2026-11-20: the spec simplification of 2026-11-19 (baton#299; `spec/BATON_SPEC_HISTORY.md`, that date) moved the unbuilt parts of the design this ticket builds out of the section files, with their rule ids, to proposal pages: the launcher is part 7 of [the checks-and-executors proposal](../../spec/proposals/checks-and-executors.md), and the views a runner ranks from are under "The runner's views and the doorbell" in [the tables-and-routes proposal](../../spec/proposals/data-model-and-api.md). Each rule keeps its id and a line in its section, which links the page. The pull request that builds this ticket moves the rules it builds back into the section files, and the scenarios and gates it makes pass back into [the verification section](../../spec/BATON_SPEC/15-verification.md#sec-15), in the same change. The plan above is unchanged.)_

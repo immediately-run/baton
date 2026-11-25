@@ -1,0 +1,222 @@
+---
+title: "B-311 — Work done outside Baton, modelled in each course: fact legs for hand acts, a reconcile leg for evidence, found by the sync and applied by Baton (R-BTN-203, S-BTN-309)"
+id: B-311
+project: baton
+status: available
+updated: 2026-11-21
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1311
+tier: critical
+description: "The sync finds work done outside Baton and Baton applies it inside each course's own graph: fact legs (opened-, reviewed-, fixed-, merged-by-hand) arriving by the sync's std:arrival@1, and filtered evidence (merged-early, mention) as std:evidence@1 that Baton keeps and hands to the course's reconcile leg, queued in place of the queued leg. Builds the arrival apply path, the reconcile-leg queueing and the standard courses' new legs."
+topics:
+  - sync
+  - courses
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the owner, 2026-11-21:
+- "Baton should handle work performed outside of baton gracefully: If it is possible to determine
+  that a ticket has been completed in a separate session, baton should update its board accordingly
+  … This should be performed by the sync github action code, not the baton server".
+- "baton *must* work well in a setup where only a portion of the organization is using baton".
+- "the codegen leg is not the only leg which may be completed outside baton".
+- "Baton's whole strategy is explicitly modeling processes that have been traditionally implicit
+  via the coarse graph. This only works if transitions between stations that happen outside Baton
+  are also modeled. So the reconciler legs need to be part of the course".
+
+After two adversarial reviews, the owner chose:
+- hand acts as separate fact legs;
+- mentions filtered, rather than an explicit trailer;
+- a hand merge closing only where the course allows.
+
+The case that started it: B-166 was delivered on 2026-11-02 by PRs #158, #159, #163 and #164, never
+claimed or closed, and cost a runner's implement leg on 2026-11-21.
+
+- The open-world stance: Baton cannot prevent moves outside it, only detect them and place the
+  ticket; a factory that needs strictness gates the forge (values #13, the owner, 2026-11-21).
+
+**Spec:** [BATON_SPEC §4.2](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-2) ([R-BTN-203](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-2)); [§1](../spec/BATON_SPEC/01-what-baton-is.md#sec-1) ([R-BTN-39](../spec/BATON_SPEC/01-what-baton-is.md#sec-1)'s fact arrival, and evidence and the reconcile
+leg); [§5.2](../spec/BATON_SPEC/05-courses.md#sec-5-2) ([R-BTN-69](../spec/BATON_SPEC/05-courses.md#sec-5-2)'s `arrives` and `reconciles`; `std:evidence@1`); [§3.4](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-4) ([R-BTN-96](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-4), [R-BTN-139](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-4));
+[§13](../spec/BATON_SPEC/13-data-model.md#sec-13) (`ticket_evidence`, `reconcile_displaced`); [§14](../spec/BATON_SPEC/14-api.md#sec-14) (the claim answer); [R-BTN-188](../spec/BATON_SPEC/12-security.md#sec-12-8)'s `attestations`
+and [R-BTN-191](../spec/BATON_SPEC/12-security.md#sec-12-8); scenario [S-BTN-309](../spec/BATON_SPEC/15-verification.md#scenarios). The courses' contract is `docs/standard-courses.mdx`, *Work done
+outside Baton* and *The reconcile leg*.
+
+## Plan
+
+### Core (`src/core/`)
+
+1. **`arrives` and `reconciles` in the course file.** Accept both in `validateCourse`
+   (`src/core/course.ts`: the `LEG_KEYS` allowlist ≈66, which refuses `arrives` today; the
+   comment in the `autonomous` check ≈376).
+   - A fact leg (`arrives: {fact, verdict?, next?}`) has exactly one outcome, is never
+     `kind: person`, never `start_leg` and never another leg's `next`. Its `next` leaves its
+     outcome; on a `pr-verdict` leg it may be `{approve, changes}`.
+   - A reconcile leg (`reconciles: {to: {station: next | null}}`) declares no `to`. Its outcomes
+     are its `from` and the keys of `reconciles.to`, and it has `max_runs`. Each `next` leaves its
+     station (`null` only at an end). At most one leaves a station, and it is never `start_leg` or
+     a `next`.
+   - R-BTN-39's default next skips fact and reconcile legs.
+
+   Raise the standard courses' `min_runner_version`, since older runners and servers refuse
+   either field, and deploy the server before any repository adopts the new course versions.
+2. **Applying `std:arrival@1`.** Today `src/core/questions.ts` ≈195 records every type but
+   `std:decision@1` as `arrival-unapplied`. Build the apply path R-BTN-39 states:
+   - the board came from a sync key or the CI identity (on a machine-key board these attestations
+     are dropped and the board accepted), and the policy admits the writer;
+   - a fact leg leaves Baton's station;
+   - `reached` is its outcome;
+   - no claim is active (otherwise record `arrival-unapplied` once per `ref` and drop it, below)
+     and nothing holds the ticket (otherwise keep it and apply it when the hold lifts).
+
+   Apply once per attestation `ref`, queue `next` (per verdict on a `pr-verdict` leg), and log
+   `fact-arrival`. A hand arrival counts as a run of the fact leg itself (R-BTN-63). A sync
+   arrival meeting a claim is dropped, not deferred: the next sync posts it again if its fact
+   still holds. A sync arrival on a fact leg with no runs left
+   is kept as `fact` evidence. An arrival refused only because the policy admits
+   no `sync` writer is kept as evidence (`fact`, or `merged-early` for `pr-merged`).
+3. **`std:evidence@1` and the reconcile leg.**
+   - A new numbered migration (append-only) for `ticket_evidence` and `reconcile_displaced` (§13).
+   - Keep each admitted piece of evidence once per `ref`. A policy stored before the type existed
+     admits `sync` for it (R-BTN-188).
+   - In every transaction that changes a ticket's station, queued leg, claim, hold or evidence,
+     apply R-BTN-39's rule: queue the reconcile leg leaving the station (runs left; never in place
+     of a person, suspended, routed, exhausted or expired leg), and record the displaced leg with
+     its station. A reconcile leg already queued at that station keeps the record. Any change of
+     station or queued leg the reconcile leg didn't make clears it, including a fact arrival at
+     the same station. An exhausted reconcile leg puts the displaced leg back. Log
+     `reconcile-queued`.
+   - Accept as its finishing position only `unchanged` (the station it left, `next` = the
+     displaced leg) or a `reconciles.to` station with its mapped `next`. That position marks the claim's evidence
+     weighed and clears the record. A claim ending any other way leaves both.
+   - Evidence the rule can't hand on waits, and the ticket read lists it (§14 `evidence`). The
+     attestations read lists fact arrivals and evidence.
+4. **The claim answer** (§9.1) for a reconcile leg carries `evidence: [{ref, kind}]` and
+   `displaced`. The observation (§4.3) serves the sync `runner_pushers`, `verdict_refs`,
+   `claim_prs` and `claim_shas`, all from the evidence claims reported (R-BTN-8's
+   `ended_at_sha`, the leg outputs and the PR URLs), and each position's `changed_at`. The
+   standard review stubs must report their verdict comment's URL even when the claim is released
+   after posting it.
+
+### Sync (`src/defaults/`)
+
+5. **Facts.** Extend `PrFact` (`src/defaults/course-pr.ts` ≈15) with the merge commit and the
+   title and body, which are read and never posted. Read PRs for every course's live tickets
+   (R-BTN-96 as amended). Note that `BATON_PR_AUTHOR` (`cli.ts` ≈1186) narrows the PR list to one
+   author, which defeats this; it must not apply to the evidence read.
+6. **Arrivals.** In the CLI, for every ticket whatever its station function, post an
+   `std:arrival@1` as `sync` for each fact a fact leg leaving Baton's station takes, with the ref
+   and the leg's `next`. Extend `StationsResult` and `PostedStation` so a post can carry them (they
+   carry no attestations today), and pass `ctx.positions` (`StationCtx` doesn't carry it). A
+   machine-key sync posts none.
+   - No `pr-opened`, `pr-verdict` or `pr-pushed` while `runner_pushers` is NULL or `[]`.
+   - `pr-opened`: a PR not in `claim_prs` and not authored by a `runner_pushers` login.
+   - `pr-verdict`: the head's latest verdict, newer than the position's `changed_at`, when it is
+     a hand verdict (not `runner_pushers`, the PR's author, the head's pushers, or a
+     `verdict_refs` URL). One per head. Honour `arrives.verdict`. No condition on the test gate
+     (open world, values #13).
+   - `pr-pushed`: after the latest changes verdict (none without one), by no `runner_pushers` login,
+     of no commit in `claim_shas`, changing more than the merged-in base.
+   - `pr-merged`: in each repository the ticket's PRs map, a merged PR and none open (PRs closed
+     unmerged ignored), none by a `merge` leg. A partial merge is `merged-early`.
+7. **Evidence.**
+   - Post `merged-early` for a `pr-merged` fact that no fact leg can take.
+   - Post `mention` for pushers' PRs (home and `repos:`) merged between the times Baton accepted
+     the last head and handed out this observation, and for the home's first-parent commits
+     between those heads, that name the id as a whole word, with every exclusion R-BTN-203 lists.
+   - `baton repo sync --backfill-mentions <since>` widens one run's window, so outside work from
+     before the feature (B-166's kind) can be found once.
+
+### Courses
+
+8. **Fact legs and reconcile legs** in `create-pr`, `review-pr` (`approved-by-hand`, with
+   `verdict: approve`) and `create-spec` (`opened-by-hand`, `pushed-by-hand`, `merged-by-hand`)
+   (`src/defaults/course-pr.ts`, `src/defaults/courses.ts` and the course files), as
+   `docs/standard-courses.mdx`'s two tables list, with the course versions raised (R-BTN-22).
+   - Each reconcile leg's stub reads the answer the page gives:
+     - `unchanged` (next = the displaced leg from the claim);
+     - `at <station>` (its `reconciles.to` stations, the one it left included, with the mapped
+       next), where a merge or verdict it names is checked as the fact leg's would be, and an
+       unchecked `at merged` fails;
+     - on `create-pr`, `delivered <sha|PR,…>`, checked on the default branch as B-257's
+       `delivered` is. Every
+     cycle contains a leg with `max_runs` (R-BTN-69), so `baton test-course` passes.
+   - Its instructions file (`legs/reconcile.md`) says what the agent reads and what it may not
+     decide.
+
+### Checks and tests
+
+9. **`baton ticket check`** reports, never as a finding, each ticket that is done on the board but
+   whose file is live.
+10. **Tests:**
+    - S-BTN-309's cases, in one test file naming the row.
+    - A `baton test-course` run for each changed course.
+    - B-166's shape as a fixture: four merged PRs naming it in titles, none in `prs:`. It gets
+      `mention` evidence and its `reconcile` leg is queued at `filed`; `delivered` leads to
+      `confirm`, and `unchanged` re-queues `implement`.
+    - A `create-pr` ticket at `pr-open` whose PR is merged by hand arrives at `merged` by
+      `merged-by-hand` (open world: no gate or review required).
+    - The same ticket at `reviewed`, with a person's approval and then a hand merge, ends at
+      `merged`.
+    - A repository whose course narrows `merged-by-hand` to `reviewed` gets `merged-early`
+      evidence for a merge at `pr-open`, and its reconcile leg is queued.
+
+### Deploying it on this repository
+
+The owner's actions, not this ticket's (CLAUDE.md: CI workflows and pins are the owner's):
+- Move this repository's sync workflow CLI pin and `.baton/baton.json`'s `create-pr` source to a
+  commit with this ticket. Re-scaffold `.baton/courses/create-pr/course.json` (`baton repo init
+  --course create-pr --force`, keeping `BATON_GITHUB_READ_TOKEN` in the workflow, as #314 did).
+  Until then, hand merges here are `merged-early` evidence that no reconcile leg takes.
+- The sync authenticates by the CI identity (OIDC), so its boards carry arrivals.
+- For B-166's kind of past work, the one `--backfill-mentions` run needs a `workflow_dispatch`
+  input on the sync workflow (an owner edit), or a registered sync key for a local run. A
+  machine-key run's evidence is dropped.
+
+### Trust
+
+New inputs, each read by the sync and judged by Baton:
+- **The forge's PR states, merges, verdicts and pushes** move a ticket only through a fact leg its
+  own course file places (open world, values #13: Baton records what happened). They need a board
+  posted with the sync key or the CI identity, never a runner's machine key, and a policy whose
+  `attestations` admit `sync` for `std:arrival@1` (`cooperative` does). Under `protected` the
+  refused arrival becomes evidence. No PR, verdict or push counts as a hand act while runner
+  identities are unknown, and runners' own acts are excluded once they are known.
+- **PR titles and bodies, and commit messages**, are read as text to find an id and never
+  posted. A `mention` is evidence for the reconcile leg. The agent may conclude where the evidence
+  shows the ticket, `merged` included, but its stub verifies any merge or verdict it names against
+  the forge as the fact leg would. A mention alone, with no such merge, can't close the ticket
+  except through `delivered` and a person's `confirm`.
+- **`std:evidence@1`** is admitted for `sync` under both presets.
+- **The reconcile leg's `reconciles.to`** comes from the repository's own course file.
+
+### Invariants
+
+- **The sync finds, the core places (R-BTN-35, R-BTN-39, R-BTN-50).** The sync never sets a
+  position. Baton applies arrivals and reconcile legs' conclusions along edges of the ticket's own
+  course.
+- **A claimed or held ticket is untouched.** Queueing waits for the claim or hold to end. A sync
+  arrival under a claim is dropped and posted again by the next sync; one under a hold is kept
+  and applied when it lifts. Archive and `status: done` close as before. Pinned, person and
+  suspended legs are never displaced.
+- **A partial reading is never posted (R-BTN-96).**
+- **Filter fields only (R-BTN-33).** Evidence is a `ref` and a `kind`; no title or message is
+  stored.
+- **Migrations are append-only.**
+
+## Exit criteria
+
+- [ ] `npm test` passes, with S-BTN-309's test file naming its §15 row.
+- [ ] `npm run typecheck` passes.
+- [ ] `node cli/baton.mjs test-course . create-pr` reports no violations, as does each other
+  changed course in a fixture repository.
+
+## Status
+
+_filed 2026-11-21._ From the owner's rulings in the supervising session on bering, after B-166.
+Revised the same day after two adversarial reviews and the owner's choices on them, and again when
+the owner made reconciliation a leg of each course.
