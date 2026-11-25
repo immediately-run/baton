@@ -1,7 +1,7 @@
 // S-BTN-300 the sessions read (B-202; BATON_SPEC §11.4 R-BTN-155, §12.4 R-BTN-16, §14): `GET
 // /v1/admin/sessions` (`admin.session.list`) lists the live dashboard sessions to an
 // administrator's key or session. Must hold:
-//   1. a live session is `{role, key_fingerprint, created_at, expires_at, current}`, newest
+//   1. a live session is `{role, key_fingerprint, via, created_at, expires_at, current}`, newest
 //      first; the calling session's own is `current`, and no row is for a key's call;
 //   2. an ended session is not listed: logged out, expired, or its key no longer an
 //      administrator's;
@@ -48,9 +48,9 @@ describe('S-BTN-300 the sessions read (B-202)', () => {
     const json = JSON.parse(text) as Row;
     expect(Object.keys(json).sort()).toEqual(['not_built', 'server_time', 'sessions']);
     expect(json.sessions).toEqual([
-      { role: 'administrator', key_fingerprint: second.fingerprint, created_at: T0 + 2 * H, expires_at: T0 + 14 * H, current: false },
-      { role: 'administrator', key_fingerprint: admin.fingerprint, created_at: T0 + H, expires_at: T0 + 13 * H, current: false },
-      { role: 'administrator', key_fingerprint: admin.fingerprint, created_at: T0, expires_at: T0 + 12 * H, current: true },
+      { role: 'administrator', key_fingerprint: second.fingerprint, via: 'link', created_at: T0 + 2 * H, expires_at: T0 + 14 * H, current: false },
+      { role: 'administrator', key_fingerprint: admin.fingerprint, via: 'link', created_at: T0 + H, expires_at: T0 + 13 * H, current: false },
+      { role: 'administrator', key_fingerprint: admin.fingerprint, via: 'link', created_at: T0, expires_at: T0 + 12 * H, current: true },
     ]);
     expect(json.not_built).toEqual({ last_seen_at: 'B-76', client_addr: 'B-76' });
     // Another session of the same key: its own row is the current one.

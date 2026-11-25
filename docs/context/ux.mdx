@@ -1,0 +1,102 @@
+---
+title: UX rules — the dashboard
+description: What a person must be able to do on Baton's dashboard, the questions it answers in a few clicks, the rules every dashboard change is checked against, and the gaps today.
+nav: UX rules
+order: 5
+tags: [context, design]
+---
+
+<Lede>The dashboard is finished when a person can run the factory from it: answer their
+questions in a few clicks and clear whatever stops the runners, without a terminal. A screen
+that draws its entity correctly but leaves the task to the CLI is not done.</Lede>
+
+**The owner, 2026-11-21:** "The v2 UI is much nicer visually, but the overall UX is still far
+from usable." The rules below are the owner's response. They sit beside
+[the design brief](design-brief.mdx), which keeps the screens' content, visual language and
+constraints. This page owns the questions the dashboard answers and how a person gets
+through a task.
+
+## The questions, and how far away each answer is
+
+The owner's five come first. Each is answered **from the landing page in at most two clicks**,
+and the answer is on the page, not behind a CLI line:
+
+1. **What is the status of a project or goal?** How much is done, what is in flight, what is
+   blocked and on what, and what is expected next.
+2. **What is waiting on me?** Every item that needs this person, with the control that clears
+   it next to it: held tickets, open decisions and conditions, unconfirmed completions,
+   tickets nobody can take.
+3. **Which (ticket, leg) pairs are the runners working on now?** Ticket, leg, runner, how long
+   it has run, and whether it is stalled — and for an agentic leg, a link into its live agent
+   session (the opencode session, or the host's leg page that serves it).
+4. **What is the factory's throughput?** Over a window the person picks (a day, a week):
+   tickets finished, PRs merged, legs run and failed, by course and by runner, and the trend.
+5. **What happened to a given ticket so far?** Its whole history in order: every claim, leg,
+   attempt and how it ended (the agent's last words for a failed leg), holds and who lifted
+   them, its PRs. Reached by typing its id from any screen.
+
+The design brief's other questions keep their place after these: who is working, the 24-hour
+timeline, the ready queue, how a course performs, where git overruled Baton, whether the
+instance is healthy.
+
+## The rules
+
+Every dashboard change is checked against these eight. A reviewer names the task the change serves
+and walks each rule.
+
+1. **No task needs a terminal or devtools.** If Baton can produce a state, a person can clear it
+   from the dashboard. A screen may show the CLI line as well, never instead. Signing in
+   counts: a person who has passed the instance's identity check (Cloudflare Access today)
+   reaches their session without minting a link in a terminal.
+2. **Batch where Baton batches.** Any action Baton can cause on many tickets at once — holds
+   after a run of failures, backoffs, refusals for one reason — has a multi-select and a bulk
+   control. A filter by reason ("held: attempts exhausted") is enough to select them all. One
+   confirmation covers the batch, and the result names each ticket that did not change, and why.
+3. **Every domain word on screen explains itself.** A capability, a station, a leg, a gate code
+   (`awaiting-sync`, `missing-capability`), a condition kind: each carries its one-sentence
+   meaning from [the vocabulary](vocabulary.mdx), inline or on hover, and where it matters, its
+   consequence ("only runners that declare and are granted `credential:DEPLOY_TOKEN` take
+   it"). An internal code is never the only text.
+4. **Every blocked state says why, who can clear it, and offers the control.** "Held — three
+   failed attempts (gateway unreachable). You can lift it: [Lift]", not "held". "Waiting for a
+   sync — the next one runs on a push or at …; [Resync now]", not `awaiting-sync`. When no one
+   in the session's role can clear it, the page says who can.
+5. **The landing page is what needs you.** It opens on the person's questions 2 and 3, with the
+   controls, then links on to the entity screens. The entity tree is how the dashboard is
+   organized, not how a person starts.
+6. **A failure names its cause in words a person acts on.** A failed leg shows the reason
+   Baton recorded and the agent's last message. A refusal shows what to change. Raw JSON is
+   available, but not first.
+7. **A running agentic leg is one click from its live session, on both sides.** A ticket whose
+   leg is running opens the leg's agent session from the ticket's own page and its row on the
+   Board. A runner running such a leg opens the same session from the runner's page and its row
+   on Runners. The link is the claim's `session_url` (R-BTN-113), labelled "Open session" with
+   its host. Where none is reported, the page says so, and it never shows a stale one once the
+   leg ends.
+8. **Answers are counted, not left for a person to compute.** Throughput, progress, and age
+   and wait times are drawn as numbers and trends. A person never counts rows to answer a
+   question.
+
+## Gaps today (2026-11-21)
+
+Each gap needs its own ticket; these rules alone do not close them.
+
+- **Project and goal status (question 1):** the Goals screen reads nothing, because goals
+  (B-122) are not built, and projects (`tickets/projects/`) are not drawn anywhere.
+- **What is waiting on me (question 2):** the strip counts it, but held tickets can only be
+  lifted one ticket page at a time (rule 2). On 2026-11-21 the owner lifted 31
+  `attempts-exhausted` holds with a pasted console script.
+- **Throughput (question 4):** no read or screen counts finished work over time.
+- **Explaining terms (rule 3):** capabilities, stations and gate codes are drawn as bare codes.
+- **Signing in (rule 1):** only an administrator's one-time link exists, minted from the CLI
+  (R-BTN-57). The owner's sign-in (B-76) is not built, and an identity Cloudflare Access has
+  verified does not open a session. Accepting that identity is a security-model decision for
+  the owner: a spec rule tying the Access identity to an owner key.
+- **A ticket's history (question 5):** a ticket's page draws its history and attempts, with the
+  recorded end reason. But no screen jumps to a ticket by id, and a failed leg's agent's last
+  message is only in the host's leg archive.
+- **Running legs (question 3, rule 7):** the Board's Running section answers which pairs are
+  running. The session link is drawn on a ticket's page (its claim) and on a runner's card and
+  timeline, but not on the Board's Running rows. Bering's runners report it (its leg pages,
+  e.g. `https://bering.…:8702/baton/baton%3AB-60/review/…`); it is a link only where its host
+  passes the repository's link rule (`session_hosts`).

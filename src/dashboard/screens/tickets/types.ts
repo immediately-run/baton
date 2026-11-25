@@ -116,6 +116,7 @@ export interface HistoryRow {
   leg_version?: number;
   detail?: unknown;
   inputs?: unknown;
+  rationale?: unknown;
 }
 
 export interface HistoryAnswer {

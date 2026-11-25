@@ -39,10 +39,12 @@ process for development and CI. Nothing crosses a tenant.
 - **Code.** Schema migrations are numbered and append-only; the object refuses to serve until
   all are applied. There is no staging instance: a home repository binds to one Baton
   (R-BTN-56).
-- **R-BTN-37 (shared modules are vendored by hash).** The Worker imports byte-identical copies
-  of the pure modules it shares with another repository from `src/shared/`, listed in
-  `src/shared/manifest.json` with the commit they came from and each file's SHA-256. The suite
-  checks every copy against the manifest and fails on drift. Code with course meaning (`locate`,
+- **R-BTN-37 (shared modules are vendored by hash).** Baton keeps byte-identical copies in
+  `src/vendor/`. The source is `immediately-run/docs`: `scripts/lib/baton.mjs`,
+  `scripts/lib/vocabulary.mjs`, `scripts/lib/sessionUsage.mjs`, `scripts/lib/batonSync.mjs`,
+  and `scripts/lib/ticketPr.mjs`. `src/vendor/manifest.json` records the source commit and
+  each file's SHA-256. The suite checks every copy against the manifest and fails on drift.
+  Code with course meaning (`locate`,
   ranking, activity matchers) is never vendored: the sync posts its results, and core compares
   strings and integers only.
 - **R-BTN-32 (one clock, with a production-inert test seam).** Every component reads time
@@ -67,6 +69,7 @@ process for development and CI. Nothing crosses a tenant.
   | `Clock` | `batonNow()` (R-BTN-32) | the same |
   | `Origin` | variable `BATON_ORIGIN` | `--origin` (default `http://127.0.0.1:<port>`) |
   | `AdminKeys` (R-BTN-57) | secret `BATON_ADMIN_KEYS` | `--admin-keys <file>` |
+  | `AccessIdentities` (R-BTN-155), read on every request like `AdminKeys` | secret `ACCESS_IDENTITIES`, with variables `ACCESS_TEAM_DOMAIN`, `ACCESS_AUD` and secret `OWNER_EMAILS` | `--access-identities <file>` |
   | `HumanKeys` (R-BTN-185) | secret `BATON_HUMAN_KEYS` | `--human-keys <file>` |
   | `ForgeSecrets` — per-repository webhook secret and dispatch token (R-BTN-94, R-BTN-95) | secret `BATON_FORGE_SECRETS` | `--forge-secrets <file>` |
   | `GitHubApp` (optional, §12.7) | `BATON_GITHUB_APP_ID`, secrets `BATON_GITHUB_WEBHOOK_SECRET` and `BATON_GITHUB_APP_KEY` | `--github-app-id`, `--github-webhook-secret`, `--github-app-key <file>` |
@@ -189,7 +192,7 @@ process for development and CI. Nothing crosses a tenant.
   (R-BTN-76) — and at most 10 minutes; an idle beat then reads a handful of rows. The answer
   remembered is always the one computing it gives (R-BTN-61, R-BTN-72).
   - **What a heartbeat writes.** A live runner's heartbeat writes its liveness only, unless
-    anything it declares (harness, kind, model, tier ceilings, lease timeout, isolation,
+    anything it declares (harness, kind, model, lease timeout, isolation,
     concurrency, profile, capabilities, tags, courses) changed, it re-keys, or it carries
     something to record.
 - **R-BTN-149 (hard caps per repository).** Safety limits at twice the envelope; none refuses
@@ -217,7 +220,7 @@ process for development and CI. Nothing crosses a tenant.
     is refused before the object; key and nonce checks run inside it. Every other route is
     checked in the Worker for its own credential first: `/v1/sync/*` a CI identity token or a
     signature (R-BTN-93); `/v1/ui/*` a dashboard session; `POST /v1/login` a one-time link's
-    token (R-BTN-155); the App's forge-notification route GitHub's signature (R-BTN-73). The
+    token or a Cloudflare Access assertion (R-BTN-155); the App's forge-notification route GitHub's signature (R-BTN-73). The
     static pages (`/login`, the shell at `/` and every §11.4 screen path, and
     `/conditions/{condition}`, R-BTN-163) need no session. The OAuth and MCP routes are not
     built (R-BTN-130).
@@ -233,4 +236,3 @@ process for development and CI. Nothing crosses a tenant.
     non-zero naming the code. Neither marks a lease lost at once, but an unanswered heartbeat
     still runs the lease clock (G-BTN-4). `too-large` is reported, never retried. A capped forge
     webhook is a lost trigger, covered by the sync's other triggers (R-BTN-94).
-

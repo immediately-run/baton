@@ -44,6 +44,7 @@ export interface ClaimView {
   endedRegressed: boolean;
   confirmed: boolean;
   fencePending: boolean;
+  runningSeq?: number;
   deadlineAt?: number;
   fenceDeadline?: number;
   timeoutRelease?: { deliveredAt: number | null };
@@ -94,14 +95,15 @@ export function projectState(store: Store, now: number): Projection {
     `SELECT id, ticket_id, runner_id, status, end_reason, station, leg, start_path, claim_observation, end_observation, regressed_since, ended_regressed,
             confirmed_at, fence_pending, deadline_at, fence_deadline, course_id FROM claims ORDER BY id`)) {
     if (!inScope(c.ticket_id) || (c.course_id ?? MODEL_COURSE) !== MODEL_COURSE) continue;
-    const legs = rows<{ leg: string; to_station: string | null; bars: string; finished_at: number | null; abandoned_at: number | null }>(
-      'SELECT leg, to_station, bars, finished_at, abandoned_at FROM claim_legs WHERE claim_id = ? ORDER BY seq', c.id);
-    const running = legs.find((l) => l.to_station == null && l.abandoned_at == null && l.finished_at == null);
+    const legs = rows<{ seq: number; leg: string; to_station: string | null; bars: string; finished_at: number | null; abandoned_at: number | null }>(
+      'SELECT seq, leg, to_station, bars, finished_at, abandoned_at FROM claim_legs WHERE claim_id = ? ORDER BY seq', c.id);
+    const running = legs.findLast((l) => l.to_station == null && l.abandoned_at == null && l.finished_at == null);
     claims[String(c.id)] = {
       ticket: c.ticket_id, runner: c.runner_id, status: c.status, endReason: c.end_reason, station: c.station ?? '', leg: c.leg ?? '',
       finished: legs.filter((l) => l.to_station != null).map((l) => l.leg), legBars: running ? (JSON.parse(running.bars) as string[]) : [],
       startPath: legsOf(c.start_path), claimObs: c.claim_observation, endObs: c.end_observation ?? -1,
       regressed: c.regressed_since != null, endedRegressed: c.ended_regressed === 1, confirmed: c.confirmed_at != null, fencePending: c.fence_pending === 1,
+      ...(running == null ? {} : { runningSeq: running.seq }),
       ...(c.deadline_at == null ? {} : { deadlineAt: c.deadline_at }),
       ...(c.fence_deadline == null ? {} : { fenceDeadline: c.fence_deadline }),
     };

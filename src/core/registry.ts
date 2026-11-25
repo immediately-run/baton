@@ -229,7 +229,7 @@ const parse = (r: RepoRow): Repository => ({ ...r, transcript_repos: JSON.parse(
 const REPO_COLUMNS = 'id, github, forge, remote, web_base, ci_identity, default_branch, sync_workflow, mirror_workflow, weight, transcript_repos, tiers, cutover_at, retired_at, former_paths';
 
 export class Registry {
-  constructor(private readonly c: { store: Store; now: () => number; ensurePolicy?: (repository: string, forge: Forge) => void }) {}
+  constructor(private readonly c: { store: Store; now: () => number; ensurePolicy: (repository: string, forge: Forge) => void }) {}
 
   private rows<T>(q: string, ...p: unknown[]): T[] {
     return this.c.store.exec<T>(q, ...p).toArray();
@@ -256,7 +256,7 @@ export class Registry {
     this.c.store.exec('INSERT INTO board_head (repository_id, sha) VALUES (?, NULL) ON CONFLICT (repository_id) DO NOTHING', r.id);
     // §12.8 (B-145): version 1 with the repository — the `cooperative` preset on a forge,
     // `plain-git` where the forge is git — in the same transaction.
-    this.c.ensurePolicy?.(r.id, r.forge);
+    this.c.ensurePolicy(r.id, r.forge);
     return this.get(r.id)!;
   }
 
@@ -368,15 +368,6 @@ export class Registry {
     return r ? parse(r) : null;
   }
 
-  /** The repository whose sync still posts the instance's fleet data — the reviewer matrix and
-   *  catalog — until the course data of §7.1's board post replaces them (§2a drops the reference repository; R3-1231). The model tables' blocks are not fleet
-   *  data since B-142: a sync still posting `providers` or `prices` is ignored for them. An
-   *  interim, so it is the one a deployment registered first (docs, the board these tables came
-   *  from), and no other repository's sync can rewrite what every repository's claims read. */
-  fleetRepository(): string | null {
-    return this.rows<{ id: string }>('SELECT id FROM repositories WHERE retired_at IS NULL ORDER BY rowid LIMIT 1')[0]?.id ?? null;
-  }
-
   /** §6.8: the repositories a transcript pointer under one of `repo`'s claims may name — its
    *  own `transcript_repos` (R-BTN-66), or the defaults while it names none. */
   transcriptReposOf(repo: string): string[] {
@@ -420,4 +411,3 @@ export class Registry {
     return parse(row);
   }
 }
-

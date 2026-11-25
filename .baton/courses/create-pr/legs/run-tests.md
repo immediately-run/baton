@@ -20,8 +20,12 @@ What you will see of it:
 - **the budget** — the gate may run 30 times (and `fix` 30 with it) while the review rounds
   stay at 3: the gate is deterministic and cheap, and spending retries there harms nothing the
   way a wasted review round does.
-- **a PR it cannot reach** — the gate tests the home repository's one PR branch. A ticket whose
-  PRs are in other repositories, or that has several at home, is listed under Needs you
+- **a PR in another repository** — the gate tests the home repository's one PR branch. A PR
+  in a repository the ticket's `repos:` names is gated by that PR's own CI instead: every check
+  on its head green passes, a red one routes to `fix`, and while they run the round waits on
+  `ci`. With no PR branch at home, this leg runs nothing and makes no marker: it suspends, and
+  the sync reads that CI. A ticket with PRs at home and elsewhere needs both green.
+- **several PRs at home** — the gate cannot choose one: the ticket is listed under Needs you
   (`run-tests-unreachable`) instead of looping; the owner answers `skip` through Baton to waive
   the gate for that ticket.
 - **no verdict** — npm that cannot start, or a kill the gate's own bound did not send, fails the

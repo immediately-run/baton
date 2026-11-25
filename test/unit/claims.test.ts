@@ -1,13 +1,13 @@
 // R3-1212 — claims (BATON_SPEC §6.1–6.7, §7.2, §11): G-BTN-1, -2, -3, -6, -14 and -40, plus the
 // claim and end contracts, the holder query, matching's runner rules, and the held history.
 import { describe, it, expect, inject, beforeEach } from 'vitest';
-import { confirmations } from '../../src/shared/batonSync.mjs';
+import { confirmations } from '../../src/vendor/batonSync.mjs';
 import { gatesFor } from '../../src/core/gates';
 import {
   beat, claimItem, claimRow, course, cutover, q, endClaim, hbBody, keyCall, ORIGIN, ownerCall, payload, recommended, refresh, register, requestId, rows, setAdminKeys, setClock, sha256, syncCall, syncToken, withCore, runnerCall, tick,
 } from '../helpers';
 import { makeKey, signedRequest } from '../lib/sshKeys';
-import { capabilitiesOf } from '../../src/shared/vocabulary.mjs';
+import { capabilitiesOf } from '../../src/vendor/vocabulary.mjs';
 import { call as hostCall } from '#host';
 import roadmapPr from '../fixtures/courses/roadmap-pr/course.json';
 
@@ -49,7 +49,7 @@ describe('the claim and end contracts (§11, §6.5, §11)', () => {
     // B-134: the ticket's scope — its home (the fixture's `repos: ['immediately-run/docs']` is
     // the home itself, so one path).
     expect(c.json).toEqual({ claim_id: expect.any(Number), ticket_id: 'docs:R3-9001', course_id: 'roadmap-pr', course_version: 3, default_branch: 'main',
-      policy_hash: expect.stringMatching(/^[0-9a-f]{64}$/), guarantees_hash: expect.stringMatching(/^[0-9a-f]{64}$/), floors_hash: expect.stringMatching(/^[0-9a-f]{64}$/), leg_state: 'forge',
+      leg_state: 'forge',
       station: 'filed', legs: ['implement'], next: [{ leg: 'implement', state: 'ready' }], scope: ['immediately-run/docs'],
       path: 'content/roadmap/R3-9001.mdx', nonce: expect.stringMatching(/^[0-9a-f]{6}$/), snapshot_sha: sha.A, previous_attempts: [],
       // B-183 (§4.5): the ticket's version as the board holds it ('' — the interim post carries none)
@@ -214,6 +214,9 @@ describe('the claim and end contracts (§11, §6.5, §11)', () => {
     const late = await register('vm-b', { model_id: 'opencode-go/kimi-k3', courses: [{ repository: 'docs', course: 'roadmap-pr', version: 2 }] });
     expect(await claimItem('vm-b', late.secret)).toMatchObject({ status: 409, json: { code: 'stale-skills', rule: 9 } });
     expect(await claimItem('vm-b', late.secret, { ticket_id: 'docs:R3-9002' })).toMatchObject({ status: 409, json: { code: 'stale-skills', rule: 9 } });
+    expect(await claimItem('vm-b', late.secret, { prefer: [{ ticket_id: 'docs:R3-9002' }] })).toMatchObject({ status: 404, json: {
+      code: 'no-eligible-ticket', refusals: [{ ticket_id: 'docs:R3-9002', code: 'stale-skills', rule: 9 }],
+    } });
     // Declaring no course at all is stale too: rule 9 asks for the ticket's course.
     const none = await register('mac', { model_id: 'opencode-go/kimi-k3', courses: [] });
     expect(await claimItem('mac', none.secret)).toMatchObject({ status: 409, json: { code: 'stale-skills', rule: 9 } });
@@ -713,5 +716,36 @@ describe('§7.1: a held history is accepted after 24 hours or by the owner', () 
     await syncCall('/v1/sync/board', payload(sha.D, sha.B, board.states.D, { force: true }));
     expect((await owner('/v1/ui/board/accept', { repository: 'docs', sha: sha.D })).status).toBe(200);
     expect((await syncCall('/v1/sync/board', payload(sha.D, sha.B, board.states.D, { force: true }))).status).toBe(200);
+  });
+});
+
+describe('S-BTN-57 claim preferences', () => {
+  it('takes the first passing entry and stores the rationale without an order override', async () => {
+    const w = await register();
+    const rationale = { choice: ['opaque', false] };
+    const body = { request_id: requestId(), prefer: [{ ticket_id: 'docs:R3-9001', leg: 'review' }, { ticket_id: 'docs:R3-9002' }, { ticket_id: 'docs:R3-9001' }], rationale };
+    const first = await claimItem('vm-a', w.secret, body);
+    expect(first).toMatchObject({ status: 200, json: { ticket_id: 'docs:R3-9002' } });
+    expect(await claimItem('vm-a', w.secret, body)).toEqual(first);
+    const stored = await rows<{ advice_json: string }>('SELECT advice_json FROM claims WHERE id = ?', first.json.claim_id);
+    expect(JSON.parse(stored[0].advice_json)).toEqual({ rationale });
+    expect((await withCore((c) => c.history.list('docs:R3-9002', null, 10))).rows).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: 'claimed', claim_id: first.json.claim_id, rationale }),
+    ]));
+  });
+
+  it('lists each refusal and rejects mutually exclusive or oversized inputs', async () => {
+    const w = await register();
+    const prefer = [{ ticket_id: 'docs:R3-9001', leg: 'review' }, { ticket_id: 'docs:R3-9003' }];
+    expect(await claimItem('vm-a', w.secret, { prefer })).toMatchObject({ status: 404, json: {
+      code: 'no-eligible-ticket', refusals: [
+        { ticket_id: 'docs:R3-9001', code: 'not-eligible', rule: 'not-queued' },
+        { ticket_id: 'docs:R3-9003', code: 'not-eligible', rule: 4 },
+      ],
+    } });
+    for (const body of [{ prefer, ticket_id: 'docs:R3-9001' }, { prefer, rationale: 'é'.repeat(2048) }, { prefer: Array(51).fill(prefer[0]) }]) {
+      expect(await claimItem('vm-a', w.secret, body)).toMatchObject({ status: 400, json: { code: 'invalid-params' } });
+    }
+    expect(await rows('SELECT id FROM claims')).toEqual([]);
   });
 });

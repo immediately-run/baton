@@ -27,7 +27,7 @@ export interface Ctx {
   now: () => number;
   blocks: Blocks;
   /** The retired-fields window's one writer (`deprecated.ts`): a reading's `nonce`, `signature`. */
-  deprecated?: Deprecated;
+  deprecated: Pick<Deprecated, 'note'>;
 }
 
 /** Who posts a reading: a runner session, a probe key, or an administrator — one more instrument. */
@@ -212,7 +212,7 @@ export class Resources {
    * writer class `admin` — no precedence. A reading's `nonce` and `signature` are its retired
    * signature (R-BTN-181), read and ignored while the history's Migrations entry lasts.
    */
-  // @model reading sha256:52055fa390cf
+  // @model reading sha256:7859931ad182
   post(who: Instrument, body: unknown, repos: string[] | null) {
     const readings = checkReadings(body, VALID_FOR.state_s);
     return this.c.store.transaction(() => {
@@ -222,7 +222,7 @@ export class Resources {
       // An administrator's instrument is its key; a probe's, its key; a runner's, its session.
       const source = who.kind === 'admin' ? `admin:${who.fingerprint}` : who.kind === 'probe' ? `probe:${who.fingerprint}` : `runner:${who.runnerId}`;
       const writer = who.kind === 'admin' ? 'admin' : who.kind === 'probe' ? 'instrument' : 'runner';
-      for (const field of new Set(readings.flatMap((r) => r.retired))) this.c.deprecated?.note(now, source, `reading.${field}`, 'readings');
+      for (const field of new Set(readings.flatMap((r) => r.retired))) this.c.deprecated.note(now, source, `reading.${field}`, 'readings');
       for (const r of readings) {
         const served = this.servedBy(r.instance);
         if (!served.length) {
@@ -320,7 +320,7 @@ export class Resources {
 
   /** The alarm's share: lapsed readings are dropped (every reading in force is kept, R-BTN-101),
    *  and the states they held change. Returns when the next one lapses. */
-  // @model readingLapses sha256:2ed2cbc78676
+  // @model readingLapses sha256:e21de463d6ed
   alarm(): number | null {
     const now = this.c.now();
     const lapsed = this.rows<{ instance: string }>('SELECT DISTINCT instance FROM instance_readings WHERE lapses_at <= ?', now).map((r) => r.instance);
@@ -334,10 +334,21 @@ export class Resources {
   }
 
   /** The instances, their states and the readings in force — for the dashboard (§14). */
-  view(now: number) {
+  readings(now: number, inForce = false) {
+    return this.rows<{ instance: string; source: string; writer: string | null; kind: 'state' | 'measure'; available: number | null; until: number | null; observed_at: number; lapses_at: number; detail: string | null }>(
+      `SELECT instance, source, writer, kind, available, until, observed_at, lapses_at, detail FROM instance_readings
+       ${inForce ? 'WHERE lapses_at > ?' : ''} ORDER BY instance, observed_at DESC, rowid DESC`, ...(inForce ? [now] : []))
+      .map((r) => ({ ...r, available: r.available == null ? null : !!r.available, detail: r.detail == null ? null : JSON.parse(r.detail) as unknown, stale: r.lapses_at <= now }));
+  }
+
+  view(now: number, repositories?: string[]) {
     return {
-      resources: this.rows('SELECT name, scope FROM external_resources ORDER BY name'),
-      instances: this.rows<{ name: string; repositories: string }>(`SELECT name, repositories FROM resource_instances ORDER BY name`).map((i) => ({
+      resources: this.rows<{ name: string; scope: string }>('SELECT name, scope FROM external_resources ORDER BY name'),
+      instances: this.rows<{ name: string; repositories: string }>(`SELECT name, repositories FROM resource_instances i
+        ${repositories === undefined ? '' : `WHERE EXISTS (SELECT 1 FROM instance_serves s JOIN external_resources r ON r.name = s.resource
+          WHERE s.instance = i.name AND r.scope = 'service') OR EXISTS (SELECT 1 FROM json_each(i.repositories) j
+          WHERE j.value IN (SELECT value FROM json_each(?)))`} ORDER BY name`,
+        ...(repositories === undefined ? [] : [JSON.stringify(repositories)])).map((i) => ({
         name: i.name,
         repositories: JSON.parse(i.repositories) as string[],
         serves: this.rows<{ resource: string }>('SELECT resource FROM instance_serves WHERE instance = ? ORDER BY resource', i.name).map((r) => r.resource),

@@ -78,6 +78,8 @@ Designs for this section that are not built are on the proposal page
   | `from` | leg | the stations it leaves | R-BTN-69 |
   | `to` | leg | its outcome station, or a list of them | R-BTN-83 |
   | `kind` | leg | absent: run by a runner; `person`: a person answers | R-BTN-116 |
+  | `reconciles` | leg | `{to: {<station>: <next leg> \| null}}`: a reconcile leg, run by a runner, which Baton queues when the ticket has evidence of work done outside Baton (R-BTN-39, R-BTN-203). It declares no `to`: its outcomes are each of its `from` (concluding `unchanged`, with the displaced leg next) and each station of `reconciles.to`, with that entry's next leg (`null` at an end). It needs `max_runs`; at most one reconcile leg leaves a station; it is never `start_leg` and never a `next`. Not on a fact or `kind: person` leg | R-BTN-39, R-BTN-203 |
+  | `arrives` | leg | `{fact: <kind>, verdict?, next?}`, a fact leg: no claim runs it; it arrives when the sync attests its fact (R-BTN-203); exactly one outcome; `verdict` (`approve` or `changes`) narrows a `pr-verdict`; `next` is a leg leaving its outcome (none at an end), or on a `pr-verdict` leg `{approve, changes}`, one per verdict. Its arrival is a run of the fact leg itself (R-BTN-63). A fact leg is never `start_leg`, never another leg's `next`, and never chosen as a default next (R-BTN-39). Not on a `kind: person` leg | R-BTN-39, R-BTN-203 |
   | `asks`, `expires` | leg | for `kind: person`: who answers, and when and where the leg arrives unanswered | R-BTN-116 |
   | `max_runs` | leg | how often one ticket may run it without a person | R-BTN-63 |
   | `max_queue` | leg | queue depth that raises a warning | R-BTN-79 |
@@ -143,6 +145,10 @@ Designs for this section that are not built are on the proposal page
     (a route, or an adopt, R-BTN-39). The reason is in the position's history row. An owner's
     route, a retry policy's `exhausted` leg (R-BTN-122) and a person leg's expiry (R-BTN-116)
     stay queued until the ticket's station changes, whatever readiness a later snapshot posts.
+  - **Missing from a snapshot.** If a board post places a ticket at a non-end station with no
+    queued leg, Baton accepts the post and places its other tickets as usual. The affected ticket
+    is not claimable and Baton raises `baton.missing-next` on it (R-BTN-163). The condition closes
+    when a later post supplies a queued leg, places the ticket at an end, or no longer places it.
   - **Route** (not built: [the proposal](../proposals/data-model-and-api.md#other-reads-and-owner-routes)).
     `baton ticket route <ticket> <leg>` (R-BTN-127) queues any leg leaving Baton's
     station for the ticket, `next_source: owner`, restarting its run count (R-BTN-63);
@@ -173,7 +179,9 @@ Designs for this section that are not built are on the proposal page
   - **Baton's traversal record counts.** A ticket's runs of each leg and arrivals at each
     station are counted from Baton's own record, under resolved names (R-BTN-64). `max_runs`,
     attempts and retries (R-BTN-122) read these counts, so rewriting a ticket's history in git
-    changes neither its position nor its counts. `max_runs` bounds the runs made without a
+    changes neither its position nor its counts. The `advance` that starts a run also answers
+    its number, `run`: the ticket's runs of that leg, this one included, as `max_runs` counts
+    them; the holder hands it to the leg rather than counting them itself. `max_runs` bounds the runs made without a
     person: a person leg's answer (R-BTN-116), an owner's route or an adopt restarts the count
     of the leg it queues. The traversal record itself is never erased.
   - The holder pushes a leg's evidence before the `advance` that finishes it, and may pass
@@ -310,7 +318,9 @@ Designs for this section that are not built are on the proposal page
   | `std:effect@1` | `{kind, ref?, at}` |
   | `std:decision@1` | `{id, leg, option, reached, ref?, answered_by?, commit?}`, a person's answer (R-BTN-116) |
   | `std:arrival@1` | `{leg, reached, next?, ref?}`: a leg's arrival at one of its outcomes (R-BTN-39, R-BTN-191) |
-  | `std:git.readiness@1`, `std:git.implied@1`, `std:git.output@1`, `std:git.evidence@1` | the sync's attestations (R-BTN-191) |
+  | `std:evidence@1` | `{ref, kind}`: work a ticket may have had done outside Baton, `kind` `merged-early` or `mention` (R-BTN-203); Baton also keeps a refused arrival as `fact` (R-BTN-39) |
+  | `std:git.readiness@1`, `std:git.implied@1`, `std:git.output@1` | the sync's attestations (R-BTN-191) |
+  | `std:git.evidence@1` | `{claim, evidence, found}`: whether git or the forge shows the evidence an unconfirmed end named, `evidence` exactly as the observation listed it — the sync's attestation (R-BTN-10, R-BTN-191) |
   | `std:api-capacity@1` | `{window_s, remaining_permille, resets_at_min?}`, integers: a quota's window, what remains of it in ‰, and its reset in epoch minutes. The library's one open schema, so a resource's schema refines it by adding fields |
 
   A course extends one by refinement. A published `std:` version never changes; a new field is
@@ -420,10 +430,13 @@ Designs for this section that are not built are on the proposal page
   - **`min_runner_version`** is raised only when a runner on an older version would misbehave;
     a change to `rank.mjs` raises it only when the course needs every runner to rank alike
     (R-BTN-98).
-  - **Rule 9.** The runner reads each course's `version` from its checkout at startup and
-    declares it (`courses`, §14). A runner declaring a ticket's course below
-    `min_runner_version` gets no new claim on it (`stale-skills`); the dashboard shows it needing
-    a restart from a pulled checkout. Rule 9 is checked at a claim, never at an `advance`, so a
+  - **Rule 9.** The runner reads each course's `version` from its home checkout at startup and
+    whenever it brings the home to a snapshot: for a claim (R-BTN-34), or after a bounded fetch
+    of the default branch with no claim held. The next heartbeat declares the refreshed list
+    (`courses`, §14), omitting courses the home no longer declares. An ahead, diverged or
+    edited home is left alone; the runner logs why and keeps its last good list. A runner declaring
+    a ticket's course below `min_runner_version` gets no new claim on it (`stale-skills`).
+    Rule 9 is checked at a claim, never at an `advance`, so a
     held claim finishes under its protocol. It gates a course's protocol, never runner features,
     which are `runner:` capabilities (R-BTN-133).
 - **R-BTN-64 (in-flight tickets survive a course change).** Where a ticket is, is Baton's
@@ -505,8 +518,9 @@ Designs for this section that are not built are on the proposal page
       received as it would an exit's. The bounds are the course's.
     - The answer is the last line of the agent's output that begins with one of the course's
       values as a whole word, with at most one PR URL after it. No such line fails the leg.
-    - A stub whose leg claims a PR verifies it on the forge before it reports a position. A
-      stub reports failure and never retries.
+    - A stub whose leg claims a PR verifies it on the forge before it reports a position: an
+      opened PR open, a merged change every PR of the ticket merged and none open. A stub
+      reports failure and never retries.
   - **Overrides replace `run`, never `close`.** A home's `legs/<leg>.run.<ext>` exports
     `run(ctx, standard)`; the leg script loads it at the claim's snapshot and calls it instead
     of its own `run`, keeping its own `close`. Its position must be an edge. An override keeps
