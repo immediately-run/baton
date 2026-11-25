@@ -34,6 +34,14 @@ export interface Scheduler {
   set(at: number): Promise<void>;
 }
 
+/** R-BTN-149: resolve only when every part of the event batch is durable. */
+export type EventArchive = (parts: readonly EventArchivePart[]) => Promise<void>;
+export interface EventArchivePart {
+  repository: string;
+  day: string;
+  ndjson: string;
+}
+
 /** Baton's clock (R-BTN-32): epoch milliseconds. Core reads time only through its `now`;
  *  without one the core uses the system clock, on both hosts alike. */
 export type Clock = () => number;
@@ -155,6 +163,8 @@ export interface Gate {
 export interface Ports {
   store: Store;
   scheduler: Scheduler;
+  /** Without a host-configured archive, event retention never deletes. */
+  archiveEvents?: EventArchive;
   config: Config;
   dispatch: Dispatch;
   adminKeys: AdminKeys;
