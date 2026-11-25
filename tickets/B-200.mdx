@@ -1,9 +1,9 @@
 ---
-title: "B-200 — Governance, read-only: /policy shows the policy in force with its guarantees, floors and log; /settings the owner settings and the registry's tiers and weight; /bars the owner and required bars; /consents the code-repository consents"
+title: "B-200 — Governance, read-only: /policy shows the policy in force with its guarantees, floors and log; /settings the owner settings and the registry's ~~tiers and~~ weight; /bars the owner and required bars; /consents the code-repository consents"
 id: B-200
 project: baton-ui-v2
 status: available
-updated: 2026-11-09
+updated: 2026-11-23
 repos:
   - baton
 tags:
@@ -54,7 +54,7 @@ owner bars and required bars), [§3.4](../spec/BATON_SPEC/03-repositories-and-fo
 2. **`/repositories/{r}/settings`**: the grants read's `settings` — every §13.1 owner setting
    (`code_repos`, `retry`, `transcript_repos`, `api_keys`, `scope_policy` and the rest the data
    model lists), each as its value as text with the one-line meaning the data model gives it —
-   and the repository's `tiers` and `weight` from `repo.list` (B-204 carries them so an owner's
+   and the repository's ~~`tiers` and~~ `weight` from `repo.list` (B-204 carries them so an owner's
    session needs no administrator read). `baton owner settings set <repository> […]` as text.
 3. **`/repositories/{r}/bars`**: the owner bars in force and scheduled (course, tag, legs,
    applies, starts, ends, release holders, reason, set by — `mcp:<id>` drawn with the key's
@@ -91,7 +91,7 @@ owner bars and required bars), [§3.4](../spec/BATON_SPEC/03-repositories-and-fo
 
 Under `test/ui/` with fixtures (a `protected` policy with two versions, a scheduled bar set over
 MCP, a required bar, one consent): the policy screen marks the floors and lists the log; the
-settings screen shows `tiers` and `weight` from `repo.list`; the bars screen draws `mcp:<id>` with
+settings screen shows ~~`tiers` and~~ `weight` from `repo.list`; the bars screen draws `mcp:<id>` with
 its name; the consents screen lists the home; every command line matches R-BTN-127's tree (the
 same test as B-199's); no control is drawn; a hostile reason is text.
 
@@ -106,7 +106,9 @@ same test as B-199's); no control is drawn; a hostile reason is text.
 _filed 2026-11-09._
 
 _2026-11-09 — revised after review: the attestations read and screen split out to B-213;
-`consents` taken from B-199's read; the `policy/log` hedge removed; `tiers` and `weight` from
+`consents` taken from B-199's read; the `policy/log` hedge removed; ~~`tiers` and~~ `weight` from
 `repo.list`._
 
 _2026-11-09 — revised after the second review: the `mcp:<id>` join names B-199's `id`._
+
+_2026-11-23 — tiers retired (spec/retire-tiers: [BATON_SPEC §6.6](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-6) gate 5, [R-BTN-66](../spec/BATON_SPEC/01-what-baton-is.md#sec-1)): the struck tier clauses are gone from the spec — no ticket tier, runner ceiling, grant `max_tier`, ladder, `ready_by_tier` or `?tier=`. Build the rest without them._

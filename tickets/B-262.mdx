@@ -3,14 +3,14 @@ title: "B-262 — [OP] The live sitting: the read-only view on baton.immediately
 id: B-262
 project: baton
 status: available
-updated: 2026-11-18
+updated: 2026-11-23
 repos:
   - baton
 tags:
   - OP
   - roadmap-item
 tier: judgement
-description: "The owner's live sitting at baton.immediately.run (§16.2 step 1's exit), filed from R3-1209 as its merge closed the agent half: sign in, read the Ready view's snapshot sha and order, run the compare per tier at that sha, and re-run docs' npm run verify once docs' main is green (B-261). No code, no PR: the record is the product. Requires: human-operator."
+description: "The owner's live sitting at baton.immediately.run (§16.2 step 1's exit), filed from R3-1209 as its merge closed the agent half: sign in, read the Ready view's snapshot sha and order, run the compare ~~per tier~~ at that sha, and re-run docs' npm run verify once docs' main is green (B-261). No code, no PR: the record is the product. Requires: human-operator."
 topics:
   - baton
 owns: {}
@@ -29,7 +29,7 @@ depends_on:
 
 ### Why
 
-[§16.2](../spec/BATON_SPEC/16-adoption.md#sec-16-2) step 1's exit is that, for each tier, the live Ready view's order equals the course's own claim order on the same snapshot (Baton applies the expedite bound from its own claims, so git's withholding is not compared — docs#205's review). Only a person signing in to the deployed Worker can read it. R3-1209's sitting had two halves: the agent half — criterion 3, [S-BTN-13](../spec/BATON_SPEC/15-verification.md#scenarios) green on the deploying commit — landed with its PR (baton#285); the live half is the owner's, and is this ticket, filed as R3-1209's merge closed it.
+[§16.2](../spec/BATON_SPEC/16-adoption.md#sec-16-2) step 1's exit is that, ~~for each tier,~~ the live Ready view's order equals the course's own claim order on the same snapshot (Baton applies the expedite bound from its own claims, so git's withholding is not compared — docs#205's review). Only a person signing in to the deployed Worker can read it. R3-1209's sitting had two halves: the agent half — criterion 3, [S-BTN-13](../spec/BATON_SPEC/15-verification.md#scenarios) green on the deploying commit — landed with its PR (baton#285); the live half is the owner's, and is this ticket, filed as R3-1209's merge closed it.
 
 ### What to do
 
@@ -67,3 +67,5 @@ None to write: a sitting, no code. The automated half, S-BTN-13, runs in CI's te
 _filed 2026-11-18._
 
 _(2026-11-18: R3-1209's live half, filed as its merge closed the ticket — the agent half (criterion 3, S-BTN-13 green on the deploying commit) landed with baton#285, and the criteria above are carried from it. [§16.2](../spec/BATON_SPEC/16-adoption.md#sec-16-2)'s table names R3-1209 for step 1; this ticket is the sitting that exit still waits on.)_
+
+_2026-11-23 — tiers retired (spec/retire-tiers: [BATON_SPEC §6.6](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-6) gate 5, [R-BTN-66](../spec/BATON_SPEC/01-what-baton-is.md#sec-1)): the struck tier clauses are gone from the spec — no ticket tier, runner ceiling, grant `max_tier`, ladder, `ready_by_tier` or `?tier=`. Build the rest without them._

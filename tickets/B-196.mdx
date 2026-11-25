@@ -3,14 +3,14 @@ title: "B-196 — The runner reads: GET …/runners is the fleet granted on a re
 id: B-196
 project: baton-ui-v2
 status: available
-updated: 2026-11-16
+updated: 2026-11-23
 repos:
   - baton
 tags:
   - roadmap-item
 order: 1195
 tier: judgement
-description: "The two reads the Runners screens of BATON-UI-V2 lack. repo.runners: every runner row Baton holds with an accepted grant on the repository — alive is last_seen_at within its lease timeout and not reaped — with its name, harness, kind, isolation, tier ceilings, declared and granted capabilities, tags, courses for this repository, lease timeout, last seen and last activity, credential kind and grant role and domain, and the claim it holds here (ticket, leg, run id, lease, deadline, attempt and backoff, session link, log directory, current activity) or busy_elsewhere; keyed by runner_id, the URL's segment. runner.show: that row plus ?since= (24 hours default, 7 days at most) of its claims on the repository with nested activities, and its earlier attempts on its live ticket. Requires: B-192, B-205."
+description: "The two reads the Runners screens of BATON-UI-V2 lack. repo.runners: every runner row Baton holds with an accepted grant on the repository — alive is last_seen_at within its lease timeout and not reaped — with its name, harness, kind, isolation, ~~tier ceilings,~~ declared and granted capabilities, tags, courses for this repository, lease timeout, last seen and last activity, credential kind and grant role and domain, and the claim it holds here (ticket, leg, run id, lease, deadline, attempt and backoff, session link, log directory, current activity) or busy_elsewhere; keyed by runner_id, the URL's segment. runner.show: that row plus ?since= (24 hours default, 7 days at most) of its claims on the repository with nested activities, and its earlier attempts on its live ticket. Requires: B-192, B-205."
 topics:
   - baton
 owns: {}
@@ -51,7 +51,7 @@ The two §14 rows first, then the code, reusing `workerApi.ts`'s `workersView` a
    principals and a session): every runner row Baton holds whose grant on the repository is
    accepted (R-BTN-146) — Baton prunes no runner row, so a dead one stays until its key is
    revoked — each `{runner_id, hostname, session_name, alive, last_seen_at, last_activity_at,
-   reaped_at, harness, kind, isolation, tier_ceilings, capabilities, granted, tags, courses,
+   reaped_at, harness, kind, isolation, ~~tier_ceilings,~~ capabilities, granted, tags, courses,
    lease_timeout_s, credential: {kind, token_id?, role, domain?}, executor, last_report,
    transcript_url, claim, busy_elsewhere}`:
    `executor` the runner's `executor_json` — `{source, digest, provides}` from its last
@@ -143,3 +143,5 @@ after this ticket was written) are served — the card's `executor`, each run's
 `executor_digest`, `environment` and `instance`; and the reads' cost is bounded (item 3) after
 the 2026-11-14 and 2026-11-15 `rows_read` outages and B-250's finding that a per-runner loop
 grows with every runner ever registered._
+
+_2026-11-23 — tiers retired (spec/retire-tiers: [BATON_SPEC §6.6](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-6) gate 5, [R-BTN-66](../spec/BATON_SPEC/01-what-baton-is.md#sec-1)): the struck tier clauses are gone from the spec — no ticket tier, runner ceiling, grant `max_tier`, ladder, `ready_by_tier` or `?tier=`. Build the rest without them._

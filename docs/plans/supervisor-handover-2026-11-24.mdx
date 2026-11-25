@@ -1,0 +1,101 @@
+---
+title: "Handover — supervising bering's runner, from 2026-11-24"
+description: Where the supervision of bering's Baton runner stands after the 2026-11-23–24 session (one runner at concurrency 2, tiers retired in the spec, 13 PRs merged), what is waiting on the owner, the three open investigations, and the traps the session hit. Read before supervising.
+tags: [plans]
+order: 62
+---
+
+# Handover — supervising bering's runner, from 2026-11-24
+
+Written at the end of a supervising session that ran from 2026-11-23 13:30 UTC to 2026-11-24
+07:50 UTC. It follows the 2026-11-23 handover (#386, still open and conflicting; its host notes on
+the executor pin, the gateway, the live leg-page check and the half-hourly check still hold). Read
+`AGENTS.md`'s *The supervising agent*, [the interventions log](../interventions.mdx) (the
+2026-11-23 21:57 and 2026-11-24 entries) and [lessons](../lessons.mdx) before acting.
+
+## The host as it stands
+
+- **One runner, at concurrency 2.** It runs in tmux session `0`, window `1` (`runner-1`). Window `2` (`runner-2`) is stopped and sits on a shell.
+  - Session: `run-20261123-225903-r1`. State file: `~/.cache/immediately-run/baton/run-20261123-225903-r1.json`, where `last_ok` is the heartbeat. Log: `~/factory/logs/runner-run-20261123-225903-r1.log`.
+  - It was started from a copy of `start-runner.sh` that adds `--concurrency 2` to the `baton.mjs run` line. The copy is in a session scratchpad that may be cleared. To restart it the same way, make the same one-line change in a copy of `~/factory/bin/start-runner.sh`:
+    ```
+    --capabilities "$BATON_CAPABILITIES" --concurrency 2 2>&1 | tee -i "$LOG"
+    ```
+    `start-runner.sh` itself passes no extra flags; plain `start-runner.sh 1` starts at concurrency 1. Better: a change to the script that passes extra arguments through.
+  - Stop it with Ctrl-C in its window (the graceful release). If you must kill it, kill it by exact PID, never `pkill -f`.
+- **The grant.** The bering key (`~/.ssh/baton_worker`, `SHA256:GCumYI21…`) is granted on `baton` with:
+  - hostname `bering`;
+  - capabilities `authentication, create-pr, drivable-browser, key:zai, llm-call`;
+  - `max_tier: critical`, `max_claims: 2`.
+
+  The released CLI 0.1.4 has no `--max-claims`. The grant was made with `node ~/factory/baton-cli/cli/baton.mjs owner --dev -i ~/.ssh/baton_repo_owner grant …`, at the owner's word. `--concurrency` belongs to `baton run`, not to the grant.
+- **Code.** `~/factory/baton-cli` is detached at `52baaccc` (main on 2026-11-23, with B-274's ClaimRun per claim). `main` has moved since. `start-runner.sh` (`BATON_CLI_PIN=branch:main`) refuses to start until the CLI is moved to `main`'s tip: `git -C ~/factory/baton-cli checkout --detach origin/main && npm ci --prefix ~/factory/baton-cli`.
+- **Concurrency works.** The runner claimed B-319 and B-320 side by side, then B-322.
+- **Production** runs `5ade89aa`, deployed 07:31 UTC on 2026-11-24 (tests and deploy green). It includes #400.
+
+## Waiting on the owner
+
+1. **36 held tickets** (`attempts-exhausted`). Each needs `baton owner -i <owner key> resolve baton <ticket> baton:retries retry|park`.
+   - 26 are held at `filed`: 25 after transient `implement` failures (the three sampled failed on 2026-11-21, about 12:48–13:32 UTC) and one reaped silent.
+   - 9 are held at `merged`, with holds from 2026-11-02 to 11-16 that git's later "merged" never cleared (B-110, B-125, B-129 among them). They are probably safe to park.
+   - 1 is held at `reviewed`, with `merge` next.
+2. **Two tickets proposed, not yet answered:**
+   - the review stub's round bound must come from the course file (open investigation 1);
+   - a hold on a ticket git shows merged should clear itself.
+3. **PRs that need `main` merged in before they can merge:**
+   - #386 (the 2026-11-23 handover, interventions and lessons) and #399 (spec);
+   - #395, #359, #317 and #337;
+   - about 30 runner PRs.
+
+   Those with red tests:
+   - #357 and #384 failed only on the S-BTN-41 flake, which #392 fixed, so they need a re-run after a `main` merge;
+   - #352, #323 and #311 have their own failures.
+4. **FLDH-64** (from the last handover): rotate bering's leg credentials, and restrict the logs written before 2026-11-22 17:25 UTC. This is for a human operator only. Never read those logs; a broad `grep` across `~/factory/logs/*` reaches them, and the auto-mode classifier refused one this session.
+5. **The docs queue is over its bounds:**
+   - operator 28/15, autonomous 52/40, expedite 3/2;
+   - docs' filing script asked for this to be relayed to the owner when R3-1369 was filed;
+   - the owner should choose one of: shed, split, automate, or raise the bound in docs' `scripts/lib/workQueues.mjs`.
+6. **Last handover's proposals,** still unanswered:
+   - the `run-tests` gate's `npm ci`;
+   - `main`'s CI never completing (#381);
+   - over-masking in B-316.
+
+## Open investigations
+
+1. **The review stub stops at round 3; the course says 8.** This is the main reason the course merges almost nothing on its own.
+   - `.baton/courses/create-pr/legs/review.mjs` (generated 2026-11-21) hard-codes `(ctx.run ?? 1) >= 3 ? { suspend: true } … 'adjudicate'`. The generator is `src/defaults/courses.ts`, which reads `CREATE_PR_COURSE.legs.review.max_runs`: 3, in `src/defaults/course-pr.ts`.
+   - On 2026-11-22 the owner raised `review.max_runs` to 8, but only in `course.json`.
+   - So every round from the third that asks for changes ends the claim `suspended:reviewed`, next `adjudicate`. Baton's station function reads 8 and shows `fix` next.
+   - The fix is a Baton change, so file a ticket first.
+2. **#400 is deployed, but confirmed none of the 52 stuck suspensions.**
+   - #400 makes `endShown` (`src/core/claims.ts`) confirm a suspension that named no commit (stored `ended_at_sha = ''`) on any accepted snapshot observed after it.
+   - Production has it. The #402 sync at 07:44 UTC was accepted (`baton: advanced at b0b941336b … accepted`).
+   - Even so, B-39 and B-312 (ended 2026-11-21) are still `unconfirmed`, with no `confirmed` event.
+   - The SQL in `judge` takes only claims with `COALESCE(end_observation, 0) < n`. The lead is how `end_observation` (`handedOut(repo)` at the end) compares with the post's observation number `n`. Nothing visible from outside shows either value.
+   - Start with a test that replays B-39's shape: a claim ended `suspended:reviewed` with no sha and a station git disagrees with, then several accepted posts. #400 was written by another session, which may still be running in window `0` or `3`.
+3. **`implement` agents stall after about 40 seconds.**
+   - B-320 failed twice, and B-322 twice, with "the agent exited 0, but no open PR on a branch matching claude/B-…".
+   - Each opencode session ran 0.6–0.9 minutes (10–11 messages). It ended on a completed `shell` tool call, and no model turn followed. The stub concluded it idle after 15 quiet minutes.
+   - In the same window, B-319's implement ran 16 minutes and its review 9, so the runner, the executor and the gateway (`/health/liveliness` 200) work.
+   - Suspect the model call after a tool result hangs (`gpt-6.2-sol` via fieldhouse), perhaps when two legs call at once. Compare `calls/*.stderr.txt` and the sessions under `~/factory/leg-archive/baton/baton_B-32{0,2}/implement/`. Also check whether it happens at concurrency 1.
+   - B-320 is an operator-only check ("verify B-317 on the next naturally red main") with no PR to open. It may never pass `implement` as written.
+
+## Done this session
+
+- **The dashboard console script was run** (B-259, B-270, B-299).
+- **Tiers retired in the spec** (#391, owner-approved): gate 5, the ladder, ceilings and `max_tier` are gone, and capabilities send work to particular runners.
+  - The build is filed as B-322 (Baton; claimed, see investigation 3) and R3-1369 (docs, on docs `main`).
+  - Until B-322 lands, gate 5 still runs on the server. A ticket with an off-ladder tier (`normal`, `high`) is claimable by no one; set it to `judgement`, as #388 and #401 did.
+- **S-BTN-41's lease race fixed** (#392). The test moves the clock 5 minutes at a time, with a heartbeat at each step.
+- **Merged at the owner's word on 2026-11-24:** #392, #401, #393, #400, #397, #394, #398, #390, #366, #351, #331, #330 and #402.
+
+## Traps this session hit
+
+- **The board's `ready` list is not what a runner can claim.** It counted 77 while one ticket was claimable. Ask `GET /v1/repositories/baton/tickets?state=ready`: each row carries `eligible_runners` and `failed_rule`.
+  - A signed GET needs a small script that imports `send` and `DEFAULT_URL` from `~/factory/baton-cli/cli/baton.mjs`.
+  - Its `limit` parameter does not exist.
+- **The runner says nothing on `no-eligible-ticket`.** An idle runner looks like a stuck one; read `last_ok` before reading code.
+- **GitHub reports `UNKNOWN` mergeability for a while after each merge.** Wait it out, and re-read each PR's state and checks just before merging it. Six clean PRs turned conflicting as others landed.
+- **Every merge to `main` starts `baton-deploy` and cancels the one before.** Only the last deploy runs to the end; watch that one.
+- **Don't `git pull` in `~/git/baton`.** It is the owner's checkout, and may be on another session's branch. A pull there fast-forwarded `fix/confirm-suspension-without-sha` (nothing was lost). Use `git fetch` and `git show origin/main:<path>`, and do work in scratchpad worktrees.
+- **Ticket filing:** it is `node cli/baton.mjs tickets new -i ~/.ssh/baton_repo_owner …` (plural `tickets`). The owner authorized that key for filing. Docs ids come from docs' `scripts/claim.sh new`, which pushes to docs `main`.

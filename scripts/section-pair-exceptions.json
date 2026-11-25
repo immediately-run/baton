@@ -131,7 +131,6 @@
   "test/unit/runner-bundle.test.ts \u00a76.13 R-BTN-72": "B-277",
   "test/unit/runner-protocol.test.ts \u00a76.13 R-BTN-72": "B-277",
   "test/unit/seed-owners.test.ts \u00a75 R-BTN-58": "B-277",
-  "test/unit/shared.test.ts \u00a73 R-BTN-37": "B-277",
   "test/unit/sync.test.ts \u00a77.1 R-BTN-11": "B-277",
   "test/unit/tickets-commands.test.ts \u00a72f R-BTN-74": "B-277",
   "test/unit/tickets-markdown.test.ts \u00a72f R-BTN-74": "B-277",

@@ -41,8 +41,6 @@
     "prebuild:cli": "npm run build:ui",
     "prepack": "npm run build:cli",
     "check:package": "node scripts/check-package.mjs",
-    "vendor": "node scripts/vendor.mjs",
-    "fixtures": "node scripts/board-fixtures.mjs",
     "dev": "wrangler dev",
     "predev": "npm run build:ui",
     "start:local": "node scripts/start-local.mjs",
@@ -60,7 +58,8 @@
     "check:tickets": "node cli/baton.mjs tickets check --repo .",
     "spec:impact": "node scripts/spec-tools.mjs impact",
     "spec:index": "node scripts/spec-files.mjs",
-    "check:spec": "node scripts/check-spec.mjs"
+    "check:spec": "npm run check:standalone && node scripts/check-spec.mjs",
+    "check:standalone": "node --test scripts/check-standalone.self-test.mjs && node scripts/check-standalone.mjs"
   },
   "dependencies": {
     "jose": "^6.2.12"
