@@ -7,7 +7,7 @@ import type { Cursor, Row, Store } from './ports';
 
 /** The tables whose writes are bookkeeping, never state a reader keys on: the request nonces
  *  (R-BTN-13, a replay guard) and the migration ledger. */
-const UNVERSIONED = new Set(['request_nonces', '_baton_migrations', 'state_version', 'sync_fingerprints']);
+const UNVERSIONED = new Set(['request_nonces', '_baton_migrations', 'state_version', 'sync_fingerprints', 'sync_quota']);
 
 const kinds = new Map<string, { write: boolean; table: string | null }>();
 /** Whether `query` may write, and the table it names first — read once per statement text. */

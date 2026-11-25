@@ -41,6 +41,8 @@ export const LISTINGS: { key: string; label: string; hint: string; when?: string
   { key: 'sync_late', label: 'Sync late', hint: 'No sync has answered this want for over 30 minutes.', when: 'wanted_at', tone: 'warn', glyph: '▲' },
   { key: 'mirror_late', label: 'Mirror late', hint: 'The mirror has not acknowledged its oldest pending event for over 30 minutes.', when: 'wanted_at', tone: 'warn', glyph: '▲' },
   { key: 'forge_secret_missing', label: 'Forge secret missing', hint: 'A configured dispatch or webhook has no matching host secret.', tone: 'warn', glyph: '▲' },
+  { key: 'sync_lapses', label: 'Sync repeatedly timed out', hint: 'This credential held up other syncs. Check its job logs; an administrator can revoke a compromised SSH key.', when: 'at' },
+  { key: 'sync_control_changes', label: 'Control paths changed or unverified', hint: 'Check the default branch at this commit. If the push record is incomplete, Baton cannot tell whether control paths changed.', when: 'at' },
   { key: 'pool_unclaimed', label: 'Notice nobody claimed', hint: 'A notice has waited an hour in the pool.', when: 'since' },
   { key: 'no_owner_channel', label: 'No channel reaches the owners', hint: 'Decisions ask the owners and no courier delivers to them.' },
   { key: 'adoptions', label: 'Adoption asked for', hint: 'A session asks to take over a claim made in git. An administrator confirms it on Sync.', when: 'requested_at' },
@@ -51,6 +53,7 @@ const TIME_FIELD = /(^|_)(at|since)$/;
 /** One value of a listing's row: a time as a relative time, anything else as text. */
 function FieldValue({ name, value }: { name: string; value: unknown }) {
   if (TIME_FIELD.test(name) && typeof value === 'number') return <RelTime at={value} />;
+  if (name === 'changes' && Array.isArray(value) && value.every((c) => c && typeof c === 'object')) return <ul>{value.map((c, i) => <li key={i}><Text value={c.path} /> by <Text value={c.pusher} /> at <Text value={c.commit} /></li>)}</ul>;
   if (Array.isArray(value)) return <Text value={value.length} />;
   return <Text value={value} />;
 }

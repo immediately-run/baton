@@ -21,7 +21,7 @@ stated once, in the rule it cites.
 
 | Principal | Routes | Credential | May |
 |---|---|---|---|
-| Runner (machine key) | `/v1/runner/*` | SSH-signed (R-BTN-13) or API key (R-BTN-159), plus the runner secret (R-BTN-14) | heartbeat as its name; claim and act where it holds an active grant (R-BTN-58, R-BTN-146); post readings (R-BTN-101); ask blocks (R-BTN-75); accept or decline its grants, key alone (R-BTN-146); as a signed key, sync a granted repository (R-BTN-102) and deliver outbox entries where the policy admits `runner` (R-BTN-171) |
+| Runner (machine key) | `/v1/runner/*` | SSH-signed (R-BTN-13) or API key (R-BTN-159), plus the runner secret (R-BTN-14) | heartbeat as its name; claim and act where it holds an active grant (R-BTN-58, R-BTN-146); post readings (R-BTN-101); ask blocks (R-BTN-75); accept or decline its grants, key alone (R-BTN-146); a signed key may deliver outbox entries where the policy admits `runner` (R-BTN-171); see R-BTN-102 for the unbuilt machine-key sync |
 | Trusted runner | `/v1/runner/*` | SSH-signed, on a grant with the `trusted-runner` role (R-BTN-180) | heartbeat as its name; R-BTN-182; as the protection checker, report `protection` and nothing else (R-BTN-180) |
 | Owner's agent | the owner's routes | an owner key not registered `human_only` | an owner's actions, as `owner`; never a `human` attestation or a human gate (R-BTN-185) |
 | Check-runner | `/v1/runner/*`; `POST …/attestations` as a `service:` key the policy names | SSH-signed, plus the runner secret | heartbeat as its name; claim, advance and end check tickets; report activities and transcripts, write leg logs; where the policy's `attestations` names its key for `std:checks@1`, post that attestation (R-BTN-115); nothing else (R-BTN-114) |
@@ -579,9 +579,8 @@ trusted runners or of the protection checker; a compromised forge; and a comprom
     refused when it would admit another writer for a type a current course's trusted leg
     requires, and a course whose trusted leg requires a type the policy admits another writer for
     is refused at the snapshot that posts it, the previous course version staying in force.
-  - **Baton's own state.** Attestations about work are exported with the owner state (R-BTN-88);
-    an import drops every one of them. Lost attestations fail closed. Readings are kept and
-    exported as R-BTN-76 and R-BTN-88 say.
+  - **Baton's own state.** The owner-state export does not carry work attestations (R-BTN-88).
+    Lost attestations fail closed. Readings are kept and exported as R-BTN-76 and R-BTN-88 say.
   - The attestation's shape, its other types, supersession, revocation and the
     `requires.attestations` prerequisite are [proposed](../proposals/security.md) (B-146).
 - **R-BTN-191 (every statement Baton receives about the work is an attestation).** Baton takes
@@ -689,8 +688,20 @@ trusted runners or of the protection checker; a compromised forge; and a comprom
     Tightening is open to any owner credential.
 - **R-BTN-187 (what Baton trusts from a board post).** Who may post the board is the policy's
   `inputs.board`, and whether what a post read from git counts is its `attestations` entries
-  (R-BTN-188, R-BTN-191). A webhook delivery only triggers a sync (values 6). Per-key limits on observation numbers, board posts and concurrent claims are
-  [proposed](../proposals/security.md) (B-137).
+  (R-BTN-188, R-BTN-191). The sync routes admit registered sync keys and verified CI identities
+  only when their input is listed (see R-BTN-102 for machine keys). Repositories with runners
+  below the human level exclude `machine`. A sync credential is limited to 60 observation
+  allocations and, separately, 60 board requests (including refused posts) per UTC hour.
+  CI tokens for the same repository share one credential's quota. Over quota is `rate-limited`
+  (HTTP 429). Two or more expired reservations by the same credential on a UTC day are listed
+  under Needs you for that day (R-BTN-62).
+  On a head move while `paths.control` is not `any`, Baton reports control changes from the
+  recorded push chain (R-BTN-73, R-BTN-194), not the board. It matches the directly named
+  control paths in [the protected paths proposal](../proposals/security.md#9-protected-paths-r-btn-184-proposed),
+  not paths discovered by reading files. A gap or truncated delivery is `pusher-unknown`, not
+  evidence of unchanged control paths. Needs you lists the latest reported move to a head for
+  seven days, with up to sixteen changed paths and the number omitted. This is a report, not a
+  refusal or a course accounting claim (§12.9).
 
 ### 12.9 A leg's scope
 

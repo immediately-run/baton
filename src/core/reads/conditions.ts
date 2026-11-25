@@ -154,6 +154,8 @@ function listingsOf(cx: ReadCtx, repository: string, now: number, administrator:
     courses_refused: cx.core.courses.refusals().filter((r) => r.repository_id === repository),
     scope: cx.core.scope.needsYou().filter((f) => f.repository_id === repository),
     unsigned_control: cx.core.unsignedControlView(now).filter((u) => u.repository_id === repository),
+    sync_lapses: cx.core.observations.needsYou(now, repository),
+    sync_control_changes: cx.core.provenance.needsYou(now, repository),
     // R-BTN-28: an adoption is an administrator's to confirm, on the Sync screen.
     ...(administrator ? { adoptions: (cx.core.cutover.adoptions() as Row[]).filter(byTicket) } : {}),
   };

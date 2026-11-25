@@ -1,6 +1,6 @@
 ---
 title: "Proposal: the merge runner, the fact reader, general attestations and the rest of the repository policy's enforcement"
-description: "Unbuilt designs moved out of BATON_SPEC §12.8 and §12.9: the policy's dry run, the protection check per forge, proposed tickets, attestations beyond a person's answer, the fact reader, trusted runners and what the merge runner merges, protected paths, hardware human-only keys, per-key board limits, and the out-of-course finding."
+description: "Unbuilt designs moved out of BATON_SPEC §12.8 and §12.9: the policy's dry run, the protection check per forge, proposed tickets, attestations beyond a person's answer, the fact reader, trusted runners and what the merge runner merges, protected paths, hardware human-only keys, trusted consumption of the board, and the out-of-course finding."
 ---
 **Status:** proposal — not built; moves into BATON_SPEC §12 when built (tickets B-136, B-137, B-140, B-146, B-147, B-263, B-264, B-268)
 
@@ -320,10 +320,10 @@ Under `human_key: hardware` Baton accepts only a hardware-backed key requiring P
   CLI signs; a WebAuthn assertion is a human gate only with an authenticator registered by a
   `human_only` signature, attested and allowlisted under `hardware`.
 
-## 11. Per-key limits on the board (R-BTN-187, proposed)
+## 11. Trusted consumption of the board (R-BTN-187, proposed)
 
-Per-key limits on observation numbers, board posts and concurrent claims, so one key can freeze
-neither the board nor the leases.
+Observation and board post limits are in R-BTN-187. Additional concurrent claim limits are
+proposed, so one key cannot freeze the leases.
 
 Where the policy's `inputs.board` excludes `machine` and its `attestations` entries admit no
 `sync` writer for `std:arrival@1` or `std:decision@1`: what a protection depends on (changed

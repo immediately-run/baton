@@ -62,4 +62,6 @@ export const LEDGER: Record<string, Home[]> = {
   sync_late: [listing('sync_late')],
   mirror_late: [listing('mirror_late')],
   forge_secret_missing: [listing('forge_secret_missing')],
+  sync_lapses: [listing('sync_lapses')],
+  sync_control_changes: [listing('sync_control_changes')],
 };

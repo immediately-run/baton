@@ -5,6 +5,7 @@
 // request's writes are one transaction, so the compare-and-set below needs no lock. Requests
 // reach it only through the front, which has verified the principal — all but a signed
 // request's key, signature, clock and nonce, which only the core can check (verifySigned).
+import type { ClaimAnswer } from '../shared/runner-wire';
 import { MIGRATIONS } from '../migrations';
 import { versionedStore, clockBucket, ifNoneMatch, nonScheduling, schedulingVersion, type VersionedStore } from './stateVersion';
 import { runnerViewResponse, requireFleetScope } from './runnerViews';
@@ -56,7 +57,7 @@ import type { DispatchTarget, ForgeDispatch, Ports, Row, SqlValue, Store, Workfl
 import { dispatchRead } from './reads';
 import type { ReadPrincipal } from './reads/kit';
 
-const HELD_AUTO_ACCEPT_MS = 24 * 3_600_000; // §7.1: a held history is accepted after 24 h (R3-1212)
+const HELD_AUTO_ACCEPT_MS = 24 * 3_600_000; // R-BTN-11: measured from the first post of the held history.
 const RESYNC_WINDOW_MS = 30_000; // B-201: a session's resync, once per repository per R-BTN-73's dispatch window
 const ALARM_EVERY_MS = 60_000; // §3: one alarm, every 60 seconds
 /** One path segment, decoded: a malformed escape is the caller's error, never a 500. */
@@ -145,11 +146,11 @@ export class BatonCore {
     // §12.8 (B-145): the policy store, before everything that reads a knob — the claims' floor
     // rule, the heartbeat's reports and pins, the owner routes' approver checks.
     this.policies = new Policies({ store, now: () => this.now(), releaseForFloor: (repository) => this.claims.releaseForFloor(repository) });
-    // R3-1258: the capacity envelope (R-BTN-87) and owner state (R-BTN-88), each one module
-    // with the store and the clock alone.
+    // R3-1258: the capacity envelope (R-BTN-87) and owner state (R-BTN-88).
     this.capacity = new Capacity({ store, now: () => this.now(), config: ports.config });
     this.syncWants = new SyncWants({ store, now: () => this.now() });
     this.ownerState = new OwnerState({ store, now: () => this.now(), origin: ports.config.BATON_ORIGIN,
+      policies: this.policies, restoreNext: (...args) => this.stations.restoreNext(...args),
       dispatchMirror: (repository) => want({ repository, kind: 'mirror', own: true }) });
     this.courses = new Courses({ store, requiredBars: (repo) => this.admin.requiredBars(repo), policies: this.policies });
     this.observations = new Observations({ store, now: () => this.now() });
@@ -367,7 +368,7 @@ export class BatonCore {
    *  (signed; its signature, clock and nonce checked here, as every key's are), or a CI identity
    *  token the front verified (GitHub Actions OIDC, GitLab CI `id_tokens`). Anything else is
    *  refused. Returns the request with a signed body put back. */
-  private async verifySync(req: Request, role?: 'sync' | 'mirror'): Promise<{ repo: Repository; req: Request; role: 'sync' | 'mirror' }> {
+  private async verifySync(req: Request, role?: 'sync' | 'mirror'): Promise<{ repo: Repository; req: Request; role: 'sync' | 'mirror'; issuer: string }> {
     if (req.headers.has('X-Baton-Signed')) {
       // Every key Baton knows verifies here, so a key in another role is told `forbidden`, not
       // `unauthenticated` — an administrator's included (round 1, 1-A-9).
@@ -387,17 +388,27 @@ export class BatonCore {
       // A runner, probe, courier or administrator key is never a sync's (R-BTN-57, R-BTN-93).
       if (!key) throw new BatonError('forbidden', 'only a sync key may act as a sync');
       if (role && key.role !== role) throw new BatonError('forbidden', `this sync key serves its repository's ${key.role}, not its ${role}`);
-      return { repo: this.registry.get(key.repository)!, req: signed, role: key.role };
+      const repo = this.registry.get(key.repository)!;
+      if (key.role === 'sync') this.requireBoardInput(repo.id, 'sync-key');
+      return { repo, req: signed, role: key.role, issuer: cred };
     }
     const raw = req.headers.get('X-Baton-Sync');
     if (!raw) throw new BatonError('unauthenticated', 'no sync principal');
     const claims = JSON.parse(raw) as SyncCredential;
+    let bound: { repo: Repository; role: 'sync' | 'mirror' };
     if (claims.kind === 'gitlab') {
       const selected = role ?? claims.role;
-      return { repo: this.registry.forGitlab(claims, selected), req, role: selected };
+      bound = { repo: this.registry.forGitlab(claims, selected), role: selected };
+    } else if (role) bound = { repo: this.registry.forSync(claims, role), role };
+    else bound = this.registry.bindGithubSync(claims);
+    if (bound.role === 'sync') this.requireBoardInput(bound.repo.id, 'ci-identity');
+    return { ...bound, req, issuer: `ci:${bound.repo.id}` };
+  }
+
+  private requireBoardInput(repo: string, input: 'sync-key' | 'ci-identity') {
+    if (this.policies.current(repo)?.policy.inputs.board.includes(input) === false) {
+      throw new BatonError('forbidden', `${repo}'s policy excludes ${input} from inputs.board (R-BTN-187)`);
     }
-    if (role) return { repo: this.registry.forSync(claims, role), req, role };
-    return { ...this.registry.bindGithubSync(claims), req };
   }
 
   /** R-BTN-73: a verified delivery's fields, from the front. Its syncs go after the response;
@@ -556,6 +567,8 @@ export class BatonCore {
         // R-BTN-80: lapsed leases and due reminders queue again; old closed notices go.
         stage = 'notices';
         this.notices.alarm();
+        this.observations.alarm();
+        this.provenance.prune(this.now());
         // R-BTN-81: the history of tickets closed 90 days ago goes.
         stage = 'history.purge';
         this.history.purge();
@@ -727,13 +740,13 @@ export class BatonCore {
         if (req.method === 'GET' && url.pathname === '/v1/sync/head') return json(this.head((await this.verifySync(req, 'sync')).repo.id));
         // R-BTN-62: the next number of the repository's counter, before the sync reads anything.
         if (req.method === 'POST' && url.pathname === '/v1/sync/observation') {
-          const { repo: { id: repo }, req: signed } = await this.verifySync(req, 'sync');
+          const { repo: { id: repo }, req: signed, issuer } = await this.verifySync(req, 'sync');
           // R-BTN-62 (Release): a run that will not post gives its number back; only the
           // outstanding number is voided, so a stale release voids nothing.
           const release = ((await readJson(signed).catch(() => null)) as { release?: unknown } | null)?.release;
           if (release !== undefined) {
             if (!Number.isSafeInteger(release)) throw new BatonError('invalid-params', 'release must be the number this credential was handed (R-BTN-62)');
-            this.observations.release(repo, release as number);
+            this.observations.release(repo, release as number, issuer);
             return json({ released: release });
           }
           // R-BTN-67: with the owner bars in force or scheduled for the repository, each with its course.
@@ -751,10 +764,24 @@ export class BatonCore {
           // B-182 (R-BTN-140): and the effective `code_repos`, each entry with its forge, host,
           // ids and web_base, and the owners' `pushers` host-qualified — what the fact adapter
           // reads each repository by, and whose words count there.
-          return json({ ...this.observations.observe(repo), bars: this.admin.bars([repo], this.now(), true).map(({ repository_id: _r, ...b }) => b), code_repos: codeReposOf(this.store, repo), pushers: pushersOf(this.store, repo), ...this.claims.syncRecord(repo), versions: this.ticketVersions(repo), signing_keys: await this.admin.signingKeys(repo), require_signed_control: !!this.sql<{ flag: number }>('SELECT require_signed_control AS flag FROM repositories WHERE id = ?', repo)[0]?.flag });
+          return json({ ...this.observations.observe(repo, issuer), bars: this.admin.bars([repo], this.now(), true).map(({ repository_id: _r, ...b }) => b), code_repos: codeReposOf(this.store, repo), pushers: pushersOf(this.store, repo), ...this.claims.syncRecord(repo), versions: this.ticketVersions(repo), signing_keys: await this.admin.signingKeys(repo), require_signed_control: !!this.sql<{ flag: number }>('SELECT require_signed_control AS flag FROM repositories WHERE id = ?', repo)[0]?.flag });
         }
         if (req.method === 'POST' && url.pathname === '/v1/sync/board') {
-          const { repo, req: signed } = await this.verifySync(req, 'sync');
+          const { repo, req: signed, issuer } = await this.verifySync(req, 'sync');
+          const release = (body: unknown) => {
+            const n = (body as { observation?: unknown } | null)?.observation;
+            if (Number.isSafeInteger(n)) this.observations.release(repo.id, n as number, issuer);
+          };
+          try {
+            this.observations.charge(issuer, 'board');
+          } catch (e) {
+            // R-BTN-62: even a rate-limited post uses the number it carries. Don't parse a
+            // throttled request that cannot have a reservation to return.
+            if (e instanceof BatonError && e.code === 'rate-limited' && this.observations.heldBy(repo.id, issuer)) {
+              release(await readJson(signed).catch(() => null));
+            }
+            throw e;
+          }
           const body = await readJson(signed);
           // B-168: the part-4 retired fields the post carries, read before `checkPayload` drops
           // them from the body.
@@ -767,14 +794,13 @@ export class BatonCore {
           } catch (e) {
             // A refused post uses its number too (R-BTN-62), malformed or not, so the sync's
             // next run is not held off as busy for ten minutes.
-            const n = (body as { observation?: unknown } | null)?.observation;
-            if (Number.isSafeInteger(n)) this.observations.release(repo.id, n as number);
+            release(body);
             throw e;
           }
           // …read as absent, and logged once per repository's sync credential, field and day
           // (the history's Migrations entry).
           if (retired.length) this.store.transaction(() => { for (const f of retired) this.deprecated.note(this.now(), `sync:${repo.id}`, f, 'board', repo.id); });
-          return json(await this.board(repo, p));
+          return json(await this.board(repo, p, issuer));
         }
         // B-113 (§4.3): the sync's dependencies read — each qualified `depends_on` entry of
         // another repository the posting repository's tickets name, resolved against its
@@ -1375,7 +1401,7 @@ export class BatonCore {
       if (m === 'GET' && p === '/v1/admin/export') return json(this.ownerState.export(url.searchParams.get('with_history') === '1'));
       if (m === 'POST' && p === '/v1/admin/import') {
         const b = await body();
-        return json(this.store.transaction(() => this.ownerState.import(actor, b)));
+        return json(await this.ownerState.import(actor, b, new Set((await this.admin.adminFingerprints()).keys())));
       }
       if (m === 'POST' && p === '/v1/admin/grants') {
         const b = await body();
@@ -1741,23 +1767,23 @@ export class BatonCore {
    * schema's "written once" and "the first force post" describe that one hold.
    */
   // @model syncPost sha256:7c0efc930fe7
-  async board(repo: Repository, p: BoardPayload) {
+  async board(repo: Repository, p: BoardPayload, issuer: string | null = null) {
     // Course graphs are read per post: a registry applied, or a post refused after applying one,
     // must not leave another request reading a graph that is not in force.
     this.stations.reset();
     try {
-      return await this.boardPost(repo, p);
+      return await this.boardPost(repo, p, issuer);
     } finally {
       this.stations.reset();
     }
   }
 
-  private async boardPost(repo: Repository, p: BoardPayload) {
+  private async boardPost(repo: Repository, p: BoardPayload, issuer: string | null) {
     const r = repo.id;
     // R-BTN-62: the post's number is used first, whatever becomes of the post; an older reading
     // than the last accepted one, or a void or used number, is refused whole here.
     const n = p.observation;
-    this.observations.use(r, n);
+    this.observations.use(r, n, issuer);
     // B-183 (§4.4, R-BTN-184): the `tickets-approved` guarantee is defined over a ticket file's
     // approval — a source that reads only as it is now has no file to approve, so its post to a
     // repository whose policy's floors include the guarantee is refused, naming it. What approval
@@ -1895,9 +1921,6 @@ export class BatonCore {
           // withdrawn ticket clears its closure row, as a new head does (round 1, finding 4) —
           // withdraw-and-reopen with no commit is the tracker flow this ticket builds for.
           this.stations.reopened(r, refreshed.map(({ row }) => row.id));
-          // R-BTN-88 (§4.8): the import's pending ticket-scoped rows, applied to the tickets
-          // this reading creates — a refresh creates them as a new head does (B-183).
-          this.ownerState.applyPending(r, new Set(refreshed.map(({ row }) => row.id)), at);
         }
         const seen = normative ? this.refreshStations(r, p, n, at, wrote) : new Map<string, Seen>();
         const confirmed = this.claims.confirm(confirmations, n);
@@ -1950,7 +1973,7 @@ export class BatonCore {
       // one it does not post is dropped with discrepancy `spawned-unposted` (R-BTN-85); and the
       // import's pending ticket-scoped rows, applied to the tickets this post creates.
       this.settleSpawned(r, p, n, at);
-      this.ownerState.applyPending(r, new Set(rows.map(({ row }) => row.id)), at);
+      this.ownerState.applyPending(r, new Set(rows.map(({ row }) => row.id)), stations, at, true);
       this.claims.confirmOutputs(r, p.attestations ?? []);
       const seen = this.stations.apply(r, p.sha, n, stations, p.closed ?? [], at, wrote.closingPositions);
       // R-BTN-116: the questions the post carries for its queued person legs (§4.4), then the
@@ -1987,10 +2010,10 @@ export class BatonCore {
       // history stays in the events.
       this.store.exec('DELETE FROM held_snapshots WHERE repository_id = ? AND head_sha IS ?', r, head);
       this.event(r, 'snapshot-accepted', { sha: p.sha, parent_sha: p.parent_sha, ticket_count: ticketCount, ...changed, ...(accepted ? { held: true } : {}) }, at);
-      // B-126 (R-BTN-194): each ticket's `last_written_by`, read from the push deliveries of the
-      // range (never the post's own account of what changed). Information only: the post is
-      // accepted whatever it finds, and nothing is noticed.
-      this.provenance.advance(repo, head, p.sha, at, rows.map(({ row }) => row), new Set(upserted.map((id) => id.slice(r.length + 1))));
+      // R-BTN-194 and R-BTN-187: ticket provenance and control notices share the server's
+      // push chain. Neither gates the post or relies on what the sync says changed.
+      const control = this.policies.current(r)?.policy.paths.control;
+      this.provenance.advance(repo, head, p.sha, at, rows.map(({ row }) => row), new Set(upserted.map((id) => id.slice(r.length + 1))), control != null && control !== 'any');
       this.observations.accept(r, n);
       this.syncWants.posted(r, n, p.sha);
       const confirmed = this.claims.confirm(confirmations, n);
@@ -2073,7 +2096,7 @@ export class BatonCore {
    *  changes what a runner refuses, not what it runs. With the setting off, `{}`: nothing is
    *  gated, and the ticket's brief mark rides its row as ever. A group missing (`read` null or
    *  absent) is the fail-closed case — no signed version — and the runner treats it so. */
-  private async claimControl(ticket: string, claimId: number): Promise<{ control?: unknown }> {
+  private async claimControl(ticket: string, claimId: number): Promise<Pick<ClaimAnswer, 'control'>> {
     if (!ticket.includes(':')) return {};
     const repo = repositoryOf(ticket);
     if (!this.sql<{ flag: number }>('SELECT require_signed_control AS flag FROM repositories WHERE id = ?', repo)[0]?.flag) return {};
@@ -2328,6 +2351,9 @@ export class BatonCore {
     // on an old station (round 1, 1-A-0, 1-B-0).
     const legsBefore = this.queuedLegs(r);
     for (const id of live) if (!stations.has(id)) this.stations.clear(qualify(r, id));
+    // R-BTN-88: a refresh can supply the first placement, but only a materializing read
+    // decides which tickets are absent. A held history cannot consume a pending position.
+    if (!held) this.ownerState.applyPending(r, live, stations, at, wrote != null);
     // A held history's closures stand even for tickets the current head still has: the holder's
     // archive may be in the rewritten history alone, and its done end must not wait the hold's
     // 24 hours (R-BTN-62; round 2, 2-A-0). A plain refresh's own closures are applied as they
@@ -2615,6 +2641,8 @@ export class BatonCore {
         // B-234 (R-BTN-163, R-BTN-195): the open conditions, an `interact` with the session
         // link Baton set — a person asked into the leg's session.
         conditions: this.conditions.needsYou(),
+        sync_lapses: this.observations.needsYou(now),
+        sync_control_changes: this.provenance.needsYou(now),
         // B-127: the unsigned control changes a post moved the head onto while signed control is required.
         unsigned_control: this.unsignedControlView(now) },
       // R-BTN-75, R-BTN-76: each blocked ticket with its blocks, and the instances' states.
