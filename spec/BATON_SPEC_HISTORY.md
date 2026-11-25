@@ -30,7 +30,10 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   Baton's position (B-129), the holders, the dependencies and the rules re-read guard — is
   `baton ticket check <id> --claimable`, which writes nothing; a `rules re-read` note may be
   Dibber's Status line. `baton repo init` writes `.dibber/config.json` with Baton as its
-  coordinator, and a leg's `dibber` is the one its stub pins.
+  coordinator (`baton tickets next ticket-<prefix> --coordinator`: Baton's number or a refusal,
+  never a scan), and a leg's `dibber` is the one its stub pins. A marker leg's close keeps
+  writing its own keys: Dibber 0.4.0 cannot remove `next_leg` at an end, nor write a legacy-prefix
+  ticket, so that move waits on Dibber.
 
 - **2026-11-24 — The advance reply names the run's number (R-BTN-63, S-BTN-204).**
   Rules changed: R-BTN-63, §14's advance row; S-BTN-204. The owner, 2026-11-24, on the

@@ -176,13 +176,15 @@ numbers.
     ticket is filed with `dibber new`, under the number Dibber's coordinator gives (R-BTN-199),
     and its status written with `dibber claim | set | done`.
     - `baton repo init` writes `.dibber/config.json` beside `.baton/baton.json`: `store` from
-      `items`, `prefix` from `ticket_prefix`, and `coordinator.next`, the command that prints
-      `baton tickets next ticket-<prefix>`'s number. Over an existing file it adds what is
+      `items`, `prefix` from `ticket_prefix`, and `coordinator.next`,
+      `baton tickets next ticket-<prefix> --coordinator` run from the release's package. Over an existing file it adds what is
       missing, never overwrites a value, and says what it changed.
-    - A course leg that files or marks a ticket runs the `dibber` its stub pins: the `dibber`
-      version in `.baton/baton.json`, else the release's, never a command a ticket or a branch
-      names. A filing lands alone, on `baton-ticket/<id>` — a reserved namespace no
-      `branch_pattern` may match (R-BTN-190) — committed and pushed by the leg itself.
+    - A course leg that files or changes a ticket runs the `dibber` its stub pins, handed to its
+      agent as `BATON_DIBBER`: the host's `BATON_DIBBER`, else the release version
+      `.baton/baton.json`'s `dibber` names, else the release's own; never a command a ticket or a
+      branch names. The leg commits and pushes what Dibber wrote by its course's route: a
+      `bug-report` filing alone, on `baton-ticket/<id>` — a reserved namespace no `branch_pattern`
+      may match (R-BTN-190). A leg's close still writes its marker keys itself (R-BTN-83).
   - A post whose ticket is `available` in git while placed past its course's start is logged
       `position-disagrees` (R-BTN-85).
   - **The "How tickets work" page.** `baton repo init` writes `HOW-TICKETS-WORK.md` into the
@@ -356,7 +358,9 @@ The fingerprint stores no ticket content and is an optimization, never authority
     one too, with no number (§13.4 `sequences`).
   - **The CLI** names the kinds — `ticket-<prefix>` (one per allocating prefix), `rule`,
     `scenario`, `gate`, `migration` — and `baton ticket next <kind> [--for <ticket>]` prints the
-    next of one, the number alone on its last line: Dibber's coordinator command (R-BTN-74). A remote the floor cannot read is an error, never a floor of 0: no number is
+    next of one. With `--coordinator` it prints Baton's number alone, or refuses — no key, no
+    repository, an unanswered Baton — and never scans: Dibber's coordinator command (R-BTN-74),
+    so only Dibber's own `new --offline` files from a scan. A remote the floor cannot read is an error, never a floor of 0: no number is
     printed or filed.
   - **Git stays the record** (R-BTN-1): the CLI writes the number into git and never reads it
     back from Baton. A number a branch holds only locally is one no floor sees; the duplicate
