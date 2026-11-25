@@ -89,7 +89,7 @@ async function held(w: { secret: string }, ticket: string) {
 /** A check runner of `ops`, its one session registered once per test. */
 const checkRunner = () => register('vm-a', { courses: [{ repository: 'ops', course: 'check', version: 1 }] });
 
-describe('B-175 the check conclusions', () => {
+describe('B-175 the check conclusions (S-BTN-68, core half)', () => {
   it('no owners’ map, or one that names another course: any done stands', async () => {
     // The map names only `probe`, so `check`'s stations are ordinary ones.
     git.registry = [...git.registry, { id: 'probe', version: 1, min_runner_version: 1, skill: 'next-roadmap-item', course: PROBE_V1, step_kinds: ['implement'], branch_pattern: 'claude/{ticket}-*' }];

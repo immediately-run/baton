@@ -215,7 +215,7 @@ export class ClaimRun {
   cloneIndex: number | null = null;
   /** R-BTN-72 (B-188): the running leg's place, persisted for a restart's reattach. */
   place: Pick<PersistedClaim, 'run_id' | 'seq' | 'leg' | 'at' | 'handle' | 'ctx'> = {};
-  /** R-BTN-202 (B-248): a leg run under a local order while Baton is unreachable — no claim, no
+  /** R-BTN-202 (B-248): a leg run under a local order while Baton is unreachable — no claim (R-BTN-18), no
    *  lease: nothing fences it, and no beat reports it. */
   offline = false;
   /** R-BTN-202 (B-248): the leg this claim's ticket already ran under a local order, offline —
@@ -1576,7 +1576,7 @@ export class ClaimRun {
     return undefined;
   }
 
-  /** `handoff(ctx)` (R-BTN-44): before any suspension or release; its failure is logged and the
+  /** `handoff(ctx)` (R-BTN-38, R-BTN-44): before any suspension or release; its failure is logged and the
    * resume record covers the rest. */
   private async callHandoff(script: string | null, ctx: Record<string, unknown>, why?: string, liveRun?: string): Promise<string | null> {
     if (script == null) return null;

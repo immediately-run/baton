@@ -42,7 +42,7 @@ function headingIds(line, prefix) {
 
 /** The rule ids whose heading is followed by an italic sentence. */
 export function patchNotes(spec, prefix = CONFIG.prefix) {
-  const re = new RegExp(`^- \\*\\*(${esc(prefix)}-\\d+)\\b[^\\n]*?\\*\\*\\.? \\*(?!\\*)`, 'gm');
+  const re = new RegExp(`^- \\*\\*(${esc(prefix)}-\\d+)\\b[^\\n]*?\\*\\*\\.?(?:[ \\t]+\`status:[^\`\\n]*\`)*[ \\t]+\\*(?!\\*)`, 'gm');
   return [...spec.matchAll(re)].map((m) => m[1]);
 }
 
