@@ -257,6 +257,24 @@ describe('S-BTN-41 the runner', () => {
     expect(await rows('SELECT status, end_reason FROM claims')).toEqual([{ status: 'completed', end_reason: 'suspended:built' }]);
   }, 30_000);
 
+  it('S-BTN-63: a refused advance preserves the evidence of a finished self-loop', async () => {
+    const CHAINED = { ...relay, legs: {
+      ...relay.legs,
+      check: { from: ['built'], to: ['built', 'checked'], max_runs: 2 },
+      merge: { ...relay.legs.merge, from: ['built', 'checked'], no_chain_from: ['build'] },
+    } };
+    home.write('.baton/courses/relay/course.json', `${JSON.stringify(CHAINED, null, 2)}\n`);
+    home.leg('build', `return { reached: 'built', next: 'check' };`);
+    home.leg('check', `return { reached: 'built', next: 'merge' };`);
+    home.commit();
+    await home.post({ 'T-1': placed('filed', [], [['build', 'ready']]) }, undefined, { course: CHAINED });
+    expect(await makeRunner().runOnce()).toMatchObject({ end_reason: 'suspended:built', reached: 'built' });
+    expect(await rows('SELECT leg, to_station, evidence, abandoned_at FROM claim_legs ORDER BY seq')).toMatchObject([
+      { leg: 'build', to_station: 'built' },
+      { leg: 'check', to_station: 'built', evidence: home.sha(), abandoned_at: null },
+    ]);
+  }, 30_000);
+
   it('a done end whose outputs fail its arrival is given up the same way', async () => {
     const END = { ...relay, stations: { ...relay.stations, merged: { ...relay.stations.merged, entry: [{ output: 'artifact', schema: 'std:url@1' }] } } };
     home.write('.baton/courses/relay/course.json', `${JSON.stringify(END, null, 2)}\n`);
@@ -580,7 +598,8 @@ describe('S-BTN-41 the runner', () => {
   }, 30_000);
 
   it("the immediate stop (stopNow, the signal handler's call) releases the leg at its next safe point with its hand-off — a safe point, not an abandonment (B-109)", async () => {
-    home.leg('check', `${ABORTABLE}
+    home.leg('check', `ev(ctx, 'check started');
+    ${ABORTABLE}
     ev(ctx, 'check aborted:' + ctx.signal.reason);
     return { reached: 'checked', next: 'merge' };`);
     home.commit();
@@ -588,7 +607,8 @@ describe('S-BTN-41 the runner', () => {
     const runner = makeRunner();
     runner.start();
     const done = runner.runOnce();
-    await until(() => rows(`SELECT 1 FROM claim_legs WHERE leg = 'check'`));
+    // The leg is running (not merely recorded): a stop before it starts releases at `built`.
+    await until(() => home.evidence().filter((l) => l === 'check started'));
     runner.stopNow();
     expect(await done).toMatchObject({ end_reason: 'released:requested', reached: 'checked' });
     const lines = home.evidence();
@@ -1339,15 +1359,17 @@ describe('S-BTN-41 the runner', () => {
     await home.post({ 'T-1': placed('filed', [], [['build', 'ready']]) });
     const done = runner.work();
     await until(async () => lines.filter((l) => l.includes("docs:T-1's build has run")));
+    // Registration may already have unblocked build's own capability prerequisite.
+    const receivedBefore = lines.filter((l) => l.includes('baton: message unblocked received')).length;
     const [{ id: runnerId }] = await rows<{ id: number }>('SELECT id FROM runners');
     await rows(`INSERT INTO messages (kind, payload_json, from_principal, to_runner_id, sent_at, status) VALUES ('unblocked', '{"tickets":[]}', 'baton', ?, ?, 'pending')`, runnerId, Date.now());
     // Acknowledged while the build leg still runs — not held for the claim's end.
-    await until(async () => (await rows<{ status: string }>(`SELECT status FROM messages WHERE kind = 'unblocked'`)).filter((r) => r.status === 'acknowledged'));
+    await until(async () => await rows(`SELECT 1 FROM messages WHERE kind = 'unblocked' AND payload_json = '{"tickets":[]}' AND status = 'acknowledged'`));
     expect(lines.join('\n')).not.toContain('build ran');
     await until(async () => lines.filter((l) => l.includes('docs:T-1 done at')));
     runner.stop();
     await done;
-    expect(lines.filter((l) => l.includes('baton: message unblocked received'))).toHaveLength(1);
+    expect(lines.filter((l) => l.includes('baton: message unblocked received'))).toHaveLength(receivedBefore + 1);
   }, 30_000);
 
   // B-108 — the runner's liveness line: while a leg runs, each beat says how long and how live,

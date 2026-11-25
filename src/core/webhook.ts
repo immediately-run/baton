@@ -357,13 +357,13 @@ export class Webhooks {
     const slash = full.indexOf('/');
     const owner = full.slice(0, slash);
     const name = full.slice(slash + 1);
-    const out = new Set(registered.filter((r) => r.github.toLowerCase() === full).map((r) => r.id));
-    for (const r of this.rows<{ repository_id: string }>(
-      `SELECT DISTINCT t.repository_id FROM ticket_repositories j JOIN tickets t ON t.id = j.ticket_id JOIN repositories p ON p.id = t.repository_id
-       WHERE j.repository_key = ?
-          OR (j.repository_key = ? AND instr(j.repository_key, '/') = 0 AND lower(substr(p.github, 1, instr(p.github, '/') - 1)) = ?)`, full, name, owner)) {
-      if (registered.some((g) => g.id === r.repository_id)) out.add(r.repository_id);
-    }
+    const out = new Set(registered.filter((r) => {
+      const home = r.github.toLowerCase();
+      if (home === full) return true;
+      const short = !name.includes('/') && home.startsWith(`${owner}/`) ? name : full;
+      return this.rows(`SELECT 1 FROM ticket_repositories INDEXED BY ticket_repositories_reverse
+        WHERE repository_key IN (?, ?) AND repository_id = ? LIMIT 1`, full, short, r.id).length > 0;
+    }).map((r) => r.id));
     if (id !== undefined) {
       for (const r of this.rows<{ repository_id: string }>(`SELECT c.repository_id FROM code_repos c
         JOIN repositories r ON r.id = c.repository_id AND r.retired_at IS NULL
