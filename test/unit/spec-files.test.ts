@@ -8,6 +8,7 @@ import { describe, it, expect } from 'vitest';
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { HISTORY_SECTIONS, SECTIONS } from '../../src/core/ownerState';
 // @ts-expect-error a plain .mjs script, no types
 import { SPEC_DIR, SPEC_INDEX, indexText, joinParts, layoutProblems, locate, moveProof, part, partFrontmatter, partProblems, specParts } from '../../scripts/spec-files.mjs';
 // @ts-expect-error a plain .mjs script, no types
@@ -36,6 +37,15 @@ function paged(parts: Record<string, string>): Record<string, string> {
 }
 
 describe('spec-files (B-179)', () => {
+  it('S-BTN-50: R-BTN-88 lists exactly the default and history export sections', () => {
+    const spec = readFileSync(join(ROOT, SPEC_DIR, '04-tickets-syncs-board.md'), 'utf8');
+    const tableNames = (list: string) => Array.from(list.matchAll(/`([a-z][a-z_]*)`/g), (m) => m[1]);
+    expect(tableNames(spec.match(/\*\*Default sections\*\* \(each table's stored columns\):\n([\s\S]*?)\.\n/)?.[1] ?? ''))
+      .toEqual(SECTIONS.map(({ table }) => table));
+    expect(tableNames(spec.match(/\*\*History sections\*\* \(only with `--with-history`\): ([\s\S]*?)\. An import/)?.[1] ?? ''))
+      .toEqual(HISTORY_SECTIONS.map(({ table }) => table));
+  });
+
   it('the parts, joined in name order, are the spec', () => {
     const root = fixture({ '02-two.md': TWO, '00-front.md': FRONT, '01-one.md': ONE, 'README.txt': 'not a part' });
     const parts: Part[] = specParts(root);

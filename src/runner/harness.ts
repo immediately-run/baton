@@ -96,3 +96,86 @@ export function builtinAgentActivityPaths(command: string, checkout: string): st
   const adapter = HARNESS_ADAPTERS.find((entry) => basename(splitWords(entry.agentCommand)[0]) === basename(command));
   return adapter ? harnessActivityPaths(checkout, [adapter]) : [];
 }
+
+/** B-141: reconstruct argv rather than forwarding flags that might change the workspace,
+ * connect to another session, load plugins, or bypass the tool policy. */
+export function readOnlyHarness(words: string[], prompt: string, readConfig: (path: string) => string | null = () => null): { argv: string[]; env: NodeJS.ProcessEnv } {
+  const [bin, mode, ...options] = words;
+  const opencode = bin === 'opencode' && mode === 'run';
+  if (!opencode && !(bin === 'claude' && (mode === '-p' || mode === '--print'))) {
+    throw new Error('reads_only supports only opencode run and claude --print agent commands (R-BTN-183)');
+  }
+  let model: string | undefined;
+  for (let i = 0; i < options.length; i++) {
+    if (options[i] === '--model' || options[i] === '-m') {
+      model = options[++i];
+      if (!model || !/^[\w./:#-]+$/.test(model) || model.startsWith('-')) throw new Error('invalid reads_only harness model');
+    }
+  }
+  const selection = model ? ['--model', model] : [];
+  const env = { ...process.env };
+  // The agent should not discover or operate on the object's original Git directory.
+  for (const key of Object.keys(env)) if (key.startsWith('GIT_')) delete env[key];
+  if (opencode) {
+    // Explicit config locations in the host environment are not part of the snapshot. The
+    // standalone server must receive this policy, not reuse a service started without it.
+    for (const key of Object.keys(env)) if (key.startsWith('OPENCODE_CONFIG') || key === 'OPENCODE_PERMISSION') delete env[key];
+    const config: Record<string, unknown> = {};
+    for (const path of ['opencode.json', 'opencode.jsonc', '.opencode/opencode.json', '.opencode/opencode.jsonc']) {
+      const snapshot = configObject(readConfig(path), path);
+      for (const field of ['model', 'default_agent'] as const) if (typeof snapshot[field] === 'string') config[field] = snapshot[field];
+      config.providers = { ...object(config.providers), ...object(snapshot.providers) };
+      const agents = Object.fromEntries(Object.entries(object(snapshot.agents)).map(([id, value]) => [id,
+        Object.fromEntries(Object.entries(object(value)).filter(([key]) => ['description', 'mode', 'model', 'system', 'hidden', 'temperature', 'top_p'].includes(key))),
+      ]));
+      config.agents = { ...object(config.agents), ...agents };
+    }
+    const readTools = ['read', 'glob', 'grep'];
+    env.OPENCODE_CONFIG_CONTENT = JSON.stringify({
+      ...config,
+      snapshots: false, formatter: false, lsp: false,
+      permissions: [
+        { action: '*', resource: '*', effect: 'deny' },
+        ...readTools.map((action) => ({ action, resource: '*', effect: 'allow' })),
+      ],
+      policies: [
+        { action: 'tool.use', resource: '*', effect: 'deny' },
+        ...readTools.map((tool) => ({ action: 'tool.use', resource: `${tool}:*`, effect: 'allow' })),
+        ...['plugin.use', 'mcp.use', 'skill.use'].map((action) => ({ action, resource: '*', effect: 'deny' })),
+      ],
+    });
+    return { argv: [bin, mode, '--standalone', ...selection, '--', prompt], env };
+  }
+  const snapshot = configObject(readConfig('.claude/settings.json'), '.claude/settings.json');
+  const settings = Object.fromEntries(Object.entries(snapshot).filter(([key, value]) => ['model', 'language'].includes(key) && typeof value === 'string'));
+  return {
+    argv: [bin, '--print', '--bare', '--setting-sources', '', '--strict-mcp-config', '--mcp-config', '{}',
+      '--tools', 'Read,Glob,Grep', '--allowedTools', 'Read,Glob,Grep', '--permission-mode', 'dontAsk',
+      ...(Object.keys(settings).length ? ['--settings', JSON.stringify(settings)] : []),
+      ...selection, '--', prompt], env,
+  };
+}
+
+function object(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function configObject(text: string | null, path: string): Record<string, unknown> {
+  if (text == null) return {};
+  try {
+    // Match strings first, so comments and trailing commas inside them are left alone.
+    const clean = path.endsWith('.jsonc') ? text
+      .replace(/"(?:[^"\\]|\\.)*"|\/\/[^\r\n]*|\/\*[\s\S]*?\*\//g, (token) => token.startsWith('"') ? token : ' ')
+      .replace(/"(?:[^"\\]|\\.)*"|,(?=\s*[}\]])/g, (token) => token === ',' ? '' : token) : text;
+    const parsed: unknown = JSON.parse(clean);
+    if (object(parsed) !== parsed) throw new Error('expected an object');
+    return parsed as Record<string, unknown>;
+  } catch {
+    throw new Error(`invalid reads_only snapshot configuration: ${path}`);
+  }
+}
+
+export function readOnlyVersionSupported(version: string): boolean {
+  const match = /^(?:opencode )?v*2\.(\d+)\.(\d+)(?:[-+].*)?$/.exec(version.trim());
+  return match != null && (Number(match[1]) > 2 || (Number(match[1]) === 2 && Number(match[2]) >= 3));
+}
