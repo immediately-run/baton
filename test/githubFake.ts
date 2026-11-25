@@ -25,6 +25,10 @@ function items(routes: Routes, path: string, pick: (b: any) => any[] = (b) => b)
 }
 
 const first = (list: any[]) => ({ pageInfo: { hasNextPage: list.length > 100 }, nodes: list.slice(0, 100) });
+const commentPage = (comments: any[], after = 0) => ({
+  pageInfo: { hasNextPage: comments.length > after + 100, endCursor: String(after + 100) },
+  nodes: comments.slice(after, after + 100).map((c) => ({ author: c.user ? { login: c.user.login, databaseId: c.user.id } : null, authorAssociation: c.author_association, createdAt: c.created_at, body: c.body, url: c.html_url, lastEditedAt: c.last_edited_at ?? null, includesCreatedEdit: c.includes_created_edit ?? false })),
+});
 
 /** One PR's GraphQL node from its REST routes in `repo`; null when the list does not have it. */
 function prNode(routes: Routes, repo: string, n: number): unknown {
@@ -46,7 +50,7 @@ function prNode(routes: Routes, repo: string, n: number): unknown {
       },
     }))),
     reviews: first(reviews.map((r) => ({ author: r.user ? { login: r.user.login } : null, authorAssociation: r.author_association, state: r.state, submittedAt: r.submitted_at, body: r.body }))),
-    comments: first(comments.map((c) => ({ author: c.user ? { login: c.user.login } : null, authorAssociation: c.author_association, createdAt: c.created_at, body: c.body, url: c.html_url, lastEditedAt: c.last_edited_at ?? null, includesCreatedEdit: c.includes_created_edit ?? false }))),
+    comments: commentPage(comments),
   };
 }
 
@@ -59,8 +63,28 @@ export function githubFake(routes: Routes, calls: string[] = [], { checksForbidd
   return async (url: string, init?: { method?: string; body?: string }): Promise<Response> => {
     const u = new URL(url);
     if (u.pathname === '/graphql' || u.pathname === '/api/graphql') {
-      const { query, variables } = JSON.parse(String(init?.body)) as { query: string; variables: { owner: string; name: string } };
+      const { query, variables } = JSON.parse(String(init?.body)) as { query: string; variables: { owner: string; name: string; number?: number; sha?: string; after?: string } };
       const repo = `${variables.owner}/${variables.name}`;
+      if (variables.number != null) {
+        calls.push(`graphql ${repo} comments ${variables.number} after ${variables.after}`);
+        const comments = items(routes, `/repos/${repo}/issues/${variables.number}/comments`) ?? [];
+        return Response.json({ data: { repository: { pullRequest: { comments: commentPage(comments, Number(variables.after)) } } } });
+      }
+      if (variables.sha != null) {
+        calls.push(`graphql ${repo} commit ${variables.sha}`);
+        const comments = items(routes, `/repos/${repo}/commits/${variables.sha}/comments`);
+        const object = comments == null ? null : { oid: variables.sha, comments: commentPage(comments, Number(variables.after ?? 0)) };
+        return Response.json({ data: { repository: { object } } });
+      }
+      const commits = [...query.matchAll(/(c\d+): object\(oid: "([0-9a-f]+)"\)/g)];
+      if (commits.length) {
+        calls.push(`graphql ${repo} commit batch`);
+        const repository = Object.fromEntries(commits.map(([, alias, oid]) => {
+          const comments = items(routes, `/repos/${repo}/commits/${oid}/comments`);
+          return [alias, comments == null ? null : { oid, comments: commentPage(comments) }];
+        }));
+        return Response.json({ data: { repository } });
+      }
       const numbers = [...query.matchAll(/p(\d+): pullRequest\(number: (\d+)\)/g)].map((m) => Number(m[2]));
       calls.push(`graphql ${repo} ${numbers.join(',')}`);
       if (!(`/repos/${repo}/pulls?state=all` in routes)) return Response.json({ data: { repository: null }, errors: [{ type: 'NOT_FOUND', message: `Could not resolve to a Repository with the name '${repo}'.` }] });

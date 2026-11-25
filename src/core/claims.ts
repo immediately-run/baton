@@ -1415,11 +1415,11 @@ export class Claims {
    *  reported, and the run's recorded inputs (the ticket's version and its read's digest among
    *  them, `leg_run_inputs`). `end` is the claim's end reason once the claim ended. */
   runsOf(ticketId: string, leg: string) {
-    const runs = this.rows<{ claim_id: number; seq: number; run_id: string | null; head_sha: string | null; from_station: string; started_at: number; finished_at: number | null; abandoned_at: number | null; session_url: string | null; snapshot_sha: string; course_id: string | null; status: string; end_reason: string | null; ended_at: number | null; runner_id: number; contract_version: number | null; contract_course_version: number | null }>(
-      `SELECT l.claim_id, l.seq, l.run_id, l.head_sha, l.from_station, l.started_at, l.finished_at, l.abandoned_at, l.session_url,
+    const runs = this.rows<{ claim_id: number; seq: number; leg: string; contract_leg: string | null; run_id: string | null; head_sha: string | null; from_station: string; started_at: number; finished_at: number | null; abandoned_at: number | null; session_url: string | null; snapshot_sha: string; course_id: string | null; status: string; end_reason: string | null; ended_at: number | null; runner_id: number; contract_version: number | null; contract_course_version: number | null }>(
+      `SELECT l.claim_id, l.seq, l.leg, l.contract_leg, l.run_id, l.head_sha, l.from_station, l.started_at, l.finished_at, l.abandoned_at, l.session_url,
               c.snapshot_sha, c.course_id, c.status, c.end_reason, c.ended_at, c.runner_id, l.contract_version, l.contract_course_version
        FROM claim_legs l JOIN claims c ON c.id = l.claim_id
-       WHERE c.ticket_id = ? AND l.leg = ? ORDER BY l.claim_id, l.seq`, ticketId, leg);
+       WHERE c.ticket_id = ? AND (l.leg = ? OR l.contract_leg = ?) ORDER BY l.claim_id, l.seq`, ticketId, leg, leg);
     const inputs = this.rows<{ claim_id: number; seq: number; name: string; schema: string | null; from_leg: string | null; from_run: number | null; uri: string | null; digest: string | null; value_json: string | null; leg_version: number | null; ticket_version: string | null; read_digest: string | null }>(
       'SELECT claim_id, seq, name, schema, from_leg, from_run, uri, digest, value_json, leg_version, ticket_version, read_digest FROM leg_run_inputs WHERE ticket_id = ? ORDER BY claim_id, seq, name', ticketId);
     const defaultBranch = this.rows<{ default_branch: string }>('SELECT default_branch FROM repositories WHERE id = ?', repositoryOf(ticketId))[0]?.default_branch ?? null;
@@ -1434,7 +1434,7 @@ export class Claims {
         const ticket = mine.find((i) => i.name === '');
         return {
           run: ordinal + 1,
-          claim: r.claim_id, runner: r.runner_id, seq: r.seq, leg,
+          claim: r.claim_id, runner: r.runner_id, seq: r.seq, leg: r.leg, contract_leg: r.contract_leg ?? r.leg,
           run_id: r.run_id, from: r.from_station, started_at: r.started_at,
           ended_at: r.finished_at ?? r.abandoned_at ?? null,
           end: r.status === 'active' ? null : r.end_reason,

@@ -1,4 +1,4 @@
-import { outputLine } from '../../src/defaults/output-evidence';
+import { outputLine, syncAttestationBatch } from '../../src/defaults/output-evidence';
 // defaults-cli.test.ts — `baton repo sync`'s argument parser, `baton repo init`'s scaffolding
 // and `close` (BATON_SPEC §2f R-BTN-74, R-BTN-83; R3-1249): the flags; the scaffold's every
 // file, run through the BUILT CLI (the esbuild bundle production runs, not the source); the leg
@@ -2022,12 +2022,22 @@ describe('githubFacts (R-BTN-96’s GitHub adapter) against a recorded GitHub', 
     const comment = (id: number, login: string) => ({ ...who('MEMBER', body, '2026-10-04T00:00:00Z', login), html_url: `${base.html_url}#issuecomment-${id}` });
     serve({
       '/repos/o/r/pulls?state=all': [{ ...base, head: { ...base.head, repo: { id: 10 } }, base: { repo: { id: 10 } } }],
-      '/repos/o/r/issues/1/comments': [comment(1, 'x'), comment(2, 'outsider'), { ...comment(3, 'x'), last_edited_at: '2026-10-05T00:00:00Z' }],
+      '/repos/o/r/issues/1/comments': [...Array.from({ length: 100 }, () => who('NONE', 'unrelated', '2026-10-04T00:00:00Z', 'outsider')), comment(1, 'x'), comment(2, 'outsider'), { ...comment(3, 'x'), last_edited_at: '2026-10-05T00:00:00Z' }],
       ...may('o/r', 'x', 'write'), ...may('o/r', 'outsider', 'read'),
     });
     const outputEvidence: NonNullable<Parameters<typeof githubFacts>[4]>['outputEvidence'] = [];
     await githubFacts(dir, () => {}, () => true, [], { outputEvidence, ownsOutput: (id, p, fork) => id === 'A-1' && p.number === 1 && !fork });
     expect(outputEvidence).toEqual([expect.objectContaining({ type: 'std:git.output@1', ticket: 'A-1', ref: `${base.html_url}#issuecomment-1` })]);
+  });
+
+  it('S-BTN-48: successive observations post beyond a full historical output prefix', () => {
+    const confirmation = [{ type: 'std:git.evidence@1', ticket: 'A-1', value: {} }];
+    const outputs = Array.from({ length: 101 }, (_, i) => ({ type: 'std:git.output@1', ticket: 'A-1', ref: `ref-${i}`, value: {} }));
+    const first = syncAttestationBatch(confirmation, outputs, 1);
+    const second = syncAttestationBatch(confirmation, outputs, 2);
+    expect(first).toHaveLength(100);
+    expect(first).not.toContain(outputs.at(-1));
+    expect(second).toEqual([...confirmation, ...outputs.slice(99)]);
   });
 
   it('pages the PR list, reads detail only for PRs a live ticket owns — closed unmerged ones too — and keeps verdicts from people with a say', async () => {
@@ -2213,7 +2223,7 @@ describe('githubFacts (R-BTN-96’s GitHub adapter) against a recorded GitHub', 
     expect(facts[30]).toEqual({ number: 99, head: 'feature/other', state: 'open', pushedAt: 0, checks: [], reviews: [], repository: 'o/r', url: 'https://github.com/o/r/pull/99' });
   });
 
-  it('reads over REST, in full, a connection that overflows its first page, and the checks of a head the batch read at another commit (B-35)', async () => {
+  it('pages comments with their edit metadata and reads checks of a head the batch read at another commit (B-35)', async () => {
     const many = Array.from({ length: 150 }, (_, i) => who('MEMBER', `c${i}`, '2026-10-05T00:00:00Z'));
     serve({
       '/repos/o/r/pulls?state=all': [pr(1, 'claude/A-1-x', 'open')],
@@ -2224,7 +2234,7 @@ describe('githubFacts (R-BTN-96’s GitHub adapter) against a recorded GitHub', 
     });
     const [fact] = await githubFacts(dir, () => {}, () => true);
     expect(fact.reviews.map((r) => r.body)).toEqual(many.map((c) => c.body));
-    expect(calls).toEqual(['/repos/o/r/pulls?state=all', 'graphql o/r 1', '/repos/o/r/issues/1/comments', '/repos/o/r/issues/1/comments?page=2', '/repos/o/r/collaborators/x/permission']);
+    expect(calls).toEqual(['/repos/o/r/pulls?state=all', 'graphql o/r 1', 'graphql o/r comments 1 after 100', '/repos/o/r/collaborators/x/permission']);
     // The list's head moved on after the batch read the PR: its checks are read at the list's head.
     const routes = { '/repos/o/r/pulls?state=all': [pr(1, 'claude/A-1-x', 'open')], '/repos/o/r/commits/s1/check-runs': { check_runs: [{ conclusion: 'failure' }] } };
     const real = githubFake(routes);

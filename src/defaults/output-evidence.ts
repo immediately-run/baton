@@ -5,6 +5,23 @@ import type { PostedAttestation } from '../core/board';
 const PREFIX = 'Baton-Output: ';
 const MAX = 256 * 1024;
 
+/** A forge comment vouches for the immutable commit it is attached to, not arbitrary Git authorship. */
+export const TICKET_OUTPUT_WITNESS = 'baton: ticket close outputs';
+
+export function syncAttestationBatch(confirmation: PostedAttestation[], outputs: PostedAttestation[], observation: number): PostedAttestation[] {
+  const limit = 100;
+  if (confirmation.length + outputs.length <= limit) return [...confirmation, ...outputs];
+  // Both streams get room. Consecutive observations page through the same evidence instead of
+  // taking its first page forever; a later sweep can revisit a marker seen while its claim lived.
+  const capacity = Math.min(confirmation.length, limit - Math.min(outputs.length, limit / 2));
+  const page = (items: PostedAttestation[], size: number) => {
+    if (size === 0 || items.length <= size) return items.slice(0, size);
+    const start = ((observation - 1) % Math.ceil(items.length / size)) * size;
+    return items.slice(start, start + size);
+  };
+  return [...page(confirmation, capacity), ...page(outputs, limit - capacity)];
+}
+
 interface OutputContext {
   ticket: { id: string; home?: string | null };
   leg: string;

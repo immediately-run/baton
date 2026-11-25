@@ -40,6 +40,7 @@ import { digestOfRead, MARKDOWN_SOURCE } from '../defaults/ticket-versions';
 import { dropCourse, git, loadCourse, extractTicketSource, type CourseLoad } from './home';
 import { gitBytes, readArtifact } from './contracts';
 import type { PointerReach } from '../core/contractPointers';
+import { resolveLeg } from '../core/graph';
 import { stdSchema } from '../shared/std.mjs';
 import { loadExecutor, type Executor, type Handle } from './executor';
 import { maskLegOutput, readMaskEnv, runnerConfigPath, secretValues } from './mask';
@@ -143,6 +144,8 @@ export function parseReplayArgs(argv: string[], env: NodeJS.ProcessEnv = process
 export interface RecordedRun {
   run: number;
   run_id?: string;
+  leg?: string;
+  contract_leg?: string;
   claim: number;
   runner?: number;
   from?: string;
@@ -316,14 +319,15 @@ export async function replayMain(argv: string[], io: ReplayIo = {}): Promise<num
   } catch (e) {
     return refuse(`the course's scripts would not load at the snapshot (${msg(e)})`);
   }
-  const script = course.scripts.get(a.leg) ?? null;
+  const pinnedLeg = run.contract_leg ?? a.leg;
+  const script = course.scripts.get(pinnedLeg) ?? null;
   if (script == null) {
     dropCourse(course.scratch);
-    return refuse(`the snapshot's course has no legs/${a.leg}.mjs`);
+    return refuse(`the snapshot's course has no legs/${pinnedLeg}.mjs`);
   }
-  if (course.graph.legs.get(a.leg)?.replaySafe === false) {
+  if (course.graph.legs.get(pinnedLeg)?.replaySafe === false) {
     dropCourse(course.scratch);
-    return refuse(`${a.leg} is marked "replay_safe": false — it has side effects outside git and its forge, and is never replayed (R-BTN-84)`);
+    return refuse(`${pinnedLeg} is marked "replay_safe": false — it has side effects outside git and its forge, and is never replayed (R-BTN-84)`);
   }
   report.course = { course: course.course, at: run.snapshot_sha };
 
@@ -376,7 +380,7 @@ export async function replayMain(argv: string[], io: ReplayIo = {}): Promise<num
     const worktree = join(mkdtempSync(join(tmpdir(), 'baton-replay-')), 'checkout');
     git(a.home, ['worktree', 'add', '--detach', '--quiet', worktree, checkoutSha]);
     try {
-      const ran = await runOnce(executor, replayEnv, { repository: a.repository, home: a.home, worktree, script, run, inputs: checkedInputs, ticketId, leg: a.leg, secrets, timeoutS: a.timeoutS, say });
+      const ran = await runOnce(executor, replayEnv, { repository: a.repository, home: a.home, worktree, script, run, inputs: checkedInputs, ticketId, leg: pinnedLeg, secrets, timeoutS: a.timeoutS, say });
       report.ran = ran.outcome;
       report.would_have_written = ran.writes;
       report.close = 'not called (R-BTN-84): the runner records what it would have written, and writes nothing';
@@ -385,19 +389,20 @@ export async function replayMain(argv: string[], io: ReplayIo = {}): Promise<num
       //    not bind the flag's sha), compared with the recorded run's.
       if (a.against != null) {
         const againstCourse = loadCourse(a.home, a.against, course.course);
-        const againstScript = againstCourse.scripts.get(a.leg) ?? null;
-        if (againstCourse.graph.legs.get(a.leg)?.replaySafe === false) {
+        const againstLeg = resolveLeg(againstCourse.graph, pinnedLeg) ?? run.leg ?? a.leg;
+        const againstScript = againstCourse.scripts.get(againstLeg) ?? null;
+        if (againstCourse.graph.legs.get(againstLeg)?.replaySafe === false) {
           dropCourse(againstCourse.scratch);
-          return refuse(`${a.leg} at --against is marked "replay_safe": false`, secrets);
+          return refuse(`${againstLeg} at --against is marked "replay_safe": false`, secrets);
         }
         if (againstScript == null) {
           dropCourse(againstCourse.scratch);
-          return refuse(`the scripts at ${a.against.slice(0, 10)} have no legs/${a.leg}.mjs (--against)`, secrets);
+          return refuse(`the scripts at ${a.against.slice(0, 10)} have no legs/${againstLeg}.mjs (--against)`, secrets);
         }
         const againstWorktree = join(mkdtempSync(join(tmpdir(), 'baton-replay-')), 'checkout');
         git(a.home, ['worktree', 'add', '--detach', '--quiet', againstWorktree, checkoutSha]);
         try {
-          const other = await runOnce(executor, replayEnv, { repository: a.repository, home: a.home, worktree: againstWorktree, script: againstScript, run, inputs: checkedInputs, ticketId, leg: a.leg, secrets, timeoutS: a.timeoutS, say, against: a.against });
+          const other = await runOnce(executor, replayEnv, { repository: a.repository, home: a.home, worktree: againstWorktree, script: againstScript, run, inputs: checkedInputs, ticketId, leg: againstLeg, secrets, timeoutS: a.timeoutS, say, against: a.against });
           report.against = {
             sha: a.against, ran: other.outcome, would_have_written: other.writes,
             same: JSON.stringify(other.outcome) === JSON.stringify(ran.outcome) && JSON.stringify(other.writes) === JSON.stringify(ran.writes),
