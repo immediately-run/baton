@@ -37,6 +37,10 @@ const TIMEOUT = 4;
 const OBSERVATION_TTL_MS = 10 * 60_000;
 const stationOf = (path) => path.reduce((_, l) => TO[l], START);
 const COURSE = JSON.parse(readFileSync(join(ROOT, 'test', 'fixtures', 'courses', 'roadmap-pr', 'course.json'), 'utf8'));
+// Deadlines do not change the model's graph. The trace maps their wall-clock intervals to ticks.
+const withoutDeadlines = ({ legs, ...course }) => ({ ...course, legs: Object.fromEntries(Object.entries(legs)
+  .map(([name, { max_duration, deadline_s, ...leg }]) => [name, leg])) });
+const COURSE_SHAPE = JSON.stringify(withoutDeadlines(COURSE));
 
 // ── ITF back to JSON ─────────────────────────────────────────────────────────────────────
 export function fromItf(v) {
@@ -67,6 +71,7 @@ export function kindOf(endReason) {
   if (endReason === 'done') return 'done';
   if (endReason.startsWith('suspended:')) return 'suspended';
   if (endReason === 'released:stale-board') return 'stale';
+  if (endReason === 'released:leg-timeout') return 'timeout';
   if (endReason.startsWith('released:')) return 'release';
   if (endReason.startsWith('reaped:')) return 'reap';
   return `?${endReason}`;
@@ -204,7 +209,8 @@ function translateStep(step, P, env, k) {
   const acts = [];
   const path = step.path ?? '';
   const origin = step.kind === 'request' ? path.replace(/\?.*$/, '') : step.kind;
-  if (Q.courseFile && JSON.stringify(JSON.parse(Q.courseFile)) !== JSON.stringify(COURSE)) return { end: 'a roadmap-pr course file other than the model’s (R-BTN-64, course changes: not modelled)' };
+  const course = Q.courseFile && JSON.parse(Q.courseFile);
+  if (course && (!course.legs || JSON.stringify(withoutDeadlines(course)) !== COURSE_SHAPE)) return { end: 'a roadmap-pr course file other than the model’s (R-BTN-64, course changes: not modelled)' };
   if (Object.keys(Q.claims).length && JSON.stringify(Q.required) !== JSON.stringify(k.required)) return { end: 'the required bar changed under a run (the model’s REQUIRED is constant)' };
   // A runner's tags matter to the model only at its own claims and advances (rule 8, R-BTN-67):
   // there they must be the tags it first claimed with.
@@ -319,7 +325,9 @@ function translateStep(step, P, env, k) {
       if (!sameSet(sent, d.legBars)) return { reject: `claim ${id}'s leg stored bars ${JSON.stringify(d.legBars)}, not the ${JSON.stringify(sent)} the holder sent` };
       acts.push(`heartbeat(${w})`);
       if (c.leg !== '') acts.push(`pushEvidence(${w}, false)`);
-      acts.push(`advance(${w}, ${q(d.leg)}, ${qSet(sent)})`);
+      const deadlineS = course?.legs?.[d.leg]?.deadline_s ?? course?.legs?.[d.leg]?.max_duration;
+      if (deadlineS != null && d.deadlineAt !== step.now + deadlineS * 1000) return { reject: `claim ${id}'s advance armed the wrong deadline` };
+      acts.push(deadlineS == null ? `advance(${w}, ${q(d.leg)}, ${qSet(sent)})` : `advanceRun(${w}, ${q(d.leg)}, ${qSet(sent)}, 2)`);
     } else if (c.status === 'active' && d.status !== 'active' && /\/end$/.test(origin)) {
       const reached = d.finished.length > c.finished.length;
       acts.push(`heartbeat(${w})`);
@@ -327,7 +335,12 @@ function translateStep(step, P, env, k) {
       acts.push(`endClaim(${w}, ${q(kindOf(d.endReason))}, ${reached})`);
     } else if (c.status === 'active' && d.status === 'reaped') {
       if (origin === 'alarm' && d.endReason === 'reaped:release-unacknowledged') return { end: `claim ${id} reaped on an unacknowledged release (§9; messages are not modelled)` };
-      if (origin === 'alarm') {
+      if (origin === 'alarm' && d.endReason === 'reaped:leg-timeout') {
+        const deliveredAt = c.timeoutRelease?.deliveredAt;
+        if (deliveredAt == null || step.now < deliveredAt + 900_000 || silent(d.runner)) return { reject: `claim ${id} reaped before the leg-timeout grace elapsed or after lease loss` };
+        if (!d.fencePending || d.fenceDeadline !== step.now + Q.liveness?.[d.runner]?.lease) return { reject: `claim ${id} reaped for leg-timeout without its fixed fence (R-BTN-90)` };
+        acts.push(`heartbeat(${w})`, 'tick', 'tick', `timeoutReap(${m})`);
+      } else if (origin === 'alarm') {
         // the lease ran out by Baton's clock (round 1, 1-A-0)
         if (!silent(d.runner)) return { reject: `claim ${id} reaped by the alarm before runner ${d.runner}'s lease ran out` };
         tick();
@@ -345,10 +358,30 @@ function translateStep(step, P, env, k) {
     } else if (c.status !== d.status && !(c.status === 'active' && origin === '/v1/sync/board')) {
       return { reject: `claim ${id} went ${c.status} → ${d.status} by ${origin}, which no model action does` };
     }
+    if (c.status === 'active' && d.status === 'active' && d.leg === c.leg && d.finished.length === c.finished.length) {
+      if (!c.timeoutRelease && d.timeoutRelease) {
+        if (origin !== 'alarm' || c.deadlineAt == null || step.now < c.deadlineAt) return { reject: `claim ${id} queued a leg-timeout before its deadline` };
+        acts.push('4.reps(_ => tick)', `queueTimeout(${m})`);
+      } else if ((c.timeoutRelease && !d.timeoutRelease) || d.deadlineAt !== c.deadlineAt) {
+        if (origin !== '/v1/runner/heartbeat') return { reject: `claim ${id}'s deadline changed outside a finishing beat` };
+        const finished = step.body?.legs_finished;
+        const namedRun = Array.isArray(finished) && finished.some((f) => Number.isInteger(f?.claim_id) && f.claim_id === Number(id) && f.seq === c.runningSeq);
+        const loneRun = step.body?.leg_finished === c.runningSeq && Object.values(P.claims)
+          .filter((x) => x.runner === c.runner && x.status === 'active').length === 1;
+        if (c.runningSeq == null || !(namedRun || loneRun)) return { reject: `claim ${id}'s finishing beat did not name its current run` };
+        if (d.deadlineAt !== c.deadlineAt && (c.deadlineAt == null || d.deadlineAt !== step.now + 40 * 60_000)) {
+          return { reject: `claim ${id}'s finishing beat re-armed the wrong deadline` };
+        }
+        acts.push(`legFinished(${w})`);
+      } else if (c.timeoutRelease?.deliveredAt == null && d.timeoutRelease?.deliveredAt != null) {
+        if (origin !== '/v1/runner/heartbeat' || d.timeoutRelease.deliveredAt !== step.now) return { reject: `claim ${id} delivered a leg-timeout outside a heartbeat` };
+        acts.push(`deliverTimeout(${w})`);
+      }
+    }
     if (c.fencePending && !d.fencePending) {
       if (origin === '/v1/runner/heartbeat') acts.push(`fenceCleared(${w})`);
       else if (origin === 'alarm') {
-        if (!silent(d.runner)) return { reject: `claim ${id}'s fence timed out while runner ${d.runner} was heard from` };
+        if (d.fenceDeadline != null ? step.now < d.fenceDeadline : !silent(d.runner)) return { reject: `claim ${id}'s fence timed out before its expiry` };
         tick();
         acts.push(`fenceTimeout(${m})`);
       } else if (/\/fence-clear$/.test(origin)) acts.push(`adminFenceClear(${m})`);

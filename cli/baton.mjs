@@ -116,26 +116,17 @@
 //   baton repo migrate-markers [--root DIR]   — the one-time fold of the retired .baton/markers.jsonl into the tickets (B-100)
 //                   [--eject tickets|stations] [--pin owner/name@commit] [--force]
 //                — a repository's own sync and scaffold (§2f R-BTN-74, R-BTN-131)
-//   baton tickets new --title T [--description D] [--project ID] [--depends-on A,B] [--tags X,Y]
-//                [--order N] [--repos a,b] [--course C] [--body-file F] [--trust T] [--invariants I]
-//                — file one ticket, the next free id under .baton/baton.json's ticket_prefix,
-//                with the conventional body, as one commit pushed to the default branch (B-112)
-//   baton tickets claim <id> [-i KEY] [--url URL] [--offline] [--rules-reread <ids>]
-//   baton tickets set <id> <status> [--pr URL] [--note TEXT] [-i KEY] [--url URL] [--offline] [--rules-reread <ids>] | done <id> [--pr URL]
-//                — claim asks Baton first (B-129): before it writes, it reads the ticket from
-//                Baton with the key -i names (else BATON_KEY_FILE) — the board for the station,
-//                the ready leg and the live claims, the history for the path and the PRs of the
-//                ended claims, the branch-holder query for the branch — and continues the ticket
-//                where Baton holds it: past its course's start, a false `available` is a takeover
-//                (the PRs are written back, the position printed), never a fresh start, while the
-//                git lock and a parked or closed status still refuse; another claim refuses,
-//                naming its holder and its lease; an unanswered read or an unreadable key refuses
-//                rather than trust the frontmatter, unless --offline. set/done write any live
-//                status, each one commit pushed to the default branch (B-112); a release
-//                (set <id> available) keeps every prs: entry and its commit is the hand-off — the
-//                PRs, Baton's station and next leg, the branch and --note's what is left (B-129);
-//                claim refuses a ticket citing a rule the spec's history amended since the ticket
-//                was filed or last re-read it, until --rules-reread names those ids (R-BTN-74)
+//   baton tickets new | claim | set | done
+//                — retired (B-326): ticket files are Dibber's to write; each names its dibber command
+//   baton tickets check <id> --claimable [-i KEY] [--url URL] [--offline]
+//                — what a claim must know first, writing nothing (B-129, B-326): Baton's board,
+//                history and branch-holder query, read with the key -i names (else
+//                BATON_KEY_FILE); past its course's start a false `available` is a takeover (the
+//                station, ready leg, PRs and branches printed), while the git lock and a parked or
+//                closed status are not claimable; another live claim, an undone dependency or a
+//                rule amended since the ticket answered for it (until a rules re-read note) is
+//                not claimable either. Exit 0 and `dibber claim <id>`, 1 and why not; an
+//                unanswered read exits 2 unless --offline
 //   baton tickets check [--repo DIR] [--quiet]
 //                — check this repository's ticket source without posting it: ids, the board
 //                post's validation, depends_on targets and cycles, (with check.depends_line in

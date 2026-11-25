@@ -114,6 +114,30 @@ export class Conditions {
     }
   }
 
+  /** R-BTN-82 (S-BTN-48): reconcile core notify conditions with the queued legs' waits. */
+  contractWaits(repo: string, at: number, ticket?: string): void {
+    const scope = ticket == null ? 't.repository_id = ?' : 't.id = ?';
+    const key = (r: { ticket_id: string; leg: string; type: string }) => JSON.stringify([r.ticket_id, r.leg, r.type]);
+    const waits = this.rows<{ ticket_id: string; leg: string; type: string }>(
+      `SELECT n.ticket_id, n.leg, 'baton.' || n.waiting_on AS type FROM ticket_next_legs n
+       JOIN tickets t ON t.id = n.ticket_id WHERE ${scope} AND n.state = 'waiting'
+       AND n.waiting_on IN ('input-missing', 'input-version')`, ticket ?? repo);
+    const pending = new Map(waits.map((r) => [key(r), r]));
+    for (const row of this.rows<{ id: number; ticket_id: string; leg: string; type: string }>(
+      `SELECT id, ticket_id, leg, type FROM conditions
+       WHERE repository_id = ? AND type IN ('baton.input-missing', 'baton.input-version') AND outcome = 'open'
+       ${ticket == null ? '' : 'AND ticket_id = ?'}`, repo, ...(ticket == null ? [] : [ticket]))) {
+      if (!pending.delete(key(row))) this.exec(`UPDATE conditions SET outcome = 'closed', closed_at = ?, closed_how = 'cause-ended' WHERE id = ?`, at, row.id);
+    }
+    for (const row of pending.values()) {
+      this.exec(`INSERT INTO conditions (repository_id, ticket_id, leg, type, disposition, raised_at) VALUES (?, ?, ?, ?, 'notify', ?)`,
+        repo, row.ticket_id, row.leg, row.type, at);
+      const detail = { type: row.type, disposition: 'notify' };
+      logEvent(this.c.store, at, 'condition', 'baton', { ...detail, leg: row.leg }, row.ticket_id, null, repo);
+      this.c.history.record(row.ticket_id, { kind: 'condition', leg: row.leg, detail });
+    }
+  }
+
   /** R-BTN-163 (S-BTN-312): close only this ticket's missing-next notice when its cause ends. */
   closeMissingNext(ticket: string, at: number): void {
     this.exec(`UPDATE conditions SET outcome = 'closed', closed_at = ?, closed_how = 'cause-ended'

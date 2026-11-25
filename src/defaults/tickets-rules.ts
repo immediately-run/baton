@@ -1,6 +1,6 @@
 // tickets-rules.ts — the two process guards on a ticket's text (BATON_SPEC §2f R-BTN-74): the
-// rules it cites that the spec's history says were amended after the ticket answered for them, read at
-// `baton tickets claim` and reported by `baton tickets check`; and the `### Trust` and
+// rules it cites that the spec's history says were amended after the ticket answered for them, read by
+// `baton tickets check <id> --claimable` and reported by `baton tickets check`; and the `### Trust` and
 // `### Invariants` sections a ticket filed after `.baton/baton.json`'s `check.sections_since`
 // must carry. Both answer what PRs #160 and #161 taught (spec/BATON_SPEC_HISTORY.md, 2026-11-03):
 // tickets filed before a ruling were built as written after it, and tickets prescribed inputs with
@@ -108,12 +108,18 @@ export interface StaleRule {
   title: string;
 }
 
-/** The days a ticket re-read each rule id, from its `rules re-read` notes — the one a claim writes,
- *  `_(YYYY-MM-DD: rules re-read at claim: R-BTN-x (amended …), …)_`, and the one a spec PR adds for
- *  the ids it handled, `_(YYYY-MM-DD: rules re-read: R-BTN-x, …)_` — the latest per id. */
+/** The days a ticket re-read each rule id, from its `rules re-read` notes — the one the retired
+ *  claim wrote, `_(YYYY-MM-DD: rules re-read at claim: R-BTN-x (amended …), …)_`, the one a spec PR
+ *  adds for the ids it handled, `_(YYYY-MM-DD: rules re-read: R-BTN-x, …)_`, and Dibber's Status
+ *  line, `dibber set <id> --note "rules re-read: R-BTN-x, …"`'s `_YYYY-MM-DD: rules re-read: …._`
+ *  (B-326) — the latest per id. */
 export function rereads(text: string, prefix = RULES_DEFAULTS.prefix): Map<string, string> {
   const out = new Map<string, string>();
-  for (const m of text.matchAll(/_\((\d{4}-\d{2}-\d{2}): rules re-read\b[^:\n]*:([^\n]*)\)_/g)) {
+  const notes = [
+    ...text.matchAll(/_\((\d{4}-\d{2}-\d{2}): rules re-read\b[^:\n]*:([^\n]*)\)_/g),
+    ...text.matchAll(/^_(\d{4}-\d{2}-\d{2}): rules re-read\b[^:\n]*:([^\n]*)\._$/gm),
+  ];
+  for (const m of notes) {
     for (const id of ruleIds(m[2], prefix)) if (!out.has(id) || out.get(id)! < m[1]) out.set(id, m[1]);
   }
   return out;

@@ -197,7 +197,7 @@ export async function checkTickets(root: string, settings: MarkdownSettings = {}
     said.add(key);
   };
   // A qualified id (B-113) names another repository's ticket: not this repository's to check —
-  // `baton tickets claim` resolves it through the repos map, the sync's dependencies read
+  // `baton tickets check <id> --claimable` resolves it through the repos map, the sync's dependencies read
   // against its board, and the post's judgment refuses what neither resolves. This
   // repository's own id spelled qualified is the local id's own (§3.1), checked as one.
   for (const t of live) {

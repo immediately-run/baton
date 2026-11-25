@@ -43,7 +43,7 @@ resumed by a **restart** (§7). "Workflow" means only a CI workflow; "activity" 
     to Baton, not in it, and goes to the owner.
   - **Legacy, removed with its code.** What remains of coordinating through git is marked legacy
     where it is specified, is never extended, and leaves with the work that retires each (B-176,
-    B-178): the git-lock ticket commands (R-BTN-74); the next-free scans of git; the cutover and
+    B-178): the next-free scans of git; the cutover and
     the mirror, which serve a repository that coordinated its claims through git before Baton
     (§16); and every passage elsewhere that serves only one of these. A collision one still produces is caught by the sync's duplicate-id
     refusal (R-BTN-74, R-BTN-147) or at merge.

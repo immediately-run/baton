@@ -1,13 +1,13 @@
 // R3-1212 — claims (BATON_SPEC §6.1–6.7, §7.2, §11): G-BTN-1, -2, -3, -6, -14 and -40, plus the
 // claim and end contracts, the holder query, matching's runner rules, and the held history.
 import { describe, it, expect, inject, beforeEach } from 'vitest';
-import { confirmations } from '../../src/vendor/batonSync.mjs';
+import { confirmations } from '../../src/shared/batonSync.mjs';
 import { gatesFor } from '../../src/core/gates';
 import {
   beat, claimItem, claimRow, course, cutover, q, endClaim, hbBody, keyCall, ORIGIN, ownerCall, payload, recommended, refresh, register, requestId, rows, setAdminKeys, setClock, sha256, syncCall, syncToken, withCore, runnerCall, tick,
 } from '../helpers';
 import { makeKey, signedRequest } from '../lib/sshKeys';
-import { capabilitiesOf } from '../../src/vendor/vocabulary.mjs';
+import { capabilitiesOf } from '../../src/shared/vocabulary.mjs';
 import { call as hostCall } from '#host';
 import roadmapPr from '../fixtures/courses/roadmap-pr/course.json';
 

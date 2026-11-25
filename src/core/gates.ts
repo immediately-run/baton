@@ -3,7 +3,7 @@
 // its mirror, and G-BTN-40 checks the two against each other. Everything else Baton says about
 // scheduling — the order, the expedite lane's bound, a course's advice — is advice and never
 // refuses (`advice-overridden`). No rule reads what a leg, a station or a tag means.
-import { capabilitiesOf } from '../vendor/vocabulary.mjs';
+import { capabilitiesOf } from '../shared/vocabulary.mjs';
 
 /** Who asks: the runner as its heartbeat declared it (§5, R-BTN-60). */
 export interface GateRunner {

@@ -8,6 +8,9 @@
 // key's signature, its no-CI path.
 // Course code in the CLI, never core (§2b). Reached through the esbuild bundle
 // (scripts/baton-cli.mjs), the way `baton run` reaches src/runner.
+import { outputAttestation, syncAttestationBatch, TICKET_OUTPUT_WITNESS } from './output-evidence';
+import { hostOf } from './forge';
+import type { PostedAttestation } from '../core/board';
 import { execFileSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
@@ -16,7 +19,7 @@ import { dirname, join, relative } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { BatonApi, BatonRefusal, envAuth, type Auth, type Transport } from '../runner/api';
 import { HARNESS_AGENTS, type Harness } from '../runner/harness';
-import { syncOnce } from '../vendor/batonSync.mjs';
+import { syncOnce } from '../shared/batonSync.mjs';
 import { DEFAULT_URL } from '../../cli/baton.mjs';
 import { API_KEY, signingKey } from '../../cli/sign.mjs';
 import { DEFAULT_BRANCH_PATTERN, matchPatterns, sameRepo as sameRepoName, ticketOwns, type BatonRecord, type CodeRepoEntry, type PrFact, type StationsResult } from './course-pr';
@@ -40,6 +43,7 @@ import { readTicketSettings } from './tickets-config';
 import { ownRepositoryId, remoteSlug } from './remote-slug';
 import { attestEvidence, type EvidenceAttestation, type UnconfirmedEnd } from './evidence';
 import { PAGE_NAME, ticketsPage } from './tickets-page';
+import { dibberConfig } from './dibber';
 
 // LC_ALL=C on every git call (B-93, round 4): git translates its messages, and the two shapes
 // remoteSlug quiets are matched by their words — under a German catalog 'not a git repository'
@@ -151,12 +155,14 @@ interface BatonJson {
   /** A command whose words precede `agent_command`'s in every leg's spawn (B-95);
    * `BATON_AGENT_WRAPPER` in the host's environment wins over it. */
   agent_wrapper?: string;
+  /** The `dibber` release a leg runs (B-326, dibber.ts): a version, never a command. */
+  dibber?: string;
   /** The ticket check's settings (B-111); every one is off. Read by `baton tickets check` alone,
    * never by a sync. */
   check?: { depends_line?: boolean };
-  /** The ticket commands' settings (B-112, tickets-config.ts): the prefix `baton tickets new`
-   * allocates under, the ids it still accepts, the `project:` a filing takes when `--project`
-   * names none, and the tags it writes when `--tags` names none. Read by the commands alone. */
+  /** The ticket settings (B-112, tickets-config.ts): the prefix Baton's `ticket-<prefix>`
+   * sequence allocates under (and `.dibber/config.json`'s `prefix`), the ids it still accepts,
+   * and the "How tickets work" page's defaults. */
   ticket_prefix?: string;
   legacy_ids?: string[];
   prefixes?: Record<string, string>;
@@ -264,6 +270,7 @@ interface Board {
   payload: { registry: Record<string, unknown>[]; tickets: TicketsResult['tickets']; closed: TicketsResult['closed']; stations: StationsResult['stations']; markers: StationsResult['markers']; course_data: Record<string, unknown>;
     /** B-183 (§4.4): the ticket source's declaration. */
     source: { kind: 'markdown' | 'custom'; versions?: 'pinned' | 'current'; cli: string }; }
+  outputEvidence: PostedAttestation[];
   /** A ticket's status at this reading for §6.7's confirmations: its file's, `live`, or null once closed. */
   statusOf: (id: string) => string | null;
 }
@@ -375,7 +382,34 @@ async function readBoard(root: string, batonJson: BatonJson, args: SyncArgs, log
       }
     }
   }
-  const facts: PrFact[] = args.factsFile ? (JSON.parse(readFileSync(args.factsFile, 'utf8')) as PrFact[]) : readsPrs ? await githubFacts(root, log, owns, [...siblings.values()], { codeRepos: record?.code_repos, pushers: record?.pushers }) : [];
+  const outputEvidence: PostedAttestation[] = [];
+  const ticketOutputEvidence: PostedAttestation[] = [];
+  // B-100: the ticket is the record. One traversal of the repository's history groups every
+  // `baton:close <id> <leg>` commit by ticket; each live ticket's closes — oldest first — are
+  // attached to its opaque `course` blob, which the station functions read, with its
+  // frontmatter's machine state beside them (a migration's record, or a hand-edited file: git's
+  // history is the authority, never the working tree). No second input, no shared file: a
+  // checkout git cannot answer for has no close history, and its frontmatter state stands.
+  const origin = repository != null ? git(root, 'remote', 'get-url', 'origin') : null;
+  const plain = origin != null && plainGitRemote(origin);
+  const githubHome = origin != null && hostOf(origin) === 'github.com';
+  const closeCommits = closesByTicket((args) => git(root, ...args));
+  for (const t of result.tickets) {
+    if (closedIds.has(t.id) || t.path == null) continue; // a pathless ticket (a tracker's) has no file to close on
+    const commits = closeCommits.get(t.id) ?? [];
+    const fm = existsSync(join(root, t.path)) ? parseFrontmatter(readFileSync(join(root, t.path), 'utf8')) : null;
+    if (!commits.length && fm?.station === undefined) continue;
+    if (plain || githubHome) for (const { sha, leg } of commits) {
+      const a = outputAttestation(git(root, 'show', '-s', '--format=%b', sha), sha);
+      if (a?.ticket === t.id && (a.value as { leg: string }).leg === leg) (plain ? outputEvidence : ticketOutputEvidence).push(a);
+    }
+    const closes = closesOfCommits((args) => git(root, ...args), t.path, t.id, commits);
+    t.course = { ...(t.course ?? {}), closes, ...machineOf(fm) };
+  }
+
+  const facts: PrFact[] = args.factsFile ? (JSON.parse(readFileSync(args.factsFile, 'utf8')) as PrFact[]) : readsPrs || ticketOutputEvidence.length ? await githubFacts(root, log, owns, [...siblings.values()], { codeRepos: record?.code_repos, pushers: record?.pushers, outputEvidence, ticketOutputEvidence, readPrs: readsPrs,
+    ownsOutput: (ticket, pr, fork) => owners.some((o) => o.tickets.some((t) => t.id === ticket && ticketOwns(t, pr, fork ? [] : o.patterns, repository))),
+  }) : [];
   // B-110: the plain-git half of the fact reading. A fact whose adapter read no commits (a facts
   // file, a forge with no adapter) gets its open branch's commits from the checkout's own git —
   // no forge, no `gh` — so the run-tests gate's markers are read the same way (`commitsOf`). Only
@@ -390,22 +424,6 @@ async function readBoard(root: string, batonJson: BatonJson, args: SyncArgs, log
     } catch (e) {
       log(`baton: ${f.head}'s commits could not be read from git (${e instanceof Error ? e.message.split('\n')[0] : String(e)}) — its gate reads as open`);
     }
-  }
-
-  // B-100: the ticket is the record. One traversal of the repository's history groups every
-  // `baton:close <id> <leg>` commit by ticket; each live ticket's closes — oldest first — are
-  // attached to its opaque `course` blob, which the station functions read, with its
-  // frontmatter's machine state beside them (a migration's record, or a hand-edited file: git's
-  // history is the authority, never the working tree). No second input, no shared file: a
-  // checkout git cannot answer for has no close history, and its frontmatter state stands.
-  const closeCommits = closesByTicket((args) => git(root, ...args));
-  for (const t of result.tickets) {
-    if (closedIds.has(t.id) || t.path == null) continue; // a pathless ticket (a tracker's) has no file to close on
-    const commits = closeCommits.get(t.id) ?? [];
-    const fm = existsSync(join(root, t.path)) ? parseFrontmatter(readFileSync(join(root, t.path), 'utf8')) : null;
-    if (!commits.length && fm?.station === undefined) continue;
-    const closes = closesOfCommits((args) => git(root, ...args), t.path, t.id, commits);
-    t.course = { ...(t.course ?? {}), closes, ...machineOf(fm) };
   }
 
   // Each course's stations, markers and course data: its own sync.mjs, else its standard
@@ -488,8 +506,11 @@ async function readBoard(root: string, batonJson: BatonJson, args: SyncArgs, log
     // that posts — beside its tickets, each stamped with its `version` and `key` above.
     payload: {
       source: { kind: sourceKind, ...(sourceVersions ? { versions: sourceVersions } : {}), cli: cliVersion() },
+      // R-BTN-139: station functions report observations, not forge authorship. None of
+      // their raw markers may be promoted to a std:git.output attestation here.
       registry, tickets: result.tickets, closed: result.closed, stations, markers, course_data: courseData, ...controlField,
     },
+    outputEvidence,
     statusOf: (id) => (closedIds.has(id) ? null : status.get(id) ?? null),
   };
 }
@@ -637,7 +658,7 @@ export async function migrateMarkersMain(argv: string[], io: { root?: string; lo
   return 0;
 }
 
-/** One sync (§7.1), its decisions the vendored `syncOnce` (R-BTN-37: the code S-BTN-12 and
+/** One sync (§7.1), its decisions the shared `syncOnce` (R-BTN-37: the code S-BTN-12 and
  * S-BTN-13 drive): the observation number first, then — with `--latest` — the current default
  * branch fetched and checked out, then the board read from the checkout, the head read and the
  * ancestry decided; a lost race takes a new number and reads again, once. */
@@ -699,6 +720,7 @@ export async function syncMain(args: SyncArgs): Promise<number> {
   // R-BTN-10 (§4.3): the unconfirmed ends that named evidence, as the observation listed them, and
   // this run's answers for them — read after the number, posted with the board.
   let unconfirmed: UnconfirmedEnd[] = [];
+  let observation = 1;
   let evidence: EvidenceAttestation[] = [];
   // B-89: `busy` is another run's reading, not this run's post, and R-BTN-62 lets no number this
   // run takes be used while that one is out. So the wait comes before the first `observe`, and
@@ -751,7 +773,7 @@ export async function syncMain(args: SyncArgs): Promise<number> {
         };
         return got;
       });
-      if (o.ok !== false && Number.isSafeInteger(o.observation)) held = o.observation;
+      if (o.ok !== false && Number.isSafeInteger(o.observation)) held = observation = o.observation;
       return o;
     },
     // Everything posted under a number is read after it (§7.1 steps 1–2): the commit and the board.
@@ -783,7 +805,11 @@ export async function syncMain(args: SyncArgs): Promise<number> {
         return false; // not an ancestor, or a commit this clone lacks: never "descends"
       }
     },
-    buildPayload: async () => (evidence.length ? { ...board!.payload, attestations: evidence } : board!.payload),
+    buildPayload: async () => {
+      const outputs = board!.outputEvidence.toSorted((a, b) => a.ticket.localeCompare(b.ticket) || a.ref!.localeCompare(b.ref!));
+      const attestations = syncAttestationBatch(evidence, outputs, observation);
+      return attestations.length ? { ...board!.payload, attestations } : board!.payload;
+    },
     statusOf: (id: string) => board!.statusOf(id),
     sleep,
   });
@@ -923,16 +949,18 @@ const GRAPHQL_BATCH = 25;
 /** The detail of one PR that a GraphQL batch asks for (B-35): the head commit's check runs, the
  * commits' dates, the reviews and the issue comments — the four REST lists it replaces, each a
  * first page (10 check suites of 100 runs; 100 commits, reviews, comments) with `hasNextPage`,
- * so an overflowing one is read over REST in full. The
+ * so an overflowing one is read in full. Comments stay on GraphQL for their edit metadata. The
  * check runs come through the head's check suites (the latest run of each check, as REST's
  * check-runs list gives them), never `statusCheckRollup`, which takes in commit statuses too and
  * so may need a permission the sync workflow does not grant: `checks: read` covers this, as it
  * covered the REST read. */
+const COMMENT_FIELDS = 'author { login ... on User { databaseId } ... on Bot { databaseId } ... on Organization { databaseId } ... on Mannequin { databaseId } } authorAssociation body lastEditedAt includesCreatedEdit';
+const PR_COMMENTS = `pageInfo { hasNextPage endCursor } nodes { ${COMMENT_FIELDS} createdAt url }`;
 const PR_DETAIL = `fragment D on PullRequest {
   head: commits(last: 1) { nodes { commit { oid checkSuites(first: 10) { pageInfo { hasNextPage } nodes { checkRuns(first: 100, filterBy: { checkType: LATEST }) { pageInfo { hasNextPage } nodes { status conclusion } } } } } } }
   commits(first: 100) { pageInfo { hasNextPage } nodes { commit { oid committedDate message tree { oid } parents(first: 1) { nodes { oid tree { oid } } } } } }
   reviews(first: 100) { pageInfo { hasNextPage } nodes { author { login } authorAssociation state submittedAt body } }
-  comments(first: 100) { pageInfo { hasNextPage } nodes { author { login } authorAssociation createdAt body } }
+  comments(first: 100) { ${PR_COMMENTS} }
 }`;
 
 /** The GraphQL query reading `numbers`' detail in one repository, each PR under alias `p<n>`. */
@@ -964,7 +992,11 @@ function githubConn(host: string): { host: string; rest: string; graphql: string
     : { host, rest: `https://${host}/api/v3`, graphql: `https://${host}/api/graphql` };
 }
 
-export async function githubFacts(root: string, log: (l: string) => void, owns: (pr: { number: number; head: string; repository: string }) => boolean, siblings: { repository: string; tickets: string[] }[] = [], obs: { codeRepos?: CodeRepoEntry[]; pushers?: { host: string; id: string }[] } = {}): Promise<PrFact[]> {
+export async function githubFacts(root: string, log: (l: string) => void, owns: (pr: { number: number; head: string; repository: string }) => boolean, siblings: { repository: string; tickets: string[] }[] = [], obs: { codeRepos?: CodeRepoEntry[]; pushers?: { host: string; id: string }[]; outputEvidence?: PostedAttestation[];
+  ownsOutput?: (ticket: string, pr: { number: number; head: string; repository: string }, fork: boolean) => boolean;
+  ticketOutputEvidence?: PostedAttestation[];
+  readPrs?: boolean;
+} = {}): Promise<PrFact[]> {
   const slug = remoteSlug(root);
   if (slug == null) throw new Error(`${root} has no origin remote to read PRs from — pass --facts <file> for recorded facts`);
   // B-182 (first slice): a plain-git home has no forge, so no adapter reads it (R-BTN-96) — only
@@ -1134,10 +1166,44 @@ export async function githubFacts(root: string, log: (l: string) => void, owns: 
     }
     return out;
   };
+  const commentNodes = async (page: any, next: (after: string) => Promise<any>): Promise<any[]> => {
+    const out: any[] = [];
+    for (let i = 0; ; i++) {
+      if (!Array.isArray(page?.nodes) || typeof page.pageInfo?.hasNextPage !== 'boolean') throw new Error('GitHub did not return the comment connection');
+      out.push(...page.nodes);
+      if (!page.pageInfo.hasNextPage) return out;
+      const after = page.pageInfo.endCursor;
+      if (i + 1 >= MAX_PAGES || typeof after !== 'string' || !after) throw new Error('GitHub cannot page all comments — refusing a truncated reading');
+      page = await next(after);
+    }
+  };
+  const unedited = (node: any): boolean => node.lastEditedAt === null && node.includesCreatedEdit === false;
+  if (home != null && obs.ticketOutputEvidence?.length) {
+    const conn = { ...githubConn('github.com'), token };
+    const [owner, name] = home.split('/');
+    const fields = (after = '') => `oid comments(first: 100${after}) { pageInfo { hasNextPage endCursor } nodes { ${COMMENT_FIELDS} } }`;
+    const query = `query($owner: String!, $name: String!, $sha: GitObjectID!, $after: String!) { repository(owner: $owner, name: $name) { object(oid: $sha) { ... on Commit { ${fields(', after: $after')} } } } }`;
+    for (let i = 0; i < obs.ticketOutputEvidence.length; i += GRAPHQL_BATCH) {
+      const batch = obs.ticketOutputEvidence.slice(i, i + GRAPHQL_BATCH);
+      const objects = batch.map((a, j) => `c${j}: object(oid: ${JSON.stringify(a.ref)}) { ... on Commit { ${fields()} } }`).join(' ');
+      const first = (await graphql(conn, `query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { ${objects} } }`, { owner, name })).data?.repository;
+      for (const [j, a] of batch.entries()) {
+        const commit = first?.[`c${j}`];
+        if (!commit || commit.oid !== a.ref) continue;
+        const comments = await commentNodes(commit.comments, async (after) => {
+          const next = (await graphql(conn, query, { owner, name, sha: a.ref, after })).data?.repository?.object;
+          return next?.oid === a.ref ? next.comments : null;
+        });
+        const witnesses = comments.filter((c) => c?.body === TICKET_OUTPUT_WITNESS && unedited(c))
+          .map((c) => ({ login: c.author?.login, userId: c.author?.databaseId, association: c.authorAssociation }));
+        if ((await trustedOnly(conn, home, witnesses)).length) obs.outputEvidence?.push(a);
+      }
+    }
+  }
   const out: PrFact[] = [];
   // The home, then each other repository a live ticket names in `repos:` (B-29), each through
   // its own connection: a refusal under any budget never posts a partial reading.
-  for (const { repository: repo, tickets, entry } of reads) {
+  for (const { repository: repo, tickets, entry } of obs.readPrs === false ? [] : reads) {
     if (entry != null && entry.forge !== 'github') {
       throw new Error(`${entry.path}: no adapter for ${entry.forge} yet — the ${entry.forge} fact adapter is not built, and the sync will not post a partial reading (R-BTN-96)`);
     }
@@ -1186,7 +1252,7 @@ export async function githubFacts(root: string, log: (l: string) => void, owns: 
   }
 
   /** One PR's facts from its GraphQL node, mapped exactly as the REST lists are; a connection
-   *  whose first page overflows, or a head the batch read at another commit, is read over REST. */
+   *  whose first page overflows is paged, and a head the batch read at another commit uses REST. */
   async function detailOf(conn: { host: string; rest: string; graphql: string; token: string }, repo: string, pr: any, node: any): Promise<Omit<PrFact, 'number' | 'head' | 'state' | 'repository'>> {
     if (node == null) throw new Error(`GitHub GraphQL (${repo}): no pull request #${pr.number}, though the list has it`);
     const head = node.head?.nodes?.[0]?.commit;
@@ -1225,10 +1291,17 @@ export async function githubFacts(root: string, log: (l: string) => void, owns: 
       ? (await all<any>(conn, `/repos/${repo}/pulls/${pr.number}/reviews`)).map((r) => ({ login: r.user?.login, userId: r.user?.id, association: r.author_association, state: r.state, at: r.submitted_at, body: r.body }))
       : node.reviews.nodes.map((r: any) => ({ login: r.author?.login, association: r.authorAssociation, state: r.state, at: r.submittedAt, body: r.body }))))
       .map((r: any) => ({ author: r.login ?? '?', state: r.state, submittedAt: Date.parse(r.at), body: r.body ?? '' }));
-    const comments = (await trustedOnly(conn, repo, node.comments.pageInfo.hasNextPage
-      ? (await all<any>(conn, `/repos/${repo}/issues/${pr.number}/comments`)).map((c) => ({ login: c.user?.login, userId: c.user?.id, association: c.author_association, at: c.created_at, body: c.body }))
-      : node.comments.nodes.map((c: any) => ({ login: c.author?.login, association: c.authorAssociation, at: c.createdAt, body: c.body }))))
-      .map((c: any) => ({ author: c.login ?? '?', state: 'COMMENTED' as const, submittedAt: Date.parse(c.at), body: c.body ?? '' }));
+    const [owner, name] = repo.split('/');
+    const query = `query($owner: String!, $name: String!, $number: Int!, $after: String!) { repository(owner: $owner, name: $name) { pullRequest(number: $number) { comments(first: 100, after: $after) { ${PR_COMMENTS} } } } }`;
+    const nodes = await commentNodes(node.comments, async (after) => (await graphql(conn, query, { owner, name, number: pr.number, after })).data?.repository?.pullRequest?.comments);
+    const verifiedComments = await trustedOnly(conn, repo, nodes.filter(Boolean).map((c) => ({ login: c.author?.login, userId: c.author?.databaseId, association: c.authorAssociation, at: c.createdAt, body: c.body, url: c.url, unedited: unedited(c) })));
+    for (const c of verifiedComments) {
+      if (!c.unedited || typeof c.url !== 'string' || typeof c.body !== 'string') continue;
+      const a = outputAttestation(c.body, c.url);
+      const fork = pr.head.repo?.id == null || pr.head.repo.id !== pr.base.repo?.id;
+      if (a && obs.ownsOutput?.(a.ticket, { number: pr.number, head: pr.head.ref, repository: repo }, fork)) obs.outputEvidence?.push(a);
+    }
+    const comments = verifiedComments.map((c: any) => ({ author: c.login ?? '?', state: 'COMMENTED' as const, submittedAt: Date.parse(c.at), body: c.body ?? '' }));
     return { pushedAt: Math.max(0, ...pushes), pushes, checks, reviews: [...reviews, ...comments], commits };
   }
 
@@ -1374,6 +1447,7 @@ import { homedir, tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { splitWords } from ${JSON.stringify(source('agent-words.ts'))};
+import { dibberWords } from ${JSON.stringify(source('dibber.ts'))};
 // B-94: every git and gh call this stub makes — the snapshot probes, the override and
 // instructions reads, the forge verification — is bounded and non-interactive, the same bound
 // and environment the close uses, so a wedged call fails the leg within the bound instead of
@@ -1481,7 +1555,11 @@ async function standard(ctx) {
   // resolves no route; a repository that picks its model at run time writes a leg override
   // (R-BTN-131) that reads its own configuration or the instance views (R-BTN-99).
   const agentWords = splitWords(settingsCommand);
-  const agentCommand = agentWords.join(' ');${verify ? `
+  const agentCommand = agentWords.join(' ');
+  // B-326: the \`dibber\` a leg that files or marks a ticket runs — the host's BATON_DIBBER, else
+  // the version the snapshot's settings pin, else this release's; never a command a ticket or a
+  // branch names. Handed to the agent as BATON_DIBBER.
+  const dibberCommand = process.env.BATON_DIBBER?.trim() || dibberWords(settings).join(' ');${verify ? `
   // What this leg's verification looks for (B-81): the course's branch patterns, as the
   // snapshot's settings carry them, and the repositories the ticket's repos: names — the
   // ticket file is the checkout's own copy, the one the agent may have just added its PR to.
@@ -1589,7 +1667,7 @@ ${asksOwner ? `  // S-BTN-222 (B-325): an open harness question can be silent an
     const child = spawn(argv[0], argv.slice(1), {
       cwd: ctx.checkout, stdio: ['ignore', 'pipe', 'pipe'],
       env: {
-        ...process.env, BATON_COURSE: ${JSON.stringify(b.id)}, BATON_LEG: ${JSON.stringify(leg)}, BATON_INSTRUCTIONS: instructions, BATON_TICKET_FILE: ctx.ticket.file ?? ctx.ticket.path ?? '',${ask ? `
+        ...process.env, BATON_COURSE: ${JSON.stringify(b.id)}, BATON_LEG: ${JSON.stringify(leg)}, BATON_INSTRUCTIONS: instructions, BATON_TICKET_FILE: ctx.ticket.file ?? ctx.ticket.path ?? '', BATON_DIBBER: dibberCommand,${ask ? `
         BATON_ANSWER: ${JSON.stringify(`print ${values} as your last line${names ? ', then the URL of the PR to write it on when it is not the checkout branch\'s' : ''}`)},${ask.name === 'verdict' ? ` BATON_VERDICT: ${JSON.stringify(`print ${values} as your last line${names ? ', then the URL of the PR to write it on when it is not the checkout branch\'s' : ''}`)},` : ''}` : ''}
       },
     });
@@ -2240,6 +2318,26 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
     await put(relative(root, pagePath), (abs) => writeFileSync(abs, page), true);
     log(`baton: ${relative(root, pagePath)} — how tickets work in this repository, generated`);
   }
+  // B-326: Dibber writes the ticket files, with Baton as its coordinator — `.dibber/config.json`
+  // beside `.baton/baton.json`, what is missing added, no value it holds overwritten.
+  const dibberPath = join(root, '.dibber', 'config.json');
+  let dibberExisting: Record<string, unknown> | null = null;
+  if (existsSync(dibberPath)) {
+    try {
+      const parsed: unknown = JSON.parse(readFileSync(dibberPath, 'utf8'));
+      if (parsed == null || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('not a JSON object');
+      dibberExisting = parsed as Record<string, unknown>;
+    } catch (e) {
+      throw new Error(`.dibber/config.json is not a settings object (${(e as Error).message}) — fix or remove it, then run baton repo init again`);
+    }
+  }
+  const dibber = dibberConfig(dibberExisting, readTicketSettings(root, root), cliVersion());
+  if (dibber.changed.length) {
+    mkdirSync(dirname(dibberPath), { recursive: true });
+    writeFileSync(dibberPath, `${JSON.stringify(dibber.config, null, 2)}\n`);
+    log(`baton: .dibber/config.json — ${dibberExisting ? `added ${dibber.changed.join(', ')}` : 'written'}: Dibber writes the ticket files, Baton gives their numbers (coordinator)`);
+  }
+  for (const d of dibber.disagrees) log(`baton: .dibber/config.json kept — its ${d}`);
   // B-95: the worked example of a leg wrapper, there to be copied and named; a repository already
   // has one once it is.
   await put(`.baton/${WRAPPER_EXAMPLE}`, (abs) => writeFileSync(abs, wrapperExample()));

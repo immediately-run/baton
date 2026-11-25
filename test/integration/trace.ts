@@ -43,6 +43,10 @@ export interface ClaimView {
   endedRegressed: boolean;
   confirmed: boolean;
   fencePending: boolean;
+  runningSeq?: number;
+  deadlineAt?: number;
+  fenceDeadline?: number;
+  timeoutRelease?: { deliveredAt: number | null };
 }
 export interface Projection {
   counter: number;
@@ -86,19 +90,31 @@ export function projectState(store: Store, now: number): Projection {
   const claims: Record<string, ClaimView> = {};
   for (const c of rows<{ id: number; ticket_id: string; runner_id: number; status: string; end_reason: string | null; station: string | null; leg: string | null;
     start_path: string; claim_observation: number; end_observation: number | null; regressed_since: number | null; ended_regressed: number;
-    confirmed_at: number | null; fence_pending: number; course_id: string | null }>(
+    confirmed_at: number | null; fence_pending: number; deadline_at: number | null; fence_deadline: number | null; course_id: string | null }>(
     `SELECT id, ticket_id, runner_id, status, end_reason, station, leg, start_path, claim_observation, end_observation, regressed_since, ended_regressed,
-            confirmed_at, fence_pending, course_id FROM claims ORDER BY id`)) {
+            confirmed_at, fence_pending, deadline_at, fence_deadline, course_id FROM claims ORDER BY id`)) {
     if (!inScope(c.ticket_id) || (c.course_id ?? MODEL_COURSE) !== MODEL_COURSE) continue;
-    const legs = rows<{ leg: string; to_station: string | null; bars: string; finished_at: number | null; abandoned_at: number | null }>(
-      'SELECT leg, to_station, bars, finished_at, abandoned_at FROM claim_legs WHERE claim_id = ? ORDER BY seq', c.id);
-    const running = legs.find((l) => l.to_station == null && l.abandoned_at == null && l.finished_at == null);
+    const legs = rows<{ seq: number; leg: string; to_station: string | null; bars: string; finished_at: number | null; abandoned_at: number | null }>(
+      'SELECT seq, leg, to_station, bars, finished_at, abandoned_at FROM claim_legs WHERE claim_id = ? ORDER BY seq', c.id);
+    const running = legs.findLast((l) => l.to_station == null && l.abandoned_at == null && l.finished_at == null);
     claims[String(c.id)] = {
       ticket: c.ticket_id, runner: c.runner_id, status: c.status, endReason: c.end_reason, station: c.station ?? '', leg: c.leg ?? '',
       finished: legs.filter((l) => l.to_station != null).map((l) => l.leg), legBars: running ? (JSON.parse(running.bars) as string[]) : [],
       startPath: legsOf(c.start_path), claimObs: c.claim_observation, endObs: c.end_observation ?? -1,
       regressed: c.regressed_since != null, endedRegressed: c.ended_regressed === 1, confirmed: c.confirmed_at != null, fencePending: c.fence_pending === 1,
+      ...(running == null ? {} : { runningSeq: running.seq }),
+      ...(c.deadline_at == null ? {} : { deadlineAt: c.deadline_at }),
+      ...(c.fence_deadline == null ? {} : { fenceDeadline: c.fence_deadline }),
     };
+  }
+  const active = Object.values(claims).filter((c) => c.status === 'active' && c.leg);
+  if (active.length) {
+    for (const m of rows<{ runner: number; ticket: string; delivered_at: number | null }>(
+      `SELECT to_runner_id AS runner, json_extract(payload_json, '$.ticket_id') AS ticket, delivered_at FROM messages
+       WHERE kind = 'release' AND status IN ('pending', 'delivered') AND json_extract(payload_json, '$.reason') = 'leg-timeout' ORDER BY id DESC`)) {
+      const c = active.find((a) => a.runner === m.runner && a.ticket === m.ticket);
+      if (c) c.timeoutRelease = { deliveredAt: m.delivered_at };
+    }
   }
   const held: Record<string, boolean> = {};
   for (const o of rows<{ ticket_id: string; hold: number }>('SELECT ticket_id, hold FROM ticket_overrides')) if (inScope(o.ticket_id)) held[o.ticket_id] = o.hold === 1;

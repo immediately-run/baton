@@ -191,6 +191,7 @@ export class BatonCore {
     this.questions = new Questions({ store, now: () => this.now(), graph: (repo, course) => this.stations.graph(repo, course), history: this.history,
       queued: (ticket) => this.queues.touch(ticket), reevaluate: (ticket) => this.blocks.write([ticket]), isHeld: (ticket) => this.blocks.isHeld(ticket),
       closeMissingNext: (ticket, at) => this.conditions.closeMissingNext(ticket, at),
+      contractWaits: (repo, at, ticket) => this.conditions.contractWaits(repo, at, ticket),
       linkBases: (ticket) => this.blocks.linkBases(ticket), answersFrom: (repo) => this.policies.current(repo)?.policy.inputs.answers ?? 'git',
       dispatch: (kind, ticketId) => want({ repository: repositoryOf(ticketId), kind }) });
     // B-234 (R-BTN-160, R-BTN-195): the raised conditions — a course's own vocabulary decides a
@@ -405,7 +406,7 @@ export class BatonCore {
 
   /** §3: the one alarm, every 60 seconds — earlier when a webhook's trailing dispatch or the
    *  webhook path's own backstop is due. */
-  // @model alarmLive sha256:ed13912c9b0f
+  // @model alarmLive sha256:9738e53567a4
   async alarm(): Promise<void> {
     // R-BTN-88 (§4.8, R3-1258): a sealed Baton's alarm idles — it logs nothing and touches
     // nothing; the next period is kept armed (B-229), so the instance that imports this state
@@ -1564,7 +1565,7 @@ export class BatonCore {
    * a rewind to a once-accepted history included — is a fresh hold with a fresh row. The 0001
    * schema's "written once" and "the first force post" describe that one hold.
    */
-  // @model syncPost sha256:a097d293a2c2
+  // @model syncPost sha256:9d500d65a2bf
   async board(repo: Repository, p: BoardPayload) {
     // Course graphs are read per post: a registry applied, or a post refused after applying one,
     // must not leave another request reading a graph that is not in force.
@@ -1770,6 +1771,7 @@ export class BatonCore {
       // import's pending ticket-scoped rows, applied to the tickets this post creates.
       this.settleSpawned(r, p, n, at);
       this.ownerState.applyPending(r, new Set(rows.map(({ row }) => row.id)), at);
+      this.claims.confirmOutputs(r, p.attestations ?? []);
       const seen = this.stations.apply(r, p.sha, n, stations, p.closed ?? [], at, wrote.closingParents);
       // R-BTN-116: the questions the post carries for its queued person legs (§4.4), then the
       // sync's attestations (R-BTN-191) — a person leg's answer, read from the ticket's
@@ -1778,6 +1780,7 @@ export class BatonCore {
       this.questions.posted(r, p.tickets ?? [], new Set(stations.keys()));
       this.questions.attestations(r, p.attestations ?? []);
       this.conditions.missingNext(r, this.stations.missingNext(r), at);
+      this.conditions.contractWaits(r, at);
       // B-129 (R-BTN-85, both values): a post whose ticket frontmatter says `available` while
       // the ticket is past its course's start — the snapshot implying a position Baton has
       // moved past, the false `available`/`prs: []` of the 2026-10-27 release — is a
@@ -2150,6 +2153,7 @@ export class BatonCore {
     // 24 hours (R-BTN-62; round 2, 2-A-0). A plain refresh's own closures are applied as they
     // arrive (B-183): validation already refuses a post closing a ticket it also posts, and its
     // materialization dropped what it no longer names.
+    this.claims.confirmOutputs(r, p.attestations ?? []);
     const seen = this.stations.apply(r, p.sha, n, stations, (p.closed ?? []).filter((c) => held || !live.has(c.id)), at);
     // R-BTN-86: a refresh judges a `spawned` end's children as a new head does — it is a
     // reading too, numbered above the end's.
@@ -2159,6 +2163,7 @@ export class BatonCore {
     this.questions.posted(r, (p.tickets ?? []).filter((t) => live.has(t.id)), new Set(stations.keys()));
     this.questions.attestations(r, p.attestations ?? []);
     this.conditions.missingNext(r, this.stations.missingNext(r), at);
+    this.conditions.contractWaits(r, at);
     // A refresh's stations carry `needs` and `decisions` too (R-BTN-76, R-BTN-78); a refresh that
     // materialized (B-183) recounts for what its rows moved, as a new head does.
     this.applyBlocks(r, stations, wrote?.upserted ?? [], legsBefore, !!wrote && wrote.deleted > 0);
