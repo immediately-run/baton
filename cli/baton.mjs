@@ -1039,7 +1039,7 @@ async function policyMain(argv) {
   // `--home` rides along the same way, and the home in force supplies the repository the
   // missing positional names and the origin a missing --url/BATON_URL calls.
   // Validate adjacency before separating global options from command options.
-  parseArgs(argv, ['dry-run']);
+  parseArgs(argv, ['dry-run', 'yes']);
   const isFlagOrValue = (_, i, a) => a[i] === '-i' || a[i - 1] === '-i' || a[i] === '--url' || a[i - 1] === '--url' || a[i] === '--home' || a[i - 1] === '--home';
   const { flags: globalFlags } = parseArgs(argv.filter(isFlagOrValue));
   const args = argv.filter((x, i, a) => !isFlagOrValue(x, i, a));

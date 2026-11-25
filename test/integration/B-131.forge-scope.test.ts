@@ -65,7 +65,7 @@ it('S-BTN-310: only the holder can prove a run; only the broker can read its liv
       { path: 'immediately-run/docs', id: null }, { path: 'immediately-run/fieldhouse', id: '123' },
     ], valid_until: expect.any(Number) });
     const requested = await sessionCall(await adminSession(admin), '/v1/ui/messages', { method: 'POST',
-      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind: 'release', to_runner_id: runnerId,
+      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind: 'release', confirm: true, to_runner_id: runnerId,
         payload: { ticket_id: 'docs:R3-9001', reason: 'requested' } }) });
     expect(requested.status).toBe(200);
     const { id } = await requested.json() as { id: number };
