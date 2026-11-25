@@ -136,6 +136,24 @@ describe('sign-in (B-206 item 4)', () => {
     expect((await screen.findByRole('alert')).textContent).toContain('No verified Cloudflare Access email is bound');
     expect(screen.getByText('baton admin open')).toBeDefined();
   });
+
+  it.each([
+    ['not-configured', /set ACCESS_TEAM_DOMAIN and ACCESS_AUD as secrets/],
+    ['no-assertion', /No Cloudflare Access token reached Baton: .*cover \/v1\/login on this hostname/],
+    ['unverified', /token did not verify: .*sign in to Access again.*ACCESS_AUD and ACCESS_TEAM_DOMAIN/],
+    ['not-bound', /No verified Cloudflare Access email is bound .*ACCESS_IDENTITIES.*BATON_ADMIN_KEYS/],
+    [undefined, /No verified Cloudflare Access email is bound .*ACCESS_IDENTITIES.*BATON_ADMIN_KEYS/],
+  ] as const)('S-BTN-318: explains %s and offers a one-time link', async (reason, message) => {
+    const { routes } = baton(false);
+    routes['POST /v1/login'] = () => ({ status: 401, body: { code: 'unauthenticated', message: 'operator@example.com', reason } });
+    renderApp('/login');
+    fireEvent.click(await screen.findByRole('button', { name: 'Sign in with Cloudflare Access' }));
+    const text = (await screen.findByRole('alert')).textContent;
+    expect(text).toMatch(message);
+    expect(text).not.toContain('operator@example.com');
+    expect(text).toContain('Use a one-time link instead.');
+    expect(screen.getByText('baton admin open')).toBeDefined();
+  });
 });
 
 describe('the frame (B-206 item 1)', () => {

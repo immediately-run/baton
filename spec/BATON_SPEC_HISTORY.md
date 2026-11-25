@@ -18,6 +18,25 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
 
 ## Changelog
 
+- **2026-11-24 — The advance reply names the run's number (R-BTN-63, S-BTN-204).**
+  Rules changed: R-BTN-63, §14's advance row; S-BTN-204. The owner, 2026-11-24, on the
+  supervisor's report that the runner numbered a claim's runs 1, 3, 5: "Yes, fix now, and also
+  think of ways we can systematically prevent these errors from happening in the first place."
+  The runner handed each leg `ctx.run` from its own count — the earlier attempts' legs plus the
+  claim's own — while each leg the claim finished had already joined the first list, so a
+  claim's second review round reached 3 and the create-pr stub suspended it for `adjudicate`
+  (B-322 and B-324 on 2026-11-24, Baton's history showing run 2). Baton already counted the
+  runs, for `max_runs`, from its own record; the count had two homes. Now the `advance` that
+  starts a run answers `run`, counted as `max_runs` counts it, and the holder hands that to the
+  leg; a run an earlier claim abandoned is not one of them, as it never was for `max_runs`
+  (the history row's `run`, R-BTN-81, still counts every row). B-335.
+
+- **2026-11-24 — Access sign-in refusals name the failed check (R-BTN-155, S-BTN-318).**
+  Previously missing settings, missing or unverifiable assertions, and missing administrator
+  bindings all drew the same message. Missing Worker settings caused the 2026-11-23 sign-in
+  failure (B-319). The front now answers verification refusals itself; both binding failures
+  still share one answer to avoid revealing whether the verified email has a line.
+
 - **2026-11-23 — Tiers retired (§6.6 gate 5, R-BTN-66).**
   Rules changed: R-BTN-5, R-BTN-9, R-BTN-34, R-BTN-35, R-BTN-50, R-BTN-58, R-BTN-66, R-BTN-74,
   R-BTN-114, R-BTN-117, R-BTN-127, R-BTN-159, R-BTN-179, R-BTN-196, the board post (§4.4), §6.6,

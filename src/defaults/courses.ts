@@ -72,6 +72,8 @@ export interface LegStub {
 
 export interface BuiltIn {
   id: string;
+  /** The version a fresh or forced init writes to the course entry; defaults to 1. */
+  version?: number;
   /** One line for `baton repo init --help` and the docs. */
   summary: string;
   /** The course file `init` writes (R-BTN-69). */
@@ -223,6 +225,7 @@ const VERDICT: Ask = { name: 'verdict', values: ['approve', 'changes'] };
 
 const CREATE_PR: BuiltIn = {
   id: 'create-pr',
+  version: 2,
   summary: 'implement a ticket in a PR, gate every review round behind its tests, review it in up to three blind rounds, fix, hand the third round\'s blockers to the owner, merge',
   course: CREATE_PR_COURSE,
   reads: 'prs',
