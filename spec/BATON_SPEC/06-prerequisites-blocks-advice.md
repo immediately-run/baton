@@ -9,9 +9,6 @@ not" from that index, gates claims on the blocks safety needs, and advises on th
 
 Not built, each a design its rule below still states:
 
-- R-BTN-120: a leg's `requires.tickets` and `requires.resources` (the course validator accepts `requires.capabilities`
-  alone, [courses proposal](../proposals/courses.md)), `baton.prerequisite-unmet`,
-  `baton.prerequisite-cycle`, the `/prerequisites` route and `baton leg why`.
 - R-BTN-75: the `retry` kind and the `found`, `provisional` and `binds` columns of
   `ticket_blocks`. A backoff is a stored `retry_after`, which rule 10 reads.
 - R-BTN-126: the `ticket` and `resource` blocked ends, `LegError`'s prerequisite option, `baton leg release --blocked`,

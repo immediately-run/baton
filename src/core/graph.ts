@@ -55,6 +55,8 @@ export interface Leg {
   conditionTypes: string[] | null;
   /** R-BTN-195: the leg never asks for a person. */
   autonomous: boolean;
+  /** R-BTN-183: the leg's agent receives review data, not a checkout. */
+  readsOnly: boolean;
 }
 
 export interface Graph {
@@ -114,7 +116,7 @@ export function graphOf(json: unknown): Graph {
     capability_roles?: Record<string, string[]>;
     stations: Record<string, { renamed_from?: string | string[]; entry?: { output: string; schema: string }[] }>;
     legs: Record<string, { from: string[]; to: string | string[]; max_runs?: number; max_queue?: number; renamed_from?: string | string[]; no_chain_from?: string[]; isolation?: 'session'; requires?: { capabilities?: string[] };
-      kind?: 'person'; asks?: string; expires?: { after_s: number; reached: string }; replay_safe?: boolean; max_duration?: number; conditions?: string[]; autonomous?: boolean } & ContractFields>;
+      kind?: 'person'; asks?: string; expires?: { after_s: number; reached: string }; replay_safe?: boolean; max_duration?: number; conditions?: string[]; autonomous?: boolean; reads_only?: boolean } & ContractFields>;
   };
   const legs = new Map<string, Leg>();
   const legRenames = new Map<string, string>();
@@ -125,7 +127,7 @@ export function graphOf(json: unknown): Graph {
       noChainFrom: [...new Set(l.no_chain_from ?? [])], isolation: l.isolation ?? null, requires: legCapabilities(l.requires, f.capability_roles),
       person: l.kind === 'person', asks: l.kind === 'person' ? l.asks ?? null : null, expires: l.kind === 'person' && l.expires ? { afterS: l.expires.after_s, reached: l.expires.reached } : null,
       replaySafe: l.replay_safe !== false, maxDuration: l.max_duration ?? null,
-      conditionTypes: Array.isArray(l.conditions) ? [...new Set(l.conditions)] : null, autonomous: l.autonomous === true });
+      conditionTypes: Array.isArray(l.conditions) ? [...new Set(l.conditions)] : null, autonomous: l.autonomous === true, readsOnly: l.reads_only === true });
     for (const old of names(l.renamed_from)) legRenames.set(old, id);
   }
   const entry = new Map<string, { output: string; schema: string }[]>();

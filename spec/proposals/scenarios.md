@@ -81,16 +81,11 @@ Tickets: B-10, B-41, B-21.
 
 | Scenario | Sets up | Expects |
 |---|---|---|
-| S-BTN-72 tickets at stations | `requires.tickets` on a parent `reached` and a `depends_at` `at`; a missing parent; a holder advancing into the leg while its `ticket` row stands | one `ticket` row until the dependency arrives; `reached` holds past it; the missing parent raises `baton.prerequisite-unmet`; the advance refused `blocked` (rule 1) |
-| S-BTN-74 why a leg cannot start | four unmet prerequisites; an asker lacking a capability | `baton leg why` lists each with its `why`, plus `not-declared`, from the blocks index alone |
-| S-BTN-82 cycles and closed tickets | a two-ticket cycle; a withdrawn dependency; `reached` on a closed ticket | `prerequisite-cycle` raised; never met; met from `final_path` |
 | S-BTN-108 one primitive per prerequisite | `depends_on`; a parent whose call leg waits on its children beside another leg; an `OP` tag; a post with a reserved `waiting_on`; a course file with `select: "run"` in `requires.tickets` | start leg waits `ticket@done`; the other leg ready; rule 4; post refused naming the ticket; file refused, previous kept |
 | S-BTN-95 blocked ends are bounded | six blocked ends on one leg in a day; one runner blocked 21 times | ticket held `blocked-exhausted`, `baton.retries`; lifting resets; `baton.blocked-ends` |
 
 | Gate | Must hold | Proved by |
 |---|---|---|
-| G-BTN-97 | A leg is offered only when every prerequisite holds; each unmet one is a block row on the leg | S-BTN-72, -74 |
-| G-BTN-104 | Cycles keep their blocks and are raised; a withdrawn ticket meets nothing; `reached` reads a closed ticket's final path | S-BTN-82 |
 | G-BTN-127 | Ticket prerequisites reach core only as `requires.tickets` (`parent`, `posted`) or `depends_at`, and a parent waits on its children only through a call; `human-operator` by rule 4; `waiting_on` is never `dependencies`, `children`, `owner` or `policy` | S-BTN-108 |
 | G-BTN-115 | Blocked ends per (ticket, leg) past `max_blocked` (5) in 24 h hold the ticket with `baton.retries`; call blocks are not counted | S-BTN-95 |
 

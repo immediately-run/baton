@@ -581,7 +581,8 @@ export class Claims {
       // they are left to those rules, whose refusals name the cause; they stay blocks for asking.
       blocks: this.rows<{ kind: string; leg: string }>(
         `SELECT b.kind, b.leg FROM ticket_blocks b WHERE b.ticket_id = ? AND b.kind IN ('ticket', 'decision')
-           AND NOT (b.kind = 'decision' AND EXISTS (SELECT 1 FROM ticket_decisions d WHERE d.ticket_id = b.ticket_id AND d.decision_id = b.ref AND d.source = 'baton'))`, item.id),
+           AND NOT (b.kind = 'decision' AND EXISTS (SELECT 1 FROM ticket_decisions d WHERE d.ticket_id = b.ticket_id AND d.decision_id = b.ref AND d.source = 'baton'))
+           AND (? = 'claim' OR b.kind <> 'ticket' OR instr(b.ref, '@') > 0)`, item.id, phase),
       // R-BTN-178: rule 11's fact — the seats claims other than the asking one hold (a claim's
       // own seat never counts against it, so an advance excludes the advancing claim here).
       get seats() { return core.seatFacts(item, leg, opts.except ?? null); },
@@ -691,7 +692,7 @@ export class Claims {
            AND NOT EXISTS (SELECT 1 FROM ticket_overrides o WHERE o.ticket_id = w.id
                            AND (o.hold = 1 OR o.retry_after > :now))                                          -- rules 3, 10
            AND NOT EXISTS (SELECT 1 FROM ticket_blocks k WHERE k.ticket_id = w.id
-                           AND (k.kind = 'ticket' OR (k.kind = 'decision' AND k.leg IN ('', a.leg))))         -- rule 1's blocks
+                           AND k.kind IN ('ticket', 'decision') AND k.leg IN ('', a.leg))                    -- rule 1's blocks
            AND (EXISTS (SELECT 1 FROM runner_grants g WHERE g.credential_id = :credential
                         AND g.repository_id = w.repository_id AND g.revoked_at IS NULL)                       -- rule 7
                 OR NOT EXISTS (SELECT 1 FROM runner_grants g2 WHERE g2.credential_id = :credential))          -- an interim credential reaches every repository (B-104, A1)
@@ -1325,7 +1326,7 @@ export class Claims {
 
   /** `POST /v1/runner/claim` (§6.2): idempotent by `request_id`; the lock is the index. The claim
    *  is at the ticket's posted station, running nothing, its path recorded (R-BTN-63). */
-  // @model claim sha256:f16b703785eb
+  // @model claim sha256:e1abff2cbb15
   claim(runnerId: number, body: unknown) {
     const b = checkClaim(body);
     // R-BTN-47 (B-173): a wanted ticket of a repository not registered — retired, or never
@@ -1591,8 +1592,8 @@ export class Claims {
    * state. The first advance starts the leg the claim was offered (R-BTN-83). A refusal changes
    * nothing. The answer carries the latest snapshot's next legs and the run's id and number (B-335).
    */
-  // @model advance sha256:21709d9401bc
-  // @model advanceRun sha256:aad92c654eea
+  // @model advance sha256:6b47a79f6b67
+  // @model advanceRun sha256:b6172c27f111
   advance(runnerId: number, claimId: number, body: unknown) {
     const b = checkAdvance(body);
     const c = this.held(runnerId, claimId);
@@ -1765,7 +1766,7 @@ export class Claims {
   }
 
   /** `POST /v1/runner/claims/{id}/end` (§6.5, R-BTN-8, R-BTN-71). A retried identical end is a no-op. */
-  // @model endClaim sha256:5fa2311361bd
+  // @model endClaim sha256:8ad0f1f4ce17
   end(runnerId: number, claimId: number, body: unknown) {
     const e = checkEnd(body);
     const c = this.held(runnerId, claimId);
@@ -2219,7 +2220,7 @@ export class Claims {
 
   /** `POST /v1/ui/overrides/{item}` (§8, §11): `{expedite?, hold?}`. Lifting a hold clears its
    *  reason and any backoff, and resets the attempt count (§6.10). */
-  // @model setHold sha256:2569b5668121
+  // @model setHold sha256:931209b289a9
   setOverride(owner: string, item: string, body: unknown) {
     const o = checkOverride(body);
     const actor = `owner:${owner}`;
@@ -2479,8 +2480,8 @@ export class Claims {
 
   /** The heartbeat's `fenced` report (R-BTN-19): clears the fence of a claim reaped while this
    *  runner was alive — only in the incarnation it was reaped in, since a re-key never clears one. */
-  // @model fenceCleared sha256:551d1bb768f5
-  // @model heartbeat sha256:9c0136704c87
+  // @model fenceCleared sha256:9afb4a0b5bf8
+  // @model heartbeat sha256:576daa5cf97c
   fenced(runnerId: number, incarnation: number, claimId: number) {
     const c = this.rows<{ ticket_id: string }>(
       `SELECT ticket_id FROM claims WHERE id = ? AND runner_id = ? AND status = 'reaped' AND fence_pending = 1 AND fence_incarnation = ?`,
@@ -2499,7 +2500,7 @@ export class Claims {
   /** `POST /v1/ui/claims/{id}/reap`: any active claim. A live runner's claim is fence-pending
    *  (R-BTN-19) and the runner is not reaped, so its sidecar can still report the fence; a
    *  silent runner's is reaped as the alarm would. */
-  // @model forceReap sha256:dea6a296cd3c
+  // @model forceReap sha256:d1ff28fc20e8
   forceReap(owner: string, claimId: number, body: unknown) {
     checkConfirm(body);
     const c = this.rows<{ id: number; ticket_id: string; runner_id: number; status: string }>('SELECT id, ticket_id, runner_id, status FROM claims WHERE id = ?', claimId)[0];
@@ -2522,7 +2523,7 @@ export class Claims {
    *  not pending is `conflict`; a freeze never refuses it (R-BTN-88), so a seal waiting on the
    *  claim proceeds after it. The runner is not reaped: it may still be alive, its own lease
    *  check (R-BTN-26) the bound on what it can push. */
-  // @model adminFenceClear sha256:e910358c8682
+  // @model adminFenceClear sha256:d89adbb0a97c
   fenceClear(admin: string, claimId: number, body: unknown) {
     checkConfirm(body);
     const c = this.rows<{ ticket_id: string }>('SELECT ticket_id FROM claims WHERE id = ?', claimId)[0];
@@ -2559,7 +2560,7 @@ export class Claims {
    *  its own `action`): an unconfirmed completion is never confirmed automatically; the owner
    *  confirms it (git does carry it) or releases it (it never landed), which makes the item
    *  claimable again. The commit it named stays in the event. */
-  // @model ownerResolve sha256:45e2eeaff781
+  // @model ownerResolve sha256:70b8eaf75df7
   resolve(owner: string, claimId: number, body: unknown) {
     const { action } = checkResolve(body);
     const c = this.rows<{ ticket_id: string; end_reason: string; ended_at_sha: string }>(
@@ -2605,7 +2606,7 @@ export class Claims {
    * a failed attempt (§6.10); this only takes the claim back, it ends nothing itself. The
    * caller's transaction (the alarm's).
    */
-  // @model queueTimeout sha256:f95f3da4be95
+  // @model queueTimeout sha256:71d450c92eb7
   deadlineDue(now: number): number {
     const due = this.rows<{ id: number; ticket_id: string; runner_id: number; deadline_at: number }>(
       `SELECT id, ticket_id, runner_id, deadline_at FROM claims WHERE status = 'active' AND deadline_at IS NOT NULL AND deadline_at <= ? ORDER BY deadline_at`, now);
@@ -2651,7 +2652,7 @@ export class Claims {
    * (the heartbeat's). A seq that names no running run of this runner's active claim — a beat
    * retried past the advance that finished the run — changes nothing.
    */
-  // @model legFinished sha256:27268e3cdbb4
+  // @model legFinished sha256:1d22a1accbb0
   legFinished(runnerId: number, claimId: number, seq: number): void {
     const now = this.c.now();
     const c = this.rows<{ ticket_id: string; status: string; runner_id: number; deadline_at: number | null }>(
@@ -2768,7 +2769,7 @@ export class Claims {
    * - R-BTN-63: a holder's declared bars the snapshot posts that leg's bars without log
    *   `bars-mismatch`.
    */
-  // @model syncPost sha256:9d500d65a2bf
+  // @model syncPost sha256:7c0efc930fe7
   judge(repo: string, observation: number, seen: Map<string, Seen>, evidence: PostedEvidence = new Map()) {
     let confirmed = 0;
     // A `done` is also confirmed by a reading numbered after the claim's latest advance that shows
@@ -2899,7 +2900,7 @@ export class Claims {
    *  or at an interim status that ends the item — ends `released:stale-board`, and the holder is
    *  told. A station that lags the holder's advances is never staleness (§2e). Before cutover git
    *  decides alone and the shadow reports end claims. */
-  // @model syncPost sha256:9d500d65a2bf
+  // @model syncPost sha256:7c0efc930fe7
   private staleBoard(repo: string, observation: number) {
     if (!this.rows('SELECT 1 FROM repositories WHERE id = ? AND cutover_at IS NOT NULL', repo).length) return 0;
     const active = this.rows<{ id: number; ticket_id: string; runner_id: number; tier_ceiling: string; tier_ceilings: string; kind: string }>(
@@ -2953,8 +2954,8 @@ export class Claims {
     )`, now, now, gap);
   }
 
-  // @model alarmReap sha256:b00b4e304089
-  // @model fenceTimeout sha256:28b54860fbba
+  // @model alarmReap sha256:0d265c57f66c
+  // @model fenceTimeout sha256:009fc7e44d7d
   alarm(): string[] {
     const now = this.c.now();
     // B-229 (R-BTN-9): each reap is its own savepoint, and one that throws is named and passed
@@ -3011,7 +3012,7 @@ export class Claims {
   }
 
   /** §9.5: give an unacknowledged leg-timeout priority over a general release for the same claim. */
-  // @model timeoutReap sha256:0d7f933299bf
+  // @model timeoutReap sha256:e8e3a859037d
   private reapUnacknowledged(now: number, each: (claimId: number, ticketId: string, fn: () => void) => void) {
     const stale = this.rows<{ id: number; ticket_id: string; runner_id: number; incarnation: number; lease_timeout_ms: number; timeout: number }>(
       `SELECT c.id, c.ticket_id, c.runner_id, w.incarnation, w.lease_timeout_ms,
