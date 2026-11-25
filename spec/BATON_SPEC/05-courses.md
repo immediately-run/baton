@@ -89,6 +89,7 @@ Designs for this section that are not built are on the proposal page
   | `deadline_s` | leg | how long one run may take before Baton takes the claim back | R-BTN-167, R-BTN-90 |
   | `conditions` | leg | narrows the condition types it may raise (`[]`: none) | R-BTN-160 |
   | `autonomous` | leg | `true`: the leg never asks for a person | R-BTN-195 |
+  | `reads_only` | runner leg | Boolean; `true` starts the agent in a read-only review workspace | R-BTN-183 |
   | `spawns` | leg | the courses of the children it files, and what it provides them | R-BTN-111 |
   | `no_chain_from` | leg | legs whose credential may not take this one on the same ticket | R-BTN-106 |
 
@@ -510,6 +511,7 @@ Designs for this section that are not built are on the proposal page
     to every executor in `brief` (R-BTN-107). A repository's `agent_wrapper` — or
     `BATON_AGENT_WRAPPER` in the leg's environment, which wins — is one more command whose
     words precede the agent's; Baton builds nothing in its place.
+    A `reads_only` leg instead uses the restricted invocation in R-BTN-183.
     - The spawn has no shell: each command string splits into words as `sh` would, with no
       substitutions, and runs with the ticket id, the leg and the checkout appended. Stdin is
       closed; stdout and stderr are captured.

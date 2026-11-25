@@ -285,7 +285,7 @@ is stale. Never edit it by hand.
 | R-BTN-180 | roles, domains and protection | [`12-security.md`](BATON_SPEC/12-security.md) |
 | R-BTN-181 | attestations: typed statements about work or about a resource | [`12-security.md`](BATON_SPEC/12-security.md) |
 | R-BTN-182 | trusted runners | [`12-security.md`](BATON_SPEC/12-security.md) |
-| R-BTN-183 | what the merge runner merges | [`12-security.md`](BATON_SPEC/12-security.md) |
+| R-BTN-183 | review input and what the merge runner merges | [`12-security.md`](BATON_SPEC/12-security.md) |
 | R-BTN-184 | protected paths | [`12-security.md`](BATON_SPEC/12-security.md) |
 | R-BTN-185 | human-only credentials | [`12-security.md`](BATON_SPEC/12-security.md) |
 | R-BTN-186 | authority by credential, not channel | [`12-security.md`](BATON_SPEC/12-security.md) |
@@ -499,6 +499,7 @@ is stale. Never edit it by hand.
 | S-BTN-312 | a board post missing a queued leg | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-313 | refresh course versions and request a restart | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-318 | Access sign-in refusal reasons | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-320 | a read-only agent reviews commit data | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 
 ## Gates
 
@@ -626,3 +627,4 @@ is stale. Never edit it by hand.
 | G-BTN-168 | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | G-BTN-169 | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | G-BTN-172 | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-173 | [`15-verification.md`](BATON_SPEC/15-verification.md) |
