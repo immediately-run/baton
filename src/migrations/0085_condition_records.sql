@@ -62,9 +62,9 @@ CREATE TABLE activities_next (
   CHECK (claim_id IS NOT NULL OR kind = 'orient')
 );
 INSERT INTO activities_next (runner_id, id, claim_id, parent_id, call_id, kind, seq, label,
-    source, started_at, ended_at, outcome, received_at, run_id, detail_json)
+    source, started_at, ended_at, outcome, received_at, detail_json)
   SELECT runner_id, id, claim_id, parent_id, call_id, kind, seq, label,
-    source, started_at, ended_at, outcome, received_at, run_id, detail_json FROM activities;
+    source, started_at, ended_at, outcome, received_at, detail_json FROM activities;
 DROP TABLE activities;
 ALTER TABLE activities_next RENAME TO activities;
 CREATE INDEX activities_by_claim ON activities(claim_id, started_at);
