@@ -22,7 +22,10 @@ test('allows repository-local links and single-line history notes', () => {
     '[Guide](../docs/DEPLOY.md#deploy-and-verify)',
     '<!-- dependency-history: the old instructions used immediately-run/docs -->',
     'Use ../docs/nowhere instead.',
-  ].join('\n')), [3]);
+    '> ```md',
+    '> <!-- dependency-history: Use immediately-run/docs -->',
+    '> ```',
+  ].join('\n')), [3, 5]);
 });
 
 test('rejects active references between notes and sibling links with fragments', () => {
@@ -52,6 +55,22 @@ test('only Markdown links can use a document-relative path into docs', () => {
     '// [Guide](../docs/DEPLOY.md)',
     '```',
   ].join('\n')), [2, 4, 5]);
+});
+
+test('only parsed destinations are exempt in MDX, not code, labels or titles', () => {
+  assert.deepEqual(checkReferences(root, 'spec/guide.mdx', [
+    '[Guide](../docs/DEPLOY.md#deploy-and-verify)',
+    '',
+    '`',
+    '[Guide](../docs/DEPLOY.md)`',
+    '',
+    '> ```md',
+    '> [Guide](../docs/DEPLOY.md)',
+    '> ```',
+    '',
+    '[../docs/DEPLOY.md](../docs/DEPLOY.md)',
+    '[Guide](../docs/DEPLOY.md "../docs/DEPLOY.md")',
+  ].join('\n')), [4, 7, 10, 11]);
 });
 
 test('scans tracked package scripts, test code, skills and nested guides', (t) => {

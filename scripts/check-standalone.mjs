@@ -2,8 +2,9 @@
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, lstatSync, readFileSync, readlinkSync, realpathSync } from 'node:fs';
-import { dirname, relative, resolve } from 'node:path';
+import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { createProcessor } from '@mdx-js/mdx';
 
 // Scan tracked text by default. These are ledgers, captured artifacts or immutable SQL,
 // not setup or agent instructions. Ticket bodies describe work across repositories.
@@ -11,9 +12,51 @@ const records = /^(?:tickets\/|(?:docs|spec)\/review\/|src\/migrations\/|docs\/(
 // Pin individual legacy fixture lines, not entire test files. New or changed code is scanned.
 const fixtureLines = JSON.parse(readFileSync(new URL('./standalone-fixture-lines.json', import.meta.url), 'utf8'));
 
-function withoutHistoricalReferences(file, line, prose) {
-  // Only a standalone comment is a note; the first closing delimiter ends the note.
-  if (prose && /^\s*<!-- dependency-history: (?:(?!-->|<!--).)*-->\s*$/.test(line)) return '';
+const processors = { md: createProcessor({ format: 'md' }), mdx: createProcessor() };
+const siblingDocs = /(?:\.\.\/)+docs(?:\/[^\s`'"<>()[\]#?,;]*)?(?![\w-])/g;
+const consumer = /immediately-run\/docs(?![\w-])|(?:^|[^\w-])content\//;
+const historyNote = /^\s*<!-- dependency-history: (?:(?!-->|<!--).)*-->\s*$/;
+
+function markdownExemptions(root, file, text) {
+  const destinations = new Map();
+  const notes = new Set();
+  const processor = processors[file.match(/\.(mdx?)$/)?.[1]];
+  if (!processor || (!text.includes('../docs') && !text.includes('dependency-history:'))) return { destinations, notes };
+  let tree;
+  try {
+    tree = processor.parse(text);
+  } catch {
+    // A parse failure must not turn an unverified destination into an exemption.
+    return { destinations, notes };
+  }
+  const pending = [tree];
+  while (pending.length) {
+    const node = pending.pop();
+    if (node.children) pending.push(...node.children);
+    if (node.type === 'html' && historyNote.test(node.value)) {
+      notes.add(node.position.start.line);
+    }
+    if (node.type !== 'link' || !/^(?:\.\.\/)+docs(?:\/|[?#]|$)/.test(node.url)) continue;
+    // Use the parsed label's end to locate the raw destination, not any matching
+    // text in the label or the optional title. Unrecognized spellings stay checked.
+    const labelEnd = node.children.at(-1)?.position.end.offset ?? node.position.start.offset + 1;
+    const tail = text.slice(labelEnd, node.position.end.offset);
+    const opening = /^\]\(\s*(<?)/.exec(tail);
+    if (!opening || !tail.startsWith(node.url, opening[0].length)) continue;
+    const afterUrl = tail.slice(opening[0].length + node.url.length);
+    if (opening[1] ? !afterUrl.startsWith('>') : !/^[\s)]/.test(afterUrl)) continue;
+    const path = node.url.split(/[?#]/, 1)[0];
+    const target = resolve(root, dirname(file), path);
+    if (!existsSync(target)) continue;
+    const fromDocs = relative(resolve(root, 'docs'), realpathSync(target));
+    if (!isAbsolute(fromDocs) && fromDocs !== '..' && !fromDocs.startsWith(`..${sep}`)) {
+      destinations.set(labelEnd + opening[0].length, path);
+    }
+  }
+  return { destinations, notes };
+}
+
+function withoutHistoricalReferences(file, line) {
   if (file === 'src/core/board.ts' && line.trim() === 'const path = `content/roadmap/${it.id}.mdx`; // dependency-history: legacy ticket URL, not an input') return '';
   // Site configuration names a supported code repo and an existing seed, not a build input.
   if (file === '.baton/baton.json' && line.trim() === '"docs": "immediately-run/docs",') return '';
@@ -37,32 +80,17 @@ function withoutHistoricalReferences(file, line, prose) {
 
 export function checkReferences(root, file, text) {
   const issues = [];
-  const markdown = /\.mdx?$/.test(file);
-  let fence;
-  for (const [index, line] of text.split(/\r?\n/).entries()) {
-    const delimiter = /^(?: {0,3})(`{3,}|~{3,})(.*)$/.exec(line);
-    if (markdown && delimiter) {
-      const [, token, rest] = delimiter;
-      if (!fence) fence = token;
-      else if (token[0] === fence[0] && token.length >= fence.length && !rest.trim()) fence = undefined;
+  const { destinations, notes } = markdownExemptions(root, file, text);
+  let offset = 0;
+  for (const [index, rawLine] of text.split('\n').entries()) {
+    const line = rawLine.replace(/\r$/, '');
+    const history = notes.has(index + 1) && historyNote.test(line);
+    const active = history ? '' : withoutHistoricalReferences(file, line);
+    if (consumer.test(active) || Array.from(active.matchAll(siblingDocs))
+      .some(({ 0: path, index: start }) => active !== line || destinations.get(offset + start) !== path)) {
+      issues.push(index + 1);
     }
-    const active = withoutHistoricalReferences(file, line, markdown && !fence);
-    if (!active) continue;
-    if (/immediately-run\/docs(?![\w-])|(?:^|[^\w-])content\//.test(active)) issues.push(index + 1);
-    else for (const { 0: link, index: start } of active.matchAll(/(?:\.\.\/)+docs(?:\/[^\s`'"<>()[\]#?,;]*)?(?![\w-])/g)) {
-      const target = resolve(root, dirname(file), link);
-      // Only a Markdown destination is relative to the document. A code string may be
-      // relative to the process's working directory instead.
-      const prefix = active.slice(0, start).replace(/(`+)(?:(?!\1).)*\1/g, 'label');
-      const suffix = active.slice(start + link.length);
-      const destination = markdown && !fence && !prefix.includes('`') && /\[[^\]\n]+\]\($/.test(prefix)
-        && /^(?:[?#][^\s)`]*)?\)/.test(suffix);
-      const fromDocs = destination && existsSync(target) ? relative(resolve(root, 'docs'), realpathSync(target)) : '..';
-      if (fromDocs === '..' || fromDocs.startsWith('../')) {
-        issues.push(index + 1);
-        break;
-      }
-    }
+    offset += rawLine.length + 1;
   }
   return issues;
 }
