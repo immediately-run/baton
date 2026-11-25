@@ -25,7 +25,7 @@ import { LocalHost } from './host';
 import { openStore } from './store';
 
 export type KitRule = 'course' | 'accepted' | 'legs-scripts' | 'min-runner-version' | 'moves-back' | 'generic-run' | 'no-op' | 'instructions'
-  | 'schema' | 'entry' | 'spawns';
+  | 'schema' | 'entry' | 'spawns' | 'contract';
 export interface KitViolation {
   rule: KitRule;
   message: string;
@@ -167,7 +167,39 @@ export function staticViolations(k: KitInput): KitViolation[] {
       }
     }
   }
-  out.push(...schemaViolations(k), ...entryViolations(k), ...spawnsViolations(k));
+  out.push(...schemaViolations(k), ...contractViolations(k), ...entryViolations(k), ...spawnsViolations(k));
+  return out;
+}
+
+/** R-BTN-82: a required input is available on every route only if removing its producer
+ * makes each of the consumer's departure stations unreachable. */
+export function contractViolations(k: KitInput): KitViolation[] {
+  const graph = graphOf(k.proposed);
+  const { resolve } = schemaPool(k);
+  const without = new Map<string, Set<string>>();
+  const out: KitViolation[] = [];
+  for (const [id, leg] of graph.legs) {
+    for (const [name, output] of Object.entries(leg.outputs ?? {})) {
+      if (!resolve(output.schema)) out.push({ rule: 'contract', message: `legs.${id}.outputs.${name}: missing schema ${output.schema}` });
+    }
+    for (const [name, input] of Object.entries(leg.inputs ?? {})) {
+      const producer = input.from.split('.')[0];
+      const version = graph.legs.get(producer)!.version;
+      const at = `legs.${id}.inputs.${name}`;
+      if (input.accepts && !input.accepts.includes(version)) out.push({ rule: 'contract', message: `${at} does not accept ${producer}'s current version ${version}` });
+      if (input.required === false) continue;
+      let reachable = without.get(producer);
+      if (!reachable) {
+        reachable = new Set([graph.start]);
+        for (const station of reachable) {
+          for (const [edge, def] of graph.legs) if (edge !== producer && def.from.includes(station)) for (const to of def.to) reachable.add(to);
+        }
+        without.set(producer, reachable);
+      }
+      const bypassed = leg.from.filter((station) => reachable.has(station));
+      if (bypassed.length) out.push({ rule: 'contract', message: `${at}: ${bypassed.join(', ')} can be reached without ${producer}` });
+    }
+  }
   return out;
 }
 
@@ -431,24 +463,32 @@ export async function coreViolations(k: KitInput): Promise<KitViolation[]> {
     // R-BTN-109: an arrival at a station with an `entry` must carry each output it names — the
     // generic run gives one by pointer (a git: uri the kit's own commit answers for), which the
     // arrival check reads by name and schema as a holder's would be.
-    const outputsAt = (station: string) => (proposed.entry.get(station) ?? []).map((r) => ({ name: r.output, schema: r.schema, uri: `git:kit/kit@${SHA(999)}:kit/${r.output}` }));
+    const outputsAt = (step: Step) => {
+      const declared = proposed.legs.get(step.leg)?.outputs;
+      const outputs = declared ? Object.entries(declared).map(([name, o]) => ({ name, schema: o.schema }))
+        : (proposed.entry.get(step.reached) ?? []).map((r) => ({ name: r.output, schema: r.schema }));
+      return outputs.map((o) => ({ ...o, uri: `git:local/kit@${SHA(999)}:kit/${o.name}` }));
+    };
     let at = proposed.start;
+    let previous: Step | undefined;
     for (const [i, step] of route.entries()) {
       clock += 60_000;
       try {
-        tx(() => core.claims.advance(holder.runner_id, holder.claim_id, { leg: step.leg, ...(i === 0 ? {} : { reached: at, outputs: outputsAt(at) }) }));
+        tx(() => core.claims.advance(holder.runner_id, holder.claim_id, { leg: step.leg, ...(previous ? { reached: at, outputs: outputsAt(previous) } : {}) }));
       } catch (e) {
-        if (i === 0 || !(e instanceof BatonError) || e.extra.rule_code !== 'chain') throw e;
-        tx(() => core.claims.end(holder.runner_id, holder.claim_id, { end_reason: `suspended:${at}`, reached: at, next: step.leg, outputs: outputsAt(at) }));
+        if (!previous || !(e instanceof BatonError) || e.extra.rule_code !== 'chain') throw e;
+        const from = previous;
+        tx(() => core.claims.end(holder.runner_id, holder.claim_id, { end_reason: `suspended:${at}`, reached: at, next: step.leg, outputs: outputsAt(from) }));
         const posted = await post(proposedRegistry, { 'KIT-1': placedAt(proposed, route.slice(0, i), step.leg) });
         if (!posted.confirmed) return [{ rule: 'generic-run', message: `the hand-off at ${at} was not confirmed by a snapshot queuing ${step.leg}` }];
         holder = await take(credentials[i]);
         tx(() => core.claims.advance(holder.runner_id, holder.claim_id, { leg: step.leg }));
       }
       at = step.reached;
+      previous = step;
     }
     clock += 60_000;
-    const end = tx(() => core.claims.end(holder.runner_id, holder.claim_id, { end_reason: 'done', reached: at, ended_at_sha: SHA(999), outputs: outputsAt(at) })) as { ok?: boolean; code?: string };
+    const end = tx(() => core.claims.end(holder.runner_id, holder.claim_id, { end_reason: 'done', reached: at, ended_at_sha: SHA(999), outputs: outputsAt(route[route.length - 1]) })) as { ok?: boolean; code?: string };
     if (!end.ok) return [{ rule: 'generic-run', message: `the done end at ${at} was refused: ${end.code ?? ''}` }];
     const posted = await post(proposedRegistry, { 'KIT-1': placedAt(proposed, route) });
     if (!posted.confirmed) out.push({ rule: 'generic-run', message: `the done end at ${at} was not confirmed by a snapshot placing the ticket there` });

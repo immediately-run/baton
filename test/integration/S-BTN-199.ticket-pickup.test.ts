@@ -1,6 +1,6 @@
-// S-BTN-199 the git-lock pickup asks Baton (B-129; R-BTN-179's one-answer rule, R-BTN-81's
-// history, §9's branch-holder query, R-BTN-85 both values): `baton tickets claim` reads the
-// ticket from Baton before it writes, so one wrong `status: available` line over an open PR (the
+// S-BTN-199 the pickup asks Baton (B-129, B-326; R-BTN-179's one-answer rule, R-BTN-81's
+// history, §9's branch-holder query, R-BTN-85 both values): `baton tickets check <id>
+// --claimable` reads the ticket from Baton before a claim, so one wrong `status: available` line over an open PR (the
 // 2026-10-27 release over PR #109) hands the next session Baton's position instead of a fresh
 // start. Must hold: the board read answers the station, the ready leg and — the field B-129 adds —
 // the repository's live claims, each with its holder and when its lease ends; the history read
@@ -67,7 +67,7 @@ async function implementAndRelease(cred: 'vm-a' | 'vm-b', ticket: string, branch
   return w;
 }
 
-describe('S-BTN-199 the git-lock pickup asks Baton', () => {
+describe('S-BTN-199 the pickup asks Baton', () => {
   it('the board answers the lock with each holder and its lease\'s end; the history answers the PRs a false frontmatter lost', async () => {
     const git = new Git()
       .add('T-1', { display: { status: 'in-progress' } }, placed('filed', [], [['implement', 'ready']]))
