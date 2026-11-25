@@ -96,7 +96,7 @@ interface RunnerFacts {
   lease_timeout_ms: number;
   last_seen_at: number;
   last_activity_at: number | null;
-  declared: string[];
+  holdings: Set<string>;
   /** The courses its checkouts run (R-BTN-48): rule 9. */
   courses: { repository: string; course: string; version: number }[];
   /** R-BTN-60: what rule 8 matches. */
@@ -139,11 +139,18 @@ interface Candidate {
   weight: number;
   expedite: number;
   to_end: number;
+  rank: number | null;
   ready_since: number | null;
   n: number;
   /** Rule 9 for the row's (repository, course) group — per group, so filtering on it after the
    *  numbering drops whole groups and leaves every other row's `n` as it was (B-237). */
   r9: number;
+}
+
+/** Within a group, a full expedite lane merges the two runs in ordinary order. */
+function ordinaryOrder(a: Candidate, b: Candidate): number {
+  return a.to_end - b.to_end || (a.rank ?? Number.MAX_SAFE_INTEGER) - (b.rank ?? Number.MAX_SAFE_INTEGER)
+    || (a.ready_since ?? 0) - (b.ready_since ?? 0) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 }
 
 /** B-237: what one recommendation or claim decision reads many times and no write changes
@@ -371,17 +378,17 @@ export class Claims {
   // ── what matching reads ─────────────────────────────────────────────────────────────────
 
   private runner(id: number): RunnerFacts {
-    const w = this.rows<Omit<RunnerFacts, 'declared' | 'courses' | 'tier_ceilings' | 'tags' | 'grants'> & { tier_ceilings: string; created_by: string | null }>(
+    const w = this.rows<Omit<RunnerFacts, 'holdings' | 'courses' | 'tier_ceilings' | 'tags' | 'grants'> & { tier_ceilings: string; created_by: string | null }>(
       `SELECT w.id, w.kind, w.incarnation, w.tier_ceiling, w.tier_ceilings, w.lease_timeout_ms, w.last_seen_at, w.last_activity_at, w.credential_id, w.isolation, w.concurrency,
               (SELECT COUNT(*) FROM claims k WHERE k.runner_id = w.id AND k.status = 'active') AS held, c.created_by
        FROM runners w JOIN credentials c ON c.id = w.credential_id WHERE w.id = ?`, id)[0];
     if (!w) throw new BatonError('unauthenticated', 'no such runner');
-    const declared = this.rows<{ declared: string }>('SELECT DISTINCT declared FROM runner_capabilities WHERE runner_id = ? ORDER BY declared', id).map((r) => r.declared);
+    const holdings = new Set(this.rows<{ capability: string }>('SELECT capability FROM runner_capabilities WHERE runner_id = ?', id).map((r) => r.capability));
     const courses = this.rows<{ repository: string; course: string; version: number }>(
       'SELECT repository_id AS repository, course_id AS course, version FROM runner_courses WHERE runner_id = ? ORDER BY repository_id, course_id', id);
     const tags = this.rows<{ tag: string }>('SELECT tag FROM runner_tags WHERE runner_id = ? ORDER BY tag', id).map((r) => r.tag);
     const { created_by, ...facts } = w;
-    return { ...facts, tier_ceilings: JSON.parse(w.tier_ceilings) as Record<string, string>, declared, courses, tags, grants: this.grantsOf(w.credential_id, created_by) };
+    return { ...facts, tier_ceilings: JSON.parse(w.tier_ceilings) as Record<string, string>, holdings, courses, tags, grants: this.grantsOf(w.credential_id, created_by) };
   }
 
   /** R-BTN-58: a granted key's grants in force by repository. A key an owner or administrator
@@ -588,7 +595,7 @@ export class Claims {
       get seats() { return core.seatFacts(item, leg, opts.except ?? null); },
       missingCapabilities: opts.missingCapabilities,
     };
-    const verdict = gatesFor(w && { declared: w.declared, tier_ceiling: this.ceiling(w, item.repository), tags: w.tags, courses: w.courses, grants: w.grants, isolation: w.isolation }, ticket, this.postedLeg(item, leg, phase, !!w), phase, facts);
+    const verdict = gatesFor(w && { holdings: w.holdings, tier_ceiling: this.ceiling(w, item.repository), tags: w.tags, courses: w.courses, grants: w.grants, isolation: w.isolation }, ticket, this.postedLeg(item, leg, phase, !!w), phase, facts);
     opts.removed?.(verdict, facts);
     return verdict;
   }
@@ -670,8 +677,8 @@ export class Claims {
    */
   private referenceCandidates(w: RunnerFacts, page = 0, rule9 = true): Candidate[] {
     const rows = this.named<Candidate>(
-      `SELECT id, repository_id, course_id, weight, expedite, to_end, ready_since, n FROM (
-         SELECT w.id, w.repository_id, w.course_id, p.weight, s.to_end, a.ready_since,
+      `SELECT id, repository_id, course_id, weight, expedite, to_end, rank, ready_since, n FROM (
+         SELECT w.id, w.repository_id, w.course_id, p.weight, s.to_end, w.rank, a.ready_since,
                 MAX(w.expedite, COALESCE((SELECT o.expedite FROM ticket_overrides o WHERE o.ticket_id = w.id), 0)) AS expedite,
                 ROW_NUMBER() OVER (PARTITION BY w.repository_id, w.course_id
                                    ORDER BY MAX(w.expedite, COALESCE((SELECT o.expedite FROM ticket_overrides o WHERE o.ticket_id = w.id), 0)) DESC,
@@ -759,56 +766,58 @@ export class Claims {
    * The projection contains runner-independent facts; all runner gates remain authoritative.
    * JSON parameters below are small request-local sets, expanded once, never stored documents
    * expanded for every candidate. Page cursors live only for this synchronous decision. */
-  candidates(w: RunnerFacts, page = 0, rule9 = true, wanted: string[] | null = null, skipExpedited?: ReadonlySet<string>): Candidate[] {
+  candidates(w: RunnerFacts, page = 0, rule9 = true, wanted: string[] | null = null, skipExpedited?: ReadonlySet<string>, batch = 50): Candidate[] {
     if (this.reference) return this.referenceCandidates(w, page, rule9);
     const groups = this.rows<{ repository_id: string; course_id: string; weight: number; min_runner_version: number; observation: number; tiers: string }>(
       `SELECT k.repository_id, k.id AS course_id, p.weight, k.min_runner_version, h.observation, p.tiers
        FROM courses k JOIN repositories p ON p.id = k.repository_id JOIN board_head h ON h.repository_id = p.id
        WHERE p.cutover_at IS NOT NULL AND p.retired_at IS NULL ORDER BY k.repository_id, k.id`);
     const out: Candidate[] = [];
-    const holdings = capabilitiesOf(w.declared);
+    const effectiveCaps = `SELECT capability FROM runner_effective_caps WHERE runner_id = ? AND repository_id IN ('', ?)`;
     for (const g of groups) {
       const key = `${g.repository_id}\u0000${g.course_id}`;
       if (wanted && !wanted.includes(key)) continue;
       const grant = w.grants?.[g.repository_id];
       if (w.grants && !grant) continue;
-      const admitted = new Set(grant?.capabilities ?? []);
-      const caps = JSON.stringify([...holdings].filter((c) => !grant || c.startsWith('runner:') || admitted.has(c) || admitted.has(`${c.split(':')[0]}:*`)));
       const tiers = JSON.parse(g.tiers) as string[];
       const ceiling = tiers.indexOf(this.ceiling(w, g.repository_id));
       const r9 = w.courses.some((k) => k.repository === g.repository_id && k.course === g.course_id && k.version >= g.min_runner_version) ? 1 : 0;
       if (rule9 && !r9) continue;
+      // The first read still supplies the full stale-skills probe for an old course.
+      const size = r9 ? batch : 50;
       const legs = this.rows<{ leg: string }>(`SELECT l.leg FROM course_legs l
         WHERE l.repository_id = ? AND l.course_id = ? AND l.person = 0
         AND NOT EXISTS (SELECT 1 FROM course_leg_capabilities c
           WHERE c.repository_id = l.repository_id AND c.course_id = l.course_id AND c.leg = l.leg
-          AND c.capability NOT IN (SELECT value FROM json_each(?)))`, g.repository_id, g.course_id, caps).map((l) => l.leg);
+          AND c.capability NOT IN (${effectiveCaps}))`, g.repository_id, g.course_id, w.id, g.repository_id).map((l) => l.leg);
       if (!legs.length) continue;
       const prior = page > 0 ? this.cache?.candidatePages.get(key) : undefined;
-      if (prior && prior.count < page * 50) continue;
+      if (prior && prior.count < page * size) continue;
+      // One read of the repo's effective set. A scalar lookup in that object avoids
+      // building or probing a SQLite temp index for every requirement in the queue.
+      const { caps } = this.rows<{ caps: string }>(`SELECT json_group_object(capability, 1) AS caps FROM (${effectiveCaps})`, w.id, g.repository_id)[0];
       const after = prior ? `AND (-q.expedite, q.to_end, q.rank IS NULL, COALESCE(q.rank, 0), COALESCE(q.ready_since, -1), q.ticket_id) > (?, ?, ?, ?, ?, ?)` : '';
-      const found = this.rows<Omit<Candidate, 'n' | 'r9' | 'weight'> & { rank: number | null }>(
+      const found = this.rows<Omit<Candidate, 'n' | 'r9' | 'weight'>>(
         `SELECT q.ticket_id AS id, q.repository_id, q.course_id, q.expedite, q.to_end, q.rank, q.ready_since
          FROM ready_tickets q INDEXED BY ready_tickets_order
          WHERE q.repository_id = ? AND q.course_id = ?
            AND q.last_end_observation < ? AND (q.retry_after IS NULL OR q.retry_after <= ?)
            AND COALESCE(q.tier_position, ?) <= ?
            AND q.leg IN (SELECT value FROM json_each(?))
+           AND NOT EXISTS (SELECT 1 FROM json_each(q.required_caps) r WHERE json_extract(?, '$.' || json_quote(r.value)) IS NULL)
            AND NOT EXISTS (SELECT 1 FROM ticket_bars b JOIN runner_tags t ON t.tag = b.tag
              WHERE b.ticket_id = q.ticket_id AND b.leg = q.leg AND t.runner_id = ?)
-           AND NOT EXISTS (SELECT 1 FROM ticket_requires r WHERE r.ticket_id = q.ticket_id
-             AND r.name NOT IN (SELECT value FROM json_each(?)))
            ${skipExpedited?.has(key) ? 'AND -q.expedite = 0' : ''} ${after}
          ORDER BY -q.expedite, q.to_end, q.rank IS NULL, COALESCE(q.rank, 0), COALESCE(q.ready_since, -1), q.ticket_id
-         LIMIT 50${page > 0 && !prior ? ' OFFSET ?' : ''}`,
+         LIMIT ?${page > 0 && !prior ? ' OFFSET ?' : ''}`,
         g.repository_id, g.course_id, g.observation, this.c.now(), tiers.length - 1, ceiling,
-        JSON.stringify(legs), w.id, caps, ...(prior?.cursor ?? []), ...(page > 0 && !prior ? [page * 50] : []));
+        JSON.stringify(legs), caps, w.id, ...(prior?.cursor ?? []), size, ...(page > 0 && !prior ? [page * size] : []));
       const last = found.at(-1);
       if (last) this.cache?.candidatePages.set(key, {
         cursor: [-last.expedite, last.to_end, Number(last.rank == null), last.rank ?? 0, last.ready_since ?? -1, last.id],
-        count: page * 50 + found.length,
+        count: page * size + found.length,
       });
-      out.push(...found.map((r, i) => ({ ...r, weight: g.weight, r9, n: page * 50 + i + 1 })));
+      out.push(...found.map((r, i) => ({ ...r, weight: g.weight, r9, n: page * size + i + 1 })));
     }
     return out;
   }
@@ -837,30 +846,53 @@ export class Claims {
    * `limit`; the answer is the one gating every candidate gives. `page0` is the first reading,
    * every group's, rule 9's included, for a refusal's `stale-skills` check.
    */
-  private recommend(w: RunnerFacts, limit: number, out?: { page0?: Candidate[] }, all = false): Recommendation[] {
+  private recommend(w: RunnerFacts, limit: number, out?: { page0?: Candidate[]; needsFullPrefix?: boolean }, all = false): Recommendation[] {
     const groups = new Map<string, { rows: (Candidate & { item: ItemFacts })[]; done: boolean; passed: [number, number]; cut: boolean }>();
     // B-127 (fail closed, unpenalised): no ticket of a repository whose required control has no
     // signed version is recommended — see unsignedControlBlocked.
     const unsignedBlocked = this.unsignedControlBlocked();
     const full = this.expediteActive() >= EXPEDITE_BOUND;
     const lazy = !this.reference;
-    for (let page = 0; all || page < 4; page++) {
+    // B-239: for a small prefix, don't read 50 candidates before checking the first ten.
+    // Keep the same 200-candidate horizon and full-lane pagination.
+    const batch = lazy && !all && !full && limit <= 10 ? 10 : 50;
+    const sortedPages = full && lazy && !all && limit <= 10;
+    for (let page = 0; all || page < 200 / batch; page++) {
       const wanted = page === 0 ? null : [...groups].filter(([, g]) => !g.done && (all
         ? !lazy || g.passed[0] < limit
         : !g.cut && g.rows.length < limit)).map(([k]) => k);
       if (wanted && !wanted.length) break;
       let read: Candidate[];
       if (page === 0 && lazy) {
-        const all = this.candidates(w, 0, false);
+        const all = this.candidates(w, 0, false, null, undefined, batch);
         if (out) out.page0 = all;
         read = all.filter((r) => r.r9);
+        if (full && limit === 1 && out) {
+          // A full first page with no ordinary rows may hide a better ordinary ticket on
+          // a later page of the 50-result fallback. Don't conclude from that prefix.
+          const expedites = new Map<string, number>();
+          for (const r of read) if (r.expedite) {
+            const key = `${r.repository_id}\u0000${r.course_id}`;
+            expedites.set(key, (expedites.get(key) ?? 0) + 1);
+          }
+          out.needsFullPrefix = [...expedites.values()].includes(batch) || read.some((r) => r.rank === Number.MAX_SAFE_INTEGER);
+          if (out.needsFullPrefix) return [];
+        }
       } else {
         // With the lane full, expedited rows are the first sorted run. Once it cannot
         // contribute more to the merged prefix, page only the unexpedited run.
         const skipExpedited = all && full && lazy ? new Set(wanted?.filter((k) => groups.get(k)!.passed[1] >= limit)) : undefined;
-        read = this.candidates(w, page, false, wanted, skipExpedited);
+        read = this.candidates(w, page, false, wanted, skipExpedited, batch);
       }
+      // Keep page membership and the existing stopping point, but gate a small prefix in
+      // the order we'll actually return it. At most `limit` passes from any one page can
+      // make the group's result, even if a later page contributes better ordinary rows.
+      // Legacy sorting ties a missing rank with MAX_SAFE_INTEGER, while SQL puts nulls
+      // last. Leave that rare case on the original per-run gating path.
+      const sortedPage = sortedPages && !read.some((r) => r.rank === Number.MAX_SAFE_INTEGER);
+      if (sortedPage) read.sort(ordinaryOrder);
       const counts = new Map<string, number>();
+      const pagePassed = new Map<string, number>();
       for (const c of read) {
         const key = `${c.repository_id}\u0000${c.course_id}`;
         if (wanted && !wanted.includes(key)) continue;
@@ -870,6 +902,7 @@ export class Claims {
         counts.set(key, (counts.get(key) ?? 0) + 1);
         const g = groups.get(key) ?? { rows: [], done: false, passed: [0, 0], cut: false };
         groups.set(key, g);
+        if (sortedPage && (pagePassed.get(key) ?? 0) >= limit) continue;
         const run = full && c.expedite ? 1 : 0;
         if (lazy && g.passed[run] >= limit) {
           g.cut = true;
@@ -884,24 +917,21 @@ export class Claims {
           && !this.intakeClosed(item)) {
           g.rows.push({ ...c, item });
           g.passed[run]++;
+          if (sortedPage) pagePassed.set(key, (pagePassed.get(key) ?? 0) + 1);
         }
       }
-      for (const [key, g] of groups) if ((counts.get(key) ?? 0) < 50) g.done = true;
+      for (const [key, g] of groups) if ((counts.get(key) ?? 0) < batch) g.done = true;
     }
     // Rule 2 (advice): past the lane's bound an expedited ticket loses its lane — it sorts as an
     // unexpedited one in the default order — before its group's places are numbered, so R-BTN-61's
     // "firsts before any seconds" reads the order it is actually offered in (round 1, 1-A-2, 1-B-1).
-    const byId = (a: { id: string }, b: { id: string }) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
     const merged = [...groups.values()].flatMap((g) => {
       const rows = g.rows.map((r) => ({ ...r, waits: !!r.expedite && full, lane: !!r.expedite && !full }));
-      if (full) {
-        rows.sort((a, b) => Number(b.lane) - Number(a.lane) || a.to_end - b.to_end
-          || (a.item.rank ?? Number.MAX_SAFE_INTEGER) - (b.item.rank ?? Number.MAX_SAFE_INTEGER) || (a.ready_since ?? 0) - (b.ready_since ?? 0) || byId(a, b));
-      }
+      if (full) rows.sort(ordinaryOrder);
       return rows.map((r, place) => ({ ...r, place }));
     });
     merged.sort((a, b) => Number(b.lane) - Number(a.lane) || b.weight - a.weight || a.place - b.place
-      || a.to_end - b.to_end || (a.ready_since ?? 0) - (b.ready_since ?? 0) || byId(a, b));
+      || a.to_end - b.to_end || (a.ready_since ?? 0) - (b.ready_since ?? 0) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
     return merged.slice(0, limit).map((r) => ({
       ticket_id: r.id,
       station: r.item.station!.station,
@@ -1035,8 +1065,11 @@ export class Claims {
       throw new BatonError('no-eligible-ticket', 'none of the preferred tickets can be claimed', { refusals });
     }
     if (wanted) return this.decideNamed(w, wanted);
-    const read: { page0?: Candidate[] } = {};
-    const recs = this.recommend(w, 50, read);
+    const read: { page0?: Candidate[]; needsFullPrefix?: boolean } = {};
+    // Don't gate 50 tickets to claim the first where the prefix is conclusive.
+    const prefix = this.reference ? null : this.recommend(w, 1, read);
+    const recs = prefix && !read.needsFullPrefix && (!prefix.length || this.canOffer(prefix[0].ticket_id, w))
+      ? prefix : this.recommend(w, 50, read);
     // §12.8 (B-145): a recommended ticket is offered only where the floor rule lets it be — the
     // first one that is not on a stopped repository.
     const first = recs.find((r) => this.canOffer(r.ticket_id, w))
@@ -1204,7 +1237,7 @@ export class Claims {
         const runner = this.runner(runner_id);
         const grant = runner.grants?.[repo];
         const allowed = new Set(grant?.capabilities);
-        const capabilities = [...capabilitiesOf(runner.declared)].filter((c) => runner.grants == null || (grant &&
+        const capabilities = [...runner.holdings].filter((c) => runner.grants == null || (grant &&
           (c.startsWith('runner:') || allowed.has(c) || allowed.has(`${c.split(':')[0]}:*`)))).sort();
         return { ...claim, course: opaque(course_fields_json), advance_course: opaque(course_advance_json),
           runner: { hostname, tags: runner.tags, profile: opaque(profile_json), capabilities }, reports: byClaim.get(claim.claim_id) ?? [] };
@@ -1346,12 +1379,12 @@ export class Claims {
     const now = this.c.now();
     // R-BTN-4 (B-188): up to the runner's bound — its `concurrency` here, each repository's grant
     // in `decide` — never one claim per runner.
-    this.refuseFull(this.runner(runnerId), null);
+    const w = this.runner(runnerId);
+    this.refuseFull(w, null);
     // B-237 (R-BTN-196): an idle runner asking again with nothing changed gets the same refusal.
     const idle = b.ticket_id || b.prefer ? null : this.idleHit(runnerId);
     if (idle?.refusal) throw idle.refusal;
     const version = schedulingVersion(this.c.store);
-    const w = this.runner(runnerId);
     const { item, advice } = this.decideNoting(w, b.ticket_id, version, b.prefer);
     const rationale = b.rationale === null ? undefined : JSON.parse(b.rationale) as unknown;
     const savedAdvice = rationale === undefined ? advice : { ...advice, rationale };
@@ -1845,7 +1878,11 @@ export class Claims {
     // set, and the fleet's counts follow (R-BTN-75) — rule 4 refuses this runner at once. A
     // valid blocked end is not a failed attempt, not a run for max_runs, and starts no backoff
     // (the blocked-end work's rules). The transaction is the end's own; the delete is its shape.
-    if (e.prerequisite?.kind === 'capability') this.exec('DELETE FROM runner_capabilities WHERE runner_id = ? AND capability = ?', runnerId, e.prerequisite.ref);
+    if (e.prerequisite?.kind === 'capability') {
+      this.exec('DELETE FROM runner_capabilities WHERE runner_id = ? AND capability = ?', runnerId, e.prerequisite.ref);
+      // A later heartbeat can restore the holding by declaring the same role again.
+      this.exec("UPDATE runners SET settings_hash = '' WHERE id = ?", runnerId);
+    }
     // R-BTN-86 (§4.6, R3-1258): the children the ending leg reported — recorded as the run's
     // (the range a call settles over is B-62's to read) until the first accepted snapshot
     // observed after this end, which posts them or drops each unposted one with discrepancy
