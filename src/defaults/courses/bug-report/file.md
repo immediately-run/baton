@@ -18,10 +18,13 @@ ticket for the fix exists and the bug ticket names it.
 
 ## Write the fix ticket
 
-- Create a new ticket file in the repository's tickets directory (the `items` setting in
-  `.baton/baton.json`, `tickets/` by default), with the next id the repository uses — its id
-  tool if it has one: `baton tickets new` (or `baton tickets next ticket-<prefix>` for a child
-  on a branch) takes the id from Baton's sequence, never a scan (R-BTN-131). Its course is the
+Ticket files are Dibber's to write: file and change them with `$BATON_DIBBER` (the `dibber` your stub pins: run it exactly as that variable says, never another), never by hand.
+
+- Write the body to a file outside the checkout, then file it:
+  `$BATON_DIBBER new --title "…" --body-file <that file>`, adding `--depends-on`, `--tags` and
+  `--field key=value` for any other frontmatter key. Dibber takes the id from Baton's sequence
+  through `.dibber/config.json`'s coordinator (R-BTN-131); if it refuses because Baton gave no
+  number, stop and say so — never `--offline`, never an id of your own. Its course is the
   repository's default (`create-pr` unless it says otherwise).
 - Write it the way the `draft-ticket` course does: **Why** (the symptom and the cause at
   `file:line`), **What to build**, **Architecture** (the decisions, named), **Trust** (every new
@@ -38,8 +41,10 @@ ticket for the fix exists and the bug ticket names it.
 
 ## Record
 
-Add `## file` to the bug ticket, naming the new ticket(s). Commit the new ticket file(s) and the
-bug ticket together to the default branch.
+- **The filing** lands alone: commit each new ticket file, and nothing else, on a branch
+  `baton-ticket/<its id>` cut from the default branch, push it, and open a pull request for it.
+- **The bug ticket:** add `## file`, naming the new ticket(s) and their pull requests, and commit
+  that to the default branch.
 
 Your work lands under the ticket's own `## file` heading — write it if it is not there; the close checks it is.
 

@@ -2,7 +2,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { writeSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
-import { batonNow } from '../vendor/baton.mjs';
+import { batonNow } from '../shared/baton.mjs';
 import type { LocalQueue } from './queue';
 import type { RefState } from './audit';
 import { BatonApi, BatonRefusal, batonUnreachable } from './api';
@@ -12,7 +12,9 @@ import { StateFile, leaseLostFrom, type PersistedClaim } from './state';
 import { ClaimRun, type ClaimOutcome, type Resume } from './claimRun';
 import { Sidecar, BEAT_MS } from './sidecar';
 import { MachineLocks } from './machineLocks';
-import { msg, sleep, stampLine, withTimestamps } from './log';
+import { ageWords, msg, sleep, stampLine, withTimestamps } from './log';
+import { maskLegOutput } from './mask';
+import { idleReason } from './idle';
 
 export { BEAT_MS, declarationFrom } from './sidecar';
 export { SIGNAL_GRACE_MS, type ClaimOutcome } from './claimRun';
@@ -119,6 +121,8 @@ export class Runner {
   private draining = false;
   /** Bumps with every claim: an answer a beat started before the claim cannot fence it. */
   private epoch = 0;
+  /** B-244: one line on entry and on a changed refusal, not one per beat. */
+  private idle: { since: number; line: string } | null = null;
   /** B-86: the empty-declaration line has been said, once, since `runOnce` would ask each time. */
   private saidEmpty = false;
   private readonly locks: MachineLocks | null;
@@ -499,7 +503,6 @@ export class Runner {
         }
         return null;
       }
-      if (e instanceof BatonRefusal && e.code === 'no-eligible-ticket') return null;
       if (e instanceof BatonRefusal && e.code === 'unauthenticated') {
         // B-93: only the registration's own missing-secret refusal is quiet. A replaced
         // secret or replayed nonce still names itself, now on the single claim request.
@@ -520,8 +523,15 @@ export class Runner {
         return null;
       }
       // R-BTN-4 (B-188): `max-claims` among them — the runner is at its bound for now.
-      if (e instanceof BatonRefusal && e.code === 'not-eligible') {
-        this.log(`baton: no claim (${e.message})`);
+      // B-244: the idle reason, said once on entry and again only when it changes.
+      if (e instanceof BatonRefusal && (e.code === 'not-eligible' || e.code === 'no-eligible-ticket' || (e.code === 'stale-skills' && e.detail != null))) {
+        if (!this.slots.size) {
+          const line = maskLegOutput(`baton: idle — ${e.code}: ${idleReason(e)}`, []);
+          if (line !== this.idle?.line) {
+            this.log(line);
+            this.idle = { since: this.idle?.since ?? this.now(), line };
+          }
+        }
         return null;
       }
       throw e;
@@ -531,6 +541,10 @@ export class Runner {
     this.epoch++;
     const ticket = claim.ticket_id as string;
     const claimId = claim.claim_id as number;
+    if (this.idle) {
+      this.log(`baton: idle for ${ageWords(this.now() - this.idle.since)}, ended by claim ${claimId}`);
+      this.idle = null;
+    }
     // R-BTN-4 (B-188): the claim's slot is held from here — before any await, so no beat can
     // read a claim Baton granted as one this runner does not hold.
     const slot = this.newSlot();
@@ -604,6 +618,11 @@ export class Runner {
       if (def == null || at == null) {
         dropCourse(course.scratch);
         wait(order.ticket_id, def == null ? `${leg} is not a leg of course ${course.course}` : `${leg} leaves ${def.from.join(' or ')}, and without Baton the runner cannot tell where the ticket rests`);
+        continue;
+      }
+      if (Object.keys(def.inputs ?? {}).length || def.outputs || def.to.some((station) => course.graph.entry.has(station))) {
+        dropCourse(course.scratch);
+        wait(order.ticket_id, `${leg} needs Baton for its contract or station entry (R-BTN-82)`);
         continue;
       }
       this.saidOffline.delete(order.ticket_id);

@@ -84,7 +84,8 @@ Then edit `.baton/baton.json`:
 - `"baton_url": "http://127.0.0.1:8787"`;
 - `"repos": {"mono": "<owner>/<repository>"}` — the GitHub repository, so tickets can say
   `repos: [mono]`;
-- optionally `"ticket_prefix": "LIN"`, so `baton tickets new` numbers `LIN-<n>`.
+- optionally `"ticket_prefix": "LIN"`, so Baton's sequence numbers `LIN-<n>` (`baton repo init`
+  writes it into `.dibber/config.json`, and `dibber new` takes its number from Baton).
 
 Commit and push: `git add -A && git commit -m "baton home" && git push origin main`.
 

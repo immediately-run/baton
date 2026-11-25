@@ -5,7 +5,7 @@ import { BatonError } from './http';
 import type { Store } from './ports';
 import { sha256Hex } from './runnerApi';
 import { bad, checkRegistrationTokenId, DAY_MS, registrationBody, registrationObject, registrationTokenId, tokenScope } from './validate';
-import { capabilitiesOf } from '../vendor/vocabulary.mjs';
+import { capabilitiesOf } from '../shared/vocabulary.mjs';
 
 interface Token {
   repository_id: string;

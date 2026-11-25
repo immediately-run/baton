@@ -6,7 +6,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { capabilitiesOf } from '../../src/vendor/vocabulary.mjs';
+import { capabilitiesOf } from '../../src/shared/vocabulary.mjs';
 import { asksHelp, declareCourses, fetchMain, hostMaskEnv, parseRunArgs, runMain, servedCourses } from '../../src/runner/main';
 import { drainLines, Runner, withTimestamps } from '../../src/runner/runner';
 import { BatonApi, BatonRefusal } from '../../src/runner/api';
@@ -917,12 +917,11 @@ describe('the first beat (B-93, S-BTN-159: a runner start says what it does, and
     (r as unknown as { state: StateFile }).state.set({ runner_id: 7 });
     await r.runOnce();
     expect(asked).toEqual([null]); // the server chooses in the claim transaction
-    // B-86's own once-per-declaration line, and nothing else: no refusal was due, and none was logged.
-    expect(lines).toEqual([DECLARED]);
+    expect(lines).toEqual([DECLARED, 'baton: idle — no-eligible-ticket: nothing to claim']);
     refuseGates = true;
     lines.length = 0;
     await r.runOnce();
-    expect(lines).toEqual(['baton: no claim (every gate refused this runner)']);
+    expect(lines).toEqual(['baton: idle — not-eligible: every gate refused this runner']);
     r.stop();
   });
 });
