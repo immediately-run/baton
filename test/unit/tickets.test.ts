@@ -83,11 +83,10 @@ describe('the tickets cache', () => {
 });
 
 describe('reference data and the dashboard state', () => {
-  it('materializes the reviewer catalog; the advisory blocks post through the window and store nothing (B-142)', async () => {
-    await post(A, null, stateA, reference);
-    expect(await rows('SELECT name, family, bills, models FROM reviewer_agents ORDER BY name')).toEqual([
-      { name: 'review-pr-claude', family: 'claude', bills: '["zai-coding-plan","anthropic"]', models: '{"zai-coding-plan":"zai-coding-plan/glm-5.3-flash","anthropic":"claude-opus-5-5"}' },
-      { name: 'review-pr-glm', family: 'glm', bills: '["zai-coding-plan"]', models: null }]);
+  it('accepts legacy advisory blocks without storing them (B-142, B-285)', async () => {
+    expect((await post(A, null, stateA, reference)).status).toBe(200);
+    expect(await rows(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'reviewer_agents'`)).toEqual([]);
+    expect(await rows(`SELECT key FROM baton_settings WHERE key IN ('reviewer_matrix', 'reviewer_catalog')`)).toEqual([]);
     // min_skills_version is gone (R-BTN-22): the registry carries each course's version.
     expect(await rows(`SELECT id, version, min_runner_version FROM courses`)).toEqual([{ id: 'roadmap-pr', version: 3, min_runner_version: 3 }]);
     // The `providers` and `prices` the reference still carries (the sync keeps posting them

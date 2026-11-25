@@ -3,7 +3,7 @@ title: "B-214 — Tenant screens, part one: /repositories (the registry), /insta
 id: B-214
 project: baton-ui-v2
 status: available
-updated: 2026-11-09
+updated: 2026-11-23
 repos:
   - baton
 tags:
@@ -46,7 +46,7 @@ screens from an owner).
 
 1. **`/repositories`** (`src/dashboard/screens/tenant/Registry.tsx`): from `GET
    /v1/admin/repositories?retired=1` as B-202 extends it — a `<table>` with id, forge path
-   (linking the forge by `web_base`), forge, default branch, weight, `tiers`, head (sha, age),
+   (linking the forge by `web_base`), forge, default branch, weight, ~~`tiers`,~~ head (sha, age),
    mode, courses, `sync_keys` and `ci_identity`, retired rows marked by `retired_at`,
    `seed_owners` marked and explained (R-BTN-58); what the root `/` does not show (the full row,
    retired repositories). The commands `baton admin repo add
@@ -99,3 +99,5 @@ extended); every command line matches R-BTN-127's tree; a hostile instance name 
 _filed 2026-11-09, split from B-202 after review._
 
 _2026-11-09 — revised after the second review: the registry's columns come from B-202's extended `admin.repo.list`._
+
+_2026-11-23 — tiers retired (spec/retire-tiers: [BATON_SPEC §6.6](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-6) gate 5, [R-BTN-66](../spec/BATON_SPEC/01-what-baton-is.md#sec-1)): the struck tier clauses are gone from the spec — no ticket tier, runner ceiling, grant `max_tier`, ladder, `ready_by_tier` or `?tier=`. Build the rest without them._

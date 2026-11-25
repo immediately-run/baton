@@ -31,6 +31,19 @@ export const SIGN_IN_ROLES: readonly SignInRole[] = [
 /** A role named in `/login?as=…` that no sign-in exists for yet, with the ticket that builds it. */
 const NOT_BUILT: Partial<Record<string, string>> = { owner: 'B-76' };
 
+function accessRefusal(reason?: string): string {
+  switch (reason) {
+    case 'not-configured':
+      return 'This Baton is missing Cloudflare Access settings: ask whoever deploys it to set ACCESS_TEAM_DOMAIN and ACCESS_AUD as secrets so they survive deploys.';
+    case 'no-assertion':
+      return 'No Cloudflare Access token reached Baton: ask whoever manages Access to cover /v1/login on this hostname.';
+    case 'unverified':
+      return 'The Cloudflare Access token did not verify: sign in to Access again if your session ended, or ask whoever deploys Baton to check that ACCESS_AUD and ACCESS_TEAM_DOMAIN match the Access application.';
+    default:
+      return 'No verified Cloudflare Access email is bound to an administrator key: ask whoever deploys Baton to check that ACCESS_IDENTITIES binds it to a key in BATON_ADMIN_KEYS.';
+  }
+}
+
 /** The link's token, as `baton admin open` writes it: the URL's fragment, 64 hex characters. */
 export function tokenOf(hash: string): string | null {
   const m = /^#([0-9a-f]{64})$/.exec(hash);
@@ -109,7 +122,7 @@ export function SignIn({ inPlace, as, error, onSignedIn }: { inPlace: boolean; a
           <h2 id={`signin-${r.role}`}>Sign in as {r.as}</h2>
           <p><button type="button" className="btn btn-primary" disabled={signing} onClick={() => void signInWithAccess()}>Sign in with Cloudflare Access</button></p>
           {accessFault?.code === 'unauthenticated'
-            ? <p className="band band-warn" role="alert">No verified Cloudflare Access email is bound to an administrator key. Use a one-time link instead.</p>
+            ? <p className="band band-warn" role="alert">{accessRefusal(accessFault.reason)} Use a one-time link instead.</p>
             : accessFault ? <ErrorNote error={accessFault} what="Cloudflare Access sign-in failed" /> : null}
           <p>For a one-time link, run this where your key is:</p>
           <p><CliLine>{r.cli}</CliLine></p>

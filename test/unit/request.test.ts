@@ -235,6 +235,34 @@ describe('baton request: what it refuses (B-98)', () => {
   });
 });
 
+describe('baton request: commit provenance (B-251)', () => {
+  it('appends the supplied trailers after a blank line without changing the returned subject', async () => {
+    const dir = repo();
+    const trailers = 'Claude-Session: test-session\nCo-Authored-By: Test <test@example.com>';
+    const filed = await fileRequest(readRequestPlan(dir, 'create-spec', SENTENCE), {
+      env: { TICKET_TRAILERS: trailers, TICKET_REQUIRE_TRAILERS: '1' },
+    });
+    const subject = requestMessage('B-1', 'create-spec', SENTENCE);
+    expect(filed.message).toBe(subject);
+    expect(git(originOf(dir), 'log', '-1', '--format=%B', 'main')).toBe(`${subject}\n\n${trailers}`);
+  });
+
+  it('commits only the subject when no trailers are supplied or required', async () => {
+    const dir = repo();
+    const filed = await fileRequest(readRequestPlan(dir, 'create-spec', SENTENCE), { env: {} });
+    expect(git(originOf(dir), 'log', '-1', '--format=%B', 'main')).toBe(filed.message);
+  });
+
+  it('refuses required but empty trailers without pushing any refs', async () => {
+    const dir = repo();
+    const before = git(originOf(dir), 'show-ref');
+    await expect(fileRequest(readRequestPlan(dir, 'create-spec', SENTENCE), {
+      env: { TICKET_TRAILERS: ' \n', TICKET_REQUIRE_TRAILERS: '1' },
+    })).rejects.toThrow('TICKET_REQUIRE_TRAILERS=1, but TICKET_TRAILERS is empty');
+    expect(git(originOf(dir), 'show-ref')).toBe(before);
+  });
+});
+
 describe('baton request: the id, the branch and the push (B-98)', () => {
   it('the next free id skips the live and the archived ones', async () => {
     const existing = { 'tickets/B-1.mdx': '---\ntitle: "B-1 — x"\nid: B-1\nstatus: available\ntags: [request]\ntopics: [baton]\nowns: {}\nprs: []\ndepends_on: []\n---\n', 'tickets/archive/B-7.mdx': '---\ntitle: "B-7 — y"\nid: B-7\nstatus: done\ntags: [request]\ntopics: [baton]\nowns: {}\nprs: []\ndepends_on: []\n---\n' };

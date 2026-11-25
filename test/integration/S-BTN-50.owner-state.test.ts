@@ -64,7 +64,7 @@ describe('S-BTN-50 owner state exported (R3-1258)', () => {
     expect((await keyCall(owner, '/v1/owner/docs/owners', { public_key: human.publicKey })).status).toBe(200);
     const path = '/v1/repositories/docs/policy';
     expect((await keyCall(owner, '/v1/owner/docs/policy', { base_version: 1, preset: 'protected' }, 'PUT')).status).toBe(200);
-    expect((await keyCall(human, '/v1/owner/docs/policy/floors', { name: 'human-only', guarantees: ['human-gates'] })).status).toBe(200);
+    expect((await keyCall(human, '/v1/owner/docs/policy/floors', { name: 'protected', guarantees: ['no-runner-lands'] })).status).toBe(200);
     const before = (await keyCall(owner, path)).json;
     const versions = await rows('SELECT * FROM repository_policies ORDER BY repository_id, version');
     const keys = await rows('SELECT * FROM human_keys ORDER BY fingerprint');

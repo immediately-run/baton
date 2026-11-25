@@ -156,7 +156,7 @@ export class OwnerState {
     policies: Policies;
     restoreNext: (repository: string, ticket: string, station: string, leg: string | null, at: number) => void;
     /** §4.8's step 2: a seal refused for lagging mirrors dispatches their workflows (R-BTN-94). */
-    dispatchMirror?: (repository: string) => void;
+    dispatchMirror: (repository: string) => void;
   }) {}
 
   private rows<T = Record<string, unknown>>(q: string, ...p: unknown[]): T[] {
@@ -220,7 +220,7 @@ export class OwnerState {
          AND (r.mirror_workflow IS NOT NULL OR EXISTS (SELECT 1 FROM sync_keys k WHERE k.repository_id = r.id AND k.role = 'mirror' AND k.revoked_at IS NULL))
        ORDER BY r.id`, last);
     if (claims.length || lagging.length) {
-      for (const m of lagging) this.c.dispatchMirror?.(m.id);
+      for (const m of lagging) this.c.dispatchMirror(m.id);
       throw new BatonError('conflict', `the seal waits: ${claims.length ? `claims ${claims.map((c) => `${c.id} (${c.ticket_id}${c.fence_pending ? ', fence pending' : ''})`).join(', ')}` : ''}${claims.length && lagging.length ? '; ' : ''}${lagging.length ? `mirrors lagging on ${lagging.map((m) => m.id).join(', ')}` : ''}`.trim(), {
         claims: claims.map((c) => ({ id: c.id, ticket_id: c.ticket_id, status: c.status, fence_pending: c.fence_pending === 1 })),
         lagging_mirrors: lagging.map((m) => m.id),
@@ -339,6 +339,7 @@ export class OwnerState {
       if (!str(r.credential_id) || !creds.has(r.credential_id)) bad('runner_grants row', `${JSON.stringify(r.credential_id)} is not an imported credential`);
       if (!str(r.repository_id) || !repoIds.has(r.repository_id)) bad('runner_grants row', `${JSON.stringify(r.repository_id)} is not an imported repository`);
       if (r.role != null && !['runner', 'trusted-runner'].includes(String(r.role))) bad('runner_grants row', `${r.credential_id}: role is unknown`);
+      if ('deliver_interactions' in r && r.deliver_interactions !== 0 && r.deliver_interactions !== 1) bad('runner_grants row', 'deliver_interactions must be 0 or 1');
     }
     for (const r of sections.couriers ?? []) {
       if (!str(r.credential_id) || !creds.has(r.credential_id)) bad('couriers row', `${JSON.stringify(r.credential_id)} is not an imported credential`);
@@ -448,7 +449,7 @@ export class OwnerState {
     // floor rolls back the entire import, including the policy and the pending rows.
     for (const repository of new Set((b.sections.policy_floors ?? []).map((row) => String(row.repository_id)))) {
       const { policy } = this.c.policies.current(repository)!;
-      const holds = guaranteesOf(policy, { humanKeys: this.c.policies.facts(repository).humans });
+      const holds = guaranteesOf(policy);
       for (const floor of this.c.policies.floors(repository)) {
         for (const guarantee of floor.guarantees) {
           if (!holds[guarantee as keyof typeof holds]) {

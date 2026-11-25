@@ -14,21 +14,20 @@ import { Stations, type Seen } from './stations';
 import { Questions } from './questions';
 import { Conditions } from './conditions';
 import { Admin, SESSION_COOKIE, SESSION_MS } from './admin';
-import { familyOf } from '../shared/baton.mjs';
 import { fitsTier, TIERS } from '../shared/vocabulary.mjs';
 import { clientVersionOf } from '../shared/versions.mjs';
 import { RunnerApi } from './runnerApi';
 import { parseAdminKeys, parseSshKey, verifyApiKey, verifyRequest, withBody, type SyncCredential } from './auth';
 import { Claims } from './claims';
 import { Cutover } from './cutover';
-import { Mirror } from './mirror';
+import { DispatchRefused, Mirror } from './mirror';
 import { CAPABILITY_NAME, checkAttestation, checkConfirmations, checkDependenciesRead, checkRepositoryId, checkSequenceTake, COURSE_ID, GIT_BRANCH, GIT_REPO, SEQUENCE_KIND } from './validate';
 import { Courses } from './courses';
 import { Observations } from './observations';
 import { Sequences } from './sequences';
 import { Webhooks, type Delivery } from './webhook';
 import { checkCrossBoardCycle, checkCrossRepository, consentRoute, resolveDependencies } from './dependencies';
-import { fileUrl } from './links';
+import { fileUrl, hiddenSessionLink, type SessionLinkView } from './links';
 import { Stats } from './stats';
 import { Blocks } from './blocks';
 import { Resources } from './resources';
@@ -43,7 +42,7 @@ import { checkBlockedOn, checkNoticeClaim } from './validate';
 import { checkResync } from './validate';
 import { Registry, TICKET_ID, qualify, repositoryOf, tierPosition, type Repository, type SyncClaims } from './registry';
 import { codeReposOf, pushersOf } from './codeRepos';
-import { Policies, sha256HexSync } from './policy';
+import { acceptsUnattestedHumanKey, Policies, sha256HexSync } from './policy';
 import { Scope } from './scope';
 import { logEvent, systemRandom } from './db';
 import { Deprecated } from './deprecated';
@@ -138,8 +137,7 @@ export class BatonCore {
     this.registry = new Registry({ store, now: () => this.now(), ensurePolicy: (repository, forge) => this.policies.ensure(repository, forge) });
     // §12.8 (B-145): the policy store, before everything that reads a knob — the claims' floor
     // rule, the heartbeat's reports and pins, the owner routes' approver checks.
-    this.policies = new Policies({ store, now: () => this.now() });
-    this.policies.releaseForFloor = (repository) => this.claims.releaseForFloor(repository);
+    this.policies = new Policies({ store, now: () => this.now(), releaseForFloor: (repository) => this.claims.releaseForFloor(repository) });
     // R3-1258: the capacity envelope (R-BTN-87) and owner state (R-BTN-88).
     this.capacity = new Capacity({ store, now: () => this.now(), config: ports.config });
     this.ownerState = new OwnerState({ store, now: () => this.now(), origin: ports.config.BATON_ORIGIN,
@@ -193,6 +191,7 @@ export class BatonCore {
     // a sync is asked (R-BTN-73) — and what it may not apply it records, never refusing (R-BTN-39).
     this.questions = new Questions({ store, now: () => this.now(), graph: (repo, course) => this.stations.graph(repo, course), history: this.history,
       queued: (ticket) => this.queues.touch(ticket), reevaluate: (ticket) => this.blocks.write([ticket]), isHeld: (ticket) => this.blocks.isHeld(ticket),
+      closeMissingNext: (ticket, at) => this.conditions.closeMissingNext(ticket, at),
       linkBases: (ticket) => this.blocks.linkBases(ticket), answersFrom: (repo) => this.policies.current(repo)?.policy.inputs.answers ?? 'git',
       dispatch: (kind, ticketId) => want({ repository: repositoryOf(ticketId), kind }) });
     // B-234 (R-BTN-160, R-BTN-195): the raised conditions — a course's own vocabulary decides a
@@ -287,8 +286,7 @@ export class BatonCore {
 
   /** §10.3: a repository's sync or mirror workflow, on its default branch. A repository with no
    *  mirror has nothing to dispatch for it; a retired one has nothing at all (R-BTN-47, B-173). A
-   *  dispatch the forge refuses is logged with its reason (R-BTN-94): the want it answers stands
-   *  until a post answers it, so a refusal costs latency, never correctness. */
+   *  dispatch the forge refuses is logged with its reason (R-BTN-94); the sync backstop still applies. */
   private async sendDispatch(wf: Workflow): Promise<unknown> {
     const repo = this.registry.live(wf.repository);
     if (!repo) return false;
@@ -310,10 +308,10 @@ export class BatonCore {
     try {
       return await this.ports.dispatch.send(target);
     } catch (e) {
-      // R-BTN-94: the forge's refusal, with its reason — identifiers only, never a body (the
-      // refusal's message is the forge's own words, capped like a notice's).
+      if (!(e instanceof DispatchRefused)) return false;
+      // R-BTN-94: identifiers and the adapter's short text reason, never the response payload.
       this.store.transaction(() => logEvent(this.store, this.now(), 'discrepancy', 'baton',
-        { kind: 'dispatch-refused', repository: wf.repository, workflow: wf.kind, reason: (e instanceof Error ? e.message : String(e)).slice(0, 500) },
+        { kind: 'dispatch-refused', repository: wf.repository, workflow: wf.kind, reason: e.message },
         null, null, wf.repository));
       return false;
     }
@@ -408,7 +406,7 @@ export class BatonCore {
 
   /** §3: the one alarm, every 60 seconds — earlier when a webhook's trailing dispatch or the
    *  webhook path's own backstop is due. */
-  // @model alarmLive sha256:6f9056ae3a4b
+  // @model alarmLive sha256:9738e53567a4
   async alarm(): Promise<void> {
     // R-BTN-88 (§4.8, R3-1258): a sealed Baton's alarm idles — it logs nothing and touches
     // nothing; the next period is kept armed (B-229), so the instance that imports this state
@@ -748,11 +746,15 @@ export class BatonCore {
         const signed = await this.authenticated(req, (fp) => admins.get(fp) ?? this.admin.ownerKey(fp) ?? this.admin.humanKeyLine(fp));
         const fp = signed.cred;
         const human = await this.admin.isHumanKey(fp);
+        const policy = this.policies.current(repo)?.policy;
         if (admins.has(fp)) throw new BatonError('forbidden', 'an administrator’s key is never an owner key (R-BTN-57); a person’s answer is an owner’s or a human-only key’s');
         if (!human && !this.admin.owns(fp, repo)) throw new BatonError('forbidden', `this key neither owns ${repo} nor is a human-only key (R-BTN-116, R-BTN-185)`);
+        if (human && !acceptsUnattestedHumanKey(policy?.human_key ?? 'any')) {
+          throw new BatonError('forbidden', `${repo}'s policy requires an attested hardware key for a human answer (R-BTN-185)`);
+        }
         // §12.8, R-BTN-191: where the policy's `inputs.answers` is `attestation` (`protected`),
         // a person's answer counts from a human key alone — an owner key's does not.
-        if (!human && (this.policies.current(repo)?.policy.inputs.answers ?? 'git') === 'attestation') {
+        if (!human && policy?.inputs.answers === 'attestation') {
           throw new BatonError('forbidden', `${repo}'s policy counts a person's answer from a human key alone (inputs.answers: attestation)`);
         }
         const b = checkAttestation(await readJson(signed.req), repo);
@@ -1337,7 +1339,7 @@ export class BatonCore {
    * runner session's own answer, so it needs the session's secret. B-192: served through
    * src/core/reads/repository.ts, for a session beside those keys.
    */
-  async repositoryRead(req: Request, url: URL, repo: string, who: ReadPrincipal): Promise<Response | null> {
+  async repositoryRead(req: Request, url: URL, repo: string, who: ReadPrincipal, sessionLink: SessionLinkView): Promise<Response | null> {
     const blocks = /^\/v1\/repositories\/([^/]+)\/tickets\/([^/]+)\/blocks$/.exec(url.pathname);
     const blocked = /^\/v1\/repositories\/([^/]+)\/blocked$/.exec(url.pathname);
     // R-BTN-81: a ticket's history, read by the principals that may read its blocks (§11).
@@ -1375,7 +1377,7 @@ export class BatonCore {
         ? [...new Set(this.runners.grantedCapabilities(cred, repo))].filter((x) => x !== 'none').sort()
         : null;
     }
-    if (boardRead) return json(this.boardView(repo, granted));
+    if (boardRead) return json(this.boardView(repo, granted, sessionLink));
     if (policyRead) return this.policyRead(repo);
     if (show) {
       const raw = seg(show[2]);
@@ -1427,7 +1429,7 @@ export class BatonCore {
       if (!TICKET_ID.test(id) || repositoryOf(id) !== repo) throw new BatonError('invalid-params', `ticket: must be a ticket of ${repo}`);
       const leg = seg(runs[3]);
       if (!COURSE_ID.test(leg)) throw new BatonError('invalid-params', 'leg: must be a leg id');
-      return json(this.claims.runsOf(id, leg));
+      return json(this.claims.runsOf(id, leg, sessionLink));
     }
     if (blocks) {
       const raw = seg(blocks[2]);
@@ -1562,7 +1564,7 @@ export class BatonCore {
    * a rewind to a once-accepted history included — is a fresh hold with a fresh row. The 0001
    * schema's "written once" and "the first force post" describe that one hold.
    */
-  // @model syncPost sha256:231806fa206f
+  // @model syncPost sha256:9d500d65a2bf
   async board(repo: Repository, p: BoardPayload) {
     // Course graphs are read per post: a registry applied, or a post refused after applying one,
     // must not leave another request reading a graph that is not in force.
@@ -1608,7 +1610,7 @@ export class BatonCore {
         this.observations.accept(r, n);
         const seen = normative ? this.refreshStations(r, p, n, at, null, true) : new Map<string, Seen>();
         this.claims.confirm(confirmations, n);
-        this.claims.judge(r, n, seen);
+        this.claims.judge(r, n, seen, this.claims.evidenceOf(r, p.attestations));
         this.store.exec('UPDATE held_snapshots SET observation = ? WHERE repository_id = ? AND sha = ?', n, r, p.sha);
       });
       // Held once per sha: a repeat (the sync re-posts every 15 minutes) changes nothing, so
@@ -1659,7 +1661,7 @@ export class BatonCore {
           nonScheduling(this.store, () => this.store.exec('UPDATE board_head SET stations_observation = ? WHERE repository_id = ?', n, r));
           this.settleSpawned(r, p, n, at);
           const confirmed = this.claims.confirm(confirmations, n);
-          const judged = this.claims.judge(r, n, seen);
+          const judged = this.claims.judge(r, n, seen, this.claims.evidenceOf(r, p.attestations));
           remember();
           return { ok: true, unchanged: true, ...(p.read_sha === p.sha ? { tickets_upserted: 0, tickets_deleted: 0 } : {}),
             confirmed: confirmed + judged.confirmed, stale_released: judged.stale_released };
@@ -1716,7 +1718,7 @@ export class BatonCore {
         }
         const seen = normative ? this.refreshStations(r, p, n, at, wrote) : new Map<string, Seen>();
         const confirmed = this.claims.confirm(confirmations, n);
-        const judged = this.claims.judge(r, n, seen);
+        const judged = this.claims.judge(r, n, seen, this.claims.evidenceOf(r, p.attestations));
         remember();
         return {
           ok: true, unchanged: true,
@@ -1729,7 +1731,7 @@ export class BatonCore {
 
     // Hash every row before the transaction: the digest is async, the transaction is not.
     const rows = await this.rowsFor(repo, p);
-    const changed: { upserted: number; deleted: number; renumbered?: { from: string; to: string; key: string }[]; confirmed?: number; stale_released?: number; courses_refused?: string[]; fleet_ignored?: boolean; dropped?: string[] } = { upserted: 0, deleted: 0 };
+    const changed: { upserted: number; deleted: number; renumbered?: { from: string; to: string; key: string }[]; confirmed?: number; stale_released?: number; courses_refused?: string[]; dropped?: string[] } = { upserted: 0, deleted: 0 };
     this.store.transaction(() => {
       // The row hashes were awaited after the number was used, so another run may have posted
       // meanwhile: this reading must still be the newest, over the head it was judged against.
@@ -1772,6 +1774,7 @@ export class BatonCore {
       // the blocks are re-evaluated below.
       this.questions.posted(r, p.tickets ?? [], new Set(stations.keys()));
       this.questions.attestations(r, p.attestations ?? []);
+      this.conditions.missingNext(r, this.stations.missingNext(r), at);
       // B-129 (R-BTN-85, both values): a post whose ticket frontmatter says `available` while
       // the ticket is past its course's start — the snapshot implying a position Baton has
       // moved past, the false `available`/`prs: []` of the 2026-10-27 release — is a
@@ -1781,8 +1784,6 @@ export class BatonCore {
       // where each ticket is queued — rewrite the changed tickets' blocks in this transaction.
       const dropped = this.applyBlocks(r, stations, upserted, legsBefore, changed.deleted > 0);
       if (dropped.length) changed.dropped = dropped.slice(0, 100);
-      // A non-fleet repository's fleet fields are ignored, and its answer says so.
-      if (this.reference(r, p)) changed.fleet_ignored = true;
       this.store.exec('INSERT INTO board_snapshots (repository_id, sha, parent_sha, received_at, ticket_count) VALUES (?, ?, ?, ?, ?) ON CONFLICT (repository_id, sha) DO NOTHING', r, p.sha, p.parent_sha, at, ticketCount);
       this.store.exec('INSERT INTO board_head (repository_id, sha) VALUES (?, ?) ON CONFLICT (repository_id) DO UPDATE SET sha = excluded.sha', r, p.sha);
       // B-127: the post's signed-control record stands for the repository (the latest post's
@@ -1807,7 +1808,7 @@ export class BatonCore {
       this.observations.accept(r, n);
       const confirmed = this.claims.confirm(confirmations, n);
       // R-BTN-10, R-BTN-35, §2e: git confirms ends, takes tickets away and goes backwards.
-      const judged = this.claims.judge(r, n, seen);
+      const judged = this.claims.judge(r, n, seen, this.claims.evidenceOf(r, p.attestations));
       changed.confirmed = confirmed + judged.confirmed;
       changed.stale_released = judged.stale_released;
       remember();
@@ -2153,6 +2154,7 @@ export class BatonCore {
     // head (§4.4) — each is idempotent, so a re-post of the same question or answer moves nothing.
     this.questions.posted(r, (p.tickets ?? []).filter((t) => live.has(t.id)), new Set(stations.keys()));
     this.questions.attestations(r, p.attestations ?? []);
+    this.conditions.missingNext(r, this.stations.missingNext(r), at);
     // A refresh's stations carry `needs` and `decisions` too (R-BTN-76, R-BTN-78); a refresh that
     // materialized (B-183) recounts for what its rows moved, as a new head does.
     this.applyBlocks(r, stations, wrote?.upserted ?? [], legsBefore, !!wrote && wrote.deleted > 0);
@@ -2234,33 +2236,6 @@ export class BatonCore {
     return refused;
   }
 
-  /** The reference data the sync posts with every snapshot (§7.3, §7.4): the reviewer catalog
-   *  and matrix. Each table is a copy of a docs file, never edited here, so it is rewritten
-   *  whole. The model tables' blocks — `providers`, `prices` — are gone (B-142): what they
-   *  carried is a reading or a course rule (§6.3, R-BTN-76), and a sync that still posts them
-   *  is accepted with the fields ignored.
-   *  Returns whether the payload carried fleet data this repository may not write. */
-  private reference(repo: string, p: BoardPayload): boolean {
-    const exec = (q: string, ...a: unknown[]) => this.store.exec(q, ...a);
-    // §6.8, R-BTN-66: a repository's transcript repositories are its owners' setting, never read
-    // from a board post (R3-1240); a sync that still sends them is not refused for it.
-    // The rest is the instance's: only the fleet repository writes it (interim, R3-1231 2b).
-    const carries = p.matrix != null || p.reviewers != null;
-    if (this.registry.fleetRepository() !== repo) return carries;
-    const catalog = p.reviewers ?? p.matrix?.agents;
-    if (catalog && p.matrix) {
-      exec('DELETE FROM reviewer_agents');
-      for (const [name, a] of Object.entries(catalog)) {
-        exec('INSERT INTO reviewer_agents (name, reviews_on, family, bills, models) VALUES (?, ?, ?, ?, ?)',
-          name, a.reviews_on, familyOf(a.reviews_on, p.matrix) ?? 'unknown', JSON.stringify(a.bills), a.models ? JSON.stringify(a.models) : null);
-      }
-    }
-    // Rule 8 (R-BTN-27) reads the whole matrix (rows, seats, costs) and the posted catalog.
-    if (p.matrix) exec(`INSERT INTO baton_settings (key, value) VALUES ('reviewer_matrix', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value`, JSON.stringify(p.matrix));
-    if (p.reviewers) exec(`INSERT INTO baton_settings (key, value) VALUES ('reviewer_catalog', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value`, JSON.stringify(p.reviewers));
-    return false;
-  }
-
   private event(repo: string, kind: string, detail: unknown, at: number) {
     this.store.exec('INSERT INTO events (at, kind, actor, detail_json, repository_id) VALUES (?, ?, ?, ?, ?)', at, kind, 'sync', JSON.stringify(detail), repo);
   }
@@ -2299,6 +2274,7 @@ export class BatonCore {
       grants: limits.grants.filter((g) => g.repository_id === repo).map((g) => ({
         credential_id: g.credential_id, hostname: g.hostname, label: g.label, repository_id: g.repository_id,
         capabilities: g.capabilities, max_tier: g.max_tier, max_claims: g.max_claims, granted_by: g.granted_by, granted_at: g.granted_at,
+        deliver_interactions: g.deliver_interactions,
         other_repositories: limits.grants.filter((o) => o.credential_id === g.credential_id && o.repository_id !== repo).map((o) => o.repository_id).sort(),
       })),
       settings: limits.settings.find((s) => s.repository_id === repo) ?? null,
@@ -2316,7 +2292,7 @@ export class BatonCore {
    *  for a key no grant binds and for an owner's or an administrator's key. `holders` (B-129) is
    *  the repository's live claims with each holder and its lease's end — the lock a session
    *  claiming through git reads with the same request (R-BTN-179's one-answer rule). */
-  boardView(repo: string, granted: string[] | null = null) {
+  boardView(repo: string, granted: string[] | null = null, sessionLink = hiddenSessionLink) {
     const now = this.now();
     const repository = this.uiRepo(this.registry.get(repo)!);
     const ready = this.readyRows([repository], repo);
@@ -2324,7 +2300,7 @@ export class BatonCore {
       repository,
       ready,
       ready_by_tier: this.readyByTier(ready, [repo]),
-      holders: this.claims.holdersOf(repo),
+      holders: this.claims.holdersOf(repo, sessionLink),
       granted_capabilities: granted,
       server_time: now,
     };
