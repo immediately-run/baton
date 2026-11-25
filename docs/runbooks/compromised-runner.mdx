@@ -49,15 +49,21 @@ when you hold only owner keys; it names the fingerprint each grant belongs to.
 Revoke — everywhere at once with an administrator key, which also ends the credential so no
 owner can re-grant it by accident:
 
+On a server enforcing §12.2, use a pinned release that includes B-300 for both revocation
+commands. Set `BATON_CONFIRM_CLI_VERSION` to that exact release version; the older read-only
+commands above still work. Do not use a working-tree CLI with incident credentials (B-138).
+
 ```sh
-npx --yes @immediately-run/baton@0.1.3 admin -i ~/.ssh/baton_admin revoke SHA256:FINGERPRINT
+npx --yes "@immediately-run/baton@${BATON_CONFIRM_CLI_VERSION:?set the exact B-300 release version}" admin -i ~/.ssh/baton_admin revoke SHA256:FINGERPRINT
 ```
 
 or, per repository, with an owner key (the spec's `owner grant revoke`, R-BTN-58, §12.2):
 
 ```sh
-npx --yes @immediately-run/baton@0.1.3 owner -i ~/.ssh/baton_repo_owner revoke baton SHA256:FINGERPRINT
+npx --yes "@immediately-run/baton@${BATON_CONFIRM_CLI_VERSION:?set the exact B-300 release version}" owner -i ~/.ssh/baton_repo_owner revoke baton SHA256:FINGERPRINT
 ```
+
+Review and accept Baton's confirmation prompt. The `npx --yes` flag only permits npm to install the package.
 
 **What this does, and when.** The runner's next heartbeat — within its beat, two minutes by
 default — is refused; a `baton run` marks its lease lost at that beat, kills its running leg
