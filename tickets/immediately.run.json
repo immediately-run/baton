@@ -1,6 +1,6 @@
 {
   "opensWith": {
-    "app": "github:immediately-run/baton-board",
+    "app": "github:immediately-run/dibber-board",
     "version": "1.0"
   },
   "kind": "wiki",

@@ -3,7 +3,7 @@ title: "B-299 — The runner rules §8.4 and §9 state and the reference runner 
 id: B-299
 project: baton
 status: available
-updated: 2026-11-20
+updated: 2026-11-23
 repos:
   - baton
 tags:
@@ -19,6 +19,8 @@ prs:
   - https://github.com/immediately-run/baton/pull/339
 depends_on: []
 ---
+
+**Owner ruling, 2026-11-23** (the owner: "Yes to both", on the ten rows proposed in #339). **Rows 1–4 and 6–10 are confirmed as proposed.** **Row 5 is confirmed with a condition:** B-299 adds the runner secret and the runner's credentials to the leg mask set through the existing secret-set inputs (`maskEnv`, the secret-name pattern, `secretValues`), and does not change the masker itself. `createLegMasker`, `literalSpans` and `maskLiterals` in `src/runner/mask.ts` belong to B-316 (after #354); separate tickets never share a write target. **Plan item 5 (the four builder tickets):** the separate hand-off is authorized. Each builder ticket keeps its own write target, and B-299's code phase touches none of theirs.
 
 **Brief:** the spec simplification of 2026-11-19 cut the spec to what is built, and its review
 found rules in §8 and §9 that the text already stated before the rewrite and that the reference

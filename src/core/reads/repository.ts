@@ -1,9 +1,8 @@
 // reads/repository.ts — the repository and owner reads that existed for keys before B-192, now
 // one entry each in src/core/actions.ts with a session beside the keys: the board, the blocks,
 // the history, a ticket and its children, a leg's runs, the policy, the stats, the conditions,
-// and the owner's grants and policy log. Their bodies are unchanged (R-BTN-179: a session reads
-// the same entry, query and JSON a key gets); what changed is before them — one principal, one
-// authorization, the one refusal, and the ETag (./index.ts).
+// and the owner's grants and policy log. The dispatcher supplies one principal, one
+// authorization, the ETag and the R-BTN-113 projection for session capabilities (./index.ts).
 import { BatonError, json } from '../http';
 import { STATS_WINDOW_MS } from '../stats';
 import { withCredentials } from './credentials';
@@ -14,7 +13,7 @@ import type { ReadRoute } from './kit';
 const legacy = (action: string, over: Partial<ReadRoute> = {}): ReadRoute => ({
   action,
   clock: true,
-  run: async (cx, call) => (await cx.core.repositoryRead(call.req, call.url, call.repository!, call.principal))
+  run: async (cx, call) => (await cx.core.repositoryRead(call.req, call.url, call.repository!, call.principal, call.sessionLink))
     ?? (() => { throw new BatonError('not-found', `no route GET ${call.url.pathname}`); })(),
   ...over,
 });
