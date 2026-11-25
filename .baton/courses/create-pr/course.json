@@ -44,6 +44,7 @@
         "pr-open",
         "delivered"
       ],
+      "max_duration": 10800,
       "label": "Implement it and open the PR, or find it delivered"
     },
     "run-tests": {
@@ -56,6 +57,7 @@
         "fixed"
       ],
       "max_runs": 30,
+      "autonomous": true,
       "label": "Run the deterministic tests"
     },
     "review": {
@@ -70,6 +72,7 @@
         "implement",
         "fix"
       ],
+      "autonomous": true,
       "label": "Review round"
     },
     "fix": {
@@ -80,6 +83,7 @@
       ],
       "to": "fixed",
       "max_runs": 30,
+      "max_duration": 10800,
       "label": "Fix or answer the findings"
     },
     "adjudicate": {
@@ -87,6 +91,7 @@
         "reviewed"
       ],
       "to": "adjudicated",
+      "autonomous": true,
       "label": "The owner answers the last round"
     },
     "merge": {
@@ -95,6 +100,7 @@
         "adjudicated"
       ],
       "to": "merged",
+      "autonomous": true,
       "label": "Merge and close the ticket"
     },
     "confirm": {

@@ -9,7 +9,7 @@ import roadmapPr from '../fixtures/courses/roadmap-pr/course.json';
 import { CREATE_PR_COURSE, stationsPr } from '../../src/defaults/course-pr';
 import type { BranchCommit, RecordedLeg } from '../../src/defaults/pr-markers';
 import type { SourceTicket } from '../../src/defaults/tickets-markdown';
-import { advance, claimItem, course, cutover, endClaim, Git, keyCall, observe, placed, recommended, register, setAdminKeys, setClock } from '../helpers';
+import { advance, claimItem, course, cutover, endClaim, evidenceFound, Git, keyCall, observe, placed, recommended, register, setAdminKeys, setClock } from '../helpers';
 import { makeKey, type TestKey } from '../lib/sshKeys';
 
 const T0 = Date.parse('2026-10-19T12:00:00Z');
@@ -70,7 +70,10 @@ describe('S-BTN-63 no review by its author’s key', () => {
       });
       expect(stations['T-1'].next_leg).toBe(next);
       git.place('T-1', stations['T-1']);
-      expect(await git.post({ observation: json.observation, markers })).toMatchObject({ status: 200, confirmed: 1 });
+      // R-BTN-10: the sync attests the evidence each unconfirmed end named.
+      const unconfirmed = ((json as { unconfirmed?: { ticket: string; claim: number; evidence: string }[] }).unconfirmed ?? []);
+      const attestations = unconfirmed.flatMap((u) => evidenceFound(u.claim, u.evidence, u.ticket).attestations);
+      expect(await git.post({ observation: json.observation, markers, attestations })).toMatchObject({ status: 200, confirmed: 1 });
     };
     const a = await register('vm-a', runner);
     const { json: impl } = await claimItem('vm-a', a.secret, ticket);
