@@ -1,6 +1,6 @@
 // fixtureRepo.mjs — the integration harness's stand-in for `docs/main` (BATON_SPEC §13a
 // R-BTN-29): a local bare repository with fixture roadmap items and real git history. Node
-// only; test/integration/global-setup.ts and scripts/board-fixtures.mjs use it.
+// only; test/global-setup.ts uses it.
 //
 // The history (commit dates and identity fixed, so every run produces the same shas):
 //   A  R3-9001..9004 filed (R3-9004 blocked on R3-9001; R3-9003's repos entry is the
@@ -16,7 +16,6 @@ import { fileURLToPath } from 'node:url';
 
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), '..', 'fixtures');
 export const LABELS = ['A', 'B', 'C', 'D'];
-export const NOW = '2026-10-13T12:00:00.000Z';
 
 const ENV = {
   GIT_AUTHOR_NAME: 'Fixture', GIT_AUTHOR_EMAIL: 'fixture@example.invalid',
@@ -49,7 +48,7 @@ export function buildFixtureRepo() {
   for (const f of readdirSync(join(FIXTURES, 'roadmap'))) put(f.replace(/\.mdx$/, ''), fixture(f.replace(/\.mdx$/, '')));
   mkdirSync(join(work, 'scripts/data'), { recursive: true });
   for (const f of readdirSync(join(FIXTURES, 'data'))) copyFileSync(join(FIXTURES, 'data', f), join(work, 'scripts/data', f));
-  // docs' course file, which the sync posts in its registry (R-BTN-48): the vendored copy.
+  // The captured course file, which the sync posted in its registry (R-BTN-48).
   mkdirSync(join(work, '.baton/courses/roadmap-pr'), { recursive: true });
   copyFileSync(join(FIXTURES, 'courses/roadmap-pr/course.json'), join(work, '.baton/courses/roadmap-pr/course.json'));
   const A = commit('roadmap: file R3-9001..9004', '2026-10-13T10:00:00Z');
@@ -80,18 +79,4 @@ export function buildFixtureRepo() {
     }
   };
   return { root, bare, work, shas, isAncestor };
-}
-
-/** The snapshot the sync posts at each commit, produced by the REAL docs sync —
- *  `buildPayload` from docs scripts/baton-sync.mjs, run over the fixture repository (it reads
- *  the board with factory-state's code and the data files at that commit) — minus its
- *  internal `_state`. */
-export async function boardStates(repo, docsDir) {
-  const { buildPayload } = await import(join(docsDir, 'scripts/baton-sync.mjs'));
-  const out = {};
-  for (const label of LABELS) {
-    const { _state, ...payload } = buildPayload(repo.shas[label], { root: repo.work, now: NOW });
-    out[label] = payload;
-  }
-  return out;
 }

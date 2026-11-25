@@ -1,8 +1,7 @@
 # Baton's core as a formal model (R3-1243)
 
 A [Quint](https://quint-lang.org) model of Baton's core state machine, written against
-`BATON_SPEC` (now [`spec/BATON_SPEC.md`](../spec/BATON_SPEC.md); written against it in
-`immediately-run/docs` as merged at `b7537395`, docs#212) and being brought up to the spec's
+[`BATON_SPEC`](../spec/BATON_SPEC.md) and being brought up to the spec's
 §2g–§2m by R3-1254 — so far R-BTN-98's one-transaction claim, R-BTN-83's queued leg, and a leg's
 prerequisites with their blocks, retries and blocked ends (R-BTN-75, -77, -78, -120, -122, -126).
 In sync with the spec's 2026-11-02 restructure, part 4 (B-167): rule 4 matches capabilities by
@@ -15,6 +14,8 @@ layout in the same pass.
 *Not modelled* lists the rest. Each action, helper
 and property names the requirement it models (`R-BTN-n`, §n). A counterexample is a spec
 defect: it is filed against BATON_SPEC with the trace, never fixed by weakening a property.
+
+<!-- dependency-history: The first model targeted BATON_SPEC in immediately-run/docs at b7537395 (docs#212). -->
 
 ## Files
 
@@ -35,7 +36,7 @@ defect: it is filed against BATON_SPEC with the trace, never fixed by weakening 
 
 **Where the checks run (R-BTN-68, amended 2026-10-17).** Model checking runs on the
 author's machine, not on hosted CI runners, whose time limits it outgrew. A pull request that
-changes what the checks read — `model/`, `src/core/` with the `src/shared/` and `src/vendor/` modules and
+changes what the checks read — `model/`, `src/core/` with the `src/shared/` modules and
 `src/migrations/` it imports, the replay and its helpers (`test/model/`, `test/helpers.ts`,
 `test/lib/`), the scenarios and their hosts (`test/integration/`, `test/hosts/`), the trace check,
 or `package-lock.json`, which pins Quint and Apalache — carries

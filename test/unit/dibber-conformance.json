@@ -1,0 +1,397 @@
+{
+  "revision": "39b761f1dfba2972b7074237b80735fa4b1ccb37",
+  "stores": {
+    "archive": {
+      "store": "tickets",
+      "files": [
+        {
+          "path": "X-2.md",
+          "text": "---\nid: X-2\ntitle: \"X-2 — an example ticket\"\nstatus: available\ndepends_on: [X-1]\n---\n\n**Depends on:** X-1.\n\n## Status\n\n_filed 2026-11-22._\n"
+        },
+        {
+          "path": "archive/X-1.md",
+          "text": "---\nid: X-1\ntitle: \"X-1 — an example ticket\"\nstatus: done\n---\n\n**Depends on:** none.\n\n### What to build\n\nAn example.\n\n## Status\n\n_filed 2026-11-22._\n"
+        },
+        {
+          "path": "archive/X-3.md",
+          "text": "---\nid: X-3\ntitle: \"X-3 — an example ticket\"\nstatus: withdrawn\n---\n\n**Depends on:** none.\n\n### What to build\n\nAn example.\n\n## Status\n\n_filed 2026-11-22._\n"
+        }
+      ],
+      "tickets": [
+        {
+          "id": "X-2",
+          "status": "available",
+          "depends_on": [
+            "X-1"
+          ],
+          "parent": null
+        },
+        {
+          "id": "X-1",
+          "status": "done",
+          "depends_on": [],
+          "parent": null
+        },
+        {
+          "id": "X-3",
+          "status": "withdrawn",
+          "depends_on": [],
+          "parent": null
+        }
+      ]
+    },
+    "closed-in-place": {
+      "store": "tickets",
+      "files": [
+        {
+          "path": "X-1.md",
+          "text": "---\nid: X-1\ntitle: \"X-1 — an example ticket\"\nstatus: done\n---\n\n**Depends on:** none.\n\n## Status\n\n_filed 2026-11-22._\n"
+        },
+        {
+          "path": "X-2.md",
+          "text": "---\nid: X-2\ntitle: \"X-2 — an example ticket\"\nstatus: withdrawn\n---\n\n**Depends on:** none.\n\n## Status\n\n_filed 2026-11-22._\n"
+        },
+        {
+          "path": "X-3.md",
+          "text": "---\nid: X-3\ntitle: \"X-3 — an example ticket\"\nstatus: superseded\n---\n\n**Depends on:** none.\n\n## Status\n\n_filed 2026-11-22._\n"
+        },
+        {
+          "path": "X-4.md",
+          "text": "---\nid: X-4\ntitle: \"X-4 — an example ticket\"\nstatus: deferred\n---\n\n**Depends on:** none.\n\n## Status\n\n_filed 2026-11-22._\n"
+        },
+        {
+          "path": "X-5.md",
+          "text": "---\nid: X-5\ntitle: \"X-5 — waits on a closed ticket\"\nstatus: available\ndepends_on: [X-1]\n---\n\n**Depends on:** X-1.\n\n## Status\n\n_filed 2026-11-22._\n"
+        }
+      ],
+      "tickets": [
+        {
+          "id": "X-1",
+          "status": "done",
+          "depends_on": [],
+          "parent": null
+        },
+        {
+          "id": "X-2",
+          "status": "withdrawn",
+          "depends_on": [],
+          "parent": null
+        },
+        {
+          "id": "X-3",
+          "status": "superseded",
+          "depends_on": [],
+          "parent": null
+        },
+        {
+          "id": "X-4",
+          "status": "deferred",
+          "depends_on": [],
+          "parent": null
+        },
+        {
+          "id": "X-5",
+          "status": "available",
+          "depends_on": [
+            "X-1"
+          ],
+          "parent": null
+        }
+      ]
+    },
+    "config": {
+      "store": "work/items",
+      "files": [
+        {
+          "path": "W-1.md",
+          "text": "---\nid: W-1\ntitle: \"W-1 — an example ticket\"\nstatus: available\n---\n\n**Depends on:** none.\n\n### What to build\n\nAn example.\n\n## Status\n\n_filed 2026-11-22._\n"
+        }
+      ],
+      "tickets": [
+        {
+          "id": "W-1",
+          "status": "available",
+          "depends_on": [],
+          "parent": null
+        }
+      ]
+    },
+    "every-key": {
+      "store": "tickets",
+      "files": [
+        {
+          "path": "EK-1.md",
+          "text": "---\nid: EK-1\ntitle: \"EK-1 — Write the landing page\"\nstatus: available\ndescription: The page people land on first.\ndepends_on: [EK-2, \"other:OT-9\"]\norder: 10\ntags: [web]\nproject: launch\nrepos: [example/site]\nupdated: 2026-11-20\nnot_before: 2026-11-25\nkind: ticket\n---\n\n**Depends on:** EK-2, other:OT-9.\n\n## Status\n\n_filed 2026-11-22._\n"
+        },
+        {
+          "path": "EK-2.md",
+          "text": "---\nid: EK-2\ntitle: \"EK-2 — Pick the fonts\"\nstatus: in-progress\nassignee: sam\nparent: EK-6\nproject: launch\n---\n\n**Depends on:** none.\n\n### What to build\n\nAn example.\n\n## Status\n\n_filed 2026-11-22._\n"
+        },
+        {
+          "path": "EK-3.md",
+          "text": "---\nid: EK-3\ntitle: \"EK-3 — Sign-up form\"\nstatus: in-review\nprs: [\"https://github.com/example/site/pull/3\"]\nassignee: sam\n---\n\n**Depends on:** none.\n\n### What to build\n\nAn example.\n\n## Status\n\n_filed 2026-11-22._\n"
+        },
+        {
+          "path": "EK-4.md",
+          "text": "---\nid: EK-4\ntitle: \"EK-4 — Dark mode\"\nstatus: deprioritized\n---\n\n**Depends on:** none.\n\n### What to build\n\nAn example.\n\n## Status\n\n_filed 2026-11-22._\n"
+        },
+        {
+          "path": "EK-5.md",
+          "text": "---\nid: EK-5\ntitle: \"EK-5 — Register the domain\"\nstatus: done\nprs: [\"https://github.com/example/site/pull/1\"]\n---\n\n**Depends on:** none.\n\n### What to build\n\nAn example.\n\n## Status\n\n_filed 2026-11-22._\n"
+        },
+        {
+          "path": "EK-6.md",
+          "text": "---\nid: EK-6\ntitle: \"EK-6 — Brand kit (parent of EK-2)\"\nstatus: available\n---\n\n**Depends on:** none.\n\n### What to build\n\nAn example.\n\n## Status\n\n_filed 2026-11-22._\n"
+        },
+        {
+          "path": "EK-7.md",
+          "text": "---\nid: EK-7\ntitle: \"EK-7 — A mascot\"\nstatus: withdrawn\n---\n\n**Depends on:** none.\n\n### What to build\n\nAn example.\n\n## Status\n\n_filed 2026-11-22._\n"
+        },
+        {
+          "path": "EK-8.md",
+          "text": "---\nid: EK-8\ntitle: \"EK-8 — Landing page v0 (replaced by EK-1)\"\nstatus: superseded\n---\n\n**Depends on:** none.\n\n### What to build\n\nAn example.\n\n## Status\n\n_filed 2026-11-22._\n"
+        },
+        {
+          "path": "EK-9.md",
+          "text": "---\nid: EK-9\ntitle: \"EK-9 — Mobile app\"\nstatus: deferred\n---\n\n**Depends on:** none.\n\n### What to build\n\nAn example.\n\n## Status\n\n_filed 2026-11-22._\n"
+        },
+        {
+          "path": "projects/launch.md",
+          "text": "---\nid: launch\nkind: project\ntitle: Launch the app\n---\n\nGroups the launch tickets.\n"
+        }
+      ],
+      "tickets": [
+        {
+          "id": "EK-1",
+          "status": "available",
+          "depends_on": [
+            "EK-2",
+            "other:OT-9"
+          ],
+          "parent": null
+        },
+        {
+          "id": "EK-2",
+          "status": "in-progress",
+          "depends_on": [],
+          "parent": "EK-6"
+        },
+        {
+          "id": "EK-3",
+          "status": "in-review",
+          "depends_on": [],
+          "parent": null
+        },
+        {
+          "id": "EK-4",
+          "status": "deprioritized",
+          "depends_on": [],
+          "parent": null
+        },
+        {
+          "id": "EK-5",
+          "status": "done",
+          "depends_on": [],
+          "parent": null
+        },
+        {
+          "id": "EK-6",
+          "status": "available",
+          "depends_on": [],
+          "parent": null
+        },
+        {
+          "id": "EK-7",
+          "status": "withdrawn",
+          "depends_on": [],
+          "parent": null
+        },
+        {
+          "id": "EK-8",
+          "status": "superseded",
+          "depends_on": [],
+          "parent": null
+        },
+        {
+          "id": "EK-9",
+          "status": "deferred",
+          "depends_on": [],
+          "parent": null
+        }
+      ]
+    },
+    "item-schema": {
+      "store": "tickets",
+      "files": [
+        {
+          "path": "X-1.md",
+          "text": "---\nid: X-1\ntitle: \"X-1 — an example ticket\"\nstatus: available\npriority: high\n---\n\n**Depends on:** none.\n\n### What to build\n\nAn example.\n\n## Status\n\n_filed 2026-11-22._\n"
+        }
+      ],
+      "tickets": [
+        {
+          "id": "X-1",
+          "status": "available",
+          "depends_on": [],
+          "parent": null
+        }
+      ]
+    },
+    "mdx": {
+      "store": "tickets",
+      "files": [
+        {
+          "path": "X-1.mdx",
+          "text": "---\nid: X-1\ntitle: \"X-1 — an example ticket\"\nstatus: available\n---\n\n**Depends on:** none.\n\nUse `<div>` in a code span, as MDX requires.\n\n## Status\n\n_filed 2026-11-22._\n"
+        },
+        {
+          "path": "X-2.md",
+          "text": "---\nid: X-2\ntitle: \"X-2 — an example ticket\"\nstatus: available\n---\n\n**Depends on:** none.\n\n### What to build\n\nAn example.\n\n## Status\n\n_filed 2026-11-22._\n"
+        }
+      ],
+      "tickets": [
+        {
+          "id": "X-1",
+          "status": "available",
+          "depends_on": [],
+          "parent": null
+        },
+        {
+          "id": "X-2",
+          "status": "available",
+          "depends_on": [],
+          "parent": null
+        }
+      ]
+    },
+    "minimal": {
+      "store": "tickets",
+      "files": [
+        {
+          "path": "X-1.md",
+          "text": "---\nid: X-1\ntitle: \"X-1 — an example ticket\"\nstatus: available\n---\n\n**Depends on:** none.\n\n### What to build\n\nAn example.\n\n## Status\n\n_filed 2026-11-22._\n"
+        }
+      ],
+      "tickets": [
+        {
+          "id": "X-1",
+          "status": "available",
+          "depends_on": [],
+          "parent": null
+        }
+      ]
+    },
+    "nested": {
+      "store": "tickets",
+      "files": [
+        {
+          "path": "README.md",
+          "text": "# Our tickets\n\nA page for people: no frontmatter, so not a ticket.\n"
+        },
+        {
+          "path": "X-2.md",
+          "text": "---\nid: X-2\ntitle: \"X-2 — an example ticket\"\nstatus: available\ndepends_on: [X-1]\n---\n\n**Depends on:** X-1.\n\n## Status\n\n_filed 2026-11-22._\n"
+        },
+        {
+          "path": "area/X-1.md",
+          "text": "---\nid: X-1\ntitle: \"X-1 — an example ticket\"\nstatus: available\n---\n\n**Depends on:** none.\n\n### What to build\n\nAn example.\n\n## Status\n\n_filed 2026-11-22._\n"
+        },
+        {
+          "path": "guide.md",
+          "text": "---\nid: guide\nkind: doc\ntitle: How we file tickets\n---\n\nA page with an id of its own says what it is with `kind`.\n"
+        }
+      ],
+      "tickets": [
+        {
+          "id": "X-2",
+          "status": "available",
+          "depends_on": [
+            "X-1"
+          ],
+          "parent": null
+        },
+        {
+          "id": "X-1",
+          "status": "available",
+          "depends_on": [],
+          "parent": null
+        }
+      ]
+    },
+    "older-ids": {
+      "store": "tickets",
+      "files": [
+        {
+          "path": "R3-51a.md",
+          "text": "---\nid: R3-51a\ntitle: \"R3-51a — an example ticket\"\nstatus: available\n---\n\n**Depends on:** none.\n\n### What to build\n\nAn example.\n\n## Status\n\n_filed 2026-11-22._\n"
+        },
+        {
+          "path": "R3-52.md",
+          "text": "---\nid: R3-52\ntitle: \"R3-52 — an example ticket\"\nstatus: available\n---\n\n**Depends on:** none.\n\n### What to build\n\nAn example.\n\n## Status\n\n_filed 2026-11-22._\n"
+        }
+      ],
+      "tickets": [
+        {
+          "id": "R3-51a",
+          "status": "available",
+          "depends_on": [],
+          "parent": null
+        },
+        {
+          "id": "R3-52",
+          "status": "available",
+          "depends_on": [],
+          "parent": null
+        }
+      ]
+    },
+    "qualified-dependency": {
+      "store": "tickets",
+      "files": [
+        {
+          "path": "X-1.md",
+          "text": "---\nid: X-1\ntitle: \"X-1 — an example ticket\"\nstatus: available\ndepends_on: [\"baton:B-111\"]\n---\n\n**Depends on:** baton:B-111.\n\n## Status\n\n_filed 2026-11-22._\n"
+        }
+      ],
+      "tickets": [
+        {
+          "id": "X-1",
+          "status": "available",
+          "depends_on": [
+            "baton:B-111"
+          ],
+          "parent": null
+        }
+      ]
+    },
+    "random-ids": {
+      "store": "tickets",
+      "files": [
+        {
+          "path": "is-01kf5zyg8h.md",
+          "text": "---\nid: is-01kf5zyg8h\ntitle: is-01kf5zyg8h — Example\nstatus: available\ndepends_on: [other:tek-m5tt]\n---\n"
+        },
+        {
+          "path": "tek-m5tt.md",
+          "text": "---\nid: tek-m5tt\ntitle: tek-m5tt — Example\nstatus: available\n---\n"
+        }
+      ],
+      "tickets": [
+        {
+          "id": "is-01kf5zyg8h",
+          "status": "available",
+          "depends_on": [
+            "other:tek-m5tt"
+          ],
+          "parent": null
+        },
+        {
+          "id": "tek-m5tt",
+          "status": "available",
+          "depends_on": [],
+          "parent": null
+        }
+      ]
+    }
+  }
+}

@@ -51,6 +51,7 @@ import legRunInputs from './0047_leg_run_inputs.sql';
 import conditions from './0048_conditions.sql';
 import coreConditions from './0075_core_conditions.sql';
 import retireReviewerSettings from './0076_retire_reviewer_settings.sql';
+import legTimeoutFence from './0082_leg_timeout_fence.sql';
 import eventLookups from './0049_event_lookups.sql';
 import alarmIndexes from './0052_alarm_indexes.sql';
 import retention from './0053_retention.sql';
@@ -70,6 +71,9 @@ import readEfficiency from './0065_read_efficiency.sql';
 import runnerViews from './0066_runner_views.sql';
 import retirePolicyPins from './0070_retire_policy_pins.sql';
 import accessSignIn from './0071_access_sign_in.sql';
+import sessionLinkSecrets from './0079_session_link_secrets.sql';
+import interactionDeliveryGrant from './0080_interaction_delivery_grant.sql';
+import sessionLinkIncarnation from './0081_session_link_incarnation.sql';
 import { isUniqueViolation, logEvent, mintRunId, type Random } from '../core/db';
 import type { Store } from '../core/ports';
 
@@ -218,6 +222,10 @@ export const MIGRATIONS: Migration[] = [
   { id: 71, sql: accessSignIn },
   { id: 75, sql: coreConditions },
   { id: 76, sql: retireReviewerSettings },
+  { id: 79, sql: sessionLinkSecrets },
+  { id: 80, sql: interactionDeliveryGrant },
+  { id: 81, sql: sessionLinkIncarnation },
+  { id: 82, sql: legTimeoutFence },
   { id: 83, sql: postedHead },
   { id: 84, sql: backfillPostedHead },
 ];
