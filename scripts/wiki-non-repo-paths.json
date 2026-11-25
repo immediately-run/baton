@@ -37,7 +37,6 @@
   "spec/BATON_SPEC/05-courses.md rank.mjs": "B-277",
   "spec/BATON_SPEC/05-courses.md sync.mjs": "B-277",
   "spec/BATON_SPEC/06-prerequisites-blocks-advice.md rank.mjs": "B-277",
-  "spec/BATON_SPEC/08-runners.md course.json": "B-277",
   "spec/BATON_SPEC/08-runners.md executor.mjs": "B-277",
   "spec/BATON_SPEC/08-runners.md legProcess.mjs": "B-277",
   "spec/BATON_SPEC/08-runners.md legs/": "B-277",
