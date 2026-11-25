@@ -258,7 +258,8 @@ export class Resources {
         const detail = r.detail === undefined && r.kind === 'state' ? priorDetail : r.detail === undefined ? null : JSON.stringify(r.detail);
         // R-BTN-181: the writer class the credential names; a reading carries no signature, the
         // request that posts it being its authentication.
-        this.exec(`INSERT INTO instance_readings (instance, source, kind, available, until, observed_at, lapses_at, detail, posted_by, writer) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        this.exec(`INSERT INTO instance_readings (instance, source, kind, available, until, observed_at, lapses_at, detail, posted_by, writer, insertion_order)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, (SELECT COALESCE(MAX(insertion_order), 0) + 1 FROM instance_readings))
                    ON CONFLICT (instance, source, kind) DO UPDATE SET available = excluded.available, until = excluded.until, observed_at = excluded.observed_at,
                      lapses_at = excluded.lapses_at, detail = excluded.detail, posted_by = excluded.posted_by, writer = excluded.writer`,
           r.instance, source, r.kind, r.kind === 'state' ? (r.available ? 1 : 0) : null, r.until, now, lapses, detail, source, writer);
@@ -297,7 +298,7 @@ export class Resources {
   stateReading(instance: string, now = this.c.now()) {
     return this.rows<{ available: number; until: number | null; source: string }>(
       `SELECT available, until, source FROM instance_readings WHERE instance = ? AND kind = 'state' AND lapses_at > ?
-       ORDER BY observed_at DESC, rowid DESC LIMIT 1`, instance, now)[0];
+       ORDER BY observed_at DESC, insertion_order DESC LIMIT 1`, instance, now)[0];
   }
 
   /** Re-evaluate these instances' states (every instance with a reading or a stored state when
@@ -341,7 +342,7 @@ export class Resources {
   readings(now: number, inForce = false) {
     return this.rows<{ instance: string; source: string; writer: string | null; kind: 'state' | 'measure'; available: number | null; until: number | null; observed_at: number; lapses_at: number; detail: string | null }>(
       `SELECT instance, source, writer, kind, available, until, observed_at, lapses_at, detail FROM instance_readings
-       ${inForce ? 'WHERE lapses_at > ?' : ''} ORDER BY instance, observed_at DESC, rowid DESC`, ...(inForce ? [now] : []))
+       ${inForce ? 'WHERE lapses_at > ?' : ''} ORDER BY instance, observed_at DESC, insertion_order DESC`, ...(inForce ? [now] : []))
       .map((r) => ({ ...r, available: r.available == null ? null : !!r.available, detail: r.detail == null ? null : JSON.parse(r.detail) as unknown, stale: r.lapses_at <= now }));
   }
 

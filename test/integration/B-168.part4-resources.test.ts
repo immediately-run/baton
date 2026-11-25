@@ -95,6 +95,24 @@ describe('B-168 the resources: two scopes, no runner uses, one reading per instr
     expect(await rows('SELECT instance FROM instance_readings')).toEqual([]);
   });
 
+  it('breaks same-time reading ties by insertion order, even after an upsert (S-BTN-31)', async () => {
+    const other = await makeKey('ssh-ed25519', 'other-admin');
+    await setAdminKeys(admin, other);
+    await keyCall(admin, '/v1/admin/resources', { name: R, scope: 'account', detail_schema: SCHEMA });
+    await keyCall(admin, '/v1/admin/instances', { name: GO, serves: [R], repositories: ['docs'] });
+    const post = (key: TestKey, available: boolean) => keyCall(key, '/v1/admin/readings', {
+      readings: [{ instance: GO, available, valid_for: 3600 }],
+    });
+    expect((await post(admin, true)).json).toEqual({ ok: true, refused: [] });
+    expect((await post(other, false)).json).toEqual({ ok: true, refused: [] });
+    expect(await stateOf(GO)).toBe('unavailable');
+    expect((await post(admin, true)).json).toEqual({ ok: true, refused: [] });
+    expect(await stateOf(GO)).toBe('unavailable');
+    expect(await rows('SELECT insertion_order FROM instance_readings ORDER BY insertion_order')).toEqual([
+      { insertion_order: 1 }, { insertion_order: 2 },
+    ]);
+  });
+
   it('a leg\'s `no_chain_from` is the one statement of independence: the owners have no setting for it', async () => {
     expect((await keyCall(owner, '/v1/owner/docs/settings', { required_independence: { review: ['implement'] } }, 'PUT')).json).toMatchObject({ code: 'invalid-params' });
     expect((await keyCall(owner, '/v1/owner/docs/settings', { required_bars: [] }, 'PUT')).status).toBe(200);

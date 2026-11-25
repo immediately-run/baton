@@ -19,6 +19,11 @@
       "count": 1
     }
   },
+  "scripts/lib/sql-dialect.mjs": {
+    "baton/file-name": {
+      "count": 1
+    }
+  },
   "scripts/lib/wiki-references.mjs": {
     "baton/file-name": {
       "count": 1
