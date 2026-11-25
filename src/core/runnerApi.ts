@@ -5,6 +5,7 @@
 // whose rows the unique indexes guard. The model tables are gone (B-142): a heartbeat may still
 // carry `model_provider_id`, `billing`, `usage` and `rate_limits`, all accepted and ignored,
 // and an unavailable provider is a reading (§6.3, R-BTN-76), never a table core keeps.
+import type { BeatAnswer } from '../shared/runner-wire';
 import { isLive, liveRunnerSql, type Lease } from './runnerLiveness';
 import { runnerLatest } from './runnerLatest';
 import { BatonError } from './http';
@@ -111,9 +112,10 @@ export class RunnerApi {
     const marker = fnv1a(`${this.c.config.CREDENTIALS ?? ''}\u0000${this.c.config.TOKEN_HASHES ?? ''}`);
     const now = this.c.now();
     if (this.setting('credentials_marker') !== marker) this.mirrorCredentials(policy, hashes, marker, now);
-    const row = this.rows<{ id: string; hostname: string; allowed_capabilities: string; revoked_at: number | null; kind: string; created_by: string | null }>(
-      'SELECT id, hostname, allowed_capabilities, revoked_at, kind, created_by FROM credentials WHERE id = ?', id)[0];
-    if (!row || row.revoked_at != null || !this.credentialInForce(id)) throw new BatonError('forbidden', 'this credential is not registered or is revoked or expired');
+    const row = this.rows<{ id: string; hostname: string; allowed_capabilities: string; kind: string; created_by: string | null }>(
+      `SELECT id, hostname, allowed_capabilities, kind, created_by FROM credentials WHERE id = ? AND revoked_at IS NULL
+       AND (expires_at IS NULL OR expires_at > ?) AND (last_used_at IS NULL OR last_used_at > ?)`, id, now, now - 7 * DAY_MS)[0];
+    if (!row) throw new BatonError('forbidden', 'this credential is not registered or is revoked or expired');
     // R-BTN-58: a key an owner or administrator granted may declare what its grants together give
     // it — expanded capabilities, `human-operator` only from an administrator's grant.
     if (isGrantedKey(row.created_by)) {
@@ -214,12 +216,6 @@ export class RunnerApi {
       fingerprint, this.c.now(), this.c.now() - 7 * DAY_MS)[0]?.public_key ?? null;
   }
 
-  private credentialInForce(id: string): boolean {
-    const now = this.c.now();
-    return !!this.rows(`SELECT 1 FROM credentials WHERE id = ? AND revoked_at IS NULL
-      AND (expires_at IS NULL OR expires_at > ?) AND (last_used_at IS NULL OR last_used_at > ?)`, id, now, now - 7 * DAY_MS).length;
-  }
-
   /** Authenticated calls renew the idle window, never the absolute one. */
   useCredential(id: string): void {
     const now = this.c.now();
@@ -309,7 +305,7 @@ export class RunnerApi {
    *  absent, logging `deprecated-field`. */
   // @model heartbeat sha256:576daa5cf97c
   // @model declare sha256:d9cef42a9b45
-  async heartbeat(credentialId: string, secretHeader: string | null, body: unknown, clientVersion: string | null = null, legacyName = false) {
+  async heartbeat(credentialId: string, secretHeader: string | null, body: unknown, clientVersion: string | null = null, legacyName = false): Promise<BeatAnswer> {
     // B-168 (R-BTN-76): `uses` is retired — a runner uses the repository's instances, never a set
     // it declares — and read as absent while the history's Migrations entry lasts.
     if (body && typeof body === 'object' && !Array.isArray(body) && (body as { uses?: unknown }).uses !== undefined) {
@@ -363,7 +359,7 @@ export class RunnerApi {
     };
   }
 
-  private heartbeatTx(credentialId: string, presented: string | null, settingsHash: string, hb: Heartbeat, clientVersion: string | null, legacyName: boolean) {
+  private heartbeatTx(credentialId: string, presented: string | null, settingsHash: string, hb: Heartbeat, clientVersion: string | null, legacyName: boolean): BeatAnswer {
     // B-253: the profile, serialized once — the same bytes compared, stored and hashed.
     const profileJson = hb.profile ? JSON.stringify(hb.profile) : null;
     const cred = this.credential(credentialId);

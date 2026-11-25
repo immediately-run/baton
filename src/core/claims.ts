@@ -3,6 +3,7 @@
 // reaps, the fence before re-issue (R-BTN-19), confirmation by ancestry, and git winning over a
 // stale claim (R-BTN-35). The lock is the two partial unique indexes: a claim inserts and lets
 // SQLite refuse a second holder, never check-then-insert without them (R-BTN-4).
+import type { AdvanceAnswer, ClaimAnswer, NextLegs } from '../shared/runner-wire';
 import { CLAIM_LEASE_END_SQL, expiredClaimFenceSql, expiredLeaseSql, isClaimLeaseLive, liveDeclaringRunnerSql, liveRunnerSql, type Lease } from './runnerLiveness';
 import { BatonError } from './http';
 import { runnerKeyAllowed } from './runnerKeyPolicy';
@@ -1430,11 +1431,11 @@ export class Claims {
 
   /** The latest snapshot's legs leaving a station, as the holder sees them (R-BTN-70): only when
    *  the snapshot has the ticket there — git may be behind or ahead of the holder. */
-  private nextLegs(ticketId: string, station: string) {
+  private nextLegs(ticketId: string, station: string): NextLegs {
     const s = this.rows<{ station: string }>('SELECT station FROM ticket_stations WHERE ticket_id = ?', ticketId)[0];
     if (!s || s.station !== station) return [];
     return this.rows<{ leg: string; state: string; waiting_on: string | null }>(
-      'SELECT leg, state, waiting_on FROM ticket_next_legs WHERE ticket_id = ? ORDER BY leg', ticketId).map((n) => (n.waiting_on ? n : { leg: n.leg, state: n.state }));
+      'SELECT leg, state, waiting_on FROM ticket_next_legs WHERE ticket_id = ? ORDER BY leg', ticketId).map((n) => (n.waiting_on ? { ...n, waiting_on: n.waiting_on } : { leg: n.leg, state: n.state }));
   }
 
   /** The claim response (§11, R-BTN-34): where the ticket starts or resumes, its course and that
@@ -1445,7 +1446,7 @@ export class Claims {
    *  it ran (§6.11, R-BTN-24). B-127 adds two readings beside them: the ticket's brief mark, and —
    *  while the repository requires signed control — the record of what counts, with the owner
    *  keys a runner verifies the named commits against itself. */
-  private claimResponse(id: number) {
+  private claimResponse(id: number): ClaimAnswer {
     const c = this.rows<{ id: number; ticket_id: string; nonce: string; snapshot_sha: string; station: string; offered_leg: string | null; course_id: string | null }>(
       'SELECT id, ticket_id, nonce, snapshot_sha, station, offered_leg, course_id FROM claims WHERE id = ?', id)[0];
     // R-BTN-81's reading of the same two facts (`legFacts`): the course in force for the claim's
@@ -1627,7 +1628,7 @@ export class Claims {
    */
   // @model advance sha256:6b47a79f6b67
   // @model advanceRun sha256:b6172c27f111
-  advance(runnerId: number, claimId: number, body: unknown) {
+  advance(runnerId: number, claimId: number, body: unknown): AdvanceAnswer {
     const b = checkAdvance(body);
     const c = this.held(runnerId, claimId);
     if (c.status !== 'active') throw new BatonError('claim-ended', `the claim already ended (${c.status}: ${c.end_reason})`);
@@ -2514,7 +2515,7 @@ export class Claims {
     else if (st) {
       git = { station: st.station, path: JSON.parse(st.path), path_len: st.path_len, regressed: c.regressed_since != null,
         next: this.rows<{ leg: string; state: string; waiting_on: string | null }>('SELECT leg, state, waiting_on FROM ticket_next_legs WHERE ticket_id = ? ORDER BY leg', c.ticket_id)
-          .map((n) => (n.waiting_on ? n : { leg: n.leg, state: n.state })) };
+          .map((n) => (n.waiting_on ? { ...n, waiting_on: n.waiting_on } : { leg: n.leg, state: n.state })) };
     }
     return { station: c.station, ...(c.leg ? { leg: c.leg } : {}), ...(c.deadline_at != null ? { deadline_at: c.deadline_at } : {}), git };
   }

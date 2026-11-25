@@ -530,6 +530,20 @@ export function checkShadowReport(body: unknown) {
 
 const REQUEST_ID = /^[A-Za-z0-9._:-]{8,128}$/;
 export const GIT_SHA = /^[0-9a-f]{40}$/;
+
+/** R-BTN-88: the server-owned placement carried by an owner-state export. */
+export function checkOwnerStateStation(row: Record<string, unknown>, path: unknown): void {
+  const id = (v: unknown): boolean => typeof v === 'string' && COURSE_ID.test(v);
+  const n = (v: unknown): boolean => typeof v === 'number' && Number.isSafeInteger(v) && v >= 0;
+  if (typeof row.ticket_id !== 'string' || !TICKET_ID.test(row.ticket_id) || row.next_source !== 'baton'
+    || !id(row.station) || (row.next_leg !== null && !id(row.next_leg))
+    || !Array.isArray(path) || row.path_len !== path.length || path.some((step) => !isObj(step) || !id(step.leg) || !id(step.reached)
+      || Object.keys(step).some((key) => !['leg', 'reached', 'adopted'].includes(key)) || (step.adopted !== undefined && typeof step.adopted !== 'boolean'))
+    || !n(row.to_end) || !n(row.observation) || (row.person_expires_at !== null && !n(row.person_expires_at))
+    || (row.handoff_url !== null && !isHttpsPointer(row.handoff_url)) || typeof row.snapshot_sha !== 'string' || !GIT_SHA.test(row.snapshot_sha)) {
+    bad('ticket_stations row', 'must carry a valid Baton-owned position');
+  }
+}
 /** §6.5: the `released:` reasons, exactly. */
 export const RELEASE_END_REASONS = ['blocked', 'stale-board', 'cannot-finish:transient', 'cannot-finish:capability', 'cannot-finish:spec', 'cannot-finish:contract-output', 'cannot-finish:contract-input',
   'lease-lost', 'requested', 'owner-cancel', 'provider-suspended', 'provider-exhausted', 'course-changed', 'leg-timeout'] as const;

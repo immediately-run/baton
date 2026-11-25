@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { call as hostCall } from '#host';
 import { BatonApi } from '../../src/runner/api';
 import { cliBehind, readCliPin } from '../../src/runner/cliPin';
-import { git } from '../../src/runner/home';
+import { git } from '../../src/defaults/git.mjs';
 import { courseReader, refreshHome } from '../../src/runner/main';
 import { Runner } from '../../src/runner/runner';
 import { claimItem, course, cutover, placed, register, rows, setClock, syncCall, syncToken, ticket, TOKENS } from '../helpers';
