@@ -137,6 +137,7 @@ export class Admin {
     dispatchSync: (repository: string) => void;
     /** R-BTN-75, R-BTN-76: a grant made, changed or revoked moves the fleet's counts. */
     fleetChanged: () => void;
+    dependencyVisibilityChanged: () => void;
     /** R-BTN-47 (B-173): retirement reaps the repository's active claims as an administrator's
      *  force-reap does, inside the retiring transaction. */
     reapForRetire: (repository: string, actor: string) => void;
@@ -439,6 +440,7 @@ export class Admin {
         this.mayOwn(o.fingerprint, admins);
         this.insertOwner(id, o, actor, marks.has(o.fingerprint) ? 1 : 0);
       }
+      if (newOwners.length) this.c.dependencyVisibilityChanged?.();
       if (weight !== undefined) this.exec('UPDATE repositories SET weight = ? WHERE id = ?', weight, id);
       if (tiers) {
         this.exec('UPDATE repositories SET tiers = ? WHERE id = ?', JSON.stringify(tiers), id);
@@ -506,6 +508,7 @@ export class Admin {
           JSON.stringify((JSON.parse(i.repositories) as string[]).filter((r) => r !== id)), i.name);
       }
       this.event(actor, { act: 'repository-retired', repository: id, github: known.github }, id);
+      this.c.dependencyVisibilityChanged?.();
       // The fleet's counts read the grants and the instance lists (R-BTN-75, R-BTN-76).
       this.c.fleetChanged();
     });
@@ -615,6 +618,7 @@ export class Admin {
         throw new BatonError('not-found', 'no key with that fingerprint');
       }
       this.event(actor, { act: 'key-revoked', key: fingerprint }, null);
+      this.c.dependencyVisibilityChanged();
       this.c.fleetChanged();
       return { ok: true };
     });
@@ -775,6 +779,7 @@ export class Admin {
                    deliver_interactions = excluded.deliver_interactions, revoked_at = NULL`,
         key.fingerprint, repository, JSON.stringify(caps), maxTier, maxClaims, actor, this.c.now(), Number(deliverInteractions));
       this.event(actor, { act: 'grant', key: key.fingerprint, repository, capabilities: caps, max_tier: maxTier, max_claims: maxClaims, deliver_interactions: deliverInteractions }, repository);
+      if (!prior || prior.revoked_at != null) this.c.dependencyVisibilityChanged();
       this.c.fleetChanged();
       return { ok: true, fingerprint: key.fingerprint };
     });
@@ -790,6 +795,7 @@ export class Admin {
       this.exec('UPDATE runner_grants SET revoked_at = ? WHERE credential_id = ? AND repository_id = ? AND revoked_at IS NULL', this.c.now(), fingerprint, repository);
       if (!this.changed()) throw new BatonError('not-found', `no grant of ${fingerprint} on ${repository}`);
       this.event(actor, { act: 'grant-revoked', key: fingerprint, repository }, repository);
+      this.c.dependencyVisibilityChanged();
       this.c.fleetChanged();
       return { ok: true };
     });
@@ -818,6 +824,7 @@ export class Admin {
         this.refuseUnsatisfiableLists(repository, { owners: new Map([...facts.owners].filter(([fp2]) => fp2 !== fp)), humans: facts.humans, breakGlass: facts.breakGlass, humanOwners: new Set([...facts.humanOwners].filter((fp2) => fp2 !== fp)) });
         this.exec('UPDATE repository_owners SET removed_at = ? WHERE repository_id = ? AND fingerprint = ? AND removed_at IS NULL', this.c.now(), repository, fp);
         this.event(actor, { act: 'owner-removed', key: fp, repository }, repository);
+        this.c.dependencyVisibilityChanged?.();
         return { ok: true };
       });
     }
@@ -833,6 +840,7 @@ export class Admin {
       if (this.rows('SELECT 1 FROM repository_owners WHERE repository_id = ? AND removed_at IS NULL', repository).length >= OWNERS_MAX) bad('public_key', `a repository has at most ${OWNERS_MAX} owners`);
       this.insertOwner(repository, key, actor, human);
       this.event(actor, { act: 'owner-added', key: key.fingerprint, repository, human_only: human === 1 }, repository);
+      this.c.dependencyVisibilityChanged?.();
       return { ok: true };
     });
   }
@@ -985,7 +993,7 @@ export class Admin {
 
   /** `POST /v1/owner/{repository}/bars`: an owner bar `{course, tag, legs?, applies, starts_at?,
    *  ends_at?, release_holders?, reason}`; named legs need a named course. */
-  // @model setOwnerBar sha256:8ffc35865ecf
+  // @model setOwnerBar sha256:44f33168acbc
   setBar(actor: string, repository: string, body: unknown) {
     if (!isObj(body)) bad('body', 'must be a JSON object');
     const b = body as Record<string, unknown>;
@@ -1022,7 +1030,7 @@ export class Admin {
   }
 
   /** `POST /v1/owner/{repository}/bars/{id}/lift`. */
-  // @model liftOwnerBars sha256:d099663688c6
+  // @model liftOwnerBars sha256:3f440cb63410
   liftBar(actor: string, repository: string, id: number) {
     return this.c.store.transaction(() => {
       this.exec('UPDATE owner_bars SET lifted_at = ? WHERE id = ? AND repository_id = ? AND lifted_at IS NULL', this.c.now(), id, repository);

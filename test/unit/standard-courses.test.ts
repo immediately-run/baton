@@ -135,6 +135,18 @@ describe('the standard courses (R-BTN-131)', () => {
     expect(text).toContain('Your word alone never closes the ticket');
   });
 
+  it("create-pr's shipped and home reviews require independent credentials and a different model when available (B-30, S-BTN-63)", () => {
+    const home = join(__dirname, '..', '..', '.baton', 'courses', 'create-pr');
+    const owned = JSON.parse(readFileSync(join(home, 'course.json'), 'utf8'));
+    expect(owned.legs.review.no_chain_from).toEqual(['implement', 'fix']);
+    expect(builtIn('create-pr')!.course.legs.review).toMatchObject({ no_chain_from: ['implement', 'fix'] });
+    for (const dir of [instructionsDir('create-pr'), join(home, 'legs')]) {
+      const text = readFileSync(join(dir, 'review.md'), 'utf8');
+      expect(text, dir).toMatch(/Before launching the reviewer, the runner's\s+command, wrapper or override must select a model different from those used for `implement`\s+and `fix` on this ticket whenever it can/);
+      expect(text, dir).toMatch(/If the authoring models are unknown or a different model is unavailable, say so\s+in your review/);
+    }
+  });
+
   it('only implement and fix may ask in-session in either create-pr course (B-325, S-BTN-222)', () => {
     const home = join(__dirname, '..', '..', '.baton', 'courses', 'create-pr');
     for (const course of [builtIn('create-pr')!.course, JSON.parse(readFileSync(join(home, 'course.json'), 'utf8'))]) {
