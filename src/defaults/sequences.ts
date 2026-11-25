@@ -9,16 +9,15 @@
 // With no Baton configured, unreachable or `--offline`, the caller falls back to today's scan and
 // SAYS so (R-BTN-131): the duplicate-id refusal stays the backstop for that path, and a branch
 // merging main before it merges and renumbering if main took the number for the rest.
-import { execFileSync } from 'node:child_process';
+
+import { gitText } from './git.mjs';
 import { join, resolve } from 'node:path';
-import { send, DEFAULT_URL } from '../../cli/baton.mjs';
+import { send } from '../client/send.mjs';
+import { DEFAULT_URL } from '../client/config.mjs';
 import { remoteSlug } from './cli';
 import { checkKey, Undetermined } from './tickets-baton';
 import { readSettingsJson, readTicketSettings } from './tickets-config';
 import { rulesConfig } from './tickets-rules';
-
-const git = (root: string, ...a: string[]): string =>
-  execFileSync('git', ['-C', root, ...a], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, LC_ALL: 'C' } }).trim();
 
 /** One open branch head `git ls-remote --heads` answers. */
 interface Head { sha: string; ref: string }
@@ -27,7 +26,7 @@ interface Head { sha: string; ref: string }
  *  reserved namespaces (`baton-ticket/*`, `baton-request/*`) are read like any other branch:
  *  a number a filing branch holds is taken. */
 const heads = (root: string, remote: string): Head[] => {
-  const out = git(root, 'ls-remote', '--heads', remote);
+  const out = gitText(root, 'ls-remote', '--heads', remote);
   return out.split('\n').filter(Boolean).map((l) => {
     const [sha, ref] = l.split('\t');
     return { sha: (sha ?? '').trim(), ref: (ref ?? '').trim() };
@@ -96,7 +95,7 @@ export function floorFor(root: string, remote: string, k: NamedKind): number {
   // whatever many refs point at it.
   const shas = [...new Set(open.map((h) => h.sha))];
   try {
-    git(root, 'fetch', '-q', remote);
+    gitText(root, 'fetch', '-q', remote);
   } catch {
     // an unfetchable remote: the numbers it holds are the backstop's at merge, not the floor's
   }
@@ -108,7 +107,7 @@ export function floorFor(root: string, remote: string, k: NamedKind): number {
     if (k.family === 'ticket') {
       let listed = '';
       try {
-        listed = git(root, 'ls-tree', '-r', '--name-only', sha, '--', k.at, `${k.at}/archive`);
+        listed = gitText(root, 'ls-tree', '-r', '--name-only', sha, '--', k.at, `${k.at}/archive`);
       } catch {
         continue;
       }
@@ -117,7 +116,7 @@ export function floorFor(root: string, remote: string, k: NamedKind): number {
     } else if (k.family === 'migration') {
       let listed = '';
       try {
-        listed = git(root, 'ls-tree', '-r', '--name-only', sha, '--', k.at);
+        listed = gitText(root, 'ls-tree', '-r', '--name-only', sha, '--', k.at);
       } catch {
         continue;
       }
@@ -128,7 +127,7 @@ export function floorFor(root: string, remote: string, k: NamedKind): number {
     } else {
       let found = '';
       try {
-        found = git(root, 'grep', '-h', '-o', '-E', `${k.idPrefix}-[0-9]+`, sha, '--', k.at);
+        found = gitText(root, 'grep', '-h', '-o', '-E', `${k.idPrefix}-[0-9]+`, sha, '--', k.at);
       } catch {
         continue; // git grep exits 1 when nothing matches
       }

@@ -89,6 +89,8 @@ checked in the transaction that adds or first accepts a key (§12.1).
 |---|---|---|---|
 | `runners` | `id`; unique `(hostname, session_name)` | `hostname`, `session_name`, `credential_id`, `secret_hash`, `incarnation` (bumped by a re-key), `harness` (a label), `kind`, `executor_json` (the last heartbeat's `executor`; NULL for a sidecar), `profile_json` (opaque), `lease_timeout_ms`, `concurrency`, `settings_hash`, `client_version`, `legacy_names_at` (the last accepted use of a retired wire spelling; NULL if none), `first_seen_at`, `last_seen_at`, `last_activity_at`, `reaped_at` | One agent session; created at its first heartbeat, never deleted (R-BTN-3, R-BTN-4, R-BTN-9, R-BTN-14, R-BTN-107, R-BTN-197) |
 | `runner_capabilities` | `(runner_id, capability)` | `declared`, `provided` | Declared capabilities, expanded, and the executor's (R-BTN-107, R-BTN-121) |
+| `runner_effective_caps` | `(runner_id, repository_id, capability)` | — | Each runner's capabilities as its grants admit them: per granted repository for an owner- or administrator-made key, under `''` for any other key; `runner:` names always. Derived from `runner_capabilities` and the grants by triggers; what candidate matching reads (§6.6, R-BTN-58, R-BTN-121) |
+| `runner_idle` | `runner_id` | `started_at`, `notified` | The runner's current idle episode, one per runner, kept across host restarts (§8, B-244) |
 | `runner_tags` | `(runner_id, tag)` | — | R-BTN-60 |
 | `runner_courses` | `(runner_id, repository_id, course_id)` | `version` | What its checkouts can run (R-BTN-48) |
 | `fleet_capabilities` | `(repository_id, capability)` | `runners` | Live granted runners declaring each capability (R-BTN-75) |
@@ -99,6 +101,9 @@ checked in the transaction that adds or first accepts a key (§12.1).
 |---|---|---|---|
 | `board_snapshots` | `(repository_id, sha)` | `parent_sha`, `received_at`, `ticket_count`, `posted_by` | Accepted posts (R-BTN-11, R-BTN-102) |
 | `board_head` | `repository_id` | `fleet_version`, `course_data` (opaque JSON by course), `sha`, `observation`, `last_handed_out`, `observation_issued_at`, `stations_observation` (the latest accepted snapshot to post stations), `source_kind`, `source_versions` (the last accepted post's ticket-source declaration) | The head and the observation counter (R-BTN-11, R-BTN-62, R-BTN-70, R-BTN-74, R-BTN-150) |
+| `sync_quota` | `(issuer, kind)` | `hour`, `used` | Each sync issuer's posts this hour, by kind; a refused post uses the quota too (R-BTN-62, R-BTN-187) |
+| `sync_lapses` | `(repository_id, issuer)` | `day`, `lapses`, `at` | Observations an issuer let expire, counted per day, for Needs you; a revoked sync key's row goes (R-BTN-62, R-BTN-187) |
+| `sync_control_changes` | `(repository_id, sha)` | `detail_json`, `at` | Control-path changes a post moved the head onto, read from the push deliveries, for Needs you (R-BTN-187, R-BTN-194) |
 | `held_snapshots` | (`repository_id`, `sha`) | `parent_sha`, `head_sha`, `ticket_count`, `received_at`, `auto_accept_at`, `observation`, `accepted_at` | A `force` post held for the owner (R-BTN-11) |
 | `sync_fingerprints` | `repository_id` | `digest`, `scheduling_v` | The last accepted snapshot's fingerprint and the scheduling version it was materialized at (§4.3, R-BTN-196); derived, and moves no version |
 | `sequences` | `(repository_id, kind)` | `last_number` | The identifier sequences; `kind` is opaque to core (R-BTN-199) |
@@ -128,7 +133,7 @@ checked in the transaction that adds or first accepts a key (§12.1).
 | `leg_outputs` | `(ticket_id, leg, run, name)` | `schema`, `uri`, `digest`, `value_json`, `course_version`, `leg_version`, `claim_id`, `source` (`holder`\|`sync`), `confirmed`, `recorded_at` | Output envelopes, by pointer or bounded inline value (R-BTN-82, R-BTN-108) |
 | `leg_run_inputs` | `(claim_id, seq, name)` | `ticket_id`, `from_leg`, `from_run`, `uri`, `digest`, `value_json`, `leg_version` | What each leg run was given; replay reads it (R-BTN-82, R-BTN-84) |
 | `transcripts` | `id`; unique `(runner_id, repo, path, claim_id)` | `runner_id`, `claim_id`, `repo`, `path`, `role` (`session`\|`subagent`), `activity_id`, `first_seen_at`, `last_pushed_at` | Archived transcript pointers (R-BTN-20) |
-| `activities` | `(runner_id, id)`; unique `(runner_id, call_id)` | `claim_id` (NULL only before a claim), `parent_id`, `call_id`, `kind`, `seq`, `label`, `source` (`skill`\|`hook`), `started_at` (runner clock), `ended_at`, `outcome` (set exactly when ended), `received_at`, `detail_json` | The runner's timeline (§9) |
+| `activities` | `(runner_id, id)`; unique `(runner_id, call_id)` | `claim_id` (NULL only before a claim), `run_id` (on a `condition` activity), `parent_id`, `call_id`, `kind`, `seq`, `label`, `source` (`skill`\|`hook`\|`baton`), `started_at`, `ended_at`, `outcome` (set exactly when ended), `received_at`, `detail_json` | The runner's timeline (§9, R-BTN-160) |
 | `ticket_history` | `id` | `rationale_json` (opaque, claim rows only), `repository_id`, `ticket_id`, `at`, `kind`, `claim_id`, `runner_id`, `leg`, `reached`, `next_leg`, `run`, `run_id`, `snapshot_sha`, `head_sha`, `course_version`, `leg_version`, `detail_json` | The ticket's running record and course history (R-BTN-39, R-BTN-81) |
 
 `ticket_history.kind` is one of `leg-started`, `leg-finished`, `leg-abandoned`,
@@ -140,6 +145,7 @@ or one of the event kinds §13.8 marks as history rows.
 | Table | Key | Columns | Purpose |
 |---|---|---|---|
 | `ticket_blocks` | `(ticket_id, kind, ref, leg)`; `leg` `''` for the whole ticket | `repository_id`, `kind`, `ref`, `since`, `until`, `provisional` (the commit a runner-written row waits for), `found` (`before-start`\|`during-run`), `binds` (`gate`\|`advice`) | Each unmet prerequisite, maintained, never recomputed on read (R-BTN-75, R-BTN-120, R-BTN-126) |
+| `ticket_dependents` | `(ticket_id, leg, ref, selector)` | `on_ticket`, `predicate`, `target_course`, `skip_withdrawn`, `allow_empty`, `why` (null when met), `station`, `cycle` | Each indexed `ticket` prerequisite of a leg or the whole ticket (`leg` `''`), by the ticket it waits on, and its last verdict; what the prerequisites read reports (R-BTN-120, R-BTN-75) |
 | `leg_needs` | `(ticket_id, leg, resource)` | `repository_id`, `source` (`posted`\|`end`), `added_at`, `found_at` | Resources a next leg needs (R-BTN-76, R-BTN-126) |
 | `leg_attempts` | `(ticket_id, leg)` | `repository_id`, `attempts`, `retry_after`, `last_error_type` | Retry state per ticket and leg (R-BTN-122) |
 | `ticket_overrides` | `ticket_id` | `expedite`, `hold`, `hold_reason`, `route_leg`, `route_station`, `override_kind` (`owner`\|`baton`), `set_by`, `set_at` | Expedite and hold (§6), and the queued leg Baton or the owner chose, held until the station changes (R-BTN-12, R-BTN-83, R-BTN-116, R-BTN-122) |

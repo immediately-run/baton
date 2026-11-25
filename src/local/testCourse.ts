@@ -6,7 +6,7 @@
 // the shortest route, done, confirmed — goes through the core's own claim, advance and end,
 // handing off to a fresh credential when independence requires it (S-BTN-63).
 // It needs no access to production. A violation names its rule; none is a pass.
-import { execFileSync } from 'node:child_process';
+import { git as runGit } from '../defaults/git.mjs';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -540,7 +540,7 @@ export async function noopViolations(k: KitInput): Promise<KitViolation[]> {
     // The scratch checkout: a no-op agent_command at the snapshot, and an origin no forge
     // answers, so the verification cannot succeed and must say so.
     const git = (out: boolean, ...args: string[]) =>
-      String(execFileSync('git', ['-C', dir, '-c', 'user.name=kit', '-c', 'user.email=kit@baton.test', ...args], { stdio: ['ignore', out ? 'pipe' : 'ignore', 'ignore'], ...(out ? { encoding: 'utf8' } : {}) }));
+      runGit(dir, ['-c', 'user.name=kit', '-c', 'user.email=kit@baton.test', ...args], { stdio: ['ignore', out ? 'pipe' : 'ignore', 'ignore'] });
     git(false, 'init', '-q', '-b', 'main');
     git(false, 'remote', 'add', 'origin', 'https://127.0.0.1:1/kit/no-forge.git');
     mkdirSync(join(dir, '.baton'), { recursive: true });
@@ -585,9 +585,9 @@ export async function ticketViolations(k: KitInput): Promise<KitViolation[]> {
   // the close's own checks, not pass on a fetch that cannot connect.
   const origin = mkdtempSync(join(tmpdir(), 'baton-kit-ticket-origin-'));
   try {
-    execFileSync('git', ['-C', origin, 'init', '-q', '--bare', '-b', 'main'], { stdio: 'ignore' });
+    runGit(origin, ['init', '-q', '--bare', '-b', 'main'], { stdio: 'ignore' });
     const git = (out: boolean, ...args: string[]) =>
-      String(execFileSync('git', ['-C', dir, '-c', 'user.name=kit', '-c', 'user.email=kit@baton.test', ...args], { stdio: ['ignore', out ? 'pipe' : 'ignore', 'ignore'], ...(out ? { encoding: 'utf8' } : {}) }));
+      runGit(dir, ['-c', 'user.name=kit', '-c', 'user.email=kit@baton.test', ...args], { stdio: ['ignore', out ? 'pipe' : 'ignore', 'ignore'] });
     git(false, 'init', '-q', '-b', 'main');
     git(false, 'remote', 'add', 'origin', origin);
     mkdirSync(join(dir, 'tickets'), { recursive: true });
@@ -681,24 +681,24 @@ export async function readInputs(root: string, course: string, opts: { base?: st
   // repository scaffolds, however the course is filed here.
   const entry = (settings.courses as unknown[] | undefined)?.map(asRecord).find((x) => x.id === course);
   const courseSource = typeof entry?.source === 'string' ? entry.source : null;
-  const git = (...args: string[]) => execFileSync('git', ['-C', root, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 16 << 20 });
+  const gitAtRoot = (...args: string[]) => runGit(root, args);
   let base: unknown = null;
   let baseVersions: Versions | null = null;
   if (opts.base) {
     // A base that does not resolve is an error, never "a new course" (round 1, 1-A-2/1-B-0).
     try {
-      git('rev-parse', '--verify', '--quiet', `${opts.base}^{commit}`);
+      gitAtRoot('rev-parse', '--verify', '--quiet', `${opts.base}^{commit}`);
     } catch {
       throw new Error(`--base ${opts.base}: not a commit in ${root} (fetch it, or pass --base none to skip the removal rule)`);
     }
     // Only a path the base does not have reads as absent; a file that is there must parse.
     const show = (path: string) => {
       try {
-        git('cat-file', '-e', `${opts.base}:${path}`);
+        gitAtRoot('cat-file', '-e', `${opts.base}:${path}`);
       } catch {
         return null;
       }
-      return JSON.parse(git('show', `${opts.base}:${path}`));
+      return JSON.parse(gitAtRoot('show', `${opts.base}:${path}`));
     };
     base = show(`.baton/courses/${course}/course.json`);
     baseVersions = versionsOf(show('.baton/baton.json'), course);

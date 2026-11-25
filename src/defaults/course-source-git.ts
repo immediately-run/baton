@@ -6,7 +6,8 @@ import { pathToFileURL } from 'node:url';
 import { GIT_SHA, isSourceBranch } from '../core/validate';
 import type { CourseSource } from './course-source';
 import type { builtIn } from './courses';
-import { CLOSE_TIMEOUT_MS, GIT_NONINTERACTIVE_ENV } from './ticket-state';
+import { GIT_NONINTERACTIVE_ENV } from '../client/git-env.mjs';
+import { CLOSE_TIMEOUT_MS } from './ticket-state';
 
 /** Fetch one exact branch (not a tag or the remote's HEAD) and load its standard registry.
  * Fetch both resolves and obtains the commit, so a move cannot race a second lookup. */

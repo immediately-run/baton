@@ -5,7 +5,7 @@ import { BatonError, RECOMMENDED_CLIENT } from './http';
 import { gitPointer, S3_POINTER } from './contractPointers';
 import { FREE_TEXT_MAX, isFreeText } from './text';
 import { COURSE_ID, RESOURCE_NAME } from './course';
-import { CONDITION_TYPE, CONDITION_TYPE_MAX, RESTART_ID, SEVERITIES } from './conditionTypes';
+import { CONDITION_TYPE, CONDITION_TYPE_MAX, RESTART_ID, SEVERITIES, isCoreOnly, restartFault } from './conditionTypes';
 import { parseSchemaId, VALUE_MAX_BYTES } from '../shared/schema.mjs';
 import { CLIENT_VERSION_MAX, compareVersions, parseVersion } from '../shared/versions.mjs';
 
@@ -537,6 +537,20 @@ export function isSourceBranch(ref: unknown): ref is string {
     && !/^[0-9a-f]{40}$/i.test(ref) && !ref.startsWith('-') && !ref.endsWith('.') && !ref.includes('..')
     && ref.split('/').every((part) => part && !part.startsWith('.') && !part.endsWith('.lock'));
 }
+
+/** R-BTN-88: the server-owned placement carried by an owner-state export. */
+export function checkOwnerStateStation(row: Record<string, unknown>, path: unknown): void {
+  const id = (v: unknown): boolean => typeof v === 'string' && COURSE_ID.test(v);
+  const n = (v: unknown): boolean => typeof v === 'number' && Number.isSafeInteger(v) && v >= 0;
+  if (typeof row.ticket_id !== 'string' || !TICKET_ID.test(row.ticket_id) || row.next_source !== 'baton'
+    || !id(row.station) || (row.next_leg !== null && !id(row.next_leg))
+    || !Array.isArray(path) || row.path_len !== path.length || path.some((step) => !isObj(step) || !id(step.leg) || !id(step.reached)
+      || Object.keys(step).some((key) => !['leg', 'reached', 'adopted'].includes(key)) || (step.adopted !== undefined && typeof step.adopted !== 'boolean'))
+    || !n(row.to_end) || !n(row.observation) || (row.person_expires_at !== null && !n(row.person_expires_at))
+    || (row.handoff_url !== null && !isHttpsPointer(row.handoff_url)) || typeof row.snapshot_sha !== 'string' || !GIT_SHA.test(row.snapshot_sha)) {
+    bad('ticket_stations row', 'must carry a valid Baton-owned position');
+  }
+}
 /** §6.5: the `released:` reasons, exactly. */
 export const RELEASE_END_REASONS = ['blocked', 'stale-board', 'cannot-finish:transient', 'cannot-finish:capability', 'cannot-finish:spec', 'cannot-finish:contract-output', 'cannot-finish:contract-input',
   'lease-lost', 'requested', 'owner-cancel', 'provider-suspended', 'provider-exhausted', 'course-changed', 'leg-timeout'] as const;
@@ -649,6 +663,7 @@ export interface End {
   reached: string | null;
   next: string | null;
   detail: string | null;
+  error: { type: string; message: string } | null;
   ended_at_sha: string | null;
   /** A suspension reporting a completed self-loop, not an abandoned run at the same station. */
   finished_self_loop: boolean;
@@ -794,6 +809,15 @@ export function checkEnd(body: unknown): End {
   if (suspended_at && reached && reached !== suspended_at) bad('reached', `a suspended:${suspended_at} end rests at ${suspended_at}`);
   const next = optional(b.next, matches(COURSE_ID, 'next')) ?? null;
   const detail = b.detail === undefined || b.detail === null ? null : isFreeText(b.detail, 200) ? (b.detail as string) : bad('detail', 'must be §10.4 free text of at most 200 characters');
+  let error: End['error'] = null;
+  if (b.error != null) {
+    if (!reason.startsWith('released:cannot-finish:')) bad('error', 'only an interrupt end carries an error (R-BTN-160)');
+    const fields = isObj(b.error) ? b.error : bad('error', 'must be {type, message}');
+    const type = matches(CONDITION_TYPE, 'error.type')(fields.type);
+    if (type.length > CONDITION_TYPE_MAX || isCoreOnly(type)) bad('error.type', 'must be a leg condition type (R-BTN-160)');
+    const message = isFreeText(fields.message) ? fields.message : bad('error.message', 'must be §10.4 free text');
+    error = { type, message };
+  }
   const ptr = b.ended_at_sha;
   if (ptr !== undefined && ptr !== null && !isPointer(ptr)) bad('ended_at_sha', 'must be a commit sha or an https URL of at most 1000 characters');
   const sha = (ptr as string | undefined | null) ?? null;
@@ -830,7 +854,7 @@ export function checkEnd(body: unknown): End {
     spawned = b.spawned as string[];
     if (reason === 'done') bad('spawned', 'a done end spawns nothing — its open children are superseded by the close (R-BTN-86, R-BTN-168)');
   }
-  return { end_reason: reason, status: status!, suspended_at, reached: reached ?? suspended_at, next, detail, ended_at_sha: sha, finished_self_loop: b.finished_self_loop === true, owner_bar: ownerBar, prerequisite, outputs: checkOutputs(b.outputs), scope_exceeded: checkScopeReport(b.scope_exceeded), exit_status: optional(b.exit_status, exitStatus) ?? null, session_url: carriedSessionUrl(b.session_url), spawned, local_order: checkLocalOrder(b.local_order) };
+  return { end_reason: reason, status: status!, suspended_at, reached: reached ?? suspended_at, next, detail, error, ended_at_sha: sha, finished_self_loop: b.finished_self_loop === true, owner_bar: ownerBar, prerequisite, outputs: checkOutputs(b.outputs), scope_exceeded: checkScopeReport(b.scope_exceeded), exit_status: optional(b.exit_status, exitStatus) ?? null, session_url: carriedSessionUrl(b.session_url), spawned, local_order: checkLocalOrder(b.local_order) };
 }
 
 /** B-248 (R-BTN-202): a local order's provenance, as the advance or end that reports the leg
@@ -1050,8 +1074,14 @@ export interface ConditionReport {
 export function checkConditionReport(body: unknown): ConditionReport {
   if (!isObj(body)) bad('body', 'must be a JSON object');
   const b = body as Record<string, unknown>;
+  for (const field of Object.keys(b)) {
+    if (!['type', 'disposition', 'handler', 'restarts', 'default', 'severity', 'url'].includes(field)) {
+      bad('body', 'condition reports carry filter fields only (R-BTN-33)');
+    }
+  }
   const type = matches(CONDITION_TYPE, 'type')(b.type);
   if ((type as string).length > CONDITION_TYPE_MAX) bad('type', `must be at most ${CONDITION_TYPE_MAX} characters`);
+  if (isCoreOnly(type)) bad('type', 'baton and baton.* are core-only (R-BTN-160)');
   // The report may carry the disposition the runner's file reads; Baton's own word decides
   // (R-BTN-50), so it is only shape-checked, never trusted.
   if (b.disposition !== undefined && b.disposition !== null && !['interrupt', 'suspend', 'notify'].includes(b.disposition as string)) {
@@ -1060,18 +1090,14 @@ export function checkConditionReport(body: unknown): ConditionReport {
   const severity = b.severity === undefined || b.severity === null ? 'normal' : SEVERITIES.includes(b.severity as never) ? (b.severity as ConditionReport['severity']) : bad('severity', `must be one of ${SEVERITIES.join(', ')}`);
   let restarts: Record<string, string> | null = null;
   if (b.restarts !== undefined && b.restarts !== null) {
-    if (!isObj(b.restarts) || Object.keys(b.restarts).length === 0 || Object.keys(b.restarts).length > 8) bad('restarts', 'must be 1–8 ids with one-line descriptions');
-    for (const [id, text] of Object.entries(b.restarts as Record<string, unknown>)) {
-      if (!RESTART_ID.test(id)) bad(`restarts.${id}`, 'a restart id matches ^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$ (§12.3)');
-      if (!isFreeText(text)) bad(`restarts.${id}`, 'must be §10.4 free text');
-    }
+    const fault = restartFault(b.restarts);
+    if (fault != null) bad('restarts', fault);
     restarts = b.restarts as Record<string, string>;
   }
   const def = optional(b.default, matches(RESTART_ID, 'default')) ?? null;
   if (def != null && (restarts == null || !Object.prototype.hasOwnProperty.call(restarts, def))) bad('default', 'names one of the raise\'s restarts');
   const url = b.url === undefined || b.url === null ? null : isHttpsPointer(b.url) ? (b.url as string) : bad('url', 'must be an https URL of at most 1000 characters');
   if (b.handler !== undefined && b.handler !== null && typeof b.handler !== 'string') bad('handler', 'must be a course id');
-  retiredFields(b);
   return { type: type as string, disposition: (b.disposition as ConditionReport['disposition']) ?? null, severity, restarts, default: def, url };
 }
 

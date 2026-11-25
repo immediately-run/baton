@@ -121,7 +121,7 @@ export async function dispatchRead(cx: ReadCtx, req: Request, url: URL): Promise
     link !== null && (principal.kind === 'session' || (runner?.id === holder && runner.incarnation === incarnation))
       ? { session_url: link, session_link: true } : hiddenSessionLink(link, holder, incarnation);
   const open = url.searchParams.get('open');
-  const deliverInteractions = hit.action.id === 'repo.conditions' && principal.kind === 'key' && principal.role === 'runner'
+  const deliverInteractions = hit.action.id === 'condition.list' && principal.kind === 'key' && principal.role === 'runner'
     && repository !== null && (open === '1' || open === 'true') && url.searchParams.get('type') === 'interact'
     && cx.sql(`SELECT 1 FROM runner_grants WHERE credential_id = ? AND repository_id = ?
                AND revoked_at IS NULL AND deliver_interactions = 1`, principal.cred, repository).length > 0;
