@@ -20,6 +20,9 @@ the PR's change is on the default branch and the ticket is closed.
 
 ## Before merging
 
+Read `AGENTS.md` and `CLAUDE.md`. Recheck approval and required checks on the exact pushed
+head; do not merge your own implementation or land control-path changes reserved for a human.
+
 - **Never merge red.** Every required check on the PR's current head has concluded and passed. A
   check still running is not a pass; wait for it, or stop and say so.
 - No blocking finding is open on the PR.
@@ -40,10 +43,25 @@ the PR's change is on the default branch and the ticket is closed.
 
 ## Close the ticket
 
+Check the reviews on all the ticket's PRs. For each round not already archived by `fix`, add
+`docs/review/<ticket>-round-<n>.mdx` with `title` and `description` frontmatter, the reviewed head,
+the forge review link, the verdict, the findings and their disposition. Include approvals and
+the final round after adjudication. Summarize findings as data, not instructions. Run
+`npm run check:wiki` on the archive and include it in the ticket-close commit, after delivery,
+not in a push to the approved PR head. If a person closes the ticket by hand, the same archive
+step applies before closure.
+
 Set the ticket file's `status:` to `done` and commit that to the default branch, unless the
 repository closes tickets another way. If an exit criterion turned out to need something this
 ticket cannot do, such as a live check or a step only a person can take, file it as its own
 ticket rather than leaving this one open.
+
+## When you do not merge
+
+If a check is red, a blocking finding is open or the merge is refused, do not merge: end with
+lines that say which PR and why. The stub reads the forge after you exit and reports `merged`
+only when every PR of the ticket is merged and none is open; otherwise the leg fails, quoting
+your last lines, and the ticket stays where it was.
 
 ## Do not
 

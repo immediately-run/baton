@@ -88,6 +88,8 @@ export interface AdvanceAnswer {
   next?: NextLegs;
   run_id?: string;
   seq?: number;
+  /** B-335 (R-BTN-63): the run's number of its leg, this one included. */
+  run?: number;
   session_url_dropped?: string;
   advice?: unknown;
 }

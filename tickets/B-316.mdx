@@ -1,0 +1,89 @@
+---
+title: "B-316 — Runner masker follow-ups after #354: line-crossing secrets, split characters, over-masking, a stray mask and a slow hold"
+id: B-316
+project: baton
+status: available
+updated: 2026-11-23
+tier: judgement
+repos:
+  - baton
+tags:
+  - roadmap-item
+  - security
+description: "#354 fixed the runner's leg-output masker (createLegMasker, src/runner/mask.ts). Its second adversarial review left five findings: secrets with a newline or CRLF in them can still leak a part (about 0.3% of the reviewer's fuzz cases); the executor decodes each stderr chunk on its own, so a multi-byte character split across chunks is garbled; a line ending in any secret's first character loses it to a separate *** line; a stray second *** after a cut at 0; and a hold that costs O(longest secret²) per line. Fix each, with a fuzz test in the suite, under S-BTN-119."
+topics:
+  - baton
+  - security
+owns: {}
+prs:
+  - https://github.com/immediately-run/baton/pull/398
+depends_on: []
+---
+
+**Brief:** the owner, 2026-11-22, approved filing this ticket ("OK for me to … file the four tickets" — "Yes"). The facts are from that day's supervision on host bering. PR #354 (merged as `44080032`, after two rounds of adversarial review) fixed `createLegMasker` and `maskLiterals` in `src/runner/mask.ts`. Before the fix, part of a secret could reach the runner log and the leg log in clear; FLDH-64 rotates bering's credentials for that. The second review round left the findings below. The reviewer's fuzz harnesses (`fuzz3.mts`, `fuzz4.mts`) lived in that session's scratchpad and are not in the repository, so this ticket adds a fuzz test of its own to the suite.
+
+**Spec:** [BATON_SPEC §8.4](../spec/BATON_SPEC/08-runners.md#sec-8-4) ([R-BTN-144](../spec/BATON_SPEC/08-runners.md#sec-8-4), class 7: the masked literals), [§8.3](../spec/BATON_SPEC/08-runners.md#sec-8-3) ([R-BTN-107](../spec/BATON_SPEC/08-runners.md#sec-8-3), the executor's stream). Scenario: [S-BTN-119](../spec/BATON_SPEC/15-verification.md#sec-15) (environment and masking), extended.
+
+## Plan
+
+### (a) Secrets that contain a newline, or start with one, still leak in part
+
+The fuzz cases leaked at about 0.3%, against 57–67% on main before #354. There are three causes:
+
+1. **The join takes the first candidate.** When a line arrives while bytes are held, `push` tries `held + line`, then `` `${held}\n${line}` ``, and `crosses` takes the first candidate that a literal crosses (`mask.ts` ~:227). Where both cross, the wrong one can win. Repro:
+   ```js
+   const m = createLegMasker(['prefix12', 'prefix1\n2-secret-tail-long']);
+   m.push('x prefix1');           // held
+   m.push('2-secret-tail-long y'); // → '***-secret-tail-long y'
+   ```
+   `prefix12` wins on the joined text and the second secret's tail goes out in clear. Fix: take the candidate whose crossing run covers the most bytes past the boundary, or mask the union of both candidates' runs. Choose one and say why in the PR.
+2. **Periodic multi-line secrets leak 2 bytes, rarely.** Repro: secrets `['ccccccc0', 'cccc0cccc\nc']`, lines `['LHccccccc0cccc', 'cc', 'c0']`. Find the cause with the fuzz test; it may be the same fix as item 1.
+3. **CRLF.** The executor's `builtin` stderr framing splits on `\n` only (`src/runner/executor.ts` ~:170), so a `\r` stays at the end of the line. A secret holding `\r\n` then meets a line ending in `\r` that it does not match, because `createLegMasker` folds `\r\n` to `\n` in the literals but not in the lines. Make the framing and the literals agree: strip one trailing `\r` at the framing, or match it in the masker. Test both a value that contains `\r\n` and a value printed on a CRLF stream.
+
+### (b) A multi-byte character split across chunks
+
+`src/runner/executor.ts` ~:165 decodes each stderr (and stdout) chunk with `d.toString('utf8')`. A character split across two chunks becomes two U+FFFD characters, so a secret holding it no longer matches. Decode each stream through one `StringDecoder('utf8')` (`node:string_decoder`) and call `end()` when the stream closes. A test feeds a secret holding a 3- or 4-byte character, split at every byte offset.
+
+### (c) Over-masking: an owner decision
+
+A line that ends in the first character of any secret is held, and when the next line disproves the hold, the held bytes go out as a separate `***` line. The owner decides, and the PR asks: **may a disproved hold shorter than `MIN_SECRET_BYTES` go out in clear?**
+- **Yes:** a disproved hold that is not itself part of a literal is emitted as written. Fewer false `***`. The hold is still masked when it is part of any literal.
+- **No:** the current behaviour stays, and a test states it.
+
+Until the owner answers, build (a), (b), (d) and (e), and leave (c) as it is.
+
+### (d) A stray second `***` after a cut at 0
+
+When `take` cuts at 0 (the whole text is held again), it resets `gone` from `nextGone`, which is 0 because no run passed the cut (`mask.ts` ~:212). The held bytes that already left as a `***` are then counted as new, and a second `***` follows. Fix: when `cut === 0`, carry `gone = left`. Test it with a sequence that holds the same bytes twice.
+
+### (e) The hold is quadratic for long periodic secrets
+
+`holdLiteralTail` costs O(longest secret²) per line when secrets are long and periodic: 300 lines of `'a'×100` against the secret `'a'^4096` took 5.3 s. Bring it to O(line + longest secret) per line, for example with a KMP or Aho–Corasick prefix automaton over the literals, or with a check that stops at the first suffix that is a prefix. Add a test with a time bound, like the case above under one second, so the cost cannot creep back.
+
+### Tests
+
+- Extend S-BTN-119's tests in `test/unit/runner-mask.test.ts` with each repro above, which fail on `44080032`.
+- **A fuzz test in the suite.** It generates small alphabets, overlapping, nested and periodic secrets with `\n` and `\r\n` inside them, and random line splits. It checks that no secret appears in clear in the joined output, and that the output equals the input when no secret occurs. It uses a fixed seed and a few thousand cases so `npm test` stays fast. On a failure it prints the seed and the case, so the case can become a fixed test.
+- A `builtin` executor test for the `StringDecoder` split (b) and for CRLF framing (a3).
+
+### Trust
+
+The masker is what keeps a leg's printed credentials out of the runner log and the leg archive (R-BTN-144), so a mistake here leaks a secret. The direction of every trade-off is to mask more, never less. The one exception is (c), which only the owner can choose.
+
+### Invariants
+
+- **No literal of R-BTN-144's class 7 leaves in clear**, whole or in part, whatever the line splits or chunk boundaries.
+- A line with no secret in it leaves unchanged, apart from the over-masking that (c) decides.
+- **One clock (R-BTN-32).** The time-bound test measures with the test's clock helper or a coarse bound, never `Date.now()` in `src/`.
+
+## Exit criteria
+
+- [ ] The repros in (a), (b) and (d) are tests that fail on `44080032` and pass.
+- [ ] The fuzz test is in `npm test`, its test file names S-BTN-119's §15 row, and it finds no leak.
+- [ ] (e)'s case runs in under a second.
+- [ ] The owner's answer on (c) is recorded in the PR, and the code does what it says.
+- [ ] `npm test` and `npm run typecheck` pass.
+
+## Status
+
+_filed 2026-11-22._
