@@ -74,6 +74,8 @@ import accessSignIn from './0071_access_sign_in.sql';
 import sessionLinkSecrets from './0079_session_link_secrets.sql';
 import interactionDeliveryGrant from './0080_interaction_delivery_grant.sql';
 import sessionLinkIncarnation from './0081_session_link_incarnation.sql';
+import runnerIdle from './0121_runner_idle.sql';
+import runnerIdleRepositories from './0122_runner_idle_repositories.sql';
 import eligibilityInputs from './0124_eligibility_inputs.sql';
 import readyRequirements from './0125_ready_requirements.sql';
 import { isUniqueViolation, logEvent, mintRunId, type Random } from '../core/db';
@@ -230,6 +232,8 @@ export const MIGRATIONS: Migration[] = [
   { id: 82, sql: legTimeoutFence },
   { id: 100, sql: legContracts },
   { id: 101, sql: pinnedContracts },
+  { id: 121, sql: runnerIdle },
+  { id: 122, sql: runnerIdleRepositories },
   { id: 124, sql: eligibilityInputs },
   { id: 125, sql: readyRequirements },
 ];

@@ -10,6 +10,7 @@ import { versionedStore, clockBucket, ifNoneMatch, nonScheduling, schedulingVers
 import { runnerViewResponse, requireFleetScope } from './runnerViews';
 import { BatonError, CLIENT_HEADER, errorResponse, json, servedClientVersions, withClientVersions } from './http';
 import { checkPayload, DEFAULT_COURSE, resolveParents, retiredBoardFields, rowFor, rowForTicket, rowHash, stationOf, type BoardPayload, type PostedStation, type TicketRow } from './board';
+import { noteIdle, type IdleDetail } from './idleReasons';
 import { Stations, type Seen } from './stations';
 import { Questions } from './questions';
 import { Conditions } from './conditions';
@@ -200,7 +201,7 @@ export class BatonCore {
     // bases (as a question's), and the Needs-you and list reads a delivery runner polls.
     this.conditions = new Conditions({ store, now: () => this.now(), graph: (repo, course) => this.stations.graph(repo, course), history: this.history,
       linkBases: (ticket) => this.blocks.linkBases(ticket) });
-    this.claims = new Claims({ store, now: () => this.now(), random: (n) => this.random(n), stations: this.stations, admin: this.admin, blocks: this.blocks, history: this.history,
+    this.claims = new Claims({ store, now: () => this.now(), random: (n) => this.random(n), stations: this.stations, admin: this.admin, blocks: this.blocks, history: this.history, resourceReadings: this.resources,
       schema: (repo, id) => this.courses.schema(repo, id), intake: (repo, course) => this.queues.intake(repo, course),
       dispatch: (kind, ticketId) => want({ repository: repositoryOf(ticketId), kind }) ,
       policies: this.policies, forgeOf: (repo) => this.registry.get(repo)?.forge ?? 'github', scope: this.scope, deprecated: this.deprecated,
@@ -744,7 +745,7 @@ export class BatonCore {
         // R-BTN-185: an owner key of the repository, or a human-only one — a registered human
         // key's own public line serves the signature lookup, not the host's break-glass lines
         // alone (a key registered through POST /v1/human-keys owns nothing, but answers).
-        const signed = await this.authenticated(req, (fp) => admins.get(fp) ?? this.admin.ownerKey(fp) ?? this.admin.humanKeyLine(fp));
+        const signed = await this.authenticated(req, (fp) => admins.get(fp) ?? this.admin.decisionKeyLine(fp));
         const fp = signed.cred;
         const human = await this.admin.isHumanKey(fp);
         const policy = this.policies.current(repo)?.policy;
@@ -982,7 +983,7 @@ export class BatonCore {
         // snapshot itself; a signed read must be its ancestor) burned the honest claim as
         // `cannot-finish:spec`, a counted, non-retryable attempt, where the stale board's
         // release is unpenalised.
-        const answer = tx(() => {
+        const answer = this.claimWithIdle(runnerId, () => {
           const a = this.claims.claim(runnerId, body);
           const ticket = String(a.ticket_id ?? '');
           if (ticket.includes(':')) {
@@ -1150,6 +1151,26 @@ export class BatonCore {
     return null;
   }
 
+  /** B-244: an idle refusal may queue a notification, but never commits the refused claim's
+   *  transaction. The existing unblocked alarm sends the committed queue. */
+  private claimWithIdle<T>(runnerId: number, claim: () => T): T {
+    try {
+      return this.store.transaction(() => {
+        const answer = claim();
+        this.store.exec('DELETE FROM runner_idle WHERE runner_id = ?', runnerId);
+        return answer;
+      });
+    } catch (e) {
+      if (e instanceof BatonError && (e.code === 'no-eligible-ticket' || e.code === 'not-eligible' || e.code === 'stale-skills')) {
+        const seconds = Number(this.ports.config.BATON_IDLE_NOTIFY_AFTER_S);
+        const threshold = (Number.isSafeInteger(seconds) && seconds > 0 ? seconds : 1800) * 1000;
+        this.store.transaction(() => noteIdle(this.store, runnerId, this.now(), threshold, e.extra.detail as IdleDetail | undefined,
+          (repo) => this.blocks.queueIdleTrigger(repo)));
+      }
+      throw e;
+    }
+  }
+
   /**
    * `/v1/admin/*` and `/v1/owner/{repository}/*` (R-BTN-57, R-BTN-58, §11): signed by an
    * administrator's key (BATON_ADMIN_KEYS) or by an owner key of that repository. A key Baton
@@ -1166,6 +1187,7 @@ export class BatonCore {
     const p = url.pathname;
     const m = req.method;
     const body = async () => readJson(signed.req);
+    const optionalBody = async () => signed.req.body ? body() : null;
     const seg = pathSegment;
     if (p.startsWith('/v1/admin/')) {
       if (!admins.has(fp)) throw new BatonError('forbidden', 'an administrator’s key is required (R-BTN-57)');
@@ -1219,7 +1241,7 @@ export class BatonCore {
         return json(await this.admin.grant(actor, repo, b, 'admin'));
       }
       const revoke = /^\/v1\/admin\/keys\/([^/]+)\/revoke$/.exec(p);
-      if (m === 'POST' && revoke) return json(await this.admin.revokeKey(actor, seg(revoke[1])));
+      if (m === 'POST' && revoke) return json(await this.admin.revokeKey(actor, seg(revoke[1]), await optionalBody()));
       if (m === 'POST' && p === '/v1/admin/login-links') return json(await this.admin.loginLink(fp));
       throw new BatonError('not-found', `no route ${m} ${p}`);
     }
@@ -1243,7 +1265,7 @@ export class BatonCore {
     if (m === 'GET' && rest === 'signing-keys') return json({ keys: await this.admin.signingKeys(repo) });
     if (m === 'POST' && rest === 'grants') return json(await this.admin.grant(actor, repo, await body(), 'owner'));
     const rg = /^grants\/([^/]+)\/revoke$/.exec(rest);
-    if (m === 'POST' && rg) return json(await this.admin.revokeGrant(actor, repo, seg(rg[1])));
+    if (m === 'POST' && rg) return json(await this.admin.revokeGrant(actor, repo, seg(rg[1]), await optionalBody()));
     if (m === 'POST' && rest === 'owners') return json(await this.admin.owners(actor, repo, await body()));
     // B-113 (R-BTN-140's precedent): the repository's owners' consent to another repository's
     // tickets depending on theirs — the consent a dependency on a less visible repository needs
@@ -1261,8 +1283,10 @@ export class BatonCore {
       const repoRow = this.registry.get(repo);
       if (!repoRow || repoRow.retired_at != null) throw new BatonError('not-found', `${repo} is not registered`);
       const b = await body();
-      const breakGlass = await this.humanBreakGlass();
-      return json(this.store.transaction(() => this.policies.put(repo, b, repoRow.forge, { credential: fp, label: actor }, new Set(breakGlass.keys()))));
+      const breakGlass = new Set((await this.humanBreakGlass()).keys());
+      const personAnswerStops = () => this.admin.hasHumanDecisionWriter(breakGlass, admins) ? []
+        : this.questions.answerableLegs(repo);
+      return json(this.store.transaction(() => this.policies.put(repo, b, repoRow.forge, { credential: fp, label: actor }, { breakGlass, personAnswerStops })));
     }
     if (m === 'POST' && rest === 'policy/floors') {
       const b = await body();

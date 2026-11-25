@@ -97,6 +97,13 @@ describe('class 7 by name (R-BTN-144)', () => {
     expect(other.flush()).toBe('');
   });
 
+  it('S-BTN-119: masks a complete literal even when its suffix is held for another literal', () => {
+    const sink = createLegMasker(['sample-redaction-13', '13-more-sample']);
+    expect(sink.push('value: sample-redaction-13')).toBe('value: ***');
+    expect(sink.push('-more-sample done')).toBe('*** done');
+    expect(sink.flush()).toBe('');
+  });
+
   it('a value holding a newline is masked across the boundary the line framing ate', () => {
     const value = 'topsecret\nsecondline';
     const sink = createLegMasker([value]);

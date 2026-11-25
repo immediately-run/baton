@@ -150,7 +150,8 @@ export function RunnerCard({ repository, row, now, heading, notBuilt }: { reposi
         {row.transcript_url != null ? <><ExtLink href={row.transcript_url} showHost>transcript</ExtLink> · </> : null}
         executor: <span className="mut">not recorded{notBuilt?.executor ? <> (<Text mono value={notBuilt.executor} />)</> : null}</span>
       </p>
-      <Controls view="repository/runners/{runner}" target={target} allowed={allowed} label={`Actions on runner ${row.runner_id}`} />
+      {/* A poll can retain the runner card but replace its claim. Discard the old Stop dialog. */}
+      <Controls key={row.claim?.claim_id ?? 'idle'} view="repository/runners/{runner}" target={target} allowed={allowed} label={`Actions on runner ${row.runner_id}`} />
     </Card>
   );
 }

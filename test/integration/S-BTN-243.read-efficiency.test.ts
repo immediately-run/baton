@@ -267,7 +267,9 @@ describe('S-BTN-243 bounded reads without changing matching', { timeout: 120_000
     if (HOST === 'cloudflare') {
       // Includes the observation response's mandatory 181 ticket versions, not just board POST.
       expect(rec.read, 'no-match recommendation rows_read').toBeLessThanOrEqual(300);
-      expect(cold.read, 'no-match claim rows_read').toBeLessThanOrEqual(300);
+      // Cold refusals now explain the whole visible ready set (181 legs), not just the indexed
+      // candidates. The warm budget still guards against re-reading any of that set per beat.
+      expect(cold.read).toBeLessThan(2900);
       expect(indexed.cursor.rowsRead, 'candidate query rows_read').toBeLessThanOrEqual(200);
       expect(warm.read).toBeLessThan(60);
       expect(sync.read).toBeLessThan(350);
