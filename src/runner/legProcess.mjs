@@ -46,14 +46,14 @@ function verifySource(root, blobs) {
   if (count !== Object.keys(blobs).length) throw new Error('the verified source tree is incomplete');
 }
 
-async function runFetched(ctx, source, standard) {
+async function runSourced(ctx, id, source, standard) {
   const git = (...argv) => execFileSync('git', ['-C', ctx.checkout, ...argv], {
     env: { ...process.env, GIT_NO_REPLACE_OBJECTS: '1', GIT_TERMINAL_PROMPT: '0' },
     stdio: ['ignore', 'pipe', 'pipe'], timeout: 30_000, killSignal: 'SIGKILL', maxBuffer: 16 << 20,
   });
-  const base = `.baton/courses/${source.id}/legs`;
+  const base = `.baton/courses/${id}/legs`;
   const leg = ctx.leg;
-  if (!/^[a-z][a-z0-9-]*$/.test(leg)) throw new Error('invalid sourced leg name');
+  if (![id, leg].every((name) => /^[a-z][a-z0-9-]*$/.test(name))) throw new Error('invalid sourced leg name');
   const snapshot = (group) => {
     const sha = ctx.signed_control?.[group] ?? ctx.snapshot.sha;
     if (!/^[0-9a-f]{40}$/i.test(sha)) throw new Error('the leg has no verified home snapshot');
@@ -71,21 +71,24 @@ async function runFetched(ctx, source, standard) {
   const courseRows = entries(instructionsSha);
   const [instructions] = find(courseRows, (name) => name === `${leg}.md`);
   const overrides = find(overridesSha === instructionsSha ? courseRows : entries(overridesSha),
-    (name) => name.startsWith(`${leg}.run.`) && /^[a-z0-9]+$/.test(name.slice(leg.length + 5)));
+    (name) => name.startsWith(`${leg}.run.`));
   if (overrides.length > 1) throw new Error(`${leg}: multiple run overrides at ${overridesSha}`);
+  if (overrides[0] && !/\.(?:mjs|js|cjs)$/.test(overrides[0])) throw new Error(`${overrides[0]}: unsupported run override`);
   const dir = mkdtempSync(join(tmpdir(), 'baton-source-run-'));
   try {
     const fallback = `legs/${leg}.md`;
-    const path = instructions ? join(dir, `${leg}.md`) : Object.hasOwn(source.blobs, fallback) ? join(dirname(script), `${leg}.md`) : '';
+    const path = instructions ? join(dir, `${leg}.md`) : source && Object.hasOwn(source.blobs, fallback) ? join(dirname(script), `${leg}.md`) : '';
     if (instructions) writeFileSync(path, git('show', `${instructionsSha}:${instructions}`), { mode: 0o400 });
     process.env.BATON_INSTRUCTIONS = path;
     ctx.instructions = path;
     if (overrides.length === 0) return await standard(ctx);
     const file = join(dir, overrides[0].slice(base.length + 1));
     writeFileSync(file, git('show', `${overridesSha}:${overrides[0]}`), { mode: 0o400 });
+    if (file.endsWith('.js')) writeFileSync(join(dir, 'package.json'), '{"type":"module"}');
     const override = await import(pathToFileURL(file).href);
-    if (typeof override.run !== 'function') throw new Error(`${overrides[0]} exports no run(ctx, standard)`);
-    return await override.run(ctx, standard);
+    const run = override.run ?? override.default?.run;
+    if (typeof run !== 'function') throw new Error(`${overrides[0]} exports no run(ctx, standard)`);
+    return await run(ctx, standard);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -152,11 +155,15 @@ try {
   const owner = typeof mod[call] === 'function' ? mod : holder != null && typeof holder[call] === 'function' ? holder : null;
   const fn = owner != null ? owner[call] : call === 'run' && typeof mod.default === 'function' ? mod.default : undefined;
   if (typeof fn !== 'function') throw new Error(`the script exports no ${call}()`);
-  if (call === 'run') args[0] = { ...args[0], signal: stop.signal };
+  if (call === 'run') {
+    if (args[0]?.reads_only === true && mod.readsOnly !== true) {
+      throw new Error('a reads_only leg needs a stub that supports reads_only (R-BTN-183)');
+    }
+    args[0] = { ...args[0], signal: stop.signal };
+  }
   if (call === 'stations') args[0] = { ...args[0], closed: new Set(args[0].closed), done: new Set(args[0].done) };
-  // Historical generated stubs already dispatch their own overrides.
-  const result = call === 'run' && source && !source.legacy
-    ? await runFetched(args[0], source, typeof mod.standard === 'function' ? mod.standard : (ctx) => fn.call(owner, ctx))
+  const result = call === 'run' && args[0]?.sourced_course_id
+    ? await runSourced(args[0], args[0].sourced_course_id, source, typeof mod.standard === 'function' ? mod.standard : (ctx) => fn.call(owner, ctx))
     : await fn.apply(owner, args);
   finish({ ok: true, result: result === undefined ? null : result }, 0);
 } catch (e) {

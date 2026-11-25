@@ -2,7 +2,7 @@
 title: "4. Tickets, syncs and the board"
 description: "A repository describes itself in its .baton/ folder."
 ---
-## 4. Tickets, syncs and the board *(proposal)*
+## 4. Tickets, syncs and the board
 
 A repository describes itself in its `.baton/` folder. Its **sync** — `baton repo sync`, however
 it is triggered (R-BTN-94, R-BTN-105) — reads the tickets from the ticket source and their
@@ -103,13 +103,14 @@ numbers.
     Defaults are CLI code run in the sync, never core: `src/core/` may not import
     `src/defaults/`.
   - **The markdown source.** Every `*.md` or `*.mdx` under `items` (default `tickets/`) whose
-    frontmatter has an `id` is a ticket. It is **pinned**: a live ticket's `version` is its
+    frontmatter has an `id` and either omits `kind` or sets it to `ticket` is a ticket. It is
+    **pinned**: a live ticket's `version` is its
     file's blob id at the posted commit, its `key` is its `path`, and its `read` is that blob;
     a ticket whose file is not at the commit is posted with no version. Its frontmatter:
 
     | field | posted as |
     |---|---|
-    | `id`, `title`, `tier`, `parent` (R-BTN-86), `not_before` (R-BTN-89) | the same |
+    | `id`, `title`, `parent` (R-BTN-86), `not_before` (R-BTN-89) | the same |
     | `status` | `done` → `closed` as done; `withdrawn`, `superseded`, `deferred` → `closed` as withdrawn; any other → live, in `display.status` |
     | `course` | `course_id` (default `default_course`, else `create-pr`) |
     | `requires` | capability names, expanded |
@@ -153,54 +154,39 @@ numbers.
     compared: an entry of the same day is not after. A shallow clone skips the report, saying
     so.
 
+    A `rules re-read` note is `_(YYYY-MM-DD: rules re-read: <ids>)_`, or the Status line
+    `dibber set <id> --note "rules re-read: <ids>"` writes, `_YYYY-MM-DD: rules re-read: <ids>._`.
     The `_filed` line, `tags: [request]` and the `rules re-read` notes are claims anyone who
-    can push can write; the check and the claim verify their form alone.
-  - **`baton ticket new`** (R-BTN-127) `--title T [--description D] [--project ID]
-    [--depends-on A,B] [--tags X,Y] [--tier T] [--order N] [--repos a,b] [--course C]
-    [--body-file F] [--trust T] [--invariants I] [--direct] [-i KEY] [--url URL] [--offline]`
-    files one ticket under an id from R-BTN-199.
-    - It writes the conventional body unless `--body-file` names one: `**Brief:**`, `**Spec:**`,
-      `**Depends on:**` (`none.` when empty), `**Used by:**`, `### What to build`, `### Trust`,
-      `### Invariants`, `### Tests`, `### Exit criteria`, `**Requires:**` (the capabilities a
-      description's closing `Requires:` clause names) and `## Status` with the `_filed` line,
-      which every filing carries.
-    - It refuses, before any push: a `--body-file` whose `**Depends on:**` line disagrees with
-      `--depends-on`; a filing `baton ticket check` would find fault with, judged over the
-      files the commit would leave; on or after the `sections_since` day, a filing whose
-      `### Trust` or `### Invariants` is absent, empty or a placeholder; and a filing whose project —
-      `--project`, else the `project` setting — is absent or names no `kind: project` page in
-      the items folder's `projects/`.
-    - It lands the ticket file alone, as one commit cut from the fetched default head in a
-      throwaway worktree, on `baton-ticket/<id>` — a reserved namespace no `branch_pattern` may
-      match (R-BTN-190) — and asks the forge for a PR with the caller's credential; on a `git`
-      forge it prints the pushed branch for a person to merge. The ticket is claimable when
-      that branch merges. With `--direct` it pushes the commit to the default branch instead,
-      adding the new id once to each dependency's `**Used by:**` line, and falls back to the PR
-      when the forge refuses the push as protected.
-    - Its settings: `items`, `ticket_prefix` (default `B`), `legacy_ids` (id patterns the
-      repository accepts and never allocates), `prefixes` (a prefix to its pattern, for one
-      that allocates more than `\d+`), `project` and `tags` (the defaults of `--project` and
-      `--tags`; `tags` else `roadmap-item`).
-  - **The git-lock commands.** Legacy, removed with its code (R-BTN-193). `baton ticket claim |
-    set | done` each write one commit to a ticket's `status:` and push it to the default branch
-    from a throwaway worktree at the fetched head; a push refused because the branch moved is
-    retried on the new head, six tries in all.
-    - `claim <id> [-i KEY] [--url URL] [--offline] [--rules-reread <ids>]`, and `set <id>
-      in-progress`, move a ticket available → in-progress. They refuse a ticket that is not
-      available; one whose `depends_on` are not all done (a qualified one is read at the target
-      repository's default branch, found through the `repos` setting); one another claim holds
-      in Baton; and one whose body cites a rule amended since the ticket answered for it (the
-      check's reading), unless `--rules-reread` names exactly those ids, which the commit then
-      notes in `## Status`. The claim reads Baton's position first: a ticket Baton holds past
-      its course's start is taken over where it is — its `prs:` kept, the position printed, the
-      ready leg continued on its branch. A read Baton does not answer refuses, unless
-      `--offline`.
-    - `set <id> <status> [--pr URL] [--note TEXT]` writes any live status and adds the PR to
-      `prs` once. A release to `available` refuses to drop a PR Baton's record holds while Baton
-      offers the ticket past its start; its commit message carries the hand-off — the PRs,
-      Baton's station, ready leg and branches, and the note.
-    - `done <id> [--pr URL]` writes `done` and moves the file to `<items>/archive/`.
-    - A post whose ticket is `available` in git while placed past its course's start is logged
+    can push can write; the check verifies their form alone.
+  - **`baton ticket check <id> --claimable [-i KEY] [--url URL] [--offline]`** reads what a
+    claim must know before Dibber writes it, and writes nothing. It reads the ticket at the
+    fetched default head and Baton's position of it (the board's station, ready leg and holders,
+    the history's `resume`, the branch-holder query). It is not claimable, exit 1 naming why,
+    when: another live claim holds it or its branch; it is not `available` in git, Baton's
+    position past its course's start overriding only a false `available`, never `in-progress`,
+    `in-review`, a parked or a closed status; a `depends_on` entry is not done (archived, or
+    `done` or `superseded`; a qualified one read at the target repository's default branch,
+    found through the `repos` setting); or its body cites a rule amended since it answered for
+    it (the check's reading), naming each id until a `rules re-read` note names it. Claimable,
+    exit 0, it prints the claim to make (`dibber claim <id>`) and, for a ticket Baton holds past
+    its start, the takeover: the station, the ready leg, every PR Baton's record holds (each one
+    the file lacks with its `dibber set <id> --pr <url>`), and each branch to continue on. A read
+    Baton does not answer exits 2, unless `--offline`, which judges git's word alone and says so.
+  - **Ticket files are Dibber's to write.** Baton's CLI files no ticket and writes no status:
+    `baton ticket new | claim | set | done` are refused, each naming its `dibber` command. A
+    ticket is filed with `dibber new`, under the number Dibber's coordinator gives (R-BTN-199),
+    and its status written with `dibber claim | set | done`.
+    - `baton repo init` writes `.dibber/config.json` beside `.baton/baton.json`: `store` from
+      `items`, `prefix` from `ticket_prefix`, and `coordinator.next`,
+      `baton tickets next ticket-<prefix> --coordinator` run from the release's package. Over an existing file it adds what is
+      missing, never overwrites a value, and says what it changed.
+    - A course leg that files or changes a ticket runs the `dibber` its stub pins, handed to its
+      agent as `BATON_DIBBER`: the host's `BATON_DIBBER`, else the release version
+      `.baton/baton.json`'s `dibber` names, else the release's own; never a command a ticket or a
+      branch names. The leg commits and pushes what Dibber wrote by its course's route: a
+      `bug-report` filing alone, on `baton-ticket/<id>` — a reserved namespace no `branch_pattern`
+      may match (R-BTN-190). A leg's close still writes its marker keys itself (R-BTN-83).
+  - A post whose ticket is `available` in git while placed past its course's start is logged
       `position-disagrees` (R-BTN-85).
   - **The "How tickets work" page.** `baton repo init` writes `HOW-TICKETS-WORK.md` into the
     items folder, the same text in every repository but for the id prefix, legacy patterns and
@@ -327,9 +313,10 @@ numbers.
     released or void) the observation route answers `sync-busy`. A number is void 10 minutes
     after it was handed out.
   - **Release.** A sync run that will not post gives its number back with
-    `POST /v1/sync/observation {release: <number>}`; a release of any number but the
-    outstanding one does nothing.
-  - Renewal, voiding by credential and the bar on a credential that lets numbers lapse are
+    `POST /v1/sync/observation {release: <number>}`. Only the issuer of the outstanding number
+    may release or post it; revoking a sync key voids its number without resetting the counter.
+    See R-BTN-187 for quotas and owner alerts.
+  - Renewal and the bar on a credential that lets numbers lapse are
     proposed in [tickets and sources](../proposals/tickets-and-sources.md).
 
 An identical validated same-head snapshot may reuse its materialization only while its
@@ -343,11 +330,14 @@ The fingerprint stores no ticket content and is an optimization, never authority
   observation is newer, then moves the head. A first snapshot is accepted with `parent_sha:
   null` only while no head exists. A lost race is `head-moved`; the sync re-reads and retries.
   A post marked `force` — neither its commit nor the head descends from the other — is refused
-  `snapshot-rejected` and held; the head stands until an owner accepts the held history
-  (`POST /v1/ui/board/accept`) or 24 hours pass, after which the sync's next `force` post
-  against that head becomes the head. A held post's stations and confirmations are applied as a
-  refresh.
-  Ordering never depends on a clock. An administrator's adoption of a rewritten default branch
+  `snapshot-rejected` and held once per sha against the current head. An administrator can
+  accept it on the dashboard (`POST /v1/ui/board/accept`); otherwise the alarm accepts it
+  when 24 hours have elapsed since its first post against that head. Acceptance admits the
+  rewritten line for that repository and previous head; it does not move the head. The next
+  otherwise eligible `force` post against that head moves it, even if the posted sha differs
+  from the held sha. A held post's stations and
+  confirmations are applied as a refresh. Which of two posts is newer never depends on a clock.
+  An administrator's adoption of a rewritten default branch
   (a forced Resync) is proposed in [tickets and sources](../proposals/tickets-and-sources.md).
 
 - **R-BTN-147 (a renumbered ticket keeps its hold and backoff).** Each ticket is posted with a
@@ -373,7 +363,9 @@ The fingerprint stores no ticket content and is an optimization, never authority
     one too, with no number (§13.4 `sequences`).
   - **The CLI** names the kinds — `ticket-<prefix>` (one per allocating prefix), `rule`,
     `scenario`, `gate`, `migration` — and `baton ticket next <kind> [--for <ticket>]` prints the
-    next of one. A remote the floor cannot read is an error, never a floor of 0: no number is
+    next of one. With `--coordinator` it prints Baton's number alone, or refuses — no key, no
+    repository, an unanswered Baton — and never scans: Dibber's coordinator command (R-BTN-74),
+    so only Dibber's own `new --offline` files from a scan. A remote the floor cannot read is an error, never a floor of 0: no number is
     printed or filed.
   - **Git stays the record** (R-BTN-1): the CLI writes the number into git and never reads it
     back from Baton. A number a branch holds only locally is one no floor sees; the duplicate
@@ -381,8 +373,8 @@ The fingerprint stores no ticket content and is an optimization, never authority
     R-BTN-31's for the rest.
   - **The next-free scan.** Legacy, removed with its code (R-BTN-193). With no key, no
     configured Baton, an unreachable Baton or `--offline`, the CLI takes the next free number
-    git shows it — for `baton ticket new`, across the items folder at any depth on the head it
-    files on, `archive/` included — and says so in its output. The duplicate check at merge is
+    git shows it — for a ticket kind, across the items folder at any depth, `archive/` included —
+    and says so in its output. Dibber's own scan is its `new --offline`. The duplicate check at merge is
     that path's only guard.
 
 ### 4.4 The board post
@@ -390,7 +382,7 @@ The fingerprint stores no ticket content and is an optimization, never authority
 `POST /v1/sync/board` — the one normative schema:
 
 ```
-{ sha, parent_sha, observation,                                   -- R-BTN-11, R-BTN-62
+{ sha, parent_sha, observation, force?,                                   -- R-BTN-11, R-BTN-62
   read_sha?,                                                      -- the commit the tickets were read at (§4.3)
   source: { kind: 'markdown' | 'custom', versions?, cli },         -- R-BTN-74
   contains?: [<sha>],                                            -- the provisional commits (R-BTN-126) this post contains
@@ -398,7 +390,7 @@ The fingerprint stores no ticket content and is an optimization, never authority
                course: <course.json with its schemas>,           -- R-BTN-69, R-BTN-108
                step_kinds, branch_pattern, previous_branch_pattern? }],
   tickets:  [{ id,                                               -- local id
-               course_id, version?, key?, path?, title, tier?,    -- version: R-BTN-74; key: R-BTN-147
+               course_id, version?, key?, path?, title,          -- version: R-BTN-74; key: R-BTN-147
                requires[], expedite, repos[], rank?,             -- requires expanded; repos are forge paths
                parent?, not_before?,                             -- R-BTN-86, R-BTN-89
                depends_at?: [{ ticket, at | reached | done, leg? }],   -- R-BTN-120
@@ -409,11 +401,18 @@ The fingerprint stores no ticket content and is an optimization, never authority
                bars: { <leg>: [<tag>] },                         -- R-BTN-60
                course: <opaque> }],
   closed:   [{ id, as: 'done' | 'withdrawn' }],                  -- tickets that left the board
+  stations?: { <local ticket id>: {                             -- R-BTN-70
+    station, path: [{ leg, reached }], next_leg: <leg> | null,
+    next_source: 'course' | 'marker' | 'inferred' | 'holder', handoff_url: <url> | null,
+    next: [{ leg, state: 'ready' | 'waiting', waiting_on: <label> | null, needs?: [<resource>] }],
+    bars: { <leg>: [<tag>] }, decisions?: [{ id, asks, leg?, url?, question?, options? }] } },
   attestations: [{ type, ticket, ref?, value }],                 -- the sync's attestations, this run's observation (R-BTN-191)
   course_data: { <course>: <opaque> } }
 ```
 
-- Core reads every generic field and stores each `<opaque>` verbatim. Every station and leg
+- Core reads every generic field and stores each `<opaque>` verbatim. `stations` supplies
+  placements and readiness (R-BTN-70); a new-head post does not offer a ticket it does not place.
+  For the interim post see §16.4. Every station and leg
   named must be in the course file. Each attestation is validated by its type's schema and
   accepted with the post (R-BTN-191): readiness whose `at` is not Baton's station is discarded,
   and an arrival Baton does not apply is recorded unapplied (R-BTN-39). Confirmations are not
@@ -486,8 +485,7 @@ The fingerprint stores no ticket content and is an optimization, never authority
     `version` as the board holds it, and how its source reads (`ticket_source`: `{kind,
     versions}`; absent when the board declared no source, and `version` is `''` when the board
     holds none).
-    Before preparing any tree at the sha, the runner checks it is on the registered default
-    branch (R-BTN-143, else `released:off-branch`). If `git cat-file -e <snapshot_sha>` fails or
+    R-BTN-143 governs verification of the snapshot's ancestry. If `git cat-file -e <snapshot_sha>` fails or
     the file is absent, it fetches the default branch once, then releases `stale-board` if it is
     still missing.
   - The runner reads the ticket from `origin/<default branch>:<path>`, never the working tree,
@@ -501,12 +499,11 @@ The fingerprint stores no ticket content and is an optimization, never authority
     **current** source reads it as the store holds it now (`read(id, {})`), and a different
     version releases `stale-board`. A source that declares `versions` and exports no `read`
     releases `stale-board` too. A source that declares neither is not re-verified by version.
-  - **Re-verification of readiness.** The runner then checks the tier fits its ceiling and
-    runs the course's `sync.mjs` (through the wrapper, from a verified tree at the claim's
-    commit, R-BTN-133) on the ticket and its PRs at the fetched head. Its readiness must show
-    the offered leg leaving the claim's station as Baton holds it (the claim response's
+  - **Re-verification of readiness.** The runner then runs the course's `sync.mjs` (through the
+    wrapper, from a verified tree at the claim's commit, R-BTN-133) on the ticket and its PRs
+    at the fetched head. Its readiness must show the offered leg leaving the claim's station as Baton holds it (the claim response's
     station, `path_len` and queued leg, R-BTN-39); the ticket's position never comes from the
-    source. A ticket closed, archived or re-tiered, or the leg not offered there, releases
+    source. A ticket closed or archived, or the leg not offered there, releases
     `stale-board`. A ticket with no file — a `changes` check ticket (R-BTN-114) — is
     re-verified against the claim response's station and queued leg instead.
   - After this check, a version that moves under the claim is read again as R-BTN-198 says.
@@ -588,30 +585,47 @@ The fingerprint stores no ticket content and is an optimization, never authority
   them and imports them into another Baton.
   - **Format** `baton.owner-state/v1`: `{format, schema_version (highest applied migration),
     exported_at, origin, events_seq, sections, digest}`; `digest` is SHA-256 over the RFC 8785
-    canonical JSON of the rest. `sections` holds every column §13 gives these tables:
-    `repositories` (a retired repository's tombstoned row alone, and no row of it in any other
-    section, R-BTN-47), `repository_owners`, `credentials`, `sync_keys`,
-    `runner_grants`, `runners` (with `secret_hash` and `incarnation`; import writes
-    `last_seen_at` 0), `owner_bars`, `ticket_overrides`, `ticket_stations` and the live
-    tickets' position rows of `ticket_history` and their `claim_legs`, `closed_tickets`,
-    `external_resources`,
-    `resource_instances`, `instance_serves`, `capability_capacity`, `check_runners`, `mcp_keys` (hashes only), `instance_settings`, unexpired
-    `registration_tokens` (hashes only), open `conditions`, `ticket_timers`, every `repository_policies` version (R-BTN-188, R-BTN-189).
-  - **Not exported**: claims and their `claim_seats`, events,
-    readings (R-BTN-76), sync wants; and, unless `--with-history`, the history, `leg_outputs`
-    and `leg_run_inputs`, which an import without them loses.
+    canonical JSON of the rest. **Default sections** (each table's stored columns):
+    `repositories`, `repository_owners`, `credentials`, `sync_keys`, `runner_grants`,
+    `runners`, `owner_bars`, `ticket_overrides`, `closed_tickets`, `external_resources`,
+    `resource_instances`, `instance_serves`, `couriers`, `instance_readings`,
+    `repository_policies`, `policy_floors`, `human_keys`, `capability_capacity`,
+    `instance_settings`, `ticket_stations`.
+    Policy versions and floors are for live repositories (R-BTN-188, R-BTN-189); the human key
+    register is tenant-wide (R-BTN-185), and host-configured keys do not travel with it.
+    `policy_floors` also holds the backing rows for live legacy floor projections (R-BTN-189); a
+    schema storing legacy floor rows always includes the section in the digest, as an empty
+    array when there are no such rows.
+    Only Baton-owned positions on live repositories are exported; the board rebuilds the rest.
+    Import zeros runners' liveness and activity timestamps.
+  - **History sections** (only with `--with-history`): `ticket_history`, `leg_outputs`,
+    `leg_run_inputs`. An import without them loses them. A populated `leg_run_inputs` section
+    cannot be restored into an empty target: its rows require originating claims, which do
+    not travel in the export.
+  - **Not exported**: claims, their seats and leg rows, events, reading history, sync wants,
+    and the board cache apart from the Baton-owned positions above.
   - **Import** (`POST /v1/admin/import`): one transaction, into an **empty** Baton only (no
-    repository, owner or credential but the seeded `legacy` row), else `conflict`; digest checked (`invalid-params`); the
-    same `schema_version` required. Every row passes the write path's validation and invariants
-    (one role per key, unique names, id grammars, tombstones only on retired rows); the first
-    failing row refuses the whole import. It refuses a live repository whose policy versions do
-    not chain by `previous_hash` from version 1, or whose export holds no policy; a retired
-    repository's tombstone needs none. Signed requests with `created` at or before the
-    source's `sealed_at` are refused `unauthenticated`. Ticket-scoped rows wait in
-    `pending_owner_state` until the first snapshot that creates their ticket; one the
-    repository's first snapshot does not post is dropped and logged. A ticket with pending course
-    history is placed from it, not at its course's `start` (R-BTN-39). The event sequence
-    continues from `events_seq`.
+    repository, owner or credential but the seeded `legacy` row), else `conflict`; digest
+    checked (`invalid-params`); the same `schema_version` and all default sections required —
+    a missing `policy_floors` section is refused even with a valid digest and policy hash chain.
+    Rows pass import validation and invariants (one role per key, unique names, id grammars,
+    tombstones only on retired rows); the first failing row refuses the whole import. Every live
+    repository needs its original policy versions, validated as documents and by their hashes
+    and contiguous `previous_hash` chain starting at version 1. Import writes them unchanged
+    and seeds none; a retired repository's tombstone needs none. Import refuses floors whose
+    guarantees do not hold on the imported policy and authority facts (R-BTN-189); it does not
+    check a live protection report. It validates legacy rows using the stored format, and on a
+    schema that uses projection it checks the current projection after restoring its backing
+    data (R-BTN-188, R-BTN-189). Imported human keys must not be destination administrator
+    keys (R-BTN-57). A digest checks integrity,
+    not the authority of the source. Signed requests with `created` at or before the source's
+    `sealed_at` are refused `unauthenticated`. Ticket-scoped rows wait in `pending_owner_state`
+    until the ticket is posted for an override, or placed for a Baton-owned position. A pending
+    row whose ticket is absent from a snapshot that materializes the ticket set is dropped and
+    logged. A further move exports rows that are still pending. Before the first accepted
+    placement on the current or new head is judged (R-BTN-39), Baton restores the pending
+    position and rebuilds its outgoing legs from the course in force. Until then the ticket is
+    not offered (§4.4). The event sequence continues from `events_seq`.
   - **Moving a Baton**:
     1. **freeze** (`baton admin freeze`, `POST /v1/admin/freeze`; `baton_settings.frozen_at`,
        event `frozen`): new claims and owner writes are refused `frozen`;

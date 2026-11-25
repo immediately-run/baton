@@ -29,17 +29,21 @@
 // The pure half (`parseReplayArgs`, `pickRun`, `replayEnvironment`, `compareRead`, `slugOf`) is
 // unit-tested in test/unit/runner-replay.test.ts; the whole is exercised end-to-end by S-BTN-48
 // against the local host, over a real repository.
-import { execFileSync } from 'node:child_process';
+import { git, gitBuffer } from '../defaults/git.mjs';
 import { createHash } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { DEFAULT_URL } from '../../cli/baton.mjs';
-import { requestCredential, signHeaders } from '../../cli/sign.mjs';
+import { DEFAULT_URL } from '../client/config.mjs';
+import { requestCredential, signHeaders } from '../client/sign.mjs';
 import { bareTicketId } from '../defaults/ticket-state';
 import { digestOfRead, MARKDOWN_SOURCE } from '../defaults/ticket-versions';
-import { dropCourse, git, loadCourse, extractTicketSource, sourceContext, type CourseLoad } from './home';
+import { dropCourse, loadCourse, extractTicketSource, sourceContext, type CourseLoad } from './home';
+import { gitBytes, readArtifact } from './contracts';
+import type { PointerReach } from '../core/contractPointers';
+import { resolveLeg } from '../core/graph';
+import { stdSchema } from '../shared/std.mjs';
 import { loadExecutor, type Executor, type Handle } from './executor';
 import { maskLegOutput, readMaskEnv, runnerConfigPath, secretValues } from './mask';
 
@@ -142,6 +146,8 @@ export function parseReplayArgs(argv: string[], env: NodeJS.ProcessEnv = process
 export interface RecordedRun {
   run: number;
   run_id?: string;
+  leg?: string;
+  contract_leg?: string;
   claim: number;
   runner?: number;
   from?: string;
@@ -153,7 +159,7 @@ export interface RecordedRun {
   course?: string | null;
   course_version?: number | null;
   ticket?: { version?: string; read_digest?: string };
-  inputs: { name: string; from_leg?: string; from_run?: number; uri?: string; digest?: string; value?: unknown; leg_version?: number }[];
+  inputs: { name: string; schema?: string; from_leg?: string; from_run?: number; uri?: string; digest?: string; value?: unknown; leg_version?: number }[];
 }
 
 /** Pure: which run the flags name — `--run` its number, `--run-id` its id, absent the newest
@@ -224,10 +230,7 @@ export function compareRead(
   return { ...base, read_version: read.version, read_digest: read.digest };
 }
 
-/** A remote's `<owner>/<name>` as a `git:` pointer spells it, whatever the URL's shape. */
-export function slugOf(url: string): string {
-  return url.trim().replace(/\.git$/, '').replace(/^.*[:/]([^/:]+\/[^/:]+)$/, '$1').toLowerCase();
-}
+export { slugOf } from './contracts';
 
 /** The wrapper's outcome: stdout's last line (R-BTN-133), as the runner reads it. */
 function wrapperOutcome(stdout: string): { ok: boolean; result?: unknown; error?: string } | null {
@@ -241,15 +244,6 @@ function wrapperOutcome(stdout: string): { ok: boolean; result?: unknown; error?
 }
 
 const sha256 = (bytes: Buffer | string): string => `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
-
-/** One git command's bytes as a Buffer (a path's bytes at a commit are not text). */
-function gitBytes(home: string, args: string[]): Buffer | null {
-  try {
-    return execFileSync('git', ['-C', home, ...args], { encoding: 'buffer', maxBuffer: 16 << 20, timeout: 30_000, killSignal: 'SIGKILL' }) as Buffer;
-  } catch {
-    return null;
-  }
-}
 
 export interface ReplayIo {
   log?: (line: string) => void;
@@ -329,14 +323,19 @@ export async function replayMain(argv: string[], io: ReplayIo = {}): Promise<num
   } catch (e) {
     return refuse(`the course's scripts would not load at the snapshot (${msg(e)})`);
   }
-  const script = course.scripts.get(a.leg) ?? null;
+  const pinnedLeg = run.contract_leg ?? a.leg;
+  const script = course.scripts.get(pinnedLeg) ?? null;
   if (script == null) {
     dropCourse(course.scratch);
-    return refuse(`the snapshot's course has no legs/${a.leg}.mjs`);
+    return refuse(`the snapshot's course has no legs/${pinnedLeg}.mjs`);
   }
-  if (course.graph.legs.get(a.leg)?.replaySafe === false) {
+  if (course.graph.legs.get(pinnedLeg)?.readsOnly) {
     dropCourse(course.scratch);
-    return refuse(`${a.leg} is marked "replay_safe": false — it has side effects outside git and its forge, and is never replayed (R-BTN-84)`);
+    return refuse(`${pinnedLeg} is reads_only: replay does not record a pinned review input (R-BTN-183)`);
+  }
+  if (course.graph.legs.get(pinnedLeg)?.replaySafe === false) {
+    dropCourse(course.scratch);
+    return refuse(`${pinnedLeg} is marked "replay_safe": false — it has side effects outside git and its forge, and is never replayed (R-BTN-84)`);
   }
   report.course = { course: course.course, at: run.snapshot_sha };
 
@@ -364,9 +363,17 @@ export async function replayMain(argv: string[], io: ReplayIo = {}): Promise<num
 
     // 5. The inputs, fetched read-only and checked by digest (R-BTN-82, R-BTN-140).
     const inputs: Record<string, unknown>[] = [];
+    const checkedInputs: Record<string, unknown>[] = [];
     let tampered = false;
     for (const input of run.inputs) {
-      const checked = await checkInput(a.home, input);
+      let checked: { ok: boolean; why?: string };
+      try {
+        const value = await readArtifact(a.home, input, course.schema ?? stdSchema, read.pointer_reach ?? { git: [], web: [], buckets: [] });
+        checkedInputs.push(value === undefined ? input : { ...input, value });
+        checked = { ok: true };
+      } catch (e) {
+        checked = { ok: false, why: msg(e) };
+      }
       inputs.push({ name: input.name, ...(input.uri ? { uri: input.uri } : {}), ...(input.digest ? { digest: input.digest } : {}), ...checked });
       if (!checked.ok) tampered = true;
     }
@@ -381,7 +388,7 @@ export async function replayMain(argv: string[], io: ReplayIo = {}): Promise<num
     const worktree = join(mkdtempSync(join(tmpdir(), 'baton-replay-')), 'checkout');
     git(a.home, ['worktree', 'add', '--detach', '--quiet', worktree, checkoutSha]);
     try {
-      const ran = await runOnce(executor, replayEnv, { repository: a.repository, home: a.home, worktree, script, course, run, ticketId, leg: a.leg, secrets, timeoutS: a.timeoutS, say });
+      const ran = await runOnce(executor, replayEnv, { repository: a.repository, home: a.home, worktree, script, course, run, inputs: checkedInputs, ticketId, leg: pinnedLeg, secrets, timeoutS: a.timeoutS, say });
       report.ran = ran.outcome;
       report.would_have_written = ran.writes;
       report.close = 'not called (R-BTN-84): the runner records what it would have written, and writes nothing';
@@ -390,15 +397,20 @@ export async function replayMain(argv: string[], io: ReplayIo = {}): Promise<num
       //    not bind the flag's sha), compared with the recorded run's.
       if (a.against != null) {
         const againstCourse = await loadCourse(a.home, a.against, course.course);
-        const againstScript = againstCourse.scripts.get(a.leg) ?? null;
+        const againstLeg = resolveLeg(againstCourse.graph, pinnedLeg) ?? run.leg ?? a.leg;
+        const againstScript = againstCourse.scripts.get(againstLeg) ?? null;
+        if (againstCourse.graph.legs.get(againstLeg)?.replaySafe === false) {
+          dropCourse(againstCourse.scratch);
+          return refuse(`${againstLeg} at --against is marked "replay_safe": false`, secrets);
+        }
         if (againstScript == null) {
           dropCourse(againstCourse.scratch);
-          return refuse(`the scripts at ${a.against.slice(0, 10)} have no legs/${a.leg}.mjs (--against)`, secrets);
+          return refuse(`the scripts at ${a.against.slice(0, 10)} have no legs/${againstLeg}.mjs (--against)`, secrets);
         }
         const againstWorktree = join(mkdtempSync(join(tmpdir(), 'baton-replay-')), 'checkout');
         git(a.home, ['worktree', 'add', '--detach', '--quiet', againstWorktree, checkoutSha]);
         try {
-          const other = await runOnce(executor, replayEnv, { repository: a.repository, home: a.home, worktree: againstWorktree, script: againstScript, course: againstCourse, run, ticketId, leg: a.leg, secrets, timeoutS: a.timeoutS, say, against: a.against });
+          const other = await runOnce(executor, replayEnv, { repository: a.repository, home: a.home, worktree: againstWorktree, script: againstScript, course: againstCourse, run, inputs: checkedInputs, ticketId, leg: againstLeg, secrets, timeoutS: a.timeoutS, say, against: a.against });
           report.against = {
             sha: a.against, ran: other.outcome, would_have_written: other.writes,
             same: JSON.stringify(other.outcome) === JSON.stringify(ran.outcome) && JSON.stringify(other.writes) === JSON.stringify(ran.writes),
@@ -423,17 +435,19 @@ export async function replayMain(argv: string[], io: ReplayIo = {}): Promise<num
 }
 
 /** The run's record and the repository's default branch, read with the caller's key (§14). */
-async function readRuns(a: ReplayArgs, io: ReplayIo): Promise<{ runs: RecordedRun[]; default_branch?: string }> {
+async function readRuns(a: ReplayArgs, io: ReplayIo): Promise<RunsRead> {
   const path = `/v1/repositories/${encodeURIComponent(a.repository)}/tickets/${encodeURIComponent(a.ticket)}/legs/${encodeURIComponent(a.leg)}/runs`;
   const target = new URL(path, a.url).toString();
   const cred = requestCredential(a.key);
   const headers = cred.bearer ? { Authorization: `Bearer ${cred.bearer}` } : signHeaders({ method: 'GET', url: target, body: '', key: cred.key });
   const transport = io.transport ?? ((req) => fetch(req));
   const res = await transport(new Request(target, { method: 'GET', headers, signal: AbortSignal.timeout(30_000) }));
-  const json = await res.json().catch(() => null) as { runs?: RecordedRun[]; default_branch?: string; message?: string } | null;
+  const json = await res.json().catch(() => null) as (Partial<RunsRead> & { message?: string }) | null;
   if (!res.ok) throw new Error(`reading the leg's runs failed (${res.status}: ${json?.message ?? 'no message'}) — the key must be an owner's or an administrator's (§14)`);
-  return { runs: json?.runs ?? [], ...(json?.default_branch ? { default_branch: json.default_branch } : {}) };
+  return { runs: json?.runs ?? [], default_branch: json?.default_branch, pointer_reach: json?.pointer_reach };
 }
+
+interface RunsRead { runs: RecordedRun[]; default_branch?: string; pointer_reach?: PointerReach }
 
 /** The course id the snapshot's own settings name (§2c): one, else the refusal — the recorded
  *  run names which course it ran, and a replay never guesses. */
@@ -487,64 +501,6 @@ async function readTicket(executor: Executor, env: Record<string, string>, o: { 
   }
 }
 
-/** One recorded input, fetched read-only and checked by digest (R-BTN-82, R-BTN-140): an inline
- *  value is its own bytes (no digest to check, R-BTN-108), a `git:` pointer of the home
- *  repository from the checkout's object store, an `https://` pointer with no credential. What
- *  replay cannot fetch it names, never skips. */
-async function checkInput(home: string, input: { name: string; uri?: string; digest?: string; value?: unknown }): Promise<{ ok: boolean; why?: string }> {
-  if (input.value !== undefined) return { ok: true };
-  const uri = input.uri ?? '';
-  const named = (why: string): { ok: boolean; why: string } => ({ ok: false, why });
-  if (input.digest == null) {
-    return uri === '' ? named('the input records neither a pointer nor a value') : { ok: true, why: 'content-addressed by its pointer; no digest recorded to check' };
-  }
-  const digest = input.digest;
-  let bytes: Buffer | null = null;
-  let why = '';
-  if (uri.startsWith('https://')) {
-    try {
-      const res = await fetch(uri, { redirect: 'error', signal: AbortSignal.timeout(30_000) });
-      if (!res.ok) {
-        why = `the pointer answered ${res.status}`;
-      } else {
-        bytes = Buffer.from(await res.arrayBuffer());
-      }
-    } catch (e) {
-      why = `the pointer could not be fetched read-only (${msg(e)})`;
-    }
-  } else {
-    // The pointer shapes §5.5 names: a path at a commit, or a blob by its id (either sha
-    // length — the validator takes a sha1 or sha256 repository's).
-    const at = /^git:([^@]+)@([0-9a-f]{40,64}):(.+)$/.exec(uri);
-    const blob = /^git:([^#]+)#blob=([0-9a-f]{40,64})$/.exec(uri);
-    if (at != null || blob != null) {
-      const repo = (at ?? blob)![1];
-      const sha = at != null ? at[2] : blob![2];
-      const path = at != null ? at[3] : '';
-      let mine = '';
-      try {
-        // `git config remote.origin.url`, not `git remote get-url`: the config value is the
-        // repository's own spelling (what a `git:` pointer names); get-url expands an
-        // `insteadOf` rewrite, which is this checkout's local plumbing, not its identity.
-        mine = slugOf(git(home, ['config', 'remote.origin.url']).trim());
-      } catch {
-        mine = '';
-      }
-      if (mine !== slugOf(repo)) {
-        why = `${uri} names ${slugOf(repo)}, not the home checkout (${mine || 'none named'}) — replay fetches no other repository`;
-      } else {
-        bytes = path === '' ? gitBytes(home, ['cat-file', 'blob', sha]) : gitBytes(home, ['show', `${sha}:${path}`]);
-        if (bytes == null) why = `the pointer's bytes are not in the checkout (${sha.slice(0, 10)})`;
-      }
-    } else {
-      why = `replay cannot fetch ${uri || '(no uri)'}: a git: pointer of the home repository, an https:// one, or an inline value`;
-    }
-  }
-  if (bytes == null) return named(why || 'the input could not be fetched');
-  if (sha256(bytes) !== digest) return named(`the fetched bytes digest to ${sha256(bytes).slice(0, 17)}…, the recorded ${digest.slice(0, 17)}… — a substitution, not the run's input`);
-  return { ok: true };
-}
-
 /** Where the leg runs: the recorded head when the checkout holds it, else the snapshot — said
  *  either way in the report, never silently. */
 function worktreeSha(home: string, run: RecordedRun, say: (l: string) => void): string {
@@ -558,7 +514,7 @@ function worktreeSha(home: string, run: RecordedRun, say: (l: string) => void): 
  *  `ctx.replay` set (R-BTN-84): the recorded facts as the run held them, the worktree as its
  *  checkout, no close. Its would-be writes are the worktree's changes. */
 async function runOnce(executor: Executor, env: Record<string, string>, o: {
-  repository: string; home: string; worktree: string; script: string; course: CourseLoad; run: RecordedRun; ticketId: string; leg: string;
+  repository: string; home: string; worktree: string; script: string; course: CourseLoad; run: RecordedRun; inputs: Record<string, unknown>[]; ticketId: string; leg: string;
   secrets: readonly string[]; timeoutS: number; say: (l: string) => void; against?: string;
 }): Promise<{ outcome: { ok: boolean; result?: unknown; error?: string }; writes: string[] }> {
   const sessionId = `${o.run.run_id ?? `claim-${o.run.claim}`}.replay`;
@@ -574,6 +530,7 @@ async function runOnce(executor: Executor, env: Record<string, string>, o: {
     return { outcome: { ok: false, error: `the executor could not start the leg's session (${msg(e)})` }, writes: [] };
   }
   const ctx = {
+    inputs: o.inputs,
     replay: {
       recorded: { run: o.run.run, run_id: o.run.run_id ?? null, claim: o.run.claim, started_at: o.run.started_at, snapshot_sha: o.run.snapshot_sha, head_sha: o.run.head_sha ?? null, inputs: o.run.inputs },
       ...(o.against ? { against: o.against } : {}),

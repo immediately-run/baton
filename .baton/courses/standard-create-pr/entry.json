@@ -1,0 +1,20 @@
+{
+  "id": "create-pr",
+  "version": 2,
+  "min_runner_version": 1,
+  "skill": "baton-create-pr",
+  "step_kinds": [
+    "implement",
+    "run-tests",
+    "review",
+    "fix",
+    "adjudicate",
+    "merge",
+    "confirm"
+  ],
+  "branch_pattern": "claude/{ticket}-*",
+  "protocol_files": [],
+  "facts": [
+    "prs"
+  ]
+}

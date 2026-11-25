@@ -11,6 +11,7 @@ import { Git, cutover, keyCall, placed, recommended, rows, setAdminKeys, setCloc
 import { makeKey, type TestKey } from '../lib/sshKeys';
 import { grantedRunner, signed, SCHEMA, type FleetRunner } from '../lib/fleet';
 import type { Workflow } from '../../src/core/ports';
+import { isBeatAnswer } from '../../src/runner/replies';
 
 const T0 = Date.parse('2026-10-16T12:00:00Z');
 const MIN = 60_000;
@@ -112,6 +113,18 @@ describe('S-BTN-44 blocks, resources and decisions', { timeout: 30_000 }, () => 
     expect((await w4.call('/v1/runner/claim', { request_id: 'req-claim-a', ticket_id: 'docs:A' })).json).toMatchObject({ code: 'blocked', rule: 1, rule_code: 'blocked' });
     expect((await w4.call('/v1/runner/claim', { request_id: 'req-claim-e', ticket_id: 'docs:E' })).json).toMatchObject({ code: 'blocked' });
     expect(await recommended(w4.id)).not.toContain('docs:D');
+    const held = await w4.call('/v1/runner/claim', { request_id: 'idle-fixture-b', ticket_id: 'docs:B' });
+    expect(held.status).toBe(200);
+    const report = await w2.call('/v1/runner/next', undefined, 'GET');
+    expect(report.json.detail?.repositories[0]?.gates).toEqual(expect.arrayContaining([
+      { gate: 'blocked', count: 2, tickets: ['docs:A', 'docs:E'] },
+      { gate: 'missing-capability', count: 1, tickets: ['docs:C'], capabilities: ['real-iphone'] },
+      { gate: 'resource', count: 1, tickets: ['docs:D'], readings: [
+        { resource: R, instance: GO, writer: `runner:${w1.id}`, until: T0 + H },
+        { resource: R, instance: GO2, writer: `probe:${probe.fingerprint}`, until: null },
+      ] },
+    ]));
+    expect((await w4.call(`/v1/runner/claims/${held.json.claim_id}/end`, { end_reason: 'released:requested' })).status).toBe(200);
 
     // The probe's reading lapses: go_plus_2 is unknown, which unblocks D for the fleet.
     await advance(T0, T0 + 10 * MIN, [w1, w2, w3, w4]);
@@ -140,7 +153,10 @@ describe('S-BTN-44 blocks, resources and decisions', { timeout: 30_000 }, () => 
     // updated in place (a host whose alarm fires on its own may deliver D's a beat earlier) — and
     // its recommendation is fresh.
     const hb = await w3.beat();
-    expect((hb.json.messages as { kind: string }[]).filter((m) => m.kind === 'unblocked').length).toBeGreaterThan(0);
+    expect(isBeatAnswer(hb.json)).toBe(true);
+    expect(hb.json.messages).toContainEqual(expect.objectContaining({
+      kind: 'unblocked', payload: { tickets: expect.arrayContaining([expect.objectContaining({ ticket_id: 'docs:A', cleared: expect.any(Array) })]) },
+    }));
     const toW3 = await rows<{ payload_json: string; status: string }>(`SELECT payload_json, status FROM messages WHERE to_runner_id = ? AND kind = 'unblocked' ORDER BY id`, w3.id);
     expect(toW3.filter((m) => m.status === 'pending')).toEqual([]);
     expect(toW3.flatMap((m) => (JSON.parse(m.payload_json) as { tickets: { ticket_id: string }[] }).tickets.map((t) => t.ticket_id))).toEqual(['docs:D', 'docs:A', 'docs:E']);

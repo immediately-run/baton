@@ -6,7 +6,8 @@
 // the claims of a ticket whose history R-BTN-81 purged go with their legs and activities once
 // their events have gone — an open ticket's claims stay (R-BTN-24, R-BTN-106). Runs on both hosts.
 import { describe, it, expect, afterEach, beforeEach } from 'vitest';
-import { Git, advance, claimItem, cutover, endClaim, mirrorCall, register, rows, setClock, tick, withCore, runnerCall } from '../helpers';
+import { Git, HOST, advance, claimItem, cutover, endClaim, mirrorCall, register, rows, setClock, tick, withCore, runnerCall } from '../helpers';
+import type { EventArchive, Ports } from '../../src/core/ports';
 
 const T0 = Date.parse('2026-08-01T12:00:00Z');
 const DAY = 86_400_000;
@@ -36,6 +37,9 @@ const count = async (sql: string, ...p: unknown[]) => (await rows<{ n: number }>
 const maxSeq = async () => count('SELECT COALESCE(MAX(seq), 0) AS n FROM events');
 /** docs' mirror reads its feed from `after`: the acknowledgement (§12, §16). */
 const ack = async (after: number) => expect((await mirrorCall(`/v1/sync/events?after=${after}`)).status).toBe(200);
+const useArchive = (archive: EventArchive) => withCore((c) => {
+  (c as unknown as { ports: Ports }).ports.archiveEvents = archive;
+});
 
 let git: Git;
 
@@ -50,6 +54,7 @@ beforeEach(async () => {
 
 describe('S-BTN-244 R-BTN-149 retention', () => {
   it('events older than 90 days go below the mirror’s acknowledged cursor; tenant events and younger ones stay', async () => {
+    await useArchive(async () => {});
     const fill = (n: number, at: number, repo: string | null) => rows(
       `WITH RECURSIVE k(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM k WHERE i < ?)
        INSERT INTO events (at, kind, actor, detail_json, repository_id) SELECT ?, 'admin', 'test', '{}', ? FROM k`, n, at, repo);
@@ -84,6 +89,7 @@ describe('S-BTN-244 R-BTN-149 retention', () => {
   });
 
   it('a tick deletes at most 1,000 rows', async () => {
+    await useArchive(async () => {});
     await rows(`WITH RECURSIVE k(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM k WHERE i < 2500)
                 INSERT INTO events (at, kind, actor, detail_json, repository_id) SELECT ?, 'admin', 'test', '{}', 'docs' FROM k`, T0);
     await setClock(T0 + 91 * DAY);
@@ -98,6 +104,97 @@ describe('S-BTN-244 R-BTN-149 retention', () => {
     await tick();
     // All but the acknowledged cursor's own event: R-BTN-149 prunes below it.
     expect(await old()).toBe(1);
+  });
+
+  it('keeps old acknowledged events when no archive is configured', async () => {
+    await withCore((c) => { (c as unknown as { ports: Ports }).ports.archiveEvents = undefined; });
+    const before = await rows('SELECT seq FROM events WHERE repository_id IS NOT NULL ORDER BY seq');
+    expect(before.length).toBeGreaterThan(0);
+    await setClock(T0 + 91 * DAY);
+    await ack(await maxSeq());
+    await tick();
+    expect(await rows('SELECT seq FROM events WHERE repository_id IS NOT NULL AND at = ? ORDER BY seq', T0)).toEqual(before);
+  });
+
+  it.runIf((HOST as string) === 'local')('prunes snapshots during archive I/O without a second export, then rechecks the mirror cursor', async () => {
+    const expired = git.head;
+    expect((await git.post()).status).toBe(200);
+    expect(git.head).not.toBe(expired);
+    const snapshots = () => count(`SELECT COUNT(*) AS n FROM board_snapshots WHERE repository_id = 'docs' AND sha = ?`, expired);
+    await rows(`INSERT INTO events (at, kind, actor, detail_json, repository_id) VALUES (?, 'admin', 'test', '{}', 'docs')`, T0);
+    await setClock(T0 + 91 * DAY);
+    await ack(await maxSeq());
+    const oldRows = () => rows('SELECT seq FROM events WHERE repository_id IS NOT NULL AND at = ? ORDER BY seq', T0);
+    const before = await oldRows();
+    expect(before.length).toBeGreaterThan(1);
+    let started!: () => void;
+    let release!: () => void;
+    const archiving = new Promise<void>((resolve) => { started = resolve; });
+    const archived = new Promise<void>((resolve) => { release = resolve; });
+    let writes = 0;
+    await useArchive(async () => {
+      if (++writes !== 1) return;
+      started();
+      await archived;
+    });
+    const pruning = tick();
+    await Promise.race([archiving, pruning]);
+    let ran = false;
+    const nextTurn = snapshots().then((n) => { ran = true; return n; });
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(ran).toBe(true);
+      expect(await nextTurn).toBe(1);
+      // The batch is still eligible: only the in-flight guard prevents a second export.
+      await tick();
+      expect(writes).toBe(1);
+      expect(await snapshots()).toBe(0);
+      expect(await oldRows()).toEqual(before);
+      await rows(`UPDATE repositories SET mirror_acked_seq = 0 WHERE id = 'docs'`);
+    } finally {
+      release();
+      await Promise.all([pruning, nextTurn]);
+    }
+    expect(await oldRows()).toEqual(before);
+  });
+
+  it('after archive failure retains all events; the retry exports the mirror format and deletes only that batch', async () => {
+    const add = (kind: string) => rows<{ seq: number }>(`INSERT INTO events
+      (at, kind, actor, detail_json, repository_id) VALUES (?, ?, 'owner:private', '{"reason":"test","session":"private"}', 'docs') RETURNING seq`, T0, kind);
+    const [visible] = await add('admin');
+    const [internal] = await add('blocked');
+    const [later] = await add('admin');
+    await setClock(T0 + 91 * DAY);
+    const feed = await (await mirrorCall(`/v1/sync/events?after=${visible.seq - 1}`)).json<{ events: unknown[]; cutover_at: number | null }>();
+    await ack(later.seq);
+    const eligible = await rows<{ seq: number }>('SELECT seq FROM events WHERE repository_id IS NOT NULL AND at = ? AND seq < ? ORDER BY seq', T0, later.seq);
+    expect(eligible).toContainEqual(internal);
+
+    await useArchive(async () => { throw new Error('archive unavailable'); });
+    await expect(tick()).rejects.toThrow('archive unavailable');
+    expect(await rows('SELECT seq FROM events WHERE repository_id IS NOT NULL AND at = ? AND seq < ? ORDER BY seq', T0, later.seq)).toEqual(eligible);
+
+    // Advance the ack during the write: `later` becomes eligible but wasn't in the selected batch.
+    const archived: number[] = [];
+    await withCore((c) => {
+      (c as unknown as { ports: Ports }).ports.archiveEvents = async (parts) => {
+        const found = c.store.exec<{ seq: number }>('SELECT seq FROM events WHERE repository_id IS NOT NULL AND at = ? AND seq < ? ORDER BY seq', T0, later.seq).toArray();
+        expect(found).toEqual(eligible);
+        const docs = parts.find(({ repository }) => repository === 'docs')!;
+        expect(docs.day).toBe('2026-08-01');
+        const page = JSON.parse(docs.ndjson);
+        expect(page.repository).toBe('docs');
+        expect(page.events.find((e: { seq: number }) => e.seq === visible.seq)).toEqual(feed.events[0]);
+        expect(page).toMatchObject({ cutover_at: feed.cutover_at, next: internal.seq });
+        expect(docs.ndjson).not.toContain('private');
+        archived.push(...parts.flatMap((p) => JSON.parse(p.ndjson).events.map((e: { seq: number }) => e.seq)));
+        c.store.exec(`INSERT INTO events (at, kind, actor) VALUES (?, 'admin', 'test')`, T0);
+        c.store.exec(`UPDATE repositories SET mirror_acked_seq = (SELECT MAX(seq) FROM events) WHERE id = 'docs'`);
+      };
+    });
+    await tick();
+    expect(archived.sort((a, b) => a - b)).toEqual(eligible.map((e) => e.seq));
+    expect(await rows('SELECT seq FROM events WHERE repository_id IS NOT NULL AND at = ? ORDER BY seq', T0)).toEqual([later]);
   });
 
   it('board snapshots older than 90 days go, never a head’s', async () => {
@@ -139,6 +236,7 @@ describe('S-BTN-244 R-BTN-149 retention', () => {
   });
 
   it('a purged ticket’s claims go with their legs and activities once their events have; an open ticket’s stay', async () => {
+    await useArchive(async () => {});
     const w = await register('vm-a');
     const run = async (ticket: string, end: Record<string, unknown> = { end_reason: 'released:requested', reached: 'pr-open', next: 'review' }) => {
       const c = (await claimItem('vm-a', w.secret, { ticket_id: ticket })).json;

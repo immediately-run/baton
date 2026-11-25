@@ -204,7 +204,7 @@ BATON_SPEC's sections are named with a rule or as `§11.3`, `§12.2`.
     | cut over (`POST /v1/ui/cutover`, R-BTN-28); force-reap (`POST /v1/ui/claims/{id}/reap`); clear a fence (`POST /v1/ui/claims/{id}/fence-clear`, R-BTN-19); force a resync onto a rewritten default branch's head (`POST /v1/ui/resync` with `force: true` and `sha`, R-BTN-11); confirm or release an unconfirmed completion (`POST /v1/ui/claims/{id}/confirm`, `…/release`); confirm an adoption (`POST /v1/ui/adoptions/{claim}/confirm`) | an administrator's | the code |
     | lift a hold, set or clear expedite (`POST /v1/ui/overrides/{ticket}` with `hold: false` or `expedite`) | either | the code |
     | approve an MCP grant naming a destructive action (`owner.mcp-key.approve`, `BATON_MCP_OAUTH_SPEC` §5) | an owner's | the code |
-    | Stop (`leg.stop`: `POST /v1/ui/messages` `{kind: "release", payload: {ticket_id, reason: "requested"}}`, R-BTN-119) | either | one click: no dialog, no code |
+    | Stop (`leg.stop`: `POST /v1/ui/messages` `{kind: "release", payload: {ticket_id, reason: "requested"}, confirm: true}`, R-BTN-119) | either | §12.2 confirmation dialog; no code |
     | any other destructive action (§12.2), cancel among them | either | its dialog, which sends `confirm: true` |
     | everything else a session may call: a hold, a resync, a status request, resolving a condition (`POST /v1/ui/conditions/{condition}/resolve`, R-BTN-163), a person leg's answer (R-BTN-116), an OAuth request, its status, a denial or an approval naming no destructive action, `ui.logout` | either | nothing |
 
@@ -226,7 +226,7 @@ BATON_SPEC's sections are named with a rule or as `§11.3`, `§12.2`.
     `condition-wait` where the leg waits on a condition, with session links (R-BTN-113) and log
     directories (R-BTN-128).
   - **`/tickets`** — every ticket under its state word (below), Ready in the matching order with
-    each ticket's `requires`, tier and eligible alive runners, and **ready but nobody can take
+    each ticket's `requires` and eligible alive runners, and **ready but nobody can take
     it** with the failed rule.
   - **`/tickets/{ticket}`** — the ticket as Baton holds it: its station and path, the claim's
     legs since, what a suspended ticket waits for, its newest hand-off, blocks, queued leg and
@@ -248,7 +248,7 @@ BATON_SPEC's sections are named with a rule or as `§11.3`, `§12.2`.
     and restarts; choosing a restart is `ticket.resolve` for a signed-in owner of its repository
     or an administrator.
   - **`/runners`** — the runners granted on the repository, grouped by hostname (R-BTN-3), each
-    card marked with its state: alive or dead, harness, tier ceiling, capabilities (declared,
+    card marked with its state: alive or dead, harness, capabilities (declared,
     and granted per repository, R-BTN-174), tags, courses, lease timeout, last seen, last
     activity, the claim held, current activity, transcript link, executor (source, digest and
     `provides`, R-BTN-107), credential kind and registering token.

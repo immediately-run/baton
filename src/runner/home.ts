@@ -4,7 +4,6 @@
 // sha is missing; then `git show` reads blobs straight from the object store. Leg scripts are
 // extracted per claim into a scratch directory, so a course change between two claims needs no
 // restart and the fresh `import()` the wrapper does is of the snapshot's bytes.
-import { execFile, execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -14,34 +13,19 @@ import { graphOf, legCapabilities, type Graph } from '../core/graph';
 import { builtInSource, resolveSource, runnerLegs, writeStub } from '../defaults/cli';
 import { dropCourseTree, writeCourseTree } from '../defaults/course-tree';
 
-/** B-94: the bound on every git the runner itself runs. The heartbeat path reads the snapshot
- * here (`ensureSha`, `courseOf`, `loadCourse`), and a state file lock, a hook or a stalled
- * filesystem must never hold the event loop past a beat — a runner that stops beating while its
- * process lives is a claim lost silently. */
-export const GIT_TIMEOUT_MS = 30_000;
-
-// B-94: git's non-interactive environment is defined once, beside the close's bound — the
-// runner's git and the generated stubs import it from there.
-import { GIT_NONINTERACTIVE_ENV } from '../defaults/ticket-state';
-
-/** One git command in the home checkout; throws with stderr when it fails, and is killed at
- * `timeoutMs` (default `GIT_TIMEOUT_MS`, under a beat) when it cannot answer (B-94). */
-export function git(home: string, args: string[], timeoutMs: number = GIT_TIMEOUT_MS): string {
-  return execFileSync('git', ['-C', home, ...args], {
-    encoding: 'utf8', maxBuffer: 16 << 20, timeout: timeoutMs, killSignal: 'SIGKILL',
-    env: { ...process.env, ...GIT_NONINTERACTIVE_ENV },
-  });
-}
+import { git, gitAsync } from '../defaults/git.mjs';
+import { parseSchemaId, type Resolve } from '../shared/schema.mjs';
+import { stdSchema } from '../shared/std.mjs';
 
 export interface CourseLoad {
   course: string;
   sourced?: true;
   fetched?: Record<string, string>;
-  legacy?: true;
   graph: Graph;
   /** The extracted `legs/<leg>.mjs` of the snapshot, by leg name — file paths on disk. */
   scripts: Map<string, string>;
   scratch: string;
+  schema?: Resolve;
 }
 
 /** The course id the home repository runs, from the snapshot's `.baton/baton.json`: the spec's
@@ -116,10 +100,10 @@ export function ensureSha(home: string, sha: string, fetch: () => void): boolean
 export function advanceHome(home: string, sha: string, defaultBranch: string | null): string | null {
   const head = git(home, ['rev-parse', 'HEAD']).trim();
   const target = git(home, ['rev-parse', `${sha}^{commit}`]).trim();
-  if (head === target) return null;
-  const branch = (() => { try { return git(home, ['symbolic-ref', '--short', '-q', 'HEAD']).trim(); } catch { return ''; } })();
-  if (defaultBranch == null || branch !== defaultBranch) return `the home is on ${branch || 'a detached HEAD'}, not ${defaultBranch ?? 'the default branch'}`;
+  const branch = (() => { try { return git(home, ['symbolic-ref', '-q', 'HEAD']).trim().replace(/^refs\/heads\//, ''); } catch { return ''; } })();
+  if (branch !== defaultBranch && (defaultBranch !== null || head !== target)) return `the home is on ${branch || 'a detached HEAD'}, not ${defaultBranch ?? 'the default branch'}`;
   if (git(home, ['status', '--porcelain', '--untracked-files=no']).trim() !== '') return 'the home has tracked changes';
+  if (head === target) return null;
   try {
     git(home, ['merge-base', '--is-ancestor', head, target]);
   } catch {
@@ -133,16 +117,6 @@ export function advanceHome(home: string, sha: string, defaultBranch: string | n
  *  asynchronously, so the event loop, and with it the beat, never waits on it. */
 export const CLONE_TIMEOUT_MS = 10 * 60_000;
 
-/** One git command, asynchronously, bounded and non-interactive like `git` (B-94). */
-function gitAsync(cwd: string | null, args: string[], timeoutMs: number = CLONE_TIMEOUT_MS): Promise<string> {
-  return new Promise((resolve, reject) => {
-    execFile('git', cwd ? ['-C', cwd, ...args] : args, {
-      encoding: 'utf8', maxBuffer: 16 << 20, timeout: timeoutMs, killSignal: 'SIGKILL',
-      env: { ...process.env, ...GIT_NONINTERACTIVE_ENV },
-    }, (e, stdout, stderr) => (e ? reject(new Error(`git ${args[0]}: ${String(stderr || e.message).trim().slice(0, 300)}`)) : resolve(stdout)));
-  });
-}
-
 /** R-BTN-72, R-BTN-4 (B-188): a claim's own checkout when the runner holds several — a separate
  *  `git clone` of the home with its own git directory (never a worktree sharing refs), kept at
  *  `dir` and reused by the next claim there. Its `origin` is the home's (so its pushes go where
@@ -155,24 +129,41 @@ export async function prepareClone(home: string, dir: string, sha: string, branc
   if (!existsSync(join(dir, '.git'))) {
     rmSync(dir, { recursive: true, force: true });
     mkdirSync(dirname(dir), { recursive: true });
-    await gitAsync(null, ['clone', '-q', '--no-checkout', home, dir]);
+    await gitAsync(null, ['clone', '-q', '--no-checkout', home, dir], CLONE_TIMEOUT_MS);
   }
   let origin = '';
   try {
-    origin = (await gitAsync(home, ['remote', 'get-url', 'origin'])).trim();
+    origin = (await gitAsync(home, ['remote', 'get-url', 'origin'], CLONE_TIMEOUT_MS)).trim();
   } catch {
     origin = ''; // a home with no origin: the clone's origin stays the home
   }
-  await gitAsync(dir, ['remote', 'set-url', 'origin', origin || home]);
-  await gitAsync(dir, ['fetch', '-q', '--no-tags', home, '+refs/heads/*:refs/baton/home/heads/*', '+refs/remotes/*:refs/baton/home/remotes/*']);
+  await gitAsync(dir, ['remote', 'set-url', 'origin', origin || home], CLONE_TIMEOUT_MS);
+  await gitAsync(dir, ['fetch', '-q', '--no-tags', home, '+refs/heads/*:refs/baton/home/heads/*', '+refs/remotes/*:refs/baton/home/remotes/*'], CLONE_TIMEOUT_MS);
   try {
-    await gitAsync(dir, ['rev-parse', '--verify', '--quiet', `${sha}^{commit}`]);
+    await gitAsync(dir, ['rev-parse', '--verify', '--quiet', `${sha}^{commit}`], CLONE_TIMEOUT_MS);
   } catch {
     // The snapshot is in the home's objects but on no ref there (a fetched FETCH_HEAD): by id.
-    await gitAsync(dir, ['fetch', '-q', '--no-tags', home, sha]);
+    await gitAsync(dir, ['fetch', '-q', '--no-tags', home, sha], CLONE_TIMEOUT_MS);
   }
-  await gitAsync(dir, ['checkout', '-q', '-f', '-B', branch ?? 'baton-claim', sha]);
-  await gitAsync(dir, ['clean', '-fdq']);
+  await gitAsync(dir, ['checkout', '-q', '-f', '-B', branch ?? 'baton-claim', sha], CLONE_TIMEOUT_MS);
+  await gitAsync(dir, ['clean', '-fdq'], CLONE_TIMEOUT_MS);
+}
+
+/** Only the explicitly recognized 17ae8cce pin needs this bridge. Its historical
+ * generated stubs predate entry-only homes. Expose their original standard run
+ * and reroute its two home-copy lookups to the verified source and dispatcher. */
+function legacyLeg(path: string, bytes: Buffer, graph: string): Buffer {
+  const anchor = path === 'legs/run-tests.mjs'
+    ? 'JSON.parse(show(".baton/courses/create-pr/course.json"))'
+    : 'present ? show(rel) : null';
+  const replacement = path === 'legs/run-tests.mjs'
+    ? `(${JSON.stringify({ test_script: JSON.parse(graph).test_script })})`
+    : "ctx.instructions ? readFileSync(ctx.instructions, 'utf8') : null";
+  const text = bytes.toString('utf8');
+  if (text.split(anchor).length !== 2 || !text.includes('async function standard(ctx)')) {
+    throw new Error(`${path}: unexpected legacy source layout`);
+  }
+  return Buffer.from(`${text.replace(anchor, () => replacement)}\nexport { standard };\n`);
 }
 
 /** Load a claim's course from the snapshot: the graph, and every leg script the snapshot's
@@ -196,13 +187,24 @@ export async function loadCourse(home: string, sha: string, course: string, sett
         }
       } else if (resolved.files) {
         const dir = join(scratch, 'source');
-        fetched = writeCourseTree(dir, resolved.files);
+        const files = resolved.legacy ? resolved.files.map((file) => {
+          if (!/^legs\/[a-z-]+\.mjs$/.test(file.path)) return file;
+          return { ...file, read: () => legacyLeg(file.path, file.read(), resolved.graph) };
+        }) : resolved.files;
+        fetched = writeCourseTree(dir, files);
         for (const { path } of resolved.files) {
           const leg = /^legs\/([a-z][a-z0-9-]*)\.mjs$/.exec(path)?.[1];
           if (leg) scripts.set(leg, join(dir, path));
         }
       }
-      return { course, sourced: true, fetched, legacy: resolved.legacy, graph, scripts, scratch };
+      const schema: Resolve = (id) => {
+        const parts = parseSchemaId(id);
+        if (!parts || parts.prefix === 'std') return stdSchema(id);
+        if (parts.prefix !== course) return null;
+        const file = resolved.files?.find((f) => f.path === `schemas/${parts.name}@${parts.version}.json` && f.regular);
+        return file ? JSON.parse(file.read().toString('utf8')) : null;
+      };
+      return { course, sourced: true, fetched, graph, scripts, scratch, schema };
     } catch (e) {
       dropCourse(scratch);
       throw e;
@@ -230,7 +232,18 @@ export async function loadCourse(home: string, sha: string, course: string, sett
     writeFileSync(to, bytes, { mode: 0o600 });
     scripts.set(leg, to);
   }
-  return { course, graph, scripts, scratch };
+  const schemas = new Map<string, ReturnType<Resolve>>();
+  const schema: Resolve = (id) => {
+    const parts = parseSchemaId(id);
+    if (!parts || parts.prefix === 'std') return stdSchema(id);
+    if (schemas.has(id)) return schemas.get(id) ?? null;
+    const text = readAt(home, sha, `.baton/courses/${parts.prefix}/schemas/${parts.name}@${parts.version}.json`);
+    let value = null;
+    try { value = text == null ? null : JSON.parse(text); } catch { /* malformed schema */ }
+    schemas.set(id, value);
+    return value;
+  };
+  return { course, graph, scripts, scratch, schema };
 }
 
 function courseSettings(home: string, sha: string): { courses?: { id?: string; source?: string }[] } | null {
@@ -307,7 +320,7 @@ export function dropCourse(scratch: string): void {
 }
 
 export function sourceContext(course: CourseLoad) {
-  return { ...(course.sourced ? { sourced_course: true as const } : {}), ...(course.fetched ? { fetched_course: { id: course.course, blobs: course.fetched, legacy: course.legacy } } : {}) };
+  return { ...(course.sourced ? { sourced_course: true as const, sourced_course_id: course.course } : {}), ...(course.fetched ? { fetched_course: { id: course.course, blobs: course.fetched } } : {}) };
 }
 
 /** The scratch directory the runner itself uses for a claim's ctx and result files. */

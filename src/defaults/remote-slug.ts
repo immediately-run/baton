@@ -2,9 +2,7 @@
 // sync defaults (cli.ts) and the CLI's homes (homes.ts, B-121) read. A leaf, so the runner's
 // bundle can resolve a named home without the whole of cli.ts beside it: the function, its git
 // helper and its failure shape moved here from cli.ts, which re-exports it unchanged.
-import { execFileSync } from 'node:child_process';
-
-const git = (root: string, ...a: string[]): string => execFileSync('git', ['-C', root, ...a], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, LC_ALL: 'C' } }).trim();
+import { gitText } from './git.mjs';
 
 interface GitFailure { status?: number | null; stderr?: string | Uint8Array }
 
@@ -43,7 +41,7 @@ export function remoteSlug(root: string, remote: string = 'origin'): string | nu
   try {
     // The proxy's `…/git/owner/name` form drops its `git/` — only when `owner/name` follows, so an
     // owner named `git` keeps its name.
-    return slugOfUrl(git(root, 'remote', 'get-url', remote));
+    return slugOfUrl(gitText(root, 'remote', 'get-url', remote));
   } catch (e) {
     const { status, stderr } = (e ?? {}) as GitFailure;
     const said = typeof stderr === 'string' ? stderr : stderr ? new TextDecoder().decode(stderr) : (e instanceof Error ? e.message : '');

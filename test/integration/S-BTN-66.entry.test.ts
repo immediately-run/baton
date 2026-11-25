@@ -91,7 +91,7 @@ describe('S-BTN-66 entry requirements', () => {
     // An inline value whose schema does not bound it is given by pointer instead (R-BTN-108).
     const notes = { name: 'notes', schema: 'roadmap-pr:notes@1', value: { text: 'short' } };
     expect(await outputsOf([notes, { name: 'findings', schema: 'roadmap-pr:findings@2', value: { open: 1 } }])).toMatchObject({ code: 'invalid-params' });
-    expect(await outputsOf([{ name: 'notes', schema: 'roadmap-pr:notes@1', uri: `git:o/r@${SHA}:notes.md` }, { name: 'findings', schema: 'roadmap-pr:findings@2', value: { open: 1 } }]))
+    expect(await outputsOf([{ name: 'notes', schema: 'roadmap-pr:notes@1', uri: `git:immediately-run/docs@${SHA}:notes.md` }, { name: 'findings', schema: 'roadmap-pr:findings@2', value: { open: 1 } }]))
       .toMatchObject({ ok: true });
   });
 });

@@ -4,7 +4,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { COURSE_ID } from '../core/course';
-import { GIT_NONINTERACTIVE_ENV } from './ticket-state';
+import { GIT_NONINTERACTIVE_ENV } from '../client/git-env.mjs';
 import type { CourseSource } from './course-source';
 
 const gitEnv = () => ({ ...process.env, ...GIT_NONINTERACTIVE_ENV, GIT_NO_REPLACE_OBJECTS: '1' });
@@ -43,7 +43,7 @@ export function courseFiles(root: string, sha: string, id: string): CourseFile[]
 }
 
 /** Only regular, top-level leg overrides belong in a sourced home. */
-export const isOverride = (path: string): boolean => /^legs\/[a-z][a-z0-9-]*(?:\.md|\.run\.[a-z0-9]+)$/.test(path);
+export const isOverride = (path: string): boolean => /^legs\/[a-z][a-z0-9-]*(?:\.md|\.run\.(?:mjs|js|cjs))$/.test(path);
 
 /** One bare object cache per upstream. Resolve HEAD afresh, fetch by branch (never by id),
  * and prove the pin against the head returned by that very fetch. No tree is reused. */

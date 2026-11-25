@@ -43,7 +43,7 @@ resumed by a **restart** (§7). "Workflow" means only a CI workflow; "activity" 
     to Baton, not in it, and goes to the owner.
   - **Legacy, removed with its code.** What remains of coordinating through git is marked legacy
     where it is specified, is never extended, and leaves with the work that retires each (B-176,
-    B-178): the git-lock ticket commands (R-BTN-74); the next-free scans of git; the cutover and
+    B-178): the next-free scans of git; the cutover and
     the mirror, which serve a repository that coordinated its claims through git before Baton
     (§16); and every passage elsewhere that serves only one of these. A collision one still produces is caught by the sync's duplicate-id
     refusal (R-BTN-74, R-BTN-147) or at merge.
@@ -55,8 +55,8 @@ resumed by a **restart** (§7). "Workflow" means only a CI workflow; "activity" 
   criteria, a PR list or other prose; the dashboard links each ticket that has a `path` to its
   file on the forge.
   - It may hold **pointers and digests, never content**: evidence pointers, input and output URIs
-    and digests (R-BTN-82, R-BTN-83), a leg run's log directory (R-BTN-128), session and
-    transcript pointers, and the credential id that answered a condition (R-BTN-163). A leg's
+    and digests (R-BTN-82, R-BTN-83), a leg run's log directory (R-BTN-128), session pointers (which may themselves be credentials, R-BTN-113), transcript pointers, and
+    the credential id that answered a condition (R-BTN-163). A leg's
     output never passes through Baton (R-BTN-128); the one inline output value is R-BTN-108's.
   - **Opaque blobs** are the other inline values, capped by §12.3: course fields and course data,
     profiles, reports, `rationale`, a reading's `detail`. Core never reads them, so it cannot stop
@@ -71,9 +71,8 @@ resumed by a **restart** (§7). "Workflow" means only a CI workflow; "activity" 
   Baton also holds, Baton adopts it and logs the discrepancy (R-BTN-85). A runner acts on the
   ticket as its source has it (R-BTN-5, R-BTN-34).
   - **Staleness.** A snapshot observed after a claim's latest claim or `advance` (R-BTN-62) that
-    shows the held ticket `closed` as `withdrawn`, or re-tiered above the holder's ceiling, ends
-    the claim `released:stale-board` with a `release` to the holder. A held ticket dropped without
-    `closed` is R-BTN-147's.
+    shows the held ticket `closed` as `withdrawn` ends the claim `released:stale-board` with a
+    `release` to the holder. A held ticket dropped without `closed` is R-BTN-147's.
   - **Progress is not staleness.** Facts lagging the holder, readiness the latest snapshot has not
     caught up with, a station or leg the course file lacks (R-BTN-64) and a new version of a held
     ticket (R-BTN-198) leave the claim alone.
@@ -85,7 +84,7 @@ resumed by a **restart** (§7). "Workflow" means only a CI workflow; "activity" 
   snapshot places a ticket; a note a leg adds to its ticket is evidence for people, never a
   position. A leg's runs and a ticket's arrivals are counted from this record (R-BTN-63).
   - **Where a ticket starts.** A ticket a snapshot posts for the first time stands at its course's
-    `start` with `start_leg` queued (R-BTN-83), unless an import holds its course history
+    `start` with `start_leg` queued (R-BTN-83), unless an import holds its position
     (R-BTN-88), placed in the transaction that accepts the post, before that post's attestations
     are judged.
   - **Who moves a ticket.** Only these, each along an edge of the course file from Baton's current
@@ -176,7 +175,7 @@ resumed by a **restart** (§7). "Workflow" means only a CI workflow; "activity" 
   |---|---|
   | repository, ticket, course id and version | registers, keys, matches declaring runners |
   | station, leg, a ticket's station and path, leg state and `waiting_on`, run count; timer, call leg, person leg, cancel leg | validates course files, leases a run of legs, checks edges, recommends, arms, settles, fires |
-  | runner, capability, tier, tag; lease, fence, reap, attempt, backoff, hold, expedite, suspension | the safety gates and the default order |
+  | runner, capability, tag; lease, fence, reap, attempt, backoff, hold, expedite, suspension | the safety gates and the default order |
   | grant, owner, administrator, credential | who may do what |
   | block, `depends_at`, resource, instance, a reading's envelope, a leg's `needs` | keeps rows, answers queries, gates or advises (R-BTN-75) |
   | condition (type, disposition, restart, binding, handler), supersession, outbox entry | records, routes, resumes (§7) |
@@ -189,7 +188,7 @@ resumed by a **restart** (§7). "Workflow" means only a CI workflow; "activity" 
   fixtures, beyond an exceptions list that only shrinks; `src/defaults/` is exempt and never
   imported by `src/core/`; the toy course `chore` runs the generic scenarios (S-BTN-28).
 - **R-BTN-66 (agents can change anything in git; what they must not change lives in Baton).**
-  An agent can change every byte of a registered repository — `.baton/`, the sync, tiers,
+  An agent can change every byte of a registered repository — `.baton/`, the sync,
   requirements, computed bars and leg states, condition bindings, reviews. Baton does not
   replace or fortify git's security model: whoever can push, or is in `pushers` (R-BTN-139), is a
   legitimate user of this tenant (R-BTN-137). What is computed from git binds only as strongly as
@@ -218,4 +217,3 @@ resumed by a **restart** (§7). "Workflow" means only a CI workflow; "activity" 
     recommendations and views — is not built, and no runner runs one:
     [the proposal](../proposals/courses.md).
   - Estimates stay on the runner; Baton stores no estimate or forecast.
-

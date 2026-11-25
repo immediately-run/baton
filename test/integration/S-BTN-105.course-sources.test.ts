@@ -1,10 +1,13 @@
-// S-BTN-105 / S-BTN-310 (B-139): sourced scripts and graph, home overrides, no home copies.
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+// S-BTN-105 / S-BTN-110 (B-139): sourced scripts and graph, home overrides, no home copies.
+import { describe, it, expect, beforeEach, afterEach, inject } from 'vitest';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { build } from 'esbuild';
+import { Miniflare } from 'miniflare';
+import { LOCAL_LOADERS, dashboardScriptAsText } from '../../scripts/bundle.mjs';
 import { call as hostCall } from '#host';
 import { initMain, parseSyncArgs, showCourseMain, syncMain } from '../../src/defaults/cli';
 import { dropCourse, loadCourse, sourceContext } from '../../src/runner/home';
@@ -53,7 +56,7 @@ afterEach(() => {
 describe('S-BTN-105 a course from its source, one leg overridden', () => {
   it('posts the sourced course, runs the override at the snapshot, and the standard close moves the ticket', async () => {
     const settings = JSON.parse(readFileSync(settingsFile(), 'utf8'));
-    expect(settings.courses[0].source).toMatch(new RegExp(`^github/[^/]+/[^/]+/${SHA}/create-pr$`));
+    expect(settings.courses[0].source).toMatch(new RegExp(`^github/[^/]+/[^/]+/${SHA}/standard-create-pr$`));
     await sync();
     const at = async () => (await rows<{ station: string; next_leg: string | null }>('SELECT station, next_leg FROM ticket_stations WHERE ticket_id = ?', 'docs:T-1'))[0];
     // The gate comes before every review round (B-110): with no marker on the head it is the
@@ -80,7 +83,8 @@ describe('S-BTN-105 a course from its source, one leg overridden', () => {
     writeFileSync(join(dir, '.baton', 'courses', 'create-pr', 'legs', 'review.md'), 'Home review instructions\n');
     chmodSync(agent, 0o755);
     writeFileSync(settingsFile(), JSON.stringify({ ...settings, agent_command: agent }, null, 2));
-    writeFileSync(join(dir, '.baton', 'courses', 'create-pr', 'legs', 'review.run.mjs'), `import { writeFileSync } from 'node:fs';
+    rmSync(join(dir, '.baton', 'courses', 'create-pr', 'legs', 'review.run.mjs'));
+    writeFileSync(join(dir, '.baton', 'courses', 'create-pr', 'legs', 'review.run.js'), `import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 export async function run(ctx, standard) {
   writeFileSync(join(ctx.checkout, 'gate.log'), 'two blind reviewers, then the matcher');
@@ -98,7 +102,11 @@ export async function run(ctx, standard) {
     try {
       const leg = await import(`${pathToFileURL(loaded.scripts.get('review')!).href}?t=${Date.now()}`);
       const ctx = { ticket: { id: 'docs:T-1', path: 'tickets/t1.md', home: 'docs' }, checkout: dir, snapshot: { sha }, sourced_course: loaded.sourced, leg: 'review', claim: { nonce: 'n1' } };
-      const result = await leg.run(ctx);
+      const run = spawnSync(process.execPath, [join(ROOT, 'src/runner/legProcess.mjs'), 'run', loaded.scripts.get('review')!], {
+        input: `${JSON.stringify([{ ...ctx, ...sourceContext(loaded) }])}\n`, encoding: 'utf8',
+      });
+      expect(run.status, run.stdout || run.stderr).toBe(0);
+      const result = JSON.parse(run.stdout.trim().split('\n').at(-1)!).result;
       expect(result).toEqual({ reached: 'reviewed', next: 'fix', verdict: 'changes' });
       expect(readFileSync(join(dir, 'instruction.log'), 'utf8')).toBe('Home review instructions\n');
       expect(readFileSync(join(dir, 'gate.log'), 'utf8')).toContain('two blind reviewers');
@@ -116,7 +124,7 @@ export async function run(ctx, standard) {
     expect(await at()).toMatchObject({ station: 'reviewed', next_leg: 'fix' });
   }, 120_000);
 
-  it('S-BTN-310 refuses a committed copy and loads the source script instead of it', async () => {
+  it('S-BTN-110 refuses a committed copy and loads the source script instead of it', async () => {
     const copy = join(dir, '.baton', 'courses', 'create-pr', 'legs', 'implement.mjs');
     writeFileSync(copy, 'throw new Error("home copy must not run");\n');
     const sha = commit();
@@ -131,7 +139,7 @@ export async function run(ctx, standard) {
     }
   });
 
-  it('S-BTN-310 scaffolds only explicitly requested files and prunes identical copies', async () => {
+  it('S-BTN-110 scaffolds only explicitly requested files and prunes identical copies', async () => {
     const graphDir = join(dir, '.baton', 'courses', 'create-pr');
     expect(readdirSync(join(graphDir, 'legs'))).toEqual(['review.run.mjs']);
     rmSync(graphDir, { recursive: true });
@@ -143,7 +151,7 @@ export async function run(ctx, standard) {
     const log: string[] = [];
     await initMain(['--prune'], { root: dir, log: (line) => log.push(line) });
     expect(existsSync(join(graphDir, 'course.json'))).toBe(false);
-    expect(readdirSync(join(graphDir, 'legs'))).toEqual(['review.md']);
+    expect(readdirSync(join(graphDir, 'legs')).filter((x) => x !== 'review-defaults.json')).toEqual(['review.md']);
     expect(log.join('\n')).toContain('review.md (differs from source');
     rmSync(graphDir, { recursive: true });
     await initMain([], { root: dir, log: () => {} });
@@ -155,7 +163,7 @@ export async function run(ctx, standard) {
     expect(shown.join('\n')).toContain('--- legs/implement.md ---');
   });
 
-  it('S-BTN-310 reads a fetched pin and rechecks ancestry even when its objects are cached', async () => {
+  it('S-BTN-110 reads a fetched pin and rechecks ancestry even when its objects are cached', async () => {
     const upstream = mkdtempSync(join(tmpdir(), 'baton-s105-source-'));
     const env = { GIT_CONFIG_COUNT: process.env.GIT_CONFIG_COUNT, GIT_CONFIG_KEY_0: process.env.GIT_CONFIG_KEY_0, GIT_CONFIG_VALUE_0: process.env.GIT_CONFIG_VALUE_0 };
     const remote = (...args: string[]) => execFileSync('git', ['-C', upstream, ...args], { encoding: 'utf8' }).trim();

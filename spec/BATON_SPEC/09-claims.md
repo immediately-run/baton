@@ -161,28 +161,40 @@ A claim ends with `POST /v1/runner/claims/{id}/end`. Its body, stated here once:
 | `released:requested` | `released` | an owner's release message, Stop leg, the runner's own stop signal (R-BTN-119, R-BTN-72) | no |
 | `released:owner-cancel` | `released` | Cancel: hold plus release (§6) | no |
 | `released:floor` | `released` | a guarantee a floor names broke on a repository the ticket reaches, and Baton released the claim (R-BTN-189) | no |
+| `released:provider-suspended` | `released` | a release message reports that the leg's provider account was suspended | no |
+| `released:provider-exhausted` | `released` | the leg reports that its provider account was exhausted | no |
 | `released:<bar reason>` | `released` | an owner bar that releases holders, with that bar's `reason` (R-BTN-67) | no |
 | `released:course-changed` | `released` | the leg left the course under the claim: an `off-graph` refusal or a heartbeat `station: unknown` (R-BTN-64) | no |
-| `released:off-branch` | `released` | the claim's sha is not on the default branch (R-BTN-143) | no |
+| `released:off-branch` | `released` | not built: the claim's sha is not on the default branch (R-BTN-143) | no |
 | reaped, actor `alarm` | `reaped` | the runner was silent past its lease timeout (§9.5) | yes |
 | reaped, actor `admin:<fingerprint>` | `reaped` | an administrator's force-reap | no |
 | reaped, actor `alarm:unacked-release` | `reaped` | a delivered `release` unacknowledged for 2 hours | no |
 | reaped, actor `alarm:leg-timeout` | `reaped` | a delivered `leg-timeout` release unacknowledged for 15 minutes | as `leg-timeout` |
 
+- Baton writes `released:floor` directly when it releases a claim under R-BTN-189. Explicit
+  acceptance as a runner end reason is not built ([B-299](../../tickets/B-299.mdx)). The
+  parser classifies a runner's `released:floor` as an owner-bar reason, so the end route
+  rejects it unless the repository has a bar with reason `floor`.
 - The `cannot-finish` classes are core's built-in `interrupt` types `error.<class>` (R-BTN-160);
   a course's own `interrupt` type travels in `error`. What a failed attempt or a non-retryable
   class triggers is R-BTN-122's.
 - **A release** pushes the work done so far, then `close`, then `handoff` (R-BTN-72), except as
-  R-BTN-119 and R-BTN-44 say. A holder told to release (a `release` message, §6) stops at its
-  next safe point, or at once for the reasons R-BTN-119 lists, ends `released:<reason>` and
-  acknowledges.
-- Every end records a sync want (R-BTN-94), so confirmation never waits for an unrelated push.
+  R-BTN-119 and R-BTN-44 say. A holder told to release (a `release` message, §6) stops as
+  R-BTN-119 describes, ends `released:<reason>` and acknowledges.
+- Every end requests a sync dispatch under R-BTN-94. This is not a persistent sync want
+  (not built, R-BTN-94; [B-57](../../tickets/B-57.mdx)).
 
 ### 9.5 Reaping and the fence
 
-- **Reaping** (unnumbered). The alarm reaps every active claim whose runner has `now −
-  last_seen_at ≥ lease_timeout_ms`: the claim becomes `reaped`, the runner gets `reaped_at` (no
-  other reap sets it, R-BTN-19), and its pending and delivered messages become `expired`. The
+- **Reaping** (unnumbered). Baton records service from successful requests (including
+  not-modified replies) and committed reaper turns, at most once per alarm period. When the
+  gap still exceeds the runner's lease after subtracting the sampling period, Baton gives
+  its active non-legacy claims a full lease from recovery for silence
+  reaping. The alarm reaps once a full lease has passed since the later of the runner's
+  `last_seen_at` and the claim's recovery, if any. Recovery does not record a heartbeat or
+  change a pending fence. A silence reap makes the claim `reaped` and its pending and delivered
+  messages become `expired`. A reap that finds the runner silent sets `reaped_at` only if
+  no other claim still holds (R-BTN-4, R-BTN-19). The
   alarm also reaps a claim whose delivered `release` stays unacknowledged for the end table's
   time (§9.4). The reaps commit on their own, before the rest of the alarm's tick: a reap whose
   end cannot be written is passed over, the tick then fails naming that claim after its other
@@ -192,27 +204,24 @@ A claim ends with `POST /v1/runner/claims/{id}/end`. Its body, stated here once:
   resume record.
 - **R-BTN-19 (fence before re-issue).** A claim reaped while its runner was **alive** — a
   force-reap (a retirement's included, R-BTN-47), an unacknowledged-release reap, a `leg-timeout`
-  reap — is `fence_pending` with its `fence_incarnation` and `fence_deadline`, the reap instant
-  plus the runner's `lease_timeout_ms`. Such a reap sets no `reaped_at`: the runner's next
+  reap — is `fence_pending` with its `fence_incarnation`. Such a reap sets no `reaped_at`: the runner's next
   heartbeat is answered without the claim, so it can report the fence. A silence reap is not
   fence-pending: every check of that runner already computes the lease as lost.
   - The ticket is not claimable until one of three things. That incarnation's sidecar, with its
     pre-reap secret, heartbeats, is told it no longer holds the claim, and reports it in
     `fenced` (§8.1) — the lease marked lost and its running tool processes terminated; Baton
-    logs `fence-cleared`. Or an administrator clears it. Or `fence_deadline` passes, whatever
-    the runner does meanwhile; the alarm then clears it, logging `fence-cleared {deadline:
-    true}`, and every check of the old incarnation has computed its lease as lost by then
-    (R-BTN-6).
-  - A fence still pending 30 minutes after the reap raises `baton.fence-pending` on the ticket,
-    naming the runner and the deadline. Nothing a runner does extends a fence, and a re-key
-    never clears one (R-BTN-14).
+    logs `fence-cleared`. Or an administrator clears it. Or the runner's last heartbeat is
+    older than its lease timeout, or exactly that old; the alarm clears the fence and logs
+    `fence-cleared {by: 'timeout'}`. A re-key does not itself clear a fence (R-BTN-14).
+  - **Not built ([B-79](../../tickets/B-79.mdx)):** a fixed `fence_deadline` independent of later
+    heartbeats and the `baton.fence-pending` condition after 30 minutes.
   - **An administrator's clear.** An administrator may clear a pending fence at once
     (`claim.fence-clear`, `POST /v1/ui/claims/{id}/fence-clear`, destructive and confirmed per
-    R-BTN-155, never delegated): the ticket is claimable and its seats free (R-BTN-178), its
-    `baton.fence-pending` condition, if raised, is resolved, and Baton logs `fence-cleared {admin:
+    R-BTN-155, never delegated): the ticket is claimable and its seats free (R-BTN-178), and
+    Baton logs `fence-cleared {admin:
     <fingerprint>}`. It is its own action, never a condition restart, and a freeze does not
-    refuse it (R-BTN-88). The control is drawn, for an administrator only, on the claim and on
-    its `baton.fence-pending` condition. The dialog shows the runner's last-seen time and says what the clear
+    refuse it (R-BTN-88). The control is drawn for an administrator only. The dialog shows the
+    runner's last-seen time and says what the clear
     gives up: a process the old incarnation still runs can push until its own lease check fails,
     and the next claimant's re-read of git (R-BTN-25) is then the only protection.
 
@@ -223,9 +232,12 @@ A claim ends with `POST /v1/runner/claims/{id}/end`. Its body, stated here once:
   from facts read after the end. The end's position stands from the moment Baton records it
   (R-BTN-39); confirmation checks its evidence, not where it put the ticket. It is confirmed by
   the first accepted snapshot whose observation began after the end and that:
-  - for an end that named `ended_at_sha` (R-BTN-8), carries the sync's `std:git.evidence@1`
-    for it with `found: true` — the observation's `unconfirmed` list (§4.3) tells the sync
-    which ends wait and what each named;
+  - for an end that named `ended_at_sha` (R-BTN-8), a commit or a URL, carries the sync's
+    `std:git.evidence@1` for that claim and that evidence with `found: true` — the
+    observation's `unconfirmed` list (§4.3) tells the sync which ends wait and what each named.
+    The sync says `found: false` only where git or the forge answers that the object does not
+    exist, and nothing for evidence it did not look at; where git places the ticket is never
+    evidence;
   - for an end that named none, is accepted at all;
   - for `done`, shows the ticket closed as done (`closed_tickets`) or absent, whatever it named.
 
@@ -254,8 +266,8 @@ A claim ends with `POST /v1/runner/claims/{id}/end`. Its body, stated here once:
   particular activity kind.
   - The claim response for a ticket with earlier ended claims carries `previous_attempts`,
     newest first, each `{claim_id, status, end_reason, detail, ended_at, resume, legs}`, `legs`
-    naming each run's `run_id` (R-BTN-63). A leg receives them only as data (`BATON_RESUME`,
-    R-BTN-144).
+    naming each run's `run_id` (R-BTN-63). The proposed `BATON_RESUME` data file is not built
+    (R-BTN-144).
   - The ticket history read (R-BTN-81) serves the records pruned to its *reader*, so a claim
     through git continues the change (R-BTN-74).
 - **R-BTN-25 (idempotent side effects).** Every side effect is keyed by the ticket so a later
@@ -318,7 +330,7 @@ A claim ends with `POST /v1/runner/claims/{id}/end`. Its body, stated here once:
   the dashboard links the newest.
   - A child session (a reviewer, a runner's leg session) has no sidecar and is no runner
     (R-BTN-72); its archiver appends to the parent's spool with `role: subagent` and its
-    activity id (`BATON_ACTIVITY`, R-BTN-144). An in-process subagent has no transcript of its
+    activity id when available (see R-BTN-144 for `BATON_ACTIVITY`). An in-process subagent has no transcript of its
     own.
   - A path links to the claim it names (`claim_id`), else its activity's, else the runner's one
     claim. A path that names neither, from a runner holding several claims or none, links to the
