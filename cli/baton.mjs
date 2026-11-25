@@ -59,8 +59,8 @@
 //   baton owner -i KEY policy show REPO                     — the signed read (R-BTN-189), as JSON
 //   baton owner -i KEY policy diff REPO FILE                — the knobs FILE's document would change
 //   baton owner -i KEY policy log REPO [--after N]          — the append-only change log
-//   baton owner -i KEY policy set REPO FILE --base N        — a compare-and-set on the version you read
-//   baton owner -i KEY policy apply REPO PRESET --base N    — cooperative | protected | protected-signed | plain-git
+//   baton owner -i KEY policy set REPO FILE --base N [--dry-run] — compare-and-set on the version you read
+//   baton owner -i KEY policy apply REPO PRESET --base N [--dry-run] — preview policy effects without writing
 //   baton owner -i KEY policy floor add REPO NAME --guarantees a,b [--remove-by human|owner]
 //   baton owner -i KEY policy floor remove REPO NAME        (R-BTN-189: needs the floor's remove_by and approvers.policy)
 //   baton owner -i KEY bar REPO --course C|'*' --tag T [--legs a,b] --applies claim|claim+advance
@@ -208,7 +208,7 @@ export function parseArgs(argv, booleans = [], allowed = null, positionals = Inf
       continue;
     }
     const value = argv[++i];
-    if (value === undefined) throw new Error(`${a} needs a value`);
+    if (value === undefined || value.startsWith('--') || value === '-i') throw new Error(`${a} needs a value`);
     if (name === 'required-bar') groups.push({ leg: value });
     else if (groups.length && ['course', 'except', 'tag-prefix'].includes(name) && flags['required-bar-mode']) groups.at(-1)[name] = value;
     else flags[name] = value;
@@ -279,7 +279,7 @@ function workingTreeRefusal(argv) {
  *  the owner and administrator commands' value-less flags (parseArgs booleans) are named here so
  *  `--yes --dev` still counts. An unknown boolean is read as value-taking, which refuses rather
  *  than bypasses — the safe direction. */
-const NO_VALUE_FLAGS = new Set(['transitive', 'cut-over', 'available', 'unavailable', 'clear', 'yes', 'release-holders', 'no-required-bars', 'require-signed-control', 'no-require-signed-control', 'watch', 'all']);
+const NO_VALUE_FLAGS = new Set(['transitive', 'cut-over', 'available', 'unavailable', 'clear', 'yes', 'release-holders', 'no-required-bars', 'require-signed-control', 'no-require-signed-control', 'watch', 'all', 'dry-run']);
 function devFlagPositions(argv) {
   const at = [];
   for (let i = 1; i < argv.length; i++) {
@@ -993,6 +993,8 @@ async function policyMain(argv) {
   // REPO` is the documented form — or after it, as every other command takes them. B-121:
   // `--home` rides along the same way, and the home in force supplies the repository the
   // missing positional names and the origin a missing --url/BATON_URL calls.
+  // Validate adjacency before separating global options from command options.
+  parseArgs(argv, ['dry-run']);
   const isFlagOrValue = (_, i, a) => a[i] === '-i' || a[i - 1] === '-i' || a[i] === '--url' || a[i - 1] === '--url' || a[i] === '--home' || a[i - 1] === '--home';
   const { flags: globalFlags } = parseArgs(argv.filter(isFlagOrValue));
   const args = argv.filter((x, i, a) => !isFlagOrValue(x, i, a));
@@ -1037,7 +1039,7 @@ async function policyMain(argv) {
     return 0;
   }
   if (sub === 'set' || sub === 'apply') {
-    const { flags, positional } = parseArgs(rest, [], ['base', 'identity', 'url'], 2);
+    const { flags, positional } = parseArgs(rest, ['dry-run'], ['base', 'identity', 'url'], 2);
     // B-121: with a home in force the repository may be omitted — one positional is the file or
     // preset, the named repository (two positionals) always winning over the home.
     const fromHome = home?.repository != null && positional.length === 1;
@@ -1048,6 +1050,7 @@ async function policyMain(argv) {
     // so a concurrent change is a `conflict` the operator sees, never one this overwrites.
     const base = need(baseOf(flags.base), '--base N (the version your change builds on — `baton owner policy show` names it; a stale one answers conflict)');
     const body = sub === 'apply' ? { base_version: base, preset: what } : { base_version: base, policy: JSON.parse(readFileSync(what, 'utf8')) };
+    if (flags['dry-run']) body.dry_run = true;
     const out = await request('PUT', `/v1/owner/${encodeURIComponent(repo)}/policy`, body);
     write(JSON.stringify(out.json));
     return out.status >= 200 && out.status < 300 ? 0 : 1;

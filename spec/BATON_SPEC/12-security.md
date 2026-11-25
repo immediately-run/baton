@@ -318,6 +318,19 @@ trusted runners or of the protection checker; a compromised forge; and a comprom
     `baton owner policy show | diff | log` read it. Each change is logged `admin` with the
     versions and the knobs it changed, and is checked against the floors (R-BTN-189) and the
     current courses (R-BTN-181) in its transaction.
+  - **Previewing a policy change.** `dry_run: true` (`--dry-run` on `policy apply` or `policy set`)
+    uses the same current version, approver and change validation as apply, but changes no
+    policy or trust settings and adds no policy audit event. `changed` lists the changed knobs;
+    `guarantees` gives their projected result using Baton's current protection report.
+    `trust_cleared` lists the trust settings apply would clear (`grant:<fingerprint>` or
+    `courier:<fingerprint>`), not grants it would revoke. On a change from `inputs.answers: git`
+    to `attestation` with no human-only key admitted by the decision route (R-BTN-116),
+    `stops.legs` lists the person legs that could take an answer from each live ticket's current
+    station, including when another leg is queued, as `{ticket_id, leg}`. `stops.tickets` lists
+    their distinct qualified ticket ids. This reports loss of the answer path, not loss of expiry
+    or of other legs the ticket can take.
+    `not_evaluated` names the effects this preview does not predict: `outbox-delivery`,
+    `leg-attestation-requirements`, `trusted-merge` and `repos.unlisted`.
   - **Who may change it.** Every change to the policy, in any direction, needs an approver on the
     `approvers.policy` list as it stands before the change; Baton never asks whether a change
     tightens or loosens. A change to any `approvers.*` list is authorised the same way, never by
