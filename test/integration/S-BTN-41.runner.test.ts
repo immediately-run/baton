@@ -22,7 +22,7 @@ import { Runner, legActivity, newestWrite } from '../../src/runner/runner';
 import { legNeeds, readHead } from '../../src/runner/home';
 import { capabilitiesOf } from '../../src/vendor/vocabulary.mjs';
 import { call as hostCall } from '#host';
-import { course, cutover, evidenceFound, observe, ORIGIN, ownerCall, placed, rows, setClock, syncCall, ticket, TOKENS } from '../helpers';
+import { course, cutover, evidenceFound, observe, ORIGIN, ownerCall, placed, rows, setClock, syncCall, tick, ticket, TOKENS } from '../helpers';
 import relay from '../fixtures/courses/relay/course.json';
 
 const T0 = Date.parse('2026-10-16T12:00:00Z');
@@ -115,11 +115,11 @@ const runners: Runner[] = [];
 const stateFiles = new Map<Runner, string>();
 
 /** A runner against this test's Baton (the local host), heartbeating as credential vm-a. */
-function makeRunner(over: Record<string, unknown> = {}): Runner {
+function makeRunner(over: Record<string, unknown> = {}, transport: (req: Request) => Promise<Response> = hostCall): Runner {
   const stateFile = join(tmpdir(), `baton-runner-${process.pid}-${++n}.json`);
   const api = new BatonApi({
     url: 'https://baton.test',
-    transport: (req) => hostCall(req),
+    transport,
     auth: (_m, _u, _b, secret) => ({ Authorization: `Bearer ${TOKENS['vm-a']}`, ...(secret ? { 'X-Runner-Secret': secret } : {}) }),
   });
   const runner = new Runner({
@@ -265,6 +265,72 @@ describe('S-BTN-41 the runner', () => {
     await home.post({ 'T-1': placed('checked', [['build', 'built'], ['check', 'checked']], [['merge', 'ready']]) }, undefined, { course: END });
     expect(await makeRunner().runOnce()).toMatchObject({ ticket: 'docs:T-1', end_reason: 'released:cannot-finish:contract-output' });
   }, 30_000);
+
+  it('S-BTN-52: a delivered timeout refusing the successor ends the current run with a hand-off', async () => {
+    home.leg('build', `return { reached: 'built', next: 'check' };`);
+    home.leg('check', `ev(ctx, 'run check'); return { reached: 'checked' };`);
+    home.commit();
+    await home.post({ 'T-1': placed('filed', [], [['build', 'ready']]) });
+    const runner = makeRunner({}, async (req) => {
+      if (new URL(req.url).pathname.endsWith('/advance') && (await req.clone().json()).leg === 'check') {
+        // Delivery can race the close; the runner may learn of it first from this refusal.
+        return Response.json({ code: 'not-eligible', rule_code: 'leg-timeout', message: 'the current run has a delivered leg-timeout release' }, { status: 409 });
+      }
+      return hostCall(req);
+    });
+    expect(await runner.runOnce()).toMatchObject({ end_reason: 'released:leg-timeout', handoff: 'https://example.test/handoff/build' });
+    expect(home.evidence()).toEqual(['close build', 'handoff build']);
+    expect(await rows('SELECT status, end_reason FROM claims')).toEqual([{ status: 'released', end_reason: 'released:leg-timeout' }]);
+    expect(await rows('SELECT leg FROM claim_legs')).toEqual([{ leg: 'build' }]);
+  }, 30_000);
+
+  it('S-BTN-52: a timeout delivered during terminal close refuses done and writes a hand-off', async () => {
+    const timed = { ...relay, legs: { ...relay.legs, merge: { ...relay.legs.merge, max_duration: 60 } } };
+    home.write('.baton/courses/relay/course.json', JSON.stringify(timed));
+    home.write('.baton/courses/relay/legs/merge.mjs', legFile(`return { reached: 'merged' };`).replace(
+      "  return git(ctx, 'rev-parse', 'HEAD');",
+      `  while (!existsSync(at(ctx, 'resume-close'))) await new Promise(resolve => setTimeout(resolve, 10));
+  return git(ctx, 'rev-parse', 'HEAD');`,
+    ));
+    home.commit();
+    await home.post({ 'T-1': placed('checked', [['build', 'built'], ['check', 'checked']], [['merge', 'ready']]) }, undefined, { course: timed });
+    let sendBeat: (() => Promise<Response>) | undefined;
+    const runner = makeRunner({ beatEvery: 60_000 }, async (req) => {
+      if (new URL(req.url).pathname === '/v1/runner/heartbeat') {
+        const body = await req.clone().json();
+        if (body.legs_finished?.length) {
+          delete body.legs_finished;
+          delete body.leg_finished;
+          sendBeat = () => hostCall(new Request(req.url, { method: 'POST', headers: req.headers, body: JSON.stringify(body) }));
+        }
+      }
+      return hostCall(req);
+    });
+    const result = runner.runOnce();
+    try {
+      await until(() => home.evidence().filter(line => line === 'close merge'));
+      expect(sendBeat).toBeDefined();
+      const [{ deadline_at }] = await rows<{ deadline_at: number }>('SELECT deadline_at FROM claims');
+      expect(deadline_at).toBe(T0 + 40 * 60_000);
+      // Move in steps shorter than the lease while the close is blocked.
+      for (let now = T0 + 10 * 60_000; now <= deadline_at; now += 10 * 60_000) {
+        await setClock(now);
+        const response = await sendBeat!();
+        expect(response.status, await response.text()).toBe(200);
+      }
+      await tick();
+      const delivery = await (await sendBeat!()).json();
+      // Leave the heartbeat reply outside the runner: the end refusal is how it learns of delivery.
+      expect(delivery.messages).toEqual([expect.objectContaining({ payload: expect.objectContaining({ reason: 'leg-timeout' }) })]);
+    } finally {
+      home.write('.baton/resume-close', '');
+      await result;
+    }
+    expect(await result).toMatchObject({ end_reason: 'released:leg-timeout', handoff: 'https://example.test/handoff/merge' });
+    expect(home.evidence()).toEqual(['close merge', 'handoff merge']);
+    expect(await rows('SELECT status, end_reason, failed_attempt FROM claims'))
+      .toEqual([{ status: 'released', end_reason: 'released:leg-timeout', failed_attempt: 1 }]);
+  }, 45_000);
 
   it('holds the claim through a short ci wait and goes on when it clears', async () => {
     home.leg('build', `return { reached: 'built', next: 'check' };`);
