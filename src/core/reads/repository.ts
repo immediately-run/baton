@@ -47,7 +47,7 @@ export const REPOSITORY_READS: ReadRoute[] = [
     // R-BTN-163 (B-234): the conditions list — what a delivery runner polls
     // (`?open=1&type=interact`, R-BTN-195) and the Conditions screen draws. Its own `?cursor=`
     // stays (B-205: existing reads keep their paging).
-    action: 'repo.conditions',
+    action: 'condition.list',
     clock: true,
     // B-195: each entry also carries its `outcome`, `closed_at` and `resolve_url` (./conditions.ts).
     run: (cx, call) => conditionsList(cx, call),
