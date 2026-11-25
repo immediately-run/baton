@@ -5,8 +5,8 @@
   "src/core/claims.ts | INSERT OR | c5005b1a5847ce51": 1,
   "src/core/claims.ts | IS ? | 9e3e7f63c3f12162": 3,
   "src/core/claims.ts | IS ? | b5b4a9dfe77d1cbc": 1,
-  "src/core/claims.ts | scalar MAX | 5c2c788c81543b94": 2,
   "src/core/claims.ts | scalar MAX | 698e812f5e025eef": 1,
+  "src/core/claims.ts | scalar MAX | a3eef4b906048cc6": 2,
   "src/core/courses.ts | INSERT OR | 59a2313a05c1f25f": 1,
   "src/core/ownerState.ts | PRAGMA | a207f7b04a7d6524": 1,
   "src/core/registry.ts | COLLATE NOCASE | 19c21a4b93de5889": 1,
@@ -30,5 +30,9 @@
   "src/migrations/0065_read_efficiency.sql | INSERT OR | 71cad513278486a6": 3,
   "src/migrations/0065_read_efficiency.sql | rowid | 71cad513278486a6": 4,
   "src/migrations/0065_read_efficiency.sql | scalar MAX | 71cad513278486a6": 1,
+  "src/migrations/0103_prerequisite_identity_and_ready.sql | scalar MAX | 4464782c03262f26": 1,
+  "src/migrations/0124_eligibility_inputs.sql | INSERT OR | b7295d543b578e01": 2,
+  "src/migrations/0124_eligibility_inputs.sql | rowid | b7295d543b578e01": 1,
+  "src/migrations/0125_ready_requirements.sql | scalar MAX | 1bcc7200e09a13d3": 1,
   "src/migrations/0140_insertion_order.sql | rowid | edf3f6980ea7e9b9": 4
 }
