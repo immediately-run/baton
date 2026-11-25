@@ -5,6 +5,7 @@
 // whose rows the unique indexes guard. The model tables are gone (B-142): a heartbeat may still
 // carry `model_provider_id`, `billing`, `usage` and `rate_limits`, all accepted and ignored,
 // and an unavailable provider is a reading (§6.3, R-BTN-76), never a table core keeps.
+import type { BeatAnswer } from '../shared/runner-wire';
 import { isLive, liveRunnerSql, type Lease } from './runnerLiveness';
 import { runnerLatest } from './runnerLatest';
 import { BatonError } from './http';
@@ -289,9 +290,9 @@ export class RunnerApi {
    *  claim, the messages, the stale courses and the mode. A `uses` a runner still sends is its
    *  retired declaration that it uses account instances (B-168): the heartbeat reads it as
    *  absent, logging `deprecated-field`. */
-  // @model heartbeat sha256:9c0136704c87
-  // @model declare sha256:828f5e6ae833
-  async heartbeat(credentialId: string, secretHeader: string | null, body: unknown, clientVersion: string | null = null, legacyName = false) {
+  // @model heartbeat sha256:576daa5cf97c
+  // @model declare sha256:d9cef42a9b45
+  async heartbeat(credentialId: string, secretHeader: string | null, body: unknown, clientVersion: string | null = null, legacyName = false): Promise<BeatAnswer> {
     // B-168 (R-BTN-76): `uses` is retired — a runner uses the repository's instances, never a set
     // it declares — and read as absent while the history's Migrations entry lasts.
     if (body && typeof body === 'object' && !Array.isArray(body) && (body as { uses?: unknown }).uses !== undefined) {
@@ -345,7 +346,7 @@ export class RunnerApi {
     };
   }
 
-  private heartbeatTx(credentialId: string, presented: string | null, settingsHash: string, hb: Heartbeat, clientVersion: string | null, legacyName: boolean) {
+  private heartbeatTx(credentialId: string, presented: string | null, settingsHash: string, hb: Heartbeat, clientVersion: string | null, legacyName: boolean): BeatAnswer {
     // B-253: the profile, serialized once — the same bytes compared, stored and hashed.
     const profileJson = hb.profile ? JSON.stringify(hb.profile) : null;
     const cred = this.credential(credentialId);
@@ -412,6 +413,7 @@ export class RunnerApi {
         if (w.reaped_at != null) throw new BatonError('runner-reaped', 'this runner was reaped; re-key to start a new incarnation');
       }
       if (moving) this.exec('UPDATE runners SET credential_id = ? WHERE id = ?', cred.id, w.id);
+      if (moving || rekeyed) this.exec('DELETE FROM runner_idle WHERE runner_id = ?', w.id);
     }
 
     const current = rekeyed ? hb.secret_hash : w.secret_hash; // the hash stored now
@@ -666,7 +668,7 @@ export class RunnerApi {
 
   /** Delivery is the heartbeat (§9): pending messages become delivered; delivered ones not yet
    *  acknowledged are sent again, so a lost response loses nothing. */
-  // @model deliverTimeout sha256:1916e7aa5051
+  // @model deliverTimeout sha256:f961aa2db6e7
   private deliver(runnerId: number, now: number) {
     const out = this.rows<{ id: number; kind: string; payload_json: string | null; sent_at: number }>(
       `SELECT id, kind, payload_json, sent_at FROM messages WHERE to_runner_id = ? AND status IN ('pending','delivered')

@@ -43,7 +43,7 @@ A checkout and a terminal for most of it. Two exit criteria need forge access:
 
 The owner, 2026-10-18, asked that the single-tenant findings of the security review be
 addressed, and settled five choices: a multi-repository key opts in, exit-status verdicts,
-MCP add-only holds, a loopback local host with `--bind`, and Developer as GitLab's "can
+MCP add-only holds, a loopback local host with `--host`, and Developer as GitLab's "can
 push".
 
 ### What to build
@@ -86,7 +86,7 @@ Split into reviewed PRs along four parts. Each is independent.
      GitLab protected-variable check in `repo init`; notification binding.
    - Token limits, role expansion from the snapshot, and links.
    - The App manifest checks; backticks and the export fence.
-   - The local host's `--bind` and file modes.
+   - The local host's `--host` binding and file modes.
    - Import re-validation and the pre-seal refusal.
    - The signature profile, the headers, `trigger_workflows`, foreign claims after cutover,
      and the fence per incarnation.
@@ -211,6 +211,9 @@ adapter's trust and fork mapping from real payload shapes. Item 7's cases, on bo
 - A real GitLab `id_tokens` JWT from a merge-request pipeline is refused.
 
 ## Status
+
+_2026-11-22 (B-300):_ Keep the shipped `--host` spelling; there is no `--bind` alias.
+R-BTN-158's bearer refusals and revocation, trusted proxy and file-mode checks remain B-46 work.
 
 _(2026-10-20: rescoped to the current-state spec, PR #71 — the courier `asks` scope, the delivery flag and the `courier` grant flag are dropped (personal couriers retired, R-BTN-164); everything else is unchanged.)_
 

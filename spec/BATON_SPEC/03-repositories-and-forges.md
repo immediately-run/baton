@@ -65,8 +65,8 @@ route, with the events and fields the table lists for it, is
     Afterwards every rule reads live repositories only: a retired one has no dispatch,
     credential, owner, policy or count, and every call naming it is `not-found`, as for one never
     registered. Its rows stay, read-only, for administrators' reads. Two things stay live while
-    one of its claims is fence-pending: the fence itself — the alarm clears it at its
-    `fence_deadline`, an administrator may clear it, the seal waits for it (R-BTN-19, R-BTN-88),
+    one of its claims is fence-pending: the fence itself — cleared as R-BTN-19 specifies, and
+    the seal waits for it (R-BTN-88),
     and the old holder's heartbeat, whose retired course is dropped rather than refused
     (R-BTN-3), can still report `fenced` — and the holder queries, which keep answering for its
     former path (R-BTN-7, R-BTN-138). Its id is never registered again in the tenant (`conflict`);
@@ -149,22 +149,22 @@ route, with the events and fields the table lists for it, is
   - **A held rename.** When a live repository already holds the new path, the old path is kept
     and the token still passes. The repository raises `baton.rename-held`; a claim on a ticket
     whose home or code repository has a held rename is refused `not-eligible` (`rename-held`,
-    §6); active claims on those tickets get a `requested` release (§6). The hold clears when an
-    administrator changes the path with `confirm: true` (same rewrite as a verified rename) or a
+    §6); active claims on those tickets get a `requested` release (§6). The hold clears when a
     later verified rename stops colliding.
   - **Former paths reach the fence only** (the branch-holder query, §9), never authentication or
     links: `?repo=P` resolves to live repositories whose current path is `P`, and to one whose
     former path is `P` only while no live repository holds `P`. A `code_repos` entry keeps its own
-    `former_paths` (latest 10), updated by id-matched deliveries. Several matches fail safe. An
-    administrator removes a former path with `former_paths_remove` and `confirm: true`.
-  - **Re-identifying** after a transfer: the change body's `forge_repo_id`, `forge_owner_id`
-    and `confirm: true`.
+    `former_paths` (latest 10), updated by id-matched deliveries. Several matches fail safe.
+  - **Administrative changes (not built, B-45).** The design allows a confirmed manual path
+    change to clear a held rename using the verified rename's rewrite, removal of a former path
+    with `former_paths_remove`, and re-identification after a transfer with `forge_repo_id`
+    and `forge_owner_id`. These fields are not supported by the repository change route (§14).
   - **Retiring** moves the path to `former_paths`, sets `github` to the tombstone
     `~retired/<id>` and stops reading `web_base`. The path validator and import (R-BTN-88)
     accept a tombstone only on a retired row.
-  - Renames, path changes and identifications are `admin` events with `detail.action`
-    `repo-renamed` (actor `sync`), `repo-path-changed` or `repo-identified` (actor the
-    administrator).
+  - Verified renames are `admin` events with `detail.action` `repo-renamed` (actor `sync`).
+    The unbuilt administrative changes would record `repo-path-changed` or `repo-identified`
+    (actor the administrator) for manual path changes and re-identifications, respectively.
 
 - **R-BTN-61 (merging courses and repositories).** Recommendations order each (repository,
   course) group by the default order (§6), then merge the groups by: (1) expedited first
@@ -179,8 +179,8 @@ route, with the events and fields the table lists for it, is
 ### 3.2 Who may post a board
 
 - **R-BTN-93 (sync keys and the one verifier).** A repository's sync authenticates with a sync
-  key, a CI identity token (R-BTN-15) or a machine key granted on the repository (R-BTN-102,
-  R-BTN-146). A board post from a class the policy's `inputs.board` excludes (`sync-key`,
+  key or a CI identity token (R-BTN-15); see R-BTN-102 for the unbuilt machine-key input. A
+  board post from a class the policy's `inputs.board` excludes (`sync-key`,
   `ci-identity`, `machine`; R-BTN-188) is refused `forbidden`.
   - **A sync key** is an SSH key of R-BTN-13's types in one `sync_keys` row: exactly one
     repository and one role. Owners add and revoke it
@@ -193,8 +193,8 @@ route, with the events and fields the table lists for it, is
     configuration in which only default-branch runs can read it.
   - **`verifySync(req) → {repository, role}`** is the only check. It refuses `unauthenticated`
     (no credential, bad signature, unknown or revoked key, a token that fails) or `forbidden`
-    (another role, a key that is no sync credential, a machine key whose grant does not sync
-    there). Every `/v1/sync/*` route uses only its answer.
+    (another role or a key that is no sync credential). Every `/v1/sync/*` route uses only its
+    answer.
   - **The mirror.** Legacy, removed with its code (R-BTN-193). A sync key's role is `sync` or
     `mirror`; a repository has a mirror when it has a `mirror_workflow`, `ci_identity.mirror` is
     true, or it has a `mirror`-role sync key. Only sync keys and CI tokens act as the mirror
@@ -279,10 +279,12 @@ route, with the events and fields the table lists for it, is
     and of each registered repository whose `code_repos` lists it. A `pull_request` delivery
     triggers one only when it is a merge (`pull_request.merged` is `true`), whatever its base branch.
   - **The push record.** A GitHub push delivery to a branch is recorded for ticket provenance
-    (R-BTN-194): `sender.id`, `sender.login`, `ref`, `before`, `after` and each commit's `id`
-    with its `added`, `removed` and `modified` paths, up to 30 commits and 600 paths. A push past
-    the bounds is remembered `truncated` with no paths, and one that does not parse is not
-    recorded; what either changed reads as `pusher-unknown`, and the delivery still triggers. The
+    (R-BTN-194) and control notices (R-BTN-187): `sender.id`, `sender.login`, `ref`, `before`,
+    `after`, `forced` and each commit's `id` with its `added`, `removed` and `modified` paths,
+    up to 30 commits and 600 paths. A delivery past the bounds is remembered `truncated` with no
+    paths. A forced push, an unknown `forced` flag, a missing destination commit or missing path
+    lists also make the record `truncated`, keeping any paths actually supplied within the bounds.
+    A delivery that does not parse is not recorded. The delivery still triggers a sync. The
     record lives 24 hours.
   - **Findings.** From the delivery's own fields, reading no repository content: a push by a
     worker pusher of the owners' `runner_pushers` setting to a repository no open claim's scope
@@ -403,4 +405,3 @@ route, with the events and fields the table lists for it, is
     home is G or whose `repos:` entry for G has reach (R-BTN-140), and names only
     tickets of repositories the asking key is granted on; any other match answers
     `held_by_other: true`, with no ids.
-

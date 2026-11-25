@@ -7,6 +7,7 @@ import { capabilitiesOf } from '../shared/vocabulary.mjs';
 import { parseTranscriptRepo } from './links';
 import { BatonError } from './http';
 import { checkRegistry, COURSE_ID, type RegistryEntry } from './courses';
+import { requirementKeys, requirementOf, type PostedDependency } from './ticketRequirement';
 import { ASKS, COURSE_ID as LEG_ID, DECISION_GRANT_MAX, DECISION_ID, DECISION_OPTION, DECISION_OPTIONS_MAX, DECISION_QUESTION, DECISIONS_MAX, DEPENDENCY_ID, isHttpsPointer, LOCAL_ID, NEEDS_MAX, SESSION_NAME, TAG, HOLDING_TYPE, HOLDING_VALUE, repositoryOf } from './validate';
 import type { Step } from './graph';
 
@@ -69,6 +70,7 @@ export interface PostedTicket {
   expedite: boolean;
   depends_on: string[];
   blocked_by: string[];
+  depends_at?: PostedDependency[];
   repos: string[];
   rank?: number | null;
   /** R-BTN-86 (§4.6): the ticket's parent, a LOCAL id of the same repository as the sync reads
@@ -234,6 +236,7 @@ export interface TicketRow {
   operator_only: 0 | 1;
   depends_on: string;
   blocked_by: string;
+  depends_at?: string;
   repos: string;
   ord: string | null;
   rank: number | null;
@@ -527,6 +530,16 @@ function checkNormative(p: BoardPayload, repo?: string) {
       // B-113 (§4.4): a `depends_on` entry is a local id or a qualified one naming another
       // registered repository's ticket; `blocked_by` (a parent's children, R-BTN-47) stays local.
       list(t[k], k === 'depends_on' ? DEPENDENCY_ID : ID, `${t.id}: ${k}`);
+    }
+    if (t.depends_at !== undefined) {
+      if (!isObjArr(t.depends_at, DEP_MAX)) fail(`${t.id}.depends_at`, `must be a list of at most ${DEP_MAX}`);
+      else for (const [i, d] of t.depends_at.entries()) {
+        if (!isObj(d) || typeof d.ticket !== 'string' || !DEPENDENCY_ID.test(d.ticket)
+          || ('leg' in d && (typeof d.leg !== 'string' || !LEG_ID.test(d.leg)))
+          || Object.keys(d).some((k) => !['ticket', 'leg', ...requirementKeys].includes(k)) || !requirementOf(d, LEG_ID)) {
+          fail(`${t.id}.depends_at.${i}`, 'must name a ticket, one of at, reached, done, withdrawn, closed, and optionally a leg');
+        }
+      }
     }
     if (!isObjArr(t.repos, 64)) fail(`${t.id}.repos`, 'must be a list of at most 64');
     list(t.repos, REPO, `${t.id}: repos`);
@@ -827,6 +840,7 @@ export function rowForTicket(t: PostedTicket): TicketRow {
     operator_only: t.operator_only ? 1 : 0,
     depends_on: JSON.stringify(t.depends_on),
     blocked_by: JSON.stringify(t.blocked_by),
+    ...(t.depends_at?.length ? { depends_at: JSON.stringify(t.depends_at) } : {}),
     repos: JSON.stringify(t.repos),
     ord: null,
     rank: t.rank ?? null,

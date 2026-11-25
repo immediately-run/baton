@@ -3,18 +3,21 @@
 // reaps, the fence before re-issue (R-BTN-19), confirmation by ancestry, and git winning over a
 // stale claim (R-BTN-35). The lock is the two partial unique indexes: a claim inserts and lets
 // SQLite refuse a second holder, never check-then-insert without them (R-BTN-4).
-import { expiredLeaseSql, isClaimLeaseLive, leaseEndsAt, liveDeclaringRunnerSql, liveRunnerSql, type Lease } from './runnerLiveness';
+import type { AdvanceAnswer, ClaimAnswer, NextLegs } from '../shared/runner-wire';
+import { expiredLeaseSql, isClaimLeaseLive, liveDeclaringRunnerSql, liveRunnerSql, type Lease } from './runnerLiveness';
 import { BatonError } from './http';
 import { sessionLinkWhy, transcriptUrl, type SessionLinkView } from './links';
 import { groupBy, isUniqueViolation, logEvent, mintRunId, randomHex, type Random } from './db';
 import type { Deprecated } from './deprecated';
 import { fitsTier, capabilitiesOf, TIERS } from '../shared/vocabulary.mjs';
 import { afterFailure, countsAsFailed, nonRetryableClass, resumeRecord, type ResumeActivity } from './attempts';
-import { checkAccept, checkAdvance, checkClaim, checkConfirm, checkDecisionAnswer, checkEnd, checkOverride, checkResolve, isGrantedKey, type ClaimPreference, type End, type Output } from './validate';
+import { type ClaimPreference, checkAccept, checkAdvance, checkClaim, checkConfirm, checkDecisionAnswer, checkEnd, checkOutputs, checkOverride, checkResolve, isGrantedKey, type End, type Output } from './validate';
+import { declaredOutputFault, pointerReach, ticketInputs } from './contracts';
+import { pointerAllowed } from './contractPointers';
+import { GIT_EVIDENCE_TYPE, type PostedAttestation } from './board';
 import { ceilingIn, repositoryOf, transcriptReposOf } from './registry';
 import { GATE_CODES, gatesFor, type GateContext, type GateLeg, type GateTicket, type GateVerdict, type Phase } from './gates';
-import { GIT_EVIDENCE_TYPE, type PostedAttestation } from './board';
-import { extendsPath, leaves, modelsOutsideWork, resolveLeg, resolveStation, runsOf, type Graph, type Step } from './graph';
+import { extendsPath, graphOf, leaves, modelsOutsideWork, resolveLeg, resolveStation, runsOf, type Graph, type Step } from './graph';
 import type { OutsideWork } from './outsideWork';
 import { baseChain, PATTERN_STEPS_MAX, unboundedAt, validate, type Schema } from '../shared/schema.mjs';
 import type { Seen, Stations } from './stations';
@@ -25,10 +28,11 @@ import type { Row, SqlValue, Store } from './ports';
 import { schedulingVersion } from './stateVersion';
 import { fleetSummary, instanceView, opaque, REPORT_AGE_FROM, REPORTS_FROM, requireFleetScope, type ViewScope } from './runnerViews';
 import type { Resources } from './resources';
-import { REPORT_HORIZON_MS } from './validate';
+import { clampLease, REPORT_HORIZON_MS } from './validate';
 import type { Blocks } from './blocks';
 import type { Conditions } from './conditions';
 import type { History } from './history';
+import type { IdleDetail, IdleGate } from './idleReasons';
 const EXPEDITE_BOUND = 2; // §7.2 rule 2, advice
 /** §2e: a claim regressed this long is listed under Needs you. */
 export const REGRESSED_FLAG_MS = 30 * 60_000;
@@ -38,6 +42,8 @@ const RELEASE_ACK_MS = 2 * 3_600_000; // §9: a delivered release unacknowledged
 const LEG_TIMEOUT_ACK_MS = 15 * 60_000; // R-BTN-90, S-BTN-52
 export const UNCONFIRMED_FLAG_MS = 6 * 3_600_000; // §6.7
 export const STALLED_MS = 2 * 3_600_000; // §14 Running: alive but no activity for 2 h
+/** §9.5: grace changes the silence-reap deadline, not the runner's last heartbeat. */
+export const CLAIM_LEASE_END_SQL = 'MAX(w.last_seen_at, COALESCE(c.lease_recovered_at, w.last_seen_at)) + w.lease_timeout_ms';
 /** §7.5 R-BTN-90: what a `leg_finished` heartbeat re-arms a still-armed deadline to — now plus
  *  40 minutes, once per leg run, so finishing is never the end. */
 const LEG_FINISH_REARM_MS = 40 * 60_000;
@@ -58,7 +64,8 @@ export interface Ctx {
    *  request's transaction has committed. */
   dispatch: (kind: 'mirror' | 'sync', ticketId: string) => void;
   /** R-BTN-75: whether a claim holds a ticket moves its blocked state; each change says so. */
-  blocks: Pick<Blocks, 'held' | 'forRunner' | 'raise' | 'answer' | 'answerPosted' | 'hasDecision' | 'postedDecision'>;
+  blocks: Pick<Blocks, 'held' | 'forRunner' | 'raise' | 'answer' | 'answerPosted' | 'hasDecision' | 'postedDecision' | 'unavailableReadings'>;
+  resourceReadings?: Pick<Resources, 'stateReading'>;
   /** R-BTN-81, R-BTN-85: the ticket's history and Baton's disagreements with git. */
   history: Pick<History, 'record' | 'discrepancy'>;
   /** R-BTN-79: a course's intake, `closed` while any of its legs is over its `max_queue`. */
@@ -92,7 +99,7 @@ interface RunnerFacts {
   lease_timeout_ms: number;
   last_seen_at: number;
   last_activity_at: number | null;
-  declared: string[];
+  holdings: Set<string>;
   /** The courses its checkouts run (R-BTN-48): rule 9. */
   courses: { repository: string; course: string; version: number }[];
   /** R-BTN-60: what rule 8 matches. */
@@ -135,11 +142,18 @@ interface Candidate {
   weight: number;
   expedite: number;
   to_end: number;
+  rank: number | null;
   ready_since: number | null;
   n: number;
   /** Rule 9 for the row's (repository, course) group — per group, so filtering on it after the
    *  numbering drops whole groups and leaves every other row's `n` as it was (B-237). */
   r9: number;
+}
+
+/** Within a group, a full expedite lane merges the two runs in ordinary order. */
+function ordinaryOrder(a: Candidate, b: Candidate): number {
+  return a.to_end - b.to_end || (a.rank ?? Number.MAX_SAFE_INTEGER) - (b.rank ?? Number.MAX_SAFE_INTEGER)
+    || (a.ready_since ?? 0) - (b.ready_since ?? 0) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 }
 
 /** B-237: what one recommendation or claim decision reads many times and no write changes
@@ -367,17 +381,17 @@ export class Claims {
   // ── what matching reads ─────────────────────────────────────────────────────────────────
 
   private runner(id: number): RunnerFacts {
-    const w = this.rows<Omit<RunnerFacts, 'declared' | 'courses' | 'tier_ceilings' | 'tags' | 'grants'> & { tier_ceilings: string; created_by: string | null }>(
+    const w = this.rows<Omit<RunnerFacts, 'holdings' | 'courses' | 'tier_ceilings' | 'tags' | 'grants'> & { tier_ceilings: string; created_by: string | null }>(
       `SELECT w.id, w.kind, w.incarnation, w.tier_ceiling, w.tier_ceilings, w.lease_timeout_ms, w.last_seen_at, w.last_activity_at, w.credential_id, w.isolation, w.concurrency,
               (SELECT COUNT(*) FROM claims k WHERE k.runner_id = w.id AND k.status = 'active') AS held, c.created_by
        FROM runners w JOIN credentials c ON c.id = w.credential_id WHERE w.id = ?`, id)[0];
     if (!w) throw new BatonError('unauthenticated', 'no such runner');
-    const declared = this.rows<{ declared: string }>('SELECT DISTINCT declared FROM runner_capabilities WHERE runner_id = ? ORDER BY declared', id).map((r) => r.declared);
+    const holdings = new Set(this.rows<{ capability: string }>('SELECT capability FROM runner_capabilities WHERE runner_id = ?', id).map((r) => r.capability));
     const courses = this.rows<{ repository: string; course: string; version: number }>(
       'SELECT repository_id AS repository, course_id AS course, version FROM runner_courses WHERE runner_id = ? ORDER BY repository_id, course_id', id);
     const tags = this.rows<{ tag: string }>('SELECT tag FROM runner_tags WHERE runner_id = ? ORDER BY tag', id).map((r) => r.tag);
     const { created_by, ...facts } = w;
-    return { ...facts, tier_ceilings: JSON.parse(w.tier_ceilings) as Record<string, string>, declared, courses, tags, grants: this.grantsOf(w.credential_id, created_by) };
+    return { ...facts, tier_ceilings: JSON.parse(w.tier_ceilings) as Record<string, string>, holdings, courses, tags, grants: this.grantsOf(w.credential_id, created_by) };
   }
 
   /** R-BTN-58: a granted key's grants in force by repository. A key an owner or administrator
@@ -557,8 +571,9 @@ export class Claims {
   }
 
   /** `gatesFor`'s inputs for one ticket (§7.2), from Baton's own tables (R-BTN-33). */
-  private gate(w: RunnerFacts | null, item: ItemFacts, leg: string, phase: Phase, opts: { except?: number; holderBars?: string[] } = {}): GateVerdict {
+  private gate(w: RunnerFacts | null, item: ItemFacts, leg: string, phase: Phase, opts: { except?: number; holderBars?: string[]; removed?: (verdict: GateVerdict, facts: GateContext) => void; missingCapabilities?: (names: string[]) => void } = {}): GateVerdict {
     const ticket: GateTicket = { repository: item.repository, course: item.course, tier: item.tier, requires: item.requires, operator_only: item.operator_only, tiers: this.ladder(item.repository) };
+    const core = this;
     const facts: GateContext = {
       now: this.c.now(),
       claims: this.rows(`SELECT status, confirmed_at, fence_pending FROM claims WHERE ticket_id = ? AND id IS NOT ? AND (status = 'active' OR (status = 'completed' AND confirmed_at IS NULL) OR (status = 'reaped' AND fence_pending = 1))`, item.id, opts.except ?? null),
@@ -568,20 +583,24 @@ export class Claims {
         this.rows<{ v: number }>('SELECT min_runner_version AS v FROM courses WHERE repository_id = ? AND id = ?', item.repository, item.course)[0]?.v ?? Number.POSITIVE_INFINITY),
       headObservation: this.memo(this.cache?.head, item.repository, () =>
         this.rows<{ n: number }>('SELECT observation AS n FROM board_head WHERE repository_id = ?', item.repository)[0]?.n ?? 0),
-      lastEndObservation: this.rows<{ n: number | null }>('SELECT MAX(end_observation) AS n FROM claims WHERE ticket_id = ?', item.id)[0]?.n ?? -1,
+      get lastEndObservation() { return core.rows<{ n: number | null }>('SELECT MAX(end_observation) AS n FROM claims WHERE ticket_id = ?', item.id)[0]?.n ?? -1; },
       holderBars: opts.holderBars,
-      ranByKey: w ? this.ranByKey(item, w.credential_id) : [],
+      get ranByKey() { return w ? core.ranByKey(item, w.credential_id) : []; },
       // R-BTN-78: Baton's own decisions refuse nothing advice would not — `baton:retries` sits on a
       // ticket its hold keeps (rule 3), `baton:stalled` on a queued leg posted waiting (rule 1) — so
       // they are left to those rules, whose refusals name the cause; they stay blocks for asking.
       blocks: this.rows<{ kind: string; leg: string }>(
         `SELECT b.kind, b.leg FROM ticket_blocks b WHERE b.ticket_id = ? AND b.kind IN ('ticket', 'decision')
-           AND NOT (b.kind = 'decision' AND EXISTS (SELECT 1 FROM ticket_decisions d WHERE d.ticket_id = b.ticket_id AND d.decision_id = b.ref AND d.source = 'baton'))`, item.id),
+           AND NOT (b.kind = 'decision' AND EXISTS (SELECT 1 FROM ticket_decisions d WHERE d.ticket_id = b.ticket_id AND d.decision_id = b.ref AND d.source = 'baton'))
+           AND (? = 'claim' OR b.kind <> 'ticket' OR instr(b.ref, '@') > 0)`, item.id, phase),
       // R-BTN-178: rule 11's fact — the seats claims other than the asking one hold (a claim's
       // own seat never counts against it, so an advance excludes the advancing claim here).
-      seats: this.seatFacts(item, leg, opts.except ?? null),
+      get seats() { return core.seatFacts(item, leg, opts.except ?? null); },
+      missingCapabilities: opts.missingCapabilities,
     };
-    return gatesFor(w && { declared: w.declared, tier_ceiling: this.ceiling(w, item.repository), tags: w.tags, courses: w.courses, grants: w.grants, isolation: w.isolation }, ticket, this.postedLeg(item, leg, phase, !!w), phase, facts);
+    const verdict = gatesFor(w && { holdings: w.holdings, tier_ceiling: this.ceiling(w, item.repository), tags: w.tags, courses: w.courses, grants: w.grants, isolation: w.isolation }, ticket, this.postedLeg(item, leg, phase, !!w), phase, facts);
+    opts.removed?.(verdict, facts);
+    return verdict;
   }
 
   /** R-BTN-178: the capabilities rule 4 matched for this leg — the ticket's requires clause and
@@ -661,8 +680,8 @@ export class Claims {
    */
   private referenceCandidates(w: RunnerFacts, page = 0, rule9 = true): Candidate[] {
     const rows = this.named<Candidate>(
-      `SELECT id, repository_id, course_id, weight, expedite, to_end, ready_since, n FROM (
-         SELECT w.id, w.repository_id, w.course_id, p.weight, s.to_end, a.ready_since,
+      `SELECT id, repository_id, course_id, weight, expedite, to_end, rank, ready_since, n FROM (
+         SELECT w.id, w.repository_id, w.course_id, p.weight, s.to_end, w.rank, a.ready_since,
                 MAX(w.expedite, COALESCE((SELECT o.expedite FROM ticket_overrides o WHERE o.ticket_id = w.id), 0)) AS expedite,
                 ROW_NUMBER() OVER (PARTITION BY w.repository_id, w.course_id
                                    ORDER BY MAX(w.expedite, COALESCE((SELECT o.expedite FROM ticket_overrides o WHERE o.ticket_id = w.id), 0)) DESC,
@@ -683,7 +702,7 @@ export class Claims {
            AND NOT EXISTS (SELECT 1 FROM ticket_overrides o WHERE o.ticket_id = w.id
                            AND (o.hold = 1 OR o.retry_after > :now))                                          -- rules 3, 10
            AND NOT EXISTS (SELECT 1 FROM ticket_blocks k WHERE k.ticket_id = w.id
-                           AND (k.kind = 'ticket' OR (k.kind = 'decision' AND k.leg IN ('', a.leg))))         -- rule 1's blocks
+                           AND k.kind IN ('ticket', 'decision') AND k.leg IN ('', a.leg))                    -- rule 1's blocks
            AND (EXISTS (SELECT 1 FROM runner_grants g WHERE g.credential_id = :credential
                         AND g.repository_id = w.repository_id AND g.revoked_at IS NULL)                       -- rule 7
                 OR NOT EXISTS (SELECT 1 FROM runner_grants g2 WHERE g2.credential_id = :credential))          -- an interim credential reaches every repository (B-104, A1)
@@ -750,56 +769,58 @@ export class Claims {
    * The projection contains runner-independent facts; all runner gates remain authoritative.
    * JSON parameters below are small request-local sets, expanded once, never stored documents
    * expanded for every candidate. Page cursors live only for this synchronous decision. */
-  candidates(w: RunnerFacts, page = 0, rule9 = true, wanted: string[] | null = null, skipExpedited?: ReadonlySet<string>): Candidate[] {
+  candidates(w: RunnerFacts, page = 0, rule9 = true, wanted: string[] | null = null, skipExpedited?: ReadonlySet<string>, batch = 50): Candidate[] {
     if (this.reference) return this.referenceCandidates(w, page, rule9);
     const groups = this.rows<{ repository_id: string; course_id: string; weight: number; min_runner_version: number; observation: number; tiers: string }>(
       `SELECT k.repository_id, k.id AS course_id, p.weight, k.min_runner_version, h.observation, p.tiers
        FROM courses k JOIN repositories p ON p.id = k.repository_id JOIN board_head h ON h.repository_id = p.id
        WHERE p.cutover_at IS NOT NULL AND p.retired_at IS NULL ORDER BY k.repository_id, k.id`);
     const out: Candidate[] = [];
-    const holdings = capabilitiesOf(w.declared);
+    const effectiveCaps = `SELECT capability FROM runner_effective_caps WHERE runner_id = ? AND repository_id IN ('', ?)`;
     for (const g of groups) {
       const key = `${g.repository_id}\u0000${g.course_id}`;
       if (wanted && !wanted.includes(key)) continue;
       const grant = w.grants?.[g.repository_id];
       if (w.grants && !grant) continue;
-      const admitted = new Set(grant?.capabilities ?? []);
-      const caps = JSON.stringify([...holdings].filter((c) => !grant || c.startsWith('runner:') || admitted.has(c) || admitted.has(`${c.split(':')[0]}:*`)));
       const tiers = JSON.parse(g.tiers) as string[];
       const ceiling = tiers.indexOf(this.ceiling(w, g.repository_id));
       const r9 = w.courses.some((k) => k.repository === g.repository_id && k.course === g.course_id && k.version >= g.min_runner_version) ? 1 : 0;
       if (rule9 && !r9) continue;
+      // The first read still supplies the full stale-skills probe for an old course.
+      const size = r9 ? batch : 50;
       const legs = this.rows<{ leg: string }>(`SELECT l.leg FROM course_legs l
         WHERE l.repository_id = ? AND l.course_id = ? AND l.person = 0
         AND NOT EXISTS (SELECT 1 FROM course_leg_capabilities c
           WHERE c.repository_id = l.repository_id AND c.course_id = l.course_id AND c.leg = l.leg
-          AND c.capability NOT IN (SELECT value FROM json_each(?)))`, g.repository_id, g.course_id, caps).map((l) => l.leg);
+          AND c.capability NOT IN (${effectiveCaps}))`, g.repository_id, g.course_id, w.id, g.repository_id).map((l) => l.leg);
       if (!legs.length) continue;
       const prior = page > 0 ? this.cache?.candidatePages.get(key) : undefined;
-      if (prior && prior.count < page * 50) continue;
+      if (prior && prior.count < page * size) continue;
+      // One read of the repo's effective set. A scalar lookup in that object avoids
+      // building or probing a SQLite temp index for every requirement in the queue.
+      const { caps } = this.rows<{ caps: string }>(`SELECT json_group_object(capability, 1) AS caps FROM (${effectiveCaps})`, w.id, g.repository_id)[0];
       const after = prior ? `AND (-q.expedite, q.to_end, q.rank IS NULL, COALESCE(q.rank, 0), COALESCE(q.ready_since, -1), q.ticket_id) > (?, ?, ?, ?, ?, ?)` : '';
-      const found = this.rows<Omit<Candidate, 'n' | 'r9' | 'weight'> & { rank: number | null }>(
+      const found = this.rows<Omit<Candidate, 'n' | 'r9' | 'weight'>>(
         `SELECT q.ticket_id AS id, q.repository_id, q.course_id, q.expedite, q.to_end, q.rank, q.ready_since
          FROM ready_tickets q INDEXED BY ready_tickets_order
          WHERE q.repository_id = ? AND q.course_id = ?
            AND q.last_end_observation < ? AND (q.retry_after IS NULL OR q.retry_after <= ?)
            AND COALESCE(q.tier_position, ?) <= ?
            AND q.leg IN (SELECT value FROM json_each(?))
+           AND NOT EXISTS (SELECT 1 FROM json_each(q.required_caps) r WHERE json_extract(?, '$.' || json_quote(r.value)) IS NULL)
            AND NOT EXISTS (SELECT 1 FROM ticket_bars b JOIN runner_tags t ON t.tag = b.tag
              WHERE b.ticket_id = q.ticket_id AND b.leg = q.leg AND t.runner_id = ?)
-           AND NOT EXISTS (SELECT 1 FROM ticket_requires r WHERE r.ticket_id = q.ticket_id
-             AND r.name NOT IN (SELECT value FROM json_each(?)))
            ${skipExpedited?.has(key) ? 'AND -q.expedite = 0' : ''} ${after}
          ORDER BY -q.expedite, q.to_end, q.rank IS NULL, COALESCE(q.rank, 0), COALESCE(q.ready_since, -1), q.ticket_id
-         LIMIT 50${page > 0 && !prior ? ' OFFSET ?' : ''}`,
+         LIMIT ?${page > 0 && !prior ? ' OFFSET ?' : ''}`,
         g.repository_id, g.course_id, g.observation, this.c.now(), tiers.length - 1, ceiling,
-        JSON.stringify(legs), w.id, caps, ...(prior?.cursor ?? []), ...(page > 0 && !prior ? [page * 50] : []));
+        JSON.stringify(legs), caps, w.id, ...(prior?.cursor ?? []), size, ...(page > 0 && !prior ? [page * size] : []));
       const last = found.at(-1);
       if (last) this.cache?.candidatePages.set(key, {
         cursor: [-last.expedite, last.to_end, Number(last.rank == null), last.rank ?? 0, last.ready_since ?? -1, last.id],
-        count: page * 50 + found.length,
+        count: page * size + found.length,
       });
-      out.push(...found.map((r, i) => ({ ...r, weight: g.weight, r9, n: page * 50 + i + 1 })));
+      out.push(...found.map((r, i) => ({ ...r, weight: g.weight, r9, n: page * size + i + 1 })));
     }
     return out;
   }
@@ -828,30 +849,53 @@ export class Claims {
    * `limit`; the answer is the one gating every candidate gives. `page0` is the first reading,
    * every group's, rule 9's included, for a refusal's `stale-skills` check.
    */
-  private recommend(w: RunnerFacts, limit: number, out?: { page0?: Candidate[] }, all = false): Recommendation[] {
+  private recommend(w: RunnerFacts, limit: number, out?: { page0?: Candidate[]; needsFullPrefix?: boolean }, all = false): Recommendation[] {
     const groups = new Map<string, { rows: (Candidate & { item: ItemFacts })[]; done: boolean; passed: [number, number]; cut: boolean }>();
     // B-127 (fail closed, unpenalised): no ticket of a repository whose required control has no
     // signed version is recommended — see unsignedControlBlocked.
     const unsignedBlocked = this.unsignedControlBlocked();
     const full = this.expediteActive() >= EXPEDITE_BOUND;
     const lazy = !this.reference;
-    for (let page = 0; all || page < 4; page++) {
+    // B-239: for a small prefix, don't read 50 candidates before checking the first ten.
+    // Keep the same 200-candidate horizon and full-lane pagination.
+    const batch = lazy && !all && !full && limit <= 10 ? 10 : 50;
+    const sortedPages = full && lazy && !all && limit <= 10;
+    for (let page = 0; all || page < 200 / batch; page++) {
       const wanted = page === 0 ? null : [...groups].filter(([, g]) => !g.done && (all
         ? !lazy || g.passed[0] < limit
         : !g.cut && g.rows.length < limit)).map(([k]) => k);
       if (wanted && !wanted.length) break;
       let read: Candidate[];
       if (page === 0 && lazy) {
-        const all = this.candidates(w, 0, false);
+        const all = this.candidates(w, 0, false, null, undefined, batch);
         if (out) out.page0 = all;
         read = all.filter((r) => r.r9);
+        if (full && limit === 1 && out) {
+          // A full first page with no ordinary rows may hide a better ordinary ticket on
+          // a later page of the 50-result fallback. Don't conclude from that prefix.
+          const expedites = new Map<string, number>();
+          for (const r of read) if (r.expedite) {
+            const key = `${r.repository_id}\u0000${r.course_id}`;
+            expedites.set(key, (expedites.get(key) ?? 0) + 1);
+          }
+          out.needsFullPrefix = [...expedites.values()].includes(batch) || read.some((r) => r.rank === Number.MAX_SAFE_INTEGER);
+          if (out.needsFullPrefix) return [];
+        }
       } else {
         // With the lane full, expedited rows are the first sorted run. Once it cannot
         // contribute more to the merged prefix, page only the unexpedited run.
         const skipExpedited = all && full && lazy ? new Set(wanted?.filter((k) => groups.get(k)!.passed[1] >= limit)) : undefined;
-        read = this.candidates(w, page, false, wanted, skipExpedited);
+        read = this.candidates(w, page, false, wanted, skipExpedited, batch);
       }
+      // Keep page membership and the existing stopping point, but gate a small prefix in
+      // the order we'll actually return it. At most `limit` passes from any one page can
+      // make the group's result, even if a later page contributes better ordinary rows.
+      // Legacy sorting ties a missing rank with MAX_SAFE_INTEGER, while SQL puts nulls
+      // last. Leave that rare case on the original per-run gating path.
+      const sortedPage = sortedPages && !read.some((r) => r.rank === Number.MAX_SAFE_INTEGER);
+      if (sortedPage) read.sort(ordinaryOrder);
       const counts = new Map<string, number>();
+      const pagePassed = new Map<string, number>();
       for (const c of read) {
         const key = `${c.repository_id}\u0000${c.course_id}`;
         if (wanted && !wanted.includes(key)) continue;
@@ -861,6 +905,7 @@ export class Claims {
         counts.set(key, (counts.get(key) ?? 0) + 1);
         const g = groups.get(key) ?? { rows: [], done: false, passed: [0, 0], cut: false };
         groups.set(key, g);
+        if (sortedPage && (pagePassed.get(key) ?? 0) >= limit) continue;
         const run = full && c.expedite ? 1 : 0;
         if (lazy && g.passed[run] >= limit) {
           g.cut = true;
@@ -875,24 +920,21 @@ export class Claims {
           && !this.intakeClosed(item)) {
           g.rows.push({ ...c, item });
           g.passed[run]++;
+          if (sortedPage) pagePassed.set(key, (pagePassed.get(key) ?? 0) + 1);
         }
       }
-      for (const [key, g] of groups) if ((counts.get(key) ?? 0) < 50) g.done = true;
+      for (const [key, g] of groups) if ((counts.get(key) ?? 0) < batch) g.done = true;
     }
     // Rule 2 (advice): past the lane's bound an expedited ticket loses its lane — it sorts as an
     // unexpedited one in the default order — before its group's places are numbered, so R-BTN-61's
     // "firsts before any seconds" reads the order it is actually offered in (round 1, 1-A-2, 1-B-1).
-    const byId = (a: { id: string }, b: { id: string }) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
     const merged = [...groups.values()].flatMap((g) => {
       const rows = g.rows.map((r) => ({ ...r, waits: !!r.expedite && full, lane: !!r.expedite && !full }));
-      if (full) {
-        rows.sort((a, b) => Number(b.lane) - Number(a.lane) || a.to_end - b.to_end
-          || (a.item.rank ?? Number.MAX_SAFE_INTEGER) - (b.item.rank ?? Number.MAX_SAFE_INTEGER) || (a.ready_since ?? 0) - (b.ready_since ?? 0) || byId(a, b));
-      }
+      if (full) rows.sort(ordinaryOrder);
       return rows.map((r, place) => ({ ...r, place }));
     });
     merged.sort((a, b) => Number(b.lane) - Number(a.lane) || b.weight - a.weight || a.place - b.place
-      || a.to_end - b.to_end || (a.ready_since ?? 0) - (b.ready_since ?? 0) || byId(a, b));
+      || a.to_end - b.to_end || (a.ready_since ?? 0) - (b.ready_since ?? 0) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
     return merged.slice(0, limit).map((r) => ({
       ticket_id: r.id,
       station: r.item.station!.station,
@@ -1026,8 +1068,11 @@ export class Claims {
       throw new BatonError('no-eligible-ticket', 'none of the preferred tickets can be claimed', { refusals });
     }
     if (wanted) return this.decideNamed(w, wanted);
-    const read: { page0?: Candidate[] } = {};
-    const recs = this.recommend(w, 50, read);
+    const read: { page0?: Candidate[]; needsFullPrefix?: boolean } = {};
+    // Don't gate 50 tickets to claim the first where the prefix is conclusive.
+    const prefix = this.reference ? null : this.recommend(w, 1, read);
+    const recs = prefix && !read.needsFullPrefix && (!prefix.length || this.canOffer(prefix[0].ticket_id, w))
+      ? prefix : this.recommend(w, 50, read);
     // §12.8 (B-145): a recommended ticket is offered only where the floor rule lets it be — the
     // first one that is not on a stopped repository.
     const first = recs.find((r) => this.canOffer(r.ticket_id, w))
@@ -1047,14 +1092,77 @@ export class Claims {
       return !!item?.station?.next_leg && (!w.courses.length || w.courses.some((k) => k.repository === item.repository && k.course === item.course))
         && (this.gate(w, item, item.station.next_leg, 'claim') as { code?: string }).code === GATE_CODES[9];
     })) {
-      throw new BatonError('stale-skills', 'this runner does not declare the ready tickets’ courses at their min_runner_version — it declares an older version or none (R-BTN-22, R-BTN-65)', { rule: 9 });
+      throw new BatonError('stale-skills', 'this runner does not declare the ready tickets’ courses at their min_runner_version — it declares an older version or none (R-BTN-22, R-BTN-65)', { rule: 9, detail: this.idleDetail(w) });
     }
     // R-BTN-4 (B-188): when every repository the runner serves is at its bound, say so — the
     // runner has no room, which is not the same as nothing to do.
     const served = [...new Set(w.courses.map((k) => k.repository))];
     const full = served.filter((r) => w.held >= this.claimBound(w, r));
     if (w.held > 0 && served.length && full.length === served.length) this.refuseFull(w, full[0]);
-    throw new BatonError('no-eligible-ticket', 'no ready ticket fits this runner');
+    throw new BatonError('no-eligible-ticket', 'no ready ticket fits this runner', { detail: this.idleDetail(w) });
+  }
+
+  /** The indexed recommendation drops held and mismatched legs before it loads them. On a cold
+   *  refusal only, look back at the posted ready set and use the same gate and advice verdicts.
+   *  Start with the key's visible repositories, never with other workers' grants or holdings. */
+  private idleDetail(w: RunnerFacts): IdleDetail {
+    const groups = new Map<string, Map<string, IdleGate>>();
+    for (const { id } of this.rows<{ id: string }>(`SELECT t.id FROM tickets t
+      JOIN repositories p ON p.id = t.repository_id AND p.retired_at IS NULL AND p.cutover_at IS NOT NULL
+      JOIN ticket_stations s ON s.ticket_id = t.id
+      JOIN ticket_next_legs n ON n.ticket_id = t.id AND n.leg = s.next_leg AND n.state = 'ready'
+      WHERE (? IS NULL OR t.repository_id IN (SELECT value FROM json_each(?))) ORDER BY t.id`,
+    w.grants ? 1 : null, JSON.stringify(Object.keys(w.grants ?? {})))) {
+      const item = this.item(id);
+      const leg = item?.station?.next_leg;
+      if (!item || !leg) continue;
+      const why = this.idleGate(w, item, leg);
+      if (!why) continue;
+      const gates = groups.get(item.repository) ?? new Map<string, IdleGate>();
+      groups.set(item.repository, gates);
+      const entry = gates.get(why.gate) ?? { gate: why.gate, count: 0, tickets: [], ...(why.limit ? { limit: why.limit } : {}) };
+      gates.set(why.gate, entry);
+      entry.count++;
+      if (entry.tickets.length < 5) entry.tickets.push(item.id);
+      if (why.capabilities) entry.capabilities = [...new Set([...(entry.capabilities ?? []), ...why.capabilities])].sort();
+      if (why.readings) {
+        const readings = [...(entry.readings ?? []), ...why.readings];
+        entry.readings = [...new Map(readings.map((r) => [JSON.stringify(r), r])).values()].slice(0, 5);
+      }
+    }
+    return { repositories: [...groups].map(([repository, gates]) => ({ repository, gates: [...gates.values()].sort((a, b) => a.gate.localeCompare(b.gate)) })) };
+  }
+
+  private idleGate(w: RunnerFacts, item: ItemFacts, leg: string): Omit<IdleGate, 'count' | 'tickets'> | null {
+    const repo = item.repository;
+    if (this.unsignedControlBlocked().has(repo)) return { gate: 'unsigned-control' };
+    if (w.held >= this.claimBound(w, repo)) return { gate: 'max-claims' };
+    let unconfirmed = false;
+    let missing: string[] | undefined;
+    const verdict = this.gate(w, item, leg, 'claim', {
+      removed: (v, { claims }) => { unconfirmed = !v.ok && v.code === 'claimed' && claims.some((c) => c.status === 'completed'); },
+      missingCapabilities: (names) => { missing = names; },
+    });
+    if (!verdict.ok) {
+      if (verdict.code === 'claimed' && unconfirmed) return { gate: 'unconfirmed-end' };
+      if (verdict.code === 'held') {
+        const retry = this.rows(`SELECT 1 FROM ticket_overrides o JOIN ticket_decisions d ON d.ticket_id = o.ticket_id
+          AND d.decision_id = 'baton:retries' AND d.source = 'baton' WHERE o.ticket_id = ? AND o.hold_reason = 'attempts-exhausted'`, item.id);
+        if (retry.length) return { gate: 'attempts-exhausted' };
+      }
+      if (verdict.rule === 5) {
+        const ladder = this.ladder(repo);
+        const declared = ceilingIn(repo, ladder, w.tier_ceilings, w.tier_ceiling);
+        return fitsTier(item.tier, declared, ladder)
+          ? { gate: 'grant-max-tier', limit: this.ceiling(w, repo) }
+          : { gate: 'declared-tier-ceiling', limit: declared };
+      }
+      return { gate: verdict.code, ...(missing ? { capabilities: missing } : {}) };
+    }
+    const resources = this.resourceAdvice(w.id, item.id, leg);
+    if (resources.length) return { gate: 'resource', readings: this.c.blocks?.unavailableReadings(repo, resources, (instance) => this.c.resourceReadings?.stateReading(instance)) ?? [] };
+    if (this.intakeClosed(item)) return { gate: 'intake' };
+    return null;
   }
 
   /** R-BTN-76: the resources that make `leg` of the ticket advice against, for this runner: the
@@ -1132,7 +1240,7 @@ export class Claims {
         const runner = this.runner(runner_id);
         const grant = runner.grants?.[repo];
         const allowed = new Set(grant?.capabilities);
-        const capabilities = [...capabilitiesOf(runner.declared)].filter((c) => runner.grants == null || (grant &&
+        const capabilities = [...runner.holdings].filter((c) => runner.grants == null || (grant &&
           (c.startsWith('runner:') || allowed.has(c) || allowed.has(`${c.split(':')[0]}:*`)))).sort();
         return { ...claim, course: opaque(course_fields_json), advance_course: opaque(course_advance_json),
           runner: { hostname, tags: runner.tags, profile: opaque(profile_json), capabilities }, reports: byClaim.get(claim.claim_id) ?? [] };
@@ -1254,7 +1362,7 @@ export class Claims {
 
   /** `POST /v1/runner/claim` (§6.2): idempotent by `request_id`; the lock is the index. The claim
    *  is at the ticket's posted station, running nothing, its path recorded (R-BTN-63). */
-  // @model claim sha256:f16b703785eb
+  // @model claim sha256:e1abff2cbb15
   claim(runnerId: number, body: unknown) {
     const b = checkClaim(body);
     // R-BTN-47 (B-173): a wanted ticket of a repository not registered — retired, or never
@@ -1274,12 +1382,12 @@ export class Claims {
     const now = this.c.now();
     // R-BTN-4 (B-188): up to the runner's bound — its `concurrency` here, each repository's grant
     // in `decide` — never one claim per runner.
-    this.refuseFull(this.runner(runnerId), null);
+    const w = this.runner(runnerId);
+    this.refuseFull(w, null);
     // B-237 (R-BTN-196): an idle runner asking again with nothing changed gets the same refusal.
     const idle = b.ticket_id || b.prefer ? null : this.idleHit(runnerId);
     if (idle?.refusal) throw idle.refusal;
     const version = schedulingVersion(this.c.store);
-    const w = this.runner(runnerId);
     const { item, advice } = this.decideNoting(w, b.ticket_id, version, b.prefer);
     const rationale = b.rationale === null ? undefined : JSON.parse(b.rationale) as unknown;
     const savedAdvice = rationale === undefined ? advice : { ...advice, rationale };
@@ -1301,6 +1409,8 @@ export class Claims {
       throw e;
     }
     const id = this.rows<{ id: number }>('SELECT last_insert_rowid() AS id')[0].id;
+    this.exec(`UPDATE claims SET (contract_course_json, contract_course_version) =
+      (SELECT course_json, version FROM courses WHERE repository_id = ? AND id = ?) WHERE id = ?`, item.repository, item.course, id);
     if (st.next_leg && this.stations.graph(item.repository, item.course)?.legs.get(st.next_leg)?.reconciles) this.c.outsideWork?.capture(item.id, id);
     this.event('claimed', `runner:${runnerId}`, { request_id: b.request_id, station: st.station, leg: st.next_leg }, item.id, id);
     if (b.rationale !== null) this.c.history.record(item.id, { kind: 'claimed', claim_id: id, runner_id: runnerId, leg: st.next_leg, rationale_json: b.rationale });
@@ -1324,11 +1434,11 @@ export class Claims {
 
   /** The latest snapshot's legs leaving a station, as the holder sees them (R-BTN-70): only when
    *  the snapshot has the ticket there — git may be behind or ahead of the holder. */
-  private nextLegs(ticketId: string, station: string) {
+  private nextLegs(ticketId: string, station: string): NextLegs {
     const s = this.rows<{ station: string }>('SELECT station FROM ticket_stations WHERE ticket_id = ?', ticketId)[0];
     if (!s || s.station !== station) return [];
     return this.rows<{ leg: string; state: string; waiting_on: string | null }>(
-      'SELECT leg, state, waiting_on FROM ticket_next_legs WHERE ticket_id = ? ORDER BY leg', ticketId).map((n) => (n.waiting_on ? n : { leg: n.leg, state: n.state }));
+      'SELECT leg, state, waiting_on FROM ticket_next_legs WHERE ticket_id = ? ORDER BY leg', ticketId).map((n) => (n.waiting_on ? { ...n, waiting_on: n.waiting_on } : { leg: n.leg, state: n.state }));
   }
 
   /** The claim response (§11, R-BTN-34): where the ticket starts or resumes, its course and that
@@ -1339,7 +1449,7 @@ export class Claims {
    *  it ran (§6.11, R-BTN-24). B-127 adds two readings beside them: the ticket's brief mark, and —
    *  while the repository requires signed control — the record of what counts, with the owner
    *  keys a runner verifies the named commits against itself. */
-  private claimResponse(id: number) {
+  private claimResponse(id: number): ClaimAnswer {
     const c = this.rows<{ id: number; ticket_id: string; nonce: string; snapshot_sha: string; station: string; offered_leg: string | null; course_id: string | null }>(
       'SELECT id, ticket_id, nonce, snapshot_sha, station, offered_leg, course_id FROM claims WHERE id = ?', id)[0];
     // R-BTN-81's reading of the same two facts (`legFacts`): the course in force for the claim's
@@ -1376,6 +1486,7 @@ export class Claims {
     // are the repository's owner signing keys, so a runner that trusts the record still checks
     // the signatures against keys the post did not choose.
     const briefRow = this.rows<{ brief: string | null }>('SELECT brief FROM tickets WHERE id = ?', c.ticket_id)[0];
+    const graph = c.course_id ? this.stations.graph(repo, c.course_id) : null;
     const brief = briefRow?.brief ? JSON.parse(briefRow.brief) as { signed: boolean; signer?: string; commit: string } : null;
     const displaced = c.offered_leg && c.course_id && this.stations.graph(repo, c.course_id)?.legs.get(c.offered_leg)?.reconciles
       ? this.c.outsideWork?.displaced(c.ticket_id) : undefined;
@@ -1388,6 +1499,8 @@ export class Claims {
       // B-134: the ticket's scope — its home and its `repos:` — as lowercased forge paths. The
       // runner audits each leg's pushes against this and reports what falls outside.
       scope: this.c.scope.scopeOf(c.ticket_id),
+      ...(graph && (graph.entry.size || [...graph.legs.values()].some((l) => l.inputs || l.outputs))
+        ? { pointer_reach: pointerReach(this.c.store, repo, c.ticket_id) } : {}),
       ...(handoff ? { handoff_url: handoff } : {}), path, nonce: c.nonce, snapshot_sha: c.snapshot_sha,
       // B-183 (§4.5): the ticket's version and the source's reading of it — `version` is `''`
       // when the source posts none, and `ticket_source` is null when the board declared none.
@@ -1415,37 +1528,38 @@ export class Claims {
    *  reported, and the run's recorded inputs (the ticket's version and its read's digest among
    *  them, `leg_run_inputs`). `end` is the claim's end reason once the claim ended. */
   runsOf(ticketId: string, leg: string, sessionLink: SessionLinkView) {
-    const runs = this.rows<{ claim_id: number; seq: number; run_id: string | null; head_sha: string | null; from_station: string; started_at: number; finished_at: number | null; abandoned_at: number | null; session_url: string | null; session_incarnation: number | null; snapshot_sha: string; course_id: string | null; status: string; end_reason: string | null; ended_at: number | null; runner_id: number }>(
-      `SELECT l.claim_id, l.seq, l.run_id, l.head_sha, l.from_station, l.started_at, l.finished_at, l.abandoned_at, l.session_url, l.session_incarnation,
-              c.snapshot_sha, c.course_id, c.status, c.end_reason, c.ended_at, c.runner_id
+    const runs = this.rows<{ claim_id: number; seq: number; leg: string; contract_leg: string | null; run_id: string | null; head_sha: string | null; from_station: string; started_at: number; finished_at: number | null; abandoned_at: number | null; session_url: string | null; session_incarnation: number | null; snapshot_sha: string; course_id: string | null; status: string; end_reason: string | null; ended_at: number | null; runner_id: number; contract_version: number | null; contract_course_version: number | null }>(
+      `SELECT l.claim_id, l.seq, l.leg, l.contract_leg, l.run_id, l.head_sha, l.from_station, l.started_at, l.finished_at, l.abandoned_at, l.session_url, l.session_incarnation,
+              c.snapshot_sha, c.course_id, c.status, c.end_reason, c.ended_at, c.runner_id, l.contract_version, l.contract_course_version
        FROM claim_legs l JOIN claims c ON c.id = l.claim_id
-       WHERE c.ticket_id = ? AND l.leg = ? ORDER BY l.claim_id, l.seq`, ticketId, leg);
-    const inputs = this.rows<{ claim_id: number; seq: number; name: string; from_leg: string | null; from_run: number | null; uri: string | null; digest: string | null; value_json: string | null; leg_version: number | null; ticket_version: string | null; read_digest: string | null }>(
-      'SELECT claim_id, seq, name, from_leg, from_run, uri, digest, value_json, leg_version, ticket_version, read_digest FROM leg_run_inputs WHERE ticket_id = ? ORDER BY claim_id, seq, name', ticketId);
+       WHERE c.ticket_id = ? AND (l.leg = ? OR l.contract_leg = ?) ORDER BY l.claim_id, l.seq`, ticketId, leg, leg);
+    const inputs = this.rows<{ claim_id: number; seq: number; name: string; schema: string | null; from_leg: string | null; from_run: number | null; uri: string | null; digest: string | null; value_json: string | null; leg_version: number | null; ticket_version: string | null; read_digest: string | null }>(
+      'SELECT claim_id, seq, name, schema, from_leg, from_run, uri, digest, value_json, leg_version, ticket_version, read_digest FROM leg_run_inputs WHERE ticket_id = ? ORDER BY claim_id, seq, name', ticketId);
     const defaultBranch = this.rows<{ default_branch: string }>('SELECT default_branch FROM repositories WHERE id = ?', repositoryOf(ticketId))[0]?.default_branch ?? null;
     const courseVersion = (run: typeof runs[number]): number | null => run.course_id
       ? this.rows<{ version: number }>('SELECT version FROM courses WHERE repository_id = ? AND id = ?', repositoryOf(ticketId), run.course_id)[0]?.version ?? null
       : null;
     return {
       ...(defaultBranch ? { default_branch: defaultBranch } : {}),
+      pointer_reach: pointerReach(this.c.store, repositoryOf(ticketId), ticketId),
       runs: runs.map((r, ordinal) => {
         const mine = inputs.filter((i) => i.claim_id === r.claim_id && i.seq === r.seq);
         const ticket = mine.find((i) => i.name === '');
         return {
           run: ordinal + 1,
-          claim: r.claim_id, runner: r.runner_id, seq: r.seq, leg,
+          claim: r.claim_id, runner: r.runner_id, seq: r.seq, leg: r.leg, contract_leg: r.contract_leg ?? r.leg,
           run_id: r.run_id, from: r.from_station, started_at: r.started_at,
           ended_at: r.finished_at ?? r.abandoned_at ?? null,
           end: r.status === 'active' ? null : r.end_reason,
           snapshot_sha: r.snapshot_sha, head_sha: r.head_sha,
           // R-BTN-113 (B-4): the run's session link, as the run list draws it (§11.4).
           ...sessionLink(r.session_url, r.runner_id, r.session_incarnation),
-          course: r.course_id, course_version: courseVersion(r),
+          course: r.course_id, course_version: r.contract_course_version ?? courseVersion(r), leg_version: r.contract_version,
           ...(ticket?.ticket_version != null || ticket?.read_digest != null
             ? { ticket: { ...(ticket.ticket_version != null ? { version: ticket.ticket_version } : {}), ...(ticket.read_digest != null ? { read_digest: ticket.read_digest } : {}) } }
             : {}),
           inputs: mine.filter((i) => i.name !== '').map((i) => ({
-            name: i.name, ...(i.from_leg != null ? { from_leg: i.from_leg } : {}), ...(i.from_run != null ? { from_run: i.from_run } : {}),
+            name: i.name, ...(i.schema ? { schema: i.schema } : {}), ...(i.from_leg != null ? { from_leg: i.from_leg } : {}), ...(i.from_run != null ? { from_run: i.from_run } : {}),
             ...(i.uri != null ? { uri: i.uri } : {}), ...(i.digest != null ? { digest: i.digest } : {}),
             ...(i.value_json != null ? { value: JSON.parse(i.value_json) as unknown } : {}), ...(i.leg_version != null ? { leg_version: i.leg_version } : {}),
           })),
@@ -1456,8 +1570,15 @@ export class Claims {
 
   /** The claim's running leg, if any: its last started leg not yet finished or given up. */
   private runningLeg(claimId: number) {
-    return this.rows<{ seq: number; leg: string; from_station: string; run_id: string | null }>(
-      'SELECT seq, leg, from_station, run_id FROM claim_legs WHERE claim_id = ? AND finished_at IS NULL AND abandoned_at IS NULL ORDER BY seq DESC LIMIT 1', claimId)[0] ?? null;
+    return this.rows<{ seq: number; leg: string; from_station: string; run_id: string | null; contract_leg: string | null }>(
+      'SELECT seq, leg, from_station, run_id, contract_leg FROM claim_legs WHERE claim_id = ? AND finished_at IS NULL AND abandoned_at IS NULL ORDER BY seq DESC LIMIT 1', claimId)[0] ?? null;
+  }
+
+  private contract(claim: number, current: Graph) {
+    const pinned = this.rows<{ contract_course_json: string | null; contract_course_version: number | null }>(
+      'SELECT contract_course_json, contract_course_version FROM claims WHERE id = ?', claim)[0];
+    return { graph: pinned?.contract_course_json ? graphOf(JSON.parse(pinned.contract_course_json)) : current,
+      version: pinned?.contract_course_version };
   }
 
   /** B-4 (R-BTN-113): the instance's session-host allowlist, as the runner calls' shared rule
@@ -1511,9 +1632,9 @@ export class Claims {
    * state. The first advance starts the leg the claim was offered (R-BTN-83). A refusal changes
    * nothing. The answer carries the latest snapshot's next legs and the run's id and number (B-335).
    */
-  // @model advance sha256:21709d9401bc
-  // @model advanceRun sha256:aad92c654eea
-  advance(runnerId: number, claimId: number, body: unknown) {
+  // @model advance sha256:6b47a79f6b67
+  // @model advanceRun sha256:b6172c27f111
+  advance(runnerId: number, claimId: number, body: unknown): AdvanceAnswer {
     const b = checkAdvance(body);
     const c = this.held(runnerId, claimId);
     if (c.status !== 'active') throw new BatonError('claim-ended', `the claim already ended (${c.status}: ${c.end_reason})`);
@@ -1575,9 +1696,18 @@ export class Claims {
     const advancing = this.runner(runnerId);
     const v = this.gate(advancing, item, leg, 'advance', { except: claimId, holderBars: b.bars });
     if (!v.ok) throw this.refusal(c.ticket_id, v, 'advance', advancing, claimId);
+    const contract = this.contract(claimId, g);
+    const scriptLeg = resolveLeg(contract.graph, b.leg);
+    if (!scriptLeg) throw offGraph(`${b.leg} is not in the claim's pinned snapshot`);
     // R-BTN-109: the finished leg arrives at `at` with what its entry asks; inline values in full.
-    if (run) this.checkEntry(repo, g, at, b.outputs);
-    else this.checkOutputValues(repo, b.outputs);
+    if (run) {
+      this.checkEntry(repo, g, at, b.outputs);
+      this.recordOutputs(c.ticket_id, claimId, run, contract.graph, b.outputs);
+    } else if (b.outputs.length) {
+      throw new BatonError('invalid-params', 'outputs: no producing leg is running');
+    }
+    const resolved = ticketInputs(this.c.store, c.ticket_id, contract.graph, scriptLeg, g);
+    if (resolved.wait) throw new BatonError('not-eligible', `${leg}: ${resolved.wait}`, { rule: 1, rule_code: resolved.wait });
     // R-BTN-76: an advance into a leg blocked on a resource is accepted — the holder may know better.
     const resources = this.resourceAdvice(runnerId, c.ticket_id, leg);
     if (resources.length) this.event('advice-overridden', `runner:${runnerId}`, { overridden: [{ advice: 'resource', leg, resources }] }, c.ticket_id, claimId);
@@ -1631,7 +1761,10 @@ export class Claims {
     // start — pointers and digests only (R-BTN-33), the ticket's version and its read's digest
     // on the row whose name is empty. Replay reads these rows; a retried advance that reached
     // this far never runs twice (its claim-legs insert above is the transaction's own).
-    for (const i of b.run_inputs.inputs) {
+    for (const i of contract.graph.legs.get(scriptLeg)?.inputs ? [] : b.run_inputs.inputs) {
+      if (i.hasValue || !pointerAllowed(i.uri, pointerReach(this.c.store, repo, c.ticket_id))) {
+        throw new BatonError('invalid-params', `run_inputs: ${i.name} must be a pointer within the ticket's reach`);
+      }
       this.exec(`INSERT INTO leg_run_inputs (claim_id, seq, name, ticket_id, from_leg, from_run, uri, digest, value_json, leg_version)
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         claimId, seq, i.name, c.ticket_id, i.from_leg, i.from_run, i.hasValue ? null : i.uri, i.digest, i.hasValue ? JSON.stringify(i.value) : null, i.leg_version);
@@ -1641,6 +1774,17 @@ export class Claims {
         claimId, seq, c.ticket_id, b.run_inputs.ticket.version, b.run_inputs.ticket.read_digest);
     }
     const started = this.legFacts(claimId, leg, runId);
+    const contractVersion = contract.graph.legs.get(scriptLeg)!.version;
+    const courseVersion = contract.version ?? started.row.course_version;
+    this.exec('UPDATE claim_legs SET contract_version = ?, contract_course_version = ?, contract_leg = ? WHERE claim_id = ? AND seq = ?',
+      contractVersion, courseVersion, scriptLeg, claimId, seq);
+    for (const i of resolved.inputs) {
+      this.exec(`INSERT INTO leg_run_inputs (claim_id, seq, name, ticket_id, from_leg, from_run, uri, digest, value_json, leg_version, schema)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, claimId, seq, i.name, c.ticket_id, i.from_leg, i.from_run,
+        i.uri ?? null, i.digest ?? null, Object.hasOwn(i, 'value') ? JSON.stringify(i.value) : null, i.leg_version, i.schema);
+    }
+    if (resolved.inputs.length) this.c.history.record(started.ticket, { kind: 'inputs', ...started.row, course_version: courseVersion, leg_version: contractVersion,
+      detail: { seq, names: resolved.inputs.map((i) => i.name) } });
     this.c.history.record(started.ticket, { kind: 'leg-started', ...started.row, detail: { from: at, ...(b.bars.length ? { bars: b.bars } : {}) } });
     // R-BTN-62: only a reading numbered above the counter now can judge the claim stale.
     // R-BTN-90 (B-234): the advance that starts a run arms the claim's deadline when the leg
@@ -1663,11 +1807,11 @@ export class Claims {
     // dropped link says so, as a beat's answer does.
     // B-335 (R-BTN-63): and the run's number — the ticket's runs of the leg, this one included,
     // counted as the max-runs check above counts them, so the holder never recounts.
-    return { ok: true, station: at, next: this.nextLegs(c.ticket_id, at), run_id: runId, seq, run: runsOf(g, leg, this.legsRan(c.start_path, claimId)), ...(sessionUrlDropped != null ? { session_url_dropped: sessionUrlDropped } : {}) };
+    return { ok: true, station: at, next: this.nextLegs(c.ticket_id, at), run_id: runId, seq, inputs: resolved.inputs, run: runsOf(g, leg, this.legsRan(c.start_path, claimId)), ...(sessionUrlDropped != null ? { session_url_dropped: sessionUrlDropped } : {}) };
   }
 
   /** `POST /v1/runner/claims/{id}/end` (§6.5, R-BTN-8, R-BTN-71). A retried identical end is a no-op. */
-  // @model endClaim sha256:5fa2311361bd
+  // @model endClaim sha256:8ad0f1f4ce17
   end(runnerId: number, claimId: number, body: unknown) {
     const e = checkEnd(body);
     const c = this.held(runnerId, claimId);
@@ -1734,7 +1878,10 @@ export class Claims {
       this.checkPosition(c.ticket_id, g, leg, c.station, reached, e.next);
       this.c.outsideWork?.finish(c.ticket_id, c.id, g, { leg, reached }, e.next);
     }
-    if (e.status === 'completed' && finished && g) this.checkEntry(repositoryOf(c.ticket_id), g, reached, e.outputs);
+    if (e.status === 'completed' && finished && g) {
+      this.checkEntry(repositoryOf(c.ticket_id), g, reached, e.outputs);
+      if (endingRun) this.recordOutputs(c.ticket_id, c.id, endingRun, this.contract(c.id, g).graph, e.outputs);
+    }
     else if (e.status === 'completed') this.checkOutputValues(repositoryOf(c.ticket_id), e.outputs);
     // R-BTN-153 (B-175): a `done` end's `reached` is what the owners' conclusions map reads
     // (R-BTN-115), so a success-mapped one is the check command's alone. A suspension rests
@@ -1751,7 +1898,11 @@ export class Claims {
     // set, and the fleet's counts follow (R-BTN-75) — rule 4 refuses this runner at once. A
     // valid blocked end is not a failed attempt, not a run for max_runs, and starts no backoff
     // (the blocked-end work's rules). The transaction is the end's own; the delete is its shape.
-    if (e.prerequisite?.kind === 'capability') this.exec('DELETE FROM runner_capabilities WHERE runner_id = ? AND capability = ?', runnerId, e.prerequisite.ref);
+    if (e.prerequisite?.kind === 'capability') {
+      this.exec('DELETE FROM runner_capabilities WHERE runner_id = ? AND capability = ?', runnerId, e.prerequisite.ref);
+      // A later heartbeat can restore the holding by declaring the same role again.
+      this.exec("UPDATE runners SET settings_hash = '' WHERE id = ?", runnerId);
+    }
     // R-BTN-86 (§4.6, R3-1258): the children the ending leg reported — recorded as the run's
     // (the range a call settles over is B-62's to read) until the first accepted snapshot
     // observed after this end, which posts them or drops each unposted one with discrepancy
@@ -1850,6 +2001,79 @@ export class Claims {
     }
   }
 
+  private recordOutputs(ticket: string, claim: number, run: NonNullable<ReturnType<Claims['runningLeg']>>, graph: Graph, outputs: Output[], recoveredRun?: number) {
+    const repo = repositoryOf(ticket);
+    const leg = graph.legs.get(run.contract_leg ?? resolveLeg(graph, run.leg) ?? run.leg);
+    const fault = declaredOutputFault(leg, outputs);
+    if (fault) throw new BatonError('not-eligible', fault, { rule: 'entry', rule_code: 'output-invalid' });
+    if (!outputs.length) return;
+    const f = this.legFacts(claim, run.leg, run.run_id);
+    if (recoveredRun !== undefined) f.row.run = recoveredRun;
+    const versions = this.rows<{ contract_version: number | null; contract_course_version: number | null }>(
+      'SELECT contract_version, contract_course_version FROM claim_legs WHERE claim_id = ? AND seq = ?', claim, run.seq)[0];
+    const version = versions.contract_version ?? leg?.version ?? 0;
+    const courseVersion = versions.contract_course_version ?? f.row.course_version ?? 0;
+    const reach = outputs.some((o) => o.uri) ? pointerReach(this.c.store, repo, ticket) : null;
+    for (const o of outputs) if (o.uri && !pointerAllowed(o.uri, reach!)) {
+      throw new BatonError('not-eligible', `output ${o.name}: pointer has no repository or bucket reach`, { rule: 'entry', rule_code: 'output-invalid' });
+    }
+    for (const o of outputs) {
+      this.exec(`INSERT INTO leg_outputs (ticket_id, leg, run, name, schema, uri, digest, value_json, course_version, leg_version, claim_id, source, confirmed, recorded_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, ticket, run.leg, f.row.run, o.name, o.schema,
+        o.uri ?? null, o.digest ?? null, Object.hasOwn(o, 'value') ? JSON.stringify(o.value) : null, courseVersion, version, claim,
+        recoveredRun === undefined ? 'holder' : 'sync', recoveredRun === undefined ? 0 : 1, this.c.now());
+    }
+    this.c.history?.record(ticket, { kind: 'outputs', ...f.row, course_version: courseVersion, leg_version: version, detail: { names: outputs.map((o) => o.name) } });
+  }
+
+  /** S-BTN-48: read attestations from the authenticated sync, never raw station markers.
+   * Confirm exact holder evidence; recover only for an identified, abandoned run. */
+  confirmOutputs(repo: string, attestations: PostedAttestation[]) {
+    for (const a of attestations) {
+      if (a.type !== 'std:git.output@1' || !a.ref || !a.value || typeof a.value !== 'object') continue;
+      const value = a.value as Record<string, unknown>;
+      if (typeof value.claim_nonce !== 'string' || typeof value.leg !== 'string') continue;
+      let outputs: Output[];
+      try { outputs = checkOutputs(value.outputs); } catch (e) {
+        if (e instanceof BatonError) continue;
+        throw e;
+      }
+      if (typeof value.run_id === 'string') this.recoverOutputs(repo, a.ticket, { nonce: value.claim_nonce, leg: value.leg, runId: value.run_id }, outputs);
+      for (const o of outputs) {
+        this.exec(`UPDATE leg_outputs SET confirmed = 1
+          WHERE ticket_id = ? AND name = ? AND schema = ? AND uri IS ? AND digest IS ? AND value_json IS ? AND confirmed = 0
+            AND EXISTS (SELECT 1 FROM claims c JOIN claim_legs l ON l.claim_id = c.id
+              WHERE c.id = leg_outputs.claim_id AND c.ticket_id = leg_outputs.ticket_id AND c.nonce = ? AND l.leg = leg_outputs.leg AND COALESCE(l.contract_leg, l.leg) = ? AND l.evidence = ?
+                AND leg_outputs.run = (SELECT COUNT(*) FROM claim_legs p JOIN claims k ON k.id = p.claim_id
+                  WHERE k.ticket_id = c.ticket_id AND p.leg = l.leg AND (k.id < c.id OR (k.id = c.id AND p.seq <= l.seq))))`,
+          `${repo}:${a.ticket}`, o.name, o.schema, o.uri ?? null, o.digest ?? null, Object.hasOwn(o, 'value') ? JSON.stringify(o.value) : null,
+          value.claim_nonce, value.leg, a.ref);
+      }
+    }
+  }
+
+  private recoverOutputs(repo: string, local: string, evidence: { nonce: string; leg: string; runId: string }, outputs: Output[]) {
+    const ticket = `${repo}:${local}`;
+    const run = this.rows<{ claim_id: number; seq: number; leg: string; run_id: string; from_station: string; course_id: string; contract_leg: string | null }>(
+      `SELECT l.claim_id, l.seq, l.leg, l.run_id, l.from_station, l.contract_leg, c.course_id FROM claim_legs l JOIN claims c ON c.id = l.claim_id
+       JOIN tickets t ON t.id = c.ticket_id WHERE c.ticket_id = ? AND c.nonce = ? AND COALESCE(l.contract_leg, l.leg) = ? AND l.run_id = ?
+       AND l.abandoned_at IS NOT NULL AND c.contract_course_json IS NOT NULL
+       AND c.end_reason NOT IN ('released:cannot-finish:contract-input', 'released:cannot-finish:contract-output')`,
+      ticket, evidence.nonce, evidence.leg, evidence.runId)[0];
+    if (!run || !outputs.length) return;
+    const graph = this.stations.graph(repo, run.course_id);
+    if (!graph) return;
+    const ordinal = this.rows<{ n: number }>(`SELECT COUNT(*) AS n FROM claim_legs p JOIN claims k ON k.id = p.claim_id
+      WHERE k.ticket_id = ? AND p.leg = ? AND (k.id < ? OR (k.id = ? AND p.seq <= ?))`, ticket, run.leg, run.claim_id, run.claim_id, run.seq)[0].n;
+    if (this.rows('SELECT 1 FROM leg_outputs WHERE ticket_id = ? AND leg = ? AND run = ? LIMIT 1', ticket, run.leg, ordinal).length) return;
+    try {
+      this.checkOutputValues(repo, outputs);
+      this.recordOutputs(ticket, run.claim_id, run, this.contract(run.claim_id, graph).graph, outputs, ordinal);
+    } catch (e) {
+      if (!(e instanceof BatonError)) throw e;
+    }
+  }
+
   /** One request's schema resolver (3-r3-1): each id read and parsed once, so the validator's
    *  done-once work — enum sets and `const` keys, keyed by the schema object — is done once, and
    *  the reads are bounded by the schemas a chain names, not by the value's size. */
@@ -1888,7 +2112,10 @@ export class Claims {
     const g = c.course_id ? this.stations.graph(repositoryOf(c.ticket_id), c.course_id) : null;
     const run = this.runningLeg(c.id);
     // A course no longer in force: nothing to check against; a named outcome finishes the leg.
-    if (!g) return { reached: e.reached ?? c.station, finished: !!run && !!e.reached && e.reached !== c.station };
+    if (!g) {
+      if (e.finished_self_loop) throw new BatonError('invalid-params', 'finished_self_loop: no course in force');
+      return { reached: e.reached ?? c.station, finished: !!run && !!e.reached && e.reached !== c.station };
+    }
     const station = resolveStation(g, c.station) ?? c.station;
     const outcomes = run ? g.legs.get(resolveLeg(g, run.leg) ?? '')?.to ?? [] : [];
     const allowed = new Set([station, ...outcomes]);
@@ -1905,11 +2132,12 @@ export class Claims {
     } else if (e.end_reason === 'done' && outcomes.length === 1) {
       reached = outcomes[0];
     }
-    // An end at the leg's `from` gives the leg up — a self-loop's (`to` = `from`) included: from
-    // the end alone Baton cannot tell a finished loop from an abandoned one, and recording it given
-    // up is the reading git can always confirm (a git path that does show the run still extends
-    // the expected path; round 3, 3-A-1). An advance names the outcome and so finishes it.
-    return { reached, finished: outcomes.includes(reached) && reached !== station };
+    // S-BTN-63: resting at `from` normally gives up the run. A runner suspending after a
+    // completed self-loop explicitly reports it with evidence; the graph must allow that loop.
+    if (e.finished_self_loop && (reached !== station || !outcomes.includes(reached))) {
+      throw new BatonError('invalid-params', 'finished_self_loop: the running leg must have its current station as an outcome');
+    }
+    return { reached, finished: outcomes.includes(reached) && (reached !== station || e.finished_self_loop) };
   }
 
   /** Ends an active claim (§6.5): the running leg finishes at its outcome or is given up at its
@@ -1964,7 +2192,10 @@ export class Claims {
     // started, a decision posted while held) logs `blocked`, which wakes no one.
     this.c.blocks.held(ticketId, false);
     if (status === 'completed') this.confirmByClosure(claimId);
-    else this.applyRetryPolicy(claimId, ticketId, reason, run?.leg);
+    else if (reason === 'released:cannot-finish:contract-input') {
+      this.hold(ticketId, 'non-retryable:contract-input', 'baton', { claim_id: claimId, detail: opts.detail ?? null });
+      this.c.blocks?.raise(ticketId, 'baton.contract', opts.detail ?? null);
+    } else this.applyRetryPolicy(claimId, ticketId, reason, run?.leg);
     this.c.outsideWork?.pending(undefined, ticketId);
   }
 
@@ -2079,7 +2310,7 @@ export class Claims {
 
   /** `POST /v1/ui/overrides/{item}` (§8, §11): `{expedite?, hold?}`. Lifting a hold clears its
    *  reason and any backoff, and resets the attempt count (§6.10). */
-  // @model setHold sha256:2569b5668121
+  // @model setHold sha256:931209b289a9
   setOverride(owner: string, item: string, body: unknown) {
     const o = checkOverride(body);
     const actor = `owner:${owner}`;
@@ -2164,6 +2395,7 @@ export class Claims {
     this.event('override', actor, { hold: 0 }, item);
     this.c.blocks.answer(item, 'baton:retries');
     this.c.outsideWork?.pending(undefined, item);
+    this.c.blocks.answer(item, 'baton.contract');
   }
 
   /**
@@ -2191,7 +2423,7 @@ export class Claims {
       return { ok: true };
     }
     if (!this.c.blocks.hasDecision(ticket, a.decision)) throw new BatonError('not-found', `${ticket} has no open ${a.decision} decision`);
-    if (a.decision === 'baton:retries') {
+    if (a.decision === 'baton:retries' || a.decision === 'baton.contract') {
       if (a.answer === 'retry') this.liftHold(ticket, actor);
       else this.c.blocks.answer(ticket, a.decision);
     } else {
@@ -2233,9 +2465,10 @@ export class Claims {
    *  alarm would end, so its `lease_ends_at` is null. Claims on tickets git has dropped stay
    *  (R-BTN-35) — matched by the repository's qualified-id prefix. */
   holdersOf(repo: string, sessionLink: SessionLinkView) {
-    return this.rows<{ ticket_id: string; runner_id: number; hostname: string; session_name: string; kind: string; last_seen_at: number; lease_timeout_ms: number; session_url: string | null; session_incarnation: number | null }>(
+    return this.rows<{ ticket_id: string; runner_id: number; hostname: string; session_name: string; kind: string; last_seen_at: number; lease_timeout_ms: number; session_url: string | null; session_incarnation: number | null; lease_ends_at: number | null }>(
       `SELECT c.ticket_id, c.runner_id, w.hostname, w.session_name, w.kind, w.last_seen_at, w.lease_timeout_ms,
-              l.session_url, l.session_incarnation
+              l.session_url, l.session_incarnation,
+              CASE WHEN w.kind != 'legacy' THEN ${CLAIM_LEASE_END_SQL} END AS lease_ends_at
        FROM claims c JOIN runners w ON w.id = c.runner_id
        LEFT JOIN claim_legs l ON l.claim_id = c.id AND l.seq = (SELECT MAX(seq) FROM claim_legs
          WHERE claim_id = c.id AND finished_at IS NULL AND abandoned_at IS NULL)
@@ -2247,7 +2480,7 @@ export class Claims {
       hostname: c.hostname,
       session_name: c.session_name,
       ...sessionLink(c.session_url, c.runner_id, c.session_incarnation),
-      lease_ends_at: c.kind === 'legacy' ? null : leaseEndsAt(c),
+      lease_ends_at: c.lease_ends_at,
     }));
   }
 
@@ -2331,15 +2564,15 @@ export class Claims {
     else if (st) {
       git = { station: st.station, path: JSON.parse(st.path), path_len: st.path_len, regressed: c.regressed_since != null,
         next: this.rows<{ leg: string; state: string; waiting_on: string | null }>('SELECT leg, state, waiting_on FROM ticket_next_legs WHERE ticket_id = ? ORDER BY leg', c.ticket_id)
-          .map((n) => (n.waiting_on ? n : { leg: n.leg, state: n.state })) };
+          .map((n) => (n.waiting_on ? { ...n, waiting_on: n.waiting_on } : { leg: n.leg, state: n.state })) };
     }
     return { station: c.station, ...(c.leg ? { leg: c.leg } : {}), ...(c.deadline_at != null ? { deadline_at: c.deadline_at } : {}), git };
   }
 
   /** The heartbeat's `fenced` report (R-BTN-19): clears the fence of a claim reaped while this
    *  runner was alive — only in the incarnation it was reaped in, since a re-key never clears one. */
-  // @model fenceCleared sha256:551d1bb768f5
-  // @model heartbeat sha256:9c0136704c87
+  // @model fenceCleared sha256:9afb4a0b5bf8
+  // @model heartbeat sha256:576daa5cf97c
   fenced(runnerId: number, incarnation: number, claimId: number) {
     const c = this.rows<{ ticket_id: string }>(
       `SELECT ticket_id FROM claims WHERE id = ? AND runner_id = ? AND status = 'reaped' AND fence_pending = 1 AND fence_incarnation = ?`,
@@ -2358,7 +2591,7 @@ export class Claims {
   /** `POST /v1/ui/claims/{id}/reap`: any active claim. A live runner's claim is fence-pending
    *  (R-BTN-19) and the runner is not reaped, so its sidecar can still report the fence; a
    *  silent runner's is reaped as the alarm would. */
-  // @model forceReap sha256:dea6a296cd3c
+  // @model forceReap sha256:d1ff28fc20e8
   forceReap(owner: string, claimId: number, body: unknown) {
     checkConfirm(body);
     const c = this.rows<{ id: number; ticket_id: string; runner_id: number; status: string }>('SELECT id, ticket_id, runner_id, status FROM claims WHERE id = ?', claimId)[0];
@@ -2368,7 +2601,7 @@ export class Claims {
     const now = this.c.now();
     const alive = isClaimLeaseLive(w, now);
     this.finish(c.id, c.ticket_id, 'reaped', 'reaped:owner', `owner:${owner}`, { fence: alive ? { incarnation: w.incarnation } : null });
-    if (!alive) this.exec('UPDATE runners SET reaped_at = ? WHERE id = ? AND reaped_at IS NULL', now, w.id);
+    if (!alive) this.markRunnerReaped(w.id, now);
     return { ok: true, fence_pending: alive };
   }
 
@@ -2381,7 +2614,7 @@ export class Claims {
    *  not pending is `conflict`; a freeze never refuses it (R-BTN-88), so a seal waiting on the
    *  claim proceeds after it. The runner is not reaped: it may still be alive, its own lease
    *  check (R-BTN-26) the bound on what it can push. */
-  // @model adminFenceClear sha256:e910358c8682
+  // @model adminFenceClear sha256:d89adbb0a97c
   fenceClear(admin: string, claimId: number, body: unknown) {
     checkConfirm(body);
     const c = this.rows<{ ticket_id: string }>('SELECT ticket_id FROM claims WHERE id = ?', claimId)[0];
@@ -2410,7 +2643,7 @@ export class Claims {
        WHERE c.status = 'active' AND substr(c.ticket_id, 1, length(?) + 1) = ? || ':' ORDER BY c.id`, repository, repository)) {
       const alive = isClaimLeaseLive(c, now);
       this.finish(c.id, c.ticket_id, 'reaped', 'reaped:owner', actor, { fence: alive ? { incarnation: c.incarnation } : null });
-      if (!alive) this.exec('UPDATE runners SET reaped_at = ? WHERE id = ? AND reaped_at IS NULL', now, c.runner_id);
+      if (!alive) this.markRunnerReaped(c.runner_id, now);
     }
   }
 
@@ -2418,7 +2651,7 @@ export class Claims {
    *  its own `action`): an unconfirmed completion is never confirmed automatically; the owner
    *  confirms it (git does carry it) or releases it (it never landed), which makes the item
    *  claimable again. The commit it named stays in the event. */
-  // @model ownerResolve sha256:45e2eeaff781
+  // @model ownerResolve sha256:70b8eaf75df7
   resolve(owner: string, claimId: number, body: unknown) {
     const { action } = checkResolve(body);
     const c = this.rows<{ ticket_id: string; end_reason: string; ended_at_sha: string }>(
@@ -2464,7 +2697,7 @@ export class Claims {
    * a failed attempt (§6.10); this only takes the claim back, it ends nothing itself. The
    * caller's transaction (the alarm's).
    */
-  // @model queueTimeout sha256:f95f3da4be95
+  // @model queueTimeout sha256:71d450c92eb7
   deadlineDue(now: number): number {
     const due = this.rows<{ id: number; ticket_id: string; runner_id: number; deadline_at: number }>(
       `SELECT id, ticket_id, runner_id, deadline_at FROM claims WHERE status = 'active' AND deadline_at IS NOT NULL AND deadline_at <= ? ORDER BY deadline_at`, now);
@@ -2510,7 +2743,7 @@ export class Claims {
    * (the heartbeat's). A seq that names no running run of this runner's active claim — a beat
    * retried past the advance that finished the run — changes nothing.
    */
-  // @model legFinished sha256:27268e3cdbb4
+  // @model legFinished sha256:1d22a1accbb0
   legFinished(runnerId: number, claimId: number, seq: number): void {
     const now = this.c.now();
     const c = this.rows<{ ticket_id: string; status: string; runner_id: number; deadline_at: number | null }>(
@@ -2627,7 +2860,7 @@ export class Claims {
    * - R-BTN-63: a holder's declared bars the snapshot posts that leg's bars without log
    *   `bars-mismatch`.
    */
-  // @model syncPost sha256:9d500d65a2bf
+  // @model syncPost sha256:7c0efc930fe7
   judge(repo: string, observation: number, seen: Map<string, Seen>, evidence: PostedEvidence = new Map()) {
     let confirmed = 0;
     // A `done` is also confirmed by a reading numbered after the claim's latest advance that shows
@@ -2766,7 +2999,7 @@ export class Claims {
    *  or at an interim status that ends the item — ends `released:stale-board`, and the holder is
    *  told. A station that lags the holder's advances is never staleness (§2e). Before cutover git
    *  decides alone and the shadow reports end claims. */
-  // @model syncPost sha256:9d500d65a2bf
+  // @model syncPost sha256:7c0efc930fe7
   private staleBoard(repo: string, observation: number) {
     if (!this.rows('SELECT 1 FROM repositories WHERE id = ? AND cutover_at IS NOT NULL', repo).length) return 0;
     const active = this.rows<{ id: number; ticket_id: string; runner_id: number; tier_ceiling: string; tier_ceilings: string; kind: string }>(
@@ -2804,8 +3037,24 @@ export class Claims {
 
   // ── the alarm's share (§6.6, §7.1, §9) ──────────────────────────────────────────────────
 
-  // @model alarmReap sha256:b00b4e304089
-  // @model fenceTimeout sha256:28b54860fbba
+  /** R-BTN-4: runner-wide invalidation cannot fence a sibling that still holds its claim. */
+  private markRunnerReaped(runnerId: number, now: number) {
+    this.exec(`UPDATE runners SET reaped_at = ? WHERE id = ? AND reaped_at IS NULL
+               AND NOT EXISTS (SELECT 1 FROM claims WHERE runner_id = ? AND status = 'active')`, now, runnerId, runnerId);
+  }
+
+  /** B-249 (§9.5): give held claims a lease from recovery if Baton missed more than their
+   *  runner's lease. Leave actual runner liveness, legacy reaps and existing fences alone. */
+  recoverLeases(now: number, gap: number): void {
+    if (gap <= 1000 * clampLease(0)) return;
+    this.exec(`UPDATE claims SET lease_recovered_at = ? WHERE id IN (
+      SELECT c.id FROM claims c JOIN runners w ON w.id = c.runner_id
+      WHERE c.status = 'active' AND w.kind != 'legacy' AND w.last_seen_at < ? AND w.lease_timeout_ms < ?
+    )`, now, now, gap);
+  }
+
+  // @model alarmReap sha256:0d265c57f66c
+  // @model fenceTimeout sha256:009fc7e44d7d
   alarm(): string[] {
     const now = this.c.now();
     // B-229 (R-BTN-9): each reap is its own savepoint, and one that throws is named and passed
@@ -2827,15 +3076,16 @@ export class Claims {
     // failed attempt §6.10 counts. A claim whose deadline moved on (a newer advance re-armed it)
     // is not due here; the alarm arms at the earliest standing instant.
     this.deadlineDue(now);
-    // Silent runners: reaped at exactly their clamped timeout (R-BTN-9), never by Date.now().
+    // Silent runners: reaped at their clamped timeout (R-BTN-9), measured from recovery
+    // or their last contact, whichever is later.
     const silent = this.rows<{ id: number; ticket_id: string; runner_id: number; kind: string }>(
       `SELECT c.id, c.ticket_id, c.runner_id, w.kind FROM claims c JOIN runners w ON w.id = c.runner_id
-       WHERE c.status = 'active' AND ((w.kind != 'legacy' AND ${expiredLeaseSql})
+       WHERE c.status = 'active' AND ((w.kind != 'legacy' AND ${CLAIM_LEASE_END_SQL} <= ?)
                                       OR (w.kind = 'legacy' AND c.reap_after IS NOT NULL AND c.reap_after <= ?))`, now, now);
     for (const c of silent) {
       each(c.id, c.ticket_id, () => {
         this.finish(c.id, c.ticket_id, 'reaped', c.kind === 'legacy' ? 'reaped:legacy' : 'reaped:silent', 'alarm', {});
-        this.exec('UPDATE runners SET reaped_at = ? WHERE id = ? AND reaped_at IS NULL', now, c.runner_id);
+        this.markRunnerReaped(c.runner_id, now);
       });
     }
     this.reapUnacknowledged(now, each);
@@ -2848,7 +3098,7 @@ export class Claims {
     for (const c of lapsed) {
       this.exec('UPDATE claims SET fence_pending = 0 WHERE id = ?', c.id);
       this.exec('DELETE FROM claim_seats WHERE claim_id = ?', c.id);
-      if (c.fence_deadline == null) this.exec('UPDATE runners SET reaped_at = ? WHERE id = ? AND reaped_at IS NULL', now, c.runner_id);
+      if (c.fence_deadline == null) this.markRunnerReaped(c.runner_id, now);
       this.event('fence-cleared', 'alarm', c.fence_deadline == null ? { by: 'timeout' } : { deadline: true }, c.ticket_id, c.id);
       this.c.blocks.held(c.ticket_id, false);
     }
@@ -2861,7 +3111,7 @@ export class Claims {
   }
 
   /** §9.5: give an unacknowledged leg-timeout priority over a general release for the same claim. */
-  // @model timeoutReap sha256:0d7f933299bf
+  // @model timeoutReap sha256:e8e3a859037d
   private reapUnacknowledged(now: number, each: (claimId: number, ticketId: string, fn: () => void) => void) {
     const stale = this.rows<{ id: number; ticket_id: string; runner_id: number; incarnation: number; lease_timeout_ms: number; timeout: number }>(
       `SELECT c.id, c.ticket_id, c.runner_id, w.incarnation, w.lease_timeout_ms,
@@ -2912,7 +3162,7 @@ export class Claims {
   running(now: number) {
     const active = this.rows<Row & Lease & { kind: string }>(
       `SELECT c.id, c.ticket_id, c.runner_id, c.claimed_at, c.nonce, w.hostname, w.session_name, w.last_seen_at, w.last_activity_at,
-              w.lease_timeout_ms, w.kind, wi.title,
+              w.lease_timeout_ms, w.kind, wi.title, CASE WHEN w.kind != 'legacy' THEN ${CLAIM_LEASE_END_SQL} END AS reap_at,
               (SELECT l.leg FROM claim_legs l WHERE l.claim_id = c.id AND l.finished_at IS NULL AND l.abandoned_at IS NULL
                 ORDER BY l.seq DESC LIMIT 1) AS leg,
               NULL AS session_url,
@@ -2934,7 +3184,6 @@ export class Claims {
         ...c,
         session_link: !!has_session_link,
         alive,
-        reap_at: c.kind === 'legacy' ? null : leaseEndsAt(c),
         stalled: alive && (c.last_activity_at == null ? now - (c.claimed_at as number) : now - (c.last_activity_at as number)) > STALLED_MS,
         events: events.get(c.id as number) ?? [],
         activities: activities.get(c.id as number) ?? [],

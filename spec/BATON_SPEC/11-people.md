@@ -61,8 +61,7 @@ contents are not built; their design is
     `BATON_ADMIN_KEYS` line (`--admin-keys` locally), an owner key, a grant's `public_key`.
   - **How it is sent.** `Authorization: Bearer <key>` in place of a signature, on `/v1/admin/*`,
     `/v1/owner/*`, `/v1/runner/*` and the repository reads; a runner adds its secret
-    (R-BTN-14). `baton … -i FILE`, `BATON_KEY_FILE` and `BATON_KEY` send it; no client sends a
-    bearer over non-loopback `http` (R-BTN-158). Baton hashes the key and compares every byte
+    (R-BTN-14). `baton … -i FILE`, `BATON_KEY_FILE` and `BATON_KEY` send it. Client refusal over clear HTTP is not built (R-BTN-158). Baton hashes the key and compares every byte
     with the hash on the public line its fingerprint names. An unknown fingerprint, a wrong
     secret or a malformed bearer is `unauthenticated`.
   - **Records and revocation.** Acts are recorded as `admin:bak_<id>` or `owner:bak_<id>`.
@@ -205,7 +204,7 @@ contents are not built; their design is
   | `leg log <ticket> [<leg>] [--run <n>] [-f] [--transcripts] [--json]` | `leg.runs`, then reads the log directory | R-BTN-128 |
   | `leg runs <ticket> [<leg>]` | a leg's runs | R-BTN-128 |
   | `leg replay <ticket> <leg> [--run <n>] [--against <sha>]` | `leg.runs`, then replays locally | R-BTN-84 |
-  | `leg stop <ticket>` | stops the running leg | R-BTN-119 |
+   | `leg stop <ticket>` | *proposed* ([B-9](../../tickets/B-9.mdx)) | R-BTN-119 |
   | `leg status`, `output`, `done`, `suspend`, `release`, `next`, `yield`, `raise` | the local channel, inside a leg; `leg await`, `events` and `ticket` are proposed ([conditions](../proposals/conditions.md)) | R-BTN-106, R-BTN-160 |
   | `ticket blocked [<ticket>] [--on <kind>:<ref>]` | a ticket's or the repository's blocks (`repo.blocked`) | R-BTN-75 |
   | `ticket history <ticket>` | a ticket's history | R-BTN-81 |

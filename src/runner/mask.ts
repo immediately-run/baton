@@ -214,6 +214,16 @@ function createBoundaryMatcher(literal: string) {
   };
 }
 
+function completeLiterals(text: string, literals: readonly string[]) {
+  const matches: { start: number; end: number }[] = [];
+  for (const literal of literals) {
+    for (let start = text.indexOf(literal); start !== -1; start = text.indexOf(literal, start + 1)) {
+      matches.push({ start, end: start + literal.length });
+    }
+  }
+  return matches.sort((a, b) => a.start - b.start || b.end - a.end);
+}
+
 /** R-BTN-144 across a stream, which a line-at-a-time sink cannot do. Class 6's key block is
  *  `src/shared/mask.mjs`'s stream (`createMasker`: a block's lines are held until its `END` line
  *  or `KEY_HOLD` bytes, and classes 5 and 6 are masked on every line as it leaves) — each line

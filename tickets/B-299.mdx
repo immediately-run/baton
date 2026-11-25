@@ -15,7 +15,8 @@ topics:
   - baton
   - security
 owns: {}
-prs: []
+prs:
+  - https://github.com/immediately-run/baton/pull/339
 depends_on: []
 ---
 
@@ -127,6 +128,12 @@ setting, a CI workflow or a deploy.
 - One home per statement: each "not built" line names the ticket and restates no design.
 
 ## Status
+
+_2026-11-22 — spec rulings proposed for owner confirmation._ B-299 retains the live ancestry
+check, runner credential stripping and masking classes 1–2 for its code phase. B-46 retains
+credential scoping, `BATON_RESUME`, class 3 and the off-branch condition; B-79 retains the fixed
+fence deadline and pending condition. B-9 retains Stop work and gains the CLI command. B-184
+should use the executor-owned stop mechanism and R-BTN-145's bound, not a prescribed ladder.
 
 _filed 2026-11-20._ From the adversarial review of PR #299 (the spec simplification of
 2026-11-19), findings A4-8 to A4-11 and the fix round's list for §8 and §9. Related: B-46

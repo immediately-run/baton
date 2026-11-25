@@ -74,8 +74,6 @@ describe('validateCourse (R-BTN-69)', () => {
       'shape capability_roles.empty',
       'shape capability_roles.notList',
       'shape capability_roles.tooMany',
-      'unknown-key legs.deploy.requires.resources',
-      'unknown-key legs.review.requires.tickets',
     ]);
     // A requires that is not an object, a capability list that is empty or holds a non-name.
     c.capability_roles = {};
@@ -88,6 +86,37 @@ describe('validateCourse (R-BTN-69)', () => {
     expect(rules(c)).toEqual(['shape legs.review.requires.capabilities.1']);
     c.legs.review.requires = { capabilities: 'create-pr' };
     expect(rules(c)).toEqual(['shape legs.review.requires.capabilities']);
+  });
+
+  it('S-BTN-72 accepts only parent and posted, with exactly one ticket predicate', () => {
+    const c = copy();
+    for (const select of ['children', 'run', '*', '', null]) {
+      c.legs.review.requires = { tickets: [{ select, done: true }] };
+      expect(rules(c)).toEqual(['shape legs.review.requires.tickets.0']);
+    }
+    c.legs.review.requires = { tickets: [{ select: 'parent', done: true, closed: true }] };
+    expect(rules(c)).toEqual(['shape legs.review.requires.tickets.0']);
+    c.legs.review.requires = { tickets: [{ select: 'parent', reached: ['filed'] }, { select: 'posted', done: true }] };
+    expect(rules(c)).toEqual([]);
+  });
+
+  it('S-BTN-73 checks declared type values after a role expands', () => {
+    const c = copy();
+    c.capability_types = { vpn: { description: 'Network', values: '^corp$' } };
+    c.capability_roles = { deployer: ['vpn:corp'] };
+    c.legs.review.requires = { capabilities: ['deployer', 'runner:leg-trees'] };
+    expect(rules(c)).toEqual([]);
+    c.capability_roles.deployer = ['vpn:public', 'other:corp'];
+    expect(rules(c)).toEqual(['shape capability_roles.deployer.0', 'shape capability_roles.deployer.1']);
+  });
+
+  it('S-BTN-73 enforces an explicit credential value pattern over the built-in type', () => {
+    const c = copy();
+    c.capability_types = { credential: { description: 'Deployment credential', values: '^DEPLOY_TOKEN$' } };
+    c.legs.review.requires = { capabilities: ['credential:OTHER_TOKEN'] };
+    expect(rules(c)).toEqual(['shape legs.review.requires.capabilities.0']);
+    c.legs.review.requires = { capabilities: ['credential:DEPLOY_TOKEN'] };
+    expect(rules(c)).toEqual([]);
   });
 
   it('a capability role naming a role holds the file (R-BTN-121, R-BTN-157)', () => {
@@ -220,7 +249,7 @@ describe('validateCourse (R-BTN-69)', () => {
 
   it('an input must read a declared output of a leg', () => {
     const c = copy();
-    c.legs.review.outputs = { findings: {} };
+    c.legs.review.outputs = { findings: { schema: 'std:url@1' } };
     c.legs.fix.inputs = { findings: { from: 'review.nope' } };
     expect(rules(c)).toEqual(['input legs.fix.inputs.findings.from']);
     c.legs.fix.inputs = { findings: { from: 'ghost.findings' } };
@@ -273,11 +302,19 @@ describe('validateCourse (R-BTN-69)', () => {
   it('short_waits labels and input and output names are not station ids (review gate 1-B-2)', () => {
     const c = copy();
     c.short_waits = ['ci', 'review_seats', 'CI', 'ci:main'];
-    c.legs.review.outputs = { pr_url: {}, Findings: {} };
+    c.legs.review.outputs = { pr_url: { schema: 'std:url@1' }, Findings: { schema: 'std:url@1' } };
     c.legs.fix.inputs = { pr_url: { from: 'review.pr_url' } };
     expect(validateCourse(c)).toEqual([]);
-    c.legs.review.outputs = { 'a.b': {} };
+    c.legs.review.outputs = { 'a.b': { schema: 'std:url@1' } };
     expect(rules(c)).toContain('id legs.review.outputs.a.b');
+  });
+
+  it('S-BTN-48: contract output declarations fit the wire envelope limit and require schemas', () => {
+    const c = copy();
+    c.legs.review.outputs = { findings: {} };
+    expect(rules(c)).toContain('shape legs.review.outputs.findings.schema');
+    c.legs.review.outputs = Object.fromEntries(Array.from({ length: 17 }, (_, i) => [`o${i}`, { schema: 'std:url@1' }]));
+    expect(rules(c)).toContain('shape legs.review.outputs');
   });
 
   it('a repeated station in a from or to names the same edge (review gate 1-B-3)', () => {

@@ -82,7 +82,7 @@ describe('the one parser (R-BTN-73)', () => {
     workflow_run: new Set([...COMMON, 'workflow_run', 'workflow_run.path']),
     push: new Set([...COMMON, 'pusher', 'pusher.name', 'head_commit', 'head_commit.author', 'head_commit.author.email',
       // B-126 (R-BTN-194): the push's recorded half.
-      'sender', 'sender.id', 'sender.login', 'ref', 'before', 'after', 'commits', 'commits.length',
+      'sender', 'sender.id', 'sender.login', 'ref', 'before', 'after', 'forced', 'commits', 'commits.length',
       'commits.0', 'commits.0.id', 'commits.0.added', 'commits.0.removed', 'commits.0.modified']),
   };
 
@@ -119,7 +119,7 @@ describe('the one parser (R-BTN-73)', () => {
   const B = '0'.repeat(39) + '1';
   const A = 'f'.repeat(40);
   const pushPayload = (over: Record<string, unknown> = {}) => ({
-    ref: 'refs/heads/main', before: B, after: A,
+    ref: 'refs/heads/main', before: B, after: A, forced: false,
     repository: { full_name: 'immediately-run/docs' }, pusher: { name: 'runner' },
     sender: { id: 424242, login: 'immediately-run-worker' },
     head_commit: { id: A, author: { email: 'w@x' } },
