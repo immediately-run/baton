@@ -8,7 +8,7 @@ repos:
   - baton
 tags:
   - roadmap-item
-tier: high
+tier: judgement
 description: "GitHub ran baton-sync.yml's */15 schedule about five times in 24 hours (2026-11-22/23), and Baton's own backstop dispatched nothing, so between pushes to main no board was posted, suspended tickets never got their next leg and bering's two runners sat idle about an hour until the supervisor dispatched the sync by hand. Find why the backstop did not fire, then pick (owner) how a ready leg reaches the board within N minutes without a push to main."
 topics:
   - baton
@@ -41,6 +41,10 @@ These options can be combined: for example (d) for speed with (b) as the backsto
 1. **Diagnose (owner or supervisor, live).** For `baton` on the running instance, check whether there is a `dispatch` target, whether the App is installed and subscribed to `push`, `pull_request`, `check_suite` and `workflow_run`, whether deliveries are verified (or dropped, and why), and whether the alarm's backstop row (`webhook_syncs.last_dispatch_at`) moves. Record the answer here and in `docs/lessons.mdx`.
 2. **Owner's choice** among (a) to (d), or a fix of what step 1 finds broken.
 3. **Implement it**, with the spec amended in the section that owns the rule (R-BTN-94 for (b) and (c), R-BTN-73 for (d); (a) is a runbook and workflow change), and a scenario (`baton tickets next scenario`). The scenario: a ticket suspended on `ci` whose PR's checks complete gets its next leg on the board within N minutes, with no push to the default branch. A repository with no dispatch target behaves as today.
+
+### Trust
+
+- **No new input until the owner picks an option.** Each option's new reach is named under *Options*: (a) a scheduler credential with `actions:write`, held by the owner; (c) dispatch or board-post authority for every runner, weighed against `docs/security-model.mdx`; (d) forge deliveries, verified as R-BTN-73 already verifies them. The chosen design states here, before `implement`, every input it adds, who may write it and how Baton verifies it.
 
 ### Invariants
 
