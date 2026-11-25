@@ -4,7 +4,7 @@
 // hostile title is text. The controls are the registry's: an owner's entries draw hold, Stop
 // and the acknowledgement and no force-reap; an administrator's draw force-reap, the fence
 // clear and the completion's confirm and release too; unhold only where the read's `allowed`
-// names it; Stop is one click with `to_runner_id`; a destructive entry opens the confirm dialog.
+// names it; Stop confirms with `to_runner_id`; a destructive entry opens the confirm dialog.
 import { afterEach, describe, expect, it } from 'vitest';
 import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { ACTIONS, actionsFor } from '../../src/core/actions';
@@ -230,14 +230,16 @@ describe('the ticket page’s controls (B-222)', () => {
     expect(controlNames().join(' | ')).not.toMatch(/Lift a ticket’s hold|Confirm an unconfirmed|Clear a fenced/);
   });
 
-  it('Stop is one click, with to_runner_id and no dialog', async () => {
+  it('Stop confirms with to_runner_id', async () => {
     const { calls } = serve(show(), 'owner', { 'POST /v1/ui/messages': { ok: true } });
     renderApp('/repositories/docs/tickets/T-1');
     await screen.findByRole('heading', { level: 1 });
-    fireEvent.click(await screen.findByRole('button', { name: 'Stop' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Stop…' }));
+    expect(calls.some((c) => c.method === 'POST')).toBe(false);
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Stop' }));
     await waitFor(() => expect(calls.some((c) => c.method === 'POST')).toBe(true));
     const sent = calls.find((c) => c.method === 'POST')!;
-    expect([sent.path, sent.body]).toEqual(['/v1/ui/messages', { to_runner_id: 1, kind: 'release', payload: { ticket_id: 'docs:T-1', reason: 'requested' } }]);
+    expect([sent.path, sent.body]).toEqual(['/v1/ui/messages', { to_runner_id: 1, kind: 'release', confirm: true, payload: { ticket_id: 'docs:T-1', reason: 'requested' } }]);
     expect(screen.queryByRole('dialog')).toBeNull();
   });
 
