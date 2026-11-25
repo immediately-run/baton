@@ -71,7 +71,7 @@ const args = await new Promise((resolveArgs, rejectArgs) => {
 
 try {
   if (!Array.isArray(args)) throw new Error('legProcess: the arguments are not a JSON array');
-  if (call === 'run') {
+  if (call === 'run' || call === 'close' || call === 'handoff') {
     // Extracted scripts have no node_modules. Bind only Baton's public leg API to this wrapper's
     // client, without changing how any other import resolves. `register` also works on Node 22.13.
     const client = new URL('./legClient.mjs', import.meta.url).href;

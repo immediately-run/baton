@@ -104,8 +104,8 @@ route. It adds no handler. Until B-58 lands, every condition is unbound.
      (`message` is free text under §12.3). Today's attempts path (`src/core/attempts.ts`) routes
      it, and B-11 makes the retry policy read the type.
    - `notify`: recorded and closed at once with outcome `recorded`.
-   - `suspend`: refused on the channel with `suspend-unavailable` until B-59 builds the wait.
-     B-59 removes this refusal.
+   - `suspend`: recorded and returned, leaving the condition open under Needs you (R-BTN-160).
+     B-59 builds the wait and resume (R-BTN-162).
 7. **Closing**, as R-BTN-160's table says for what this ticket raises: an unbound `interrupt` and
    an unbound `notify` close when raised. The other rows are built by B-56, B-58 and B-59.
 8. **Severity** (R-BTN-125) is `critical`, `high` or `normal` (default `normal`). It is stored and
@@ -147,7 +147,7 @@ route. It adds no handler. Until B-58 lands, every condition is unbound.
   - a narrowed leg's raise refused on the channel (S-BTN-130's case);
   - restarts that are not a subset, a bad default and a bad severity, each refused;
   - a raise of `baton.retries` or `hitl.decision` refused on the channel;
-  - a `suspend` raise refused until B-59;
+  - an allowed `suspend` raise recorded and returned without waiting;
   - a typed `LegError` ending `cannot-finish:spec`, and an untyped throw ending
     `cannot-finish:transient`.
 - On both hosts, in `test/integration/S-BTN-131.debugger.test.ts` (a file B-56 completes): an
