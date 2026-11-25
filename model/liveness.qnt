@@ -16,13 +16,13 @@ module liveness {
   // Each is stated under weak fairness of every step that resolves it, per runner, so that
   // no other runner's activity can stand in for it (review gate round 1). R-BTN-19, R-BTN-10,
   // §9.6, R-BTN-67, R-BTN-45.
-  // R-BTN-19: every fence clears — at the runner's fence-cleared, or once it has been silent
-  // past its timeout. Time is bounded (MAX_TIME), so only a fence whose timeout itself falls
-  // past the horizon — its runner kept heartbeating — may still stand at the end
+  // R-BTN-19: every fence clears — at the runner's fence-cleared or at its expiry.
+  // Time is bounded (MAX_TIME), so only a fence whose expiry itself falls
+  // past the horizon may still stand at the end
   // (round 3, 3-A-0: the round-2 escape `now == MAX_TIME` made this a tautology; with
   // fenceTimeout deleted, a crashed fenced runner now falsifies it).
   def fencesBeyondHorizon(t: str): bool =
-    fencedOf(t).forall(i => st.claims.get(i).leaseUntil > MAX_TIME)
+    fencedOf(t).forall(i => fenceExpiry(st.claims.get(i)) > MAX_TIME)
   temporal fencesClear =
     (weakFair(tick, st) and RUNNERS.forall(w => weakFair(fenceCleared(w), st))
       and 1.to(MAX_CLAIMS).forall(i => weakFair(fenceTimeout(i), st))) implies

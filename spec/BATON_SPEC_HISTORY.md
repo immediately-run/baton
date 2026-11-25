@@ -18,6 +18,36 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
 
 ## Changelog
 
+- **2026-11-25 — Ticket files are Dibber's to write (R-BTN-74, R-BTN-199, S-BTN-189, S-BTN-234).**
+  Rules changed: R-BTN-74, R-BTN-199, R-BTN-193 (its legacy list: the git-lock ticket commands are
+  gone); §11's CLI table; S-BTN-189, S-BTN-199, S-BTN-234, S-BTN-241;
+  the Decisions entry for `baton ticket new`. The owner, 2026-11-24: "the baton cli should not write
+  ticket files, thats dibber's job", and in the same session: `baton tickets` keeps `next` and
+  `check`, and the course legs that file or mark tickets go through `dibber` too (B-326). Dibber
+  0.4.0 (DIB-33) takes a filing's number from a coordinator command, writes a whole ticket and a
+  reader's own keys. `baton ticket new`, `claim`, `set` and `done`, with the PR filing,
+  `--direct` and the `**Used by:**` reverse lines, are retired. What `claim` checked first —
+  Baton's position (B-129), the holders, the dependencies and the rules re-read guard — is
+  `baton ticket check <id> --claimable`, which writes nothing; a `rules re-read` note may be
+  Dibber's Status line. `baton repo init` writes `.dibber/config.json` with Baton as its
+  coordinator (`baton tickets next ticket-<prefix> --coordinator`: Baton's number or a refusal,
+  never a scan), and a leg's `dibber` is the one its stub pins. A marker leg's close keeps
+  writing its own keys: Dibber 0.4.0 cannot remove `next_leg` at an end, nor write a legacy-prefix
+  ticket, so that move waits on Dibber.
+
+- **2026-11-24 — The advance reply names the run's number (R-BTN-63, S-BTN-204).**
+  Rules changed: R-BTN-63, §14's advance row; S-BTN-204. The owner, 2026-11-24, on the
+  supervisor's report that the runner numbered a claim's runs 1, 3, 5: "Yes, fix now, and also
+  think of ways we can systematically prevent these errors from happening in the first place."
+  The runner handed each leg `ctx.run` from its own count — the earlier attempts' legs plus the
+  claim's own — while each leg the claim finished had already joined the first list, so a
+  claim's second review round reached 3 and the create-pr stub suspended it for `adjudicate`
+  (B-322 and B-324 on 2026-11-24, Baton's history showing run 2). Baton already counted the
+  runs, for `max_runs`, from its own record; the count had two homes. Now the `advance` that
+  starts a run answers `run`, counted as `max_runs` counts it, and the holder hands that to the
+  leg; a run an earlier claim abandoned is not one of them, as it never was for `max_runs`
+  (the history row's `run`, R-BTN-81, still counts every row). B-335.
+
 - **2026-11-24 — Access sign-in refusals name the failed check (R-BTN-155, S-BTN-318).**
   Previously missing settings, missing or unverifiable assertions, and missing administrator
   bindings all drew the same message. Missing Worker settings caused the 2026-11-23 sign-in

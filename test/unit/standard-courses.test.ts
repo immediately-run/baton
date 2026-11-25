@@ -135,6 +135,34 @@ describe('the standard courses (R-BTN-131)', () => {
     expect(text).toContain('Your word alone never closes the ticket');
   });
 
+  it('only implement and fix may ask in-session in either create-pr course (B-325, S-BTN-222)', () => {
+    const home = join(__dirname, '..', '..', '.baton', 'courses', 'create-pr');
+    for (const course of [builtIn('create-pr')!.course, JSON.parse(readFileSync(join(home, 'course.json'), 'utf8'))]) {
+      expect(validateCourse(course)).toEqual([]);
+      for (const leg of ['implement', 'fix']) {
+        expect(course.legs[leg].max_duration).toBe(10_800);
+        expect(course.legs[leg].autonomous).not.toBe(true);
+      }
+      for (const leg of ['review', 'run-tests', 'adjudicate', 'merge']) {
+        expect(course.legs[leg].autonomous).toBe(true);
+      }
+      expect(course.legs.confirm).not.toHaveProperty('autonomous');
+    }
+  });
+
+  it('implement and fix explain how to ask the owner, and distinguish dismissal from no answer (B-325, S-BTN-222)', () => {
+    for (const leg of ['implement', 'fix']) {
+      const text = readFileSync(join(instructionsDir('create-pr'), `${leg}.md`), 'utf8');
+      expect(text).toContain('Ask the owner only when blocked');
+      expect(text).toMatch(/decision only the owner can make,[\s\S]*the spec, `docs\/context\/` and the PR thread/);
+      expect(text).toMatch(/question tool\. Ask one question at a time,[\s\S]*recommend one\. Wait for the answer in the foreground/);
+      expect(text).toContain('do not raise it yourself');
+      expect(text).toContain('**Owner answers**');
+      expect(text).toMatch(/cancelled or dismissed[\s\S]*reading the spec supports best/);
+      expect(text).toMatch(/nobody answers[\s\S]*`deadline_s`[\s\S]*offers the ticket again if retries remain/);
+    }
+  });
+
   it("create-pr's implement and fix instructions carry the shared-file rule, and this repository's own .baton copies with them (B-102)", () => {
     const rule = "never edits a file another ticket's leg may edit";
     for (const leg of ['implement', 'fix']) {

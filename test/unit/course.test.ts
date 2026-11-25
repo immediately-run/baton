@@ -1,5 +1,5 @@
 // course.test.ts — R3-1231: the course file's rules (BATON_SPEC §2e R-BTN-69). The real
-// `roadmap-pr` file, vendored byte for byte from docs' .baton/ (scripts/vendor.mjs FIXTURES),
+// `roadmap-pr` file, captured as a test fixture,
 // passes; each rule has a file that breaks only it.
 import { describe, it, expect } from 'vitest';
 import roadmapPr from '../fixtures/courses/roadmap-pr/course.json';
@@ -220,7 +220,7 @@ describe('validateCourse (R-BTN-69)', () => {
 
   it('an input must read a declared output of a leg', () => {
     const c = copy();
-    c.legs.review.outputs = { findings: {} };
+    c.legs.review.outputs = { findings: { schema: 'std:url@1' } };
     c.legs.fix.inputs = { findings: { from: 'review.nope' } };
     expect(rules(c)).toEqual(['input legs.fix.inputs.findings.from']);
     c.legs.fix.inputs = { findings: { from: 'ghost.findings' } };
@@ -273,11 +273,19 @@ describe('validateCourse (R-BTN-69)', () => {
   it('short_waits labels and input and output names are not station ids (review gate 1-B-2)', () => {
     const c = copy();
     c.short_waits = ['ci', 'review_seats', 'CI', 'ci:main'];
-    c.legs.review.outputs = { pr_url: {}, Findings: {} };
+    c.legs.review.outputs = { pr_url: { schema: 'std:url@1' }, Findings: { schema: 'std:url@1' } };
     c.legs.fix.inputs = { pr_url: { from: 'review.pr_url' } };
     expect(validateCourse(c)).toEqual([]);
-    c.legs.review.outputs = { 'a.b': {} };
+    c.legs.review.outputs = { 'a.b': { schema: 'std:url@1' } };
     expect(rules(c)).toContain('id legs.review.outputs.a.b');
+  });
+
+  it('S-BTN-48: contract output declarations fit the wire envelope limit and require schemas', () => {
+    const c = copy();
+    c.legs.review.outputs = { findings: {} };
+    expect(rules(c)).toContain('shape legs.review.outputs.findings.schema');
+    c.legs.review.outputs = Object.fromEntries(Array.from({ length: 17 }, (_, i) => [`o${i}`, { schema: 'std:url@1' }]));
+    expect(rules(c)).toContain('shape legs.review.outputs');
   });
 
   it('a repeated station in a from or to names the same edge (review gate 1-B-3)', () => {

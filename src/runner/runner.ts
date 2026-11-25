@@ -2,7 +2,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { writeSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
-import { batonNow } from '../vendor/baton.mjs';
+import { batonNow } from '../shared/baton.mjs';
 import type { LocalQueue } from './queue';
 import type { RefState } from './audit';
 import { BatonApi, BatonRefusal, batonUnreachable } from './api';
@@ -604,6 +604,11 @@ export class Runner {
       if (def == null || at == null) {
         dropCourse(course.scratch);
         wait(order.ticket_id, def == null ? `${leg} is not a leg of course ${course.course}` : `${leg} leaves ${def.from.join(' or ')}, and without Baton the runner cannot tell where the ticket rests`);
+        continue;
+      }
+      if (Object.keys(def.inputs ?? {}).length || def.outputs || def.to.some((station) => course.graph.entry.has(station))) {
+        dropCourse(course.scratch);
+        wait(order.ticket_id, `${leg} needs Baton for its contract or station entry (R-BTN-82)`);
         continue;
       }
       this.saidOffline.delete(order.ticket_id);

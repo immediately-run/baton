@@ -2,8 +2,8 @@
 title: "B-312 — Session links carry a capability: serve them only to sessions, their own runner and interact deliveries; never log or export them"
 id: B-312
 project: baton
-status: available
-updated: 2026-11-21
+status: done
+updated: 2026-11-25
 tags:
   - roadmap-item
   - EXPEDITE
@@ -12,7 +12,7 @@ description: "Fieldhouse leg-page links now carry a per-run bearer token (fieldh
 topics:
   - baton
 owns: {}
-prs: []
+prs: [https://github.com/immediately-run/baton/pull/325]
 depends_on: []
 ---
 
@@ -34,8 +34,8 @@ All of these are open to every reader principal, runner keys included (§12.1). 
 machine key, a compromised runner's included, holds a capability to every other run's session.
 The link may also reach places a pointer never mattered in: events, exports, logs.
 
-**Spec:** BATON_SPEC R-BTN-113 (§8, a leg run carries its session's link), R-BTN-33 (§1,
-pointers, never content), R-BTN-195 (§7, `interact`), R-BTN-129 and §12.1 (principals), §14 (the
+**Spec:** BATON_SPEC [R-BTN-113](../../spec/BATON_SPEC/08-runners.md#sec-8-3) ([§8](../../spec/BATON_SPEC/08-runners.md#sec-8), a leg run carries its session's link), [R-BTN-33](../../spec/BATON_SPEC/01-what-baton-is.md#sec-1) ([§1](../../spec/BATON_SPEC/01-what-baton-is.md#sec-1),
+pointers, never content), [R-BTN-195](../../spec/BATON_SPEC/07-conditions.md#sec-7-1) ([§7](../../spec/BATON_SPEC/07-conditions.md#sec-7), `interact`), [R-BTN-129](../../spec/BATON_SPEC/11-people.md#sec-11-3) and [§12.1](../../spec/BATON_SPEC/12-security.md#sec-12-1) (principals), [§14](../../spec/BATON_SPEC/14-api.md#sec-14) (the
 reads that serve `session_url`).
 
 ## Plan

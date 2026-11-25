@@ -1,9 +1,97 @@
-// ../../../../../../../../tmp/baton-bundle-5DByf4/entry.ts
+// ../../../../tmp/baton-bundle-7qJjuQ/entry.ts
 import { execFileSync as execFileSync2 } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
+
+// src/shared/schema.mjs
+var SCHEMA_MAX_BYTES = 32 * 1024;
+
+// src/shared/vocabulary.mjs
+var CAPABILITIES = [
+  "authentication",
+  // a signed-in product session (the OAuth round-trip is done)
+  "llm-call",
+  // a working provider round (key + transport, relayed or browser-direct)
+  "create-pr",
+  // a GitHub write identity (fork/branch/PR)
+  "drivable-browser"
+  // an agent-driven Chromium with network/console observation
+];
+var ROLES = {
+  "agent-venue": ["authentication", "llm-call", "create-pr", "drivable-browser"]
+};
+var RESOURCES = [
+  "none",
+  "terraform",
+  "npm-publish",
+  // A NEW package's first publish: the trusted-publisher binding on npmjs.com is set by a
+  // scope admin by hand. A version bump of an existing package is `npm-publish`, which the
+  // agent line holds (bump + merge; CI publishes through OIDC after the release approval).
+  "npm-scope-admin",
+  "mcp-chrome",
+  "local-host",
+  "real-iphone",
+  "gcloud-admin",
+  "github-admin",
+  // BATON_SPEC (2026-10-13): authority on the Cloudflare account behind
+  // baton.immediately.run — Workers, Durable Objects, DNS routes, Access, the plan.
+  "cloudflare-admin",
+  // BATON_SPEC: a session registered with Baton — a runner token for its host and a
+  // running sidecar. Agent-held once the fleet is provisioned (AGENT_HOLDS).
+  "baton-worker",
+  "human-operator",
+  // R3-671/672: the standing venue — a ROLE per the 2026-09-22 model; clause-valid
+  // during the sweep (items still naming it translate to capabilities).
+  "agent-venue"
+];
+var CLAUSE_NAMES = [.../* @__PURE__ */ new Set([...CAPABILITIES, ...Object.keys(ROLES), ...RESOURCES])];
+var AGENT_HOLDS = /* @__PURE__ */ new Set([...CAPABILITIES, "agent-venue", "mcp-chrome", "local-host", "npm-publish", "baton-worker", "none"]);
+
+// src/core/course.ts
+var VOCABULARY = /* @__PURE__ */ new Set([...Object.keys(ROLES), ...Object.values(ROLES).flat(), "human-operator", "none"]);
+var EXPIRES_AFTER_MAX = 30 * 86400;
+
+// src/core/validate.ts
+var REPOSITORY_SRC = "[a-z][a-z0-9-]{0,39}";
+var LOCAL_SRC = "[A-Za-z0-9][A-Za-z0-9._-]{0,63}";
+var REPOSITORY_ID = new RegExp(`^${REPOSITORY_SRC}$`);
+var LOCAL_ID = new RegExp(`^${LOCAL_SRC}$`);
+var TICKET_ID = new RegExp(`^(${REPOSITORY_SRC}):(${LOCAL_SRC})$`);
+var DEPENDENCY_ID = new RegExp(`^(?:${REPOSITORY_SRC}:${LOCAL_SRC}|${LOCAL_SRC})$`);
+var NAME = /^[a-z0-9][a-z0-9-]{0,63}$/;
+var HOLDING_TYPE = "[a-z][a-z0-9-]{0,31}";
+var HOLDING_VALUE = "[A-Za-z0-9:._/@-]{1,128}";
+var HOLDING = new RegExp(`^${HOLDING_TYPE}:${HOLDING_VALUE}$`);
+var REPORT_HORIZON_MS = 6 * 36e5;
+var NUM = "number";
+var BOOL = "boolean";
+var PR = "pr";
+var TEXT = "text";
+var COMMON = { pr: PR, exit_code: NUM, note: TEXT };
+var DETAIL_SCHEMAS = {
+  orient: { ...COMMON },
+  implement: { ...COMMON },
+  "local-verify": { ...COMMON, passed: BOOL },
+  "open-pr": { ...COMMON },
+  push: { ...COMMON, branch: TEXT, sha: TEXT },
+  "ci-wait": { ...COMMON, conclusion: TEXT },
+  "review-round": { ...COMMON, findings: NUM, blocking: NUM, should_fix: NUM, nit: NUM },
+  reviewer: { ...COMMON, agent: TEXT, model: TEXT, substituted_for: TEXT, findings: NUM, blocking: NUM },
+  "fix-findings": { ...COMMON, fixed: NUM, argued: NUM },
+  adjudicate: { ...COMMON, reproduced: BOOL },
+  merge: { ...COMMON, sha: TEXT },
+  reconcile: { ...COMMON, archived: NUM },
+  "status-write": { ...COMMON, status: TEXT, item: TEXT },
+  "decision-packet": { ...COMMON, item: TEXT },
+  other: { ...COMMON }
+};
+var CAPABILITY_NAME = new RegExp(`^(?:${NAME.source}|${HOLDING.source.slice(1, -1)})$`);
+var VALID_FOR = { default_s: 3600, state_s: 24 * 3600, measure_s: 31 * 24 * 3600 };
+
+// src/defaults/output-evidence.ts
+var MAX = 256 * 1024;
 
 // src/defaults/ticket-state.ts
 import { execFileSync } from "node:child_process";
@@ -79,6 +167,7 @@ function testsClose(ctx, result, run2 = exec) {
 
 // src/defaults/course-pr.ts
 var DEFAULT_BRANCH_PATTERN = "claude/{ticket}-*";
+var CREATE_PR_ASK_DEADLINE_S = 3 * 60 * 60;
 function branchMatches(pattern, branch) {
   const p = pattern.toLowerCase();
   const b = branch.toLowerCase();
@@ -114,7 +203,7 @@ function ticketRepositories(text, reposMap) {
   return names.map((r) => typeof r === "string" && /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(r) ? r : reposMap?.[r]).filter((r) => typeof r === "string" && r !== "");
 }
 
-// ../../../../../../../../tmp/baton-bundle-5DByf4/entry.ts
+// ../../../../tmp/baton-bundle-7qJjuQ/entry.ts
 var GIT_BOUND_MS = 12e4;
 var GIT_ENV = { "GIT_TERMINAL_PROMPT": "0", "GIT_SSH_COMMAND": "ssh -o BatchMode=yes -o ConnectTimeout=20" };
 var gitRun = (args, opts = {}) => execFileSync2("git", args, { encoding: "utf8", timeout: GIT_BOUND_MS, killSignal: "SIGKILL", env: { ...process.env, ...GIT_ENV }, stdio: ["ignore", "pipe", "pipe"], ...opts });

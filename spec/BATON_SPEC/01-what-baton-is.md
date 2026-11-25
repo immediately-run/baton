@@ -43,7 +43,7 @@ resumed by a **restart** (§7). "Workflow" means only a CI workflow; "activity" 
     to Baton, not in it, and goes to the owner.
   - **Legacy, removed with its code.** What remains of coordinating through git is marked legacy
     where it is specified, is never extended, and leaves with the work that retires each (B-176,
-    B-178): the git-lock ticket commands (R-BTN-74); the next-free scans of git; the cutover and
+    B-178): the next-free scans of git; the cutover and
     the mirror, which serve a repository that coordinated its claims through git before Baton
     (§16); and every passage elsewhere that serves only one of these. A collision one still produces is caught by the sync's duplicate-id
     refusal (R-BTN-74, R-BTN-147) or at merge.
@@ -55,8 +55,8 @@ resumed by a **restart** (§7). "Workflow" means only a CI workflow; "activity" 
   criteria, a PR list or other prose; the dashboard links each ticket that has a `path` to its
   file on the forge.
   - It may hold **pointers and digests, never content**: evidence pointers, input and output URIs
-    and digests (R-BTN-82, R-BTN-83), a leg run's log directory (R-BTN-128), session and
-    transcript pointers, and the credential id that answered a condition (R-BTN-163). A leg's
+    and digests (R-BTN-82, R-BTN-83), a leg run's log directory (R-BTN-128), session pointers (which may themselves be credentials, R-BTN-113), transcript pointers, and
+    the credential id that answered a condition (R-BTN-163). A leg's
     output never passes through Baton (R-BTN-128); the one inline output value is R-BTN-108's.
   - **Opaque blobs** are the other inline values, capped by §12.3: course fields and course data,
     profiles, reports, `rationale`, a reading's `detail`. Core never reads them, so it cannot stop
