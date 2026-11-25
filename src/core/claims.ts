@@ -2831,12 +2831,13 @@ export class Claims {
     const activities = groupBy(this.forIds(ids,
       `SELECT claim_id, id, kind, label, started_at, ended_at, outcome, parent_id FROM activities
        WHERE claim_id IN (SELECT value FROM json_each(?)) ORDER BY claim_id, started_at, rowid`, ids));
-    return active.map((c) => {
-      const alive = isClaimLeaseLive(c, now);
+    return active.map(({ api_lease_cap_at, ...c }) => {
+      const lease = { ...c, api_lease_cap_at };
+      const alive = isClaimLeaseLive(lease, now);
       return {
         ...c,
         alive,
-        reap_at: c.kind === 'legacy' ? null : claimLeaseEndsAt(c),
+        reap_at: c.kind === 'legacy' ? null : claimLeaseEndsAt(lease),
         stalled: alive && (c.last_activity_at == null ? now - (c.claimed_at as number) : now - (c.last_activity_at as number)) > STALLED_MS,
         events: events.get(c.id as number) ?? [],
         activities: activities.get(c.id as number) ?? [],
