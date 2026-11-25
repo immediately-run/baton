@@ -8,7 +8,7 @@
 // key's signature, its no-CI path.
 // Course code in the CLI, never core (§2b). Reached through the esbuild bundle
 // (scripts/baton-cli.mjs), the way `baton run` reaches src/runner.
-import { outputAttestation, syncAttestationBatch, TICKET_OUTPUT_WITNESS } from './output-evidence';
+import { outputAttestation, syncAttestationBatch, ticketOutputWitness } from './output-evidence';
 import { hostOf } from './forge';
 import type { PostedAttestation } from '../core/board';
 import { execFileSync } from 'node:child_process';
@@ -380,7 +380,7 @@ async function readBoard(root: string, batonJson: BatonJson, args: SyncArgs, log
     }
   }
   const outputEvidence: PostedAttestation[] = [];
-  const ticketOutputEvidence: PostedAttestation[] = [];
+  const ticketOutputEvidence: TicketOutputEvidence[] = [];
   // B-100: the ticket is the record. One traversal of the repository's history groups every
   // `baton:close <id> <leg>` commit by ticket; each live ticket's closes — oldest first — are
   // attached to its opaque `course` blob, which the station functions read, with its
@@ -397,8 +397,11 @@ async function readBoard(root: string, batonJson: BatonJson, args: SyncArgs, log
     const fm = existsSync(join(root, t.path)) ? parseFrontmatter(readFileSync(join(root, t.path), 'utf8')) : null;
     if (!commits.length && fm?.station === undefined) continue;
     if (plain || githubHome) for (const { sha, leg } of commits) {
-      const a = outputAttestation(git(root, 'show', '-s', '--format=%b', sha), sha);
-      if (a?.ticket === t.id && (a.value as { leg: string }).leg === leg) (plain ? outputEvidence : ticketOutputEvidence).push(a);
+      const [parent, ...body] = git(root, 'show', '-s', '--format=%P%n%b', sha).split('\n');
+      const a = outputAttestation(body.join('\n'), sha);
+      if (a?.ticket !== t.id || (a.value as { leg: string }).leg !== leg) continue;
+      if (plain) outputEvidence.push(a);
+      else if (/^[0-9a-f]{40}$/.test(parent)) ticketOutputEvidence.push({ attestation: a, parent });
     }
     const closes = closesOfCommits((args) => git(root, ...args), t.path, t.id, commits);
     t.course = { ...(t.course ?? {}), closes, ...machineOf(fm) };
@@ -989,9 +992,11 @@ function githubConn(host: string): { host: string; rest: string; graphql: string
     : { host, rest: `https://${host}/api/v3`, graphql: `https://${host}/api/graphql` };
 }
 
+interface TicketOutputEvidence { attestation: PostedAttestation; parent: string }
+
 export async function githubFacts(root: string, log: (l: string) => void, owns: (pr: { number: number; head: string; repository: string }) => boolean, siblings: { repository: string; tickets: string[] }[] = [], obs: { codeRepos?: CodeRepoEntry[]; pushers?: { host: string; id: string }[]; outputEvidence?: PostedAttestation[];
   ownsOutput?: (ticket: string, pr: { number: number; head: string; repository: string }, fork: boolean) => boolean;
-  ticketOutputEvidence?: PostedAttestation[];
+  ticketOutputEvidence?: TicketOutputEvidence[];
   readPrs?: boolean;
 } = {}): Promise<PrFact[]> {
   const slug = remoteSlug(root);
@@ -1182,18 +1187,19 @@ export async function githubFacts(root: string, log: (l: string) => void, owns: 
     const query = `query($owner: String!, $name: String!, $sha: GitObjectID!, $after: String!) { repository(owner: $owner, name: $name) { object(oid: $sha) { ... on Commit { ${fields(', after: $after')} } } } }`;
     for (let i = 0; i < obs.ticketOutputEvidence.length; i += GRAPHQL_BATCH) {
       const batch = obs.ticketOutputEvidence.slice(i, i + GRAPHQL_BATCH);
-      const objects = batch.map((a, j) => `c${j}: object(oid: ${JSON.stringify(a.ref)}) { ... on Commit { ${fields()} } }`).join(' ');
+      const objects = batch.map(({ parent }, j) => `c${j}: object(oid: ${JSON.stringify(parent)}) { ... on Commit { ${fields()} } }`).join(' ');
       const first = (await graphql(conn, `query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { ${objects} } }`, { owner, name })).data?.repository;
-      for (const [j, a] of batch.entries()) {
+      for (const [j, { attestation, parent }] of batch.entries()) {
         const commit = first?.[`c${j}`];
-        if (!commit || commit.oid !== a.ref) continue;
+        if (!commit || commit.oid !== parent || !attestation.ref) continue;
         const comments = await commentNodes(commit.comments, async (after) => {
-          const next = (await graphql(conn, query, { owner, name, sha: a.ref, after })).data?.repository?.object;
-          return next?.oid === a.ref ? next.comments : null;
+          const next = (await graphql(conn, query, { owner, name, sha: parent, after })).data?.repository?.object;
+          return next?.oid === parent ? next.comments : null;
         });
-        const witnesses = comments.filter((c) => c?.body === TICKET_OUTPUT_WITNESS && unedited(c))
+        const witnessBody = ticketOutputWitness(attestation.ref);
+        const witnesses = comments.filter((c) => c?.body === witnessBody && unedited(c))
           .map((c) => ({ login: c.author?.login, userId: c.author?.databaseId, association: c.authorAssociation }));
-        if ((await trustedOnly(conn, home, witnesses)).length) obs.outputEvidence?.push(a);
+        if ((await trustedOnly(conn, home, witnesses)).length) obs.outputEvidence?.push(attestation);
       }
     }
   }

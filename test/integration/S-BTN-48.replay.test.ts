@@ -21,9 +21,9 @@ import { Runner } from '../../src/runner/runner';
 import { BatonApi } from '../../src/runner/api';
 import { replayMain } from '../../src/runner/replay';
 import { closeTicket, exec } from '../../src/defaults/ticket-state';
-import { TICKET_OUTPUT_WITNESS } from '../../src/defaults/output-evidence';
+import { ticketOutputWitness } from '../../src/defaults/output-evidence';
 import { githubFake } from '../githubFake';
-import { call, ORIGIN, TOKENS, advance, claimItem, cutover, endClaim, makeApiKey, register, rows, setAdminKeys, setClock, syncToken } from '../helpers';
+import { SYNC_CLAIMS, call, ORIGIN, TOKENS, advance, claimItem, cutover, endClaim, makeApiKey, register, rows, setAdminKeys, setClock, syncToken } from '../helpers';
 
 const T0 = Date.parse('2026-11-13T12:00:00Z');
 const sha256 = (text: string) => `sha256:${createHash('sha256').update(text, 'utf8').digest('hex')}`;
@@ -75,8 +75,8 @@ class Repo {
     g('init', '-q', '-b', 'main');
     g('config', 'user.email', 'relay@test');
     g('config', 'user.name', 'relay test');
-    g('remote', 'add', 'origin', 'https://github.com/immediately-run/docs.git');
-    g('config', `url.${origin}.insteadOf`, 'https://github.com/immediately-run/docs.git');
+    g('remote', 'add', 'origin', `https://github.com/${SYNC_CLAIMS.repository}.git`);
+    g('config', `url.${origin}.insteadOf`, `https://github.com/${SYNC_CLAIMS.repository}.git`);
     mkdirSync(join(this.dir, 'tickets'), { recursive: true });
     this.store = join(mkdtempSync(join(tmpdir(), 'baton-s48-store-')), 'store.json');
   }
@@ -237,7 +237,7 @@ describe('S-BTN-48 replay: a recorded run re-run without a claim', () => {
     expect(compared.report.refused).toMatch(/deliver at --against is marked/);
   });
 
-  it('recovers a GitHub ticket close after claim loss only with an unedited pusher witness', async () => {
+  it.each([false, true])('publishes only witnessed GitHub ticket closes (retry after failure: %s)', async (retry) => {
     repo = new Repo(false);
     repos.push(repo);
     await repo.setup();
@@ -252,39 +252,57 @@ describe('S-BTN-48 replay: a recorded run re-run without a claim', () => {
       apply: { from: ['planned'], to: 'done', inputs: { plan: { from: 'implement.plan' } } },
     } }));
     writeFileSync(join(repo.dir, 'tickets', 'one.mdx'), '---\nid: T-1\ntitle: One\ntier: routine\n---\n## implement\nThe plan.\n');
-    repo.commit('output contract');
+    const parent = repo.commit('output contract');
     await repo.sync();
     const { secret } = await register('vm-a', { courses: [{ repository: 'docs', course: 'create-pr', version: 1 }] });
     const offered = (await claimItem('vm-a', secret, { ticket_id: 'docs:T-1' })).json;
     const started = (await advance('vm-a', secret, offered.claim_id, { leg: 'implement' })).json;
     const ghCalls: string[][] = [];
-    const origin = g('config', 'remote.origin.url');
     const localRemote = g('remote', 'get-url', 'origin');
-    const close = await closeTicket({ checkout: repo.dir, ticket: { id: 'docs:T-1', path: 'tickets/one.mdx', home: 'docs' }, leg: 'implement', claim: offered, run_id: started.run_id }, {
+    const origin = `ssh://git@github.com/${SYNC_CLAIMS.repository}.git`;
+    const remoteHead = () => g('ls-remote', 'origin', 'refs/heads/main').split(/\s/)[0];
+    let failWitness = true;
+    const publish = () => closeTicket({ checkout: repo.dir, ticket: { id: 'docs:T-1', path: 'tickets/one.mdx', home: 'docs' }, leg: 'implement', claim: offered, run_id: started.run_id }, {
       reached: 'planned', next: 'apply', outputs: [{ name: 'plan', schema: 'std:url@1', value: { url: 'https://example.test' } }],
     }, (cmd, args, cwd, opts) => {
-      if (cmd === 'gh') { ghCalls.push(args); return '{}'; }
+      if (cmd === 'gh') {
+        expect(remoteHead()).toBe(parent);
+        ghCalls.push(args);
+        if (failWitness) throw new Error('witness POST failed');
+        return '{}';
+      }
       if (args.join(' ') === 'remote get-url origin') return origin;
       return exec(cmd, args, cwd, opts);
     });
-    expect(ghCalls).toEqual([['api', '--hostname', 'github.com', '-X', 'POST', `repos/immediately-run/docs/commits/${close}/comments`, '-f', `body=${TICKET_OUTPUT_WITNESS}`]]);
+    await expect(publish()).rejects.toThrow('witness POST failed');
+    expect(remoteHead()).toBe(parent);
+    failWitness = false;
+    const close = retry ? await publish() : parent;
+    expect(ghCalls).toHaveLength(retry ? 2 : 1);
+    if (retry) {
+      expect(g('rev-parse', `${close}^`)).toBe(parent);
+      expect(remoteHead()).toBe(close);
+      expect(ghCalls[1]).toEqual(['api', '--hostname', 'github.com', '-X', 'POST', `repos/${SYNC_CLAIMS.repository}/commits/${parent}/comments`, '-f', `body=${ticketOutputWitness(close)}`]);
+    }
     expect((await endClaim('vm-a', secret, offered.claim_id, { end_reason: 'released:requested' })).status).toBe(200);
     g('checkout', '--detach', close);
     g('config', '--unset', `url.${localRemote}.insteadOf`);
+    g('remote', 'set-url', 'origin', origin);
     vi.stubEnv('GITHUB_TOKEN', 'test-token');
     const token = await syncToken();
     const sync = async (comments: unknown[]) => {
       vi.stubGlobal('fetch', githubFake({
-        '/repos/immediately-run/docs/pulls?state=all': [],
-        [`/repos/immediately-run/docs/commits/${close}/comments`]: comments,
-        '/repos/immediately-run/docs/collaborators/writer/permission': { permission: 'write' },
-        '/repos/immediately-run/docs/collaborators/reader/permission': { permission: 'read' },
+        `/repos/${SYNC_CLAIMS.repository}/pulls?state=all`: [],
+        [`/repos/${SYNC_CLAIMS.repository}/commits/${parent}/comments`]: comments,
+        `/repos/${SYNC_CLAIMS.repository}/collaborators/writer/permission`: { permission: 'write' },
+        `/repos/${SYNC_CLAIMS.repository}/collaborators/reader/permission`: { permission: 'read' },
       }));
       expect(await syncMain({ root: repo.dir, url: ORIGIN, auth: () => ({ Authorization: `Bearer ${token}` }), transport: hostCall, log: () => {} })).toBe(0);
     };
-    const witness = { body: TICKET_OUTPUT_WITNESS, user: { login: 'writer' }, author_association: 'MEMBER' };
-    await sync([{ ...witness, user: { login: 'reader' } }, { ...witness, includes_created_edit: true }]);
+    const witness = { body: ticketOutputWitness(close), user: { login: 'writer' }, author_association: 'MEMBER' };
+    await sync([{ ...witness, user: { login: 'reader' } }, { ...witness, includes_created_edit: true }, { ...witness, body: ticketOutputWitness('a'.repeat(40)) }]);
     expect(await rows('SELECT name FROM leg_outputs')).toEqual([]);
+    if (!retry) return;
     await sync([witness]);
     expect(await rows('SELECT name, source, confirmed FROM leg_outputs')).toEqual([{ name: 'plan', source: 'sync', confirmed: 1 }]);
   });
@@ -305,7 +323,7 @@ describe('S-BTN-48 replay: a recorded run re-run without a claim', () => {
       apply: { from: ['planned'], to: 'done', inputs: { plan: { from: 'implement.plan' } } },
     } }));
     writeFileSync(join(dir, 'legs', 'implement.mjs'), `import { writeFileSync } from 'node:fs';
-export function run() { return { reached: 'planned', next: 'apply', outputs: [{ name: 'plan', schema: 'std:url@1', uri: 'git:immediately-run/docs@${artifact}:plan.json' }] }; }
+export function run() { return { reached: 'planned', next: 'apply', outputs: [{ name: 'plan', schema: 'std:url@1', uri: 'git:${SYNC_CLAIMS.repository}@${artifact}:plan.json' }] }; }
 export function close(ctx) { writeFileSync(ctx.checkout + '/producer-closed', 'yes'); return '${artifact}'; }
 export function handoff() { return null; }
 `);
@@ -346,7 +364,7 @@ export function handoff() { return null; }
       expect(again.report.inputs).toMatchObject([{ name: 'plan', ok: true }]);
       expect(again.report.wrote_to_baton).toBe(false);
       const [{ nonce }] = await rows<{ nonce: string }>('SELECT nonce FROM claims');
-      const outputs = encodeURIComponent(JSON.stringify([{ name: 'plan', schema: 'std:url@1', uri: `git:immediately-run/docs@${artifact}:plan.json` }]));
+      const outputs = encodeURIComponent(JSON.stringify([{ name: 'plan', schema: 'std:url@1', uri: `git:${SYNC_CLAIMS.repository}@${artifact}:plan.json` }]));
       writeFileSync(join(dir, 'sync.mjs'), `export default { stations() { return { stations: {}, markers: ${JSON.stringify([
         { ticket: 'T-1', leg: 'implement', ref: artifact, claim_nonce: nonce, outputs },
       ])} }; } };`);
@@ -499,7 +517,7 @@ export function handoff() { return null; }
     // the report a runner makes at a run's start (R-BTN-82), here with an input to check.
     writeFileSync(join(repo.dir, 'plan.txt'), 'the plan as the run read it\n');
     const planSha = repo.commit('the plan');
-    const uri = `git:immediately-run/docs@${planSha}:plan.txt`;
+    const uri = `git:${SYNC_CLAIMS.repository}@${planSha}:plan.txt`;
     const { secret } = await register('vm-a', { courses: [{ repository: 'docs', course: 'create-pr', version: 1 }] });
     const claim = await claimItem('vm-a', secret, { ticket_id: 'docs:T-1' });
     const started = await advance('vm-a', secret, claim.json.claim_id, {

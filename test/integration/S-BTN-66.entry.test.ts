@@ -7,7 +7,7 @@
 // Runs on both hosts.
 import { describe, it, expect, beforeEach } from 'vitest';
 import roadmapPr from '../fixtures/courses/roadmap-pr/course.json';
-import { advance, claimItem, course, cutover, endClaim, Git, placed, register, setClock } from '../helpers';
+import { SYNC_CLAIMS, advance, claimItem, course, cutover, endClaim, Git, placed, register, setClock } from '../helpers';
 
 const T0 = Date.parse('2026-10-20T09:00:00Z');
 const FINDINGS = { type: 'object', additionalProperties: false, properties: { open: { type: 'integer', minimum: 0 }, url: { type: 'string', maxLength: 256 } }, required: ['open'] };
@@ -63,7 +63,7 @@ describe('S-BTN-66 entry requirements', () => {
 
   it('a pointer meets the requirement by name and schema; its contents are the sync\'s to check', async () => {
     const { secret, claim } = await reviewing('docs:T-1');
-    expect((await advance('vm-a', secret, claim, { reached: 'reviewed', leg: 'fix', outputs: [{ name: 'findings', schema: 'roadmap-pr:findings@2', uri: `git:immediately-run/docs@${SHA}:reviews/T-1.json` }] })).json)
+    expect((await advance('vm-a', secret, claim, { reached: 'reviewed', leg: 'fix', outputs: [{ name: 'findings', schema: 'roadmap-pr:findings@2', uri: `git:${SYNC_CLAIMS.repository}@${SHA}:reviews/T-1.json` }] })).json)
       .toMatchObject({ ok: true, station: 'reviewed' });
   });
 
@@ -91,7 +91,7 @@ describe('S-BTN-66 entry requirements', () => {
     // An inline value whose schema does not bound it is given by pointer instead (R-BTN-108).
     const notes = { name: 'notes', schema: 'roadmap-pr:notes@1', value: { text: 'short' } };
     expect(await outputsOf([notes, { name: 'findings', schema: 'roadmap-pr:findings@2', value: { open: 1 } }])).toMatchObject({ code: 'invalid-params' });
-    expect(await outputsOf([{ name: 'notes', schema: 'roadmap-pr:notes@1', uri: `git:immediately-run/docs@${SHA}:notes.md` }, { name: 'findings', schema: 'roadmap-pr:findings@2', value: { open: 1 } }]))
+    expect(await outputsOf([{ name: 'notes', schema: 'roadmap-pr:notes@1', uri: `git:${SYNC_CLAIMS.repository}@${SHA}:notes.md` }, { name: 'findings', schema: 'roadmap-pr:findings@2', value: { open: 1 } }]))
       .toMatchObject({ ok: true });
   });
 });

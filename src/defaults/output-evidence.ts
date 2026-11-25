@@ -5,21 +5,22 @@ import type { PostedAttestation } from '../core/board';
 const PREFIX = 'Baton-Output: ';
 const MAX = 256 * 1024;
 
-/** A forge comment vouches for the immutable commit it is attached to, not arbitrary Git authorship. */
-export const TICKET_OUTPUT_WITNESS = 'baton: ticket close outputs';
+/** Posted on the already-published parent before pushing the close. Its exact SHA binds the
+ * witness to the immutable close (including its outputs), without trusting git authorship. */
+export const ticketOutputWitness = (close: string): string => `baton: ticket close outputs ${close}`;
 
 export function syncAttestationBatch(confirmation: PostedAttestation[], outputs: PostedAttestation[], observation: number): PostedAttestation[] {
   const limit = 100;
   if (confirmation.length + outputs.length <= limit) return [...confirmation, ...outputs];
   // Both streams get room. Consecutive observations page through the same evidence instead of
   // taking its first page forever; a later sweep can revisit a marker seen while its claim lived.
-  const capacity = Math.min(confirmation.length, limit - Math.min(outputs.length, limit / 2));
+  const outputPageSize = Math.min(outputs.length, limit / 2);
   const page = (items: PostedAttestation[], size: number) => {
     if (size === 0 || items.length <= size) return items.slice(0, size);
     const start = ((observation - 1) % Math.ceil(items.length / size)) * size;
     return items.slice(start, start + size);
   };
-  return [...page(confirmation, capacity), ...page(outputs, limit - capacity)];
+  return [...page(confirmation, limit - outputPageSize), ...page(outputs, outputPageSize)];
 }
 
 interface OutputContext {

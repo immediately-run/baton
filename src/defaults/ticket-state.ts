@@ -8,7 +8,7 @@
 // frontmatter against the repository's own item schema, the machine fields' types, and the
 // presence of this leg's heading: trust nothing the agent touched, check everything the
 // machine reads (the owner's decision, 2026-10-22). Course code in the CLI, never core (§2b).
-import { outputLine, TICKET_OUTPUT_WITNESS } from './output-evidence';
+import { outputLine, ticketOutputWitness } from './output-evidence';
 import { hostOf } from './forge';
 import { slugOfUrl } from './remote-slug';
 import { execFileSync } from 'node:child_process';
@@ -370,16 +370,16 @@ export async function closeTicket(
       git(['update-index', '--add', '--cacheinfo', `100644,${blob},${ctx.ticket.path}`], { env });
       const tree = git(['write-tree'], { env });
       const commit = git(['commit-tree', tree, '-p', parent, '-m', `baton:close ${id} ${ctx.leg}`, ...(marker ? ['-m', marker] : [])]);
+      // The parent is already on the forge; the child need not be. If witnessing fails,
+      // nothing has been pushed. If a push races, a witness for the unpublished SHA is inert.
+      if (githubRepo) run('gh', ['api', '--hostname', 'github.com', '-X', 'POST',
+        `repos/${githubRepo}/commits/${parent}/comments`, '-f', `body=${ticketOutputWitness(commit)}`], ctx.checkout);
       try {
         git(['push', 'origin', `${commit}:refs/heads/${branch}`]);
       } catch (e) {
         if (!movedOnRemote(e) || tries >= PUSH_TRIES) throw e;
         continue;
       }
-      // The commit API authenticates the commenter. The comment only vouches for this SHA;
-      // outputs (possibly larger than a GitHub comment) stay in the unchanged commit message.
-      if (githubRepo) run('gh', ['api', '--hostname', 'github.com', '-X', 'POST',
-        `repos/${githubRepo}/commits/${commit}/comments`, '-f', `body=${TICKET_OUTPUT_WITNESS}`], ctx.checkout);
       return commit;
     }
   } finally {

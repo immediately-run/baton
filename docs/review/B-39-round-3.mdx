@@ -1,0 +1,13 @@
+---
+title: B-39 review round 3
+description: Findings and disposition for the third review of Baton leg contracts and replay.
+---
+
+The [review of PR #308](https://github.com/immediately-run/baton/pull/308#pullrequestreview-6056398459)
+at `9e2bd64c` asked for changes.
+
+| Finding | Disposition |
+| --- | --- |
+| [Claim loss between the close push and its witness](https://github.com/immediately-run/baton/pull/308#discussion_r4693939403) | Post the witness on the already published parent, naming the exact child SHA, before pushing the close. A failed POST leaves the branch unchanged; sync checks the witness author, edit metadata and exact SHA. The two-host test covers claim loss after a failed POST and after a successful retry. |
+| [Changing confirmation volume can skip output markers](https://github.com/immediately-run/baton/pull/308#discussion_r4693939410) | Use an output page size independent of confirmation volume. The regression checks all 198 markers with alternating confirmation counts. |
+| [SSH URL origins produce a malformed GitHub slug](https://github.com/immediately-run/baton/pull/308#discussion_r4693939419) | The shared repository parser now accepts `ssh://` URLs. The two-host close and sync test uses this origin format. |

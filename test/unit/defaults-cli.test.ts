@@ -2030,14 +2030,13 @@ describe('githubFacts (R-BTN-96’s GitHub adapter) against a recorded GitHub', 
     expect(outputEvidence).toEqual([expect.objectContaining({ type: 'std:git.output@1', ticket: 'A-1', ref: `${base.html_url}#issuecomment-1` })]);
   });
 
-  it('S-BTN-48: successive observations post beyond a full historical output prefix', () => {
+  it('S-BTN-48: output pages make progress as confirmation volume changes', () => {
     const confirmation = [{ type: 'std:git.evidence@1', ticket: 'A-1', value: {} }];
-    const outputs = Array.from({ length: 101 }, (_, i) => ({ type: 'std:git.output@1', ticket: 'A-1', ref: `ref-${i}`, value: {} }));
-    const first = syncAttestationBatch(confirmation, outputs, 1);
-    const second = syncAttestationBatch(confirmation, outputs, 2);
-    expect(first).toHaveLength(100);
-    expect(first).not.toContain(outputs.at(-1));
-    expect(second).toEqual([...confirmation, ...outputs.slice(99)]);
+    const outputs = Array.from({ length: 198 }, (_, i) => ({ type: 'std:git.output@1', ticket: 'A-1', ref: `ref-${i}`, value: {} }));
+    const batches = Array.from({ length: 4 }, (_, i) => syncAttestationBatch(i % 2 === 0 ? confirmation : [], outputs, i + 1));
+    expect(batches.every((batch) => batch.length <= 100)).toBe(true);
+    expect(batches[0]).toContain(confirmation[0]);
+    expect(batches.flat().filter((a) => a.type === 'std:git.output@1')).toEqual(outputs);
   });
 
   it('pages the PR list, reads detail only for PRs a live ticket owns — closed unmerged ones too — and keeps verdicts from people with a say', async () => {

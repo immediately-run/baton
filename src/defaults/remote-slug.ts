@@ -27,14 +27,14 @@ interface GitFailure { status?: number | null; stderr?: string | Uint8Array }
  * a broken checkout indistinguishable from an origin-less one. Only `git remote get-url`'s own
  * two answers about the absence of a remote go quiet. */
 /** `owner/name` of a remote URL — the parse a remote's own URL gets below (the scp form's
- * `git@host:` and the user-less `host:owner/name` and the `https://host/` prefix stripped,
+ * `git@host:` and the user-less `host:owner/name` and the HTTPS or SSH URL prefix stripped,
  * `.git` dropped, the proxy's `git/` folded away): exported for the caller that holds the
  * URL itself rather than a remote's name (request.ts's PR, opened on the remote the request
  * was pushed to, round 1). */
 export const slugOfUrl = (url: string): string =>
   url
     .replace(/^git@[^:]+:/, '')
-    .replace(/^https?:\/\/[^/]+\//, '')
+    .replace(/^(?:https?|ssh):\/\/[^/]+\//, '')
     .replace(/^[A-Za-z0-9][A-Za-z0-9.-]*\.[A-Za-z0-9-]+:(?=[^/])/, '')
     .replace(/\.git$/, '')
     .replace(/^git\/(?=[^/]+\/[^/]+$)/, '');

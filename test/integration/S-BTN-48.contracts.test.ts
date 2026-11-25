@@ -1,10 +1,10 @@
 // S-BTN-48, both hosts: the core resolves and stores envelopes, not artifact bytes.
 import { beforeEach, describe, expect, it } from 'vitest';
-import { advance, claimItem, course, cutover, endClaim, Git, placed, register, rows, setClock } from '../helpers';
+import { SYNC_CLAIMS, advance, claimItem, course, cutover, endClaim, Git, placed, register, rows, setClock } from '../helpers';
 
 const schema = 'std:git.commit@1';
 const sha = 'a'.repeat(40);
-const uri = `git:immediately-run/docs@${sha}:plan.json`;
+const uri = `git:${SYNC_CLAIMS.repository}@${sha}:plan.json`;
 const definition = {
   start: 'filed', start_leg: 'plan', end: ['done'], stations: { filed: {}, planned: {}, done: {} },
   legs: {
@@ -46,7 +46,7 @@ describe('S-BTN-48 core contracts', () => {
     const claim = offered.claim_id;
     expect((await advance('vm-a', secret, claim, { leg: 'plan' })).status).toBe(200);
     const send = (pointer: string) => advance('vm-a', secret, claim, { leg: 'apply', reached: 'planned', evidence: sha, outputs: [{ name: 'plan', schema, uri: pointer }] });
-    expect((await send(uri.replace('immediately-run/docs', 'other/repo'))).json).toMatchObject({ rule_code: 'output-invalid' });
+    expect((await send(uri.replace(SYNC_CLAIMS.repository, 'other/repo'))).json).toMatchObject({ rule_code: 'output-invalid' });
     expect(await rows('SELECT * FROM leg_outputs')).toEqual([]);
     expect((await send(uri)).json).toMatchObject({ ok: true, inputs: [{ name: 'plan', schema, uri, from_leg: 'plan', from_run: 1, leg_version: 2 }] });
     expect(await rows('SELECT uri, value_json FROM leg_outputs')).toEqual([{ uri, value_json: null }]);

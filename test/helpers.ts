@@ -11,7 +11,7 @@ import { deliverySignature } from '../src/core/webhook';
 export { HOST, withCore } from '#host';
 
 export const ORIGIN = env.BATON_ORIGIN;
-const SYNC_CLAIMS = {
+export const SYNC_CLAIMS = {
   repository: 'immediately-run/docs',
   ref: 'refs/heads/main',
   job_workflow_ref: 'immediately-run/docs/.github/workflows/baton-sync.yml@refs/heads/main',
