@@ -693,3 +693,12 @@ segments). The claim answer carries it. Two reports say what a leg did outside i
 A third finding, `out-of-course` — a control path changed on the default branch by a push no
 course accounts for — and two more kinds of audit action are
 [proposed](../proposals/security.md).
+
+**Host forge broker (B-131).** This read is not the audit's open scope. A runner holding a live
+leg proves possession with a signed `GET /v1/forge-scope/runner/{run}` (204, no data). A host
+broker signs `GET /v1/forge-scope/broker/{run}` with its separate key, whose public half is in
+`BATON_FORGE_BROKER_KEYS`. Both reads refuse a run whose lease, leg or grant is no longer live.
+The broker's reply carries only the home path, the ticket's explicitly listed code repository
+paths and IDs (R-BTN-140), and the time through which the lease and deadline currently hold.
+There is no implicit by-name reach or mixed-forge scope for this GitHub.com broker. Baton never
+sees the App key or the installation token. Fieldhouse owns minting, renewal and revocation.
