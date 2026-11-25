@@ -25,6 +25,8 @@ export interface Seen {
   bars: Record<string, string[]>;
 }
 
+export type ClosingPosition = { parent: string | null; course_id: string; station: string | null; path: string | null };
+
 /** A queued or next leg as `ticket_next_legs` holds it. */
 type NextRow = { leg: string; state: string; waiting_on: string | null; ready_since: number | null; waiting_since: number | null };
 
@@ -96,7 +98,7 @@ export class Stations {
    * path that neither extends the previous one by edges nor is shorter is stored (git wins) and
    * logs `off-graph`. Returns what each placed ticket showed, by qualified id.
    */
-  apply(repo: string, sha: string, observation: number, stations: Map<string, PostedStation>, closed: { id: string; as: 'done' | 'withdrawn' }[], at: number, closingParents?: ReadonlyMap<string, string | null>): Map<string, Seen> {
+  apply(repo: string, sha: string, observation: number, stations: Map<string, PostedStation>, closed: { id: string; as: 'done' | 'withdrawn' }[], at: number, closingPositions?: ReadonlyMap<string, ClosingPosition>): Map<string, Seen> {
     const seen = new Map<string, Seen>();
     // The reading that placed every station row before this one (R-BTN-62): a row this post
     // leaves unchanged keeps its own, older `observation`, so the repository's stands for it.
@@ -162,11 +164,16 @@ export class Stations {
       // R-BTN-86: the relation outlives the close — the parent the closing ticket's row held,
       // passed by the materialization that just dropped it (or read from the row a held
       // history's refresh still leaves standing).
-      const parent = closingParents?.get(c.id)
+      const closing = closingPositions?.get(c.id);
+      const parent = closing?.parent
         ?? this.rows<{ parent: string | null }>('SELECT parent FROM tickets WHERE id = ?', qualify(repo, c.id))[0]?.parent
         ?? null;
-      this.exec('INSERT INTO closed_tickets (ticket_id, closed_as, observation, closed_at, parent) VALUES (?, ?, ?, ?, ?) ON CONFLICT (ticket_id) DO NOTHING',
-        qualify(repo, c.id), c.as, observation, at, parent);
+      const id = qualify(repo, c.id);
+      const previous = stored.get(id);
+      const position = previous?.station;
+      this.exec(`INSERT INTO closed_tickets (ticket_id, closed_as, observation, closed_at, parent, final_station, final_path, course_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (ticket_id) DO NOTHING`,
+        id, c.as, observation, at, parent, closing?.station ?? position?.station ?? null, closing?.path ?? position?.path ?? null, closing?.course_id ?? previous?.course_id ?? null);
     }
     return seen;
   }
@@ -289,6 +296,27 @@ export class Stations {
                ON CONFLICT (ticket_id, leg) DO UPDATE SET state = 'waiting', waiting_on = 'course-changed', ready_since = NULL,
                  waiting_since = CASE WHEN ticket_next_legs.state = 'waiting' AND ticket_next_legs.waiting_on = 'course-changed'
                                       THEN ticket_next_legs.waiting_since ELSE excluded.waiting_since END`, id, leg, since);
+  }
+
+  /** Rebuild the queue an imported person-leg arrival left, using the course now in force.
+   *  A stale first placement may leave this queue standing (R-BTN-39, S-BTN-50). */
+  restoreNext(repo: string, id: string, station: string, queued: string | null, at: number) {
+    const ticket = this.rows<{ course_id: string }>('SELECT course_id FROM tickets WHERE id = ?', id)[0];
+    const g = ticket && this.graph(repo, ticket.course_id);
+    if (!g) return;
+    const required = this.c.requiredBars?.(repo) ?? [];
+    for (const [leg, def] of g.legs) {
+      if (!def.from.includes(station)) continue;
+      // No posted bars for this restored queue have been accepted yet.
+      const unmet = required.some((bar) => requiredBarCovers(bar, ticket.course_id, leg, g));
+      this.exec(`INSERT INTO ticket_next_legs (ticket_id, leg, state, waiting_on, ready_since, waiting_since) VALUES (?, ?, ?, ?, ?, ?)`,
+        id, leg, unmet ? 'waiting' : 'ready', unmet ? 'policy' : null, unmet ? null : at, unmet ? at : null);
+    }
+    if (queued != null) {
+      const leg = resolveLeg(g, queued) ?? queued;
+      if (leg !== queued) this.exec('UPDATE ticket_stations SET next_leg = ? WHERE ticket_id = ?', leg, id);
+      if (!leaves(g, leg, station)) this.courseChanged(id, leg, at);
+    }
   }
 
   /** Store where a snapshot places the ticket, writing only what changed (R-BTN-70): the sync

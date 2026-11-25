@@ -65,8 +65,8 @@ route, with the events and fields the table lists for it, is
     Afterwards every rule reads live repositories only: a retired one has no dispatch,
     credential, owner, policy or count, and every call naming it is `not-found`, as for one never
     registered. Its rows stay, read-only, for administrators' reads. Two things stay live while
-    one of its claims is fence-pending: the fence itself — the alarm clears it at its
-    `fence_deadline`, an administrator may clear it, the seal waits for it (R-BTN-19, R-BTN-88),
+    one of its claims is fence-pending: the fence itself — cleared as R-BTN-19 specifies, and
+    the seal waits for it (R-BTN-88),
     and the old holder's heartbeat, whose retired course is dropped rather than refused
     (R-BTN-3), can still report `fenced` — and the holder queries, which keep answering for its
     former path (R-BTN-7, R-BTN-138). Its id is never registered again in the tenant (`conflict`);
@@ -180,7 +180,7 @@ route, with the events and fields the table lists for it, is
 
 - **R-BTN-93 (sync keys and the one verifier).** A repository's sync authenticates with a sync
   key, a CI identity token (R-BTN-15) or a machine key granted on the repository (R-BTN-102,
-  R-BTN-146).
+  R-BTN-146; the machine-key input is not yet built).
   - **A sync key** is an SSH key of R-BTN-13's types in one `sync_keys` row: exactly one
     repository and one role. Owners add and revoke it
     (`POST /v1/owner/{repository}/sync-keys`, `…/sync-keys/{fingerprint}/revoke`); an
@@ -278,10 +278,12 @@ route, with the events and fields the table lists for it, is
     and of each registered repository whose `code_repos` lists it. A `pull_request` delivery
     triggers one only when it is a merge (`pull_request.merged` is `true`), whatever its base branch.
   - **The push record.** A GitHub push delivery to a branch is recorded for ticket provenance
-    (R-BTN-194): `sender.id`, `sender.login`, `ref`, `before`, `after` and each commit's `id`
-    with its `added`, `removed` and `modified` paths, up to 30 commits and 600 paths. A push past
-    the bounds is remembered `truncated` with no paths, and one that does not parse is not
-    recorded; what either changed reads as `pusher-unknown`, and the delivery still triggers. The
+    (R-BTN-194) and control notices (R-BTN-187): `sender.id`, `sender.login`, `ref`, `before`,
+    `after`, `forced` and each commit's `id` with its `added`, `removed` and `modified` paths,
+    up to 30 commits and 600 paths. A delivery past the bounds is remembered `truncated` with no
+    paths. A forced push, an unknown `forced` flag, a missing destination commit or missing path
+    lists also make the record `truncated`, keeping any paths actually supplied within the bounds.
+    A delivery that does not parse is not recorded. The delivery still triggers a sync. The
     record lives 24 hours.
   - **Findings.** From the delivery's own fields, reading no repository content: a push by a
     worker pusher of the owners' `runner_pushers` setting to a repository no open claim's scope
@@ -402,4 +404,3 @@ route, with the events and fields the table lists for it, is
     home is G or whose `repos:` entry for G has reach (R-BTN-140), and names only
     tickets of repositories the asking key is granted on; any other match answers
     `held_by_other: true`, with no ids.
-

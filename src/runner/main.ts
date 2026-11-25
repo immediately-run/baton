@@ -7,28 +7,29 @@
 // half (`parseRunArgs`, `declareCourses`, `servedCourses`, `envAuth`) is unit-tested in
 // test/unit/runner-main.test.ts; the wiring is exercised end-to-end by S-BTN-41 against the
 // local host.
-import { execFileSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, writeSync } from 'node:fs';
+import { git, gitText } from '../defaults/git.mjs';
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync, writeSync } from 'node:fs';
 import { homedir, hostname } from 'node:os';
-import { join } from 'node:path';
-import { DEFAULT_URL } from '../../cli/baton.mjs';
+import { dirname, isAbsolute, join, relative } from 'node:path';
+import { DEFAULT_URL } from '../client/config.mjs';
 import { checkDeclaredCourses } from '../core/validate';
 import { BatonApi, envAuth } from './api';
 import { HARNESS_AGENTS, type Harness } from './harness';
-import { advanceHome, git, holdHome, legNeeds, readHead } from './home';
+import { advanceHome, holdHome, legNeeds, readHead } from './home';
 import { cliBehind, cliPinLines, cliProfile, readCliPin } from './cliPin';
-import { GIT_NONINTERACTIVE_ENV } from '../defaults/ticket-state';
 import { Runner, stampLine, withTimestamps, type RunnerOptions } from './runner';
 import { loadExecutor } from './executor';
 import { readMaskEnv, runnerConfigPath, underBatonDirectory } from './mask';
 import { runnerHome } from '../defaults/homes';
 import { LocalQueue, queueMain, queuePath } from './queue';
 import { fileURLToPath } from 'node:url';
+import { capabilityChecks } from './capabilityChecks';
 
 /** The CLI's wrapper (R-BTN-133), which every executor runs. */
 const LEG_WRAPPER = fileURLToPath(new URL('./legProcess.mjs', import.meta.url));
 
 export interface RunArgs {
+  config?: string;
   harness: Harness;
   home: string;
   url: string;
@@ -95,6 +96,7 @@ export function parseRunArgs(argv: string[], env: NodeJS.ProcessEnv = process.en
     else if (a === '--verbose') out.verbose = true;
     else if (a === '--restart-when-behind') out.restartWhenBehind = true;
     else if (a === '--home') out.home = value();
+    else if (a === '--config') out.config = value();
     else if (a === '--url') out.url = value();
     else if (a === '--session') out.session = value();
     else if (a === '--repository') out.repository = value();
@@ -136,7 +138,7 @@ export const RUN_USAGE = [
   'usage: baton runner start (or baton run) [--harness opencode|claude-code] [--home <checkout|home name>] [--url <url>] [--session <id>]',
   '                 [--repository <id>] [--hostname <name>] [--tier <tier>] [--capabilities a,b]',
   '                 [--beat-every <ms>] [--course <id>] [--executor <source>] [--concurrency <k>]',
-  '                 [--test-harness] [--verbose] [--restart-when-behind]',
+  '                 [--config FILE] [--test-harness] [--verbose] [--restart-when-behind]',
   '',
   'Runs this machine\'s runner: it heartbeats, claims a ticket of a course its home checkout',
   'declares and runs each claim\'s legs one at a time. --home names a checkout, or a home of',
@@ -289,9 +291,7 @@ export const FETCH_TIMEOUT_MS = 20_000;
 
 export function fetchMain(home: string, log: (l: string) => void = () => {}, branch = 'main'): boolean {
   try {
-    execFileSync('git', ['-C', home, 'fetch', 'origin', `refs/heads/${branch}`], {
-      stdio: 'ignore', timeout: FETCH_TIMEOUT_MS, killSignal: 'SIGKILL', env: { ...process.env, ...GIT_NONINTERACTIVE_ENV },
-    });
+    git(home, ['fetch', 'origin', `refs/heads/${branch}`], { stdio: 'ignore', timeoutMs: FETCH_TIMEOUT_MS });
     return true;
   } catch (e) {
     log(`baton: the snapshot fetch failed (${e instanceof Error ? e.message : String(e)})`);
@@ -307,7 +307,7 @@ export function refreshHome(home: string, log: (l: string) => void): boolean {
   } catch { /* fetch-only checkouts need not have origin/HEAD */ }
   if (!branch) {
     try {
-      branch = git(home, ['ls-remote', '--symref', 'origin', 'HEAD'], FETCH_TIMEOUT_MS)
+      branch = git(home, ['ls-remote', '--symref', 'origin', 'HEAD'], { timeoutMs: FETCH_TIMEOUT_MS })
         .match(/^ref: refs\/heads\/(.+)\tHEAD$/m)?.[1];
     } catch { /* log below and keep the last declaration */ }
     if (!branch) {
@@ -391,6 +391,20 @@ export async function runMain(argv: string[], io: { log?: (l: string) => void; f
   // checkout path — a name resolves to its checkout, refused naming the home when the home has
   // none. A path (a value with `/` or naming an existing directory) keeps R-BTN-131's meaning.
   const home = runnerHome(a.home);
+  const configPath = a.config ?? runnerConfigPath();
+  const checks = a.config || existsSync(configPath) ? (() => {
+    const file = realpathSync(configPath);
+    if (underBatonDirectory(file)) throw new Error('runner capability checks must be configured outside .baton');
+    const config: unknown = JSON.parse(readFileSync(file, 'utf8'));
+    if (!config || typeof config !== 'object' || !('capabilities' in config)) return undefined;
+    const fromCheckout = relative(realpathSync(home), file);
+    if (!isAbsolute(fromCheckout) && !fromCheckout.startsWith('..')) throw new Error('runner capability checks must be configured outside the checkout');
+    return capabilityChecks(config, dirname(file), io.env ?? process.env);
+  })() : undefined;
+  if (checks) {
+    if (checks.origin && !process.env.BATON_URL && !argv.includes('--url')) a.url = checks.origin;
+    a.capabilities = a.capabilities?.filter((name) => checks.names.includes(name)) ?? checks.names;
+  }
   const log = io.log ?? ((l: string) => process.stdout.write(`${l}\n`));
   // Verbose (the owner, 2026-10-23): every line carries the time it was written.
   const say = a.verbose ? withTimestamps(log) : log;
@@ -441,7 +455,7 @@ export async function runMain(argv: string[], io: { log?: (l: string) => void; f
   // historical log this week began with no hint of what code produced it. B-103: the courses
   // field names every course the heartbeat declares (`--course` narrowed it, or the home's list).
   try {
-    const head = execFileSync('git', ['-C', home, 'rev-parse', '--short', 'HEAD'], { encoding: 'utf8' }).trim();
+    const head = gitText(home, 'rev-parse', '--short', 'HEAD');
     say(`baton: runner starting: home ${home} @ ${head}, capabilities ${declared}, course${courses.length === 1 ? '' : 's'} ${courses.map((c) => `${c.course}@${c.version}`).join(', ')}, host ${a.hostname}, session ${a.session}`);
   } catch { /* a home with no git yet: the rest of the banner still names the run */ }
   // One runner per home checkout: its legs run in the working tree (R-BTN-131). Node's default
@@ -513,6 +527,7 @@ export async function runMain(argv: string[], io: { log?: (l: string) => void; f
     apiFor: (secret: string) => { const other = new BatonApi({ url: a.url, transport, auth }, say); other.setSecret(secret); return other; },
     home, repository: a.repository, hostname: a.hostname, harness: a.harness, session: a.session,
     tierCeiling: a.tier, ...(a.capabilities ? { capabilities: a.capabilities } : {}),
+    capabilityChecks: checks,
     courses,
     readCourses,
     refreshHome: () => {
