@@ -65,6 +65,7 @@ async function oldRunning(now: number) {
     const alive = c.kind !== 'legacy' && now - c.last_seen_at < c.lease_timeout_ms;
     out.push({
       ...c,
+      session_url: null, session_link: c.session_url != null,
       alive,
       reap_at: c.kind === 'legacy' ? null : c.last_seen_at + c.lease_timeout_ms,
       stalled: alive && (c.last_activity_at == null ? now - c.claimed_at : now - c.last_activity_at) > STALLED_MS,
@@ -90,7 +91,7 @@ async function oldTimeline(now: number) {
         activities.push({ ...a, transcript_url: t ? transcriptUrl(t.repo, t.path) : null });
       }
       const runs = (await rows<Record<string, any>>('SELECT leg, started_at, finished_at, abandoned_at, session_url FROM claim_legs WHERE claim_id = ? ORDER BY seq', c.id))
-        .map((r) => ({ leg: r.leg, started_at: r.started_at, ended_at: r.finished_at ?? r.abandoned_at ?? null, session_url: r.session_url }));
+        .map((r) => ({ leg: r.leg, started_at: r.started_at, ended_at: r.finished_at ?? r.abandoned_at ?? null, session_url: null, session_link: r.session_url != null }));
       claims.push({ ...c, runs, activities });
     }
     lanes.push({ ...l, claims });
@@ -211,6 +212,9 @@ describe('B-240 Running and Timeline in joined queries', { timeout: 120_000 }, (
     expect(urls.filter((u: string | null) => u == null)).toHaveLength(4);
     // Later: the window moves past the ended claims and a lane's runner falls silent.
     await setClock(T0 + 21 * H);
+    // This is elapsed time on a serving Baton, not a 21-hour outage. Stand in for the
+    // intervening service ticks without running the reaper over the test's fixture.
+    await rows("UPDATE baton_settings SET value = ? WHERE key = 'last_served_at'", String(T0 + 21 * H - 60_000));
     await rows('UPDATE runners SET last_seen_at = ? WHERE id = ?', T0 + 21 * H, a.id);
     session = await adminSession(admin); // a session lives 4 hours (R-BTN-155)
     await sameAsBefore(session, T0 + 21 * H);
@@ -251,7 +255,7 @@ describe('B-240 Running and Timeline in joined queries', { timeout: 120_000 }, (
     // and the Runners view's own reads (its claims, its open activities, its latest transcript,
     // now one query per list) are B-250's, not this ticket's.
     const read = (log: Captured[]) => log.filter((l) => /\b(claims|activities|transcripts)\b/.test(l.sql) && !/\bFROM events\b/.test(l.sql) && !/\bWHERE runner_id = \?/.test(l.sql)
-      && !/FROM claims WHERE status = 'active' ORDER BY claimed_at, id$/.test(l.sql) && !/FROM activities WHERE ended_at IS NULL$/.test(l.sql) && !/AS t FROM (pending_)?transcripts$/.test(l.sql))
+      && !/FROM claims WHERE status = 'active' ORDER BY claimed_at, id$/.test(l.sql) && !/FROM activities WHERE ended_at IS NULL$/.test(l.sql) && !/AS t FROM (pending_)?transcripts\b/.test(l.sql))
       .reduce((s, l) => s + (l.cursor.rowsRead ?? 0), 0);
     await state(session); // the session's first read does its own one-time work
     const before = await quiet(session);

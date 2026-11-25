@@ -209,9 +209,9 @@ describe('the course page (B-223)', () => {
     expect(run.textContent).toContain('/var/log/baton/r_0002');
     expect(run.textContent).toContain(`baton leg log docs:T-7 ${LEGS[1]}`);
     expect(run.textContent).toContain('example-org/sessions:a/b.jsonl');
-    // A session link on no list is text.
-    expect(run.textContent).toContain('https://evil.example/s/9');
-    expect(within(run).queryByRole('link', { name: /evil/ })).toBeNull();
+    // An unlisted session host is drawn as a neutral label, not an address or a link.
+    expect(run.textContent).not.toContain('https://evil.example/s/9');
+    expect(within(run).queryByRole('link', { name: /Open leg page/ })).toBeNull();
     expect(document.querySelector('a[href^="https://evil"]')).toBeNull();
 
     // A station: its resting tickets, linking their pages (the claimed one is not resting).

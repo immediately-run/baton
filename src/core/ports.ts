@@ -34,6 +34,14 @@ export interface Scheduler {
   set(at: number): Promise<void>;
 }
 
+/** R-BTN-149: resolve only when every part of the event batch is durable. */
+export type EventArchive = (parts: readonly EventArchivePart[]) => Promise<void>;
+export interface EventArchivePart {
+  repository: string;
+  day: string;
+  ndjson: string;
+}
+
 /** Baton's clock (R-BTN-32): epoch milliseconds. Core reads time only through its `now`;
  *  without one the core uses the system clock, on both hosts alike. */
 export type Clock = () => number;
@@ -42,6 +50,11 @@ export type Clock = () => number;
  *  `--admin-keys` names. One OpenSSH public key per entry. */
 export interface AdminKeys {
   list(): string[];
+}
+
+/** R-BTN-155: the deployment's email-to-key bindings, read afresh on each call. */
+export interface AccessIdentities {
+  read(): string;
 }
 
 /** R-BTN-185 (B-145): the host's human-only keys — `BATON_HUMAN_KEYS`, the same shape as the
@@ -79,6 +92,8 @@ export interface Dispatch {
 /** The instance's settings (§3a): wrangler.toml's vars and the Worker secrets on Cloudflare,
  *  the start-up options and `--config` file locally. */
 export interface Config {
+  /** B-244: seconds idle before dispatching the repository's owner trigger (default 1800). */
+  BATON_IDLE_NOTIFY_AFTER_S?: string;
   BATON_ORIGIN: string;
   OIDC_ISSUER: string;
   OIDC_JWKS_URL: string;
@@ -86,9 +101,8 @@ export interface Config {
    *  array of `POST /v1/admin/repositories` bodies less their owner keys. Each binds its own
    *  sync and mirror workflow to its board (R-BTN-15). */
   BATON_REPOSITORIES?: string;
-  /** R-BTN-16, as amended 2026-10-20: Access is hardening in front of the dashboard that Baton
-   *  never reads, and no deployment sets these (R3-1208's provision sets none). B-46 removes
-   *  the one read that remains. */
+  /** R-BTN-155: verify Access assertions at sign-in. OWNER_EMAILS applies only to the
+   *  legacy Access-only dashboard path when there are no administrator keys. */
   ACCESS_TEAM_DOMAIN?: string;
   ACCESS_AUD?: string;
   OWNER_EMAILS?: string;
@@ -113,6 +127,8 @@ export interface Config {
    *  deployment's root of trust, set outside Baton. A key in it satisfies every `human` entry
    *  of every repository on the instance, and it is the only recovery from a lost key. */
   BATON_HUMAN_KEYS?: string;
+  /** B-131: host broker OpenSSH public keys, one per line; forge-scope reads only. */
+  BATON_FORGE_BROKER_KEYS?: string;
   /** R-BTN-113 (B-234): the hosts whose session links the instance accepts — `session_hosts`,
    *  a comma- or JSON-separated list. An administrator's setting, as the human keys are; the
    *  default is `claude.ai` alone. */
@@ -147,9 +163,12 @@ export interface Gate {
 export interface Ports {
   store: Store;
   scheduler: Scheduler;
+  /** Without a host-configured archive, event retention never deletes. */
+  archiveEvents?: EventArchive;
   config: Config;
   dispatch: Dispatch;
   adminKeys: AdminKeys;
+  accessIdentities?: AccessIdentities;
   /** R-BTN-185 (B-145): the host's human-only keys; absent, `BATON_HUMAN_KEYS` in the config. */
   humanKeys?: HumanKeys;
   /** Absent on Cloudflare, where the input gate needs nothing. */

@@ -85,6 +85,7 @@ type StationRow = { station: string; next_leg: string | null };
 type NextRow = { leg: string; state: string; waiting_on: string | null };
 const stationOf = (id: string): Promise<StationRow[]> => rows('SELECT station, next_leg FROM ticket_stations WHERE ticket_id = ?', `docs:${id}`);
 const nextOf = (id: string): Promise<NextRow[]> => rows('SELECT leg, state, waiting_on FROM ticket_next_legs WHERE ticket_id = ? ORDER BY leg', `docs:${id}`);
+const recommendable = (id: string) => rows('SELECT 1 FROM ready_ticket_source WHERE ticket_id = ?', `docs:${id}`);
 
 /** One run-tests gate run (B-110): its marker on the branch, and the claim whose run-tests leg
  *  Baton recorded with that marker as its evidence — the only way a marker counts (round 1,
@@ -151,7 +152,9 @@ describe('S-BTN-43 a repository with no course code', () => {
     expect((await nextOf('T-3'))[0]).toMatchObject({ leg: 'implement', state: 'ready' });
     // The dependent ticket is not ready until its dependency is done.
     expect((await stationOf('T-2'))[0]).toMatchObject({ station: 'filed', next_leg: 'implement' });
-    expect((await nextOf('T-2'))[0]).toMatchObject({ state: 'waiting', waiting_on: 'dependencies' });
+    expect(await recommendable('T-2')).toHaveLength(0);
+    expect(await rows("SELECT leg, ref FROM ticket_blocks WHERE ticket_id = ? AND kind = 'ticket'", 'docs:T-2'))
+      .toEqual([{ leg: 'implement', ref: 'docs:T-1@done' }]);
 
     // A PR opens for T-1: the run-tests gate comes before every review round (B-110), so with
     // no marker on the head the gate is ready — not review, whatever the checks say.
@@ -207,6 +210,7 @@ describe('S-BTN-43 a repository with no course code', () => {
     await repo.sync();
     expect((await stationOf('T-2'))[0]).toMatchObject({ station: 'filed', next_leg: 'implement' });
     expect((await nextOf('T-2'))[0]).toMatchObject({ state: 'ready', waiting_on: null });
+    expect(await recommendable('T-2')).toHaveLength(1);
   }, 60_000);
 
   it('--eject tickets, then an edit to the copy: the edited source’s tickets are posted', async () => {

@@ -83,7 +83,7 @@ function ClaimBlock({ repository, claim, now }: { repository: string; claim: Run
           {claim.leg != null ? <> · <CliLine>baton leg log <Text value={claim.ticket_id} /> <Text value={claim.leg} /></CliLine></> : null}
         </dd></div>
         {claim.session_url != null ? (
-          <div className="kv-row"><dt>session</dt><dd><ExtLink href={claim.session_url} kind="session" showHost>Open session</ExtLink></dd></div>
+          <div className="kv-row"><dt>session</dt><dd><ExtLink href={claim.session_url} kind="session" showHost /></dd></div>
         ) : null}
       </dl>
     </div>
@@ -150,7 +150,8 @@ export function RunnerCard({ repository, row, now, heading, notBuilt }: { reposi
         {row.transcript_url != null ? <><ExtLink href={row.transcript_url} showHost>transcript</ExtLink> · </> : null}
         executor: <span className="mut">not recorded{notBuilt?.executor ? <> (<Text mono value={notBuilt.executor} />)</> : null}</span>
       </p>
-      <Controls view="repository/runners/{runner}" target={target} allowed={allowed} label={`Actions on runner ${row.runner_id}`} />
+      {/* A poll can retain the runner card but replace its claim. Discard the old Stop dialog. */}
+      <Controls key={row.claim?.claim_id ?? 'idle'} view="repository/runners/{runner}" target={target} allowed={allowed} label={`Actions on runner ${row.runner_id}`} />
     </Card>
   );
 }

@@ -15,7 +15,9 @@ description: "OWASP agentic mapping, hole 3 (ASI02, ASI03, ASI10): a host-level 
 topics:
   - baton
 owns: {}
-prs: []
+prs:
+  - https://github.com/immediately-run/baton/pull/329
+  - https://github.com/immediately-run/fieldhouse/pull/49
 depends_on: []
 ---
 
@@ -59,7 +61,7 @@ R-FH-11 (what a VM holds) and Axiom 6; `docs/security-model.mdx` (OWASP mapping,
 
 ### Tests
 
-- A scenario (the next free S-BTN number): a runner with a claim on a `fieldhouse` ticket gets a
+- S-BTN-310: a runner with a claim on a `fieldhouse` ticket gets a
   token that can push `fieldhouse` and is refused on `baton`; after the claim ends the token is
   revoked; a runner with no claim gets nothing; the token cannot change a workflow file.
 

@@ -1,0 +1,58 @@
+---
+title: "B-285 — Remove what the spec retired: notices and couriers, the reviewer settings nothing reads, the HookRunner port"
+id: B-285
+project: baton
+status: done
+updated: 2026-11-23
+tags:
+  - roadmap-item
+description: "src/core/notices.ts, /v1/courier/*, admin.couriers and the CLI's courier commands once R-BTN-170's phase 4 is confirmed; reviewer_agents, reviewer_matrix and reviewer_catalog; HookRunner"
+topics:
+  - baton
+owns: {}
+prs:
+  - https://github.com/immediately-run/baton/pull/378
+depends_on: []
+---
+
+**What:** code the spec retired is still live in core, where a reader takes it for the model to
+extend.
+
+From the architecture review of 2026-11-19 (`docs/review/architecture-review-2026-11-19.mdx`, on the branch `review/architecture-2026-11-19` until it lands).
+
+### What to build
+
+Remove, each in its own commit:
+
+1. `src/core/notices.ts`, the `/v1/courier/*` routes, `admin.couriers` and the CLI's `courier`
+   commands. The spec's history keeps them "until R-BTN-170's phase 4" (retired rules R-BTN-80
+   and R-BTN-103): first confirm that phase has a ticket and has happened, and stop if it has
+   not.
+2. The `reviewer_agents`, `reviewer_matrix` and `reviewer_catalog` settings, which core writes
+   and nothing reads.
+3. The `HookRunner` port.
+
+Until step 1 can land, add a short page on how a delivery channel is added today, so nobody
+extends the retired model.
+
+**Stop and ask the owner** before removing a route or a table a deployed runner or courier may
+still call: the reference deployment's state is not readable from the repository.
+
+**Done when:** no source file names a retired rule except the history file and the migrations.
+
+### Trust
+
+Removing a route removes an input. The check that matters is the opposite one: no route loses
+its principal check by being moved while its neighbour is deleted.
+
+### Invariants
+
+- Migrations are append-only: a dropped table is a new numbered file, and earlier files are not
+  edited.
+- A removed route answers `not-found`, as one never served.
+- Transitional code is catalogued in `spec/BATON_SPEC_HISTORY.md` with its stop condition; each
+  removal strikes its entry.
+
+## Status
+
+_filed 2026-11-19._

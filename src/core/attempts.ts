@@ -17,9 +17,10 @@ export const ATTEMPTS_HOLD_AT = 3;
  * provider-exhausted, course-changed or any completion, suspensions included.
  */
 export function countsAsFailed(endReason: string, leaseLostBefore = false): boolean {
+  if (endReason === 'released:cannot-finish:contract-input') return false;
   if (endReason === 'reaped:silent') return true;
   if (endReason.startsWith('released:cannot-finish:')) return true;
-  if (endReason === 'released:leg-timeout') return true;
+  if (endReason === 'released:leg-timeout' || endReason === 'reaped:leg-timeout') return true;
   if (endReason === 'released:lease-lost') return !leaseLostBefore;
   return false;
 }

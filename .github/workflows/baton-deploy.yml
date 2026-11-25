@@ -11,6 +11,15 @@ name: baton-deploy
 # by the owner in R3-1208: Workers Scripts: Edit on the account, plus Zone: Read and Workers
 # Routes: Edit on the immediately.run zone (wrangler resolves the zone and writes the route).
 # Until it exists the deploy job fails at its first step, naming it.
+#
+# Actions minutes (owner, 2026-11-23): this test job is main's only run of the suite (ci.yml no
+# longer repeats it on each merge), and a push of ticket files alone — the bot's "tickets: …"
+# status commits, over a third of main's pushes — neither runs the suite nor deploys: no ticket
+# file reaches the Worker, and ci.yml ran the ticket checks on the pull request
+# (scripts/ci-scope.mjs). The change is read against the last commit this workflow DEPLOYED, not
+# the push's `before`: the concurrency group below replaces a waiting run with the newest, so a
+# code push displaced by a ticket push is still in the diff — and so is one whose deploy failed.
+# No deployed commit found, or a manual dispatch, runs both.
 on:
   push:
     branches: [main]
@@ -18,6 +27,7 @@ on:
 
 permissions:
   contents: read
+  actions: read # the scope step finds the last run whose deploy job succeeded
 
 concurrency:
   group: baton-deploy
@@ -29,18 +39,43 @@ jobs:
     # The suite as in ci.yml, without quint (R-BTN-68 as amended 2026-10-20): the model's checks
     # ran on the author's machine for every PR that could change their outcome.
     timeout-minutes: 25
+    outputs:
+      code: ${{ steps.scope.outputs.code }}
     steps:
       - uses: actions/checkout@v4
+      - name: Scope
+        id: scope
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          BASE=''
+          if [ "$EVENT" = push ]; then
+            RUNS=$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/baton-deploy.yml/runs?branch=main&status=success&per_page=30" \
+              --jq '.workflow_runs[] | "\(.id) \(.head_sha)"' || true)
+            while read -r id sha; do
+              [ -n "$id" ] || continue
+              deployed=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${id}/jobs" --jq '.jobs[] | select(.name == "deploy") | .conclusion' || true)
+              if [ "$deployed" = success ]; then BASE=$sha; break; fi
+            done <<< "$RUNS"
+          fi
+          echo "last deployed commit: ${BASE:-none found}"
+          node scripts/ci-scope.mjs "$BASE" HEAD >> "$GITHUB_OUTPUT"
       - uses: actions/setup-node@v4
+        if: steps.scope.outputs.code != 'false'
         with:
           node-version: 22
           cache: npm
       - run: npm ci
+        if: steps.scope.outputs.code != 'false'
       - run: npm run typecheck
+        if: steps.scope.outputs.code != 'false'
       - run: npm run test:no-quint
+        if: steps.scope.outputs.code != 'false'
 
   deploy:
     needs: test
+    if: needs.test.outputs.code != 'false'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: production

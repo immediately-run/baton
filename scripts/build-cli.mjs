@@ -4,27 +4,23 @@
 // scripts/baton-cli.mjs, scripts/bundle.mjs), which needs esbuild, a devDependency. Here each of
 // those three is swapped for its TypeScript source, so dist/baton.mjs runs with dependencies only.
 import { build } from 'esbuild';
-import { execFileSync } from 'node:child_process';
-import { copyFileSync, mkdirSync, rmSync } from 'node:fs';
+import { gitText } from '../src/defaults/git.mjs';
+import { CLI_ENTRIES, entryExports } from './cli-entries.mjs';
+import { copyFileSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { LOCAL_LOADERS, dashboardScriptAsText } from './bundle.mjs';
+import { checkCliDispatch } from './check-cli-dispatch.mjs';
 
 const ROOT = resolve(import.meta.dirname, '..');
 const OUT = join(ROOT, 'dist');
 const src = (path) => JSON.stringify(join(ROOT, path));
+checkCliDispatch(readFileSync(join(ROOT, 'cli/baton.mjs'), 'utf8'));
 
 /** Each on-demand bundler cli/baton.mjs imports, as the module it would have bundled. */
 const PREBUILT = {
-  'baton-run.mjs': `export { runMain, queueCommand } from ${src('src/runner/main.ts')};
-export { replayMain } from ${src('src/runner/replay.ts')};`,
-  'baton-leg.mjs': `export { raiseMain } from ${src('src/runner/leg.ts')};`,
-  // Every name cli/baton.mjs takes from ../scripts/baton-cli.mjs: one missing here is `… is not a
-  // function` in the published package only, where the checkout's bundler exports it
-  // (scripts/check-package.mjs compares the two lists).
-  'baton-cli.mjs': `export { initMain, migrateMarkersMain, parseSyncArgs, syncMain, verifyConfigMain } from ${src('src/defaults/cli.ts')};
-export { ticketsMain } from ${src('src/defaults/tickets.ts')};
-export { requestMain } from ${src('src/defaults/request.ts')};
-export { homeMain, resolveHomes } from ${src('src/defaults/homes.ts')};`,
+  ...Object.fromEntries(Object.keys(CLI_ENTRIES).map((name) => [name,
+    `export * as default from ${JSON.stringify(`${name}:namespace`)};`,
+  ])),
   'bundle.mjs': `const ENTRIES = { 'src/local/testCourse.ts': () => import(${src('src/local/testCourse.ts')}) };
 export async function bundleLocal(entry) {
   const load = ENTRIES[entry];
@@ -38,6 +34,11 @@ const prebuilt = {
   setup(b) {
     const filter = new RegExp(`^\\.\\./scripts/(${Object.keys(PREBUILT).map((n) => n.replace('.', '\\.')).join('|')})$`);
     b.onResolve({ filter }, (args) => ({ path: args.path.slice('../scripts/'.length), namespace: 'prebuilt' }));
+    b.onResolve({ filter: /^[\w.-]+:namespace$/, namespace: 'prebuilt' }, ({ path }) => ({ path: path.slice(0, -10), namespace: 'prebuilt-namespace' }));
+    b.onLoad({ filter: /.*/, namespace: 'prebuilt-namespace' }, ({ path }) => ({
+      contents: entryExports(CLI_ENTRIES[path]),
+      resolveDir: ROOT,
+    }));
     b.onLoad({ filter: /.*/, namespace: 'prebuilt' }, (args) => ({ contents: PREBUILT[args.path], loader: 'js', resolveDir: ROOT }));
   },
 };
@@ -56,14 +57,14 @@ await build({
   plugins: [prebuilt, dashboardScriptAsText],
   logLevel: 'warning',
 });
-// The runner spawns its leg process by path (src/runner/runner.ts LEG_PROCESS), beside the bundle.
+// The runner spawns its leg process by path (src/runner/claimRun.ts LEG_PROCESS), beside the bundle.
 copyFileSync(join(ROOT, 'src/runner/legProcess.mjs'), join(OUT, 'legProcess.mjs'));
 
 // What `baton repo init` writes, prebuilt (a package has no src/ and no esbuild), and the commit
 // it was built from, which the package names as its courses' source and its workflow's pin
 // (src/defaults/cli.ts cliPin). A modified tree is recorded as such, and that package pins nothing.
-const git = (...a) => execFileSync('git', ['-C', ROOT, ...a], { encoding: 'utf8' }).trim();
-const { prebuildDefaults, remoteSlug } = await import('./baton-cli.mjs');
+const git = (...args) => gitText(ROOT, ...args);
+const { prebuildDefaults, remoteSlug } = (await import('./baton-cli.mjs')).default;
 const repository = process.env.GITHUB_REPOSITORY ?? remoteSlug(ROOT);
 if (!repository) throw new Error('build-cli: no origin remote names the repository the package is built from');
 const dirty = git('status', '--porcelain', '--untracked-files=no') !== '';

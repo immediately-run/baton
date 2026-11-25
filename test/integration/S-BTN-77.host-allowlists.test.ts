@@ -3,10 +3,9 @@
 // host, without userinfo, at most 512 characters — every other is dropped and logged, never a
 // refused call — and a host an administrator adds through `PUT /v1/admin/settings`
 // (`instance_settings`, §13.1) is kept from then on. The settings row carries `link_hosts` and
-// `check_app_id` beside `session_hosts`; the stored link rides the dashboard's Running and
-// Timeline views, the run list and the ticket history (§11.4).
+// `check_app_id` beside `session_hosts`; the dashboard session can read the stored link.
 import { describe, it, expect, beforeEach } from 'vitest';
-import { advance, beat, claimItem, course, cutover, endClaim, Git, keyCall, register, rows, setAdminKeys, setClock, withCore } from '../helpers';
+import { adminSession, sessionCall, advance, beat, claimItem, course, cutover, endClaim, Git, keyCall, register, rows, setAdminKeys, setClock, withCore } from '../helpers';
 import { makeKey, type TestKey } from '../lib/sshKeys';
 
 const T0 = Date.parse('2026-11-14T09:00:00Z');
@@ -53,13 +52,13 @@ describe('S-BTN-77: host allowlists (R-BTN-113)', () => {
     // the beat answers 200 and says why — and the link already kept stands.
     const other = await beat('vm-a', w.secret, { session_url: OTHER });
     expect(other.status).toBe(200);
-    expect(other.json.session_url_dropped).toContain('sessions.example');
+    expect(other.json.session_url_dropped).toContain('session_hosts');
     expect((await beat('vm-a', w.secret, { session_url: 'https://user:pw@claude.ai/s/x' })).json.session_url_dropped).toContain('userinfo');
     expect((await beat('vm-a', w.secret, { session_url: `https://claude.ai/${'x'.repeat(600)}` })).json.session_url_dropped).toContain('512');
     expect((await beat('vm-a', w.secret, { session_url: 'http://claude.ai/s/x' })).json.session_url_dropped).toContain('https');
     expect(await rows<{ session_url: string | null }>('SELECT session_url FROM claim_legs WHERE claim_id = ?', c.claim_id)).toEqual([{ session_url: LINK }]);
     expect((await drops()).map((d) => d.why)).toEqual([
-      expect.stringContaining('sessions.example'), 'carries userinfo', 'over 512 characters', 'not https',
+      expect.stringContaining('session_hosts'), 'carries userinfo', 'over 512 characters', 'not https',
     ]);
   });
 
@@ -81,20 +80,20 @@ describe('S-BTN-77: host allowlists (R-BTN-113)', () => {
     expect(first.json.session_url_dropped).toContain('finishes no leg');
 
     // A beat lands the run's link; the advance that finishes the leg carries a fresher one,
-    // which wins (latest), and the finished run's history row rides it (R-BTN-81, §11.4).
+    // which wins (latest) without copying it into history.
     expect((await beat('vm-b', w2.secret, { session_url: LINK })).status).toBe(200);
     const finished = await advance('vm-b', w2.secret, c2.json.claim_id, { reached: 'pr-open', leg: 'review', session_url: SECOND });
     expect(finished.status).toBe(200);
     expect(finished.json.session_url_dropped).toBeUndefined();
     expect(await rows<{ leg: string; session_url: string | null }>('SELECT leg, session_url FROM claim_legs WHERE claim_id = ? ORDER BY seq', c2.json.claim_id))
       .toEqual([{ leg: 'implement', session_url: SECOND }, { leg: 'review', session_url: null }]);
-    expect((await historyRows()).filter((r) => r.kind === 'leg-finished').map((r) => [r.leg, r.detail?.session_url])).toEqual([['implement', SECOND]]);
+    expect((await historyRows()).filter((r) => r.kind === 'leg-finished').map((r) => [r.leg, r.detail?.session_url])).toEqual([['implement', undefined]]);
 
     // The end may carry the running leg's link; one off the allowlist is dropped and logged,
     // the end never refused, and the run's row keeps what an earlier beat landed (nothing).
     const badEnd = await endClaim('vm-b', w2.secret, c2.json.claim_id, { end_reason: 'released:requested', session_url: OTHER });
     expect(badEnd.status).toBe(200);
-    expect(badEnd.json.session_url_dropped).toContain('sessions.example');
+    expect(badEnd.json.session_url_dropped).toContain('session_hosts');
     expect(await rows<{ leg: string; session_url: string | null }>('SELECT leg, session_url FROM claim_legs WHERE claim_id = ? ORDER BY seq', c2.json.claim_id))
       .toEqual([{ leg: 'implement', session_url: SECOND }, { leg: 'review', session_url: null }]);
     // The given-up run's history row carries no link (the run's row holds none).
@@ -109,11 +108,11 @@ describe('S-BTN-77: host allowlists (R-BTN-113)', () => {
     expect(await rows<{ leg: string; session_url: string | null }>('SELECT leg, session_url FROM claim_legs WHERE claim_id = ?', c3.json.claim_id))
       .toEqual([{ leg: 'implement', session_url: REVIEW }]);
     expect((await historyRows()).filter((r) => r.kind === 'leg-finished').map((r) => [r.leg, r.detail?.session_url]))
-      .toEqual([['implement', REVIEW], ['implement', SECOND]]); // newest first
+      .toEqual([['implement', undefined], ['implement', undefined]]); // newest first
 
     // Every drop above is the one log shape.
     expect((await drops()).map((d) => d.why)).toEqual([
-      expect.stringContaining('runs no leg'), expect.stringContaining('finishes no leg'), expect.stringContaining('sessions.example'),
+      expect.stringContaining('runs no leg'), expect.stringContaining('finishes no leg'), expect.stringContaining('session_hosts'),
     ]);
   });
 
@@ -152,24 +151,24 @@ describe('S-BTN-77: host allowlists (R-BTN-113)', () => {
     // — so a sessions.example link is dropped again.
     expect((await keyCall(admin, '/v1/admin/settings', { session_hosts: null }, 'PUT')).status).toBe(200);
     expect((await wholeState()).instance.session_hosts).toEqual(['claude.ai']);
-    expect((await beat('vm-a', w.secret, { session_url: OTHER })).json.session_url_dropped).toContain('sessions.example');
+    expect((await beat('vm-a', w.secret, { session_url: OTHER })).json.session_url_dropped).toContain('session_hosts');
   });
 
-  it('the stored link rides the Running and Timeline views and the run list (§11.4)', async () => {
+  it('the run list serves a session link, but the export does not', async () => {
     const w = await register('vm-a');
     const { json: c } = await claimItem('vm-a', w.secret, { ticket_id: 'docs:A' });
     const a = await advance('vm-a', w.secret, c.claim_id, { leg: 'implement' });
     expect((await beat('vm-a', w.secret, { session_url: LINK })).status).toBe(200);
 
     const state = await wholeState();
-    expect(state.running).toEqual([expect.objectContaining({ ticket_id: 'docs:A', leg: 'implement', session_url: LINK })]);
+    expect(state.running).toEqual([expect.objectContaining({ ticket_id: 'docs:A', leg: 'implement', session_url: null, session_link: true })]);
     const lane = state.timeline.lanes.find((l: { id: number }) => l.id === w.id);
     const claim = lane.claims.find((x: { id: number }) => x.id === c.claim_id);
-    expect(claim.runs).toEqual([expect.objectContaining({ leg: 'implement', session_url: LINK })]);
+    expect(claim.runs).toEqual([expect.objectContaining({ leg: 'implement', session_url: null, session_link: true })]);
 
     // B-190's run list: each of a leg's runs carries its own link.
-    const runs = await keyCall(owner, '/v1/repositories/docs/tickets/A/legs/implement/runs');
+    const runs = await sessionCall(await adminSession(admin), '/v1/repositories/docs/tickets/A/legs/implement/runs');
     expect(runs.status).toBe(200);
-    expect(runs.json.runs).toEqual([expect.objectContaining({ leg: 'implement', run_id: a.json.run_id, session_url: LINK })]);
+    expect((await runs.json() as { runs: unknown[] }).runs).toEqual([expect.objectContaining({ leg: 'implement', run_id: a.json.run_id, session_url: LINK })]);
   });
 });
