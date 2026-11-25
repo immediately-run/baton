@@ -56,14 +56,14 @@ export interface BatonJson {
   /** A command whose words precede `agent_command`'s in every leg's spawn (B-95);
    * `BATON_AGENT_WRAPPER` in the host's environment wins over it. */
   agent_wrapper?: string;
-  /** The Dibber release a leg runs (B-326), a version, never a command. */
+  /** The `dibber` release a leg runs (B-326, dibber.ts): a version, never a command. */
   dibber?: string;
   /** The ticket check's settings (B-111); every one is off. Read by `baton tickets check` alone,
    * never by a sync. */
   check?: { depends_line?: boolean };
-  /** The ticket commands' settings (B-112, tickets-config.ts): the prefix `baton tickets new`
-   * allocates under, the ids it still accepts, the `project:` a filing takes when `--project`
-   * names none, and the tags it writes when `--tags` names none. Read by the commands alone. */
+  /** The ticket settings (B-112, tickets-config.ts): the prefix Baton's `ticket-<prefix>`
+   * sequence allocates under (and `.dibber/config.json`'s `prefix`), the ids it still accepts,
+   * and the "How tickets work" page's defaults. */
   ticket_prefix?: string;
   legacy_ids?: string[];
   prefixes?: Record<string, string>;

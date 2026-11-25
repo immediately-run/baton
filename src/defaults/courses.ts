@@ -225,6 +225,9 @@ const CREATE_PR: BuiltIn = {
     // (`baton owner resolve … merge|owner|round`). No agent reproduces anything, so no runner is
     // offered the leg: the position below is what a holder would report if one ever ran it by hand.
     adjudicate: ADJUDICATE,
+    // R-BTN-131: the stub reads the forge before it reports `merged` — every PR of the ticket
+    // merged, none open. On 2026-11-23 B-259's merge agent rightly refused PR #357 over red CI and
+    // exited 0; the leg said `merged` and Baton ended the claim done with the PR open.
     merge: { position: { reached: 'merged', next: null }, verify: 'merged' },
   },
   skill: 'baton-create-pr',

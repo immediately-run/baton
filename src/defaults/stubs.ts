@@ -53,7 +53,7 @@ async function bundleSource(contents: string): Promise<Buffer> {
   return Buffer.from(result.outputFiles[0].contents);
 }
 
-function stubSource(b: BuiltIn, leg: string): string {
+export function stubSource(b: BuiltIn, leg: string): string {
   const config: StubConfig = {
     course: b.id, leg, reads: b.reads, spec: b.legs[leg],
     overridePath: `.baton/courses/${b.id}/legs/${leg}${OVERRIDE_SUFFIX}`,

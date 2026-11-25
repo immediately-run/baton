@@ -13,8 +13,8 @@ import { join, resolve } from 'node:path';
 
 const ROOT = resolve(import.meta.dirname, '..');
 const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'));
-const ALLOWED = [/^package\.json$/, /^README\.md$/, /^LICENSE$/, /^NOTICE$/, /^dist\/baton\.mjs$/, /^dist\/legProcess\.mjs$/, /^dist\/build\.json$/, /^dist\/defaults\/[\w./-]+\.(mjs|md)$/, /^dist\/defaults\/leg-wrapper\.example$/, /^scripts\/cloud-runner\.sh$/, /^skills\/baton-cloud-runner\/SKILL\.md$/];
-const REQUIRED = ['package.json', 'LICENSE', 'NOTICE', 'dist/baton.mjs', 'dist/legProcess.mjs', 'dist/build.json', 'dist/defaults/tickets.mjs', 'dist/defaults/stubs/create-pr/implement.mjs', 'dist/defaults/courses/create-pr/implement.md', 'dist/defaults/leg-wrapper.example', 'scripts/cloud-runner.sh', 'skills/baton-cloud-runner/SKILL.md'];
+const ALLOWED = [/^package\.json$/, /^README\.md$/, /^LICENSE$/, /^NOTICE$/, /^dist\/baton\.mjs$/, /^dist\/legProcess\.mjs$/, /^dist\/legClient\.(mjs|d\.mts)$/, /^dist\/build\.json$/, /^dist\/defaults\/[\w./-]+\.(mjs|md)$/, /^dist\/defaults\/leg-wrapper\.example$/, /^scripts\/cloud-runner\.sh$/, /^skills\/baton-cloud-runner\/SKILL\.md$/];
+const REQUIRED = ['package.json', 'LICENSE', 'NOTICE', 'dist/baton.mjs', 'dist/legProcess.mjs', 'dist/legClient.mjs', 'dist/legClient.d.mts', 'dist/build.json', 'dist/defaults/tickets.mjs', 'dist/defaults/stubs/create-pr/implement.mjs', 'dist/defaults/courses/create-pr/implement.md', 'dist/defaults/leg-wrapper.example', 'scripts/cloud-runner.sh', 'skills/baton-cloud-runner/SKILL.md'];
 
 const fail = (msg) => {
   process.stderr.write(`check-package: ${msg}\n`);
@@ -41,6 +41,21 @@ try {
   // The runner bundle and its leg wrapper load: `run` reaches its credential check (§6.4) and
   // stops there, so nothing contacts a Baton. The environment is cleared of any real credential.
   const env = { PATH: process.env.PATH, HOME: dir };
+  // Match loadCourse: the leg is outside the consumer's node_modules ancestry.
+  const script = join(mkdtempSync(join(dir, 'baton-legs-')), 'leg.mjs');
+  writeFileSync(script, `import { LegError } from '@immediately-run/baton/leg';
+export function run(ctx) { if (typeof ctx.raise === 'function') throw new LegError('error.spec', 'test'); }
+export function close(ctx, result) { return result; }
+export function handoff(ctx) { return ctx.ticket; }
+`);
+  const wrapper = join(app, 'node_modules', pkg.name, 'dist', 'legProcess.mjs');
+  const invoke = (call, args) => spawnSync(process.execPath, [wrapper, call, script], { cwd: app, env, input: JSON.stringify(args) + '\n', encoding: 'utf8' });
+  const leg = invoke('run', [{}]);
+  if (leg.status !== 4 || !leg.stdout.includes('"errorType":"error.spec"')) fail(`the installed leg wrapper lost the typed error:\n${leg.stdout}${leg.stderr}`);
+  for (const [call, args, result] of [['close', [{}, 'marker'], 'marker'], ['handoff', [{ ticket: 'example:T' }], 'example:T']]) {
+    const callback = invoke(call, args);
+    if (callback.status !== 0 || !callback.stdout.includes(JSON.stringify({ ok: true, result }))) fail(`the installed leg wrapper could not call ${call}:\n${callback.stdout}${callback.stderr}`);
+  }
   const run = spawnSync(join(app, 'node_modules', '.bin', 'baton'), ['run'], { cwd: app, env, encoding: 'utf8' });
   if (!/no credential: BATON_KEY_FILE/.test(run.stderr)) fail(`the installed \`baton run\` did not reach its credential check:\n${run.stdout}${run.stderr}`);
   // B-97: the release dropped the transition's IR_BATON_* spellings — only they set, the same check.

@@ -10,6 +10,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { dispatchWorkflow } from '../../src/core/mirror';
 import type { Ports } from '../../src/core/ports';
+import { delivery } from '../../src/core/routes/sync';
 import { Webhooks, SYNC_STALE_MS } from '../../src/core/webhook';
 import { armedAt, captureDispatches, withCore } from '../helpers';
 
@@ -94,7 +95,7 @@ describe('S-BTN-167 a merge dispatches the sync', () => {
   it('the merge’s dispatch is the core’s own: a merge sends the sync, one that did not merge sends none', async () => {
     await withCore(async (c) => {
       const sent = await captureDispatches();
-      const deliver = (x: unknown) => (c as unknown as { delivery(r: Request): Promise<unknown> }).delivery(x as Request);
+      const deliver = (x: Request) => delivery(c, x);
       await deliver(header(d({ id: 'm-1' })));
       expect(sent).toEqual(['baton:sync']);
       // A pull request closed without merging moves nothing.
@@ -122,7 +123,7 @@ describe('S-BTN-167 a merge dispatches the sync', () => {
         .toEqual({ outcome: 'dispatched', now: ['docs'], trailing: [] });
       expect(stamps(c)).toEqual([`baton@${B}`, `docs@${B}`]);
       // Through the core's own route the same holds, and the stamp is the send's clock.
-      const deliver = (x: unknown) => (c as unknown as { delivery(r: Request): Promise<unknown> }).delivery(x as Request);
+      const deliver = (x: Request) => delivery(c, x);
       c.now = () => B + 60_000;
       const sent = await captureDispatches();
       await deliver(header(d({ id: 'push-2', event: 'push', repository: 'immediately-run/baton', merged: undefined, pusher: 'p', author_email: 'p@x' })));

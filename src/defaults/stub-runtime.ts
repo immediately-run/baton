@@ -1,12 +1,11 @@
 // Standard leg execution and verification (R-BTN-131, S-BTN-104, S-BTN-105).
 import { execFileSync, spawn } from 'node:child_process';
-import { createHash } from 'node:crypto';
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
-import { homedir, tmpdir } from 'node:os';
+import { existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { newestWrite } from '../runner/log';
-import { readOnlyHarness, readOnlyVersionSupported } from '../runner/harness';
+import { builtinAgentActivityPaths, readOnlyHarness, readOnlyVersionSupported } from '../runner/harness';
 import { dibberWords } from './dibber';
 import { gitBuffer } from './git.mjs';
 import { readOnlyWorkspace } from './read-only-workspace';
@@ -34,6 +33,7 @@ interface LegCtx extends CloseCtx {
   reads_only?: boolean;
   review_store?: string;
   review_head?: string;
+  agent_activity?: { command?: unknown; paths?: unknown[] };
   replay?: { against?: string };
   graph?: { legs?: Map<string, { maxRuns?: number }> | Record<string, { max_runs?: number }> };
 }
@@ -132,6 +132,9 @@ async function runAgent(ctx: LegCtx, { course, leg, names, spec, readsOnly }: { 
   const sha = ctx.snapshot?.sha;
   if (typeof sha !== 'string' || sha === '') throw new Error('the leg has no snapshot to read .baton/baton.json at');
   if (ctx.reads_only && (!readsOnly || !ctx.review_store)) throw new Error('reads_only requires a compatible runner and non-writing stub (R-BTN-183)');
+  // S-BTN-222 (B-325): an open harness question can be silent and the stub cannot tell
+  // it from idle, or learn when it was answered. For a run allowed to raise interact, use
+  // Baton's deadline and release rather than inferring completion from silence.
   const canInteract = course === 'create-pr' && (leg === 'implement' || leg === 'fix') && ctx.can_interact === true;
   // B-127: where the repository requires owner-signed control, `agent_command` and
   // `agent_wrapper` are read at the signed commit `ctx.signed_control.agent_command` names —
@@ -149,6 +152,9 @@ async function runAgent(ctx: LegCtx, { course, leg, names, spec, readsOnly }: { 
   // (R-BTN-131) that reads its own configuration or the instance views (R-BTN-99).
   const agentWords = splitWords(settingsCommand);
   const agentCommand = agentWords.join(' ');
+  // B-326: the `dibber` a leg that files or marks a ticket runs — the host's BATON_DIBBER, else
+  // the version the snapshot's settings pin, else this release's; never a command a ticket or a
+  // branch names. Handed to the agent as BATON_DIBBER.
   const dibberCommand = process.env.BATON_DIBBER?.trim() || dibberWords(settings).join(' ');
   const entry = courseEntry(settings, course);
   const patterns = [entry.branch_pattern, entry.previous_branch_pattern].filter((p): p is string => typeof p === 'string' && p !== '');
@@ -163,6 +169,9 @@ async function runAgent(ctx: LegCtx, { course, leg, names, spec, readsOnly }: { 
   const courseSha = typeof signedCourse === 'string' && signedCourse !== '' ? signedCourse : sha;
   let reviewLimit: number | undefined;
   if (course === 'create-pr' && leg === 'review') {
+    // B-324: course.json is board data, not part of the signed executable group. Use
+    // the posted snapshot for its limit; keep scripts and instructions at the signed pin.
+    // Comparison replay selects its own graph while retaining the recorded ticket inputs.
     const graphSha = ctx.replay?.against ?? sha;
     const graph: NonNullable<LegCtx['graph']> = ctx.graph ?? JSON.parse(show(ctx.checkout, graphSha, `.baton/courses/${course}/course.json`));
     const limits = graph.legs;
@@ -229,22 +238,12 @@ async function runAgent(ctx: LegCtx, { course, leg, names, spec, readsOnly }: { 
     // the agent's activity.
     const startedAt = new Date().getTime();
     const wrapperLog = join(ctx.checkout, '.baton', 'logs', `${ctx.ticket.id}-${leg}.log`);
-    const agentBin = basename(command);
-    const storePaths: string[] = [];
-    if (agentBin === 'opencode' || agentBin === 'claude') {
-      const dataHome = process.env.XDG_DATA_HOME && process.env.XDG_DATA_HOME !== '' ? process.env.XDG_DATA_HOME : join(homedir(), '.local', 'share');
-      const dashed = cwd.split('/').join('-');
-      if (agentBin === 'opencode') {
-        const root = join(dataHome, 'opencode');
-        storePaths.push(join(root, 'opencode.db'), join(root, 'opencode.db-wal'), join(root, 'opencode.db-shm'), join(root, 'project', dashed));
-        const key = createHash('sha1').update(cwd).digest('hex');
-        let instances: string[] = [];
-        try { instances = readdirSync(join(root, 'snapshot')); } catch { /* none yet */ }
-        for (const i of instances) storePaths.push(join(root, 'snapshot', i, key));
-      } else {
-        storePaths.push(join(process.env.CLAUDE_CONFIG_DIR && process.env.CLAUDE_CONFIG_DIR !== '' ? process.env.CLAUDE_CONFIG_DIR : join(homedir(), '.claude'), 'projects', dashed));
-      }
-    }
+    // A runtime adapter can supply paths as data, but only for the command that actually won.
+    // Match the entire command, not the executable: unrelated agents can share 'node', etc.
+    const activity = ctx.agent_activity;
+    const storePaths: string[] = typeof activity?.command === 'string' && activity.command.trim() === settingsCommand.trim()
+      && Array.isArray(activity.paths) && activity.paths.every((path): path is string => typeof path === 'string')
+      ? activity.paths : builtinAgentActivityPaths(command, cwd);
     // The agent's last output (2026-10-24; B-256): the last lines of both streams, bounded — what a
     // failed leg's error carries, so the runner's log alone can diagnose it, whether the agent
     // exited non-zero or exited 0 and the checks after it failed.
@@ -307,6 +306,8 @@ async function runAgent(ctx: LegCtx, { course, leg, names, spec, readsOnly }: { 
         const now = new Date().getTime();
         if (now - startedAt >= LEG_CEILING_MS) {
           if (canInteract) {
+            // The wrapper may have exited while a descendant still holds the pipes open.
+            // Neither pipe closure nor partial output is needed to fail at the ceiling.
             stopped = `the leg reached its hard ceiling (${LEG_CEILING_MS} ms)`;
             clearInterval(watch);
             ctx.signal?.removeEventListener('abort', onAbort);
@@ -354,6 +355,8 @@ async function runAgent(ctx: LegCtx, { course, leg, names, spec, readsOnly }: { 
       const last = names && !ask ? lastLine(out) : '';
       const on = names ? answer?.pr ?? (PR_URL.test(last) ? last : null) : null;
       const concluded = conclusion ? { conclusion } : {};
+      // The forge read before the position (R-BTN-131): `pr` an open PR (B-81), `merged` every PR
+      // of the ticket merged and none open — the merge agent's exit 0 is not a merge.
       if (verify === 'merged') {
         const merged = verifyPrsMerged({ checkout: ctx.checkout, ticket: ctx.ticket, branchPatterns: patterns, repositories: ticketRepositories(ticketText, settings.repos) }, legRun);
         if (process.env.BATON_VERBOSE) process.stderr.write(`${heading}the forge verified ${merged.join(', ')} merged, none open, on a branch matching ${patterns.join(' or ')}\n`);

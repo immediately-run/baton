@@ -2,7 +2,7 @@
 import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { DEFAULT_URL } from '../client/config.mjs';
-import { HARNESS_AGENTS, type Harness } from '../runner/harness';
+import { HARNESS_ADAPTERS, selectHarness } from '../runner/harness';
 import { DEFAULT_BRANCH_PATTERN, DEFAULT_CREATE_PR_REVIEW_ROUNDS, REVIEW_DEFAULTS_PATH } from './course-pr';
 import { parseSource, printSource } from './course-source';
 import { DEFAULT_COURSE, builtIn, scaffoldable, type BuiltIn } from './courses';
@@ -127,7 +127,7 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
   let pin: string | null = null;
   let force = false;
   let check = false;
-  let agent: Harness = 'opencode';
+  let agent = selectHarness('opencode')!;
   let agentNamed = false;
   let agentCommand: string | null = null;
   const overrides: string[] = [];
@@ -145,8 +145,9 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
     else if (a === '--override') overrides.push(value());
     else if (a === '--agent') {
       const v = value();
-      if (v !== 'opencode' && v !== 'claude-code') throw new Error('--agent: opencode or claude-code');
-      agent = v;
+      const adapter = selectHarness(v);
+      if (!adapter) throw new Error(`--agent: ${HARNESS_ADAPTERS.map((entry) => entry.name).join(' or ')}`);
+      agent = adapter;
       agentNamed = true;
     } else if (a === '--agent-command') agentCommand = value();
     else if (a === '--eject') {
@@ -286,7 +287,7 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
     // is replaced by the default harness's command, and any other named command — the
     // repository's own — is kept.
     const was = typeof existing.agent_command === 'string' ? existing.agent_command : '';
-    const now = agentCommand ?? (agentNamed || was === 'echo' ? HARNESS_AGENTS[agent] : null);
+    const now = agentCommand ?? (agentNamed || was === 'echo' ? agent.agentCommand : null);
     if (now != null && now !== was) settings.agent_command = now;
     commandMoved = now != null && now !== was;
     if (!listed || force || moved.length || commandMoved) {
@@ -299,7 +300,7 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
     // B-83: a fresh repository names a real agent from the start — the chosen harness's command,
     // printed below for the unfamiliar. The bare `echo` stub is written only when named
     // explicitly, never by default.
-    const chosen = agentCommand ?? HARNESS_AGENTS[agent];
+    const chosen = agentCommand ?? agent.agentCommand;
     if (chosen === 'echo' && agentCommand !== 'echo') {
       throw new Error('baton repo init refuses to write the no-op agent_command "echo" — pass --agent opencode or --agent claude-code for a real command, or --agent-command echo to name the stub explicitly');
     }

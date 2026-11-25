@@ -59,6 +59,8 @@ await build({
 });
 // The runner spawns its leg process by path (src/runner/claimRun.ts LEG_PROCESS), beside the bundle.
 copyFileSync(join(ROOT, 'src/runner/legProcess.mjs'), join(OUT, 'legProcess.mjs'));
+copyFileSync(join(ROOT, 'src/runner/legClient.mjs'), join(OUT, 'legClient.mjs'));
+copyFileSync(join(ROOT, 'src/runner/legClient.d.mts'), join(OUT, 'legClient.d.mts'));
 
 // What `baton repo init` writes, prebuilt (a package has no src/ and no esbuild), and the commit
 // it was built from, which the package names as its courses' source and its workflow's pin
