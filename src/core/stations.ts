@@ -14,6 +14,7 @@ import { qualify } from './validate';
 import { repositoryOf } from './registry';
 import type { History } from './history';
 import { BATON_WAITS } from './blocks';
+import { ticketInputs } from './contracts';
 
 /** What one snapshot showed of one ticket, against the previous accepted one. */
 export interface Seen {
@@ -354,7 +355,8 @@ export class Stations {
       // R-BTN-67: a leg a required bar covers whose posted bars hold no tag with its prefix is
       // stored waiting on `policy` — the board still moves — and listed under Needs you.
       const unmet = required.some((r) => requiredBarCovers(r, course, posted.leg, g) && !meetsRequiredBar(r, Object.hasOwn(st.bars, posted.leg) ? st.bars[posted.leg] : []));
-      const n = unmet ? { leg: posted.leg, state: 'waiting' as const, waiting_on: 'policy' } : posted;
+      const wait = unmet ? 'policy' : posted.state === 'ready' ? ticketInputs(this.c.store, id, g, posted.leg).wait : undefined;
+      const n = wait ? { leg: posted.leg, state: 'waiting' as const, waiting_on: wait } : posted;
       const b = before.get(n.leg);
       // Age (the default order's fourth key) runs from the first snapshot that showed the leg
       // ready, and an unbroken wait from the first that showed it waiting. A wait git posts never
