@@ -86,12 +86,12 @@ try {
 
     // Use the committed tree, with no parents so the fixture also works in CI's shallow clone.
     const upstream = join(dir, 'upstream.git');
-    const gitEnv = { GIT_ALTERNATE_OBJECT_DIRECTORIES: git(ROOT, ['rev-parse', '--path-format=absolute', '--git-path', 'objects']).toString().trim(),
-      GIT_AUTHOR_NAME: 'Package check', GIT_AUTHOR_EMAIL: 'package@example.test',
+    const gitEnv = { ...env, GIT_AUTHOR_NAME: 'Package check', GIT_AUTHOR_EMAIL: 'package@example.test',
       GIT_COMMITTER_NAME: 'Package check', GIT_COMMITTER_EMAIL: 'package@example.test' };
     git(null, ['init', '--bare', '-q', '-b', 'main', upstream]);
-    const pin = execFileSync('git', ['-C', upstream, 'commit-tree', `${build.commit}^{tree}`, '-m', 'source fixture'], { env: { ...env, ...gitEnv }, encoding: 'utf8' }).trim();
-    execFileSync('git', ['-C', upstream, 'update-ref', 'refs/heads/main', pin], { env: { ...env, ...gitEnv } });
+    writeFileSync(join(upstream, 'objects', 'info', 'alternates'), git(ROOT, ['rev-parse', '--path-format=absolute', '--git-path', 'objects']));
+    const pin = execFileSync('git', ['-C', upstream, 'commit-tree', `${build.commit}^{tree}`, '-m', 'source fixture'], { env: gitEnv, encoding: 'utf8' }).trim();
+    execFileSync('git', ['-C', upstream, 'update-ref', 'refs/heads/main', pin], { env: gitEnv });
     const baton = (args, extraEnv = {}) => execFileSync(join(app, 'node_modules', '.bin', 'baton'), args, { cwd: repo, env: { ...env, ...extraEnv }, encoding: 'utf8' });
     // Only the producer's build identity changes; the fixture tree is byte-identical.
     writeFileSync(buildFile, JSON.stringify({ ...build, commit: pin }));
@@ -100,7 +100,7 @@ try {
     execFileSync('git', ['-C', repo, '-c', 'user.name=Package check', '-c', 'user.email=package@example.test', 'commit', '-qm', 'review-pr entry']);
     const bundled = baton(['course', 'show', 'review-pr']);
     writeFileSync(buildFile, JSON.stringify(build));
-    const fetched = baton(['course', 'show', 'review-pr'], { ...gitEnv, GIT_CONFIG_COUNT: '1',
+    const fetched = baton(['course', 'show', 'review-pr'], { GIT_CONFIG_COUNT: '1',
       GIT_CONFIG_KEY_0: `url.${upstream}.insteadOf`, GIT_CONFIG_VALUE_0: `https://github.com/${build.repository.toLowerCase()}.git` });
     if (fetched !== bundled || !['entry.json', 'course.json', 'sync.mjs', 'legs/review.mjs', 'legs/review.md'].every((name) => fetched.includes(`--- ${name} ---`))) {
       fail('the installed CLI did not read the same review-pr course from a different build pin');
