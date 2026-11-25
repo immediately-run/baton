@@ -60,6 +60,8 @@ export interface GateLeg {
 }
 
 export interface GateContext {
+  /** On a diagnostic read, collect the missing rule-4 names without changing its verdict. */
+  missingCapabilities?: (names: string[]) => void;
   now: number;
   /** The ticket's claims; at an advance, without the advancing one. */
   claims: { status: string; confirmed_at: number | null; fence_pending: number }[];
@@ -159,8 +161,10 @@ export function gatesFor(runner: GateRunner | null, ticket: GateTicket, leg: Gat
     // R-BTN-58: a grant entry `<type>:*` admits every holding of that type.
     const admits = (capability: string) => granted ? granted.has(capability) || granted.has(`${capability.split(':')[0]}:*`) : true;
     // R-BTN-178: rule 11 reads the same set — every capability with a capacity in it holds a seat.
-    for (const need of needs) {
-      if (!held.has(need) || !(need.startsWith('runner:') || admits(need))) return refuse(4);
+    const missing = [...needs].filter((need) => !held.has(need) || !(need.startsWith('runner:') || admits(need)));
+    if (missing.length) {
+      facts.missingCapabilities?.(missing);
+      return refuse(4);
     }
 
     // Rule 5: the caller passes the lower of the declared ceiling and the grant's max_tier.
@@ -194,9 +198,10 @@ export function gatesFor(runner: GateRunner | null, ticket: GateTicket, leg: Gat
   // Rule 11 (R-BTN-178, §6.11): every capability with a capacity in rule 4's set for this leg
   // has a seat no other claim holds. The fact's `held` already excludes the asking claim's own
   // seats, so an advance into a leg with the same requirements never refuses itself.
-  if (facts.seats) {
+  const seats = facts.seats;
+  if (seats) {
     for (const need of needs) {
-      const s = facts.seats[need];
+      const s = seats[need];
       if (s && s.held >= s.capacity) return { ok: false, rule: 11, code: GATE_CODES[11], capability: need };
     }
   }
