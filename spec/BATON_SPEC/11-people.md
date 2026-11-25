@@ -2,7 +2,7 @@
 title: "11. People: administrators, owners and their surfaces"
 description: "Two kinds of people hold authority in a tenant: its administrators and each repository's owners."
 ---
-## 11. People: administrators, owners and their surfaces *(partly built)*
+## 11. People: administrators, owners and their surfaces
 
 Two kinds of people hold authority in a tenant: its **administrators** and each repository's
 **owners**. They act through the CLI and the dashboard. What every principal may do is in the
@@ -12,7 +12,7 @@ contents are not built; their design is
 
 ### 11.1 Keys
 
-- **R-BTN-13 (SSH keys and signed requests).**
+- **R-BTN-13 (SSH keys and signed requests).** `status: built R3-1213`
   - **Keys.** An SSH key is one of `ssh-ed25519`, `ecdsa-sha2-nistp256`,
     `sk-ssh-ed25519@openssh.com` or `sk-ecdsa-sha2-nistp256@openssh.com`. Baton stores only the
     public key; a credential's id is its fingerprint (`SHA256:…`). A credential is valid in one
@@ -43,7 +43,7 @@ contents are not built; their design is
   - **Signing.** Signers sign through `ssh-agent` or the key file and never write the private
     key to a log or transcript.
 
-- **R-BTN-159 (an SSH key or an API key).** An administrator, an owner and a runner each hold
+- **R-BTN-159 (an SSH key or an API key).** `status: built B-8` An administrator, an owner and a runner each hold
   either an SSH key, whose every request is signed (R-BTN-13), or an API key, sent as a bearer.
   Role, grants, revocation and the one-role rule (§12.1) are the same for both kinds. The kinds
   differ only as this rule says.
@@ -75,7 +75,7 @@ contents are not built; their design is
 
 ### 11.2 Administrators and owners
 
-- **R-BTN-57 (administrators: whoever controls the deployment).**
+- **R-BTN-57 (administrators: whoever controls the deployment).** `status: built`
   - **The root of trust.** Whoever can deploy a Baton or set its secrets can replace its code,
     so that control is the root of trust (R-BTN-136). Where `ACCESS_IDENTITIES` binds an email
     (R-BTN-155), whoever can make the deployment's Cloudflare Access application assert that
@@ -113,7 +113,7 @@ contents are not built; their design is
 
     `baton admin check-app create` makes the check App the same way (§12.7).
 
-- **R-BTN-58 (repository owners).**
+- **R-BTN-58 (repository owners).** `status: built`
   - **Owners act for one repository.** Each registered repository has owner keys
     (`repository_owners`), SSH or API (R-BTN-159). An owner calls `/v1/owner/{repository}/*`
     and acts for that repository only; owning one repository confers nothing on another. Its
@@ -132,7 +132,7 @@ contents are not built; their design is
 
 ### 11.3 The actions, the CLI and MCP
 
-- **R-BTN-129 (principals, scopes and effects).** Every route and command is an action: an id,
+- **R-BTN-129 (principals, scopes and effects).** `status: partly B-25` Every route and command is an action: an id,
   the principals that may call it with their scopes, and an effect.
   - **Principals.** `administrator`, `owner`, `session` (a dashboard session, R-BTN-155),
     `runner`, `check-runner`, `probe` (an instrument key), `sync`, `mirror`, `token` (a
@@ -153,7 +153,7 @@ contents are not built; their design is
     [the proposal, §1](../proposals/people-and-dashboard.md#1-the-action-registry). Until it
     is, §14 lists each route with its callers and R-BTN-127's table each command.
 
-- **R-BTN-127 (the CLI is a tree of nouns and verbs).**
+- **R-BTN-127 (the CLI is a tree of nouns and verbs).** `status: built B-22 B-23`
   - **Grammar.** Every command is `baton <noun> <verb> [<arguments>] [<flags>]`; the only
     top-level verbs are `help` and `version`. Under `owner` and `admin`, a verb that acts on a
     kind of thing is two words, `<thing> <act>`, the thing singular (`owner policy apply`,
@@ -259,7 +259,7 @@ contents are not built; their design is
   | `owner open`, `admin confirm <code>`, `owner confirm <code>`, `admin sessions revoke --all`, `owner sessions revoke` | owners' sign-in, confirmations and session revocation (proposed: [people and dashboard](../proposals/people-and-dashboard.md#3-sign-in-sessions-and-confirmed-actions)) | R-BTN-155 |
   | `owner mcp-key create <repository> --name <name> [--actions read \| <id>,…] [--ttl <days>]`, `owner mcp-key revoke <repository> <name>` | MCP keys (proposed: [people and dashboard](../proposals/people-and-dashboard.md#2-mcp)) | R-BTN-130 |
 
-- **R-BTN-197 (Baton states the client versions it serves).**
+- **R-BTN-197 (Baton states the client versions it serves).** `status: built`
   - **The client says what it is.** Every request the CLI sends carries `Baton-Client:
     baton/<version>`, its package's version, with `+dev` appended when it runs from a git
     working tree (`baton/0.1.4+dev`). A request without the header is compared as `0.0.0`.
@@ -285,7 +285,7 @@ contents are not built; their design is
     ends as its lease lapses (R-BTN-9). No client installs, fetches or switches its version on
     Baton's answer, and the header carries version numbers only (R-BTN-107).
 
-- **R-BTN-130 (MCP and delegated keys).** Baton serves no MCP endpoint and registers no
+- **R-BTN-130 (MCP and delegated keys).** `status: specified B-25` Baton serves no MCP endpoint and registers no
   delegated key (B-25, B-124). What a delegated key may do is R-BTN-186's. The design of
   `POST /v1/mcp` and the MCP key is
   [the proposal, §2](../proposals/people-and-dashboard.md#2-mcp); OAuth for MCP clients that
@@ -293,7 +293,7 @@ contents are not built; their design is
 
 ### 11.4 The dashboard
 
-- **R-BTN-155 (dashboard sign-in and sessions).**
+- **R-BTN-155 (dashboard sign-in and sessions).** `status: partly B-46 B-204 B-252 B-310`
   - **Sign-in.** `baton admin open` asks `POST /v1/admin/login-links` with an administrator
     key for a one-time link, `<origin>/login#<token>`, valid 5 minutes and used once. The page
     sends `POST /v1/login {token}`, which answers the session cookie `__Host-baton_session`

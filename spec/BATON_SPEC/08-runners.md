@@ -2,7 +2,7 @@
 title: "8. Runners"
 description: "A runner is any process that can execute a leg; it registers by heartbeat and holds claims (§9)."
 ---
-## 8. Runners *(partly built — B-8, B-9, B-12, B-42, B-46, B-47, B-184, R3-1213, R3-1260)*
+## 8. Runners
 
 A **runner** is any process that can execute a leg; it registers by heartbeat and holds claims
 (§9). There are two kinds, on the same API: an **interactive runner**, an agent harness session,
@@ -13,7 +13,7 @@ section that are not built are in [the proposal page](../proposals/checks-and-ex
 
 ### 8.1 Runners, heartbeats and the doorbell
 
-- **R-BTN-3 (a runner exists from its first heartbeat).** A runner is created by its first
+- **R-BTN-3 (a runner exists from its first heartbeat).** `status: built` A runner is created by its first
   authenticated heartbeat and never deleted. It is one interactive session or one CLI runner.
   Several sessions on one host are several runners; the dashboard groups them by hostname. A CLI
   runner's leg sessions (R-BTN-107) are not runners.
@@ -23,7 +23,7 @@ section that are not built are in [the proposal page](../proposals/checks-and-ex
   - **Alive** = `reaped_at IS NULL AND now − last_seen_at < lease_timeout_ms`. A reaped runner
     (§9.5) is dead: its calls are refused `runner-reaped` until it re-keys (R-BTN-14), which
     starts a new incarnation of the same runner holding no claim.
-- **R-BTN-9 (the runner declares its lease timeout).** `lease_timeout_s` on each heartbeat,
+- **R-BTN-9 (the runner declares its lease timeout).** `status: built` `lease_timeout_s` on each heartbeat,
   clamped to [900, 86400], default 900. The sidecar fences (R-BTN-6, R-BTN-26) on the lowest of
   the value in force at `last_ok` and every value it has declared since, so a heartbeat that
   lowers the timeout and loses its response never leaves Baton reaping on a shorter lease than
@@ -36,7 +36,7 @@ section that are not built are in [the proposal page](../proposals/checks-and-ex
   |---|---|
   | `hostname`, `session_name` | the runner's identity (R-BTN-3) |
   | `secret_hash`, `rekey` | on first contact or a re-key (R-BTN-14) |
-  | `harness` | `opencode` or `claude-code` |
+  | `harness` | a name the runner declares, `^[a-z0-9][a-z0-9-]{0,63}$`; Baton records it as a label and derives no capabilities or behavior from it |
   | `kind` | `vm`, `local` or `cloud`: a label no rule reads |
   | `model_id` | optional; a label no rule reads |
   | `capabilities` | the declared capabilities, roles and holdings (R-BTN-121, R-BTN-174) |
@@ -76,7 +76,7 @@ section that are not built are in [the proposal page](../proposals/checks-and-ex
       the delivered ones not yet acknowledged, re-sent until they are (§6.9).
   - Every runner call updates `last_seen_at` and the runner's `client_version` (R-BTN-197). Lease
     upkeep has its own rate bucket and no per-tenant cap (R-BTN-135).
-- **R-BTN-14 (runner secrets).** The sidecar generates a random 256-bit secret and sends its
+- **R-BTN-14 (runner secrets).** `status: built` The sidecar generates a random 256-bit secret and sends its
   SHA-256 on the first heartbeat for a new `(hostname, session_name)`; Baton stores the hash and
   every later runner call presents the secret in `X-Runner-Secret`, signed or API-key alike
   (R-BTN-159).
@@ -89,7 +89,7 @@ section that are not built are in [the proposal page](../proposals/checks-and-ex
     lease lost (R-BTN-6).
   - The secret separates sessions against accidents only: sessions of one OS user can read each
     other's files. The boundary between machines is the key.
-- **R-BTN-91 (the doorbell).** Not built: a runner learns of a queued message at its next
+- **R-BTN-91 (the doorbell).** `status: specified R3-1260` Not built: a runner learns of a queued message at its next
   heartbeat. The design, a WebSocket on which Baton rings a runner to heartbeat at once, is in
   [the proposal page](../proposals/checks-and-executors.md).
 - **The sidecar** (unnumbered). An interactive session's harness starts a sidecar at session
@@ -107,7 +107,7 @@ section that are not built are in [the proposal page](../proposals/checks-and-ex
 
 ### 8.2 Keys and grants
 
-- **R-BTN-102 (a machine key is trusted with everything a machine does).** A machine key
+- **R-BTN-102 (a machine key is trusted with everything a machine does).** `status: partly B-137` A machine key
   (credential kind `runner`, SSH) may, on each repository where it holds a grant (R-BTN-146),
   with ordinary signed requests:
   - **work** (R-BTN-58);
@@ -121,17 +121,17 @@ section that are not built are in [the proposal page](../proposals/checks-and-ex
   Every snapshot records its credential (`board_snapshots.posted_by`). A machine key is never an
   owner or administrator key, and neither is a machine key. API-key runners (R-BTN-159) work
   and report readings but never sync.
-- **R-BTN-146 (a repository's grants).** A grant is in force from its creation until it is
+- **R-BTN-146 (a repository's grants).** `status: built` A grant is in force from its creation until it is
   revoked. `GET /v1/owner/{repository}/grants` lists the grants in force on the repository. The
   holder's acceptance of a grant is not built
   ([proposal](../proposals/checks-and-executors.md)).
-- **R-BTN-117 (registration tokens).** Not built. The design, an owner-minted token with which
+- **R-BTN-117 (registration tokens).** `status: specified B-8` Not built. The design, an owner-minted token with which
   a session that has no key registers one, is in
   [the proposal page](../proposals/checks-and-executors.md).
 
 ### 8.3 The runner
 
-- **R-BTN-72 (the runner).** `baton runner start` is a generic runner loop. It hosts the
+- **R-BTN-72 (the runner).** `status: built B-47 B-274` `baton runner start` is a generic runner loop. It hosts the
   sidecar, heartbeats, claims up to R-BTN-4's bound, and runs each
   claim's legs one at a time, claims side by side, each leg by **the script for that leg**; then
   it advances, suspends or ends as the script's result, the course file, R-BTN-40 and the end
@@ -224,7 +224,7 @@ section that are not built are in [the proposal page](../proposals/checks-and-ex
     its scripts from the claim's `snapshot_sha` (R-BTN-143), so a course change reaches every
     runner at its next claim without a restart. `min_runner_version` (R-BTN-65) covers harness
     skills; the runner's own features are gated by `runner:` capabilities (R-BTN-133).
-- **R-BTN-106 (a session reports to its runner; the runner checks every move).**
+- **R-BTN-106 (a session reports to its runner; the runner checks every move).** `status: built B-47`
   - **The leg's channel.** The runner serves one channel per leg and authenticates a call by the
     channel it arrived on; the leg's session finds its address in `BATON_SOCKET`. The interface
     names an address, not a transport: the transport is the executor's (R-BTN-107). It carries
@@ -252,7 +252,7 @@ section that are not built are in [the proposal page](../proposals/checks-and-ex
     it, `not-eligible`, rule `chain`, by a **credential** that has run any named leg on this
     ticket, in this claim or another (`claim_legs` → claim → runner → credential; a run with no
     claim is skipped; runners sharing one credential count as one). The runner suspends instead.
-- **R-BTN-107 (the executor: how a leg runs is the runner host's choice).** A CLI runner starts
+- **R-BTN-107 (the executor: how a leg runs is the runner host's choice).** `status: built` A CLI runner starts
   every leg, and runs every call into repository code, through its **executor**: a module with a
   versioned interface whose code the runner's host chooses. Baton is agnostic about isolation: it
   names no sandbox, VM, container or cgroup, defines no key an executor reads, keeps no ranking of
@@ -311,10 +311,10 @@ section that are not built are in [the proposal page](../proposals/checks-and-ex
     `brief`; Baton says nothing about how a session of any kind runs. A call that takes `ctx` is
     an `exec` of the wrapper (R-BTN-133).
   - A leg whose session cannot start ends `released:cannot-finish:transient`.
-- **R-BTN-123 (a run's session id).** A leg run's session id is `<run_id>.r<n>` (R-BTN-63), `n`
+- **R-BTN-123 (a run's session id).** `status: built` A leg run's session id is `<run_id>.r<n>` (R-BTN-63), `n`
   counting the run's context refreshes from 0. Refreshing a leg into a fresh session when its
   context fills is not built ([proposal](../proposals/checks-and-executors.md)), so `n` is 0.
-- **R-BTN-113 (a leg run carries its session's link).** A heartbeat may carry `session_urls`,
+- **R-BTN-113 (a leg run carries its session's link).** `status: built` A heartbeat may carry `session_urls`,
   one link for each claim's running leg, and `advance` or `end` a `session_url` for the leg it
   finishes. A link must be `https`, at most 512 characters, without userinfo, with its host in
   the instance's `session_hosts` (an administrator's setting, default `claude.ai`, §12.7), else
@@ -332,7 +332,7 @@ section that are not built are in [the proposal page](../proposals/checks-and-ex
   - The link never goes into events, ticket history, logs, error messages or the admin state
     export. The dashboard labels it **Open leg page**, validates it by its link rule, and opens
     it with `rel="noreferrer"` and the referrer policy of R-BTN-16.
-- **R-BTN-201 (a launcher starts sessions; Baton reserves nothing for them).** A **launcher** is
+- **R-BTN-201 (a launcher starts sessions; Baton reserves nothing for them).** `status: partly` A **launcher** is
   a process outside Baton, run by the deployment, that starts runner sessions when there is work
   for them. Baton records no launch and reserves nothing for one: a started session claims as
   any runner does. A session whose lease lapses is fenced (R-BTN-6) and reaped (§9.5), so a
@@ -340,7 +340,7 @@ section that are not built are in [the proposal page](../proposals/checks-and-ex
   /v1/runner/launch-candidates`, and a claim's hint naming the ticket a session was started
   for, are not built; the design is in
   [the proposal page](../proposals/checks-and-executors.md).
-- **R-BTN-202 (a runner's local queue; local orders while Baton is unreachable).** A runner keeps a
+- **R-BTN-202 (a runner's local queue; local orders while Baton is unreachable).** `status: built B-248` A runner keeps a
   local work queue for its home checkout, on its host and outside every leg session, so no leg can
   write it. It holds the **orders** the host's user gives with `baton queue add <repository>:<id>[@leg]` (`baton queue list`,
   `baton queue remove`). Baton is **unreachable** when a call does not reach it or it answers 5xx.
@@ -365,7 +365,7 @@ section that are not built are in [the proposal page](../proposals/checks-and-ex
 
 ### 8.4 Where and how a leg runs
 
-- **R-BTN-143 (a runner runs only code the default branch holds).** Before reading any file at
+- **R-BTN-143 (a runner runs only code the default branch holds).** `status: partly B-299 B-46 B-57` Before reading any file at
   the recorded `snapshot_sha`, `baton leg replay` checks `git merge-base --is-ancestor <snapshot_sha>
   refs/baton/<repository>/default`, its own ref of the **registered** default branch Baton
   names, not a branch selected by the checkout. On failure it makes one bounded fetch
@@ -378,7 +378,7 @@ section that are not built are in [the proposal page](../proposals/checks-and-ex
     `released:off-branch` (§9.4).
   - **Not built:** the `baton.off-branch` condition ([B-46](../../tickets/B-46.mdx)) and the
     off-branch sync want ([B-57](../../tickets/B-57.mdx), R-BTN-94).
-- **R-BTN-133 (repository code runs through the wrapper).** R-BTN-143 governs snapshot reads. No repository
+- **R-BTN-133 (repository code runs through the wrapper).** `status: built B-42` R-BTN-143 governs snapshot reads. No repository
   code loads in the runner's process.
   - **The wrapper** `legProcess.mjs`, the CLI's own, which the executor makes available where
     its sessions run, runs every call into a script — `run`, `close`, `handoff`, a ticket
@@ -397,7 +397,7 @@ section that are not built are in [the proposal page](../proposals/checks-and-ex
     and their installed dependencies load from, gated by `runner:leg-trees` — with scripts in
     TypeScript and the leg module `@immediately-run/baton/leg`, are not built
     ([proposal](../proposals/checks-and-executors.md)).
-- **R-BTN-144 (a leg's environment, and the one list of what is masked).**
+- **R-BTN-144 (a leg's environment, and the one list of what is masked).** `status: partly B-299`
   - **The runner's own credentials.** The reference runner currently passes its environment to
     legs, including `BATON_KEY`, `BATON_KEY_FILE` and `BATON_TOKEN` if set (the token can be
     an API key). **Not built ([B-299](../../tickets/B-299.mdx)):** remove those variables after
@@ -459,13 +459,13 @@ section that are not built are in [the proposal page](../proposals/checks-and-ex
   - **Replay** (R-BTN-84) builds its environment from an allowlist: `PATH`, `LANG`, `TZ`,
     `TERM`, an isolated `HOME`, the read-only clone credential `runner.json`
     `replay_clone_credential` if configured, and names in `runner.json` `replay_env` or `--env`.
-- **R-BTN-145 (every process a leg starts is stopped with it).** Every process the leg started
+- **R-BTN-145 (every process a leg starts is stopped with it).** `status: partly B-184 B-9` Every process the leg started
   must be gone within 30 s of the runner receiving a stop or release or detecting a lost lease,
   or of the runner exiting or the leg call returning. This is an end-to-end bound, including
   any grace period and executor cleanup (R-BTN-107). The `builtin` executor kills the call's
   process group on exit or when asked to stop. **Not built:** enforcement of the end-to-end
   bound for release and for processes outside the call's group (B-184, B-9).
-- **R-BTN-119 (stopping a running leg).** Baton kills nothing; it asks the runner.
+- **R-BTN-119 (stopping a running leg).** `status: partly B-9` Baton kills nothing; it asks the runner.
   - A `release` reaches the runner on a heartbeat. It sends one abort line to the running leg
     call, if attached, and gives the leg a safe point to stop. The reference runner starts its
     30-second grace timer when a poll sees the pending abort, not at receipt of the release.
@@ -479,7 +479,7 @@ section that are not built are in [the proposal page](../proposals/checks-and-ex
 
 ### 8.5 A running leg's output
 
-- **R-BTN-128 (a leg run's output).** A leg's output is masked (R-BTN-144) before it leaves the
+- **R-BTN-128 (a leg run's output).** `status: built B-22 B-23` A leg's output is masked (R-BTN-144) before it leaves the
   runner, and goes to the runner's own log. `claim_legs.leg_log_dir` is null on every run:
   writing a run's output to an owners' log location, and `baton leg log`, which reads it there,
   are not built ([proposal](../proposals/checks-and-executors.md)).

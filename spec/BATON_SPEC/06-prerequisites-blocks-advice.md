@@ -2,7 +2,7 @@
 title: "6. Prerequisites, blocks and advice"
 description: "A leg starts when its prerequisites hold."
 ---
-## 6. Prerequisites, blocks and advice *(partly built)*
+## 6. Prerequisites, blocks and advice
 
 A leg starts when its prerequisites hold. Baton stores each unmet one as a block, answers "why
 not" from that index, gates claims on the blocks safety needs, and advises on the rest.
@@ -19,7 +19,7 @@ Not built, each a design its rule below still states:
 
 ### 6.1 Prerequisites
 
-- **R-BTN-120 / R-BTN-132 (a leg's prerequisites, one way in for each kind).** A leg can start
+- **R-BTN-120 / R-BTN-132 (a leg's prerequisites, one way in for each kind).** `status: partly B-10` `status: partly B-41` A leg can start
   when every prerequisite holds. This is the one list of prerequisite and block kinds:
 
   | Kind | Declared by | Holds when | Block `ref` | `why` when unmet |
@@ -80,7 +80,7 @@ Not built, each a design its rule below still states:
 
 ### 6.2 Blocks
 
-- **R-BTN-75 (blocks are stored, not recomputed).** A block is one unmet prerequisite, a row of
+- **R-BTN-75 (blocks are stored, not recomputed).** `status: built` A block is one unmet prerequisite, a row of
   `ticket_blocks` (repository, ticket, leg or `''` for the whole ticket, `kind`, `ref`, `since`,
   `until`, `found`, `provisional`, `binds`) written in the transaction that causes it, so asking
   reads one repository-scoped index. The kinds and their `ref` are R-BTN-120's table.
@@ -122,7 +122,7 @@ Not built, each a design its rule below still states:
     present at the claim's start, is `before-start`.
   - Rows and the messages they cause count against the write budget (§2).
 
-- **R-BTN-77 (blocked and unblocked are events; unblocking wakes work).**
+- **R-BTN-77 (blocked and unblocked are events; unblocking wakes work).** `status: built B-26 B-49`
   - Setting `blocked_since` logs `blocked`; clearing it other than by a claim starting logs
     `unblocked` `{ticket, cleared: [{kind, ref}]}`, the rows whose removal cleared it, in the
     same transaction. A claim's end is never an unblocking; an end leaving the ticket blocked
@@ -137,7 +137,7 @@ Not built, each a design its rule below still states:
     plus a trailing one, at most 100 entries then `{truncated: n}`. Every id and `ref` in it has
     passed §12.3's untrusted-text rules.
 
-- **R-BTN-126 (a prerequisite that fails during a leg blocks that leg's edge).** The ticket stays
+- **R-BTN-126 (a prerequisite that fails during a leg blocks that leg's edge).** `status: partly B-21` The ticket stays
   at the station the leg leaves; no station is added.
   - **The end.** The runner pushes the work so far, `handoff` writes the hand-off (R-BTN-44), and
     the claim ends **`released:blocked`** with `prerequisite: {kind, ref}`. In that transaction:
@@ -192,7 +192,7 @@ Not built, each a design its rule below still states:
 
 ### 6.3 External resources and readings
 
-- **R-BTN-76 / R-BTN-101 / R-BTN-151 (external resources, their instances and readings).** A
+- **R-BTN-76 / R-BTN-101 / R-BTN-151 (external resources, their instances and readings).** `status: built` `status: built` `status: built` A
   resource is anything outside Baton that a course reads the state of: a provider's capacity, an
   API's rate limit, disk on a shared server. A **reading** is an attestation about one of its
   instances: R-BTN-181 owns its writers and authentication, and this rule adds what is particular
@@ -274,7 +274,7 @@ Not built, each a design its rule below still states:
 
 ### 6.4 People
 
-- **R-BTN-116 (a person's leg: the one way a course waits on a person).** A leg may be `"kind":
+- **R-BTN-116 (a person's leg: the one way a course waits on a person).** `status: built` A leg may be `"kind":
   "person"` with `"asks": <label>` (who answers; matches `^[a-z][a-z0-9-]{0,31}$`). No runner is
   offered it or may claim or advance into it (rule `person`), and no claim ever runs it: the ticket
   waits unheld while it is queued, and the leg may also arrive while another leg is queued
@@ -324,7 +324,7 @@ Not built, each a design its rule below still states:
 
 ### 6.5 Waiting for a time
 
-- **R-BTN-89 (a queued leg may wait for a time).** A queued leg may carry `not_before`, an
+- **R-BTN-89 (a queued leg may wait for a time).** `status: built` A queued leg may carry `not_before`, an
   instant before which it is not offered.
   - **From git.** After a leg, its closing marker's `not_before=` (from the result's
     `not_before?`, R-BTN-72), posted by `locate` with the ticket as `not_before` (§4.4); the runner
@@ -400,7 +400,7 @@ never refuses, and acting against it is accepted and recorded `advice-overridden
 
 ### 6.7 What a runner ranks from
 
-- **R-BTN-99 (the views a runner ranks from).** Read-only, signed by a machine key alone (no
+- **R-BTN-99 (the views a runner ranks from).** `status: built` Read-only, signed by a machine key alone (no
   runner secret). Each answers with an `ETag`, so an unchanged poll costs a `304`. The tag
   uses the view versions, the key's grant set and UTC hour, and changes at relevant lapses,
   backoff deadlines and bar starts or ends.
@@ -424,14 +424,14 @@ never refuses, and acting against it is accepted and recorded `advice-overridden
     runner decides (lease, readiness, holds, backoff, blocks, a full capability), in the default
     order with their course fields, for a launcher's `rank` with `runner: null` (R-BTN-98).
 
-- **R-BTN-152 (what a view serves is data).** Profiles, reports, readings' `detail`, course
+- **R-BTN-152 (what a view serves is data).** `status: partly` Profiles, reports, readings' `detail`, course
   fields, resume records and hand-off documents in a view reach a model only as quoted data. A
   runner-level report names a repository the key is granted on, and the fleet view serves only
   those naming its own. The runner checks `rank`'s return: `order` names only the given
   candidates; `advice` and `launch` validate against the course file's `rank_advice` and
   `rank_launch` schema ids (R-BTN-108), dropped when it names none; on any failure, Baton's order.
 
-- **R-BTN-100 (a claim names its preferences).** `POST /v1/runner/claim` takes `request_id`
+- **R-BTN-100 (a claim names its preferences).** `status: built` `POST /v1/runner/claim` takes `request_id`
   and at most one of `ticket_id` and `prefer: [{ticket_id, leg?}]`. Baton tries up to 50 known
   tickets in order, using the same gates as a named claim, and grants the first passing entry
   in the same transaction. If none passes it answers `no-eligible-ticket` with
@@ -445,7 +445,7 @@ never refuses, and acting against it is accepted and recorded `advice-overridden
 
 ### 6.8 Owner overrides: expedite and hold
 
-- **R-BTN-12 (expedite and hold).** A ticket is expedited when its snapshot carries `EXPEDITE`
+- **R-BTN-12 (expedite and hold).** `status: built B-75` A ticket is expedited when its snapshot carries `EXPEDITE`
   or its override says so; the override stays until an owner clears it, whatever later snapshots
   show. The mirror writes the tag, and for a hold a Status note, never a status (legacy, removed
   with its code, R-BTN-193).
@@ -496,7 +496,7 @@ Which model a leg uses, through which key, and how it reacts to a reading is cou
 
 ### 6.11 Capacity: exclusive use of a capability
 
-- **R-BTN-178 (a capability with a capacity has that many seats).** A capability that takes one
+- **R-BTN-178 (a capability with a capacity has that many seats).** `status: built` A capability that takes one
   client at a time, or a few, is given a capacity; Baton then holds its seats as it holds a
   ticket's lease.
   - **Capacity.** An administrator sets it for the tenant: `baton admin capacity set

@@ -2,7 +2,7 @@
 title: "12. Security"
 description: "BATON_SPEC — 12. Security."
 ---
-## 12. Security *(partly built)*
+## 12. Security
 
 - **Whose rules these are.** Every principal belongs to one tenant and authenticates only at
   that tenant's origin (R-BTN-137); the operator is not a principal (R-BTN-136).
@@ -40,7 +40,7 @@ stated once, in the rule it cites.
 The repository reads (`GET /v1/repositories/{repository}/…`) are open to any key granted on the
 repository, its owners and administrators, except where a route's rule narrows them.
 
-- **R-BTN-179 (the state is readable with a key).** What the dashboard's state answers is
+- **R-BTN-179 (the state is readable with a key).** `status: built` What the dashboard's state answers is
   answered to a signed key too, by the same queries with the session-link projection of R-BTN-113:
   `GET /v1/admin/repositories` (administrators: the registry as `/v1/admin/state`'s
   `repositories`, plus `seed_owners` — the unretired repositories whose live owner keys are all the
@@ -164,7 +164,7 @@ Every value below is validated on write; a value over its cap is refused `invali
 
 ### 12.4 Same-site with the product
 
-- **R-BTN-16 (same-site with the product).** A Baton may share its registrable domain with
+- **R-BTN-16 (same-site with the product).** `status: built` A Baton may share its registrable domain with
   origins that run untrusted code. So, on every host:
   - **Cookies.** Baton sets one cookie and reads no other: the dashboard session
     `__Host-baton_session` (12 hours, R-BTN-155), `__Host-` prefixed, host-only, `Secure`,
@@ -198,7 +198,7 @@ Every value below is validated on write; a value over its cap is refused `invali
 
 ### 12.5 The local host and bearers
 
-- **R-BTN-158 (the local host, and bearers over `http`).**
+- **R-BTN-158 (the local host, and bearers over `http`).** `status: partly B-46 B-300`
   - **Binding.** `baton server start` binds `127.0.0.1` unless `--host <address>` says otherwise.
     TLS is the operator's: a front (a reverse proxy, Tailscale serve) terminates it, and
     `--origin` names the front's origin, against which R-BTN-135's host check holds. A
@@ -225,7 +225,7 @@ Every value below is validated on write; a value over its cap is refused `invali
 
 ### 12.6 Capability roles and links
 
-- **R-BTN-157 (capability roles never reach a grant; links are bounded).** Registration
+- **R-BTN-157 (capability roles never reach a grant; links are bounded).** `status: built` Registration
   tokens' bounds — role `runner` only, uses, lifetime, re-keys and bursts — are R-BTN-117's.
   - **Roles never reach a grant.** A course file whose `capability_roles` (R-BTN-121) names
     `human-operator`, another role, a capability or `none` is held (R-BTN-69). A grant holds
@@ -263,7 +263,7 @@ Every value below is validated on write; a value over its cap is refused `invali
   read. An organisation owner installs it on each repository whose `checks` setting names a course,
   never on "All repositories" (R-BTN-115). Branch protection names it,
   never the dispatch App (R-BTN-115).
-### 12.8 The repository policy and its guarantees *(partly built)*
+### 12.8 The repository policy and its guarantees
 
 Baton specifies mechanisms, each with what it guarantees; a repository's **policy** chooses which
 of them hold. The policy is Baton state, one document per repository, set by its owners and never
@@ -337,7 +337,7 @@ Outside every guarantee as well: a change, or a review's findings, that persuade
 `merge.reviews` requires; a compromised runner, or a compromised host of runners or of what
 confines a leg's credentials; a compromised forge; and a compromised Baton.
 
-- **R-BTN-188 (the repository policy).** Every rule about authority and trust that an agent must
+- **R-BTN-188 (the repository policy).** `status: partly B-145 B-147` Every rule about authority and trust that an agent must
   not change, and that Baton, the forge or a trusted runner enforces, is one knob of the
   repository's policy. A rule none of the three can enforce is not policy: it is the
   deployment's (§12.8).
@@ -457,7 +457,7 @@ confines a leg's credentials; a compromised forge; and a compromised Baton.
     entry of every repository on the instance whose `human_key` it meets; a line that does not
     meet `hardware` satisfies nothing on a repository that requires it. It is set outside Baton
     and is the only recovery from a lost key.
-- **R-BTN-189 (guarantees and floors).**
+- **R-BTN-189 (guarantees and floors).** `status: partly B-145 B-147`
   - **A guarantee** is a named condition over the policy, defined here, and held or broken for
     each version. A deployment defines its own guarantees in its own specification, out of these
     and of what it enforces itself; Baton knows only these. A version or a `floors` entry naming
@@ -522,7 +522,7 @@ confines a leg's credentials; a compromised forge; and a compromised Baton.
     audit read the same route, each with its own key. `held` says the policy's values meet the
     guarantee's conditions, never that the deployment keeps §12.8's duty, which Baton cannot see:
     under `builtin` a held guarantee protects nothing.
-- **R-BTN-180 (what lands on the default branch).**
+- **R-BTN-180 (what lands on the default branch).** `status: partly B-140 B-147 B-189`
   - **No runner role and no domain.** Every grant is a runner's. Which runner may take a trusted
     leg is rule `trusted`'s (R-BTN-182, [proposed](../proposals/security.md)), by the
     capability the leg requires; the `approvers.members` approver names it only on the grants of
@@ -540,7 +540,7 @@ confines a leg's credentials; a compromised forge; and a compromised Baton.
   - **Baton's refs.** `refs/baton/*` is open to every writer, and Baton reads nothing from it
     that a trusted leg acts on; `baton-legs/*` is open to every runner and the human
     (R-BTN-190).
-- **R-BTN-181 (attestations: typed statements about work or about a resource).** A typed
+- **R-BTN-181 (attestations: typed statements about work or about a resource).** `status: built` A typed
   statement Baton stores, which a leg may require: a review, a check run, a human's approval, a
   provider's remaining quota. Attestations differ only in their subject and their writer; an
   attestation about a resource instance is a **reading** (R-BTN-76).
@@ -574,7 +574,7 @@ confines a leg's credentials; a compromised forge; and a compromised Baton.
     Lost attestations fail closed. Readings are kept and exported as R-BTN-76 and R-BTN-88 say.
   - The attestation's shape, its other types, supersession, revocation and the
     `requires.attestations` prerequisite are [proposed](../proposals/security.md) (B-146).
-- **R-BTN-191 (every statement Baton receives about the work is an attestation).** Baton takes
+- **R-BTN-191 (every statement Baton receives about the work is an attestation).** `status: partly B-116 B-146` Baton takes
   facts about work in one way: as attestations (R-BTN-181), whoever states them. What else
   reaches it is a **command**: a request to change Baton's own state (a claim, an `advance` or
   end, a heartbeat, an owner's or administrator's action), which Baton accepts or refuses by its
@@ -593,14 +593,14 @@ confines a leg's credentials; a compromised forge; and a compromised Baton.
     only on a board a sync key or the CI identity posted. Its other
     types, the holder's `std:arrival@1` and a deliverer's `std:effect@1` are
     [proposed](../proposals/security.md).
-- **R-BTN-192 (the fact reader).** Where the policy admits no `sync` writer for `std:arrival@1`,
+- **R-BTN-192 (the fact reader).** `status: partly B-146 B-311` Where the policy admits no `sync` writer for `std:arrival@1`,
   a fact leg's arrival comes from the fact reader: a trusted runner whose `service:` key the
   policy names. [Proposed](../proposals/security.md) (B-140).
-- **R-BTN-182 (trusted runners).** A runner whose grant names the capability a trusted leg
+- **R-BTN-182 (trusted runners).** `status: specified B-140 B-189` A runner whose grant names the capability a trusted leg
   requires exactly (rule `trusted`), for the legs a course marks `trusted: true`; its host holds the leg's
   credential, which, where the deployment keeps §12.8's duty, no leg's environment holds. What a trusted runner claims, runs and re-checks before it acts is
   [proposed](../proposals/security.md) (B-140).
-- **R-BTN-183 (review input and what the merge runner merges).** A domain that runs the
+- **R-BTN-183 (review input and what the merge runner merges).** `status: partly B-140 B-189` A domain that runs the
   branch's code is one of its writers. Baton records what the deployment declares; the
   deployment makes it true. The writer attestations and what the merge runner requires at a
   PR's exact head are [proposed](../proposals/security.md) (B-140).
@@ -633,12 +633,12 @@ confines a leg's credentials; a compromised forge; and a compromised Baton.
     `Read`, `Glob` and `Grep`. Unsupported agent commands fail. This is a harness restriction,
     not an OS sandbox: the deployment must trust the installed harness, host configuration
     and snapshot course code, and must not grant higher-precedence tool policy overrides.
-- **R-BTN-184 (protected paths).** The policy's `paths.protected`, beside a floor Baton computes
+- **R-BTN-184 (protected paths).** `status: partly B-140 B-189` The policy's `paths.protected`, beside a floor Baton computes
   that no course or owner removes, in two classes: **control paths** — courses, workflows, agent
   configuration, the ticket source and what the owner declares — and **tickets and goals**. The
   floor's entries, its glob grammar, how each class lands and a leg's own progress lines are
   [proposed](../proposals/security.md) (B-140).
-- **R-BTN-185 (human-only credentials).** A human gate — a `human` attestation or its
+- **R-BTN-185 (human-only credentials).** `status: partly B-136` A human gate — a `human` attestation or its
   revocation, and every action whose approver list in the repository's policy is human-only
   (R-BTN-188) — is satisfied only by a human-only key's own signature. A human's merge is the
   forge's, recognised by the policy's `human_identity`.
@@ -659,7 +659,7 @@ confines a leg's credentials; a compromised forge; and a compromised Baton.
     `owner`, never as `human`. A dashboard session of a `human_only` key is an owner's
     session too: no session, and no OAuth approval by one, satisfies a human-only `approvers.*`
     list.
-- **R-BTN-186 (authority by credential, not channel).** An action is available on every surface (the
+- **R-BTN-186 (authority by credential, not channel).** `status: partly B-124` An action is available on every surface (the
   CLI, the API, the dashboard, MCP) to the principals its `callers` list (R-BTN-129), and to no other;
   a surface lacks an action only for a mechanical reason the registry names.
   - **A delegated key** (an MCP key, R-BTN-130) acts as an owner of its repository, never as
@@ -678,7 +678,7 @@ confines a leg's credentials; a compromised forge; and a compromised Baton.
     another's bar, any change that loosens an R-BTN-66 setting — is an `approvers.policy`
     approver's (R-BTN-188): an owner's under `[owner]`, a human's under a human-only list.
     Tightening is open to any owner credential.
-- **R-BTN-187 (what Baton trusts from a board post).** Who may post the board is R-BTN-93's,
+- **R-BTN-187 (what Baton trusts from a board post).** `status: partly B-137` Who may post the board is R-BTN-93's,
   and whether what a post read from git counts is its `attestations` entries
   (R-BTN-188, R-BTN-191). A sync credential is limited to 60 observation
   allocations and, separately, 60 board requests (including refused posts) per UTC hour.
