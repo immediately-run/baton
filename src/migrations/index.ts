@@ -68,6 +68,8 @@ import dependencyConsents from './0062_dependency_consents.sql';
 import runnersViewReads from './0063_runners_view_reads.sql';
 import childrenOwnerState from './0064_children_owner_state.sql';
 import readEfficiency from './0065_read_efficiency.sql';
+import legContracts from './0100_leg_contracts.sql';
+import pinnedContracts from './0101_pinned_contracts.sql';
 import runnerViews from './0066_runner_views.sql';
 import retirePolicyPins from './0070_retire_policy_pins.sql';
 import accessSignIn from './0071_access_sign_in.sql';
@@ -228,4 +230,6 @@ export const MIGRATIONS: Migration[] = [
   { id: 82, sql: legTimeoutFence },
   { id: 83, sql: postedHead },
   { id: 84, sql: backfillPostedHead },
+  { id: 100, sql: legContracts },
+  { id: 101, sql: pinnedContracts },
 ];
