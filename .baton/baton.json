@@ -22,7 +22,7 @@
   "courses": [
     {
       "id": "create-pr",
-      "version": 3,
+      "version": 4,
       "min_runner_version": 1,
       "skill": "baton-create-pr",
       "step_kinds": [
