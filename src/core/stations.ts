@@ -7,13 +7,14 @@
 import { nonScheduling } from './stateVersion';
 import { logEvent } from './db';
 import { extendsPath, graphOf, leaves, onGraph, resolveLeg, type Graph, type Step } from './graph';
-import type { PostedStation } from './board';
+import { missingQueuedLeg, type PostedStation } from './board';
 import type { Store } from './ports';
 import { meetsRequiredBar, requiredBarCovers, type RequiredBar } from './admin';
 import { qualify } from './validate';
 import { repositoryOf } from './registry';
 import type { History } from './history';
 import { BATON_WAITS } from './blocks';
+import { ticketInputs } from './contracts';
 
 /** What one snapshot showed of one ticket, against the previous accepted one. */
 export interface Seen {
@@ -45,7 +46,7 @@ function batonWait(on: string | null | undefined): boolean {
 export class Stations {
   private graphs = new Map<string, Graph | null>();
 
-  constructor(private readonly c: { store: Store; now: () => number; requiredBars?: (repo: string) => RequiredBar[]; history?: History }) {}
+  constructor(private readonly c: { store: Store; now: () => number; requiredBars: (repo: string) => RequiredBar[]; history: Pick<History, 'record' | 'discrepancy'> }) {}
 
   private rows<T>(q: string, ...p: unknown[]): T[] {
     return this.c.store.exec<T>(q, ...p).toArray();
@@ -105,7 +106,7 @@ export class Stations {
     // once for the post; each ticket's writes touch only its own rows, so what was read for the
     // others stays true while the loop runs.
     const stored = this.storedOf(repo);
-    const required = this.c.requiredBars?.(repo) ?? [];
+    const required = this.c.requiredBars(repo);
     for (const [local, st] of stations) {
       const id = qualify(repo, local);
       const t = stored.get(id);
@@ -152,7 +153,7 @@ export class Stations {
       this.write(id, g!, st, sha, observation, at, required, t);
       // R-BTN-81: git moved the ticket and no claim said so — someone else's work.
       if (prevRow && (prevRow.station !== st.station || prevRow.path !== JSON.stringify(st.path)) && !this.claimMoved(id, st.station, Math.max(prevRow.observation, placedBefore))) {
-        this.c.history?.record(id, { kind: 'git-moved', reached: st.station, next_leg: st.next_leg, detail: { from: prevRow.station, to: st.station, path: st.path, observation, next_source: st.next_source } });
+        this.c.history.record(id, { kind: 'git-moved', reached: st.station, next_leg: st.next_leg, detail: { from: prevRow.station, to: st.station, path: st.path, observation, next_source: st.next_source } });
       }
       seen.set(id, { station: st.station, path: st.path, prev, bars: st.bars });
     }
@@ -168,6 +169,19 @@ export class Stations {
         qualify(repo, c.id), c.as, observation, at, parent);
     }
     return seen;
+  }
+
+  /** R-BTN-83 (S-BTN-312): read the final placement, including any move by a sync attestation. */
+  missingNext(repo: string): Set<string> {
+    const missing = new Set<string>();
+    for (const row of this.rows<{ id: string; course_id: string; station: string; next_leg: null }>(
+      `SELECT t.id, t.course_id, s.station, s.next_leg FROM tickets t JOIN ticket_stations s ON s.ticket_id = t.id
+       WHERE t.repository_id = ? AND s.next_leg IS NULL
+         AND NOT EXISTS (SELECT 1 FROM closed_tickets c WHERE c.ticket_id = t.id)`, repo)) {
+      const g = this.graph(repo, row.course_id);
+      if (g?.stations.has(row.station) && missingQueuedLeg(row, g.ends)) missing.add(row.id);
+    }
+    return missing;
   }
 
   /** Every live ticket of the repository with its stored station, next legs and bars (B-241).
@@ -320,7 +334,8 @@ export class Stations {
       // R-BTN-67: a leg a required bar covers whose posted bars hold no tag with its prefix is
       // stored waiting on `policy` — the board still moves — and listed under Needs you.
       const unmet = required.some((r) => requiredBarCovers(r, course, posted.leg, g) && !meetsRequiredBar(r, Object.hasOwn(st.bars, posted.leg) ? st.bars[posted.leg] : []));
-      const n = unmet ? { leg: posted.leg, state: 'waiting' as const, waiting_on: 'policy' } : posted;
+      const wait = unmet ? 'policy' : posted.state === 'ready' ? ticketInputs(this.c.store, id, g, posted.leg).wait : undefined;
+      const n = wait ? { leg: posted.leg, state: 'waiting' as const, waiting_on: wait } : posted;
       const b = before.get(n.leg);
       // Age (the default order's fourth key) runs from the first snapshot that showed the leg
       // ready, and an unbroken wait from the first that showed it waiting. A wait git posts never
@@ -365,6 +380,6 @@ export class Stations {
   private offGraph(repo: string, id: string, detail: { observation: number; why: string; path?: Step[]; previous?: Step[] | null }) {
     logEvent(this.c.store, this.c.now(), 'off-graph', 'sync', detail, id, null, repo);
     // R-BTN-85: git's path wins; what Baton held beside it is logged.
-    this.c.history?.discrepancy(id, 'off-graph', { path: detail.previous ?? null, source: 'snapshot' }, { why: detail.why, ...(detail.path ? { path: detail.path } : {}) }, detail.observation);
+    this.c.history.discrepancy(id, 'off-graph', { path: detail.previous ?? null, source: 'snapshot' }, { why: detail.why, ...(detail.path ? { path: detail.path } : {}) }, detail.observation);
   }
 }
