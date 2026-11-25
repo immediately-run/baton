@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { comparisonProblems, migratedTables, registeredReadRoutes, specifiedRoutes, specifiedTables } from './check-api.mjs';
-import { legacyRoutes, readMethods } from './lib/core-routes.mjs';
+import { comparisonProblems, migratedTables, registeredReadRoutes, registeredWriteRoutes, specifiedRoutes, specifiedTables } from './check-api.mjs';
+import { legacyRoutes, readMethods, writeActionIds } from './lib/core-routes.mjs';
 
 // B-277 exercises the repository verification under R-BTN-31, not a runtime API change.
 describe('check:api', () => {
@@ -32,6 +32,28 @@ describe('check:api', () => {
       .toEqual(['PUT /v1/widgets', 'POST /v1/widgets']);
     expect(() => legacyRoutes(router("(req.method === 'PUT' && url.pathname === '/v1/widgets') || (req.method === 'POST' && url.pathname === '/v1/items')")))
       .toThrow(/unsupported route method alternatives/);
+  });
+
+  it('counts registry writes only when dispatched and rejects missing registrations', () => {
+    const core = `class Fixture {
+      dashboardWrite() {
+        switch (hit.action.id) {
+          case 'ticket.hold':
+          case 'ticket.unhold': return setOverride();
+          default: throw notFound();
+        }
+      }
+      adminRoute() { if (action?.id === 'admin.freeze') return freeze(); }
+    }`;
+    const entries = [
+      { id: 'ticket.hold', http: { method: 'POST', path: '/v1/ui/overrides/{ticket}' } },
+      { id: 'ticket.unhold', http: { method: 'POST', path: '/v1/ui/overrides/{ticket}' } },
+      { id: 'admin.freeze', http: { method: 'POST', path: '/v1/admin/freeze' } },
+      { id: 'ticket.cancel', http: { method: 'POST', path: '/v1/ui/cancel/{ticket}' } },
+    ];
+    const ids = writeActionIds(core);
+    expect(new Set(registeredWriteRoutes(entries, ids))).toEqual(new Set(['POST /v1/ui/overrides/{}', 'POST /v1/admin/freeze']));
+    expect(() => registeredWriteRoutes(entries.slice(0, 2), ids)).toThrow(/admin\.freeze/);
   });
 
   it('rejects matching new exceptions in both directions and validates ticket ids', () => {

@@ -7,7 +7,7 @@ import { pathToFileURL } from 'node:url';
 import { build } from 'esbuild';
 import { LOCAL_LOADERS } from './bundle.mjs';
 import { exceptionProblems, priorExceptions } from './lib/check-exceptions.mjs';
-import { legacyRoutes, readMethods, routeKey } from './lib/core-routes.mjs';
+import { legacyRoutes, readMethods, routeKey, writeActionIds } from './lib/core-routes.mjs';
 
 const ROOT = resolve(import.meta.dirname, '..');
 const read = (path) => readFileSync(resolve(ROOT, path), 'utf8');
@@ -73,12 +73,23 @@ export function registeredReadRoutes(actions, reads, methods) {
     .flatMap(({ http: { path } }) => methods.map((method) => routeKey(method, path)));
 }
 
+export function registeredWriteRoutes(actions, ids) {
+  const byId = new Map(actions.map((action) => [action.id, action]));
+  return [...ids].map((id) => {
+    const http = byId.get(id)?.http;
+    if (http?.method !== 'POST') throw new Error(`no registered POST route for write handler ${id}`);
+    return routeKey(http.method, http.path);
+  });
+}
+
 async function run() {
   const [{ ACTIONS }, { READS }, { MIGRATIONS }] = await Promise.all([
     load('src/core/actions.ts'), load('src/core/reads/index.ts'), load('src/migrations/index.ts'),
   ]);
-  const routes = legacyRoutes(read('src/core/baton.ts'));
+  const core = read('src/core/baton.ts');
+  const routes = legacyRoutes(core);
   for (const route of registeredReadRoutes(ACTIONS, READS, readMethods(read('src/core/reads/index.ts')))) routes.add(route);
+  for (const route of registeredWriteRoutes(ACTIONS, writeActionIds(core))) routes.add(route);
   const tables = migratedTables(MIGRATIONS);
   const specRoutes = specifiedRoutes(read('spec/BATON_SPEC/14-api.md'));
   const specTables = specifiedTables(read('spec/BATON_SPEC/13-data-model.md'));
