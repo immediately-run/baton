@@ -163,24 +163,18 @@
 //
 // The URL is `--url`, else BATON_URL, else the home in force's origin (B-121), else
 // https://baton.immediately.run.
-import { execFileSync } from 'node:child_process';
+import { git } from '../src/defaults/git.mjs';
 import { createHash, randomBytes } from 'node:crypto';
 import { existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { requestCredential, signHeaders, signingKey } from './sign.mjs';
-import { clientVersion, packageVersion, workingTreeOf } from './version.mjs';
-import { compareVersions, parseClientVersions } from '../src/shared/versions.mjs';
+import { signingKey } from '../src/client/sign.mjs';
+import { send } from '../src/client/send.mjs';
+/** @typedef {import('../src/client/send.mjs').BatonFetch} BatonFetch */
+import { DEFAULT_URL, homesPath } from '../src/client/config.mjs';
+export { send, DEFAULT_URL, homesPath };
+import { clientVersion, packageVersion, workingTreeOf } from '../src/client/version.mjs';
 
-export const DEFAULT_URL = 'https://baton.immediately.run';
-/** Where the CLI's homes.json sits (B-121): `$XDG_CONFIG_HOME` (or `~/.config`)/baton/
- *  homes.json — the directory keys.json, origins.json and runner.json's own rules name
- *  (R-BTN-137, R-BTN-144). Spelled here once and imported by src/defaults/homes.ts, so this
- *  file's fast path and the bundled home resolution read the same file. */
-export function homesPath(env = process.env) {
-  return join(env.XDG_CONFIG_HOME || join(env.HOME || homedir(), '.config'), 'baton', 'homes.json');
-}
 /** The package the pinned release command names (B-138): `npx --yes @immediately-run/baton@<version>`. */
 export const PINNED_PACKAGE = '@immediately-run/baton';
 const UNITS = { m: 60_000, h: 3_600_000, d: 86_400_000 };
@@ -264,9 +258,9 @@ export function duration(v) {
 }
 
 /** The version of the package this CLI ships in — the pin the B-138 refusal names — and the
- *  `Baton-Client` value every request names (R-BTN-197, B-254): `cli/version.mjs`'s, the leaf
+ *  `Baton-Client` value every request names (R-BTN-197, B-254): `src/client/version.mjs`'s, the leaf
  *  the runner's bundle also takes, re-exported where they have always been imported from. */
-export { clientVersion, packageVersion, workingTreeOf } from './version.mjs';
+export { clientVersion, packageVersion, workingTreeOf } from '../src/client/version.mjs';
 
 /** A word that keeps the shell it is copied into reading one argument (round 1): the refusal's
  *  suggested command must survive a key path with a space in it. */
@@ -846,82 +840,12 @@ export function createApiKey(file, comment = '') {
   return line;
 }
 
-/** A redirect, named for what it is (B-80): an intermediary in front of Baton — Cloudflare
- *  Access's login — answered, so the request never reached Baton. */
-const redirectAnswered = (target, status, to) => new Error(
-  `a redirect answered ${target}${status ? ` (HTTP ${status}${to ? ` to ${to}` : ''})` : ''} — not followed; the request never reached Baton (an Access login in front of it?)`,
-);
-
-/** Send a planned request, signed with `keyFile` — or, when it holds an API key (R-BTN-159),
- *  with that key as a bearer. Returns `{status, json, text}`: `json` is null when the body is
- *  not JSON, `text` the body as it arrived, for the caller to show. A redirect is refused,
- *  never followed (B-80): a 3xx is an error naming what answered — a login page in front of
- *  Baton is not Baton's answer. R-BTN-197 (B-254): every request says which client it is
- *  (`Baton-Client`, `clientVersion`'s one place), and the first answer that names a
- *  `recommended` above it draws the warning — once per command, on stderr, so a script's
- *  stdout stays its own. `client` names the version for a test (a CLI this code never shipped
- *  as); a command's own requests are always `clientVersion()`'s. */
-let saidClientVersions = false;
-/** @typedef {(url: string, init: RequestInit) => Promise<Response>} BatonFetch */
-/** @param {string} url
- * @param {{path: string, method: string, body?: unknown}} p
- * @param {string} keyFile
- * @param {BatonFetch} [fetchImpl]
- * @returns {Promise<{status: number, json: unknown, text: string}>}
- */
-export async function send(url, p, keyFile, fetchImpl = fetch, client = clientVersion()) {
-  const cred = requestCredential(keyFile);
-  const target = new URL(p.path, url).toString();
-  // A GET carries no body; its digest is of the empty one.
-  const body = p.method === 'GET' ? undefined : JSON.stringify(p.body ?? {});
-  const auth = cred.bearer !== undefined ? { Authorization: `Bearer ${cred.bearer}` } : signHeaders({ method: p.method, url: target, body, key: cred.key });
-  const headers = { 'Baton-Client': client, ...(body === undefined ? {} : { 'Content-Type': 'application/json' }), ...auth };
-  // A Baton that does not answer in 30 seconds is reported, never waited on for ever (round 3, 3-A-5).
-  let res;
-  try {
-    // A 3xx is never followed (B-80): `redirect: 'error'` makes fetch refuse it outright.
-    res = await fetchImpl(target, { method: p.method, headers, body, redirect: 'error', signal: AbortSignal.timeout(30_000) });
-  } catch (e) {
-    // `redirect: 'error'` surfaces that refusal as a fetch failure whose cause names it: report
-    // what happened, not the generic failure (B-80).
-    if (/redirect/i.test(`${e?.message ?? ''} ${e?.cause?.message ?? ''}`)) throw redirectAnswered(target);
-    throw e;
-  }
-  // A fetch stand-in may hand the 3xx back instead of throwing: the same refusal (B-80).
-  if (res.status >= 300 && res.status < 400) throw redirectAnswered(target, res.status, res.headers.get('location'));
-  warnClientVersions(res.headers.get('Baton-Client-Versions'), client);
-  const raw = await res.text();
-  let json = null;
-  try {
-    json = JSON.parse(raw);
-  } catch {
-    json = null;
-  }
-  return { status: res.status, json, text: raw };
-}
-
-/** R-BTN-197: `baton: this CLI is <version>; Baton recommends <recommended> and refuses below
- *  <min>`, said at most once per command (one command is one process), only when the
- *  recommendation is above this CLI's version — compared by semver precedence, `+dev` taking no
- *  part. An answer that recommends nothing above it says nothing and spends nothing: a later
- *  answer of the same command that does (an administrator raised it mid-run) still gets its
- *  line. Nothing installs or switches anything: the header carries version numbers only, and
- *  updating stays the operator's act. */
-function warnClientVersions(headerValue, client) {
-  if (saidClientVersions || headerValue == null) return;
-  const served = parseClientVersions(headerValue);
-  if (!served) return;
-  if (compareVersions(client.replace(/^baton\//, ''), served.recommended) >= 0) return;
-  saidClientVersions = true;
-  process.stderr.write(`baton: this CLI is ${client}; Baton recommends ${served.recommended} and refuses below ${served.min}\n`);
-}
-
 /** The base a course change is judged against: `--base`, else the remote's default branch. */
 /** @param {string} root */
 export function defaultBase(root) {
   for (const ref of ['origin/HEAD', 'origin/main']) {
     try {
-      execFileSync('git', ['-C', root, 'rev-parse', '--verify', '--quiet', `${ref}^{commit}`], { stdio: 'ignore' });
+      git(root, ['rev-parse', '--verify', '--quiet', `${ref}^{commit}`], { stdio: 'ignore' });
       return ref;
     } catch {
       // not there: the next one
@@ -1155,7 +1079,7 @@ const arrived = (text) => (text.length > 300 ? `${text.slice(0, 300)}…` : text
  *  itself); the fast path reads homesPath, spelled once above. */
 async function homesContext(flag, explicitUrl = null) {
   if (flag === undefined && process.env.BATON_HOME == null && !existsSync(homesPath())) return { inForce: null, names: [] };
-  const { resolveHomes } = await import('../scripts/baton-cli.mjs');
+  const { resolveHomes } = (await import('../scripts/baton-cli.mjs')).default;
   return resolveHomes({ flag, env: process.env, explicitUrl });
 }
 
@@ -1241,7 +1165,7 @@ export async function main(argv) {
         else throw new Error(`${args[i]}: not a flag of \`baton owner sign\` (-m TEXT, --repo DIR, -- <paths>)`);
       }
       if (!paths.length) throw new Error('baton owner sign names no path: commit paths explicitly (`-- .baton/baton.json`), the way a leg does — never the whole tree');
-      const out = execFileSync('git', ['-C', repo, '-c', 'gpg.format=ssh', `-c`, `user.signingkey=${realpathSync(keyFile)}`, 'commit', '-S', '--no-verify', '-m', message, '--', ...paths], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+      const out = git(repo, ['-c', 'gpg.format=ssh', '-c', `user.signingkey=${realpathSync(keyFile)}`, 'commit', '-S', '--no-verify', '-m', message, '--', ...paths]);
       process.stdout.write(out);
       process.stderr.write(`baton: signed with ${keyFile} — a commit \`require_signed_control\` counts (B-127)\n`);
       return 0;
@@ -1270,7 +1194,7 @@ export async function main(argv) {
         process.stdout.write(`${JSON.stringify(read.json)}\n`);
         return 1;
       }
-      const { verifyConfigMain } = await import('../scripts/baton-cli.mjs');
+      const { verifyConfigMain } = (await import('../scripts/baton-cli.mjs')).default;
       // B-121: the resolved repository is passed with the keys, so the omitted-REPOSITORY form
       // names the repository in its own refusal too (verifyConfigMain's word for it).
       return await verifyConfigMain(args, { keys: read.json?.keys ?? [], ...(positional.length ? {} : { repository }) });
@@ -1286,36 +1210,36 @@ export async function main(argv) {
   if (argv[0] === 'home') {
     // B-121: the CLI's homes — local configuration, no request (R-BTN-129's actions are not
     // theirs). The command lives in src/defaults/homes.ts, bundled beside the ticket commands.
-    const { homeMain } = await import('../scripts/baton-cli.mjs');
+    const { homeMain } = (await import('../scripts/baton-cli.mjs')).default;
     return homeMain(argv.slice(1));
   }
   if (argv[0] === 'run' || (argv[0] === 'runner' && argv[1] === 'start')) {
     // §6.13: the runner is TypeScript under src/runner; bundle it (a checkout runs the CLI with
     // its devDependencies), then run it in this process's stead.
-    const { runMain } = await import('../scripts/baton-run.mjs');
+    const { runMain } = (await import('../scripts/baton-run.mjs')).default;
     return runMain(argv.slice(argv[0] === 'run' ? 1 : 2));
   }
   if (argv[0] === 'queue') {
     // R-BTN-202 (B-248): this host's local work queue for the runners on one home — local
     // files only, never a request to Baton.
-    const { queueCommand } = await import('../scripts/baton-run.mjs');
+    const { queueCommand } = (await import('../scripts/baton-run.mjs')).default;
     return queueCommand(argv.slice(1));
   }
   if (argv[0] === 'leg' && argv[1] === 'replay') {
     // §9.8 R-BTN-84: re-run one recorded leg run without a claim — the replay half of the
     // runner-side bundle, read with the owner's or administrator's key the flags name.
-    const { replayMain } = await import('../scripts/baton-run.mjs');
+    const { replayMain } = (await import('../scripts/baton-run.mjs')).default;
     return replayMain(argv.slice(2));
   }
   if (argv[0] === 'leg' && argv[1] === 'raise') {
     // R-BTN-106, R-BTN-160, R-BTN-195 (B-234): raise a condition from the leg this command
     // runs in, on its channel — the runner checks it, answers it, and reports what passes.
-    const { raiseMain } = await import('../scripts/baton-leg.mjs');
+    const { raiseMain } = (await import('../scripts/baton-leg.mjs')).default;
     return raiseMain(argv.slice(2));
   }
   if (argv[0] === 'repo' && (argv[1] === 'sync' || argv[1] === 'init' || argv[1] === 'migrate-markers')) {
     // §2f, R-BTN-127's names: the defaults are TypeScript under src/defaults, bundled the same way.
-    const { parseSyncArgs, syncMain, initMain, migrateMarkersMain } = await import('../scripts/baton-cli.mjs');
+    const { parseSyncArgs, syncMain, initMain, migrateMarkersMain } = (await import('../scripts/baton-cli.mjs')).default;
     if (argv[1] === 'sync') return syncMain(parseSyncArgs(argv.slice(2)));
     if (argv[1] === 'migrate-markers') return migrateMarkersMain(argv.slice(2));
     return initMain(argv.slice(2));
@@ -1323,13 +1247,13 @@ export async function main(argv) {
   if (argv[0] === 'tickets') {
     // B-111's check, and B-112's ticket commands: repository commands in the defaults beside
     // `repo sync` (src/defaults/tickets.ts), each writing one commit pushed to the default branch.
-    const { ticketsMain } = await import('../scripts/baton-cli.mjs');
+    const { ticketsMain } = (await import('../scripts/baton-cli.mjs')).default;
     return ticketsMain(argv.slice(1));
   }
   if (argv[0] === 'request') {
     // B-98: a course started from one sentence. A repository command — it commits the request
     // ticket and pushes it — so it lives in the defaults beside `tickets check` (src/defaults/request.ts).
-    const { requestMain } = await import('../scripts/baton-cli.mjs');
+    const { requestMain } = (await import('../scripts/baton-cli.mjs')).default;
     return requestMain(argv.slice(1));
   }
   const [role, ...rest] = argv;

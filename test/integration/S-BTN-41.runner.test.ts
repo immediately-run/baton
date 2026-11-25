@@ -979,7 +979,7 @@ describe('S-BTN-41 the runner', () => {
     const api = (runner as unknown as { o: { api: BatonApi } }).o.api;
     const beat = api.heartbeat;
     api.heartbeat = async (body: Record<string, unknown>) => {
-      const answer = await beat.call(api, body) as Record<string, any>;
+      const answer = await beat.call(api, body);
       const declaring = (body.capabilities ?? []) as string[];
       seen.beats.push(declaring);
       if (typeof answer.runner_id === 'number') {
@@ -1079,7 +1079,7 @@ describe('S-BTN-41 the runner', () => {
     const runner = asGranted(makeRunner());
     const api = (runner as unknown as { o: { api: BatonApi } }).o.api;
     const beat = api.heartbeat;
-    api.heartbeat = async (body: Record<string, unknown>) => ({ ...await beat.call(api, body) as Record<string, unknown>, grant: { capabilities: ['agent-venue', 'llm-call'] } });
+    api.heartbeat = async (body: Record<string, unknown>) => ({ ...await beat.call(api, body), grant: { capabilities: ['agent-venue', 'llm-call'] } });
     const seen = recording(runner);
     expect(await runner.runOnce()).toMatchObject({ ticket: 'docs:T-1' });
     // Before the fix the role was dropped for its one named capability: a declaration narrower
@@ -1169,7 +1169,7 @@ describe('S-BTN-41 the runner', () => {
     recording(runner);
     const api = (runner as unknown as { o: { api: BatonApi } }).o.api;
     const beat = api.heartbeat;
-    api.heartbeat = async (body: Record<string, unknown>) => ({ ...await beat.call(api, body) as Record<string, unknown>, grant: { capabilities: [] } });
+    api.heartbeat = async (body: Record<string, unknown>) => ({ ...await beat.call(api, body), grant: { capabilities: [] } });
     expect(await runner.runOnce()).toMatchObject({ ticket: 'docs:T-1' });
     expect(lines.join('\n')).toContain("declared nothing — its key's grant allows no capability");
     // Said once across idle attempts, and no never-eligible line: no leg names a capability.
@@ -1190,7 +1190,7 @@ describe('S-BTN-41 the runner', () => {
     let first = true;
     const seen: string[][] = [];
     api.heartbeat = async (body: Record<string, unknown>) => {
-      const answer = await beat.call(api, body) as Record<string, any>;
+      const answer = await beat.call(api, body);
       seen.push((body.capabilities ?? []) as string[]);
       if (!first) return answer;
       first = false;
@@ -1220,7 +1220,7 @@ describe('S-BTN-41 the runner', () => {
     // on none of the repositories its course is in — so the declaration settles at nothing.
     const api = (runner as unknown as { o: { api: BatonApi } }).o.api;
     const beat = api.heartbeat;
-    api.heartbeat = async (body: Record<string, unknown>) => ({ ...(await beat.call(api, body) as Record<string, unknown>), grant: { capabilities: [] } });
+    api.heartbeat = async (body: Record<string, unknown>) => ({ ...(await beat.call(api, body)), grant: { capabilities: [] } });
     // Finding 5: an empty declaration still claims — the ticket names no capability, so rule 4
     // passes anything — and the line says what the grant allows, once, not per attempt.
     expect(await runner.runOnce()).toMatchObject({ ticket: 'docs:T-1' });
@@ -1246,7 +1246,7 @@ describe('S-BTN-41 the runner', () => {
     // The owner's grant, as the answer carries it — replaced mid-run with a narrower one
     // (`admin.ts`'s upsert replaces the list; the answer is the grant's capabilities).
     let grant = ['agent-venue', 'create-pr', 'drivable-browser', 'llm-call'];
-    api.heartbeat = async (body: Record<string, unknown>) => ({ ...await beat.call(api, body) as Record<string, unknown>, grant: { capabilities: grant } });
+    api.heartbeat = async (body: Record<string, unknown>) => ({ ...await beat.call(api, body), grant: { capabilities: grant } });
     const seen = recording(runner);
     // The first claim is on the grant it was answered: the declared list, served as it stood.
     expect(await runner.runOnce()).toMatchObject({ ticket: 'docs:T-1' });
@@ -1258,7 +1258,7 @@ describe('S-BTN-41 the runner', () => {
       // The heartbeat's own check, refused exactly as the server would (runnerApi.ts).
       const declaring = (body.capabilities ?? []) as string[];
       if (declaring.some((c) => !grant.includes(c))) throw new BatonRefusal('forbidden', undefined, `this credential may not declare ${declaring.filter((c) => !grant.includes(c)).join(', ')}`, 403);
-      return { ...await beat.call(api, body) as Record<string, unknown>, grant: { capabilities: grant } };
+      return { ...await beat.call(api, body), grant: { capabilities: grant } };
     };
     await runner.tick();
     // The declaration is dropped, in memory and in the state file, and said once — with the
@@ -1303,7 +1303,7 @@ describe('S-BTN-41 the runner', () => {
     // A grant of create-pr: the leg's own need is met, and a ticket naming no clause is claimed.
     let grant = ['create-pr'];
     api.heartbeat = async (body: Record<string, unknown>) => ({
-      ...await beat.call(api, body) as Record<string, unknown>,
+      ...await beat.call(api, body),
       grant: { capabilities: ((body.capabilities as string[] | undefined) ?? []).length ? grant : ['create-pr'] },
     });
     await home.post({ 'T-1': placed('filed', [], [['build', 'ready']]) });
@@ -1315,7 +1315,7 @@ describe('S-BTN-41 the runner', () => {
     api.heartbeat = async (body: Record<string, unknown>) => {
       const declaring = (body.capabilities ?? []) as string[];
       if (declaring.some((c) => !grant.includes(c))) throw new BatonRefusal('forbidden', undefined, 'this credential may not declare ' + declaring.join(', '), 403);
-      return { ...await beat.call(api, body) as Record<string, unknown>, grant: { capabilities: grant } };
+      return { ...await beat.call(api, body), grant: { capabilities: grant } };
     };
     await runner.tick();
     const second = await runner.runOnce();

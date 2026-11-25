@@ -24,6 +24,16 @@
       "count": 1
     }
   },
+  "src/client/git-env.d.mts": {
+    "baton/file-name": {
+      "count": 1
+    }
+  },
+  "src/client/git-env.mjs": {
+    "baton/file-name": {
+      "count": 1
+    }
+  },
   "src/defaults/cli.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 27
@@ -41,22 +51,17 @@
   },
   "src/runner/api.ts": {
     "@typescript-eslint/no-explicit-any": {
-      "count": 13
+      "count": 8
     }
   },
   "src/runner/claimRun.ts": {
     "@typescript-eslint/no-explicit-any": {
-      "count": 11
+      "count": 3
     }
   },
-  "src/runner/runner.ts": {
-    "@typescript-eslint/no-explicit-any": {
-      "count": 5
-    }
-  },
-  "src/runner/sidecar.ts": {
-    "@typescript-eslint/no-explicit-any": {
-      "count": 5
+  "src/shared/runner-wire.ts": {
+    "baton/file-name": {
+      "count": 1
     }
   },
   "test/githubFake.ts": {
@@ -199,11 +204,6 @@
       "count": 1
     }
   },
-  "test/integration/S-BTN-26.runner.test.ts": {
-    "@typescript-eslint/no-explicit-any": {
-      "count": 2
-    }
-  },
   "test/integration/S-BTN-260.tickets-list.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 1
@@ -291,7 +291,7 @@
   },
   "test/integration/S-BTN-41.runner.test.ts": {
     "@typescript-eslint/no-explicit-any": {
-      "count": 6
+      "count": 4
     }
   },
   "test/integration/S-BTN-48.replay.test.ts": {
