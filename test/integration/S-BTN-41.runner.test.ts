@@ -399,7 +399,7 @@ describe('S-BTN-41 the runner', () => {
     await home.post({ 'T-1': placed('built', [['build', 'built']], [['check', 'waiting', 'ci']]) });
     await until(() => rows(`SELECT 1 FROM claim_legs WHERE leg = 'check'`)); // the wait holds
     const runnerId = (await rows<{ id: number }>('SELECT id FROM runners ORDER BY id DESC LIMIT 1'))[0].id;
-    const send = await ownerCall('/v1/ui/messages', { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: ORIGIN }, body: JSON.stringify({ kind: 'release', to_runner_id: runnerId, payload: { ticket_id: 'docs:T-1', reason: 'requested' } }) });
+    const send = await ownerCall('/v1/ui/messages', { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: ORIGIN }, body: JSON.stringify({ kind: 'release', confirm: true, to_runner_id: runnerId, payload: { ticket_id: 'docs:T-1', reason: 'requested' } }) });
     expect(send.status).toBe(200);
     // No leg was running when the release landed — the claim still ends released, never
     // suspended, and the message is acked because it was acted on.
@@ -537,7 +537,7 @@ describe('S-BTN-41 the runner', () => {
     const done = runner.runOnce();
     await until(() => rows(`SELECT 1 FROM claim_legs WHERE leg = 'check'`));
     const runnerId = (await rows<{ id: number }>('SELECT id FROM runners ORDER BY id DESC LIMIT 1'))[0].id;
-    const send = await ownerCall('/v1/ui/messages', { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: ORIGIN }, body: JSON.stringify({ kind: 'release', to_runner_id: runnerId, payload: { ticket_id: 'docs:T-1', reason: 'requested' } }) });
+    const send = await ownerCall('/v1/ui/messages', { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: ORIGIN }, body: JSON.stringify({ kind: 'release', confirm: true, to_runner_id: runnerId, payload: { ticket_id: 'docs:T-1', reason: 'requested' } }) });
     expect(send.status).toBe(200);
     // It names that the leg reached its to — validated and closed like any result (R-BTN-83),
     // the marker before the hand-off — and releases naming a leg leaving where it rests.
@@ -580,7 +580,8 @@ describe('S-BTN-41 the runner', () => {
   }, 30_000);
 
   it("the immediate stop (stopNow, the signal handler's call) releases the leg at its next safe point with its hand-off — a safe point, not an abandonment (B-109)", async () => {
-    home.leg('check', `${ABORTABLE}
+    home.leg('check', `ev(ctx, 'check started');
+    ${ABORTABLE}
     ev(ctx, 'check aborted:' + ctx.signal.reason);
     return { reached: 'checked', next: 'merge' };`);
     home.commit();
@@ -588,7 +589,8 @@ describe('S-BTN-41 the runner', () => {
     const runner = makeRunner();
     runner.start();
     const done = runner.runOnce();
-    await until(() => rows(`SELECT 1 FROM claim_legs WHERE leg = 'check'`));
+    // The leg is running (not merely recorded): a stop before it starts releases at `built`.
+    await until(() => home.evidence().filter((l) => l === 'check started'));
     runner.stopNow();
     expect(await done).toMatchObject({ end_reason: 'released:requested', reached: 'checked' });
     const lines = home.evidence();
