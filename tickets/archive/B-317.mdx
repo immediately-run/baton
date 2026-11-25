@@ -2,18 +2,19 @@
 title: "B-317 — create-pr's implement and fix instructions: a failure that also fails on main does not stop the push, and is never fixed inside the ticket's PR"
 id: B-317
 project: baton
-status: available
-updated: 2026-11-22
+status: done
+updated: 2026-11-23
+tier: judgement
 repos:
   - baton
 tags:
   - roadmap-item
-tier: normal
 description: "The implement instructions say to push only once the checks pass, so an agent that finished its work but hit a test failure that main has too did not push, and the work was lost with its sandbox (B-239, 2026-11-22). Change create-pr's implement and fix instructions (both copies: .baton/courses/create-pr/legs/ and src/defaults/courses/create-pr/): a failure that also fails on a clean checkout of the base is named in the PR and does not stop the push, and it is never fixed inside the ticket's PR. The run-tests leg is the gate."
 topics:
   - baton
 owns: {}
-prs: []
+prs:
+  - https://github.com/immediately-run/baton/pull/396
 depends_on: []
 ---
 
@@ -23,7 +24,7 @@ depends_on: []
 
 The `run-tests` leg is the gate (`.baton/courses/create-pr/legs/run-tests.md`). It runs on what is pushed, and red routes to `fix`. An implement leg that holds back a push does not protect anything: the gate would have said red anyway, and the work is lost.
 
-**Spec:** [BATON_SPEC §5.8](../spec/BATON_SPEC/05-courses.md#sec-5-8) ([R-BTN-131](../spec/BATON_SPEC/05-courses.md#sec-5-8), the standard courses). What each standard course's legs do is in [the standard courses](../docs/standard-courses.mdx) and the course's own files, not the spec, so no rule changes.
+**Spec:** [BATON_SPEC §5.8](../../spec/BATON_SPEC/05-courses.md#sec-5-8) ([R-BTN-131](../../spec/BATON_SPEC/05-courses.md#sec-5-8), the standard courses). What each standard course's legs do is in [the standard courses](../../docs/standard-courses.mdx) and the course's own files, not the spec, so no rule changes.
 
 ## Plan
 

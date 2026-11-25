@@ -3,19 +3,20 @@ title: "B-316 — Runner masker follow-ups after #354: line-crossing secrets, sp
 id: B-316
 project: baton
 status: available
-updated: 2026-11-22
+updated: 2026-11-23
+tier: judgement
 repos:
   - baton
 tags:
   - roadmap-item
   - security
-tier: high
 description: "#354 fixed the runner's leg-output masker (createLegMasker, src/runner/mask.ts). Its second adversarial review left five findings: secrets with a newline or CRLF in them can still leak a part (about 0.3% of the reviewer's fuzz cases); the executor decodes each stderr chunk on its own, so a multi-byte character split across chunks is garbled; a line ending in any secret's first character loses it to a separate *** line; a stray second *** after a cut at 0; and a hold that costs O(longest secret²) per line. Fix each, with a fuzz test in the suite, under S-BTN-119."
 topics:
   - baton
   - security
 owns: {}
-prs: []
+prs:
+  - https://github.com/immediately-run/baton/pull/398
 depends_on: []
 ---
 

@@ -3,7 +3,7 @@ title: "B-216 — Cutover, part two: GET /v1/admin/state keeps its shape as stat
 id: B-216
 project: baton-ui-v2
 status: available
-updated: 2026-11-09
+updated: 2026-11-23
 repos:
   - baton
 tags:
@@ -49,7 +49,7 @@ the state readable with a key, by the same queries), [§12.3](../spec/BATON_SPEC
    to `owner.grant.list`, `blocked` to `blocked`, `needs_you`'s keys to the homes B-203's ledger
    names — and the tenant-wide sections equal the tenant reads: `resources` to
    `admin.instance.list`, `workers` as a whole to the union of `repo.runners` over every
-   repository plus the runners granted nowhere; `ready_by_tier` is the board's — asserted on both
+   repository plus the runners granted nowhere; ~~`ready_by_tier` is the board's — asserted on both~~
    hosts.
 2. **The renderer scenarios.** S-BTN-76 and G-BTN-13 amended to name the V2 renderer and run
    against it: fixture rows carrying `<img onerror>`, `{{x}}`, backticks and a `javascript:`
@@ -115,3 +115,5 @@ owner binds the sign-in code._
 
 _2026-11-09 — the owner answered Decision 7: no staging at all. The post-merge check runs on
 production, read-only._
+
+_2026-11-23 — tiers retired (spec/retire-tiers: [BATON_SPEC §6.6](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-6) gate 5, [R-BTN-66](../spec/BATON_SPEC/01-what-baton-is.md#sec-1)): the struck tier clauses are gone from the spec — no ticket tier, runner ceiling, grant `max_tier`, ladder, `ready_by_tier` or `?tier=`. Build the rest without them._

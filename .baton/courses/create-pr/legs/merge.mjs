@@ -1,7 +1,7 @@
-// ../../../../../baton-bundle-hCtq2C/entry.ts
+// ../../../../../baton-bundle-fGsKLR/entry.ts
 import { execFileSync as execFileSync2, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtempSync, readdirSync, rmSync as rmSync2, statSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync as rmSync2, statSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { basename, join as join2 } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -321,7 +321,128 @@ baton: ${ctx.ticket.id} ${ctx.leg}, claim ${ctx.claim?.nonce ?? "?"}`;
   return closeTicket({ ...ctx, heading: false }, result, run2);
 }
 
-// ../../../../../baton-bundle-hCtq2C/entry.ts
+// src/defaults/course-pr.ts
+var DEFAULT_BRANCH_PATTERN = "claude/{ticket}-*";
+var CREATE_SPEC_COURSE = {
+  start: "requested",
+  start_leg: "converse",
+  end: ["merged"],
+  // B-98: a specification is requested, not found — `baton request "<one sentence>" --course
+  // create-spec` files the ticket that starts it.
+  starts_from: "request",
+  short_waits: ["ci"],
+  stations: {
+    requested: { label: "Requested, no PR yet" },
+    "spec-open": { label: "Spec PR open" },
+    reviewed: { label: "Reviewed" },
+    adjudicated: { label: "Open findings adjudicated" },
+    merged: { label: "Merged" }
+  },
+  legs: {
+    converse: { from: ["requested"], to: "spec-open", label: "Design the specification with the owner" },
+    review: { from: ["spec-open"], to: "reviewed", max_runs: 4, label: "Adversarial review round" },
+    address: { from: ["reviewed"], to: "spec-open", max_runs: 3, label: "Address the blocking findings with the owner" },
+    adjudicate: { from: ["reviewed"], to: "adjudicated", label: "Reproduce the findings left open" },
+    merge: { from: ["reviewed", "adjudicated"], to: "merged", label: "Merge and close the ticket" }
+  }
+};
+var SPEC_BOUNDS = {
+  legs: { open: "converse", opened: "spec-open", back: "address", backTo: "spec-open" },
+  back: "address",
+  rounds: CREATE_SPEC_COURSE.legs.review.max_runs,
+  adjudicates: true,
+  gate: false
+};
+function branchMatches(pattern, branch) {
+  const p = pattern.toLowerCase();
+  const b = branch.toLowerCase();
+  let i = 0;
+  let j = 0;
+  let star = -1;
+  let mark = 0;
+  while (i < b.length) {
+    if (j < p.length && (p[j] === b[i] || p[j] === "*")) {
+      if (p[j] === "*") {
+        star = j++;
+        mark = i;
+      } else {
+        i++;
+        j++;
+      }
+    } else if (star >= 0) {
+      i = ++mark;
+      j = star + 1;
+    } else {
+      return false;
+    }
+  }
+  while (j < p.length && p[j] === "*") j++;
+  return j === p.length;
+}
+var matchPatterns = (branchPatterns) => (branchPatterns?.length ? branchPatterns : [DEFAULT_BRANCH_PATTERN]).map((p) => p.replace(/\{repository\}/g, "*"));
+
+// src/defaults/pr-verify.ts
+var bareId = (t) => {
+  if (t.home && t.id.startsWith(`${t.home}:`)) return t.id.slice(t.home.length + 1);
+  const colon = t.id.indexOf(":");
+  return colon < 0 ? t.id : t.id.slice(colon + 1);
+};
+var msg = (e) => e instanceof Error ? e.message : String(e);
+function ticketRepositories(text, reposMap) {
+  const fm = text == null ? null : parseFrontmatter(text);
+  const names = Array.isArray(fm?.repos) ? fm.repos : fm?.repos == null || fm.repos === "" ? [] : [fm.repos];
+  return names.map((r) => typeof r === "string" && /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(r) ? r : reposMap?.[r]).filter((r) => typeof r === "string" && r !== "");
+}
+function originSlug(run2, checkout) {
+  try {
+    const url = run2("git", ["remote", "get-url", "origin"], checkout);
+    return /[:/]([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+?)(?:\.git)?\s*$/.exec(url)?.[1] ?? null;
+  } catch {
+    return null;
+  }
+}
+function verifyPrsMerged(ask, run2) {
+  const id = bareId(ask.ticket);
+  const patterns = matchPatterns(ask.branchPatterns).map((p) => p.replace(/\{ticket\}/g, id));
+  const slug = originSlug(run2, ask.checkout);
+  const siblings = (ask.repositories ?? []).filter((r, i, all) => all.indexOf(r) === i && (slug == null || r.toLowerCase() !== slug.toLowerCase()));
+  const label = (repo) => repo ?? slug ?? "the checkout\u2019s repository";
+  const list = (repo, state) => {
+    const args = ["pr", "list", "--state", state, "--limit", "300", "--json", "number,headRefName", ...repo ? ["--repo", repo] : []];
+    const text = run2("gh", args, ask.checkout);
+    let prs;
+    try {
+      prs = JSON.parse(text);
+    } catch {
+      prs = null;
+    }
+    if (!Array.isArray(prs)) throw new Error(`gh pr list --state ${state}${repo ? ` --repo ${repo}` : ""} answered no PR list: ${text.slice(0, 200)}`);
+    return prs.filter((p) => p != null && typeof p === "object" && typeof p.headRefName === "string" && patterns.some((pat) => branchMatches(pat, p.headRefName)));
+  };
+  const found = [null, ...siblings].map((repo) => {
+    try {
+      return { repo, open: list(repo, "open"), merged: list(repo, "merged"), error: null };
+    } catch (e) {
+      return { repo, open: null, merged: null, error: msg(e) };
+    }
+  });
+  const name = (f, p) => `${f.repo ? f.repo : ""}#${String(p.number)} (${String(p.headRefName)})`;
+  const unread = found.filter((f) => f.error != null);
+  if (unread.length > 0) {
+    throw new Error(`cannot verify ${id}\u2019s PRs merged \u2014 ${unread.map((f) => `${label(f.repo)} (${f.error})`).join("; ")} could not be read: the leg reports merged only when the forge shows every PR merged`);
+  }
+  const open = found.flatMap((f) => (f.open ?? []).map((p) => name(f, p)));
+  if (open.length > 0) {
+    throw new Error(`the merge agent exited 0, but ${id}\u2019s PR ${open.join(", ")} is still open \u2014 not merged; the leg reports merged only when every PR of the ticket is`);
+  }
+  const merged = found.flatMap((f) => (f.merged ?? []).map((p) => `${f.repo ? f.repo : ""}#${String(p.number)}`));
+  if (merged.length === 0) {
+    throw new Error(`the merge agent exited 0, but no merged PR on a branch matching ${patterns.join(" or ")} for ticket ${id} exists in ${found.map((f) => label(f.repo)).join(" or ")} \u2014 the leg reports merged only when the forge shows one`);
+  }
+  return merged;
+}
+
+// ../../../../../baton-bundle-fGsKLR/entry.ts
 var GIT_BOUND_MS = 12e4;
 var GIT_ENV = { "GIT_TERMINAL_PROMPT": "0", "GIT_SSH_COMMAND": "ssh -o BatchMode=yes -o ConnectTimeout=20" };
 var AGENT_IDLE_MS = 9e5;
@@ -373,6 +494,23 @@ async function standard(ctx) {
   if (settingsCommand === "") throw new Error(".baton/baton.json names no agent_command \u2014 run `baton repo init --agent opencode` (or --agent claude-code, or --agent-command <cmd>); baton run --harness <harness> runs its command when the settings name none");
   const agentWords = splitWords(settingsCommand);
   const agentCommand = agentWords.join(" ");
+  const entry = (settings.courses ?? []).find((c) => c && c.id === "create-pr") ?? {};
+  const patterns = [entry.branch_pattern, entry.previous_branch_pattern].filter((p) => typeof p === "string" && p !== "");
+  const ticketText = (() => {
+    try {
+      return ctx.ticket?.file ? readFileSync(ctx.ticket.file, "utf8") : ctx.ticket?.path ? readFileSync(join2(ctx.checkout, ctx.ticket.path), "utf8") : null;
+    } catch {
+      return null;
+    }
+  })();
+  const legRun = (cmd, args, cwd) => {
+    try {
+      return gitRun(cmd, args, { cwd, maxBuffer: 67108864 }).trim();
+    } catch (e) {
+      const why = e && typeof e.stderr === "string" && e.stderr.trim() !== "" ? e.stderr.trim().split("\n")[0] : e && e.message ? e.message : String(e);
+      throw new Error(`${cmd} ${args.join(" ")} failed: ${why}`);
+    }
+  };
   const courseSha = typeof ctx.signed_control?.course === "string" && ctx.signed_control.course !== "" ? ctx.signed_control.course : sha;
   const rel = ".baton/courses/create-pr/legs/merge.md";
   const present = gitRun("git", ["-C", ctx.checkout, "ls-tree", "--name-only", courseSha, "--", rel]).trim() !== "";
@@ -508,6 +646,14 @@ async function standard(ctx) {
   const said = lastOutput(out, errOut);
   const failed = (e) => new Error((e instanceof Error ? e.message : String(e)) + (said !== "" ? "; the agent's last output:\n  " + said : "; the agent printed nothing"));
   void out;
+  const mergedPrs = (() => {
+    try {
+      return verifyPrsMerged({ checkout: ctx.checkout, ticket: ctx.ticket, branchPatterns: patterns, repositories: ticketRepositories(ticketText, settings.repos) }, legRun);
+    } catch (e) {
+      throw failed(e);
+    }
+  })();
+  if (process.env.BATON_VERBOSE) process.stderr.write("baton: create-pr/merge ticket " + ctx.ticket.id + ": the forge verified " + mergedPrs.join(", ") + " merged, none open, on a branch matching " + patterns.join(" or ") + "\n");
   return { ...{ reached: "merged", next: null }, ...conclusion ? { conclusion } : {} };
 }
 var closeCtx2 = (ctx) => ({ ...ctx, ...ctx.default_branch == null && typeof process.env.BATON_DEFAULT_BRANCH === "string" && process.env.BATON_DEFAULT_BRANCH !== "" ? { default_branch: process.env.BATON_DEFAULT_BRANCH } : {} });
