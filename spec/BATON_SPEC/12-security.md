@@ -579,9 +579,8 @@ trusted runners or of the protection checker; a compromised forge; and a comprom
     refused when it would admit another writer for a type a current course's trusted leg
     requires, and a course whose trusted leg requires a type the policy admits another writer for
     is refused at the snapshot that posts it, the previous course version staying in force.
-  - **Baton's own state.** Attestations about work are exported with the owner state (R-BTN-88);
-    an import drops every one of them. Lost attestations fail closed. Readings are kept and
-    exported as R-BTN-76 and R-BTN-88 say.
+  - **Baton's own state.** The owner-state export does not carry work attestations (R-BTN-88).
+    Lost attestations fail closed. Readings are kept and exported as R-BTN-76 and R-BTN-88 say.
   - The attestation's shape, its other types, supersession, revocation and the
     `requires.attestations` prerequisite are [proposed](../proposals/security.md) (B-146).
 - **R-BTN-191 (every statement Baton receives about the work is an attestation).** `status: partly B-116 B-146` Baton takes

@@ -330,11 +330,14 @@ The fingerprint stores no ticket content and is an optimization, never authority
   observation is newer, then moves the head. A first snapshot is accepted with `parent_sha:
   null` only while no head exists. A lost race is `head-moved`; the sync re-reads and retries.
   A post marked `force` — neither its commit nor the head descends from the other — is refused
-  `snapshot-rejected` and held; the head stands until an owner accepts the held history
-  (`POST /v1/ui/board/accept`) or 24 hours pass, after which the sync's next `force` post
-  against that head becomes the head. A held post's stations and confirmations are applied as a
-  refresh.
-  Ordering never depends on a clock. An administrator's adoption of a rewritten default branch
+  `snapshot-rejected` and held once per sha against the current head. An administrator can
+  accept it on the dashboard (`POST /v1/ui/board/accept`); otherwise the alarm accepts it
+  when 24 hours have elapsed since its first post against that head. Acceptance admits the
+  rewritten line for that repository and previous head; it does not move the head. The next
+  otherwise eligible `force` post against that head moves it, even if the posted sha differs
+  from the held sha. A held post's stations and
+  confirmations are applied as a refresh. Which of two posts is newer never depends on a clock.
+  An administrator's adoption of a rewritten default branch
   (a forced Resync) is proposed in [tickets and sources](../proposals/tickets-and-sources.md).
 
 - **R-BTN-147 (a renumbered ticket keeps its hold and backoff).** `status: built` Each ticket is posted with a
@@ -379,7 +382,7 @@ The fingerprint stores no ticket content and is an optimization, never authority
 `POST /v1/sync/board` — the one normative schema:
 
 ```
-{ sha, parent_sha, observation,                                   -- R-BTN-11, R-BTN-62
+{ sha, parent_sha, observation, force?,                                   -- R-BTN-11, R-BTN-62
   read_sha?,                                                      -- the commit the tickets were read at (§4.3)
   source: { kind: 'markdown' | 'custom', versions?, cli },         -- R-BTN-74
   contains?: [<sha>],                                            -- the provisional commits (R-BTN-126) this post contains
@@ -398,11 +401,18 @@ The fingerprint stores no ticket content and is an optimization, never authority
                bars: { <leg>: [<tag>] },                         -- R-BTN-60
                course: <opaque> }],
   closed:   [{ id, as: 'done' | 'withdrawn' }],                  -- tickets that left the board
+  stations?: { <local ticket id>: {                             -- R-BTN-70
+    station, path: [{ leg, reached }], next_leg: <leg> | null,
+    next_source: 'course' | 'marker' | 'inferred' | 'holder', handoff_url: <url> | null,
+    next: [{ leg, state: 'ready' | 'waiting', waiting_on: <label> | null, needs?: [<resource>] }],
+    bars: { <leg>: [<tag>] }, decisions?: [{ id, asks, leg?, url?, question?, options? }] } },
   attestations: [{ type, ticket, ref?, value }],                 -- the sync's attestations, this run's observation (R-BTN-191)
   course_data: { <course>: <opaque> } }
 ```
 
-- Core reads every generic field and stores each `<opaque>` verbatim. Every station and leg
+- Core reads every generic field and stores each `<opaque>` verbatim. `stations` supplies
+  placements and readiness (R-BTN-70); a new-head post does not offer a ticket it does not place.
+  For the interim post see §16.4. Every station and leg
   named must be in the course file. Each attestation is validated by its type's schema and
   accepted with the post (R-BTN-191): readiness whose `at` is not Baton's station is discarded,
   and an arrival Baton does not apply is recorded unapplied (R-BTN-39). Confirmations are not
@@ -575,37 +585,47 @@ The fingerprint stores no ticket content and is an optimization, never authority
   them and imports them into another Baton.
   - **Format** `baton.owner-state/v1`: `{format, schema_version (highest applied migration),
     exported_at, origin, events_seq, sections, digest}`; `digest` is SHA-256 over the RFC 8785
-    canonical JSON of the rest. `sections` holds every column §13 gives these tables:
-    `repositories` (a retired repository's tombstoned row alone, and no row of it in any other
-    section, R-BTN-47), `repository_owners`, `credentials`, `sync_keys`,
-    `runner_grants`, `runners` (with `secret_hash` and `incarnation`; import writes
-    `last_seen_at` 0), `owner_bars`, `ticket_overrides`, `ticket_stations` and the live
-    tickets' position rows of `ticket_history` and their `claim_legs`, `closed_tickets`,
-    `external_resources`,
-    `resource_instances`, `instance_serves`, `capability_capacity`, `check_runners`, `mcp_keys` (hashes only), `instance_settings`, unexpired
-    `registration_tokens` (hashes only), open `conditions`, `ticket_timers`, every `repository_policies` version (R-BTN-188, R-BTN-189),
-    and `policy_floors`, the backing rows for live legacy floor projections (R-BTN-189).
-    A schema storing legacy floor rows always includes the `policy_floors` section
-    in the digest, as an empty array when there are no such rows.
-  - **Not exported**: claims and their `claim_seats`, events,
-    readings (R-BTN-76), sync wants; and, unless `--with-history`, the history, `leg_outputs`
-    and `leg_run_inputs`, which an import without them loses.
+    canonical JSON of the rest. **Default sections** (each table's stored columns):
+    `repositories`, `repository_owners`, `credentials`, `sync_keys`, `runner_grants`,
+    `runners`, `owner_bars`, `ticket_overrides`, `closed_tickets`, `external_resources`,
+    `resource_instances`, `instance_serves`, `couriers`, `instance_readings`,
+    `repository_policies`, `policy_floors`, `human_keys`, `capability_capacity`,
+    `instance_settings`, `ticket_stations`.
+    Policy versions and floors are for live repositories (R-BTN-188, R-BTN-189); the human key
+    register is tenant-wide (R-BTN-185), and host-configured keys do not travel with it.
+    `policy_floors` also holds the backing rows for live legacy floor projections (R-BTN-189); a
+    schema storing legacy floor rows always includes the section in the digest, as an empty
+    array when there are no such rows.
+    Only Baton-owned positions on live repositories are exported; the board rebuilds the rest.
+    Import zeros runners' liveness and activity timestamps.
+  - **History sections** (only with `--with-history`): `ticket_history`, `leg_outputs`,
+    `leg_run_inputs`. An import without them loses them. A populated `leg_run_inputs` section
+    cannot be restored into an empty target: its rows require originating claims, which do
+    not travel in the export.
+  - **Not exported**: claims, their seats and leg rows, events, reading history, sync wants,
+    and the board cache apart from the Baton-owned positions above.
   - **Import** (`POST /v1/admin/import`): one transaction, into an **empty** Baton only (no
-    repository, owner or credential but the seeded `legacy` row), else `conflict`; digest checked (`invalid-params`); the
-    same `schema_version` required. Every row passes the write path's validation and invariants
-    (one role per key, unique names, id grammars, tombstones only on retired rows); the first
-    failing row refuses the whole import. It refuses a live repository whose policy versions do
-    not chain by `previous_hash` from version 1, or whose export holds no policy; a retired
-    repository's tombstone needs none. Import refuses a missing required `policy_floors`
-    section even with a valid digest and policy hash chain. It validates legacy rows using the
-    stored format. On a schema that uses projection, import checks the current projection after
-    restoring its backing data (R-BTN-188, R-BTN-189).
-    Signed requests with `created` at or before the
-    source's `sealed_at` are refused `unauthenticated`. Ticket-scoped rows wait in
-    `pending_owner_state` until the first snapshot that creates their ticket; one the
-    repository's first snapshot does not post is dropped and logged. A ticket with pending course
-    history is placed from it, not at its course's `start` (R-BTN-39). The event sequence
-    continues from `events_seq`.
+    repository, owner or credential but the seeded `legacy` row), else `conflict`; digest
+    checked (`invalid-params`); the same `schema_version` and all default sections required —
+    a missing `policy_floors` section is refused even with a valid digest and policy hash chain.
+    Rows pass import validation and invariants (one role per key, unique names, id grammars,
+    tombstones only on retired rows); the first failing row refuses the whole import. Every live
+    repository needs its original policy versions, validated as documents and by their hashes
+    and contiguous `previous_hash` chain starting at version 1. Import writes them unchanged
+    and seeds none; a retired repository's tombstone needs none. Import refuses floors whose
+    guarantees do not hold on the imported policy and authority facts (R-BTN-189); it does not
+    check a live protection report. It validates legacy rows using the stored format, and on a
+    schema that uses projection it checks the current projection after restoring its backing
+    data (R-BTN-188, R-BTN-189). Imported human keys must not be destination administrator
+    keys (R-BTN-57). A digest checks integrity,
+    not the authority of the source. Signed requests with `created` at or before the source's
+    `sealed_at` are refused `unauthenticated`. Ticket-scoped rows wait in `pending_owner_state`
+    until the ticket is posted for an override, or placed for a Baton-owned position. A pending
+    row whose ticket is absent from a snapshot that materializes the ticket set is dropped and
+    logged. A further move exports rows that are still pending. Before the first accepted
+    placement on the current or new head is judged (R-BTN-39), Baton restores the pending
+    position and rebuilds its outgoing legs from the course in force. Until then the ticket is
+    not offered (§4.4). The event sequence continues from `events_seq`.
   - **Moving a Baton**:
     1. **freeze** (`baton admin freeze`, `POST /v1/admin/freeze`; `baton_settings.frozen_at`,
        event `frozen`): new claims and owner writes are refused `frozen`;
