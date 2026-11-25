@@ -8,6 +8,9 @@ import type { Courier } from '../notices';
 import { authenticated, verifySigned } from './principal';
 import { holderTicket, liveRepoParam, requireGrant, runnerSecret } from './kit';
 import { noteIdle, type IdleDetail } from '../idleReasons';
+import { parseAdminKeys, parseSshKey } from '../auth';
+import { forgeScope } from '../forgeScope';
+import { sha256Hex } from '../runnerApi';
 
 type RunnerAuthCore = Parameters<typeof authenticated>[0] & Pick<BatonCore, 'admin'>;
 type RunnerCore = Pick<BatonCore, 'store' | 'registry' | 'runners' | 'claims' | 'sql' | 'admin' | 'now' | 'queues' | 'resources' | 'cutover' | 'conditions' | 'blocks' | 'config'>;
@@ -297,4 +300,29 @@ function claimWithIdle<T>(core: Pick<BatonCore, 'store' | 'config' | 'now' | 'bl
     }
     throw e;
   }
+}
+
+/** B-131: `GET /v1/forge-scope/{broker|runner}/{run}` — a forge broker's signed read of a live
+ *  run's scope, or a runner's proof that the run is its own live session. Proof is a read, not a
+ *  heartbeat: it never revives or extends the session it proves. */
+export async function forgeScopeRoute(core: Parameters<typeof verifySigned>[0] & Pick<BatonCore, 'store' | 'admin'>, req: Request, path: string): Promise<Response> {
+  const match = /^\/v1\/forge-scope\/(broker|runner)\/([^/]+)$/.exec(path);
+  if (!match) throw new BatonError('not-found', 'no such route');
+  if (!req.headers.has('X-Baton-Signed')) throw new BatonError('unauthenticated', 'a forge-scope read must be signed');
+  if (match[1] === 'broker') {
+    const keys = new Map<string, string>();
+    for (const line of parseAdminKeys(core.config.BATON_FORGE_BROKER_KEYS ?? '')) {
+      const key = await parseSshKey(line);
+      keys.set(key.fingerprint, line);
+    }
+    await verifySigned(core, req, (fp) => keys.get(fp) ?? null);
+    return json(forgeScope(core.store, core.now(), match[2]));
+  }
+  const { cred } = await verifySigned(core, req);
+  if ((await core.admin.adminFingerprints()).has(cred)) throw new BatonError('forbidden', 'an administrator key is never a runner key');
+  const secret = req.headers.get('X-Runner-Secret');
+  if (!secret) throw new BatonError('unauthenticated', 'X-Runner-Secret is required after the first heartbeat');
+  const secretHash = await core.outside(() => sha256Hex(secret));
+  forgeScope(core.store, core.now(), match[2], { credential: cred, secretHash });
+  return new Response(null, { status: 204 });
 }

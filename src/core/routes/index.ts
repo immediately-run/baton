@@ -5,7 +5,7 @@ import { adminRoute } from './admin';
 import { attestationRoute, dashboardSessionRoute, dashboardWriteRoute, humanKeysRoute, ownerRoute } from './owner';
 import { dashboardPrincipal, personPrincipal } from './principal';
 import { publicRoute, sequenceRoute } from './public';
-import { courierRoute, probeRoute, runnerPrincipal, runnerRoute } from './runner';
+import { courierRoute, forgeScopeRoute, probeRoute, runnerPrincipal, runnerRoute } from './runner';
 import { syncPrincipal, syncRoute } from './sync';
 
 export async function dispatchRoute(core: BatonCore, req: Request, url: URL): Promise<Response> {
@@ -52,6 +52,7 @@ export async function dispatchRoute(core: BatonCore, req: Request, url: URL): Pr
     const sequence = await sequenceRoute(core, req, url);
     if (sequence) return sequence;
     if (path.startsWith('/v1/courier/')) return await courierRoute(core, req, url);
+    if (req.method === 'GET' && path.startsWith('/v1/forge-scope/')) return await forgeScopeRoute(core, req, path);
     const probe = await probeRoute(core, req, url);
     if (probe) return probe;
     const runner = await runnerPrincipal(core, req);
