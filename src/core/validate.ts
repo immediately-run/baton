@@ -1149,6 +1149,13 @@ export function checkDecisionAnswer(body: unknown):
   return { decision: b.decision as 'baton:retries' | 'baton:stalled', answer: b.answer as 'retry' | 'park' };
 }
 
+/** R-BTN-163: interaction delivery is opt-in on each runner grant. */
+export function checkDeliverInteractions(value: unknown): boolean {
+  if (value === undefined) return false;
+  if (typeof value === 'boolean') return value;
+  return bad('deliver_interactions', 'must be a boolean');
+}
+
 /** §8, §11: `{expedite?, hold?}` — booleans, at least one. */
 export function checkOverride(body: unknown): { expedite?: boolean; hold?: boolean } {
   if (!isObj(body)) bad('body', 'must be a JSON object');

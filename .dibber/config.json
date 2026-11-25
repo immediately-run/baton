@@ -1,0 +1,14 @@
+{
+  "store": "tickets",
+  "prefix": "B",
+  "coordinator": {
+    "next": [
+      "node",
+      "cli/baton.mjs",
+      "tickets",
+      "next",
+      "ticket-<prefix>",
+      "--coordinator"
+    ]
+  }
+}

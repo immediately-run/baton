@@ -2,18 +2,18 @@
 title: "B-326 — Baton stops writing ticket files: baton tickets keeps next and check, and every ticket write goes through dibber"
 id: B-326
 project: baton
-status: available
-updated: 2026-11-24
+status: in-review
+updated: 2026-11-25
 repos:
   - baton
 tags:
   - roadmap-item
 tier: judgement
-description: "Retire baton tickets new|claim|set|done (keeping next, Baton's id sequences, and the read-only check, which takes over claim's Ask-Baton-first and rules re-read checks); baton repo init writes .dibber/config.json with Baton as the coordinator; the bug-report file leg and create-spec's markers write through dibber; docs, skills and CLAUDE.md point at dibber. Needs dibber DIB-30. Requires: none."
+description: "Retire baton tickets new|claim|set|done (keeping next, Baton's id sequences, and the read-only check, which takes over claim's Ask-Baton-first and rules re-read checks); baton repo init writes .dibber/config.json with Baton as the coordinator; the bug-report file leg and create-spec's markers write through dibber; docs, skills and CLAUDE.md point at dibber. Needs dibber DIB-33. Requires: none."
 topics:
   - baton
 owns: {}
-prs: []
+prs: [https://github.com/immediately-run/baton/pull/423]
 depends_on: []
 ---
 
@@ -23,7 +23,7 @@ depends_on: []
 
 **Depends on:** none in this repository.
 
-**Needs:** Dibber's DIB-30, released, which adds `dibber new --id` and a coordinator, `--body-file` and `--field`, and `dibber set --field`.
+**Needs:** Dibber's DIB-33, which adds `dibber new --id` and a coordinator, `--body-file` and `--field`, and `dibber set --field`. It is built ([dibber#21](https://github.com/immediately-run/dibber/pull/21), merged 2026-11-25) but not yet released: `@immediately-run/dibber` 0.3.0 predates it. Build and test against a pinned fake `dibber` as the tests below say. Pin the stub's `dibber` to the first release that carries DIB-33; if none is out when the PR is ready, say so in the PR and leave the pin for the owner (releasing is the owner's).
 
 ### What to build
 
@@ -69,3 +69,5 @@ The coordinator command in `.dibber/config.json` is repository data that `dibber
 ## Status
 
 _filed 2026-11-24._
+
+_2026-11-25: in-review, https://github.com/immediately-run/baton/pull/423._

@@ -1,6 +1,6 @@
 // tickets-file.ts — one ticket file, read and written (B-112, BATON_SPEC §2f R-BTN-74, §4.2):
 // its frontmatter as the markdown source reads it (tickets-markdown.ts's parseFrontmatter, the one
-// reader), the line edits `baton tickets set|done` make, and the body's `**Depends on:**` line —
+// reader), the line edits a ticket file takes (Dibber writes them now, B-326), and the body's `**Depends on:**` line —
 // read by the check's own `dependsLine` (tickets-check.ts, B-111), never a second parser. Pure
 // over the text it is given, so the commands' decisions are tested without a repository.
 import { existsSync } from 'node:fs';
