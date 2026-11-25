@@ -113,6 +113,10 @@ Scenarios numbered at merge, on both hosts:
 
 ## Status
 
+_2026-11-22 (B-300):_ The shared front already checks `Origin` and `Sec-Fetch-Site` on
+session reads, including `/v1/ui/*`. B-300 verifies headerless reads, write refusals and
+public navigation separately under S-BTN-251.
+
 _filed 2026-11-09._
 
 _2026-11-09 — revised after review: split into B-192 (this), B-204 and B-205; the front's cookie
