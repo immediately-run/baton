@@ -8,7 +8,7 @@
 //      one from the dashboard's own origin is served.
 // Runs on both hosts.
 import { describe, it, expect, beforeEach } from 'vitest';
-import { adminSession, cutover, Git, keyCall, makeApiKey, ORIGIN, sessionCall, setAdminKeys, setClock, TOKENS, withCore } from '../helpers';
+import { adminSession, call, cutover, Git, keyCall, makeApiKey, ORIGIN, sessionCall, setAdminKeys, setClock, TOKENS, withCore } from '../helpers';
 import { makeKey, signedRequest, type TestKey } from '../lib/sshKeys';
 import { call as hostCall } from '#host';
 
@@ -74,6 +74,7 @@ describe('S-BTN-251 the key’s or the session’s, and same-origin (B-192)', ()
 
   it('a session’s read from another origin is forbidden; from the dashboard’s own it is served', async () => {
     for (const path of ['/v1/repositories/docs/board', '/v1/owner/docs/grants', '/v1/repositories', '/v1/ui/session']) {
+      expect((await sessionCall(cookie, path)).status, path).toBe(200);
       const foreign = await sessionCall(cookie, path, { headers: { Origin: 'https://evil.example' } });
       expect([path, foreign.status, ((await foreign.json()) as { code: string }).code]).toEqual([path, 403, 'forbidden']);
       for (const site of ['cross-site', 'same-site', 'none']) {
@@ -83,6 +84,23 @@ describe('S-BTN-251 the key’s or the session’s, and same-origin (B-192)', ()
       const own = await sessionCall(cookie, path, { headers: { Origin: ORIGIN, 'Sec-Fetch-Site': 'same-origin' } });
       expect([path, own.status]).toEqual([path, 200]);
       expect(own.headers.get('Cache-Control')).toBe('no-store');
+    }
+  });
+
+  it('session writes still need JSON and the exact Origin; public navigations need neither header', async () => {
+    for (const headers of [
+      { 'Content-Type': 'application/json' },
+      { 'Content-Type': 'application/json', Origin: 'https://sibling.example' },
+      { 'Content-Type': 'text/plain', Origin: ORIGIN },
+      { 'Content-Type': 'application/json', Origin: ORIGIN, 'Sec-Fetch-Site': 'cross-site' },
+    ]) {
+      const denied = await call('/v1/ui/logout', { method: 'POST', headers: { Cookie: cookie, ...headers } as HeadersInit, body: '{}' });
+      expect(denied.status).toBe(403);
+      expect(await denied.json()).toMatchObject({ code: 'forbidden' });
+    }
+    expect((await sessionCall(cookie, '/v1/ui/session')).status).toBe(200);
+    for (const site of ['none', 'cross-site']) {
+      expect((await sessionCall(cookie, '/repositories/docs/board', { headers: { 'Sec-Fetch-Site': site } })).status).toBe(200);
     }
   });
 });

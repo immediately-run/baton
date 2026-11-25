@@ -77,8 +77,7 @@ process for development and CI. Nothing crosses a tenant.
   - The Durable Object class is wiring only; `src/core/` imports no `cloudflare:*` module (a
     build check enforces it). Every integration scenario runs against both hosts. Signed
     requests (§11.1) and administration (§11) need no Cloudflare service.
-  - The local host binds loopback unless `--bind` says otherwise; TLS is its operator's
-    (R-BTN-158).
+  - The local host's binding (`--host`) and operator-managed TLS follow R-BTN-158.
 - **R-BTN-2 (the day's usage against the plan's limits).** The dashboard shows the day's
   Durable Object requests and SQLite rows written against the plan's limits. The limits are the
   one Worker var `BATON_PLAN_LIMITS` — `{"requests": <n>, "rows_written": <n>}` a UTC day,
@@ -207,8 +206,11 @@ process for development and CI. Nothing crosses a tenant.
     [the proposal](../proposals/multi-tenancy.md).
   - **Retention.** Runner rows unseen for 30 days lose their capability, tag, course and report
     rows. The alarm deletes `board_snapshots` older than 90 days (never the head's) and
-    repository `events` older than 90 days — while a repository has a mirror (§16), only below
-    its `mirror_acked_seq` — then the claims of a ticket whose history R-BTN-81 purged, with
+    repository `events` older than 90 days, below every live mirror's `mirror_acked_seq` (§16).
+    Event deletion is off unless the instance configures an archive. The alarm deletes only
+    events acknowledged by the archive, in the mirror feed's shape (§12); a failed archive
+    batch leaves all its events in SQLite. The latest sequence remains as a cursor watermark.
+    The alarm also deletes the claims of a ticket whose history R-BTN-81 purged, with
     their legs, activities and the rows that name them; a claim still held (R-BTN-39), or named
     by an event, a condition or a scope finding, waits and its ticket is tried again a day
     later. The alarm deletes at most 1,000 rows a tick, oldest first, each prune through an

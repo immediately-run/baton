@@ -1,4 +1,4 @@
-// ../../../../../baton-bundle-LXBGhQ/entry.ts
+// ../../../../tmp/baton-bundle-5hl1DZ/entry.ts
 import { execFileSync as execFileSync2, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdtempSync, readdirSync, rmSync as rmSync2, statSync, writeFileSync } from "node:fs";
@@ -113,6 +113,192 @@ function requireAnswer(out, ask, leg, opts = {}) {
   if (opened) throw new Error(`the ${leg} agent's last line names no PR URL after its ${ask.name}`);
   throw new Error(`the ${leg} agent printed no ${ask.name} (${values}) as its last line${last === "" ? " \u2014 its output was empty" : ` \u2014 its last line was ${JSON.stringify(last)}`}`);
 }
+
+// src/core/http.ts
+var BatonError = class extends Error {
+  /** `extra` rides in the error body beside `code` and `message` — `not-eligible` names its `rule` (§11). */
+  constructor(code, message, extra = {}) {
+    super(message);
+    this.code = code;
+    this.extra = extra;
+  }
+  code;
+  extra;
+};
+
+// src/core/contractPointers.ts
+var OUTPUTS_MAX = 16;
+var GIT_POINTER = /^git:([A-Za-z0-9._-]+\/[A-Za-z0-9._-]+)(?:@([0-9a-f]{40}):([A-Za-z0-9._/-]{1,512})|#blob=([0-9a-f]{40}))$/;
+var S3_POINTER = /^s3:\/\/([a-z0-9][a-z0-9.-]{1,61}[a-z0-9])\/[^\s?#]+\?versionId=[^\s&#]+$/;
+function gitPointer(uri) {
+  const m = GIT_POINTER.exec(uri);
+  if (!m || m[3]?.split("/").some((s) => !s || s === "." || s === "..")) return null;
+  return { repository: m[1], commit: m[2], path: m[3], blob: m[4] };
+}
+
+// src/shared/schema.mjs
+var SCHEMA_ID = /^(std|[a-z][a-z0-9-]{0,39}):([A-Za-z][A-Za-z0-9._-]{0,63})@(0|[1-9][0-9]{0,5})$/;
+var SCHEMA_MAX_BYTES = 32 * 1024;
+var VALUE_MAX_BYTES = 4096;
+function parseSchemaId(id) {
+  const m = typeof id === "string" ? SCHEMA_ID.exec(id) : null;
+  return m ? { prefix: m[1], name: m[2], version: Number(m[3]) } : null;
+}
+
+// src/shared/vocabulary.mjs
+var CAPABILITIES = [
+  "authentication",
+  // a signed-in product session (the OAuth round-trip is done)
+  "llm-call",
+  // a working provider round (key + transport, relayed or browser-direct)
+  "create-pr",
+  // a GitHub write identity (fork/branch/PR)
+  "drivable-browser"
+  // an agent-driven Chromium with network/console observation
+];
+var ROLES = {
+  "agent-venue": ["authentication", "llm-call", "create-pr", "drivable-browser"]
+};
+var RESOURCES = [
+  "none",
+  "terraform",
+  "npm-publish",
+  // A NEW package's first publish: the trusted-publisher binding on npmjs.com is set by a
+  // scope admin by hand. A version bump of an existing package is `npm-publish`, which the
+  // agent line holds (bump + merge; CI publishes through OIDC after the release approval).
+  "npm-scope-admin",
+  "mcp-chrome",
+  "local-host",
+  "real-iphone",
+  "gcloud-admin",
+  "github-admin",
+  // BATON_SPEC (2026-10-13): authority on the Cloudflare account behind
+  // baton.immediately.run — Workers, Durable Objects, DNS routes, Access, the plan.
+  "cloudflare-admin",
+  // BATON_SPEC: a session registered with Baton — a runner token for its host and a
+  // running sidecar. Agent-held once the fleet is provisioned (AGENT_HOLDS).
+  "baton-worker",
+  "human-operator",
+  // R3-671/672: the standing venue — a ROLE per the 2026-09-22 model; clause-valid
+  // during the sweep (items still naming it translate to capabilities).
+  "agent-venue"
+];
+var CLAUSE_NAMES = [.../* @__PURE__ */ new Set([...CAPABILITIES, ...Object.keys(ROLES), ...RESOURCES])];
+var AGENT_HOLDS = /* @__PURE__ */ new Set([...CAPABILITIES, "agent-venue", "mcp-chrome", "local-host", "npm-publish", "baton-worker", "none"]);
+
+// src/core/course.ts
+var VOCABULARY = /* @__PURE__ */ new Set([...Object.keys(ROLES), ...Object.values(ROLES).flat(), "human-operator", "none"]);
+var EXPIRES_AFTER_MAX = 30 * 86400;
+
+// src/core/validate.ts
+var REPOSITORY_SRC = "[a-z][a-z0-9-]{0,39}";
+var LOCAL_SRC = "[A-Za-z0-9][A-Za-z0-9._-]{0,63}";
+var REPOSITORY_ID = new RegExp(`^${REPOSITORY_SRC}$`);
+var LOCAL_ID = new RegExp(`^${LOCAL_SRC}$`);
+var TICKET_ID = new RegExp(`^(${REPOSITORY_SRC}):(${LOCAL_SRC})$`);
+var DEPENDENCY_ID = new RegExp(`^(?:${REPOSITORY_SRC}:${LOCAL_SRC}|${LOCAL_SRC})$`);
+var NAME = /^[a-z0-9][a-z0-9-]{0,63}$/;
+var HOLDING_TYPE = "[a-z][a-z0-9-]{0,31}";
+var HOLDING_VALUE = "[A-Za-z0-9:._/@-]{1,128}";
+var HOLDING = new RegExp(`^${HOLDING_TYPE}:${HOLDING_VALUE}$`);
+var bad = (field, why) => {
+  throw new BatonError("invalid-params", `${field}: ${why}`);
+};
+var isObj = (v) => !!v && typeof v === "object" && !Array.isArray(v);
+var optional = (v, check) => v === void 0 || v === null ? void 0 : check(v);
+var matches = (re, field) => (v) => typeof v === "string" && re.test(v) ? v : bad(field, `must match ${re}`);
+var REPORT_HORIZON_MS = 6 * 36e5;
+var NUM = "number";
+var BOOL = "boolean";
+var PR = "pr";
+var TEXT = "text";
+var COMMON = { pr: PR, exit_code: NUM, note: TEXT };
+var DETAIL_SCHEMAS = {
+  orient: { ...COMMON },
+  implement: { ...COMMON },
+  "local-verify": { ...COMMON, passed: BOOL },
+  "open-pr": { ...COMMON },
+  push: { ...COMMON, branch: TEXT, sha: TEXT },
+  "ci-wait": { ...COMMON, conclusion: TEXT },
+  "review-round": { ...COMMON, findings: NUM, blocking: NUM, should_fix: NUM, nit: NUM },
+  reviewer: { ...COMMON, agent: TEXT, model: TEXT, substituted_for: TEXT, findings: NUM, blocking: NUM },
+  "fix-findings": { ...COMMON, fixed: NUM, argued: NUM },
+  adjudicate: { ...COMMON, reproduced: BOOL },
+  merge: { ...COMMON, sha: TEXT },
+  reconcile: { ...COMMON, archived: NUM },
+  "status-write": { ...COMMON, status: TEXT, item: TEXT },
+  "decision-packet": { ...COMMON, item: TEXT },
+  other: { ...COMMON }
+};
+var isHttpsPointer = (v) => typeof v === "string" && v.length <= 1e3 && v.startsWith("https://") && !/[\s\u0000-\u001f\u007f]/.test(v);
+var OUTPUT_NAME = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
+var OUTPUT_DIGEST = /^sha256:[0-9a-f]{64}$/;
+function checkOutputs(v) {
+  if (v === void 0 || v === null) return [];
+  if (!Array.isArray(v) || v.length > OUTPUTS_MAX) bad("outputs", `must be a list of at most ${OUTPUTS_MAX} outputs`);
+  const names = /* @__PURE__ */ new Set();
+  return v.map((raw, i) => {
+    const at = `outputs[${i}]`;
+    if (!isObj(raw)) bad(at, "must be {name, schema, uri, digest?} or {name, schema, value}");
+    const o = raw;
+    for (const k of Object.keys(o)) if (!["name", "schema", "uri", "digest", "value"].includes(k)) bad(`${at}.${k}`, "is not an output field");
+    const name = matches(OUTPUT_NAME, `${at}.name`)(o.name);
+    if (names.has(name)) bad(`${at}.name`, `repeats ${name}`);
+    names.add(name);
+    if (!parseSchemaId(o.schema)) bad(`${at}.schema`, "must name a schema as <id>@<version>");
+    const hasValue = Object.prototype.hasOwnProperty.call(o, "value");
+    if (hasValue === (o.uri !== void 0)) bad(at, "gives exactly one of uri and value");
+    if (hasValue) {
+      if (o.digest !== void 0) bad(`${at}.digest`, "an inline value carries no digest");
+      let n = Infinity;
+      try {
+        n = new TextEncoder().encode(JSON.stringify(o.value)).length;
+      } catch {
+      }
+      if (n > VALUE_MAX_BYTES) bad(`${at}.value`, `must be at most ${VALUE_MAX_BYTES} bytes serialized; give a larger output by pointer`);
+      return { name, schema: o.schema, value: o.value };
+    }
+    const uri = o.uri;
+    if (typeof uri !== "string" || uri.length > 1024 || !(gitPointer(uri) || S3_POINTER.test(uri) || isHttpsPointer(uri))) {
+      bad(`${at}.uri`, "must be a git:, https:// or s3:// pointer of at most 1000 characters");
+    }
+    const digest = optional(o.digest, matches(OUTPUT_DIGEST, `${at}.digest`));
+    if (!uri.startsWith("git:") && !digest) bad(`${at}.digest`, "an https:// or s3:// output carries its sha256:<hex> digest");
+    return { name, schema: o.schema, uri, ...digest ? { digest } : {} };
+  });
+}
+var CAPABILITY_NAME = new RegExp(`^(?:${NAME.source}|${HOLDING.source.slice(1, -1)})$`);
+var VALID_FOR = { default_s: 3600, state_s: 24 * 3600, measure_s: 31 * 24 * 3600 };
+
+// src/defaults/output-evidence.ts
+var PREFIX = "Baton-Output: ";
+var MAX = 256 * 1024;
+var TICKET_OUTPUT_WITNESS = "baton: ticket close outputs";
+function outputLine(ctx, raw) {
+  const outputs = checkOutputs(raw);
+  if (!outputs.length) return null;
+  if (!ctx.run_id || !ctx.claim?.nonce) throw new Error("output evidence requires an online run and claim nonce");
+  const ticket = ctx.ticket.id.split(":").at(-1);
+  return PREFIX + encodeURIComponent(JSON.stringify({ ticket, leg: ctx.leg, run_id: ctx.run_id, claim_nonce: ctx.claim.nonce, outputs }));
+}
+
+// src/defaults/forge.ts
+function hostOf(url) {
+  const u = url.trim();
+  if (/^(file:|\/|\.{1,2}[\\/]|~)/.test(u) || /^[A-Za-z]:[\\/]/.test(u)) return null;
+  try {
+    const parsed = new URL(u);
+    if (parsed.hostname) return (parsed.protocol === "https:" || parsed.protocol === "http:" ? parsed.host : parsed.hostname).toLowerCase();
+  } catch {
+  }
+  const withUser = /^[^@/]+@([^/:]+):/.exec(u);
+  if (withUser) return withUser[1].toLowerCase();
+  const userLess = /^([a-z0-9][a-z0-9.-]*\.[a-z0-9-]+):/i.exec(u);
+  return userLess ? userLess[1].toLowerCase() : null;
+}
+
+// src/defaults/remote-slug.ts
+var slugOfUrl = (url) => url.replace(/^git@[^:]+:/, "").replace(/^https?:\/\/[^/]+\//, "").replace(/^[A-Za-z0-9][A-Za-z0-9.-]*\.[A-Za-z0-9-]+:(?=[^/])/, "").replace(/\.git$/, "").replace(/^git\/(?=[^/]+\/[^/]+$)/, "");
 
 // src/defaults/ticket-state.ts
 import { execFileSync } from "node:child_process";
@@ -289,9 +475,12 @@ async function closeTicket(ctx, result, run2 = exec) {
   if (typeof result?.reached !== "string" || result.reached === "") throw new Error(`the ${ctx.leg} leg returned no station reached`);
   if (ctx.ticket.path == null || ctx.ticket.path === "") throw new Error(`the ${ctx.leg} leg's ticket has no file path to write`);
   const id = bareTicketId(ctx.ticket);
+  const marker = outputLine(ctx, result.outputs);
   const state = { station: result.reached, next_leg: result.next ?? null, claim: ctx.claim?.nonce ?? null };
   const branch = ticketsBranch(ctx.checkout, ctx.default_branch ?? null, run2);
   const git = (args, opts = {}) => run2("git", args, ctx.checkout, opts);
+  const origin = marker ? git(["remote", "get-url", "origin"]) : null;
+  const githubRepo = origin && hostOf(origin) === "github.com" ? slugOfUrl(origin) : null;
   const ref = `origin/${branch}`;
   const index = tmpIndex(ctx.checkout, run2);
   const env = { GIT_INDEX_FILE: index };
@@ -326,13 +515,24 @@ async function closeTicket(ctx, result, run2 = exec) {
       git(["read-tree", parent], { env });
       git(["update-index", "--add", "--cacheinfo", `100644,${blob},${ctx.ticket.path}`], { env });
       const tree = git(["write-tree"], { env });
-      const commit = git(["commit-tree", tree, "-p", parent, "-m", `baton:close ${id} ${ctx.leg}`]);
+      const commit = git(["commit-tree", tree, "-p", parent, "-m", `baton:close ${id} ${ctx.leg}`, ...marker ? ["-m", marker] : []]);
       try {
         git(["push", "origin", `${commit}:refs/heads/${branch}`]);
-        return commit;
       } catch (e) {
         if (!movedOnRemote(e) || tries >= PUSH_TRIES) throw e;
+        continue;
       }
+      if (githubRepo) run2("gh", [
+        "api",
+        "--hostname",
+        "github.com",
+        "-X",
+        "POST",
+        `repos/${githubRepo}/commits/${commit}/comments`,
+        "-f",
+        `body=${TICKET_OUTPUT_WITNESS}`
+      ], ctx.checkout);
+      return commit;
     }
   } finally {
     rmSync(index, { force: true });
@@ -361,10 +561,10 @@ function commentLine(leg, result) {
 }
 var MARKER_LEGS = /* @__PURE__ */ new Set(["converse", "address"]);
 async function prClose(ctx, result, run2 = exec) {
+  const marker = outputLine(ctx, result?.outputs);
   const comment = commentLine(ctx.leg, result);
-  if (comment != null) {
-    const body = `${comment}
-baton: ${ctx.ticket.id} ${ctx.leg}, claim ${ctx.claim?.nonce ?? "?"}`;
+  if (comment != null || marker && !MARKER_LEGS.has(ctx.leg)) {
+    const body = [comment, `baton: ${ctx.ticket.id} ${ctx.leg}, claim ${ctx.claim?.nonce ?? "?"}`, marker].filter(Boolean).join("\n");
     if (result?.pr != null && !(typeof result.pr === "string" && PR_URL2.test(result.pr))) throw new Error(`the ${ctx.leg} leg named no PR URL to write on, got ${JSON.stringify(result.pr)}`);
     return run2("gh", ["pr", "comment", ...typeof result?.pr === "string" ? [result.pr] : [], "--body", body], ctx.checkout);
   }
@@ -377,7 +577,7 @@ baton: ${ctx.ticket.id} ${ctx.leg}, claim ${ctx.claim?.nonce ?? "?"}`;
   return closeTicket({ ...ctx, heading: false }, result, run2);
 }
 
-// ../../../../../baton-bundle-LXBGhQ/entry.ts
+// ../../../../tmp/baton-bundle-5hl1DZ/entry.ts
 var GIT_BOUND_MS = 12e4;
 var GIT_ENV = { "GIT_TERMINAL_PROMPT": "0", "GIT_SSH_COMMAND": "ssh -o BatchMode=yes -o ConnectTimeout=20" };
 var AGENT_IDLE_MS = 9e5;

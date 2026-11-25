@@ -21,6 +21,7 @@ import { mkdirSync } from 'node:fs';
 import { githubFake } from '../githubFake';
 import { graphOf } from '../../src/core/graph';
 import { decide } from '../../src/runner/protocol';
+import { replayMain } from '../../src/runner/replay';
 import { CREATE_PR_COURSE, stationsPr, stationsReviewPr, type PrFact } from '../../src/defaults/course-pr';
 import { prClose, verdictLine, type Exec } from '../../src/defaults/pr-close';
 import { splitWords } from '../../src/defaults/agent-words';
@@ -1179,6 +1180,127 @@ describe('baton repo init, through the built CLI', () => {
       commitAll(root);
     }
   });
+
+  it('uses the course in force for the adjudication bound in both scaffolded and checked-in review stubs (S-BTN-43, B-324)', async () => {
+    const courseDir = join('.baton', 'courses', 'create-pr');
+    const courseFile = join(root, courseDir, 'course.json');
+    const defaultsFile = join(root, courseDir, 'review-defaults.json');
+    const settingsFile = join(root, '.baton', 'baton.json');
+    const before = readFileSync(courseFile, 'utf8');
+    const defaults = readFileSync(defaultsFile, 'utf8');
+    const settings = readFileSync(settingsFile, 'utf8');
+    const shipped = JSON.parse(readFileSync(join(ROOT, courseDir, 'course.json'), 'utf8'));
+    const bound = shipped.legs.review.max_runs;
+    const scratch = mkdtempSync(join(tmpdir(), 'baton-review-legs-'));
+    try {
+      const agent = join(scratch, 'agent.sh');
+      writeFileSync(agent, '#!/bin/sh\necho changes\n', { mode: 0o755 });
+      writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(settings), agent_command: agent }));
+      writeFileSync(courseFile, JSON.stringify(shipped));
+      const snapshot = { sha: commitAll(root) };
+      const omitted = structuredClone(shipped);
+      delete omitted.legs.review.max_runs;
+      writeFileSync(courseFile, JSON.stringify(omitted));
+      const withoutLimit = { sha: commitAll(root) };
+      writeFileSync(defaultsFile, JSON.stringify({ rounds: 5 }));
+      const alternateDefault = { sha: commitAll(root) };
+      const ctx = { ticket: { id: 'A-1' }, checkout: root, snapshot };
+      const changes = { reached: 'reviewed', next: 'fix', verdict: 'changes' };
+      const adjudicate = { ...changes, suspend: true, next: 'adjudicate' };
+      for (const [name, repo] of [['scaffolded', root], ['checked-in', ROOT]] as const) {
+        for (const leg of readdirSync(join(repo, courseDir, 'legs')).filter((f) => f.endsWith('.mjs'))) {
+          expect(readFileSync(join(repo, courseDir, 'legs', leg), 'utf8'), `${name} ${leg}`).not.toMatch(/\b(?:max_runs\s*:|DEFAULT_CREATE_PR_REVIEW_ROUNDS\s*=)\s*\d/);
+        }
+        const file = join(scratch, `${name}.mjs`);
+        copyFileSync(join(repo, courseDir, 'legs', 'review.mjs'), file);
+        const stub = await load(file);
+        expect(await stub.run({ ...ctx, run: 3 }), name).toEqual(changes);
+        expect(await stub.run({ ...ctx, run: bound - 1 }), name).toEqual(changes);
+        expect(await stub.run({ ...ctx, run: bound }), name).toEqual(adjudicate);
+        expect(await stub.run({ ...ctx, snapshot: withoutLimit, run: 3 }), name).toEqual(adjudicate);
+        expect(await stub.run({ ...ctx, snapshot: alternateDefault, run: 4 }), name).toEqual(changes);
+        expect(await stub.run({ ...ctx, snapshot: alternateDefault, run: 5 }), name).toEqual(adjudicate);
+        for (const graph of [CREATE_PR_COURSE, graphOf(CREATE_PR_COURSE)]) {
+          expect(await stub.run({ ...ctx, graph, run: 3 }), name).toEqual(adjudicate);
+        }
+      }
+    } finally {
+      writeFileSync(courseFile, before);
+      writeFileSync(defaultsFile, defaults);
+      writeFileSync(settingsFile, settings);
+      commitAll(root);
+      rmSync(scratch, { recursive: true, force: true });
+    }
+  });
+
+  it('sync, signed review and comparison replay agree on graph-only updates (S-BTN-43, S-BTN-219, S-BTN-48, B-324)', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'baton-signed-review-'));
+    const scratch = mkdtempSync(join(tmpdir(), 'baton-signed-fixtures-'));
+    try {
+      gitInit(dir);
+      const git = (...a: string[]) => execFileSync('git', ['-C', dir, ...a], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+      const key = join(scratch, 'owner');
+      execFileSync('ssh-keygen', ['-q', '-t', 'ed25519', '-N', '', '-f', key]);
+      const public_key = readFileSync(`${key}.pub`, 'utf8').trim();
+      const fingerprint = execFileSync('ssh-keygen', ['-lf', `${key}.pub`], { encoding: 'utf8' }).split(' ')[1];
+      const sign = (message: string) => {
+        git('add', '-A');
+        git('-c', 'gpg.format=ssh', '-c', `user.signingkey=${key}`, 'commit', '-S', '-qm', message);
+        return git('rev-parse', 'HEAD');
+      };
+      const agent = join(scratch, 'agent.sh');
+      writeFileSync(agent, '#!/bin/sh\necho changes\n', { mode: 0o755 });
+      await initMain(['--agent-command', agent], { root: dir, log: () => {} });
+      const settingsFile = join(dir, '.baton', 'baton.json');
+      const settings = JSON.parse(readFileSync(settingsFile, 'utf8'));
+      delete settings.courses[0].source;
+      writeFileSync(settingsFile, JSON.stringify(settings));
+      const courseDir = join('.baton', 'courses', 'create-pr');
+      const courseFile = join(dir, courseDir, 'course.json');
+      const graph = JSON.parse(readFileSync(courseFile, 'utf8'));
+      const original = sign('scaffold');
+      graph.legs.review.max_runs = 8;
+      writeFileSync(courseFile, JSON.stringify(graph));
+      const updated = sign('change only the graph');
+      const facts = join(scratch, 'facts.json');
+      writeFileSync(facts, '[]');
+      const posted: Record<string, any>[] = [];
+      const transport: Transport = async (req) => {
+        const path = new URL(req.url).pathname;
+        if (path.endsWith('/observation')) return Response.json({ sha: null, observation: 1, signing_keys: [{ public_key, fingerprint }], require_signed_control: true });
+        if (path.endsWith('/head')) return Response.json({ sha: null });
+        posted.push(await req.json() as Record<string, unknown>);
+        return Response.json({ outcome: 'accepted' });
+      };
+      expect(await syncMain({ root: dir, url: 'https://baton.test', factsFile: facts, token: 'test', transport, log: () => {} })).toBe(0);
+      expect(posted[0]).toMatchObject({
+        registry: [{ course: { legs: { review: { max_runs: 8 } } } }],
+        control: { groups: { course: { read: original, key: fingerprint } } },
+      });
+      const stub = await load(join(dir, courseDir, 'legs', 'review.mjs'));
+      const ctx = { ticket: { id: 'A-1' }, checkout: dir, snapshot: { sha: updated }, signed_control: { course: posted[0].control.groups.course.read } };
+      expect(await stub.run({ ...ctx, run: 3 })).toMatchObject({ next: 'fix' });
+      expect(await stub.run({ ...ctx, run: 8 })).toMatchObject({ suspend: true, next: 'adjudicate' });
+
+      git('update-ref', 'refs/baton/test/default', updated);
+      const bearer = join(scratch, 'replay.key');
+      writeFileSync(bearer, `bak_${'0'.repeat(16)}_${'0'.repeat(64)}`);
+      const report = join(scratch, 'report.json');
+      const code = await replayMain(['test:A-1', 'review', '-i', bearer, '--home', dir, '--report', report, '--against', updated], {
+        transport: async () => Response.json({ default_branch: 'main', runs: [{ run: 3, claim: 1, started_at: 1, snapshot_sha: original, course: 'create-pr', inputs: [] }] }),
+        log: () => {},
+      });
+      expect(code).toBe(0);
+      expect(JSON.parse(readFileSync(report, 'utf8'))).toMatchObject({
+        checked_out_at: original,
+        ran: { ok: true, result: { suspend: true, next: 'adjudicate' } },
+        against: { same: false, ran: { ok: true, result: { next: 'fix' } } },
+      });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(scratch, { recursive: true, force: true });
+    }
+  }, 120_000);
 
   it('the stub runs BATON_AGENT_COMMAND — what baton run --harness chose — when the snapshot’s settings name no agent_command; the settings win; neither names the fix (B-83)', async () => {
     const agent = join(root, 'agent.sh');
@@ -2733,9 +2855,6 @@ describe('course sources and leg overrides (B-33)', () => {
   it('--override seeds legs/<leg>.run.mjs calling the course’s own run; a leg the course lacks is refused before anything is written', () => {
     const seeded = readFileSync(join(legs(), 'review.run.mjs'), 'utf8');
     expect(seeded).toContain('export async function run(ctx, standard) {\n  return standard(ctx);\n}');
-    // B-110 round 1: a changes verdict on the last round (the file's `max_runs`, or one the owner
-    // granted past it) queues the owner's adjudicate and suspends, never a fix.
-    expect(seeded).toContain("{ ...(answer !== 'approve' && (ctx.run ?? 1) >= 3 ? { suspend: true } : {}), reached: 'reviewed', next: answer === 'approve' ? 'merge' : (ctx.run ?? 1) >= 3 ? 'adjudicate' : 'fix', verdict: answer }");
     expect(() => baton(root, 'repo', 'init', '--pin', PIN, '--override', 'deploy')).toThrow(/--override deploy: create-pr has no such leg — its legs are implement, run-tests, review, fix, adjudicate, merge/);
     expect(existsSync(join(legs(), 'deploy.run.mjs'))).toBe(false);
   });

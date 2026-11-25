@@ -77,14 +77,17 @@ repository, its owners and administrators, except where a route's rule narrows t
 
 ### 12.2 Destructive actions
 
-These actions take `confirm: true` in the body, or are refused `confirm-required`; the CLI asks
-or takes `--yes`, and the dashboard's dialogs send it.
+These actions take `confirm: true` in the body, or are refused `confirm-required`. Where the
+CLI offers the action it asks or takes `--yes`; where the dashboard offers it its dialog sends
+the confirmation. Confirmation does not grant authority to perform the action.
 
-- `ticket.cancel`, `leg.stop`, `claim.force-reap`, `claim.fence-clear`;
-- `owner.owner.remove`, `owner.grant.revoke`, `owner.sync-key.revoke`, `human-key.revoke`;
+- `leg.stop`, `claim.force-reap`, `claim.fence-clear`;
+- `owner.owner.remove`, `owner.grant.revoke`, `human-key.revoke`;
+- removal of a policy floor (R-BTN-189);
 - `admin.key.revoke`, `admin.repo.retire`.
 
-A change of a repository's path also takes `confirm: true` (R-BTN-138).
+Not built: `ticket.cancel` (R-BTN-12), `owner.sync-key.revoke` (B-301), and an administrator's
+change of a repository's path (R-BTN-138, B-45). Each takes the same confirmation when built.
 
 Proposed, each with the design that brings its action: a `code_repos` consent (R-BTN-140;
 [data model and API](../proposals/data-model-and-api.md)), `owner.check-runner.revoke` and
@@ -179,7 +182,10 @@ Every value below is validated on write; a value over its cap is refused `invali
     (`BATON_ORIGIN`; locally `--origin`), else `forbidden`.
   - **Every session request.** Any request a dashboard session authorizes, reads included,
     carries an `Origin` equal to the origin when it carries one, and `Sec-Fetch-Site:
-    same-origin` when it carries that header, else `forbidden`.
+    same-origin` when it carries that header, else `forbidden`. This is a check on the
+    session's API requests (including the shared reads below), not on public dashboard page
+    loads. The session-assisted condition redirect falls back to the public page if the
+    checks do not pass.
   - **Sessions.** `/v1/ui/*` requires a dashboard session of an administrator key (R-BTN-155). Outside `/v1/ui/*` a session authenticates only the `GET`s §14 lists it on —
     the reads it shares with the keys — and no write.
     Cloudflare Access may stand in front of the dashboard; Baton never requires it and never reads
@@ -193,11 +199,11 @@ Every value below is validated on write; a value over its cap is refused `invali
 ### 12.5 The local host and bearers
 
 - **R-BTN-158 (the local host, and bearers over `http`).**
-  - **Binding.** `baton server start` binds `127.0.0.1` unless `--bind <address>` says otherwise.
+  - **Binding.** `baton server start` binds `127.0.0.1` unless `--host <address>` says otherwise.
     TLS is the operator's: a front (a reverse proxy, Tailscale serve) terminates it, and
     `--origin` names the front's origin, against which R-BTN-135's host check holds. A
     non-loopback `http` origin gets no dashboard, because its cookie is `Secure`.
-  - **Bearers never cross `http`.** The CLI and the runner refuse to send a
+  - **Bearers never cross `http` (not built, B-46).** The CLI and the runner refuse to send a
     bearer to a non-loopback `http` origin; that is the control. The server detects:
     - the Cloudflare host refuses a bearer on a plain-`http` URL as `unauthenticated`;
     - an `http` listener refuses every bearer (API keys, MCP keys, registration tokens, the
@@ -208,10 +214,10 @@ Every value below is validated on write; a value over its cap is refused `invali
       for a cookie), because it crossed the network in clear, and raises
       `baton.bearer-over-http`. One that does not verify is only refused and counted in §2.3's
       failure buckets: an id or fingerprint alone, which is public, revokes nothing.
-  - **The trusted proxy.** Not built: `--trusted-proxy <address>`, naming the one front
+  - **The trusted proxy (not built, B-46).** `--trusted-proxy <address>`, naming the one front
     whose forwarded client address Baton reads, for the sign-in limits
     ([proposed](../proposals/people-and-dashboard.md#3-sign-in-sessions-and-confirmed-actions)).
-  - **File modes.** At start the local host exits 2 on a group- or world-writable `--db`, secret
+  - **File modes (not built, B-46).** At start the local host exits 2 on a group- or world-writable `--db`, secret
     file or directory, or a group- or world-readable secret file. It creates the database `0600`
     in a `0700` directory.
   - **Import** re-validates every row and refuses requests signed before the source's seal, as
@@ -318,6 +324,19 @@ trusted runners or of the protection checker; a compromised forge; and a comprom
     `baton owner policy show | diff | log` read it. Each change is logged `admin` with the
     versions and the knobs it changed, and is checked against the floors (R-BTN-189) and the
     current courses (R-BTN-181) in its transaction.
+  - **Previewing a policy change.** `dry_run: true` (`--dry-run` on `policy apply` or `policy set`)
+    uses the same current version, approver and change validation as apply, but changes no
+    policy or trust settings and adds no policy audit event. `changed` lists the changed knobs;
+    `guarantees` gives their projected result using Baton's current protection report.
+    `trust_cleared` lists the trust settings apply would clear (`grant:<fingerprint>` or
+    `courier:<fingerprint>`), not grants it would revoke. On a change from `inputs.answers: git`
+    to `attestation` with no human-only key admitted by the decision route (R-BTN-116),
+    `stops.legs` lists the person legs that could take an answer from each live ticket's current
+    station, including when another leg is queued, as `{ticket_id, leg}`. `stops.tickets` lists
+    their distinct qualified ticket ids. This reports loss of the answer path, not loss of expiry
+    or of other legs the ticket can take.
+    `not_evaluated` names the effects this preview does not predict: `outbox-delivery`,
+    `leg-attestation-requirements`, `trusted-merge` and `repos.unlisted`.
   - **Who may change it.** Every change to the policy, in any direction, needs an approver on the
     `approvers.policy` list as it stands before the change; Baton never asks whether a change
     tightens or loosens. A change to any `approvers.*` list is authorised the same way, never by
@@ -665,3 +684,12 @@ segments). The claim answer carries it. Two reports say what a leg did outside i
 A third finding, `out-of-course` — a control path changed on the default branch by a push no
 course accounts for — and two more kinds of audit action are
 [proposed](../proposals/security.md).
+
+**Host forge broker (B-131).** This read is not the audit's open scope. A runner holding a live
+leg proves possession with a signed `GET /v1/forge-scope/runner/{run}` (204, no data). A host
+broker signs `GET /v1/forge-scope/broker/{run}` with its separate key, whose public half is in
+`BATON_FORGE_BROKER_KEYS`. Both reads refuse a run whose lease, leg or grant is no longer live.
+The broker's reply carries only the home path, the ticket's explicitly listed code repository
+paths and IDs (R-BTN-140), and the time through which the lease and deadline currently hold.
+There is no implicit by-name reach or mixed-forge scope for this GitHub.com broker. Baton never
+sees the App key or the installation token. Fieldhouse owns minting, renewal and revocation.
