@@ -42,11 +42,11 @@
 //   baton blocked -i KEY TICKET                           baton blocked -i KEY --repository R --on KIND:REF [--transitive]
 //                — why a ticket cannot move, or what waits on a ticket, a resource, a capability or a
 //                decision (R-BTN-75); `--on decision:*` is every decision waiting on a person
-//   baton admin -i KEY revoke FINGERPRINT                          baton admin -i KEY open
+//   baton admin -i KEY revoke FINGERPRINT [--yes]                  baton admin -i KEY open
 //   baton admin -i KEY state      — what the dashboard draws, as JSON, read with the key (B-118)
 //   baton owner -i KEY grant REPO --key PUB [--hostname H] --capabilities a,b [--label L] [--max-tier T] [--max-claims N] [--deliver-interactions]
-//   baton owner -i KEY revoke REPO FINGERPRINT
-//   baton owner -i KEY owners REPO (--add PUB | --remove FINGERPRINT)
+//   baton owner -i KEY revoke REPO FINGERPRINT [--yes]
+//   baton owner -i KEY owners REPO (--add PUB | --remove FINGERPRINT [--yes])
 //   baton owner -i KEY sign [--message TEXT] [--repo DIR] -- <paths>…   (B-127: a commit signed
 //                the way require_signed_control counts — git's gpg.format ssh, the SSHSIG
 //                namespace `git`, the key -i names; plain `git commit -S` with git configured
@@ -397,8 +397,12 @@ export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? 
       return { method: 'POST', path: '/v1/admin/probes', body: { public_key: readKey(need(flags.key, '--key')), label: need(flags.label, '--label'), instances: list(flags.instances) ?? [] } };
     }
     if (cmd === 'revoke') {
-      parseArgs(rest.slice(1), [], [], 0);
-      return { method: 'POST', path: `/v1/admin/keys/${encodeURIComponent(need(rest[0], 'the key fingerprint'))}/revoke`, body: {} };
+      const { flags, positional } = parseArgs(rest, ['yes'], [], 1);
+      const fp = need(positional[0], 'the key fingerprint');
+      return {
+        method: 'POST', path: `/v1/admin/keys/${encodeURIComponent(fp)}/revoke`, body: { confirm: true },
+        confirm: { question: `revoke key ${fp} throughout this Baton?`, yes: !!flags.yes },
+      };
     }
     if (cmd === 'open') {
       parseArgs(rest, [], [], 0);
@@ -509,17 +513,23 @@ export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? 
     if (cmd === 'revoke') {
       // B-121: with a home in force the repository position may be omitted, the fingerprint
       // alone remaining.
-      const fpOnly = home?.repository != null && rest.length === 1;
-      const repo = repoOrHome(fpOnly ? undefined : rest[0], home);
-      const fp = need(fpOnly ? rest[0] : rest[1], 'the key fingerprint');
-      parseArgs(rest.slice(fpOnly ? 1 : 2), [], [], 0);
-      return { method: 'POST', path: `/v1/owner/${encodeURIComponent(repo)}/grants/${encodeURIComponent(fp)}/revoke`, body: {} };
+      const { flags, positional } = parseArgs(rest, ['yes'], [], 2);
+      const fpOnly = home?.repository != null && positional.length === 1;
+      const repo = repoOrHome(fpOnly ? undefined : positional[0], home);
+      const fp = need(fpOnly ? positional[0] : positional[1], 'the key fingerprint');
+      return {
+        method: 'POST', path: `/v1/owner/${encodeURIComponent(repo)}/grants/${encodeURIComponent(fp)}/revoke`, body: { confirm: true },
+        confirm: { question: `revoke the grant of ${fp} on ${repo}?`, yes: !!flags.yes },
+      };
     }
     if (cmd === 'owners') {
-      const { flags, positional } = parseArgs(rest, [], ['add', 'remove'], 1);
+      const { flags, positional } = parseArgs(rest, ['yes'], ['add', 'remove'], 1);
       const repo = repoOrHome(positional[0], home);
       if (flags.add) return { method: 'POST', path: `/v1/owner/${repo}/owners`, body: { public_key: readKey(flags.add) } };
-      if (flags.remove) return { method: 'POST', path: `/v1/owner/${repo}/owners`, body: { fingerprint: flags.remove, remove: true } };
+      if (flags.remove) return {
+        method: 'POST', path: `/v1/owner/${repo}/owners`, body: { fingerprint: flags.remove, remove: true, confirm: true },
+        confirm: { question: `remove owner ${flags.remove} from ${repo}?`, yes: !!flags.yes },
+      };
       throw new Error('baton owner owners REPO --add PUB | --remove FINGERPRINT');
     }
     if (cmd === 'bar' && rest[0] === 'lift') {
@@ -1066,12 +1076,15 @@ async function policyMain(argv) {
     return out.status >= 200 && out.status < 300 ? 0 : 1;
   }
   if (sub === 'floor' && rest[0] === 'remove') {
-    const { positional } = parseArgs(rest.slice(1), [], ['identity', 'url'], 2);
+    const { flags, positional } = parseArgs(rest.slice(1), ['yes'], ['identity', 'url'], 2);
     // B-121: with a home in force the repository may be omitted — one positional is the floor.
     const fromHome = home?.repository != null && positional.length === 1;
     const [repoArg, nameArg] = fromHome ? [home.repository, positional[0]] : positional;
-    const out = await request('POST', `/v1/owner/${encodeURIComponent(repoOrHome(repoArg, home))}/policy/floors`,
-      { name: need(nameArg, 'the floor name'), remove: true, confirm: true });
+    const repo = repoOrHome(repoArg, home);
+    const name = need(nameArg, 'the floor name');
+    if (!(await confirmAsk(`remove policy floor ${name} from ${repo}?`, flags.yes, process.stdout, process.stdin))) return 1;
+    const out = await request('POST', `/v1/owner/${encodeURIComponent(repo)}/policy/floors`,
+      { name, remove: true, confirm: true });
     write(JSON.stringify(out.json));
     return out.status >= 200 && out.status < 300 ? 0 : 1;
   }

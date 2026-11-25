@@ -180,7 +180,7 @@ here; every other cause is its rule's.
 | **Dashboard** | | | | |
 | `POST /v1/login` | none, or a verified Cloudflare Access assertion | `{token}` or `{access: true}`, exactly one (else `invalid-params`) | `{ok: true}` and the session cookie; else `unauthenticated` (with `reason` for Access; see R-BTN-155) or `unavailable`, and no cookie | R-BTN-155 |
 | `POST /v1/ui/logout` | session | `{}` | `{ok: true}` and the session cookie cleared; the caller's own session ends (`ui.logout`) | R-BTN-155 |
-| `POST /v1/ui/messages` | session | `{to_runner_id, kind: "release" \| "status_request" \| "wind-down", payload}`; Stop is `{kind: "release", payload: {ticket_id, reason: "requested"}}` | `{id}`; `forbidden` for a `release` whose ticket `to_runner_id` does not hold; any other kind `invalid-params` | §6, R-BTN-119 |
+| `POST /v1/ui/messages` | session | `{to_runner_id, kind: "release" \| "status_request" \| "wind-down", payload}`; Stop is `{kind: "release", payload: {ticket_id, reason: "requested"}, confirm: true}` | `{id}`; `forbidden` for a `release` whose ticket `to_runner_id` does not hold; any other kind `invalid-params` | §6, §12.2, R-BTN-119 |
 | `POST /v1/ui/overrides/{ticket}` | session | `{expedite}` or `{hold}` | `{ok: true}` | §6 |
 | `POST /v1/ui/board/accept` | session | `{repository, sha}` | `{ok: true}` (`repo.accept-post`); `not-found` for no such held history | R-BTN-11 |
 | `POST /v1/ui/resync` | session | `{repository}` | `{ok: true}` (`repo.resync`): the repository's sync workflow is dispatched, as a delivery dispatches it; `conflict` within 30 seconds of the last one or with no sync workflow registered; `invalid-params` for `force` or `sha` | R-BTN-73, R-BTN-94 |

@@ -98,7 +98,7 @@ describe('S-BTN-126 API keys beside SSH keys', () => {
   });
 
   it('revoking an owner API key, or removing an administrator’s line, stops it at its next call', async () => {
-    expect((await apiKeyCall(admin.key, `/v1/admin/keys/${owner.fingerprint}/revoke`, {})).status).toBe(200);
+    expect((await apiKeyCall(admin.key, `/v1/admin/keys/${owner.fingerprint}/revoke`, { confirm: true })).status).toBe(200);
     const after = await apiKeyCall(owner.key, '/v1/owner/ops/grants', { public_key: k.publicKey, capabilities: [] });
     expect([401, 403]).toContain(after.status);
     await setAdminKeys();
