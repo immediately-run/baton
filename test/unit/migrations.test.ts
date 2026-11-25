@@ -15,9 +15,9 @@ import { makeKey, signedRequest } from '../lib/sshKeys';
 
 import { dropDerivedSchema } from '../lib/migrationRewind';
 
-describe('migration 0077: retire tiers (B-322)', () => {
+describe('migration 0127: retire tiers (B-322)', () => {
   it('preserves provenance (S-BTN-220) and lets the same capped key claim after upgrade (S-BTN-39)', async () => {
-    const stub = env.BATON.get(env.BATON.idFromName('migrations-0077'));
+    const stub = env.BATON.get(env.BATON.idFromName('migrations-0127'));
     const key = await makeKey('ssh-ed25519', 'capped');
     const secret = 'migration-test';
     const secretHash = await sha256(secret);
@@ -41,7 +41,7 @@ describe('migration 0077: retire tiers (B-322)', () => {
       sql.exec('PRAGMA foreign_keys = OFF');
       dropDerivedSchema(sql);
       for (const o of sql.exec("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%'").toArray()) sql.exec(`DROP TABLE "${o.name}"`);
-      for (const m of MIGRATIONS.filter((x) => x.id <= 76)) sql.exec(m.sql);
+      for (const m of MIGRATIONS.filter((x) => x.id < 127)) sql.exec(m.sql);
     });
     const oldTag = await runInDurableObject(stub, (o: Baton, state: DurableObjectState) => {
       o.core.now = () => at;
@@ -68,10 +68,10 @@ describe('migration 0077: retire tiers (B-322)', () => {
       expect(all(`SELECT tier_position > max_tier AS refused FROM tickets JOIN runner_grants USING (repository_id) WHERE tickets.id = 'docs:A'`)).toEqual([{ refused: 1 }]);
       const ready = () => all('SELECT ticket_id, leg, rank, ready_since FROM ready_tickets INDEXED BY ready_tickets_order');
       expect(ready()).toEqual([{ ticket_id: 'docs:A', leg: 'implement', rank: 4, ready_since: 1 }]);
-      // Hold the route, caller and clock bucket fixed to isolate 0077's invalidation (S-BTN-243).
+      // Hold the route, caller and clock bucket fixed to isolate 0127's invalidation (S-BTN-243).
       const tag = () => stateEtag(o.core.store, `key:runner:${key.fingerprint}`, `repo.tickets\n${ticketsPath}\n\nredacted`, clockBucket(at), false);
       const before = tag();
-      sql.exec(MIGRATIONS.find((m) => m.id === 77)!.sql);
+      sql.exec(MIGRATIONS.find((m) => m.id === 127)!.sql);
       expect(tag()).not.toBe(before);
       expect(ready()).toEqual([{ ticket_id: 'docs:A', leg: 'implement', rank: 4, ready_since: 1 }]);
       expect(all('SELECT credential_id, capabilities FROM runner_grants')).toEqual([{ credential_id: key.fingerprint, capabilities: '["agent-venue"]' }]);
@@ -83,7 +83,7 @@ describe('migration 0077: retire tiers (B-322)', () => {
       sql.exec("UPDATE ticket_next_legs SET state = 'waiting' WHERE ticket_id = 'docs:A'");
       expect(ready()).toEqual([]);
       sql.exec("UPDATE tickets SET rank = 4 WHERE id = 'docs:A'; UPDATE ticket_next_legs SET state = 'ready' WHERE ticket_id = 'docs:A'");
-      for (const m of MIGRATIONS.filter((x) => x.id > 77)) sql.exec(m.sql);
+      for (const m of MIGRATIONS.filter((x) => x.id > 127)) sql.exec(m.sql);
       return before;
     });
 
@@ -863,10 +863,19 @@ describe('migration 0065: normalized matching inputs and ready candidates', () =
       sql.exec('INSERT INTO ready_tickets SELECT * FROM ready_ticket_source');
       expect(all('SELECT * FROM ready_tickets EXCEPT SELECT * FROM ready_ticket_source')).toEqual([]);
       expect(all('SELECT * FROM ready_ticket_source EXCEPT SELECT * FROM ready_tickets')).toEqual([]);
+      // B-239: upgrade the populated 0065 projection, not just an empty database.
+      sql.exec("UPDATE credentials SET created_by = 'admin:test' WHERE id = 'key'");
+      sql.exec(`INSERT INTO runners (id, hostname, session_name, secret_hash, credential_id, harness, kind,
+                tier_ceiling, lease_timeout_ms, settings_hash, first_seen_at, last_seen_at)
+                VALUES (1, 'host', 's', 'hash', 'key', 'opencode', 'vm', 'routine', 900000, '', 0, 0)`);
+      sql.exec("INSERT INTO runner_capabilities (runner_id, capability, declared) VALUES (1, 'new', 'new'), (1, 'missing', 'missing')");
+      sql.exec(MIGRATIONS.find((m) => m.id === 124)!.sql);
+      expect(all('SELECT * FROM runner_effective_caps')).toEqual([{ runner_id: 1, repository_id: 'docs', capability: 'new' }]);
+      expect(all('SELECT repository_key, repository_id FROM ticket_repositories')).toEqual([{ repository_key: 'o/docs', repository_id: 'docs' }]);
       sql.exec("DELETE FROM tickets WHERE id='docs:A'");
       sql.exec('DELETE FROM runner_grants');
       sql.exec('DELETE FROM courses');
-      for (const table of ['ready_tickets','ticket_repositories','grant_capabilities','course_legs','course_leg_capabilities']) expect(all(`SELECT * FROM ${table}`)).toEqual([]);
+      for (const table of ['ready_tickets','ticket_repositories','grant_capabilities','course_legs','course_leg_capabilities','runner_effective_caps']) expect(all(`SELECT * FROM ${table}`)).toEqual([]);
       expect(all('PRAGMA foreign_key_check')).toEqual([]);
     });
   });

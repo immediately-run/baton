@@ -19,6 +19,8 @@ DROP TRIGGER ready_ticket_blocks_insert;
 DROP TRIGGER ready_ticket_blocks_delete;
 DROP TRIGGER ready_ticket_blocks_update;
 DROP VIEW ready_ticket_source;
+-- 0125's ready-order index carries tier_position; it is rebuilt below without it.
+DROP INDEX ready_tickets_order;
 
 -- The old digest covered the posted parent, which cannot be recovered from the resolved
 -- parent column. Keep the dropped hash inputs with that digest only until the next sync.
@@ -35,11 +37,14 @@ ALTER TABLE runners DROP COLUMN tier_ceiling;
 ALTER TABLE runners DROP COLUMN tier_ceilings;
 ALTER TABLE repositories DROP COLUMN tiers;
 
+-- The projection as 0126 left it (the per-leg block rule and 0125's required_caps, last, as
+-- ready_tickets' columns are), without tier_position.
 CREATE VIEW ready_ticket_source AS
 SELECT t.id AS ticket_id, t.repository_id, t.course_id, s.next_leg AS leg,
   MAX(t.expedite, COALESCE(o.expedite, 0)) AS expedite,
   s.to_end, t.rank, n.ready_since, o.retry_after,
-  COALESCE((SELECT MAX(c.end_observation) FROM claims c WHERE c.ticket_id = t.id), -1) AS last_end_observation
+  COALESCE((SELECT MAX(c.end_observation) FROM claims c WHERE c.ticket_id = t.id), -1) AS last_end_observation,
+  COALESCE((SELECT r.required_caps FROM ready_ticket_requirements r WHERE r.ticket_id = t.id), '[]') AS required_caps
 FROM tickets t JOIN ticket_stations s ON s.ticket_id = t.id
 JOIN ticket_next_legs n ON n.ticket_id = t.id AND n.leg = s.next_leg AND n.state = 'ready'
 LEFT JOIN ticket_overrides o ON o.ticket_id = t.id
@@ -47,7 +52,11 @@ WHERE COALESCE(o.hold, 0) = 0
 AND NOT EXISTS (SELECT 1 FROM claims c WHERE c.ticket_id = t.id AND
  (c.status = 'active' OR (c.status = 'completed' AND c.confirmed_at IS NULL) OR (c.status = 'reaped' AND c.fence_pending = 1)))
 AND NOT EXISTS (SELECT 1 FROM ticket_blocks b WHERE b.ticket_id = t.id AND
- (b.kind = 'ticket' OR (b.kind = 'decision' AND b.leg IN ('', s.next_leg))));
+ b.kind IN ('ticket', 'decision') AND b.leg IN ('', s.next_leg));
+
+CREATE INDEX ready_tickets_order ON ready_tickets(repository_id, course_id,
+  (-expedite), to_end, (rank IS NULL), COALESCE(rank, 0), COALESCE(ready_since, -1), ticket_id,
+  required_caps, last_end_observation, retry_after, leg, expedite, rank, ready_since);
 
 CREATE TRIGGER ready_tickets_insert AFTER INSERT ON tickets BEGIN
   DELETE FROM ready_tickets WHERE ticket_id = NEW.id

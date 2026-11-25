@@ -77,6 +77,8 @@ describe('S-BTN-229: a runner holds several claims, up to R-BTN-4\'s bound', () 
     // Silent past its lease: every claim it still holds is reaped (one lease, the runner's).
     const three = (await claimItem('vm-a', a.secret)).json;
     expect(three.claim_id).toBeTruthy();
+    await setClock(T0 + 8 * 60_000);
+    await tick(); // Baton is still serving.
     await setClock(T0 + 16 * 60_000);
     await tick();
     expect(await rows(`SELECT status FROM claims WHERE id IN (?, ?) ORDER BY id`, two.claim_id, three.claim_id)).toEqual([{ status: 'reaped' }, { status: 'reaped' }]);

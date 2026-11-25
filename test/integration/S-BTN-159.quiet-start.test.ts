@@ -6,7 +6,7 @@
 // and, as an operator's console reads it, through the CLI's own esbuild bundle (what
 // scripts/baton-cli.mjs loads for `baton repo sync`). Node only: it writes a real git checkout
 // and builds that bundle.
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -14,6 +14,9 @@ import { join, resolve } from 'node:path';
 import { build } from 'esbuild';
 import { BatonApi, BatonRefusal } from '../../src/runner/api';
 import { Runner } from '../../src/runner/runner';
+import { StateFile } from '../../src/runner/state';
+import { setClock, tick } from '../helpers';
+import { idleFixture } from '../lib/idleFixture';
 import { remoteSlug } from '../../src/defaults/cli';
 
 const ROOT = resolve(import.meta.dirname, '..', '..');
@@ -32,10 +35,10 @@ process.stdout.write(JSON.stringify(remoteSlug(${JSON.stringify(root)})));\n`);
 /** A fresh session's start: no state file and no runner, the first attempt's beat registering one.
  *  Its state lives in this process's memory — the handful of fields one heartbeat registers — and
  *  its home, state file and spool are its own, under a fresh temp directory. */
-const start = (api: BatonApi, log: (l: string) => void, state: Record<string, unknown> = { runner_id: null, claim: null }): Runner => {
+const start = (api: BatonApi, log: (l: string) => void, state: Record<string, unknown> = { runner_id: null, claim: null }, now?: () => number): Runner => {
   const home = mkdtempSync(join(tmpdir(), 'baton-fb-'));
   const r = new Runner({ api, home, repository: 'docs', hostname: 'vm-a', harness: 'opencode', session: 'fresh',
-    courses: [{ course: 'create-pr', version: 1 }], stateFile: join(home, 's.json'), beatEvery: 60_000, log });
+    courses: [{ course: 'create-pr', version: 1 }], stateFile: join(home, 's.json'), beatEvery: 60_000, log, now });
   (r as unknown as { state: unknown }).state = {
     get: () => state,
     set: (patch: Record<string, unknown>) => { Object.assign(state, patch); },
@@ -92,9 +95,8 @@ describe.skipIf(!nodeOnly)('S-BTN-159 a quiet start', () => {
     // and is answered the grant, the second carries the settled list before the claim. Then the
     // single unnamed claim follows the settled heartbeat.
     expect(calls).toEqual({ heartbeats: 2, recommendations: 0, claims: 1 });
-    // The only line is the declaration the grant settles — not `no recommendation (no runner
-    // holds this secret)` on every start.
-    expect(lines).toEqual(["baton: declaring agent-venue, create-pr, drivable-browser, llm-call — the grant's capabilities, no --capabilities given"]);
+    expect(lines).toEqual(["baton: declaring agent-venue, create-pr, drivable-browser, llm-call — the grant's capabilities, no --capabilities given",
+      'baton: idle — no-eligible-ticket: nothing to claim']);
     r.stop();
   });
 
@@ -115,14 +117,55 @@ describe.skipIf(!nodeOnly)('S-BTN-159 a quiet start', () => {
     const r = start(api, (l) => lines.push(l), { runner_id: 7, claim: null });
     await r.runOnce();
     expect(asked).toEqual([null]); // the server chooses and claims in one transaction
-    // B-86's once-per-declaration line, and nothing else: the state names the runner, so its
-    // refusal would have been logged had it come — and none was due.
-    expect(lines).toEqual(["baton: declaring create-pr — the grant's capabilities, no --capabilities given"]);
+    expect(lines).toEqual(["baton: declaring create-pr — the grant's capabilities, no --capabilities given",
+      'baton: idle — no-eligible-ticket: nothing to claim']);
     refuseGates = true;
     lines.length = 0;
     await r.runOnce();
-    expect(lines).toEqual(['baton: no claim (every gate refused this runner)']);
+    await r.runOnce();
+    expect(lines).toEqual(['baton: idle — not-eligible: every gate refused this runner']);
     r.stop();
+  });
+
+  it('logs both idle causes once, notifies the owner, and claims the held ticket after the owner retries it', async () => {
+    const { start, w, sent, retry } = await idleFixture();
+    const lines: string[] = [];
+    let now = start;
+    const api = new BatonApi({ url: 'https://baton.invalid', auth: () => ({}), transport: async (req) => {
+      const res = await w.call(new URL(req.url).pathname, req.body ? await req.json() : undefined, req.method);
+      return Response.json(res.json, { status: res.status });
+    } });
+    const home = mkdtempSync(join(tmpdir(), 'baton-idle-'));
+    const stateFile = join(home, 'runner.json');
+    new StateFile(stateFile).set({ runner_id: w.id, incarnation: 1, secret: w.secret });
+    const runner = new Runner({ api, home, repository: 'docs', hostname: w.hostname, harness: 'opencode', session: 'idle',
+      capabilities: ['agent-venue'], courses: [{ course: 'roadmap-pr', version: 3 }], stateFile, now: () => now, log: (line) => lines.push(line) });
+    // Only the leg execution is stubbed; the claim and retry are real core operations.
+    const run = vi.spyOn(runner as unknown as { runInSlot: (claim: Record<string, unknown>) => Promise<null> }, 'runInSlot').mockResolvedValue(null);
+    try {
+      expect(await runner.runOnce()).toBeNull();
+      for (const minutes of [10, 20, 29, 30, 31]) {
+        now = start + minutes * 60_000;
+        await setClock(now);
+        await runner.tick();
+        expect(await runner.runOnce()).toBeNull();
+        await tick();
+        expect(sent).toHaveLength(minutes < 30 ? 0 : 1);
+      }
+      expect(sent).toEqual([{ kind: 'unblocked', repository: 'docs', tickets: [] }]);
+      expect((await retry()).status).toBe(200);
+      await runner.runOnce();
+      expect(run).toHaveBeenCalledOnce();
+      const claim = run.mock.calls[0][0];
+      expect(claim.ticket_id).toBe('docs:RETRY');
+      expect(lines.filter((l) => l.startsWith('baton: idle'))).toEqual([
+        "baton: idle — no-eligible-ticket: no ready ticket fits this worker: 1 held attempts-exhausted (baton:retries open: docs:RETRY), 1 missing capability (rule 4) (docs:HIGH; human-operator)",
+        `baton: idle for 31m, ended by claim ${claim.claim_id}`,
+      ]);
+    } finally {
+      runner.stop();
+      rmSync(home, { recursive: true, force: true });
+    }
   });
 
   it('an origin-less checkout gives null with its stderr empty, in process and through the bundle', () => {

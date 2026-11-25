@@ -3,15 +3,17 @@
 // `.baton/`. It is the local host, not a second implementation: the course file is checked by
 // `validateCourse` and accepted or refused by the core exactly as a sync's post would be, every
 // live ticket's path is replayed under the proposed file, and a generic run — claim, every leg of
-// the shortest route, done, confirmed — goes through the core's own claim, advance and end.
+// the shortest route, done, confirmed — goes through the core's own claim, advance and end,
+// handing off to a fresh credential when independence requires it (S-BTN-63).
 // It needs no access to production. A violation names its rule; none is a pass.
-import { execFileSync } from 'node:child_process';
+import { git as runGit } from '../defaults/git.mjs';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { validateCourse } from '../core/course';
 import { graphOf, onGraph, resolvePath, signatureOf, type Graph, type Step } from '../core/graph';
+import { BatonError } from '../core/http';
 import { signatureConditions } from '../core/conditionTypes';
 import { checkPayload, DEFAULT_COURSE } from '../core/board';
 import { baseChain, checkSchemaSet, parseSchemaId, POST_STATES_MAX, refinementGaps, type Schema } from '../shared/schema.mjs';
@@ -121,6 +123,21 @@ export function staticViolations(k: KitInput): KitViolation[] {
   const out: KitViolation[] = validateCourse(k.proposed).map((v) => ({ rule: 'course', message: `${v.path}: ${v.message} (${v.rule})` }));
   for (const v of legacyPathReport(k)) out.push(v);
   if (out.length) return out;
+  const selectable = new Map([[k.course, k.proposed], ...(k.others ?? []).map((c): [string, unknown] => [c.id, c.file])]);
+  for (const [leg, def] of Object.entries(asRecord(asRecord(k.proposed).legs))) {
+    const entries = asRecord(asRecord(def).requires).tickets;
+    if (!Array.isArray(entries)) continue;
+    for (const entry of entries) {
+      const names = entry.at ?? entry.reached ?? [];
+      const courses = entry.select === 'posted' ? [...selectable.entries()] : [[entry.course ?? k.course, selectable.get(entry.course ?? k.course)]];
+      for (const [course, file] of courses) {
+        if (!file) out.push({ rule: 'course', message: `legs.${leg}: unknown selectable course ${course}` });
+        else for (const station of names) if (!Object.hasOwn(asRecord(asRecord(file).stations), station)) {
+          out.push({ rule: 'course', message: `legs.${leg}: unknown selectable station ${course}:${station}` });
+        }
+      }
+    }
+  }
   if (k.legScripts) {
     const all = asRecord(asRecord(k.proposed).legs);
     const legs = Object.keys(all);
@@ -383,21 +400,24 @@ export function shortestRoute(g: Graph): Step[] | null {
 }
 
 const REPO = 'kit'; // the repository under test, as the kit's own local host registers it
-const CRED = 'test-course';
 const SHA = (n: number) => n.toString(16).padStart(40, '0');
 
 /** The core's verdict, on a fresh in-memory local host: the base file then the proposed one posted
  *  as a sync would post them (accepted, not refused — R-BTN-69), and one generic run of a ticket
  *  along the proposed course's shortest route: claim, each leg, done, confirmed by the next post. */
 export async function coreViolations(k: KitInput): Promise<KitViolation[]> {
+  const proposed = graphOf(k.proposed);
+  const route = shortestRoute(proposed) ?? [];
+  // Each step can need at most one fresh synthetic credential.
+  const credentials = Array.from({ length: Math.max(1, route.length) }, (_, i) => `test-course-${i + 1}`);
   let clock = Date.parse('2026-01-01T00:00:00Z');
   const { store } = openStore(':memory:');
   const host = new LocalHost({
     store, alarm: 'manual',
     config: {
       BATON_ORIGIN: 'http://127.0.0.1', OIDC_ISSUER: '', OIDC_JWKS_URL: '', ACCESS_TEAM_DOMAIN: '', ACCESS_AUD: '', OWNER_EMAILS: '',
-      CREDENTIALS: JSON.stringify({ [CRED]: { hostname: 'test-course', allowed_capabilities: ['agent-venue'] } }),
-      TOKEN_HASHES: JSON.stringify({ [CRED]: 'unused' }),
+      CREDENTIALS: JSON.stringify(Object.fromEntries(credentials.map((cred) => [cred, { hostname: cred, allowed_capabilities: ['agent-venue'] }]))),
+      TOKEN_HASHES: JSON.stringify(Object.fromEntries(credentials.map((cred) => [cred, 'unused']))),
       BATON_REPOSITORIES: JSON.stringify([{ id: REPO, github: 'local/kit', default_branch: 'main', sync_workflow: '.github/workflows/baton-sync.yml' }]),
     },
   });
@@ -422,13 +442,12 @@ export async function coreViolations(k: KitInput): Promise<KitViolation[]> {
     const p = checkPayload({ registry, sha: SHA(++n), parent_sha: n === 1 ? null : SHA(n - 1), tickets, closed, stations, observation });
     return (await core.board(repo, p)) as Record<string, unknown>;
   };
-  const placedAt = (g: Graph, path: Step[]) => {
+  const placedAt = (g: Graph, path: Step[], queued?: string) => {
     const at = path.length ? path[path.length - 1].reached : g.start;
     const next = [...g.legs].filter(([, l]) => l.from.includes(at)).map(([leg]) => ({ leg, state: 'ready' }));
-    return { station: at, path, next_leg: next[0]?.leg ?? null, next_source: 'marker', next, bars: {} };
+    return { station: at, path, next_leg: queued ?? next[0]?.leg ?? null, next_source: 'marker', next, bars: {} };
   };
   try {
-    const proposed = graphOf(k.proposed);
     // The registry of each post: the other listed courses beside the one under test — their
     // files as the working tree holds them — and its own schemas spread in (R-BTN-108).
     const registry = (ownCourse: unknown, v: Versions, schemas: KitSchema[]): unknown[] => [
@@ -437,8 +456,8 @@ export async function coreViolations(k: KitInput): Promise<KitViolation[]> {
     ];
     // The base file first, with the live tickets where it placed them; then the proposed one.
     if (k.base) await post(registry(k.base, k.baseVersions ?? version, []), Object.fromEntries((k.live ?? []).filter((t) => onGraph(graphOf(k.base), t.path)).map((t) => [t.id, placedAt(graphOf(k.base), t.path)])));
-    const route = shortestRoute(proposed) ?? [];
-    await post(registry(k.proposed, version, k.schemas ?? []), { 'KIT-1': placedAt(proposed, []) });
+    const proposedRegistry = registry(k.proposed, version, k.schemas ?? []);
+    await post(proposedRegistry, { 'KIT-1': placedAt(proposed, []) });
     const refused = core.courses.refusals().filter((r) => r.course_id === k.course);
     for (const r of refused) for (const v of r.violations) out.push({ rule: 'accepted', message: `the core refuses the file: ${v.path}: ${v.message} (${v.rule})` });
     if (refused.length) return out;
@@ -448,12 +467,14 @@ export async function coreViolations(k: KitInput): Promise<KitViolation[]> {
     core.store.transaction(() => core.cutover.cutover('test-course', { repository: REPO, confirm: true }));
     const secret = 'test-course-secret';
     const hash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(secret)))].map((b) => b.toString(16).padStart(2, '0')).join('');
-    const hb = await core.runners.heartbeat(CRED, null, { hostname: 'test-course', session_name: 'test-course', harness: 'claude-code', kind: 'vm', capabilities: ['agent-venue'],
-      model_id: 'anthropic/kit',
-      lease_timeout_s: 3600, secret_hash: hash, courses: [{ repository: REPO, course: k.course, version: version.version }] }) as { runner_id: number };
     const tx = <T>(f: () => T) => core.store.transaction(f);
-    const claim = tx(() => core.claims.claim(hb.runner_id, { request_id: 'test-course-1', ticket_id: `${REPO}:KIT-1` })) as { claim_id?: number; code?: string; message?: string };
-    if (!claim.claim_id) return [{ rule: 'generic-run', message: `the claim at ${proposed.start} was refused: ${claim.code ?? ''} ${claim.message ?? ''}`.trim() }];
+    const take = async (cred: string) => {
+      const { runner_id } = await core.runners.heartbeat(cred, null, { hostname: cred, session_name: 'test-course', harness: 'claude-code', kind: 'vm', capabilities: ['agent-venue'],
+        model_id: 'anthropic/kit', lease_timeout_s: 3600, secret_hash: hash, courses: [{ repository: REPO, course: k.course, version: version.version }] }) as { runner_id: number };
+      const { claim_id } = tx(() => core.claims.claim(runner_id, { request_id: cred, ticket_id: `${REPO}:KIT-1` })) as { claim_id: number };
+      return { runner_id, claim_id };
+    };
+    let holder = await take(credentials[0]);
     // R-BTN-109: an arrival at a station with an `entry` must carry each output it names — the
     // generic run gives one by pointer (a git: uri the kit's own commit answers for), which the
     // arrival check reads by name and schema as a holder's would be.
@@ -465,17 +486,26 @@ export async function coreViolations(k: KitInput): Promise<KitViolation[]> {
     };
     let at = proposed.start;
     let previous: Step | undefined;
-    for (const step of route) {
+    for (const [i, step] of route.entries()) {
       clock += 60_000;
-      const r = tx(() => core.claims.advance(hb.runner_id, claim.claim_id!, { leg: step.leg, ...(previous ? { reached: at, outputs: outputsAt(previous) } : {}) })) as { ok?: boolean; code?: string; rule_code?: string };
-      if (!r.ok) return [{ rule: 'generic-run', message: `advance into ${step.leg} from ${at} was refused: ${r.code ?? ''} ${r.rule_code ?? ''}`.trim() }];
+      try {
+        tx(() => core.claims.advance(holder.runner_id, holder.claim_id, { leg: step.leg, ...(previous ? { reached: at, outputs: outputsAt(previous) } : {}) }));
+      } catch (e) {
+        if (!previous || !(e instanceof BatonError) || e.extra.rule_code !== 'chain') throw e;
+        const from = previous;
+        tx(() => core.claims.end(holder.runner_id, holder.claim_id, { end_reason: `suspended:${at}`, reached: at, next: step.leg, outputs: outputsAt(from) }));
+        const posted = await post(proposedRegistry, { 'KIT-1': placedAt(proposed, route.slice(0, i), step.leg) });
+        if (!posted.confirmed) return [{ rule: 'generic-run', message: `the hand-off at ${at} was not confirmed by a snapshot queuing ${step.leg}` }];
+        holder = await take(credentials[i]);
+        tx(() => core.claims.advance(holder.runner_id, holder.claim_id, { leg: step.leg }));
+      }
       at = step.reached;
       previous = step;
     }
     clock += 60_000;
-    const end = tx(() => core.claims.end(hb.runner_id, claim.claim_id!, { end_reason: 'done', reached: at, ended_at_sha: SHA(999), outputs: outputsAt(route[route.length - 1]) })) as { ok?: boolean; code?: string };
+    const end = tx(() => core.claims.end(holder.runner_id, holder.claim_id, { end_reason: 'done', reached: at, ended_at_sha: SHA(999), outputs: outputsAt(route[route.length - 1]) })) as { ok?: boolean; code?: string };
     if (!end.ok) return [{ rule: 'generic-run', message: `the done end at ${at} was refused: ${end.code ?? ''}` }];
-    const posted = await post(registry(k.proposed, version, k.schemas ?? []), { 'KIT-1': placedAt(proposed, route) });
+    const posted = await post(proposedRegistry, { 'KIT-1': placedAt(proposed, route) });
     if (!posted.confirmed) out.push({ rule: 'generic-run', message: `the done end at ${at} was not confirmed by a snapshot placing the ticket there` });
   } catch (e) {
     out.push({ rule: 'generic-run', message: `the local host failed: ${(e as Error).message}` });
@@ -510,7 +540,7 @@ export async function noopViolations(k: KitInput): Promise<KitViolation[]> {
     // The scratch checkout: a no-op agent_command at the snapshot, and an origin no forge
     // answers, so the verification cannot succeed and must say so.
     const git = (out: boolean, ...args: string[]) =>
-      String(execFileSync('git', ['-C', dir, '-c', 'user.name=kit', '-c', 'user.email=kit@baton.test', ...args], { stdio: ['ignore', out ? 'pipe' : 'ignore', 'ignore'], ...(out ? { encoding: 'utf8' } : {}) }));
+      runGit(dir, ['-c', 'user.name=kit', '-c', 'user.email=kit@baton.test', ...args], { stdio: ['ignore', out ? 'pipe' : 'ignore', 'ignore'] });
     git(false, 'init', '-q', '-b', 'main');
     git(false, 'remote', 'add', 'origin', 'https://127.0.0.1:1/kit/no-forge.git');
     mkdirSync(join(dir, '.baton'), { recursive: true });
@@ -555,9 +585,9 @@ export async function ticketViolations(k: KitInput): Promise<KitViolation[]> {
   // the close's own checks, not pass on a fetch that cannot connect.
   const origin = mkdtempSync(join(tmpdir(), 'baton-kit-ticket-origin-'));
   try {
-    execFileSync('git', ['-C', origin, 'init', '-q', '--bare', '-b', 'main'], { stdio: 'ignore' });
+    runGit(origin, ['init', '-q', '--bare', '-b', 'main'], { stdio: 'ignore' });
     const git = (out: boolean, ...args: string[]) =>
-      String(execFileSync('git', ['-C', dir, '-c', 'user.name=kit', '-c', 'user.email=kit@baton.test', ...args], { stdio: ['ignore', out ? 'pipe' : 'ignore', 'ignore'], ...(out ? { encoding: 'utf8' } : {}) }));
+      runGit(dir, ['-c', 'user.name=kit', '-c', 'user.email=kit@baton.test', ...args], { stdio: ['ignore', out ? 'pipe' : 'ignore', 'ignore'] });
     git(false, 'init', '-q', '-b', 'main');
     git(false, 'remote', 'add', 'origin', origin);
     mkdirSync(join(dir, 'tickets'), { recursive: true });
@@ -651,24 +681,24 @@ export async function readInputs(root: string, course: string, opts: { base?: st
   // repository scaffolds, however the course is filed here.
   const entry = (settings.courses as unknown[] | undefined)?.map(asRecord).find((x) => x.id === course);
   const courseSource = typeof entry?.source === 'string' ? entry.source : null;
-  const git = (...args: string[]) => execFileSync('git', ['-C', root, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 16 << 20 });
+  const gitAtRoot = (...args: string[]) => runGit(root, args);
   let base: unknown = null;
   let baseVersions: Versions | null = null;
   if (opts.base) {
     // A base that does not resolve is an error, never "a new course" (round 1, 1-A-2/1-B-0).
     try {
-      git('rev-parse', '--verify', '--quiet', `${opts.base}^{commit}`);
+      gitAtRoot('rev-parse', '--verify', '--quiet', `${opts.base}^{commit}`);
     } catch {
       throw new Error(`--base ${opts.base}: not a commit in ${root} (fetch it, or pass --base none to skip the removal rule)`);
     }
     // Only a path the base does not have reads as absent; a file that is there must parse.
     const show = (path: string) => {
       try {
-        git('cat-file', '-e', `${opts.base}:${path}`);
+        gitAtRoot('cat-file', '-e', `${opts.base}:${path}`);
       } catch {
         return null;
       }
-      return JSON.parse(git('show', `${opts.base}:${path}`));
+      return JSON.parse(gitAtRoot('show', `${opts.base}:${path}`));
     };
     base = show(`.baton/courses/${course}/course.json`);
     baseVersions = versionsOf(show('.baton/baton.json'), course);

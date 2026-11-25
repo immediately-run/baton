@@ -257,6 +257,24 @@ describe('S-BTN-41 the runner', () => {
     expect(await rows('SELECT status, end_reason FROM claims')).toEqual([{ status: 'completed', end_reason: 'suspended:built' }]);
   }, 30_000);
 
+  it('S-BTN-63: a refused advance preserves the evidence of a finished self-loop', async () => {
+    const CHAINED = { ...relay, legs: {
+      ...relay.legs,
+      check: { from: ['built'], to: ['built', 'checked'], max_runs: 2 },
+      merge: { ...relay.legs.merge, from: ['built', 'checked'], no_chain_from: ['build'] },
+    } };
+    home.write('.baton/courses/relay/course.json', `${JSON.stringify(CHAINED, null, 2)}\n`);
+    home.leg('build', `return { reached: 'built', next: 'check' };`);
+    home.leg('check', `return { reached: 'built', next: 'merge' };`);
+    home.commit();
+    await home.post({ 'T-1': placed('filed', [], [['build', 'ready']]) }, undefined, { course: CHAINED });
+    expect(await makeRunner().runOnce()).toMatchObject({ end_reason: 'suspended:built', reached: 'built' });
+    expect(await rows('SELECT leg, to_station, evidence, abandoned_at FROM claim_legs ORDER BY seq')).toMatchObject([
+      { leg: 'build', to_station: 'built' },
+      { leg: 'check', to_station: 'built', evidence: home.sha(), abandoned_at: null },
+    ]);
+  }, 30_000);
+
   it('a done end whose outputs fail its arrival is given up the same way', async () => {
     const END = { ...relay, stations: { ...relay.stations, merged: { ...relay.stations.merged, entry: [{ output: 'artifact', schema: 'std:url@1' }] } } };
     home.write('.baton/courses/relay/course.json', `${JSON.stringify(END, null, 2)}\n`);
@@ -399,7 +417,7 @@ describe('S-BTN-41 the runner', () => {
     await home.post({ 'T-1': placed('built', [['build', 'built']], [['check', 'waiting', 'ci']]) });
     await until(() => rows(`SELECT 1 FROM claim_legs WHERE leg = 'check'`)); // the wait holds
     const runnerId = (await rows<{ id: number }>('SELECT id FROM runners ORDER BY id DESC LIMIT 1'))[0].id;
-    const send = await ownerCall('/v1/ui/messages', { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: ORIGIN }, body: JSON.stringify({ kind: 'release', to_runner_id: runnerId, payload: { ticket_id: 'docs:T-1', reason: 'requested' } }) });
+    const send = await ownerCall('/v1/ui/messages', { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: ORIGIN }, body: JSON.stringify({ kind: 'release', confirm: true, to_runner_id: runnerId, payload: { ticket_id: 'docs:T-1', reason: 'requested' } }) });
     expect(send.status).toBe(200);
     // No leg was running when the release landed — the claim still ends released, never
     // suspended, and the message is acked because it was acted on.
@@ -537,7 +555,7 @@ describe('S-BTN-41 the runner', () => {
     const done = runner.runOnce();
     await until(() => rows(`SELECT 1 FROM claim_legs WHERE leg = 'check'`));
     const runnerId = (await rows<{ id: number }>('SELECT id FROM runners ORDER BY id DESC LIMIT 1'))[0].id;
-    const send = await ownerCall('/v1/ui/messages', { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: ORIGIN }, body: JSON.stringify({ kind: 'release', to_runner_id: runnerId, payload: { ticket_id: 'docs:T-1', reason: 'requested' } }) });
+    const send = await ownerCall('/v1/ui/messages', { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: ORIGIN }, body: JSON.stringify({ kind: 'release', confirm: true, to_runner_id: runnerId, payload: { ticket_id: 'docs:T-1', reason: 'requested' } }) });
     expect(send.status).toBe(200);
     // It names that the leg reached its to — validated and closed like any result (R-BTN-83),
     // the marker before the hand-off — and releases naming a leg leaving where it rests.
@@ -580,7 +598,8 @@ describe('S-BTN-41 the runner', () => {
   }, 30_000);
 
   it("the immediate stop (stopNow, the signal handler's call) releases the leg at its next safe point with its hand-off — a safe point, not an abandonment (B-109)", async () => {
-    home.leg('check', `${ABORTABLE}
+    home.leg('check', `ev(ctx, 'check started');
+    ${ABORTABLE}
     ev(ctx, 'check aborted:' + ctx.signal.reason);
     return { reached: 'checked', next: 'merge' };`);
     home.commit();
@@ -588,7 +607,8 @@ describe('S-BTN-41 the runner', () => {
     const runner = makeRunner();
     runner.start();
     const done = runner.runOnce();
-    await until(() => rows(`SELECT 1 FROM claim_legs WHERE leg = 'check'`));
+    // The leg is running (not merely recorded): a stop before it starts releases at `built`.
+    await until(() => home.evidence().filter((l) => l === 'check started'));
     runner.stopNow();
     expect(await done).toMatchObject({ end_reason: 'released:requested', reached: 'checked' });
     const lines = home.evidence();
@@ -959,7 +979,7 @@ describe('S-BTN-41 the runner', () => {
     const api = (runner as unknown as { o: { api: BatonApi } }).o.api;
     const beat = api.heartbeat;
     api.heartbeat = async (body: Record<string, unknown>) => {
-      const answer = await beat.call(api, body) as Record<string, any>;
+      const answer = await beat.call(api, body);
       const declaring = (body.capabilities ?? []) as string[];
       seen.beats.push(declaring);
       if (typeof answer.runner_id === 'number') {
@@ -1059,7 +1079,7 @@ describe('S-BTN-41 the runner', () => {
     const runner = asGranted(makeRunner());
     const api = (runner as unknown as { o: { api: BatonApi } }).o.api;
     const beat = api.heartbeat;
-    api.heartbeat = async (body: Record<string, unknown>) => ({ ...await beat.call(api, body) as Record<string, unknown>, grant: { capabilities: ['agent-venue', 'llm-call'] } });
+    api.heartbeat = async (body: Record<string, unknown>) => ({ ...await beat.call(api, body), grant: { capabilities: ['agent-venue', 'llm-call'] } });
     const seen = recording(runner);
     expect(await runner.runOnce()).toMatchObject({ ticket: 'docs:T-1' });
     // Before the fix the role was dropped for its one named capability: a declaration narrower
@@ -1149,7 +1169,7 @@ describe('S-BTN-41 the runner', () => {
     recording(runner);
     const api = (runner as unknown as { o: { api: BatonApi } }).o.api;
     const beat = api.heartbeat;
-    api.heartbeat = async (body: Record<string, unknown>) => ({ ...await beat.call(api, body) as Record<string, unknown>, grant: { capabilities: [] } });
+    api.heartbeat = async (body: Record<string, unknown>) => ({ ...await beat.call(api, body), grant: { capabilities: [] } });
     expect(await runner.runOnce()).toMatchObject({ ticket: 'docs:T-1' });
     expect(lines.join('\n')).toContain("declared nothing — its key's grant allows no capability");
     // Said once across idle attempts, and no never-eligible line: no leg names a capability.
@@ -1170,7 +1190,7 @@ describe('S-BTN-41 the runner', () => {
     let first = true;
     const seen: string[][] = [];
     api.heartbeat = async (body: Record<string, unknown>) => {
-      const answer = await beat.call(api, body) as Record<string, any>;
+      const answer = await beat.call(api, body);
       seen.push((body.capabilities ?? []) as string[]);
       if (!first) return answer;
       first = false;
@@ -1200,7 +1220,7 @@ describe('S-BTN-41 the runner', () => {
     // on none of the repositories its course is in — so the declaration settles at nothing.
     const api = (runner as unknown as { o: { api: BatonApi } }).o.api;
     const beat = api.heartbeat;
-    api.heartbeat = async (body: Record<string, unknown>) => ({ ...(await beat.call(api, body) as Record<string, unknown>), grant: { capabilities: [] } });
+    api.heartbeat = async (body: Record<string, unknown>) => ({ ...(await beat.call(api, body)), grant: { capabilities: [] } });
     // Finding 5: an empty declaration still claims — the ticket names no capability, so rule 4
     // passes anything — and the line says what the grant allows, once, not per attempt.
     expect(await runner.runOnce()).toMatchObject({ ticket: 'docs:T-1' });
@@ -1226,7 +1246,7 @@ describe('S-BTN-41 the runner', () => {
     // The owner's grant, as the answer carries it — replaced mid-run with a narrower one
     // (`admin.ts`'s upsert replaces the list; the answer is the grant's capabilities).
     let grant = ['agent-venue', 'create-pr', 'drivable-browser', 'llm-call'];
-    api.heartbeat = async (body: Record<string, unknown>) => ({ ...await beat.call(api, body) as Record<string, unknown>, grant: { capabilities: grant } });
+    api.heartbeat = async (body: Record<string, unknown>) => ({ ...await beat.call(api, body), grant: { capabilities: grant } });
     const seen = recording(runner);
     // The first claim is on the grant it was answered: the declared list, served as it stood.
     expect(await runner.runOnce()).toMatchObject({ ticket: 'docs:T-1' });
@@ -1238,7 +1258,7 @@ describe('S-BTN-41 the runner', () => {
       // The heartbeat's own check, refused exactly as the server would (runnerApi.ts).
       const declaring = (body.capabilities ?? []) as string[];
       if (declaring.some((c) => !grant.includes(c))) throw new BatonRefusal('forbidden', undefined, `this credential may not declare ${declaring.filter((c) => !grant.includes(c)).join(', ')}`, 403);
-      return { ...await beat.call(api, body) as Record<string, unknown>, grant: { capabilities: grant } };
+      return { ...await beat.call(api, body), grant: { capabilities: grant } };
     };
     await runner.tick();
     // The declaration is dropped, in memory and in the state file, and said once — with the
@@ -1283,7 +1303,7 @@ describe('S-BTN-41 the runner', () => {
     // A grant of create-pr: the leg's own need is met, and a ticket naming no clause is claimed.
     let grant = ['create-pr'];
     api.heartbeat = async (body: Record<string, unknown>) => ({
-      ...await beat.call(api, body) as Record<string, unknown>,
+      ...await beat.call(api, body),
       grant: { capabilities: ((body.capabilities as string[] | undefined) ?? []).length ? grant : ['create-pr'] },
     });
     await home.post({ 'T-1': placed('filed', [], [['build', 'ready']]) });
@@ -1295,7 +1315,7 @@ describe('S-BTN-41 the runner', () => {
     api.heartbeat = async (body: Record<string, unknown>) => {
       const declaring = (body.capabilities ?? []) as string[];
       if (declaring.some((c) => !grant.includes(c))) throw new BatonRefusal('forbidden', undefined, 'this credential may not declare ' + declaring.join(', '), 403);
-      return { ...await beat.call(api, body) as Record<string, unknown>, grant: { capabilities: grant } };
+      return { ...await beat.call(api, body), grant: { capabilities: grant } };
     };
     await runner.tick();
     const second = await runner.runOnce();
@@ -1339,15 +1359,17 @@ describe('S-BTN-41 the runner', () => {
     await home.post({ 'T-1': placed('filed', [], [['build', 'ready']]) });
     const done = runner.work();
     await until(async () => lines.filter((l) => l.includes("docs:T-1's build has run")));
+    // Registration may already have unblocked build's own capability prerequisite.
+    const receivedBefore = lines.filter((l) => l.includes('baton: message unblocked received')).length;
     const [{ id: runnerId }] = await rows<{ id: number }>('SELECT id FROM runners');
     await rows(`INSERT INTO messages (kind, payload_json, from_principal, to_runner_id, sent_at, status) VALUES ('unblocked', '{"tickets":[]}', 'baton', ?, ?, 'pending')`, runnerId, Date.now());
     // Acknowledged while the build leg still runs — not held for the claim's end.
-    await until(async () => (await rows<{ status: string }>(`SELECT status FROM messages WHERE kind = 'unblocked'`)).filter((r) => r.status === 'acknowledged'));
+    await until(async () => await rows(`SELECT 1 FROM messages WHERE kind = 'unblocked' AND payload_json = '{"tickets":[]}' AND status = 'acknowledged'`));
     expect(lines.join('\n')).not.toContain('build ran');
     await until(async () => lines.filter((l) => l.includes('docs:T-1 done at')));
     runner.stop();
     await done;
-    expect(lines.filter((l) => l.includes('baton: message unblocked received'))).toHaveLength(1);
+    expect(lines.filter((l) => l.includes('baton: message unblocked received'))).toHaveLength(receivedBefore + 1);
   }, 30_000);
 
   // B-108 — the runner's liveness line: while a leg runs, each beat says how long and how live,

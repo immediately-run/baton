@@ -10,7 +10,7 @@ import { BatonError } from './http';
 import type { Store } from './ports';
 
 export const DAY_MS = 86_400_000;
-export const DROP_TIERS_MIGRATION = 77;
+export const DROP_TIERS_MIGRATION = 127;
 const TIER_FIELDS = ['ticket.tier', 'heartbeat.tier_ceiling', 'heartbeat.tier_ceilings', 'grant.max_tier', 'repository.tiers', 'tickets.tier'];
 
 /** The one Deprecated: the store, and the days this process has logged (`field\0actor\0day`). */

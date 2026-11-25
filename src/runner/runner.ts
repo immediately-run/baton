@@ -1,4 +1,5 @@
 // The runner allocates checkouts and machine locks, claims tickets and supervises their runs.
+import type { ClaimAnswer } from '../shared/runner-wire';
 import { createHash, randomBytes } from 'node:crypto';
 import { writeSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
@@ -12,7 +13,9 @@ import { StateFile, leaseLostFrom, type PersistedClaim } from './state';
 import { ClaimRun, type ClaimOutcome, type Resume } from './claimRun';
 import { Sidecar, BEAT_MS } from './sidecar';
 import { MachineLocks } from './machineLocks';
-import { msg, sleep, stampLine, withTimestamps } from './log';
+import { ageWords, msg, sleep, stampLine, withTimestamps } from './log';
+import { maskLegOutput } from './mask';
+import { idleReason } from './idle';
 
 export { BEAT_MS, declarationFrom } from './sidecar';
 export { SIGNAL_GRACE_MS, type ClaimOutcome } from './claimRun';
@@ -39,6 +42,7 @@ export interface RunnerOptions {
   /** B-86: what the heartbeat declares — `--capabilities`, which narrows. Absent, the runner asks
    *  once (a beat declaring nothing) and declares the grant the answer carries. */
   capabilities?: string[];
+  capabilityChecks?: { passes(name: string): boolean; refresh(now: () => number, force?: boolean): Promise<void> };
   /** B-86: the rule 4 names the legs of the courses it serves require, read from the home checkout
    *  each time it is asked, so a runner whose declaration lacks one says so at startup. Injected by
    *  `baton run`; absent, no such line. B-103: every served course's legs, not one course's. */
@@ -118,6 +122,8 @@ export class Runner {
   private draining = false;
   /** Bumps with every claim: an answer a beat started before the claim cannot fence it. */
   private epoch = 0;
+  /** B-244: one line on entry and on a changed refusal, not one per beat. */
+  private idle: { since: number; line: string } | null = null;
   /** B-86: the empty-declaration line has been said, once, since `runOnce` would ask each time. */
   private saidEmpty = false;
   private readonly locks: MachineLocks | null;
@@ -398,7 +404,7 @@ export class Runner {
 
   /** One claim attempt (R-BTN-72): the claim Baton granted, in a fresh slot already held, or
    *  null when nothing was claimable — or when the runner holds its bound (B-188). */
-  private async claimNext(): Promise<{ claim: Record<string, any>; slot: ClaimRun } | null> {
+  private async claimNext(): Promise<{ claim: ClaimAnswer; slot: ClaimRun } | null> {
     this.roomMade = false;
     // The runner must exist before it can claim (§5): one heartbeat registers it. Whether this
     // attempt is the registration (B-93) is read before this attempt's own beat: an attempt that
@@ -442,6 +448,7 @@ export class Runner {
     }
     // R-BTN-4 (B-188): no room — the runner holds its bound.
     if (this.slots.size >= this.concurrency) return null;
+    await this.o.capabilityChecks?.refresh(() => this.now(), true);
     // B-86: the claim goes out only on the declaration the server holds — `sent` is the list the
     // last answered beat carried, which is what `rewriteSettings` recorded. A runner whose grant
     // arrived on a beat that declared nothing must beat once more before claiming (review round
@@ -467,7 +474,7 @@ export class Runner {
     return this.requestClaim(beating || !registered);
   }
 
-  private async requestClaim(registering: boolean): Promise<{ claim: Record<string, any>; slot: ClaimRun } | null> {
+  private async requestClaim(registering: boolean): Promise<{ claim: ClaimAnswer; slot: ClaimRun } | null> {
     // R-BTN-202 (B-248): the local queue first — a leg run offline whose result waits for Baton,
     // then the host user's oldest order, each claimed by name: Baton's claim decides, every gate
     // in force. Otherwise R-BTN-72 / B-287: an unnamed claim selects and claims atomically.
@@ -476,7 +483,7 @@ export class Runner {
     const preworked = queued?.worked[0] ?? null;
     const order = preworked == null ? (queued?.orders[0] ?? null) : null;
     const wanted: string | undefined = preworked?.ticket_id ?? order?.ticket_id;
-    let claim: Record<string, any>;
+    let claim: ClaimAnswer;
     const requestId = `run-${randomBytes(8).toString('hex')}`;
     this.claimsOut++;
     try {
@@ -498,7 +505,6 @@ export class Runner {
         }
         return null;
       }
-      if (e instanceof BatonRefusal && e.code === 'no-eligible-ticket') return null;
       if (e instanceof BatonRefusal && e.code === 'unauthenticated') {
         // B-93: only the registration's own missing-secret refusal is quiet. A replaced
         // secret or replayed nonce still names itself, now on the single claim request.
@@ -519,8 +525,15 @@ export class Runner {
         return null;
       }
       // R-BTN-4 (B-188): `max-claims` among them — the runner is at its bound for now.
-      if (e instanceof BatonRefusal && e.code === 'not-eligible') {
-        this.log(`baton: no claim (${e.message})`);
+      // B-244: the idle reason, said once on entry and again only when it changes.
+      if (e instanceof BatonRefusal && (e.code === 'not-eligible' || e.code === 'no-eligible-ticket' || (e.code === 'stale-skills' && e.detail != null))) {
+        if (!this.slots.size) {
+          const line = maskLegOutput(`baton: idle — ${e.code}: ${idleReason(e)}`, []);
+          if (line !== this.idle?.line) {
+            this.log(line);
+            this.idle = { since: this.idle?.since ?? this.now(), line };
+          }
+        }
         return null;
       }
       throw e;
@@ -528,8 +541,12 @@ export class Runner {
       this.claimsOut--;
     }
     this.epoch++;
-    const ticket = claim.ticket_id as string;
-    const claimId = claim.claim_id as number;
+    const ticket = claim.ticket_id;
+    const claimId = claim.claim_id;
+    if (this.idle) {
+      this.log(`baton: idle for ${ageWords(this.now() - this.idle.since)}, ended by claim ${claimId}`);
+      this.idle = null;
+    }
     // R-BTN-4 (B-188): the claim's slot is held from here — before any await, so no beat can
     // read a claim Baton granted as one this runner does not hold.
     const slot = this.newSlot();
@@ -652,7 +669,7 @@ export class Runner {
 
   /** B-188: one claim's whole run, bound to its slot — the slot is let go, its clone freed and
    *  the state file's claims rewritten when it ends, whatever ended it. */
-  private async runInSlot(claim: Record<string, any>, slot: ClaimRun, resume?: Resume): Promise<ClaimOutcome> {
+  private async runInSlot(claim: ClaimAnswer, slot: ClaimRun, resume?: Resume): Promise<ClaimOutcome> {
     try {
       return await slot.runClaim(claim, resume);
     } finally {
@@ -728,7 +745,7 @@ export class Runner {
   /** R-BTN-72 (B-188): reconnect to a persisted claim's running leg — the executor's `reattach`
    *  over the handle its state kept, and the claim's answer again by its `request_id` (the same
    *  claim, G-BTN-2) — or why not. */
-  private async reattach(p: PersistedClaim): Promise<{ handle: Handle; claim: Record<string, any> } | { why: string }> {
+  private async reattach(p: PersistedClaim): Promise<{ handle: Handle; claim: ClaimAnswer } | { why: string }> {
     const reattach = this.executor.reattach;
     if (typeof reattach !== 'function') return { why: `the ${this.executor.source} executor offers no reattach` };
     if (!p.handle || !p.leg || !p.at || !p.ctx || !p.request_id) return { why: 'no leg session was running' };

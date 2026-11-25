@@ -219,7 +219,7 @@ describe('§9: two stale releases reap a claim once', () => {
     const a = await register('vm-a', { lease_timeout_s: 43_200 });
     const { json: c } = await claimItem('vm-a', a.secret);
     for (const reason of ['requested', 'owner-cancel']) {
-      await owner('/v1/ui/messages', { to_runner_id: a.id, kind: 'release', payload: { ticket_id: 'docs:R3-9001', reason } });
+      await owner('/v1/ui/messages', { to_runner_id: a.id, kind: 'release', confirm: true, payload: { ticket_id: 'docs:R3-9001', reason } });
     }
     await beat('vm-a', a.secret, { lease_timeout_s: 43_200 });
     await alarmAt(T0 + 2 * H);
@@ -325,7 +325,7 @@ describe('§14: Running, Timeline and Needs you', () => {
   it('Needs you: unacknowledged releases and fence-pending claims appear and clear', async () => {
     const a = await register('vm-a');
     const { json: c } = await claimItem('vm-a', a.secret);
-    await owner('/v1/ui/messages', { to_runner_id: a.id, kind: 'release', payload: { ticket_id: 'docs:R3-9001', reason: 'requested' } });
+    await owner('/v1/ui/messages', { to_runner_id: a.id, kind: 'release', confirm: true, payload: { ticket_id: 'docs:R3-9001', reason: 'requested' } });
     expect((await wholeState()).needs_you.unacknowledged_releases).toHaveLength(1);
     const msg = (await beat('vm-a', a.secret)).json.messages.find((m: { kind: string }) => m.kind === 'release');
     await runnerCall(`/v1/runner/messages/${msg.id}/ack`, { secret: a.secret, method: 'POST' });

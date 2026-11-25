@@ -24,7 +24,8 @@
 // the refusal's own words — and lands the same commit on `baton-request/<ID>` (outside every
 // `branch_pattern`, R-BTN-190), opening a PR from it with the caller's forge credential. A `git`
 // forge and any other refusal are the operator's, in git's own words (R-BTN-74).
-import { execFileSync } from 'node:child_process';
+
+import { gitText } from './git.mjs';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -85,12 +86,10 @@ export interface Filed {
   pr?: string;
 }
 
-const git = (root: string, ...a: string[]): string =>
-  execFileSync('git', ['-C', root, ...a], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, LC_ALL: 'C' } }).trim();
 
 const gitQuiet = (root: string, ...a: string[]): boolean => {
   try {
-    git(root, ...a);
+    gitText(root, ...a);
     return true;
   } catch {
     return false;
@@ -114,7 +113,7 @@ const refusalWords = (e: unknown): string => {
  *  no remote, and is the URL the request pushed to all the same. */
 const remoteUrl = (root: string, remote: string): string | null => {
   try {
-    return git(root, 'remote', 'get-url', remote);
+    return gitText(root, 'remote', 'get-url', remote);
   } catch {
     return remote.trim() !== '' ? remote : null;
   }
@@ -265,7 +264,7 @@ export function readRequestPlan(root: string, course: string, sentence: string, 
 export function defaultBranch(root: string, branch?: string): string {
   if (branch) return branch;
   try {
-    const ref = git(root, 'symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD');
+    const ref = gitText(root, 'symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD');
     if (ref.startsWith('origin/') && ref.length > 'origin/'.length) return ref.slice('origin/'.length);
   } catch {
     // no origin/HEAD: main, below
@@ -315,13 +314,13 @@ export async function fileRequest(plan: RequestPlan, opts: RequestOptions = {}):
   const branch = () => defaultBranch(plan.root, opts.branch);
   const warn = opts.warn ?? (() => {});
   for (let attempt = 1; attempt <= REQUEST_TRIES; attempt++) {
-    git(plan.root, 'fetch', '-q', remote, branch());
+    gitText(plan.root, 'fetch', '-q', remote, branch());
     const dir = mkdtempSync(join(tmpdir(), 'baton-request-'));
     try {
       // The worktree starts from the commit the fetch just brought (`FETCH_HEAD`), never from a
       // remote-tracking ref: a stale `origin/main` would have the commit refused as no fast-forward
       // every try, while this is the head the push must extend.
-      git(plan.root, 'worktree', 'add', '-q', '--detach', dir, 'FETCH_HEAD');
+      gitText(plan.root, 'worktree', 'add', '-q', '--detach', dir, 'FETCH_HEAD');
       // The landing tree's own word (round 1, 1-A-2): the course must be listed and opted in on
       // the branch this ticket will be read from, never only on one the caller stands on. The
       // plan's root is swapped for the worktree for this try.
@@ -331,7 +330,7 @@ export async function fileRequest(plan: RequestPlan, opts: RequestOptions = {}):
       // their branches never share an id. The head the commit sits on is the worktree's own.
       const id = opts.allocated?.startsWith(`${atHead.prefix}-`)
         ? opts.allocated
-        : nextId(dir, atHead.items, atHead.prefix, openRequestNumbers(dir, remote, atHead.items, `${atHead.prefix}-`, git(dir, 'rev-parse', 'HEAD'), warn));
+        : nextId(dir, atHead.items, atHead.prefix, openRequestNumbers(dir, remote, atHead.items, `${atHead.prefix}-`, gitText(dir, 'rev-parse', 'HEAD'), warn));
       const text = requestFile(id, atHead.course, plan.sentence, opts.date);
       const message = requestMessage(id, plan.course, plan.sentence);
       const file = join(dir, atHead.items, `${id}.mdx`);
@@ -339,10 +338,10 @@ export async function fileRequest(plan: RequestPlan, opts: RequestOptions = {}):
       writeFileSync(file, text);
       // The ticket file alone: the worktree is a fresh checkout of the fetched head, so nothing
       // else in it is this request's to commit.
-      git(dir, 'add', '--', `${atHead.items}/${id}.mdx`);
-      git(dir, 'commit', '-q', '-m', requestCommitMessage(message, opts.env));
+      gitText(dir, 'add', '--', `${atHead.items}/${id}.mdx`);
+      gitText(dir, 'commit', '-q', '-m', requestCommitMessage(message, opts.env));
       try {
-        git(dir, 'push', '-q', remote, `HEAD:refs/heads/${branch()}`);
+        gitText(dir, 'push', '-q', remote, `HEAD:refs/heads/${branch()}`);
         return { id, text, message, course: atHead.course, start: atHead.start, startLeg: atHead.startLeg };
       } catch (e) {
         const detail = stderrOf(e);
@@ -368,7 +367,7 @@ export async function fileRequest(plan: RequestPlan, opts: RequestOptions = {}):
       }
     } finally {
       try {
-        git(plan.root, 'worktree', 'remove', '--force', dir);
+        gitText(plan.root, 'worktree', 'remove', '--force', dir);
       } catch {
         rmSync(dir, { recursive: true, force: true });
       }
@@ -405,16 +404,16 @@ async function fileOnRequestBranch(
   if (taken !== id) {
     // Back to the default branch's head and forward under the new id: one commit, the ticket
     // file alone, exactly as the first one was made.
-    git(dir, 'reset', '-q', '--hard', 'HEAD~1');
+    gitText(dir, 'reset', '-q', '--hard', 'HEAD~1');
     const moved = join(dir, atHead.items, `${taken}.mdx`);
     mkdirSync(dirname(moved), { recursive: true });
     writeFileSync(moved, requestFile(taken, atHead.course, plan.sentence, opts.date));
-    git(dir, 'add', '--', `${atHead.items}/${taken}.mdx`);
-    git(dir, 'commit', '-q', '-m', requestCommitMessage(requestMessage(taken, plan.course, plan.sentence), opts.env));
+    gitText(dir, 'add', '--', `${atHead.items}/${taken}.mdx`);
+    gitText(dir, 'commit', '-q', '-m', requestCommitMessage(requestMessage(taken, plan.course, plan.sentence), opts.env));
   }
   const on = requestBranch(taken);
   try {
-    git(dir, 'push', '-q', remote, `HEAD:refs/heads/${on}`);
+    gitText(dir, 'push', '-q', remote, `HEAD:refs/heads/${on}`);
   } catch (e) {
     // Any refusal of the side branch — `refs.other` refusing it to a runner under `protected`
     // among them (R-BTN-188) — is the operator's, in git's own words (R-BTN-74): nothing is
@@ -461,7 +460,7 @@ async function fileOnRequestBranch(
 /** Whether a path is inside a git checkout at all (`git rev-parse` names its top level). */
 const topOf = (root: string): string | null => {
   try {
-    return git(root, 'rev-parse', '--show-toplevel');
+    return gitText(root, 'rev-parse', '--show-toplevel');
   } catch {
     return null;
   }

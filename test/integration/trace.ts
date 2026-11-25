@@ -12,6 +12,7 @@
 // README's "Not modelled") is left out of the projection, not out of the trace: a step on them
 // is still recorded, and must leave the projection as it was.
 import type { Store } from '../../src/core/ports';
+import type { PostedDependency } from '../../src/core/ticketRequirement';
 
 /** The repository and course the model is written against (model/README.md). */
 export const MODEL_REPOSITORY = 'docs';
@@ -60,6 +61,8 @@ export interface Projection {
   required: { course: string; leg: string; except?: string[]; tag_prefix: string }[];
   /** Courses of the model's repository whose file is not the model's (R-BTN-64: not modelled). */
   courseFile: string | null;
+  /** Source entries and actual block refs, separately so replay can check the index. */
+  dependencies: Record<string, { entries: PostedDependency[]; blocks: { leg: string; ref: string }[] }>;
   /** Each runner's last call and lease, by the core's clock: the checker's evidence that an
    *  alarm reap or fence timeout came after the lease ran out. Not a reason to record a step. */
   liveness: Record<string, { lastSeen: number; lease: number }>;
@@ -131,6 +134,13 @@ export function projectState(store: Store, now: number): Projection {
   for (const t of rows<{ runner_id: number; tag: string }>('SELECT runner_id, tag FROM runner_tags ORDER BY runner_id, tag')) (runners[String(t.runner_id)] ??= []).push(t.tag);
   const repo = rows<{ required_bars: string | null }>('SELECT required_bars FROM repositories WHERE id = ?', MODEL_REPOSITORY)[0];
   const course = rows<{ course_json: string }>('SELECT course_json FROM courses WHERE repository_id = ? AND id = ?', MODEL_REPOSITORY, MODEL_COURSE)[0];
+  const dependencies: Projection['dependencies'] = {};
+  for (const t of rows<{ id: string; depends_at: string }>(`SELECT id, depends_at FROM tickets WHERE repository_id = ?
+    AND (depends_at <> '[]' OR EXISTS (SELECT 1 FROM ticket_blocks WHERE ticket_id = tickets.id AND kind = 'ticket')) ORDER BY id`, MODEL_REPOSITORY)) {
+    if (!tickets[t.id]?.present) continue;
+    dependencies[t.id] = { entries: JSON.parse(t.depends_at), blocks: rows(
+      "SELECT leg, ref FROM ticket_blocks WHERE ticket_id = ? AND kind = 'ticket' ORDER BY leg, ref", t.id) };
+  }
   return {
     counter: head?.last_handed_out ?? 0,
     lastAccepted: head?.observation ?? 0,
@@ -138,6 +148,7 @@ export function projectState(store: Store, now: number): Projection {
     tickets, claims, held, ownerBars, runners,
     required: repo?.required_bars ? JSON.parse(repo.required_bars) : [],
     courseFile: course?.course_json ?? null,
+    dependencies,
     liveness,
   };
 }
@@ -245,7 +256,7 @@ export function recordingStore(inner: Store, origin: () => Origin | null, now: (
 }
 
 function empty(): Projection {
-  return { counter: 0, lastAccepted: 0, outstanding: false, tickets: {}, claims: {}, held: {}, ownerBars: [], runners: {}, required: [], courseFile: null, liveness: {} };
+  return { counter: 0, lastAccepted: 0, outstanding: false, tickets: {}, claims: {}, held: {}, ownerBars: [], runners: {}, required: [], courseFile: null, dependencies: {}, liveness: {} };
 }
 
 // ── ITF (https://apalache-mc.org/docs/adr/015adr-trace.html) ─────────────────────────────

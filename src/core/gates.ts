@@ -7,8 +7,9 @@ import { capabilitiesOf } from '../shared/vocabulary.mjs';
 
 /** Who asks: the runner as its heartbeat declared it (§5, R-BTN-60). */
 export interface GateRunner {
-  /** Capability and role names as declared. */
-  declared: string[];
+  declared?: string[];
+  /** Database-backed callers pass the expanded rows, minus any holdings lost since the heartbeat. */
+  holdings?: ReadonlySet<string>;
   tags: string[];
   courses: { repository: string; course: string; version: number }[];
   /** R-BTN-58: the key's grants by repository, each with the capabilities it may use there; null
@@ -55,6 +56,8 @@ export interface GateLeg {
 }
 
 export interface GateContext {
+  /** On a diagnostic read, collect the missing rule-4 names without changing its verdict. */
+  missingCapabilities?: (names: string[]) => void;
   now: number;
   /** The ticket's claims; at an advance, without the advancing one. */
   claims: { status: string; confirmed_at: number | null; fence_pending: number }[];
@@ -125,11 +128,12 @@ export function gatesFor(runner: GateRunner | null, ticket: GateTicket, leg: Gat
   // the whole ticket or on the leg refuses a claim of it and an advance into it — never fails open.
   const blocks = facts.blocks ?? [];
   const decided = blocks.some((b) => b.kind === 'decision' && (b.leg === '' || b.leg === leg.name));
+  const dependency = blocks.some((b) => b.kind === 'ticket' && (b.leg === '' || b.leg === leg.name));
   if (phase === 'claim') {
     if (leg.state !== 'ready') return refuse(1);
-    if (decided || blocks.some((b) => b.kind === 'ticket')) return refuse(1, 'blocked');
+    if (decided || dependency) return refuse(1, 'blocked');
     if (facts.claims.some(claimHolds)) return refuse(3);
-  } else if (decided) {
+  } else if (decided || dependency) {
     return refuse(1, 'blocked');
   }
   if (facts.override?.hold) return refuse(3, 'held');
@@ -148,13 +152,15 @@ export function gatesFor(runner: GateRunner | null, ticket: GateTicket, leg: Gat
     // only (§12.5), `human-operator` included as the literal R-BTN-121 compares — rule 6 is
     // retired, so it is met by declaring it and granted like any capability (R-BTN-121 as
     // amended).
-    const held = capabilitiesOf(runner.declared);
+    const held = runner.holdings ?? capabilitiesOf(runner.declared);
     const granted = grant ? new Set(grant.capabilities) : null;
     // R-BTN-58: a grant entry `<type>:*` admits every holding of that type.
     const admits = (capability: string) => granted ? granted.has(capability) || granted.has(`${capability.split(':')[0]}:*`) : true;
     // R-BTN-178: rule 11 reads the same set — every capability with a capacity in it holds a seat.
-    for (const need of needs) {
-      if (!held.has(need) || !(need.startsWith('runner:') || admits(need))) return refuse(4);
+    const missing = [...needs].filter((need) => !held.has(need) || !(need.startsWith('runner:') || admits(need)));
+    if (missing.length) {
+      facts.missingCapabilities?.(missing);
+      return refuse(4);
     }
 
 
@@ -186,9 +192,10 @@ export function gatesFor(runner: GateRunner | null, ticket: GateTicket, leg: Gat
   // Rule 11 (R-BTN-178, §6.11): every capability with a capacity in rule 4's set for this leg
   // has a seat no other claim holds. The fact's `held` already excludes the asking claim's own
   // seats, so an advance into a leg with the same requirements never refuses itself.
-  if (facts.seats) {
+  const seats = facts.seats;
+  if (seats) {
     for (const need of needs) {
-      const s = facts.seats[need];
+      const s = seats[need];
       if (s && s.held >= s.capacity) return { ok: false, rule: 11, code: GATE_CODES[11], capability: need };
     }
   }

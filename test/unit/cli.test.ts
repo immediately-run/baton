@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { answerPlan, confirmAsk, confirmCapacity, createApiKey, duration, main, parseArgs, plan, policyDiff, send, workingTreeOf } from '../../cli/baton.mjs';
 import { formatDecision, listOnce, plain, watch, WATCH_EVERY_MS } from '../../cli/decisions.mjs';
-import { ORIGIN, setAdminKeys, setClock } from '../helpers';
+import { Git, ORIGIN, setAdminKeys, setClock } from '../helpers';
 import type { TestKey } from '../lib/sshKeys';
 import { call as hostCall } from '#host';
 
@@ -116,10 +116,22 @@ describe('plan: one request per command', () => {
     expect(lines.at(-1)).toContain('not confirmed');
   });
 
+  it('S-BTN-311: destructive credential commands plan a prompt or accept --yes', () => {
+    const home = { repository: 'docs', names: [] };
+    for (const [role, args] of [
+      ['admin', ['revoke', 'SHA256:x']],
+      ['owner', ['revoke', 'SHA256:x']],
+      ['owner', ['owners', '--remove', 'SHA256:x']],
+    ] as const) {
+      expect(plan(role, [...args], key, undefined, home)).toMatchObject({ body: { confirm: true }, confirm: { yes: false } });
+      expect(plan(role, [...args, '--yes'], key, undefined, home)).toMatchObject({ body: { confirm: true }, confirm: { yes: true } });
+    }
+  });
+
   it('owner commands, the required bars in their groups', () => {
     expect(plan('owner', ['grant', 'docs', '--key', PUB, '--capabilities', 'agent-venue'], key))
       .toEqual({ method: 'POST', path: '/v1/owner/docs/grants', body: { public_key: PUB, capabilities: ['agent-venue'] } });
-    expect(plan('owner', ['owners', 'docs', '--remove', 'SHA256:x'], key).body).toEqual({ fingerprint: 'SHA256:x', remove: true });
+    expect(plan('owner', ['owners', 'docs', '--remove', 'SHA256:x'], key).body).toEqual({ fingerprint: 'SHA256:x', remove: true, confirm: true });
     expect(plan('owner', ['bar', 'docs', '--course', '*', '--tag', 'account:go_plus', '--applies', 'claim', '--starts-at', '2026-10-16T13:00:00Z', '--reason', 'go-quota', '--release-holders'], key).body)
       .toEqual({ course: '*', tag: 'account:go_plus', applies: 'claim', starts_at: Date.parse('2026-10-16T13:00:00Z'), release_holders: true, reason: 'go-quota' });
     expect(plan('owner', ['bar', 'lift', 'docs', '7'], key).path).toBe('/v1/owner/docs/bars/7/lift');
@@ -302,6 +314,22 @@ describe('send: signed with a key file, verified by Baton', () => {
     dir = mkdtempSync(join(tmpdir(), 'baton-cli-'));
   });
   afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  it('S-BTN-74: baton leg why prints the indexed answer for the requested leg', async () => {
+    const identity = join(dir, 'admin.key');
+    await setAdminKeys(createApiKey(identity, 'admin'));
+    expect(await new Git().add('B', { depends_at: [{ ticket: 'P', done: true, leg: 'review' }] }).add('P').post()).toMatchObject({ status: 200 });
+    const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation((url, init) => hostCall(new Request(url, init)));
+    const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    try {
+      expect(await main(['leg', 'why', 'docs:B', 'review', '-i', identity, '--url', ORIGIN])).toBe(0);
+      expect(JSON.parse(String(output.mock.calls.at(-1)?.[0]))).toMatchObject({ leg: 'review', ready: false,
+        prerequisites: expect.arrayContaining([expect.objectContaining({ ref: 'docs:P@done', why: 'not-done' })]) });
+    } finally {
+      output.mockRestore();
+      fetch.mockRestore();
+    }
+  });
 
   it('an administrator’s key file signs a request Baton accepts; another key is unauthenticated', async () => {
     const file = join(dir, 'admin');
@@ -694,12 +722,16 @@ describe('baton owner policy: the CLI of §12.8 (B-145)', () => {
       await expect(run(['log', 'ops', '--after', '2'])).resolves.toBe(0);
       await expect(run(['set', 'ops', policyFile, '--base', '4'])).resolves.toBe(0);
       await expect(run(['apply', 'ops', 'protected', '--base', '5'])).resolves.toBe(0);
+      await expect(main(['owner', '-i', file, 'policy', 'apply', 'ops', 'protected', '--base', '5', '--dry-run', '--dev', '--url', ORIGIN])).resolves.toBe(0);
       await expect(run(['floor', 'add', 'ops', 'fieldhouse', '--guarantees', 'no-runner-lands,human-gates', '--remove-by', 'owner'])).resolves.toBe(0);
-      await expect(run(['floor', 'remove', 'ops', 'fieldhouse'])).resolves.toBe(0);
+      await expect(run(['floor', 'remove', 'ops', 'fieldhouse', '--yes'])).resolves.toBe(0);
       // Round 1, findings 9 and 10: `set` without --base refuses rather than fetch-and-overwrite
       // (the compare-and-set builds on the version the operator read), and `baton owner -i KEY
       // policy show REPO` — the documented form — reaches the policy commands.
       await expect(run(['set', 'ops', policyFile])).rejects.toThrow(/--base/);
+      for (const flag of ['--base', '-i', '--identity', '--url', '--home']) {
+        await expect(run(['apply', 'ops', 'protected', flag, '--dry-run', '--base', '5'])).rejects.toThrow(`${flag} needs a value`);
+      }
       await expect(main(['owner', '-i', file, 'policy', 'show', 'ops', '--dev', '--url', ORIGIN])).resolves.toBe(0);
     } finally {
       globalThis.fetch = was;
@@ -711,6 +743,7 @@ describe('baton owner policy: the CLI of §12.8 (B-145)', () => {
       'GET /v1/owner/ops/policy/log?after=2',
       'PUT /v1/owner/ops/policy',
       'PUT /v1/owner/ops/policy',
+      'PUT /v1/owner/ops/policy',
       'POST /v1/owner/ops/policy/floors',
       'POST /v1/owner/ops/policy/floors',
       'GET /v1/repositories/ops/policy',
@@ -718,8 +751,9 @@ describe('baton owner policy: the CLI of §12.8 (B-145)', () => {
     // The compare-and-set builds on the version the operator named, never one the CLI fetched.
     expect(requests[3].body).toEqual({ base_version: 4, policy: { ...READ.policy, human_key: 'hardware' } });
     expect(requests[4].body).toEqual({ base_version: 5, preset: 'protected' });
-    expect(requests[5].body).toEqual({ name: 'fieldhouse', guarantees: ['no-runner-lands', 'human-gates'], remove_by: 'owner' });
-    expect(requests[6].body).toEqual({ name: 'fieldhouse', remove: true, confirm: true });
+    expect(requests[5].body).toEqual({ base_version: 5, preset: 'protected', dry_run: true });
+    expect(requests[6].body).toEqual({ name: 'fieldhouse', guarantees: ['no-runner-lands', 'human-gates'], remove_by: 'owner' });
+    expect(requests[7].body).toEqual({ name: 'fieldhouse', remove: true, confirm: true });
     // diff printed the one knob; show printed the read it verified the fields of.
     expect(outs.join('')).toContain('human_key');
   });
@@ -760,7 +794,7 @@ describe('baton owner policy: the CLI of §12.8 (B-145)', () => {
       await expect(run(['set', policyFile, '--base', '4'])).resolves.toBe(0);
       await expect(run(['apply', 'protected', '--base', '5'])).resolves.toBe(0);
       await expect(run(['floor', 'add', 'fieldhouse', '--guarantees', 'no-runner-lands'])).resolves.toBe(0);
-      await expect(run(['floor', 'remove', 'fieldhouse'])).resolves.toBe(0);
+      await expect(run(['floor', 'remove', 'fieldhouse', '--yes'])).resolves.toBe(0);
       // A named repository (two positionals) still wins over the home.
       await expect(run(['diff', 'docs', policyFile])).resolves.toBe(0);
     } finally {
