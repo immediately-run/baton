@@ -11,7 +11,7 @@ Not built, each a design its rule below still states:
 
 - R-BTN-75: the `retry` kind and the `found`, `provisional` and `binds` columns of
   `ticket_blocks`. A backoff is a stored `retry_after`, which rule 10 reads.
-- R-BTN-126: the `ticket` and `resource` blocked ends, `LegError`, `baton leg release --blocked`,
+- R-BTN-126: the `ticket` and `resource` blocked ends, `LegError`'s prerequisite option, `baton leg release --blocked`,
   `max_blocked` with its `blocked-exhausted` hold, and `baton.blocked-ends`. A `released:blocked`
   end names a `capability` and nothing else.
 - §6.6: rule 13, the `trusted` rule and the `wip-bound` flag.
