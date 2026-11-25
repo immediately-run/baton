@@ -1382,7 +1382,7 @@ export function checkProtection(v: unknown): { repository: string; matched: bool
     for (const k of Object.keys(e)) if (k !== 'repository' && k !== 'matched' && k !== 'reading_hash' && k !== 'legs') bad(`protection[${i}].${k}`, 'unknown field');
     if (typeof e.matched !== 'boolean') bad(`protection[${i}].matched`, 'must be true or false');
     if (typeof e.reading_hash !== 'string' || !/^[A-Za-z0-9:_-]{1,128}$/.test(e.reading_hash)) bad(`protection[${i}].reading_hash`, 'must be a short reading hash');
-    // §14 (R-BTN-190): the heartbeat protection entry's `legs` — what the checker's reading
+    // The heartbeat protection entry's `legs` (R-BTN-190) — what the checker's reading
     // covered, B-140's client sends it.
     let legs: { count: number; tickets: number } | undefined;
     if (e.legs !== undefined) {
