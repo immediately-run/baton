@@ -210,6 +210,8 @@ describe('S-BTN-48 replay: a recorded run re-run without a claim', () => {
     const configPath = join(repo.dir, '.baton', 'baton.json');
     const config = JSON.parse(readFileSync(configPath, 'utf8'));
     delete config.courses[0].source;
+    config.courses[0].version = 1;
+    config.courses[0].min_runner_version = 1;
     writeFileSync(configPath, JSON.stringify(config));
     const dir = join(repo.dir, '.baton', 'courses', 'create-pr');
     const graph = (name: string, extras = {}) => ({ start: 'filed', start_leg: name, end: ['done'], stations: { filed: {}, done: {} }, legs: { [name]: { from: ['filed'], to: 'done', ...extras } } });
@@ -245,6 +247,8 @@ describe('S-BTN-48 replay: a recorded run re-run without a claim', () => {
     const configPath = join(repo.dir, '.baton', 'baton.json');
     const config = JSON.parse(readFileSync(configPath, 'utf8'));
     delete config.courses[0].source;
+    config.courses[0].version = 1;
+    config.courses[0].min_runner_version = 1;
     writeFileSync(configPath, JSON.stringify(config));
     const dir = join(repo.dir, '.baton', 'courses', 'create-pr');
     writeFileSync(join(dir, 'course.json'), JSON.stringify({ start: 'filed', start_leg: 'implement', end: ['done'], stations: { filed: {}, planned: {}, done: {} }, legs: {
@@ -255,8 +259,12 @@ describe('S-BTN-48 replay: a recorded run re-run without a claim', () => {
     repo.commit('output contract');
     await repo.sync();
     const { secret } = await register('vm-a', { courses: [{ repository: 'docs', course: 'create-pr', version: 1 }] });
-    const offered = (await claimItem('vm-a', secret, { ticket_id: 'docs:T-1' })).json;
-    const started = (await advance('vm-a', secret, offered.claim_id, { leg: 'implement' })).json;
+    const offer = await claimItem('vm-a', secret, { ticket_id: 'docs:T-1' });
+    expect(offer.status).toBe(200);
+    const offered = offer.json;
+    const start = await advance('vm-a', secret, offered.claim_id, { leg: 'implement' });
+    expect(start.status).toBe(200);
+    const started = start.json;
     const ghCalls: string[][] = [];
     const origin = g('config', 'remote.origin.url');
     const localRemote = g('remote', 'get-url', 'origin');
