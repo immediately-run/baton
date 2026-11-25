@@ -100,6 +100,12 @@ export class BatonApi {
     this.secret = s;
   }
 
+  /** Host-only proof for a pinned executor's credential broker, never part of a leg brief. */
+  forgeProof(run: string): Record<string, string> {
+    const url = new URL(`/v1/forge-scope/runner/${encodeURIComponent(run)}`, this.o.url);
+    return this.o.auth('GET', url.toString(), '', this.secret);
+  }
+
   private async call(method: string, path: string, body?: unknown): Promise<Record<string, any>>;
   private async call<T>(method: string, path: string, body: unknown, check: (v: unknown) => v is T): Promise<T>;
   private async call(method: string, path: string, body?: unknown, check?: (v: unknown) => boolean): Promise<unknown> {
