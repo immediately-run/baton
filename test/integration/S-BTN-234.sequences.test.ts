@@ -1,15 +1,15 @@
 // S-BTN-234 Baton hands out the identifiers (BATON_SPEC §15 S-BTN-234, §4.3 R-BTN-199; B-176):
 // every id a concurrent branch writes to git — a ticket id from any filer, a rule, scenario,
 // gate or migration number — is one Baton's per-repository, per-kind sequence hands out, and
-// `baton tickets new` files through a PR on `baton-ticket/<id>` by default. Must hold: two
+// `baton tickets next --coordinator` is the command Dibber's `new` takes a ticket's number from
+// (B-326). Must hold: two
 // filers racing get distinct ids; a fresh Baton seeded by a floor never reissues a number git
 // holds; an inflated floor is refused; `next` issues increasing numbers per repository and
 // never across two; the principals that file tickets may take a number and a key granted
 // nowhere may not; the kind is opaque and validated; each take is an event naming the caller
-// and the ticket it is for; `new` opens a branch carrying the new ticket alone, and the ticket
-// is not on the board until it merges — on a `git` forge the branch is pushed and printed
-// (the unit half, beside this one, walks `--direct`'s protected fallback, the CLI's floor, the
-// fallback and the reserved `branch_pattern`); no `branch_pattern` matches `baton-ticket/*`
+// and the ticket it is for; the coordinator prints Baton's number alone, and a filing landed alone
+// on `baton-ticket/<id>` is not on the board until it merges (the unit half, beside this one,
+// walks the CLI's floor, the fallback and the coordinator's refusals); no `branch_pattern` matches `baton-ticket/*`
 // (R-BTN-190, the unit half). The CLI's half runs on the local host alone: it writes a real
 // repository and runs git and the CLI.
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -248,7 +248,7 @@ class Repo {
     this.git('commit', '-qm', 'scaffold');
     this.git('push', '-q', 'origin', 'HEAD:main');
   }
-  /** `baton tickets new` in-process, its fetch routed into the harness's host — the CLI's own
+  /** `baton tickets …` in-process, its fetch routed into the harness's host — the CLI's own
    *  code, the real core answering (S-BTN-199's pattern: the local host serves no port). The
    *  core's clock moves to the real now first: the CLI signs at its own clock (R-BTN-32 is
    *  Baton's rule, not a laptop's). */
@@ -303,39 +303,40 @@ afterEach(() => {
   rmSync(repo.bare, { recursive: true, force: true });
 });
 
-describe('S-BTN-234 the CLI half: new asks Baton first and files through a PR (B-176)', () => {
-  it.runIf(HOST === 'local')('new takes its id from the sequence and files the ticket alone on baton-ticket/<id>; the ticket boards only when the branch merges', async () => {
+describe('S-BTN-234 the CLI half: Baton is Dibber\'s coordinator (B-176, B-326)', () => {
+  it.runIf(HOST === 'local')('the coordinator prints the sequence\'s number alone; a filing landed alone on baton-ticket/<id> boards only when the branch merges', async () => {
     if (repo === null) return;
     expect(await initMain(['--course', 'create-pr'], { root: repo.dir, log: () => {} })).toBe(0);
-    // The repos map names this checkout's bare origin as `ops`, so the CLI's asks reach it; a
-    // `kind: project` page is what `--project` names.
     const settings = JSON.parse(execFileSync('cat', [join(repo.dir, '.baton', 'baton.json')], { encoding: 'utf8' })) as Record<string, unknown>;
     settings.repos = { ops: repo.bare };
     writeFileSync(join(repo.dir, '.baton', 'baton.json'), `${JSON.stringify(settings, null, 2)}\n`);
-    mkdirSync(join(repo.dir, 'tickets', 'projects'), { recursive: true });
-    writeFileSync(join(repo.dir, 'tickets', 'projects', 'baton.mdx'), '---\ntitle: baton\nid: baton\nstatus: active\nkind: project\ntags:\n  - project\ndescription: the project\n---\n\nProse.\n');
     repo.publish();
     const before = repo.git('rev-parse', 'HEAD');
 
-    const filed = await repo.tickets('new', '--title', 'First', '--project', 'baton', '-i', keyFile, '--url', ORIGIN);
-    if (filed.code !== 0 || filed.err.length) throw new Error(`new exited ${filed.code}: ${filed.err.join('\n')}`);
-    // The git forge has no PR to ask for: the branch is the answer, printed for a person to merge.
-    expect(filed.out).toEqual(['✓ tickets: file B-1 — First', '  branch: baton-ticket/B-1 — pushed for a person to merge']);
-    // The default branch is exactly as it was, and the filing branch carries the ticket alone.
-    expect(execFileSync('git', ['-C', repo.bare, 'rev-parse', 'main'], { encoding: 'utf8' }).trim()).toBe(before);
-    expect(execFileSync('git', ['-C', repo.bare, 'show', '--name-only', '--format=%s', 'baton-ticket/B-1'], { encoding: 'utf8' }).trim().split('\n'))
-      .toEqual(['tickets: file B-1 — First', '', 'tickets/B-1.mdx']);
-    // The id came from Baton's sequence, floor 0 on a fresh repository: number 1.
+    // What `dibber new` runs: the coordinator `.dibber/config.json` names, its prefix filled in.
+    const coordinator = JSON.parse(execFileSync('cat', [join(repo.dir, '.dibber', 'config.json')], { encoding: 'utf8' })) as { coordinator: { next: string[] } };
+    expect(coordinator.coordinator.next.slice(3)).toEqual(['tickets', 'next', 'ticket-<prefix>', '--coordinator']);
+    const took = await repo.tickets('next', 'ticket-B', '--coordinator', '-i', keyFile, '--url', ORIGIN);
+    expect(took).toMatchObject({ code: 0, out: ['1'], err: [] });
     expect(await rows('SELECT repository_id, kind, last_number FROM sequences')).toEqual([{ repository_id: 'ops', kind: 'ticket-b', last_number: 1 }]);
 
-    // The ticket is not on the board while it lives only on the filing branch (the project
-    // page beside it is; a page is not the ticket).
+    // The filing, as a leg lands it: the file alone, on its own branch.
+    repo.git('checkout', '-q', '-b', 'baton-ticket/B-1');
+    writeFileSync(join(repo.dir, 'tickets', 'B-1.mdx'), '---\nid: B-1\ntitle: "B-1 — First"\nstatus: available\ndepends_on: []\n---\n\nBody.\n\n## Status\n\n_filed 2026-11-25._\n');
+    repo.git('add', 'tickets/B-1.mdx');
+    repo.git('commit', '-qm', 'tickets: file B-1 — First');
+    repo.git('push', '-q', 'origin', 'HEAD:refs/heads/baton-ticket/B-1');
+    repo.git('checkout', '-q', 'main');
+    expect(execFileSync('git', ['-C', repo.bare, 'rev-parse', 'main'], { encoding: 'utf8' }).trim()).toBe(before);
+
+    // Not on the board while it lives only on the filing branch.
     await later();
     await repo.sync();
     expect((await rows('SELECT id FROM tickets')).map((r) => r.id)).not.toContain('ops:B-1');
 
     // A person merges the branch; the next sync boards the ticket at its course's start.
     execFileSync('git', ['-C', repo.dir, 'fetch', '-q', 'origin'], { stdio: 'ignore' });
+    execFileSync('git', ['-C', repo.dir, 'checkout', '-q', 'main'], { stdio: 'ignore' });
     execFileSync('git', ['-C', repo.dir, 'merge', '-q', '--no-ff', '-m', 'merge the filing', 'origin/baton-ticket/B-1'], { stdio: 'ignore' });
     execFileSync('git', ['-C', repo.dir, 'push', '-q', 'origin', 'HEAD:main'], { stdio: 'ignore' });
     await later();
@@ -378,25 +379,20 @@ describe('S-BTN-234 the CLI half: new asks Baton first and files through a PR (B
     expect(events[0].actor).toMatch(/^owner:/);
   }, 120_000);
 
-  it.runIf(HOST === 'local')('two concurrent baton tickets new runs against one Baton file two distinct ids', async () => {
+  it.runIf(HOST === 'local')('two concurrent coordinator runs against one Baton take two distinct numbers', async () => {
     if (repo === null) return;
     expect(await initMain(['--course', 'create-pr'], { root: repo.dir, log: () => {} })).toBe(0);
     const settings = JSON.parse(execFileSync('cat', [join(repo.dir, '.baton', 'baton.json')], { encoding: 'utf8' })) as Record<string, unknown>;
     settings.repos = { ops: repo.bare };
     writeFileSync(join(repo.dir, '.baton', 'baton.json'), `${JSON.stringify(settings, null, 2)}\n`);
-    mkdirSync(join(repo.dir, 'tickets', 'projects'), { recursive: true });
-    writeFileSync(join(repo.dir, 'tickets', 'projects', 'baton.mdx'), '---\ntitle: baton\nid: baton\nstatus: active\nkind: project\ntags:\n  - project\ndescription: the project\n---\n\nProse.\n');
     repo.publish();
-    // Two filings at once, the race the sequence exists for: two ids, two branches.
+    // Two filings at once, the race the sequence exists for: two numbers.
     const both = await Promise.all([
-      repo.tickets('new', '--title', 'One', '--project', 'baton', '-i', keyFile, '--url', ORIGIN),
-      repo.tickets('new', '--title', 'Two', '--project', 'baton', '-i', keyFile, '--url', ORIGIN),
+      repo.tickets('next', 'ticket-B', '--coordinator', '-i', keyFile, '--url', ORIGIN),
+      repo.tickets('next', 'ticket-B', '--coordinator', '-i', keyFile, '--url', ORIGIN),
     ]);
-    for (const r of both) {
-      if (r.code !== 0 || r.err.length) throw new Error(`new exited ${r.code}: ${r.err.join('\n')}`);
-    }
-    const branches = execFileSync('git', ['-C', repo.bare, 'for-each-ref', '--format=%(refname:short)', 'refs/heads/baton-ticket/*'], { encoding: 'utf8' }).trim().split('\n').sort();
-    expect(branches).toEqual(['baton-ticket/B-1', 'baton-ticket/B-2']);
+    expect(both.map((r) => r.code)).toEqual([0, 0]);
+    expect(both.flatMap((r) => r.out).sort()).toEqual(['1', '2']);
     expect(await rows('SELECT repository_id, kind, last_number FROM sequences')).toEqual([{ repository_id: 'ops', kind: 'ticket-b', last_number: 2 }]);
   }, 120_000);
 });

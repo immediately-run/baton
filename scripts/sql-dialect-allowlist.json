@@ -3,6 +3,7 @@
   "src/core/baton.ts | IS ? | 60ae3ca92855aa9f": 1,
   "src/core/claims.ts | COLLATE NOCASE | d8643aa263637034": 1,
   "src/core/claims.ts | INSERT OR | c5005b1a5847ce51": 1,
+  "src/core/claims.ts | IS ? | 9e3e7f63c3f12162": 3,
   "src/core/claims.ts | IS ? | b5b4a9dfe77d1cbc": 1,
   "src/core/claims.ts | scalar MAX | 5c2c788c81543b94": 2,
   "src/core/courses.ts | INSERT OR | 59a2313a05c1f25f": 1,
