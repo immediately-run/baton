@@ -38,6 +38,7 @@ import { nodeKeygen } from '../shared/commitSign.mjs';
 import type { PostedControl } from '../core/board';
 import { readTicketSettings } from './tickets-config';
 import { ownRepositoryId, remoteSlug } from './remote-slug';
+import { attestEvidence, type EvidenceAttestation, type UnconfirmedEnd } from './evidence';
 import { PAGE_NAME, ticketsPage } from './tickets-page';
 
 // LC_ALL=C on every git call (B-93, round 4): git translates its messages, and the two shapes
@@ -170,8 +171,8 @@ const defaultSkill = (course: string): string => `baton-${course}`;
 /** The `courses` entry `baton repo init` writes: every R-BTN-51 field, so a repository edits
  * them where the spec says rather than discovering them. Never `min_worker_version`: init
  * writes the new name only; the window is on the read (above). */
-function courseEntry(course: string, legs: string[]): Required<Omit<CourseEntry, 'previous_branch_pattern' | 'source' | 'min_worker_version'>> {
-  return { id: course, version: 1, min_runner_version: 1, skill: defaultSkill(course), step_kinds: legs, branch_pattern: DEFAULT_BRANCH_PATTERN, protocol_files: [] };
+function courseEntry(b: BuiltIn): Required<Omit<CourseEntry, 'previous_branch_pattern' | 'source' | 'min_worker_version'>> {
+  return { id: b.id, version: b.version ?? 1, min_runner_version: 1, skill: b.skill, step_kinds: Object.keys(b.course.legs), branch_pattern: DEFAULT_BRANCH_PATTERN, protocol_files: [] };
 }
 
 export interface SyncArgs {
@@ -636,7 +637,7 @@ export async function migrateMarkersMain(argv: string[], io: { root?: string; lo
   return 0;
 }
 
-/** One sync (§7.1), its decisions the vendored `syncOnce` (R-BTN-37: the code S-BTN-12 and
+/** One sync (§7.1), its decisions the shared `syncOnce` (R-BTN-37: the code S-BTN-12 and
  * S-BTN-13 drive): the observation number first, then — with `--latest` — the current default
  * branch fetched and checked out, then the board read from the checkout, the head read and the
  * ancestry decided; a lost race takes a new number and reads again, once. */
@@ -695,6 +696,10 @@ export async function syncMain(args: SyncArgs): Promise<number> {
   const api = new BatonApi({ url, transport: args.transport ?? ((req) => fetch(req)), auth, kind: 'sync' }, log);
   let board: Board | null = null;
   let record: BatonRecord | undefined;
+  // R-BTN-10 (§4.3): the unconfirmed ends that named evidence, as the observation listed them, and
+  // this run's answers for them — read after the number, posted with the board.
+  let unconfirmed: UnconfirmedEnd[] = [];
+  let evidence: EvidenceAttestation[] = [];
   // B-89: `busy` is another run's reading, not this run's post, and R-BTN-62 lets no number this
   // run takes be used while that one is out. So the wait comes before the first `observe`, and
   // the retry is a whole second sync from a fresh number.
@@ -729,6 +734,7 @@ export async function syncMain(args: SyncArgs): Promise<number> {
     observe: async () => {
       const o = await asResult(async () => {
         const got = await api.observation();
+        unconfirmed = Array.isArray(got.unconfirmed) ? (got.unconfirmed as UnconfirmedEnd[]) : [];
         record = {
           answers: Array.isArray(got.answers) ? got.answers : [],
           legs: Array.isArray(got.legs) ? got.legs : [],
@@ -761,6 +767,7 @@ export async function syncMain(args: SyncArgs): Promise<number> {
         const answer = await api.dependencies([...ids]);
         return (Array.isArray(answer.dependencies) ? answer.dependencies : []).map((d) => ({ ticket: String(d.ticket), done: d.done === true }));
       });
+      evidence = unconfirmed.length ? await attestEvidence(unconfirmed, evidencePorts(root, record?.code_repos ?? [], log)) : [];
       return git(root, 'rev-parse', 'HEAD');
     },
     readHead: () => asResult(() => api.head()),
@@ -776,7 +783,7 @@ export async function syncMain(args: SyncArgs): Promise<number> {
         return false; // not an ancestor, or a commit this clone lacks: never "descends"
       }
     },
-    buildPayload: async () => board!.payload,
+    buildPayload: async () => (evidence.length ? { ...board!.payload, attestations: evidence } : board!.payload),
     statusOf: (id: string) => board!.statusOf(id),
     sleep,
   });
@@ -841,6 +848,53 @@ function syncKeyAuth(file: string): Auth {
   // never posted under one credential and half under none.
   signingKey(file);
   return auth;
+}
+
+/** R-BTN-10: what the evidence check reads through — the home checkout's git, and the REST API
+ *  of the GitHub hosts this repository is on (github.com, its home's host, its `code_repos`
+ *  entries'), with the sync's `GITHUB_TOKEN`. Without a token only commits are looked at. */
+function evidencePorts(root: string, codeRepos: readonly CodeRepoEntry[], log: (l: string) => void): Parameters<typeof attestEvidence>[1] {
+  const token = process.env.GITHUB_TOKEN;
+  const slug = remoteSlug(root);
+  let originHost: string | null = null;
+  try {
+    const u = git(root, 'remote', 'get-url', 'origin');
+    originHost = /^https:\/\//.test(u) ? new URL(u).host : (/^[^@]+@([^:]+):/.exec(u)?.[1] ?? null);
+  } catch {
+    originHost = null;
+  }
+  const hosts = new Set<string>(['github.com', ...codeRepos.filter((e) => e.forge === 'github').map((e) => e.host)]);
+  const homeHost = originHost === 'github.com' || (originHost != null && hosts.has(originHost)) ? originHost : null;
+  const hasObject = (sha: string) => {
+    try {
+      execFileSync('git', ['-C', root, 'cat-file', '-e', `${sha}^{commit}`], { stdio: 'ignore' });
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  return {
+    hasCommit: (sha) => {
+      if (hasObject(sha)) return true;
+      try {
+        execFileSync('git', ['-C', root, 'fetch', '-q', 'origin', sha], { stdio: 'ignore', timeout: FETCH_TIMEOUT_MS });
+      } catch {
+        return false;
+      }
+      return hasObject(sha);
+    },
+    home: token && slug && homeHost ? { host: homeHost, slug } : null,
+    hosts: token ? hosts : new Set(),
+    get: async (host, path) => {
+      try {
+        const res = await fetch(`${githubConn(host).rest}${path}`, { headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json', 'User-Agent': 'baton-sync' }, redirect: 'error', signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+        return res.status;
+      } catch {
+        return null;
+      }
+    },
+    log,
+  };
 }
 
 /** GitHub's API origin, REST and GraphQL alike. */
@@ -1294,6 +1348,7 @@ const AGENT_WRAPPER_ENV = 'BATON_AGENT_WRAPPER';
  * convention puts it. */
 export function stubSource(b: BuiltIn, course: string, leg: string): string {
   const { ask, position, verify, pushes, delivered } = b.legs[leg];
+  const asksOwner = b.id === 'create-pr' && (leg === 'implement' || leg === 'fix');
   // A leg whose close writes a line on a PR may name that PR after its answer (B-29): a ticket's
   // PRs may sit in other repositories, and its home may have none.
   const names = b.reads === 'prs' && COMMENTING_LEGS.has(leg);
@@ -1305,6 +1360,13 @@ export function stubSource(b: BuiltIn, course: string, leg: string): string {
   // close hands the checkout's default branch in itself.)
   const closeHelpers = b.reads === 'prs' ? `\nimport { ticketsBranch } from ${JSON.stringify(source('ticket-state.ts'))};` : '';
   const values = ask ? ask.values.join(' or ') : '';
+  // The forge read before the position (R-BTN-131): `pr` an open PR (B-81), `merged` every PR
+  // of the ticket merged and none open — the merge agent's exit 0 is not a merge.
+  const verifySource = verify === 'merged' ? `  const mergedPrs = (() => { try { return verifyPrsMerged({ checkout: ctx.checkout, ticket: ctx.ticket, branchPatterns: patterns, repositories: ticketRepositories(ticketText, settings.repos) }, legRun); } catch (e) { throw failed(e); } })();
+  if (process.env.BATON_VERBOSE) process.stderr.write('baton: ' + ${JSON.stringify(`${b.id}/${leg}`)} + ' ticket ' + ctx.ticket.id + ': the forge verified ' + mergedPrs.join(', ') + ' merged, none open, on a branch matching ' + patterns.join(' or ') + '\\n');
+` : verify ? `  try { await verifyPrOpen({ checkout: ctx.checkout, ticket: ctx.ticket, branchPatterns: patterns, repositories: ticketRepositories(ticketText, settings.repos) }, legRun); } catch (e) { throw failed(e); }
+  if (process.env.BATON_VERBOSE) process.stderr.write('baton: ' + ${JSON.stringify(`${b.id}/${leg}`)} + ' ticket ' + ctx.ticket.id + ': the forge verified an open PR on a branch matching ' + patterns.join(' or ') + '\\n');
+` : '';
   return `import { execFile, execFileSync, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -1348,7 +1410,7 @@ const newestWrite = (p, depth = 0) => {
 const gitRun = (cmd, args, opts = {}) => execFileSync(cmd, args, { encoding: 'utf8', timeout: GIT_BOUND_MS, killSignal: 'SIGKILL', env: { ...process.env, ...GIT_ENV }, stdio: ['ignore', 'pipe', 'pipe'], ...opts });${ask ? `
 import { requireAnswer } from ${JSON.stringify(source('answer.ts'))};` : ''}
 import { ${closeFrom[0]} } from ${JSON.stringify(source(closeFrom[1]))};${closeHelpers}${verify ? `
-import { verifyPrOpen, ticketRepositories${delivered ? ', findDelivered, verifyDelivered, deliveredDetail' : ''} } from ${JSON.stringify(source('pr-verify.ts'))};` : ''}${pushes ? `
+import { ${verify === 'merged' ? 'verifyPrsMerged' : 'verifyPrOpen'}, ticketRepositories${delivered ? ', findDelivered, verifyDelivered, deliveredDetail' : ''} } from ${JSON.stringify(source('pr-verify.ts'))};` : ''}${pushes ? `
 import { DEFAULT_BRANCH_PATTERN, branchMatches, matchPatterns } from ${JSON.stringify(source('course-pr.ts'))};
 import { bareTicketId } from ${JSON.stringify(source('ticket-state.ts'))};${verify ? '' : `
 import { ticketRepositories } from ${JSON.stringify(source('pr-verify.ts'))};`}` : ''}
@@ -1365,10 +1427,14 @@ import { ticketRepositories } from ${JSON.stringify(source('pr-verify.ts'))};`}`
 // The agent's last line of output must be its ${ask.name}: ${values}. A line that opens with
 // one of them is read as the answer wherever it sits — prose before or after it is the agent's,
 // not a lost round (B-85) — and that line may name one PR URL after the word. A missing or
-// misspelled ${ask.name} still fails the leg, naming what the agent's output ended with.` : ''}${verify ? `
+// misspelled ${ask.name} still fails the leg, naming what the agent's output ended with.` : ''}${verify === 'pr' ? `
 // Before returning its position the stub verifies the leg's outcome on the forge (B-81): an
 // open PR on a branch this course's branch patterns map to the ticket, its head pushed; where
-// it cannot verify, the leg fails naming what it looked for.` : ''}
+// it cannot verify, the leg fails naming what it looked for.` : verify === 'merged' ? `
+// Before returning its position the stub verifies the leg's outcome on the forge (R-BTN-131):
+// every PR on a branch this course's branch patterns map to the ticket merged, none open — an
+// agent that exits 0 without merging (it refused red CI, say) fails the leg naming the open PR
+// and quoting what the agent said, and never reports merged.` : ''}
 // The repository may replace this leg's run, never its close: \`${leg}.run.mjs\` beside this file
 // (\`baton repo init --override ${leg}\`), read at the same snapshot (R-BTN-131) — or, where the
 // repository requires owner-signed control (B-127), at the signed commit the claim's
@@ -1514,7 +1580,11 @@ ${pushes ? `  // B-231: run from the gate's red (pr-open, fixed), this leg must 
   // failed leg's error carries, so the runner's log alone can diagnose it, whether the agent
   // exited non-zero or exited 0 and the checks after it failed.
   const lastOutput = (so, se) => (so + '\\n' + se).split('\\n').map((l) => l.trimEnd()).filter((l) => l.trim() !== '').slice(-20).join('\\n  ');
-  const received = await new Promise((resolve, reject) => {
+${asksOwner ? `  // S-BTN-222 (B-325): an open harness question can be silent and the stub cannot tell
+  // it from idle, or learn when it was answered. For a run allowed to raise interact, use
+  // Baton's deadline and release rather than inferring completion from silence.
+  const canInteract = ctx.can_interact === true;
+` : ''}  const received = await new Promise((resolve, reject) => {
     const echo = process.env.BATON_VERBOSE === '1';
     const child = spawn(argv[0], argv.slice(1), {
       cwd: ctx.checkout, stdio: ['ignore', 'pipe', 'pipe'],
@@ -1567,12 +1637,25 @@ ${pushes ? `  // B-231: run from the gate's red (pr-open, fixed), this leg must 
     watch = setInterval(() => {
       if (stopped != null || conclusion != null) return;
       const now = Date.now();
-      if (now - startedAt >= LEG_CEILING_MS) {
+      if (now - startedAt >= LEG_CEILING_MS) {${asksOwner ? `
+        if (canInteract) {
+          // The wrapper may have exited while a descendant still holds the pipes open.
+          // Neither pipe closure nor partial output is needed to fail at the ceiling.
+          stopped = 'the leg reached its hard ceiling (' + LEG_CEILING_MS + ' ms)';
+          clearInterval(watch);
+          ctx.signal?.removeEventListener('abort', onAbort);
+          child.kill('SIGKILL');
+          child.stdout.destroy();
+          child.stderr.destroy();
+          reject(new Error('the agent was stopped: ' + stopped));
+          return;
+        }` : ''}
         conclusion = { cause: 'agent_concluded_absolute', ceiling_ms: LEG_CEILING_MS };
         finishWatch();
         return;
       }
-      const all = signals();
+${asksOwner ? `      if (canInteract) return;
+` : ''}      const all = signals();
       if (all.every(([, at]) => now - at >= AGENT_IDLE_MS)) {
         conclusion = { cause: 'agent_concluded_idle', idle_ms: AGENT_IDLE_MS, quiet_signals: all.map(([name]) => name) };
         finishWatch();
@@ -1617,9 +1700,7 @@ ${pushes ? `  // B-231: run from the gate's red (pr-open, fixed), this leg must 
   const on = pr;` : `
   const last = (out.trim().split('\\n').at(-1) ?? '').trim();
   const on = ${PR_URL}.test(last) ? last : null;`}
-${verify ? `  try { await verifyPrOpen({ checkout: ctx.checkout, ticket: ctx.ticket, branchPatterns: patterns, repositories: ticketRepositories(ticketText, settings.repos) }, legRun); } catch (e) { throw failed(e); }
-  if (process.env.BATON_VERBOSE) process.stderr.write('baton: ' + ${JSON.stringify(`${b.id}/${leg}`)} + ' ticket ' + ctx.ticket.id + ': the forge verified an open PR on a branch matching ' + patterns.join(' or ') + '\\n');
-` : ''}  return { ...(${position}), ...(on ? { pr: on } : {}), ...(conclusion ? { conclusion } : {}) };` : `${ask ? `
+${verifySource}  return { ...(${position}), ...(on ? { pr: on } : {}), ...(conclusion ? { conclusion } : {}) };` : `${ask ? `
   // The answer (B-85): the last line that opens with the leg's value word, backwards past any
   // prose after it; a missing or misspelled verdict still fails, naming what it read.
   const { answer } = (() => { try { return requireAnswer(out, ${JSON.stringify({ name: ask.name, values: ask.values })}, ${JSON.stringify(leg)}); } catch (e) { throw failed(e); } })();` : `
@@ -1635,9 +1716,7 @@ ${verify ? `  try { await verifyPrOpen({ checkout: ctx.checkout, ticket: ctx.tic
     if (process.env.BATON_VERBOSE) process.stderr.write('baton: ' + ${JSON.stringify(`${b.id}/${leg}`)} + ' ticket ' + ctx.ticket.id + ': delivered at ' + shas.join(', ') + ', on the default branch — a person confirms\\n');
     return { suspend: true, reached: 'delivered', next: 'confirm', delivered: shas[0], detail: deliveredDetail(shas, claimed.evidence), ...(conclusion ? { conclusion } : {}) };
   }` : ''}
-${verify ? `  try { await verifyPrOpen({ checkout: ctx.checkout, ticket: ctx.ticket, branchPatterns: patterns, repositories: ticketRepositories(ticketText, settings.repos) }, legRun); } catch (e) { throw failed(e); }
-  if (process.env.BATON_VERBOSE) process.stderr.write('baton: ' + ${JSON.stringify(`${b.id}/${leg}`)} + ' ticket ' + ctx.ticket.id + ': the forge verified an open PR on a branch matching ' + patterns.join(' or ') + '\\n');
-` : ''}  return { ...(${position}), ...(conclusion ? { conclusion } : {}) };`}
+${verifySource}  return { ...(${position}), ...(conclusion ? { conclusion } : {}) };`}
 }
 // The close's ctx, one line (B-96's review round 2): everything the stub hands back, plus the
 // repository's default branch — the claim answer's \`default_branch\`, which the runner puts in
@@ -2088,7 +2167,7 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
   for (const leg of overrides) {
     if (!runnerLegs(b).includes(leg)) throw new Error(`--override ${leg}: ${b.id} has no such leg — its legs are ${runnerLegs(b).join(', ')}`);
   }
-  const entry = { ...courseEntry(b.id, Object.keys(b.course.legs)), skill: b.skill, ...(sourceOf(b.id) ? { source: sourceOf(b.id)! } : {}) };
+  const entry = { ...courseEntry(b), ...(sourceOf(b.id) ? { source: sourceOf(b.id)! } : {}) };
   let settings: BatonJson;
   let changed: string | null = null;
   let rewriteNamed = force;

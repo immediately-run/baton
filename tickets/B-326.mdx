@@ -1,0 +1,71 @@
+---
+title: "B-326 — Baton stops writing ticket files: baton tickets keeps next and check, and every ticket write goes through dibber"
+id: B-326
+project: baton
+status: available
+updated: 2026-11-25
+repos:
+  - baton
+tags:
+  - roadmap-item
+tier: judgement
+description: "Retire baton tickets new|claim|set|done (keeping next, Baton's id sequences, and the read-only check, which takes over claim's Ask-Baton-first and rules re-read checks); baton repo init writes .dibber/config.json with Baton as the coordinator; the bug-report file leg and create-spec's markers write through dibber; docs, skills and CLAUDE.md point at dibber. Needs dibber DIB-33. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the owner, 2026-11-24 (in a Claude Code session on bering): "the baton cli should not write ticket files, thats dibber's job". Their answers in the same session: `baton tickets` keeps `next` and `check` only, and the course legs that file or change tickets go through `dibber` too.
+
+**Spec:** [BATON_SPEC §4.2](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-2) ([R-BTN-74](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-2): the ticket source Baton reads), [§4.3](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-3) ([R-BTN-199](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-3): unchanged: Baton keeps allocating), [§5.3](../spec/BATON_SPEC/05-courses.md#sec-5-3) ([R-BTN-83](../spec/BATON_SPEC/05-courses.md#sec-5-3): positions, the markers `create-spec` writes). Run `npm run spec:impact` on each, and on the terms `baton tickets new`, `tickets claim`, `tickets set` and `tickets done`. Amend any rule, scenario or gate that names those commands, by pull request, before the code changes.
+
+**Depends on:** none in this repository.
+
+**Needs:** Dibber's DIB-33, which adds `dibber new --id` and a coordinator, `--body-file` and `--field`, and `dibber set --field`. It is built ([dibber#21](https://github.com/immediately-run/dibber/pull/21), merged 2026-11-25) but not yet released: `@immediately-run/dibber` 0.3.0 predates it. Build and test against a pinned fake `dibber` as the tests below say. Pin the stub's `dibber` to the first release that carries DIB-33; if none is out when the PR is ready, say so in the PR and leave the pin for the owner (releasing is the owner's).
+
+### What to build
+
+1. **Retire `baton tickets new|claim|set|done`.** Keep `baton tickets next` (Baton's sequences, R-BTN-199) and `baton tickets check` (read only: Baton's reading of a store). A retired verb is refused with one line naming its `dibber` replacement. Examples: `dibber new --title … --body-file …`, which takes its id from Baton through `.dibber/config.json`'s coordinator, and `dibber set <id> in-review --pr <url>`.
+   - **What `claim` checked moves, it is not dropped.**
+     - Its read of Baton's station (B-129, *Ask Baton first*) becomes `baton tickets check <id> --claimable`, or the existing `baton ticket history`, whichever the implementer finds simpler.
+     - Its rules re-read refusal (a rule a history entry names after the ticket answered for it) moves to that same read-only check.
+     - The status write becomes `dibber claim`.
+   - Remove the PR-filing and `--direct` push code (`newTicket`, `baton-ticket/<id>` branches, the `**Used by:**` reverse lines) and its tests. The reverse-mention lines go with it, unless Dibber takes them over.
+2. **`baton repo init` writes the coordinator.** It writes a `.dibber/config.json` beside `.baton/baton.json`: the store's folder from `items`, the prefix from `ticket_prefix`, and the coordinator command from `baton tickets next`. Where a `.dibber/config.json` exists it adds the coordinator, never overwrites the rest, and says what it changed.
+3. **The course legs.**
+   - The `bug-report` course's `file` leg (`src/defaults/courses/bug-report/file.md`) files through `dibber new` with Baton's id, then commits and pushes the filing on its `baton-ticket/<id>` branch itself.
+   - `create-spec`'s `converse` and `address` markers (`closeTicket`, `src/defaults/ticket-state.ts`) are written with `dibber set --field`. The git plumbing that commits them to the default branch stays Baton's, because the sync must find them there.
+   - The stub that runs a leg gets `dibber` the way it gets `baton`: pinned, and named in `.baton/baton.json` or the course.
+4. **Docs and skills.** Update `CLAUDE.md` (*Claiming a ticket*), `README.md`, `tickets/HOW-TICKETS-WORK.md`, `tickets/home.mdx`, the `babysit` and `spec-review` skills, `docs/standard-courses.mdx` and `docs/runbooks/local-home.mdx`. Leave dated history pages (`docs/plans/`, `docs/review/`, `docs/interventions.mdx`) as they are.
+   - `CLAUDE.md` and the skills are standing guidance. Their change lands only through the owner's PR review.
+
+### Trust
+
+The coordinator command in `.dibber/config.json` is repository data that `dibber` executes. `baton repo init` writes it from a fixed template. A leg runs only the `dibber` its stub pins, never a command a ticket or a branch names.
+
+### Invariants
+
+- Baton stays the only allocator (R-BTN-199). No path files an id from a scan unless `--offline` says so.
+- Separate tickets never share a write target. A filing still lands alone on its own branch.
+- The sync reads tickets exactly as before: no change to R-BTN-74's source or to the board.
+
+### Tests
+
+- Each retired verb is refused with its replacement named. `next` and `check` are unchanged.
+- `repo init` writes, or merges into, `.dibber/config.json`.
+- The `bug-report` `file` leg and the `create-spec` marker legs, through the local host with a pinned fake `dibber`, file and mark as before. Name the scenarios; take new numbers with `baton tickets next scenario`.
+
+### Exit criteria
+
+- [ ] `baton tickets` offers `next` and `check` only. The retired verbs name their `dibber` replacements.
+- [ ] The standard courses' ticket writes go through `dibber`. The scenarios pass on the local host.
+- [ ] Docs, skills and `CLAUDE.md` point at `dibber`. `npm test`, `npm run typecheck` and `npm run check:spec` green.
+- [ ] Merged under the review gate.
+
+**Requires:** none.
+
+## Status
+
+_filed 2026-11-24._

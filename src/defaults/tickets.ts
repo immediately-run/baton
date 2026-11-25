@@ -992,7 +992,7 @@ export async function ticketsCheckMain(argv: string[], io: TicketsIo = {}): Prom
 
 /** B-133: the ticket-PR view against `base`, as `baton tickets check --pr` prints it, and the
  *  finding when a PR's own description claims what the computation contradicts. The view is the
- *  vendored library's (src/shared/ticketPr.mjs, R-BTN-37 — docs' scripts/lib is the source);
+ *  shared library's (src/shared/ticketPr.mjs, R-BTN-37);
  *  git is read here. Returns how many findings it added; every line it prints goes to `lines`. */
 function ticketPrFindings(root: string, settings: TicketSettings, base: string | null, claimedStatusOnly: boolean, forgePath: string | null, lines: string[]): number {
   if (base == null) return 0;

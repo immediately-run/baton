@@ -83,7 +83,7 @@ function ClaimBlock({ repository, claim, now }: { repository: string; claim: Run
           {claim.leg != null ? <> · <CliLine>baton leg log <Text value={claim.ticket_id} /> <Text value={claim.leg} /></CliLine></> : null}
         </dd></div>
         {claim.session_url != null ? (
-          <div className="kv-row"><dt>session</dt><dd><ExtLink href={claim.session_url} kind="session" showHost>Open session</ExtLink></dd></div>
+          <div className="kv-row"><dt>session</dt><dd><ExtLink href={claim.session_url} kind="session" showHost /></dd></div>
         ) : null}
       </dl>
     </div>
