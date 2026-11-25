@@ -21,6 +21,7 @@
     "test/unit/runner-mask.test.ts",
     "test/unit/runner-replay.test.ts",
     "test/integration/S-BTN-41.runner.test.ts",
+    "test/integration/S-BTN-313.runner-refresh.test.ts",
     "test/integration/S-BTN-26.runner.test.ts",
     "test/integration/S-BTN-21.machine-lock.test.ts",
     "test/integration/S-BTN-227.runner.test.ts",
