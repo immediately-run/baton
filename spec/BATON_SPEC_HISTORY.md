@@ -22,12 +22,12 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   person on the dashboard a human (R-BTN-155, R-BTN-204, R-BTN-186, R-BTN-185).**
   Rules changed: R-BTN-155 (rewritten), R-BTN-186, R-BTN-181, R-BTN-116, R-BTN-129, R-BTN-127,
   R-BTN-57, R-BTN-159, R-BTN-16, the policy table's `attestations` default, §11's preamble,
-  §12.1, §13.2, §14; S-BTN-308, G-BTN-57. Added: R-BTN-204, S-BTN-313, S-BTN-314, S-BTN-315,
-  G-BTN-174, S-BTN-316; four open questions; one Decisions entry added. Also changed: S-BTN-124,
+  §12.1, §13.2, §14; S-BTN-308, G-BTN-57. Added: R-BTN-204, S-BTN-321, S-BTN-322, S-BTN-323,
+  G-BTN-174, S-BTN-324; four open questions; one Decisions entry added. Also changed: S-BTN-124,
   S-BTN-185, S-BTN-250, S-BTN-270, S-BTN-276, S-BTN-278, S-BTN-279, R-BTN-185, R-BTN-188,
   R-BTN-191, §12.2, §12.8's deployment list, `human-gates`, three Decisions entries changed and
   one replaced, the linked proposals (people and dashboard, data model and API, security) and
-  `docs/security-model.mdx`. The new ids and B-320–B-322 were taken by R-BTN-199's offline scan,
+  `docs/security-model.mdx`. The new ids and B-338–B-340 were taken by R-BTN-199's offline scan,
   the session holding no Baton key; the duplicate check at merge is their guard. The
   owner, 2026-11-23, on finding that the dashboard could not answer a person leg ("This page cannot
   answer it — an administrator's session answers no person leg"): "this is fundamentally
@@ -51,7 +51,7 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   session routes have no key route and no CLI command — force-reap, clearing a fence, confirming
   or releasing a completion, confirming an adoption, resolving a scope finding, accepting a held
   post, cutover, a resync dispatch, a status request and wind-down — the same defect the other
-  way (B-321). Review, round one: two fresh reviewers given the diff, one for consistency, one
+  way (B-339). Review, round one: two fresh reviewers given the diff, one for consistency, one
   for security. Security found that "a session may do what its key may" let a session mint
   sessions, confirm its own acts, and mint API, registration and MCP credentials that outlive it,
   and take the tenant's export; that authority-changing acts lost their confirmation; that a
@@ -80,8 +80,8 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   an owner key and a browser can open a session by code and act as the human; and, where a
   repository's `human_key` is `hardware`, a security-key touch per human act, over the session
   alone, so `human-gates` stays true. R-BTN-185 now says so; R-BTN-181's `human` writer, R-BTN-188's
-  `human` approver entry, R-BTN-57, §12.1, S-BTN-278, S-BTN-313, the Decisions entry on human-only
-  credentials and the open question (now MCP's alone) follow; S-BTN-316 added; B-322 builds it.
+  `human` approver entry, R-BTN-57, §12.1, S-BTN-278, S-BTN-321, the Decisions entry on human-only
+  credentials and the open question (now MCP's alone) follow; S-BTN-324 added; B-340 builds it.
   Review, round two (the owner: "yes" to a second round): the same two kinds of fresh reviewer, on
   the whole branch. Security found that the hardware touch could come from a software
   authenticator registered by any human-only key, was replayable and bound to no person, and that

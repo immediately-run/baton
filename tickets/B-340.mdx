@@ -1,6 +1,6 @@
 ---
-title: "B-322 — A person on the dashboard is a human: sessions write as `human` and meet human-only lists, with a security-key touch per act under `human_key: hardware`"
-id: B-322
+title: "B-340 — A person on the dashboard is a human: sessions write as `human` and meet human-only lists, with a security-key touch per act under `human_key: hardware`"
+id: B-340
 project: baton
 status: available
 updated: 2026-11-23
@@ -9,7 +9,7 @@ repos:
 tags:
   - roadmap-item
 tier: judgement
-description: "Build R-BTN-185 as amended 2026-11-23: every administrator's, owner's and member's dashboard session acts as `human` beside its key's role — its attestations recorded with writers `human` and the role, counted where the policy admits either; a `human` approver entry matched by a session whose role may take the action. Under `human_key: hardware`, a session's act that counts only because it is `human` also carries a WebAuthn assertion over the action and its parameters, by a security key registered with a human-only key's signature (`baton human-key webauthn add`, one migration for the credentials), else `forbidden`. S-BTN-316. Requires: B-76, B-195."
+description: "Build R-BTN-185 as amended 2026-11-23: every administrator's, owner's and member's dashboard session acts as `human` beside its key's role — its attestations recorded with writers `human` and the role, counted where the policy admits either; a `human` approver entry matched by a session whose role may take the action. Under `human_key: hardware`, a session's act that counts only because it is `human` also carries a WebAuthn assertion over the action and its parameters, by a security key registered with a human-only key's signature (`baton human-key webauthn add`, one migration for the credentials), else `forbidden`. S-BTN-324. Requires: B-76, B-195."
 topics:
   - baton
 owns: {}
@@ -79,11 +79,11 @@ under `human_key: hardware`, "only with a per-act key touch".
 
 ### Tests
 
-- S-BTN-316 on both hosts; S-BTN-278 and S-BTN-313 as amended.
+- S-BTN-324 on both hosts; S-BTN-278 and S-BTN-321 as amended.
 
 ### Exit criteria
 
-- [ ] S-BTN-316 passes on both hosts
+- [ ] S-BTN-324 passes on both hosts
 - [ ] `npm test`, `npm run typecheck`, `npm run check:spec` and `npm run check:tickets` green
 
 ## Status

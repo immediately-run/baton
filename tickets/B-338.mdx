@@ -1,6 +1,6 @@
 ---
-title: "B-320 — Repository members: keys an owner adds that read one repository and answer the person legs whose asks labels they hold, on the CLI and the dashboard alike"
-id: B-320
+title: "B-338 — Repository members: keys an owner adds that read one repository and answer the person legs whose asks labels they hold, on the CLI and the dashboard alike"
+id: B-338
 project: baton
 status: available
 updated: 2026-11-23
@@ -9,7 +9,7 @@ repos:
 tags:
   - roadmap-item
 tier: judgement
-description: "Build R-BTN-204: the `member` role (§12.1's one role per key), `repository_members` with each member's `answers` labels (one migration), `owner member add|answers|remove` and `POST /v1/owner/{repository}/members` as `approvers.members` actions, the repository reads open to a member, `POST …/attestations` taking a member's `std:decision@1` for a leg whose `asks` label it holds (writer `member`, R-BTN-181; the `cooperative` default admitting it), `admin key revoke` removing a member key everywhere, and members' dashboard sessions on B-76's per-role sessions with B-195's answer path. S-BTN-313, S-BTN-315 for the member role. Requires: B-76, B-195."
+description: "Build R-BTN-204: the `member` role (§12.1's one role per key), `repository_members` with each member's `answers` labels (one migration), `owner member add|answers|remove` and `POST /v1/owner/{repository}/members` as `approvers.members` actions, the repository reads open to a member, `POST …/attestations` taking a member's `std:decision@1` for a leg whose `asks` label it holds (writer `member`, R-BTN-181; the `cooperative` default admitting it), `admin key revoke` removing a member key everywhere, and members' dashboard sessions on B-76's per-role sessions with B-195's answer path. S-BTN-321, S-BTN-323 for the member role. Requires: B-76, B-195."
 topics:
   - baton
 owns: {}
@@ -91,12 +91,12 @@ rule wins.
 
 ### Tests
 
-- S-BTN-313 on both hosts; S-BTN-315 for the member role; S-BTN-307 extended with a member's
+- S-BTN-321 on both hosts; S-BTN-323 for the member role; S-BTN-307 extended with a member's
   session; G-BTN-57's member clause.
 
 ### Exit criteria
 
-- [ ] S-BTN-313 passes on both hosts, and S-BTN-315 for the member role
+- [ ] S-BTN-321 passes on both hosts, and S-BTN-323 for the member role
 - [ ] `npm test`, `npm run typecheck`, `npm run check:spec`, `npm run check:wiki` and
   `npm run check:tickets` green
 

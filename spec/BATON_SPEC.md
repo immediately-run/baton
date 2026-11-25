@@ -493,10 +493,10 @@ is stale. Never edit it by hand.
 | S-BTN-308 | sign-in through Cloudflare Access | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-309 | work done outside Baton | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-312 | a board post missing a queued leg | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| S-BTN-313 | repository members | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| S-BTN-314 | one session per tab, its role chosen after sign-in | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| S-BTN-315 | a session is as capable as its key | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| S-BTN-316 | a person on the dashboard is a human | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-321 | repository members | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-322 | one session per tab, its role chosen after sign-in | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-323 | a session is as capable as its key | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-324 | a person on the dashboard is a human | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 
 ## Gates
 

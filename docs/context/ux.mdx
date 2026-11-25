@@ -90,18 +90,18 @@ Each gap needs its own ticket; these rules alone do not close them.
 - **Explaining terms (rule 3):** capabilities, stations and gate codes are drawn as bare codes.
 - **Signing in (rule 1):** an administrator signs in through Cloudflare Access or a one-time
   link (R-BTN-155). Owners' and members' sessions, the key chosen after authenticating and one
-  session per tab are specified but not built (B-76, B-320).
+  session per tab are specified but not built (B-76, B-338).
 - **Answering a person leg (question 2, rule 1):** the Conditions screen draws each option with
   its `baton decision answer` line and "This page cannot answer it": no session today is an
-  owner's or a member's, and no session can write the answer (B-76, B-195, B-219, B-320).
+  owner's or a member's, and no session can write the answer (B-76, B-195, B-219, B-338).
   A person's session is a human (R-BTN-185), so it answers where the policy counts only a human's
   answer too; under `human_key: hardware` each such answer also takes a security-key touch
-  (B-322).
+  (B-340).
 - **Session-only acts (rule 1, the other way):** force-reap, clearing a fence, confirming or
   releasing a completion, confirming an adoption, resolving a scope finding, accepting a held
   post, cutover, dispatching a resync, and a runner's status request or wind-down have a
   dashboard route and no CLI command; hold, unhold, expedite and Stop have commands in
-  R-BTN-127's table but only a dashboard route (R-BTN-186, B-321).
+  R-BTN-127's table but only a dashboard route (R-BTN-186, B-339).
 - **A ticket's history (question 5):** a ticket's page draws its history and attempts, with the
   recorded end reason. But no screen jumps to a ticket by id, and a failed leg's agent's last
   message is only in the host's leg archive.

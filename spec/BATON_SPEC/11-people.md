@@ -267,7 +267,7 @@ built; their design is [the people and dashboard proposal](../proposals/people-a
   | `owner grant role <repository> <fingerprint> --role runner\|trusted-runner [--domain <label>] [--checker]` | sets a grant's role, domain and checker mark (proposed: [security](../proposals/security.md)) | R-BTN-180 |
   | `owner grant flags <repository> <fingerprint> --sync\|--no-sync` | sets a grant's `sync` flag | R-BTN-146 |
   | `owner owner add <repository> <pub>`, `owner owner remove <repository> <fingerprint>` | adds or removes an owner | R-BTN-58 |
-  | `owner member add <repository> <pub> --answers <label,…>`, `owner member answers <repository> <fingerprint> <label,…>`, `owner member remove <repository> <fingerprint>` | adds, changes or removes a member (proposed: B-320) | R-BTN-204 |
+  | `owner member add <repository> <pub> --answers <label,…>`, `owner member answers <repository> <fingerprint> <label,…>`, `owner member remove <repository> <fingerprint>` | adds, changes or removes a member (proposed: B-338) | R-BTN-204 |
   | `owner bar add <repository> --course <c> --tag <t>`, `owner bar lift <repository> <id>`, `owner bar follow <repository> <course>` | the owner's bars | R-BTN-67, R-BTN-142 |
   | `owner settings show <repository>`, `owner settings set <repository>` | reads (`owner.grant.list`) or sets the owner settings | R-BTN-66, R-BTN-140 |
   | `owner policy show <repository>`, `owner policy diff <repository> [<version>]`, `owner policy log <repository>`, `owner policy set <repository> <file>`, `owner policy apply <repository> <preset>` | reads (`repo.policy`, `owner.policy.log`) or sets the policy | R-BTN-188 |
@@ -418,7 +418,7 @@ built; their design is [the people and dashboard proposal](../proposals/people-a
     no part). Once an administrator key is configured, only a session authenticates `/v1/ui/*`
     (R-BTN-16).
   - **Not built:** owners' and members' sessions, the role chosen after authentication, one
-    session per tab and signing out of the browser (B-76, B-320); sign-in by a code the key
+    session per tab and signing out of the browser (B-76, B-338); sign-in by a code the key
     holder confirms (`baton admin open`, `owner open` or `member open` binding it with that key,
     the session that key's), session revocation and confirmation codes
     ([the proposal, §3](../proposals/people-and-dashboard.md#3-sign-in-sessions-and-confirmed-actions);

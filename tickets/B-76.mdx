@@ -10,7 +10,7 @@ tags:
   - roadmap-item
 order: 1125
 tier: judgement
-description: "Build BATON_SPEC R-BTN-155's sessions for every person role (R-BTN-186: the dashboard carries each role the CLI does): an administrator's, an owner's and a member's session, each as capable as its key but R-BTN-186's key-only acts, calling its actions at their key routes; sign-in codes with no role, bound by `baton admin|owner|member open` and taking the binding key's role; Cloudflare Access lines binding an email to several keys of any person role, the key chosen after authentication (`choose`, then `{access: true, key}`); one session per browser tab under one cookie whose value is replaced at every sign-in (a replaced value in use ends the browser's sessions), each tab naming its session in `Baton-Session`; logout of a tab or the whole browser; the key's confirmation of authority-changing session acts; `owner.sessions.revoke`; `admin.key.revoke` removing an owner or member key from every repository and refusing an administrator's key `invalid-params` (R-BTN-57); `baton admin keys set` refusing a line whose key holds another role, a host loading one anyway raising `baton.admin-key-conflict` (§12.1). S-BTN-32, S-BTN-124, S-BTN-126, S-BTN-314, S-BTN-315, G-BTN-57, G-BTN-144, G-BTN-174. Requires: B-25."
+description: "Build BATON_SPEC R-BTN-155's sessions for every person role (R-BTN-186: the dashboard carries each role the CLI does): an administrator's, an owner's and a member's session, each as capable as its key but R-BTN-186's key-only acts, calling its actions at their key routes; sign-in codes with no role, bound by `baton admin|owner|member open` and taking the binding key's role; Cloudflare Access lines binding an email to several keys of any person role, the key chosen after authentication (`choose`, then `{access: true, key}`); one session per browser tab under one cookie whose value is replaced at every sign-in (a replaced value in use ends the browser's sessions), each tab naming its session in `Baton-Session`; logout of a tab or the whole browser; the key's confirmation of authority-changing session acts; `owner.sessions.revoke`; `admin.key.revoke` removing an owner or member key from every repository and refusing an administrator's key `invalid-params` (R-BTN-57); `baton admin keys set` refusing a line whose key holds another role, a host loading one anyway raising `baton.admin-key-conflict` (§12.1). S-BTN-32, S-BTN-124, S-BTN-126, S-BTN-322, S-BTN-323, G-BTN-57, G-BTN-144, G-BTN-174. Requires: B-25."
 topics:
   - baton
 owns: {}
@@ -85,7 +85,7 @@ None: a checkout, a terminal and a browser.
    §13.2); the cookie lives as long as its longest session; a request carrying a replaced value
    ends every session of that browser. A tab with no session id signs in; nothing lists sessions to it.
    `ui.logout` ends the tab's session; `{all: true}` ends every session bound to the cookie and
-   clears it. Members' sessions land with B-320; build the role as data, not an owner special
+   clears it. Members' sessions land with B-338; build the role as data, not an owner special
    case.
 9. **A session calls its actions at their key routes** (R-BTN-155 *Where a session calls*,
    R-BTN-16, §14's *Routes a session shares with the keys*). The front resolves the cookie and
@@ -95,7 +95,7 @@ None: a checkout, a terminal and a browser.
    a registration token or an MCP key, export and import). An act an `approvers.*` list governs,
    or that changes an owner, a member, a grant or a credential, answers `202 {confirm_code}` and
    waits for the key's confirmation (item 4); until item 4 lands, it is refused to a session and
-   its control is drawn disabled, naming the command. S-BTN-315 and G-BTN-174.
+   its control is drawn disabled, naming the command. S-BTN-323 and G-BTN-174.
 
 ### Do not
 
@@ -113,7 +113,7 @@ None: a checkout, a terminal and a browser.
 - Unit: `baton admin keys set` refuses a line whose key is an owner key; a host started with
   such a line refuses that key's administrator requests and raises `baton.admin-key-conflict`.
 
-- S-BTN-314 (the role choice and per-tab sessions) and S-BTN-315 for the owner role (every owner
+- S-BTN-322 (the role choice and per-tab sessions) and S-BTN-323 for the owner role (every owner
   action through a session, a person leg's answer with B-195's route included); G-BTN-174's
   check over §14's rows.
 
@@ -145,6 +145,6 @@ _(2026-11-23: widened by the owner's ruling that the dashboard is as capable as 
 person role (R-BTN-186) — "the dashboard should also be available for repo owners and regular users
 as well" and "one session per browser tab / window … If you have several roles then you should
 need to pick one during the sign-in process (post authentication)". Item 8 and its tests added;
-R-BTN-155 rewritten in the same spec PR. Members are B-320's.)_
+R-BTN-155 rewritten in the same spec PR. Members are B-338's.)_
 
 _(2026-11-23: rules re-read: R-BTN-155, R-BTN-186, R-BTN-129)_
