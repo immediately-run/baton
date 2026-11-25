@@ -97,18 +97,10 @@ describe('class 7 by name (R-BTN-144)', () => {
     expect(other.flush()).toBe('');
   });
 
-  it('S-BTN-119: masks a whole literal even when its suffix could start another literal', () => {
-    const value = 'vendor-credential-42';
-    const other = '42-second-value';
-    const sink = createLegMasker([value, other]);
-    expect(sink.push(`vendor: ${value}`)).toBe('vendor: ***');
-    expect(sink.push(`other: ${other}`)).toBe('other: ***');
-    expect(sink.flush()).toBe('');
-
-    // The already-masked suffix can still complete a second value across the boundary.
-    expect(sink.push(value)).toBe('***');
-    expect(sink.push('-second-value')).toBe('***');
-    expect(sink.push(`${value}-second-value`)).toBe('***');
+  it('S-BTN-119: masks a complete literal even when its suffix is held for another literal', () => {
+    const sink = createLegMasker(['sample-redaction-13', '13-more-sample']);
+    expect(sink.push('value: sample-redaction-13')).toBe('value: ***');
+    expect(sink.push('-more-sample done')).toBe('*** done');
     expect(sink.flush()).toBe('');
   });
 

@@ -76,6 +76,8 @@ import interactionDeliveryGrant from './0080_interaction_delivery_grant.sql';
 import sessionLinkIncarnation from './0081_session_link_incarnation.sql';
 import ticketPrerequisites from './0102_ticket_prerequisites.sql';
 import prerequisiteIdentityAndReady from './0103_prerequisite_identity_and_ready.sql';
+import runnerIdle from './0121_runner_idle.sql';
+import runnerIdleRepositories from './0122_runner_idle_repositories.sql';
 import { isUniqueViolation, logEvent, mintRunId, type Random } from '../core/db';
 import type { Store } from '../core/ports';
 
@@ -232,4 +234,6 @@ export const MIGRATIONS: Migration[] = [
   { id: 101, sql: pinnedContracts },
   { id: 102, sql: ticketPrerequisites },
   { id: 103, sql: prerequisiteIdentityAndReady },
+  { id: 121, sql: runnerIdle },
+  { id: 122, sql: runnerIdleRepositories },
 ];

@@ -30,6 +30,7 @@ import { REPORT_HORIZON_MS } from './validate';
 import type { Blocks } from './blocks';
 import type { Conditions } from './conditions';
 import type { History } from './history';
+import type { IdleDetail, IdleGate } from './idleReasons';
 const EXPEDITE_BOUND = 2; // §7.2 rule 2, advice
 /** §2e: a claim regressed this long is listed under Needs you. */
 export const REGRESSED_FLAG_MS = 30 * 60_000;
@@ -58,7 +59,8 @@ export interface Ctx {
    *  request's transaction has committed. */
   dispatch: (kind: 'mirror' | 'sync', ticketId: string) => void;
   /** R-BTN-75: whether a claim holds a ticket moves its blocked state; each change says so. */
-  blocks: Pick<Blocks, 'held' | 'forRunner' | 'raise' | 'answer' | 'answerPosted' | 'hasDecision' | 'postedDecision'>;
+  blocks: Pick<Blocks, 'held' | 'forRunner' | 'raise' | 'answer' | 'answerPosted' | 'hasDecision' | 'postedDecision' | 'unavailableReadings'>;
+  resourceReadings?: Pick<Resources, 'stateReading'>;
   /** R-BTN-81, R-BTN-85: the ticket's history and Baton's disagreements with git. */
   history: Pick<History, 'record' | 'discrepancy'>;
   /** R-BTN-79: a course's intake, `closed` while any of its legs is over its `max_queue`. */
@@ -557,8 +559,9 @@ export class Claims {
   }
 
   /** `gatesFor`'s inputs for one ticket (§7.2), from Baton's own tables (R-BTN-33). */
-  private gate(w: RunnerFacts | null, item: ItemFacts, leg: string, phase: Phase, opts: { except?: number; holderBars?: string[] } = {}): GateVerdict {
+  private gate(w: RunnerFacts | null, item: ItemFacts, leg: string, phase: Phase, opts: { except?: number; holderBars?: string[]; removed?: (verdict: GateVerdict, facts: GateContext) => void; missingCapabilities?: (names: string[]) => void } = {}): GateVerdict {
     const ticket: GateTicket = { repository: item.repository, course: item.course, tier: item.tier, requires: item.requires, operator_only: item.operator_only, tiers: this.ladder(item.repository) };
+    const core = this;
     const facts: GateContext = {
       now: this.c.now(),
       claims: this.rows(`SELECT status, confirmed_at, fence_pending FROM claims WHERE ticket_id = ? AND id IS NOT ? AND (status = 'active' OR (status = 'completed' AND confirmed_at IS NULL) OR (status = 'reaped' AND fence_pending = 1))`, item.id, opts.except ?? null),
@@ -568,9 +571,9 @@ export class Claims {
         this.rows<{ v: number }>('SELECT min_runner_version AS v FROM courses WHERE repository_id = ? AND id = ?', item.repository, item.course)[0]?.v ?? Number.POSITIVE_INFINITY),
       headObservation: this.memo(this.cache?.head, item.repository, () =>
         this.rows<{ n: number }>('SELECT observation AS n FROM board_head WHERE repository_id = ?', item.repository)[0]?.n ?? 0),
-      lastEndObservation: this.rows<{ n: number | null }>('SELECT MAX(end_observation) AS n FROM claims WHERE ticket_id = ?', item.id)[0]?.n ?? -1,
+      get lastEndObservation() { return core.rows<{ n: number | null }>('SELECT MAX(end_observation) AS n FROM claims WHERE ticket_id = ?', item.id)[0]?.n ?? -1; },
       holderBars: opts.holderBars,
-      ranByKey: w ? this.ranByKey(item, w.credential_id) : [],
+      get ranByKey() { return w ? core.ranByKey(item, w.credential_id) : []; },
       // R-BTN-78: Baton's own decisions refuse nothing advice would not — `baton:retries` sits on a
       // ticket its hold keeps (rule 3), `baton:stalled` on a queued leg posted waiting (rule 1) — so
       // they are left to those rules, whose refusals name the cause; they stay blocks for asking.
@@ -580,9 +583,12 @@ export class Claims {
            AND (? = 'claim' OR b.kind <> 'ticket' OR instr(b.ref, '@') > 0)`, item.id, phase),
       // R-BTN-178: rule 11's fact — the seats claims other than the asking one hold (a claim's
       // own seat never counts against it, so an advance excludes the advancing claim here).
-      seats: this.seatFacts(item, leg, opts.except ?? null),
+      get seats() { return core.seatFacts(item, leg, opts.except ?? null); },
+      missingCapabilities: opts.missingCapabilities,
     };
-    return gatesFor(w && { declared: w.declared, tier_ceiling: this.ceiling(w, item.repository), tags: w.tags, courses: w.courses, grants: w.grants, isolation: w.isolation }, ticket, this.postedLeg(item, leg, phase, !!w), phase, facts);
+    const verdict = gatesFor(w && { declared: w.declared, tier_ceiling: this.ceiling(w, item.repository), tags: w.tags, courses: w.courses, grants: w.grants, isolation: w.isolation }, ticket, this.postedLeg(item, leg, phase, !!w), phase, facts);
+    opts.removed?.(verdict, facts);
+    return verdict;
   }
 
   /** R-BTN-178: the capabilities rule 4 matched for this leg — the ticket's requires clause and
@@ -1048,14 +1054,77 @@ export class Claims {
       return !!item?.station?.next_leg && (!w.courses.length || w.courses.some((k) => k.repository === item.repository && k.course === item.course))
         && (this.gate(w, item, item.station.next_leg, 'claim') as { code?: string }).code === GATE_CODES[9];
     })) {
-      throw new BatonError('stale-skills', 'this runner does not declare the ready tickets’ courses at their min_runner_version — it declares an older version or none (R-BTN-22, R-BTN-65)', { rule: 9 });
+      throw new BatonError('stale-skills', 'this runner does not declare the ready tickets’ courses at their min_runner_version — it declares an older version or none (R-BTN-22, R-BTN-65)', { rule: 9, detail: this.idleDetail(w) });
     }
     // R-BTN-4 (B-188): when every repository the runner serves is at its bound, say so — the
     // runner has no room, which is not the same as nothing to do.
     const served = [...new Set(w.courses.map((k) => k.repository))];
     const full = served.filter((r) => w.held >= this.claimBound(w, r));
     if (w.held > 0 && served.length && full.length === served.length) this.refuseFull(w, full[0]);
-    throw new BatonError('no-eligible-ticket', 'no ready ticket fits this runner');
+    throw new BatonError('no-eligible-ticket', 'no ready ticket fits this runner', { detail: this.idleDetail(w) });
+  }
+
+  /** The indexed recommendation drops held and mismatched legs before it loads them. On a cold
+   *  refusal only, look back at the posted ready set and use the same gate and advice verdicts.
+   *  Start with the key's visible repositories, never with other workers' grants or holdings. */
+  private idleDetail(w: RunnerFacts): IdleDetail {
+    const groups = new Map<string, Map<string, IdleGate>>();
+    for (const { id } of this.rows<{ id: string }>(`SELECT t.id FROM tickets t
+      JOIN repositories p ON p.id = t.repository_id AND p.retired_at IS NULL AND p.cutover_at IS NOT NULL
+      JOIN ticket_stations s ON s.ticket_id = t.id
+      JOIN ticket_next_legs n ON n.ticket_id = t.id AND n.leg = s.next_leg AND n.state = 'ready'
+      WHERE (? IS NULL OR t.repository_id IN (SELECT value FROM json_each(?))) ORDER BY t.id`,
+    w.grants ? 1 : null, JSON.stringify(Object.keys(w.grants ?? {})))) {
+      const item = this.item(id);
+      const leg = item?.station?.next_leg;
+      if (!item || !leg) continue;
+      const why = this.idleGate(w, item, leg);
+      if (!why) continue;
+      const gates = groups.get(item.repository) ?? new Map<string, IdleGate>();
+      groups.set(item.repository, gates);
+      const entry = gates.get(why.gate) ?? { gate: why.gate, count: 0, tickets: [], ...(why.limit ? { limit: why.limit } : {}) };
+      gates.set(why.gate, entry);
+      entry.count++;
+      if (entry.tickets.length < 5) entry.tickets.push(item.id);
+      if (why.capabilities) entry.capabilities = [...new Set([...(entry.capabilities ?? []), ...why.capabilities])].sort();
+      if (why.readings) {
+        const readings = [...(entry.readings ?? []), ...why.readings];
+        entry.readings = [...new Map(readings.map((r) => [JSON.stringify(r), r])).values()].slice(0, 5);
+      }
+    }
+    return { repositories: [...groups].map(([repository, gates]) => ({ repository, gates: [...gates.values()].sort((a, b) => a.gate.localeCompare(b.gate)) })) };
+  }
+
+  private idleGate(w: RunnerFacts, item: ItemFacts, leg: string): Omit<IdleGate, 'count' | 'tickets'> | null {
+    const repo = item.repository;
+    if (this.unsignedControlBlocked().has(repo)) return { gate: 'unsigned-control' };
+    if (w.held >= this.claimBound(w, repo)) return { gate: 'max-claims' };
+    let unconfirmed = false;
+    let missing: string[] | undefined;
+    const verdict = this.gate(w, item, leg, 'claim', {
+      removed: (v, { claims }) => { unconfirmed = !v.ok && v.code === 'claimed' && claims.some((c) => c.status === 'completed'); },
+      missingCapabilities: (names) => { missing = names; },
+    });
+    if (!verdict.ok) {
+      if (verdict.code === 'claimed' && unconfirmed) return { gate: 'unconfirmed-end' };
+      if (verdict.code === 'held') {
+        const retry = this.rows(`SELECT 1 FROM ticket_overrides o JOIN ticket_decisions d ON d.ticket_id = o.ticket_id
+          AND d.decision_id = 'baton:retries' AND d.source = 'baton' WHERE o.ticket_id = ? AND o.hold_reason = 'attempts-exhausted'`, item.id);
+        if (retry.length) return { gate: 'attempts-exhausted' };
+      }
+      if (verdict.rule === 5) {
+        const ladder = this.ladder(repo);
+        const declared = ceilingIn(repo, ladder, w.tier_ceilings, w.tier_ceiling);
+        return fitsTier(item.tier, declared, ladder)
+          ? { gate: 'grant-max-tier', limit: this.ceiling(w, repo) }
+          : { gate: 'declared-tier-ceiling', limit: declared };
+      }
+      return { gate: verdict.code, ...(missing ? { capabilities: missing } : {}) };
+    }
+    const resources = this.resourceAdvice(w.id, item.id, leg);
+    if (resources.length) return { gate: 'resource', readings: this.c.blocks?.unavailableReadings(repo, resources, (instance) => this.c.resourceReadings?.stateReading(instance)) ?? [] };
+    if (this.intakeClosed(item)) return { gate: 'intake' };
+    return null;
   }
 
   /** R-BTN-76: the resources that make `leg` of the ticket advice against, for this runner: the

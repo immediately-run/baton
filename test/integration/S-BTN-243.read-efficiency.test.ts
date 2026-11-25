@@ -98,9 +98,11 @@ describe('S-BTN-243 bounded reads without changing matching', { timeout: 120_000
     expect(plan.some((p) => p.detail.includes('ready_tickets_order'))).toBe(true);
     expect(plan.some((p) => p.detail.includes('TEMP B-TREE'))).toBe(false);
     if (HOST === 'cloudflare') {
-      // Includes the observation response's mandatory 181 ticket versions, not just board POST.
-      expect(cold.read).toBeLessThan(750);
+      // Cold refusals now explain the whole visible ready set (181 legs), not just the indexed
+      // candidates. The warm budget still guards against re-reading any of that set per beat.
+      expect(cold.read).toBeLessThan(2900);
       expect(warm.read).toBeLessThan(60);
+      // Includes the observation response's mandatory 181 ticket versions, not just board POST.
       expect(sync.read).toBeLessThan(350);
       expect(sync.written).toBeLessThan(20);
       expect(sync.log.some((e) => e.sql.includes('FROM tickets t LEFT JOIN ticket_stations'))).toBe(false);
