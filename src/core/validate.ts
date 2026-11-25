@@ -1426,3 +1426,7 @@ export function checkNoticeClaim(v: unknown): number {
   if (!Number.isInteger(b.limit) || (b.limit as number) < 1 || (b.limit as number) > CLAIM_MAX) bad('limit', `must be an integer from 1 to ${CLAIM_MAX}`);
   return b.limit as number;
 }
+/** B-131: the opaque R-BTN-63 run id selects one leg, not all claims of a key. */
+export function checkForgeRun(run: string): void {
+  if (!/^r_[0-9A-HJKMNP-TV-Z]{26}$/.test(run)) bad('run', 'must be a leg run id');
+}
