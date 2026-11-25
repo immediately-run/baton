@@ -3,7 +3,7 @@ title: "B-210 — The ticket page's sections: /tickets/{ticket} gathers every re
 id: B-210
 project: baton-ui-v2
 status: available
-updated: 2026-11-09
+updated: 2026-11-23
 repos:
   - baton
 tags:
@@ -50,7 +50,7 @@ inputs and outputs as URIs), [§4.6](../spec/BATON_SPEC/04-tickets-syncs-board.m
 1. **Sections** (`src/dashboard/screens/tickets/TicketPage.tsx`, one component per section
    under it), all declared to the polling layer together, every value through `Text` or
    `View`:
-   - **Head**: qualified id, title, course, tier, tags, requires as chips, `web_url` as the one
+   - **Head**: qualified id, title, course, ~~tier,~~ tags, requires as chips, `web_url` as the one
      outward link (host shown), parent linking its page, the state mark and word.
    - **Position**: station, the path as stations and legs run with run ids, the queued leg and
      its `source` (course, route or decision; R-BTN-83) — from `ticket.show`; beneath it the
@@ -111,3 +111,5 @@ _filed 2026-11-09, split from B-194 after review._
 
 _2026-11-09 — revised after the second review: the controls split out to B-222 together with
 the two routes they need; the client's link rule applied to history and prerequisite links._
+
+_2026-11-23 — tiers retired (spec/retire-tiers: [BATON_SPEC §6.6](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-6) gate 5, [R-BTN-66](../spec/BATON_SPEC/01-what-baton-is.md#sec-1)): the struck tier clauses are gone from the spec — no ticket tier, runner ceiling, grant `max_tier`, ladder, `ready_by_tier` or `?tier=`. Build the rest without them._

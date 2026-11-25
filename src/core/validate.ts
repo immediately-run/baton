@@ -21,6 +21,10 @@ export const ORIGIN = /^https?:\/\/[A-Za-z0-9.-]+(?::[1-9][0-9]{0,4})?$/;
 /** R-BTN-138's id kind, as a `code_repos` entry stores it: a decimal string. */
 export const FORGE_ID = /^[1-9][0-9]{0,19}$/;
 export const SHA256_HEX = /^[0-9a-f]{64}$/;
+export const KEY_FINGERPRINT = /^SHA256:[A-Za-z0-9+/]{43}$/;
+export const API_KEY_FINGERPRINT = /^bak_[0-9a-f]{16}$/;
+/** A login link's token and a session's value: 32 random bytes, hex. */
+export const SESSION_TOKEN = SHA256_HEX;
 // The id forms of R-BTN-47, each spelled once.
 const REPOSITORY_SRC = '[a-z][a-z0-9-]{0,39}';
 const LOCAL_SRC = '[A-Za-z0-9][A-Za-z0-9._-]{0,63}';
@@ -90,6 +94,36 @@ export const bad = (field: string, why: string): never => {
 const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 const isInt = (v: unknown) => Number.isInteger(v);
 const isTime = (v: unknown) => Number.isInteger(v) && (v as number) >= 0;
+
+/** R-BTN-155: compare only ASCII addresses, without silently trimming or Unicode folding. */
+export function accessEmail(value: unknown): string | null {
+  const address = /^[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\.[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+)*@[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)*$/;
+  return typeof value === 'string' && address.test(value) ? value.toLowerCase() : null;
+}
+
+/** R-BTN-155: one email/fingerprint pair per line; a bad line invalidates the whole binding. */
+export function parseAccessIdentities(text: string): Map<string, string> {
+  const identities = new Map<string, string>();
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.replace(/^[ \t]+|[ \t]+$/g, '');
+    if (!line) continue;
+    const [address, fingerprint, ...extra] = line.split(/[ \t]+/);
+    const email = accessEmail(address);
+    if (!email || !fingerprint || extra.length || !(KEY_FINGERPRINT.test(fingerprint) || API_KEY_FINGERPRINT.test(fingerprint)) || identities.has(email)) {
+      throw new BatonError('unavailable', 'ACCESS_IDENTITIES has a malformed or duplicate line');
+    }
+    identities.set(email, fingerprint);
+  }
+  return identities;
+}
+
+export function checkLogin(body: unknown): { token: string } | { access: true } {
+  if (isObj(body) && Object.keys(body).length === 1) {
+    if (body.access === true) return { access: true };
+    if (typeof body.token === 'string' && SESSION_TOKEN.test(body.token)) return { token: body.token };
+  }
+  return bad('body', 'send exactly one of the link token or access: true');
+}
 
 /** §10.4's free text: at most 500 characters, no control characters, none of `< > { }`. */
 export function freeText(v: unknown, field: string, max = FREE_TEXT_MAX): string {
@@ -209,6 +243,22 @@ export const clampConcurrency = (n: unknown) => (isInt(n) ? Math.min(MAX_CLAIMS_
 /** R-BTN-107: the isolation modes a heartbeat may declare. */
 export const ISOLATIONS: readonly Heartbeat['isolation'][] = ['attached', 'process', 'session'];
 
+/** Shared by the heartbeat boundary and the runner before it adopts a new declaration. */
+export function checkDeclaredCourses(rawCourses: unknown): Heartbeat['courses'] {
+  if (!Array.isArray(rawCourses) || rawCourses.length > COURSES_MAX) bad('courses', `must be a list of at most ${COURSES_MAX}`);
+  const declaredCourses = new Set<string>();
+  return (rawCourses as unknown[]).map((c, i) => {
+    if (!isObj(c)) bad(`courses[${i}]`, 'must be an object');
+    const x = c as Record<string, unknown>;
+    const repository = checkRepositoryId(x.repository, `courses[${i}].repository`);
+    const course = matches(COURSE_ID, `courses[${i}].course`)(x.course);
+    if (!isInt(x.version) || (x.version as number) < 0 || (x.version as number) > COURSE_VERSION_MAX) bad(`courses[${i}].version`, 'must be a non-negative integer');
+    if (declaredCourses.has(`${repository}:${course}`)) bad(`courses[${i}]`, `repeats ${repository}:${course}`);
+    declaredCourses.add(`${repository}:${course}`);
+    return { repository, course, version: x.version as number };
+  });
+}
+
 export function checkHeartbeat(body: unknown, transcriptRepos: string[]): Heartbeat {
   if (!isObj(body)) bad('body', 'must be a JSON object');
   const b = body as Record<string, unknown>;
@@ -231,19 +281,7 @@ export function checkHeartbeat(body: unknown, transcriptRepos: string[]): Heartb
   if (!TIERS.includes(tier as never)) bad('tier_ceiling', `must be one of ${TIERS.join(', ')}`);
   // R-BTN-22: the skills version is each course's version, declared per course; a sidecar that
   // still sends `skills_version` is not refused for it.
-  const rawCourses = b.courses ?? [];
-  if (!Array.isArray(rawCourses) || rawCourses.length > COURSES_MAX) bad('courses', `must be a list of at most ${COURSES_MAX}`);
-  const declaredCourses = new Set<string>();
-  const courses = (rawCourses as unknown[]).map((c, i) => {
-    if (!isObj(c)) bad(`courses[${i}]`, 'must be an object');
-    const x = c as Record<string, unknown>;
-    const repository = checkRepositoryId(x.repository, `courses[${i}].repository`);
-    const course = matches(COURSE_ID, `courses[${i}].course`)(x.course);
-    if (!isInt(x.version) || (x.version as number) < 0 || (x.version as number) > COURSE_VERSION_MAX) bad(`courses[${i}].version`, 'must be a non-negative integer');
-    if (declaredCourses.has(`${repository}:${course}`)) bad(`courses[${i}]`, `repeats ${repository}:${course}`);
-    declaredCourses.add(`${repository}:${course}`);
-    return { repository, course, version: x.version as number };
-  });
+  const courses = checkDeclaredCourses(b.courses ?? []);
   if (b.last_activity_at !== undefined && !isTime(b.last_activity_at)) bad('last_activity_at', 'must be epoch ms');
   if (b.test_harness !== undefined && typeof b.test_harness !== 'boolean') bad('test_harness', 'must be a boolean');
   if (b.isolation !== undefined && !ISOLATIONS.includes(b.isolation as Heartbeat['isolation'])) bad('isolation', `must be one of ${ISOLATIONS.join(', ')}`);
@@ -1202,22 +1240,20 @@ export function registrationObject(value: unknown, fields: string[]) {
   return b;
 }
 
-export function tokenScope(value: unknown, tiers: string[]) {
-  const b = registrationObject(value, ['role', 'capabilities', 'max_tier', 'ttl_s', 'uses', 'grant_ttl_s']);
+export function tokenScope(value: unknown) {
+  const b = registrationObject(value, ['role', 'capabilities', 'ttl_s', 'uses', 'grant_ttl_s']);
   if (b.role !== 'runner') bad('role', 'must be runner');
   const capabilities = b.capabilities === undefined ? [] : b.capabilities;
   if (!Array.isArray(capabilities) || capabilities.length > 64 || capabilities.some((c) =>
     typeof c !== 'string' || !CAPABILITY_NAME.test(c) || c === 'human-operator' || c === 'capability:human-operator')) {
     return bad('capabilities', 'must be at most 64 capability names, without human-operator');
   }
-  const maxTier = b.max_tier === undefined ? null : typeof b.max_tier === 'string' && tiers.includes(b.max_tier)
-    ? tiers.indexOf(b.max_tier) : bad('max_tier', `must be one of ${tiers.join(', ')}`);
   const bounded = (field: string, fallback: number, max: number) => {
     const v = b[field] === undefined ? fallback : b[field];
     return typeof v === 'number' && Number.isInteger(v) && v >= 1 && v <= max ? v : bad(field, `must be an integer from 1 to ${max}`);
   };
   const ttl = bounded('ttl_s', 7 * DAY_MS / 1000, 30 * DAY_MS / 1000);
-  return { capabilities: capabilities as string[], maxTier, ttl, uses: bounded('uses', 1, 100), grantTtl: bounded('grant_ttl_s', ttl, 90 * DAY_MS / 1000) };
+  return { capabilities: capabilities as string[], ttl, uses: bounded('uses', 1, 100), grantTtl: bounded('grant_ttl_s', ttl, 90 * DAY_MS / 1000) };
 }
 export const grantedKeySql = (column: string) => `(${column} LIKE 'owner:%' OR ${column} LIKE 'admin:%')`;
 

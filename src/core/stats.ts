@@ -57,7 +57,7 @@ export function durations(ms: number[]): Durations {
 
 export class Stats {
   /** `queues`: the one reader of `leg_queues` and the intake (R-BTN-79). */
-  constructor(private readonly store: Store, private readonly queues?: Queues) {}
+  constructor(private readonly store: Store, private readonly queues: Pick<Queues, 'all' | 'intake'>) {}
 
   private rows<T = Row>(q: string, ...p: unknown[]): T[] {
     return this.store.exec(q, ...p).toArray() as T[];
@@ -148,7 +148,7 @@ export class Stats {
     }
 
     // Each leg's queue as Baton counts it (R-BTN-79), and the intake it closes — Queues' own reads.
-    for (const q of this.queues?.all(repository) ?? []) {
+    for (const q of this.queues.all(repository)) {
       leg(q.course, q.leg).queue = { depth: q.depth, max_queue: q.max_queue };
       course(q.course).intake = this.queues!.intake(repository, q.course);
     }

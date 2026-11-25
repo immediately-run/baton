@@ -74,7 +74,7 @@ describe('POST /v1/sync/board', () => {
     ['65 step kinds', { ...payload(A, null, board.states.A), registry: [course(3, 3, { step_kinds: Array.from({ length: 65 }, (_, i) => `k${i}`) })] }],
     ['a version past the ceiling', { ...payload(A, null, board.states.A), registry: [course(1_000_000_001, 0)] }],
     ['an item naming a malformed course', { sha: A, parent_sha: null, state: { items: [{ id: 'R3-1', title: 't', status: 'available', queue: 'autonomous', node: 'blocked', course: 'Roadmap PR' }] }, ready: [] }],
-    ['a reviewer with no bills', { ...payload(A, null, board.states.A), matrix: { families: {}, agents: { 'review-pr-x': { reviews_on: 'm' } } } }],
+    ['a malformed transcript repository', { ...payload(A, null, board.states.A), transcript_repos: ['not-a-repo'] }],
   ])('refuses %s with invalid-params, writing nothing', async (_what, bad) => {
     const res = await syncCall('/v1/sync/board', bad);
     expect(res.status).toBe(400);
@@ -133,7 +133,7 @@ describe('POST /v1/sync/board', () => {
     // B-142: the providers block the sync still posts is accepted and ignored — no table exists.
     expect(live.providers.accounts.length).toBeGreaterThan(0);
     expect(await rows(`SELECT count(*) AS n FROM sqlite_master WHERE type = 'table' AND name = 'model_providers'`)).toEqual([{ n: 0 }]);
-    expect(await rows('SELECT count(*) AS n FROM reviewer_agents')).toEqual([{ n: Object.keys(live.reviewers).length }]);
+    expect(Object.keys(live.reviewers).length).toBeGreaterThan(0);
   });
 });
 

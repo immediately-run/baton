@@ -3,7 +3,7 @@ title: "B-8 — Baton registration tokens and API keys beside SSH keys"
 id: B-8
 project: baton
 status: available
-updated: 2026-11-03
+updated: 2026-11-23
 repos:
   - baton
 tags:
@@ -37,7 +37,7 @@ Registration tokens let the owner scope what such a session may become; R-BTN-15
 ### What to build
 
 1. **Tokens.** `baton owner token create --repo <id> --role runner [--capabilities …]
-   [--max-tier <t>] [--ttl <d>] [--uses <n>]` and `baton owner token revoke`, in a new
+   ~~[--max-tier <t>]~~ [--ttl <d>] [--uses <n>]` and `baton owner token revoke`, in a new
    migration adding `registration_tokens`. `runner` is the only role: there is no `courier` role
    and no `--asks` (a forge courier registers through `baton owner courier add`, R-BTN-115).
    `--uses` defaults to 1, at most 100; TTL defaults to 7 days, at most 30. Shown once as
@@ -101,3 +101,5 @@ stream was retired with R-BTN-118. Neither has an endpoint to extend here. The M
 `api_keys: false` belongs with the MCP key implementation (B-25). Item 4 remains open: the
 seed stores SSH public keys, so retiring seed authentication without a separate holder cutover
 would strand existing runners. This PR does not perform or verify that migration.)_
+
+_2026-11-23 — tiers retired (spec/retire-tiers: [BATON_SPEC §6.6](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-6) gate 5, [R-BTN-66](../spec/BATON_SPEC/01-what-baton-is.md#sec-1)): the struck tier clauses are gone from the spec — no ticket tier, runner ceiling, grant `max_tier`, ladder, `ready_by_tier` or `?tier=`. Build the rest without them._

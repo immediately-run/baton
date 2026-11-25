@@ -1,0 +1,45 @@
+---
+title: B-320 — Verify B-317 on the next naturally red main on bering
+id: B-320
+project: baton
+status: available
+updated: 2026-11-23
+repos:
+  - baton
+tags:
+  - roadmap-item
+description: Observe a live create-pr run on bering to confirm a pre-existing base failure does not stop the implement push and is not fixed inside an unrelated PR.
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-317
+---
+
+**Brief:** Verify the B-317 behavior the next time a naturally occurring default-branch failure affects a create-pr run on bering. Do not induce a failure on main. The implementation and instruction tests landed in [#396](https://github.com/immediately-run/baton/pull/396); the live observation was not part of that merge.
+
+**Spec:** [BATON_SPEC §5.8](../spec/BATON_SPEC/05-courses.md#sec-5-8) ([R-BTN-131](../spec/BATON_SPEC/05-courses.md#sec-5-8)). No rule change.
+
+**Depends on:** B-317.
+
+### What to build
+
+No code change is required to verify the rollout. Record the run and PR links, the base commit, and the failing test when a suitable run occurs. If the observed behavior differs, record the discrepancy before proposing a fix.
+
+### Trust
+
+Verify the implement and fix legs' reports against their run records, the forge's PR and head, and evidence of the same failure on the named clean base. A PR comment alone does not establish that the failure is pre-existing.
+
+### Invariants
+
+The run-tests gate still judges the pushed head. Separate tickets never share a write target: a pre-existing failure must not be repaired in an unrelated PR.
+
+### Exit criteria
+
+- [ ] On the next naturally red main on bering, an implement leg pushes and opens its PR, naming the failing test, first failing line, and clean base commit under Pre-existing failures.
+- [ ] A fix leg encountering that still-present base failure records the hand-off and does not patch the unrelated failure in its PR. Link the evidence for both legs.
+
+## Status
+
+_filed 2026-11-23._

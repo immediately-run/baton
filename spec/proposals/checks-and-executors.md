@@ -41,10 +41,10 @@ print its way to `success`.
     - A webhook or forge notification only triggers the sync (R-BTN-73, R-BTN-95).
   - **Check-runners.** A check-runner is a key role of its own (§12.1). A repository's owners
     register one with `baton owner check-runner add <repository> <key> --name <hostname>
-    [--capabilities …] [--max-tier <t>]` (R-BTN-127; `POST /v1/owner/{repository}/check-runners`, stored in `check_runners`)
+    [--capabilities …]` (R-BTN-127; `POST /v1/owner/{repository}/check-runners`, stored in `check_runners`)
     and revoke it with the destructive `owner.check-runner.revoke`.
     - The `check_runners` row stands in for a grant: rule 7 reads it for a check ticket, rule 4
-      its `capabilities` and rule 5 its `max_tier`. The hostname binds at `add` and is the name
+      its `capabilities`. The hostname binds at `add` and is the name
       the key heartbeats under (R-BTN-3). A check-runner heartbeats, claims, advances and ends
       check tickets and reports activities and transcripts and writes leg logs, as any runner does.
     - Only a check-runner claims or advances in a check ticket, and a check-runner claims nothing
@@ -324,8 +324,8 @@ Registration tokens are in [R-BTN-117](../BATON_SPEC/08-runners.md#sec-8-2). Sho
 registration token id in the dashboard is proposed.
 
 A machine key's sync (R-BTN-102) is then forbidden where its span forbids it. A machine-key post
-that closes a ticket another runner holds, drops a posted bar, or loosens an author's gate (lowers
-a tier, drops a `requires` clause, removes a `ticket` block or a decision) raises
+that closes a ticket another runner holds, drops a posted bar, or loosens an author's gate (drops
+a `requires` clause, removes a `ticket` block or a decision) raises
 `baton.machine-post` naming the tickets and the key; it is noticed, not stopped.
 
 

@@ -139,11 +139,11 @@ Design: BATON_SPEC §10's check courses and check-runners (B-5).
 
 | Table | Key | Columns | Purpose |
 |---|---|---|---|
-| `check_runners` | `(credential_id, repository_id)` | `capabilities` JSON (expanded), `max_tier`, `added_by`, `added_at`, `revoked_at` | Check-runner keys; the row stands in for a grant (R-BTN-114) |
+| `check_runners` | `(credential_id, repository_id)` | `capabilities` JSON (expanded), `added_by`, `added_at`, `revoked_at` | Check-runner keys; the row stands in for a grant (R-BTN-114) |
 
 | Route | Caller | Body or query | Response | Rules |
 |---|---|---|---|---|
-| `POST /v1/owner/{repository}/check-runners`, `…/check-runners/{fingerprint}/revoke` | owner | `{public_key, name, capabilities?, max_tier?}`; revoke `{confirm: true}` | `{ok: true}` | R-BTN-114 |
+| `POST /v1/owner/{repository}/check-runners`, `…/check-runners/{fingerprint}/revoke` | owner | `{public_key, name, capabilities?}`; revoke `{confirm: true}` | `{ok: true}` | R-BTN-114 |
 
 ## The executor's run record and leg logs
 

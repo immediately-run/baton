@@ -9,6 +9,7 @@
 // 00:00 UTC, so a deployment serving several tenants shows each tenant its own counters only.
 import { logEvent } from './db';
 import type { Store } from './ports';
+import { unreapedCapacityRunnerSql } from './runnerLiveness';
 
 /** R-BTN-87 (§2.3): the envelope — targets, not platform limits. */
 export const ENVELOPE = {
@@ -175,7 +176,7 @@ export class Capacity {
     now: () => number;
     /** §2.1's one Worker var, `BATON_PLAN_LIMITS` (R3-1258): read at each use, so a host that
      *  changes its configuration serves the change. */
-    config?: { BATON_PLAN_LIMITS?: string };
+    config: { BATON_PLAN_LIMITS?: string };
   }) {
     const get = (key: string) => this.c.store.exec<{ value: string }>('SELECT value FROM baton_settings WHERE key = ?', key).toArray()[0]?.value ?? null;
     const put = (key: string, value: string | null) => {
@@ -193,7 +194,7 @@ export class Capacity {
     const one = (q: string) => this.c.store.exec<{ n: number }>(q).toArray()[0]?.n ?? 0;
     const kept = maintainedCounts(this.c.store);
     return {
-      live_runners: one(`SELECT COUNT(*) AS n FROM runners WHERE reaped_at IS NULL AND kind != 'legacy'`),
+      live_runners: one(`SELECT COUNT(*) AS n FROM runners WHERE ${unreapedCapacityRunnerSql}`),
       repositories: one('SELECT COUNT(*) AS n FROM repositories WHERE retired_at IS NULL'),
       live_tickets: kept.tickets,
       history_rows: kept.history,
@@ -223,7 +224,7 @@ export class Capacity {
       requests = 0;
       rows = 0;
     }
-    return { day, requests, rows_written: rows, limits: planLimitsOf(this.c.config?.BATON_PLAN_LIMITS) };
+    return { day, requests, rows_written: rows, limits: planLimitsOf(this.c.config.BATON_PLAN_LIMITS) };
   }
 
   private writeUsage(day: string, requests: number, rows: number): void {

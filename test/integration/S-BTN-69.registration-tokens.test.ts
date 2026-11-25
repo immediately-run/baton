@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, inject, it } from 'vitest';
 import { call as hostCall } from '#host';
-import { apiKeyCall, cutover, hbBody, makeApiKey, ORIGIN, payload, setAdminKeys, setClock, sha256, syncCall, withCore } from '../helpers';
+import { apiKeyCall, claimRow, cutover, hbBody, makeApiKey, ORIGIN, payload, setAdminKeys, setClock, sha256, syncCall, tick, withCore } from '../helpers';
 import { makeKey, signedRequest } from '../lib/sshKeys';
 
 const T0 = Date.parse('2026-10-19T12:00:00Z');
@@ -32,14 +32,14 @@ beforeEach(async () => {
 
 describe('S-BTN-69 registration and API keys', () => {
   it('scopes SSH and API registration, stores hashes, and revokes both credentials', async () => {
-    const t = await mint({ uses: 2, capabilities: ['agent-venue'], max_tier: 'critical' });
+    const t = await mint({ uses: 2, capabilities: ['agent-venue'] });
     expect(t.status).toBe(200);
     const { id, token } = t.json;
     const stored = await withCore((c) => c.store.exec('SELECT secret_hash FROM registration_tokens WHERE id = ?', id).toArray()[0]);
     expect(stored.secret_hash).toBe(await sha256(token));
     const ssh = await makeKey('ssh-ed25519', 'registered');
     expect((await register(token, { name: 'ssh', public_key: ssh.publicKey })).json.grant)
-      .toMatchObject({ repository_id: 'ops', accepted_at: T0, capabilities: ['authentication', 'create-pr', 'drivable-browser', 'llm-call'], max_tier: 2 });
+      .toMatchObject({ repository_id: 'ops', accepted_at: T0, capabilities: ['authentication', 'create-pr', 'drivable-browser', 'llm-call'] });
     expect((await register(token, { name: 'api', api_key: true, capabilities: ['human-operator'] })).status).toBe(400);
     const api = await register(token, { name: 'api', api_key: true });
     expect(api.status).toBe(200);
@@ -87,29 +87,8 @@ describe('S-BTN-69 registration and API keys', () => {
     expect(await claim.json()).toMatchObject({ ticket_id: expect.stringMatching(/^docs:/) });
   });
 
-  it('keeps outstanding and spent tokens at the same named ceiling when the ladder changes', async () => {
-    const { json: { token } } = await mint({ uses: 2, max_tier: 'judgement' });
-    const initial = await register(token, { name: 'api', api_key: true });
-    expect(initial.json.grant.max_tier).toBe(1);
-    expect((await apiKeyCall(admin.key, '/v1/admin/repositories', { id: 'ops', tiers: ['judgement', 'critical'] })).status).toBe(200);
-    expect((await register(token, { name: 'another', api_key: true })).json.grant.max_tier).toBe(0);
-    const rotated = await register(token, { name: 'api', api_key: true }, initial.json.api_key);
-    expect(rotated.json.grant.max_tier).toBe(0);
-  });
-
-  it('cannot redeem or rotate a token after its named ceiling is removed', async () => {
-    const { json: { id, token } } = await mint({ uses: 2, max_tier: 'judgement' });
-    const initial = await register(token, { name: 'api', api_key: true });
-    expect(initial.status).toBe(200);
-    expect((await apiKeyCall(admin.key, '/v1/admin/repositories', { id: 'ops', tiers: ['critical'] })).status).toBe(200);
-    expect((await register(token, { name: 'another', api_key: true })).status).toBe(403);
-    expect((await register(token, { name: 'api', api_key: true }, initial.json.api_key)).status).toBe(403);
-    expect((await apiKeyCall(initial.json.api_key, '/v1/runner/tickets/ops:B-1/holder')).status).toBe(403);
-    expect((await apiKeyCall(admin.key, '/v1/admin/repositories', { id: 'ops', tiers: ['judgement', 'critical'] })).status).toBe(200);
-    expect((await register(token, { name: 'another', api_key: true })).status).toBe(403);
-    expect(await withCore((c) => c.store.exec('SELECT uses_left FROM registration_tokens WHERE id = ?', id).toArray()[0].uses_left)).toBe(1);
-    expect((await apiKeyCall(owner.key, `${base}/tokens/${id}/revoke`, { confirm: true })).status).toBe(200);
-    expect((await apiKeyCall(initial.json.api_key, '/v1/runner/tickets/ops:B-1/holder')).status).toBe(401);
+  it('rejects the retired tier parameter on a token', async () => {
+    expect((await mint({ max_tier: 'critical' })).status).toBe(400);
   });
 
   it('installs a prepared API public line without returning or storing the secret', async () => {
@@ -147,7 +126,7 @@ describe('S-BTN-69 registration and API keys', () => {
     }
   });
 
-  it('does not acknowledge a fence on a disabled repository from an allowed repository heartbeat', async () => {
+  it.each(['fence acknowledgment', 'fence expiry', 'lease expiry'])('scopes %s to API-key policy', async (scenario) => {
     expect((await apiKeyCall(admin.key, '/v1/admin/repositories', { id: 'docs', owner_keys_add: [owner.line] })).status).toBe(200);
     await syncCall('/v1/sync/board', payload('f'.repeat(40), null, board.states.A));
     await cutover();
@@ -165,18 +144,25 @@ describe('S-BTN-69 registration and API keys', () => {
     const claim = await post('/v1/runner/claim', { request_id: 'shared-key-1' });
     const { claim_id, ticket_id } = await claim.json() as { claim_id: number; ticket_id: string };
     expect(ticket_id).toMatch(/^docs:/);
-    await withCore((c) => c.claims.forceReap('admin:test', claim_id, { confirm: true }));
-    const pending = () => withCore((c) => c.store.exec('SELECT fence_pending FROM claims WHERE id = ?', claim_id).toArray()[0].fence_pending);
-    expect(await pending()).toBe(1);
+    const fenced = scenario !== 'lease expiry';
+    if (fenced) await withCore((c) => c.claims.forceReap('admin:test', claim_id, { confirm: true }));
     const allowKeys = (allow: boolean) => apiKeyCall(owner.key, '/v1/owner/docs/settings', { api_keys: allow }, 'PUT');
     expect((await allowKeys(false)).status).toBe(200);
+    await setClock(T0 + 899_999);
     const ack = { ...beat, courses: [{ repository: 'other', course: 'roadmap-pr', version: 3 }],
-      fenced: [{ claim_id, terminated: true }] };
+      fenced: fenced ? [{ claim_id, terminated: true }] : [] };
     expect((await post('/v1/runner/heartbeat', ack)).status).toBe(200);
-    expect(await pending()).toBe(1);
-    expect((await allowKeys(true)).status).toBe(200);
-    expect((await post('/v1/runner/heartbeat', ack)).status).toBe(200);
-    expect(await pending()).toBe(0);
+    await tick();
+    expect(await claimRow(claim_id)).toMatchObject({ status: fenced ? 'reaped' : 'active', fence_pending: Number(fenced) });
+    if (scenario === 'fence acknowledgment') {
+      expect((await allowKeys(true)).status).toBe(200);
+      expect((await post('/v1/runner/heartbeat', ack)).status).toBe(200);
+    } else {
+      await setClock(T0 + 900_000);
+      await tick();
+      expect(await withCore((c) => c.store.exec('SELECT reaped_at FROM runners WHERE hostname = ?', 'shared-runner').toArray()[0].reaped_at)).toBeNull();
+    }
+    expect(await claimRow(claim_id)).toMatchObject({ status: 'reaped', fence_pending: 0 });
   });
 
   it('honors token and key lifetimes and rejects API runners at the next call', async () => {

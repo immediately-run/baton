@@ -212,7 +212,9 @@ describe('R-BTN-116, R-BTN-39: the answer', () => {
         // The same store and graph, one knob swapped: `inputs.answers: attestation`, under which
         // an answer read from git does not count.
         const strict = new Questions({ store: core.store, now: core.now, graph: (repo, course_) => core.stations.graph(repo, course_),
-          answersFrom: () => 'attestation' });
+          history: core.history, queued: (id) => core.queues.touch(id), reevaluate: (id) => core.blocks.write([id]),
+          closeMissingNext: (id, at) => core.conditions.closeMissingNext(id, at), isHeld: (id) => core.blocks.isHeld(id),
+          linkBases: (id) => core.blocks.linkBases(id), answersFrom: () => 'attestation', dispatch: () => {} });
         strict.attestations('docs', [DECISION('a')]);
       });
     });

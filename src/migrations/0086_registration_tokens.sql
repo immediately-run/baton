@@ -3,7 +3,6 @@ CREATE TABLE registration_tokens (
   repository_id TEXT NOT NULL REFERENCES repositories(id),
   secret_hash TEXT NOT NULL,
   capabilities TEXT NOT NULL,
-  max_tier INTEGER,
   uses_left INTEGER NOT NULL CHECK (uses_left BETWEEN 0 AND 100),
   grant_ttl_s INTEGER NOT NULL,
   expires_at INTEGER NOT NULL,
@@ -25,3 +24,5 @@ CREATE INDEX credentials_registration_token ON credentials(registration_token_id
 ALTER TABLE runner_grants ADD COLUMN accepted_at INTEGER;
 UPDATE runner_grants SET accepted_at = granted_at;
 ALTER TABLE repositories ADD COLUMN api_keys INTEGER NOT NULL DEFAULT 1 CHECK (api_keys IN (0, 1));
+
+ALTER TABLE claims ADD COLUMN api_lease_cap_at INTEGER;

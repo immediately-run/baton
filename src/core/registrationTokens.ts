@@ -5,13 +5,12 @@ import { BatonError } from './http';
 import type { Store } from './ports';
 import { sha256Hex } from './runnerApi';
 import { bad, checkRegistrationTokenId, DAY_MS, registrationBody, registrationObject, registrationTokenId, tokenScope } from './validate';
-import { capabilitiesOf } from '../shared/vocabulary.mjs';
+import { capabilitiesOf } from '../vendor/vocabulary.mjs';
 
 interface Token {
   repository_id: string;
   secret_hash: string;
   capabilities: string;
-  max_tier: number | null;
   uses_left: number;
   grant_ttl_s: number;
   expires_at: number;
@@ -22,18 +21,19 @@ interface Token {
 export class RegistrationTokens {
   constructor(private readonly store: Store, private readonly now: () => number) {}
 
-  async mint(repository: string, actor: string, body: unknown, authorize: () => string[]) {
+  async mint(repository: string, actor: string, body: unknown, authorize: () => void) {
     const id = randomHex(8);
     const token = `brt_${id}_${randomHex(32)}`;
     const hash = await sha256Hex(token);
     this.store.transaction(() => {
-      const scope = tokenScope(body, authorize());
+      authorize();
+      const scope = tokenScope(body);
       const expanded = [...new Set(capabilitiesOf(scope.capabilities))].sort();
       if (expanded.some((c) => c === 'human-operator' || c === 'capability:human-operator')) bad('capabilities', 'human-operator is not a token capability');
       const now = this.now();
       this.store.exec(`INSERT INTO registration_tokens
-        (id, repository_id, secret_hash, capabilities, max_tier, uses_left, grant_ttl_s, expires_at, created_by, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, id, repository, hash, JSON.stringify(expanded), scope.maxTier,
+        (id, repository_id, secret_hash, capabilities, uses_left, grant_ttl_s, expires_at, created_by, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, id, repository, hash, JSON.stringify(expanded),
       scope.uses, scope.grantTtl, now + scope.ttl * 1000, actor, now);
       logEvent(this.store, now, 'admin', actor, { act: 'token-created', token_id: id }, null, null, repository);
     });
@@ -75,7 +75,6 @@ export class RegistrationTokens {
       if (!equalBytes(bytes.encode(hash), bytes.encode(t?.secret_hash ?? '0'.repeat(64))) || !t || t.revoked_at != null || t.expires_at <= now) {
         throw new BatonError('unauthenticated', 'unknown, expired or revoked registration token');
       }
-      if (t.max_tier != null && t.max_tier < 0) throw new BatonError('forbidden', 'the registration token tier was removed');
       if ((api || apiKey) && !t.api_keys) throw new BatonError('forbidden', 'this repository does not allow API-key runners');
       const held = this.store.exec(`SELECT id, registration_token_id FROM credentials WHERE hostname = ? AND kind IN ('runner', 'token')
         AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > ?) AND (last_used_at IS NULL OR last_used_at > ?)`, name, now, now - 7 * DAY_MS).toArray();
@@ -94,8 +93,8 @@ export class RegistrationTokens {
       const expiresAt = now + t.grant_ttl_s * 1000;
       this.store.exec(`INSERT INTO credentials (id, hostname, allowed_capabilities, kind, public_key, created_by, registration_token_id, expires_at, last_used_at)
         VALUES (?, ?, '[]', 'runner', ?, 'owner:registration-token', ?, ?, ?)`, id, name, line, tokenId, expiresAt, now);
-      this.store.exec(`INSERT INTO runner_grants (credential_id, repository_id, capabilities, max_tier, granted_by, granted_at, accepted_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)`, id, t.repository_id, t.capabilities, t.max_tier, `token:${tokenId}`, now, now);
+      this.store.exec(`INSERT INTO runner_grants (credential_id, repository_id, capabilities, granted_by, granted_at, accepted_at)
+        VALUES (?, ?, ?, ?, ?, ?)`, id, t.repository_id, t.capabilities, `token:${tokenId}`, now, now);
       if (rekey) {
         this.store.exec('UPDATE runner_grants SET revoked_at = ? WHERE credential_id = ? AND revoked_at IS NULL', now, current);
         this.store.exec('UPDATE runners SET credential_id = ? WHERE credential_id = ?', id, current);
@@ -107,7 +106,7 @@ export class RegistrationTokens {
       const count = this.store.exec('SELECT COUNT(*) AS n FROM token_registrations WHERE token_id = ?', tokenId).toArray()[0].n;
       logEvent(this.store, now, 'admin', `token:${tokenId}`, { act: 'runner-registered', credential_id: id, rekey }, null, null, t.repository_id);
       if (count === 11) logEvent(this.store, now, 'admin', 'baton', { act: 'baton.token-burst', token_id: tokenId }, null, null, t.repository_id);
-      const grant = { repository_id: t.repository_id, capabilities: JSON.parse(t.capabilities) as string[], max_tier: t.max_tier, accepted_at: now, expires_at: expiresAt };
+      const grant = { repository_id: t.repository_id, capabilities: JSON.parse(t.capabilities) as string[], accepted_at: now, expires_at: expiresAt };
       return { credential_id: id, grant, ...(apiKey ? { api_key: apiKey } : {}) };
     });
   }

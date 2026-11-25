@@ -1,6 +1,7 @@
 // cutover.ts — the one-way switch (BATON_SPEC §13 step 3, R-BTN-28; R3-1217): the owner's
 // cutover, the legacy import that runs in the same transaction, and adoption of a legacy claim
 // by the session that was working it, which moves only on the owner's confirmation.
+import { isLive, liveRunnerSql } from './runnerLiveness';
 import { BatonError } from './http';
 import { checkConfirm, checkRepositoryId, SESSION_NAME, TICKET_ID } from './validate';
 import { localOf, repositoryOf } from './registry';
@@ -44,7 +45,7 @@ export interface Ctx {
   store: Store;
   now: () => number;
   /** R-BTN-75: an imported claim holds its ticket; a claim's start changes `blocked_since` silently. */
-  held?: (ticketId: string) => void;
+  held: (ticketId: string) => void;
 }
 
 export class Cutover {
@@ -108,7 +109,7 @@ export class Cutover {
         item: it.id, preferred: it.holder, nonce: randomHex(3), sha, requestId: `legacy:${it.id}`,
         claimedAt: it.since ? Date.parse(`${it.since}T00:00:00Z`) : now, detail: { since: it.since },
       });
-      this.c.held?.(it.id);
+      this.c.held(it.id);
       out.push(it.id);
     }
     return out;
@@ -153,7 +154,7 @@ export class Cutover {
     // the alarm would reap it at once, as a failed attempt (§6.10).
     const asker = this.rows<{ reaped_at: number | null; last_seen_at: number; lease_timeout_ms: number }>(
       'SELECT reaped_at, last_seen_at, lease_timeout_ms FROM runners WHERE id = ?', a.runner_id)[0];
-    if (!asker || asker.reaped_at != null || this.c.now() - asker.last_seen_at >= asker.lease_timeout_ms) {
+    if (!asker || !isLive(asker, this.c.now())) {
       throw new BatonError('not-eligible', 'the session that asked is no longer alive; it must ask again', { rule: 'requester-silent' });
     }
     // A legacy session holds one item: 0001's per-runner index once refused a second, and B-188
@@ -172,7 +173,7 @@ export class Cutover {
     return this.rows(`SELECT a.ticket_id, a.claim_id, a.runner_id, a.requested_at, w.hostname, w.session_name, l.session_name AS legacy_session
                       FROM adoptions a JOIN runners w ON w.id = a.runner_id JOIN claims c ON c.id = a.claim_id
                       JOIN runners l ON l.id = c.runner_id
-                      WHERE c.status = 'active' AND l.kind = 'legacy' AND w.reaped_at IS NULL AND w.last_seen_at + w.lease_timeout_ms > ?
+                      WHERE c.status = 'active' AND l.kind = 'legacy' AND ${liveRunnerSql('w.')}
                       ORDER BY a.requested_at`, this.c.now());
   }
 }

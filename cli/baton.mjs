@@ -507,13 +507,12 @@ export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? 
   }
   if (role === 'owner') {
     if (cmd === 'token' && rest[0] === 'create') {
-      const { flags, positional } = parseArgs(rest.slice(1), [], ['repo', 'role', 'capabilities', 'max-tier', 'ttl', 'uses', 'grant-ttl'], 1);
+      const { flags, positional } = parseArgs(rest.slice(1), [], ['repo', 'role', 'capabilities', 'ttl', 'uses', 'grant-ttl'], 1);
       if (flags.repo && positional.length) throw new Error('name the repository once');
       const repo = repoOrHome(flags.repo ?? positional[0], home);
       if (flags.role !== 'runner') throw new Error('--role must be runner');
       return { method: 'POST', path: `/v1/owner/${encodeURIComponent(repo)}/tokens`, body: {
         role: flags.role, capabilities: list(flags.capabilities) ?? [],
-        ...(flags['max-tier'] ? { max_tier: flags['max-tier'] } : {}),
         ...(flags.ttl ? { ttl_s: duration(flags.ttl) / 1000 } : {}),
         ...(flags.uses ? { uses: Number(flags.uses) } : {}),
         ...(flags['grant-ttl'] ? { grant_ttl_s: duration(flags['grant-ttl']) / 1000 } : {}),
@@ -1328,11 +1327,11 @@ export async function main(argv) {
     const { homeMain } = await import('../scripts/baton-cli.mjs');
     return homeMain(argv.slice(1));
   }
-  if (argv[0] === 'run') {
+  if (argv[0] === 'run' || (argv[0] === 'runner' && argv[1] === 'start')) {
     // §6.13: the runner is TypeScript under src/runner; bundle it (a checkout runs the CLI with
     // its devDependencies), then run it in this process's stead.
     const { runMain } = await import('../scripts/baton-run.mjs');
-    return runMain(argv.slice(1));
+    return runMain(argv.slice(argv[0] === 'run' ? 1 : 2));
   }
   if (argv[0] === 'queue') {
     // R-BTN-202 (B-248): this host's local work queue for the runners on one home — local
