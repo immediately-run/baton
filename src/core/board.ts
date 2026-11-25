@@ -7,8 +7,14 @@ import { capabilitiesOf } from '../shared/vocabulary.mjs';
 import { parseTranscriptRepo } from './links';
 import { BatonError } from './http';
 import { checkRegistry, COURSE_ID, type RegistryEntry } from './courses';
+import { requirementKeys, requirementOf, type PostedDependency } from './ticketRequirement';
 import { ASKS, COURSE_ID as LEG_ID, DECISION_GRANT_MAX, DECISION_ID, DECISION_OPTION, DECISION_OPTIONS_MAX, DECISION_QUESTION, DECISIONS_MAX, DEPENDENCY_ID, isHttpsPointer, LOCAL_ID, NEEDS_MAX, SESSION_NAME, TAG, HOLDING_TYPE, HOLDING_VALUE, repositoryOf } from './validate';
 import type { Step } from './graph';
+
+/** R-BTN-83: a placed ticket at a known non-end station needs a queued leg, not just readiness. */
+export function missingQueuedLeg(st: Pick<PostedStation, 'station' | 'next_leg'>, ends: ReadonlySet<string>): boolean {
+  return st.next_leg === null && !ends.has(st.station);
+}
 
 /** One factory-state item, as the sync posts it (`docs/scripts/factory-state.mjs`). Only the
  *  keys named here are read; anything else in the item is ignored. */
@@ -64,6 +70,7 @@ export interface PostedTicket {
   expedite: boolean;
   depends_on: string[];
   blocked_by: string[];
+  depends_at?: PostedDependency[];
   repos: string[];
   rank?: number | null;
   /** R-BTN-86 (§4.6): the ticket's parent, a LOCAL id of the same repository as the sync reads
@@ -149,12 +156,6 @@ export interface BoardPayload {
   stations?: Record<string, PostedStation>;
   confirmations?: unknown[];
   course_data?: Record<string, unknown>;
-  /** B-142: `prices` and `providers` are gone with the model tables the route choice stratum
-   *  never read (§6.3's readings are an unavailable provider's replacement, R-BTN-76). A sync
-   *  that still posts either is not refused for it — accepted with the field ignored, as
-   *  `min_skills_version` above — until no registered repository posts it. */
-  reviewers?: Record<string, { reviews_on: string; bills: string[]; models?: Record<string, string> }>;
-  matrix?: { families: Record<string, string[]>; agents: Record<string, { reviews_on: string; bills: string[]; models?: Record<string, string> }> };
   /** The course registry (R-BTN-48, §7.1); absent, the courses in force stay. */
   registry?: RegistryEntry[];
   /** §6.8: the transcript repositories from `baton.json`; absent, the defaults stand. */
@@ -202,6 +203,10 @@ export interface PostedControl {
 
 /** R-BTN-191's envelope as the sync posts it (§4.4): a typed fact about one ticket, its `value`
  *  judged by its `type`'s schema when the type is read. */
+/** R-BTN-10, R-BTN-191: the sync's attestation that git or the forge shows (`found`) the
+ *  evidence an unconfirmed end named. */
+export const GIT_EVIDENCE_TYPE = 'std:git.evidence@1';
+
 export interface PostedAttestation {
   type: string;
   /** A local ticket id, as the post's tickets name them. */
@@ -231,6 +236,7 @@ export interface TicketRow {
   operator_only: 0 | 1;
   depends_on: string;
   blocked_by: string;
+  depends_at?: string;
   repos: string;
   ord: string | null;
   rank: number | null;
@@ -299,7 +305,8 @@ export function retiredBoardFields(body: unknown): string[] {
  *  leaves every qualified edge to the cross-board walk, as before. */
 export function checkPayload(body: unknown, repo?: string): BoardPayload {
   if (!body || typeof body !== 'object') throw new BatonError('invalid-params', 'a JSON object is required');
-  const { hooks: _hooks, ...p } = body as BoardPayload & { hooks?: unknown };
+  // Older syncs still post these; neither hooks nor reviewer routing data belongs in core.
+  const { hooks: _hooks, matrix: _matrix, reviewers: _reviewers, ...p } = body as BoardPayload & { hooks?: unknown; matrix?: unknown; reviewers?: unknown };
   if (typeof p.sha !== 'string' || !SHA.test(p.sha)) throw new BatonError('invalid-params', 'sha must be a 40-hex commit');
   if (p.parent_sha !== null && (typeof p.parent_sha !== 'string' || !SHA.test(p.parent_sha))) throw new BatonError('invalid-params', 'parent_sha must be a 40-hex commit or null');
   if (p.read_sha !== undefined && p.read_sha !== null && (typeof p.read_sha !== 'string' || !SHA.test(p.read_sha))) throw new BatonError('invalid-params', 'read_sha must be a 40-hex commit or null (the commit the tickets were read at, B-183)');
@@ -329,7 +336,10 @@ export function checkPayload(body: unknown, repo?: string): BoardPayload {
   if (p.force !== undefined && typeof p.force !== 'boolean') throw new BatonError('invalid-params', 'force must be a boolean');
   // `min_skills_version` is gone (R-BTN-22: each course's version is the skills version); a
   // sync that still sends it is not refused for it, and Baton reads it nowhere.
-  checkReference(p);
+  // §6.8: only the owners' setting takes effect; validate the legacy board field as before.
+  if (p.transcript_repos !== undefined && !(Array.isArray(p.transcript_repos) && p.transcript_repos.length <= 20 && p.transcript_repos.every((r) => typeof r === 'string' && parseTranscriptRepo(r) !== null))) {
+    throw new BatonError('invalid-params', 'transcript_repos: must be a list of repositories, each a GitHub owner/name or <forge>:<web_base>');
+  }
   // §5.9 (B-167): the capability ontology is gone from core. A post that still carries a field
   // the restructure retired is taken with the field ignored — the route logs it
   // `deprecated-field` (`retiredBoardFields`, B-168), and the history's Migrations entry "part
@@ -353,6 +363,14 @@ export function checkPayload(body: unknown, repo?: string): BoardPayload {
         throw new BatonError('invalid-params', `${at}.ref must be a short string or null`);
       }
       if (!isObj((a as PostedAttestation).value)) throw new BatonError('invalid-params', `${at}.value must be an object`);
+      // R-BTN-10: the sync's word on the evidence an unconfirmed end named — `{claim, evidence,
+      // found}`, the evidence exactly as the observation listed it.
+      if ((a as PostedAttestation).type === GIT_EVIDENCE_TYPE) {
+        const v = (a as PostedAttestation).value as Record<string, unknown>;
+        if (!Number.isSafeInteger(v.claim) || (v.claim as number) <= 0) throw new BatonError('invalid-params', `${at}.value.claim must be a claim id`);
+        if (typeof v.evidence !== 'string' || v.evidence === '' || v.evidence.length > 1000) throw new BatonError('invalid-params', `${at}.value.evidence must be the commit sha or URL the end named`);
+        if (typeof v.found !== 'boolean') throw new BatonError('invalid-params', `${at}.value.found must be true or false`);
+      }
     }
   }
   // B-127 (R-BTN-66 as amended): the post's signed-control record. The shape and bounds here;
@@ -507,6 +525,16 @@ function checkNormative(p: BoardPayload, repo?: string) {
       // B-113 (§4.4): a `depends_on` entry is a local id or a qualified one naming another
       // registered repository's ticket; `blocked_by` (a parent's children, R-BTN-47) stays local.
       list(t[k], k === 'depends_on' ? DEPENDENCY_ID : ID, `${t.id}: ${k}`);
+    }
+    if (t.depends_at !== undefined) {
+      if (!isObjArr(t.depends_at, DEP_MAX)) fail(`${t.id}.depends_at`, `must be a list of at most ${DEP_MAX}`);
+      else for (const [i, d] of t.depends_at.entries()) {
+        if (!isObj(d) || typeof d.ticket !== 'string' || !DEPENDENCY_ID.test(d.ticket)
+          || ('leg' in d && (typeof d.leg !== 'string' || !LEG_ID.test(d.leg)))
+          || Object.keys(d).some((k) => !['ticket', 'leg', ...requirementKeys].includes(k)) || !requirementOf(d, LEG_ID)) {
+          fail(`${t.id}.depends_at.${i}`, 'must name a ticket, one of at, reached, done, withdrawn, closed, and optionally a leg');
+        }
+      }
     }
     if (!isObjArr(t.repos, 64)) fail(`${t.id}.repos`, 'must be a list of at most 64');
     list(t.repos, REPO, `${t.id}: repos`);
@@ -744,49 +772,7 @@ export function stationOf(st: PostedStation): PostedStation {
   };
 }
 
-const MODEL = /^[A-Za-z0-9._/:-]{1,200}$/;
 const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
-const bad = (field: string, why: string): never => {
-  throw new BatonError('invalid-params', `${field}: ${why}`);
-};
-function regex(field: string, pattern: unknown) {
-  if (typeof pattern !== 'string') bad(field, 'must be a pattern string');
-  try {
-    new RegExp(pattern as string, 'i');
-  } catch {
-    bad(field, 'is not a valid pattern');
-  }
-}
-function catalog(field: string, agents: unknown) {
-  if (!isObj(agents)) bad(field, 'must be an object of agents');
-  for (const [name, a] of Object.entries(agents as Record<string, unknown>)) {
-    if (!NAME.test(name) || !isObj(a)) bad(`${field}.${name}`, 'is malformed');
-    const agent = a as Record<string, unknown>;
-    if (typeof agent.reviews_on !== 'string' || !MODEL.test(agent.reviews_on)) bad(`${field}.${name}.reviews_on`, 'must be a model id');
-    if (!Array.isArray(agent.bills) || !agent.bills.every((b) => typeof b === 'string' && NAME.test(b))) bad(`${field}.${name}.bills`, 'must be a list of prefixes');
-    if (agent.models !== undefined && !(isObj(agent.models) && Object.entries(agent.models).every(([k, v]) => NAME.test(k) && typeof v === 'string' && MODEL.test(v)))) {
-      bad(`${field}.${name}.models`, 'must map prefixes to model ids');
-    }
-  }
-}
-
-/** The reference blocks (§7.3, §7.4) are docs data files: a malformed one is refused, named,
- *  before anything is written, never left to fail a constraint mid-transaction. The model
- *  tables' blocks (B-142) validate nowhere: `providers` and `prices` are accepted unread. */
-function checkReference(p: BoardPayload) {
-  if (p.matrix !== undefined) {
-    if (!isObj(p.matrix) || !isObj(p.matrix.families)) bad('matrix.families', 'must be an object');
-    for (const [fam, pats] of Object.entries(p.matrix.families)) {
-      if (!NAME.test(fam) || !Array.isArray(pats)) bad(`matrix.families.${fam}`, 'must be a list of patterns');
-      pats.forEach((pat, i) => regex(`matrix.families.${fam}[${i}]`, pat));
-    }
-    catalog('matrix.agents', p.matrix.agents);
-  }
-  if (p.reviewers !== undefined) catalog('reviewers', p.reviewers);
-  if (p.transcript_repos !== undefined && !(Array.isArray(p.transcript_repos) && p.transcript_repos.length <= 20 && p.transcript_repos.every((r) => typeof r === 'string' && parseTranscriptRepo(r) !== null))) {
-    bad('transcript_repos', 'must be a list of repositories, each a GitHub owner/name or <forge>:<web_base>');
-  }
-}
 
 /** The row an item becomes (R-BTN-33). `rank` is its index in the sync's `ready` list. A
  *  clause is stored expanded (§7.2 rule 4): a role becomes its capabilities, a legacy name
@@ -795,7 +781,7 @@ export function rowFor(it: StateItem, rankOf: Map<string, number>): TicketRow {
   const tags = it.tags ?? [];
   const names = it.requires ?? null;
   const clause = names == null ? 'absent' : names.every((n) => n === 'none') ? 'none' : 'listed';
-  const path = `content/roadmap/${it.id}.mdx`;
+  const path = `content/roadmap/${it.id}.mdx`; // dependency-history: legacy ticket URL, not an input
   return {
     id: it.id,
     path,
@@ -849,6 +835,7 @@ export function rowForTicket(t: PostedTicket): TicketRow {
     operator_only: t.operator_only ? 1 : 0,
     depends_on: JSON.stringify(t.depends_on),
     blocked_by: JSON.stringify(t.blocked_by),
+    ...(t.depends_at?.length ? { depends_at: JSON.stringify(t.depends_at) } : {}),
     repos: JSON.stringify(t.repos),
     ord: null,
     rank: t.rank ?? null,
@@ -997,4 +984,3 @@ export function resolveParents(
   }
   return { parentOf, invalid };
 }
-

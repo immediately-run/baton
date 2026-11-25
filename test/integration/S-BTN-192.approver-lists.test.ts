@@ -9,7 +9,7 @@
 // body says so. Runs on both hosts.
 import { describe, it, expect, beforeEach, inject } from 'vitest';
 import { call as hostCall } from '#host';
-import { keyCall, ORIGIN, rows, setAdminKeys, setClock, setHumanKeys, withCore } from '../helpers';
+import { apiKeyCall, keyCall, makeApiKey, ORIGIN, rows, setAdminKeys, setClock, setHumanKeys, withCore } from '../helpers';
 import { makeKey, sshsig, signedRequest, type TestKey } from '../lib/sshKeys';
 import { Policies } from '../../src/core/policy';
 import { BatonCore } from '../../src/core/baton';
@@ -121,7 +121,7 @@ describe('S-BTN-192 approver lists', () => {
     const { version, doc } = await current();
     const policy = { ...doc, human_key: 'hardware', approvers: { ...doc.approvers, policy: ['owner'] } };
     expect((await as(b, '/v1/owner/ops/policy', { base_version: version, policy }, 'PUT')).status).toBe(200);
-    const remove = await as(b, '/v1/owner/ops/owners', { fingerprint: b.fingerprint, remove: true });
+    const remove = await as(b, '/v1/owner/ops/owners', { fingerprint: b.fingerprint, remove: true, confirm: true });
     expect(remove.json).toMatchObject({ code: 'unsatisfiable-approvers', list: 'approvers.members' });
     expect((await rows('SELECT fingerprint FROM repository_owners WHERE repository_id = ? AND removed_at IS NULL', 'ops')).length).toBe(2);
   });
@@ -149,6 +149,50 @@ describe('S-BTN-192 approver lists', () => {
       await restart(c, 'any').start();
     });
     expect((await current()).doc).toEqual(policy);
+  });
+
+  it('applies the same proposed-list liveness to API-key and SSH owners', async () => {
+    const api = await makeApiKey('API owner');
+    await setHumanKeys();
+    for (const public_key of [api.line, breakGlass.publicKey]) {
+      expect((await as(b, '/v1/owner/ops/owners', { public_key })).status).toBe(200);
+    }
+    await setHumanKeys(breakGlass);
+    const { version, doc } = await current();
+    const candidate = { base_version: version, policy: { ...doc, human_key: 'hardware',
+      approvers: { ...doc.approvers, policy: [`key:${breakGlass.fingerprint}`] } } };
+    const path = '/v1/owner/ops/policy';
+    for (const res of [await apiKeyCall(api.key, path, candidate, 'PUT'), await as(b, path, candidate, 'PUT')]) {
+      expect(res.json).toMatchObject({ code: 'unsatisfiable-approvers', list: 'approvers.policy' });
+    }
+    expect((await current()).version).toBe(version);
+  });
+
+  it('checks existing hardware policies at startup even with no instance switch', async () => {
+    await setHumanKeys();
+    expect((await as(b, '/v1/owner/ops/owners', { public_key: breakGlass.publicKey })).status).toBe(200);
+    const { version, doc } = await current();
+    const policy = { ...doc, human_key: 'hardware' };
+    expect((await as(b, '/v1/owner/ops/policy', { base_version: version, policy }, 'PUT')).status).toBe(200);
+    await withCore((c) => restart(c, 'any').start()); // another eligible owner remains
+    expect((await as(b, '/v1/owner/ops/owners', { fingerprint: b.fingerprint, remove: true, confirm: true })).status).toBe(200);
+    await withCore(async (c) => {
+      await expect(restart(c, 'any').start()).rejects.toMatchObject({ code: 'unsatisfiable-approvers', extra: { list: 'approvers.members' } });
+    });
+    expect((await current()).doc).toEqual(policy);
+  });
+
+  it('does not recognize a runner key as configured human authority', async () => {
+    await setHumanKeys();
+    const grant = await as(b, '/v1/owner/ops/grants', { public_key: breakGlass.publicKey, hostname: 'runner', capabilities: ['agent-venue'] });
+    expect(grant.status, JSON.stringify(grant.json)).toBe(200);
+    await setHumanKeys(breakGlass);
+    const { version, doc } = await current();
+    const policy = { ...doc, approvers: { ...doc.approvers, policy: ['owner', 'human'], members: ['owner', 'human'] } };
+    expect((await as(b, '/v1/owner/ops/policy', { base_version: version, policy }, 'PUT')).status).toBe(200);
+    expect((await as(breakGlass, '/v1/owner/ops/owners', { public_key: a.publicKey })).status).toBe(401);
+    expect((await as(breakGlass, '/v1/repositories/ops/attestations', {})).status).toBe(401);
+    expect((await registerHuman(a, breakGlass)).status).toBe(401);
   });
 
   it.each(['any', 'hardware'] as const)('uses instance %s for signed tenant key management', async (floor) => {
@@ -181,11 +225,31 @@ describe('S-BTN-192 approver lists', () => {
 
   it('uses the instance hardware minimum even when the repository says any', async () => {
     const allowed = await withCore((c) => {
-      const policies = new Policies({ store: c.store, now: () => c.now(), humanKeyFloor: 'hardware' });
+      const policies = new Policies({ store: c.store, now: () => c.now(), humanKeyFloor: 'hardware', releaseForFloor: () => {} });
       const facts = policies.facts('ops', new Map([[breakGlass.fingerprint, breakGlass.publicKey]]));
       return policies.entryMatches(['owner', 'human'], breakGlass.fingerprint, facts, policies.current('ops')!.policy.human_key);
     });
     expect(allowed).toBe(false);
+  });
+
+  it('S-BTN-185: a stored marker and a configured break-glass key do not prove hardware custody', async () => {
+    await humanOwner(a, breakGlass);
+    expect((await as(b, '/v1/owner/ops/owners', { public_key: breakGlass.publicKey })).status).toBe(200);
+    await rows('UPDATE repository_owners SET fido_attestation = ? WHERE fingerprint = ?', 'opaque-marker', a.fingerprint);
+    const { version, doc } = await current();
+    const hardware = { ...doc, human_key: 'hardware' };
+    for (const entry of ['human', `key:${a.fingerprint}`]) {
+      const result = await as(b, '/v1/owner/ops/policy', {
+        base_version: version, policy: { ...hardware, approvers: { ...doc.approvers, policy: [entry] } },
+      }, 'PUT');
+      expect(result.json).toMatchObject({ code: 'unsatisfiable-approvers', list: 'approvers.policy' });
+    }
+    // An ordinary owner can set the minimum without installing a human-only list. Neither
+    // soft human key can then use even the generic owner entry on that repository.
+    expect((await as(b, '/v1/owner/ops/policy', { base_version: version, policy: hardware }, 'PUT')).status).toBe(200);
+    for (const soft of [a, breakGlass]) {
+      expect((await as(soft, '/v1/owner/ops/policy', { base_version: version + 1, policy: doc }, 'PUT')).json.code).toBe('forbidden');
+    }
   });
 
   it('the named key alone approves; the list in force decides what replaces it', async () => {

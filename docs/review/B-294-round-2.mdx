@@ -1,0 +1,13 @@
+---
+title: "B-294 review round 2"
+description: Disposition of the four blocking findings on break-glass eligibility and reach.
+---
+
+Reviewed head: `0c4a1182b2fe6604d391b809e138a7ec81cfa698`.
+[Forge review](https://github.com/immediately-run/baton/pull/338#pullrequestreview-6010645415).
+Verdict: changes.
+
+- [Policy liveness](https://github.com/immediately-run/baton/pull/338#discussion_r4656911061): fixed. The proposed-policy check sees the same configured SSH fingerprints for bearer API-key and signed SSH owner requests. Only signed requests can use the configured lines to authenticate.
+- [Upgrade liveness](https://github.com/immediately-run/baton/pull/338#discussion_r4656911066): fixed. Startup also checks repositories already at `hardware` for legacy owner entries left with no eligible approver. The restart test verifies refusal and the independently eligible owner control.
+- [Role separation](https://github.com/immediately-run/baton/pull/338#discussion_r4656911068): fixed. Configured human admission uses the existing role classifier for policy, membership, person answers, and tenant key management. Owner overlap remains supported; machine and administrator roles are excluded.
+- [Person-answer reach](https://github.com/immediately-run/baton/pull/338#discussion_r4656911072): fixed. The route verifies the request and admits a repository owner or eligible human before exposing answer state. Missing and out-of-reach repositories return the same denial.

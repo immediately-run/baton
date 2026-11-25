@@ -8,10 +8,7 @@ declare module 'vitest' {
       states: Record<'A' | 'B' | 'C' | 'D', { state: { items: unknown[] }; ready: string[]; [k: string]: unknown }>;
       ancestry: Record<string, boolean>;
     };
-    shared: { manifest: Record<string, string>; vendored: Record<string, string>; upstream: Record<string, string> | null };
-    fixtures: { manifest: Record<string, string>; vendored: Record<string, string>; upstream: Record<string, string> | null };
     wranglerToml: string;
-    liveBoard: Record<string, unknown> | null;
     /** The local project's host settings: wrangler.toml's vars and the run's test bindings. */
     localConfig: import('../src/core/ports').Config;
   }

@@ -56,13 +56,12 @@ contents are not built; their design is
     the key> [comment]` to `FILE.pub`. Nothing is sent. The key's fingerprint is `bak_<id>`.
     Baton can mint a runner's API key instead, returned once: through a registration token
     (R-BTN-117), or `baton owner grant add --api-key --name <name>` (`POST
-    /v1/owner/{repository}/grants {name, api_key: true, capabilities, max_tier?}`).
+    /v1/owner/{repository}/grants {name, api_key: true, capabilities}`).
   - **Where it is registered.** Wherever an SSH public key goes for that role: a
     `BATON_ADMIN_KEYS` line (`--admin-keys` locally), an owner key, a grant's `public_key`.
   - **How it is sent.** `Authorization: Bearer <key>` in place of a signature, on `/v1/admin/*`,
     `/v1/owner/*`, `/v1/runner/*` and the repository reads; a runner adds its secret
-    (R-BTN-14). `baton … -i FILE`, `BATON_KEY_FILE` and `BATON_KEY` send it; no client sends a
-    bearer over non-loopback `http` (R-BTN-158). Baton hashes the key and compares every byte
+    (R-BTN-14). `baton … -i FILE`, `BATON_KEY_FILE` and `BATON_KEY` send it. Client refusal over clear HTTP is not built (R-BTN-158). Baton hashes the key and compares every byte
     with the hash on the public line its fingerprint names. An unknown fingerprint, a wrong
     secret or a malformed bearer is `unauthenticated`.
   - **Records and revocation.** Acts are recorded as `admin:bak_<id>` or `owner:bak_<id>`.
@@ -121,7 +120,7 @@ contents are not built; their design is
     each owned by the rule its row cites. The last owner is never removed by an owner.
   - **Grants carry the power.** A grant (`runner_grants`) gives one runner key access to one
     repository: the capabilities it may use there (a capability, or a whole type `<type>:*`,
-    R-BTN-121; never a role name, R-BTN-157), its `max_tier` and its `max_claims` (R-BTN-4). A
+    R-BTN-121; never a role name, R-BTN-157) and its `max_claims` (R-BTN-4). A
     key's capabilities live in each grant, not on the key, so what one repository's owners
     grant reaches only that repository's tickets (rules 4 and 7, R-BTN-45). A grant bounds
     which statements count for a repository; it confers no ability, and `human-operator` is
@@ -205,7 +204,7 @@ contents are not built; their design is
   | `leg log <ticket> [<leg>] [--run <n>] [-f] [--transcripts] [--json]` | `leg.runs`, then reads the log directory | R-BTN-128 |
   | `leg runs <ticket> [<leg>]` | a leg's runs | R-BTN-128 |
   | `leg replay <ticket> <leg> [--run <n>] [--against <sha>]` | `leg.runs`, then replays locally | R-BTN-84 |
-  | `leg stop <ticket>` | stops the running leg | R-BTN-119 |
+   | `leg stop <ticket>` | *proposed* ([B-9](../../tickets/B-9.mdx)) | R-BTN-119 |
   | `leg status`, `output`, `done`, `suspend`, `release`, `next`, `yield`, `raise` | the local channel, inside a leg; `leg await`, `events` and `ticket` are proposed ([conditions](../proposals/conditions.md)) | R-BTN-106, R-BTN-160 |
   | `ticket blocked [<ticket>] [--on <kind>:<ref>]` | a ticket's or the repository's blocks (`repo.blocked`) | R-BTN-75 |
   | `ticket history <ticket>` | a ticket's history | R-BTN-81 |
@@ -213,7 +212,7 @@ contents are not built; their design is
   | `ticket route <ticket> <leg> \| --clear` | queues or clears a leg (proposed: [data model and API](../proposals/data-model-and-api.md#other-reads-and-owner-routes)) | R-BTN-83 |
   | `ticket adopt <ticket> [--at <station>] [--next <leg>] [--ran <leg>,…]` | places a ticket on its course (proposed: [ticket adopt](../proposals/ticket-adopt.md)) | R-BTN-39 |
   | `ticket resolve <ticket> <restart> [--condition <id>]` | resolves a condition | R-BTN-163 |
-  | `ticket new`, `ticket claim <id>`, `ticket set <id> <status>`, `ticket done <id>`, `ticket check`, `ticket request "<one sentence>" --course <course>` | local: the ticket source in git | R-BTN-74, R-BTN-131 |
+  | `ticket next <kind>`, `ticket check [<id> --claimable]`, `ticket request "<one sentence>" --course <course>` | local: the ticket source in git, read; Dibber writes the ticket files | R-BTN-74, R-BTN-199, R-BTN-131 |
   | `decision list [--all] [--watch]` | `condition.list`: what waits for a person | R-BTN-163 |
   | `decision answer <ticket> <option>` | `attestation.add`: a person leg's answer | R-BTN-116, R-BTN-181 |
   | `attestation add <repository> --type <type> --subject <json> --value <json> [--lapses <duration>]`, `attestation revoke <repository> <id>` | writes or revokes an attestation (proposed: [security](../proposals/security.md)) | R-BTN-181 |
@@ -232,7 +231,7 @@ contents are not built; their design is
   | `home list`, `home use <name>`, `home add [<name>] --repository <id> [--origin <url>] [--checkout <path>]`, `home remove <name>`, `home show` | local: the homes file | R-BTN-127 |
   | `server start --db <file> --admin-keys <file>` | local: starts the local host | R-BTN-56, R-BTN-158 |
   | `owner grant list <repository>` | owners, grants, settings and bars | R-BTN-179, R-BTN-146 |
-  | `owner grant add <repository> --key <pub> --capabilities <a,b> [--hostname <h>] [--label <l>] [--max-tier <t>] [--max-claims <n>] [--confirm-span]`, or `--api-key --name <name>` | grants a runner key | R-BTN-58, R-BTN-146, R-BTN-159 |
+  | `owner grant add <repository> --key <pub> --capabilities <a,b> [--hostname <h>] [--label <l>] [--max-claims <n>] [--confirm-span]`, or `--api-key --name <name>` | grants a runner key | R-BTN-58, R-BTN-146, R-BTN-159 |
   | `owner grant revoke <repository> <fingerprint>` | revokes a grant | R-BTN-58 |
   | `owner grant role <repository> <fingerprint> --role runner\|trusted-runner [--domain <label>] [--checker]` | sets a grant's role, domain and checker mark (proposed: [security](../proposals/security.md)) | R-BTN-180 |
   | `owner grant flags <repository> <fingerprint> --sync\|--no-sync` | sets a grant's `sync` flag | R-BTN-146 |
@@ -243,8 +242,8 @@ contents are not built; their design is
   | `owner consent add <repository> <home>`, `owner consent withdraw <repository> <home>` | a `code_repos` consent (proposed: [data model and API](../proposals/data-model-and-api.md)) | R-BTN-140 |
   | `owner sync-key add <repository> <pub> --role sync\|mirror`, `owner sync-key revoke <repository> <fingerprint>` | sync and mirror keys | R-BTN-93 |
   | `owner sync want <repository>` | records a sync want | R-BTN-105 |
-  | `owner token create <repository> --role runner [--capabilities …] [--max-tier <t>] [--ttl <d>] [--uses <n>]`, `owner token revoke <repository> <id>` | registration tokens (proposed: [checks and executors](../proposals/checks-and-executors.md)) | R-BTN-117 |
-  | `owner check-runner add <repository> <pub> --name <hostname> [--capabilities …] [--max-tier <t>]`, `owner check-runner revoke <repository> <fingerprint>` | check-runners (proposed: [checks and executors](../proposals/checks-and-executors.md)) | R-BTN-114 |
+  | `owner token create <repository> --role runner [--capabilities …] [--ttl <d>] [--uses <n>]`, `owner token revoke <repository> <id>` | registration tokens (proposed: [checks and executors](../proposals/checks-and-executors.md)) | R-BTN-117 |
+  | `owner check-runner add <repository> <pub> --name <hostname> [--capabilities …]`, `owner check-runner revoke <repository> <fingerprint>` | check-runners (proposed: [checks and executors](../proposals/checks-and-executors.md)) | R-BTN-114 |
   | `admin repo list` | the registry | R-BTN-179 |
   | `admin repo add <forge path> --owner-key <pub>`, `admin repo set <id>`, `admin repo retire <id>` | registers, changes or retires a repository | R-BTN-47, R-BTN-138 |
   | `admin repo resync <repository> --force [<sha>]` | forces a resync (proposed: [tickets and sources](../proposals/tickets-and-sources.md)) | R-BTN-11 |
@@ -314,12 +313,17 @@ contents are not built; their design is
     emails ASCII and compared ASCII-lowercased, at most one line per email, several emails to
     one key allowed. Whoever controls the deployment sets it (R-BTN-57). An email bound to an
     administrator key gets a session of that key, as its link would open it; that session's key
-    is the line's. An absent, unverified or expired assertion, one with no or a non-ASCII email,
-    and an email bound to no key in `BATON_ADMIN_KEYS` are `unauthenticated` and set no cookie;
-    an unreadable key set is `unavailable`. A value of `ACCESS_IDENTITIES` with a malformed or
-    duplicated line binds nothing: every Access sign-in is `unavailable` until it is fixed, and
-    nothing else is affected. Each sign-in is recorded as an event of its key,
-    `{act: "login", via: "access"}`, with the email's SHA-256, never the email. Each request
+    is the line's. An Access sign-in refusal with `unauthenticated` sets no cookie and carries
+    one `reason`, checked in this order: `not-configured` if either `ACCESS_TEAM_DOMAIN` or
+    `ACCESS_AUD` is absent; `no-assertion` if no assertion reached Baton; `unverified` if the
+    assertion did not verify or lacks a usable ASCII email; `not-bound` if the verified email
+    has no line or its line names a key not in `BATON_ADMIN_KEYS`. Both binding failures have
+    the same answer; no refusal echoes the email. The page explains the reason as text and
+    still offers a one-time link. An unreadable key set is `unavailable`. A value of
+    `ACCESS_IDENTITIES` with a malformed or duplicated line binds nothing: an Access sign-in
+    that reaches the binding check is `unavailable` until it is fixed. Each successful sign-in
+    is recorded as an event of its key, `{act: "login", via: "access"}`, with the email's
+    SHA-256, never the email. Each request
     a session so opened authorizes also checks its line: the session ends as soon as the email
     leaves `ACCESS_IDENTITIES` or its line names another key. Baton reads no assertion after
     the sign-in, so ending the Access session does not end Baton's.

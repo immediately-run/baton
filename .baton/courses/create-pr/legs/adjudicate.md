@@ -1,11 +1,11 @@
-# create-pr · adjudicate — the owner answers three failed reviews
+# create-pr · adjudicate — the owner answers the last failed review round
 
-No agent runs this leg. Three review rounds have run on the ticket's PRs, each asking for
-changes, and the third pair of eyes is **yours** — the owner's — not another model's: nothing
+No agent runs this leg. The course's review rounds (`review.max_runs` in `course.json`, eight)
+have run on the ticket's PRs, each asking for changes, and the next pair of eyes is **yours** — the owner's — not another model's: nothing
 is reproduced by an agent, and no claim runs while you have not answered. The ticket waits at
 `reviewed`, listed under **Needs you**, asking:
 
-> **3 failed reviews — manual review or start a 4th round?**
+> **8 failed reviews — manual review or start a 9th round?**
 > **How the stub runs you** — Baton's contract for the `agent_command` author: your command
 > line splits into words as `sh` would (quotes honoured, no substitutions) and executes
 > **without a shell**, with the ticket id, the leg and the checkout appended as arguments.
@@ -25,7 +25,7 @@ this one — the Needs-you entry links the PR whose last round holds them), then
 Baton, with your owner key — the way Baton's own decisions are answered:
 
 ```
-baton owner -i <your owner key> resolve <repository> <ticket> review-rounds-3 merge|owner|round
+baton owner -i <your owner key> resolve <repository> <ticket> review-rounds-<n> merge|owner|round
 ```
 
 (`baton decision list` prints the line for you, with the decision's id.)
@@ -33,10 +33,12 @@ baton owner -i <your owner key> resolve <repository> <ticket> review-rounds-3 me
 - **`merge`** — you reviewed it yourself and it merges: the ticket moves to `adjudicated` with
   `merge` ready.
 - **`owner`** — you take the change over by hand: the ticket parks, `merge` waiting on you,
-  until you say otherwise.
-- **`round`** — start a 4th review round. The answer itself grants exactly one more `review`
-  run beyond the course's three — there is no second step — and the round runs on the same
-  head. If that round still asks for changes, you are asked again (`review-rounds-4`), and may
+  until you say otherwise. Keep the last round on its PR while parked. If you close the ticket
+  by hand, follow [the merge leg's archive step](merge.md#close-the-ticket) for every round
+  not already recorded in `docs/review/`.
+- **`round`** — start one more review round. The answer itself grants exactly one more `review`
+  run beyond the course's rounds — there is no second step — and the round runs on the same
+  head. If that round still asks for changes, you are asked again (`review-rounds-9`), and may
   answer again.
 
 The answer counts only because your key gave it to Baton. A commit trailer, or a comment line
@@ -45,5 +47,5 @@ such as `<!-- baton:adjudicated merge -->`, answers nothing: anyone who can push
 ## Do not
 
 - Answer from the review summaries alone: read the findings the rounds left open.
-- Grant a round without reading why the third refused — the gate's tests are green; the
+- Grant a round without reading why the last one refused — the gate's tests are green; the
   findings are the question.

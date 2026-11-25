@@ -27,8 +27,7 @@
 #                      with a line saying so and the local half must still pass.
 #   --port N           the local Baton's port (default 8791)
 #   --keep             keep the scratch directory (printed) for inspection
-#   --cli              override the pinned release CLI (default: npx --yes @immediately-run/baton@0.1.4,
-#                      the runbook's pin; B-138)
+#   --cli              override this checkout's CLI with a compatible command (must include B-300)
 #
 # Needs: this repository's checkout (node_modules installed — `npm ci --ignore-scripts`),
 # Node 22+, git, and `gh` signed in with write on --repo's repository for the GitHub half.
@@ -39,7 +38,15 @@ PORT=8791
 KEEP=0
 LOCAL_ONLY=0
 REPO=''
-BATON="${BATON_CLI:-npx --yes @immediately-run/baton@0.1.4}"
+BATON="${BATON_CLI:-drill_checkout_cli}"
+
+# Only the drill's throwaway keys use the checkout override; the runbooks pin a release.
+drill_checkout_cli() {
+  case "$1" in
+    admin|owner) local role="$1"; shift; node "$ROOT/cli/baton.mjs" "$role" --dev "$@" ;;
+    *) node "$ROOT/cli/baton.mjs" "$@" ;;
+  esac
+}
 
 die() { echo "drill: $*" >&2; exit 2; }
 note() { echo; echo "── $* ──────────────────────────────────────────"; }
@@ -221,9 +228,9 @@ cd "$WORK"
 note "runbook 1 — the key first: revoke, then close the board to machine keys"
 run "$BATON admin -i '$WORK/keys/drill_admin' state"
 run "$BATON owner -i '$WORK/keys/drill_owner' grants home"
-run "$BATON owner -i '$WORK/keys/drill_owner' revoke home '$FP1'"
+run "$BATON owner -i '$WORK/keys/drill_owner' revoke home '$FP1' --yes"
 echo "+ the same cut, everywhere at once with an administrator key (a second compromised machine, '$FP2'):"
-run "$BATON admin -i '$WORK/keys/drill_admin' revoke '$FP2'"
+run "$BATON admin -i '$WORK/keys/drill_admin' revoke '$FP2' --yes"
 echo "+ the revoked machine's next heartbeat (within its beat, 2 min) is refused — the probe:"
 EXPECT_REFUSAL=1 run "W1 beat drill-compromised"
 run "$BATON owner -i '$WORK/keys/drill_owner' policy show home > '$WORK/policy.json'"

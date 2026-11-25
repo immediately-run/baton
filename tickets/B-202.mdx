@@ -3,7 +3,7 @@ title: "B-202 — The tenant reads: GET /v1/admin/instances, /resources (with pr
 id: B-202
 project: baton-ui-v2
 status: available
-updated: 2026-11-09
+updated: 2026-11-23
 repos:
   - baton
 tags:
@@ -76,7 +76,7 @@ The §14 rows first, then the code. Every read's callers: `admin` (a key) and `{
 6. **`GET /v1/admin/sessions`** (`admin.session.list`): the live dashboard sessions — `{id, role,
    key_fingerprint, repositories, bound_at, last_seen_at, client_addr, current}` (`current` the
    caller's own); ended sessions are not listed (they live at most 4 hours, R-BTN-155).
-7. **`GET /v1/admin/repositories`** (`admin.repo.list`) gains, per row, `tiers`, `sync_keys:
+7. **`GET /v1/admin/repositories`** (`admin.repo.list`) gains, per row, ~~`tiers`,~~ `sync_keys:
    [{fingerprint, role}]`, `ci_identity`, `retired_at`, and `?retired=1` to include retired
    repositories — the registry screen's columns (B-214); its §14 row follows. `GET
    /v1/admin/state` is untouched (B-216 settles it).
@@ -110,7 +110,7 @@ and a probe (one stale), one capacity half held, two sessions: each read answers
 administrator's key and session and refuses the owner's session; `admin.tenant`'s live counts
 equal the rows and its rate reflects a burst of verified requests under the fake clock;
 `admin.session.list` marks the caller's own and lists no ended session; `admin.resource.list`
-lists the probe key; `admin.repo.list` carries `tiers`, `sync_keys`, `ci_identity` and, with
+lists the probe key; `admin.repo.list` carries ~~`tiers`,~~ `sync_keys`, `ci_identity` and, with
 `?retired=1`, a retired row.
 
 ### Exit criteria
@@ -131,3 +131,5 @@ probes added; the per-credential limit kept off the tenant figures._
 _2026-11-09 — revised after the second review: the request counter built (Decision 8a) with
 R-BTN-87's envelope spelt out; `frozen` and `sealed` dropped (R-BTN-88 is unbuilt); the registry
 read extended for B-214's columns._
+
+_2026-11-23 — tiers retired (spec/retire-tiers: [BATON_SPEC §6.6](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-6) gate 5, [R-BTN-66](../spec/BATON_SPEC/01-what-baton-is.md#sec-1)): the struck tier clauses are gone from the spec — no ticket tier, runner ceiling, grant `max_tier`, ladder, `ready_by_tier` or `?tier=`. Build the rest without them._

@@ -77,6 +77,35 @@ describe('S-BTN-204: every leg run has a run id (R-BTN-63)', () => {
     ]);
   });
 
+  it('B-335: each advance reply names its run\'s number — the count max_runs reads, each of the claim\'s runs once', async () => {
+    const w = await register('vm-a');
+    const c1 = (await claimItem('vm-a', w.secret, { ticket_id: 'docs:A' })).json;
+    const step = async (body: Record<string, unknown>) => {
+      const a = await advance('vm-a', w.secret, c1.claim_id, body);
+      expect(a.status, JSON.stringify(a.json)).toBe(200);
+      return a.json.run;
+    };
+    // review → fix → review → fix → review on one claim: the rounds are 1, 2, 3, never 1, 3, 5.
+    expect(await step({ leg: 'implement' })).toBe(1);
+    expect(await step({ reached: 'pr-open', leg: 'review' })).toBe(1);
+    expect(await step({ reached: 'reviewed', leg: 'fix' })).toBe(1);
+    expect(await step({ reached: 'fixed', leg: 'review' })).toBe(2);
+    expect(await step({ reached: 'reviewed', leg: 'fix' })).toBe(2);
+    expect(await step({ reached: 'fixed', leg: 'review' })).toBe(3);
+    // fix's bound is 2: a third fix is refused max-runs, read from the same count as the number.
+    expect((await advance('vm-a', w.secret, c1.claim_id, { reached: 'reviewed', leg: 'fix' })).json.rule_code).toBe('max-runs');
+  });
+
+  it('B-335: a run the earlier claim abandoned is not one of the ticket\'s runs for the number, as for max_runs', async () => {
+    const w = await register('vm-a');
+    const c1 = (await claimItem('vm-a', w.secret, { ticket_id: 'docs:A' })).json;
+    expect((await advance('vm-a', w.secret, c1.claim_id, { leg: 'implement' })).json.run).toBe(1);
+    expect((await endClaim('vm-a', w.secret, c1.claim_id, { end_reason: 'released:requested' })).status).toBe(200);
+    await git.refresh(); // a later snapshot confirms the end (R-BTN-62)
+    const c2 = (await claimItem('vm-a', w.secret, { ticket_id: 'docs:A' })).json;
+    expect((await advance('vm-a', w.secret, c2.claim_id, { leg: 'implement' })).json.run).toBe(1);
+  });
+
   it('a run id that collides with an existing one is refused by the unique index and minted again', async () => {
     // The random source repeats its first draw once: the second advance's first id collides.
     await withCore((core) => {

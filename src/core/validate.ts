@@ -2,8 +2,9 @@
 // §5). One module, called by every endpoint before any write (R3-1211); a value that fails is
 // refused with `invalid-params` naming the field, never trimmed into shape.
 import { BatonError, RECOMMENDED_CLIENT } from './http';
+import { gitPointer, S3_POINTER } from './contractPointers';
 import { FREE_TEXT_MAX, isFreeText } from './text';
-import { COURSE_ID } from './course';
+import { COURSE_ID, RESOURCE_NAME } from './course';
 import { CONDITION_TYPE, CONDITION_TYPE_MAX, RESTART_ID, SEVERITIES } from './conditionTypes';
 import { parseSchemaId, VALUE_MAX_BYTES } from '../shared/schema.mjs';
 import { CLIENT_VERSION_MAX, compareVersions, parseVersion } from '../shared/versions.mjs';
@@ -21,6 +22,10 @@ export const ORIGIN = /^https?:\/\/[A-Za-z0-9.-]+(?::[1-9][0-9]{0,4})?$/;
 /** R-BTN-138's id kind, as a `code_repos` entry stores it: a decimal string. */
 export const FORGE_ID = /^[1-9][0-9]{0,19}$/;
 export const SHA256_HEX = /^[0-9a-f]{64}$/;
+export const KEY_FINGERPRINT = /^SHA256:[A-Za-z0-9+/]{43}$/;
+export const API_KEY_FINGERPRINT = /^bak_[0-9a-f]{16}$/;
+/** A login link's token and a session's value: 32 random bytes, hex. */
+export const SESSION_TOKEN = SHA256_HEX;
 // The id forms of R-BTN-47, each spelled once.
 const REPOSITORY_SRC = '[a-z][a-z0-9-]{0,39}';
 const LOCAL_SRC = '[A-Za-z0-9][A-Za-z0-9._-]{0,63}';
@@ -90,6 +95,36 @@ export const bad = (field: string, why: string): never => {
 const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 const isInt = (v: unknown) => Number.isInteger(v);
 const isTime = (v: unknown) => Number.isInteger(v) && (v as number) >= 0;
+
+/** R-BTN-155: compare only ASCII addresses, without silently trimming or Unicode folding. */
+export function accessEmail(value: unknown): string | null {
+  const address = /^[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\.[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+)*@[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)*$/;
+  return typeof value === 'string' && address.test(value) ? value.toLowerCase() : null;
+}
+
+/** R-BTN-155: one email/fingerprint pair per line; a bad line invalidates the whole binding. */
+export function parseAccessIdentities(text: string): Map<string, string> {
+  const identities = new Map<string, string>();
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.replace(/^[ \t]+|[ \t]+$/g, '');
+    if (!line) continue;
+    const [address, fingerprint, ...extra] = line.split(/[ \t]+/);
+    const email = accessEmail(address);
+    if (!email || !fingerprint || extra.length || !(KEY_FINGERPRINT.test(fingerprint) || API_KEY_FINGERPRINT.test(fingerprint)) || identities.has(email)) {
+      throw new BatonError('unavailable', 'ACCESS_IDENTITIES has a malformed or duplicate line');
+    }
+    identities.set(email, fingerprint);
+  }
+  return identities;
+}
+
+export function checkLogin(body: unknown): { token: string } | { access: true } {
+  if (isObj(body) && Object.keys(body).length === 1) {
+    if (body.access === true) return { access: true };
+    if (typeof body.token === 'string' && SESSION_TOKEN.test(body.token)) return { token: body.token };
+  }
+  return bad('body', 'send exactly one of the link token or access: true');
+}
 
 /** §10.4's free text: at most 500 characters, no control characters, none of `< > { }`. */
 export function freeText(v: unknown, field: string, max = FREE_TEXT_MAX): string {
@@ -209,6 +244,22 @@ export const clampConcurrency = (n: unknown) => (isInt(n) ? Math.min(MAX_CLAIMS_
 /** R-BTN-107: the isolation modes a heartbeat may declare. */
 export const ISOLATIONS: readonly Heartbeat['isolation'][] = ['attached', 'process', 'session'];
 
+/** Shared by the heartbeat boundary and the runner before it adopts a new declaration. */
+export function checkDeclaredCourses(rawCourses: unknown): Heartbeat['courses'] {
+  if (!Array.isArray(rawCourses) || rawCourses.length > COURSES_MAX) bad('courses', `must be a list of at most ${COURSES_MAX}`);
+  const declaredCourses = new Set<string>();
+  return (rawCourses as unknown[]).map((c, i) => {
+    if (!isObj(c)) bad(`courses[${i}]`, 'must be an object');
+    const x = c as Record<string, unknown>;
+    const repository = checkRepositoryId(x.repository, `courses[${i}].repository`);
+    const course = matches(COURSE_ID, `courses[${i}].course`)(x.course);
+    if (!isInt(x.version) || (x.version as number) < 0 || (x.version as number) > COURSE_VERSION_MAX) bad(`courses[${i}].version`, 'must be a non-negative integer');
+    if (declaredCourses.has(`${repository}:${course}`)) bad(`courses[${i}]`, `repeats ${repository}:${course}`);
+    declaredCourses.add(`${repository}:${course}`);
+    return { repository, course, version: x.version as number };
+  });
+}
+
 export function checkHeartbeat(body: unknown, transcriptRepos: string[]): Heartbeat {
   if (!isObj(body)) bad('body', 'must be a JSON object');
   const b = body as Record<string, unknown>;
@@ -231,19 +282,7 @@ export function checkHeartbeat(body: unknown, transcriptRepos: string[]): Heartb
   if (!TIERS.includes(tier as never)) bad('tier_ceiling', `must be one of ${TIERS.join(', ')}`);
   // R-BTN-22: the skills version is each course's version, declared per course; a sidecar that
   // still sends `skills_version` is not refused for it.
-  const rawCourses = b.courses ?? [];
-  if (!Array.isArray(rawCourses) || rawCourses.length > COURSES_MAX) bad('courses', `must be a list of at most ${COURSES_MAX}`);
-  const declaredCourses = new Set<string>();
-  const courses = (rawCourses as unknown[]).map((c, i) => {
-    if (!isObj(c)) bad(`courses[${i}]`, 'must be an object');
-    const x = c as Record<string, unknown>;
-    const repository = checkRepositoryId(x.repository, `courses[${i}].repository`);
-    const course = matches(COURSE_ID, `courses[${i}].course`)(x.course);
-    if (!isInt(x.version) || (x.version as number) < 0 || (x.version as number) > COURSE_VERSION_MAX) bad(`courses[${i}].version`, 'must be a non-negative integer');
-    if (declaredCourses.has(`${repository}:${course}`)) bad(`courses[${i}]`, `repeats ${repository}:${course}`);
-    declaredCourses.add(`${repository}:${course}`);
-    return { repository, course, version: x.version as number };
-  });
+  const courses = checkDeclaredCourses(b.courses ?? []);
   if (b.last_activity_at !== undefined && !isTime(b.last_activity_at)) bad('last_activity_at', 'must be epoch ms');
   if (b.test_harness !== undefined && typeof b.test_harness !== 'boolean') bad('test_harness', 'must be a boolean');
   if (b.isolation !== undefined && !ISOLATIONS.includes(b.isolation as Heartbeat['isolation'])) bad('isolation', `must be one of ${ISOLATIONS.join(', ')}`);
@@ -469,6 +508,7 @@ export function checkMessage(body: unknown): { to_runner_id: number; kind: 'rele
   const x = p as Record<string, unknown>;
   const ticket_id = matches(TICKET_ID, 'payload.ticket_id')(x.ticket_id);
   if (!RELEASE_REASONS.includes(x.reason as never)) bad('payload.reason', `must be one of ${RELEASE_REASONS.join(', ')}`);
+  checkConfirm(b);
   return { to_runner_id: b.to_runner_id as number, kind: 'release', payload: { ticket_id, reason: x.reason } };
 }
 
@@ -490,6 +530,20 @@ export function checkShadowReport(body: unknown) {
 
 const REQUEST_ID = /^[A-Za-z0-9._:-]{8,128}$/;
 export const GIT_SHA = /^[0-9a-f]{40}$/;
+
+/** R-BTN-88: the server-owned placement carried by an owner-state export. */
+export function checkOwnerStateStation(row: Record<string, unknown>, path: unknown): void {
+  const id = (v: unknown): boolean => typeof v === 'string' && COURSE_ID.test(v);
+  const n = (v: unknown): boolean => typeof v === 'number' && Number.isSafeInteger(v) && v >= 0;
+  if (typeof row.ticket_id !== 'string' || !TICKET_ID.test(row.ticket_id) || row.next_source !== 'baton'
+    || !id(row.station) || (row.next_leg !== null && !id(row.next_leg))
+    || !Array.isArray(path) || row.path_len !== path.length || path.some((step) => !isObj(step) || !id(step.leg) || !id(step.reached)
+      || Object.keys(step).some((key) => !['leg', 'reached', 'adopted'].includes(key)) || (step.adopted !== undefined && typeof step.adopted !== 'boolean'))
+    || !n(row.to_end) || !n(row.observation) || (row.person_expires_at !== null && !n(row.person_expires_at))
+    || (row.handoff_url !== null && !isHttpsPointer(row.handoff_url)) || typeof row.snapshot_sha !== 'string' || !GIT_SHA.test(row.snapshot_sha)) {
+    bad('ticket_stations row', 'must carry a valid Baton-owned position');
+  }
+}
 /** §6.5: the `released:` reasons, exactly. */
 export const RELEASE_END_REASONS = ['blocked', 'stale-board', 'cannot-finish:transient', 'cannot-finish:capability', 'cannot-finish:spec', 'cannot-finish:contract-output', 'cannot-finish:contract-input',
   'lease-lost', 'requested', 'owner-cancel', 'provider-suspended', 'provider-exhausted', 'course-changed', 'leg-timeout'] as const;
@@ -550,13 +604,12 @@ export interface Output {
 }
 
 /** R-BTN-82: outputs per leg run. */
-export const OUTPUTS_MAX = 16;
+import { OUTPUTS_MAX } from './contractPointers';
+export { OUTPUTS_MAX };
 const OUTPUT_NAME = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
 const OUTPUT_DIGEST = /^sha256:[0-9a-f]{64}$/;
 /** R-BTN-82's pointers: `git:<owner>/<name>@<commit>:<path>` or `#blob=<sha>` (content-addressed),
  *  an `https://` URL, or `s3://<bucket>/<key>?versionId=…`; at most 1 KB. */
-const GIT_POINTER = /^git:[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+(@[0-9a-f]{40}([0-9a-f]{24})?:[^\s]+|#blob=[0-9a-f]{40}([0-9a-f]{24})?)$/;
-const S3_POINTER = /^s3:\/\/[a-z0-9.-]{3,63}\/[^\s?]+\?versionId=[^\s&]+$/;
 
 /** `outputs` on an advance or an end (R-BTN-108, R-BTN-82): at most 16 envelopes, distinct
  *  names, each `{name, schema, uri, digest?}` or `{name, schema, value}` — never both. A value is
@@ -585,7 +638,7 @@ export function checkOutputs(v: unknown): Output[] {
       return { name, schema: o.schema as string, value: o.value };
     }
     const uri = o.uri;
-    if (typeof uri !== 'string' || uri.length > 1000 || !(GIT_POINTER.test(uri) || S3_POINTER.test(uri) || isHttpsPointer(uri))) {
+    if (typeof uri !== 'string' || uri.length > 1024 || !(gitPointer(uri) || S3_POINTER.test(uri) || isHttpsPointer(uri))) {
       bad(`${at}.uri`, 'must be a git:, https:// or s3:// pointer of at most 1000 characters');
     }
     const digest = optional(o.digest, matches(OUTPUT_DIGEST, `${at}.digest`));
@@ -604,6 +657,8 @@ export interface End {
   next: string | null;
   detail: string | null;
   ended_at_sha: string | null;
+  /** A suspension reporting a completed self-loop, not an abandoned run at the same station. */
+  finished_self_loop: boolean;
   /** `released:<reason>` naming no §6.5 reason: an owner bar's (R-BTN-67), checked by the claims. */
   owner_bar: boolean;
   /** R-BTN-126 (B-104's branch): a `released:blocked` end's failed prerequisite — `capability`,
@@ -750,6 +805,9 @@ export function checkEnd(body: unknown): End {
   if (ptr !== undefined && ptr !== null && !isPointer(ptr)) bad('ended_at_sha', 'must be a commit sha or an https URL of at most 1000 characters');
   const sha = (ptr as string | undefined | null) ?? null;
   if (status! === 'released' && sha) bad('ended_at_sha', 'only a completed end points at its evidence');
+  if (b.finished_self_loop !== undefined && (b.finished_self_loop !== true || !suspended_at || !sha)) {
+    bad('finished_self_loop', 'must be true on a suspension carrying ended_at_sha');
+  }
   // R-BTN-126 (B-104's branch): a blocked end names the prerequisite that failed — `capability`
   // with a holding the runner declares and says it lost. The other kinds are the blocked-end
   // work's; a blocked end without one is malformed.
@@ -779,7 +837,7 @@ export function checkEnd(body: unknown): End {
     spawned = b.spawned as string[];
     if (reason === 'done') bad('spawned', 'a done end spawns nothing — its open children are superseded by the close (R-BTN-86, R-BTN-168)');
   }
-  return { end_reason: reason, status: status!, suspended_at, reached: reached ?? suspended_at, next, detail, ended_at_sha: sha, owner_bar: ownerBar, prerequisite, outputs: checkOutputs(b.outputs), scope_exceeded: checkScopeReport(b.scope_exceeded), exit_status: optional(b.exit_status, exitStatus) ?? null, session_url: carriedSessionUrl(b.session_url), spawned, local_order: checkLocalOrder(b.local_order) };
+  return { end_reason: reason, status: status!, suspended_at, reached: reached ?? suspended_at, next, detail, ended_at_sha: sha, finished_self_loop: b.finished_self_loop === true, owner_bar: ownerBar, prerequisite, outputs: checkOutputs(b.outputs), scope_exceeded: checkScopeReport(b.scope_exceeded), exit_status: optional(b.exit_status, exitStatus) ?? null, session_url: carriedSessionUrl(b.session_url), spawned, local_order: checkLocalOrder(b.local_order) };
 }
 
 /** B-248 (R-BTN-202): a local order's provenance, as the advance or end that reports the leg
@@ -942,7 +1000,7 @@ export function checkRunInputs(v: unknown): RunInputs {
       return { name, from_leg, from_run, uri: '', digest: null, value: o.value, hasValue: true, leg_version };
     }
     const uri = o.uri;
-    if (typeof uri !== 'string' || uri.length > 1000 || !(GIT_POINTER.test(uri) || S3_POINTER.test(uri) || isHttpsPointer(uri))) {
+    if (typeof uri !== 'string' || uri.length > 1024 || !(gitPointer(uri) || S3_POINTER.test(uri) || isHttpsPointer(uri))) {
       bad(`${at}.uri`, 'must be a git:, https:// or s3:// pointer of at most 1000 characters');
     }
     const digest = optional(o.digest, matches(OUTPUT_DIGEST, `${at}.digest`));
@@ -1045,9 +1103,9 @@ export function checkFenced(v: unknown): { claim_id: number }[] {
   });
 }
 
-/** An owner action that names its own confirmation (§14: force-reap). */
+/** §12.2: only an explicit JSON boolean true confirms a destructive action. */
 export function checkConfirm(body: unknown): void {
-  if (!isObj(body) || body.confirm !== true) bad('confirm', 'must be true');
+  if (!isObj(body) || body.confirm !== true) throw new BatonError('confirm-required', 'this action takes confirm: true');
 }
 
 export function checkAccept(body: unknown): { repository: string; sha: string } {
@@ -1081,24 +1139,31 @@ export function checkResolve(body: unknown): { action: 'confirm' | 'release' } {
  *  other decision id is one a sync posted on the ticket (B-110): its answer is one of the
  *  options the decision carries, checked against the stored decision by the route. */
 export function checkDecisionAnswer(body: unknown):
-  | { decision: 'baton:retries' | 'baton:stalled'; answer: 'retry' | 'park' }
+  | { decision: 'baton:retries' | 'baton:stalled' | 'baton.contract'; answer: 'retry' | 'park' }
   | { decision: string; answer: string; posted: true } {
   if (!isObj(body)) bad('body', 'must be a JSON object');
   const b = body as Record<string, unknown>;
   for (const k of Object.keys(b)) if (!['decision', 'answer', 'leg'].includes(k)) bad(`body.${k}`, 'unknown field');
   if (b.decision === 'baton:contract') bad('decision', 'baton:contract is raised with leg contracts (B-39), not yet');
-  if (typeof b.decision === 'string' && !b.decision.startsWith('baton:') && DECISION_ID.test(b.decision)) {
+  if (typeof b.decision === 'string' && b.decision !== 'baton.contract' && !b.decision.startsWith('baton:') && DECISION_ID.test(b.decision)) {
     // B-110: a decision the ticket's sync posted — the owner's answer to the course's own
     // question (create-pr's third failed review round), one of the decision's options.
     if (typeof b.answer !== 'string' || !DECISION_OPTION.test(b.answer)) bad('answer', `must be one of the decision's options (${DECISION_OPTION})`);
     if (b.leg !== undefined) bad('leg', 'only with the route answer');
     return { decision: b.decision, answer: b.answer as string, posted: true };
   }
-  if (b.decision !== 'baton:retries' && b.decision !== 'baton:stalled') bad('decision', "must be 'baton:retries', 'baton:stalled' or a decision the ticket's sync posted");
+  if (b.decision !== 'baton:retries' && b.decision !== 'baton:stalled' && b.decision !== 'baton.contract') bad('decision', "must name a Baton decision or a decision the ticket's sync posted");
   if (b.answer === 'route') bad('answer', "route needs the owner's re-route (B-38), not yet: answer retry or park");
   if (b.answer !== 'retry' && b.answer !== 'park') bad('answer', "must be 'retry' or 'park'");
   if (b.leg !== undefined) bad('leg', 'only with the route answer');
-  return { decision: b.decision as 'baton:retries' | 'baton:stalled', answer: b.answer as 'retry' | 'park' };
+  return { decision: b.decision as 'baton:retries' | 'baton:stalled' | 'baton.contract', answer: b.answer as 'retry' | 'park' };
+}
+
+/** R-BTN-163: interaction delivery is opt-in on each runner grant. */
+export function checkDeliverInteractions(value: unknown): boolean {
+  if (value === undefined) return false;
+  if (typeof value === 'boolean') return value;
+  return bad('deliver_interactions', 'must be a boolean');
 }
 
 /** §8, §11: `{expedite?, hold?}` — booleans, at least one. */
@@ -1150,7 +1215,7 @@ export const DECISION_TYPE_NAME = 'std:decision@1';
 // ── blocks, external resources and readings (§2g R-BTN-75–78, §2l R-BTN-101; R3-1251) ─────
 
 /** R-BTN-76: an external resource's name — opaque to core (`llm:<model>`, `github-api`). */
-export const RESOURCE_NAME = /^[a-z][a-z0-9:._/-]{0,79}$/;
+export { RESOURCE_NAME };
 /** An instance's name (`opencode-go:go_plus`, a `service` resource's own): the resource rule with
  *  `_` (spec-silent, recorded on R3-1251 — the scenarios' own instances carry it). */
 export const INSTANCE_NAME = /^[a-z][a-z0-9_:./-]{0,79}$/;
@@ -1337,7 +1402,7 @@ export function checkProtection(v: unknown): { repository: string; matched: bool
     for (const k of Object.keys(e)) if (k !== 'repository' && k !== 'matched' && k !== 'reading_hash' && k !== 'legs') bad(`protection[${i}].${k}`, 'unknown field');
     if (typeof e.matched !== 'boolean') bad(`protection[${i}].matched`, 'must be true or false');
     if (typeof e.reading_hash !== 'string' || !/^[A-Za-z0-9:_-]{1,128}$/.test(e.reading_hash)) bad(`protection[${i}].reading_hash`, 'must be a short reading hash');
-    // §14 (R-BTN-190): the heartbeat protection entry's `legs` — what the checker's reading
+    // The heartbeat protection entry's `legs` (R-BTN-190) — what the checker's reading
     // covered, B-140's client sends it.
     let legs: { count: number; tickets: number } | undefined;
     if (e.legs !== undefined) {
@@ -1379,4 +1444,8 @@ export function checkNoticeClaim(v: unknown): number {
   if (b.limit === undefined) return CLAIM_MAX;
   if (!Number.isInteger(b.limit) || (b.limit as number) < 1 || (b.limit as number) > CLAIM_MAX) bad('limit', `must be an integer from 1 to ${CLAIM_MAX}`);
   return b.limit as number;
+}
+/** B-131: the opaque R-BTN-63 run id selects one leg, not all claims of a key. */
+export function checkForgeRun(run: string): void {
+  if (!/^r_[0-9A-HJKMNP-TV-Z]{26}$/.test(run)) bad('run', 'must be a leg run id');
 }

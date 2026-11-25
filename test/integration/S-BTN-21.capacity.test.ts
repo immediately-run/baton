@@ -230,7 +230,9 @@ describe('S-BTN-21 capacity (R-BTN-178)', () => {
     expect(await seatsOf(took.json.claim_id)).toEqual([CAP]);
 
     // A silent reap — W2 stops beating, its lease lapses — frees the seat at once (not fenced).
-    await setClock(T0 + 2 * 3_600_000);
+    await setClock(T0 + 14 * 60_000);
+    await tick(); // Baton is still serving; only W2 went silent.
+    await setClock(T0 + 15 * 60_000);
     await tick();
     expect((await rows<{ status: string }>('SELECT status FROM claims WHERE id = ?', took.json.claim_id))[0].status).toBe('reaped');
     expect(await seatsOf(took.json.claim_id)).toEqual([]);

@@ -1,5 +1,5 @@
 // tickets-baton.ts — the ticket commands' Baton reads (B-129; R-BTN-179's one-answer rule, §9's
-// branch-holder query, R-BTN-81's history): before `baton tickets claim` writes, it asks Baton
+// branch-holder query, R-BTN-81's history): before a claim — `baton tickets check <id> --claimable`, B-326 — it asks Baton
 // where the ticket stands — the pickup side of the owner's ruling that Baton owns a ticket's
 // course history (B-120; R-BTN-35: about what Baton owns, Baton wins and the disagreement is
 // logged). One wrong `status: available` line over an open PR (B-91, 2026-10-27) then hands the
@@ -23,8 +23,8 @@
 // key cannot sign runner routes, and the board's `holders` has already answered the ticket's own
 // lock, so that one read is skipped, not fatal.
 import { readFileSync } from 'node:fs';
-import { send } from '../../cli/baton.mjs';
-import { requestCredential } from '../../cli/sign.mjs';
+import { send } from '../client/send.mjs';
+import { requestCredential } from '../client/sign.mjs';
 
 /** One live claim on a ticket, as the board's `holders` answers it (B-129). */
 export interface Holder {

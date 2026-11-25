@@ -98,7 +98,7 @@ export class Scope {
     store: Store;
     now: () => number;
     /** B-134: with `scope_policy: hold`, hold the claim's ticket — wired to Claims' own hold. */
-    hold?: (ticket: string, claimId: number) => void;
+    hold: (ticket: string, claimId: number) => void;
   }) {}
 
   private rows<T>(q: string, ...p: unknown[]): T[] {
@@ -137,7 +137,7 @@ export class Scope {
       this.upsert(policy.repository_id, claim.ticket_id, claimId, 'scope-exceeded', a.target, { kind: a.kind, ref: a.ref ?? null, claim: claimId }, now);
       logEvent(this.c.store, now, 'scope-exceeded', 'baton', { ...a, claim: claimId, snapshot_sha: claim.snapshot_sha }, claim.ticket_id, claimId);
     }
-    if (raised.length && policy.scope_policy === 'hold') this.c.hold?.(claim.ticket_id, claimId);
+    if (raised.length && policy.scope_policy === 'hold') this.c.hold(claim.ticket_id, claimId);
     return raised;
   }
 
