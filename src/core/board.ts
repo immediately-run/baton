@@ -6,6 +6,7 @@ import { boundedJson } from './validate';
 import { capabilitiesOf } from '../vendor/vocabulary.mjs';
 import { parseTranscriptRepo } from './links';
 import { BatonError } from './http';
+import { sha256HexSync } from './policy';
 import { checkRegistry, COURSE_ID, type RegistryEntry } from './courses';
 import { ASKS, COURSE_ID as LEG_ID, DECISION_GRANT_MAX, DECISION_ID, DECISION_OPTION, DECISION_OPTIONS_MAX, DECISION_QUESTION, DECISIONS_MAX, DEPENDENCY_ID, isHttpsPointer, LOCAL_ID, NEEDS_MAX, SESSION_NAME, TAG, HOLDING_TYPE, HOLDING_VALUE, repositoryOf } from './validate';
 import type { Step } from './graph';
@@ -199,6 +200,10 @@ export interface PostedControl {
 
 /** R-BTN-191's envelope as the sync posts it (§4.4): a typed fact about one ticket, its `value`
  *  judged by its `type`'s schema when the type is read. */
+/** R-BTN-10, R-BTN-191: the sync's attestation that git or the forge shows (`found`) the
+ *  evidence an unconfirmed end named. */
+export const GIT_EVIDENCE_TYPE = 'std:git.evidence@1';
+
 export interface PostedAttestation {
   type: string;
   /** A local ticket id, as the post's tickets name them. */
@@ -368,6 +373,14 @@ export function checkPayload(body: unknown, repo?: string): BoardPayload {
         throw new BatonError('invalid-params', `${at}.ref must be a short string or null`);
       }
       if (!isObj((a as PostedAttestation).value)) throw new BatonError('invalid-params', `${at}.value must be an object`);
+      // R-BTN-10: the sync's word on the evidence an unconfirmed end named — `{claim, evidence,
+      // found}`, the evidence exactly as the observation listed it.
+      if ((a as PostedAttestation).type === GIT_EVIDENCE_TYPE) {
+        const v = (a as PostedAttestation).value as Record<string, unknown>;
+        if (!Number.isSafeInteger(v.claim) || (v.claim as number) <= 0) throw new BatonError('invalid-params', `${at}.value.claim must be a claim id`);
+        if (typeof v.evidence !== 'string' || v.evidence === '' || v.evidence.length > 1000) throw new BatonError('invalid-params', `${at}.value.evidence must be the commit sha or URL the end named`);
+        if (typeof v.found !== 'boolean') throw new BatonError('invalid-params', `${at}.value.found must be true or false`);
+      }
     }
   }
   // B-127 (R-BTN-66 as amended): the post's signed-control record. The shape and bounds here;
@@ -842,14 +855,30 @@ export function calendarDate(v: unknown): string | null {
   return Number.isFinite(t) && new Date(t).toISOString().slice(0, 10) === v ? v : null;
 }
 
-/** Unprefixed hashes predate B-322's untiered row shape. */
-export const TICKET_ROW_HASH_PREFIX = 'v2:';
+/** B-322: compare against the exact pre-0077 digest, with the posted (not resolved) parent.
+ *  Migration 0077 wraps the digest with the two dropped inputs. No client supplies either. */
+export function matchesPreTierDropHash(stored: string, row: TicketRow): boolean {
+  if (!stored.startsWith('v1:')) return false;
+  const [digest, tier, position] = JSON.parse(stored.slice(3));
+  // The old row builders both inserted tier after tags and appended its position last.
+  const { requires_clause, ...fields } = row;
+  const old: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(fields)) {
+    old[key] = value;
+    if (key === 'tags') {
+      old.tier = tier;
+      old.requires_clause = requires_clause;
+    }
+  }
+  old.tier_position = position;
+  return sha256HexSync(JSON.stringify(old)) === digest;
+}
 
 /** The row's hash: what decides whether an accepted snapshot rewrites it (§7.1). */
 export async function rowHash(row: TicketRow): Promise<string> {
   const bytes = new TextEncoder().encode(JSON.stringify(row));
   const digest = await crypto.subtle.digest('SHA-256', bytes);
-  return TICKET_ROW_HASH_PREFIX + [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
+  return 'v2:' + [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
 // ── §4.6 children (R-BTN-86, R3-1258) ────────────────────────────────────────────────────

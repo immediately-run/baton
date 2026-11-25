@@ -9,7 +9,7 @@ import { MIGRATIONS } from '../migrations';
 import { versionedStore, clockBucket, ifNoneMatch, nonScheduling, schedulingVersion, type VersionedStore } from './stateVersion';
 import { runnerViewResponse, requireFleetScope } from './runnerViews';
 import { BatonError, CLIENT_HEADER, errorResponse, json, servedClientVersions, withClientVersions } from './http';
-import { checkPayload, DEFAULT_COURSE, resolveParents, retiredBoardFields, stripBoardTier, rowFor, rowForTicket, rowHash, stationOf, TICKET_ROW_HASH_PREFIX, type BoardPayload, type PostedStation, type TicketRow } from './board';
+import { checkPayload, DEFAULT_COURSE, matchesPreTierDropHash, resolveParents, retiredBoardFields, stripBoardTier, rowFor, rowForTicket, rowHash, stationOf, type BoardPayload, type PostedStation, type TicketRow } from './board';
 import { Stations, type Seen } from './stations';
 import { Questions } from './questions';
 import { Conditions } from './conditions';
@@ -26,7 +26,7 @@ import { Observations } from './observations';
 import { Sequences } from './sequences';
 import { Webhooks, type Delivery } from './webhook';
 import { checkCrossBoardCycle, checkCrossRepository, consentRoute, resolveDependencies } from './dependencies';
-import { fileUrl } from './links';
+import { fileUrl, hiddenSessionLink, type SessionLinkView } from './links';
 import { Stats } from './stats';
 import { Blocks } from './blocks';
 import { Resources } from './resources';
@@ -405,7 +405,7 @@ export class BatonCore {
 
   /** §3: the one alarm, every 60 seconds — earlier when a webhook's trailing dispatch or the
    *  webhook path's own backstop is due. */
-  // @model alarmLive sha256:2d9b7ebc3e4f
+  // @model alarmLive sha256:ed13912c9b0f
   async alarm(): Promise<void> {
     // R-BTN-88 (§4.8, R3-1258): a sealed Baton's alarm idles — it logs nothing and touches
     // nothing; the next period is kept armed (B-229), so the instance that imports this state
@@ -1339,7 +1339,7 @@ export class BatonCore {
    * runner session's own answer, so it needs the session's secret. B-192: served through
    * src/core/reads/repository.ts, for a session beside those keys.
    */
-  async repositoryRead(req: Request, url: URL, repo: string, who: ReadPrincipal): Promise<Response | null> {
+  async repositoryRead(req: Request, url: URL, repo: string, who: ReadPrincipal, sessionLink: SessionLinkView): Promise<Response | null> {
     const blocks = /^\/v1\/repositories\/([^/]+)\/tickets\/([^/]+)\/blocks$/.exec(url.pathname);
     const blocked = /^\/v1\/repositories\/([^/]+)\/blocked$/.exec(url.pathname);
     // R-BTN-81: a ticket's history, read by the principals that may read its blocks (§11).
@@ -1377,7 +1377,7 @@ export class BatonCore {
         ? [...new Set(this.runners.grantedCapabilities(cred, repo))].filter((x) => x !== 'none').sort()
         : null;
     }
-    if (boardRead) return json(this.boardView(repo, granted));
+    if (boardRead) return json(this.boardView(repo, granted, sessionLink));
     if (policyRead) return this.policyRead(repo);
     if (show) {
       const raw = seg(show[2]);
@@ -1429,7 +1429,7 @@ export class BatonCore {
       if (!TICKET_ID.test(id) || repositoryOf(id) !== repo) throw new BatonError('invalid-params', `ticket: must be a ticket of ${repo}`);
       const leg = seg(runs[3]);
       if (!COURSE_ID.test(leg)) throw new BatonError('invalid-params', 'leg: must be a leg id');
-      return json(this.claims.runsOf(id, leg));
+      return json(this.claims.runsOf(id, leg, sessionLink));
     }
     if (blocks) {
       const raw = seg(blocks[2]);
@@ -1564,7 +1564,7 @@ export class BatonCore {
    * a rewind to a once-accepted history included — is a fresh hold with a fresh row. The 0001
    * schema's "written once" and "the first force post" describe that one hold.
    */
-  // @model syncPost sha256:2128e0c420ad
+  // @model syncPost sha256:a097d293a2c2
   async board(repo: Repository, p: BoardPayload) {
     // Course graphs are read per post: a registry applied, or a post refused after applying one,
     // must not leave another request reading a graph that is not in force.
@@ -1610,7 +1610,7 @@ export class BatonCore {
         this.observations.accept(r, n);
         const seen = normative ? this.refreshStations(r, p, n, at, null, true) : new Map<string, Seen>();
         this.claims.confirm(confirmations, n);
-        this.claims.judge(r, n, seen);
+        this.claims.judge(r, n, seen, this.claims.evidenceOf(r, p.attestations));
         this.store.exec('UPDATE held_snapshots SET observation = ? WHERE repository_id = ? AND sha = ?', n, r, p.sha);
       });
       // Held once per sha: a repeat (the sync re-posts every 15 minutes) changes nothing, so
@@ -1661,7 +1661,7 @@ export class BatonCore {
           nonScheduling(this.store, () => this.store.exec('UPDATE board_head SET stations_observation = ? WHERE repository_id = ?', n, r));
           this.settleSpawned(r, p, n, at);
           const confirmed = this.claims.confirm(confirmations, n);
-          const judged = this.claims.judge(r, n, seen);
+          const judged = this.claims.judge(r, n, seen, this.claims.evidenceOf(r, p.attestations));
           remember();
           return { ok: true, unchanged: true, ...(p.read_sha === p.sha ? { tickets_upserted: 0, tickets_deleted: 0 } : {}),
             confirmed: confirmed + judged.confirmed, stale_released: judged.stale_released };
@@ -1721,7 +1721,7 @@ export class BatonCore {
         }
         const seen = normative ? this.refreshStations(r, p, n, at, wrote) : new Map<string, Seen>();
         const confirmed = this.claims.confirm(confirmations, n);
-        const judged = this.claims.judge(r, n, seen);
+        const judged = this.claims.judge(r, n, seen, this.claims.evidenceOf(r, p.attestations));
         remember();
         return {
           ok: true, unchanged: true,
@@ -1811,7 +1811,7 @@ export class BatonCore {
       this.observations.accept(r, n);
       const confirmed = this.claims.confirm(confirmations, n);
       // R-BTN-10, R-BTN-35, §2e: git confirms ends, takes tickets away and goes backwards.
-      const judged = this.claims.judge(r, n, seen);
+      const judged = this.claims.judge(r, n, seen, this.claims.evidenceOf(r, p.attestations));
       changed.confirmed = confirmed + judged.confirmed;
       changed.stale_released = judged.stale_released;
       remember();
@@ -2002,18 +2002,18 @@ export class BatonCore {
       const before = have.get(row.id);
       have.delete(row.id);
       const parent = parents.parentOf.get(row.id)?.qualified ?? null;
+      const id = qualify(r, row.id);
       if (before?.row_hash === hash) {
         // The row is unchanged as posted; its stored parent may still move — the same raw value
         // resolves differently against a board that changed around it (an orphan's parent
         // posted, a cycle closed by other tickets).
-        if (before?.parent !== parent) this.store.exec('UPDATE tickets SET parent = ? WHERE id = ?', parent, qualify(r, row.id));
+        if (before.parent !== parent) this.store.exec('UPDATE tickets SET parent = ? WHERE id = ?', parent, id);
         continue;
       }
-      const id = qualify(r, row.id);
-      // B-322 / S-BTN-220: the old hash included a field the migration dropped. On the first
-      // materializing sync, compare the surviving fields rather than inferring a source edit.
-      if (before && !before.row_hash.startsWith(TICKET_ROW_HASH_PREFIX) && this.matchesLegacyRow(id, row, parent)) {
-        this.store.exec('UPDATE tickets SET row_hash = ? WHERE id = ?', hash, id);
+      // B-322 / S-BTN-220: an unchanged posted row only needs its hash upgraded and its
+      // derived parent refreshed. Neither is a new source edit or changes attribution.
+      if (before && matchesPreTierDropHash(before.row_hash, row)) {
+        this.store.exec('UPDATE tickets SET row_hash = ?, parent = ? WHERE id = ?', hash, parent, id);
         continue;
       }
       this.store.exec(
@@ -2075,15 +2075,6 @@ export class BatonCore {
     // and dropped — never COUNTed, a growing table being what B-236 refuses to scan.
     if (newTickets || deleted) adjustCounts(this.store, { tickets: newTickets - deleted });
     return { upserted, deleted, renumbered, closingParents };
-  }
-
-  private matchesLegacyRow(id: string, row: TicketRow, parent: string | null): boolean {
-    const { id: _localId, requires, parent: _postedParent, course_fields, brief, ...fields } = row;
-    const stored = this.sql<Record<string, unknown>>('SELECT * FROM tickets WHERE id = ?', id)[0];
-    const projected = { ...fields, parent, course_fields_json: course_fields ?? null, brief: brief ?? null };
-    if (!Object.entries(projected).every(([key, value]) => stored[key] === value)) return false;
-    const names = this.sql<{ name: string }>('SELECT name FROM ticket_requires WHERE ticket_id = ?', id).map(({ name }) => name).sort();
-    return names.length === requires.length && names.every((name, i) => name === requires[i]);
   }
 
   /** B-183 (§4.4, R-BTN-184): a `custom` source that reads only as it is now has no ticket file
@@ -2287,6 +2278,7 @@ export class BatonCore {
       grants: limits.grants.filter((g) => g.repository_id === repo).map((g) => ({
         credential_id: g.credential_id, hostname: g.hostname, label: g.label, repository_id: g.repository_id,
         capabilities: g.capabilities, max_claims: g.max_claims, granted_by: g.granted_by, granted_at: g.granted_at,
+        deliver_interactions: g.deliver_interactions,
         other_repositories: limits.grants.filter((o) => o.credential_id === g.credential_id && o.repository_id !== repo).map((o) => o.repository_id).sort(),
       })),
       settings: limits.settings.find((s) => s.repository_id === repo) ?? null,
@@ -2304,14 +2296,14 @@ export class BatonCore {
    *  for a key no grant binds and for an owner's or an administrator's key. `holders` (B-129) is
    *  the repository's live claims with each holder and its lease's end — the lock a session
    *  claiming through git reads with the same request (R-BTN-179's one-answer rule). */
-  boardView(repo: string, granted: string[] | null = null) {
+  boardView(repo: string, granted: string[] | null = null, sessionLink = hiddenSessionLink) {
     const now = this.now();
     const repository = this.uiRepo(this.registry.get(repo)!);
     const ready = this.readyRows([repository], repo);
     return {
       repository,
       ready,
-      holders: this.claims.holdersOf(repo),
+      holders: this.claims.holdersOf(repo, sessionLink),
       granted_capabilities: granted,
       server_time: now,
     };

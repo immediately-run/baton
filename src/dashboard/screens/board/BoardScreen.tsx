@@ -10,6 +10,7 @@ import type { ReactNode } from 'react';
 import { ReadGate } from '../../app/Refusal';
 import { Link, pathOrNull } from '../../app/router';
 import { span } from '../../lib/format';
+import { ExtLink } from '../../lib/links';
 import { useRead } from '../../lib/reads';
 import { Text } from '../../lib/Text';
 import { Empty, ErrorNote, Loading, PageHeader, Section, StatusMark, useClock } from '../../lib/ui';
@@ -55,6 +56,9 @@ function RunningRow({ row, repository }: { row: TicketRow; repository: string })
       <th scope="row" className="tk-id"><TicketCell row={row} repository={repository} /></th>
       <td data-label="Runner"><RunnerLink runner={{ runner_id: d.runner_id as number, hostname: d.hostname as string, session_name: d.session_name as string }} repository={repository} /></td>
       <td data-label="Leg">{d.leg != null ? <Text mono value={d.leg} /> : <span className="mut">—</span>}</td>
+      <td data-label="Leg page">{d.session_url
+        ? <ExtLink kind="session" href={d.session_url} showHost />
+        : <span className="mut">{d.session_link === true ? 'Link unavailable' : 'No leg page reported'}</span>}</td>
       <td data-label="Running for">{since !== null ? span(Math.max(0, now - since)) : <span className="mut">—</span>}</td>
       <td data-label="Lease"><LeaseBar from={d.since} to={d.lease_ends_at} /></td>
       <td data-label="Notes">
@@ -100,7 +104,7 @@ export function BoardScreen({ params }: ScreenProps) {
           {() => (running.rows.length === 0 ? <Empty>No ticket is claimed.</Empty> : (
             <div className="table-wrap tk-wrap">
               <table className="table tk-table bd-running" aria-label="Running tickets">
-                <thead><tr><th scope="col">Ticket</th><th scope="col">Runner</th><th scope="col">Leg</th><th scope="col">Running for</th><th scope="col">Lease</th><th scope="col">Notes</th></tr></thead>
+                <thead><tr><th scope="col">Ticket</th><th scope="col">Runner</th><th scope="col">Leg</th><th scope="col">Leg page</th><th scope="col">Running for</th><th scope="col">Lease</th><th scope="col">Notes</th></tr></thead>
                 <tbody>{running.rows.map((row) => <RunningRow key={row.ticket_id} row={row} repository={repo} />)}</tbody>
               </table>
             </div>

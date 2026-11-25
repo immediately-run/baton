@@ -20,6 +20,13 @@ DROP TRIGGER ready_ticket_blocks_delete;
 DROP TRIGGER ready_ticket_blocks_update;
 DROP VIEW ready_ticket_source;
 
+-- The old digest covered the posted parent, which cannot be recovered from the resolved
+-- parent column. Keep the dropped hash inputs with that digest only until the next sync.
+UPDATE tickets SET row_hash = 'v1:' || json_array(row_hash, tier, tier_position);
+
+-- Both the activity and quiet read validators must change with the response shape.
+UPDATE state_version SET v = v + 1, board_v = board_v + 1, scheduling_v = scheduling_v + 1 WHERE id = 1;
+
 ALTER TABLE ready_tickets DROP COLUMN tier_position;
 ALTER TABLE tickets DROP COLUMN tier_position;
 ALTER TABLE tickets DROP COLUMN tier;

@@ -167,10 +167,17 @@ describe('the agent_command a runner runs (B-83)', () => {
 
   it('leaves completion criteria to the leg instructions in both briefings (B-317)', () => {
     const settings = JSON.parse(readFileSync(join(__dirname, '..', '..', '.baton', 'baton.json'), 'utf8'));
-    for (const prompt of [AGENT_PROMPT, splitWords(settings.agent_command).at(-1)]) {
-      expect(prompt).toContain('When you have met the completion criteria in the leg instructions, exit immediately.');
-      expect(prompt).not.toContain('the checks green');
-    }
+    const prompt = splitWords(settings.agent_command).at(-1);
+    expect(prompt).toBe(AGENT_PROMPT);
+    expect(AGENT_PROMPT).toContain('When you have met the completion criteria in the leg instructions, exit immediately.');
+    expect(AGENT_PROMPT).not.toContain('the checks green');
+  });
+
+  it('allows permitted questions in the foreground without suspending the one-shot process (B-325, S-BTN-222)', () => {
+    expect(AGENT_PROMPT).toContain('If your leg instructions allow it and only the owner can unblock you');
+    expect(AGENT_PROMPT).toContain("ask through the harness's question tool and wait for the answer in the foreground");
+    expect(AGENT_PROMPT).toContain('if nobody answers, let Baton take the claim back at the leg deadline');
+    expect(AGENT_PROMPT).not.toContain('never write that you are waiting');
   });
 
   it('settings naming no agent_command drive from --harness, the command logged; a named one is left to the settings', async () => {

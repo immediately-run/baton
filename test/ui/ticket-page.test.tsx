@@ -107,7 +107,7 @@ describe('the ticket page’s sections (B-210)', () => {
     expect(claim.querySelector('.lease')!.getAttribute('aria-label')).toMatch(/^lease: (1 h|60 min) left$/);
     expect(claim.textContent).toContain('2 of 3');
     // R-BTN-113: a session link on session_hosts is a link; R-BTN-128: a log directory is text.
-    expect(within(claim).getByRole('link', { name: /claude\.ai\/code\/session_1/ }).getAttribute('href')).toBe('https://claude.ai/code/session_1');
+    expect(within(claim).getByRole('link', { name: /Open leg page/ }).getAttribute('href')).toBe('https://claude.ai/code/session_1');
     expect(claim.textContent).toContain('/var/log/baton/T-1/leg-b');
     expect([...claim.querySelectorAll('a')].some((a) => (a.getAttribute('href') ?? '').includes('/var/log'))).toBe(false);
     expect([...claim.querySelectorAll('code.cli')].map((c) => c.textContent)).toEqual(['baton leg log T-1 leg-b']);
@@ -141,8 +141,8 @@ describe('the ticket page’s sections (B-210)', () => {
 
     const runs = await screen.findByRole('table', { name: 'Leg runs' });
     await waitFor(() => expect(runs.querySelectorAll('tbody tr').length).toBe(2));
-    // A session link off session_hosts is text; the log directory and the transcript are text.
-    expect(runs.textContent).toContain('https://evil.example/session');
+    // A session link off session_hosts is a neutral label; the log directory and transcript are text.
+    expect(runs.textContent).not.toContain('https://evil.example/session');
     expect([...runs.querySelectorAll('a')].map((a) => a.getAttribute('href')).filter((h) => h?.startsWith('http'))).toEqual(['https://claude.ai/code/session_1']);
     expect(runs.textContent).toContain('/var/log/baton/T-1/leg-a');
     expect(runs.textContent).toContain('example-org/sessions:a/b.jsonl');

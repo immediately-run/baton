@@ -8,6 +8,7 @@ import { mintRunId } from '../../src/core/db';
 import type { Store } from '../../src/core/ports';
 import { RECOMMENDED_CLIENT } from '../../src/core/http';
 import { front } from '../../src/core/front';
+import { clockBucket, stateEtag } from '../../src/core/stateVersion';
 import type { Baton } from '../../src/cloudflare/baton';
 import { Git, hbBody, ORIGIN, sha256, syncToken } from '../helpers';
 import { makeKey, signedRequest } from '../lib/sshKeys';
@@ -24,6 +25,17 @@ describe('migration 0077: retire tiers (B-322)', () => {
     const oldHead = '1'.repeat(40);
     const newHead = '2'.repeat(40);
     const author = JSON.stringify({ pusher: 'known', pusher_id: 42, commit: oldHead, at });
+    const ticketsPath = '/v1/repositories/docs/tickets';
+    // The 0076 row builders hashed the raw parent even when resolution discarded it.
+    const oldHash = (id: string, parent: string, rank: number, tier: string, tierPosition: number) => sha256(JSON.stringify({
+      id, path: `tickets/${id}.md`, version: '', key: `tickets/${id}.md`, title: id, project: null,
+      status: '', node: '', queue: '', tags: '[]', tier, requires_clause: 'none', operator_only: 0,
+      depends_on: '[]', blocked_by: '[]', repos: '["immediately-run/docs"]', ord: null, rank,
+      course_id: 'roadmap-pr', parent, requires: [], since: null, holder: null, expedite: 0, display: null,
+      brief: null, tier_position: tierPosition,
+    }));
+    const aHash = await oldHash('A', 'B', 4, 'critical', 2);
+    const bHash = await oldHash('B', 'A', 5, 'routine', 0);
     await runInDurableObject(stub, (_o: unknown, state: DurableObjectState) => {
       const sql = state.storage.sql;
       sql.exec('PRAGMA foreign_keys = OFF');
@@ -31,7 +43,7 @@ describe('migration 0077: retire tiers (B-322)', () => {
       for (const o of sql.exec("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%'").toArray()) sql.exec(`DROP TABLE "${o.name}"`);
       for (const m of MIGRATIONS.filter((x) => x.id <= 76)) sql.exec(m.sql);
     });
-    await runInDurableObject(stub, (o: Baton, state: DurableObjectState) => {
+    const oldTag = await runInDurableObject(stub, (o: Baton, state: DurableObjectState) => {
       o.core.now = () => at;
       const sql = state.storage.sql;
       sql.exec('PRAGMA foreign_keys = ON');
@@ -43,9 +55,9 @@ describe('migration 0077: retire tiers (B-322)', () => {
       sql.exec(`INSERT INTO runners (id, hostname, session_name, secret_hash, credential_id, harness, kind, tier_ceiling, tier_ceilings, lease_timeout_ms, settings_hash, first_seen_at, last_seen_at)
           VALUES (7, 'host', 's', ?, ?, 'opencode', 'vm', 'critical', '{"docs":"critical"}', 900000, '', ?, ?)`, secretHash, key.fingerprint, at, at);
       sql.exec(`INSERT INTO tickets (id, repository_id, local_id, path, title, status, node, queue, tags, requires_clause, depends_on, blocked_by, repos, snapshot_sha, row_hash, tier, tier_position, course_id, rank, key, last_written_by)
-          VALUES ('docs:A', 'docs', 'A', 'tickets/A.md', 'A', '', '', '', '[]', 'none', '[]', '[]', '["immediately-run/docs"]', ?, ?, 'critical', 2, 'roadmap-pr', 4, 'tickets/A.md', ?)`, oldHead, 'a'.repeat(64), author);
+          VALUES ('docs:A', 'docs', 'A', 'tickets/A.md', 'A', '', '', '', '[]', 'none', '[]', '[]', '["immediately-run/docs"]', ?, ?, 'critical', 2, 'roadmap-pr', 4, 'tickets/A.md', ?)`, oldHead, aHash, author);
       sql.exec(`INSERT INTO tickets (id, repository_id, local_id, path, title, status, node, queue, tags, requires_clause, depends_on, blocked_by, repos, snapshot_sha, row_hash, tier, tier_position, course_id, rank, key, last_written_by)
-          VALUES ('docs:B', 'docs', 'B', 'tickets/B.md', 'B', '', '', '', '[]', 'none', '[]', '[]', '["immediately-run/docs"]', ?, ?, 'routine', 0, 'roadmap-pr', 5, 'tickets/B.md', ?)`, oldHead, 'b'.repeat(64), author);
+          VALUES ('docs:B', 'docs', 'B', 'tickets/B.md', 'B', '', '', '', '[]', 'none', '[]', '[]', '["immediately-run/docs"]', ?, ?, 'routine', 0, 'roadmap-pr', 5, 'tickets/B.md', ?)`, oldHead, bHash, author);
       sql.exec(`
         INSERT INTO ticket_stations (ticket_id, station, path, path_len, to_end, next_leg, next_source, snapshot_sha, observation)
           VALUES ('docs:A', 'filed', '[]', 0, 1, 'implement', 'course', '', 1);
@@ -56,7 +68,11 @@ describe('migration 0077: retire tiers (B-322)', () => {
       expect(all(`SELECT tier_position > max_tier AS refused FROM tickets JOIN runner_grants USING (repository_id) WHERE tickets.id = 'docs:A'`)).toEqual([{ refused: 1 }]);
       const ready = () => all('SELECT ticket_id, leg, rank, ready_since FROM ready_tickets INDEXED BY ready_tickets_order');
       expect(ready()).toEqual([{ ticket_id: 'docs:A', leg: 'implement', rank: 4, ready_since: 1 }]);
+      // Hold the route, caller and clock bucket fixed to isolate 0077's invalidation (S-BTN-243).
+      const tag = () => stateEtag(o.core.store, `key:runner:${key.fingerprint}`, `repo.tickets\n${ticketsPath}\n\nredacted`, clockBucket(at), false);
+      const before = tag();
       sql.exec(MIGRATIONS.find((m) => m.id === 77)!.sql);
+      expect(tag()).not.toBe(before);
       expect(ready()).toEqual([{ ticket_id: 'docs:A', leg: 'implement', rank: 4, ready_since: 1 }]);
       expect(all('SELECT credential_id, capabilities FROM runner_grants')).toEqual([{ credential_id: key.fingerprint, capabilities: '["agent-venue"]' }]);
       expect(all('SELECT id, credential_id FROM runners')).toEqual([{ id: 7, credential_id: key.fingerprint }]);
@@ -67,6 +83,8 @@ describe('migration 0077: retire tiers (B-322)', () => {
       sql.exec("UPDATE ticket_next_legs SET state = 'waiting' WHERE ticket_id = 'docs:A'");
       expect(ready()).toEqual([]);
       sql.exec("UPDATE tickets SET rank = 4 WHERE id = 'docs:A'; UPDATE ticket_next_legs SET state = 'ready' WHERE ticket_id = 'docs:A'");
+      for (const m of MIGRATIONS.filter((x) => x.id > 77)) sql.exec(m.sql);
+      return before;
     });
 
     const syncAuth = await syncToken();
@@ -75,17 +93,27 @@ describe('migration 0077: retire tiers (B-322)', () => {
     const sync = (path: string, body: unknown) => send(new Request(ORIGIN + path, {
       method: 'POST', headers: { ...client, Authorization: `Bearer ${syncAuth}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body),
     }));
-    const git = new Git().add('A', { path: 'tickets/A.md', title: 'A', rank: 4 })
-      .add('B', { path: 'tickets/B.md', title: 'B edited', rank: 5 });
+    const refreshed = await send(await signedRequest(key, ORIGIN + ticketsPath, {
+      method: 'GET', created: at / 1000, headers: { ...client, 'If-None-Match': oldTag },
+    }));
+    expect(refreshed.status).toBe(200);
+    expect(refreshed.headers.get('ETag')).not.toBe(oldTag);
+    const { tickets } = await refreshed.json<{ tickets: { id: string }[] }>();
+    expect(tickets).toHaveLength(2);
+    for (const ticket of tickets) expect(ticket).not.toHaveProperty('tier');
+
+    // Only B edits its posted parent, breaking the cycle. A's stored parent now resolves.
+    const git = new Git().add('A', { path: 'tickets/A.md', title: 'A', rank: 4, parent: 'B' })
+      .add('B', { path: 'tickets/B.md', title: 'B', rank: 5 });
     const observed = await sync('/v1/sync/observation', {});
     const { observation } = await observed.json<{ observation: number }>();
     expect(observed.status).toBe(200);
     const posted = await sync('/v1/sync/board', git.body(newHead, oldHead, { observation }));
     expect(await posted.json()).toMatchObject({ ok: true, upserted: 1 });
     await runInDurableObject(stub, (_o: Baton, state: DurableObjectState) => {
-      expect(state.storage.sql.exec('SELECT local_id, snapshot_sha, row_hash, last_written_by FROM tickets ORDER BY local_id').toArray()).toEqual([
-        { local_id: 'A', snapshot_sha: oldHead, row_hash: expect.stringMatching(/^v2:/), last_written_by: author },
-        { local_id: 'B', snapshot_sha: newHead, row_hash: expect.stringMatching(/^v2:/), last_written_by: JSON.stringify({ pusher: 'pusher-unknown', commit: newHead, at }) },
+      expect(state.storage.sql.exec('SELECT local_id, parent, snapshot_sha, row_hash, last_written_by FROM tickets ORDER BY local_id').toArray()).toEqual([
+        { local_id: 'A', parent: 'docs:B', snapshot_sha: oldHead, row_hash: expect.stringMatching(/^v2:/), last_written_by: author },
+        { local_id: 'B', parent: null, snapshot_sha: newHead, row_hash: expect.stringMatching(/^v2:/), last_written_by: JSON.stringify({ pusher: 'pusher-unknown', commit: newHead, at }) },
       ]);
     });
     const runner = async (path: string, body: unknown) => send(await signedRequest(key, ORIGIN + path, {

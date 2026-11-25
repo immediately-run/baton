@@ -289,8 +289,8 @@ export class RunnerApi {
    *  claim, the messages, the stale courses and the mode. A `uses` a runner still sends is its
    *  retired declaration that it uses account instances (B-168): the heartbeat reads it as
    *  absent, logging `deprecated-field`. */
-  // @model heartbeat sha256:32dad889118d
-  // @model declare sha256:c54f040956e4
+  // @model heartbeat sha256:27844ee91e6c
+  // @model declare sha256:8af9917a77b9
   async heartbeat(credentialId: string, secretHeader: string | null, body: unknown, clientVersion: string | null = null, legacyName = false) {
     // B-168 (R-BTN-76): `uses` is retired — a runner uses the repository's instances, never a set
     // it declares — and read as absent while the history's Migrations entry lasts.
@@ -467,11 +467,13 @@ export class RunnerApi {
       const why = sessionLinkWhy(link.url, this.c.sessionHosts());
       if (why != null) {
         sessionUrlDropped = why;
-        this.event('discrepancy', `runner:${w.id}`, { sub: 'session-url', why, url: link.url.slice(0, 120) }, claim.ticket_id, claim.id);
+        this.event('discrepancy', `runner:${w.id}`, { sub: 'session-url', why }, claim.ticket_id, claim.id);
       } else {
-        // The same link again changes no row (B-237: so a working runner's beat moves no version).
-        this.exec(`UPDATE claim_legs SET session_url = ? WHERE claim_id = ? AND finished_at IS NULL AND abandoned_at IS NULL AND session_url IS NOT ?`,
-          link.url, claim.id, link.url);
+        // The same report from the same incarnation changes no row (B-237).
+        this.exec(`UPDATE claim_legs SET session_url = ?, session_incarnation = ?
+                   WHERE claim_id = ? AND finished_at IS NULL AND abandoned_at IS NULL
+                     AND (session_url IS NOT ? OR session_incarnation IS NOT ?)`,
+          link.url, fresh.incarnation, claim.id, link.url, fresh.incarnation);
       }
     }
     // §7.5 R-BTN-90 (B-234): `leg_finished` is processed before this beat delivers its

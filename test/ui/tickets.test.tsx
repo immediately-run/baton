@@ -43,7 +43,7 @@ const LIST = '/v1/repositories/docs/tickets';
 
 function serve(routes: Record<string, Route> = {}) {
   return mockFetch({
-    '/v1/repositories': repoList([repoRow('docs')]),
+    '/v1/repositories': repoList([repoRow('docs')], 'administrator', { session_hosts: ['claude.ai'] }),
     '/v1/actions': { actions: [] },
     [LIST]: { tickets: ROWS, counts: COUNTS, matched: ROWS.length },
     ...routes,
@@ -204,6 +204,22 @@ describe('the Board (B-209 item 1)', () => {
     expect(within(stalled).getByRole('link', { name: 'waits on condition 31' }).getAttribute('href')).toBe('/repositories/docs/conditions/31');
     expect(within(quiet).queryByText('stalled')).toBeNull();
     expect(quiet.querySelector('[data-label="Notes"]')!.textContent).toBe('—');
+  });
+
+  it('S-BTN-310: links only to the running row’s leg page, through the session link rule', async () => {
+    const href = 'https://claude.ai/leg/synthetic-token';
+    serveBoard({ [`${LIST}?state=running`]: { tickets: [
+      { ...running[0], detail: { ...running[0].detail, session_url: href, session_link: true } },
+      { ...running[1], detail: { ...running[1].detail, session_url: null, session_link: false } },
+    ], counts: COUNTS, matched: 2 } });
+    renderApp('/repositories/docs/board');
+    const table = await screen.findByRole('table', { name: 'Running tickets' });
+    const [withLink, withoutLink] = [...table.querySelectorAll('tbody tr')] as HTMLElement[];
+    const link = within(withLink).getByRole('link', { name: /Open leg page.*claude\.ai/ });
+    expect(link.getAttribute('href')).toBe(href);
+    expect(link.getAttribute('rel')).toContain('noreferrer');
+    expect(within(withoutLink).getByText('No leg page reported')).toBeDefined();
+    expect(within(withoutLink).queryByRole('link', { name: /Open leg page/ })).toBeNull();
   });
 
   it('follows each list to its end by cursor, draws granted capabilities as chips, and says when nothing runs', async () => {

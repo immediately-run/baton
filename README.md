@@ -176,6 +176,9 @@ remains the development path — the repository commands (`tickets`, `repo`, `te
   `--rules-reread <id>,…` names exactly those ids (R-BTN-74); in a shallow clone it deepens the
   clone first. A new migration or scenario number is the next free one at merge (B-176 moves it
   into Baton).
+The default markdown source reads [Dibber](https://github.com/immediately-run/dibber)
+stores. The reader test uses vendored fixtures from Dibber's conformance suite.
+
 - `npm run check:wiki` — every page in `tickets/`, `docs/` and `spec/` compiles as MDX, uses only known
   components and links only to files that exist; every ticket matches `tickets/item.schema.json`.
 - `npm run check:tickets` (or `node cli/baton.mjs tickets check [--repo DIR]`) — check this

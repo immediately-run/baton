@@ -404,3 +404,9 @@ export function sessionCall(cookie: string, path: string, init: RequestInit = {}
   if (init.method && init.method !== 'GET') headers.set('Origin', ORIGIN);
   return hostCall(new Request(ORIGIN + path, { ...init, headers }));
 }
+
+/** R-BTN-10: the post fields of a sync that found the evidence an unconfirmed end named — its
+ *  `std:git.evidence@1` for that claim, `ticket` a local id. Spread into `Git.refresh`/`post`. */
+export function evidenceFound(claim: number, evidence: string, ticket = 'T-1', found = true) {
+  return { attestations: [{ type: 'std:git.evidence@1', ticket, ref: String(claim), value: { claim, evidence, found } }] };
+}

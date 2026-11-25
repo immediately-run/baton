@@ -33,7 +33,7 @@ function ticketsAnswer(cx: ReadCtx, call: ReadCall): TicketsAnswer {
   const after = cursorOf<{ id: string; n: number }>(cx, call);
   if (after != null && !(typeof after === 'object' && typeof after.id === 'string' && Number.isInteger(after.n))) throw new BatonError('invalid-params', 'cursor: not a cursor of this read');
 
-  const all = ticketRows(cx, repo);
+  const all = ticketRows(cx, repo, call.sessionLink);
   const needle = q.q?.toLowerCase() ?? null;
   const matched = all.filter((r) =>
     (!states || states.includes(r.state))
@@ -82,7 +82,7 @@ function ticketAnswer(cx: ReadCtx, call: ReadCall) {
   const shown = cx.core.claims.ticketView(id);
   if (!shown) throw new BatonError('not-found', `${id} is not on the board`);
   const row = withEligible(cx, ticketRows(cx, repo).filter((r) => r.ticket_id === id))[0];
-  const detail = ticketDetail(cx, repo, id, typeof shown.path === 'string' ? shown.path : null);
+  const detail = ticketDetail(cx, repo, id, typeof shown.path === 'string' ? shown.path : null, call.sessionLink);
   const station = cx.sql<{ next_source: string }>('SELECT next_source FROM ticket_stations WHERE ticket_id = ?', id)[0];
   return {
     ...shown,

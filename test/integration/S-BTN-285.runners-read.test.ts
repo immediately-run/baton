@@ -83,7 +83,7 @@ describe('S-BTN-285 the repository’s runners (B-196)', () => {
     expect(ra.claim).toEqual({
       claim_id: held.claim_id, ticket_id: 'docs:T-1', station: 'filed', leg: 'implement', run_id: expect.stringMatching(/^r_/), claimed_at: T0,
       lease_ends_at: ra.last_seen_at + 900_000, deadline_at: null, attempt: 1, max_runs: null, next_backoff_until: null,
-      session_url: null, log_dir: null, activity: { kind: 'implement', label: 'writing the read', started_at: T0 + 2000 },
+      session_url: null, session_link: false, log_dir: null, activity: { kind: 'implement', label: 'writing the read', started_at: T0 + 2000 },
     });
     expect(ra.claims).toEqual([ra.claim]);
     // No model, no profile on the list (B-196).
