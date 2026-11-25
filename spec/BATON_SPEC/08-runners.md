@@ -41,7 +41,6 @@ section that are not built are in [the proposal page](../proposals/checks-and-ex
   | `model_id` | optional; a label no rule reads |
   | `capabilities` | the declared capabilities, roles and holdings (R-BTN-121, R-BTN-174) |
   | `tags` | optional (R-BTN-60) |
-  | `tier_ceiling`, `tier_ceilings` | a tier name for every repository, and one per repository; absent ⇒ the top tier |
   | `lease_timeout_s` | R-BTN-9 |
   | `concurrency` | R-BTN-4 |
   | `courses` | `[{repository, course, version}]`, read from the runner's checkout at session start (R-BTN-22) |
@@ -58,13 +57,11 @@ section that are not built are in [the proposal page](../proposals/checks-and-ex
 
   - A runner holding one claim may send `session_url`, `leg_finished` and one `fenced` object in
     place of the three lists. Spooled activities go in their own call before the beat (§9.9).
-  - A refused `transcripts`, `couriers` or `protection` entry, a `tier_ceilings` entry for a
-    repository Baton does not serve and a dropped session link (R-BTN-113) are named in the
-    answer and never refuse the heartbeat, since a refused heartbeat would get a live runner
-    reaped. A malformed `session_urls` or `legs_finished` entry is dropped unnamed. A malformed
-    `protection` or `tier_ceilings`, or a tier not on a registered repository's ladder, is
-    `invalid-params`, as is a `transcripts`, `couriers` or `protection` list over its bound and
-    a malformed `fenced`.
+  - A refused `transcripts`, `couriers` or `protection` entry and a dropped session link
+    (R-BTN-113) are named in the answer and never refuse the heartbeat, since a refused heartbeat
+    would get a live runner reaped. A malformed `session_urls` or `legs_finished` entry is dropped
+    unnamed. A malformed `protection` is `invalid-params`, as is a `transcripts`, `couriers` or
+    `protection` list over its bound and a malformed `fenced`.
   - **The answer** carries `runner_id`, `incarnation`, `lease_timeout_s` (as clamped),
     `grant: {capabilities}` (R-BTN-72), `claims`, `messages`, `bars` (the owner bars in force,
     R-BTN-67), `stale_courses` (R-BTN-22), `mode` (per repository `shadow` or `cut-over`;
@@ -145,6 +142,12 @@ section that are not built are in [the proposal page](../proposals/checks-and-ex
   at its own interval (R-BTN-77). Each attempt is one claim request and reads no
   recommendations, which are for a caller choosing work (§6.6). A claim that waits (R-BTN-40, R-BTN-195) holds only
   its own place, never the runner's other claims.
+  - **Restart requested.** With `--restart-when-behind`, at a claim boundary with no claims
+    held, the runner compares its loaded CLI checkout commit with its branch's local tracking ref.
+    If strictly behind, it logs why and takes the graceful drain path, exiting `75` instead
+    of taking another claim. Without the flag it keeps claiming. Released and detached CLIs
+    have no tracking branch to check. Updating the CLI, choosing the executor pin and launching
+    another process belong to the host.
   - **Course directory** (R-BTN-69, R-BTN-134):
 
     ```
@@ -310,10 +313,20 @@ section that are not built are in [the proposal page](../proposals/checks-and-ex
   one link for each claim's running leg, and `advance` or `end` a `session_url` for the leg it
   finishes. A link must be `https`, at most 512 characters, without userinfo, with its host in
   the instance's `session_hosts` (an administrator's setting, default `claude.ai`, §12.7), else
-  it is dropped and logged, never a refused call. It is stored on `claim_legs.session_url` (latest wins while
-  running) and shown on Board and the runner page (§11.4). Under an executor whose handle names
-  its session's link (R-BTN-107), it is that link, or a page the runner serves that leads a
-  person to the session.
+  it is dropped, never a refused call; only the reason, not any part of the supplied address, is
+  logged or returned. It is stored on `claim_legs.session_url` (latest wins while running). An
+  executor (R-BTN-107) may report the session's link or a runner-hosted leg page that leads to it.
+  - **A session link may carry a bearer capability.** The read dispatcher (R-BTN-129) discloses
+    it only to authorized owner and administrator dashboard sessions (R-BTN-155) and to the
+    runner incarnation whose claim reported it, verified by its key and current runner secret
+    (R-BTN-14). A re-key does not inherit links, and a link predating incarnation tracking is
+    not disclosed to runner keys unless reported anew.
+    Other readers get `session_url: null` and `session_link: true`
+    when a link exists (`false` when absent). An `interact` condition uses `url` for the same
+    field and also discloses it in its delivery (R-BTN-163).
+  - The link never goes into events, ticket history, logs, error messages or the admin state
+    export. The dashboard labels it **Open leg page**, validates it by its link rule, and opens
+    it with `rel="noreferrer"` and the referrer policy of R-BTN-16.
 - **R-BTN-201 (a launcher starts sessions; Baton reserves nothing for them).** A **launcher** is
   a process outside Baton, run by the deployment, that starts runner sessions when there is work
   for them. Baton records no launch and reserves nothing for one: a started session claims as

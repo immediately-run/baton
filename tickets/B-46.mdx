@@ -3,7 +3,7 @@ title: "B-46 — hardening within a tenant: only pushers' forge writes count, ru
 id: B-46
 project: baton
 status: available
-updated: 2026-11-03
+updated: 2026-11-23
 repos:
   - immediately-run/baton
 tags:
@@ -121,7 +121,7 @@ Split into reviewed PRs along four parts. Each is independent.
      and the server refusing every one that arrives (which it revokes is item 7's).
 7. **The adversarial review's fixes** (2026-10-20), each with its scenario case:
    - **Author and posted-state gates at settlement** (R-BTN-104/R-BTN-148, adv-1 M7), in the
-     settlement path in `src/core/claims.ts`. The author gates are the `requires` and tier gates,
+     settlement path in `src/core/claims.ts`. The author gates are the `requires` ~~and tier~~ gates,
      judged over `declared` at the claim and again over the posted ticket; the outcome table
      applies only when one of them fails. A claim settling at `start` whose author gates pass but
      whose posted-state gate fails for the claimed leg (not `ready`, a block, an open decision, a
@@ -232,3 +232,5 @@ _(2026-11-20: the spec simplification of 2026-11-19 (baton#299; `spec/BATON_SPEC
 _(2026-11-20: the spec simplification of 2026-11-19 (baton#299; `spec/BATON_SPEC_HISTORY.md`, that date) moved the unbuilt parts of the design this ticket builds out of the section files, with their rule ids, to proposal pages: admission limits within a tenant are in [the multi-tenancy proposal](../spec/proposals/multi-tenancy.md); observation renewal, the founded head and lagging fetches are parts 3 and 4 of [the tickets-and-sources proposal](../spec/proposals/tickets-and-sources.md); grant acceptance and a key's span are part 5 of [the checks-and-executors proposal](../spec/proposals/checks-and-executors.md). S-BTN-121 and S-BTN-123 are no longer rows of the verification section: they are in [the proposals' scenarios](../spec/proposals/scenarios.md), under "Sync ordering: founded heads, lagging fetches and the forced Resync" and "Checks". Each rule keeps its id and a line in its section, which links the page. The pull request that builds this ticket moves the rules it builds back into the section files, and the scenarios and gates it makes pass back into [the verification section](../spec/BATON_SPEC/15-verification.md#sec-15), in the same change. The plan above is otherwise as the earlier note of this day leaves it.)_
 
 _(2026-11-20: rules re-read: R-BTN-154, R-BTN-146)_
+
+_2026-11-23 — tiers retired (spec/retire-tiers: [BATON_SPEC §6.6](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-6) gate 5, [R-BTN-66](../spec/BATON_SPEC/01-what-baton-is.md#sec-1)): the struck tier clauses are gone from the spec — no ticket tier, runner ceiling, grant `max_tier`, ladder, `ready_by_tier` or `?tier=`. Build the rest without them._

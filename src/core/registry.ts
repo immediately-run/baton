@@ -368,15 +368,6 @@ export class Registry {
     return r ? parse(r) : null;
   }
 
-  /** The repository whose sync still posts the instance's fleet data — the reviewer matrix and
-   *  catalog — until the course data of §7.1's board post replaces them (§2a drops the reference repository; R3-1231). The model tables' blocks are not fleet
-   *  data since B-142: a sync still posting `providers` or `prices` is ignored for them. An
-   *  interim, so it is the one a deployment registered first (docs, the board these tables came
-   *  from), and no other repository's sync can rewrite what every repository's claims read. */
-  fleetRepository(): string | null {
-    return this.rows<{ id: string }>('SELECT id FROM repositories WHERE retired_at IS NULL ORDER BY rowid LIMIT 1')[0]?.id ?? null;
-  }
-
   /** §6.8: the repositories a transcript pointer under one of `repo`'s claims may name — its
    *  own `transcript_repos` (R-BTN-66), or the defaults while it names none. */
   transcriptReposOf(repo: string): string[] {
@@ -420,4 +411,3 @@ export class Registry {
     return parse(row);
   }
 }
-

@@ -30,7 +30,7 @@ export function declarationFrom(held: string[]): string[] {
 }
 
 type SidecarOptions = Pick<RunnerOptions, 'api' | 'apiFor' | 'stateFile' | 'hostname' | 'session' |
-  'harness' | 'activityPaths' | 'capabilities' | 'tierCeiling' | 'profile' | 'testHarness' | 'courses' | 'repository' | 'legNeeds'> & {
+  'harness' | 'activityPaths' | 'capabilities' | 'tierCeiling' | 'profile' | 'testHarness' | 'courses' | 'readCourses' | 'repository' | 'legNeeds'> & {
   beatEvery: number;
   concurrency: number;
   now: () => number;
@@ -93,6 +93,7 @@ export class Sidecar {
    *  server will have recorded (`rewriteSettings`), null while no answer has landed. A beat that
    *  carried another list leaves the server on this one until the next answered beat. */
   private sent: string[] | null = null;
+  private sentCourses: RunnerOptions['courses'];
   /** B-86: an answer carried no `grant` — the declaration stays unsettled and the next beat is
    *  forced, so a grant that arrives later is still read. */
   private grantAsked = false;
@@ -117,6 +118,7 @@ export class Sidecar {
     private readonly claims: () => ClaimRegistry,
     private readonly drain: (why: string) => void,
   ) {
+    this.sentCourses = o.courses;
     // B-86: a restart keeps the declaration the last process settled — a granted runner does not
     // ask again, and `runOnce` has no stale `[]` to force a beat for. `--capabilities` still
     // narrows what was read: a flag is the operator's word, the state file's a past answer.
@@ -145,6 +147,10 @@ export class Sidecar {
   }
 
   get leaseLost(): boolean { return this.lostLease; }
+  get hasPendingEnds(): boolean { return this.pendingEnds.size > 0; }
+
+  private courses(): RunnerOptions['courses'] { return this.o.readCourses?.() ?? this.o.courses; }
+  get coursesSettled(): boolean { return this.sentCourses === this.courses(); }
 
   clearLeaseLoss(): void {
     this.lostLease = false;
@@ -231,6 +237,7 @@ export class Sidecar {
     // One claim at a time keeps the shapes a Baton before B-188 reads: the bare `session_url`
     // and `leg_finished`, and a `fenced` object.
     const one = this.o.concurrency === 1;
+    const courses = this.courses();
     const body: Record<string, unknown> = {
       hostname: this.o.hostname, session_name: this.o.session, harness: this.o.harness, kind: 'vm',
       capabilities: declaring, tier_ceiling: this.o.tierCeiling ?? 'critical',
@@ -241,7 +248,7 @@ export class Sidecar {
       lease_timeout_s: s.lease_timeout_s ?? 900,
       // R-BTN-4 (B-188): how many claims this runner holds at once.
       concurrency: this.o.concurrency,
-      courses: this.o.courses.map((c) => ({ repository: this.o.repository, course: c.course, version: c.version })),
+      courses: courses.map((c) => ({ repository: this.o.repository, course: c.course, version: c.version })),
       // R-BTN-113 (B-234, B-188): the running legs' session links, kept on their runs' rows
       // (latest wins while each runs); Baton drops and logs one that fails the link rule.
       ...(links.length ? { session_urls: links.map((l) => ({ claim_id: l.claim_id, url: l.url })) } : {}),
@@ -256,6 +263,7 @@ export class Sidecar {
     };
     const result = await this.sendHeartbeat(body, spool);
     if (!result) return;
+    this.sentCourses = courses;
     const { answer, sentAt } = result;
     // R-BTN-113 (B-234): the answer's word on each link — Baton holds a run's session link when
     // the beat carried it and the answer kept it (not dropped: a dropped link failed the rule
@@ -567,7 +575,7 @@ export class Sidecar {
     const declared = this.declared.join(', ') || 'nothing';
     let needs: string[];
     try {
-      needs = await this.o.legNeeds();
+      needs = await this.o.legNeeds(this.courses());
     } catch (e) {
       this.o.log(`baton: the course's leg needs could not be read (${msg(e)})`);
       return;
@@ -663,11 +671,11 @@ export class Sidecar {
     let beat = false;
     for (let n = 0; n < MAX_STALE_BEATS; n++) {
       const claimOn = this.declaringList();
-      const stale = this.grantAsked || this.sent == null || JSON.stringify(this.sent) !== JSON.stringify(claimOn);
+      const stale = !this.coursesSettled || this.grantAsked || this.sent == null || JSON.stringify(this.sent) !== JSON.stringify(claimOn);
       if (!stale) break;
       await this.tick();
       beat = true;
-      if (this.grantAsked) break;
+      if (this.grantAsked && this.coursesSettled) break;
     }
     return beat;
   }

@@ -87,8 +87,8 @@ describe('the Runners list (B-211 item 1)', () => {
     expect(cards[0].textContent).toContain('executor: not recorded (B-184)');
 
     // An unlisted session link is text, never a link.
-    expect(within(cards[1]).queryByRole('link', { name: /Open session/ })).toBeNull();
-    expect(cards[1].textContent).toContain('Open session');
+    expect(within(cards[1]).queryByRole('link', { name: /Open leg page/ })).toBeNull();
+    expect(cards[1].textContent).toContain('Open leg page');
     expect(cards[2].textContent).toContain('idle since');
     expect(cards[3].querySelector('.runner-reap')!.textContent).toMatch(/^lost its heartbeat; reaped at 2026-11-20 11:00 UTC; its claim on docs:T-9 was reaped$/);
     expect(cards[4].textContent).toContain('working on another repository');
@@ -197,14 +197,14 @@ describe('one runner’s page (B-211 item 2)', () => {
     expect(panel.textContent).toContain(HOSTILE);
     expect(segs[0].getAttribute('aria-pressed')).toBe('true');
     // The claim's session link passed `session_hosts`: a link, its host shown.
-    const link = within(panel).getByRole('link', { name: /Open session/ });
-    expect([link.getAttribute('href'), link.textContent]).toEqual(['https://claude.ai/code/session_1', 'Open session (claude.ai)']);
+    const link = within(panel).getByRole('link', { name: /Open leg page/ });
+    expect([link.getAttribute('href'), link.textContent]).toEqual(['https://claude.ai/code/session_1', 'Open leg page (claude.ai)']);
     expect(panel.textContent).toContain('digest, environment and instance are not recorded (B-184)');
     // The other claim's link is on no list: text.
     fireEvent.click(bars[1]);
     const second = screen.getByRole('region', { name: 'The chosen segment' });
-    expect(within(second).queryByRole('link', { name: /Open session/ })).toBeNull();
-    expect(second.textContent).toContain('Open session');
+    expect(within(second).queryByRole('link', { name: /Open leg page/ })).toBeNull();
+    expect(second.textContent).toContain('Open leg page');
     expect(second.textContent).toContain('/var/log/baton/r_01');
     expect(second.textContent).toContain('baton leg log docs:T-1 leg-one');
 
