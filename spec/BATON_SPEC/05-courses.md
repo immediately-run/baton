@@ -14,7 +14,7 @@ Designs for this section that are not built are on the proposal page
 
 ### 5.1 Course directories and sources
 
-- **R-BTN-134 (a course is what its source names).** The CLI holds the machinery that reads any
+- **R-BTN-134 (a course is what its source names).** `status: built B-43` The CLI holds the machinery that reads any
   course; a course is files in a repository.
   - **The course directory** is the home's `.baton/courses/<course>/`: `course.json` (R-BTN-69),
     a script and an instruction file `legs/<leg>.md` for each leg (R-BTN-133), and optionally
@@ -31,7 +31,7 @@ Designs for this section that are not built are on the proposal page
     home changes a sourced course only through its leg instructions and leg overrides
     (R-BTN-131).
   - **Every reader goes through the snapshot.** The sync reads `.baton/` at the commit it posts
-    (R-BTN-105), the runner at the claim's `snapshot_sha` after R-BTN-143's check, and
+    (R-BTN-105), the runner at the claim's `snapshot_sha` (see R-BTN-143), and
     re-verification at the commit it verifies (R-BTN-5), so all three use the same bytes.
     Station functions and ticket sources run through the wrapper (R-BTN-133) in a read-only
     worktree of that commit, never in `ctx.checkout`.
@@ -45,7 +45,7 @@ Designs for this section that are not built are on the proposal page
 
 ### 5.2 The course file
 
-- **R-BTN-69 (the course file).** `course.json` in the course directory is the course's whole
+- **R-BTN-69 (the course file).** `status: built` `course.json` in the course directory is the course's whole
   state machine, in a schema core owns. The sync posts it with every board (§4); the runner
   loads the same file at each claim's snapshot.
 
@@ -85,10 +85,11 @@ Designs for this section that are not built are on the proposal page
   | `max_queue` | leg | queue depth that raises a warning | R-BTN-79 |
   | `version`, `inputs`, `outputs` | leg | its contract | R-BTN-82 |
   | `replay_safe` | leg | `false` when it has side effects outside git and its forge | R-BTN-82, R-BTN-84 |
-  | `requires` | leg | prerequisites: `{capabilities}` | R-BTN-120 |
+  | `requires` | leg | prerequisites: `{capabilities, tickets, resources}` | R-BTN-120 |
   | `deadline_s` | leg | how long one run may take before Baton takes the claim back | R-BTN-167, R-BTN-90 |
   | `conditions` | leg | narrows the condition types it may raise (`[]`: none) | R-BTN-160 |
   | `autonomous` | leg | `true`: the leg never asks for a person | R-BTN-195 |
+  | `reads_only` | runner leg | Boolean; `true` starts the agent in a read-only review workspace | R-BTN-183 |
   | `spawns` | leg | the courses of the children it files, and what it provides them | R-BTN-111 |
   | `no_chain_from` | leg | legs whose credential may not take this one on the same ticket | R-BTN-106 |
 
@@ -111,7 +112,7 @@ Designs for this section that are not built are on the proposal page
 
 ### 5.3 Where a ticket is, and how it moves
 
-- **R-BTN-70 (where a ticket is, and what it may do next).** Baton holds every ticket's
+- **R-BTN-70 (where a ticket is, and what it may do next).** `status: built` Baton holds every ticket's
   **station**, **path** and **queued leg** with its `next_source` (R-BTN-39, R-BTN-83). A ticket
   at an end station is done. For every live ticket the sync attests, from its station function,
   `std:git.readiness@1` (R-BTN-191): for each leg leaving Baton's station that the ticket may
@@ -123,7 +124,7 @@ Designs for this section that are not built are on the proposal page
   discarded until the next run. Core recommends a `ready` leg and never computes readiness. The
   claim response, every heartbeat and every `advance` response show the holder Baton's station,
   path and queued leg, and the latest snapshot's readiness.
-- **R-BTN-83 (a leg ends in a position: the station it reached and the leg it queues).**
+- **R-BTN-83 (a leg ends in a position: the station it reached and the leg it queues).** `status: partly`
   - **Outcomes.** A leg's `to` lists its possible outcomes; which one a run reached is the
     holder's report, its evidence in git.
   - **The pair.** Every finishing leg reports a **position** `(reached, next)`: `reached` one
@@ -162,7 +163,7 @@ Designs for this section that are not built are on the proposal page
     on `course-changed` and raises `baton.course-changed`. A ticket with no claim at a station
     the new file lacks waits `course-changed` the same way, until the owner adopts it
     (R-BTN-39). A leg added later changes no queued leg.
-- **R-BTN-63 (an advance follows an edge, on the holder's word).** A claim **is at** a station
+- **R-BTN-63 (an advance follows an edge, on the holder's word).** `status: built B-185 B-274` A claim **is at** a station
   — the last one it reached — and may be **running** one leg.
   - When claimed, it is at the ticket's station as Baton holds it (recorded as `start_path`) and
     runs nothing.
@@ -179,7 +180,9 @@ Designs for this section that are not built are on the proposal page
   - **Baton's traversal record counts.** A ticket's runs of each leg and arrivals at each
     station are counted from Baton's own record, under resolved names (R-BTN-64). `max_runs`,
     attempts and retries (R-BTN-122) read these counts, so rewriting a ticket's history in git
-    changes neither its position nor its counts. `max_runs` bounds the runs made without a
+    changes neither its position nor its counts. The `advance` that starts a run also answers
+    its number, `run`: the ticket's runs of that leg, this one included, as `max_runs` counts
+    them; the holder hands it to the leg rather than counting them itself. `max_runs` bounds the runs made without a
     person: a person leg's answer (R-BTN-116), an owner's route or an adopt restarts the count
     of the leg it queues. The traversal record itself is never erased.
   - The holder pushes a leg's evidence before the `advance` that finishes it, and may pass
@@ -189,7 +192,7 @@ Designs for this section that are not built are on the proposal page
     then on.
   - Baton does not check a leg's state: which leg comes next is the holder's judgement of
     git's facts. An `advance` is checked against the newest snapshot's course file.
-- **R-BTN-71 (a suspension rests at a station).** A claim that stops ends
+- **R-BTN-71 (a suspension rests at a station).** `status: built` A claim that stops ends
   `suspended:<station>`: the outcome its running leg reached if that leg finished, else the
   leg's `from`; any other station is refused. The end carries the queued leg `next` (R-BTN-83),
   which Baton records as the ticket's position at once; the end is confirmed as R-BTN-10 says.
@@ -200,7 +203,7 @@ Designs for this section that are not built are on the proposal page
 
 ### 5.4 Legs are queues
 
-- **R-BTN-79 (legs are queues; a course may bound them, as a warning).** Leg L's **queue**, per
+- **R-BTN-79 (legs are queues; a course may bound them, as a warning).** `status: built` Leg L's **queue**, per
   repository, is the tickets of L's course whose queued leg is L (ready or waiting, blocked or
   not) and that are not held (R-BTN-75). Baton keeps its depth in `leg_queues`, in every
   transaction that changes it.
@@ -217,7 +220,7 @@ Designs for this section that are not built are on the proposal page
 
 ### 5.5 Contracts, schemas and views
 
-- **R-BTN-82 (leg contracts: declared inputs and outputs, as pointers, checked by the runner).**
+- **R-BTN-82 (leg contracts: declared inputs and outputs, as pointers, checked by the runner).** `status: built`
   - **A contract** is optional, per leg: `version` (an integer, raised whenever its inputs or
     outputs change meaning); named `outputs`, each with a `schema` (`<id>@<version>`, R-BTN-108);
     named `inputs`, each reading one leg's output (`from: "<leg>.<output>"`) with the producer
@@ -247,7 +250,7 @@ Designs for this section that are not built are on the proposal page
     `released:cannot-finish:contract-input`, not a failed attempt: the ticket is held at once
     (`hold_reason: non-retryable:contract-input`) and raises `baton.contract`, whose `detail`
     names the input, the schema, and the producing leg and version.
-- **R-BTN-108 (one envelope, named schemas, one validator).** Leg outputs and instrument readings
+- **R-BTN-108 (one envelope, named schemas, one validator).** `status: built` Leg outputs and instrument readings
   are one mechanism.
   - **Core owns the envelope.** A leg output is `{name, schema: "<id>@<version>", uri?,
     digest?, value?}`: `uri` and `digest` (R-BTN-82), or an inline `value` of at most 4 KB
@@ -285,7 +288,7 @@ Designs for this section that are not built are on the proposal page
     `values` (R-BTN-121).
   - **One validator**, `src/shared/schema.mjs`, with no dependency, is imported by the server,
     the CLI and runner, the sync and `baton course test`.
-- **R-BTN-109 (station entry requirements).** A station may name what any leg arriving at it
+- **R-BTN-109 (station entry requirements).** `status: built B-53` A station may name what any leg arriving at it
   must have produced: `"entry": [{"output": <name>, "schema": "<id>@<version>"}, …]`.
   - **Baton checks presence and identity** at an `advance` or `end` whose `reached` is the
     station: an output of that name whose schema is the required one or refines it (by the
@@ -300,7 +303,7 @@ Designs for this section that are not built are on the proposal page
     R-BTN-116) — is checked the same way when its attestation is accepted.
   - A leg whose work is only a side effect arrives at a station with no `entry`, or with one
     `std:effect@1` requirement.
-- **R-BTN-110 (standard output formats are a shared library, not core).** Baton ships beside its
+- **R-BTN-110 (standard output formats are a shared library, not core).** `status: built` Baton ships beside its
   CLI a library of `std:` schemas, each with a view (R-BTN-112); to core a `std:` id is a string
   with a digest.
 
@@ -317,12 +320,13 @@ Designs for this section that are not built are on the proposal page
   | `std:decision@1` | `{id, leg, option, reached, ref?, answered_by?, commit?}`, a person's answer (R-BTN-116) |
   | `std:arrival@1` | `{leg, reached, next?, ref?}`: a leg's arrival at one of its outcomes (R-BTN-39, R-BTN-191) |
   | `std:evidence@1` | `{ref, kind}`: work a ticket may have had done outside Baton, `kind` `merged-early` or `mention` (R-BTN-203); Baton also keeps a refused arrival as `fact` (R-BTN-39) |
-  | `std:git.readiness@1`, `std:git.implied@1`, `std:git.output@1`, `std:git.evidence@1` | the sync's attestations (R-BTN-191) |
+  | `std:git.readiness@1`, `std:git.implied@1`, `std:git.output@1` | the sync's attestations (R-BTN-191) |
+  | `std:git.evidence@1` | `{claim, evidence, found}`: whether git or the forge shows the evidence an unconfirmed end named, `evidence` exactly as the observation listed it — the sync's attestation (R-BTN-10, R-BTN-191) |
   | `std:api-capacity@1` | `{window_s, remaining_permille, resets_at_min?}`, integers: a quota's window, what remains of it in ‰, and its reset in epoch minutes. The library's one open schema, so a resource's schema refines it by adding fields |
 
   A course extends one by refinement. A published `std:` version never changes; a new field is
   a new version.
-- **R-BTN-111 (a course's signature).** A course's **input** is its `start` station's `entry`;
+- **R-BTN-111 (a course's signature).** `status: built` A course's **input** is its `start` station's `entry`;
   its **output** is each end station's; its signature also lists the conditions its legs may
   raise (R-BTN-160). `baton course test` prints it, and the repository's stats carry it per
   course.
@@ -331,7 +335,7 @@ Designs for this section that are not built are on the proposal page
     course the repository lists other than its own. The kit checks that what it provides meets
     each such course's input; a child filed on another course is a script fault. The file also
     accepts `lifetime` (`parent` or `station`), which nothing acts on yet.
-- **R-BTN-112 (declarative views; Baton's renderers).** A schema may carry `x-baton-view`:
+- **R-BTN-112 (declarative views; Baton's renderers).** `status: built B-54` A schema may carry `x-baton-view`:
   `{title?, summary?, fields?: [{label, pointer, as, unit?, max?, tones?}]}`, ≤ 4 KB and ≤ 24
   fields.
   - `title` and `summary` are templates where `{<JSON Pointer>}` is replaced by the value as
@@ -351,7 +355,7 @@ Designs for this section that are not built are on the proposal page
 
 ### 5.6 Gates a course can set: tags, bars and capabilities
 
-- **R-BTN-60 (tags: the one generic gate a course can set).** A runner's heartbeat carries
+- **R-BTN-60 (tags: the one generic gate a course can set).** `status: built` A runner's heartbeat carries
   `tags`, course-defined strings (`family:<name>`); every posted leg carries `barred_tags`. Core
   refuses a claim or `advance` with `barred-tag` when the runner's tags meet the leg's barred
   tags — those posted, joined by the owner bars in force on that leg (R-BTN-67) — without knowing
@@ -361,7 +365,7 @@ Designs for this section that are not built are on the proposal page
   - Tags are self-reported and bind cooperating runners only (R-BTN-66).
   - A tag matches `^[a-z0-9-]+:[A-Za-z0-9._/-]{1,96}$`; at most 32 per runner; free text under
     §12.3.
-- **R-BTN-67 (owner bars and required bars).** Two rules over tags, set only by owners
+- **R-BTN-67 (owner bars and required bars).** `status: built` Two rules over tags, set only by owners
   (R-BTN-66).
   - **An owner bar** is `{course, tag, legs, applies: 'claim' | 'claim+advance', starts_at,
     ends_at?, release_holders, reason}`. `course` is a course id or `*`; named `legs` need a
@@ -381,12 +385,12 @@ Designs for this section that are not built are on the proposal page
     stored `waiting` on `policy`, the advance is refused (`not-eligible`, `policy`), the board
     still moves, and `baton.required-bar` is raised; so is a posted snapshot lacking the prefix
     for a leg a claim ran on the holder's `bars`.
-- **R-BTN-142 (bars and renames).** Bars name legs literally, as stored.
+- **R-BTN-142 (bars and renames).** `status: built` Bars name legs literally, as stored.
   - **Refused files** (R-BTN-69): two stations, or two legs, with the same `renamed_from`; a
     `renamed_from` naming a name the file still uses; a leg's `renamed_from` naming a station or
     a station's naming a leg; and a file that has no leg an owner's required bar names, under
     that name or as a `renamed_from`, until an owner changes or drops the bar.
-- **R-BTN-121 (capability types are declared in the course file).** A capability is
+- **R-BTN-121 (capability types are declared in the course file).** `status: built` A capability is
   `<type>:<value>`, compared as a string, or the built-in bare `human-operator`.
   - **The course declares its types and roles:**
 
@@ -407,33 +411,39 @@ Designs for this section that are not built are on the proposal page
     capability, `human-operator` or `none`. A course may not declare a type named `runner` or
     `human-operator`.
   - **Built-ins:** `human-operator`, a runner's own statement that a person operates it, and
-    the type `runner` (R-BTN-133). `credential:<NAME>` names an environment variable a leg
-    receives only when it requires it (R-BTN-144).
+    the type `runner` (R-BTN-133). For the proposed `credential:<NAME>` environment scoping,
+    see R-BTN-144.
   - A course's types and roles are served with its course file and shown on the **Courses**
     view, which lists every type two courses define differently.
   - **The runner declares what it has** when it starts. A capability it declares with a lock
     file is one that a single runner on the machine may use at a time: the runner declares it
     only while it holds the file's exclusive lock, and takes the lock before it claims, or
     advances into, a leg requiring the capability (R-BTN-178).
+  - A host may configure checked capabilities in its runner configuration. The runner runs
+    the check at start, before claiming, and periodically while idle. Only a passing check
+    contributes its capability to the runner’s declaration.
   - **Grants** list capabilities (R-BTN-58) and may name `<type>:*`, never a role: the CLI
     expands roles from the latest accepted snapshot, and before signing `<type>:*` prints every
     course defining the type and asks to confirm when their definitions differ (R-BTN-157).
 
 ### 5.7 Changing a course
 
-- **R-BTN-22 / R-BTN-65 (course versions).** Each course entry carries two integers.
+- **R-BTN-22 / R-BTN-65 (course versions).** `status: built` `status: built` Each course entry carries two integers.
   - **`version`** is bumped by any commit that changes how a runner must behave on the course —
     any file in its `protocol_files`.
   - **`min_runner_version`** is raised only when a runner on an older version would misbehave;
     a change to `rank.mjs` raises it only when the course needs every runner to rank alike
     (R-BTN-98).
-  - **Rule 9.** The runner reads each course's `version` from its checkout at startup and
-    declares it (`courses`, §14). A runner declaring a ticket's course below
-    `min_runner_version` gets no new claim on it (`stale-skills`); the dashboard shows it needing
-    a restart from a pulled checkout. Rule 9 is checked at a claim, never at an `advance`, so a
+  - **Rule 9.** The runner reads each course's `version` from its home checkout at startup and
+    whenever it brings the home to a snapshot: for a claim (R-BTN-34), or after a bounded fetch
+    of the default branch with no claim held. The next heartbeat declares the refreshed list
+    (`courses`, §14), omitting courses the home no longer declares. An ahead, diverged or
+    edited home is left alone; the runner logs why and keeps its last good list. A runner declaring
+    a ticket's course below `min_runner_version` gets no new claim on it (`stale-skills`).
+    Rule 9 is checked at a claim, never at an `advance`, so a
     held claim finishes under its protocol. It gates a course's protocol, never runner features,
     which are `runner:` capabilities (R-BTN-133).
-- **R-BTN-64 (in-flight tickets survive a course change).** Where a ticket is, is Baton's
+- **R-BTN-64 (in-flight tickets survive a course change).** `status: built` Where a ticket is, is Baton's
   (R-BTN-39), so a new course file must accept every live ticket's station and queued leg, or
   map them by `renamed_from`.
   - **Renames.** A renamed station or leg carries `renamed_from`. When Baton accepts the file it
@@ -476,7 +486,7 @@ Designs for this section that are not built are on the proposal page
 
 ### 5.8 The standard courses
 
-- **R-BTN-131 (the standard courses).** A standard course is one the baton repository ships
+- **R-BTN-131 (the standard courses).** `status: built B-28` A standard course is one the baton repository ships
   with the CLI, under `src/defaults/`: `create-pr` (the default), `review-pr`, `bug-report`,
   `draft-ticket`, `decision`, `build-app`, `create-spec` and `spec-to-tickets`. A repository
   scaffolds one with `baton repo init --course <id>` and needs no course code of its own.
@@ -501,6 +511,7 @@ Designs for this section that are not built are on the proposal page
     to every executor in `brief` (R-BTN-107). A repository's `agent_wrapper` — or
     `BATON_AGENT_WRAPPER` in the leg's environment, which wins — is one more command whose
     words precede the agent's; Baton builds nothing in its place.
+    A `reads_only` leg instead uses the restricted invocation in R-BTN-183.
     - The spawn has no shell: each command string splits into words as `sh` would, with no
       substitutions, and runs with the ticket id, the leg and the checkout appended. Stdin is
       closed; stdout and stderr are captured.
@@ -524,7 +535,7 @@ Designs for this section that are not built are on the proposal page
     refused at startup. So is a home held by another live runner. The claim answer's
     `course_id` names the ticket's course, which the runner loads from the claim's
     `snapshot_sha`. A claim runs one leg at a time.
-- **R-BTN-190 (leg state).** State one leg hands the next that must never reach the default
+- **R-BTN-190 (leg state).** `status: built B-101 B-149` State one leg hands the next that must never reach the default
   branch, such as review rounds and their answers, goes where the PRs the course reads live.
   Every claim response says where, as `leg_state`, and no policy knob chooses it: `forge` when
   the home is on a forge or the claimed ticket's course reads PR facts, and `branch` otherwise.
@@ -532,12 +543,12 @@ Designs for this section that are not built are on the proposal page
   - The branch namespaces `baton-legs/*`, `baton-request/*` and `baton-ticket/*` are reserved:
     the course validator refuses a `branch_pattern` that matches one, so no reader of
     `branch_pattern` sees such a branch and no work branch's name collides with one.
-- **R-BTN-124 (the planning course, `epic`).** Not built: `epic` is on the proposal page
+- **R-BTN-124 (the planning course, `epic`).** `status: specified B-13` Not built: `epic` is on the proposal page
   [courses](../proposals/courses.md).
 
 ### 5.9 Capabilities are the runner's statement
 
-- **R-BTN-174 (capabilities are matched by name; what a runner has is its own statement).** Core
+- **R-BTN-174 (capabilities are matched by name; what a runner has is its own statement).** `status: built` Core
   matches the capabilities a ticket and its leg require against what a runner declares, by name
   (R-BTN-121); a grant's `<type>:*` admits every value of the type. A runner's capabilities for
   a repository are its declared ones and its executor's `provides` (R-BTN-107) that its grant

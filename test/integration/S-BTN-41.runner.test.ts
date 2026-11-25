@@ -12,17 +12,22 @@
 // session's claim is refused, since it carries BATON_PARENT, and leg sessions register no
 // runner of their own; an `unblocked` message is acknowledged. Node only: it spawns the legs'
 // child processes and runs git.
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { build } from 'esbuild';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { BatonApi, BatonRefusal } from '../../src/runner/api';
 import { Runner, legActivity, newestWrite } from '../../src/runner/runner';
+import { runMain } from '../../src/runner/main';
+import { HARNESS_ADAPTERS, type HarnessAdapter } from '../../src/runner/harness';
+import { stubSource } from '../../src/defaults/cli';
+import { builtIn } from '../../src/defaults/courses';
 import { legNeeds, readHead } from '../../src/runner/home';
-import { capabilitiesOf } from '../../src/vendor/vocabulary.mjs';
+import { capabilitiesOf } from '../../src/shared/vocabulary.mjs';
 import { call as hostCall } from '#host';
-import { course, cutover, ORIGIN, ownerCall, placed, rows, setClock, syncCall, ticket, TOKENS } from '../helpers';
+import { course, cutover, evidenceFound, observe, ORIGIN, ownerCall, placed, rows, setClock, syncCall, tick, ticket, TOKENS } from '../helpers';
 import relay from '../fixtures/courses/relay/course.json';
 
 const T0 = Date.parse('2026-10-16T12:00:00Z');
@@ -30,16 +35,16 @@ const T0 = Date.parse('2026-10-16T12:00:00Z');
 /** One leg script: `run` is the body given; `close` commits its closing record and returns the
  * commit (the position is in git before it is reported, R-BTN-83); `handoff` records its call.
  * Every line the test asserts on lands in `<home>/.baton/evidence.jsonl`. */
-function legFile(run: string, defaultExport = false): string {
+function legFile(run: string | null, defaultExport = false): string {
   return `import { appendFileSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 const at = (ctx, name) => [ctx.checkout, '.baton', name].join('/');
 const ev = (ctx, line) => appendFileSync(at(ctx, 'evidence.jsonl'), line + '\\n');
 const out = (ctx, o) => { const f = at(ctx, 'evidence.jsonl'); const was = existsSync(f) ? readFileSync(f, 'utf8') : ''; writeFileSync(f, was + JSON.stringify(o) + '\\n'); };
 const git = (ctx, ...a) => execFileSync('git', ['-C', ctx.checkout, ...a], { encoding: 'utf8' }).trim();
-${defaultExport ? 'export default' : 'export'} async function run(ctx) {
+${run === null ? '' : `${defaultExport ? 'export default' : 'export'} async function run(ctx) {
 ${run}
-}
+}`}
 export async function close(ctx, result) {
   appendFileSync(at(ctx, 'closes.jsonl'), JSON.stringify({ leg: ctx.leg, ...(result && result.reached ? { reached: result.reached } : {}), claim: ctx.claim.nonce }) + '\\n');
   git(ctx, 'add', '.baton/closes.jsonl');
@@ -86,9 +91,14 @@ class Home {
   }
   async post(stations: Record<string, unknown>, tickets: unknown[] = [ticket('T-1', { course_id: 'relay' })], registryOver: Record<string, unknown> = {}): Promise<void> {
     const sha = this.sha();
+    // A sync run (§4.3): the observation first, then the post under its number, attesting each
+    // listed end's evidence found (R-BTN-10) — the commits this home's closes made are in git.
+    const { json: o } = await observe();
+    const listed = (o as { unconfirmed?: { ticket: string; claim: number; evidence: string }[] }).unconfirmed ?? [];
+    const attestations = listed.flatMap((u) => evidenceFound(u.claim, u.evidence, u.ticket).attestations);
     const res = await syncCall('/v1/sync/board', {
       registry: [course(3, 3, { id: 'relay', course: relay as unknown as Record<string, unknown>, ...registryOver })],
-      sha, parent_sha: this.head, tickets, closed: [], stations,
+      sha, parent_sha: this.head, tickets, closed: [], stations, observation: o.observation, ...(attestations.length ? { attestations } : {}),
     });
     if (res.status !== 200) throw new Error(`board post: ${res.status} ${await res.text()}`);
     this.head = sha;
@@ -107,13 +117,14 @@ let home: Home;
 let n = 0;
 const clock = { now: T0 };
 const runners: Runner[] = [];
+const stateFiles = new Map<Runner, string>();
 
 /** A runner against this test's Baton (the local host), heartbeating as credential vm-a. */
-function makeRunner(over: Record<string, unknown> = {}): Runner {
+function makeRunner(over: Record<string, unknown> = {}, transport: (req: Request) => Promise<Response> = hostCall): Runner {
   const stateFile = join(tmpdir(), `baton-runner-${process.pid}-${++n}.json`);
   const api = new BatonApi({
     url: 'https://baton.test',
-    transport: (req) => hostCall(req),
+    transport,
     auth: (_m, _u, _b, secret) => ({ Authorization: `Bearer ${TOKENS['vm-a']}`, ...(secret ? { 'X-Runner-Secret': secret } : {}) }),
   });
   const runner = new Runner({
@@ -123,7 +134,16 @@ function makeRunner(over: Record<string, unknown> = {}): Runner {
     ...over,
   });
   runners.push(runner);
+  stateFiles.set(runner, stateFile);
   return runner;
+}
+
+/** Move the runner's clock to `t` and wait for a beat at `t` to land: its state file's `last_ok`,
+ *  which the runner's own lease check reads (R-BTN-26), reaches `t`. */
+async function beatAt(runner: Runner, t: number): Promise<void> {
+  clock.now = t;
+  const file = stateFiles.get(runner)!;
+  await until(() => (existsSync(file) && (JSON.parse(readFileSync(file, 'utf8')).last_ok ?? 0) >= t ? [1] : []));
 }
 
 /** Wait until `q` returns a non-empty list — the test's window into the runner's progress. */
@@ -170,6 +190,61 @@ afterEach(async () => {
 });
 
 describe('S-BTN-41 the runner', () => {
+  it('claims and runs a standard stub with a third harness that stays active only in its store (B-284)', async () => {
+    const store = '.baton/third harness.store';
+    home.write('.baton/third-agent.mjs', `import { appendFileSync } from 'node:fs';
+      for (let i = 0; i < 24; i++) {
+        appendFileSync(${JSON.stringify(store)}, 'active\\n');
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      console.log('built');`);
+    const standard = stubSource({
+      ...builtIn('draft-ticket')!, id: 'relay',
+      legs: { build: { ask: { name: 'outcome', values: ['built'] }, position: "{ suspend: true, reached: answer, next: 'check' }" } },
+    }, 'relay', 'build');
+    expect(standard).toContain('AGENT_IDLE_MS = 900000');
+    const bundle = await build({
+      stdin: { contents: standard.replace('AGENT_IDLE_MS = 900000', 'AGENT_IDLE_MS = 1000'), resolveDir: process.cwd() },
+      bundle: true, platform: 'node', format: 'esm', write: false,
+    });
+    home.write('.baton/courses/relay/legs/standard.mjs', bundle.outputFiles[0].text);
+    home.write('.baton/courses/relay/legs/build.mjs', `${legFile(null)}\nexport { run } from './standard.mjs';\n`);
+    home.commit();
+    await home.post({ 'T-1': placed('filed', [], [['build', 'ready']]) });
+    const third: HarnessAdapter = {
+      name: 'third-agent', agentCommand: 'node .baton/third-agent.mjs',
+      activityPaths(checkout) { return [join(checkout, store)]; },
+      usage: () => ({ records: [], children: [] }),
+    };
+    vi.stubEnv('BATON_PARENT', undefined);
+    vi.stubEnv('BATON_TOKEN', TOKENS['vm-a']);
+    vi.stubEnv('BATON_KEY', undefined);
+    vi.stubEnv('BATON_KEY_FILE', undefined);
+    vi.stubEnv('HOME', home.dir);
+    const handlers = new Set(process.listeners('SIGTERM'));
+    let finished = false;
+    const running = runMain([
+      '--harness', third.name, '--home', home.dir, '--hostname', 'vm-a', '--session', 'third-harness',
+      '--url', 'https://baton.test', '--repository', 'docs', '--executor', 'builtin', '--beat-every', '50',
+    ], { harnesses: [...HARNESS_ADAPTERS, third], transport: hostCall, fetch: () => {}, log: () => {} })
+      .then((code) => ({ code }), (error: unknown) => ({ error }))
+      .finally(() => { finished = true; });
+    const drain = process.listeners('SIGTERM').find((handler) => !handlers.has(handler)) as ((s: NodeJS.Signals) => void) | undefined;
+    try {
+      expect(drain).toBeDefined();
+      await until(async () => {
+        if (finished) throw new Error('runner stopped before completing its leg');
+        return rows('SELECT end_reason FROM claims WHERE end_reason IS NOT NULL');
+      });
+      expect(await rows('SELECT end_reason FROM claims')).toEqual([{ end_reason: 'suspended:built' }]);
+      expect(await rows('SELECT harness FROM runners WHERE session_name = ?', 'third-harness')).toEqual([{ harness: third.name }]);
+      expect(readFileSync(join(home.dir, store), 'utf8')).toBe('active\n'.repeat(24));
+    } finally {
+      if (!finished) drain?.('SIGTERM');
+      try { expect(await running).toEqual({ code: 0 }); } finally { vi.unstubAllEnvs(); }
+    }
+  }, 30_000);
+
   it('claims a ticket and takes the leg each result names, never inferring one', async () => {
     home.leg('build', `out(ctx, { leg: 'build', parent: process.env.BATON_PARENT ?? null, hasState: !!process.env.BATON_STATE, hasOldMarkers: !!(process.env.IR_BATON_PARENT || process.env.IR_BATON_STATE), session: ctx.session ?? null, run: ctx.run });
   return { reached: 'built', next: 'check', session: 's-1' };`);
@@ -242,6 +317,24 @@ describe('S-BTN-41 the runner', () => {
     expect(await rows('SELECT status, end_reason FROM claims')).toEqual([{ status: 'completed', end_reason: 'suspended:built' }]);
   }, 30_000);
 
+  it('S-BTN-63: a refused advance preserves the evidence of a finished self-loop', async () => {
+    const CHAINED = { ...relay, legs: {
+      ...relay.legs,
+      check: { from: ['built'], to: ['built', 'checked'], max_runs: 2 },
+      merge: { ...relay.legs.merge, from: ['built', 'checked'], no_chain_from: ['build'] },
+    } };
+    home.write('.baton/courses/relay/course.json', `${JSON.stringify(CHAINED, null, 2)}\n`);
+    home.leg('build', `return { reached: 'built', next: 'check' };`);
+    home.leg('check', `return { reached: 'built', next: 'merge' };`);
+    home.commit();
+    await home.post({ 'T-1': placed('filed', [], [['build', 'ready']]) }, undefined, { course: CHAINED });
+    expect(await makeRunner().runOnce()).toMatchObject({ end_reason: 'suspended:built', reached: 'built' });
+    expect(await rows('SELECT leg, to_station, evidence, abandoned_at FROM claim_legs ORDER BY seq')).toMatchObject([
+      { leg: 'build', to_station: 'built' },
+      { leg: 'check', to_station: 'built', evidence: home.sha(), abandoned_at: null },
+    ]);
+  }, 30_000);
+
   it('a done end whose outputs fail its arrival is given up the same way', async () => {
     const END = { ...relay, stations: { ...relay.stations, merged: { ...relay.stations.merged, entry: [{ output: 'artifact', schema: 'std:url@1' }] } } };
     home.write('.baton/courses/relay/course.json', `${JSON.stringify(END, null, 2)}\n`);
@@ -250,6 +343,72 @@ describe('S-BTN-41 the runner', () => {
     await home.post({ 'T-1': placed('checked', [['build', 'built'], ['check', 'checked']], [['merge', 'ready']]) }, undefined, { course: END });
     expect(await makeRunner().runOnce()).toMatchObject({ ticket: 'docs:T-1', end_reason: 'released:cannot-finish:contract-output' });
   }, 30_000);
+
+  it('S-BTN-52: a delivered timeout refusing the successor ends the current run with a hand-off', async () => {
+    home.leg('build', `return { reached: 'built', next: 'check' };`);
+    home.leg('check', `ev(ctx, 'run check'); return { reached: 'checked' };`);
+    home.commit();
+    await home.post({ 'T-1': placed('filed', [], [['build', 'ready']]) });
+    const runner = makeRunner({}, async (req) => {
+      if (new URL(req.url).pathname.endsWith('/advance') && (await req.clone().json()).leg === 'check') {
+        // Delivery can race the close; the runner may learn of it first from this refusal.
+        return Response.json({ code: 'not-eligible', rule_code: 'leg-timeout', message: 'the current run has a delivered leg-timeout release' }, { status: 409 });
+      }
+      return hostCall(req);
+    });
+    expect(await runner.runOnce()).toMatchObject({ end_reason: 'released:leg-timeout', handoff: 'https://example.test/handoff/build' });
+    expect(home.evidence()).toEqual(['close build', 'handoff build']);
+    expect(await rows('SELECT status, end_reason FROM claims')).toEqual([{ status: 'released', end_reason: 'released:leg-timeout' }]);
+    expect(await rows('SELECT leg FROM claim_legs')).toEqual([{ leg: 'build' }]);
+  }, 30_000);
+
+  it('S-BTN-52: a timeout delivered during terminal close refuses done and writes a hand-off', async () => {
+    const timed = { ...relay, legs: { ...relay.legs, merge: { ...relay.legs.merge, max_duration: 60 } } };
+    home.write('.baton/courses/relay/course.json', JSON.stringify(timed));
+    home.write('.baton/courses/relay/legs/merge.mjs', legFile(`return { reached: 'merged' };`).replace(
+      "  return git(ctx, 'rev-parse', 'HEAD');",
+      `  while (!existsSync(at(ctx, 'resume-close'))) await new Promise(resolve => setTimeout(resolve, 10));
+  return git(ctx, 'rev-parse', 'HEAD');`,
+    ));
+    home.commit();
+    await home.post({ 'T-1': placed('checked', [['build', 'built'], ['check', 'checked']], [['merge', 'ready']]) }, undefined, { course: timed });
+    let sendBeat: (() => Promise<Response>) | undefined;
+    const runner = makeRunner({ beatEvery: 60_000 }, async (req) => {
+      if (new URL(req.url).pathname === '/v1/runner/heartbeat') {
+        const body = await req.clone().json();
+        if (body.legs_finished?.length) {
+          delete body.legs_finished;
+          delete body.leg_finished;
+          sendBeat = () => hostCall(new Request(req.url, { method: 'POST', headers: req.headers, body: JSON.stringify(body) }));
+        }
+      }
+      return hostCall(req);
+    });
+    const result = runner.runOnce();
+    try {
+      await until(() => home.evidence().filter(line => line === 'close merge'));
+      expect(sendBeat).toBeDefined();
+      const [{ deadline_at }] = await rows<{ deadline_at: number }>('SELECT deadline_at FROM claims');
+      expect(deadline_at).toBe(T0 + 40 * 60_000);
+      // Move in steps shorter than the lease while the close is blocked.
+      for (let now = T0 + 10 * 60_000; now <= deadline_at; now += 10 * 60_000) {
+        await setClock(now);
+        const response = await sendBeat!();
+        expect(response.status, await response.text()).toBe(200);
+      }
+      await tick();
+      const delivery = await (await sendBeat!()).json();
+      // Leave the heartbeat reply outside the runner: the end refusal is how it learns of delivery.
+      expect(delivery.messages).toEqual([expect.objectContaining({ payload: expect.objectContaining({ reason: 'leg-timeout' }) })]);
+    } finally {
+      home.write('.baton/resume-close', '');
+      await result;
+    }
+    expect(await result).toMatchObject({ end_reason: 'released:leg-timeout', handoff: 'https://example.test/handoff/merge' });
+    expect(home.evidence()).toEqual(['close merge', 'handoff merge']);
+    expect(await rows('SELECT status, end_reason, failed_attempt FROM claims'))
+      .toEqual([{ status: 'released', end_reason: 'released:leg-timeout', failed_attempt: 1 }]);
+  }, 45_000);
 
   it('holds the claim through a short ci wait and goes on when it clears', async () => {
     home.leg('build', `return { reached: 'built', next: 'check' };`);
@@ -291,7 +450,11 @@ describe('S-BTN-41 the runner', () => {
     await until(() => rows(`SELECT 1 FROM claim_legs WHERE leg = 'check'`));
     await new Promise((r) => setTimeout(r, 120));
     expect(await rows('SELECT status FROM claims')).toEqual([{ status: 'active' }]); // still waiting
-    clock.now = T0 + 31 * 60_000; // the budget is spent (R-BTN-40)
+    // The budget is spent (R-BTN-40). Time passes as on a host, in steps the lease outlives,
+    // each renewed by a beat: one 31-minute jump raced the runner's own lease check (R-BTN-26)
+    // against the budget, and could end `released:lease-lost`.
+    for (let m = 5; m <= 25; m += 5) await beatAt(runner, T0 + m * 60_000);
+    clock.now = T0 + 31 * 60_000;
     expect(await done).toMatchObject({ end_reason: 'suspended:built', reached: 'built' });
     expect(await rows('SELECT end_reason, status FROM claims')).toEqual([{ end_reason: 'suspended:built', status: 'completed' }]);
     // The waiting leg was started then given up at its from; the end names it queued again.
@@ -314,7 +477,7 @@ describe('S-BTN-41 the runner', () => {
     await home.post({ 'T-1': placed('built', [['build', 'built']], [['check', 'waiting', 'ci']]) });
     await until(() => rows(`SELECT 1 FROM claim_legs WHERE leg = 'check'`)); // the wait holds
     const runnerId = (await rows<{ id: number }>('SELECT id FROM runners ORDER BY id DESC LIMIT 1'))[0].id;
-    const send = await ownerCall('/v1/ui/messages', { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: ORIGIN }, body: JSON.stringify({ kind: 'release', to_runner_id: runnerId, payload: { ticket_id: 'docs:T-1', reason: 'requested' } }) });
+    const send = await ownerCall('/v1/ui/messages', { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: ORIGIN }, body: JSON.stringify({ kind: 'release', confirm: true, to_runner_id: runnerId, payload: { ticket_id: 'docs:T-1', reason: 'requested' } }) });
     expect(send.status).toBe(200);
     // No leg was running when the release landed — the claim still ends released, never
     // suspended, and the message is acked because it was acted on.
@@ -452,7 +615,7 @@ describe('S-BTN-41 the runner', () => {
     const done = runner.runOnce();
     await until(() => rows(`SELECT 1 FROM claim_legs WHERE leg = 'check'`));
     const runnerId = (await rows<{ id: number }>('SELECT id FROM runners ORDER BY id DESC LIMIT 1'))[0].id;
-    const send = await ownerCall('/v1/ui/messages', { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: ORIGIN }, body: JSON.stringify({ kind: 'release', to_runner_id: runnerId, payload: { ticket_id: 'docs:T-1', reason: 'requested' } }) });
+    const send = await ownerCall('/v1/ui/messages', { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: ORIGIN }, body: JSON.stringify({ kind: 'release', confirm: true, to_runner_id: runnerId, payload: { ticket_id: 'docs:T-1', reason: 'requested' } }) });
     expect(send.status).toBe(200);
     // It names that the leg reached its to — validated and closed like any result (R-BTN-83),
     // the marker before the hand-off — and releases naming a leg leaving where it rests.
@@ -495,7 +658,8 @@ describe('S-BTN-41 the runner', () => {
   }, 30_000);
 
   it("the immediate stop (stopNow, the signal handler's call) releases the leg at its next safe point with its hand-off — a safe point, not an abandonment (B-109)", async () => {
-    home.leg('check', `${ABORTABLE}
+    home.leg('check', `ev(ctx, 'check started');
+    ${ABORTABLE}
     ev(ctx, 'check aborted:' + ctx.signal.reason);
     return { reached: 'checked', next: 'merge' };`);
     home.commit();
@@ -503,7 +667,8 @@ describe('S-BTN-41 the runner', () => {
     const runner = makeRunner();
     runner.start();
     const done = runner.runOnce();
-    await until(() => rows(`SELECT 1 FROM claim_legs WHERE leg = 'check'`));
+    // The leg is running (not merely recorded): a stop before it starts releases at `built`.
+    await until(() => home.evidence().filter((l) => l === 'check started'));
     runner.stopNow();
     expect(await done).toMatchObject({ end_reason: 'released:requested', reached: 'checked' });
     const lines = home.evidence();
@@ -874,7 +1039,7 @@ describe('S-BTN-41 the runner', () => {
     const api = (runner as unknown as { o: { api: BatonApi } }).o.api;
     const beat = api.heartbeat;
     api.heartbeat = async (body: Record<string, unknown>) => {
-      const answer = await beat.call(api, body) as Record<string, any>;
+      const answer = await beat.call(api, body);
       const declaring = (body.capabilities ?? []) as string[];
       seen.beats.push(declaring);
       if (typeof answer.runner_id === 'number') {
@@ -974,7 +1139,7 @@ describe('S-BTN-41 the runner', () => {
     const runner = asGranted(makeRunner());
     const api = (runner as unknown as { o: { api: BatonApi } }).o.api;
     const beat = api.heartbeat;
-    api.heartbeat = async (body: Record<string, unknown>) => ({ ...await beat.call(api, body) as Record<string, unknown>, grant: { capabilities: ['agent-venue', 'llm-call'] } });
+    api.heartbeat = async (body: Record<string, unknown>) => ({ ...await beat.call(api, body), grant: { capabilities: ['agent-venue', 'llm-call'] } });
     const seen = recording(runner);
     expect(await runner.runOnce()).toMatchObject({ ticket: 'docs:T-1' });
     // Before the fix the role was dropped for its one named capability: a declaration narrower
@@ -1064,7 +1229,7 @@ describe('S-BTN-41 the runner', () => {
     recording(runner);
     const api = (runner as unknown as { o: { api: BatonApi } }).o.api;
     const beat = api.heartbeat;
-    api.heartbeat = async (body: Record<string, unknown>) => ({ ...await beat.call(api, body) as Record<string, unknown>, grant: { capabilities: [] } });
+    api.heartbeat = async (body: Record<string, unknown>) => ({ ...await beat.call(api, body), grant: { capabilities: [] } });
     expect(await runner.runOnce()).toMatchObject({ ticket: 'docs:T-1' });
     expect(lines.join('\n')).toContain("declared nothing — its key's grant allows no capability");
     // Said once across idle attempts, and no never-eligible line: no leg names a capability.
@@ -1085,7 +1250,7 @@ describe('S-BTN-41 the runner', () => {
     let first = true;
     const seen: string[][] = [];
     api.heartbeat = async (body: Record<string, unknown>) => {
-      const answer = await beat.call(api, body) as Record<string, any>;
+      const answer = await beat.call(api, body);
       seen.push((body.capabilities ?? []) as string[]);
       if (!first) return answer;
       first = false;
@@ -1115,7 +1280,7 @@ describe('S-BTN-41 the runner', () => {
     // on none of the repositories its course is in — so the declaration settles at nothing.
     const api = (runner as unknown as { o: { api: BatonApi } }).o.api;
     const beat = api.heartbeat;
-    api.heartbeat = async (body: Record<string, unknown>) => ({ ...(await beat.call(api, body) as Record<string, unknown>), grant: { capabilities: [] } });
+    api.heartbeat = async (body: Record<string, unknown>) => ({ ...(await beat.call(api, body)), grant: { capabilities: [] } });
     // Finding 5: an empty declaration still claims — the ticket names no capability, so rule 4
     // passes anything — and the line says what the grant allows, once, not per attempt.
     expect(await runner.runOnce()).toMatchObject({ ticket: 'docs:T-1' });
@@ -1141,7 +1306,7 @@ describe('S-BTN-41 the runner', () => {
     // The owner's grant, as the answer carries it — replaced mid-run with a narrower one
     // (`admin.ts`'s upsert replaces the list; the answer is the grant's capabilities).
     let grant = ['agent-venue', 'create-pr', 'drivable-browser', 'llm-call'];
-    api.heartbeat = async (body: Record<string, unknown>) => ({ ...await beat.call(api, body) as Record<string, unknown>, grant: { capabilities: grant } });
+    api.heartbeat = async (body: Record<string, unknown>) => ({ ...await beat.call(api, body), grant: { capabilities: grant } });
     const seen = recording(runner);
     // The first claim is on the grant it was answered: the declared list, served as it stood.
     expect(await runner.runOnce()).toMatchObject({ ticket: 'docs:T-1' });
@@ -1153,7 +1318,7 @@ describe('S-BTN-41 the runner', () => {
       // The heartbeat's own check, refused exactly as the server would (runnerApi.ts).
       const declaring = (body.capabilities ?? []) as string[];
       if (declaring.some((c) => !grant.includes(c))) throw new BatonRefusal('forbidden', undefined, `this credential may not declare ${declaring.filter((c) => !grant.includes(c)).join(', ')}`, 403);
-      return { ...await beat.call(api, body) as Record<string, unknown>, grant: { capabilities: grant } };
+      return { ...await beat.call(api, body), grant: { capabilities: grant } };
     };
     await runner.tick();
     // The declaration is dropped, in memory and in the state file, and said once — with the
@@ -1198,7 +1363,7 @@ describe('S-BTN-41 the runner', () => {
     // A grant of create-pr: the leg's own need is met, and a ticket naming no clause is claimed.
     let grant = ['create-pr'];
     api.heartbeat = async (body: Record<string, unknown>) => ({
-      ...await beat.call(api, body) as Record<string, unknown>,
+      ...await beat.call(api, body),
       grant: { capabilities: ((body.capabilities as string[] | undefined) ?? []).length ? grant : ['create-pr'] },
     });
     await home.post({ 'T-1': placed('filed', [], [['build', 'ready']]) });
@@ -1210,7 +1375,7 @@ describe('S-BTN-41 the runner', () => {
     api.heartbeat = async (body: Record<string, unknown>) => {
       const declaring = (body.capabilities ?? []) as string[];
       if (declaring.some((c) => !grant.includes(c))) throw new BatonRefusal('forbidden', undefined, 'this credential may not declare ' + declaring.join(', '), 403);
-      return { ...await beat.call(api, body) as Record<string, unknown>, grant: { capabilities: grant } };
+      return { ...await beat.call(api, body), grant: { capabilities: grant } };
     };
     await runner.tick();
     const second = await runner.runOnce();
@@ -1254,15 +1419,17 @@ describe('S-BTN-41 the runner', () => {
     await home.post({ 'T-1': placed('filed', [], [['build', 'ready']]) });
     const done = runner.work();
     await until(async () => lines.filter((l) => l.includes("docs:T-1's build has run")));
+    // Registration may already have unblocked build's own capability prerequisite.
+    const receivedBefore = lines.filter((l) => l.includes('baton: message unblocked received')).length;
     const [{ id: runnerId }] = await rows<{ id: number }>('SELECT id FROM runners');
     await rows(`INSERT INTO messages (kind, payload_json, from_principal, to_runner_id, sent_at, status) VALUES ('unblocked', '{"tickets":[]}', 'baton', ?, ?, 'pending')`, runnerId, Date.now());
     // Acknowledged while the build leg still runs — not held for the claim's end.
-    await until(async () => (await rows<{ status: string }>(`SELECT status FROM messages WHERE kind = 'unblocked'`)).filter((r) => r.status === 'acknowledged'));
+    await until(async () => await rows(`SELECT 1 FROM messages WHERE kind = 'unblocked' AND payload_json = '{"tickets":[]}' AND status = 'acknowledged'`));
     expect(lines.join('\n')).not.toContain('build ran');
     await until(async () => lines.filter((l) => l.includes('docs:T-1 done at')));
     runner.stop();
     await done;
-    expect(lines.filter((l) => l.includes('baton: message unblocked received'))).toHaveLength(1);
+    expect(lines.filter((l) => l.includes('baton: message unblocked received'))).toHaveLength(receivedBefore + 1);
   }, 30_000);
 
   // B-108 — the runner's liveness line: while a leg runs, each beat says how long and how live,

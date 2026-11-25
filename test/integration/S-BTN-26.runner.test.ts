@@ -15,7 +15,7 @@ import { dirname, join } from 'node:path';
 import { BatonApi } from '../../src/runner/api';
 import { Runner } from '../../src/runner/runner';
 import { declareCourses, servedCourses } from '../../src/runner/main';
-import { capabilitiesOf } from '../../src/vendor/vocabulary.mjs';
+import { capabilitiesOf } from '../../src/shared/vocabulary.mjs';
 import { call as hostCall } from '#host';
 import { course, cutover, placed, rows, setClock, syncCall, ticket, TOKENS } from '../helpers';
 import roadmapPr from '../fixtures/courses/roadmap-pr/course.json';
@@ -152,7 +152,7 @@ describe('S-BTN-26 the runner half (B-103): one runner, one checkout, two course
     const beat = api.heartbeat;
     api.heartbeat = async (body: Record<string, unknown>) => {
       sent.push((body.courses ?? []) as { repository: string; course: string; version: number }[]);
-      return await beat.call(api, body) as Record<string, any>;
+      return await beat.call(api, body);
     };
     // The first claim: either course, the server's choice. Both tickets are ready and docs is
     // cut over, so the recommendation's first pick is what the runner takes.
@@ -198,7 +198,7 @@ describe('S-BTN-26 the runner half (B-103): one runner, one checkout, two course
     // the runner must not choose one from the snapshot's list.
     const api = (runner as unknown as { o: { api: BatonApi } }).o.api;
     const claim = api.claim;
-    api.claim = async (body: { request_id: string; ticket_id?: string }) => ({ ...await claim.call(api, body) as Record<string, unknown>, course_id: null });
+    api.claim = async (body: { request_id: string; ticket_id?: string }) => ({ ...await claim.call(api, body), course_id: null });
     const lines: string[] = [];
     (runner as unknown as { log: (l: string) => void }).log = (l: string) => lines.push(l);
     const out = await runner.runOnce();
@@ -222,7 +222,7 @@ describe('S-BTN-26 the runner half (B-103): one runner, one checkout, two course
     const beat = api.heartbeat;
     api.heartbeat = async (body: Record<string, unknown>) => {
       sent.push(body.courses);
-      return await beat.call(api, body) as Record<string, any>;
+      return await beat.call(api, body);
     };
     const out = await runner.runOnce();
     expect(out).toMatchObject({ ticket: 'docs:C-1' });
@@ -245,7 +245,7 @@ describe('S-BTN-26 the runner half (B-103): one runner, one checkout, two course
     const api = (runner as unknown as { o: { api: BatonApi } }).o.api;
     const claim = api.claim;
     api.claim = async (body: { request_id: string; ticket_id?: string }) => ({
-      ...await claim.call(api, body) as Record<string, unknown>,
+      ...await claim.call(api, body),
       course_id: 'roadmap-pr',
     });
     const lines: string[] = [];

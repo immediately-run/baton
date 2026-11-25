@@ -33,7 +33,9 @@ baton owner -i <your owner key> resolve <repository> <ticket> review-rounds-<n> 
 - **`merge`** — you reviewed it yourself and it merges: the ticket moves to `adjudicated` with
   `merge` ready.
 - **`owner`** — you take the change over by hand: the ticket parks, `merge` waiting on you,
-  until you say otherwise.
+  until you say otherwise. Keep the last round on its PR while parked. If you close the ticket
+  by hand, follow [the merge leg's archive step](merge.md#close-the-ticket) for every round
+  not already recorded in `docs/review/`.
 - **`round`** — start one more review round. The answer itself grants exactly one more `review`
   run beyond the course's rounds — there is no second step — and the round runs on the same
   head. If that round still asks for changes, you are asked again (`review-rounds-9`), and may

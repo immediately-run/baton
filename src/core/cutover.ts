@@ -26,17 +26,15 @@ export function importLegacyClaim(sql: Store, now: number,
   sql.exec(`INSERT INTO credentials (id, hostname, allowed_capabilities, kind) VALUES ('legacy', 'legacy', '[]', 'legacy') ON CONFLICT (id) DO NOTHING`);
   const session = o.preferred && SESSION_NAME.test(o.preferred) && !taken(o.preferred) ? o.preferred
     : !taken(`item-${localOf(o.item)}`) ? `item-${localOf(o.item)}` : `item-${localOf(o.item)}-${o.nonce}`;
-  sql.exec(`INSERT INTO runners (hostname, session_name, secret_hash, credential_id, harness, kind, tier_ceiling, lease_timeout_ms, settings_hash, first_seen_at, last_seen_at)
-            VALUES ('legacy', ?, ?, 'legacy', 'claude-code', 'legacy', 'critical', 0, '', ?, ?)`, session, randomHex(32), now, now);
-  const runnerId = sql.exec('SELECT last_insert_rowid() AS id').one().id as number;
+  const { id: runnerId } = sql.exec<{ id: number }>(`INSERT INTO runners (hostname, session_name, secret_hash, credential_id, harness, kind, tier_ceiling, lease_timeout_ms, settings_hash, first_seen_at, last_seen_at)
+            VALUES ('legacy', ?, ?, 'legacy', 'claude-code', 'legacy', 'critical', 0, '', ?, ?) RETURNING id`, session, randomHex(32), now, now).one();
   // R-BTN-62: the counter's value now, as for any claim.
   // §4: a legacy claim starts at the station the sync posts for its ticket at the import.
-  sql.exec(`INSERT INTO claims (ticket_id, runner_id, request_id, nonce, snapshot_sha, claimed_at, status, reap_after, claim_observation, station, start_path, course_id)
+  const { id: claimId } = sql.exec<{ id: number }>(`INSERT INTO claims (ticket_id, runner_id, request_id, nonce, snapshot_sha, claimed_at, status, reap_after, claim_observation, station, start_path, course_id)
             VALUES (?, ?, ?, ?, ?, ?, 'active', ?, COALESCE((SELECT last_handed_out FROM board_head WHERE repository_id = ?), 0),
                     COALESCE((SELECT station FROM ticket_stations WHERE ticket_id = ?), ''), COALESCE((SELECT path FROM ticket_stations WHERE ticket_id = ?), '[]'),
-                    (SELECT course_id FROM tickets WHERE id = ?))`,
-    o.item, runnerId, o.requestId, o.nonce, o.sha, o.claimedAt, o.claimedAt + LEGACY_REAP_MS, repositoryOf(o.item), o.item, o.item, o.item);
-  const claimId = sql.exec('SELECT last_insert_rowid() AS id').one().id as number;
+                    (SELECT course_id FROM tickets WHERE id = ?)) RETURNING id`,
+    o.item, runnerId, o.requestId, o.nonce, o.sha, o.claimedAt, o.claimedAt + LEGACY_REAP_MS, repositoryOf(o.item), o.item, o.item, o.item).one();
   logEvent(sql, now, 'claimed', 'baton', { legacy: true, session, ...(o.detail ?? {}) }, o.item, claimId);
   return { claimId, session };
 }

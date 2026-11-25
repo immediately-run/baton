@@ -5,9 +5,10 @@
 // R-BTN-39, blocks R-BTN-75, overrides R-BTN-12, claims R-BTN-10, questions R-BTN-116), and
 // `ticketDetail` adds what one ticket's page draws. Filter fields only (R-BTN-33): no body, note
 // or exit criterion is read. Nothing here writes, and the clock is the caller's `now`.
-import { claimFleetSql, isClaimLeaseLive, leaseEndsAt } from './runnerLiveness';
+import type { SessionLinkView } from './links';
+import { claimFleetSql, isClaimLeaseLive } from './runnerLiveness';
 import { ATTEMPTS_HOLD_AT } from './attempts';
-import { STALLED_MS } from './claims';
+import { CLAIM_LEASE_END_SQL, STALLED_MS } from './claims';
 import { fileUrl, type Forge } from './links';
 import type { BatonCore } from './baton';
 import type { Row } from './ports';
@@ -118,14 +119,14 @@ const list = (json: unknown): string[] => {
 
 type Held = {
   id: number; ticket_id: string; runner_id: number; status: string; claimed_at: number; ended_at: number | null; hostname: string; session_name: string;
-  kind: string; last_seen_at: number; last_activity_at: number | null; lease_timeout_ms: number; leg: string | null;
+  kind: string; last_seen_at: number; last_activity_at: number | null; lease_timeout_ms: number; lease_ends_at: number | null; leg: string | null; session_url: string | null; session_incarnation: number | null;
 };
 
 /** Every row of the repository, in the list's order: the ready ones in Baton's matching order
  *  (R-BTN-61 — the board read's own `ORDER BY`), then the others by state precedence and id,
  *  the tickets closed in the last 24 hours last. No `eligible_runners` yet: `withEligible` adds
  *  them to the rows a page serves. */
-export function ticketRows(cx: TicketsCtx, repo: string): TicketRow[] {
+export function ticketRows(cx: TicketsCtx, repo: string, sessionLink?: SessionLinkView): TicketRow[] {
   const now = cx.now();
   const lo = `${repo}:`;
   const hi = `${repo};`;
@@ -152,8 +153,11 @@ export function ticketRows(cx: TicketsCtx, repo: string): TicketRow[] {
   const claims = new Map<string, { active?: Held; unconfirmed?: Held }>();
   for (const c of cx.sql<Held>(
     `SELECT c.id, c.ticket_id, c.runner_id, c.status, c.claimed_at, c.ended_at, w.hostname, w.session_name, w.kind, w.last_seen_at, w.last_activity_at, w.lease_timeout_ms,
-            COALESCE((SELECT l.leg FROM claim_legs l WHERE l.claim_id = c.id AND l.finished_at IS NULL AND l.abandoned_at IS NULL ORDER BY l.seq DESC LIMIT 1), c.offered_leg) AS leg
+            CASE WHEN w.kind != 'legacy' THEN ${CLAIM_LEASE_END_SQL} END AS lease_ends_at,
+            COALESCE(l.leg, c.offered_leg) AS leg, ${sessionLink ? 'l.session_url' : 'NULL'} AS session_url, l.session_incarnation
      FROM claims c JOIN runners w ON w.id = c.runner_id
+     LEFT JOIN claim_legs l ON l.claim_id = c.id AND l.seq = (SELECT MAX(seq) FROM claim_legs
+       WHERE claim_id = c.id AND finished_at IS NULL AND abandoned_at IS NULL)
      WHERE (c.status = 'active' OR (c.status = 'completed' AND c.confirmed_at IS NULL)) AND c.ticket_id >= ? AND c.ticket_id < ? ORDER BY c.id`, lo, hi)) {
     const e = claims.get(c.ticket_id) ?? {};
     if (c.status === 'active') e.active = c;
@@ -186,7 +190,8 @@ export function ticketRows(cx: TicketsCtx, repo: string): TicketRow[] {
     const alive = isClaimLeaseLive(c, now);
     return {
       claim_id: c.id, runner_id: c.runner_id, hostname: c.hostname, session_name: c.session_name, leg: c.leg, since: c.claimed_at,
-      lease_ends_at: c.kind === 'legacy' ? null : leaseEndsAt(c),
+      ...sessionLink?.(c.session_url, c.runner_id, c.session_incarnation),
+      lease_ends_at: c.lease_ends_at,
       last_activity_at: c.last_activity_at, alive,
       // §11.4: alive, and no activity for 2 hours (the claim's own age where none was reported).
       stalled: alive && now - (c.last_activity_at ?? c.claimed_at) > STALLED_MS,
@@ -283,7 +288,7 @@ export function withEligible(cx: TicketsCtx, rows: readonly TicketRow[]): Ticket
 /** What a ticket's page draws beyond its list row (B-218): the live claim, the earlier failed
  *  attempts, the overrides, the open conditions and scope findings, a pending fence, the resume
  *  record and the forge link. `repo` is the ticket's own, already checked. */
-export function ticketDetail(cx: TicketsCtx, repo: string, id: string, path: string | null) {
+export function ticketDetail(cx: TicketsCtx, repo: string, id: string, path: string | null, sessionLink: SessionLinkView) {
   const now = cx.now();
   const retryMax = cx.core.admin.retry(repo)?.max_failed ?? ATTEMPTS_HOLD_AT;
   const failed = cx.core.claims.failedAttempts(id);
@@ -291,22 +296,23 @@ export function ticketDetail(cx: TicketsCtx, repo: string, id: string, path: str
     'SELECT expedite, hold, hold_reason, retry_after, set_by, set_at FROM ticket_overrides WHERE ticket_id = ?', id)[0] ?? null;
   const live = cx.sql<{
     id: number; runner_id: number; claimed_at: number; deadline_at: number | null; hostname: string; session_name: string; kind: string; last_seen_at: number;
-    last_activity_at: number | null; lease_timeout_ms: number; offered_leg: string | null;
+    last_activity_at: number | null; lease_timeout_ms: number; lease_ends_at: number | null; offered_leg: string | null;
   }>(
-    `SELECT c.id, c.runner_id, c.claimed_at, c.deadline_at, c.offered_leg, w.hostname, w.session_name, w.kind, w.last_seen_at, w.last_activity_at, w.lease_timeout_ms
+    `SELECT c.id, c.runner_id, c.claimed_at, c.deadline_at, c.offered_leg, w.hostname, w.session_name, w.kind, w.last_seen_at, w.last_activity_at, w.lease_timeout_ms,
+            CASE WHEN w.kind != 'legacy' THEN ${CLAIM_LEASE_END_SQL} END AS lease_ends_at
      FROM claims c JOIN runners w ON w.id = c.runner_id WHERE c.ticket_id = ? AND c.status = 'active'`, id)[0] ?? null;
-  const leg = live ? cx.sql<{ leg: string; run_id: string | null; session_url: string | null; leg_log_dir: string | null; started_at: number }>(
-    `SELECT leg, run_id, session_url, leg_log_dir, started_at FROM claim_legs WHERE claim_id = ? AND finished_at IS NULL AND abandoned_at IS NULL ORDER BY seq DESC LIMIT 1`, live.id)[0] ?? null : null;
+  const leg = live ? cx.sql<{ leg: string; run_id: string | null; session_url: string | null; session_incarnation: number | null; leg_log_dir: string | null; started_at: number }>(
+    `SELECT leg, run_id, session_url, session_incarnation, leg_log_dir, started_at FROM claim_legs WHERE claim_id = ? AND finished_at IS NULL AND abandoned_at IS NULL ORDER BY seq DESC LIMIT 1`, live.id)[0] ?? null : null;
   const alive = !!live && isClaimLeaseLive(live, now);
   const claim = live ? {
     claim_id: live.id, runner_id: live.runner_id, hostname: live.hostname, session_name: live.session_name,
     // The leg it runs; before its first advance, the leg it was offered.
     leg: leg?.leg ?? live.offered_leg ?? null, run_id: leg?.run_id ?? null, leg_started_at: leg?.started_at ?? null, claimed_at: live.claimed_at,
-    lease_ends_at: live.kind === 'legacy' ? null : leaseEndsAt(live), deadline_at: live.deadline_at,
+    lease_ends_at: live.lease_ends_at, deadline_at: live.deadline_at,
     // §7.4: the attempt this claim is, against the failed attempts that hold the ticket.
     attempt: failed.length + 1, max_runs: retryMax, next_backoff_until: override?.retry_after ?? null,
     // R-BTN-113: stored only where the session-host rule passed it; R-BTN-128: a directory, as text.
-    session_url: leg?.session_url ?? null, log_dir: leg?.leg_log_dir ?? null,
+    ...sessionLink(leg?.session_url ?? null, live.runner_id, leg?.session_incarnation ?? null), log_dir: leg?.leg_log_dir ?? null,
     last_activity_at: live.last_activity_at, alive, stalled: alive && now - (live.last_activity_at ?? live.claimed_at) > STALLED_MS,
   } : null;
   const attempts = cx.sql<{ id: number; runner_id: number; hostname: string; claimed_at: number; ended_at: number | null; end_reason: string | null; end_detail: string | null }>(

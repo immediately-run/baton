@@ -3,10 +3,11 @@ import { boundedJson } from './validate';
 // R-BTN-33/35). Pure: the core does the SQL, on either host. Only filter fields survive — an item's
 // body, Status notes, exit criteria and PR list never reach Baton; the dashboard links each
 // item to its file on GitHub instead.
-import { capabilitiesOf } from '../vendor/vocabulary.mjs';
+import { capabilitiesOf } from '../shared/vocabulary.mjs';
 import { parseTranscriptRepo } from './links';
 import { BatonError } from './http';
 import { checkRegistry, COURSE_ID, type RegistryEntry } from './courses';
+import { requirementKeys, requirementOf, type PostedDependency } from './ticketRequirement';
 import { ASKS, COURSE_ID as LEG_ID, DECISION_GRANT_MAX, DECISION_ID, DECISION_OPTION, DECISION_OPTIONS_MAX, DECISION_QUESTION, DECISIONS_MAX, DEPENDENCY_ID, isHttpsPointer, LOCAL_ID, NEEDS_MAX, SESSION_NAME, TAG, HOLDING_TYPE, HOLDING_VALUE, repositoryOf } from './validate';
 import type { Step } from './graph';
 
@@ -69,6 +70,7 @@ export interface PostedTicket {
   expedite: boolean;
   depends_on: string[];
   blocked_by: string[];
+  depends_at?: PostedDependency[];
   repos: string[];
   rank?: number | null;
   /** R-BTN-86 (§4.6): the ticket's parent, a LOCAL id of the same repository as the sync reads
@@ -201,6 +203,10 @@ export interface PostedControl {
 
 /** R-BTN-191's envelope as the sync posts it (§4.4): a typed fact about one ticket, its `value`
  *  judged by its `type`'s schema when the type is read. */
+/** R-BTN-10, R-BTN-191: the sync's attestation that git or the forge shows (`found`) the
+ *  evidence an unconfirmed end named. */
+export const GIT_EVIDENCE_TYPE = 'std:git.evidence@1';
+
 export interface PostedAttestation {
   type: string;
   /** A local ticket id, as the post's tickets name them. */
@@ -230,6 +236,7 @@ export interface TicketRow {
   operator_only: 0 | 1;
   depends_on: string;
   blocked_by: string;
+  depends_at?: string;
   repos: string;
   ord: string | null;
   rank: number | null;
@@ -356,6 +363,14 @@ export function checkPayload(body: unknown, repo?: string): BoardPayload {
         throw new BatonError('invalid-params', `${at}.ref must be a short string or null`);
       }
       if (!isObj((a as PostedAttestation).value)) throw new BatonError('invalid-params', `${at}.value must be an object`);
+      // R-BTN-10: the sync's word on the evidence an unconfirmed end named — `{claim, evidence,
+      // found}`, the evidence exactly as the observation listed it.
+      if ((a as PostedAttestation).type === GIT_EVIDENCE_TYPE) {
+        const v = (a as PostedAttestation).value as Record<string, unknown>;
+        if (!Number.isSafeInteger(v.claim) || (v.claim as number) <= 0) throw new BatonError('invalid-params', `${at}.value.claim must be a claim id`);
+        if (typeof v.evidence !== 'string' || v.evidence === '' || v.evidence.length > 1000) throw new BatonError('invalid-params', `${at}.value.evidence must be the commit sha or URL the end named`);
+        if (typeof v.found !== 'boolean') throw new BatonError('invalid-params', `${at}.value.found must be true or false`);
+      }
     }
   }
   // B-127 (R-BTN-66 as amended): the post's signed-control record. The shape and bounds here;
@@ -510,6 +525,16 @@ function checkNormative(p: BoardPayload, repo?: string) {
       // B-113 (§4.4): a `depends_on` entry is a local id or a qualified one naming another
       // registered repository's ticket; `blocked_by` (a parent's children, R-BTN-47) stays local.
       list(t[k], k === 'depends_on' ? DEPENDENCY_ID : ID, `${t.id}: ${k}`);
+    }
+    if (t.depends_at !== undefined) {
+      if (!isObjArr(t.depends_at, DEP_MAX)) fail(`${t.id}.depends_at`, `must be a list of at most ${DEP_MAX}`);
+      else for (const [i, d] of t.depends_at.entries()) {
+        if (!isObj(d) || typeof d.ticket !== 'string' || !DEPENDENCY_ID.test(d.ticket)
+          || ('leg' in d && (typeof d.leg !== 'string' || !LEG_ID.test(d.leg)))
+          || Object.keys(d).some((k) => !['ticket', 'leg', ...requirementKeys].includes(k)) || !requirementOf(d, LEG_ID)) {
+          fail(`${t.id}.depends_at.${i}`, 'must name a ticket, one of at, reached, done, withdrawn, closed, and optionally a leg');
+        }
+      }
     }
     if (!isObjArr(t.repos, 64)) fail(`${t.id}.repos`, 'must be a list of at most 64');
     list(t.repos, REPO, `${t.id}: repos`);
@@ -756,7 +781,7 @@ export function rowFor(it: StateItem, rankOf: Map<string, number>): TicketRow {
   const tags = it.tags ?? [];
   const names = it.requires ?? null;
   const clause = names == null ? 'absent' : names.every((n) => n === 'none') ? 'none' : 'listed';
-  const path = `content/roadmap/${it.id}.mdx`;
+  const path = `content/roadmap/${it.id}.mdx`; // dependency-history: legacy ticket URL, not an input
   return {
     id: it.id,
     path,
@@ -810,6 +835,7 @@ export function rowForTicket(t: PostedTicket): TicketRow {
     operator_only: t.operator_only ? 1 : 0,
     depends_on: JSON.stringify(t.depends_on),
     blocked_by: JSON.stringify(t.blocked_by),
+    ...(t.depends_at?.length ? { depends_at: JSON.stringify(t.depends_at) } : {}),
     repos: JSON.stringify(t.repos),
     ord: null,
     rank: t.rank ?? null,

@@ -65,9 +65,8 @@ beforeEach(async () => {
   reader = await makeKey('ssh-ed25519', 'docs-reader');
   await setAdminKeys(admin);
   expect((await keyCall(admin, '/v1/admin/repositories', { id: 'docs', owner_keys_add: [owner.publicKey] })).status).toBe(200);
-  // R-BTN-163: the delivery runner's key — granted on docs, its tags barred, delivery courses
-  // alone. The read needs the grant alone; nothing else is asked of it here.
-  expect((await keyCall(owner, '/v1/owner/docs/grants', { public_key: reader.publicKey, hostname: 'docs-deliver', capabilities: ['agent-venue'] })).status).toBe(200);
+  // R-BTN-163: explicitly authorize delivery on docs; the courier need not register a session.
+  expect((await keyCall(owner, '/v1/owner/docs/grants', { public_key: reader.publicKey, hostname: 'docs-deliver', capabilities: ['agent-venue'], deliver_interactions: true })).status).toBe(200);
   git = new Git().add('A');
   git.registry = [course(3, 3, { course: INTERACT })];
   expect((await git.post()).status).toBe(200);
@@ -95,9 +94,9 @@ describe('S-BTN-222: an interaction request (R-BTN-195)', () => {
       ['interact', LINK, 'open', 'high'], // the stored link, not the runner's; no subject or body anywhere
     ]);
 
-    // Needs you lists it with its link (R-BTN-163), and the delivery runner reads the list
+    // The export’s Needs you flags the link, and the delivery runner reads the list
     // (R-BTN-195): the entry carries the ticket, the leg and the url, and no leg text.
-    expect(await needsYou()).toEqual([expect.objectContaining({ ticket_id: 'docs:A', leg: 'implement', type: 'interact', url: LINK, run_id: a.json.run_id })]);
+    expect(await needsYou()).toEqual([expect.objectContaining({ ticket_id: 'docs:A', leg: 'implement', type: 'interact', url: null, session_link: true, run_id: a.json.run_id })]);
     const list = await readAs(reader, '/v1/repositories/docs/conditions?open=1&type=interact');
     expect(list.status).toBe(200);
     expect(list.json.conditions).toEqual([expect.objectContaining({ ticket_id: 'docs:A', leg: 'implement', url: LINK })]);
@@ -134,7 +133,7 @@ describe('S-BTN-222: an interaction request (R-BTN-195)', () => {
     // default) is dropped and logged — the beat answers 200 and says so.
     const dropped = await beat('vm-a', w.secret, { session_url: 'https://sessions.example/not-allowed' });
     expect(dropped.status).toBe(200);
-    expect(dropped.json.session_url_dropped).toContain('sessions.example');
+    expect(dropped.json.session_url_dropped).toContain('session_hosts');
     expect(await rows<{ session_url: string | null }>('SELECT session_url FROM claim_legs WHERE claim_id = ?', c.claim_id)).toEqual([{ session_url: null }]);
     expect((await rows(`SELECT 1 FROM events WHERE kind = 'discrepancy' AND json_extract(detail_json, '$.sub') = 'session-url'`)).length).toBe(1);
     // A link over the bound is dropped the same way, never refused.
@@ -143,6 +142,10 @@ describe('S-BTN-222: an interaction request (R-BTN-195)', () => {
     // The runner-check refusals the core holds too: baton is core's alone; an unknown type is
     // neither standard nor declared.
     expect((await raise1('vm-a', w.secret, c.claim_id, { type: 'baton.retries', disposition: 'notify' })).json.code).toBe('invalid-params');
+    expect((await raise1('vm-a', w.secret, c.claim_id, { type: 'baton', disposition: 'notify' })).json.code).toBe('invalid-params');
+    for (const forbidden of [{ subject: 'not a filter field' }, { body: 'not a filter field' }, { extra: true }]) {
+      expect((await raise1('vm-a', w.secret, c.claim_id, { type: 'warning', disposition: 'notify', ...forbidden })).json.code).toBe('invalid-params');
+    }
     expect((await raise1('vm-a', w.secret, c.claim_id, { type: 'unheard-of', disposition: 'notify' })).json.code).toBe('invalid-params');
     // The heartbeat carried a good link meanwhile: hitl records open (unbound: the debugger's,
     // R-BTN-163), an unbound notify only records, and a suspend's url is kept only under
@@ -300,6 +303,56 @@ describe('S-BTN-222: an interaction request (R-BTN-195)', () => {
     expect(past.json.code).toBe('quota');
     // Needs you orders by severity, then age (R-BTN-163): the critical ask first.
     expect((await needsYou()).map((x) => x.severity)).toEqual(['critical', ...Array<string>(19).fill('normal')]);
+  });
+
+  it('S-BTN-131: one open core condition per repository, type, ticket and ref, even without a ticket', async () => {
+    await withCore((core) => {
+      const insert = (ticket: string | null, ref: string, outcome = 'open') => core.store.exec(
+        `INSERT INTO conditions(repository_id, ticket_id, ref, type, disposition, raised_at, outcome)
+         VALUES ('docs', ?, ?, 'baton.stalled', 'notify', ?, ?)`, ticket, ref, T0, outcome);
+      for (const ticket of ['docs:A', null]) {
+        insert(ticket, 'x');
+        expect(() => insert(ticket, 'x')).toThrow(/UNIQUE/i);
+        insert(ticket, 'y');
+        insert(ticket, 'x', 'closed');
+      }
+    });
+  });
+
+  it('S-BTN-222: keeps the claim index for condition quotas and retention', async () => {
+    expect(await rows("SELECT name FROM pragma_index_info('conditions_by_claim')")).toEqual([{ name: 'claim_id' }]);
+  });
+
+  it('G-BTN-146: records an unbound warning, its activity and history on the same run, without private text', async () => {
+    const w = await register('vm-a');
+    const { json: c } = await claimItem('vm-a', w.secret, { ticket_id: 'docs:A' });
+    const { json: a } = await advance('vm-a', w.secret, c.claim_id, { leg: 'implement' });
+    const rejected = await raise1('vm-a', w.secret, c.claim_id, { type: 'warning', body: 'private' });
+    expect(rejected.json.code).toBe('invalid-params');
+    const accepted = await raise1('vm-a', w.secret, c.claim_id, { type: 'warning' });
+    expect(accepted.status).toBe(200);
+    expect(await conditionRows()).toEqual([expect.objectContaining({ id: accepted.json.condition_id, run_id: a.run_id, outcome: 'recorded' })]);
+    expect(await rows(`SELECT kind, source, run_id, outcome, detail_json FROM activities WHERE claim_id = ?`, c.claim_id)).toEqual([
+      { kind: 'condition', source: 'baton', run_id: a.run_id, outcome: 'succeeded', detail_json: JSON.stringify({ condition_id: accepted.json.condition_id, type: 'warning', disposition: 'notify' }) },
+    ]);
+    expect(await rows(`SELECT kind, run_id FROM ticket_history WHERE ticket_id = 'docs:A' AND kind = 'condition'`)).toEqual([{ kind: 'condition', run_id: a.run_id }]);
+  });
+
+  it('counts closed raises against the daily ticket quota and pages the list', async () => {
+    const w = await register('vm-a');
+    const { json: c } = await claimItem('vm-a', w.secret, { ticket_id: 'docs:A' });
+    expect((await advance('vm-a', w.secret, c.claim_id, { leg: 'implement' })).status).toBe(200);
+    for (let i = 0; i < 200; i++) {
+      expect((await raise1('vm-a', w.secret, c.claim_id, { type: 'warning.quota', disposition: 'notify', restarts: {} })).status).toBe(200);
+    }
+    expect((await raise1('vm-a', w.secret, c.claim_id, { type: 'warning', disposition: 'notify' })).json.code).toBe('quota');
+    const path = '/v1/repositories/docs/conditions?type=warning&ticket=docs%3AA';
+    const first = await readAs(reader, path);
+    expect(first.json.conditions).toHaveLength(100);
+    expect(first.json.cursor).toBeTruthy();
+    const second = await readAs(reader, `${path}&cursor=${first.json.cursor}`);
+    expect(second.json.conditions).toHaveLength(100);
+    expect(second.json.conditions[0].condition_id).not.toBe(first.json.conditions[0].condition_id);
   });
 
   it('a course file with autonomous beside a conditions list naming hitl.x is refused naming the leg', async () => {

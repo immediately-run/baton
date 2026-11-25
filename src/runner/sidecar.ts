@@ -1,7 +1,8 @@
 // The runner's heartbeat cadence, lease and spool delivery (R-BTN-6, R-BTN-26).
+import type { BeatAnswer } from '../shared/runner-wire';
 import { appendFileSync, readdirSync, readFileSync, renameSync, rmSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
-import { capabilitiesOf } from '../vendor/vocabulary.mjs';
+import { capabilitiesOf } from '../shared/vocabulary.mjs';
 import { BatonRefusal } from './api';
 import type { MachineLocks } from './machineLocks';
 import type { RunnerOptions } from './runner';
@@ -30,7 +31,7 @@ export function declarationFrom(held: string[]): string[] {
 }
 
 type SidecarOptions = Pick<RunnerOptions, 'api' | 'apiFor' | 'stateFile' | 'hostname' | 'session' |
-  'harness' | 'capabilities' | 'tierCeiling' | 'profile' | 'testHarness' | 'courses' | 'repository' | 'legNeeds'> & {
+  'harness' | 'activityPaths' | 'capabilities' | 'capabilityChecks' | 'tierCeiling' | 'profile' | 'testHarness' | 'courses' | 'readCourses' | 'repository' | 'legNeeds'> & {
   beatEvery: number;
   concurrency: number;
   now: () => number;
@@ -93,6 +94,7 @@ export class Sidecar {
    *  server will have recorded (`rewriteSettings`), null while no answer has landed. A beat that
    *  carried another list leaves the server on this one until the next answered beat. */
   private sent: string[] | null = null;
+  private sentCourses: RunnerOptions['courses'];
   /** B-86: an answer carried no `grant` — the declaration stays unsettled and the next beat is
    *  forced, so a grant that arrives later is still read. */
   private grantAsked = false;
@@ -117,6 +119,7 @@ export class Sidecar {
     private readonly claims: () => ClaimRegistry,
     private readonly drain: (why: string) => void,
   ) {
+    this.sentCourses = o.courses;
     // B-86: a restart keeps the declaration the last process settled — a granted runner does not
     // ask again, and `runOnce` has no stale `[]` to force a beat for. `--capabilities` still
     // narrows what was read: a flag is the operator's word, the state file's a past answer.
@@ -145,6 +148,10 @@ export class Sidecar {
   }
 
   get leaseLost(): boolean { return this.lostLease; }
+  get hasPendingEnds(): boolean { return this.pendingEnds.size > 0; }
+
+  private courses(): RunnerOptions['courses'] { return this.o.readCourses?.() ?? this.o.courses; }
+  get coursesSettled(): boolean { return this.sentCourses === this.courses(); }
 
   clearLeaseLoss(): void {
     this.lostLease = false;
@@ -201,7 +208,7 @@ export class Sidecar {
    *  settled list less every lock capability whose file this process does not hold — of the
    *  runners on one machine only the one holding the lock declares it (R-BTN-178). */
   private declaringList(): string[] {
-    const base = this.declared ?? this.o.capabilities ?? [];
+    const base = (this.declared ?? this.o.capabilities ?? []).filter((name) => this.o.capabilityChecks?.passes(name) ?? true);
     const locks = this.locks;
     return locks ? base.filter((c) => !locks.manages(c) || locks.holds(c)) : base;
   }
@@ -222,6 +229,7 @@ export class Sidecar {
     // is the claims' own — `ensureLegLocks` holds the legs' locks and releases the rest — so the
     // idle maintenance stays out until every claim ends.
     if (this.locks && !live.some((x) => x.heartbeatLeg)) await this.locks.takeAll();
+    if (!live.some((x) => x.heartbeatLeg)) await this.o.capabilityChecks?.refresh(() => this.o.now());
     const declaring = this.declaringList();
     // R-BTN-113, R-BTN-90 (B-188): each claim's running leg's link and finished run, by claim;
     // read at build time, so the answer below clears only what this beat carried.
@@ -231,6 +239,7 @@ export class Sidecar {
     // One claim at a time keeps the shapes a Baton before B-188 reads: the bare `session_url`
     // and `leg_finished`, and a `fenced` object.
     const one = this.o.concurrency === 1;
+    const courses = this.courses();
     const body: Record<string, unknown> = {
       hostname: this.o.hostname, session_name: this.o.session, harness: this.o.harness, kind: 'vm',
       capabilities: declaring, tier_ceiling: this.o.tierCeiling ?? 'critical',
@@ -241,7 +250,7 @@ export class Sidecar {
       lease_timeout_s: s.lease_timeout_s ?? 900,
       // R-BTN-4 (B-188): how many claims this runner holds at once.
       concurrency: this.o.concurrency,
-      courses: this.o.courses.map((c) => ({ repository: this.o.repository, course: c.course, version: c.version })),
+      courses: courses.map((c) => ({ repository: this.o.repository, course: c.course, version: c.version })),
       // R-BTN-113 (B-234, B-188): the running legs' session links, kept on their runs' rows
       // (latest wins while each runs); Baton drops and logs one that fails the link rule.
       ...(links.length ? { session_urls: links.map((l) => ({ claim_id: l.claim_id, url: l.url })) } : {}),
@@ -256,6 +265,7 @@ export class Sidecar {
     };
     const result = await this.sendHeartbeat(body, spool);
     if (!result) return;
+    this.sentCourses = courses;
     const { answer, sentAt } = result;
     // R-BTN-113 (B-234): the answer's word on each link — Baton holds a run's session link when
     // the beat carried it and the answer kept it (not dropped: a dropped link failed the rule
@@ -282,7 +292,7 @@ export class Sidecar {
     await this.applyClaimViews(answer, live, epoch, claimingAtStart);
   }
 
-  private async sendHeartbeat(body: Record<string, unknown>, spool: ReturnType<Sidecar['takeSpool']>): Promise<{ answer: Record<string, any>; sentAt: number } | null> {
+  private async sendHeartbeat(body: Record<string, unknown>, spool: ReturnType<Sidecar['takeSpool']>): Promise<{ answer: BeatAnswer; sentAt: number } | null> {
     // §6.9: the spool's activity rows go up as their own call, before the beat; anything the
     // calls do not land comes back to the spool, so a leg session's record is never lost.
     const carry = [...spool.overflowTranscripts, ...spool.overflowActivities];
@@ -296,7 +306,7 @@ export class Sidecar {
       rmSync(spool.taken, { force: true }); // back in the spool; the taken copy is spent
       throw e;
     }
-    let answer: Record<string, any>;
+    let answer: BeatAnswer;
     // R-BTN-26: the lease this beat renews counts from when the beat left, never from when its
     // answer was read — Baton counts from no later than its receipt, so the later reading would
     // have the runner believe in a lease Baton has already ended.
@@ -338,7 +348,7 @@ export class Sidecar {
     return { answer, sentAt };
   }
 
-  private async recordDeclaration(declaring: string[], answer: Record<string, any>): Promise<void> {
+  private async recordDeclaration(declaring: string[], answer: BeatAnswer): Promise<void> {
     // What Baton recorded from this beat: `rewriteSettings` writes the rows of the list a beat
     // carried, so an answer to this beat leaves the server on `declaring` (B-86: `runOnce` reads
     // this to know whether the next claim would go out on a stale declaration).
@@ -380,11 +390,11 @@ export class Sidecar {
     }
   }
 
-  private async applyClaimViews(answer: Record<string, any>, live: readonly HeartbeatClaim[], epoch: number, claimingAtStart: boolean): Promise<void> {
+  private async applyClaimViews(answer: BeatAnswer, live: readonly HeartbeatClaim[], epoch: number, claimingAtStart: boolean): Promise<void> {
     // R-BTN-4 (B-188): every claim the runner holds, oldest first; a Baton before B-188 answers
     // the one `claim`.
-    const answered = (Array.isArray(answer.claims) ? answer.claims : answer.claim && typeof answer.claim === 'object' ? [answer.claim] : []) as Record<string, any>[];
-    const byId = new Map(answered.filter((c) => c && typeof c.id === 'number').map((c) => [c.id as number, c]));
+    const answered = (Array.isArray(answer.claims) ? answer.claims : answer.claim && typeof answer.claim === 'object' ? [answer.claim] : []);
+    const byId = new Map(answered.filter((c) => c && typeof c.id === 'number').map((c) => [c.id, c]));
     this.answerClaims = new Set(byId.keys());
     // R-BTN-6 and §6.13: the wall clock's own verdict fences the runner — every claim, stop each
     // leg, no hand-off; an answer that no longer lists one claim fences that claim alone.
@@ -410,7 +420,7 @@ export class Sidecar {
       // detector: the stub concludes its agent; this line only makes the wait visible.
       if (running.running && running.leg != null) {
         const leg = running.leg;
-        const signals = [...legActivity(x.checkout, running.ticket, leg), ...(x.legLineAt != null ? [{ name: 'drained-line', at: x.legLineAt }] : [])];
+        const signals = [...legActivity(x.checkout, running.ticket, leg, this.o.activityPaths), ...(x.legLineAt != null ? [{ name: 'drained-line', at: x.legLineAt }] : [])];
         const newest = signals.reduce((a, b) => (b.at > a.at ? b : a));
         this.o.log(`baton: ${running.ticket}'s ${leg} has run ${ageWords(this.o.now() - running.legAt)}; newest activity ${newest.at > 0 ? `${ageWords(this.o.now() - newest.at)} ago (${newest.name})` : 'not seen'}`);
       }
@@ -433,7 +443,7 @@ export class Sidecar {
     if (!live.length) for (const id of this.toAck.splice(0)) await this.o.api.ack(id).catch(() => {});
   }
 
-  private deliverMessages(messages: { id: number; kind: string; payload?: { reason?: string; ticket_id?: string } }[], live: readonly HeartbeatClaim[]): void {
+  private deliverMessages(messages: BeatAnswer['messages'], live: readonly HeartbeatClaim[]): void {
     for (const m of messages) {
       // R-BTN-119 (B-188): a release names its ticket — it stops that claim alone.
       const target = m.kind === 'release' ? this.slotFor(live, m.payload?.ticket_id) : null;
@@ -567,7 +577,7 @@ export class Sidecar {
     const declared = this.declared.join(', ') || 'nothing';
     let needs: string[];
     try {
-      needs = await this.o.legNeeds();
+      needs = await this.o.legNeeds(this.courses());
     } catch (e) {
       this.o.log(`baton: the course's leg needs could not be read (${msg(e)})`);
       return;
@@ -663,11 +673,11 @@ export class Sidecar {
     let beat = false;
     for (let n = 0; n < MAX_STALE_BEATS; n++) {
       const claimOn = this.declaringList();
-      const stale = this.grantAsked || this.sent == null || JSON.stringify(this.sent) !== JSON.stringify(claimOn);
+      const stale = !this.coursesSettled || this.grantAsked || this.sent == null || JSON.stringify(this.sent) !== JSON.stringify(claimOn);
       if (!stale) break;
       await this.tick();
       beat = true;
-      if (this.grantAsked) break;
+      if (this.grantAsked && this.coursesSettled) break;
     }
     return beat;
   }

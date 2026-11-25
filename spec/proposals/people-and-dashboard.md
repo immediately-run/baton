@@ -212,7 +212,7 @@ authentication; and the confirmed acts R-BTN-155 names.
     | lift a hold, set or clear expedite (`POST /v1/ui/overrides/{ticket}` with `hold: false` or `expedite`) | either | the code |
     | any act an `approvers.*` list governs, or that adds, changes or removes an owner, a member, a grant or another credential (R-BTN-155) | an administrator's or an owner's | the code |
     | approve an MCP grant (`owner.mcp-key.approve`, `BATON_MCP_OAUTH_SPEC` §5), whatever it names (R-BTN-186) | an owner's | the code |
-    | Stop (`leg.stop`: `POST /v1/ui/messages` `{kind: "release", payload: {ticket_id, reason: "requested"}}`, R-BTN-119) | either | one click: no dialog, no code |
+    | Stop (`leg.stop`: `POST /v1/ui/messages` `{kind: "release", payload: {ticket_id, reason: "requested"}, confirm: true}`, R-BTN-119) | either | §12.2 confirmation dialog; no code |
     | any other destructive action (§12.2), cancel among them | either | its dialog, which sends `confirm: true` |
     | everything else a session may call: a hold, a resync, a status request, resolving a condition (`POST /v1/ui/conditions/{condition}/resolve`, R-BTN-163), a person leg's answer (R-BTN-116; an owner's or member's session, never an administrator's, R-BTN-181), an OAuth request, its status, a denial, `ui.logout` | either | nothing |
 

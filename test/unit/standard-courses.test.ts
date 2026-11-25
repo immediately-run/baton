@@ -20,6 +20,8 @@ import { ticketsMarkdown, type SourceTicket } from '../../src/defaults/tickets-m
 
 const instructionsDir = (id: string) => join(__dirname, '..', '..', 'src', 'defaults', 'courses', id);
 const tosOf = (to: string | string[]): string[] => (Array.isArray(to) ? to : [to]);
+const positionOf = (position: string, answer: string | undefined, roundsSpent = false) =>
+  new Function('answer', 'roundsSpent', `return (${position});`)(answer, roundsSpent) as { reached: string; next: string | null; [k: string]: unknown };
 
 describe('the standard courses (R-BTN-131)', () => {
   it('are create-pr, review-pr, bug-report, draft-ticket, decision, build-app, create-spec and spec-to-tickets; create-pr is the default', () => {
@@ -58,11 +60,11 @@ describe('the standard courses (R-BTN-131)', () => {
             continue;
           }
           const answers = stub.ask?.values ?? [undefined];
-          // B-110 round 1: a position may read the run number (`ctx.run`) — create-pr's review
+          // B-110 round 1: a position may depend on the run number — create-pr's review
           // queues the owner's adjudicate on its last round — so each is checked at a first run
           // and at the file's last.
-          for (const answer of answers) for (const run of [1, 3]) {
-            const pos = new Function('answer', 'ctx', `return (${stub.position});`)(answer, { run }) as { reached: string; next: string | null; [k: string]: unknown };
+          for (const answer of answers) for (const spent of stub.reviewBound ? [false, true] : [false]) {
+            const pos = positionOf(stub.position, answer, spent);
             // A suspension may rest where the leg started (R-BTN-71: a give-up), which the file's
             // `to` does not list; every other reached station is an outcome. S-BTN-174 drives
             // create-spec's such stubs end to end.
@@ -79,7 +81,7 @@ describe('the standard courses (R-BTN-131)', () => {
         for (const [leg, stub] of Object.entries(b.legs)) {
           if (stub.tests) continue; // B-110: no agent runs the gate, and it reaches no end
           const ends = (stub.ask?.values ?? [undefined]).some((answer) => {
-            const pos = new Function('answer', 'ctx', `return (${stub.position});`)(answer, { run: 1 }) as { reached: string };
+            const pos = positionOf(stub.position, answer);
             return b.course.end.includes(pos.reached);
           });
           if (ends) expect(readFileSync(join(instructionsDir(b.id), `${leg}.md`), 'utf8'), `${b.id}/${leg}`).toMatch(/`?status:`? to `?done`?/);
@@ -111,7 +113,7 @@ describe('the standard courses (R-BTN-131)', () => {
         for (const answer of stub.ask?.values ?? [undefined]) {
           // A first run's position (B-110: create-pr's review suspends only on its last round,
           // queuing the owner's adjudicate — defaults-cli.test.ts drives that).
-          const pos = new Function('answer', 'ctx', `return (${stub.position});`)(answer, { run: 1 }) as { suspend?: boolean };
+          const pos = positionOf(stub.position, answer);
           const key = [b.id, leg, answer].filter(Boolean).join(' ');
           expect(pos.suspend === true, key).toBe(waits.has(key));
         }
@@ -133,6 +135,46 @@ describe('the standard courses (R-BTN-131)', () => {
     expect(text).toContain('Your word alone never closes the ticket');
   });
 
+  it("create-pr's shipped and home reviews require independent credentials and a different model when available (B-30, S-BTN-63)", () => {
+    const home = join(__dirname, '..', '..', '.baton', 'courses', 'create-pr');
+    const owned = JSON.parse(readFileSync(join(home, 'course.json'), 'utf8'));
+    expect(owned.legs.review.no_chain_from).toEqual(['implement', 'fix']);
+    expect(builtIn('create-pr')!.course.legs.review).toMatchObject({ no_chain_from: ['implement', 'fix'] });
+    for (const dir of [instructionsDir('create-pr'), join(home, 'legs')]) {
+      const text = readFileSync(join(dir, 'review.md'), 'utf8');
+      expect(text, dir).toMatch(/Before launching the reviewer, the runner's\s+command, wrapper or override must select a model different from those used for `implement`\s+and `fix` on this ticket whenever it can/);
+      expect(text, dir).toMatch(/If the authoring models are unknown or a different model is unavailable, say so\s+in your review/);
+    }
+  });
+
+  it('only implement and fix may ask in-session in either create-pr course (B-325, S-BTN-222)', () => {
+    const home = join(__dirname, '..', '..', '.baton', 'courses', 'create-pr');
+    for (const course of [builtIn('create-pr')!.course, JSON.parse(readFileSync(join(home, 'course.json'), 'utf8'))]) {
+      expect(validateCourse(course)).toEqual([]);
+      for (const leg of ['implement', 'fix']) {
+        expect(course.legs[leg].max_duration).toBe(10_800);
+        expect(course.legs[leg].autonomous).not.toBe(true);
+      }
+      for (const leg of ['review', 'run-tests', 'adjudicate', 'merge']) {
+        expect(course.legs[leg].autonomous).toBe(true);
+      }
+      expect(course.legs.confirm).not.toHaveProperty('autonomous');
+    }
+  });
+
+  it('implement and fix explain how to ask the owner, and distinguish dismissal from no answer (B-325, S-BTN-222)', () => {
+    for (const leg of ['implement', 'fix']) {
+      const text = readFileSync(join(instructionsDir('create-pr'), `${leg}.md`), 'utf8');
+      expect(text).toContain('Ask the owner only when blocked');
+      expect(text).toMatch(/decision only the owner can make,[\s\S]*the spec, `docs\/context\/` and the PR thread/);
+      expect(text).toMatch(/question tool\. Ask one question at a time,[\s\S]*recommend one\. Wait for the answer in the foreground/);
+      expect(text).toContain('do not raise it yourself');
+      expect(text).toContain('**Owner answers**');
+      expect(text).toMatch(/cancelled or dismissed[\s\S]*reading the spec supports best/);
+      expect(text).toMatch(/nobody answers[\s\S]*`deadline_s`[\s\S]*offers the ticket again if retries remain/);
+    }
+  });
+
   it("create-pr's implement and fix instructions carry the shared-file rule, and this repository's own .baton copies with them (B-102)", () => {
     const rule = "never edits a file another ticket's leg may edit";
     for (const leg of ['implement', 'fix']) {
@@ -152,6 +194,28 @@ describe('the standard courses (R-BTN-131)', () => {
         expect(text, `${dir} ${leg}.md names the allow list`).toContain('allow_install_scripts');
       }
     }
+  });
+
+  it("create-pr's implement and fix instructions keep pre-existing failures out of ticket fixes in both copies (B-317, S-BTN-230 for external CI)", () => {
+    const home = join(__dirname, '..', '..', '.baton', 'courses', 'create-pr', 'legs');
+    const implement = readFileSync(join(instructionsDir('create-pr'), 'implement.md'), 'utf8');
+    const fix = readFileSync(join(instructionsDir('create-pr'), 'fix.md'), 'utf8');
+    expect(readFileSync(join(home, 'implement.md'), 'utf8')).toBe(implement);
+    expect(readFileSync(join(home, 'fix.md'), 'utf8')).toBe(fix);
+    expect(implement).toMatch(/clean checkout of the base[\s\S]*push and open the PR anyway/);
+    expect(implement).toMatch(/\*\*Pre-existing failures\*\*:[\s\S]*first failing line[\s\S]*base commit/);
+    expect(implement).toMatch(/base commit you reproduced it on\. When you confirm such a failure, say in your last lines that\s+the default branch is red/);
+    expect(implement).toMatch(/Fix failures your change causes before you push, even if the same check also reports a\s+pre-existing failure/);
+    expect(implement).toContain('Never fix an unrelated failure');
+    expect(implement).toContain('the run-tests leg is the gate');
+    expect(implement).not.toContain('Push only once they pass');
+    expect(fix).toContain('clean checkout of the current base');
+    expect(fix).toMatch(/If the base reports A and the PR\s+reports A and B, leave A alone and fix B before ending/);
+    expect(fix).toMatch(/failure that still occurs on the current base, change nothing for it\. Comment on the\s+PR/);
+    expect(fix).toMatch(/same head, base commit and failure already\s+have that hand-off, link the existing comment in your output instead of posting it again/);
+    expect(fix).toMatch(/base has moved and already fixes a failure[^]*?merge the default branch into the PR branch and push the merge\s+with any other fixes for that repository\. Add commits; never rebase\./);
+    expect(fix).toContain('same rule applies to a red CI check in another repository');
+    expect(fix).toContain('Fix a failure that also fails on the base inside this PR');
   });
 
   it("the review legs' instructions name every added or upgraded dependency with its publisher and age (B-132)", () => {

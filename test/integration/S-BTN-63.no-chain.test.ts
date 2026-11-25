@@ -1,13 +1,15 @@
 // S-BTN-63 no review by its author's key (BATON_SPEC §15, §8.3 R-BTN-106; B-2): a claim runs
 // `implement` and reaches `pr-open`; its runner tries to advance into `review`, which names
-// `implement` in `no_chain_from`; it suspends, then claims the ticket again under the same key; the
-// course file drops the list while the owners' `required_independence` names it. Must hold: the
-// advance and the second claim are refused, rule `chain`; a runner under another key takes
-// `review`; with the list dropped from git the owner setting still refuses the first key.
+// `implement` in `no_chain_from`; it suspends, then claims the ticket again under the same key.
+// Must hold: the advance and the second claim are refused, rule `chain`; a runner under another
+// key takes `review`. The course file is the only statement of the rule.
 // Runs on both hosts.
 import { describe, it, expect, beforeEach } from 'vitest';
 import roadmapPr from '../fixtures/courses/roadmap-pr/course.json';
-import { adminSession, advance, claimItem, course, cutover, endClaim, Git, keyCall, placed, recommended, register, sessionCall, setAdminKeys, setClock } from '../helpers';
+import { CREATE_PR_COURSE, stationsPr } from '../../src/defaults/course-pr';
+import type { BranchCommit, RecordedLeg } from '../../src/defaults/pr-markers';
+import type { SourceTicket } from '../../src/defaults/tickets-markdown';
+import { advance, claimItem, course, cutover, endClaim, evidenceFound, Git, keyCall, observe, placed, recommended, register, setAdminKeys, setClock } from '../helpers';
 import { makeKey, type TestKey } from '../lib/sshKeys';
 
 const T0 = Date.parse('2026-10-19T12:00:00Z');
@@ -44,6 +46,68 @@ async function implementAndSuspend() {
 }
 
 describe('S-BTN-63 no review by its author’s key', () => {
+  it('create-pr refuses both the implementer and the fixer after the test gate; a third key reviews', async () => {
+    git.registry = [course(1, 1, { id: 'create-pr', course: CREATE_PR_COURSE })];
+    git.add('T-1', { rank: 1, course_id: 'create-pr' });
+    expect((await git.post()).status).toBe(200);
+    const runner = { courses: [{ repository: 'docs', course: 'create-pr', version: 1 }] };
+    const ticket = { ticket_id: 'docs:T-1' };
+    const refused = { status: 409, json: { code: 'not-eligible', rule: 'chain' } };
+    const sha = (n: number) => n.toString(16).padStart(40, '1');
+    const commits: BranchCommit[] = [];
+    const push = (n: number, marker?: { tests: 'red' | 'green'; nonce: string }) => {
+      const parent = commits.at(-1)?.sha ?? null;
+      commits.push({ sha: sha(n), parent, at: T0 + n, empty: marker != null,
+        message: marker ? `baton: tests ${marker.tests} for T-1\n\nBaton-Tests: ${marker.tests}\nBaton-Tested: ${parent}\nBaton-Claim: ${marker.nonce}` : 'work' });
+    };
+    const sync = async (next: string) => {
+      const { json } = await observe();
+      const { legs } = json as typeof json & { legs: RecordedLeg[] };
+      const { stations, markers } = stationsPr({
+        tickets: [git.tickets.get('T-1') as unknown as SourceTicket], closed: new Set(), graph: CREATE_PR_COURSE,
+        facts: [{ number: 1, head: 'claude/T-1-work', state: 'open', pushedAt: commits.at(-1)!.at, checks: [], reviews: [], commits }],
+        baton: { legs },
+      });
+      expect(stations['T-1'].next_leg).toBe(next);
+      git.place('T-1', stations['T-1']);
+      // R-BTN-10: the sync attests the evidence each unconfirmed end named.
+      const unconfirmed = ((json as { unconfirmed?: { ticket: string; claim: number; evidence: string }[] }).unconfirmed ?? []);
+      const attestations = unconfirmed.flatMap((u) => evidenceFound(u.claim, u.evidence, u.ticket).attestations);
+      expect(await git.post({ observation: json.observation, markers, attestations })).toMatchObject({ status: 200, confirmed: 1 });
+    };
+    const a = await register('vm-a', runner);
+    const { json: impl } = await claimItem('vm-a', a.secret, ticket);
+    expect((await advance('vm-a', a.secret, impl.claim_id, { leg: 'implement' })).status).toBe(200);
+    const loopEnd = { finished_self_loop: true, end_reason: 'suspended:filed' };
+    expect(await endClaim('vm-a', a.secret, impl.claim_id, loopEnd))
+      .toMatchObject({ status: 400, json: { code: 'invalid-params' } });
+    expect(await endClaim('vm-a', a.secret, impl.claim_id, { ...loopEnd, ended_at_sha: sha(1) }))
+      .toMatchObject({ status: 400, json: { code: 'invalid-params' } });
+    push(1);
+    expect((await advance('vm-a', a.secret, impl.claim_id, { reached: 'pr-open', leg: 'run-tests' })).status).toBe(200);
+    push(2, { tests: 'red', nonce: impl.nonce });
+    // Hand off the red result so fix can run under a key that never implemented.
+    expect((await endClaim('vm-a', a.secret, impl.claim_id, { end_reason: 'suspended:pr-open', reached: 'pr-open', next: 'fix', finished_self_loop: true, ended_at_sha: sha(2) })).status).toBe(200);
+    await sync('fix');
+
+    const b = await register('vm-b', runner);
+    const { json: fix } = await claimItem('vm-b', b.secret, ticket);
+    expect((await advance('vm-b', b.secret, fix.claim_id, { leg: 'fix' })).status).toBe(200);
+    push(3);
+    expect((await advance('vm-b', b.secret, fix.claim_id, { reached: 'fixed', leg: 'run-tests' })).status).toBe(200);
+    push(4, { tests: 'green', nonce: fix.nonce });
+    expect(await advance('vm-b', b.secret, fix.claim_id, { reached: 'fixed', leg: 'review', evidence: sha(4) })).toMatchObject(refused);
+    expect((await endClaim('vm-b', b.secret, fix.claim_id, { end_reason: 'suspended:fixed', reached: 'fixed', next: 'review', finished_self_loop: true, ended_at_sha: sha(4) })).status).toBe(200);
+    await sync('review');
+
+    expect(await claimItem('vm-a', a.secret, ticket)).toMatchObject(refused);
+    expect(await claimItem('vm-b', b.secret, ticket)).toMatchObject(refused);
+    const c = await register('mac', runner);
+    const review = await claimItem('mac', c.secret, ticket);
+    expect(review).toMatchObject({ status: 200, json: { station: 'fixed', legs: ['review'] } });
+    expect((await advance('mac', c.secret, review.json.claim_id, { leg: 'review' })).status).toBe(200);
+  });
+
   it('the course file’s no_chain_from refuses the advance and a second claim by the same key; another key takes review', async () => {
     git.registry = [course(3, 3, { course: CHAINED })];
     await git.post();

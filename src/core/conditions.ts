@@ -12,7 +12,7 @@
 import { BatonError } from './http';
 import { logEvent } from './db';
 import { checkConditionReport, repositoryOf, type ConditionReport } from './validate';
-import { dispositionOf, isCoreOnly, type ConditionDeclaration } from './conditionTypes';
+import { dispositionOf, type ConditionDeclaration } from './conditionTypes';
 import type { Graph } from './graph';
 import type { History } from './history';
 import type { Store } from './ports';
@@ -41,7 +41,7 @@ export interface Ctx {
 interface ConditionRow {
   id: number;
   repository_id: string;
-  ticket_id: string;
+  ticket_id: string | null;
   run_id: string | null;
   leg: string | null;
   type: string;
@@ -58,7 +58,7 @@ interface ConditionRow {
 /** An entry of the Needs-you list and the conditions route. */
 export interface ConditionEntry {
   condition_id: number;
-  ticket_id: string;
+  ticket_id: string | null;
   leg: string | null;
   run_id: string | null;
   type: string;
@@ -66,9 +66,19 @@ export interface ConditionEntry {
   severity: string;
   raised_at: number;
   url: string | null;
+  session_link?: boolean;
   restarts: Record<string, string> | null;
   default: string | null;
   detail?: { reraised: number };
+}
+
+export function isInteraction(type: string): boolean {
+  return type === 'interact' || type.startsWith('interact.');
+}
+
+/** Non-interaction links are ordinary pointers; interaction links are capabilities. */
+export function conditionLink(type: string, url: string | null, disclose: boolean): Pick<ConditionEntry, 'url' | 'session_link'> {
+  return isInteraction(type) ? { url: disclose ? url : null, session_link: url !== null } : { url };
 }
 
 export class Conditions {
@@ -104,6 +114,30 @@ export class Conditions {
     }
   }
 
+  /** R-BTN-82 (S-BTN-48): reconcile core notify conditions with the queued legs' waits. */
+  contractWaits(repo: string, at: number, ticket?: string): void {
+    const scope = ticket == null ? 't.repository_id = ?' : 't.id = ?';
+    const key = (r: { ticket_id: string; leg: string; type: string }) => JSON.stringify([r.ticket_id, r.leg, r.type]);
+    const waits = this.rows<{ ticket_id: string; leg: string; type: string }>(
+      `SELECT n.ticket_id, n.leg, 'baton.' || n.waiting_on AS type FROM ticket_next_legs n
+       JOIN tickets t ON t.id = n.ticket_id WHERE ${scope} AND n.state = 'waiting'
+       AND n.waiting_on IN ('input-missing', 'input-version')`, ticket ?? repo);
+    const pending = new Map(waits.map((r) => [key(r), r]));
+    for (const row of this.rows<{ id: number; ticket_id: string; leg: string; type: string }>(
+      `SELECT id, ticket_id, leg, type FROM conditions
+       WHERE repository_id = ? AND type IN ('baton.input-missing', 'baton.input-version') AND outcome = 'open'
+       ${ticket == null ? '' : 'AND ticket_id = ?'}`, repo, ...(ticket == null ? [] : [ticket]))) {
+      if (!pending.delete(key(row))) this.exec(`UPDATE conditions SET outcome = 'closed', closed_at = ?, closed_how = 'cause-ended' WHERE id = ?`, at, row.id);
+    }
+    for (const row of pending.values()) {
+      this.exec(`INSERT INTO conditions (repository_id, ticket_id, leg, type, disposition, raised_at) VALUES (?, ?, ?, ?, 'notify', ?)`,
+        repo, row.ticket_id, row.leg, row.type, at);
+      const detail = { type: row.type, disposition: 'notify' };
+      logEvent(this.c.store, at, 'condition', 'baton', { ...detail, leg: row.leg }, row.ticket_id, null, repo);
+      this.c.history.record(row.ticket_id, { kind: 'condition', leg: row.leg, detail });
+    }
+  }
+
   /** R-BTN-163 (S-BTN-312): close only this ticket's missing-next notice when its cause ends. */
   closeMissingNext(ticket: string, at: number): void {
     this.exec(`UPDATE conditions SET outcome = 'closed', closed_at = ?, closed_how = 'cause-ended'
@@ -134,7 +168,6 @@ export class Conditions {
     if (!run?.run_id) throw new BatonError('invalid-params', 'the claim is running no leg: a condition is raised from a run');
     // R-BTN-160: Baton's own vocabulary decides the disposition — the standard table, else the
     // course's declaration at the registry's file; core reads no course meaning (R-BTN-50).
-    if (isCoreOnly(b.type)) throw new BatonError('invalid-params', `${b.type} is core's alone: a leg raises no baton condition (R-BTN-160)`);
     const g = c.course_id ? this.c.graph(repo, c.course_id) : null;
     const declared: Map<string, ConditionDeclaration> = g?.conditionTypes ?? new Map();
     const disposition = dispositionOf(b.type, declared);
@@ -149,7 +182,7 @@ export class Conditions {
     // the raise is refused without one; a `suspend`'s is where git holds the question, kept only
     // under R-BTN-92's link bases. Nothing else carries one.
     let url: string | null = null;
-    if (b.type === 'interact' || b.type.startsWith('interact.')) {
+    if (isInteraction(b.type)) {
       if (run.session_url == null) throw new BatonError('invalid-params', 'the run holds no session link: Baton cannot address an interaction request (R-BTN-113, R-BTN-195)');
       url = run.session_url;
       // One open `interact` per run: the raise that supersedes closes the open one here, in the
@@ -168,7 +201,7 @@ export class Conditions {
     // and the retry policy routes what follows. An `interact` stays open — its run's end or a
     // new raise of the same run closes it — and a `suspend` waits for its handler (R-BTN-162
     // unbuilt: it records open, the debugger's floor, and nothing waits).
-    const closesAtRaise = (disposition === 'notify' || disposition === 'interrupt') && b.type !== 'interact' && !b.type.startsWith('interact.');
+    const closesAtRaise = (disposition === 'notify' || disposition === 'interrupt') && !isInteraction(b.type);
     // The id before the insert: the caller wraps this in one transaction, so SQLite's
     // serialized writes make the read-then-insert atomic.
     const id = this.rows<{ n: number }>('SELECT COALESCE(MAX(id), 0) + 1 AS n FROM conditions')[0].n;
@@ -176,10 +209,15 @@ export class Conditions {
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       id, repo, c.ticket_id, claimId, run.run_id, run.leg, b.type, disposition, b.severity, url, JSON.stringify(restarts), b.default ?? null, now,
       closesAtRaise ? 'recorded' : 'open', closesAtRaise ? now : null, closesAtRaise ? 'raised' : null);
+    const detail = { condition_id: id, type: b.type, disposition, ...(b.severity !== 'normal' ? { severity: b.severity } : {}) };
+    // '/' is outside the client activity-id grammar, so a runner cannot preempt this row.
+    this.exec(`INSERT INTO activities (runner_id, id, claim_id, run_id, kind, label, source, started_at, ended_at, outcome, received_at, detail_json)
+               VALUES (?, ?, ?, ?, 'condition', ?, 'baton', ?, ?, 'succeeded', ?, ?)`,
+      runnerId, `condition/${id}`, claimId, run.run_id, b.type, now, now, now, JSON.stringify(detail));
+    const recorded = { ...detail, ...(url && !isInteraction(b.type) ? { url } : {}) };
     logEvent(this.c.store, now, 'condition', `runner:${runnerId}`,
-      { ticket: c.ticket_id, leg: run.leg, run_id: run.run_id, type: b.type, disposition, ...(b.severity !== 'normal' ? { severity: b.severity } : {}), ...(url ? { url } : {}) },
-      c.ticket_id, claimId, repo);
-    this.c.history.record(c.ticket_id, { kind: 'condition', claim_id: claimId, leg: run.leg, run_id: run.run_id, detail: { type: b.type, disposition, ...(b.severity !== 'normal' ? { severity: b.severity } : {}), ...(url ? { url } : {}) } });
+      { ...recorded, ticket: c.ticket_id, leg: run.leg, run_id: run.run_id }, c.ticket_id, claimId, repo);
+    this.c.history.record(c.ticket_id, { kind: 'condition', claim_id: claimId, leg: run.leg, run_id: run.run_id, detail: recorded });
     return { ok: true, condition_id: id, disposition };
   }
 
@@ -216,7 +254,7 @@ export class Conditions {
    */
   retired(repository: string): void {
     const now = this.c.now();
-    const open = this.rows<{ id: number; ticket_id: string; claim_id: number | null; type: string }>(
+    const open = this.rows<{ id: number; ticket_id: string | null; claim_id: number | null; type: string }>(
       `SELECT id, ticket_id, claim_id, type FROM conditions WHERE repository_id = ? AND outcome = 'open'`, repository);
     if (!open.length) return;
     this.exec(`UPDATE conditions SET outcome = 'closed', closed_at = ?, closed_how = 'retired'
@@ -228,7 +266,7 @@ export class Conditions {
 
   // ── the reads (R-BTN-163: Needs you, and the list a delivery runner polls) ───────────────
 
-  private entry(r: ConditionRow): ConditionEntry {
+  private entry(r: ConditionRow, disclose: boolean): ConditionEntry {
     let restarts: Record<string, string> | null = null;
     try {
       const parsed = JSON.parse(r.restarts_json) as Record<string, string>;
@@ -236,7 +274,7 @@ export class Conditions {
     } catch { /* an unreadable list is no list */ }
     return {
       condition_id: r.id, ticket_id: r.ticket_id, leg: r.leg, run_id: r.run_id, type: r.type,
-      disposition: r.disposition, severity: r.severity, raised_at: r.raised_at, url: r.url,
+      disposition: r.disposition, severity: r.severity, raised_at: r.raised_at, ...conditionLink(r.type, r.url, disclose),
       restarts, default: r.default_restart,
       ...(r.reraised ? { detail: { reraised: r.reraised } } : {}),
     };
@@ -244,16 +282,15 @@ export class Conditions {
 
   /**
    * §14 Needs you (R-BTN-163): every open condition with no handler ticket — here, every open
-   * condition, none being bound (R-BTN-161 unbuilt) — ordered by severity, then by age. An
-   * `interact` entry carries the session link Baton set (R-BTN-195), a person asked into the
-   * leg's session: `url` is where they join, and nothing the leg wrote is in the entry.
+   * condition, none being bound (R-BTN-161 unbuilt) — ordered by severity, then by age.
+   *  Used by the admin state export, which never carries interaction links (R-BTN-113).
    */
   needsYou(): ConditionEntry[] {
     return this.rows<ConditionRow>(
       `SELECT id, repository_id, ticket_id, run_id, leg, type, disposition, severity, url, restarts_json, default_restart, raised_at, reraised
        FROM conditions WHERE outcome = 'open'
        ORDER BY CASE severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 ELSE 2 END, raised_at, id`,
-    ).map((r) => this.entry(r));
+    ).map((r) => this.entry(r, false));
   }
 
   /**
@@ -262,7 +299,7 @@ export class Conditions {
    * `type` prefix and by `ticket`, 100 per page with a cursor — the read a delivery runner
    * polls with `type=interact` (R-BTN-195), serving each entry once by its own record.
    */
-  list(repo: string, q: { open?: boolean; type?: string; ticket?: string; cursor?: string }): { conditions: ConditionEntry[]; cursor: string | null } {
+  list(repo: string, q: { open?: boolean; type?: string; ticket?: string; cursor?: string }, disclose = false): { conditions: ConditionEntry[]; cursor: string | null } {
     const where: string[] = ['repository_id = ?'];
     const params: unknown[] = [repo];
     if (q.open) where.push(`outcome = 'open'`);
@@ -286,7 +323,7 @@ export class Conditions {
     const rows = this.rows<ConditionRow & { id: number }>(
       `SELECT id, repository_id, ticket_id, run_id, leg, type, disposition, severity, url, restarts_json, default_restart, raised_at, reraised
        FROM conditions WHERE ${where.join(' AND ')} ORDER BY id LIMIT ${CONDITIONS_PAGE_MAX + 1}`, ...params);
-    const page = rows.slice(0, CONDITIONS_PAGE_MAX).map((r) => this.entry(r));
+    const page = rows.slice(0, CONDITIONS_PAGE_MAX).map((r) => this.entry(r, disclose));
     return { conditions: page, cursor: rows.length > CONDITIONS_PAGE_MAX ? String(page[page.length - 1].condition_id) : null };
   }
 }
