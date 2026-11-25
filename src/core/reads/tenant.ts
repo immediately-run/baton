@@ -20,6 +20,7 @@
 // (`RequestRing`, R-BTN-87 — in memory, emptied by a restart), the counts the envelope's own
 // (`Capacity.counts`), and what no store holds — a session's last use and client address, the
 // store's size in bytes, a probe's added time — is left out and named in `not_built`.
+import { keysNotice } from '../views';
 import { sha256Hex } from '../runnerApi';
 import type { ReadCtx, ReadRoute } from './kit';
 import type { Row } from '../ports';
@@ -145,7 +146,7 @@ function tenant(cx: ReadCtx) {
     frozen_at: cx.core.ownerState.frozenAt(),
     sealed_at: cx.core.ownerState.sealedAt(),
     needs_you: {
-      keys: cx.core.keysNotice(),
+      keys: keysNotice(cx.core),
       ...cx.core.capacity.needsYou(figures),
       instances_unknown: cx.core.blocks.needsYou(now).instances_unknown,
       stale_clients: cx.core.runners.staleClients(cx.core.runners.runnersView(now), cx.core.instance.recommendedClient()),
