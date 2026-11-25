@@ -106,7 +106,8 @@ export const CREATE_PR_COURSE = {
     // B-110: review also leaves `reviewed` — the owner's `round` answer grants exactly one more
     // round on the same head (the answer itself carries the run, §6.8; the round's verdict is
     // its marker, and a round still asking for changes comes straight back to the owner).
-    review: { from: ['pr-open', 'fixed', 'reviewed'], to: 'reviewed', max_runs: DEFAULT_CREATE_PR_REVIEW_ROUNDS, autonomous: true, label: 'Review round' },
+    // B-30 (S-BTN-63): review cannot be claimed or chained by a credential that wrote the change.
+    review: { from: ['pr-open', 'fixed', 'reviewed'], to: 'reviewed', max_runs: DEFAULT_CREATE_PR_REVIEW_ROUNDS, no_chain_from: ['implement', 'fix'], autonomous: true, label: 'Review round' },
     fix: { from: ['reviewed', 'pr-open', 'fixed'], to: 'fixed', max_runs: 30, max_duration: CREATE_PR_ASK_DEADLINE_S, label: 'Fix or answer the findings' },
     adjudicate: { from: ['reviewed'], to: 'adjudicated', autonomous: true, label: 'The owner answers the third round' },
     merge: { from: ['reviewed', 'adjudicated'], to: 'merged', autonomous: true, label: 'Merge and close the ticket' },
@@ -684,9 +685,8 @@ export function stationsPr(ctx: { tickets: SourceTicket[]; facts: PrFact[]; bran
       continue;
     }
     if (!mine.length) {
-      // No PR is `filed`; `implement` is the queued leg, waiting while a dependency is not
-      // closed done or an open child blocks it (R-BTN-74, R-BTN-83: the queue is the queued leg).
-      const waiting = t.depends_on.filter((d) => !done.has(d));
+      // Posted depends_at is gated by core; only a legacy source uses this wait for dependencies.
+      const waiting = t.depends_at ? [] : t.depends_on.filter((d) => !done.has(d));
       const ready = waiting.length === 0 && t.blocked_by.length === 0;
       const waitingOn = waiting.length ? 'dependencies' : t.blocked_by.length ? 'children' : null;
       stations[t.id] = {
@@ -821,7 +821,7 @@ export function stationsSpec(ctx: {
     // (closing the PR is not an answer the board can read; the owner re-files or reopens).
     const mine = ctx.facts.filter((f) => f.state !== 'closed' && ticketOwns(t, f, patterns, ctx.repository));
     if (!mine.length) {
-      const waiting = t.depends_on.filter((d) => !done.has(d));
+      const waiting = t.depends_at ? [] : t.depends_on.filter((d) => !done.has(d));
       const blocked = waiting.length ? 'dependencies' : t.blocked_by.length ? 'children' : null;
       // A blocked start is `waiting` whatever the conversation did; an unblocked one that has
       // begun waits on the owner in the session; one that has not is ready for its claim. The
@@ -884,7 +884,7 @@ export function stationsReviewPr(ctx: { tickets: SourceTicket[]; facts: PrFact[]
     const pushes = fact.pushes?.length ? fact.pushes : [fact.pushedAt];
     // The first round waits like any course's start leg: on a dependency not closed done, then on
     // an open child (R-BTN-74).
-    const before = path.length ? null : t.depends_on.some((d) => !done.has(d)) ? 'dependencies' : t.blocked_by.length ? 'children' : null;
+    const before = path.length ? null : !t.depends_at && t.depends_on.some((d) => !done.has(d)) ? 'dependencies' : t.blocked_by.length ? 'children' : null;
     const wait = before ?? (station === 'changes-requested' && !pushes.some((p) => p > lastVerdict) ? 'author' : checksDone(fact) ? null : 'ci');
     stations[t.id] = at(station, path, [
       { leg: 'review', state: wait ? 'waiting' : 'ready', waiting_on: wait },

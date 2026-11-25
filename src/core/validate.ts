@@ -4,7 +4,7 @@
 import { BatonError, RECOMMENDED_CLIENT } from './http';
 import { gitPointer, S3_POINTER } from './contractPointers';
 import { FREE_TEXT_MAX, isFreeText } from './text';
-import { COURSE_ID } from './course';
+import { COURSE_ID, RESOURCE_NAME } from './course';
 import { CONDITION_TYPE, CONDITION_TYPE_MAX, RESTART_ID, SEVERITIES } from './conditionTypes';
 import { parseSchemaId, VALUE_MAX_BYTES } from '../shared/schema.mjs';
 import { CLIENT_VERSION_MAX, compareVersions, parseVersion } from '../shared/versions.mjs';
@@ -643,6 +643,8 @@ export interface End {
   next: string | null;
   detail: string | null;
   ended_at_sha: string | null;
+  /** A suspension reporting a completed self-loop, not an abandoned run at the same station. */
+  finished_self_loop: boolean;
   /** `released:<reason>` naming no §6.5 reason: an owner bar's (R-BTN-67), checked by the claims. */
   owner_bar: boolean;
   /** R-BTN-126 (B-104's branch): a `released:blocked` end's failed prerequisite — `capability`,
@@ -789,6 +791,9 @@ export function checkEnd(body: unknown): End {
   if (ptr !== undefined && ptr !== null && !isPointer(ptr)) bad('ended_at_sha', 'must be a commit sha or an https URL of at most 1000 characters');
   const sha = (ptr as string | undefined | null) ?? null;
   if (status! === 'released' && sha) bad('ended_at_sha', 'only a completed end points at its evidence');
+  if (b.finished_self_loop !== undefined && (b.finished_self_loop !== true || !suspended_at || !sha)) {
+    bad('finished_self_loop', 'must be true on a suspension carrying ended_at_sha');
+  }
   // R-BTN-126 (B-104's branch): a blocked end names the prerequisite that failed — `capability`
   // with a holding the runner declares and says it lost. The other kinds are the blocked-end
   // work's; a blocked end without one is malformed.
@@ -818,7 +823,7 @@ export function checkEnd(body: unknown): End {
     spawned = b.spawned as string[];
     if (reason === 'done') bad('spawned', 'a done end spawns nothing — its open children are superseded by the close (R-BTN-86, R-BTN-168)');
   }
-  return { end_reason: reason, status: status!, suspended_at, reached: reached ?? suspended_at, next, detail, ended_at_sha: sha, owner_bar: ownerBar, prerequisite, outputs: checkOutputs(b.outputs), scope_exceeded: checkScopeReport(b.scope_exceeded), exit_status: optional(b.exit_status, exitStatus) ?? null, session_url: carriedSessionUrl(b.session_url), spawned, local_order: checkLocalOrder(b.local_order) };
+  return { end_reason: reason, status: status!, suspended_at, reached: reached ?? suspended_at, next, detail, ended_at_sha: sha, finished_self_loop: b.finished_self_loop === true, owner_bar: ownerBar, prerequisite, outputs: checkOutputs(b.outputs), scope_exceeded: checkScopeReport(b.scope_exceeded), exit_status: optional(b.exit_status, exitStatus) ?? null, session_url: carriedSessionUrl(b.session_url), spawned, local_order: checkLocalOrder(b.local_order) };
 }
 
 /** B-248 (R-BTN-202): a local order's provenance, as the advance or end that reports the leg
@@ -1196,7 +1201,7 @@ export const DECISION_TYPE_NAME = 'std:decision@1';
 // ── blocks, external resources and readings (§2g R-BTN-75–78, §2l R-BTN-101; R3-1251) ─────
 
 /** R-BTN-76: an external resource's name — opaque to core (`llm:<model>`, `github-api`). */
-export const RESOURCE_NAME = /^[a-z][a-z0-9:._/-]{0,79}$/;
+export { RESOURCE_NAME };
 /** An instance's name (`opencode-go:go_plus`, a `service` resource's own): the resource rule with
  *  `_` (spec-silent, recorded on R3-1251 — the scenarios' own instances carry it). */
 export const INSTANCE_NAME = /^[a-z][a-z0-9_:./-]{0,79}$/;
