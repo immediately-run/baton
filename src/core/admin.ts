@@ -8,7 +8,7 @@
 import { BatonError, PENDING_COOKIE, SESSION_COOKIE } from './http';
 import { logEvent, randomHex } from './db';
 import { adminFingerprints, API_KEY_FINGERPRINT, KEY_FINGERPRINT, parseApiKeyLine, parseSshKey, sshPublicLine, verifyNamespacedSignature, type SshKey } from './auth';
-import { capabilitiesOf } from '../vendor/vocabulary.mjs';
+import { capabilitiesOf } from '../shared/vocabulary.mjs';
 import { COURSE_ID, HOSTNAME, INSTANCE_NAME, SESSION_TOKEN, TAG, checkAsks, checkDeliverInteractions, checkLogin, checkRepositoryId, HOLDING_TYPE, MAX_CLAIMS_CAP, parseAccessIdentities } from './validate';
 import { REMIND_AFTER_S, type Notices } from './notices';
 import { parseTranscriptRepo } from './links';
@@ -971,7 +971,7 @@ export class Admin {
 
   /** `POST /v1/owner/{repository}/bars`: an owner bar `{course, tag, legs?, applies, starts_at?,
    *  ends_at?, release_holders?, reason}`; named legs need a named course. */
-  // @model setOwnerBar sha256:3dba495167f6
+  // @model setOwnerBar sha256:8ffc35865ecf
   setBar(actor: string, repository: string, body: unknown) {
     if (!isObj(body)) bad('body', 'must be a JSON object');
     const b = body as Record<string, unknown>;
@@ -1009,7 +1009,7 @@ export class Admin {
   }
 
   /** `POST /v1/owner/{repository}/bars/{id}/lift`. */
-  // @model liftOwnerBars sha256:00434bd168f8
+  // @model liftOwnerBars sha256:d099663688c6
   liftBar(actor: string, repository: string, id: number) {
     return this.c.store.transaction(() => {
       this.exec('UPDATE owner_bars SET lifted_at = ? WHERE id = ? AND repository_id = ? AND lifted_at IS NULL', this.c.now(), id, repository);

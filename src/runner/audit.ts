@@ -29,8 +29,8 @@ export interface RefState {
   log: Record<string, [sha: string, message: string][]>;
 }
 
-/** The whole forge path from a git remote URL — `https://github.com/immediately-run/docs.git`,
- *  `ssh://git@github.com/immediately-run/docs`, `git@github.com:immediately-run/docs.git` — or
+/** The whole forge path from a git remote URL — `https://github.com/example-org/project.git`,
+ *  `ssh://git@github.com/example-org/project`, `git@github.com:example-org/project.git` — or
  *  null when the URL names no repository: a bare path or host (a plain `git` remote's checkout,
  *  a host root) is not a forge repository. The path is kept whole (a GitLab subgroup's
  *  `group/sub/repo` names its repository by all three segments) because that is the spelling a

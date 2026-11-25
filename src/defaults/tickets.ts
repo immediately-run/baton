@@ -21,7 +21,7 @@ import { PAGE_NAME, ticketsPage } from './tickets-page';
 import { readItems } from './read-items';
 import { filingDate, firstCommit, historyEntries, rulesConfig, staleIds, staleList, staleRules, unshallow } from './tickets-rules';
 import { ticketsMarkdown } from './tickets-markdown';
-import { claimMismatch, formatTicket, ticketPathsUnder, ticketPrView } from '../vendor/ticketPr.mjs';
+import { claimMismatch, formatTicket, ticketPathsUnder, ticketPrView } from '../shared/ticketPr.mjs';
 import { defaultBranch } from './request';
 import { ownRepositoryId } from './cli';
 import { builtIn, DEFAULT_COURSE } from './courses';
@@ -389,7 +389,7 @@ export async function ticketsCheckMain(argv: string[], io: TicketsIo = {}): Prom
 
 /** B-133: the ticket-PR view against `base`, as `baton tickets check --pr` prints it, and the
  *  finding when a PR's own description claims what the computation contradicts. The view is the
- *  vendored library's (src/vendor/ticketPr.mjs, R-BTN-37 — docs' scripts/lib is the source);
+ *  shared library's (src/shared/ticketPr.mjs, R-BTN-37);
  *  git is read here. Returns how many findings it added; every line it prints goes to `lines`. */
 function ticketPrFindings(root: string, settings: TicketSettings, base: string | null, claimedStatusOnly: boolean, forgePath: string | null, lines: string[]): number {
   if (base == null) return 0;
@@ -424,7 +424,7 @@ function ticketPrFindings(root: string, settings: TicketSettings, base: string |
   // loud one-line refusal naming --forge, never a silent fallthrough that would show git's
   // reading as the only one over a file the caller did pass (round two's finding — docs'
   // readForge shape).
-  type ForgeFile = { pr_author: string; commits: Record<string, import('../vendor/ticketPr.mjs').TicketForge> };
+  type ForgeFile = { pr_author: string; commits: Record<string, import('../shared/ticketPr.mjs').TicketForge> };
   let forge: ForgeFile | null = null;
   if (forgePath != null) {
     let parsed: unknown;
@@ -438,7 +438,7 @@ function ticketPrFindings(root: string, settings: TicketSettings, base: string |
     }
     forge = parsed as ForgeFile;
   }
-  const provenance: Record<string, import('../vendor/ticketPr.mjs').TicketProvenance[]> = {};
+  const provenance: Record<string, import('../shared/ticketPr.mjs').TicketProvenance[]> = {};
   for (const p of paths) {
     baseFiles[p] = read(mergeBase, p);
     headFiles[p] = existsSync(join(root, p)) ? readFileSync(join(root, p), 'utf8') : undefined;

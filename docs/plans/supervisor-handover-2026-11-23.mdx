@@ -1,0 +1,69 @@
+---
+title: "Handover — supervising bering's runners, from 2026-11-23"
+description: Where the supervision of bering's two Baton runners stands after the 2026-11-21–23 session, what is waiting on the owner, what is in flight, how to run the half-hourly check, and the traps the session hit. Read before supervising.
+tags: [plans]
+order: 61
+---
+
+# Handover — supervising bering's runners, from 2026-11-23
+
+Written at the end of a supervising session that ran from 2026-11-21 to 2026-11-23 (13:30 UTC).
+Read `AGENTS.md`'s *The supervising agent*, [the interventions log](../interventions.mdx) (the
+2026-11-21 to 2026-11-23 entries) and [lessons](../lessons.mdx) before acting.
+
+## The host as it stands
+
+- **Runners:** `runner-1` and `runner-2` in tmux session `0` on bering. Each was started with `bash -lc '~/factory/bin/start-runner.sh N; exec bash'`; when a runner exits its window stays open on a shell. Restarted 2026-11-22 17:25 UTC.
+  - Session files: `~/.cache/immediately-run/baton/run-20261122-181737-r{1,2}.json`. `last_ok` there is the heartbeat; a quiet log with a fresh `last_ok` means idle, not wedged.
+  - Logs: `~/factory/logs/runner-run-20261122-181737-r{1,2}.log`.
+- **Code:** `~/factory/baton-cli` is at `44080032` (#354, the masking fix). `start-runner.sh` refuses a CLI behind `main`'s tip, so fast-forward it before a restart. `~/factory/fieldhouse` is detached at `09f1015` (fieldhouse #51).
+- **Executor pin:** `BATON_EXECUTOR` in `~/factory/runner.env` is pinned at `sha256:df2b7cc7…`. Previous pins are kept in `runner.env.bak-*`. Compute a digest with:
+  ```
+  node --input-type=module -e "import { bundleDigest } from '/home/neumark/factory/baton-cli/src/runner/executor.ts'; console.log(bundleDigest('/home/neumark/factory/fieldhouse/sandbox/e2b/executor'))"
+  ```
+  Check it against a fresh `git worktree` of the same commit, after `npm ci --omit=dev --no-bin-links` in `sandbox/e2b/executor`.
+- **Live leg-page check:** passed 24/24 on `df2b7cc7`. Run it only with both runners drained, since the hugepage pool fits about three 4 GiB sandboxes:
+  ```
+  cd ~/factory/fieldhouse && ( set -a; . ~/factory/runner.env; set +a; export E2B_LEG_GATEWAY_KEY_FILE=$HOME/factory/secrets/gateway/r1.key; BATON_DIR=$HOME/factory/baton-cli HOME_CO=$HOME/factory/baton-home node sandbox/e2b/tests/executor-legpage.mjs )
+  ```
+- **Gateway:** `curl -m5 http://192.0.2.10:4000/health/liveliness` answers 200.
+- **Course:** `create-pr` is owned in `main` (#342), version 2, with eight review rounds. A course change applies from the next claim, without a restart. Only a raised `min_runner_version` or new runner code needs one (B-314).
+
+## Right now
+
+Both runners have been idle since about 09:00 UTC on 2026-11-23, with no claimable work. They are alive and heartbeating. See the last interventions entry.
+
+## Waiting on the owner
+
+1. **A console script in a signed-in dashboard tab** (the supervisor gave it on 2026-11-23). It releases B-259's unconfirmed "done at merged" claim (`POST /v1/ui/claims/{id}/release`, `{action: "release", confirm: true}`), lifts any holds on B-270 and B-299 (`POST /v1/ui/overrides/baton:<id>`, `{hold: false}`), and prints their blocks. Dispatch the sync afterwards (`gh workflow run baton-sync.yml --ref main`).
+2. **`S-BTN-41` failing on `main`** (`test/integration/S-BTN-41.runner.test.ts:295`). It turns every PR's `test` check red, including #357 (B-259) and #384. The owner was asked whether to start a fix; not answered.
+3. **#384 (B-318):** the sync-schedule ticket. Its only failure is `S-BTN-41`.
+4. **FLDH-64:** rotate bering's leg credentials and restrict the logs written before 2026-11-22 17:25 UTC (the masking leak). For a human operator only; never read those logs for secrets.
+5. **Unanswered proposals:**
+   - the `run-tests` gate fix (`npm ci` when the lockfile differs);
+   - a ticket for `main`'s CI never completing (#381, open, may bear on it);
+   - over-masking in B-316: may a short held fragment that turns out not to be a secret be printed in the clear?
+
+## In flight
+
+- **About thirty `claude/B-*` PRs are parked at `reviewed` or `fixed`.** They resume as syncs post. Scope notes are on #352, #353 and #371.
+- **B-299 and R3-1268 can proceed:** their rulings are on `main` (#383).
+- **Tickets filed in this session, not yet built:**
+  - Baton: B-313, B-314, B-315, B-316, B-317 (merged), B-318 (#384);
+  - Fieldhouse: FLDH-63 to FLDH-66.
+
+## The half-hourly check
+
+Capture both panes and grep the newest logs for `claimed`, `failed (`, `finished`, `suspended`, `released` and `done`. For a failed leg, read the agent's last text in `~/factory/leg-archive/baton/baton_<ticket>/<leg>/<newest>/*/sandbox/sessions/ses_*.json`. Some exports do not parse as JSON (masking can break them), so fall back to `grep -ao '"text": "[^"]*' … | tail -1`. Check the gateway.
+
+## Traps this session hit
+
+- **"reviewed" is not "approved",** and a merge leg's `merged` was not a merge until #385. Read the review verdicts and the forge.
+- **Read each check's conclusion before merging.** #383 was merged red.
+- **A stopped "ask the owner" leg is retried before its ruling lands.** Get the ruling merged before the ticket is claimed again.
+- **Fix legs patch shared files** (the masker, `src/shared/`, the test gate) inside unrelated tickets. Leave a scope note on the PR; B-317 now forbids it.
+- **The opencode client in `--server` mode sometimes exits 1 after a finished session,** and the leg counts as failed (FLDH-66). Read the archive before calling it a failure.
+- **GitHub's schedule is unreliable.** When the runners are idle with parked work, dispatch the sync (B-318).
+- **`pkill -f` matched the supervisor's own shell.** Kill runner processes by their exact PIDs.
+- **Keep throwaway worktrees outside `~/git/baton`;** use the session's scratchpad.
+- **Keep watching a drain until the runners are back.**

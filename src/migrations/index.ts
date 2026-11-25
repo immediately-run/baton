@@ -49,6 +49,7 @@ import legRunInputs from './0047_leg_run_inputs.sql';
 import conditions from './0048_conditions.sql';
 import coreConditions from './0075_core_conditions.sql';
 import retireReviewerSettings from './0076_retire_reviewer_settings.sql';
+import legTimeoutFence from './0082_leg_timeout_fence.sql';
 import eventLookups from './0049_event_lookups.sql';
 import alarmIndexes from './0052_alarm_indexes.sql';
 import retention from './0053_retention.sql';
@@ -222,4 +223,5 @@ export const MIGRATIONS: Migration[] = [
   { id: 79, sql: sessionLinkSecrets },
   { id: 80, sql: interactionDeliveryGrant },
   { id: 81, sql: sessionLinkIncarnation },
+  { id: 82, sql: legTimeoutFence },
 ];

@@ -77,4 +77,4 @@ expect(await screen.findByText('R3-1')).toBeDefined();
 `test/ui/helpers.tsx`: `mockFetch` (routes by `'METHOD /path'` or bare path; returns `calls`),
 `refuse`, `repoRow`, `repoList`, `renderWithShell` (returns `store`; `await act(() =>
 store.refresh())` polls now), `renderApp(path)` for the whole app. Test that a hostile string
-stays text. Run `DOCS_DIR=/nonexistent npx vitest run test/ui/<file> --project ui`.
+stays text. Run `npx vitest run test/ui/<file> --project ui`.
