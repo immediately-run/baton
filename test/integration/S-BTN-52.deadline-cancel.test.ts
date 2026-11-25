@@ -110,7 +110,7 @@ describe('S-BTN-52: a run deadline', () => {
     const requestRelease = async (ticketId: string) => {
       const response = await ownerCall('/v1/ui/messages', {
         method: 'POST', headers: { 'Content-Type': 'application/json', Origin: ORIGIN },
-        body: JSON.stringify({ kind: 'release', to_runner_id: a.id, payload: { ticket_id: ticketId, reason: 'requested' } }),
+        body: JSON.stringify({ kind: 'release', to_runner_id: a.id, payload: { ticket_id: ticketId, reason: 'requested' }, confirm: true }),
       });
       expect(response.status).toBe(200);
     };

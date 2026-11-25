@@ -27,8 +27,10 @@ async function toRequest(req: IncomingMessage, origin: string): Promise<Request>
       if (size > MAX_BODY) throw new BatonError('invalid-params', `the body is larger than ${MAX_BODY} bytes`);
       chunks.push(c as Buffer);
     }
-    const all = Buffer.concat(chunks);
-    body = all.buffer.slice(all.byteOffset, all.byteOffset + all.byteLength) as ArrayBuffer;
+    if (size > 0) {
+      const all = Buffer.concat(chunks, size);
+      body = all.buffer.slice(all.byteOffset, all.byteOffset + all.byteLength) as ArrayBuffer;
+    }
   }
   return new Request(origin + target, { method, headers, body });
 }

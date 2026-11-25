@@ -87,6 +87,12 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   named no order or end, the grants `max_tier` widens, and missing rule ids; each was checked
   against the text and code, and fixed.
 
+- **2026-11-22 — Dashboard headers and destructive actions (B-300).**
+  Rules changed: R-BTN-16, R-BTN-158, R-BTN-159; S-BTN-124, S-BTN-125, S-BTN-311, G-BTN-145. The shared front's session checks apply to API
+  requests, not public navigations. The local host keeps `--host`; B-46 still owns the unbuilt
+  network and file-mode protections. Stop now asks for confirmation rather than sending on the
+  first click (supersedes Decision 3a for Stop). §12.2 lists the live confirmed actions and
+  separates the unbuilt ones.
 - **2026-11-22 — Owner-state moves and board posts (B-302).**
   Rules changed: R-BTN-88, R-BTN-11. Moves preserve repository policy chains, floors, the
   human-key register and other owner settings; both hosts previously accepted a move that left
