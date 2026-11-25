@@ -1,89 +1,141 @@
 ---
-title: "B-23 — Baton CLI command tree and leg logs: baton <noun> <verb>, the runner's leg-output archive, and baton leg log"
+title: "B-23 — Leg logs: the runner writes a streamed leg's masked output to the owners' leg_log_root as create-only chunks, and baton leg log reads and follows it there"
 id: B-23
 project: baton
 status: available
-updated: 2026-11-02
+updated: 2026-11-23
 repos:
   - baton
-  - docs
 tags:
   - roadmap-item
 order: 1126
 tier: critical
-description: "Build R-BTN-127 and R-BTN-128: the noun-verb CLI with each command signing as the first role in its actions' `callers` the user holds a key for, and the old names refused; the runner writing process-mode leg output, masked, as create-only chunks to the owners' `leg_log_root` (`s3:`, `gs:`, or `file:` locally) with its own ambient credentials; the runs and release routes; baton leg log reading and following the run's directory with the user's own credentials; and every caller in this repository and in docs moved to the new names in the same release. Requires: B-22."
+description: "Build R-BTN-128, now a proposal: the owners' leg_log_root setting (s3:, gs:, or file: on the local host); the run directory in the advance reply that starts a run, keyed by run_id and recorded as claim_legs.leg_log_dir; the runner writing a streaming executor's masked output as create-only chunks and an end record with its own ambient credentials; log_dir on the built runs route; and baton leg log reading and following the directory with the user's own credentials. Moves R-BTN-128 back from the proposal into §8.5. The command tree this ticket once also held is B-157's. Requires: B-299, whose masking of the runner's own secret and credentials must land before any output leaves for a bucket."
 topics:
   - baton
 owns: {}
 prs: []
 depends_on:
   - B-22
+  - B-299
 ---
 
-**Brief:** the owner, 2026-10-17: a Git-like CLI with every leg command under `baton leg`, and `baton leg log` showing a leg's logs. Each leg run's output is saved now, and the old command names go outright. B-22 specified it (baton#46).
-**Spec:** [BATON_SPEC §11.3](../spec/BATON_SPEC/11-people.md#sec-11-3) ([R-BTN-127](../spec/BATON_SPEC/11-people.md#sec-11-3)), [§8.5](../spec/BATON_SPEC/08-runners.md#sec-8-5) ([R-BTN-128](../spec/BATON_SPEC/08-runners.md#sec-8-5)), [§8.4](../spec/BATON_SPEC/08-runners.md#sec-8-4) ([R-BTN-144](../spec/BATON_SPEC/08-runners.md#sec-8-4): the one list of
-what is masked), [§14](../spec/BATON_SPEC/14-api.md#sec-14)'s rows; history, Migrations: renamed CLI commands.
+**Brief:** the owner, 2026-10-17: every leg command under `baton leg`, and `baton leg log` showing a
+leg's logs, each leg run's output saved. B-22 specified it (baton#46).
+
+**Spec:** [R-BTN-128](../spec/BATON_SPEC/08-runners.md#sec-8-5) ([§8.5](../spec/BATON_SPEC/08-runners.md#sec-8-5), a leg run's output; its
+design is part 10 of [the checks-and-executors proposal](../spec/proposals/checks-and-executors.md)
+since the cut of 2026-11-19), [R-BTN-144](../spec/BATON_SPEC/08-runners.md#sec-8-4) ([§8.4](../spec/BATON_SPEC/08-runners.md#sec-8-4), the one
+list of what is masked), [R-BTN-107](../spec/BATON_SPEC/08-runners.md#sec-8-3) ([§8.3](../spec/BATON_SPEC/08-runners.md#sec-8-3), which
+executors stream a leg's output), [R-BTN-63](../spec/BATON_SPEC/05-courses.md#sec-5-3) (the run id
+the directory is keyed by), [R-BTN-66](../spec/BATON_SPEC/01-what-baton-is.md#sec-1) (the owners'
+settings), [§13](../spec/BATON_SPEC/13-data-model.md#sec-13) (`leg_log_root`,
+`claim_legs.leg_log_dir`), [§14](../spec/BATON_SPEC/14-api.md#sec-14) (`GET …/legs/{leg}/runs` with
+`log_dir`), [§15](../spec/BATON_SPEC/15-verification.md#sec-15) ([S-BTN-98](../spec/BATON_SPEC/15-verification.md#scenarios), [S-BTN-99](../spec/BATON_SPEC/15-verification.md#scenarios), [G-BTN-118](../spec/BATON_SPEC/15-verification.md#gates),
+[G-BTN-119](../spec/BATON_SPEC/15-verification.md#gates)).
+
+**Depends on:** B-22 (the specification, done). **B-299**: the reference runner masks only R-BTN-144's
+classes 5 to 7 today (`src/runner/mask.ts`), so the runner's secret and the contents of its key
+file (classes 1 and 2) can reach a leg's output; that output stays in the runner's own log now,
+and this ticket would copy it to a bucket every owner and every reader of the bucket can see.
+B-299's rows 2 and 5 (in review in [baton#339](https://github.com/immediately-run/baton/pull/339))
+strip the runner's Baton credentials from the leg's environment and mask classes 1 and 2; this
+ticket starts after they land. Classes 3 and 4 stay B-46's and B-131's, as R-BTN-144 says.
+
 **Used by:** B-192 (adds a session caller to `legs/{leg}/runs`), B-197 and B-210 (draw its rows).
 
 ### Why
 
-R-BTN-127 and R-BTN-128 are specified. This ticket builds them, and moves every caller of the old names in the same release.
+Today a leg's output reaches only the runner's own log, on whatever machine ran it. An owner
+watching a leg, or reading why one failed, has to reach that machine. R-BTN-128's design keeps
+Baton out of the bytes: the runner writes to storage its owners control, with credentials Baton
+never sees, and the CLI reads it there.
 
 ### What to build
 
-1. **The tree.** Rebuild `cli/baton.mjs` as R-BTN-127's tree:
-   - each command signs as its actions' `callers`, in order, trying the first role the user
-     holds a key for (`-i`, else `~/.config/baton/keys.json` for the origin called); no key for
-     any of them exits 2 naming the first role (R-BTN-127, G-BTN-117, adv-4 m12);
-   - each old name exits 2 with its "renamed:" line, kept until no caller uses it (history, Migrations);
-   - an ambiguous ticket id lists its matches;
-   - the leg default is running, then queued, then most recent;
-   - the channel verbs work only inside a leg;
-   - `help` covers every level, with nearest-name suggestions;
-   - every read takes `--json`;
-   - R-BTN-127's rows that later tickets fill in: `decision list` on the conditions route and
-     `owner resolve` (B-56), `leg raise` (B-55), `leg await` (B-59).
-2. **The leg log.** In `src/runner`: read the pipes of a `process`-mode leg, mask R-BTN-144's
-   closed credential set on the byte stream before framing, and write create-only chunks
-   `<dir>/<n>.jsonl` (1 s or 256 KB) then `end.json` to the `dir` the claim or `advance` reply
-   named, with bounded retries and buffer, `gap` frames and the 50 MB cap. One small writer
-   interface with three implementations — `s3:` (AWS default credential chain,
-   `AWS_ENDPOINT_URL_S3` for R2 or MinIO, `If-None-Match: *`), `gs:` (Application Default
-   Credentials, `ifGenerationMatch=0`) and `file:` (`O_EXCL`) — the local one driving the
-   scenarios. Only when the owners set `leg_log_root`.
-3. **The server.**
-   - the `leg_log_root` setting and its validation (`file:` only on the local host);
-   - `claim_legs.leg_log_dir`, and `leg_log: {dir}` in the claim and `advance` replies;
-   - `GET …/tickets/{ticket}/legs/{leg}/runs` with `log_dir`;
-   - `POST /v1/owner/{repository}/tickets/{ticket}/release`.
-4. **`baton leg log`.**
-   - finished runs read from the directory with the user's own credentials, chunks in order;
-   - `-f`, polling for the next chunk until `end.json`;
-   - `--transcripts`;
-   - session and attached runs as links;
-   - the failure messages;
-   - escapes and C0/C1 controls stripped on every printed path.
-5. **The callers, in the same release.**
-   - this repository's `README.md`, `scripts/`, tests and the runner's usage text;
-   - the docs repository: `content/specs/BATON_DOCS_DEPLOYMENT.mdx` (docs' CI, `npx baton repo sync`, `baton course test`), `BATON_ROADMAP_PR_COURSE.mdx`, its skills and workflows that call `baton run`, `baton sync` or `baton test-course`.
+1. **The spec, first, in the same PR.** Move R-BTN-128 from part 10 of the checks-and-executors
+   proposal back into §8.5 as built text, and strike the part from the proposal. Correct the
+   proposal's "Built: … the masking of a leg's output (R-BTN-144)": after B-299, classes 1, 2 and
+   5 to 7 are built, 3 and 4 not. S-BTN-98, S-BTN-99, G-BTN-118 and G-BTN-119 are already rows of
+   §15; take `*no test*` off what this PR tests. Run `spec:impact` on R-BTN-128 and put the
+   checklist in the PR body. The PR is a spec PR under the babysit skill's *Spec PRs*.
+2. **The server.**
+   - the owners' `leg_log_root` setting (R-BTN-66) and its validation in `src/core/validate.ts`:
+     `s3://` and `gs://` with the bucket pattern and R-BTN-20's path rule, `file://` only on the
+     local host, anything else `invalid-params`;
+   - on each `advance` reply that starts a run while a root is set, `leg_log: {dir}` with `dir`
+     `<root>/<tenant host>/<repository id>/<local ticket id>/<leg>/<run_id>/`, recorded as
+     `claim_legs.leg_log_dir` (the column exists); nothing else about the log is stored;
+   - `log_dir` on each row of the built `GET …/tickets/{ticket}/legs/{leg}/runs` (B-190).
+3. **The runner** (`src/runner`). Only for a run whose `advance` reply named a directory, whose
+   executor streams the leg's output (`builtin`; the `session` and `attached` executors stream
+   none, R-BTN-107), and whose leg is not `"stream": false`:
+   - frame the masked stream (the masker that already runs before bytes leave the runner, with
+     B-299's classes) as R-BTN-128's JSON-lines frames, ≤ 8 KB each, cut between code points;
+   - write create-only chunks `<dir>/<n>.jsonl` (1 s after a chunk's first frame or at 256 KB),
+     then `end.json` last; bounded retries and buffer, `gap` frames and the 50 MB cap; a final
+     failure records `leg-log-write-failed` and never delays or fails the end;
+   - one small writer interface with three implementations: `s3:` (the AWS default credential
+     chain, `AWS_ENDPOINT_URL_S3` for R2 or MinIO, `If-None-Match: *`), `gs:` (Application
+     Default Credentials, `ifGenerationMatch=0`) and `file:` (`O_CREAT | O_EXCL`), the local one
+     driving the scenarios.
+4. **`baton leg log <ticket> [<leg>] [--run <n>] [-f] [--transcripts] [--json]`**, a verb beside
+   the built `leg replay` and `leg raise` in `cli/baton.mjs`: the runs route, then the directory
+   with the user's own credentials, chunks in order, `[gap]` for a missing `seq`; `-f` polling
+   (1 s backing off to 10 s) until `end.json` or 30 s past the run's end; session and attached
+   runs as their links and transcript pointers, `--transcripts` printing the transcripts; the
+   run record and why when there is nothing to print; "cannot read `<dir>`" and exit 1 on a read
+   failure; terminal escapes and C0/C1 controls (but newline and tab) stripped from every
+   printed path and frame. `--json` prints frames as JSON lines. It signs as the current CLI
+   signs, with the key `-i` names.
 
 ### Do not
 
-- Keep an alias for any old name.
-- Store a log's bytes, or hold, mint or sign a bucket credential, in Baton.
+- Store a log's bytes, or hold, mint or sign a bucket credential, in Baton (G-BTN-118).
+- Ship before B-299's classes 1 and 2 are masked.
+- Build the command tree, the old-name refusals or `baton leg stop`: the tree is B-157's (after
+  B-25's registry), and the stop is R-BTN-119's, which B-299 assigns to B-9.
 
 ### Tests
 
-- S-BTN-97, S-BTN-98 and S-BTN-99 as integration scenarios on both hosts; G-BTN-117 to G-BTN-119.
-- Unit (`test/unit/cli.test.ts`): a command whose actions' `callers` are `[owner, admin]` signs
-  with the owner key when both are held, with the administrator key when only it is, and exits 2
-  naming `owner` when neither is.
-- `npm test`, `npm run typecheck` and `npm run check:spec` green, and docs' `npm run verify` green.
+- S-BTN-98 as an integration scenario on both hosts with the `file:` writer, and G-BTN-118: a
+  run's output lands as create-only chunks and `end.json` in the named directory, a credential
+  of every built class masked; nothing is written with no root, for a `stream: false` leg, or for
+  a non-streaming executor; a failing writer never delays the end.
+- S-BTN-99's leg-log clauses and G-BTN-119: `baton leg log -f` follows chunks to the end record,
+  marking a gap; another repository's owner is `forbidden`. Its `leg stop` clause stays for the
+  ticket that builds the stop.
+- Unit: the `s3:` and `gs:` writers send the create-only precondition and read their credentials
+  from the environment only; the root's validation; escape stripping.
+- `npm test`, `npm run typecheck`, `npm run check:spec`, `npm run check:wiki` and
+  `npm run check:tickets` green.
+
+### Trust
+
+- **`leg_log_root`** is an owner's setting, validated before it is stored; Baton turns it into a
+  directory name and nothing more. Who may write or read the bucket is its owners' (IAM, a
+  lifecycle rule), never Baton's.
+- **The directory** in the `advance` reply is Baton's; the runner writes only there, with
+  credentials from its own environment. Under `builtin` a leg runs as the runner's user and can
+  reach the same storage, so a leg log is a diagnostic, not evidence (R-BTN-128).
+- **What `baton leg log` prints** is written by a leg, which is repository code and possibly an
+  injected agent (reaches 1 and 3): untrusted text, with terminal escapes and controls stripped
+  before it reaches the reader's terminal.
+- **The runs route** gives `log_dir` only to the repository's owners and administrators
+  (G-BTN-119).
+
+### Invariants
+
+- **Baton never holds a log byte or a bucket credential** (G-BTN-118).
+- **Masked before it leaves the runner** (R-BTN-144): the writer sees only the masker's output.
+- **Create-only**: no chunk or end record is ever rewritten.
+- **A log never delays or fails a leg's end.**
+- **One clock**: the server reads time only through `this.now` (R-BTN-32).
 
 ### Exit criteria
 
-- [ ] the scenarios above pass on both hosts, with the first-held-role signing
-- [ ] no caller in either repository uses an old name
+- [ ] R-BTN-128 is built text in §8.5 and gone from the proposal
+- [ ] S-BTN-98 passes on both hosts; S-BTN-99's leg-log clauses pass
 - [ ] merged under the review gate
 
 ## Status
@@ -95,3 +147,7 @@ _(2026-10-20: extended for the adversarial review's fixes — a command signs as
 _(2026-10-21: R-BTN-118 retired — leg output is written to the owners' log location and followed there by `baton leg log -f`, never relayed through Baton (R-BTN-128). Items 2–4 re-scoped from the git archive and `GET /v1/stream` to the owners' log location.)_
 
 _(2026-11-02: the spec restructure's part 3 (B-166, the PR `spec-restructure-handoff`, [#163](https://github.com/immediately-run/baton/pull/163)): R-BTN-127's tree now holds every command the spec names, under one grammar, with help generated from the registry's command table (R-BTN-129); a second set of renames joins the first twelve (the history's Migrations). B-157's code item builds it; this ticket's leg-log half is unchanged.)_
+
+_(2026-11-23: rewritten to the leg-log half after re-reading the rules amended since it was filed. The command tree, the old-name refusals and the callers' moves were B-157's code item as well as this ticket's; they are B-157's alone, and need B-25's registry, since each command signs as its actions' `callers` (R-BTN-129) — B-25 depended on this ticket for the tree, which made the two circular. The 2026-11-08 amendments key the directory by `run_id` under the tenant's host (R-BTN-63) and drop the claim reply as a carrier; the 2026-11-09 executor amendments replace "process-mode leg" with a streaming executor (R-BTN-107); the 2026-11-19 cut moved R-BTN-128 to a proposal, which this ticket's PR moves back (B-298); `GET …/legs/{leg}/runs` was built by B-190, so this ticket adds `log_dir` only; the owner release route left the spec in the cut, and `leg stop` is B-299's to assign (B-9). Added B-299: the runner masks classes 5 to 7 only, and a log in a bucket must not carry the runner's own secret or key.)_
+
+_(2026-11-23: rules re-read: R-BTN-127, R-BTN-128, R-BTN-129, R-BTN-144)_

@@ -212,13 +212,13 @@ describe('the core: self-filter, repository map, window (R-BTN-73)', () => {
 
   it('Baton’s own work is dropped; anything else in a registered repository is a trigger', async () => {
     await withCore((c) => {
-      const w = new Webhooks({ store: c.store, now: () => 1_000_000 });
+      const w = new Webhooks({ store: c.store, scope: c.scope, now: () => 1_000_000 });
       expect(w.receive(d({ event: 'workflow_run', workflow_path: '.github/workflows/baton-mirror.yml' }))).toEqual({ outcome: 'own-work' });
       expect(w.receive(d({ event: 'workflow_run', repository: 'Immediately-Run/Docs', workflow_path: '.github/workflows/baton-sync.yml' }))).toEqual({ outcome: 'own-work' });
       expect(w.receive(d({ event: 'push', pusher: 'github-actions[bot]', author_email: 'baton-mirror@immediately.run' }))).toEqual({ outcome: 'own-work' });
       // A push by the bot as anyone else, or by anyone as the mirror, is a trigger (2-A-0).
       expect(w.receive(d({ event: 'push', pusher: 'github-actions[bot]', author_email: 'x@y' }))).toMatchObject({ now: ['docs'] });
-      const later = new Webhooks({ store: c.store, now: () => 2_000_000 });
+      const later = new Webhooks({ store: c.store, scope: c.scope, now: () => 2_000_000 });
       expect(later.receive(d({ event: 'push', pusher: 'alice', author_email: 'baton-mirror@immediately.run' }))).toMatchObject({ now: ['docs'] });
     });
   });
@@ -227,12 +227,12 @@ describe('the core: self-filter, repository map, window (R-BTN-73)', () => {
     await withCore((c) => {
       c.store.exec(`INSERT INTO tickets (id, repository_id, local_id, path, title, status, node, queue, tags, requires_clause, depends_on, blocked_by, repos, snapshot_sha, row_hash)
                     SELECT 'docs:X-1', 'docs', 'X-1', 'p', 't', 'available', 'ready', 'ready-autonomous', '[]', 'listed', '[]', '[]', '["baton","immediately-run/sandbox"]', 'a', 'h'`);
-      const w = new Webhooks({ store: c.store, now: () => 5_000_000 });
+      const w = new Webhooks({ store: c.store, scope: c.scope, now: () => 5_000_000 });
       // A delivery to this repository now dispatches its own sync too: baton is a registered
       // repository whose tickets name it (R3-1266), beside docs' — one entry, though the merge
       // (B-89) wants it as well as the merged ticket.
       expect(w.receive(d({ repository: 'immediately-run/baton' }))).toEqual({ outcome: 'dispatched', now: ['baton', 'docs'], trailing: [] });
-      const later = new Webhooks({ store: c.store, now: () => 6_000_000 });
+      const later = new Webhooks({ store: c.store, scope: c.scope, now: () => 6_000_000 });
       expect(later.receive(d({ repository: 'IMMEDIATELY-RUN/Sandbox' }))).toEqual({ outcome: 'dispatched', now: ['docs'], trailing: [] });
       expect(later.receive(d({ repository: 'immediately-run/other' }))).toEqual({ outcome: 'dispatched', now: [], trailing: [] });
       // A short name is read under the home repository's owner: another owner's baton names nothing (1-B-1).
@@ -242,7 +242,7 @@ describe('the core: self-filter, repository map, window (R-BTN-73)', () => {
 
   it('one dispatch per 30 seconds, then one trailing when the window that suppressed one closes', async () => {
     await withCore((c) => {
-      const at = (now: number) => new Webhooks({ store: c.store, now: () => now });
+      const at = (now: number) => new Webhooks({ store: c.store, scope: c.scope, now: () => now });
       expect(at(0).receive(d({}))).toMatchObject({ now: ['docs'], trailing: [] });
       expect(at(0).nextTrailing()).toBeNull();
       expect(at(10_000).receive(d({}))).toMatchObject({ now: [], trailing: ['docs'] });
@@ -284,7 +284,7 @@ describe('the core: self-filter, repository map, window (R-BTN-73)', () => {
       c.registry.register({ id: 'ops', github: 'immediately-run/ops', default_branch: 'main', sync_workflow: '.github/workflows/sync.yml' });
       c.store.exec(`INSERT INTO webhook_dispatch (repository_id, last_dispatch_at, trailing_at) VALUES ('ops', 0, 30000)`);
       c.store.exec(`UPDATE repositories SET retired_at = 1 WHERE id = 'ops'`);
-      const w = new Webhooks({ store: c.store, now: () => 30_000 });
+      const w = new Webhooks({ store: c.store, scope: c.scope, now: () => 30_000 });
       expect(w.dueTrailing()).toEqual([]);
       expect(w.nextTrailing()).toBeNull();
     });
@@ -292,7 +292,7 @@ describe('the core: self-filter, repository map, window (R-BTN-73)', () => {
 
   it('a suppressed delivery writes its window’s trailing time once (1-A-3)', async () => {
     await withCore((c) => {
-      const at = (now: number) => new Webhooks({ store: c.store, now: () => now });
+      const at = (now: number) => new Webhooks({ store: c.store, scope: c.scope, now: () => now });
       at(0).receive(d({}));
       at(5_000).receive(d({}));
       at(9_000).receive(d({}));
@@ -303,7 +303,7 @@ describe('the core: self-filter, repository map, window (R-BTN-73)', () => {
 
   it('a delivery id is remembered for 24 hours', async () => {
     await withCore((c) => {
-      const at = (now: number) => new Webhooks({ store: c.store, now: () => now });
+      const at = (now: number) => new Webhooks({ store: c.store, scope: c.scope, now: () => now });
       const one = d({ id: 'same' });
       expect(at(0).receive(one)).toMatchObject({ outcome: 'dispatched' });
       expect(at(24 * 3_600_000).receive(one)).toEqual({ outcome: 'duplicate' });
@@ -313,7 +313,7 @@ describe('the core: self-filter, repository map, window (R-BTN-73)', () => {
 
   it('B-126: a push delivery\u2019s recorded half is stored once, pruned with the 24-hour ttl, and kept for Baton\u2019s own work', async () => {
     await withCore((c) => {
-      const at = (now: number) => new Webhooks({ store: c.store, now: () => now });
+      const at = (now: number) => new Webhooks({ store: c.store, scope: c.scope, now: () => now });
       const push = (id: string, over: Record<string, unknown> = {}, pushOver: Record<string, unknown> = {}) => d({
         event: 'push', id, repository: 'immediately-run/docs',
         push: { sender_id: 424242, sender_login: 'immediately-run-worker', ref: 'refs/heads/main', before: '0'.repeat(39) + '1', after: 'f'.repeat(40),

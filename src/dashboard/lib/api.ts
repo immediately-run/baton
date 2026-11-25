@@ -3,15 +3,17 @@
 // call is JSON from this origin, exactly what R-BTN-16's check asks (`checkStateChanging`:
 // `Content-Type: application/json` and the page's own `Origin`, which the browser sets).
 
-/** A refusal as §14 answers it: the HTTP status, Baton's error code and its message — text. */
+/** A refusal as §14 answers it: the HTTP status, Baton's error code, message and optional reason. */
 export class ApiError extends Error {
   readonly status: number;
   readonly code: string;
-  constructor(status: number, code: string, message: string) {
+  readonly reason?: string;
+  constructor(status: number, code: string, message: string, reason?: string) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
     this.code = code;
+    this.reason = reason;
   }
 }
 
@@ -31,7 +33,8 @@ async function refusal(res: Response): Promise<ApiError> {
   }
   const code = isObj(body) && typeof body.code === 'string' ? body.code : CODE_BY_STATUS[res.status] ?? `http-${res.status}`;
   const message = isObj(body) && typeof body.message === 'string' ? body.message : res.statusText || `HTTP ${res.status}`;
-  return new ApiError(res.status, code, message);
+  const reason = isObj(body) && typeof body.reason === 'string' ? body.reason : undefined;
+  return new ApiError(res.status, code, message, reason);
 }
 
 /** Any failure as an `ApiError`: a refusal as itself, a network fault as `unreachable`. */

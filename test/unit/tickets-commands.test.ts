@@ -1,13 +1,11 @@
-// tickets.test.ts — `baton tickets new | claim | set | done | check` (B-112, BATON_SPEC §2f
-// R-BTN-74, §4.2, R-BTN-31): the ported stopgap's suite (scripts/ticket.mjs), against a throwaway
-// bare remote. What must hold: every command is one commit on the remote's default branch, made in
-// a throwaway worktree, so the caller's branch and tree are untouched; claim refuses a ticket that
-// is not available or whose dependencies are not done; done archives; new takes the next free id
-// from the configured prefix with a legacy pattern present; --tags, --project (an unknown or
-// unconfigured project refused), the written skeleton and its **Depends on:** line, a --body-file
-// that disagrees with the flag refused, and a filing the check would refuse left unpushed; every
-// commit carries the TICKET_TRAILERS provenance trailers it was given, after a blank line (B-16),
-// and TICKET_REQUIRE_TRAILERS=1 refuses a command without them.
+// tickets.test.ts — `baton tickets next | check` (B-112, B-326; BATON_SPEC §4.2 R-BTN-74, S-BTN-189):
+// against a throwaway bare remote. Ticket files are Dibber's to write (B-326): `new`, `claim`,
+// `set` and `done` are refused, each naming its `dibber` command, and nothing lands. What a claim
+// must know first is `check <id> --claimable`, which writes nothing: it is not claimable (exit 1)
+// for a ticket that is not available or whose dependencies are not done, one citing a rule amended
+// since it answered for it (until a rules re-read note, Dibber's included, names the ids), and one
+// another live claim holds in Baton; a ticket Baton holds past its start is a takeover, printed.
+// The commit-message builder (B-16) is `baton request`'s, and stays tested here.
 // Node only: it writes real repositories and runs git.
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
@@ -16,9 +14,9 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { checkTickets } from '../../src/defaults/tickets-check';
-import { accepts, readTicketSettings, requiresFrom } from '../../src/defaults/tickets-config';
+import { accepts, readTicketSettings } from '../../src/defaults/tickets-config';
 import { PAGE_NAME, ticketsPage } from '../../src/defaults/tickets-page';
-import { courseStart, moveTicket, reverseMention, skeletonBody, ticketCommitMessage } from '../../src/defaults/tickets';
+import { courseStart, ticketCommitMessage } from '../../src/defaults/tickets';
 import { unnamedEntries } from '../../scripts/check-spec.mjs';
 import { appendStatus, entryIds, filingDate, firstCommit, firstCommits, historyEntries, missingSections, rereadNote, rereads, ruleIds, rulesConfig, sectionGaps, sectionsDate, staleRules } from '../../src/defaults/tickets-rules';
 import { parseFrontmatter } from '../../src/defaults/tickets-markdown';
@@ -137,219 +135,70 @@ const runAsync = (dir: string, ...argv: string[]): Promise<{ code: number | null
 const fmOf = (f: Fixture, path: string): Record<string, unknown> => parseFrontmatter(f.at(path)!)!;
 
 
-describe('baton tickets new: the ticket it files (B-112)', () => {
-  it('one commit on the default branch, the next free id from the configured prefix, the skeleton, and the caller’s tree untouched', () => {
-    const f = repo({ existing: { 'tickets/B-3.mdx': ticket('B-3'), 'tickets/R3-9.mdx': ticket('R3-9') } });
-    git(f.dir, 'checkout', '-q', '-b', 'my-work');
-    writeFileSync(join(f.dir, 'draft.txt'), 'uncommitted\n');
-    const before = f.head().sha;
-    const r = run(f.dir, 'new', '--direct', '--title', 'Write the thing', '--description', 'Write the thing, so two of them agree');
-    expect(r).toMatchObject({ code: 0 });
-    expect(r.err).toMatch(/^… id by the next-free scan — Baton did not answer \(no key: pass -i KEY \(or set BATON_KEY_FILE\), or --offline to say nothing\)/);
-    expect(r.out).toBe('✓ tickets: file B-4 — Write the thing\n');
-    // One commit on top of the head, the ticket file alone.
-    const { sha, parent } = f.head();
-    expect(parent).toBe(before);
-    expect(execFileSync('git', ['-C', f.origin, 'show', '--name-only', '--format=%s', sha], { encoding: 'utf8' }).trim().split('\n'))
-      .toEqual(['tickets: file B-4 — Write the thing', '', 'tickets/B-4.mdx']);
-    // The caller's branch, HEAD and tree are as they were.
-    expect(git(f.dir, 'rev-parse', 'HEAD')).toBe(before);
-    expect(git(f.dir, 'symbolic-ref', '--short', 'HEAD')).toBe('my-work');
-    expect(git(f.dir, 'status', '--porcelain')).toBe('?? draft.txt');
-    // The skeleton: the conventional body, the filing's date, the flag's line.
-    const text = f.at('tickets/B-4.mdx')!;
-    expect(parseFrontmatter(text)).toMatchObject({ id: 'B-4', project: 'baton', status: 'available', updated: today(), tags: ['roadmap-item'], description: 'Write the thing, so two of them agree', title: 'B-4 — Write the thing', depends_on: [] });
-    for (const line of ['**Brief:** Write the thing, so two of them agree', '**Spec:**', '**Depends on:** none.', '**Used by:** nothing yet.', '### What to build', '### Tests', '### Exit criteria', '## Status', `_filed ${today()}._`]) {
-      expect(text, line).toContain(line);
-    }
-    // The legacy id was not allocated, and B-4 is the next free number across the live and the archived.
-    expect(f.at('tickets/B-5.mdx')).toBeNull();
-  }, 60_000);
 
-  it('B-174 (R-BTN-131): the next free number also skips an open request branch’s id — a merged one keeps none', () => {
-    const f = repo({ existing: { 'tickets/B-2.mdx': ticket('B-2') } });
-    // A request still waiting on its side branch holds B-3: `baton request` pushed it there, and
-    // the default branch does not reach the branch.
-    git(f.dir, 'checkout', '-q', '-b', 'side', 'origin/main');
-    writeFileSync(join(f.dir, 'tickets', 'B-3.mdx'), `---\ntitle: "B-3 — a request"\nid: B-3\nstatus: available\ntags: [request]\ncourse: create-spec\n---\n`);
-    git(f.dir, 'add', '-A');
-    git(f.dir, 'commit', '-qm', 'B-3: request');
-    git(f.dir, 'push', '-q', 'origin', 'HEAD:refs/heads/baton-request/B-3');
-    git(f.dir, 'checkout', '-q', 'main');
-    git(f.dir, 'branch', '-D', 'side');
-    // B-176: Baton is not asked here (no key), so the scan gives the id and says so; `--direct`
-    // lands on the default branch as B-174's filing did.
-    const r = run(f.dir, 'new', '--direct', '--title', 'Write the thing');
-    expect(r).toMatchObject({ code: 0 });
-    expect(r.err).toMatch(/^… id by the next-free scan — Baton did not answer \(no key/);
-    expect(r.out).toBe('✓ tickets: file B-4 — Write the thing\n');
+/** `check <id> --claimable` as an operator runs it, offline unless Baton is named. */
+const claimable = (dir: string, id: string, ...more: string[]) => run(dir, 'check', id, '--claimable', ...(more.length ? more : ['--offline']));
 
-    // A request whose PR MERGED leaves its id free again: the branch stays, but the default
-    // branch reaches its commit, so no allocator counts it.
-    const merged = repo({});
-    git(merged.dir, 'checkout', '-q', '-b', 'side2', 'origin/main');
-    writeFileSync(join(merged.dir, 'tickets', 'B-1.mdx'), `---\ntitle: "B-1 — a request"\nid: B-1\nstatus: available\ntags: [request]\ncourse: create-spec\n---\n`);
-    git(merged.dir, 'add', '-A');
-    git(merged.dir, 'commit', '-qm', 'B-1: request');
-    git(merged.dir, 'push', '-q', 'origin', 'HEAD:refs/heads/baton-request/B-1', 'HEAD:refs/heads/main');
-    git(merged.dir, 'checkout', '-q', 'main');
-    git(merged.dir, 'branch', '-D', 'side2');
-    const r2 = run(merged.dir, 'new', '--direct', '--title', 'Write the other thing');
-    expect(r2).toMatchObject({ code: 0 });
-    expect(r2.err).toMatch(/^… id by the next-free scan — Baton did not answer \(no key/);
-    expect(r2.out).toBe('✓ tickets: file B-2 — Write the other thing\n');
-  }, 60_000);
-
-  it('the next free number skips the archived ones, and the configured prefix is the one allocated', () => {
-    const archived = repo({ existing: { 'tickets/archive/B-7.mdx': ticket('B-7', 'status: done').replace('status: available', ''), 'tickets/B-2.mdx': ticket('B-2') }, settings: { ticket_prefix: 'F', legacy_ids: ['R3-\\d+', 'B-\\d+'] } });
-    expect(run(archived.dir, 'new', '--direct', '--title', 'x').out).toBe('✓ tickets: file F-1 — x\n');
-    // F was not among the accepted ids before the prefix named it: its own pattern is `\d+`.
-    expect(fmOf(archived, 'tickets/F-1.mdx').id).toBe('F-1');
-    const again = run(archived.dir, 'new', '--direct', '--title', 'y');
-    expect(again.out).toBe('✓ tickets: file F-2 — y\n');
-  }, 60_000);
-
-  it('the legacy patterns the file names are accepted for a dependency and never allocated', () => {
-    const f = repo({ existing: { 'tickets/R3-1249.mdx': ticket('R3-1249', 'status: done') } });
-    // A closed ticket may be depended on no more than a live one may (a filing does not wait on
-    // a done one, but the id is accepted): an unknown pattern is the refusal.
-    expect(run(f.dir, 'new', '--direct', '--title', 'x', '--depends-on', 'R3-1250').err).toContain('--depends-on R3-1250: no such ticket on origin/main');
-    expect(run(f.dir, 'new', '--direct', '--title', 'x', '--depends-on', 'B-9').err).toContain('--depends-on B-9: no such ticket');
-    expect(run(f.dir, 'new', '--direct', '--title', 'x', '--depends-on', 'Q-1').err).toContain('--depends-on Q-1 is not a ticket id of this repository');
-    expect(f.at('tickets/B-1.mdx')).toBeNull();
-  }, 60_000);
-
-  it('--depends-on writes the depends_on list, the **Depends on:** line and the reverse mention', () => {
+describe('the retired verbs (B-326, S-BTN-189)', () => {
+  it('new, claim, set and done are refused, each naming its dibber command, and nothing lands', () => {
     const f = repo({ existing: { 'tickets/B-1.mdx': ticket('B-1') } });
-    const r = run(f.dir, 'new', '--direct', '--title', 'the second', '--depends-on', 'B-1');
-    expect(r.out).toBe('✓ tickets: file B-2 — the second\n');
-    expect(parseFrontmatter(f.at('tickets/B-2.mdx')!)!.depends_on).toEqual(['B-1']);
-    expect(f.at('tickets/B-2.mdx')).toContain('**Depends on:** B-1.');
-    // The dependency says who waits on it.
-    expect(f.at('tickets/B-1.mdx')).toContain('**Used by:** B-2.');
-    // And its own line is unchanged: only the reverse mention moved.
-    expect(f.at('tickets/B-1.mdx')).toContain('**Depends on:** none.');
-  }, 60_000);
-
-  it('--tags writes what it names, else the file’s tags', () => {
-    const f = repo();
-    expect(run(f.dir, 'new', '--direct', '--title', 'expedited', '--tags', 'EXPEDITE,OP').out).toBe('✓ tickets: file B-1 — expedited\n');
-    expect(fmOf(f, 'tickets/B-1.mdx').tags).toEqual(['EXPEDITE', 'OP']);
-    expect(run(f.dir, 'new', '--direct', '--title', 'plain').out).toBe('✓ tickets: file B-2 — plain\n');
-    expect(fmOf(f, 'tickets/B-2.mdx').tags).toEqual(['roadmap-item']);
-    const named = repo({ settings: { tags: ['feature'] } });
-    expect(run(named.dir, 'new', '--direct', '--title', 'x').code).toBe(0);
-    expect(fmOf(named, 'tickets/B-1.mdx').tags).toEqual(['feature']);
+    const before = f.head().sha;
+    const want: Record<string, string> = {
+      new: 'dibber new --title',
+      claim: 'baton tickets check <id> --claimable, then dibber claim <id>',
+      set: 'dibber set <id> <status>',
+      done: 'dibber done <id>',
+    };
+    for (const [verb, replacement] of Object.entries(want)) {
+      const r = run(f.dir, verb, ...(verb === 'new' ? ['--title', 'x'] : ['B-1', '--offline']));
+      expect(r.code).toBe(2);
+      expect(r.err).toContain(`baton: baton tickets ${verb} is retired — ticket files are Dibber's to write (B-326): `);
+      expect(r.err).toContain(replacement);
+    }
+    expect(f.head().sha).toBe(before);
+    expect(fmOf(f, 'tickets/B-1.mdx').status).toBe('available');
+    // A verb the CLI never had names the two it keeps.
+    expect(run(f.dir, 'grab', 'B-1').err).toBe('baton: grab: baton tickets next|check (baton tickets --help)\n');
+    expect(run(f.dir, '--help').out).toContain('baton tickets check <id> --claimable');
   }, 30_000);
-
-  it('--project writes the page it names; an unknown project, or none at all, is refused', () => {
-    const f = repo({ files: { 'tickets/projects/other.mdx': PROJECT('other') } });
-    expect(run(f.dir, 'new', '--direct', '--title', 'x', '--project', 'other').code).toBe(0);
-    expect(fmOf(f, 'tickets/B-1.mdx').project).toBe('other');
-    const missing = run(f.dir, 'new', '--direct', '--title', 'y', '--project', 'nope');
-    expect(missing.code).toBe(2);
-    expect(missing.err.split('\n').find((l) => l.startsWith('baton:'))).toBe('baton: --project nope: no `kind: project` page in tickets/projects/ — write tickets/projects/nope.mdx (frontmatter `id: nope`, `kind: project`) first, or name a project that is there');
-    // Without a configured default, --project is required — there is no hard-coded one.
-    const none = repo({ settings: { project: undefined } });
-    const refused = run(none.dir, 'new', '--direct', '--title', 'z');
-    expect(refused.code).toBe(2);
-    expect(refused.err).toContain('--project is required: this repository names no default project');
-    expect(none.at('tickets/B-1.mdx')).toBeNull();
-  }, 60_000);
-
-  it('a --body-file is kept as given, and its **Depends on:** line must agree with the flag', () => {
-    const f = repo();
-    const body = join(f.dir, 'body.md');
-    const withLine = (line: string) => `**Brief:** mine\n\n${line}\n\n### What to build\n\nMine.\n`;
-    writeFileSync(body, withLine('**Depends on:** none.'));
-    expect(run(f.dir, 'new', '--direct', '--title', 'a', '--body-file', body).out).toBe('✓ tickets: file B-1 — a\n');
-    expect(f.at('tickets/B-1.mdx')).toContain('### What to build\n\nMine.\n');
-    // The flag names a dependency the file's line does not: refused, nothing pushed.
-    writeFileSync(body, withLine('**Depends on:** none.'));
-    const r = run(f.dir, 'new', '--direct', '--title', 'b', '--body-file', body, '--depends-on', 'B-1');
-    expect(r.code).toBe(2);
-    expect(r.err).toContain("--body-file's **Depends on:** line does not name B-1, which --depends-on names");
-    // The file's line names a dependency the flag does not: refused too.
-    writeFileSync(body, withLine('**Depends on:** B-1.'));
-    const s = run(f.dir, 'new', '--direct', '--title', 'c', '--body-file', body);
-    expect(s.code).toBe(2);
-    expect(s.err).toContain('**Depends on:** names B-1, which --depends-on does not (--depends-on names none)');
-    expect(f.at('tickets/B-2.mdx')).toBeNull();
-  }, 60_000);
-
-  it('a filing the check would refuse — a cycle, or a prefix it cannot allocate — is written to no branch', () => {
-    // B-1 waits on B-2, which does not exist yet: filing B-2 as waiting on B-1 closes the loop,
-    // and the board's own cycle check refuses it before the push — as `baton tickets check`
-    // would after it.
-    const f = repo({ existing: {
-      'tickets/B-1.mdx': ticket('B-1').replace('**Depends on:** none.', '**Depends on:** B-2.').replace('depends_on: []', 'depends_on:\n  - B-2'),
-    } });
-    const head = f.head().sha;
-    const r = run(f.dir, 'new', '--direct', '--title', 'a loop', '--depends-on', 'B-1');
-    expect(r.code).toBe(2);
-    expect(r.err.split('\n').find((l) => l.startsWith('baton:'))).toBe('baton: B-2: a dependency cycle: B-1 → B-2 → B-1');
-    expect(f.head().sha).toBe(head);
-    expect(f.at('tickets/B-2.mdx')).toBeNull();
-    // A prefix whose pattern names four-digit ids is accepted but never allocated: `new` says so
-    // rather than write an id its pattern does not admit.
-    const zero = repo({ settings: { prefixes: { 'B-': '\\d{4}' } } });
-    const r2 = run(zero.dir, 'new', '--direct', '--title', 'x');
-    expect(r2.code).toBe(2);
-    expect(r2.err).toContain('new allocates B-<n>');
-    expect(zero.at('tickets/B-1.mdx')).toBeNull();
-  }, 60_000);
-
-  it('the Requires: clause a description ends with is written on the requires line, and nowhere else', () => {
-    const f = repo();
-    expect(run(f.dir, 'new', '--direct', '--title', 'x', '--description', 'Check the results. Requires: human-operator, drivable-browser.').code).toBe(0);
-    const text = f.at('tickets/B-1.mdx')!;
-    expect(text).toContain('**Requires:** `human-operator`, `drivable-browser`.');
-    expect(text).not.toContain('_A description that ends with a `Requires:` clause');
-    expect(requiresFrom('Check the results. Requires: human-operator, drivable-browser.')).toEqual(['human-operator', 'drivable-browser']);
-    // The clause is the END of the description: a sentence that merely mentions one is not it.
-    expect(requiresFrom('A sentence about Requires: this, and that. Not a clause.')).toEqual([]);
-    // A description with no clause says the line is the filer's.
-    expect(skeletonBody({ description: 'plain', deps: [], date: '2026-10-30' })).toContain('_A description that ends with a `Requires:` clause');
-  }, 60_000);
 });
 
-describe('baton tickets claim | set | done (B-112)', () => {
-  it('claim sets in-progress, and refuses a ticket that is not available or whose dependencies are not done', () => {
-    const f = repo({ existing: { 'tickets/B-1.mdx': ticket('B-1'), 'tickets/B-2.mdx': ticket('B-2').replace('**Depends on:** none.', '**Depends on:** B-1.'), 'tickets/B-3.mdx': ticket('B-3', 'status: in-review') } });
-    // --offline: git's own refusals, as B-112 had them — B-129's suite below claims with Baton.
-    const r = run(f.dir, 'claim', 'B-1', '--offline');
-    expect(r).toMatchObject({ code: 0 });
-    expect(r.err).toContain('--offline');
-    expect(r.out).toMatch(/^✓ tickets: claim B-1 \(in progress\) — pushed as [0-9a-f]{7,}\n$/);
-    expect(fmOf(f, 'tickets/B-1.mdx')).toMatchObject({ status: 'in-progress', updated: today() });
-    // B-1 is held now: a second claim of it is refused.
-    const twice = run(f.dir, 'claim', 'B-1', '--offline');
-    expect(twice.code).toBe(2);
-    expect(twice.err).toBe('baton: B-1 is in-progress, not available — someone may hold it (claimed with --offline: Baton was not asked)\n');
-    // A ticket already in review is not available.
-    expect(run(f.dir, 'claim', 'B-3', '--offline').err).toBe('baton: B-3 is in-review, not available — someone may hold it (claimed with --offline: Baton was not asked)\n');
-    // An id this repository does not allocate.
-    expect(run(f.dir, 'claim', 'Z-1', '--offline').code).toBe(2);
+describe('baton tickets check --claimable: git\'s word (B-326, S-BTN-189)', () => {
+  const depends = (id: string, dep: string) => ticket(id).replace('**Depends on:** none.', `**Depends on:** ${dep}.`).replace('depends_on: []', `depends_on:\n  - ${dep}`);
+
+  it('an available ticket is claimable, and the claim to make is named; nothing is written', () => {
+    const f = repo({ existing: { 'tickets/B-1.mdx': ticket('B-1'), 'tickets/B-3.mdx': ticket('B-3', 'status: in-review').replace('status: available\n', '') } });
+    const before = f.head().sha;
+    const r = claimable(f.dir, 'B-1');
+    expect(r).toMatchObject({ code: 0, err: '' });
+    expect(r.out).toBe("B-1: claimable on git's word alone (--offline: Baton's position is unknown, not refuted) — claim it with: dibber claim B-1\n");
+    // A ticket that is not available is not claimable: exit 1, the reason on stdout.
+    expect(claimable(f.dir, 'B-3')).toMatchObject({ code: 1, out: 'B-3: not claimable — B-3 is in-review, not available — someone may hold it (--offline: Baton was not asked)\n' });
+    // An id this repository does not take is a refusal, not a finding.
+    expect(claimable(f.dir, 'Z-1').code).toBe(2);
+    expect(f.head().sha).toBe(before);
+    expect(git(f.dir, 'worktree', 'list').split('\n')).toHaveLength(1);
   }, 30_000);
 
-  it('claim refuses a ticket whose dependency is not done, and takes it once the dependency is archived', () => {
-    const depends = (id: string, dep: string) => ticket(id).replace('**Depends on:** none.', `**Depends on:** ${dep}.`).replace('depends_on: []', `depends_on:\n  - ${dep}`);
-    const f = repo({ existing: { 'tickets/B-1.mdx': ticket('B-1'), 'tickets/B-2.mdx': depends('B-2', 'B-1') } });
-    const waiting = run(f.dir, 'claim', 'B-2', '--offline');
-    expect(waiting.code).toBe(2);
-    expect(waiting.err).toBe('baton: B-2 depends on B-1, not done yet\n');
-    expect(run(f.dir, 'done', 'B-1').code).toBe(0);
-    expect(run(f.dir, 'claim', 'B-2', '--offline').code).toBe(0);
-  }, 60_000);
-
-  it('a dependency closed in the file but not archived still counts as done', () => {
-    const f = repo({ existing: { 'tickets/B-1.mdx': ticket('B-1').replace('status: available', 'status: superseded'), 'tickets/B-2.mdx': ticket('B-2').replace('**Depends on:** none.', '**Depends on:** B-1.').replace('depends_on: []', 'depends_on:\n  - B-1') } });
-    expect(run(f.dir, 'claim', 'B-2', '--offline').code).toBe(0);
+  it('an undone dependency is not claimable; an archived or a closed one is done', () => {
+    const f = repo({ existing: {
+      'tickets/B-1.mdx': ticket('B-1'),
+      'tickets/B-2.mdx': depends('B-2', 'B-1'),
+      'tickets/archive/B-4.mdx': ticket('B-4').replace('status: available', 'status: done'),
+      'tickets/B-5.mdx': depends('B-5', 'B-4'),
+      'tickets/B-6.mdx': ticket('B-6').replace('status: available', 'status: superseded'),
+      'tickets/B-7.mdx': depends('B-7', 'B-6'),
+      'tickets/B-8.mdx': ticket('B-8').replace('status: available', 'status: done'),
+      'tickets/B-9.mdx': depends('B-9', 'B-8'),
+    } });
+    expect(claimable(f.dir, 'B-2')).toMatchObject({ code: 1, out: 'B-2: not claimable — B-2 depends on B-1, not done yet\n' });
+    expect(claimable(f.dir, 'B-5').code).toBe(0);
+    expect(claimable(f.dir, 'B-7').code).toBe(0);
+    // Dibber's `done` leaves the file in place: done all the same.
+    expect(claimable(f.dir, 'B-9').code).toBe(0);
   }, 60_000);
 
   it('a qualified dependency resolves through the repos map and gates the claim on the target\'s own board (B-113)', () => {
-    // The target repository: a bare git remote the repos map names by path, holding an archived
-    // done ticket (B-1), a live done one (B-2) and a live open one (B-3).
     const target = tmp('baton-b113-target-');
     execFileSync('git', ['init', '-q', '-b', 'main', target], { stdio: 'ignore' });
     git(target, 'config', 'user.email', 'b113@test');
@@ -362,9 +211,8 @@ describe('baton tickets claim | set | done (B-112)', () => {
     writeFileSync(join(target, 'tickets', 'B-3.mdx'), ticket('B-3'));
     git(target, 'add', '-A');
     git(target, 'commit', '-qm', 'target fixture');
-    const depends = (id: string, dep: string) => ticket(id).replace('**Depends on:** none.', `**Depends on:** ${dep}.`).replace('depends_on: []', `depends_on:\n  - ${dep}`);
     const f = repo({
-      settings: { repos: { target: target } },
+      settings: { repos: { target } },
       existing: {
         'tickets/B-9.mdx': depends('B-9', 'target:B-1'),
         'tickets/B-10.mdx': depends('B-10', 'target:B-2'),
@@ -373,22 +221,14 @@ describe('baton tickets claim | set | done (B-112)', () => {
         'tickets/B-13.mdx': depends('B-13', 'ghost:B-1'),
       },
     });
-    // Archived there and live `done` there are done here: the claims go through.
-    expect(run(f.dir, 'claim', 'B-9', '--offline').code).toBe(0);
-    expect(run(f.dir, 'claim', 'B-10', '--offline').code).toBe(0);
-    // A live open target keeps the claim waiting; an unknown ticket and a repository the map
-    // does not name refuse, as the board post would (§4.4).
-    expect(run(f.dir, 'claim', 'B-11', '--offline').err).toBe('baton: B-11 depends on target:B-3, not done yet\n');
-    expect(run(f.dir, 'claim', 'B-12', '--offline').err).toContain('target:B-99, which is neither live nor archived on');
-    expect(run(f.dir, 'claim', 'B-13', '--offline').err).toContain('ghost: the baton.json repos map does not resolve it');
+    expect(claimable(f.dir, 'B-9').code).toBe(0);
+    expect(claimable(f.dir, 'B-10').code).toBe(0);
+    expect(claimable(f.dir, 'B-11').out).toBe('B-11: not claimable — B-11 depends on target:B-3, not done yet\n');
+    expect(claimable(f.dir, 'B-12').err).toContain('target:B-99, which is neither live nor archived on');
+    expect(claimable(f.dir, 'B-13').err).toContain('ghost: the baton.json repos map does not resolve it');
   }, 60_000);
 
   it('a self-qualified dependency reads as its local id: the same checkout answers it, offline and all (B-113 round 1)', () => {
-    // The repos map names the own repository — by its bare origin path, as a checkout on a local
-    // remote reads it — so `baton:B-1` in baton's own checkout is the local B-1 (§3.1): the
-    // archive and the live status answer it, never a depth-1 clone of the repository's own
-    // remote (which `--offline` could not take anyway).
-    const depends = (id: string, dep: string) => ticket(id).replace('**Depends on:** none.', `**Depends on:** ${dep}.`).replace('depends_on: []', `depends_on:\n  - ${dep}`);
     const f = repo({ existing: {
       'tickets/B-1.mdx': ticket('B-1').replace('status: available', 'status: superseded'),
       'tickets/B-2.mdx': ticket('B-2'),
@@ -399,19 +239,10 @@ describe('baton tickets claim | set | done (B-112)', () => {
     git(f.dir, 'add', '-A');
     git(f.dir, 'commit', '-qm', 'name the own repository in the repos map');
     git(f.dir, 'push', '-q', 'origin', 'HEAD:main');
-    // Locally superseded is done, locally open is not — the same rule as a bare local id.
-    expect(run(f.dir, 'claim', 'B-9', '--offline').code).toBe(0);
-    expect(run(f.dir, 'claim', 'B-10', '--offline').err).toBe('baton: B-10 depends on baton:B-2, not done yet\n');
-    // And `new` refuses a filing whose self-qualified dependency loops: the next free id is
-    // B-11, and B-11 waiting on baton:B-11 is the self-dependency, refused before the push
-    // (round 1 — the board's own judgment, made here).
-    const loop = run(f.dir, 'new', '--direct', '--title', 'a self loop', '--depends-on', 'baton:B-11');
-    expect(loop.code).toBe(2);
-    expect(loop.err.split('\n').find((l) => l.startsWith('baton:'))).toBe('baton: B-11: a dependency cycle: B-11 → B-11');
-    // A map naming no id of its own cannot tell the spelling from another repository's: the
-    // claim says so, naming the fix, as it does for any repository the map does not resolve.
+    expect(claimable(f.dir, 'B-9').code).toBe(0);
+    expect(claimable(f.dir, 'B-10').out).toBe('B-10: not claimable — B-10 depends on baton:B-2, not done yet\n');
     const unnamed = repo({ existing: { 'tickets/B-1.mdx': ticket('B-1'), 'tickets/B-9.mdx': depends('B-9', 'baton:B-1') } });
-    expect(run(unnamed.dir, 'claim', 'B-9', '--offline').err).toContain('baton: the baton.json repos map does not resolve it');
+    expect(claimable(unnamed.dir, 'B-9').err).toContain('baton: the baton.json repos map does not resolve it');
   }, 60_000);
 
   it('dependencyRemote reads the repos map: a forge path is GitHub\'s, a remote as written', async () => {
@@ -422,105 +253,15 @@ describe('baton tickets claim | set | done (B-112)', () => {
     expect(() => dependencyRemote({}, 'ghost')).toThrow('ghost: the baton.json repos map does not resolve it');
   });
 
-  it('set writes any live status and --pr adds the pull request once', () => {
+  it('the check reads the fetched default head, never the caller\'s branch', () => {
     const f = repo({ existing: { 'tickets/B-1.mdx': ticket('B-1') } });
-    const url = 'https://github.com/immediately-run/baton/pull/40';
-    expect(run(f.dir, 'set', 'B-1', 'in-review', '--pr', url).out).toMatch(/^✓ tickets: B-1 → in-review — pushed as /);
-    expect(fmOf(f, 'tickets/B-1.mdx')).toMatchObject({ status: 'in-review' });
-    expect(f.at('tickets/B-1.mdx')).toContain(`prs:\n  - ${url}`);
-    // The same URL again is not added twice, and the same status on the same day writes nothing
-    // at all (`updated:` is what changes, and it is already today's).
-    const again = run(f.dir, 'set', 'B-1', 'in-review', '--pr', url);
-    expect(again.err).toContain('nothing to commit');
-    // moveTicket's own clock, with the date a test hands it: writing the same URL again beside
-    // another status adds it once. `deferred` — a live status again, as in the stopgap's LIVE
-    // list — carries it; `in-progress` would be refused below, held ticket.
-    const before = f.at('tickets/B-1.mdx')!;
-    moveTicket(f.dir, { date: tomorrow() }, 'B-1', 'deferred', url);
-    const after = f.at('tickets/B-1.mdx')!;
-    expect(parseFrontmatter(after)).toMatchObject({ status: 'deferred', updated: tomorrow() });
-    expect(after.match(new RegExp(url.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'))).toHaveLength(1);
-    expect(before.match(new RegExp(url.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'))).toHaveLength(1);
-    expect(f.at('tickets/B-1.mdx')!.match(new RegExp(url.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'))).toHaveLength(1);
-    // A URL that is not a GitHub pull request, and a status set does not write.
-    expect(run(f.dir, 'set', 'B-1', 'in-review', '--pr', 'https://example.com/x').err).toContain('is not a GitHub pull request URL');
-    expect(run(f.dir, 'set', 'B-1', 'done').err).toContain('`baton tickets done <id>`, past this push');
-    expect(run(f.dir, 'set', 'B-1', 'nonsense').err).toContain('nonsense is not a status `set` writes');
-    // In-progress is the claim status: only an available ticket takes it (the stopgap's rule),
-    // and this one is deferred — someone may hold it.
-    const second = run(f.dir, 'set', 'B-1', 'in-progress', '--pr', url);
-    expect(second.err).toContain('B-1 is closed, not available — someone may hold it'); // deferred left the live list
+    // The caller's own branch says in-progress; the remote's default branch says available.
+    git(f.dir, 'checkout', '-q', '-b', 'mine');
+    writeFileSync(join(f.dir, 'tickets', 'B-1.mdx'), ticket('B-1', 'status: in-progress').replace('status: available\n', ''));
+    git(f.dir, 'commit', '-qam', 'local');
+    expect(claimable(f.dir, 'B-1').code).toBe(0);
+    expect(git(f.dir, 'rev-parse', '--abbrev-ref', 'HEAD')).toBe('mine');
   }, 30_000);
-
-  it('done archives the file with its status and PR', () => {
-    const f = repo({ existing: { 'tickets/B-1.mdx': ticket('B-1') } });
-    const url = 'https://github.com/immediately-run/baton/pull/41';
-    const r = run(f.dir, 'done', 'B-1', '--pr', url);
-    expect(r.code).toBe(0);
-    expect(r.out).toMatch(/^✓ tickets: B-1 done \(archived\) — pushed as /);
-    expect(f.at('tickets/B-1.mdx')).toBeNull();
-    const archived = f.at('tickets/archive/B-1.mdx')!;
-    expect(parseFrontmatter(archived)).toMatchObject({ id: 'B-1', status: 'done' });
-    expect(archived).toContain(url);
-    // And a claim of it afterwards is refused: it is archived.
-    expect(run(f.dir, 'claim', 'B-1', '--offline').err).toBe('baton: B-1 is archived (done)\n');
-    expect(run(f.dir, 'done', 'B-1').err).toBe('baton: B-1 is archived (done)\n');
-  }, 60_000);
-
-  it('done climbs one more level in the ticket\'s relative links, so they still resolve from archive/', () => {
-    const body = ticket('B-1') + '\n[R-BTN-4](../spec/BATON_SPEC/09-claims.md#sec-9-1), [B-2](./B-2.mdx), [x](https://example.com/../y), [here](#why)\n';
-    const f = repo({ existing: { 'tickets/B-1.mdx': body } });
-    expect(run(f.dir, 'done', 'B-1').code).toBe(0);
-    const archived = f.at('tickets/archive/B-1.mdx')!;
-    expect(archived).toContain('[R-BTN-4](../../spec/BATON_SPEC/09-claims.md#sec-9-1)');
-    expect(archived).toContain('[B-2](../B-2.mdx)');
-    expect(archived).toContain('[x](https://example.com/../y)');
-    expect(archived).toContain('[here](#why)');
-  }, 60_000);
-
-  it('a push refused because the branch moved is fetched again and retried on the new head', () => {
-    // A peer claims B-1 first, between this command's fetch and its push: a `git` on PATH turns
-    // the first push away as a moved head would, and lets the peer's commit land.
-    const f = repo({ existing: { 'tickets/B-1.mdx': ticket('B-1') } });
-    const peer = tmp('baton-b112-peer-');
-    rmSync(peer, { recursive: true, force: true });
-    execFileSync('git', ['clone', '-q', f.origin, peer], { stdio: 'ignore' });
-    git(peer, 'config', 'user.email', 'peer@test');
-    git(peer, 'config', 'user.name', 'peer');
-    writeFileSync(join(peer, 'tickets', 'B-2.mdx'), ticket('B-2'));
-    git(peer, 'add', '-A');
-    git(peer, 'commit', '-qm', 'a peer files B-2');
-    const bin = tmp('baton-b112-git-');
-    const realGit = execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim();
-    const flag = JSON.stringify(join(bin, 'refused'));
-    const shim = [
-      '#!/bin/sh',
-      'n=0',
-      'for a in "$@"; do if [ "$a" = "push" ]; then n=1; fi; done',
-      `if [ "$n" = "1" ] && [ ! -e ${flag} ]; then`,
-      `  touch ${flag}`,
-      `  ${JSON.stringify(realGit)} -C ${JSON.stringify(peer)} push -q ${JSON.stringify(f.origin)} HEAD:main`,
-      '  echo " ! [rejected]        HEAD -> main (non-fast-forward)" 1>&2',
-      '  echo "error: failed to push some refs" >&2',
-      '  exit 1',
-      'fi',
-      `exec ${JSON.stringify(realGit)} "$@"`,
-      '',
-    ].join('\n');
-    writeFileSync(join(bin, 'git'), shim, { mode: 0o755 });
-    const out = spawnSync(process.execPath, [CLI, 'tickets', 'new', '--direct', '--title', 'mine'], { cwd: f.dir, encoding: 'utf8', env: { ...process.env, BATON_HOME: f.dir, PATH: `${bin}:${process.env.PATH}` } });
-    expect(out.stderr).toContain('origin/main moved; retrying on the new head (1/6)');
-    expect(out.stdout).toBe('✓ tickets: file B-3 — mine\n');
-    // It landed on the peer's commit, which the first try never saw.
-    expect(git(f.origin, 'log', '--format=%s', 'main').split('\n').slice(0, 3)).toEqual(['tickets: file B-3 — mine', 'a peer files B-2', 'fixture']);
-  }, 60_000);
-
-  it('a command the CLI does not take, and a flag it does not know, are refusals', () => {
-    const f = repo();
-    expect(run(f.dir, 'archive', 'B-1').err).toBe('baton: archive: baton tickets new|claim|set|done|check (baton tickets --help)\n');
-    expect(run(f.dir, 'claim', 'B-1', '--bogus', 'x').err).toBe('baton: --bogus: not a flag of baton tickets claim\n');
-    expect(run(f.dir, 'new').err).toBe('baton: new needs --title\n');
-  }, 60_000);
 });
 
 describe('the ticket commands’ commits: provenance trailers (B-16)', () => {
@@ -540,30 +281,6 @@ describe('the ticket commands’ commits: provenance trailers (B-16)', () => {
     expect(() => ticketCommitMessage('tickets: file B-2 — x', '', true)).toThrow("TICKET_REQUIRE_TRAILERS=1, but TICKET_TRAILERS is empty — set it to the session's provenance lines (the agent-provenance trailers, then Claude-Session and Co-Authored-By), or unset TICKET_REQUIRE_TRAILERS to commit without them");
   }, 30_000);
 
-  it('a command given trailers lands them on its commit, and one required without them refuses and pushes nothing', () => {
-    const f = repo({ existing: { 'tickets/B-1.mdx': ticket('B-1'), 'tickets/B-2.mdx': ticket('B-2') } });
-    const trailers = 'Claude-Session: ses-9\nCo-Authored-By: Claude <noreply@anthropic.com>';
-    // The environment's value, through the CLI as an operator sets it.
-    const r = spawnSync(process.execPath, [CLI, 'tickets', 'claim', 'B-1', '--offline'], { cwd: f.dir, encoding: 'utf8', env: { ...childEnv(f.dir), TICKET_TRAILERS: trailers } });
-    expect(r.status).toBe(0);
-    expect(r.stderr).toContain('--offline');
-    expect(git(f.origin, 'log', '-1', '--format=%B', 'main')).toBe(`tickets: claim B-1 (in progress)\n\n${trailers}`);
-    // git reads the lines as trailers, not just as text.
-    expect(git(f.origin, 'log', '-1', '--format=%(trailers:key=Claude-Session,valueonly)', 'main')).toBe('ses-9');
-    // The io's stand-in lands the same way on another command.
-    moveTicket(f.dir, { trailers }, 'B-2', 'in-review');
-    expect(git(f.origin, 'log', '-1', '--format=%B', 'main')).toBe(`tickets: B-2 → in-review\n\n${trailers}`);
-    // Required and empty: refused, nothing pushed — the environment's flag and the io's stand-in.
-    const head = f.head().sha;
-    const refused = spawnSync(process.execPath, [CLI, 'tickets', 'set', 'B-2', 'deferred'], { cwd: f.dir, encoding: 'utf8', env: { ...childEnv(f.dir), TICKET_REQUIRE_TRAILERS: '1' } });
-    expect(refused.status).toBe(2);
-    expect(refused.stderr).toBe("baton: TICKET_REQUIRE_TRAILERS=1, but TICKET_TRAILERS is empty — set it to the session's provenance lines (the agent-provenance trailers, then Claude-Session and Co-Authored-By), or unset TICKET_REQUIRE_TRAILERS to commit without them\n");
-    expect(() => moveTicket(f.dir, { trailers: '', requireTrailers: true }, 'B-2', 'deferred')).toThrow('TICKET_REQUIRE_TRAILERS=1, but TICKET_TRAILERS is empty');
-    expect(f.head().sha).toBe(head);
-    // Required with trailers: the commit lands, carrying them.
-    moveTicket(f.dir, { trailers, requireTrailers: true }, 'B-2', 'deferred');
-    expect(git(f.origin, 'log', '-1', '--format=%B', 'main')).toBe(`tickets: B-2 → deferred\n\n${trailers}`);
-  }, 60_000);
 });
 
 describe('baton tickets: the settings and the page (B-112)', () => {
@@ -599,20 +316,13 @@ describe('baton tickets: the settings and the page (B-112)', () => {
     expect(page).toContain('This repository’s default project is `fieldhouse`');
     expect(page).toContain('- `EXPEDITE` —');
     expect(page).toContain('- `OP` —');
-    expect(page).toContain('**Used by:**');
     expect(page).toContain('**Waits on:**');
     expect(page).toContain('Choose or create the');
-    expect(page).toContain('baton tickets claim <id>');
+    expect(page).toContain('dibber claim <id>');
+    expect(page).toContain('baton tickets check <id> --claimable');
+    expect(page).not.toMatch(/baton tickets (new|claim|set|done)/);
   }, 60_000);
 
-  it('the reverse mention adds a name to the line, or writes the line where the ticket has none', () => {
-    const withLine = '**Brief:** x\n\n**Used by:** nothing yet.\n\nProse.\n';
-    expect(reverseMention(withLine, 'B-2')).toBe('**Brief:** x\n\n**Used by:** B-2.\n\nProse.\n');
-    expect(reverseMention('**Brief:** x\n\n**Used by:** B-2.\n\nProse.\n', 'B-3')).toBe('**Brief:** x\n\n**Used by:** B-2, B-3.\n\nProse.\n');
-    expect(reverseMention('**Brief:** x\n\n**Used by:** B-2.\n\nProse.\n', 'B-2')).toBe('**Brief:** x\n\n**Used by:** B-2.\n\nProse.\n');
-    // No **Used by:** line: one is written at the end of the opening header block.
-    expect(reverseMention('**Brief:** x\n\n**Depends on:** none.\n\n### What to build\n', 'B-4')).toBe('**Brief:** x\n**Used by:** B-4.\n\n**Depends on:** none.\n\n### What to build\n');
-  }, 60_000);
 });
 
 describe('baton repo init and baton tickets check: the generated page (B-112)', () => {
@@ -638,12 +348,12 @@ describe('baton repo init and baton tickets check: the generated page (B-112)', 
     // The check finds nothing on a clean repository.
     expect((await checkTickets(dir)).findings).toEqual([]);
     // An edited copy is a finding, one line and the count, exit 1.
-    writeFileSync(page, `${want.replace('baton tickets claim <id>', 'claim it by hand')}\n`);
+    writeFileSync(page, `${want.replace('dibber claim <id>', 'claim it by hand')}\n`);
     const r = run(dir, 'check', '--repo', dir);
     expect(r.code).toBe(1);
     expect(r.out.split('\n').filter(Boolean)).toEqual([
       `tickets/${PAGE_NAME}: differs from the "How tickets work" page this release generates — \`baton repo init --force\` writes it again`,
-      'baton tickets check: 1 ticket(s), 1 finding(s)',
+      'baton tickets check: 0 ticket(s), 1 finding(s)',
     ]);
     // --quiet keeps stdout for the exit code.
     expect(run(dir, 'check', '--repo', dir, '--quiet')).toMatchObject({ code: 1, out: '' });
@@ -653,6 +363,68 @@ describe('baton repo init and baton tickets check: the generated page (B-112)', 
     expect(run(dir, 'check', '--repo', dir).code).toBe(0);
     expect(existsSync(join(dir, 'tickets', 'README.md'))).toBe(true);
   }, 60_000);
+});
+
+describe('baton repo init writes .dibber/config.json: Baton is Dibber\'s coordinator (B-326, S-BTN-189)', () => {
+  const initRepo = (settings: Record<string, unknown> = {}): string => {
+    const dir = tmp('baton-b326-init-');
+    execFileSync('git', ['init', '-q', '-b', 'main', dir], { stdio: 'ignore' });
+    mkdirSync(join(dir, '.baton'), { recursive: true });
+    writeFileSync(join(dir, '.baton', 'baton.json'), `${JSON.stringify({ baton_url: 'https://baton.immediately.run', items: 'roadmap', default_course: 'create-pr', repos: {}, agent_command: 'echo', ticket_prefix: 'FLDH', ...settings }, null, 2)}\n`);
+    return dir;
+  };
+  const config = (dir: string): Record<string, unknown> => JSON.parse(readFileSync(join(dir, '.dibber', 'config.json'), 'utf8')) as Record<string, unknown>;
+
+  it('writes the store, the prefix and the coordinator from .baton/baton.json, and says so', async () => {
+    const dir = initRepo();
+    const { initMain } = await CLI_MODULE();
+    const said: string[] = [];
+    await initMain(['--course', 'create-pr'], { root: dir, log: (l) => said.push(l) });
+    const version = (JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')) as { version: string }).version;
+    expect(config(dir)).toEqual({
+      store: 'roadmap',
+      prefix: 'FLDH',
+      coordinator: { next: ['npx', '--yes', `@immediately-run/baton@${version}`, 'tickets', 'next', 'ticket-<prefix>', '--coordinator'] },
+    });
+    expect(said).toContain('baton: .dibber/config.json — written: Dibber writes the ticket files, Baton gives their numbers (coordinator)');
+    // A second init changes nothing and says nothing of it.
+    const again: string[] = [];
+    await initMain(['--course', 'create-pr'], { root: dir, log: (l) => again.push(l) });
+    expect(again.filter((l) => l.includes('.dibber'))).toEqual([]);
+  }, 60_000);
+
+  it('over an existing file it adds what is missing, keeps every value and names a disagreement', async () => {
+    const dir = initRepo();
+    mkdirSync(join(dir, '.dibber'), { recursive: true });
+    writeFileSync(join(dir, '.dibber', 'config.json'), JSON.stringify({ store: 'tickets', ids: 'numeric', mine: true }));
+    const { initMain } = await CLI_MODULE();
+    const said: string[] = [];
+    await initMain(['--course', 'create-pr'], { root: dir, log: (l) => said.push(l) });
+    expect(config(dir)).toMatchObject({ store: 'tickets', ids: 'numeric', mine: true, prefix: 'FLDH', coordinator: { next: expect.arrayContaining(['ticket-<prefix>', '--coordinator']) } });
+    expect(said).toContain('baton: .dibber/config.json — added prefix, coordinator: Dibber writes the ticket files, Baton gives their numbers (coordinator)');
+    expect(said).toContain('baton: .dibber/config.json kept — its store is "tickets", .baton/baton.json says "roadmap"');
+    // A coordinator of the repository's own is kept as written.
+    writeFileSync(join(dir, '.dibber', 'config.json'), JSON.stringify({ store: 'roadmap', prefix: 'FLDH', coordinator: { next: ['node', 'cli/baton.mjs', 'tickets', 'next', 'ticket-<prefix>', '--coordinator'] } }));
+    await initMain(['--course', 'create-pr'], { root: dir, log: () => {} });
+    expect((config(dir).coordinator as { next: string[] }).next[0]).toBe('node');
+    // A file that is not a settings object is refused, never overwritten.
+    writeFileSync(join(dir, '.dibber', 'config.json'), '[1]');
+    await expect(initMain(['--course', 'create-pr'], { root: dir, log: () => {} })).rejects.toThrow('.dibber/config.json is not a settings object (not a JSON object)');
+    expect(readFileSync(join(dir, '.dibber', 'config.json'), 'utf8')).toBe('[1]');
+  }, 60_000);
+});
+
+describe('the dibber a leg runs: pinned, never a command a ticket names (B-326)', () => {
+  it('the setting pins a release version; the host\'s BATON_DIBBER wins; anything else is refused', async () => {
+    const { DIBBER_VERSION, dibberVersion, dibberWords } = await import('../../src/defaults/dibber');
+    expect(DIBBER_VERSION).toBe('0.4.0');
+    expect(dibberWords({}, {})).toEqual(['npx', '--yes', '@immediately-run/dibber@0.4.0']);
+    expect(dibberWords({ dibber: '0.5.1-rc.0' }, {})).toEqual(['npx', '--yes', '@immediately-run/dibber@0.5.1-rc.0']);
+    expect(dibberWords({ dibber: '0.4.0' }, { BATON_DIBBER: "node '/opt/dibber/bin/dibber.mjs'" })).toEqual(['node', '/opt/dibber/bin/dibber.mjs']);
+    for (const bad of ['latest', '0.4.0; rm -rf /', '../dibber', 4, '0.4']) {
+      expect(() => dibberVersion({ dibber: bad })).toThrow("it pins @immediately-run/dibber, it never names a command");
+    }
+  });
 });
 
 /** The CLI's own init, bundled as the CLI runs it (src/defaults/cli.ts through scripts/baton-cli.mjs). */
@@ -860,74 +632,49 @@ describe('the stale-rule guard: how a ticket is dated (2026-11-03)', () => {
   });
 });
 
-describe('baton tickets claim: the stale-rule guard (2026-11-03)', () => {
-  it('refuses a ticket citing a rule amended after it was filed, naming each id, date and title; nothing lands', () => {
+describe('baton tickets check --claimable: the stale-rule guard (2026-11-03, B-326)', () => {
+  it('a ticket citing a rule amended after it was filed is not claimable, naming each id, date and title and the note that answers it', () => {
     const f = datedRepo('2026-10-20', { existing: { 'tickets/B-1.mdx': citing('B-1') }, files: { 'spec/BATON_SPEC_HISTORY.md': HISTORY } });
     const before = f.head().sha;
-    const r = run(f.dir, 'claim', 'B-1', '--offline');
-    expect(r.code).toBe(2);
-    expect(r.err).toBe([
-      'baton: B-1 cites rules that spec/BATON_SPEC_HISTORY.md amended after the ticket answered for them (filed 2026-10-20, or a later rules re-read note naming the rule):',
+    const r = claimable(f.dir, 'B-1');
+    expect(r.code).toBe(1);
+    expect(r.out).toBe([
+      'B-1: not claimable — B-1 cites rules that spec/BATON_SPEC_HISTORY.md amended after the ticket answered for them (filed 2026-10-20, or a later rules re-read note naming the rule):',
       '  R-BTN-33 — 2026-11-02 — R-BTN-33, R-BTN-150: a range, its title wrapped',
       '  R-BTN-50 — 2026-11-01 — R-BTN-50: the owner’s ruling on Needs you',
       '  R-BTN-150 — 2026-11-02 — R-BTN-33, R-BTN-150: a range, its title wrapped',
-      'Re-read each rule and entry, rewrite or strike what in the ticket they contradict, then claim with --rules-reread R-BTN-33,R-BTN-50,R-BTN-150.',
+      'Re-read each rule and entry, rewrite or strike what in the ticket they contradict, then record it — dibber set B-1 --note "rules re-read: R-BTN-33, R-BTN-50, R-BTN-150" — and check again.',
       '',
     ].join('\n'));
     expect(f.head().sha).toBe(before);
-    expect(fmOf(f, 'tickets/B-1.mdx').status).toBe('available');
-    // `set in-progress` is a claim, and is refused the same way.
-    expect(run(f.dir, 'set', 'B-1', 'in-progress', '--offline').code).toBe(2);
   });
 
-  it('--rules-reread claims, and the claim’s commit records the re-read under ## Status', () => {
-    const f = datedRepo('2026-10-20', { existing: { 'tickets/B-1.mdx': citing('B-1') }, files: { 'spec/BATON_SPEC_HISTORY.md': HISTORY } });
-    const r = run(f.dir, 'claim', 'B-1', '--offline', '--rules-reread', 'R-BTN-50, R-BTN-150,R-BTN-33');
-    expect(r).toMatchObject({ code: 0 });
-    const text = f.at('tickets/B-1.mdx')!;
-    expect(parseFrontmatter(text)).toMatchObject({ status: 'in-progress', updated: today() });
-    expect(text).toContain(`## Status\n\n_filed 2026-10-20._\n\n_(${today()}: rules re-read at claim: R-BTN-33 (amended 2026-11-02), R-BTN-50 (amended 2026-11-01), R-BTN-150 (amended 2026-11-02))_\n`);
-    expect(execFileSync('git', ['-C', f.origin, 'show', '--name-only', '--format=%s', 'main'], { encoding: 'utf8' }).trim().split('\n')).toEqual(['tickets: claim B-1 (in progress)', '', 'tickets/B-1.mdx']);
+  it('Dibber\'s rules re-read note, naming every stale id, answers for them; one naming fewer does not', () => {
+    const dibberNote = (ids: string) => `${citing('B-1')}\n_2026-11-03: rules re-read: ${ids}._\n`;
+    const all = datedRepo('2026-10-20', { existing: { 'tickets/B-1.mdx': dibberNote('R-BTN-33, R-BTN-50, R-BTN-150') }, files: { 'spec/BATON_SPEC_HISTORY.md': HISTORY } });
+    expect(claimable(all.dir, 'B-1').code).toBe(0);
+    const some = datedRepo('2026-10-20', { existing: { 'tickets/B-1.mdx': dibberNote('R-BTN-50') }, files: { 'spec/BATON_SPEC_HISTORY.md': HISTORY } });
+    const r = claimable(some.dir, 'B-1');
+    expect(r.code).toBe(1);
+    expect(r.out).toContain('  R-BTN-33 — 2026-11-02');
+    expect(r.out).not.toContain('  R-BTN-50 —');
   });
 
-  it('--rules-reread names exactly the stale ids, or refuses listing the difference; nothing lands', () => {
-    const f = datedRepo('2026-10-20', { existing: { 'tickets/B-1.mdx': citing('B-1') }, files: { 'spec/BATON_SPEC_HISTORY.md': HISTORY } });
-    const before = f.head().sha;
-    const r = run(f.dir, 'claim', 'B-1', '--offline', '--rules-reread', 'R-BTN-50,R-BTN-7');
-    expect(r.code).toBe(2);
-    expect(r.err.split('\n').slice(0, 3)).toEqual([
-      'baton: B-1: --rules-reread names R-BTN-50,R-BTN-7; the rules amended since the ticket answered for them are R-BTN-33,R-BTN-50,R-BTN-150',
-      '  not named: R-BTN-33, R-BTN-150',
-      '  not amended since: R-BTN-7',
-    ]);
-    expect(run(f.dir, 'claim', 'B-1', '--offline', '--rules-reread').err).toBe('baton: --rules-reread needs a value\n');
-    expect(run(f.dir, 'claim', 'B-1', '--offline', '--rules-reread', ',').err).toBe('baton: --rules-reread takes the re-read rule ids, comma-separated: --rules-reread <id>,<id>\n');
-    expect(run(f.dir, 'set', 'B-1', 'in-review', '--rules-reread', 'R-BTN-50').err).toBe("baton: --rules-reread is a claim's (claim, or set <id> in-progress), not set in-review's\n");
-    expect(f.head().sha).toBe(before);
-    // A ticket with nothing stale refuses the flag too: it names ids not amended since.
-    const fresh = datedRepo('2026-10-20', { existing: { 'tickets/B-1.mdx': citing('B-1', '2026-11-02') }, files: { 'spec/BATON_SPEC_HISTORY.md': HISTORY } });
-    expect(run(fresh.dir, 'claim', 'B-1', '--offline', '--rules-reread', 'R-BTN-50').err).toContain('the rules amended since the ticket answered for them are none\n  not amended since: R-BTN-50');
-    // `set in-progress` with the right ids claims.
-    expect(run(f.dir, 'set', 'B-1', 'in-progress', '--offline', '--rules-reread', 'R-BTN-33,R-BTN-50,R-BTN-150').code).toBe(0);
-  });
-
-  it('an edit after the amendments clears nothing, a `tickets: …` subject or not; with no _filed line, the first commit dates the ticket', () => {
+  it('an edit after the amendments clears nothing; with no _filed line, the first commit dates the ticket', () => {
     const f = datedRepo('2026-10-20', { existing: { 'tickets/B-1.mdx': citing('B-1', null) }, files: { 'spec/BATON_SPEC_HISTORY.md': HISTORY } });
     edit(f, 'tickets/B-1.mdx', `${citing('B-1', null)}\nA clause struck by a spec PR.\n`, 'spec: R-BTN-50 — strike B-1’s clause\n\ntickets: a body line that is not the subject', '2026-11-05');
-    edit(f, 'tickets/B-1.mdx', `${citing('B-1', null)}\nA hand edit with a bookkeeping subject.\n`, 'tickets: B-1 — a hand edit', '2026-11-06');
-    const r = run(f.dir, 'claim', 'B-1', '--offline');
-    expect(r.code).toBe(2);
-    expect(r.err).toContain('(filed 2026-10-20, or a later rules re-read note naming the rule):\n  R-BTN-33 — 2026-11-02');
+    const r = claimable(f.dir, 'B-1');
+    expect(r.code).toBe(1);
+    expect(r.out).toContain('(filed 2026-10-20, or a later rules re-read note naming the rule):\n  R-BTN-33 — 2026-11-02');
   });
 
-  it('a ticket filed after the amendments, one whose re-read notes name every stale id, or a repository with no history file, claims without the flag and without a note', () => {
+  it('a ticket filed after the amendments, one whose spec-PR note names every stale id, or a repository with no history file, is claimable', () => {
     const fresh = datedRepo('2026-10-20', { existing: { 'tickets/B-1.mdx': citing('B-1', '2026-11-02') }, files: { 'spec/BATON_SPEC_HISTORY.md': HISTORY } });
-    expect(run(fresh.dir, 'claim', 'B-1', '--offline').code).toBe(0);
-    expect(fresh.at('tickets/B-1.mdx')).not.toContain('rules re-read at claim');
+    expect(claimable(fresh.dir, 'B-1').code).toBe(0);
     const handled = datedRepo('2026-10-20', { existing: { 'tickets/B-1.mdx': `${citing('B-1')}\n_(2026-11-03: rules re-read: R-BTN-33, R-BTN-50, R-BTN-150)_\n` }, files: { 'spec/BATON_SPEC_HISTORY.md': HISTORY } });
-    expect(run(handled.dir, 'claim', 'B-1', '--offline').code).toBe(0);
+    expect(claimable(handled.dir, 'B-1').code).toBe(0);
     const none = datedRepo('2026-10-20', { existing: { 'tickets/B-1.mdx': citing('B-1') } });
-    expect(run(none.dir, 'claim', 'B-1', '--offline').code).toBe(0);
+    expect(claimable(none.dir, 'B-1').code).toBe(0);
   });
 
   it('check.rules points the guard at another spec’s history and prefix (fieldhouse’s shape)', () => {
@@ -937,64 +684,44 @@ describe('baton tickets claim: the stale-rule guard (2026-11-03)', () => {
       files: { 'spec/FIELDHOUSE_SPEC_HISTORY.md': fh, 'spec/BATON_SPEC_HISTORY.md': HISTORY },
       settings: { check: { rules: { prefix: 'R-FH', history: 'spec/FIELDHOUSE_SPEC_HISTORY.md' } } },
     });
-    const r = run(f.dir, 'claim', 'B-1', '--offline');
-    expect(r.code).toBe(2);
-    expect(r.err).toContain('spec/FIELDHOUSE_SPEC_HISTORY.md amended after the ticket answered for them (filed 2026-10-20, or a later rules re-read note naming the rule):\n  R-FH-50 — 2026-11-01');
-    expect(r.err).not.toContain('  R-BTN');
+    const r = claimable(f.dir, 'B-1');
+    expect(r.code).toBe(1);
+    expect(r.out).toContain('spec/FIELDHOUSE_SPEC_HISTORY.md amended after the ticket answered for them (filed 2026-10-20, or a later rules re-read note naming the rule):\n  R-FH-50 — 2026-11-01');
+    expect(r.out).not.toContain('  R-BTN');
   });
 });
 
-describe('baton tickets claim in a shallow clone (2026-11-03)', () => {
-  /** A full fixture with a ticket filed 2026-10-20 and no `_filed` line, a later commit, and a
-   *  `--depth 1` clone of its origin: the clone's boundary commit is the later one. */
+describe('baton tickets check --claimable in a shallow clone (2026-11-03)', () => {
   const shallowOf = (): { f: Fixture; clone: string } => {
     const f = datedRepo('2026-10-20', { existing: { 'tickets/B-1.mdx': citing('B-1', null) } });
     edit(f, 'spec/BATON_SPEC_HISTORY.md', HISTORY, 'spec: the history', '2026-11-05');
     const clone = tmp('baton-shallow-');
     rmSync(clone, { recursive: true, force: true });
     execFileSync('git', ['clone', '-q', '--depth', '1', `file://${f.origin}`, clone], { stdio: 'ignore' });
-    git(clone, 'config', 'user.email', 'b112@test');
-    git(clone, 'config', 'user.name', 'b112 test');
     expect(git(clone, 'rev-parse', '--is-shallow-repository')).toBe('true');
     return { f, clone };
   };
 
   it('deepens the clone first, so the ticket is dated by its real first commit, not the boundary', () => {
     const { clone } = shallowOf();
-    const r = run(clone, 'claim', 'B-1', '--offline');
-    expect(r.code).toBe(2);
-    expect(r.err).toContain('(filed 2026-10-20, or a later rules re-read note naming the rule):\n  R-BTN-33 — 2026-11-02');
+    const r = claimable(clone, 'B-1');
+    expect(r.code).toBe(1);
+    expect(r.out).toContain('(filed 2026-10-20, or a later rules re-read note naming the rule):\n  R-BTN-33 — 2026-11-02');
     expect(git(clone, 'rev-parse', '--is-shallow-repository')).toBe('false');
   });
 
-  it('refuses, naming the fix, when the clone cannot be deepened; nothing lands', () => {
-    const { f, clone } = shallowOf();
-    const before = f.head().sha;
-    // A `git` on PATH that fails `fetch --unshallow` and runs every other command.
+  it('refuses, naming the fix, when the clone cannot be deepened', () => {
+    const { clone } = shallowOf();
     const bin = tmp('baton-bin-');
     const real = execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim();
     writeFileSync(join(bin, 'git'), `#!/bin/sh\nfor a in "$@"; do [ "$a" = --unshallow ] && { echo "fatal: unable to access the remote" >&2; exit 128; }; done\nexec ${real} "$@"\n`, { mode: 0o755 });
-    const out = spawnSync(process.execPath, [CLI, 'tickets', 'claim', 'B-1', '--offline'], { cwd: clone, encoding: 'utf8', env: { ...process.env, BATON_HOME: clone, PATH: `${bin}:${process.env.PATH}` } });
+    const out = spawnSync(process.execPath, [CLI, 'tickets', 'check', 'B-1', '--claimable', '--offline'], { cwd: clone, encoding: 'utf8', env: { ...childEnv(clone), PATH: `${bin}:${process.env.PATH}` } });
     expect(out.status).toBe(2);
-    expect(out.stderr).toContain("baton: B-1: this clone is shallow, so the day tickets/B-1.mdx was filed cannot be read, and `git fetch --unshallow origin` failed (fatal: unable to access the remote) — deepen the clone (`git fetch --unshallow`, or clone without --depth), then claim again");
-    expect(f.head().sha).toBe(before);
+    expect(out.stderr).toContain("baton: B-1: this clone is shallow, so the day tickets/B-1.mdx was filed cannot be read, and `git fetch --unshallow origin` failed (fatal: unable to access the remote) — deepen the clone (`git fetch --unshallow`, or clone without --depth), then check again");
   });
 });
 
-describe('baton tickets new: the Trust and Invariants sections (2026-11-03)', () => {
-  it('the skeleton carries ### Trust and ### Invariants, with repository-neutral placeholders, between the build and the tests', () => {
-    const body = skeletonBody({ description: 'd', deps: [], date: '2026-11-03' });
-    expect(sectionGaps(body)).toEqual({ absent: [], unfilled: ['Trust', 'Invariants'] });
-    expect(missingSections(body)).toEqual(['Trust', 'Invariants']);
-    const at = (h: string) => body.indexOf(`\n${h}\n`);
-    expect(at('### What to build')).toBeLessThan(at('### Trust'));
-    expect(at('### Trust')).toBeLessThan(at('### Invariants'));
-    expect(at('### Invariants')).toBeLessThan(at('### Tests'));
-    expect(body).toContain('who may write it and how it is verified');
-    // No other repository's ids or paths: every repository's `new` writes this text.
-    expect(body).not.toMatch(/R-BTN|docs\/|Baton/);
-  });
-
+describe('the Trust and Invariants sections: their reading (2026-11-03)', () => {
   it('a section counts as missing when absent, empty or still a placeholder; filled once anything else is written', () => {
     const t = (trust: string, inv = 'R-1: kept.') => `---\nid: B-1\n---\n\n### Trust\n\n${trust}\n\n### Invariants\n\n${inv}\n\n### Tests\n\nx\n`;
     expect(sectionGaps(t('no new input'))).toEqual({ absent: [], unfilled: [] });
@@ -1009,57 +736,11 @@ describe('baton tickets new: the Trust and Invariants sections (2026-11-03)', ()
     expect(missingSections('---\nid: B-1\n---\n\n### Trust\n\nx\n\n```\n### Invariants\n```\n')).toEqual(['Invariants']);
   });
 
-  it('after check.sections_since, an unfilled skeleton is refused before the push; --trust and --invariants fill it', async () => {
-    const f = repo({ settings: { check: { sections_since: '2000-01-01' } } });
-    const before = f.head().sha;
-    const r = run(f.dir, 'new', '--direct', '--title', 'a');
-    expect(r.code).toBe(2);
-    expect(r.err).toContain('B-1: filed on or after check.sections_since (2000-01-01), so ### Trust');
-    expect(r.err).toContain('pass --trust "<text>" and --invariants "<text>", or a --body-file that fills them');
-    expect(f.head().sha).toBe(before);
-    // One filled is still refused, naming only the other.
-    expect(run(f.dir, 'new', '--direct', '--title', 'a', '--trust', 'no new input').err).toContain('pass --invariants "<text>"');
-    const ok = run(f.dir, 'new', '--direct', '--title', 'a', '--trust', 'no new input', '--invariants', 'keeps the board post valid');
-    expect(ok).toMatchObject({ code: 0 });
-    expect(ok.err).toMatch(/^… id by the next-free scan/);
-    expect(f.at('tickets/B-1.mdx')).toContain('### Trust\n\nno new input\n\n### Invariants\n\nkeeps the board post valid\n');
-    git(f.dir, 'pull', '-q', 'origin', 'main');
-    expect((await checkTickets(f.dir, {}, { sections_since: '2000-01-01' })).findings).toEqual([]);
-    // Before the cutover (no setting), the skeleton files as before.
-    expect(run(repo().dir, 'new', '--direct', '--title', 'b')).toMatchObject({ code: 0 });
-  });
-
-});
-
-describe('baton tickets new --body-file: filed and judged like the skeleton (2026-11-03)', () => {
-  it('a body with no _filed line gains one under ## Status, so the sections check sees it', () => {
-    const f = repo();
-    const body = join(f.dir, 'body.md');
-    writeFileSync(body, '**Brief:** mine\n\n**Depends on:** none.\n\n### What to build\n\nMine.\n');
-    expect(run(f.dir, 'new', '--direct', '--title', 'a', '--body-file', body).code).toBe(0);
-    expect(f.at('tickets/B-1.mdx')).toMatch(/\n## Status\n\n_filed \d{4}-\d{2}-\d{2}\._\n/);
-    // A body that already has its own _filed line keeps it, once.
-    writeFileSync(body, '**Brief:** mine\n\n**Depends on:** none.\n\n## Status\n\n_filed 2026-01-02._\n');
-    expect(run(f.dir, 'new', '--direct', '--title', 'b', '--body-file', body).code).toBe(0);
-    expect(f.at('tickets/B-2.mdx')!.match(/_filed /g)).toHaveLength(1);
-  });
-
-  it('after check.sections_since, a body without ### Trust and ### Invariants is refused before the push', () => {
-    const f = repo({ settings: { check: { sections_since: '2000-01-01' } } });
-    const before = f.head().sha;
-    const body = join(f.dir, 'body.md');
-    writeFileSync(body, '**Brief:** mine\n\n**Depends on:** none.\n\n### What to build\n\nMine.\n\n### Trust\n\nno new input\n');
-    const r = run(f.dir, 'new', '--direct', '--title', 'a', '--body-file', body);
-    expect(r.code).toBe(2);
-    expect(r.err).toContain('B-1: filed on or after check.sections_since (2000-01-01), so the body needs ### Invariants (the rules it must not break, by id, and how the design keeps each)');
-    expect(f.head().sha).toBe(before);
-    writeFileSync(body, '**Brief:** mine\n\n**Depends on:** none.\n\n### What to build\n\nMine.\n\n### Trust\n\nno new input\n\n### Invariants\n\nR-BTN-33: posts no prose.\n');
-    expect(run(f.dir, 'new', '--direct', '--title', 'a', '--body-file', body).code).toBe(0);
-  });
 });
 
 /* ──────────────────────────────────────────────────────────────────────────────────────────
- * B-129 — the claim asks Baton first, and continues the ticket where Baton holds it.
+ * B-129, B-326 — check --claimable asks Baton first, and a takeover continues the ticket where
+ * Baton holds it.
  * Against a fake Baton (node:http) and the bare origin above: the B-91 replay (a release wrote
  * `status: available` / `prs: []` over an open PR; Baton held the ticket at pr-open with review
  * ready), the live claim that refuses naming its holder and the lease's end, a ticket at its
@@ -1067,7 +748,7 @@ describe('baton tickets new --body-file: filed and judged like the skeleton (202
  * and the release that keeps every prs: entry — refusing the write that would drop an open PR.
  * ──────────────────────────────────────────────────────────────────────────────────────── */
 
-/** A stand-in Baton answering the three reads the claim makes, recording what it was asked. */
+/** A stand-in Baton answering the three reads the check makes, recording what it was asked. */
 const PR109 = 'https://github.com/immediately-run/baton/pull/109';
 async function fakeBaton(state: {
   ready?: Record<string, unknown>[];
@@ -1120,7 +801,7 @@ function namedRepo(opts: Parameters<typeof repo>[0] & { courseFile?: boolean } =
   return f;
 }
 
-describe('baton tickets claim asks Baton first (B-129)', () => {
+describe('baton tickets check --claimable asks Baton first (B-129, B-326, S-BTN-199)', () => {
   /** B-91's 2026-10-27 state: the frontmatter says available with no PRs; Baton holds the ticket
    *  at pr-open, review ready, its claim released with #109 on the seeded-owner-keys branch. */
   const B91 = {
@@ -1147,217 +828,128 @@ describe('baton tickets claim asks Baton first (B-129)', () => {
     writeFileSync(keyFile, `${key}\n`);
   });
 
-  it('replaying B-91: the claim takes the ticket over at pr-open, printing and restoring #109', async () => {
+
+  it('replaying B-91: the takeover at pr-open is printed with #109, the branch and the hand-off; nothing is written', async () => {
     const f = namedRepo({ existing: { 'tickets/B-91.mdx': b91File('available', []) } });
     const baton = await fakeBaton(B91);
     try {
       const before = f.head().sha;
-      const r = await runAsync(f.dir, 'claim', 'B-91', '-i', keyFile, '--url', baton.url);
+      const r = await runAsync(f.dir, 'check', 'B-91', '--claimable', '-i', keyFile, '--url', baton.url);
       expect(r).toMatchObject({ code: 0, err: '' });
-      // The session starts from Baton's position: the station, the ready leg, the PR, the branch
-      // and where the hand-off is.
-      expect(r.out).toContain('B-91: Baton holds it at pr-open, review ready — you are taking it over, not starting it');
-      expect(r.out).toContain(`  PR: ${PR109}`);
-      expect(r.out).toContain('  branch: claude/B-91-seed-owner-keys — continue on it, never `checkout -b` a new one');
-      expect(r.out).toContain('  hand-off: released:requested 2026-10-27T09:15:00.000Z — read it: git log -1 tickets/B-91.mdx');
-      // The three reads the ticket names, and only them: the board, the history, and the
-      // branch-holder query for the branch the history named.
+      expect(r.out.split('\n')).toEqual([
+        'B-91: Baton holds it at pr-open, review ready — you are taking it over, not starting it',
+        `  PR: ${PR109} — Baton's record holds it and the file does not: dibber set B-91 --pr ${PR109}`,
+        '  branch: claude/B-91-seed-owner-keys — continue on it, never `checkout -b` a new one',
+        '  hand-off: released:requested 2026-10-27T09:15:00.000Z — read it: git log -1 tickets/B-91.mdx',
+        'B-91: claimable — claim it with: dibber claim B-91',
+        '',
+      ]);
       expect(baton.asked.map((x) => x.replace(/\?.*$/, ''))).toEqual([
         'GET /v1/repositories/baton/board',
         'GET /v1/repositories/baton/tickets/baton%3AB-91/history',
         'GET /v1/runner/branch-holder',
       ]);
-      // The commit writes Baton's record back: in-progress, and `prs:` restored to #109.
-      expect(fmOf(f, 'tickets/B-91.mdx')).toMatchObject({ status: 'in-progress' });
-      expect(f.at('tickets/B-91.mdx')).toContain(`prs:\n  - ${PR109}`);
-      // The hand-off rides on the commit, where the next session reads it.
-      const message = git(f.origin, 'log', '-1', '--format=%B', 'main');
-      expect(message).toContain('tickets: claim B-91 (in progress — continuing where Baton holds it: pr-open, review ready)');
-      expect(message).toContain(`PR ${PR109}`);
-      expect(message).toContain('Station: pr-open (Baton)');
-      expect(message).toContain("Next: review from pr-open (Baton's ready row) — baton tickets claim B-91 continues there");
-      expect(message).toContain('Branch: claude/B-91-seed-owner-keys');
-      expect(f.head().parent).toBe(before);
+      expect(f.head().sha).toBe(before);
+      expect(f.at('tickets/B-91.mdx')).toContain('prs: []');
     } finally {
       baton.close();
     }
   }, 60_000);
 
-  it('the same state with a live claim by another runner refuses, naming the holder and the lease', async () => {
+  it('a PR the file already names is printed without the dibber set', async () => {
+    const f = namedRepo({ existing: { 'tickets/B-91.mdx': b91File('available', [PR109]) } });
+    const baton = await fakeBaton(B91);
+    try {
+      const r = await runAsync(f.dir, 'check', 'B-91', '--claimable', '-i', keyFile, '--url', baton.url);
+      expect(r.code).toBe(0);
+      expect(r.out).toContain(`  PR: ${PR109}\n`);
+    } finally {
+      baton.close();
+    }
+  }, 60_000);
+
+  it('a live claim by another runner is not claimable, naming the holder and the lease', async () => {
     const f = namedRepo({ existing: { 'tickets/B-91.mdx': b91File('available', []) } });
     const leaseEnds = Date.parse('2026-10-27T11:00:00Z');
     const baton = await fakeBaton({ ...B91, holders: [{ ticket_id: 'baton:B-91', runner_id: 7, hostname: 'host-3', session_name: 'claude-review', lease_ends_at: leaseEnds }] });
     try {
-      const before = f.head().sha;
-      const r = await runAsync(f.dir, 'claim', 'B-91', '-i', keyFile, '--url', baton.url);
-      expect(r.code).toBe(2);
-      expect(r.err).toBe(`baton: B-91 is held by host-3 · claude-review (runner 7), its lease ends 2026-10-27T11:00:00.000Z — its lease has not ended; it is released or reaped first (Baton's board, B-129)\n`);
-      expect(f.head().sha).toBe(before);
+      const r = await runAsync(f.dir, 'check', 'B-91', '--claimable', '-i', keyFile, '--url', baton.url);
+      expect(r.code).toBe(1);
+      expect(r.out).toBe(`B-91: not claimable — B-91 is held by host-3 · claude-review (runner 7), its lease ends 2026-10-27T11:00:00.000Z — its lease has not ended; it is released or reaped first (Baton's board, B-129)\n`);
     } finally {
       baton.close();
     }
   }, 60_000);
 
-  it("a branch another live claim holds refuses the takeover, and a fence-pending branch too", async () => {
+  it('a branch another live claim holds is not claimable, and a fence-pending branch neither', async () => {
     const f = namedRepo({ existing: { 'tickets/B-91.mdx': b91File('available', []) } });
     const held = await fakeBaton({ ...B91, branchHolder: { tickets: ['baton:B-91'], held_by_other: true, fence_pending: false } });
     try {
-      const r = await runAsync(f.dir, 'claim', 'B-91', '-i', keyFile, '--url', held.url);
-      expect(r.code).toBe(2);
-      expect(r.err).toContain("B-91's branch claude/B-91-seed-owner-keys is held by another live claim");
+      const r = await runAsync(f.dir, 'check', 'B-91', '--claimable', '-i', keyFile, '--url', held.url);
+      expect(r.code).toBe(1);
+      expect(r.out).toContain("B-91's branch claude/B-91-seed-owner-keys is held by another live claim");
     } finally {
       held.close();
     }
     const fenced = await fakeBaton({ ...B91, branchHolder: { tickets: ['baton:B-91'], held_by_other: false, fence_pending: true } });
     try {
-      expect((await runAsync(f.dir, 'claim', 'B-91', '-i', keyFile, '--url', fenced.url)).err).toContain('fence-pending');
+      expect((await runAsync(f.dir, 'check', 'B-91', '--claimable', '-i', keyFile, '--url', fenced.url)).out).toContain('fence-pending');
     } finally {
       fenced.close();
     }
   }, 60_000);
 
-  it('a ticket at its start station with no holder claims as before', async () => {
+  it('a ticket at its start station with no holder is a fresh claim, and the branch-holder query is not asked', async () => {
     const f = namedRepo({ existing: { 'tickets/B-5.mdx': ticket('B-5') } });
     const baton = await fakeBaton({ ready: [], holders: [], history: [], resume: null });
     try {
-      const r = await runAsync(f.dir, 'claim', 'B-5', '-i', keyFile, '--url', baton.url);
-      expect(r).toMatchObject({ code: 0, err: '' });
-      expect(r.out).toMatch(/^✓ tickets: claim B-5 \(in progress\) — pushed as [0-9a-f]{7,}\n$/);
-      expect(fmOf(f, 'tickets/B-5.mdx')).toMatchObject({ status: 'in-progress' });
-      // No branch was named, so the branch-holder query was never asked.
+      const r = await runAsync(f.dir, 'check', 'B-5', '--claimable', '-i', keyFile, '--url', baton.url);
+      expect(r).toMatchObject({ code: 0, err: '', out: 'B-5: claimable — claim it with: dibber claim B-5\n' });
       expect(baton.asked.filter((x) => x.includes('branch-holder'))).toEqual([]);
     } finally {
       baton.close();
     }
   }, 60_000);
 
-  it('an unanswered read refuses — unreachable, forbidden, no key — and --offline claims', async () => {
+  it('an unanswered read exits 2 — unreachable, forbidden, no key — and --offline judges git\'s word', async () => {
     const f = namedRepo({ existing: { 'tickets/B-5.mdx': ticket('B-5') } });
-    const before = f.head().sha;
-    // Unreachable: nothing listens there.
-    const dead = await runAsync(f.dir, 'claim', 'B-5', '-i', keyFile, '--url', 'http://127.0.0.1:9');
+    const dead = await runAsync(f.dir, 'check', 'B-5', '--claimable', '-i', keyFile, '--url', 'http://127.0.0.1:9');
     expect(dead.code).toBe(2);
     expect(dead.err).toContain('the board of baton: Baton at http://127.0.0.1:9 is unreachable');
-    expect(dead.err).toContain("--offline to claim on git's word alone");
-    expect(f.head().sha).toBe(before);
-    // Forbidden: the key is not granted on the repository.
+    expect(dead.err).toContain("--offline to judge git's word alone");
     const refused = await fakeBaton({ boardStatus: 403 });
     try {
-      const r = await runAsync(f.dir, 'claim', 'B-5', '-i', keyFile, '--url', refused.url);
+      const r = await runAsync(f.dir, 'check', 'B-5', '--claimable', '-i', keyFile, '--url', refused.url);
       expect(r.code).toBe(2);
       expect(r.err).toContain('the board of baton: forbidden');
     } finally {
       refused.close();
     }
-    // No key at all: the frontmatter is not a fallback.
-    const bare = spawnSync(process.execPath, [CLI, 'tickets', 'claim', 'B-5'], { cwd: f.dir, encoding: 'utf8', env: childEnv(f.dir) });
+    const bare = spawnSync(process.execPath, [CLI, 'tickets', 'check', 'B-5', '--claimable'], { cwd: f.dir, encoding: 'utf8', env: childEnv(f.dir) });
     expect(bare.status).toBe(2);
-    expect(bare.stderr).toContain("claim reads Baton's record of the ticket first (B-129) — pass -i KEY");
-    // --offline claims on git's word alone, saying what it did not know.
-    const offline = run(f.dir, 'claim', 'B-5', '--offline');
-    expect(offline.code).toBe(0);
-    expect(offline.err).toContain("claimed on git's word alone (--offline)");
-    expect(fmOf(f, 'tickets/B-5.mdx')).toMatchObject({ status: 'in-progress' });
+    expect(bare.stderr).toContain("the check reads Baton's record of the ticket first (B-129) — pass -i KEY");
+    expect(claimable(f.dir, 'B-5').code).toBe(0);
   }, 30_000);
 
-  it('a release keeps every prs: entry and its commit carries the hand-off', async () => {
-    const f = namedRepo({ existing: { 'tickets/B-91.mdx': b91File('in-progress', [PR109]) } });
-    const baton = await fakeBaton(B91);
-    try {
-      const r = await runAsync(f.dir, 'set', 'B-91', 'available', '-i', keyFile, '--url', baton.url);
-      expect(r).toMatchObject({ code: 0, err: '' });
-      expect(fmOf(f, 'tickets/B-91.mdx')).toMatchObject({ status: 'available' });
-      expect(f.at('tickets/B-91.mdx')).toContain(`prs:\n  - ${PR109}`);
-      const message = git(f.origin, 'log', '-1', '--format=%B', 'main');
-      expect(message).toBe([
-        'tickets: release B-91 → available',
-        '',
-        `PR ${PR109}`,
-        'Station: pr-open (Baton)',
-        "Next: review from pr-open (Baton's ready row) — baton tickets claim B-91 continues there",
-        'Branch: claude/B-91-seed-owner-keys',
-      ].join('\n'));
-    } finally {
-      baton.close();
-    }
-  }, 60_000);
-
-  it('a release\'s --note is the hand-off\'s "what is left", and --note is a release\'s alone', async () => {
-    const f = namedRepo({ existing: { 'tickets/B-91.mdx': b91File('in-progress', [PR109]) } });
-    const baton = await fakeBaton(B91);
-    try {
-      const r = await runAsync(f.dir, 'set', 'B-91', 'available', '--note', 'round 3 findings 2 and 5 open;\n the rest fixed', '-i', keyFile, '--url', baton.url);
-      expect(r).toMatchObject({ code: 0, err: '' });
-      const message = git(f.origin, 'log', '-1', '--format=%B', 'main');
-      expect(message).toContain("Next: review from pr-open (Baton's ready row)");
-      expect(message).toContain('Left: round 3 findings 2 and 5 open; the rest fixed');
-      const wrong = await runAsync(f.dir, 'set', 'B-91', 'in-review', '--note', 'x', '-i', keyFile, '--url', baton.url);
-      expect(wrong.code).toBe(2);
-      expect(wrong.err).toContain('--note is a release\'s hand-off');
-    } finally {
-      baton.close();
-    }
-    // Offline, the note is still the hand-off — Baton's lines are left out, never guessed.
-    const f2 = namedRepo({ existing: { 'tickets/B-91.mdx': b91File('in-progress', [PR109]) } });
-    expect(run(f2.dir, 'set', 'B-91', 'available', '--offline', '--note', 'review round 2 next').code).toBe(0);
-    expect(git(f2.origin, 'log', '-1', '--format=%B', 'main')).toBe(`tickets: release B-91 → available\n\nPR ${PR109}\nLeft: review round 2 next`);
-  }, 60_000);
-
-  it("a write that would drop an open PR is refused: Baton holds the ticket past its start", async () => {
-    const f = namedRepo({ existing: { 'tickets/B-91.mdx': b91File('available', []) } });
-    const baton = await fakeBaton(B91);
-    try {
-      const before = f.head().sha;
-      const r = await runAsync(f.dir, 'set', 'B-91', 'available', '-i', keyFile, '--url', baton.url);
-      expect(r.code).toBe(2);
-      expect(r.err).toContain(`B-91: this write would drop ${PR109} — Baton's record holds that PR for a ticket it offers ready at pr-open (review), past its start`);
-      expect(r.err).toContain('take it over instead');
-      expect(f.head().sha).toBe(before);
-    } finally {
-      baton.close();
-    }
-    // With Baton unreadable the release proceeds on git's own word, warning as it goes: a
-    // release must be possible while Baton is down, and this write drops nothing git had.
-    const warned = await runAsync(f.dir, 'set', 'B-91', 'available', '-i', keyFile, '--url', 'http://127.0.0.1:9');
-    expect(warned.code).toBe(0);
-    expect(warned.err).toContain('continuing on git\'s own record');
-    expect(fmOf(f, 'tickets/B-91.mdx')).toMatchObject({ status: 'available' });
-  }, 60_000);
-
-  it('done is never refused by the drop-PR guard', async () => {
-    const f = namedRepo({ existing: { 'tickets/B-91.mdx': b91File('in-review', []) } });
-    const baton = await fakeBaton(B91);
-    try {
-      const r = await runAsync(f.dir, 'done', 'B-91', '-i', keyFile, '--url', baton.url);
-      expect(r).toMatchObject({ code: 0, err: '' });
-      expect(parseFrontmatter(f.at('tickets/archive/B-91.mdx')!)).toMatchObject({ status: 'done' });
-    } finally {
-      baton.close();
-    }
-  }, 60_000);
-
-  it('a takeover overrides only a false available: the git lock, a parked or closed status and an undone dependency still refuse', async () => {
+  it('a takeover overrides only a false available: the git lock, a parked or closed status and an undone dependency are not claimable', async () => {
     const baton = await fakeBaton(B91);
     try {
       for (const status of ['in-progress', 'in-review']) {
         const f = namedRepo({ existing: { 'tickets/B-91.mdx': b91File(status, [PR109]) } });
-        const before = f.head().sha;
-        const r = await runAsync(f.dir, 'claim', 'B-91', '-i', keyFile, '--url', baton.url);
-        expect(r.code).toBe(2);
-        expect(r.err).toBe(`baton: B-91 is ${status} in git — a git-lock holder may hold it; Baton's position (pr-open) overrides only a false available, never the git lock\n`);
-        expect(f.head().sha).toBe(before);
+        const r = await runAsync(f.dir, 'check', 'B-91', '--claimable', '-i', keyFile, '--url', baton.url);
+        expect(r.code).toBe(1);
+        expect(r.out).toBe(`B-91: not claimable — B-91 is ${status} in git — a git-lock holder may hold it; Baton's position (pr-open) overrides only a false available, never the git lock\n`);
       }
       for (const status of ['deferred', 'deprioritized', 'superseded']) {
         const f = namedRepo({ existing: { 'tickets/B-91.mdx': b91File(status, [PR109]) } });
-        const r = await runAsync(f.dir, 'claim', 'B-91', '-i', keyFile, '--url', baton.url);
-        expect(r.code).toBe(2);
-        expect(r.err).toMatch(/^baton: B-91 is [a-z-]+ in git — parked or closed; Baton's position \(pr-open\) overrides only a false available\n$/);
+        const r = await runAsync(f.dir, 'check', 'B-91', '--claimable', '-i', keyFile, '--url', baton.url);
+        expect(r.code).toBe(1);
+        expect(r.out).toMatch(/^B-91: not claimable — B-91 is [a-z-]+ in git — parked or closed; Baton's position \(pr-open\) overrides only a false available\n$/);
       }
       const depends = b91File('available', []).replace('**Depends on:** none.', '**Depends on:** B-1.').replace('depends_on: []', 'depends_on:\n  - B-1');
       const f = namedRepo({ existing: { 'tickets/B-1.mdx': ticket('B-1'), 'tickets/B-91.mdx': depends } });
-      const r = await runAsync(f.dir, 'claim', 'B-91', '-i', keyFile, '--url', baton.url);
-      expect(r.code).toBe(2);
-      expect(r.err).toBe('baton: B-91 depends on B-1, not done yet\n');
+      const r = await runAsync(f.dir, 'check', 'B-91', '--claimable', '-i', keyFile, '--url', baton.url);
+      expect(r).toMatchObject({ code: 1, out: 'B-91: not claimable — B-91 depends on B-1, not done yet\n' });
     } finally {
       baton.close();
     }
@@ -1365,39 +957,28 @@ describe('baton tickets claim asks Baton first (B-129)', () => {
 
   it('a ticket moved back to its start is judged by where Baton holds it now: a fresh claim, not a takeover', async () => {
     const f = namedRepo({ existing: { 'tickets/B-91.mdx': b91File('available', []) } });
-    // The history once reached pr-open; the board now offers implement from filed — the start.
     const baton = await fakeBaton({ ...B91, ready: [{ id: 'baton:B-91', local_id: 'B-91', station: 'filed', leg: 'implement' }] });
     try {
-      const r = await runAsync(f.dir, 'claim', 'B-91', '-i', keyFile, '--url', baton.url);
-      expect(r).toMatchObject({ code: 0, err: '' });
-      expect(r.out).toMatch(/^✓ tickets: claim B-91 \(in progress\) — pushed as [0-9a-f]{7,}\n$/);
-      expect(f.at('tickets/B-91.mdx')).toContain('prs: []');
+      const r = await runAsync(f.dir, 'check', 'B-91', '--claimable', '-i', keyFile, '--url', baton.url);
+      expect(r).toMatchObject({ code: 0, err: '', out: 'B-91: claimable — claim it with: dibber claim B-91\n' });
     } finally {
       baton.close();
     }
   }, 60_000);
 
   it('with no local course file the start is the standard course\'s: a ticket whose newest reached row is the start is a fresh claim, one past it a takeover', async () => {
-    // No `.baton/courses/create-pr/course.json` (a sourced course, a repository with no course
-    // code): the start comes from the standard create-pr course (`filed`), never from whichever
-    // row the path reached.
     const f = namedRepo({ courseFile: false, existing: { 'tickets/B-91.mdx': b91File('available', []), 'tickets/B-92.mdx': ticket('B-92') } });
     expect(existsSync(join(f.dir, '.baton', 'courses', 'create-pr', 'course.json'))).toBe(false);
-    // Moved back to its start: the board offers nothing ready, and the newest row that reached a
-    // station reached `filed`, over an older pr-open.
     const back = await fakeBaton({ ...B91, ready: [], history: [{ id: 4, kind: 'git-moved', reached: 'filed', next_leg: 'implement' }, ...B91.history] });
     try {
-      const r = await runAsync(f.dir, 'claim', 'B-91', '-i', keyFile, '--url', back.url);
-      expect(r).toMatchObject({ code: 0, err: '' });
-      expect(r.out).toMatch(/^✓ tickets: claim B-91 \(in progress\) — pushed as [0-9a-f]{7,}\n$/);
-      expect(f.at('tickets/B-91.mdx')).toContain('prs: []');
+      const r = await runAsync(f.dir, 'check', 'B-91', '--claimable', '-i', keyFile, '--url', back.url);
+      expect(r).toMatchObject({ code: 0, err: '', out: 'B-91: claimable — claim it with: dibber claim B-91\n' });
     } finally {
       back.close();
     }
-    // Past it (the history's newest reached row is `reviewed`): the takeover, as with a file.
     const past = await fakeBaton({ ...B91, ready: [] });
     try {
-      const r = await runAsync(f.dir, 'claim', 'B-92', '-i', keyFile, '--url', past.url);
+      const r = await runAsync(f.dir, 'check', 'B-92', '--claimable', '-i', keyFile, '--url', past.url);
       expect(r.code).toBe(0);
       expect(r.out).toContain('B-92: Baton holds it at reviewed — you are taking it over, not starting it');
     } finally {
@@ -1424,44 +1005,22 @@ describe('baton tickets claim asks Baton first (B-129)', () => {
     }
   });
 
-  it('every release writes its subject and PR lines; Baton\'s lines only past the start', async () => {
-    const PR7 = 'https://github.com/immediately-run/baton/pull/7';
-    const f = namedRepo({ existing: { 'tickets/B-5.mdx': ticket('B-5', 'status: in-progress').replace('status: available\n', '').replace('prs: []', `prs:\n  - ${PR7}`) } });
-    // At its start, no note: the release subject and the PR line, no Baton line.
-    const atStart = await fakeBaton({ ready: [{ id: 'baton:B-5', local_id: 'B-5', station: 'filed', leg: 'implement' }], holders: [], history: [], resume: null });
-    try {
-      const r = await runAsync(f.dir, 'set', 'B-5', 'available', '-i', keyFile, '--url', atStart.url);
-      expect(r).toMatchObject({ code: 0, err: '' });
-      expect(git(f.origin, 'log', '-1', '--format=%B', 'main')).toBe(`tickets: release B-5 → available\n\nPR ${PR7}`);
-    } finally {
-      atStart.close();
-    }
-    // Offline, no note: the same two lines — git's word, Baton's lines left out.
-    expect(run(f.dir, 'set', 'B-5', 'in-progress', '--offline').code).toBe(0);
-    expect(run(f.dir, 'set', 'B-5', 'available', '--offline').code).toBe(0);
-    expect(git(f.origin, 'log', '-1', '--format=%B', 'main')).toBe(`tickets: release B-5 → available\n\nPR ${PR7}`);
-    // A ticket naming no PR: the subject alone.
-    const g = namedRepo({ existing: { 'tickets/B-6.mdx': ticket('B-6', 'status: in-progress').replace('status: available\n', '') } });
-    expect(run(g.dir, 'set', 'B-6', 'available', '--offline').code).toBe(0);
-    expect(git(g.origin, 'log', '-1', '--format=%B', 'main')).toBe('tickets: release B-6 → available');
-  }, 60_000);
-
   it('a holder whose lease has ended awaits reaping, and a legacy holder has no lease: both refuse, naming it', async () => {
     const f = namedRepo({ existing: { 'tickets/B-91.mdx': b91File('available', []) } });
     const ended = Date.parse('2026-10-27T11:00:00Z');
     const stale = await fakeBaton({ ...B91, serverTime: ended + 60_000, holders: [{ ticket_id: 'baton:B-91', runner_id: 7, hostname: 'host-3', session_name: 'claude-review', lease_ends_at: ended }] });
     try {
-      const r = await runAsync(f.dir, 'claim', 'B-91', '-i', keyFile, '--url', stale.url);
-      expect(r.code).toBe(2);
-      expect(r.err).toBe("baton: B-91 is held by host-3 · claude-review (runner 7), its lease ended 2026-10-27T11:00:00.000Z and the claim awaits reaping; it is reaped first (Baton's board, B-129)\n");
+      const r = await runAsync(f.dir, 'check', 'B-91', '--claimable', '-i', keyFile, '--url', stale.url);
+      expect(r.code).toBe(1);
+      expect(r.out).toBe("B-91: not claimable — B-91 is held by host-3 · claude-review (runner 7), its lease ended 2026-10-27T11:00:00.000Z and the claim awaits reaping; it is reaped first (Baton's board, B-129)\n");
     } finally {
       stale.close();
     }
     const legacy = await fakeBaton({ ...B91, holders: [{ ticket_id: 'baton:B-91', runner_id: 3, hostname: 'legacy', session_name: 'item-B-91', lease_ends_at: null }] });
     try {
-      const r = await runAsync(f.dir, 'claim', 'B-91', '-i', keyFile, '--url', legacy.url);
-      expect(r.code).toBe(2);
-      expect(r.err).toBe("baton: B-91 is held by legacy · item-B-91 (runner 3), a claim with no lease to end (a legacy claim); it is released, adopted or reaped first (Baton's board, B-129)\n");
+      const r = await runAsync(f.dir, 'check', 'B-91', '--claimable', '-i', keyFile, '--url', legacy.url);
+      expect(r.code).toBe(1);
+      expect(r.out).toBe("B-91: not claimable — B-91 is held by legacy · item-B-91 (runner 3), a claim with no lease to end (a legacy claim); it is released, adopted or reaped first (Baton's board, B-129)\n");
     } finally {
       legacy.close();
     }
@@ -1471,13 +1030,13 @@ describe('baton tickets claim asks Baton first (B-129)', () => {
     const f = namedRepo({ existing: { 'tickets/B-5.mdx': ticket('B-5') } });
     const baton = await fakeBaton({});
     try {
-      const missing = await runAsync(f.dir, 'claim', 'B-5', '-i', join(dirname(keyFile), 'nope.key'), '--url', baton.url);
+      const missing = await runAsync(f.dir, 'check', 'B-5', '--claimable', '-i', join(dirname(keyFile), 'nope.key'), '--url', baton.url);
       expect(missing.code).toBe(2);
       expect(missing.err).toContain(`no key: ${join(dirname(keyFile), 'nope.key')} does not exist — the reads cannot be signed, so Baton was not asked`);
       expect(missing.err).not.toContain('unreachable');
       const junk = join(dirname(keyFile), 'junk.key');
       writeFileSync(junk, 'not a key\n');
-      const unreadable = await runAsync(f.dir, 'claim', 'B-5', '-i', junk, '--url', baton.url);
+      const unreadable = await runAsync(f.dir, 'check', 'B-5', '--claimable', '-i', junk, '--url', baton.url);
       expect(unreadable.code).toBe(2);
       expect(unreadable.err).toContain('key unreadable:');
       expect(unreadable.err).not.toContain('unreachable');

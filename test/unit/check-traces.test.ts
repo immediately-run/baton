@@ -2,17 +2,19 @@
 // step (R3-1244 "Tests"): a claim on a held ticket, and an end confirmed by an observation no
 // greater than its own. Each starts from a trace the model accepts, so the rejection is the
 // mutation's. Node only: it runs Quint.
-import { describe, it, expect, afterAll } from 'vitest';
+import { describe, it, expect, afterAll, vi } from 'vitest';
+import { spawn } from 'node:child_process';
 import { cpSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { toItf, type ClaimView, type Projection, type Step } from '../integration/trace';
-import { checkTrace, scopeErrors } from '../../scripts/check-traces.mjs';
+import { checkTrace, checkTraces, groupTraces, readTrace, scopeErrors, translate } from '../../scripts/check-traces.mjs';
 import { check as checkLinks, closureText, declarations, hashOf, pendingLines } from '../../scripts/check-model-links.mjs';
 import { readFileSync } from 'node:fs';
 
 const dir = mkdtempSync(join(tmpdir(), 'baton-check-traces-'));
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
+vi.mock('node:child_process', { spy: true });
 
 const T = 'docs:T-1';
 const base = (): Projection => ({ counter: 0, lastAccepted: 0, outstanding: false, tickets: {}, claims: {}, held: {}, ownerBars: [], runners: { 1: [] }, required: [], courseFile: null, liveness: { 1: { lastSeen: 0, lease: 900_000 } } });
@@ -37,11 +39,12 @@ function trace(rest: [Step['origin'], (p: Projection) => Projection][]): Step[] 
 }
 
 const req = (method: string, path: string, body?: unknown): Step['origin'] => ({ kind: 'request', method, path, body, status: 200 });
-async function check(name: string, steps: Step[]) {
+function writeTrace(name: string, steps: Step[]) {
   const file = join(dir, `${name}.itf.json`);
   writeFileSync(file, JSON.stringify(toItf('check-traces.test', name, steps)));
-  return checkTrace(file, name);
+  return file;
 }
+const check = (name: string, steps: Step[]) => checkTrace(writeTrace(name, steps));
 
 // the two cases below run Quint over the whole model, the second also bisecting a rejected trace; since
 // R3-1254 part 2b's fleet that takes up to 85 s locally and over 120 s on a CI runner (baton#60's CI,
@@ -53,17 +56,46 @@ const QUINT_CASE_MS = 240_000;
 const itQuint = process.env.BATON_SKIP_QUINT === '1' ? it.skip : it;
 
 describe('check-traces rejects what the model forbids, naming the step', () => {
-  itQuint('a second claim on a held ticket: the base is accepted, the claim after the hold is not', async () => {
+  itQuint('S-BTN-39: one batch accepts two traces and bisects only the claim after a hold', async () => {
     const claimed = (p: Projection) => ({ ...p, claims: { 1: claim() } });
     const held = (p: Projection) => ({ ...p, held: { [T]: true } });
-    // accepted: the claim, then the hold
-    expect(await check('claim-then-hold', trace([[req('POST', '/v1/runner/claim'), claimed], [req('POST', `/v1/ui/overrides/${T}`), held]]))).toMatchObject({ ok: true, end: null });
-    // rejected: the hold, then a claim the core should have refused (rule 3)
-    const r = await check('hold-then-claim', trace([[req('POST', `/v1/ui/overrides/${T}`), held], [req('POST', '/v1/runner/claim'), claimed]]));
+    const c = [req('POST', '/v1/runner/claim'), claimed] as const;
+    const h = [req('POST', `/v1/ui/overrides/${T}`), held] as const;
+    const files = [
+      writeTrace('claim-then-hold', trace([[...c], [...h]])),
+      writeTrace('hold-then-claim', trace([[...h], [...c]])),
+      writeTrace('claim-without-hold', trace([[...c]])),
+    ];
+    vi.mocked(spawn).mockClear();
+    const [before, r, after] = await checkTraces(files);
+    expect(before).toMatchObject({ test: 'claim-then-hold', ok: true, checked: 4, end: null });
+    expect(after).toMatchObject({ test: 'claim-without-hold', ok: true, checked: 3, end: null });
+    expect(r.test).toBe('hold-then-claim');
     expect(r.ok).toBe(false);
     // the model refuses the claim: its gates fail on the hold
-    expect('failure' in r && r.failure).toMatchObject({ step: 3, label: 'POST /v1/runner/claim → 200', actionRefused: true });
-    expect(r.failure && 'actions' in r.failure && r.failure.actions).toContain('claim("w1", "docs:T-1")');
+    expect(r.failure).toMatchObject({ step: 3, label: 'POST /v1/runner/claim → 200', actionRefused: true });
+    expect(r.failure.actions).toContain('claim("w1", "docs:T-1")');
+    const modules = vi.mocked(spawn).mock.calls.map(([, args]) => args?.[2]?.split('/').at(-1));
+    expect(modules).toEqual(['batch.qnt', 'trace1.prefix.qnt', 'trace1.prefix.qnt', 'trace1.step.qnt']);
+  }, QUINT_CASE_MS);
+
+  itQuint('S-BTN-39: a generated run that does not compile cannot reject its batch mates', async () => {
+    const file = (name: string, claimObs: number) => writeTrace(name, trace([
+      [req('POST', '/v1/runner/claim'), (p) => ({ ...p, claims: { 1: claim({ claimObs }) } })],
+    ]));
+    const good = file('compiles', 1);
+    // The recorder round-trips this Number, but its exponent notation is not a Quint integer.
+    const bad = file('does-not-compile', 1e21);
+    expect(translate(readTrace(good)).consts).toEqual(translate(readTrace(bad)).consts);
+    vi.mocked(spawn).mockClear();
+    const report = vi.fn();
+    const [accepted, broken] = await checkTraces([good, bad], report);
+    expect(accepted).toMatchObject({ ok: true, checked: 3, end: null });
+    expect(broken).toMatchObject({ ok: false, checked: 3, end: null, failure: { error: expect.stringContaining('QNT000') } });
+    expect(broken.failure).not.toHaveProperty('actionRefused');
+    expect(report.mock.calls).toEqual([[accepted], [broken]]);
+    expect(vi.mocked(spawn).mock.calls.map(([, args]) => args?.[2]?.split('/').at(-1)))
+      .toEqual(['batch.qnt', 'batch.qnt', 'batch.qnt']);
   }, QUINT_CASE_MS);
 
   itQuint('an end confirmed by an observation not above its own: rejected at the post that claims it', async () => {
@@ -92,6 +124,55 @@ describe('check-traces rejects what the model forbids, naming the step', () => {
   }, QUINT_CASE_MS);
 });
 
+function instanceFiles() {
+  const taggedClaim = (tag: string) => trace([[req('POST', '/v1/runner/claim'), (p) => ({
+    ...p, runners: { 1: [tag] }, claims: { 1: claim() },
+  })]]);
+  return [
+    writeTrace('family-a', taggedClaim('family:a')),
+    writeTrace('family-b', taggedClaim('family:b')),
+    writeTrace('no-claims', trace([])),
+    writeTrace('family-a-again', taggedClaim('family:a')),
+  ];
+}
+
+it('groups recorder output by model instance, including runner tags and the claim bound', () => {
+  const [a, b, unclaimed, aAgain] = instanceFiles().map((file) => translate(readTrace(file)));
+  expect(a.consts.TAGS).not.toBe(b.consts.TAGS);
+  expect(a.consts.MAX_CLAIMS).not.toBe(unclaimed.consts.MAX_CLAIMS);
+  expect(groupTraces([a, b, unclaimed, aAgain])).toEqual([[a, aAgain], [b], [unclaimed]]);
+});
+
+itQuint('dispatches each recorder-derived instance to its own Quint module', async () => {
+  const files = instanceFiles();
+  vi.mocked(spawn).mockClear();
+  const results = await checkTraces(files);
+  expect(results.map((r: { file: string; ok: boolean }) => [r.file, r.ok]))
+    .toEqual(files.map((file) => [file, true]));
+  const modules = vi.mocked(spawn).mock.calls.map(([, args]) => args?.[2]);
+  expect(modules).toHaveLength(3);
+  expect(new Set(modules).size).toBe(3);
+}, QUINT_CASE_MS);
+
+it('reports a shared model compile error without splitting the batch or bisecting a trace', async () => {
+  const [first, , , second] = instanceFiles();
+  const real = await vi.importActual<typeof import('node:child_process')>('node:child_process');
+  const mockedSpawn = vi.mocked(spawn);
+  mockedSpawn.mockClear();
+  mockedSpawn.mockImplementationOnce(() => real.spawn(process.execPath, ['-e', `
+    console.error(' Error [QNT000]: invalid model');
+    console.error('  at model/baton.qnt:100:1');
+    console.error('error: typechecking failed');
+    process.exitCode = 1;
+  `]));
+  const results = await checkTraces([first, second]);
+  expect(mockedSpawn).toHaveBeenCalledTimes(1);
+  for (const result of results) {
+    expect(result).toMatchObject({ ok: false, failure: { error: expect.stringContaining('incomplete or inconsistent batch results') } });
+    expect(result.failure).not.toHaveProperty('actionRefused');
+  }
+});
+
 // each case checks one trace through the model; the first also pays for loading it, which outgrew
 // the default 5 s with R3-1254's prerequisites (the cases above allow more; most cases here are
 // rejected by translate before Quint starts)
@@ -116,6 +197,19 @@ describe('check-traces rejects each step round 1 found accepted (round 2, 2-r2-1
   });
   it('a claim\'s legs moved by anything but its advance', async () => {
     await rejected('legs-by-heartbeat', [[claimReq, claimed()], [req('POST', '/v1/runner/heartbeat'), claimed({ leg: 'implement' })]], 'legs changed by /v1/runner/heartbeat');
+  });
+  it('a finishing heartbeat re-armed the deadline one millisecond late (S-BTN-52)', async () => {
+    await rejected('wrong-rearm', [[claimReq, claimed()],
+      [req('POST', '/v1/runner/claims/1/advance', { leg: 'implement' }), claimed({ leg: 'implement', runningSeq: 1, deadlineAt: 30 * 60_000 })],
+      [req('POST', '/v1/runner/heartbeat', { legs_finished: [{ claim_id: 1, seq: 1 }] }),
+        claimed({ leg: 'implement', runningSeq: 1, deadlineAt: 40 * 60_000 + 1 })]], 'finishing beat re-armed the wrong deadline');
+  });
+  it.each([{ claim_id: 1, seq: 999 }, { claim_id: 2, seq: 1 }, { claim_id: '1', seq: 1 }])('rejects a finishing beat for the wrong run (%j, S-BTN-52)', async (finished) => {
+    const running = { leg: 'implement', runningSeq: 1 };
+    await rejected('wrong-finishing-run', [[claimReq, claimed()],
+      [req('POST', '/v1/runner/claims/1/advance', { leg: 'implement' }), claimed({ ...running, deadlineAt: 30 * 60_000 })],
+      [req('POST', '/v1/runner/heartbeat', { legs_finished: [finished] }),
+        claimed({ ...running, deadlineAt: 40 * 60_000 })]], 'finishing beat did not name its current run');
   });
   it('an advance whose stored bars are not the ones the holder sent', async () => {
     await rejected('bars-not-sent', [[claimReq, claimed()],

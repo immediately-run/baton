@@ -3,7 +3,7 @@ title: "B-194 — The ticket list read: GET …/tickets gives every live ticket 
 id: B-194
 project: baton-ui-v2
 status: available
-updated: 2026-11-09
+updated: 2026-11-23
 repos:
   - baton
 tags:
@@ -49,7 +49,7 @@ exported, since B-218 reuses it), reading the rows `readyRows`, `claims.running`
 `claims.needsYou`, `attempts.ts`, `stations.ts` and `questions.ts` already produce.
 
 1. **`GET /v1/repositories/{repository}/tickets`** (`repo.tickets`, read; the repository reads'
-   principals and a session). Each live ticket: `ticket_id`, `title`, `course`, `tier`,
+   principals and a session). Each live ticket: `ticket_id`, `title`, `course`, ~~`tier`,~~
    `requires`, `tags`, `order`, `parent`, `position: {station, path_len, next_leg}` (R-BTN-83),
    `state` and `reasons` — `unconfirmed` > `running` > `waiting-person` > `held` > `blocked` >
    `backing-off` > `suspended` > `ready` > `closed`; `state` the first that applies, `reasons`
@@ -67,7 +67,7 @@ exported, since B-218 reuses it), reading the rows `readyRows`, `claims.running`
 2. **Query.** `?state=` one word, or a tab name: `blocked` as a tab means `held`, `blocked`,
    `waiting-person`, `backing-off` and `suspended` (the mockup's count); `closed-today` means
    `closed`; `?q=` a case-insensitive substring of id or title, matched never interpreted;
-   `?tier=` a ceiling (`fitsTier` as `ready_by_tier` uses it); `?cursor=` by B-205. Order:
+   ~~`?tier=` a ceiling (`fitsTier` as `ready_by_tier` uses it);~~ `?cursor=` by B-205. Order:
    Baton's matching order for ready tickets (R-BTN-61), then the others by state precedence and
    id; no order parameter. `counts: {<state>: n, total}` over the whole repository, unaffected
    by the filters.
@@ -98,7 +98,7 @@ A scenario numbered at merge, on both hosts, with a fixture repository holding a
 running (one stalled, one in `condition-wait`), a held-and-blocked, a backing-off, an
 unconfirmed, a suspended, a person-waiting and a closed-today ticket: each gets its state by
 precedence (the held-and-blocked one is `held` with `reasons: ["blocked"]`) and its detail;
-`?state=blocked` returns the tab's five states; `?q=` and `?tier=` filter; `counts` ignore the
+`?state=blocked` returns the tab's five states; `?q=` ~~and `?tier=`~~ filter; `counts` ignore the
 filters; pages chain; the ready ticket names its eligible runners by name and a ticket nobody
 can take has an empty list with the gate's rule word.
 
@@ -119,3 +119,5 @@ precedence, tab mapping, counts and no-client-sort decisions recorded._
 _2026-11-09 — revised after the second review: `ticket.show` split out to B-218; held tickets
 counted under the Blocked tab as the mockup does; the running detail carries the runner's names,
 `stalled` and `condition_wait`; eligible runners by name; `failed_rule` typed; one `at` field._
+
+_2026-11-23 — tiers retired (spec/retire-tiers: [BATON_SPEC §6.6](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-6) gate 5, [R-BTN-66](../spec/BATON_SPEC/01-what-baton-is.md#sec-1)): the struck tier clauses are gone from the spec — no ticket tier, runner ceiling, grant `max_tier`, ladder, `ready_by_tier` or `?tier=`. Build the rest without them._
