@@ -462,6 +462,15 @@ type ConditionSeed = {
 export function seedCondition(fields: ConditionSeed): Promise<void> {
   return withCore((core) => insertFixture(core.store, 'conditions', fields));
 }
+/** A core condition row (R-BTN-160's `baton.*`), written in the caller's store so a schema
+ *  test can watch the open-condition unique index refuse a second one (S-BTN-131). */
+type CoreConditionSeed = {
+  repository_id: string; ticket_id: string | null; ref: string; type: string; disposition: string;
+  raised_at: number; outcome: string;
+};
+export function seedCoreConditionIn(store: Pick<Store, 'exec'>, fields: CoreConditionSeed): void {
+  insertFixture(store, 'conditions', fields);
+}
 
 type CredentialSeed = {
   id: string; hostname: string; allowed_capabilities: string; kind?: string; public_key?: string;
