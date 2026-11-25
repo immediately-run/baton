@@ -22,8 +22,8 @@ npx --yes @immediately-run/baton@0.1.4 run   # a runner (§6.13), with BATON_KEY
 
 From the package, `baton run`, `baton repo init`, `baton decision list` and the
 `baton admin|owner …` API client work. Init names the commit the package was built from
-(`dist/build.json`) as its courses' source and its workflow's pin, and copies the leg stubs and
-instructions `build:cli` prebuilt into `dist/defaults/`, so it needs no checkout and no esbuild.
+(dist/build.json in the built package) as its courses' source and its workflow's pin, and copies the leg stubs and
+instructions `build:cli` prebuilt into the package's dist/defaults/, so it needs no checkout and no esbuild.
 `--eject` copies prebuilt defaults the same way.
 
 Owners, administrators and runners run a pinned release only — `npx --yes
@@ -48,7 +48,7 @@ remains the development path — the repository commands (`tickets`, `repo`, `te
 | `src/core/front.ts` | What stands in front of the core: verifies the principal (OIDC for the sync, Access for the owner, a signed request's shape for a runner, the App's signature for a webhook), sets the R-BTN-16 headers, serves the dashboard's static files, forwards the API |
 | `src/core/baton.ts` | The core: migrations, board sync (§7.1), routing, the alarm, and `stateView()` — the whole state in one request, `GET /v1/admin/state`, an administrator's key's alone (R-BTN-57) |
 | `src/core/actions.ts` | The action registry (§11.3 R-BTN-129): one table of every read a session shares with the keys and every route a session may call — id, method and path, callers, input, and `ui.view`, the screens that draw it as a control. The front admits a cookie from it, the reads authorize by it, `GET /v1/actions` answers from it |
-| `src/core/reads/` | Every read a session may call, one module per domain (`tickets`, `runners`, `courses`, `conditions`, `sync`, `credentials`, `attestations`, `tenant`, …) behind one dispatcher (`index.ts`, which says how to add one): one principal, one authorization, the one refusal, the `ETag`; `kit.ts` holds the paging and query helpers, `src/core/cursor.ts` the opaque cursor |
+| `src/core/reads/` | Every read a session may call, one module per domain (`tickets`, `runners`, `courses`, `conditions`, `sync`, `credentials`, `attestations`, `tenant`, …) behind one dispatcher (`src/core/reads/index.ts`, which says how to add one): one principal, one authorization, the one refusal, the `ETag`; `src/core/reads/kit.ts` holds the paging and query helpers, `src/core/cursor.ts` the opaque cursor |
 | `src/core/runnerApi.ts` | The runner API (§8): heartbeat and registration, activities, messages, mode and shadow reports, the Runners view |
 | `src/core/claims.ts` | The lease (§6, R3-1212): claim and end, matching (§7.2 rules 1–9 via `isEligible`), the alarm's reaps, the fence before re-issue, confirmations, git winning over a stale claim, the Running / Timeline / Needs you data |
 | `src/core/attempts.ts` | Pure: the retry policy (§6.10 R-BTN-23) — which ends count, backoff, holds, the review-capacity run, the resume record (R-BTN-24) |
@@ -71,7 +71,7 @@ remains the development path — the repository commands (`tickets`, `repo`, `te
 | `src/core/auth.ts` | JWT verification (R-BTN-15, R-BTN-16); the one verifier of signed requests, SSHSIG over RFC 9421 (R-BTN-13); runner bearer tokens against `TOKEN_HASHES` during the transition |
 | `src/core/stations.ts` | Where each ticket is, as its repository's sync places it (R-BTN-70, R-BTN-39): a cache each accepted snapshot overwrites, never computed; it notices an `off-graph` path and hands the claims what changed |
 | `src/core/graph.ts` | Pure: a course file read as a graph (R-BTN-63/-64/-70/-71) — a leg's edge, the runs made of a leg, whether one path extends another, the legs from a station to an end, renamed names |
-| `src/core/gates.ts` | Pure: what stays a gate (§7.2, R-BTN-45) — the rules refused at a claim and at an advance, in one function; the matching query in `claims.ts` is its mirror |
+| `src/core/gates.ts` | Pure: what stays a gate (§7.2, R-BTN-45) — the rules refused at a claim and at an advance, in one function; the matching query in `src/core/claims.ts` is its mirror |
 | `src/core/conditions.ts` | The raised conditions Baton holds (R-BTN-160, R-BTN-195, R-BTN-163's list): a runner's report of each raise, the Needs-you and list reads, and the closes |
 | `src/core/conditionTypes.ts` | Pure: a condition's type vocabulary (R-BTN-160, R-BTN-195) — the grammar, the standard table, a type's disposition and the raise check |
 | `src/core/questions.ts` | A person's leg and its question (§6.4 R-BTN-116): stored while the ticket's queued leg is a person's, listed under Needs you, answered by a `std:decision@1` applied as the leg's arrival (R-BTN-39) |
@@ -90,16 +90,16 @@ remains the development path — the repository commands (`tickets`, `repo`, `te
 | `src/core/deprecated.ts` | The one writer of `deprecated-field` events (R-BTN-132's window): a retired field accepted and ignored, logged once per field, actor and day |
 | `src/core/db.ts` | Shared helpers: the event log's one insert (`logEvent`), random hex, run ids (R-BTN-63), recognising a unique-index refusal |
 | `src/core/text.ts` | Pure: §10.4's free text as one predicate (`isFreeText`) — a length, no control characters, none of `< > { }` |
-| `src/cloudflare/` | The Cloudflare host: the Worker (`worker.ts`) and the `Baton` Durable Object (`baton.ts`), wiring `ctx.storage`, the alarm and `waitUntil` into the ports |
-| `src/local/` | The local host: `node:sqlite` as the `Store` (`store.ts`), one queue for every request and alarm tick (`queue.ts`), a timer as the alarm (`host.ts`), `node:http` (`server.ts`), the command line (`main.ts`); the course test kit (`testCourse.ts`, R3-1248) |
-| `src/runner/` | `baton run`'s runner loop (§6.13 R-BTN-72): the claim/leg loop (`runner.ts`), the pure result protocol (`protocol.ts`), the API client (`api.ts`), the state file and spool (`state.ts`), the home checkout's snapshot reads (`home.ts`), the leg child wrapper (`legProcess.mjs`), the CLI entry (`main.ts`) and `baton leg replay` (§9.8 R-BTN-84, `replay.ts`) |
+| `src/cloudflare/` | The Cloudflare host: the Worker (`src/cloudflare/worker.ts`) and the `Baton` Durable Object (`src/cloudflare/baton.ts`), wiring `ctx.storage`, the alarm and `waitUntil` into the ports |
+| `src/local/` | The local host: `node:sqlite` as the `Store` (`src/local/store.ts`), one queue for every request and alarm tick (`src/local/queue.ts`), a timer as the alarm (`src/local/host.ts`), `node:http` (`src/local/server.ts`), the command line (`src/local/main.ts`); the course test kit (`src/local/testCourse.ts`, R3-1248) |
+| `src/runner/` | `baton run`'s runner loop (§6.13 R-BTN-72): the claim/leg loop (`src/runner/runner.ts`), the pure result protocol (`src/runner/protocol.ts`), the API client (`src/runner/api.ts`), the state file and spool (`src/runner/state.ts`), the home checkout's snapshot reads (`src/runner/home.ts`), the leg child wrapper (`src/runner/legProcess.mjs`), the CLI entry (`src/runner/main.ts`) and `baton leg replay` (§9.8 R-BTN-84, `src/runner/replay.ts`) |
 | `src/migrations/` | Numbered schema migrations, applied before the object serves |
-| `src/dashboard/` | The dashboard (BATON-UI-V2), in React 19 and TypeScript with no other runtime dependency: a walk down the entity tree — sign in, pick a repository, then one entity a screen. `app/` is the frame, the router, the sign-in and the controls drawn from the registry; `screens/` one folder per entity (`root`, `board`, `tickets`, `goals`, `courses`, `conditions`, `runners`, `credentials`, `governance`, `attestations`, `sync`, `tenant`), each registered in `screens/index.ts` under its id in `src/core/screens.ts` and kept to `screens/README.md`'s contract; `lib/` the shared pieces (`Text` and `View`, the polling store, the link rule). Every screen draws its entity's reads (`src/core/reads/`) and the registry entries `ui.view` places on it — never the whole state. Built by `npm run build:ui` (esbuild) into `src/dashboard/dist/` (gitignored): one bundle served as text by both hosts (R-BTN-55), never Workers assets |
+| `src/dashboard/` | The dashboard (BATON-UI-V2), in React 19 and TypeScript with no other runtime dependency: a walk down the entity tree — sign in, pick a repository, then one entity a screen. `src/dashboard/app/` is the frame, the router, the sign-in and the controls drawn from the registry; `src/dashboard/screens/` one folder per entity (`root`, `board`, `tickets`, `goals`, `courses`, `conditions`, `runners`, `credentials`, `governance`, `attestations`, `sync`, `tenant`), each registered in `src/dashboard/screens/index.ts` under its id in `src/core/screens.ts` and kept to `src/dashboard/screens/README.md`'s contract; `src/dashboard/lib/` the shared pieces (`Text` and `View`, the polling store, the link rule). Every screen draws its entity's reads (`src/core/reads/`) and the registry entries `ui.view` places on it — never the whole state. Built by `npm run build:ui` (esbuild) into src/dashboard/dist/ (gitignored): one bundle served as text by both hosts (R-BTN-55), never Workers assets |
 | `test/ui/` | The dashboard's tests (vitest project `ui`, jsdom): each screen over a mocked `fetch`, the source gate (no markup-parsing API under `src/dashboard/**`, §12.3), hostile values through the real screens (S-BTN-76) and a screen drawing only its caller's actions (S-BTN-307) |
-| `cli/` | `baton admin …` and `baton owner …` (`baton.mjs`); `baton decision list` (`decisions.mjs`, R-BTN-163's reader of what waits on a person; its courier half is R-BTN-80's retired sense): one request per command, signed with the key file `-i` names by `ssh-keygen -Y sign` (`sign.mjs`); `baton test-course`, which needs no Baton. The command tree the spec now defines is R-BTN-127's (`baton runner start`, `baton ticket …`, `baton course test`); the built names move to it under B-157 |
-| `src/shared/` | Baton's source modules (R-BTN-37), including `batonSync.mjs` (driven by S-BTN-13), `schema.mjs` (R-BTN-108), and `std.mjs` (R-BTN-110) |
-| `test/unit/`, `test/integration/` | Vitest; `S-BTN-n` scenarios in `integration/`. Project `cloudflare` runs everything in the Workers runtime; project `local` runs every scenario again on the local host, plus the Node-only tests |
-| `test/integration/trace.ts` | R3-1244: every scenario's run on the local host as a trace — one step per request or alarm tick, with the state projection the formal model has — written to `test/.traces/` |
+| `cli/` | `baton admin …` and `baton owner …` (`cli/baton.mjs`); `baton decision list` (`cli/decisions.mjs`, R-BTN-163's reader of what waits on a person; its courier half is R-BTN-80's retired sense): one request per command, signed with the key file `-i` names by `ssh-keygen -Y sign` (`cli/sign.mjs`); `baton test-course`, which needs no Baton. The command tree the spec now defines is R-BTN-127's (`baton runner start`, `baton ticket …`, `baton course test`); the built names move to it under B-157 |
+| `src/shared/` | Baton's source modules (R-BTN-37), including `src/shared/batonSync.mjs` (driven by S-BTN-13), `src/shared/schema.mjs` (R-BTN-108), and `src/shared/std.mjs` (R-BTN-110) |
+| `test/unit/`, `test/integration/` | Vitest; `S-BTN-n` scenarios in `test/integration/`. Project `cloudflare` runs everything in the Workers runtime; project `local` runs every scenario again on the local host, plus the Node-only tests |
+| `test/integration/trace.ts` | R3-1244: every scenario's run on the local host as a trace — one step per request or alarm tick, with the state projection the formal model has — written to the generated test/.traces/ folder |
 | `test/model/replay.test.ts` | R3-1244: traces drawn from `model/replay.qnt` drive the core, compared with the model's state at every step |
 | `scripts/check-traces.mjs`, `scripts/check-model-links.mjs` | R3-1244: replay each scenario's trace through `model/baton.qnt` (`npm run traces`); check that every model action and its implementation name each other, with current hashes (`npm run model:links`) |
 | `test/hosts/` | The two hosts the harness drives, behind one interface (`#host`) |
@@ -135,6 +135,10 @@ remains the development path — the repository commands (`tickets`, `repo`, `te
   `ui.view` names a screen of `src/core/screens.ts`, stands only on an entry a session may call,
   and every id is well-formed and listed once; it lists, without failing, the screens no control
   names.
+- `npm run check:api` — compares the core's HTTP method/path shapes and migrated table names
+  with §14 and §13. Existing gaps are listed by name in `scripts/check-api-exceptions.json`.
+  Remove an entry when fixing its gap; do not add entries. `npm test` also checks spec citations,
+  wiki paths and npm script names, and citations that still need linking.
 - `baton admin -i <key> open` — the dashboard: a one-time link (5 minutes) that signs an
   administrator's browser in at the instance's origin (*Administrators and owners*, below).
   The screens are a tree: `/` lists the repositories; under `/repositories/{repository}/` are
@@ -145,8 +149,8 @@ remains the development path — the repository commands (`tickets`, `repo`, `te
   `/repositories`, `/instances`, `/resources`, `/capacities`, `/settings`, `/state` and
   `/sessions`. What a terminal reads in one request is `baton admin state`'s
   `GET /v1/admin/state`.
-- `npm run build:ui` — the dashboard's one esbuild bundle into `src/dashboard/dist/` (gitignored):
-  `app.js` and `app.css` with `index.html` copied beside them, served as text by both hosts and
+- `npm run build:ui` — the dashboard's one esbuild bundle into src/dashboard/dist/ (gitignored):
+  app.js and app.css with index.html copied beside them, served as text by both hosts and
   embedded in the published CLI. `npm test`, `npm run typecheck`, `npm run dev`,
   `npm run start:local` and `npm run build:cli` build it first (their `pre*` scripts), so a clean
   checkout works — and when `node_modules` does not hold what the lockfile locks for
@@ -220,7 +224,7 @@ lists them, and each folder's `immediately.run.json` opens it with the viewer it
   <https://immediately.run/present/github/immediately-run/baton/main/bundle/docs/home.mdx>.
 - **`spec/`**, the specification (B-180):
   <https://immediately.run/present/github/immediately-run/baton/main/bundle/spec/home.mdx>.
-  Its pages are `.md`: `BATON_SPEC.md` (the generated index), `BATON_SPEC/` (one file per
+  Its pages are `.md`: `spec/BATON_SPEC.md` (the generated index), `spec/BATON_SPEC/` (one file per
   section), the history and the MCP OAuth companion. Tickets and docs link a section by a relative
   path to its file and heading (`node scripts/link-spec-refs.mjs` writes them).
 
@@ -425,7 +429,7 @@ first sync. The tenant's administrator drives it (BATON_SPEC §4.8):
 ## Releasing the CLI
 
 A release is a PR that bumps `version` in `package.json` (and its two copies at the root of
-`package-lock.json`: `npm install --package-lock-only`), merged to `main`. `ci.yml` runs on `main` only for a push that changes `package.json`, and
+`package-lock.json`: `npm install --package-lock-only`), merged to `main`. `.github/workflows/ci.yml` runs on `main` only for a push that changes `package.json`, and
 its `release` job starts only when that version is not on npm yet; it then waits for a reviewer's approval in the `npm` environment, tags `v<version>`, and runs
 `npm publish` by OIDC trusted publishing, with provenance; no npm token exists. A version npm
 already has is skipped, so a merge without a bump publishes nothing. `npm run check:package`

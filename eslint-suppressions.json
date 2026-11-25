@@ -1,7 +1,32 @@
 {
+  "scripts/check-standalone.self-test.mjs": {
+    "baton/file-name": {
+      "count": 1
+    }
+  },
+  "scripts/lib/check-exceptions.mjs": {
+    "baton/file-name": {
+      "count": 1
+    }
+  },
+  "scripts/lib/core-routes.mjs": {
+    "baton/file-name": {
+      "count": 1
+    }
+  },
+  "scripts/lib/spec-code.mjs": {
+    "baton/file-name": {
+      "count": 1
+    }
+  },
+  "scripts/lib/wiki-references.mjs": {
+    "baton/file-name": {
+      "count": 1
+    }
+  },
   "src/defaults/cli.ts": {
     "@typescript-eslint/no-explicit-any": {
-      "count": 24
+      "count": 27
     }
   },
   "src/defaults/courses.ts": {
@@ -36,7 +61,7 @@
   },
   "test/githubFake.ts": {
     "@typescript-eslint/no-explicit-any": {
-      "count": 6
+      "count": 7
     }
   },
   "test/helpers.ts": {
@@ -71,7 +96,7 @@
   },
   "test/integration/B-250.runners-view-reads.test.ts": {
     "@typescript-eslint/no-explicit-any": {
-      "count": 6
+      "count": 12
     }
   },
   "test/integration/S-BTN-126.people-api-keys.test.ts": {

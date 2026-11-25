@@ -1,7 +1,6 @@
 import { basename } from 'node:path';
 import { defineConfig, globalIgnores } from 'eslint/config';
 import tseslint from 'typescript-eslint';
-import manifest from './src/shared/manifest.json' with { type: 'json' };
 
 const fileName = {
   meta: { schema: [{ type: 'string' }] },
@@ -29,7 +28,6 @@ export default defineConfig([
     '**/dist/', '.wrangler/', '.local/', '_apalache-out/', 'test/.traces/', 'test/fixtures/',
     // Checked-in esbuild bundles: lint the source that produces them.
     '.baton/tickets.mjs', '.baton/courses/create-pr/legs/*.mjs',
-    ...Object.keys(manifest.files).map((file) => `src/shared/${file}`),
   ]),
   {
     files: ['**/*.{js,mjs,cjs,jsx,ts,mts,cts,tsx}'],
