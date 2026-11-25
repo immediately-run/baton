@@ -228,7 +228,8 @@ describe('the code dialog (B-207 item 5)', () => {
     expect(within(dialog).getByLabelText('Confirmation code').textContent).toBe('K7M2Q9XA');
     expect(within(dialog).getByText('baton admin confirm K7M2Q9XA')).toBeDefined();
     expect(within(dialog).getByText(/This page cannot confirm it/)).toBeDefined();
-    expect(store.freshness().interval).toBe(5000); // B-191's one exception to the 10-second rule
+    // The dialog can render before its effect arms the fast poll (the 202 resolves outside act).
+    await waitFor(() => expect(store.freshness().interval).toBe(5000)); // B-191's one exception to the 10-second rule
     // An unchanged poll leaves it open; the effect showing closes it.
     await act(() => store.refresh());
     expect(screen.queryByRole('dialog')).not.toBeNull();

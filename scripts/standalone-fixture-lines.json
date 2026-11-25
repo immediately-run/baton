@@ -114,6 +114,9 @@
   "test/integration/S-BTN-313.runner-refresh.test.ts": [
     "be611f1afc488f28aea27de4b21337df9a7ee4f4014410964aed00cbe0461d7e"
   ],
+  "test/integration/S-BTN-319.board-boundary.test.ts": [
+    "bde182f365178eaf5d42b5fb173c1d58fa3ad4c5f078778e388569d1512f5dcb"
+  ],
   "test/integration/S-BTN-42.webhooks.test.ts": [
     "645a421fc447f6b3c28fe6d647f1e785185f3a973ab9d75369f54b744d4ede82",
     "8c9b22381ca4a30a3ac8a35c56437aad029a20e01eb145b8741380cafa62517a",

@@ -21,7 +21,7 @@ stated once, in the rule it cites.
 
 | Principal | Routes | Credential | May |
 |---|---|---|---|
-| Runner (machine key) | `/v1/runner/*` | SSH-signed (R-BTN-13) or API key (R-BTN-159), plus the runner secret (R-BTN-14) | heartbeat as its name; claim and act where it holds an active grant (R-BTN-58, R-BTN-146); post readings (R-BTN-101); ask blocks (R-BTN-75); accept or decline its grants, key alone (R-BTN-146); as a signed key, sync a granted repository (R-BTN-102) and deliver outbox entries where the policy admits `runner` (R-BTN-171) |
+| Runner (machine key) | `/v1/runner/*` | SSH-signed (R-BTN-13) or API key (R-BTN-159), plus the runner secret (R-BTN-14) | heartbeat as its name; claim and act where it holds an active grant (R-BTN-58, R-BTN-146); post readings (R-BTN-101); ask blocks (R-BTN-75); accept or decline its grants, key alone (R-BTN-146); a signed key may deliver outbox entries where the policy admits `runner` (R-BTN-171); see R-BTN-102 for the unbuilt machine-key sync |
 | Trusted runner | `/v1/runner/*` | SSH-signed, on a grant with the `trusted-runner` role (R-BTN-180) | heartbeat as its name; R-BTN-182; as the protection checker, report `protection` and nothing else (R-BTN-180) |
 | Owner's agent | the owner's routes | an owner key not registered `human_only` | an owner's actions, as `owner`; never a `human` attestation or a human gate (R-BTN-185) |
 | Check-runner | `/v1/runner/*`; `POST …/attestations` as a `service:` key the policy names | SSH-signed, plus the runner secret | heartbeat as its name; claim, advance and end check tickets; report activities and transcripts, write leg logs; where the policy's `attestations` names its key for `std:checks@1`, post that attestation (R-BTN-115); nothing else (R-BTN-114) |
@@ -324,6 +324,26 @@ trusted runners or of the protection checker; a compromised forge; and a comprom
     `baton owner policy show | diff | log` read it. Each change is logged `admin` with the
     versions and the knobs it changed, and is checked against the floors (R-BTN-189) and the
     current courses (R-BTN-181) in its transaction.
+  - **Reading a current legacy policy.** Only the current version is projected onto the current
+    knob table, using that repository's live legacy floor rows (R-BTN-189). The policy read's
+    effective hash is over the projected document. Historical reads use the stored documents
+    and hashes, including for the history's knob diffs; they neither project versions nor attach
+    today's floors to them. A migration validates each repository's current projection in one
+    transaction and logs its old and effective hashes as an `admin` event when they differ or
+    when the guarantee comparison (R-BTN-189) reports a held guarantee with no successor.
+    Only a subsequent write authorised by the prior `approvers.policy` appends a version; it
+    links to the prior version's stored hash.
+  - **No new authority from a projection.** Rename `approvers.trust` to `approvers.roles`
+    without changing its list. Drop `courier` from writer and deliverer lists; never translate
+    it to `runner`. Read a missing legacy `outbox.source` with no deliverers. Carry the old
+    answer restriction into `std:decision@1` without adding a writer: in particular a policy
+    that required `inputs.answers: attestation` must still refuse ordinary owner answers.
+    Compare effective permissions before and after, including defaults and fixed rules. For
+    `refs.baton` and `refs.legs`, compare the old writer sets with the sets that R-BTN-180
+    supplies after projection; refuse if any writer is newly admitted to either namespace.
+    Reject a projection that adds authority or leaves a policy that could not work, including
+    an unsatisfiable approver list under the repository's `human_key`. The migration fails
+    atomically and names the repository and the offending knob or floor. It changes no grant.
   - **Previewing a policy change.** `dry_run: true` (`--dry-run` on `policy apply` or `policy set`)
     uses the same current version, approver and change validation as apply, but changes no
     policy or trust settings and adds no policy audit event. `changed` lists the changed knobs;
@@ -451,6 +471,25 @@ trusted runners or of the protection checker; a compromised forge; and a comprom
     breaks it is refused, so a shortening is its own version, made while the guarantee still
     holds. A consumer reads the `floors` list and the computed `guarantees`, never a floor's name
     alone.
+  - **Comparing legacy guarantees.** Compare policy conditions on the same repository facts,
+    without the protection report. Compare `no-runner-lands`, `control-paths-human`,
+    `tickets-approved`, `independent-review` and `board-from-trusted` by name, and compare
+    legacy `human-gates-hardware` to current `human-gates`. A held comparable guarantee
+    becoming broken stops the migration, even if unfloored. Legacy `human-gates` (the weaker
+    condition), `signed-authorship` and `trusted-domain-separate` have no migration successor.
+    Report each such held guarantee that was not floored in the repository's migration audit;
+    it does not by itself prevent migration. This comparison does not replace R-BTN-188's
+    check against widening authority.
+  - **Legacy floors.** Project the union of the guarantees the named rows list, using the
+    comparison's successor names. A floor on `human-gates-hardware` thus becomes a floor on
+    `human-gates`, provided its policy conditions and removal restriction are preserved. A
+    floor with no successor or whose successor's policy conditions are unmet stops migration.
+    The prior `approvers.policy` gate must imply the old `remove_by` gate not only now but in
+    every allowed later version that retains the floor. Reject a floor if the document cannot
+    preserve that restriction: `[human]` today does not preserve `remove_by: human` if a later
+    version can keep the floor and switch to `[owner]`. Likewise a later `[human]` could
+    admit a break-glass key that is not an owner, so `remove_by: owner` is not inherently
+    redundant either. Do not clear a floor on the repository's behalf.
   - **Floors are judged on the policy alone.** The protection report is not a policy condition,
     so a lapsed or failed report never refuses a change. It breaks `no-runner-lands` all the
     same: Baton raises `baton.unprotected` (R-BTN-180), and a floor that names it stops the
@@ -650,8 +689,20 @@ trusted runners or of the protection checker; a compromised forge; and a comprom
     Tightening is open to any owner credential.
 - **R-BTN-187 (what Baton trusts from a board post).** Who may post the board is the policy's
   `inputs.board`, and whether what a post read from git counts is its `attestations` entries
-  (R-BTN-188, R-BTN-191). A webhook delivery only triggers a sync (values 6). Per-key limits on observation numbers, board posts and concurrent claims are
-  [proposed](../proposals/security.md) (B-137).
+  (R-BTN-188, R-BTN-191). The sync routes admit registered sync keys and verified CI identities
+  only when their input is listed (see R-BTN-102 for machine keys). Repositories with runners
+  below the human level exclude `machine`. A sync credential is limited to 60 observation
+  allocations and, separately, 60 board requests (including refused posts) per UTC hour.
+  CI tokens for the same repository share one credential's quota. Over quota is `rate-limited`
+  (HTTP 429). Two or more expired reservations by the same credential on a UTC day are listed
+  under Needs you for that day (R-BTN-62).
+  On a head move while `paths.control` is not `any`, Baton reports control changes from the
+  recorded push chain (R-BTN-73, R-BTN-194), not the board. It matches the directly named
+  control paths in [the protected paths proposal](../proposals/security.md#9-protected-paths-r-btn-184-proposed),
+  not paths discovered by reading files. A gap or truncated delivery is `pusher-unknown`, not
+  evidence of unchanged control paths. Needs you lists the latest reported move to a head for
+  seven days, with up to sixteen changed paths and the number omitted. This is a report, not a
+  refusal or a course accounting claim (§12.9).
 
 ### 12.9 A leg's scope
 

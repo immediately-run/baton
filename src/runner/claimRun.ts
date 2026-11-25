@@ -1068,10 +1068,12 @@ export class ClaimRun {
     // B-106 (R-BTN-178): the lock of a leg the next one requires is taken before the advance
     // is sent; one this runner cannot take suspends the claim rather than sending it, the
     // finished leg's evidence already in git (R-BTN-121, R-BTN-71).
+    // S-BTN-63 (B-30): distinguish a closed self-loop from abandoning the run at its start.
+    const loopEnd = closed && verdict.reached === state.at ? { finished_self_loop: true, ended_at_sha: closed } : {};
     const locked = await this.host.ensureLegLocks(this, verdict.leg, course);
     if (this.claimLost()) return await this.finish(claimId, { end_reason: 'released:lease-lost', reached: state.at, next: legName }, null);
     if (!locked) {
-      return await this.finish(claimId, { end_reason: `suspended:${verdict.reached}`, reached: verdict.reached, next: verdict.leg, outputs: verdict.outputs, ...(closed ? { ended_at_sha: closed } : {}) }, await this.callHandoff(script, ctx) ?? handoffUrl);
+      return await this.finish(claimId, { end_reason: `suspended:${verdict.reached}`, reached: verdict.reached, next: verdict.leg, ...(verdict.outputs ? { outputs: verdict.outputs } : {}), ...loopEnd, ...(closed ? { ended_at_sha: closed } : {}) }, await this.callHandoff(script, ctx) ?? handoffUrl);
     }
     this.auditLeg();
     // R-BTN-113 (B-4): the advance that finishes the leg carries its session link beside the
@@ -1090,7 +1092,10 @@ export class ClaimRun {
     // a leg whose agent a bound concluded says so — the how-ended of the wait is the log's.
     const howEnded = typeof (result as { conclusion?: { cause?: unknown } } | null)?.conclusion?.cause === 'string' ? ` — the agent ${(result as { conclusion: { cause: string } }).conclusion.cause}` : '';
     this.o.log(`baton: ${ticket}'s ${legName} finished: reached ${verdict.reached}, next ${'settle' in answer ? 'the end' : verdict.leg} (run ${run} of ${course.graph.legs.get(legName)?.maxRuns ?? 1})${howEnded}`);
-    if ('settle' in answer) return await this.finish(claimId, answer.settle, await this.callHandoff(script, ctx) ?? handoffUrl);
+    if ('settle' in answer) {
+      const end = answer.settle.end_reason === `suspended:${verdict.reached}` ? { ...answer.settle, ...loopEnd } : answer.settle;
+      return await this.finish(claimId, end, await this.callHandoff(script, ctx) ?? handoffUrl);
+    }
     state.gitPath = [...state.gitPath, { leg: legName, reached: verdict.reached }];
     state.at = answer.station ?? verdict.reached;
     state.nextLegs = answer.next ?? state.nextLegs;
