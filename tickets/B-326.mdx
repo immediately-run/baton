@@ -9,7 +9,7 @@ repos:
 tags:
   - roadmap-item
 tier: judgement
-description: "Retire baton tickets new|claim|set|done (keeping next, Baton's id sequences, and the read-only check, which takes over claim's Ask-Baton-first and rules re-read checks); baton repo init writes .dibber/config.json with Baton as the coordinator; the bug-report file leg and create-spec's markers write through dibber; docs, skills and CLAUDE.md point at dibber. Needs dibber DIB-30. Requires: none."
+description: "Retire baton tickets new|claim|set|done (keeping next, Baton's id sequences, and the read-only check, which takes over claim's Ask-Baton-first and rules re-read checks); baton repo init writes .dibber/config.json with Baton as the coordinator; the bug-report file leg and create-spec's markers write through dibber; docs, skills and CLAUDE.md point at dibber. Needs dibber DIB-33. Requires: none."
 topics:
   - baton
 owns: {}
@@ -23,7 +23,7 @@ depends_on: []
 
 **Depends on:** none in this repository.
 
-**Needs:** Dibber's DIB-30, released, which adds `dibber new --id` and a coordinator, `--body-file` and `--field`, and `dibber set --field`.
+**Needs:** Dibber's DIB-33 ([dibber#20](https://github.com/immediately-run/dibber/pull/20)), released, which adds `dibber new --id` and a coordinator, `--body-file` and `--field`, and `dibber set --field`.
 
 ### What to build
 
