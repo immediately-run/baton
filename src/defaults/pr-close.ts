@@ -27,6 +27,7 @@
 //   the sync counts only as the evidence Baton recorded for the claim. No comment anywhere: the
 //   marker is git's, so a plain-git repository reads the same gate with no forge at all.
 // `baton repo init` bundles this into each leg stub, so a stub imports nothing at run time.
+import { outputLine } from './output-evidence';
 import { closeTicket, exec } from './ticket-state';
 
 /** What `close` runs: `git` or `gh`, in the checkout, answering stdout. Tests inject it. */
@@ -36,6 +37,7 @@ export interface CloseCtx {
   checkout: string;
   ticket: { id: string; path?: string | null; home?: string | null };
   leg: string;
+  run_id?: string;
   claim?: { nonce?: string };
   /** The repository's default branch (B-96's review round 2), where a marker leg's line goes:
    *  the claim answer's `default_branch`, which the runner hands the stub in
@@ -82,10 +84,11 @@ const MARKER_LEGS = new Set(['converse', 'address']);
  *  forge is the record the sync reads. A ticket write does: the sync reads the ticket's own
  *  git history from the default branch, and a write left in an un-pushed checkout is one no
  *  reading sees (B-96's review round 1) — so it is committed on that branch itself (round 2). */
-export async function prClose(ctx: CloseCtx, result: { reached?: string; next?: string | null; verdict?: unknown; adjudication?: unknown; pr?: unknown; delivered?: unknown }, run: Exec = exec): Promise<string> {
+export async function prClose(ctx: CloseCtx, result: { reached?: string; next?: string | null; verdict?: unknown; adjudication?: unknown; pr?: unknown; delivered?: unknown; outputs?: unknown }, run: Exec = exec): Promise<string> {
+  const marker = outputLine(ctx, result?.outputs);
   const comment = commentLine(ctx.leg, result);
-  if (comment != null) {
-    const body = `${comment}\nbaton: ${ctx.ticket.id} ${ctx.leg}, claim ${ctx.claim?.nonce ?? '?'}`;
+  if (comment != null || (marker && !MARKER_LEGS.has(ctx.leg))) {
+    const body = [comment, `baton: ${ctx.ticket.id} ${ctx.leg}, claim ${ctx.claim?.nonce ?? '?'}`, marker].filter(Boolean).join('\n');
     // On the PR the agent named (B-29: a ticket's PRs may be in other repositories, and its home
     // may have none); else `gh pr comment` with no number, on the checkout branch's PR.
     if (result?.pr != null && !(typeof result.pr === 'string' && PR_URL.test(result.pr))) throw new Error(`the ${ctx.leg} leg named no PR URL to write on, got ${JSON.stringify(result.pr)}`);

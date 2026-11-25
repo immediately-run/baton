@@ -2,6 +2,7 @@
 // §5). One module, called by every endpoint before any write (R3-1211); a value that fails is
 // refused with `invalid-params` naming the field, never trimmed into shape.
 import { BatonError, RECOMMENDED_CLIENT } from './http';
+import { gitPointer, S3_POINTER } from './contractPointers';
 import { FREE_TEXT_MAX, isFreeText } from './text';
 import { COURSE_ID } from './course';
 import { CONDITION_TYPE, CONDITION_TYPE_MAX, RESTART_ID, SEVERITIES } from './conditionTypes';
@@ -243,6 +244,22 @@ export const clampConcurrency = (n: unknown) => (isInt(n) ? Math.min(MAX_CLAIMS_
 /** R-BTN-107: the isolation modes a heartbeat may declare. */
 export const ISOLATIONS: readonly Heartbeat['isolation'][] = ['attached', 'process', 'session'];
 
+/** Shared by the heartbeat boundary and the runner before it adopts a new declaration. */
+export function checkDeclaredCourses(rawCourses: unknown): Heartbeat['courses'] {
+  if (!Array.isArray(rawCourses) || rawCourses.length > COURSES_MAX) bad('courses', `must be a list of at most ${COURSES_MAX}`);
+  const declaredCourses = new Set<string>();
+  return (rawCourses as unknown[]).map((c, i) => {
+    if (!isObj(c)) bad(`courses[${i}]`, 'must be an object');
+    const x = c as Record<string, unknown>;
+    const repository = checkRepositoryId(x.repository, `courses[${i}].repository`);
+    const course = matches(COURSE_ID, `courses[${i}].course`)(x.course);
+    if (!isInt(x.version) || (x.version as number) < 0 || (x.version as number) > COURSE_VERSION_MAX) bad(`courses[${i}].version`, 'must be a non-negative integer');
+    if (declaredCourses.has(`${repository}:${course}`)) bad(`courses[${i}]`, `repeats ${repository}:${course}`);
+    declaredCourses.add(`${repository}:${course}`);
+    return { repository, course, version: x.version as number };
+  });
+}
+
 export function checkHeartbeat(body: unknown, transcriptRepos: string[]): Heartbeat {
   if (!isObj(body)) bad('body', 'must be a JSON object');
   const b = body as Record<string, unknown>;
@@ -265,19 +282,7 @@ export function checkHeartbeat(body: unknown, transcriptRepos: string[]): Heartb
   if (!TIERS.includes(tier as never)) bad('tier_ceiling', `must be one of ${TIERS.join(', ')}`);
   // R-BTN-22: the skills version is each course's version, declared per course; a sidecar that
   // still sends `skills_version` is not refused for it.
-  const rawCourses = b.courses ?? [];
-  if (!Array.isArray(rawCourses) || rawCourses.length > COURSES_MAX) bad('courses', `must be a list of at most ${COURSES_MAX}`);
-  const declaredCourses = new Set<string>();
-  const courses = (rawCourses as unknown[]).map((c, i) => {
-    if (!isObj(c)) bad(`courses[${i}]`, 'must be an object');
-    const x = c as Record<string, unknown>;
-    const repository = checkRepositoryId(x.repository, `courses[${i}].repository`);
-    const course = matches(COURSE_ID, `courses[${i}].course`)(x.course);
-    if (!isInt(x.version) || (x.version as number) < 0 || (x.version as number) > COURSE_VERSION_MAX) bad(`courses[${i}].version`, 'must be a non-negative integer');
-    if (declaredCourses.has(`${repository}:${course}`)) bad(`courses[${i}]`, `repeats ${repository}:${course}`);
-    declaredCourses.add(`${repository}:${course}`);
-    return { repository, course, version: x.version as number };
-  });
+  const courses = checkDeclaredCourses(b.courses ?? []);
   if (b.last_activity_at !== undefined && !isTime(b.last_activity_at)) bad('last_activity_at', 'must be epoch ms');
   if (b.test_harness !== undefined && typeof b.test_harness !== 'boolean') bad('test_harness', 'must be a boolean');
   if (b.isolation !== undefined && !ISOLATIONS.includes(b.isolation as Heartbeat['isolation'])) bad('isolation', `must be one of ${ISOLATIONS.join(', ')}`);
@@ -584,13 +589,12 @@ export interface Output {
 }
 
 /** R-BTN-82: outputs per leg run. */
-export const OUTPUTS_MAX = 16;
+import { OUTPUTS_MAX } from './contractPointers';
+export { OUTPUTS_MAX };
 const OUTPUT_NAME = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
 const OUTPUT_DIGEST = /^sha256:[0-9a-f]{64}$/;
 /** R-BTN-82's pointers: `git:<owner>/<name>@<commit>:<path>` or `#blob=<sha>` (content-addressed),
  *  an `https://` URL, or `s3://<bucket>/<key>?versionId=…`; at most 1 KB. */
-const GIT_POINTER = /^git:[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+(@[0-9a-f]{40}([0-9a-f]{24})?:[^\s]+|#blob=[0-9a-f]{40}([0-9a-f]{24})?)$/;
-const S3_POINTER = /^s3:\/\/[a-z0-9.-]{3,63}\/[^\s?]+\?versionId=[^\s&]+$/;
 
 /** `outputs` on an advance or an end (R-BTN-108, R-BTN-82): at most 16 envelopes, distinct
  *  names, each `{name, schema, uri, digest?}` or `{name, schema, value}` — never both. A value is
@@ -619,7 +623,7 @@ export function checkOutputs(v: unknown): Output[] {
       return { name, schema: o.schema as string, value: o.value };
     }
     const uri = o.uri;
-    if (typeof uri !== 'string' || uri.length > 1000 || !(GIT_POINTER.test(uri) || S3_POINTER.test(uri) || isHttpsPointer(uri))) {
+    if (typeof uri !== 'string' || uri.length > 1024 || !(gitPointer(uri) || S3_POINTER.test(uri) || isHttpsPointer(uri))) {
       bad(`${at}.uri`, 'must be a git:, https:// or s3:// pointer of at most 1000 characters');
     }
     const digest = optional(o.digest, matches(OUTPUT_DIGEST, `${at}.digest`));
@@ -976,7 +980,7 @@ export function checkRunInputs(v: unknown): RunInputs {
       return { name, from_leg, from_run, uri: '', digest: null, value: o.value, hasValue: true, leg_version };
     }
     const uri = o.uri;
-    if (typeof uri !== 'string' || uri.length > 1000 || !(GIT_POINTER.test(uri) || S3_POINTER.test(uri) || isHttpsPointer(uri))) {
+    if (typeof uri !== 'string' || uri.length > 1024 || !(gitPointer(uri) || S3_POINTER.test(uri) || isHttpsPointer(uri))) {
       bad(`${at}.uri`, 'must be a git:, https:// or s3:// pointer of at most 1000 characters');
     }
     const digest = optional(o.digest, matches(OUTPUT_DIGEST, `${at}.digest`));
@@ -1115,24 +1119,31 @@ export function checkResolve(body: unknown): { action: 'confirm' | 'release' } {
  *  other decision id is one a sync posted on the ticket (B-110): its answer is one of the
  *  options the decision carries, checked against the stored decision by the route. */
 export function checkDecisionAnswer(body: unknown):
-  | { decision: 'baton:retries' | 'baton:stalled'; answer: 'retry' | 'park' }
+  | { decision: 'baton:retries' | 'baton:stalled' | 'baton.contract'; answer: 'retry' | 'park' }
   | { decision: string; answer: string; posted: true } {
   if (!isObj(body)) bad('body', 'must be a JSON object');
   const b = body as Record<string, unknown>;
   for (const k of Object.keys(b)) if (!['decision', 'answer', 'leg'].includes(k)) bad(`body.${k}`, 'unknown field');
   if (b.decision === 'baton:contract') bad('decision', 'baton:contract is raised with leg contracts (B-39), not yet');
-  if (typeof b.decision === 'string' && !b.decision.startsWith('baton:') && DECISION_ID.test(b.decision)) {
+  if (typeof b.decision === 'string' && b.decision !== 'baton.contract' && !b.decision.startsWith('baton:') && DECISION_ID.test(b.decision)) {
     // B-110: a decision the ticket's sync posted — the owner's answer to the course's own
     // question (create-pr's third failed review round), one of the decision's options.
     if (typeof b.answer !== 'string' || !DECISION_OPTION.test(b.answer)) bad('answer', `must be one of the decision's options (${DECISION_OPTION})`);
     if (b.leg !== undefined) bad('leg', 'only with the route answer');
     return { decision: b.decision, answer: b.answer as string, posted: true };
   }
-  if (b.decision !== 'baton:retries' && b.decision !== 'baton:stalled') bad('decision', "must be 'baton:retries', 'baton:stalled' or a decision the ticket's sync posted");
+  if (b.decision !== 'baton:retries' && b.decision !== 'baton:stalled' && b.decision !== 'baton.contract') bad('decision', "must name a Baton decision or a decision the ticket's sync posted");
   if (b.answer === 'route') bad('answer', "route needs the owner's re-route (B-38), not yet: answer retry or park");
   if (b.answer !== 'retry' && b.answer !== 'park') bad('answer', "must be 'retry' or 'park'");
   if (b.leg !== undefined) bad('leg', 'only with the route answer');
-  return { decision: b.decision as 'baton:retries' | 'baton:stalled', answer: b.answer as 'retry' | 'park' };
+  return { decision: b.decision as 'baton:retries' | 'baton:stalled' | 'baton.contract', answer: b.answer as 'retry' | 'park' };
+}
+
+/** R-BTN-163: interaction delivery is opt-in on each runner grant. */
+export function checkDeliverInteractions(value: unknown): boolean {
+  if (value === undefined) return false;
+  if (typeof value === 'boolean') return value;
+  return bad('deliver_interactions', 'must be a boolean');
 }
 
 /** §8, §11: `{expedite?, hold?}` — booleans, at least one. */
@@ -1371,7 +1382,7 @@ export function checkProtection(v: unknown): { repository: string; matched: bool
     for (const k of Object.keys(e)) if (k !== 'repository' && k !== 'matched' && k !== 'reading_hash' && k !== 'legs') bad(`protection[${i}].${k}`, 'unknown field');
     if (typeof e.matched !== 'boolean') bad(`protection[${i}].matched`, 'must be true or false');
     if (typeof e.reading_hash !== 'string' || !/^[A-Za-z0-9:_-]{1,128}$/.test(e.reading_hash)) bad(`protection[${i}].reading_hash`, 'must be a short reading hash');
-    // §14 (R-BTN-190): the heartbeat protection entry's `legs` — what the checker's reading
+    // The heartbeat protection entry's `legs` (R-BTN-190) — what the checker's reading
     // covered, B-140's client sends it.
     let legs: { count: number; tickets: number } | undefined;
     if (e.legs !== undefined) {

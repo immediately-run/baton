@@ -1,3 +1,4 @@
+import { ticketInputs } from './contracts';
 // questions.ts — a person's leg and its question (BATON_SPEC §6.4 R-BTN-116; B-7). The one leg a
 // runner may never take: the course file marks it `kind: "person"` with `asks`, rule `person`
 // refuses every claim and advance, and the ticket waits in its queue until a person answers. The
@@ -16,7 +17,7 @@ import { resolveLeg, resolveStation, type Graph } from './graph';
 import { HELD_CLAIMS_SQL } from './blocks';
 import { validate, PATTERN_STEPS_MAX } from '../shared/schema.mjs';
 import { stdSchema } from '../shared/std.mjs';
-import type { PostedAttestation, PostedQuestion, PostedTicket } from './board';
+import { GIT_EVIDENCE_TYPE, type PostedAttestation, type PostedQuestion, type PostedTicket } from './board';
 import type { History } from './history';
 import type { Store } from './ports';
 
@@ -35,6 +36,7 @@ export interface Ctx {
   /** R-BTN-75: a ticket whose queued leg changed has its blocks re-evaluated. */
   reevaluate: (ticketId: string) => void;
   /** R-BTN-163: a person arrival can end the cause of a missing-next notice. */
+  contractWaits?: (repo: string, at: number, ticket: string) => void;
   closeMissingNext: (ticketId: string, at: number) => void;
   /** Rule 3's one definition of a held ticket (Blocks.isHeld); an arrival waits for the hold. */
   isHeld: (ticketId: string) => boolean;
@@ -188,12 +190,14 @@ export class Questions {
    * answer read from git — is an arrival recorded `arrival-unapplied` (R-BTN-39), raising
    * nothing; one that fails only because a claim holds the ticket defers (R-BTN-39), kept with
    * its ref for the hold's end. Any other type is recorded unapplied too: its reader arrives
-   * with B-146 and B-120. An attestation whose `ref` repeats an applied answer's is silent
+   * with B-146 and B-120; `std:git.evidence@1` is the confirmation's (R-BTN-10). An attestation whose `ref` repeats an applied answer's is silent
    * (R-BTN-39's idempotence — the same commit attested by two runs moves the ticket once).
    */
   attestations(repo: string, list: PostedAttestation[]) {
     for (const a of list) {
       const id = qualify(repo, a.ticket);
+      // R-BTN-10: the sync's evidence attestations are read by the confirmation (`Claims.judge`).
+      if (a.type === GIT_EVIDENCE_TYPE) continue;
       if (a.type !== DECISION_TYPE) {
         this.unapplied(id, null, { type: a.type, why: 'a type Baton does not read yet (R-BTN-191)' });
         continue;
@@ -326,7 +330,7 @@ export class Questions {
         stored?.posted_at ?? this.c.now(), leg, option.id, option.reached, who.by, who.ref ?? null, this.c.now());
       return { reached: option.reached, deferred: true };
     }
-    this.settle(repo, id, g, leg, { id: option.id, reached: option.reached }, { by: who.by, ref: who.ref ?? null, expired: false });
+    this.settle(repo, id, g, leg, { id: option.id, reached: option.reached }, { by: who.by, ref: who.ref ?? null, expired: false, question: given });
     return { reached: option.reached };
   }
 
@@ -424,10 +428,19 @@ export class Questions {
   // ── the arrival itself ───────────────────────────────────────────────────────────────────
 
   /** Move the ticket along its person leg and close its question. The caller's transaction. */
-  private settle(repo: string, id: string, g: Graph, leg: string, option: { id: string | null; reached: string }, meta: { by: string; ref: string | null; expired: boolean }) {
+  private settle(repo: string, id: string, g: Graph, leg: string, option: { id: string | null; reached: string }, meta: { by: string; ref: string | null; expired: boolean; question?: string }) {
     const now = this.c.now();
     const path = [...(JSON.parse(this.rows<{ path: string }>('SELECT path FROM ticket_stations WHERE ticket_id = ?', id)[0]?.path ?? '[]') as { leg: string; reached: string }[]),
       { leg, reached: option.reached }];
+    if (!meta.expired && option.id != null) {
+      const version = this.rows<{ version: number }>(`SELECT c.version FROM courses c JOIN tickets t
+        ON t.repository_id = c.repository_id AND t.course_id = c.id WHERE t.id = ?`, id)[0]?.version ?? 0;
+      const run = this.rows<{ run: number }>('SELECT COALESCE(MAX(run), 0) + 1 AS run FROM leg_outputs WHERE ticket_id = ? AND leg = ?', id, leg)[0].run;
+      const answer: DecisionValue = { id: meta.question ?? '', leg, option: option.id, reached: option.reached };
+      this.exec(`INSERT INTO leg_outputs (ticket_id, leg, run, name, schema, value_json, course_version, leg_version, source, confirmed, recorded_at)
+        VALUES (?, ?, ?, 'answer', ?, ?, ?, ?, 'sync', 1, ?)`, id, leg, run, DECISION_TYPE, JSON.stringify(answer), version, g.legs.get(leg)!.version, now);
+      this.c.history?.record(id, { kind: 'outputs', leg, run, course_version: version, leg_version: g.legs.get(leg)!.version, detail: { names: ['answer'] } });
+    }
     // The legs leaving the outcome it reached, in the file's order: the ticket waits at the
     // station, `next_source: baton` (R-BTN-83), and the next snapshot places it properly.
     const next = [...g.legs.entries()].filter(([, l]) => l.from.includes(option.reached)).map(([name]) => name);
@@ -441,9 +454,11 @@ export class Questions {
                WHERE ticket_id = ?`, option.reached, JSON.stringify(path), path.length, g.toEnd.get(option.reached) ?? 0, next[0] ?? null, expiresAt, id);
     this.exec('DELETE FROM ticket_next_legs WHERE ticket_id = ?', id);
     for (const name of next) {
-      this.exec(`INSERT INTO ticket_next_legs (ticket_id, leg, state, ready_since) VALUES (?, ?, 'ready', ?)
-                 ON CONFLICT (ticket_id, leg) DO UPDATE SET state = 'ready', waiting_on = NULL, waiting_since = NULL, ready_since = excluded.ready_since`, id, name, now);
+      const wait = ticketInputs(this.c.store, id, g, name).wait;
+      this.exec(`INSERT INTO ticket_next_legs (ticket_id, leg, state, waiting_on, waiting_since, ready_since) VALUES (?, ?, ?, ?, ?, ?)`,
+        id, name, wait ? 'waiting' : 'ready', wait ?? null, wait ? now : null, wait ? null : now);
     }
+    this.c.contractWaits?.(repo, now, id);
     // The question closes — answered or expired — and the expiry and any deferred answer with
     // it. The row names the leg the answer actually ran: a person's leg need not be the queued
     // one (R-BTN-39), and the queued one's question is moot once the ticket has moved. A leg

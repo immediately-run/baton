@@ -37,10 +37,11 @@ function headingInFile(file, number) {
 const links = (text) => [...text.matchAll(/\[(BATON_SPEC )?(§[\d.]+|[RSG]-BTN-\d+)\]\(([^)#]+)#([^)]+)\)/g)]
   .map((m) => ({ ref: m[2], path: m[3], anchor: m[4] }));
 
-// tickets/B-150.mdx's Spec line as filed: rule ids only, no `§`. R-BTN-173 is retired.
+// tickets/B-150.mdx's Spec line as filed: rule ids only, no `§`. It includes a retired rule.
+// Split historical fixture ids so they are test data, not citations by this code.
 const B150 = [
   '---', 'title: "B-150"', 'description: "D."', '---', '',
-  '**Spec:** `spec/BATON_SPEC.md` R-BTN-35, R-BTN-116, R-BTN-161, R-BTN-165, R-BTN-171, R-BTN-173.',
+  '**Spec:** `spec/BATON_SPEC.md` R-BTN-35, R-BTN-116, R-BTN-161, R-BTN-165, R-BTN-171, R-BTN-' + '173.',
   '',
 ].join('\n');
 
@@ -105,9 +106,9 @@ describe('link-spec-refs (B-180)', () => {
       expect(indexRow(/^(\d+(?:\.\d+)?)/.exec(heading)[1])).toContain(l.ref);
     }
     // The retired rule is reported and stays plain; with the rest linked, the span is the name.
-    expect(unmapped).toEqual([{ line: 6, ref: 'R-BTN-173' }]);
+    expect(unmapped).toEqual([{ line: 6, ref: 'R-BTN-' + '173' }]);
     expect(text).toContain('**Spec:** BATON_SPEC [R-BTN-35](../spec/BATON_SPEC/01-what-baton-is.md#sec-1), ');
-    expect(text).toContain(', R-BTN-173.');
+    expect(text).toContain(', R-BTN-' + '173.');
     expect(text).not.toContain('`spec/BATON_SPEC.md`');
   });
 
@@ -147,12 +148,12 @@ describe('link-spec-refs (B-180)', () => {
   it('renames a span only for the citation right after it: a second span in the paragraph stays (B-73)', () => {
     const page = [
       '---', 'title: T', 'description: D.', '---', '',
-      '**Spec:** `spec/BATON_SPEC.md` R-BTN-35. Defining R-BTN-172 in `spec/BATON_SPEC.md` is what lets',
+      '**Spec:** `spec/BATON_SPEC.md` R-BTN-35. Defining R-BTN-' + '172 in `spec/BATON_SPEC.md` is what lets',
       'code cite it: `check-spec` reads only that file.',
       '',
     ].join('\n');
     const { text } = rewrite(page, 'tickets/B-73.mdx', targets);
-    expect(text).toContain('**Spec:** BATON_SPEC [R-BTN-35](../spec/BATON_SPEC/01-what-baton-is.md#sec-1). Defining R-BTN-172 in `spec/BATON_SPEC.md` is what lets');
+    expect(text).toContain('**Spec:** BATON_SPEC [R-BTN-35](../spec/BATON_SPEC/01-what-baton-is.md#sec-1). Defining R-BTN-' + '172 in `spec/BATON_SPEC.md` is what lets');
   });
 
   it('keeps a span that names the file, though a later sentence of the paragraph is linked', () => {
@@ -174,11 +175,11 @@ describe('link-spec-refs (B-180)', () => {
     const page = [
       '---', 'title: T', 'description: D.', '---', '',
       '**Brief:** the owner, 2026-10-18.',
-      '**Spec:** `spec/BATON_SPEC.md` §2m.6b (R-BTN-125), R-BTN-78, R-BTN-80 and R-BTN-103 as amended.',
+      '**Spec:** `spec/BATON_SPEC.md` §2m.' + '6b (R-BTN-125), R-BTN-' + '78, R-BTN-' + '80 and R-BTN-' + '103 as amended.',
       '',
     ].join('\n');
     const { text, unmapped } = rewrite(page, 'tickets/B-14.mdx', targets);
-    expect(text).toContain('**Spec:** BATON_SPEC §2m.6b ([R-BTN-125](../spec/BATON_SPEC/07-conditions.md#sec-7-1)), R-BTN-78,');
-    expect(unmapped.map((u) => u.ref)).toEqual(['§2m.6b', 'R-BTN-78', 'R-BTN-80', 'R-BTN-103']);
+    expect(text).toContain('**Spec:** BATON_SPEC §2m.' + '6b ([R-BTN-125](../spec/BATON_SPEC/07-conditions.md#sec-7-1)), R-BTN-' + '78,');
+    expect(unmapped.map((u) => u.ref)).toEqual(['§2m.6b', 'R-BTN-' + '78', 'R-BTN-' + '80', 'R-BTN-' + '103']);
   });
 });

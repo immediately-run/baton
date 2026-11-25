@@ -1,4 +1,4 @@
-// ../../../../../baton-bundle-kQR1mr/entry.ts
+// ../../../../../baton-bundle-LXBGhQ/entry.ts
 import { execFileSync as execFileSync2, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdtempSync, readdirSync, rmSync as rmSync2, statSync, writeFileSync } from "node:fs";
@@ -56,6 +56,22 @@ function splitWords(command) {
   }
   if (started) take();
   return words;
+}
+
+// src/defaults/dibber.ts
+var DIBBER_VERSION = "0.4.0";
+var DIBBER_PACKAGE = "@immediately-run/dibber";
+var VERSION = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.]{1,32})?$/;
+function dibberVersion(settings) {
+  const v = settings.dibber;
+  if (v == null) return DIBBER_VERSION;
+  if (typeof v !== "string" || !VERSION.test(v)) throw new Error(`.baton/baton.json's dibber is ${JSON.stringify(v)}, not a release version (such as "${DIBBER_VERSION}") \u2014 it pins @immediately-run/dibber, it never names a command`);
+  return v;
+}
+function dibberWords(settings, env = process.env) {
+  const host = env.BATON_DIBBER?.trim();
+  if (host) return splitWords(host);
+  return ["npx", "--yes", `${DIBBER_PACKAGE}@${dibberVersion(settings)}`];
 }
 
 // src/defaults/answer.ts
@@ -361,7 +377,7 @@ baton: ${ctx.ticket.id} ${ctx.leg}, claim ${ctx.claim?.nonce ?? "?"}`;
   return closeTicket({ ...ctx, heading: false }, result, run2);
 }
 
-// ../../../../../baton-bundle-kQR1mr/entry.ts
+// ../../../../../baton-bundle-LXBGhQ/entry.ts
 var GIT_BOUND_MS = 12e4;
 var GIT_ENV = { "GIT_TERMINAL_PROMPT": "0", "GIT_SSH_COMMAND": "ssh -o BatchMode=yes -o ConnectTimeout=20" };
 var AGENT_IDLE_MS = 9e5;
@@ -413,6 +429,7 @@ async function standard(ctx) {
   if (settingsCommand === "") throw new Error(".baton/baton.json names no agent_command \u2014 run `baton repo init --agent opencode` (or --agent claude-code, or --agent-command <cmd>); baton run --harness <harness> runs its command when the settings name none");
   const agentWords = splitWords(settingsCommand);
   const agentCommand = agentWords.join(" ");
+  const dibberCommand = process.env.BATON_DIBBER?.trim() || dibberWords(settings).join(" ");
   const courseSha = typeof ctx.signed_control?.course === "string" && ctx.signed_control.course !== "" ? ctx.signed_control.course : sha;
   const rel = ".baton/courses/create-pr/legs/adjudicate.md";
   const present = gitRun("git", ["-C", ctx.checkout, "ls-tree", "--name-only", courseSha, "--", rel]).trim() !== "";
@@ -461,6 +478,7 @@ async function standard(ctx) {
         BATON_LEG: "adjudicate",
         BATON_INSTRUCTIONS: instructions,
         BATON_TICKET_FILE: ctx.ticket.file ?? ctx.ticket.path ?? "",
+        BATON_DIBBER: dibberCommand,
         BATON_ANSWER: "print merge or owner as your last line, then the URL of the PR to write it on when it is not the checkout branch's"
       }
     });

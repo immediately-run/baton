@@ -3,7 +3,7 @@ import { boundedJson } from './validate';
 // R-BTN-33/35). Pure: the core does the SQL, on either host. Only filter fields survive — an item's
 // body, Status notes, exit criteria and PR list never reach Baton; the dashboard links each
 // item to its file on GitHub instead.
-import { capabilitiesOf } from '../vendor/vocabulary.mjs';
+import { capabilitiesOf } from '../shared/vocabulary.mjs';
 import { parseTranscriptRepo } from './links';
 import { BatonError } from './http';
 import { checkRegistry, COURSE_ID, type RegistryEntry } from './courses';
@@ -201,6 +201,10 @@ export interface PostedControl {
 
 /** R-BTN-191's envelope as the sync posts it (§4.4): a typed fact about one ticket, its `value`
  *  judged by its `type`'s schema when the type is read. */
+/** R-BTN-10, R-BTN-191: the sync's attestation that git or the forge shows (`found`) the
+ *  evidence an unconfirmed end named. */
+export const GIT_EVIDENCE_TYPE = 'std:git.evidence@1';
+
 export interface PostedAttestation {
   type: string;
   /** A local ticket id, as the post's tickets name them. */
@@ -356,6 +360,14 @@ export function checkPayload(body: unknown, repo?: string): BoardPayload {
         throw new BatonError('invalid-params', `${at}.ref must be a short string or null`);
       }
       if (!isObj((a as PostedAttestation).value)) throw new BatonError('invalid-params', `${at}.value must be an object`);
+      // R-BTN-10: the sync's word on the evidence an unconfirmed end named — `{claim, evidence,
+      // found}`, the evidence exactly as the observation listed it.
+      if ((a as PostedAttestation).type === GIT_EVIDENCE_TYPE) {
+        const v = (a as PostedAttestation).value as Record<string, unknown>;
+        if (!Number.isSafeInteger(v.claim) || (v.claim as number) <= 0) throw new BatonError('invalid-params', `${at}.value.claim must be a claim id`);
+        if (typeof v.evidence !== 'string' || v.evidence === '' || v.evidence.length > 1000) throw new BatonError('invalid-params', `${at}.value.evidence must be the commit sha or URL the end named`);
+        if (typeof v.found !== 'boolean') throw new BatonError('invalid-params', `${at}.value.found must be true or false`);
+      }
     }
   }
   // B-127 (R-BTN-66 as amended): the post's signed-control record. The shape and bounds here;
@@ -756,7 +768,7 @@ export function rowFor(it: StateItem, rankOf: Map<string, number>): TicketRow {
   const tags = it.tags ?? [];
   const names = it.requires ?? null;
   const clause = names == null ? 'absent' : names.every((n) => n === 'none') ? 'none' : 'listed';
-  const path = `content/roadmap/${it.id}.mdx`;
+  const path = `content/roadmap/${it.id}.mdx`; // dependency-history: legacy ticket URL, not an input
   return {
     id: it.id,
     path,

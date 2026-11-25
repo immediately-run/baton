@@ -752,7 +752,7 @@ describe('migration 0065: normalized matching inputs and ready candidates', () =
                 tier_ceiling, lease_timeout_ms, settings_hash, first_seen_at, last_seen_at)
                 VALUES (1, 'host', 's', 'hash', 'key', 'opencode', 'vm', 'routine', 900000, '', 0, 0)`);
       sql.exec("INSERT INTO runner_capabilities (runner_id, capability, declared) VALUES (1, 'new', 'new'), (1, 'missing', 'missing')");
-      sql.exec(MIGRATIONS.find((m) => m.id === 77)!.sql);
+      sql.exec(MIGRATIONS.find((m) => m.id === 124)!.sql);
       expect(all('SELECT * FROM runner_effective_caps')).toEqual([{ runner_id: 1, repository_id: 'docs', capability: 'new' }]);
       expect(all('SELECT repository_key, repository_id FROM ticket_repositories')).toEqual([{ repository_key: 'o/docs', repository_id: 'docs' }]);
       sql.exec("DELETE FROM tickets WHERE id='docs:A'");

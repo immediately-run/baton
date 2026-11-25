@@ -3,7 +3,7 @@ title: "B-157 — One CLI command tree: R-BTN-127 lists every command the spec n
 id: B-157
 project: baton
 status: available
-updated: 2026-11-02
+updated: 2026-11-23
 repos:
   - baton
 tags:
@@ -17,6 +17,7 @@ owns: {}
 prs: []
 depends_on:
   - B-166
+  - B-25
 ---
 
 **Brief:** the owner, 2026-11-01, on the whole-spec review they commissioned ("assess it for …
@@ -60,3 +61,5 @@ _(2026-11-02: the spec restructure's part 2 (B-166, the PR `baton-spec-restructu
 - 2026-11-02: the spec half is written by the spec restructure's part 3 (B-166, the PR `spec-restructure-handoff`, [#163](https://github.com/immediately-run/baton/pull/163)): R-BTN-127's table lists every command any rule names under one grammar, each rule cites it, and `baton help [noun [verb]]` and `--help` on every command come from the registry's command table (R-BTN-129), each with its arguments, flags, summary and one example. **Remaining for the code item:** build the tree and the generated help (item 3), and rename the built commands and their callers — `baton run` → `runner start`, `baton request` → `ticket request`, `baton tickets …` → `ticket …` (`npm run check:tickets`, fieldhouse's `npm run ticket`), `baton board` → `repo board`, `admin repos` → `admin repo list`, `owner grants` → `owner grant list`, `admin revoke` → `admin key revoke`, `owner resolve` → `ticket resolve` and the rest of the history's Migrations list — each old name exiting 2 with its `renamed:` line.
 - 2026-11-02: part 3's review round one added to the tree `human-key add | revoke` (R-BTN-185) and renamed `owner owners add | remove` → `owner owner add | remove` and `admin resource set` → `admin reading set`; the grammar now states the one-word verbs (instance or own session) and the plurals (`keys set`, `settings set`, `sessions revoke`); `keys.json` gains a `human` slot.
 - 2026-11-02: the owner took the recommendations on part 3's open items, the renames among them (`baton ticket …`, `baton ticket request`, `baton attestation add | revoke` with `baton decision answer`); the code item builds the tree, the generated help and the `renamed:` exits.
+
+_(2026-11-23: B-23 is rewritten to the leg-log half; the command tree, the old names' `renamed:` exits and the callers' moves, which both tickets held, are this ticket's alone. Each command signs as its actions' `callers` (R-BTN-129), so the code item now depends on B-25's registry; B-25 no longer depends on B-23 for the tree. `baton leg log` lands with B-23 as a verb of the current CLI, beside `leg replay` and `leg raise`, and joins the tree here.)_

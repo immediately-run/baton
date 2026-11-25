@@ -1,4 +1,4 @@
-// ../../../../../baton-bundle-LKjTl4/entry.ts
+// ../../../../../baton-bundle-ZmWdYG/entry.ts
 import { execFileSync as execFileSync2, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, readdirSync, rmSync as rmSync2, statSync, writeFileSync } from "node:fs";
@@ -56,6 +56,22 @@ function splitWords(command) {
   }
   if (started) take();
   return words;
+}
+
+// src/defaults/dibber.ts
+var DIBBER_VERSION = "0.4.0";
+var DIBBER_PACKAGE = "@immediately-run/dibber";
+var VERSION = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.]{1,32})?$/;
+function dibberVersion(settings) {
+  const v = settings.dibber;
+  if (v == null) return DIBBER_VERSION;
+  if (typeof v !== "string" || !VERSION.test(v)) throw new Error(`.baton/baton.json's dibber is ${JSON.stringify(v)}, not a release version (such as "${DIBBER_VERSION}") \u2014 it pins @immediately-run/dibber, it never names a command`);
+  return v;
+}
+function dibberWords(settings, env = process.env) {
+  const host = env.BATON_DIBBER?.trim();
+  if (host) return splitWords(host);
+  return ["npx", "--yes", `${DIBBER_PACKAGE}@${dibberVersion(settings)}`];
 }
 
 // src/defaults/ticket-state.ts
@@ -323,6 +339,7 @@ baton: ${ctx.ticket.id} ${ctx.leg}, claim ${ctx.claim?.nonce ?? "?"}`;
 
 // src/defaults/course-pr.ts
 var DEFAULT_BRANCH_PATTERN = "claude/{ticket}-*";
+var CREATE_PR_ASK_DEADLINE_S = 3 * 60 * 60;
 var CREATE_SPEC_COURSE = {
   start: "requested",
   start_leg: "converse",
@@ -388,7 +405,7 @@ function ticketRepositories(text, reposMap) {
   return names.map((r) => typeof r === "string" && /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(r) ? r : reposMap?.[r]).filter((r) => typeof r === "string" && r !== "");
 }
 
-// ../../../../../baton-bundle-LKjTl4/entry.ts
+// ../../../../../baton-bundle-ZmWdYG/entry.ts
 var GIT_BOUND_MS = 12e4;
 var GIT_ENV = { "GIT_TERMINAL_PROMPT": "0", "GIT_SSH_COMMAND": "ssh -o BatchMode=yes -o ConnectTimeout=20" };
 var AGENT_IDLE_MS = 9e5;
@@ -440,6 +457,7 @@ async function standard(ctx) {
   if (settingsCommand === "") throw new Error(".baton/baton.json names no agent_command \u2014 run `baton repo init --agent opencode` (or --agent claude-code, or --agent-command <cmd>); baton run --harness <harness> runs its command when the settings name none");
   const agentWords = splitWords(settingsCommand);
   const agentCommand = agentWords.join(" ");
+  const dibberCommand = process.env.BATON_DIBBER?.trim() || dibberWords(settings).join(" ");
   const redEdge = ctx.claim?.station === "pr-open" || ctx.claim?.station === "fixed";
   const prHeads = () => {
     const own = (Array.isArray(settings.courses) ? settings.courses : []).find((c) => c && c.id === "create-pr") ?? {};
@@ -495,6 +513,7 @@ async function standard(ctx) {
     }
   }
   const lastOutput = (so, se) => (so + "\n" + se).split("\n").map((l) => l.trimEnd()).filter((l) => l.trim() !== "").slice(-20).join("\n  ");
+  const canInteract = ctx.can_interact === true;
   const received = await new Promise((resolve, reject) => {
     const echo = process.env.BATON_VERBOSE === "1";
     const child = spawn(argv[0], argv.slice(1), {
@@ -505,7 +524,8 @@ async function standard(ctx) {
         BATON_COURSE: "create-pr",
         BATON_LEG: "fix",
         BATON_INSTRUCTIONS: instructions,
-        BATON_TICKET_FILE: ctx.ticket.file ?? ctx.ticket.path ?? ""
+        BATON_TICKET_FILE: ctx.ticket.file ?? ctx.ticket.path ?? "",
+        BATON_DIBBER: dibberCommand
       }
     });
     let so = "", se = "";
@@ -557,10 +577,21 @@ async function standard(ctx) {
       if (stopped != null || conclusion2 != null) return;
       const now = Date.now();
       if (now - startedAt >= LEG_CEILING_MS) {
+        if (canInteract) {
+          stopped = "the leg reached its hard ceiling (" + LEG_CEILING_MS + " ms)";
+          clearInterval(watch);
+          ctx.signal?.removeEventListener("abort", onAbort);
+          child.kill("SIGKILL");
+          child.stdout.destroy();
+          child.stderr.destroy();
+          reject(new Error("the agent was stopped: " + stopped));
+          return;
+        }
         conclusion2 = { cause: "agent_concluded_absolute", ceiling_ms: LEG_CEILING_MS };
         finishWatch();
         return;
       }
+      if (canInteract) return;
       const all = signals();
       if (all.every(([, at]) => now - at >= AGENT_IDLE_MS)) {
         conclusion2 = { cause: "agent_concluded_idle", idle_ms: AGENT_IDLE_MS, quiet_signals: all.map(([name]) => name) };

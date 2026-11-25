@@ -1,7 +1,7 @@
 // B-287: mixed busy/idle polling, a cold indexed decision, unchanged snapshots and paged UI.
 import { beforeEach, describe, expect, it } from 'vitest';
 import { schedulingVersion } from '../../src/core/stateVersion';
-import { Git, HOST, adminSession, beat, call, captureDispatches, claimItem, cutover, endClaim, register, rows, runnerCall, sessionCall, setAdminKeys, setClock, webhookCall, withCore } from '../helpers';
+import { Git, HOST, adminSession, beat, call, captureDispatches, claimItem, cutover, endClaim, register, rows, runnerCall, sessionCall, setAdminKeys, setClock, ticket, webhookCall, withCore } from '../helpers';
 import { makeKey } from '../lib/sshKeys';
 
 const T0 = Date.parse('2026-11-19T12:00:00Z');
@@ -126,7 +126,7 @@ describe('S-BTN-243 bounded reads without changing matching', { timeout: 120_000
     const { git, idle } = await busyBoard();
     // More than 50 matching repo rows, and a mixture of eligible and ineligible tickets.
     for (let i = 1; i <= 180; i++) git.add(`T-${i}`, { rank: i,
-      requires: i % 2 ? ['agent-venue'] : ['human-operator'], repos: ['immediately-run/docs', 'sandbox'] });
+      requires: i % 2 ? ['agent-venue'] : ['human-operator'], repos: [...ticket('T-0').repos, 'sandbox'] });
     expect((await git.post()).status).toBe(200);
     const rec = await measure(() => runnerCall('/v1/runner/recommendations', { secret: idle.secret }));
     expect(rec.value.status).toBe(200);
