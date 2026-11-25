@@ -129,6 +129,7 @@ function listingsOf(cx: ReadCtx, repository: string, now: number, administrator:
   const claims = cx.core.claims.needsYou(now);
   const blocks = cx.core.blocks.needsYou(now);
   const notices = cx.core.notices.needsYou(now);
+  const stations = cx.core.stations.needsYou();
   return {
     unconfirmed: (claims.unconfirmed as Row[]).filter(byTicket),
     unacknowledged_releases: (claims.unacknowledged_releases as Row[])
@@ -148,7 +149,7 @@ function listingsOf(cx: ReadCtx, repository: string, now: number, administrator:
       ORDER BY ticket_id, leg, ref LIMIT 100`, repository, repository),
     pool_unclaimed: (notices.pool_unclaimed as Row[]).filter(here),
     no_owner_channel: (notices.no_owner_channel as Row[]).filter(here),
-    course_changed: (cx.core.stations.needsYou().course_changed as Row[]).filter(byTicket),
+    course_changed: (stations.course_changed as Row[]).filter(byTicket),
     courses_refused: cx.core.courses.refusals().filter((r) => r.repository_id === repository),
     scope: cx.core.scope.needsYou().filter((f) => f.repository_id === repository),
     unsigned_control: cx.core.unsignedControlView(now).filter((u) => u.repository_id === repository),
