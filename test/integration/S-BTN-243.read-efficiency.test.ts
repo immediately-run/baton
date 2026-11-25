@@ -4,7 +4,8 @@ import { schedulingVersion } from '../../src/core/stateVersion';
 import {
   Git, HOST, adminSession, beat, call, captureDispatches, claimItem, cutover, endClaim, register, rows, runnerCall, sessionCall,
   setAdminKeys, setClock, ticket, webhookCall, withCore, clearTicketRequirements, setTicketRankIn, seedClaim, seedMessage,
-  seedTicketOverride, seedTicketOverrideIn,
+  seedTicketOverride, seedTicketOverrideIn, setCourseLegCapabilities, setCredentialAllowedCapabilities, putRunnerGrant,
+  setCoursePersonLegs, setCredentialCreatedBy, revokeRunnerGrants, removeRunnerCapability, revokeCredentialIn,
 } from '../helpers';
 import { makeKey } from '../lib/sshKeys';
 
@@ -77,12 +78,9 @@ describe('S-BTN-243 bounded reads without changing matching', { timeout: 120_000
         } finally { c.claims.reference = false; }
       });
     };
-    const courseCaps = (caps: string[]) => rows(`UPDATE courses SET leg_capabilities_json = ? WHERE repository_id = 'docs' AND id = 'roadmap-pr'`,
-      JSON.stringify({ implement: caps }));
-    const allow = (caps: string[]) => rows("UPDATE credentials SET allowed_capabilities = ? WHERE id = 'vm-a'", JSON.stringify(caps));
-    const grant = (caps: string[]) => rows(`INSERT INTO runner_grants (credential_id, repository_id, capabilities, granted_by, granted_at)
-      VALUES ('vm-a', 'docs', ?, 'admin:test', ?) ON CONFLICT (credential_id, repository_id)
-      DO UPDATE SET capabilities = excluded.capabilities, revoked_at = NULL`, JSON.stringify(caps), T0);
+    const courseCaps = (caps: string[]) => setCourseLegCapabilities('docs', 'roadmap-pr', { implement: caps });
+    const allow = (caps: string[]) => setCredentialAllowedCapabilities('vm-a', caps);
+    const grant = (caps: string[]) => putRunnerGrant({ credential_id: 'vm-a', repository_id: 'docs', capabilities: caps, granted_by: 'admin:test', granted_at: T0 });
 
     await agreement(['PLAIN', 'RUNNER']); // declaration without admission; runner: is exempt
     await allow(['key:one']);
@@ -98,27 +96,27 @@ describe('S-BTN-243 bounded reads without changing matching', { timeout: 120_000
     await agreement([]); // a leg's own need is independent of the ticket clause
     await courseCaps(['key:one']);
     await agreement(['NEEDS', 'PLAIN', 'RUNNER']);
-    await rows(`UPDATE courses SET person_legs_json = '["implement"]' WHERE repository_id = 'docs' AND id = 'roadmap-pr'`);
+    await setCoursePersonLegs('docs', 'roadmap-pr', ['implement']);
     await agreement([]);
-    await rows(`UPDATE courses SET person_legs_json = '[]' WHERE repository_id = 'docs' AND id = 'roadmap-pr'`);
+    await setCoursePersonLegs('docs', 'roadmap-pr', []);
 
-    await rows("UPDATE credentials SET created_by = 'admin:test' WHERE id = 'vm-a'");
+    await setCredentialCreatedBy('vm-a', 'admin:test');
     await grant(['key:*']);
     await agreement(['NEEDS', 'PLAIN', 'RUNNER']); // a literal first-segment wildcard
     await grant(['key:other']);
     await agreement([]);
     await grant(['key:one']);
     await agreement(['NEEDS', 'PLAIN', 'RUNNER']);
-    await rows("UPDATE runner_grants SET revoked_at = ? WHERE credential_id = 'vm-a'", T0);
+    await revokeRunnerGrants('vm-a', T0);
     await agreement([]);
     await grant(['key:*']);
     await courseCaps([]);
-    await rows("DELETE FROM runner_capabilities WHERE runner_id = ? AND capability = 'key:one'", w.id);
+    await removeRunnerCapability(w.id, 'key:one');
     await agreement(['PLAIN', 'RUNNER']); // a lost holding is removed without waiting for heartbeat
 
     await withCore((c) => {
       expect(() => c.store.transaction(() => {
-        c.store.exec("UPDATE credentials SET revoked_at = ? WHERE id = 'vm-a'", T0);
+        revokeCredentialIn(c.store, 'vm-a', T0);
         expect(c.store.exec('SELECT capability FROM runner_effective_caps WHERE runner_id = ?', w.id).toArray()).toEqual([]);
         throw new Error('rollback');
       })).toThrow('rollback');

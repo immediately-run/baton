@@ -8,7 +8,7 @@ import { mintRunId } from '../../src/core/db';
 import type { Store } from '../../src/core/ports';
 
 import { dropDerivedSchema } from '../lib/migrationRewind';
-import { seedLegacyReviewerSql, seedSettingsSql } from '../helpers';
+import { seedAdminRunnerSql, seedLegacyReviewerSql, seedSettingsSql } from '../helpers';
 
 describe('migration 0076: retire reviewer settings (B-285, S-BTN-26)', () => {
   it('drops the old reviewer data without changing other instance settings', async () => {
@@ -748,11 +748,7 @@ describe('migration 0065: normalized matching inputs and ready candidates', () =
       expect(all('SELECT * FROM ready_tickets EXCEPT SELECT * FROM ready_ticket_source')).toEqual([]);
       expect(all('SELECT * FROM ready_ticket_source EXCEPT SELECT * FROM ready_tickets')).toEqual([]);
       // B-239: upgrade the populated 0065 projection, not just an empty database.
-      sql.exec("UPDATE credentials SET created_by = 'admin:test' WHERE id = 'key'");
-      sql.exec(`INSERT INTO runners (id, hostname, session_name, secret_hash, credential_id, harness, kind,
-                tier_ceiling, lease_timeout_ms, settings_hash, first_seen_at, last_seen_at)
-                VALUES (1, 'host', 's', 'hash', 'key', 'opencode', 'vm', 'routine', 900000, '', 0, 0)`);
-      sql.exec("INSERT INTO runner_capabilities (runner_id, capability, declared) VALUES (1, 'new', 'new'), (1, 'missing', 'missing')");
+      seedAdminRunnerSql(sql, 'key', 1, ['new', 'missing']);
       sql.exec(MIGRATIONS.find((m) => m.id === 124)!.sql);
       expect(all('SELECT * FROM runner_effective_caps')).toEqual([{ runner_id: 1, repository_id: 'docs', capability: 'new' }]);
       expect(all('SELECT repository_key, repository_id FROM ticket_repositories')).toEqual([{ repository_key: 'o/docs', repository_id: 'docs' }]);

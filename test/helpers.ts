@@ -705,6 +705,31 @@ export function replaceClaimControl(claim: number, control: string) {
 export function replaceSignedControl(repository: string, control: string) {
   return rows("UPDATE signed_control SET control_json = ? WHERE repository_id = ?", control, repository);
 }
+export function setCredentialCreatedBy(credential: string, createdBy: string) {
+  return rows("UPDATE credentials SET created_by = ? WHERE id = ?", createdBy, credential);
+}
+export function revokeCredentialIn(store: Pick<Store, 'exec'>, credential: string, at: number): void {
+  store.exec("UPDATE credentials SET revoked_at = ? WHERE id = ?", at, credential).toArray();
+}
+export function setCredentialAllowedCapabilities(credential: string, capabilities: string[]) {
+  return rows("UPDATE credentials SET allowed_capabilities = ? WHERE id = ?", JSON.stringify(capabilities), credential);
+}
+export function setCourseLegCapabilities(repository: string, course: string, legCapabilities: Record<string, string[]>) {
+  return rows("UPDATE courses SET leg_capabilities_json = ? WHERE repository_id = ? AND id = ?", JSON.stringify(legCapabilities), repository, course);
+}
+export function setCoursePersonLegs(repository: string, course: string, legs: string[]) {
+  return rows("UPDATE courses SET person_legs_json = ? WHERE repository_id = ? AND id = ?", JSON.stringify(legs), repository, course);
+}
+/** A grant written, or rewritten and un-revoked, with these capabilities. */
+export function putRunnerGrant(fields: { credential_id: string; repository_id: string; capabilities: string[]; granted_by: string; granted_at: number }) {
+  return rows(`INSERT INTO runner_grants (credential_id, repository_id, capabilities, granted_by, granted_at)
+    VALUES (?, ?, ?, ?, ?) ON CONFLICT (credential_id, repository_id)
+    DO UPDATE SET capabilities = excluded.capabilities, revoked_at = NULL`,
+  fields.credential_id, fields.repository_id, JSON.stringify(fields.capabilities), fields.granted_by, fields.granted_at);
+}
+export function removeRunnerCapability(runner: number, capability: string) {
+  return rows("DELETE FROM runner_capabilities WHERE runner_id = ? AND capability = ?", runner, capability);
+}
 export function clearTicketRequirements(ticket: string) {
   return rows("DELETE FROM ticket_requires WHERE ticket_id = ?", ticket);
 }
@@ -878,6 +903,14 @@ export function seedLegacyReviewerSql(sql: SqlExec): void {
 }
 export function seedSettingsSql(sql: SqlExec, entries: [string, string][]): void {
   for (const [key, value] of entries) sql.exec('INSERT INTO baton_settings (key, value) VALUES (?, ?)', key, value);
+}
+/** Migration tests (B-239): an administrator-made key's runner holding `capabilities`. */
+export function seedAdminRunnerSql(sql: SqlExec, credential: string, runner: number, capabilities: string[]): void {
+  sql.exec("UPDATE credentials SET created_by = 'admin:test' WHERE id = ?", credential);
+  sql.exec(`INSERT INTO runners (id, hostname, session_name, secret_hash, credential_id, harness, kind,
+            tier_ceiling, lease_timeout_ms, settings_hash, first_seen_at, last_seen_at)
+            VALUES (?, 'host', 's', 'hash', ?, 'opencode', 'vm', 'routine', 900000, '', 0, 0)`, runner, credential);
+  for (const c of capabilities) sql.exec('INSERT INTO runner_capabilities (runner_id, capability, declared) VALUES (?, ?, ?)', runner, c, c);
 }
 /** S-BTN-243: months of history for one runner — `count` linked and pending transcripts and
  *  status reports, half an hour apart from `from`. */
