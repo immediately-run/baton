@@ -570,9 +570,39 @@ trusted runners or of the protection checker; a compromised forge; and a comprom
 - **R-BTN-182 (trusted runners).** A grant role (R-BTN-180), for the legs a course marks
   `trusted: true`. What a trusted runner claims, runs and re-checks before it acts is
   [proposed](../proposals/security.md) (B-140).
-- **R-BTN-183 (what the merge runner merges).** [Proposed](../proposals/security.md) (B-140):
-  the reviews, checks, paths and approvals the merge runner requires at a PR's exact head under
-  the policy's `merge.*` and `paths.*`.
+- **R-BTN-183 (review input and what the merge runner merges).** A domain that runs the
+  branch's code is one of its writers. Baton records what the deployment declares; the
+  deployment makes it true. The writer attestations and what the merge runner requires at a
+  PR's exact head are [proposed](../proposals/security.md) (B-140).
+  - **Read-only agents (B-141).** A deployment can mark a runner leg `reads_only: true`.
+    The runner passes that declaration to the stub and as a hint to the executor (R-BTN-107).
+    A deployment installs compatible stubs when opting in. The runner rejects older stubs
+    (no `readsOnly: true` export), and the shipped stub checks the pinned graph and refuses an
+    opted-in leg when an older runner omits the read-only context. Deployment-owned course code selects the review commit
+    through its snapshot override: pass `ctx.review_head`, an exact commit id already present in
+    the home object store, when calling `standard(ctx)`. The stub reads that store even when
+    the claim clone does not have the object. It never infers the head from a checkout or
+    branch name. Replay does not run these legs until it records the review
+    input. No standard course opts in.
+  - **The workspace.** The agent starts in a temporary directory outside the checkout, with
+    `review.diff` from the snapshot and review head's merge base to the review head, and the
+    changed regular blobs under `changes/` as non-executable files. No git metadata, symlink,
+    submodule or branch harness configuration is extracted. The ticket and leg instructions
+    come from the claim's source and control snapshot, not the review head. For a versioned
+    ticket this requires the verified source text, even when the ticket also has a path. The stub removes
+    the workspace when the agent call ends.
+  - **The launch.** The stub takes the harness and model from the snapshot's agent command
+    (or the host fallback in R-BTN-131) and builds the command itself. Native settings come
+    from the same settings commit: OpenCode's root and `.opencode/` JSON/JSONC supply model,
+    default agent, declarative agents and providers; Claude's `.claude/settings.json` supplies
+    model and language. The explicit command's model wins. The stub does not forward native
+    permission, plugin, hook or MCP settings. No wrapper, project
+    configuration from the review head, auto-approval or bypass is passed on. It allows file
+    reads and searches only: OpenCode 2.2.3 or newer in the 2.x series uses a standalone
+    invocation and a deny-by-default tool policy; Claude Code uses a bare invocation with only
+    `Read`, `Glob` and `Grep`. Unsupported agent commands fail. This is a harness restriction,
+    not an OS sandbox: the deployment must trust the installed harness, host configuration
+    and snapshot course code, and must not grant higher-precedence tool policy overrides.
 - **R-BTN-184 (protected paths).** The policy's `paths.protected`, beside a floor Baton computes
   that no course or owner removes, in two classes: **control paths** — courses, workflows, agent
   configuration, the ticket source and what the owner declares — and **tickets and goals**. The

@@ -142,6 +142,11 @@ function listingsOf(cx: ReadCtx, repository: string, now: number, administrator:
     bars_mismatch: (claims.bars_mismatch as Row[]).filter(byTicket).map(({ detail_json, ...e }) => ({ ...e, detail: parsed(detail_json) })),
     held_items: claims.held_items.filter((h) => mine(h.ticket_id)),
     blocked_capability: (blocks.blocked_capability as Row[]).filter(byTicket),
+    prerequisite_issues: cx.sql(`SELECT ticket_id, leg, ref, why,
+      CASE WHEN cycle = 1 THEN 'baton.prerequisite-cycle' ELSE 'baton.prerequisite-unmet' END AS type
+      FROM ticket_dependents WHERE ticket_id >= ? || ':' AND ticket_id < ? || ';'
+        AND (cycle = 1 OR why IN ('no-parent', 'unknown-ticket', 'withdrawn', 'empty-selection'))
+      ORDER BY ticket_id, leg, ref LIMIT 100`, repository, repository),
     pool_unclaimed: (notices.pool_unclaimed as Row[]).filter(here),
     no_owner_channel: (notices.no_owner_channel as Row[]).filter(here),
     course_changed: (stations.course_changed as Row[]).filter(byTicket),
