@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { answerPlan, confirmAsk, confirmCapacity, createApiKey, duration, main, parseArgs, plan, policyDiff, send, workingTreeOf } from '../../cli/baton.mjs';
 import { formatDecision, listOnce, plain, watch, WATCH_EVERY_MS } from '../../cli/decisions.mjs';
-import { ORIGIN, setAdminKeys, setClock } from '../helpers';
+import { Git, ORIGIN, setAdminKeys, setClock } from '../helpers';
 import type { TestKey } from '../lib/sshKeys';
 import { call as hostCall } from '#host';
 
@@ -314,6 +314,22 @@ describe('send: signed with a key file, verified by Baton', () => {
     dir = mkdtempSync(join(tmpdir(), 'baton-cli-'));
   });
   afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  it('S-BTN-74: baton leg why prints the indexed answer for the requested leg', async () => {
+    const identity = join(dir, 'admin.key');
+    await setAdminKeys(createApiKey(identity, 'admin'));
+    expect(await new Git().add('B', { depends_at: [{ ticket: 'P', done: true, leg: 'review' }] }).add('P').post()).toMatchObject({ status: 200 });
+    const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation((url, init) => hostCall(new Request(url, init)));
+    const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    try {
+      expect(await main(['leg', 'why', 'docs:B', 'review', '-i', identity, '--url', ORIGIN])).toBe(0);
+      expect(JSON.parse(String(output.mock.calls.at(-1)?.[0]))).toMatchObject({ leg: 'review', ready: false,
+        prerequisites: expect.arrayContaining([expect.objectContaining({ ref: 'docs:P@done', why: 'not-done' })]) });
+    } finally {
+      output.mockRestore();
+      fetch.mockRestore();
+    }
+  });
 
   it('an administrator’s key file signs a request Baton accepts; another key is unauthenticated', async () => {
     const file = join(dir, 'admin');

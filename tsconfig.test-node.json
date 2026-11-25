@@ -75,7 +75,8 @@
     "test/integration/S-BTN-225.homes.test.ts",
     "test/integration/S-BTN-226.pathless-ticket-file.test.ts",
     "test/unit/sequences.test.ts",
-    "test/unit/retired-routes.test.ts"
+    "test/unit/retired-routes.test.ts",
+    "test/unit/executor.test.ts"
   ],
   "include": [
     "test/hosts/local.ts",
