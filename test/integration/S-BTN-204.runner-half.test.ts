@@ -129,7 +129,7 @@ export async function close() { return 'https://example.test/close'; }
           return new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
         };
         const api = new BatonApi({
-          url: 'https://baton.test',
+          url: ORIGIN,
           transport,
           auth: (_m, _u, _b, secret) => ({ Authorization: `Bearer ${TOKENS['vm-a']}`, ...(secret ? { 'X-Runner-Secret': secret } : {}) }),
         });

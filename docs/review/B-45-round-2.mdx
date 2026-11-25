@@ -1,0 +1,16 @@
+---
+title: "B-45 review round 2"
+description: "Findings and dispositions for the second review of the single-tenant shell draft."
+---
+
+Reviewed head: `731af051e76ea8e3bb2fb6944e37d55c93729c31`.
+[Forge review](https://github.com/immediately-run/baton/pull/350#pullrequestreview-6012352361).
+Verdict: changes requested.
+
+- **Blocking: B-45 is incomplete.** The [scope finding](https://github.com/immediately-run/baton/pull/350#discussion_r4658042055)
+  remains open. The PR is still a draft and does not claim ticket completion. A split needs
+  an owner decision; the full ticket also needs owner-run GitHub Actions OIDC evidence.
+- **Should fix: promote G-BTN-131.** The boundary, object-name and header-replacement tests
+  cover the gate. Moving its row into §15 also requires regenerating the shared spec index;
+  the fix leg cannot edit that index. Promote the row and its index entry together in a spec
+  change. Leave the incomplete scenarios and gates in the proposal.

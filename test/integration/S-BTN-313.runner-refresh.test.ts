@@ -10,7 +10,7 @@ import { cliBehind, readCliPin } from '../../src/runner/cliPin';
 import { git } from '../../src/defaults/git.mjs';
 import { courseReader, refreshHome } from '../../src/runner/main';
 import { Runner } from '../../src/runner/runner';
-import { claimItem, course, cutover, placed, register, rows, setClock, syncCall, syncToken, ticket, TOKENS } from '../helpers';
+import { claimItem, course, cutover, ORIGIN, placed, register, rows, setClock, syncCall, syncToken, ticket, TOKENS } from '../helpers';
 import relay from '../fixtures/courses/relay/course.json';
 
 const settings = '.baton/baton.json';
@@ -59,7 +59,7 @@ async function post(sha: string, parent: string | null, version: number, ids: st
 
 function makeRunner(options: Partial<ConstructorParameters<typeof Runner>[0]> = {}) {
   const api = new BatonApi({
-    url: 'https://baton.test', transport: (req) => hostCall(req),
+    url: ORIGIN, transport: (req) => hostCall(req),
     auth: (_m, _u, _b, secret) => ({ Authorization: `Bearer ${TOKENS['vm-a']}`, ...(secret ? { 'X-Runner-Secret': secret } : {}) }),
   });
   const readCourses = options.readCourses ?? courseReader(home, 'docs');
