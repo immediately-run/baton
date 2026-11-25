@@ -21,7 +21,7 @@ export interface Ctx {
   store: Store;
   now: () => number;
   /** R-BTN-75: an imported claim holds its ticket; a claim's start changes `blocked_since` silently. */
-  held?: (ticketId: string) => void;
+  held: (ticketId: string) => void;
 }
 
 export class Mirror {
@@ -126,7 +126,7 @@ export class Mirror {
       item, preferred: null, nonce, claimedAt: b.at as number, sha: head, requestId: `foreign:${item}:${nonce}`, detail: { foreign: true },
     });
     logEvent(this.c.store, now, 'foreign-claim', 'sync', { nonce, sha: b.sha, imported: true }, item, claimId);
-    this.c.held?.(item);
+    this.c.held(item);
     return { imported: true, claim_id: claimId, nonce };
   }
 }
@@ -134,21 +134,85 @@ export class Mirror {
 /** §10.3: the workflows Baton dispatches. */
 export type { Workflow };
 
+const DISPATCH_REASON_MAX = 500;
+const DISPATCH_BODY_MAX = 8 * 1024;
+const DISPATCH_BODY_TIMEOUT_MS = 1000;
+
+export class DispatchRefused extends Error {
+  constructor(readonly status: number, reason: string) {
+    super(reason ? `HTTP ${status}: ${reason}`.slice(0, DISPATCH_REASON_MAX) : `HTTP ${status}`);
+  }
+}
+
+async function readDispatchBody(res: Response): Promise<string> {
+  if (!res.body) return '';
+  const reader = res.body.getReader();
+  const read = async () => {
+    if (Number(res.headers.get('Content-Length')) > DISPATCH_BODY_MAX) return '';
+    const decoder = new TextDecoder();
+    let size = 0;
+    let body = '';
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) return body + decoder.decode();
+      size += value.byteLength;
+      if (size > DISPATCH_BODY_MAX) return '';
+      body += decoder.decode(value, { stream: true });
+    }
+  };
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const deadline = new Promise<string>((resolve) => {
+      timer = setTimeout(() => resolve(''), DISPATCH_BODY_TIMEOUT_MS);
+    });
+    return await Promise.race([read(), deadline]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+    // The stream's underlying cancellation must not extend the diagnostic deadline.
+    void reader.cancel().catch(() => {});
+    reader.releaseLock();
+  }
+}
+
+/** R-BTN-94: keep a short, single-line reason, not the forge's payload. */
+async function dispatchRefusal(res: Response, token: string): Promise<string> {
+  try {
+    const body = await readDispatchBody(res);
+    let reason = body;
+    const mediaType = res.headers.get('Content-Type')?.split(';')[0].trim().toLowerCase();
+    if (mediaType?.endsWith('/json') || mediaType?.endsWith('+json') || (!mediaType && /^\s*[\[{]/.test(body))) {
+      const data = JSON.parse(body) as { message?: unknown } | null;
+      reason = typeof data?.message === 'string' ? data.message : '';
+    }
+    // Redact before clipping (including a token that would straddle the limit), and after
+    // stripping tags in case the original response split the token across markup.
+    return reason.replaceAll(token, '[redacted]').replace(/<[^>]*>/g, '').replace(/[<>]/g, '')
+      .replaceAll(token, '[redacted]').replace(/[\p{Cc}\p{Cf}\s]+/gu, ' ').trim();
+  } catch {
+    // An unreadable or malformed body cannot hide the HTTP status.
+    return '';
+  }
+}
+
 /**
  * Dispatch a repository's workflow on its default branch with the Actions-write token (§10.3).
- * Fire and forget: a missing or revoked token, or a failed call, leaves the workflow to its
- * 15-minute schedule. (R3-1247 moves this to the GitHub App's installation tokens.)
+ * No token or no HTTP response means no dispatch; an HTTP refusal rejects so the caller can
+ * log the discrepancy without failing the request that wanted the dispatch (R-BTN-94).
  */
 export async function dispatchWorkflow(token: string | undefined, target: DispatchTarget): Promise<boolean> {
+  token = token?.trim();
   if (!token) return false;
+  let res: Response;
   try {
-    const res = await fetch(`https://api.github.com/repos/${target.github}/actions/workflows/${target.workflow}/dispatches`, {
+    res = await fetch(`https://api.github.com/repos/${target.github}/actions/workflows/${target.workflow}/dispatches`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json', 'User-Agent': 'baton', 'Content-Type': 'application/json' },
       body: JSON.stringify(target.inputs ? { ref: target.ref, inputs: target.inputs } : { ref: target.ref }),
     });
-    return res.ok;
   } catch {
+    // A transport error is not a forge refusal and may include request details.
     return false;
   }
+  if (!res.ok) throw new DispatchRefused(res.status, await dispatchRefusal(res, token));
+  return true;
 }

@@ -26,7 +26,7 @@ describe('the course record at size', () => {
       }
     });
     const start = performance.now();
-    const r = new Stats(store).of('docs', T0, T0 + 8000 * 60_000);
+    const r = new Stats(store, { all: () => [], intake: () => 'open' }).of('docs', T0, T0 + 8000 * 60_000);
     const ms = performance.now() - start;
     expect(r.courses['roadmap-pr'].legs.implement.started).toBe(8000);
     expect(r.courses['roadmap-pr'].legs.review.waited).toEqual({ count: 8000, median_s: 1, max_s: 1 });

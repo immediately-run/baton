@@ -41,7 +41,7 @@ function checkHosts(v: unknown, field: string): string[] | null {
 }
 
 export class InstanceSettings {
-  constructor(private readonly c: { store: Store; now: () => number; config?: Config }) {}
+  constructor(private readonly c: { store: Store; now: () => number; config: Config }) {}
 
   private row(): { link_hosts: string; session_hosts: string | null; check_app_id: string | null; recommended_client: string | null } | null {
     return this.c.store.exec<{ link_hosts: string; session_hosts: string | null; check_app_id: string | null; recommended_client: string | null }>(
@@ -51,7 +51,7 @@ export class InstanceSettings {
   /** A host column's list: the row's when set, else the deploy's config (claude.ai alone by
    *  default) — the one fallback both reads share. */
   private hostsOf(raw: string | null): string[] {
-    return raw == null ? SESSION_HOSTS.of(this.c.config ?? {}) : JSON.parse(raw) as string[];
+    return raw == null ? SESSION_HOSTS.of(this.c.config) : JSON.parse(raw) as string[];
   }
 
   /** R-BTN-113's allowlist: the row's `session_hosts` where an administrator set one, else the
