@@ -298,6 +298,27 @@ export class Stations {
                                       THEN ticket_next_legs.waiting_since ELSE excluded.waiting_since END`, id, leg, since);
   }
 
+  /** Rebuild the queue an imported person-leg arrival left, using the course now in force.
+   *  A stale first placement may leave this queue standing (R-BTN-39, S-BTN-50). */
+  restoreNext(repo: string, id: string, station: string, queued: string | null, at: number) {
+    const ticket = this.rows<{ course_id: string }>('SELECT course_id FROM tickets WHERE id = ?', id)[0];
+    const g = ticket && this.graph(repo, ticket.course_id);
+    if (!g) return;
+    const required = this.c.requiredBars?.(repo) ?? [];
+    for (const [leg, def] of g.legs) {
+      if (!def.from.includes(station)) continue;
+      // No posted bars for this restored queue have been accepted yet.
+      const unmet = required.some((bar) => requiredBarCovers(bar, ticket.course_id, leg, g));
+      this.exec(`INSERT INTO ticket_next_legs (ticket_id, leg, state, waiting_on, ready_since, waiting_since) VALUES (?, ?, ?, ?, ?, ?)`,
+        id, leg, unmet ? 'waiting' : 'ready', unmet ? 'policy' : null, unmet ? null : at, unmet ? at : null);
+    }
+    if (queued != null) {
+      const leg = resolveLeg(g, queued) ?? queued;
+      if (leg !== queued) this.exec('UPDATE ticket_stations SET next_leg = ? WHERE ticket_id = ?', leg, id);
+      if (!leaves(g, leg, station)) this.courseChanged(id, leg, at);
+    }
+  }
+
   /** Store where a snapshot places the ticket, writing only what changed (R-BTN-70): the sync
    *  re-posts every live ticket on every push and every refresh, and rows rewritten unchanged
    *  are what spend a plan's rows written (R-BTN-2; S-BTN-188). */

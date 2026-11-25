@@ -7,17 +7,16 @@
 // half (`parseRunArgs`, `declareCourses`, `servedCourses`, `envAuth`) is unit-tested in
 // test/unit/runner-main.test.ts; the wiring is exercised end-to-end by S-BTN-41 against the
 // local host.
-import { execFileSync } from 'node:child_process';
+import { git, gitText } from '../defaults/git.mjs';
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync, writeSync } from 'node:fs';
 import { homedir, hostname } from 'node:os';
 import { dirname, isAbsolute, join, relative } from 'node:path';
-import { DEFAULT_URL } from '../../cli/baton.mjs';
+import { DEFAULT_URL } from '../client/config.mjs';
 import { checkDeclaredCourses } from '../core/validate';
 import { BatonApi, envAuth } from './api';
 import { HARNESS_AGENTS, type Harness } from './harness';
-import { advanceHome, git, holdHome, legNeeds, readHead } from './home';
+import { advanceHome, holdHome, legNeeds, readHead } from './home';
 import { cliBehind, cliPinLines, cliProfile, readCliPin } from './cliPin';
-import { GIT_NONINTERACTIVE_ENV } from '../defaults/ticket-state';
 import { Runner, stampLine, withTimestamps, type RunnerOptions } from './runner';
 import { loadExecutor } from './executor';
 import { readMaskEnv, runnerConfigPath, underBatonDirectory } from './mask';
@@ -292,9 +291,7 @@ export const FETCH_TIMEOUT_MS = 20_000;
 
 export function fetchMain(home: string, log: (l: string) => void = () => {}, branch = 'main'): boolean {
   try {
-    execFileSync('git', ['-C', home, 'fetch', 'origin', `refs/heads/${branch}`], {
-      stdio: 'ignore', timeout: FETCH_TIMEOUT_MS, killSignal: 'SIGKILL', env: { ...process.env, ...GIT_NONINTERACTIVE_ENV },
-    });
+    git(home, ['fetch', 'origin', `refs/heads/${branch}`], { stdio: 'ignore', timeoutMs: FETCH_TIMEOUT_MS });
     return true;
   } catch (e) {
     log(`baton: the snapshot fetch failed (${e instanceof Error ? e.message : String(e)})`);
@@ -310,7 +307,7 @@ export function refreshHome(home: string, log: (l: string) => void): boolean {
   } catch { /* fetch-only checkouts need not have origin/HEAD */ }
   if (!branch) {
     try {
-      branch = git(home, ['ls-remote', '--symref', 'origin', 'HEAD'], FETCH_TIMEOUT_MS)
+      branch = git(home, ['ls-remote', '--symref', 'origin', 'HEAD'], { timeoutMs: FETCH_TIMEOUT_MS })
         .match(/^ref: refs\/heads\/(.+)\tHEAD$/m)?.[1];
     } catch { /* log below and keep the last declaration */ }
     if (!branch) {
@@ -458,7 +455,7 @@ export async function runMain(argv: string[], io: { log?: (l: string) => void; f
   // historical log this week began with no hint of what code produced it. B-103: the courses
   // field names every course the heartbeat declares (`--course` narrowed it, or the home's list).
   try {
-    const head = execFileSync('git', ['-C', home, 'rev-parse', '--short', 'HEAD'], { encoding: 'utf8' }).trim();
+    const head = gitText(home, 'rev-parse', '--short', 'HEAD');
     say(`baton: runner starting: home ${home} @ ${head}, capabilities ${declared}, course${courses.length === 1 ? '' : 's'} ${courses.map((c) => `${c.course}@${c.version}`).join(', ')}, host ${a.hostname}, session ${a.session}`);
   } catch { /* a home with no git yet: the rest of the banner still names the run */ }
   // One runner per home checkout: its legs run in the working tree (R-BTN-131). Node's default

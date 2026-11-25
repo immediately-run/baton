@@ -11,10 +11,10 @@
 // an incidental edit; the amendments are the history file's dated entries. Pure over the texts it
 // is given, apart from the git readers at the bottom, so the decisions are tested without a
 // repository. Course code in the CLI, never core (§2b).
-import { execFileSync } from 'node:child_process';
+import { git } from './git.mjs';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { CLOSE_TIMEOUT_MS, GIT_NONINTERACTIVE_ENV } from './ticket-state';
+import { CLOSE_TIMEOUT_MS } from './ticket-state';
 
 /** Where the amendments are, and the rule ids they name: the shape spec-tools.mjs's CONFIG has
  *  (fieldhouse's copy names `R-FH` and its own history), overridden by `.baton/baton.json`'s
@@ -351,7 +351,7 @@ export function sectionsSince(check: { sections_since?: unknown } | undefined): 
  * ---------------------------------------------------------------------------------------- */
 
 const gitOut = (root: string, args: string[]): string =>
-  execFileSync('git', ['-C', root, '-c', 'core.quotePath=false', ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 64 * 1024 * 1024, timeout: CLOSE_TIMEOUT_MS, killSignal: 'SIGKILL', env: { ...process.env, ...GIT_NONINTERACTIVE_ENV } });
+  git(root, ['-c', 'core.quotePath=false', ...args], { stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 64 * 1024 * 1024, timeoutMs: CLOSE_TIMEOUT_MS });
 
 /** Whether `root` is a shallow clone (`git rev-parse --is-shallow-repository`); false where it is
  *  no git checkout. */
@@ -406,7 +406,7 @@ export const firstCommit = (root: string, path: string): FirstCommit | null => f
  *  a ticket; the error (git's own words) when it cannot. */
 export function unshallow(root: string, remote: string): string | null {
   try {
-    execFileSync('git', ['-C', root, 'fetch', '-q', '--unshallow', remote], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: CLOSE_TIMEOUT_MS, killSignal: 'SIGKILL', env: { ...process.env, ...GIT_NONINTERACTIVE_ENV } });
+    git(root, ['fetch', '-q', '--unshallow', remote], { timeoutMs: CLOSE_TIMEOUT_MS });
     return null;
   } catch (e) {
     const err = e as { stderr?: string; message?: string };
