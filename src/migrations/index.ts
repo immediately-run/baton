@@ -76,6 +76,7 @@ import accessSignIn from './0071_access_sign_in.sql';
 import sessionLinkSecrets from './0079_session_link_secrets.sql';
 import interactionDeliveryGrant from './0080_interaction_delivery_grant.sql';
 import sessionLinkIncarnation from './0081_session_link_incarnation.sql';
+import harnessNames from './0141_harness_names.sql';
 import conditionRecords from './0085_condition_records.sql';
 import syncLimits from './0104_sync_limits.sql';
 import ticketPrerequisites from './0102_ticket_prerequisites.sql';
@@ -242,6 +243,7 @@ export const MIGRATIONS: Migration[] = [
   { id: 100, sql: legContracts },
   { id: 101, sql: pinnedContracts },
   { id: 142, sql: courseSourceResolutions },
+  { id: 141, sql: harnessNames },
   { id: 104, sql: syncLimits },
   { id: 102, sql: ticketPrerequisites },
   { id: 103, sql: prerequisiteIdentityAndReady },
