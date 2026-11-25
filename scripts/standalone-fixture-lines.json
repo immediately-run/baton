@@ -67,6 +67,7 @@
     "a45078a6d62bdc3c1abc32d2388e7eaf5270f67369ce96eb7587615b132c5980"
   ],
   "test/integration/S-BTN-207.ticket-versions-sync.test.ts": [
+    "4bf5969c133c00bc8b59a9fa2948b468a542fcce4b4d8f3d7f3e078408408772",
     "ad0630e90aac256177e687b09dcd718958c35d0c361e1dfd8988758b2f416621"
   ],
   "test/integration/S-BTN-215.code-repos-settings.test.ts": [
@@ -82,6 +83,7 @@
     "f01b633209f696843625ad66b91228e3d517b9f252588e23461398c3d40e37b6"
   ],
   "test/integration/S-BTN-226.pathless-ticket-file.test.ts": [
+    "08a1b2a8c2906962b57951d8550ac701d1bae8f637d8ae86cc22c6a97949f726",
     "786603486a704aefdaab538104350e23cf30e49b3fc71f60f8898ff89789c2c3"
   ],
   "test/integration/S-BTN-23.resume-handoff.test.ts": [
@@ -125,10 +127,23 @@
   "test/integration/S-BTN-47.positions-decisions.test.ts": [
     "8a2992f7242dadb3dc3a4c727c6e3998adc7643c38f02b58c08003f4ef9c2c5b"
   ],
+  "test/integration/S-BTN-48.contracts.test.ts": [
+    "1accd1d02c437840c7201d1aafd533805c4c44add1689a8d66373463c8759c7d",
+    "2e5a680b288fc0141da3ba32567b8231fbdf1fcc2fe5f23d8a2d7bac63cd7927"
+  ],
   "test/integration/S-BTN-48.replay.test.ts": [
+    "0be7276da8ebd8b5810067f84896cf75c607a57e72e03d0f2b8747faff3b1512",
+    "0f9b7bbbd92b43a2f33d3b209d81c361d169537ccc39ac411906379fe7e7d34b",
+    "23d4333cd314126dfe45f251c96ae5911c205df360120b1ca3e7594714dd53ba",
+    "3d76ea7bac3d1165ef7644da3893bc9a61c57edd662d27f181ebe86d86cf996e",
+    "441e2f0843e5182f6af0b1ce4cc04b76c1f8374da23578cf86925aa39749bcfe",
     "5fd3291b90904dc287a5cb5bffda13dccad51920eabbb3c8c83aa80a2e726a9a",
+    "6b04a9b35cb506f4b92f84d082721fb46b4d2e70fe64b6bb0d0209562e50978e",
     "6fb8a92877bf2c3541323d2d7f365d335ebbdfb37f1539fc819f589f0cce44b5",
-    "ad0630e90aac256177e687b09dcd718958c35d0c361e1dfd8988758b2f416621"
+    "8f5a2bfcd35749f38f34b142f29163e8a3bb0d9ef5da2c3b0f6599e30b127b92",
+    "ad0630e90aac256177e687b09dcd718958c35d0c361e1dfd8988758b2f416621",
+    "bb181308f3b5858519d8030f50ac72c984208d19591b5ccfc9a0db0efbf0b393",
+    "e03ef945c7a0030ae348af7148f2b29ce2175719119fe28430aeb21d8dce4725"
   ],
   "test/integration/S-BTN-5.retried-item.test.ts": [
     "3bcd65ad38acdf3101a24e07acb1d206ef39c3c6717df8fc1b9669016b9c6f07"
@@ -138,7 +153,8 @@
     "f205332b714f56f70429ff21787b070b7e09c17f1648e345e7d65cf3a1f3cb05"
   ],
   "test/integration/S-BTN-66.entry.test.ts": [
-    "8ea8a2711ae57fc2339a42400266cb76c8e42a1361c8452a22093bbc844a77da"
+    "8ea8a2711ae57fc2339a42400266cb76c8e42a1361c8452a22093bbc844a77da",
+    "24d7e70ba808ebb1b5236ec91e0cc1988faaa06386b749461c3ac0be2963cd10"
   ],
   "test/lib/fixtureRepo.mjs": [
     "10186a3613a13e40807934212cd4d66ac579dddb93317806afa0d3894af011e1"
