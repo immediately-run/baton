@@ -29,7 +29,7 @@ const pullBody = ({ title, head, base, body }: OpenPr) => ({ title, head, base, 
 const project = (path: string) => `/projects/${encodeURIComponent(path)}`;
 const mergeRequests = (path: string) => `${project(path)}/merge_requests`;
 const publicOrigin = FORGE_SHAPES[DEFAULT_FORGE].defaultOrigin;
-const publicApi = 'https://api.github.com';
+const publicApi = FORGE_SHAPES[DEFAULT_FORGE].dispatchOrigin;
 
 /** Runner-owned credentials and wire formats. Core never imports these clients. */
 const ADAPTERS: Record<PrForge, Adapter> = {
@@ -72,6 +72,7 @@ const ADAPTERS: Record<PrForge, Adapter> = {
       identity: (path) => `/repos/${path}`, ownerId: (p) => p.owner?.id,
       commits: (path, n) => `${pulls(path)}/${n}/commits`,
       commit: (c) => ({ oid: c.sha, date: c.commit?.committer?.date, message: c.commit?.message, parent: c.parents?.[0]?.sha, tree: c.commit?.tree?.sha }),
+      newestCommitFirst: true,
       treeOf: (path, oid) => `/repos/${path}/git/commits/${oid}`,
       checks: (path, oid) => `/repos/${path}/commits/${oid}/status`,
       checkItems: (p) => p?.statuses ?? (p && (p.total_count === 0 || Object.keys(p).length === 0) ? [] : undefined),
@@ -160,12 +161,12 @@ export function forgeClient(repo: ForgeRepo, opts: ForgeOptions = {}, reader?: {
     },
     async listOpenPrs() {
       if (!cli) return (await all(`${pulls}?${adapter.openQuery}`)).map(adapter.head);
-      return listCli(cli, repoFlag, 'open', true);
+      return listCli(cli, repoFlag);
     },
     async listPrs() {
-      if (cli) return listCli(cli, repoFlag, 'all', true);
+      if (cli) return listCli(cli, repoFlag, 'all');
       const query = adapter.allQuery ?? (adapter.cli ? 'state=all' : '');
-      return (await all(`${pulls}${query ? `?${query}` : ''}`)).map(adapter.head);
+      return (await all(`${pulls}${query ? `?${query}` : ''}`)).map((p) => ({ ...adapter.head(p), state: adapter.restFacts?.state(p) ?? (p.merged_at ? 'merged' : p.state) }));
     },
     async comment(number, body) {
       if (!prNumber(number)) throw new Error('invalid PR number');
@@ -173,7 +174,7 @@ export function forgeClient(repo: ForgeRepo, opts: ForgeOptions = {}, reader?: {
       if (cli) return commentUrl(prUrl, cli(['pr', 'comment', prUrl, '--body', body]));
       const response = await api.request(adapter.comments(path, number), { body });
       if (typeof response?.html_url === 'string') return commentUrl(prUrl, response.html_url);
-      if (!prNumber(response?.id)) throw new Error(`${repo.forge} answered no comment id`);
+      if (!immutableId(response?.id)) throw new Error(`${repo.forge} answered no comment id`);
       return `${prUrl}#${adapter.restFacts?.reviews ? 'issuecomment-' : 'note_'}${response.id}`;
     },
     async facts(read) {
@@ -206,12 +207,12 @@ export function forgeClient(repo: ForgeRepo, opts: ForgeOptions = {}, reader?: {
 }
 
 /** Compatibility for a detached test or older runner without repository coordinates. */
-export function listCli(run: (args: string[]) => string, repository?: string, state = 'open', identity = false) {
-  const text = run(['pr', 'list', '--state', state, '--limit', '300', '--json', `number,headRefName,headRefOid${identity ? ',isCrossRepository' : ''}`, ...(repository ? ['--repo', repository] : [])]);
+export function listCli(run: (args: string[]) => string, repository?: string, state = 'open') {
+  const text = run(['pr', 'list', '--state', state, '--limit', '300', '--json', 'number,headRefName,headRefOid,isCrossRepository,state', ...(repository ? ['--repo', repository] : [])]);
   let items: unknown;
   try { items = JSON.parse(text); } catch { /* diagnosed below */ }
   if (!Array.isArray(items) || items.length > 300) throw new Error(`gh pr list answered no PR list: ${text.slice(0, 200)}`);
-  return items.map((p) => ({ ...openRef(p?.number, p?.headRefName, p?.headRefOid), ...(identity ? { sameRepository: p?.isCrossRepository === false } : {}) }));
+  return items.map((p) => ({ ...openRef(p?.number, p?.headRefName, p?.headRefOid), sameRepository: p?.isCrossRepository === false, state: p?.state?.toLowerCase() }));
 }
 
 function commentUrl(prUrl: string, url: string): string {

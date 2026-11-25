@@ -28,7 +28,11 @@ ends on anything else loses the round. Baton writes the verdict line on the PR f
 - **Which model reviews is the repository's choice** (§6.10, R-BTN-131). Your command's own
   `--model` is the one the stub runs; Baton delivers no advice about a model, a key or a route,
   and no `$BATON_ADVICE` file exists. A repository that picks a reviewer at run time writes a
-  leg override that reads its own configuration.
+  leg override that reads its own configuration. Before launching the reviewer, the runner's
+  command, wrapper or override must select a model different from those used for `implement`
+  and `fix` on this ticket whenever it can. The launched reviewer can verify the choice, not
+  change it. If the authoring models are unknown or a different model is unavailable, say so
+  in your review; a different credential alone does not establish model independence.
 - **Round one gets two blind reviewers.** If you can start independent sub-agents, start two,
   from fresh contexts, ideally on two different models — the models your repository's own
   configuration or instructions name. Give each this file, the ticket and the

@@ -9,30 +9,27 @@ import { isForge } from './forges';
 // own table to that list in its PR (conditions B-55, `ticket_timers` B-61/B-63, the outbox
 // B-64, check runners B-5, MCP keys B-25, registration tokens and instance settings B-8/B-46).
 import { BatonError } from './http';
-import { sha256HexSync } from './policy';
+import { canonicalJson, checkFloorGuarantees, checkFloorName, guaranteesOf, PRESETS, sha256HexSync, validatePolicyDocument, type Policies } from './policy';
+import { parseSshKey } from './auth';
+import { checkInstanceSettings } from './instanceSettings';
 import { logEvent } from './db';
-import { REPOSITORY_ID, TICKET_ID } from './validate';
+import { checkCapacity, checkOwnerStateStation, REPOSITORY_ID, TICKET_ID } from './validate';
+import type { Forge } from './links';
 import type { Store } from './ports';
 
 export const OWNER_STATE_FORMAT = 'baton.owner-state/v1';
 
-/** One exported section: its table, the order that makes the export deterministic, and — for
- *  `ticket_overrides` — that its rows are ticket-scoped, waiting in `pending_owner_state` for
- *  the first snapshot that creates their ticket. R3-1258's list; later tickets append their own
- *  tables here, in the PR that adds the section. */
+/** One exported section: its table, deterministic order, and whether its rows wait in
+ *  `pending_owner_state` until the ticket is posted (and, for positions, placed). */
 export interface Section {
   table: string;
   /** The column list of the ORDER BY, the table's key in order. */
   order: string;
-  /** §4.8: ticket-scoped rows an import holds back until their ticket's first snapshot. */
-  ticketScoped?: { kind: 'override' | 'condition' | 'timer' | 'outbox' };
+  /** §4.8: ticket-scoped rows an import holds back until their ticket is posted or placed. */
+  ticketScoped?: { kind: 'override' | 'station' };
 }
 
-/** The one list (§4.8, R3-1258): repositories and their settings, owners, credentials, sync
- *  keys, grants, runners, owner bars, overrides, closed tickets, resources, instances, serves,
- *  couriers, readings in force. Claims, events, notices, instrument readings' history and sync
- *  wants are never exported (R-BTN-88); the history, `leg_outputs` and `leg_run_inputs` only
- *  with `--with-history`. */
+/** The default export sections (R-BTN-88, S-BTN-50). */
 export const SECTIONS: readonly Section[] = [
   { table: 'repositories', order: 'id' },
   { table: 'repository_owners', order: 'repository_id, fingerprint' },
@@ -49,6 +46,12 @@ export const SECTIONS: readonly Section[] = [
   { table: 'couriers', order: 'credential_id, repository_id, asks' },
   // Readings in force: lapsed rows are deleted by the alarm, so the table holds them alone.
   { table: 'instance_readings', order: 'instance, source, kind' },
+  { table: 'repository_policies', order: 'repository_id, version' },
+  { table: 'policy_floors', order: 'repository_id, name' },
+  { table: 'human_keys', order: 'fingerprint' },
+  { table: 'capability_capacity', order: 'capability' },
+  { table: 'instance_settings', order: 'id' },
+  { table: 'ticket_stations', order: 'ticket_id', ticketScoped: { kind: 'station' } },
 ];
 
 /** The tables `--with-history` adds (§4.8): the history and the outputs and inputs replay reads.
@@ -87,13 +90,74 @@ function canonical(v: unknown): string {
   return JSON.stringify(v);
 }
 
+const bad = (at: string, why: string): never => {
+  throw new BatonError('invalid-params', `the import's ${at}: ${why}`);
+};
+const str = (v: unknown): v is string => typeof v === 'string';
+const object = (v: unknown): v is Record<string, unknown> => v != null && typeof v === 'object' && !Array.isArray(v);
+const instant = (v: unknown): boolean => typeof v === 'number' && Number.isSafeInteger(v) && v >= 0;
+function storedJson(value: unknown, at: string): unknown {
+  if (!str(value)) return bad(at, 'must be stored JSON text');
+  try { return JSON.parse(value); } catch { return bad(at, 'must be valid JSON'); }
+}
+
+async function validatePolicySections(sections: OwnerStateExport['sections'], admins: ReadonlySet<string>) {
+  const repos = new Map((sections.repositories ?? []).map((r) => [r.id, r]));
+  const versions = [...(sections.repository_policies ?? [])];
+  for (const row of versions) {
+    const repo = repos.get(row.repository_id);
+    if (!repo || repo.retired_at != null) bad('repository_policies row', 'must name an imported live repository');
+    if (!instant(row.version) || row.version === 0 || !instant(row.at) || !str(row.changed_by) || !row.changed_by
+      || (row.approver !== null && !str(row.approver)) || (row.preset !== null && (!str(row.preset) || !Object.hasOwn(PRESETS, row.preset)))) {
+      bad('repository_policies row', 'invalid version or audit fields');
+    }
+    const doc = storedJson(row.policy_json, 'repository_policies.policy_json');
+    validatePolicyDocument(doc, { forge: repo!.forge as Forge });
+    // Hash the stored document, not the validator's normalized result: old versions are immutable.
+    if (row.hash !== sha256HexSync(canonicalJson(doc))) bad('repository_policies.hash', 'does not match its policy document');
+  }
+  const chains = new Map<unknown, { version: number; hash: unknown }>();
+  for (const row of versions.sort((a, b) => Number(a.version) - Number(b.version))) {
+    const prior = chains.get(row.repository_id);
+    if (row.version !== (prior?.version ?? 0) + 1 || row.previous_hash !== (prior?.hash ?? null)) {
+      bad('repository_policies row', `${row.repository_id}: versions must chain from version 1`);
+    }
+    chains.set(row.repository_id, { version: row.version as number, hash: row.hash });
+  }
+  for (const repo of repos.values()) {
+    if (repo.retired_at == null && !chains.has(repo.id)) bad('repository_policies', `${repo.id}: no policy`);
+  }
+  const floors = new Set<string>();
+  for (const row of sections.policy_floors ?? []) {
+    if (!chains.has(row.repository_id)) bad('policy_floors row', 'must name an imported live repository');
+    const key = `${row.repository_id}/${checkFloorName(row.name)}`;
+    checkFloorGuarantees(storedJson(row.guarantees, 'policy_floors.guarantees'));
+    if (floors.has(key) || !instant(row.added_at) || !str(row.added_by) || !row.added_by || (row.remove_by !== 'human' && row.remove_by !== 'owner')) {
+      bad('policy_floors row', 'duplicate floor or invalid removal authority or audit fields');
+    }
+    floors.add(key);
+  }
+  const incompatibleKeys = new Set([...admins, ...(sections.credentials ?? []).map((r) => r.id), ...(sections.sync_keys ?? []).map((r) => r.fingerprint)]);
+  const keys = new Set<string>();
+  for (const row of sections.human_keys ?? []) {
+    const key = await parseSshKey(str(row.public_key) ? row.public_key : '');
+    if (row.fingerprint !== key.fingerprint || keys.has(key.fingerprint) || incompatibleKeys.has(row.fingerprint) || !instant(row.added_at)
+      || !str(row.added_by) || !row.added_by || (row.revoked_at !== null && !instant(row.revoked_at))) {
+      bad('human_keys row', 'invalid fingerprint, role or audit fields');
+    }
+    keys.add(key.fingerprint);
+  }
+}
+
 export class OwnerState {
   constructor(private readonly c: {
     store: Store;
     now: () => number;
     origin: string;
+    policies: Policies;
+    restoreNext: (repository: string, ticket: string, station: string, leg: string | null, at: number) => void;
     /** §4.8's step 2: a seal refused for lagging mirrors dispatches their workflows (R-BTN-94). */
-    dispatchMirror?: (repository: string) => void;
+    dispatchMirror: (repository: string) => void;
   }) {}
 
   private rows<T = Record<string, unknown>>(q: string, ...p: unknown[]): T[] {
@@ -157,7 +221,7 @@ export class OwnerState {
          AND (r.mirror_workflow IS NOT NULL OR EXISTS (SELECT 1 FROM sync_keys k WHERE k.repository_id = r.id AND k.role = 'mirror' AND k.revoked_at IS NULL))
        ORDER BY r.id`, last);
     if (claims.length || lagging.length) {
-      for (const m of lagging) this.c.dispatchMirror?.(m.id);
+      for (const m of lagging) this.c.dispatchMirror(m.id);
       throw new BatonError('conflict', `the seal waits: ${claims.length ? `claims ${claims.map((c) => `${c.id} (${c.ticket_id}${c.fence_pending ? ', fence pending' : ''})`).join(', ')}` : ''}${claims.length && lagging.length ? '; ' : ''}${lagging.length ? `mirrors lagging on ${lagging.map((m) => m.id).join(', ')}` : ''}`.trim(), {
         claims: claims.map((c) => ({ id: c.id, ticket_id: c.ticket_id, status: c.status, fence_pending: c.fence_pending === 1 })),
         lagging_mirrors: lagging.map((m) => m.id),
@@ -178,7 +242,9 @@ export class OwnerState {
   private sectionRows(table: string, order: string): Record<string, unknown>[] {
     const cols = this.columns(table);
     if (!cols.length) throw new BatonError('internal', `the export finds no table ${table}`);
-    return this.rows<Record<string, unknown>>(`SELECT ${cols.map((c) => `"${c}"`).join(', ')} FROM ${table} ORDER BY ${order}`);
+    const where = table === 'ticket_stations' ? `WHERE next_source = 'baton' AND substr(ticket_id, 1, instr(ticket_id, ':') - 1) IN (SELECT id FROM repositories WHERE retired_at IS NULL)`
+      : table === 'repository_policies' || table === 'policy_floors' ? 'WHERE repository_id IN (SELECT id FROM repositories WHERE retired_at IS NULL)' : '';
+    return this.rows<Record<string, unknown>>(`SELECT ${cols.map((c) => `"${c}"`).join(', ')} FROM ${table} ${where} ORDER BY ${order}`);
   }
 
   /** Step 3 (§4.8): the export, sealed only and deterministic — `exported_at` is `sealed_at`,
@@ -189,7 +255,19 @@ export class OwnerState {
     if (sealedAt == null) throw new BatonError('conflict', 'the export is of a sealed Baton: freeze, let the claims drain and the mirrors acknowledge, then seal (R-BTN-88)');
     const sections: Record<string, Record<string, unknown>[]> = {};
     for (const s of [...SECTIONS, ...(withHistory ? HISTORY_SECTIONS : [])]) {
-      sections[s.table] = this.sectionRows(s.table, s.order);
+      const rows = this.sectionRows(s.table, s.order);
+      if (!s.ticketScoped) {
+        sections[s.table] = rows;
+        continue;
+      }
+      // A target can move again before its first post materializes these rows.
+      const byTicket = new Map(rows.map((row) => [String(row.ticket_id), row]));
+      for (const { ticket_id, row_json } of this.rows<{ ticket_id: string; row_json: string }>(
+        `SELECT ticket_id, row_json FROM pending_owner_state WHERE kind = ?
+         AND repository_id IN (SELECT id FROM repositories WHERE retired_at IS NULL)`, s.ticketScoped.kind)) {
+        if (!byTicket.has(ticket_id)) byTicket.set(ticket_id, JSON.parse(row_json));
+      }
+      sections[s.table] = [...byTicket.keys()].sort().map((id) => byTicket.get(id)!);
     }
     const out: OwnerStateExport = {
       format: OWNER_STATE_FORMAT,
@@ -217,10 +295,6 @@ export class OwnerState {
    *  and referents that exist in the import itself — the first failing row refuses the whole
    *  import, before anything is written. */
   private validate(sections: Record<string, Record<string, unknown>[]>): void {
-    const bad = (at: string, why: string): never => {
-      throw new BatonError('invalid-params', `the import's ${at}: ${why}`);
-    };
-    const str = (v: unknown): v is string => typeof v === 'string';
     for (const r of sections.repositories ?? []) {
       if (!str(r.id) || !REPOSITORY_ID.test(r.id)) bad('repositories row', `id ${JSON.stringify(r.id)} is not a repository id`);
       if (r.retired_at == null && !str(r.github)) bad('repositories row', `${r.id}: a live row names its forge path`);
@@ -266,6 +340,7 @@ export class OwnerState {
       if (!str(r.credential_id) || !creds.has(r.credential_id)) bad('runner_grants row', `${JSON.stringify(r.credential_id)} is not an imported credential`);
       if (!str(r.repository_id) || !repoIds.has(r.repository_id)) bad('runner_grants row', `${JSON.stringify(r.repository_id)} is not an imported repository`);
       if (r.role != null && !['runner', 'trusted-runner'].includes(String(r.role))) bad('runner_grants row', `${r.credential_id}: role is unknown`);
+      if ('deliver_interactions' in r && r.deliver_interactions !== 0 && r.deliver_interactions !== 1) bad('runner_grants row', 'deliver_interactions must be 0 or 1');
     }
     for (const r of sections.couriers ?? []) {
       if (!str(r.credential_id) || !creds.has(r.credential_id)) bad('couriers row', `${JSON.stringify(r.credential_id)} is not an imported credential`);
@@ -280,15 +355,40 @@ export class OwnerState {
         if (!str(r.ticket_id) || !TICKET_ID.test(r.ticket_id)) bad(`${table} row`, `ticket_id ${JSON.stringify(r.ticket_id)} is not a qualified id`);
       }
     }
+    const liveRepos = new Set((sections.repositories ?? []).filter((r) => r.retired_at == null).map((r) => r.id));
+    const stationIds = new Set<unknown>();
+    for (const row of sections.ticket_stations ?? []) {
+      checkOwnerStateStation(row, storedJson(row.path, 'ticket_stations.path'));
+      const repository = String(row.ticket_id).split(':', 1)[0];
+      if (!liveRepos.has(repository) || stationIds.has(row.ticket_id)) bad('ticket_stations row', 'must name a unique ticket in an imported live repository');
+      stationIds.add(row.ticket_id);
+    }
+    const capacities = new Set<string>();
+    for (const row of sections.capability_capacity ?? []) {
+      const { capability, capacity } = checkCapacity({ capability: row.capability, capacity: row.capacity });
+      if (capacity === null || capacities.has(capability) || !instant(row.set_at) || !str(row.set_by) || !row.set_by) {
+        bad('capability_capacity row', 'invalid capacity or audit fields');
+      }
+      capacities.add(capability);
+    }
+    if ((sections.instance_settings?.length ?? 0) > 1) bad('instance_settings', 'only one row is allowed');
+    for (const row of sections.instance_settings ?? []) {
+      if (row.id !== 1 || row.check_app_id === undefined || row.recommended_client === undefined) bad('instance_settings row', 'invalid singleton row');
+      const link = storedJson(row.link_hosts, 'instance_settings.link_hosts');
+      const session = row.session_hosts === null ? null : storedJson(row.session_hosts, 'instance_settings.session_hosts');
+      if (session === null && row.session_hosts !== null) bad('instance_settings.session_hosts', 'a reset must be SQL NULL');
+      const checked = checkInstanceSettings({ link_hosts: link, session_hosts: session, check_app_id: row.check_app_id, recommended_client: row.recommended_client });
+      if (canonicalJson(link) !== canonicalJson(checked.link) || canonicalJson(session) !== canonicalJson(checked.session)) bad('instance_settings row', 'hosts must be normalized');
+    }
   }
 
   /** Step 4 (§4.8): the import — one transaction, into an empty Baton of the same schema, every
    *  row through the write path's validation; ticket-scoped rows wait in `pending_owner_state`
-   *  for the first snapshot that creates their ticket; the event sequence continues from
+   *  until their ticket is posted or placed; the event sequence continues from
    *  `events_seq`; runners' `last_seen_at` is 0 (they resume unkeyed). A sealed source's
    *  `sealed_at` becomes the new instance's floor for signed `created` (§11.1: a pre-seal
    *  replay reaches nothing). */
-  import(actor: string, body: unknown): { ok: true } {
+  async import(actor: string, body: unknown, admins: ReadonlySet<string>): Promise<{ ok: true }> {
     const b = body as OwnerStateExport;
     if (!b || typeof b !== 'object') throw new BatonError('invalid-params', 'the body is not an owner-state export');
     if (b.format !== OWNER_STATE_FORMAT) throw new BatonError('invalid-params', `the export's format is not ${OWNER_STATE_FORMAT}`);
@@ -298,8 +398,22 @@ export class OwnerState {
     if (typeof b.digest !== 'string' || b.digest !== sha256HexSync(canonical(rest))) {
       throw new BatonError('invalid-params', 'the export fails its digest (R-BTN-88)');
     }
+    const sections = b.sections;
+    if (!object(sections) || Object.values(sections).some((rows) => !Array.isArray(rows) || !rows.every(object))) {
+      return bad('sections', 'must be an object of row lists');
+    }
     if (!this.isEmpty()) throw new BatonError('conflict', 'the import is into an empty Baton alone (R-BTN-88)');
-    this.validate(b.sections ?? {});
+    for (const { table } of SECTIONS) if (!Object.hasOwn(sections, table)) bad('sections', `missing ${table}; export again from an updated source`);
+    this.validate(sections);
+    await validatePolicySections(sections, admins);
+    // Recheck under the transaction after asynchronous SSH key validation.
+    return this.c.store.transaction(() => {
+      if (!this.isEmpty() || this.sealedAt() != null) throw new BatonError('conflict', 'the import is into an empty, unsealed Baton alone (R-BTN-88)');
+      return this.restore(actor, b);
+    });
+  }
+
+  private restore(actor: string, b: OwnerStateExport): { ok: true } {
     const importOne = (table: string, rows: Record<string, unknown>[]) => {
       if (!rows.length) return;
       const cols = this.columns(table);
@@ -311,10 +425,7 @@ export class OwnerState {
           ...named.map((c) => (row[c] instanceof ArrayBuffer ? new Uint8Array(row[c] as ArrayBuffer) : row[c])));
       }
     };
-    // Ticket-scoped rows wait (§4.8): the first snapshot that creates their ticket applies them;
-    // the repository's first snapshot drops and logs the ones it does not post. The marker the
-    // snapshot reads is the setting below.
-    const awaiting: Record<string, true> = {};
+    // Ticket-scoped rows wait for the ticket to be posted or placed (§4.8).
     for (const s of SECTIONS) {
       if (!s.ticketScoped) continue;
       for (const row of b.sections?.[s.table] ?? []) {
@@ -322,14 +433,31 @@ export class OwnerState {
         const repo = ticket.slice(0, ticket.indexOf(':'));
         this.c.store.exec('INSERT INTO pending_owner_state (repository_id, ticket_id, kind, key, row_json) VALUES (?, ?, ?, ?, ?) ON CONFLICT (repository_id, ticket_id, kind, key) DO UPDATE SET row_json = excluded.row_json',
           repo, ticket, s.ticketScoped.kind, '', canonical(row));
-        awaiting[repo] = true;
       }
     }
-    if (Object.keys(awaiting).length) this.setSetting('pending_first_snapshot', JSON.stringify(Object.keys(awaiting).sort()));
     for (const s of SECTIONS) {
       if (s.ticketScoped) continue;
       const rows = (b.sections?.[s.table] ?? []).map((r) => (s.table === 'runners' ? { ...r, last_seen_at: 0, last_activity_at: 0 } : r));
+      // The migration seeds the singleton even on a fresh target.
+      if (s.table === 'instance_settings' && rows.length) this.c.store.exec('DELETE FROM instance_settings WHERE id = 1');
+      // A target may already have the legacy credential seeded, as allowed by isEmpty().
+      if (s.table === 'credentials' && rows.some((row) => row.id === 'legacy' && row.kind === 'legacy')) {
+        this.c.store.exec("DELETE FROM credentials WHERE id = 'legacy' AND kind = 'legacy'");
+      }
       importOne(s.table, rows);
+    }
+    // Use the write path's authority facts, without a live protection report. A failing
+    // floor rolls back the entire import, including the policy and the pending rows.
+    for (const repository of new Set((b.sections.policy_floors ?? []).map((row) => String(row.repository_id)))) {
+      const { policy } = this.c.policies.current(repository)!;
+      const holds = guaranteesOf(policy);
+      for (const floor of this.c.policies.floors(repository)) {
+        for (const guarantee of floor.guarantees) {
+          if (!holds[guarantee as keyof typeof holds]) {
+            throw new BatonError('floor-violated', `${repository}: floor ${floor.name} requires ${guarantee} (R-BTN-189)`, { floor: floor.name, guarantee });
+          }
+        }
+      }
     }
     for (const s of HISTORY_SECTIONS) importOne(s.table, b.sections?.[s.table] ?? []);
     // §4.8's step 6 — the repository's first post after the move: each imported repository
@@ -355,37 +483,35 @@ export class OwnerState {
     return Number.isSafeInteger(n) && n > 0 ? n : null;
   }
 
-  /** §4.8: apply the pending ticket-scoped rows the post's live tickets answer to, inside the
-   *  transaction that accepted it. The repository's first snapshot since the import is the
-   *  judge: a pending row whose ticket it does not post is dropped and logged, and the rest
-   *  wait no longer than their own ticket's first appearance. */
-  applyPending(repository: string, postedLive: ReadonlySet<string>, at: number): void {
+  /** §4.8: apply imported overrides to live tickets, but keep positions pending until a post
+   *  places them (S-BTN-50). Only a post that materializes the ticket set can drop absent rows. */
+  applyPending(repository: string, live: ReadonlySet<string>, placements: ReadonlyMap<string, unknown>, at: number, dropAbsent: boolean): void {
     const pending = this.rows<{ ticket_id: string; kind: string; key: string; row_json: string }>(
       'SELECT ticket_id, kind, key, row_json FROM pending_owner_state WHERE repository_id = ?', repository);
-    if (!pending.length) return;
-    const awaiting = new Set(JSON.parse(this.setting('pending_first_snapshot') ?? '[]') as string[]);
-    const first = awaiting.has(repository);
     for (const row of pending) {
       const local = row.ticket_id.slice(repository.length + 1);
-      if (postedLive.has(local)) {
+      if (live.has(local)) {
+        if (row.kind === 'station' && !placements.has(local)) continue;
         // The override's columns, as the export held them; the table's own keys decide the row.
         const value = JSON.parse(row.row_json) as Record<string, unknown>;
         if (row.kind === 'override') {
-          const cols = Object.keys(value).filter((c) => c !== 'ticket_id');
+          const cols = this.columns('ticket_overrides').filter((c) => c !== 'ticket_id' && Object.hasOwn(value, c));
           this.c.store.exec(`INSERT INTO ticket_overrides (ticket_id, ${cols.map((c) => `"${c}"`).join(', ')}) VALUES (?, ${cols.map(() => '?').join(', ')})
                              ON CONFLICT (ticket_id) DO UPDATE SET ${cols.map((c) => `"${c}" = excluded."${c}"`).join(', ')}`,
             row.ticket_id, ...cols.map((c) => value[c]));
+        } else if (row.kind === 'station') {
+          // The source observation does not participate in the target's new observation order.
+          this.c.store.exec(`INSERT INTO ticket_stations (ticket_id, station, path, path_len, to_end, next_leg, next_source, handoff_url, snapshot_sha, observation, person_expires_at)
+                             VALUES (?, ?, ?, ?, ?, ?, 'baton', ?, ?, 0, ?)`, row.ticket_id, value.station, value.path, value.path_len,
+            value.to_end, value.next_leg, value.handoff_url, value.snapshot_sha, value.person_expires_at);
+          this.c.restoreNext(repository, row.ticket_id, String(value.station), value.next_leg as string | null, at);
         }
         this.c.store.exec('DELETE FROM pending_owner_state WHERE repository_id = ? AND ticket_id = ? AND kind = ? AND key = ?', repository, row.ticket_id, row.kind, row.key);
-      } else if (first) {
-        // §4.8: one the repository's first snapshot does not post is dropped and logged.
+      } else if (dropAbsent) {
+        // Do not attach a removed ticket's pending state to a later reuse of its ID.
         this.c.store.exec('DELETE FROM pending_owner_state WHERE repository_id = ? AND ticket_id = ? AND kind = ? AND key = ?', repository, row.ticket_id, row.kind, row.key);
         logEvent(this.c.store, at, 'imported', 'server', { act: 'pending-dropped', ticket: row.ticket_id, kind: row.kind }, row.ticket_id, null, repository);
       }
-    }
-    if (first) {
-      awaiting.delete(repository);
-      this.setSetting('pending_first_snapshot', awaiting.size ? JSON.stringify([...awaiting].sort()) : null);
     }
   }
 }

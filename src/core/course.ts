@@ -23,7 +23,9 @@ export interface CourseViolation {
 }
 
 import { isFreeText } from './text';
-import { parseSchemaId } from '../shared/schema.mjs';
+import { OUTPUTS_MAX } from './contractPointers';
+import { compilePattern, parseSchemaId } from '../shared/schema.mjs';
+import { requirementKeys, requirementOf } from './ticketRequirement';
 import { ROLES } from '../shared/vocabulary.mjs';
 import { CONDITION_TYPE, CONDITION_TYPE_MAX, RESTART_ID, barredFromAutonomous, dispositionOf, type ConditionDeclaration, type Disposition } from './conditionTypes';
 
@@ -64,7 +66,7 @@ const STARTS_FROM = new Set(['request']);
 const STATION_KEYS = new Set(['label', 'renamed_from', 'entry']);
 const ENTRY_KEYS = new Set(['output', 'schema']);
 const LEG_KEYS = new Set(['from', 'to', 'label', 'max_runs', 'max_duration', 'max_queue', 'version', 'inputs', 'outputs', 'replay_safe', 'renamed_from',
-  'no_chain_from', 'isolation', 'requires', 'kind', 'asks', 'expires', 'conditions', 'autonomous', 'spawns']);
+  'no_chain_from', 'isolation', 'requires', 'kind', 'asks', 'expires', 'conditions', 'autonomous', 'spawns', 'reads_only']);
 /** R-BTN-116: the one kind a leg may be today — `person`, a leg a person answers by a
  *  `std:decision@1`. A `call` leg (R-BTN-165) is not built, so a file carrying one is refused
  *  rather than kept unread. */
@@ -77,11 +79,9 @@ const ASKS_LABEL = /^[a-z][a-z0-9-]{0,31}$/;
 const EXPIRES_KEYS = new Set(['after_s', 'reached']);
 /** 30 days in seconds: `expires.after_s`'s upper bound. */
 const EXPIRES_AFTER_MAX = 30 * 86_400;
-/** R-BTN-120: what a leg's `requires` holds — its capabilities, which rule 4 reads as its own
- *  input beside the ticket's clause (`gates.ts`; `claims.ts` passes the leg's list through).
- *  The spec's `tickets`, `resources` and the other prerequisite kinds are not implemented, so a
- *  file carrying one is refused rather than silently accepted unread (B-86). */
-const REQUIRES_KEYS = new Set(['capabilities']);
+/** R-BTN-120: the prerequisite kinds a course leg declares. */
+const REQUIRES_KEYS = new Set(['capabilities', 'tickets', 'resources']);
+export const RESOURCE_NAME = /^[a-z][a-z0-9:._/-]{0,79}$/;
 /** A capability name: a vocabulary name (`create-pr`) or a namespaced one (`vpn:corp`). */
 const CAPABILITY = /^[A-Za-z][A-Za-z0-9._:-]{0,63}$/;
 const INPUT_KEYS = new Set(['from', 'accepts', 'required']);
@@ -132,6 +132,7 @@ export function validateCourse(json: unknown): CourseViolation[] {
   // each with a one-line description and the pattern a value matches (R-BTN-108's engine). Stored
   // verbatim in the registry for what names a thing shared across repositories (R-BTN-178's
   // confirm print); checking a leg's names against them is B-10's acceptance, not this one.
+  const valueMatches = new Map<string, ReturnType<typeof compilePattern>>();
   if ('capability_types' in json) {
     const types = json.capability_types;
     if (!isObject(types)) add('shape', 'capability_types', 'capability_types is an object of type declarations');
@@ -144,6 +145,9 @@ export function validateCourse(json: unknown): CourseViolation[] {
       if (!isObject(def) || typeof def.description !== 'string' || def.description.length < 1 || def.description.length > 200
         || typeof def.values !== 'string' || def.values.length > 256 || !VALUES_PATTERN.test(def.values)) {
         add('shape', `capability_types.${type}`, 'a type is {description: 1-200 chars, values: a pattern of at most 256 chars} (R-BTN-121)');
+      } else {
+        try { valueMatches.set(type, compilePattern(def.values)); }
+        catch { add('shape', `capability_types.${type}.values`, 'must be a valid capability value pattern'); }
       }
     }
   }
@@ -300,6 +304,29 @@ export function validateCourse(json: unknown): CourseViolation[] {
       else {
         for (const k of Object.keys(r)) if (!REQUIRES_KEYS.has(k)) add('unknown-key', `${at}.requires.${k}`, `unknown key "${k}"`);
         if ('capabilities' in r) capabilityList(r.capabilities, `${at}.requires.capabilities`, 'a leg');
+        if ('resources' in r && (!Array.isArray(r.resources) || r.resources.length > COURSE_LIST_MAX
+          || !r.resources.every((x) => typeof x === 'string' && RESOURCE_NAME.test(x)))) {
+          add('shape', `${at}.requires.resources`, 'must be a list of resource names');
+        }
+        if ('tickets' in r) {
+          if (!Array.isArray(r.tickets) || r.tickets.length > COURSE_LIST_MAX) add('shape', `${at}.requires.tickets`, 'must be a bounded list of ticket prerequisites');
+          else for (const [i, entry] of r.tickets.entries()) {
+            const path = `${at}.requires.tickets.${i}`;
+            if (!isObject(entry) || (entry.select !== 'parent' && entry.select !== 'posted')) {
+              add('shape', path, 'select must be parent or posted');
+              continue;
+            }
+            for (const key of Object.keys(entry)) if (!['select', 'course', 'skip_withdrawn', 'allow_empty', ...requirementKeys].includes(key)) add('unknown-key', `${path}.${key}`, `unknown key "${key}"`);
+            if ('course' in entry && (entry.select !== 'parent' || typeof entry.course !== 'string' || !ID.test(entry.course))) add('shape', `${path}.course`, 'only a parent may name a course id');
+            for (const key of ['skip_withdrawn', 'allow_empty']) if (key in entry && typeof entry[key] !== 'boolean') add('shape', `${path}.${key}`, 'must be a boolean');
+            const predicate = requirementOf(entry, ID);
+            if (!predicate) add('shape', path, 'must name exactly one of at, reached, done, withdrawn, closed');
+            else if (entry.select === 'parent' && !entry.course) {
+              if ('at' in predicate) stationList(predicate.at, `${path}.at`, false);
+              if ('reached' in predicate) stationList(predicate.reached, `${path}.reached`, false);
+            }
+          }
+        }
       }
     }
     // R-BTN-111 (B-52): a leg that files children declares their courses — one id, a list, or
@@ -379,6 +406,9 @@ export function validateCourse(json: unknown): CourseViolation[] {
     // itself to. R-BTN-69's clause reads on the field's presence, `false` included: a leg that
     // is not autonomous says nothing, so `autonomous: false` beside a barred type or on a
     // person leg is the same broken promise, refused as such.
+    if ('reads_only' in l && (typeof l.reads_only !== 'boolean' || l.kind === 'person' || 'arrives' in l)) {
+      add('shape', `${at}.reads_only`, 'reads_only is a boolean on a runner leg (R-BTN-183)');
+    }
     if ('autonomous' in l && typeof l.autonomous !== 'boolean') add('bound', `${at}.autonomous`, 'autonomous is true or false (R-BTN-195)');
     if ('autonomous' in l) {
       if (person) {
@@ -396,7 +426,7 @@ export function validateCourse(json: unknown): CourseViolation[] {
     if ('label' in l && !isFreeText(l.label)) add('bound', `${at}.label`, 'a label is §10.4 free text: 1–500 characters, no control characters, none of < > { }');
     if ('outputs' in l) {
       if (!isObject(l.outputs)) add('shape', `${at}.outputs`, 'outputs is an object of output names');
-      else if (Object.keys(l.outputs).length > COURSE_LIST_MAX) add('shape', `${at}.outputs`, `at most ${COURSE_LIST_MAX} outputs`);
+      else if (Object.keys(l.outputs).length > OUTPUTS_MAX) add('shape', `${at}.outputs`, `at most ${OUTPUTS_MAX} outputs (R-BTN-82)`);
       else for (const [name, o] of Object.entries(l.outputs)) {
         const op = `${at}.outputs.${name}`;
         if (!NAME.test(name)) add('id', op, `output name "${name}" must match ${NAME.source}`);
@@ -405,7 +435,7 @@ export function validateCourse(json: unknown): CourseViolation[] {
         // R-BTN-108: a named schema `<id>@<version>`. The legacy relative-path window is closed
         // (history, Migrations: Legacy schema forms, deleted with it): a path is a shape
         // violation like any other non-id string, and the kit names the id to write in its place.
-        if ('schema' in o && !parseSchemaId(o.schema)) add('shape', `${op}.schema`, 'a schema is <id>@<version> (R-BTN-108)');
+        if (!parseSchemaId(o.schema)) add('shape', `${op}.schema`, 'a schema is <id>@<version> (R-BTN-108)');
       }
     }
   }
@@ -421,6 +451,16 @@ export function validateCourse(json: unknown): CourseViolation[] {
     // and a list that is fine element by element reports nothing.
     for (const [i, x] of v.entries()) {
       if (typeof x !== 'string' || !CAPABILITY.test(x)) add('shape', `${path}.${i}`, `${what}: "${String(x)}" is not a capability name (${CAPABILITY.source})`);
+      else if ('capability_types' in (json as object)) {
+        const roles = (json as Record<string, unknown>).capability_roles;
+        if (what === 'a leg' && isObject(roles) && own(roles, x)) continue;
+        const colon = x.indexOf(':');
+        const type = x.slice(0, colon);
+        const value = x.slice(colon + 1);
+        if (x !== 'human-operator' && !(colon > 0 && (type === 'runner' || (valueMatches.get(type)?.(value) ?? type === 'credential')))) {
+          add('shape', `${path}.${i}`, `"${x}" is not a capability of a declared or built-in type (R-BTN-121)`);
+        }
+      }
     }
   }
 
@@ -483,7 +523,7 @@ export function validateCourse(json: unknown): CourseViolation[] {
       const producer = isLeg.has(m[1]) ? legs![m[1]] : undefined;
       if (!isLeg.has(m[1])) add('input', `${ip}.from`, `"${m[1]}" is not a leg`);
       // Own keys only: an inherited name (`toString`, `__proto__`) is no declared output.
-      else if (!isObject(producer) || !isObject(producer.outputs) || !NAME.test(m[2]) || !own(producer.outputs, m[2])) add('input', `${ip}.from`, `leg "${m[1]}" declares no output "${m[2]}"`);
+      else if (!isObject(producer) || (producer.kind === 'person' ? m[2] !== 'answer' : !isObject(producer.outputs) || !NAME.test(m[2]) || !own(producer.outputs, m[2]))) add('input', `${ip}.from`, `leg "${m[1]}" declares no output "${m[2]}"`);
     }
   }
 

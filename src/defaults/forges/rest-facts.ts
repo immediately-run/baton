@@ -21,6 +21,7 @@ export interface RestFactShape {
   canPush: (p: any, id: number) => boolean;
   scopeRefusal: (message: string) => boolean;
   gitTrees?: boolean;
+  newestCommitFirst?: boolean;
   treeOf?: (path: string, oid: string) => string;
   unpagedComments?: boolean;
 }
@@ -59,7 +60,9 @@ export async function readRestFacts(repo: ForgeRepo, read: FactRead, ctx: FactCo
         const at = Date.parse(c.date);
         if (!sha(c.oid) || !Number.isFinite(at)) throw new Error(`${path} #${number}: invalid commit facts`);
         return { sha: c.oid, at, parent: sha(c.parent) ? c.parent : null, empty: sha(c.tree) && c.tree === trees.get(c.parent), message: typeof c.message === 'string' ? c.message.slice(0, 16_384) : '' };
-      }).sort((a, b) => a.at - b.at);
+      });
+      // The branch gate reads Git history order, not committer timestamps.
+      if (shape.newestCommitFirst) commits.reverse();
       if (!shape.gitTrees) {
         for (const c of commits) {
           const tree = trees.get(c.sha);

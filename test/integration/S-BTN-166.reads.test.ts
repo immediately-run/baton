@@ -93,7 +93,7 @@ describe('S-BTN-166 the CLI’s reads (B-90)', () => {
     expect(res.json.grants).toEqual([{
       credential_id: granted.fingerprint, hostname: 'granted-host', label: null, repository_id: 'docs',
       capabilities: JSON.stringify(['authentication', 'create-pr', 'drivable-browser', 'llm-call']),
-      max_tier: null, max_claims: 1, granted_by: `owner:${docsOwner.fingerprint}`, granted_at: T0,
+      max_tier: null, max_claims: 1, deliver_interactions: false, granted_by: `owner:${docsOwner.fingerprint}`, granted_at: T0,
       // R-BTN-58: the other repositories this key is granted on — none yet.
       other_repositories: [],
       // B-199 (S-BTN-295): the grant's role, domain and who set them — none set.
@@ -153,7 +153,7 @@ describe('S-BTN-166 the CLI’s reads (B-90)', () => {
     expect((await read(admin, '/v1/repositories/nope/board')).json.code).toBe('forbidden');
     expect((await read(admin, '/v1/admin/repositories/extra')).json.code).toBe('not-found');
     // The grant is the repository's alone: revoked, the read is refused.
-    expect((await keyCall(docsOwner, `/v1/owner/docs/grants/${encodeURIComponent(granted.fingerprint)}/revoke`, {})).status).toBe(200);
+    expect((await keyCall(docsOwner, `/v1/owner/docs/grants/${encodeURIComponent(granted.fingerprint)}/revoke`, { confirm: true })).status).toBe(200);
     const revoked = await read(granted, '/v1/repositories/docs/board');
     expect([revoked.status, revoked.json.code]).toEqual([403, 'forbidden']);
   });

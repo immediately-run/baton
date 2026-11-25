@@ -6,7 +6,7 @@
 import { describe, it, expect } from 'vitest';
 import { CREATE_PR_COURSE, REVIEW_PR_COURSE, branchMatches, matchPatterns, prRefs, stationsPr, stationsReviewPr, ticketOwns, type BatonRecord, type PrFact } from '../../src/defaults/course-pr';
 import type { BranchCommit, RecordedLeg } from '../../src/defaults/pr-markers';
-import { deliveredDetail, findDelivered, ticketRepositories, verifyDelivered, verifyPrOpen, type PrExec } from '../../src/defaults/pr-verify';
+import { deliveredDetail, findDelivered, ticketRepositories, verifyDelivered, verifyPrOpen, verifyPrsMerged, type PrExec } from '../../src/defaults/pr-verify';
 import type { SourceTicket as PostedTicket } from '../../src/defaults/tickets-markdown';
 
 const T0 = 1_000_000;
@@ -520,7 +520,7 @@ describe('the implement stub\'s PR verification (B-81)', () => {
     return { run: (cmd, args, cwd) => (cmd === 'gh' ? run(cmd, args, cwd) : git(plain)(args)), repos };
   };
   const ask = (over: Partial<Parameters<typeof verifyPrOpen>[0]> = {}) => ({ checkout, ticket: { id: 'docs:B-81', home: 'docs' }, ...over });
-  const pr = (number: number, headRefName: string, headRefOid = HEAD_A): string => JSON.stringify([{ number, headRefName, headRefOid }]);
+  const pr = (number: number, headRefName: string, headRefOid = HEAD_A): string => JSON.stringify([{ number, headRefName, headRefOid, isCrossRepository: false }]);
 
   it('a matching open PR in the checkout\'s repository passes; the pattern is the course\'s, its {ticket} the bare id', async () => {
     const { run, repos } = bound({ '': pr(7, 'claude/B-81-verify') });
@@ -528,16 +528,24 @@ describe('the implement stub\'s PR verification (B-81)', () => {
     expect(repos).toEqual([null]);
   });
 
+  it('S-BTN-106: legacy branch discovery rejects forks and unknown identity, but an explicit PR reference counts', async () => {
+    for (const isCrossRepository of [true, undefined]) {
+      const { run } = bound({ '': JSON.stringify([{ number: 7, headRefName: 'claude/B-81-verify', headRefOid: HEAD_A, isCrossRepository }]) });
+      await expect(verifyPrOpen(ask(), run)).rejects.toThrow(/no open PR/);
+      await expect(verifyPrOpen(ask({ prRefs: ['#7'] }), run)).resolves.toBeUndefined();
+    }
+  });
+
   it('a sibling repository\'s PR is the ticket\'s too (B-29): the home may have none', async () => {
-    const { run, repos } = bound({ '': '[]', 'immediately-run/docs': pr(3, 'claude/B-81-docs') });
-    await expect(verifyPrOpen(ask({ repositories: ['immediately-run/docs'] }), run)).resolves.toBeUndefined();
-    expect(repos).toEqual([null, 'immediately-run/docs']);
+    const { run, repos } = bound({ '': '[]', 'immediately-run/site': pr(3, 'claude/B-81-docs') });
+    await expect(verifyPrOpen(ask({ repositories: ['immediately-run/site'] }), run)).resolves.toBeUndefined();
+    expect(repos).toEqual([null, 'immediately-run/site']);
   });
 
   it('no matching PR anywhere fails the leg naming the pattern, the ticket and every repository it looked in', async () => {
-    const { run } = bound({ '': '[]', 'immediately-run/docs': '[]' });
-    await expect(verifyPrOpen(ask({ repositories: ['immediately-run/docs'] }), run)).rejects.toThrow(
-      'no open PR on a branch matching claude/B-81-* for ticket B-81 exists in immediately-run/baton or immediately-run/docs',
+    const { run } = bound({ '': '[]', 'immediately-run/site': '[]' });
+    await expect(verifyPrOpen(ask({ repositories: ['immediately-run/site'] }), run)).rejects.toThrow(
+      'no open PR on a branch matching claude/B-81-* for ticket B-81 exists in immediately-run/baton or immediately-run/site',
     );
   });
 
@@ -562,15 +570,15 @@ describe('the implement stub\'s PR verification (B-81)', () => {
   it('a forge it cannot read fails the leg naming what it looked for; one read of it is enough (B-29)', async () => {
     // Nothing could be read: the outcome is not verified, whatever the agent said.
     const { run } = bound({}); // every repository's read fails
-    await expect(verifyPrOpen(ask({ repositories: ['immediately-run/docs'] }), run)).rejects.toThrow(/cannot verify B-81.s PR — no repository the ticket reads could be read: immediately-run\/baton \(gh: cannot read null\); immediately-run\/docs \(gh: cannot read immediately-run\/docs\)/);
+    await expect(verifyPrOpen(ask({ repositories: ['immediately-run/site'] }), run)).rejects.toThrow(/cannot verify B-81.s PR — no repository the ticket reads could be read: immediately-run\/baton \(gh: cannot read null\); immediately-run\/site \(gh: cannot read immediately-run\/site\)/);
     await expect(verifyPrOpen(ask(), bound({ '': 'not JSON' }).run)).rejects.toThrow(/cannot verify B-81.s PR .* answered no PR list: not JSON/);
     // The home unreadable, the sibling holding the PR: verified — a ticket's change may sit in any repository it reads.
-    const homeDown = bound({ 'immediately-run/docs': pr(3, 'claude/B-81-docs') });
-    await expect(verifyPrOpen(ask({ repositories: ['immediately-run/docs'] }), homeDown.run)).resolves.toBeUndefined();
+    const homeDown = bound({ 'immediately-run/site': pr(3, 'claude/B-81-docs') });
+    await expect(verifyPrOpen(ask({ repositories: ['immediately-run/site'] }), homeDown.run)).resolves.toBeUndefined();
     // One repository read and empty, one unreadable: the failure names both, never guesses the unread one.
     const { run: partial } = bound({ '': '[]' }); // the sibling's read fails
-    await expect(verifyPrOpen(ask({ repositories: ['immediately-run/docs'] }), partial)).rejects.toThrow(
-      'no open PR on a branch matching claude/B-81-* for ticket B-81 exists in immediately-run/baton — immediately-run/docs could not be read',
+    await expect(verifyPrOpen(ask({ repositories: ['immediately-run/site'] }), partial)).rejects.toThrow(
+      'no open PR on a branch matching claude/B-81-* for ticket B-81 exists in immediately-run/baton — immediately-run/site could not be read',
     );
   });
 
@@ -595,15 +603,54 @@ describe('the implement stub\'s PR verification (B-81)', () => {
   });
 
   it('the repositories a ticket\'s repos: names, resolved as the markdown source resolves them', () => {
-    const map = { docs: 'immediately-run/docs' };
-    expect(ticketRepositories('---\nid: B-81\nrepos:\n  - docs\n  - immediately-run/baton\n---\n', map)).toEqual(['immediately-run/docs', 'immediately-run/baton']);
-    expect(ticketRepositories('---\nid: B-81\nrepos: [docs]\n---\n', map)).toEqual(['immediately-run/docs']);
-    expect(ticketRepositories('---\nid: B-81\nrepos: docs\n---\n', map)).toEqual(['immediately-run/docs']);
+    const map = { docs: 'immediately-run/site' };
+    expect(ticketRepositories('---\nid: B-81\nrepos:\n  - docs\n  - immediately-run/baton\n---\n', map)).toEqual(['immediately-run/site', 'immediately-run/baton']);
+    expect(ticketRepositories('---\nid: B-81\nrepos: [docs]\n---\n', map)).toEqual(['immediately-run/site']);
+    expect(ticketRepositories('---\nid: B-81\nrepos: docs\n---\n', map)).toEqual(['immediately-run/site']);
     // a short name the map does not resolve is dropped: the sync fails it when it reads the file
     expect(ticketRepositories('---\nid: B-81\nrepos: [gone]\n---\n', map)).toEqual([]);
     expect(ticketRepositories('---\nid: B-81\n---\n', map)).toEqual([]);
     expect(ticketRepositories(null, map)).toEqual([]);
     expect(ticketRepositories('---\nrepos: [docs]\n---\n')).toEqual([]); // no map, nothing to resolve through
+  });
+});
+
+// S-BTN-231 (R-BTN-131): the merge stub reads the forge before it reports `merged` — every PR of
+// the ticket merged, none open. On 2026-11-23 B-259's merge agent refused PR #357 over red CI and
+// exited 0, and the leg reported `merged` with the PR open.
+describe('the merge stub\'s merged verification (R-BTN-131)', async () => {
+  const checkout = '/checkout';
+  /** A scripted forge: per repository (`''` the checkout's own), what `gh pr list --state open`
+   *  and `--state merged` answer; a repository absent fails to read. */
+  const forge = (answers: Record<string, { open: unknown[]; merged: unknown[] }>): PrExec => (cmd, args) => {
+    if (cmd === 'git') {
+      if (args.join(' ') === 'remote get-url origin') return 'https://github.com/immediately-run/baton.git';
+      throw new Error(`git ${args.join(' ')}: not scripted`);
+    }
+    const at = args.indexOf('--repo');
+    const a = answers[at < 0 ? '' : args[at + 1]];
+    if (a === undefined) throw new Error(`gh: cannot read ${at < 0 ? 'home' : args[at + 1]}`);
+    return JSON.stringify(args[args.indexOf('--state') + 1] === 'open' ? a.open : a.merged);
+  };
+  const ask = (over: Partial<Parameters<typeof verifyPrsMerged>[0]> = {}) => ({ checkout, ticket: { id: 'baton:B-259', home: 'baton' }, ...over });
+  const pr = (number: number, headRefName = 'claude/B-259-export') => ({ number, headRefName, headRefOid: 'a'.repeat(40), isCrossRepository: false });
+
+  it('every matching PR merged and none open passes, naming the merged PRs', async () => {
+    await expect(verifyPrsMerged(ask(), forge({ '': { open: [pr(400, 'claude/B-2590-other')], merged: [pr(357), pr(12, 'claude/B-25-x')] } }))).resolves.toEqual(['#357']);
+    await expect(verifyPrsMerged(ask({ repositories: ['immediately-run/site'] }), forge({ '': { open: [], merged: [pr(357)] }, 'immediately-run/site': { open: [], merged: [pr(9)] } }))).resolves.toEqual(['#357', 'immediately-run/site#9']);
+  });
+
+  it('the agent exited 0 but the PR is still open: the leg fails naming it, never reports merged (B-259)', async () => {
+    await expect(verifyPrsMerged(ask(), forge({ '': { open: [pr(357)], merged: [] } }))).rejects.toThrow(
+      'the merge agent exited 0, but B-259’s PR #357 (claude/B-259-export) is still open — not merged; the leg reports merged only when every PR of the ticket is');
+    // One repository merged and another still open is not merged either (B-29).
+    await expect(verifyPrsMerged(ask({ repositories: ['immediately-run/site'] }), forge({ '': { open: [], merged: [pr(357)] }, 'immediately-run/site': { open: [pr(9)], merged: [] } }))).rejects.toThrow(/PR immediately-run\/site#9 \(claude\/B-259-export\) is still open/);
+  });
+
+  it('no merged PR at all, or a forge that does not answer, fails the leg', async () => {
+    await expect(verifyPrsMerged(ask(), forge({ '': { open: [], merged: [] } }))).rejects.toThrow(/no merged PR on a branch matching claude\/B-259-\* for ticket B-259 exists in immediately-run\/baton/);
+    await expect(verifyPrsMerged(ask({ repositories: ['immediately-run/site'] }), forge({ '': { open: [], merged: [pr(357)] } }))).rejects.toThrow(/cannot verify B-259’s PRs merged — immediately-run\/site \(gh: cannot read immediately-run\/site\) could not be read/);
+    await expect(verifyPrsMerged(ask(), () => 'not JSON')).rejects.toThrow(/answered no PR list: not JSON/);
   });
 });
 

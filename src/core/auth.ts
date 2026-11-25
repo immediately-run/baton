@@ -126,18 +126,23 @@ export async function verifySyncCredential(req: Request, env: Config): Promise<S
   return { kind: 'gitlab-ci', issuer: iss, project_path, ref, ref_type, role: roles[0] };
 }
 
+type AccessVerification = { email: string } | { reason: 'not-configured' | 'no-assertion' | 'unverified' };
+
 /** R-BTN-155: verify the application's assertion, without assigning a role to the email. */
-export async function verifyAccess(req: Request, env: Config): Promise<string | null> {
-  const token = req.headers.get('Cf-Access-Jwt-Assertion') ?? '';
+export async function verifyAccess(req: Request, env: Config): Promise<AccessVerification> {
   const team = env.ACCESS_TEAM_DOMAIN;
-  if (!token || !team || !env.ACCESS_AUD) return null;
+  if (!team || !env.ACCESS_AUD) return { reason: 'not-configured' };
+  const token = req.headers.get('Cf-Access-Jwt-Assertion');
+  if (token === null) return { reason: 'no-assertion' };
+  if (token === '') return { reason: 'unverified' };
   try {
     const keys = testKeys(env, env.TEST_ACCESS_JWKS) ?? remote(`https://${team}/cdn-cgi/access/certs`);
     const { payload } = await jwtVerify(token, keys, { issuer: `https://${team}`, audience: env.ACCESS_AUD, requiredClaims: ['exp'] });
-    return accessEmail(payload.email);
+    const email = accessEmail(payload.email);
+    return email ? { email } : { reason: 'unverified' };
   } catch (e) {
     const failure = verifyFailure(e, 'Access');
-    if (failure.code === 'unauthenticated') return null;
+    if (failure.code === 'unauthenticated') return { reason: 'unverified' };
     throw failure;
   }
 }
@@ -147,8 +152,9 @@ export async function verifyAccess(req: Request, env: Config): Promise<string | 
 export async function verifyOwner(req: Request, env: Config): Promise<string> {
   const owners = (env.OWNER_EMAILS ?? '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
   if (!env.ACCESS_TEAM_DOMAIN || !env.ACCESS_AUD || !owners.length) throw new BatonError('forbidden', 'Access is not configured');
-  const email = await verifyAccess(req, env);
-  if (!email) throw new BatonError('unauthenticated', 'the Access token did not verify for an email');
+  const access = await verifyAccess(req, env);
+  if ('reason' in access) throw new BatonError('unauthenticated', 'the Access token did not verify for an email');
+  const { email } = access;
   if (!owners.includes(email)) throw new BatonError('forbidden', 'not an owner');
   return email;
 }

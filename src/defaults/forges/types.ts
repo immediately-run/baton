@@ -1,3 +1,4 @@
+import type { PostedAttestation } from '../../core/board';
 import type { Forge, PrForge } from '../../core/forges';
 import type { CodeRepoEntry, PrFact } from '../course-pr';
 
@@ -29,11 +30,14 @@ export interface OpenPrRef {
   headRefName: string;
   headRefOid: string;
   sameRepository?: boolean;
+  state?: PrFact['state'];
 }
-export interface FactRead { tickets: string[]; entry?: CodeRepoEntry }
+export interface FactRead { tickets: string[]; entry?: CodeRepoEntry; ticketOutputs?: PostedAttestation[]; readPrs?: boolean }
 export interface FactContext {
   log: (line: string) => void;
   owns: (pr: Pick<PrFact, 'number' | 'head' | 'repository' | 'sameRepository'>) => boolean;
+  outputEvidence?: PostedAttestation[];
+  ownsOutput?: (ticket: string, pr: Parameters<FactContext['owns']>[0]) => boolean;
   pushers: { host: string; id: string }[];
 }
 export interface ForgeClient {

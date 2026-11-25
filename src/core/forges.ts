@@ -5,13 +5,14 @@ export interface ForgeShape {
   blob: string | null;
   commit: string | null;
   dispatch: string | null;
+  dispatchOrigin?: string;
   dispatchInput: 'workflow-path' | 'project-ref' | 'workflow-ref' | null;
   defaultOrigin: string | null;
   ci: 'github-actions' | 'gitlab-ci' | null;
 }
 
 export const FORGE_SHAPES = {
-  github: { depth: [2, 2], pr: '/pull/', blob: '/blob/', commit: '/commit/', dispatch: 'github-app', dispatchInput: 'workflow-path', defaultOrigin: 'https://github.com', ci: 'github-actions' },
+  github: { depth: [2, 2], pr: '/pull/', blob: '/blob/', commit: '/commit/', dispatch: 'github-app', dispatchOrigin: 'https://api.github.com', dispatchInput: 'workflow-path', defaultOrigin: 'https://github.com', ci: 'github-actions' },
   gitlab: { depth: [2, 4], pr: '/-/merge_requests/', blob: '/-/blob/', commit: '/-/commit/', dispatch: 'gitlab-trigger', dispatchInput: 'project-ref', defaultOrigin: null, ci: 'gitlab-ci' },
   gitea: { depth: [2, 2], pr: '/pulls/', blob: '/src/branch/', commit: '/commit/', dispatch: 'gitea', dispatchInput: 'workflow-ref', defaultOrigin: null, ci: null },
   git: { depth: [2, 2], pr: null, blob: null, commit: null, dispatch: null, dispatchInput: null, defaultOrigin: null, ci: null },

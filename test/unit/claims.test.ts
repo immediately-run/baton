@@ -4,7 +4,7 @@ import { describe, it, expect, inject, beforeEach } from 'vitest';
 import { confirmations } from '../../src/shared/batonSync.mjs';
 import { gatesFor } from '../../src/core/gates';
 import {
-  beat, claimItem, claimRow, course, cutover, q, endClaim, hbBody, keyCall, ORIGIN, ownerCall, payload, recommended, refresh, register, requestId, rows, setAdminKeys, setClock, sha256, syncCall, syncToken, withCore, runnerCall, tick,
+  beat, claimItem, claimRow, course, cutover, q, endClaim, hbBody, keyCall, ORIGIN, ownerCall, payload, recommended, refresh, register, requestId, rows, setAdminKeys, setClock, sha256, syncCall, syncToken, withCore, runnerCall, tick, SYNC_REPO_PATH,
 } from '../helpers';
 import { makeKey, signedRequest } from '../lib/sshKeys';
 import { capabilitiesOf } from '../../src/shared/vocabulary.mjs';
@@ -50,7 +50,7 @@ describe('the claim and end contracts (§11, §6.5, §11)', () => {
     // the home itself, so one path).
     expect(c.json).toEqual({ claim_id: expect.any(Number), ticket_id: 'docs:R3-9001', course_id: 'roadmap-pr', course_version: 3, default_branch: 'main',
       leg_state: 'forge',
-      forge_home: { forge: 'github', path: 'immediately-run/docs', webBase: 'https://github.com/immediately-run/docs' }, forge_repositories: [],
+      forge_home: { forge: 'github', path: SYNC_REPO_PATH, webBase: `https://github.com/${SYNC_REPO_PATH}` }, forge_repositories: [],
       station: 'filed', legs: ['implement'], next: [{ leg: 'implement', state: 'ready' }], scope: ['immediately-run/docs'],
       path: 'content/roadmap/R3-9001.mdx', nonce: expect.stringMatching(/^[0-9a-f]{6}$/), snapshot_sha: sha.A, previous_attempts: [],
       // B-183 (§4.5): the ticket's version as the board holds it ('' — the interim post carries none)
@@ -458,7 +458,7 @@ describe('G-BTN-14: a force-reaped live runner’s item waits for its fence', ()
     const a = await register('vm-a');
     const b = await register('vm-b');
     const { json: c } = await claimItem('vm-a', a.secret);
-    expect((await owner(`/v1/ui/claims/${c.claim_id}/reap`, {})).status).toBe(400); // names its confirmation
+    expect((await owner(`/v1/ui/claims/${c.claim_id}/reap`, {})).status).toBe(428); // names its confirmation
     expect(await (await owner(`/v1/ui/claims/${c.claim_id}/reap`, { confirm: true })).json()).toEqual({ ok: true, fence_pending: true });
     expect(await claimRow(c.claim_id)).toMatchObject({ status: 'reaped', end_reason: 'reaped:owner', fence_pending: 1 });
     expect((await claimItem('vm-b', b.secret, { ticket_id: 'docs:R3-9001' })).json.rule).toBe(3);
@@ -498,7 +498,7 @@ describe('G-BTN-14: a force-reaped live runner’s item waits for its fence', ()
   it('§9: a release unacknowledged for 2 hours reaps the claim, fence-pending', async () => {
     const a = await register('vm-a', { lease_timeout_s: 43_200 });
     const { json: c } = await claimItem('vm-a', a.secret);
-    await owner('/v1/ui/messages', { to_runner_id: a.id, kind: 'release', payload: { ticket_id: 'docs:R3-9001', reason: 'requested' } });
+    await owner('/v1/ui/messages', { to_runner_id: a.id, kind: 'release', confirm: true, payload: { ticket_id: 'docs:R3-9001', reason: 'requested' } });
     await beat('vm-a', a.secret, { lease_timeout_s: 43_200 }); // delivered at T0
     await alarmAt(T0 + 2 * 3_600_000 - S);
     expect(await claimRow(c.claim_id)).toMatchObject({ status: 'active' });
@@ -513,7 +513,7 @@ describe('G-BTN-14: a force-reaped live runner’s item waits for its fence', ()
     await owner(`/v1/ui/claims/${c.claim_id}/reap`, { confirm: true });
     expect((await claimItem('vm-b', b.secret, { ticket_id: 'docs:R3-9001' })).json.rule).toBe(3);
     // §12.2: destructive, so it names its confirmation.
-    expect((await owner(`/v1/ui/claims/${c.claim_id}/fence-clear`, {})).status).toBe(400);
+    expect((await owner(`/v1/ui/claims/${c.claim_id}/fence-clear`, {})).status).toBe(428);
     expect(await (await owner(`/v1/ui/claims/${c.claim_id}/fence-clear`, { confirm: true })).json()).toEqual({ ok: true });
     expect((await claimRow(c.claim_id)).fence_pending).toBe(0);
     // The clear is logged naming the administrator (§9.5), the third way a fence ends.
@@ -700,16 +700,19 @@ describe('G-BTN-40: the matching query and gatesFor agree; git overtaking a clai
   });
 });
 
-describe('§7.1: a held history is accepted after 24 hours or by the owner', () => {
+describe('S-BTN-13 (R-BTN-11): a held history is accepted after 24 hours or on the dashboard', () => {
   it('the alarm accepts it at 24 h; the sync’s next force post becomes the head', async () => {
     await syncCall('/v1/sync/board', payload(sha.B, sha.A, board.states.B));
     const force = () => syncCall('/v1/sync/board', payload(sha.D, sha.B, board.states.D, { force: true }));
     expect(await code(await force())).toBe('snapshot-rejected');
-    await alarmAt(T0 + 24 * 3_600_000 - S);
+    await alarmAt(T0 + 24 * 3_600_000 - 60 * S);
     expect(await code(await force())).toBe('snapshot-rejected');
+    const head = async () => (await (await syncCall('/v1/sync/head')).json() as { sha: string }).sha;
+    expect(await head()).toBe(sha.B);
     await alarmAt(T0 + 24 * 3_600_000);
+    expect(await head()).toBe(sha.B);
     expect((await force()).status).toBe(200);
-    expect((await (await syncCall('/v1/sync/head')).json() as { sha: string }).sha).toBe(sha.D);
+    expect(await head()).toBe(sha.D);
   });
 
   it('the owner accepts it at once', async () => {

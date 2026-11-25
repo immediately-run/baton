@@ -13,6 +13,7 @@ import { BatonError } from './http';
 import { logEvent } from './db';
 import { KEY_FINGERPRINT } from './auth';
 import { crossHostEntries } from './codeRepos';
+import { checkConfirm } from './validate';
 import type { Store } from './ports';
 import type { Forge } from './links';
 
@@ -97,6 +98,13 @@ export type RefWriter = (typeof REF_WRITERS)[number];
 export const BOARD_INPUTS = ['sync-key', 'ci-identity', 'machine'] as const;
 /** An approver-list entry (R-BTN-188): a class, or one named key. */
 export type ApproverEntry = 'owner' | 'human' | `key:${string}`;
+export type HumanKeyMinimum = 'any' | 'hardware';
+
+/** R-BTN-185: no credential proves hardware custody until Baton verifies FIDO attestation.
+ *  A configured key, an SK public-key prefix, or an opaque stored value is not that proof. */
+export function acceptsUnattestedHumanKey(minimum: HumanKeyMinimum): boolean {
+  return minimum === 'any';
+}
 /** An attestation's or reading's writer class (R-BTN-181). */
 export type WriterClass = 'human' | 'owner' | 'baton' | 'runner' | 'instrument' | 'admin' | `service:${string}`;
 
@@ -113,7 +121,7 @@ export interface OutboxRoute {
  *  `human_identity` means none). */
 export interface PolicyDocument {
   approvers: { members: ApproverEntry[]; trust: ApproverEntry[]; policy: ApproverEntry[] };
-  human_key: 'any' | 'hardware';
+  human_key: HumanKeyMinimum;
   /** R-BTN-188: the human-only identity as the fact reader and the merge runner see it — on a
    *  forge its immutable forge user id, on `git` the `pre-receive` pusher identity. Absent or
    *  null means none; B-182: while a `code_repos` entry sits on another host, it stays null —
@@ -126,6 +134,7 @@ export interface PolicyDocument {
   authorship: 'any' | 'signed';
   tickets: { created: 'filed' | 'proposed' };
   leg_state?: 'forge' | 'branch';
+  repos?: { unlisted: 'by-name' | 'none' };
   outbox: { git: OutboxRoute; 'forge-check': OutboxRoute };
   inputs: { board: (typeof BOARD_INPUTS)[number][]; answers: 'git' | 'attestation' };
   attestations: Record<string, WriterClass[]>;
@@ -143,7 +152,7 @@ export const KNOBS = [
   'refs.default_branch', 'refs.tags', 'refs.other', 'refs.baton', 'refs.legs',
   'paths.protected', 'paths.control', 'paths.tickets',
   'merge.trusted', 'merge.reviews', 'merge.checks', 'authorship', 'tickets.created', 'leg_state',
-  'outbox.git', 'outbox.forge-check', 'inputs.board', 'inputs.answers', 'attestations', 'readings',
+  'repos.unlisted', 'outbox.git', 'outbox.forge-check', 'inputs.board', 'inputs.answers', 'attestations', 'readings',
 ] as const;
 export type Knob = (typeof KNOBS)[number];
 
@@ -216,7 +225,12 @@ function checkOutboxRoute(v: unknown, at: string): OutboxRoute {
  *  `service:` key's roles) are the `Policies` class's. */
 export function validatePolicyDocument(input: unknown, opts: { forge: Forge }): PolicyDocument {
   const v: Record<string, unknown> = isObj(input) ? input : bad('policy', 'must be a JSON object');
-  only(v, ['approvers', 'human_key', 'human_identity', 'grants', 'refs', 'paths', 'merge', 'authorship', 'tickets', 'leg_state', 'outbox', 'inputs', 'attestations', 'readings'], 'policy');
+  only(v, ['approvers', 'human_key', 'human_identity', 'grants', 'refs', 'paths', 'merge', 'authorship', 'tickets', 'leg_state', 'repos', 'outbox', 'inputs', 'attestations', 'readings'], 'policy');
+  const repos = v.repos === undefined ? undefined : isObj(v.repos) ? v.repos : bad('policy.repos', 'must be {unlisted}');
+  if (repos) {
+    only(repos, ['unlisted'], 'policy.repos');
+    if (repos.unlisted !== 'by-name' && repos.unlisted !== 'none') bad('policy.repos.unlisted', 'must be by-name or none');
+  }
   const approvers = isObj(v.approvers) ? v.approvers : bad('policy.approvers', 'must be an object');
   only(approvers, ['members', 'trust', 'policy'], 'policy.approvers');
   const grants = isObj(v.grants) ? v.grants : bad('policy.grants', 'must be an object');
@@ -339,6 +353,7 @@ export function validatePolicyDocument(input: unknown, opts: { forge: Forge }): 
       trust: checkApproverList(approvers.trust, 'policy.approvers.trust'),
       policy: checkApproverList(approvers.policy, 'policy.approvers.policy'),
     },
+    ...(repos ? { repos: { unlisted: repos.unlisted as 'by-name' | 'none' } } : {}),
     human_key: v.human_key as PolicyDocument['human_key'],
     ...(v.human_identity != null ? { human_identity: v.human_identity as string } : {}),
     grants: { default_trust: grants.default_trust as PolicyDocument['grants']['default_trust'], one_per_domain: grants.one_per_domain as boolean, trusted_domain: grants.trusted_domain as PolicyDocument['grants']['trusted_domain'] },
@@ -359,6 +374,7 @@ export function validatePolicyDocument(input: unknown, opts: { forge: Forge }): 
  *  carries `readings.*.signed`, retired and read nowhere: it is left out, so the first change
  *  after it is not reported as one to `readings`. */
 function knobOf(doc: PolicyDocument, knob: Knob): unknown {
+  if (knob === 'repos.unlisted') return doc.repos?.unlisted ?? 'by-name';
   const v = knob.split('.').reduce<unknown>((v, seg) => (v && typeof v === 'object' ? (v as Record<string, unknown>)[seg] : undefined), doc);
   if (knob !== 'readings' || !v || typeof v !== 'object') return v;
   return Object.fromEntries(Object.entries(v as Record<string, { writers?: unknown }>).map(([k, e]) => [k, e && typeof e === 'object' ? { writers: e.writers } : e]));
@@ -403,6 +419,7 @@ export const COOPERATIVE: PolicyDocument = {
 /** The `protected` column. */
 export const PROTECTED: PolicyDocument = {
   ...COOPERATIVE,
+  repos: { unlisted: 'none' },
   approvers: { members: ['human'], trust: ['human'], policy: ['human'] },
   grants: { default_trust: 'untrusted', one_per_domain: true, trusted_domain: 'separate' },
   refs: {
@@ -478,7 +495,7 @@ export function humanOnlyList(list: ApproverEntry[], humanKeys: ReadonlySet<stri
  *  `protection` true, `no-runner-lands` needs the checker's latest report to have matched
  *  within 24 hours; with `protection` undefined the guarantee is judged on the policy alone —
  *  the mode a floor is judged in, the report never being a policy condition. */
-export function guaranteesOf(policy: PolicyDocument, opts: { protection?: boolean; humanKeys?: ReadonlySet<string> } = {}): Record<GuaranteeName, boolean> {
+export function guaranteesOf(policy: PolicyDocument, opts: { protection?: boolean } = {}): Record<GuaranteeName, boolean> {
   const refsLand = admitsOnly(policy.refs.default_branch, ['trusted-runner', 'human'])
     && admitsOnly(policy.refs.tags, ['trusted-runner', 'human'])
     && admitsOnly(policy.refs.other, ['trusted-runner', 'human']);
@@ -489,8 +506,6 @@ export function guaranteesOf(policy: PolicyDocument, opts: { protection?: boolea
     && reported;
   const att = (type: string): WriterClass[] | undefined => policy.attestations[type];
   const attOnly = (type: string, writer: WriterClass) => att(type) !== undefined && att(type)!.every((w) => w === writer);
-  const humans = opts.humanKeys ?? new Set<string>();
-  const gates = humanOnlyList(policy.approvers.members, humans) && humanOnlyList(policy.approvers.trust, humans) && humanOnlyList(policy.approvers.policy, humans);
   return {
     'no-runner-lands': noRunnerLands,
     'control-paths-human': noRunnerLands && policy.paths.control === 'human',
@@ -501,8 +516,10 @@ export function guaranteesOf(policy: PolicyDocument, opts: { protection?: boolea
       && ['std:review@1', 'std:wrote@1', 'std:ran@1'].every((t) => attOnly(t, 'baton')),
     'signed-authorship': noRunnerLands && policy.authorship === 'signed',
     'trusted-domain-separate': policy.grants.trusted_domain === 'separate' && policy.grants.default_trust === 'untrusted',
-    'human-gates': gates,
-    'human-gates-hardware': gates && policy.human_key === 'hardware',
+    // Neither custody intent nor an unverified hardware policy establishes R-BTN-189.
+    // Keep both names readable for previously registered floors.
+    'human-gates': false,
+    'human-gates-hardware': false,
     'board-from-trusted': noRunnerLands && !policy.inputs.board.includes('machine') && policy.inputs.answers === 'attestation',
   };
 }
@@ -537,32 +554,39 @@ export interface ProtectionReport { repository: string; matched: boolean; readin
 
 /** A repository's live owners, and the human-only keys among them — everything the approver
  *  checks read. `humans` is every fingerprint a `human` entry counts when ACTING: the
- *  repository's `human_only` owners, the tenant's registered human keys, and the host's
- *  BATON_HUMAN_KEYS lines; `breakGlass` is those lines alone (R-BTN-185: the deployment's root
- *  of trust, which satisfies every `human` entry of every repository on the instance, whatever
- *  `human_key` asks, and is the only recovery from a lost key). `humanOwners` is the
+ *  repository's human-only owners and the host's BATON_HUMAN_KEYS lines; `breakGlass` is those
+ *  lines alone, still subject to `human_key` (R-BTN-188). `humanOwners` is the
  *  repository's owners alone that are human keys by their own mark or the tenant's register —
  *  break-glass excluded: R-BTN-188's no-gate rule needs "a `human_only` key meeting the
  *  resulting `human_key` among the repository's owners", so a list a break-glass key alone
  *  could satisfy is a gate with no key to open it. */
 export interface ApproverFacts {
-  owners: Map<string, { human_only: boolean; fido_attestation: string | null }>;
+  owners: Map<string, { human_only: boolean }>;
   humans: Set<string>;
   breakGlass: Set<string>;
   humanOwners: Set<string>;
 }
 
 const FLOOR_NAME = /^[a-z][a-z0-9-]{0,39}$/;
+
+export function checkFloorName(value: unknown): string {
+  return typeof value === 'string' && FLOOR_NAME.test(value) ? value : bad('name', 'must be a short floor name');
+}
+
+export function checkFloorGuarantees(value: unknown): GuaranteeName[] {
+  return Array.isArray(value) && value.length >= 1 && value.every((g) => (GUARANTEE_NAMES as readonly string[]).includes(g))
+    ? [...new Set(value as GuaranteeName[])] : bad('guarantees', `must name guarantees from ${GUARANTEE_NAMES.join(', ')}`);
+}
 /** A protection report feeds `no-runner-lands` this long (R-BTN-180). */
 export const PROTECTION_WINDOW_MS = 24 * 3_600_000;
 
 export class Policies {
-  /** Baton's own callback: a floored guarantee broke on `repository`, and every running claim
-   *  on a ticket that reaches it is released `released:floor` (R-BTN-189) — the claims' half
-   *  lives in claims.ts, wired by the core like every other cross-link. */
-  releaseForFloor: ((repository: string) => void) | null = null;
-
-  constructor(private readonly c: { store: Store; now: () => number }) {}
+  constructor(private readonly c: {
+    store: Store;
+    now: () => number;
+    /** R-BTN-189: a broken floor releases the running claims on tickets that reach it. */
+    releaseForFloor: (repository: string) => void;
+  }) {}
 
   private rows<T = Record<string, unknown>>(q: string, ...p: unknown[]): T[] {
     return this.c.store.exec<T>(q, ...p).toArray() as T[];
@@ -628,7 +652,7 @@ export class Policies {
   /** The guarantees over the current version, the protection report applied. */
   guaranteesFor(repository: string): Record<GuaranteeName, boolean> {
     const cur = this.current(repository);
-    return guaranteesOf(cur?.policy ?? COOPERATIVE, { protection: this.protectionOk(repository), humanKeys: this.facts(repository).humans });
+    return guaranteesOf(cur?.policy ?? COOPERATIVE, { protection: this.protectionOk(repository) });
   }
 
   // ── approvers (R-BTN-188) ──────────────────────────────────────────────────────────────
@@ -636,11 +660,11 @@ export class Policies {
   /** The facts every approver check reads: the repository's live owners (with their human-only
    *  marks) and every fingerprint a `human` entry counts. `breakGlass` — BATON_HUMAN_KEYS'
    *  fingerprints — is passed by the routes that judge an acting credential or a list's
-   *  satisfiability (R-BTN-185); the guarantee computations read the owners' own marks. */
+   *  satisfiability (R-BTN-185). */
   facts(repository: string, breakGlass: ReadonlySet<string> = new Set()): ApproverFacts {
-    const owners = new Map(this.rows<{ fingerprint: string; human_only: number; fido_attestation: string | null }>(
-      'SELECT fingerprint, human_only, fido_attestation FROM repository_owners WHERE repository_id = ? AND removed_at IS NULL', repository)
-      .map((o) => [o.fingerprint, { human_only: !!o.human_only, fido_attestation: o.fido_attestation }]));
+    const owners = new Map(this.rows<{ fingerprint: string; human_only: number }>(
+      'SELECT fingerprint, human_only FROM repository_owners WHERE repository_id = ? AND removed_at IS NULL', repository)
+      .map((o) => [o.fingerprint, { human_only: !!o.human_only }]));
     const registered = new Set(this.rows<{ fingerprint: string }>('SELECT fingerprint FROM human_keys WHERE revoked_at IS NULL').map((r) => r.fingerprint));
     const humans = new Set<string>(breakGlass);
     const humanOwners = new Set<string>();
@@ -655,40 +679,18 @@ export class Policies {
     return { owners, humans, breakGlass: new Set(breakGlass), humanOwners };
   }
 
-  /** R-BTN-185: whether a human-only owner key meets `human_key` — `any` always; `hardware`
-   *  only with a FIDO attestation (B-136 builds the attestation check; until it does, no key
-   *  carries one, and only break-glass meets `hardware`). */
-  private meetsHumanKey(owner: { human_only: boolean; fido_attestation: string | null }, humanKey: 'any' | 'hardware'): boolean {
-    if (!owner.human_only) return false;
-    return humanKey === 'any' || owner.fido_attestation != null;
-  }
-
   /** Whether `credential` matches an approver entry of `list`, as it stands (R-BTN-188): an
    *  owner key matches `owner`; a `human` entry needs a `human_only` owner meeting `human_key`,
    *  or a break-glass key; a `key:` entry names one live owner key, meeting `human_key` when
    *  it is a `human_only` key. A delegated key (R-BTN-130) matches no entry — none is
    *  registered yet (B-124 builds them); when one is, its class answers before this runs. */
-  entryMatches(list: ApproverEntry[], credential: string, facts: ApproverFacts, humanKey: 'any' | 'hardware'): boolean {
-    for (const e of list) {
-      if (e === 'owner') {
-        if (facts.owners.has(credential)) return true;
-      } else if (e === 'human') {
-        if (this.humanEntryOk(credential, facts, humanKey)) return true;
-      } else if (e === `key:${credential}`) {
-        const o = facts.owners.get(credential);
-        if (o && (!o.human_only || this.meetsHumanKey(o, humanKey))) return true;
-      }
-    }
-    return false;
-  }
-
-  /** A `human` entry's key: break-glass always — R-BTN-185: the host's configuration satisfies
-   *  every `human` entry of every repository, and no `human_key` rises above it; any other key
-   *  needs a `human_only` owner's mark meeting the repository's `human_key`. */
-  private humanEntryOk(credential: string, facts: ApproverFacts, humanKey: 'any' | 'hardware'): boolean {
-    if (facts.breakGlass.has(credential)) return true;
-    const o = facts.owners.get(credential);
-    return o !== undefined && facts.humans.has(credential) && this.meetsHumanKey(o, humanKey);
+  entryMatches(list: ApproverEntry[], credential: string, facts: ApproverFacts, humanKey: HumanKeyMinimum): boolean {
+    const humanAllowed = acceptsUnattestedHumanKey(humanKey);
+    const owner = facts.owners.get(credential);
+    return list.some((e) => {
+      if (e === 'human') return humanAllowed && (facts.breakGlass.has(credential) || facts.humanOwners.has(credential));
+      return !!owner && (!facts.humans.has(credential) || humanAllowed) && (e === 'owner' || e === `key:${credential}`);
+    });
   }
 
   /** R-BTN-188's no-gate-without-a-key: whether some live credential could satisfy `list` —
@@ -696,27 +698,34 @@ export class Policies {
    *  meeting `human_key` (break-glass never opens a gate: it is the acting root of trust, not
    *  an owner; a repository whose human lists only break-glass could satisfy has no key to open
    *  them), a `key:` entry a live owner of its own. */
-  listSatisfiable(list: ApproverEntry[], facts: ApproverFacts, humanKey: 'any' | 'hardware'): boolean {
-    return list.some((e) => {
-      if (e === 'owner') return facts.owners.size > 0;
-      if (e === 'human') {
-        return [...facts.humanOwners].some((fp) => this.meetsHumanKey({ human_only: true, fido_attestation: facts.owners.get(fp)?.fido_attestation ?? null }, humanKey));
-      }
-      const o = facts.owners.get(e.slice(4));
-      return o !== undefined && (!o.human_only || this.meetsHumanKey(o, humanKey));
-    });
+  listSatisfiable(list: ApproverEntry[], facts: ApproverFacts, humanKey: HumanKeyMinimum): boolean {
+    return [...facts.owners.keys()].some((fp) => this.entryMatches(list, fp, facts, humanKey));
   }
 
   // ── the change (R-BTN-188, R-BTN-189) ──────────────────────────────────────────────────
 
-  /** `PUT /v1/owner/{repository}/policy {base_version, policy | preset}` — in the caller's one
+  /** Compute the trust settings the change clears, without touching their rows. */
+  private trustToClear(repository: string, before: PolicyDocument, after: PolicyDocument, facts: ApproverFacts) {
+    const ids = (table: 'runner_grants' | 'couriers') => this.rows<{ credential_id: string; trust_set_by: string }>(
+      `SELECT DISTINCT credential_id, trust_set_by FROM ${table} WHERE repository_id = ? AND trust_set_by IS NOT NULL${table === 'runner_grants' ? ' AND revoked_at IS NULL' : ''} ORDER BY credential_id`, repository)
+      .filter((r) => !this.entryMatches(after.approvers.trust, ownerOfTrustSet(r.trust_set_by), facts, after.human_key))
+      .map((r) => r.credential_id);
+    return !humanOnlyList(before.approvers.trust, facts.humans) && humanOnlyList(after.approvers.trust, facts.humans)
+      ? { grants: ids('runner_grants'), couriers: [...new Set(ids('couriers'))] }
+      : { grants: [], couriers: [] };
+  }
+
+  /** `PUT /v1/owner/{repository}/policy {base_version, policy | preset, dry_run?}` — in the caller's one
    *  transaction: the compare-and-set on `base_version`, the approver check against the list in
    *  force, the satisfiable-list refusal, the floors re-checked against the new version, the
    *  trust clearing when `approvers.trust` becomes human-only, and the append-only insert with
-   *  its `admin` event. `breakGlass` is BATON_HUMAN_KEYS' fingerprints (R-BTN-185). */
-  put(repository: string, input: unknown, forge: Forge, actor: { credential: string; label: string }, breakGlass: ReadonlySet<string>): { version: number; hash: string; changed: Knob[]; guarantees: Record<GuaranteeName, boolean> } {
+   *  its `admin` event. A dry run returns before the writes. `breakGlass` is BATON_HUMAN_KEYS'
+   *  fingerprints (R-BTN-185). */
+  put(repository: string, input: unknown, forge: Forge, actor: { credential: string; label: string },
+    { breakGlass, personAnswerStops }: { breakGlass: ReadonlySet<string>; personAnswerStops: () => { ticket_id: string; leg: string }[] }) {
     const body: Record<string, unknown> = isObj(input) ? input : bad('body', 'must be a JSON object');
-    only(body, ['base_version', 'policy', 'preset'], 'body');
+    only(body, ['base_version', 'policy', 'preset', 'dry_run'], 'body');
+    if (Object.hasOwn(body, 'dry_run') && typeof body.dry_run !== 'boolean') bad('dry_run', 'must be true or false');
     if (!Number.isSafeInteger(body.base_version) || (body.base_version as number) < 1) bad('base_version', 'must be the version the change builds on');
     if (body.policy !== undefined && body.preset !== undefined) bad('body', 'carries either a policy or a preset, not both');
     const cur = this.current(repository);
@@ -726,7 +735,7 @@ export class Policies {
     let doc: PolicyDocument;
     let preset: string | null = null;
     if (body.preset !== undefined) {
-      if (typeof body.preset !== 'string' || !(body.preset in PRESETS)) bad('preset', `must be one of ${Object.keys(PRESETS).join(', ')}`);
+      if (typeof body.preset !== 'string' || !Object.hasOwn(PRESETS, body.preset)) bad('preset', `must be one of ${Object.keys(PRESETS).join(', ')}`);
       preset = body.preset as string;
       doc = policyForPreset(body.preset as PresetName, forge);
     } else {
@@ -789,7 +798,7 @@ export class Policies {
 
     // The floors (R-BTN-189): judged on the policy alone — the protection report is not a
     // policy condition, so a lapsed or failed report never refuses a change.
-    const nextGuarantees = guaranteesOf(doc, { humanKeys: factsNow.humans });
+    const nextGuarantees = guaranteesOf(doc);
     for (const floor of this.floors(repository)) {
       for (const g of floor.guarantees) {
         if ((GUARANTEE_NAMES as readonly string[]).includes(g) && !nextGuarantees[g as GuaranteeName]) {
@@ -801,37 +810,36 @@ export class Policies {
     // R-BTN-188: on `approvers.trust` becoming human-only, every trust setting made by a
     // credential the new list does not admit is cleared — untrusted, roles dropped, domains and
     // families null.
-    const wasHumanOnly = humanOnlyList(cur.policy.approvers.trust, factsNow.humans);
-    const nowHumanOnly = humanOnlyList(doc.approvers.trust, factsNow.humans);
-    if (!wasHumanOnly && nowHumanOnly) {
-      const admits = (by: string) => this.entryMatches(doc.approvers.trust, by, factsNow, doc.human_key);
-      const cleared: string[] = [];
-      for (const t of this.rows<{ credential_id: string; trust_set_by: string | null }>(
-        'SELECT credential_id, trust_set_by FROM runner_grants WHERE repository_id = ? AND revoked_at IS NULL AND trust_set_by IS NOT NULL', repository)) {
-        if (!admits(ownerOfTrustSet(t.trust_set_by ?? ''))) {
-          this.exec('UPDATE runner_grants SET trust_level = ?, trust_domain = NULL, model_family = NULL, role = NULL WHERE credential_id = ? AND repository_id = ?', 'untrusted', t.credential_id, repository);
-          cleared.push(`grant:${t.credential_id}`);
-        }
-      }
-      for (const t of this.rows<{ credential_id: string; trust_set_by: string | null }>(
-        'SELECT credential_id, trust_set_by FROM couriers WHERE repository_id = ? AND trust_set_by IS NOT NULL', repository)) {
-        if (!admits(ownerOfTrustSet(t.trust_set_by ?? ''))) {
-          this.exec('UPDATE couriers SET trust_level = ?, trust_domain = NULL WHERE credential_id = ? AND repository_id = ?', 'untrusted', t.credential_id, repository);
-          cleared.push(`courier:${t.credential_id}`);
-        }
-      }
-      if (cleared.length) logEvent(this.c.store, this.c.now(), 'admin', actor.label, { act: 'policy-trust-cleared', repository, cleared }, null, null, repository);
-    }
-
-    const version = cur.version + 1;
+    const trust = this.trustToClear(repository, cur.policy, doc, factsNow);
+    const cleared = [...trust.grants.map((id) => `grant:${id}`), ...trust.couriers.map((id) => `courier:${id}`)];
     const hash = hashOfDocument(doc);
     const changed = diffPolicies(cur.policy, doc);
+    const guarantees = guaranteesOf(doc, { protection: this.protectionOk(repository) });
+    if (body.dry_run === true) {
+      const legs = cur.policy.inputs.answers === 'git' && doc.inputs.answers === 'attestation' ? personAnswerStops() : [];
+      // Core cannot predict effects of gates it doesn't enforce. Name those gaps rather than
+      // guessing which legs merge by their names or whether external checks would pass.
+      return {
+        changed, guarantees, trust_cleared: cleared, stops: { legs, tickets: [...new Set(legs.map(({ ticket_id }) => ticket_id))] },
+        not_evaluated: ['outbox-delivery', 'leg-attestation-requirements', 'trusted-merge', 'repos.unlisted'],
+      };
+    }
+
+    for (const id of trust.grants) {
+      this.exec('UPDATE runner_grants SET trust_level = ?, trust_domain = NULL, model_family = NULL, role = NULL WHERE credential_id = ? AND repository_id = ?', 'untrusted', id, repository);
+    }
+    for (const id of trust.couriers) {
+      this.exec('UPDATE couriers SET trust_level = ?, trust_domain = NULL WHERE credential_id = ? AND repository_id = ?', 'untrusted', id, repository);
+    }
+    if (cleared.length) logEvent(this.c.store, this.c.now(), 'admin', actor.label, { act: 'policy-trust-cleared', repository, cleared }, null, null, repository);
+
+    const version = cur.version + 1;
     this.exec('INSERT INTO repository_policies (repository_id, version, policy_json, hash, previous_hash, changed_by, approver, preset, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
       repository, version, canonicalJson(doc), hash, cur.hash, actor.label, approver, preset, this.c.now());
     logEvent(this.c.store, this.c.now(), 'admin', actor.label, { act: 'policy-changed', repository, from: cur.version, to: version, changed }, null, null, repository);
     // The answer's guarantees are the enforced state of the new version — the protection report
     // counted, as the signed read counts it (the floors above stayed policy-only, R-BTN-189).
-    return { version, hash, changed, guarantees: guaranteesOf(doc, { protection: this.protectionOk(repository), humanKeys: factsNow.humans }) };
+    return { version, hash, changed, guarantees };
   }
 
   /** R-BTN-181's store half: a `service:` writer the policy names must hold no owner, runner or
@@ -879,19 +887,19 @@ export class Policies {
     }
     if (body.remove === true) {
       only(body, ['name', 'remove', 'confirm'], 'body');
-      if (body.confirm !== true) throw new BatonError('confirm-required', 'removing a floor takes confirm: true');
       const name = typeof body.name === 'string' && FLOOR_NAME.test(body.name) ? body.name : bad('name', 'must be a floor name');
       const floor = this.floors(repository).find((f) => f.name === name);
       if (!floor) throw new BatonError('not-found', `${repository} has no floor ${name}`);
       if (!this.entryMatches([floor.remove_by], actor.credential, facts, cur.policy.human_key)) {
         throw new BatonError('forbidden', `removing floor ${name} needs a credential its remove_by (${floor.remove_by}) admits (R-BTN-189)`);
       }
+      checkConfirm(body);
       this.exec('DELETE FROM policy_floors WHERE repository_id = ? AND name = ?', repository, name);
       logEvent(this.c.store, this.c.now(), 'admin', actor.label, { act: 'floor-removed', repository, name }, null, null, repository);
       return { ok: true };
     }
     only(body, ['name', 'guarantees', 'remove_by'], 'body');
-    const name = typeof body.name === 'string' && FLOOR_NAME.test(body.name) ? body.name : bad('name', 'must be a short floor name');
+    const name = checkFloorName(body.name);
     // B-182 (R-BTN-188): a floor names guarantees a human identity underwrites; while a code
     // repository sits on another host, none may stand — the other order of the refusal `put`
     // makes. Judged before the guarantees, so the refusal is the same whatever would be floored.
@@ -901,15 +909,14 @@ export class Policies {
         throw new BatonError('invalid-params', `floors: ${repository} holds the code repository ${cross.path} on ${cross.host}, another host than the home's — no floor may stand while a human identity cannot be named across hosts (B-182)`);
       }
     }
-    const guarantees = Array.isArray(body.guarantees) && body.guarantees.length >= 1 && (body.guarantees as unknown[]).every((g) => (GUARANTEE_NAMES as readonly string[]).includes(g as string))
-      ? [...new Set(body.guarantees as string[])] : bad('guarantees', `must name guarantees from ${GUARANTEE_NAMES.join(', ')}`);
+    const guarantees = checkFloorGuarantees(body.guarantees);
     const remove_by = body.remove_by === undefined ? 'human' : body.remove_by === 'human' || body.remove_by === 'owner' ? body.remove_by : bad('remove_by', "must be 'human' or 'owner'");
     if (this.rows('SELECT 1 FROM policy_floors WHERE repository_id = ? AND name = ?', repository, name).length) {
       throw new BatonError('conflict', `${repository} already has a floor named ${name} (R-BTN-189)`);
     }
     // Refused when a named guarantee's policy conditions are not met now — judged on the policy
     // alone, the report never a policy condition.
-    const now = guaranteesOf(cur.policy, { humanKeys: facts.humans });
+    const now = guaranteesOf(cur.policy);
     for (const g of guarantees) {
       if (!now[g as GuaranteeName]) throw new BatonError('floor-violated', `${g} does not hold now (R-BTN-189)`, { guarantee: g });
     }
@@ -926,7 +933,7 @@ export class Policies {
   brokenUnderFloors(repository: string): { floor: string; guarantee: string }[] {
     const cur = this.current(repository);
     if (!cur) return [];
-    const guarantees = guaranteesOf(cur.policy, { protection: this.protectionOk(repository), humanKeys: this.facts(repository).humans });
+    const guarantees = guaranteesOf(cur.policy, { protection: this.protectionOk(repository) });
     const out: { floor: string; guarantee: string }[] = [];
     for (const floor of this.floors(repository)) {
       for (const g of floor.guarantees) {
@@ -945,7 +952,7 @@ export class Policies {
   enforceFloors(): void {
     this.raiseLapsedReports();
     for (const r of this.rows<{ id: string }>('SELECT DISTINCT repository_id AS id FROM policy_floors')) {
-      if (this.brokenUnderFloors(r.id).length) this.releaseForFloor?.(r.id);
+      if (this.brokenUnderFloors(r.id).length) this.c.releaseForFloor(r.id);
     }
   }
 

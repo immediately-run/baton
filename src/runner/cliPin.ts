@@ -5,10 +5,10 @@
 // released copy (no working tree) names the commit its `dist/build.json` was built from, and is
 // unpinned only when that build was dirty, for no commit holds its files. Reported, never
 // refused: nothing gates on it, and a state that cannot be read is said so, never guessed.
+import { git } from '../defaults/git.mjs';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { workingTreeOf } from '../../cli/baton.mjs';
-import { git } from './home';
+import { workingTreeOf } from '../client/version.mjs';
 
 /** What the runner reports about its own CLI — the heartbeat `profile`'s `cli` key and the
  *  start line's subject. `kind` says how the pinning was read; it stays here, for the line's
@@ -42,7 +42,8 @@ export function readCliPin(cliFile: string): CliPin {
     const commit = git(tree, ['rev-parse', 'HEAD']).trim();
     try {
       // A branch tip: `symbolic-ref` names it — the state the owner's warning is for.
-      return { commit, ref: git(tree, ['symbolic-ref', '--short', '-q', 'HEAD']).trim(), pinned: false, kind: 'branch' };
+      const branch = git(tree, ['symbolic-ref', '-q', 'HEAD']).trim().slice('refs/heads/'.length);
+      return { commit, ref: branch, pinned: false, kind: 'branch' };
     } catch {
       // Detached: a tag names a release; the commit naming itself is a fixed commit either way.
       try {
@@ -53,6 +54,26 @@ export function readCliPin(cliFile: string): CliPin {
     }
   } catch {
     return { commit: null, ref: null, pinned: false, kind: 'unknown' };
+  }
+}
+
+/** Compare the code loaded at startup with its local tracking ref. The launcher, not the
+ *  runner, fetches/updates the CLI and decides whether to start another process. */
+export function cliBehind(cliFile: string, started: CliPin): string | null {
+  if (started.kind !== 'branch' || !started.commit) return null;
+  const tree = workingTreeOf(cliFile);
+  if (tree == null) return null;
+  try {
+    const branch = git(tree, ['symbolic-ref', '-q', 'HEAD']).trim();
+    if (branch !== `refs/heads/${started.ref}`) return null;
+    const upstream = git(tree, ['for-each-ref', '--count=1', '--format=%(upstream)', branch]).trim();
+    if (!upstream) return null;
+    const tip = git(tree, ['rev-parse', '--verify', '--quiet', `${upstream}^{commit}`]).trim();
+    if (tip === started.commit) return null;
+    git(tree, ['merge-base', '--is-ancestor', started.commit, tip]);
+    return `CLI ${started.commit.slice(0, 10)} is behind ${upstream} at ${tip.slice(0, 10)}; restart requested`;
+  } catch {
+    return null;
   }
 }
 

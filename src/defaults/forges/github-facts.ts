@@ -1,3 +1,4 @@
+import { outputAttestation, TICKET_OUTPUT_WITNESS } from '../output-evidence';
 import type { CodeRepoEntry, PrFact } from '../course-pr';
 import type { BranchCommit } from '../pr-markers';
 import type { FactContext, FactRead, ForgeRepo } from './types';
@@ -32,11 +33,13 @@ const GRAPHQL_BATCH = 25;
  * check-runs list gives them), never `statusCheckRollup`, which takes in commit statuses too and
  * so may need a permission the sync workflow does not grant: `checks: read` covers this, as it
  * covered the REST read. */
+const COMMENT_FIELDS = 'author { login ... on User { databaseId } ... on Bot { databaseId } ... on Organization { databaseId } ... on Mannequin { databaseId } } authorAssociation body lastEditedAt includesCreatedEdit';
+const PR_COMMENTS = `pageInfo { hasNextPage endCursor } nodes { ${COMMENT_FIELDS} createdAt url }`;
 const PR_DETAIL = `fragment D on PullRequest {
   head: commits(last: 1) { nodes { commit { oid checkSuites(first: 10) { pageInfo { hasNextPage } nodes { checkRuns(first: 100, filterBy: { checkType: LATEST }) { pageInfo { hasNextPage } nodes { status conclusion } } } } } } }
   commits(first: 100) { pageInfo { hasNextPage } nodes { commit { oid committedDate message tree { oid } parents(first: 1) { nodes { oid tree { oid } } } } } }
   reviews(first: 100) { pageInfo { hasNextPage } nodes { author { login } authorAssociation state submittedAt body } }
-  comments(first: 100) { pageInfo { hasNextPage } nodes { author { login } authorAssociation createdAt body } }
+  comments(first: 100) { ${PR_COMMENTS} }
 }`;
 
 /** The GraphQL query reading `numbers`' detail in one repository, each PR under alias `p<n>`. */
@@ -44,7 +47,7 @@ const detailQuery = (numbers: number[]): string =>
   `query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { ${numbers.map((n) => `p${n}: pullRequest(number: ${n}) { ...D }`).join(' ')} } }\n${PR_DETAIL}`;
 
 /** The existing GraphQL detail reader, with one budget and permission cache per sync. */
-export function githubFactReader({ log, owns, pushers: listedPushers }: FactContext) {
+export function githubFactReader({ log, owns, pushers: listedPushers, ...obs }: FactContext) {
   // B-182: the request budget is per host (R-BTN-96) — a second forge's reading never spends the
   // first's token down, and one host's overflow refuses before its budget is spent.
   const requests = new Map<string, number>();
@@ -188,8 +191,42 @@ export function githubFactReader({ log, owns, pushers: listedPushers }: FactCont
     }
     return out;
   };
+  const commentNodes = async (page: any, next: (after: string) => Promise<any>): Promise<any[]> => {
+    const out: any[] = [];
+    for (let i = 0; ; i++) {
+      if (!Array.isArray(page?.nodes) || typeof page.pageInfo?.hasNextPage !== 'boolean') throw new Error('GitHub did not return the comment connection');
+      out.push(...page.nodes);
+      if (!page.pageInfo.hasNextPage) return out;
+      const after = page.pageInfo.endCursor;
+      if (i + 1 >= MAX_PAGES || typeof after !== 'string' || !after) throw new Error('GitHub cannot page all comments — refusing a truncated reading');
+      page = await next(after);
+    }
+  };
+  const unedited = (node: any): boolean => node.lastEditedAt === null && node.includesCreatedEdit === false;
   return async (target: ForgeRepo, read: FactRead, token: string, endpoints: { rest: string; graphql: string }): Promise<PrFact[]> => {
-    const out = await repoFacts({ ...endpoints, host: new URL(target.webBase).host, token }, target.path, read.tickets, read.entry);
+    const conn = { ...endpoints, host: new URL(target.webBase).host, token };
+    if (read.ticketOutputs && read.ticketOutputs?.length) {
+      const [owner, name] = target.path.split('/');
+      const fields = (after = '') => `oid comments(first: 100${after}) { pageInfo { hasNextPage endCursor } nodes { ${COMMENT_FIELDS} } }`;
+      const query = `query($owner: String!, $name: String!, $sha: GitObjectID!, $after: String!) { repository(owner: $owner, name: $name) { object(oid: $sha) { ... on Commit { ${fields(', after: $after')} } } } }`;
+      for (let i = 0; i < read.ticketOutputs.length; i += GRAPHQL_BATCH) {
+        const batch = read.ticketOutputs.slice(i, i + GRAPHQL_BATCH);
+        const objects = batch.map((a, j) => `c${j}: object(oid: ${JSON.stringify(a.ref)}) { ... on Commit { ${fields()} } }`).join(' ');
+        const first = (await graphql(conn, `query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { ${objects} } }`, { owner, name })).data?.repository;
+        for (const [j, a] of batch.entries()) {
+          const commit = first?.[`c${j}`];
+          if (!commit || commit.oid !== a.ref) continue;
+          const comments = await commentNodes(commit.comments, async (after) => {
+            const next = (await graphql(conn, query, { owner, name, sha: a.ref, after })).data?.repository?.object;
+            return next?.oid === a.ref ? next.comments : null;
+          });
+          const witnesses = comments.filter((c) => c?.body === TICKET_OUTPUT_WITNESS && unedited(c))
+            .map((c) => ({ login: c.author?.login, userId: c.author?.databaseId, association: c.authorAssociation }));
+          if ((await trustedOnly(conn, target.path, witnesses)).length) obs.outputEvidence?.push(a);
+        }
+      }
+    }
+    const out = read.readPrs === false ? [] : await repoFacts(conn, target.path, read.tickets, read.entry);
     log(`baton: read ${out.length} PRs of ${target.path} (${[...requests].map(([host, n]) => `${n} requests of ${host}`).join(', ')})`);
     return out;
   };
@@ -272,10 +309,18 @@ export function githubFactReader({ log, owns, pushers: listedPushers }: FactCont
       ? (await all<any>(conn, `/repos/${repo}/pulls/${pr.number}/reviews`)).map((r) => ({ login: r.user?.login, userId: r.user?.id, association: r.author_association, state: r.state, at: r.submitted_at, body: r.body }))
       : node.reviews.nodes.map((r: any) => ({ login: r.author?.login, association: r.authorAssociation, state: r.state, at: r.submittedAt, body: r.body }))))
       .map((r: any) => ({ author: r.login ?? '?', state: r.state, submittedAt: Date.parse(r.at), body: r.body ?? '' }));
-    const comments = (await trustedOnly(conn, repo, node.comments.pageInfo.hasNextPage
-      ? (await all<any>(conn, `/repos/${repo}/issues/${pr.number}/comments`)).map((c) => ({ login: c.user?.login, userId: c.user?.id, association: c.author_association, at: c.created_at, body: c.body }))
-      : node.comments.nodes.map((c: any) => ({ login: c.author?.login, association: c.authorAssociation, at: c.createdAt, body: c.body }))))
-      .map((c: any) => ({ author: c.login ?? '?', state: 'COMMENTED' as const, submittedAt: Date.parse(c.at), body: c.body ?? '' }));
+    const [owner, name] = repo.split('/');
+    const query = `query($owner: String!, $name: String!, $number: Int!, $after: String!) { repository(owner: $owner, name: $name) { pullRequest(number: $number) { comments(first: 100, after: $after) { ${PR_COMMENTS} } } } }`;
+    const nodes = await commentNodes(node.comments, async (after) => (await graphql(conn, query, { owner, name, number: pr.number, after })).data?.repository?.pullRequest?.comments);
+    const verifiedComments = await trustedOnly(conn, repo, nodes.filter(Boolean).map((c) => ({ login: c.author?.login, userId: c.author?.databaseId, association: c.authorAssociation, at: c.createdAt, body: c.body, url: c.url, unedited: unedited(c) })));
+    for (const c of verifiedComments) {
+      if (!c.unedited || typeof c.url !== 'string' || typeof c.body !== 'string') continue;
+      const a = outputAttestation(c.body, c.url);
+      const same = sameRepository(pr.head?.repo?.id, pr.base?.repo?.id) ||
+         (typeof pr.head?.repo?.node_id === 'string' && pr.head.repo.node_id !== '' && pr.head.repo.node_id === pr.base?.repo?.node_id);
+      if (a && obs.ownsOutput?.(a.ticket, { number: pr.number, head: pr.head.ref, repository: repo, sameRepository: same })) obs.outputEvidence?.push(a);
+    }
+    const comments = verifiedComments.map((c: any) => ({ author: c.login ?? '?', state: 'COMMENTED' as const, submittedAt: Date.parse(c.at), body: c.body ?? '' }));
     return { pushedAt: Math.max(0, ...pushes), pushes, checks, reviews: [...reviews, ...comments], commits };
   }
 

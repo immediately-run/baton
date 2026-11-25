@@ -11,16 +11,15 @@ import type { ForgeRegistration } from './forges/types';
 // With no Baton configured, unreachable or `--offline`, the caller falls back to today's scan and
 // SAYS so (R-BTN-131): the duplicate-id refusal stays the backstop for that path, and a branch
 // merging main before it merges and renumbering if main took the number for the rest.
-import { execFileSync } from 'node:child_process';
+
+import { gitText } from './git.mjs';
 import { join, resolve } from 'node:path';
-import { send, DEFAULT_URL } from '../../cli/baton.mjs';
+import { send } from '../client/send.mjs';
+import { DEFAULT_URL } from '../client/config.mjs';
 import { remoteSlug } from './cli';
 import { checkKey, Undetermined } from './tickets-baton';
 import { readSettingsJson, readTicketSettings } from './tickets-config';
 import { rulesConfig } from './tickets-rules';
-
-const git = (root: string, ...a: string[]): string =>
-  execFileSync('git', ['-C', root, ...a], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, LC_ALL: 'C' } }).trim();
 
 /** One open branch head `git ls-remote --heads` answers. */
 interface Head { sha: string; ref: string }
@@ -29,7 +28,7 @@ interface Head { sha: string; ref: string }
  *  reserved namespaces (`baton-ticket/*`, `baton-request/*`) are read like any other branch:
  *  a number a filing branch holds is taken. */
 const heads = (root: string, remote: string): Head[] => {
-  const out = git(root, 'ls-remote', '--heads', remote);
+  const out = gitText(root, 'ls-remote', '--heads', remote);
   return out.split('\n').filter(Boolean).map((l) => {
     const [sha, ref] = l.split('\t');
     return { sha: (sha ?? '').trim(), ref: (ref ?? '').trim() };
@@ -98,7 +97,7 @@ export function floorFor(root: string, remote: string, k: NamedKind): number {
   // whatever many refs point at it.
   const shas = [...new Set(open.map((h) => h.sha))];
   try {
-    git(root, 'fetch', '-q', remote);
+    gitText(root, 'fetch', '-q', remote);
   } catch {
     // an unfetchable remote: the numbers it holds are the backstop's at merge, not the floor's
   }
@@ -110,7 +109,7 @@ export function floorFor(root: string, remote: string, k: NamedKind): number {
     if (k.family === 'ticket') {
       let listed = '';
       try {
-        listed = git(root, 'ls-tree', '-r', '--name-only', sha, '--', k.at, `${k.at}/archive`);
+        listed = gitText(root, 'ls-tree', '-r', '--name-only', sha, '--', k.at, `${k.at}/archive`);
       } catch {
         continue;
       }
@@ -119,7 +118,7 @@ export function floorFor(root: string, remote: string, k: NamedKind): number {
     } else if (k.family === 'migration') {
       let listed = '';
       try {
-        listed = git(root, 'ls-tree', '-r', '--name-only', sha, '--', k.at);
+        listed = gitText(root, 'ls-tree', '-r', '--name-only', sha, '--', k.at);
       } catch {
         continue;
       }
@@ -130,7 +129,7 @@ export function floorFor(root: string, remote: string, k: NamedKind): number {
     } else {
       let found = '';
       try {
-        found = git(root, 'grep', '-h', '-o', '-E', `${k.idPrefix}-[0-9]+`, sha, '--', k.at);
+        found = gitText(root, 'grep', '-h', '-o', '-E', `${k.idPrefix}-[0-9]+`, sha, '--', k.at);
       } catch {
         continue; // git grep exits 1 when nothing matches
       }
@@ -202,6 +201,11 @@ export const fallbackNote = (why: string): string => `id by the next-free scan �
  * printed with its source named is the command's whole answer. A remote that cannot be read
  * throws instead (value 1: no floor means no number worth printing, from Baton or the scan
  * alike).
+ *
+ * `--coordinator` (B-326) is the command `.dibber/config.json` names: it prints the number alone,
+ * and Baton's answer or nothing — a key, a repository or a Baton that cannot answer refuses
+ * (exit 2) instead of falling back to the scan, so `dibber new` refuses too and only its own
+ * `--offline` files from a scan (R-BTN-199).
  */
 export async function nextMain(argv: string[], io: { root?: string; log?: (line: string) => void; warn?: (line: string) => void; identity?: string; url?: string; offline?: boolean; remote?: string; fetchImpl?: typeof fetch } = {}): Promise<number> {
   const log = io.log ?? ((l: string) => process.stdout.write(`${l}\n`));
@@ -209,6 +213,7 @@ export async function nextMain(argv: string[], io: { root?: string; log?: (line:
   let root = io.root ?? process.env.BATON_HOME ?? process.cwd();
   let kind = '';
   let forTicket: string | null = null;
+  let coordinator = false;
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const value = (): string => {
@@ -222,13 +227,15 @@ export async function nextMain(argv: string[], io: { root?: string; log?: (line:
     else if (a === '--offline') io.offline = true;
     else if (a === '--remote') io.remote = value();
     else if (a === '--for') forTicket = value();
+    else if (a === '--coordinator') coordinator = true;
     else if (a === '--help' || a === '-h') {
-      log('baton tickets next <kind> [--for <ticket>] [-i KEY] [--url URL] [--remote R] [--offline]');
+      log('baton tickets next <kind> [--for <ticket>] [-i KEY] [--url URL] [--remote R] [--offline | --coordinator]');
       log('  rule | scenario | gate | migration | ticket[-<prefix>] — the next number of that');
       log('  sequence, taken from Baton with the floor this checkout sees (the default branch and');
       log('  every open branch). --offline and an unanswered Baton print the next free number by');
       log('  the scan and say so. --for names the ticket the number is for, recorded with the take.');
       log('  A remote that cannot be read is refused: no floor means no number worth printing.');
+      log('  --coordinator prints Baton\'s number alone, or refuses: Dibber\'s coordinator command (B-326).');
       return 0;
     } else if (a.startsWith('-')) throw new Error(`${a}: not a flag of baton tickets next`);
     else if (kind === '') kind = a;
@@ -237,6 +244,7 @@ export async function nextMain(argv: string[], io: { root?: string; log?: (line:
   if (kind === '') throw new Error('baton tickets next <kind> — rule, scenario, gate, migration, ticket[-<prefix>]');
   if (forTicket != null && !/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(forTicket)) throw new Error(`--for ${forTicket}: not a ticket id of this repository`);
   const parsed = parseKind(kind, root);
+  if (coordinator && io.offline) throw new Error('--coordinator answers with Baton\'s number or not at all — drop --offline (Dibber\'s own `new --offline` is the scan)');
   const remote = io.remote ?? 'origin';
   // A dead or unreachable origin throws here: no floor means no number worth printing, from
   // Baton or the scan alike (value 1: the scan scanned nothing, and a fresh Baton seeded by 0
@@ -247,12 +255,15 @@ export async function nextMain(argv: string[], io: { root?: string; log?: (line:
     if (target.keyFile != null && target.repository != null) {
       try {
         const took = await takeNumber({ url: target.url, keyFile: target.keyFile, repository: target.repository, kind: parsed.kind, floor, ...(forTicket != null ? { forTicket } : {}), ...(io.fetchImpl ? { fetchImpl: io.fetchImpl } : {}) });
-        log(`✓ ${parsed.kind}: ${printOf(parsed, took.number)} (Baton's sequence, floor ${floor})`);
+        if (coordinator) log(String(took.number));
+        else log(`✓ ${parsed.kind}: ${printOf(parsed, took.number)} (Baton's sequence, floor ${floor})`);
         return 0;
       } catch (e) {
+        if (coordinator) throw new Error(`${parsed.kind}: Baton did not hand out a number (${e instanceof Error ? e.message : String(e)}) — the coordinator answers with Baton's number or not at all`);
         warn(`… ${fallbackNote(e instanceof Error ? e.message : String(e))}`);
       }
     } else {
+      if (coordinator) throw new Error(`${parsed.kind}: ${target.keyFile == null ? 'no key: pass -i KEY (or set BATON_KEY_FILE)' : 'this checkout names no Baton repository'} — the coordinator answers with Baton's number or not at all`);
       warn(`… ${fallbackNote(target.keyFile == null ? 'no key: pass -i KEY (or set BATON_KEY_FILE)' : 'this checkout names no Baton repository')}`);
     }
   } else {

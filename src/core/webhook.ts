@@ -79,6 +79,7 @@ export interface PushDelivery {
   before: string;
   after: string;
   commits: { sha: string; paths: string[] }[];
+  /** The recorded paths do not account for the whole head transition. */
   truncated?: boolean;
 }
 
@@ -194,17 +195,18 @@ function pickPush(payload: unknown): PushDelivery | undefined {
   const commits = at(payload, 'commits');
   if (commits !== undefined && !Array.isArray(commits)) return undefined;
   const base = { sender_id: senderId, ...(login ? { sender_login: login } : {}), ref, before, after };
-  if (commits === undefined) return { ...base, commits: [] };
-  if ((commits as unknown[]).length > PUSH_COMMITS_MAX) return { ...base, commits: [], truncated: true };
+  if (!Array.isArray(commits) || commits.length > PUSH_COMMITS_MAX) return { ...base, commits: [], truncated: true };
+  // A force push can discard changes not represented by the paths of the new commits.
+  let incomplete = at(payload, 'forced') !== false;
   const out: { sha: string; paths: string[] }[] = [];
   let paths = 0;
-  for (const c of commits as unknown[]) {
+  for (const c of commits) {
     const sha = str(at(c, 'id'));
     if (!sha || !SHA40.test(sha)) return undefined;
     const list: string[] = [];
     for (const key of ['added', 'removed', 'modified'] as const) {
       const v = at(c, key);
-      if (v === undefined || v === null) continue;
+      if (v === undefined || v === null) { incomplete = true; continue; }
       if (!Array.isArray(v) || !v.every((x) => typeof x === 'string' && x.length > 0 && x.length <= MAX_PATH)) return undefined;
       list.push(...v as string[]);
     }
@@ -212,7 +214,7 @@ function pickPush(payload: unknown): PushDelivery | undefined {
     if (paths > PUSH_PATHS_MAX) return { ...base, commits: [], truncated: true };
     out.push({ sha, paths: [...new Set(list)] });
   }
-  return { ...base, commits: out };
+  return { ...base, commits: out, ...(incomplete || !out.some((c) => c.sha === after) ? { truncated: true } : {}) };
 }
 
 interface Registered { id: string; github: string; sync_workflow: string; mirror_workflow: string | null }
@@ -228,7 +230,7 @@ export class Webhooks {
   constructor(private readonly c: { store: Store; now: () => number; /** B-134: the forge
    *  cross-check — a push by a named runner pusher to a repository no open claim covers (rule
    *  3's reading of still holding, as `openScopes` reads it) raises `unclaimed-write`. */
-   scope?: { pushDelivery(d: Delivery): void } }) {}
+   scope: { pushDelivery(d: Delivery): void } }) {}
 
   private rows<T>(q: string, ...p: unknown[]): T[] {
     return this.c.store.exec(q, ...p).toArray() as T[];
@@ -265,7 +267,7 @@ export class Webhooks {
     // B-134's control: every push delivery — a duplicate was dropped above, Baton's own work
     // just before — is cross-checked against the claims open now, whatever repositories the
     // delivery's want ends up dispatching.
-    this.c.scope?.pushDelivery(d);
+    this.c.scope.pushDelivery(d);
     // B-89: a merge is the trigger; a pull_request the App sends for an opened, synchronised or
     // closed-without-merging PR moves the default branch nowhere, so the board owes nothing.
     if (d.event === 'pull_request' && d.merged !== true) return { outcome: 'not-a-merge' };
@@ -364,14 +366,13 @@ export class Webhooks {
     const slash = full.indexOf('/');
     const owner = full.slice(0, slash);
     const name = full.slice(slash + 1);
-    const out = new Set(registered.filter((r) => r.github.toLowerCase() === full).map((r) => r.id));
-    for (const r of this.rows<{ repository_id: string }>(
-      `SELECT DISTINCT t.repository_id FROM ticket_repositories j JOIN tickets t ON t.id = j.ticket_id JOIN repositories p ON p.id = t.repository_id
-       WHERE j.repository_key = ?
-          OR (j.repository_key = ? AND instr(j.repository_key, '/') = 0 AND lower(substr(p.github, 1, instr(p.github, '/') - 1)) = ?)`, full, name, owner)) {
-      if (registered.some((g) => g.id === r.repository_id)) out.add(r.repository_id);
-    }
-    return [...out].sort();
+    return registered.filter((r) => {
+      const home = r.github.toLowerCase();
+      if (home === full) return true;
+      const short = !name.includes('/') && home.startsWith(`${owner}/`) ? name : full;
+      return this.rows(`SELECT 1 FROM ticket_repositories INDEXED BY ticket_repositories_reverse
+        WHERE repository_key IN (?, ?) AND repository_id = ? LIMIT 1`, full, short, r.id).length > 0;
+    }).map((r) => r.id).sort();
   }
 
   /** The alarm: the repositories whose trailing dispatch is due, each starting a new window. */

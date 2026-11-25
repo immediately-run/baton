@@ -17,6 +17,8 @@ const SYNC_CLAIMS = {
   job_workflow_ref: 'immediately-run/docs/.github/workflows/baton-sync.yml@refs/heads/main',
 };
 
+export const SYNC_REPO_PATH = SYNC_CLAIMS.repository;
+
 async function sign(claims: Record<string, unknown>, { issuer, audience }: { issuer: string; audience: string }) {
   const key = await importJWK(JSON.parse(env.TEST_SIGNING_JWK!), 'ES256');
   return new SignJWT(claims).setProtectedHeader({ alg: 'ES256', kid: 'baton-test' })
@@ -404,4 +406,10 @@ export function sessionCall(cookie: string, path: string, init: RequestInit = {}
   headers.set('Cookie', cookie);
   if (init.method && init.method !== 'GET') headers.set('Origin', ORIGIN);
   return hostCall(new Request(ORIGIN + path, { ...init, headers }));
+}
+
+/** R-BTN-10: the post fields of a sync that found the evidence an unconfirmed end named — its
+ *  `std:git.evidence@1` for that claim, `ticket` a local id. Spread into `Git.refresh`/`post`. */
+export function evidenceFound(claim: number, evidence: string, ticket = 'T-1', found = true) {
+  return { attestations: [{ type: 'std:git.evidence@1', ticket, ref: String(claim), value: { claim, evidence, found } }] };
 }

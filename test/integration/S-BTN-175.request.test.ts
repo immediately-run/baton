@@ -202,10 +202,10 @@ describe('S-BTN-175 the request', () => {
     const before = execFileSync('git', ['-C', repo.bare, 'rev-parse', 'main'], { encoding: 'utf8' }).trim();
 
     const bin = refuseMain(repo.bare);
-    const url = 'https://github.com/immediately-run/docs.git';
+    const url = 'https://github.com/o/requests.git';
     execFileSync('git', ['-C', repo.dir, 'config', `url.${repo.bare}.insteadOf`, url]);
     execFileSync('git', ['-C', repo.dir, 'config', 'remote.origin.url', url]);
-    const pr = prFetch('https://github.com/immediately-run/docs/pull/7');
+    const pr = prFetch('https://github.com/o/requests/pull/7');
     const out: string[] = [];
     const path = process.env.PATH;
     process.env.PATH = `${bin}:${path}`;
@@ -220,7 +220,7 @@ describe('S-BTN-175 the request', () => {
     // The request landed on the side branch — the commit is the ticket file alone — and the PR
     // opened from it with the caller's credential; the default branch never moved.
     expect(code).toBe(0);
-    expect(out).toEqual(['baton request: filed B-1 (course create-spec) on baton-request/B-1 — the default branch refused the push as protected; PR https://github.com/immediately-run/docs/pull/7; its merge starts converse at requested']);
+    expect(out).toEqual(['baton request: filed B-1 (course create-spec) on baton-request/B-1 — the default branch refused the push as protected; PR https://github.com/o/requests/pull/7; its merge starts converse at requested']);
     expect(pr.calls.length).toBe(1);
     expect(JSON.parse(await pr.calls[0].text())).toMatchObject({ head: 'baton-request/B-1', base: 'main' });
     expect(execFileSync('git', ['-C', repo.bare, 'rev-parse', 'main'], { encoding: 'utf8' }).trim()).toBe(before);
@@ -264,10 +264,10 @@ describe('S-BTN-175 the request', () => {
 
     // The same request again, the credential now set and the PR injected: `baton-request/B-1` is
     // present and still open, so the request takes the NEXT free id — B-2, its own branch.
-    const url = 'https://github.com/immediately-run/docs.git';
+    const url = 'https://github.com/o/requests.git';
     execFileSync('git', ['-C', repo.dir, 'config', `url.${repo.bare}.insteadOf`, url]);
     execFileSync('git', ['-C', repo.dir, 'config', 'remote.origin.url', url]);
-    const pr = prFetch('https://github.com/immediately-run/docs/pull/9');
+    const pr = prFetch('https://github.com/o/requests/pull/9');
     const out: string[] = [];
     const path = process.env.PATH;
     process.env.PATH = `${bin}:${path}`;

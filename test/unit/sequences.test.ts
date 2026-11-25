@@ -4,14 +4,13 @@
 // — the fallback that says itself (no key, no answer, --offline), `new`'s PR-first landing with
 // the forge asked through `gh`, `--direct`'s protected-refusal fallback, and R-BTN-190's reserved
 // namespace `baton-ticket/*` no `branch_pattern` may match.
-import { describe, it, expect, afterEach, vi } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { createServer } from 'node:http';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { floorFor, nextMain, parseKind, printOf } from '../../src/defaults/sequences';
-import { protectedPush, ticketsMain } from '../../src/defaults/tickets';
 import { checkRegistry } from '../../src/core/courses';
 
 const git = (root: string, ...a: string[]): string =>
@@ -49,7 +48,7 @@ function repo(files: Record<string, string>, bareAt?: string): string {
 const ticket = (id: string, status = 'available'): string => `---\ntitle: "${id} — t"\nid: ${id}\nstatus: ${status}\ntags: [roadmap-item]\ntopics: [baton]\nowns: {}\nprs: []\ndepends_on: []\n---\n\nBody.\n`;
 
 /** A stand-in Baton answering the sequence route with a real counter, recording what it was asked. */
-async function standIn(home?: { forge: string; path: string; webBase: string }): Promise<{ url: string; asked: string[]; close: () => void }> {
+async function standIn(): Promise<{ url: string; asked: string[]; close: () => void }> {
   const asked: string[] = [];
   const counters = new Map<string, number>();
   const server = createServer((req, res) => {
@@ -69,7 +68,7 @@ async function standIn(home?: { forge: string; path: string; webBase: string }):
       const n = Math.max(counters.get(kind) ?? 0, Number.isFinite(floor) ? floor : 0) + 1;
       counters.set(kind, n);
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ ok: true, kind, number: n, home }));
+      res.end(JSON.stringify({ ok: true, kind, number: n }));
     });
   });
   await new Promise<void>((done) => server.listen(0, '127.0.0.1', done));
@@ -182,182 +181,28 @@ describe('baton tickets next: Baton first, the scan the fallback that says itsel
   });
 });
 
-describe('baton tickets new: the PR-first landing and --direct (B-176)', () => {
-  /** `baton tickets new` in-process, its fetch routed where the test names. A refusal the CLI
-   *  would print as one `baton: …` line and exit 2 on is caught here as the CLI catches it. */
-  async function run(root: string, io: { url?: string; identity?: string; fetchImpl?: typeof fetch }, ...argv: string[]): Promise<{ code: number; out: string[]; err: string[] }> {
+describe('baton tickets next --coordinator: Dibber\'s coordinator command (B-326, R-BTN-199)', () => {
+  it('prints Baton\'s number alone, the last line Dibber reads', async () => {
+    const dir = repo({ 'tickets/B-3.mdx': ticket('B-3') });
+    const baton = await standIn();
+    try {
+      const out: string[] = [];
+      const err: string[] = [];
+      expect(await nextMain(['ticket-B', '--coordinator', '-i', keyFile(), '--url', baton.url], { root: dir, log: (l) => out.push(l), warn: (l) => err.push(l) })).toBe(0);
+      expect(out).toEqual(['4']);
+      expect(err).toEqual([]);
+    } finally {
+      baton.close();
+    }
+  });
+
+  it('refuses rather than scan: Baton unreachable, no key, or --offline — so dibber new refuses too', async () => {
+    const dir = repo({ 'tickets/B-3.mdx': ticket('B-3') });
     const out: string[] = [];
-    const err: string[] = [];
-    try {
-      const code = await ticketsMain(['new', ...argv], { root, log: (l) => out.push(l), warn: (l) => err.push(l), ...io });
-      return { code, out, err };
-    } catch (e) {
-      return { code: 2, out, err: [...err, `baton: ${(e as Error).message}`] };
-    }
-  }
-  const bareOf = (root: string): string => git(root, 'remote', 'get-url', 'origin');
-  const at = (root: string, ref: string, path: string): string | null => {
-    try {
-      return execFileSync('git', ['-C', bareOf(root), 'show', `${ref}:${path}`], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
-    } catch {
-      return null;
-    }
-  };
-
-  it('new takes its id from Baton and files the ticket ALONE on baton-ticket/<id>, printed for a person to merge (a git forge)', async () => {
-    const dir = repo({ 'tickets/B-3.mdx': ticket('B-3') });
-    const baton = await standIn();
-    try {
-      const r = await run(dir, { url: baton.url, identity: keyFile() }, '--title', 'Fourth', '--project', 'baton');
-      expect(r.code).toBe(0);
-      expect(r.err).toEqual([]);
-      expect(r.out).toEqual(['✓ tickets: file B-4 — Fourth', '  branch: baton-ticket/B-4 — pushed for a person to merge']);
-      // The ticket alone on the filing branch; the default branch untouched.
-      expect(at(dir, 'baton-ticket/B-4', 'tickets/B-4.mdx')).toContain('id: B-4');
-      expect(at(dir, 'main', 'tickets/B-4.mdx')).toBeNull();
-      expect(execFileSync('git', ['-C', bareOf(dir), 'log', '--format=%s', 'main'], { encoding: 'utf8' }).trim()).toBe('fixture');
-      // The ask this filing made: the ticket kind, floor 3 (B-3 on main), no ticket it is for.
-      expect(baton.asked).toEqual(['POST /v1/repositories/seq/sequences/ticket-b/next bearer']);
-    } finally {
-      baton.close();
-    }
-  });
-
-  it('a dependency\'s **Used by:** line is NOT written by a PR filing — two open filings never share a write target', async () => {
-    const dir = repo({ 'tickets/B-3.mdx': ticket('B-3') });
-    const baton = await standIn();
-    try {
-      const r = await run(dir, { url: baton.url, identity: keyFile() }, '--title', 'Fourth', '--project', 'baton', '--depends-on', 'B-3');
-      expect(r.code).toBe(0);
-      // The branch carries the new ticket alone: B-3's file, on main and on the branch, is as it was.
-      expect(at(dir, 'baton-ticket/B-4', 'tickets/B-3.mdx')).not.toContain('**Used by:** B-4');
-      expect(at(dir, 'baton-ticket/B-4', 'tickets/B-4.mdx')).toContain('depends_on:');
-    } finally {
-      baton.close();
-    }
-  });
-
-  it('on a registered GitHub repository, gh pr create opens the PR and its URL is printed; a gh that fails keeps the branch', async () => {
-    // The bare origin is local; the sequence response supplies the registered forge.
-    const dir = repo({ 'tickets/B-3.mdx': ticket('B-3') });
-    const bin = mkdtempSync(join(tmpdir(), 'baton-seq-bin-'));
-    scratch.push(bin);
-    writeFileSync(join(bin, 'gh'), '#!/bin/sh\necho "https://github.com/immediately-run/ops/pull/9"\n');
-    execFileSync('chmod', ['+x', join(bin, 'gh')], { stdio: 'ignore' });
-    const baton = await standIn({ forge: 'github', path: 'immediately-run/ops', webBase: 'https://github.com/immediately-run/ops' });
-    const path = process.env.PATH;
-    process.env.PATH = `${bin}:${path}`;
-    vi.stubEnv('GH_TOKEN', undefined);
-    vi.stubEnv('GITHUB_TOKEN', undefined);
-    try {
-      const r = await run(dir, { url: baton.url, identity: keyFile() }, '--title', 'Fourth', '--project', 'baton');
-      expect(r.code).toBe(0);
-      expect(r.err).toEqual([]);
-      expect(r.out).toEqual(['✓ tickets: file B-4 — Fourth', '  PR: https://github.com/immediately-run/ops/pull/9']);
-      // A gh that answers nothing: the branch stays the answer, and the failure is said, not hidden.
-      writeFileSync(join(bin, 'gh'), '#!/bin/sh\necho "gh: no credential" >&2\nexit 1\n');
-      const failed = await run(dir, { url: baton.url, identity: keyFile() }, '--title', 'Fifth', '--project', 'baton');
-      expect(failed.code).toBe(0);
-      expect(failed.out).toEqual(['✓ tickets: file B-5 — Fifth', '  branch: baton-ticket/B-5 — pushed for a person to merge']);
-      expect(failed.err.join('\n')).toMatch(/the forge could not open the PR for baton-ticket\/B-5/);
-      expect(at(dir, 'baton-ticket/B-5', 'tickets/B-5.mdx')).toContain('id: B-5');
-    } finally {
-      vi.unstubAllEnvs();
-      process.env.PATH = path;
-      baton.close();
-    }
-  });
-
-  it('--direct keeps today\'s push to the default branch with the reverse mentions; a protected refusal falls back to the PR', async () => {
-    const dir = repo({ 'tickets/B-3.mdx': ticket('B-3') });
-    const baton = await standIn();
-    try {
-      const r = await run(dir, { url: baton.url, identity: keyFile() }, '--direct', '--title', 'Fourth', '--project', 'baton', '--depends-on', 'B-3');
-      expect(r.code).toBe(0);
-      expect(r.out).toEqual(['✓ tickets: file B-4 — Fourth']);
-      expect(at(dir, 'main', 'tickets/B-4.mdx')).toContain('id: B-4');
-      expect(at(dir, 'main', 'tickets/B-3.mdx')).toContain('**Used by:** B-4');
-
-      // The forge refuses the default branch as protected (GitHub's own GH006 words, from a
-      // pre-receive hook): the same filing lands as the PR, by the forge's answer alone.
-      const bare = bareOf(dir);
-      mkdirSync(join(bare, 'hooks'), { recursive: true });
-      writeFileSync(join(bare, 'hooks', 'pre-receive'), [
-        '#!/bin/sh',
-        'while read old new ref; do',
-        '  if [ "$ref" = "refs/heads/main" ]; then',
-        '    echo "error: GH006: Protected branch update failed for refs/heads/main." >&2',
-        '    exit 1',
-        '  fi',
-        'done',
-        '',
-      ].join('\n'));
-      execFileSync('chmod', ['+x', join(bare, 'hooks', 'pre-receive')], { stdio: 'ignore' });
-      const fell = await run(dir, { url: baton.url, identity: keyFile() }, '--direct', '--title', 'Fifth', '--project', 'baton', '--depends-on', 'B-3');
-      expect(fell.code).toBe(0);
-      expect(fell.out).toEqual(['✓ tickets: file B-5 — Fifth', '  branch: baton-ticket/B-5 — pushed for a person to merge']);
-      expect(fell.err.join('\n')).toMatch(/the default branch refused the push as protected — filing through a PR instead/);
-      // The PR filing carries the ticket alone: the reverse mention never landed anywhere.
-      expect(at(dir, 'main', 'tickets/B-5.mdx')).toBeNull();
-      expect(at(dir, 'baton-ticket/B-5', 'tickets/B-5.mdx')).toContain('id: B-5');
-      expect(at(dir, 'baton-ticket/B-5', 'tickets/B-3.mdx')).not.toContain('**Used by:** B-5');
-    } finally {
-      baton.close();
-    }
-  });
-
-  it('Baton unreachable: the id is the scan\'s and the output says so, whichever way it lands', async () => {
-    const dir = repo({ 'tickets/B-3.mdx': ticket('B-3') });
-    const r = await run(dir, { url: 'http://127.0.0.1:1', identity: keyFile() }, '--title', 'Fourth', '--project', 'baton');
-    expect(r.code).toBe(0);
-    expect(r.err.join('\n')).toMatch(/^… id by the next-free scan — Baton did not answer/);
-    expect(r.out).toEqual(['✓ tickets: file B-4 — Fourth', '  branch: baton-ticket/B-4 — pushed for a person to merge']);
-    // The scanned id may collide: a branch that already holds it is the backstop's own moment.
-    const again = await run(dir, { url: 'http://127.0.0.1:1', identity: keyFile() }, '--title', 'Again', '--project', 'baton');
-    expect(again.code).toBe(2);
-    expect(again.err.join('\n')).toMatch(/B-4: the filing branch baton-ticket\/B-4 was refused: .*the branch exists, so the scanned id is taken/);
-  });
-
-  it('a refused filing-branch push is named for the id\'s source and the refusal\'s own shape — never one wrong instruction', async () => {
-    const dir = repo({ 'tickets/B-3.mdx': ticket('B-3') });
-    const baton = await standIn();
-    try {
-      // An id from Baton that collides with a branch already on the remote: a leftover filing
-      // branch, or a reissue after lost state — not "the scanned id is taken" (round 1,
-      // should-fix 4). The leftover holds no ticket itself, so the floor still reads 3 and
-      // Baton's id is B-4.
-      git(dir, 'checkout', '-q', '-b', 'leftover');
-      writeFileSync(join(dir, 'README.md'), 'a leftover filing branch\n');
-      git(dir, 'add', '-A');
-      git(dir, 'commit', '-qm', 'a leftover filing branch');
-      git(dir, 'push', '-q', 'origin', 'HEAD:refs/heads/baton-ticket/B-4');
-      git(dir, 'checkout', '-q', 'main');
-      const leftover = await run(dir, { url: baton.url, identity: keyFile() }, '--title', 'Fourth', '--project', 'baton');
-      expect(leftover.code).toBe(2);
-      expect(leftover.err.join('\n')).toMatch(/B-4: the filing branch baton-ticket\/B-4 was refused: .*the branch exists, and Baton gave this id: a leftover filing branch/);
-      // A refusal that is not the branch's existence — a hook's — is git's own words, never a
-      // collision claim: no instruction to take the next id from a refusal that says nothing
-      // about the id.
-      const bare = bareOf(dir);
-      mkdirSync(join(bare, 'hooks'), { recursive: true });
-      writeFileSync(join(bare, 'hooks', 'pre-receive'), [
-        '#!/bin/sh',
-        'while read old new ref; do',
-        '  case "$ref" in refs/heads/baton-ticket/*) echo "error: the baton-ticket namespace is frozen" >&2; exit 1;; esac',
-        'done',
-        '',
-      ].join('\n'));
-      execFileSync('chmod', ['+x', join(bare, 'hooks', 'pre-receive')], { stdio: 'ignore' });
-      const frozen = await run(dir, { url: baton.url, identity: keyFile() }, '--title', 'Fifth', '--project', 'baton');
-      expect(frozen.code).toBe(2);
-      const said = frozen.err.join('\n');
-      expect(said).toMatch(/B-5: the filing branch baton-ticket\/B-5 was refused:/);
-      expect(said).toMatch(/the baton-ticket namespace is frozen/);
-      expect(said).toMatch(/— nothing was pushed/);
-      expect(said).not.toMatch(/the scanned id is taken|Baton gave this id/);
-    } finally {
-      baton.close();
-    }
+    await expect(nextMain(['ticket-B', '--coordinator', '-i', keyFile(), '--url', 'http://127.0.0.1:1'], { root: dir, log: (l) => out.push(l), warn: () => {} })).rejects.toThrow(/^ticket-b: Baton did not hand out a number \(.*\) — the coordinator answers with Baton's number or not at all$/);
+    await expect(nextMain(['ticket-B', '--coordinator'], { root: dir, log: (l) => out.push(l), warn: () => {} })).rejects.toThrow("ticket-b: no key: pass -i KEY (or set BATON_KEY_FILE) — the coordinator answers with Baton's number or not at all");
+    await expect(nextMain(['ticket-B', '--coordinator', '--offline'], { root: dir, log: (l) => out.push(l), warn: () => {} })).rejects.toThrow('--coordinator answers with Baton\'s number or not at all');
+    expect(out).toEqual([]);
   });
 });
 
@@ -375,20 +220,5 @@ describe('R-BTN-190: no branch_pattern matches the reserved namespaces (B-176)',
     // A pattern that cannot reach a reserved namespace stands.
     expect(checkRegistry([entry('claude/{ticket}-*')])).toHaveLength(1);
     expect(checkRegistry([entry('ticket/{ticket}-*')])).toHaveLength(1);
-  });
-});
-
-describe('the forge\'s protected-refusal words (R-BTN-74: a GH013 naming a pull-request or update rule, never secret push protection)', () => {
-  it('GH006 and the protected-branch words are protected; a GH013 is, only while its words name the rule', () => {
-    expect(protectedPush('error: GH006: Protected branch update failed for refs/heads/main.')).toBe(true);
-    expect(protectedPush('remote: Not allowed to push to protected branch')).toBe(true);
-    expect(protectedPush('remote: not allowed to push code to protected branches')).toBe(true);
-    // A ruleset refusal naming its rule — the refusals whose other landing is a PR.
-    expect(protectedPush('remote: GH013: Error: ruleset violations found: "Require a pull request before merging"')).toBe(true);
-    expect(protectedPush('remote: GH013: Error: cannot update a protected ref: the update rule requires review')).toBe(true);
-    // GitHub's secret push protection answers GH013 too: its refusal is not a protected
-    // branch's — the same content would be refused on the PR branch (§5.8).
-    expect(protectedPush('remote: GH013: Secret push protection: a secret was detected in this push')).toBe(false);
-    expect(protectedPush('remote: GH013: push protection has blocked this push: remove the secret')).toBe(false);
   });
 });

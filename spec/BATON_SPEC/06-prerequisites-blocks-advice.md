@@ -9,9 +9,6 @@ not" from that index, gates claims on the blocks safety needs, and advises on th
 
 Not built, each a design its rule below still states:
 
-- R-BTN-120: a leg's `requires.tickets` and `requires.resources` (the course validator accepts `requires.capabilities`
-  alone, [courses proposal](../proposals/courses.md)), `baton.prerequisite-unmet`,
-  `baton.prerequisite-cycle`, the `/prerequisites` route and `baton leg why`.
 - R-BTN-75: the `retry` kind and the `found`, `provisional` and `binds` columns of
   `ticket_blocks`. A backoff is a stored `retry_after`, which rule 10 reads.
 - R-BTN-126: the `ticket` and `resource` blocked ends, `LegError`, `baton leg release --blocked`,
@@ -367,7 +364,6 @@ never refuses, and acting against it is accepted and recorded `advice-overridden
   | 2 | *(advice)* expedite lane: while 2 active claims hold expedited tickets, other expedited tickets lose their expedite place and carry `expedite-bound` | — | — |
   | 3 | No other active, completed-unconfirmed or fence-pending claim on the ticket; no hold (§6.8) | claim; advance: the hold only | `claimed`, `held` |
   | 4 | `capabilitiesOf(ticket.requires ∪ leg.requires.capabilities) ⊆ declared ∩ grant(repository)`, matched by name (R-BTN-174); `runner:` counts once declared (R-BTN-133); no clause is met by all | claim, advance | `missing-capability` |
-  | 5 | Tier at or below the runner's ceiling: the position in the repository's `tiers` of the lower of its declared ceiling and grant `max_tier`; untiered fits only the top | claim, advance | `above-tier-ceiling` |
   | 7 | The key holds a grant for the ticket's repository (R-BTN-58) | claim, advance | `not-granted` |
   | 8 | Tags meet none of the leg's posted barred tags, the owner bars in force for its course or `*` (at an advance those with `applies: claim+advance`) and, at an advance, the holder's `bars`; required bars met by posted bars joined with the holder's `bars` (R-BTN-60, R-BTN-67) | claim, advance | `barred-tag`; rule 8 `policy` |
   | 9 | The runner declares the course at `min_runner_version` or later (R-BTN-22, R-BTN-65) | claim | `stale-skills` |
@@ -378,7 +374,7 @@ never refuses, and acting against it is accepted and recorded `advice-overridden
   | `floor` | Every guarantee a floor names holds on every repository the ticket reaches: its home and each `repos:` entry with reach (R-BTN-140, R-BTN-189); the protection checker is exempt | claim, advance | `floor-broken` |
 
   Rules `chain` (R-BTN-106), `isolation` (R-BTN-107), `entry` (R-BTN-109) and `not-queued`
-  (R-BTN-72) are gates too; `trusted` is proposed (R-BTN-182). `isEligible`, in the vendored decision
+  (R-BTN-72) are gates too; `trusted` is proposed (R-BTN-182). `isEligible`, in the shared decision
   library (R-BTN-37), is the reference for every rule; the SQL is tested against it (G-BTN-40).
 
 - **Matching** reads only `tickets` and Baton's tables (R-BTN-33). Candidates are one row per
@@ -486,8 +482,8 @@ never refuses, and acting against it is accepted and recorded `advice-overridden
   `delivered` in the same transaction, and returns again every delivered message not yet
   acknowledged, so a lost response loses none; the runner acts on a message `id` once, then
   acknowledges. A ring (R-BTN-91) only prompts that heartbeat.
-- **`release`.** The runner stops the leg at its next safe point — at once for `requested`,
-  `floor` and `owner-cancel` (R-BTN-119) — leaves its work in git with the hand-off (R-BTN-44),
+- **`release`.** The runner stops the leg as R-BTN-119 describes, leaves its work in git with
+  the hand-off (R-BTN-44),
   ends the claim `released:<reason>` (§9) and acknowledges. A delivered `release` unacknowledged
   for 2 hours is reaped by the alarm with a fence (R-BTN-19); a `leg-timeout` release is reaped
   as R-BTN-90 says.
@@ -525,8 +521,8 @@ Which model a leg uses, through which key, and how it reacts to a reading is cou
     holder's repository (R-BTN-99). Claims are serialized in the tenant's object, so the first
     to take a free seat holds it.
   - **Releasing.** An `advance` rewrites the claim's `claim_seats` for the leg it starts, and
-    the claim's end deletes them. A reap releases its seats at the reap, a fence-pending one
-    (R-BTN-19) at `fence-cleared` or the fence deadline.
+    the claim's end deletes them. A reap releases its seats at the reap unless the fence is
+    pending, in which case the seats are released at `fence-cleared` (R-BTN-19).
   - **Seats are no blocks.** A leg rule 11 would refuse is not recommended (§6.6) nor listed in
     `launch-candidates` (R-BTN-99), and `baton leg why` answers `full` for it. Seats write no
     block row and send no `unblocked`: an idle runner finds the leg at its next claim attempt

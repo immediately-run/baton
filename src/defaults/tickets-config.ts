@@ -12,7 +12,7 @@ import { join } from 'node:path';
 export interface TicketSettings {
   /** The ticket folder, relative to the repository root (`tickets`). */
   items?: string;
-  /** The prefix `baton tickets new` allocates under — `B` unless `.baton/baton.json`'s
+  /** The prefix Baton's `ticket-<prefix>` sequence allocates under — `B` unless `.baton/baton.json`'s
    *  `ticket_prefix` names one. */
   ticket_prefix?: string;
   /** The id patterns the repository still accepts but never allocates (this repository's
@@ -53,9 +53,7 @@ export const REQUIRES_MARKER = 'Requires:';
 export const STATUSES = ['available', 'in-progress', 'in-review', 'deferred', 'deprioritized', 'superseded', 'done'] as const;
 export type Status = (typeof STATUSES)[number];
 
-/** The live statuses `baton tickets set` writes: every one but `done` (which `done` writes,
- *  moving the file to `archive/`) — the stopgap's own LIVE list, `deferred` and `superseded`
- *  included, so withdrawing a ticket without archiving keeps a writer. */
+/** The live statuses: every one but `done` — `deferred` and `superseded` included. */
 export const LIVE_STATUSES: readonly Status[] = ['available', 'in-progress', 'in-review', 'deferred', 'deprioritized', 'superseded'];
 
 /** Whether `id` may be named — the ticket, `claim`'s dependency, `new`'s: under the allocating

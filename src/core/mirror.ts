@@ -1,3 +1,4 @@
+import { DEFAULT_FORGE, FORGE_SHAPES } from './forges';
 // mirror.ts — what the git mirror reads and reports (BATON_SPEC §12, R-BTN-36; R3-1218): the
 // event feed `GET /v1/sync/events`, the foreign-claim report, and which workflows Baton
 // dispatches after a transition (§10.3). The mirror workflow itself lives in docs.
@@ -17,11 +18,47 @@ const DETAIL_KEYS = new Set(['foreign', 'end_reason', 'ended_at_sha', 'hold_reas
 /** The actor's kind only: `runner:<id>` and `owner:<email>` name people and machines. */
 const actorKind = (actor: string) => actor.split(':')[0];
 
+export type EventRow = { seq: number; at: number; kind: string; ticket_id: string | null; claim_id: number | null; actor: string; detail_json: string | null };
+
+/** Shared by the mirror feed and the retention archive; callers choose which rows to include. */
+export function eventPage(store: Store, repo: string, rows: EventRow[], after: number) {
+  const events = rows.map((e) => {
+    let detail: Record<string, unknown> = {};
+    try {
+      detail = JSON.parse(e.detail_json ?? 'null') ?? {};
+    } catch {
+      detail = {};
+    }
+    const kept = Object.fromEntries(Object.entries(detail).filter(([k]) => DETAIL_KEYS.has(k)));
+    return { seq: e.seq, at: e.at, kind: e.kind, ticket_id: e.ticket_id, claim_id: e.claim_id, actor: actorKind(e.actor), detail: kept, claim: e.claim_id ? eventClaim(store, e.claim_id) : null };
+  });
+  const at = store.exec<{ cutover_at: number | null }>('SELECT cutover_at FROM repositories WHERE id = ?', repo).toArray()[0]?.cutover_at ?? null;
+  return { events, next: events.at(-1)?.seq ?? after, cutover_at: at };
+}
+
+function eventClaim(store: Store, id: number) {
+  const c = store.exec<{ id: number; nonce: string; status: string; end_reason: string | null; claimed_at: number; ended_at: number | null; ended_at_sha: string | null; request_id: string }>(
+    'SELECT id, nonce, status, end_reason, claimed_at, ended_at, ended_at_sha, request_id FROM claims WHERE id = ?', id).toArray()[0];
+  if (!c) return null;
+  // §13 step 3: an imported claim (the cutover's, or a foreign one) is legacy for good — even
+  // once adopted — and its git note is claim.sh's, not the mirror's: the mirror ends it on that.
+  const { request_id, ...claim } = c;
+  const legacy = /^(legacy|foreign):/.test(request_id);
+  // §12's `unstarted:` note: a claim that ended before any work beyond orienting.
+  const started = store.exec(`SELECT 1 FROM activities WHERE claim_id = ? AND kind != 'orient' LIMIT 1`, id).toArray().length > 0;
+  const out: Record<string, unknown> = { ...claim, legacy, started };
+  if (c.status !== 'active') {
+    out.activities = store.exec('SELECT kind, seq, label, started_at, ended_at, outcome, detail_json FROM activities WHERE claim_id = ? ORDER BY started_at', id).toArray();
+    out.transcripts = store.exec('SELECT repo, path, role FROM transcripts WHERE claim_id = ? ORDER BY id', id).toArray();
+  }
+  return out;
+}
+
 export interface Ctx {
   store: Store;
   now: () => number;
   /** R-BTN-75: an imported claim holds its ticket; a claim's start changes `blocked_since` silently. */
-  held?: (ticketId: string) => void;
+  held: (ticketId: string) => void;
 }
 
 export class Mirror {
@@ -41,23 +78,12 @@ export class Mirror {
    */
   events(repo: string, after: number, limit: number) {
     const n = Math.min(Math.max(1, limit || MAX_PAGE), MAX_PAGE);
-    const rows = this.rows<{ seq: number; at: number; kind: string; ticket_id: string | null; claim_id: number | null; actor: string; detail_json: string | null }>(
+    const rows = this.rows<EventRow>(
       // R-BTN-75–77's `blocked`, `unblocked` and `resource` are Baton's own state, nothing git
       // holds (§12 writes claims, holds and overrides): the feed leaves them out.
       `SELECT seq, at, kind, ticket_id, claim_id, actor, detail_json FROM events WHERE repository_id = ? AND seq > ?
          AND kind NOT IN ('blocked', 'unblocked', 'resource') ORDER BY seq LIMIT ?`, repo, after, n);
-    const events = rows.map((e) => {
-      let detail: Record<string, unknown> = {};
-      try {
-        detail = e.detail_json ? JSON.parse(e.detail_json) : {};
-      } catch {
-        detail = {};
-      }
-      const kept = Object.fromEntries(Object.entries(detail).filter(([k]) => DETAIL_KEYS.has(k)));
-      return { seq: e.seq, at: e.at, kind: e.kind, ticket_id: e.ticket_id, claim_id: e.claim_id, actor: actorKind(e.actor), detail: kept, claim: e.claim_id ? this.claim(e.claim_id) : null };
-    });
-    const at = this.rows<{ cutover_at: number | null }>('SELECT cutover_at FROM repositories WHERE id = ?', repo)[0]?.cutover_at ?? null;
-    return { events, next: events.at(-1)?.seq ?? after, cutover_at: at };
+    return eventPage(this.c.store, repo, rows, after);
   }
 
   /**
@@ -68,24 +94,6 @@ export class Mirror {
   acknowledge(repo: string, after: number) {
     this.c.store.exec(`UPDATE repositories SET mirror_acked_seq = MIN(?, (SELECT COALESCE(MAX(seq), 0) FROM events))
                        WHERE id = ? AND mirror_acked_seq < MIN(?, (SELECT COALESCE(MAX(seq), 0) FROM events))`, after, repo, after);
-  }
-
-  private claim(id: number) {
-    const c = this.rows<{ id: number; nonce: string; status: string; end_reason: string | null; claimed_at: number; ended_at: number | null; ended_at_sha: string | null; request_id: string }>(
-      'SELECT id, nonce, status, end_reason, claimed_at, ended_at, ended_at_sha, request_id FROM claims WHERE id = ?', id)[0];
-    if (!c) return null;
-    // §13 step 3: an imported claim (the cutover's, or a foreign one) is legacy for good — even
-    // once adopted — and its git note is claim.sh's, not the mirror's: the mirror ends it on that.
-    const { request_id, ...claim } = c;
-    const legacy = /^(legacy|foreign):/.test(request_id);
-    // §12's `unstarted:` note: a claim that ended before any work beyond orienting.
-    const started = this.rows(`SELECT 1 FROM activities WHERE claim_id = ? AND kind != 'orient' LIMIT 1`, id).length > 0;
-    const out: Record<string, unknown> = { ...claim, legacy, started };
-    if (c.status !== 'active') {
-      out.activities = this.rows('SELECT kind, seq, label, started_at, ended_at, outcome, detail_json FROM activities WHERE claim_id = ? ORDER BY started_at', id);
-      out.transcripts = this.rows('SELECT repo, path, role FROM transcripts WHERE claim_id = ? ORDER BY id', id);
-    }
-    return out;
   }
 
   /**
@@ -126,7 +134,7 @@ export class Mirror {
       item, preferred: null, nonce, claimedAt: b.at as number, sha: head, requestId: `foreign:${item}:${nonce}`, detail: { foreign: true },
     });
     logEvent(this.c.store, now, 'foreign-claim', 'sync', { nonce, sha: b.sha, imported: true }, item, claimId);
-    this.c.held?.(item);
+    this.c.held(item);
     return { imported: true, claim_id: claimId, nonce };
   }
 }
@@ -134,21 +142,85 @@ export class Mirror {
 /** §10.3: the workflows Baton dispatches. */
 export type { Workflow };
 
+const DISPATCH_REASON_MAX = 500;
+const DISPATCH_BODY_MAX = 8 * 1024;
+const DISPATCH_BODY_TIMEOUT_MS = 1000;
+
+export class DispatchRefused extends Error {
+  constructor(readonly status: number, reason: string) {
+    super(reason ? `HTTP ${status}: ${reason}`.slice(0, DISPATCH_REASON_MAX) : `HTTP ${status}`);
+  }
+}
+
+async function readDispatchBody(res: Response): Promise<string> {
+  if (!res.body) return '';
+  const reader = res.body.getReader();
+  const read = async () => {
+    if (Number(res.headers.get('Content-Length')) > DISPATCH_BODY_MAX) return '';
+    const decoder = new TextDecoder();
+    let size = 0;
+    let body = '';
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) return body + decoder.decode();
+      size += value.byteLength;
+      if (size > DISPATCH_BODY_MAX) return '';
+      body += decoder.decode(value, { stream: true });
+    }
+  };
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const deadline = new Promise<string>((resolve) => {
+      timer = setTimeout(() => resolve(''), DISPATCH_BODY_TIMEOUT_MS);
+    });
+    return await Promise.race([read(), deadline]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+    // The stream's underlying cancellation must not extend the diagnostic deadline.
+    void reader.cancel().catch(() => {});
+    reader.releaseLock();
+  }
+}
+
+/** R-BTN-94: keep a short, single-line reason, not the forge's payload. */
+async function dispatchRefusal(res: Response, token: string): Promise<string> {
+  try {
+    const body = await readDispatchBody(res);
+    let reason = body;
+    const mediaType = res.headers.get('Content-Type')?.split(';')[0].trim().toLowerCase();
+    if (mediaType?.endsWith('/json') || mediaType?.endsWith('+json') || (!mediaType && /^\s*[\[{]/.test(body))) {
+      const data = JSON.parse(body) as { message?: unknown } | null;
+      reason = typeof data?.message === 'string' ? data.message : '';
+    }
+    // Redact before clipping (including a token that would straddle the limit), and after
+    // stripping tags in case the original response split the token across markup.
+    return reason.replaceAll(token, '[redacted]').replace(/<[^>]*>/g, '').replace(/[<>]/g, '')
+      .replaceAll(token, '[redacted]').replace(/[\p{Cc}\p{Cf}\s]+/gu, ' ').trim();
+  } catch {
+    // An unreadable or malformed body cannot hide the HTTP status.
+    return '';
+  }
+}
+
 /**
  * Dispatch a repository's workflow on its default branch with the Actions-write token (§10.3).
- * Fire and forget: a missing or revoked token, or a failed call, leaves the workflow to its
- * 15-minute schedule. (R3-1247 moves this to the GitHub App's installation tokens.)
+ * No token or no HTTP response means no dispatch; an HTTP refusal rejects so the caller can
+ * log the discrepancy without failing the request that wanted the dispatch (R-BTN-94).
  */
 export async function dispatchWorkflow(token: string | undefined, target: DispatchTarget): Promise<boolean> {
+  token = token?.trim();
   if (!token) return false;
+  let res: Response;
   try {
-    const res = await fetch(`https://api.github.com/repos/${target.path}/actions/workflows/${target.workflow}/dispatches`, {
+    res = await fetch(`${FORGE_SHAPES[DEFAULT_FORGE].dispatchOrigin}/repos/${target.path}/actions/workflows/${target.workflow}/dispatches`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json', 'User-Agent': 'baton', 'Content-Type': 'application/json' },
       body: JSON.stringify(target.inputs ? { ref: target.ref, inputs: target.inputs } : { ref: target.ref }),
     });
-    return res.ok;
   } catch {
+    // A transport error is not a forge refusal and may include request details.
     return false;
   }
+  if (!res.ok) throw new DispatchRefused(res.status, await dispatchRefusal(res, token));
+  return true;
 }

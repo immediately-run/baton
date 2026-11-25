@@ -51,10 +51,11 @@ describe('the dashboard shell (B-193)', () => {
   it('carries the R-BTN-16 headers on every answer, the refusals included', async () => {
     for (const path of ['/', '/login', '/instances', '/dashboard/app.js', '/dashboard/app.css', '/nope']) {
       const res = await call(path);
-      expect(res.headers.get('Content-Security-Policy')).toBe("default-src 'self'; frame-ancestors 'none'");
+      expect(res.headers.get('Content-Security-Policy')).toBe("default-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'");
       expect(res.headers.get('X-Frame-Options')).toBe('DENY');
       expect(res.headers.get('X-Content-Type-Options')).toBe('nosniff');
       expect(res.headers.get('Referrer-Policy')).toBe('no-referrer');
+      expect(res.headers.get('Cross-Origin-Resource-Policy')).toBe('same-origin');
     }
   });
 });

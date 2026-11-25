@@ -2,7 +2,7 @@
 // one number outstanding per repository, each used once, a post refused whole unless its number
 // is the outstanding one and above the last accepted reading's.
 import { describe, it, expect, inject, beforeEach } from 'vitest';
-import { MIRROR_WORKFLOW_REF, observe, payload, register, rows, setClock, syncCall, syncToken, withCore, runnerCall } from '../helpers';
+import { MIRROR_WORKFLOW_REF, observe, payload, register, rows, setClock, syncCall, syncToken, withCore, runnerCall, SYNC_REPO_PATH } from '../helpers';
 import { checkPayload } from '../../src/core/board';
 
 const board = inject('board');
@@ -20,13 +20,13 @@ describe('POST /v1/sync/observation (R-BTN-62)', () => {
   it('hands out the next number with the head; sync-busy while one is outstanding; void after ten minutes', async () => {
     // B-110: with Baton's own record for the station functions — the owner's answers, the legs' evidence.
     // B-183: and each live ticket's last accepted version (§4.3) — {} with no board yet.
-    expect(await observe()).toEqual({ status: 200, json: { sha: null, observation: 1, bars: [], home: { forge: 'github', path: 'immediately-run/docs', webBase: 'https://github.com/immediately-run/docs' }, code_repos: [], pushers: [], answers: [], legs: [], versions: {}, signing_keys: [], require_signed_control: false } });
+    expect(await observe()).toEqual({ status: 200, json: { sha: null, observation: 1, bars: [], home: { forge: 'github', path: SYNC_REPO_PATH, webBase: `https://github.com/${SYNC_REPO_PATH}` }, code_repos: [], pushers: [], answers: [], legs: [], unconfirmed: [], versions: {}, signing_keys: [], require_signed_control: false } });
     const busy = await observe();
     expect([busy.status, busy.json.code]).toEqual([409, 'sync-busy']);
     await setClock(T0 + 10 * MIN - 1);
     expect((await observe()).json.code).toBe('sync-busy');
     await setClock(T0 + 10 * MIN);
-    expect((await observe()).json).toEqual({ sha: null, observation: 2, bars: [], home: { forge: 'github', path: 'immediately-run/docs', webBase: 'https://github.com/immediately-run/docs' }, code_repos: [], pushers: [], answers: [], legs: [], versions: {}, signing_keys: [], require_signed_control: false });
+    expect((await observe()).json).toEqual({ sha: null, observation: 2, bars: [], home: { forge: 'github', path: SYNC_REPO_PATH, webBase: `https://github.com/${SYNC_REPO_PATH}` }, code_repos: [], pushers: [], answers: [], legs: [], unconfirmed: [], versions: {}, signing_keys: [], require_signed_control: false });
     expect(await rows(`SELECT last_handed_out, handed_out_at, observation FROM board_head WHERE repository_id = 'docs'`)).toEqual([
       { last_handed_out: 2, handed_out_at: T0 + 10 * MIN, observation: 0 }]);
   });

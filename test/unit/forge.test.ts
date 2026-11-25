@@ -191,7 +191,7 @@ it.each(['github', 'gitlab', 'gitea'] as const)('%s client opens, lists, comment
     expect(init?.redirect).toBe('error');
     expect(new Headers(init?.headers).get('Authorization')).toBe(forge === 'gitea' ? 'token fake' : 'Bearer fake');
     if (url.pathname.endsWith(end)) return Response.json(init?.method === 'POST' ? pr : [pr]);
-    if (init?.method === 'POST') return Response.json(gl ? { id: 2 } : { html_url: `${page}#issuecomment-2` });
+    if (init?.method === 'POST') return Response.json(gl ? { id: 1_000_000_000 } : { html_url: `${page}#issuecomment-2` });
     throw new Error(`unexpected request ${url}`);
   });
   // GitHub's existing reader takes fetch from the sync runtime.
@@ -201,7 +201,7 @@ it.each(['github', 'gitlab', 'gitea'] as const)('%s client opens, lists, comment
     const client = connect({ forge, path, webBase: base }, { env: { [tokenOf(forge)]: 'fake' }, fetchImpl });
     expect(await client.openPr({ head: branch, base: 'main', title: 'Test' })).toBe(page);
     expect(await client.listOpenPrs()).toEqual([{ number: 9, headRefName: branch, headRefOid: sha, sameRepository: true }]);
-    expect(await client.comment(9, 'baton: verdict')).toBe(`${page}${gl ? '#note_2' : '#issuecomment-2'}`);
+    expect(await client.comment(9, 'baton: verdict')).toBe(`${page}${gl ? '#note_1000000000' : '#issuecomment-2'}`);
     expect(await client.facts({ tickets: [] })).toEqual([{ number: 9, head: branch, repository: path, state: 'open', url: page, sameRepository: true, ...(forge === 'github' ? {} : { headOid: sha }), pushedAt: 0, checks: [], reviews: [] }]);
     expect(client.protectedRefusal(gl ? 'not allowed to push code to protected branches' : forge === 'gitea' ? 'not allowed to push to protected branch' : 'GH006')).toBe(true);
     expect(client.protectedRefusal('access denied')).toBe(false);
@@ -245,4 +245,26 @@ it('S-BTN-230: a GitLab MR leaves marker trees to git, bound to the observed hea
   const counted = verifiedMarkers(commits, 'B-1', [{ ticket: 'B-1', leg: 'run-tests', claim_nonce: 'n1', evidence: marker }]);
   expect(gateOfBranch(commits, counted)).toBe('green');
   expect(() => readHomePrCommits(git, fact.head, content)).toThrow('the branch moved');
+});
+
+it('S-BTN-230: Gitea home PR gate follows Git history even when commits share a timestamp', async () => {
+  const [base, first, second, marker, tree, olderTree] = [...'abcdef'].map((c) => c.repeat(40));
+  const date = '2026-11-22T20:00:00Z';
+  const body = `gate\n\nBaton-Tests: green\nBaton-Tested: ${second}\nBaton-Claim: n1`;
+  const commit = (sha: string, parent: string, tree: string, message: string) => ({ sha, parents: [{ sha: parent }], commit: { committer: { date }, tree: { sha: tree }, message } });
+  const client = forgeReader({ log: () => {}, owns: () => true, pushers: [] })({ forge: 'gitea', path: 'o/r', webBase: 'https://tea.example/o/r' }, {
+    env: { GITEA_TOKEN: 'fake' },
+    fetchImpl: async (url) => {
+      const endpoint = new URL(String(url)).pathname;
+      if (endpoint.endsWith('/pulls')) return Response.json([{ number: 1, state: 'open', head: { ref: 'claude/B-1-patch', sha: marker, repo_id: 17 }, base: { repo_id: 17 }, html_url: 'https://tea.example/o/r/pulls/1' }]);
+      if (endpoint.endsWith('/1/commits')) return Response.json([commit(marker, second, tree, body), commit(second, first, tree, 'second'), commit(first, base, olderTree, 'first')]);
+      if (endpoint.endsWith('/status')) return Response.json({ statuses: [] });
+      if (endpoint.endsWith('/reviews') || endpoint.endsWith('/comments')) return Response.json([]);
+      throw new Error(`unexpected endpoint ${endpoint}`);
+    },
+  });
+  const [{ commits }] = await client.facts({ tickets: ['B-1'] });
+  expect(commits?.map((c) => c.sha)).toEqual([first, second, marker]);
+  const counted = verifiedMarkers(commits!, 'B-1', [{ ticket: 'B-1', leg: 'run-tests', claim_nonce: 'n1', evidence: marker }]);
+  expect(gateOfBranch(commits!, counted)).toBe('green');
 });

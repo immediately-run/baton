@@ -34,6 +34,14 @@ export interface Scheduler {
   set(at: number): Promise<void>;
 }
 
+/** R-BTN-149: resolve only when every part of the event batch is durable. */
+export type EventArchive = (parts: readonly EventArchivePart[]) => Promise<void>;
+export interface EventArchivePart {
+  repository: string;
+  day: string;
+  ndjson: string;
+}
+
 /** Baton's clock (R-BTN-32): epoch milliseconds. Core reads time only through its `now`;
  *  without one the core uses the system clock, on both hosts alike. */
 export type Clock = () => number;
@@ -84,6 +92,8 @@ export interface Dispatch {
 /** The instance's settings (§3a): wrangler.toml's vars and the Worker secrets on Cloudflare,
  *  the start-up options and `--config` file locally. */
 export interface Config {
+  /** B-244: seconds idle before dispatching the repository's owner trigger (default 1800). */
+  BATON_IDLE_NOTIFY_AFTER_S?: string;
   BATON_ORIGIN: string;
   OIDC_ISSUER: string;
   OIDC_JWKS_URL: string;
@@ -117,6 +127,8 @@ export interface Config {
    *  deployment's root of trust, set outside Baton. A key in it satisfies every `human` entry
    *  of every repository on the instance, and it is the only recovery from a lost key. */
   BATON_HUMAN_KEYS?: string;
+  /** B-131: host broker OpenSSH public keys, one per line; forge-scope reads only. */
+  BATON_FORGE_BROKER_KEYS?: string;
   /** R-BTN-113 (B-234): the hosts whose session links the instance accepts — `session_hosts`,
    *  a comma- or JSON-separated list. An administrator's setting, as the human keys are; the
    *  default is `claude.ai` alone. */
@@ -151,6 +163,8 @@ export interface Gate {
 export interface Ports {
   store: Store;
   scheduler: Scheduler;
+  /** Without a host-configured archive, event retention never deletes. */
+  archiveEvents?: EventArchive;
   config: Config;
   dispatch: Dispatch;
   adminKeys: AdminKeys;

@@ -8,9 +8,9 @@ import { FORGES, FORGE_SHAPES, WORKFLOW_PATH, hasPrs } from './forges';
 // sync key. Each act is an `admin` event; a bar change also dispatches the repository's sync.
 import { BatonError, PENDING_COOKIE, SESSION_COOKIE } from './http';
 import { logEvent, randomHex } from './db';
-import { adminFingerprints, API_KEY_FINGERPRINT, KEY_FINGERPRINT, parseApiKeyLine, parseSshKey, sshPublicLine, verifyNamespacedSignature } from './auth';
+import { adminFingerprints, API_KEY_FINGERPRINT, KEY_FINGERPRINT, parseApiKeyLine, parseSshKey, sshPublicLine, verifyNamespacedSignature, type SshKey } from './auth';
 import { capabilitiesOf } from '../shared/vocabulary.mjs';
-import { COURSE_ID, HOSTNAME, INSTANCE_NAME, SESSION_TOKEN, TAG, checkAsks, checkLogin, checkRepositoryId, HOLDING_TYPE, MAX_CLAIMS_CAP, parseAccessIdentities } from './validate';
+import { COURSE_ID, HOSTNAME, INSTANCE_NAME, SESSION_TOKEN, TAG, checkAsks, checkConfirm, checkDeliverInteractions, checkLogin, checkRepositoryId, HOLDING_TYPE, MAX_CLAIMS_CAP, parseAccessIdentities } from './validate';
 import { REMIND_AFTER_S, type Notices } from './notices';
 import { parseTranscriptRepo } from './links';
 import { checkCodeRepos, checkPushers, codeReposOf, crossHostEntries, homeForgeOf, pushersOf, writeCodeRepos, type CodeRepo } from './codeRepos';
@@ -137,19 +137,20 @@ export class Admin {
     /** R-BTN-67: a bar change dispatches the repository's sync, after commit. */
     dispatchSync: (repository: string) => void;
     /** R-BTN-75, R-BTN-76: a grant made, changed or revoked moves the fleet's counts. */
-    fleetChanged?: () => void;
+    fleetChanged: () => void;
+    dependencyVisibilityChanged: () => void;
     /** R-BTN-47 (B-173): retirement reaps the repository's active claims as an administrator's
      *  force-reap does, inside the retiring transaction. */
-    reapForRetire?: (repository: string, actor: string) => void;
+    reapForRetire: (repository: string, actor: string) => void;
     /** R-BTN-47 (B-173): retirement closes the repository's still-open conditions inside the
      *  same transaction, after the reaps — a `suspend` above all, which no run's end closes. */
-    conditionsForRetire?: (repository: string) => void;
+    conditionsForRetire: (repository: string) => void;
     /** R-BTN-80: a courier registered or revoked queues or closes its notices. */
-    notices?: Notices;
+    notices: Pick<Notices, 'registered' | 'revoked' | 'couriers'>;
     /** §12.8 (B-145): the repository policies — the approver lists the owner routes read. */
-    policies?: Policies;
+    policies: Pick<Policies, 'current' | 'facts' | 'entryMatches' | 'listSatisfiable' | 'floors'>;
     /** R-BTN-185 (B-145): BATON_HUMAN_KEYS' fingerprints (break-glass), parsed per call. */
-    humanBreakGlass?: () => Promise<Map<string, string>>;
+    humanBreakGlass: () => Promise<Map<string, string>>;
   }) {}
 
   private rows<T = Record<string, unknown>>(q: string, ...p: unknown[]): T[] {
@@ -194,6 +195,17 @@ export class Admin {
    *  a person leg (R-BTN-116) and signs what its role admits. */
   humanKeyLine(fingerprint: string): string | null {
     return this.rows<{ public_key: string }>('SELECT public_key FROM human_keys WHERE fingerprint = ? AND revoked_at IS NULL', fingerprint)[0]?.public_key ?? null;
+  }
+
+  decisionKeyLine(fingerprint: string): string | null {
+    return this.ownerKey(fingerprint) ?? this.humanKeyLine(fingerprint);
+  }
+
+  /** Match the decision route's human mark, live key lookup and administrator exclusion. */
+  hasHumanDecisionWriter(breakGlass: ReadonlySet<string>, admins: ReadonlyMap<string, string>): boolean {
+    const registered = this.rows<{ fingerprint: string }>('SELECT fingerprint FROM human_keys WHERE revoked_at IS NULL');
+    return registered.some(({ fingerprint }) => !admins.has(fingerprint)) ||
+      [...breakGlass].some((fp) => !admins.has(fp) && this.decisionKeyLine(fp) != null);
   }
 
   /** R-BTN-185: whether the fingerprint counts as a human-only key — registered here, or a
@@ -241,7 +253,7 @@ export class Admin {
 
   /** BATON_HUMAN_KEYS' fingerprints alone — the break-glass set (R-BTN-185). */
   private async breakGlassSet(): Promise<Set<string>> {
-    return new Set(this.c.humanBreakGlass ? (await this.c.humanBreakGlass()).keys() : []);
+    return new Set((await this.c.humanBreakGlass()).keys());
   }
 
   /** B-127: the repository's owner signing keys — its owners' keys the human-only register
@@ -270,7 +282,6 @@ export class Admin {
    *  registered yet (B-124), and its class will answer before this runs. */
   private requireMembersApprover(repository: string, fingerprint: string, by: 'owner' | 'admin', breakGlass: ReadonlySet<string>): void {
     const policies = this.c.policies;
-    if (!policies) return; // no policy store wired (a unit test's Admin)
     const cur = policies.current(repository);
     if (!cur) return;
     const facts = policies.facts(repository, breakGlass);
@@ -293,7 +304,6 @@ export class Admin {
    *  facts passed are the post-removal ones. */
   private refuseUnsatisfiableLists(repository: string, facts: ApproverFacts): void {
     const policies = this.c.policies;
-    if (!policies) return;
     const cur = policies.current(repository);
     if (!cur) return;
     const live = (list: ApproverEntry[]) => policies.listSatisfiable(list, facts, cur.policy.human_key) || list.every((e) => e === 'owner');
@@ -312,8 +322,7 @@ export class Admin {
   /** The approver facts of `repository` with only `remaining` owners counted. */
   private async factsWithout(repository: string, remaining: string[] | null): Promise<ApproverFacts> {
     const policies = this.c.policies;
-    const breakGlass = this.c.humanBreakGlass ? new Set((await this.c.humanBreakGlass()).keys()) : new Set<string>();
-    if (!policies) return { owners: new Map(), humans: new Set(breakGlass), breakGlass, humanOwners: new Set() };
+    const breakGlass = await this.breakGlassSet();
     const facts = policies.facts(repository, breakGlass);
     if (remaining == null) return facts;
     const owners = new Map([...facts.owners].filter(([fp]) => remaining.includes(fp)));
@@ -337,7 +346,7 @@ export class Admin {
       // is no longer there.
       if (!known || known.retired_at != null) throw new BatonError('not-found', `${id} is not registered`);
       // §12.2: a destructive action takes confirm: true.
-      if (b.confirm !== true) throw new BatonError('confirm-required', 'retiring a repository takes confirm: true');
+      checkConfirm(b);
       this.retireRepository(actor, id, known);
       return { ok: true };
     }
@@ -432,6 +441,7 @@ export class Admin {
         this.mayOwn(o.fingerprint, admins);
         this.insertOwner(id, o, actor, marks.has(o.fingerprint) ? 1 : 0);
       }
+      if (newOwners.length) this.c.dependencyVisibilityChanged?.();
       if (weight !== undefined) this.exec('UPDATE repositories SET weight = ? WHERE id = ?', weight, id);
       if (tiers) {
         this.exec('UPDATE repositories SET tiers = ? WHERE id = ?', JSON.stringify(tiers), id);
@@ -484,10 +494,10 @@ export class Admin {
       this.exec('UPDATE sync_keys SET revoked_at = ? WHERE repository_id = ? AND revoked_at IS NULL', now, id);
       this.exec('UPDATE runner_grants SET revoked_at = ? WHERE repository_id = ? AND revoked_at IS NULL', now, id);
       // R-BTN-19: each active claim on its tickets, as an administrator's force-reap reaps one.
-      this.c.reapForRetire?.(id, actor);
+      this.c.reapForRetire(id, actor);
       // B-234's store (R-BTN-160): the reaps above have ended its runs, so their open
       // `interact`s are closed; the `suspend`s still open close here (R-BTN-47, B-173).
-      this.c.conditionsForRetire?.(id);
+      this.c.conditionsForRetire(id);
       // R-BTN-94, R-BTN-73, R-BTN-77: its wants, its webhook stamps and windows, its trigger's.
       this.exec('DELETE FROM webhook_dispatch WHERE repository_id = ?', id);
       this.exec('DELETE FROM webhook_syncs WHERE repository_id = ?', id);
@@ -499,8 +509,9 @@ export class Admin {
           JSON.stringify((JSON.parse(i.repositories) as string[]).filter((r) => r !== id)), i.name);
       }
       this.event(actor, { act: 'repository-retired', repository: id, github: known.github }, id);
+      this.c.dependencyVisibilityChanged?.();
       // The fleet's counts read the grants and the instance lists (R-BTN-75, R-BTN-76).
-      this.c.fleetChanged?.();
+      this.c.fleetChanged();
     });
   }
 
@@ -573,11 +584,12 @@ export class Admin {
    *  with it, so its next call is refused. An administrator key is revoked by editing the secret.
    *  R-BTN-188 (B-145): refused while an approver list or a floor's `remove_by` the key alone
    *  satisfies would be left with no live credential. */
-  async revokeKey(actor: string, raw: string) {
+  async revokeKey(actor: string, raw: string, body: unknown) {
     // A key's fingerprint, or a bearer-token credential's id while tokens serve (R3-1239).
     const fingerprint = KEY_FINGERPRINT.test(raw) || TOKEN_CREDENTIAL.test(raw) ? raw : bad('fingerprint', 'must be a key fingerprint, SHA256:…, or a token credential’s id');
     // The pool's reserved credential has no key to revoke (R-BTN-103).
     if (fingerprint === 'pool') bad('fingerprint', 'pool is reserved for runner couriers’ pool copies, not a key');
+    checkConfirm(body);
     // Judged over the live repositories the key owns only (R-BTN-47): a retired repository's
     // policy blocks no revocation — its rows stay, read-only, and no route can change it again.
     for (const { repository_id } of this.rows<{ repository_id: string }>(
@@ -602,12 +614,13 @@ export class Admin {
       changed += this.changed();
       // A courier key's registrations go with it, and its notices close (R-BTN-80).
       this.exec('DELETE FROM couriers WHERE credential_id = ?', fingerprint);
-      this.c.notices?.revoked(fingerprint, null);
+      this.c.notices.revoked(fingerprint, null);
       if (!changed && !this.rows('SELECT 1 FROM credentials WHERE id = ? UNION SELECT 1 FROM sync_keys WHERE fingerprint = ? UNION SELECT 1 FROM repository_owners WHERE fingerprint = ?', fingerprint, fingerprint, fingerprint).length) {
         throw new BatonError('not-found', 'no key with that fingerprint');
       }
       this.event(actor, { act: 'key-revoked', key: fingerprint }, null);
-      this.c.fleetChanged?.();
+      this.c.dependencyVisibilityChanged();
+      this.c.fleetChanged();
       return { ok: true };
     });
   }
@@ -631,9 +644,8 @@ export class Admin {
     const login = checkLogin(body);
     const identities = 'access' in login ? parseAccessIdentities(this.c.accessIdentities()) : null;
     const fingerprint = email == null ? undefined : identities?.get(email);
-    if (identities && !fingerprint) throw new BatonError('unauthenticated', 'no verified Access email bound to an administrator key');
     const hash = 'token' in login ? await sha256Hex(login.token) : null;
-    const emailHash = fingerprint && email != null ? await sha256Hex(email) : null;
+    const emailHash = identities && email != null ? await sha256Hex(email) : null;
     const value = randomHex(32);
     const id = await sha256Hex(value);
     const admins = await this.adminFingerprints();
@@ -646,7 +658,7 @@ export class Admin {
         this.exec('UPDATE login_links SET used_at = ? WHERE token_hash = ?', now, hash);
         key = link.admin_key;
       } else {
-        if (!fingerprint || !admins.has(fingerprint)) throw new BatonError('unauthenticated', 'no verified Access email bound to an administrator key');
+        if (!fingerprint || !admins.has(fingerprint)) throw new BatonError('unauthenticated', 'no verified Access email bound to an administrator key', { reason: 'not-bound' });
         key = fingerprint;
         this.event(`admin:${key}`, { act: 'login', via: 'access', email_sha256: emailHash }, null);
       }
@@ -711,7 +723,8 @@ export class Admin {
   async grant(actor: string, repository: string, body: unknown, by: 'owner' | 'admin') {
     if (!isObj(body)) bad('body', 'must be a JSON object');
     const b = body as Record<string, unknown>;
-    only(b, by === 'admin' ? ['repository', 'public_key', 'hostname', 'label', 'capabilities', 'max_tier', 'max_claims'] : ['public_key', 'hostname', 'label', 'capabilities', 'max_tier', 'max_claims'], 'body');
+    only(b, ['public_key', 'hostname', 'label', 'capabilities', 'max_tier', 'max_claims', 'deliver_interactions', ...(by === 'admin' ? ['repository'] : [])], 'body');
+    const deliverInteractions = checkDeliverInteractions(b.deliver_interactions);
     const repo = this.c.registry.get(repository);
     if (!repo || repo.retired_at != null) throw new BatonError('not-found', `${repository} is not registered`);
     const key = await this.parsePersonOrRunnerKey(b.public_key, 'public_key');
@@ -761,26 +774,30 @@ export class Admin {
       }
       const prior = this.rows<{ capabilities: string; revoked_at: number | null }>('SELECT capabilities, revoked_at FROM runner_grants WHERE credential_id = ? AND repository_id = ?', key.fingerprint, repository)[0];
       const caps = expanded;
-      this.exec(`INSERT INTO runner_grants (credential_id, repository_id, capabilities, max_tier, max_claims, granted_by, granted_at) VALUES (?, ?, ?, ?, ?, ?, ?)
+      this.exec(`INSERT INTO runner_grants (credential_id, repository_id, capabilities, max_tier, max_claims, granted_by, granted_at, deliver_interactions) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                  ON CONFLICT (credential_id, repository_id) DO UPDATE SET capabilities = excluded.capabilities, max_tier = excluded.max_tier,
-                   max_claims = excluded.max_claims, granted_by = excluded.granted_by, granted_at = excluded.granted_at, revoked_at = NULL`,
-        key.fingerprint, repository, JSON.stringify(caps), maxTier, maxClaims, actor, this.c.now());
-      this.event(actor, { act: 'grant', key: key.fingerprint, repository, capabilities: caps, max_tier: maxTier, max_claims: maxClaims }, repository);
-      this.c.fleetChanged?.();
+                   max_claims = excluded.max_claims, granted_by = excluded.granted_by, granted_at = excluded.granted_at,
+                   deliver_interactions = excluded.deliver_interactions, revoked_at = NULL`,
+        key.fingerprint, repository, JSON.stringify(caps), maxTier, maxClaims, actor, this.c.now(), Number(deliverInteractions));
+      this.event(actor, { act: 'grant', key: key.fingerprint, repository, capabilities: caps, max_tier: maxTier, max_claims: maxClaims, deliver_interactions: deliverInteractions }, repository);
+      if (!prior || prior.revoked_at != null) this.c.dependencyVisibilityChanged();
+      this.c.fleetChanged();
       return { ok: true, fingerprint: key.fingerprint };
     });
   }
 
   /** `POST /v1/owner/{repository}/grants/{fingerprint}/revoke`: this repository's grant only. */
-  async revokeGrant(actor: string, repository: string, raw: string) {
+  async revokeGrant(actor: string, repository: string, raw: string, body: unknown) {
     const fingerprint = fingerprintOf(raw, 'fingerprint');
     // B-145 item 12: revoking a runner key is an `approvers.members` action too.
     this.requireMembersApprover(repository, actor.slice(actor.indexOf(':') + 1), 'owner', await this.breakGlassSet());
+    checkConfirm(body);
     return this.c.store.transaction(() => {
       this.exec('UPDATE runner_grants SET revoked_at = ? WHERE credential_id = ? AND repository_id = ? AND revoked_at IS NULL', this.c.now(), fingerprint, repository);
       if (!this.changed()) throw new BatonError('not-found', `no grant of ${fingerprint} on ${repository}`);
       this.event(actor, { act: 'grant-revoked', key: fingerprint, repository }, repository);
-      this.c.fleetChanged?.();
+      this.c.dependencyVisibilityChanged();
+      this.c.fleetChanged();
       return { ok: true };
     });
   }
@@ -796,8 +813,9 @@ export class Admin {
     // B-145 item 12: adding and removing owners is an `approvers.members` action.
     this.requireMembersApprover(repository, actor.slice(actor.indexOf(':') + 1), 'owner', await this.breakGlassSet());
     if (b.remove === true) {
-      only(b, ['fingerprint', 'remove'], 'body');
+      only(b, ['fingerprint', 'remove', 'confirm'], 'body');
       const fp = fingerprintOf(b.fingerprint, 'fingerprint');
+      checkConfirm(b);
       const facts = await this.factsWithout(repository, null);
       return this.c.store.transaction(() => {
         const left = this.rows<{ fingerprint: string }>('SELECT fingerprint FROM repository_owners WHERE repository_id = ? AND removed_at IS NULL', repository);
@@ -807,6 +825,7 @@ export class Admin {
         this.refuseUnsatisfiableLists(repository, { owners: new Map([...facts.owners].filter(([fp2]) => fp2 !== fp)), humans: facts.humans, breakGlass: facts.breakGlass, humanOwners: new Set([...facts.humanOwners].filter((fp2) => fp2 !== fp)) });
         this.exec('UPDATE repository_owners SET removed_at = ? WHERE repository_id = ? AND fingerprint = ? AND removed_at IS NULL', this.c.now(), repository, fp);
         this.event(actor, { act: 'owner-removed', key: fp, repository }, repository);
+        this.c.dependencyVisibilityChanged?.();
         return { ok: true };
       });
     }
@@ -822,6 +841,7 @@ export class Admin {
       if (this.rows('SELECT 1 FROM repository_owners WHERE repository_id = ? AND removed_at IS NULL', repository).length >= OWNERS_MAX) bad('public_key', `a repository has at most ${OWNERS_MAX} owners`);
       this.insertOwner(repository, key, actor, human);
       this.event(actor, { act: 'owner-added', key: key.fingerprint, repository, human_only: human === 1 }, repository);
+      this.c.dependencyVisibilityChanged?.();
       return { ok: true };
     });
   }
@@ -849,7 +869,7 @@ export class Admin {
       return this.c.store.transaction(() => {
         this.exec('DELETE FROM couriers WHERE credential_id = ? AND repository_id = ?', fp, repository);
         if (!this.changed()) throw new BatonError('not-found', `${fp} is no courier of ${repository}`);
-        this.c.notices?.revoked(fp, repository);
+        this.c.notices.revoked(fp, repository);
         if (!this.rows('SELECT 1 FROM couriers WHERE credential_id = ?', fp).length) {
           this.exec('UPDATE credentials SET revoked_at = ?, revoked_by = ? WHERE id = ? AND revoked_at IS NULL', this.c.now(), actor, fp);
         }
@@ -865,10 +885,10 @@ export class Admin {
     let trustLevel: 'trusted' | 'untrusted' | null = null;
     let trustDomain: string | null = null;
     const policies = this.c.policies;
-    const cur = policies?.current(repository);
-    const facts = cur ? policies!.facts(repository, await this.breakGlassSet()) : null;
+    const cur = policies.current(repository);
+    const facts = cur ? policies.facts(repository, await this.breakGlassSet()) : null;
     if (cur && facts && (b.trust_level !== undefined || b.trust_domain !== undefined)) {
-      if (!policies!.entryMatches(cur.policy.approvers.trust, fingerprint, facts, cur.policy.human_key)) {
+      if (!policies.entryMatches(cur.policy.approvers.trust, fingerprint, facts, cur.policy.human_key)) {
         throw new BatonError('forbidden', 'trust_level and trust_domain are set by an approver on approvers.trust (R-BTN-180)');
       }
       if (b.trust_level !== undefined) {
@@ -898,7 +918,7 @@ export class Admin {
       this.exec('DELETE FROM couriers WHERE credential_id = ? AND repository_id = ?', key.fingerprint, repository);
       for (const a of asks) this.exec('INSERT INTO couriers (credential_id, repository_id, asks, trust_level, trust_domain, trust_set_by) VALUES (?, ?, ?, ?, ?, ?)',
         key.fingerprint, repository, a, trustLevel, trustDomain, setTrust ? actor : null);
-      this.c.notices?.registered(key.fingerprint, repository);
+      this.c.notices.registered(key.fingerprint, repository);
       this.event(actor, { act: 'courier-added', key: key.fingerprint, repository, asks, ...(trustLevel ? { trust_level: trustLevel } : {}), ...(trustDomain ? { trust_domain: trustDomain } : {}) }, repository);
       return { ok: true, fingerprint: key.fingerprint };
     });
@@ -916,7 +936,7 @@ export class Admin {
     const b = body as Record<string, unknown>;
     if (b.revoke === true) {
       only(b, ['fingerprint', 'revoke', 'confirm'], 'body');
-      if (b.confirm !== true) throw new BatonError('confirm-required', 'revoking a human key takes confirm: true');
+      checkConfirm(b);
       const fp = fingerprintOf(b.fingerprint, 'fingerprint');
       // Refuse where the key is the last live credential a list or a floor's `remove_by` has
       // (R-BTN-188) — judged per live repository it owns (R-BTN-47: a retired repository's
@@ -951,7 +971,7 @@ export class Admin {
     // The signature is by the acting human_only key — a registered one or a break-glass line —
     // over the new key's public line exactly as sent.
     const signerLine = this.rows<{ public_key: string }>('SELECT public_key FROM human_keys WHERE fingerprint = ? AND revoked_at IS NULL', actor)[0]?.public_key
-      ?? (await this.c.humanBreakGlass?.().then((m) => m.get(actor)) ?? null);
+      ?? (await this.c.humanBreakGlass().then((m) => m.get(actor)) ?? null);
     if (!signerLine) throw new BatonError('unauthenticated', 'the acting key is not a live human_only key');
     const sig = Uint8Array.from(atob(signature), (c) => c.charCodeAt(0));
     await verifyNamespacedSignature(signerLine, sig, new TextEncoder().encode(publicKey.trim()), 'baton-human-keys@1');
@@ -974,7 +994,7 @@ export class Admin {
 
   /** `POST /v1/owner/{repository}/bars`: an owner bar `{course, tag, legs?, applies, starts_at?,
    *  ends_at?, release_holders?, reason}`; named legs need a named course. */
-  // @model setOwnerBar sha256:82527aa95b44
+  // @model setOwnerBar sha256:44f33168acbc
   setBar(actor: string, repository: string, body: unknown) {
     if (!isObj(body)) bad('body', 'must be a JSON object');
     const b = body as Record<string, unknown>;
@@ -1012,7 +1032,7 @@ export class Admin {
   }
 
   /** `POST /v1/owner/{repository}/bars/{id}/lift`. */
-  // @model liftOwnerBars sha256:67a7770a9c79
+  // @model liftOwnerBars sha256:3f440cb63410
   liftBar(actor: string, repository: string, id: number) {
     return this.c.store.transaction(() => {
       this.exec('UPDATE owner_bars SET lifted_at = ? WHERE id = ? AND repository_id = ? AND lifted_at IS NULL', this.c.now(), id, repository);
@@ -1038,13 +1058,21 @@ export class Admin {
   async setSettings(actor: string, repository: string, body: unknown) {
     if (!isObj(body)) bad('body', 'must be a JSON object');
     const b = body as Record<string, unknown>;
-    only(b, ['required_bars', 'retry', 'transcript_repos', 'unblocked_trigger', 'remind_after', 'scope_policy', 'runner_pushers', 'code_repos', 'pushers', 'require_signed_control', 'checks'], 'body');
+    only(b, ['required_bars', 'retry', 'transcript_repos', 'artifact_buckets', 'unblocked_trigger', 'remind_after', 'scope_policy', 'runner_pushers', 'code_repos', 'pushers', 'require_signed_control', 'checks'], 'body');
     if (!Object.keys(b).length) bad('body', 'names at least one setting');
     // R-BTN-114: a check's conclusion decides what branch protection sees, so the map is the
     // owners', not an agent's — refused here, before the approver question, whichever it changes.
     const delegated = this.delegated(actor);
     if (b.checks !== undefined && delegated) throw new BatonError('forbidden', 'a delegated key changes no checks map: the conclusions are the owners’ (R-BTN-114)');
     const sets: [string, string | null][] = [];
+    if (b.artifact_buckets !== undefined) {
+      if (delegated) throw new BatonError('forbidden', 'a delegated key does not change artifact buckets');
+      const buckets = b.artifact_buckets;
+      if (!Array.isArray(buckets) || buckets.length > 20 || !buckets.every((x) => typeof x === 'string' && /^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/.test(x))) {
+        bad('artifact_buckets', 'must be at most 20 S3 bucket names');
+      }
+      sets.push(['artifact_buckets', JSON.stringify([...new Set(buckets as string[])].sort())]);
+    }
     // B-182 (R-BTN-140): the home's code repositories, each naming its own forge and host. The
     // list is stored in its own table; `codeRepos` holds it validated, `web_base` derived.
     let codeRepos: CodeRepo[] | null = null;
@@ -1057,8 +1085,8 @@ export class Admin {
       const homeHost = hasPrs(home.forge) ? home.host : null;
       const cross = codeRepos.find((e) => homeHost == null || e.host !== homeHost);
       if (cross) {
-        const cur = this.c.policies?.current(repository);
-        const floors = this.c.policies?.floors(repository) ?? [];
+        const cur = this.c.policies.current(repository);
+        const floors = this.c.policies.floors(repository);
         if (cur?.policy.human_identity != null || floors.length) {
           const which = cur?.policy.human_identity != null ? `a human_identity (${cur.policy.human_identity})` : `${floors.length} floor(s)`;
           throw new BatonError('invalid-params', `code_repos: the entry ${cross.path} is on ${cross.host}, another host than the home's, while ${repository}'s policy names ${which} — no human identity across hosts yet (B-182); per-host identities are a later ticket`);
@@ -1115,8 +1143,8 @@ export class Admin {
     // `approvers.policy` as it stands, the same gate R-BTN-188 puts on an R-BTN-66 setting.
     if (this.loosensSettings(repository, sets, codeRepos)) {
       const policies = this.c.policies;
-      const cur = policies?.current(repository);
-      if (policies && cur) {
+      const cur = policies.current(repository);
+      if (cur) {
         const facts = policies.facts(repository, await this.breakGlassSet());
         if (!policies.entryMatches(cur.policy.approvers.policy, actor.slice(actor.indexOf(':') + 1), facts, cur.policy.human_key)) {
           throw new BatonError('forbidden', 'loosening an R-BTN-66 setting needs an approver on approvers.policy (R-BTN-186, R-BTN-188)');
@@ -1161,11 +1189,11 @@ export class Admin {
       if (towardSuccess) return true;
       if (Object.keys(was).some((course) => !Object.hasOwn(next, course))) return true;
     }
-    const flat = ['retry', 'transcript_repos'];
+    const flat = ['retry', 'transcript_repos', 'artifact_buckets'];
     for (const [k, v] of sets) {
       if (flat.includes(k)) {
         const old = k === 'retry' ? this.retry(repository) : null;
-        const before = k === 'transcript_repos' ? JSON.parse(this.rows<{ v: string | null }>('SELECT transcript_repos AS v FROM repositories WHERE id = ?', repository)[0]?.v ?? 'null') : old;
+        const before = k === 'transcript_repos' || k === 'artifact_buckets' ? JSON.parse(this.rows<{ v: string | null }>(`SELECT ${k} AS v FROM repositories WHERE id = ?`, repository)[0]?.v ?? 'null') : old;
         if (JSON.stringify(before ?? null) !== (v ?? 'null')) return true;
       }
       // B-127: requiring signed control tightens (any owner may turn it on); turning it off
@@ -1351,7 +1379,7 @@ export class Admin {
         code_repos: codeReposOf(this.c.store, String(s.repository_id)),
       })) as (Record<string, unknown> & { code_repos: CodeRepo[] })[],
       // R-BTN-80: the personal channels, by repository.
-      couriers: this.c.notices?.couriers() ?? [],
+      couriers: this.c.notices.couriers(),
     };
   }
 
@@ -1359,9 +1387,9 @@ export class Admin {
    *  `GET /v1/owner/{repository}/grants` narrows to a repository (R-BTN-179, B-90). */
   grants() {
     // max_tier as its name in the repository's ladder (stored as a position, R-BTN-66).
-    return this.rows<{ credential_id: string; hostname: string | null; label: string | null; repository_id: string; capabilities: string; max_tier: number | null; max_claims: number; granted_by: string; granted_at: number }>(`SELECT g.credential_id, c.hostname, c.label, g.repository_id, g.capabilities, g.max_tier, g.max_claims, g.granted_by, g.granted_at
+    return this.rows<{ credential_id: string; hostname: string | null; label: string | null; repository_id: string; capabilities: string; max_tier: number | null; max_claims: number; granted_by: string; granted_at: number; deliver_interactions: number }>(`SELECT g.credential_id, c.hostname, c.label, g.repository_id, g.capabilities, g.max_tier, g.max_claims, g.granted_by, g.granted_at, g.deliver_interactions
                        FROM runner_grants g JOIN credentials c ON c.id = g.credential_id WHERE g.revoked_at IS NULL ORDER BY g.repository_id, c.hostname`)
-      .map((g) => ({ ...g, max_tier: g.max_tier == null ? null : this.c.registry.get(g.repository_id)?.tiers[g.max_tier] ?? null }));
+      .map((g) => ({ ...g, deliver_interactions: g.deliver_interactions === 1, max_tier: g.max_tier == null ? null : this.c.registry.get(g.repository_id)?.tiers[g.max_tier] ?? null }));
   }
 
   // ── keys ────────────────────────────────────────────────────────────────────────────────

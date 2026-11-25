@@ -195,7 +195,7 @@ describe('S-BTN-226 a pathless ticket\'s file for its legs', () => {
     process.env.PATH = `${bin}:${path}`;
     try {
       // The PR is in the sibling the file's repos: names, not in the home: the leg passes.
-      writeFileSync(sibling, JSON.stringify([{ number: 4, headRefName: 'claude/T-300-tracker', headRefOid: '0123456789abcdef0123456789abcdef01234567' }]));
+      writeFileSync(sibling, JSON.stringify([{ number: 4, headRefName: 'claude/T-300-tracker', headRefOid: '0123456789abcdef0123456789abcdef01234567', isCrossRepository: false }]));
       expect(await stub.run(ctx)).toEqual({ reached: 'pr-open', next: 'run-tests' });
       expect(readFileSync(told, 'utf8')).toBe(file);
       // No PR in the sibling either: the failure names the sibling it looked in.
