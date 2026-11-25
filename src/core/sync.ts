@@ -3,19 +3,19 @@ import type { BatonCore } from './baton';
 import type { Dispatch, DispatchTarget, Workflow } from './ports';
 import { DEFAULT_COURSE, resolveParents, rowFor, rowForTicket, rowHash, stationOf, type BoardPayload, type PostedStation, type TicketRow } from './board';
 import { BatonError } from './http';
-import { familyOf } from '../shared/baton.mjs';
 import { nonScheduling, schedulingVersion } from './stateVersion';
 import { checkConfirmations } from './validate';
 import { checkCrossBoardCycle, checkCrossRepository } from './dependencies';
 import { qualify, tierPosition, type Repository } from './registry';
 import { sha256HexSync } from './policy';
 import { logEvent } from './db';
+import { DispatchRefused } from './mirror';
 import { adjustCounts } from './capacity';
 import type { Seen } from './stations';
 
 const HELD_AUTO_ACCEPT_MS = 24 * 3_600_000; // §7.1: a held history is accepted after 24 h (R3-1212)
 
-type BoardPostCore = Pick<BatonCore, 'store' | 'sql' | 'now' | 'observations' | 'claims' | 'ownerState' | 'stations' | 'blocks' | 'courses' | 'policies' | 'questions' | 'history' | 'provenance' | 'queues' | 'admin' | 'registry'>;
+type BoardPostCore = Pick<BatonCore, 'store' | 'sql' | 'now' | 'observations' | 'claims' | 'ownerState' | 'stations' | 'blocks' | 'courses' | 'policies' | 'questions' | 'history' | 'provenance' | 'queues' | 'admin' | 'registry' | 'conditions'>;
 
 /** A repository's head snapshot (R-BTN-11, per repository), or null before its first. */
 export function headOf(core: Pick<BatonCore, 'sql'>, repo: string): string | null {
@@ -53,7 +53,7 @@ export async function board(core: BoardPostCore, repo: Repository, p: BoardPaylo
   }
 }
 
-// @model syncPost sha256:231806fa206f
+// @model syncPost sha256:9d500d65a2bf
 async function boardPost(core: BoardPostCore, repo: Repository, p: BoardPayload, hashRows: typeof rowsFor) {
   const r = repo.id;
   // R-BTN-62: the post's number is used first, whatever becomes of the post; an older reading
@@ -88,7 +88,7 @@ async function boardPost(core: BoardPostCore, repo: Repository, p: BoardPayload,
       core.observations.accept(r, n);
       const seen = normative ? refreshStations(core, r, p, n, at, null, true) : new Map<string, Seen>();
       core.claims.confirm(confirmations, n);
-      core.claims.judge(r, n, seen);
+      core.claims.judge(r, n, seen, core.claims.evidenceOf(r, p.attestations));
       core.store.exec('UPDATE held_snapshots SET observation = ? WHERE repository_id = ? AND sha = ?', n, r, p.sha);
     });
     // Held once per sha: a repeat (the sync re-posts every 15 minutes) changes nothing, so
@@ -139,7 +139,7 @@ async function boardPost(core: BoardPostCore, repo: Repository, p: BoardPayload,
         nonScheduling(core.store, () => core.store.exec('UPDATE board_head SET stations_observation = ? WHERE repository_id = ?', n, r));
         settleSpawned(core, r, p, n, at);
         const confirmed = core.claims.confirm(confirmations, n);
-        const judged = core.claims.judge(r, n, seen);
+        const judged = core.claims.judge(r, n, seen, core.claims.evidenceOf(r, p.attestations));
         remember();
         return { ok: true, unchanged: true, ...(p.read_sha === p.sha ? { tickets_upserted: 0, tickets_deleted: 0 } : {}),
           confirmed: confirmed + judged.confirmed, stale_released: judged.stale_released };
@@ -199,7 +199,7 @@ async function boardPost(core: BoardPostCore, repo: Repository, p: BoardPayload,
       }
       const seen = normative ? refreshStations(core, r, p, n, at, wrote) : new Map<string, Seen>();
       const confirmed = core.claims.confirm(confirmations, n);
-      const judged = core.claims.judge(r, n, seen);
+      const judged = core.claims.judge(r, n, seen, core.claims.evidenceOf(r, p.attestations));
       remember();
       return {
         ok: true, unchanged: true,
@@ -212,7 +212,7 @@ async function boardPost(core: BoardPostCore, repo: Repository, p: BoardPayload,
 
   // Hash every row before the transaction: the digest is async, the transaction is not.
   const rows = await hashRows(repo, p);
-  const changed: { upserted: number; deleted: number; renumbered?: { from: string; to: string; key: string }[]; confirmed?: number; stale_released?: number; courses_refused?: string[]; fleet_ignored?: boolean; dropped?: string[] } = { upserted: 0, deleted: 0 };
+  const changed: { upserted: number; deleted: number; renumbered?: { from: string; to: string; key: string }[]; confirmed?: number; stale_released?: number; courses_refused?: string[]; dropped?: string[] } = { upserted: 0, deleted: 0 };
   core.store.transaction(() => {
     // The row hashes were awaited after the number was used, so another run may have posted
     // meanwhile: this reading must still be the newest, over the head it was judged against.
@@ -248,6 +248,7 @@ async function boardPost(core: BoardPostCore, repo: Repository, p: BoardPayload,
     // import's pending ticket-scoped rows, applied to the tickets this post creates.
     settleSpawned(core, r, p, n, at);
     core.ownerState.applyPending(r, new Set(rows.map(({ row }) => row.id)), at);
+    core.claims.confirmOutputs(r, p.attestations ?? []);
     const seen = core.stations.apply(r, p.sha, n, stations, p.closed ?? [], at, wrote.closingParents);
     // R-BTN-116: the questions the post carries for its queued person legs (§4.4), then the
     // sync's attestations (R-BTN-191) — a person leg's answer, read from the ticket's
@@ -255,6 +256,8 @@ async function boardPost(core: BoardPostCore, repo: Repository, p: BoardPayload,
     // the blocks are re-evaluated below.
     core.questions.posted(r, p.tickets ?? [], new Set(stations.keys()));
     core.questions.attestations(r, p.attestations ?? []);
+  core.conditions.missingNext(r, core.stations.missingNext(r), at);
+  core.conditions.contractWaits(r, at);
     // B-129 (R-BTN-85, both values): a post whose ticket frontmatter says `available` while
     // the ticket is past its course's start — the snapshot implying a position Baton has
     // moved past, the false `available`/`prs: []` of the 2026-10-27 release — is a
@@ -264,8 +267,6 @@ async function boardPost(core: BoardPostCore, repo: Repository, p: BoardPayload,
     // where each ticket is queued — rewrite the changed tickets' blocks in this transaction.
     const dropped = applyBlocks(core, r, stations, upserted, legsBefore, changed.deleted > 0);
     if (dropped.length) changed.dropped = dropped.slice(0, 100);
-    // A non-fleet repository's fleet fields are ignored, and its answer says so.
-    if (reference(core, r, p)) changed.fleet_ignored = true;
     core.store.exec('INSERT INTO board_snapshots (repository_id, sha, parent_sha, received_at, ticket_count) VALUES (?, ?, ?, ?, ?) ON CONFLICT (repository_id, sha) DO NOTHING', r, p.sha, p.parent_sha, at, ticketCount);
     core.store.exec('INSERT INTO board_head (repository_id, sha) VALUES (?, ?) ON CONFLICT (repository_id) DO UPDATE SET sha = excluded.sha', r, p.sha);
     // B-127: the post's signed-control record stands for the repository (the latest post's
@@ -290,7 +291,7 @@ async function boardPost(core: BoardPostCore, repo: Repository, p: BoardPayload,
     core.observations.accept(r, n);
     const confirmed = core.claims.confirm(confirmations, n);
     // R-BTN-10, R-BTN-35, §2e: git confirms ends, takes tickets away and goes backwards.
-    const judged = core.claims.judge(r, n, seen);
+    const judged = core.claims.judge(r, n, seen, core.claims.evidenceOf(r, p.attestations));
     changed.confirmed = confirmed + judged.confirmed;
     changed.stale_released = judged.stale_released;
     remember();
@@ -571,6 +572,7 @@ function refreshStations(core: BoardPostCore, r: string, p: BoardPayload, n: num
   // 24 hours (R-BTN-62; round 2, 2-A-0). A plain refresh's own closures are applied as they
   // arrive (B-183): validation already refuses a post closing a ticket it also posts, and its
   // materialization dropped what it no longer names.
+  core.claims.confirmOutputs(r, p.attestations ?? []);
   const seen = core.stations.apply(r, p.sha, n, stations, (p.closed ?? []).filter((c) => held || !live.has(c.id)), at);
   // R-BTN-86: a refresh judges a `spawned` end's children as a new head does — it is a
   // reading too, numbered above the end's.
@@ -579,7 +581,9 @@ function refreshStations(core: BoardPostCore, r: string, p: BoardPayload, n: num
   // head (§4.4) — each is idempotent, so a re-post of the same question or answer moves nothing.
   core.questions.posted(r, (p.tickets ?? []).filter((t) => live.has(t.id)), new Set(stations.keys()));
   core.questions.attestations(r, p.attestations ?? []);
-  // A refresh's stations carry `needs` and `decisions` too (R-BTN-76, R-BTN-78); a refresh that
+  core.conditions.missingNext(r, core.stations.missingNext(r), at);
+  core.conditions.contractWaits(r, at);
+  // A refresh's stations carry `needs` and `decisions` too (R-BTN-76); a refresh that
   // materialized (B-183) recounts for what its rows moved, as a new head does.
   applyBlocks(core, r, stations, wrote?.upserted ?? [], legsBefore, !!wrote && wrote.deleted > 0);
   return seen;
@@ -595,14 +599,14 @@ function queuedLegs(core: Pick<BatonCore, 'sql'>, r: string): Map<string, string
  *  counts brought to what is needed now, and the rows of every ticket whose causes changed —
  *  its row, its needs or decisions, or its queued leg — rewritten. Returns what it reports: a
  *  need failing the resource rule or naming an unregistered resource, a decision with a reserved
- *  id or a url outside the ticket's repositories (R-BTN-76, R-BTN-78). */
+ *  id or a url outside the ticket's repositories (R-BTN-76). */
 function applyBlocks(core: Pick<BatonCore, 'sql' | 'blocks'>, r: string, stations: Map<string, PostedStation>, upserted: string[], legsBefore: Map<string, string | null>, removed = false): string[] {
   const live = core.sql<{ local_id: string }>('SELECT local_id FROM tickets WHERE repository_id = ?', r).map((x) => x.local_id);
   const { changed, dropped } = core.blocks.posted(r, stations, live);
   // A closed `baton:stalled`, the recount and the post's own rows are evaluated once, after all
   // three (R-BTN-75; B-49).
   core.blocks.batch(() => {
-    // R-BTN-78: a `baton:stalled` whose queued leg the snapshot posts other than waiting closes.
+    // A `baton:stalled` whose queued leg the snapshot posts other than waiting closes.
     core.blocks.settleStalled(r);
     // The counts follow what is needed: a post that changed a ticket — its row (where `requires`
     // lives), its needs or its decisions — or dropped one recounts; a post that changed nothing
@@ -660,42 +664,13 @@ function applyRegistry(core: Pick<BatonCore, 'courses' | 'stations' | 'claims' |
   return refused;
 }
 
-/** The reference data the sync posts with every snapshot (§7.3, §7.4): the reviewer catalog
- *  and matrix. Each table is a copy of a docs file, never edited here, so it is rewritten
- *  whole. The model tables' blocks — `providers`, `prices` — are gone (B-142): what they
- *  carried is a reading or a course rule (§6.3, R-BTN-76), and a sync that still posts them
- *  is accepted with the fields ignored.
- *  Returns whether the payload carried fleet data this repository may not write. */
-function reference(core: Pick<BatonCore, 'store' | 'registry'>, repo: string, p: BoardPayload): boolean {
-  const exec = (q: string, ...a: unknown[]) => core.store.exec(q, ...a);
-  // §6.8, R-BTN-66: a repository's transcript repositories are its owners' setting, never read
-  // from a board post (R3-1240); a sync that still sends them is not refused for it.
-  // The rest is the instance's: only the fleet repository writes it (interim, R3-1231 2b).
-  const carries = p.matrix != null || p.reviewers != null;
-  if (core.registry.fleetRepository() !== repo) return carries;
-  const catalog = p.reviewers ?? p.matrix?.agents;
-  if (catalog && p.matrix) {
-    exec('DELETE FROM reviewer_agents');
-    for (const [name, a] of Object.entries(catalog)) {
-      exec('INSERT INTO reviewer_agents (name, reviews_on, family, bills, models) VALUES (?, ?, ?, ?, ?)',
-        name, a.reviews_on, familyOf(a.reviews_on, p.matrix) ?? 'unknown', JSON.stringify(a.bills), a.models ? JSON.stringify(a.models) : null);
-    }
-  }
-  // Rule 8 (R-BTN-27) reads the whole matrix (rows, seats, costs) and the posted catalog.
-  if (p.matrix) exec(`INSERT INTO baton_settings (key, value) VALUES ('reviewer_matrix', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value`, JSON.stringify(p.matrix));
-  if (p.reviewers) exec(`INSERT INTO baton_settings (key, value) VALUES ('reviewer_catalog', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value`, JSON.stringify(p.reviewers));
-  return false;
-}
-
 function event(core: Pick<BatonCore, 'store'>, repo: string, kind: string, detail: unknown, at: number) {
   core.store.exec('INSERT INTO events (at, kind, actor, detail_json, repository_id) VALUES (?, ?, ?, ?, ?)', at, kind, 'sync', JSON.stringify(detail), repo);
 }
 
-
 /** §10.3: a repository's sync or mirror workflow, on its default branch. A repository with no
  *  mirror has nothing to dispatch for it; a retired one has nothing at all (R-BTN-47, B-173). A
- *  dispatch the forge refuses is logged with its reason (R-BTN-94): the want it answers stands
- *  until a post answers it, so a refusal costs latency, never correctness. */
+ *  dispatch the forge refuses is logged with its reason (R-BTN-94); the sync backstop still applies. */
 export async function sendDispatch(core: Pick<BatonCore, 'registry' | 'sql' | 'store' | 'now'>, dispatch: Dispatch, wf: Workflow): Promise<unknown> {
   const repo = core.registry.live(wf.repository);
   if (!repo) return false;
@@ -717,10 +692,10 @@ export async function sendDispatch(core: Pick<BatonCore, 'registry' | 'sql' | 's
   try {
     return await dispatch.send(target);
   } catch (e) {
-    // R-BTN-94: the forge's refusal, with its reason — identifiers only, never a body (the
-    // refusal's message is the forge's own words, capped like a notice's).
+    if (!(e instanceof DispatchRefused)) return false;
+    // R-BTN-94: identifiers and the adapter's short text reason, never the response payload.
     core.store.transaction(() => logEvent(core.store, core.now(), 'discrepancy', 'baton',
-      { kind: 'dispatch-refused', repository: wf.repository, workflow: wf.kind, reason: (e instanceof Error ? e.message : String(e)).slice(0, 500) },
+      { kind: 'dispatch-refused', repository: wf.repository, workflow: wf.kind, reason: e.message },
       null, null, wf.repository));
     return false;
   }

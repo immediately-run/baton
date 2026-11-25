@@ -139,22 +139,15 @@ describe('S-BTN-26 two repositories (registry half)', () => {
     expect(await rows(`SELECT ticket_id FROM claims`)).toEqual([{ ticket_id: 'ops:R3-9001' }]);
   });
 
-  it('only the fleet repository writes the instance’s fleet data (interim until part 2b)', async () => {
-    const fleet = () => rows(`SELECT key, value FROM baton_settings WHERE key = 'reviewer_matrix'`);
-    const before = await fleet();
-    expect(before.length).toBe(1);
-    const res = await opsCall('/v1/sync/board', payload('e'.repeat(40), OPS_SHA, opsBoard, { matrix: { ...(board.states.A.matrix as Record<string, unknown>), families: {} }, providers: board.states.A.providers }));
-    expect(await res.json()).toMatchObject({ ok: true, fleet_ignored: true });
-    expect(await fleet()).toEqual(before);
-    // B-142: `providers` is no longer fleet data — an ops post carrying it alone (residue the
-    // sync still posts through the window) is ignored on its own, without the fleet refusal.
-    const residueOnly = await opsCall('/v1/sync/board', payload('f'.repeat(40), 'e'.repeat(40), opsBoard, { providers: board.states.A.providers }));
-    expect(residueOnly.status).toBe(200);
-    expect(await residueOnly.json()).not.toHaveProperty('fleet_ignored');
-    // docs' own post still writes it, and says nothing was ignored.
-    const docs = await (await syncCall('/v1/sync/board', payload(sha.B, sha.A, board.states.B, { matrix: { ...(board.states.A.matrix as Record<string, unknown>), families: {} } }))).json();
-    expect(docs).not.toHaveProperty('fleet_ignored');
-    expect(JSON.parse((await fleet())[0].value as string).families).toEqual({});
+  it('ignores the old reviewer fields without widening sync credentials (B-285)', async () => {
+    const legacy = { matrix: { families: { stale: ['('] } }, reviewers: 'ignored' };
+    const body = payload(sha.B, OPS_SHA, opsBoard, legacy);
+    expect((await opsCall('/v1/sync/board', body, 'baton-mirror.yml')).status).toBe(403);
+    const res = await opsCall('/v1/sync/board', body);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ ok: true });
+    expect(await (await opsCall('/v1/sync/head')).json()).toMatchObject({ sha: sha.B });
+    expect(await (await syncCall('/v1/sync/head')).json()).toMatchObject({ sha: sha.A });
   });
 
   it('§6.8: a transcript pointer names one of its claim’s own repository’s transcript repositories', async () => {

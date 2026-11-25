@@ -4,6 +4,7 @@ import { SESSION_COOKIE } from '../admin';
 import { checkAccept, checkAttestation, checkResync } from '../validate';
 import { consentRoute } from '../dependencies';
 import { logEvent } from '../db';
+import { acceptsUnattestedHumanKey } from '../policy';
 import { liveRepoParam, pathSegment, qualifiedTicket, ticketOf } from './kit';
 import { authenticated, verifySigned, type PersonPrincipal } from './principal';
 
@@ -61,7 +62,7 @@ export async function ownerRoute(core: OwnerCore, req: Request, url: URL, princi
   }
   const resolve = /^tickets\/([^/]+)\/resolve$/.exec(rest);
   if (m === 'POST' && resolve) {
-    // R-BTN-78: an owner answers one of Baton's own decisions on a ticket of this repository.
+    // An owner answers one of Baton's own decisions on a ticket of this repository.
     // A local id is this repository's, as the repository reads take it (§11).
     const ticket = ticketOf(repo, resolve[1]);
     const b = await body();
@@ -215,11 +216,15 @@ export async function attestationRoute(core: Parameters<typeof authenticated>[0]
     const signed = await authenticated(core, req, (fp) => admins.get(fp) ?? core.admin.ownerKey(fp) ?? core.admin.humanKeyLine(fp));
     const fp = signed.cred;
     const human = await core.admin.isHumanKey(fp);
+    const policy = core.policies.current(repo)?.policy;
     if (admins.has(fp)) throw new BatonError('forbidden', 'an administrator’s key is never an owner key (R-BTN-57); a person’s answer is an owner’s or a human-only key’s');
     if (!human && !core.admin.owns(fp, repo)) throw new BatonError('forbidden', `this key neither owns ${repo} nor is a human-only key (R-BTN-116, R-BTN-185)`);
+    if (human && !acceptsUnattestedHumanKey(policy?.human_key ?? 'any')) {
+      throw new BatonError('forbidden', `${repo}'s policy requires an attested hardware key for a human answer (R-BTN-185)`);
+    }
     // §12.8, R-BTN-191: where the policy's `inputs.answers` is `attestation` (`protected`),
     // a person's answer counts from a human key alone — an owner key's does not.
-    if (!human && (core.policies.current(repo)?.policy.inputs.answers ?? 'git') === 'attestation') {
+    if (!human && policy?.inputs.answers === 'attestation') {
       throw new BatonError('forbidden', `${repo}'s policy counts a person's answer from a human key alone (inputs.answers: attestation)`);
     }
     const b = checkAttestation(await readJson(signed.req), repo);

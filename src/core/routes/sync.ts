@@ -150,7 +150,7 @@ export async function delivery(core: Pick<BatonCore, 'store' | 'webhooks' | 'syn
   if (out.outcome === 'dispatched') {
     // B-92's live run: the delivery's row is what proves it arrived, on either side of the
     // cutover. The dispatch itself goes to every repository the path named, whatever its mode
-    // (§7.1 R-BTN-73: the sync posts the board snapshot before the cutover too, and a snapshot
+    // (R-BTN-73: the sync posts the board snapshot before the cutover too, and a snapshot
     // under 15 minutes old is what cutover.ts needs when its day comes — the round-1 filter
     // held shadow repositories back while the alarm's own backstop sent them 30 seconds
     // later, so the code, the spec and the runbook disagreed until it went).

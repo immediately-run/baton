@@ -21,6 +21,13 @@ concurrency:
 
 jobs:
   report:
+    # Actions minutes (owner, 2026-11-23): the job bills a whole minute for seconds of work, and
+    # `edited` fires on every body edit. It can only fail on a pasted report, so it runs when the
+    # body holds one (or a FAIL row the script would read) and the event could have changed it; a
+    # skipped job reads as passed, as the script's own verdict without a report does.
+    if: >-
+      (github.event.action != 'edited' || github.event.changes.body != null)
+      && (contains(github.event.pull_request.body, '### Model checks') || contains(github.event.pull_request.body, '**FAIL**'))
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

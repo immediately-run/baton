@@ -5,6 +5,7 @@ import { clientVersionOf } from '../../shared/versions.mjs';
 import { checkBlockedOn, checkSequenceTake, COURSE_ID, SEQUENCE_KIND, TICKET_ID, repositoryOf } from '../validate';
 import { HISTORY_PAGE_MAX } from '../history';
 import { boardView } from '../views';
+import type { SessionLinkView } from '../links';
 import type { ReadPrincipal } from '../reads/kit';
 import { liveRepoParam, pathSegment, requireGrant, runnerSecret, ticketOf } from './kit';
 import { authenticated } from './principal';
@@ -85,7 +86,7 @@ export async function sequenceRoute(core: Parameters<typeof authenticated>[0] & 
  * runner session's own answer, so it needs the session's secret. B-192: served through
  * src/core/reads/repository.ts, for a session beside those keys.
  */
-export async function repositoryRead(core: Parameters<typeof boardView>[0] & Pick<BatonCore, 'policies' | 'instance' | 'blocks' | 'history'>, req: Request, url: URL, repo: string, who: ReadPrincipal): Promise<Response | null> {
+export async function repositoryRead(core: Parameters<typeof boardView>[0] & Pick<BatonCore, 'policies' | 'instance' | 'blocks' | 'history'>, req: Request, url: URL, repo: string, who: ReadPrincipal, sessionLink: SessionLinkView): Promise<Response | null> {
   const blocks = /^\/v1\/repositories\/([^/]+)\/tickets\/([^/]+)\/blocks$/.exec(url.pathname);
   const blocked = /^\/v1\/repositories\/([^/]+)\/blocked$/.exec(url.pathname);
   // R-BTN-81: a ticket's history, read by the principals that may read its blocks (§11).
@@ -123,7 +124,7 @@ export async function repositoryRead(core: Parameters<typeof boardView>[0] & Pic
       ? [...new Set(core.runners.grantedCapabilities(cred, repo))].filter((x) => x !== 'none').sort()
       : null;
   }
-  if (boardRead) return json(boardView(core, repo, granted));
+  if (boardRead) return json(boardView(core, repo, granted, sessionLink));
   if (policy) return policyRead(core, repo);
   if (show) {
     const id = ticketOf(repo, show[2]);
@@ -167,7 +168,7 @@ export async function repositoryRead(core: Parameters<typeof boardView>[0] & Pic
     const id = ticketOf(repo, runs[2]);
     const leg = seg(runs[3]);
     if (!COURSE_ID.test(leg)) throw new BatonError('invalid-params', 'leg: must be a leg id');
-    return json(core.claims.runsOf(id, leg));
+    return json(core.claims.runsOf(id, leg, sessionLink));
   }
   if (blocks) {
     const id = ticketOf(repo, blocks[2]);

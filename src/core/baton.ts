@@ -13,6 +13,7 @@ import { RunnerApi } from './runnerApi';
 import { Claims } from './claims';
 import { Cutover } from './cutover';
 import { Mirror } from './mirror';
+import { hiddenSessionLink } from './links';
 import { Courses } from './courses';
 import { Observations } from './observations';
 import { Sequences } from './sequences';
@@ -115,8 +116,7 @@ export class BatonCore {
     this.registry = new Registry({ store, now: () => this.now(), ensurePolicy: (repository, forge) => this.policies.ensure(repository, forge) });
     // §12.8 (B-145): the policy store, before everything that reads a knob — the claims' floor
     // rule, the heartbeat's reports and pins, the owner routes' approver checks.
-    this.policies = new Policies({ store, now: () => this.now() });
-    this.policies.releaseForFloor = (repository) => this.claims.releaseForFloor(repository);
+    this.policies = new Policies({ store, now: () => this.now(), releaseForFloor: (repository) => this.claims.releaseForFloor(repository) });
     // R3-1258: the capacity envelope (R-BTN-87) and owner state (R-BTN-88), each one module
     // with the store and the clock alone.
     this.capacity = new Capacity({ store, now: () => this.now(), config: ports.config });
@@ -170,6 +170,8 @@ export class BatonCore {
     // a sync is asked (R-BTN-73) — and what it may not apply it records, never refusing (R-BTN-39).
     this.questions = new Questions({ store, now: () => this.now(), graph: (repo, course) => this.stations.graph(repo, course), history: this.history,
       queued: (ticket) => this.queues.touch(ticket), reevaluate: (ticket) => this.blocks.write([ticket]), isHeld: (ticket) => this.blocks.isHeld(ticket),
+      closeMissingNext: (ticket, at) => this.conditions.closeMissingNext(ticket, at),
+      contractWaits: (repo, at, ticket) => this.conditions.contractWaits(repo, at, ticket),
       linkBases: (ticket) => this.blocks.linkBases(ticket), answersFrom: (repo) => this.policies.current(repo)?.policy.inputs.answers ?? 'git',
       dispatch: (kind, ticketId) => want({ repository: repositoryOf(ticketId), kind }) });
     // B-234 (R-BTN-160, R-BTN-195): the raised conditions — a course's own vocabulary decides a
@@ -296,7 +298,7 @@ export class BatonCore {
 
   /** §3: the one alarm, every 60 seconds — earlier when a webhook's trailing dispatch or the
    *  webhook path's own backstop is due. */
-  // @model alarmLive sha256:6f9056ae3a4b
+  // @model alarmLive sha256:9738e53567a4
   async alarm(): Promise<void> {
     // R-BTN-88 (§4.8, R3-1258): a sealed Baton's alarm idles — it logs nothing and touches
     // nothing; the next period is kept armed (B-229), so the instance that imports this state
@@ -482,7 +484,7 @@ export class BatonCore {
 
   private rowsFor = rowsFor;
 
-  // @model syncPost sha256:231806fa206f
+  // @model syncPost sha256:9d500d65a2bf
   async board(repo: Repository, p: BoardPayload) {
     return board(this, repo, p, this.rowsFor);
   }
@@ -491,6 +493,6 @@ export class BatonCore {
 
   adminView() { return adminView(this); }
   grantsView(repo: string) { return grantsView(this, repo); }
-  boardView(repo: string, granted: string[] | null = null) { return boardView(this, repo, granted); }
+  boardView(repo: string, granted: string[] | null = null, sessionLink = hiddenSessionLink) { return boardView(this, repo, granted, sessionLink); }
   stateView() { return stateView(this); }
 }

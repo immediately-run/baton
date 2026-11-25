@@ -12,7 +12,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { CREATE_PR_COURSE, stationsPr, type PrGraph } from '../../src/defaults/course-pr';
 import type { RecordedLeg } from '../../src/defaults/pr-markers';
 import type { SourceTicket } from '../../src/defaults/tickets-markdown';
-import { advance, claimItem, claimRow, course, cutover, endClaim, Git, keyCall, observe, placed, register, rows, setAdminKeys, setClock, withCore } from '../helpers';
+import { advance, claimItem, claimRow, course, cutover, endClaim, evidenceFound, Git, keyCall, observe, placed, register, rows, setAdminKeys, setClock, withCore } from '../helpers';
 import { makeKey, type TestKey } from '../lib/sshKeys';
 
 const T0 = Date.parse('2026-11-17T09:00:00Z');
@@ -29,7 +29,10 @@ async function synced(id: string) {
   const legs = (json as { legs?: RecordedLeg[] }).legs ?? [];
   const st = stationsPr({ tickets: [source(id)], facts: [], closed: new Set(), graph: CREATE_PR_COURSE as unknown as PrGraph, baton: { legs } }).stations[id];
   git.place(id, st);
-  const posted = await git.post({ observation: json.observation });
+  // R-BTN-10: the sync attests each listed end's evidence; the delivered commit is in git.
+  const unconfirmed = (json as { unconfirmed?: { ticket: string; claim: number; evidence: string }[] }).unconfirmed ?? [];
+  const attestations = unconfirmed.flatMap((u) => evidenceFound(u.claim, u.evidence, u.ticket).attestations);
+  const posted = await git.post({ observation: json.observation, ...(attestations.length ? { attestations } : {}) });
   return { legs, st, posted };
 }
 const station = (local: string) => rows<{ station: string; next_leg: string | null }>('SELECT station, next_leg FROM ticket_stations WHERE ticket_id = ?', `docs:${local}`);

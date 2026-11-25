@@ -181,7 +181,7 @@ export async function runnerRoute(core: RunnerCore, req: Request, url: URL, prin
 }
 
 /**
- * `/v1/courier/*` (R-BTN-80, R-BTN-103, §11): signed by a personal courier's key, or by a machine
+ * `/v1/courier/*` (§11): signed by a personal courier's key, or by a machine
  * key naming `?repository=` — granted there, its sessions having declared `couriers` for it within
  * the day — acting as a runner courier on that repository's pool, with no runner secret. A key in
  * any other role is `forbidden`.
@@ -198,11 +198,11 @@ export async function courierRoute(core: Pick<BatonCore, 'admin' | 'config' | 'n
     if (raw != null) throw new BatonError('invalid-params', 'repository: only a machine key names one; a courier key claims its own notices');
     who = { kind: 'personal', fingerprint: fp };
   } else if (cred?.kind === 'runner') {
-    if (raw == null) throw new BatonError('invalid-params', 'repository: a machine key delivers one repository’s pool at a time (R-BTN-103)');
+    if (raw == null) throw new BatonError('invalid-params', 'repository: a machine key delivers one repository’s pool at a time');
     const repository = checkRepositoryId(raw);
     requireGrant(core.store, fp, repository);
     const asks = core.notices.runnerAsks(fp, repository);
-    if (!asks.length) throw new BatonError('forbidden', `no session of this key declared couriers for ${repository} within the day (R-BTN-103)`);
+    if (!asks.length) throw new BatonError('forbidden', `no session of this key declared couriers for ${repository} within the day`);
     who = { kind: 'runner', fingerprint: fp, repository, asks };
   } else throw new BatonError('forbidden', 'only a courier key or a machine key delivers notices (R-BTN-57)');
   const p = url.pathname;
