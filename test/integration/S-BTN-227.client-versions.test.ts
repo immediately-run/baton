@@ -148,6 +148,8 @@ describe(`S-BTN-227 the client versions Baton serves (${HOST})`, () => {
     expect((await claimItem('vm-b', secret, { ticket_id: 'docs:T-2' }, 'baton/0.1.3')).status).toBe(426);
     expect(await rows('SELECT status FROM claims')).toEqual([{ status: 'active' }]);
     // R-BTN-9: the lease lapses, and the alarm reaps the claim — the runner's one way out.
+    await setClock(T0 + 8 * 60_000);
+    await tick(); // Baton is still serving.
     await setClock(T0 + 16 * 60_000);
     await tick();
     expect(await rows('SELECT status FROM claims WHERE id = ?', claimId)).toEqual([{ status: 'reaped' }]);

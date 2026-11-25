@@ -146,7 +146,7 @@ here; every other cause is its rule's.
 | `POST /v1/owner/{repository}/bars` | owner | `{course, tag, legs?, applies, starts_at?, ends_at?, release_holders?, reason}` | `{id}` | R-BTN-67 |
 | `POST /v1/owner/{repository}/bars/{id}/lift` | owner | — | `{ok: true}` | R-BTN-67, R-BTN-186 |
 | `PUT /v1/owner/{repository}/settings` | owner | any owner setting (§13.1); `code_repos` as `[{path}]` | `{ok: true}` | R-BTN-66, R-BTN-140, R-BTN-186 |
-| `PUT /v1/owner/{repository}/policy` | owner | `{base_version, policy}` or `{base_version, preset}` | `{version, hash, changed[], guarantees}`; `conflict` when stale, `forbidden`, `floor-violated` | R-BTN-188, R-BTN-189 |
+| `PUT /v1/owner/{repository}/policy` | owner | `{base_version, policy, dry_run?}` or `{base_version, preset, dry_run?}` (`dry_run` is boolean) | `{version, hash, changed[], guarantees}` or, with `dry_run: true`, `{changed[], guarantees, trust_cleared[], stops: {legs[], tickets[]}, not_evaluated[]}`; `conflict` when stale, `forbidden`, `floor-violated` | R-BTN-188, R-BTN-189 |
 | `GET/HEAD /v1/owner/{repository}/policy/log` | owner | `?after=<version>` | `{versions: [{version, hash, previous_hash, changed_by, approver, preset?, at, changed[]}]}` | R-BTN-188 |
 | `POST /v1/human-keys` | a `human_only` key | `{public_key, signature}`, `signature` the new key's SSHSIG over its own public line; or `{fingerprint, revoke: true, confirm: true}` | `{ok: true}`; `conflict`; `unsatisfiable-approvers` | R-BTN-185, R-BTN-188 |
 | **Sync and forges** | | | | |
@@ -180,7 +180,7 @@ here; every other cause is its rule's.
 | **Dashboard** | | | | |
 | `POST /v1/login` | none, or a verified Cloudflare Access assertion | `{token}` or `{access: true}`, exactly one (else `invalid-params`) | `{ok: true}` and the session cookie; else `unauthenticated` (with `reason` for Access; see R-BTN-155) or `unavailable`, and no cookie | R-BTN-155 |
 | `POST /v1/ui/logout` | session | `{}` | `{ok: true}` and the session cookie cleared; the caller's own session ends (`ui.logout`) | R-BTN-155 |
-| `POST /v1/ui/messages` | session | `{to_runner_id, kind: "release" \| "status_request" \| "wind-down", payload}`; Stop is `{kind: "release", payload: {ticket_id, reason: "requested"}}` | `{id}`; `forbidden` for a `release` whose ticket `to_runner_id` does not hold; any other kind `invalid-params` | §6, R-BTN-119 |
+| `POST /v1/ui/messages` | session | `{to_runner_id, kind: "release" \| "status_request" \| "wind-down", payload}`; Stop is `{kind: "release", payload: {ticket_id, reason: "requested"}, confirm: true}` | `{id}`; `forbidden` for a `release` whose ticket `to_runner_id` does not hold; any other kind `invalid-params` | §6, §12.2, R-BTN-119 |
 | `POST /v1/ui/overrides/{ticket}` | session | `{expedite}` or `{hold}` | `{ok: true}` | §6 |
 | `POST /v1/ui/board/accept` | session | `{repository, sha}` | `{ok: true}` (`repo.accept-post`); `not-found` for no such held history | R-BTN-11 |
 | `POST /v1/ui/resync` | session | `{repository}` | `{ok: true}` (`repo.resync`): the repository's sync workflow is dispatched, as a delivery dispatches it; `conflict` within 30 seconds of the last one or with no sync workflow registered; `invalid-params` for `force` or `sha` | R-BTN-73, R-BTN-94 |

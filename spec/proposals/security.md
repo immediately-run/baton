@@ -11,13 +11,13 @@ answer as an attestation; the
 policy's knobs are stored and computed over, and what enforces `merge.*`, `paths.*`,
 `tickets.created: proposed` and the `std:` types below is this page.
 
-## 1. The policy's dry run (R-BTN-188, proposed)
+## 1. Extending the policy's dry run (R-BTN-188, proposed)
 
-`PUT /v1/owner/{repository}/policy` with `dry_run: true` (`baton owner policy apply <preset>
---dry-run`) writes nothing and answers what the change would do: the knobs changed, each
-guarantee held or broken after it, and what the new values would stop — runners delivering the
-source kinds that a new `outbox.source` no longer admits, queued legs whose requirements the new `attestations` entries admit no writer for, tickets on a
-course whose `merge` leg a new `merge.trusted` leaves without a runner whose grant names its capability (rule `trusted`, R-BTN-182), and, for a change
+R-BTN-188 specifies the built preview. Still proposed are stops for runners delivering the source
+kinds that a new `outbox.source` no longer admits, queued legs whose requirements the new
+`attestations` entries admit no writer for, tickets on a course whose `merge` leg a new
+`merge.trusted` leaves without a runner whose grant names its capability (rule `trusted`,
+R-BTN-182), and, for a change
 to `repos.unlisted`, the live tickets whose `repos:` entries lose reach (`stops.unreached`).
 
 ## 2. Checking the forge's protection (§12.8, proposed)

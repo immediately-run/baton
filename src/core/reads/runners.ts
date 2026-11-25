@@ -14,9 +14,10 @@
 // B-184): a runner's `executor`, a run's `executor_digest`, `environment` and `instance`. The
 // answer says so in `not_built` instead of inventing them. A run's `log_dir` is the column as
 // stored (`claim_legs.leg_log_dir`), which nothing writes yet (B-23).
-import { isLive, leaseEndsAt } from '../runnerLiveness';
+import { isLive } from '../runnerLiveness';
 import { runnerLatest } from '../runnerLatest';
 import { BatonError } from '../http';
+import { CLAIM_LEASE_END_SQL } from '../claims';
 import { transcriptUrl, type SessionLinkView } from '../links';
 import { graphOf, type Graph } from '../graph';
 import { grantedKeySql } from '../validate';
@@ -146,13 +147,14 @@ export function runnerRows(cx: ReadCtx, repo: string, sessionLink: SessionLinkVi
      WHERE f.repository_id = ? AND f.runner_id IN (SELECT value FROM json_each(?)) ORDER BY f.course_id`, repo, ids));
   // Every live claim of these runners, here or elsewhere, with its running leg, that leg's run
   // number on the ticket and the ticket's backoff — one statement.
-  const claims = grouped(of<{ runner_id: number; id: number; ticket_id: string; station: string; course_id: string | null; claimed_at: number; deadline_at: number | null;
+  const claims = grouped(of<{ runner_id: number; id: number; ticket_id: string; station: string; course_id: string | null; claimed_at: number; deadline_at: number | null; lease_ends_at: number | null;
     leg: string | null; run_id: string | null; session_url: string | null; session_incarnation: number | null; leg_log_dir: string | null; attempt: number | null; retry_after: number | null }>(
     `SELECT c.runner_id, c.id, c.ticket_id, c.station, c.course_id, c.claimed_at, c.deadline_at,
+            CASE WHEN w.kind != 'legacy' THEN ${CLAIM_LEASE_END_SQL} END AS lease_ends_at,
             l.leg, l.run_id, l.session_url, l.session_incarnation, l.leg_log_dir,
             (SELECT COUNT(*) FROM claim_legs x JOIN claims y ON y.id = x.claim_id WHERE y.ticket_id = c.ticket_id AND x.leg = l.leg) AS attempt,
             o.retry_after
-     FROM claims c
+     FROM claims c JOIN runners w ON w.id = c.runner_id
      LEFT JOIN claim_legs l ON l.claim_id = c.id
        AND l.seq = (SELECT MAX(m.seq) FROM claim_legs m WHERE m.claim_id = c.id AND m.finished_at IS NULL AND m.abandoned_at IS NULL)
      LEFT JOIN ticket_overrides o ON o.ticket_id = c.ticket_id
@@ -195,12 +197,11 @@ export function runnerRows(cx: ReadCtx, repo: string, sessionLink: SessionLinkVi
   const profiles = new Map<number, unknown>();
   const rows = raw.map((w): RunnerRow => {
     const mine = claims.get(w.id) ?? [];
-    const leaseEnds = w.kind === 'legacy' ? null : leaseEndsAt(w);
     const here = mine.filter((c) => c.ticket_id.startsWith(prefix)).map((c): RunnerClaim => {
       const a = activity.get(c.id);
       return {
         claim_id: c.id, ticket_id: c.ticket_id, station: c.station, leg: c.leg, run_id: c.run_id, claimed_at: c.claimed_at,
-        lease_ends_at: leaseEnds, deadline_at: c.deadline_at,
+        lease_ends_at: c.lease_ends_at, deadline_at: c.deadline_at,
         attempt: c.leg == null ? null : c.attempt,
         max_runs: c.leg != null && c.course_id != null ? graphs.get(c.course_id)?.legs.get(c.leg)?.maxRuns ?? null : null,
         next_backoff_until: c.retry_after != null && c.retry_after > now ? c.retry_after : null,
