@@ -55,7 +55,7 @@ function Body({ c, repository }: { c: ConditionShown; repository: string }) {
       )}
       {interact && open ? (
         <Band tone="warn">
-          <p>A leg asks a person into its session. {c.url ? <ExtLink href={c.url} kind="session" showHost>Open session</ExtLink> : <span className="mut">Baton holds no link for it.</span>}</p>
+          <p>A leg asks a person into its session. {c.url ? <ExtLink href={c.url} kind="session" showHost /> : <span className="mut">Baton holds no link for it.</span>}</p>
         </Band>
       ) : null}
       <Section title="The condition">

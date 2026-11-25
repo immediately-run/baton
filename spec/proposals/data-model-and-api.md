@@ -139,11 +139,11 @@ Design: BATON_SPEC §10's check courses and check-runners (B-5).
 
 | Table | Key | Columns | Purpose |
 |---|---|---|---|
-| `check_runners` | `(credential_id, repository_id)` | `capabilities` JSON (expanded), `max_tier`, `added_by`, `added_at`, `revoked_at` | Check-runner keys; the row stands in for a grant (R-BTN-114) |
+| `check_runners` | `(credential_id, repository_id)` | `capabilities` JSON (expanded), `added_by`, `added_at`, `revoked_at` | Check-runner keys; the row stands in for a grant (R-BTN-114) |
 
 | Route | Caller | Body or query | Response | Rules |
 |---|---|---|---|---|
-| `POST /v1/owner/{repository}/check-runners`, `…/check-runners/{fingerprint}/revoke` | owner | `{public_key, name, capabilities?, max_tier?}`; revoke `{confirm: true}` | `{ok: true}` | R-BTN-114 |
+| `POST /v1/owner/{repository}/check-runners`, `…/check-runners/{fingerprint}/revoke` | owner | `{public_key, name, capabilities?}`; revoke `{confirm: true}` | `{ok: true}` | R-BTN-114 |
 
 ## The executor's run record and leg logs
 
@@ -164,11 +164,11 @@ Design: registration tokens beside keys (R-BTN-117, R-BTN-157; B-8). `credential
 
 | Table | Key | Columns | Purpose |
 |---|---|---|---|
-| `registration_tokens` | `id` (of `brt_<id>_<secret>`) | `repository_id`, `secret_hash`, `role` (`runner`), `capabilities` JSON, `max_tier`, `uses_left`, `grant_ttl_s`, `expires_at`, `created_by`, `created_at`, `revoked_at` | R-BTN-117, R-BTN-157 |
+| `registration_tokens` | `id` (of `brt_<id>_<secret>`) | `repository_id`, `secret_hash`, `role` (`runner`), `capabilities` JSON, `uses_left`, `grant_ttl_s`, `expires_at`, `created_by`, `created_at`, `revoked_at` | R-BTN-117, R-BTN-157 |
 
 | Route | Caller | Body or query | Response | Rules |
 |---|---|---|---|---|
-| `POST /v1/owner/{repository}/tokens`, `…/tokens/{id}/revoke` | owner | `{role: "runner", capabilities?, max_tier?, ttl_s?, uses?, grant_ttl_s?}`; revoke `{confirm: true}` | `{id, token}`, the token once; revoking revokes every credential it registered | R-BTN-117, R-BTN-157 |
+| `POST /v1/owner/{repository}/tokens`, `…/tokens/{id}/revoke` | owner | `{role: "runner", capabilities?, ttl_s?, uses?, grant_ttl_s?}`; revoke `{confirm: true}` | `{id, token}`, the token once; revoking revokes every credential it registered | R-BTN-117, R-BTN-157 |
 | `POST /v1/register` | `Authorization: Baton-Token <token>` | `{name, public_key}` or `{name, api_key: true}` | `{credential_id, grant}`, and `{api_key}` once for the second form; `forbidden` beyond the token's scope; `unauthenticated` for a spent, expired or revoked token; `conflict` | R-BTN-117 |
 
 ## Attestations, roles and fact legs

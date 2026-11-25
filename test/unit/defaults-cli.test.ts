@@ -597,7 +597,7 @@ describe('baton repo init, through the built CLI', () => {
     expect(settings.agent_command).not.toMatch(/[<>|]/);
     expect(splitWords(settings.agent_command).at(0)).toBe('opencode');
     expect(settings).toMatchObject({ items: 'tickets', default_course: 'create-pr' });
-    expect(settings.courses).toEqual([{ id: 'create-pr', version: 1, min_runner_version: 1, skill: 'baton-create-pr', step_kinds: ['implement', 'run-tests', 'review', 'fix', 'adjudicate', 'merge', 'confirm'], branch_pattern: 'claude/{ticket}-*', protocol_files: [], source: sourceOf('create-pr') }]);
+    expect(settings.courses).toEqual([{ id: 'create-pr', version: 2, min_runner_version: 1, skill: 'baton-create-pr', step_kinds: ['implement', 'run-tests', 'review', 'fix', 'adjudicate', 'merge', 'confirm'], branch_pattern: 'claude/{ticket}-*', protocol_files: [], source: sourceOf('create-pr') }]);
     expect(JSON.parse(readFileSync(join(root, '.baton', 'courses', 'create-pr', 'course.json'), 'utf8'))).toEqual(JSON.parse(JSON.stringify(CREATE_PR_COURSE)));
     const workflow = readFileSync(join(root, '.github', 'workflows', 'baton-sync.yml'), 'utf8');
     expect(workflow).toBe(syncWorkflow(PIN));
@@ -1481,6 +1481,87 @@ describe('baton repo init, through the built CLI', () => {
     }
   }, 60_000);
 
+  it.each(['implement', 'fix'])('%s: a joinable run survives idle, but stops on release or the hard ceiling without using partial output (S-BTN-222)', async (leg) => {
+    const settingsFile = join(root, '.baton', 'baton.json');
+    const before = readFileSync(settingsFile, 'utf8');
+    const stub = join(root, '.baton', 'courses', 'create-pr', 'legs', `${leg}.mjs`);
+    const restore = shrinkBounds(stub, 500, 2_500);
+    const pidFile = join(root, 'asking.pid');
+    const agent = join(root, 'asking.mjs');
+    writeFileSync(agent, `import { writeFileSync } from 'node:fs';
+console.log('work pushed, awaiting owner');
+writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));
+setInterval(() => {}, 60_000);
+`);
+    try {
+      writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(before), agent_command: `"${process.execPath}" "${agent}"` }));
+      const snapshot = { sha: commitAll(root) };
+      const run = (await load(stub)).run;
+      const ctx = { ticket: { id: 'B-1' }, checkout: root, snapshot, can_interact: true };
+      const abort = new AbortController();
+      // Release well after the idle cutoff, but before the ceiling. A stub that incorrectly
+      // takes the quiet path would settle before the release, not with the release reason.
+      const release = setTimeout(() => abort.abort('leg-timeout'), 1_250);
+      try {
+        await expect(run({ ...ctx, signal: abort.signal })).rejects.toThrow('the agent was stopped: leg-timeout');
+      } finally {
+        clearTimeout(release);
+      }
+      expect(await agentGone(pidFile)).toBe(true);
+      rmSync(pidFile);
+      await expect(run(ctx)).rejects.toThrow('the agent was stopped: the leg reached its hard ceiling');
+      expect(await agentGone(pidFile)).toBe(true);
+    } finally {
+      restore();
+      writeFileSync(settingsFile, before);
+      rmSync(agent, { force: true });
+      rmSync(pidFile, { force: true });
+      commitAll(root);
+    }
+  }, 30_000);
+
+  it('a joinable run fails at the ceiling even when a descendant holds the exited wrapper’s pipes (S-BTN-222)', async () => {
+    const settingsFile = join(root, '.baton', 'baton.json');
+    const before = readFileSync(settingsFile, 'utf8');
+    const stub = join(root, '.baton', 'courses', 'create-pr', 'legs', 'implement.mjs');
+    const restore = shrinkBounds(stub, 500, 1_500);
+    const wrapper = join(root, 'pipe-wrapper.mjs');
+    const release = join(root, 'pipe-release');
+    const closed = join(root, 'pipe-closing');
+    const pidFile = join(root, 'pipe-wrapper.pid');
+    const descendant = `
+import { existsSync, writeFileSync } from 'node:fs';
+const limit = Date.now() + 5000;
+const watch = setInterval(() => {
+  if (Date.now() < limit && !existsSync(${JSON.stringify(release)})) return;
+  clearInterval(watch);
+  writeFileSync(${JSON.stringify(closed)}, 'closing');
+}, 25);`;
+    writeFileSync(wrapper, `import { spawn } from 'node:child_process';
+import { writeFileSync } from 'node:fs';
+spawn(process.execPath, ['--input-type=module', '-e', ${JSON.stringify(descendant)}], { stdio: 'inherit' }).unref();
+writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));
+`);
+    try {
+      writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(before), agent_command: `"${process.execPath}" "${wrapper}"` }));
+      const snapshot = { sha: commitAll(root) };
+      const run = (await load(stub)).run;
+      await expect(run({ ticket: { id: 'B-1' }, checkout: root, snapshot, can_interact: true }))
+        .rejects.toThrow('the agent was stopped: the leg reached its hard ceiling');
+      expect(await agentGone(pidFile)).toBe(true);
+      expect(existsSync(closed), 'failure does not wait for inherited pipes to close').toBe(false);
+    } finally {
+      if (existsSync(pidFile)) {
+        writeFileSync(release, 'release');
+        await vi.waitFor(() => expect(existsSync(closed)).toBe(true), { timeout: 5000 });
+      }
+      restore();
+      writeFileSync(settingsFile, before);
+      for (const file of [wrapper, release, closed, pidFile]) rmSync(file, { force: true });
+      commitAll(root);
+    }
+  }, 30_000);
+
   it('the stub prepends the agent_wrapper — the host’s BATON_AGENT_WRAPPER over the file — and the example wrapper passes the answer through with a byte-identical log (B-95)', async () => {
     // A wrapper sees the whole leg command as its arguments. Here it hands them to a reporter
     // (a node script, so nothing in a shell re-splits them), then runs the agent as its own
@@ -1675,7 +1756,7 @@ describe('baton repo init, through the built CLI', () => {
       baton(root, 'repo', 'init', '--pin', PIN, '--force');
       const forced = JSON.parse(readFileSync(settingsFile, 'utf8'));
       expect(forced).toMatchObject({ repos: { docs: 'o/docs' }, agent_command: 'my-agent', default_course: 'create-pr' });
-      expect(forced.courses.map((c: { id: string; version: number }) => [c.id, c.version])).toEqual([['create-pr', 1], ['bug-report', 1]]);
+      expect(forced.courses.map((c: { id: string; version: number }) => [c.id, c.version])).toEqual([['create-pr', 2], ['bug-report', 1]]);
       expect(readFileSync(stub, 'utf8')).not.toContain('// edited by hand');
     } finally {
       writeFileSync(settingsFile, settings);
@@ -2518,19 +2599,57 @@ describe('course sources and leg overrides (B-33)', () => {
   it('init moves a course’s source to this CLI’s commit, rewriting its course file and leg scripts and keeping the repository’s files', () => {
     const settingsFile = join(root, '.baton', 'baton.json');
     const stub = join(legs(), 'fix.mjs');
+    const graph = join(legs(), '..', 'course.json');
+    const instructions = ['implement', 'fix'].map((leg) => join(legs(), `${leg}.md`));
+    const before = [stub, graph, ...instructions].map((file) => readFileSync(file, 'utf8'));
     const settings = JSON.parse(readFileSync(settingsFile, 'utf8'));
     const old = `github/${SELF.slug}/${'1'.repeat(40)}/create-pr`;
-    writeFileSync(settingsFile, JSON.stringify({ ...settings, agent_command: 'mine', courses: [{ ...settings.courses[0], source: old, version: 4 }] }, null, 2));
+    writeFileSync(settingsFile, JSON.stringify({ ...settings, agent_command: 'mine', courses: [{ ...settings.courses[0], source: old, version: 1 }] }, null, 2));
     writeFileSync(stub, '// an older release\n');
+    const legacy = JSON.parse(before[1]);
+    for (const leg of Object.values(legacy.legs) as Record<string, unknown>[]) {
+      delete leg.max_duration;
+      delete leg.autonomous;
+    }
+    writeFileSync(graph, JSON.stringify(legacy));
+    for (const file of instructions) writeFileSync(file, '<!-- home-owned instructions -->\n');
     writeFileSync(join(legs(), 'review.run.mjs'), '// ours\nexport async function run(ctx, standard) { return standard(ctx); }\n');
     try {
       expect(baton(root, 'repo', 'init', '--pin', PIN)).toContain(`create-pr now from ${SELF.sha.slice(0, 10)}`);
       const moved = JSON.parse(readFileSync(settingsFile, 'utf8'));
-      expect(moved).toMatchObject({ agent_command: 'mine', courses: [{ id: 'create-pr', version: 4, source: sourceOf('create-pr') }] });
+      expect(moved).toMatchObject({ agent_command: 'mine', courses: [{ id: 'create-pr', version: 1, source: sourceOf('create-pr') }] });
+      expect(JSON.parse(readFileSync(graph, 'utf8'))).toEqual(CREATE_PR_COURSE);
       expect(readFileSync(stub, 'utf8')).toContain('.baton/courses/create-pr/legs/fix.run.mjs'); // the current leg script, bundled
+      for (const file of instructions) expect(readFileSync(file, 'utf8')).toBe('<!-- home-owned instructions -->\n');
+
+      // Generate defaults in a scratch home and carry over only the version, new text,
+      // and briefing; neither force nor replacing the live home-owned files is necessary.
+      const fresh = mkdtempSync(join(tmpdir(), 'baton-create-pr-v2-'));
+      try {
+        gitInit(fresh);
+        baton(fresh, 'repo', 'init', '--course', 'create-pr');
+        const defaults = JSON.parse(readFileSync(join(fresh, '.baton', 'baton.json'), 'utf8'));
+        moved.courses[0].version = defaults.courses[0].version;
+        moved.agent_command += ` ${defaults.agent_command.slice(defaults.agent_command.indexOf(' "You are a Baton leg agent.'))}`;
+        writeFileSync(settingsFile, JSON.stringify(moved));
+        for (const file of instructions) {
+          const standard = readFileSync(join(fresh, '.baton', 'courses', 'create-pr', 'legs', file.split('/').at(-1)!), 'utf8');
+          writeFileSync(file, readFileSync(file, 'utf8') + standard);
+        }
+        baton(root, 'repo', 'init', '--pin', PIN);
+        expect(JSON.parse(readFileSync(settingsFile, 'utf8'))).toMatchObject({
+          agent_command: expect.stringMatching(/^mine .*harness's question tool/), courses: [{ version: 2 }],
+        });
+        for (const file of instructions) {
+          expect(readFileSync(file, 'utf8')).toMatch(/^<!-- home-owned instructions -->[\s\S]*Ask the owner only when blocked/);
+        }
+      } finally {
+        rmSync(fresh, { recursive: true, force: true });
+      }
       expect(readFileSync(join(legs(), 'review.run.mjs'), 'utf8')).toContain('// ours');
     } finally {
       writeFileSync(settingsFile, `${JSON.stringify(settings, null, 2)}\n`);
+      [stub, graph, ...instructions].forEach((file, i) => writeFileSync(file, before[i]));
       commitAll(root);
     }
   }, 120_000);

@@ -56,11 +56,11 @@ export function hostOf(href: string): string {
 }
 
 /** A link to another origin, drawn only when it passes the rule; otherwise its text alone.
- *  `children` default to the URL as text. Always a new tab, never an opener. */
+ *  `children` default to the URL as text, or a neutral label for session links. Always a new tab, never an opener. */
 export function ExtLink({ href, kind, children, showHost }: { href: unknown; kind?: LinkKind; children?: ReactNode; showHost?: boolean }) {
   const ctx = useLinkContext();
   const safe = safeHref(href, ctx, kind);
-  const label = children ?? textOf(href);
+  const label = children ?? (kind === 'session' ? 'Open leg page' : textOf(href));
   if (safe === null) return <span className="unlinked">{label}</span>;
   return (
     <a className="ext" href={safe} target="_blank" rel="noopener noreferrer">
