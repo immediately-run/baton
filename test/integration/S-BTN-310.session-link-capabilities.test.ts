@@ -27,10 +27,13 @@ beforeEach(async () => {
   reporter = await grantedRunner('reporter', 'reporting-host', grant);
   other = await grantedRunner('reader', 'reading-host', grant);
   claim = (await claimAndStart(reporter, 'docs:T-1', 'implement')).claim_id;
-  expect((await heartbeat(reporter.key, reporter.hostname, reporter.secret, { session_url: LINK })).status).toBe(200);
 });
 
 afterEach(() => vi.restoreAllMocks());
+
+async function reportLinkByHeartbeat() {
+  expect((await heartbeat(reporter.key, reporter.hostname, reporter.secret, { session_url: LINK })).status).toBe(200);
+}
 
 async function raiseInteraction() {
   const result = await signed(reporter.key, `/v1/runner/claims/${claim}/conditions`, { type: 'interact.review' }, reporter.secret);
@@ -40,6 +43,7 @@ async function raiseInteraction() {
 
 describe('S-BTN-310 session-link capabilities', () => {
   it('projects links for the dashboard and verified reporter, not bare keys or another session on the same key', async () => {
+    await reportLinkByHeartbeat();
     const siblingSecret = 'synthetic-sibling-runner-secret';
     const sibling = await heartbeat(reporter.key, reporter.hostname, siblingSecret, { session_name: 's-sibling' }, true);
     expect(sibling.status).toBe(200);
@@ -77,6 +81,7 @@ describe('S-BTN-310 session-link capabilities', () => {
   });
 
   it('keeps fenced run links bound to the reporting incarnation after re-keying', async () => {
+    await reportLinkByHeartbeat();
     const paths: [string, (b: Json) => unknown[]][] = [
       [`${BASE}/runners/${reporter.id}`, (b) => [b.window.claims[0], ...b.window.claims[0].runs]],
       [`${BASE}/courses/roadmap-pr`, (b) => b.legs.flatMap((l: Json) => l.runs ?? [])],
@@ -107,7 +112,26 @@ describe('S-BTN-310 session-link capabilities', () => {
     }
   });
 
+  it.each(['advance', 'end'] as const)('serves the reporting incarnation a link first recorded by %s', async (command) => {
+    const readRun = async () => {
+      const res = await signed(reporter.key, `${BASE}/runners/${reporter.id}`, undefined, reporter.secret);
+      expect(res.status).toBe(200);
+      return res.json.window.claims.find((c: Json) => c.claim_id === claim)?.runs.find((r: Json) => r.leg === 'implement');
+    };
+    expect(await readRun()).toMatchObject({ session_url: null, session_link: false });
+
+    const result = await signed(reporter.key, `/v1/runner/claims/${claim}/${command}`, {
+      ...(command === 'advance' ? { reached: 'pr-open', leg: 'review' } : { end_reason: 'done' }),
+      session_url: LINK,
+    }, reporter.secret);
+    expect(result.status).toBe(200);
+    expect(result.json.session_url_dropped).toBeUndefined();
+
+    expect(await readRun()).toMatchObject({ ...visible, ended_at: AT });
+  });
+
   it('gives different validators to queries with different first filter values', async () => {
+    await reportLinkByHeartbeat();
     await raiseInteraction();
     const path = `${BASE}/conditions?open=1&type=interact`;
     const present = await signed(other.key, `${path}&ticket=docs:T-1&ticket=docs:T-2`);
@@ -121,6 +145,7 @@ describe('S-BTN-310 session-link capabilities', () => {
   });
 
   it('delivers open interactions without leaking them to general condition reads or exports', async () => {
+    await reportLinkByHeartbeat();
     const id = await raiseInteraction();
     const poll = `${BASE}/conditions?open=1&type=interact`;
     const grantPath = '/v1/owner/docs/grants';
@@ -155,7 +180,7 @@ describe('S-BTN-310 session-link capabilities', () => {
     for (const level of ['debug', 'log', 'info', 'warn', 'error'] as const) {
       vi.spyOn(console, level).mockImplementation((...args: unknown[]) => { logs.push(args); });
     }
-    expect((await heartbeat(reporter.key, reporter.hostname, reporter.secret, { session_url: LINK })).status).toBe(200);
+    await reportLinkByHeartbeat();
     await raiseInteraction();
     const dropped = `https://${TOKEN}.invalid/${TOKEN}`;
     const advancePath = `/v1/runner/claims/${claim}/advance`;
@@ -180,6 +205,7 @@ describe('S-BTN-310 session-link capabilities', () => {
   });
 
   it('scrubs historical audit copies without deleting normal condition URLs or evidence', async () => {
+    await reportLinkByHeartbeat();
     const interaction = JSON.stringify({ type: 'interact.review', url: LINK });
     const ordinary = JSON.stringify({ type: 'ask.owner', url: 'https://example.test/question' });
     for (const detail of [interaction, ordinary]) {
