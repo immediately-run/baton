@@ -8,6 +8,8 @@
 // key's signature, its no-CI path.
 // Course code in the CLI, never core (§2b). Reached through the esbuild bundle
 // (scripts/baton-cli.mjs), the way `baton run` reaches src/runner.
+
+import { git, gitText } from './git.mjs';
 import { outputAttestation, syncAttestationBatch, TICKET_OUTPUT_WITNESS } from './output-evidence';
 import { hostOf } from './forge';
 import type { PostedAttestation } from '../core/board';
@@ -20,15 +22,16 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { BatonApi, BatonRefusal, envAuth, type Auth, type Transport } from '../runner/api';
 import { HARNESS_AGENTS, type Harness } from '../runner/harness';
 import { syncOnce } from '../shared/batonSync.mjs';
-import { DEFAULT_URL } from '../../cli/baton.mjs';
-import { API_KEY, signingKey } from '../../cli/sign.mjs';
+import { GIT_NONINTERACTIVE_ENV } from '../client/git-env.mjs';
+import { DEFAULT_URL } from '../client/config.mjs';
+import { API_KEY, signingKey } from '../client/sign.mjs';
 import { DEFAULT_BRANCH_PATTERN, DEFAULT_CREATE_PR_REVIEW_ROUNDS, matchPatterns, readReviewDefault, sameRepo as sameRepoName, ticketOwns, type BatonRecord, type CodeRepoEntry, type PrFact, type StationsResult } from './course-pr';
 import { commitsOf, type BranchCommit } from './pr-markers';
 import { COMMENTING_LEGS, PR_URL as PR_URL_RE } from './pr-close';
 import { GIT_SHA } from '../core/validate';
 import { parseSource, printSource } from './course-source';
 import { stampMarkdownVersions } from './ticket-versions';
-import { closeTicket, closesByTicket, closesOfCommits, exec, machineOf, setMachineKeys, stationsTickets, ticketsBranch, CLOSE_TIMEOUT_MS, GIT_NONINTERACTIVE_ENV, RUN_TESTS_TIMEOUT_MS } from './ticket-state';
+import { closeTicket, closesByTicket, closesOfCommits, exec, machineOf, setMachineKeys, stationsTickets, ticketsBranch, CLOSE_TIMEOUT_MS, RUN_TESTS_TIMEOUT_MS } from './ticket-state';
 
 /** The retired markers file's path (B-100): the sync no longer reads it — `baton repo
  *  migrate-markers` does, once, and deletes it. */
@@ -51,14 +54,13 @@ const REVIEW_DEFAULTS_PATH = '.baton/courses/create-pr/review-defaults.json';
 // remoteSlug quiets are matched by their words — under a German catalog 'not a git repository'
 // is 'Kein Git-Repository', and the quiet case would throw instead. The C catalog is git's own
 // stable one, whatever the operator's locale.
-const git = (root: string, ...a: string[]): string => execFileSync('git', ['-C', root, ...a], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, LC_ALL: 'C' } }).trim();
 /** The control walks' git (B-127): untrimmed — a commit object's bytes are what its SSHSIG
  *  signed, and `git` above trims, which would verify against a shortened payload (round 1:
  *  a `--cleanup=verbatim` message ending in a blank line failed to verify) — and bounded at
  *  16 MiB, because the walks' one `git log --name-status -n2000` runs through it (round 1:
  *  Node's 1 MiB default overflowed on busy repositories and failed every sync). Callers that
  *  need a single value trim it themselves. */
-const gitRaw = (root: string, ...a: string[]): string => execFileSync('git', ['-C', root, ...a], { encoding: 'utf8', maxBuffer: 16 << 20, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, LC_ALL: 'C' } });
+const gitRaw = (root: string, ...args: string[]): string => git(root, args);
 /** Why `git` failed, as `execFileSync` reports it: the exit status, and the stderr it captured
  * (`string` under `encoding: 'utf8'`; `Uint8Array`, which `Buffer` is, if an encoding is ever
  * dropped — named that rather than `Buffer` so this file types under both tsconfigs the repo ships,
@@ -305,7 +307,7 @@ async function readBoard(root: string, batonJson: BatonJson, args: SyncArgs, log
   const own = join(root, '.baton', 'tickets.mjs');
   const ctx = { root, settings, ...(record?.versions != null ? { versions: record.versions } : {}) };
   if (existsSync(own)) {
-    const mod = (await import(`${pathToFileURL(own).href}?at=${git(root, 'rev-parse', 'HEAD')}`)) as { default?: { tickets?: (ctx: unknown) => Promise<TicketsResult>; versions?: unknown; read?: unknown } };
+    const mod = (await import(`${pathToFileURL(own).href}?at=${gitText(root, 'rev-parse', 'HEAD')}`)) as { default?: { tickets?: (ctx: unknown) => Promise<TicketsResult>; versions?: unknown; read?: unknown } };
     if (typeof mod.default?.tickets !== 'function') throw new Error('.baton/tickets.mjs default-exports no tickets(ctx)');
     sourceKind = 'custom';
     const declared = mod.default.versions;
@@ -392,20 +394,20 @@ async function readBoard(root: string, batonJson: BatonJson, args: SyncArgs, log
   // frontmatter's machine state beside them (a migration's record, or a hand-edited file: git's
   // history is the authority, never the working tree). No second input, no shared file: a
   // checkout git cannot answer for has no close history, and its frontmatter state stands.
-  const origin = repository != null ? git(root, 'remote', 'get-url', 'origin') : null;
+  const origin = repository != null ? gitText(root, 'remote', 'get-url', 'origin') : null;
   const plain = origin != null && plainGitRemote(origin);
   const githubHome = origin != null && hostOf(origin) === 'github.com';
-  const closeCommits = closesByTicket((args) => git(root, ...args));
+  const closeCommits = closesByTicket((args) => gitText(root, ...args));
   for (const t of result.tickets) {
     if (closedIds.has(t.id) || t.path == null) continue; // a pathless ticket (a tracker's) has no file to close on
     const commits = closeCommits.get(t.id) ?? [];
     const fm = existsSync(join(root, t.path)) ? parseFrontmatter(readFileSync(join(root, t.path), 'utf8')) : null;
     if (!commits.length && fm?.station === undefined) continue;
     if (plain || githubHome) for (const { sha, leg } of commits) {
-      const a = outputAttestation(git(root, 'show', '-s', '--format=%b', sha), sha);
+      const a = outputAttestation(gitText(root, 'show', '-s', '--format=%b', sha), sha);
       if (a?.ticket === t.id && (a.value as { leg: string }).leg === leg) (plain ? outputEvidence : ticketOutputEvidence).push(a);
     }
-    const closes = closesOfCommits((args) => git(root, ...args), t.path, t.id, commits);
+    const closes = closesOfCommits((args) => gitText(root, ...args), t.path, t.id, commits);
     t.course = { ...(t.course ?? {}), closes, ...machineOf(fm) };
   }
 
@@ -417,7 +419,7 @@ async function readBoard(root: string, batonJson: BatonJson, args: SyncArgs, log
   // no forge, no `gh` — so the run-tests gate's markers are read the same way (`commitsOf`). Only
   // the home repository's branches are this checkout's to read; a branch git cannot fetch keeps
   // its fact as it is (its gate stays open).
-  const boundedGit = (a: string[]): string => execFileSync('git', ['-C', root, ...a], { encoding: 'utf8', timeout: CLOSE_TIMEOUT_MS, killSignal: 'SIGKILL', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, ...GIT_NONINTERACTIVE_ENV, LC_ALL: 'C' } });
+  const boundedGit = (a: string[]): string => git(root, a, { timeoutMs: CLOSE_TIMEOUT_MS });
   for (const f of facts) {
     if (f.commits || f.state !== 'open' || (f.repository != null && repository != null && !sameRepoName(f.repository, repository)) || !owns(f)) continue;
     try {
@@ -457,7 +459,7 @@ async function readBoard(root: string, batonJson: BatonJson, args: SyncArgs, log
     const standard = builtIn(c.id);
     let fn: StationFn;
     if (existsSync(syncMjs)) {
-      const mod = (await import(`${pathToFileURL(syncMjs).href}?at=${git(root, 'rev-parse', 'HEAD')}`)) as { default?: { stations?: StationFn } };
+      const mod = (await import(`${pathToFileURL(syncMjs).href}?at=${gitText(root, 'rev-parse', 'HEAD')}`)) as { default?: { stations?: StationFn } };
       if (typeof mod.default?.stations !== 'function') throw new Error(`.baton/courses/${c.id}/sync.mjs default-exports no stations(ctx)`);
       fn = mod.default.stations;
     } else if (standard) {
@@ -623,7 +625,7 @@ export async function migrateMarkersMain(argv: string[], io: { root?: string; lo
   }
   const settings: MarkdownSettings = { items: batonJson.items, default_course: batonJson.default_course, repos: batonJson.repos };
   const result = existsSync(join(root, '.baton', 'tickets.mjs'))
-    ? await ((await import(`${pathToFileURL(join(root, '.baton', 'tickets.mjs')).href}?at=${git(root, 'rev-parse', 'HEAD')}`)) as { default: { tickets: (ctx: unknown) => Promise<TicketsResult> } }).default.tickets({ root, settings })
+    ? await ((await import(`${pathToFileURL(join(root, '.baton', 'tickets.mjs')).href}?at=${gitText(root, 'rev-parse', 'HEAD')}`)) as { default: { tickets: (ctx: unknown) => Promise<TicketsResult> } }).default.tickets({ root, settings })
     : ticketsMarkdown(readItems(root, settings.items), settings);
   const closedIds = new Set(result.closed.map((c) => c.id));
   const byTicket = new Map<string, typeof lines>();
@@ -762,7 +764,7 @@ export async function syncMain(args: SyncArgs): Promise<number> {
       throw e;
     }
   };
-  const syncOnceRun = () => syncOnce(git(root, 'rev-parse', 'HEAD'), {
+  const syncOnceRun = () => syncOnce(gitText(root, 'rev-parse', 'HEAD'), {
     // B-110: the observation also carries Baton's own record a station function judges git
     // against — the owner's answers to posted decisions and the legs claims finished with an
     // evidence pointer — read after the number like everything else this run posts. B-183: and
@@ -794,8 +796,8 @@ export async function syncMain(args: SyncArgs): Promise<number> {
     // Everything posted under a number is read after it (§7.1 steps 1–2): the commit and the board.
     fetchNext: async () => {
       if (args.latest) {
-        git(root, 'fetch', '-q', 'origin', args.latest);
-        git(root, 'checkout', '-q', '--detach', 'FETCH_HEAD');
+        gitText(root, 'fetch', '-q', 'origin', args.latest);
+        gitText(root, 'checkout', '-q', '--detach', 'FETCH_HEAD');
       }
       // baton.json too is read at the commit posted.
       // B-113: the qualified dependencies of other repositories resolve against their boards —
@@ -805,7 +807,7 @@ export async function syncMain(args: SyncArgs): Promise<number> {
         return (Array.isArray(answer.dependencies) ? answer.dependencies : []).map((d) => ({ ticket: String(d.ticket), done: d.done === true }));
       });
       evidence = unconfirmed.length ? await attestEvidence(unconfirmed, evidencePorts(root, record?.code_repos ?? [], log)) : [];
-      return git(root, 'rev-parse', 'HEAD');
+      return gitText(root, 'rev-parse', 'HEAD');
     },
     readHead: () => asResult(() => api.head()),
     post: (body: Record<string, unknown>) => {
@@ -814,7 +816,7 @@ export async function syncMain(args: SyncArgs): Promise<number> {
     },
     isAncestor: async (a: string, b: string) => {
       try {
-        execFileSync('git', ['-C', root, 'merge-base', '--is-ancestor', a, b], { stdio: 'ignore' });
+        git(root, ['merge-base', '--is-ancestor', a, b], { stdio: 'ignore' });
         return true;
       } catch {
         return false; // not an ancestor, or a commit this clone lacks: never "descends"
@@ -874,7 +876,7 @@ function bearerAuth(token: string | null): Auth {
  * key — a runner's credential, never a sync's — is refused by name here instead of being spent as
  * a bearer the server would deny. */
 function syncKeyAuth(file: string): Auth {
-  // R-BTN-159's API key (`cli/sign.mjs`): a runner's credential, never a sync's — `envAuth` would
+  // R-BTN-159's API key (`src/client/sign.mjs`): a runner's credential, never a sync's — `envAuth` would
   // spend it as a bearer the sync routes deny, so it is refused by name.
   if (existsSync(file) && API_KEY.test(readFileSync(file, 'utf8').trim())) {
     throw new Error(`--sync-key ${file}: an API key is a runner's credential, not a sync key — register an SSH key (\`baton admin repo add --sync-key <key.pub>\`) and pass its private file`);
@@ -899,7 +901,7 @@ function evidencePorts(root: string, codeRepos: readonly CodeRepoEntry[], log: (
   const slug = remoteSlug(root);
   let originHost: string | null = null;
   try {
-    const u = git(root, 'remote', 'get-url', 'origin');
+    const u = gitText(root, 'remote', 'get-url', 'origin');
     originHost = /^https:\/\//.test(u) ? new URL(u).host : (/^[^@]+@([^:]+):/.exec(u)?.[1] ?? null);
   } catch {
     originHost = null;
@@ -908,7 +910,7 @@ function evidencePorts(root: string, codeRepos: readonly CodeRepoEntry[], log: (
   const homeHost = originHost === 'github.com' || (originHost != null && hosts.has(originHost)) ? originHost : null;
   const hasObject = (sha: string) => {
     try {
-      execFileSync('git', ['-C', root, 'cat-file', '-e', `${sha}^{commit}`], { stdio: 'ignore' });
+      git(root, ['cat-file', '-e', `${sha}^{commit}`], { stdio: 'ignore' });
       return true;
     } catch {
       return false;
@@ -918,7 +920,7 @@ function evidencePorts(root: string, codeRepos: readonly CodeRepoEntry[], log: (
     hasCommit: (sha) => {
       if (hasObject(sha)) return true;
       try {
-        execFileSync('git', ['-C', root, 'fetch', '-q', 'origin', sha], { stdio: 'ignore', timeout: FETCH_TIMEOUT_MS });
+        git(root, ['fetch', '-q', 'origin', sha], { stdio: 'ignore', timeoutMs: FETCH_TIMEOUT_MS });
       } catch {
         return false;
       }
@@ -1016,7 +1018,7 @@ export async function githubFacts(root: string, log: (l: string) => void, owns: 
   if (slug == null) throw new Error(`${root} has no origin remote to read PRs from — pass --facts <file> for recorded facts`);
   // B-182 (first slice): a plain-git home has no forge, so no adapter reads it (R-BTN-96) — only
   // the repositories its tickets name in `repos:` are read, and with none nothing is, token or not.
-  const home = plainGitRemote(git(root, 'remote', 'get-url', 'origin')) ? null : slug;
+  const home = plainGitRemote(gitText(root, 'remote', 'get-url', 'origin')) ? null : slug;
   const entries = obs.codeRepos ?? [];
   // The reading set: the home (when it is on a forge), then each named repository — through its
   // `code_repos` entry when the home lists any (R-BTN-140's reach), by name when it lists none.
@@ -2148,7 +2150,7 @@ function cliPin(): string {
   const slug = remoteSlug(root);
   let sha: string | null = null;
   try {
-    sha = git(root, 'rev-parse', 'HEAD');
+    sha = gitText(root, 'rev-parse', 'HEAD');
   } catch {
     sha = null;
   }

@@ -1,4 +1,5 @@
 // The runner allocates checkouts and machine locks, claims tickets and supervises their runs.
+import type { ClaimAnswer } from '../shared/runner-wire';
 import { createHash, randomBytes } from 'node:crypto';
 import { writeSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
@@ -404,7 +405,7 @@ export class Runner {
 
   /** One claim attempt (R-BTN-72): the claim Baton granted, in a fresh slot already held, or
    *  null when nothing was claimable — or when the runner holds its bound (B-188). */
-  private async claimNext(): Promise<{ claim: Record<string, any>; slot: ClaimRun } | null> {
+  private async claimNext(): Promise<{ claim: ClaimAnswer; slot: ClaimRun } | null> {
     this.roomMade = false;
     // The runner must exist before it can claim (§5): one heartbeat registers it. Whether this
     // attempt is the registration (B-93) is read before this attempt's own beat: an attempt that
@@ -474,7 +475,7 @@ export class Runner {
     return this.requestClaim(beating || !registered);
   }
 
-  private async requestClaim(registering: boolean): Promise<{ claim: Record<string, any>; slot: ClaimRun } | null> {
+  private async requestClaim(registering: boolean): Promise<{ claim: ClaimAnswer; slot: ClaimRun } | null> {
     // R-BTN-202 (B-248): the local queue first — a leg run offline whose result waits for Baton,
     // then the host user's oldest order, each claimed by name: Baton's claim decides, every gate
     // in force. Otherwise R-BTN-72 / B-287: an unnamed claim selects and claims atomically.
@@ -483,7 +484,7 @@ export class Runner {
     const preworked = queued?.worked[0] ?? null;
     const order = preworked == null ? (queued?.orders[0] ?? null) : null;
     const wanted: string | undefined = preworked?.ticket_id ?? order?.ticket_id;
-    let claim: Record<string, any>;
+    let claim: ClaimAnswer;
     const requestId = `run-${randomBytes(8).toString('hex')}`;
     this.claimsOut++;
     try {
@@ -541,8 +542,8 @@ export class Runner {
       this.claimsOut--;
     }
     this.epoch++;
-    const ticket = claim.ticket_id as string;
-    const claimId = claim.claim_id as number;
+    const ticket = claim.ticket_id;
+    const claimId = claim.claim_id;
     if (this.idle) {
       this.log(`baton: idle for ${ageWords(this.now() - this.idle.since)}, ended by claim ${claimId}`);
       this.idle = null;
@@ -669,7 +670,7 @@ export class Runner {
 
   /** B-188: one claim's whole run, bound to its slot — the slot is let go, its clone freed and
    *  the state file's claims rewritten when it ends, whatever ended it. */
-  private async runInSlot(claim: Record<string, any>, slot: ClaimRun, resume?: Resume): Promise<ClaimOutcome> {
+  private async runInSlot(claim: ClaimAnswer, slot: ClaimRun, resume?: Resume): Promise<ClaimOutcome> {
     try {
       return await slot.runClaim(claim, resume);
     } finally {
@@ -745,7 +746,7 @@ export class Runner {
   /** R-BTN-72 (B-188): reconnect to a persisted claim's running leg — the executor's `reattach`
    *  over the handle its state kept, and the claim's answer again by its `request_id` (the same
    *  claim, G-BTN-2) — or why not. */
-  private async reattach(p: PersistedClaim): Promise<{ handle: Handle; claim: Record<string, any> } | { why: string }> {
+  private async reattach(p: PersistedClaim): Promise<{ handle: Handle; claim: ClaimAnswer } | { why: string }> {
     const reattach = this.executor.reattach;
     if (typeof reattach !== 'function') return { why: `the ${this.executor.source} executor offers no reattach` };
     if (!p.handle || !p.leg || !p.at || !p.ctx || !p.request_id) return { why: 'no leg session was running' };

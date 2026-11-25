@@ -1,3 +1,4 @@
+import type { ClaimAnswer } from '../../shared/runner-wire';
 import type { BatonCore } from '../baton';
 import { BatonError, CLIENT_HEADER, json, readJson } from '../http';
 import { clientVersionOf } from '../../shared/versions.mjs';
@@ -243,7 +244,7 @@ function grantedRepos(core: Pick<BatonCore, 'runners' | 'sql'>, cred: string): s
  *  changes what a runner refuses, not what it runs. With the setting off, `{}`: nothing is
  *  gated, and the ticket's brief mark rides its row as ever. A group missing (`read` null or
  *  absent) is the fail-closed case — no signed version — and the runner treats it so. */
-async function claimControl(core: Pick<BatonCore, 'sql' | 'admin'>, ticket: string, claimId: number): Promise<{ control?: unknown }> {
+async function claimControl(core: Pick<BatonCore, 'sql' | 'admin'>, ticket: string, claimId: number): Promise<Pick<ClaimAnswer, 'control'>> {
   if (!ticket.includes(':')) return {};
   const repo = repositoryOf(ticket);
   if (!core.sql<{ flag: number }>('SELECT require_signed_control AS flag FROM repositories WHERE id = ?', repo)[0]?.flag) return {};

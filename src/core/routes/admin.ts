@@ -5,7 +5,7 @@ import { stateView } from '../views';
 import { pathSegment } from './kit';
 import type { PersonPrincipal } from './principal';
 
-type AdminCore = Parameters<typeof stateView>[0] & Pick<BatonCore, 'ownerState' | 'store' | 'flushDispatch'>;
+type AdminCore = Parameters<typeof stateView>[0] & Pick<BatonCore, 'ownerState' | 'store' | 'flushDispatch' | 'admin'>;
 
 export async function adminRoute(core: AdminCore, req: Request, url: URL, principal: PersonPrincipal): Promise<Response | null> {
   const { cred: fp, administrator } = principal;
@@ -58,7 +58,7 @@ export async function adminRoute(core: AdminCore, req: Request, url: URL, princi
   if (m === 'GET' && p === '/v1/admin/export') return json(core.ownerState.export(url.searchParams.get('with_history') === '1'));
   if (m === 'POST' && p === '/v1/admin/import') {
     const b = await body();
-    return json(core.store.transaction(() => core.ownerState.import(actor, b)));
+    return json(await core.ownerState.import(actor, b, new Set((await core.admin.adminFingerprints()).keys())));
   }
   if (m === 'POST' && p === '/v1/admin/grants') {
     const b = await body();

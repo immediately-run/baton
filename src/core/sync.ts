@@ -13,7 +13,7 @@ import { DispatchRefused } from './mirror';
 import { adjustCounts } from './capacity';
 import type { ClosingPosition, Seen } from './stations';
 
-const HELD_AUTO_ACCEPT_MS = 24 * 3_600_000; // §7.1: a held history is accepted after 24 h (R3-1212)
+const HELD_AUTO_ACCEPT_MS = 24 * 3_600_000; // R-BTN-11: measured from the first post of the held history.
 
 type BoardPostCore = Pick<BatonCore, 'store' | 'sql' | 'now' | 'observations' | 'claims' | 'ownerState' | 'stations' | 'blocks' | 'courses' | 'policies' | 'questions' | 'history' | 'provenance' | 'queues' | 'admin' | 'registry' | 'conditions'>;
 
@@ -194,9 +194,6 @@ async function boardPost(core: BoardPostCore, repo: Repository, p: BoardPayload,
         // withdrawn ticket clears its closure row, as a new head does (round 1, finding 4) —
         // withdraw-and-reopen with no commit is the tracker flow this ticket builds for.
         core.stations.reopened(r, refreshed.map(({ row }) => row.id));
-        // R-BTN-88 (§4.8): the import's pending ticket-scoped rows, applied to the tickets
-        // this reading creates — a refresh creates them as a new head does (B-183).
-        core.ownerState.applyPending(r, new Set(refreshed.map(({ row }) => row.id)), at);
       }
       const seen = normative ? refreshStations(core, r, p, n, at, wrote) : new Map<string, Seen>();
       const confirmed = core.claims.confirm(confirmations, n);
@@ -249,7 +246,7 @@ async function boardPost(core: BoardPostCore, repo: Repository, p: BoardPayload,
     // one it does not post is dropped with discrepancy `spawned-unposted` (R-BTN-85); and the
     // import's pending ticket-scoped rows, applied to the tickets this post creates.
     settleSpawned(core, r, p, n, at);
-    core.ownerState.applyPending(r, new Set(rows.map(({ row }) => row.id)), at);
+    core.ownerState.applyPending(r, new Set(rows.map(({ row }) => row.id)), stations, at, true);
     core.claims.confirmOutputs(r, p.attestations ?? []);
     const seen = core.stations.apply(r, p.sha, n, stations, p.closed ?? [], at, wrote.closingPositions);
     // R-BTN-116: the questions the post carries for its queued person legs (§4.4), then the
@@ -572,6 +569,9 @@ function refreshStations(core: BoardPostCore, r: string, p: BoardPayload, n: num
   // on an old station (round 1, 1-A-0, 1-B-0).
   const legsBefore = queuedLegs(core, r);
   for (const id of live) if (!stations.has(id)) core.stations.clear(qualify(r, id));
+  // R-BTN-88: a refresh can supply the first placement, but only a materializing read
+  // decides which tickets are absent. A held history cannot consume a pending position.
+  if (!held) core.ownerState.applyPending(r, live, stations, at, wrote != null);
   // A held history's closures stand even for tickets the current head still has: the holder's
   // archive may be in the rewritten history alone, and its done end must not wait the hold's
   // 24 hours (R-BTN-62; round 2, 2-A-0). A plain refresh's own closures are applied as they

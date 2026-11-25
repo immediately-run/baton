@@ -6,6 +6,7 @@
 // carry `model_provider_id`, `billing`, `usage` and `rate_limits`, all accepted and ignored,
 // and an unavailable provider is a reading (§6.3, R-BTN-76), never a table core keeps.
 import { hasGrant } from './grants';
+import type { BeatAnswer } from '../shared/runner-wire';
 import { isLive, liveRunnerSql, type Lease } from './runnerLiveness';
 import { runnerLatest } from './runnerLatest';
 import { BatonError } from './http';
@@ -292,7 +293,7 @@ export class RunnerApi {
    *  absent, logging `deprecated-field`. */
   // @model heartbeat sha256:576daa5cf97c
   // @model declare sha256:d9cef42a9b45
-  async heartbeat(credentialId: string, secretHeader: string | null, body: unknown, clientVersion: string | null = null, legacyName = false) {
+  async heartbeat(credentialId: string, secretHeader: string | null, body: unknown, clientVersion: string | null = null, legacyName = false): Promise<BeatAnswer> {
     // B-168 (R-BTN-76): `uses` is retired — a runner uses the repository's instances, never a set
     // it declares — and read as absent while the history's Migrations entry lasts.
     if (body && typeof body === 'object' && !Array.isArray(body) && (body as { uses?: unknown }).uses !== undefined) {
@@ -346,7 +347,7 @@ export class RunnerApi {
     };
   }
 
-  private heartbeatTx(credentialId: string, presented: string | null, settingsHash: string, hb: Heartbeat, clientVersion: string | null, legacyName: boolean) {
+  private heartbeatTx(credentialId: string, presented: string | null, settingsHash: string, hb: Heartbeat, clientVersion: string | null, legacyName: boolean): BeatAnswer {
     // B-253: the profile, serialized once — the same bytes compared, stored and hashed.
     const profileJson = hb.profile ? JSON.stringify(hb.profile) : null;
     const cred = this.credential(credentialId);

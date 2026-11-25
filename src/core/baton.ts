@@ -118,10 +118,10 @@ export class BatonCore {
     // §12.8 (B-145): the policy store, before everything that reads a knob — the claims' floor
     // rule, the heartbeat's reports and pins, the owner routes' approver checks.
     this.policies = new Policies({ store, now: () => this.now(), releaseForFloor: (repository) => this.claims.releaseForFloor(repository) });
-    // R3-1258: the capacity envelope (R-BTN-87) and owner state (R-BTN-88), each one module
-    // with the store and the clock alone.
+    // R3-1258: the capacity envelope (R-BTN-87) and owner state (R-BTN-88).
     this.capacity = new Capacity({ store, now: () => this.now(), config: ports.config });
     this.ownerState = new OwnerState({ store, now: () => this.now(), origin: ports.config.BATON_ORIGIN,
+      policies: this.policies, restoreNext: (...args) => this.stations.restoreNext(...args),
       dispatchMirror: (repository) => want({ repository, kind: 'mirror' }) });
     this.courses = new Courses({ store, requiredBars: (repo) => this.admin.requiredBars(repo), policies: this.policies });
     this.observations = new Observations({ store, now: () => this.now() });
