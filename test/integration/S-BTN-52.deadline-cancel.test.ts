@@ -78,6 +78,10 @@ describe('S-BTN-52: a run deadline', () => {
     expect(delivery).toEqual([expect.objectContaining({ kind: 'release', payload: { ticket_id: ticket, reason: 'leg-timeout', deadline_at: DUE } })]);
     await setClock(DUE + offset);
     expect((await beat('vm-a', a.secret, { ...LEASE, legs_finished: [{ claim_id: id, seq }] })).json.messages).toEqual(delivery);
+    const suspended = await endClaim('vm-a', a.secret, id, { end_reason: 'suspended:filed' });
+    expect(suspended.status).toBe(409);
+    expect(suspended.json).toMatchObject({ rule_code: 'leg-timeout' });
+    expect(await claimRow(id)).toMatchObject({ status: 'active' });
     const end = { end_reason: 'released:leg-timeout', reached: 'filed', next: 'implement' };
     expect((await endClaim('vm-a', a.secret, id, end)).status).toBe(200);
     expect((await endClaim('vm-a', a.secret, id, end)).status).toBe(200);

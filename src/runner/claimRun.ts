@@ -999,7 +999,7 @@ export class ClaimRun {
       // A done end carries no hand-off (R-BTN-44 writes one for suspensions and releases);
       // the closing marker and the resume record are its record.
       const done = { end_reason: 'done', reached: verdict.reached, ...(verdict.detail ? { detail: verdict.detail } : {}), ...(verdict.outputs ? { outputs: verdict.outputs } : {}), ...(closed ? { ended_at_sha: closed } : {}) };
-      return await this.finish(claimId, done, null);
+      return await this.finish(claimId, done, null, () => this.callHandoff(script, ctx));
     }
     if (verdict.kind === 'suspend' || verdict.kind === 'release') {
       const reason = verdict.kind === 'suspend' ? `suspended:${verdict.reached}` : `released:${verdict.reason}`;
@@ -1542,7 +1542,8 @@ export class ClaimRun {
   /** End the claim, clear the local claim state, and ack what the sidecar delivered. The local
    * flags clear whatever the wire said — a lost lease belongs to the claim that lost it — and an
    * end the network ate is parked and retried on every beat until Baton answers. */
-  private async finish(claimId: number, body: Record<string, unknown>, handoff: string | null): Promise<ClaimOutcome> {
+  private async finish(claimId: number, body: Record<string, unknown>, handoff: string | null,
+    timeoutHandoff?: () => Promise<string | null>): Promise<ClaimOutcome> {
     // A fence may land while a hook is already in flight. Do not report its result.
     if (this.claimLost() && body.end_reason !== 'released:lease-lost') {
       body = { end_reason: 'released:lease-lost', ...(this.inflight?.leg ? { next: this.inflight.leg } : {}) };
@@ -1577,11 +1578,17 @@ export class ClaimRun {
         // transport failure, or the orphan path would re-end the claim with another reason.
         this.o.log(`baton: the end of ${ticket} did not reach Baton (${e.message}) — retried on every beat`);
         this.sidecar.parkEnd(claimId, body);
+      } else if (e instanceof BatonRefusal && e.ruleCode === 'leg-timeout' && body.end_reason !== 'released:leg-timeout') {
+        // Delivery may win even after close, without the heartbeat reply reaching us yet.
+        // Keep the audit and provenance, but do not report the refused leg outcome.
+        const { scope_exceeded, local_order } = body;
+        return await this.finish(claimId, { end_reason: 'released:leg-timeout', scope_exceeded, local_order },
+          timeoutHandoff ? await timeoutHandoff() : handoff);
       } else if (e instanceof BatonRefusal && refusalKind(e.ruleCode) === 'contract-output' && !String(body.end_reason).startsWith('released:')) {
         // R-BTN-109: a completed end whose outputs fail its station's entry gives the leg up, as
         // a refused advance does — an output contract failure (R-BTN-82).
         this.o.log(`baton: ${ticket}'s outputs do not meet its arrival (${e.message}) — the leg is given up`);
-        return await this.finish(claimId, { end_reason: 'released:cannot-finish:contract-output' }, handoff);
+        return await this.finish(claimId, { end_reason: 'released:cannot-finish:contract-output' }, handoff, timeoutHandoff);
       } else if (e instanceof BatonRefusal) {
         throw e;
       } else {

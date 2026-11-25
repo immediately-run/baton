@@ -367,7 +367,7 @@ function translateStep(step, P, env, k) {
       } else if ((c.timeoutRelease && !d.timeoutRelease) || d.deadlineAt !== c.deadlineAt) {
         if (origin !== '/v1/runner/heartbeat') return { reject: `claim ${id}'s deadline changed outside a finishing beat` };
         const finished = step.body?.legs_finished;
-        const namedRun = Array.isArray(finished) && finished.some((f) => String(f?.claim_id) === id && f?.seq === c.runningSeq);
+        const namedRun = Array.isArray(finished) && finished.some((f) => Number.isInteger(f?.claim_id) && f.claim_id === Number(id) && f.seq === c.runningSeq);
         const loneRun = step.body?.leg_finished === c.runningSeq && Object.values(P.claims)
           .filter((x) => x.runner === c.runner && x.status === 'active').length === 1;
         if (c.runningSeq == null || !(namedRun || loneRun)) return { reject: `claim ${id}'s finishing beat did not name its current run` };

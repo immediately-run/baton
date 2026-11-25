@@ -481,11 +481,13 @@ export class RunnerApi {
       const why = sessionLinkWhy(link.url, this.c.sessionHosts());
       if (why != null) {
         sessionUrlDropped = why;
-        this.event('discrepancy', `runner:${w.id}`, { sub: 'session-url', why, url: link.url.slice(0, 120) }, claim.ticket_id, claim.id);
+        this.event('discrepancy', `runner:${w.id}`, { sub: 'session-url', why }, claim.ticket_id, claim.id);
       } else {
-        // The same link again changes no row (B-237: so a working runner's beat moves no version).
-        this.exec(`UPDATE claim_legs SET session_url = ? WHERE claim_id = ? AND finished_at IS NULL AND abandoned_at IS NULL AND session_url IS NOT ?`,
-          link.url, claim.id, link.url);
+        // The same report from the same incarnation changes no row (B-237).
+        this.exec(`UPDATE claim_legs SET session_url = ?, session_incarnation = ?
+                   WHERE claim_id = ? AND finished_at IS NULL AND abandoned_at IS NULL
+                     AND (session_url IS NOT ? OR session_incarnation IS NOT ?)`,
+          link.url, fresh.incarnation, claim.id, link.url, fresh.incarnation);
       }
     }
     // §7.5 R-BTN-90 (B-234): `leg_finished` is processed before this beat delivers its

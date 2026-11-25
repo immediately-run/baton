@@ -27,7 +27,7 @@ import { Observations } from './observations';
 import { Sequences } from './sequences';
 import { Webhooks, type Delivery } from './webhook';
 import { checkCrossBoardCycle, checkCrossRepository, consentRoute, resolveDependencies } from './dependencies';
-import { fileUrl } from './links';
+import { fileUrl, hiddenSessionLink, type SessionLinkView } from './links';
 import { Stats } from './stats';
 import { Blocks } from './blocks';
 import { Resources } from './resources';
@@ -1339,7 +1339,7 @@ export class BatonCore {
    * runner session's own answer, so it needs the session's secret. B-192: served through
    * src/core/reads/repository.ts, for a session beside those keys.
    */
-  async repositoryRead(req: Request, url: URL, repo: string, who: ReadPrincipal): Promise<Response | null> {
+  async repositoryRead(req: Request, url: URL, repo: string, who: ReadPrincipal, sessionLink: SessionLinkView): Promise<Response | null> {
     const blocks = /^\/v1\/repositories\/([^/]+)\/tickets\/([^/]+)\/blocks$/.exec(url.pathname);
     const blocked = /^\/v1\/repositories\/([^/]+)\/blocked$/.exec(url.pathname);
     // R-BTN-81: a ticket's history, read by the principals that may read its blocks (§11).
@@ -1377,7 +1377,7 @@ export class BatonCore {
         ? [...new Set(this.runners.grantedCapabilities(cred, repo))].filter((x) => x !== 'none').sort()
         : null;
     }
-    if (boardRead) return json(this.boardView(repo, granted));
+    if (boardRead) return json(this.boardView(repo, granted, sessionLink));
     if (policyRead) return this.policyRead(repo);
     if (show) {
       const raw = seg(show[2]);
@@ -1429,7 +1429,7 @@ export class BatonCore {
       if (!TICKET_ID.test(id) || repositoryOf(id) !== repo) throw new BatonError('invalid-params', `ticket: must be a ticket of ${repo}`);
       const leg = seg(runs[3]);
       if (!COURSE_ID.test(leg)) throw new BatonError('invalid-params', 'leg: must be a leg id');
-      return json(this.claims.runsOf(id, leg));
+      return json(this.claims.runsOf(id, leg, sessionLink));
     }
     if (blocks) {
       const raw = seg(blocks[2]);
@@ -2274,6 +2274,7 @@ export class BatonCore {
       grants: limits.grants.filter((g) => g.repository_id === repo).map((g) => ({
         credential_id: g.credential_id, hostname: g.hostname, label: g.label, repository_id: g.repository_id,
         capabilities: g.capabilities, max_tier: g.max_tier, max_claims: g.max_claims, granted_by: g.granted_by, granted_at: g.granted_at,
+        deliver_interactions: g.deliver_interactions,
         other_repositories: limits.grants.filter((o) => o.credential_id === g.credential_id && o.repository_id !== repo).map((o) => o.repository_id).sort(),
       })),
       settings: limits.settings.find((s) => s.repository_id === repo) ?? null,
@@ -2291,7 +2292,7 @@ export class BatonCore {
    *  for a key no grant binds and for an owner's or an administrator's key. `holders` (B-129) is
    *  the repository's live claims with each holder and its lease's end — the lock a session
    *  claiming through git reads with the same request (R-BTN-179's one-answer rule). */
-  boardView(repo: string, granted: string[] | null = null) {
+  boardView(repo: string, granted: string[] | null = null, sessionLink = hiddenSessionLink) {
     const now = this.now();
     const repository = this.uiRepo(this.registry.get(repo)!);
     const ready = this.readyRows([repository], repo);
@@ -2299,7 +2300,7 @@ export class BatonCore {
       repository,
       ready,
       ready_by_tier: this.readyByTier(ready, [repo]),
-      holders: this.claims.holdersOf(repo),
+      holders: this.claims.holdersOf(repo, sessionLink),
       granted_capabilities: granted,
       server_time: now,
     };

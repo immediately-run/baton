@@ -672,7 +672,7 @@ module baton {
               .with("lastSeen", st.lastSeen.set(w, st.now))
     all {
       // an end that leaves the ticket blocked logs `blocked` (R-BTN-75 as amended by R3-1254)
-      kind != "timeout" or c.releasePhase == "delivered",
+      (kind == "timeout") == (c.releasePhase == "delivered"),
       st' = settle(if (kind == "fail" or kind == "timeout") failIn(ended, c.ticket, legOf(c)) else ended, Set()),
     },
   }
@@ -691,6 +691,7 @@ module baton {
     val l = legOf(c)
     val v = st.gitVersion + 1
     all {
+      c.releasePhase != "delivered",
       kind == "ticket" or kind == "decision",
       kind != "ticket" or d.other != c.ticket,
       st' = settle(blockedEndOf(st, w, c)
@@ -714,6 +715,7 @@ module baton {
     runnerCanAct(w), runnerClaim(w).size() == 1, not(st.pushed.get(w)),
     val c = theClaim(w)
     all {
+      c.releasePhase != "delivered",
       or {
         kind == "capability" and REQUIRES.get(c.ticket).contains(x) and st.declared.get(w).contains(x),
         kind == "resource" and RESOURCES.contains(x),

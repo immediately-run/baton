@@ -204,7 +204,7 @@ describe('check-traces rejects each step round 1 found accepted (round 2, 2-r2-1
       [req('POST', '/v1/runner/heartbeat', { legs_finished: [{ claim_id: 1, seq: 1 }] }),
         claimed({ leg: 'implement', runningSeq: 1, deadlineAt: 40 * 60_000 + 1 })]], 'finishing beat re-armed the wrong deadline');
   });
-  it.each([{ claim_id: 1, seq: 999 }, { claim_id: 2, seq: 1 }])('rejects a finishing beat for the wrong run (%j, S-BTN-52)', async (finished) => {
+  it.each([{ claim_id: 1, seq: 999 }, { claim_id: 2, seq: 1 }, { claim_id: '1', seq: 1 }])('rejects a finishing beat for the wrong run (%j, S-BTN-52)', async (finished) => {
     const running = { leg: 'implement', runningSeq: 1 };
     await rejected('wrong-finishing-run', [[claimReq, claimed()],
       [req('POST', '/v1/runner/claims/1/advance', { leg: 'implement' }), claimed({ ...running, deadlineAt: 30 * 60_000 })],

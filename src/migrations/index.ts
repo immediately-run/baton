@@ -69,6 +69,9 @@ import readEfficiency from './0065_read_efficiency.sql';
 import runnerViews from './0066_runner_views.sql';
 import retirePolicyPins from './0070_retire_policy_pins.sql';
 import accessSignIn from './0071_access_sign_in.sql';
+import sessionLinkSecrets from './0079_session_link_secrets.sql';
+import interactionDeliveryGrant from './0080_interaction_delivery_grant.sql';
+import sessionLinkIncarnation from './0081_session_link_incarnation.sql';
 import { isUniqueViolation, logEvent, mintRunId, type Random } from '../core/db';
 import type { Store } from '../core/ports';
 
@@ -217,5 +220,8 @@ export const MIGRATIONS: Migration[] = [
   { id: 71, sql: accessSignIn },
   { id: 75, sql: coreConditions },
   { id: 76, sql: retireReviewerSettings },
+  { id: 79, sql: sessionLinkSecrets },
+  { id: 80, sql: interactionDeliveryGrant },
+  { id: 81, sql: sessionLinkIncarnation },
   { id: 82, sql: legTimeoutFence },
 ];
