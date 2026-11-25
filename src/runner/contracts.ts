@@ -1,5 +1,4 @@
 // S-BTN-48: live runs and replay read the same bytes and use the shared schema validator.
-import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -10,14 +9,15 @@ import { checkOutputs, type Output } from '../core/validate';
 import { baseChain, PATTERN_STEPS_MAX, unboundedAt, validate, type Resolve } from '../shared/schema.mjs';
 import { underWebBase } from '../shared/links.mjs';
 import { stdSchema } from '../shared/std.mjs';
-import { git, type CourseLoad } from './home';
+import { type CourseLoad } from './home';
+import { git, gitBuffer } from '../defaults/git.mjs';
 
 const MAX_BYTES = 16 << 20;
 export const sha256 = (bytes: Buffer): string => `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
 
 export function gitBytes(home: string, args: string[]): Buffer | null {
   try {
-    return execFileSync('git', ['-C', home, ...args], { encoding: 'buffer', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: MAX_BYTES, timeout: 30_000, killSignal: 'SIGKILL', env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never' } });
+    return gitBuffer(home, args);
   } catch {
     return null;
   }

@@ -3,7 +3,8 @@
 // no `ctx` — so the same core runs on the local host; and the local host imports none of it.
 import { describe, it, expect } from 'vitest';
 import { readdirSync, readFileSync } from 'node:fs';
-import { join, relative, resolve } from 'node:path';
+import { isAbsolute, join, relative, resolve } from 'node:path';
+import ts from 'typescript';
 
 const ROOT = resolve(import.meta.dirname, '../..');
 
@@ -51,5 +52,34 @@ describe('the host boundary (R-BTN-55)', () => {
     expect(files(join(ROOT, 'src/defaults')).length).toBeGreaterThan(0); // the exemption is real, not vacuous
     const imports = files(join(ROOT, 'src/core')).filter((p) => /from\s+['"]\.\.\/(\.\.\/)*defaults\b/.test(code(p))).map((p) => relative(ROOT, p));
     expect(imports).toEqual([]);
+  });
+});
+
+const cliImports = (source: string, owner: string) => ts.preProcessFile(source, true, true).importedFiles
+  .map((i) => i.fileName)
+  .filter((i) => {
+    if (!i.startsWith('.') && !isAbsolute(i)) return false;
+    const target = relative(ROOT, resolve(owner, i));
+    return target === 'cli' || target.startsWith('cli/');
+  });
+
+describe('the client boundary (B-280)', () => {
+  it('no source file imports from cli/', () => {
+    const hits = files(join(ROOT, 'src')).flatMap((p) =>
+      cliImports(readFileSync(p, 'utf8'), resolve(p, '..')).map((i) => `${relative(ROOT, p)}: ${i}`));
+    expect(hits).toEqual([]);
+  });
+
+  it('detects static, dynamic and re-exported CLI imports but not comments', () => {
+    const source = `
+      import { send } from '../../cli/baton.mjs';
+      await import('../../cli/version.mjs');
+      export { signHeaders } from '../../cli/sign.mjs';
+      // import '../../cli/baton.mjs';
+      import { send } from '../client/send.mjs';
+    `;
+    expect(cliImports(source, join(ROOT, 'src', 'defaults'))).toEqual([
+      '../../cli/baton.mjs', '../../cli/version.mjs', '../../cli/sign.mjs',
+    ]);
   });
 });

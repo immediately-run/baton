@@ -5,6 +5,7 @@
 // request's writes are one transaction, so the compare-and-set below needs no lock. Requests
 // reach it only through the front, which has verified the principal — all but a signed
 // request's key, signature, clock and nonce, which only the core can check (verifySigned).
+import type { ClaimAnswer } from '../shared/runner-wire';
 import { MIGRATIONS } from '../migrations';
 import { versionedStore, clockBucket, ifNoneMatch, nonScheduling, schedulingVersion, type VersionedStore } from './stateVersion';
 import { runnerViewResponse, requireFleetScope } from './runnerViews';
@@ -53,7 +54,7 @@ import type { DispatchTarget, Ports, Row, SqlValue, Store, Workflow } from './po
 import { dispatchRead } from './reads';
 import type { ReadPrincipal } from './reads/kit';
 
-const HELD_AUTO_ACCEPT_MS = 24 * 3_600_000; // §7.1: a held history is accepted after 24 h (R3-1212)
+const HELD_AUTO_ACCEPT_MS = 24 * 3_600_000; // R-BTN-11: measured from the first post of the held history.
 const RESYNC_WINDOW_MS = 30_000; // B-201: a session's resync, once per repository per R-BTN-73's dispatch window
 const ALARM_EVERY_MS = 60_000; // §3: one alarm, every 60 seconds
 /** One path segment, decoded: a malformed escape is the caller's error, never a 500. */
@@ -140,10 +141,10 @@ export class BatonCore {
     // §12.8 (B-145): the policy store, before everything that reads a knob — the claims' floor
     // rule, the heartbeat's reports and pins, the owner routes' approver checks.
     this.policies = new Policies({ store, now: () => this.now(), releaseForFloor: (repository) => this.claims.releaseForFloor(repository) });
-    // R3-1258: the capacity envelope (R-BTN-87) and owner state (R-BTN-88), each one module
-    // with the store and the clock alone.
+    // R3-1258: the capacity envelope (R-BTN-87) and owner state (R-BTN-88).
     this.capacity = new Capacity({ store, now: () => this.now(), config: ports.config });
     this.ownerState = new OwnerState({ store, now: () => this.now(), origin: ports.config.BATON_ORIGIN,
+      policies: this.policies, restoreNext: (...args) => this.stations.restoreNext(...args),
       dispatchMirror: (repository) => want({ repository, kind: 'mirror' }) });
     this.courses = new Courses({ store, requiredBars: (repo) => this.admin.requiredBars(repo), policies: this.policies });
     this.observations = new Observations({ store, now: () => this.now() });
@@ -1315,7 +1316,7 @@ export class BatonCore {
       if (m === 'GET' && p === '/v1/admin/export') return json(this.ownerState.export(url.searchParams.get('with_history') === '1'));
       if (m === 'POST' && p === '/v1/admin/import') {
         const b = await body();
-        return json(this.store.transaction(() => this.ownerState.import(actor, b)));
+        return json(await this.ownerState.import(actor, b, new Set((await this.admin.adminFingerprints()).keys())));
       }
       if (m === 'POST' && p === '/v1/admin/grants') {
         const b = await body();
@@ -1828,9 +1829,6 @@ export class BatonCore {
           // withdrawn ticket clears its closure row, as a new head does (round 1, finding 4) —
           // withdraw-and-reopen with no commit is the tracker flow this ticket builds for.
           this.stations.reopened(r, refreshed.map(({ row }) => row.id));
-          // R-BTN-88 (§4.8): the import's pending ticket-scoped rows, applied to the tickets
-          // this reading creates — a refresh creates them as a new head does (B-183).
-          this.ownerState.applyPending(r, new Set(refreshed.map(({ row }) => row.id)), at);
         }
         const seen = normative ? this.refreshStations(r, p, n, at, wrote) : new Map<string, Seen>();
         const confirmed = this.claims.confirm(confirmations, n);
@@ -1883,7 +1881,7 @@ export class BatonCore {
       // one it does not post is dropped with discrepancy `spawned-unposted` (R-BTN-85); and the
       // import's pending ticket-scoped rows, applied to the tickets this post creates.
       this.settleSpawned(r, p, n, at);
-      this.ownerState.applyPending(r, new Set(rows.map(({ row }) => row.id)), at);
+      this.ownerState.applyPending(r, new Set(rows.map(({ row }) => row.id)), stations, at, true);
       this.claims.confirmOutputs(r, p.attestations ?? []);
       const seen = this.stations.apply(r, p.sha, n, stations, p.closed ?? [], at, wrote.closingPositions);
       // R-BTN-116: the questions the post carries for its queued person legs (§4.4), then the
@@ -2005,7 +2003,7 @@ export class BatonCore {
    *  changes what a runner refuses, not what it runs. With the setting off, `{}`: nothing is
    *  gated, and the ticket's brief mark rides its row as ever. A group missing (`read` null or
    *  absent) is the fail-closed case — no signed version — and the runner treats it so. */
-  private async claimControl(ticket: string, claimId: number): Promise<{ control?: unknown }> {
+  private async claimControl(ticket: string, claimId: number): Promise<Pick<ClaimAnswer, 'control'>> {
     if (!ticket.includes(':')) return {};
     const repo = repositoryOf(ticket);
     if (!this.sql<{ flag: number }>('SELECT require_signed_control AS flag FROM repositories WHERE id = ?', repo)[0]?.flag) return {};
@@ -2260,6 +2258,9 @@ export class BatonCore {
     // on an old station (round 1, 1-A-0, 1-B-0).
     const legsBefore = this.queuedLegs(r);
     for (const id of live) if (!stations.has(id)) this.stations.clear(qualify(r, id));
+    // R-BTN-88: a refresh can supply the first placement, but only a materializing read
+    // decides which tickets are absent. A held history cannot consume a pending position.
+    if (!held) this.ownerState.applyPending(r, live, stations, at, wrote != null);
     // A held history's closures stand even for tickets the current head still has: the holder's
     // archive may be in the rewritten history alone, and its done end must not wait the hold's
     // 24 hours (R-BTN-62; round 2, 2-A-0). A plain refresh's own closures are applied as they

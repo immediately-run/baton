@@ -570,6 +570,15 @@ export interface ApproverFacts {
 }
 
 const FLOOR_NAME = /^[a-z][a-z0-9-]{0,39}$/;
+
+export function checkFloorName(value: unknown): string {
+  return typeof value === 'string' && FLOOR_NAME.test(value) ? value : bad('name', 'must be a short floor name');
+}
+
+export function checkFloorGuarantees(value: unknown): GuaranteeName[] {
+  return Array.isArray(value) && value.length >= 1 && value.every((g) => (GUARANTEE_NAMES as readonly string[]).includes(g))
+    ? [...new Set(value as GuaranteeName[])] : bad('guarantees', `must name guarantees from ${GUARANTEE_NAMES.join(', ')}`);
+}
 /** A protection report feeds `no-runner-lands` this long (R-BTN-180). */
 export const PROTECTION_WINDOW_MS = 24 * 3_600_000;
 
@@ -892,7 +901,7 @@ export class Policies {
       return { ok: true };
     }
     only(body, ['name', 'guarantees', 'remove_by'], 'body');
-    const name = typeof body.name === 'string' && FLOOR_NAME.test(body.name) ? body.name : bad('name', 'must be a short floor name');
+    const name = checkFloorName(body.name);
     // B-182 (R-BTN-188): a floor names guarantees a human identity underwrites; while a code
     // repository sits on another host, none may stand — the other order of the refusal `put`
     // makes. Judged before the guarantees, so the refusal is the same whatever would be floored.
@@ -902,8 +911,7 @@ export class Policies {
         throw new BatonError('invalid-params', `floors: ${repository} holds the code repository ${cross.path} on ${cross.host}, another host than the home's — no floor may stand while a human identity cannot be named across hosts (B-182)`);
       }
     }
-    const guarantees = Array.isArray(body.guarantees) && body.guarantees.length >= 1 && (body.guarantees as unknown[]).every((g) => (GUARANTEE_NAMES as readonly string[]).includes(g as string))
-      ? [...new Set(body.guarantees as string[])] : bad('guarantees', `must name guarantees from ${GUARANTEE_NAMES.join(', ')}`);
+    const guarantees = checkFloorGuarantees(body.guarantees);
     const remove_by = body.remove_by === undefined ? 'human' : body.remove_by === 'human' || body.remove_by === 'owner' ? body.remove_by : bad('remove_by', "must be 'human' or 'owner'");
     if (this.rows('SELECT 1 FROM policy_floors WHERE repository_id = ? AND name = ?', repository, name).length) {
       throw new BatonError('conflict', `${repository} already has a floor named ${name} (R-BTN-189)`);
