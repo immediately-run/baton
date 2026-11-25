@@ -60,7 +60,7 @@ describe('S-BTN-319 board boundary', () => {
     expect((await syncCall(BOARD, body)).status).toBe(409);
     expect((await observe()).json.code).toBe('sync-busy');
     const fp = await withCore((c) => c.store.exec<{ fingerprint: string }>('SELECT fingerprint FROM sync_keys WHERE repository_id = ?', 'docs').one().fingerprint);
-    expect((await keyCall(admin, `/v1/admin/keys/${encodeURIComponent(fp)}/revoke`, {})).status).toBe(200);
+    expect((await keyCall(admin, `/v1/admin/keys/${encodeURIComponent(fp)}/revoke`, { confirm: true })).status).toBe(200);
     expect((await observe()).json.observation).toBe(observation + 1);
   });
 
