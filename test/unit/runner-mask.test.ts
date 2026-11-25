@@ -105,6 +105,13 @@ describe('class 7 by name (R-BTN-144)', () => {
     expect(sink.flush()).toBe('');
   });
 
+  it('S-BTN-119: a separate literal on the next line cannot expose a held suffix', () => {
+    const sink = createLegMasker(['sample-value-13', '13-followup', 'different-value']);
+    expect(sink.push('value: sample-value-13')).toBe('value: ***');
+    expect(sink.push('again: different-value')).toBe('again: ***'); // the held 13 already left inside the first ***
+    expect(sink.flush()).toBe('');
+  });
+
   it('a value holding a newline is masked across the boundary the line framing ate', () => {
     const value = 'topsecret\nsecondline';
     const sink = createLegMasker([value]);

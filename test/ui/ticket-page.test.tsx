@@ -230,11 +230,12 @@ describe('the ticket page’s controls (B-222)', () => {
     expect(controlNames().join(' | ')).not.toMatch(/Lift a ticket’s hold|Confirm an unconfirmed|Clear a fenced/);
   });
 
-  it('Stop sends to_runner_id after confirmation', async () => {
+  it('Stop confirms with to_runner_id', async () => {
     const { calls } = serve(show(), 'owner', { 'POST /v1/ui/messages': { ok: true } });
     renderApp('/repositories/docs/tickets/T-1');
     await screen.findByRole('heading', { level: 1 });
     fireEvent.click(await screen.findByRole('button', { name: 'Stop…' }));
+    expect(calls.some((c) => c.method === 'POST')).toBe(false);
     fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Stop' }));
     await waitFor(() => expect(calls.some((c) => c.method === 'POST')).toBe(true));
     const sent = calls.find((c) => c.method === 'POST')!;

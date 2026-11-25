@@ -58,3 +58,10 @@ sync key, R-BTN-93), kept outside Baton, that writes Baton's claim events into g
   `POST /v1/sync/foreign-claim`. Over an active Baton claim it is logged `foreign-claim`, the
   holder keeps its claim, and the mirror writes the holder's status back. With no
   Baton claim it is imported as a legacy claim (§16.1).
+
+### 16.4 The interim board post
+
+Legacy (R3-1233, superseded by B-31). The pre-standard-course sync posted `state: { items }`
+with `ready` in `rankReady` order, not §4.4's ticket and station lists. Core still accepts this
+shape for older posters, but refuses a post mixing the two shapes. Interim items start at the
+course's start station; the post supplies no station map.

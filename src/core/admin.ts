@@ -9,7 +9,7 @@ import { BatonError, PENDING_COOKIE, SESSION_COOKIE } from './http';
 import { logEvent, randomHex } from './db';
 import { adminFingerprints, API_KEY_FINGERPRINT, KEY_FINGERPRINT, parseApiKeyLine, parseSshKey, sshPublicLine, verifyNamespacedSignature, type SshKey } from './auth';
 import { capabilitiesOf } from '../shared/vocabulary.mjs';
-import { COURSE_ID, HOSTNAME, INSTANCE_NAME, SESSION_TOKEN, TAG, checkAsks, checkDeliverInteractions, checkLogin, checkRepositoryId, HOLDING_TYPE, MAX_CLAIMS_CAP, parseAccessIdentities } from './validate';
+import { COURSE_ID, HOSTNAME, INSTANCE_NAME, SESSION_TOKEN, TAG, checkAsks, checkConfirm, checkDeliverInteractions, checkLogin, checkRepositoryId, HOLDING_TYPE, MAX_CLAIMS_CAP, parseAccessIdentities } from './validate';
 import { REMIND_AFTER_S, type Notices } from './notices';
 import { parseTranscriptRepo } from './links';
 import { checkCodeRepos, checkPushers, codeReposOf, crossHostEntries, homeForgeOf, pushersOf, writeCodeRepos, type CodeRepo } from './codeRepos';
@@ -137,6 +137,7 @@ export class Admin {
     dispatchSync: (repository: string) => void;
     /** R-BTN-75, R-BTN-76: a grant made, changed or revoked moves the fleet's counts. */
     fleetChanged: () => void;
+    dependencyVisibilityChanged: () => void;
     /** R-BTN-47 (B-173): retirement reaps the repository's active claims as an administrator's
      *  force-reap does, inside the retiring transaction. */
     reapForRetire: (repository: string, actor: string) => void;
@@ -193,6 +194,17 @@ export class Admin {
    *  a person leg (R-BTN-116) and signs what its role admits. */
   humanKeyLine(fingerprint: string): string | null {
     return this.rows<{ public_key: string }>('SELECT public_key FROM human_keys WHERE fingerprint = ? AND revoked_at IS NULL', fingerprint)[0]?.public_key ?? null;
+  }
+
+  decisionKeyLine(fingerprint: string): string | null {
+    return this.ownerKey(fingerprint) ?? this.humanKeyLine(fingerprint);
+  }
+
+  /** Match the decision route's human mark, live key lookup and administrator exclusion. */
+  hasHumanDecisionWriter(breakGlass: ReadonlySet<string>, admins: ReadonlyMap<string, string>): boolean {
+    const registered = this.rows<{ fingerprint: string }>('SELECT fingerprint FROM human_keys WHERE revoked_at IS NULL');
+    return registered.some(({ fingerprint }) => !admins.has(fingerprint)) ||
+      [...breakGlass].some((fp) => !admins.has(fp) && this.decisionKeyLine(fp) != null);
   }
 
   /** R-BTN-185: whether the fingerprint counts as a human-only key — registered here, or a
@@ -333,7 +345,7 @@ export class Admin {
       // is no longer there.
       if (!known || known.retired_at != null) throw new BatonError('not-found', `${id} is not registered`);
       // §12.2: a destructive action takes confirm: true.
-      if (b.confirm !== true) throw new BatonError('confirm-required', 'retiring a repository takes confirm: true');
+      checkConfirm(b);
       this.retireRepository(actor, id, known);
       return { ok: true };
     }
@@ -430,6 +442,7 @@ export class Admin {
         this.mayOwn(o.fingerprint, admins);
         this.insertOwner(id, o, actor, marks.has(o.fingerprint) ? 1 : 0);
       }
+      if (newOwners.length) this.c.dependencyVisibilityChanged?.();
       if (weight !== undefined) this.exec('UPDATE repositories SET weight = ? WHERE id = ?', weight, id);
       if (tiers) {
         this.exec('UPDATE repositories SET tiers = ? WHERE id = ?', JSON.stringify(tiers), id);
@@ -497,6 +510,7 @@ export class Admin {
           JSON.stringify((JSON.parse(i.repositories) as string[]).filter((r) => r !== id)), i.name);
       }
       this.event(actor, { act: 'repository-retired', repository: id, github: known.github }, id);
+      this.c.dependencyVisibilityChanged?.();
       // The fleet's counts read the grants and the instance lists (R-BTN-75, R-BTN-76).
       this.c.fleetChanged();
     });
@@ -572,11 +586,12 @@ export class Admin {
    *  R-BTN-188 (B-145): refused while an approver list or a floor's `remove_by` the key alone
    *  satisfies would be left with no live credential. */
   async revokeKey(actor: string, raw: string, body: unknown) {
-    this.confirmRevoke(body);
     // A key's fingerprint, or a bearer-token credential's id while tokens serve (R3-1239).
     const fingerprint = KEY_FINGERPRINT.test(raw) || TOKEN_CREDENTIAL.test(raw) ? raw : bad('fingerprint', 'must be a key fingerprint, SHA256:…, or a token credential’s id');
     // The pool's reserved credential has no key to revoke (R-BTN-103).
     if (fingerprint === 'pool') bad('fingerprint', 'pool is reserved for runner couriers’ pool copies, not a key');
+    checkConfirm(body);
+    if (isObj(body)) only(body, ['confirm'], 'body');
     // Judged over the live repositories the key owns only (R-BTN-47): a retired repository's
     // policy blocks no revocation — its rows stay, read-only, and no route can change it again.
     for (const { repository_id } of this.rows<{ repository_id: string }>(
@@ -606,6 +621,7 @@ export class Admin {
         throw new BatonError('not-found', 'no key with that fingerprint');
       }
       this.event(actor, { act: 'key-revoked', key: fingerprint }, null);
+      this.c.dependencyVisibilityChanged();
       this.c.fleetChanged();
       return { ok: true };
     });
@@ -766,6 +782,7 @@ export class Admin {
                    deliver_interactions = excluded.deliver_interactions, revoked_at = NULL`,
         key.fingerprint, repository, JSON.stringify(caps), maxTier, maxClaims, actor, this.c.now(), Number(deliverInteractions));
       this.event(actor, { act: 'grant', key: key.fingerprint, repository, capabilities: caps, max_tier: maxTier, max_claims: maxClaims, deliver_interactions: deliverInteractions }, repository);
+      if (!prior || prior.revoked_at != null) this.c.dependencyVisibilityChanged();
       this.c.fleetChanged();
       return { ok: true, fingerprint: key.fingerprint };
     });
@@ -773,26 +790,22 @@ export class Admin {
 
   /** `POST /v1/owner/{repository}/grants/{fingerprint}/revoke`: this repository's grant only. */
   async revokeGrant(actor: string, repository: string, raw: string, body: unknown) {
-    this.confirmRevoke(body);
     const fingerprint = fingerprintOf(raw, 'fingerprint');
     // B-145 item 12: revoking a runner key is an `approvers.members` action too.
     this.requireMembersApprover(repository, actor.slice(actor.indexOf(':') + 1), 'owner', await this.breakGlassSet());
+    checkConfirm(body);
+    if (isObj(body)) only(body, ['confirm'], 'body');
     return this.c.store.transaction(() => {
       this.exec('UPDATE runner_grants SET revoked_at = ? WHERE credential_id = ? AND repository_id = ? AND revoked_at IS NULL', this.c.now(), fingerprint, repository);
       if (!this.changed()) throw new BatonError('not-found', `no grant of ${fingerprint} on ${repository}`);
       this.event(actor, { act: 'grant-revoked', key: fingerprint, repository }, repository);
+      this.c.dependencyVisibilityChanged();
       this.c.fleetChanged();
       return { ok: true };
     });
   }
 
   // ── owners (R-BTN-58) ───────────────────────────────────────────────────────────────────
-
-  private confirmRevoke(body: unknown): void {
-    if (!isObj(body)) return bad('body', 'must be a JSON object');
-    if (body.confirm !== true) throw new BatonError('confirm-required', 'revocation takes confirm: true');
-    only(body, ['confirm'], 'body');
-  }
 
   /** `POST /v1/owner/{repository}/owners`: `{public_key}` adds an owner, `{fingerprint, remove:
    *  true}` removes one — never the last, and never leaving an approver list or a floor's
@@ -804,8 +817,8 @@ export class Admin {
     this.requireMembersApprover(repository, actor.slice(actor.indexOf(':') + 1), 'owner', await this.breakGlassSet());
     if (b.remove === true) {
       only(b, ['fingerprint', 'remove', 'confirm'], 'body');
-      if (b.confirm !== true) throw new BatonError('confirm-required', 'removing an owner takes confirm: true');
       const fp = fingerprintOf(b.fingerprint, 'fingerprint');
+      checkConfirm(b);
       const facts = await this.factsWithout(repository, null);
       return this.c.store.transaction(() => {
         const left = this.rows<{ fingerprint: string }>('SELECT fingerprint FROM repository_owners WHERE repository_id = ? AND removed_at IS NULL', repository);
@@ -815,6 +828,7 @@ export class Admin {
         this.refuseUnsatisfiableLists(repository, { owners: new Map([...facts.owners].filter(([fp2]) => fp2 !== fp)), humans: facts.humans, breakGlass: facts.breakGlass, humanOwners: new Set([...facts.humanOwners].filter((fp2) => fp2 !== fp)) });
         this.exec('UPDATE repository_owners SET removed_at = ? WHERE repository_id = ? AND fingerprint = ? AND removed_at IS NULL', this.c.now(), repository, fp);
         this.event(actor, { act: 'owner-removed', key: fp, repository }, repository);
+        this.c.dependencyVisibilityChanged?.();
         return { ok: true };
       });
     }
@@ -830,6 +844,7 @@ export class Admin {
       if (this.rows('SELECT 1 FROM repository_owners WHERE repository_id = ? AND removed_at IS NULL', repository).length >= OWNERS_MAX) bad('public_key', `a repository has at most ${OWNERS_MAX} owners`);
       this.insertOwner(repository, key, actor, human);
       this.event(actor, { act: 'owner-added', key: key.fingerprint, repository, human_only: human === 1 }, repository);
+      this.c.dependencyVisibilityChanged?.();
       return { ok: true };
     });
   }
@@ -924,7 +939,7 @@ export class Admin {
     const b = body as Record<string, unknown>;
     if (b.revoke === true) {
       only(b, ['fingerprint', 'revoke', 'confirm'], 'body');
-      if (b.confirm !== true) throw new BatonError('confirm-required', 'revoking a human key takes confirm: true');
+      checkConfirm(b);
       const fp = fingerprintOf(b.fingerprint, 'fingerprint');
       // Refuse where the key is the last live credential a list or a floor's `remove_by` has
       // (R-BTN-188) — judged per live repository it owns (R-BTN-47: a retired repository's
@@ -982,7 +997,7 @@ export class Admin {
 
   /** `POST /v1/owner/{repository}/bars`: an owner bar `{course, tag, legs?, applies, starts_at?,
    *  ends_at?, release_holders?, reason}`; named legs need a named course. */
-  // @model setOwnerBar sha256:8ffc35865ecf
+  // @model setOwnerBar sha256:44f33168acbc
   setBar(actor: string, repository: string, body: unknown) {
     if (!isObj(body)) bad('body', 'must be a JSON object');
     const b = body as Record<string, unknown>;
@@ -1020,7 +1035,7 @@ export class Admin {
   }
 
   /** `POST /v1/owner/{repository}/bars/{id}/lift`. */
-  // @model liftOwnerBars sha256:d099663688c6
+  // @model liftOwnerBars sha256:3f440cb63410
   liftBar(actor: string, repository: string, id: number) {
     return this.c.store.transaction(() => {
       this.exec('UPDATE owner_bars SET lifted_at = ? WHERE id = ? AND repository_id = ? AND lifted_at IS NULL', this.c.now(), id, repository);

@@ -118,7 +118,7 @@ describe('the seed’s owner keys (R-BTN-47, R-BTN-58)', () => {
       // (The route stores the line without its comment.)
       expect(await live()).toEqual([second.publicKey.split(' ').slice(0, 2).join(' ')]);
       // A leaked only key: revoked with no owner beside it, the start still succeeds…
-      c.admin.revokeKey('admin:test', second.fingerprint, { confirm: true });
+      await c.admin.revokeKey('admin:test', second.fingerprint, { confirm: true });
       await seedOwners(c, config);
       expect(await live()).toEqual([]);
     });

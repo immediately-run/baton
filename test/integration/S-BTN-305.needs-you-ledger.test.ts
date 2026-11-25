@@ -40,7 +40,7 @@ function narrowed(key: string, repository: string): Json[] {
       return list.map(({ payload_json, ...m }) => ({ ...m, payload: parsed(payload_json) })).filter((m) => mine(m.payload.ticket_id));
     case 'bars_mismatch':
       return list.filter((e) => mine(e.ticket_id)).map(({ detail_json, ...e }) => ({ ...e, detail: parsed(detail_json) }));
-    case 'stale_skills': case 'pool_unclaimed': case 'no_owner_channel': case 'courses_refused': case 'scope': case 'unsigned_control':
+    case 'stale_skills': case 'pool_unclaimed': case 'no_owner_channel': case 'courses_refused': case 'scope': case 'unsigned_control': case 'sync_lapses': case 'sync_control_changes':
       return list.filter((x) => x.repository_id === repository);
     default:
       return list.filter((x) => mine(x.ticket_id));

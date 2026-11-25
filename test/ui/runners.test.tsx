@@ -1,11 +1,11 @@
 // runners.test.tsx — B-211: the runner screens on B-196's reads. The cards group by hostname
 // and order by state within a host; the claim block draws the lease bar; the newest status
-// report is text under its card; Stop sends a confirmed `release` and draws a `forbidden` as
+// report is text under its card; Stop confirms `release` and draws a `forbidden` as
 // text; an unlisted session link is text; the timeline's bars and nested segments match the
 // fixture, each a focusable group with a name, and the table lists the same rows; a hostile
 // label is text; `?since=` round-trips through the URL.
 import { afterEach, describe, expect, it } from 'vitest';
-import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { ACTIONS, actionsFor } from '../../src/core/actions';
 import { SCREENS } from '../../src/core/screens';
 import { RunnerScreen } from '../../src/dashboard/screens/runners/RunnerScreen';
@@ -101,12 +101,13 @@ describe('the Runners list (B-211 item 1)', () => {
     expect(names(cards[3])).toEqual([]);
   });
 
-  it('Stop sends confirmed release and draws a forbidden as text', async () => {
+  it('Stop confirms release and draws a forbidden as text', async () => {
     const { calls } = mockFetch({ '/v1/repositories/docs/runners': LIST, 'POST /v1/ui/messages': () => refuse('forbidden', `not this runner's ticket ${HOSTILE}`) });
     renderWithShell(<RunnersScreen {...props('repository/runners', { repository: 'docs' })} />, { actions, repos, now: NOW });
     await screen.findByText('4 alive of 5');
     const card = document.querySelector('.runner-card') as HTMLElement;
     fireEvent.click(within(card).getByRole('button', { name: 'Stop…' }));
+    expect(calls.some((c) => c.method === 'POST')).toBe(false);
     fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Stop' }));
     await waitFor(() => expect(calls.some((c) => c.method === 'POST')).toBe(true));
     expect(calls.find((c) => c.method === 'POST')).toMatchObject({ path: '/v1/ui/messages', body: { to_runner_id: 3, kind: 'release', confirm: true, payload: { ticket_id: 'docs:T-1', reason: 'requested' } } });
@@ -119,6 +120,31 @@ describe('the Runners list (B-211 item 1)', () => {
     fireEvent.click(within(card).getByRole('button', { name: 'Status' }));
     await waitFor(() => expect(calls.filter((c) => c.method === 'POST').length).toBe(2));
     expect(calls.filter((c) => c.method === 'POST')[1].body).toEqual({ to_runner_id: 3, kind: 'status_request' });
+  });
+
+  it('S-BTN-311: closes an open Stop confirmation when a refresh replaces the claim', async () => {
+    let fleet = LIST;
+    const { calls } = mockFetch({ '/v1/repositories/docs/runners': () => ({ body: fleet }), 'POST /v1/ui/messages': {} });
+    const { store } = renderWithShell(<RunnersScreen {...props('repository/runners', { repository: 'docs' })} />, { actions, repos, now: NOW });
+    await screen.findByText('4 alive of 5');
+    const controls = () => within(screen.getByRole('group', { name: 'Actions on runner 3' }));
+    fireEvent.click(controls().getByRole('button', { name: 'Stop…' }));
+    expect(within(screen.getByRole('dialog')).getByText('docs:T-1')).toBeDefined();
+
+    const next = claim({ claim_id: 9, ticket_id: 'docs:T-3' }) as NonNullable<RunnerRow['claim']>;
+    fleet = { ...LIST, runners: FLEET.map((r) => r.runner_id === 3 ? { ...r, claim: next, claims: [next] } : r) };
+    await act(() => store.refresh());
+    expect(screen.getByRole('link', { name: 'docs:T-3' })).toBeDefined();
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(calls.filter((c) => c.method === 'POST')).toEqual([]);
+
+    fireEvent.click(controls().getByRole('button', { name: 'Stop…' }));
+    expect(within(screen.getByRole('dialog')).getByText('docs:T-3')).toBeDefined();
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Stop' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(calls.filter((c) => c.method === 'POST')).toMatchObject([
+      { path: '/v1/ui/messages', body: { to_runner_id: 3, kind: 'release', confirm: true, payload: { ticket_id: 'docs:T-3' } } },
+    ]);
   });
 
   it('says so when no runner is granted, and draws the repository refusal', async () => {
