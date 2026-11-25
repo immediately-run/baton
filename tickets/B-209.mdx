@@ -3,14 +3,14 @@ title: "B-209 — Board and Tickets screens: /board is the repository as it stan
 id: B-209
 project: baton-ui-v2
 status: available
-updated: 2026-11-09
+updated: 2026-11-23
 repos:
   - baton
 tags:
   - roadmap-item
 order: 1208
 tier: judgement
-description: "Two read-only screens of BATON-UI-V2 under /repositories/{r}. Board: from GET …/board and repo.tickets — the ready list in the matching order (requires, tier, eligible alive runners by name; 'nobody can take it' with the failed rule — the retired Ready view), the live claims as holders (ticket, runner, leg, running for, lease ends, stalled, condition-wait — the retired Running view), ready_by_tier and the repository's granted capabilities. Tickets: the mockup's table from repo.tickets — qualified id and title linking the ticket page, state with its shape mark and the reason band, course position, requires as chips (one no alive runner holds marked) — with the tabs' counts, the text filter and the tier ceiling as URL query. Both read at 375 px. Requires: B-194, B-208."
+description: "Two read-only screens of BATON-UI-V2 under /repositories/{r}. Board: from GET …/board and repo.tickets — the ready list in the matching order (requires, ~~tier,~~ eligible alive runners by name; 'nobody can take it' with the failed rule — the retired Ready view), the live claims as holders (ticket, runner, leg, running for, lease ends, stalled, condition-wait — the retired Running view), ready_by_tier and the repository's granted capabilities. Tickets: the mockup's table from repo.tickets — qualified id and title linking the ticket page, state with its shape mark and the reason band, course position, requires as chips (one no alive runner holds marked) — with the tabs' counts, the text filter and the tier ceiling as URL query. Both read at 375 px. Requires: B-194, B-208."
 topics:
   - baton
 owns: {}
@@ -29,7 +29,7 @@ view are text here.
 **Spec:** [BATON_SPEC §11.4](../spec/BATON_SPEC/11-people.md#sec-11-4) (Board and Tickets; the
 tab mapping; stalled is `last_activity_at` over 2 hours old), [§12.1](../spec/BATON_SPEC/12-security.md#sec-12-1)
 ([R-BTN-179](../spec/BATON_SPEC/12-security.md#sec-12-1): the board read's `ready`,
-`ready_by_tier`, `holders`, `granted_capabilities`), [§6.6](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-6)
+~~`ready_by_tier`,~~ `holders`, `granted_capabilities`), [§6.6](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-6)
 (matching: the failed rule), [§3.1](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-1)
 ([R-BTN-61](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-1): the order is Baton's),
 [§14](../spec/BATON_SPEC/14-api.md#sec-14) (`board`, `repo.tickets`). Context: the brief —
@@ -45,9 +45,9 @@ from B-207).
 1. **Board** (`src/dashboard/screens/board/`), two sections, each from one filtered read
    followed to its end by cursor (bounded by the envelope's 5,000 tickets): **Ready** — from
    `repo.tickets?state=ready` in Baton's order (the same order as `GET …/board`'s `ready`), each
-   row the ticket (linking its page), tier, requires as chips, the eligible alive runners by
-   name, and for a ticket none can take `failed_rule` as text; `GET …/board`'s `ready_by_tier`
-   as a one-line summary above. **Running** — from `repo.tickets?state=running`: ticket, runner
+   row the ticket (linking its page), ~~tier,~~ requires as chips, the eligible alive runners by
+   name, and for a ticket none can take `failed_rule` as text~~; `GET …/board`'s `ready_by_tier`
+   as a one-line summary above~~. **Running** — from `repo.tickets?state=running`: ticket, runner
    (hostname and session name, linking its page), leg, running for, lease ends (a bar from
    `since` to `lease_ends_at`, now marked, as the mockup's runner cards draw it), `stalled` where
    the read says so, `condition_wait` linking the condition where the leg waits on one. Below, the repository's `granted_capabilities` as chips. No control
@@ -59,8 +59,8 @@ from B-207).
    mockup's "Held by operator: …", "Retries exhausted … 3 of 3", "Decision open", "No capable
    worker — needs real-iphone", "Waiting on docs:R3-1200"), course position (station, holder and
    duration or wait), requires as chips with one no alive runner holds marked; the tabs All,
-   Ready, Running, Blocked, Unconfirmed, Closed today with `counts`, the text filter and the
-   tier ceiling as `?state=`, `?q=`, `?tier=` in the URL so a view is linkable; "Showing n of
+   Ready, Running, Blocked, Unconfirmed, Closed today with `counts`, the text filter ~~and the
+   tier ceiling~~ as `?state=`, `?q=`~~, `?tier=`~~ in the URL so a view is linkable; "Showing n of
    total" and a load-more by cursor. No client sort (the order is Baton's).
 3. **Phone.** At 375 px the Board's rows and the Tickets table become one card per ticket with
    the state first; the tabs scroll horizontally.
@@ -89,7 +89,7 @@ from B-207).
 Under `test/ui/` with fixture reads: the Board's Ready order equals the fixture's; the failed
 rule is drawn for an untakeable ticket; Running draws the lease bar and `stalled`; the Tickets
 table draws each state's mark and reason band; the tabs carry the fixture's counts and set
-`?state=`; `?q=` and `?tier=` round-trip through the URL; no sort control exists; a hostile title
+`?state=`; `?q=` ~~and `?tier=`~~ round-trip through the URL; no sort control exists; a hostile title
 and hold reason are text; the 375 px cards.
 
 ### Exit criteria
@@ -105,3 +105,5 @@ _filed 2026-11-09, split from B-194 after review._
 _2026-11-09 — revised after the second review: the Board reads the filtered ticket list to its
 end rather than joining the board's holders against one page; runner names, `stalled` and
 `condition_wait` come from B-194's detail._
+
+_2026-11-23 — tiers retired (spec/retire-tiers: [BATON_SPEC §6.6](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-6) gate 5, [R-BTN-66](../spec/BATON_SPEC/01-what-baton-is.md#sec-1)): the struck tier clauses are gone from the spec — no ticket tier, runner ceiling, grant `max_tier`, ladder, `ready_by_tier` or `?tier=`. Build the rest without them._
