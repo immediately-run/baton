@@ -18,6 +18,75 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
 
 ## Changelog
 
+- **2026-11-25 — Ticket files are Dibber's to write (R-BTN-74, R-BTN-199, S-BTN-189, S-BTN-234).**
+  Rules changed: R-BTN-74, R-BTN-199, R-BTN-193 (its legacy list: the git-lock ticket commands are
+  gone); §11's CLI table; S-BTN-189, S-BTN-199, S-BTN-234, S-BTN-241;
+  the Decisions entry for `baton ticket new`. The owner, 2026-11-24: "the baton cli should not write
+  ticket files, thats dibber's job", and in the same session: `baton tickets` keeps `next` and
+  `check`, and the course legs that file or mark tickets go through `dibber` too (B-326). Dibber
+  0.4.0 (DIB-33) takes a filing's number from a coordinator command, writes a whole ticket and a
+  reader's own keys. `baton ticket new`, `claim`, `set` and `done`, with the PR filing,
+  `--direct` and the `**Used by:**` reverse lines, are retired. What `claim` checked first —
+  Baton's position (B-129), the holders, the dependencies and the rules re-read guard — is
+  `baton ticket check <id> --claimable`, which writes nothing; a `rules re-read` note may be
+  Dibber's Status line. `baton repo init` writes `.dibber/config.json` with Baton as its
+  coordinator (`baton tickets next ticket-<prefix> --coordinator`: Baton's number or a refusal,
+  never a scan), and a leg's `dibber` is the one its stub pins. A marker leg's close keeps
+  writing its own keys: Dibber 0.4.0 cannot remove `next_leg` at an end, nor write a legacy-prefix
+  ticket, so that move waits on Dibber.
+
+- **2026-11-24 — The advance reply names the run's number (R-BTN-63, S-BTN-204).**
+  Rules changed: R-BTN-63, §14's advance row; S-BTN-204. The owner, 2026-11-24, on the
+  supervisor's report that the runner numbered a claim's runs 1, 3, 5: "Yes, fix now, and also
+  think of ways we can systematically prevent these errors from happening in the first place."
+  The runner handed each leg `ctx.run` from its own count — the earlier attempts' legs plus the
+  claim's own — while each leg the claim finished had already joined the first list, so a
+  claim's second review round reached 3 and the create-pr stub suspended it for `adjudicate`
+  (B-322 and B-324 on 2026-11-24, Baton's history showing run 2). Baton already counted the
+  runs, for `max_runs`, from its own record; the count had two homes. Now the `advance` that
+  starts a run answers `run`, counted as `max_runs` counts it, and the holder hands that to the
+  leg; a run an earlier claim abandoned is not one of them, as it never was for `max_runs`
+  (the history row's `run`, R-BTN-81, still counts every row). B-335.
+
+- **2026-11-24 — Access sign-in refusals name the failed check (R-BTN-155, S-BTN-318).**
+  Previously missing settings, missing or unverifiable assertions, and missing administrator
+  bindings all drew the same message. Missing Worker settings caused the 2026-11-23 sign-in
+  failure (B-319). The front now answers verification refusals itself; both binding failures
+  still share one answer to avoid revealing whether the verified email has a line.
+
+- **2026-11-23 — Tiers retired (§6.6 gate 5, R-BTN-66).**
+  Rules changed: R-BTN-5, R-BTN-9, R-BTN-34, R-BTN-35, R-BTN-50, R-BTN-58, R-BTN-66, R-BTN-74,
+  R-BTN-114, R-BTN-117, R-BTN-127, R-BTN-159, R-BTN-179, R-BTN-196, the board post (§4.4), §6.6,
+  §13.1–§13.4, §14; S-BTN-24, S-BTN-39, S-BTN-69, S-BTN-260, S-BTN-296, G-BTN-66; two Decisions
+  entries; the linked proposals (checks and executors, data model and API, conditions, people
+  and dashboard, scenarios); the context pages product, ux and vocabulary. The owner,
+  2026-11-23: "If possible, I would like to get rid of tiers entirely." A tier (`routine`,
+  `judgement`, `critical`, R3-1193) routed a ticket to a runner on a strong enough model line:
+  gate 5 refused a runner whose ceiling, the lower of its declared `tier_ceiling` and its
+  grant's `max_tier`, sat below the ticket's place on the repository's ladder. Every runner
+  declared the default ceiling, `critical`; the runbook grants keys `--max-tier judgement`
+  (`scripts/start-runner.sh`); no course read a tier. On 2026-11-23 six tickets filed as
+  `normal` or `high`, off the ladder, showed "nobody can take it — above-tier-ceiling" until
+  #388 moves them to `judgement`. Removed: gate 5 and its code `above-tier-ceiling`, the
+  repository's `tiers` ladder, the heartbeat's `tier_ceiling` and `tier_ceilings`, the grant's
+  and the proposed tokens' and check-runners' `max_tier`, a ticket's `tier` in the board post,
+  in `ready_tickets` and in every read, the tickets list's `?tier=` filter, the board's
+  `ready_by_tier`, staleness by a re-tier, and the runner's tier check at re-verification. A
+  ticket sent to particular runners requires a capability, of a type a course declares
+  (R-BTN-121), that those runners declare and are granted (§6.6 rule 4); declaring a new type
+  is a course-file change, a control path (R-BTN-184). A `requires` clause is written in git
+  like the tier was and binds as strongly as git does (R-BTN-66); the retired Decisions entry's
+  condition, no runner above the VM level serving a repository that runners below it push,
+  was the price of an unprotected tier and lapses with it. Removing `max_tier` widens every
+  grant that set one below the top: such a key may take every ticket its capabilities fit. Gate
+  numbers are stable, so 5 is left unused, as 6 and 12 are. Once the shipped sources stop
+  posting it, a markdown ticket's `tier:` line is one of the fields its source ignores
+  (R-BTN-74) and needs no edit. Review: two fresh reviewers given the diff (round one) found a
+  surviving `tier_position` column, tier text in five linked proposals, an invalid capability
+  in the ux example, a migration entry that described runner code that does not exist and
+  named no order or end, the grants `max_tier` widens, and missing rule ids; each was checked
+  against the text and code, and fixed.
+
 - **2026-11-21 — Sign-in through Cloudflare Access (R-BTN-155, R-BTN-57, S-BTN-308).**
   Rules changed: R-BTN-155, R-BTN-57, R-BTN-16, R-BTN-149, R-BTN-185, R-BTN-188; G-BTN-144, S-BTN-124. The
   owner approved it on 2026-11-21: a person Cloudflare Access has verified reaches a dashboard
@@ -3899,6 +3968,26 @@ The simplification of 2026-11-19 moved the scenarios and gates of unbuilt design
 
 Each entry is a transition the specification no longer describes. The code keeps the old form
 working until the stated condition holds, then removes it.
+
+- **Tier fields from older clients (2026-11-23).** The server changes first: gate 5, the
+  re-tier release in `staleBoard` and the tier reads go before any CLI or sync stops sending a
+  tier, since an old server counts an untiered ticket as the top tier and refuses it to a capped
+  grant. A board post's ticket `tier`, a heartbeat's `tier_ceiling` and `tier_ceilings`, a
+  grant's `max_tier`, a repository registration's or change's `tiers` and the tickets list's
+  `?tier=` are then accepted and ignored, never validated (a refused heartbeat would get a live
+  runner reaped), each logging one `deprecated-field` event per credential and field per day.
+  Stop when no request has carried one for 30 days: they are then refused `invalid-params`. The
+  stored `max_tier` values are dropped, widening those grants (the changelog entry); an owner
+  who relied on one re-scopes the key by capability before the deploy. A migration drops
+  every tier column: the repository's `tiers`, the grant's `max_tier`, the runner's
+  `tier_ceiling` and `tier_ceilings`, the ticket's `tier` and `tier_position`, and
+  `ready_tickets.tier_position`. What still carries the
+  rule goes with it: the vendored decision library's rule 5 (`isEligible`, `fitsTier`, `TIERS`,
+  docs-owned, then `npm run vendor`), `src/core/gates.ts`, the failed-rule order in
+  `src/core/claims.ts`, the trace checker's re-tier release, `ticketPr.mjs`'s `tier` control
+  field, the Quint model's rules 4–7, the `--tier`, `--max-tier` and `--tiers` flags,
+  `scripts/start-runner.sh`'s grant line, and the README's and `docs/security-model.mdx`'s tier
+  text.
 
 - **One claim per runner on the heartbeat (B-188, 2026-11-17).** The heartbeat answer keeps
   `claim` — the runner's oldest active claim, or null — beside `claims`, and reads the bare

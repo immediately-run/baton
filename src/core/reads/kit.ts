@@ -1,6 +1,7 @@
 // reads/kit.ts — what a read module is written with (B-192, B-205): the principal a read's
 // caller resolves to, the one authorization of a principal against an action and a repository,
 // and the helpers a list read pages with. See ./index.ts for how to add a read.
+import type { SessionLinkView } from '../links';
 import { BatonError } from '../http';
 import { callerFor, type Action, type ActionPrincipal, type Caller, type SessionRole } from '../actions';
 import { checkCursor, mintCursor, page, PAGE_DEFAULT, type CursorBinding } from '../cursor';
@@ -30,6 +31,9 @@ export type ReadCtx = {
 /** One authorized call of a read. */
 export type ReadCall = {
   action: Action;
+  sessionLink: SessionLinkView;
+  /** A dashboard session or the authorized R-BTN-195 delivery poll. */
+  showInteractionLinks: boolean;
   principal: ReadPrincipal;
   /** The entry's caller the principal matched. */
   caller: Caller;

@@ -11,6 +11,8 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { graphOf, legCapabilities, type Graph } from '../core/graph';
+import { parseSchemaId, type Resolve } from '../shared/schema.mjs';
+import { stdSchema } from '../shared/std.mjs';
 
 /** B-94: the bound on every git the runner itself runs. The heartbeat path reads the snapshot
  * here (`ensureSha`, `courseOf`, `loadCourse`), and a state file lock, a hook or a stalled
@@ -37,6 +39,7 @@ export interface CourseLoad {
   /** The extracted `legs/<leg>.mjs` of the snapshot, by leg name — file paths on disk. */
   scripts: Map<string, string>;
   scratch: string;
+  schema?: Resolve;
 }
 
 /** The course id the home repository runs, from the snapshot's `.baton/baton.json`: the spec's
@@ -111,10 +114,10 @@ export function ensureSha(home: string, sha: string, fetch: () => void): boolean
 export function advanceHome(home: string, sha: string, defaultBranch: string | null): string | null {
   const head = git(home, ['rev-parse', 'HEAD']).trim();
   const target = git(home, ['rev-parse', `${sha}^{commit}`]).trim();
-  if (head === target) return null;
-  const branch = (() => { try { return git(home, ['symbolic-ref', '--short', '-q', 'HEAD']).trim(); } catch { return ''; } })();
-  if (defaultBranch == null || branch !== defaultBranch) return `the home is on ${branch || 'a detached HEAD'}, not ${defaultBranch ?? 'the default branch'}`;
+  const branch = (() => { try { return git(home, ['symbolic-ref', '-q', 'HEAD']).trim().replace(/^refs\/heads\//, ''); } catch { return ''; } })();
+  if (branch !== defaultBranch && (defaultBranch !== null || head !== target)) return `the home is on ${branch || 'a detached HEAD'}, not ${defaultBranch ?? 'the default branch'}`;
   if (git(home, ['status', '--porcelain', '--untracked-files=no']).trim() !== '') return 'the home has tracked changes';
+  if (head === target) return null;
   try {
     git(home, ['merge-base', '--is-ancestor', head, target]);
   } catch {
@@ -195,7 +198,18 @@ export function loadCourse(home: string, sha: string, course: string): CourseLoa
     writeFileSync(to, bytes, { mode: 0o600 });
     scripts.set(leg, to);
   }
-  return { course, graph, scripts, scratch };
+  const schemas = new Map<string, ReturnType<Resolve>>();
+  const schema: Resolve = (id) => {
+    const parts = parseSchemaId(id);
+    if (!parts || parts.prefix === 'std') return stdSchema(id);
+    if (schemas.has(id)) return schemas.get(id) ?? null;
+    const text = readAt(home, sha, `.baton/courses/${parts.prefix}/schemas/${parts.name}@${parts.version}.json`);
+    let value = null;
+    try { value = text == null ? null : JSON.parse(text); } catch { /* malformed schema */ }
+    schemas.set(id, value);
+    return value;
+  };
+  return { course, graph, scripts, scratch, schema };
 }
 
 /** B-183 (§4.5, R-BTN-74): the repository's ticket source at the claim's snapshot — its

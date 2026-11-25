@@ -1,0 +1,22 @@
+---
+title: B-25 review round 2
+description: Findings and disposition for the second review of keyed action discovery.
+---
+
+Reviewed [Baton #382](https://github.com/immediately-run/baton/pull/382) at `4c01c81f`.
+The [review](https://github.com/immediately-run/baton/pull/382#pullrequestreview-6019091305)
+returned changes.
+
+| Finding | Disposition |
+|---|---|
+| [CLI may send a bearer over cleartext](https://github.com/immediately-run/baton/pull/382#discussion_r4663823047) | The shared send path checks the resolved destination before attaching the bearer. S-BTN-126 covers refusal without a fetch and allows HTTPS and loopback HTTP. |
+| [A visible log prefix spends the key hold budget](https://github.com/immediately-run/baton/pull/382#discussion_r4663823054) | Count from the banner, not the beginning of the line. S-BTN-119 covers a long visible prefix and continued masking through the closing banner. Classify raw lines while retaining the base branch's CRLF-aware literal matcher. |
+| [Emergency revocation pins predate confirmation](https://github.com/immediately-run/baton/pull/382#discussion_r4663823063) | Document how to pin and use a confirmation-capable released CLI before rolling out enforcement. The old pins remain documented only for old servers. |
+
+The prior round's complete registry and surface parity, MCP, condition resolution, and
+cancellation blockers remain open. This fix does not claim B-25's full exit criteria.
+
+The merge with `main` also exposed two integration regressions, absent on base `1e184d2f`:
+the delivery check still used `repo.conditions` instead of `condition.list` (S-BTN-222 and S-BTN-310),
+and the new deadline scenario (S-BTN-52) needed to make a confirmed Stop request to exercise
+release expiry. The fix keeps the existing session-link authorization and Stop confirmation.

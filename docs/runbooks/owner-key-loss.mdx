@@ -97,6 +97,11 @@ With an administrator key:
 npx --yes @immediately-run/baton@0.1.4 admin -i ~/.ssh/baton_admin revoke SHA256:OLD_FINGERPRINT
 ```
 
+That pin is for servers before destructive-action confirmation was enforced. For a server that
+enforces it, follow the [confirmation-compatible release instructions](./compromised-runner.mdx#1-the-first-minute--the-key-not-the-identity):
+replace `0.1.4` with the exact verified release version and confirm the old fingerprint at the
+prompt, or pass `--yes` after checking it. A `confirm-required` response leaves the old key live.
+
 Prefer this over the owner's `owners baton --remove SHA256:OLD_FINGERPRINT`, which only removes
 the key from one repository. A revocation (R-BTN-57) removes it from every repository it owns,
 ends its sessions and MCP keys, and marks it revoked: no owner can add it back, and a rebuilt

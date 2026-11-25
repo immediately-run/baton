@@ -20,13 +20,15 @@ const ctxOf = (c: BatonCore): ReadCtx => ({
   core: c, store: c.store, sql: (q, ...p) => c.store.exec(q, ...p).toArray() as never[], now: () => c.now(),
   config: (c as unknown as { ports: { config: ReadCtx['config'] } }).ports.config,
 });
+import { hiddenSessionLink } from '../../src/core/links';
+
 const alice: ReadPrincipal = { kind: 'session', role: 'administrator', id: 'SHA256:alice', repositories: null };
 const bob: ReadPrincipal = { kind: 'session', role: 'administrator', id: 'SHA256:bob', repositories: null };
 const key: ReadPrincipal = { kind: 'key', role: 'owner', cred: 'SHA256:alice' };
 const callOf = (principal: ReadPrincipal, action: string, path: string): ReadCall => {
   const a = ACTIONS.find((x) => x.id === action)!;
   const url = new URL(ORIGIN + path);
-  return { action: a, principal, caller: a.callers[0], repository: 'docs', params: {}, url, req: new Request(url) };
+  return { action: a, sessionLink: hiddenSessionLink, showInteractionLinks: false, principal, caller: a.callers[0], repository: 'docs', params: {}, url, req: new Request(url) };
 };
 const code = (f: () => unknown): string => {
   try {

@@ -2,7 +2,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { writeSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
-import { batonNow } from '../vendor/baton.mjs';
+import { batonNow } from '../shared/baton.mjs';
 import type { LocalQueue } from './queue';
 import type { RefState } from './audit';
 import { BatonApi, BatonRefusal, batonUnreachable } from './api';
@@ -12,7 +12,9 @@ import { StateFile, leaseLostFrom, type PersistedClaim } from './state';
 import { ClaimRun, type ClaimOutcome, type Resume } from './claimRun';
 import { Sidecar, BEAT_MS } from './sidecar';
 import { MachineLocks } from './machineLocks';
-import { msg, sleep, stampLine, withTimestamps } from './log';
+import { ageWords, msg, sleep, stampLine, withTimestamps } from './log';
+import { maskLegOutput } from './mask';
+import { idleReason } from './idle';
 
 export { BEAT_MS, declarationFrom } from './sidecar';
 export { SIGNAL_GRACE_MS, type ClaimOutcome } from './claimRun';
@@ -42,13 +44,19 @@ export interface RunnerOptions {
   /** B-86: the rule 4 names the legs of the courses it serves require, read from the home checkout
    *  each time it is asked, so a runner whose declaration lacks one says so at startup. Injected by
    *  `baton run`; absent, no such line. B-103: every served course's legs, not one course's. */
-  legNeeds?: () => Promise<string[]> | string[];
+  legNeeds?: (courses: RunnerOptions['courses']) => Promise<string[]> | string[];
   tierCeiling?: string;
   /** The courses this runner serves and declares (B-103, rule 9): every course its home checkout
    *  declares, or the one `--course` narrowed it to. The claim it takes names the ticket's course
    *  (`course_id`), which `runClaim` loads from the claim's snapshot — so one runner, one checkout,
    *  serves several courses, one leg at a time (rule 3). */
   courses: { course: string; version: number }[];
+  /** Re-read the home declaration after a successful advance. */
+  readCourses?: () => RunnerOptions['courses'];
+  /** Bring an idle home to its default branch's fetched snapshot. True when safe to re-read. */
+  refreshHome?: () => boolean;
+  /** Return the reason to restart, or null. Called only with no claim or leg in flight. */
+  restartReason?: () => string | null;
   stateFile: string;
   beatEvery?: number;
   now?: () => number;
@@ -113,6 +121,8 @@ export class Runner {
   private draining = false;
   /** Bumps with every claim: an answer a beat started before the claim cannot fence it. */
   private epoch = 0;
+  /** B-244: one line on entry and on a changed refusal, not one per beat. */
+  private idle: { since: number; line: string } | null = null;
   /** B-86: the empty-declaration line has been said, once, since `runOnce` would ask each time. */
   private saidEmpty = false;
   private readonly locks: MachineLocks | null;
@@ -143,6 +153,7 @@ export class Runner {
   /** R-BTN-202 (B-248): the leg running under a local order while Baton is unreachable — held
    *  by no claim, so no beat reports it; the stop paths reach it here. */
   private offlineSlot: ClaimRun | null = null;
+  private restartRequested = false;
   /** R-BTN-202: why each order waits, once said — idle retries say it again only when it changes. */
   private saidOffline = new Map<string, string>();
 
@@ -171,7 +182,7 @@ export class Runner {
       this.legacy.add(was.claim.id);
     }
     this.startedInLease = was.last_ok != null && !leaseLostFrom(was, this.now());
-    this.sidecar = new Sidecar({ ...this.o, concurrency: k, now: this.now, log: this.log }, this.state, this.locks,
+    this.sidecar = new Sidecar({ ...this.o, readCourses: () => this.o.courses, concurrency: k, now: this.now, log: this.log }, this.state, this.locks,
       () => ({ live: [...this.slots], persisted: this.persisted, epoch: this.epoch, pendingRequests: this.claimsOut }),
       (why) => this.drain(why));
   }
@@ -268,7 +279,7 @@ export class Runner {
     this.offlineSlot?.signalLeg('release', 'released:requested');
   }
 
-  async work(): Promise<void> {
+  async work(): Promise<number> {
     this.ensureFatalHooks();
     this.start();
     while (!this.stopped && !this.draining) {
@@ -308,6 +319,30 @@ export class Runner {
     }
     // Draining (or stopped): every claim still running ends at its own boundary first.
     await Promise.allSettled([...this.tasks]);
+    this.stop();
+    await this.sidecar.waitForBeat();
+    return this.restartRequested ? 75 : 0;
+  }
+
+  private refreshCourses(): void {
+    if (!this.o.readCourses) return;
+    try {
+      const next = this.o.readCourses();
+      const previous = new Map(this.o.courses.map(({ course, version }) => [course, version]));
+      let changed = false;
+      for (const { course, version } of next) {
+        const was = previous.get(course);
+        if (was !== version) {
+          this.log(`baton: course ${course} now version ${version}${was == null ? '' : ` (was ${was})`}`);
+          changed = true;
+        }
+        previous.delete(course);
+      }
+      for (const [course, version] of previous) this.log(`baton: course ${course} no longer declared (was ${version})`);
+      if (changed || previous.size) this.o.courses = next;
+    } catch (e) {
+      this.log(`baton: keeping the last course declaration (${msg(e)})`);
+    }
   }
 
   /** B-188: a claim's run on its own task — a failure is the loop's line, never another claim's. */
@@ -399,6 +434,17 @@ export class Runner {
     // B-229: and what this host's earlier sessions still hold — each start is a new session with
     // a new state file, so the orphan above never sees them.
     await this.sidecar.endEarlierSessions();
+    if (this.stopped || this.draining) return null;
+    if (this.slots.size === 0 && this.claimsOut === 0 && !this.offlineSlot) {
+      if (this.o.refreshHome?.()) this.refreshCourses();
+      // The home fetch may also move the CLI's upstream when they share a checkout.
+      const reason = !this.sidecar.hasPendingEnds && this.o.restartReason?.();
+      if (reason) {
+        this.restartRequested = true;
+        this.drain(reason);
+        return null;
+      }
+    }
     // R-BTN-4 (B-188): no room — the runner holds its bound.
     if (this.slots.size >= this.concurrency) return null;
     // B-86: the claim goes out only on the declaration the server holds — `sent` is the list the
@@ -415,6 +461,7 @@ export class Runner {
     // out on what this runner named.
     // Only an attempt that began unregistered can receive a registration's stray refusal.
     if (await this.sidecar.settleDeclaration()) beating = !registered;
+    if (!this.sidecar.coursesSettled || this.stopped || this.draining) return null;
     // An empty declaration is not "nothing to do" (finding 5): rule 4 passes any declaration for
     // a ticket with no `Requires:` clause, so it still claims — the line below explains what it
     // can never take, once, since every idle attempt returns here.
@@ -456,7 +503,6 @@ export class Runner {
         }
         return null;
       }
-      if (e instanceof BatonRefusal && e.code === 'no-eligible-ticket') return null;
       if (e instanceof BatonRefusal && e.code === 'unauthenticated') {
         // B-93: only the registration's own missing-secret refusal is quiet. A replaced
         // secret or replayed nonce still names itself, now on the single claim request.
@@ -477,8 +523,15 @@ export class Runner {
         return null;
       }
       // R-BTN-4 (B-188): `max-claims` among them — the runner is at its bound for now.
-      if (e instanceof BatonRefusal && e.code === 'not-eligible') {
-        this.log(`baton: no claim (${e.message})`);
+      // B-244: the idle reason, said once on entry and again only when it changes.
+      if (e instanceof BatonRefusal && (e.code === 'not-eligible' || e.code === 'no-eligible-ticket' || (e.code === 'stale-skills' && e.detail != null))) {
+        if (!this.slots.size) {
+          const line = maskLegOutput(`baton: idle — ${e.code}: ${idleReason(e)}`, []);
+          if (line !== this.idle?.line) {
+            this.log(line);
+            this.idle = { since: this.idle?.since ?? this.now(), line };
+          }
+        }
         return null;
       }
       throw e;
@@ -488,6 +541,10 @@ export class Runner {
     this.epoch++;
     const ticket = claim.ticket_id as string;
     const claimId = claim.claim_id as number;
+    if (this.idle) {
+      this.log(`baton: idle for ${ageWords(this.now() - this.idle.since)}, ended by claim ${claimId}`);
+      this.idle = null;
+    }
     // R-BTN-4 (B-188): the claim's slot is held from here — before any await, so no beat can
     // read a claim Baton granted as one this runner does not hold.
     const slot = this.newSlot();
@@ -561,6 +618,11 @@ export class Runner {
       if (def == null || at == null) {
         dropCourse(course.scratch);
         wait(order.ticket_id, def == null ? `${leg} is not a leg of course ${course.course}` : `${leg} leaves ${def.from.join(' or ')}, and without Baton the runner cannot tell where the ticket rests`);
+        continue;
+      }
+      if (Object.keys(def.inputs ?? {}).length || def.outputs || def.to.some((station) => course.graph.entry.has(station))) {
+        dropCourse(course.scratch);
+        wait(order.ticket_id, `${leg} needs Baton for its contract or station entry (R-BTN-82)`);
         continue;
       }
       this.saidOffline.delete(order.ticket_id);
@@ -749,6 +811,7 @@ export class Runner {
   private makeRun(checkout: string): ClaimRun {
     return new ClaimRun(checkout, { ...this.o, now: this.now, verbose: this.verbose, log: this.log },
       this.state, this.executor, this.sidecar, {
+        homeAdvanced: () => this.refreshCourses(),
         ensureLegLocks: (run, leg, course) => this.ensureLegLocks(run, leg, course),
         savePlace: (run) => { if (this.slots.has(run)) this.writeClaims(); },
         retire: (run) => {

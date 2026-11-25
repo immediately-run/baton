@@ -22,7 +22,7 @@
 //                [--sync-workflow PATH|none] [--mirror-workflow PATH|none] [--ci-identity …]
 //                [--add-owner-key PUB[,…]] [--add-sync-key PUB[,…]] [--add-mirror-key PUB[,…]] [--remove-sync-key FP[,…]]
 //   baton admin -i KEY repo retire ID [--yes]
-//   baton admin -i KEY grant REPO --key PUB [--hostname H] --capabilities a,b [--max-tier T] [--max-claims N]
+//   baton admin -i KEY grant REPO --key PUB [--hostname H] --capabilities a,b [--max-tier T] [--max-claims N] [--deliver-interactions]
 //   baton admin -i KEY probe add --key PUB --label L
 //   baton admin -i KEY resource add NAME --scope account|service --schema FILE|JSON    (R-BTN-76)
 //   baton admin -i KEY instance add NAME --serves a,b --repositories x,y
@@ -44,7 +44,7 @@
 //                decision (R-BTN-75); `--on decision:*` is every decision waiting on a person
 //   baton admin -i KEY revoke FINGERPRINT [--yes]                  baton admin -i KEY open
 //   baton admin -i KEY state      — what the dashboard draws, as JSON, read with the key (B-118)
-//   baton owner -i KEY grant REPO --key PUB [--hostname H] --capabilities a,b [--label L] [--max-tier T] [--max-claims N]
+//   baton owner -i KEY grant REPO --key PUB [--hostname H] --capabilities a,b [--label L] [--max-tier T] [--max-claims N] [--deliver-interactions]
 //   baton owner -i KEY revoke REPO FINGERPRINT [--yes]
 //   baton owner -i KEY owners REPO (--add PUB | --remove FINGERPRINT [--yes])
 //   baton owner -i KEY sign [--message TEXT] [--repo DIR] -- <paths>…   (B-127: a commit signed
@@ -116,26 +116,17 @@
 //   baton repo migrate-markers [--root DIR]   — the one-time fold of the retired .baton/markers.jsonl into the tickets (B-100)
 //                   [--eject tickets|stations] [--pin owner/name@commit] [--force]
 //                — a repository's own sync and scaffold (§2f R-BTN-74, R-BTN-131)
-//   baton tickets new --title T [--description D] [--project ID] [--depends-on A,B] [--tags X,Y]
-//                [--tier T] [--order N] [--repos a,b] [--course C] [--body-file F] [--trust T] [--invariants I]
-//                — file one ticket, the next free id under .baton/baton.json's ticket_prefix,
-//                with the conventional body, as one commit pushed to the default branch (B-112)
-//   baton tickets claim <id> [-i KEY] [--url URL] [--offline] [--rules-reread <ids>]
-//   baton tickets set <id> <status> [--pr URL] [--note TEXT] [-i KEY] [--url URL] [--offline] [--rules-reread <ids>] | done <id> [--pr URL]
-//                — claim asks Baton first (B-129): before it writes, it reads the ticket from
-//                Baton with the key -i names (else BATON_KEY_FILE) — the board for the station,
-//                the ready leg and the live claims, the history for the path and the PRs of the
-//                ended claims, the branch-holder query for the branch — and continues the ticket
-//                where Baton holds it: past its course's start, a false `available` is a takeover
-//                (the PRs are written back, the position printed), never a fresh start, while the
-//                git lock and a parked or closed status still refuse; another claim refuses,
-//                naming its holder and its lease; an unanswered read or an unreadable key refuses
-//                rather than trust the frontmatter, unless --offline. set/done write any live
-//                status, each one commit pushed to the default branch (B-112); a release
-//                (set <id> available) keeps every prs: entry and its commit is the hand-off — the
-//                PRs, Baton's station and next leg, the branch and --note's what is left (B-129);
-//                claim refuses a ticket citing a rule the spec's history amended since the ticket
-//                was filed or last re-read it, until --rules-reread names those ids (R-BTN-74)
+//   baton tickets new | claim | set | done
+//                — retired (B-326): ticket files are Dibber's to write; each names its dibber command
+//   baton tickets check <id> --claimable [-i KEY] [--url URL] [--offline]
+//                — what a claim must know first, writing nothing (B-129, B-326): Baton's board,
+//                history and branch-holder query, read with the key -i names (else
+//                BATON_KEY_FILE); past its course's start a false `available` is a takeover (the
+//                station, ready leg, PRs and branches printed), while the git lock and a parked or
+//                closed status are not claimable; another live claim, an undone dependency or a
+//                rule amended since the ticket answered for it (until a rules re-read note) is
+//                not claimable either. Exit 0 and `dibber claim <id>`, 1 and why not; an
+//                unanswered read exits 2 unless --offline
 //   baton tickets check [--repo DIR] [--quiet]
 //                — check this repository's ticket source without posting it: ids, the board
 //                post's validation, depends_on targets and cycles, (with check.depends_line in
@@ -404,7 +395,7 @@ export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? 
       throw new Error('baton admin repos | baton admin repo add|set|retire');
     }
     if (cmd === 'grant') {
-      const { flags, positional } = parseArgs(rest, [], GRANT_FLAGS, 1);
+      const { flags, positional } = parseArgs(rest, ['deliver-interactions'], GRANT_FLAGS, 1);
       return { method: 'POST', path: '/v1/admin/grants', body: grantBody(flags, readKey, { repository: repoOrHome(positional[0], home) }) };
     }
     if (cmd === 'probe' && rest[0] === 'add') {
@@ -520,7 +511,7 @@ export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? 
       return { method: 'GET', path: `/v1/owner/${encodeURIComponent(repoOrHome(positional[0], home))}/grants` };
     }
     if (cmd === 'grant') {
-      const { flags, positional } = parseArgs(rest, [], GRANT_FLAGS, 1);
+      const { flags, positional } = parseArgs(rest, ['deliver-interactions'], GRANT_FLAGS, 1);
       return { method: 'POST', path: `/v1/owner/${repoOrHome(positional[0], home)}/grants`, body: grantBody(flags, readKey, {}) };
     }
     if (cmd === 'revoke') {
@@ -807,6 +798,7 @@ function grantBody(flags, readKey, extra) {
     capabilities: list(flags.capabilities) ?? [], ...(flags['max-tier'] ? { max_tier: flags['max-tier'] } : {}),
     // R-BTN-4 (B-188): how many claims the key's runner may hold at once while claiming here.
     ...(flags['max-claims'] ? { max_claims: Number(flags['max-claims']) } : {}),
+    ...(flags['deliver-interactions'] ? { deliver_interactions: true } : {}),
   };
 }
 
@@ -841,7 +833,13 @@ const redirectAnswered = (target, status, to) => new Error(
 let saidClientVersions = false;
 export async function send(url, p, keyFile, fetchImpl = fetch, client = clientVersion()) {
   const cred = requestCredential(keyFile);
-  const target = new URL(p.path, url).toString();
+  const destination = new URL(p.path, url);
+  const loopback = destination.hostname === 'localhost' || destination.hostname === '[::1]' ||
+    /^127(?:\.\d{1,3}){3}$/.test(destination.hostname);
+  if (cred.bearer && destination.protocol !== 'https:' && !(destination.protocol === 'http:' && loopback)) {
+    throw new Error('API keys require HTTPS or a loopback HTTP origin (R-BTN-158)');
+  }
+  const target = destination.toString();
   // A GET carries no body; its digest is of the empty one.
   const body = p.method === 'GET' ? undefined : JSON.stringify(p.body ?? {});
   const auth = cred.bearer ? { Authorization: `Bearer ${cred.bearer}` } : signHeaders({ method: p.method, url: target, body, key: cred.key });
@@ -1296,11 +1294,11 @@ export async function main(argv) {
     const { homeMain } = await import('../scripts/baton-cli.mjs');
     return homeMain(argv.slice(1));
   }
-  if (argv[0] === 'run') {
+  if (argv[0] === 'run' || (argv[0] === 'runner' && argv[1] === 'start')) {
     // §6.13: the runner is TypeScript under src/runner; bundle it (a checkout runs the CLI with
     // its devDependencies), then run it in this process's stead.
     const { runMain } = await import('../scripts/baton-run.mjs');
-    return runMain(argv.slice(1));
+    return runMain(argv.slice(argv[0] === 'run' ? 1 : 2));
   }
   if (argv[0] === 'queue') {
     // R-BTN-202 (B-248): this host's local work queue for the runners on one home — local

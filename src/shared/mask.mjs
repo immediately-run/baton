@@ -65,7 +65,7 @@ export function createKeyBoundary() {
     push(line) {
       const prefix = bytes > 0 ? 0 : line.search(KEY_BEGIN);
       if (prefix < 0) return { prefix: undefined, marker: false };
-      bytes += line.length + 1;
+      bytes += line.length - prefix + 1;
       const marker = KEY_END.test(line.slice(prefix)) || bytes >= KEY_HOLD;
       if (marker) bytes = 0;
       return { prefix, marker };

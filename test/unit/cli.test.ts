@@ -335,6 +335,21 @@ describe('send: signed with a key file, verified by Baton', () => {
     expect(plan('admin', ['repo', 'add', 'o/r', '--owner-key', `${file}.pub`]).body.owner_keys).toEqual([line]);
   });
 
+  it('S-BTN-126: send attaches a bearer only over HTTPS or loopback HTTP', async () => {
+    const file = join(dir, 'transport.key');
+    createApiKey(file);
+    const request = { method: 'GET', path: '/v1/actions' };
+    const transport = vi.fn(async (_url: string, _init: RequestInit) => new Response('{}'));
+    await expect(send('http://baton.example.test', request, file, transport)).rejects.toThrow('API keys require HTTPS');
+    expect(transport).not.toHaveBeenCalled();
+    for (const origin of ['https://baton.example.test', 'http://localhost:8787', 'http://127.0.0.1:8787', 'http://[::1]:8787']) {
+      await expect(send(origin, request, file, transport)).resolves.toMatchObject({ status: 200 });
+      expect(transport).toHaveBeenLastCalledWith(`${origin}${request.path}`, expect.objectContaining({
+        headers: expect.objectContaining({ Authorization: expect.stringMatching(/^Bearer bak_/) }),
+      }));
+    }
+  });
+
   it('S-BTN-100: baton help with an API key prints the server’s action list', async () => {
     const file = join(dir, 'help.key');
     await setAdminKeys(createApiKey(file, 'help'));

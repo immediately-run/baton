@@ -18,7 +18,8 @@ export const CALL_TIMEOUT_MS = 30_000;
  *  served `min` and `recommended` — for the runner to log before it exits. */
 export class BatonRefusal extends Error {
   constructor(readonly code: string, readonly ruleCode: string | undefined, message: string, readonly status: number,
-    readonly versions: { client: string; min: string; recommended: string } | undefined = undefined) {
+    readonly versions: { client: string; min: string; recommended: string } | undefined = undefined,
+    readonly detail?: unknown) {
     super(message);
   }
 }
@@ -124,7 +125,7 @@ export class BatonApi {
         ? { client: json!.client as string, min: json!.min as string, recommended: json!.recommended as string }
         : undefined;
       throw new BatonRefusal(code, typeof json?.rule_code === 'string' ? json.rule_code : undefined,
-        typeof json?.message === 'string' ? json.message : `${method} ${path}: ${res.status}`, res.status, versions);
+        typeof json?.message === 'string' ? json.message : `${method} ${path}: ${res.status}`, res.status, versions, json?.detail);
     }
     return json ?? {};
   }

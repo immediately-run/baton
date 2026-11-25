@@ -70,7 +70,7 @@ export interface Ctx {
 
 /** R-BTN-78: the decisions Baton raises itself, each `asks: owner` on the whole ticket, answered in
  *  Baton (`resolve`). `baton:contract` arrives with B-39. */
-export const BATON_DECISIONS = ['baton:retries', 'baton:stalled'] as const;
+export const BATON_DECISIONS = ['baton:retries', 'baton:stalled', 'baton.contract'] as const;
 export type BatonDecision = (typeof BATON_DECISIONS)[number];
 
 /** B-133 (OWASP ASI09): the exact action each option of a decision takes, computed — what
@@ -81,12 +81,12 @@ export type BatonDecision = (typeof BATON_DECISIONS)[number];
  *  of a leg on this ticket, never a credential. Pure, so every surface prints the same action
  *  for the same answer. */
 export function decisionOptionActions(decision: string, options: readonly { id: string; grants?: { leg: string; runs: number } }[] | null): { id: string; action: string }[] {
-  if (decision === 'baton:retries' || decision === 'baton:stalled') {
+  if ((BATON_DECISIONS as readonly string[]).includes(decision)) {
     return [
-      { id: 'retry', action: decision === 'baton:retries'
+      { id: 'retry', action: decision !== 'baton:stalled'
         ? 'lifts the hold and clears its backoff — the failed-attempt count starts again and the ticket becomes claimable'
         : 'closes this decision and restarts the queued leg’s 72-hour stall clock from now' },
-      { id: 'park', action: decision === 'baton:retries'
+      { id: 'park', action: decision !== 'baton:stalled'
         ? 'keeps the hold — the ticket stays parked until an owner lifts the hold'
         : 'holds the ticket (parked) until an owner lifts the hold' },
     ];
@@ -415,9 +415,9 @@ export class Blocks {
 
   /** Raise Baton's decision `id` on the whole ticket, `asks: owner`, in the caller's transaction:
    *  a `decision` block with its notices (R-BTN-78, R-BTN-80). A decision already open is left. */
-  raise(ticket: string, id: BatonDecision): boolean {
+  raise(ticket: string, id: BatonDecision, detail: string | null = null): boolean {
     if (this.hasDecision(ticket, id)) return false;
-    this.exec(`INSERT INTO ticket_decisions (ticket_id, decision_id, leg, asks, url, source) VALUES (?, ?, '', 'owner', NULL, 'baton')`, ticket, id);
+    this.exec(`INSERT INTO ticket_decisions (ticket_id, decision_id, leg, asks, url, source, question) VALUES (?, ?, '', 'owner', NULL, 'baton', ?)`, ticket, id, detail);
     this.c.decisions.opened(ticket, [id]);
     this.write([ticket], ['decision']);
     return true;
@@ -549,7 +549,7 @@ export class Blocks {
       const answered = new Set((answeredAll.get(id) ?? []).map((r) => r.decision_id));
       const decisions = (st?.decisions ?? []).filter((d) => {
         if (answered.has(d.id)) return false;
-        if (!d.id.startsWith('baton:')) return true;
+        if (!d.id.startsWith('baton:') && d.id !== 'baton.contract') return true;
         dropped.push(`${id}:decision:${d.id}`);
         return false;
       }).map((d) => ({
@@ -636,12 +636,23 @@ export class Blocks {
     }
     // The repository's unblocked trigger, coalesced: one dispatch per window per repository, with
     // a trailing one carrying every ticket the window unblocked (`due`).
-    if (this.rows<{ t: string | null }>('SELECT unblocked_trigger AS t FROM repositories WHERE id = ?', repo)[0]?.t == null) return;
+    this.queueTrigger(repo, { ticket, cleared });
+  }
+
+  /** Idle alerts share the owner's dispatch window, but carry no unblocked tickets. */
+  queueIdleTrigger(repo: string): boolean {
+    return this.queueTrigger(repo, 'runner-idle');
+  }
+
+  private queueTrigger(repo: string, entry: 'runner-idle' | { ticket: string; cleared: { kind: string; ref: string }[] }): boolean {
+    if (this.rows<{ t: string | null }>('SELECT unblocked_trigger AS t FROM repositories WHERE id = ?', repo)[0]?.t == null) return false;
+    const now = this.c.now();
     const row = this.rows<{ last_sent_at: number | null; pending_json: string }>('SELECT last_sent_at, pending_json FROM unblocked_dispatch WHERE repository_id = ?', repo)[0];
-    const pending = [...(row ? (JSON.parse(row.pending_json) as unknown[]) : []), { ticket: ticket, cleared }];
+    const pending = [...(row ? (JSON.parse(row.pending_json) as unknown[]) : []), entry];
     const due = row?.last_sent_at == null ? now : Math.max(now, row.last_sent_at + DISPATCH_WINDOW_MS);
     this.exec(`INSERT INTO unblocked_dispatch (repository_id, pending_json, due_at) VALUES (?, ?, ?)
                ON CONFLICT (repository_id) DO UPDATE SET pending_json = excluded.pending_json, due_at = excluded.due_at`, repo, JSON.stringify(pending), due);
+    return true;
   }
 
   /** The unblocked dispatches due now, taken: each repository's window's tickets, at most 100,
@@ -651,8 +662,16 @@ export class Blocks {
     const out: { repository: string; tickets: unknown[] }[] = [];
     for (const r of this.rows<{ repository_id: string; pending_json: string }>(`SELECT repository_id, pending_json FROM unblocked_dispatch WHERE due_at IS NOT NULL AND due_at <= ?`, now)) {
       const all = JSON.parse(r.pending_json) as unknown[];
-      const tickets = all.length > UNBLOCKED_DISPATCH_MAX ? [...all.slice(0, UNBLOCKED_DISPATCH_MAX), { truncated: all.length - UNBLOCKED_DISPATCH_MAX }] : all;
-      this.exec(`UPDATE unblocked_dispatch SET pending_json = '[]', due_at = NULL, last_sent_at = ? WHERE repository_id = ?`, now, r.repository_id);
+      // An idle alert is its own dispatch with `tickets: []`. Never count it as a truncated
+      // unblock, or let later unblocks push it back. Leave the tail for the next window.
+      const idle = all.indexOf('runner-idle');
+      const unblocks = idle < 0 ? all : all.slice(0, idle);
+      const rest = idle < 0 ? [] : all.slice(idle === 0 ? 1 : idle);
+      const tickets = unblocks.length > UNBLOCKED_DISPATCH_MAX
+        ? [...unblocks.slice(0, UNBLOCKED_DISPATCH_MAX), { truncated: unblocks.length - UNBLOCKED_DISPATCH_MAX }]
+        : unblocks;
+      this.exec(`UPDATE unblocked_dispatch SET pending_json = ?, due_at = ?, last_sent_at = ? WHERE repository_id = ?`,
+        JSON.stringify(rest), rest.length ? now + DISPATCH_WINDOW_MS : null, now, r.repository_id);
       if (all.length) out.push({ repository: r.repository_id, tickets });
     }
     return out;
@@ -721,6 +740,17 @@ export class Blocks {
   private usable(repo: string, resource: string, info: ResourceInfo): string[] {
     if (info.scope === 'service') return [resource];
     return [...info.instances].filter(([, repos]) => repos.includes(repo)).map(([name]) => name);
+  }
+
+  unavailableReadings(repo: string, resources: string[], read: (instance: string) => { available: number; source: string; until: number | null } | undefined) {
+    const info = this.resources();
+    return resources.flatMap((resource) => {
+      const r = info.get(resource);
+      return r ? this.usable(repo, resource, r).sort().flatMap((instance) => {
+        const reading = read(instance);
+        return reading?.available === 0 ? [{ resource, instance, writer: reading.source, until: reading.until }] : [];
+      }) : [];
+    });
   }
 
   /**
