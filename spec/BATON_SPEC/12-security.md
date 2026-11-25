@@ -324,6 +324,26 @@ trusted runners or of the protection checker; a compromised forge; and a comprom
     `baton owner policy show | diff | log` read it. Each change is logged `admin` with the
     versions and the knobs it changed, and is checked against the floors (R-BTN-189) and the
     current courses (R-BTN-181) in its transaction.
+  - **Reading a current legacy policy.** Only the current version is projected onto the current
+    knob table, using that repository's live legacy floor rows (R-BTN-189). The policy read's
+    effective hash is over the projected document. Historical reads use the stored documents
+    and hashes, including for the history's knob diffs; they neither project versions nor attach
+    today's floors to them. A migration validates each repository's current projection in one
+    transaction and logs its old and effective hashes as an `admin` event when they differ or
+    when the guarantee comparison (R-BTN-189) reports a held guarantee with no successor.
+    Only a subsequent write authorised by the prior `approvers.policy` appends a version; it
+    links to the prior version's stored hash.
+  - **No new authority from a projection.** Rename `approvers.trust` to `approvers.roles`
+    without changing its list. Drop `courier` from writer and deliverer lists; never translate
+    it to `runner`. Read a missing legacy `outbox.source` with no deliverers. Carry the old
+    answer restriction into `std:decision@1` without adding a writer: in particular a policy
+    that required `inputs.answers: attestation` must still refuse ordinary owner answers.
+    Compare effective permissions before and after, including defaults and fixed rules. For
+    `refs.baton` and `refs.legs`, compare the old writer sets with the sets that R-BTN-180
+    supplies after projection; refuse if any writer is newly admitted to either namespace.
+    Reject a projection that adds authority or leaves a policy that could not work, including
+    an unsatisfiable approver list under the repository's `human_key`. The migration fails
+    atomically and names the repository and the offending knob or floor. It changes no grant.
   - **Previewing a policy change.** `dry_run: true` (`--dry-run` on `policy apply` or `policy set`)
     uses the same current version, approver and change validation as apply, but changes no
     policy or trust settings and adds no policy audit event. `changed` lists the changed knobs;
@@ -451,6 +471,25 @@ trusted runners or of the protection checker; a compromised forge; and a comprom
     breaks it is refused, so a shortening is its own version, made while the guarantee still
     holds. A consumer reads the `floors` list and the computed `guarantees`, never a floor's name
     alone.
+  - **Comparing legacy guarantees.** Compare policy conditions on the same repository facts,
+    without the protection report. Compare `no-runner-lands`, `control-paths-human`,
+    `tickets-approved`, `independent-review` and `board-from-trusted` by name, and compare
+    legacy `human-gates-hardware` to current `human-gates`. A held comparable guarantee
+    becoming broken stops the migration, even if unfloored. Legacy `human-gates` (the weaker
+    condition), `signed-authorship` and `trusted-domain-separate` have no migration successor.
+    Report each such held guarantee that was not floored in the repository's migration audit;
+    it does not by itself prevent migration. This comparison does not replace R-BTN-188's
+    check against widening authority.
+  - **Legacy floors.** Project the union of the guarantees the named rows list, using the
+    comparison's successor names. A floor on `human-gates-hardware` thus becomes a floor on
+    `human-gates`, provided its policy conditions and removal restriction are preserved. A
+    floor with no successor or whose successor's policy conditions are unmet stops migration.
+    The prior `approvers.policy` gate must imply the old `remove_by` gate not only now but in
+    every allowed later version that retains the floor. Reject a floor if the document cannot
+    preserve that restriction: `[human]` today does not preserve `remove_by: human` if a later
+    version can keep the floor and switch to `[owner]`. Likewise a later `[human]` could
+    admit a break-glass key that is not an owner, so `remove_by: owner` is not inherently
+    redundant either. Do not clear a floor on the repository's behalf.
   - **Floors are judged on the policy alone.** The protection report is not a policy condition,
     so a lapsed or failed report never refuses a change. It breaks `no-runner-lands` all the
     same: Baton raises `baton.unprotected` (R-BTN-180), and a floor that names it stops the
