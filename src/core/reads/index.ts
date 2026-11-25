@@ -70,26 +70,31 @@ function decoded(raw: string): string {
   }
 }
 
+type ReportingRunner = { id: number; incarnation: number };
+
 /** B-205: the strong ETag of this call's answer — the state version, the caller, the action,
  *  its path and its query, and the clock's coarse bucket where the read shows what the clock
  *  decides — through B-242's one helper. Decided after authorization and before the read. */
-export function etagOf(cx: ReadCtx, call: ReadCall, route: ReadRoute, runnerId: number | null = null): string {
-  const query = [...call.url.searchParams].map(([k, v]) => `${k}=${v}`).sort().join('&');
-  const caller = callerKey(call.principal) + (runnerId === null ? '' : `:runner:${runnerId}`);
-  return stateEtag(cx.store, caller, `${call.action.id}\n${call.url.pathname}\n${query}`, route.clock ? clockBucket(cx.now()) : null, !route.quiet);
+export function etagOf(cx: ReadCtx, call: ReadCall, route: ReadRoute, runner: ReportingRunner | null = null): string {
+  const query = new URLSearchParams(call.url.searchParams);
+  // Sort by name only: readers using get() care about the order of repeated values.
+  query.sort();
+  const caller = callerKey(call.principal) + (runner === null ? '' : `:runner:${runner.id}:${runner.incarnation}`);
+  const projection = call.showInteractionLinks ? 'interaction-links' : 'redacted';
+  return stateEtag(cx.store, caller, `${call.action.id}\n${call.url.pathname}\n${query}\n${projection}`, route.clock ? clockBucket(cx.now()) : null, !route.quiet);
 }
 
 /** Optional R-BTN-14 proof, without refreshing liveness on a read. */
-async function reportingRunner(cx: ReadCtx, cred: string, req: Request): Promise<number | null> {
+async function reportingRunner(cx: ReadCtx, cred: string, req: Request): Promise<ReportingRunner | null> {
   const secret = req.headers.get('X-Runner-Secret');
   const legacy = req.headers.get('X-Worker-Secret');
   if (secret !== null && legacy !== null && secret !== legacy) return null;
   const proof = secret ?? legacy;
   if (!proof) return null;
   // Refuse an ambiguous proof rather than choosing between sessions with the same hash.
-  const owners = cx.sql<{ id: number; reaped_at: number | null }>(
-    'SELECT id, reaped_at FROM runners WHERE credential_id = ? AND secret_hash = ? LIMIT 2', cred, await sha256Hex(proof));
-  return owners.length === 1 && owners[0].reaped_at === null ? owners[0].id : null;
+  const owners = cx.sql<ReportingRunner & { reaped_at: number | null }>(
+    'SELECT id, incarnation, reaped_at FROM runners WHERE credential_id = ? AND secret_hash = ? LIMIT 2', cred, await sha256Hex(proof));
+  return owners.length === 1 && owners[0].reaped_at === null ? owners[0] : null;
 }
 
 /** Serve `req` if it is a read registered here; null otherwise, and the core's older routes
@@ -109,12 +114,12 @@ export async function dispatchRead(cx: ReadCtx, req: Request, url: URL): Promise
     repository = checkRepositoryId(params.repository);
   }
   const principal = who.principal;
-  const runnerId = principal.kind === 'key' && principal.role === 'runner'
+  const runner = principal.kind === 'key' && principal.role === 'runner'
     ? await reportingRunner(cx, principal.cred, who.req) : null;
   if (repository !== null) authorizeRepository(cx, principal, repository);
-  const sessionLink: SessionLinkView = (link, holder) =>
-    link !== null && (principal.kind === 'session' || holder === runnerId)
-      ? { session_url: link, session_link: true } : hiddenSessionLink(link, holder);
+  const sessionLink: SessionLinkView = (link, holder, incarnation) =>
+    link !== null && (principal.kind === 'session' || (runner?.id === holder && runner.incarnation === incarnation))
+      ? { session_url: link, session_link: true } : hiddenSessionLink(link, holder, incarnation);
   const open = url.searchParams.get('open');
   const deliverInteractions = hit.action.id === 'repo.conditions' && principal.kind === 'key' && principal.role === 'runner'
     && repository !== null && (open === '1' || open === 'true') && url.searchParams.get('type') === 'interact'
@@ -122,7 +127,7 @@ export async function dispatchRead(cx: ReadCtx, req: Request, url: URL): Promise
                AND revoked_at IS NULL AND deliver_interactions = 1`, principal.cred, repository).length > 0;
   const call: ReadCall = { action: hit.action, principal, caller, repository, params, url, req: who.req, sessionLink, showInteractionLinks: principal.kind === 'session' || deliverInteractions };
   const conditional = route.etag === undefined ? true : route.etag === false ? false : route.etag(call);
-  const etag = conditional ? etagOf(cx, call, route, runnerId) : null;
+  const etag = conditional ? etagOf(cx, call, route, runner) : null;
   if (etag && ifNoneMatch(req, etag)) return noStore(new Response(null, { status: 304, headers: { ETag: etag } }));
   const out = await route.run(cx, call);
   const res = out instanceof Response ? out : json(out);

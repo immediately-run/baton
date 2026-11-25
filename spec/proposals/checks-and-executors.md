@@ -41,10 +41,10 @@ print its way to `success`.
     - A webhook or forge notification only triggers the sync (R-BTN-73, R-BTN-95).
   - **Check-runners.** A check-runner is a key role of its own (§12.1). A repository's owners
     register one with `baton owner check-runner add <repository> <key> --name <hostname>
-    [--capabilities …] [--max-tier <t>]` (R-BTN-127; `POST /v1/owner/{repository}/check-runners`, stored in `check_runners`)
+    [--capabilities …]` (R-BTN-127; `POST /v1/owner/{repository}/check-runners`, stored in `check_runners`)
     and revoke it with the destructive `owner.check-runner.revoke`.
     - The `check_runners` row stands in for a grant: rule 7 reads it for a check ticket, rule 4
-      its `capabilities` and rule 5 its `max_tier`. The hostname binds at `add` and is the name
+      its `capabilities`. The hostname binds at `add` and is the name
       the key heartbeats under (R-BTN-3). A check-runner heartbeats, claims, advances and ends
       check tickets and reports activities and transcripts and writes leg logs, as any runner does.
     - Only a check-runner claims or advances in a check ticket, and a check-runner claims nothing
@@ -321,7 +321,7 @@ repository's grants.
     key holds a grant elsewhere.
 - R-BTN-117 (proposed): registration tokens. A repository owner mints a token for a session that has
   no key yet: `baton owner token create <repository> --role runner [--capabilities …]
-  [--max-tier <t>] [--ttl <d>] [--uses <n>]` (R-BTN-127).
+  [--ttl <d>] [--uses <n>]` (R-BTN-127).
   - `--uses` default 1, at most 100; TTL default 7 days, at most 30 days. Shown once as
     `brt_<id>_<secret>` (256 random bits), stored as its SHA-256 with its scope, valid in the
     minting tenant only (R-BTN-137), revoked with `baton owner token revoke`.
@@ -337,8 +337,8 @@ repository's grants.
     credential it registered. The dashboard shows each runner's credential kind and token.
 
 A machine key's sync (R-BTN-102) is then forbidden where its span forbids it. A machine-key post
-that closes a ticket another runner holds, drops a posted bar, or loosens an author's gate (lowers
-a tier, drops a `requires` clause, removes a `ticket` block or a decision) raises
+that closes a ticket another runner holds, drops a posted bar, or loosens an author's gate (drops
+a `requires` clause, removes a `ticket` block or a decision) raises
 `baton.machine-post` naming the tickets and the key; it is noticed, not stopped.
 
 

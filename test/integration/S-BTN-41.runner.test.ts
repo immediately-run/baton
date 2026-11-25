@@ -20,9 +20,9 @@ import { dirname, join, resolve } from 'node:path';
 import { BatonApi, BatonRefusal } from '../../src/runner/api';
 import { Runner, legActivity, newestWrite } from '../../src/runner/runner';
 import { legNeeds, readHead } from '../../src/runner/home';
-import { capabilitiesOf } from '../../src/shared/vocabulary.mjs';
+import { capabilitiesOf } from '../../src/vendor/vocabulary.mjs';
 import { call as hostCall } from '#host';
-import { course, cutover, ORIGIN, ownerCall, placed, rows, setClock, syncCall, ticket, TOKENS } from '../helpers';
+import { course, cutover, evidenceFound, observe, ORIGIN, ownerCall, placed, rows, setClock, syncCall, ticket, TOKENS } from '../helpers';
 import relay from '../fixtures/courses/relay/course.json';
 
 const T0 = Date.parse('2026-10-16T12:00:00Z');
@@ -86,9 +86,14 @@ class Home {
   }
   async post(stations: Record<string, unknown>, tickets: unknown[] = [ticket('T-1', { course_id: 'relay' })], registryOver: Record<string, unknown> = {}): Promise<void> {
     const sha = this.sha();
+    // A sync run (§4.3): the observation first, then the post under its number, attesting each
+    // listed end's evidence found (R-BTN-10) — the commits this home's closes made are in git.
+    const { json: o } = await observe();
+    const listed = (o as { unconfirmed?: { ticket: string; claim: number; evidence: string }[] }).unconfirmed ?? [];
+    const attestations = listed.flatMap((u) => evidenceFound(u.claim, u.evidence, u.ticket).attestations);
     const res = await syncCall('/v1/sync/board', {
       registry: [course(3, 3, { id: 'relay', course: relay as unknown as Record<string, unknown>, ...registryOver })],
-      sha, parent_sha: this.head, tickets, closed: [], stations,
+      sha, parent_sha: this.head, tickets, closed: [], stations, observation: o.observation, ...(attestations.length ? { attestations } : {}),
     });
     if (res.status !== 200) throw new Error(`board post: ${res.status} ${await res.text()}`);
     this.head = sha;
@@ -107,6 +112,7 @@ let home: Home;
 let n = 0;
 const clock = { now: T0 };
 const runners: Runner[] = [];
+const stateFiles = new Map<Runner, string>();
 
 /** A runner against this test's Baton (the local host), heartbeating as credential vm-a. */
 function makeRunner(over: Record<string, unknown> = {}): Runner {
@@ -123,7 +129,16 @@ function makeRunner(over: Record<string, unknown> = {}): Runner {
     ...over,
   });
   runners.push(runner);
+  stateFiles.set(runner, stateFile);
   return runner;
+}
+
+/** Move the runner's clock to `t` and wait for a beat at `t` to land: its state file's `last_ok`,
+ *  which the runner's own lease check reads (R-BTN-26), reaches `t`. */
+async function beatAt(runner: Runner, t: number): Promise<void> {
+  clock.now = t;
+  const file = stateFiles.get(runner)!;
+  await until(() => (existsSync(file) && (JSON.parse(readFileSync(file, 'utf8')).last_ok ?? 0) >= t ? [1] : []));
 }
 
 /** Wait until `q` returns a non-empty list — the test's window into the runner's progress. */
@@ -291,7 +306,11 @@ describe('S-BTN-41 the runner', () => {
     await until(() => rows(`SELECT 1 FROM claim_legs WHERE leg = 'check'`));
     await new Promise((r) => setTimeout(r, 120));
     expect(await rows('SELECT status FROM claims')).toEqual([{ status: 'active' }]); // still waiting
-    clock.now = T0 + 31 * 60_000; // the budget is spent (R-BTN-40)
+    // The budget is spent (R-BTN-40). Time passes as on a host, in steps the lease outlives,
+    // each renewed by a beat: one 31-minute jump raced the runner's own lease check (R-BTN-26)
+    // against the budget, and could end `released:lease-lost`.
+    for (let m = 5; m <= 25; m += 5) await beatAt(runner, T0 + m * 60_000);
+    clock.now = T0 + 31 * 60_000;
     expect(await done).toMatchObject({ end_reason: 'suspended:built', reached: 'built' });
     expect(await rows('SELECT end_reason, status FROM claims')).toEqual([{ end_reason: 'suspended:built', status: 'completed' }]);
     // The waiting leg was started then given up at its from; the end names it queued again.

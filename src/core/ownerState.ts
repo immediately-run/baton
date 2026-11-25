@@ -92,7 +92,7 @@ export class OwnerState {
     now: () => number;
     origin: string;
     /** §4.8's step 2: a seal refused for lagging mirrors dispatches their workflows (R-BTN-94). */
-    dispatchMirror?: (repository: string) => void;
+    dispatchMirror: (repository: string) => void;
   }) {}
 
   private rows<T = Record<string, unknown>>(q: string, ...p: unknown[]): T[] {
@@ -156,7 +156,7 @@ export class OwnerState {
          AND (r.mirror_workflow IS NOT NULL OR EXISTS (SELECT 1 FROM sync_keys k WHERE k.repository_id = r.id AND k.role = 'mirror' AND k.revoked_at IS NULL))
        ORDER BY r.id`, last);
     if (claims.length || lagging.length) {
-      for (const m of lagging) this.c.dispatchMirror?.(m.id);
+      for (const m of lagging) this.c.dispatchMirror(m.id);
       throw new BatonError('conflict', `the seal waits: ${claims.length ? `claims ${claims.map((c) => `${c.id} (${c.ticket_id}${c.fence_pending ? ', fence pending' : ''})`).join(', ')}` : ''}${claims.length && lagging.length ? '; ' : ''}${lagging.length ? `mirrors lagging on ${lagging.map((m) => m.id).join(', ')}` : ''}`.trim(), {
         claims: claims.map((c) => ({ id: c.id, ticket_id: c.ticket_id, status: c.status, fence_pending: c.fence_pending === 1 })),
         lagging_mirrors: lagging.map((m) => m.id),

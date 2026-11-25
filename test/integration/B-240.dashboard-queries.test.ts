@@ -252,7 +252,7 @@ describe('B-240 Running and Timeline in joined queries', { timeout: 120_000 }, (
     // and the Runners view's own reads (its claims, its open activities, its latest transcript,
     // now one query per list) are B-250's, not this ticket's.
     const read = (log: Captured[]) => log.filter((l) => /\b(claims|activities|transcripts)\b/.test(l.sql) && !/\bFROM events\b/.test(l.sql) && !/\bWHERE runner_id = \?/.test(l.sql)
-      && !/FROM claims WHERE status = 'active' ORDER BY claimed_at, id$/.test(l.sql) && !/FROM activities WHERE ended_at IS NULL$/.test(l.sql) && !/AS t FROM (pending_)?transcripts$/.test(l.sql))
+      && !/FROM claims WHERE status = 'active' ORDER BY claimed_at, id$/.test(l.sql) && !/FROM activities WHERE ended_at IS NULL$/.test(l.sql) && !/AS t FROM (pending_)?transcripts\b/.test(l.sql))
       .reduce((s, l) => s + (l.cursor.rowsRead ?? 0), 0);
     await state(session); // the session's first read does its own one-time work
     const before = await quiet(session);

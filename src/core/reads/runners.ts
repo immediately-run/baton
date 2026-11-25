@@ -7,13 +7,15 @@
 //
 // What a poll costs (B-196 item 3): a constant number of statements however many runner rows
 // the repository ever had — one read of the rows, then one read per kind of detail over the
-// rows that are neither reaped nor unseen for the longest window, by id list. A reaped runner,
-// and one unseen past that window, is listed from its own columns alone.
+// rows that are neither reaped nor unseen for the longest window, by id list. Latest
+// transcripts and reports are narrower: only the live subset gets them (S-BTN-243).
 //
 // Not served, because the core does not hold them yet (R-BTN-107's executor declaration,
 // B-184): a runner's `executor`, a run's `executor_digest`, `environment` and `instance`. The
 // answer says so in `not_built` instead of inventing them. A run's `log_dir` is the column as
 // stored (`claim_legs.leg_log_dir`), which nothing writes yet (B-23).
+import { isLive, leaseEndsAt } from '../runnerLiveness';
+import { runnerLatest } from '../runnerLatest';
 import { BatonError } from '../http';
 import { transcriptUrl, type SessionLinkView } from '../links';
 import { graphOf, type Graph } from '../graph';
@@ -145,9 +147,9 @@ export function runnerRows(cx: ReadCtx, repo: string, sessionLink: SessionLinkVi
   // Every live claim of these runners, here or elsewhere, with its running leg, that leg's run
   // number on the ticket and the ticket's backoff — one statement.
   const claims = grouped(of<{ runner_id: number; id: number; ticket_id: string; station: string; course_id: string | null; claimed_at: number; deadline_at: number | null;
-    leg: string | null; run_id: string | null; session_url: string | null; leg_log_dir: string | null; attempt: number | null; retry_after: number | null }>(
+    leg: string | null; run_id: string | null; session_url: string | null; session_incarnation: number | null; leg_log_dir: string | null; attempt: number | null; retry_after: number | null }>(
     `SELECT c.runner_id, c.id, c.ticket_id, c.station, c.course_id, c.claimed_at, c.deadline_at,
-            l.leg, l.run_id, l.session_url, l.leg_log_dir,
+            l.leg, l.run_id, l.session_url, l.session_incarnation, l.leg_log_dir,
             (SELECT COUNT(*) FROM claim_legs x JOIN claims y ON y.id = x.claim_id WHERE y.ticket_id = c.ticket_id AND x.leg = l.leg) AS attempt,
             o.retry_after
      FROM claims c
@@ -163,22 +165,8 @@ export function runnerRows(cx: ReadCtx, repo: string, sessionLink: SessionLinkVi
     const best = activity.get(a.claim_id);
     if (!best || a.started_at > best.started_at || (a.started_at === best.started_at && a.received_at > best.received_at)) activity.set(a.claim_id, a);
   }
-  // §6.8: the newest transcript pointer of each runner, linked ones before pending ones at a tie.
-  const transcript = new Map<number, { repo: string; path: string; t: number }>();
-  for (const t of of<{ runner_id: number; repo: string; path: string; t: number }>(
-    `SELECT runner_id, repo, path, COALESCE(last_pushed_at, first_seen_at) AS t FROM transcripts
-     WHERE id IN (SELECT (SELECT t.id FROM transcripts t WHERE t.runner_id = j.value ORDER BY COALESCE(t.last_pushed_at, t.first_seen_at) DESC, t.repo, t.path, t.claim_id LIMIT 1) FROM json_each(?) j)`, ids)) transcript.set(t.runner_id, t);
-  for (const t of of<{ runner_id: number; repo: string; path: string; t: number }>(
-    `SELECT runner_id, repo, path, COALESCE(last_pushed_at, first_seen_at) AS t FROM pending_transcripts
-     WHERE rowid IN (SELECT (SELECT t.rowid FROM pending_transcripts t WHERE t.runner_id = j.value ORDER BY COALESCE(t.last_pushed_at, t.first_seen_at) DESC, t.repo, t.path LIMIT 1) FROM json_each(?) j)`, ids)) {
-    const best = transcript.get(t.runner_id);
-    if (!best || t.t > best.t) transcript.set(t.runner_id, t);
-  }
-  // §6.9: the newest status report of each runner — the reply a status request produces.
-  const reports = new Map(of<{ runner_id: number; payload_json: string | null; sent_at: number }>(
-    `SELECT from_runner_id AS runner_id, payload_json, sent_at FROM messages
-     WHERE id IN (SELECT (SELECT m.id FROM messages m WHERE m.kind = 'status_report' AND m.from_runner_id = j.value ORDER BY m.id DESC LIMIT 1) FROM json_each(?) j)`, ids)
-    .map((m) => [m.runner_id, m]));
+  const liveIds = JSON.stringify(raw.filter((w) => isLive(w, now)).map((w) => w.id));
+  const { transcript, reports } = runnerLatest(cx.sql, liveIds);
   // A runner reaped within the longest window: the newest claim here its reap ended — one
   // statement over those few; an older reap is told from `reaped_at` alone.
   const reapedIds = JSON.stringify(raw.filter((w) => w.reaped_at != null && now - w.reaped_at <= WINDOW_MAX_MS).map((w) => w.id));
@@ -207,7 +195,7 @@ export function runnerRows(cx: ReadCtx, repo: string, sessionLink: SessionLinkVi
   const profiles = new Map<number, unknown>();
   const rows = raw.map((w): RunnerRow => {
     const mine = claims.get(w.id) ?? [];
-    const leaseEnds = w.kind === 'legacy' ? null : w.last_seen_at + w.lease_timeout_ms;
+    const leaseEnds = w.kind === 'legacy' ? null : leaseEndsAt(w);
     const here = mine.filter((c) => c.ticket_id.startsWith(prefix)).map((c): RunnerClaim => {
       const a = activity.get(c.id);
       return {
@@ -216,7 +204,7 @@ export function runnerRows(cx: ReadCtx, repo: string, sessionLink: SessionLinkVi
         attempt: c.leg == null ? null : c.attempt,
         max_runs: c.leg != null && c.course_id != null ? graphs.get(c.course_id)?.legs.get(c.leg)?.maxRuns ?? null : null,
         next_backoff_until: c.retry_after != null && c.retry_after > now ? c.retry_after : null,
-        ...sessionLink(c.session_url, c.runner_id), log_dir: c.leg_log_dir,
+        ...sessionLink(c.session_url, c.runner_id, c.session_incarnation), log_dir: c.leg_log_dir,
         activity: a ? { kind: a.kind, label: a.label, started_at: a.started_at } : null,
       };
     });
@@ -225,7 +213,7 @@ export function runnerRows(cx: ReadCtx, repo: string, sessionLink: SessionLinkVi
     profiles.set(w.id, parsed<unknown>(w.profile_json, null));
     return {
       runner_id: w.id, hostname: w.hostname, session_name: w.session_name,
-      alive: w.reaped_at == null && now - w.last_seen_at < w.lease_timeout_ms,
+      alive: isLive(w, now),
       last_seen_at: w.last_seen_at, last_activity_at: w.last_activity_at, reaped_at: w.reaped_at,
       harness: w.harness, kind: w.kind, isolation: w.isolation,
       tier_ceilings: parsed<Record<string, string>>(w.tier_ceilings, {}),
@@ -289,11 +277,11 @@ function showRunner(cx: ReadCtx, call: ReadCall) {
   const runs = new Map<number, { leg: string; run_id: string | null; started_at: number; ended_at: number | null; reached: string | null; session_url: string | null; session_link: boolean; log_dir: string | null }[]>();
   const activities = new Map<number, Record<string, unknown>[]>();
   if (claims.length) {
-    for (const r of cx.sql<{ claim_id: number; leg: string; run_id: string | null; started_at: number; finished_at: number | null; abandoned_at: number | null; to_station: string | null; session_url: string | null; leg_log_dir: string | null }>(
-      `SELECT claim_id, leg, run_id, started_at, finished_at, abandoned_at, to_station, session_url, leg_log_dir FROM claim_legs
+    for (const r of cx.sql<{ claim_id: number; leg: string; run_id: string | null; started_at: number; finished_at: number | null; abandoned_at: number | null; to_station: string | null; session_url: string | null; session_incarnation: number | null; leg_log_dir: string | null }>(
+      `SELECT claim_id, leg, run_id, started_at, finished_at, abandoned_at, to_station, session_url, session_incarnation, leg_log_dir FROM claim_legs
        WHERE claim_id IN (SELECT value FROM json_each(?)) ORDER BY claim_id, seq`, claimIds)) {
       runs.set(r.claim_id, [...(runs.get(r.claim_id) ?? []), { leg: r.leg, run_id: r.run_id, started_at: r.started_at, ended_at: r.finished_at ?? r.abandoned_at ?? null,
-        reached: r.to_station, ...call.sessionLink(r.session_url, id), log_dir: r.leg_log_dir }]);
+        reached: r.to_station, ...call.sessionLink(r.session_url, id, r.session_incarnation), log_dir: r.leg_log_dir }]);
     }
     for (const a of cx.sql<{ claim_id: number; id: string; parent_id: string | null; kind: string; label: string | null; source: string; started_at: number; ended_at: number | null; outcome: string | null; detail_json: string | null }>(
       `SELECT claim_id, id, parent_id, kind, label, source, started_at, ended_at, outcome, detail_json FROM activities

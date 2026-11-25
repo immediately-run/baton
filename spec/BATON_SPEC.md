@@ -492,6 +492,9 @@ is stale. Never edit it by hand.
 | S-BTN-308 | sign-in through Cloudflare Access | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-309 | work done outside Baton | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-310 | session-link capabilities | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-312 | a board post missing a queued leg | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-313 | refresh course versions and request a restart | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-318 | Access sign-in refusal reasons | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 
 ## Gates
 

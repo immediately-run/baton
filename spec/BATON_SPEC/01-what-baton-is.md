@@ -71,9 +71,8 @@ resumed by a **restart** (§7). "Workflow" means only a CI workflow; "activity" 
   Baton also holds, Baton adopts it and logs the discrepancy (R-BTN-85). A runner acts on the
   ticket as its source has it (R-BTN-5, R-BTN-34).
   - **Staleness.** A snapshot observed after a claim's latest claim or `advance` (R-BTN-62) that
-    shows the held ticket `closed` as `withdrawn`, or re-tiered above the holder's ceiling, ends
-    the claim `released:stale-board` with a `release` to the holder. A held ticket dropped without
-    `closed` is R-BTN-147's.
+    shows the held ticket `closed` as `withdrawn` ends the claim `released:stale-board` with a
+    `release` to the holder. A held ticket dropped without `closed` is R-BTN-147's.
   - **Progress is not staleness.** Facts lagging the holder, readiness the latest snapshot has not
     caught up with, a station or leg the course file lacks (R-BTN-64) and a new version of a held
     ticket (R-BTN-198) leave the claim alone.
@@ -176,7 +175,7 @@ resumed by a **restart** (§7). "Workflow" means only a CI workflow; "activity" 
   |---|---|
   | repository, ticket, course id and version | registers, keys, matches declaring runners |
   | station, leg, a ticket's station and path, leg state and `waiting_on`, run count; timer, call leg, person leg, cancel leg | validates course files, leases a run of legs, checks edges, recommends, arms, settles, fires |
-  | runner, capability, tier, tag; lease, fence, reap, attempt, backoff, hold, expedite, suspension | the safety gates and the default order |
+  | runner, capability, tag; lease, fence, reap, attempt, backoff, hold, expedite, suspension | the safety gates and the default order |
   | grant, owner, administrator, credential | who may do what |
   | block, `depends_at`, resource, instance, a reading's envelope, a leg's `needs` | keeps rows, answers queries, gates or advises (R-BTN-75) |
   | condition (type, disposition, restart, binding, handler), supersession, outbox entry | records, routes, resumes (§7) |
@@ -189,7 +188,7 @@ resumed by a **restart** (§7). "Workflow" means only a CI workflow; "activity" 
   fixtures, beyond an exceptions list that only shrinks; `src/defaults/` is exempt and never
   imported by `src/core/`; the toy course `chore` runs the generic scenarios (S-BTN-28).
 - **R-BTN-66 (agents can change anything in git; what they must not change lives in Baton).**
-  An agent can change every byte of a registered repository — `.baton/`, the sync, tiers,
+  An agent can change every byte of a registered repository — `.baton/`, the sync,
   requirements, computed bars and leg states, condition bindings, reviews. Baton does not
   replace or fortify git's security model: whoever can push, or is in `pushers` (R-BTN-139), is a
   legitimate user of this tenant (R-BTN-137). What is computed from git binds only as strongly as

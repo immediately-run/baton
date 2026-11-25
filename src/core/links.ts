@@ -69,7 +69,7 @@ export function sessionLinkWhy(url: string, hosts: readonly string[]): string | 
 }
 
 /** Project a stored R-BTN-113 capability for the authorized reader. */
-export type SessionLinkView = (url: string | null, runnerId: number) => { session_url: string | null; session_link: boolean };
+export type SessionLinkView = (url: string | null, runnerId: number, incarnation: number | null) => { session_url: string | null; session_link: boolean };
 export const hiddenSessionLink: SessionLinkView = (url) => ({ session_url: null, session_link: url !== null });
 
 /** R-BTN-113's `session_hosts`: the hosts whose sessions an instance's people may be linked to,

@@ -1,6 +1,6 @@
 // S-BTN-310 session-link capabilities (BATON_SPEC §15, R-BTN-33, R-BTN-113, R-BTN-195), both hosts.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { course, keyCall, rows, sessionCall, withCore } from '../helpers';
+import { course, keyCall, ORIGIN, rows, sessionCall, withCore } from '../helpers';
 import { claimAndStart, fleet, grantedRunner, heartbeat, signed, type Fleet, type Granted, type Json } from '../lib/runnerFleet';
 import roadmapPr from '../fixtures/courses/roadmap-pr/course.json';
 import { MIGRATIONS } from '../../src/migrations';
@@ -76,6 +76,50 @@ describe('S-BTN-310 session-link capabilities', () => {
     expect((await (await sessionCall(f.cookie, runPath)).json() as Json).runs[0]).toMatchObject(visible);
   });
 
+  it('keeps fenced run links bound to the reporting incarnation after re-keying', async () => {
+    const paths: [string, (b: Json) => unknown[]][] = [
+      [`${BASE}/runners/${reporter.id}`, (b) => [b.window.claims[0], ...b.window.claims[0].runs]],
+      [`${BASE}/courses/roadmap-pr`, (b) => b.legs.flatMap((l: Json) => l.runs ?? [])],
+    ];
+    const reap = await sessionCall(f.cookie, `/v1/ui/claims/${claim}/reap`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', Origin: ORIGIN }, body: JSON.stringify({ confirm: true }),
+    });
+    expect(reap.status).toBe(200);
+    expect(await reap.json()).toMatchObject({ fence_pending: true });
+    for (const [path, links] of paths) {
+      const res = await signed(reporter.key, path, undefined, reporter.secret);
+      expect(res.status).toBe(200);
+      expect(links(res.json)).toEqual(expect.arrayContaining([expect.objectContaining(visible)]));
+    }
+    const replacement = 'synthetic-replacement-secret';
+    const rekeyed = await heartbeat(reporter.key, reporter.hostname, replacement, { rekey: true }, true);
+    expect(rekeyed.status).toBe(200);
+    expect(rekeyed.json).toMatchObject({ runner_id: reporter.id, incarnation: 2 });
+    expect(await rows('SELECT fence_pending FROM claims WHERE id = ?', claim)).toEqual([{ fence_pending: 1 }]);
+    for (const [path, links] of paths) {
+      const res = await signed(reporter.key, path, undefined, replacement);
+      expect(res.status).toBe(200);
+      expect(links(res.json)).toEqual(expect.arrayContaining([expect.objectContaining(hidden)]));
+      expect(JSON.stringify(res.json)).not.toContain(TOKEN);
+      const dashboard = await sessionCall(f.cookie, path);
+      expect(dashboard.status).toBe(200);
+      expect(links(await dashboard.json() as Json)).toEqual(expect.arrayContaining([expect.objectContaining(visible)]));
+    }
+  });
+
+  it('gives different validators to queries with different first filter values', async () => {
+    await raiseInteraction();
+    const path = `${BASE}/conditions?open=1&type=interact`;
+    const present = await signed(other.key, `${path}&ticket=docs:T-1&ticket=docs:T-2`);
+    const absent = await signed(other.key, `${path}&ticket=docs:T-2&ticket=docs:T-1`);
+    expect([present.status, absent.status]).toEqual([200, 200]);
+    expect(present.json.conditions).toHaveLength(1);
+    expect(absent.json.conditions).toHaveLength(0);
+    expect(present.res.headers.get('ETag')).toBeTruthy();
+    expect(absent.res.headers.get('ETag')).toBeTruthy();
+    expect(present.res.headers.get('ETag')).not.toBe(absent.res.headers.get('ETag'));
+  });
+
   it('delivers open interactions without leaking them to general condition reads or exports', async () => {
     const id = await raiseInteraction();
     const poll = `${BASE}/conditions?open=1&type=interact`;
@@ -144,7 +188,7 @@ describe('S-BTN-310 session-link capabilities', () => {
     }
     await rows("INSERT INTO events (at, kind, actor, detail_json) VALUES (?, 'discrepancy', 'baton', ?)", AT, JSON.stringify({ sub: 'session-url', why: `its host ${TOKEN}`, url: LINK }));
     await rows("INSERT INTO ticket_history (repository_id, ticket_id, at, kind, detail_json) VALUES ('docs', 'docs:T-1', ?, 'leg-finished', ?)", AT, JSON.stringify({ evidence: 'commit', session_url: LINK }));
-    await withCore((core) => core.store.transaction(() => core.store.script(MIGRATIONS.find((m) => m.id === 71)!.sql)));
+    await withCore((core) => core.store.transaction(() => core.store.script(MIGRATIONS.find((m) => m.id === 79)!.sql)));
     for (const table of ['events', 'ticket_history']) {
       const values = (await rows<{ detail_json: string }>(`SELECT detail_json FROM ${table}`)).map((r) => r.detail_json);
       expect(values.join()).not.toContain(TOKEN);
