@@ -143,7 +143,7 @@ async function runAgent(ctx: LegCtx, { course, leg, names, spec, readsOnly }: { 
   // `baton run --harness` chose — fills their absence, never overrides their choice.
   const settingsCommand = typeof settings.agent_command === 'string' && settings.agent_command !== '' ? settings.agent_command : process.env.BATON_AGENT_COMMAND ?? '';
   if (settingsCommand === '') throw new Error('.baton/baton.json names no agent_command — run `baton repo init --agent opencode` (or --agent claude-code, or --agent-command <cmd>); baton run --harness <harness> runs its command when the settings name none');
-  // §6.10 (R-BTN-131, B-167): the course's choice of model is the repository's own — the
+  // R-BTN-131 (B-167): the course's choice of model is the repository's own — the
   // words `agent_command` carries, run exactly as written. Baton delivers no advice and core
   // resolves no route; a repository that picks its model at run time writes a leg override
   // (R-BTN-131) that reads its own configuration or the instance views (R-BTN-99).

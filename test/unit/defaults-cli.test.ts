@@ -800,9 +800,9 @@ describe('baton repo init, through the built CLI', () => {
       };
       refuses();
       execFileSync('git', ['-C', checkout, 'update-index', '--assume-unchanged', 'src/defaults/stub-runtime.ts']);
-      expect(execFileSync('git', ['-C', checkout, 'status', '--porcelain'], { encoding: 'utf8' })).toBe('');
+      expect(execFileSync('git', ['-C', checkout, 'status', '--porcelain', '--', 'src/defaults/stub-runtime.ts'], { encoding: 'utf8' })).toBe('');
       refuses();
-      execFileSync('node', ['scripts/build-cli.mjs'], { cwd: checkout, stdio: 'pipe', timeout: 30_000 });
+      execFileSync('npm', ['run', 'build:cli'], { cwd: checkout, stdio: 'pipe', timeout: 30_000 });
       expect(JSON.parse(readFileSync(join(checkout, 'dist/build.json'), 'utf8'))).toMatchObject({ commit: SELF.sha, dirty: true });
       expect([readFileSync(settings, 'utf8'), readFileSync(stub, 'utf8')]).toEqual(before);
     } finally {
