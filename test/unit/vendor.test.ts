@@ -1,11 +1,15 @@
-// R3-1206 — the vendored decision library (BATON_SPEC §3 R-BTN-37): the copies match their
+// R3-1206 — the vendored decision library (BATON_SPEC §2.1 R-BTN-37): the copies match their
 // manifest always, and the docs checkout's current files wherever one exists.
 import { describe, it, expect, inject } from 'vitest';
-import * as baton from '../../src/shared/baton.mjs';
-import * as vocabulary from '../../src/shared/vocabulary.mjs';
+import * as baton from '../../src/vendor/baton.mjs';
+import * as vocabulary from '../../src/vendor/vocabulary.mjs';
 
-describe('src/shared', () => {
-  const { manifest, vendored, upstream } = inject('shared');
+describe('src/vendor', () => {
+  const { manifest, vendored, upstream, copiesInShared } = inject('vendor');
+
+  it('leaves no vendored copy in src/shared', () => {
+    expect(copiesInShared).toEqual([]);
+  });
 
   it('each copy is the file its manifest pins', () => {
     expect(Object.keys(manifest).sort()).toEqual(['baton.mjs', 'batonSync.mjs', 'sessionUsage.mjs', 'ticketPr.mjs', 'vocabulary.mjs']);

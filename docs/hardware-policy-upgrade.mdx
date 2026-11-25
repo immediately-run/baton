@@ -1,0 +1,30 @@
+---
+title: Check hardware policy before upgrading
+description: Operator preflight for B-136's fail-closed handling of unverified hardware keys.
+---
+
+Baton cannot yet verify hardware custody. A repository minimum of `any` allows the existing
+custody-based approvals, but does not establish `human-gates`. A minimum of `hardware` does not
+accept an unverified key, including a host-configured break-glass key. Both `human-gates` and the
+legacy `human-gates-hardware` name are reported broken. A floor naming either still stops claims.
+
+Before installing the release, the operator should inspect `baton owner -i KEY policy show REPO` for every
+registered repository. Flag every policy with `human_key: hardware` and every floor containing
+one of the two names above. Do not upgrade a flagged repository in place if it must retain that
+minimum or floor. Keep it out of service if its deployment relies on hardware evidence the
+current server cannot verify.
+
+If the deployment accepts custody-only approval, make the transition on the **previous** release
+in an owner-controlled maintenance window with runners paused. Use the currently authorized
+human credential, outside any agent session. Explicitly remove the affected floors through
+`baton owner -i KEY policy floor remove REPO NAME`; it still checks the current policy and `remove_by`.
+Preserve other guarantees from a mixed floor in a replacement floor with the same removal
+authority. Then use `baton owner -i KEY policy set REPO FILE --base N` with a fresh policy version to set
+`human_key` to `any`, leaving the approver lists and other knobs unchanged. Do not turn a human
+list into an owner list to make the upgrade pass. If any step is refused, stop the upgrade.
+Read back the policy and floors before upgrading and again before resuming runners.
+
+After an upgrade, a legacy floor on an `any` policy can still be removed by its authorized
+approver. A repository already upgraded with an unsatisfiable hardware policy has no in-place
+API bypass. Keep runners stopped and arrange operator recovery before resuming service; adding
+an unverified break-glass key or editing Baton state is not a supported recovery.

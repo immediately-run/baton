@@ -28,6 +28,7 @@ export class Baton extends DurableObject<Env> {
       config: env,
       dispatch: { send: (target) => sendForgeDispatch(env, target, this.core.now()), defer: (work) => ctx.waitUntil(work) },
       adminKeys: { list: () => parseAdminKeys(env.BATON_ADMIN_KEYS ?? '') },
+      accessIdentities: { read: () => env.ACCESS_IDENTITIES ?? '' },
     });
     // The object refuses to serve until every migration is applied (§3), and keeps one alarm.
     ctx.blockConcurrencyWhile(() => this.core.start());

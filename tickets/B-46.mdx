@@ -3,18 +3,19 @@ title: "B-46 — hardening within a tenant: only pushers' forge writes count, ru
 id: B-46
 project: baton
 status: available
-updated: 2026-11-03
+updated: 2026-11-23
 repos:
   - immediately-run/baton
 tags:
   - roadmap-item
-description: "Owner, 2026-10-18, after the security review: build BATON_SPEC R-BTN-139 to R-BTN-158 (placed by rule across §2.3, §3–§6, §8 and §10–§12), which close the holes inside one tenant that the tenancy rules (§2.2) do not touch — outsiders' PRs and verdicts, off-branch leg code, runner secrets in legs and logs, multi-repository machine keys, unfounded heads, open-world gates, missing caps, forged merge checks, MCP lifting holds, the login link, CI-token events, tokens, and the local host. The grant's one flag is sync: no courier flag, delivery flag or courier asks scope (personal couriers are retired). Extended after the adversarial review: the author and posted-state gates at an open-world settlement, consents in `code_repo_consents`, the longest id winning a branch, `base_sha` ancestry, `accept {confirm_span?}` and pending grants holding no role, the per-credential declaration budget, revocation only of a fully verifying bearer over `http`, and no read of Cloudflare Access's JWT. S-BTN-115 to S-BTN-125, S-BTN-32's pending-grant case, G-BTN-135 to G-BTN-145, G-BTN-57's pending-grant clause, G-BTN-59's open-world clause. Requires: a public GitHub repository and a GitLab project for two exit criteria."
+description: "Owner, 2026-10-18, after the security review: build BATON_SPEC R-BTN-139 to R-BTN-158 (placed by rule across §2.3, §3–§6, §8 and §10–§12), which close the holes inside one tenant that the tenancy rules (§2.2) do not touch — outsiders' PRs and verdicts, off-branch leg code, runner secrets in legs and logs, multi-repository machine keys, unfounded heads, open-world gates, missing caps, forged merge checks, MCP lifting holds, the login link, CI-token events, tokens, and the local host. The grant's one flag is sync: no courier flag, delivery flag or courier asks scope (personal couriers are retired). Extended after the adversarial review: the author and posted-state gates at an open-world settlement, consents in `code_repo_consents`, the longest id winning a branch, `accept {confirm_span?}` and pending grants holding no role, the per-credential declaration budget, revocation only of a fully verifying bearer over `http`, and no read of Cloudflare Access's JWT. S-BTN-115 to S-BTN-125, S-BTN-32's pending-grant case, G-BTN-135 to G-BTN-145, G-BTN-57's pending-grant clause, G-BTN-59's open-world clause. Requires: a public GitHub repository and a GitLab project for two exit criteria."
 topics:
   - baton
 owns: {}
 prs: []
 depends_on:
   - B-45
+  - B-310
 ---
 
 **Spec:** BATON_SPEC [R-BTN-139](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-4) to [R-BTN-158](../spec/BATON_SPEC/12-security.md#sec-12-5) and the rules they amend, placed by rule: [§2.3](../spec/BATON_SPEC/02-deployments.md#sec-2-3) ([R-BTN-149](../spec/BATON_SPEC/02-deployments.md#sec-2-3)), [§3.2](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-2) and
@@ -120,7 +121,7 @@ Split into reviewed PRs along four parts. Each is independent.
      and the server refusing every one that arrives (which it revokes is item 7's).
 7. **The adversarial review's fixes** (2026-10-20), each with its scenario case:
    - **Author and posted-state gates at settlement** (R-BTN-104/R-BTN-148, adv-1 M7), in the
-     settlement path in `src/core/claims.ts`. The author gates are the `requires` and tier gates,
+     settlement path in `src/core/claims.ts`. The author gates are the `requires` ~~and tier~~ gates,
      judged over `declared` at the claim and again over the posted ticket; the outcome table
      applies only when one of them fails. A claim settling at `start` whose author gates pass but
      whose posted-state gate fails for the claimed leg (not `ready`, a block, an open decision, a
@@ -143,11 +144,8 @@ Split into reviewed PRs along four parts. Each is independent.
      `src/defaults/course-markers.ts`), the runner's local branch check and `branchHolder` in
      `src/core/claims.ts`: a branch maps to a ticket only when no longer id of the same repository
      also matches it. Until a child's first snapshot, its branch maps to its parent.
-   - **No roll-back** (R-BTN-143, adv-3 F4). The claim response names `base_sha`
-     (`board_snapshots.parent_sha`; null for a repository's first snapshot and for a held post
-     accepted per R-BTN-11). The runner (`src/runner/home.ts`) checks that it is an ancestor of
-     `snapshot_sha` too, and a failure is handled as an off-branch sha. The held machine-key
-     post that may name such a sha is B-77's.
+   - **Default-branch membership** (R-BTN-143). The runner checks `snapshot_sha` against its
+     own fetched default branch. The claim has no `base_sha` ancestry check (B-160).
    - **Accepting a grant** (R-BTN-146, §12.1, §14; adv-4 m2, m4).
      - `POST /v1/runner/grants/{repository}/accept` takes `{confirm_span?}`; an acceptance that
        raises the span without it is `conflict`, listing the repositories that would lose sync.
@@ -162,14 +160,14 @@ Split into reviewed PRs along four parts. Each is independent.
      verifies is revoked (a cookie's session ended) and raises `baton.bearer-over-http`. One that
      does not verify is refused `unauthenticated` and counted in §2.3's failure buckets: an id
      or fingerprint alone, which is public, revokes nothing.
-   - **Access is never read** (R-BTN-16, adv-4 m5). Remove `verifyOwner` and every
-     `Cf-Access-Jwt-Assertion` read from `src/core/auth.ts` and `src/core/front.ts`, the
-     `X-Baton-Owner` principal from `src/core/baton.ts`, and the `ACCESS_TEAM_DOMAIN`,
-     `ACCESS_AUD`, `OWNER_EMAILS` and `TEST_ACCESS_JWKS` bindings (`src/core/ports.ts`,
-     `src/local/main.ts`, `src/local/testCourse.ts`, the test bindings). A dashboard request is
-     authorized by Baton's own session alone. R3-1208 narrows the Access policy itself. The
-     release notes say that a deployment signing in through Access alone needs an administrator
-     key first.
+   - **Access opens a session; it never authorizes a request** (R-BTN-16, R-BTN-155, adv-4 m5;
+     amended 2026-11-21 when the owner approved sign-in through Access). Keep B-310's
+     `verifyAccess` and its sign-in route. Remove the Access-alone path: `verifyOwner`, the
+     `X-Baton-Owner` principal from `src/core/baton.ts`, and `OWNER_EMAILS`, so a dashboard
+     request is authorized by Baton's own session alone, whichever way it was opened. Retire
+     R-BTN-155's *Cloudflare Access, with no administrator key* clause in the same PR. The
+     release notes say that a deployment signing in through Access alone needs an
+     administrator key and an `ACCESS_IDENTITIES` line first.
 
 ### Architecture
 
@@ -190,22 +188,24 @@ adapter's trust and fork mapping from real payload shapes. Item 7's cases, on bo
   `stream` cases are B-77's.
 - S-BTN-122: heartbeats flipping declarations past the budget keep their leases and drop the
   declarations (`declarations: 'quota'`).
-- S-BTN-123: a post naming an older default-branch sha gives `released:off-branch`, because
-  `base_sha` is not its ancestor.
+- Proposed S-BTN-123: Baton would refuse an already-accepted older head as `head-moved`.
+  Current R-BTN-11 checks the post's `parent_sha` and observation ordering, not whether
+  the submitted `sha` was previously a head. The runner still refuses off-branch claim
+  code (R-BTN-143).
 - S-BTN-124: an unverifying bearer naming an administrator's `bak_<id>` over `http` is refused
   and nothing is revoked.
 - S-BTN-32: a pending grant on a key later added as an owner gives `conflict` without naming the
   role. Its `admin.key.revoke` case is B-76's.
 - Unit: `claude/T-12-1-impl` maps to `T-12-1`, never `T-12`, in every caller of the matcher, and
   to `T-12` while `T-12-1` is unposted; `accept` without `confirm_span` listing the repositories;
-  no `Cf-Access-Jwt-Assertion` header changes any principal.
+  no `Cf-Access-Jwt-Assertion` header changes any principal outside `POST /v1/login {access: true}`.
 
 ### Exit criteria
 
 - `npm test` and `npm run typecheck` green, with S-BTN-115 to S-BTN-125 and G-BTN-135 to
   G-BTN-145 passing, item 7's cases among them; G-BTN-57's pending-grant clause and G-BTN-59's
   open-world clause hold.
-- No code under `src/` reads Cloudflare Access's cookie or JWT.
+- No code under `src/` reads Cloudflare Access's cookie or JWT outside B-310's sign-in route.
 - On a scratch public GitHub repository, an outsider's fork PR and approve comment move
   nothing.
 - A real GitLab `id_tokens` JWT from a merge-request pipeline is refused.
@@ -220,7 +220,7 @@ _(2026-10-31: a code-repository consent is an `approvers.members` action of the 
 
 _(2026-11-01: the spec restructure's part 1 (B-166, the PR `baton-spec-restructure-p1`): open-world claims are retired (R-BTN-104, R-BTN-148; R3-1271 superseded), so this ticket's items on open-world gates, the `declared` field, `misdeclared` and tainting, and its unfounded-head items (`head-replaced`) are void; `base_sha` and `released:off-branch` stand (R-BTN-143), and a forced Resync is the one way a rewritten head is adopted (R-BTN-11). G-BTN-59's open-world clause is gone.)_
 
-_(2026-11-02: the spec restructure's part 2 (B-166, the PR `baton-spec-restructure-p2`): R-BTN-139's flag and setting are `pusher` and `pushers` (`baton.pushers-degraded`; B-163), and R-BTN-143's `base_sha` no-roll-back check is gone (B-160: an older sha's post is refused `head-moved`, R-BTN-11; S-BTN-123 changed). The rows naming `trusted`, `trusted_identities` and `base_sha` read accordingly.)_
+_(2026-11-02: the spec restructure's part 2 (B-166, the PR `baton-spec-restructure-p2`): R-BTN-139's flag and setting are `pusher` and `pushers` (`baton.pushers-degraded`; B-163), and R-BTN-143's `base_sha` no-roll-back check is gone (B-160; earlier-head refusal remains proposed under S-BTN-123). The rows naming `trusted`, `trusted_identities` and `base_sha` read accordingly.)_
 
 _(2026-11-02: the spec restructure's part 3 (B-166, the PR `spec-restructure-handoff`, [#163](https://github.com/immediately-run/baton/pull/163)): `baton owner grants` is `baton owner grant list` (R-BTN-127).)_
 - 2026-11-02: the spec restructure's part 4 (B-166): `trigger_workflows` is gone — an unblocked trigger names any workflow on the default branch that declares a manual dispatch (R-BTN-94; B-168); cutover and foreign claims sit in §16, now an appendix that ends when docs retires its mirror.
@@ -232,3 +232,5 @@ _(2026-11-20: the spec simplification of 2026-11-19 (baton#299; `spec/BATON_SPEC
 _(2026-11-20: the spec simplification of 2026-11-19 (baton#299; `spec/BATON_SPEC_HISTORY.md`, that date) moved the unbuilt parts of the design this ticket builds out of the section files, with their rule ids, to proposal pages: admission limits within a tenant are in [the multi-tenancy proposal](../spec/proposals/multi-tenancy.md); observation renewal, the founded head and lagging fetches are parts 3 and 4 of [the tickets-and-sources proposal](../spec/proposals/tickets-and-sources.md); grant acceptance and a key's span are part 5 of [the checks-and-executors proposal](../spec/proposals/checks-and-executors.md). S-BTN-121 and S-BTN-123 are no longer rows of the verification section: they are in [the proposals' scenarios](../spec/proposals/scenarios.md), under "Sync ordering: founded heads, lagging fetches and the forced Resync" and "Checks". Each rule keeps its id and a line in its section, which links the page. The pull request that builds this ticket moves the rules it builds back into the section files, and the scenarios and gates it makes pass back into [the verification section](../spec/BATON_SPEC/15-verification.md#sec-15), in the same change. The plan above is otherwise as the earlier note of this day leaves it.)_
 
 _(2026-11-20: rules re-read: R-BTN-154, R-BTN-146)_
+
+_2026-11-23 — tiers retired (spec/retire-tiers: [BATON_SPEC §6.6](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-6) gate 5, [R-BTN-66](../spec/BATON_SPEC/01-what-baton-is.md#sec-1)): the struck tier clauses are gone from the spec — no ticket tier, runner ceiling, grant `max_tier`, ladder, `ready_by_tier` or `?tier=`. Build the rest without them._

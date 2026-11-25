@@ -371,18 +371,6 @@ export function setHumanKeys(...keys: (TestKey | string)[]) {
   });
 }
 
-/** BATON_SIGNING_KEY for this test (R-BTN-114's SigningKey, B-145/R-BTN-189): the tenant's
- *  Ed25519 key, generated per test and handed as the host hands it — never stored by Baton.
- *  Returns the JWK, for the scenarios to verify signatures as a pinned reader would. */
-export async function setPolicySigningKey(): Promise<JsonWebKey> {
-  const pair = await crypto.subtle.generateKey({ name: 'Ed25519' }, true, ['sign', 'verify']) as CryptoKeyPair;
-  const jwk = await crypto.subtle.exportKey('jwk', pair.privateKey) as JsonWebKey;
-  await withCore((c) => {
-    (c as unknown as { ports: { config: Record<string, string | undefined> } }).ports.config.BATON_SIGNING_KEY = JSON.stringify(jwk);
-  });
-  return jwk;
-}
-
 /** R-BTN-159: an API key and its public line, as `baton key create` makes them. */
 export async function makeApiKey(comment = '') {
   const hex = (n: number) => [...crypto.getRandomValues(new Uint8Array(n))].map((b) => b.toString(16).padStart(2, '0')).join('');
@@ -416,4 +404,10 @@ export function sessionCall(cookie: string, path: string, init: RequestInit = {}
   headers.set('Cookie', cookie);
   if (init.method && init.method !== 'GET') headers.set('Origin', ORIGIN);
   return hostCall(new Request(ORIGIN + path, { ...init, headers }));
+}
+
+/** R-BTN-10: the post fields of a sync that found the evidence an unconfirmed end named — its
+ *  `std:git.evidence@1` for that claim, `ticket` a local id. Spread into `Git.refresh`/`post`. */
+export function evidenceFound(claim: number, evidence: string, ticket = 'T-1', found = true) {
+  return { attestations: [{ type: 'std:git.evidence@1', ticket, ref: String(claim), value: { claim, evidence, found } }] };
 }

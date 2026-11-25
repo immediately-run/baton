@@ -5,11 +5,14 @@ import type { Config, DispatchTarget } from './ports';
 
 const headers = { 'Content-Type': 'application/json', Accept: 'application/json', 'User-Agent': 'baton' };
 
-async function request(url: string, init: RequestInit, operation: string) {
+async function request(url: string, init: RequestInit, operation: string, token?: string) {
   const response = await fetch(url, { ...init, redirect: 'error', signal: AbortSignal.timeout(10_000) })
-    .catch(() => { throw new Error(`${operation}: transport failed`); });
-  // Never put a response body, URL or credential in the core's dispatch log.
-  if (!response.ok) throw new Error(`${operation}: HTTP ${response.status}`);
+    .catch(() => { throw new DispatchTransportError(`${operation}: transport failed`); });
+  // Installation errors and token-bearing trigger responses are reported by status only.
+  if (!response.ok) {
+    if (token) throw new DispatchRefused(response.status, await dispatchRefusal(response, token));
+    throw new Error(`${operation}: HTTP ${response.status}`);
+  }
   return response;
 }
 
@@ -53,16 +56,14 @@ async function installationToken(config: Config, path: string, now: number) {
   return token;
 }
 
-export async function sendForgeDispatch(config: Config, target: DispatchTarget, now: number): Promise<true | null> {
+export async function sendForgeDispatch(config: Config, target: DispatchTarget, now: number): Promise<boolean | null> {
   const { adapter, origin, github, workflow, ref, inputs } = target;
   const path = github.split('/').map(encodeURIComponent).join('/');
   const body = JSON.stringify(inputs ? { ref, inputs } : { ref });
   if (!adapter || adapter.kind === 'github-app') {
     const token = await installationToken(config, path, Math.floor(now / 1000));
     if (!token) return null;
-    await request(`https://api.github.com/repos/${path}/actions/workflows/${encodeURIComponent(workflow)}/dispatches`, {
-      method: 'POST', headers: { ...headers, Accept: 'application/vnd.github+json', Authorization: `Bearer ${token}` }, body,
-    }, 'GitHub workflow dispatch');
+    return dispatchWorkflow(token, target);
   } else {
     const token = dispatchToken(config, target.repository!, adapter);
     if (!origin || !token) return null;
@@ -76,5 +77,79 @@ export async function sendForgeDispatch(config: Config, target: DispatchTarget, 
       }, 'Gitea workflow dispatch');
     }
   }
+  return true;
+}
+
+const DISPATCH_REASON_MAX = 500;
+const DISPATCH_BODY_MAX = 8 * 1024;
+const DISPATCH_BODY_TIMEOUT_MS = 1000;
+
+export class DispatchTransportError extends Error {}
+
+export class DispatchRefused extends Error {
+  constructor(readonly status: number, reason: string) {
+    super(reason ? `HTTP ${status}: ${reason}`.slice(0, DISPATCH_REASON_MAX) : `HTTP ${status}`);
+  }
+}
+
+async function readDispatchBody(res: Response): Promise<string> {
+  if (!res.body) return '';
+  const reader = res.body.getReader();
+  const read = async () => {
+    if (Number(res.headers.get('Content-Length')) > DISPATCH_BODY_MAX) return '';
+    const decoder = new TextDecoder();
+    let size = 0;
+    let body = '';
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) return body + decoder.decode();
+      size += value.byteLength;
+      if (size > DISPATCH_BODY_MAX) return '';
+      body += decoder.decode(value, { stream: true });
+    }
+  };
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const deadline = new Promise<string>((resolve) => {
+      timer = setTimeout(() => resolve(''), DISPATCH_BODY_TIMEOUT_MS);
+    });
+    return await Promise.race([read(), deadline]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+    // The stream's underlying cancellation must not extend the diagnostic deadline.
+    void reader.cancel().catch(() => {});
+    reader.releaseLock();
+  }
+}
+
+/** R-BTN-94: keep a short, single-line reason, not the forge's payload. */
+async function dispatchRefusal(res: Response, token: string): Promise<string> {
+  try {
+    const body = await readDispatchBody(res);
+    let reason = body;
+    const mediaType = res.headers.get('Content-Type')?.split(';')[0].trim().toLowerCase();
+    if (mediaType?.endsWith('/json') || mediaType?.endsWith('+json') || (!mediaType && /^\s*[\[{]/.test(body))) {
+      const data = JSON.parse(body) as { message?: unknown } | null;
+      reason = typeof data?.message === 'string' ? data.message : '';
+    }
+    // Redact before clipping (including a token that would straddle the limit), and after
+    // stripping tags in case the original response split the token across markup.
+    return reason.replaceAll(token, '[redacted]').replace(/<[^>]*>/g, '').replace(/[<>]/g, '')
+      .replaceAll(token, '[redacted]').replace(/[\p{Cc}\p{Cf}\s]+/gu, ' ').trim();
+  } catch {
+    // An unreadable or malformed body cannot hide the HTTP status.
+    return '';
+  }
+}
+
+/** Send the GitHub request with the installation token, never the App JWT. */
+export async function dispatchWorkflow(token: string | undefined, target: DispatchTarget): Promise<boolean> {
+  token = token?.trim();
+  if (!token) return false;
+  const path = target.github.split('/').map(encodeURIComponent).join('/');
+  await request(`https://api.github.com/repos/${path}/actions/workflows/${encodeURIComponent(target.workflow)}/dispatches`, {
+    method: 'POST', headers: { ...headers, Accept: 'application/vnd.github+json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify(target.inputs ? { ref: target.ref, inputs: target.inputs } : { ref: target.ref }),
+  }, 'GitHub workflow dispatch', token);
   return true;
 }

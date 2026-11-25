@@ -21,7 +21,7 @@ export interface Ctx {
   store: Store;
   now: () => number;
   /** R-BTN-75: an imported claim holds its ticket; a claim's start changes `blocked_since` silently. */
-  held?: (ticketId: string) => void;
+  held: (ticketId: string) => void;
 }
 
 export class Mirror {
@@ -130,7 +130,7 @@ export class Mirror {
       item, preferred: null, nonce, claimedAt: b.at as number, sha: head, requestId: `foreign:${item}:${nonce}`, detail: { foreign: true },
     });
     logEvent(this.c.store, now, 'foreign-claim', 'sync', { nonce, sha: b.sha, imported: true }, item, claimId);
-    this.c.held?.(item);
+    this.c.held(item);
     return { imported: true, claim_id: claimId, nonce };
   }
 }

@@ -2,7 +2,8 @@
 // registration is checked before it is written and is insert-only; the BATON_REPOSITORIES seed
 // never changes a repository Baton knows; a sync token binds to exactly one repository's
 // workflow on its default branch; a dispatch names that repository's workflow. S-BTN-26.
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+import { dispatchWorkflow } from '../../src/core/dispatch';
 import { checkRegistration } from '../../src/core/registry';
 import { branchMatches } from '../../src/core/claims';
 import { checkRegistry } from '../../src/core/courses';
@@ -128,7 +129,62 @@ describe('the registry', () => {
     expect(sent).toEqual([expect.objectContaining({ github: 'immediately-run/docs', workflow: 'baton-unblocked.yml', ref: 'main', inputs: { tickets: JSON.stringify(tickets) } })]);
   });
 
+  it('dispatchWorkflow posts `inputs` only when the target has them', async () => {
+    const bodies: unknown[] = [];
+    const urls: string[] = [];
+    vi.stubGlobal('fetch', async (url: string, init: RequestInit) => {
+      urls.push(url);
+      bodies.push(JSON.parse(init.body as string));
+      return new Response(null, { status: 204 });
+    });
+    try {
+      expect(await dispatchWorkflow('tok', { github: 'immediately-run/docs', workflow: 'baton-unblocked.yml', ref: 'main', inputs: { tickets: '[]' } })).toBe(true);
+      expect(await dispatchWorkflow('tok', { github: 'immediately-run/docs', workflow: 'baton-mirror.yml', ref: 'main' })).toBe(true);
+      expect(await dispatchWorkflow(undefined, { github: 'immediately-run/docs', workflow: 'baton-mirror.yml', ref: 'main' })).toBe(false);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+    expect(urls).toEqual(['https://api.github.com/repos/immediately-run/docs/actions/workflows/baton-unblocked.yml/dispatches', 'https://api.github.com/repos/immediately-run/docs/actions/workflows/baton-mirror.yml/dispatches']);
+    expect(bodies).toEqual([{ ref: 'main', inputs: { tickets: '[]' } }, { ref: 'main' }]);
+  });
 
+  it.each([
+    ['plain text', () => new Response('<p>Workflow\r\n not found</p>', { status: 404 }), 'HTTP 404: Workflow not found'],
+    ['bracket-prefixed plain text', () => new Response('[deploy] Invalid ref', { status: 422 }), 'HTTP 422: [deploy] Invalid ref'],
+    ['JSON without a declared type', () => new Response(new TextEncoder().encode('{"message":"Invalid ref"}'), { status: 422 }), 'HTTP 422: Invalid ref'],
+    ['oversized body', () => new Response('x'.repeat(8193), { status: 404 }), 'HTTP 404'],
+    ['malformed JSON', () => new Response('{', { status: 404, headers: { 'Content-Type': 'application/json' } }), 'HTTP 404'],
+    ['no body', () => new Response(null, { status: 404 }), 'HTTP 404'],
+  ])('dispatchWorkflow reports %s safely', async (_case, reply, reason) => {
+    vi.stubGlobal('fetch', async () => reply());
+    try {
+      await expect(dispatchWorkflow('test-dispatch-credential', { github: 'immediately-run/docs', workflow: 'baton-sync.yml', ref: 'main' })).rejects.toMatchObject({ message: reason });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('bounds a stalled refusal body and cancels it without waiting for cancellation', async () => {
+    vi.useFakeTimers();
+    let finishCancel: (() => void) | undefined;
+    const cancel = vi.fn(() => new Promise<void>((resolve) => { finishCancel = resolve; }));
+    const body = new ReadableStream({
+      start(controller) { controller.enqueue(new TextEncoder().encode('partial reason')); },
+      cancel,
+    });
+    vi.stubGlobal('fetch', async () => new Response(body, { status: 422 }));
+    try {
+      await Promise.all([
+        expect(dispatchWorkflow('test-dispatch-credential', { github: 'immediately-run/docs', workflow: 'baton-sync.yml', ref: 'main' })).rejects.toMatchObject({ status: 422, message: 'HTTP 422' }),
+        vi.advanceTimersByTimeAsync(1000),
+      ]);
+      expect(cancel).toHaveBeenCalledOnce();
+    } finally {
+      finishCancel?.();
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+    }
+  });
 });
 
 describe('branch patterns (R-BTN-51, §6.3)', () => {
@@ -189,4 +245,3 @@ describe('the reserved branch namespaces (R-BTN-190, B-174)', () => {
     expect(checkRegistry([entry(branch_pattern as string)])[0].branch_pattern).toBe(branch_pattern);
   });
 });
-

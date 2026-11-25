@@ -1,4 +1,4 @@
-// ../../../../tmp/baton-bundle-fElYh9/entry.ts
+// ../../../../../baton-bundle-uPwf6M/entry.ts
 import { execFileSync as execFileSync2, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, readdirSync, rmSync as rmSync2, statSync, writeFileSync } from "node:fs";
@@ -313,12 +313,17 @@ baton: ${ctx.ticket.id} ${ctx.leg}, claim ${ctx.claim?.nonce ?? "?"}`;
     return run2("gh", ["pr", "comment", ...typeof result?.pr === "string" ? [result.pr] : [], "--body", body], ctx.checkout);
   }
   if (typeof result?.reached !== "string" || result.reached === "") throw new Error(`the ${ctx.leg} leg returned no station reached`);
+  if (ctx.leg === "implement" && result.reached === "delivered") {
+    if (typeof result.delivered !== "string" || !/^[0-9a-f]{40}$/.test(result.delivered)) throw new Error(`the implement leg reached delivered naming no verified commit, got ${JSON.stringify(result.delivered)}`);
+    return result.delivered;
+  }
   if (!MARKER_LEGS.has(ctx.leg)) return run2("git", ["rev-parse", "HEAD"], ctx.checkout);
   return closeTicket({ ...ctx, heading: false }, result, run2);
 }
 
 // src/defaults/course-pr.ts
 var DEFAULT_BRANCH_PATTERN = "claude/{ticket}-*";
+var CREATE_PR_ASK_DEADLINE_S = 3 * 60 * 60;
 var CREATE_SPEC_COURSE = {
   start: "requested",
   start_leg: "converse",
@@ -416,8 +421,8 @@ var ancestor = (a, b, run2, checkout) => {
 function verifyPrOpen(ask, run2) {
   const id = bareId(ask.ticket);
   const patterns = matchPatterns(ask.branchPatterns).map((p) => p.replace(/\{ticket\}/g, id));
-  const siblings = ask.repositories ?? [];
   const slug = originSlug(run2, ask.checkout);
+  const siblings = (ask.repositories ?? []).filter((r, i, all) => all.indexOf(r) === i && (slug == null || r.toLowerCase() !== slug.toLowerCase()));
   const label = (repo) => repo ?? slug ?? "the checkout\u2019s repository";
   const of = (repo) => {
     const args = ["pr", "list", "--state", "open", "--limit", "300", "--json", "number,headRefName,headRefOid", ...repo ? ["--repo", repo] : []];
@@ -473,8 +478,50 @@ function verifyPrOpen(ask, run2) {
   }
   throw new Error(`the implement agent exited 0, but no open PR on a branch matching ${patterns.join(" or ")} for ticket ${id} exists in ${read.join(" or ")}${unread.length ? ` \u2014 ${unread.map((f) => label(f.repo)).join(" or ")} could not be read` : ""} \u2014 open one from a matching branch with its head pushed, or the leg fails here`);
 }
+var DELIVERED_LINE = /^delivered\s+([0-9a-f]{7,40}(?:,[0-9a-f]{7,40})*)(?:\s+(.*))?$/;
+function findDelivered(out) {
+  const lines = out.split("\n").map((l) => l.trim()).filter((l) => l !== "");
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const m = DELIVERED_LINE.exec(lines[i]);
+    if (m == null) continue;
+    const evidence = (m[2] ?? "").trim();
+    if (evidence === "") throw new Error(`the implement agent answered ${JSON.stringify(lines[i])} with no evidence \u2014 the line is \`delivered <sha> <what you ran to find it delivered>\``);
+    return { shas: [...new Set(m[1].split(","))], evidence, line: lines[i] };
+  }
+  return null;
+}
+function verifyDelivered(ask, run2) {
+  if (ask.shas.length === 0) throw new Error("the implement agent answered delivered naming no commit");
+  const branch = ask.branch;
+  if (!/^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(branch) || branch.includes("..")) throw new Error(`cannot verify the delivered answer \u2014 ${JSON.stringify(branch)} is no branch name`);
+  const tracking = `refs/remotes/origin/${branch}`;
+  try {
+    run2("git", ["fetch", "-q", "origin", `+refs/heads/${branch}:${tracking}`], ask.checkout);
+  } catch (e) {
+    throw new Error(`cannot verify the delivered answer \u2014 fetching ${branch} from origin failed: ${msg(e)}`);
+  }
+  return ask.shas.map((sha) => {
+    let full;
+    try {
+      full = run2("git", ["rev-parse", "--verify", "--quiet", `${sha}^{commit}`], ask.checkout).trim();
+    } catch {
+      throw new Error(`the implement agent answered delivered at ${sha}, which names no commit this checkout knows \u2014 refused`);
+    }
+    if (!/^[0-9a-f]{40}$/.test(full)) throw new Error(`the implement agent answered delivered at ${sha}, which names no commit this checkout knows \u2014 refused`);
+    if (!ancestor(full, tracking, run2, ask.checkout)) {
+      throw new Error(`the implement agent answered delivered at ${sha}, which is not on ${branch} \u2014 refused: the commit a delivered answer names is on the default branch`);
+    }
+    return full;
+  });
+}
+function deliveredDetail(shas, evidence) {
+  const head = `delivered at ${shas.map((s) => s.slice(0, 10)).join(", ")}`;
+  const said = evidence.replace(/[\u0000-\u001f\u007f-\u009f<>{}]/g, " ").replace(/\s+/g, " ").trim();
+  const text = said === "" ? head : `${head}: ${said}`;
+  return text.length <= 200 ? text : `${text.slice(0, 199)}\u2026`;
+}
 
-// ../../../../tmp/baton-bundle-fElYh9/entry.ts
+// ../../../../../baton-bundle-uPwf6M/entry.ts
 var GIT_BOUND_MS = 12e4;
 var GIT_ENV = { "GIT_TERMINAL_PROMPT": "0", "GIT_SSH_COMMAND": "ssh -o BatchMode=yes -o ConnectTimeout=20" };
 var AGENT_IDLE_MS = 9e5;
@@ -499,39 +546,16 @@ var newestWrite = (p, depth = 0) => {
   return best;
 };
 var gitRun = (cmd, args, opts = {}) => execFileSync2(cmd, args, { encoding: "utf8", timeout: GIT_BOUND_MS, killSignal: "SIGKILL", env: { ...process.env, ...GIT_ENV }, stdio: ["ignore", "pipe", "pipe"], ...opts });
-function advisedCommand(words, settings, adviceFile) {
-  if (!adviceFile) return words;
-  let advice;
-  try {
-    advice = JSON.parse(readFileSync(adviceFile, "utf8"));
-  } catch {
-    return words;
-  }
-  const choices = advice && Array.isArray(advice.route_choices) ? advice.route_choices : [];
-  const map = settings && settings.agent_models && typeof settings.agent_models === "object" ? settings.agent_models : {};
-  const model = (rc) => Array.isArray(rc && rc.needs) ? rc.needs.find((n) => typeof n === "string" && n.startsWith("model:")) : void 0;
-  for (const rc of choices) {
-    if (!rc || typeof rc !== "object") continue;
-    const alt = rc.alternative ?? (Array.isArray(rc.ranked) && rc.ranked[0] ? rc.ranked[0].alternative : null);
-    if (alt == null) continue;
-    const ranked = Array.isArray(rc.ranked) ? rc.ranked.find((r) => r && r.alternative === alt) : null;
-    const mapped = map[rc.choice + "/" + alt] ?? map[model(ranked)];
-    if (typeof mapped !== "string" || mapped === "") continue;
-    const at = words.findIndex((w) => w === "--model");
-    if (at >= 0 && at + 1 < words.length && words[at + 1] !== mapped) words[at + 1] = mapped;
-    return words;
-  }
-  return words;
-}
 async function run(ctx) {
   const sha = ctx.snapshot?.sha;
   if (typeof sha !== "string" || sha === "") throw new Error("the leg has no snapshot to read its override at");
+  const readSha = typeof ctx.signed_control?.overrides === "string" && ctx.signed_control.overrides !== "" ? ctx.signed_control.overrides : sha;
   const rel = ".baton/courses/create-pr/legs/implement.run.mjs";
-  if (gitRun("git", ["-C", ctx.checkout, "ls-tree", "--name-only", sha, "--", rel]).trim() === "") return standard(ctx);
+  if (gitRun("git", ["-C", ctx.checkout, "ls-tree", "--name-only", readSha, "--", rel]).trim() === "") return standard(ctx);
   const dir = mkdtempSync(join2(tmpdir(), "baton-override-"));
   try {
     const file = join2(dir, "implement.run.mjs");
-    writeFileSync(file, gitRun("git", ["-C", ctx.checkout, "show", sha + ":" + rel], { maxBuffer: 67108864 }));
+    writeFileSync(file, gitRun("git", ["-C", ctx.checkout, "show", readSha + ":" + rel], { maxBuffer: 67108864 }));
     const mod = await import(pathToFileURL(file).href);
     if (typeof mod.run !== "function") throw new Error(rel + " exports no run(ctx, standard)");
     return await mod.run(ctx, standard);
@@ -542,17 +566,18 @@ async function run(ctx) {
 async function standard(ctx) {
   const sha = ctx.snapshot?.sha;
   if (typeof sha !== "string" || sha === "") throw new Error("the leg has no snapshot to read .baton/baton.json at");
-  const show = (rel2) => gitRun("git", ["-C", ctx.checkout, "show", sha + ":" + rel2], { maxBuffer: 67108864 });
+  const settingsSha = typeof ctx.signed_control?.agent_command === "string" && ctx.signed_control.agent_command !== "" ? ctx.signed_control.agent_command : sha;
+  const show = (rel2) => gitRun("git", ["-C", ctx.checkout, "show", settingsSha + ":" + rel2], { maxBuffer: 67108864 });
   const settings = JSON.parse(show(".baton/baton.json"));
   const settingsCommand = typeof settings.agent_command === "string" && settings.agent_command !== "" ? settings.agent_command : process.env.BATON_AGENT_COMMAND ?? "";
   if (settingsCommand === "") throw new Error(".baton/baton.json names no agent_command \u2014 run `baton repo init --agent opencode` (or --agent claude-code, or --agent-command <cmd>); baton run --harness <harness> runs its command when the settings name none");
-  const agentWords = advisedCommand(splitWords(settingsCommand), settings, process.env.BATON_ADVICE);
+  const agentWords = splitWords(settingsCommand);
   const agentCommand = agentWords.join(" ");
   const entry = (settings.courses ?? []).find((c) => c && c.id === "create-pr") ?? {};
   const patterns = [entry.branch_pattern, entry.previous_branch_pattern].filter((p) => typeof p === "string" && p !== "");
   const ticketText = (() => {
     try {
-      return ctx.ticket?.path ? readFileSync(join2(ctx.checkout, ctx.ticket.path), "utf8") : null;
+      return ctx.ticket?.file ? readFileSync(ctx.ticket.file, "utf8") : ctx.ticket?.path ? readFileSync(join2(ctx.checkout, ctx.ticket.path), "utf8") : null;
     } catch {
       return null;
     }
@@ -565,9 +590,10 @@ async function standard(ctx) {
       throw new Error(`${cmd} ${args.join(" ")} failed: ${why}`);
     }
   };
+  const courseSha = typeof ctx.signed_control?.course === "string" && ctx.signed_control.course !== "" ? ctx.signed_control.course : sha;
   const rel = ".baton/courses/create-pr/legs/implement.md";
-  const present = gitRun("git", ["-C", ctx.checkout, "ls-tree", "--name-only", sha, "--", rel]).trim() !== "";
-  const text = present ? show(rel) : null;
+  const present = gitRun("git", ["-C", ctx.checkout, "ls-tree", "--name-only", courseSha, "--", rel]).trim() !== "";
+  const text = present ? gitRun("git", ["-C", ctx.checkout, "show", courseSha + ":" + rel], { maxBuffer: 67108864 }) : null;
   const dir = text == null ? null : mkdtempSync(join2(tmpdir(), "baton-leg-"));
   const instructions = dir == null ? "" : join2(dir, "implement.md");
   if (dir != null) writeFileSync(instructions, text);
@@ -600,6 +626,8 @@ async function standard(ctx) {
       storePaths.push(join2(process.env.CLAUDE_CONFIG_DIR && process.env.CLAUDE_CONFIG_DIR !== "" ? process.env.CLAUDE_CONFIG_DIR : join2(homedir(), ".claude"), "projects", dashed));
     }
   }
+  const lastOutput = (so, se) => (so + "\n" + se).split("\n").map((l) => l.trimEnd()).filter((l) => l.trim() !== "").slice(-20).join("\n  ");
+  const canInteract = ctx.can_interact === true;
   const received = await new Promise((resolve, reject) => {
     const echo = process.env.BATON_VERBOSE === "1";
     const child = spawn(argv[0], argv.slice(1), {
@@ -610,7 +638,7 @@ async function standard(ctx) {
         BATON_COURSE: "create-pr",
         BATON_LEG: "implement",
         BATON_INSTRUCTIONS: instructions,
-        BATON_TICKET_FILE: ctx.ticket.path ?? ""
+        BATON_TICKET_FILE: ctx.ticket.file ?? ctx.ticket.path ?? ""
       }
     });
     let so = "", se = "";
@@ -656,16 +684,27 @@ async function standard(ctx) {
       if (watch != null) clearInterval(watch);
       child.kill("SIGKILL");
       process.stderr.write("baton: create-pr/implement ticket " + ctx.ticket.id + ": the agent " + conclusion2.cause + (conclusion2.cause === "agent_concluded_idle" ? " \u2014 quiet past " + Math.round(AGENT_IDLE_MS / 6e4) + " minutes on " + conclusion2.quiet_signals.join(", ") : " \u2014 the leg's ceiling of " + Math.round(LEG_CEILING_MS / 6e4) + " minutes") + "; the stdout it received is its output\n");
-      resolve({ text: so, conclusion: conclusion2 });
+      resolve({ text: so, stderr: se, conclusion: conclusion2 });
     };
     watch = setInterval(() => {
       if (stopped != null || conclusion2 != null) return;
       const now = Date.now();
       if (now - startedAt >= LEG_CEILING_MS) {
+        if (canInteract) {
+          stopped = "the leg reached its hard ceiling (" + LEG_CEILING_MS + " ms)";
+          clearInterval(watch);
+          ctx.signal?.removeEventListener("abort", onAbort);
+          child.kill("SIGKILL");
+          child.stdout.destroy();
+          child.stderr.destroy();
+          reject(new Error("the agent was stopped: " + stopped));
+          return;
+        }
         conclusion2 = { cause: "agent_concluded_absolute", ceiling_ms: LEG_CEILING_MS };
         finishWatch();
         return;
       }
+      if (canInteract) return;
       const all = signals();
       if (all.every(([, at]) => now - at >= AGENT_IDLE_MS)) {
         conclusion2 = { cause: "agent_concluded_idle", idle_ms: AGENT_IDLE_MS, quiet_signals: all.map(([name]) => name) };
@@ -685,19 +724,36 @@ async function standard(ctx) {
       }
       if (conclusion2 != null) return;
       if (code === 0) {
-        resolve({ text: so, conclusion: null });
+        resolve({ text: so, stderr: se, conclusion: null });
         return;
       }
-      const tail = (so + "\n" + se).split("\n").map((l) => l.trimEnd()).filter((l) => l.trim() !== "").slice(-20).join("\n  ");
-      reject(new Error("the agent exited " + (code != null ? "with code " + code : "on signal " + sig) + "; its last output:\n  " + tail));
+      reject(new Error("the agent exited " + (code != null ? "with code " + code : "on signal " + sig) + "; its last output:\n  " + lastOutput(so, se)));
     });
     child.stdin?.end();
   }).finally(() => {
     if (dir != null) rmSync2(dir, { recursive: true, force: true });
   });
-  const { text: out, conclusion } = received;
+  const { text: out, stderr: errOut, conclusion } = received;
+  const said = lastOutput(out, errOut);
+  const failed = (e) => new Error((e instanceof Error ? e.message : String(e)) + (said !== "" ? "; the agent's last output:\n  " + said : "; the agent printed nothing"));
   void out;
-  await verifyPrOpen({ checkout: ctx.checkout, ticket: ctx.ticket, branchPatterns: patterns, repositories: ticketRepositories(ticketText, settings.repos) }, legRun);
+  const claimed = findDelivered(out);
+  if (claimed != null) {
+    const shas = (() => {
+      try {
+        return verifyDelivered({ checkout: ctx.checkout, shas: claimed.shas, branch: ticketsBranch(ctx.checkout, ctx.default_branch ?? process.env.BATON_DEFAULT_BRANCH ?? null) }, legRun);
+      } catch (e) {
+        throw failed(e);
+      }
+    })();
+    if (process.env.BATON_VERBOSE) process.stderr.write("baton: create-pr/implement ticket " + ctx.ticket.id + ": delivered at " + shas.join(", ") + ", on the default branch \u2014 a person confirms\n");
+    return { suspend: true, reached: "delivered", next: "confirm", delivered: shas[0], detail: deliveredDetail(shas, claimed.evidence), ...conclusion ? { conclusion } : {} };
+  }
+  try {
+    await verifyPrOpen({ checkout: ctx.checkout, ticket: ctx.ticket, branchPatterns: patterns, repositories: ticketRepositories(ticketText, settings.repos) }, legRun);
+  } catch (e) {
+    throw failed(e);
+  }
   if (process.env.BATON_VERBOSE) process.stderr.write("baton: create-pr/implement ticket " + ctx.ticket.id + ": the forge verified an open PR on a branch matching " + patterns.join(" or ") + "\n");
   return { ...{ reached: "pr-open", next: "run-tests" }, ...conclusion ? { conclusion } : {} };
 }

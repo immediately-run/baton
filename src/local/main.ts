@@ -1,11 +1,11 @@
 // main.ts — `npm run start:local -- --db <path> --port <n>` (BATON_SPEC §3a R-BTN-55, R-BTN-57).
 // Options, never a `.dev.vars` file: `--origin` (default `http://127.0.0.1:<port>`), `--admin-keys
-// <file>` (one OpenSSH public key per line), `--github-webhook-secret <file>` (R-BTN-73),
-// `--signing-key <file>` (R-BTN-114's SigningKey, the tenant's Ed25519 JWK; R-BTN-171, R-BTN-189)
+// <file>` (one OpenSSH public key per line), `--access-identities <file>` (R-BTN-155),
+// `--github-webhook-secret <file>` (R-BTN-73),
 // and `--config <file>`, a JSON object of the
 // Runner's other variables and secrets (OIDC_ISSUER, OIDC_JWKS_URL, BATON_REPOSITORIES — the
 // repositories to register, as a JSON string —, ACCESS_*, OWNER_EMAILS, TOKEN_HASHES,
-// CREDENTIALS, BATON_KEYS, BATON_GITHUB_WEBHOOK_SECRET, BATON_FORGE_SECRETS, BATON_SIGNING_KEY,
+// CREDENTIALS, BATON_KEYS, BATON_GITHUB_WEBHOOK_SECRET, BATON_FORGE_SECRETS,
 // BATON_SESSION_HOSTS — the hosts whose session links the instance accepts, R-BTN-113 —,
 // BATON_GITHUB_APP_ID and BATON_GITHUB_APP_KEY). The test
 // bindings are refused: only the test harness, in-process, may set them.
@@ -14,7 +14,8 @@ import { dirname, resolve } from 'node:path';
 import { isIP } from 'node:net';
 import { parseArgs } from 'node:util';
 import { parseAdminKeys } from '../core/auth';
-import type { Config } from '../core/ports';
+import { BatonError } from '../core/http';
+import type { AccessIdentities, Config } from '../core/ports';
 import { LocalHost } from './host';
 import { serve } from './server';
 import { openStore } from './store';
@@ -61,7 +62,6 @@ export function localConfig(file: Record<string, unknown>, origin: string): Conf
     BATON_GITHUB_APP_ID: opt('BATON_GITHUB_APP_ID'),
     BATON_GITHUB_APP_KEY: opt('BATON_GITHUB_APP_KEY'),
     BATON_FORGE_SECRETS: opt('BATON_FORGE_SECRETS'),
-    BATON_SIGNING_KEY: opt('BATON_SIGNING_KEY'),
   };
 }
 
@@ -96,8 +96,9 @@ export async function main(argv: string[]) {
       'forge-secrets': { type: 'string' },
       'github-app-id': { type: 'string' },
       'github-app-key': { type: 'string' },
+      'access-identities': { type: 'string' },
       'github-webhook-secret': { type: 'string' },
-      'signing-key': { type: 'string' },
+      'signing-key': { type: 'string' }, // Retired; accept old launch commands without reading the file.
       config: { type: 'string' },
     },
   });
@@ -129,13 +130,8 @@ export async function main(argv: string[]) {
   if (values['github-app-id']) config.BATON_GITHUB_APP_ID = values['github-app-id'];
   if (values['github-app-key']) config.BATON_GITHUB_APP_KEY = readSecret(values['github-app-key'], '--github-app-key');
   if (values['github-webhook-secret']) config.BATON_GITHUB_WEBHOOK_SECRET = readSecret(values['github-webhook-secret'], '--github-webhook-secret').trim();
-  // R-BTN-114's SigningKey (R-BTN-171, R-BTN-189): the tenant's Ed25519 key from the file
-  // `--signing-key` names (§3's table: a key file locally, a secret on Cloudflare) — the JWK
-  // of the private half; it wins over a --config value. Read once at start: the key rotates by
-  // restarting with a new file, never by Baton writing one.
-  if (values['signing-key']) config.BATON_SIGNING_KEY = readSecret(values['signing-key'], '--signing-key').trim();
   const { store } = openStore(values.db);
-  const host = new LocalHost({ store, config, adminKeys: adminKeysFrom(values['admin-keys']) });
+  const host = new LocalHost({ store, config, adminKeys: adminKeysFrom(values['admin-keys']), accessIdentities: accessIdentitiesFrom(values['access-identities']) });
   await host.start();
   const server = serve(host, origin);
   server.listen(port, values.host, () => console.log(`baton: serving ${origin} from ${values.db}`));
@@ -155,6 +151,20 @@ export function adminKeysFrom(path: string | undefined): { list: () => string[] 
         return parseAdminKeys(readFileSync(path, 'utf8'));
       } catch {
         return [];
+      }
+    },
+  };
+}
+
+/** The local Access binding is re-read like the administrator keys, not loaded at startup. */
+export function accessIdentitiesFrom(path: string | undefined): AccessIdentities {
+  return {
+    read: () => {
+      if (!path) return '';
+      try {
+        return readFileSync(path, 'utf8');
+      } catch {
+        throw new BatonError('unavailable', 'the Access identities file could not be read');
       }
     },
   };

@@ -8,7 +8,7 @@ declare module 'vitest' {
       states: Record<'A' | 'B' | 'C' | 'D', { state: { items: unknown[] }; ready: string[]; [k: string]: unknown }>;
       ancestry: Record<string, boolean>;
     };
-    shared: { manifest: Record<string, string>; vendored: Record<string, string>; upstream: Record<string, string> | null };
+    vendor: { manifest: Record<string, string>; vendored: Record<string, string>; upstream: Record<string, string> | null; copiesInShared: string[] };
     fixtures: { manifest: Record<string, string>; vendored: Record<string, string>; upstream: Record<string, string> | null };
     wranglerToml: string;
     liveBoard: Record<string, unknown> | null;

@@ -254,7 +254,7 @@ export interface CourseRow {
 }
 
 export class Courses {
-  constructor(private readonly c: { store: Store; requiredBars?: (repo: string) => { course: string; leg: string }[]; /** §12.8 (B-145, R-BTN-181): the repository policies — the `service:` writer check runs again at every snapshot, against the roles as they stand now. */ policies?: Policies }) {}
+  constructor(private readonly c: { store: Store; requiredBars: (repo: string) => { course: string; leg: string }[]; /** §12.8 (B-145, R-BTN-181): the repository policies — the `service:` writer check runs again at every snapshot, against the roles as they stand now. */ policies: Pick<Policies, 'serviceWriterDrift'> }) {}
 
   private rows<T>(q: string, ...p: unknown[]): T[] {
     return this.c.store.exec<T>(q, ...p).toArray();
@@ -285,7 +285,7 @@ export class Courses {
       // `renamed_from` — is held until an owner updates or drops the bar.
       if (!violations.length) {
         const g = graphOf(e.course);
-        for (const bar of this.c.requiredBars?.(repo) ?? []) {
+        for (const bar of this.c.requiredBars(repo)) {
           if (bar.course === e.id && bar.leg !== '*' && !resolveLeg(g, bar.leg)) {
             violations.push({ rule: 'required-bar', path: `legs.${bar.leg}`, message: `an owner's required bar names the leg ${bar.leg}, which this file no longer has` });
           }
@@ -296,7 +296,7 @@ export class Courses {
       // roles move with membership actions, the policy document does not. A drifted policy
       // holds every course at its previous version until an approver fixes the policy.
       if (!violations.length) {
-        for (const message of this.c.policies?.serviceWriterDrift(repo) ?? []) {
+        for (const message of this.c.policies.serviceWriterDrift(repo)) {
           violations.push({ rule: 'policy', path: '', message });
         }
       }

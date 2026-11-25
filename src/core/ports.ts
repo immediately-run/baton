@@ -44,16 +44,15 @@ export interface AdminKeys {
   list(): string[];
 }
 
+/** R-BTN-155: the deployment's email-to-key bindings, read afresh on each call. */
+export interface AccessIdentities {
+  read(): string;
+}
+
 /** R-BTN-185 (B-145): the host's human-only keys — `BATON_HUMAN_KEYS`, the same shape as the
  *  administrators'. The deployment's root of trust, set outside Baton; a test replaces it as it
  *  replaces the administrators'. */
 export type HumanKeys = AdminKeys;
-
-/** A hook call (R-BTN-52, R-BTN-59): a Dynamic Worker on Cloudflare, a local `workerd`
- *  process locally — the same module format, input, output and limits. R3-1236 builds both. */
-export interface HookRunner {
-  run(hook: { module: string; entry: string }, input: unknown, limits: { timeout_ms: number }): Promise<unknown>;
-}
 
 /** §10.3: a workflow Baton dispatches after a committed transition: one repository's sync or
  *  mirror, resolved by the core to the GitHub repository and the workflow file. */
@@ -98,9 +97,8 @@ export interface Config {
    *  array of `POST /v1/admin/repositories` bodies less their owner keys. Each binds its own
    *  sync and mirror workflow to its board (R-BTN-15). */
   BATON_REPOSITORIES?: string;
-  /** R-BTN-16, as amended 2026-10-20: Access is hardening in front of the dashboard that Baton
-   *  never reads, and no deployment sets these (R3-1208's provision sets none). B-46 removes
-   *  the one read that remains. */
+  /** R-BTN-155: verify Access assertions at sign-in. OWNER_EMAILS applies only to the
+   *  legacy Access-only dashboard path when there are no administrator keys. */
   ACCESS_TEAM_DOMAIN?: string;
   ACCESS_AUD?: string;
   OWNER_EMAILS?: string;
@@ -126,10 +124,6 @@ export interface Config {
    *  a comma- or JSON-separated list. An administrator's setting, as the human keys are; the
    *  default is `claude.ai` alone. */
   BATON_SESSION_HOSTS?: string;
-  /** R-BTN-114's `SigningKey` (R-BTN-171, R-BTN-189): the tenant's Ed25519 signing key, as the
-   *  JWK of its private half — `{"kty":"OKP","crv":"Ed25519","d":…,"x":…}`. A secret on
-   *  Cloudflare, a key file locally; Baton never generates or stores one. */
-  BATON_SIGNING_KEY?: string;
   /** R-BTN-2 (§2.1, R3-1258): the plan's daily limits, `{"requests": <n>, "rows_written": <n>}`,
    *  a Worker var on Cloudflare and `--plan-limits` locally — the default is Workers Free's
    *  100,000 each. The dashboard draws the day's usage against them; nothing is refused at a
@@ -150,8 +144,7 @@ export interface Config {
   TEST_GITLAB_JWKS?: string;
 }
 
-/** §3: the two awaits at which another request may run — a signed request's signature check
- *  (R3-1239) and a hook call (R3-1236); their callers await through this. The Durable Object's
+/** §3: a signed request's signature check (R3-1239) may let another request run. The Durable Object's
  *  input gate opens there by itself; the local queue is released. */
 export interface Gate {
   outside<T>(work: () => Promise<T>): Promise<T>;
@@ -164,10 +157,9 @@ export interface Ports {
   config: Config;
   dispatch: Dispatch;
   adminKeys: AdminKeys;
+  accessIdentities?: AccessIdentities;
   /** R-BTN-185 (B-145): the host's human-only keys; absent, `BATON_HUMAN_KEYS` in the config. */
   humanKeys?: HumanKeys;
-  /** Absent until R3-1236; a test injects a fake. */
-  hooks?: HookRunner;
   /** Absent on Cloudflare, where the input gate needs nothing. */
   gate?: Gate;
   clock?: Clock;

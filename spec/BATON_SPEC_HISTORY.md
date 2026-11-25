@@ -18,6 +18,122 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
 
 ## Changelog
 
+- **2026-11-24 — The advance reply names the run's number (R-BTN-63, S-BTN-204).**
+  Rules changed: R-BTN-63, §14's advance row; S-BTN-204. The owner, 2026-11-24, on the
+  supervisor's report that the runner numbered a claim's runs 1, 3, 5: "Yes, fix now, and also
+  think of ways we can systematically prevent these errors from happening in the first place."
+  The runner handed each leg `ctx.run` from its own count — the earlier attempts' legs plus the
+  claim's own — while each leg the claim finished had already joined the first list, so a
+  claim's second review round reached 3 and the create-pr stub suspended it for `adjudicate`
+  (B-322 and B-324 on 2026-11-24, Baton's history showing run 2). Baton already counted the
+  runs, for `max_runs`, from its own record; the count had two homes. Now the `advance` that
+  starts a run answers `run`, counted as `max_runs` counts it, and the holder hands that to the
+  leg; a run an earlier claim abandoned is not one of them, as it never was for `max_runs`
+  (the history row's `run`, R-BTN-81, still counts every row). B-335.
+
+- **2026-11-24 — Access sign-in refusals name the failed check (R-BTN-155, S-BTN-318).**
+  Previously missing settings, missing or unverifiable assertions, and missing administrator
+  bindings all drew the same message. Missing Worker settings caused the 2026-11-23 sign-in
+  failure (B-319). The front now answers verification refusals itself; both binding failures
+  still share one answer to avoid revealing whether the verified email has a line.
+
+- **2026-11-23 — Tiers retired (§6.6 gate 5, R-BTN-66).**
+  Rules changed: R-BTN-5, R-BTN-9, R-BTN-34, R-BTN-35, R-BTN-50, R-BTN-58, R-BTN-66, R-BTN-74,
+  R-BTN-114, R-BTN-117, R-BTN-127, R-BTN-159, R-BTN-179, R-BTN-196, the board post (§4.4), §6.6,
+  §13.1–§13.4, §14; S-BTN-24, S-BTN-39, S-BTN-69, S-BTN-260, S-BTN-296, G-BTN-66; two Decisions
+  entries; the linked proposals (checks and executors, data model and API, conditions, people
+  and dashboard, scenarios); the context pages product, ux and vocabulary. The owner,
+  2026-11-23: "If possible, I would like to get rid of tiers entirely." A tier (`routine`,
+  `judgement`, `critical`, R3-1193) routed a ticket to a runner on a strong enough model line:
+  gate 5 refused a runner whose ceiling, the lower of its declared `tier_ceiling` and its
+  grant's `max_tier`, sat below the ticket's place on the repository's ladder. Every runner
+  declared the default ceiling, `critical`; the runbook grants keys `--max-tier judgement`
+  (`scripts/start-runner.sh`); no course read a tier. On 2026-11-23 six tickets filed as
+  `normal` or `high`, off the ladder, showed "nobody can take it — above-tier-ceiling" until
+  #388 moves them to `judgement`. Removed: gate 5 and its code `above-tier-ceiling`, the
+  repository's `tiers` ladder, the heartbeat's `tier_ceiling` and `tier_ceilings`, the grant's
+  and the proposed tokens' and check-runners' `max_tier`, a ticket's `tier` in the board post,
+  in `ready_tickets` and in every read, the tickets list's `?tier=` filter, the board's
+  `ready_by_tier`, staleness by a re-tier, and the runner's tier check at re-verification. A
+  ticket sent to particular runners requires a capability, of a type a course declares
+  (R-BTN-121), that those runners declare and are granted (§6.6 rule 4); declaring a new type
+  is a course-file change, a control path (R-BTN-184). A `requires` clause is written in git
+  like the tier was and binds as strongly as git does (R-BTN-66); the retired Decisions entry's
+  condition, no runner above the VM level serving a repository that runners below it push,
+  was the price of an unprotected tier and lapses with it. Removing `max_tier` widens every
+  grant that set one below the top: such a key may take every ticket its capabilities fit. Gate
+  numbers are stable, so 5 is left unused, as 6 and 12 are. Once the shipped sources stop
+  posting it, a markdown ticket's `tier:` line is one of the fields its source ignores
+  (R-BTN-74) and needs no edit. Review: two fresh reviewers given the diff (round one) found a
+  surviving `tier_position` column, tier text in five linked proposals, an invalid capability
+  in the ux example, a migration entry that described runner code that does not exist and
+  named no order or end, the grants `max_tier` widens, and missing rule ids; each was checked
+  against the text and code, and fixed.
+
+- **2026-11-21 — Sign-in through Cloudflare Access (R-BTN-155, R-BTN-57, S-BTN-308).**
+  Rules changed: R-BTN-155, R-BTN-57, R-BTN-16, R-BTN-149, R-BTN-185, R-BTN-188; G-BTN-144, S-BTN-124. The
+  owner approved it on 2026-11-21: a person Cloudflare Access has verified reaches a dashboard
+  session without minting a link in a terminal (the dashboard's UX rules, rule 1). Authority stays
+  with a key: `ACCESS_IDENTITIES` binds each email to one key, the deployment's to set, and the
+  session is that key's and ends with its key or its line. Two adversarial reviewers with fresh
+  context read the first draft. Both found that it contradicted R-BTN-57's single root of trust,
+  the Decisions entry choosing keys over Access as identity, and ticket B-46's removal of every
+  Access read; and that its one safeguard, an Access factor no agent session holds, is invisible to
+  Baton and does nothing against an agent driving a browser already signed in. The owner chose
+  (2026-11-21) to accept the Access configuration as a second root of trust and to require only an
+  explicit click, not an assertion-age or factor rule; `docs/security-model.mdx` (reach 3) records
+  the accepted risk. The draft's owner-key paragraph in the people-and-dashboard proposal was
+  dropped until owners' sessions are designed (B-76). Rejected: Access alone, with no key (it would
+  make the identity provider the only authority); signing in automatically when an assertion is
+  present (logout would undo itself and any agent that opens the page would be signed in).
+- **2026-11-21 — Work done outside Baton, modelled in each course (R-BTN-203, R-BTN-39, R-BTN-69, R-BTN-96, S-BTN-309).**
+  Rules changed: R-BTN-39, R-BTN-69, R-BTN-74, R-BTN-96, R-BTN-110, R-BTN-188, R-BTN-191; R-BTN-203
+  new. The owner, 2026-11-21: "baton *must* work well in a setup where only a portion of the
+  organization is using baton"; outside work is found by the sync's code, not the server; "the
+  codegen leg is not the only leg which may be completed outside baton"; and weak evidence starts a
+  reconciliation course Baton manages, configurable like any course. B-166 had been delivered by
+  four PRs on 2026-11-02 by sessions that never claimed it, and cost a runner's leg. Two
+  adversarial reviewers with fresh context read the first draft and found it not buildable:
+  evidence that lasted one sync and never reached the leg, a course switch the sync could not
+  make (R-BTN-39), `returned` as an end that marked work done, `record` writing `prs:` and so
+  closing partial work, a bare-id match that fires on most of this repository's commits, a hand
+  merge closing from any station past the test gate, `arrives` undefined in R-BTN-69, and runners
+  counting as reviewers. The owner then chose (2026-11-21): hand acts as separate fact legs the
+  course file places (the courses proposal's design, over `arrives` on runner legs); mentions
+  filtered rather than an explicit trailer; and a hand merge closing only where the course allows.
+  The owner then went further (2026-11-21): "Baton's whole strategy is explicitly modeling
+  processes that have been traditionally implicit via the coarse graph. This only works if
+  transitions between stations that happen outside Baton are also modeled. So the reconciler legs
+  need to be part of the course." So there is no reconciliation course: each course carries a
+  reconcile leg (`reconciles: true`) whose edges say where evidence may move a ticket, which Baton
+  queues in place of the queued leg while evidence waits (`ticket_evidence`,
+  `reconcile_displaced`). A second review round found the reconcile leg could conclude a review,
+  had no `max_runs` (so the standard courses failed R-BTN-69's cycle rule), lost the displaced leg
+  when queued twice, and weighed evidence on a mere release; that runner verdicts still counted
+  with `runner_pushers` unset; that a runner's machine key could forge arrivals; and that under
+  `protected` the B-166 failure returned. The owner chose (2026-11-21): arrivals and evidence only
+  from the sync key or the CI identity; no hand review while runner identities are unknown; a hand
+  merge from `reviewed` closes whatever the verdict; a refused arrival becomes evidence. So
+  `reconciles` maps each station it may conclude to its next leg, every reconcile and cyclic fact
+  leg has `max_runs`, and evidence is weighed only by the leg's finishing position. Rejected: a
+  separate reconciliation course entered and left by a position Baton parks (a move outside the
+  graph); the server inferring closure from forge events (against R-BTN-35); closing on any
+  mention. The owner then ruled on the round's first blocker, that the reconcile leg could skip
+  review and the test gate (2026-11-21): Baton works under an open-world assumption. Actors
+  outside it open, review and merge PRs and edit tickets; it gates only its own state; so almost
+  any transition may happen outside Baton, and its job is to detect it and place the ticket. A
+  factory needing strictness gates the forge events on Baton's state or disables them. So the
+  standard courses' fact legs are broad (`merged-by-hand` from every station but the ends and `delivered`, a hand review
+  on any head) and a reconcile leg may conclude any station the evidence shows, `merged`
+  included; values #13 states the stance. A third review round found runners' own pushes and PRs
+  counted as hand acts and deferred arrivals applied blind; a stale displaced-leg record after a
+  station change; `pr-merged` vacuous for a ticket with no PRs; the per-verdict `next` with no
+  shape in R-BTN-69; and unverified `at merged` conclusions. So runners' PRs and pushes are
+  excluded (none found while `runner_pushers` is unset), a sync arrival under a claim is dropped
+  and posted again by the next sync, the displaced record is cleared on any other station change,
+  `pr-merged` needs a PR, `arrives.next` takes one leg per verdict, a fact leg with no runs left
+  yields evidence, and a reconcile leg's merge or verdict is checked as the fact leg's would be.
+
 - **2026-11-20 — A session's reads outside `/v1/ui/*`, the strip's ready count, V1's paged lists (R-BTN-16, R-BTN-155, S-BTN-243, S-BTN-254).**
   Rules changed: R-BTN-16, R-BTN-155.
   The V2 dashboard (BATON-UI-V2, merged 2026-11-20) reads the repository and tenant `GET`s §14
@@ -3836,6 +3952,26 @@ The simplification of 2026-11-19 moved the scenarios and gates of unbuilt design
 Each entry is a transition the specification no longer describes. The code keeps the old form
 working until the stated condition holds, then removes it.
 
+- **Tier fields from older clients (2026-11-23).** The server changes first: gate 5, the
+  re-tier release in `staleBoard` and the tier reads go before any CLI or sync stops sending a
+  tier, since an old server counts an untiered ticket as the top tier and refuses it to a capped
+  grant. A board post's ticket `tier`, a heartbeat's `tier_ceiling` and `tier_ceilings`, a
+  grant's `max_tier`, a repository registration's or change's `tiers` and the tickets list's
+  `?tier=` are then accepted and ignored, never validated (a refused heartbeat would get a live
+  runner reaped), each logging one `deprecated-field` event per credential and field per day.
+  Stop when no request has carried one for 30 days: they are then refused `invalid-params`. The
+  stored `max_tier` values are dropped, widening those grants (the changelog entry); an owner
+  who relied on one re-scopes the key by capability before the deploy. A migration drops
+  every tier column: the repository's `tiers`, the grant's `max_tier`, the runner's
+  `tier_ceiling` and `tier_ceilings`, the ticket's `tier` and `tier_position`, and
+  `ready_tickets.tier_position`. What still carries the
+  rule goes with it: the vendored decision library's rule 5 (`isEligible`, `fitsTier`, `TIERS`,
+  docs-owned, then `npm run vendor`), `src/core/gates.ts`, the failed-rule order in
+  `src/core/claims.ts`, the trace checker's re-tier release, `ticketPr.mjs`'s `tier` control
+  field, the Quint model's rules 4–7, the `--tier`, `--max-tier` and `--tiers` flags,
+  `scripts/start-runner.sh`'s grant line, and the README's and `docs/security-model.mdx`'s tier
+  text.
+
 - **One claim per runner on the heartbeat (B-188, 2026-11-17).** The heartbeat answer keeps
   `claim` — the runner's oldest active claim, or null — beside `claims`, and reads the bare
   `session_url`, `leg_finished: <seq>` and a single `fenced` object as the runner's one claim's
@@ -3957,8 +4093,6 @@ working until the stated condition holds, then removes it.
   `refused_couriers`, the `pool` credential, `worker_couriers`, the grant's and token's
   `courier` flag and role), and `GET /v1/courier/decisions`. After it they are dropped; only
   `forge-check` notices remain.
-- **Hook residue (R-BTN-98).** The code still carries the `HookRunner` port and cites R-BTN-52 and
-  R-BTN-59; `hook-failed` survives only in a CHECK constraint. Remove when next touched.
 - **The docs deployment's own migration** of `skills_version` to each course's `version`, with
   the `Skills-Version:` trailer as an alias (R-BTN-22), belongs to docs' `BATON_DOCS_DEPLOYMENT`.
   Cutover itself — shadow reports, the legacy-claim import and adoption — stays in the
@@ -8043,4 +8177,3 @@ asserting signatures Baton cannot see (N10); F1 and N1 stated as the deployment'
 Fieldhouse does (R-FH-3; review legs without command execution, VM resets); the host repository
 writable by the human-only identity only (N2, fieldhouse#7); the rest recorded under Open
 questions.)*
-

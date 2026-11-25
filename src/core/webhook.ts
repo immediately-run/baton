@@ -230,7 +230,7 @@ export class Webhooks {
   constructor(private readonly c: { store: Store; now: () => number; /** B-134: the forge
    *  cross-check — a push by a named runner pusher to a repository no open claim covers (rule
    *  3's reading of still holding, as `openScopes` reads it) raises `unclaimed-write`. */
-   scope?: { pushDelivery(d: Delivery): void }; want?: (repository: string) => void }) {}
+    scope: { pushDelivery(d: Delivery): void }; want: (repository: string) => void }) {}
 
   private rows<T>(q: string, ...p: unknown[]): T[] {
     return this.c.store.exec(q, ...p).toArray() as T[];
@@ -267,7 +267,7 @@ export class Webhooks {
     // B-134's control: every push delivery — a duplicate was dropped above, Baton's own work
     // just before — is cross-checked against the claims open now, whatever repositories the
     // delivery's want ends up dispatching.
-    this.c.scope?.pushDelivery(d);
+    this.c.scope.pushDelivery(d);
     // B-89: a merge is the trigger; a pull_request the App sends for an opened, synchronised or
     // closed-without-merging PR moves the default branch nowhere, so the board owes nothing.
     if (d.event === 'pull_request' && d.merged !== true) return { outcome: 'not-a-merge' };
@@ -276,7 +276,7 @@ export class Webhooks {
     const nowDue: string[] = [];
     const trailing: string[] = [];
     for (const repository of new Set(own ? [own, ...targets] : targets)) {
-      this.c.want?.(repository);
+      this.c.want(repository);
       const decision = this.queueSync(repository);
       if (decision === 'now') this.stamp([repository], now);
       // A non-webhook producer may have opened the window first. Enrol this repository
@@ -321,7 +321,7 @@ export class Webhooks {
     const now = this.c.now();
     const stale = this.rows<{ repository_id: string }>(STALE_QUERY, now - SYNC_STALE_MS);
     return stale.flatMap(({ repository_id: id }) => {
-      this.c.want?.(id);
+      this.c.want(id);
       const decision = this.queueSync(id);
       this.c.store.exec(STAMP_UPDATE, now, id);
       return decision === 'now' ? [id] : [];

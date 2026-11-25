@@ -16,7 +16,7 @@
 // consents, ticket timers, the outbox) extend this file with their own cases.
 // Runs on both hosts.
 import { describe, it, expect, beforeEach } from 'vitest';
-import { adminSession, captureDispatches, claimItem, claimRow, course, ORIGIN, placed, register, rows, sessionCall, setAdminKeys, setClock, setHumanKeys, setPolicySigningKey, sha256, syncCall, tick, ticket, withCore, webhookCall, runnerCall } from '../helpers';
+import { adminSession, captureDispatches, claimItem, claimRow, course, ORIGIN, placed, register, rows, sessionCall, setAdminKeys, setClock, setHumanKeys, sha256, syncCall, tick, ticket, withCore, webhookCall, runnerCall } from '../helpers';
 import { makeKey, signedRequest, sshsig, type TestKey } from '../lib/sshKeys';
 import { call as hostCall } from '#host';
 
@@ -280,7 +280,6 @@ describe('S-BTN-198 retirement', () => {
 
   it('a retired repository\'s policy blocks no revocation (R-BTN-57, R-BTN-47)', async () => {
     await aLiveRepository();
-    await setPolicySigningKey();
     const breakGlass = await makeKey('ssh-ed25519', 'retire-break-glass');
     await setHumanKeys(breakGlass);
     // A human-only key H, an owner of ops, its approvers.trust naming it alone; opsOwner's

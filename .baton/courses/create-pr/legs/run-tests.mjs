@@ -1,4 +1,4 @@
-// ../../../../tmp/baton-bundle-z143Om/entry.ts
+// ../../../../../baton-bundle-iJZtjS/entry.ts
 import { execFileSync as execFileSync2 } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -7,6 +7,39 @@ import { pathToFileURL } from "node:url";
 
 // src/defaults/ticket-state.ts
 import { execFileSync } from "node:child_process";
+
+// src/defaults/tickets-markdown.ts
+function parseFrontmatter(text) {
+  const m = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text);
+  if (!m) return null;
+  const out = {};
+  const lines = m[1].split(/\r?\n/);
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const kv = /^([A-Za-z][A-Za-z0-9_-]*):\s*(.*)$/.exec(line);
+    if (!kv) continue;
+    const [, key, rest] = kv;
+    if (rest.trim() === "") {
+      const items = [];
+      while (i + 1 < lines.length && /^\s+-\s+/.test(lines[i + 1])) {
+        i++;
+        items.push(unquote(lines[i].replace(/^\s+-\s+/, "")));
+      }
+      out[key] = items;
+    } else if (/^\[.*\]$/.test(rest.trim())) {
+      out[key] = rest.trim().slice(1, -1).split(",").map(unquote).filter(Boolean);
+    } else {
+      out[key] = unquote(rest);
+    }
+  }
+  return out;
+}
+var unquote = (v) => {
+  const t = v.trim();
+  return /^(["']).*\1$/.test(t) && t.length >= 2 ? t.slice(1, -1) : t;
+};
+
+// src/defaults/ticket-state.ts
 var CLOSE_TIMEOUT_MS = 12e4;
 var GIT_NONINTERACTIVE_ENV = {
   GIT_TERMINAL_PROMPT: "0",
@@ -28,6 +61,10 @@ function bareTicketId(ticket) {
 
 // src/defaults/pr-close.ts
 function testsClose(ctx, result, run2 = exec) {
+  if (result?.tests === "ci") {
+    if (result.next !== "review" || typeof result.reached !== "string" || result.reached === "") throw new Error("the run-tests gate deferred to CI without suspending at its station");
+    return null;
+  }
   if (result?.tests !== "green" && result?.tests !== "red") {
     throw new Error(`the run-tests gate returned neither green nor red, got ${JSON.stringify(result?.tests)}`);
   }
@@ -100,7 +137,14 @@ function branchMatches(pattern, branch) {
 }
 var matchPatterns = (branchPatterns) => (branchPatterns?.length ? branchPatterns : [DEFAULT_BRANCH_PATTERN]).map((p) => p.replace(/\{repository\}/g, "*"));
 
-// ../../../../tmp/baton-bundle-z143Om/entry.ts
+// src/defaults/pr-verify.ts
+function ticketRepositories(text, reposMap) {
+  const fm = text == null ? null : parseFrontmatter(text);
+  const names = Array.isArray(fm?.repos) ? fm.repos : fm?.repos == null || fm.repos === "" ? [] : [fm.repos];
+  return names.map((r) => typeof r === "string" && /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(r) ? r : reposMap?.[r]).filter((r) => typeof r === "string" && r !== "");
+}
+
+// ../../../../../baton-bundle-iJZtjS/entry.ts
 var GIT_BOUND_MS = 12e4;
 var GIT_ENV = { "GIT_TERMINAL_PROMPT": "0", "GIT_SSH_COMMAND": "ssh -o BatchMode=yes -o ConnectTimeout=20" };
 var gitRun = (args, opts = {}) => execFileSync2("git", args, { encoding: "utf8", timeout: GIT_BOUND_MS, killSignal: "SIGKILL", env: { ...process.env, ...GIT_ENV }, stdio: ["ignore", "pipe", "pipe"], ...opts });
@@ -170,6 +214,18 @@ async function standard(ctx) {
   const id = bareTicketId(ctx.ticket);
   const wanted = matchPatterns([entry.branch_pattern ?? DEFAULT_BRANCH_PATTERN, entry.previous_branch_pattern].filter((p) => typeof p === "string" && p !== "")).map((p) => p.replace(/\{ticket\}/g, id));
   const branches = gitRun(["-C", ctx.checkout, "ls-remote", "--heads", "origin"]).split("\n").map((l) => l.split("	")[1] ?? "").filter((r) => r.startsWith("refs/heads/")).map((r) => r.slice("refs/heads/".length)).filter((br) => wanted.some((p) => branchMatches(p, br)));
+  if (branches.length === 0) {
+    let ticketText = null;
+    try {
+      ticketText = ctx.ticket?.file ? readFileSync(ctx.ticket.file, "utf8") : ctx.ticket?.path ? readFileSync(join(ctx.checkout, ctx.ticket.path), "utf8") : null;
+    } catch {
+    }
+    const siblings = ticketRepositories(ticketText, settings.repos);
+    if (siblings.length) {
+      if (process.env.BATON_VERBOSE) process.stderr.write("baton: create-pr/run-tests ticket " + ctx.ticket.id + ": no PR branch at home; the gate is the CI of " + siblings.join(", ") + "\n");
+      return { reached: station, next: "review", suspend: true, tests: "ci", repositories: siblings };
+    }
+  }
   if (branches.length !== 1) {
     throw new Error(branches.length ? "the run-tests gate tests one PR branch; " + id + " has " + branches.join(", ") + " in the home repository" : "no branch matching " + wanted.join(" or ") + " in the home repository for " + id + " \u2014 the gate tests the PR branch it can reach");
   }

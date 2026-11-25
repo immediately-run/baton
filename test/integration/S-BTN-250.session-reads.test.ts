@@ -14,7 +14,7 @@
 // Owner sessions do not exist yet (B-76): their branch is written and not reachable here.
 // Runs on both hosts.
 import { describe, it, expect, beforeEach } from 'vitest';
-import { adminSession, cutover, Git, keyCall, ORIGIN, rows, sessionCall, setAdminKeys, setClock, setPolicySigningKey, withCore } from '../helpers';
+import { adminSession, cutover, Git, keyCall, ORIGIN, rows, sessionCall, setAdminKeys, setClock, withCore } from '../helpers';
 import { makeKey, signedRequest, type TestKey } from '../lib/sshKeys';
 import { call as hostCall } from '#host';
 
@@ -43,7 +43,6 @@ beforeEach(async () => {
   opsOwner = await makeKey('ssh-ed25519', 'ops-owner');
   granted = await makeKey('ssh-ed25519', 'granted');
   await setAdminKeys(admin);
-  await setPolicySigningKey();
   expect((await keyCall(admin, '/v1/admin/repositories', {
     id: 'ops', github: 'immediately-run/ops', default_branch: 'main',
     sync_workflow: '.github/workflows/baton-sync.yml', mirror_workflow: '.github/workflows/baton-mirror.yml', owner_keys: [opsOwner.publicKey],
@@ -58,6 +57,7 @@ beforeEach(async () => {
 
 const READS = [
   '/v1/repositories/docs/board',
+  '/v1/repositories/docs/policy',
   '/v1/repositories/docs/blocked',
   '/v1/repositories/docs/stats',
   '/v1/repositories/docs/conditions',
@@ -80,12 +80,6 @@ describe('S-BTN-250 sessions read the repository reads (B-192)', () => {
       expect([path, viaKey.status]).toEqual([path, 200]);
       expect(viaSession.json).toEqual(viaKey.json);
     }
-    // The signed policy read carries a fresh signature each time; its fields are the key's.
-    const policy = await session('/v1/repositories/docs/policy');
-    expect(policy.status).toBe(200);
-    const { signature: _s, ...fields } = policy.json;
-    const { signature: _k, ...keyed } = (await read(docsOwner, '/v1/repositories/docs/policy')).json;
-    expect(fields).toEqual(keyed);
     // An administrator's session reads every live repository — the owner routes of one it
     // does not own among them — where its key signs no `/v1/owner/*` route (R-BTN-57).
     expect((await session('/v1/owner/ops/grants')).status).toBe(200);
@@ -110,6 +104,7 @@ describe('S-BTN-250 sessions read the repository reads (B-192)', () => {
     expect(refused(unowned)).toEqual([403, 'forbidden']);
     expect(unowned.json.message).toBe(absent.json.message);
     expect(refused(await read(granted, '/v1/repositories/ops/board'))).toEqual([403, 'forbidden']);
+    expect(refused(await read(granted, '/v1/repositories/ops/policy'))).toEqual([403, 'forbidden']);
     expect(refused(await read(docsOwner, '/v1/owner/ops/grants'))).toEqual([403, 'forbidden']);
     // Retired: as one never registered (R-BTN-47).
     await rows('UPDATE repositories SET retired_at = ? WHERE id = ?', T0, 'ops');

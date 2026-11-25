@@ -56,7 +56,7 @@ describe(`S-BTN-56 sync wants (${HOST})`, () => {
     expect((await board(await observe(), b, a, true)).status).toBe(409);
     await withCore((c) => {
       c.store.exec("UPDATE board_head SET posted_sha = NULL WHERE repository_id = 'docs'");
-      c.store.exec('DELETE FROM _baton_migrations WHERE id = 68');
+      c.store.exec('DELETE FROM _baton_migrations WHERE id = 84');
       c.migrate();
     });
     expect(await wanted()).toEqual({ wanted: false, head_sha: b });

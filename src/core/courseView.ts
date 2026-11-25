@@ -12,6 +12,7 @@
 // The counts are over every ticket of the course, never over the page: one read of the
 // course's tickets (id, station, queued leg and what holds it) feeds them and the page's order;
 // the page's own detail is then read for its 100 ids alone.
+import { liveRunnerSql } from './runnerLiveness';
 import type { BatonCore } from './baton';
 import type { Row } from './ports';
 import { localOf as localId } from './validate';
@@ -76,7 +77,7 @@ export function courseView(c: ViewCtx, repo: string, course: string, opts: { sin
   // R-BTN-48: the runners whose heartbeat names this course for the repository, reaped ones
   // left out, and how many of them hold a standing lease.
   const fleet = c.sql<{ declaring: number; alive: number | null }>(
-    `SELECT COUNT(*) AS declaring, SUM(? - w.last_seen_at < w.lease_timeout_ms) AS alive
+    `SELECT COUNT(*) AS declaring, SUM(${liveRunnerSql('w.')}) AS alive
      FROM runner_courses f JOIN runners w ON w.id = f.runner_id
      WHERE f.repository_id = ? AND f.course_id = ? AND w.reaped_at IS NULL`, now, repo, course)[0];
 

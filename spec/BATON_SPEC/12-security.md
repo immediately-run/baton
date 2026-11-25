@@ -35,7 +35,7 @@ stated once, in the rule it cites.
 | Repository owner | `/v1/owner/{repository}/*`; the repository's reads and leg runs | an owner key, SSH-signed or API key | R-BTN-58 |
 | Human-only key | `POST /v1/human-keys`; `POST`, `DELETE …/attestations` as writer `human`; as an owner, or as a break-glass line on every repository it satisfies (R-BTN-188), the owner's routes | an SSH key registered `human_only` (R-BTN-185), on an owner key or a key of no other role | open human gates (R-BTN-185), `human-key.add` and `human-key.revoke` among them; as an owner, R-BTN-58; never through a session, which is `owner` |
 | MCP key (a delegated key; proposed, [people and dashboard, §2](../proposals/people-and-dashboard.md#2-mcp)) | `POST /v1/mcp` only | bearer `bmcp_…` | as `owner` on one repository, narrowed to the ids listed at minting: R-BTN-186, R-BTN-130 |
-| Public | `POST /v1/login`, the dashboard shell's three assets — its page, its one script, its one stylesheet | none | start a sign-in |
+| Public | `POST /v1/login`, the dashboard shell's three assets — its page, its one script, its one stylesheet | none, or on `POST /v1/login` a verified Cloudflare Access assertion (R-BTN-155) | start a sign-in |
 
 The repository reads (`GET /v1/repositories/{repository}/…`) are open to any key granted on the
 repository, its owners and administrators, except where a route's rule narrows them.
@@ -48,7 +48,7 @@ repository, its owners and administrators, except where a route's rule narrows t
   `grants`, `mcp_keys` and `settings`, and the bars in force or scheduled, R-BTN-146, each grant also naming
   the `other_repositories` its key holds); and
   `GET /v1/repositories/{repository}/board` (the repository reads' principals: the repository,
-  its `ready` tickets and `ready_by_tier`, `granted_capabilities`, the repository's live claims
+  its `ready` tickets, `granted_capabilities`, the repository's live claims
   as `holders` — each with its holder and when its lease ends (null for a legacy claim) — and `server_time`). A key outside the route's role is refused as this
   section says — `forbidden`, or `unauthenticated` for a key Baton does not know. The CLI's
   `baton admin repo list`, `baton owner grant list <repository>` and `baton repo board
@@ -180,8 +180,7 @@ Every value below is validated on write; a value over its cap is refused `invali
   - **Every session request.** Any request a dashboard session authorizes, reads included,
     carries an `Origin` equal to the origin when it carries one, and `Sec-Fetch-Site:
     same-origin` when it carries that header, else `forbidden`.
-  - **Sessions.** `/v1/ui/*` requires a dashboard session minted from an administrator key
-    (R-BTN-155). Outside `/v1/ui/*` a session authenticates only the `GET`s §14 lists it on —
+  - **Sessions.** `/v1/ui/*` requires a dashboard session of an administrator key (R-BTN-155). Outside `/v1/ui/*` a session authenticates only the `GET`s §14 lists it on —
     the reads it shares with the keys — and no write.
     Cloudflare Access may stand in front of the dashboard; Baton never requires it and never reads
     its cookie. Baton verifies the assertion Access forwards, and that assertion alone
@@ -254,7 +253,7 @@ Every value below is validated on write; a value over its cap is refused `invali
   other permission; its private key is written to `--key-out` on the delivering runner's host,
   never to the secret sink, and its App id to the instance setting `check_app_id` (`PUT
   /v1/admin/settings`, §13.1), one per tenant as the App is, which the sync is handed with its
-  observation, the policy read answers, and R-BTN-115's read-back and `baton repo protect --print`
+  observation, and R-BTN-115's read-back and `baton repo protect --print`
   read. An organisation owner installs it on each repository whose `checks` setting names a course,
   never on "All repositories" (R-BTN-115). Branch protection names it,
   never the dispatch App (R-BTN-115).
@@ -347,7 +346,7 @@ trusted runners or of the protection checker; a compromised forge; and a comprom
     | `outbox.source` — `{deliverers}`: which grant roles may deliver the source kinds, from `runner` alone | `{deliverers: [runner]}` | `{deliverers: []}` | | Baton | R-BTN-171 |
     | `inputs.board` — who may post the board, from `sync-key`, `ci-identity`, `machine` | all three | `[sync-key, ci-identity]` | | Baton | R-BTN-93, R-BTN-102, R-BTN-187 |
     | `repos.unlisted` — whether a home that lists no `code_repos` reaches its tickets' `repos:` entries by name: `by-name` or `none`; a stored version naming none reads as `by-name` | `by-name` | `none` | | Baton, the sync | R-BTN-140 |
-    | `attestations` — `{<type>: writers}`: whose attestations about work count; an absent type admits no writer | each `std:` type's standard writer (R-BTN-181), `runner` for the holder's `std:arrival@1` and a deliverer's `std:effect@1`, `sync` for the `std:git.*` types, `std:arrival@1` and `std:decision@1` (R-BTN-191); `std:checks@1` absent until the owner names a check-runner's key (R-BTN-114) | as `cooperative`, except that `std:arrival@1` admits the fact reader's `service:` key once the owner names it (R-BTN-192) and never `sync`, and `std:decision@1` admits `human` alone | | Baton, trusted runners | R-BTN-181 |
+    | `attestations` — `{<type>: writers}`: whose attestations about work count; an absent type admits no writer, except `std:evidence@1`, which a policy stored before it existed admits from `sync` (R-BTN-203) | each `std:` type's standard writer (R-BTN-181), `runner` for the holder's `std:arrival@1` and a deliverer's `std:effect@1`, `sync` for the `std:git.*` types, `std:arrival@1`, `std:evidence@1` and `std:decision@1` (R-BTN-191); `std:checks@1` absent until the owner names a check-runner's key (R-BTN-114) | as `cooperative`, except that `std:arrival@1` admits the fact reader's `service:` key once the owner names it (R-BTN-192) and never `sync`, and `std:decision@1` admits `human` alone | | Baton, trusted runners | R-BTN-181 |
     | `readings` — `{<resource> \| "*": {writers}}`: whose readings count for this repository; `*` covers every resource not listed; an absent entry admits no writer | `{"*": {writers: every writer R-BTN-76 lets report}}` | as `cooperative` | | Baton | R-BTN-76, R-BTN-181 |
     | `floors` — the guarantees no change to this policy may break | no value | no value | no value | Baton | R-BTN-189 |
 
@@ -381,7 +380,7 @@ trusted runners or of the protection checker; a compromised forge; and a comprom
       matches an `owner` entry on every repository and no other;
     - `human`: any `human_only` key that is an owner of the repository and meets `human_key`
       (R-BTN-185);
-    - `key:<fingerprint>`: that one key, and a dashboard session it minted when the key is not
+    - `key:<fingerprint>`: that one key, and a dashboard session of that key (R-BTN-155) when the key is not
       `human_only`, while it is an owner of the repository, and meeting `human_key` when it is a
       `human_only` key.
 
@@ -445,8 +444,10 @@ trusted runners or of the protection checker; a compromised forge; and a comprom
     itself, never by asking runners.
   - **The read.** `GET /v1/repositories/{repository}/policy` answers owners, administrators and
     keys granted on the repository with `{repository, version, hash, policy, guarantees: {<name>:
-    held | broken}, floors, at}`. A trusted runner and a deployment's audit read the same route,
-    each with its own key.
+    held | broken}, floors, check_app_id, at, valid_until}`. `check_app_id` is the instance
+    setting (§12.7). The response is unsigned; `valid_until` equals `at` for CLI 0.1.3 and
+    0.1.4 compatibility, not as a validity guarantee. A trusted runner and a deployment's
+    audit read the same route, each with its own key.
 - **R-BTN-180 (roles, domains and protection).**
   - **Every grant has a role and a domain.** The role is `runner` or `trusted-runner` (R-BTN-182),
     and a `trusted-runner` grant may further be marked the repository's protection checker
@@ -540,7 +541,9 @@ trusted runners or of the protection checker; a compromised forge; and a comprom
     entry admitting `sync` is an answer in git, one admitting only `human` or `owner` is an
     answer in Baton (R-BTN-116). An attestation of a type Baton does not read is kept as evidence
     and recorded `arrival-unapplied` (R-BTN-39).
-  - The sync's other types, the holder's `std:arrival@1` and a deliverer's `std:effect@1` are
+  - The sync's `std:arrival@1` for a fact leg and its `std:evidence@1` are R-BTN-203's, admitted
+    only on a board a sync key or the CI identity posted. Its other
+    types, the holder's `std:arrival@1` and a deliverer's `std:effect@1` are
     [proposed](../proposals/security.md).
 - **R-BTN-192 (the fact reader).** Where the policy admits no `sync` writer for `std:arrival@1`,
   a fact leg's arrival comes from the fact reader: a trusted runner whose `service:` key the
@@ -571,8 +574,10 @@ trusted runners or of the protection checker; a compromised forge; and a comprom
     shows before a signature, are [proposed](../proposals/security.md) (B-136). Under `any` a
     human-only list is a custody promise: Baton cannot tell a key an agent session can use, so
     no guarantee claims it as a human gate (`human-gates`, R-BTN-189).
+  - Until FIDO attestation verification is built, no key, including a break-glass line, meets
+    the repository's `hardware` minimum. A stored attestation marker alone is not evidence.
   - **The owner's agent** is a principal (§12.1): an owner key not `human_only`. It acts as
-    `owner`, never as `human`. A dashboard session minted by a `human_only` key is an owner's
+    `owner`, never as `human`. A dashboard session of a `human_only` key is an owner's
     session too: no session, and no OAuth approval by one, satisfies a human-only `approvers.*`
     list.
 - **R-BTN-186 (authority by credential, not channel).** An action is available on every surface (the

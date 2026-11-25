@@ -26,14 +26,14 @@ One line per decision in force; the reasoning and the rejected alternatives in f
 - Chose a grant's role and a domain label as the whole of a grant's trust, over a separate trust level, a model family or a separate-domain guarantee (R-BTN-180, R-BTN-183).
 - Chose to state that review is no security gate, `independent-review` requiring two reviews from distinct domains and nothing about model families (R-BTN-183, R-BTN-189).
 - Chose trusted runners that hold the only credential for a sensitive leg's action, re-check its attestations against Baton's record and trust Baton (R-BTN-182, R-BTN-189).
-- Chose that ticket `tier` is not a protected input, while no runner above the VM level serves a repository that runners below it push (R-BTN-184).
+- Chose capabilities (§6.6 rule 4, R-BTN-121, R-BTN-174) over an ordered tier ladder to send a ticket to particular runners.
 - Chose provenance alone, each ticket served with who last pushed its body, over a `control-changed` notice (R-BTN-194, R-BTN-66).
 - Chose to verify no commit signature anywhere: who may land a path is the policy's, and who wrote one is the forge's pusher record (R-BTN-66, R-BTN-133, R-BTN-194, R-BTN-107).
 - Chose to make a break-glass change visible as an `out-of-course` finding, refusing nothing, and only where the policy protects control paths (§12.9).
 - Chose the policy knob `repos.unlisted` over one rule for every repository: a `cooperative` home resolves `repos:` by name, a `protected` one reaches only its list (R-BTN-140, R-BTN-188).
 - Chose to run checks only on the repository's own branches over a sandbox for forks' code (R-BTN-114).
 - Chose to answer a `baton.*` condition only through Baton's own authenticated surfaces, never a delegated key, and to count from Baton's own traversal record (R-BTN-163, R-BTN-63).
-- Chose no core default timers per tier: timers are the course's (R-BTN-167).
+- Chose no core default timers: timers are the course's (R-BTN-167).
 - Chose to keep dependencies within one repository (R-BTN-120).
 - Chose to leave reviewer-independence seats and tags as cooperative checks (R-BTN-60, R-BTN-66).
 - Chose a Cloudflare Durable Object over SQLite on a home server (§2).
@@ -146,7 +146,7 @@ One line per decision in force; the reasoning and the rejected alternatives in f
 - Chose a leg that waits on an effect git or the forge shows over waiting on "sent" (R-BTN-116).
 - Chose check courses whose verdict is a command's exit status, the forge's own check runs being enough for `merge.checks: required` (R-BTN-114, R-BTN-153, R-BTN-183).
 - Chose either an SSH key or an API key for every administrator, owner and runner, over one kind per role (R-BTN-13, R-BTN-159).
-- Chose administrator keys anchored in the deployment's secret and owner and runner keys in SQLite behind a signed API, over keys in git or Cloudflare Access as identity (R-BTN-57).
+- Chose administrator keys anchored in the deployment's secret and owner and runner keys in SQLite behind a signed API, over keys in git or Cloudflare Access as identity; Access only binds an email to a key's session (R-BTN-57, R-BTN-155).
 - Chose dashboard sessions as one `session` principal carrying its key's role, scoped to what that key still owns, over an administrator-only dashboard (R-BTN-155, R-BTN-129).
 - Chose to keep a ticket's holds, cancel, attempts and backoff when it leaves the board and to restore them if its id returns (R-BTN-12).
 - Chose capabilities on each repository's grant over capabilities on the key (R-BTN-58).
@@ -193,3 +193,5 @@ One line per decision in force; the reasoning and the rejected alternatives in f
 - Chose a launcher outside Baton that ranks `launch-candidates` and starts sessions by its host's own means, over launches queued in Baton's outbox (R-BTN-201, R-BTN-45, R-BTN-98, R-BTN-107).
 - Chose a runner-side queue of the host user's orders, run without a claim only while Baton is unreachable and reported through an ordinary claim on its return, over a git lock beside it or runners idle through an outage (R-BTN-202, R-BTN-193, R-BTN-72).
 - Chose proposal pages for unbuilt designs, the course's own pages for a shipped course's contract, and this specification for the reference runner and the CLI ([the simplification review](../../docs/review/spec-simplification-review-2026-11-19.mdx)).
+- Chose a Cloudflare Access sign-in by an explicit click, bound per email to a key by the deployment's secret, over a terminal-minted link for every sign-in, accepting the Access configuration as a second root of trust and the risk of an agent driving a signed-in browser (R-BTN-155, R-BTN-57).
+- Chose an open world: Baton detects moves made outside it and places the ticket, gating only its own state, with strictness left to the forge — each course modelling outside moves as fact legs and a reconcile leg in its own graph, found by the sync on its own key's board and applied by Baton — over Baton trying to keep tickets on the course, a separate reconciliation course, or the server inferring progress (R-BTN-203, R-BTN-39, R-BTN-69, R-BTN-35).
