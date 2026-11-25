@@ -14,7 +14,7 @@ import { type ClaimPreference, checkAccept, checkAdvance, checkClaim, checkConfi
 import { declaredOutputFault, pointerReach, ticketInputs } from './contracts';
 import { pointerAllowed } from './contractPointers';
 import { GIT_EVIDENCE_TYPE, type PostedAttestation } from './board';
-import { ceilingIn, repositoryOf, transcriptReposOf } from './registry';
+import { repositoryOf, transcriptReposOf } from './registry';
 import { GATE_CODES, gatesFor, type GateContext, type GateLeg, type GateTicket, type GateVerdict, type Phase } from './gates';
 import { extendsPath, graphOf, leaves, resolveLeg, resolveStation, runsOf, type Graph, type Step } from './graph';
 import { baseChain, PATTERN_STEPS_MAX, unboundedAt, validate, type Schema } from '../shared/schema.mjs';
