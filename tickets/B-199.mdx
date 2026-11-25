@@ -3,7 +3,7 @@ title: "B-199 — Credentials: /grants, /owners, /tokens, /mcp-keys, /sync-keys 
 id: B-199
 project: baton-ui-v2
 status: available
-updated: 2026-11-09
+updated: 2026-11-23
 repos:
   - baton
 tags:
@@ -56,7 +56,7 @@ The §14 row first, then the code (`admin.ts`'s `grantsView`).
    name, minter, actions, expires_at, last_used_at, client_host, client_addr}]` (§14 names the
    field and the code lacks it; the keys exist from B-25, in this ticket's closure), `tokens:
    [{id, role, capabilities,
-   max_tier, expires_at, uses_left, registered: [credential_id]}]` (R-BTN-117), `sync_keys:
+   ~~max_tier,~~ expires_at, uses_left, registered: [credential_id]}]` (R-BTN-117), `sync_keys:
    [{fingerprint, role: sync | mirror, added_by, added_at}]` (R-BTN-93), ~~`check_runners:
    [{fingerprint, name, capabilities, max_tier}]` (R-BTN-114),~~ `consents: [{home, consented,
    by, at, withdrawn_at}]` (R-BTN-140: each home that lists this repository in `code_repos`),
@@ -70,12 +70,12 @@ The §14 row first, then the code (`admin.ts`'s `grantsView`).
    <repository> --name <name> […]`; `baton owner sync-key add <repository> <pub> --role
    sync|mirror`~~; `baton owner check-runner add <repository> <pub> --name <hostname> […]`~~) as
    text:
-   - `/grants`: fingerprint (short, full on focus), hostname, label, capabilities as chips, max
-     tier, role and domain, checker, sync, pending (marked), set by, granted by and at, other
+   - `/grants`: fingerprint (short, full on focus), hostname, label, capabilities as chips, ~~max
+     tier,~~ role and domain, checker, sync, pending (marked), set by, granted by and at, other
      repositories;
    - `/owners`: fingerprint, kind, human-only, added at; the `seed_owners` notice where
      `repo.list` flags the repository (R-BTN-58);
-   - `/tokens`: id, role, capabilities, max tier, expiry, uses left, what it registered;
+   - `/tokens`: id, role, capabilities, ~~max tier,~~ expiry, uses left, what it registered;
    - `/mcp-keys`: name, minter, actions (each id), expiry, last used, client host and address;
    - `/sync-keys`: fingerprint, role, added by and at;
    - ~~`/check-runners`: fingerprint, name, capabilities, max tier.~~
@@ -131,3 +131,5 @@ _2026-11-09 — revised after the second review: `mcp_keys` (with `id`) listed a
 additions, since `grantsView` does not answer it today._
 
 _(2026-11-20: the owner cut the check-runner on 2026-11-19 (`docs/review/spec-simplification-review-2026-11-19.mdx`, ruling 5; the spec simplification of that date, baton#299), and B-290 removes what is built of it, the check-runners screen row included. The `check_runners` field, the `check-runner add` command line, the `/check-runners` screen and the fixture's check-runner are struck: five screens remain, where the title and the description say six and name check-runners.)_
+
+_2026-11-23 — tiers retired (spec/retire-tiers: [BATON_SPEC §6.6](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-6) gate 5, [R-BTN-66](../spec/BATON_SPEC/01-what-baton-is.md#sec-1)): the struck tier clauses are gone from the spec — no ticket tier, runner ceiling, grant `max_tier`, ladder, `ready_by_tier` or `?tier=`. Build the rest without them._

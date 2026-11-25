@@ -7,9 +7,9 @@
 // sync key. Each act is an `admin` event; a bar change also dispatches the repository's sync.
 import { BatonError, PENDING_COOKIE, SESSION_COOKIE } from './http';
 import { logEvent, randomHex } from './db';
-import { API_KEY_FINGERPRINT, KEY_FINGERPRINT, parseApiKeyLine, parseSshKey, verifyNamespacedSignature, type SshKey } from './auth';
+import { adminFingerprints, API_KEY_FINGERPRINT, KEY_FINGERPRINT, parseApiKeyLine, parseSshKey, sshPublicLine, verifyNamespacedSignature, type SshKey } from './auth';
 import { capabilitiesOf } from '../shared/vocabulary.mjs';
-import { COURSE_ID, HOSTNAME, INSTANCE_NAME, TAG, checkAsks, checkRepositoryId, HOLDING_TYPE, MAX_CLAIMS_CAP } from './validate';
+import { COURSE_ID, HOSTNAME, INSTANCE_NAME, SESSION_TOKEN, TAG, checkAsks, checkDeliverInteractions, checkLogin, checkRepositoryId, HOLDING_TYPE, MAX_CLAIMS_CAP, parseAccessIdentities } from './validate';
 import { REMIND_AFTER_S, type Notices } from './notices';
 import { parseTranscriptRepo } from './links';
 import { checkCodeRepos, checkPushers, codeReposOf, crossHostEntries, homeForgeOf, pushersOf, writeCodeRepos, type CodeRepo } from './codeRepos';
@@ -38,8 +38,6 @@ const CHECKS_MAX = 200;
 const LINK_FIELDS = ['remote', 'web_base', 'ci_identity', 'sync_workflow', 'mirror_workflow'] as const;
 /** A capability or role name, as a heartbeat declares one. */
 const CAPABILITY = /^[a-z0-9][a-z0-9-]{0,63}$/;
-/** A login link's token and a session's value: 32 random bytes, hex. */
-const TOKEN = /^[0-9a-f]{64}$/;
 const LABEL = /^[A-Za-z0-9][A-Za-z0-9 ._:@/-]{0,99}$/;
 
 export interface RequiredBar {
@@ -94,7 +92,6 @@ const only = (b: Record<string, unknown>, keys: string[], at: string) => {
   for (const k of Object.keys(b)) if (!keys.includes(k)) bad(`${at}.${k}`, 'unknown field');
 };
 /** A key's stored line: its type and base64 only — a comment is for people, never stored. */
-const lineOf = (key: SshKey, text: string) => `${key.type} ${text.trim().split(/\s+/)[1]}`;
 
 /** A setting's value as the settings event carries it: the JSON settings parse back to their
  *  value; `scope_policy`'s bare word (B-134) is its own value, not JSON. */
@@ -134,23 +131,24 @@ export class Admin {
     registry: Registry;
     /** BATON_ADMIN_KEYS' lines, read on every call (a key that leaves ends its sessions). */
     adminKeys: () => string[];
+    accessIdentities: () => string;
     origin: string;
     /** R-BTN-67: a bar change dispatches the repository's sync, after commit. */
     dispatchSync: (repository: string) => void;
     /** R-BTN-75, R-BTN-76: a grant made, changed or revoked moves the fleet's counts. */
-    fleetChanged?: () => void;
+    fleetChanged: () => void;
     /** R-BTN-47 (B-173): retirement reaps the repository's active claims as an administrator's
      *  force-reap does, inside the retiring transaction. */
-    reapForRetire?: (repository: string, actor: string) => void;
+    reapForRetire: (repository: string, actor: string) => void;
     /** R-BTN-47 (B-173): retirement closes the repository's still-open conditions inside the
      *  same transaction, after the reaps — a `suspend` above all, which no run's end closes. */
-    conditionsForRetire?: (repository: string) => void;
+    conditionsForRetire: (repository: string) => void;
     /** R-BTN-80: a courier registered or revoked queues or closes its notices. */
-    notices?: Notices;
+    notices: Pick<Notices, 'registered' | 'revoked' | 'couriers'>;
     /** §12.8 (B-145): the repository policies — the approver lists the owner routes read. */
-    policies?: Policies;
+    policies: Pick<Policies, 'current' | 'facts' | 'entryMatches' | 'listSatisfiable' | 'floors'>;
     /** R-BTN-185 (B-145): BATON_HUMAN_KEYS' fingerprints (break-glass), parsed per call. */
-    humanBreakGlass?: () => Promise<Map<string, string>>;
+    humanBreakGlass: () => Promise<Map<string, string>>;
   }) {}
 
   private rows<T = Record<string, unknown>>(q: string, ...p: unknown[]): T[] {
@@ -170,23 +168,8 @@ export class Admin {
   // ── principals ──────────────────────────────────────────────────────────────────────────
 
   /** The administrators' keys by fingerprint (R-BTN-57). An unparsable line is no key. */
-  async adminFingerprints(): Promise<Map<string, string>> {
-    const out = new Map<string, string>();
-    for (const line of this.c.adminKeys()) {
-      // An API key's public line (R-BTN-159) or an OpenSSH public key.
-      const api = parseApiKeyLine(line);
-      if (api) {
-        out.set(api.fingerprint, api.line);
-        continue;
-      }
-      try {
-        const k = await parseSshKey(line);
-        out.set(k.fingerprint, lineOf(k, line));
-      } catch {
-        // A line that is no key admits nobody.
-      }
-    }
-    return out;
+  adminFingerprints(): Promise<Map<string, string>> {
+    return adminFingerprints(this.c.adminKeys());
   }
 
   /** An owner key's line by fingerprint, if it owns any live repository (R-BTN-58, R-BTN-47: a
@@ -268,7 +251,7 @@ export class Admin {
 
   /** BATON_HUMAN_KEYS' fingerprints alone — the break-glass set (R-BTN-185). */
   private async breakGlassSet(): Promise<Set<string>> {
-    return new Set(this.c.humanBreakGlass ? (await this.c.humanBreakGlass()).keys() : []);
+    return new Set((await this.c.humanBreakGlass()).keys());
   }
 
   /** B-127: the repository's owner signing keys — its owners' keys the human-only register
@@ -297,7 +280,6 @@ export class Admin {
    *  registered yet (B-124), and its class will answer before this runs. */
   private requireMembersApprover(repository: string, fingerprint: string, by: 'owner' | 'admin', breakGlass: ReadonlySet<string>): void {
     const policies = this.c.policies;
-    if (!policies) return; // no policy store wired (a unit test's Admin)
     const cur = policies.current(repository);
     if (!cur) return;
     const facts = policies.facts(repository, breakGlass);
@@ -320,7 +302,6 @@ export class Admin {
    *  facts passed are the post-removal ones. */
   private refuseUnsatisfiableLists(repository: string, facts: ApproverFacts): void {
     const policies = this.c.policies;
-    if (!policies) return;
     const cur = policies.current(repository);
     if (!cur) return;
     const live = (list: ApproverEntry[]) => policies.listSatisfiable(list, facts, cur.policy.human_key) || list.every((e) => e === 'owner');
@@ -339,8 +320,7 @@ export class Admin {
   /** The approver facts of `repository` with only `remaining` owners counted. */
   private async factsWithout(repository: string, remaining: string[] | null): Promise<ApproverFacts> {
     const policies = this.c.policies;
-    const breakGlass = this.c.humanBreakGlass ? new Set((await this.c.humanBreakGlass()).keys()) : new Set<string>();
-    if (!policies) return { owners: new Map(), humans: new Set(breakGlass), breakGlass, humanOwners: new Set() };
+    const breakGlass = await this.breakGlassSet();
     const facts = policies.facts(repository, breakGlass);
     if (remaining == null) return facts;
     const owners = new Map([...facts.owners].filter(([fp]) => remaining.includes(fp)));
@@ -511,10 +491,10 @@ export class Admin {
       this.exec('UPDATE sync_keys SET revoked_at = ? WHERE repository_id = ? AND revoked_at IS NULL', now, id);
       this.exec('UPDATE runner_grants SET revoked_at = ? WHERE repository_id = ? AND revoked_at IS NULL', now, id);
       // R-BTN-19: each active claim on its tickets, as an administrator's force-reap reaps one.
-      this.c.reapForRetire?.(id, actor);
+      this.c.reapForRetire(id, actor);
       // B-234's store (R-BTN-160): the reaps above have ended its runs, so their open
       // `interact`s are closed; the `suspend`s still open close here (R-BTN-47, B-173).
-      this.c.conditionsForRetire?.(id);
+      this.c.conditionsForRetire(id);
       // R-BTN-94, R-BTN-73, R-BTN-77: its wants, its webhook stamps and windows, its trigger's.
       this.exec('DELETE FROM webhook_dispatch WHERE repository_id = ?', id);
       this.exec('DELETE FROM webhook_syncs WHERE repository_id = ?', id);
@@ -527,7 +507,7 @@ export class Admin {
       }
       this.event(actor, { act: 'repository-retired', repository: id, github: known.github }, id);
       // The fleet's counts read the grants and the instance lists (R-BTN-75, R-BTN-76).
-      this.c.fleetChanged?.();
+      this.c.fleetChanged();
     });
   }
 
@@ -629,12 +609,12 @@ export class Admin {
       changed += this.changed();
       // A courier key's registrations go with it, and its notices close (R-BTN-80).
       this.exec('DELETE FROM couriers WHERE credential_id = ?', fingerprint);
-      this.c.notices?.revoked(fingerprint, null);
+      this.c.notices.revoked(fingerprint, null);
       if (!changed && !this.rows('SELECT 1 FROM credentials WHERE id = ? UNION SELECT 1 FROM sync_keys WHERE fingerprint = ? UNION SELECT 1 FROM repository_owners WHERE fingerprint = ?', fingerprint, fingerprint, fingerprint).length) {
         throw new BatonError('not-found', 'no key with that fingerprint');
       }
       this.event(actor, { act: 'key-revoked', key: fingerprint }, null);
-      this.c.fleetChanged?.();
+      this.c.fleetChanged();
       return { ok: true };
     });
   }
@@ -652,40 +632,72 @@ export class Admin {
     return { url: `${this.c.origin}/login#${token}` };
   }
 
-  /** `POST /v1/login {token}`: marks the link used and opens a session, returning the cookie's
-   *  value — only while the key that minted the link is still an administrator. */
-  async login(body: unknown): Promise<string> {
-    const token = isObj(body) && typeof body.token === 'string' && TOKEN.test(body.token) ? body.token : bad('token', 'must be the link’s token');
-    const hash = await sha256Hex(token);
-    const admins = await this.adminFingerprints();
+  /** `POST /v1/login`: exchange a one-time link or a verified, bound Access email for its
+   *  administrator key's session. Only the front supplies the email. */
+  async login(body: unknown, email: string | null): Promise<string> {
+    const login = checkLogin(body);
+    const identities = 'access' in login ? parseAccessIdentities(this.c.accessIdentities()) : null;
+    const fingerprint = email == null ? undefined : identities?.get(email);
+    const hash = 'token' in login ? await sha256Hex(login.token) : null;
+    const emailHash = identities && email != null ? await sha256Hex(email) : null;
     const value = randomHex(32);
     const id = await sha256Hex(value);
+    const admins = await this.adminFingerprints();
     return this.c.store.transaction(() => {
       const now = this.c.now();
-      const link = this.rows<{ admin_key: string; expires_at: number; used_at: number | null }>('SELECT admin_key, expires_at, used_at FROM login_links WHERE token_hash = ?', hash)[0];
-      if (!link || link.used_at != null || link.expires_at <= now || !admins.has(link.admin_key)) throw new BatonError('unauthenticated', 'the link is used, expired or unknown');
-      this.exec('UPDATE login_links SET used_at = ? WHERE token_hash = ?', now, hash);
+      let key: string;
+      if (hash !== null) {
+        const link = this.rows<{ admin_key: string; expires_at: number; used_at: number | null }>('SELECT admin_key, expires_at, used_at FROM login_links WHERE token_hash = ?', hash)[0];
+        if (!link || link.used_at != null || link.expires_at <= now || !admins.has(link.admin_key)) throw new BatonError('unauthenticated', 'the link is used, expired or unknown');
+        this.exec('UPDATE login_links SET used_at = ? WHERE token_hash = ?', now, hash);
+        key = link.admin_key;
+      } else {
+        if (!fingerprint || !admins.has(fingerprint)) throw new BatonError('unauthenticated', 'no verified Access email bound to an administrator key', { reason: 'not-bound' });
+        key = fingerprint;
+        this.event(`admin:${key}`, { act: 'login', via: 'access', email_sha256: emailHash }, null);
+      }
       this.exec('DELETE FROM dashboard_sessions WHERE expires_at < ?', now - SESSION_MS);
-      this.exec('INSERT INTO dashboard_sessions (id_hash, admin_key, created_at, expires_at) VALUES (?, ?, ?, ?)', id, link.admin_key, now, now + SESSION_MS);
+      this.exec('INSERT INTO dashboard_sessions (id_hash, admin_key, access_email_hash, created_at, expires_at) VALUES (?, ?, ?, ?, ?)', id, key, emailHash, now, now + SESSION_MS);
       return value;
     });
   }
 
-  /** The administrator a dashboard session cookie stands for, or null: a live, unrevoked session
-   *  whose key is still in BATON_ADMIN_KEYS — checked on every request. */
+  /** Current Access bindings indexed by hash, never by a stored email. Invalid or unreadable
+   *  bindings bind nobody; link sessions need not consult them at all. */
+  async accessFingerprints(): Promise<Map<string, string>> {
+    let identities: Map<string, string>;
+    try {
+      identities = parseAccessIdentities(this.c.accessIdentities());
+    } catch (e) {
+      if (!(e instanceof BatonError) || e.code !== 'unavailable') throw e;
+      return new Map();
+    }
+    return new Map(await Promise.all([...identities].map(async ([email, key]) => [await sha256Hex(email), key] as const)));
+  }
+
+  /** The administrator a dashboard session cookie stands for, or null. A bound session
+   *  checks its key and its Access line on every request, not the original JWT. */
   async session(value: string | null): Promise<string | null> {
-    if (!value || !TOKEN.test(value)) return null;
+    if (!value || !SESSION_TOKEN.test(value)) return null;
     const id = await sha256Hex(value);
-    const s = this.rows<{ admin_key: string; expires_at: number; revoked_at: number | null }>('SELECT admin_key, expires_at, revoked_at FROM dashboard_sessions WHERE id_hash = ?', id)[0];
+    const s = this.rows<{ admin_key: string; access_email_hash: string | null; expires_at: number; revoked_at: number | null }>('SELECT admin_key, access_email_hash, expires_at, revoked_at FROM dashboard_sessions WHERE id_hash = ?', id)[0];
     if (!s || s.revoked_at != null || s.expires_at <= this.c.now()) return null;
-    return (await this.adminFingerprints()).has(s.admin_key) ? s.admin_key : null;
+    const admin = (await this.adminFingerprints()).has(s.admin_key);
+    if (s.access_email_hash === null) return admin ? s.admin_key : null;
+    if (admin && (await this.accessFingerprints()).get(s.access_email_hash) === s.admin_key) {
+      // Hashing the bindings can yield to logout; recheck the row before authorizing.
+      return this.rows('SELECT 1 FROM dashboard_sessions WHERE id_hash = ? AND revoked_at IS NULL AND expires_at > ?', id, this.c.now()).length
+        ? s.admin_key : null;
+    }
+    this.exec('UPDATE dashboard_sessions SET revoked_at = ? WHERE id_hash = ? AND revoked_at IS NULL', this.c.now(), id);
+    return null;
   }
 
   /** `POST /v1/ui/logout` (`ui.logout`, R-BTN-155; B-206): ends the caller's own session — its
    *  row is marked revoked, so the cookie's value authorizes nothing from this request on. A
    *  value that names no live row ends nothing; the caller was authorized before this. */
   async endSession(value: string | null): Promise<void> {
-    if (!value || !TOKEN.test(value)) return;
+    if (!value || !SESSION_TOKEN.test(value)) return;
     const id = await sha256Hex(value);
     this.c.store.transaction(() => {
       const s = this.rows<{ admin_key: string }>('SELECT admin_key FROM dashboard_sessions WHERE id_hash = ? AND revoked_at IS NULL', id)[0];
@@ -705,7 +717,8 @@ export class Admin {
   async grant(actor: string, repository: string, body: unknown, by: 'owner' | 'admin') {
     if (!isObj(body)) bad('body', 'must be a JSON object');
     const b = body as Record<string, unknown>;
-    only(b, by === 'admin' ? ['repository', 'public_key', 'hostname', 'label', 'capabilities', 'max_tier', 'max_claims'] : ['public_key', 'hostname', 'label', 'capabilities', 'max_tier', 'max_claims'], 'body');
+    only(b, ['public_key', 'hostname', 'label', 'capabilities', 'max_tier', 'max_claims', 'deliver_interactions', ...(by === 'admin' ? ['repository'] : [])], 'body');
+    const deliverInteractions = checkDeliverInteractions(b.deliver_interactions);
     const repo = this.c.registry.get(repository);
     if (!repo || repo.retired_at != null) throw new BatonError('not-found', `${repository} is not registered`);
     const key = await this.parsePersonOrRunnerKey(b.public_key, 'public_key');
@@ -755,12 +768,13 @@ export class Admin {
       }
       const prior = this.rows<{ capabilities: string; revoked_at: number | null }>('SELECT capabilities, revoked_at FROM runner_grants WHERE credential_id = ? AND repository_id = ?', key.fingerprint, repository)[0];
       const caps = expanded;
-      this.exec(`INSERT INTO runner_grants (credential_id, repository_id, capabilities, max_tier, max_claims, granted_by, granted_at) VALUES (?, ?, ?, ?, ?, ?, ?)
+      this.exec(`INSERT INTO runner_grants (credential_id, repository_id, capabilities, max_tier, max_claims, granted_by, granted_at, deliver_interactions) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                  ON CONFLICT (credential_id, repository_id) DO UPDATE SET capabilities = excluded.capabilities, max_tier = excluded.max_tier,
-                   max_claims = excluded.max_claims, granted_by = excluded.granted_by, granted_at = excluded.granted_at, revoked_at = NULL`,
-        key.fingerprint, repository, JSON.stringify(caps), maxTier, maxClaims, actor, this.c.now());
-      this.event(actor, { act: 'grant', key: key.fingerprint, repository, capabilities: caps, max_tier: maxTier, max_claims: maxClaims }, repository);
-      this.c.fleetChanged?.();
+                   max_claims = excluded.max_claims, granted_by = excluded.granted_by, granted_at = excluded.granted_at,
+                   deliver_interactions = excluded.deliver_interactions, revoked_at = NULL`,
+        key.fingerprint, repository, JSON.stringify(caps), maxTier, maxClaims, actor, this.c.now(), Number(deliverInteractions));
+      this.event(actor, { act: 'grant', key: key.fingerprint, repository, capabilities: caps, max_tier: maxTier, max_claims: maxClaims, deliver_interactions: deliverInteractions }, repository);
+      this.c.fleetChanged();
       return { ok: true, fingerprint: key.fingerprint };
     });
   }
@@ -774,7 +788,7 @@ export class Admin {
       this.exec('UPDATE runner_grants SET revoked_at = ? WHERE credential_id = ? AND repository_id = ? AND revoked_at IS NULL', this.c.now(), fingerprint, repository);
       if (!this.changed()) throw new BatonError('not-found', `no grant of ${fingerprint} on ${repository}`);
       this.event(actor, { act: 'grant-revoked', key: fingerprint, repository }, repository);
-      this.c.fleetChanged?.();
+      this.c.fleetChanged();
       return { ok: true };
     });
   }
@@ -843,7 +857,7 @@ export class Admin {
       return this.c.store.transaction(() => {
         this.exec('DELETE FROM couriers WHERE credential_id = ? AND repository_id = ?', fp, repository);
         if (!this.changed()) throw new BatonError('not-found', `${fp} is no courier of ${repository}`);
-        this.c.notices?.revoked(fp, repository);
+        this.c.notices.revoked(fp, repository);
         if (!this.rows('SELECT 1 FROM couriers WHERE credential_id = ?', fp).length) {
           this.exec('UPDATE credentials SET revoked_at = ?, revoked_by = ? WHERE id = ? AND revoked_at IS NULL', this.c.now(), actor, fp);
         }
@@ -859,10 +873,10 @@ export class Admin {
     let trustLevel: 'trusted' | 'untrusted' | null = null;
     let trustDomain: string | null = null;
     const policies = this.c.policies;
-    const cur = policies?.current(repository);
-    const facts = cur ? policies!.facts(repository, await this.breakGlassSet()) : null;
+    const cur = policies.current(repository);
+    const facts = cur ? policies.facts(repository, await this.breakGlassSet()) : null;
     if (cur && facts && (b.trust_level !== undefined || b.trust_domain !== undefined)) {
-      if (!policies!.entryMatches(cur.policy.approvers.trust, fingerprint, facts, cur.policy.human_key)) {
+      if (!policies.entryMatches(cur.policy.approvers.trust, fingerprint, facts, cur.policy.human_key)) {
         throw new BatonError('forbidden', 'trust_level and trust_domain are set by an approver on approvers.trust (R-BTN-180)');
       }
       if (b.trust_level !== undefined) {
@@ -892,7 +906,7 @@ export class Admin {
       this.exec('DELETE FROM couriers WHERE credential_id = ? AND repository_id = ?', key.fingerprint, repository);
       for (const a of asks) this.exec('INSERT INTO couriers (credential_id, repository_id, asks, trust_level, trust_domain, trust_set_by) VALUES (?, ?, ?, ?, ?, ?)',
         key.fingerprint, repository, a, trustLevel, trustDomain, setTrust ? actor : null);
-      this.c.notices?.registered(key.fingerprint, repository);
+      this.c.notices.registered(key.fingerprint, repository);
       this.event(actor, { act: 'courier-added', key: key.fingerprint, repository, asks, ...(trustLevel ? { trust_level: trustLevel } : {}), ...(trustDomain ? { trust_domain: trustDomain } : {}) }, repository);
       return { ok: true, fingerprint: key.fingerprint };
     });
@@ -945,7 +959,7 @@ export class Admin {
     // The signature is by the acting human_only key — a registered one or a break-glass line —
     // over the new key's public line exactly as sent.
     const signerLine = this.rows<{ public_key: string }>('SELECT public_key FROM human_keys WHERE fingerprint = ? AND revoked_at IS NULL', actor)[0]?.public_key
-      ?? (await this.c.humanBreakGlass?.().then((m) => m.get(actor)) ?? null);
+      ?? (await this.c.humanBreakGlass().then((m) => m.get(actor)) ?? null);
     if (!signerLine) throw new BatonError('unauthenticated', 'the acting key is not a live human_only key');
     const sig = Uint8Array.from(atob(signature), (c) => c.charCodeAt(0));
     await verifyNamespacedSignature(signerLine, sig, new TextEncoder().encode(publicKey.trim()), 'baton-human-keys@1');
@@ -968,7 +982,7 @@ export class Admin {
 
   /** `POST /v1/owner/{repository}/bars`: an owner bar `{course, tag, legs?, applies, starts_at?,
    *  ends_at?, release_holders?, reason}`; named legs need a named course. */
-  // @model setOwnerBar sha256:82527aa95b44
+  // @model setOwnerBar sha256:8ffc35865ecf
   setBar(actor: string, repository: string, body: unknown) {
     if (!isObj(body)) bad('body', 'must be a JSON object');
     const b = body as Record<string, unknown>;
@@ -1006,7 +1020,7 @@ export class Admin {
   }
 
   /** `POST /v1/owner/{repository}/bars/{id}/lift`. */
-  // @model liftOwnerBars sha256:67a7770a9c79
+  // @model liftOwnerBars sha256:d099663688c6
   liftBar(actor: string, repository: string, id: number) {
     return this.c.store.transaction(() => {
       this.exec('UPDATE owner_bars SET lifted_at = ? WHERE id = ? AND repository_id = ? AND lifted_at IS NULL', this.c.now(), id, repository);
@@ -1051,8 +1065,8 @@ export class Admin {
       const homeHost = home.forge === 'git' ? null : home.host;
       const cross = codeRepos.find((e) => homeHost == null || e.host !== homeHost);
       if (cross) {
-        const cur = this.c.policies?.current(repository);
-        const floors = this.c.policies?.floors(repository) ?? [];
+        const cur = this.c.policies.current(repository);
+        const floors = this.c.policies.floors(repository);
         if (cur?.policy.human_identity != null || floors.length) {
           const which = cur?.policy.human_identity != null ? `a human_identity (${cur.policy.human_identity})` : `${floors.length} floor(s)`;
           throw new BatonError('invalid-params', `code_repos: the entry ${cross.path} is on ${cross.host}, another host than the home's, while ${repository}'s policy names ${which} — no human identity across hosts yet (B-182); per-host identities are a later ticket`);
@@ -1109,8 +1123,8 @@ export class Admin {
     // `approvers.policy` as it stands, the same gate R-BTN-188 puts on an R-BTN-66 setting.
     if (this.loosensSettings(repository, sets, codeRepos)) {
       const policies = this.c.policies;
-      const cur = policies?.current(repository);
-      if (policies && cur) {
+      const cur = policies.current(repository);
+      if (cur) {
         const facts = policies.facts(repository, await this.breakGlassSet());
         if (!policies.entryMatches(cur.policy.approvers.policy, actor.slice(actor.indexOf(':') + 1), facts, cur.policy.human_key)) {
           throw new BatonError('forbidden', 'loosening an R-BTN-66 setting needs an approver on approvers.policy (R-BTN-186, R-BTN-188)');
@@ -1345,7 +1359,7 @@ export class Admin {
         code_repos: codeReposOf(this.c.store, String(s.repository_id)),
       })) as (Record<string, unknown> & { code_repos: CodeRepo[] })[],
       // R-BTN-80: the personal channels, by repository.
-      couriers: this.c.notices?.couriers() ?? [],
+      couriers: this.c.notices.couriers(),
     };
   }
 
@@ -1353,9 +1367,9 @@ export class Admin {
    *  `GET /v1/owner/{repository}/grants` narrows to a repository (R-BTN-179, B-90). */
   grants() {
     // max_tier as its name in the repository's ladder (stored as a position, R-BTN-66).
-    return this.rows<{ credential_id: string; hostname: string | null; label: string | null; repository_id: string; capabilities: string; max_tier: number | null; max_claims: number; granted_by: string; granted_at: number }>(`SELECT g.credential_id, c.hostname, c.label, g.repository_id, g.capabilities, g.max_tier, g.max_claims, g.granted_by, g.granted_at
+    return this.rows<{ credential_id: string; hostname: string | null; label: string | null; repository_id: string; capabilities: string; max_tier: number | null; max_claims: number; granted_by: string; granted_at: number; deliver_interactions: number }>(`SELECT g.credential_id, c.hostname, c.label, g.repository_id, g.capabilities, g.max_tier, g.max_claims, g.granted_by, g.granted_at, g.deliver_interactions
                        FROM runner_grants g JOIN credentials c ON c.id = g.credential_id WHERE g.revoked_at IS NULL ORDER BY g.repository_id, c.hostname`)
-      .map((g) => ({ ...g, max_tier: g.max_tier == null ? null : this.c.registry.get(g.repository_id)?.tiers[g.max_tier] ?? null }));
+      .map((g) => ({ ...g, deliver_interactions: g.deliver_interactions === 1, max_tier: g.max_tier == null ? null : this.c.registry.get(g.repository_id)?.tiers[g.max_tier] ?? null }));
   }
 
   // ── keys ────────────────────────────────────────────────────────────────────────────────
@@ -1363,7 +1377,7 @@ export class Admin {
   private async parseKey(v: unknown, field: string): Promise<{ fingerprint: string; line: string }> {
     if (typeof v !== 'string') bad(field, 'must be an OpenSSH public key line');
     const key = await parseSshKey(v as string);
-    return { fingerprint: key.fingerprint, line: lineOf(key, v as string) };
+    return { fingerprint: key.fingerprint, line: sshPublicLine(key, v as string) };
   }
 
   /** An owner's or a runner's key: an OpenSSH public key, or an API key's public line (R-BTN-159).

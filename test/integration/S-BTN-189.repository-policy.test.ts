@@ -3,8 +3,8 @@
 // `protected` applied to one writes plain-git's three values with it; the protected preset
 // applied by an owner key holding no human_only key is refused (its human-only approver lists
 // would have no live credential), by one with a human_only key stored — without the preset's
-// name in the document; every guarantee but signed-authorship and human-gates-hardware holds
-// except no-runner-lands, which holds once the protection checker reports a match; the owner
+// name in the document; the protection checker must report a match for no-runner-lands;
+// custody-only keys establish neither human-gates guarantee; the owner
 // key's policy changes are forbidden both ways under approvers.policy: [human], the human
 // key's accepted and logged with `changed`; two owners setting from one base_version: the
 // second conflict; setting approvers.trust: [human] clears every owner-set trust level to
@@ -144,15 +144,12 @@ describe('S-BTN-189 the repository policy', () => {
     const applied = await as(human, '/v1/owner/ops/policy', { base_version: 1, preset: 'protected' }, 'PUT');
     expect(applied.status).toBe(200);
     expect(applied.json.changed).toContain('approvers.policy');
-    // Before any protection report: every guarantee but signed-authorship and
-    // human-gates-hardware holds EXCEPT no-runner-lands and every guarantee including it.
+    // Before any protection report, only trusted-domain-separate holds.
     expect(applied.json.guarantees['no-runner-lands']).toBe(false);
-    for (const g of ['control-paths-human', 'tickets-approved', 'independent-review', 'signed-authorship', 'board-from-trusted', 'human-gates-hardware']) {
+    for (const g of ['control-paths-human', 'tickets-approved', 'independent-review', 'signed-authorship', 'board-from-trusted', 'human-gates', 'human-gates-hardware']) {
       expect(applied.json.guarantees[g], g).toBe(false);
     }
-    for (const g of ['trusted-domain-separate', 'human-gates']) {
-      expect(applied.json.guarantees[g], g).toBe(true);
-    }
+    expect(applied.json.guarantees['trusted-domain-separate']).toBe(true);
 
     const read = await policyRead('ops', owner);
     expect(read.status).toBe(200);
