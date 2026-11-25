@@ -412,6 +412,7 @@ export class RunnerApi {
         if (w.reaped_at != null) throw new BatonError('runner-reaped', 'this runner was reaped; re-key to start a new incarnation');
       }
       if (moving) this.exec('UPDATE runners SET credential_id = ? WHERE id = ?', cred.id, w.id);
+      if (moving || rekeyed) this.exec('DELETE FROM runner_idle WHERE runner_id = ?', w.id);
     }
 
     const current = rekeyed ? hb.secret_hash : w.secret_hash; // the hash stored now
