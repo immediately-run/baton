@@ -62,10 +62,10 @@ describe('validateCourse (R-BTN-69)', () => {
     expect(validateCourse(c)).toEqual([]);
   });
 
-  it('refuses a course resource gate instead of turning readings into a prerequisite (S-BTN-24)', () => {
+  it('rejects gate objects in the course resource-name list', () => {
     const c = copy();
     c.legs.review.requires = { resources: [{ resource: 'llm:x', binds: 'gate', missing: 'block' }] };
-    expect(rules(c)).toEqual(['unknown-key legs.review.requires.resources']);
+    expect(rules(c)).toEqual(['shape legs.review.requires.resources']);
   });
 
   it('a leg\'s requires and a course\'s capability_roles are checked in shape (R-BTN-120, B-86)', () => {

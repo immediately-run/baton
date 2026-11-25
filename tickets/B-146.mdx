@@ -24,8 +24,8 @@ depends_on:
 generalized into a single thing", and "Why not leave this up to the course to decide what the gate
 should be for the leg? It could actually depend on a reading if we want (eg: account funds)."
 Recorded in `spec/BATON_SPEC_HISTORY.md` (baton#145).
-**Spec:** R-BTN-181 (attestations: shape, writers, signatures, supersession, the prerequisite,
-standard types, records not git), R-BTN-76 (readings as attestations about an instance, read per
+**Spec:** R-BTN-181 (attestations: shape, credential-derived writers, request authentication,
+supersession, the prerequisite, standard types, records not git), R-BTN-76 (readings as attestations about an instance, read per
 repository), R-BTN-75 (block kinds, `binds`), R-BTN-120 (prerequisites), §6.6 rule 1, R-BTN-88
 (export), R-BTN-188's `attestations` and `readings` knobs; §13 `attestations`, `ticket_blocks`,
 `instance_readings`; §14 the attestation and reading routes; S-BTN-181, S-BTN-24, G-BTN-70.
@@ -56,8 +56,8 @@ removed the resource prerequisite and block and kept readings as advice (R-BTN-7
    `where`, `count`, `distinct`, `binds` and `missing`. Course writers may only narrow policy.
    Store unmet requirements as `attestation` rows; rule 1 returns the blocking rows when
    refusing a claim or advance. The validator refuses a trusted leg whose requirement binds as
-   advice or takes `missing: allow`. Shared `isEligible` parity needs an owner-authorized docs
-   change before vendoring; this ticket lists only `baton`.
+   advice or takes `missing: allow`. Keep `isEligible` in Baton's shared source in parity with
+   rule 1 (R-BTN-37); consumers pin Baton, not the reverse.
 4. **Export.** Export work records with owner state and drop them on import (R-BTN-88).
 5. **Sync.** Supersede facts by type and subject across credentials authorized to post those
    facts. Reconcile the proposal's machine-key supersession text with R-BTN-203 before changing

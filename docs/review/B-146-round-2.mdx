@@ -1,0 +1,16 @@
+---
+title: B-146 review round 2
+description: Findings and disposition for the second review of the work-attestation draft.
+---
+
+The [second review of Baton #335](https://github.com/immediately-run/baton/pull/335#pullrequestreview-6010073070)
+reviewed `d857bf9b` and returned changes. The first round's short-form resource gate was withdrawn.
+
+| Finding | Disposition |
+|---|---|
+| [Work attestations and S-BTN-181 are not implemented](https://github.com/immediately-run/baton/pull/335#discussion_r4656470299) | Still blocking. The draft does not implement the store, revocation, work requirements, or their scenarios. The owner question about whether the proposal's typed instance form can bind as a gate was unavailable in this run; readings remain advisory. |
+| [The ticket still mentions record signatures](https://github.com/immediately-run/baton/pull/335#discussion_r4656470303) | Corrected the Spec summary to describe request authentication. |
+| [The course-validator regression is not S-BTN-24](https://github.com/immediately-run/baton/pull/335#discussion_r4656470309) | Renamed the test. Current main accepts resource names, not gate objects, so the test checks for rejection of the object shape. |
+
+The integration parity requirement remains. R-BTN-37 now puts the shared source in Baton;
+implementing parity no longer needs a change in another repository.
