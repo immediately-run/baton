@@ -23,6 +23,7 @@ export interface CourseViolation {
 }
 
 import { isFreeText } from './text';
+import { OUTPUTS_MAX } from './contractPointers';
 import { parseSchemaId } from '../shared/schema.mjs';
 import { ROLES } from '../shared/vocabulary.mjs';
 import { CONDITION_TYPE, CONDITION_TYPE_MAX, RESTART_ID, RESTARTS_MAX, barredFromAutonomous, declaredConditions, dispositionOf, type ConditionDeclaration, type Disposition } from './conditionTypes';
@@ -394,7 +395,7 @@ export function validateCourse(json: unknown): CourseViolation[] {
     if ('label' in l && !isFreeText(l.label)) add('bound', `${at}.label`, 'a label is §10.4 free text: 1–500 characters, no control characters, none of < > { }');
     if ('outputs' in l) {
       if (!isObject(l.outputs)) add('shape', `${at}.outputs`, 'outputs is an object of output names');
-      else if (Object.keys(l.outputs).length > COURSE_LIST_MAX) add('shape', `${at}.outputs`, `at most ${COURSE_LIST_MAX} outputs`);
+      else if (Object.keys(l.outputs).length > OUTPUTS_MAX) add('shape', `${at}.outputs`, `at most ${OUTPUTS_MAX} outputs (R-BTN-82)`);
       else for (const [name, o] of Object.entries(l.outputs)) {
         const op = `${at}.outputs.${name}`;
         if (!NAME.test(name)) add('id', op, `output name "${name}" must match ${NAME.source}`);
@@ -403,7 +404,7 @@ export function validateCourse(json: unknown): CourseViolation[] {
         // R-BTN-108: a named schema `<id>@<version>`. The legacy relative-path window is closed
         // (history, Migrations: Legacy schema forms, deleted with it): a path is a shape
         // violation like any other non-id string, and the kit names the id to write in its place.
-        if ('schema' in o && !parseSchemaId(o.schema)) add('shape', `${op}.schema`, 'a schema is <id>@<version> (R-BTN-108)');
+        if (!parseSchemaId(o.schema)) add('shape', `${op}.schema`, 'a schema is <id>@<version> (R-BTN-108)');
       }
     }
   }
@@ -481,7 +482,7 @@ export function validateCourse(json: unknown): CourseViolation[] {
       const producer = isLeg.has(m[1]) ? legs![m[1]] : undefined;
       if (!isLeg.has(m[1])) add('input', `${ip}.from`, `"${m[1]}" is not a leg`);
       // Own keys only: an inherited name (`toString`, `__proto__`) is no declared output.
-      else if (!isObject(producer) || !isObject(producer.outputs) || !NAME.test(m[2]) || !own(producer.outputs, m[2])) add('input', `${ip}.from`, `leg "${m[1]}" declares no output "${m[2]}"`);
+      else if (!isObject(producer) || (producer.kind === 'person' ? m[2] !== 'answer' : !isObject(producer.outputs) || !NAME.test(m[2]) || !own(producer.outputs, m[2]))) add('input', `${ip}.from`, `leg "${m[1]}" declares no output "${m[2]}"`);
     }
   }
 

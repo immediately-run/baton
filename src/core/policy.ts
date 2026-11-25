@@ -132,6 +132,7 @@ export interface PolicyDocument {
   authorship: 'any' | 'signed';
   tickets: { created: 'filed' | 'proposed' };
   leg_state?: 'forge' | 'branch';
+  repos?: { unlisted: 'by-name' | 'none' };
   outbox: { git: OutboxRoute; 'forge-check': OutboxRoute };
   inputs: { board: (typeof BOARD_INPUTS)[number][]; answers: 'git' | 'attestation' };
   attestations: Record<string, WriterClass[]>;
@@ -149,7 +150,7 @@ export const KNOBS = [
   'refs.default_branch', 'refs.tags', 'refs.other', 'refs.baton', 'refs.legs',
   'paths.protected', 'paths.control', 'paths.tickets',
   'merge.trusted', 'merge.reviews', 'merge.checks', 'authorship', 'tickets.created', 'leg_state',
-  'outbox.git', 'outbox.forge-check', 'inputs.board', 'inputs.answers', 'attestations', 'readings',
+  'repos.unlisted', 'outbox.git', 'outbox.forge-check', 'inputs.board', 'inputs.answers', 'attestations', 'readings',
 ] as const;
 export type Knob = (typeof KNOBS)[number];
 
@@ -222,7 +223,12 @@ function checkOutboxRoute(v: unknown, at: string): OutboxRoute {
  *  `service:` key's roles) are the `Policies` class's. */
 export function validatePolicyDocument(input: unknown, opts: { forge: Forge }): PolicyDocument {
   const v: Record<string, unknown> = isObj(input) ? input : bad('policy', 'must be a JSON object');
-  only(v, ['approvers', 'human_key', 'human_identity', 'grants', 'refs', 'paths', 'merge', 'authorship', 'tickets', 'leg_state', 'outbox', 'inputs', 'attestations', 'readings'], 'policy');
+  only(v, ['approvers', 'human_key', 'human_identity', 'grants', 'refs', 'paths', 'merge', 'authorship', 'tickets', 'leg_state', 'repos', 'outbox', 'inputs', 'attestations', 'readings'], 'policy');
+  const repos = v.repos === undefined ? undefined : isObj(v.repos) ? v.repos : bad('policy.repos', 'must be {unlisted}');
+  if (repos) {
+    only(repos, ['unlisted'], 'policy.repos');
+    if (repos.unlisted !== 'by-name' && repos.unlisted !== 'none') bad('policy.repos.unlisted', 'must be by-name or none');
+  }
   const approvers = isObj(v.approvers) ? v.approvers : bad('policy.approvers', 'must be an object');
   only(approvers, ['members', 'trust', 'policy'], 'policy.approvers');
   const grants = isObj(v.grants) ? v.grants : bad('policy.grants', 'must be an object');
@@ -345,6 +351,7 @@ export function validatePolicyDocument(input: unknown, opts: { forge: Forge }): 
       trust: checkApproverList(approvers.trust, 'policy.approvers.trust'),
       policy: checkApproverList(approvers.policy, 'policy.approvers.policy'),
     },
+    ...(repos ? { repos: { unlisted: repos.unlisted as 'by-name' | 'none' } } : {}),
     human_key: v.human_key as PolicyDocument['human_key'],
     ...(v.human_identity != null ? { human_identity: v.human_identity as string } : {}),
     grants: { default_trust: grants.default_trust as PolicyDocument['grants']['default_trust'], one_per_domain: grants.one_per_domain as boolean, trusted_domain: grants.trusted_domain as PolicyDocument['grants']['trusted_domain'] },
@@ -365,6 +372,7 @@ export function validatePolicyDocument(input: unknown, opts: { forge: Forge }): 
  *  carries `readings.*.signed`, retired and read nowhere: it is left out, so the first change
  *  after it is not reported as one to `readings`. */
 function knobOf(doc: PolicyDocument, knob: Knob): unknown {
+  if (knob === 'repos.unlisted') return doc.repos?.unlisted ?? 'by-name';
   const v = knob.split('.').reduce<unknown>((v, seg) => (v && typeof v === 'object' ? (v as Record<string, unknown>)[seg] : undefined), doc);
   if (knob !== 'readings' || !v || typeof v !== 'object') return v;
   return Object.fromEntries(Object.entries(v as Record<string, { writers?: unknown }>).map(([k, e]) => [k, e && typeof e === 'object' ? { writers: e.writers } : e]));
@@ -409,6 +417,7 @@ export const COOPERATIVE: PolicyDocument = {
 /** The `protected` column. */
 export const PROTECTED: PolicyDocument = {
   ...COOPERATIVE,
+  repos: { unlisted: 'none' },
   approvers: { members: ['human'], trust: ['human'], policy: ['human'] },
   grants: { default_trust: 'untrusted', one_per_domain: true, trusted_domain: 'separate' },
   refs: {

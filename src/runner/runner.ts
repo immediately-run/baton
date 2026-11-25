@@ -606,6 +606,11 @@ export class Runner {
         wait(order.ticket_id, def == null ? `${leg} is not a leg of course ${course.course}` : `${leg} leaves ${def.from.join(' or ')}, and without Baton the runner cannot tell where the ticket rests`);
         continue;
       }
+      if (Object.keys(def.inputs ?? {}).length || def.outputs || def.to.some((station) => course.graph.entry.has(station))) {
+        dropCourse(course.scratch);
+        wait(order.ticket_id, `${leg} needs Baton for its contract or station entry (R-BTN-82)`);
+        continue;
+      }
       this.saidOffline.delete(order.ticket_id);
       const slot = this.makeRun(this.o.home);
       slot.offline = true;
