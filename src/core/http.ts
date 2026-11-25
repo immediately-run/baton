@@ -144,3 +144,11 @@ export function noStore(res: Response): Response {
   const body = status === 101 || status === 204 || status === 205 || status === 304 ? null : res.body;
   return new Response(body, { status, statusText: res.statusText, headers });
 }
+
+export async function readJson(req: Request): Promise<unknown> {
+  try {
+    return await req.json();
+  } catch {
+    throw new BatonError('invalid-params', 'the body is not JSON');
+  }
+}

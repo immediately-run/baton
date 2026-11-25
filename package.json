@@ -18,6 +18,10 @@
     "provenance": true
   },
   "type": "module",
+  "exports": {
+    "./leg": "./dist/legClient.mjs",
+    "./*": "./*"
+  },
   "description": "Baton — work-item leases, runners and the factory dashboard, on a Cloudflare Durable Object or as a local Node process (BATON_SPEC §3a).",
   "engines": {
     "node": ">=22.13"
