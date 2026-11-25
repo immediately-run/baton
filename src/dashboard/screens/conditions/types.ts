@@ -2,7 +2,7 @@
 // conditions.ts`). Every field is still untrusted data: drawn through `Text`, `ExtLink` or
 // `View`, never trusted for more than its shape.
 
-/** One condition, as `repo.needs-you`, `repo.conditions` and `condition.show` answer it. */
+/** One condition, as `repo.needs-you`, `condition.list` and `condition.show` answer it. */
 export interface Condition {
   condition_id: number;
   ticket_id: string;
@@ -62,7 +62,7 @@ export interface NeedsYou {
   server_time?: number;
 }
 
-/** `repo.conditions`: the list, open and closed, by id. */
+/** `condition.list`: the list, open and closed, by id. */
 export interface ConditionsPage {
   conditions: Condition[];
   cursor: string | null;
