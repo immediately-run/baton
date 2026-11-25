@@ -44,6 +44,11 @@ export interface AdminKeys {
   list(): string[];
 }
 
+/** R-BTN-155: the deployment's email-to-key bindings, read afresh on each call. */
+export interface AccessIdentities {
+  read(): string;
+}
+
 /** R-BTN-185 (B-145): the host's human-only keys — `BATON_HUMAN_KEYS`, the same shape as the
  *  administrators'. The deployment's root of trust, set outside Baton; a test replaces it as it
  *  replaces the administrators'. */
@@ -86,9 +91,8 @@ export interface Config {
    *  array of `POST /v1/admin/repositories` bodies less their owner keys. Each binds its own
    *  sync and mirror workflow to its board (R-BTN-15). */
   BATON_REPOSITORIES?: string;
-  /** R-BTN-16, as amended 2026-10-20: Access is hardening in front of the dashboard that Baton
-   *  never reads, and no deployment sets these (R3-1208's provision sets none). B-46 removes
-   *  the one read that remains. */
+  /** R-BTN-155: verify Access assertions at sign-in. OWNER_EMAILS applies only to the
+   *  legacy Access-only dashboard path when there are no administrator keys. */
   ACCESS_TEAM_DOMAIN?: string;
   ACCESS_AUD?: string;
   OWNER_EMAILS?: string;
@@ -152,6 +156,7 @@ export interface Ports {
   config: Config;
   dispatch: Dispatch;
   adminKeys: AdminKeys;
+  accessIdentities?: AccessIdentities;
   /** R-BTN-185 (B-145): the host's human-only keys; absent, `BATON_HUMAN_KEYS` in the config. */
   humanKeys?: HumanKeys;
   /** Absent on Cloudflare, where the input gate needs nothing. */

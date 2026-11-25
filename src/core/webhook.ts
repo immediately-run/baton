@@ -227,7 +227,7 @@ export class Webhooks {
   constructor(private readonly c: { store: Store; now: () => number; /** B-134: the forge
    *  cross-check — a push by a named runner pusher to a repository no open claim covers (rule
    *  3's reading of still holding, as `openScopes` reads it) raises `unclaimed-write`. */
-   scope?: { pushDelivery(d: Delivery): void } }) {}
+   scope: { pushDelivery(d: Delivery): void } }) {}
 
   private rows<T>(q: string, ...p: unknown[]): T[] {
     return this.c.store.exec(q, ...p).toArray() as T[];
@@ -264,7 +264,7 @@ export class Webhooks {
     // B-134's control: every push delivery — a duplicate was dropped above, Baton's own work
     // just before — is cross-checked against the claims open now, whatever repositories the
     // delivery's want ends up dispatching.
-    this.c.scope?.pushDelivery(d);
+    this.c.scope.pushDelivery(d);
     // B-89: a merge is the trigger; a pull_request the App sends for an opened, synchronised or
     // closed-without-merging PR moves the default branch nowhere, so the board owes nothing.
     if (d.event === 'pull_request' && d.merged !== true) return { outcome: 'not-a-merge' };

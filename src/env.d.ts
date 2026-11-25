@@ -7,6 +7,8 @@ declare global {
     BATON: DurableObjectNamespace;
     /** R-BTN-57: the administrators' public keys, one per line (R3-1240 reads them). */
     BATON_ADMIN_KEYS?: string;
+    /** R-BTN-155: the deployment's Access email-to-key bindings. */
+    ACCESS_IDENTITIES?: string;
   }
   // `env` from cloudflare:test is typed as Cloudflare.Env.
   namespace Cloudflare {
