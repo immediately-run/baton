@@ -593,6 +593,9 @@ The fingerprint stores no ticket content and is an optimization, never authority
     `instance_settings`, `ticket_stations`.
     Policy versions and floors are for live repositories (R-BTN-188, R-BTN-189); the human key
     register is tenant-wide (R-BTN-185), and host-configured keys do not travel with it.
+    `policy_floors` also holds the backing rows for live legacy floor projections (R-BTN-189); a
+    schema storing legacy floor rows always includes the section in the digest, as an empty
+    array when there are no such rows.
     Only Baton-owned positions on live repositories are exported; the board rebuilds the rest.
     Import zeros runners' liveness and activity timestamps.
   - **History sections** (only with `--with-history`): `ticket_history`, `leg_outputs`,
@@ -603,14 +606,17 @@ The fingerprint stores no ticket content and is an optimization, never authority
     and the board cache apart from the Baton-owned positions above.
   - **Import** (`POST /v1/admin/import`): one transaction, into an **empty** Baton only (no
     repository, owner or credential but the seeded `legacy` row), else `conflict`; digest
-    checked (`invalid-params`); the same `schema_version` and all default sections required.
+    checked (`invalid-params`); the same `schema_version` and all default sections required —
+    a missing `policy_floors` section is refused even with a valid digest and policy hash chain.
     Rows pass import validation and invariants (one role per key, unique names, id grammars,
     tombstones only on retired rows); the first failing row refuses the whole import. Every live
     repository needs its original policy versions, validated as documents and by their hashes
     and contiguous `previous_hash` chain starting at version 1. Import writes them unchanged
     and seeds none; a retired repository's tombstone needs none. Import refuses floors whose
     guarantees do not hold on the imported policy and authority facts (R-BTN-189); it does not
-    check a live protection report. Imported human keys must not be destination administrator
+    check a live protection report. It validates legacy rows using the stored format, and on a
+    schema that uses projection it checks the current projection after restoring its backing
+    data (R-BTN-188, R-BTN-189). Imported human keys must not be destination administrator
     keys (R-BTN-57). A digest checks integrity,
     not the authority of the source. Signed requests with `created` at or before the source's
     `sealed_at` are refused `unauthenticated`. Ticket-scoped rows wait in `pending_owner_state`

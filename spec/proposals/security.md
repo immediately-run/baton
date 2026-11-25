@@ -2,7 +2,7 @@
 title: "Proposal: the merge runner, the fact reader, general attestations and the rest of the repository policy's enforcement"
 description: "Unbuilt designs moved out of BATON_SPEC §12.8 and §12.9: the policy's dry run, the protection check per forge, proposed tickets, attestations beyond a person's answer, the fact reader, trusted runners and what the merge runner merges, protected paths, hardware human-only keys, per-key board limits, and the out-of-course finding."
 ---
-**Status:** proposal — not built; moves into BATON_SPEC §12 when built (tickets B-136, B-137, B-140, B-141, B-146, B-147, B-263, B-264, B-268)
+**Status:** proposal — not built; moves into BATON_SPEC §12 when built (tickets B-136, B-137, B-140, B-146, B-147, B-263, B-264, B-268)
 
 Each part names the rule of [BATON_SPEC §12](../BATON_SPEC/12-security.md) it would extend. The
 rule ids stay defined there and are written here as `R-BTN-n (proposed)`. What is built is the
@@ -222,11 +222,9 @@ or may claim, advance or end one (rule `trusted`), and neither is a grant marked
 
 R-BTN-183 (proposed) — what the merge runner merges. At the PR's exact head `H`, under the policy's
 `merge` and `paths` (R-BTN-188), except a proposal merge (part 3):
-- **A domain that runs a branch's code is one of its writers.** Every `std:wrote@1` and `std:ran@1`
-  domain of `H`'s chain is a writer domain. A review leg is one its course
-  marks `reads_only: true`; `std:ran@1` follows from the course's declarations, since Baton cannot
-  observe what a leg ran (§12.8). The runner's harness starts a `reads_only` leg's agent with no
-  `--auto` or permission bypass and no configuration from the branch (B-141).
+- **Writer attestations.** For R-BTN-183's writer-domain rule, every `std:wrote@1` and
+  `std:ran@1` domain of `H`'s chain is a writer domain. `std:ran@1` follows from the course's
+  declarations, since Baton cannot observe what a leg ran (§12.8).
 - **Continuity.** A writing claim reports its start head at claim, which must be the last
   attested head (or the merge base for the first leg). The CLI refuses to build on any other tip
   and raises `baton.foreign-commit`. At `advance` the leg reports `start..head` from the objects it
