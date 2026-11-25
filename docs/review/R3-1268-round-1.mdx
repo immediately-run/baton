@@ -1,0 +1,21 @@
+---
+title: R3-1268 review round 1
+description: Findings and disposition for the first review of Baton's standalone repository changes.
+---
+
+Reviewed Baton [#312](https://github.com/immediately-run/baton/pull/312) at `9f51326f`
+and companion docs PR [#234](https://github.com/immediately-run/docs/pull/234) at `1885ba78`.
+The reviewer checked the five consumer hashes, docs hosted verify, Baton typecheck and spec
+checks, and the board-ordering and shared-module tests. The full local suite timed out in review.
+Verdict: changes.
+
+| Finding | Disposition |
+|---|---|
+| [The gate misses active files](https://github.com/immediately-run/baton/pull/312#discussion_r4652087831) | Scan tracked text by default, including package scripts, tests, skills and nested guides; distinguish fixture data, old records and site configuration from checkout dependencies. Update the babysit instructions. |
+| [The history matcher can hide prose and skip fragment links](https://github.com/immediately-run/baton/pull/312#discussion_r4652087834) | Limit history notes to a single standalone comment and test sibling links with fragments and queries. |
+| [The runtime requires the sourced course graph](https://github.com/immediately-run/baton/pull/312#discussion_r4652087837) | Document the runtime as built. Removing the local graph breaks sync under the pinned CLI and contradicts R-BTN-134. The owner needs to reconcile the override-only requirement with the current source contract. |
+| [Fix is not the only route after review](https://github.com/immediately-run/baton/pull/312#discussion_r4652087840) | Record every round in the forge without touching the reviewed head. Fix archives its rounds; the ticket closer archives any remaining rounds after delivery, including approvals and rounds that went to adjudication. |
+| [A new repo cannot claim before cutover](https://github.com/immediately-run/baton/pull/312#discussion_r4652087844) | Document fresh sync, owner-authorized administrator cutover and verification in the Sync screen. |
+| [The end-to-end drills are not evidenced](https://github.com/immediately-run/baton/pull/312#discussion_r4652087849) | Acceptance remains open. Automated checks are not a live agent trial; the production exercise needs an operator-approved ticket and runner. |
+| [The CLI uses `baton run`](https://github.com/immediately-run/baton/pull/312#discussion_r4652087852) | Lead with the supported command and label the spec spelling as pending. |
+| [The changelog preamble is stale](https://github.com/immediately-run/baton/pull/312#discussion_r4652087857) | Leave the shared changelog to its release owner as required by B-102; suggest a Baton-only preamble on the review thread. |

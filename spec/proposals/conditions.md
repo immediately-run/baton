@@ -552,7 +552,7 @@ a `suspend` would. Only the runner knows the binding, so it reports the raise wi
       and, on the markdown source, the version required to be the blob at the ticket's path at
       `snapshot_sha`. It refuses, with these reasons:
       - `off-branch`: `snapshot_sha` is not on the default branch (R-BTN-143);
-      - `closed`: the version is closed or archived, or its tier is above the runner's ceiling;
+      - `closed`: the version is closed or archived;
       - `bounds-changed`: its `repos`, `course` or `requires` differ from the claim's, since they
         bound the claim's scope, course and runner (§12.9, R-BTN-121);
       - `moved`: a current source holds a newer version, or a markdown version is not the blob at

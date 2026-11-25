@@ -1,0 +1,81 @@
+// S-BTN-48: resolve contract envelopes without reading the bytes behind a pointer.
+import { codeReposOf, homeForgeOf, ticketRepositories } from './codeRepos';
+import type { PointerReach, PointerRepository } from './contractPointers';
+import type { Store } from './ports';
+import { resolveLeg, type Graph, type Leg } from './graph';
+import type { Output } from './validate';
+
+export interface ResolvedInput extends Output {
+  from_leg: string;
+  from_run: number;
+  leg_version: number;
+  course_version: number;
+}
+
+interface StoredOutput {
+  run: number;
+  schema: string;
+  uri: string | null;
+  digest: string | null;
+  value_json: string | null;
+  leg_version: number;
+  course_version: number;
+}
+
+export function resolveInputs(graph: Graph, leg: string, latest: (producer: string, output: string) => StoredOutput | undefined):
+  { inputs: ResolvedInput[]; wait?: 'input-missing' | 'input-version' } {
+  const inputs: ResolvedInput[] = [];
+  for (const [name, def] of Object.entries(graph.legs.get(leg)?.inputs ?? {})) {
+    const [producer, output] = def.from.split('.');
+    const found = latest(producer, output);
+    const accepted = def.accepts ?? [graph.legs.get(producer)!.version];
+    if (!found || !accepted.includes(found.leg_version)) {
+      if (def.required !== false) return { inputs: [], wait: found ? 'input-version' : 'input-missing' };
+      continue;
+    }
+    inputs.push({ name, schema: found.schema, from_leg: producer, from_run: found.run, leg_version: found.leg_version, course_version: found.course_version,
+      ...(found.uri != null ? { uri: found.uri, ...(found.digest != null ? { digest: found.digest } : {}) } : { value: JSON.parse(found.value_json!) }) });
+  }
+  return { inputs };
+}
+
+export function ticketInputs(store: Store, ticket: string, graph: Graph, leg: string, current = graph) {
+  return resolveInputs(graph, leg, (producer, output) => {
+    const canonical = resolveLeg(current, producer) ?? producer;
+    const names = [...new Set([producer, canonical, ...[...current.legRenames].filter(([, name]) => name === canonical).map(([old]) => old)])];
+    return store.exec<StoredOutput>(`SELECT run, schema, uri, digest, value_json, leg_version, course_version FROM leg_outputs
+      WHERE ticket_id = ? AND leg IN (${names.map(() => '?').join(',')}) AND name = ?
+      ORDER BY claim_id DESC, run DESC LIMIT 1`, ticket, ...names, output).toArray()[0];
+  });
+}
+
+export function declaredOutputFault(leg: Leg | undefined, outputs: Output[]): string | null {
+  if (!leg?.outputs) return null;
+  for (const [name, { schema }] of Object.entries(leg.outputs)) {
+    if (!outputs.some((o) => o.name === name && o.schema === schema)) return `output ${name} must carry ${schema}`;
+  }
+  return outputs.some((o) => !Object.hasOwn(leg.outputs!, o.name)) ? 'the leg returned an undeclared output' : null;
+}
+
+export function pointerReach(store: Store, repo: string, ticket: string): PointerReach {
+  const row = store.exec<{ repos: string }>('SELECT repos FROM tickets WHERE id = ?', ticket).toArray()[0];
+  const paths = JSON.parse(row?.repos ?? '[]') as string[];
+  const home = homeForgeOf(store, repo);
+  const entries = codeReposOf(store, repo);
+  const owner = home?.github.split('/').slice(0, -1).join('/').toLowerCase();
+  const unlisted = (id: string) => store.exec<{ mode: string | null }>(
+    `SELECT json_extract(policy_json, '$.repos.unlisted') AS mode FROM repository_policies
+      WHERE repository_id = ? ORDER BY version DESC LIMIT 1`, id).toArray()[0]?.mode ?? 'by-name';
+  const listed = entries.length || !home ? paths : unlisted(repo) !== 'by-name' ? [] : paths.filter((name) => {
+    const path = (name.includes('/') ? name : `${owner}/${name}`).toLowerCase();
+    if (path.slice(0, path.lastIndexOf('/')) !== owner || !home.host) return false;
+    const registered = store.exec<{ id: string }>(
+      'SELECT id FROM repositories WHERE lower(web_base) = ?', `https://${home.host}/${path}`).toArray();
+    return registered.every(({ id }) => unlisted(id) === 'by-name');
+  });
+  const web = ticketRepositories(store, repo, listed).map((r) => r.webBase);
+  const git = [...new Set([...(home ? [home.github.toLowerCase()] : []), ...web.map((base) => new URL(base).pathname.slice(1).toLowerCase())])];
+  const settings = store.exec<{ artifact_buckets: string }>('SELECT artifact_buckets FROM repositories WHERE id = ?', repo).toArray()[0];
+  const repositories: PointerRepository[] = entries.filter((e) => web.includes(e.web_base));
+  return { git, web, ...(repositories.length ? { repositories } : {}), buckets: JSON.parse(settings?.artifact_buckets ?? '[]') as string[] };
+}
