@@ -7,10 +7,13 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { keyCall, payload, course, rows, setAdminKeys, setClock, syncCall, cutover } from '../helpers';
+import { keyCall, payload, course, rows, setAdminKeys, setClock, syncCall, cutover, TOKENS } from '../helpers';
 import { makeKey } from '../lib/sshKeys';
 import { testRunner } from '../lib/runnerRig';
+import { Runner } from '../../src/runner/runner';
+import { BatonApi } from '../../src/runner/api';
 import roadmapPr from '../fixtures/courses/roadmap-pr/course.json';
+import { call as hostCall } from '#host';
 
 const board = inject('board');
 const T0 = Date.parse('2026-11-09T12:00:00Z');

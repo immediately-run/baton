@@ -759,6 +759,36 @@ export function replaceClaimSnapshot(ticket: string, sha: string) {
 export function clearSettingIn(store: Pick<Store, 'exec'>, key: string): void {
   store.exec("DELETE FROM baton_settings WHERE key = ?", key).toArray();
 }
+/** B-259 (S-BTN-244, B-236): an events row as retention sees it — only the columns given are
+ *  written, the rest take the table's defaults; the new row's `seq`. */
+type EventRowSeed = { at: number; kind: string; actor: string; detail_json?: string; repository_id?: string };
+function eventInsert(e: EventRowSeed): [string, unknown[]] {
+  const cols = Object.entries(e).filter(([, v]) => v !== undefined);
+  return [`INSERT INTO events (${cols.map(([k]) => k).join(', ')}) VALUES (${cols.map(() => '?').join(', ')}) RETURNING seq`, cols.map(([, v]) => v)];
+}
+export async function addEventRow(e: EventRowSeed): Promise<{ seq: number }> {
+  const [sql, params] = eventInsert(e);
+  return (await rows<{ seq: number }>(sql, ...params))[0];
+}
+export function addEventRowIn(store: Pick<Store, 'exec'>, e: EventRowSeed): void {
+  const [sql, params] = eventInsert(e);
+  store.exec(sql, ...params).toArray();
+}
+/** B-259: the mirror's acknowledged cursor — `seq`, or the newest event's when `'max'`; for one
+ *  repository, or every one when `repository` is null. */
+function mirrorAck(repository: string | null, seq: number | 'max'): [string, unknown[]] {
+  const value = seq === 'max' ? '(SELECT MAX(seq) FROM events)' : '?';
+  return [`UPDATE repositories SET mirror_acked_seq = ${value}${repository == null ? '' : ' WHERE id = ?'}`,
+    [...(seq === 'max' ? [] : [seq]), ...(repository == null ? [] : [repository])]];
+}
+export function setMirrorAcked(repository: string | null, seq: number | 'max') {
+  const [sql, params] = mirrorAck(repository, seq);
+  return rows(sql, ...params);
+}
+export function setMirrorAckedIn(store: Pick<Store, 'exec'>, repository: string | null, seq: number | 'max'): void {
+  const [sql, params] = mirrorAck(repository, seq);
+  store.exec(sql, ...params).toArray();
+}
 /** B-249: the instant Baton last served, so a clock jump reads as elapsed service time, not an outage. */
 export function setLastServedAt(at: number) {
   return rows("UPDATE baton_settings SET value = ? WHERE key = 'last_served_at'", String(at));
