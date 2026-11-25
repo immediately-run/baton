@@ -1,0 +1,98 @@
+---
+title: "B-312 — Session links carry a capability: serve them only to sessions, their own runner and interact deliveries; never log or export them"
+id: B-312
+project: baton
+status: available
+updated: 2026-11-21
+tags:
+  - roadmap-item
+  - EXPEDITE
+tier: critical
+description: "Fieldhouse leg-page links now carry a per-run bearer token (fieldhouse #44); Baton stores them as claim_legs.session_url and serves them to every reader, runner keys included. Amend R-BTN-33 and R-BTN-113 so a session link is served only to dashboard sessions, the reporting runner and an interact condition's delivery, never logged, evented or exported; relabel the dashboard's 'Open session'."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the owner, 2026-11-21: "Create an expedited ticket for the Baton change for session links
+that carry a token." Fieldhouse PR #44 (merged 2026-11-21, FIELDHOUSE_SPEC R-FH-80) made every leg
+run's page open only with a per-run token in its link:
+`https://<host>.<tailnet>.ts.net:<port>/<repo>/<ticket>/<leg>/<run_id>/<token>`, 24 random bytes.
+Without the token the page answers 404. The runner reports that link to Baton as the run's
+session link (R-BTN-113), so **Baton now stores and serves a bearer capability**. Anyone who
+reads it can open the run's session (only from the tailnet, and only until the run's page
+closes): watch an autonomous leg, and drive an interactive one.
+
+Baton serves the link wherever it serves `claim_legs.session_url`:
+- the runners reads (`src/core/reads/runners.ts`);
+- the ticket read and the board read (`src/core/tickets.ts`, `src/core/courseView.ts`);
+- an `interact` condition's `url` (`src/core/conditions.ts`, R-BTN-195).
+
+All of these are open to every reader principal, runner keys included (§12.1). So any runner's
+machine key, a compromised runner's included, holds a capability to every other run's session.
+The link may also reach places a pointer never mattered in: events, exports, logs.
+
+**Spec:** BATON_SPEC R-BTN-113 (§8, a leg run carries its session's link), R-BTN-33 (§1,
+pointers, never content), R-BTN-195 (§7, `interact`), R-BTN-129 and §12.1 (principals), §14 (the
+reads that serve `session_url`).
+
+## Plan
+
+1. **Spec (R-BTN-33, R-BTN-113).** Amend in place: a session link may carry a capability (a
+   bearer token in its path).
+   - Baton stores it as it does now, and serves it only to:
+     - dashboard sessions (owner and administrator, R-BTN-155);
+     - the runner whose claim reported it;
+     - an `interact` condition's delivery (R-BTN-163), whose reader is the person being asked.
+   - Every other reader gets `session_url: null` plus a `session_link: true` flag, so a list can
+     show that a session exists. Runner keys reading the board, the ticket read and the runners
+     reads are the main case.
+   - It is never written to events, history rows, `GET /v1/admin/state` exports, logs or error
+     messages.
+   - Name the rule's scenario (a new S-BTN-n, from `baton tickets next scenario`).
+2. **Reads.** Apply the rule in each read that serves `session_url` (the files above), from the
+   caller's principal. Keep the one authorization in `src/core/reads/index.ts`'s dispatcher, not
+   a per-screen check.
+3. **Logs and events.** Find every place `session_url` is logged, evented or exported, and remove
+   or redact the token there: a dropped-link log line (R-BTN-113), event payloads, the state
+   read. A test greps the event and log output of a run carrying a tokened link.
+4. **Dashboard.** The label "Open session" becomes "Open leg page" where the link leads to a
+   Fieldhouse leg page. Rule: the label is the dashboard's, not the runner's, so use one neutral
+   label everywhere. The link is opened with `rel="noreferrer"`, and no `Referer` leaves the
+   dashboard (`Referrer-Policy: no-referrer` is already R-BTN-16's).
+5. **Tests.** The scenario's cases:
+   - a runner key reading the board, the ticket read and the runners reads gets no link and the
+     flag;
+   - an owner's or administrator's session gets the link;
+   - the reporting runner gets its own;
+   - an `interact` condition still carries it to its delivery;
+   - no event or log line carries the token.
+
+### Trust
+
+No new input. The session link is already a runner-supplied field, validated by R-BTN-113 (https,
+at most 512 characters, no userinfo, host in `session_hosts`). What changes is who it is served to:
+the link is now treated as a credential, so it reaches only the principals that should be able to
+open the session. The runner that reports it is trusted for its own claim only.
+
+### Invariants
+
+- **R-BTN-33.** Baton still holds a pointer, never content. The capability is in the pointer, so
+  the pointer is now served like a secret.
+- **One authorization (R-BTN-129).** The decision is made once, in the read dispatcher, by
+  principal.
+- **Text, never markup (§12.3).** The dashboard renders the link through `ExtLink`'s link rule.
+- **Validate before you write (CLAUDE.md).** Unchanged: R-BTN-113's checks before storing.
+
+## Exit criteria
+
+- [ ] `npm test` passes, with the new scenario's test file naming its §15 row.
+- [ ] `npm run typecheck` passes.
+- [ ] `git grep -n "Open session" src/dashboard` returns nothing.
+
+## Status
+
+_filed 2026-11-21._ Expedited at the owner's request, after Fieldhouse PR #44 put a per-run token
+in leg-page links.

@@ -139,11 +139,11 @@ Design: BATON_SPEC §10's check courses and check-runners (B-5).
 
 | Table | Key | Columns | Purpose |
 |---|---|---|---|
-| `check_runners` | `(credential_id, repository_id)` | `capabilities` JSON (expanded), `max_tier`, `added_by`, `added_at`, `revoked_at` | Check-runner keys; the row stands in for a grant (R-BTN-114) |
+| `check_runners` | `(credential_id, repository_id)` | `capabilities` JSON (expanded), `added_by`, `added_at`, `revoked_at` | Check-runner keys; the row stands in for a grant (R-BTN-114) |
 
 | Route | Caller | Body or query | Response | Rules |
 |---|---|---|---|---|
-| `POST /v1/owner/{repository}/check-runners`, `…/check-runners/{fingerprint}/revoke` | owner | `{public_key, name, capabilities?, max_tier?}`; revoke `{confirm: true}` | `{ok: true}` | R-BTN-114 |
+| `POST /v1/owner/{repository}/check-runners`, `…/check-runners/{fingerprint}/revoke` | owner | `{public_key, name, capabilities?}`; revoke `{confirm: true}` | `{ok: true}` | R-BTN-114 |
 
 ## The executor's run record and leg logs
 
@@ -164,11 +164,11 @@ Design: registration tokens beside keys (R-BTN-117, R-BTN-157; B-8). `credential
 
 | Table | Key | Columns | Purpose |
 |---|---|---|---|
-| `registration_tokens` | `id` (of `brt_<id>_<secret>`) | `repository_id`, `secret_hash`, `role` (`runner`), `capabilities` JSON, `max_tier`, `uses_left`, `grant_ttl_s`, `expires_at`, `created_by`, `created_at`, `revoked_at` | R-BTN-117, R-BTN-157 |
+| `registration_tokens` | `id` (of `brt_<id>_<secret>`) | `repository_id`, `secret_hash`, `role` (`runner`), `capabilities` JSON, `uses_left`, `grant_ttl_s`, `expires_at`, `created_by`, `created_at`, `revoked_at` | R-BTN-117, R-BTN-157 |
 
 | Route | Caller | Body or query | Response | Rules |
 |---|---|---|---|---|
-| `POST /v1/owner/{repository}/tokens`, `…/tokens/{id}/revoke` | owner | `{role: "runner", capabilities?, max_tier?, ttl_s?, uses?, grant_ttl_s?}`; revoke `{confirm: true}` | `{id, token}`, the token once; revoking revokes every credential it registered | R-BTN-117, R-BTN-157 |
+| `POST /v1/owner/{repository}/tokens`, `…/tokens/{id}/revoke` | owner | `{role: "runner", capabilities?, ttl_s?, uses?, grant_ttl_s?}`; revoke `{confirm: true}` | `{id, token}`, the token once; revoking revokes every credential it registered | R-BTN-117, R-BTN-157 |
 | `POST /v1/register` | `Authorization: Baton-Token <token>` | `{name, public_key}` or `{name, api_key: true}` | `{credential_id, grant}`, and `{api_key}` once for the second form; `forbidden` beyond the token's scope; `unauthenticated` for a spent, expired or revoked token; `conflict` | R-BTN-117 |
 
 ## Attestations, roles and fact legs
@@ -191,23 +191,12 @@ Design: BATON_SPEC §12.8's unbuilt parts (B-136, B-146, B-147).
 | `PUT /v1/owner/{repository}/grants/{fingerprint}/role` | an approver on `approvers.roles` | `{role: "runner" \| "trusted-runner", domain?, checker?}` | `{ok: true}`; `invalid-params` for `trusted-runner` on an API key, or a `checker` mark R-BTN-180 refuses | R-BTN-180, R-BTN-188 |
 | `GET /v1/repositories/{repository}/fact-legs` | a trusted runner whose `service:` key the policy names for `std:arrival@1` (the fact reader) | — | `{tickets: [{ticket, station, path_len, leg, fact, waiting_since}]}` | R-BTN-192 |
 
-## The runner's views and the doorbell
+## The doorbell
 
-Design: the views a runner ranks from (R-BTN-99, proposed) and the doorbell (R-BTN-91, proposed).
-
-- `baton_settings` gains the key `instances_version`; `board_head` gains `fleet_version`.
-- The heartbeat body carries `reports?: [{claim_id?, key?, payload}]`.
-
-| Table | Key | Columns | Purpose |
-|---|---|---|---|
-| `course_data` | `repository_id` | `payload` (opaque JSON), `snapshot_sha` | The courses' opaque board data, served in the fleet view |
-| `runner_reports` | `(runner_id, claim_id, key)`; `claim_id` 0 for none | `received_at`, `payload` (opaque) | Latest report per key, within R-BTN-99's count and retention |
+Design: the doorbell (R-BTN-91, proposed).
 
 | Route | Caller | Body or query | Response | Rules |
 |---|---|---|---|---|
-| `GET /v1/runner/fleet` | machine alone | `?repository=`; `If-None-Match` | the fleet view, `ETag`; `304` unchanged | R-BTN-99, R-BTN-152 |
-| `GET /v1/runner/instances` | machine alone | `If-None-Match` | the instance view, `ETag`; `304` unchanged | R-BTN-99 |
-| `GET /v1/runner/launch-candidates` | machine alone | — | per granted repository, the legs that pass every gate no runner decides, in Baton's order | R-BTN-99 |
 | `GET /v1/runner/push` | machine | `?session_name=`; WebSocket upgrade, authenticated as a heartbeat | `101`, then `{ring: [<kind>]}` frames and `pong`; a heartbeat refusal instead of the upgrade | R-BTN-91 |
 
 ## Grant acceptance and the sync flag
@@ -306,18 +295,6 @@ surfaces of actions the dashboard or the heartbeat serves today.
 | `POST /v1/owner/{repository}/tickets/{ticket}/release` | owner | `{reason: "requested", confirm: true}` | `{ok: true}` | R-BTN-119 |
 | `POST /v1/owner/{repository}/overrides/{ticket}` | owner | `{expedite}`, `{hold}` or `{cancel: true, confirm: true}` | `{ok: true}` | §6, R-BTN-186 |
 | `POST /v1/owner/{repository}/bars/follow` | owner | `{course}` | `{ok: true}` | R-BTN-142 |
-
-## A claim's preference list and rationale (R-BTN-100, proposed)
-
-Moved from BATON_SPEC §6.7. The built claim takes `request_id` and an optional `ticket_id`.
-
-- `POST /v1/runner/claim` takes at most one of `ticket_id` or `prefer: [{ticket_id, leg?}]`: at
-  most 50 known tickets, of which Baton claims, in one transaction, the first passing every gate,
-  else answers `no-eligible-ticket` with `refusals: [{ticket_id, code, rule?}]`. With both,
-  `invalid-params`.
-- `rationale`: opaque JSON of at most 4 KB, kept in the claim's `advice_json` and history row and
-  exported with it (R-BTN-88). Baton never reads it, the fleet view omits it, the dashboard shows
-  it as escaped text, and §12.3's free-text rules do not apply to it.
 
 ## Riders on §3: retirement's further steps and code-repository consent (R-BTN-47, R-BTN-140, proposed)
 

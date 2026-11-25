@@ -38,9 +38,8 @@ is `active` until it ends `completed`, `released` or `reaped`.
     `course_version`, `station`, `legs` (the queued leg, R-BTN-83), `next`, `path`, `nonce` (6
     hex, public: written in markers, R-BTN-17), `snapshot_sha`, `default_branch` (R-BTN-143),
     the ticket's `version`, `ticket_source?` and `last_written_by?` (R-BTN-194),
-    `brief?` (R-BTN-194), `scope` (§12.9), the policy's `policy_hash`, `guarantees_hash` and
-    `floors_hash` (R-BTN-189), `leg_state?` (R-BTN-188), `handoff_url?` and `previous_attempts`
-    (R-BTN-24).
+    `brief?` (R-BTN-194), `scope` (§12.9), `leg_state?` (R-BTN-188), `handoff_url?`, `previous_attempts`
+    (R-BTN-24), and on a reconcile leg `evidence: [{ref, kind}]` and `displaced` (R-BTN-39).
   - The runner then reads the ticket from git and re-verifies it (R-BTN-34, R-BTN-5).
 - **One claim runs a run of legs** (unnumbered). A claim runs as many legs as it can. Each leg
   starts with `POST /v1/runner/claims/{id}/advance` naming it (R-BTN-63): Baton checks the edge
@@ -224,9 +223,12 @@ A claim ends with `POST /v1/runner/claims/{id}/end`. Its body, stated here once:
   from facts read after the end. The end's position stands from the moment Baton records it
   (R-BTN-39); confirmation checks its evidence, not where it put the ticket. It is confirmed by
   the first accepted snapshot whose observation began after the end and that:
-  - for an end that named `ended_at_sha` (R-BTN-8), carries the sync's `std:git.evidence@1`
-    for it with `found: true` — the observation's `unconfirmed` list (§4.3) tells the sync
-    which ends wait and what each named;
+  - for an end that named `ended_at_sha` (R-BTN-8), a commit or a URL, carries the sync's
+    `std:git.evidence@1` for that claim and that evidence with `found: true` — the
+    observation's `unconfirmed` list (§4.3) tells the sync which ends wait and what each named.
+    The sync says `found: false` only where git or the forge answers that the object does not
+    exist, and nothing for evidence it did not look at; where git places the ticket is never
+    evidence;
   - for an end that named none, is accepted at all;
   - for `done`, shows the ticket closed as done (`closed_tickets`) or absent, whatever it named.
 

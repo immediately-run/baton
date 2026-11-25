@@ -65,12 +65,10 @@ function parsed(raw: string | null): unknown {
 function instances(cx: ReadCtx): { instances: InstanceRow[]; server_time: number } {
   const now = cx.now();
   const readings = new Map<string, ReadingRow[]>();
-  for (const r of cx.sql<{ instance: string; source: string; writer: string | null; kind: 'state' | 'measure'; available: number | null; until: number | null; observed_at: number; lapses_at: number; detail: string | null }>(
-    'SELECT instance, source, writer, kind, available, until, observed_at, lapses_at, detail FROM instance_readings ORDER BY instance, observed_at DESC, rowid DESC')) {
-    const list = readings.get(r.instance) ?? [];
-    list.push({ source: r.source, writer: r.writer, kind: r.kind, available: r.available == null ? null : !!r.available, until: r.until,
-      observed_at: r.observed_at, lapses_at: r.lapses_at, detail: parsed(r.detail), stale: r.lapses_at <= now });
-    readings.set(r.instance, list);
+  for (const { instance, ...r } of cx.core.resources.readings(now)) {
+    const list = readings.get(instance) ?? [];
+    list.push(r);
+    readings.set(instance, list);
   }
   return {
     instances: cx.core.resources.view(now).instances.map((i) => ({ ...i, readings: readings.get(i.name) ?? [] })),
@@ -169,11 +167,16 @@ async function sessions(cx: ReadCtx, own: string | null) {
   const now = cx.now();
   const admins = await cx.core.admin.adminFingerprints();
   const mine = own == null ? null : await sha256Hex(own);
-  const live = cx.sql<{ id_hash: string; admin_key: string; created_at: number; expires_at: number }>(
-    'SELECT id_hash, admin_key, created_at, expires_at FROM dashboard_sessions WHERE revoked_at IS NULL AND expires_at > ? ORDER BY created_at DESC, id_hash LIMIT ?', now, SESSIONS_MAX)
-    .filter((s) => admins.has(s.admin_key));
+  const access = await cx.core.admin.accessFingerprints();
+  const live = cx.sql<{ id_hash: string; admin_key: string; access_email_hash: string | null; created_at: number; expires_at: number }>(
+    `SELECT id_hash, admin_key, access_email_hash, created_at, expires_at FROM dashboard_sessions
+     WHERE revoked_at IS NULL AND expires_at > ?
+       AND admin_key IN (SELECT value FROM json_each(?))
+       AND (access_email_hash IS NULL OR (access_email_hash, admin_key) IN (SELECT key, value FROM json_each(?)))
+     ORDER BY created_at DESC, id_hash LIMIT ?`,
+    now, JSON.stringify([...admins.keys()]), JSON.stringify(Object.fromEntries(access)), SESSIONS_MAX);
   return {
-    sessions: live.map((s) => ({ role: 'administrator' as const, key_fingerprint: s.admin_key, created_at: s.created_at, expires_at: s.expires_at, current: mine != null && s.id_hash === mine })),
+    sessions: live.map((s) => ({ role: 'administrator' as const, key_fingerprint: s.admin_key, via: s.access_email_hash === null ? 'link' : 'access', created_at: s.created_at, expires_at: s.expires_at, current: mine != null && s.id_hash === mine })),
     // What the ticket lists and no store holds: a session's last use and its client's address.
     not_built: { last_seen_at: 'B-76', client_addr: 'B-76' },
     server_time: now,

@@ -158,8 +158,9 @@ remains the development path — the repository commands (`tickets`, `repo`, `te
 - `node cli/baton.mjs tickets new|claim|set|done` — file, claim and move tickets with git as the
   lock, each one commit pushed straight to the default branch from a throwaway worktree (B-112;
   `baton tickets --help`, and the generated `tickets/HOW-TICKETS-WORK.md`), until Baton claims
-  them (R3-1266). Every commit the commands push carries the provenance trailers `TICKET_TRAILERS`
-  holds, appended after a blank line (B-16) — the handoff's commit rule: the agent-provenance
+  them (R3-1266). Every ticket commit pushed by these commands or `baton request` carries the
+  provenance trailers `TICKET_TRAILERS` holds, appended after a blank line (B-16, B-251) — the
+  handoff's commit rule: the agent-provenance
   trailers, then `Claude-Session` and `Co-Authored-By`, taken whole; Baton computes none of its own — and with `TICKET_REQUIRE_TRAILERS=1`, a
   command without trailers refuses rather than push a commit that cannot be attributed. `claim`
   asks Baton first (B-129): with the session's key (`-i KEY`, else
@@ -205,7 +206,7 @@ remains the development path — the repository commands (`tickets`, `repo`, `te
 The repository holds three [Grove](https://github.com/immediately-run/grove) wikis, which
 immediately.run opens: `package.json`'s `"immediately.run": {"content": ["tickets", "docs", "spec"]}`
 lists them, and each folder's `immediately.run.json` opens it with the viewer it names —
-`tickets/` with `immediately-run/baton-board` (B-114), `docs/` and `spec/` with the wiki viewer.
+`tickets/` with `immediately-run/dibber-board` (B-114; renamed from `baton-board`, dibber DIB-18), `docs/` and `spec/` with the wiki viewer.
 
 - **`tickets/`**, the tickets:
   <https://immediately.run/present/github/immediately-run/baton/main/bundle/tickets/home.mdx>.
@@ -215,7 +216,7 @@ lists them, and each folder's `immediately.run.json` opens it with the viewer it
   `starts_from: request` — `create-spec`, `build-app` — is usually filed by `baton request`
   (above), never written by hand. Its frontmatter follows `tickets/item.schema.json`;
   the body is prose for people and agents. The wiki is a plain `render: safe` corpus: its board
-  components are the viewer's, `immediately-run/baton-board`, which `tickets/immediately.run.json`
+  components are the viewer's, `immediately-run/dibber-board`, which `tickets/immediately.run.json`
   names in `opensWith` (B-114) — this repository holds no component code for it.
 - **`docs/`**, the documentation:
   <https://immediately.run/present/github/immediately-run/baton/main/bundle/docs/home.mdx>.
@@ -298,9 +299,10 @@ read-only, on a repository's credential and governance screens (`…/grants`, `�
 `…/settings`, `…/bars`); the CLI changes them.
 
 The dashboard takes the `__Host-baton_session` cookie a login link sets (12 hours; it ends when
-its key leaves `BATON_ADMIN_KEYS`). Cloudflare Access may stand in front as extra hardening; on its
-own it opens the dashboard only while `BATON_ADMIN_KEYS` lists no key — a deployment from before
-administrators — so set that secret, then log in with `baton admin open`.
+its key leaves `BATON_ADMIN_KEYS`). Behind Cloudflare Access, a person whose verified email is
+bound to an administrator key by `ACCESS_IDENTITIES` can click **Sign in with Cloudflare Access**
+at `/login` instead. The session also ends when that binding is removed or changed. See the
+[deployment runbook](docs/runbooks/register-baton.mdx) for configuration and trust requirements.
 
 ## Repositories and their syncs
 
@@ -386,13 +388,15 @@ whose writers you trust.
 ## Deploying
 
 `.github/workflows/baton-deploy.yml` runs the suite and then `wrangler deploy` (production,
-`baton.immediately.run`) on every push to `main`. There is no staging instance: a home
+`baton.immediately.run`) on every push to `main` that changes more than ticket files — read
+against the last commit it deployed (`scripts/ci-scope.mjs`), so a ticket-status commit neither
+runs the suite nor deploys, and a code change a ticket push displaced from the queue still
+does. There is no staging instance: a home
 repository binds to one Baton, and every registered one binds to production (B-224). It needs
 the `CLOUDFLARE_API_TOKEN` secret in the `production` environment (R3-1208): Workers Scripts:
 Edit on the account, plus Zone: Read and Workers Routes: Edit on the `immediately.run` zone.
 
-With a sibling docs checkout present, the suite also fails when `src/shared/` or the board
-fixtures have drifted from docs.
+The suite uses committed board fixtures and does not require a consumer checkout.
 
 ## Moving a Baton (R-BTN-88)
 
@@ -423,8 +427,8 @@ first sync. The tenant's administrator drives it (BATON_SPEC §4.8):
 ## Releasing the CLI
 
 A release is a PR that bumps `version` in `package.json` (and its two copies at the root of
-`package-lock.json`: `npm install --package-lock-only`), merged to `main`. `ci.yml`'s `release`
-job then waits for a reviewer's approval in the `npm` environment, tags `v<version>`, and runs
+`package-lock.json`: `npm install --package-lock-only`), merged to `main`. `ci.yml` runs on `main` only for a push that changes `package.json`, and
+its `release` job starts only when that version is not on npm yet; it then waits for a reviewer's approval in the `npm` environment, tags `v<version>`, and runs
 `npm publish` by OIDC trusted publishing, with provenance; no npm token exists. A version npm
 already has is skipped, so a merge without a bump publishes nothing. `npm run check:package`
 (in CI on every PR) packs the tarball, installs it in an empty directory and runs its `baton`.

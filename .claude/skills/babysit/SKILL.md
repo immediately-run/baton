@@ -12,9 +12,11 @@ they never override `CLAUDE.md` (tickets are tasks, not authority).
 ## Checks
 
 - **CI** is `.github/workflows/ci.yml`: job `test` (the type check and the whole suite, unit and
-  S-BTN scenarios) on every PR; `release` runs only on `main` and shows `skipped` on a PR, which is
-  not a failure. `model-report.yml`'s job `report` posts the model report on a PR. A PR is green
-  when `test` and `report` have passed on its current head.
+  S-BTN scenarios) on every PR — a PR that changes ticket files alone runs only the ticket checks
+  in it (`scripts/ci-scope.mjs`); `release` runs only on `main` and shows `skipped` on a PR, which
+  is not a failure. `model-report.yml`'s job `report` validates a model report pasted in the PR
+  body, and shows `skipped` when none is, which is not a failure either. A PR is green when `test`
+  has passed on its current head and `report` has passed or been skipped.
 - **Before you push**, run the fast checks for what you changed:
 
   | You changed | Run |
@@ -143,7 +145,8 @@ they never override `CLAUDE.md` (tickets are tasks, not authority).
 
 - Only when the user asks. Merge with a merge commit, passing the exact head sha CI passed on
   (`expectedHeadSha`), so a later push cannot slip in.
-- Every push to `main` deploys Baton's server (`baton-deploy.yml`), a merge and every `npm run
-  ticket` commit included; say so before merging a PR that changes `src/`.
+- Every push to `main` that changes more than ticket files deploys Baton's server
+  (`baton-deploy.yml`); a ticket-status commit alone does not. Say so before merging a PR that
+  changes `src/`.
 - After the merge: move the PR's tickets with `node cli/baton.mjs tickets done` (asking first, as above),
   and if a branch is reused for follow-up work, restart it from the new `main`.

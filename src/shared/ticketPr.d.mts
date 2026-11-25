@@ -1,5 +1,4 @@
-// ticketPr.d.mts — the types for the vendored ticketPr.mjs (docs' scripts/lib is the source,
-// R-BTN-37). The implementation is JavaScript
+// ticketPr.d.mts — types for the shared ticketPr.mjs source (R-BTN-37). The implementation is JavaScript
 // with JSDoc; these declarations give `src/defaults` the same shapes at type-check time.
 export declare const STATUS_FIELDS: string[];
 export declare const CONTROL_FIELDS: string[];

@@ -33,6 +33,27 @@ test('rejects active references between notes and sibling links with fragments',
   ].join('\n')), [1, 2, 3]);
 });
 
+test('checks executable test code even in files with legacy fixture lines', () => {
+  assert.deepEqual(checkReferences(root, 'test/helpers.ts', [
+    "  repository: 'immediately-run/docs',",
+    'readFileSync("content/roadmap/setup.mdx");',
+    'readFileSync("immediately-run/docs/scripts/helper.mjs");',
+  ].join('\n')), [2, 3]);
+});
+
+test('only Markdown links can use a document-relative path into docs', () => {
+  const read = 'readFileSync("../docs/DEPLOY.md");';
+  assert.deepEqual(checkReferences(root, 'scripts/consumer.mjs', read), [1]);
+  assert.deepEqual(checkReferences(root, 'spec/guide.md', [
+    '[`DEPLOY.md`](../docs/DEPLOY.md)',
+    '`[Guide](../docs/DEPLOY.md)`',
+    '```js',
+    read,
+    '// [Guide](../docs/DEPLOY.md)',
+    '```',
+  ].join('\n')), [2, 4, 5]);
+});
+
 test('scans tracked package scripts, test code, skills and nested guides', (t) => {
   const checkout = mkdtempSync(join(tmpdir(), 'baton-standalone-'));
   t.after(() => rmSync(checkout, { recursive: true, force: true }));

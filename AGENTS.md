@@ -38,6 +38,11 @@ or `changes` on the last line (with the PR URL if needed). Baton, not the agent,
 releases the lease. Check the board and ticket history for the final station and the forge for
 the merged PR; a PR on its own does not show that the course completed.
 
+Post each review round on the PR. When fixing a round, archive its findings and their disposition
+in `docs/review/<ticket>-round-<n>.mdx`, with `title` and `description` frontmatter, the reviewed
+head, forge review link and verdict. Run `npm run check:wiki`. If no fix push is needed, leave
+the record on the PR for the ticket closer to archive without changing the approved head.
+
 ## The supervising agent
 
 **This section is for the agent that supervises Baton's runners** — the session that checks the

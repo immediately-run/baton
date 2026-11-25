@@ -105,7 +105,6 @@ R-BTN-69 (proposed). Each of these is refused as an unknown field today.
   | `cancel` | course | the leg that undoes the course's work when a ticket is cancelled: an ordinary leg whose `from` lists every station a ticket may be cancelled at and whose `to` is one end station; absent, a cancelled ticket closes at once | R-BTN-168 |
   | `rank_advice`, `rank_launch` | course | schema ids (R-BTN-108) that `rank.mjs`'s `advice` and `launch` must meet; absent, they are dropped | R-BTN-152 |
   | `display_status` | station | the status a ticket source's writer shows people for a ticket at this station (`show`, R-BTN-74): a string of 1–64 characters naming a status the source's reader posts as live | R-BTN-74, R-BTN-200 |
-  | `arrives` | leg | `{fact: <kind>}`: no claim runs it; it arrives when an admitted writer attests its fact (R-BTN-39), the leg having one outcome; while it leaves the ticket's station it is `waiting` on what its course names. `<kind>` is one of the closed set the CLI reads with no course code (R-BTN-192): `pr-merged`, `pr-verdict`, `pr-opened`, `pr-pushed`. Not on a `kind: person` leg, which arrives from its answer (R-BTN-116) | R-BTN-39, R-BTN-192 |
   | `retry` | leg | its retry policy: `{max_attempts, backoff_s, exhausted?}` | R-BTN-122 |
   | `stalled_s` | leg | how long the leg may be posted `waiting` before `baton.stalled` is raised; default 259,200 (72 h) | R-BTN-167 |
   | `on_ticket_changed` | leg | what a running leg does when its ticket's version moves: `continue` (the default) or `restart` | R-BTN-198 |
@@ -172,7 +171,7 @@ courses `draft-doc`, `epic`, `branch`, `ask`, `deliver` and `announce`.
 
 | Course | Legs (`from` → `to`) | Ends | Reads |
 |---|---|---|---|
-| `create-pr` (the default) | `implement` (`filed` → `pr-open` \| `delivered`); the person leg `confirm` (`delivered` → `confirmed` \| `filed`, `asks: owner`, `max_runs` 3); `review` (`pr-open`, `fixed` → `reviewed`, `max_runs` 3); `fix` (`reviewed` → `fixed`, `max_runs` 2); `adjudicate` (`reviewed` → `adjudicated`); `merge` (`reviewed`, `adjudicated` → `merged`); and the fact legs `reviewed-by-hand` (`pr-open`, `fixed` → `reviewed`, `pr-verdict`) and `merged-by-hand` (`pr-open`, `fixed`, `reviewed`, `adjudicated` → `merged`, `pr-merged`) | `merged`, `confirmed` | PRs |
+| `create-pr` (the default) | `implement` (`filed` → `pr-open` \| `delivered`); the person leg `confirm` (`delivered` → `confirmed` \| `filed`, `asks: owner`, `max_runs` 3); `review` (`pr-open`, `fixed` → `reviewed`, `max_runs` 3); `fix` (`reviewed` → `fixed`, `max_runs` 2); `adjudicate` (`reviewed` → `adjudicated`); `merge` (`reviewed`, `adjudicated` → `merged`); and the fact legs of R-BTN-203 (specified there; `docs/standard-courses.mdx`) | `merged`, `confirmed` | PRs |
 | `review-pr` | `review` (`requested`, `changes-requested` → `approved` \| `changes-requested`, `max_runs` 3); `conclude` (`requested`, `changes-requested` → `concluded`) | `approved`, `concluded` | PRs |
 | `bug-report` | `trace` (`reported` → `traced`); `origin` (`traced` → `explained`); `dedupe` (`explained` → `new-cause` \| `duplicate`); `file` (`new-cause` → `ticketed`); `fold` (`duplicate` → `folded`); `prevent` (`ticketed`, `folded`, `prevented` → `prevented`, `max_runs` 3); the fact leg `merged-by-hand` (`prevented` → `merged`, `pr-merged`) | `merged`; `closed` by `close-pr` | PRs |
 | `draft-ticket` | `research`, `draft`, `check` (`requested` → `researched` → `drafted` → `checked`; `check` also leaves `checked`, `max_runs` 3); `merged-by-hand` (`checked` → `merged`, `pr-merged`) | `merged`; `closed` by `close-pr` | PRs |
@@ -229,7 +228,7 @@ courses `draft-doc`, `epic`, `branch`, `ask`, `deliver` and `announce`.
     by its `id` wherever the branch holds it (under `archive/` once archived). `prs:` and the
     ticket's other filter fields are read from the default branch only.
   - **The owner's merge is the approval.** `merged-by-hand` waits on the `owner` and arrives
-    when they merge the PR, exactly as `create-pr`'s does (R-BTN-192). Which merge counts, the
+    when they merge the PR, exactly as `create-pr`'s does (R-BTN-203). Which merge counts, the
     owner's own commits on the PR, and what a hand merge may change are that rule's, for every
     course alike (B-154).
   - **Sending back and rejecting.** The owner may send the last writing leg back with
@@ -264,15 +263,8 @@ courses `draft-doc`, `epic`, `branch`, `ask`, `deliver` and `announce`.
   `ready` or `waiting`, and settle a leg that declares `arrives` (R-BTN-192); they never place a
   ticket. A verdict a holder's leg writes is its evidence; the holder's `advance` or end moves
   the ticket. What a human does on the forge moves it through the courses' fact legs:
-  - `create-pr` adds `reviewed-by-hand` (`from: [pr-open, fixed]`, `to: reviewed`,
-    `arrives: {fact: pr-verdict}`) and `merged-by-hand` (`from: [pr-open, fixed, reviewed,
-    adjudicated, human-merge]`, `to: merged`, `arrives: {fact: pr-merged}`): a pusher's verdict
-    under `cooperative`, or the human-only identity's where the policy admits no `sync` arrival
-    (R-BTN-192), that no claim of the ticket wrote; and a merge no `merge` leg made, a human's
-    landing of a control path at `human-merge` included (R-BTN-184). A runner's `review` and
-    `merge` stay runner legs.
-  - `create-spec`'s `converse` declares `arrives: {fact: pr-opened}` and `address`
-    `arrives: {fact: pr-pushed}` (below).
+  - The PR courses' fact legs and reconcile legs are R-BTN-203's, listed in
+    `docs/standard-courses.mdx`. A runner's `review` and `merge` stay runner legs.
 - **`spec-to-tickets`** (B-99) takes one merged specification — entered by `baton ticket request`
   (`starts_from: request`), the sentence naming the spec; a `create-spec` conversation's merged
   PR is the usual input — and files its child tickets. `decompose` drafts one ticket per spec

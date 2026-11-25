@@ -12,7 +12,7 @@ the PR's change is on the default branch and the ticket is closed.
 > completion: a harness that is a client of a background service must keep its session in
 > process (`opencode run --standalone`, or the equivalent) — a client that can exit before its
 > work ends leaves truncated output and an orphaned session posting to a claim that no longer
-> exists (B-84). A repository's `agent_wrapper` in `.baton/baton.json`, or the host's
+> exists (B-84). Your completion is your exit **or your silence** (B-108): the stub stops waiting at the earliest of your exit, fifteen minutes of quiet on every activity signal it can see — your stdout, the wrapper’s log, the harness’s own store — and five hours of the leg, its ceiling; the stdout you left is judged as any exit’s is. A repository's `agent_wrapper` in `.baton/baton.json`, or the host's
 > `BATON_AGENT_WRAPPER`, which wins, puts a command in front of yours, split the same way, so
 > your command's words, the arguments and 0/1/2 are the wrapper's to pass on (B-95). Never end
 > with work in flight: the process is the session, and nothing resumes it — wait, in the
@@ -55,6 +55,13 @@ Set the ticket file's `status:` to `done` and commit that to the default branch,
 repository closes tickets another way. If an exit criterion turned out to need something this
 ticket cannot do, such as a live check or a step only a person can take, file it as its own
 ticket rather than leaving this one open.
+
+## When you do not merge
+
+If a check is red, a blocking finding is open or the merge is refused, do not merge: end with
+lines that say which PR and why. The stub reads the forge after you exit and reports `merged`
+only when every PR of the ticket is merged and none is open; otherwise the leg fails, quoting
+your last lines, and the ticket stays where it was.
 
 ## Do not
 

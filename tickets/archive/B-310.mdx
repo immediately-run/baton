@@ -1,0 +1,114 @@
+---
+title: "B-310 — Sign-in through Cloudflare Access: an email ACCESS_IDENTITIES binds to an administrator key opens that key's session, no terminal (R-BTN-155, S-BTN-308)"
+id: B-310
+project: baton
+status: done
+updated: 2026-11-22
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1310
+tier: critical
+description: "POST /v1/login {access: true}, sent only by an explicit click: a verified Cloudflare Access assertion whose email the deployment's ACCESS_IDENTITIES secret binds to an administrator key opens that key's dashboard session, its line checked on every request. The owner approved the rule on 2026-11-21."
+topics:
+  - dashboard
+  - sign-in
+owns: {}
+prs:
+  - https://github.com/immediately-run/baton/pull/343
+depends_on: []
+---
+
+**Brief:** the owner approved it on 2026-11-21: a person Cloudflare Access has verified reaches a
+dashboard session without a terminal, by one explicit click. Today the only sign-in is
+`baton admin open`'s one-time link, so every sign-in needs a shell holding an administrator key,
+even after Access has let the person through. The rule is R-BTN-155's *Sign-in through Cloudflare
+Access*, tested by S-BTN-308. The owner accepted the Access configuration as a second root of
+trust (R-BTN-57) and an explicit click as the only guard against an agent driving a signed-in
+browser; `docs/security-model.mdx` (reach 3) records the risk.
+
+**Spec:** [BATON_SPEC §11.2](../../spec/BATON_SPEC/11-people.md#sec-11-2) ([R-BTN-155](../../spec/BATON_SPEC/11-people.md#sec-11-2), [R-BTN-57](../../spec/BATON_SPEC/11-people.md#sec-11-2)),
+[§12.4](../../spec/BATON_SPEC/12-security.md#sec-12-4) ([R-BTN-16](../../spec/BATON_SPEC/12-security.md#sec-12-4)), [§2.1](../../spec/BATON_SPEC/02-deployments.md#sec-2-1) (`AccessIdentities`), [§13](../../spec/BATON_SPEC/13-data-model.md#sec-13)
+(`dashboard_sessions.access_email_hash`), [§14](../../spec/BATON_SPEC/14-api.md#sec-14) (`POST /v1/login`); scenario [S-BTN-308](../../spec/BATON_SPEC/15-verification.md#scenarios).
+
+## Plan
+
+1. **The bindings, a port.** Add `AccessIdentities` beside `AdminKeys` (`src/core/ports.ts`), read
+   on every request as `AdminKeys` is: the Cloudflare secret `ACCESS_IDENTITIES`; locally
+   `--access-identities <file>` (`src/local/main.ts`, re-read per call like `--admin-keys`). Parse
+   it in `src/core/validate.ts`: `<email> <fingerprint>` lines, emails ASCII and ASCII-lowercased,
+   at most one line per email. A malformed or duplicated line makes the whole value bind nothing:
+   Access sign-in answers `unavailable`, nothing else changes. Never add it to `wrangler.toml`.
+2. **A verifier of its own.** Add `verifyAccess(req, env) → email | null` in `src/core/auth.ts`,
+   sharing `verifyOwner`'s key set and `jwtVerify` (`issuer` the team, `audience` `ACCESS_AUD`) but
+   no `OWNER_EMAILS` check: absent, unverified, expired, no or non-ASCII email, or Access not
+   configured is null (`unauthenticated`); a key-set fetch failure is `unavailable`. Rewrite the
+   comments at `auth.ts` (≈128–133, "until B-46 removes this read") and `ports.ts` (≈95–97, "Access
+   is hardening … Baton never reads") to say what is now true.
+3. **A principal header of its own.** For `POST /v1/login` only, the front puts the verified email
+   in a new header, `X-Baton-Access-Email`, added to `PRINCIPAL_HEADERS` (`src/core/front.ts:97`) so
+   a client's copy is stripped before forwarding; the core reads it on that route alone.
+4. **`POST /v1/login {access: true}`** (`src/core/admin.ts`). Exactly one of `token` and `access`,
+   else `invalid-params`. Look the email up; if its fingerprint is in `BATON_ADMIN_KEYS`, open a
+   session as the link path does (`dashboard_sessions`, the same cookie and lifetime,
+   `Cache-Control: no-store`, R-BTN-16's `Origin` and `Content-Type` checks), with
+   `access_email_hash` set, and record the event `{act: "login", via: "access", email_sha256}` as
+   `admin:<fp>`, all in one `store.transaction`. Otherwise `unauthenticated`, no cookie. The new
+   column is a new numbered migration (append-only).
+5. **The per-request check.** Where a session is resolved, one with `access_email_hash` set also
+   finds its email's line by hash and ends (revoked) when there is none or it names another key.
+   `GET /v1/admin/sessions` shows `via: "access" | "link"`.
+6. **Signed-out behind Access.** Fix `dashboardPrincipal` (`src/core/front.ts:52–67`): with an
+   assertion, no cookie and an administrator key configured, the answer is `unauthenticated`, not
+   `verifyOwner`'s `forbidden`, so the shell reaches the sign-in screen.
+7. **The sign-in page.** `src/dashboard/app/SignIn.tsx`: a "Sign in with Cloudflare Access"
+   button sends `{access: true}` on click and only then — never on load, after a logout or when a
+   read answers `unauthenticated`. On `unauthenticated` it says the email is not bound (without
+   naming it) and shows the `baton admin open` line. A `/login#token` link signs in as today.
+8. **Docs.** `docs/runbooks/register-baton.mdx` (beside `BATON_ADMIN_KEYS`, ≈58–64): setting
+   `ACCESS_IDENTITIES` with `wrangler secret put`, and the Access application's settings the
+   security model names (hostname scope, session duration, a factor no agent session holds).
+   `README.md` ≈303–306: the sign-in paragraph.
+9. **Tests.** Every clause of S-BTN-308, in its own test file naming the row; the test JWKS
+   (`TEST_ACCESS_JWKS`) only under the test bindings.
+
+**Not in this ticket:** owners' sessions and any Access line for an owner key (B-76, B-206).
+Removing the Access-alone path (`verifyOwner`, `X-Baton-Owner`, `OWNER_EMAILS`) is B-46's, which
+waits for this ticket so the two never edit `auth.ts` and `front.ts` at once. No Access setting and
+no secret's value changes here.
+
+### Trust
+
+One new input: the secret `ACCESS_IDENTITIES`. Only whoever controls the deployment writes it
+(R-BTN-57), by the platform's secret store or the local file, never git, a ticket or a runner. The
+email it is matched against comes only from a `Cf-Access-Jwt-Assertion` verified against the
+team's keys and the application's audience, carried to the core in a principal header the front
+strips from every client request; no body or cookie names an email. `{access: true}` carries no
+authority. Whoever can make Access assert a bound email is trusted as that key's holder: the
+second root of trust R-BTN-57 names, which Baton cannot inspect.
+
+### Invariants
+
+- **A session is its key's (R-BTN-155).** An Access sign-in opens a session only for a key in
+  `BATON_ADMIN_KEYS`; it ends with the key, and with its line.
+- **Same-site (R-BTN-16).** The one cookie and its attributes, `Origin`/`Content-Type` on
+  `POST /v1/login`, `Cache-Control: no-store` on the answer.
+- **Trust only verified JWTs (CLAUDE.md).** The test JWKS is honoured only under the test
+  bindings; nothing is added to `wrangler.toml`; a principal header never comes from a client.
+- **Validate before you write (CLAUDE.md).** `ACCESS_IDENTITIES` and the body are checked in
+  `validate.ts` before any SQL; the session row and its event are one transaction.
+- **Filter fields only (R-BTN-33).** The email is stored as its SHA-256, never in clear.
+
+## Exit criteria
+
+- [ ] `npm test` passes, with S-BTN-308's test file naming its §15 row.
+- [ ] `npm run typecheck` passes.
+- [ ] `git grep -n "ACCESS_IDENTITIES" wrangler.toml` returns nothing.
+- [ ] `git grep -n "X-Baton-Access-Email" src/core/front.ts` shows it in `PRINCIPAL_HEADERS`.
+
+## Status
+
+_filed 2026-11-21._ The owner approved the rule (R-BTN-155's sign-in through Cloudflare Access) in
+the supervising session on bering; revised the same day after two adversarial reviews and the
+owner's choices on them.

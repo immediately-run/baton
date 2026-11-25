@@ -47,6 +47,8 @@ import checkConclusions from './0045_check_conclusions.sql';
 import ticketProvenance from './0046_ticket_provenance.sql';
 import legRunInputs from './0047_leg_run_inputs.sql';
 import conditions from './0048_conditions.sql';
+import coreConditions from './0075_core_conditions.sql';
+import retireReviewerSettings from './0076_retire_reviewer_settings.sql';
 import eventLookups from './0049_event_lookups.sql';
 import alarmIndexes from './0052_alarm_indexes.sql';
 import retention from './0053_retention.sql';
@@ -63,6 +65,9 @@ import dependencyConsents from './0062_dependency_consents.sql';
 import runnersViewReads from './0063_runners_view_reads.sql';
 import childrenOwnerState from './0064_children_owner_state.sql';
 import readEfficiency from './0065_read_efficiency.sql';
+import runnerViews from './0066_runner_views.sql';
+import retirePolicyPins from './0070_retire_policy_pins.sql';
+import accessSignIn from './0071_access_sign_in.sql';
 import { isUniqueViolation, logEvent, mintRunId, type Random } from '../core/db';
 import type { Store } from '../core/ports';
 
@@ -206,4 +211,9 @@ export const MIGRATIONS: Migration[] = [
   // `frozen`, `unfrozen`, `sealed`, `imported` event kinds).
   { id: 64, sql: childrenOwnerState },
   { id: 65, sql: readEfficiency },
+  { id: 66, sql: runnerViews },
+  { id: 70, sql: retirePolicyPins },
+  { id: 71, sql: accessSignIn },
+  { id: 75, sql: coreConditions },
+  { id: 76, sql: retireReviewerSettings },
 ];
