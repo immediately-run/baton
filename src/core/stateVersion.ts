@@ -75,6 +75,8 @@ export function versionedStore(inner: Store): VersionedStore {
   const wrote = (rows: number, table: string | null = null) => {
     if (!tracking || quiet || rows <= 0) return;
     written += rows;
+    // The owner's dispatch queue and idle timer are accounting writes, not scheduling changes.
+    if (table === 'runner_idle' || table === 'unblocked_dispatch') return;
     const activity = table != null && activityTables.has(table);
     activityDirty ||= activity;
     boardDirty ||= !activity;

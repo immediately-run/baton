@@ -12,11 +12,9 @@ mark); the
 policy's knobs are stored and computed over, and what enforces `merge.*`, `paths.*`,
 `tickets.created: proposed` and the `std:` types below is this page.
 
-## 1. The policy's dry run (R-BTN-188, proposed)
+## 1. Extending the policy's dry run (R-BTN-188, proposed)
 
-`PUT /v1/owner/{repository}/policy` with `dry_run: true` (`baton owner policy apply <preset>
---dry-run`) writes nothing and answers what the change would do: the knobs changed, each
-guarantee held or broken after it, and what the new values would stop — grants whose role the new
+R-BTN-188 specifies the built preview. Still proposed are stops for grants whose role the new
 `outbox` no longer admits to a class they deliver or whose null domain now counts toward nothing,
 queued legs whose requirements the new `attestations` entries admit no writer for, tickets on a
 course whose `merge` leg a new `merge.trusted` leaves without a trusted runner, and, for a change

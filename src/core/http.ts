@@ -4,10 +4,11 @@ import { clientVersionsValue, maxVersion, parseVersion } from '../shared/version
 
 /** Every response carries these (R-BTN-16): no framing, nothing loaded from elsewhere. */
 export const SECURITY_HEADERS: Record<string, string> = {
-  'Content-Security-Policy': "default-src 'self'; frame-ancestors 'none'",
+  'Content-Security-Policy': "default-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'",
   'X-Frame-Options': 'DENY',
   'X-Content-Type-Options': 'nosniff',
   'Referrer-Policy': 'no-referrer',
+  'Cross-Origin-Resource-Policy': 'same-origin',
 };
 
 // ── the client versions Baton serves (§11.3 R-BTN-197, B-254) ───────────────────────────
