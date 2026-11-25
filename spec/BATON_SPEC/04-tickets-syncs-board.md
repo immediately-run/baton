@@ -586,7 +586,8 @@ The fingerprint stores no ticket content and is an optimization, never authority
   - **Format** `baton.owner-state/v1`: `{format, schema_version (highest applied migration),
     exported_at, origin, events_seq, sections, digest}`; `digest` is SHA-256 over the RFC 8785
     canonical JSON of the rest. **Default sections** (each table's stored columns):
-    `repositories`, `repository_owners`, `credentials`, `sync_keys`, `runner_grants`,
+    `repositories`, `repository_owners`, `registration_tokens`, `token_registrations`,
+    `credentials`, `sync_keys`, `runner_grants`,
     `runners`, `owner_bars`, `ticket_overrides`, `closed_tickets`, `external_resources`,
     `resource_instances`, `instance_serves`, `couriers`, `instance_readings`,
     `repository_policies`, `policy_floors`, `human_keys`, `capability_capacity`,
