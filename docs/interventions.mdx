@@ -907,6 +907,20 @@ Entry shape: **When** · **Host** · **Tickets** · **Why it was needed** · **R
     Three are left for the owner: B-271 (claim 523, a `done` end, confirmed only by closure or
     the ticket's absence), and B-127 (claim 106, vltava2) and B-176 (claim 240, bering), old ends
     with no position.
+  - The owner resolved the three on 2026-11-25; `?state=unconfirmed` is empty.
+    - **B-271 (claim 523):** confirmed from the dashboard, though its `done` was false. The
+      merge leg of 2026-11-22 reported `merged` while PR #364 stayed open; it predates
+      `696bbeab` (2026-11-23), which makes the leg report `merged` only when the forge shows the
+      PR merged. Release was the right action. The confirm only set `confirmed_at` and logged a
+      `confirmed` event; it closed nothing, since closure is git's. Baton still holds B-271 at
+      `reviewed` with `merge` next, as a release would have, and PR #364 conflicts with `main`.
+    - **B-127 (claim 106) and B-176 (claim 240):** parked ends from before git closed both
+      tickets as done (2026-11-12, 2026-11-18). Nothing could confirm them: the observation lists
+      only live tickets' ends, and R-BTN-10 confirms a suspension's evidence, not its ticket's
+      closure. The dashboard could not resolve them either: the Unconfirmed tab lists them, but
+      the ticket page answers "No such ticket". The owner confirmed both from the browser
+      console with `POST /v1/ui/claims/{id}/confirm` and `{action: 'confirm', confirm: true}`.
+      Filed as B-337 (#426).
   - `std:git.evidence@1` is built in #415: the observation lists each unconfirmed end's
     evidence, the sync checks it (a commit in git or on the forge; a comment, review, PR or
     commit URL on a known GitHub host) and attests it, and the server confirms only on
