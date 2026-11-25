@@ -13,7 +13,7 @@ in `archive/` — and posts the tickets to Baton; the body is for people, and Ba
 |---|---|
 | `id` | the ticket’s id; the file is named after it |
 | `title` | its title on the board |
-| `status` | `available`, `in-progress`, `in-review` and `deprioritized` are live; `done` is done, in `archive/`; `deferred` and `superseded` are closed as withdrawn |
+| `status` | `available`, `in-progress`, `in-review` and `deprioritized` are live; `done` is done, in place or in `archive/`; `deferred`, `withdrawn` and `superseded` are closed as withdrawn |
 | `depends_on` | the tickets this one waits for: it is offered only once each is done — another repository’s by its qualified id `<repository>:<id>` |
 | `order` | where it ranks on the board, lower first |
 | `tags` | the tags Baton reads, below |
@@ -27,10 +27,11 @@ Every other key is ignored, so a repository may carry its own.
 
 ## Ids
 
-New tickets take `B-<n>` from Baton's sequence (`baton tickets new` asks for it,
-unique across concurrent branches); with Baton unreachable, `baton tickets new` takes
-the next free number across `tickets/` and `tickets/archive/` and says so.
-Ids under `R3-` are still accepted — a ticket may be named by one — but `baton tickets new` never allocates them.
+New tickets take `B-<n>` from Baton's sequence, unique across concurrent branches:
+`dibber new` asks for it through `.dibber/config.json`'s coordinator, `baton tickets next
+ticket-<prefix> --coordinator`, and refuses when Baton does not answer; only `dibber new
+--offline` takes the next free number by a scan of `tickets/` and the branches.
+Ids under `R3-` are still accepted — a ticket may be named by one — but Baton never allocates them.
 `.baton/baton.json` sets `ticket_prefix` and `legacy_ids`; changing them renames no ticket already filed.
 
 ## Tags Baton reads
@@ -46,8 +47,6 @@ Another tag is the repository’s own ranking word; Baton reads it nowhere.
   there is nothing to wait for. It runs to the next blank line or `**Label:**` line, and a
   dependency written only in prose is one the cycle check cannot see. With `check.depends_line`
   on in `.baton/baton.json`, `baton tickets check` holds the line to the frontmatter.
-- `**Used by:**` names the tickets that depend on this one: the reverse mention, kept by the
-  ticket that adds the dependency, so a file says who waits on it without a search.
 - A dependency on **another repository’s ticket** is `depends_on: [<repository>:<id>]` — as
   `baton:B-111` — named the same way on the `**Depends on:**` line: the ticket is offered
   once the target is done on its own board, and the repository must be one `.baton/baton.json`’s
@@ -61,42 +60,43 @@ A ticket names a project — a page in the items folder’s projects/ folder who
 says `kind: project` — when its work belongs with other tickets’ work. Choose or create the
 project **before filing**: a session is the moment it is plain which tickets belong together,
 and a project page written afterwards leaves the tickets it was meant to group ungrouped.
-This repository’s default project is `baton`: `baton tickets new` writes it when `--project` names none.
+This repository’s default project is `baton`: file with `dibber new --project baton` unless the ticket belongs elsewhere.
 
 ## The commands
 
-Each command is one commit pushed straight to the default branch, made in a throwaway worktree
-at the freshly fetched head: your own branch and working tree are never touched. A push refused
-because the branch moved is fetched again and retried on the new head.
+Dibber writes the ticket files; Baton reads them, hands out their numbers and holds the claims.
+Every write lands in your working tree: commit it and push it — a filing alone, on its own
+`baton-ticket/<id>` branch, through a pull request.
 
 ```sh
-baton tickets new --title "…" --project baton    # file a ticket, B-<n>, with the conventional body
-baton tickets claim <id> [-i KEY]           # available → in-progress; asks Baton first — a ticket
-                                           # past its course's start is taken over where Baton holds it
-                                           # refuses one citing a rule amended since it was filed
-                                           # (--rules-reread <ids>, once re-read)
-baton tickets set <id> <status> [--pr URL] # any live status; --pr adds a pull request URL
-baton tickets done <id> [--pr URL]         # done, moved to archive/
-baton tickets check [--repo DIR]           # check the tickets without posting them
+dibber new --title "…" --project baton --body-file F  # file a ticket, B-<n> from Baton's sequence
+baton tickets check <id> --claimable [-i KEY]  # may it be claimed? asks Baton first — a ticket past
+                                               # its course's start is a takeover, its PRs and branch
+                                               # printed; refuses one citing a rule amended since it
+                                               # was filed, until a rules re-read note names the ids
+dibber claim <id>                              # available → in-progress
+dibber set <id> <status> [--pr URL] [--note T] # any status; --pr adds a pull request URL
+dibber done <id> [--pr URL]                    # done
+baton tickets check [--repo DIR]               # check the tickets without posting them
 ```
 
-`claim` reads the ticket from Baton with the key `-i` names (else `BATON_KEY_FILE`) before it
-writes: a ticket Baton holds past its course's start is continued there — the PRs are written
-back and the position printed — never started over; only another live claim refuses, and an
-unanswered read (Baton unreachable, no key) refuses rather than trust the frontmatter, unless
-`--offline` claims on git's word alone.
+`check --claimable` reads the ticket from Baton with the key `-i` names (else `BATON_KEY_FILE`)
+and writes nothing: a ticket Baton holds past its course's start is continued there — never
+started over; another live claim, an undone dependency, the git lock or a parked status is not
+claimable, and an unanswered read (Baton unreachable, no key) exits 2 unless `--offline` judges
+git's word alone. A rule re-read is recorded with
+`dibber set <id> --note "rules re-read: <ids>"`.
 
-A ticket filed by `new` carries `### Trust` (every new input it adds, who may write it, how it is
+A ticket carries `### Trust` (every new input it adds, who may write it, how it is
 verified) and `### Invariants` (the rules it must not break, by id); with `check.sections_since`
 set, `baton tickets check` fails a ticket filed on or after that day without them, or with either
-still empty or the skeleton’s placeholder, and `new` refuses to file one unfilled — pass
-`--trust` and `--invariants`, or a `--body-file` that fills both. A ticket is dated by the later
+still empty or a placeholder. A ticket is dated by the later
 of its `_filed` Status line and its file’s first commit. With `check.sections_from_id` set (an
-id, `B-176`), every ticket at or above that id must carry the `_filed` line `new` writes, so a
+id, `B-176`), every ticket at or above that id must carry a `_filed` Status line, so a
 shallow clone such as CI’s judges it; one below it with no `_filed` line, or under another prefix,
 is dated by its first commit, which a shallow clone cannot show, and is then listed, not judged.
 A request ticket (`tags: [request]`) is not judged: its course’s legs write the tickets that
 are, a child a leg files (`parent:`) included.
 
-`baton tickets --help` lists every flag, the tags Baton reads and the `Requires:` clause a
-description ends with.
+`baton tickets --help` and `dibber --help` list every flag; `baton tickets --help` also lists the
+tags Baton reads.

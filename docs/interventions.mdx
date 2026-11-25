@@ -914,3 +914,39 @@ Entry shape: **When** · **Host** · **Tickets** · **Why it was needed** · **R
 - **Autonomous handling:** #415, live since #417 moved the sync's pinned CLI. A server change
   the sync must answer is not live until the pin moves; the 2026-11-21 entry's lag report would
   have caught it. *No ticket yet.*
+
+## 2026-11-25 11:30–12:47 — bering overloaded; the runner churned 43 tickets through sandboxes E2B could not place
+
+- **Host:** bering (runner session `run-20261124-210538-r1`, `--concurrency 2`)
+- **Tickets:** 43 released in a few minutes, 39 `released:stale-board` and 4
+  `released:cannot-finish:transient` (B-141, B-279, B-30, B-60); R3-1263 (its fix's agent died
+  with exit code 135, its hand-off with `EIO`)
+- **Why it was needed:**
+  - Between about 11:30 and 12:47 UTC the host's load average reached about 216. The desktop
+    session crash-looped (`gnome-shell` and its helpers restarting every few seconds), and
+    `/tmp`, a 16 GB `tmpfs` in RAM, held 12 GB, 11 GB of it other Claude sessions' scratchpads.
+    The kernel log was not readable to the supervisor, so the cause is not known.
+  - The runner could not reach Baton for about 50 minutes; Baton reaped it, and it re-keyed
+    (incarnation 2) once the network answered.
+  - Then every leg's sandbox was refused: "Failed to place sandbox: this node cannot map 4096 MiB
+    of guest memory: its memory pool is too small or in use by running sandboxes" (47 times).
+    The runner claimed the next ready ticket after each failure, so it went through the whole
+    queue in minutes. A failure to start the ticket source's sandbox was reported as "ticket
+    moved under the claim" and released `stale-board`; a failure to start a leg's session was
+    released `cannot-finish:transient`, which counts against the ticket's retries.
+  - Each release is an end a sync must confirm (R-BTN-10), so all 43 went from ready to
+    `awaiting-sync`, and stayed there: the last sync had run at 12:19.
+- **Resolution:**
+  - None needed for the host: by 12:47 the load fell (1.2 at 12:50) and sandboxes started again.
+    The supervisor deleted nothing in `/tmp`; the large scratchpads are other sessions'.
+  - The supervisor meant to drain the runner when the failures started. Its process search
+    matched its own shell, which received the SIGTERM instead; by the time the runner's real PID
+    was found (its process name is `MainThread`, not `node`), sandboxes were starting again, so
+    it was left running.
+  - The 43 wait for the next sync; nothing about their positions or PRs changed.
+- **Autonomous handling:** the owner, 2026-11-25: "The runner should not advertise its ability
+  to start an e2b sandbox if it turns out that it lacks sufficient memory." A runner whose
+  executor cannot place a sandbox should stop claiming — declare no capacity in its heartbeat,
+  or check placement before the claim — and resume when placement succeeds; a placement failure
+  should be named as one, not as a moved ticket, and should not cost the ticket a retry.
+  *No ticket yet.*
