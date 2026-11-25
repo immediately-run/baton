@@ -1,0 +1,14 @@
+---
+title: B-8 review round 4
+description: Findings and disposition for the fourth review of runner registration tokens.
+---
+
+[Round 4 review](https://github.com/immediately-run/baton/pull/321#pullrequestreview-6055926342) on
+`1628562add48daa451178fc026f0bab2e57aa7af`: changes requested.
+
+| Finding | Disposition |
+| --- | --- |
+| [Legacy credential cutover](https://github.com/immediately-run/baton/pull/321#discussion_r4653661083) | Still blocks delivery. Seed entries hold SSH public keys, not secrets their holders can present as API keys. Refusing those signers before their replacement is installed would stop active runners. The draft does not claim migration, grant review, or span coverage. |
+| [Expired claim accepts writes before the alarm](https://github.com/immediately-run/baton/pull/321#discussion_r4693598497) | Reject writes to an expired capped claim even after policy is reopened. S-BTN-69 checks advance and end before the alarm. |
+| [Ticket reads report a runner-wide lease](https://github.com/immediately-run/baton/pull/321#discussion_r4693598519) | Ticket list and detail use the same capped lease as Running. S-BTN-69 checks both reads. |
+| [Heartbeat exposes the internal cap](https://github.com/immediately-run/baton/pull/321#discussion_r4693598533) | Project the public heartbeat fields explicitly. S-BTN-69 checks the response that clears a live cap. |

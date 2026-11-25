@@ -543,7 +543,9 @@ export class RunnerApi {
       grant: { capabilities: grantCapabilities },
       // R-BTN-4 (B-188): every active claim; `claim`, the oldest, stays for runners before B-188.
       ...(() => {
-        const views = claims.map((c) => ({ ...c, ...this.c.claimView(c.id), activity: this.currentActivity(w.id, c.id) }));
+        const views = claims.map(({ id, ticket_id, nonce, claimed_at }) => ({
+          id, ticket_id, nonce, claimed_at, ...this.c.claimView(id), activity: this.currentActivity(w.id, id),
+        }));
         return { claims: views, claim: views[0] ?? null };
       })(),
       messages: this.deliver(w.id, now),
@@ -679,6 +681,10 @@ export class RunnerApi {
           hb.transcript_refusals.push({ index: t.index ?? -1, code: 'forbidden', message: 'this repository does not allow API-key runners' });
           continue;
         }
+        if (claim.api_lease_cap_at !== null && claim.api_lease_cap_at <= now) {
+          hb.transcript_refusals.push({ index: t.index ?? -1, code: 'claim-ended', message: 'the claim lease expired' });
+          continue;
+        }
         // A pointer under a claim names one of that claim's repository's transcript repositories
         // (§6.8, R-BTN-66): another repository's list does not widen it.
         if (!transcriptReposOf(this.c.store, repositoryOf(claim.ticket_id)).includes(t.repo)) {
@@ -791,10 +797,13 @@ export class RunnerApi {
     }
     if (typeof a.detail?.pr === 'string') this.checkPullRequest(a.detail.pr, a.claim_id, `activity ${a.id}.detail.pr`);
     if (a.claim_id !== null) {
-      const claim = this.rows<{ runner_id: number; status: string; ended_at: number | null; credential_id: string; ticket_id: string }>(
-        'SELECT c.runner_id, c.status, c.ended_at, w.credential_id, c.ticket_id FROM claims c JOIN runners w ON w.id = c.runner_id WHERE c.id = ?', a.claim_id)[0];
+      const claim = this.rows<{ runner_id: number; status: string; ended_at: number | null; credential_id: string; ticket_id: string; api_lease_cap_at: number | null }>(
+        'SELECT c.runner_id, c.status, c.ended_at, w.credential_id, c.ticket_id, c.api_lease_cap_at FROM claims c JOIN runners w ON w.id = c.runner_id WHERE c.id = ?', a.claim_id)[0];
       if (!claim || claim.runner_id !== runnerId) throw new BatonError('not-holder', `claim ${a.claim_id} is not this runner's`);
       requireRunnerKeyPolicy(this.c.store, claim.credential_id, repositoryOf(claim.ticket_id));
+      if (claim.status === 'active' && claim.api_lease_cap_at !== null && claim.api_lease_cap_at <= now) {
+        throw new BatonError('claim-ended', 'the claim lease expired');
+      }
       if (claim.status !== 'active') {
         // §6.9: for 10 minutes after the end, an update that only closes an open activity is
         // accepted; anything else, and every later update, is claim-ended.

@@ -1007,7 +1007,7 @@ export class BatonCore {
           const a = this.claims.claim(runnerId, body);
           const ticket = String(a.ticket_id ?? '');
           if (ticket.includes(':')) {
-            requireRunnerKeyPolicy(this.store, cred, repositoryOf(ticket));
+            this.requireClaimKeyPolicy(cred, runnerId, Number(a.claim_id));
             const standing = this.sql<{ control_json: string }>('SELECT control_json FROM signed_control WHERE repository_id = ?', repositoryOf(ticket))[0];
             // Set once: a replay keeps the pairing the claim was made with, never the moved
             // board's (an empty string is the no-record shape, never NULL). Round 4: stored on
@@ -1416,9 +1416,13 @@ export class BatonCore {
   }
 
   private requireClaimKeyPolicy(cred: string, runner: number, claim: number): void {
-    if (!cred.startsWith('bak_')) return;
-    const row = this.sql<{ ticket_id: string }>('SELECT ticket_id FROM claims WHERE id = ? AND runner_id = ?', claim, runner)[0];
-    if (row) requireRunnerKeyPolicy(this.store, cred, repositoryOf(row.ticket_id));
+    const row = this.sql<{ ticket_id: string; api_lease_cap_at: number | null }>(
+      'SELECT ticket_id, api_lease_cap_at FROM claims WHERE id = ? AND runner_id = ?', claim, runner)[0];
+    if (!row) return;
+    requireRunnerKeyPolicy(this.store, cred, repositoryOf(row.ticket_id));
+    if (row.api_lease_cap_at !== null && row.api_lease_cap_at <= this.now()) {
+      throw new BatonError('claim-ended', 'the claim lease expired');
+    }
   }
 
   /**

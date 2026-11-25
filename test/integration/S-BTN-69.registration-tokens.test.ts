@@ -126,7 +126,10 @@ describe('S-BTN-69 registration and API keys', () => {
     }
   });
 
-  it.each(['fence acknowledgment', 'fence expiry', 'lease expiry'])('scopes %s to API-key policy', async (scenario) => {
+  it.each(['fence acknowledgment', 'fence expiry', 'lease expiry', 'late re-enable', 'early re-enable'])('scopes %s to API-key policy', async (scenario) => {
+    // Keep the host alarm out of the interval between advancing the fake clock and calling tick.
+    await withCore((c) => (c as unknown as { ports: { scheduler: { set(at: number): Promise<void> } } })
+      .ports.scheduler.set(Math.max(Date.now(), T0) + 3_600_000));
     expect((await apiKeyCall(admin.key, '/v1/admin/repositories', { id: 'docs', owner_keys_add: [owner.line] })).status).toBe(200);
     await syncCall('/v1/sync/board', payload('f'.repeat(40), null, board.states.A));
     await cutover();
@@ -142,9 +145,9 @@ describe('S-BTN-69 registration and API keys', () => {
     const beat = hbBody('vm-a', { hostname: 'shared-runner', secret_hash: await sha256(secret) });
     expect((await post('/v1/runner/heartbeat', beat)).status).toBe(200);
     const claim = await post('/v1/runner/claim', { request_id: 'shared-key-1' });
-    const { claim_id, ticket_id } = await claim.json() as { claim_id: number; ticket_id: string };
+    const { claim_id, ticket_id, legs: [leg] } = await claim.json() as { claim_id: number; ticket_id: string; legs: string[] };
     expect(ticket_id).toMatch(/^docs:/);
-    const fenced = scenario !== 'lease expiry';
+    const fenced = scenario.startsWith('fence');
     if (fenced) await withCore((c) => c.claims.forceReap('admin:test', claim_id, { confirm: true }));
     const allowKeys = (allow: boolean) => apiKeyCall(owner.key, '/v1/owner/docs/settings', { api_keys: allow }, 'PUT');
     expect((await allowKeys(false)).status).toBe(200);
@@ -152,8 +155,37 @@ describe('S-BTN-69 registration and API keys', () => {
     const ack = { ...beat, courses: [{ repository: 'other', course: 'roadmap-pr', version: 3 }],
       fenced: fenced ? [{ claim_id, terminated: true }] : [] };
     expect((await post('/v1/runner/heartbeat', ack)).status).toBe(200);
-    await tick();
+    if (!scenario.endsWith('re-enable')) await tick();
     expect(await claimRow(claim_id)).toMatchObject({ status: fenced ? 'reaped' : 'active', fence_pending: Number(fenced) });
+    if (scenario === 'early re-enable') {
+      expect((await allowKeys(true)).status).toBe(200);
+      const response = await post('/v1/runner/heartbeat', ack);
+      expect(response.status).toBe(200);
+      const view = await response.json() as { claim: object; claims: object[] };
+      expect(view.claim).toMatchObject({ id: claim_id });
+      expect(view.claim).not.toHaveProperty('api_lease_cap_at');
+      expect(view.claims).toEqual([view.claim]);
+      expect(await withCore((c) => c.store.exec('SELECT api_lease_cap_at FROM claims WHERE id = ?', claim_id).toArray()[0].api_lease_cap_at)).toBeNull();
+      return;
+    }
+    if (scenario === 'late re-enable') {
+      await setClock(T0 + 900_000);
+      const path = '/v1/repositories/docs/tickets';
+      const list = await apiKeyCall(owner.key, path);
+      const detail = await apiKeyCall(owner.key, `${path}/${ticket_id}`);
+      const capped = { lease_ends_at: T0 + 900_000, alive: false };
+      expect(list.status).toBe(200);
+      expect(list.json.tickets.find((ticket: { ticket_id: string }) => ticket.ticket_id === ticket_id)?.detail).toMatchObject(capped);
+      expect(detail.status).toBe(200);
+      expect(detail.json.claim).toMatchObject(capped);
+      expect((await allowKeys(true)).status).toBe(200);
+      for (const [route, body] of [['advance', { leg }], ['end', { end_reason: 'released:operator' }]] as const) {
+        const response = await post(`/v1/runner/claims/${claim_id}/${route}`, body);
+        expect(response.status).toBe(409);
+        expect(await response.json()).toMatchObject({ code: 'claim-ended' });
+      }
+      expect(await claimRow(claim_id)).toMatchObject({ status: 'active' });
+    }
     if (scenario === 'fence acknowledgment') {
       expect((await allowKeys(true)).status).toBe(200);
       expect((await post('/v1/runner/heartbeat', ack)).status).toBe(200);
