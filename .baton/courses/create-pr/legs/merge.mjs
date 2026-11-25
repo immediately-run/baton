@@ -1,4 +1,4 @@
-// ../../../../../baton-bundle-fGsKLR/entry.ts
+// ../../../../../baton-bundle-0dmTRA/entry.ts
 import { execFileSync as execFileSync2, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, readdirSync, rmSync as rmSync2, statSync, writeFileSync } from "node:fs";
@@ -56,6 +56,22 @@ function splitWords(command) {
   }
   if (started) take();
   return words;
+}
+
+// src/defaults/dibber.ts
+var DIBBER_VERSION = "0.4.0";
+var DIBBER_PACKAGE = "@immediately-run/dibber";
+var VERSION = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.]{1,32})?$/;
+function dibberVersion(settings) {
+  const v = settings.dibber;
+  if (v == null) return DIBBER_VERSION;
+  if (typeof v !== "string" || !VERSION.test(v)) throw new Error(`.baton/baton.json's dibber is ${JSON.stringify(v)}, not a release version (such as "${DIBBER_VERSION}") \u2014 it pins @immediately-run/dibber, it never names a command`);
+  return v;
+}
+function dibberWords(settings, env = process.env) {
+  const host = env.BATON_DIBBER?.trim();
+  if (host) return splitWords(host);
+  return ["npx", "--yes", `${DIBBER_PACKAGE}@${dibberVersion(settings)}`];
 }
 
 // src/defaults/ticket-state.ts
@@ -323,6 +339,7 @@ baton: ${ctx.ticket.id} ${ctx.leg}, claim ${ctx.claim?.nonce ?? "?"}`;
 
 // src/defaults/course-pr.ts
 var DEFAULT_BRANCH_PATTERN = "claude/{ticket}-*";
+var CREATE_PR_ASK_DEADLINE_S = 3 * 60 * 60;
 var CREATE_SPEC_COURSE = {
   start: "requested",
   start_leg: "converse",
@@ -442,7 +459,7 @@ function verifyPrsMerged(ask, run2) {
   return merged;
 }
 
-// ../../../../../baton-bundle-fGsKLR/entry.ts
+// ../../../../../baton-bundle-0dmTRA/entry.ts
 var GIT_BOUND_MS = 12e4;
 var GIT_ENV = { "GIT_TERMINAL_PROMPT": "0", "GIT_SSH_COMMAND": "ssh -o BatchMode=yes -o ConnectTimeout=20" };
 var AGENT_IDLE_MS = 9e5;
@@ -494,6 +511,7 @@ async function standard(ctx) {
   if (settingsCommand === "") throw new Error(".baton/baton.json names no agent_command \u2014 run `baton repo init --agent opencode` (or --agent claude-code, or --agent-command <cmd>); baton run --harness <harness> runs its command when the settings name none");
   const agentWords = splitWords(settingsCommand);
   const agentCommand = agentWords.join(" ");
+  const dibberCommand = process.env.BATON_DIBBER?.trim() || dibberWords(settings).join(" ");
   const entry = (settings.courses ?? []).find((c) => c && c.id === "create-pr") ?? {};
   const patterns = [entry.branch_pattern, entry.previous_branch_pattern].filter((p) => typeof p === "string" && p !== "");
   const ticketText = (() => {
@@ -558,7 +576,8 @@ async function standard(ctx) {
         BATON_COURSE: "create-pr",
         BATON_LEG: "merge",
         BATON_INSTRUCTIONS: instructions,
-        BATON_TICKET_FILE: ctx.ticket.file ?? ctx.ticket.path ?? ""
+        BATON_TICKET_FILE: ctx.ticket.file ?? ctx.ticket.path ?? "",
+        BATON_DIBBER: dibberCommand
       }
     });
     let so = "", se = "";

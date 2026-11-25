@@ -18,11 +18,13 @@ them from `` `spec/BATON_SPEC.md` §n R-BTN-n `` or `BATON_SPEC §n`, and `--che
 
 ## Claiming a ticket
 
-Ask Baton first (B-129): before `baton tickets claim`, read `node cli/baton.mjs board baton`
-(or `node cli/baton.mjs ticket history baton:<id>`) and trust its station over the ticket's
-frontmatter — a ticket past its course's start already has work and a PR to continue, and the
-claim takes it over there, on its branch. One wrong `status:` line over an open PR must not
-start the work again.
+Ask Baton first (B-129): before `dibber claim <id>`, run
+`node cli/baton.mjs tickets check <id> --claimable` (it reads Baton's board and the ticket's
+history, and writes nothing) and trust Baton's station over the ticket's frontmatter — a ticket
+past its course's start already has work and a PR to continue, and you take it over there, on
+its branch. One wrong `status:` line over an open PR must not start the work again. Ticket files
+are Dibber's to write (B-326): file with `dibber new` and change a status with
+`dibber claim | set | done`; `baton tickets` keeps `next` and `check`.
 
 ## Resident context
 

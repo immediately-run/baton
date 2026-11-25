@@ -40,6 +40,7 @@ import { readTicketSettings } from './tickets-config';
 import { ownRepositoryId, remoteSlug } from './remote-slug';
 import { attestEvidence, type EvidenceAttestation, type UnconfirmedEnd } from './evidence';
 import { PAGE_NAME, ticketsPage } from './tickets-page';
+import { dibberConfig } from './dibber';
 
 // LC_ALL=C on every git call (B-93, round 4): git translates its messages, and the two shapes
 // remoteSlug quiets are matched by their words — under a German catalog 'not a git repository'
@@ -151,12 +152,14 @@ interface BatonJson {
   /** A command whose words precede `agent_command`'s in every leg's spawn (B-95);
    * `BATON_AGENT_WRAPPER` in the host's environment wins over it. */
   agent_wrapper?: string;
+  /** The `dibber` release a leg runs (B-326, dibber.ts): a version, never a command. */
+  dibber?: string;
   /** The ticket check's settings (B-111); every one is off. Read by `baton tickets check` alone,
    * never by a sync. */
   check?: { depends_line?: boolean };
-  /** The ticket commands' settings (B-112, tickets-config.ts): the prefix `baton tickets new`
-   * allocates under, the ids it still accepts, the `project:` a filing takes when `--project`
-   * names none, and the tags it writes when `--tags` names none. Read by the commands alone. */
+  /** The ticket settings (B-112, tickets-config.ts): the prefix Baton's `ticket-<prefix>`
+   * sequence allocates under (and `.dibber/config.json`'s `prefix`), the ids it still accepts,
+   * and the "How tickets work" page's defaults. */
   ticket_prefix?: string;
   legacy_ids?: string[];
   prefixes?: Record<string, string>;
@@ -1374,6 +1377,7 @@ import { homedir, tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { splitWords } from ${JSON.stringify(source('agent-words.ts'))};
+import { dibberWords } from ${JSON.stringify(source('dibber.ts'))};
 // B-94: every git and gh call this stub makes — the snapshot probes, the override and
 // instructions reads, the forge verification — is bounded and non-interactive, the same bound
 // and environment the close uses, so a wedged call fails the leg within the bound instead of
@@ -1481,7 +1485,11 @@ async function standard(ctx) {
   // resolves no route; a repository that picks its model at run time writes a leg override
   // (R-BTN-131) that reads its own configuration or the instance views (R-BTN-99).
   const agentWords = splitWords(settingsCommand);
-  const agentCommand = agentWords.join(' ');${verify ? `
+  const agentCommand = agentWords.join(' ');
+  // B-326: the \`dibber\` a leg that files or marks a ticket runs — the host's BATON_DIBBER, else
+  // the version the snapshot's settings pin, else this release's; never a command a ticket or a
+  // branch names. Handed to the agent as BATON_DIBBER.
+  const dibberCommand = process.env.BATON_DIBBER?.trim() || dibberWords(settings).join(' ');${verify ? `
   // What this leg's verification looks for (B-81): the course's branch patterns, as the
   // snapshot's settings carry them, and the repositories the ticket's repos: names — the
   // ticket file is the checkout's own copy, the one the agent may have just added its PR to.
@@ -1589,7 +1597,7 @@ ${asksOwner ? `  // S-BTN-222 (B-325): an open harness question can be silent an
     const child = spawn(argv[0], argv.slice(1), {
       cwd: ctx.checkout, stdio: ['ignore', 'pipe', 'pipe'],
       env: {
-        ...process.env, BATON_COURSE: ${JSON.stringify(b.id)}, BATON_LEG: ${JSON.stringify(leg)}, BATON_INSTRUCTIONS: instructions, BATON_TICKET_FILE: ctx.ticket.file ?? ctx.ticket.path ?? '',${ask ? `
+        ...process.env, BATON_COURSE: ${JSON.stringify(b.id)}, BATON_LEG: ${JSON.stringify(leg)}, BATON_INSTRUCTIONS: instructions, BATON_TICKET_FILE: ctx.ticket.file ?? ctx.ticket.path ?? '', BATON_DIBBER: dibberCommand,${ask ? `
         BATON_ANSWER: ${JSON.stringify(`print ${values} as your last line${names ? ', then the URL of the PR to write it on when it is not the checkout branch\'s' : ''}`)},${ask.name === 'verdict' ? ` BATON_VERDICT: ${JSON.stringify(`print ${values} as your last line${names ? ', then the URL of the PR to write it on when it is not the checkout branch\'s' : ''}`)},` : ''}` : ''}
       },
     });
@@ -2240,6 +2248,26 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
     await put(relative(root, pagePath), (abs) => writeFileSync(abs, page), true);
     log(`baton: ${relative(root, pagePath)} — how tickets work in this repository, generated`);
   }
+  // B-326: Dibber writes the ticket files, with Baton as its coordinator — `.dibber/config.json`
+  // beside `.baton/baton.json`, what is missing added, no value it holds overwritten.
+  const dibberPath = join(root, '.dibber', 'config.json');
+  let dibberExisting: Record<string, unknown> | null = null;
+  if (existsSync(dibberPath)) {
+    try {
+      const parsed: unknown = JSON.parse(readFileSync(dibberPath, 'utf8'));
+      if (parsed == null || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('not a JSON object');
+      dibberExisting = parsed as Record<string, unknown>;
+    } catch (e) {
+      throw new Error(`.dibber/config.json is not a settings object (${(e as Error).message}) — fix or remove it, then run baton repo init again`);
+    }
+  }
+  const dibber = dibberConfig(dibberExisting, readTicketSettings(root, root), cliVersion());
+  if (dibber.changed.length) {
+    mkdirSync(dirname(dibberPath), { recursive: true });
+    writeFileSync(dibberPath, `${JSON.stringify(dibber.config, null, 2)}\n`);
+    log(`baton: .dibber/config.json — ${dibberExisting ? `added ${dibber.changed.join(', ')}` : 'written'}: Dibber writes the ticket files, Baton gives their numbers (coordinator)`);
+  }
+  for (const d of dibber.disagrees) log(`baton: .dibber/config.json kept — its ${d}`);
   // B-95: the worked example of a leg wrapper, there to be copied and named; a repository already
   // has one once it is.
   await put(`.baton/${WRAPPER_EXAMPLE}`, (abs) => writeFileSync(abs, wrapperExample()));

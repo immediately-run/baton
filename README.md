@@ -156,26 +156,20 @@ remains the development path — the repository commands (`tickets`, `repo`, `te
 - `npm run model:links`, `npm run traces` — the code against the formal model (R3-1244; `model/README.md`).
   `npm run test:full` runs both after the suite, and the model's own checks; `npm run model:pr` and
   `model:full` run `traces` too, on a fresh set.
-- `node cli/baton.mjs tickets new|claim|set|done` — file, claim and move tickets with git as the
-  lock, each one commit pushed straight to the default branch from a throwaway worktree (B-112;
-  `baton tickets --help`, and the generated `tickets/HOW-TICKETS-WORK.md`), until Baton claims
-  them (R3-1266). Every ticket commit pushed by these commands or `baton request` carries the
-  provenance trailers `TICKET_TRAILERS` holds, appended after a blank line (B-16, B-251) — the
-  handoff's commit rule: the agent-provenance
-  trailers, then `Claude-Session` and `Co-Authored-By`, taken whole as docs' `claim.sh` takes
-  `CLAIM_TRAILERS` and baton computes none of its own — and with `TICKET_REQUIRE_TRAILERS=1`, a
-  command without trailers refuses rather than push a commit that cannot be attributed. `claim`
-  asks Baton first (B-129): with the session's key (`-i KEY`, else
-  `BATON_KEY_FILE`) it reads the ticket's position from Baton's board and history, continues a
-  ticket past its course's start where Baton holds it (the PRs written back, the position
-  printed) instead of starting over — overriding only a false `available`, never the git lock or
-  a parked or closed status — and refuses, rather than trust the frontmatter, when a read cannot
-  be answered (`--offline` for an unreachable Baton). A release (`set <id> available
-  [--note TEXT]`) keeps every `prs:` entry and its commit is the hand-off. `claim` also refuses a ticket
-  citing a rule whose `spec/BATON_SPEC_HISTORY.md` entry, by its title, amended it after the ticket was filed or last re-read it, until
-  `--rules-reread <id>,…` names exactly those ids (R-BTN-74); in a shallow clone it deepens the
-  clone first. A new migration or scenario number is the next free one at merge (B-176 moves it
-  into Baton).
+- **Tickets are Dibber's to write** (B-326): `dibber new` files one, under the number Baton
+  hands out through `.dibber/config.json`'s coordinator (`node cli/baton.mjs tickets next
+  ticket-<prefix> --coordinator`), and `dibber claim | set | done` change its status; each write
+  lands in the working tree for you to commit (`baton tickets --help`, and the generated
+  `tickets/HOW-TICKETS-WORK.md`). `baton tickets new|claim|set|done` are refused, naming the
+  `dibber` command. Before a claim, `node cli/baton.mjs tickets check <id> --claimable` asks
+  Baton first (B-129): with the session's key (`-i KEY`, else `BATON_KEY_FILE`) it reads the
+  ticket's position from Baton's board and history and writes nothing. A ticket past its
+  course's start is a takeover — its station, ready leg, PRs and branch printed — overriding only
+  a false `available`, never the git lock or a parked or closed status; another live claim, an
+  undone dependency, or a rule whose `spec/BATON_SPEC_HISTORY.md` entry amended it after the
+  ticket answered for it (until `dibber set <id> --note "rules re-read: <ids>"`) makes it not
+  claimable (R-BTN-74); an unanswered read exits 2 unless `--offline`. A new migration or scenario
+  number comes from `node cli/baton.mjs tickets next migration|scenario` (B-176, R-BTN-199).
 - `npm run check:wiki` — every page in `tickets/`, `docs/` and `spec/` compiles as MDX, uses only known
   components and links only to files that exist; every ticket matches `tickets/item.schema.json`.
 - `npm run check:tickets` (or `node cli/baton.mjs tickets check [--repo DIR]`) — check this
