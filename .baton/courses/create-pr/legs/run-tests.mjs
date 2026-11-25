@@ -1,4 +1,4 @@
-// ../../../../../baton-bundle-iJZtjS/entry.ts
+// ../../../../../baton-bundle-92ohqu/entry.ts
 import { execFileSync as execFileSync2 } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -79,6 +79,7 @@ function testsClose(ctx, result, run2 = exec) {
 
 // src/defaults/course-pr.ts
 var DEFAULT_BRANCH_PATTERN = "claude/{ticket}-*";
+var CREATE_PR_ASK_DEADLINE_S = 3 * 60 * 60;
 var CREATE_SPEC_COURSE = {
   start: "requested",
   start_leg: "converse",
@@ -144,7 +145,7 @@ function ticketRepositories(text, reposMap) {
   return names.map((r) => typeof r === "string" && /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(r) ? r : reposMap?.[r]).filter((r) => typeof r === "string" && r !== "");
 }
 
-// ../../../../../baton-bundle-iJZtjS/entry.ts
+// ../../../../../baton-bundle-92ohqu/entry.ts
 var GIT_BOUND_MS = 12e4;
 var GIT_ENV = { "GIT_TERMINAL_PROMPT": "0", "GIT_SSH_COMMAND": "ssh -o BatchMode=yes -o ConnectTimeout=20" };
 var gitRun = (args, opts = {}) => execFileSync2("git", args, { encoding: "utf8", timeout: GIT_BOUND_MS, killSignal: "SIGKILL", env: { ...process.env, ...GIT_ENV }, stdio: ["ignore", "pipe", "pipe"], ...opts });
