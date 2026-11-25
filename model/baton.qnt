@@ -1,4 +1,4 @@
-// Baton's core as a state machine (R3-1243), written against BATON_SPEC in immediately-run/docs
+// Baton's core as a state machine (R3-1243), written against BATON_SPEC
 // as merged at b7537395 (docs#212) and brought up to spec/BATON_SPEC.md by R3-1254. Every action
 // and helper names the requirement it models.
 //

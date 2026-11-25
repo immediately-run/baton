@@ -14,7 +14,7 @@ import { Stations, type Seen } from './stations';
 import { Questions } from './questions';
 import { Conditions } from './conditions';
 import { Admin, SESSION_COOKIE, SESSION_MS } from './admin';
-import { fitsTier, TIERS } from '../vendor/vocabulary.mjs';
+import { fitsTier, TIERS } from '../shared/vocabulary.mjs';
 import { clientVersionOf } from '../shared/versions.mjs';
 import { RunnerApi } from './runnerApi';
 import { parseAdminKeys, parseSshKey, verifyApiKey, verifyRequest, withBody, type SyncCredential } from './auth';

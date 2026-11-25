@@ -377,7 +377,7 @@ never refuses, and acting against it is accepted and recorded `advice-overridden
   | `floor` | Every guarantee a floor names holds on every repository the ticket reaches: its home and each `repos:` entry with reach (R-BTN-140, R-BTN-189); the protection checker is exempt | claim, advance | `floor-broken` |
 
   Rules `chain` (R-BTN-106), `isolation` (R-BTN-107), `entry` (R-BTN-109) and `not-queued`
-  (R-BTN-72) are gates too; `trusted` is proposed (R-BTN-182). `isEligible`, in the vendored decision
+  (R-BTN-72) are gates too; `trusted` is proposed (R-BTN-182). `isEligible`, in the shared decision
   library (R-BTN-37), is the reference for every rule; the SQL is tested against it (G-BTN-40).
 
 - **Matching** reads only `tickets` and Baton's tables (R-BTN-33). Candidates are one row per

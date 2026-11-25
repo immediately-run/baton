@@ -83,7 +83,7 @@ describe('needsReport: what the model checks read', () => {
   it('the model, the core, the replay and the trace check need a report; the rest does not', () => {
     for (const f of ['model/baton.qnt', 'src/core/claims.ts', 'test/model/replay.test.ts', 'test/integration/trace.ts', 'scripts/check-traces.mjs']) expect(needsReport([f])).toBe(true);
     // what the core and the replay import, and the lock file that pins Quint and Apalache (2-r2-0)
-    for (const f of ['src/shared/schema.mjs', 'src/vendor/vocabulary.mjs', 'src/migrations/0016_blocks.sql', 'test/helpers.ts', 'test/lib/sshKeys.mjs', 'package-lock.json']) expect(needsReport([f])).toBe(true);
+    for (const f of ['src/shared/schema.mjs', 'src/shared/vocabulary.mjs', 'src/migrations/0016_blocks.sql', 'test/helpers.ts', 'test/lib/sshKeys.mjs', 'package-lock.json']) expect(needsReport([f])).toBe(true);
     // the scenarios and their hosts: their traces are checked against the model, on the author's
     // machine only since hosted CI runs no quint (2026-10-20)
     for (const f of ['test/integration/S-BTN-43.defaults.test.ts', 'test/hosts/local.ts']) expect(needsReport([f])).toBe(true);

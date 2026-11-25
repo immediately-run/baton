@@ -88,6 +88,9 @@ round reviews it.
 
 ## For each finding, most severe first
 
+If the home repository keeps a per-ticket review archive, follow its instructions to record
+the findings and their disposition. Do not edit a shared findings log.
+
 - **Fix it and push**, or **reply on its thread** with why it is wrong or out of the ticket's
   scope. Every blocking finding gets one of the two. A should-fix may be answered. A nit may be
   left, or carried into a push you are making anyway.
