@@ -11,10 +11,7 @@
 // the caller's repository: the heads' objects are fetched with an empty refmap, so nothing
 // lands but FETCH_HEAD and the object store. A leaf, like remote-slug.ts: request.ts and
 // tickets.ts are bundled separately and both allocate ids.
-import { execFileSync } from 'node:child_process';
-
-const git = (root: string, ...a: string[]): string =>
-  execFileSync('git', ['-C', root, ...a], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, LC_ALL: 'C' } }).trim();
+import { gitText } from './git.mjs';
 
 /** The side branch a request's commit lands on when the forge refuses the default branch
  *  (R-BTN-131): `baton-request/<ID>`, outside every `branch_pattern` (R-BTN-190). */
@@ -29,7 +26,7 @@ export function requestHeads(at: string, remote: string, warn: (line: string) =>
   const out = new Map<string, string>();
   let listed = '';
   try {
-    listed = git(at, 'ls-remote', '--heads', remote, 'refs/heads/baton-request/*');
+    listed = gitText(at, 'ls-remote', '--heads', remote, 'refs/heads/baton-request/*');
   } catch {
     warn(`baton: the baton-request/* heads on ${remote} could not be listed; none of their ids is counted — a duplicate is answered by the sync's duplicate-id refusal`);
     return out;
@@ -57,7 +54,7 @@ export function openRequestNumbers(at: string, remote: string, items: string, pr
   // listing and this fetch must not fail the whole command (round 1): its branch is gone, its
   // id is free again — so a refused batch is fetched one head at a time, and the heads that no
   // longer answer are dropped.
-  const byName = (names: string[]) => git(at, 'fetch', '-q', '--refmap=', remote, ...names.map((name) => `refs/heads/${name}`));
+  const byName = (names: string[]) => gitText(at, 'fetch', '-q', '--refmap=', remote, ...names.map((name) => `refs/heads/${name}`));
   let live = heads;
   try {
     byName([...heads.keys()]);
@@ -77,12 +74,12 @@ export function openRequestNumbers(at: string, remote: string, items: string, pr
   for (const sha of live.values()) {
     let reachable = true;
     try {
-      git(at, 'merge-base', '--is-ancestor', sha, head);
+      gitText(at, 'merge-base', '--is-ancestor', sha, head);
     } catch {
       reachable = false; // not an ancestor — an unrelated history no more reaches head than a forked one
     }
     if (reachable) continue;
-    for (const f of git(at, 'ls-tree', '-r', '--name-only', sha, '--', items).split('\n')) {
+    for (const f of gitText(at, 'ls-tree', '-r', '--name-only', sha, '--', items).split('\n')) {
       const n = re.exec(f.split('/').at(-1) ?? '')?.[1];
       if (n != null) taken.push(Number(n));
     }

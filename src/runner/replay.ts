@@ -29,15 +29,17 @@
 // The pure half (`parseReplayArgs`, `pickRun`, `replayEnvironment`, `compareRead`, `slugOf`) is
 // unit-tested in test/unit/runner-replay.test.ts; the whole is exercised end-to-end by S-BTN-48
 // against the local host, over a real repository.
+import { git, gitBuffer } from '../defaults/git.mjs';
+import { createHash } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { DEFAULT_URL } from '../../cli/baton.mjs';
-import { requestCredential, signHeaders } from '../../cli/sign.mjs';
+import { DEFAULT_URL } from '../client/config.mjs';
+import { requestCredential, signHeaders } from '../client/sign.mjs';
 import { bareTicketId } from '../defaults/ticket-state';
 import { digestOfRead, MARKDOWN_SOURCE } from '../defaults/ticket-versions';
-import { dropCourse, git, loadCourse, extractTicketSource, type CourseLoad } from './home';
+import { dropCourse, loadCourse, extractTicketSource, type CourseLoad } from './home';
 import { gitBytes, readArtifact } from './contracts';
 import type { PointerReach } from '../core/contractPointers';
 import { resolveLeg } from '../core/graph';
@@ -240,6 +242,8 @@ function wrapperOutcome(stdout: string): { ok: boolean; result?: unknown; error?
     return null;
   }
 }
+
+const sha256 = (bytes: Buffer | string): string => `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
 
 export interface ReplayIo {
   log?: (line: string) => void;
