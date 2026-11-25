@@ -64,7 +64,7 @@ describe('the CLI lines the read-only screens name', () => {
       expect(COMMANDS[id].argv).toBeNull();
     }
     // `--base` and `--guarantees` are the flags `policy set|apply` and `policy floor add` parse.
-    expect(cli).toMatch(/parseArgs\(rest, \[\], \['base', 'identity', 'url'\], 2\)/);
+    expect(cli).toMatch(/parseArgs\(rest, \['dry-run'\], \['base', 'identity', 'url'\], 2\)/);
     expect(cli).toMatch(/\['guarantees', 'remove-by', 'identity', 'url'\]/);
     expect(flagsOf(COMMANDS.policySet.line)).toEqual(['--base']);
     expect(flagsOf(COMMANDS.policyFloorAdd.line)).toEqual(['--guarantees']);

@@ -13,7 +13,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import {
   Git, HOST, adminSession, cutover, register, rows, sessionCall, setAdminKeys, setClock, withCore, keyCall,
-  setRunnerLastSeen, setRunnerReaped, seedActivity, seedClaim, seedClaimLeg, seedEvent, seedTranscript,
+  setLastServedAt, setRunnerLastSeen, setRunnerReaped, seedActivity, seedClaim, seedClaimLeg, seedEvent, seedTranscript,
 } from '../helpers';
 import { makeKey, type TestKey } from '../lib/sshKeys';
 import { transcriptUrl } from '../../src/core/links';
@@ -220,6 +220,9 @@ describe('B-240 Running and Timeline in joined queries', { timeout: 120_000 }, (
     expect(urls.filter((u: string | null) => u == null)).toHaveLength(4);
     // Later: the window moves past the ended claims and a lane's runner falls silent.
     await setClock(T0 + 21 * H);
+    // This is elapsed time on a serving Baton, not a 21-hour outage. Stand in for the
+    // intervening service ticks without running the reaper over the test's fixture.
+    await setLastServedAt(T0 + 21 * H - 60_000);
     await setRunnerLastSeen(a.id, T0 + 21 * H);
     session = await adminSession(admin); // a session lives 4 hours (R-BTN-155)
     await sameAsBefore(session, T0 + 21 * H);

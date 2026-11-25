@@ -759,6 +759,10 @@ export function replaceClaimSnapshot(ticket: string, sha: string) {
 export function clearSettingIn(store: Pick<Store, 'exec'>, key: string): void {
   store.exec("DELETE FROM baton_settings WHERE key = ?", key).toArray();
 }
+/** B-249: the instant Baton last served, so a clock jump reads as elapsed service time, not an outage. */
+export function setLastServedAt(at: number) {
+  return rows("UPDATE baton_settings SET value = ? WHERE key = 'last_served_at'", String(at));
+}
 export function clearSetting(key: string) {
   return withCore((core) => clearSettingIn(core.store, key));
 }

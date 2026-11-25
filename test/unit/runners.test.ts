@@ -280,7 +280,7 @@ describe('messages (§9)', () => {
     const { id } = await register('vm-a');
     const bad = await owner('/v1/ui/messages', { to_runner_id: id, kind: 'release', payload: { ticket_id: 'docs:R3-9001', reason: 'because' } });
     expect([bad.status, await code(bad)]).toEqual([400, 'invalid-params']);
-    expect((await owner('/v1/ui/messages', { to_runner_id: id, kind: 'release', payload: { ticket_id: 'docs:R3-9001', reason: 'owner-cancel' } })).status).toBe(200);
+    expect((await owner('/v1/ui/messages', { to_runner_id: id, kind: 'release', confirm: true, payload: { ticket_id: 'docs:R3-9001', reason: 'owner-cancel' } })).status).toBe(200);
   });
 
   it('the alarm expires a reaped runner’s open messages', async () => {

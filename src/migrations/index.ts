@@ -69,6 +69,7 @@ import readEfficiency from './0065_read_efficiency.sql';
 import legContracts from './0100_leg_contracts.sql';
 import pinnedContracts from './0101_pinned_contracts.sql';
 import runnerViews from './0066_runner_views.sql';
+import leaseRecovery from './0123_lease_recovery.sql';
 import retirePolicyPins from './0070_retire_policy_pins.sql';
 import accessSignIn from './0071_access_sign_in.sql';
 import sessionLinkSecrets from './0079_session_link_secrets.sql';
@@ -232,4 +233,5 @@ export const MIGRATIONS: Migration[] = [
   { id: 101, sql: pinnedContracts },
   { id: 121, sql: runnerIdle },
   { id: 122, sql: runnerIdleRepositories },
+  { id: 123, sql: leaseRecovery },
 ];
