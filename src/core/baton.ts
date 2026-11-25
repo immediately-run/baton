@@ -17,9 +17,10 @@ import { Conditions } from './conditions';
 import { Admin, SESSION_COOKIE, SESSION_MS } from './admin';
 import { fitsTier, TIERS } from '../shared/vocabulary.mjs';
 import { clientVersionOf } from '../shared/versions.mjs';
-import { RunnerApi } from './runnerApi';
+import { RunnerApi, sha256Hex } from './runnerApi';
 import { parseAdminKeys, parseSshKey, verifyApiKey, verifyRequest, withBody, type SyncCredential } from './auth';
 import { Claims } from './claims';
+import { forgeScope } from './forgeScope';
 import { Cutover } from './cutover';
 import { DispatchRefused, Mirror } from './mirror';
 import { CAPABILITY_NAME, checkAttestation, checkConfirmations, checkDependenciesRead, checkRepositoryId, checkSequenceTake, COURSE_ID, GIT_BRANCH, GIT_REPO, SEQUENCE_KIND } from './validate';
@@ -799,6 +800,9 @@ export class BatonCore {
       const sequence = await this.sequenceRoute(req, url);
       if (sequence) return sequence;
       if (url.pathname.startsWith('/v1/courier/')) return await this.courierRoute(req, url);
+      if (req.method === 'GET' && url.pathname.startsWith('/v1/forge-scope/')) {
+        return await this.forgeScopeRoute(req, url.pathname);
+      }
       if (req.method === 'POST' && url.pathname === '/v1/probe/readings') {
         // R-BTN-53, R-BTN-101: a probe key's readings, on any registered instance.
         if (!req.headers.has('X-Baton-Signed')) throw new BatonError('unauthenticated', 'sign with a probe key');
@@ -877,6 +881,29 @@ export class BatonCore {
     if (!lookup(signed.cred)) throw new BatonError('unauthenticated', 'the key is not registered or is revoked');
     const body = await readJson(signed.req);
     return json(await this.admin.humanKeys(body, signed.cred, new Set(breakGlass.keys())));
+  }
+
+  private async forgeScopeRoute(req: Request, path: string): Promise<Response> {
+    const match = /^\/v1\/forge-scope\/(broker|runner)\/([^/]+)$/.exec(path);
+    if (!match) throw new BatonError('not-found', 'no such route');
+    if (!req.headers.has('X-Baton-Signed')) throw new BatonError('unauthenticated', 'a forge-scope read must be signed');
+    if (match[1] === 'broker') {
+      const keys = new Map<string, string>();
+      for (const line of parseAdminKeys(this.ports.config.BATON_FORGE_BROKER_KEYS ?? '')) {
+        const key = await parseSshKey(line);
+        keys.set(key.fingerprint, line);
+      }
+      await this.verifySigned(req, (fp) => keys.get(fp) ?? null);
+      return json(forgeScope(this.store, this.now(), match[2]));
+    }
+    const { cred } = await this.verifySigned(req);
+    if ((await this.admin.adminFingerprints()).has(cred)) throw new BatonError('forbidden', 'an administrator key is never a runner key');
+    const secret = req.headers.get('X-Runner-Secret');
+    if (!secret) throw new BatonError('unauthenticated', 'X-Runner-Secret is required after the first heartbeat');
+    const secretHash = await this.outside(() => sha256Hex(secret));
+    // Proof is a read, not a heartbeat. It must not revive or extend the session it proves.
+    forgeScope(this.store, this.now(), match[2], { credential: cred, secretHash });
+    return new Response(null, { status: 204 });
   }
 
   /** A signed request (R3-1239), verified whole by the one verifier: the key its keyid names

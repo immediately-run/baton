@@ -119,6 +119,8 @@ export interface Config {
    *  deployment's root of trust, set outside Baton. A key in it satisfies every `human` entry
    *  of every repository on the instance, and it is the only recovery from a lost key. */
   BATON_HUMAN_KEYS?: string;
+  /** B-131: host broker OpenSSH public keys, one per line; forge-scope reads only. */
+  BATON_FORGE_BROKER_KEYS?: string;
   /** R-BTN-113 (B-234): the hosts whose session links the instance accepts — `session_hosts`,
    *  a comma- or JSON-separated list. An administrator's setting, as the human keys are; the
    *  default is `claude.ai` alone. */
