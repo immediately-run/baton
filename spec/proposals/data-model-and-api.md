@@ -260,10 +260,8 @@ Design: [admission limits within a tenant](multi-tenancy.md#admission-limits-wit
 
 ## The policy's dry run
 
-Design: [the policy's dry run](security.md#1-the-policys-dry-run-r-btn-188-proposed).
-`PUT /v1/owner/{repository}/policy` also takes `dry_run?` beside `policy` or `preset`, and with
-it answers `{changed[], guarantees, stops: {grants[], legs[], tickets[], runners[], unreached[]}}`
-and writes nothing.
+The built policy route and its preview are specified in [§14](../BATON_SPEC/14-api.md)
+and R-BTN-188. See [the proposed additional stop predictions](security.md#1-extending-the-policys-dry-run-r-btn-188-proposed).
 
 ## A control path changed outside a course
 

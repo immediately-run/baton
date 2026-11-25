@@ -228,9 +228,10 @@ export const ACTIONS: Action[] = [
     id: 'leg.stop', summary: 'Stop: ask the runner to release the ticket it holds.',
     effect: 'destructive', http: { method: 'POST', path: '/v1/ui/messages', match: { kind: 'release' } },
     callers: [SESSION_ANY],
-    input: { type: 'object', required: ['to_runner_id', 'kind', 'payload'], properties: {
+    input: { type: 'object', required: ['to_runner_id', 'kind', 'payload', 'confirm'], properties: {
       to_runner_id: RUNNER_ID,
       kind: { type: 'string', const: 'release' },
+      confirm: CONFIRM,
       payload: { type: 'object', required: ['ticket_id', 'reason'], properties: {
         ticket_id: { type: 'string', description: 'The qualified ticket the runner holds.' },
         reason: { type: 'string', enum: ['requested', 'owner-cancel', 'provider-suspended'] },
