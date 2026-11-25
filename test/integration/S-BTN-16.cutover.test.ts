@@ -35,7 +35,7 @@ describe('S-BTN-16 cutover (server)', () => {
     expect((await claimItem('vm-a', secret)).json.code).toBe('no-eligible-ticket');
     expect((await claimItem('vm-a', secret, { ticket_id: 'docs:R3-9001' })).json.code).toBe('not-cut-over');
 
-    expect((await owner('/v1/ui/cutover', {})).status).toBe(400); // names its confirmation
+    expect((await owner('/v1/ui/cutover', {})).status).toBe(428); // names its confirmation
     expect((await owner('/v1/ui/cutover', { confirm: true })).status).toBe(400); // and its repository
     const res = await owner('/v1/ui/cutover', { repository: 'docs', confirm: true });
     expect(await res.json()).toEqual({ ok: true, repository: 'docs', cutover_at: T0, imported: ['docs:R3-9001'] });

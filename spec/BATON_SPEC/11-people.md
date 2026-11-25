@@ -61,8 +61,7 @@ contents are not built; their design is
     `BATON_ADMIN_KEYS` line (`--admin-keys` locally), an owner key, a grant's `public_key`.
   - **How it is sent.** `Authorization: Bearer <key>` in place of a signature, on `/v1/admin/*`,
     `/v1/owner/*`, `/v1/runner/*` and the repository reads; a runner adds its secret
-    (R-BTN-14). `baton … -i FILE`, `BATON_KEY_FILE` and `BATON_KEY` send it; no client sends a
-    bearer over non-loopback `http` (R-BTN-158). Baton hashes the key and compares every byte
+    (R-BTN-14). `baton … -i FILE`, `BATON_KEY_FILE` and `BATON_KEY` send it. Client refusal over clear HTTP is not built (R-BTN-158). Baton hashes the key and compares every byte
     with the hash on the public line its fingerprint names. An unknown fingerprint, a wrong
     secret or a malformed bearer is `unauthenticated`.
   - **Records and revocation.** Acts are recorded as `admin:bak_<id>` or `owner:bak_<id>`.
