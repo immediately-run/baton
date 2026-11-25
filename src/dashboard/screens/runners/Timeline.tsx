@@ -62,7 +62,7 @@ function Panel({ repository, picked, notBuilt }: { repository: string; picked: P
       ['detail', claim.detail != null ? <Text value={claim.detail} /> : <span className="mut">none</span>],
     ];
   rows.push(
-    ['session', claim.session_url != null ? <ExtLink href={claim.session_url} kind="session" showHost>Open session</ExtLink> : <span className="mut">no session link passed</span>],
+    ['session', claim.session_url != null ? <ExtLink href={claim.session_url} kind="session" showHost /> : <span className="mut">no session link passed</span>],
     ['log', <>{claim.log_dir != null ? <Text mono value={claim.log_dir} /> : <span className="mut">no log directory recorded</span>}{claim.leg != null ? <> · <CliLine>baton leg log <Text value={claim.ticket_id} /> <Text value={claim.leg} /></CliLine></> : null}</>],
     ['executor', <span className="mut">digest, environment and instance are not recorded{notBuilt?.executor ? <> (<Text mono value={notBuilt.executor} />)</> : null}</span>],
   );

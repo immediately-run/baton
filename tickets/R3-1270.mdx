@@ -3,7 +3,7 @@ title: "R3-1270 — Baton machine-key sync: a granted runner key posts its repos
 id: R3-1270
 project: baton
 status: available
-updated: 2026-10-31
+updated: 2026-11-23
 repos:
   - baton
 tags:
@@ -44,7 +44,7 @@ critical — authentication.
 2. Refused `forbidden` when the key holds no unrevoked grant on the repository, or the repository policy's `inputs.board` excludes `machine` (R-BTN-93, R-BTN-188), read through `src/core/policy.ts` (B-145; until it lands, `inputs.board` defaults to the `cooperative` preset's, which admits `machine`).
 3. No settings route: whether a machine key may post is a policy change, made by an approver on `approvers.policy` (B-145).
 4. Every accepted or held board post stores `posted_by` (the credential's fingerprint, or the CI identity), and its `snapshot-accepted` event names it.
-5. A machine-key post that closes a ticket another runner holds, drops a posted bar, lowers a tier, drops a `requires` clause (or, during R-BTN-132's window, `operator_only`), or removes a `ticket` block or a decision raises `baton.machine-post` naming the tickets and the key — through today's `needsYou()` path if this lands before B-57, which converts it.
+5. A machine-key post that closes a ticket another runner holds, drops a posted bar, ~~lowers a tier,~~ drops a `requires` clause (or, during R-BTN-132's window, `operator_only`), or removes a `ticket` block or a decision raises `baton.machine-post` naming the tickets and the key — through today's `needsYou()` path if this lands before B-57, which converts it.
 
 ### Architecture — the decisions, named
 
@@ -70,3 +70,5 @@ critical — authentication.
 _(filed 2026-10-16)_
 
 _(2026-10-30: `machine_sync` is retired as a setting: whether a machine key may post the board is the repository policy's `inputs.board` (`machine`), R-BTN-188, built by B-145. Read it through `src/core/policy.ts` once B-145 lands.)_
+
+_2026-11-23 — tiers retired (spec/retire-tiers: [BATON_SPEC §6.6](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-6) gate 5, [R-BTN-66](../spec/BATON_SPEC/01-what-baton-is.md#sec-1)): the struck tier clauses are gone from the spec — no ticket tier, runner ceiling, grant `max_tier`, ladder, `ready_by_tier` or `?tier=`. Build the rest without them._

@@ -44,7 +44,8 @@ async function bundleCommand(entry, load) {
 const cli = await bundleCommand('cli.ts', (file) => import(pathToFileURL(file).href));
 export const { initMain, parseSyncArgs, syncMain, migrateMarkersMain, prebuildDefaults, remoteSlug, verifyConfigMain } = cli;
 
-// B-111's `baton tickets check` and B-112's `baton tickets new|claim|set|done`, built the same
+// B-111's `baton tickets check`, `next` and B-326's `check --claimable` (the retired
+// `new|claim|set|done` refusals beside them), built the same
 // way and re-exported beside the repo commands.
 const tickets = await bundleCommand('tickets.ts', (file) => import(pathToFileURL(file).href));
 export const ticketsMain = tickets.ticketsMain;

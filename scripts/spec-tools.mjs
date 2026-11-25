@@ -3,8 +3,8 @@
 //
 //   npm run spec:impact -- R-BTN-39 [R-BTN-35 …] [--term "course history" …]
 //       every rule, scenario, gate and decision of the spec, and every live ticket and context
-//       page, that cites one of the ids or uses one of the terms: the places an amendment to those
-//       rules must reach, or be shown not to need to. Printed as a checklist for the PR body.
+//       page, that cites one of the ids or uses one of the terms, plus code and tests that cite
+//       the ids. Printed as a checklist for the PR body.
 //
 //   patchNotes(spec, prefix) — the rules whose heading is followed by an italic sentence
 //       (`- **R-BTN-35 (…).** *Except …*`): an exception stated on top of a rule whose body still
@@ -20,6 +20,7 @@ import { join, dirname, resolve } from 'node:path';
 import { joinParts, locate, specParts } from './spec-files.mjs';
 import { frontmatterBlock } from './lib/stripFrontmatter.mjs';
 import { fileURLToPath } from 'node:url';
+import { readSpecCode } from './lib/spec-code.mjs';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -130,7 +131,7 @@ export function render(result, specPath = CONFIG.spec, where = (n) => `l. ${n}`)
   out.push(`In \`${specPath}\` — mark each **changed** or **still true**:`, '');
   for (const u of result.spec) out.push(`- [ ] ${u.kind} ${u.label} — ${where(u.line)} — ${u.why.join(', ')}`);
   if (!result.spec.length) out.push('- (nothing else cites them)');
-  out.push('', 'Outside the spec (live tickets, context pages):', '');
+  out.push('', 'Outside the spec (live tickets, context pages, code and tests):', '');
   for (const f of result.files) out.push(`- [ ] \`${f.path}\` — ${f.why.join(', ')}`);
   if (!result.files.length) out.push('- (nothing)');
   return out.join('\n');
@@ -158,5 +159,11 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const { text: spec, where } = readSpecAt(REPO, CONFIG.spec);
   const files = CONFIG.dirs.flatMap((d) => mdx(join(REPO, d)))
     .map((p) => [p.slice(REPO.length + 1), readFileSync(p, 'utf8')]);
-  console.log(render(impact(spec, ids, terms, files), CONFIG.spec, where));
+  const result = impact(spec, ids, terms, files);
+  // Terms are often ordinary domain words. Only explicit rule citations pull code into the list.
+  for (const [path, text] of readSpecCode(REPO)) {
+    const why = reasons(text, ids, []);
+    if (why.length) result.files.push({ path, why });
+  }
+  console.log(render(result, CONFIG.spec, where));
 }
