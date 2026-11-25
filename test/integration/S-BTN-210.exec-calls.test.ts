@@ -54,6 +54,29 @@ function recording(): { executor: Executor; log: { op: string; session: string; 
 }
 
 describe('S-BTN-210: repository code runs only through the executor (R-BTN-107)', () => {
+  it('collects the full output of short calls even when they exit together', async () => {
+    const executor = builtinExecutor();
+    const handle = await executor.start({ brief: {
+      kind: 'leg', session_id: 'output', checkout: tmpdir(), paths: [],
+      wrapper: join(import.meta.dirname, '../../src/runner/legProcess.mjs'), env: {},
+    } });
+    try {
+      for (let batch = 0; batch < 8; batch++) {
+        const results = await Promise.all(Array.from({ length: 16 }, () => {
+          const lines: string[] = [];
+          return executor.exec(handle, ['/bin/sh', '-c', 'printf "result\\n"; printf "diagnostic" >&2'], {
+            cwd: tmpdir(), timeout_s: 10, onStderr: (line) => lines.push(line),
+          }).result.then((result) => ({ ...result, lines }));
+        }));
+        for (const result of results) {
+          expect(result).toEqual({ status: 0, stdout: 'result\n', stderr: 'diagnostic', lines: ['diagnostic'] });
+        }
+      }
+    } finally {
+      await executor.stop(handle, 'test');
+    }
+  });
+
   it('each leg starts a session keyed by its run id; run and close are wrapper calls in it, never in the runner\'s process', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'baton-210-'));
     const stateFile = join(tmpdir(), `baton-210-${process.pid}.json`);

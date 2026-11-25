@@ -1,0 +1,18 @@
+---
+title: R3-1268 review round 2
+description: Findings and disposition for the second review of Baton's standalone repository changes.
+---
+
+Reviewed [Baton #312](https://github.com/immediately-run/baton/pull/312) at `6a455dac`
+and [docs #234](https://github.com/immediately-run/docs/pull/234) at `1885ba78`.
+The verdict was changes. The reviewer passed Baton spec, wiki, type and targeted tests,
+and docs hosted verify, library tests and the pinned copy comparison. No live drills ran.
+
+| Finding | Disposition |
+|---|---|
+| [The test tree exemption hides executable dependencies](https://github.com/immediately-run/baton/pull/312#discussion_r4652162428) | Exempt the two known JSON fixtures and pin individual legacy data lines in test sources. New or changed lines are scanned. Test a file that uses both fixture data and a consumer path in executable code. |
+| [Script strings are not document-relative links](https://github.com/immediately-run/baton/pull/312#discussion_r4652162433) | Only Markdown links to existing paths inside Baton's documentation directory qualify. Test a root-run script and code examples as well as a real link. |
+
+The [course layout, acceptance drills and changelog](R3-1268-round-1.mdx) remain as documented
+in the first round. This round does not remove the course graph required by R-BTN-134 or change
+release-owned files.

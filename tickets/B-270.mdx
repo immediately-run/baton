@@ -3,7 +3,7 @@ title: "B-270 — The Runners view's transcript and status-report walks read row
 id: B-270
 project: baton
 status: available
-updated: 2026-11-18
+updated: 2026-11-22
 repos:
   - baton
 tags:
@@ -12,9 +12,12 @@ description: "B-250's runnersView walks transcripts, pending_transcripts and eve
 topics:
   - baton
 owns: {}
-prs: []
+prs:
+  - https://github.com/immediately-run/baton/pull/390
 depends_on: []
 ---
+
+**Brief:** the owner, 2026-11-22, deciding the question this ticket asks: **bounded serving**. Keep every runner row and all stored transcript pointers and status reports; serve the latest transcript and report only for recently-seen runners (the `runners_live` set), with the latest-of fields `null` beyond it, so the Runners view's three reads key by that set and `rows_read` per poll is bounded by a constant. No retention or pruning in this ticket. The implement agent on 2026-11-22 recommended the same; build it and open the PR.
 
 **What:** B-250 (PR #281) made the dashboard's Runners view read one statement per list, however many runners were ever registered. Three of those lists are whole-table walks keyed by nothing — `transcripts`, `pending_transcripts`, and `messages WHERE kind = 'status_report'` through 0063's partial `messages_reports` — because the only key a latest-per-runner read has is the runners ever registered, the very count B-250 stopped paying. Nothing prunes those tables: R-BTN-149's retention ([§2.3](../spec/BATON_SPEC/02-deployments.md#sec-2-3), src/core/retention.ts) deletes a long-unseen runner's declarations, events and snapshots past 90 days, and the claims of purged tickets with their transcripts — a kept claim's transcript pointers stay forever, and no `DELETE FROM messages` exists at all; the only `pending_transcripts` delete is linking (src/core/claims.ts). The view's `rows_read` per poll therefore grows with those tables over the object's life, on the same road to Cloudflare's free-tier cap of 5,000,000 `rows_read`/day that production passed on 2026-11-14 and 2026-11-15 (B-250's Why). The B-240 harness state (300 old runners carrying no transcripts or reports) stays inside the 500-row target; months of history do not.
 
@@ -22,7 +25,7 @@ depends_on: []
 - **The retention option** follows B-238's shape: bounded batches in the alarm (at most `RETENTION_BATCH` rows a tick), oldest first, each prune through an index, a tick with nothing to delete reading a few rows. Consider whether B-259's export-before-delete applies here as it does to events: the owner may want old pointers and reports exported before deletion.
 - **The bounded-serving option** keys the three reads by the recently-seen set (the `runners_live` partial index's set), nulling the latest-of fields beyond it; the served rows themselves stay, as R-BTN-3 and the dashboard's every-row rendering keep them.
 
-**Target:** the Runners view's `rows_read` per poll is bounded by a constant on a state with months of transcript and report history — independent of those tables' sizes.
+**Target:** the three history lookups read at most a constant number of rows per live runner per poll, independent of the size of the retained tables. The roster still costs at least one row per runner served, and the history budget scales with the live set; R-BTN-87's 50-runner envelope is a target, not a cap.
 
 **Why:** the `rows_read`/day cap is what took production down on 2026-11-14 and 2026-11-15; B-235–B-250 bounded the statements and the per-runner reads, and this is the remainder.
 

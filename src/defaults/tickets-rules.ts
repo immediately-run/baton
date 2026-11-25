@@ -1,6 +1,6 @@
 // tickets-rules.ts — the two process guards on a ticket's text (BATON_SPEC §2f R-BTN-74): the
-// rules it cites that the spec's history says were amended after the ticket answered for them, read at
-// `baton tickets claim` and reported by `baton tickets check`; and the `### Trust` and
+// rules it cites that the spec's history says were amended after the ticket answered for them, read by
+// `baton tickets check <id> --claimable` and reported by `baton tickets check`; and the `### Trust` and
 // `### Invariants` sections a ticket filed after `.baton/baton.json`'s `check.sections_since`
 // must carry. Both answer what PRs #160 and #161 taught (spec/BATON_SPEC_HISTORY.md, 2026-11-03):
 // tickets filed before a ruling were built as written after it, and tickets prescribed inputs with
@@ -11,10 +11,10 @@
 // an incidental edit; the amendments are the history file's dated entries. Pure over the texts it
 // is given, apart from the git readers at the bottom, so the decisions are tested without a
 // repository. Course code in the CLI, never core (§2b).
-import { execFileSync } from 'node:child_process';
+import { git } from './git.mjs';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { CLOSE_TIMEOUT_MS, GIT_NONINTERACTIVE_ENV } from './ticket-state';
+import { CLOSE_TIMEOUT_MS } from './ticket-state';
 
 /** Where the amendments are, and the rule ids they name: the shape spec-tools.mjs's CONFIG has
  *  (fieldhouse's copy names `R-FH` and its own history), overridden by `.baton/baton.json`'s
@@ -108,12 +108,18 @@ export interface StaleRule {
   title: string;
 }
 
-/** The days a ticket re-read each rule id, from its `rules re-read` notes — the one a claim writes,
- *  `_(YYYY-MM-DD: rules re-read at claim: R-BTN-x (amended …), …)_`, and the one a spec PR adds for
- *  the ids it handled, `_(YYYY-MM-DD: rules re-read: R-BTN-x, …)_` — the latest per id. */
+/** The days a ticket re-read each rule id, from its `rules re-read` notes — the one the retired
+ *  claim wrote, `_(YYYY-MM-DD: rules re-read at claim: R-BTN-x (amended …), …)_`, the one a spec PR
+ *  adds for the ids it handled, `_(YYYY-MM-DD: rules re-read: R-BTN-x, …)_`, and Dibber's Status
+ *  line, `dibber set <id> --note "rules re-read: R-BTN-x, …"`'s `_YYYY-MM-DD: rules re-read: …._`
+ *  (B-326) — the latest per id. */
 export function rereads(text: string, prefix = RULES_DEFAULTS.prefix): Map<string, string> {
   const out = new Map<string, string>();
-  for (const m of text.matchAll(/_\((\d{4}-\d{2}-\d{2}): rules re-read\b[^:\n]*:([^\n]*)\)_/g)) {
+  const notes = [
+    ...text.matchAll(/_\((\d{4}-\d{2}-\d{2}): rules re-read\b[^:\n]*:([^\n]*)\)_/g),
+    ...text.matchAll(/^_(\d{4}-\d{2}-\d{2}): rules re-read\b[^:\n]*:([^\n]*)\._$/gm),
+  ];
+  for (const m of notes) {
     for (const id of ruleIds(m[2], prefix)) if (!out.has(id) || out.get(id)! < m[1]) out.set(id, m[1]);
   }
   return out;
@@ -345,7 +351,7 @@ export function sectionsSince(check: { sections_since?: unknown } | undefined): 
  * ---------------------------------------------------------------------------------------- */
 
 const gitOut = (root: string, args: string[]): string =>
-  execFileSync('git', ['-C', root, '-c', 'core.quotePath=false', ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 64 * 1024 * 1024, timeout: CLOSE_TIMEOUT_MS, killSignal: 'SIGKILL', env: { ...process.env, ...GIT_NONINTERACTIVE_ENV } });
+  git(root, ['-c', 'core.quotePath=false', ...args], { stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 64 * 1024 * 1024, timeoutMs: CLOSE_TIMEOUT_MS });
 
 /** Whether `root` is a shallow clone (`git rev-parse --is-shallow-repository`); false where it is
  *  no git checkout. */
@@ -400,7 +406,7 @@ export const firstCommit = (root: string, path: string): FirstCommit | null => f
  *  a ticket; the error (git's own words) when it cannot. */
 export function unshallow(root: string, remote: string): string | null {
   try {
-    execFileSync('git', ['-C', root, 'fetch', '-q', '--unshallow', remote], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: CLOSE_TIMEOUT_MS, killSignal: 'SIGKILL', env: { ...process.env, ...GIT_NONINTERACTIVE_ENV } });
+    git(root, ['fetch', '-q', '--unshallow', remote], { timeoutMs: CLOSE_TIMEOUT_MS });
     return null;
   } catch (e) {
     const err = e as { stderr?: string; message?: string };
