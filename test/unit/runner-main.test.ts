@@ -1,6 +1,7 @@
 // runner-main.test.ts — `baton run`'s pure half (BATON_SPEC §6.13; R3-1245): the flag parser,
 // the course declarations a heartbeat needs (rule 9), the credential the environment names and
 // the runner secret's shape. Node only: it writes temp checkouts and runs ssh-keygen.
+import { capabilityChecks } from '../../src/runner/capabilityChecks';
 import { describe, it, expect, vi } from 'vitest';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
@@ -19,6 +20,9 @@ import { Sidecar } from '../../src/runner/sidecar';
 import { StateFile } from '../../src/runner/state';
 import { declarationFrom } from '../../src/runner/runner';
 import { validateCourse } from '../../src/core/course';
+import { course, cutover, Git, keyCall, ORIGIN, rows, setAdminKeys, setClock } from '../helpers';
+import { makeKey, signedRequest } from '../lib/sshKeys';
+import { call as hostCall } from '#host';
 import { graphOf } from '../../src/core/graph';
 
 function home(): string {
@@ -1354,6 +1358,79 @@ describe('baton run --home: a name resolves to its checkout (B-121)', () => {
       rmSync(config, { recursive: true, force: true });
     }
   });
+});
+
+it('S-BTN-73 withholds a failed check, then restores it after an idle check passes', async () => {
+  let time = 0;
+  const clock = () => time;
+  const env = { CHECK_RESULT: '1' };
+  const checks = capabilityChecks({ capabilities: [
+    { name: 'vpn:corp', check: [process.execPath, '-e', 'process.exit(Number(process.env.CHECK_RESULT))'], every_s: 2 },
+    { name: 'human-operator' },
+  ] }, process.cwd(), env);
+  expect(checks.passes('vpn:corp')).toBe(false);
+  expect(checks.passes('human-operator')).toBe(true);
+  await checks.refresh(clock);
+  expect(checks.passes('vpn:corp')).toBe(false);
+  env.CHECK_RESULT = '0';
+  await checks.refresh(clock, true);
+  expect(checks.passes('vpn:corp')).toBe(false);
+  time = 2000;
+  await checks.refresh(clock);
+  expect(checks.passes('vpn:corp')).toBe(true);
+});
+
+it('S-BTN-73: a runner heartbeat withdraws a failed check from the claim and advance gates', async () => {
+  let time = Date.parse('2026-10-16T12:00:00Z');
+  await setClock(time);
+  const admin = await makeKey('ssh-ed25519', 'admin');
+  const key = await makeKey('ssh-ed25519', 'checked-runner');
+  await setAdminKeys(admin);
+  const hostname = 'checked-host';
+  expect((await keyCall(admin, '/v1/admin/grants', { repository: 'docs', public_key: key.publicKey, hostname, capabilities: ['vpn:corp'] })).status).toBe(200);
+  const base = course();
+  const file = base.course;
+  const git = new Git().add('B', { requires: ['vpn:corp'] }).add('C');
+  git.registry = [{ ...base, course: { ...file, capability_types: { vpn: { description: 'Network', values: '^corp$' } },
+    legs: { ...file.legs, review: { ...file.legs.review, requires: { capabilities: ['vpn:corp'] } } } } }];
+  expect(await git.post()).toMatchObject({ status: 200 });
+  await cutover(time);
+  const dir = home();
+  const env = { CHECK_RESULT: '1' };
+  const checks = capabilityChecks({ capabilities: [{ name: 'vpn:corp', every_s: 1,
+    check: [process.execPath, '-e', 'process.exit(Number(process.env.CHECK_RESULT))'] }] }, dir, env);
+  const api = new BatonApi({ url: ORIGIN, auth: (_method, _url, _body, secret): Record<string, string> => secret ? { 'X-Runner-Secret': secret } : {},
+    transport: async (req) => {
+      const headers: Record<string, string> = {};
+      req.headers.forEach((value, name) => { headers[name] = value; });
+      return hostCall(await signedRequest(key, req.url, {
+        method: req.method, body: req.body ? await req.text() : undefined, created: Math.floor(time / 1000), headers,
+      }));
+    } });
+  const runner = new Runner({ api, home: dir, repository: 'docs', hostname, harness: 'opencode', session: 'checks',
+    courses: [{ course: 'roadmap-pr', version: 3 }], capabilities: ['vpn:corp'], capabilityChecks: checks,
+    stateFile: join(dir, 'checks.json'), beatEvery: 60_000, now: () => time, log: () => {} });
+  const tick = async (result: string) => {
+    env.CHECK_RESULT = result;
+    time += 1000;
+    await setClock(time);
+    await runner.tick();
+    expect(await rows('SELECT capability FROM runner_capabilities WHERE capability = ?', 'vpn:corp')).toHaveLength(result === '0' ? 1 : 0);
+  };
+  try {
+    await tick('1');
+    await expect(api.claim({ request_id: 'failed-check', ticket_id: 'docs:B' })).rejects.toMatchObject({ ruleCode: 'missing-capability' });
+    await tick('0');
+    const passed = await api.claim({ request_id: 'passing-check', ticket_id: 'docs:B' });
+    await api.end(passed.claim_id, { end_reason: 'released:requested' });
+    await tick('1');
+    const claim = await api.claim({ request_id: 'failed-review-check', ticket_id: 'docs:C' });
+    await api.advance(claim.claim_id, { leg: 'implement' });
+    await expect(api.advance(claim.claim_id, { reached: 'pr-open', leg: 'review' })).rejects.toMatchObject({ ruleCode: 'missing-capability' });
+  } finally {
+    runner.stop();
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 it.each([false, true])('S-BTN-21: a retiring claim reserves its machine lock (release ack: %s)', async (ack) => {

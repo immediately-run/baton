@@ -47,6 +47,7 @@ export interface Brief {
   wrapper: string;
   /** The leg's environment as R-BTN-144 lists it — the executor decides what reaches the session. */
   env: Record<string, string>;
+  /** R-BTN-183 (B-141): a hint for the executor; the agent stub applies the restriction. */
   reads_only?: boolean;
   /** R-BTN-195 (B-234): the leg never asks for a person — a hint for the executor's brief, as
    *  `reads_only` is: the runner's raise check enforces it, whatever the executor does with it. */

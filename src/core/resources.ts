@@ -212,7 +212,7 @@ export class Resources {
    * writer class `admin` — no precedence. A reading's `nonce` and `signature` are its retired
    * signature (R-BTN-181), read and ignored while the history's Migrations entry lasts.
    */
-  // @model reading sha256:7859931ad182
+  // @model reading sha256:163448542748
   post(who: Instrument, body: unknown, repos: string[] | null) {
     const readings = checkReadings(body, VALID_FOR.state_s);
     return this.c.store.transaction(() => {
@@ -324,7 +324,7 @@ export class Resources {
 
   /** The alarm's share: lapsed readings are dropped (every reading in force is kept, R-BTN-101),
    *  and the states they held change. Returns when the next one lapses. */
-  // @model readingLapses sha256:e21de463d6ed
+  // @model readingLapses sha256:6b60a476da58
   alarm(): number | null {
     const now = this.c.now();
     const lapsed = this.rows<{ instance: string }>('SELECT DISTINCT instance FROM instance_readings WHERE lapses_at <= ?', now).map((r) => r.instance);
