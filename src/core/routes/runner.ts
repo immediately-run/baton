@@ -7,6 +7,7 @@ import { requireFleetScope, runnerViewResponse } from '../runnerViews';
 import type { Courier } from '../notices';
 import { authenticated, verifySigned } from './principal';
 import { holderTicket, liveRepoParam, requireGrant, runnerSecret } from './kit';
+import { noteIdle, type IdleDetail } from '../idleReasons';
 
 type RunnerAuthCore = Parameters<typeof authenticated>[0] & Pick<BatonCore, 'admin'>;
 type RunnerCore = Pick<BatonCore, 'store' | 'registry' | 'runners' | 'claims' | 'sql' | 'admin' | 'now' | 'queues' | 'resources' | 'cutover' | 'conditions'>;
@@ -94,7 +95,7 @@ export async function runnerRoute(core: RunnerCore, req: Request, url: URL, prin
       // snapshot itself; a signed read must be its ancestor) burned the honest claim as
       // `cannot-finish:spec`, a counted, non-retryable attempt, where the stale board's
       // release is unpenalised.
-      const answer = tx(() => {
+      const answer = claimWithIdle(core, runnerId, () => {
         const a = core.claims.claim(runnerId, body);
         const ticket = String(a.ticket_id ?? '');
         if (ticket.includes(':')) {
@@ -276,4 +277,24 @@ export async function probeRoute(core: Parameters<typeof verifySigned>[0] & Pick
   if (kind !== 'probe') throw new BatonError('forbidden', 'only a probe key posts here (R-BTN-57: one role per key)');
   const out = core.resources.post({ kind: 'probe', fingerprint: signed.cred }, await readJson(signed.req), null);
   return json(out);
+}
+
+/** B-244: an idle refusal may queue a notification, but never commits the refused claim's
+ *  transaction. The existing unblocked alarm sends the committed queue. */
+function claimWithIdle<T>(core: Pick<BatonCore, 'store' | 'config' | 'now' | 'blocks'>, runnerId: number, claim: () => T): T {
+  try {
+    return core.store.transaction(() => {
+      const answer = claim();
+      core.store.exec('DELETE FROM runner_idle WHERE runner_id = ?', runnerId);
+      return answer;
+    });
+  } catch (e) {
+    if (e instanceof BatonError && (e.code === 'no-eligible-ticket' || e.code === 'not-eligible' || e.code === 'stale-skills')) {
+      const seconds = Number(core.config.BATON_IDLE_NOTIFY_AFTER_S);
+      const threshold = (Number.isSafeInteger(seconds) && seconds > 0 ? seconds : 1800) * 1000;
+      core.store.transaction(() => noteIdle(core.store, runnerId, core.now(), threshold, e.extra.detail as IdleDetail | undefined,
+        (repo) => core.blocks.queueIdleTrigger(repo)));
+    }
+    throw e;
+  }
 }

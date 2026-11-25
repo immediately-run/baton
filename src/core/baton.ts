@@ -179,7 +179,7 @@ export class BatonCore {
     // bases (as a question's), and the Needs-you and list reads a delivery runner polls.
     this.conditions = new Conditions({ store, now: () => this.now(), graph: (repo, course) => this.stations.graph(repo, course), history: this.history,
       linkBases: (ticket) => this.blocks.linkBases(ticket) });
-    this.claims = new Claims({ store, now: () => this.now(), random: (n) => this.random(n), stations: this.stations, admin: this.admin, blocks: this.blocks, history: this.history,
+    this.claims = new Claims({ store, now: () => this.now(), random: (n) => this.random(n), stations: this.stations, admin: this.admin, blocks: this.blocks, history: this.history, resourceReadings: this.resources,
       schema: (repo, id) => this.courses.schema(repo, id), intake: (repo, course) => this.queues.intake(repo, course),
       dispatch: (kind, ticketId) => want({ repository: repositoryOf(ticketId), kind }) ,
       policies: this.policies, forgeOf: (repo) => this.registry.get(repo)?.forge ?? 'github', scope: this.scope, deprecated: this.deprecated,

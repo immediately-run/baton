@@ -10,7 +10,7 @@ import { authenticated, verifySigned, type PersonPrincipal } from './principal';
 
 const RESYNC_WINDOW_MS = 30_000; // B-201: a session's resync, once per repository per R-BTN-73's dispatch window
 
-type OwnerCore = Pick<BatonCore, 'registry' | 'admin' | 'store' | 'now' | 'policies' | 'claims' | 'humanBreakGlass'>;
+type OwnerCore = Pick<BatonCore, 'registry' | 'admin' | 'store' | 'now' | 'policies' | 'claims' | 'humanBreakGlass' | 'questions'>;
 
 export async function ownerRoute(core: OwnerCore, req: Request, url: URL, principal: PersonPrincipal): Promise<Response | null> {
   const { cred: fp, administrator } = principal;
@@ -18,6 +18,7 @@ export async function ownerRoute(core: OwnerCore, req: Request, url: URL, princi
   if (!p.startsWith('/v1/owner/')) return null;
   const m = req.method;
   const body = () => readJson(req);
+  const optionalBody = async () => req.body ? body() : null;
   const seg = pathSegment;
   const o = /^\/v1\/owner\/([^/]+)\/(.+)$/.exec(p);
   if (!o) throw new BatonError('not-found', `no route ${m} ${p}`);
@@ -36,7 +37,7 @@ export async function ownerRoute(core: OwnerCore, req: Request, url: URL, princi
   if (m === 'GET' && rest === 'signing-keys') return json({ keys: await core.admin.signingKeys(repo) });
   if (m === 'POST' && rest === 'grants') return json(await core.admin.grant(actor, repo, await body(), 'owner'));
   const rg = /^grants\/([^/]+)\/revoke$/.exec(rest);
-  if (m === 'POST' && rg) return json(await core.admin.revokeGrant(actor, repo, seg(rg[1])));
+  if (m === 'POST' && rg) return json(await core.admin.revokeGrant(actor, repo, seg(rg[1]), await optionalBody()));
   if (m === 'POST' && rest === 'owners') return json(await core.admin.owners(actor, repo, await body()));
   // B-113 (R-BTN-140's precedent): the repository's owners' consent to another repository's
   // tickets depending on theirs — the consent a dependency on a less visible repository needs
@@ -52,8 +53,11 @@ export async function ownerRoute(core: OwnerCore, req: Request, url: URL, princi
   // floors and the satisfiable-list refusals all inside it.
   if (m === 'PUT' && rest === 'policy') {
     const b = await body();
-    const breakGlass = await core.humanBreakGlass();
-    return json(core.store.transaction(() => core.policies.put(repo, b, forge, { credential: fp, label: actor }, new Set(breakGlass.keys()))));
+    const breakGlass = new Set((await core.humanBreakGlass()).keys());
+    const admins = await core.admin.adminFingerprints();
+    const personAnswerStops = () => core.admin.hasHumanDecisionWriter(breakGlass, admins) ? []
+      : core.questions.answerableLegs(repo);
+    return json(core.store.transaction(() => core.policies.put(repo, b, forge, { credential: fp, label: actor }, { breakGlass, personAnswerStops })));
   }
   if (m === 'POST' && rest === 'policy/floors') {
     const b = await body();
@@ -213,7 +217,7 @@ export async function attestationRoute(core: Parameters<typeof authenticated>[0]
     // R-BTN-185: an owner key of the repository, or a human-only one — a registered human
     // key's own public line serves the signature lookup, not the host's break-glass lines
     // alone (a key registered through POST /v1/human-keys owns nothing, but answers).
-    const signed = await authenticated(core, req, (fp) => admins.get(fp) ?? core.admin.ownerKey(fp) ?? core.admin.humanKeyLine(fp));
+    const signed = await authenticated(core, req, (fp) => admins.get(fp) ?? core.admin.decisionKeyLine(fp));
     const fp = signed.cred;
     const human = await core.admin.isHumanKey(fp);
     const policy = core.policies.current(repo)?.policy;

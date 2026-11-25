@@ -84,6 +84,8 @@ export interface Dispatch {
 /** The instance's settings (§3a): wrangler.toml's vars and the Worker secrets on Cloudflare,
  *  the start-up options and `--config` file locally. */
 export interface Config {
+  /** B-244: seconds idle before dispatching the repository's owner trigger (default 1800). */
+  BATON_IDLE_NOTIFY_AFTER_S?: string;
   BATON_ORIGIN: string;
   OIDC_ISSUER: string;
   OIDC_JWKS_URL: string;

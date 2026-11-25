@@ -13,6 +13,7 @@ export async function adminRoute(core: AdminCore, req: Request, url: URL, princi
   if (!p.startsWith('/v1/admin/')) return null;
   const m = req.method;
   const body = () => readJson(req);
+  const optionalBody = async () => req.body ? body() : null;
   const seg = pathSegment;
   if (!administrator) throw new BatonError('forbidden', 'an administrator’s key is required (R-BTN-57)');
   const actor = `admin:${fp}`;
@@ -65,7 +66,7 @@ export async function adminRoute(core: AdminCore, req: Request, url: URL, princi
     return json(await core.admin.grant(actor, repo, b, 'admin'));
   }
   const revoke = /^\/v1\/admin\/keys\/([^/]+)\/revoke$/.exec(p);
-  if (m === 'POST' && revoke) return json(await core.admin.revokeKey(actor, seg(revoke[1])));
+  if (m === 'POST' && revoke) return json(await core.admin.revokeKey(actor, seg(revoke[1]), await optionalBody()));
   if (m === 'POST' && p === '/v1/admin/login-links') return json(await core.admin.loginLink(fp));
   return null;
 }
