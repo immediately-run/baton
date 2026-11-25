@@ -292,10 +292,10 @@ describe('S-BTN-48 replay: a recorded run re-run without a claim', () => {
     const token = await syncToken();
     const sync = async (comments: unknown[]) => {
       vi.stubGlobal('fetch', githubFake({
-        `/repos/${SYNC_CLAIMS.repository}/pulls?state=all`: [],
+        [`/repos/${SYNC_CLAIMS.repository}/pulls?state=all`]: [],
         [`/repos/${SYNC_CLAIMS.repository}/commits/${parent}/comments`]: comments,
-        `/repos/${SYNC_CLAIMS.repository}/collaborators/writer/permission`: { permission: 'write' },
-        `/repos/${SYNC_CLAIMS.repository}/collaborators/reader/permission`: { permission: 'read' },
+        [`/repos/${SYNC_CLAIMS.repository}/collaborators/writer/permission`]: { permission: 'write' },
+        [`/repos/${SYNC_CLAIMS.repository}/collaborators/reader/permission`]: { permission: 'read' },
       }));
       expect(await syncMain({ root: repo.dir, url: ORIGIN, auth: () => ({ Authorization: `Bearer ${token}` }), transport: hostCall, log: () => {} })).toBe(0);
     };
