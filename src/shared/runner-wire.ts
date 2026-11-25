@@ -2,6 +2,9 @@
 // validation where it is consumed; these types do not validate JSON.
 import type { LastWrittenBy } from '../core/provenance';
 
+import type { ResolvedInput } from '../core/contracts';
+import type { PointerReach } from '../core/contractPointers';
+
 export type NextLegs = { leg: string; state: string; waiting_on?: string }[];
 
 export interface ClaimAnswer {
@@ -19,6 +22,8 @@ export interface ClaimAnswer {
   ticket_source?: { kind: string; versions: string | null } | null;
   leg_state?: 'forge' | 'branch';
   scope?: string[];
+  /** B-39: where the leg's declared pointers may reach (R-BTN-109). */
+  pointer_reach?: PointerReach;
   brief?: { signed: boolean; signer?: string; commit: string };
   last_written_by?: LastWrittenBy;
   default_branch?: string;
@@ -90,6 +95,8 @@ export interface AdvanceAnswer {
   seq?: number;
   /** B-335 (R-BTN-63): the run's number of its leg, this one included. */
   run?: number;
+  /** B-39: the leg's resolved inputs (R-BTN-109). */
+  inputs?: ResolvedInput[];
   session_url_dropped?: string;
   advice?: unknown;
 }
