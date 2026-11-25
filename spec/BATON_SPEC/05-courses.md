@@ -31,7 +31,7 @@ Designs for this section that are not built are on the proposal page
     home changes a sourced course only through its leg instructions and leg overrides
     (R-BTN-131).
   - **Every reader goes through the snapshot.** The sync reads `.baton/` at the commit it posts
-    (R-BTN-105), the runner at the claim's `snapshot_sha` after R-BTN-143's check, and
+    (R-BTN-105), the runner at the claim's `snapshot_sha` (see R-BTN-143), and
     re-verification at the commit it verifies (R-BTN-5), so all three use the same bytes.
     Station functions and ticket sources run through the wrapper (R-BTN-133) in a read-only
     worktree of that commit, never in `ctx.checkout`.
@@ -85,10 +85,11 @@ Designs for this section that are not built are on the proposal page
   | `max_queue` | leg | queue depth that raises a warning | R-BTN-79 |
   | `version`, `inputs`, `outputs` | leg | its contract | R-BTN-82 |
   | `replay_safe` | leg | `false` when it has side effects outside git and its forge | R-BTN-82, R-BTN-84 |
-  | `requires` | leg | prerequisites: `{capabilities}` | R-BTN-120 |
+  | `requires` | leg | prerequisites: `{capabilities, tickets, resources}` | R-BTN-120 |
   | `deadline_s` | leg | how long one run may take before Baton takes the claim back | R-BTN-167, R-BTN-90 |
   | `conditions` | leg | narrows the condition types it may raise (`[]`: none) | R-BTN-160 |
   | `autonomous` | leg | `true`: the leg never asks for a person | R-BTN-195 |
+  | `reads_only` | runner leg | Boolean; `true` starts the agent in a read-only review workspace | R-BTN-183 |
   | `spawns` | leg | the courses of the children it files, and what it provides them | R-BTN-111 |
   | `no_chain_from` | leg | legs whose credential may not take this one on the same ticket | R-BTN-106 |
 
@@ -410,14 +411,17 @@ Designs for this section that are not built are on the proposal page
     capability, `human-operator` or `none`. A course may not declare a type named `runner` or
     `human-operator`.
   - **Built-ins:** `human-operator`, a runner's own statement that a person operates it, and
-    the type `runner` (R-BTN-133). `credential:<NAME>` names an environment variable a leg
-    receives only when it requires it (R-BTN-144).
+    the type `runner` (R-BTN-133). For the proposed `credential:<NAME>` environment scoping,
+    see R-BTN-144.
   - A course's types and roles are served with its course file and shown on the **Courses**
     view, which lists every type two courses define differently.
   - **The runner declares what it has** when it starts. A capability it declares with a lock
     file is one that a single runner on the machine may use at a time: the runner declares it
     only while it holds the file's exclusive lock, and takes the lock before it claims, or
     advances into, a leg requiring the capability (R-BTN-178).
+  - A host may configure checked capabilities in its runner configuration. The runner runs
+    the check at start, before claiming, and periodically while idle. Only a passing check
+    contributes its capability to the runner’s declaration.
   - **Grants** list capabilities (R-BTN-58) and may name `<type>:*`, never a role: the CLI
     expands roles from the latest accepted snapshot, and before signing `<type>:*` prints every
     course defining the type and asks to confirm when their definitions differ (R-BTN-157).
@@ -520,6 +524,7 @@ Designs for this section that are not built are on the proposal page
     to every executor in `brief` (R-BTN-107). A repository's `agent_wrapper` — or
     `BATON_AGENT_WRAPPER` in the leg's environment, which wins — is one more command whose
     words precede the agent's; Baton builds nothing in its place.
+    A `reads_only` leg instead uses the restricted invocation in R-BTN-183.
     - The spawn has no shell: each command string splits into words as `sh` would, with no
       substitutions, and runs with the ticket id, the leg and the checkout appended. Stdin is
       closed; stdout and stderr are captured.

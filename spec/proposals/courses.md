@@ -115,7 +115,6 @@ R-BTN-69 (proposed). Each of these is refused as an unknown field today.
   | `executor` | leg | executor data: a JSON object Baton never reads, passed to the runner's executor | R-BTN-107 |
   | `check_command` | leg | a check course's verdict command: an argv, with `timeout_s` (default 1800, ≤ 7200) | R-BTN-153 |
 | `kind: call` | leg | files children of its `spawns` courses and waits for them; its `to` is a completion table | R-BTN-165 |
-| `requires.tickets`, `requires.resources` | leg | prerequisites other than capabilities | R-BTN-120 |
 
 The validation these fields would add, with the field names an earlier schema used:
 
@@ -379,8 +378,7 @@ R-BTN-142 (proposed).
 
 ## 7. Runner capability checks
 
-R-BTN-121 (proposed). Today a runner declares capabilities with `--capabilities` and a
-machine-exclusive one with `--lock`.
+R-BTN-121: account-instance reporting and confirmation of a blocked end remain proposed.
 
 - **The runner declares what it has** in its configuration (`baton runner start --config`,
   default `~/.config/baton/runner.json`): `{origin, capabilities: [{name, check?: [<argv>…],
