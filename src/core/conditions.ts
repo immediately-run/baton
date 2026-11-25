@@ -23,16 +23,18 @@ export const OPEN_CONDITIONS_MAX = 20;
 export const DAILY_CONDITIONS_MAX = 200;
 /** R-BTN-163: the list route pages 100 at a time. */
 export const CONDITIONS_PAGE_MAX = 100;
+const MISSING_NEXT = 'baton.missing-next';
+const HOUR = 3_600_000;
 
 export interface Ctx {
   store: Store;
   now: () => number;
   /** The course file's graph, as the registry holds it (Stations.graph, cached per post). */
   graph: (repo: string, course: string) => Graph | null;
-  history?: History;
+  history: Pick<History, 'record'>;
   /** R-BTN-92's link bases for a ticket: a `suspend` raise's `url` is kept only under one of
    *  them, as a question's is. */
-  linkBases?: (ticketId: string) => string[];
+  linkBases: (ticketId: string) => string[];
 }
 
 /** One condition row, as the table holds it. */
@@ -50,6 +52,7 @@ interface ConditionRow {
   default_restart: string | null;
   raised_at: number;
   outcome: string;
+  reraised: number;
 }
 
 /** An entry of the Needs-you list and the conditions route. */
@@ -65,6 +68,7 @@ export interface ConditionEntry {
   url: string | null;
   restarts: Record<string, string> | null;
   default: string | null;
+  detail?: { reraised: number };
 }
 
 export class Conditions {
@@ -75,6 +79,35 @@ export class Conditions {
   }
   private exec(q: string, ...p: unknown[]) {
     return this.c.store.exec(q, ...p);
+  }
+
+  /** R-BTN-83/R-BTN-163: settle the repository's missing-next notices in the snapshot transaction. */
+  missingNext(repo: string, missing: ReadonlySet<string>, at: number): void {
+    const open = new Set<string>();
+    for (const row of this.rows<{ id: number; ticket_id: string }>(
+      `SELECT id, ticket_id FROM conditions WHERE repository_id = ? AND type = ? AND outcome = 'open'`, repo, MISSING_NEXT)) {
+      if (missing.has(row.ticket_id)) open.add(row.ticket_id);
+      else this.exec(`UPDATE conditions SET outcome = 'closed', closed_at = ?, closed_how = 'cause-ended' WHERE id = ?`, at, row.id);
+    }
+    for (const ticket of missing) {
+      if (open.has(ticket)) continue;
+      const recent = this.rows<{ id: number }>(
+        `SELECT id FROM conditions WHERE ticket_id = ? AND type = ? AND outcome = 'closed' AND closed_at >= ?
+         ORDER BY closed_at DESC, id DESC LIMIT 1`, ticket, MISSING_NEXT, at - HOUR)[0];
+      if (recent) {
+        this.exec(`UPDATE conditions SET outcome = 'open', raised_at = ?, closed_at = NULL, closed_how = NULL, reraised = reraised + 1 WHERE id = ?`, at, recent.id);
+      } else {
+        this.exec(`INSERT INTO conditions (repository_id, ticket_id, type, disposition, raised_at) VALUES (?, ?, ?, 'notify', ?)`, repo, ticket, MISSING_NEXT, at);
+      }
+      logEvent(this.c.store, at, 'condition', 'baton', { ticket, type: MISSING_NEXT, disposition: 'notify' }, ticket, null, repo);
+      this.c.history.record(ticket, { kind: 'condition', detail: { type: MISSING_NEXT, disposition: 'notify' } });
+    }
+  }
+
+  /** R-BTN-163 (S-BTN-312): close only this ticket's missing-next notice when its cause ends. */
+  closeMissingNext(ticket: string, at: number): void {
+    this.exec(`UPDATE conditions SET outcome = 'closed', closed_at = ?, closed_how = 'cause-ended'
+               WHERE ticket_id = ? AND type = ? AND outcome = 'open'`, at, ticket, MISSING_NEXT);
   }
 
   /**
@@ -125,7 +158,7 @@ export class Conditions {
       this.exec(`UPDATE conditions SET outcome = 'superseded', closed_at = ?, closed_how = 'superseded'
                  WHERE run_id = ? AND (type = 'interact' OR type LIKE 'interact.%') AND outcome = 'open'`, now, run.run_id);
     } else if (disposition === 'suspend' && b.url != null) {
-      url = (this.c.linkBases?.(c.ticket_id) ?? []).some((base) => b.url!.startsWith(base)) ? b.url : null;
+      url = this.c.linkBases(c.ticket_id).some((base) => b.url!.startsWith(base)) ? b.url : null;
     }
     const restarts = b.restarts ?? {};
     // R-BTN-160's closing table, this slice's rows: an unbound leg-raised `notify` (warning and
@@ -142,14 +175,15 @@ export class Conditions {
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       id, repo, c.ticket_id, claimId, run.run_id, run.leg, b.type, disposition, b.severity, url, JSON.stringify(restarts), b.default ?? null, now,
       closesAtRaise ? 'recorded' : 'open', closesAtRaise ? now : null, closesAtRaise ? 'raised' : null);
-    const detail = { condition_id: id, type: b.type, disposition, ...(b.severity !== 'normal' ? { severity: b.severity } : {}), ...(url ? { url } : {}) };
+    const detail = { condition_id: id, type: b.type, disposition, ...(b.severity !== 'normal' ? { severity: b.severity } : {}) };
     // '/' is outside the client activity-id grammar, so a runner cannot preempt this row.
     this.exec(`INSERT INTO activities (runner_id, id, claim_id, run_id, kind, label, source, started_at, ended_at, outcome, received_at, detail_json)
                VALUES (?, ?, ?, ?, 'condition', ?, 'baton', ?, ?, 'succeeded', ?, ?)`,
       runnerId, `condition/${id}`, claimId, run.run_id, b.type, now, now, now, JSON.stringify(detail));
+    const recorded = { ...detail, ...(url ? { url } : {}) };
     logEvent(this.c.store, now, 'condition', `runner:${runnerId}`,
-      { ...detail, ticket: c.ticket_id, leg: run.leg, run_id: run.run_id }, c.ticket_id, claimId, repo);
-    this.c.history?.record(c.ticket_id, { kind: 'condition', claim_id: claimId, leg: run.leg, run_id: run.run_id, detail });
+      { ...recorded, ticket: c.ticket_id, leg: run.leg, run_id: run.run_id }, c.ticket_id, claimId, repo);
+    this.c.history.record(c.ticket_id, { kind: 'condition', claim_id: claimId, leg: run.leg, run_id: run.run_id, detail: recorded });
     return { ok: true, condition_id: id, disposition };
   }
 
@@ -208,6 +242,7 @@ export class Conditions {
       condition_id: r.id, ticket_id: r.ticket_id, leg: r.leg, run_id: r.run_id, type: r.type,
       disposition: r.disposition, severity: r.severity, raised_at: r.raised_at, url: r.url,
       restarts, default: r.default_restart,
+      ...(r.reraised ? { detail: { reraised: r.reraised } } : {}),
     };
   }
 
@@ -219,7 +254,7 @@ export class Conditions {
    */
   needsYou(): ConditionEntry[] {
     return this.rows<ConditionRow>(
-      `SELECT id, repository_id, ticket_id, run_id, leg, type, disposition, severity, url, restarts_json, default_restart, raised_at
+      `SELECT id, repository_id, ticket_id, run_id, leg, type, disposition, severity, url, restarts_json, default_restart, raised_at, reraised
        FROM conditions WHERE outcome = 'open'
        ORDER BY CASE severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 ELSE 2 END, raised_at, id`,
     ).map((r) => this.entry(r));
@@ -253,7 +288,7 @@ export class Conditions {
     where.push('id > ?');
     params.push(after);
     const rows = this.rows<ConditionRow & { id: number }>(
-      `SELECT id, repository_id, ticket_id, run_id, leg, type, disposition, severity, url, restarts_json, default_restart, raised_at
+      `SELECT id, repository_id, ticket_id, run_id, leg, type, disposition, severity, url, restarts_json, default_restart, raised_at, reraised
        FROM conditions WHERE ${where.join(' AND ')} ORDER BY id LIMIT ${CONDITIONS_PAGE_MAX + 1}`, ...params);
     const page = rows.slice(0, CONDITIONS_PAGE_MAX).map((r) => this.entry(r));
     return { conditions: page, cursor: rows.length > CONDITIONS_PAGE_MAX ? String(page[page.length - 1].condition_id) : null };

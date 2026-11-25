@@ -223,9 +223,12 @@ A claim ends with `POST /v1/runner/claims/{id}/end`. Its body, stated here once:
   from facts read after the end. The end's position stands from the moment Baton records it
   (R-BTN-39); confirmation checks its evidence, not where it put the ticket. It is confirmed by
   the first accepted snapshot whose observation began after the end and that:
-  - for an end that named `ended_at_sha` (R-BTN-8), carries the sync's `std:git.evidence@1`
-    for it with `found: true` — the observation's `unconfirmed` list (§4.3) tells the sync
-    which ends wait and what each named;
+  - for an end that named `ended_at_sha` (R-BTN-8), a commit or a URL, carries the sync's
+    `std:git.evidence@1` for that claim and that evidence with `found: true` — the
+    observation's `unconfirmed` list (§4.3) tells the sync which ends wait and what each named.
+    The sync says `found: false` only where git or the forge answers that the object does not
+    exist, and nothing for evidence it did not look at; where git places the ticket is never
+    evidence;
   - for an end that named none, is accepted at all;
   - for `done`, shows the ticket closed as done (`closed_tickets`) or absent, whatever it named.
 

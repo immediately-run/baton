@@ -41,7 +41,6 @@ section that are not built are in [the proposal page](../proposals/checks-and-ex
   | `model_id` | optional; a label no rule reads |
   | `capabilities` | the declared capabilities, roles and holdings (R-BTN-121, R-BTN-174) |
   | `tags` | optional (R-BTN-60) |
-  | `tier_ceiling`, `tier_ceilings` | a tier name for every repository, and one per repository; absent ⇒ the top tier |
   | `lease_timeout_s` | R-BTN-9 |
   | `concurrency` | R-BTN-4 |
   | `courses` | `[{repository, course, version}]`, read from the runner's checkout at session start (R-BTN-22) |
@@ -58,13 +57,11 @@ section that are not built are in [the proposal page](../proposals/checks-and-ex
 
   - A runner holding one claim may send `session_url`, `leg_finished` and one `fenced` object in
     place of the three lists. Spooled activities go in their own call before the beat (§9.9).
-  - A refused `transcripts`, `couriers` or `protection` entry, a `tier_ceilings` entry for a
-    repository Baton does not serve and a dropped session link (R-BTN-113) are named in the
-    answer and never refuse the heartbeat, since a refused heartbeat would get a live runner
-    reaped. A malformed `session_urls` or `legs_finished` entry is dropped unnamed. A malformed
-    `protection` or `tier_ceilings`, or a tier not on a registered repository's ladder, is
-    `invalid-params`, as is a `transcripts`, `couriers` or `protection` list over its bound and
-    a malformed `fenced`.
+  - A refused `transcripts`, `couriers` or `protection` entry and a dropped session link
+    (R-BTN-113) are named in the answer and never refuse the heartbeat, since a refused heartbeat
+    would get a live runner reaped. A malformed `session_urls` or `legs_finished` entry is dropped
+    unnamed. A malformed `protection` is `invalid-params`, as is a `transcripts`, `couriers` or
+    `protection` list over its bound and a malformed `fenced`.
   - **The answer** carries `runner_id`, `incarnation`, `lease_timeout_s` (as clamped),
     `grant: {capabilities}` (R-BTN-72), `claims`, `messages`, `bars` (the owner bars in force,
     R-BTN-67), `stale_courses` (R-BTN-22), `mode` (per repository `shadow` or `cut-over`;
@@ -145,6 +142,12 @@ section that are not built are in [the proposal page](../proposals/checks-and-ex
   at its own interval (R-BTN-77). Each attempt is one claim request and reads no
   recommendations, which are for a caller choosing work (§6.6). A claim that waits (R-BTN-40, R-BTN-195) holds only
   its own place, never the runner's other claims.
+  - **Restart requested.** With `--restart-when-behind`, at a claim boundary with no claims
+    held, the runner compares its loaded CLI checkout commit with its branch's local tracking ref.
+    If strictly behind, it logs why and takes the graceful drain path, exiting `75` instead
+    of taking another claim. Without the flag it keeps claiming. Released and detached CLIs
+    have no tracking branch to check. Updating the CLI, choosing the executor pin and launching
+    another process belong to the host.
   - **Course directory** (R-BTN-69, R-BTN-134):
 
     ```

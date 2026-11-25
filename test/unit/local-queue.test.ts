@@ -12,7 +12,7 @@ import { current } from '../hosts/local';
 import { RequestQueue } from '../../src/local/queue';
 import { MAX_BODY, serve } from '../../src/local/server';
 import { openStore } from '../../src/local/store';
-import { adminKeysFrom, concreteHost, localConfig, main } from '../../src/local/main';
+import { accessIdentitiesFrom, adminKeysFrom, concreteHost, localConfig, main } from '../../src/local/main';
 import { RECOMMENDED_CLIENT, SECURITY_HEADERS } from '../../src/core/http';
 
 const board = inject('board');
@@ -254,4 +254,22 @@ describe('--admin-keys (R-BTN-57; round 3, 3-A-4)', () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+});
+
+it('S-BTN-308: re-reads the local Access binding file and refuses an unreadable one', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'baton-access-identities-'));
+  try {
+    const path = join(dir, 'identities');
+    const line = 'admin@example.com bak_0123456789abcdef';
+    const bindings = accessIdentitiesFrom(path);
+    writeFileSync(path, line);
+    expect(bindings.read()).toBe(line);
+    writeFileSync(path, '');
+    expect(bindings.read()).toBe('');
+    rmSync(path);
+    expect(() => bindings.read()).toThrow(/could not be read/);
+    expect(accessIdentitiesFrom(undefined).read()).toBe('');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

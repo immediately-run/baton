@@ -20,12 +20,13 @@ CREATE TABLE conditions_next (
   raised_at     INTEGER NOT NULL,
   outcome       TEXT NOT NULL DEFAULT 'open' CHECK (outcome IN ('open','superseded','recorded','closed')),
   closed_at     INTEGER,
+  reraised      INTEGER NOT NULL DEFAULT 0,
   closed_how    TEXT                              -- 'run-ended' for an interact whose run ended
 );
 INSERT INTO conditions_next (id, repository_id, ticket_id, claim_id, run_id, leg, type, disposition,
-    severity, url, restarts_json, default_restart, raised_at, outcome, closed_at, closed_how)
+    severity, url, restarts_json, default_restart, raised_at, outcome, closed_at, closed_how, reraised)
   SELECT id, repository_id, ticket_id, claim_id, run_id, leg, type, disposition,
-    severity, url, restarts_json, default_restart, raised_at, outcome, closed_at, closed_how FROM conditions;
+    severity, url, restarts_json, default_restart, raised_at, outcome, closed_at, closed_how, reraised FROM conditions;
 DROP TABLE conditions;
 ALTER TABLE conditions_next RENAME TO conditions;
 CREATE INDEX conditions_open ON conditions(repository_id, type, raised_at) WHERE outcome = 'open';
@@ -61,9 +62,9 @@ CREATE TABLE activities_next (
   CHECK (claim_id IS NOT NULL OR kind = 'orient')
 );
 INSERT INTO activities_next (runner_id, id, claim_id, parent_id, call_id, kind, seq, label,
-    source, started_at, ended_at, outcome, received_at, detail_json)
+    source, started_at, ended_at, outcome, received_at, run_id, detail_json)
   SELECT runner_id, id, claim_id, parent_id, call_id, kind, seq, label,
-    source, started_at, ended_at, outcome, received_at, detail_json FROM activities;
+    source, started_at, ended_at, outcome, received_at, run_id, detail_json FROM activities;
 DROP TABLE activities;
 ALTER TABLE activities_next RENAME TO activities;
 CREATE INDEX activities_by_claim ON activities(claim_id, started_at);
