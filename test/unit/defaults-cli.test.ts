@@ -1004,7 +1004,7 @@ describe('baton repo init, through the built CLI', () => {
       mkdirSync(join(checkout, 'tickets/nested'), { recursive: true });
       const path = 'tickets/nested/Delivery [1].MD';
       const archived = 'tickets/archive/nested/Delivery [1].MD';
-      writeFileSync(join(checkout, path), '---\nid: B-1\ntitle: Delivery\nstatus: available\n---\nSee [docs](../../docs/file.md).\n');
+      writeFileSync(join(checkout, path), '---\nid: B-1\ntitle: Delivery\nstatus: available\n---\nSee [work](../../evidence.txt).\n');
       const second = commitAll(checkout);
       const commits = [first, second];
       for (let i = 2; legacy && i < 16; i++) {
@@ -1048,7 +1048,7 @@ describe('baton repo init, through the built CLI', () => {
       const note = legacy ? '\n\nDelivery evidence incomplete: the legacy end record was truncated; unrecorded commits are not listed.' : '';
       expect(g('log', '-1', '--format=%B', sha)).toBe(`tickets: B-1 done (archived)\n\nDelivered by: ${commits.slice(0, 15).join(', ')}${note}`);
       expect(g('show', `${sha}:${archived}`)).toContain('status: done');
-      expect(g('show', `${sha}:${archived}`)).toContain('[docs](../../../docs/file.md)');
+      expect(g('show', `${sha}:${archived}`)).toContain('[work](../../../evidence.txt)');
       expect(g('--literal-pathspecs', 'ls-tree', sha, '--', path)).toBe('');
       expect(g('rev-parse', 'HEAD')).toBe(beforeArchive);
       g('switch', '--detach', sha);
