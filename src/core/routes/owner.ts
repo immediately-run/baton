@@ -10,7 +10,7 @@ import { authenticated, verifySigned, type PersonPrincipal } from './principal';
 
 const RESYNC_WINDOW_MS = 30_000; // B-201: a session's resync, once per repository per R-BTN-73's dispatch window
 
-type OwnerCore = Pick<BatonCore, 'registry' | 'admin' | 'store' | 'now' | 'policies' | 'claims' | 'humanBreakGlass' | 'questions'>;
+type OwnerCore = Pick<BatonCore, 'registry' | 'admin' | 'store' | 'now' | 'policies' | 'claims' | 'humanBreakGlass' | 'questions' | 'blocks'>;
 
 export async function ownerRoute(core: OwnerCore, req: Request, url: URL, principal: PersonPrincipal): Promise<Response | null> {
   const { cred: fp, administrator } = principal;
@@ -42,7 +42,7 @@ export async function ownerRoute(core: OwnerCore, req: Request, url: URL, princi
   // B-113 (R-BTN-140's precedent): the repository's owners' consent to another repository's
   // tickets depending on theirs — the consent a dependency on a less visible repository needs
   // (§3.1). Given here, never by the dependent's own settings; `{withdraw: true}` takes it back.
-  if (m === 'POST' && rest === 'dependency-consents') return json(consentRoute(core.store, () => core.now(), repo, actor, await body()));
+  if (m === 'POST' && rest === 'dependency-consents') return json(consentRoute(core.store, () => core.now(), repo, actor, await body(), () => core.blocks.refreshPrerequisiteVisibility()));
   if (m === 'POST' && rest === 'bars') return json(core.admin.setBar(actor, repo, await body()));
   const lift = /^bars\/(\d+)\/lift$/.exec(rest);
   if (m === 'POST' && lift) return json(core.admin.liftBar(actor, repo, Number(lift[1])));

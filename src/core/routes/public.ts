@@ -87,7 +87,7 @@ export async function sequenceRoute(core: Parameters<typeof authenticated>[0] & 
  * src/core/reads/repository.ts, for a session beside those keys.
  */
 export async function repositoryRead(core: Parameters<typeof boardView>[0] & Pick<BatonCore, 'policies' | 'instance' | 'blocks' | 'history'>, req: Request, url: URL, repo: string, who: ReadPrincipal, sessionLink: SessionLinkView): Promise<Response | null> {
-  const blocks = /^\/v1\/repositories\/([^/]+)\/tickets\/([^/]+)\/blocks$/.exec(url.pathname);
+  const blocks = /^\/v1\/repositories\/([^/]+)\/tickets\/([^/]+)\/(blocks|prerequisites)$/.exec(url.pathname);
   const blocked = /^\/v1\/repositories\/([^/]+)\/blocked$/.exec(url.pathname);
   // R-BTN-81: a ticket's history, read by the principals that may read its blocks (§11).
   const history = /^\/v1\/repositories\/([^/]+)\/tickets\/([^/]+)\/history$/.exec(url.pathname);
@@ -181,6 +181,11 @@ export async function repositoryRead(core: Parameters<typeof boardView>[0] & Pic
       if (who !== 'me' || role !== 'runner') throw new BatonError('invalid-params', 'runner: only `me`, from a runner session');
       const { secret, legacyName } = runnerSecret(req);
       runner = await core.runners.authRunner(cred, secret, clientVersionOf(req.headers.get(CLIENT_HEADER)), legacyWho != null || legacyName);
+    }
+    if (blocks[3] === 'prerequisites') {
+      const leg = url.searchParams.get('leg');
+      if (leg != null && !COURSE_ID.test(leg)) throw new BatonError('invalid-params', 'leg: must be a leg id');
+      return json(core.blocks.prerequisitesOf(id, leg, runner));
     }
     return json(core.blocks.blocksOf(id, runner));
   }

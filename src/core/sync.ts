@@ -11,7 +11,7 @@ import { sha256HexSync } from './policy';
 import { logEvent } from './db';
 import { DispatchRefused } from './mirror';
 import { adjustCounts } from './capacity';
-import type { Seen } from './stations';
+import type { ClosingPosition, Seen } from './stations';
 
 const HELD_AUTO_ACCEPT_MS = 24 * 3_600_000; // §7.1: a held history is accepted after 24 h (R3-1212)
 
@@ -42,24 +42,24 @@ export function head(core: Pick<BatonCore, 'sql'>, repo: string) {
  * a rewind to a once-accepted history included — is a fresh hold with a fresh row. The 0001
  * schema's "written once" and "the first force post" describe that one hold.
  */
-export async function board(core: BoardPostCore, repo: Repository, p: BoardPayload, hashRows: typeof rowsFor) {
+export async function board(core: BoardPostCore, repo: Repository, p: BoardPayload, hashRows: typeof rowsFor, issuer: string | null = null) {
   // Course graphs are read per post: a registry applied, or a post refused after applying one,
   // must not leave another request reading a graph that is not in force.
   core.stations.reset();
   try {
-    return await boardPost(core, repo, p, hashRows);
+    return await boardPost(core, repo, p, hashRows, issuer);
   } finally {
     core.stations.reset();
   }
 }
 
-// @model syncPost sha256:9d500d65a2bf
-async function boardPost(core: BoardPostCore, repo: Repository, p: BoardPayload, hashRows: typeof rowsFor) {
+// @model syncPost sha256:7c0efc930fe7
+async function boardPost(core: BoardPostCore, repo: Repository, p: BoardPayload, hashRows: typeof rowsFor, issuer: string | null) {
   const r = repo.id;
   // R-BTN-62: the post's number is used first, whatever becomes of the post; an older reading
   // than the last accepted one, or a void or used number, is refused whole here.
   const n = p.observation;
-  core.observations.use(r, n);
+  core.observations.use(r, n, issuer);
   // B-183 (§4.4, R-BTN-184): the `tickets-approved` guarantee is defined over a ticket file's
   // approval — a source that reads only as it is now has no file to approve, so its post to a
   // repository whose policy's floors include the guarantee is refused, naming it. What approval
@@ -178,7 +178,7 @@ async function boardPost(core: BoardPostCore, repo: Repository, p: BoardPayload,
       // B-127: the record rides a refresh too (the latest post's word stands); the head has not
       // moved, so no `unsigned-control` event is raised for it again.
       applyControl(core, r, p, at, head);
-      let wrote: { upserted: string[]; deleted: number; renumbered: { from: string; to: string; key: string }[]; closingParents: Map<string, string | null> } | null = null;
+      let wrote: { upserted: string[]; deleted: number; renumbered: { from: string; to: string; key: string }[]; closingPositions: Map<string, ClosingPosition> } | null = null;
       if (refreshed) {
         // B-113: a refresh that writes rows may change `depends_on` too (a source whose store
         // moves with no commit, B-183), so its cross-repository edges are judged as a new
@@ -188,6 +188,7 @@ async function boardPost(core: BoardPostCore, repo: Repository, p: BoardPayload,
         // 1 finding 3) — the same per-ticket check the new-head path runs, without applying the
         // registry the body carries (an older one would roll a course back, above).
         requireCoursesInForce(core, r, refreshed.map(({ row }) => row.course_id));
+        checkPrerequisiteLegs(core, r, p);
         wrote = materialize(core, r, refreshed, p.sha, at, new Set((p.closed ?? []).map((c) => c.id)));
         // A live ticket is not closed (stations.ts, R-BTN-12): a refresh that re-adds a
         // withdrawn ticket clears its closure row, as a new head does (round 1, finding 4) —
@@ -226,6 +227,7 @@ async function boardPost(core: BoardPostCore, repo: Repository, p: BoardPayload,
     // The course registry first (R-BTN-48, R-BTN-69): every ticket must name a course in
     // force, and a refused file with none to keep refuses the whole post.
     const refused = applyRegistry(core, r, p, rows.map(({ row }) => row.course_id), at);
+    checkPrerequisiteLegs(core, r, p);
     if (refused.length) changed.courses_refused = refused;
     const legsBefore = queuedLegs(core, r);
     // The repository's own tickets, keyed by their local ids (R-BTN-47) — upserts by
@@ -249,7 +251,7 @@ async function boardPost(core: BoardPostCore, repo: Repository, p: BoardPayload,
     settleSpawned(core, r, p, n, at);
     core.ownerState.applyPending(r, new Set(rows.map(({ row }) => row.id)), at);
     core.claims.confirmOutputs(r, p.attestations ?? []);
-    const seen = core.stations.apply(r, p.sha, n, stations, p.closed ?? [], at, wrote.closingParents);
+    const seen = core.stations.apply(r, p.sha, n, stations, p.closed ?? [], at, wrote.closingPositions);
     // R-BTN-116: the questions the post carries for its queued person legs (§4.4), then the
     // sync's attestations (R-BTN-191) — a person leg's answer, read from the ticket's
     // `answer:` — applied as the leg's arrival (R-BTN-39), which may move the ticket before
@@ -265,7 +267,7 @@ async function boardPost(core: BoardPostCore, repo: Repository, p: BoardPayload,
     notePositionDisagreements(core, r, p, seen, n);
     // R-BTN-75–78: the snapshot's causes — `blocked_by`, `requires`, `needs`, `decisions` and
     // where each ticket is queued — rewrite the changed tickets' blocks in this transaction.
-    const dropped = applyBlocks(core, r, stations, upserted, legsBefore, changed.deleted > 0);
+    const dropped = applyBlocks(core, r, stations, upserted, legsBefore, changed.deleted > 0, !!p.registry);
     if (dropped.length) changed.dropped = dropped.slice(0, 100);
     core.store.exec('INSERT INTO board_snapshots (repository_id, sha, parent_sha, received_at, ticket_count) VALUES (?, ?, ?, ?, ?) ON CONFLICT (repository_id, sha) DO NOTHING', r, p.sha, p.parent_sha, at, ticketCount);
     core.store.exec('INSERT INTO board_head (repository_id, sha) VALUES (?, ?) ON CONFLICT (repository_id) DO UPDATE SET sha = excluded.sha', r, p.sha);
@@ -284,10 +286,10 @@ async function boardPost(core: BoardPostCore, repo: Repository, p: BoardPayload,
     // history stays in the events.
     core.store.exec('DELETE FROM held_snapshots WHERE repository_id = ? AND head_sha IS ?', r, head);
     event(core, r, 'snapshot-accepted', { sha: p.sha, parent_sha: p.parent_sha, ticket_count: ticketCount, ...changed, ...(accepted ? { held: true } : {}) }, at);
-    // B-126 (R-BTN-194): each ticket's `last_written_by`, read from the push deliveries of the
-    // range (never the post's own account of what changed). Information only: the post is
-    // accepted whatever it finds, and nothing is noticed.
-    core.provenance.advance(repo, head, p.sha, at, rows.map(({ row }) => row), new Set(upserted.map((id) => id.slice(r.length + 1))));
+    // R-BTN-194 and R-BTN-187: ticket provenance and control notices share the server's
+    // push chain. Neither gates the post or relies on what the sync says changed.
+    const control = core.policies.current(r)?.policy.paths.control;
+    core.provenance.advance(repo, head, p.sha, at, rows.map(({ row }) => row), new Set(upserted.map((id) => id.slice(r.length + 1))), control != null && control !== 'any');
     core.observations.accept(r, n);
     const confirmed = core.claims.confirm(confirmations, n);
     // R-BTN-10, R-BTN-35, §2e: git confirms ends, takes tickets away and goes backwards.
@@ -393,10 +395,10 @@ export async function rowsFor(repo: Repository, p: BoardPayload): Promise<{ row:
  *  the old one's hold and backoff, and an event says the move. Returns what it wrote, beside
  *  the parents of the tickets it dropped that the post reports closing (`stations.apply` keeps
  *  the relation past the close, R-BTN-86). */
-function materialize(core: Pick<BatonCore, 'store' | 'sql' | 'claims' | 'history' | 'stations' | 'blocks' | 'queues'>, r: string, rows: { row: TicketRow; hash: string }[], sha: string, at: number, closing: ReadonlySet<string> = new Set()): { upserted: string[]; deleted: number; renumbered: { from: string; to: string; key: string }[]; closingParents: Map<string, string | null> } {
+function materialize(core: Pick<BatonCore, 'store' | 'sql' | 'claims' | 'history' | 'stations' | 'blocks' | 'queues'>, r: string, rows: { row: TicketRow; hash: string }[], sha: string, at: number, closing: ReadonlySet<string> = new Set()): { upserted: string[]; deleted: number; renumbered: { from: string; to: string; key: string }[]; closingPositions: Map<string, ClosingPosition> } {
   const upserted: string[] = [];
   const renumbered: { from: string; to: string; key: string }[] = [];
-  const closingParents = new Map<string, string | null>();
+  const closingPositions = new Map<string, ClosingPosition>();
   const have = new Map(core.sql<{ local_id: string; row_hash: string; key: string | null; path: string; parent: string | null }>(
     'SELECT local_id, row_hash, key, path, parent FROM tickets WHERE repository_id = ?', r).map((x) => [x.local_id, x]));
   // R-BTN-86 (§4.6): each posted parent becomes a stored qualified id — or none, logged
@@ -440,8 +442,8 @@ function materialize(core: Pick<BatonCore, 'store' | 'sql' | 'claims' | 'history
     const id = qualify(r, row.id);
     core.store.exec(
       `INSERT INTO tickets (id, repository_id, local_id, path, title, project, status, node, queue, tags, tier, requires_clause, operator_only,
-         depends_on, blocked_by, repos, ord, rank, snapshot_sha, row_hash, since, holder, course_id, tier_position, expedite, display, version, key, brief, parent, course_fields_json)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         depends_on, blocked_by, repos, ord, rank, snapshot_sha, row_hash, since, holder, course_id, tier_position, expedite, display, version, key, brief, parent, course_fields_json, depends_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (id) DO UPDATE SET path = excluded.path, title = excluded.title, project = excluded.project,
          status = excluded.status, node = excluded.node, queue = excluded.queue, tags = excluded.tags,
          tier = excluded.tier, requires_clause = excluded.requires_clause, operator_only = excluded.operator_only,
@@ -449,10 +451,10 @@ function materialize(core: Pick<BatonCore, 'store' | 'sql' | 'claims' | 'history
          ord = excluded.ord, rank = excluded.rank, snapshot_sha = excluded.snapshot_sha, row_hash = excluded.row_hash,
          since = excluded.since, holder = excluded.holder, course_id = excluded.course_id, tier_position = excluded.tier_position,
          expedite = excluded.expedite, display = excluded.display, version = excluded.version, key = excluded.key, brief = excluded.brief,
-         parent = excluded.parent, course_fields_json = excluded.course_fields_json`,
+         parent = excluded.parent, course_fields_json = excluded.course_fields_json, depends_at = excluded.depends_at`,
       id, r, row.id, row.path, row.title, row.project, row.status, row.node, row.queue, row.tags, row.tier,
       row.requires_clause, row.operator_only, row.depends_on, row.blocked_by, row.repos, row.ord, row.rank, sha, hash, row.since, row.holder, row.course_id,
-      row.tier_position, row.expedite, row.display, row.version, row.key, row.brief ?? null, parent, row.course_fields ?? null);
+      row.tier_position, row.expedite, row.display, row.version, row.key, row.brief ?? null, parent, row.course_fields ?? null, row.depends_at ?? '[]');
     core.store.exec('DELETE FROM ticket_requires WHERE ticket_id = ?', id);
     for (const name of row.requires) core.store.exec('INSERT INTO ticket_requires (ticket_id, name) VALUES (?, ?)', id, name);
     upserted.push(id);
@@ -469,7 +471,10 @@ function materialize(core: Pick<BatonCore, 'store' | 'sql' | 'claims' | 'history
   // Tickets no longer live leave the cache (R-BTN-35); their claims and events stay.
   for (const [gone, had] of have) {
     const id = qualify(r, gone);
-    if (closing.has(gone)) closingParents.set(gone, had.parent ?? null);
+    if (closing.has(gone)) {
+      const position = core.sql<ClosingPosition>(`SELECT t.parent, t.course_id, s.station, s.path FROM tickets t LEFT JOIN ticket_stations s ON s.ticket_id = t.id WHERE t.id = ?`, id)[0];
+      if (position) closingPositions.set(gone, position);
+    }
     core.stations.clear(id);
     core.blocks.forget(id);
     core.store.exec('DELETE FROM ticket_requires WHERE ticket_id = ?', id);
@@ -496,7 +501,7 @@ function materialize(core: Pick<BatonCore, 'store' | 'sql' | 'claims' | 'history
   // R3-1258: the maintained tickets count (R-BTN-87's figure) moves with what this post wrote
   // and dropped — never COUNTed, a growing table being what B-236 refuses to scan.
   if (newTickets || deleted) adjustCounts(core.store, { tickets: newTickets - deleted });
-  return { upserted, deleted, renumbered, closingParents };
+  return { upserted, deleted, renumbered, closingPositions };
 }
 
 /** B-183 (§4.4, R-BTN-184): a `custom` source that reads only as it is now has no ticket file
@@ -560,7 +565,7 @@ function settleSpawned(core: Pick<BatonCore, 'sql' | 'history' | 'store'>, r: st
 /** A refresh's stations (§4.3, R-BTN-62): the head's tickets as the refresh materialized them,
  *  where each is replaced. `wrote` is the refresh's own materialization (B-183) — null on a
  *  held history's refresh, which changes no ticket. */
-function refreshStations(core: BoardPostCore, r: string, p: BoardPayload, n: number, at: number, wrote: { upserted: string[]; deleted: number } | null, held = false): Map<string, Seen> {
+function refreshStations(core: BoardPostCore, r: string, p: BoardPayload, n: number, at: number, wrote: { upserted: string[]; deleted: number; closingPositions: Map<string, ClosingPosition> } | null, held = false): Map<string, Seen> {
   const live = new Set(core.sql<{ local_id: string }>('SELECT local_id FROM tickets WHERE repository_id = ?', r).map((t) => t.local_id));
   const stations = new Map(Object.entries(p.stations ?? {}).filter(([id]) => live.has(id)).map(([id, st]) => [id, stationOf(st)] as [string, PostedStation]));
   // As on a new head: a live ticket the refresh does not place is placed nowhere, never offered
@@ -573,7 +578,7 @@ function refreshStations(core: BoardPostCore, r: string, p: BoardPayload, n: num
   // arrive (B-183): validation already refuses a post closing a ticket it also posts, and its
   // materialization dropped what it no longer names.
   core.claims.confirmOutputs(r, p.attestations ?? []);
-  const seen = core.stations.apply(r, p.sha, n, stations, (p.closed ?? []).filter((c) => held || !live.has(c.id)), at);
+  const seen = core.stations.apply(r, p.sha, n, stations, (p.closed ?? []).filter((c) => held || !live.has(c.id)), at, wrote?.closingPositions);
   // R-BTN-86: a refresh judges a `spawned` end's children as a new head does — it is a
   // reading too, numbered above the end's.
   settleSpawned(core, r, p, n, at);
@@ -600,7 +605,7 @@ function queuedLegs(core: Pick<BatonCore, 'sql'>, r: string): Map<string, string
  *  its row, its needs or decisions, or its queued leg — rewritten. Returns what it reports: a
  *  need failing the resource rule or naming an unregistered resource, a decision with a reserved
  *  id or a url outside the ticket's repositories (R-BTN-76). */
-function applyBlocks(core: Pick<BatonCore, 'sql' | 'blocks'>, r: string, stations: Map<string, PostedStation>, upserted: string[], legsBefore: Map<string, string | null>, removed = false): string[] {
+function applyBlocks(core: Pick<BatonCore, 'sql' | 'blocks'>, r: string, stations: Map<string, PostedStation>, upserted: string[], legsBefore: Map<string, string | null>, removed = false, registryPosted = false): string[] {
   const live = core.sql<{ local_id: string }>('SELECT local_id FROM tickets WHERE repository_id = ?', r).map((x) => x.local_id);
   const { changed, dropped } = core.blocks.posted(r, stations, live);
   // A closed `baton:stalled`, the recount and the post's own rows are evaluated once, after all
@@ -613,7 +618,9 @@ function applyBlocks(core: Pick<BatonCore, 'sql' | 'blocks'>, r: string, station
     // does not (R-BTN-75, R-BTN-76). Coarser than "what is needed changed", by design: a row's
     // hash does not say which field moved, and a recount that finds no crossing writes no row.
     if (upserted.length || changed.length || removed) core.blocks.recount();
+    if (registryPosted) core.blocks.courseCapabilitiesChanged(r);
     const moved = [...queuedLegs(core, r)].filter(([id, leg]) => legsBefore.get(id) !== leg).map(([id]) => id);
+    core.blocks.postPrerequisites(r);
     core.blocks.write([...upserted, ...changed, ...moved]);
   });
   return dropped;
@@ -626,6 +633,18 @@ function applyBlocks(core: Pick<BatonCore, 'sql' | 'blocks'>, r: string, station
 function requireCoursesInForce(core: Pick<BatonCore, 'courses'>, r: string, ticketCourses: string[]): void {
   for (const c of new Set(ticketCourses)) {
     if (!core.courses.get(r, c)) throw new BatonError('invalid-params', `a ticket's course ${c} is not in ${r}'s registry`);
+  }
+}
+
+function checkPrerequisiteLegs(core: Pick<BatonCore, 'sql'>, repo: string, p: BoardPayload): void {
+  const legs = new Map<string, Set<string>>();
+  for (const t of p.tickets ?? []) {
+    if (!t.depends_at?.some((d) => d.leg)) continue;
+    if (!legs.has(t.course_id)) legs.set(t.course_id, new Set(core.sql<{ leg: string }>(
+      'SELECT leg FROM course_legs WHERE repository_id = ? AND course_id = ?', repo, t.course_id).map((r) => r.leg)));
+    for (const d of t.depends_at) if (d.leg && !legs.get(t.course_id)!.has(d.leg)) {
+      throw new BatonError('invalid-params', `${t.id}.depends_at: ${d.leg} is not a leg of ${t.course_id}`);
+    }
   }
 }
 

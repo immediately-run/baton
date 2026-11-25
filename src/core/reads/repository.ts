@@ -28,6 +28,7 @@ export const REPOSITORY_READS: ReadRoute[] = [
   legacy('ticket.children', { clock: false }),
   legacy('ticket.history', { clock: false }),
   legacy('leg.runs'),
+  legacy('leg.why', { etag: false }),
   // `?runner=me` is a runner session's own answer, decided by its secret after authorization:
   // never conditional, so a `304` is never answered where the secret would have been refused.
   legacy('ticket.blocks', { etag: (call) => !call.url.searchParams.has('runner') && !call.url.searchParams.has('worker') }),

@@ -313,9 +313,10 @@ numbers.
     released or void) the observation route answers `sync-busy`. A number is void 10 minutes
     after it was handed out.
   - **Release.** A sync run that will not post gives its number back with
-    `POST /v1/sync/observation {release: <number>}`; a release of any number but the
-    outstanding one does nothing.
-  - Renewal, voiding by credential and the bar on a credential that lets numbers lapse are
+    `POST /v1/sync/observation {release: <number>}`. Only the issuer of the outstanding number
+    may release or post it; revoking a sync key voids its number without resetting the counter.
+    See R-BTN-187 for quotas and owner alerts.
+  - Renewal and the bar on a credential that lets numbers lapse are
     proposed in [tickets and sources](../proposals/tickets-and-sources.md).
 
 An identical validated same-head snapshot may reuse its materialization only while its
@@ -474,8 +475,7 @@ The fingerprint stores no ticket content and is an optimization, never authority
     `version` as the board holds it, and how its source reads (`ticket_source`: `{kind,
     versions}`; absent when the board declared no source, and `version` is `''` when the board
     holds none).
-    Before preparing any tree at the sha, the runner checks it is on the registered default
-    branch (R-BTN-143, else `released:off-branch`). If `git cat-file -e <snapshot_sha>` fails or
+    R-BTN-143 governs verification of the snapshot's ancestry. If `git cat-file -e <snapshot_sha>` fails or
     the file is absent, it fetches the default branch once, then releases `stale-board` if it is
     still missing.
   - The runner reads the ticket from `origin/<default branch>:<path>`, never the working tree,
@@ -583,7 +583,10 @@ The fingerprint stores no ticket content and is an optimization, never authority
     tickets' position rows of `ticket_history` and their `claim_legs`, `closed_tickets`,
     `external_resources`,
     `resource_instances`, `instance_serves`, `capability_capacity`, `check_runners`, `mcp_keys` (hashes only), `instance_settings`, unexpired
-    `registration_tokens` (hashes only), open `conditions`, `ticket_timers`, every `repository_policies` version (R-BTN-188, R-BTN-189).
+    `registration_tokens` (hashes only), open `conditions`, `ticket_timers`, every `repository_policies` version (R-BTN-188, R-BTN-189),
+    and `policy_floors`, the backing rows for live legacy floor projections (R-BTN-189).
+    A schema storing legacy floor rows always includes the `policy_floors` section
+    in the digest, as an empty array when there are no such rows.
   - **Not exported**: claims and their `claim_seats`, events,
     readings (R-BTN-76), sync wants; and, unless `--with-history`, the history, `leg_outputs`
     and `leg_run_inputs`, which an import without them loses.
@@ -593,7 +596,11 @@ The fingerprint stores no ticket content and is an optimization, never authority
     (one role per key, unique names, id grammars, tombstones only on retired rows); the first
     failing row refuses the whole import. It refuses a live repository whose policy versions do
     not chain by `previous_hash` from version 1, or whose export holds no policy; a retired
-    repository's tombstone needs none. Signed requests with `created` at or before the
+    repository's tombstone needs none. Import refuses a missing required `policy_floors`
+    section even with a valid digest and policy hash chain. It validates legacy rows using the
+    stored format. On a schema that uses projection, import checks the current projection after
+    restoring its backing data (R-BTN-188, R-BTN-189).
+    Signed requests with `created` at or before the
     source's `sealed_at` are refused `unauthenticated`. Ticket-scoped rows wait in
     `pending_owner_state` until the first snapshot that creates their ticket; one the
     repository's first snapshot does not post is dropped and logged. A ticket with pending course

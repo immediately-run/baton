@@ -9,7 +9,7 @@ import type { SqlValue } from './ports';
 
 type StateViewCore = Pick<BatonCore, 'sql' | 'now' | 'capacityFigures' | 'registry' | 'courses' | 'queues'
   | 'runners' | 'claims' | 'admin' | 'instance' | 'blocks' | 'notices' | 'stations' | 'cutover' | 'capacity'
-  | 'scope' | 'questions' | 'conditions' | 'history' | 'resources'>;
+  | 'scope' | 'questions' | 'conditions' | 'history' | 'resources' | 'observations' | 'provenance'>;
 
 /** Needs you: a BATON_KEYS list that was refused, or that names a revoked key (R3-1239). */
 export function keysNotice(core: Pick<BatonCore, 'sql'>): { refused?: string; revoked_listed?: string[] } | null {
@@ -207,6 +207,8 @@ export function stateView(core: StateViewCore) {
       // B-234 (R-BTN-163, R-BTN-195): the open conditions, an `interact` with the session
       // link Baton set — a person asked into the leg's session.
       conditions: core.conditions.needsYou(),
+      sync_lapses: core.observations.needsYou(now),
+      sync_control_changes: core.provenance.needsYou(now),
       // B-127: the unsigned control changes a post moved the head onto while signed control is required.
       unsigned_control: unsignedControlView(core, now) },
     // R-BTN-75, R-BTN-76: each blocked ticket with its blocks, and the instances' states.

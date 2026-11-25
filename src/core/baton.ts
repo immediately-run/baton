@@ -163,6 +163,7 @@ export class BatonCore {
     this.admin = new Admin({ store, now: () => this.now(), registry: this.registry, adminKeys: () => ports.adminKeys.list(),
       accessIdentities: () => ports.accessIdentities?.read() ?? '', origin: ports.config.BATON_ORIGIN,
       dispatchSync: (repository) => want({ repository, kind: 'sync' }), fleetChanged: () => this.blocks.recount(), notices: this.notices,
+      dependencyVisibilityChanged: () => this.blocks.refreshPrerequisiteVisibility(),
       policies: this.policies, humanBreakGlass: () => this.humanBreakGlass(), reapForRetire: (repository, actor) => this.claims.retireReaps(repository, actor),
       conditionsForRetire: (repository) => this.conditions.retired(repository) });
     this.stations = new Stations({ store, now: () => this.now(), requiredBars: (repo) => this.admin.requiredBars(repo), history: this.history });
@@ -170,7 +171,7 @@ export class BatonCore {
     // does — the queues' membership follows (R-BTN-79), the blocks are re-evaluated (R-BTN-75),
     // a sync is asked (R-BTN-73) — and what it may not apply it records, never refusing (R-BTN-39).
     this.questions = new Questions({ store, now: () => this.now(), graph: (repo, course) => this.stations.graph(repo, course), history: this.history,
-      queued: (ticket) => this.queues.touch(ticket), reevaluate: (ticket) => this.blocks.write([ticket]), isHeld: (ticket) => this.blocks.isHeld(ticket),
+      queued: (ticket) => this.queues.touch(ticket), reevaluate: (ticket) => this.blocks.positionChanged(ticket), isHeld: (ticket) => this.blocks.isHeld(ticket),
       closeMissingNext: (ticket, at) => this.conditions.closeMissingNext(ticket, at),
       contractWaits: (repo, at, ticket) => this.conditions.contractWaits(repo, at, ticket),
       linkBases: (ticket) => this.blocks.linkBases(ticket), answersFrom: (repo) => this.policies.current(repo)?.policy.inputs.answers ?? 'git',
@@ -317,7 +318,7 @@ export class BatonCore {
 
   /** §3: the one alarm, every 60 seconds — earlier when a webhook's trailing dispatch or the
    *  webhook path's own backstop is due. */
-  // @model alarmLive sha256:9738e53567a4
+  // @model alarmLive sha256:16f0682d650b
   async alarm(): Promise<void> {
     // R-BTN-88 (§4.8, R3-1258): a sealed Baton's alarm idles — it logs nothing and touches
     // nothing; the next period is kept armed (B-229), so the instance that imports this state
@@ -386,6 +387,8 @@ export class BatonCore {
         // R-BTN-80: lapsed leases and due reminders queue again; old closed notices go.
         stage = 'notices';
         this.notices.alarm();
+        this.observations.alarm();
+        this.provenance.prune(this.now());
         // R-BTN-81: the history of tickets closed 90 days ago goes.
         stage = 'history.purge';
         this.history.purge();
@@ -515,9 +518,9 @@ export class BatonCore {
 
   private rowsFor = rowsFor;
 
-  // @model syncPost sha256:9d500d65a2bf
-  async board(repo: Repository, p: BoardPayload) {
-    return board(this, repo, p, this.rowsFor);
+  // @model syncPost sha256:7c0efc930fe7
+  async board(repo: Repository, p: BoardPayload, issuer: string | null = null) {
+    return board(this, repo, p, this.rowsFor, issuer);
   }
 
   unsignedControlView(now: number) { return unsignedControlView(this, now); }
