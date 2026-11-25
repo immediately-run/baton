@@ -15,7 +15,7 @@ import { dirname, join } from 'node:path';
 import { BatonApi } from '../../src/runner/api';
 import { Runner } from '../../src/runner/runner';
 import { declareCourses, servedCourses } from '../../src/runner/main';
-import { capabilitiesOf } from '../../src/vendor/vocabulary.mjs';
+import { capabilitiesOf } from '../../src/shared/vocabulary.mjs';
 import { call as hostCall } from '#host';
 import { course, cutover, placed, rows, setClock, syncCall, ticket, TOKENS } from '../helpers';
 import roadmapPr from '../fixtures/courses/roadmap-pr/course.json';

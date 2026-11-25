@@ -19,6 +19,7 @@
 //     `repo.needs-you` serves the repository-scoped ones under `listings`, each as the module
 //     that owns it answers it, narrowed to the one repository. The instance-wide ones are named
 //     under `elsewhere` and are `admin.tenant`'s (`needs_you`, ./tenant.ts), drawn on State.
+import { conditionLink } from '../conditions';
 import { BatonError } from '../http';
 import { canRead, queryOf, type ReadCall, type ReadCtx, type ReadPrincipal, type ReadRoute } from './kit';
 import type { Row } from '../ports';
@@ -60,7 +61,7 @@ const CONDITION_COLUMNS = 'id, repository_id, ticket_id, claim_id, run_id, leg, 
 /** A condition as these reads answer it: the list's fields (`Conditions.entry`), and its
  *  outcome, close and Resolve path. `allowed` is the registry ids the caller may call on it —
  *  none while no resolve is built. */
-function conditionOf(r: ConditionRow) {
+function conditionOf(r: ConditionRow, disclose: boolean) {
   let restarts: Record<string, string> | null = null;
   try {
     const parsed = JSON.parse(r.restarts_json) as Record<string, string>;
@@ -68,7 +69,7 @@ function conditionOf(r: ConditionRow) {
   } catch { /* an unreadable list is no list */ }
   return {
     condition_id: r.id, ticket_id: r.ticket_id, leg: r.leg, run_id: r.run_id, type: r.type,
-    disposition: r.disposition, severity: r.severity, raised_at: r.raised_at, url: r.url,
+    disposition: r.disposition, severity: r.severity, raised_at: r.raised_at, ...conditionLink(r.type, r.url, disclose),
     restarts, default: r.default_restart,
     ...(r.reraised ? { detail: { reraised: r.reraised } } : {}),
     outcome: r.outcome, closed_at: r.closed_at, closed_how: r.closed_how,
@@ -173,7 +174,7 @@ export function conditionsList(cx: ReadCtx, call: ReadCall) {
     type: q.get('type') ?? undefined,
     ticket: q.get('ticket') ?? undefined,
     cursor: q.get('cursor') ?? undefined,
-  });
+  }, call.showInteractionLinks);
   const closes = new Map(cx.sql<{ id: number; outcome: string; closed_at: number | null }>(
     'SELECT id, outcome, closed_at FROM conditions WHERE id IN (SELECT value FROM json_each(?))', JSON.stringify(page.conditions.map((c) => c.condition_id)))
     .map((r) => [r.id, r]));
@@ -206,7 +207,7 @@ export const CONDITION_READS: ReadRoute[] = [
       // ticket (`ticket_blocks`) — no block names a condition itself.
       const unblocks = row.outcome === 'open' && row.ticket_id != null ? cx.core.blocks.blockedOn(repository, { kind: 'ticket', ref: row.ticket_id }, false).tickets.map((t) => t.ticket_id) : [];
       return {
-        ...conditionOf(row),
+        ...conditionOf(row, call.showInteractionLinks),
         repository,
         claim_id: row.claim_id,
         ticket: ticket ? { ticket_id: row.ticket_id, title: ticket.title, course_id: ticket.course_id, station: ticket.station, next_leg: ticket.next_leg } : null,
@@ -228,7 +229,7 @@ export const CONDITION_READS: ReadRoute[] = [
       const now = cx.now();
       const conditions = cx.sql<ConditionRow>(
         `SELECT ${CONDITION_COLUMNS} FROM conditions WHERE repository_id = ? AND outcome = 'open' ORDER BY ${SEVERITY_ORDER}, raised_at, id`, repository)
-        .map(conditionOf);
+        .map((r) => conditionOf(r, call.showInteractionLinks));
       return {
         repository,
         conditions,

@@ -41,7 +41,7 @@ The repository reads (`GET /v1/repositories/{repository}/…`) are open to any k
 repository, its owners and administrators, except where a route's rule narrows them.
 
 - **R-BTN-179 (the state is readable with a key).** What the dashboard's state answers is
-  answered to a signed key too, by the same queries — one request, one JSON answer:
+  answered to a signed key too, by the same queries with the session-link projection of R-BTN-113:
   `GET /v1/admin/repositories` (administrators: the registry as `/v1/admin/state`'s
   `repositories`, plus `seed_owners` — the unretired repositories whose live owner keys are all the
   deploy seed's, or that have no live owner, R-BTN-58); `GET /v1/owner/{repository}/grants` (its owners: that repository's `owners`,

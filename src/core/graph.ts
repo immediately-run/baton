@@ -4,7 +4,7 @@
 // ever given a file `validateCourse` accepted (courses.ts stores no other), so it trusts the
 // shape. To core a station and a leg are names: nothing here reads what one means.
 
-import { capabilitiesOf } from '../vendor/vocabulary.mjs';
+import { capabilitiesOf } from '../shared/vocabulary.mjs';
 import { declaredConditions, type ConditionDeclaration } from './conditionTypes';
 
 /** One step of a ticket's path: the leg run and the station it reached (R-BTN-70). */

@@ -6,7 +6,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { capabilitiesOf } from '../../src/vendor/vocabulary.mjs';
+import { capabilitiesOf } from '../../src/shared/vocabulary.mjs';
 import { asksHelp, declareCourses, fetchMain, hostMaskEnv, parseRunArgs, runMain, servedCourses } from '../../src/runner/main';
 import { drainLines, Runner, withTimestamps } from '../../src/runner/runner';
 import { BatonApi, BatonRefusal } from '../../src/runner/api';

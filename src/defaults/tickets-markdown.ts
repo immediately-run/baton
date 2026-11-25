@@ -1,5 +1,5 @@
 // tickets-markdown.ts — the CLI's default ticket source (BATON_SPEC §2f R-BTN-74): every
-// `*.md`/`*.mdx` file under the `items` setting whose frontmatter carries an `id` is a ticket.
+// `*.md`/`*.mdx` file under the `items` setting whose frontmatter carries an `id` and no other page kind is a ticket.
 // Pure over injected file texts, so the sync command reads the tree and this decides; the same
 // function serves an ejected `.baton/tickets.mjs` through its default export (one interface
 // for override and default, so `baton repo init --eject tickets` copies a working file).
@@ -92,7 +92,7 @@ export const strList = (v: unknown): string[] => (Array.isArray(v) ? v : v == nu
 
 const CLOSED: Record<string, 'done' | 'withdrawn'> = { done: 'done', withdrawn: 'withdrawn', superseded: 'withdrawn', deferred: 'withdrawn' };
 
-/** The markdown source over `files`: the board's `tickets` and `closed`. A duplicate `id`, or
+/** The markdown source over `files` (S-BTN-43, [DIB-12](https://github.com/immediately-run/dibber/blob/main/tickets/DIB-12.md)): the board's `tickets` and `closed`. A duplicate `id`, or
  * a `repos` short name with no mapping, throws naming the file — the sync fails, nothing is
  * posted. Unknown frontmatter fields are ignored, so an existing wiki needs no rewrite. */
 export function ticketsMarkdown(files: MarkdownFile[], settings: MarkdownSettings = {}): TicketsResult {
@@ -108,7 +108,7 @@ export function ticketsMarkdown(files: MarkdownFile[], settings: MarkdownSetting
     if (!/\.mdx?$/i.test(f.path)) continue;
     const fm = parseFrontmatter(f.text);
     const id = str(fm?.id);
-    if (fm == null || id == null) continue; // a file without frontmatter or `id` is not a ticket
+    if (fm == null || id == null || (fm.kind !== undefined && fm.kind !== 'ticket')) continue;
     // `order` is a number or nothing: anything else fails the sync naming the file, rather
     // than silently unranking the ticket.
     // Every value stays text; `order` alone is parsed, being the one field that is a number.
