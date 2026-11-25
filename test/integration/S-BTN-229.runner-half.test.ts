@@ -54,7 +54,7 @@ let log: string;
 let gates: string;
 let n = 0;
 const clock = runnerClock(T0);
-const work: Promise<void>[] = [];
+const work: Promise<unknown>[] = [];
 const runners: Runner[] = [];
 /** Baton out of reach: every runner call fails, as a dropped network does. */
 let down = false;

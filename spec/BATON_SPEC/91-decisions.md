@@ -26,14 +26,14 @@ One line per decision in force; the reasoning and the rejected alternatives in f
 - Chose a grant's role and a domain label as the whole of a grant's trust, over a separate trust level, a model family or a separate-domain guarantee (R-BTN-180, R-BTN-183).
 - Chose to state that review is no security gate, `independent-review` requiring two reviews from distinct domains and nothing about model families (R-BTN-183, R-BTN-189).
 - Chose trusted runners that hold the only credential for a sensitive leg's action, re-check its attestations against Baton's record and trust Baton (R-BTN-182, R-BTN-189).
-- Chose that ticket `tier` is not a protected input, while no runner above the VM level serves a repository that runners below it push (R-BTN-184).
+- Chose capabilities (§6.6 rule 4, R-BTN-121, R-BTN-174) over an ordered tier ladder to send a ticket to particular runners.
 - Chose provenance alone, each ticket served with who last pushed its body, over a `control-changed` notice (R-BTN-194, R-BTN-66).
 - Chose to verify no commit signature anywhere: who may land a path is the policy's, and who wrote one is the forge's pusher record (R-BTN-66, R-BTN-133, R-BTN-194, R-BTN-107).
 - Chose to make a break-glass change visible as an `out-of-course` finding, refusing nothing, and only where the policy protects control paths (§12.9).
 - Chose the policy knob `repos.unlisted` over one rule for every repository: a `cooperative` home resolves `repos:` by name, a `protected` one reaches only its list (R-BTN-140, R-BTN-188).
 - Chose to run checks only on the repository's own branches over a sandbox for forks' code (R-BTN-114).
 - Chose to answer a `baton.*` condition only through Baton's own authenticated surfaces, never a delegated key, and to count from Baton's own traversal record (R-BTN-163, R-BTN-63).
-- Chose no core default timers per tier: timers are the course's (R-BTN-167).
+- Chose no core default timers: timers are the course's (R-BTN-167).
 - Chose to keep dependencies within one repository (R-BTN-120).
 - Chose to leave reviewer-independence seats and tags as cooperative checks (R-BTN-60, R-BTN-66).
 - Chose a Cloudflare Durable Object over SQLite on a home server (§2).
@@ -185,7 +185,7 @@ One line per decision in force; the reasoning and the rejected alternatives in f
 - Chose the dashboard as a walk down the entity tree, one entity per screen, its controls the registry actions `ui.view` places there, over standalone console screens (R-BTN-129, §11.4).
 - Chose React and TypeScript with a build step, one bundle loading nothing from another origin, over a dependency-free dashboard (§12.3, §11.4).
 - Chose a session's controls narrower than the CLI's: the tenant screens read-only, `ticket.route` and `ticket.adopt` the CLI's, Stop one click (R-BTN-155, R-BTN-83, R-BTN-39, §11.4).
-- Chose `baton ticket new` PR-first, the filing branch asked of the forge before any push to the default branch, `--direct` keeping the push (R-BTN-74, R-BTN-199).
+- Chose Dibber for every write of a ticket file, Baton's CLI keeping `next` (the numbers, as Dibber's coordinator) and the read-only `check`, over Baton's own `new`, `claim`, `set` and `done` (R-BTN-74, R-BTN-199).
 - Chose a person joining the leg's own agent session, asked by an `interact` condition, over pausing or answering such requests in Baton (R-BTN-195, R-BTN-69, R-BTN-107).
 - Chose a floor and a recommendation of client versions, stated on every response, over a single required version or an auto-updating CLI (R-BTN-197).
 - Chose to keep a failed leg's last output, shown and never read, over keeping nothing or parsing it to choose the end (R-BTN-131, §9.4).

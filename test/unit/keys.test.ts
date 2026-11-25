@@ -3,21 +3,21 @@
 // S-BTN-30.
 import { describe, it, expect } from 'vitest';
 import { env } from 'cloudflare:test';
-import { RunnerApi } from '../../src/core/runnerApi';
+import { runnerAuth } from '../lib/runnerAuth';
 import { makeKey } from '../lib/sshKeys';
 import { rows, SSH_KEYS, withCore, revokeCredential, seedCredentialIn } from '../helpers';
 
 const entry = (k: { publicKey: string }, name: string) => ({ key: k.publicKey, name, allowed_capabilities: ['none'] });
-const api = (c: { store: never }, keys: unknown, now = 1_000) =>
-  new RunnerApi({ store: c.store, config: { ...env, BATON_KEYS: JSON.stringify(keys) }, now: () => now });
+const api = (c: Pick<import('../../src/core/baton').BatonCore, 'store'>, keys: unknown, now = 1_000) =>
+  runnerAuth({ store: c.store, config: { ...env, BATON_KEYS: JSON.stringify(keys) }, now: () => now });
 
 describe('BATON_KEYS (R3-1239)', () => {
   it('a key the list no longer names is revoked, and listing it again does not bring it back', async () => {
     const [a, b] = [SSH_KEYS['vm-ed'], SSH_KEYS['vm-p256']];
     await withCore(async (c) => {
-      expect(await api(c as never, [entry(a, 'vm-ed')], 5_000).seedKeys()).toEqual({ unchanged: false, seeded: 1, revoked: [] });
+      expect(await api(c, [entry(a, 'vm-ed')], 5_000).seedKeys()).toEqual({ unchanged: false, seeded: 1, revoked: [] });
       expect(c.runners.publicKey(b.fingerprint)).toBeNull();
-      expect(await api(c as never, [entry(a, 'vm-ed'), entry(b, 'vm-p256')], 6_000).seedKeys()).toEqual({ unchanged: false, seeded: 2, revoked: [b.fingerprint] });
+      expect(await api(c, [entry(a, 'vm-ed'), entry(b, 'vm-p256')], 6_000).seedKeys()).toEqual({ unchanged: false, seeded: 2, revoked: [b.fingerprint] });
       expect(c.runners.publicKey(b.fingerprint)).toBeNull();
     });
     expect(await rows(`SELECT hostname, revoked_at FROM credentials WHERE kind = 'runner' ORDER BY hostname`)).toEqual([
@@ -28,7 +28,7 @@ describe('BATON_KEYS (R3-1239)', () => {
   it('a name whose key changed takes its new key; the old one is revoked', async () => {
     const fresh = await makeKey('ssh-ed25519', 'vm-ed');
     await withCore(async (c) => {
-      await api(c as never, [entry(fresh, 'vm-ed')]).seedKeys();
+      await api(c, [entry(fresh, 'vm-ed')]).seedKeys();
       expect(c.runners.publicKey(SSH_KEYS['vm-ed'].fingerprint)).toBeNull();
       expect(c.runners.publicKey(fresh.fingerprint)).toBe(fresh.publicKey.split(' ').slice(0, 2).join(' '));
     });
@@ -43,7 +43,7 @@ describe('BATON_KEYS (R3-1239)', () => {
   ])('refuses %s, and writes nothing', async (_what, list, why) => {
     const keys = await list();
     await withCore(async (c) => {
-      await expect(api(c as never, keys).seedKeys()).rejects.toThrow(why);
+      await expect(api(c, keys).seedKeys()).rejects.toThrow(why);
     });
     expect(await rows(`SELECT count(*) AS n FROM credentials WHERE kind = 'runner' AND revoked_at IS NULL`)).toEqual([{ n: 4 }]);
   });
@@ -55,7 +55,7 @@ describe('BATON_KEYS (R3-1239)', () => {
         id: granted.fingerprint, hostname: 'vm-granted', allowed_capabilities: '[]', kind: 'runner',
         public_key: granted.publicKey.split(' ').slice(0, 2).join(' '), created_by: 'owner:SHA256:x',
       });
-      await api(c as never, []).seedKeys();
+      await api(c, []).seedKeys();
       expect(c.runners.publicKey(granted.fingerprint)).not.toBeNull();
     });
   });
@@ -90,12 +90,12 @@ describe('BATON_KEYS (R3-1239)', () => {
 
   it('an unset BATON_KEYS changes nothing; an empty list revokes every seeded key (round 3, 3-A-0)', async () => {
     await withCore(async (c) => {
-      const unset = new RunnerApi({ store: c.store, config: { ...env, BATON_KEYS: undefined }, now: () => 1 });
+      const unset = runnerAuth({ store: c.store, config: { ...env, BATON_KEYS: undefined }, now: () => 1 });
       expect(await unset.seedKeys()).toEqual({ unchanged: true, seeded: 0, revoked: [] });
     });
     expect(await rows(`SELECT count(*) AS n FROM credentials WHERE kind = 'runner' AND revoked_at IS NULL`)).toEqual([{ n: 4 }]);
     await withCore(async (c) => {
-      expect(await api(c as never, []).seedKeys()).toEqual({ unchanged: false, seeded: 0, revoked: [] });
+      expect(await api(c, []).seedKeys()).toEqual({ unchanged: false, seeded: 0, revoked: [] });
     });
     expect(await rows(`SELECT count(*) AS n FROM credentials WHERE kind = 'runner' AND revoked_at IS NULL`)).toEqual([{ n: 0 }]);
   });
@@ -104,7 +104,7 @@ describe('BATON_KEYS (R3-1239)', () => {
     await withCore((c) => {
       // A changed CREDENTIALS secret re-mirrors and revokes every token credential it no longer
       // lists, and no key.
-      const w = new RunnerApi({ store: c.store, config: { ...env, CREDENTIALS: '{}' }, now: () => 1 });
+      const w = runnerAuth({ store: c.store, config: { ...env, CREDENTIALS: '{}' }, now: () => 1 });
       expect(() => w.credential('vm-a')).toThrow(/revoked/);
     });
     expect(await rows(`SELECT count(*) AS n FROM credentials WHERE kind = 'runner' AND revoked_at IS NULL`)).toEqual([{ n: 4 }]);
@@ -114,7 +114,7 @@ describe('BATON_KEYS (R3-1239)', () => {
 describe('the replay cache (R-BTN-13)', () => {
   it('a nonce is refused again for the same key, not for another, and is pruned after 11 minutes', async () => {
     await withCore((c) => {
-      const at = (now: number) => new RunnerApi({ store: c.store, config: env, now: () => now });
+      const at = (now: number) => runnerAuth({ store: c.store, config: env, now: () => now });
       at(0).acceptNonce('SHA256:a', 'n1');
       expect(() => at(1).acceptNonce('SHA256:a', 'n1')).toThrow(/replayed/);
       at(1).acceptNonce('SHA256:b', 'n1');

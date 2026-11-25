@@ -828,3 +828,57 @@ export function grantRunnerConcurrency(runner: number, maxClaims: number) {
       credential_id, JSON.stringify(caps.map((c) => c.capability)), maxClaims, owner).toArray();
   }));
 }
+
+/** R-BTN-10: the post fields of a sync that found the evidence an unconfirmed end named — its
+ *  `std:git.evidence@1` for that claim, `ticket` a local id. Spread into `Git.refresh`/`post`. */
+export function evidenceFound(claim: number, evidence: string, ticket = 'T-1', found = true) {
+  return { attestations: [{ type: 'std:git.evidence@1', ticket, ref: String(claim), value: { claim, evidence, found } }] };
+}
+
+// Recorded setup that main's later scenarios wrote inline (B-279's ratchet: named here, never
+// in a scenario file).
+type SqlExec = { exec(query: string, ...bindings: unknown[]): unknown };
+/** Migration tests: the legacy reviewer rows and settings migration 0076 retires. */
+export function seedLegacyReviewerSql(sql: SqlExec): void {
+  sql.exec(`INSERT INTO reviewer_agents (name, reviews_on, family, bills) VALUES ('review', 'm', 'family', '[]')`);
+}
+export function seedSettingsSql(sql: SqlExec, entries: [string, string][]): void {
+  for (const [key, value] of entries) sql.exec('INSERT INTO baton_settings (key, value) VALUES (?, ?)', key, value);
+}
+/** S-BTN-243: months of history for one runner — `count` linked and pending transcripts and
+ *  status reports, half an hour apart from `from`. */
+export async function seedRunnerHistory(runner: number, count: number, repo: string, from: number, step: number): Promise<void> {
+  const series = 'WITH RECURSIVE k(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM k WHERE i < ?)';
+  await rows(`${series}
+    INSERT INTO transcripts (runner_id, claim_id, repo, path, role, first_seen_at)
+    SELECT c.runner_id, c.id, ?, 'linked-' || i, 'session', ? + i * ? FROM k CROSS JOIN claims c WHERE c.runner_id = ?`,
+    count, repo, from, step, runner);
+  await rows(`${series}
+    INSERT INTO pending_transcripts (runner_id, repo, path, role, first_seen_at)
+    SELECT ?, ?, 'pending-' || i, 'session', ? + i * ? FROM k`, count, runner, repo, from, step);
+  await rows(`${series}
+    INSERT INTO messages (kind, from_runner_id, to_runner_id, sent_at, status, payload_json)
+    SELECT 'status_report', ?, ?, ? + i * ?, 'acknowledged', '{"text":"history"}' FROM k`, count, runner, runner, from, step);
+}
+/** S-BTN-243: an ended claim, a linked and a pending transcript and a report for every
+ *  `extra-*` runner. */
+export async function seedExtraRunnersHistory(ticket: string, claimedAt: number, endedAt: number, repo: string): Promise<void> {
+  await rows(`INSERT INTO claims (ticket_id, runner_id, request_id, nonce, snapshot_sha, claimed_at, status, ended_at)
+    SELECT ?, id, 'history-' || id, 'test', '', ?, 'released', ? FROM runners WHERE hostname GLOB 'extra-*'`, ticket, claimedAt, endedAt);
+  await rows(`INSERT INTO transcripts (runner_id, claim_id, repo, path, role, first_seen_at)
+    SELECT c.runner_id, c.id, ?, 'linked-' || c.runner_id, 'session', ? FROM claims c WHERE c.ticket_id = ?`, repo, endedAt, ticket);
+  await rows(`INSERT INTO pending_transcripts (runner_id, repo, path, role, first_seen_at)
+    SELECT id, ?, 'pending-' || id, 'session', ? FROM runners WHERE hostname GLOB 'extra-*'`, repo, endedAt);
+  await rows(`INSERT INTO messages (kind, from_runner_id, to_runner_id, sent_at, status, payload_json)
+    SELECT 'status_report', id, id, ?, 'acknowledged', '{"text":"extra"}' FROM runners WHERE hostname GLOB 'extra-*'`, endedAt);
+}
+/** An event and a ticket-history row as an older Baton wrote them (S-BTN-310's migration). */
+export function seedLegacyEvent(at: number, kind: string, detail: string) {
+  return rows('INSERT INTO events (at, kind, actor, detail_json) VALUES (?, ?, \'baton\', ?)', at, kind, detail);
+}
+export function seedTicketHistory(repository: string, ticket: string, at: number, kind: string, detail: string) {
+  return rows('INSERT INTO ticket_history (repository_id, ticket_id, at, kind, detail_json) VALUES (?, ?, ?, ?, ?)', repository, ticket, at, kind, detail);
+}
+export function setRepositoryDefaultBranch(id: string, branch: string) {
+  return rows('UPDATE repositories SET default_branch = ? WHERE id = ?', branch, id);
+}

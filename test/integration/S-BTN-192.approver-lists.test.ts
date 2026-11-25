@@ -9,7 +9,7 @@
 // body says so. Runs on both hosts.
 import { describe, it, expect, beforeEach, inject } from 'vitest';
 import { call as hostCall } from '#host';
-import { keyCall, ORIGIN, rows, setAdminKeys, setClock, setHumanKeys, withCore } from '../helpers';
+import { keyCall, ORIGIN, rows, setAdminKeys, setClock, setHumanKeys, setOwnerAttestation, withCore } from '../helpers';
 import { makeKey, sshsig, signedRequest, type TestKey } from '../lib/sshKeys';
 
 const board = inject('board');
@@ -60,6 +60,26 @@ beforeEach(async () => {
 });
 
 describe('S-BTN-192 approver lists', () => {
+  it('S-BTN-185: a stored marker and a configured break-glass key do not prove hardware custody', async () => {
+    await humanOwner(a, breakGlass);
+    expect((await as(b, '/v1/owner/ops/owners', { public_key: breakGlass.publicKey })).status).toBe(200);
+    await setOwnerAttestation(a.fingerprint, 'opaque-marker');
+    const { version, doc } = await current();
+    const hardware = { ...doc, human_key: 'hardware' };
+    for (const entry of ['human', `key:${a.fingerprint}`]) {
+      const result = await as(b, '/v1/owner/ops/policy', {
+        base_version: version, policy: { ...hardware, approvers: { ...doc.approvers, policy: [entry] } },
+      }, 'PUT');
+      expect(result.json).toMatchObject({ code: 'unsatisfiable-approvers', list: 'approvers.policy' });
+    }
+    // An ordinary owner can set the minimum without installing a human-only list. Neither
+    // soft human key can then use even the generic owner entry on that repository.
+    expect((await as(b, '/v1/owner/ops/policy', { base_version: version, policy: hardware }, 'PUT')).status).toBe(200);
+    for (const soft of [a, breakGlass]) {
+      expect((await as(soft, '/v1/owner/ops/policy', { base_version: version + 1, policy: doc }, 'PUT')).json.code).toBe('forbidden');
+    }
+  });
+
   it('the named key alone approves; the list in force decides what replaces it', async () => {
     // A is a human_only key and an owner; the list is [key:A].
     await humanOwner(a, breakGlass);

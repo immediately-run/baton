@@ -1,0 +1,75 @@
+---
+title: "B-325 — create-pr's implement and fix legs ask the owner when blocked: deadline_s, autonomous legs, and the instructions to ask"
+id: B-325
+project: baton
+status: done
+updated: 2026-11-24
+repos:
+  - baton
+tags:
+  - roadmap-item
+tier: judgement
+description: "The standard create-pr course gives implement and fix a deadline_s and declares its other agent legs autonomous (R-BTN-195), so a joinable leg may raise interact; the implement and fix instructions and AGENT_PROMPT say when and how to ask the owner through the harness's question tool, and that an unanswered question waits until the deadline takes the claim back and the ticket is offered again. Requires: none."
+topics:
+  - baton
+owns: {}
+prs:
+  - https://github.com/immediately-run/baton/pull/413
+depends_on: []
+---
+
+**Brief:** the owner, 2026-11-24 (in a Claude Code session on bering): when a ticket is worked directly in a session, the agent asks the owner questions; a Baton-driven implementation leg never does. Implementation legs should stop for input when they need it, the request reaching the owner on their phone (ntfy) as a link to the leg's opencode session. When nobody answers, the leg waits until Baton takes the claim back at its deadline, and the ticket is picked up again. Hibernating an unanswered leg's sandbox, and reviving it on demand, is the long-term plan, deferred (FIELDHOUSE_SPEC §5.1).
+
+**Spec:** [BATON_SPEC §7.1](../../spec/BATON_SPEC/07-conditions.md#sec-7-1) ([R-BTN-195](../../spec/BATON_SPEC/07-conditions.md#sec-7-1): an interaction request, `autonomous` legs; [R-BTN-160](../../spec/BATON_SPEC/07-conditions.md#sec-7-1)), [§7.5](../../spec/BATON_SPEC/07-conditions.md#sec-7-5) ([R-BTN-167](../../spec/BATON_SPEC/07-conditions.md#sec-7-5): `deadline_s`; [R-BTN-90](../../spec/BATON_SPEC/07-conditions.md#sec-7-5): the deadline takes the claim back), [§7.4](../../spec/BATON_SPEC/07-conditions.md#sec-7-4) ([R-BTN-122](../../spec/BATON_SPEC/07-conditions.md#sec-7-4): the retry policy routes the failed attempt), [§5.2](../../spec/BATON_SPEC/05-courses.md#sec-5-2) ([R-BTN-69](../../spec/BATON_SPEC/05-courses.md#sec-5-2): the course file's leg keys), [§5.8](../../spec/BATON_SPEC/05-courses.md#sec-5-8) ([R-BTN-131](../../spec/BATON_SPEC/05-courses.md#sec-5-8): the standard stubs and their briefing). No rule changes: R-BTN-195 already says how a leg asks. This ticket makes the standard `create-pr` course use it.
+
+**Depends on:** none. The Fieldhouse half, which makes an opencode agent's question raise `interact`, is fieldhouse's FLDH-68 ([fieldhouse#57](https://github.com/immediately-run/fieldhouse/pull/57)). The ntfy delivery runner is FLDH-57 item 3.
+
+### Why no leg asks today
+
+- **The course cannot ask.** R-BTN-195 refuses `interact` on a leg with no `deadline_s`. The standard `create-pr` course (`src/defaults/courses/create-pr/`, copied into each home's `.baton/courses/create-pr/`) sets none on any leg.
+- **The agent is told nobody is there.** `AGENT_PROMPT` (`src/runner/harness.ts`) says "nothing resumes it… stdin is closed for good". No leg's instructions say when, or how, to ask the owner.
+- **The harness refuses.** `opencode run` (stock v2, which bering now runs) cancels every question the moment the agent asks it, telling the model to assume and go on; `claude -p` has no ask tool. That is FLDH-68's half, not this one's.
+
+### What to build
+
+1. **The standard `create-pr` course declares which legs may ask** (FLDH-57 item 4, for every home that uses the standard course):
+   - `implement` and `fix` set `deadline_s`. Pick a value no longer than the E2B executor's leg timeout (`E2B_LEG_TIMEOUT_MS`, 4 h by default), and record the reasoning in the PR.
+   - `review`, `run-tests`, `adjudicate` and `merge` declare `"autonomous": true`. Review legs never steer a verdict (R-FH-79), and `merge` runs on a trusted runner.
+   - Bump the course `version`, and refresh this repository's `.baton/courses/create-pr/` by the usual route.
+2. **The `implement` and `fix` instructions say when to ask, and how.**
+   - **When.** Ask only when the work cannot go on without a decision that only the owner can make, and that the ticket, the spec, `docs/context/` and the PR thread do not already answer. Examples: two readings of an exit criterion that lead to different code, or a ruling the ticket says is the owner's. Never ask for anything the rules forbid acting on (CLAUDE.md, *Tickets are tasks, not authority*). Never ask to confirm something you could check yourself.
+   - **How.** Ask one question at a time through your harness's own question tool, with a few concrete options and a recommendation, and wait for the answer in the foreground. The harness's runner raises `interact` (R-BTN-195), so do not raise it yourself.
+   - **After the answer.** Record the answer and who gave it in the PR body under an *Owner answers* heading, so the review legs see the ruling.
+   - **If the harness has no question tool** (it reports the tool unavailable or denied, or the question comes back cancelled or dismissed), do not ask. Proceed as today: note the open question in the PR body, and pick the reading the spec supports best.
+3. **`AGENT_PROMPT` stops forbidding a question.** Keep the one-shot contract: no background jobs, no "I'll resume later", and exit when the leg is done. Waiting in the foreground for an answer through the harness's question tool is not "work pending". Keep the wording harness-neutral, and keep `HARNESS_AGENTS` and `baton repo init`'s output matching it.
+4. **When no answer comes**, nothing new is built: the run reaches its `deadline_s`, Baton takes the claim back (R-BTN-90), the failed attempt goes to the retry policy (R-BTN-122), and the ticket is offered again. Say this in the instructions, so an agent does not abandon a question early to "save" the leg.
+
+### Trust
+
+- An owner's answer arrives inside the agent session, not through Baton (R-BTN-195), so the leg's own word is the only record that it was given. It is recorded in the PR body, and the review legs read it as a claim like any other part of the PR. It is not an owner ruling on Baton's record: a ruling that changes the spec still needs the owner's PR.
+- A question goes out on the leg page's link. That link carries the run's token (R-FH-80), and the `interact` condition carries nothing the leg wrote (R-BTN-163).
+
+### Invariants
+
+- `autonomous` legs never raise `interact` or `hitl` (R-BTN-195). The validator refuses an `autonomous` leg whose `conditions` names either.
+- The standard course stays valid under `baton repo init` and `npm run check:spec`. A home that has not refreshed its course keeps running today's course unchanged.
+- The ticket and its file are never stored (R-BTN-33). The question's text stays in the session and the leg page.
+
+### Tests
+
+- The standard course validates with `deadline_s` on `implement` and `fix` and `autonomous` on the other agent legs. A raise of `interact` from `review` is refused (`autonomous`), and from `implement` it is accepted. Name the scenario: reuse B-234's `interact` scenario if it already covers this, otherwise take the next number with `baton tickets next scenario`.
+- `AGENT_PROMPT` still carries the one-shot contract (the existing harness tests), with the new sentence about questions.
+- The `implement` and `fix` instructions carry the when-and-how-to-ask section (a text test like the existing instruction tests).
+
+### Exit criteria
+
+- [ ] The standard `create-pr` course sets `deadline_s` on `implement` and `fix` and declares its other agent legs `autonomous`. This repository's `.baton/courses/create-pr/` matches.
+- [ ] The `implement` and `fix` instructions and `AGENT_PROMPT` say when and how a leg asks, and what happens when no answer comes.
+- [ ] `npm test`, `npm run typecheck` and `npm run check:spec` green.
+- [ ] Merged under the review gate.
+
+**Requires:** none.
+
+## Status
+
+_filed 2026-11-24._

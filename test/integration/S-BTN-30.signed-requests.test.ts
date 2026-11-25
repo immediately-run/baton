@@ -15,9 +15,8 @@ import {
   withCore, revokeCredential, seedCredentialIn,
 } from '../helpers';
 import { makeKey, signedRequest } from '../lib/sshKeys';
-import { RunnerApi } from '../../src/core/runnerApi';
+import { runnerAuth } from '../lib/runnerAuth';
 import { call as hostCall, config } from '#host';
-import { Deprecated } from '../../src/core/deprecated';
 
 const T0 = Date.parse('2026-10-15T12:00:00Z');
 const NAMES = ['vm-ed', 'vm-p256', 'vm-sk-ed', 'vm-sk-p256'] as const;
@@ -137,7 +136,7 @@ describe(`S-BTN-30 signed requests (${HOST})`, () => {
     const { id, secret } = await register('vm-a');
     const key = await makeKey('ecdsa-sha2-nistp256', 'vm-a');
     await withCore(async (c) => {
-      const w = new RunnerApi({ store: c.store, deprecated: new Deprecated(c.store), config: { ...config, BATON_KEYS: JSON.stringify([{ key: key.publicKey, name: 'vm-a', allowed_capabilities: ['agent-venue'] }]) } as never, now: () => T0 });
+      const w = runnerAuth({ store: c.store, config: { ...config, BATON_KEYS: JSON.stringify([{ key: key.publicKey, name: 'vm-a', allowed_capabilities: ['agent-venue'] }]) }, now: () => T0 });
       await w.seedKeys();
     });
     const beat = (k: typeof key, body: unknown) => signedRequest(k, `${ORIGIN}/v1/runner/heartbeat`, { created: T0 / 1000, headers: { 'X-Runner-Secret': secret }, body: JSON.stringify(body) });
@@ -150,7 +149,7 @@ describe(`S-BTN-30 signed requests (${HOST})`, () => {
 
   it('a session under a key the seed revoked continues under its new key; nothing moves it back, and a token never takes it (round 2, 2-A-3)', async () => {
     const seed = (k: Awaited<ReturnType<typeof makeKey>>) => withCore(async (c) => {
-      await new RunnerApi({ store: c.store, deprecated: new Deprecated(c.store), config: { ...config, BATON_KEYS: JSON.stringify([{ key: k.publicKey, name: 'vm-a', allowed_capabilities: ['agent-venue'] }]) }, now: () => T0 }).seedKeys();
+      await runnerAuth({ store: c.store, config: { ...config, BATON_KEYS: JSON.stringify([{ key: k.publicKey, name: 'vm-a', allowed_capabilities: ['agent-venue'] }]) }, now: () => T0 }).seedKeys();
     });
     const beat = async (k: Awaited<ReturnType<typeof makeKey>>, secret: string, body: unknown) =>
       hostCall(await signedRequest(k, `${ORIGIN}/v1/runner/heartbeat`, { created: T0 / 1000, headers: secret ? { 'X-Runner-Secret': secret } : {}, body: JSON.stringify(body) }));
