@@ -121,6 +121,21 @@ export function staticViolations(k: KitInput): KitViolation[] {
   const out: KitViolation[] = validateCourse(k.proposed).map((v) => ({ rule: 'course', message: `${v.path}: ${v.message} (${v.rule})` }));
   for (const v of legacyPathReport(k)) out.push(v);
   if (out.length) return out;
+  const selectable = new Map([[k.course, k.proposed], ...(k.others ?? []).map((c): [string, unknown] => [c.id, c.file])]);
+  for (const [leg, def] of Object.entries(asRecord(asRecord(k.proposed).legs))) {
+    const entries = asRecord(asRecord(def).requires).tickets;
+    if (!Array.isArray(entries)) continue;
+    for (const entry of entries) {
+      const names = entry.at ?? entry.reached ?? [];
+      const courses = entry.select === 'posted' ? [...selectable.entries()] : [[entry.course ?? k.course, selectable.get(entry.course ?? k.course)]];
+      for (const [course, file] of courses) {
+        if (!file) out.push({ rule: 'course', message: `legs.${leg}: unknown selectable course ${course}` });
+        else for (const station of names) if (!Object.hasOwn(asRecord(asRecord(file).stations), station)) {
+          out.push({ rule: 'course', message: `legs.${leg}: unknown selectable station ${course}:${station}` });
+        }
+      }
+    }
+  }
   if (k.legScripts) {
     const all = asRecord(asRecord(k.proposed).legs);
     const legs = Object.keys(all);

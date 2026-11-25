@@ -85,7 +85,7 @@ Designs for this section that are not built are on the proposal page
   | `max_queue` | leg | queue depth that raises a warning | R-BTN-79 |
   | `version`, `inputs`, `outputs` | leg | its contract | R-BTN-82 |
   | `replay_safe` | leg | `false` when it has side effects outside git and its forge | R-BTN-82, R-BTN-84 |
-  | `requires` | leg | prerequisites: `{capabilities}` | R-BTN-120 |
+  | `requires` | leg | prerequisites: `{capabilities, tickets, resources}` | R-BTN-120 |
   | `deadline_s` | leg | how long one run may take before Baton takes the claim back | R-BTN-167, R-BTN-90 |
   | `conditions` | leg | narrows the condition types it may raise (`[]`: none) | R-BTN-160 |
   | `autonomous` | leg | `true`: the leg never asks for a person | R-BTN-195 |
@@ -418,6 +418,9 @@ Designs for this section that are not built are on the proposal page
     file is one that a single runner on the machine may use at a time: the runner declares it
     only while it holds the file's exclusive lock, and takes the lock before it claims, or
     advances into, a leg requiring the capability (R-BTN-178).
+  - A host may configure checked capabilities in its runner configuration. The runner runs
+    the check at start, before claiming, and periodically while idle. Only a passing check
+    contributes its capability to the runner’s declaration.
   - **Grants** list capabilities (R-BTN-58) and may name `<type>:*`, never a role: the CLI
     expands roles from the latest accepted snapshot, and before signing `<type>:*` prints every
     course defining the type and asks to confirm when their definitions differ (R-BTN-157).

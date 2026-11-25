@@ -438,14 +438,20 @@ async function readBoard(root: string, batonJson: BatonJson, args: SyncArgs, log
     const courseFile = join(root, '.baton', 'courses', c.id, 'course.json');
     if (!existsSync(courseFile)) throw new Error(`.baton/courses/${c.id}/course.json is missing — run \`baton repo init --course ${c.id}\``);
     const text = readFileSync(courseFile, 'utf8');
-    const course = JSON.parse(text) as { legs?: Record<string, { max_runs?: number }> };
+    const course = JSON.parse(text) as { start_leg?: string; legs?: Record<string, { max_runs?: number }> };
     if (c.id === 'create-pr' && course.legs?.review && course.legs.review.max_runs == null) {
       const defaults = join(root, REVIEW_DEFAULTS_PATH);
       // Older scaffolds have no fallback file, and use the same legacy default in their stub.
       course.legs.review.max_runs = existsSync(defaults) ? readReviewDefault(readFileSync(defaults, 'utf8')) : DEFAULT_CREATE_PR_REVIEW_ROUNDS;
     }
+    const tickets = result.tickets.filter((t) => t.course_id === c.id);
+    const start = course.start_leg;
+    if (sourceKind === 'markdown' && start) for (const t of tickets) {
+      t.depends_at = [...new Set(t.depends_on)].filter((id) => !doneIds.has(id))
+        .map((ticket) => ({ ticket, done: true, leg: start }));
+    }
     const branchPatterns = [c.branch_pattern ?? DEFAULT_BRANCH_PATTERN, ...(c.previous_branch_pattern ? [c.previous_branch_pattern] : [])];
-    const fnCtx = { ...ctx, course: c.id, repository, tickets: result.tickets.filter((t) => t.course_id === c.id), closed: closedIds, done: doneIds, facts, branchPatterns, graph: course, ...(record ? { baton: record } : {}) };
+    const fnCtx = { ...ctx, course: c.id, repository, tickets, closed: closedIds, done: doneIds, facts, branchPatterns, graph: course, ...(record ? { baton: record } : {}) };
     const syncMjs = syncMjsOf(c.id);
     if (c.source) checkSource(c, text, existsSync(syncMjs));
     const standard = builtIn(c.id);
@@ -516,7 +522,8 @@ async function readBoard(root: string, batonJson: BatonJson, args: SyncArgs, log
       source: { kind: sourceKind, ...(sourceVersions ? { versions: sourceVersions } : {}), cli: cliVersion() },
       // R-BTN-139: station functions report observations, not forge authorship. None of
       // their raw markers may be promoted to a std:git.output attestation here.
-      registry, tickets: result.tickets, closed: result.closed, stations, markers, course_data: courseData, ...controlField,
+      registry, tickets: result.tickets.map((t) => sourceKind === 'markdown' && t.depends_at ? { ...t, depends_on: [] } : t),
+      closed: result.closed, stations, markers, course_data: courseData, ...controlField,
     },
     outputEvidence,
     statusOf: (id) => (closedIds.has(id) ? null : status.get(id) ?? null),
