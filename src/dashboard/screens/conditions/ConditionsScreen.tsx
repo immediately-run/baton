@@ -34,7 +34,7 @@ export const LISTINGS: { key: string; label: string; hint: string; when?: string
   { key: 'policy', label: 'Waiting on a required bar', hint: 'The sync posts the leg without a bar the owners require.', when: 'waiting_since' },
   { key: 'course_changed', label: 'Course changed', hint: 'The ticket’s queued leg no longer leaves its station in the course now in force.', when: 'waiting_since' },
   { key: 'bars_mismatch', label: 'Bars read differently', hint: 'The holder and the sync read a leg’s bars differently; the sync’s reading binds.', when: 'at' },
-  { key: 'stale_skills', label: 'Runner below a course’s version', hint: 'Restart the runner from a pulled checkout.' },
+  { key: 'stale_skills', label: 'Runner below a course’s version', hint: 'The runner refreshes its course versions when idle. If the warning persists, the runner operator should check the refresh log and repair any edited, ahead, or diverged home checkout.' },
   { key: 'courses_refused', label: 'Course file refused', hint: 'The version in force stays; fix the file and push.', when: 'refused_at', tone: 'bad', glyph: '■' },
   { key: 'scope', label: 'Scope finding', hint: 'A leg reported outside its ticket’s scope, or a push no open claim covers. Acknowledge it on the ticket’s page.', when: 'updated_at' },
   { key: 'unsigned_control', label: 'Unsigned control change', hint: 'A post moved the head onto control changes no owner key signed.', when: 'at', tone: 'bad', glyph: '■' },
@@ -132,7 +132,7 @@ function ConditionRow({ condition, repository }: { condition: Condition; reposit
       </div>
       <div className="needs-act">
         {/* R-BTN-195: the session link Baton holds for the run, a link only on an allowed host. */}
-        {interact && condition.url ? <ExtLink href={condition.url} kind="session" showHost>Open session</ExtLink> : null}
+        {interact && condition.url ? <ExtLink href={condition.url} kind="session" showHost /> : null}
         <Controls
           view="repository/conditions/{condition}"
           allowed={condition.allowed ?? []}

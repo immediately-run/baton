@@ -74,7 +74,7 @@ describe('POST /v1/sync/board', () => {
     ['65 step kinds', { ...payload(A, null, board.states.A), registry: [course(3, 3, { step_kinds: Array.from({ length: 65 }, (_, i) => `k${i}`) })] }],
     ['a version past the ceiling', { ...payload(A, null, board.states.A), registry: [course(1_000_000_001, 0)] }],
     ['an item naming a malformed course', { sha: A, parent_sha: null, state: { items: [{ id: 'R3-1', title: 't', status: 'available', queue: 'autonomous', node: 'blocked', course: 'Roadmap PR' }] }, ready: [] }],
-    ['a reviewer with no bills', { ...payload(A, null, board.states.A), matrix: { families: {}, agents: { 'review-pr-x': { reviews_on: 'm' } } } }],
+    ['a malformed transcript repository', { ...payload(A, null, board.states.A), transcript_repos: ['not-a-repo'] }],
   ])('refuses %s with invalid-params, writing nothing', async (_what, bad) => {
     const res = await syncCall('/v1/sync/board', bad);
     expect(res.status).toBe(400);
@@ -87,8 +87,12 @@ describe('POST /v1/sync/board', () => {
     // included — the tables they wrote are gone (§6.3's readings are the replacement), so the
     // window accepts the post and ignores both. Even a malformed advisory block no longer
     // refuses: it is residue, read nowhere.
-    const res = await syncCall('/v1/sync/board', payload(A, null, board.states.A));
+    const captured = board.states.A;
+    expect((captured.providers as { accounts: unknown[] }).accounts.length).toBeGreaterThan(0);
+    expect(Object.keys(captured.reviewers as object).length).toBeGreaterThan(0);
+    const res = await syncCall('/v1/sync/board', payload(A, null, captured));
     expect(res.status).toBe(200);
+    expect(await rows('SELECT count(*) AS n FROM tickets')).toEqual([{ n: captured.state.items.length }]);
     const residue = { providers: { accounts: 'not even a list' }, prices: { models: [{ match: '(', input: 'x' }] } };
     expect((await syncCall('/v1/sync/board', payload(board.shas.B, A, board.states.B, residue))).status).toBe(200);
     expect(await rows(`SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('model_providers', 'provider_models', 'peak_schedules')`)).toEqual([]);
@@ -121,19 +125,6 @@ describe('POST /v1/sync/board', () => {
     // The same day's next post logs nothing more.
     expect((await syncCall('/v1/sync/board', payload(board.shas.B, A, board.states.B, retired))).status).toBe(200);
     expect(await logged()).toHaveLength(3);
-  });
-
-  it.skipIf(!inject('liveBoard'))("accepts what the docs sync builds for today's board, reference data included", async () => {
-    // buildPayload(origin/main) from the sibling docs checkout: the real producer's output
-    // through the real validator (R3-386's annotated repos entry was refused before repoName).
-    const live = inject('liveBoard') as { state: { items: unknown[] }; ready: string[]; providers: { accounts: unknown[] }; reviewers: object };
-    const res = await syncCall('/v1/sync/board', payload('f'.repeat(40), null, live));
-    expect(res.status).toBe(200);
-    expect(await rows('SELECT count(*) AS n FROM tickets')).toEqual([{ n: live.state.items.length }]);
-    // B-142: the providers block the sync still posts is accepted and ignored — no table exists.
-    expect(live.providers.accounts.length).toBeGreaterThan(0);
-    expect(await rows(`SELECT count(*) AS n FROM sqlite_master WHERE type = 'table' AND name = 'model_providers'`)).toEqual([{ n: 0 }]);
-    expect(await rows('SELECT count(*) AS n FROM reviewer_agents')).toEqual([{ n: Object.keys(live.reviewers).length }]);
   });
 });
 

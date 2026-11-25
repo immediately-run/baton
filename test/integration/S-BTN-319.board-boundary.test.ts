@@ -1,4 +1,4 @@
-// S-BTN-310 / R-BTN-187 (B-137): authenticated sync quotas and delivery-derived control notices.
+// S-BTN-319 / R-BTN-187 (B-137): authenticated sync quotas and delivery-derived control notices.
 import { beforeEach, describe, expect, it } from 'vitest';
 import { Git, keyCall, observe, setAdminKeys, setClock, SSH_KEYS, syncCall, webhookCall, withCore } from '../helpers';
 import { makeKey } from '../lib/sshKeys';
@@ -40,7 +40,7 @@ async function policy(patch: (doc: PolicyDocument) => void) {
   return owner;
 }
 
-describe('S-BTN-310 board boundary', () => {
+describe('S-BTN-319 board boundary', () => {
   it('rejects machine posts and a CI identity excluded by the board policy', async () => {
     const key = await addKey();
     expect((await keyCall(SSH_KEYS['vm-ed'], `${BOARD}?repository=docs`, {})).status).toBe(403);

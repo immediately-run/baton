@@ -3,7 +3,7 @@ title: "B-25 — Baton action registry and MCP endpoint: one authorize behind ev
 id: B-25
 project: baton
 status: available
-updated: 2026-11-03
+updated: 2026-11-23
 repos:
   - baton
 tags:
@@ -17,7 +17,6 @@ owns: {}
 prs: []
 depends_on:
   - B-24
-  - B-23
 ---
 
 **Brief:** the owner, 2026-10-17, asked for one registry of the actions an authenticated user can take, the same whether the call comes through Baton's REST API, the CLI or an agent's MCP integration. B-24 specified it (baton#47).
@@ -39,7 +38,7 @@ R-BTN-129 and R-BTN-130 are specified. This ticket builds them.
    - CLI commands live in a second table.
 2. **One `authorize`.** Every surface calls it: the router, the dashboard, the CLI and MCP.
 3. **Generated surfaces.**
-   - The router and the CLI tree (B-23's) are generated from the registry.
+   - The router and the CLI tree (B-157's) are generated from the registry.
    - `npm run check:actions` fails when a route, command or tool is outside the registry. It also fails when `owner.mcp-key.create`'s callers are anything but `[owner]`, or when an entry outside the closed allowlist carries `mcp`.
 4. **`GET /v1/actions`.** It shows a caller only their own actions. It is authenticated like
    every keyed route: an SSH-key signature or the holder's API key as a bearer
@@ -98,3 +97,5 @@ _(2026-11-20: the spec simplification of 2026-11-19 (baton#299; `spec/BATON_SPEC
 _(2026-11-20: the spec simplification of 2026-11-19 (baton#299; `spec/BATON_SPEC_HISTORY.md`, that date) moved the unbuilt parts of the design this ticket builds out of the section files, with their rule ids, to proposal pages: the registry file and what is generated from it, and the MCP endpoint with its delegated keys, are parts 1 and 2 of [the people-and-dashboard proposal](../spec/proposals/people-and-dashboard.md); their tables and routes are under "The action registry and MCP" in [the tables-and-routes proposal](../spec/proposals/data-model-and-api.md), and a grant's acceptance and `sync` flag, whose actions item "Hardening" registers, under "Grant acceptance and the sync flag" there and in part 5 of [the checks-and-executors proposal](../spec/proposals/checks-and-executors.md). S-BTN-100, S-BTN-103, G-BTN-120 and G-BTN-122 are no longer rows of the verification section: they are in [the proposals' scenarios](../spec/proposals/scenarios.md), under "The action registry and MCP". Each rule keeps its id and a line in its section, which links the page. The pull request that builds this ticket moves the rules it builds back into the section files, and the scenarios and gates it makes pass back into [the verification section](../spec/BATON_SPEC/15-verification.md#sec-15), in the same change. The plan above is otherwise as the earlier note of this day leaves it.)_
 
 _(2026-11-20: rules re-read: R-BTN-154, R-BTN-130, R-BTN-146)_
+
+_(2026-11-23: no longer depends on B-23. B-23 is rewritten to leg logs; the CLI tree generated from this registry is B-157's, which now depends on this ticket.)_

@@ -2,11 +2,10 @@
 // -24, messages, mode and shadow reports.
 import { describe, it, expect, inject, beforeEach } from 'vitest';
 import { env } from 'cloudflare:test';
-import { RunnerApi } from '../../src/core/runnerApi';
+import { runnerAuth } from '../lib/runnerAuth';
 import { beat, call, hbBody, keyCall, ORIGIN, ownerCall, payload, register, rows, seedClaim, setAdminKeys, setClock, sha256, syncCall, runnerCall , tick, withCore, stateView } from '../helpers';
 import { makeKey, signedRequest } from '../lib/sshKeys';
 import { call as hostCall } from '#host';
-import { Deprecated } from '../../src/core/deprecated';
 
 const board = inject('board');
 const T0 = Date.parse('2026-10-13T12:00:00Z');
@@ -353,7 +352,7 @@ describe('round-one review fixes (baton#4)', () => {
     await withCore((o) => {
       const hashes = JSON.parse(env.TOKEN_HASHES!);
       delete hashes['vm-a'];
-      const api = new RunnerApi({ store: o.store, deprecated: new Deprecated(o.store), config: { ...env, TOKEN_HASHES: JSON.stringify(hashes) }, now: () => o.now() });
+      const api = runnerAuth({ store: o.store, config: { ...env, TOKEN_HASHES: JSON.stringify(hashes) }, now: () => o.now() });
       expect(() => api.credential('vm-a')).toThrow(/revoked/);
       expect(() => api.credential('vm-b')).not.toThrow();
     });

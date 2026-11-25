@@ -114,10 +114,10 @@ describe('the Conditions list (B-219 item 1)', () => {
     ] }));
     await screen.findByRole('heading', { name: 'Needs you' });
     const [ok, bad, asked] = rowsOf();
-    const link = within(ok).getByRole('link', { name: /Open session/ });
-    expect([link.getAttribute('href'), link.getAttribute('rel'), link.textContent]).toEqual(['https://claude.ai/s/r_1', 'noopener noreferrer', 'Open session (claude.ai)']);
-    expect(within(bad).queryByRole('link', { name: /Open session/ })).toBeNull();
-    expect(bad.querySelector('.unlinked')!.textContent).toBe('Open session');
+    const link = within(ok).getByRole('link', { name: /Open leg page/ });
+    expect([link.getAttribute('href'), link.getAttribute('rel'), link.textContent]).toEqual(['https://claude.ai/s/r_1', 'noopener noreferrer', 'Open leg page (claude.ai)']);
+    expect(within(bad).queryByRole('link', { name: /Open leg page/ })).toBeNull();
+    expect(bad.querySelector('.unlinked')!.textContent).toBe('Open leg page');
     // A condition's own url on a host outside the repository's web_base is text too.
     expect(asked.querySelector('.unlinked')!.textContent).toBe('where it is asked');
     expect(asked.querySelector('a.ext')).toBeNull();
@@ -213,7 +213,7 @@ describe('the Resolve page (B-219 item 2)', () => {
 
   it('an interaction request shows its session link and takes no restart; a hostile value is text', async () => {
     renderOne(() => shown({ type: 'interact', disposition: 'notify', restarts: null, default: null, url: 'https://claude.ai/s/r_1', leg: HOSTILE, ticket: { ticket_id: 'docs:A', title: HOSTILE, station: HOSTILE } }));
-    const link = await screen.findByRole('link', { name: /Open session/ });
+    const link = await screen.findByRole('link', { name: /Open leg page/ });
     expect(link.getAttribute('href')).toBe('https://claude.ai/s/r_1');
     expect(screen.getByText(/takes no restart/)).toBeDefined();
     expect(document.querySelector('img')).toBeNull();
