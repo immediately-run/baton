@@ -47,6 +47,15 @@ describe('baton test-course', () => {
     expect(v.every((x) => x.rule === 'course')).toBe(true);
   }, 60_000);
 
+  it('hands off the generic route at each chain refusal and confirms done (B-30, S-BTN-28, S-BTN-63)', async () => {
+    const { review, merge } = roadmapPr.legs;
+    const proposed = { ...roadmapPr, legs: { ...roadmapPr.legs,
+      review: { ...review, no_chain_from: ['implement'] },
+      merge: { ...merge, no_chain_from: ['implement', 'review'] },
+    } };
+    expect(await checkCourse(input({ proposed }))).toEqual([]);
+  });
+
   it('a removal that leaves min_runner_version fails; raising it passes; a rename is no removal', async () => {
     expect(removed(roadmapPr, WITHOUT_ADJUDICATE)).toEqual({ stations: ['adjudicated'], legs: ['adjudicate'] });
     const { fix, ...others } = roadmapPr.legs;

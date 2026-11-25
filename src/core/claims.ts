@@ -2042,7 +2042,10 @@ export class Claims {
     const g = c.course_id ? this.stations.graph(repositoryOf(c.ticket_id), c.course_id) : null;
     const run = this.runningLeg(c.id);
     // A course no longer in force: nothing to check against; a named outcome finishes the leg.
-    if (!g) return { reached: e.reached ?? c.station, finished: !!run && !!e.reached && e.reached !== c.station };
+    if (!g) {
+      if (e.finished_self_loop) throw new BatonError('invalid-params', 'finished_self_loop: no course in force');
+      return { reached: e.reached ?? c.station, finished: !!run && !!e.reached && e.reached !== c.station };
+    }
     const station = resolveStation(g, c.station) ?? c.station;
     const outcomes = run ? g.legs.get(resolveLeg(g, run.leg) ?? '')?.to ?? [] : [];
     const allowed = new Set([station, ...outcomes]);
@@ -2059,11 +2062,12 @@ export class Claims {
     } else if (e.end_reason === 'done' && outcomes.length === 1) {
       reached = outcomes[0];
     }
-    // An end at the leg's `from` gives the leg up — a self-loop's (`to` = `from`) included: from
-    // the end alone Baton cannot tell a finished loop from an abandoned one, and recording it given
-    // up is the reading git can always confirm (a git path that does show the run still extends
-    // the expected path; round 3, 3-A-1). An advance names the outcome and so finishes it.
-    return { reached, finished: outcomes.includes(reached) && reached !== station };
+    // S-BTN-63: resting at `from` normally gives up the run. A runner suspending after a
+    // completed self-loop explicitly reports it with evidence; the graph must allow that loop.
+    if (e.finished_self_loop && (reached !== station || !outcomes.includes(reached))) {
+      throw new BatonError('invalid-params', 'finished_self_loop: the running leg must have its current station as an outcome');
+    }
+    return { reached, finished: outcomes.includes(reached) && (reached !== station || e.finished_self_loop) };
   }
 
   /** Ends an active claim (§6.5): the running leg finishes at its outcome or is given up at its
