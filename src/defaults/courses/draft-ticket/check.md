@@ -33,13 +33,16 @@ fix what fails:
 
 ## File
 
-- Write each ticket as a file in the tickets directory (the `items` setting in
-  `.baton/baton.json`, `tickets/` by default), with the next id the repository uses — its id
-  tool if it has one (`baton tickets next ticket-<prefix>`: an id from Baton's sequence, never
-  a scan, R-BTN-131), `depends_on` for the chain, and its course (the repository's default unless the
-  ticket says otherwise); each file ends in `## Status` with `_filed <today, YYYY-MM-DD>.` and carries the draft's Trust and
-  Invariants as `###` sections.
-- Add `## check` to the request, naming each ticket you filed, and set the request's `status:` to `done`.
+- File each ticket with `$BATON_DIBBER` (the `dibber` your stub pins: run it exactly as that variable says, never another): `$BATON_DIBBER new --title "…" --body-file <the
+  draft's body, in a file outside the checkout>`, `--depends-on` for the chain, and
+  `--field course=<id>` only when the ticket names a course other than the repository's default.
+  Dibber takes the id from Baton's sequence through `.dibber/config.json`'s coordinator, never a
+  scan (R-BTN-131); if it refuses because Baton gave no number, stop and say so — never
+  `--offline`, never an id of your own. Each body ends in `## Status` with
+  `_filed <today, YYYY-MM-DD>.` and carries the draft's Trust and Invariants as `###` sections.
+  Never write a ticket file by hand.
+- Add `## check` to the request, naming each ticket you filed, and set the request's
+  `status:` to `done` with `$BATON_DIBBER done <its id>`.
 - Commit the new files and the request together to the default branch.
 
 Your work lands under the ticket's own `## check` heading — write it if it is not there; the close checks it is.

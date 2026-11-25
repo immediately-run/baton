@@ -121,6 +121,7 @@ is stale. Never edit it by hand.
 | | 16.1 Cutover | R-BTN-28 |
 | | 16.2 The reference deployment's rollout | — |
 | | 16.3 The git mirror | R-BTN-17 |
+| | 16.4 The interim board post | — |
 | [`90-load-bearing-assumptions.md`](BATON_SPEC/90-load-bearing-assumptions.md) | **Load-bearing assumptions** | — |
 | [`91-decisions.md`](BATON_SPEC/91-decisions.md) | **Decisions** | — |
 | [`92-open-questions.md`](BATON_SPEC/92-open-questions.md) | **Open questions** | — |
@@ -285,7 +286,7 @@ is stale. Never edit it by hand.
 | R-BTN-180 | roles, domains and protection | [`12-security.md`](BATON_SPEC/12-security.md) |
 | R-BTN-181 | attestations: typed statements about work or about a resource | [`12-security.md`](BATON_SPEC/12-security.md) |
 | R-BTN-182 | trusted runners | [`12-security.md`](BATON_SPEC/12-security.md) |
-| R-BTN-183 | what the merge runner merges | [`12-security.md`](BATON_SPEC/12-security.md) |
+| R-BTN-183 | review input and what the merge runner merges | [`12-security.md`](BATON_SPEC/12-security.md) |
 | R-BTN-184 | protected paths | [`12-security.md`](BATON_SPEC/12-security.md) |
 | R-BTN-185 | human-only credentials | [`12-security.md`](BATON_SPEC/12-security.md) |
 | R-BTN-186 | authority by credential, not channel | [`12-security.md`](BATON_SPEC/12-security.md) |
@@ -370,13 +371,16 @@ is stale. Never edit it by hand.
 | S-BTN-68 | the merge check | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-69 | registration and API keys | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-71 | stopping a leg | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-72 | tickets at stations | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-73 | capability types | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-74 | why a leg cannot start | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-75 | a bounded run | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-76 | hostile values rendered | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-77 | host allowlists | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-78 | the `session` executor | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-79 | schemas refused | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-80 | signatures and spawns | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-82 | cycles and closed tickets | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-91 | a resource fails mid-leg | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-92 | a capability fails mid-leg | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-93 | a ticket found mid-leg | [`15-verification.md`](BATON_SPEC/15-verification.md) |
@@ -419,7 +423,7 @@ is stale. Never edit it by hand.
 | S-BTN-192 | approver lists | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-197 | the repository policy | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-198 | retirement | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| S-BTN-199 | the git-lock pickup asks Baton | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-199 | the pickup asks Baton | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-200 | a leg's end reaps its group | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-201 | the runner outlives its short waits | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-202 | a leg's scope | [`15-verification.md`](BATON_SPEC/15-verification.md) |
@@ -491,7 +495,13 @@ is stale. Never edit it by hand.
 | S-BTN-307 | a screen draws only its caller's actions | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-308 | sign-in through Cloudflare Access | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-309 | work done outside Baton | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-310 | session-link capabilities | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-311 | destructive action confirmation | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-312 | a board post missing a queued leg | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-313 | refresh course versions and request a restart | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-318 | Access sign-in refusal reasons | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-319 | board boundary | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-320 | a read-only agent reviews commit data | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 
 ## Gates
 
@@ -575,12 +585,14 @@ is stale. Never edit it by hand.
 | G-BTN-93 | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | G-BTN-94 | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | G-BTN-96 | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-97 | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | G-BTN-98 | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | G-BTN-99 | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | G-BTN-100 | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | G-BTN-101 | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | G-BTN-102 | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | G-BTN-103 | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-104 | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | G-BTN-107 | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | G-BTN-111 | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | G-BTN-112 | [`15-verification.md`](BATON_SPEC/15-verification.md) |
@@ -617,3 +629,4 @@ is stale. Never edit it by hand.
 | G-BTN-168 | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | G-BTN-169 | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | G-BTN-172 | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-173 | [`15-verification.md`](BATON_SPEC/15-verification.md) |

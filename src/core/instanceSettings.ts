@@ -40,8 +40,21 @@ function checkHosts(v: unknown, field: string): string[] | null {
   return hosts;
 }
 
+export function checkInstanceSettings(input: unknown) {
+  if (!isObj(input)) return bad('body', 'must be a JSON object');
+  for (const k of Object.keys(input)) if (!['link_hosts', 'session_hosts', 'check_app_id', 'recommended_client'].includes(k)) bad(`body.${k}`, 'unknown field');
+  if (!Object.keys(input).length) bad('body', 'names at least one setting');
+  const link = input.link_hosts === undefined ? undefined : checkHosts(input.link_hosts, 'link_hosts');
+  const session = input.session_hosts === undefined ? undefined : checkHosts(input.session_hosts, 'session_hosts');
+  const app = input.check_app_id === undefined || input.check_app_id === null ? input.check_app_id
+    : typeof input.check_app_id === 'string' && /^\d{1,21}$/.test(input.check_app_id) ? input.check_app_id
+      : bad('check_app_id', 'must be null or the check App’s numeric id (§12.7)');
+  const recommended = input.recommended_client === undefined ? undefined : checkRecommendedClient(input.recommended_client);
+  return { link, session, app, recommended };
+}
+
 export class InstanceSettings {
-  constructor(private readonly c: { store: Store; now: () => number; config?: Config }) {}
+  constructor(private readonly c: { store: Store; now: () => number; config: Config }) {}
 
   private row(): { link_hosts: string; session_hosts: string | null; check_app_id: string | null; recommended_client: string | null } | null {
     return this.c.store.exec<{ link_hosts: string; session_hosts: string | null; check_app_id: string | null; recommended_client: string | null }>(
@@ -51,7 +64,7 @@ export class InstanceSettings {
   /** A host column's list: the row's when set, else the deploy's config (claude.ai alone by
    *  default) — the one fallback both reads share. */
   private hostsOf(raw: string | null): string[] {
-    return raw == null ? SESSION_HOSTS.of(this.c.config ?? {}) : JSON.parse(raw) as string[];
+    return raw == null ? SESSION_HOSTS.of(this.c.config) : JSON.parse(raw) as string[];
   }
 
   /** R-BTN-113's allowlist: the row's `session_hosts` where an administrator set one, else the
@@ -82,20 +95,7 @@ export class InstanceSettings {
    *  clears it back to what stands without it. Each act is an `admin` event, as every
    *  administrator's is. */
   set(actor: string, body: unknown): { ok: true } {
-    if (!isObj(body)) bad('body', 'must be a JSON object');
-    const b = body as Record<string, unknown>;
-    for (const k of Object.keys(b)) if (!['link_hosts', 'session_hosts', 'check_app_id', 'recommended_client'].includes(k)) bad(`body.${k}`, 'unknown field');
-    if (!Object.keys(b).length) bad('body', 'names at least one setting');
-    const link = b.link_hosts === undefined ? undefined : checkHosts(b.link_hosts, 'link_hosts');
-    const session = b.session_hosts === undefined ? undefined : checkHosts(b.session_hosts, 'session_hosts');
-    // §12.7: GitHub's App ids are numeric — the check App's is what `baton admin check-app create`
-    // writes here.
-    const app = b.check_app_id === undefined ? undefined
-      : b.check_app_id === null ? null
-        : typeof b.check_app_id === 'string' && /^\d{1,21}$/.test(b.check_app_id) ? b.check_app_id
-          : bad('check_app_id', 'must be null or the check App’s numeric id (§12.7)');
-    // R-BTN-197 (B-254): the recommended client — null clears it back to the code's default.
-    const recommended = b.recommended_client === undefined ? undefined : checkRecommendedClient(b.recommended_client);
+    const { link, session, app, recommended } = checkInstanceSettings(body);
     return this.c.store.transaction(() => {
       if (link !== undefined) this.c.store.exec('UPDATE instance_settings SET link_hosts = ? WHERE id = 1', JSON.stringify(link));
       if (session !== undefined) this.c.store.exec('UPDATE instance_settings SET session_hosts = ? WHERE id = 1', session === null ? null : JSON.stringify(session));

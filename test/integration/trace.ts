@@ -12,6 +12,7 @@
 // README's "Not modelled") is left out of the projection, not out of the trace: a step on them
 // is still recorded, and must leave the projection as it was.
 import type { Store } from '../../src/core/ports';
+import type { PostedDependency } from '../../src/core/ticketRequirement';
 
 /** The repository and course the model is written against (model/README.md). */
 export const MODEL_REPOSITORY = 'docs';
@@ -44,6 +45,10 @@ export interface ClaimView {
   endedRegressed: boolean;
   confirmed: boolean;
   fencePending: boolean;
+  runningSeq?: number;
+  deadlineAt?: number;
+  fenceDeadline?: number;
+  timeoutRelease?: { deliveredAt: number | null };
 }
 export interface Projection {
   counter: number;
@@ -57,6 +62,8 @@ export interface Projection {
   required: { course: string; leg: string; except?: string[]; tag_prefix: string }[];
   /** Courses of the model's repository whose file is not the model's (R-BTN-64: not modelled). */
   courseFile: string | null;
+  /** Source entries and actual block refs, separately so replay can check the index. */
+  dependencies: Record<string, { entries: PostedDependency[]; blocks: { leg: string; ref: string }[] }>;
   /** Each runner's last call and lease, by the core's clock: the checker's evidence that an
    *  alarm reap or fence timeout came after the lease ran out. Not a reason to record a step. */
   liveness: Record<string, { lastSeen: number; lease: number }>;
@@ -87,19 +94,31 @@ export function projectState(store: Store, now: number): Projection {
   const claims: Record<string, ClaimView> = {};
   for (const c of rows<{ id: number; ticket_id: string; runner_id: number; status: string; end_reason: string | null; station: string | null; leg: string | null;
     start_path: string; claim_observation: number; end_observation: number | null; regressed_since: number | null; ended_regressed: number;
-    confirmed_at: number | null; fence_pending: number; course_id: string | null }>(
+    confirmed_at: number | null; fence_pending: number; deadline_at: number | null; fence_deadline: number | null; course_id: string | null }>(
     `SELECT id, ticket_id, runner_id, status, end_reason, station, leg, start_path, claim_observation, end_observation, regressed_since, ended_regressed,
-            confirmed_at, fence_pending, course_id FROM claims ORDER BY id`)) {
+            confirmed_at, fence_pending, deadline_at, fence_deadline, course_id FROM claims ORDER BY id`)) {
     if (!inScope(c.ticket_id) || (c.course_id ?? MODEL_COURSE) !== MODEL_COURSE) continue;
-    const legs = rows<{ leg: string; to_station: string | null; bars: string; finished_at: number | null; abandoned_at: number | null }>(
-      'SELECT leg, to_station, bars, finished_at, abandoned_at FROM claim_legs WHERE claim_id = ? ORDER BY seq', c.id);
-    const running = legs.find((l) => l.to_station == null && l.abandoned_at == null && l.finished_at == null);
+    const legs = rows<{ seq: number; leg: string; to_station: string | null; bars: string; finished_at: number | null; abandoned_at: number | null }>(
+      'SELECT seq, leg, to_station, bars, finished_at, abandoned_at FROM claim_legs WHERE claim_id = ? ORDER BY seq', c.id);
+    const running = legs.findLast((l) => l.to_station == null && l.abandoned_at == null && l.finished_at == null);
     claims[String(c.id)] = {
       ticket: c.ticket_id, runner: c.runner_id, status: c.status, endReason: c.end_reason, station: c.station ?? '', leg: c.leg ?? '',
       finished: legs.filter((l) => l.to_station != null).map((l) => l.leg), legBars: running ? (JSON.parse(running.bars) as string[]) : [],
       startPath: legsOf(c.start_path), claimObs: c.claim_observation, endObs: c.end_observation ?? -1,
       regressed: c.regressed_since != null, endedRegressed: c.ended_regressed === 1, confirmed: c.confirmed_at != null, fencePending: c.fence_pending === 1,
+      ...(running == null ? {} : { runningSeq: running.seq }),
+      ...(c.deadline_at == null ? {} : { deadlineAt: c.deadline_at }),
+      ...(c.fence_deadline == null ? {} : { fenceDeadline: c.fence_deadline }),
     };
+  }
+  const active = Object.values(claims).filter((c) => c.status === 'active' && c.leg);
+  if (active.length) {
+    for (const m of rows<{ runner: number; ticket: string; delivered_at: number | null }>(
+      `SELECT to_runner_id AS runner, json_extract(payload_json, '$.ticket_id') AS ticket, delivered_at FROM messages
+       WHERE kind = 'release' AND status IN ('pending', 'delivered') AND json_extract(payload_json, '$.reason') = 'leg-timeout' ORDER BY id DESC`)) {
+      const c = active.find((a) => a.runner === m.runner && a.ticket === m.ticket);
+      if (c) c.timeoutRelease = { deliveredAt: m.delivered_at };
+    }
   }
   const held: Record<string, boolean> = {};
   for (const o of rows<{ ticket_id: string; hold: number }>('SELECT ticket_id, hold FROM ticket_overrides')) if (inScope(o.ticket_id)) held[o.ticket_id] = o.hold === 1;
@@ -116,6 +135,13 @@ export function projectState(store: Store, now: number): Projection {
   for (const t of rows<{ runner_id: number; tag: string }>('SELECT runner_id, tag FROM runner_tags ORDER BY runner_id, tag')) (runners[String(t.runner_id)] ??= []).push(t.tag);
   const repo = rows<{ required_bars: string | null }>('SELECT required_bars FROM repositories WHERE id = ?', MODEL_REPOSITORY)[0];
   const course = rows<{ course_json: string }>('SELECT course_json FROM courses WHERE repository_id = ? AND id = ?', MODEL_REPOSITORY, MODEL_COURSE)[0];
+  const dependencies: Projection['dependencies'] = {};
+  for (const t of rows<{ id: string; depends_at: string }>(`SELECT id, depends_at FROM tickets WHERE repository_id = ?
+    AND (depends_at <> '[]' OR EXISTS (SELECT 1 FROM ticket_blocks WHERE ticket_id = tickets.id AND kind = 'ticket')) ORDER BY id`, MODEL_REPOSITORY)) {
+    if (!tickets[t.id]?.present) continue;
+    dependencies[t.id] = { entries: JSON.parse(t.depends_at), blocks: rows(
+      "SELECT leg, ref FROM ticket_blocks WHERE ticket_id = ? AND kind = 'ticket' ORDER BY leg, ref", t.id) };
+  }
   return {
     counter: head?.last_handed_out ?? 0,
     lastAccepted: head?.observation ?? 0,
@@ -123,6 +149,7 @@ export function projectState(store: Store, now: number): Projection {
     tickets, claims, held, ownerBars, runners,
     required: repo?.required_bars ? JSON.parse(repo.required_bars) : [],
     courseFile: course?.course_json ?? null,
+    dependencies,
     liveness,
   };
 }
@@ -230,7 +257,7 @@ export function recordingStore(inner: Store, origin: () => Origin | null, now: (
 }
 
 function empty(): Projection {
-  return { counter: 0, lastAccepted: 0, outstanding: false, tickets: {}, claims: {}, held: {}, ownerBars: [], runners: {}, required: [], courseFile: null, liveness: {} };
+  return { counter: 0, lastAccepted: 0, outstanding: false, tickets: {}, claims: {}, held: {}, ownerBars: [], runners: {}, required: [], courseFile: null, dependencies: {}, liveness: {} };
 }
 
 // ── ITF (https://apalache-mc.org/docs/adr/015adr-trace.html) ─────────────────────────────

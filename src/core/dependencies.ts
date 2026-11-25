@@ -232,7 +232,7 @@ export function resolveDependencies(sql: Sql, repo: string, ids: readonly string
  *  consent to another repository's tickets depending on theirs — given with `confirm: true`,
  *  withdrawn with `withdraw: true`, mirrored on R-BTN-140's `code-repo-consents`. Never written
  *  by the dependent's own settings: only this route, by the target's owners. */
-export function consentRoute(store: Store, now: () => number, repo: string, actor: string, body: unknown): { ok: true; repository: string; consent: boolean } {
+export function consentRoute(store: Store, now: () => number, repo: string, actor: string, body: unknown, refresh: () => void): { ok: true; repository: string; consent: boolean } {
   if (!body || typeof body !== 'object' || Array.isArray(body)) throw new BatonError('invalid-params', 'a JSON object is required');
   const b = body as { repository?: unknown; confirm?: unknown; withdraw?: unknown };
   if (typeof b.repository !== 'string' || !/^[a-z][a-z0-9-]{0,39}$/.test(b.repository)) throw new BatonError('invalid-params', 'repository: must be a repository id (the dependent)');
@@ -250,6 +250,7 @@ export function consentRoute(store: Store, now: () => number, repo: string, acto
       store.exec('INSERT INTO dependency_consents (repository_id, dependent_id, granted_by, granted_at) VALUES (?, ?, ?, ?) ON CONFLICT (repository_id, dependent_id) DO UPDATE SET granted_by = excluded.granted_by, granted_at = excluded.granted_at',
         repo, dependent, actor, now());
     }
+    refresh();
     logEvent(store, now(), 'dependency-consent', actor, { repository: repo, dependent, consent: b.confirm === true }, null, null, repo);
     return { ok: true as const, repository: dependent, consent: b.confirm === true };
   });

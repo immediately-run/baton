@@ -70,7 +70,7 @@ describe('S-BTN-287 one runner with its window (B-196)', () => {
     const claims = json.window.claims as Json[];
     expect(claims.map((c) => [c.claim_id, c.ticket_id, c.end])).toEqual([[first.claim_id, 'docs:T-1', 'released'], [second.claim_id, 'docs:T-1', 'running']]);
     expect(claims[0]).toMatchObject({ leg: 'implement', started_at: T0, ended_at: T0, end_reason: 'released:requested', session_url: null, log_dir: null, activities: [] });
-    expect(claims[0].runs).toEqual([{ leg: 'implement', run_id: expect.stringMatching(/^r_/), started_at: T0, ended_at: T0, reached: null, session_url: null, log_dir: null }]);
+    expect(claims[0].runs).toEqual([{ leg: 'implement', run_id: expect.stringMatching(/^r_/), started_at: T0, ended_at: T0, reached: null, session_url: null, session_link: false, log_dir: null }]);
     expect(claims[1].ended_at).toBeNull();
     expect(claims[1].activities).toEqual([
       { id: 'round', parent_id: null, kind: 'review-round', label: null, source: 'skill', started_at: T0 + 11 * 60_000, ended_at: null, outcome: null, detail: null },

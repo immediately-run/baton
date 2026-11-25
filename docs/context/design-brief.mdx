@@ -114,14 +114,14 @@ TypeScript, built by `npm run build:ui` into the one bundle both hosts serve at
 
 - **The screens.** `src/core/screens.ts` is the one table of them — id, path and the session
   role that may open each — read by the front, the client's router and `check:actions`.
-  `src/dashboard/screens/` holds one folder per entity (`tickets/`, `runners/`, `courses/`,
-  `conditions/`, `sync/`, `credentials/`, `governance/`, `attestations/`, `goals/`, `tenant/`,
-  `board/`, `root/`), registered in `screens/index.ts`; `screens/README.md` is the contract a
+  `src/dashboard/screens/` holds one folder per entity (`src/dashboard/screens/tickets/`, `src/dashboard/screens/runners/`, `src/dashboard/screens/courses/`,
+  `src/dashboard/screens/conditions/`, `src/dashboard/screens/sync/`, `src/dashboard/screens/credentials/`, `src/dashboard/screens/governance/`, `src/dashboard/screens/attestations/`, `src/dashboard/screens/goals/`, `src/dashboard/screens/tenant/`,
+  `src/dashboard/screens/board/`, `src/dashboard/screens/root/`), registered in `src/dashboard/screens/index.ts`; `src/dashboard/screens/README.md` is the contract a
   screen keeps. The frame, the router, the sign-in and the controls are `src/dashboard/app/`;
   the shared pieces (`Text`, `View`, the polling store, the link rule) `src/dashboard/lib/`.
 - **The data.** Every screen draws its entity's reads and nothing else: the entries of
   `src/core/actions.ts` with `effect: 'read'`, served by `src/core/reads/` (one module per
-  domain; `reads/index.ts` says how to add one) and listed in
+  domain; `src/core/reads/index.ts` says how to add one) and listed in
   [BATON_SPEC §14](../../spec/BATON_SPEC/14-api.md#sec-14). A screen's controls are the entries
   whose `ui.view` names it, as `GET /v1/actions` lists them to the session — never a button the
   screen knows of itself. `npm run check:actions` holds the two tables together.

@@ -34,10 +34,12 @@ export const LISTINGS: { key: string; label: string; hint: string; when?: string
   { key: 'policy', label: 'Waiting on a required bar', hint: 'The sync posts the leg without a bar the owners require.', when: 'waiting_since' },
   { key: 'course_changed', label: 'Course changed', hint: 'The ticket’s queued leg no longer leaves its station in the course now in force.', when: 'waiting_since' },
   { key: 'bars_mismatch', label: 'Bars read differently', hint: 'The holder and the sync read a leg’s bars differently; the sync’s reading binds.', when: 'at' },
-  { key: 'stale_skills', label: 'Runner below a course’s version', hint: 'Restart the runner from a pulled checkout.' },
+  { key: 'stale_skills', label: 'Runner below a course’s version', hint: 'The runner refreshes its course versions when idle. If the warning persists, the runner operator should check the refresh log and repair any edited, ahead, or diverged home checkout.' },
   { key: 'courses_refused', label: 'Course file refused', hint: 'The version in force stays; fix the file and push.', when: 'refused_at', tone: 'bad', glyph: '■' },
   { key: 'scope', label: 'Scope finding', hint: 'A leg reported outside its ticket’s scope, or a push no open claim covers. Acknowledge it on the ticket’s page.', when: 'updated_at' },
   { key: 'unsigned_control', label: 'Unsigned control change', hint: 'A post moved the head onto control changes no owner key signed.', when: 'at', tone: 'bad', glyph: '■' },
+  { key: 'sync_lapses', label: 'Sync repeatedly timed out', hint: 'This credential held up other syncs. Check its job logs; an administrator can revoke a compromised SSH key.', when: 'at' },
+  { key: 'sync_control_changes', label: 'Control paths changed or unverified', hint: 'Check the default branch at this commit. If the push record is incomplete, Baton cannot tell whether control paths changed.', when: 'at' },
   { key: 'pool_unclaimed', label: 'Notice nobody claimed', hint: 'A notice has waited an hour in the pool.', when: 'since' },
   { key: 'no_owner_channel', label: 'No channel reaches the owners', hint: 'Decisions ask the owners and no courier delivers to them.' },
   { key: 'adoptions', label: 'Adoption asked for', hint: 'A session asks to take over a claim made in git. An administrator confirms it on Sync.', when: 'requested_at' },
@@ -48,6 +50,7 @@ const TIME_FIELD = /(^|_)(at|since)$/;
 /** One value of a listing's row: a time as a relative time, anything else as text. */
 function FieldValue({ name, value }: { name: string; value: unknown }) {
   if (TIME_FIELD.test(name) && typeof value === 'number') return <RelTime at={value} />;
+  if (name === 'changes' && Array.isArray(value) && value.every((c) => c && typeof c === 'object')) return <ul>{value.map((c, i) => <li key={i}><Text value={c.path} /> by <Text value={c.pusher} /> at <Text value={c.commit} /></li>)}</ul>;
   if (Array.isArray(value)) return <Text value={value.length} />;
   return <Text value={value} />;
 }
@@ -129,7 +132,7 @@ function ConditionRow({ condition, repository }: { condition: Condition; reposit
       </div>
       <div className="needs-act">
         {/* R-BTN-195: the session link Baton holds for the run, a link only on an allowed host. */}
-        {interact && condition.url ? <ExtLink href={condition.url} kind="session" showHost>Open session</ExtLink> : null}
+        {interact && condition.url ? <ExtLink href={condition.url} kind="session" showHost /> : null}
         <Controls
           view="repository/conditions/{condition}"
           allowed={condition.allowed ?? []}

@@ -1,6 +1,9 @@
 // The sync's live forge facts (R-BTN-96, R-BTN-138, R-BTN-139).
 import { sameRepo as sameRepoName, type CodeRepoEntry, type PrFact } from './course-pr';
-import { git, remoteSlug } from './remote-slug';
+import { remoteSlug } from './remote-slug';
+import { gitText } from './git.mjs';
+import type { PostedAttestation } from '../core/board';
+import { outputAttestation, TICKET_OUTPUT_WITNESS } from './output-evidence';
 import type { BranchCommit } from './pr-markers';
 
 /** Whether a remote URL names a plain git repository rather than a forge's (B-182, R-BTN-105): a
@@ -20,6 +23,8 @@ export function plainGitRemote(url: string): boolean {
   return false;
 }
 
+/** GitHub's API origin, REST and GraphQL alike. */
+const GITHUB_API = 'https://api.github.com';
 /** How long one GitHub or token call may take before the sync fails (§6.3's bound). */
 export const FETCH_TIMEOUT_MS = 30_000;
 /** The most pages of 100 one list may span; beyond it the sync fails rather than truncate. */
@@ -44,16 +49,18 @@ const GRAPHQL_BATCH = 25;
 /** The detail of one PR that a GraphQL batch asks for (B-35): the head commit's check runs, the
  * commits' dates, the reviews and the issue comments — the four REST lists it replaces, each a
  * first page (10 check suites of 100 runs; 100 commits, reviews, comments) with `hasNextPage`,
- * so an overflowing one is read over REST in full. The
+ * so an overflowing one is read in full. Comments stay on GraphQL for their edit metadata. The
  * check runs come through the head's check suites (the latest run of each check, as REST's
  * check-runs list gives them), never `statusCheckRollup`, which takes in commit statuses too and
  * so may need a permission the sync workflow does not grant: `checks: read` covers this, as it
  * covered the REST read. */
+const COMMENT_FIELDS = 'author { login ... on User { databaseId } ... on Bot { databaseId } ... on Organization { databaseId } ... on Mannequin { databaseId } } authorAssociation body lastEditedAt includesCreatedEdit';
+const PR_COMMENTS = `pageInfo { hasNextPage endCursor } nodes { ${COMMENT_FIELDS} createdAt url }`;
 const PR_DETAIL = `fragment D on PullRequest {
   head: commits(last: 1) { nodes { commit { oid checkSuites(first: 10) { pageInfo { hasNextPage } nodes { checkRuns(first: 100, filterBy: { checkType: LATEST }) { pageInfo { hasNextPage } nodes { status conclusion } } } } } } }
   commits(first: 100) { pageInfo { hasNextPage } nodes { commit { oid committedDate message tree { oid } parents(first: 1) { nodes { oid tree { oid } } } } } }
   reviews(first: 100) { pageInfo { hasNextPage } nodes { author { login } authorAssociation state submittedAt body } }
-  comments(first: 100) { pageInfo { hasNextPage } nodes { author { login } authorAssociation createdAt body } }
+  comments(first: 100) { ${PR_COMMENTS} }
 }`;
 
 /** The GraphQL query reading `numbers`' detail in one repository, each PR under alias `p<n>`. */
@@ -79,18 +86,22 @@ const detailQuery = (numbers: number[]): string =>
  *  endpoint whole (nothing is appended to it), and the budget's key. GitHub's own host is
  *  `api.github.com`; a GitHub Enterprise host serves REST under `/api/v3` and GraphQL at
  *  `/api/graphql`. */
-function githubConn(host: string): { host: string; rest: string; graphql: string } {
+export function githubConn(host: string): { host: string; rest: string; graphql: string } {
   return host === 'github.com'
     ? { host, rest: 'https://api.github.com', graphql: 'https://api.github.com/graphql' }
     : { host, rest: `https://${host}/api/v3`, graphql: `https://${host}/api/graphql` };
 }
 
-export async function githubFacts(root: string, log: (l: string) => void, owns: (pr: { number: number; head: string; repository: string }) => boolean, siblings: { repository: string; tickets: string[] }[] = [], obs: { codeRepos?: CodeRepoEntry[]; pushers?: { host: string; id: string }[] } = {}): Promise<PrFact[]> {
+export async function githubFacts(root: string, log: (l: string) => void, owns: (pr: { number: number; head: string; repository: string }) => boolean, siblings: { repository: string; tickets: string[] }[] = [], obs: { codeRepos?: CodeRepoEntry[]; pushers?: { host: string; id: string }[]; outputEvidence?: PostedAttestation[];
+  ownsOutput?: (ticket: string, pr: { number: number; head: string; repository: string }, fork: boolean) => boolean;
+  ticketOutputEvidence?: PostedAttestation[];
+  readPrs?: boolean;
+} = {}): Promise<PrFact[]> {
   const slug = remoteSlug(root);
   if (slug == null) throw new Error(`${root} has no origin remote to read PRs from — pass --facts <file> for recorded facts`);
   // B-182 (first slice): a plain-git home has no forge, so no adapter reads it (R-BTN-96) — only
   // the repositories its tickets name in `repos:` are read, and with none nothing is, token or not.
-  const home = plainGitRemote(git(root, 'remote', 'get-url', 'origin')) ? null : slug;
+  const home = plainGitRemote(gitText(root, 'remote', 'get-url', 'origin')) ? null : slug;
   const entries = obs.codeRepos ?? [];
   // The reading set: the home (when it is on a forge), then each named repository — through its
   // `code_repos` entry when the home lists any (R-BTN-140's reach), by name when it lists none.
@@ -255,10 +266,44 @@ export async function githubFacts(root: string, log: (l: string) => void, owns: 
     }
     return out;
   };
+  const commentNodes = async (page: any, next: (after: string) => Promise<any>): Promise<any[]> => {
+    const out: any[] = [];
+    for (let i = 0; ; i++) {
+      if (!Array.isArray(page?.nodes) || typeof page.pageInfo?.hasNextPage !== 'boolean') throw new Error('GitHub did not return the comment connection');
+      out.push(...page.nodes);
+      if (!page.pageInfo.hasNextPage) return out;
+      const after = page.pageInfo.endCursor;
+      if (i + 1 >= MAX_PAGES || typeof after !== 'string' || !after) throw new Error('GitHub cannot page all comments — refusing a truncated reading');
+      page = await next(after);
+    }
+  };
+  const unedited = (node: any): boolean => node.lastEditedAt === null && node.includesCreatedEdit === false;
+  if (home != null && obs.ticketOutputEvidence?.length) {
+    const conn = { ...githubConn('github.com'), token };
+    const [owner, name] = home.split('/');
+    const fields = (after = '') => `oid comments(first: 100${after}) { pageInfo { hasNextPage endCursor } nodes { ${COMMENT_FIELDS} } }`;
+    const query = `query($owner: String!, $name: String!, $sha: GitObjectID!, $after: String!) { repository(owner: $owner, name: $name) { object(oid: $sha) { ... on Commit { ${fields(', after: $after')} } } } }`;
+    for (let i = 0; i < obs.ticketOutputEvidence.length; i += GRAPHQL_BATCH) {
+      const batch = obs.ticketOutputEvidence.slice(i, i + GRAPHQL_BATCH);
+      const objects = batch.map((a, j) => `c${j}: object(oid: ${JSON.stringify(a.ref)}) { ... on Commit { ${fields()} } }`).join(' ');
+      const first = (await graphql(conn, `query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { ${objects} } }`, { owner, name })).data?.repository;
+      for (const [j, a] of batch.entries()) {
+        const commit = first?.[`c${j}`];
+        if (!commit || commit.oid !== a.ref) continue;
+        const comments = await commentNodes(commit.comments, async (after) => {
+          const next = (await graphql(conn, query, { owner, name, sha: a.ref, after })).data?.repository?.object;
+          return next?.oid === a.ref ? next.comments : null;
+        });
+        const witnesses = comments.filter((c) => c?.body === TICKET_OUTPUT_WITNESS && unedited(c))
+          .map((c) => ({ login: c.author?.login, userId: c.author?.databaseId, association: c.authorAssociation }));
+        if ((await trustedOnly(conn, home, witnesses)).length) obs.outputEvidence?.push(a);
+      }
+    }
+  }
   const out: PrFact[] = [];
   // The home, then each other repository a live ticket names in `repos:` (B-29), each through
   // its own connection: a refusal under any budget never posts a partial reading.
-  for (const { repository: repo, tickets, entry } of reads) {
+  for (const { repository: repo, tickets, entry } of obs.readPrs === false ? [] : reads) {
     if (entry != null && entry.forge !== 'github') {
       throw new Error(`${entry.path}: no adapter for ${entry.forge} yet — the ${entry.forge} fact adapter is not built, and the sync will not post a partial reading (R-BTN-96)`);
     }
@@ -307,7 +352,7 @@ export async function githubFacts(root: string, log: (l: string) => void, owns: 
   }
 
   /** One PR's facts from its GraphQL node, mapped exactly as the REST lists are; a connection
-   *  whose first page overflows, or a head the batch read at another commit, is read over REST. */
+   *  whose first page overflows is paged, and a head the batch read at another commit uses REST. */
   async function detailOf(conn: { host: string; rest: string; graphql: string; token: string }, repo: string, pr: any, node: any): Promise<Omit<PrFact, 'number' | 'head' | 'state' | 'repository'>> {
     if (node == null) throw new Error(`GitHub GraphQL (${repo}): no pull request #${pr.number}, though the list has it`);
     const head = node.head?.nodes?.[0]?.commit;
@@ -346,10 +391,17 @@ export async function githubFacts(root: string, log: (l: string) => void, owns: 
       ? (await all<any>(conn, `/repos/${repo}/pulls/${pr.number}/reviews`)).map((r) => ({ login: r.user?.login, userId: r.user?.id, association: r.author_association, state: r.state, at: r.submitted_at, body: r.body }))
       : node.reviews.nodes.map((r: any) => ({ login: r.author?.login, association: r.authorAssociation, state: r.state, at: r.submittedAt, body: r.body }))))
       .map((r: any) => ({ author: r.login ?? '?', state: r.state, submittedAt: Date.parse(r.at), body: r.body ?? '' }));
-    const comments = (await trustedOnly(conn, repo, node.comments.pageInfo.hasNextPage
-      ? (await all<any>(conn, `/repos/${repo}/issues/${pr.number}/comments`)).map((c) => ({ login: c.user?.login, userId: c.user?.id, association: c.author_association, at: c.created_at, body: c.body }))
-      : node.comments.nodes.map((c: any) => ({ login: c.author?.login, association: c.authorAssociation, at: c.createdAt, body: c.body }))))
-      .map((c: any) => ({ author: c.login ?? '?', state: 'COMMENTED' as const, submittedAt: Date.parse(c.at), body: c.body ?? '' }));
+    const [owner, name] = repo.split('/');
+    const query = `query($owner: String!, $name: String!, $number: Int!, $after: String!) { repository(owner: $owner, name: $name) { pullRequest(number: $number) { comments(first: 100, after: $after) { ${PR_COMMENTS} } } } }`;
+    const nodes = await commentNodes(node.comments, async (after) => (await graphql(conn, query, { owner, name, number: pr.number, after })).data?.repository?.pullRequest?.comments);
+    const verifiedComments = await trustedOnly(conn, repo, nodes.filter(Boolean).map((c) => ({ login: c.author?.login, userId: c.author?.databaseId, association: c.authorAssociation, at: c.createdAt, body: c.body, url: c.url, unedited: unedited(c) })));
+    for (const c of verifiedComments) {
+      if (!c.unedited || typeof c.url !== 'string' || typeof c.body !== 'string') continue;
+      const a = outputAttestation(c.body, c.url);
+      const fork = pr.head.repo?.id == null || pr.head.repo.id !== pr.base.repo?.id;
+      if (a && obs.ownsOutput?.(a.ticket, { number: pr.number, head: pr.head.ref, repository: repo }, fork)) obs.outputEvidence?.push(a);
+    }
+    const comments = verifiedComments.map((c: any) => ({ author: c.login ?? '?', state: 'COMMENTED' as const, submittedAt: Date.parse(c.at), body: c.body ?? '' }));
     return { pushedAt: Math.max(0, ...pushes), pushes, checks, reviews: [...reviews, ...comments], commits };
   }
 

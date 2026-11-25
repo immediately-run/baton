@@ -4,7 +4,8 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { GIT_SHA } from '../core/validate';
 import type { BuiltIn } from './courses';
-import { git, remoteSlug } from './remote-slug';
+import { remoteSlug } from './remote-slug';
+import { gitText } from './git.mjs';
 
 /** The baton package's root: the nearest directory above this module whose package.json is
  * `@immediately-run/baton`. Found by walking up, because this module runs both as source
@@ -55,6 +56,8 @@ export interface BatonJson {
   /** A command whose words precede `agent_command`'s in every leg's spawn (B-95);
    * `BATON_AGENT_WRAPPER` in the host's environment wins over it. */
   agent_wrapper?: string;
+  /** The Dibber release a leg runs (B-326), a version, never a command. */
+  dibber?: string;
   /** The ticket check's settings (B-111); every one is off. Read by `baton tickets check` alone,
    * never by a sync. */
   check?: { depends_line?: boolean };
@@ -80,14 +83,14 @@ export function cliPin(): string {
     const file = join(packageRoot(), 'dist', 'build.json');
     if (!existsSync(file)) throw new Error('this CLI package names no commit it was built from (dist/build.json) — pass --pin owner/name@<commit>');
     const { repository, commit, dirty } = JSON.parse(readFileSync(file, 'utf8')) as { repository: string; commit: string; dirty?: boolean };
-    if (dirty) throw new Error(`this CLI package was built from a modified tree at ${repository}@${commit.slice(0, 10)}, so no commit holds its files — pass --pin owner/name@<commit>`);
+    if (dirty) throw new Error(`this CLI package was built from a modified tree at ${repository}@${commit.slice(0, 10)} — use a clean build of the pinned commit`);
     return `${repository}@${commit}`;
   }
   const root = packageRoot();
   const slug = remoteSlug(root);
   let sha: string | null = null;
   try {
-    sha = git(root, 'rev-parse', 'HEAD');
+    sha = gitText(root, 'rev-parse', 'HEAD');
   } catch {
     sha = null;
   }
@@ -117,4 +120,10 @@ export const sameRepo = (src: { namespace: string; repository: string }, self: {
 export function parsePin(at: string): { namespace: string; repository: string; sha: string } | null {
   const m = /^([\w.-]+)\/([\w.-]+)@(.*)$/.exec(at);
   return m && GIT_SHA.test(m[3]) ? { namespace: m[1], repository: m[2], sha: m[3] } : null;
+}
+
+/** The CLI's own package version, for the board post's `source.cli` (§4.4, B-183): what the
+ *  repository's pinned CLI is, beside the ticket source's declaration. */
+export function cliVersion(): string {
+  return (JSON.parse(readFileSync(join(packageRoot(), 'package.json'), 'utf8')) as { version?: string }).version ?? '';
 }

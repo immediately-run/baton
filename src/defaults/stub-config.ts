@@ -7,11 +7,11 @@ interface Position {
   suspend?: true;
 }
 
-type AnswerPosition = Position & { atRun?: { min: number; position: Position } };
+type AnswerPosition = Position & { atRun?: { min: number | 'review-limit'; position: Position } };
 
 export type AgentLeg = {
   tests?: never;
-  verify?: 'pr';
+  verify?: 'pr' | 'merged';
   pushes?: 'after-red';
   delivered?: true;
 } & (
@@ -30,10 +30,10 @@ export interface StubConfig {
 }
 
 /** The answer has already been checked by requireAnswer; a missing route is a course error. */
-export function positionOf(spec: AgentLeg, answer?: string, run = 1): Position & { verdict?: string; adjudication?: string } {
+export function positionOf(spec: AgentLeg, answer?: string, run = 1, reviewLimit = Infinity): Position & { verdict?: string; adjudication?: string } {
   if (!spec.ask) return spec.position;
   const route = answer == null ? undefined : spec.positions[answer];
   if (!route) throw new Error(`no position for ${spec.ask.name} ${JSON.stringify(answer)}`);
   const { atRun, ...position } = route;
-  return { ...(atRun && run >= atRun.min ? atRun.position : position), ...(spec.ask.name !== 'outcome' ? { [spec.ask.name]: answer } : {}) };
+  return { ...(atRun && run >= (atRun.min === 'review-limit' ? reviewLimit : atRun.min) ? atRun.position : position), ...(spec.ask.name !== 'outcome' ? { [spec.ask.name]: answer } : {}) };
 }

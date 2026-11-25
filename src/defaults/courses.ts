@@ -27,6 +27,8 @@ export interface StationCtx {
 
 export interface BuiltIn {
   id: string;
+  /** The version a fresh or forced init writes to the course entry; defaults to 1. */
+  version?: number;
   /** One line for `baton repo init --help` and the docs. */
   summary: string;
   /** The course file `init` writes (R-BTN-69). */
@@ -182,6 +184,7 @@ const ADJUDICATE: AgentLeg = { ask: { name: 'adjudication', values: ['merge', 'o
 
 const CREATE_PR: BuiltIn = {
   id: 'create-pr',
+  version: 2,
   summary: 'implement a ticket in a PR, gate every review round behind its tests, review it in up to three blind rounds, fix, hand the third round\'s blockers to the owner, merge',
   course: CREATE_PR_COURSE,
   reads: 'prs',
@@ -208,7 +211,7 @@ const CREATE_PR: BuiltIn = {
     review: { ask: VERDICT, positions: {
       approve: { reached: 'reviewed', next: 'merge' },
       changes: { reached: 'reviewed', next: 'fix', atRun: {
-        min: CREATE_PR_COURSE.legs.review.max_runs,
+        min: 'review-limit',
         position: { reached: 'reviewed', next: 'adjudicate', suspend: true },
       } },
     } },
@@ -222,7 +225,7 @@ const CREATE_PR: BuiltIn = {
     // (`baton owner resolve … merge|owner|round`). No agent reproduces anything, so no runner is
     // offered the leg: the position below is what a holder would report if one ever ran it by hand.
     adjudicate: ADJUDICATE,
-    merge: { position: { reached: 'merged', next: null } },
+    merge: { position: { reached: 'merged', next: null }, verify: 'merged' },
   },
   skill: 'baton-create-pr',
 };

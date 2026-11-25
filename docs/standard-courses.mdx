@@ -77,6 +77,11 @@ runs nothing and leaves no marker: it suspends with `review` next, and the sync 
 from that CI. Only a ticket with several PRs at home, which the gate cannot choose between,
 waits on the owner as `run-tests-unreachable`, whose `skip` waives the gate for it.
 
+**Review uses a different credential.** `review` names `implement` and `fix` in `no_chain_from`
+([R-BTN-106](../spec/BATON_SPEC/08-runners.md#sec-8-3)), so passing the test gate never makes
+an authoring credential eligible to review the ticket. The review instructions also require a
+different model when the runner offers one; Baton gates on credentials, not models.
+
 ## A ticket already delivered
 
 An `implement` agent that finds the whole ticket already on the default branch opens no PR and
@@ -88,8 +93,8 @@ leg reaches `delivered` — an outcome, not a failed attempt — with the commit
 evidence and the line as its detail, shown on the ticket's history. There the person leg
 `confirm` waits, under Needs you: `baton decision answer <repository>:<ticket> confirmed` closes
 it at the end station `confirmed`; `filed` sends it back to `implement`. The agent's word alone
-never closes a ticket. The ticket's file still says what it said; `baton tickets done <ticket>`
-archives it as for any ticket closed by hand.
+never closes a ticket. The ticket's file still says what it said; `dibber done <ticket>`
+closes it as for any ticket closed by hand.
 
 ## Work done outside Baton
 

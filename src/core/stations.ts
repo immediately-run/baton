@@ -14,6 +14,7 @@ import { qualify } from './validate';
 import { repositoryOf } from './registry';
 import type { History } from './history';
 import { BATON_WAITS } from './blocks';
+import { ticketInputs } from './contracts';
 
 /** What one snapshot showed of one ticket, against the previous accepted one. */
 export interface Seen {
@@ -23,6 +24,8 @@ export interface Seen {
   prev: Step[] | null;
   bars: Record<string, string[]>;
 }
+
+export type ClosingPosition = { parent: string | null; course_id: string; station: string | null; path: string | null };
 
 /** A queued or next leg as `ticket_next_legs` holds it. */
 type NextRow = { leg: string; state: string; waiting_on: string | null; ready_since: number | null; waiting_since: number | null };
@@ -45,7 +48,7 @@ function batonWait(on: string | null | undefined): boolean {
 export class Stations {
   private graphs = new Map<string, Graph | null>();
 
-  constructor(private readonly c: { store: Store; now: () => number; requiredBars?: (repo: string) => RequiredBar[]; history?: History }) {}
+  constructor(private readonly c: { store: Store; now: () => number; requiredBars: (repo: string) => RequiredBar[]; history: Pick<History, 'record' | 'discrepancy'> }) {}
 
   private rows<T>(q: string, ...p: unknown[]): T[] {
     return this.c.store.exec<T>(q, ...p).toArray();
@@ -95,7 +98,7 @@ export class Stations {
    * path that neither extends the previous one by edges nor is shorter is stored (git wins) and
    * logs `off-graph`. Returns what each placed ticket showed, by qualified id.
    */
-  apply(repo: string, sha: string, observation: number, stations: Map<string, PostedStation>, closed: { id: string; as: 'done' | 'withdrawn' }[], at: number, closingParents?: ReadonlyMap<string, string | null>): Map<string, Seen> {
+  apply(repo: string, sha: string, observation: number, stations: Map<string, PostedStation>, closed: { id: string; as: 'done' | 'withdrawn' }[], at: number, closingPositions?: ReadonlyMap<string, ClosingPosition>): Map<string, Seen> {
     const seen = new Map<string, Seen>();
     // The reading that placed every station row before this one (R-BTN-62): a row this post
     // leaves unchanged keeps its own, older `observation`, so the repository's stands for it.
@@ -105,7 +108,7 @@ export class Stations {
     // once for the post; each ticket's writes touch only its own rows, so what was read for the
     // others stays true while the loop runs.
     const stored = this.storedOf(repo);
-    const required = this.c.requiredBars?.(repo) ?? [];
+    const required = this.c.requiredBars(repo);
     for (const [local, st] of stations) {
       const id = qualify(repo, local);
       const t = stored.get(id);
@@ -152,7 +155,7 @@ export class Stations {
       this.write(id, g!, st, sha, observation, at, required, t);
       // R-BTN-81: git moved the ticket and no claim said so — someone else's work.
       if (prevRow && (prevRow.station !== st.station || prevRow.path !== JSON.stringify(st.path)) && !this.claimMoved(id, st.station, Math.max(prevRow.observation, placedBefore))) {
-        this.c.history?.record(id, { kind: 'git-moved', reached: st.station, next_leg: st.next_leg, detail: { from: prevRow.station, to: st.station, path: st.path, observation, next_source: st.next_source } });
+        this.c.history.record(id, { kind: 'git-moved', reached: st.station, next_leg: st.next_leg, detail: { from: prevRow.station, to: st.station, path: st.path, observation, next_source: st.next_source } });
       }
       seen.set(id, { station: st.station, path: st.path, prev, bars: st.bars });
     }
@@ -161,11 +164,16 @@ export class Stations {
       // R-BTN-86: the relation outlives the close — the parent the closing ticket's row held,
       // passed by the materialization that just dropped it (or read from the row a held
       // history's refresh still leaves standing).
-      const parent = closingParents?.get(c.id)
+      const closing = closingPositions?.get(c.id);
+      const parent = closing?.parent
         ?? this.rows<{ parent: string | null }>('SELECT parent FROM tickets WHERE id = ?', qualify(repo, c.id))[0]?.parent
         ?? null;
-      this.exec('INSERT INTO closed_tickets (ticket_id, closed_as, observation, closed_at, parent) VALUES (?, ?, ?, ?, ?) ON CONFLICT (ticket_id) DO NOTHING',
-        qualify(repo, c.id), c.as, observation, at, parent);
+      const id = qualify(repo, c.id);
+      const previous = stored.get(id);
+      const position = previous?.station;
+      this.exec(`INSERT INTO closed_tickets (ticket_id, closed_as, observation, closed_at, parent, final_station, final_path, course_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (ticket_id) DO NOTHING`,
+        id, c.as, observation, at, parent, closing?.station ?? position?.station ?? null, closing?.path ?? position?.path ?? null, closing?.course_id ?? previous?.course_id ?? null);
     }
     return seen;
   }
@@ -290,6 +298,27 @@ export class Stations {
                                       THEN ticket_next_legs.waiting_since ELSE excluded.waiting_since END`, id, leg, since);
   }
 
+  /** Rebuild the queue an imported person-leg arrival left, using the course now in force.
+   *  A stale first placement may leave this queue standing (R-BTN-39, S-BTN-50). */
+  restoreNext(repo: string, id: string, station: string, queued: string | null, at: number) {
+    const ticket = this.rows<{ course_id: string }>('SELECT course_id FROM tickets WHERE id = ?', id)[0];
+    const g = ticket && this.graph(repo, ticket.course_id);
+    if (!g) return;
+    const required = this.c.requiredBars?.(repo) ?? [];
+    for (const [leg, def] of g.legs) {
+      if (!def.from.includes(station)) continue;
+      // No posted bars for this restored queue have been accepted yet.
+      const unmet = required.some((bar) => requiredBarCovers(bar, ticket.course_id, leg, g));
+      this.exec(`INSERT INTO ticket_next_legs (ticket_id, leg, state, waiting_on, ready_since, waiting_since) VALUES (?, ?, ?, ?, ?, ?)`,
+        id, leg, unmet ? 'waiting' : 'ready', unmet ? 'policy' : null, unmet ? null : at, unmet ? at : null);
+    }
+    if (queued != null) {
+      const leg = resolveLeg(g, queued) ?? queued;
+      if (leg !== queued) this.exec('UPDATE ticket_stations SET next_leg = ? WHERE ticket_id = ?', leg, id);
+      if (!leaves(g, leg, station)) this.courseChanged(id, leg, at);
+    }
+  }
+
   /** Store where a snapshot places the ticket, writing only what changed (R-BTN-70): the sync
    *  re-posts every live ticket on every push and every refresh, and rows rewritten unchanged
    *  are what spend a plan's rows written (R-BTN-2; S-BTN-188). */
@@ -333,7 +362,8 @@ export class Stations {
       // R-BTN-67: a leg a required bar covers whose posted bars hold no tag with its prefix is
       // stored waiting on `policy` — the board still moves — and listed under Needs you.
       const unmet = required.some((r) => requiredBarCovers(r, course, posted.leg, g) && !meetsRequiredBar(r, Object.hasOwn(st.bars, posted.leg) ? st.bars[posted.leg] : []));
-      const n = unmet ? { leg: posted.leg, state: 'waiting' as const, waiting_on: 'policy' } : posted;
+      const wait = unmet ? 'policy' : posted.state === 'ready' ? ticketInputs(this.c.store, id, g, posted.leg).wait : undefined;
+      const n = wait ? { leg: posted.leg, state: 'waiting' as const, waiting_on: wait } : posted;
       const b = before.get(n.leg);
       // Age (the default order's fourth key) runs from the first snapshot that showed the leg
       // ready, and an unbroken wait from the first that showed it waiting. A wait git posts never
@@ -378,6 +408,6 @@ export class Stations {
   private offGraph(repo: string, id: string, detail: { observation: number; why: string; path?: Step[]; previous?: Step[] | null }) {
     logEvent(this.c.store, this.c.now(), 'off-graph', 'sync', detail, id, null, repo);
     // R-BTN-85: git's path wins; what Baton held beside it is logged.
-    this.c.history?.discrepancy(id, 'off-graph', { path: detail.previous ?? null, source: 'snapshot' }, { why: detail.why, ...(detail.path ? { path: detail.path } : {}) }, detail.observation);
+    this.c.history.discrepancy(id, 'off-graph', { path: detail.previous ?? null, source: 'snapshot' }, { why: detail.why, ...(detail.path ? { path: detail.path } : {}) }, detail.observation);
   }
 }

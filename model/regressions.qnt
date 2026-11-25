@@ -38,6 +38,34 @@ module regressions {
       .then(timeUp).expect(st.now == MAX_TIME and runnerClaim("w1").size() == 1)
   run timeUpWaitsForTheBoundTest = start.then(timeUp).fail()
 
+  run deadlineFinishInBudgetTest = start.then(claim("w1", "t1"))
+    .then(advanceRun("w1", "implement", NONE, 2)).then(tick).then(legFinished("w1"))
+    .then(tick).expect(c1.deadline == 5 and c1.releasePhase == "none")
+    .then(queueTimeout(1)).fail()
+
+  run deadlinePendingWithdrawnTest = start.then(claim("w1", "t1"))
+    .then(advanceRun("w1", "implement", NONE, 2)).then(tick).then(tick).then(queueTimeout(1))
+    .then(legFinished("w1")).expect(c1.deadline == -1 and c1.releasePhase == "none")
+    .then(deliverTimeout("w1")).fail()
+
+  run deadlineDeliveredRefusesAdvanceTest = start.then(claim("w1", "t1"))
+    .then(advanceRun("w1", "implement", NONE, 2)).then(tick).then(tick).then(queueTimeout(1))
+    .then(deliverTimeout("w1")).then(pushEvidence("w1", false))
+    .then(advance("w1", "review", NONE)).fail()
+
+  run deadlineDeliveredRefusesSuspensionTest = start.then(claim("w1", "t1"))
+    .then(advanceRun("w1", "implement", NONE, 2)).then(tick).then(tick).then(queueTimeout(1))
+    .then(deliverTimeout("w1"))
+    .then(endClaim("w1", "suspended", false)).fail()
+
+  run deadlineReapAndFenceTest = start.then(claim("w1", "t1"))
+    .then(advanceRun("w1", "implement", NONE, 2)).then(tick).then(heartbeat("w1"))
+    .then(tick).then(queueTimeout(1)).then(deliverTimeout("w1"))
+    .then(tick).then(tick).then(timeoutReap(1))
+    .expect(c1.fencePending and not(ticketClaimable("t1")) and st.attempts.get("t1").get("implement") == 1)
+    .then(tick).then(heartbeat("w1")).then((TIMEOUT - 1).reps(_ => tick))
+    .then(fenceTimeout(1)).expect(not(c1.fencePending))
+
   // The fifth review's B3 (a claim hook as an await, R-BTN-52) and its fallback runs went with
   // R-BTN-98, which retired the hook: a claim is one transaction (R3-1254).
 
@@ -180,6 +208,26 @@ module regressions {
       .expect(not(c1.confirmed) and not(ticketClaimable("t1")) and unconfirmedOf("t1").size() == 1)
       .then(ownerResolve(1))
       .expect(ticketClaimable("t1"))
+
+  // R-BTN-10 (bering, 2026-11-23: 47 review suspensions never confirmed): a suspension that
+  // named no commit is confirmed by the next accepted snapshot, though git shows no path for it —
+  // the position is Baton's alone (R-BTN-39).
+  run unnamedSuspensionConfirmedBySnapshotTest =
+    start.then(claim("w1", "t1")).then(advance("w1", "implement", NONE))
+      .then(endClaim("w1", "suspended", false))
+      .expect(not(c1.named) and not(c1.confirmed))
+      .then(sync1)
+      .expect(c1.confirmed and ticketClaimable("t1"))
+
+  // R-BTN-10 (bering, 2026-11-24: 44 review suspensions named their verdict comment and waited
+  // on a git path that no longer carries positions): a suspension that named evidence git holds
+  // is confirmed by the next snapshot — the sync attests it found — whatever path git shows.
+  run namedSuspensionConfirmedByEvidenceTest =
+    start.then(claim("w1", "t1")).then(advance("w1", "implement", NONE))
+      .then(pushEvidence("w1", true)).then(endClaim("w1", "suspended", true))
+      .expect(c1.named and c1.found and not(c1.confirmed))
+      .then(sync1)
+      .expect(c1.confirmed and ticketClaimable("t1"))
 
   // R-BTN-19: a force-reaped ticket is not re-issued until the live runner clears its fence.
   run forceReapFencesTest =
@@ -407,14 +455,14 @@ module regressions {
       .expect(st.retryRows.get("t1") == Set() and not(st.blocked.get("t1")) and ticketClaimable("t1")
               and st.lastEvent.get("t1") == "unblocked" and not(st.unpairedUnblock))
 
-  // §6.6, R-BTN-75: a `ticket` row refuses a claim, never a holder's advance — a dependency that
-  // opens mid-claim lets the holder advance, with no gate violation (round 3, 3-r3-2).
-  run ticketRowBindsNoAdvanceTest =
+  // R-BTN-75: a dependency on the next leg also binds an advance under a live claim.
+  run ticketRowBindsAdvanceTest =
     start.then(claim("w1", "t1")).then(leg("w1", "implement"))
       .then(gitDepends("t1", T2_DONE, true)).then(sync1)
-      .expect(st.postedDeps.get("t1") != Set())
-      .then(advance("w1", "review", NONE))
-      .expect(c1.leg == "review" and not(c1.gateViolation))
+      .expect(advanceRowsIn(st, "t1", "review"))
+      .then(gitDepends("t1", T2_DONE, false)).then(sync1)
+      .expect(not(advanceRowsIn(st, "t1", "review")))
+      .then(advance("w1", "review", NONE)).expect(c1.leg == "review" and not(c1.gateViolation))
 
   // ... and lifting that hold resets the count, so the next blocked end does not hold again.
   run liftResetsBlockedEndsTest =
