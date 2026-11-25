@@ -8,6 +8,8 @@
 // key's signature, its no-CI path.
 // Course code in the CLI, never core (§2b). Reached through the esbuild bundle
 // (scripts/baton-cli.mjs), the way `baton run` reaches src/runner.
+import { outputAttestation } from './output-evidence';
+import type { PostedAttestation } from '../core/board';
 import { execFileSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
@@ -16,7 +18,7 @@ import { dirname, join, relative } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { BatonApi, BatonRefusal, envAuth, type Auth, type Transport } from '../runner/api';
 import { HARNESS_AGENTS, type Harness } from '../runner/harness';
-import { syncOnce } from '../shared/batonSync.mjs';
+import { syncOnce } from '../vendor/batonSync.mjs';
 import { DEFAULT_URL } from '../../cli/baton.mjs';
 import { API_KEY, signingKey } from '../../cli/sign.mjs';
 import { DEFAULT_BRANCH_PATTERN, matchPatterns, sameRepo as sameRepoName, ticketOwns, type BatonRecord, type CodeRepoEntry, type PrFact, type StationsResult } from './course-pr';
@@ -38,6 +40,7 @@ import { nodeKeygen } from '../shared/commitSign.mjs';
 import type { PostedControl } from '../core/board';
 import { readTicketSettings } from './tickets-config';
 import { ownRepositoryId, remoteSlug } from './remote-slug';
+import { attestEvidence, type EvidenceAttestation, type UnconfirmedEnd } from './evidence';
 import { PAGE_NAME, ticketsPage } from './tickets-page';
 
 // LC_ALL=C on every git call (B-93, round 4): git translates its messages, and the two shapes
@@ -170,8 +173,8 @@ const defaultSkill = (course: string): string => `baton-${course}`;
 /** The `courses` entry `baton repo init` writes: every R-BTN-51 field, so a repository edits
  * them where the spec says rather than discovering them. Never `min_worker_version`: init
  * writes the new name only; the window is on the read (above). */
-function courseEntry(course: string, legs: string[]): Required<Omit<CourseEntry, 'previous_branch_pattern' | 'source' | 'min_worker_version'>> {
-  return { id: course, version: 1, min_runner_version: 1, skill: defaultSkill(course), step_kinds: legs, branch_pattern: DEFAULT_BRANCH_PATTERN, protocol_files: [] };
+function courseEntry(b: BuiltIn): Required<Omit<CourseEntry, 'previous_branch_pattern' | 'source' | 'min_worker_version'>> {
+  return { id: b.id, version: b.version ?? 1, min_runner_version: 1, skill: b.skill, step_kinds: Object.keys(b.course.legs), branch_pattern: DEFAULT_BRANCH_PATTERN, protocol_files: [] };
 }
 
 export interface SyncArgs {
@@ -263,6 +266,7 @@ interface Board {
   payload: { registry: Record<string, unknown>[]; tickets: TicketsResult['tickets']; closed: TicketsResult['closed']; stations: StationsResult['stations']; markers: StationsResult['markers']; course_data: Record<string, unknown>;
     /** B-183 (§4.4): the ticket source's declaration. */
     source: { kind: 'markdown' | 'custom'; versions?: 'pinned' | 'current'; cli: string }; }
+  outputEvidence: PostedAttestation[];
   /** A ticket's status at this reading for §6.7's confirmations: its file's, `live`, or null once closed. */
   statusOf: (id: string) => string | null;
 }
@@ -374,7 +378,10 @@ async function readBoard(root: string, batonJson: BatonJson, args: SyncArgs, log
       }
     }
   }
-  const facts: PrFact[] = args.factsFile ? (JSON.parse(readFileSync(args.factsFile, 'utf8')) as PrFact[]) : readsPrs ? await githubFacts(root, log, owns, [...siblings.values()], { codeRepos: record?.code_repos, pushers: record?.pushers }) : [];
+  const outputEvidence: PostedAttestation[] = [];
+  const facts: PrFact[] = args.factsFile ? (JSON.parse(readFileSync(args.factsFile, 'utf8')) as PrFact[]) : readsPrs ? await githubFacts(root, log, owns, [...siblings.values()], { codeRepos: record?.code_repos, pushers: record?.pushers, outputEvidence,
+    ownsOutput: (ticket, pr, fork) => owners.some((o) => o.tickets.some((t) => t.id === ticket && ticketOwns(t, pr, fork ? [] : o.patterns, repository))),
+  }) : [];
   // B-110: the plain-git half of the fact reading. A fact whose adapter read no commits (a facts
   // file, a forge with no adapter) gets its open branch's commits from the checkout's own git —
   // no forge, no `gh` — so the run-tests gate's markers are read the same way (`commitsOf`). Only
@@ -397,12 +404,17 @@ async function readBoard(root: string, batonJson: BatonJson, args: SyncArgs, log
   // frontmatter's machine state beside them (a migration's record, or a hand-edited file: git's
   // history is the authority, never the working tree). No second input, no shared file: a
   // checkout git cannot answer for has no close history, and its frontmatter state stands.
+  const plain = repository != null && plainGitRemote(git(root, 'remote', 'get-url', 'origin'));
   const closeCommits = closesByTicket((args) => git(root, ...args));
   for (const t of result.tickets) {
     if (closedIds.has(t.id) || t.path == null) continue; // a pathless ticket (a tracker's) has no file to close on
     const commits = closeCommits.get(t.id) ?? [];
     const fm = existsSync(join(root, t.path)) ? parseFrontmatter(readFileSync(join(root, t.path), 'utf8')) : null;
     if (!commits.length && fm?.station === undefined) continue;
+    if (plain) for (const { sha, leg } of commits) {
+      const a = outputAttestation(git(root, 'show', '-s', '--format=%b', sha), sha);
+      if (a?.ticket === t.id && (a.value as { leg: string }).leg === leg) outputEvidence.push(a);
+    }
     const closes = closesOfCommits((args) => git(root, ...args), t.path, t.id, commits);
     t.course = { ...(t.course ?? {}), closes, ...machineOf(fm) };
   }
@@ -491,6 +503,7 @@ async function readBoard(root: string, batonJson: BatonJson, args: SyncArgs, log
       // their raw markers may be promoted to a std:git.output attestation here.
       registry, tickets: result.tickets, closed: result.closed, stations, markers, course_data: courseData, ...controlField,
     },
+    outputEvidence,
     statusOf: (id) => (closedIds.has(id) ? null : status.get(id) ?? null),
   };
 }
@@ -697,6 +710,10 @@ export async function syncMain(args: SyncArgs): Promise<number> {
   const api = new BatonApi({ url, transport: args.transport ?? ((req) => fetch(req)), auth, kind: 'sync' }, log);
   let board: Board | null = null;
   let record: BatonRecord | undefined;
+  // R-BTN-10 (§4.3): the unconfirmed ends that named evidence, as the observation listed them, and
+  // this run's answers for them — read after the number, posted with the board.
+  let unconfirmed: UnconfirmedEnd[] = [];
+  let evidence: EvidenceAttestation[] = [];
   // B-89: `busy` is another run's reading, not this run's post, and R-BTN-62 lets no number this
   // run takes be used while that one is out. So the wait comes before the first `observe`, and
   // the retry is a whole second sync from a fresh number.
@@ -731,6 +748,7 @@ export async function syncMain(args: SyncArgs): Promise<number> {
     observe: async () => {
       const o = await asResult(async () => {
         const got = await api.observation();
+        unconfirmed = Array.isArray(got.unconfirmed) ? (got.unconfirmed as UnconfirmedEnd[]) : [];
         record = {
           answers: Array.isArray(got.answers) ? got.answers : [],
           legs: Array.isArray(got.legs) ? got.legs : [],
@@ -763,6 +781,7 @@ export async function syncMain(args: SyncArgs): Promise<number> {
         const answer = await api.dependencies([...ids]);
         return (Array.isArray(answer.dependencies) ? answer.dependencies : []).map((d) => ({ ticket: String(d.ticket), done: d.done === true }));
       });
+      evidence = unconfirmed.length ? await attestEvidence(unconfirmed, evidencePorts(root, record?.code_repos ?? [], log)) : [];
       return git(root, 'rev-parse', 'HEAD');
     },
     readHead: () => asResult(() => api.head()),
@@ -778,7 +797,10 @@ export async function syncMain(args: SyncArgs): Promise<number> {
         return false; // not an ancestor, or a commit this clone lacks: never "descends"
       }
     },
-    buildPayload: async () => board!.payload,
+    buildPayload: async () => {
+      const attestations = [...evidence, ...board!.outputEvidence].slice(0, 100);
+      return attestations.length ? { ...board!.payload, attestations } : board!.payload;
+    },
     statusOf: (id: string) => board!.statusOf(id),
     sleep,
   });
@@ -845,6 +867,53 @@ function syncKeyAuth(file: string): Auth {
   return auth;
 }
 
+/** R-BTN-10: what the evidence check reads through — the home checkout's git, and the REST API
+ *  of the GitHub hosts this repository is on (github.com, its home's host, its `code_repos`
+ *  entries'), with the sync's `GITHUB_TOKEN`. Without a token only commits are looked at. */
+function evidencePorts(root: string, codeRepos: readonly CodeRepoEntry[], log: (l: string) => void): Parameters<typeof attestEvidence>[1] {
+  const token = process.env.GITHUB_TOKEN;
+  const slug = remoteSlug(root);
+  let originHost: string | null = null;
+  try {
+    const u = git(root, 'remote', 'get-url', 'origin');
+    originHost = /^https:\/\//.test(u) ? new URL(u).host : (/^[^@]+@([^:]+):/.exec(u)?.[1] ?? null);
+  } catch {
+    originHost = null;
+  }
+  const hosts = new Set<string>(['github.com', ...codeRepos.filter((e) => e.forge === 'github').map((e) => e.host)]);
+  const homeHost = originHost === 'github.com' || (originHost != null && hosts.has(originHost)) ? originHost : null;
+  const hasObject = (sha: string) => {
+    try {
+      execFileSync('git', ['-C', root, 'cat-file', '-e', `${sha}^{commit}`], { stdio: 'ignore' });
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  return {
+    hasCommit: (sha) => {
+      if (hasObject(sha)) return true;
+      try {
+        execFileSync('git', ['-C', root, 'fetch', '-q', 'origin', sha], { stdio: 'ignore', timeout: FETCH_TIMEOUT_MS });
+      } catch {
+        return false;
+      }
+      return hasObject(sha);
+    },
+    home: token && slug && homeHost ? { host: homeHost, slug } : null,
+    hosts: token ? hosts : new Set(),
+    get: async (host, path) => {
+      try {
+        const res = await fetch(`${githubConn(host).rest}${path}`, { headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json', 'User-Agent': 'baton-sync' }, redirect: 'error', signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+        return res.status;
+      } catch {
+        return null;
+      }
+    },
+    log,
+  };
+}
+
 /** GitHub's API origin, REST and GraphQL alike. */
 const GITHUB_API = 'https://api.github.com';
 /** How long one GitHub or token call may take before the sync fails (§6.3's bound). */
@@ -880,7 +949,7 @@ const PR_DETAIL = `fragment D on PullRequest {
   head: commits(last: 1) { nodes { commit { oid checkSuites(first: 10) { pageInfo { hasNextPage } nodes { checkRuns(first: 100, filterBy: { checkType: LATEST }) { pageInfo { hasNextPage } nodes { status conclusion } } } } } } }
   commits(first: 100) { pageInfo { hasNextPage } nodes { commit { oid committedDate message tree { oid } parents(first: 1) { nodes { oid tree { oid } } } } } }
   reviews(first: 100) { pageInfo { hasNextPage } nodes { author { login } authorAssociation state submittedAt body } }
-  comments(first: 100) { pageInfo { hasNextPage } nodes { author { login } authorAssociation createdAt body } }
+  comments(first: 100) { pageInfo { hasNextPage } nodes { author { login } authorAssociation createdAt body url lastEditedAt includesCreatedEdit } }
 }`;
 
 /** The GraphQL query reading `numbers`' detail in one repository, each PR under alias `p<n>`. */
@@ -912,7 +981,9 @@ function githubConn(host: string): { host: string; rest: string; graphql: string
     : { host, rest: `https://${host}/api/v3`, graphql: `https://${host}/api/graphql` };
 }
 
-export async function githubFacts(root: string, log: (l: string) => void, owns: (pr: { number: number; head: string; repository: string }) => boolean, siblings: { repository: string; tickets: string[] }[] = [], obs: { codeRepos?: CodeRepoEntry[]; pushers?: { host: string; id: string }[] } = {}): Promise<PrFact[]> {
+export async function githubFacts(root: string, log: (l: string) => void, owns: (pr: { number: number; head: string; repository: string }) => boolean, siblings: { repository: string; tickets: string[] }[] = [], obs: { codeRepos?: CodeRepoEntry[]; pushers?: { host: string; id: string }[]; outputEvidence?: PostedAttestation[];
+  ownsOutput?: (ticket: string, pr: { number: number; head: string; repository: string }, fork: boolean) => boolean;
+} = {}): Promise<PrFact[]> {
   const slug = remoteSlug(root);
   if (slug == null) throw new Error(`${root} has no origin remote to read PRs from — pass --facts <file> for recorded facts`);
   // B-182 (first slice): a plain-git home has no forge, so no adapter reads it (R-BTN-96) — only
@@ -1173,10 +1244,16 @@ export async function githubFacts(root: string, log: (l: string) => void, owns: 
       ? (await all<any>(conn, `/repos/${repo}/pulls/${pr.number}/reviews`)).map((r) => ({ login: r.user?.login, userId: r.user?.id, association: r.author_association, state: r.state, at: r.submitted_at, body: r.body }))
       : node.reviews.nodes.map((r: any) => ({ login: r.author?.login, association: r.authorAssociation, state: r.state, at: r.submittedAt, body: r.body }))))
       .map((r: any) => ({ author: r.login ?? '?', state: r.state, submittedAt: Date.parse(r.at), body: r.body ?? '' }));
-    const comments = (await trustedOnly(conn, repo, node.comments.pageInfo.hasNextPage
-      ? (await all<any>(conn, `/repos/${repo}/issues/${pr.number}/comments`)).map((c) => ({ login: c.user?.login, userId: c.user?.id, association: c.author_association, at: c.created_at, body: c.body }))
-      : node.comments.nodes.map((c: any) => ({ login: c.author?.login, association: c.authorAssociation, at: c.createdAt, body: c.body }))))
-      .map((c: any) => ({ author: c.login ?? '?', state: 'COMMENTED' as const, submittedAt: Date.parse(c.at), body: c.body ?? '' }));
+    const verifiedComments = await trustedOnly<{ login?: string; userId?: unknown; association?: string; at: string; body?: unknown; url?: unknown; unedited: boolean }>(conn, repo, node.comments.pageInfo.hasNextPage
+      ? (await all<any>(conn, `/repos/${repo}/issues/${pr.number}/comments`)).map((c) => ({ login: c.user?.login, userId: c.user?.id, association: c.author_association, at: c.created_at, body: c.body, url: c.html_url, unedited: false }))
+      : node.comments.nodes.map((c: any) => ({ login: c.author?.login, association: c.authorAssociation, at: c.createdAt, body: c.body, url: c.url, unedited: c.lastEditedAt === null && c.includesCreatedEdit === false })));
+    for (const c of verifiedComments) {
+      if (!c.unedited || typeof c.url !== 'string' || typeof c.body !== 'string') continue;
+      const a = outputAttestation(c.body, c.url);
+      const fork = pr.head.repo?.id == null || pr.head.repo.id !== pr.base.repo?.id;
+      if (a && obs.ownsOutput?.(a.ticket, { number: pr.number, head: pr.head.ref, repository: repo }, fork)) obs.outputEvidence?.push(a);
+    }
+    const comments = verifiedComments.map((c: any) => ({ author: c.login ?? '?', state: 'COMMENTED' as const, submittedAt: Date.parse(c.at), body: c.body ?? '' }));
     return { pushedAt: Math.max(0, ...pushes), pushes, checks, reviews: [...reviews, ...comments], commits };
   }
 
@@ -1296,6 +1373,7 @@ const AGENT_WRAPPER_ENV = 'BATON_AGENT_WRAPPER';
  * convention puts it. */
 export function stubSource(b: BuiltIn, course: string, leg: string): string {
   const { ask, position, verify, pushes, delivered } = b.legs[leg];
+  const asksOwner = b.id === 'create-pr' && (leg === 'implement' || leg === 'fix');
   // A leg whose close writes a line on a PR may name that PR after its answer (B-29): a ticket's
   // PRs may sit in other repositories, and its home may have none.
   const names = b.reads === 'prs' && COMMENTING_LEGS.has(leg);
@@ -1307,6 +1385,13 @@ export function stubSource(b: BuiltIn, course: string, leg: string): string {
   // close hands the checkout's default branch in itself.)
   const closeHelpers = b.reads === 'prs' ? `\nimport { ticketsBranch } from ${JSON.stringify(source('ticket-state.ts'))};` : '';
   const values = ask ? ask.values.join(' or ') : '';
+  // The forge read before the position (R-BTN-131): `pr` an open PR (B-81), `merged` every PR
+  // of the ticket merged and none open — the merge agent's exit 0 is not a merge.
+  const verifySource = verify === 'merged' ? `  const mergedPrs = (() => { try { return verifyPrsMerged({ checkout: ctx.checkout, ticket: ctx.ticket, branchPatterns: patterns, repositories: ticketRepositories(ticketText, settings.repos) }, legRun); } catch (e) { throw failed(e); } })();
+  if (process.env.BATON_VERBOSE) process.stderr.write('baton: ' + ${JSON.stringify(`${b.id}/${leg}`)} + ' ticket ' + ctx.ticket.id + ': the forge verified ' + mergedPrs.join(', ') + ' merged, none open, on a branch matching ' + patterns.join(' or ') + '\\n');
+` : verify ? `  try { await verifyPrOpen({ checkout: ctx.checkout, ticket: ctx.ticket, branchPatterns: patterns, repositories: ticketRepositories(ticketText, settings.repos) }, legRun); } catch (e) { throw failed(e); }
+  if (process.env.BATON_VERBOSE) process.stderr.write('baton: ' + ${JSON.stringify(`${b.id}/${leg}`)} + ' ticket ' + ctx.ticket.id + ': the forge verified an open PR on a branch matching ' + patterns.join(' or ') + '\\n');
+` : '';
   return `import { execFile, execFileSync, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -1350,7 +1435,7 @@ const newestWrite = (p, depth = 0) => {
 const gitRun = (cmd, args, opts = {}) => execFileSync(cmd, args, { encoding: 'utf8', timeout: GIT_BOUND_MS, killSignal: 'SIGKILL', env: { ...process.env, ...GIT_ENV }, stdio: ['ignore', 'pipe', 'pipe'], ...opts });${ask ? `
 import { requireAnswer } from ${JSON.stringify(source('answer.ts'))};` : ''}
 import { ${closeFrom[0]} } from ${JSON.stringify(source(closeFrom[1]))};${closeHelpers}${verify ? `
-import { verifyPrOpen, ticketRepositories${delivered ? ', findDelivered, verifyDelivered, deliveredDetail' : ''} } from ${JSON.stringify(source('pr-verify.ts'))};` : ''}${pushes ? `
+import { ${verify === 'merged' ? 'verifyPrsMerged' : 'verifyPrOpen'}, ticketRepositories${delivered ? ', findDelivered, verifyDelivered, deliveredDetail' : ''} } from ${JSON.stringify(source('pr-verify.ts'))};` : ''}${pushes ? `
 import { DEFAULT_BRANCH_PATTERN, branchMatches, matchPatterns } from ${JSON.stringify(source('course-pr.ts'))};
 import { bareTicketId } from ${JSON.stringify(source('ticket-state.ts'))};${verify ? '' : `
 import { ticketRepositories } from ${JSON.stringify(source('pr-verify.ts'))};`}` : ''}
@@ -1367,10 +1452,14 @@ import { ticketRepositories } from ${JSON.stringify(source('pr-verify.ts'))};`}`
 // The agent's last line of output must be its ${ask.name}: ${values}. A line that opens with
 // one of them is read as the answer wherever it sits — prose before or after it is the agent's,
 // not a lost round (B-85) — and that line may name one PR URL after the word. A missing or
-// misspelled ${ask.name} still fails the leg, naming what the agent's output ended with.` : ''}${verify ? `
+// misspelled ${ask.name} still fails the leg, naming what the agent's output ended with.` : ''}${verify === 'pr' ? `
 // Before returning its position the stub verifies the leg's outcome on the forge (B-81): an
 // open PR on a branch this course's branch patterns map to the ticket, its head pushed; where
-// it cannot verify, the leg fails naming what it looked for.` : ''}
+// it cannot verify, the leg fails naming what it looked for.` : verify === 'merged' ? `
+// Before returning its position the stub verifies the leg's outcome on the forge (R-BTN-131):
+// every PR on a branch this course's branch patterns map to the ticket merged, none open — an
+// agent that exits 0 without merging (it refused red CI, say) fails the leg naming the open PR
+// and quoting what the agent said, and never reports merged.` : ''}
 // The repository may replace this leg's run, never its close: \`${leg}.run.mjs\` beside this file
 // (\`baton repo init --override ${leg}\`), read at the same snapshot (R-BTN-131) — or, where the
 // repository requires owner-signed control (B-127), at the signed commit the claim's
@@ -1516,7 +1605,11 @@ ${pushes ? `  // B-231: run from the gate's red (pr-open, fixed), this leg must 
   // failed leg's error carries, so the runner's log alone can diagnose it, whether the agent
   // exited non-zero or exited 0 and the checks after it failed.
   const lastOutput = (so, se) => (so + '\\n' + se).split('\\n').map((l) => l.trimEnd()).filter((l) => l.trim() !== '').slice(-20).join('\\n  ');
-  const received = await new Promise((resolve, reject) => {
+${asksOwner ? `  // S-BTN-222 (B-325): an open harness question can be silent and the stub cannot tell
+  // it from idle, or learn when it was answered. For a run allowed to raise interact, use
+  // Baton's deadline and release rather than inferring completion from silence.
+  const canInteract = ctx.can_interact === true;
+` : ''}  const received = await new Promise((resolve, reject) => {
     const echo = process.env.BATON_VERBOSE === '1';
     const child = spawn(argv[0], argv.slice(1), {
       cwd: ctx.checkout, stdio: ['ignore', 'pipe', 'pipe'],
@@ -1569,12 +1662,25 @@ ${pushes ? `  // B-231: run from the gate's red (pr-open, fixed), this leg must 
     watch = setInterval(() => {
       if (stopped != null || conclusion != null) return;
       const now = Date.now();
-      if (now - startedAt >= LEG_CEILING_MS) {
+      if (now - startedAt >= LEG_CEILING_MS) {${asksOwner ? `
+        if (canInteract) {
+          // The wrapper may have exited while a descendant still holds the pipes open.
+          // Neither pipe closure nor partial output is needed to fail at the ceiling.
+          stopped = 'the leg reached its hard ceiling (' + LEG_CEILING_MS + ' ms)';
+          clearInterval(watch);
+          ctx.signal?.removeEventListener('abort', onAbort);
+          child.kill('SIGKILL');
+          child.stdout.destroy();
+          child.stderr.destroy();
+          reject(new Error('the agent was stopped: ' + stopped));
+          return;
+        }` : ''}
         conclusion = { cause: 'agent_concluded_absolute', ceiling_ms: LEG_CEILING_MS };
         finishWatch();
         return;
       }
-      const all = signals();
+${asksOwner ? `      if (canInteract) return;
+` : ''}      const all = signals();
       if (all.every(([, at]) => now - at >= AGENT_IDLE_MS)) {
         conclusion = { cause: 'agent_concluded_idle', idle_ms: AGENT_IDLE_MS, quiet_signals: all.map(([name]) => name) };
         finishWatch();
@@ -1619,9 +1725,7 @@ ${pushes ? `  // B-231: run from the gate's red (pr-open, fixed), this leg must 
   const on = pr;` : `
   const last = (out.trim().split('\\n').at(-1) ?? '').trim();
   const on = ${PR_URL}.test(last) ? last : null;`}
-${verify ? `  try { await verifyPrOpen({ checkout: ctx.checkout, ticket: ctx.ticket, branchPatterns: patterns, repositories: ticketRepositories(ticketText, settings.repos) }, legRun); } catch (e) { throw failed(e); }
-  if (process.env.BATON_VERBOSE) process.stderr.write('baton: ' + ${JSON.stringify(`${b.id}/${leg}`)} + ' ticket ' + ctx.ticket.id + ': the forge verified an open PR on a branch matching ' + patterns.join(' or ') + '\\n');
-` : ''}  return { ...(${position}), ...(on ? { pr: on } : {}), ...(conclusion ? { conclusion } : {}) };` : `${ask ? `
+${verifySource}  return { ...(${position}), ...(on ? { pr: on } : {}), ...(conclusion ? { conclusion } : {}) };` : `${ask ? `
   // The answer (B-85): the last line that opens with the leg's value word, backwards past any
   // prose after it; a missing or misspelled verdict still fails, naming what it read.
   const { answer } = (() => { try { return requireAnswer(out, ${JSON.stringify({ name: ask.name, values: ask.values })}, ${JSON.stringify(leg)}); } catch (e) { throw failed(e); } })();` : `
@@ -1637,9 +1741,7 @@ ${verify ? `  try { await verifyPrOpen({ checkout: ctx.checkout, ticket: ctx.tic
     if (process.env.BATON_VERBOSE) process.stderr.write('baton: ' + ${JSON.stringify(`${b.id}/${leg}`)} + ' ticket ' + ctx.ticket.id + ': delivered at ' + shas.join(', ') + ', on the default branch — a person confirms\\n');
     return { suspend: true, reached: 'delivered', next: 'confirm', delivered: shas[0], detail: deliveredDetail(shas, claimed.evidence), ...(conclusion ? { conclusion } : {}) };
   }` : ''}
-${verify ? `  try { await verifyPrOpen({ checkout: ctx.checkout, ticket: ctx.ticket, branchPatterns: patterns, repositories: ticketRepositories(ticketText, settings.repos) }, legRun); } catch (e) { throw failed(e); }
-  if (process.env.BATON_VERBOSE) process.stderr.write('baton: ' + ${JSON.stringify(`${b.id}/${leg}`)} + ' ticket ' + ctx.ticket.id + ': the forge verified an open PR on a branch matching ' + patterns.join(' or ') + '\\n');
-` : ''}  return { ...(${position}), ...(conclusion ? { conclusion } : {}) };`}
+${verifySource}  return { ...(${position}), ...(conclusion ? { conclusion } : {}) };`}
 }
 // The close's ctx, one line (B-96's review round 2): everything the stub hands back, plus the
 // repository's default branch — the claim answer's \`default_branch\`, which the runner puts in
@@ -2090,7 +2192,7 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
   for (const leg of overrides) {
     if (!runnerLegs(b).includes(leg)) throw new Error(`--override ${leg}: ${b.id} has no such leg — its legs are ${runnerLegs(b).join(', ')}`);
   }
-  const entry = { ...courseEntry(b.id, Object.keys(b.course.legs)), skill: b.skill, ...(sourceOf(b.id) ? { source: sourceOf(b.id)! } : {}) };
+  const entry = { ...courseEntry(b), ...(sourceOf(b.id) ? { source: sourceOf(b.id)! } : {}) };
   let settings: BatonJson;
   let changed: string | null = null;
   let rewriteNamed = force;

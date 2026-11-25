@@ -32,6 +32,12 @@ describe('S-BTN-48 core contracts', () => {
     expect((await claimItem('vm-a', secret, { ticket_id: 'docs:T-2' })).status).toBe(409);
     expect(await rows("SELECT json_extract(detail_json, '$.type') AS type FROM events WHERE kind = 'condition' AND ticket_id = 'docs:T-2'"))
       .toEqual([{ type: 'baton.input-missing' }]);
+    expect(await rows("SELECT type, disposition, outcome FROM conditions WHERE ticket_id = 'docs:T-2'"))
+      .toEqual([{ type: 'baton.input-missing', disposition: 'notify', outcome: 'open' }]);
+    git.add('T-2', {}, placed('filed', [], [['plan', 'ready']]));
+    expect((await git.post()).status).toBe(200);
+    expect(await rows("SELECT outcome, closed_how FROM conditions WHERE ticket_id = 'docs:T-2'"))
+      .toEqual([{ outcome: 'closed', closed_how: 'cause-ended' }]);
   });
 
   it('cannot invent a producer; checks reach and atomically resolves the holder output', async () => {
@@ -89,5 +95,33 @@ describe('S-BTN-48 core contracts', () => {
     expect((await advance('vm-a', secret, offered.claim_id, { leg: 'plan' })).status).toBe(200);
     const next = await advance('vm-a', secret, offered.claim_id, { leg: 'apply', reached: 'planned', outputs: [{ name: 'plan', schema, uri }] });
     expect(next.json).toMatchObject({ ok: true, inputs: [{ schema, leg_version: 2, course_version: 3 }] });
+  });
+
+  it('validates and resolves the pinned producer after its routing name changes', async () => {
+    const { secret } = await register('vm-a');
+    const offered = (await claimItem('vm-a', secret, { ticket_id: 'docs:T-1' })).json;
+    const newer = { ...definition, start_leg: 'draft', legs: {
+      draft: { ...definition.legs.plan, renamed_from: ['plan'] },
+      apply: { ...definition.legs.apply, inputs: { plan: { from: 'draft.plan' } } },
+    } };
+    git.registry = [course(4, 3, { course: newer })];
+    expect((await git.post()).status).toBe(200);
+    expect((await advance('vm-a', secret, offered.claim_id, { leg: 'plan' })).status).toBe(200);
+    const next = (outputs: unknown[]) => advance('vm-a', secret, offered.claim_id, { leg: 'apply', reached: 'planned', outputs });
+    expect((await next([])).json).toMatchObject({ rule_code: 'output-invalid' });
+    expect((await next([{ name: 'plan', schema, uri }])).json).toMatchObject({ ok: true, inputs: [{ from_leg: 'plan', leg_version: 2 }] });
+    expect(await rows("SELECT leg, contract_leg FROM claim_legs WHERE seq = 1")).toEqual([{ leg: 'draft', contract_leg: 'plan' }]);
+  });
+
+  it('queues a person-leg successor as waiting on an incompatible answer version', async () => {
+    git.registry = [course(4, 3, { course: { ...definition, legs: {
+      plan: { from: ['filed'], to: 'planned', kind: 'person', asks: 'owner', version: 2 },
+      apply: { ...definition.legs.apply, inputs: { decision: { from: 'plan.answer', accepts: [1] } } },
+    } } })];
+    git.add('T-1', { question: { id: 'q-1', options: [{ id: 'go', reached: 'planned' }] } }, placed('filed', [], [['plan', 'ready']]));
+    expect((await git.post({ attestations: [{ type: 'std:decision@1', ticket: 'T-1', ref: sha,
+      value: { id: 'q-1', leg: 'plan', option: 'go', reached: 'planned' } }] })).status).toBe(200);
+    expect(await rows("SELECT leg, waiting_on FROM ticket_next_legs WHERE ticket_id = 'docs:T-1'")).toEqual([{ leg: 'apply', waiting_on: 'input-version' }]);
+    expect(await rows("SELECT type, outcome FROM conditions WHERE ticket_id = 'docs:T-1'")).toEqual([{ type: 'baton.input-version', outcome: 'open' }]);
   });
 });

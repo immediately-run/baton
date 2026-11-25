@@ -8,6 +8,7 @@
 // frontmatter against the repository's own item schema, the machine fields' types, and the
 // presence of this leg's heading: trust nothing the agent touched, check everything the
 // machine reads (the owner's decision, 2026-10-22). Course code in the CLI, never core (§2b).
+import { outputLine } from './output-evidence';
 import { execFileSync } from 'node:child_process';
 import { rmSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
@@ -310,13 +311,14 @@ export function checkMachine(state: MachineState): string[] {
  * Returns the pushed commit's sha, the close's evidence. Every call is bounded
  * (`CLOSE_TIMEOUT_MS`), so a remote that stops answering fails the leg in seconds. */
 export async function closeTicket(
-  ctx: { checkout: string; ticket: { id: string; path?: string | null; home?: string | null }; leg: string; claim?: { nonce?: string }; default_branch?: string | null; heading?: boolean },
-  result: { reached?: string; next?: string | null },
+  ctx: { checkout: string; ticket: { id: string; path?: string | null; home?: string | null }; leg: string; run_id?: string; claim?: { nonce?: string }; default_branch?: string | null; heading?: boolean },
+  result: { reached?: string; next?: string | null; outputs?: unknown },
   run: Exec = exec,
 ): Promise<string> {
   if (typeof result?.reached !== 'string' || result.reached === '') throw new Error(`the ${ctx.leg} leg returned no station reached`);
   if (ctx.ticket.path == null || ctx.ticket.path === '') throw new Error(`the ${ctx.leg} leg's ticket has no file path to write`);
   const id = bareTicketId(ctx.ticket);
+  const marker = outputLine(ctx, result.outputs);
   const state: MachineState = { station: result.reached, next_leg: result.next ?? null, claim: ctx.claim?.nonce ?? null };
   const branch = ticketsBranch(ctx.checkout, ctx.default_branch ?? null, run);
   const git = (args: string[], opts: { env?: Record<string, string>; input?: string } = {}): string => run('git', args, ctx.checkout, opts);
@@ -363,7 +365,7 @@ export async function closeTicket(
       git(['read-tree', parent], { env });
       git(['update-index', '--add', '--cacheinfo', `100644,${blob},${ctx.ticket.path}`], { env });
       const tree = git(['write-tree'], { env });
-      const commit = git(['commit-tree', tree, '-p', parent, '-m', `baton:close ${id} ${ctx.leg}`]);
+      const commit = git(['commit-tree', tree, '-p', parent, '-m', `baton:close ${id} ${ctx.leg}`, ...(marker ? ['-m', marker] : [])]);
       try {
         git(['push', 'origin', `${commit}:refs/heads/${branch}`]);
         return commit;

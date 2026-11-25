@@ -12,7 +12,16 @@ export function gitPointer(uri: string) {
   return { repository: m[1], commit: m[2], path: m[3], blob: m[4] };
 }
 
+export interface PointerRepository {
+  forge: 'github' | 'gitlab' | 'gitea';
+  host: string;
+  web_base: string;
+  repo_id: string;
+  owner_id: string;
+}
+
 export interface PointerReach {
+  repositories?: PointerRepository[];
   git: string[];
   web: string[];
   buckets: string[];

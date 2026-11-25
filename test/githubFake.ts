@@ -46,7 +46,7 @@ function prNode(routes: Routes, repo: string, n: number): unknown {
       },
     }))),
     reviews: first(reviews.map((r) => ({ author: r.user ? { login: r.user.login } : null, authorAssociation: r.author_association, state: r.state, submittedAt: r.submitted_at, body: r.body }))),
-    comments: first(comments.map((c) => ({ author: c.user ? { login: c.user.login } : null, authorAssociation: c.author_association, createdAt: c.created_at, body: c.body }))),
+    comments: first(comments.map((c) => ({ author: c.user ? { login: c.user.login } : null, authorAssociation: c.author_association, createdAt: c.created_at, body: c.body, url: c.html_url, lastEditedAt: c.last_edited_at ?? null, includesCreatedEdit: c.includes_created_edit ?? false }))),
   };
 }
 

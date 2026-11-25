@@ -93,7 +93,8 @@ numbers.
     source's, R-BTN-134), default-exports `stations(ctx)` → `stations` (per ticket: readiness,
     fact arrivals, implied station, outputs, bars, the queued person leg's question,
     `not_before`) and that course's opaque `course_data`, from git, the fact adapter's PR facts
-    (R-BTN-96) and `ctx.positions` (§4.3). It never returns a position (R-BTN-39). The sync
+    (R-BTN-96) and `ctx.positions` (§4.3). It never returns a position (R-BTN-39). The CLI adds
+    R-BTN-203's arrivals and evidence for every ticket itself, whatever the station function. The sync
     posts bars, the question and `not_before` with the ticket, the rest as its attestations
     (R-BTN-191), and `course_data` keyed by course id.
   - **CLI default ticket sources** (`src/defaults/`), used when the repository has no
@@ -108,7 +109,7 @@ numbers.
 
     | field | posted as |
     |---|---|
-    | `id`, `title`, `tier`, `parent` (R-BTN-86), `not_before` (R-BTN-89) | the same |
+    | `id`, `title`, `parent` (R-BTN-86), `not_before` (R-BTN-89) | the same |
     | `status` | `done` → `closed` as done; `withdrawn`, `superseded`, `deferred` → `closed` as withdrawn; any other → live, in `display.status` |
     | `course` | `course_id` (default `default_course`, else `create-pr`) |
     | `requires` | capability names, expanded |
@@ -155,7 +156,7 @@ numbers.
     The `_filed` line, `tags: [request]` and the `rules re-read` notes are claims anyone who
     can push can write; the check and the claim verify their form alone.
   - **`baton ticket new`** (R-BTN-127) `--title T [--description D] [--project ID]
-    [--depends-on A,B] [--tags X,Y] [--tier T] [--order N] [--repos a,b] [--course C]
+    [--depends-on A,B] [--tags X,Y] [--order N] [--repos a,b] [--course C]
     [--body-file F] [--trust T] [--invariants I] [--direct] [-i KEY] [--url URL] [--offline]`
     files one ticket under an id from R-BTN-199.
     - It writes the conventional body unless `--body-file` names one: `**Brief:**`, `**Spec:**`,
@@ -219,14 +220,70 @@ numbers.
     `confirmed` a notice; `held`, `busy` or `busy:again` a warning that nothing was posted;
     anything else, or no line, an error.
 
+- **R-BTN-203 (work done outside Baton).** Baton works in an open world: where only part of an
+  organization uses it, any of a ticket's legs may be done by people and sessions that never
+  claim it, and Baton cannot prevent it — it gates only its own state (R-BTN-35). Its job is to
+  detect such moves and place the ticket accordingly; a deployment that needs a course followed
+  strictly gates the outside events at the forge or disables them. The sync
+  (the CLI, for every ticket whatever its course's station function, never the server) finds that
+  work and attests it; Baton applies it by its own rules (R-BTN-39). Only a board posted with a
+  sync key or the registered CI identity (R-BTN-93) carries these attestations. On a post with a
+  runner's machine key the CLI omits them, and Baton drops any it finds there without refusing the
+  board; a repository synced only by machine key detects no outside work.
+  - **A leg done by hand is a fact leg.** A course names, as legs of their own, the hand acts it
+    accepts: each a leg with `arrives` (R-BTN-69), one outcome, and its own `from`, so the course
+    file says exactly where a hand act may move a ticket. The kinds, each read for the ticket's
+    PRs as R-BTN-131's courses map them (its `prs:` and its branch pattern):
+
+    | Kind | The fact | `ref` |
+    |---|---|---|
+    | `pr-opened` | a PR of the ticket's, open, that no claim of the ticket opened (no PR its implement or create legs reported, served as `claim_prs`, §4.3) and no `runner_pushers` login authored | the PR's URL |
+    | `pr-verdict` | the latest verdict on a PR's head — of the kind `arrives.verdict` names, if it names one — when it is a hand verdict: by a pusher (R-BTN-139) who is none of the repository's `runner_pushers`, not the PR's author and not a pusher of its head, on no comment or review a claim of the ticket posted (`verdict_refs`, §4.3), and newer than Baton's last change of the ticket's position. A runner's verdict counts as the latest when it is newer. On a ticket with several PRs, every PR's latest verdict, one per head | the review's or comment's URL |
+    | `pr-pushed` | a push to the PR after its latest changes verdict, by no `runner_pushers` login and of no commit a claim of the ticket reported (`claim_shas`, §4.3), that changes more than the base merged in; none while the PR has no changes verdict | the head sha |
+    | `pr-merged` | in each repository the ticket's PRs map (its `prs:` and `repos:`), at least one PR merged and none open, PRs closed unmerged ignored, none merged by a `merge` leg; a merge in some but not all of them is `merged-early` evidence | the last merge commit |
+
+    While `runner_pushers` is NULL or `[]`, no `pr-opened`, `pr-verdict` or `pr-pushed` is found:
+    a runner's act cannot be told from a person's (Baton serves the logins with `positions`,
+    §4.3). The sync posts one
+    `std:arrival@1` as writer `sync` per fact that a fact leg leaving Baton's station takes, with
+    that `ref` and the leg's `next` for it. A `pr-merged` no fact leg leaving the station takes is
+    `merged-early` evidence (below); any other fact no fact leg takes is posted as nothing.
+  - **Other evidence is weighed by the course's reconcile leg.** The sync also posts an
+    `std:evidence@1` (`{ref, kind}`) per piece of evidence that a ticket may have moved outside
+    Baton in a way no fact leg takes:
+    - `merged-early`: as above;
+    - `mention`: the ticket's id as a whole word in the title or body of a pusher's PR merged — in
+      the home or a `repos:` repository — between the times Baton accepted the last head and handed
+      out this observation, or in the message of a first-parent commit reaching the default branch
+      between the last accepted head and the observation's head (§4.3). Not counted: a commit that changes only the ticket
+      paths or `.baton/`; a commit a claim of the ticket reported (`claim_shas`) or a PR on a
+      branch any course of the ticket maps (its own PRs and their merges); the commit that filed the ticket;
+      a commit or PR naming more than three ids. Not posted for a ticket at an end station.
+
+    Only `ref` and `kind` are posted: titles and messages never are (R-BTN-33). Baton keeps each
+    piece and hands it to the course's reconcile leg (R-BTN-39). A course models the ways its
+    tickets move outside Baton as edges of its own graph: fact legs for the hand acts it
+    recognises, a reconcile leg for the rest.
+  - **What the sync reads.** The adapter's PR facts (R-BTN-96) and the home's first-parent
+    commits in the window above. A first snapshot has no window and reads no `mention`; outside
+    work merged before it is found only by `baton repo sync --backfill-mentions <since>`, which
+    widens one run's window to that date.
+  - **Closure is unchanged.** An archived file or `status: done` closes a ticket as the table
+    above says, claimed or not. A hand merge closes one through a fact leg or a reconcile leg the
+    course lets reach an end, whatever station it is merged from and whatever the verdict on the
+    merged head: Baton records what happened, and preventing it is the forge's job.
+
 ### 4.3 The sync run and the head
 
 - **The sync run.** A run checks out with full history (ancestry needs it), then:
-  1. `POST /v1/sync/observation` → `{sha, observation, bars, pushers, code_repos, repos_unlisted,
+  1. `POST /v1/sync/observation` → `{sha, observation, bars, pushers, runner_pushers, verdict_refs, code_repos, repos_unlisted,
      check_app_id, provisional, positions, versions, legs, unconfirmed}`, before it reads
      anything else: Baton's head (null before the first post); a fresh observation number
      (R-BTN-62); the owner bars in force or scheduled (R-BTN-67); the trust inputs (R-BTN-139,
-     R-BTN-140); the commits provisional block rows wait for (R-BTN-126); `positions`, every
+     R-BTN-140), and R-BTN-203's `runner_pushers`, `verdict_refs` (each live ticket's verdict
+     URLs its claims posted, from their evidence, R-BTN-8), `claim_prs` and `claim_shas` (the PRs
+     and commits its claims reported) among them; `positions` also carry each ticket's
+     `changed_at`, when Baton last changed its position; the commits provisional block rows wait for (R-BTN-126); `positions`, every
      live ticket's `{station, path_len, path, next_leg, running?}` from Baton's course history
      (R-BTN-39), a ticket absent from it being at its course's `start`; `versions`, each live
      ticket's last accepted version; `legs`, the runs claims finished with evidence, newest
@@ -341,7 +398,7 @@ The fingerprint stores no ticket content and is an optimization, never authority
                course: <course.json with its schemas>,           -- R-BTN-69, R-BTN-108
                step_kinds, branch_pattern, previous_branch_pattern? }],
   tickets:  [{ id,                                               -- local id
-               course_id, version?, key?, path?, title, tier?,    -- version: R-BTN-74; key: R-BTN-147
+               course_id, version?, key?, path?, title,          -- version: R-BTN-74; key: R-BTN-147
                requires[], expedite, repos[], rank?,             -- requires expanded; repos are forge paths
                parent?, not_before?,                             -- R-BTN-86, R-BTN-89
                depends_at?: [{ ticket, at | reached | done, leg? }],   -- R-BTN-120
@@ -444,12 +501,11 @@ The fingerprint stores no ticket content and is an optimization, never authority
     **current** source reads it as the store holds it now (`read(id, {})`), and a different
     version releases `stale-board`. A source that declares `versions` and exports no `read`
     releases `stale-board` too. A source that declares neither is not re-verified by version.
-  - **Re-verification of readiness.** The runner then checks the tier fits its ceiling and
-    runs the course's `sync.mjs` (through the wrapper, from a verified tree at the claim's
-    commit, R-BTN-133) on the ticket and its PRs at the fetched head. Its readiness must show
-    the offered leg leaving the claim's station as Baton holds it (the claim response's
+  - **Re-verification of readiness.** The runner then runs the course's `sync.mjs` (through the
+    wrapper, from a verified tree at the claim's commit, R-BTN-133) on the ticket and its PRs
+    at the fetched head. Its readiness must show the offered leg leaving the claim's station as Baton holds it (the claim response's
     station, `path_len` and queued leg, R-BTN-39); the ticket's position never comes from the
-    source. A ticket closed, archived or re-tiered, or the leg not offered there, releases
+    source. A ticket closed or archived, or the leg not offered there, releases
     `stale-board`. A ticket with no file — a `changes` check ticket (R-BTN-114) — is
     re-verified against the claim response's station and queued leg instead.
   - After this check, a version that moves under the claim is read again as R-BTN-198 says.

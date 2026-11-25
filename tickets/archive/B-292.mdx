@@ -2,8 +2,8 @@
 title: "B-292 — Fieldhouse follows Baton's simplified spec: drop executor.builtin, repoint its anchors to the section files, rename the trusted executor, and mark the Baton rules that are now proposals"
 id: B-292
 project: baton
-status: available
-updated: 2026-11-20
+status: done
+updated: 2026-11-21
 repos:
   - fieldhouse
 tags:
@@ -15,7 +15,8 @@ topics:
   - baton
   - fieldhouse
 owns: {}
-prs: []
+prs:
+  - https://github.com/immediately-run/fieldhouse/pull/41
 depends_on: []
 ---
 
@@ -28,12 +29,12 @@ lines call a role the "trusted executor" (118, 120, 543, 551, 555, 888, 977), wh
 with Baton's executor (the runner's module, R-BTN-107) and its `trusted-runner` role. Seventeen
 lines cite R-BTN-182, R-BTN-183 or R-BTN-184 for behaviour Baton now states only on
 `spec/proposals/security.md`. The findings are in
-[the review](../docs/review/spec-simplification-review-2026-11-19.mdx), section 5 and *Left for
+[the review](../../docs/review/spec-simplification-review-2026-11-19.mdx), section 5 and *Left for
 tickets*, item 5. Fieldhouse's spec does not cite R-BTN-192; the review's list was wrong on that
 one.
 
-**Spec:** [BATON_SPEC §12.8](../spec/BATON_SPEC/12-security.md#sec-12-8) ([R-BTN-188](../spec/BATON_SPEC/12-security.md#sec-12-8), [R-BTN-182](../spec/BATON_SPEC/12-security.md#sec-12-8), [R-BTN-183](../spec/BATON_SPEC/12-security.md#sec-12-8), [R-BTN-184](../spec/BATON_SPEC/12-security.md#sec-12-8)), [§8.3](../spec/BATON_SPEC/08-runners.md#sec-8-3) ([R-BTN-107](../spec/BATON_SPEC/08-runners.md#sec-8-3)), [§1](../spec/BATON_SPEC/01-what-baton-is.md#sec-1)
-([R-BTN-50](../spec/BATON_SPEC/01-what-baton-is.md#sec-1), [R-BTN-53](../spec/BATON_SPEC/01-what-baton-is.md#sec-1)), [§6.7](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-7) ([R-BTN-99](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-7)), [§3.4](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-4) ([R-BTN-140](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-4)). Fieldhouse's rules are its own: R-FH-3,
+**Spec:** [BATON_SPEC §12.8](../../spec/BATON_SPEC/12-security.md#sec-12-8) ([R-BTN-188](../../spec/BATON_SPEC/12-security.md#sec-12-8), [R-BTN-182](../../spec/BATON_SPEC/12-security.md#sec-12-8), [R-BTN-183](../../spec/BATON_SPEC/12-security.md#sec-12-8), [R-BTN-184](../../spec/BATON_SPEC/12-security.md#sec-12-8)), [§8.3](../../spec/BATON_SPEC/08-runners.md#sec-8-3) ([R-BTN-107](../../spec/BATON_SPEC/08-runners.md#sec-8-3)), [§1](../../spec/BATON_SPEC/01-what-baton-is.md#sec-1)
+([R-BTN-50](../../spec/BATON_SPEC/01-what-baton-is.md#sec-1), [R-BTN-53](../../spec/BATON_SPEC/01-what-baton-is.md#sec-1)), [§6.7](../../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-7) ([R-BTN-99](../../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-7)), [§3.4](../../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-4) ([R-BTN-140](../../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-4)). Fieldhouse's rules are its own: R-FH-3,
 R-FH-70, R-FH-72, R-FH-91, R-FH-95.
 
 ## Plan
@@ -77,9 +78,9 @@ except this ticket's status.
    the contract are designed, not built (B-140). Do not restate the design in Fieldhouse.
 5. **Lines that depend on Baton tickets not yet done.** List them in the PR and leave them, each
    with the Baton ticket it waits on: line 762's "whether it is a check leg (BATON_SPEC
-   [R-BTN-114](../spec/BATON_SPEC/10-checks.md#sec-10))" and line 975's `forge-check` sentence wait on B-290, which retires [R-BTN-114](../spec/BATON_SPEC/10-checks.md#sec-10) and
+   [R-BTN-114](../../spec/BATON_SPEC/10-checks.md#sec-10))" and line 975's `forge-check` sentence wait on B-290, which retires [R-BTN-114](../../spec/BATON_SPEC/10-checks.md#sec-10) and
    decides where `std:checks@1` comes from; line 444's `requires.resources` and its "block on
-   them (BATON_SPEC [R-BTN-76](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-3))" wait on B-291.
+   them (BATON_SPEC [R-BTN-76](../../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-3))" wait on B-291.
 
 ### Trust
 
@@ -93,10 +94,10 @@ loosen anything: it marks Baton behaviour as unbuilt, which makes Fieldhouse's o
 
 ### Invariants
 
-- BATON_SPEC [R-BTN-50](../spec/BATON_SPEC/01-what-baton-is.md#sec-1): Baton's core names no deployment. The rename and the anchors are edits
+- BATON_SPEC [R-BTN-50](../../spec/BATON_SPEC/01-what-baton-is.md#sec-1): Baton's core names no deployment. The rename and the anchors are edits
   to Fieldhouse's text; no Fieldhouse word enters Baton's spec.
-- BATON_SPEC [R-BTN-188](../spec/BATON_SPEC/12-security.md#sec-12-8): the knobs Fieldhouse sets are knobs Baton has. After step 1 every knob
-  in R-FH-3 is a row of [§12.8](../spec/BATON_SPEC/12-security.md#sec-12-8)'s table.
+- BATON_SPEC [R-BTN-188](../../spec/BATON_SPEC/12-security.md#sec-12-8): the knobs Fieldhouse sets are knobs Baton has. After step 1 every knob
+  in R-FH-3 is a row of [§12.8](../../spec/BATON_SPEC/12-security.md#sec-12-8)'s table.
 - Fieldhouse's one-home rule (its `check:homes`): no Baton rule's text is copied into
   Fieldhouse; each citation is an id and a file.
 - Fieldhouse's R-FH-3 guarantees are not weakened: the PR's body lists each guarantee and the

@@ -1,8 +1,8 @@
 // S-BTN-48: resolve contract envelopes without reading the bytes behind a pointer.
 import { codeReposOf, homeForgeOf, ticketRepositories } from './codeRepos';
-import type { PointerReach } from './contractPointers';
+import type { PointerReach, PointerRepository } from './contractPointers';
 import type { Store } from './ports';
-import type { Graph, Leg } from './graph';
+import { resolveLeg, type Graph, type Leg } from './graph';
 import type { Output } from './validate';
 
 export interface ResolvedInput extends Output {
@@ -39,10 +39,14 @@ export function resolveInputs(graph: Graph, leg: string, latest: (producer: stri
   return { inputs };
 }
 
-export function ticketInputs(store: Store, ticket: string, graph: Graph, leg: string) {
-  return resolveInputs(graph, leg, (producer, output) => store.exec<StoredOutput>(
-    `SELECT run, schema, uri, digest, value_json, leg_version, course_version FROM leg_outputs
-     WHERE ticket_id = ? AND leg = ? AND name = ? ORDER BY run DESC LIMIT 1`, ticket, producer, output).toArray()[0]);
+export function ticketInputs(store: Store, ticket: string, graph: Graph, leg: string, current = graph) {
+  return resolveInputs(graph, leg, (producer, output) => {
+    const canonical = resolveLeg(current, producer) ?? producer;
+    const names = [...new Set([producer, canonical, ...[...current.legRenames].filter(([, name]) => name === canonical).map(([old]) => old)])];
+    return store.exec<StoredOutput>(`SELECT run, schema, uri, digest, value_json, leg_version, course_version FROM leg_outputs
+      WHERE ticket_id = ? AND leg IN (${names.map(() => '?').join(',')}) AND name = ?
+      ORDER BY claim_id DESC, run DESC LIMIT 1`, ticket, ...names, output).toArray()[0];
+  });
 }
 
 export function declaredOutputFault(leg: Leg | undefined, outputs: Output[]): string | null {
@@ -72,5 +76,6 @@ export function pointerReach(store: Store, repo: string, ticket: string): Pointe
   const web = ticketRepositories(store, repo, listed).map((r) => r.webBase);
   const git = [...new Set([...(home ? [home.github.toLowerCase()] : []), ...web.map((base) => new URL(base).pathname.slice(1).toLowerCase())])];
   const settings = store.exec<{ artifact_buckets: string }>('SELECT artifact_buckets FROM repositories WHERE id = ?', repo).toArray()[0];
-  return { git, web, buckets: JSON.parse(settings?.artifact_buckets ?? '[]') as string[] };
+  const repositories: PointerRepository[] = entries.filter((e) => web.includes(e.web_base));
+  return { git, web, ...(repositories.length ? { repositories } : {}), buckets: JSON.parse(settings?.artifact_buckets ?? '[]') as string[] };
 }

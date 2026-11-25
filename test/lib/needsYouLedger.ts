@@ -47,8 +47,6 @@ export const LEDGER: Record<string, Home[]> = {
   no_owner_channel: [listing('no_owner_channel')],
   // The stations' (src/core/stations.ts).
   course_changed: [listing('course_changed')],
-  input_missing: [listing('input_missing')],
-  input_version: [listing('input_version')],
   // An adoption is an administrator's to confirm, on Sync, where its control is (R-BTN-28);
   // Conditions lists it too and points there.
   adoptions: [{ action: 'repo.sync', field: 'adoptions', screen: 'repository/sync', holds: 'repository' }, listing('adoptions')],

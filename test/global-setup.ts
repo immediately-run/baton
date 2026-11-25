@@ -1,7 +1,7 @@
 // global-setup.ts — runs in Node before the Workers tests (R-BTN-29). It builds the fixture
 // git repository, takes its shas and ancestry from real git, and checks the committed inputs
 // the Worker-side tests read against their sources wherever a sibling docs checkout exists:
-// the board states (test/fixtures/boards.json) and the vendored library (src/shared/, R-BTN-37).
+// the board states (test/fixtures/boards.json) and the vendored library (src/vendor/, R-BTN-37).
 import type { TestProject } from 'vitest/node';
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
@@ -30,10 +30,11 @@ export default async function setup(project: TestProject) {
   for (const x of LABELS) for (const y of LABELS) ancestry[`${x}<${y}`] = repo.isAncestor(repo.shas[x as keyof typeof repo.shas], repo.shas[y as keyof typeof repo.shas]);
   project.provide('board', { shas: repo.shas, states: committed.states, ancestry });
 
-  const manifest = JSON.parse(readFileSync(join(ROOT, 'src/shared/manifest.json'), 'utf8'));
-  const vendored = Object.fromEntries(Object.keys(manifest.files).map((n) => [n, sha256(join(ROOT, 'src/shared', n))]));
+  const manifest = JSON.parse(readFileSync(join(ROOT, 'src/vendor/manifest.json'), 'utf8'));
+  const vendored = Object.fromEntries(Object.keys(manifest.files).map((n) => [n, sha256(join(ROOT, 'src/vendor', n))]));
   const upstream = haveDocs ? Object.fromEntries(Object.keys(manifest.files).map((n) => [n, sha256(join(docs, 'scripts/lib', n))])) : null;
-  project.provide('shared', { manifest: manifest.files, vendored, upstream });
+  const copiesInShared = Object.keys(manifest.files).filter((n) => existsSync(join(ROOT, 'src/shared', n)));
+  project.provide('vendor', { manifest: manifest.files, vendored, upstream, copiesInShared });
   // The docs files the tests read (scripts/vendor.mjs FIXTURES), checked the same way.
   const { FIXTURES } = await import('../scripts/vendor.mjs');
   const fixtures = Object.fromEntries(Object.keys(FIXTURES).map((p) => [p, sha256(join(ROOT, p))]));

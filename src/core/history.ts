@@ -15,7 +15,7 @@ import type { Store } from './ports';
  *  R-BTN-116). */
 export const HISTORY_KINDS = ['leg-started', 'leg-finished', 'leg-abandoned', 'position-confirmed', 'position-replaced', 'git-moved', 'regressed',
   're-routed', 'blocked', 'unblocked', 'decision-opened', 'decision-answered', 'inputs', 'outputs', 'discrepancy', 'spawned',
-  'fact-arrival', 'arrival-unapplied', 'question-posted', 'question-answered', 'question-expired', 'condition'] as const;
+  'fact-arrival', 'arrival-unapplied', 'question-posted', 'question-answered', 'question-expired', 'condition', 'claimed'] as const;
 export type HistoryKind = (typeof HISTORY_KINDS)[number];
 
 /** R-BTN-85: the cases a discrepancy names, exactly. `position-replaced` and `route-overridden`
@@ -52,6 +52,7 @@ export interface HistoryRow {
   course_version?: number | null;
   leg_version?: number | null;
   detail?: Record<string, unknown> | null;
+  rationale_json?: string | null;
 }
 
 /** A row's detail as stored: JSON of at most 2 KB, else a note naming the cut. */
@@ -73,9 +74,9 @@ export class History {
    *  to refuse, so the count is kept, not counted). */
   record(ticket: string, r: HistoryRow) {
     this.c.store.exec(`INSERT INTO ticket_history (repository_id, ticket_id, at, kind, claim_id, runner_id, leg, reached, next_leg, run, run_id, snapshot_sha,
-                         head_sha, course_version, leg_version, detail_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                         head_sha, course_version, leg_version, detail_json, rationale_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       repositoryOf(ticket), ticket, this.c.now(), r.kind, r.claim_id ?? null, r.runner_id ?? null, r.leg ?? null, r.reached ?? null, r.next_leg ?? null,
-      r.run ?? null, r.run_id ?? null, r.snapshot_sha ?? null, r.head_sha ?? null, r.course_version ?? null, r.leg_version ?? null, detailJson(r.detail));
+      r.run ?? null, r.run_id ?? null, r.snapshot_sha ?? null, r.head_sha ?? null, r.course_version ?? null, r.leg_version ?? null, detailJson(r.detail), r.rationale_json ?? null);
     adjustCounts(this.c.store, { history: 1 });
   }
 
@@ -93,11 +94,12 @@ export class History {
   /** `GET …/tickets/{ticket}/history?before=&limit=` (§11): newest first, paged by id. */
   list(ticket: string, before: number | null, limit: number) {
     const rows = this.rows<{ id: number; at: number; kind: string; claim_id: number | null; runner_id: number | null; leg: string | null; reached: string | null;
-      next_leg: string | null; run: number | null; run_id: string | null; snapshot_sha: string | null; head_sha: string | null; course_version: number | null; leg_version: number | null; detail_json: string | null }>(
-      `SELECT id, at, kind, claim_id, runner_id, leg, reached, next_leg, run, run_id, snapshot_sha, head_sha, course_version, leg_version, detail_json
+      next_leg: string | null; run: number | null; run_id: string | null; snapshot_sha: string | null; head_sha: string | null; course_version: number | null; leg_version: number | null; detail_json: string | null; rationale_json: string | null }>(
+      `SELECT id, at, kind, claim_id, runner_id, leg, reached, next_leg, run, run_id, snapshot_sha, head_sha, course_version, leg_version, detail_json, rationale_json
        FROM ticket_history WHERE ticket_id = ? AND (? IS NULL OR id < ?) ORDER BY id DESC LIMIT ?`, ticket, before, before, limit + 1);
-    const page = rows.slice(0, limit).map(({ detail_json, ...r }) => ({
+    const page = rows.slice(0, limit).map(({ detail_json, rationale_json, ...r }) => ({
       id: r.id, ...Object.fromEntries(Object.entries(r).filter(([, v]) => v != null)), detail: detail_json ? JSON.parse(detail_json) : null,
+      ...(rationale_json == null ? {} : { rationale: JSON.parse(rationale_json) }),
     }));
     return { rows: page, ...(rows.length > limit ? { next_before: page[page.length - 1].id } : {}) };
   }

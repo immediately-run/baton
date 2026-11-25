@@ -93,7 +93,6 @@ note "0. scratch: keys, a plain-git home, a local Baton (runbooks/local-home.mdx
 mkdir -p "$WORK/keys"
 cd "$WORK/keys" || die "mktemp failed"
 for k in admin owner sync runner1 runner2 runner3 second; do ssh-keygen -q -t ed25519 -f "drill_$k" -C "drill $k" -N '' || die "ssh-keygen failed"; done
-node -e 'const {generateKeyPairSync}=require("node:crypto");const {privateKey}=generateKeyPairSync("ed25519");process.stdout.write(JSON.stringify(privateKey.export({format:"jwk"})))' > "$WORK/keys/signing-key.json" || die "the tenant signing key could not be made"
 
 git init --bare -q -b main "$WORK/home.git" || die "git init failed"
 git --git-dir="$WORK/home.git" config receive.denyNonFastForwards true
@@ -111,7 +110,7 @@ git -c user.email=drill@example.invalid -c user.name=drill commit -q -m "drill h
 git push -q origin main || die "the home's first push failed"
 
 node "$ROOT/scripts/start-local.mjs" --db "$WORK/baton.db" --port "$PORT" \
-  --admin-keys "$WORK/keys/drill_admin.pub" --signing-key "$WORK/keys/signing-key.json" > "$WORK/baton.log" 2>&1 &
+  --admin-keys "$WORK/keys/drill_admin.pub" > "$WORK/baton.log" 2>&1 &
 BATON_PID=$!
 for _ in $(seq 1 40); do
   node -e "fetch('$ORIGIN/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))" && break

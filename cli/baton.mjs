@@ -992,11 +992,9 @@ export function policyDiff(oldDoc, newDoc) {
   return POLICY_KNOBS.filter((k) => canonical(knobOf(oldDoc, k)) !== canonical(knobOf(newDoc, k)));
 }
 
-/** `baton owner policy …`: show and diff read the signed policy read (R-BTN-189 — a deployment
- *  verifies its signature against the tenant key it pinned; the CLI shows the fields and the
- *  signature beside them), set and apply compare-and-set on the `--base` version the operator
- *  READ (never a version the CLI fetches itself: a fresh fetch would overwrite a concurrent
- *  change sight unseen, defeating the compare-and-set — round 1, finding 9; `show` names the
+/** `baton owner policy …`: show and diff read the policy, set and apply compare-and-set
+ *  on the `--base` version the operator READ (never a version the CLI fetches itself: a fresh
+ *  fetch would overwrite a concurrent change sight unseen — round 1, finding 9; `show` names the
  *  version), and the floor commands register and remove a deployment's floors. */
 async function policyMain(argv) {
   // `-i KEY` and `--url URL` may sit before the subcommand — `baton owner -i KEY policy show
@@ -1019,7 +1017,6 @@ async function policyMain(argv) {
     const out = await request('GET', `/v1/repositories/${encodeURIComponent(repo)}/policy`);
     if (out.status !== 200) return write(arrived(out.text)), 1;
     write(JSON.stringify(out.json));
-    process.stderr.write(`baton: verify ${out.json.repository}@${out.json.version} against your pinned tenant key (${out.json.kid}); the read lives until ${new Date(out.json.valid_until).toISOString()}\n`);
     return 0;
   }
   if (sub === 'diff') {
@@ -1240,11 +1237,11 @@ export async function main(argv) {
     const { homeMain } = await import('../scripts/baton-cli.mjs');
     return homeMain(argv.slice(1));
   }
-  if (argv[0] === 'run') {
+  if (argv[0] === 'run' || (argv[0] === 'runner' && argv[1] === 'start')) {
     // §6.13: the runner is TypeScript under src/runner; bundle it (a checkout runs the CLI with
     // its devDependencies), then run it in this process's stead.
     const { runMain } = await import('../scripts/baton-run.mjs');
-    return runMain(argv.slice(1));
+    return runMain(argv.slice(argv[0] === 'run' ? 1 : 2));
   }
   if (argv[0] === 'queue') {
     // R-BTN-202 (B-248): this host's local work queue for the runners on one home — local

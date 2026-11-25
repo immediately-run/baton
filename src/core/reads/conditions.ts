@@ -6,8 +6,8 @@
 //
 // What stands behind them today, and what does not:
 //   - a condition's row is B-234's (`conditions`, migration 0048): type, disposition, severity,
-//     restarts, the session link of an `interact`. No `detail` and no `handler` is stored
-//     (B-55, R-BTN-161), and no resolve exists (R-BTN-163's `ticket.resolve`, B-56) — so
+//     restarts, the session link of an `interact`, and the core notice's re-raise count. No
+//     leg-supplied `detail` or `handler` is stored (B-55, R-BTN-161), and no resolve exists (B-56) — so
 //     `allowed` is empty for every caller and `not_built` names what is missing;
 //   - a queued person leg is `questions.ts`'s (`ticket_questions`, the course's graph). Whether
 //     the caller may answer it is `answerWord`: the same rule `POST …/attestations` judges by
@@ -39,9 +39,9 @@ interface ConditionRow {
   id: number;
   repository_id: string;
   ticket_id: string;
-  claim_id: number;
-  run_id: string;
-  leg: string;
+  claim_id: number | null;
+  run_id: string | null;
+  leg: string | null;
   type: string;
   disposition: string;
   severity: string;
@@ -52,9 +52,10 @@ interface ConditionRow {
   outcome: string;
   closed_at: number | null;
   closed_how: string | null;
+  reraised: number;
 }
 
-const CONDITION_COLUMNS = 'id, repository_id, ticket_id, claim_id, run_id, leg, type, disposition, severity, url, restarts_json, default_restart, raised_at, outcome, closed_at, closed_how';
+const CONDITION_COLUMNS = 'id, repository_id, ticket_id, claim_id, run_id, leg, type, disposition, severity, url, restarts_json, default_restart, raised_at, outcome, closed_at, closed_how, reraised';
 
 /** A condition as these reads answer it: the list's fields (`Conditions.entry`), and its
  *  outcome, close and Resolve path. `allowed` is the registry ids the caller may call on it —
@@ -69,6 +70,7 @@ function conditionOf(r: ConditionRow) {
     condition_id: r.id, ticket_id: r.ticket_id, leg: r.leg, run_id: r.run_id, type: r.type,
     disposition: r.disposition, severity: r.severity, raised_at: r.raised_at, url: r.url,
     restarts, default: r.default_restart,
+    ...(r.reraised ? { detail: { reraised: r.reraised } } : {}),
     outcome: r.outcome, closed_at: r.closed_at, closed_how: r.closed_how,
     resolve_url: resolvePath(r.repository_id, r.id),
     allowed: [] as string[],
@@ -142,8 +144,6 @@ function listingsOf(cx: ReadCtx, repository: string, now: number, administrator:
     pool_unclaimed: (notices.pool_unclaimed as Row[]).filter(here),
     no_owner_channel: (notices.no_owner_channel as Row[]).filter(here),
     course_changed: (stations.course_changed as Row[]).filter(byTicket),
-    input_missing: (stations.input_missing as Row[]).filter(byTicket),
-    input_version: (stations.input_version as Row[]).filter(byTicket),
     courses_refused: cx.core.courses.refusals().filter((r) => r.repository_id === repository),
     scope: cx.core.scope.needsYou().filter((f) => f.repository_id === repository),
     unsigned_control: cx.core.unsignedControlView(now).filter((u) => u.repository_id === repository),

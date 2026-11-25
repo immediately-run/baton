@@ -7,7 +7,7 @@
 import { nonScheduling } from './stateVersion';
 import { logEvent } from './db';
 import { extendsPath, graphOf, leaves, onGraph, resolveLeg, type Graph, type Step } from './graph';
-import type { PostedStation } from './board';
+import { missingQueuedLeg, type PostedStation } from './board';
 import type { Store } from './ports';
 import { meetsRequiredBar, requiredBarCovers, type RequiredBar } from './admin';
 import { qualify } from './validate';
@@ -46,7 +46,7 @@ function batonWait(on: string | null | undefined): boolean {
 export class Stations {
   private graphs = new Map<string, Graph | null>();
 
-  constructor(private readonly c: { store: Store; now: () => number; requiredBars?: (repo: string) => RequiredBar[]; history?: History }) {}
+  constructor(private readonly c: { store: Store; now: () => number; requiredBars: (repo: string) => RequiredBar[]; history: Pick<History, 'record' | 'discrepancy'> }) {}
 
   private rows<T>(q: string, ...p: unknown[]): T[] {
     return this.c.store.exec<T>(q, ...p).toArray();
@@ -106,7 +106,7 @@ export class Stations {
     // once for the post; each ticket's writes touch only its own rows, so what was read for the
     // others stays true while the loop runs.
     const stored = this.storedOf(repo);
-    const required = this.c.requiredBars?.(repo) ?? [];
+    const required = this.c.requiredBars(repo);
     for (const [local, st] of stations) {
       const id = qualify(repo, local);
       const t = stored.get(id);
@@ -153,7 +153,7 @@ export class Stations {
       this.write(id, g!, st, sha, observation, at, required, t);
       // R-BTN-81: git moved the ticket and no claim said so — someone else's work.
       if (prevRow && (prevRow.station !== st.station || prevRow.path !== JSON.stringify(st.path)) && !this.claimMoved(id, st.station, Math.max(prevRow.observation, placedBefore))) {
-        this.c.history?.record(id, { kind: 'git-moved', reached: st.station, next_leg: st.next_leg, detail: { from: prevRow.station, to: st.station, path: st.path, observation, next_source: st.next_source } });
+        this.c.history.record(id, { kind: 'git-moved', reached: st.station, next_leg: st.next_leg, detail: { from: prevRow.station, to: st.station, path: st.path, observation, next_source: st.next_source } });
       }
       seen.set(id, { station: st.station, path: st.path, prev, bars: st.bars });
     }
@@ -169,6 +169,19 @@ export class Stations {
         qualify(repo, c.id), c.as, observation, at, parent);
     }
     return seen;
+  }
+
+  /** R-BTN-83 (S-BTN-312): read the final placement, including any move by a sync attestation. */
+  missingNext(repo: string): Set<string> {
+    const missing = new Set<string>();
+    for (const row of this.rows<{ id: string; course_id: string; station: string; next_leg: null }>(
+      `SELECT t.id, t.course_id, s.station, s.next_leg FROM tickets t JOIN ticket_stations s ON s.ticket_id = t.id
+       WHERE t.repository_id = ? AND s.next_leg IS NULL
+         AND NOT EXISTS (SELECT 1 FROM closed_tickets c WHERE c.ticket_id = t.id)`, repo)) {
+      const g = this.graph(repo, row.course_id);
+      if (g?.stations.has(row.station) && missingQueuedLeg(row, g.ends)) missing.add(row.id);
+    }
+    return missing;
   }
 
   /** Every live ticket of the repository with its stored station, next legs and bars (B-241).
@@ -266,15 +279,7 @@ export class Stations {
     return {
       course_changed: this.rows(`SELECT n.ticket_id, n.leg, n.waiting_since FROM ticket_next_legs n CROSS JOIN ticket_stations s ON n.ticket_id = s.ticket_id AND n.leg = s.next_leg
                                  WHERE n.state = 'waiting' AND n.waiting_on = 'course-changed' ORDER BY n.waiting_since, n.ticket_id`),
-      input_missing: this.contractWaits('input-missing'),
-      input_version: this.contractWaits('input-version'),
     };
-  }
-
-  private contractWaits(reason: 'input-missing' | 'input-version') {
-    return this.rows(`SELECT n.ticket_id, n.leg, n.waiting_since, 'baton.' || n.waiting_on AS type
-      FROM ticket_next_legs n JOIN ticket_stations s ON n.ticket_id = s.ticket_id AND n.leg = s.next_leg
-      WHERE n.state = 'waiting' AND n.waiting_on = ? ORDER BY n.waiting_since, n.ticket_id`, reason);
   }
 
   /** Leg `leg` of ticket `id` waits on `course-changed` since `since`; a wait on it already stored
@@ -357,9 +362,6 @@ export class Stations {
     for (const n of next.values()) {
       const b = before.get(n.leg);
       if (b && b.state === n.state && b.waiting_on === n.waiting_on && b.ready_since === n.ready_since && b.waiting_since === n.waiting_since) continue;
-      if (b?.waiting_on !== n.waiting_on && (n.waiting_on === 'input-missing' || n.waiting_on === 'input-version')) {
-        logEvent(this.c.store, at, 'condition', 'baton', { type: `baton.${n.waiting_on}`, leg: n.leg }, id);
-      }
       this.exec(`INSERT INTO ticket_next_legs (ticket_id, leg, state, waiting_on, ready_since, waiting_since) VALUES (?, ?, ?, ?, ?, ?)
                  ON CONFLICT (ticket_id, leg) DO UPDATE SET state = excluded.state, waiting_on = excluded.waiting_on,
                    ready_since = excluded.ready_since, waiting_since = excluded.waiting_since`,
@@ -378,6 +380,6 @@ export class Stations {
   private offGraph(repo: string, id: string, detail: { observation: number; why: string; path?: Step[]; previous?: Step[] | null }) {
     logEvent(this.c.store, this.c.now(), 'off-graph', 'sync', detail, id, null, repo);
     // R-BTN-85: git's path wins; what Baton held beside it is logged.
-    this.c.history?.discrepancy(id, 'off-graph', { path: detail.previous ?? null, source: 'snapshot' }, { why: detail.why, ...(detail.path ? { path: detail.path } : {}) }, detail.observation);
+    this.c.history.discrepancy(id, 'off-graph', { path: detail.previous ?? null, source: 'snapshot' }, { why: detail.why, ...(detail.path ? { path: detail.path } : {}) }, detail.observation);
   }
 }

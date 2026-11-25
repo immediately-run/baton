@@ -8,7 +8,7 @@
 // docs is a sibling — Baton's CI cannot read docs). Ancestry is real git: global-setup.ts asks
 // `git merge-base --is-ancestor` of the fixture repository.
 import { describe, it, expect, inject } from 'vitest';
-import { syncOnce } from '../../src/shared/batonSync.mjs';
+import { syncOnce } from '../../src/vendor/batonSync.mjs';
 import { observe, ownerCall, setClock, syncCall, stateView } from '../helpers';
 
 type Label = 'A' | 'B' | 'C' | 'D';

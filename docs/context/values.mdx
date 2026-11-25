@@ -54,3 +54,17 @@ by a review.</Lede>
     Baton to stop a runner doing something is outside Baton, with one exception a repository opts
     into through its policy: Baton's trusted runners decide what lands, from attestations, and the
     forge enforces that only they and a human may ([BATON_SPEC §12.8](../../spec/BATON_SPEC/12-security.md#sec-12-8)).
+
+13. **An open world: Baton detects outside moves, it does not prevent them.** Baton orchestrates
+    work that processes outside it also touch: PRs are opened, reviewed and merged, ticket files
+    created and updated, by actors independent of Baton. It cannot gate what happens in a ticket
+    store, version control, CI or deployment; the only thing it gates is updates to its own state
+    (#12). So its default stance, and Fieldhouse's, is that almost any transition between a
+    course's stations may take place outside Baton, and Baton's job is to detect it and place the
+    ticket in the course graph accordingly (the owner, 2026-11-21). A course models those moves as
+    edges of its own graph: fact legs for the hand acts it recognises, a reconcile leg for the
+    evidence it must weigh ([BATON_SPEC §4.2](../../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-2),
+    [R-BTN-203](../../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-2)). A factory that needs a course followed strictly gates the outside events
+    themselves — PR merges, workflow triggers — on Baton's state at the forge, or disables those
+    avenues so that only Baton's runners move tickets; it never asks Baton to stop them. The PR
+    courses (`create-pr`, `review-pr`, `create-spec`) model outside moves; the others do not yet.

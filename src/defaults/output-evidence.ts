@@ -1,0 +1,36 @@
+// R-BTN-82 / S-BTN-48: the same bounded record goes in a close and comes back in sync.
+import { checkOutputs, LOCAL_ID } from '../core/validate';
+import type { PostedAttestation } from '../core/board';
+
+const PREFIX = 'Baton-Output: ';
+const MAX = 256 * 1024;
+
+interface OutputContext {
+  ticket: { id: string; home?: string | null };
+  leg: string;
+  run_id?: string;
+  claim?: { nonce?: string };
+}
+
+export function outputLine(ctx: OutputContext, raw: unknown): string | null {
+  const outputs = checkOutputs(raw);
+  if (!outputs.length) return null;
+  if (!ctx.run_id || !ctx.claim?.nonce) throw new Error('output evidence requires an online run and claim nonce');
+  const ticket = ctx.ticket.id.split(':').at(-1);
+  return PREFIX + encodeURIComponent(JSON.stringify({ ticket, leg: ctx.leg, run_id: ctx.run_id, claim_nonce: ctx.claim.nonce, outputs }));
+}
+
+/** Call only on default-branch commits of a plain-git home or pusher-verified forge text. */
+export function outputAttestation(body: string, ref: string): PostedAttestation | null {
+  const lines = body.split('\n').filter((line) => line.startsWith(PREFIX));
+  if (lines.length !== 1 || lines[0].length > MAX) return null;
+  try {
+    const { ticket, leg, run_id, claim_nonce, outputs: raw } = JSON.parse(decodeURIComponent(lines[0].slice(PREFIX.length)));
+    if (typeof ticket !== 'string' || !LOCAL_ID.test(ticket) || typeof leg !== 'string'
+      || typeof run_id !== 'string' || typeof claim_nonce !== 'string') return null;
+    const outputs = checkOutputs(raw);
+    return outputs.length ? { type: 'std:git.output@1', ticket, ref, value: { leg, run_id, claim_nonce, outputs } } : null;
+  } catch {
+    return null;
+  }
+}

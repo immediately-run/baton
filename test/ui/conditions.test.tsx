@@ -148,7 +148,7 @@ describe('the Conditions list (B-219 item 1)', () => {
     expect(also.textContent).toContain('something_new (1)');
     expect(screen.getByRole('link', { name: /2 held on Sync/ }).getAttribute('href')).toBe('/repositories/docs/sync');
     // Every listing the page names is one the read can serve.
-    expect(LISTINGS.map((l) => l.key).sort()).toEqual(['adoptions', 'bars_mismatch', 'blocked_capability', 'course_changed', 'courses_refused', 'fence_pending', 'held_items', 'input_missing', 'input_version',
+    expect(LISTINGS.map((l) => l.key).sort()).toEqual(['adoptions', 'bars_mismatch', 'blocked_capability', 'course_changed', 'courses_refused', 'fence_pending', 'held_items',
       'no_owner_channel', 'policy', 'pool_unclaimed', 'regressed', 'scope', 'stale_skills', 'unacknowledged_releases', 'unconfirmed', 'unsigned_control']);
   });
 
