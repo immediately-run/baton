@@ -10,7 +10,7 @@
 // a session that does not exit when its agent is done ends at the result posted on its
 // channel). Everything else is refused: the channel carries no raw `advance` or `end`, and no
 // `executor_digest`, `environment` or `instance` — the runner reports those itself.
-import { createConnection, Server as SocketServer, type Socket } from 'node:net';
+import { Server as SocketServer, type Socket } from 'node:net';
 import { chmodSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
@@ -129,35 +129,4 @@ export class LegChannel {
 export const channelPath = (stateFile: string, sessionId: string): string =>
   join(dirname(stateFile), `leg-${sessionId.replace(/[^A-Za-z0-9._-]/g, '_')}.sock`);
 
-/**
- * The session's half (the CLI's): one connection, one request, one answer. `timeoutMs` bounds
- * the wait — a harness agent calling the CLI cannot hang on a runner that stopped serving.
- */
-export function callChannel(path: string, req: ChannelRequest, timeoutMs = 30_000): Promise<ChannelAnswer> {
-  return new Promise((resolve, reject) => {
-    const sock = createConnection(path);
-    let buf = '';
-    const finish = (fn: () => void) => {
-      sock.destroy();
-      clearTimeout(timer);
-      fn();
-    };
-    const timer = setTimeout(() => finish(() => reject(new Error(`the runner's channel (${path}) did not answer within ${timeoutMs / 1000}s`))), timeoutMs);
-    timer.unref?.();
-    sock.on('error', (e) => finish(() => reject(new Error(`the runner's channel (${path}) is not serving: ${e.message}`))));
-    sock.on('data', (d) => {
-      buf += d.toString('utf8');
-      const at = buf.indexOf('\n');
-      if (at < 0) return;
-      const line = buf.slice(0, at);
-      finish(() => {
-        try {
-          resolve(JSON.parse(line) as ChannelAnswer);
-        } catch {
-          reject(new Error(`the runner's channel answered a line that is not JSON: ${line.slice(0, 120)}`));
-        }
-      });
-    });
-    sock.on('connect', () => sock.write(`${JSON.stringify(req)}\n`));
-  });
-}
+export { callChannel } from './legClient.mjs';

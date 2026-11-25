@@ -210,6 +210,8 @@ describe('S-BTN-48 replay: a recorded run re-run without a claim', () => {
     const configPath = join(repo.dir, '.baton', 'baton.json');
     const config = JSON.parse(readFileSync(configPath, 'utf8'));
     delete config.courses[0].source;
+    // B-311 raised create-pr's min_runner_version for its reconcile leg; this graph has none.
+    config.courses[0].min_runner_version = 1;
     writeFileSync(configPath, JSON.stringify(config));
     const dir = join(repo.dir, '.baton', 'courses', 'create-pr');
     const graph = (name: string, extras = {}) => ({ start: 'filed', start_leg: name, end: ['done'], stations: { filed: {}, done: {} }, legs: { [name]: { from: ['filed'], to: 'done', ...extras } } });
@@ -245,6 +247,8 @@ describe('S-BTN-48 replay: a recorded run re-run without a claim', () => {
     const configPath = join(repo.dir, '.baton', 'baton.json');
     const config = JSON.parse(readFileSync(configPath, 'utf8'));
     delete config.courses[0].source;
+    // B-311 raised create-pr's min_runner_version for its reconcile leg; this graph has none.
+    config.courses[0].min_runner_version = 1;
     writeFileSync(configPath, JSON.stringify(config));
     const dir = join(repo.dir, '.baton', 'courses', 'create-pr');
     writeFileSync(join(dir, 'course.json'), JSON.stringify({ start: 'filed', start_leg: 'implement', end: ['done'], stations: { filed: {}, planned: {}, done: {} }, legs: {
@@ -297,6 +301,8 @@ describe('S-BTN-48 replay: a recorded run re-run without a claim', () => {
     const configPath = join(repo.dir, '.baton', 'baton.json');
     const config = JSON.parse(readFileSync(configPath, 'utf8'));
     delete config.courses[0].source;
+    // B-311 raised create-pr's min_runner_version for its reconcile leg; this graph has none.
+    config.courses[0].min_runner_version = 1;
     writeFileSync(configPath, JSON.stringify(config));
     writeFileSync(join(repo.dir, 'plan.json'), JSON.stringify(mode === 'bad-output' ? { wrong: true } : { url: 'https://example.test' }));
     const artifact = repo.commit('plan artifact');

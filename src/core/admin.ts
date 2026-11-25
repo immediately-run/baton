@@ -16,7 +16,7 @@ import { checkCodeRepos, checkPushers, codeReposOf, crossHostEntries, homeForgeO
 import { checkRegistration, retiredPath, seedEntries, tierPosition, type Registration, type Registry } from './registry';
 import { graphOf, resolveLeg, type Graph } from './graph';
 import { humanOnlyList, type ApproverEntry, type ApproverFacts, type Policies } from './policy';
-import type { Config, Store } from './ports';
+import type { Config, Row, Store } from './ports';
 import { sha256Hex } from './runnerApi';
 
 /** A one-time link lives 5 minutes; a session 12 hours (R-BTN-57). */
@@ -155,8 +155,8 @@ export class Admin {
   private rows<T = Record<string, unknown>>(q: string, ...p: unknown[]): T[] {
     return this.c.store.exec<T>(q, ...p).toArray();
   }
-  private exec(q: string, ...p: unknown[]) {
-    return this.c.store.exec(q, ...p);
+  private exec<T = Row>(q: string, ...p: unknown[]) {
+    return this.c.store.exec<T>(q, ...p);
   }
   /** Rows the last statement changed (SQLite's `changes()`, the same on both hosts). */
   private changed(): number {
@@ -1021,9 +1021,8 @@ export class Admin {
       if (this.rows('SELECT 1 FROM owner_bars WHERE repository_id = ? AND lifted_at IS NULL AND (ends_at IS NULL OR ends_at > ?)', repository, now).length >= BARS_MAX) {
         bad('body', `a repository has at most ${BARS_MAX} bars in force or scheduled`);
       }
-      this.exec(`INSERT INTO owner_bars (repository_id, course, tag, legs, applies, starts_at, ends_at, release_holders, reason, set_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        repository, course, tag, JSON.stringify(legs), applies, startsAt, endsAt, b.release_holders === true ? 1 : 0, reason, actor);
-      const id = this.rows<{ id: number }>('SELECT last_insert_rowid() AS id')[0].id;
+      const { id } = this.exec<{ id: number }>(`INSERT INTO owner_bars (repository_id, course, tag, legs, applies, starts_at, ends_at, release_holders, reason, set_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
+        repository, course, tag, JSON.stringify(legs), applies, startsAt, endsAt, b.release_holders === true ? 1 : 0, reason, actor).one();
       this.event(actor, { act: 'bar-set', id, repository, course, tag, legs, applies, starts_at: startsAt, ends_at: endsAt, release_holders: b.release_holders === true, reason }, repository);
       this.c.dispatchSync(repository);
       return { id };

@@ -71,8 +71,20 @@ describe('S-BTN-105 a course from its source, one leg overridden', () => {
     const claim = held.json.claim_id;
     expect((await advance('vm-a', runner.secret, claim, { leg: 'implement' })).status).toBe(200);
     expect((await advance('vm-a', runner.secret, claim, { leg: 'run-tests', reached: 'pr-open' })).status).toBe(200);
-    expect((await advance('vm-a', runner.secret, claim, { leg: 'review', reached: 'pr-open' })).status).toBe(200);
+    // B-30: the implementer's key never chains into the review; its gate run suspends at
+    // `pr-open`, finished, and another key takes the round.
+    expect((await endClaim('vm-a', runner.secret, claim, { end_reason: 'suspended:pr-open', reached: 'pr-open', next: 'review',
+      finished_self_loop: true, ended_at_sha: 'a'.repeat(40) })).status).toBe(200);
+    await sync();
+    // What this scenario reads is the review's source; git's confirmation of the gate's end
+    // (R-BTN-10) is S-BTN-63's, so it is taken as given here.
+    await rows('UPDATE claims SET confirmed_at = ? WHERE id = ?', T0, claim);
     expect(await at()).toMatchObject({ station: 'pr-open', next_leg: 'review' });
+    const reviewer = await register('vm-b', { courses: [{ repository: 'docs', course: 'create-pr', version: 3 }] });
+    const round = await claimItem('vm-b', reviewer.secret, { ticket_id: 'docs:T-1' });
+    expect(round.status).toBe(200);
+    const reviewClaim = round.json.claim_id;
+    expect((await advance('vm-b', reviewer.secret, reviewClaim, { leg: 'review' })).status).toBe(200);
 
     // The repository's review: its own check, then the course's run with an agent that asks for changes.
     const agent = join(dir, 'agent.sh');
@@ -102,7 +114,7 @@ export async function run(ctx, standard) {
       expect(await leg.close(ctx, result)).toBe('https://github.com/o/r/pull/7#issuecomment-1');
       const body = readFileSync(join(bin, 'body'), 'utf8');
       expect(body.split('\n')[0]).toBe('<!-- baton:verdict changes -->');
-      expect((await endClaim('vm-a', runner.secret, claim, { end_reason: 'done', reached: result.reached, next: result.next,
+      expect((await endClaim('vm-b', reviewer.secret, reviewClaim, { end_reason: 'done', reached: result.reached, next: result.next,
         ended_at_sha: 'https://github.com/o/r/pull/7#issuecomment-1' })).status).toBe(200);
     } finally {
       process.env.PATH = path;

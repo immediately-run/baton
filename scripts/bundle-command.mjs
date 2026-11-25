@@ -14,7 +14,11 @@ export async function bundleCommand(name, { legProcess = false } = {}) {
   mkdirSync(dir, { recursive: true });
   const outfile = join(dir, `${name.slice(0, -4)}-${process.pid}.mjs`);
   try {
-    if (legProcess) copyFileSync(join(root, 'src/runner/legProcess.mjs'), join(dir, 'legProcess.mjs'));
+    if (legProcess) {
+      copyFileSync(join(root, 'src/runner/legProcess.mjs'), join(dir, 'legProcess.mjs'));
+      // legProcess.mjs imports its client beside it (src/runner/legClient.mjs, B-55).
+      copyFileSync(join(root, 'src/runner/legClient.mjs'), join(dir, 'legClient.mjs'));
+    }
     await build({
       stdin: { contents: entryExports(CLI_ENTRIES[name]), resolveDir: root },
       outfile,

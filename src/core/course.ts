@@ -27,7 +27,7 @@ import { OUTPUTS_MAX } from './contractPointers';
 import { compilePattern, parseSchemaId } from '../shared/schema.mjs';
 import { requirementKeys, requirementOf } from './ticketRequirement';
 import { ROLES } from '../shared/vocabulary.mjs';
-import { CONDITION_TYPE, CONDITION_TYPE_MAX, RESTART_ID, barredFromAutonomous, dispositionOf, type ConditionDeclaration, type Disposition } from './conditionTypes';
+import { CONDITION_TYPE, CONDITION_TYPE_MAX, RESTART_ID, RESTARTS_MAX, barredFromAutonomous, declaredConditions, dispositionOf, type ConditionDeclaration, type Disposition } from './conditionTypes';
 
 /** R-BTN-121, R-BTN-157: the names a vocabulary expansion already means — a vocabulary role, the
  *  built-in literal `human-operator`, and `none`, which every runner holds. Review round 7,
@@ -107,7 +107,6 @@ const DISPOSITIONS = new Set(['interrupt', 'suspend', 'notify']);
 /** R-BTN-162: a declared wait is never more than 900 s. */
 const WAIT_S_MAX = 900;
 /** A declaration's restarts: ids with one-line descriptions — a question's options. */
-const RESTARTS_MAX = 8;
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 const isInt = (v: unknown): v is number => typeof v === 'number' && Number.isInteger(v);
@@ -191,7 +190,7 @@ export function validateCourse(json: unknown): CourseViolation[] {
   // only `disposition` required. `baton` and `baton.*` are core's alone: the validator refuses
   // a course declaring them. What a declaration means for a raise (bindings, waits, restarts)
   // is not built here; the table is what the raise check and the signature read.
-  const declared = new Map<string, ConditionDeclaration>();
+  const declared = isObject(json.conditions) && Object.keys(json.conditions).length <= COURSE_LIST_MAX ? declaredConditions(json) : new Map();
   if ('conditions' in json) {
     const conditions = json.conditions;
     if (!isObject(conditions)) add('shape', 'conditions', 'conditions is an object of declared condition types (R-BTN-160)');
@@ -208,11 +207,10 @@ export function validateCourse(json: unknown): CourseViolation[] {
       }
       if (!isObject(def)) { add('shape', at, 'a declaration is {disposition, restarts?, default?, wait_s?, retryable?, description?} (R-BTN-160)'); continue; }
       for (const k of Object.keys(def)) if (!CONDITION_KEYS.has(k)) add('unknown-key', `${at}.${k}`, `unknown key "${k}"`);
-      if (typeof def.disposition !== 'string' || !DISPOSITIONS.has(def.disposition)) {
+      if (own(def, 'disposition') ? typeof def.disposition !== 'string' || !DISPOSITIONS.has(def.disposition) : !declared.has(type)) {
         add('shape', `${at}.disposition`, `disposition is required: one of ${[...DISPOSITIONS].join(', ')} (R-BTN-160)`);
         continue;
       }
-      declared.set(type, { disposition: def.disposition as Disposition });
       if ('restarts' in def) {
         const restarts = def.restarts;
         if (!isObject(restarts) || Object.keys(restarts).length === 0 || Object.keys(restarts).length > RESTARTS_MAX) {
