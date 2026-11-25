@@ -3,7 +3,7 @@ title: "B-218 — The ticket detail read: GET …/tickets/{ticket} is one ticket
 id: B-218
 project: baton-ui-v2
 status: available
-updated: 2026-11-16
+updated: 2026-11-23
 repos:
   - baton
 tags:
@@ -42,7 +42,7 @@ the resume record), [§4.6](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-6
 The §14 row first, then the code, in `src/core/tickets.ts` beside B-194's.
 
 The route exists: B-126 built it on 2026-11-13 (`src/core/baton.ts` ~1231, §14's row, R-BTN-194),
-serving `{ticket_id, repository, course_id, title, path, tier, requires[], operator_only,
+serving `{ticket_id, repository, course_id, title, path, ~~tier,~~ requires[], operator_only,
 expedite, rank, snapshot_sha, station, last_written_by?, brief?}` to keys, owners and
 administrators, and `baton ticket show` prints its provenance first. This ticket **extends that
 read** — the same route and action, every field it serves today kept with its meaning (the CLI
@@ -106,3 +106,5 @@ the work is an extension of it that keeps `last_written_by` and `brief`, which B
 should draw next to the head, as the CLI does._
 
 _(2026-11-19: rules re-read: R-BTN-194. The brief mark is retired with signed control (`spec/BATON_SPEC_HISTORY.md`, that date). The read keeps `last_written_by`, now served with `human` (R-BTN-194), and no `brief`: the mark is struck above, and the 2026-11-16 note's "and `brief`" no longer holds.)_
+
+_2026-11-23 — tiers retired (spec/retire-tiers: [BATON_SPEC §6.6](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-6) gate 5, [R-BTN-66](../spec/BATON_SPEC/01-what-baton-is.md#sec-1)): the struck tier clauses are gone from the spec — no ticket tier, runner ceiling, grant `max_tier`, ladder, `ready_by_tier` or `?tier=`. Build the rest without them._

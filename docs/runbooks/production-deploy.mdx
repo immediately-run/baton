@@ -1,0 +1,51 @@
+---
+title: Runbook — the production deploy hand-off
+description: The owner-only workflow change, Cloudflare scope check and fork drill for B-135.
+tags: [security, runbook]
+---
+
+This is the B-135 hand-off, not a record that the production gate is in place. It replaces
+the deploy arrangement described in R3-1207 and R3-1208 only once the owner completes and
+verifies the change. There is one Worker, `baton`, and no staging instance (B-224).
+
+## Owner-only changes
+
+- **Make `main` test-only.** Keep the checks in `ci.yml`, but remove the push-to-`main`
+  deployment path from `.github/workflows/baton-deploy.yml`. For a manually dispatched
+  production workflow, require a reviewer on the `production` environment whose account and
+  credentials are absent from every agent session (B-136). Restrict deployments to approved
+  refs, disallow self-review and administrator bypass, and have the reviewer verify the exact
+  commit, workflow and artifact before approval. A job's `environment: production` alone is
+  not a gate: GitHub can create an unprotected environment. If using the approval path, fail
+  closed when the run has no recorded approval from the designated human-only identity.
+- **Build before secrets.** The unprivileged job installs, tests and builds the dashboard and
+  Worker, then publishes the deploy bundle and a SHA-256 digest tied to that run and commit.
+  The production job has no checkout, lockfile install, cache restore or execution of
+  artifact-supplied scripts. Fetch the expected artifact by ID from the same run, hard-fail
+  on a digest mismatch before exposing the token, and upload the prebuilt Worker without
+  rebuilding it, using pinned deployment tooling from a trusted source. Review the bundle
+  and deploy configuration as well as the workflow: a digest checks integrity, not the
+  trustworthiness of what the build produced. Verify the artifact preserves the dashboard,
+  Worker bindings and Durable Object migration metadata.
+- **Replace the account-wide token.** Keep the deploy credential in the gated environment
+  only. Verify at the provider that its effective authority covers only `baton` and
+  `baton.immediately.run/*`. Account-level Workers Scripts edit and zone-level Workers Routes
+  edit are not per-resource restrictions. If per-Worker or per-route scoping is unavailable,
+  do not claim this criterion is met: keep route management out of CI and isolate the Worker
+  in a dedicated account or use an independently enforced deployment boundary. Revoke the old
+  token after the cutover. Do not put production credentials in the fork.
+
+## Verify before cutover
+
+Run `node scripts/check-baton-deploy.mjs PATH_TO_CANDIDATE_YAML`. The checker flags direct
+production cache use and `npm ci`, implicit `setup-node` package-manager caching, and literal
+deploy-token references outside production. It does not inspect what actions or shell
+scripts do, prove artifact integrity, or read GitHub or Cloudflare settings. The current
+workflow is expected to fail this check.
+
+Run the drill on an owner-controlled fork with the same gate settings and an inert deploy
+step that records whether it reached the upload boundary. A push to `main` must run the
+suite without reaching that boundary. Dispatch without the human review (including a rejected
+review) must not reach it. A reviewed run should reach it only with the expected artifact;
+a missing or mismatched artifact must stop before the deploy step. Record the fork run URLs
+and the scope verification on B-135 before calling the cutover complete.

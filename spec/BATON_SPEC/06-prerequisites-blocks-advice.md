@@ -364,7 +364,6 @@ never refuses, and acting against it is accepted and recorded `advice-overridden
   | 2 | *(advice)* expedite lane: while 2 active claims hold expedited tickets, other expedited tickets lose their expedite place and carry `expedite-bound` | — | — |
   | 3 | No other active, completed-unconfirmed or fence-pending claim on the ticket; no hold (§6.8) | claim; advance: the hold only | `claimed`, `held` |
   | 4 | `capabilitiesOf(ticket.requires ∪ leg.requires.capabilities) ⊆ declared ∩ grant(repository)`, matched by name (R-BTN-174); `runner:` counts once declared (R-BTN-133); no clause is met by all | claim, advance | `missing-capability` |
-  | 5 | Tier at or below the runner's ceiling: the position in the repository's `tiers` of the lower of its declared ceiling and grant `max_tier`; untiered fits only the top | claim, advance | `above-tier-ceiling` |
   | 7 | The key holds a grant for the ticket's repository (R-BTN-58) | claim, advance | `not-granted` |
   | 8 | Tags meet none of the leg's posted barred tags, the owner bars in force for its course or `*` (at an advance those with `applies: claim+advance`) and, at an advance, the holder's `bars`; required bars met by posted bars joined with the holder's `bars` (R-BTN-60, R-BTN-67) | claim, advance | `barred-tag`; rule 8 `policy` |
   | 9 | The runner declares the course at `min_runner_version` or later (R-BTN-22, R-BTN-65) | claim | `stale-skills` |
@@ -375,7 +374,7 @@ never refuses, and acting against it is accepted and recorded `advice-overridden
   | `floor` | Every guarantee a floor names holds on every repository the ticket reaches: its home and each `repos:` entry with reach (R-BTN-140, R-BTN-189); the protection checker is exempt | claim, advance | `floor-broken` |
 
   Rules `chain` (R-BTN-106), `isolation` (R-BTN-107), `entry` (R-BTN-109) and `not-queued`
-  (R-BTN-72) are gates too; `trusted` is proposed (R-BTN-182). `isEligible`, in the vendored decision
+  (R-BTN-72) are gates too; `trusted` is proposed (R-BTN-182). `isEligible`, in the shared decision
   library (R-BTN-37), is the reference for every rule; the SQL is tested against it (G-BTN-40).
 
 - **Matching** reads only `tickets` and Baton's tables (R-BTN-33). Candidates are one row per

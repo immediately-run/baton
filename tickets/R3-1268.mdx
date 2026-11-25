@@ -3,7 +3,7 @@ title: "R3-1268 — Baton is self-sufficient: its agent workflow, shared modules
 id: R3-1268
 project: baton
 status: available
-updated: 2026-10-20
+updated: 2026-11-23
 repos:
   - baton
   - docs
@@ -15,10 +15,14 @@ description: "Nothing in immediately-run/baton needs docs: a baton-side workflow
 topics:
   - baton
 owns: {}
-prs: []
+prs:
+  - https://github.com/immediately-run/baton/pull/312
+  - https://github.com/immediately-run/docs/pull/234
 depends_on:
   - R3-1267
 ---
+
+**Owner ruling, 2026-11-23** (the owner: "Yes to both", on the question B-286 raised): **Baton owns `baton.mjs`** and the modules vendored with it. Finish this ticket's cutover so Baton is the source and docs keeps a pinned copy. B-286 (#379, merged) already moved the vendored files to `src/vendor/`, so rebase #312 over that move: the cutover now reverses the dependency of `src/vendor/`, R-BTN-37 and `scripts/vendor.mjs` as they stand on `main`, with docs#234 as the companion.
 
 **Brief:** [SELF-HOSTING](https://immediately.run/present/github/immediately-run/baton/main/bundle/docs/plans/self-hosting.mdx). The owner, 2026-10-16: no access to docs should
 be needed to understand how Baton works or what is being developed.

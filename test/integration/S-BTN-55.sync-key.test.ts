@@ -4,11 +4,11 @@
 // `conflict`; a machine key's — with `machine_sync` off, today the only kind (R3-1270 adds the
 // sync-on case) — and the mirror key's posts are `forbidden`; a revoked key's post and a replay are
 // `unauthenticated`; a runner key cannot become a sync key. Runs on both hosts.
+import { runnerAuth } from '../lib/runnerAuth';
 import { describe, it, expect, beforeEach } from 'vitest';
 import { HOST, ORIGIN, payload, rows, setClock, SSH_KEYS, withCore } from '../helpers';
 import { makeKey, signedRequest, type TestKey } from '../lib/sshKeys';
-import { call as hostCall } from '#host';
-import { Deprecated } from '../../src/core/deprecated';
+import { config, call as hostCall } from '#host';
 
 const T0 = Date.parse('2026-10-16T12:00:00Z');
 const PLAIN = { id: 'plain', github: 'server/plain', forge: 'git', remote: 'ssh://git@git.example/plain.git', default_branch: 'main' };
@@ -94,9 +94,7 @@ describe(`S-BTN-55 the sync key (${HOST})`, () => {
 
   it('a sync key is never a runner’s: BATON_KEYS refuses it, and the runner API does not know it', async () => {
     await withCore(async (c) => {
-      const { RunnerApi } = await import('../../src/core/runnerApi');
-      const config = (c as unknown as { ports: { config: object } }).ports.config;
-      const w = new RunnerApi({ store: c.store, deprecated: new Deprecated(c.store), config: { ...config, BATON_KEYS: JSON.stringify([{ key: sync.publicKey, name: 'x', allowed_capabilities: [] }]) } as never, now: () => T0 });
+      const w = runnerAuth({ store: c.store, config: { ...config, BATON_KEYS: JSON.stringify([{ key: sync.publicKey, name: 'x', allowed_capabilities: [] }]) }, now: () => T0 });
       await expect(w.seedKeys()).rejects.toThrow(/sync key/);
     });
     const res = await hostCall(await signedRequest(sync, `${ORIGIN}/v1/runner/branch-holder?repo=server/plain&branch=main`, { created: T0 / 1000 }));

@@ -3,7 +3,7 @@ title: "B-211 — Runner screens: /runners draws the mockup's runner cards with 
 id: B-211
 project: baton-ui-v2
 status: available
-updated: 2026-11-16
+updated: 2026-11-23
 repos:
   - baton
 tags:
@@ -49,8 +49,8 @@ an interactive SVG group carries its own accessible name.
    `repo.runners`, grouped by hostname as R-BTN-3 says (Decision 9a; the mockup's grouping by
    state is not followed), each host's cards in state order — working, silent (alive and
    `last_activity_at` over 2 hours old), idle, dead — with the state as each card's mark: the
-   name line (hostname and session name, the state mark and word, harness and kind, tier
-   ceiling, "last report n ago"), capability
+   name line (hostname and session name, the state mark and word, harness and kind, ~~tier
+   ceiling,~~ "last report n ago"), capability
    chips (granted ones marked), then the claim block from `claim` — ticket linking its page,
    leg, running for, the lease bar from `claimed_at` to `lease_ends_at` with now marked and
    minutes left, attempt n of `max_runs` with `next_backoff_until`, `log_dir` as text with the
@@ -122,3 +122,5 @@ one source)._
 
 _2026-11-16 — the executor fields §11.4 gained after this ticket was written (a2b0065) are drawn:
 the card's executor and each run's digest, environment and instance, as text; B-196 serves them._
+
+_2026-11-23 — tiers retired (spec/retire-tiers: [BATON_SPEC §6.6](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-6) gate 5, [R-BTN-66](../spec/BATON_SPEC/01-what-baton-is.md#sec-1)): the struck tier clauses are gone from the spec — no ticket tier, runner ceiling, grant `max_tier`, ladder, `ready_by_tier` or `?tier=`. Build the rest without them._

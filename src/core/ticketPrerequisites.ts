@@ -87,7 +87,7 @@ export class TicketPrerequisites {
   }
 
   /** Refresh the indexed edges from accepted ticket and course fields. */
-  // @model syncPost sha256:b3e27c5a6599
+  // @model syncPost sha256:7c0efc930fe7
   posted(repo: string): string[] {
     const files = new Map(this.rows<{ id: string; course_json: string }>('SELECT id, course_json FROM courses WHERE repository_id = ?', repo)
       .map((c) => [c.id, (JSON.parse(c.course_json) as { legs: Record<string, { requires?: { tickets?: TicketSelector[] } }> }).legs]));

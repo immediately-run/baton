@@ -32,6 +32,7 @@ import { batonTarget, fallbackNote, floorFor, parseKind, takeNumber } from './se
 import { hostOf, NAMED_FORGES, openRequestPr, protectedRefusal, requestForge, tokenOf, type PrForge } from './forge';
 import { remoteSlug, slugOfUrl } from './remote-slug';
 import { openRequestNumbers, requestBranch, requestHeads } from './request-branches';
+import { ticketCommitMessage } from './tickets';
 
 /** The most tries one request makes when the default branch moves under it, as
  *  scripts/ticket.mjs's transact does: a lost race is refetched and re-committed on the new head. */
@@ -124,6 +125,9 @@ const today = (): string => new Date().toISOString().slice(0, 10);
 /** The commit's subject: `<ID>: request — <first 60 characters of the sentence> — <course>`. */
 export const requestMessage = (id: string, course: string, sentence: string): string =>
   `${id}: request — ${sentence.slice(0, 60).trim()} — ${course}`;
+
+const requestCommitMessage = (subject: string, env = process.env): string =>
+  ticketCommitMessage(subject, env.TICKET_TRAILERS ?? '', env.TICKET_REQUIRE_TRAILERS === '1');
 
 /** A frontmatter value as the markdown source reads it back. `parseFrontmatter`'s `unquote` strips
  *  ONE surrounding pair of quotes and unescapes nothing, so a JSON-escaped value would come back
@@ -279,8 +283,8 @@ export interface RequestOptions {
   /** B-174: the forge whose adapter decides the protected-branch fallback (R-BTN-131) — the
    *  `--forge` flag. Unset, the origin's host decides (`github` on github.com; else none). */
   forge?: string;
-  /** The environment a forge credential is read from (`GITHUB_TOKEN` and its kin); the
-   *  process's own by default. */
+  /** The environment for provenance trailers and forge credentials (`GITHUB_TOKEN` and its
+   *  kin); the process's own by default. */
   env?: Record<string, string | undefined>;
   /** The fetch the PR-open call uses; the global one by default (the tests inject one). */
   fetchImpl?: typeof fetch;
@@ -338,7 +342,7 @@ export async function fileRequest(plan: RequestPlan, opts: RequestOptions = {}):
       // The ticket file alone: the worktree is a fresh checkout of the fetched head, so nothing
       // else in it is this request's to commit.
       git(dir, 'add', '--', `${atHead.items}/${id}.mdx`);
-      git(dir, 'commit', '-q', '-m', message);
+      git(dir, 'commit', '-q', '-m', requestCommitMessage(message, opts.env));
       try {
         git(dir, 'push', '-q', remote, `HEAD:refs/heads/${branch()}`);
         return { id, text, message, course: atHead.course, start: atHead.start, startLeg: atHead.startLeg };
@@ -408,7 +412,7 @@ async function fileOnRequestBranch(
     mkdirSync(dirname(moved), { recursive: true });
     writeFileSync(moved, requestFile(taken, atHead.course, plan.sentence, opts.tier, opts.date));
     git(dir, 'add', '--', `${atHead.items}/${taken}.mdx`);
-    git(dir, 'commit', '-q', '-m', requestMessage(taken, plan.course, plan.sentence));
+    git(dir, 'commit', '-q', '-m', requestCommitMessage(requestMessage(taken, plan.course, plan.sentence), opts.env));
   }
   const on = requestBranch(taken);
   try {

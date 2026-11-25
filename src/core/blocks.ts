@@ -9,6 +9,7 @@
 // serve it and list the repository — one set for every runner granted there (R-BTN-76, B-168).
 // Asking reads the rows: one index per question (G-BTN-70). No name a course gives a resource, an
 // capability or a decision means anything here: they are compared, never read.
+import { claimFleetSql } from './runnerLiveness';
 import { BatonError } from './http';
 import { logEvent } from './db';
 import { grantedKeySql, isGrantedKey, qualify, repositoryOf, RESOURCE_NAME, TICKET_ID } from './validate';
@@ -60,12 +61,12 @@ export interface Ctx {
   fits: (runnerId: number, ticketId: string) => boolean;
   /** R-BTN-80: a ticket's decisions were first stored, or closed — their notices follow, in the
    *  same transaction. */
-  decisions?: { opened: (ticket: string, ids: string[]) => void; closed: (ticket: string, ids: string[]) => void };
+  decisions: { opened: (ticket: string, ids: string[]) => void; closed: (ticket: string, ids: string[]) => void };
   /** R-BTN-81: a logged `blocked` or `unblocked` is a history row too. */
-  history?: History;
+  history: Pick<History, 'record'>;
   /** R-BTN-79: whatever is re-evaluated here — the queued leg, the course, the hold — is what
    *  moves a ticket between leg queues, in the same transaction (Queues.touch). */
-  queued?: (ticketId: string) => void;
+  queued: (ticketId: string) => void;
 }
 
 /** R-BTN-78: the decisions Baton raises itself, each `asks: owner` on the whole ticket, answered in
@@ -144,13 +145,6 @@ export const BLOCK_SQL = {
   /** A page of the repository's blocked tickets, through `tickets_blocked`. */
   page: 'SELECT id, blocked_since FROM tickets INDEXED BY tickets_blocked WHERE repository_id = ? AND blocked_since IS NOT NULL AND id > ? ORDER BY id LIMIT ?',
 } as const;
-
-/** The SQL test of a live runner (§5): alive, not reaped, its key in force. B-236: the lease is
- *  written `last_seen_at + lease_timeout_ms > now` — R-BTN-9's `now - last_seen_at < lease`,
- *  rearranged — so the live set is a range of `runners_live` and never a read of every runner
- *  session (R-BTN-3 keeps them all). A query ordering by `w.id` writes `+w.id`, which keeps
- *  the planner from walking the whole table in id order to save a sort of the few live ones. */
-const LIVE = `w.reaped_at IS NULL AND w.kind != 'legacy' AND w.last_seen_at + w.lease_timeout_ms > :now AND c.revoked_at IS NULL`;
 
 // Whole-ticket and leg-specific requirements share the same fleet counts.
 const CAPABILITY_NEEDS = `SELECT t.repository_id, t.id AS ticket_id, '' AS leg, r.name FROM tickets t JOIN ticket_requires r ON r.ticket_id = t.id
@@ -411,7 +405,7 @@ export class Blocks {
    *  that leg — a ticket with no queued leg (done, or placed nowhere) is not blocked; `blocked_since`
    *  follows, and its transitions are the `blocked` and `unblocked` events. */
   private evaluate(id: string, cleared: Cleared[], silent: boolean, since: number | null = null) {
-    this.c.queued?.(id);
+    this.c.queued(id);
     const t = this.rows<{ repository_id: string; blocked_since: number | null }>('SELECT repository_id, blocked_since FROM tickets WHERE id = ?', id)[0];
     if (!t) return;
     const queued = this.queuedLeg(id);
@@ -429,13 +423,13 @@ export class Blocks {
       if (!silent) {
         const blocks = blocking.map((b) => ({ kind: b.kind, ref: b.ref, ...(b.leg ? { leg: b.leg } : {}) }));
         logEvent(this.c.store, now, 'blocked', 'baton', { ticket: id, blocks }, id);
-        this.c.history?.record(id, { kind: 'blocked', detail: { blocks } });
+        this.c.history.record(id, { kind: 'blocked', detail: { blocks } });
       }
     } else if (!blocking.length && t.blocked_since != null) {
       this.exec(`UPDATE tickets SET blocked_since = NULL${silent ? '' : ', answer_lost = NULL'} WHERE id = ?`, id);
       if (!silent) {
         logEvent(this.c.store, now, 'unblocked', 'baton', { ticket: id, cleared }, id);
-        this.c.history?.record(id, { kind: 'unblocked', detail: { cleared } });
+        this.c.history.record(id, { kind: 'unblocked', detail: { cleared } });
         this.unblocked(t.repository_id, id, cleared);
       }
     }
@@ -447,7 +441,7 @@ export class Blocks {
     this.exec('DELETE FROM ticket_blocks WHERE ticket_id = ?', id);
     this.exec('DELETE FROM leg_needs WHERE ticket_id = ?', id);
     // Its decisions close with it, and so do their notices (R-BTN-80).
-    this.c.decisions?.closed(id, this.rows<{ decision_id: string }>('SELECT decision_id FROM ticket_decisions WHERE ticket_id = ?', id).map((d) => d.decision_id));
+    this.c.decisions.closed(id, this.rows<{ decision_id: string }>('SELECT decision_id FROM ticket_decisions WHERE ticket_id = ?', id).map((d) => d.decision_id));
     this.exec('DELETE FROM ticket_decisions WHERE ticket_id = ?', id);
   }
 
@@ -463,7 +457,7 @@ export class Blocks {
   raise(ticket: string, id: BatonDecision): boolean {
     if (this.hasDecision(ticket, id)) return false;
     this.exec(`INSERT INTO ticket_decisions (ticket_id, decision_id, leg, asks, url, source) VALUES (?, ?, '', 'owner', NULL, 'baton')`, ticket, id);
-    this.c.decisions?.opened(ticket, [id]);
+    this.c.decisions.opened(ticket, [id]);
     this.write([ticket], ['decision']);
     return true;
   }
@@ -473,7 +467,7 @@ export class Blocks {
   answer(ticket: string, id: BatonDecision): boolean {
     if (!this.hasDecision(ticket, id)) return false;
     this.exec(`DELETE FROM ticket_decisions WHERE ticket_id = ? AND decision_id = ? AND source = 'baton'`, ticket, id);
-    this.c.decisions?.closed(ticket, [id]);
+    this.c.decisions.closed(ticket, [id]);
     this.write([ticket], ['decision']);
     return true;
   }
@@ -495,7 +489,7 @@ export class Blocks {
   answerPosted(ticket: string, id: string, answer: string, owner: string, at: number): void {
     this.exec('INSERT INTO decision_answers (ticket_id, decision_id, answer, answered_by, answered_at) VALUES (?, ?, ?, ?, ?)', ticket, id, answer, owner, at);
     this.exec(`DELETE FROM ticket_decisions WHERE ticket_id = ? AND decision_id = ? AND source = 'sync'`, ticket, id);
-    this.c.decisions?.closed(ticket, [id]);
+    this.c.decisions.closed(ticket, [id]);
     this.write([ticket], ['decision']);
   }
 
@@ -633,8 +627,8 @@ export class Blocks {
         // leg or link changed is the same decision, and its notices read it afresh.
         const before = new Map(haveDecisions.map((d) => [d.decision_id, d.asks]));
         const after = new Map(decisions.map((d) => [d.id, d.asks]));
-        this.c.decisions?.closed(id, [...before].filter(([x, asks]) => after.get(x) !== asks).map(([x]) => x));
-        this.c.decisions?.opened(id, [...after].filter(([x, asks]) => before.get(x) !== asks).map(([x]) => x));
+        this.c.decisions.closed(id, [...before].filter(([x, asks]) => after.get(x) !== asks).map(([x]) => x));
+        this.c.decisions.opened(id, [...after].filter(([x, asks]) => before.get(x) !== asks).map(([x]) => x));
       }
       if (needsChanged || decisionsChanged) changed.push(id);
     }
@@ -666,9 +660,10 @@ export class Blocks {
     const entry = { ticket_id: ticket, cleared };
     // One pending `unblocked` message per alive, idle runner granted on the repository that the
     // ticket would now pass the gates for — updated in place, the oldest dropped past 20.
+    // ORDER BY +w.id lets the planner range-scan runners_live rather than walk every runner in id order.
     for (const w of this.named<{ id: number }>(
       `SELECT w.id FROM runners w JOIN credentials c ON c.id = w.credential_id
-       WHERE ${LIVE}
+       WHERE ${claimFleetSql(':now')}
          AND (SELECT COUNT(*) FROM claims k WHERE k.runner_id = w.id AND k.status = 'active') < w.concurrency  -- B-188: a runner with room, not only an idle one
          AND (NOT COALESCE(${grantedKeySql('c.created_by')}, 0) OR EXISTS (SELECT 1 FROM runner_grants g WHERE g.credential_id = w.credential_id AND g.repository_id = :repo AND g.revoked_at IS NULL))
        ORDER BY +w.id`, { now, repo })) {
@@ -717,7 +712,7 @@ export class Blocks {
   /** The alarm's share: a pending `unblocked` message whose runner stopped being alive expires. */
   expireMessages() {
     this.named(`UPDATE messages SET status = 'expired' WHERE kind = 'unblocked' AND status = 'pending'
-                AND to_runner_id NOT IN (SELECT w.id FROM runners w JOIN credentials c ON c.id = w.credential_id WHERE ${LIVE})`, { now: this.c.now() });
+                AND to_runner_id NOT IN (SELECT w.id FROM runners w JOIN credentials c ON c.id = w.credential_id WHERE ${claimFleetSql(':now')})`, { now: this.c.now() });
   }
 
   // ── the fleet counts (R-BTN-75, R-BTN-76) ─────────────────────────────────────────────────
@@ -727,7 +722,7 @@ export class Blocks {
     const now = this.c.now();
     const all = this.rows<{ id: string }>('SELECT id FROM repositories WHERE retired_at IS NULL').map((r) => r.id);
     return this.named<{ id: number; credential_id: string; created_by: string | null }>(
-      `SELECT w.id, w.credential_id, c.created_by, c.allowed_capabilities FROM runners w JOIN credentials c ON c.id = w.credential_id WHERE ${LIVE} AND (:only IS NULL OR w.id = :only) ORDER BY +w.id`, { now, only })
+      `SELECT w.id, w.credential_id, c.created_by, c.allowed_capabilities FROM runners w JOIN credentials c ON c.id = w.credential_id WHERE ${claimFleetSql(':now')} AND (:only IS NULL OR w.id = :only) ORDER BY +w.id`, { now, only })
       .map((w) => {
         // R-BTN-58: a key an owner or administrator granted works where it is granted; another
         // (a bearer token, a BATON_KEYS seed key) is bounded by its allow-list on every
@@ -869,7 +864,7 @@ export class Blocks {
    *  runners, never of the board). */
   liveChanged(): boolean {
     const now = this.c.now();
-    const ids = this.named<{ id: number }>(`SELECT w.id FROM runners w JOIN credentials c ON c.id = w.credential_id WHERE ${LIVE} ORDER BY +w.id`, { now }).map((w) => w.id);
+    const ids = this.named<{ id: number }>(`SELECT w.id FROM runners w JOIN credentials c ON c.id = w.credential_id WHERE ${claimFleetSql(':now')} ORDER BY +w.id`, { now }).map((w) => w.id);
     return this.rows<{ value: string }>(`SELECT value FROM baton_settings WHERE key = 'fleet_live'`)[0]?.value !== JSON.stringify(ids);
   }
 
@@ -1050,7 +1045,7 @@ export class Blocks {
     if (o?.retry_after != null && o.retry_after > now) other.push({ kind: 'backoff', detail: { retry_after: o.retry_after } });
     // Match the requested leg and use only the eligibility facts needed for the bar, not fleet holdings.
     for (const b of this.named<{ id: number; tag: string }>(`WITH eligible AS (
-      SELECT w.id FROM runners w JOIN credentials c ON c.id = w.credential_id WHERE ${LIVE}
+      SELECT w.id FROM runners w JOIN credentials c ON c.id = w.credential_id WHERE ${claimFleetSql(':now')}
       AND (:runner IS NULL OR w.id = :runner)
       AND (NOT COALESCE(${grantedKeySql('c.created_by')}, 0) OR EXISTS (
         SELECT 1 FROM runner_grants g WHERE g.credential_id = c.id AND g.repository_id = :repo AND g.revoked_at IS NULL))

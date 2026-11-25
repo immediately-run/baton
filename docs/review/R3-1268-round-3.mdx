@@ -1,0 +1,16 @@
+---
+title: R3-1268 review round 3
+description: Findings and disposition for the third review of Baton's standalone repository changes.
+---
+
+Reviewed [Baton #312](https://github.com/immediately-run/baton/pull/312) at `8c492624`
+and [docs #234](https://github.com/immediately-run/docs/pull/234) at `1885ba78`.
+The verdict was changes. The reviewer reported that hosted docs Verify, the pinned copy
+comparison and the sync dry-run passed; no live trial was run.
+
+| Finding | Disposition |
+|---|---|
+| [Multiline code and quoted fences can look like links](https://github.com/immediately-run/baton/pull/312#discussion_r4692870284) | Use the existing Markdown/MDX parser to identify real link nodes and exempt only their destination offsets when the target resolves into this checkout's documentation. Regressions cover multiline code spans, quoted fences, and identical paths in labels and titles. |
+| [Override-only course home](https://github.com/immediately-run/baton/pull/312#discussion_r4652087837) | Not implemented: R-BTN-134 requires the checked-in graph to match the source, and sync rejects it when missing. Removing it requires an owner-approved spec change and a compatible loader. |
+| [End-to-end drills](https://github.com/immediately-run/baton/pull/312#discussion_r4652087849) | Still unverified. Automated checks do not replace a standalone agent run. Record an isolated local trial and an operator-run production trial before closing this criterion. |
+| [Changelog preamble](https://github.com/immediately-run/baton/pull/312#discussion_r4652087857) | The fix leg cannot edit the shared changelog; the thread has wording for the release owner. |
