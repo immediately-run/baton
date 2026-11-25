@@ -39,7 +39,7 @@ const severityRank = (s: unknown): number => (s === 'critical' ? 0 : s === 'high
 interface ConditionRow {
   id: number;
   repository_id: string;
-  ticket_id: string;
+  ticket_id: string | null;
   claim_id: number | null;
   run_id: string | null;
   leg: string | null;
@@ -213,7 +213,7 @@ export const CONDITION_READS: ReadRoute[] = [
         `SELECT t.title, t.course_id, s.station, s.next_leg FROM tickets t LEFT JOIN ticket_stations s ON s.ticket_id = t.id WHERE t.id = ?`, row.ticket_id)[0] ?? null;
       // What its closing would let move: the tickets with a `ticket` block on the condition's
       // ticket (`ticket_blocks`) — no block names a condition itself.
-      const unblocks = row.outcome === 'open' ? cx.core.blocks.blockedOn(repository, { kind: 'ticket', ref: row.ticket_id }, false).tickets.map((t) => t.ticket_id) : [];
+      const unblocks = row.outcome === 'open' && row.ticket_id != null ? cx.core.blocks.blockedOn(repository, { kind: 'ticket', ref: row.ticket_id }, false).tickets.map((t) => t.ticket_id) : [];
       return {
         ...conditionOf(row, call.showInteractionLinks),
         repository,

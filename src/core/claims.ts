@@ -1898,7 +1898,7 @@ export class Claims {
     // R-BTN-202 (B-248): an end finishing a leg run under a local order records its provenance
     // on the end's event, as an advance does.
     const localOrder = e.local_order && finished ? { leg: this.runningLeg(c.id)?.leg ?? null, ...e.local_order } : null;
-    this.finish(c.id, c.ticket_id, e.status, e.end_reason, `runner:${runnerId}`, { ended_at_sha: e.ended_at_sha, detail: e.detail, reached, finished, evidence: e.ended_at_sha, next: e.next, localOrder });
+    this.finish(c.id, c.ticket_id, e.status, e.end_reason, `runner:${runnerId}`, { ended_at_sha: e.ended_at_sha, detail: e.detail, error: e.error, reached, finished, evidence: e.ended_at_sha, next: e.next, localOrder });
     return { ok: true, ...(sessionUrlDropped != null ? { session_url_dropped: sessionUrlDropped } : {}) };
   }
 
@@ -2112,7 +2112,7 @@ export class Claims {
    *  `from` (R-BTN-71), open activities close `abandoned` (§6.9), the resume record is written
    *  for every end (R-BTN-24), and the end is logged. */
   private finish(claimId: number, ticketId: string, status: 'completed' | 'released' | 'reaped', reason: string, actor: string,
-    opts: { ended_at_sha?: string | null; fence?: { incarnation: number; deadline?: number } | null; detail?: string | null; reached?: string | null; finished?: boolean; evidence?: string | null; next?: string | null; localOrder?: { leg: string | null; by: string; ran_at: string } | null } = {}) {
+    opts: { ended_at_sha?: string | null; fence?: { incarnation: number; deadline?: number } | null; detail?: string | null; error?: End['error']; reached?: string | null; finished?: boolean; evidence?: string | null; next?: string | null; localOrder?: { leg: string | null; by: string; ran_at: string } | null } = {}) {
     const now = this.c.now();
     const c = this.rows<{ station: string; runner_id: number; regressed_since: number | null }>('SELECT station, runner_id, regressed_since FROM claims WHERE id = ?', claimId)[0];
     const run = this.runningLeg(claimId);
@@ -2147,7 +2147,7 @@ export class Claims {
     // reaped incarnation may still be driving (R-BTN-19): those go at `fence-cleared` or the
     // fence deadline (the alarm's lapse, or `fenced`).
     if (!opts.fence) this.exec('DELETE FROM claim_seats WHERE claim_id = ?', claimId);
-    this.event(status, actor, { end_reason: reason, reached, ...(opts.detail ? { detail: opts.detail } : {}), ...(opts.ended_at_sha ? { ended_at_sha: opts.ended_at_sha } : {}), ...(opts.fence ? { fence_pending: true } : {}), ...(opts.localOrder ? { local_order: opts.localOrder } : {}) }, ticketId, claimId);
+    this.event(status, actor, { end_reason: reason, reached, ...(opts.detail ? { detail: opts.detail } : {}), ...(opts.error ? { error: opts.error } : {}), ...(opts.ended_at_sha ? { ended_at_sha: opts.ended_at_sha } : {}), ...(opts.fence ? { fence_pending: true } : {}), ...(opts.localOrder ? { local_order: opts.localOrder } : {}) }, ticketId, claimId);
     // §12: the mirror writes the end; R-BTN-73: every end dispatches a sync, which confirms a
     // completion (R-BTN-10) without waiting for an unrelated push and makes the ticket claimable.
     this.c.dispatch('mirror', ticketId);
@@ -2626,8 +2626,7 @@ export class Claims {
 
   /** `POST /v1/ui/board/accept`: the owner accepts a held history; the sync's next force post
    *  of it then becomes the head (§7.1). */
-  acceptHeld(owner: string, body: unknown) {
-    const { repository, sha } = checkAccept(body);
+  acceptHeld(owner: string, { repository, sha }: { repository: string; sha: string }) {
     const held = this.rows<{ accepted_at: number | null }>('SELECT accepted_at FROM held_snapshots WHERE repository_id = ? AND sha = ?', repository, sha)[0];
     if (!held) throw new BatonError('not-found', 'no such held history');
     if (held.accepted_at == null) {

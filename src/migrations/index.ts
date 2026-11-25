@@ -75,6 +75,7 @@ import accessSignIn from './0071_access_sign_in.sql';
 import sessionLinkSecrets from './0079_session_link_secrets.sql';
 import interactionDeliveryGrant from './0080_interaction_delivery_grant.sql';
 import sessionLinkIncarnation from './0081_session_link_incarnation.sql';
+import conditionRecords from './0085_condition_records.sql';
 import syncLimits from './0104_sync_limits.sql';
 import ticketPrerequisites from './0102_ticket_prerequisites.sql';
 import prerequisiteIdentityAndReady from './0103_prerequisite_identity_and_ready.sql';
@@ -235,6 +236,7 @@ export const MIGRATIONS: Migration[] = [
   { id: 80, sql: interactionDeliveryGrant },
   { id: 81, sql: sessionLinkIncarnation },
   { id: 82, sql: legTimeoutFence },
+  { id: 85, sql: conditionRecords },
   { id: 100, sql: legContracts },
   { id: 101, sql: pinnedContracts },
   { id: 104, sql: syncLimits },
