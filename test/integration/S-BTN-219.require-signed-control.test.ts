@@ -16,7 +16,7 @@ import { join } from 'node:path';
 import { call as hostCall } from '#host';
 import { BatonApi } from '../../src/runner/api';
 import { Runner } from '../../src/runner/runner';
-import { capabilitiesOf } from '../../src/vendor/vocabulary.mjs';
+import { capabilitiesOf } from '../../src/shared/vocabulary.mjs';
 import { initMain, parseSyncArgs, syncMain, type SyncArgs } from '../../src/defaults/cli';
 import { cutover, keyCall, ORIGIN, rows, setAdminKeys, setClock, syncToken, TOKENS } from '../helpers';
 import { makeKey, type TestKey } from '../lib/sshKeys';

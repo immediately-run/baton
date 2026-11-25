@@ -1,5 +1,5 @@
 // course.test.ts — R3-1231: the course file's rules (BATON_SPEC §2e R-BTN-69). The real
-// `roadmap-pr` file, vendored byte for byte from docs' .baton/ (scripts/vendor.mjs FIXTURES),
+// `roadmap-pr` file, captured as a test fixture,
 // passes; each rule has a file that breaks only it.
 import { describe, it, expect } from 'vitest';
 import roadmapPr from '../fixtures/courses/roadmap-pr/course.json';

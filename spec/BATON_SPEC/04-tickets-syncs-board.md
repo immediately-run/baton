@@ -103,7 +103,8 @@ numbers.
     Defaults are CLI code run in the sync, never core: `src/core/` may not import
     `src/defaults/`.
   - **The markdown source.** Every `*.md` or `*.mdx` under `items` (default `tickets/`) whose
-    frontmatter has an `id` is a ticket. It is **pinned**: a live ticket's `version` is its
+    frontmatter has an `id` and either omits `kind` or sets it to `ticket` is a ticket. It is
+    **pinned**: a live ticket's `version` is its
     file's blob id at the posted commit, its `key` is its `path`, and its `read` is that blob;
     a ticket whose file is not at the commit is posted with no version. Its frontmatter:
 

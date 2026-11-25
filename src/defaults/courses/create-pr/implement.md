@@ -32,6 +32,9 @@ declaring a capability you no longer hold.
 
 ## 1. Read before you write
 
+Read the home repository's workflow and rules (for example, `AGENTS.md` and `CLAUDE.md`,
+when present). Work only in the home and the code repositories the ticket names.
+
 - Read the whole ticket: what to build, the architecture it prescribes, the tests it names, its
   exit criteria. Those sections are the contract. Where the ticket prescribes a decision, take
   it; if you take another, say so under "Deviations" in the PR body.

@@ -55,8 +55,8 @@ resumed by a **restart** (§7). "Workflow" means only a CI workflow; "activity" 
   criteria, a PR list or other prose; the dashboard links each ticket that has a `path` to its
   file on the forge.
   - It may hold **pointers and digests, never content**: evidence pointers, input and output URIs
-    and digests (R-BTN-82, R-BTN-83), a leg run's log directory (R-BTN-128), session and
-    transcript pointers, and the credential id that answered a condition (R-BTN-163). A leg's
+    and digests (R-BTN-82, R-BTN-83), a leg run's log directory (R-BTN-128), session pointers (which may themselves be credentials, R-BTN-113), transcript pointers, and
+    the credential id that answered a condition (R-BTN-163). A leg's
     output never passes through Baton (R-BTN-128); the one inline output value is R-BTN-108's.
   - **Opaque blobs** are the other inline values, capped by §12.3: course fields and course data,
     profiles, reports, `rationale`, a reading's `detail`. Core never reads them, so it cannot stop
