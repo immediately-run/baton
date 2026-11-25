@@ -34,5 +34,6 @@
   "src/migrations/0124_eligibility_inputs.sql | INSERT OR | b7295d543b578e01": 2,
   "src/migrations/0124_eligibility_inputs.sql | rowid | b7295d543b578e01": 1,
   "src/migrations/0125_ready_requirements.sql | scalar MAX | 1bcc7200e09a13d3": 1,
+  "src/migrations/0126_ready_leg_blocks.sql | scalar MAX | 56a8604fe8ecc678": 1,
   "src/migrations/0140_insertion_order.sql | rowid | edf3f6980ea7e9b9": 4
 }
