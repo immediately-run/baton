@@ -510,6 +510,12 @@ export function seedInstanceState(fields: InstanceStateSeed): Promise<void> {
   return withCore((core) => insertFixture(core.store, 'instance_states', fields));
 }
 
+/** The instance's one settings row (id 1), as a fresh Baton holds it before an import (§4.8). */
+type InstanceSettingsSeed = { id: 1; link_hosts: string };
+export function seedInstanceSettings(fields: InstanceSettingsSeed): Promise<void> {
+  return withCore((core) => insertFixture(core.store, 'instance_settings', fields));
+}
+
 type LegQueueSeed = {
   repository_id: string; course_id: string; leg: string; depth: number; max_queue: number;
 };

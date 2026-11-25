@@ -8,7 +8,7 @@
 // tampered import and a second one refused. The unit half (the digest, the section list, the
 // pending rows) is test/unit/ownerState.test.ts.
 import { describe, it, expect, beforeEach } from 'vitest';
-import { adminSession, claimItem, course, cutover, Git, keyCall, makeApiKey, mirrorCall, placed, register, rows, setAdminKeys, setClock, setHumanKeys, sessionCall, withCore } from '../helpers';
+import { adminSession, claimItem, course, cutover, Git, keyCall, makeApiKey, mirrorCall, placed, register, rows, seedInstanceSettings, setAdminKeys, setClock, setHumanKeys, sessionCall, withCore } from '../helpers';
 import { makeKey, sshsig, type TestKey } from '../lib/sshKeys';
 import roadmapPr from '../fixtures/courses/roadmap-pr/course.json';
 import { SECTIONS } from '../../src/core/ownerState';
@@ -244,7 +244,7 @@ describe('S-BTN-50 owner state exported (R3-1258)', () => {
     // The import on the target (an empty Baton, fabricated by the wipe).
     await wipe();
     await setClock(T0 + 5 * 60_000);
-    await rows("INSERT INTO instance_settings (id, link_hosts) VALUES (1, '[]')");
+    await seedInstanceSettings({ id: 1, link_hosts: '[]' });
     expect((await adminPost('/v1/admin/import', { ...first, digest: '0'.repeat(64) })).json.code).toBe('invalid-params');
     expect((await adminPost('/v1/admin/import', first)).status).toBe(200);
     expect((await adminPost('/v1/admin/import', first)).json.code).toBe('conflict');
