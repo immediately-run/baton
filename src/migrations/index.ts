@@ -83,6 +83,7 @@ import runnerIdleRepositories from './0122_runner_idle_repositories.sql';
 import insertionOrder from './0140_insertion_order.sql';
 import eligibilityInputs from './0124_eligibility_inputs.sql';
 import readyRequirements from './0125_ready_requirements.sql';
+import readyLegBlocks from './0126_ready_leg_blocks.sql';
 import { isUniqueViolation, logEvent, mintRunId, type Random } from '../core/db';
 import type { Store } from '../core/ports';
 
@@ -245,5 +246,6 @@ export const MIGRATIONS: Migration[] = [
   { id: 140, sql: insertionOrder },
   { id: 124, sql: eligibilityInputs },
   { id: 125, sql: readyRequirements },
+  { id: 126, sql: readyLegBlocks },
   { id: 123, sql: leaseRecovery },
 ];
