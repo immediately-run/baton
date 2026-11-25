@@ -21,6 +21,11 @@ import type { LocalOrder, LocalQueue, WorkedLeg } from './queue';
 import type { RunnerOptions } from './runner';
 import type { Sidecar } from './sidecar';
 import { msg } from './log';
+import { checkLegOutputs, readLegInputs } from './contracts';
+import type { ResolvedInput } from '../core/contracts';
+import type { PointerReach } from '../core/contractPointers';
+
+const NO_REACH: PointerReach = { git: [], web: [], buckets: [] };
 
 const LEG_PROCESS = fileURLToPath(new URL('./legProcess.mjs', import.meta.url));
 /** B-234 (R-BTN-195, R-BTN-145): the default grace a released leg gets to take its safe point
@@ -93,11 +98,15 @@ interface PreparedClaim {
 }
 
 interface LegProgress {
+  reach: PointerReach;
+  resolvedInputs: ResolvedInput[];
   at: string;
   legName: string;
   nextLegs: NextLegs;
   gitPath: { leg: string; reached: string }[];
-  own: string[];
+  /** B-335 (R-BTN-63): the run's number as Baton's advance reply named it — the count its
+   *  `max_runs` check reads; null from a server that does not send it. */
+  run: number | null;
   runId: string | null;
   handoffUrl: string | null;
   resume: Record<string, any> | null;
@@ -108,7 +117,7 @@ interface LegProgress {
   ranCtx: Record<string, unknown> | null;
 }
 
-type LegOutcome = { kind: 'ok'; result: unknown } | { kind: 'crashed'; error: string } | { kind: 'missing' } | { kind: 'lease-lost' };
+type LegOutcome = { kind: 'contract-input'; detail: string | null } | { kind: 'ok'; result: unknown } | { kind: 'crashed'; error: string } | { kind: 'missing' } | { kind: 'lease-lost' };
 
 interface LegExecution {
   outcome: LegOutcome;
@@ -762,8 +771,8 @@ export class ClaimRun {
     const claimId = claim.claim_id as number;
     const ticket = claim.ticket_id as string;
     const { course } = prepared;
-    // §2e/R-BTN-63: the legs git evidences are every earlier attempt's, flattened; the claim's
-    // own legs are counted beside them when a leg's run number is taken.
+    // §2e/R-BTN-63: the legs git evidences are every earlier attempt's, flattened; each leg this
+    // claim finishes joins them (the advance trail), so a fallback run number counts them once.
     let gitPath = (claim.previous_attempts ?? []).flatMap((a: { legs?: { leg: string; reached: string | null }[] }) =>
       (a.legs ?? []).map((l) => ({ leg: l.leg, reached: l.reached ?? '' })));
     const handoffUrl = (claim.handoff_url ?? null) as string | null;
@@ -784,6 +793,8 @@ export class ClaimRun {
       this.o.log(`baton: ${ticket}'s reattached ${legName} runs on without its lock (R-BTN-178)`);
     }
     let runId: string | null = reattached?.runId ?? null;
+    let run: number | null = null;
+    let resolvedInputs: ResolvedInput[] = [];
     if (reattached) {
       this.legSeq = reattached.seq;
       const g = reattached.ctx.snapshot as { path?: { leg: string; reached: string }[]; next?: NextLegs } | undefined;
@@ -792,18 +803,22 @@ export class ClaimRun {
     } else {
       const firstAnswer = await this.advance(claimId, { leg: legName, ...this.runInputsReport(prepared.read) }, at);
       if ('settle' in firstAnswer) return await this.finish(claimId, firstAnswer.settle, null);
+      resolvedInputs = firstAnswer.inputs ?? [];
       at = firstAnswer.station ?? at;
       nextLegs = (firstAnswer.next ?? nextLegs) as NextLegs;
       advice = firstAnswer.advice ?? advice;
       // R-BTN-63 (B-185): the run's id, minted by Baton at the advance that started it.
       runId = typeof firstAnswer.run_id === 'string' ? firstAnswer.run_id : null;
+      // B-335: and its number, from Baton's own count.
+      run = typeof firstAnswer.run === 'number' ? firstAnswer.run : null;
       // §7.5 R-BTN-90 (B-234): the run's `claim_legs.seq`, likewise — the finishing
       // heartbeat's word when the script returns.
       this.legSeq = typeof firstAnswer.seq === 'number' ? firstAnswer.seq : null;
     }
     const state: LegProgress = {
-      gitPath, handoffUrl, resume, advice, legName, at, nextLegs, runId, resuming: reattached,
-      session: null, own: [], ranScript: null, ranCtx: null,
+      reach: claim.pointer_reach ?? NO_REACH, resolvedInputs,
+      gitPath, handoffUrl, resume, advice, legName, at, nextLegs, run, runId, resuming: reattached,
+      session: null, ranScript: null, ranCtx: null,
     };
     for (;;) {
       if (!state.resuming) {
@@ -864,13 +879,22 @@ export class ClaimRun {
     const claimId = claim.claim_id as number;
     const ticket = claim.ticket_id as string;
     const { course, scratch, signedControl, ticketFile } = prepared;
-    const { at, legName, nextLegs, own, gitPath, runId, handoffUrl, resume, advice, resuming } = state;
+    const { at, legName, nextLegs, gitPath, runId, handoffUrl, resume, advice, resuming } = state;
     // B-108: the leg's own start — its clock (the beat's liveness line) and a fresh drain.
     if (this.inflight) { this.inflight.leg = legName; this.inflight.legAt = this.o.now(); }
     this.legLineAt = null;
-    const run = resuming && typeof resuming.ctx.run === 'number' ? resuming.ctx.run : runNumber(course.graph, gitPath, legName, own);
-    own.push(legName);
+    // B-335 (R-BTN-63): Baton's number for the run; else git's runs, which already hold this
+    // claim's finished legs — counted once (the claim's own legs were once added again, so a
+    // claim's runs were numbered 1, 3, 5 and a stub's bound ran out at half its size).
+    const run = resuming && typeof resuming.ctx.run === 'number' ? resuming.ctx.run : state.run ?? runNumber(course.graph, gitPath, legName, []);
+    let inputs;
+    try {
+      inputs = resuming ? resuming.ctx.inputs : await readLegInputs(this.checkout, course, state.resolvedInputs, state.reach);
+    } catch (e) {
+      return { outcome: { kind: 'contract-input', detail: failureDetail(msg(e), this.legSecrets) }, pre: null, ctx: {}, script: null, run };
+    }
     const ctx: Record<string, unknown> = resuming ? resuming.ctx : {
+      inputs,
       ticket: { id: ticket, path: claim.path ?? null, home: this.o.repository, ...(typeof claim.version === 'string' && claim.version !== '' ? { version: claim.version } : {}), ...(ticketFile != null ? { file: ticketFile } : {}) },
       claim: { id: claimId, nonce: claim.nonce, station: at },
       leg: legName, run, ...(runId ? { run_id: runId } : {}),
@@ -952,7 +976,12 @@ export class ClaimRun {
       let closed: string | null | undefined = null;
       if (abort.signal === 'release' && outcome.kind === 'ok') {
         const verdict = decide(outcome.result, course.graph, legName, at);
-        if (!('bug' in verdict)) closed = await this.callClose(script, ctx, outcome.result);
+        if (!('bug' in verdict)) {
+          try {
+            await checkLegOutputs(this.checkout, course, legName, verdict.reached, (outcome.result as { outputs?: unknown }).outputs, state.reach, verdict.reached !== at || verdict.kind !== 'release');
+            closed = await this.callClose(script, ctx, outcome.result);
+          } catch { /* The delivered release stands, but invalid results do not close. */ }
+        }
         if (closed != null && !('bug' in verdict)) {
           reached = verdict.reached;
           // A leg that finished queues a leg leaving where it rests — the script's own word
@@ -963,6 +992,9 @@ export class ClaimRun {
       const reason = abort.reason ?? `suspended:${at}`;
       // A released end points at no evidence (§6.5); the marker close wrote is in git.
       return await this.finish(claimId, { end_reason: reason, reached, ...(next != null ? { next } : {}) }, await this.callHandoff(script, ctx));
+    }
+    if (outcome.kind === 'contract-input') {
+      return await this.finish(claimId, { end_reason: 'released:cannot-finish:contract-input', reached: at, next: legName, ...(outcome.detail ? { detail: outcome.detail } : {}) }, null);
     }
     if (outcome.kind === 'crashed') {
       // R-BTN-144 (B-170): the leg's own error text leaves masked — a provider-auth message
@@ -984,6 +1016,12 @@ export class ClaimRun {
     }
     // R-BTN-83: `close` writes the closing marker from the validated result before anything
     // is reported; a suspension or release follows with `handoff`, so it can cite the position.
+    try {
+      await checkLegOutputs(this.checkout, course, legName, verdict.reached, (result as { outputs?: unknown }).outputs, state.reach, verdict.reached !== at || verdict.kind !== 'release');
+    } catch (e) {
+      const detail = failureDetail(msg(e), this.legSecrets);
+      return await this.finish(claimId, { end_reason: 'released:cannot-finish:contract-output', reached: at, next: legName, ...(detail ? { detail } : {}) }, await this.callHandoff(script, ctx));
+    }
     const closed = pre ? pre.closed : await this.callClose(script, ctx, result);
     if (closed === undefined) {
       return await this.finish(claimId, { end_reason: 'released:cannot-finish:transient', reached: at, next: legName }, await this.callHandoff(script, ctx));
@@ -992,7 +1030,7 @@ export class ClaimRun {
       // A done end carries no hand-off (R-BTN-44 writes one for suspensions and releases);
       // the closing marker and the resume record are its record.
       const done = { end_reason: 'done', reached: verdict.reached, ...(verdict.detail ? { detail: verdict.detail } : {}), ...(verdict.outputs ? { outputs: verdict.outputs } : {}), ...(closed ? { ended_at_sha: closed } : {}) };
-      return await this.finish(claimId, done, null);
+      return await this.finish(claimId, done, null, () => this.callHandoff(script, ctx));
     }
     if (verdict.kind === 'suspend' || verdict.kind === 'release') {
       const reason = verdict.kind === 'suspend' ? `suspended:${verdict.reached}` : `released:${verdict.reason}`;
@@ -1023,7 +1061,7 @@ export class ClaimRun {
     const locked = await this.host.ensureLegLocks(this, verdict.leg, course);
     if (this.claimLost()) return await this.finish(claimId, { end_reason: 'released:lease-lost', reached: state.at, next: legName }, null);
     if (!locked) {
-      return await this.finish(claimId, { end_reason: `suspended:${verdict.reached}`, reached: verdict.reached, next: verdict.leg }, await this.callHandoff(script, ctx) ?? handoffUrl);
+      return await this.finish(claimId, { end_reason: `suspended:${verdict.reached}`, reached: verdict.reached, next: verdict.leg, outputs: verdict.outputs, ...(closed ? { ended_at_sha: closed } : {}) }, await this.callHandoff(script, ctx) ?? handoffUrl);
     }
     this.auditLeg();
     // R-BTN-113 (B-4): the advance that finishes the leg carries its session link beside the
@@ -1041,13 +1079,15 @@ export class ClaimRun {
     // queued, so a suspension or an odd end position reads as a trail, not a riddle. B-108:
     // a leg whose agent a bound concluded says so — the how-ended of the wait is the log's.
     const howEnded = typeof (result as { conclusion?: { cause?: unknown } } | null)?.conclusion?.cause === 'string' ? ` — the agent ${(result as { conclusion: { cause: string } }).conclusion.cause}` : '';
-    this.o.log(`baton: ${ticket}'s ${legName} finished: reached ${verdict.reached}, next ${'settle' in answer ? 'the end' : (answer.next?.[0]?.leg ?? verdict.leg)} (run ${run} of ${course.graph.legs.get(legName)?.maxRuns ?? 1})${howEnded}`);
+    this.o.log(`baton: ${ticket}'s ${legName} finished: reached ${verdict.reached}, next ${'settle' in answer ? 'the end' : verdict.leg} (run ${run} of ${course.graph.legs.get(legName)?.maxRuns ?? 1})${howEnded}`);
     if ('settle' in answer) return await this.finish(claimId, answer.settle, await this.callHandoff(script, ctx) ?? handoffUrl);
     state.gitPath = [...state.gitPath, { leg: legName, reached: verdict.reached }];
     state.at = answer.station ?? verdict.reached;
     state.nextLegs = answer.next ?? state.nextLegs;
     state.advice = answer.advice ?? state.advice;
+    state.resolvedInputs = answer.inputs ?? [];
     state.runId = typeof answer.run_id === 'string' ? answer.run_id : null;
+    state.run = typeof answer.run === 'number' ? answer.run : null;
     this.legSeq = typeof answer.seq === 'number' ? answer.seq : null;
     state.legName = verdict.leg;
     state.handoffUrl = null;
@@ -1083,9 +1123,9 @@ export class ClaimRun {
   }
 
   /** One `advance`, its refusal settled by §6.13: off-graph ends `released:course-changed`; an
-   * `entry` refusal (R-BTN-109) ends `released:cannot-finish:contract-output`; every other
-   * refusal suspends at the station the claim reached, never releasing. */
-  private async advance(claimId: number, body: { leg: string; reached?: string; bars?: string[]; evidence?: string; outputs?: unknown[]; run_inputs?: { ticket?: { version: string; read_digest: string }; inputs: unknown[] }; head_sha?: string | null; session_url?: string; local_order?: { by: string; ran_at: string } }, fallbackStation: string): Promise<{ station?: string; next?: NextLegs; advice?: unknown; run_id?: string; seq?: number } | { settle: Record<string, unknown> }> {
+   * `entry` refusal (R-BTN-109) ends `released:cannot-finish:contract-output`; a delivered
+   * deadline ends `released:leg-timeout` (R-BTN-90); other refusals suspend. */
+  private async advance(claimId: number, body: { leg: string; reached?: string; bars?: string[]; evidence?: string; outputs?: unknown[]; run_inputs?: { ticket?: { version: string; read_digest: string }; inputs: unknown[] }; head_sha?: string | null; session_url?: string; local_order?: { by: string; ran_at: string } }, fallbackStation: string): Promise<{ station?: string; next?: NextLegs; advice?: unknown; run_id?: string; run?: number; seq?: number; inputs?: ResolvedInput[] } | { settle: Record<string, unknown> }> {
     // R-BTN-202 (B-248): the advance that finishes a leg run under a local order says who gave
     // it — once; a refused advance's settling end carries it instead (`finish`).
     if (this.localOrder && body.reached) {
@@ -1094,9 +1134,10 @@ export class ClaimRun {
     try {
       const answer = await this.o.api.advance(claimId, body);
       if (body.local_order) this.localOrder = null;
-      return answer as { station?: string; next?: NextLegs; advice?: unknown; run_id?: string; seq?: number };
+      return answer as { station?: string; next?: NextLegs; advice?: unknown; run_id?: string; run?: number; seq?: number; inputs?: ResolvedInput[] };
     } catch (e) {
       if (!(e instanceof BatonRefusal)) throw e;
+      if (e.ruleCode === 'leg-timeout') return { settle: { end_reason: 'released:leg-timeout' } };
       const kind = refusalKind(e.ruleCode);
       if (kind === 'course-changed') {
         return { settle: { end_reason: 'released:course-changed', reached: body.reached ?? fallbackStation, ...(body.leg ? { next: body.leg } : {}) } };
@@ -1105,7 +1146,7 @@ export class ClaimRun {
       if (kind === 'contract-output') return { settle: { end_reason: 'released:cannot-finish:contract-output' } };
       // The suspension arrives where the advance would have (R-BTN-109): its outputs go with it,
       // so a refusal for any other reason still suspends rather than failing the entry (3-r3-2).
-      return { settle: { end_reason: `suspended:${body.reached ?? fallbackStation}`, reached: body.reached ?? fallbackStation, next: body.leg, ...(body.outputs ? { outputs: body.outputs } : {}) } };
+      return { settle: { end_reason: `suspended:${body.reached ?? fallbackStation}`, reached: body.reached ?? fallbackStation, next: body.leg, ...(body.outputs ? { outputs: body.outputs } : {}), ...(body.evidence ? { ended_at_sha: body.evidence } : {}) } };
     }
   }
 
@@ -1249,7 +1290,11 @@ export class ClaimRun {
       return { kind: 'lease-lost' };
     }
     if (this.o.verbose) this.o.log(`baton: ${leg} runs: node ${basename(LEG_PROCESS)} run ${basename(script)} (session ${sessionId}, executor ${this.executor.source})`);
-    const running = this.wrapperCall(handle, 'run', script, [ctx], undefined, () => sink);
+    // The stub cannot observe a pending harness question or its answer (R-BTN-195).
+    // Give it potential eligibility: a cadence beat can still land the link if startup failed.
+    // The actual raise is checked separately against the link Baton already holds.
+    const canInteract = channel != null && checkRaise('interact', course.graph?.conditionTypes ?? new Map(), this.raisePolicy(course, leg, this.legSessionUrl)).ok;
+    const running = this.wrapperCall(handle, 'run', script, [{ ...ctx, can_interact: canInteract }], undefined, () => sink);
     return await this.awaitLeg(leg, handle, channel, running, sink);
   }
 
@@ -1410,6 +1455,17 @@ export class ClaimRun {
     return { kind: 'ok', result };
   }
 
+  // By default, check what Baton holds, not just what the executor's handle names.
+  private raisePolicy(course: CourseLoad, leg: string, sessionUrl = this.sessionLinkLanded ? this.legSessionUrl : null) {
+    const def = course.graph?.legs.get(leg);
+    return {
+      conditions: def?.conditionTypes ?? null,
+      autonomous: def?.autonomous === true,
+      deadlineS: def?.maxDuration ?? null,
+      sessionUrl,
+    };
+  }
+
   /**
    * B-234 (R-BTN-160, R-BTN-195): one request off the leg run's channel. `raise` is checked as
    * the runner checks a move — on the facts of the leg and its run, from the claim's snapshot —
@@ -1427,19 +1483,8 @@ export class ClaimRun {
     const subject = typeof req.subject === 'string' ? req.subject : '';
     if (subject.trim() === '') return { ok: false, error: 'a raise carries a subject (--subject, R-BTN-160)' };
     const type = typeof req.type === 'string' ? req.type : '';
-    const def = course.graph?.legs.get(leg);
     const declared: Map<string, ConditionDeclaration> = course.graph?.conditionTypes ?? new Map();
-    const verdict = checkRaise(type, declared, {
-      conditions: def?.conditionTypes ?? null,
-      autonomous: def?.autonomous === true,
-      deadlineS: def?.maxDuration ?? null,
-      // R-BTN-113/R-BTN-195: the link BATON holds for this run — the handle's once a beat
-      // carrying it answered, never the handle's alone. Baton sets an `interact`'s url from
-      // the link it holds, so a raise reported before the beat landed it would be refused BY
-      // Baton (`invalid-params`) instead of on this channel, its reason never reaching the
-      // leg — the one refusal R-BTN-195 gives the channel.
-      sessionUrl: this.sessionLinkLanded ? this.legSessionUrl : null,
-    });
+    const verdict = checkRaise(type, declared, this.raisePolicy(course, leg));
     if (!verdict.ok) {
       this.o.log(`baton: ${ticket}'s ${leg} raise of ${type || '(none)'} was refused on the channel: ${verdict.reason}`);
       return { ok: false, error: verdict.reason };
@@ -1529,7 +1574,8 @@ export class ClaimRun {
   /** End the claim, clear the local claim state, and ack what the sidecar delivered. The local
    * flags clear whatever the wire said — a lost lease belongs to the claim that lost it — and an
    * end the network ate is parked and retried on every beat until Baton answers. */
-  private async finish(claimId: number, body: Record<string, unknown>, handoff: string | null): Promise<ClaimOutcome> {
+  private async finish(claimId: number, body: Record<string, unknown>, handoff: string | null,
+    timeoutHandoff?: () => Promise<string | null>): Promise<ClaimOutcome> {
     // A fence may land while a hook is already in flight. Do not report its result.
     if (this.claimLost() && body.end_reason !== 'released:lease-lost') {
       body = { end_reason: 'released:lease-lost', ...(this.inflight?.leg ? { next: this.inflight.leg } : {}) };
@@ -1564,11 +1610,17 @@ export class ClaimRun {
         // transport failure, or the orphan path would re-end the claim with another reason.
         this.o.log(`baton: the end of ${ticket} did not reach Baton (${e.message}) — retried on every beat`);
         this.sidecar.parkEnd(claimId, body);
+      } else if (e instanceof BatonRefusal && e.ruleCode === 'leg-timeout' && body.end_reason !== 'released:leg-timeout') {
+        // Delivery may win even after close, without the heartbeat reply reaching us yet.
+        // Keep the audit and provenance, but do not report the refused leg outcome.
+        const { scope_exceeded, local_order } = body;
+        return await this.finish(claimId, { end_reason: 'released:leg-timeout', scope_exceeded, local_order },
+          timeoutHandoff ? await timeoutHandoff() : handoff);
       } else if (e instanceof BatonRefusal && refusalKind(e.ruleCode) === 'contract-output' && !String(body.end_reason).startsWith('released:')) {
         // R-BTN-109: a completed end whose outputs fail its station's entry gives the leg up, as
         // a refused advance does — an output contract failure (R-BTN-82).
         this.o.log(`baton: ${ticket}'s outputs do not meet its arrival (${e.message}) — the leg is given up`);
-        return await this.finish(claimId, { end_reason: 'released:cannot-finish:contract-output' }, handoff);
+        return await this.finish(claimId, { end_reason: 'released:cannot-finish:contract-output' }, handoff, timeoutHandoff);
       } else if (e instanceof BatonRefusal) {
         throw e;
       } else {
@@ -1627,6 +1679,12 @@ export class ClaimRun {
       if ('bug' in verdict) {
         q.dropOrder(ticket);
         this.o.log(`baton: ${ticket}'s offline ${leg} script bug: ${maskLegOutput(verdict.why, this.legSecrets)} — the order is dropped (R-BTN-202)`);
+        return;
+      }
+      const outputs = (outcome.result as { outputs?: unknown }).outputs;
+      if (outputs != null && (!Array.isArray(outputs) || outputs.length !== 0)) {
+        q.dropOrder(ticket);
+        this.o.log(`baton: ${ticket}'s offline ${leg} returned outputs; no closing evidence was written (R-BTN-82)`);
         return;
       }
       const closed = await this.callClose(course.scripts.get(leg) ?? null, ctx, outcome.result);

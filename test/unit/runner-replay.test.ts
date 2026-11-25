@@ -1,3 +1,4 @@
+import { verifiedArtifactBase } from '../../src/runner/contracts';
 // runner-replay.test.ts — `baton leg replay`'s pure half (BATON_SPEC §9.8 R-BTN-84; B-190): the
 // flags (unknown ones refused, never dropped), which run the flags name (by number, by id, the
 // newest), R-BTN-144's replay environment (the allowlist — nothing of the runner's own keeps),
@@ -5,7 +6,7 @@
 // read at its version agrees), and a `git:` pointer's slug. The advance's `run_inputs` shape
 // (§13.5 `leg_run_inputs`) is checked beside checkAdvance's; the whole replay runs in
 // S-BTN-48's integration test, over a real repository.
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { compareRead, parseReplayArgs, pickRun, replayEnvironment, replayMain, slugOf, type RecordedRun } from '../../src/runner/replay';
 import { checkAdvance, checkRunInputs } from '../../src/core/validate';
 import { graphOf } from '../../src/core/graph';
@@ -132,4 +133,18 @@ describe('graphOf: a leg\'s replay_safe', () => {
     expect(g.legs.get('implement')?.replaySafe).toBe(true);
     expect(g.legs.get('fix')?.replaySafe).toBe(false);
   });
+});
+
+it('S-BTN-48: follows a repository rename by immutable ID, never a changed owner', async () => {
+  const get = vi.fn().mockResolvedValueOnce(Response.json({ id: 123, owner: { id: 456 }, full_name: 'owner/renamed' }))
+    .mockResolvedValueOnce(Response.json({ id: 123, owner: { id: 999 }, full_name: 'other/repo' }));
+  vi.stubGlobal('fetch', get);
+  try {
+    const identity = { forge: 'github' as const, host: 'github.com', web_base: 'https://github.com/owner/repo', repo_id: '123', owner_id: '456' };
+    await expect(verifiedArtifactBase(identity)).resolves.toBe('https://github.com/owner/renamed');
+    expect(get).toHaveBeenCalledWith('https://api.github.com/repositories/123', expect.objectContaining({ redirect: 'error' }));
+    await expect(verifiedArtifactBase(identity)).rejects.toThrow(/does not match/);
+  } finally {
+    vi.unstubAllGlobals();
+  }
 });

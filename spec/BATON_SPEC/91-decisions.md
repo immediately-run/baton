@@ -184,7 +184,7 @@ One line per decision in force; the reasoning and the rejected alternatives in f
 - Chose the dashboard as a walk down the entity tree, one entity per screen, its controls the registry actions `ui.view` places there, over standalone console screens (R-BTN-129, §11.4).
 - Chose React and TypeScript with a build step, one bundle loading nothing from another origin, over a dependency-free dashboard (§12.3, §11.4).
 - Chose a session's controls narrower than the CLI's: the tenant screens read-only, `ticket.route` and `ticket.adopt` the CLI's, Stop one click (R-BTN-155, R-BTN-83, R-BTN-39, §11.4).
-- Chose `baton ticket new` PR-first, the filing branch asked of the forge before any push to the default branch, `--direct` keeping the push (R-BTN-74, R-BTN-199).
+- Chose Dibber for every write of a ticket file, Baton's CLI keeping `next` (the numbers, as Dibber's coordinator) and the read-only `check`, over Baton's own `new`, `claim`, `set` and `done` (R-BTN-74, R-BTN-199).
 - Chose a person joining the leg's own agent session, asked by an `interact` condition, over pausing or answering such requests in Baton (R-BTN-195, R-BTN-69, R-BTN-107).
 - Chose a floor and a recommendation of client versions, stated on every response, over a single required version or an auto-updating CLI (R-BTN-197).
 - Chose to keep a failed leg's last output, shown and never read, over keeping nothing or parsing it to choose the end (R-BTN-131, §9.4).

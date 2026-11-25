@@ -45,12 +45,12 @@ This ticket builds it.
 preamble and [§12.1](../spec/BATON_SPEC/12-security.md#sec-12-1), [§10](../spec/BATON_SPEC/10-checks.md#sec-10) ([R-BTN-114](../spec/BATON_SPEC/10-checks.md#sec-10), [R-BTN-115](../spec/BATON_SPEC/10-checks.md#sec-10)),
 [§8.1](../spec/BATON_SPEC/08-runners.md#sec-8-1)–[§8.5](../spec/BATON_SPEC/08-runners.md#sec-8-5)
 ([R-BTN-102](../spec/BATON_SPEC/08-runners.md#sec-8-2), [R-BTN-106](../spec/BATON_SPEC/08-runners.md#sec-8-3), [R-BTN-128](../spec/BATON_SPEC/08-runners.md#sec-8-5), [R-BTN-143](../spec/BATON_SPEC/08-runners.md#sec-8-4), [R-BTN-144](../spec/BATON_SPEC/08-runners.md#sec-8-4), [R-BTN-146](../spec/BATON_SPEC/08-runners.md#sec-8-2)), [§3](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3)
-([R-BTN-93](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-2)), [§2](../spec/BATON_SPEC/02-deployments.md#sec-2) (R-BTN-137),
+([R-BTN-93](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-2)), [§2](../spec/BATON_SPEC/02-deployments.md#sec-2) ([R-BTN-137](../spec/BATON_SPEC/02-deployments.md#sec-2-2)),
 [§6](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6) (rule `floor`, rule 4, readings),
 [§7](../spec/BATON_SPEC/07-conditions.md#sec-7) ([R-BTN-171](../spec/BATON_SPEC/07-conditions.md#sec-7-8)), [§13](../spec/BATON_SPEC/13-data-model.md#sec-13), [§14](../spec/BATON_SPEC/14-api.md#sec-14), [§15](../spec/BATON_SPEC/15-verification.md#sec-15), [Decisions](../spec/BATON_SPEC/91-decisions.md); `docs/security-model.mdx`.
-**Depends on:** B-184 (the executor, R-BTN-107: repository code runs only through it; item 5
+**Depends on:** B-184 (the executor, [R-BTN-107](../spec/BATON_SPEC/08-runners.md#sec-8-3): repository code runs only through it; item 5
 adds to its brief). B-187 is superseded (2026-11-20) and no longer a dependency.
-**Coordinates with:** B-293 (baton#337), which brings `src/core/policy.ts` to §12.8's table:
+**Coordinates with:** B-293 (baton#337), which brings `src/core/policy.ts` to [§12.8](../spec/BATON_SPEC/12-security.md#sec-12-8)'s table:
 whichever lands second rebases on the other, and B-293's projection of a stored legacy document
 drops every knob item 1 retires, translating none of them (items 1–2).
 **Used by:** FIELDHOUSE_SPEC §5 (R-FH-80, R-FH-83, R-FH-86): Fieldhouse confines a leg with

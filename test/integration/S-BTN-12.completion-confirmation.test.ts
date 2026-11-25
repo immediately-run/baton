@@ -3,7 +3,7 @@
 // the never-landed one is flagged at 6 h and never re-issued. The sync is the real decision code
 // (scripts/lib/batonSync.mjs, vendored) over the fixture repository's real ancestry.
 import { describe, it, expect, inject, beforeEach } from 'vitest';
-import { syncOnce } from '../../src/vendor/batonSync.mjs';
+import { syncOnce } from '../../src/shared/batonSync.mjs';
 import { claimItem, claimRow, cutover, endClaim, observe, ownerCall, payload, register, setClock, syncCall , tick, stateView } from '../helpers';
 
 const board = inject('board');

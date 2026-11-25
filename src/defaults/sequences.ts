@@ -199,6 +199,11 @@ export const fallbackNote = (why: string): string => `id by the next-free scan �
  * printed with its source named is the command's whole answer. A remote that cannot be read
  * throws instead (value 1: no floor means no number worth printing, from Baton or the scan
  * alike).
+ *
+ * `--coordinator` (B-326) is the command `.dibber/config.json` names: it prints the number alone,
+ * and Baton's answer or nothing — a key, a repository or a Baton that cannot answer refuses
+ * (exit 2) instead of falling back to the scan, so `dibber new` refuses too and only its own
+ * `--offline` files from a scan (R-BTN-199).
  */
 export async function nextMain(argv: string[], io: { root?: string; log?: (line: string) => void; warn?: (line: string) => void; identity?: string; url?: string; offline?: boolean; remote?: string; fetchImpl?: typeof fetch } = {}): Promise<number> {
   const log = io.log ?? ((l: string) => process.stdout.write(`${l}\n`));
@@ -206,6 +211,7 @@ export async function nextMain(argv: string[], io: { root?: string; log?: (line:
   let root = io.root ?? process.env.BATON_HOME ?? process.cwd();
   let kind = '';
   let forTicket: string | null = null;
+  let coordinator = false;
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const value = (): string => {
@@ -219,13 +225,15 @@ export async function nextMain(argv: string[], io: { root?: string; log?: (line:
     else if (a === '--offline') io.offline = true;
     else if (a === '--remote') io.remote = value();
     else if (a === '--for') forTicket = value();
+    else if (a === '--coordinator') coordinator = true;
     else if (a === '--help' || a === '-h') {
-      log('baton tickets next <kind> [--for <ticket>] [-i KEY] [--url URL] [--remote R] [--offline]');
+      log('baton tickets next <kind> [--for <ticket>] [-i KEY] [--url URL] [--remote R] [--offline | --coordinator]');
       log('  rule | scenario | gate | migration | ticket[-<prefix>] — the next number of that');
       log('  sequence, taken from Baton with the floor this checkout sees (the default branch and');
       log('  every open branch). --offline and an unanswered Baton print the next free number by');
       log('  the scan and say so. --for names the ticket the number is for, recorded with the take.');
       log('  A remote that cannot be read is refused: no floor means no number worth printing.');
+      log('  --coordinator prints Baton\'s number alone, or refuses: Dibber\'s coordinator command (B-326).');
       return 0;
     } else if (a.startsWith('-')) throw new Error(`${a}: not a flag of baton tickets next`);
     else if (kind === '') kind = a;
@@ -234,6 +242,7 @@ export async function nextMain(argv: string[], io: { root?: string; log?: (line:
   if (kind === '') throw new Error('baton tickets next <kind> — rule, scenario, gate, migration, ticket[-<prefix>]');
   if (forTicket != null && !/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(forTicket)) throw new Error(`--for ${forTicket}: not a ticket id of this repository`);
   const parsed = parseKind(kind, root);
+  if (coordinator && io.offline) throw new Error('--coordinator answers with Baton\'s number or not at all — drop --offline (Dibber\'s own `new --offline` is the scan)');
   const remote = io.remote ?? 'origin';
   // A dead or unreachable origin throws here: no floor means no number worth printing, from
   // Baton or the scan alike (value 1: the scan scanned nothing, and a fresh Baton seeded by 0
@@ -244,12 +253,15 @@ export async function nextMain(argv: string[], io: { root?: string; log?: (line:
     if (target.keyFile != null && target.repository != null) {
       try {
         const took = await takeNumber({ url: target.url, keyFile: target.keyFile, repository: target.repository, kind: parsed.kind, floor, ...(forTicket != null ? { forTicket } : {}), ...(io.fetchImpl ? { fetchImpl: io.fetchImpl } : {}) });
-        log(`✓ ${parsed.kind}: ${printOf(parsed, took.number)} (Baton's sequence, floor ${floor})`);
+        if (coordinator) log(String(took.number));
+        else log(`✓ ${parsed.kind}: ${printOf(parsed, took.number)} (Baton's sequence, floor ${floor})`);
         return 0;
       } catch (e) {
+        if (coordinator) throw new Error(`${parsed.kind}: Baton did not hand out a number (${e instanceof Error ? e.message : String(e)}) — the coordinator answers with Baton's number or not at all`);
         warn(`… ${fallbackNote(e instanceof Error ? e.message : String(e))}`);
       }
     } else {
+      if (coordinator) throw new Error(`${parsed.kind}: ${target.keyFile == null ? 'no key: pass -i KEY (or set BATON_KEY_FILE)' : 'this checkout names no Baton repository'} — the coordinator answers with Baton's number or not at all`);
       warn(`… ${fallbackNote(target.keyFile == null ? 'no key: pass -i KEY (or set BATON_KEY_FILE)' : 'this checkout names no Baton repository')}`);
     }
   } else {

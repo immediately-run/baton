@@ -181,8 +181,8 @@ for the operator's recovery steps.
 
 ### 1. Code execution on every runner that serves the home
 
-**Superseded where the deployment keeps BATON_SPEC §12.8's duty (B-189, the owner, 2026-11-24).**
-A runner is now trusted and runs repository code only through its executor (R-BTN-107); where the
+**Superseded where the deployment keeps [BATON_SPEC §12.8](../spec/BATON_SPEC/12-security.md#sec-12-8)'s duty (B-189, the owner, 2026-11-24).**
+A runner is now trusted and runs repository code only through its executor ([R-BTN-107](../spec/BATON_SPEC/08-runners.md#sec-8-3)); where the
 deployment keeps that code out of the runner's trust boundary and gives each leg only credentials
 confined to its claim, one push runs code in the next legs' own environments, which hold no runner
 key, no merge credential and no forge reach past the claim. What follows is reach 1 as it stands
@@ -332,10 +332,10 @@ git holds: markers, ticket records, changelogs.
 
 Any runner's machine key can post its repository's board (R-BTN-102), and under the `builtin`
 executor any leg can read its runner's key file (R-BTN-14, R-BTN-107); where the deployment keeps
-BATON_SPEC §12.8's duty, no leg reaches the key and this reach is a compromised runner's, which
+[BATON_SPEC §12.8](../spec/BATON_SPEC/12-security.md#sec-12-8)'s duty, no leg reaches the key and this reach is a compromised runner's, which
 no guarantee covers (B-189). Baton never reads
 repository content itself, so what a board post says is what Baton believes. A compromised leg
-can post a board that marks its own verdicts and approvals trusted (R-BTN-139's marking runs in
+can post a board that marks its own verdicts and approvals trusted ([R-BTN-139](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-4)'s marking runs in
 the CLI), reports no control change (so G and B-126 stay silent), and names an older commit as
 the one runners load (a rollback). B-127's signature check, as first specified, ran in that
 same sync. None of this needs a push. B-137 moves what Baton must trust (changed paths, signatures) to the server and the runners.
@@ -489,7 +489,7 @@ credentials.
 
 Since B-189 (the owner, 2026-11-24) a runner is trusted: a deployment keeps repository code out
 of its trust boundary and gives each leg only credentials confined to its claim (BATON_SPEC
-§12.8), and nothing in Baton guards against a compromised runner. The options that served only
+[§12.8](../spec/BATON_SPEC/12-security.md#sec-12-8)), and nothing in Baton guards against a compromised runner. The options that served only
 that (4, 5, 8, 16, and the runner half of 3) are marked superseded; 17 is now part of the duty; the rest keep their
 value against pushers, legs and owner sessions.
 
@@ -513,7 +513,7 @@ The options, cheapest first; 9 to 13 cover a privileged session reading what a r
 | 14 | Baton's production deploy is a human act: a signed tag or a human-only approval, a scoped Cloudflare token, no secret in the build job | a day | closes reach 0 | B-135 |
 | 15 | A human-only identity: a touch-required hardware signing key, an approval account no session holds, sessions on an identity of their own | a hardware key and an account | makes every owner gate on this page a human gate; without it, reach 3 passes them all | B-136 |
 | 16 | Board posts: `machine` out of the policy's `inputs.board` below the human level, changed paths and signatures computed server-side, per-key limits | a Baton ticket; the setting today | closes reaches 7 and 8 | B-137; the `machine` half superseded by B-189 (a machine key posts the board as any sync credential does); per-key limits kept |
-| 17 | Owners, administrators and runners run a pinned released CLI, never a working tree | a day | closes the owner-key path in reach 1 | B-138; since B-189 also part of BATON_SPEC §12.8's duty: a runner runs no CLI from a checkout it serves |
+| 17 | Owners, administrators and runners run a pinned released CLI, never a working tree | a day | closes the owner-key path in reach 1 | B-138; since B-189 also part of [BATON_SPEC §12.8](../spec/BATON_SPEC/12-security.md#sec-12-8)'s duty: a runner runs no CLI from a checkout it serves |
 | 18 | Owner session transcripts masked before archiving and readable at the human level only | a day | closes a credential crossing downward | FLDH-38 |
 | 19 | Sourced courses run from their source: homes refer to Baton's legs instead of copying them; the sync refuses copies; runners never run a home's copy | a Baton ticket; a prune per home | removes the leg scripts from reach 1, leaving `baton.json`, the overrides and the instructions | B-139 |
 | 20 | The merge runner: only it updates the default branch, by deterministic criteria at the exact approved head, tickets only with a human approval, never a control path (humans land those, outside Baton, for now); customisable per course | a Baton ticket; one protected-branch setting per repository | the core guarantee on every forge and on plain git; closes reaches 1 (configuration), 3 against runners, 4, 5 and 6 on the default branch | B-140 |

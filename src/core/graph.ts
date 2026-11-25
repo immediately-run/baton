@@ -4,7 +4,7 @@
 // ever given a file `validateCourse` accepted (courses.ts stores no other), so it trusts the
 // shape. To core a station and a leg are names: nothing here reads what one means.
 
-import { capabilitiesOf } from '../vendor/vocabulary.mjs';
+import { capabilitiesOf } from '../shared/vocabulary.mjs';
 import { declaredConditions, type ConditionDeclaration } from './conditionTypes';
 
 /** One step of a ticket's path: the leg run and the station it reached (R-BTN-70). */
@@ -13,7 +13,16 @@ export interface Step {
   reached: string;
 }
 
+interface ContractFields {
+  version?: number;
+  inputs?: Record<string, { from: string; accepts?: number[]; required?: boolean }>;
+  outputs?: Record<string, { schema: string }>;
+}
+
 export interface Leg {
+  version: number;
+  inputs: ContractFields['inputs'];
+  outputs: ContractFields['outputs'];
   from: string[];
   to: string[];
   maxRuns: number | null;
@@ -105,13 +114,14 @@ export function graphOf(json: unknown): Graph {
     capability_roles?: Record<string, string[]>;
     stations: Record<string, { renamed_from?: string | string[]; entry?: { output: string; schema: string }[] }>;
     legs: Record<string, { from: string[]; to: string | string[]; max_runs?: number; max_queue?: number; renamed_from?: string | string[]; no_chain_from?: string[]; isolation?: 'session'; requires?: { capabilities?: string[] };
-      kind?: 'person'; asks?: string; expires?: { after_s: number; reached: string }; replay_safe?: boolean; max_duration?: number; conditions?: string[]; autonomous?: boolean }>;
+      kind?: 'person'; asks?: string; expires?: { after_s: number; reached: string }; replay_safe?: boolean; max_duration?: number; conditions?: string[]; autonomous?: boolean } & ContractFields>;
   };
   const legs = new Map<string, Leg>();
   const legRenames = new Map<string, string>();
   const stationRenames = new Map<string, string>();
   for (const [id, l] of Object.entries(f.legs)) {
     legs.set(id, { from: [...new Set(l.from)], to: [...new Set(names(l.to))], maxRuns: l.max_runs ?? null, maxQueue: l.max_queue ?? null,
+      version: l.version ?? 0, inputs: l.inputs, outputs: l.outputs,
       noChainFrom: [...new Set(l.no_chain_from ?? [])], isolation: l.isolation ?? null, requires: legCapabilities(l.requires, f.capability_roles),
       person: l.kind === 'person', asks: l.kind === 'person' ? l.asks ?? null : null, expires: l.kind === 'person' && l.expires ? { afterS: l.expires.after_s, reached: l.expires.reached } : null,
       replaySafe: l.replay_safe !== false, maxDuration: l.max_duration ?? null,

@@ -65,9 +65,8 @@ beforeEach(async () => {
   reader = await makeKey('ssh-ed25519', 'docs-reader');
   await setAdminKeys(admin);
   expect((await keyCall(admin, '/v1/admin/repositories', { id: 'docs', owner_keys_add: [owner.publicKey] })).status).toBe(200);
-  // R-BTN-163: the delivery runner's key — granted on docs, its tags barred, delivery courses
-  // alone. The read needs the grant alone; nothing else is asked of it here.
-  expect((await keyCall(owner, '/v1/owner/docs/grants', { public_key: reader.publicKey, hostname: 'docs-deliver', capabilities: ['agent-venue'] })).status).toBe(200);
+  // R-BTN-163: explicitly authorize delivery on docs; the courier need not register a session.
+  expect((await keyCall(owner, '/v1/owner/docs/grants', { public_key: reader.publicKey, hostname: 'docs-deliver', capabilities: ['agent-venue'], deliver_interactions: true })).status).toBe(200);
   git = new Git().add('A');
   git.registry = [course(3, 3, { course: INTERACT })];
   expect((await git.post()).status).toBe(200);
@@ -95,9 +94,9 @@ describe('S-BTN-222: an interaction request (R-BTN-195)', () => {
       ['interact', LINK, 'open', 'high'], // the stored link, not the runner's; no subject or body anywhere
     ]);
 
-    // Needs you lists it with its link (R-BTN-163), and the delivery runner reads the list
+    // The export’s Needs you flags the link, and the delivery runner reads the list
     // (R-BTN-195): the entry carries the ticket, the leg and the url, and no leg text.
-    expect(await needsYou()).toEqual([expect.objectContaining({ ticket_id: 'docs:A', leg: 'implement', type: 'interact', url: LINK, run_id: a.json.run_id })]);
+    expect(await needsYou()).toEqual([expect.objectContaining({ ticket_id: 'docs:A', leg: 'implement', type: 'interact', url: null, session_link: true, run_id: a.json.run_id })]);
     const list = await readAs(reader, '/v1/repositories/docs/conditions?open=1&type=interact');
     expect(list.status).toBe(200);
     expect(list.json.conditions).toEqual([expect.objectContaining({ ticket_id: 'docs:A', leg: 'implement', url: LINK })]);
@@ -134,7 +133,7 @@ describe('S-BTN-222: an interaction request (R-BTN-195)', () => {
     // default) is dropped and logged — the beat answers 200 and says so.
     const dropped = await beat('vm-a', w.secret, { session_url: 'https://sessions.example/not-allowed' });
     expect(dropped.status).toBe(200);
-    expect(dropped.json.session_url_dropped).toContain('sessions.example');
+    expect(dropped.json.session_url_dropped).toContain('session_hosts');
     expect(await rows<{ session_url: string | null }>('SELECT session_url FROM claim_legs WHERE claim_id = ?', c.claim_id)).toEqual([{ session_url: null }]);
     expect((await rows(`SELECT 1 FROM events WHERE kind = 'discrepancy' AND json_extract(detail_json, '$.sub') = 'session-url'`)).length).toBe(1);
     // A link over the bound is dropped the same way, never refused.
