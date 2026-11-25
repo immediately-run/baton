@@ -1,6 +1,7 @@
 // reads/kit.ts — what a read module is written with (B-192, B-205): the principal a read's
 // caller resolves to, the one authorization of a principal against an action and a repository,
 // and the helpers a list read pages with. See ./index.ts for how to add a read.
+import { hasGrant } from '../grants';
 import type { SessionLinkView } from '../links';
 import { BatonError } from '../http';
 import { keyCaller, sessionCaller, type Action, type Caller, type SessionRole } from '../actions';
@@ -94,7 +95,7 @@ export function canRead(cx: ReadCtx, principal: ReadPrincipal, repository: strin
   }
   if (principal.role === 'admin') return true;
   if (principal.role === 'owner') return cx.core.admin.owns(principal.cred, repository);
-  return cx.sql('SELECT 1 FROM runner_grants WHERE credential_id = ? AND repository_id = ? AND revoked_at IS NULL', principal.cred, repository).length > 0;
+  return hasGrant(cx.store, principal.cred, repository);
 }
 
 /** `canRead`, or the one refusal. */

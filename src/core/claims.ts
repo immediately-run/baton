@@ -2626,8 +2626,7 @@ export class Claims {
 
   /** `POST /v1/ui/board/accept`: the owner accepts a held history; the sync's next force post
    *  of it then becomes the head (§7.1). */
-  acceptHeld(owner: string, body: unknown) {
-    const { repository, sha } = checkAccept(body);
+  acceptHeld(owner: string, { repository, sha }: { repository: string; sha: string }) {
     const held = this.rows<{ accepted_at: number | null }>('SELECT accepted_at FROM held_snapshots WHERE repository_id = ? AND sha = ?', repository, sha)[0];
     if (!held) throw new BatonError('not-found', 'no such held history');
     if (held.accepted_at == null) {
