@@ -48,7 +48,7 @@ repository, its owners and administrators, except where a route's rule narrows t
   `grants`, `mcp_keys` and `settings`, and the bars in force or scheduled, R-BTN-146, each grant also naming
   the `other_repositories` its key holds); and
   `GET /v1/repositories/{repository}/board` (the repository reads' principals: the repository,
-  its `ready` tickets and `ready_by_tier`, `granted_capabilities`, the repository's live claims
+  its `ready` tickets, `granted_capabilities`, the repository's live claims
   as `holders` — each with its holder and when its lease ends (null for a legacy claim) — and `server_time`). A key outside the route's role is refused as this
   section says — `forbidden`, or `unauthenticated` for a key Baton does not know. The CLI's
   `baton admin repo list`, `baton owner grant list <repository>` and `baton repo board
@@ -253,7 +253,7 @@ Every value below is validated on write; a value over its cap is refused `invali
   other permission; its private key is written to `--key-out` on the delivering runner's host,
   never to the secret sink, and its App id to the instance setting `check_app_id` (`PUT
   /v1/admin/settings`, §13.1), one per tenant as the App is, which the sync is handed with its
-  observation, the policy read answers, and R-BTN-115's read-back and `baton repo protect --print`
+  observation, and R-BTN-115's read-back and `baton repo protect --print`
   read. An organisation owner installs it on each repository whose `checks` setting names a course,
   never on "All repositories" (R-BTN-115). Branch protection names it,
   never the dispatch App (R-BTN-115).
@@ -444,8 +444,10 @@ trusted runners or of the protection checker; a compromised forge; and a comprom
     itself, never by asking runners.
   - **The read.** `GET /v1/repositories/{repository}/policy` answers owners, administrators and
     keys granted on the repository with `{repository, version, hash, policy, guarantees: {<name>:
-    held | broken}, floors, at}`. A trusted runner and a deployment's audit read the same route,
-    each with its own key.
+    held | broken}, floors, check_app_id, at, valid_until}`. `check_app_id` is the instance
+    setting (§12.7). The response is unsigned; `valid_until` equals `at` for CLI 0.1.3 and
+    0.1.4 compatibility, not as a validity guarantee. A trusted runner and a deployment's
+    audit read the same route, each with its own key.
 - **R-BTN-180 (roles, domains and protection).**
   - **Every grant has a role and a domain.** The role is `runner` or `trusted-runner` (R-BTN-182),
     and a `trusted-runner` grant may further be marked the repository's protection checker
@@ -572,6 +574,8 @@ trusted runners or of the protection checker; a compromised forge; and a comprom
     shows before a signature, are [proposed](../proposals/security.md) (B-136). Under `any` a
     human-only list is a custody promise: Baton cannot tell a key an agent session can use, so
     no guarantee claims it as a human gate (`human-gates`, R-BTN-189).
+  - Until FIDO attestation verification is built, no key, including a break-glass line, meets
+    the repository's `hardware` minimum. A stored attestation marker alone is not evidence.
   - **The owner's agent** is a principal (§12.1): an owner key not `human_only`. It acts as
     `owner`, never as `human`. A dashboard session of a `human_only` key is an owner's
     session too: no session, and no OAuth approval by one, satisfies a human-only `approvers.*`

@@ -35,7 +35,7 @@ defect: it is filed against BATON_SPEC with the trace, never fixed by weakening 
 
 **Where the checks run (R-BTN-68, amended 2026-10-17).** Model checking runs on the
 author's machine, not on hosted CI runners, whose time limits it outgrew. A pull request that
-changes what the checks read — `model/`, `src/core/` with the `src/shared/` modules and
+changes what the checks read — `model/`, `src/core/` with the `src/shared/` and `src/vendor/` modules and
 `src/migrations/` it imports, the replay and its helpers (`test/model/`, `test/helpers.ts`,
 `test/lib/`), the scenarios and their hosts (`test/integration/`, `test/hosts/`), the trace check,
 or `package-lock.json`, which pins Quint and Apalache — carries

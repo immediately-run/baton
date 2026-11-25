@@ -148,7 +148,7 @@ export const ACTIONS: Action[] = [
     input: { type: 'object', properties: { since: { type: 'string', description: 'An ISO time not in the future; the default window otherwise.' } } },
   },
   {
-    id: 'repo.policy', summary: 'The repository’s policy, its guarantees and floors, signed with the tenant’s key.',
+    id: 'repo.policy', summary: 'The repository’s policy, its guarantees and floors.',
     effect: 'read', http: { method: 'GET', path: '/v1/repositories/{repository}/policy' },
     callers: REPOSITORY_READERS, input: NONE,
   },

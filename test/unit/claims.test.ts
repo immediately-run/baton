@@ -1,13 +1,13 @@
 // R3-1212 — claims (BATON_SPEC §6.1–6.7, §7.2, §11): G-BTN-1, -2, -3, -6, -14 and -40, plus the
 // claim and end contracts, the holder query, matching's runner rules, and the held history.
 import { describe, it, expect, inject, beforeEach } from 'vitest';
-import { confirmations } from '../../src/shared/batonSync.mjs';
+import { confirmations } from '../../src/vendor/batonSync.mjs';
 import { gatesFor } from '../../src/core/gates';
 import {
   beat, claimItem, claimRow, course, cutover, q, endClaim, hbBody, keyCall, ORIGIN, ownerCall, payload, recommended, refresh, register, requestId, rows, setAdminKeys, setClock, sha256, syncCall, syncToken, withCore, runnerCall, tick,
 } from '../helpers';
 import { makeKey, signedRequest } from '../lib/sshKeys';
-import { capabilitiesOf } from '../../src/shared/vocabulary.mjs';
+import { capabilitiesOf } from '../../src/vendor/vocabulary.mjs';
 import { call as hostCall } from '#host';
 import roadmapPr from '../fixtures/courses/roadmap-pr/course.json';
 
@@ -49,7 +49,7 @@ describe('the claim and end contracts (§11, §6.5, §11)', () => {
     // B-134: the ticket's scope — its home (the fixture's `repos: ['immediately-run/docs']` is
     // the home itself, so one path).
     expect(c.json).toEqual({ claim_id: expect.any(Number), ticket_id: 'docs:R3-9001', course_id: 'roadmap-pr', course_version: 3, default_branch: 'main',
-      policy_hash: expect.stringMatching(/^[0-9a-f]{64}$/), guarantees_hash: expect.stringMatching(/^[0-9a-f]{64}$/), floors_hash: expect.stringMatching(/^[0-9a-f]{64}$/), leg_state: 'forge',
+      leg_state: 'forge',
       station: 'filed', legs: ['implement'], next: [{ leg: 'implement', state: 'ready' }], scope: ['immediately-run/docs'],
       path: 'content/roadmap/R3-9001.mdx', nonce: expect.stringMatching(/^[0-9a-f]{6}$/), snapshot_sha: sha.A, previous_attempts: [],
       // B-183 (§4.5): the ticket's version as the board holds it ('' — the interim post carries none)

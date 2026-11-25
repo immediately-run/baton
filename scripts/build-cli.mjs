@@ -56,7 +56,7 @@ await build({
   plugins: [prebuilt, dashboardScriptAsText],
   logLevel: 'warning',
 });
-// The runner spawns its leg process by path (src/runner/runner.ts LEG_PROCESS), beside the bundle.
+// The runner spawns its leg process by path (src/runner/claimRun.ts LEG_PROCESS), beside the bundle.
 copyFileSync(join(ROOT, 'src/runner/legProcess.mjs'), join(OUT, 'legProcess.mjs'));
 
 // What `baton repo init` writes, prebuilt (a package has no src/ and no esbuild), and the commit

@@ -10,7 +10,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { ACTIONS, actionsFor, type ListedAction } from '../../src/core/actions';
 import { SCREENS } from '../../src/core/screens';
-import { adminSession, keyCall, makeApiKey, ORIGIN, sessionCall, setAdminKeys, setClock, setPolicySigningKey, TOKENS, withCore } from '../helpers';
+import { adminSession, keyCall, makeApiKey, ORIGIN, sessionCall, setAdminKeys, setClock, TOKENS, withCore } from '../helpers';
 import { makeKey, signedRequest, type TestKey } from '../lib/sshKeys';
 import { call as hostCall } from '#host';
 
@@ -30,7 +30,6 @@ beforeEach(async () => {
   admin = await makeKey('ssh-ed25519', 'admin');
   owner = await makeKey('ssh-ed25519', 'docs-owner');
   await setAdminKeys(admin);
-  await setPolicySigningKey();
   expect((await keyCall(admin, '/v1/admin/repositories', { id: 'docs', owner_keys_add: [owner.publicKey] })).status).toBe(200);
   cookie = await adminSession(admin);
 });

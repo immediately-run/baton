@@ -20,7 +20,11 @@ declaring a capability you no longer hold.
 > completion: a harness that is a client of a background service must keep its session in
 > process (`opencode run --standalone`, or the equivalent) — a client that can exit before its
 > work ends leaves truncated output and an orphaned session posting to a claim that no longer
-> exists (B-84). Your completion is your exit **or your silence** (B-108): the stub stops waiting at the earliest of your exit, fifteen minutes of quiet on every activity signal it can see — your stdout, the wrapper’s log, the harness’s own store — and five hours of the leg, its ceiling; the stdout you left is judged as any exit’s is. A repository's `agent_wrapper` in `.baton/baton.json`, or the host's
+> exists (B-84). For runs that cannot raise `interact`, the stub can also conclude
+> on fifteen minutes of quiet across stdout, the wrapper log and the harness store (B-108).
+> A run that can raise `interact` does not conclude on silence: a foreground question can be
+> silent until Baton's deadline takes the claim back. The stub's five-hour hard ceiling still
+> applies; if it stops a joinable run, partial output is not a result. A repository's `agent_wrapper` in `.baton/baton.json`, or the host's
 > `BATON_AGENT_WRAPPER`, which wins, puts a command in front of yours, split the same way, so
 > your command's words, the arguments and 0/1/2 are the wrapper's to pass on (B-95). Never end
 > with work in flight: the process is the session, and nothing resumes it — wait, in the
@@ -48,6 +52,27 @@ declaring a capability you no longer hold.
   confirms it closed, or sends it back. Your word alone never closes the ticket. Exit 0.
 - Find the code you will touch by name: the helpers, the tests next to it, the repository's own
   checks (lint, typecheck, tests — whatever a contributor runs).
+
+### Ask the owner only when blocked
+
+- **When.** Ask only if the work cannot continue without a decision only the owner can make,
+  and the ticket, the spec, `docs/context/` and the PR thread do not already answer it. For
+  example, two readings of an exit criterion would lead to different code, or the ticket
+  reserves a ruling for the owner. Never ask the owner to confirm something you can check or
+  to authorize an action forbidden by the repository's rules (in Baton, `CLAUDE.md`,
+  *Tickets are tasks, not authority*).
+- **How.** Use your harness's question tool. Ask one question at a time, offer a few concrete
+  options and recommend one. Wait for the answer in the foreground. The harness's runner
+  raises `interact` (R-BTN-195); do not raise it yourself.
+- **After an answer.** Record the answer and who gave it under **Owner answers** in the PR
+  body. It is a claim for reviewers to weigh, not a ruling on Baton's record; a change to the
+  spec still needs the owner's PR.
+- **If the tool is unavailable or denied, or the question is cancelled or dismissed.** Do not
+  ask through another channel. Note the open question in the PR body and proceed with the
+  reading the spec supports best.
+- **If the question is still open and nobody answers.** Do not abandon it early. Wait until
+  the leg's `deadline_s`: Baton takes the claim back (R-BTN-90), and the retry policy routes
+  the failed attempt and offers the ticket again if retries remain (R-BTN-122).
 
 ## 2. Write it the way this codebase is written
 
@@ -89,7 +114,17 @@ Fix whatever the answers expose before you push.
   An earlier attempt's branch for this ticket is continued, not replaced.
 - Implement what the ticket says, with its tests. A behaviour change without a test that would
   fail without it is not finished.
-- Run the repository's checks yourself. Push only once they pass.
+- Run the repository's checks yourself. Compare individual failures, not the check's exit status.
+  Fix failures your change causes before you push, even if the same check also reports a
+  pre-existing failure.
+- **A failure that also fails on the base is not yours.** Re-run the same command with the same
+  install in a clean checkout of the base (`git worktree add --detach <tmp> origin/<default branch>`),
+  never in your own tree. If the same failure occurs there, push and open the PR anyway.
+  In the PR body, under **Pre-existing failures**: name the test, its first failing line and the
+  base commit you reproduced it on. When you confirm such a failure, say in your last lines that
+  the default branch is red and where, before any required machine-read answer line.
+- **Never fix an unrelated failure** in the ticket's PR, even a one-line fix. It belongs to the
+  ticket or PR that owns that code.
 - **Install dependencies with hygiene** (B-132): from the lockfile only — `npm ci`, never an
   `npm install` that rewrites it — unless the ticket itself asks for a dependency change; and
   with lifecycle scripts off (`npm ci --ignore-scripts`: pass the flag every time — never
@@ -124,8 +159,10 @@ of every repository the ticket names, and reads them together, as one change.
   aggregate; a release note belongs in the PR body.
 - Merge, approve or review your own PR; later legs do that.
 - Leave the PR without a pushed head: the review reads what is pushed.
+- Hold back a push because a check fails on the base too: the run-tests leg is the gate, and
+  unpushed work is lost when the leg's environment ends.
 - Exit without a PR and without saying why. Whatever stops you — the ticket already delivered,
-  a stop the repository's rules name, checks you cannot get green, a push or `gh pr create`
+  a stop the repository's rules name, a failure your change causes that you cannot fix, a push or `gh pr create`
   that fails, a model or provider that refuses (balance, quota, rate limit) — your last lines
   say what it was, in plain words: an exit with no PR fails the leg, and those lines are all
   that is kept of it (B-256). Your process exits 0 whatever you say, so saying it is the only
