@@ -10,7 +10,7 @@ import { holderTicket, liveRepoParam, requireGrant, runnerSecret } from './kit';
 import { noteIdle, type IdleDetail } from '../idleReasons';
 
 type RunnerAuthCore = Parameters<typeof authenticated>[0] & Pick<BatonCore, 'admin'>;
-type RunnerCore = Pick<BatonCore, 'store' | 'registry' | 'runners' | 'claims' | 'sql' | 'admin' | 'now' | 'queues' | 'resources' | 'cutover' | 'conditions'>;
+type RunnerCore = Pick<BatonCore, 'store' | 'registry' | 'runners' | 'claims' | 'sql' | 'admin' | 'now' | 'queues' | 'resources' | 'cutover' | 'conditions' | 'blocks' | 'config'>;
 
 export async function runnerPrincipal(core: RunnerAuthCore, req: Request) {
   let cred = req.headers.get('X-Baton-Credential');
