@@ -226,7 +226,7 @@ BATON_SPEC's sections are named with a rule or as `§11.3`, `§12.2`.
     `condition-wait` where the leg waits on a condition, with session links (R-BTN-113) and log
     directories (R-BTN-128).
   - **`/tickets`** — every ticket under its state word (below), Ready in the matching order with
-    each ticket's `requires`, tier and eligible alive runners, and **ready but nobody can take
+    each ticket's `requires` and eligible alive runners, and **ready but nobody can take
     it** with the failed rule.
   - **`/tickets/{ticket}`** — the ticket as Baton holds it: its station and path, the claim's
     legs since, what a suspended ticket waits for, its newest hand-off, blocks, queued leg and
@@ -248,7 +248,7 @@ BATON_SPEC's sections are named with a rule or as `§11.3`, `§12.2`.
     and restarts; choosing a restart is `ticket.resolve` for a signed-in owner of its repository
     or an administrator.
   - **`/runners`** — the runners granted on the repository, grouped by hostname (R-BTN-3), each
-    card marked with its state: alive or dead, harness, tier ceiling, capabilities (declared,
+    card marked with its state: alive or dead, harness, capabilities (declared,
     and granted per repository, R-BTN-174), tags, courses, lease timeout, last seen, last
     activity, the claim held, current activity, transcript link, executor (source, digest and
     `provides`, R-BTN-107), credential kind and registering token.

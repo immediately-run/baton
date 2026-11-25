@@ -64,6 +64,10 @@ export interface StationsResult {
 /** R-BTN-51's default `branch_pattern`. */
 export const DEFAULT_BRANCH_PATTERN = 'claude/{ticket}-*';
 
+// B-325 (S-BTN-222): leave time for release before the default four-hour E2B timeout.
+// The on-disk key for R-BTN-167's deadline_s is max_duration (BATON_SPEC §7).
+const CREATE_PR_ASK_DEADLINE_S = 3 * 60 * 60;
+
 /** The `create-pr` course's graph (R-BTN-131), the docs workflow's: filed → pr-open → reviewed,
  * at most three review rounds with a fix between them, then merged — or, when the third round
  * still asks for changes, adjudicated first (a fresh reader reproduces each open blocking finding)
@@ -98,15 +102,15 @@ export const CREATE_PR_COURSE = {
     delivered: { label: 'Found already delivered' }, confirmed: { label: 'Already delivered, confirmed by a person' },
   },
   legs: {
-    implement: { from: ['filed'], to: ['pr-open', 'delivered'], label: 'Implement it and open the PR, or find it delivered' },
-    'run-tests': { from: ['pr-open', 'fixed'], to: ['pr-open', 'fixed'], max_runs: 30, label: 'Run the deterministic tests' },
+    implement: { from: ['filed'], to: ['pr-open', 'delivered'], max_duration: CREATE_PR_ASK_DEADLINE_S, label: 'Implement it and open the PR, or find it delivered' },
+    'run-tests': { from: ['pr-open', 'fixed'], to: ['pr-open', 'fixed'], max_runs: 30, autonomous: true, label: 'Run the deterministic tests' },
     // B-110: review also leaves `reviewed` — the owner's `round` answer grants exactly one more
     // round on the same head (the answer itself carries the run, §6.8; the round's verdict is
     // its marker, and a round still asking for changes comes straight back to the owner).
-    review: { from: ['pr-open', 'fixed', 'reviewed'], to: 'reviewed', max_runs: 3, label: 'Review round' },
-    fix: { from: ['reviewed', 'pr-open', 'fixed'], to: 'fixed', max_runs: 30, label: 'Fix or answer the findings' },
-    adjudicate: { from: ['reviewed'], to: 'adjudicated', label: 'The owner answers the third round' },
-    merge: { from: ['reviewed', 'adjudicated'], to: 'merged', label: 'Merge and close the ticket' },
+    review: { from: ['pr-open', 'fixed', 'reviewed'], to: 'reviewed', max_runs: 3, autonomous: true, label: 'Review round' },
+    fix: { from: ['reviewed', 'pr-open', 'fixed'], to: 'fixed', max_runs: 30, max_duration: CREATE_PR_ASK_DEADLINE_S, label: 'Fix or answer the findings' },
+    adjudicate: { from: ['reviewed'], to: 'adjudicated', autonomous: true, label: 'The owner answers the third round' },
+    merge: { from: ['reviewed', 'adjudicated'], to: 'merged', autonomous: true, label: 'Merge and close the ticket' },
     // B-257: the person's confirmation — no runner is offered it (R-BTN-116); its options are
     // its outcomes, `confirmed` and `filed`.
     confirm: { from: ['delivered'], to: ['confirmed', 'filed'], kind: 'person', asks: 'owner', max_runs: 3, label: 'A person confirms it was already delivered' },

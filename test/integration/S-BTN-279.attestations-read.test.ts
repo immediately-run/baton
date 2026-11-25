@@ -17,7 +17,7 @@
 // Runs on both hosts.
 import { describe, it, expect, beforeEach } from 'vitest';
 import { COOPERATIVE } from '../../src/core/policy';
-import { keyCall, setClock } from '../helpers';
+import { keyCall, setClock, setHumanKeys } from '../helpers';
 import { atDecide, fixture, MIN, readAs, readSession, T0, type Fixture, type Json } from '../lib/needsYouFixture';
 
 let f: Fixture;
@@ -36,6 +36,18 @@ beforeEach(async () => {
 });
 
 describe('S-BTN-279 the attestations read (B-213)', () => {
+  it('S-BTN-185: a custody-only human key cannot answer under a hardware minimum', async () => {
+    await atDecide(f.git, 'H');
+    expect((await f.git.post()).status).toBe(200);
+    const policy = { ...COOPERATIVE, human_key: 'hardware', inputs: { ...COOPERATIVE.inputs, answers: 'attestation' } };
+    expect((await keyCall(f.owner, '/v1/owner/docs/policy', { base_version: 1, policy }, 'PUT')).status).toBe(200);
+    await setHumanKeys(f.owner);
+    const denied = await keyCall(f.owner, PATH, { type: 'std:decision@1', subject: { ticket: 'H' }, value: { option: 'ship' } });
+    expect(denied.status).toBe(403);
+    expect(denied.json.message).toMatch(/attested hardware key/);
+    expect((await readSession(f.cookie, `${PATH}?subject=H`)).json.attestations).toEqual([]);
+  });
+
   it('lists each applied answer, newest first, with its writer', async () => {
     const res = await readSession(f.cookie, PATH);
     expect(res.status).toBe(200);

@@ -259,6 +259,65 @@ export function verifyPrOpen(ask: PrOpenAsk, run: PrExec): void {
   throw new Error(`the implement agent exited 0, but no open PR on a branch matching ${patterns.join(' or ')} for ticket ${id} exists in ${read.join(' or ')}${unread.length ? ` — ${unread.map((f) => label(f.repo)).join(' or ')} could not be read` : ''} — open one from a matching branch with its head pushed, or the leg fails here`);
 }
 
+/** One repository's read for `verifyPrsMerged`: the ticket's open and merged PRs there, or why
+ * the forge did not answer. */
+interface MergedRead {
+  repo: string | null;
+  open: PrListItem[] | null;
+  merged: PrListItem[] | null;
+  error: string | null;
+}
+
+/** Verify what the merge leg is about to claim (R-BTN-131: a stub whose leg claims a PR verifies
+ * it on the forge before it reports a position): every PR of the ticket — on a branch the
+ * course's patterns map to it, in the checkout's repository and each one its `repos:` names — is
+ * merged, none still open, at least one merged. The stub returned `merged` for any merge agent
+ * that exited 0; on 2026-11-23 B-259's agent rightly refused to merge PR #357 over red CI, said
+ * so and exited 0, and the leg reported `merged` with the PR open. A PR still open, no merged PR,
+ * or a repository the forge does not answer for fails the leg, naming it; a PR closed unmerged
+ * counts as none, as the station function reads it. Returns the merged PRs, `#n` or
+ * `owner/name#n`. */
+export function verifyPrsMerged(ask: PrOpenAsk, run: PrExec): string[] {
+  const id = bareId(ask.ticket);
+  const patterns = matchPatterns(ask.branchPatterns).map((p) => p.replace(/\{ticket\}/g, id));
+  const slug = originSlug(run, ask.checkout);
+  const siblings = (ask.repositories ?? []).filter((r, i, all) => all.indexOf(r) === i && (slug == null || r.toLowerCase() !== slug.toLowerCase()));
+  const label = (repo: string | null): string => repo ?? slug ?? 'the checkout’s repository';
+  const list = (repo: string | null, state: 'open' | 'merged'): PrListItem[] => {
+    const args = ['pr', 'list', '--state', state, '--limit', '300', '--json', 'number,headRefName', ...(repo ? ['--repo', repo] : [])];
+    const text = run('gh', args, ask.checkout);
+    let prs: unknown;
+    try {
+      prs = JSON.parse(text);
+    } catch {
+      prs = null;
+    }
+    if (!Array.isArray(prs)) throw new Error(`gh pr list --state ${state}${repo ? ` --repo ${repo}` : ''} answered no PR list: ${text.slice(0, 200)}`);
+    return prs.filter((p): p is PrListItem => p != null && typeof p === 'object' && typeof (p as PrListItem).headRefName === 'string' && patterns.some((pat) => branchMatches(pat, (p as PrListItem).headRefName as string)));
+  };
+  const found: MergedRead[] = [null, ...siblings].map((repo) => {
+    try {
+      return { repo, open: list(repo, 'open'), merged: list(repo, 'merged'), error: null };
+    } catch (e) {
+      return { repo, open: null, merged: null, error: msg(e) };
+    }
+  });
+  const name = (f: MergedRead, p: PrListItem): string => `${f.repo ? f.repo : ''}#${String(p.number)} (${String(p.headRefName)})`;
+  const unread = found.filter((f) => f.error != null);
+  if (unread.length > 0) {
+    throw new Error(`cannot verify ${id}’s PRs merged — ${unread.map((f) => `${label(f.repo)} (${f.error})`).join('; ')} could not be read: the leg reports merged only when the forge shows every PR merged`);
+  }
+  const open = found.flatMap((f) => (f.open ?? []).map((p) => name(f, p)));
+  if (open.length > 0) {
+    throw new Error(`the merge agent exited 0, but ${id}’s PR ${open.join(', ')} is still open — not merged; the leg reports merged only when every PR of the ticket is`);
+  }
+  const merged = found.flatMap((f) => (f.merged ?? []).map((p) => `${f.repo ? f.repo : ''}#${String(p.number)}`));
+  if (merged.length === 0) {
+    throw new Error(`the merge agent exited 0, but no merged PR on a branch matching ${patterns.join(' or ')} for ticket ${id} exists in ${found.map((f) => label(f.repo)).join(' or ')} — the leg reports merged only when the forge shows one`);
+  }
+  return merged;
+}
+
 /** B-257: an implement agent's answer that the ticket is already delivered — the commits it
  *  names, which the stub checks are on the default branch, and the evidence it gives (what it
  *  ran), which is shown to the person who confirms and never trusted on its own. */

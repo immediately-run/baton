@@ -243,6 +243,22 @@ export const clampConcurrency = (n: unknown) => (isInt(n) ? Math.min(MAX_CLAIMS_
 /** R-BTN-107: the isolation modes a heartbeat may declare. */
 export const ISOLATIONS: readonly Heartbeat['isolation'][] = ['attached', 'process', 'session'];
 
+/** Shared by the heartbeat boundary and the runner before it adopts a new declaration. */
+export function checkDeclaredCourses(rawCourses: unknown): Heartbeat['courses'] {
+  if (!Array.isArray(rawCourses) || rawCourses.length > COURSES_MAX) bad('courses', `must be a list of at most ${COURSES_MAX}`);
+  const declaredCourses = new Set<string>();
+  return (rawCourses as unknown[]).map((c, i) => {
+    if (!isObj(c)) bad(`courses[${i}]`, 'must be an object');
+    const x = c as Record<string, unknown>;
+    const repository = checkRepositoryId(x.repository, `courses[${i}].repository`);
+    const course = matches(COURSE_ID, `courses[${i}].course`)(x.course);
+    if (!isInt(x.version) || (x.version as number) < 0 || (x.version as number) > COURSE_VERSION_MAX) bad(`courses[${i}].version`, 'must be a non-negative integer');
+    if (declaredCourses.has(`${repository}:${course}`)) bad(`courses[${i}]`, `repeats ${repository}:${course}`);
+    declaredCourses.add(`${repository}:${course}`);
+    return { repository, course, version: x.version as number };
+  });
+}
+
 export function checkHeartbeat(body: unknown, transcriptRepos: string[]): Heartbeat {
   if (!isObj(body)) bad('body', 'must be a JSON object');
   const b = body as Record<string, unknown>;
@@ -265,19 +281,7 @@ export function checkHeartbeat(body: unknown, transcriptRepos: string[]): Heartb
   if (!TIERS.includes(tier as never)) bad('tier_ceiling', `must be one of ${TIERS.join(', ')}`);
   // R-BTN-22: the skills version is each course's version, declared per course; a sidecar that
   // still sends `skills_version` is not refused for it.
-  const rawCourses = b.courses ?? [];
-  if (!Array.isArray(rawCourses) || rawCourses.length > COURSES_MAX) bad('courses', `must be a list of at most ${COURSES_MAX}`);
-  const declaredCourses = new Set<string>();
-  const courses = (rawCourses as unknown[]).map((c, i) => {
-    if (!isObj(c)) bad(`courses[${i}]`, 'must be an object');
-    const x = c as Record<string, unknown>;
-    const repository = checkRepositoryId(x.repository, `courses[${i}].repository`);
-    const course = matches(COURSE_ID, `courses[${i}].course`)(x.course);
-    if (!isInt(x.version) || (x.version as number) < 0 || (x.version as number) > COURSE_VERSION_MAX) bad(`courses[${i}].version`, 'must be a non-negative integer');
-    if (declaredCourses.has(`${repository}:${course}`)) bad(`courses[${i}]`, `repeats ${repository}:${course}`);
-    declaredCourses.add(`${repository}:${course}`);
-    return { repository, course, version: x.version as number };
-  });
+  const courses = checkDeclaredCourses(b.courses ?? []);
   if (b.last_activity_at !== undefined && !isTime(b.last_activity_at)) bad('last_activity_at', 'must be epoch ms');
   if (b.test_harness !== undefined && typeof b.test_harness !== 'boolean') bad('test_harness', 'must be a boolean');
   if (b.isolation !== undefined && !ISOLATIONS.includes(b.isolation as Heartbeat['isolation'])) bad('isolation', `must be one of ${ISOLATIONS.join(', ')}`);
@@ -1136,6 +1140,13 @@ export function checkDecisionAnswer(body: unknown):
   if (b.answer !== 'retry' && b.answer !== 'park') bad('answer', "must be 'retry' or 'park'");
   if (b.leg !== undefined) bad('leg', 'only with the route answer');
   return { decision: b.decision as 'baton:retries' | 'baton:stalled', answer: b.answer as 'retry' | 'park' };
+}
+
+/** R-BTN-163: interaction delivery is opt-in on each runner grant. */
+export function checkDeliverInteractions(value: unknown): boolean {
+  if (value === undefined) return false;
+  if (typeof value === 'boolean') return value;
+  return bad('deliver_interactions', 'must be a boolean');
 }
 
 /** §8, §11: `{expedite?, hold?}` — booleans, at least one. */

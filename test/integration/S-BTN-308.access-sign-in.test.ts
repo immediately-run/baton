@@ -3,6 +3,7 @@
 import { importJWK, SignJWT, generateKeyPair } from 'jose';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { config } from '#host';
+import { verifyAccess } from '../../src/core/auth';
 import { front } from '../../src/core/front';
 import type { AccessIdentities } from '../../src/core/ports';
 import { accessToken, adminSession, call, makeApiKey, ORIGIN, rows, sessionCall, setAdminKeys, setClock, sha256, withCore } from '../helpers';
@@ -24,6 +25,8 @@ function bind(text: string) {
 const login = (body: unknown, headers: Record<string, string> = JSON_HEADERS) =>
   call('/v1/login', { method: 'POST', headers, body: JSON.stringify(body) });
 const signIn = (assertion: string) => login({ access: true }, { ...JSON_HEADERS, [ASSERTION]: assertion });
+const assertion = (claims: Record<string, unknown>, exp: string, issuer = `https://${config.ACCESS_TEAM_DOMAIN}`) =>
+  new SignJWT(claims).setProtectedHeader({ alg: 'ES256', kid: 'baton-test' }).setIssuer(issuer).setAudience(config.ACCESS_AUD!).setExpirationTime(exp);
 
 async function refused(res: Response, status: number, code: string) {
   expect(res.status).toBe(status);
@@ -87,8 +90,6 @@ describe('S-BTN-308 sign-in through Cloudflare Access', () => {
   it('refuses missing, unverified, expired, wrong-audience, wrong-issuer and missing or non-ASCII email assertions', async () => {
     const { privateKey } = await generateKeyPair('ES256');
     const key = await importJWK(JSON.parse(config.TEST_SIGNING_JWK!), 'ES256');
-    const assertion = (claims: Record<string, unknown>, exp: string, issuer = `https://${config.ACCESS_TEAM_DOMAIN}`) =>
-      new SignJWT(claims).setProtectedHeader({ alg: 'ES256', kid: 'baton-test' }).setIssuer(issuer).setAudience(config.ACCESS_AUD!).setExpirationTime(exp);
     await refused(await login({ access: true }), 401, 'unauthenticated');
     for (const token of [
       'not-a-jwt',
@@ -108,6 +109,58 @@ describe('S-BTN-308 sign-in through Cloudflare Access', () => {
     await setAdminKeys(other);
     await refused(await signIn(await accessToken(EMAIL)), 401, 'unauthenticated');
     expect(await rows('SELECT id_hash FROM dashboard_sessions')).toEqual([]);
+  });
+
+  it('S-BTN-318: the verifier distinguishes missing settings, missing assertions and failed verification', async () => {
+    const request = (assertion?: string) => new Request(`${ORIGIN}/v1/login`, { headers: assertion === undefined ? {} : { [ASSERTION]: assertion } });
+    const valid = request(await accessToken(EMAIL));
+    for (const setting of ['ACCESS_TEAM_DOMAIN', 'ACCESS_AUD'] as const) {
+      expect(await verifyAccess(valid, { ...config, [setting]: undefined })).toEqual({ reason: 'not-configured' });
+    }
+    expect(await verifyAccess(request(), config)).toEqual({ reason: 'no-assertion' });
+    expect(await verifyAccess(request(''), config)).toEqual({ reason: 'unverified' });
+    const key = await importJWK(JSON.parse(config.TEST_SIGNING_JWK!), 'ES256');
+    for (const token of [await accessToken(EMAIL, { audience: 'other-app' }), await assertion({ email: EMAIL }, '0s').sign(key), await assertion({}, '5m').sign(key)]) {
+      expect(await verifyAccess(request(token), config)).toEqual({ reason: 'unverified' });
+    }
+    expect(await verifyAccess(valid, config)).toEqual({ email: EMAIL });
+  });
+
+  it('S-BTN-318: the front answers verification refusals without forwarding or setting a cookie', async () => {
+    const valid = await accessToken(EMAIL);
+    const to = vi.fn(async () => new Response('{}'));
+    for (const [reason, env, assertion] of [
+      ['not-configured', { ...config, ACCESS_AUD: undefined }, valid],
+      ['no-assertion', config, undefined],
+      ['unverified', config, ' \t '],
+      ['unverified', config, await accessToken(EMAIL, { audience: 'other-app' })],
+    ] as const) {
+      const headers = assertion === undefined ? { ...JSON_HEADERS, 'X-Baton-Access-Email': EMAIL } : { ...JSON_HEADERS, [ASSERTION]: assertion };
+      const req = new Request(`${ORIGIN}/v1/login`, { method: 'POST', headers, body: JSON.stringify({ access: true }) });
+      const res = await front(req, { ...env, TEST_MIN_CLIENT: undefined }, to);
+      await refused(res.clone(), 401, 'unauthenticated');
+      const text = await res.text();
+      expect(JSON.parse(text)).toMatchObject({ reason });
+      expect(text).not.toContain(EMAIL);
+    }
+    expect(to).not.toHaveBeenCalled();
+  });
+
+  it('S-BTN-318: both binding refusals return the same body without the email or key', async () => {
+    const assertion = await accessToken(EMAIL);
+    await bind('');
+    const unbound = await signIn(assertion);
+    await setAdminKeys(admin);
+    await bind(`${EMAIL} ${other.fingerprint}`);
+    const notAdmin = await signIn(assertion);
+    for (const res of [unbound, notAdmin]) await refused(res.clone(), 401, 'unauthenticated');
+    const body = await unbound.text();
+    expect(await notAdmin.text()).toBe(body);
+    expect(JSON.parse(body)).toMatchObject({ reason: 'not-bound' });
+    expect(body).not.toContain(EMAIL);
+    expect(body).not.toContain(other.fingerprint);
+    expect(await rows('SELECT id_hash FROM dashboard_sessions')).toEqual([]);
+    expect(await rows("SELECT actor FROM events WHERE kind = 'admin' AND json_extract(detail_json, '$.act') = 'login'")).toEqual([]);
   });
 
   it('reports an unreadable key set as unavailable and ignores an assertion for link sign-in', async () => {

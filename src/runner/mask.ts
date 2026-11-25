@@ -11,7 +11,7 @@
 import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { createMasker, maskBearerTokens, maskKeys } from '../shared/mask.mjs';
+import { BEARER_TOKEN, createMasker, KEY_BEGIN, KEY_END, KEY_HOLD, maskKeys } from '../shared/mask.mjs';
 
 /** R-BTN-144 class 7: the name endings the environment decides, compared case-sensitively. */
 export const SECRET_NAME_SUFFIXES = ['_KEY', '_TOKEN', '_SECRET', '_PASSWORD', '_PAT'];
@@ -37,19 +37,78 @@ export function secretValues(env: Record<string, string | undefined>, maskEnv: r
   return [...out];
 }
 
-/** One class 7 literal as a pattern: every occurrence of `secret`, as it stands. */
-const literalOf = (secret: string): RegExp => new RegExp(secret.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g');
+/** KMP's failure table: after matching k characters, the next shorter prefix still possible. */
+const prefixTable = (length: number, charAt: (i: number) => number): number[] => {
+  const fail = new Array<number>(length + 1).fill(0);
+  for (let i = 1, k = 0; i < length; i++) {
+    const c = charAt(i);
+    while (k > 0 && c !== charAt(k)) k = fail[k];
+    if (c === charAt(k)) k++;
+    fail[i + 1] = k;
+  }
+  return fail;
+};
 
-/** `text` with every class-7 literal replaced by `***`. */
+/** Where in `text` any class 7 literal stands: every occurrence of every literal, as sorted,
+ *  disjoint `[start, end)` runs — occurrences that overlap are one run, whichever literal each is,
+ *  so a literal inside, or overlapping, another is masked with it in one piece, in any order of
+ *  the set. Memory stays linear in the runs: a periodic run (`aaaa…` against `aaaa`) is taken
+ *  whole, never one occurrence at a time. */
+export function literalSpans(text: string, literals: readonly string[]): Array<[number, number]> {
+  const found: Array<[number, number]> = [];
+  for (const literal of literals) {
+    const n = literal.length;
+    if (n === 0) continue;
+    const p = n - prefixTable(n, (i) => literal.charCodeAt(i))[n];
+    let from = 0;
+    while (from <= text.length - n) {
+      const i = text.indexOf(literal, from);
+      if (i < 0) break;
+      // The text goes on with the literal's period: every window `p` further is an occurrence.
+      let j = i + n;
+      while (j < text.length && text.charCodeAt(j) === text.charCodeAt(j - p)) j++;
+      const end = i + n + Math.floor((j - i - n) / p) * p;
+      const last = found.length > 0 && found[found.length - 1][0] <= i ? found[found.length - 1] : null;
+      if (last && i < last[1]) last[1] = Math.max(last[1], end);
+      else found.push([i, end]);
+      // An occurrence starting before `end - n + 1` ends inside the run already found.
+      from = Math.max(i + 1, end - n + 1);
+    }
+  }
+  return mergeSpans(found);
+}
+
+function mergeSpans(found: Array<[number, number]>): Array<[number, number]> {
+  found.sort((a, b) => a[0] - b[0]);
+  const runs: Array<[number, number]> = [];
+  for (const [s, e] of found) {
+    const last = runs[runs.length - 1];
+    if (last && s < last[1]) last[1] = Math.max(last[1], e);
+    else runs.push([s, e]);
+  }
+  return runs;
+}
+
+/** `text` with every class-7 literal replaced by `***` — the literals alone: class 6 belongs to
+ *  whoever sees the whole stream (a block is held line by line), so a line on its way into the
+ *  block stream is masked of its literals, never of a block it may be part of. One pass over the
+ *  merged runs (`literalSpans`), so one literal inside or overlapping another leaves nothing of
+ *  either, whatever order the environment listed them in. */
 const maskLiterals = (text: string, literals: readonly string[]): string => {
-  let out = text;
-  for (const secret of literals) out = out.replace(literalOf(secret), () => '***');
-  return out;
+  let out = '';
+  let at = 0;
+  for (const [s, e] of literalSpans(text, literals)) {
+    out += `${text.slice(at, s)}***`;
+    at = e;
+  }
+  return out + text.slice(at);
 };
 
 /** `text` with every class-5, class-6 and class-7 occurrence replaced by `***`. */
 export function maskLegOutput(text: string, secrets: readonly string[]): string {
-  return maskBearerTokens(maskLiterals(maskKeys(text), secrets));
+  // B-311: key blocks first, on the raw text — a literal masked inside a banner must not hide
+  // the block from its own pattern — then the literals, then class 5.
+  return maskLiterals(maskKeys(text), secrets).replace(new RegExp(BEARER_TOKEN.source, 'g'), '***');
 }
 
 /** The end `detail` a failed leg's claim carries (§9.4, B-256): the last line of the leg's error —
@@ -66,72 +125,224 @@ export function failureDetail(error: string, secrets: readonly string[]): string
 /** §9.4: an end's `detail` is at most 200 characters (src/core/validate.ts `checkEnd`). */
 export const FAILURE_DETAIL_MAX = 200;
 
-/** Hold back the part of `text` that could be the start of a class 7 literal — its longest tail
- *  that one still extends — so a value split across two writes is still masked as one. Returns
- *  what may go, and what waits for the next write. The longest tail wins: a shorter suffix that
- *  happens to prefix some other literal must not cut short the one actually being split. */
-export function holdLiteralTail(text: string, literals: readonly string[]): { head: string; tail: string } {
-  // A tail waits only if a literal could still complete it in the next line: one no literal
-  // extends would never be masked, and holding it would stall the stream. No tail longer than
-  // the longest literal minus one can be a proper prefix of any of them.
-  let longest = 0;
-  for (const literal of literals) longest = Math.max(longest, literal.length);
-  for (let n = Math.min(text.length, longest - 1); n >= 1; n--) {
-    const tail = text.slice(-n);
-    if (literals.some((literal) => literal.startsWith(tail) && literal.length > tail.length)) return { head: text.slice(0, text.length - tail.length), tail };
+/** Length of the longest proper prefix that is also a suffix of this line. */
+function tailLength(line: string, literal: string, fail: number[]): number {
+  let k = 0;
+  for (let i = Math.max(0, line.length - literal.length + 1); i < line.length; i++) {
+    while (k > 0 && line[i] !== literal[k]) k = fail[k];
+    if (line[i] === literal[k]) k++;
   }
-  return { head: text, tail: '' };
+  return k;
+}
+
+/** Hold the longest tail that could begin a class 7 literal. */
+export function holdLiteralTail(text: string, literals: readonly string[]): { head: string; tail: string } {
+  let longest = 0;
+  for (const literal of literals) {
+    const fail = prefixTable(literal.length, (i) => literal.charCodeAt(i));
+    longest = Math.max(longest, tailLength(text, literal, fail));
+  }
+  const cut = text.length - longest;
+  return { head: text.slice(0, cut), tail: text.slice(cut) };
+}
+
+/** Z scan of `linePrefix + sentinel + literal`: how much of the line matches at each literal
+ *  offset. Each scan either reuses a known overlap or extends the furthest match. */
+function lineOverlaps(line: string, literal: string): number[] {
+  const size = Math.min(line.length, literal.length);
+  const base = size + 1;
+  const z = new Array<number>(base + literal.length).fill(0);
+  const charAt = (i: number) => i < size ? line.charCodeAt(i) : i === size ? -1 : literal.charCodeAt(i - base);
+  for (let i = 1, left = 0, right = 0; i < z.length; i++) {
+    let k = i < right ? Math.min(right - i, z[i - left]) : 0;
+    while (i + k < z.length && charAt(k) === charAt(i + k)) k++;
+    z[i] = k;
+    if (i + k > right) [left, right] = [i, i + k];
+  }
+  z.push(0);
+  return z.slice(base);
+}
+
+/** Advance one literal across line boundaries. For each still-possible prefix length, keep its
+ *  earliest start: the histories have the same future, and that start covers all their bytes.
+ *  Positions count only line contents, so blank lines cannot grow the buffered text. */
+function createBoundaryMatcher(literal: string) {
+  const n = literal.length;
+  const fail = prefixTable(n, (i) => literal.charCodeAt(i));
+  let prefixes = new Map<number, number>();
+  return {
+    push(line: string, offset: number, boundary: '' | '\n' | '\r\n') {
+      const end = offset + line.length;
+      const next = new Map<number, number>();
+      let first = end;
+      let crossed = offset;
+      let leading = offset;
+      const keep = (length: number, start: number) => {
+        next.set(length, Math.min(start, next.get(length) ?? start));
+        first = Math.min(first, start);
+      };
+      for (let k = tailLength(line, literal, fail); k > 0; k = fail[k]) keep(k, end - k);
+
+      const crlf = boundary === '\r\n';
+      if (boundary && (literal[0] === '\n' || (crlf && literal[0] === '\r'))) prefixes.set(0, offset);
+      if (prefixes.size > 0) {
+        // Comparing the line separately at every active prefix is quadratic on repeats.
+        const overlap = lineOverlaps(line, literal);
+        const extend = (k: number, start: number) => {
+          const matched = overlap[k];
+          if (k + matched === n) {
+            if (start < offset) crossed = Math.max(crossed, offset + matched);
+            else leading = Math.max(leading, offset + matched);
+          } else if (matched === line.length) {
+            keep(k + matched, start);
+          }
+        };
+        for (const [k, start] of prefixes) {
+          if (k > 0) extend(k, start); // a wrapped value: omit the framing boundary
+          if (boundary && literal[k] === '\n') extend(k + 1, start);
+          if (crlf && literal[k] === '\r') {
+            // The CR may belong to the literal, whether the LF does or not.
+            extend(k + 1, start);
+            if (literal[k + 1] === '\n') extend(k + 2, start);
+          }
+        }
+      }
+      prefixes = next;
+      return { first, crossed, leading };
+    },
+    reset() { prefixes.clear(); },
+  };
 }
 
 /** R-BTN-144 across a stream, which a line-at-a-time sink cannot do. Class 6's key block is
  *  `src/shared/mask.mjs`'s stream (`createMasker`: a block's lines are held until its `END` line
- *  or `KEY_HOLD` bytes). It sees the raw line so literal masking cannot break a key banner.
- *  Class 7 is masked in the text outside the block: the tail `holdLiteralTail` says a literal
+ *  or `KEY_HOLD` bytes, and classes 5 and 6 are masked on every line as it leaves) — each line
+ *  is masked of its class-7 literals and handed to that stream, never the other way round: a
+ *  block's body lines must reach the holder as they came, or the holder never sees the block.
+ *  Class 7 is masked here, as each line is handed on: the tail `holdLiteralTail` says a literal
  *  still extends is held back, unlogged, until the next line completes the literal (masked as
  *  one) or shows it will never complete — and a hold that never completes leaves as `***`,
  *  never verbatim, for its bytes may be the literal's own.
  *
- *  A literal the line framing split can re-form two ways, and both are tried: with the `\n` the
- *  framing ate (a newline inside the value) and without it (the value wrapped across the line).
+ *  Three rules keep every byte of a literal out of the log (S-BTN-119):
+ *  - the hold never cuts a literal the text holds whole: the run of literals the cut crosses
+ *    leaves as `***` with the head, and its bytes past the cut are held only as the next
+ *    literal's possible start (a value's last bytes can begin another's: `…9f2c71`, `1abc…`);
+ *  - held bytes are masked whatever the next line does — the hold is one masked run with any
+ *    literal it is part of — and bytes that already left as such a `***` never leave again,
+ *    neither in clear nor as a second `***` of their own;
+ *  - literals are masked as merged runs (`literalSpans`), never one after another.
+ *
+ *  Boundary interpretations stay live until disproved: with the newline the framing ate, or
+ *  without it (the value wrapped). CRLF also admits the CR as literal data before a wrap.
+ *  Match spans refer to the same line content in each interpretation, so mask their union.
  *  `push` takes one line (never with its `\n`: the stream's own) and returns what may leave
  *  now, joined by `\n` — `''` while a block, or a tail, is held; `flush` returns the rest at
  *  the stream's end: the `***` a held tail leaves and an unclosed block's. */
 export function createLegMasker(secrets: readonly string[]) {
-  // A value's own trailing line ending never arrives (the sink's unit is the line without its
-  // `\n`), so one is dropped and the value is masked where it stands; a `\r\n` inside a value is
-  // the boundary the framing hands back as `\n` alone.
-  const literals = [...new Set(secrets.map((secret) => secret.replace(/\r\n/g, '\n').replace(/\r?\n$/, '')).filter((secret) => secret !== ''))];
+  // Keep raw CR as a matchable character, as well as the LF spelling for normalized output.
+  // Drop a final LF so a value can be masked without waiting for another line.
+  const literals = [...new Set(secrets.flatMap((secret) => [secret, secret.replace(/\r\n/g, '\n')])
+    .map((secret) => secret.replace(/\n$/, '')).filter((secret) => secret !== ''))];
+  const block = createMasker();
+  const matchers = literals.map(createBoundaryMatcher);
+  let offset = 0;
+  let boundary: '' | '\n' | '\r\n' = '';
+  // What is held back, unlogged: a tail some literal may still extend.
   let held = '';
-  const block = createMasker((line, endsAtKey) => {
-    const said: string[] = [];
-    const emit = ({ head, tail }: { head: string; tail: string }): string => {
-      said.push(maskLiterals(head, literals));
-      // A key block interrupts the literal stream; do not join text across the block.
-      if (endsAtKey && tail !== '') said.push('***');
-      held = endsAtKey ? '' : tail;
-      return said.filter(Boolean).join('\n');
-    };
-    if (held !== '') {
-      // The line before ended inside a literal, and this line may complete it: with the
-      // boundary the framing ate (`held\nline` — a newline inside the value) or without it
-      // (`heldline` — the value wrapped across the line). The candidate that completes a
-      // literal wins; else the one that keeps one open the longest; else the hold was never a
-      // literal's start, and its bytes leave masked — never verbatim.
-      const joined = [held + line, `${held}\n${line}`].map((text) => ({ text, split: holdLiteralTail(text, literals) }));
-      const completes = joined.filter((j) => literals.some((literal) => j.text.includes(literal)));
-      const opens = joined.filter((j) => j.split.tail !== '').sort((a, b) => b.split.tail.length - a.split.tail.length);
-      const best = completes[0] ?? opens[0];
-      if (best) return emit(best.split);
-      said.push('***');
+  // How many of `held`'s leading bytes already left, as part of a `***` (a literal the hold's
+  // cut crossed): those bytes leave again as nothing, never in clear and never as more `***`.
+  let gone = 0;
+  const said: string[] = [];
+  const out = (text: string) => {
+    for (const line of text.split('\n')) said.push(block.push(line));
+  };
+  const take = (line: string) => {
+    const text = held + line;
+    const hold = held.length;
+    const base = offset - hold;
+    const end = offset + line.length;
+    let first = end;
+    let crossed = offset;
+    let leading = offset;
+    for (const matcher of matchers) {
+      const match = matcher.push(line, offset, boundary);
+      first = Math.min(first, match.first);
+      crossed = Math.max(crossed, match.crossed);
+      leading = Math.max(leading, match.leading);
     }
-    return emit(holdLiteralTail(line, literals));
-  });
+    const cut = first - base;
+    const spans = literalSpans(line, literals).map(([s, e]): [number, number] => [s + hold, e + hold]);
+    // Every crossing that started in the hold overlaps its mask. A match starting on a bare
+    // boundary, without touching held characters, is a separate run unless the spans overlap.
+    if (hold > 0) spans.push([0, crossed - base]);
+    if (leading > offset) spans.push([hold, leading - base]);
+    let text_ = '';
+    let at = 0;
+    let nextGone = Math.max(0, gone - cut);
+    for (const [s, e] of mergeSpans(spans)) {
+      if (s >= cut) break;
+      // The run's bytes this push lets go: masked, unless every one of them already left.
+      const emitsNew = !(s === 0 && Math.min(e, cut) <= gone);
+      text_ += text.slice(at, s) + (emitsNew ? '***' : '');
+      at = Math.min(e, cut);
+      if (emitsNew && e > cut) nextGone = Math.max(nextGone, e - cut);
+      if (e === hold && at < cut) text_ += '\n';
+    }
+    text_ += text.slice(at, cut);
+    if (text_ !== '' || cut > 0) out(text_);
+    held = text.slice(cut);
+    gone = Math.min(nextGone, held.length);
+    offset = end;
+  };
+  // B-311: a key block is recognized on the raw line, before any literal is masked — a literal
+  // that overlaps a banner must not break the banner and leak the block. While a block is held
+  // its lines go to the block stream as they came; the literal state restarts after it.
+  let keyBytes = -1;
+  const restart = () => {
+    if (held !== '' && gone < held.length) said.push(block.push('***'));
+    held = '';
+    gone = 0;
+    offset = 0;
+    boundary = '';
+    for (const matcher of matchers) matcher.reset();
+  };
   return {
-    push: (line: string) => block.push(line),
+    push(line: string, frame: '\n' | '\r\n' = '\n'): string {
+      said.length = 0;
+      if (keyBytes >= 0) {
+        keyBytes += line.length + 1;
+        said.push(block.push(line));
+        if (KEY_END.test(line) || keyBytes >= KEY_HOLD) keyBytes = -1;
+        return said.filter(Boolean).join('\n');
+      }
+      const open = line.search(KEY_BEGIN);
+      if (open >= 0) {
+        // What precedes the banner on its line is ordinary text, masked as any other line.
+        if (open > 0) take(line.slice(0, open));
+        restart();
+        const rest = line.slice(open);
+        said.push(block.push(rest));
+        keyBytes = rest.length;
+        return said.filter(Boolean).join('\n');
+      }
+      take(line);
+      boundary = frame;
+      return said.filter(Boolean).join('\n');
+    },
     flush(): string {
-      const tail = held === '' ? '' : '***';
+      said.length = 0;
+      // The stream ended inside what may be a literal: those bytes leave masked, not verbatim —
+      // unless every one of them already left as the `***` of a literal the head held whole.
+      if (held !== '' && gone < held.length) said.push(block.push('***'));
       held = '';
-      return [tail, block.flush()].filter(Boolean).join('\n');
+      gone = 0;
+      offset = 0;
+      boundary = '';
+      keyBytes = -1;
+      for (const matcher of matchers) matcher.reset();
+      said.push(block.flush());
+      return said.filter(Boolean).join('\n');
     },
   };
 }

@@ -98,19 +98,18 @@ describe('S-BTN-76 hostile values are text on every V2 screen (B-216)', () => {
     }
   });
 
-  it('a listed host is a link, an unlisted one the same characters as text: the rule passes what it should', async () => {
+  it('a listed session host is a link; the neutral label never exposes the address', async () => {
     for (const page of ['repository/tickets/{ticket}', 'repository/runners/{runner}', 'repository/conditions/{condition}'] as PageId[]) {
       await draw(page, LISTED);
       const linked = [...document.querySelectorAll('a[href]')].filter((a) => a.getAttribute('href') === LISTED);
       expect([page, linked.length > 0]).toEqual([page, true]);
       // A link out opens without a handle on this page.
-      for (const a of linked) expect([a.getAttribute('rel'), a.getAttribute('target')]).toEqual([expect.stringContaining('noopener'), '_blank']);
+      for (const a of linked) expect([a.getAttribute('rel'), a.getAttribute('target')]).toEqual(['noopener noreferrer', '_blank']);
       cleanup();
       resetShell();
       const main = await draw(page, 'https://evil.example/s/1');
       expect([...document.querySelectorAll('a[href*="evil.example"]')]).toEqual([]);
-      // The ticket's page shows the address it would not link, so a person can read it.
-      if (page === 'repository/tickets/{ticket}') expect(main.textContent).toContain('https://evil.example/s/1');
+      expect([...main.querySelectorAll('.unlinked')].some((el) => el.textContent === 'Open leg page')).toBe(true);
       cleanup();
       resetShell();
     }

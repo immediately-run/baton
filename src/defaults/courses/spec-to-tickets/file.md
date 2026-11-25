@@ -24,21 +24,23 @@ File the set as `check` left it; do not re-decompose it. If a draft cannot be fi
 If the request's `status:` is `withdrawn`, the owner decided against filing: file nothing,
 write nothing, and stop.
 
-For each draft, write a ticket file in the tickets directory (the `items` setting in
-`.baton/baton.json`, `tickets/` by default):
+For each draft, file a ticket with `$BATON_DIBBER` (the `dibber` your stub pins: run it exactly as that variable says, never another):
+`$BATON_DIBBER new --title "…" --body-file <the draft's body, in a file outside the checkout>`,
+with the options below. Never write a ticket file by hand.
 
-- **id** the next id the repository's id tool allocates (`baton tickets next ticket-<prefix>`:
-  an id from Baton's sequence, never a scan, R-BTN-131).
-- **parent** this ticket's id: every filed ticket is a child of the request.
-- **depends_on** the drafts' dependencies, by their filed ids.
-- **order** the draft's order, so the board takes them in the spec's order.
-- **tags** `[OP]` where the draft marks a person's ticket, so no agent claims it.
-- **course** the repository's `default_course` unless the draft names another course the
-  checkout's `.baton/baton.json` lists; never this course.
+- **id** Dibber's: it takes the next number from Baton's sequence through `.dibber/config.json`'s
+  coordinator, never a scan (R-BTN-131). If it refuses because Baton gave no number, stop and say
+  so — never `--offline`, never an id of your own.
+- **parent** this ticket's id (`--parent`): every filed ticket is a child of the request.
+- **depends_on** (`--depends-on`) the drafts' dependencies, by their filed ids.
+- **order** (`--order`) the draft's order, so the board takes them in the spec's order.
+- **tags** (`--tags OP`) where the draft marks a person's ticket, so no agent claims it.
+- **course** (`--field course=<id>`) only when the draft names a course other than the
+  repository's `default_course` that the checkout's `.baton/baton.json` lists; never this course.
 - **The body** the draft's, verbatim, with its `### Trust` (every new input it adds, who may write it and how it is verified, or "no new input") and `### Invariants` (the rules it must not break, by id, and how the design keeps each) — write them if the draft lacks them — and ending in `## Status` with `_filed <today, YYYY-MM-DD>.`.
 
-Then add a `## file` section to the request naming each child, set the request's `status:` to `done`,
-and commit the children and the request together, with explicit paths, to the default branch.
+Then add a `## file` section to the request naming each child, set the request's `status:` to `done`
+with `$BATON_DIBBER done <its id>`, and commit the children and the request together, with explicit paths, to the default branch.
 
 Your work lands under the ticket's own `## file` heading — write it if it is not there; the close checks it is.
 
