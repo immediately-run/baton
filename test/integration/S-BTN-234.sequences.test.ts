@@ -18,6 +18,8 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { Sequences } from '../../src/core/sequences';
+import type { Row } from '../../src/core/ports';
 import { call as hostCall, HOST } from '#host';
 import { initMain, parseSyncArgs, syncMain } from '../../src/defaults/cli';
 import { nextMain } from '../../src/defaults/sequences';
@@ -68,6 +70,26 @@ beforeEach(async () => {
 });
 
 describe('S-BTN-234 Baton hands out the identifiers (B-176)', () => {
+  it('reads the stored number inside the allocation transaction', async () => {
+    await withCore((core) => {
+      const store = core.store;
+      let allocating = false;
+      const sequences = new Sequences({ now: () => core.now(), store: {
+        ...store,
+        exec<T = Row>(query: string, ...params: unknown[]) {
+          if (/^SELECT last_number FROM sequences\b/.test(query)) expect(allocating).toBe(true);
+          return store.exec<T>(query, ...params);
+        },
+        transaction: (fn) => store.transaction(() => {
+          allocating = true;
+          try { return fn(); } finally { allocating = false; }
+        }),
+      } });
+      expect(sequences.next('ops', 'migration', 40, 'test', null)).toEqual({ kind: 'migration', number: 41 });
+      expect(sequences.next('ops', 'migration', null, 'test', null)).toEqual({ kind: 'migration', number: 42 });
+    });
+  });
+
   it('a retired repository hands out no number — not-found, as one never registered (R-BTN-47)', async () => {
     expect(await take(opsOwner, 'ops', 'ticket-b', { floor: 5 })).toMatchObject({ status: 200, json: { number: 6 } });
     expect((await keyCall(admin, '/v1/admin/repositories', { id: 'ops', retire: true, confirm: true })).status).toBe(200);

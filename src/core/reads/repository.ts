@@ -3,6 +3,7 @@
 // the history, a ticket and its children, a leg's runs, the policy, the stats, the conditions,
 // and the owner's grants and policy log. The dispatcher supplies one principal, one
 // authorization, the ETag and the R-BTN-113 projection for session capabilities (./index.ts).
+import { repositoryRead } from '../routes/public';
 import { BatonError, json } from '../http';
 import { STATS_WINDOW_MS } from '../stats';
 import { withCredentials } from './credentials';
@@ -13,7 +14,7 @@ import type { ReadRoute } from './kit';
 const legacy = (action: string, over: Partial<ReadRoute> = {}): ReadRoute => ({
   action,
   clock: true,
-  run: async (cx, call) => (await cx.core.repositoryRead(call.req, call.url, call.repository!, call.principal, call.sessionLink))
+  run: async (cx, call) => (await repositoryRead(cx.core, call.req, call.url, call.repository!, call.principal, call.sessionLink))
     ?? (() => { throw new BatonError('not-found', `no route GET ${call.url.pathname}`); })(),
   ...over,
 });

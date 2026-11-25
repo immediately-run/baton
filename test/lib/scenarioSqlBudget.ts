@@ -1,5 +1,6 @@
 import { execFileSync, spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
+import { scenarioSource } from './scenarioSource';
 
 export const ALLOWLIST = 'test/fixtures/scenario-sql-allowlist.json';
 export type WriteBudget = Record<string, Record<string, number>>;
@@ -27,9 +28,27 @@ export function baseWriteBudget(cwd: string): WriteBudget {
   }
 
   ensureCommit(base);
-  if (!git('ls-tree', base, '--', ALLOWLIST)) base = INITIAL;
-  ensureCommit(base);
-  return JSON.parse(git('show', `${base}:${ALLOWLIST}`));
+  if (git('ls-tree', base, '--', ALLOWLIST)) return JSON.parse(git('show', `${base}:${ALLOWLIST}`));
+  // A base without the gate: the first committed budget, raised only to the raw writes the
+  // base's own scenarios already make (main's storage and migration probes written since). The
+  // working tree still cannot add a write the base does not have.
+  ensureCommit(INITIAL);
+  return withBaseWrites(JSON.parse(git('show', `${INITIAL}:${ALLOWLIST}`)), (dir) =>
+    git('ls-tree', '-r', '--name-only', base, '--', `test/${dir}`).split('\n').filter((path) => path.endsWith('.ts'))
+      .map((path) => [path.slice('test/'.length), git('show', `${base}:${path}`)] as const));
+}
+
+function withBaseWrites(initial: WriteBudget, files: (dir: string) => (readonly [string, string])[]): WriteBudget {
+  const budget: WriteBudget = structuredClone(initial);
+  for (const dir of ['unit', 'integration']) for (const [file, source] of files(dir)) {
+    const counts: Record<string, number> = {};
+    for (const { key } of scenarioSource(file, source).writes) counts[key] = (counts[key] ?? 0) + 1;
+    for (const [key, count] of Object.entries(counts)) {
+      budget[file] ??= {};
+      budget[file][key] = Math.max(budget[file][key] ?? 0, count);
+    }
+  }
+  return budget;
 }
 
 export function budgetIncreases(current: WriteBudget, base: WriteBudget): string[] {

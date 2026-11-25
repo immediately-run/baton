@@ -14,13 +14,18 @@
 // child processes and runs git.
 import { runnerApi, testRunner, until } from '../lib/runnerRig';
 import { GitRepo } from '../lib/gitRepo';
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { build } from 'esbuild';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { BatonApi, BatonRefusal } from '../../src/runner/api';
 import { Runner, legActivity, newestWrite } from '../../src/runner/runner';
+import { runMain } from '../../src/runner/main';
+import { HARNESS_ADAPTERS, type HarnessAdapter } from '../../src/runner/harness';
+import { stubSource } from '../../src/defaults/cli';
+import { builtIn } from '../../src/defaults/courses';
 import { legNeeds, readHead } from '../../src/runner/home';
 import { capabilitiesOf } from '../../src/shared/vocabulary.mjs';
 import { call as hostCall } from '#host';
@@ -35,16 +40,16 @@ const T0 = Date.parse('2026-10-16T12:00:00Z');
 /** One leg script: `run` is the body given; `close` commits its closing record and returns the
  * commit (the position is in git before it is reported, R-BTN-83); `handoff` records its call.
  * Every line the test asserts on lands in `<home>/.baton/evidence.jsonl`. */
-function legFile(run: string, defaultExport = false): string {
+function legFile(run: string | null, defaultExport = false): string {
   return `import { appendFileSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 const at = (ctx, name) => [ctx.checkout, '.baton', name].join('/');
 const ev = (ctx, line) => appendFileSync(at(ctx, 'evidence.jsonl'), line + '\\n');
 const out = (ctx, o) => { const f = at(ctx, 'evidence.jsonl'); const was = existsSync(f) ? readFileSync(f, 'utf8') : ''; writeFileSync(f, was + JSON.stringify(o) + '\\n'); };
 const git = (ctx, ...a) => execFileSync('git', ['-C', ctx.checkout, ...a], { encoding: 'utf8' }).trim();
-${defaultExport ? 'export default' : 'export'} async function run(ctx) {
+${run === null ? '' : `${defaultExport ? 'export default' : 'export'} async function run(ctx) {
 ${run}
-}
+}`}
 export async function close(ctx, result) {
   appendFileSync(at(ctx, 'closes.jsonl'), JSON.stringify({ leg: ctx.leg, ...(result && result.reached ? { reached: result.reached } : {}), claim: ctx.claim.nonce }) + '\\n');
   git(ctx, 'add', '.baton/closes.jsonl');
@@ -158,6 +163,61 @@ afterEach(async () => {
 });
 
 describe('S-BTN-41 the runner', () => {
+  it('claims and runs a standard stub with a third harness that stays active only in its store (B-284)', async () => {
+    const store = '.baton/third harness.store';
+    home.write('.baton/third-agent.mjs', `import { appendFileSync } from 'node:fs';
+      for (let i = 0; i < 24; i++) {
+        appendFileSync(${JSON.stringify(store)}, 'active\\n');
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      console.log('built');`);
+    const standard = stubSource({
+      ...builtIn('draft-ticket')!, id: 'relay',
+      legs: { build: { ask: { name: 'outcome', values: ['built'] }, position: "{ suspend: true, reached: answer, next: 'check' }" } },
+    }, 'relay', 'build');
+    expect(standard).toContain('AGENT_IDLE_MS = 900000');
+    const bundle = await build({
+      stdin: { contents: standard.replace('AGENT_IDLE_MS = 900000', 'AGENT_IDLE_MS = 1000'), resolveDir: process.cwd() },
+      bundle: true, platform: 'node', format: 'esm', write: false,
+    });
+    home.write('.baton/courses/relay/legs/standard.mjs', bundle.outputFiles[0].text);
+    home.write('.baton/courses/relay/legs/build.mjs', `${legFile(null)}\nexport { run } from './standard.mjs';\n`);
+    home.commit();
+    await home.post({ 'T-1': placed('filed', [], [['build', 'ready']]) });
+    const third: HarnessAdapter = {
+      name: 'third-agent', agentCommand: 'node .baton/third-agent.mjs',
+      activityPaths(checkout) { return [join(checkout, store)]; },
+      usage: () => ({ records: [], children: [] }),
+    };
+    vi.stubEnv('BATON_PARENT', undefined);
+    vi.stubEnv('BATON_TOKEN', TOKENS['vm-a']);
+    vi.stubEnv('BATON_KEY', undefined);
+    vi.stubEnv('BATON_KEY_FILE', undefined);
+    vi.stubEnv('HOME', home.dir);
+    const handlers = new Set(process.listeners('SIGTERM'));
+    let finished = false;
+    const running = runMain([
+      '--harness', third.name, '--home', home.dir, '--hostname', 'vm-a', '--session', 'third-harness',
+      '--url', 'https://baton.test', '--repository', 'docs', '--executor', 'builtin', '--beat-every', '50',
+    ], { harnesses: [...HARNESS_ADAPTERS, third], transport: hostCall, fetch: () => {}, log: () => {} })
+      .then((code) => ({ code }), (error: unknown) => ({ error }))
+      .finally(() => { finished = true; });
+    const drain = process.listeners('SIGTERM').find((handler) => !handlers.has(handler)) as ((s: NodeJS.Signals) => void) | undefined;
+    try {
+      expect(drain).toBeDefined();
+      await until(async () => {
+        if (finished) throw new Error('runner stopped before completing its leg');
+        return rows('SELECT end_reason FROM claims WHERE end_reason IS NOT NULL');
+      }, (values) => values.length > 0, 'the leg to end');
+      expect(await rows('SELECT end_reason FROM claims')).toEqual([{ end_reason: 'suspended:built' }]);
+      expect(await rows('SELECT harness FROM runners WHERE session_name = ?', 'third-harness')).toEqual([{ harness: third.name }]);
+      expect(readFileSync(join(home.dir, store), 'utf8')).toBe('active\n'.repeat(24));
+    } finally {
+      if (!finished) drain?.('SIGTERM');
+      try { expect(await running).toEqual({ code: 0 }); } finally { vi.unstubAllEnvs(); }
+    }
+  }, 30_000);
+
   it('claims a ticket and takes the leg each result names, never inferring one', async () => {
     home.leg('build', `out(ctx, { leg: 'build', parent: process.env.BATON_PARENT ?? null, hasState: !!process.env.BATON_STATE, hasOldMarkers: !!(process.env.IR_BATON_PARENT || process.env.IR_BATON_STATE), session: ctx.session ?? null, run: ctx.run });
   return { reached: 'built', next: 'check', session: 's-1' };`);
