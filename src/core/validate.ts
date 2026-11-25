@@ -536,6 +536,7 @@ export function checkMessage(body: unknown): { to_runner_id: number; kind: 'rele
   const x = p as Record<string, unknown>;
   const ticket_id = matches(TICKET_ID, 'payload.ticket_id')(x.ticket_id);
   if (!RELEASE_REASONS.includes(x.reason as never)) bad('payload.reason', `must be one of ${RELEASE_REASONS.join(', ')}`);
+  checkConfirm(b);
   return { to_runner_id: b.to_runner_id as number, kind: 'release', payload: { ticket_id, reason: x.reason } };
 }
 
@@ -1111,9 +1112,9 @@ export function checkFenced(v: unknown): { claim_id: number }[] {
   });
 }
 
-/** An owner action that names its own confirmation (§14: force-reap). */
+/** §12.2: only an explicit JSON boolean true confirms a destructive action. */
 export function checkConfirm(body: unknown): void {
-  if (!isObj(body) || body.confirm !== true) bad('confirm', 'must be true');
+  if (!isObj(body) || body.confirm !== true) throw new BatonError('confirm-required', 'this action takes confirm: true');
 }
 
 export function checkAccept(body: unknown): { repository: string; sha: string } {
@@ -1452,4 +1453,8 @@ export function checkNoticeClaim(v: unknown): number {
   if (b.limit === undefined) return CLAIM_MAX;
   if (!Number.isInteger(b.limit) || (b.limit as number) < 1 || (b.limit as number) > CLAIM_MAX) bad('limit', `must be an integer from 1 to ${CLAIM_MAX}`);
   return b.limit as number;
+}
+/** B-131: the opaque R-BTN-63 run id selects one leg, not all claims of a key. */
+export function checkForgeRun(run: string): void {
+  if (!/^r_[0-9A-HJKMNP-TV-Z]{26}$/.test(run)) bad('run', 'must be a leg run id');
 }

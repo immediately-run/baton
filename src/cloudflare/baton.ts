@@ -6,7 +6,7 @@ import { DurableObject } from 'cloudflare:workers';
 import { BatonCore } from '../core/baton';
 import { sendForgeDispatch } from '../core/dispatch';
 import { parseAdminKeys } from '../core/auth';
-import type { Cursor, Row, SqlValue, Store } from '../core/ports';
+import type { Cursor, EventArchive, Row, SqlValue, Store } from '../core/ports';
 
 /** `ctx.storage` as the core's Store: the same synchronous SQLite, unchanged. */
 export function durableStore(storage: DurableObjectStorage): Store {
@@ -17,14 +17,62 @@ export function durableStore(storage: DurableObjectStorage): Store {
   };
 }
 
+function r2EventArchive(bucket: R2Bucket): EventArchive {
+  return async (parts) => {
+    for (const { repository, day, ndjson } of parts) {
+      const key = `events/${repository}/${day}.ndjson`;
+      const previous = await bucket.get(key);
+      const options: R2PutOptions = {
+        onlyIf: previous ? { etagMatches: previous.etag } : { etagDoesNotMatch: '*' },
+        httpMetadata: { contentType: 'application/x-ndjson' },
+      };
+      if (!previous) {
+        if (!await bucket.put(key, ndjson, options)) throw new Error(`R2 did not acknowledge ${key}`);
+        continue;
+      }
+
+      // Rewrite the daily object without buffering it in Worker memory. The conditional put
+      // must not replace bytes added since our read, even if a second writer used the key.
+      const bytes = new TextEncoder().encode(ndjson);
+      const stream = new FixedLengthStream(previous.size + bytes.byteLength);
+      const reader = previous.body.getReader();
+      const source = new ReadableStream<Uint8Array>({
+        async pull(controller) {
+          const chunk = await reader.read();
+          if (!chunk.done) controller.enqueue(chunk.value);
+          else {
+            controller.enqueue(bytes);
+            controller.close();
+          }
+        },
+        cancel: (reason) => reader.cancel(reason),
+      });
+      const abort = new AbortController();
+      const put = async () => {
+        try {
+          if (!await bucket.put(key, stream.readable, options)) throw new Error(`R2 did not acknowledge ${key}`);
+        } catch (error) {
+          abort.abort(error);
+          throw error;
+        }
+      };
+      const [write, copy] = await Promise.allSettled([put(), source.pipeTo(stream.writable, { signal: abort.signal })]);
+      if (write.status === 'rejected') throw write.reason;
+      if (copy.status === 'rejected') throw copy.reason;
+    }
+  };
+}
+
 export class Baton extends DurableObject<Env> {
   readonly core: BatonCore;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
+    const archive = env.BATON_EVENT_ARCHIVE;
     this.core = new BatonCore({
       store: durableStore(ctx.storage),
       scheduler: { get: () => ctx.storage.getAlarm(), set: (at) => ctx.storage.setAlarm(at) },
+      archiveEvents: archive && r2EventArchive(archive),
       config: env,
       dispatch: { send: (target) => sendForgeDispatch(env, target, this.core.now()), defer: (work) => ctx.waitUntil(work) },
       adminKeys: { list: () => parseAdminKeys(env.BATON_ADMIN_KEYS ?? '') },

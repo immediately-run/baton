@@ -17,6 +17,7 @@ import { parseAdminKeys } from '../core/auth';
 import { BatonError } from '../core/http';
 import type { AccessIdentities, Config } from '../core/ports';
 import { LocalHost } from './host';
+import { fileEventArchive } from './eventArchive';
 import { serve } from './server';
 import { openStore } from './store';
 
@@ -57,6 +58,7 @@ export function localConfig(file: Record<string, unknown>, origin: string): Conf
     TOKEN_HASHES: opt('TOKEN_HASHES'),
     CREDENTIALS: opt('CREDENTIALS'),
     BATON_KEYS: opt('BATON_KEYS'),
+    BATON_FORGE_BROKER_KEYS: opt('BATON_FORGE_BROKER_KEYS'),
     BATON_SESSION_HOSTS: opt('BATON_SESSION_HOSTS'),
     BATON_IDLE_NOTIFY_AFTER_S: opt('BATON_IDLE_NOTIFY_AFTER_S'),
     BATON_GITHUB_WEBHOOK_SECRET: opt('BATON_GITHUB_WEBHOOK_SECRET'),
@@ -99,11 +101,16 @@ export async function main(argv: string[]) {
       'github-app-key': { type: 'string' },
       'access-identities': { type: 'string' },
       'github-webhook-secret': { type: 'string' },
+      'event-archive': { type: 'string' },
       'signing-key': { type: 'string' }, // Retired; accept old launch commands without reading the file.
       config: { type: 'string' },
     },
   });
   if (!values.db) throw new Error('--db <path> is required (the SQLite file; created if absent)');
+  const archive = values['event-archive'];
+  if (archive !== undefined && (!archive.trim() || resolve(archive) === resolve(values.db))) {
+    throw new Error('--event-archive must name a separate NDJSON file');
+  }
   const port = Number(values.port);
   if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error('--port must be a port number');
   // The origin is the OIDC audience and the dashboard's Origin (R-BTN-56): it must be the
@@ -132,7 +139,8 @@ export async function main(argv: string[]) {
   if (values['github-app-key']) config.BATON_GITHUB_APP_KEY = readSecret(values['github-app-key'], '--github-app-key');
   if (values['github-webhook-secret']) config.BATON_GITHUB_WEBHOOK_SECRET = readSecret(values['github-webhook-secret'], '--github-webhook-secret').trim();
   const { store } = openStore(values.db);
-  const host = new LocalHost({ store, config, adminKeys: adminKeysFrom(values['admin-keys']), accessIdentities: accessIdentitiesFrom(values['access-identities']) });
+  const host = new LocalHost({ store, config, adminKeys: adminKeysFrom(values['admin-keys']), accessIdentities: accessIdentitiesFrom(values['access-identities']),
+    archiveEvents: archive ? fileEventArchive(archive, values.db === ':memory:' ? null : resolve(values.db)) : undefined });
   await host.start();
   const server = serve(host, origin);
   server.listen(port, values.host, () => console.log(`baton: serving ${origin} from ${values.db}`));

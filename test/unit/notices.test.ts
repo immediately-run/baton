@@ -172,16 +172,16 @@ describe('R-BTN-80: registration', () => {
   });
 
   it('an administrator’s revoke closes every notice of the key and is final', async () => {
-    expect((await keyCall(admin, `/v1/admin/keys/${encodeURIComponent(cli.fingerprint)}/revoke`, {})).status).toBe(200);
+    expect((await keyCall(admin, `/v1/admin/keys/${encodeURIComponent(cli.fingerprint)}/revoke`, { confirm: true })).status).toBe(200);
     expect((await notices())[0].state).toBe('closed');
     expect(await rows('SELECT 1 FROM couriers WHERE credential_id = ?', cli.fingerprint)).toEqual([]);
     expect((await addCourier(cli, ['owner'])).json.code).toBe('conflict');
-    expect((await keyCall(admin, '/v1/admin/keys/pool/revoke', {})).json.code).toBe('invalid-params');
+    expect((await keyCall(admin, '/v1/admin/keys/pool/revoke', { confirm: true })).json.code).toBe('invalid-params');
   });
 
   it('an administrator’s revoke of a key its owners already ended is final too', async () => {
     expect((await keyCall(owner, '/v1/owner/docs/couriers', { fingerprint: cli.fingerprint, revoke: true })).status).toBe(200);
-    expect((await keyCall(admin, `/v1/admin/keys/${encodeURIComponent(cli.fingerprint)}/revoke`, {})).status).toBe(200);
+    expect((await keyCall(admin, `/v1/admin/keys/${encodeURIComponent(cli.fingerprint)}/revoke`, { confirm: true })).status).toBe(200);
     expect((await rows<{ revoked_by: string }>('SELECT revoked_by FROM credentials WHERE id = ?', cli.fingerprint))[0].revoked_by).toBe(`admin:${admin.fingerprint}`);
     expect((await addCourier(cli, ['owner'])).json.code).toBe('conflict');
   });

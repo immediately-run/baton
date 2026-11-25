@@ -297,7 +297,7 @@ describe('S-BTN-198 retirement', () => {
     expect(put.status, JSON.stringify(await put.clone().json())).toBe(200);
     // While ops is live, each list blocks the revocation of the key that alone satisfies it —
     // the refusal the round found (R-BTN-188).
-    const adminRevoke = await keyCall(admin, `/v1/admin/keys/${encodeURIComponent(opsOwner.fingerprint)}/revoke`, {});
+    const adminRevoke = await keyCall(admin, `/v1/admin/keys/${encodeURIComponent(opsOwner.fingerprint)}/revoke`, { confirm: true });
     expect(await code(adminRevoke)).toBe('unsatisfiable-approvers');
     expect(((await adminRevoke.json()) as { list: string }).list).toBe('approvers.policy');
     const humanRevoke = await signed(breakGlass, '/v1/human-keys', { fingerprint: h.fingerprint, revoke: true, confirm: true });
@@ -305,7 +305,7 @@ describe('S-BTN-198 retirement', () => {
     // Retired, the same rows block nothing: no route can change the policy again, so it never
     // holds a revocation (R-BTN-47). Both keys revoke — their owner rows go with them.
     expect((await retire()).status).toBe(200);
-    expect((await keyCall(admin, `/v1/admin/keys/${encodeURIComponent(opsOwner.fingerprint)}/revoke`, {})).status).toBe(200);
+    expect((await keyCall(admin, `/v1/admin/keys/${encodeURIComponent(opsOwner.fingerprint)}/revoke`, { confirm: true })).status).toBe(200);
     expect((await signed(breakGlass, '/v1/human-keys', { fingerprint: h.fingerprint, revoke: true, confirm: true })).status).toBe(200);
     expect(await rows(`SELECT removed_at, revoked_at FROM repository_owners WHERE repository_id = 'ops' AND fingerprint = ?`, opsOwner.fingerprint))
       .toEqual([{ removed_at: T0, revoked_at: T0 }]);

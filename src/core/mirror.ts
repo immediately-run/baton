@@ -17,6 +17,42 @@ const DETAIL_KEYS = new Set(['foreign', 'end_reason', 'ended_at_sha', 'hold_reas
 /** The actor's kind only: `runner:<id>` and `owner:<email>` name people and machines. */
 const actorKind = (actor: string) => actor.split(':')[0];
 
+export type EventRow = { seq: number; at: number; kind: string; ticket_id: string | null; claim_id: number | null; actor: string; detail_json: string | null };
+
+/** Shared by the mirror feed and the retention archive; callers choose which rows to include. */
+export function eventPage(store: Store, repo: string, rows: EventRow[], after: number) {
+  const events = rows.map((e) => {
+    let detail: Record<string, unknown> = {};
+    try {
+      detail = JSON.parse(e.detail_json ?? 'null') ?? {};
+    } catch {
+      detail = {};
+    }
+    const kept = Object.fromEntries(Object.entries(detail).filter(([k]) => DETAIL_KEYS.has(k)));
+    return { seq: e.seq, at: e.at, kind: e.kind, ticket_id: e.ticket_id, claim_id: e.claim_id, actor: actorKind(e.actor), detail: kept, claim: e.claim_id ? eventClaim(store, e.claim_id) : null };
+  });
+  const at = store.exec<{ cutover_at: number | null }>('SELECT cutover_at FROM repositories WHERE id = ?', repo).toArray()[0]?.cutover_at ?? null;
+  return { events, next: events.at(-1)?.seq ?? after, cutover_at: at };
+}
+
+function eventClaim(store: Store, id: number) {
+  const c = store.exec<{ id: number; nonce: string; status: string; end_reason: string | null; claimed_at: number; ended_at: number | null; ended_at_sha: string | null; request_id: string }>(
+    'SELECT id, nonce, status, end_reason, claimed_at, ended_at, ended_at_sha, request_id FROM claims WHERE id = ?', id).toArray()[0];
+  if (!c) return null;
+  // §13 step 3: an imported claim (the cutover's, or a foreign one) is legacy for good — even
+  // once adopted — and its git note is claim.sh's, not the mirror's: the mirror ends it on that.
+  const { request_id, ...claim } = c;
+  const legacy = /^(legacy|foreign):/.test(request_id);
+  // §12's `unstarted:` note: a claim that ended before any work beyond orienting.
+  const started = store.exec(`SELECT 1 FROM activities WHERE claim_id = ? AND kind != 'orient' LIMIT 1`, id).toArray().length > 0;
+  const out: Record<string, unknown> = { ...claim, legacy, started };
+  if (c.status !== 'active') {
+    out.activities = store.exec('SELECT kind, seq, label, started_at, ended_at, outcome, detail_json FROM activities WHERE claim_id = ? ORDER BY started_at', id).toArray();
+    out.transcripts = store.exec('SELECT repo, path, role FROM transcripts WHERE claim_id = ? ORDER BY id', id).toArray();
+  }
+  return out;
+}
+
 export interface Ctx {
   store: Store;
   now: () => number;
@@ -41,27 +77,17 @@ export class Mirror {
    */
   events(repo: string, after: number, limit: number) {
     const n = Math.min(Math.max(1, limit || MAX_PAGE), MAX_PAGE);
-    const rows = this.rows<{ seq: number; at: number; kind: string; ticket_id: string | null; claim_id: number | null; actor: string; detail_json: string | null }>(
+    const rows = this.rows<EventRow>(
       // R-BTN-75–77's `blocked`, `unblocked` and `resource` are Baton's own state, nothing git
       // holds (§12 writes claims, holds and overrides): the feed leaves them out.
       `SELECT seq, at, kind, ticket_id, claim_id, actor, detail_json FROM events WHERE repository_id = ? AND seq > ?
          AND kind NOT IN ('blocked', 'unblocked', 'resource') ORDER BY seq LIMIT ?`, repo, after, n);
-    const events = rows.map((e) => {
-      let detail: Record<string, unknown> = {};
-      try {
-        detail = e.detail_json ? JSON.parse(e.detail_json) : {};
-      } catch {
-        detail = {};
-      }
-      const kept = Object.fromEntries(Object.entries(detail).filter(([k]) => DETAIL_KEYS.has(k)));
-      return { seq: e.seq, at: e.at, kind: e.kind, ticket_id: e.ticket_id, claim_id: e.claim_id, actor: actorKind(e.actor), detail: kept, claim: e.claim_id ? this.claim(e.claim_id) : null };
-    });
-    const at = this.rows<{ cutover_at: number | null }>('SELECT cutover_at FROM repositories WHERE id = ?', repo)[0]?.cutover_at ?? null;
+    const page = eventPage(this.c.store, repo, rows, after);
     // During a move, once the repository's page is exhausted, give the mirror a cursor
     // through the global head. The next read acknowledges it without exposing other events.
     const moveHead = rows.length < n ? this.rows<{ seq: number }>(`SELECT MAX(seq) AS seq FROM events
       WHERE EXISTS (SELECT 1 FROM baton_settings WHERE key = 'frozen_at' AND value IS NOT NULL)`)[0]?.seq : null;
-    return { events, next: Math.max(events.at(-1)?.seq ?? after, moveHead ?? 0), cutover_at: at };
+    return { ...page, next: Math.max(page.next, moveHead ?? 0) };
   }
 
   /**
@@ -72,24 +98,6 @@ export class Mirror {
   acknowledge(repo: string, after: number) {
     this.c.store.exec(`UPDATE repositories SET mirror_acked_seq = MIN(?, (SELECT COALESCE(MAX(seq), 0) FROM events))
                        WHERE id = ? AND mirror_acked_seq < MIN(?, (SELECT COALESCE(MAX(seq), 0) FROM events))`, after, repo, after);
-  }
-
-  private claim(id: number) {
-    const c = this.rows<{ id: number; nonce: string; status: string; end_reason: string | null; claimed_at: number; ended_at: number | null; ended_at_sha: string | null; request_id: string }>(
-      'SELECT id, nonce, status, end_reason, claimed_at, ended_at, ended_at_sha, request_id FROM claims WHERE id = ?', id)[0];
-    if (!c) return null;
-    // §13 step 3: an imported claim (the cutover's, or a foreign one) is legacy for good — even
-    // once adopted — and its git note is claim.sh's, not the mirror's: the mirror ends it on that.
-    const { request_id, ...claim } = c;
-    const legacy = /^(legacy|foreign):/.test(request_id);
-    // §12's `unstarted:` note: a claim that ended before any work beyond orienting.
-    const started = this.rows(`SELECT 1 FROM activities WHERE claim_id = ? AND kind != 'orient' LIMIT 1`, id).length > 0;
-    const out: Record<string, unknown> = { ...claim, legacy, started };
-    if (c.status !== 'active') {
-      out.activities = this.rows('SELECT kind, seq, label, started_at, ended_at, outcome, detail_json FROM activities WHERE claim_id = ? ORDER BY started_at', id);
-      out.transcripts = this.rows('SELECT repo, path, role FROM transcripts WHERE claim_id = ? ORDER BY id', id);
-    }
-    return out;
   }
 
   /**

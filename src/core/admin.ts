@@ -9,7 +9,7 @@ import { BatonError, PENDING_COOKIE, SESSION_COOKIE } from './http';
 import { logEvent, randomHex } from './db';
 import { adminFingerprints, API_KEY_FINGERPRINT, KEY_FINGERPRINT, parseApiKeyLine, parseSshKey, sshPublicLine, verifyNamespacedSignature, type SshKey } from './auth';
 import { capabilitiesOf } from '../shared/vocabulary.mjs';
-import { COURSE_ID, HOSTNAME, INSTANCE_NAME, SESSION_TOKEN, TAG, checkAsks, checkDeliverInteractions, checkLogin, checkUnblockedTrigger, checkRepositoryId, HOLDING_TYPE, MAX_CLAIMS_CAP, parseAccessIdentities } from './validate';
+import { COURSE_ID, HOSTNAME, INSTANCE_NAME, SESSION_TOKEN, TAG, checkAsks, checkConfirm, checkDeliverInteractions, checkLogin, checkUnblockedTrigger, checkRepositoryId, HOLDING_TYPE, MAX_CLAIMS_CAP, parseAccessIdentities } from './validate';
 import { REMIND_AFTER_S, type Notices } from './notices';
 import { parseTranscriptRepo } from './links';
 import { checkCodeRepos, checkPushers, codeReposOf, crossHostEntries, homeForgeOf, pushersOf, writeCodeRepos, type CodeRepo } from './codeRepos';
@@ -200,6 +200,17 @@ export class Admin {
     return this.rows<{ public_key: string }>('SELECT public_key FROM human_keys WHERE fingerprint = ? AND revoked_at IS NULL', fingerprint)[0]?.public_key ?? null;
   }
 
+  decisionKeyLine(fingerprint: string): string | null {
+    return this.ownerKey(fingerprint) ?? this.humanKeyLine(fingerprint);
+  }
+
+  /** Match the decision route's human mark, live key lookup and administrator exclusion. */
+  hasHumanDecisionWriter(breakGlass: ReadonlySet<string>, admins: ReadonlyMap<string, string>): boolean {
+    const registered = this.rows<{ fingerprint: string }>('SELECT fingerprint FROM human_keys WHERE revoked_at IS NULL');
+    return registered.some(({ fingerprint }) => !admins.has(fingerprint)) ||
+      [...breakGlass].some((fp) => !admins.has(fp) && this.decisionKeyLine(fp) != null);
+  }
+
   /** R-BTN-185: whether the fingerprint counts as a human-only key — registered here, or a
    *  break-glass line of the host's. */
   async isHumanKey(fingerprint: string): Promise<boolean> {
@@ -338,7 +349,7 @@ export class Admin {
       // is no longer there.
       if (!known || known.retired_at != null) throw new BatonError('not-found', `${id} is not registered`);
       // §12.2: a destructive action takes confirm: true.
-      if (b.confirm !== true) throw new BatonError('confirm-required', 'retiring a repository takes confirm: true');
+      checkConfirm(b);
       this.retireRepository(actor, id, known);
       return { ok: true };
     }
@@ -573,11 +584,12 @@ export class Admin {
    *  with it, so its next call is refused. An administrator key is revoked by editing the secret.
    *  R-BTN-188 (B-145): refused while an approver list or a floor's `remove_by` the key alone
    *  satisfies would be left with no live credential. */
-  async revokeKey(actor: string, raw: string) {
+  async revokeKey(actor: string, raw: string, body: unknown) {
     // A key's fingerprint, or a bearer-token credential's id while tokens serve (R3-1239).
     const fingerprint = KEY_FINGERPRINT.test(raw) || TOKEN_CREDENTIAL.test(raw) ? raw : bad('fingerprint', 'must be a key fingerprint, SHA256:…, or a token credential’s id');
     // The pool's reserved credential has no key to revoke (R-BTN-103).
     if (fingerprint === 'pool') bad('fingerprint', 'pool is reserved for runner couriers’ pool copies, not a key');
+    checkConfirm(body);
     // Judged over the live repositories the key owns only (R-BTN-47): a retired repository's
     // policy blocks no revocation — its rows stay, read-only, and no route can change it again.
     for (const { repository_id } of this.rows<{ repository_id: string }>(
@@ -773,10 +785,11 @@ export class Admin {
   }
 
   /** `POST /v1/owner/{repository}/grants/{fingerprint}/revoke`: this repository's grant only. */
-  async revokeGrant(actor: string, repository: string, raw: string) {
+  async revokeGrant(actor: string, repository: string, raw: string, body: unknown) {
     const fingerprint = fingerprintOf(raw, 'fingerprint');
     // B-145 item 12: revoking a runner key is an `approvers.members` action too.
     this.requireMembersApprover(repository, actor.slice(actor.indexOf(':') + 1), 'owner', await this.breakGlassSet());
+    checkConfirm(body);
     return this.c.store.transaction(() => {
       this.exec('UPDATE runner_grants SET revoked_at = ? WHERE credential_id = ? AND repository_id = ? AND revoked_at IS NULL', this.c.now(), fingerprint, repository);
       if (!this.changed()) throw new BatonError('not-found', `no grant of ${fingerprint} on ${repository}`);
@@ -797,8 +810,9 @@ export class Admin {
     // B-145 item 12: adding and removing owners is an `approvers.members` action.
     this.requireMembersApprover(repository, actor.slice(actor.indexOf(':') + 1), 'owner', await this.breakGlassSet());
     if (b.remove === true) {
-      only(b, ['fingerprint', 'remove'], 'body');
+      only(b, ['fingerprint', 'remove', 'confirm'], 'body');
       const fp = fingerprintOf(b.fingerprint, 'fingerprint');
+      checkConfirm(b);
       const facts = await this.factsWithout(repository, null);
       return this.c.store.transaction(() => {
         const left = this.rows<{ fingerprint: string }>('SELECT fingerprint FROM repository_owners WHERE repository_id = ? AND removed_at IS NULL', repository);
@@ -917,7 +931,7 @@ export class Admin {
     const b = body as Record<string, unknown>;
     if (b.revoke === true) {
       only(b, ['fingerprint', 'revoke', 'confirm'], 'body');
-      if (b.confirm !== true) throw new BatonError('confirm-required', 'revoking a human key takes confirm: true');
+      checkConfirm(b);
       const fp = fingerprintOf(b.fingerprint, 'fingerprint');
       // Refuse where the key is the last live credential a list or a floor's `remove_by` has
       // (R-BTN-188) — judged per live repository it owns (R-BTN-47: a retired repository's

@@ -127,8 +127,11 @@ describe('every response carries the R-BTN-16 headers', () => {
     ['an unknown path', () => call('/nope')],
   ])('%s', async (_what, make) => {
     const res = await make();
-    expect(res.headers.get('Content-Security-Policy')).toBe("default-src 'self'; frame-ancestors 'none'");
+    expect(res.headers.get('Content-Security-Policy')).toBe("default-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'");
     expect(res.headers.get('X-Frame-Options')).toBe('DENY');
+    expect(res.headers.get('X-Content-Type-Options')).toBe('nosniff');
+    expect(res.headers.get('Referrer-Policy')).toBe('no-referrer');
+    expect(res.headers.get('Cross-Origin-Resource-Policy')).toBe('same-origin');
     expect(res.headers.get('Set-Cookie')).toBeNull();
   });
 });

@@ -17,9 +17,10 @@ import { Conditions } from './conditions';
 import { Admin, SESSION_COOKIE, SESSION_MS } from './admin';
 import { fitsTier, TIERS } from '../shared/vocabulary.mjs';
 import { clientVersionOf } from '../shared/versions.mjs';
-import { RunnerApi } from './runnerApi';
+import { RunnerApi, sha256Hex } from './runnerApi';
 import { parseAdminKeys, parseSshKey, verifyApiKey, verifyRequest, withBody, type SyncCredential } from './auth';
 import { Claims } from './claims';
+import { forgeScope } from './forgeScope';
 import { Cutover } from './cutover';
 import { Mirror } from './mirror';
 import { DispatchTransportError } from './dispatch';
@@ -172,7 +173,7 @@ export class BatonCore {
     // R-BTN-80, R-BTN-81: a decision's notices are queued and closed with it, and its history row written.
     this.notices = new Notices({ store, now: () => this.now() });
     this.history = new History({ store, now: () => this.now() });
-    this.retention = new Retention({ store, now: () => this.now() });
+    this.retention = new Retention({ store, now: () => this.now(), sealed: () => this.ownerState.sealedAt() != null, outside: this.outside });
     // B-4 (§13.1, R-BTN-113): the instance settings, before the runner calls and the claims that
     // read the session-host allowlist.
     this.instance = new InstanceSettings({ store, now: () => this.now(), config: ports.config });
@@ -459,6 +460,24 @@ export class BatonCore {
     if (current == null || at < current) await this.ports.scheduler.set(at);
   }
 
+  /** B-249 (S-BTN-2): a healthy request or reaper turn establishes that Baton could serve.
+   *  Stamp at most once a period. Record any recovery and its stamp in the same transaction;
+   *  only cache the stamp after commit so ordinary conditional polls need no extra read. */
+  private serviceStamp = -Infinity;
+  private recordServing(): number {
+    const now = this.now();
+    if (now - this.serviceStamp < ALARM_EVERY_MS) return this.serviceStamp;
+    const last = this.sql<{ value: string }>(`SELECT value FROM baton_settings WHERE key = 'last_served_at'`)[0];
+    if (last && now - Number(last.value) < ALARM_EVERY_MS) return Number(last.value);
+    // A successful request inside the sampling period may not have moved the stamp.
+    if (last) this.claims.recoverLeases(now, now - Number(last.value) - ALARM_EVERY_MS);
+    this.store.liveness(() => {
+      this.store.exec(`INSERT INTO baton_settings (key, value) VALUES ('last_served_at', ?)
+                       ON CONFLICT (key) DO UPDATE SET value = excluded.value`, String(now));
+    });
+    return now;
+  }
+
   /** §3: the one alarm, every 60 seconds — earlier when a webhook's trailing dispatch or the
    *  webhook path's own backstop is due. */
   // @model alarmLive sha256:9738e53567a4
@@ -486,7 +505,12 @@ export class BatonCore {
     // everything else has run, so the tick's own work is never lost to it.
     let unreaped: string[] = [];
     try {
-      unreaped = this.store.transaction(() => this.claims.alarm());
+      const reaper = this.store.transaction(() => {
+        const stamp = this.recordServing();
+        return { stamp, unreaped: this.claims.alarm() };
+      });
+      this.serviceStamp = reaper.stamp;
+      unreaped = reaper.unreaped;
     } catch (e) {
       this.pendingDispatch.clear();
       throw new Error(`the alarm's reaper failed: ${e instanceof Error ? e.message : String(e)}`, { cause: e });
@@ -534,10 +558,6 @@ export class BatonCore {
         // R-BTN-81: the history of tickets closed 90 days ago goes.
         stage = 'history.purge';
         this.history.purge();
-        // R-BTN-149 (B-238): old events, snapshots and runner declarations, and the purged
-        // tickets' claims — a batch a tick, each step through its index.
-        stage = 'retention';
-        this.retention.prune();
         // §12.8 (B-145, R-BTN-189): a protection report that lapsed past its 24 hours stops
         // feeding `no-runner-lands` — every repository with floors is re-judged, and a newly
         // broken one stops offering claims and releases its running ones.
@@ -563,6 +583,8 @@ export class BatonCore {
     await this.armBy(this.questions.nextDue());
     // R-BTN-90 (B-234): the earliest armed claim deadline, so a run's clock wakes the alarm.
     await this.armBy(this.claims.nextDeadline());
+    // R-BTN-149: archive old events before pruning. Storage I/O never spans a SQL transaction.
+    await this.retention.prune(this.ports.archiveEvents);
     // B-229: a reap that could not be written fails the tick only now, after its work: the
     // failure reaches the host's log naming each claim, and the next tick tries it again.
     if (unreaped.length) throw new Error(`the alarm could not reap ${unreaped.length} claim(s): ${unreaped.join('; ')}`);
@@ -614,13 +636,22 @@ export class BatonCore {
       // An error answer means its transaction rolled back: nothing changed to mirror.
       if (res.ok && !polling) {
         // R-BTN-77: the unblocked dispatches this request made due, coalesced per window.
-        this.store.transaction(() => this.takeUnblocked());
+        this.serviceStamp = this.store.transaction(() => {
+          const stamp = this.recordServing();
+          this.takeUnblocked();
+          return stamp;
+        });
         this.flushDispatch();
         const trailing = this.syncTrailingQueued ? this.webhooks.nextTrailing() : null;
         await this.armBy(this.blocks.nextDue());
         if (trailing !== null) await this.armBy(trailing);
         await this.armBy(this.resources.nextLapse());
-      } else this.pendingDispatch.clear();
+      } else {
+        this.pendingDispatch.clear();
+        if (res.status === 304 && this.now() - this.serviceStamp >= ALARM_EVERY_MS) {
+          this.serviceStamp = this.store.transaction(() => this.recordServing());
+        }
+      }
       // R-BTN-2 (R3-1258): the rows this request's transactions wrote, counted into the day's
       // usage — after the response is built, in a quiet write that never counts itself.
       this.recordUsage(polling);
@@ -830,7 +861,7 @@ export class BatonCore {
         // R-BTN-185: an owner key of the repository, or a human-only one — a registered human
         // key's own public line serves the signature lookup, not the host's break-glass lines
         // alone (a key registered through POST /v1/human-keys owns nothing, but answers).
-        const signed = await this.authenticated(req, (fp) => admins.get(fp) ?? this.admin.ownerKey(fp) ?? this.admin.humanKeyLine(fp));
+        const signed = await this.authenticated(req, (fp) => admins.get(fp) ?? this.admin.decisionKeyLine(fp));
         const fp = signed.cred;
         const human = await this.admin.isHumanKey(fp);
         const policy = this.policies.current(repo)?.policy;
@@ -852,6 +883,9 @@ export class BatonCore {
       const sequence = await this.sequenceRoute(req, url);
       if (sequence) return sequence;
       if (url.pathname.startsWith('/v1/courier/')) return await this.courierRoute(req, url);
+      if (req.method === 'GET' && url.pathname.startsWith('/v1/forge-scope/')) {
+        return await this.forgeScopeRoute(req, url.pathname);
+      }
       if (req.method === 'POST' && url.pathname === '/v1/probe/readings') {
         // R-BTN-53, R-BTN-101: a probe key's readings, on any registered instance.
         if (!req.headers.has('X-Baton-Signed')) throw new BatonError('unauthenticated', 'sign with a probe key');
@@ -930,6 +964,29 @@ export class BatonCore {
     if (!lookup(signed.cred)) throw new BatonError('unauthenticated', 'the key is not registered or is revoked');
     const body = await readJson(signed.req);
     return json(await this.admin.humanKeys(body, signed.cred, new Set(breakGlass.keys())));
+  }
+
+  private async forgeScopeRoute(req: Request, path: string): Promise<Response> {
+    const match = /^\/v1\/forge-scope\/(broker|runner)\/([^/]+)$/.exec(path);
+    if (!match) throw new BatonError('not-found', 'no such route');
+    if (!req.headers.has('X-Baton-Signed')) throw new BatonError('unauthenticated', 'a forge-scope read must be signed');
+    if (match[1] === 'broker') {
+      const keys = new Map<string, string>();
+      for (const line of parseAdminKeys(this.ports.config.BATON_FORGE_BROKER_KEYS ?? '')) {
+        const key = await parseSshKey(line);
+        keys.set(key.fingerprint, line);
+      }
+      await this.verifySigned(req, (fp) => keys.get(fp) ?? null);
+      return json(forgeScope(this.store, this.now(), match[2]));
+    }
+    const { cred } = await this.verifySigned(req);
+    if ((await this.admin.adminFingerprints()).has(cred)) throw new BatonError('forbidden', 'an administrator key is never a runner key');
+    const secret = req.headers.get('X-Runner-Secret');
+    if (!secret) throw new BatonError('unauthenticated', 'X-Runner-Secret is required after the first heartbeat');
+    const secretHash = await this.outside(() => sha256Hex(secret));
+    // Proof is a read, not a heartbeat. It must not revive or extend the session it proves.
+    forgeScope(this.store, this.now(), match[2], { credential: cred, secretHash });
+    return new Response(null, { status: 204 });
   }
 
   /** A signed request (R3-1239), verified whole by the one verifier: the key its keyid names
@@ -1271,6 +1328,7 @@ export class BatonCore {
     const p = url.pathname;
     const m = req.method;
     const body = async () => readJson(signed.req);
+    const optionalBody = async () => signed.req.body ? body() : null;
     const seg = pathSegment;
     if (p.startsWith('/v1/admin/')) {
       if (!admins.has(fp)) throw new BatonError('forbidden', 'an administrator’s key is required (R-BTN-57)');
@@ -1324,7 +1382,7 @@ export class BatonCore {
         return json(await this.admin.grant(actor, repo, b, 'admin'));
       }
       const revoke = /^\/v1\/admin\/keys\/([^/]+)\/revoke$/.exec(p);
-      if (m === 'POST' && revoke) return json(await this.admin.revokeKey(actor, seg(revoke[1])));
+      if (m === 'POST' && revoke) return json(await this.admin.revokeKey(actor, seg(revoke[1]), await optionalBody()));
       if (m === 'POST' && p === '/v1/admin/login-links') return json(await this.admin.loginLink(fp));
       throw new BatonError('not-found', `no route ${m} ${p}`);
     }
@@ -1352,7 +1410,7 @@ export class BatonCore {
     if (m === 'GET' && rest === 'signing-keys') return json({ keys: await this.admin.signingKeys(repo) });
     if (m === 'POST' && rest === 'grants') return json(await this.admin.grant(actor, repo, await body(), 'owner'));
     const rg = /^grants\/([^/]+)\/revoke$/.exec(rest);
-    if (m === 'POST' && rg) return json(await this.admin.revokeGrant(actor, repo, seg(rg[1])));
+    if (m === 'POST' && rg) return json(await this.admin.revokeGrant(actor, repo, seg(rg[1]), await optionalBody()));
     if (m === 'POST' && rest === 'owners') return json(await this.admin.owners(actor, repo, await body()));
     // B-113 (R-BTN-140's precedent): the repository's owners' consent to another repository's
     // tickets depending on theirs — the consent a dependency on a less visible repository needs
@@ -1370,8 +1428,10 @@ export class BatonCore {
       const repoRow = this.registry.get(repo);
       if (!repoRow || repoRow.retired_at != null) throw new BatonError('not-found', `${repo} is not registered`);
       const b = await body();
-      const breakGlass = await this.humanBreakGlass();
-      return json(this.store.transaction(() => this.policies.put(repo, b, repoRow.forge, { credential: fp, label: actor }, new Set(breakGlass.keys()))));
+      const breakGlass = new Set((await this.humanBreakGlass()).keys());
+      const personAnswerStops = () => this.admin.hasHumanDecisionWriter(breakGlass, admins) ? []
+        : this.questions.answerableLegs(repo);
+      return json(this.store.transaction(() => this.policies.put(repo, b, repoRow.forge, { credential: fp, label: actor }, { breakGlass, personAnswerStops })));
     }
     if (m === 'POST' && rest === 'policy/floors') {
       const b = await body();
