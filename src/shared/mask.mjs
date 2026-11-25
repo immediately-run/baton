@@ -57,9 +57,8 @@ export function maskSecrets(text) {
  *  then — a key printed over several lines never leaves piece by piece. `push` takes one line
  *  (the sink's unit) and returns the lines that may leave now, joined by `\n` (`''` while a
  *  block is held); `flush` returns `***` for a block the stream ended inside of. Class 5 is
- *  masked on every line as it leaves, and a token never spans a line. `maskLine` lets the runner
- *  apply its stream literal masker to the text outside key blocks before masking bearer tokens. */
-export function createMasker(maskLine = (line) => line) {
+ *  masked on every line as it leaves, and a token never spans a line. */
+export function createMasker() {
   const out = [];
   let held = false;
   let bytes = 0;
@@ -75,11 +74,11 @@ export function createMasker(maskLine = (line) => line) {
         if (KEY_END.test(line) || bytes >= KEY_HOLD) release();
       } else {
         const open = line.search(KEY_BEGIN);
-        if (open < 0) out.push(maskSecrets(maskLine(line)));
+        if (open < 0) out.push(maskSecrets(line));
         else {
           // What is not key material on the `BEGIN` line (`key: …`) leaves with it, and the
           // block holds from that line on, never answered now.
-          if (open > 0) out.push(maskSecrets(maskLine(line.slice(0, open))).replace(/\s+$/, ''));
+          if (open > 0) out.push(maskSecrets(line.slice(0, open)).replace(/\s+$/, ''));
           held = true;
           bytes = line.length;
         }

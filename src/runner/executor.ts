@@ -19,6 +19,7 @@ import { createHash } from 'node:crypto';
 import { lstatSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
 import { registerHooks } from 'node:module';
 import { join, relative, resolve, sep } from 'node:path';
+import { StringDecoder } from 'node:string_decoder';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 export const EXECUTOR_API = 1;
@@ -68,8 +69,8 @@ export interface ExecOptions {
   stdin?: string;
   /** Extra environment for this call, over the session's. */
   env?: Record<string, string>;
-  /** Each stderr line as it arrives (the runner's verbose drain, B-108). */
-  onStderr?: (line: string) => void;
+  /** Each stderr line as it arrives (B-108). The frame, when supplied, is not in `line`. */
+  onStderr?: (line: string, frame?: '\n' | '\r\n') => void;
 }
 
 export interface ExecResult {
@@ -160,42 +161,46 @@ export function builtinExecutor(): Executor {
       let stdout = '';
       let stderr = '';
       let partial = '';
-      child.stdout!.on('data', (d) => { stdout += d.toString('utf8'); });
-      child.stderr!.on('data', (d) => {
-        const text = d.toString('utf8');
+      const stdoutDecoder = new StringDecoder('utf8');
+      const stderrDecoder = new StringDecoder('utf8');
+      const drainStderr = (text: string) => {
         stderr += text;
         if (!o.onStderr) return;
         partial += text;
         let at;
         while ((at = partial.indexOf('\n')) >= 0) {
-          o.onStderr(partial.slice(0, at));
+          const crlf = at > 0 && partial[at - 1] === '\r';
+          o.onStderr(partial.slice(0, crlf ? at - 1 : at), crlf ? '\r\n' : '\n');
           partial = partial.slice(at + 1);
         }
-      });
+      };
+      child.stdout!.on('data', (d: Buffer) => { stdout += stdoutDecoder.write(d); });
+      child.stderr!.on('data', (d: Buffer) => drainStderr(stderrDecoder.write(d)));
       child.stdin!.on('error', () => {});
       if (o.stdin != null) child.stdin!.write(o.stdin);
       const timer = o.timeout_s ? setTimeout(kill, o.timeout_s * 1000) : null;
       timer?.unref?.();
       const result = new Promise<ExecResult>((resolveResult) => {
-        let drainTimer: ReturnType<typeof setTimeout> | undefined;
         let spawnError = '';
-        child.once('error', (e) => { spawnError = String(e); });
-        child.once('exit', () => {
+        let drainTimer: ReturnType<typeof setTimeout> | undefined;
+        child.on('error', (e) => { spawnError = String(e); });
+        child.on('exit', () => {
           if (timer) clearTimeout(timer);
           // A call's end is its whole group's end (R-BTN-72, R-BTN-145): what the call left
-          // behind goes with it.
+          // behind goes with it. Kill at exit, but collect output until the pipes close.
           kill();
-          // A descendant outside the group can still hold a pipe open. Do not let it keep
-          // the call alive indefinitely after the child has exited.
+          // A descendant that left the group can still own the pipes; don't wait for it.
           drainTimer = setTimeout(() => {
             child.stdout!.destroy();
             child.stderr!.destroy();
           }, 1000);
+          drainTimer.unref();
         });
-        // S-BTN-210/S-BTN-48: 'exit' can arrive before the wrapper's final result line.
-        child.once('close', (code) => {
+        child.on('close', (code) => {
           if (timer) clearTimeout(timer);
           clearTimeout(drainTimer);
+          stdout += stdoutDecoder.end();
+          drainStderr(stderrDecoder.end());
           if (partial && o.onStderr) o.onStderr(partial);
           resolveResult({ status: spawnError ? null : code, stdout, stderr: stderr + spawnError });
         });

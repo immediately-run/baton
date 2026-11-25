@@ -186,7 +186,9 @@ module properties {
   val safetyA = and { observationsIncrease, oneLiveHolderPerTicket, oneClaimPerRunner, staleOnlyWhenTakenAway, writingLegsBarred }
   val safetyB = and { confirmationAfterEnd, gatesHeld, noActAfterLoss, noStuckTicket, unblockedFollowsBlocked }
   val safetyC = and { confirmedIsInGit, regressedOnlyWhenGitRegressed, capabilityRowsCounted, answerLostOwesUnblocked }
-  val safetyD = and { boundedLoops, blockedIsStored, attemptsBounded, blockedEndsBounded, capacityRespected }
+  val noTimeoutInsideFinishGrace = claimsWhere(c => c.status == "active" and c.finishGraceUntil > st.now
+                                                       and c.releasePhase != "none").size() == 0
+  val safetyD = and { boundedLoops, blockedIsStored, attemptsBounded, blockedEndsBounded, capacityRespected, noTimeoutInsideFinishGrace }
   val safety = and { safetyA, safetyB, safetyC, safetyD }
 
   // ---- liveness: in liveness.qnt, so the safety proof does not carry the fairness terms ----

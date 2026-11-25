@@ -17,4 +17,4 @@ export interface Masker {
   flush(): string;
 }
 
-export declare function createMasker(maskLine?: (line: string) => string): Masker;
+export declare function createMasker(): Masker;

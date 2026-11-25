@@ -27,7 +27,7 @@ export interface Ctx {
   now: () => number;
   blocks: Blocks;
   /** The retired-fields window's one writer (`deprecated.ts`): a reading's `nonce`, `signature`. */
-  deprecated?: Deprecated;
+  deprecated: Pick<Deprecated, 'note'>;
 }
 
 /** Who posts a reading: a runner session, a probe key, or an administrator — one more instrument. */
@@ -212,7 +212,7 @@ export class Resources {
    * writer class `admin` — no precedence. A reading's `nonce` and `signature` are its retired
    * signature (R-BTN-181), read and ignored while the history's Migrations entry lasts.
    */
-  // @model reading sha256:e0d1aece2ff1
+  // @model reading sha256:7859931ad182
   post(who: Instrument, body: unknown, repos: string[] | null) {
     const readings = checkReadings(body, VALID_FOR.state_s);
     return this.c.store.transaction(() => {
@@ -222,7 +222,7 @@ export class Resources {
       // An administrator's instrument is its key; a probe's, its key; a runner's, its session.
       const source = who.kind === 'admin' ? `admin:${who.fingerprint}` : who.kind === 'probe' ? `probe:${who.fingerprint}` : `runner:${who.runnerId}`;
       const writer = who.kind === 'admin' ? 'admin' : who.kind === 'probe' ? 'instrument' : 'runner';
-      for (const field of new Set(readings.flatMap((r) => r.retired))) this.c.deprecated?.note(now, source, `reading.${field}`, 'readings');
+      for (const field of new Set(readings.flatMap((r) => r.retired))) this.c.deprecated.note(now, source, `reading.${field}`, 'readings');
       for (const r of readings) {
         const served = this.servedBy(r.instance);
         if (!served.length) {
@@ -321,7 +321,7 @@ export class Resources {
 
   /** The alarm's share: lapsed readings are dropped (every reading in force is kept, R-BTN-101),
    *  and the states they held change. Returns when the next one lapses. */
-  // @model readingLapses sha256:aec1a39a8e0e
+  // @model readingLapses sha256:e21de463d6ed
   alarm(): number | null {
     const now = this.c.now();
     const lapsed = this.rows<{ instance: string }>('SELECT DISTINCT instance FROM instance_readings WHERE lapses_at <= ?', now).map((r) => r.instance);

@@ -87,7 +87,7 @@ describe('S-BTN-199 the git-lock pickup asks Baton', () => {
     const board = await read(reader, '/v1/repositories/docs/board');
     expect(board.status).toBe(200);
     expect(board.json.ready.find((t: Record<string, unknown>) => t.local_id === 'T-2')).toMatchObject({ station: 'pr-open', leg: 'review' });
-    expect(board.json.holders).toEqual([{ ticket_id: 'docs:T-2', runner_id: w2.id, hostname: 'vm-b', session_name: 'claude-review', lease_ends_at: T0 + 3_600_000 }]);
+    expect(board.json.holders).toEqual([{ ticket_id: 'docs:T-2', runner_id: w2.id, hostname: 'vm-b', session_name: 'claude-review', lease_ends_at: T0 + 3_600_000, session_url: null, session_link: false }]);
 
     // The history's `resume` is the PR a false `prs: []` lost, and the branch to continue on.
     const history = await read(reader, '/v1/repositories/docs/tickets/docs:T-1/history');
@@ -110,7 +110,7 @@ describe('S-BTN-199 the git-lock pickup asks Baton', () => {
     // would end, so `lease_ends_at` is null — and a claim through git is refused by it.
     const legacy = await legacyClaim('docs:T-2');
     expect((await read(reader, '/v1/repositories/docs/board')).json.holders).toEqual([
-      { ticket_id: 'docs:T-2', runner_id: legacy, hostname: 'legacy', session_name: 'item-T-2', lease_ends_at: null }]);
+      { ticket_id: 'docs:T-2', runner_id: legacy, hostname: 'legacy', session_name: 'item-T-2', lease_ends_at: null, session_url: null, session_link: false }]);
   });
 
   it('the history\'s resume keeps the PR when the newest ended claim is a review that pushed nothing (B-91\'s shape)', async () => {

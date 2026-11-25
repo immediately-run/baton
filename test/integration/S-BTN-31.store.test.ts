@@ -79,9 +79,9 @@ describe('S-BTN-31 Store conformance', () => {
     expect(store.exec(select).one()).toEqual({ id: 1 });
   }));
 
-  it('preserves populated legacy tie order and view versions in migration 0076', () => withStore((store) => {
+  it('preserves populated legacy tie order and view versions in migration 0140', () => withStore((store) => {
     // The preceding data backfills have nothing to do in this empty database.
-    for (const m of MIGRATIONS.filter((m) => m.id < 76)) store.transaction(() => store.script(m.sql));
+    for (const m of MIGRATIONS.filter((m) => m.id < 140)) store.transaction(() => store.script(m.sql));
     store.script(`
       INSERT INTO credentials (id, hostname, allowed_capabilities, kind) VALUES ('fixture', 'fixture', '[]', 'legacy');
       INSERT INTO runners (id, hostname, session_name, secret_hash, credential_id, harness, kind, tier_ceiling,
@@ -102,7 +102,7 @@ describe('S-BTN-31 Store conformance', () => {
       store.exec<{ v: number }>("SELECT CAST(value AS INTEGER) AS v FROM baton_settings WHERE key = 'instances_version'").one().v,
     ];
     const [fleet, instances] = versions();
-    store.transaction(() => store.script(MIGRATIONS.find((m) => m.id === 76)!.sql));
+    store.transaction(() => store.script(MIGRATIONS.find((m) => m.id === 140)!.sql));
     for (const query of [
       'SELECT id AS name FROM repositories ORDER BY insertion_order',
       'SELECT id AS name FROM activities ORDER BY started_at, insertion_order',
