@@ -23,6 +23,14 @@ mitigations, with what each costs.</Lede>
 - **Fieldhouse adds trust levels** (*What Fieldhouse is*, Axioms 4 and 6). A sandbox VM is the
   least trusted level, the host above it, humans at the top, and a credential never crosses
   downward. Agents in VMs write the home repository without approval.
+- **Separate proposing from approving.** For a protected deployment, interactive agents use
+  an owner's-agent forge identity and a separate Baton credential. They propose changes;
+  they do not satisfy code-owner reviews, deployment approvals or ruleset bypass. The human
+  uses a forge account whose credentials are unavailable in every agent session, and a
+  separate touch- and verification-required hardware key for Baton human gates. A session
+  does not inherit either credential from the person driving it. This is a deployment
+  requirement, not a claim that the live accounts have been migrated or that Baton can
+  verify hardware custody today (B-136).
 
 Put together: **push is held at the VM level, so everything git controls is controlled at
 the VM level.** A compromised VM, a prompt-injected leg, a leaked worker token or a careless
@@ -32,7 +40,7 @@ Two corrections from the adversarial review (2026-10-27, *Review* below) bound t
 
 - **Push is not the only door.** A push to `baton` deploys Baton's server (reach 0), and any
   runner's machine key can post a board (reach 7). Neither is a push to a home's tickets.
-- **Owner gates are not human gates.** The owner's agent sessions hold the owner's GitHub
+- **Owner gates are not human gates.** At the time of the review, the owner's agent sessions held the owner's GitHub
   account and keys, so every gate that asks for "the owner" (ruleset bypass, code-owner
   approval, environment approval, an owner pusher, an owner signature) is passable by an
   injected session (reach 3). A gate is human only when it needs a credential no agent session
@@ -137,23 +145,39 @@ Ordered by blast radius, largest first.
 that changes more than ticket files (`scripts/ci-scope.mjs`),
 with `CLOUDFLARE_API_TOKEN` (Workers Scripts edit on the whole Cloudflare account) from the
 `production` environment. The worker identity pushes `baton`, which is public, so no push ruleset
-can protect it. One push, to `src/` or to the lockfile the deploy job installs, deploys the server
-every tenant trusts:
+can protect it. One push, to `src/` or to the lockfile the deploy job installs, can replace the
+server every tenant trusts. A compromised server can:
 
-- its database of keys, grants, bars, holds and settings: everything *What a push cannot reach*
-  lists;
-- the webhook secrets, the cursor key, the GitHub App's key and the forge trigger tokens
-  (BATON_SPEC [R-BTN-94](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-3), [§12.7](../spec/BATON_SPEC/12-security.md#sec-12-7)): the App's key can dispatch any `workflow_dispatch` workflow, so a
-  compromised server can start a deploy whose workflow accepts dispatch. B-152's move of the key
-  to a dispatch courier was dropped with the ruling above (2026-11-01); the recovery is the
-  rotation below;
-- every answer runners act on: claims, snapshot shas, recommendations, the message of the day.
+- read or rewrite the database of keys, grants, bars, holds and settings: everything *What a
+  push cannot reach* lists. Owners cannot trust views of that state, the course history or
+  the attestations Baton reports;
+- hand runners false claims or snapshot SHAs, steering work to the wrong ticket or commit.
+  Recommendations can steer what gets worked next; a malicious message of the day can reach
+  the agent as instructions. A valid TLS connection authenticates the endpoint, not these
+  answers once that endpoint is compromised;
+- read the webhook secrets and forge trigger tokens (BATON_SPEC
+  [R-BTN-94](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-3)) and the GitHub App key
+  ([§12.7](../spec/BATON_SPEC/12-security.md#sec-12-7)). The App key can mint installation
+  tokens for repositories the App is installed on. With Actions: write it can dispatch any
+  `workflow_dispatch` workflow in that scope, not just Baton's named sync workflows. It does
+  not itself grant git write access or a human approval. Webhook secrets authenticate
+  deliveries, not forge writes.
 
 The token also reaches every other Worker on the account. Whether `production` requires a
 reviewer was not verified; even if it does, the reviewer is the owner's account (see *The
-decision*). **Rated critical: the largest reach on this page.** B-135 makes a production deploy
-a human act. A compromised server or Cloudflare account is recovered by rotating the webhook
-secrets, the App key, the trigger tokens and the administrator keys, and redeploying a known commit (B-125).
+decision*). **Rated critical: the largest reach on this page.** The
+[B-135 production hand-off](./runbooks/production-deploy.mdx) describes the human gate and
+the checks the owner still needs to run.
+
+**Recovery, not resistance.** Stop runners and prevent further deploys outside Baton; do not
+use Baton's own answers to decide what is trustworthy. From a trusted operator machine and
+control plane, redeploy from a known-good commit and rotate the GitHub App key, webhook
+secrets, forge trigger tokens and administrator keys before resuming service. Revoke the old
+credentials and review dispatch and git activity directly at the forge. Redeploying code does
+not repair the database: verify its state against independent records and re-review or
+re-approve work whose evidence cannot be trusted. See the
+[compromise runbook](./runbooks/compromised-runner.mdx#6-when-the-server-or-the-cloudflare-account-is-the-compromised-thing)
+for the operator's recovery steps.
 
 ### 1. Code execution on every runner that serves the home
 

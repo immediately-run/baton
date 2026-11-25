@@ -6,7 +6,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { capabilitiesOf } from '../../src/vendor/vocabulary.mjs';
+import { capabilitiesOf } from '../../src/shared/vocabulary.mjs';
 import { asksHelp, declareCourses, fetchMain, hostMaskEnv, parseRunArgs, runMain, servedCourses } from '../../src/runner/main';
 import { drainLines, Runner, withTimestamps } from '../../src/runner/runner';
 import { BatonApi, BatonRefusal } from '../../src/runner/api';
@@ -59,6 +59,8 @@ describe('parseRunArgs', () => {
     expect(() => parseRunArgs(['--lock', 'mcp:chrome'], {})).toThrow('<capability>=<path>');
     // Verbose logging (2026-10-23): timestamps, the claim's id and nonce, the leg's command.
     expect(parseRunArgs(['--verbose'], {}).verbose).toBe(true);
+    expect(parseRunArgs([], {}).restartWhenBehind).toBe(false);
+    expect(parseRunArgs(['--restart-when-behind'], {}).restartWhenBehind).toBe(true);
   });
 });
 
@@ -161,6 +163,21 @@ describe('the agent_command a runner runs (B-83)', () => {
     // its own: escaped in HARNESS_AGENTS, the no-shell split (B-84) still spawns it whole.
     expect(splitWords(HARNESS_AGENTS.opencode).at(-1)).toBe(AGENT_PROMPT);
     expect(splitWords(HARNESS_AGENTS['claude-code']).at(-1)).toBe(AGENT_PROMPT);
+  });
+
+  it('leaves completion criteria to the leg instructions in both briefings (B-317)', () => {
+    const settings = JSON.parse(readFileSync(join(__dirname, '..', '..', '.baton', 'baton.json'), 'utf8'));
+    const prompt = splitWords(settings.agent_command).at(-1);
+    expect(prompt).toBe(AGENT_PROMPT);
+    expect(AGENT_PROMPT).toContain('When you have met the completion criteria in the leg instructions, exit immediately.');
+    expect(AGENT_PROMPT).not.toContain('the checks green');
+  });
+
+  it('allows permitted questions in the foreground without suspending the one-shot process (B-325, S-BTN-222)', () => {
+    expect(AGENT_PROMPT).toContain('If your leg instructions allow it and only the owner can unblock you');
+    expect(AGENT_PROMPT).toContain("ask through the harness's question tool and wait for the answer in the foreground");
+    expect(AGENT_PROMPT).toContain('if nobody answers, let Baton take the claim back at the leg deadline');
+    expect(AGENT_PROMPT).not.toContain('never write that you are waiting');
   });
 
   it('settings naming no agent_command drive from --harness, the command logged; a named one is left to the settings', async () => {

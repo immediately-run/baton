@@ -49,7 +49,8 @@ import legRunInputs from './0047_leg_run_inputs.sql';
 import conditions from './0048_conditions.sql';
 import coreConditions from './0075_core_conditions.sql';
 import retireReviewerSettings from './0076_retire_reviewer_settings.sql';
-import courseSourceResolutions from './0077_course_source_resolutions.sql';
+import legTimeoutFence from './0082_leg_timeout_fence.sql';
+import courseSourceResolutions from './0142_course_source_resolutions.sql';
 import eventLookups from './0049_event_lookups.sql';
 import alarmIndexes from './0052_alarm_indexes.sql';
 import retention from './0053_retention.sql';
@@ -66,9 +67,14 @@ import dependencyConsents from './0062_dependency_consents.sql';
 import runnersViewReads from './0063_runners_view_reads.sql';
 import childrenOwnerState from './0064_children_owner_state.sql';
 import readEfficiency from './0065_read_efficiency.sql';
+import legContracts from './0100_leg_contracts.sql';
+import pinnedContracts from './0101_pinned_contracts.sql';
 import runnerViews from './0066_runner_views.sql';
 import retirePolicyPins from './0070_retire_policy_pins.sql';
 import accessSignIn from './0071_access_sign_in.sql';
+import sessionLinkSecrets from './0079_session_link_secrets.sql';
+import interactionDeliveryGrant from './0080_interaction_delivery_grant.sql';
+import sessionLinkIncarnation from './0081_session_link_incarnation.sql';
 import { isUniqueViolation, logEvent, mintRunId, type Random } from '../core/db';
 import type { Store } from '../core/ports';
 
@@ -217,5 +223,11 @@ export const MIGRATIONS: Migration[] = [
   { id: 71, sql: accessSignIn },
   { id: 75, sql: coreConditions },
   { id: 76, sql: retireReviewerSettings },
-  { id: 77, sql: courseSourceResolutions },
+  { id: 79, sql: sessionLinkSecrets },
+  { id: 80, sql: interactionDeliveryGrant },
+  { id: 81, sql: sessionLinkIncarnation },
+  { id: 82, sql: legTimeoutFence },
+  { id: 100, sql: legContracts },
+  { id: 101, sql: pinnedContracts },
+  { id: 142, sql: courseSourceResolutions },
 ];

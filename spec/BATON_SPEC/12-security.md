@@ -41,7 +41,7 @@ The repository reads (`GET /v1/repositories/{repository}/…`) are open to any k
 repository, its owners and administrators, except where a route's rule narrows them.
 
 - **R-BTN-179 (the state is readable with a key).** What the dashboard's state answers is
-  answered to a signed key too, by the same queries — one request, one JSON answer:
+  answered to a signed key too, by the same queries with the session-link projection of R-BTN-113:
   `GET /v1/admin/repositories` (administrators: the registry as `/v1/admin/state`'s
   `repositories`, plus `seed_owners` — the unretired repositories whose live owner keys are all the
   deploy seed's, or that have no live owner, R-BTN-58); `GET /v1/owner/{repository}/grants` (its owners: that repository's `owners`,
@@ -574,6 +574,8 @@ trusted runners or of the protection checker; a compromised forge; and a comprom
     shows before a signature, are [proposed](../proposals/security.md) (B-136). Under `any` a
     human-only list is a custody promise: Baton cannot tell a key an agent session can use, so
     no guarantee claims it as a human gate (`human-gates`, R-BTN-189).
+  - Until FIDO attestation verification is built, no key, including a break-glass line, meets
+    the repository's `hardware` minimum. A stored attestation marker alone is not evidence.
   - **The owner's agent** is a principal (§12.1): an owner key not `human_only`. It acts as
     `owner`, never as `human`. A dashboard session of a `human_only` key is an owner's
     session too: no session, and no OAuth approval by one, satisfies a human-only `approvers.*`

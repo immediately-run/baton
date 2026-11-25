@@ -213,7 +213,7 @@ contents are not built; their design is
   | `ticket route <ticket> <leg> \| --clear` | queues or clears a leg (proposed: [data model and API](../proposals/data-model-and-api.md#other-reads-and-owner-routes)) | R-BTN-83 |
   | `ticket adopt <ticket> [--at <station>] [--next <leg>] [--ran <leg>,…]` | places a ticket on its course (proposed: [ticket adopt](../proposals/ticket-adopt.md)) | R-BTN-39 |
   | `ticket resolve <ticket> <restart> [--condition <id>]` | resolves a condition | R-BTN-163 |
-  | `ticket new`, `ticket claim <id>`, `ticket set <id> <status>`, `ticket done <id>`, `ticket check`, `ticket request "<one sentence>" --course <course>` | local: the ticket source in git | R-BTN-74, R-BTN-131 |
+  | `ticket next <kind>`, `ticket check [<id> --claimable]`, `ticket request "<one sentence>" --course <course>` | local: the ticket source in git, read; Dibber writes the ticket files | R-BTN-74, R-BTN-199, R-BTN-131 |
   | `decision list [--all] [--watch]` | `condition.list`: what waits for a person | R-BTN-163 |
   | `decision answer <ticket> <option>` | `attestation.add`: a person leg's answer | R-BTN-116, R-BTN-181 |
   | `attestation add <repository> --type <type> --subject <json> --value <json> [--lapses <duration>]`, `attestation revoke <repository> <id>` | writes or revokes an attestation (proposed: [security](../proposals/security.md)) | R-BTN-181 |
@@ -314,12 +314,17 @@ contents are not built; their design is
     emails ASCII and compared ASCII-lowercased, at most one line per email, several emails to
     one key allowed. Whoever controls the deployment sets it (R-BTN-57). An email bound to an
     administrator key gets a session of that key, as its link would open it; that session's key
-    is the line's. An absent, unverified or expired assertion, one with no or a non-ASCII email,
-    and an email bound to no key in `BATON_ADMIN_KEYS` are `unauthenticated` and set no cookie;
-    an unreadable key set is `unavailable`. A value of `ACCESS_IDENTITIES` with a malformed or
-    duplicated line binds nothing: every Access sign-in is `unavailable` until it is fixed, and
-    nothing else is affected. Each sign-in is recorded as an event of its key,
-    `{act: "login", via: "access"}`, with the email's SHA-256, never the email. Each request
+    is the line's. An Access sign-in refusal with `unauthenticated` sets no cookie and carries
+    one `reason`, checked in this order: `not-configured` if either `ACCESS_TEAM_DOMAIN` or
+    `ACCESS_AUD` is absent; `no-assertion` if no assertion reached Baton; `unverified` if the
+    assertion did not verify or lacks a usable ASCII email; `not-bound` if the verified email
+    has no line or its line names a key not in `BATON_ADMIN_KEYS`. Both binding failures have
+    the same answer; no refusal echoes the email. The page explains the reason as text and
+    still offers a one-time link. An unreadable key set is `unavailable`. A value of
+    `ACCESS_IDENTITIES` with a malformed or duplicated line binds nothing: an Access sign-in
+    that reaches the binding check is `unavailable` until it is fixed. Each successful sign-in
+    is recorded as an event of its key, `{act: "login", via: "access"}`, with the email's
+    SHA-256, never the email. Each request
     a session so opened authorizes also checks its line: the session ends as soon as the email
     leaves `ACCESS_IDENTITIES` or its line names another key. Baton reads no assertion after
     the sign-in, so ending the Access session does not end Baton's.

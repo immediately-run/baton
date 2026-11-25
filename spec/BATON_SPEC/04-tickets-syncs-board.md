@@ -103,7 +103,8 @@ numbers.
     Defaults are CLI code run in the sync, never core: `src/core/` may not import
     `src/defaults/`.
   - **The markdown source.** Every `*.md` or `*.mdx` under `items` (default `tickets/`) whose
-    frontmatter has an `id` is a ticket. It is **pinned**: a live ticket's `version` is its
+    frontmatter has an `id` and either omits `kind` or sets it to `ticket` is a ticket. It is
+    **pinned**: a live ticket's `version` is its
     file's blob id at the posted commit, its `key` is its `path`, and its `read` is that blob;
     a ticket whose file is not at the commit is posted with no version. Its frontmatter:
 
@@ -153,54 +154,39 @@ numbers.
     compared: an entry of the same day is not after. A shallow clone skips the report, saying
     so.
 
+    A `rules re-read` note is `_(YYYY-MM-DD: rules re-read: <ids>)_`, or the Status line
+    `dibber set <id> --note "rules re-read: <ids>"` writes, `_YYYY-MM-DD: rules re-read: <ids>._`.
     The `_filed` line, `tags: [request]` and the `rules re-read` notes are claims anyone who
-    can push can write; the check and the claim verify their form alone.
-  - **`baton ticket new`** (R-BTN-127) `--title T [--description D] [--project ID]
-    [--depends-on A,B] [--tags X,Y] [--order N] [--repos a,b] [--course C]
-    [--body-file F] [--trust T] [--invariants I] [--direct] [-i KEY] [--url URL] [--offline]`
-    files one ticket under an id from R-BTN-199.
-    - It writes the conventional body unless `--body-file` names one: `**Brief:**`, `**Spec:**`,
-      `**Depends on:**` (`none.` when empty), `**Used by:**`, `### What to build`, `### Trust`,
-      `### Invariants`, `### Tests`, `### Exit criteria`, `**Requires:**` (the capabilities a
-      description's closing `Requires:` clause names) and `## Status` with the `_filed` line,
-      which every filing carries.
-    - It refuses, before any push: a `--body-file` whose `**Depends on:**` line disagrees with
-      `--depends-on`; a filing `baton ticket check` would find fault with, judged over the
-      files the commit would leave; on or after the `sections_since` day, a filing whose
-      `### Trust` or `### Invariants` is absent, empty or a placeholder; and a filing whose project —
-      `--project`, else the `project` setting — is absent or names no `kind: project` page in
-      the items folder's `projects/`.
-    - It lands the ticket file alone, as one commit cut from the fetched default head in a
-      throwaway worktree, on `baton-ticket/<id>` — a reserved namespace no `branch_pattern` may
-      match (R-BTN-190) — and asks the forge for a PR with the caller's credential; on a `git`
-      forge it prints the pushed branch for a person to merge. The ticket is claimable when
-      that branch merges. With `--direct` it pushes the commit to the default branch instead,
-      adding the new id once to each dependency's `**Used by:**` line, and falls back to the PR
-      when the forge refuses the push as protected.
-    - Its settings: `items`, `ticket_prefix` (default `B`), `legacy_ids` (id patterns the
-      repository accepts and never allocates), `prefixes` (a prefix to its pattern, for one
-      that allocates more than `\d+`), `project` and `tags` (the defaults of `--project` and
-      `--tags`; `tags` else `roadmap-item`).
-  - **The git-lock commands.** Legacy, removed with its code (R-BTN-193). `baton ticket claim |
-    set | done` each write one commit to a ticket's `status:` and push it to the default branch
-    from a throwaway worktree at the fetched head; a push refused because the branch moved is
-    retried on the new head, six tries in all.
-    - `claim <id> [-i KEY] [--url URL] [--offline] [--rules-reread <ids>]`, and `set <id>
-      in-progress`, move a ticket available → in-progress. They refuse a ticket that is not
-      available; one whose `depends_on` are not all done (a qualified one is read at the target
-      repository's default branch, found through the `repos` setting); one another claim holds
-      in Baton; and one whose body cites a rule amended since the ticket answered for it (the
-      check's reading), unless `--rules-reread` names exactly those ids, which the commit then
-      notes in `## Status`. The claim reads Baton's position first: a ticket Baton holds past
-      its course's start is taken over where it is — its `prs:` kept, the position printed, the
-      ready leg continued on its branch. A read Baton does not answer refuses, unless
-      `--offline`.
-    - `set <id> <status> [--pr URL] [--note TEXT]` writes any live status and adds the PR to
-      `prs` once. A release to `available` refuses to drop a PR Baton's record holds while Baton
-      offers the ticket past its start; its commit message carries the hand-off — the PRs,
-      Baton's station, ready leg and branches, and the note.
-    - `done <id> [--pr URL]` writes `done` and moves the file to `<items>/archive/`.
-    - A post whose ticket is `available` in git while placed past its course's start is logged
+    can push can write; the check verifies their form alone.
+  - **`baton ticket check <id> --claimable [-i KEY] [--url URL] [--offline]`** reads what a
+    claim must know before Dibber writes it, and writes nothing. It reads the ticket at the
+    fetched default head and Baton's position of it (the board's station, ready leg and holders,
+    the history's `resume`, the branch-holder query). It is not claimable, exit 1 naming why,
+    when: another live claim holds it or its branch; it is not `available` in git, Baton's
+    position past its course's start overriding only a false `available`, never `in-progress`,
+    `in-review`, a parked or a closed status; a `depends_on` entry is not done (archived, or
+    `done` or `superseded`; a qualified one read at the target repository's default branch,
+    found through the `repos` setting); or its body cites a rule amended since it answered for
+    it (the check's reading), naming each id until a `rules re-read` note names it. Claimable,
+    exit 0, it prints the claim to make (`dibber claim <id>`) and, for a ticket Baton holds past
+    its start, the takeover: the station, the ready leg, every PR Baton's record holds (each one
+    the file lacks with its `dibber set <id> --pr <url>`), and each branch to continue on. A read
+    Baton does not answer exits 2, unless `--offline`, which judges git's word alone and says so.
+  - **Ticket files are Dibber's to write.** Baton's CLI files no ticket and writes no status:
+    `baton ticket new | claim | set | done` are refused, each naming its `dibber` command. A
+    ticket is filed with `dibber new`, under the number Dibber's coordinator gives (R-BTN-199),
+    and its status written with `dibber claim | set | done`.
+    - `baton repo init` writes `.dibber/config.json` beside `.baton/baton.json`: `store` from
+      `items`, `prefix` from `ticket_prefix`, and `coordinator.next`,
+      `baton tickets next ticket-<prefix> --coordinator` run from the release's package. Over an existing file it adds what is
+      missing, never overwrites a value, and says what it changed.
+    - A course leg that files or changes a ticket runs the `dibber` its stub pins, handed to its
+      agent as `BATON_DIBBER`: the host's `BATON_DIBBER`, else the release version
+      `.baton/baton.json`'s `dibber` names, else the release's own; never a command a ticket or a
+      branch names. The leg commits and pushes what Dibber wrote by its course's route: a
+      `bug-report` filing alone, on `baton-ticket/<id>` — a reserved namespace no `branch_pattern`
+      may match (R-BTN-190). A leg's close still writes its marker keys itself (R-BTN-83).
+  - A post whose ticket is `available` in git while placed past its course's start is logged
       `position-disagrees` (R-BTN-85).
   - **The "How tickets work" page.** `baton repo init` writes `HOW-TICKETS-WORK.md` into the
     items folder, the same text in every repository but for the id prefix, legacy patterns and
@@ -373,7 +359,9 @@ The fingerprint stores no ticket content and is an optimization, never authority
     one too, with no number (§13.4 `sequences`).
   - **The CLI** names the kinds — `ticket-<prefix>` (one per allocating prefix), `rule`,
     `scenario`, `gate`, `migration` — and `baton ticket next <kind> [--for <ticket>]` prints the
-    next of one. A remote the floor cannot read is an error, never a floor of 0: no number is
+    next of one. With `--coordinator` it prints Baton's number alone, or refuses — no key, no
+    repository, an unanswered Baton — and never scans: Dibber's coordinator command (R-BTN-74),
+    so only Dibber's own `new --offline` files from a scan. A remote the floor cannot read is an error, never a floor of 0: no number is
     printed or filed.
   - **Git stays the record** (R-BTN-1): the CLI writes the number into git and never reads it
     back from Baton. A number a branch holds only locally is one no floor sees; the duplicate
@@ -381,8 +369,8 @@ The fingerprint stores no ticket content and is an optimization, never authority
     R-BTN-31's for the rest.
   - **The next-free scan.** Legacy, removed with its code (R-BTN-193). With no key, no
     configured Baton, an unreachable Baton or `--offline`, the CLI takes the next free number
-    git shows it — for `baton ticket new`, across the items folder at any depth on the head it
-    files on, `archive/` included — and says so in its output. The duplicate check at merge is
+    git shows it — for a ticket kind, across the items folder at any depth, `archive/` included —
+    and says so in its output. Dibber's own scan is its `new --offline`. The duplicate check at merge is
     that path's only guard.
 
 ### 4.4 The board post
