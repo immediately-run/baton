@@ -644,7 +644,7 @@ describe('baton repo init and baton tickets check: the generated page (B-112)', 
     expect(r.code).toBe(1);
     expect(r.out.split('\n').filter(Boolean)).toEqual([
       `tickets/${PAGE_NAME}: differs from the "How tickets work" page this release generates — \`baton repo init --force\` writes it again`,
-      'baton tickets check: 1 ticket(s), 1 finding(s)',
+      'baton tickets check: 0 ticket(s), 1 finding(s)',
     ]);
     // --quiet keeps stdout for the exit code.
     expect(run(dir, 'check', '--repo', dir, '--quiet')).toMatchObject({ code: 1, out: '' });

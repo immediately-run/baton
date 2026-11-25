@@ -402,6 +402,31 @@ then forward) never showed it. What changed: on bering, an
 `ip daddr 192.0.2.10 ct state established,related accept` before the drop; the fieldhouse
 repository's copy still needs it.
 
+## 2026-11-22 — a flaky test that copies the host's environment hid a real secret leak
+
+Evidence: [interventions, 2026-11-22 13:50–17:25](interventions.mdx); #354 and its two review
+rounds; `run-tests` archives of B-244 and B-249 on bering.
+
+**A test that fails differently on each run, on unrelated PRs, is evidence, not noise: read
+what it printed before calling it flaky.** The class-7 masking test copies `process.env`, so
+whether it failed depended on that host's secrets. Each failure printed a different credential
+fragment, which was the leak itself. What changed: #354 fixed the masker, with fuzz tests
+(follow-ups in B-316). A fix leg must never "repair" such a test inside an unrelated ticket
+(B-317).
+
+## 2026-11-23 — "reviewed" is a station, and exit 0 is not a merge
+
+Evidence: [interventions, 2026-11-22 06:42 and 2026-11-23 08:50](interventions.mdx); #357,
+#385.
+
+**Read a review round's verdict, and check the forge for a merge; never infer either from a
+station name or an exit code.** On 2026-11-21 the supervisor took `suspended:reviewed` to mean
+"approved, waiting to merge", but it is only the station a round reaches, whatever its verdict.
+On 2026-11-23 the merge leg reported `merged` for a PR that was still open, because its agent
+exited 0. The same morning #383 was merged after its `test` check had already failed: watching
+the checks finish is not the same as reading the result. What changed: #385 verifies the merge
+with the forge, and the supervisor merges only after reading each check's conclusion.
+
 ## 2026-11-24 — a runner holds the gateway key it read at start
 
 Evidence: [interventions, 2026-11-24 10:19–13:50](interventions.mdx); B-322's run-tests at
@@ -484,3 +509,19 @@ workflow ran the CLI at `17ae8cce`, which never read the observation's list, so 
 waited for attestations no sync sent. Neither could a script stand in: Cloudflare Access fronts
 `/v1/login`, so a dashboard session cannot be minted from a key alone. What changed: the pin moved
 to `d8f10fc0`.
+
+## 2026-11-25 — a runner that cannot place a sandbox empties the queue in minutes
+
+Evidence: [interventions, 2026-11-25 11:30–12:47](interventions.mdx);
+`runner-run-20261124-210538-r1.log` on bering, 47 lines "cannot map 4096 MiB of guest memory".
+
+**A runner keeps claiming while its executor cannot run anything: every claim fails at once,
+the ticket is released, and the next is claimed — so a host-wide shortage becomes a release of
+every ready ticket, each then waiting for a sync, some with a retry spent.** The failure is
+the host's, not the ticket's, but nothing in the claim loop tells the two apart: E2B's
+placement error reached Baton as "ticket moved under the claim" (`stale-board`) or as
+`cannot-finish:transient`. What changed: nothing yet. The owner's ruling (2026-11-25) is that
+a runner must not offer to take work it cannot place; until that is built, a supervisor who
+sees placement failures should drain the runner (SIGTERM to the `MainThread` process running
+`baton.mjs run`, found by its full command line — a pattern search can match the searching
+shell) and restart it once sandboxes start.

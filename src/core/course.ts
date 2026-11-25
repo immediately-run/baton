@@ -25,7 +25,7 @@ export interface CourseViolation {
 import { isFreeText } from './text';
 import { OUTPUTS_MAX } from './contractPointers';
 import { parseSchemaId } from '../shared/schema.mjs';
-import { ROLES } from '../vendor/vocabulary.mjs';
+import { ROLES } from '../shared/vocabulary.mjs';
 import { CONDITION_TYPE, CONDITION_TYPE_MAX, RESTART_ID, barredFromAutonomous, dispositionOf, type ConditionDeclaration, type Disposition } from './conditionTypes';
 
 /** R-BTN-121, R-BTN-157: the names a vocabulary expansion already means — a vocabulary role, the
