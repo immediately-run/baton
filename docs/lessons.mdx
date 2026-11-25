@@ -470,3 +470,17 @@ is assumed to send.** #400 assumed a review leg names no `ended_at_sha` because 
 commit; its close returns the PR comment's URL, which the runner sends and the server stores as
 the end's evidence. What changed: the `std:git.evidence@1` attestation R-BTN-10 always required,
 so ends naming a commit or a URL are confirmed by their evidence.
+
+## 2026-11-25 — a sync change merged and deployed is not running until the workflow's pin moves
+
+Evidence: [interventions, 2026-11-24 20:00](interventions.mdx); the `baton sync` run of
+2026-11-25 01:24 UTC (no `baton: evidence` line); `GET /v1/repositories/baton/tickets?state=unconfirmed`
+still counting 54 afterwards.
+
+**A change on the sync's side of the protocol is live only when `.github/workflows/baton-sync.yml`'s
+pinned `ref:` includes it; after merging one, move the pin in the same breath and read the next
+sync's log for the new line.** #415's tests drove `src/defaults/cli.ts` from this tree; the
+workflow ran the CLI at `17ae8cce`, which never read the observation's list, so the deployed server
+waited for attestations no sync sent. Neither could a script stand in: Cloudflare Access fronts
+`/v1/login`, so a dashboard session cannot be minted from a key alone. What changed: the pin moved
+to `d8f10fc0`.
