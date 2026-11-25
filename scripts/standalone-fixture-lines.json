@@ -6,6 +6,9 @@
     "85c8c74601ab27c3d0061b02c2dea988afe0e0b5677b550980916a166a227c0f",
     "ed984099fa01b7c801aa55b8788c3bcf985e9c62fa34f712e0809c7d42e55fea"
   ],
+  "test/integration/B-131.forge-scope.test.ts": [
+    "ae884f351a93f93c8b6f8087a755c7362c7e8fd10405309fd58456de66534bd9"
+  ],
   "test/integration/B-241.sync-unchanged.test.ts": [
     "bb36e1dc2495044cec5b2ecd02dcf02305f316ff40f84d5bc55a2e36285bca12"
   ],
@@ -110,6 +113,9 @@
   ],
   "test/integration/S-BTN-313.runner-refresh.test.ts": [
     "be611f1afc488f28aea27de4b21337df9a7ee4f4014410964aed00cbe0461d7e"
+  ],
+  "test/integration/S-BTN-319.board-boundary.test.ts": [
+    "bde182f365178eaf5d42b5fb173c1d58fa3ad4c5f078778e388569d1512f5dcb"
   ],
   "test/integration/S-BTN-42.webhooks.test.ts": [
     "645a421fc447f6b3c28fe6d647f1e785185f3a973ab9d75369f54b744d4ede82",

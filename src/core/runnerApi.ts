@@ -307,8 +307,8 @@ export class RunnerApi {
    *  claim, the messages, the stale courses and the mode. A `uses` a runner still sends is its
    *  retired declaration that it uses account instances (B-168): the heartbeat reads it as
    *  absent, logging `deprecated-field`. */
-  // @model heartbeat sha256:9c0136704c87
-  // @model declare sha256:828f5e6ae833
+  // @model heartbeat sha256:576daa5cf97c
+  // @model declare sha256:d9cef42a9b45
   async heartbeat(credentialId: string, secretHeader: string | null, body: unknown, clientVersion: string | null = null, legacyName = false) {
     // B-168 (R-BTN-76): `uses` is retired — a runner uses the repository's instances, never a set
     // it declares — and read as absent while the history's Migrations entry lasts.
@@ -711,7 +711,7 @@ export class RunnerApi {
 
   /** Delivery is the heartbeat (§9): pending messages become delivered; delivered ones not yet
    *  acknowledged are sent again, so a lost response loses nothing. */
-  // @model deliverTimeout sha256:1916e7aa5051
+  // @model deliverTimeout sha256:f961aa2db6e7
   private deliver(runnerId: number, now: number) {
     const out = this.rows<{ id: number; kind: string; payload_json: string | null; sent_at: number }>(
       `SELECT id, kind, payload_json, sent_at FROM messages WHERE to_runner_id = ? AND status IN ('pending','delivered')

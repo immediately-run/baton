@@ -58,6 +58,33 @@ beforeEach(async () => {
 });
 
 describe('S-BTN-189 the repository policy', () => {
+  // S-BTN-197 (policy dry run, B-155).
+  it('previews protected with the same preconditions and trust clearing as apply, but writes nothing', async () => {
+    const path = '/v1/owner/ops/policy';
+    const proposed = { base_version: 1, preset: 'protected' };
+    const preview = { ...proposed, dry_run: true };
+    expect((await as(owner, path, preview, 'PUT')).json.code).toBe('unsatisfiable-approvers');
+    await addHumanOwner('ops');
+    const grant = await as(owner, '/v1/owner/ops/couriers', { public_key: checkerKey.publicKey, asks: ['owner', 'reviewer'], trust_level: 'trusted', trust_domain: 'host-a' });
+    expect(grant.status).toBe(200);
+    const snapshot = () => Promise.all([rows('SELECT * FROM repository_policies'), rows('SELECT * FROM events'), rows('SELECT * FROM couriers')]);
+    const before = await snapshot();
+    expect((await as(owner, path, { ...preview, dry_run: 'true' }, 'PUT')).json.code).toBe('invalid-params');
+    expect((await as(owner, path, { ...preview, base_version: 2 }, 'PUT')).json.code).toBe('conflict');
+    const dry = await as(owner, path, preview, 'PUT');
+    expect(dry.status).toBe(200);
+    expect(dry.json.trust_cleared).toEqual([`courier:${checkerKey.fingerprint}`]);
+    expect(dry.json.stops).toEqual({ legs: [], tickets: [] });
+    expect(dry.json.not_evaluated).toContain('trusted-merge');
+    expect(await snapshot()).toEqual(before);
+
+    const applied = await as(owner, path, proposed, 'PUT');
+    expect(applied.status).toBe(200);
+    expect(dry.json).toMatchObject({ changed: applied.json.changed, guarantees: applied.json.guarantees });
+    expect((await rows('SELECT DISTINCT trust_level, trust_domain FROM couriers WHERE repository_id = ?', 'ops'))).toEqual([{ trust_level: 'untrusted', trust_domain: null }]);
+    expect((await as(owner, path, { ...preview, base_version: 2 }, 'PUT')).json.code).toBe('forbidden');
+  });
+
   it('a new repository gets version 1, the cooperative column, in the same transaction', async () => {
     const row = await policyRow('ops');
     expect(row.version).toBe(1);

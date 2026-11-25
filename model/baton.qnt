@@ -301,26 +301,27 @@ module baton {
   pure def stationsOn(p: List[str]): Set[str] = p.indices().map(i => TO.get(p[i])).union(Set(START))
   // R-BTN-120: a `depends_at` entry is met from the stations and paths Baton stores; a withdrawn
   // ticket meets none
-  pure def depMetIn(s: State, d: Dep): bool = and {
-    not(s.postedGone.get(d.other)),
-    if (d.mode == "at") d.stations.contains(stationOf(s.posted.get(d.other)))
+  pure def depMetIn(s: State, t: str, d: Dep): bool = and {
+    // Grow the reachable set once per vertex, enough to cover every simple path.
+    not(TICKETS.fold(Set(d.other), (seen, _) => seen.union(seen.map(u =>
+      s.postedDeps.get(u).map(edge => edge.other)).flatten())).contains(t)),
+    if (d.mode == "withdrawn") s.postedGone.get(d.other)
+    else if (d.mode == "closed") s.postedGone.get(d.other) or atEnd(s.posted.get(d.other))
+    else not(s.postedGone.get(d.other)) and (if (d.mode == "at") d.stations.contains(stationOf(s.posted.get(d.other)))
     else if (d.mode == "reached") d.stations.intersect(stationsOn(s.posted.get(d.other))).size() > 0
-    else atEnd(s.posted.get(d.other)),
+    else atEnd(s.posted.get(d.other))),
   }
+  pure def ticketRowsIn(s: State, t: str): Set[Dep] = s.postedDeps.get(t).filter(d => not(depMetIn(s, t, d)))
   pure def onLeg(x: str, l: str): bool = x == "" or x == l
   // the confirmed rows on leg l of t, whole-ticket rows included: an unmet prerequisite, an open
   // decision (R-BTN-78), a backoff (R-BTN-122)
   pure def confirmedRowsIn(s: State, t: str, l: str): bool = or {
-    s.postedDeps.get(t).exists(d => onLeg(d.leg, l) and not(depMetIn(s, d))),
+    ticketRowsIn(s, t).exists(d => onLeg(d.leg, l)),
     s.postedDecisions.get(t).exists(x => onLeg(x, l)),
     s.retryRows.get(t).contains(l),
   }
-  // §6.6, R-BTN-75: what binds an advance — a `decision` row on the leg or the ticket (R-BTN-78)
-  // and a backoff on the leg (R-BTN-122), never a `ticket` row, which refuses a claim only
-  pure def advanceRowsIn(s: State, t: str, l: str): bool = or {
-    s.postedDecisions.get(t).exists(x => onLeg(x, l)),
-    s.retryRows.get(t).contains(l),
-  }
+  // R-BTN-75: the same confirmed rows refuse claims and advances on their leg.
+  pure def advanceRowsIn(s: State, t: str, l: str): bool = confirmedRowsIn(s, t, l)
   // R-BTN-126: a provisional row refuses a claim or advance into its leg, but is not a block
   pure def provisionalIn(s: State, t: str, l: str): bool = s.provs.exists(p => p.ticket == t and p.leg == l)
   // R-BTN-75's held: an active claim, a completion not yet confirmed, a fence-pending reap
@@ -502,7 +503,7 @@ module baton {
   // candidate and checks every gate in one transaction. It is offered the ticket's queued leg
   // (R-BTN-83), and rule 8 is judged on that leg.
   // @impl src/core/claims.ts#claim
-  // @impl pending — the per-leg `at`/`reached` prerequisites (R-BTN-120, B-10), the per-leg backoff (R-BTN-122, B-11) and provisional rows (R-BTN-126, B-21) as gates
+  // @impl pending — per-leg backoff (R-BTN-122, B-11) and provisional rows (R-BTN-126, B-21) as gates
   action claim(w: str, t: str): bool = all {
     runnerFree(w), st.nextId <= MAX_CLAIMS, claimableBy(t, w), rule4(w, t),
     not(seatsFull(t, -1)),                                  // rule 11 (R-BTN-178): a free seat
@@ -831,6 +832,7 @@ module baton {
   }
   // R-BTN-4, §6.6: the alarm reaps a claim whose lease ran out — its runner dead or silent; a
   // failed attempt on the claim's leg (§7.4, R-BTN-122), and an end (R-BTN-75).
+  // The model assumes Baton is serving; host downtime and recovery grace (§9.5) are tested by S-BTN-2.
   // @impl src/core/claims.ts#alarm
   // @impl pending — the attempt counted per leg (R-BTN-122, B-11)
   action alarmReap(i: int): bool = all {
@@ -1001,7 +1003,7 @@ module baton {
   // by anyone, in git (R-BTN-66, R-BTN-78, R-BTN-120).
   // @impl external — git: the ticket's source (R-BTN-66)
   action gitDepends(t: str, d: Dep, on: bool): bool = all {
-    st.gitBudget > 0, d.other != t, st.gitDeps.get(t).contains(d) != on,
+    st.gitBudget > 0, st.gitDeps.get(t).contains(d) != on,
     st' = st.with("gitDeps", st.gitDeps.set(t, if (on) st.gitDeps.get(t).union(Set(d)) else st.gitDeps.get(t).exclude(Set(d))))
             .with("gitVersion", st.gitVersion + 1).with("gitBudget", st.gitBudget - 1),
   }
@@ -1101,7 +1103,8 @@ module baton {
   // @impl src/core/observations.ts#use
   // @impl src/core/claims.ts#judge
   // @impl src/core/claims.ts#staleBoard
-  // @impl pending — `depends_at` entries posted and their rows kept (R-BTN-120, B-10); provisional rows replaced by a snapshot containing their commit (R-BTN-126, B-21)
+  // @impl src/core/ticketPrerequisites.ts#posted
+  // @impl pending — provisional rows replaced by a snapshot containing their commit (R-BTN-126, B-21)
   action syncPost(s: int): bool = {
     val r = st.syncs.get(s)
     all {
@@ -1153,7 +1156,7 @@ module baton {
       heartbeat(w), sleep(w), wake(w), tick, timeUp, alarmReap(i),
       crash(w), reapDead(w), forceReap(w), fenceCleared(w), fenceTimeout(i), adminFenceClear(i),
       setHold(t, b), setOwnerBar(tag, applies), liftOwnerBars, ownerResolve(i),
-      foreignPush(t, leg), regress(t), withdraw(t), gitDepends(t, d, b), gitDecides(t, decisionLeg, b),
+      foreignPush(t, leg), regress(t), withdraw(t), all { d.other != t, gitDepends(t, d, b) }, gitDecides(t, decisionLeg, b),
       retryElapse(t, leg), provisionalLapses(t, leg),
       syncNumber(s), syncRead(s, postBars, queuedFor(st.gitPath, picks)), syncVoid(s), syncPost(s),
       declare(w, decl), alarmLive, reading(x, b), readingLapses(x), endBlockedOn(w, onKind, x),

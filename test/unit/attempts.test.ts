@@ -75,7 +75,7 @@ describe('G-BTN-31 through the server', () => {
     await beat('vm-a', a.secret, { lease_timeout_s: 43_200, fenced: { claim_id: one.json.claim_id, terminated: true } });
     await refresh(); // §6.7: claimable again only after a reading since the end
     const two = await claimItem('vm-a', a.secret, { ticket_id: 'docs:R3-9001' });
-    await owner('/v1/ui/messages', { to_runner_id: a.id, kind: 'release', payload: { ticket_id: 'docs:R3-9001', reason: 'requested' } });
+    await owner('/v1/ui/messages', { to_runner_id: a.id, kind: 'release', confirm: true, payload: { ticket_id: 'docs:R3-9001', reason: 'requested' } });
     await beat('vm-a', a.secret, { lease_timeout_s: 43_200 });
     await setClock(T0 + 2 * H);
     await tick();

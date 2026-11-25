@@ -40,13 +40,14 @@
 //                B-254 R-BTN-197 — raiseable, never below the code's)
 //   baton admin -i KEY resource set INSTANCE (--available | --unavailable [--until ISO]) [--valid-for 1h] [--detail FILE|JSON]
 //   baton blocked -i KEY TICKET                           baton blocked -i KEY --repository R --on KIND:REF [--transitive]
+//   baton leg why -i KEY TICKET [LEG]
 //                — why a ticket cannot move, or what waits on a ticket, a resource, a capability or a
 //                decision (R-BTN-75); `--on decision:*` is every decision waiting on a person
-//   baton admin -i KEY revoke FINGERPRINT                          baton admin -i KEY open
+//   baton admin -i KEY revoke FINGERPRINT [--yes]                  baton admin -i KEY open
 //   baton admin -i KEY state      — what the dashboard draws, as JSON, read with the key (B-118)
 //   baton owner -i KEY grant REPO --key PUB [--hostname H] --capabilities a,b [--label L] [--max-tier T] [--max-claims N] [--deliver-interactions]
-//   baton owner -i KEY revoke REPO FINGERPRINT
-//   baton owner -i KEY owners REPO (--add PUB | --remove FINGERPRINT)
+//   baton owner -i KEY revoke REPO FINGERPRINT [--yes]
+//   baton owner -i KEY owners REPO (--add PUB | --remove FINGERPRINT [--yes])
 //   baton owner -i KEY sign [--message TEXT] [--repo DIR] -- <paths>…   (B-127: a commit signed
 //                the way require_signed_control counts — git's gpg.format ssh, the SSHSIG
 //                namespace `git`, the key -i names; plain `git commit -S` with git configured
@@ -59,8 +60,8 @@
 //   baton owner -i KEY policy show REPO                     — the signed read (R-BTN-189), as JSON
 //   baton owner -i KEY policy diff REPO FILE                — the knobs FILE's document would change
 //   baton owner -i KEY policy log REPO [--after N]          — the append-only change log
-//   baton owner -i KEY policy set REPO FILE --base N        — a compare-and-set on the version you read
-//   baton owner -i KEY policy apply REPO PRESET --base N    — cooperative | protected | protected-signed | plain-git
+//   baton owner -i KEY policy set REPO FILE --base N [--dry-run] — compare-and-set on the version you read
+//   baton owner -i KEY policy apply REPO PRESET --base N [--dry-run] — preview policy effects without writing
 //   baton owner -i KEY policy floor add REPO NAME --guarantees a,b [--remove-by human|owner]
 //   baton owner -i KEY policy floor remove REPO NAME        (R-BTN-189: needs the floor's remove_by and approvers.policy)
 //   baton owner -i KEY bar REPO --course C|'*' --tag T [--legs a,b] --applies claim|claim+advance
@@ -208,7 +209,7 @@ export function parseArgs(argv, booleans = [], allowed = null, positionals = Inf
       continue;
     }
     const value = argv[++i];
-    if (value === undefined) throw new Error(`${a} needs a value`);
+    if (value === undefined || value.startsWith('--') || value === '-i') throw new Error(`${a} needs a value`);
     if (name === 'required-bar') groups.push({ leg: value });
     else if (groups.length && ['course', 'except', 'tag-prefix'].includes(name) && flags['required-bar-mode']) groups.at(-1)[name] = value;
     else flags[name] = value;
@@ -279,7 +280,7 @@ function workingTreeRefusal(argv) {
  *  the owner and administrator commands' value-less flags (parseArgs booleans) are named here so
  *  `--yes --dev` still counts. An unknown boolean is read as value-taking, which refuses rather
  *  than bypasses — the safe direction. */
-const NO_VALUE_FLAGS = new Set(['transitive', 'cut-over', 'available', 'unavailable', 'clear', 'yes', 'release-holders', 'no-required-bars', 'require-signed-control', 'no-require-signed-control', 'watch', 'all', 'confirm', 'api-keys', 'no-api-keys']);
+const NO_VALUE_FLAGS = new Set(['transitive', 'cut-over', 'available', 'unavailable', 'clear', 'yes', 'release-holders', 'no-required-bars', 'require-signed-control', 'no-require-signed-control', 'watch', 'all', 'confirm', 'api-keys', 'no-api-keys', 'dry-run']);
 function devFlagPositions(argv) {
   const at = [];
   for (let i = 1; i < argv.length; i++) {
@@ -302,6 +303,12 @@ function devFlagPositions(argv) {
  */
 export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? p : readFileSync(p, 'utf8').trim()), readJson = (p) => readFileSync(p, 'utf8'), home = null) {
   const [cmd, ...rest] = argv;
+  if (role === 'leg' && cmd === 'why') {
+    const { positional } = parseArgs(rest, [], [], 2);
+    const { repository, local } = ticketArg(need(positional[0], 'the ticket, <repository>:<id>'), home);
+    const leg = positional[1] ? `?${new URLSearchParams({ leg: positional[1] })}` : '';
+    return { method: 'GET', path: `/v1/repositories/${encodeURIComponent(repository)}/tickets/${encodeURIComponent(local)}/prerequisites${leg}` };
+  }
   if (role === 'blocked') {
     // R-BTN-75: a GET any key granted on the repository, an owner of it or an administrator signs.
     const { flags, positional } = parseArgs(argv, ['transitive'], ['on', 'repository'], 1);
@@ -397,8 +404,12 @@ export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? 
       return { method: 'POST', path: '/v1/admin/probes', body: { public_key: readKey(need(flags.key, '--key')), label: need(flags.label, '--label'), instances: list(flags.instances) ?? [] } };
     }
     if (cmd === 'revoke') {
-      parseArgs(rest.slice(1), [], [], 0);
-      return { method: 'POST', path: `/v1/admin/keys/${encodeURIComponent(need(rest[0], 'the key fingerprint'))}/revoke`, body: {} };
+      const { flags, positional } = parseArgs(rest, ['yes'], [], 1);
+      const fp = need(positional[0], 'the key fingerprint');
+      return {
+        method: 'POST', path: `/v1/admin/keys/${encodeURIComponent(fp)}/revoke`, body: { confirm: true },
+        confirm: { question: `revoke key ${fp} throughout this Baton?`, yes: !!flags.yes },
+      };
     }
     if (cmd === 'open') {
       parseArgs(rest, [], [], 0);
@@ -528,17 +539,23 @@ export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? 
     if (cmd === 'revoke') {
       // B-121: with a home in force the repository position may be omitted, the fingerprint
       // alone remaining.
-      const fpOnly = home?.repository != null && rest.length === 1;
-      const repo = repoOrHome(fpOnly ? undefined : rest[0], home);
-      const fp = need(fpOnly ? rest[0] : rest[1], 'the key fingerprint');
-      parseArgs(rest.slice(fpOnly ? 1 : 2), [], [], 0);
-      return { method: 'POST', path: `/v1/owner/${encodeURIComponent(repo)}/grants/${encodeURIComponent(fp)}/revoke`, body: {} };
+      const { flags, positional } = parseArgs(rest, ['yes'], [], 2);
+      const fpOnly = home?.repository != null && positional.length === 1;
+      const repo = repoOrHome(fpOnly ? undefined : positional[0], home);
+      const fp = need(fpOnly ? positional[0] : positional[1], 'the key fingerprint');
+      return {
+        method: 'POST', path: `/v1/owner/${encodeURIComponent(repo)}/grants/${encodeURIComponent(fp)}/revoke`, body: { confirm: true },
+        confirm: { question: `revoke the grant of ${fp} on ${repo}?`, yes: !!flags.yes },
+      };
     }
     if (cmd === 'owners') {
-      const { flags, positional } = parseArgs(rest, [], ['add', 'remove'], 1);
+      const { flags, positional } = parseArgs(rest, ['yes'], ['add', 'remove'], 1);
       const repo = repoOrHome(positional[0], home);
       if (flags.add) return { method: 'POST', path: `/v1/owner/${repo}/owners`, body: { public_key: readKey(flags.add) } };
-      if (flags.remove) return { method: 'POST', path: `/v1/owner/${repo}/owners`, body: { fingerprint: flags.remove, remove: true } };
+      if (flags.remove) return {
+        method: 'POST', path: `/v1/owner/${repo}/owners`, body: { fingerprint: flags.remove, remove: true, confirm: true },
+        confirm: { question: `remove owner ${flags.remove} from ${repo}?`, yes: !!flags.yes },
+      };
       throw new Error('baton owner owners REPO --add PUB | --remove FINGERPRINT');
     }
     if (cmd === 'bar' && rest[0] === 'lift') {
@@ -1082,6 +1099,8 @@ async function policyMain(argv) {
   // REPO` is the documented form — or after it, as every other command takes them. B-121:
   // `--home` rides along the same way, and the home in force supplies the repository the
   // missing positional names and the origin a missing --url/BATON_URL calls.
+  // Validate adjacency before separating global options from command options.
+  parseArgs(argv, ['dry-run', 'yes']);
   const isFlagOrValue = (_, i, a) => a[i] === '-i' || a[i - 1] === '-i' || a[i] === '--url' || a[i - 1] === '--url' || a[i] === '--home' || a[i - 1] === '--home';
   const { flags: globalFlags } = parseArgs(argv.filter(isFlagOrValue));
   const args = argv.filter((x, i, a) => !isFlagOrValue(x, i, a));
@@ -1126,7 +1145,7 @@ async function policyMain(argv) {
     return 0;
   }
   if (sub === 'set' || sub === 'apply') {
-    const { flags, positional } = parseArgs(rest, [], ['base', 'identity', 'url'], 2);
+    const { flags, positional } = parseArgs(rest, ['dry-run'], ['base', 'identity', 'url'], 2);
     // B-121: with a home in force the repository may be omitted — one positional is the file or
     // preset, the named repository (two positionals) always winning over the home.
     const fromHome = home?.repository != null && positional.length === 1;
@@ -1137,6 +1156,7 @@ async function policyMain(argv) {
     // so a concurrent change is a `conflict` the operator sees, never one this overwrites.
     const base = need(baseOf(flags.base), '--base N (the version your change builds on — `baton owner policy show` names it; a stale one answers conflict)');
     const body = sub === 'apply' ? { base_version: base, preset: what } : { base_version: base, policy: JSON.parse(readFileSync(what, 'utf8')) };
+    if (flags['dry-run']) body.dry_run = true;
     const out = await request('PUT', `/v1/owner/${encodeURIComponent(repo)}/policy`, body);
     write(JSON.stringify(out.json));
     return out.status >= 200 && out.status < 300 ? 0 : 1;
@@ -1152,12 +1172,15 @@ async function policyMain(argv) {
     return out.status >= 200 && out.status < 300 ? 0 : 1;
   }
   if (sub === 'floor' && rest[0] === 'remove') {
-    const { positional } = parseArgs(rest.slice(1), [], ['identity', 'url'], 2);
+    const { flags, positional } = parseArgs(rest.slice(1), ['yes'], ['identity', 'url'], 2);
     // B-121: with a home in force the repository may be omitted — one positional is the floor.
     const fromHome = home?.repository != null && positional.length === 1;
     const [repoArg, nameArg] = fromHome ? [home.repository, positional[0]] : positional;
-    const out = await request('POST', `/v1/owner/${encodeURIComponent(repoOrHome(repoArg, home))}/policy/floors`,
-      { name: need(nameArg, 'the floor name'), remove: true, confirm: true });
+    const repo = repoOrHome(repoArg, home);
+    const name = need(nameArg, 'the floor name');
+    if (!(await confirmAsk(`remove policy floor ${name} from ${repo}?`, flags.yes, process.stdout, process.stdin))) return 1;
+    const out = await request('POST', `/v1/owner/${encodeURIComponent(repo)}/policy/floors`,
+      { name, remove: true, confirm: true });
     write(JSON.stringify(out.json));
     return out.status >= 200 && out.status < 300 ? 0 : 1;
   }
@@ -1209,6 +1232,7 @@ export async function main(argv) {
     }
   }
   if (argv[0] === 'test-course') return testCourse(argv.slice(1));
+  if (argv[0] === 'course' && argv[1] === 'test') return testCourse(argv.slice(2));
   if (argv[0] === 'key') {
     if (argv[1] !== 'create' || !argv[2]) throw new Error('baton key create FILE [--comment TEXT]');
     const { flags } = parseArgs(argv.slice(3), [], ['comment'], 0);

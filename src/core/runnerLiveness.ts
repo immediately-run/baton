@@ -49,4 +49,8 @@ export const unreapedCapacityRunnerSql = `reaped_at IS NULL AND kind != 'legacy'
  *  already been marked reaped. Callers handle the imported claim's timer separately. */
 export const expiredLeaseSql = `${leaseEndSql('w.')} <= ?`;
 
-export const expiredClaimLeaseSql = `COALESCE(c.api_lease_cap_at, ${leaseEndSql('w.')}) <= ?`;
+/** Recovery extends the silence-reap deadline, but never a deadline frozen by API-key policy. */
+export const CLAIM_LEASE_END_SQL = 'COALESCE(c.api_lease_cap_at, MAX(w.last_seen_at, COALESCE(c.lease_recovered_at, w.last_seen_at)) + w.lease_timeout_ms)';
+
+// An already-ended claim's fence does not get recovery grace.
+export const expiredClaimFenceSql = `COALESCE(c.api_lease_cap_at, ${leaseEndSql('w.')}) <= ?`;

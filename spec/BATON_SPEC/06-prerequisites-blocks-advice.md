@@ -9,9 +9,6 @@ not" from that index, gates claims on the blocks safety needs, and advises on th
 
 Not built, each a design its rule below still states:
 
-- R-BTN-120: a leg's `requires.tickets` and `requires.resources` (the course validator accepts `requires.capabilities`
-  alone, [courses proposal](../proposals/courses.md)), `baton.prerequisite-unmet`,
-  `baton.prerequisite-cycle`, the `/prerequisites` route and `baton leg why`.
 - R-BTN-75: the `retry` kind and the `found`, `provisional` and `binds` columns of
   `ticket_blocks`. A backoff is a stored `retry_after`, which rule 10 reads.
 - R-BTN-126: the `ticket` and `resource` blocked ends, `LegError`, `baton leg release --blocked`,
@@ -485,8 +482,8 @@ never refuses, and acting against it is accepted and recorded `advice-overridden
   `delivered` in the same transaction, and returns again every delivered message not yet
   acknowledged, so a lost response loses none; the runner acts on a message `id` once, then
   acknowledges. A ring (R-BTN-91) only prompts that heartbeat.
-- **`release`.** The runner stops the leg at its next safe point — at once for `requested`,
-  `floor` and `owner-cancel` (R-BTN-119) — leaves its work in git with the hand-off (R-BTN-44),
+- **`release`.** The runner stops the leg as R-BTN-119 describes, leaves its work in git with
+  the hand-off (R-BTN-44),
   ends the claim `released:<reason>` (§9) and acknowledges. A delivered `release` unacknowledged
   for 2 hours is reaped by the alarm with a fence (R-BTN-19); a `leg-timeout` release is reaped
   as R-BTN-90 says.
@@ -524,8 +521,8 @@ Which model a leg uses, through which key, and how it reacts to a reading is cou
     holder's repository (R-BTN-99). Claims are serialized in the tenant's object, so the first
     to take a free seat holds it.
   - **Releasing.** An `advance` rewrites the claim's `claim_seats` for the leg it starts, and
-    the claim's end deletes them. A reap releases its seats at the reap, a fence-pending one
-    (R-BTN-19) at `fence-cleared` or the fence deadline.
+    the claim's end deletes them. A reap releases its seats at the reap unless the fence is
+    pending, in which case the seats are released at `fence-cleared` (R-BTN-19).
   - **Seats are no blocks.** A leg rule 11 would refuse is not recommended (§6.6) nor listed in
     `launch-candidates` (R-BTN-99), and `baton leg why` answers `full` for it. Seats write no
     block row and send no `unblocked`: an idle runner finds the leg at its next claim attempt
