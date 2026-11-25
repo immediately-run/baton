@@ -113,6 +113,18 @@ describe('S-BTN-44 blocks, resources and decisions', { timeout: 30_000 }, () => 
     expect((await w4.call('/v1/runner/claim', { request_id: 'req-claim-a', ticket_id: 'docs:A' })).json).toMatchObject({ code: 'blocked', rule: 1, rule_code: 'blocked' });
     expect((await w4.call('/v1/runner/claim', { request_id: 'req-claim-e', ticket_id: 'docs:E' })).json).toMatchObject({ code: 'blocked' });
     expect(await recommended(w4.id)).not.toContain('docs:D');
+    const held = await w4.call('/v1/runner/claim', { request_id: 'idle-fixture-b', ticket_id: 'docs:B' });
+    expect(held.status).toBe(200);
+    const report = await w2.call('/v1/runner/next', undefined, 'GET');
+    expect(report.json.detail?.repositories[0]?.gates).toEqual(expect.arrayContaining([
+      { gate: 'blocked', count: 2, tickets: ['docs:A', 'docs:E'] },
+      { gate: 'missing-capability', count: 1, tickets: ['docs:C'], capabilities: ['real-iphone'] },
+      { gate: 'resource', count: 1, tickets: ['docs:D'], readings: [
+        { resource: R, instance: GO, writer: `runner:${w1.id}`, until: T0 + H },
+        { resource: R, instance: GO2, writer: `probe:${probe.fingerprint}`, until: null },
+      ] },
+    ]));
+    expect((await w4.call(`/v1/runner/claims/${held.json.claim_id}/end`, { end_reason: 'released:requested' })).status).toBe(200);
 
     // The probe's reading lapses: go_plus_2 is unknown, which unblocks D for the fleet.
     await advance(T0, T0 + 10 * MIN, [w1, w2, w3, w4]);
