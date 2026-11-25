@@ -94,6 +94,11 @@
       "count": 10
     }
   },
+  "test/integration/B-249.lease-recovery.test.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
   "test/integration/B-250.runners-view-reads.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 12
@@ -350,6 +355,11 @@
     }
   },
   "test/unit/course.test.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "test/unit/defaults-cli.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 1
     }

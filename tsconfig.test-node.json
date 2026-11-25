@@ -10,6 +10,7 @@
   "files": [
     "test/unit/spec-files.test.ts",
     "test/unit/local-queue.test.ts",
+    "test/unit/local-event-archive.test.ts",
     "test/unit/boundary-host.test.ts",
     "test/unit/cli.test.ts",
     "test/model/replay.test.ts",

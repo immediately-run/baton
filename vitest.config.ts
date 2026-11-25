@@ -151,14 +151,17 @@ export default defineConfig({
         // B-91: `testVars` — the same vars, no seeded owner keys, and the test Access audience
         // and owner. The bindings come last: miniflare's merge lets the second argument win, as
         // the local project's spread does.
-        plugins: [cloudflareTest(async () => ({ wrangler: { configPath: './wrangler.toml' }, miniflare: { bindings: { ...testVars(wranglerVars()), ...bindings } } }))],
+        plugins: [cloudflareTest(async () => ({
+          wrangler: { configPath: './wrangler.toml' },
+          miniflare: { bindings: { ...testVars(wranglerVars()), ...bindings }, r2Buckets: ['BATON_EVENT_ARCHIVE'] },
+        }))],
         resolve: { alias: host('cloudflare') },
         test: {
           name: 'cloudflare',
           globalSetup: ['./test/global-setup.ts'],
           setupFiles: ['./test/setup.ts'],
           include: ['test/**/*.test.ts'],
-          exclude: [...NODE_ONLY, ...LOAD_TEST, 'test/ui/**'],
+          exclude: [...NODE_ONLY, ...LOAD_TEST, 'test/ui/**', 'test/unit/local-event-archive.test.ts'],
         },
       },
       {
@@ -169,7 +172,7 @@ export default defineConfig({
           environment: 'node',
           globalSetup: ['./test/global-setup.ts'],
           setupFiles: ['./test/setup.ts'],
-          include: ['test/integration/**/*.test.ts', 'test/unit/mirror.test.ts', 'test/unit/runner-protocol.test.ts', ...(RUN_LOAD_TEST ? LOAD_TEST : []), ...NODE_ONLY, ...SCRIPT_TESTS],
+          include: ['test/integration/**/*.test.ts', 'test/unit/mirror.test.ts', 'test/unit/runner-protocol.test.ts', 'test/unit/local-event-archive.test.ts', ...(RUN_LOAD_TEST ? LOAD_TEST : []), ...NODE_ONLY, ...SCRIPT_TESTS],
           exclude: [...configDefaults.exclude, ...QUINT_TESTS],
           provide: { localConfig: { ...testVars(wranglerVars()), ...bindings } as Config },
         },
