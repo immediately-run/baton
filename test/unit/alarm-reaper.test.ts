@@ -24,9 +24,13 @@ async function silentClaim(host: 'vm-a' | 'vm-b', ticket: string): Promise<numbe
   return json.claim_id as number;
 }
 
-/** Runs one alarm tick with `patch` applied to the core, restoring it after; the tick's error, if any. */
-async function tickWith(patch: (core: any) => () => void): Promise<string | null> {
+/** Runs one alarm tick at `at` with `patch` applied to the core, restoring it after; the tick's
+ *  error, if any. The clock moves inside the same call as the tick: the fake clock is behind the
+ *  real one, so an alarm the object armed is overdue and workerd may run it in the background —
+ *  moved by a separate `setClock`, that tick could reap past the lease before this one. */
+async function tickWith(at: number, patch: (core: any) => () => void): Promise<string | null> {
   return withCore(async (core: any) => {
+    core.now = () => at;
     const restore = patch(core);
     try {
       await core.alarm();
@@ -42,8 +46,7 @@ async function tickWith(patch: (core: any) => () => void): Promise<string | null
 describe('B-229 the alarm\'s reaper commits on its own', () => {
   it('a later step that throws leaves the reaps committed, and the error names the step', async () => {
     const id = await silentClaim('vm-a', 'docs:R3-9001');
-    await setClock(T0 + LEASE);
-    const error = await tickWith((core) => {
+    const error = await tickWith(T0 + LEASE, (core) => {
       const was = core.notices.alarm;
       core.notices.alarm = () => { throw new Error('a poisoned notice row'); };
       return () => { core.notices.alarm = was; };
@@ -55,8 +58,7 @@ describe('B-229 the alarm\'s reaper commits on its own', () => {
   it('a claim whose end cannot be written is named and passed over; the others are reaped', async () => {
     const bad = await silentClaim('vm-a', 'docs:R3-9001');
     const good = await silentClaim('vm-b', 'docs:R3-9002');
-    await setClock(T0 + LEASE);
-    const error = await tickWith((core) => {
+    const error = await tickWith(T0 + LEASE, (core) => {
       const was = core.claims.finish;
       core.claims.finish = function (this: unknown, claimId: number, ...rest: unknown[]) {
         if (claimId === bad) throw new Error('an end that cannot be written');
@@ -68,7 +70,7 @@ describe('B-229 the alarm\'s reaper commits on its own', () => {
     expect(await claimRow(good)).toMatchObject({ status: 'reaped', end_reason: 'reaped:silent' });
     // The next tick, with the end writable again, reaps it. (Not asserted active in between: the
     // Workers host may fire its own armed alarm once the patch is gone.)
-    await tickWith(() => () => {});
+    await tickWith(T0 + LEASE, () => () => {});
     expect(await claimRow(bad)).toMatchObject({ status: 'reaped', end_reason: 'reaped:silent' });
   });
 });
