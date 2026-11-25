@@ -1,7 +1,7 @@
 // R-BTN-133 / S-BTN-109: read-only script trees live beside Git, not in the agent's checkout.
 import { lstat, mkdir, readFile, readdir, readlink, realpath, rm, symlink, utimes, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
-import { GIT_NONINTERACTIVE_ENV } from '../defaults/ticket-state';
+import { GIT_NONINTERACTIVE_ENV } from '../client/git-env.mjs';
 import { builtinExecutor, type Executor } from './executor';
 import { SAFE_GIT } from './home';
 import { LegDependencies, removeSealed } from './leg-dependencies';
@@ -31,7 +31,7 @@ export class LegTrees {
   }
 
   /** R-BTN-143. Never let a caller-supplied ref, the remote's HEAD, or local HEAD attest to the sha. */
-  async onDefault(repository: string, sha: string, branch: string, signal: AbortSignal): Promise<boolean> {
+  async onDefault(repository: string, sha: string, branch: string | undefined, signal: AbortSignal): Promise<boolean> {
     if (!ID.test(repository) || !SHA.test(sha) || typeof branch !== 'string' || !branch) return false;
     const from = `refs/heads/${branch}`;
     if ((await this.git(this.home, ['check-ref-format', from], signal)).status !== 0) return false;

@@ -95,7 +95,12 @@ try {
   const owner = typeof mod[call] === 'function' ? mod : holder != null && typeof holder[call] === 'function' ? holder : null;
   const fn = exported(call);
   if (typeof fn !== 'function') throw new Error(`the script exports no ${call}()`);
-  if (call === 'run') args[0] = { ...args[0], signal: stop.signal };
+  if (call === 'run') {
+    if (args[0]?.reads_only === true && mod.readsOnly !== true) {
+      throw new Error('a reads_only leg needs a stub that supports reads_only (R-BTN-183)');
+    }
+    args[0] = { ...args[0], signal: stop.signal };
+  }
   const result = await fn.apply(owner, args);
   finish({ ok: true, result: result === undefined ? null : result }, 0);
 } catch (e) {

@@ -31,7 +31,7 @@ Designs for this section that are not built are on the proposal page
     home changes a sourced course only through its leg instructions and leg overrides
     (R-BTN-131).
   - **Every reader goes through the snapshot.** The sync reads `.baton/` at the commit it posts
-    (R-BTN-105), the runner at the claim's `snapshot_sha` after R-BTN-143's check, and
+    (R-BTN-105), the runner at the claim's `snapshot_sha` (see R-BTN-143), and
     re-verification at the commit it verifies (R-BTN-5), so all three use the same bytes.
     Station functions and ticket sources run through the wrapper (R-BTN-133) in a read-only
     worktree of that commit, never in `ctx.checkout`.
@@ -85,10 +85,11 @@ Designs for this section that are not built are on the proposal page
   | `max_queue` | leg | queue depth that raises a warning | R-BTN-79 |
   | `version`, `inputs`, `outputs` | leg | its contract | R-BTN-82 |
   | `replay_safe` | leg | `false` when it has side effects outside git and its forge | R-BTN-82, R-BTN-84 |
-  | `requires` | leg | prerequisites: `{capabilities}` | R-BTN-120 |
+  | `requires` | leg | prerequisites: `{capabilities, tickets, resources}` | R-BTN-120 |
   | `deadline_s` | leg | how long one run may take before Baton takes the claim back | R-BTN-167, R-BTN-90 |
   | `conditions` | leg | narrows the condition types it may raise (`[]`: none) | R-BTN-160 |
   | `autonomous` | leg | `true`: the leg never asks for a person | R-BTN-195 |
+  | `reads_only` | runner leg | Boolean; `true` starts the agent in a read-only review workspace | R-BTN-183 |
   | `spawns` | leg | the courses of the children it files, and what it provides them | R-BTN-111 |
   | `no_chain_from` | leg | legs whose credential may not take this one on the same ticket | R-BTN-106 |
 
@@ -145,6 +146,10 @@ Designs for this section that are not built are on the proposal page
     (a route, or an adopt, R-BTN-39). The reason is in the position's history row. An owner's
     route, a retry policy's `exhausted` leg (R-BTN-122) and a person leg's expiry (R-BTN-116)
     stay queued until the ticket's station changes, whatever readiness a later snapshot posts.
+  - **Missing from a snapshot.** If a board post places a ticket at a non-end station with no
+    queued leg, Baton accepts the post and places its other tickets as usual. The affected ticket
+    is not claimable and Baton raises `baton.missing-next` on it (R-BTN-163). The condition closes
+    when a later post supplies a queued leg, places the ticket at an end, or no longer places it.
   - **Route** (not built: [the proposal](../proposals/data-model-and-api.md#other-reads-and-owner-routes)).
     `baton ticket route <ticket> <leg>` (R-BTN-127) queues any leg leaving Baton's
     station for the ticket, `next_source: owner`, restarting its run count (R-BTN-63);
@@ -175,7 +180,9 @@ Designs for this section that are not built are on the proposal page
   - **Baton's traversal record counts.** A ticket's runs of each leg and arrivals at each
     station are counted from Baton's own record, under resolved names (R-BTN-64). `max_runs`,
     attempts and retries (R-BTN-122) read these counts, so rewriting a ticket's history in git
-    changes neither its position nor its counts. `max_runs` bounds the runs made without a
+    changes neither its position nor its counts. The `advance` that starts a run also answers
+    its number, `run`: the ticket's runs of that leg, this one included, as `max_runs` counts
+    them; the holder hands it to the leg rather than counting them itself. `max_runs` bounds the runs made without a
     person: a person leg's answer (R-BTN-116), an owner's route or an adopt restarts the count
     of the leg it queues. The traversal record itself is never erased.
   - The holder pushes a leg's evidence before the `advance` that finishes it, and may pass
@@ -313,7 +320,8 @@ Designs for this section that are not built are on the proposal page
   | `std:decision@1` | `{id, leg, option, reached, ref?, answered_by?, commit?}`, a person's answer (R-BTN-116) |
   | `std:arrival@1` | `{leg, reached, next?, ref?}`: a leg's arrival at one of its outcomes (R-BTN-39, R-BTN-191) |
   | `std:evidence@1` | `{ref, kind}`: work a ticket may have had done outside Baton, `kind` `merged-early` or `mention` (R-BTN-203); Baton also keeps a refused arrival as `fact` (R-BTN-39) |
-  | `std:git.readiness@1`, `std:git.implied@1`, `std:git.output@1`, `std:git.evidence@1` | the sync's attestations (R-BTN-191) |
+  | `std:git.readiness@1`, `std:git.implied@1`, `std:git.output@1` | the sync's attestations (R-BTN-191) |
+  | `std:git.evidence@1` | `{claim, evidence, found}`: whether git or the forge shows the evidence an unconfirmed end named, `evidence` exactly as the observation listed it — the sync's attestation (R-BTN-10, R-BTN-191) |
   | `std:api-capacity@1` | `{window_s, remaining_permille, resets_at_min?}`, integers: a quota's window, what remains of it in ‰, and its reset in epoch minutes. The library's one open schema, so a resource's schema refines it by adding fields |
 
   A course extends one by refinement. A published `std:` version never changes; a new field is
@@ -403,14 +411,17 @@ Designs for this section that are not built are on the proposal page
     capability, `human-operator` or `none`. A course may not declare a type named `runner` or
     `human-operator`.
   - **Built-ins:** `human-operator`, a runner's own statement that a person operates it, and
-    the type `runner` (R-BTN-133). `credential:<NAME>` names an environment variable a leg
-    receives only when it requires it (R-BTN-144).
+    the type `runner` (R-BTN-133). For the proposed `credential:<NAME>` environment scoping,
+    see R-BTN-144.
   - A course's types and roles are served with its course file and shown on the **Courses**
     view, which lists every type two courses define differently.
   - **The runner declares what it has** when it starts. A capability it declares with a lock
     file is one that a single runner on the machine may use at a time: the runner declares it
     only while it holds the file's exclusive lock, and takes the lock before it claims, or
     advances into, a leg requiring the capability (R-BTN-178).
+  - A host may configure checked capabilities in its runner configuration. The runner runs
+    the check at start, before claiming, and periodically while idle. Only a passing check
+    contributes its capability to the runner’s declaration.
   - **Grants** list capabilities (R-BTN-58) and may name `<type>:*`, never a role: the CLI
     expands roles from the latest accepted snapshot, and before signing `<type>:*` prints every
     course defining the type and asks to confirm when their definitions differ (R-BTN-157).
@@ -423,10 +434,13 @@ Designs for this section that are not built are on the proposal page
   - **`min_runner_version`** is raised only when a runner on an older version would misbehave;
     a change to `rank.mjs` raises it only when the course needs every runner to rank alike
     (R-BTN-98).
-  - **Rule 9.** The runner reads each course's `version` from its checkout at startup and
-    declares it (`courses`, §14). A runner declaring a ticket's course below
-    `min_runner_version` gets no new claim on it (`stale-skills`); the dashboard shows it needing
-    a restart from a pulled checkout. Rule 9 is checked at a claim, never at an `advance`, so a
+  - **Rule 9.** The runner reads each course's `version` from its home checkout at startup and
+    whenever it brings the home to a snapshot: for a claim (R-BTN-34), or after a bounded fetch
+    of the default branch with no claim held. The next heartbeat declares the refreshed list
+    (`courses`, §14), omitting courses the home no longer declares. An ahead, diverged or
+    edited home is left alone; the runner logs why and keeps its last good list. A runner declaring
+    a ticket's course below `min_runner_version` gets no new claim on it (`stale-skills`).
+    Rule 9 is checked at a claim, never at an `advance`, so a
     held claim finishes under its protocol. It gates a course's protocol, never runner features,
     which are `runner:` capabilities (R-BTN-133).
 - **R-BTN-64 (in-flight tickets survive a course change).** Where a ticket is, is Baton's
@@ -497,6 +511,7 @@ Designs for this section that are not built are on the proposal page
     to every executor in `brief` (R-BTN-107). A repository's `agent_wrapper` — or
     `BATON_AGENT_WRAPPER` in the leg's environment, which wins — is one more command whose
     words precede the agent's; Baton builds nothing in its place.
+    A `reads_only` leg instead uses the restricted invocation in R-BTN-183.
     - The spawn has no shell: each command string splits into words as `sh` would, with no
       substitutions, and runs with the ticket id, the leg and the checkout appended. Stdin is
       closed; stdout and stderr are captured.
@@ -508,8 +523,9 @@ Designs for this section that are not built are on the proposal page
       received as it would an exit's. The bounds are the course's.
     - The answer is the last line of the agent's output that begins with one of the course's
       values as a whole word, with at most one PR URL after it. No such line fails the leg.
-    - A stub whose leg claims a PR verifies it on the forge before it reports a position. A
-      stub reports failure and never retries.
+    - A stub whose leg claims a PR verifies it on the forge before it reports a position: an
+      opened PR open, a merged change every PR of the ticket merged and none open. A stub
+      reports failure and never retries.
   - **Overrides replace `run`, never `close`.** A home's `legs/<leg>.run.<ext>` exports
     `run(ctx, standard)`; the leg script loads it at the claim's snapshot and calls it instead
     of its own `run`, keeping its own `close`. Its position must be an edge. An override keeps

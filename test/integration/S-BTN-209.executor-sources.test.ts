@@ -2,8 +2,10 @@
 // the runner host's choice — `builtin` by default; `pinned:<dir>@sha256:<digest>` loaded only when
 // the bundle's canonical listing matches, a symlink or a foreign import refusing it; `home-signed`
 // refused naming B-127 while it is unbuilt. (`home` is refused too until its part of B-184 lands.)
-import { describe, it, expect } from 'vitest';
-import { execFileSync } from 'node:child_process';
+import { describe, it, expect, vi } from 'vitest';
+import * as childProcess from 'node:child_process';
+import { EventEmitter } from 'node:events';
+import { PassThrough } from 'node:stream';
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -11,6 +13,7 @@ import { bundleDigest, loadExecutor, parseSource } from '../../src/runner/execut
 import { parseRunArgs } from '../../src/runner/main';
 
 const host = { log: () => {}, wrapper: '/x/legProcess.mjs', node: process.execPath };
+vi.mock('node:child_process', { spy: true });
 
 /** A bundle directory holding `files`. */
 function bundle(files: Record<string, string>): string {
@@ -39,6 +42,32 @@ describe('S-BTN-209: the executor source is the host\'s choice (R-BTN-107)', () 
     expect(() => parseSource('docker')).toThrow(/builtin, home, home-signed or pinned/);
     const b = await loadExecutor('builtin', host);
     expect({ api: b.api, source: b.source, provides: b.provides }).toEqual({ api: 1, source: 'builtin', provides: [] });
+  });
+
+  it('keeps a wrapper outcome delivered after exit but before its stdio closes (S-BTN-48)', async () => {
+    const child = Object.assign(new EventEmitter(), {
+      pid: 1234, stdin: new PassThrough(), stdout: new PassThrough(), stderr: new PassThrough(),
+    });
+    const spawn = vi.spyOn(childProcess, 'spawn').mockReturnValue(child as unknown as ReturnType<typeof childProcess.spawn>);
+    const kill = vi.spyOn(process, 'kill').mockReturnValue(true);
+    try {
+      const ex = await loadExecutor('builtin', host);
+      const handle = await ex.start({ brief: { kind: 'leg', session_id: 'replay', paths: [], wrapper: host.wrapper, env: {} } });
+      const lines: string[] = [];
+      const { result } = ex.exec(handle, ['node', host.wrapper], { onStderr: (line) => lines.push(line) });
+      child.stderr.write('note\n');
+      child.emit('exit', 0, null);
+      expect(kill).toHaveBeenCalledWith(-child.pid, 'SIGKILL');
+      const outcome = '{"ok":true,"result":{"version":"one"}}\n';
+      child.stdout.end(outcome);
+      child.stderr.end('final note');
+      child.emit('close', 0, null);
+      expect(await result).toEqual({ status: 0, stdout: outcome, stderr: 'note\nfinal note' });
+      expect(lines).toEqual(['note', 'final note']);
+    } finally {
+      spawn.mockRestore();
+      kill.mockRestore();
+    }
   });
 
   it('home-signed is refused at start naming B-127; home is refused until built', async () => {
@@ -87,7 +116,7 @@ describe('S-BTN-209: the executor source is the host\'s choice (R-BTN-107)', () 
 const d = ${JSON.stringify(importing)};
 try { await loadExecutor('pinned:' + d + '@sha256:' + bundleDigest(d), { log() {}, wrapper: '', node: '' }); console.log('loaded'); } catch (e) { console.log(e.message); }
 `);
-      expect(execFileSync(process.execPath, [probe], { encoding: 'utf8' })).toMatch(/outside its bundle/);
+      expect(childProcess.execFileSync(process.execPath, [probe], { encoding: 'utf8' })).toMatch(/outside its bundle/);
       await expect(loadExecutor(`pinned:${runnerName}@sha256:${bundleDigest(runnerName)}`, host)).rejects.toThrow(/never starts runner:/);
     } finally {
       for (const d of [outside, importing, runnerName]) rmSync(d, { recursive: true, force: true });

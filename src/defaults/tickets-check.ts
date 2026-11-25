@@ -13,7 +13,7 @@
 // after the ticket answered for it (filed, or re-read) is reported — a count and a line each,
 // never a finding, so a ruling cannot turn every older ticket's pull request red.
 // Course code in the CLI, never core (§2b): defaults import core, never the reverse.
-import { execFileSync } from 'node:child_process';
+import { git } from './git.mjs';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -197,7 +197,7 @@ export async function checkTickets(root: string, settings: MarkdownSettings = {}
     said.add(key);
   };
   // A qualified id (B-113) names another repository's ticket: not this repository's to check —
-  // `baton tickets claim` resolves it through the repos map, the sync's dependencies read
+  // `baton tickets check <id> --claimable` resolves it through the repos map, the sync's dependencies read
   // against its board, and the post's judgment refuses what neither resolves. This
   // repository's own id spelled qualified is the local id's own (§3.1), checked as one.
   for (const t of live) {
@@ -303,7 +303,7 @@ export function staleLines(stale: NonNullable<TicketsCheckResult['stale']>): str
  *  readBoard's `?at=`): the clock alone where the directory is no git checkout. */
 function headOf(root: string): string {
   try {
-    return execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    return git(root, ['rev-parse', 'HEAD'], { stdio: ['ignore', 'pipe', 'ignore'] }).trim();
   } catch {
     return String(Date.now());
   }

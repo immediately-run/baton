@@ -68,6 +68,7 @@ export function createMasker() {
     bytes = 0;
   };
   return {
+    get holdingKey() { return held; },
     push(line) {
       if (held) {
         bytes += line.length + 1;

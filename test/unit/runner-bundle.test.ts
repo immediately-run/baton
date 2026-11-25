@@ -2,7 +2,7 @@
 // a bundle, not from source. The runner spawns each leg through legProcess.mjs by a path beside
 // its own module (src/runner/runner.ts LEG_PROCESS), which esbuild does not follow — so each
 // bundle must carry the file, or every leg crashes with no outcome. Both bundles: a checkout's
-// `.local/baton-run.mjs` (scripts/baton-run.mjs) and the published `dist/baton.mjs`
+// `.local/` runner bundle (scripts/baton-run.mjs) and the published `dist/baton.mjs`
 // (scripts/build-cli.mjs). Node only: it bundles and spawns.
 import { describe, it, expect } from 'vitest';
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
@@ -17,20 +17,21 @@ import { course, cutover, placed, rows, syncCall, ticket, TOKENS } from '../help
 import chore from '../fixtures/courses/chore/course.json';
 import { cleanNodeEnv } from '../../src/runner/preparation';
 import { removeSealed } from '../../src/runner/leg-dependencies';
+import { bundleDigest } from '../../src/runner/executor';
+import { checkCliDispatch } from '../../scripts/check-cli-dispatch.mjs';
+import { CLI_ENTRIES } from '../../scripts/cli-entries.mjs';
 
 const ROOT = resolve(import.meta.dirname, '../..');
 
 /** Run one trivial leg through the leg process `bundle` names, as the runner does. */
-function runLegVia(bundle: string): unknown {
-  const named = /new URL\("\.\/legProcess\.mjs", import\.meta\.url\)/.test(readFileSync(bundle, 'utf8'));
-  expect(named, `${bundle} names ./legProcess.mjs beside itself`).toBe(true);
+function runLegVia(wrapper: string): unknown {
   const dir = mkdtempSync(join(tmpdir(), 'baton-bundle-leg-'));
   try {
     const script = join(dir, 'leg.mjs');
     writeFileSync(script, 'export async function run(ctx) { return { echoed: ctx.leg }; }\n');
     // R-BTN-133 (B-184): `node legProcess.mjs <call> <script>`, the arguments on stdin's first
     // line, the outcome on stdout's last.
-    const child = spawnSync(process.execPath, [join(dirname(bundle), 'legProcess.mjs'), 'run', script], { input: `${JSON.stringify([{ leg: 'implement' }])}\n`, encoding: 'utf8' });
+    const child = spawnSync(process.execPath, [wrapper, 'run', script], { input: `${JSON.stringify([{ leg: 'implement' }])}\n`, encoding: 'utf8' });
     expect(child.stderr).toBe('');
     return JSON.parse(child.stdout.trim().split('\n').at(-1)!);
   } finally {
@@ -39,15 +40,39 @@ function runLegVia(bundle: string): unknown {
 }
 
 describe('S-BTN-41 the runner from its bundle (R-BTN-72)', () => {
+  it('runs the checkout CLI without loading native TypeScript', () => {
+    const home = mkdtempSync(join(tmpdir(), 'baton-checkout-cli-'));
+    try {
+      const result = spawnSync(process.execPath, ['--no-experimental-strip-types', 'cli/baton.mjs', 'home', 'list'], {
+        cwd: ROOT, env: { PATH: process.env.PATH, HOME: home }, encoding: 'utf8',
+      });
+      expect(result.stderr).toBe('');
+      expect(result.status).toBe(0);
+      expect(result.stdout).toContain('no homes configured');
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects a command missing from the export table before building the package', () => {
+    const cli = readFileSync(join(ROOT, 'cli/baton.mjs'), 'utf8');
+    const entries = { ...CLI_ENTRIES, 'baton-run.mjs': CLI_ENTRIES['baton-run.mjs'].map(({ entry, exports }) => ({
+      entry, exports: exports.filter((name) => name !== 'queueCommand'),
+    })) };
+    expect(() => checkCliDispatch(cli, entries)).toThrow(/baton-run\.mjs.*queueCommand/);
+  });
+
   it("a checkout's .local bundle runs a leg", () => {
     // Importing it bundles, as `baton run` from a checkout does.
-    execFileSync(process.execPath, ['--input-type=module', '-e', `await import(${JSON.stringify(join(ROOT, 'scripts', 'baton-run.mjs'))})`], { cwd: ROOT });
-    expect(runLegVia(join(ROOT, '.local', 'baton-run.mjs'))).toEqual({ ok: true, result: { echoed: 'implement' } });
+    const entry = JSON.stringify(join(ROOT, 'scripts', 'baton-run.mjs'));
+    expect(execFileSync(process.execPath, ['--input-type=module', '-e', `console.log(typeof (await import(${entry})).default.runMain);`], { cwd: ROOT, encoding: 'utf8' }).trim()).toBe('function');
+    expect(runLegVia(join(ROOT, '.local', 'legProcess.mjs'))).toEqual({ ok: true, result: { echoed: 'implement' } });
   });
 
   it('the published dist bundle runs a leg', () => {
     execFileSync(process.execPath, [join(ROOT, 'scripts', 'build-cli.mjs')], { cwd: ROOT });
-    expect(runLegVia(join(ROOT, 'dist', 'baton.mjs'))).toEqual({ ok: true, result: { echoed: 'implement' } });
+    expect(readFileSync(join(ROOT, 'dist', 'baton.mjs'), 'utf8')).toMatch(/new URL\("\.\/legProcess\.mjs", import\.meta\.url\)/);
+    expect(runLegVia(join(ROOT, 'dist', 'legProcess.mjs'))).toEqual({ ok: true, result: { echoed: 'implement' } });
   });
 
   it('S-BTN-109: runner start runs locked TypeScript from checkout and dist and fences preparation', async () => {
@@ -92,9 +117,11 @@ describe('S-BTN-41 the runner from its bundle (R-BTN-72)', () => {
       const graph = structuredClone(chore);
       Object.assign(graph.legs.do, { requires: { capabilities: ['runner:leg-trees'] } });
       let parent: string | null = null;
-      for (const [i, cli] of ['cli/baton.mjs', 'dist/baton.mjs', 'dist/baton.mjs', 'dist/baton.mjs'].entries()) {
+      for (const [i, cli] of ['cli/baton.mjs', 'dist/baton.mjs', 'dist/baton.mjs', 'dist/baton.mjs', 'dist/baton.mjs', 'dist/baton.mjs'].entries()) {
         const failSecondPreparation = i === 2;
         const failClone = i === 3;
+        const failCourseRead = i === 4;
+        const offBranch = i === 5;
         // Keep the board ancestry linear but use fresh checkout and cache directories per CLI.
         const home = join(tmp, `home-${i}`);
         const git = (...args: string[]) => execFileSync('git', ['-C', home, ...args], { encoding: 'utf8' }).trim();
@@ -106,7 +133,8 @@ describe('S-BTN-41 the runner from its bundle (R-BTN-72)', () => {
         const dependencies = { 'fixture-value': '1.0.0' };
         const write = (name: string, value: unknown) => put(join(home, name), JSON.stringify(value));
         write('.baton/baton.json', { courses: [{ id: 'chore', version: 3 }], agent_command: 'unused-fixture-agent' });
-        write('.baton/courses/chore/course.json', graph);
+        const courseGraph = offBranch ? { ...graph, legs: { ...graph.legs, do: { ...graph.legs.do, requires: {} } } } : graph;
+        write('.baton/courses/chore/course.json', courseGraph);
         write('.baton/package.json', { dependencies });
         write('.baton/package-lock.json', { lockfileVersion: 3, packages: {
           '': { dependencies }, 'node_modules/fixture-value': { version: '1.0.0', resolved: `${url}/package.tgz`, integrity: `sha512-${createHash('sha512').update(tar).digest('base64')}` },
@@ -122,10 +150,11 @@ export const close = () => 'https://example.test/close';
         git('add', '.baton');
         git('-c', 'user.name=Test', '-c', 'user.email=test@example.test', 'commit', '--no-gpg-sign', '-qm', 'course');
         const sha = git('rev-parse', 'HEAD');
+        if (offBranch) git('update-ref', 'refs/heads/main', `${sha}^`);
         const id = `C-${i + 1}`;
         const board = await syncCall('/v1/sync/board', {
-          registry: [course(3, 3, { id: 'chore', skill: 'run-chore', course: graph })], sha, parent_sha: parent, closed: [],
-          tickets: [ticket(id, { course_id: 'chore', path: `content/chore/${id}.mdx` })], stations: { [id]: placed('open', [], [['do', 'ready']]) },
+          registry: [course(3, 3, { id: 'chore', skill: 'run-chore', course: courseGraph })], sha, parent_sha: parent, closed: [],
+          tickets: [ticket(id, { course_id: 'chore', path: `tickets/${id}.mdx` })], stations: { [id]: placed('open', [], [['do', 'ready']]) },
         });
         expect(board.status, await board.text()).toBe(200);
         parent = sha;
@@ -138,16 +167,27 @@ export const close = () => 'https://example.test/close';
           writeFileSync(shim, `#!/bin/sh\nif [ "$1" = --version ] && [ -f "$BATON_TEST_PREPARED" ]; then exec sleep 60; fi\nexec "$BATON_TEST_NPM" "$@"\n`, { mode: 0o755 });
           Object.assign(env, { PATH: `${bin}:${process.env.PATH}`, BATON_TEST_NPM: npm, BATON_TEST_PREPARED: join(home, 'result.json') });
         }
-        if (failClone) {
+        if (failClone || failCourseRead) {
           const git = execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim();
-          const bin = join(tmp, 'git-shim');
+          const bin = join(tmp, `git-shim-${i}`);
           mkdirSync(bin);
-          writeFileSync(join(bin, 'git'), `#!/bin/sh\ncase " $* " in *' clone '*) : > "$BATON_TEST_CLONE_STARTED"; exec sleep 60;; esac\nexec "$BATON_TEST_GIT" "$@"\n`, { mode: 0o755 });
-          Object.assign(env, { PATH: `${bin}:${process.env.PATH}`, BATON_TEST_GIT: git, BATON_TEST_CLONE_STARTED: join(home, 'clone.started') });
+          // Only stall the claim-owned Git call, not the startup eligibility probe.
+          const match = failClone ? "*' clone '*" : "' -c '*' show '*':.baton/courses/chore/course.json '*";
+          writeFileSync(join(bin, 'git'), `#!/bin/sh\ncase " $* " in ${match}) : > "$BATON_TEST_GIT_STARTED"; exec sleep 60;; esac\nexec "$BATON_TEST_GIT" "$@"\n`, { mode: 0o755 });
+          Object.assign(env, { PATH: `${bin}:${process.env.PATH}`, BATON_TEST_GIT: git, BATON_TEST_GIT_STARTED: join(home, 'git.started') });
+        }
+        const pinned: string[] = [];
+        if (offBranch) {
+          const dir = join(tmp, 'pinned');
+          put(join(dir, 'executor.mjs'), `export function createExecutor() {
+  const unexpected = () => { throw new Error('off-branch claim reached executor'); };
+  return { api: 1, provides: [], start: unexpected, exec: unexpected, stop: unexpected, end: unexpected };
+}`);
+          pinned.push('--executor', `pinned:${dir}@sha256:${bundleDigest(dir)}`);
         }
         const child = spawn(process.execPath, [join(ROOT, cli), 'runner', 'start', '--home', home, '--url', url,
           '--session', `leg-tree-cli-${i}`, '--hostname', 'vm-a', '--prepare-timeout', '5s', '--beat-every', '100',
-          ...(failClone ? ['--concurrency', '2'] : [])], { env, stdio: ['ignore', 'pipe', 'pipe'] });
+          ...(failClone ? ['--concurrency', '2'] : []), ...pinned], { env, stdio: ['ignore', 'pipe', 'pipe'] });
         let log = '';
         child.stdout.on('data', (bytes) => { log += bytes; });
         child.stderr.on('data', (bytes) => { log += bytes; });
@@ -159,11 +199,11 @@ export const close = () => 'https://example.test/close';
           expect(relayError).toBeUndefined();
           expect(code, log).toBe(0);
           expect(await rows('SELECT station, end_reason FROM claims WHERE ticket_id = ?', `docs:${id}`), log).toEqual([{
-            station: failClone ? 'open' : 'done-once',
-            end_reason: failSecondPreparation || failClone ? 'released:cannot-finish:transient' : 'suspended:done-once',
+            station: failClone || offBranch || failCourseRead ? 'open' : 'done-once',
+            end_reason: offBranch ? 'released:off-branch' : failSecondPreparation || failClone || failCourseRead ? 'released:cannot-finish:transient' : 'suspended:done-once',
           }]);
-          if (failClone) {
-            expect(readFileSync(join(home, 'clone.started'), 'utf8')).toBe('');
+          if (failClone || offBranch || failCourseRead) {
+            if (!offBranch) expect(readFileSync(join(home, 'git.started'), 'utf8')).toBe('');
             expect(() => readFileSync(join(home, 'result.json'))).toThrow(/ENOENT/);
             continue;
           }

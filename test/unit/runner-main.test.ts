@@ -1,8 +1,9 @@
 // runner-main.test.ts — `baton run`'s pure half (BATON_SPEC §6.13; R3-1245): the flag parser,
 // the course declarations a heartbeat needs (rule 9), the credential the environment names and
 // the runner secret's shape. Node only: it writes temp checkouts and runs ssh-keygen.
+import { capabilityChecks } from '../../src/runner/capabilityChecks';
 import { describe, it, expect, vi } from 'vitest';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -13,9 +14,16 @@ import { BatonApi, BatonRefusal } from '../../src/runner/api';
 import { HARNESS_AGENTS, AGENT_PROMPT } from '../../src/runner/harness';
 import { splitWords } from '../../src/defaults/agent-words';
 import { envAuth } from '../../src/runner/api';
-import { advanceHome, courseOf, dropCourse, freshSecret, holdHome, legNeeds, loadCourse, readHead } from '../../src/runner/home';
+import { advanceClaimHome, courseOf, dropCourse, freshSecret, holdHome, legNeeds, loadCourse, readHead } from '../../src/runner/home';
+import { ClaimRun } from '../../src/runner/claimRun';
+import { Sidecar } from '../../src/runner/sidecar';
+import { StateFile } from '../../src/runner/state';
 import { declarationFrom } from '../../src/runner/runner';
 import { validateCourse } from '../../src/core/course';
+import { course, cutover, Git, keyCall, ORIGIN, rows, setAdminKeys, setClock } from '../helpers';
+import { makeKey, signedRequest } from '../lib/sshKeys';
+import { call as hostCall } from '#host';
+import { graphOf } from '../../src/core/graph';
 
 function home(): string {
   const dir = mkdtempSync(join(tmpdir(), 'baton-main-'));
@@ -55,6 +63,8 @@ describe('parseRunArgs', () => {
     expect(() => parseRunArgs(['--lock', 'mcp:chrome'], {})).toThrow('<capability>=<path>');
     // Verbose logging (2026-10-23): timestamps, the claim's id and nonce, the leg's command.
     expect(parseRunArgs(['--verbose'], {}).verbose).toBe(true);
+    expect(parseRunArgs([], {}).restartWhenBehind).toBe(false);
+    expect(parseRunArgs(['--restart-when-behind'], {}).restartWhenBehind).toBe(true);
   });
 });
 
@@ -157,6 +167,21 @@ describe('the agent_command a runner runs (B-83)', () => {
     // its own: escaped in HARNESS_AGENTS, the no-shell split (B-84) still spawns it whole.
     expect(splitWords(HARNESS_AGENTS.opencode).at(-1)).toBe(AGENT_PROMPT);
     expect(splitWords(HARNESS_AGENTS['claude-code']).at(-1)).toBe(AGENT_PROMPT);
+  });
+
+  it('leaves completion criteria to the leg instructions in both briefings (B-317)', () => {
+    const settings = JSON.parse(readFileSync(join(__dirname, '..', '..', '.baton', 'baton.json'), 'utf8'));
+    const prompt = splitWords(settings.agent_command).at(-1);
+    expect(prompt).toBe(AGENT_PROMPT);
+    expect(AGENT_PROMPT).toContain('When you have met the completion criteria in the leg instructions, exit immediately.');
+    expect(AGENT_PROMPT).not.toContain('the checks green');
+  });
+
+  it('allows permitted questions in the foreground without suspending the one-shot process (B-325, S-BTN-222)', () => {
+    expect(AGENT_PROMPT).toContain('If your leg instructions allow it and only the owner can unblock you');
+    expect(AGENT_PROMPT).toContain("ask through the harness's question tool and wait for the answer in the foreground");
+    expect(AGENT_PROMPT).toContain('if nobody answers, let Baton take the claim back at the leg deadline');
+    expect(AGENT_PROMPT).not.toContain('never write that you are waiting');
   });
 
   it('settings naming no agent_command drive from --harness, the command logged; a named one is left to the settings', async () => {
@@ -282,7 +307,7 @@ describe('the grant\'s declaration (B-86)', () => {
     expect([...new Set(needs)].sort()).toEqual(['authentication', 'create-pr', 'credential:DEPLOY_TOKEN', 'drivable-browser', 'llm-call', 'vpn:corp']);
     expect(needs).not.toContain('deployer');
     // A declaration carrying the role meets every need the role carries — the never-eligible
-    // line (runner.ts `reportEligibility`) compares needs with `capabilitiesOf(declared)`.
+    // line (sidecar.ts `reportEligibility`) compares needs with `capabilitiesOf(declared)`.
     const held = capabilitiesOf(['agent-venue']);
     expect([...new Set(needs)].filter((n) => !held.has(n))).toEqual(['vpn:corp', 'credential:DEPLOY_TOKEN']);
     expect(legNeeds(dir, '', 'no-such-course')).toEqual([]);
@@ -661,14 +686,6 @@ describe('the first beat (B-93, S-BTN-159: a runner start says what it does, and
     mkdirSync(home);
     const r = new Runner({ api, home, repository: 'docs', hostname: 'vm-a', harness: 'opencode', session: 'fresh',
       courses: [{ course: 'create-pr', version: 1 }], stateFile: join(home, 'fresh.json'), beatEvery: 60_000, log });
-    const state: Record<string, unknown> = { runner_id: null, claim: null };
-    const live = r as unknown as { state: Record<string, unknown> };
-    live.state = {
-      get: () => state,
-      set: (patch: Record<string, unknown>) => { Object.assign(state, patch); },
-      // A spool nobody wrote: the beat takes nothing, and its remove is the runner's own no-op.
-      spool: join(home, 'spool.jsonl'),
-    };
     return r;
   };
 
@@ -747,8 +764,7 @@ describe('the first beat (B-93, S-BTN-159: a runner start says what it does, and
     const { api, calls, refuseWith } = registeringApi();
     refuseWith(() => new BatonRefusal('unauthenticated', undefined, 'no runner holds this secret', 401));
     const r = runFresh(api, (l) => lines.push(l));
-    const live = r as unknown as { state: Record<string, unknown> };
-    live.state = { get: () => ({ runner_id: 7, claim: null, declared: ['agent-venue'], sent: null }), set: () => {}, spool: live.state.spool };
+    (r as unknown as { state: StateFile }).state.set({ runner_id: 7, declared: ['agent-venue'] });
     expect(await r.runOnce()).toBeNull();
     expect(calls.heartbeats).toBeGreaterThanOrEqual(1);
     expect(lines.some((l) => l.includes('no claim (no runner holds this secret)'))).toBe(true);
@@ -831,9 +847,9 @@ describe('the first beat (B-93, S-BTN-159: a runner start says what it does, and
     const r = runFresh(api, (l) => lines.push(l));
     // A runner the state names, its declaration settled as a previous beat left it, so runOnce has
     // no reason to beat of its own.
-    const live = r as unknown as { state: { get(): Record<string, unknown>; set(p: Record<string, unknown>): void; spool: string }; sent: string[] };
-    live.state = { get: () => ({ runner_id: 7, claim: null, declared: [] }), set: () => {}, spool: live.state.spool };
-    live.sent = [];
+    const live = r as unknown as { state: StateFile; sidecar: { sent: string[] } };
+    live.state.set({ runner_id: 7, declared: [] });
+    live.sidecar.sent = [];
 
     const beat = (r as unknown as { tick(): Promise<void> }).tick(); // in flight, not awaited
     expect(await r.runOnce()).toBeNull();
@@ -863,13 +879,7 @@ describe('the first beat (B-93, S-BTN-159: a runner start says what it does, and
     } as unknown as BatonApi;
     // A runner the state names already: the registration's own exemption does not reach it.
     const r = runFresh(api, (l) => lines.push(l));
-    const live = r as unknown as { state: { get(): Record<string, unknown>; set(p: Record<string, unknown>): void; spool: string } };
-    const answered: Record<string, unknown> = { runner_id: 7, claim: null };
-    live.state = {
-      get: () => answered,
-      set: (patch: Record<string, unknown>) => { Object.assign(answered, patch); },
-      spool: live.state.spool,
-    };
+    (r as unknown as { state: StateFile }).state.set({ runner_id: 7 });
     answer = rejecting(replayed);
     await r.runOnce();
     // B-86's once-per-declaration line first (an unsettled runner's first answered beat), then
@@ -908,21 +918,14 @@ describe('the first beat (B-93, S-BTN-159: a runner start says what it does, and
     } as unknown as BatonApi;
     const r = runFresh(api, (l) => lines.push(l));
     // A runner its state names already (a session resumed, or a beat before this attempt).
-    const live = r as unknown as { state: { get(): Record<string, unknown>; set(p: Record<string, unknown>): void; spool: string } };
-    const answered: Record<string, unknown> = { runner_id: 7, claim: null };
-    live.state = {
-      get: () => answered,
-      set: (patch: Record<string, unknown>) => { Object.assign(answered, patch); },
-      spool: live.state.spool,
-    };
+    (r as unknown as { state: StateFile }).state.set({ runner_id: 7 });
     await r.runOnce();
     expect(asked).toEqual([null]); // the server chooses in the claim transaction
-    // B-86's own once-per-declaration line, and nothing else: no refusal was due, and none was logged.
-    expect(lines).toEqual([DECLARED]);
+    expect(lines).toEqual([DECLARED, 'baton: idle — no-eligible-ticket: nothing to claim']);
     refuseGates = true;
     lines.length = 0;
     await r.runOnce();
-    expect(lines).toEqual(['baton: no claim (every gate refused this runner)']);
+    expect(lines).toEqual(['baton: idle — not-eligible: every gate refused this runner']);
     r.stop();
   });
 });
@@ -988,7 +991,8 @@ describe('S-BTN-200 a leg that ends reaps its process group (R-BTN-72)', () => {
     // The state sidecar the loop would own, as the fixtures above hand it over.
     const state: Record<string, unknown> = { runner_id: 1, claim: null };
     (r as unknown as { state: unknown }).state = { get: () => state, set: () => {}, spool: join(dir, 'spool.jsonl') };
-    (r as unknown as { inflight: unknown }).inflight = { claimId: 1, ticket: 'baton:B-x', child: null };
+    const claim = (r as unknown as { makeRun(path: string): ClaimRun }).makeRun(dir);
+    (claim as unknown as { inflight: unknown }).inflight = { claimId: 1, ticket: 'baton:B-x', child: null };
     // A leg that finishes cleanly while leaving a process behind on purpose — a held lock, a
     // background check: a child of the wrapper, in its process group, that never exits alone.
     const stray = join(dir, 'stray.pid');
@@ -1001,7 +1005,7 @@ export async function run(ctx) {
   return { echoed: ctx.leg };
 }
 `);
-    const leg = (r as unknown as { runLeg(course: { scripts: Map<string, string> }, leg: string, ctx: Record<string, unknown>, scratch: string): Promise<{ kind: string; result: unknown }> });
+    const leg = (claim as unknown as { runLeg(course: { scripts: Map<string, string> }, leg: string, ctx: Record<string, unknown>, scratch: string): Promise<{ kind: string; result: unknown }> });
     const out = await leg.runLeg({ scripts: new Map([['implement', script]]) }, 'implement', { leg: 'implement' }, join(dir, 'scratch'));
     expect(out).toEqual({ kind: 'ok', result: { echoed: 'implement' } });
     const pid = Number(readFileSync(stray, 'utf8'));
@@ -1030,7 +1034,7 @@ describe('a leg\'s output leaves the runner masked (B-170, R-BTN-144 class 7)', 
 
   /** A Runner over a temp home with the state sidecar stubbed out, as the fixtures above hand
    *  it over, running legs through the real builtin executor and wrapper. */
-  const maskRunner = (lines: string[], state: Record<string, unknown>, beatEvery = 60_000): { r: Runner; home: string } => {
+  const maskRunner = (lines: string[], state: Record<string, unknown>, beatEvery = 60_000): { r: ClaimRun; home: string } => {
     const dir = mkdtempSync(join(tmpdir(), 'baton-170-sink-'));
     mkdirSync(join(dir, 'scratch'), { recursive: true });
     const api = {
@@ -1042,10 +1046,11 @@ describe('a leg\'s output leaves the runner masked (B-170, R-BTN-144 class 7)', 
     const r = new Runner({ api, home: dir, repository: 'docs', hostname: 'vm-a', harness: 'opencode', session: 'b170-sink',
       courses: [], stateFile: join(dir, 's.json'), beatEvery, log: (l) => lines.push(l), verbose: true, maskEnv: ['BATON170_TEST_VENDOR'] });
     (r as unknown as { state: unknown }).state = { get: () => state, set: () => {}, spool: join(dir, 'spool.jsonl') };
-    (r as unknown as { inflight: unknown }).inflight = { claimId: 1, ticket: 'baton:B-x', child: null };
-    return { r, home: dir };
+    const claim = (r as unknown as { makeRun(path: string): ClaimRun }).makeRun(dir);
+    (claim as unknown as { inflight: unknown }).inflight = { claimId: 1, ticket: 'baton:B-x', child: null };
+    return { r: claim, home: dir };
   };
-  const legOf = (r: Runner) => (r as unknown as { runLeg(course: { scripts: Map<string, string>; scratch?: string }, leg: string, ctx: Record<string, unknown>, scratch: string): Promise<{ kind: string; result?: unknown; error?: string }> });
+  const legOf = (r: ClaimRun) => (r as unknown as { runLeg(course: { scripts: Map<string, string>; scratch?: string }, leg: string, ctx: Record<string, unknown>, scratch: string): Promise<{ kind: string; result?: unknown; error?: string }> });
 
   it('the leg\'s stderr goes through the class 7 sink: whole, split and mask_env values, a bearer token, and a held tail the call\'s end releases', async () => {
     const saved = ENV_NAMES.map((n) => [n, process.env[n]] as const);
@@ -1083,6 +1088,86 @@ describe('a leg\'s output leaves the runner masked (B-170, R-BTN-144 class 7)', 
       expect(said).toContain('token: ***');
       // The trailing partial the stream ended on leaves masked, at the call's release.
       expect(said).toContain('tail: ');
+    } finally {
+      for (const [n, v] of saved) {
+        if (v === undefined) delete process.env[n];
+        else process.env[n] = v;
+      }
+      rmSync(home, { recursive: true, force: true });
+    }
+  }, 60_000);
+
+  it('S-BTN-119: a host value that starts with the last bytes of the leg\'s secrets does not cut them — each still leaves whole as ***', async () => {
+    // The flaky failures of 2026-11-22 (B-249, B-244, B-239): `npm test` ran inside a leg, so
+    // the tests' runner spread an environment holding the host's own secrets; one that began with
+    // the vendor value's last byte (`1`) or the key's (`n`) made the sink's hold cut inside the
+    // printed literal, and its head reached the log in clear. Pinned here, not left to the host.
+    const names = [...ENV_NAMES, 'BATON170_TEST_ONE_TOKEN', 'BATON170_TEST_N_TOKEN'];
+    const saved = names.map((n) => [n, process.env[n]] as const);
+    process.env.BATON170_TEST_API_KEY = KEY;
+    process.env.BATON170_TEST_VENDOR = VENDOR;
+    process.env.BATON170_TEST_ONE_TOKEN = `${VENDOR.slice(-1)}abcdef0123456`;
+    process.env.BATON170_TEST_N_TOKEN = `${KEY.slice(-1)}ZZZZZZZZ0123`;
+    const lines: string[] = [];
+    const { r, home } = maskRunner(lines, { runner_id: 1, claim: null });
+    try {
+      const script = join(home, 'leak.mjs');
+      writeFileSync(script, `export async function run() {
+  process.stderr.write('whole key: ' + process.env.BATON170_TEST_API_KEY + '\\n');
+  process.stderr.write('vendor: ' + process.env.BATON170_TEST_VENDOR + '\\n');
+  process.stderr.write('token: brt_abc123XYZ\\n');
+  return { done: true };
+}
+`);
+      const out = await legOf(r).runLeg({ scripts: new Map([['implement', script]]) }, 'implement', { leg: 'implement' }, join(home, 'scratch'));
+      expect(out).toEqual({ kind: 'ok', result: { done: true } });
+      const said = lines.join('\n');
+      for (const secret of [KEY.slice(0, 14), KEY.slice(14, -1), VENDOR.slice(0, -1)]) expect(said, said).not.toContain(secret);
+      expect(said).toContain('whole key: ***');
+      expect(said).toContain('vendor: ***');
+      expect(said).toContain('token: ***');
+    } finally {
+      for (const [n, v] of saved) {
+        if (v === undefined) delete process.env[n];
+        else process.env[n] = v;
+      }
+      rmSync(home, { recursive: true, force: true });
+    }
+  }, 60_000);
+
+  it('S-BTN-119: a drained call masks with the set bound as the call starts, whatever the slot holds when its lines arrive', async () => {
+    const saved = ENV_NAMES.map((n) => [n, process.env[n]] as const);
+    process.env.BATON170_TEST_API_KEY = KEY;
+    process.env.BATON170_TEST_VENDOR = VENDOR;
+    const lines: string[] = [];
+    const { r, home } = maskRunner(lines, { runner_id: 1, claim: null });
+    try {
+      const quiet = join(home, 'quiet.mjs');
+      writeFileSync(quiet, 'export async function run() { return { done: true }; }\n');
+      expect(await legOf(r).runLeg({ scripts: new Map([['implement', quiet]]) }, 'implement', { leg: 'implement' }, join(home, 'scratch'))).toEqual({ kind: 'ok', result: { done: true } });
+      // The handoff starts, then waits; its slot's set is replaced before its line arrives (the
+      // next leg's assignment, or another slot's read through `cur`) — the line must not care.
+      const started = join(home, 'started');
+      const go = join(home, 'go');
+      const noisy = join(home, 'noisy.mjs');
+      writeFileSync(noisy, `import { existsSync, writeFileSync } from 'node:fs';
+export async function handoff() {
+  writeFileSync(${JSON.stringify(started)}, 'here');
+  while (!existsSync(${JSON.stringify(go)})) await new Promise((res) => setTimeout(res, 10));
+  process.stderr.write('handoff drain: ' + process.env.BATON170_TEST_VENDOR + '\\n');
+  return 'https://example.test/noisy';
+}
+`);
+      const handoff = (r as unknown as { callHandoff(script: string, ctx: Record<string, unknown>): Promise<string | null> }).callHandoff(noisy, { leg: 'implement' });
+      const deadline = Date.now() + 20_000;
+      while (Date.now() < deadline && !existsSync(started)) await new Promise((res) => setTimeout(res, 10));
+      expect(existsSync(started)).toBe(true);
+      (r as unknown as { legSecrets: readonly string[] }).legSecrets = [];
+      writeFileSync(go, 'go');
+      expect(await handoff).toBe('https://example.test/noisy');
+      const said = lines.join('\n');
+      expect(said).not.toContain(VENDOR);
+      expect(said).toContain('handoff drain: ***');
     } finally {
       for (const [n, v] of saved) {
         if (v === undefined) delete process.env[n];
@@ -1180,7 +1265,7 @@ export async function run() {
   }, 60_000);
 });
 
-describe('advanceHome — legs start from the claim\'s snapshot (B-228, R-BTN-34)', () => {
+describe('advanceClaimHome — legs start from the claim\'s snapshot (B-228, R-BTN-34)', () => {
   it('fast-forwards a clean home on the default branch; leaves one ahead, diverged, elsewhere or edited, saying why', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'baton-228-'));
     const g = (...a: string[]) => execFileSync('git', ['-C', dir, '-c', 'user.email=t@t', '-c', 'user.name=t', '-c', 'commit.gpgsign=false', ...a], { encoding: 'utf8' }).trim();
@@ -1195,24 +1280,24 @@ describe('advanceHome — legs start from the claim\'s snapshot (B-228, R-BTN-34
       const two = g('rev-parse', 'HEAD');
       g('reset', '-q', '--hard', one);
       // Behind, clean, on main: fast-forwarded to the snapshot.
-      expect(await advanceHome(dir, two, 'main', AbortSignal.timeout(10_000))).toBeNull();
+      expect(await advanceClaimHome(dir, two, 'main', AbortSignal.timeout(10_000))).toBeNull();
       expect(g('rev-parse', 'HEAD')).toBe(two);
       // At the snapshot: nothing to do. Ahead of it: left as it is.
-      expect(await advanceHome(dir, two, 'main', AbortSignal.timeout(10_000))).toBeNull();
-      expect(await advanceHome(dir, one, 'main', AbortSignal.timeout(10_000))).toMatch(/is not behind the snapshot/);
+      expect(await advanceClaimHome(dir, two, 'main', AbortSignal.timeout(10_000))).toBeNull();
+      expect(await advanceClaimHome(dir, one, 'main', AbortSignal.timeout(10_000))).toMatch(/is not behind the snapshot/);
       expect(g('rev-parse', 'HEAD')).toBe(two);
       // Tracked changes, or another branch: left as it is.
       g('reset', '-q', '--hard', one);
       writeFileSync(join(dir, 'f'), 'edited');
-      expect(await advanceHome(dir, two, 'main', AbortSignal.timeout(10_000))).toBe('the home has tracked changes');
+      expect(await advanceClaimHome(dir, two, 'main', AbortSignal.timeout(10_000))).toBe('the home has tracked changes');
       g('checkout', '-q', '--', 'f');
       g('checkout', '-q', '-b', 'claude/B-1-x');
-      expect(await advanceHome(dir, two, 'main', AbortSignal.timeout(10_000))).toBe('the home is on claude/B-1-x, not main');
+      expect(await advanceClaimHome(dir, two, 'main', AbortSignal.timeout(10_000))).toBe('the home is on claude/B-1-x, not main');
       expect(g('rev-parse', 'HEAD')).toBe(one);
       // An untracked file does not stop it.
       g('checkout', '-q', 'main');
       writeFileSync(join(dir, 'scratch.txt'), 'x');
-      expect(await advanceHome(dir, two, 'main', AbortSignal.timeout(10_000))).toBeNull();
+      expect(await advanceClaimHome(dir, two, 'main', AbortSignal.timeout(10_000))).toBeNull();
       expect(g('rev-parse', 'HEAD')).toBe(two);
     } finally {
       rmSync(dir, { recursive: true, force: true });
@@ -1272,5 +1357,214 @@ describe('baton run --home: a name resolves to its checkout (B-121)', () => {
       rmSync(dir, { recursive: true, force: true });
       rmSync(config, { recursive: true, force: true });
     }
+  });
+});
+
+it('S-BTN-73 withholds a failed check, then restores it after an idle check passes', async () => {
+  let time = 0;
+  const clock = () => time;
+  const env = { CHECK_RESULT: '1' };
+  const checks = capabilityChecks({ capabilities: [
+    { name: 'vpn:corp', check: [process.execPath, '-e', 'process.exit(Number(process.env.CHECK_RESULT))'], every_s: 2 },
+    { name: 'human-operator' },
+  ] }, process.cwd(), env);
+  expect(checks.passes('vpn:corp')).toBe(false);
+  expect(checks.passes('human-operator')).toBe(true);
+  await checks.refresh(clock);
+  expect(checks.passes('vpn:corp')).toBe(false);
+  env.CHECK_RESULT = '0';
+  await checks.refresh(clock, true);
+  expect(checks.passes('vpn:corp')).toBe(false);
+  time = 2000;
+  await checks.refresh(clock);
+  expect(checks.passes('vpn:corp')).toBe(true);
+});
+
+it('S-BTN-73: a runner heartbeat withdraws a failed check from the claim and advance gates', async () => {
+  let time = Date.parse('2026-10-16T12:00:00Z');
+  await setClock(time);
+  const admin = await makeKey('ssh-ed25519', 'admin');
+  const key = await makeKey('ssh-ed25519', 'checked-runner');
+  await setAdminKeys(admin);
+  const hostname = 'checked-host';
+  expect((await keyCall(admin, '/v1/admin/grants', { repository: 'docs', public_key: key.publicKey, hostname, capabilities: ['vpn:corp'] })).status).toBe(200);
+  const base = course();
+  const file = base.course;
+  const git = new Git().add('B', { requires: ['vpn:corp'] }).add('C');
+  git.registry = [{ ...base, course: { ...file, capability_types: { vpn: { description: 'Network', values: '^corp$' } },
+    legs: { ...file.legs, review: { ...file.legs.review, requires: { capabilities: ['vpn:corp'] } } } } }];
+  expect(await git.post()).toMatchObject({ status: 200 });
+  await cutover(time);
+  const dir = home();
+  const env = { CHECK_RESULT: '1' };
+  const checks = capabilityChecks({ capabilities: [{ name: 'vpn:corp', every_s: 1,
+    check: [process.execPath, '-e', 'process.exit(Number(process.env.CHECK_RESULT))'] }] }, dir, env);
+  const api = new BatonApi({ url: ORIGIN, auth: (_method, _url, _body, secret): Record<string, string> => secret ? { 'X-Runner-Secret': secret } : {},
+    transport: async (req) => {
+      const headers: Record<string, string> = {};
+      req.headers.forEach((value, name) => { headers[name] = value; });
+      return hostCall(await signedRequest(key, req.url, {
+        method: req.method, body: req.body ? await req.text() : undefined, created: Math.floor(time / 1000), headers,
+      }));
+    } });
+  const runner = new Runner({ api, home: dir, repository: 'docs', hostname, harness: 'opencode', session: 'checks',
+    courses: [{ course: 'roadmap-pr', version: 3 }], capabilities: ['vpn:corp'], capabilityChecks: checks,
+    stateFile: join(dir, 'checks.json'), beatEvery: 60_000, now: () => time, log: () => {} });
+  const tick = async (result: string) => {
+    env.CHECK_RESULT = result;
+    time += 1000;
+    await setClock(time);
+    await runner.tick();
+    expect(await rows('SELECT capability FROM runner_capabilities WHERE capability = ?', 'vpn:corp')).toHaveLength(result === '0' ? 1 : 0);
+  };
+  try {
+    await tick('1');
+    await expect(api.claim({ request_id: 'failed-check', ticket_id: 'docs:B' })).rejects.toMatchObject({ ruleCode: 'missing-capability' });
+    await tick('0');
+    const passed = await api.claim({ request_id: 'passing-check', ticket_id: 'docs:B' });
+    await api.end(passed.claim_id, { end_reason: 'released:requested' });
+    await tick('1');
+    const claim = await api.claim({ request_id: 'failed-review-check', ticket_id: 'docs:C' });
+    await api.advance(claim.claim_id, { leg: 'implement' });
+    await expect(api.advance(claim.claim_id, { reached: 'pr-open', leg: 'review' })).rejects.toMatchObject({ ruleCode: 'missing-capability' });
+  } finally {
+    runner.stop();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+it.each([false, true])('S-BTN-21: a retiring claim reserves its machine lock (release ack: %s)', async (ack) => {
+  const dir = mkdtempSync(join(tmpdir(), 'baton-lock-retire-'));
+  const capability = 'lock:test';
+  const path = join(dir, 'singleton.lock');
+  let allowAck!: () => void;
+  const acked = new Promise<void>((resolveAck) => { allowAck = resolveAck; });
+  const api = { setSecret: vi.fn(), end: vi.fn(async () => {}), ack: vi.fn(() => acked) } as unknown as BatonApi;
+  const runner = new Runner({ api, home: dir, repository: 'docs', hostname: 'vm-a', harness: 'opencode',
+    session: 'lock-retire', courses: [], stateFile: join(dir, 'runner.json'), concurrency: 2,
+    locks: { [capability]: path }, log: () => {} });
+  const a = runner['makeRun'](dir);
+  const b = runner['makeRun'](dir);
+  runner['slots'].add(a);
+  runner['slots'].add(b);
+  const course = { graph: { legs: new Map([['locked', { requires: [capability] }]]) } } as Parameters<Runner['ensureLegLocks']>[2];
+  let ending: Promise<unknown> | undefined;
+  try {
+    expect(await runner['ensureLegLocks'](a, 'locked', course)).toBe(true);
+    expect(spawnSync('flock', ['-n', path, 'true']).status).toBe(1);
+    if (ack) a.receiveRelease(1, 'released:requested');
+    ending = a['finish'](1, { end_reason: 'done' }, null);
+    await Promise.resolve(); // `end` answered; retirement hasn't resumed after `ackEnd`.
+    expect(a.ended).toBe(true);
+    const taking = runner['ensureLegLocks'](b, 'locked', course);
+    allowAck();
+    expect(await taking).toBe(false);
+    await ending;
+    // Once retirement releases A's lock, B can take it again, and an independent flock can't.
+    await vi.waitFor(async () => expect(await runner['ensureLegLocks'](b, 'locked', course)).toBe(true));
+    expect(spawnSync('flock', ['-n', path, 'true']).status).toBe(1);
+  } finally {
+    allowAck();
+    await ending;
+    runner.stop();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+it('S-BTN-229: a finishing heartbeat fences only the omitted claim and skips its settlement hooks', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'baton-claim-run-'));
+  try {
+    const stateFile = join(home, 'runner.json');
+    const state = new StateFile(stateFile);
+    const heartbeat = vi.fn(async (_body: Record<string, unknown>) => ({
+      runner_id: 1, incarnation: 1, lease_timeout_s: 900, claims: [{ id: 2 }],
+    }));
+    const end = vi.fn(async (_id: number, _body: unknown) => {});
+    const api = { heartbeat, end } as unknown as BatonApi;
+    const options = {
+      api, home, repository: 'docs', courses: [], stateFile, beatEvery: 50,
+      verbose: false, now: () => 1_000, log: () => {},
+    };
+    const live: ClaimRun[] = [];
+    const sidecar = new Sidecar({ ...options, hostname: 'vm-a', session: 'test', harness: 'opencode', concurrency: 2 },
+      state, null, () => ({ live, persisted: [], epoch: 2, pendingRequests: 0 }), () => {});
+    const stop = vi.fn(async () => {});
+    const executor = { source: 'test', stop, start: vi.fn(async () => ({ session_id: 'replacement' })), end: vi.fn(),
+      exec: vi.fn(() => ({ kill: vi.fn(), write: vi.fn(), result: Promise.resolve({ status: 0, stdout: '{"ok":true,"result":null}\n', stderr: '' }) })) };
+    const host = { ensureLegLocks: async () => true, savePlace: vi.fn(), retire: vi.fn(), isStopping: () => false, isDraining: () => false };
+    const make = (id: number) => {
+      const run = new ClaimRun(join(home, String(id)), options, state, executor, sidecar, host);
+      const ticket = `docs:T-${id}`;
+      const kill = vi.fn();
+      run.claimId = id;
+      run.ticket = ticket;
+      run.inflight = { claimId: id, ticket, course: {} as never, legAt: 0, leg: null, waiters: [],
+        child: { running: { kill, write: vi.fn(), result: Promise.resolve({ status: 0, stdout: '', stderr: '' }) } } };
+      const handle = { session_id: `run-${id}` };
+      run.session = { handle, checkout: run.checkout };
+      run.legSessionUrl = `https://example.test/run/${id}`;
+      run.sessionLinkSeq = 1;
+      live.push(run);
+      return { run, kill, handle };
+    };
+    const a = make(1);
+    const b = make(2);
+
+    a.run.legSeq = 1;
+    await a.run['reportLegFinished']();
+
+    expect(heartbeat).toHaveBeenCalledWith(expect.objectContaining({
+      legs_finished: [{ claim_id: 1, seq: 1 }],
+      session_urls: [{ claim_id: 1, url: a.run.legSessionUrl }, { claim_id: 2, url: b.run.legSessionUrl }],
+    }));
+    expect(a.kill).toHaveBeenCalledOnce();
+    expect(a.run.lost).toBe(true);
+    expect(stop.mock.calls).toEqual([[a.handle, 'lease-lost']]);
+    expect(b.kill).not.toHaveBeenCalled();
+    expect(b.run.session?.handle).toBe(b.handle);
+    expect(b.run.sessionLinkLanded).toBe(true);
+    expect(state.get().lease_lost).toBe(false);
+
+    const graph = graphOf({ start: 'filed', end: ['done'], stations: { filed: {}, done: {} }, legs: { work: { from: ['filed'], to: 'done' } } });
+    const outcome = await a.run['settleLeg'](1, 'docs:T-1', { course: { graph } } as Parameters<ClaimRun['settleLeg']>[2],
+      { at: 'filed', legName: 'work' } as Parameters<ClaimRun['settleLeg']>[3],
+      { outcome: { kind: 'ok', result: { release: 'cannot-finish:transient', reached: 'filed' } }, pre: null, ctx: {}, script: 'work.mjs', run: 1 });
+    expect(executor.start.mock.calls.length).toBe(0);
+    expect(executor.exec.mock.calls.length).toBe(0);
+    expect(outcome).toMatchObject({ end_reason: 'released:lease-lost', handoff: null });
+    expect(end).toHaveBeenCalledWith(1, expect.objectContaining({ end_reason: 'released:lease-lost' }));
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+
+const replyApi = (response: Response) => new BatonApi({ url: 'https://baton.test', auth: () => ({}), transport: async () => response });
+const minimalClaim = { claim_id: 1, ticket_id: 'docs:T-1', station: 'filed', legs: ['implement'], nonce: 'nonce', snapshot_sha: 'sha' };
+const legacyBeat = {
+  runner_id: 1, incarnation: 1, bars: [], stale_courses: [], mode: {}, server_time: 10,
+  claim: { id: 1, ticket_id: 'docs:T-1', nonce: 'nonce', claimed_at: 5 }, messages: [],
+};
+
+describe('S-BTN-41 runner reply boundary', () => {
+  const calls = [
+    { name: 'claim', call: (a: BatonApi) => a.claim({ request_id: 'test' }), malformed: { ...minimalClaim, legs: [{}] } },
+    { name: 'heartbeat', call: (a: BatonApi) => a.heartbeat({}), malformed: { ...legacyBeat, claims: [{ id: '1' }] } },
+    { name: 'advance', call: (a: BatonApi) => a.advance(1, { leg: 'implement' }), malformed: { ok: true, next: [{ leg: 2 }] } },
+  ];
+  it.each(calls)('rejects HTML, empty objects and invalid fields from $name', async ({ call, malformed }) => {
+    for (const response of [new Response('<h1>Not Baton</h1>'), Response.json({}), Response.json(malformed)]) {
+      await expect(call(replyApi(response))).rejects.toThrow('malformed successful reply');
+    }
+  });
+
+  it('does not treat a heartbeat without a claim view as an empty claim view', async () => {
+    await expect(replyApi(Response.json({ ...legacyBeat, claim: undefined })).heartbeat({})).rejects.toThrow('malformed successful reply');
+  });
+
+  it('accepts a single-claim heartbeat and claim/advance replies before optional fields existed', async () => {
+    await expect(replyApi(Response.json(legacyBeat)).heartbeat({})).resolves.toEqual(legacyBeat);
+    await expect(replyApi(Response.json(minimalClaim)).claim({ request_id: 'test' })).resolves.toEqual(minimalClaim);
+    await expect(replyApi(Response.json({ ok: true, station: 'filed' })).advance(1, { leg: 'implement' })).resolves.toEqual({ ok: true, station: 'filed' });
   });
 });

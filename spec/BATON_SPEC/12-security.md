@@ -21,7 +21,7 @@ stated once, in the rule it cites.
 
 | Principal | Routes | Credential | May |
 |---|---|---|---|
-| Runner (machine key) | `/v1/runner/*` | SSH-signed (R-BTN-13) or API key (R-BTN-159), plus the runner secret (R-BTN-14) | heartbeat as its name; claim and act where it holds an active grant (R-BTN-58, R-BTN-146); post readings (R-BTN-101); ask blocks (R-BTN-75); accept or decline its grants, key alone (R-BTN-146); as a signed key, sync a granted repository (R-BTN-102) and deliver outbox entries where the policy admits `runner` (R-BTN-171) |
+| Runner (machine key) | `/v1/runner/*` | SSH-signed (R-BTN-13) or API key (R-BTN-159), plus the runner secret (R-BTN-14) | heartbeat as its name; claim and act where it holds an active grant (R-BTN-58, R-BTN-146); post readings (R-BTN-101); ask blocks (R-BTN-75); accept or decline its grants, key alone (R-BTN-146); a signed key may deliver outbox entries where the policy admits `runner` (R-BTN-171); see R-BTN-102 for the unbuilt machine-key sync |
 | Trusted runner | `/v1/runner/*` | SSH-signed, on a grant with the `trusted-runner` role (R-BTN-180) | heartbeat as its name; R-BTN-182; as the protection checker, report `protection` and nothing else (R-BTN-180) |
 | Owner's agent | the owner's routes | an owner key not registered `human_only` | an owner's actions, as `owner`; never a `human` attestation or a human gate (R-BTN-185) |
 | Check-runner | `/v1/runner/*`; `POST …/attestations` as a `service:` key the policy names | SSH-signed, plus the runner secret | heartbeat as its name; claim, advance and end check tickets; report activities and transcripts, write leg logs; where the policy's `attestations` names its key for `std:checks@1`, post that attestation (R-BTN-115); nothing else (R-BTN-114) |
@@ -41,14 +41,14 @@ The repository reads (`GET /v1/repositories/{repository}/…`) are open to any k
 repository, its owners and administrators, except where a route's rule narrows them.
 
 - **R-BTN-179 (the state is readable with a key).** What the dashboard's state answers is
-  answered to a signed key too, by the same queries — one request, one JSON answer:
+  answered to a signed key too, by the same queries with the session-link projection of R-BTN-113:
   `GET /v1/admin/repositories` (administrators: the registry as `/v1/admin/state`'s
   `repositories`, plus `seed_owners` — the unretired repositories whose live owner keys are all the
   deploy seed's, or that have no live owner, R-BTN-58); `GET /v1/owner/{repository}/grants` (its owners: that repository's `owners`,
   `grants`, `mcp_keys` and `settings`, and the bars in force or scheduled, R-BTN-146, each grant also naming
   the `other_repositories` its key holds); and
   `GET /v1/repositories/{repository}/board` (the repository reads' principals: the repository,
-  its `ready` tickets and `ready_by_tier`, `granted_capabilities`, the repository's live claims
+  its `ready` tickets, `granted_capabilities`, the repository's live claims
   as `holders` — each with its holder and when its lease ends (null for a legacy claim) — and `server_time`). A key outside the route's role is refused as this
   section says — `forbidden`, or `unauthenticated` for a key Baton does not know. The CLI's
   `baton admin repo list`, `baton owner grant list <repository>` and `baton repo board
@@ -77,14 +77,17 @@ repository, its owners and administrators, except where a route's rule narrows t
 
 ### 12.2 Destructive actions
 
-These actions take `confirm: true` in the body, or are refused `confirm-required`; the CLI asks
-or takes `--yes`, and the dashboard's dialogs send it.
+These actions take `confirm: true` in the body, or are refused `confirm-required`. Where the
+CLI offers the action it asks or takes `--yes`; where the dashboard offers it its dialog sends
+the confirmation. Confirmation does not grant authority to perform the action.
 
-- `ticket.cancel`, `leg.stop`, `claim.force-reap`, `claim.fence-clear`;
-- `owner.owner.remove`, `owner.grant.revoke`, `owner.sync-key.revoke`, `human-key.revoke`;
+- `leg.stop`, `claim.force-reap`, `claim.fence-clear`;
+- `owner.owner.remove`, `owner.grant.revoke`, `human-key.revoke`;
+- removal of a policy floor (R-BTN-189);
 - `admin.key.revoke`, `admin.repo.retire`.
 
-A change of a repository's path also takes `confirm: true` (R-BTN-138).
+Not built: `ticket.cancel` (R-BTN-12), `owner.sync-key.revoke` (B-301), and an administrator's
+change of a repository's path (R-BTN-138, B-45). Each takes the same confirmation when built.
 
 Proposed, each with the design that brings its action: a `code_repos` consent (R-BTN-140;
 [data model and API](../proposals/data-model-and-api.md)), `owner.check-runner.revoke` and
@@ -179,7 +182,10 @@ Every value below is validated on write; a value over its cap is refused `invali
     (`BATON_ORIGIN`; locally `--origin`), else `forbidden`.
   - **Every session request.** Any request a dashboard session authorizes, reads included,
     carries an `Origin` equal to the origin when it carries one, and `Sec-Fetch-Site:
-    same-origin` when it carries that header, else `forbidden`.
+    same-origin` when it carries that header, else `forbidden`. This is a check on the
+    session's API requests (including the shared reads below), not on public dashboard page
+    loads. The session-assisted condition redirect falls back to the public page if the
+    checks do not pass.
   - **Sessions.** `/v1/ui/*` requires a dashboard session of an administrator key (R-BTN-155). Outside `/v1/ui/*` a session authenticates only the `GET`s §14 lists it on —
     the reads it shares with the keys — and no write.
     Cloudflare Access may stand in front of the dashboard; Baton never requires it and never reads
@@ -193,11 +199,11 @@ Every value below is validated on write; a value over its cap is refused `invali
 ### 12.5 The local host and bearers
 
 - **R-BTN-158 (the local host, and bearers over `http`).**
-  - **Binding.** `baton server start` binds `127.0.0.1` unless `--bind <address>` says otherwise.
+  - **Binding.** `baton server start` binds `127.0.0.1` unless `--host <address>` says otherwise.
     TLS is the operator's: a front (a reverse proxy, Tailscale serve) terminates it, and
     `--origin` names the front's origin, against which R-BTN-135's host check holds. A
     non-loopback `http` origin gets no dashboard, because its cookie is `Secure`.
-  - **Bearers never cross `http`.** The CLI and the runner refuse to send a
+  - **Bearers never cross `http` (not built, B-46).** The CLI and the runner refuse to send a
     bearer to a non-loopback `http` origin; that is the control. The server detects:
     - the Cloudflare host refuses a bearer on a plain-`http` URL as `unauthenticated`;
     - an `http` listener refuses every bearer (API keys, MCP keys, registration tokens, the
@@ -208,10 +214,10 @@ Every value below is validated on write; a value over its cap is refused `invali
       for a cookie), because it crossed the network in clear, and raises
       `baton.bearer-over-http`. One that does not verify is only refused and counted in §2.3's
       failure buckets: an id or fingerprint alone, which is public, revokes nothing.
-  - **The trusted proxy.** Not built: `--trusted-proxy <address>`, naming the one front
+  - **The trusted proxy (not built, B-46).** `--trusted-proxy <address>`, naming the one front
     whose forwarded client address Baton reads, for the sign-in limits
     ([proposed](../proposals/people-and-dashboard.md#3-sign-in-sessions-and-confirmed-actions)).
-  - **File modes.** At start the local host exits 2 on a group- or world-writable `--db`, secret
+  - **File modes (not built, B-46).** At start the local host exits 2 on a group- or world-writable `--db`, secret
     file or directory, or a group- or world-readable secret file. It creates the database `0600`
     in a `0700` directory.
   - **Import** re-validates every row and refuses requests signed before the source's seal, as
@@ -318,6 +324,39 @@ trusted runners or of the protection checker; a compromised forge; and a comprom
     `baton owner policy show | diff | log` read it. Each change is logged `admin` with the
     versions and the knobs it changed, and is checked against the floors (R-BTN-189) and the
     current courses (R-BTN-181) in its transaction.
+  - **Reading a current legacy policy.** Only the current version is projected onto the current
+    knob table, using that repository's live legacy floor rows (R-BTN-189). The policy read's
+    effective hash is over the projected document. Historical reads use the stored documents
+    and hashes, including for the history's knob diffs; they neither project versions nor attach
+    today's floors to them. A migration validates each repository's current projection in one
+    transaction and logs its old and effective hashes as an `admin` event when they differ or
+    when the guarantee comparison (R-BTN-189) reports a held guarantee with no successor.
+    Only a subsequent write authorised by the prior `approvers.policy` appends a version; it
+    links to the prior version's stored hash.
+  - **No new authority from a projection.** Rename `approvers.trust` to `approvers.roles`
+    without changing its list. Drop `courier` from writer and deliverer lists; never translate
+    it to `runner`. Read a missing legacy `outbox.source` with no deliverers. Carry the old
+    answer restriction into `std:decision@1` without adding a writer: in particular a policy
+    that required `inputs.answers: attestation` must still refuse ordinary owner answers.
+    Compare effective permissions before and after, including defaults and fixed rules. For
+    `refs.baton` and `refs.legs`, compare the old writer sets with the sets that R-BTN-180
+    supplies after projection; refuse if any writer is newly admitted to either namespace.
+    Reject a projection that adds authority or leaves a policy that could not work, including
+    an unsatisfiable approver list under the repository's `human_key`. The migration fails
+    atomically and names the repository and the offending knob or floor. It changes no grant.
+  - **Previewing a policy change.** `dry_run: true` (`--dry-run` on `policy apply` or `policy set`)
+    uses the same current version, approver and change validation as apply, but changes no
+    policy or trust settings and adds no policy audit event. `changed` lists the changed knobs;
+    `guarantees` gives their projected result using Baton's current protection report.
+    `trust_cleared` lists the trust settings apply would clear (`grant:<fingerprint>` or
+    `courier:<fingerprint>`), not grants it would revoke. On a change from `inputs.answers: git`
+    to `attestation` with no human-only key admitted by the decision route (R-BTN-116),
+    `stops.legs` lists the person legs that could take an answer from each live ticket's current
+    station, including when another leg is queued, as `{ticket_id, leg}`. `stops.tickets` lists
+    their distinct qualified ticket ids. This reports loss of the answer path, not loss of expiry
+    or of other legs the ticket can take.
+    `not_evaluated` names the effects this preview does not predict: `outbox-delivery`,
+    `leg-attestation-requirements`, `trusted-merge` and `repos.unlisted`.
   - **Who may change it.** Every change to the policy, in any direction, needs an approver on the
     `approvers.policy` list as it stands before the change; Baton never asks whether a change
     tightens or loosens. A change to any `approvers.*` list is authorised the same way, never by
@@ -432,6 +471,25 @@ trusted runners or of the protection checker; a compromised forge; and a comprom
     breaks it is refused, so a shortening is its own version, made while the guarantee still
     holds. A consumer reads the `floors` list and the computed `guarantees`, never a floor's name
     alone.
+  - **Comparing legacy guarantees.** Compare policy conditions on the same repository facts,
+    without the protection report. Compare `no-runner-lands`, `control-paths-human`,
+    `tickets-approved`, `independent-review` and `board-from-trusted` by name, and compare
+    legacy `human-gates-hardware` to current `human-gates`. A held comparable guarantee
+    becoming broken stops the migration, even if unfloored. Legacy `human-gates` (the weaker
+    condition), `signed-authorship` and `trusted-domain-separate` have no migration successor.
+    Report each such held guarantee that was not floored in the repository's migration audit;
+    it does not by itself prevent migration. This comparison does not replace R-BTN-188's
+    check against widening authority.
+  - **Legacy floors.** Project the union of the guarantees the named rows list, using the
+    comparison's successor names. A floor on `human-gates-hardware` thus becomes a floor on
+    `human-gates`, provided its policy conditions and removal restriction are preserved. A
+    floor with no successor or whose successor's policy conditions are unmet stops migration.
+    The prior `approvers.policy` gate must imply the old `remove_by` gate not only now but in
+    every allowed later version that retains the floor. Reject a floor if the document cannot
+    preserve that restriction: `[human]` today does not preserve `remove_by: human` if a later
+    version can keep the floor and switch to `[owner]`. Likewise a later `[human]` could
+    admit a break-glass key that is not an owner, so `remove_by: owner` is not inherently
+    redundant either. Do not clear a floor on the repository's behalf.
   - **Floors are judged on the policy alone.** The protection report is not a policy condition,
     so a lapsed or failed report never refuses a change. It breaks `no-runner-lands` all the
     same: Baton raises `baton.unprotected` (R-BTN-180), and a floor that names it stops the
@@ -521,9 +579,8 @@ trusted runners or of the protection checker; a compromised forge; and a comprom
     refused when it would admit another writer for a type a current course's trusted leg
     requires, and a course whose trusted leg requires a type the policy admits another writer for
     is refused at the snapshot that posts it, the previous course version staying in force.
-  - **Baton's own state.** Attestations about work are exported with the owner state (R-BTN-88);
-    an import drops every one of them. Lost attestations fail closed. Readings are kept and
-    exported as R-BTN-76 and R-BTN-88 say.
+  - **Baton's own state.** The owner-state export does not carry work attestations (R-BTN-88).
+    Lost attestations fail closed. Readings are kept and exported as R-BTN-76 and R-BTN-88 say.
   - The attestation's shape, its other types, supersession, revocation and the
     `requires.attestations` prerequisite are [proposed](../proposals/security.md) (B-146).
 - **R-BTN-191 (every statement Baton receives about the work is an attestation).** Baton takes
@@ -551,9 +608,39 @@ trusted runners or of the protection checker; a compromised forge; and a comprom
 - **R-BTN-182 (trusted runners).** A grant role (R-BTN-180), for the legs a course marks
   `trusted: true`. What a trusted runner claims, runs and re-checks before it acts is
   [proposed](../proposals/security.md) (B-140).
-- **R-BTN-183 (what the merge runner merges).** [Proposed](../proposals/security.md) (B-140):
-  the reviews, checks, paths and approvals the merge runner requires at a PR's exact head under
-  the policy's `merge.*` and `paths.*`.
+- **R-BTN-183 (review input and what the merge runner merges).** A domain that runs the
+  branch's code is one of its writers. Baton records what the deployment declares; the
+  deployment makes it true. The writer attestations and what the merge runner requires at a
+  PR's exact head are [proposed](../proposals/security.md) (B-140).
+  - **Read-only agents (B-141).** A deployment can mark a runner leg `reads_only: true`.
+    The runner passes that declaration to the stub and as a hint to the executor (R-BTN-107).
+    A deployment installs compatible stubs when opting in. The runner rejects older stubs
+    (no `readsOnly: true` export), and the shipped stub checks the pinned graph and refuses an
+    opted-in leg when an older runner omits the read-only context. Deployment-owned course code selects the review commit
+    through its snapshot override: pass `ctx.review_head`, an exact commit id already present in
+    the home object store, when calling `standard(ctx)`. The stub reads that store even when
+    the claim clone does not have the object. It never infers the head from a checkout or
+    branch name. Replay does not run these legs until it records the review
+    input. No standard course opts in.
+  - **The workspace.** The agent starts in a temporary directory outside the checkout, with
+    `review.diff` from the snapshot and review head's merge base to the review head, and the
+    changed regular blobs under `changes/` as non-executable files. No git metadata, symlink,
+    submodule or branch harness configuration is extracted. The ticket and leg instructions
+    come from the claim's source and control snapshot, not the review head. For a versioned
+    ticket this requires the verified source text, even when the ticket also has a path. The stub removes
+    the workspace when the agent call ends.
+  - **The launch.** The stub takes the harness and model from the snapshot's agent command
+    (or the host fallback in R-BTN-131) and builds the command itself. Native settings come
+    from the same settings commit: OpenCode's root and `.opencode/` JSON/JSONC supply model,
+    default agent, declarative agents and providers; Claude's `.claude/settings.json` supplies
+    model and language. The explicit command's model wins. The stub does not forward native
+    permission, plugin, hook or MCP settings. No wrapper, project
+    configuration from the review head, auto-approval or bypass is passed on. It allows file
+    reads and searches only: OpenCode 2.2.3 or newer in the 2.x series uses a standalone
+    invocation and a deny-by-default tool policy; Claude Code uses a bare invocation with only
+    `Read`, `Glob` and `Grep`. Unsupported agent commands fail. This is a harness restriction,
+    not an OS sandbox: the deployment must trust the installed harness, host configuration
+    and snapshot course code, and must not grant higher-precedence tool policy overrides.
 - **R-BTN-184 (protected paths).** The policy's `paths.protected`, beside a floor Baton computes
   that no course or owner removes, in two classes: **control paths** — courses, workflows, agent
   configuration, the ticket source and what the owner declares — and **tickets and goals**. The
@@ -574,6 +661,8 @@ trusted runners or of the protection checker; a compromised forge; and a comprom
     shows before a signature, are [proposed](../proposals/security.md) (B-136). Under `any` a
     human-only list is a custody promise: Baton cannot tell a key an agent session can use, so
     no guarantee claims it as a human gate (`human-gates`, R-BTN-189).
+  - Until FIDO attestation verification is built, no key, including a break-glass line, meets
+    the repository's `hardware` minimum. A stored attestation marker alone is not evidence.
   - **The owner's agent** is a principal (§12.1): an owner key not `human_only`. It acts as
     `owner`, never as `human`. A dashboard session of a `human_only` key is an owner's
     session too: no session, and no OAuth approval by one, satisfies a human-only `approvers.*`
@@ -599,8 +688,20 @@ trusted runners or of the protection checker; a compromised forge; and a comprom
     Tightening is open to any owner credential.
 - **R-BTN-187 (what Baton trusts from a board post).** Who may post the board is the policy's
   `inputs.board`, and whether what a post read from git counts is its `attestations` entries
-  (R-BTN-188, R-BTN-191). A webhook delivery only triggers a sync (values 6). Per-key limits on observation numbers, board posts and concurrent claims are
-  [proposed](../proposals/security.md) (B-137).
+  (R-BTN-188, R-BTN-191). The sync routes admit registered sync keys and verified CI identities
+  only when their input is listed (see R-BTN-102 for machine keys). Repositories with runners
+  below the human level exclude `machine`. A sync credential is limited to 60 observation
+  allocations and, separately, 60 board requests (including refused posts) per UTC hour.
+  CI tokens for the same repository share one credential's quota. Over quota is `rate-limited`
+  (HTTP 429). Two or more expired reservations by the same credential on a UTC day are listed
+  under Needs you for that day (R-BTN-62).
+  On a head move while `paths.control` is not `any`, Baton reports control changes from the
+  recorded push chain (R-BTN-73, R-BTN-194), not the board. It matches the directly named
+  control paths in [the protected paths proposal](../proposals/security.md#9-protected-paths-r-btn-184-proposed),
+  not paths discovered by reading files. A gap or truncated delivery is `pusher-unknown`, not
+  evidence of unchanged control paths. Needs you lists the latest reported move to a head for
+  seven days, with up to sixteen changed paths and the number omitted. This is a report, not a
+  refusal or a course accounting claim (§12.9).
 
 ### 12.9 A leg's scope
 
@@ -633,3 +734,12 @@ segments). The claim answer carries it. Two reports say what a leg did outside i
 A third finding, `out-of-course` — a control path changed on the default branch by a push no
 course accounts for — and two more kinds of audit action are
 [proposed](../proposals/security.md).
+
+**Host forge broker (B-131).** This read is not the audit's open scope. A runner holding a live
+leg proves possession with a signed `GET /v1/forge-scope/runner/{run}` (204, no data). A host
+broker signs `GET /v1/forge-scope/broker/{run}` with its separate key, whose public half is in
+`BATON_FORGE_BROKER_KEYS`. Both reads refuse a run whose lease, leg or grant is no longer live.
+The broker's reply carries only the home path, the ticket's explicitly listed code repository
+paths and IDs (R-BTN-140), and the time through which the lease and deadline currently hold.
+There is no implicit by-name reach or mixed-forge scope for this GitHub.com broker. Baton never
+sees the App key or the installation token. Fieldhouse owns minting, renewal and revocation.

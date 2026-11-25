@@ -4,7 +4,6 @@
 // sha is missing; then `git show` reads blobs straight from the object store. Leg scripts are
 // extracted per claim into a scratch directory, so a course change between two claims needs no
 // restart and the fresh `import()` the wrapper does is of the snapshot's bytes.
-import { execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { mkdir, rm } from 'node:fs/promises';
@@ -12,28 +11,15 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { graphOf, legCapabilities, type Graph } from '../core/graph';
-
-/** B-94: the bound on every git the runner itself runs. The heartbeat path reads the snapshot
- * here (`ensureSha`, `courseOf`, `loadCourse`), and a state file lock, a hook or a stalled
- * filesystem must never hold the event loop past a beat — a runner that stops beating while its
- * process lives is a claim lost silently. */
-export const GIT_TIMEOUT_MS = 30_000;
-export const SAFE_GIT = ['-c', 'core.hooksPath=/dev/null', '-c', 'core.fsmonitor=false'];
-
-// B-94: git's non-interactive environment is defined once, beside the close's bound — the
-// runner's git and the generated stubs import it from there.
-import { GIT_NONINTERACTIVE_ENV } from '../defaults/ticket-state';
+import { git, GIT_TIMEOUT_MS } from '../defaults/git.mjs';
+import { parseSchemaId, type Resolve } from '../shared/schema.mjs';
+import { stdSchema } from '../shared/std.mjs';
+import { GIT_NONINTERACTIVE_ENV } from '../client/git-env.mjs';
 import { prepareExec } from './preparation';
 import { builtinExecutor } from './executor';
-
-/** One git command in the home checkout; throws with stderr when it fails, and is killed at
- * `timeoutMs` (default `GIT_TIMEOUT_MS`, under a beat) when it cannot answer (B-94). */
-export function git(home: string, args: string[], timeoutMs: number = GIT_TIMEOUT_MS): string {
-  return execFileSync('git', ['-C', home, ...SAFE_GIT, ...args], {
-    encoding: 'utf8', maxBuffer: 16 << 20, timeout: timeoutMs, killSignal: 'SIGKILL',
-    env: { ...process.env, ...GIT_NONINTERACTIVE_ENV },
-  });
-}
+import { LEG_TREES } from './leg-scripts';
+export { GIT_TIMEOUT_MS };
+export const SAFE_GIT = ['-c', 'core.hooksPath=/dev/null', '-c', 'core.fsmonitor=false'];
 
 export interface CourseLoad {
   course: string;
@@ -44,6 +30,7 @@ export interface CourseLoad {
   roots?: string[];
   tree?: string;
   dir?: string;
+  schema?: Resolve;
 }
 
 /** The course id the home repository runs, from the snapshot's `.baton/baton.json`: the spec's
@@ -109,10 +96,32 @@ export function ensureSha(home: string, sha: string, fetch: () => void): boolean
   }
 }
 
+/** B-228 (R-BTN-34: the tree is prepared at the claim's sha): bring the home checkout to the
+ *  claim's snapshot before a leg runs, so the leg — and an executor that copies the checkout —
+ *  starts from the code the claim was decided on, never from wherever the home last stood. Only
+ *  a fast-forward, and only on `defaultBranch` with no tracked change: a home that is ahead of the
+ *  snapshot, diverged, on another branch or edited is left exactly as it is, and the reason is
+ *  returned for the log. Null: the home is at the snapshot now. */
+export function advanceHome(home: string, sha: string, defaultBranch: string | null): string | null {
+  const head = git(home, [...SAFE_GIT, 'rev-parse', 'HEAD']).trim();
+  const target = git(home, [...SAFE_GIT, 'rev-parse', `${sha}^{commit}`]).trim();
+  const branch = (() => { try { return git(home, [...SAFE_GIT, 'symbolic-ref', '-q', 'HEAD']).trim().replace(/^refs\/heads\//, ''); } catch { return ''; } })();
+  if (branch !== defaultBranch && (defaultBranch !== null || head !== target)) return `the home is on ${branch || 'a detached HEAD'}, not ${defaultBranch ?? 'the default branch'}`;
+  if (git(home, [...SAFE_GIT, 'status', '--porcelain', '--untracked-files=no']).trim() !== '') return 'the home has tracked changes';
+  if (head === target) return null;
+  try {
+    git(home, [...SAFE_GIT, 'merge-base', '--is-ancestor', head, target]);
+  } catch {
+    return `the home's ${head.slice(0, 10)} is not behind the snapshot`;
+  }
+  git(home, [...SAFE_GIT, 'merge', '--ff-only', '-q', target]);
+  return null;
+}
+
 const checkoutExecutor = builtinExecutor();
 
 /** Git for writable checkouts still runs under the claim's preparation fence. */
-async function checkoutGit(cwd: string, args: string[], signal: AbortSignal): Promise<string> {
+export async function checkoutGit(cwd: string, args: string[], signal: AbortSignal): Promise<string> {
   const result = await prepareExec(checkoutExecutor, '', {
     argv: ['git', ...SAFE_GIT, ...args], cwd, signal,
     env: { ...process.env, ...GIT_NONINTERACTIVE_ENV },
@@ -123,17 +132,17 @@ async function checkoutGit(cwd: string, args: string[], signal: AbortSignal): Pr
 
 /** B-228: fast-forward a clean home on its default branch to the claim's snapshot. Return null
  *  when it is at the snapshot, or a reason the runner can log when left unchanged. */
-export async function advanceHome(home: string, sha: string, defaultBranch: string | null, signal: AbortSignal): Promise<string | null> {
+export async function advanceClaimHome(home: string, sha: string, defaultBranch: string | null, signal: AbortSignal): Promise<string | null> {
   const git = (args: string[]) => checkoutGit(home, args, signal);
   const head = (await git(['rev-parse', 'HEAD'])).trim();
   const target = (await git(['rev-parse', `${sha}^{commit}`])).trim();
-  if (head === target) return null;
   const branch = (await git(['symbolic-ref', '--short', '-q', 'HEAD']).catch(() => {
     signal.throwIfAborted();
     return '';
   })).trim();
-  if (defaultBranch == null || branch !== defaultBranch) return `the home is on ${branch || 'a detached HEAD'}, not ${defaultBranch ?? 'the default branch'}`;
+  if (branch !== defaultBranch && (defaultBranch !== null || head !== target)) return `the home is on ${branch || 'a detached HEAD'}, not ${defaultBranch ?? 'the default branch'}`;
   if ((await git(['status', '--porcelain', '--untracked-files=no'])).trim() !== '') return 'the home has tracked changes';
+  if (head === target) return null;
   try {
     await git(['merge-base', '--is-ancestor', head, target]);
   } catch {
@@ -187,10 +196,9 @@ export function loadCourse(home: string, sha: string, course: string, prepared?:
   if (file == null) throw new Error(`the snapshot ${sha.slice(0, 10)} has no .baton/courses/${course}/course.json`);
   const graph = graphOf(JSON.parse(file));
   const scratch = mkdtempSync(join(tmpdir(), 'baton-legs-'));
-  if (prepared) return { course, graph, scratch, ...prepared };
   const scripts = new Map<string, string>();
-  let listing: string[];
-  try {
+  let listing: string[] = [];
+  if (!prepared) try {
     // ls-tree of a subtree lists names relative to it.
     listing = git(home, ['ls-tree', '-r', '--name-only', `${sha}:.baton/courses/${course}/legs/`]).split('\n').filter(Boolean);
   } catch {
@@ -206,7 +214,53 @@ export function loadCourse(home: string, sha: string, course: string, prepared?:
     writeFileSync(to, bytes, { mode: 0o600 });
     scripts.set(leg, to);
   }
-  return { course, graph, scripts, scratch };
+  return { course, graph, scripts, scratch, schema: courseSchemas(home, sha), ...prepared };
+}
+
+function courseSchemas(home: string, sha: string): Resolve {
+  const schemas = new Map<string, ReturnType<Resolve>>();
+  const schema: Resolve = (id) => {
+    const parts = parseSchemaId(id);
+    if (!parts || parts.prefix === 'std') return stdSchema(id);
+    if (schemas.has(id)) return schemas.get(id) ?? null;
+    const text = readAt(home, sha, `.baton/courses/${parts.prefix}/schemas/${parts.name}@${parts.version}.json`);
+    let value = null;
+    try { value = text == null ? null : JSON.parse(text); } catch { /* malformed schema */ }
+    schemas.set(id, value);
+    return value;
+  };
+  return schema;
+}
+
+/** The live claim must be able to receive its release while Git is reading the course. */
+export async function loadClaimCourse(home: string, sha: string, course: string, signal: AbortSignal,
+  prepare?: () => Promise<Pick<CourseLoad, 'tree' | 'dir' | 'roots' | 'scripts'>>): Promise<CourseLoad> {
+  const prefix = `.baton/courses/${course}`;
+  const git = (args: string[]) => checkoutGit(home, args, signal);
+  const file = await git(['show', `${sha}:${prefix}/course.json`]);
+  const graph = graphOf(JSON.parse(file));
+  const scratch = mkdtempSync(join(tmpdir(), 'baton-legs-'));
+  const schema = courseSchemas(home, sha);
+  try {
+    if (prepare && [...graph.legs.values()].some((leg) => leg.requires.includes(LEG_TREES))) {
+      const tree = await prepare();
+      return { course, graph, scratch, schema, ...tree };
+    }
+    const listing = await git(['ls-tree', '-r', '-z', '--name-only', sha, '--', `${prefix}/legs/`]);
+    const scripts = new Map<string, string>();
+    for (const path of listing.split('\0')) {
+      if (!path.endsWith('.mjs') || path.endsWith('.run.mjs')) continue;
+      const leg = path.split('/').pop()!.slice(0, -4);
+      const bytes = await git(['show', `${sha}:${path}`]);
+      const to = join(scratch, `${leg}.mjs`);
+      writeFileSync(to, bytes, { mode: 0o600 });
+      scripts.set(leg, to);
+    }
+    return { course, graph, scratch, schema, scripts };
+  } catch (e) {
+    dropCourse(scratch);
+    throw e;
+  }
 }
 
 /** B-183 (§4.5, R-BTN-74): the repository's ticket source at the claim's snapshot — its

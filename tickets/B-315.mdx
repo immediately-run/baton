@@ -1,0 +1,57 @@
+---
+title: "B-315 — Course sources may follow a branch: resolved per sync, recorded in the snapshot, with a warning"
+id: B-315
+project: baton
+status: available
+updated: 2026-11-23
+tier: judgement
+repos:
+  - baton
+tags:
+  - roadmap-item
+description: "A course source must name a full commit today. Accept a branch name as the source ref: each sync resolves it to the branch head, uses that exact commit, records branch and commit in the snapshot, and posts an unpinned warning; an unresolvable branch fails the sync. Pinning stays the default."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the owner, 2026-11-22: "it should be possible to specify a branch instead of a specific commit for the pin, which should trigger a warning but should be okay." The context: "During development, I think we lose more from pinning a specific hash than we gain from preventing attacks that push new courses to the Git repository" (#342, which made this repository own `create-pr` outright). A course source today must name a full commit: `parseSource` in `src/defaults/course-source.ts` refuses anything but 40 hex characters. Every home that takes a standard course from Baton therefore needs a PR for each course change.
+
+**Spec:** [BATON_SPEC §5.8](../spec/BATON_SPEC/05-courses.md#sec-5-8) ([R-BTN-131](../spec/BATON_SPEC/05-courses.md#sec-5-8), the standard courses and their sources), [§4.1](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-1) ([R-BTN-51](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-1), `.baton/baton.json`), and the unbuilt course-source design in `spec/proposals/courses.md`.
+
+## Plan
+
+1. **Spec (R-BTN-131).** A source's `<ref>` is a full commit, as today, or a branch name (`[A-Za-z0-9._/-]`, no `..`, not 40 hex). A branch source is **unpinned**. Each sync resolves it to the branch's head commit at that moment and uses that commit exactly, as if it had been named. The snapshot records both the branch and the resolved commit, so every claim still runs one exact graph and the board can say which. Each sync that uses a branch source posts a warning, which the sync workflow's annotation step shows: `course <id> follows branch <b> (unpinned): resolved to <sha10>`.
+2. **Parser.** `parseSource` accepts a branch ref and returns `{ref, pinned: false}`; `printSource` round-trips it.
+3. **The sync's check (`checkSource`, `src/defaults/cli.ts`).**
+   - For a pinned source the check is unchanged.
+   - For a branch source, resolve the branch on the source repository (`git ls-remote`, or the forge API with the read token), then check the course file against the resolved commit's scaffold, not the CLI's own commit.
+   - A branch that cannot be resolved fails the sync loudly, naming the branch. It never falls back to the last commit.
+4. **`baton repo init --course <id> --source-branch <b>`** writes a branch source. Plain `repo init` keeps writing a commit.
+5. **Docs.** A paragraph in `docs/standard-courses.mdx`: when to follow a branch (development) and when to pin (a protected home). Pinning stays the default, and a `protected` policy (R-BTN-188) may refuse branch sources. That last point is an open question for the owner: say so in the PR, don't decide it.
+6. **Tests.** A new scenario (`baton tickets next scenario`):
+   - a branch source parses and resolves, the snapshot carries the branch and the commit, and the warning is posted;
+   - a moved branch makes the next sync use the new commit;
+   - an unresolvable branch fails the sync and names it;
+   - a commit source behaves exactly as today.
+
+### Trust
+
+A branch source trusts whoever can push to that branch of the source repository, which is the trade the owner chose for development. It is visible, not silent: every sync warns, and the snapshot names the commit actually used. Baton's gates are unchanged, and a claim still runs one fixed graph.
+
+### Invariants
+
+- **One graph per claim.** The commit a branch resolved to is fixed for the snapshot, and a claim never changes course mid-flight (R-BTN-22, Rule 9).
+- **Validate before you write.** The branch name is validated before it reaches git.
+
+## Exit criteria
+
+- [ ] `npm test` passes, with the new scenario's test file naming its §15 row.
+- [ ] `npm run typecheck` passes.
+- [ ] A fixture home with `source: github/immediately-run/baton/main/create-pr` syncs, with the warning in the log.
+
+## Status
+
+_filed 2026-11-22._

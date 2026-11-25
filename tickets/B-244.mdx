@@ -3,7 +3,7 @@ title: B-244 — An idle runner says why — the refusal it idles on, and the ga
 id: B-244
 project: baton
 status: available
-updated: 2026-11-15
+updated: 2026-11-23
 repos:
   - baton
 tags:
@@ -12,11 +12,16 @@ description: a runner that gets no-eligible-ticket logs it once, then names the 
 topics:
   - baton
 owns: {}
-prs: []
-depends_on: []
+prs:
+  - https://github.com/immediately-run/baton/pull/352
+depends_on:
+  - B-245
 ---
 
 **What:** a runner that claims nothing says so, and says why.
+
+Failed-check attribution depends on B-245. A generic missing capability is not evidence of a
+failed check: it may never have been declared or may be outside the grant.
 
 - **The runner (`src/runner/runner.ts`, `runOnce`).** Today a `no-eligible-ticket` or `not-eligible` refusal
   returns `null` and the loop idles without a line. Log the refusal once when the runner goes idle
@@ -24,29 +29,30 @@ depends_on: []
   or a claim ends the idle stretch (`baton: idle for <duration>, ended by claim <id>`).
 - **The reason (the core, `recommendations` / `next`).** `no-eligible-ticket` gets a summary of why the
   ready set was emptied for this worker, from what the recommendation already computes: per gate, the count
-  of the repository's ready legs it removed. Gates: tier cap (the declared ceiling and the grant's
-  `max_tier`, named apart), `attempts-exhausted` holds (a `baton:retries` decision open), unconfirmed ends,
+  of the repository's ready legs it removed. Gates: ~~tier cap (the declared ceiling and the grant's
+  `max_tier`, named apart),~~ `attempts-exhausted` holds (a `baton:retries` decision open), unconfirmed ends,
   blocks, rule 4 (naming, for this runner, each required capability it stopped declaring after a failing
   check, B-245), rule 8 bars, backoff, `awaiting-sync`, a `resource` block from an `unavailable` reading
   (with its writer and `until`), a set that isn't current. Counts and up to five ticket
   ids per gate, only for tickets the worker's key may see ([BATON_SPEC §6.7](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-7) [R-BTN-99](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-7)). It's sent in the refusal's `detail`, and
   an older runner ignores it.
-- **The runner's idle line names it.** For example: `baton: idle — no ready ticket fits this worker: 37 above
-  the grant's max_tier judgement, 13 held attempts-exhausted (baton:retries open: B-193, B-176, …), 1 unconfirmed end`.
+- **The runner's idle line names it.** For example: `baton: idle — no ready ticket fits this worker: ~~37 above
+  the grant's max_tier judgement,~~ 13 held attempts-exhausted (baton:retries open: B-193, B-176, …), 1 unconfirmed end`.
 - **A runner that has been idle past a threshold (default 30 min) while the reason says work is held** raises
   the repository's owner notification once per episode, through the same channel as `unblocked_trigger`. It
-  isn't raised again while the episode lasts.
+  isn't raised again for that repository while the episode lasts. An idle alert is its own dispatch
+  with `tickets: []`; no unblock is reported, and the existing workflow input schema is unchanged.
 
 **Why:** on 2026-11-15 both bering runners (workers 42, 43) and vltava2's runner sat idle for about six
 hours with healthy heartbeats and 51 ready tickets on the board. Every ticket a `judgement` grant could reach
 was on hold with `attempts-exhausted` (13 open `baton:retries` decisions) or held by an unconfirmed end
-(B-175, claim 185). The other 37 were critical or untiered, above the grant's `max_tier`. Nothing said so:
+(B-175, claim 185). ~~The other 37 were critical or untiered, above the grant's `max_tier`.~~ Nothing said so:
 the runner logs nothing on `no-eligible-ticket`, the board's `ready` list doesn't apply holds or the grant's
 cap, and `baton` has no owner channel (`needs_you.no_owner_channel`: 129 decisions). Finding the cause took
 the admin state read, the owner's grants read, and source reading. The V2 UI work (behind B-193) waited the
 whole time.
 
-**Done when:** a scenario test with one ready ticket above the grant's tier and one held `attempts-exhausted`
+**Done when:** a scenario test with ~~one ready ticket above the grant's tier and~~ one held `attempts-exhausted`
 shows the runner logging one idle line naming both gates, no further line on the next idle beats, a new line
 when the hold is retried and the claim lands, and the owner notification raised once after the threshold. An
 older runner against the new core, and the new runner against an older core (no `detail`), both still work.
@@ -65,3 +71,5 @@ Ticket ids are limited to what R-BTN-99 lets that key see, and no other key's ho
 ## Status
 
 _filed 2026-11-15._
+
+_2026-11-23 — tiers retired (spec/retire-tiers: [BATON_SPEC §6.6](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-6) gate 5, [R-BTN-66](../spec/BATON_SPEC/01-what-baton-is.md#sec-1)): the struck tier clauses are gone from the spec — no ticket tier, runner ceiling, grant `max_tier`, ladder, `ready_by_tier` or `?tier=`. Build the rest without them._
