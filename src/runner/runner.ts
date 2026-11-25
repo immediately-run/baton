@@ -12,7 +12,9 @@ import { StateFile, leaseLostFrom, type PersistedClaim } from './state';
 import { ClaimRun, type ClaimOutcome, type Resume } from './claimRun';
 import { Sidecar, BEAT_MS } from './sidecar';
 import { MachineLocks } from './machineLocks';
-import { msg, sleep, stampLine, withTimestamps } from './log';
+import { ageWords, msg, sleep, stampLine, withTimestamps } from './log';
+import { maskLegOutput } from './mask';
+import { idleReason } from './idle';
 
 export { BEAT_MS, declarationFrom } from './sidecar';
 export { SIGNAL_GRACE_MS, type ClaimOutcome } from './claimRun';
@@ -39,6 +41,7 @@ export interface RunnerOptions {
   /** B-86: what the heartbeat declares — `--capabilities`, which narrows. Absent, the runner asks
    *  once (a beat declaring nothing) and declares the grant the answer carries. */
   capabilities?: string[];
+  capabilityChecks?: { passes(name: string): boolean; refresh(now: () => number, force?: boolean): Promise<void> };
   /** B-86: the rule 4 names the legs of the courses it serves require, read from the home checkout
    *  each time it is asked, so a runner whose declaration lacks one says so at startup. Injected by
    *  `baton run`; absent, no such line. B-103: every served course's legs, not one course's. */
@@ -119,6 +122,8 @@ export class Runner {
   private draining = false;
   /** Bumps with every claim: an answer a beat started before the claim cannot fence it. */
   private epoch = 0;
+  /** B-244: one line on entry and on a changed refusal, not one per beat. */
+  private idle: { since: number; line: string } | null = null;
   /** B-86: the empty-declaration line has been said, once, since `runOnce` would ask each time. */
   private saidEmpty = false;
   private readonly locks: MachineLocks | null;
@@ -443,6 +448,7 @@ export class Runner {
     }
     // R-BTN-4 (B-188): no room — the runner holds its bound.
     if (this.slots.size >= this.concurrency) return null;
+    await this.o.capabilityChecks?.refresh(() => this.now(), true);
     // B-86: the claim goes out only on the declaration the server holds — `sent` is the list the
     // last answered beat carried, which is what `rewriteSettings` recorded. A runner whose grant
     // arrived on a beat that declared nothing must beat once more before claiming (review round
@@ -499,7 +505,6 @@ export class Runner {
         }
         return null;
       }
-      if (e instanceof BatonRefusal && e.code === 'no-eligible-ticket') return null;
       if (e instanceof BatonRefusal && e.code === 'unauthenticated') {
         // B-93: only the registration's own missing-secret refusal is quiet. A replaced
         // secret or replayed nonce still names itself, now on the single claim request.
@@ -520,8 +525,15 @@ export class Runner {
         return null;
       }
       // R-BTN-4 (B-188): `max-claims` among them — the runner is at its bound for now.
-      if (e instanceof BatonRefusal && e.code === 'not-eligible') {
-        this.log(`baton: no claim (${e.message})`);
+      // B-244: the idle reason, said once on entry and again only when it changes.
+      if (e instanceof BatonRefusal && (e.code === 'not-eligible' || e.code === 'no-eligible-ticket' || (e.code === 'stale-skills' && e.detail != null))) {
+        if (!this.slots.size) {
+          const line = maskLegOutput(`baton: idle — ${e.code}: ${idleReason(e)}`, []);
+          if (line !== this.idle?.line) {
+            this.log(line);
+            this.idle = { since: this.idle?.since ?? this.now(), line };
+          }
+        }
         return null;
       }
       throw e;
@@ -531,6 +543,10 @@ export class Runner {
     this.epoch++;
     const ticket = claim.ticket_id as string;
     const claimId = claim.claim_id as number;
+    if (this.idle) {
+      this.log(`baton: idle for ${ageWords(this.now() - this.idle.since)}, ended by claim ${claimId}`);
+      this.idle = null;
+    }
     // R-BTN-4 (B-188): the claim's slot is held from here — before any await, so no beat can
     // read a claim Baton granted as one this runner does not hold.
     const slot = this.newSlot();

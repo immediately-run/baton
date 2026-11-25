@@ -18,7 +18,8 @@ export const CALL_TIMEOUT_MS = 30_000;
  *  served `min` and `recommended` — for the runner to log before it exits. */
 export class BatonRefusal extends Error {
   constructor(readonly code: string, readonly ruleCode: string | undefined, message: string, readonly status: number,
-    readonly versions: { client: string; min: string; recommended: string } | undefined = undefined) {
+    readonly versions: { client: string; min: string; recommended: string } | undefined = undefined,
+    readonly detail?: unknown) {
     super(message);
   }
 }
@@ -97,6 +98,12 @@ export class BatonApi {
     this.secret = s;
   }
 
+  /** Host-only proof for a pinned executor's credential broker, never part of a leg brief. */
+  forgeProof(run: string): Record<string, string> {
+    const url = new URL(`/v1/forge-scope/runner/${encodeURIComponent(run)}`, this.o.url);
+    return this.o.auth('GET', url.toString(), '', this.secret);
+  }
+
   private async call(method: string, path: string, body?: unknown): Promise<Record<string, any>> {
     const url = new URL(path, this.o.url).toString();
     const text = body === undefined ? '' : JSON.stringify(body);
@@ -124,7 +131,7 @@ export class BatonApi {
         ? { client: json!.client as string, min: json!.min as string, recommended: json!.recommended as string }
         : undefined;
       throw new BatonRefusal(code, typeof json?.rule_code === 'string' ? json.rule_code : undefined,
-        typeof json?.message === 'string' ? json.message : `${method} ${path}: ${res.status}`, res.status, versions);
+        typeof json?.message === 'string' ? json.message : `${method} ${path}: ${res.status}`, res.status, versions, json?.detail);
     }
     return json ?? {};
   }

@@ -149,22 +149,22 @@ route, with the events and fields the table lists for it, is
   - **A held rename.** When a live repository already holds the new path, the old path is kept
     and the token still passes. The repository raises `baton.rename-held`; a claim on a ticket
     whose home or code repository has a held rename is refused `not-eligible` (`rename-held`,
-    §6); active claims on those tickets get a `requested` release (§6). The hold clears when an
-    administrator changes the path with `confirm: true` (same rewrite as a verified rename) or a
+    §6); active claims on those tickets get a `requested` release (§6). The hold clears when a
     later verified rename stops colliding.
   - **Former paths reach the fence only** (the branch-holder query, §9), never authentication or
     links: `?repo=P` resolves to live repositories whose current path is `P`, and to one whose
     former path is `P` only while no live repository holds `P`. A `code_repos` entry keeps its own
-    `former_paths` (latest 10), updated by id-matched deliveries. Several matches fail safe. An
-    administrator removes a former path with `former_paths_remove` and `confirm: true`.
-  - **Re-identifying** after a transfer: the change body's `forge_repo_id`, `forge_owner_id`
-    and `confirm: true`.
+    `former_paths` (latest 10), updated by id-matched deliveries. Several matches fail safe.
+  - **Administrative changes (not built, B-45).** The design allows a confirmed manual path
+    change to clear a held rename using the verified rename's rewrite, removal of a former path
+    with `former_paths_remove`, and re-identification after a transfer with `forge_repo_id`
+    and `forge_owner_id`. These fields are not supported by the repository change route (§14).
   - **Retiring** moves the path to `former_paths`, sets `github` to the tombstone
     `~retired/<id>` and stops reading `web_base`. The path validator and import (R-BTN-88)
     accept a tombstone only on a retired row.
-  - Renames, path changes and identifications are `admin` events with `detail.action`
-    `repo-renamed` (actor `sync`), `repo-path-changed` or `repo-identified` (actor the
-    administrator).
+  - Verified renames are `admin` events with `detail.action` `repo-renamed` (actor `sync`).
+    The unbuilt administrative changes would record `repo-path-changed` or `repo-identified`
+    (actor the administrator) for manual path changes and re-identifications, respectively.
 
 - **R-BTN-61 (merging courses and repositories).** Recommendations order each (repository,
   course) group by the default order (§6), then merge the groups by: (1) expedited first

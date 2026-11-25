@@ -30,7 +30,7 @@ export function declarationFrom(held: string[]): string[] {
 }
 
 type SidecarOptions = Pick<RunnerOptions, 'api' | 'apiFor' | 'stateFile' | 'hostname' | 'session' |
-  'harness' | 'capabilities' | 'tierCeiling' | 'profile' | 'testHarness' | 'courses' | 'readCourses' | 'repository' | 'legNeeds'> & {
+  'harness' | 'capabilities' | 'capabilityChecks' | 'tierCeiling' | 'profile' | 'testHarness' | 'courses' | 'readCourses' | 'repository' | 'legNeeds'> & {
   beatEvery: number;
   concurrency: number;
   now: () => number;
@@ -207,7 +207,7 @@ export class Sidecar {
    *  settled list less every lock capability whose file this process does not hold — of the
    *  runners on one machine only the one holding the lock declares it (R-BTN-178). */
   private declaringList(): string[] {
-    const base = this.declared ?? this.o.capabilities ?? [];
+    const base = (this.declared ?? this.o.capabilities ?? []).filter((name) => this.o.capabilityChecks?.passes(name) ?? true);
     const locks = this.locks;
     return locks ? base.filter((c) => !locks.manages(c) || locks.holds(c)) : base;
   }
@@ -228,6 +228,7 @@ export class Sidecar {
     // is the claims' own — `ensureLegLocks` holds the legs' locks and releases the rest — so the
     // idle maintenance stays out until every claim ends.
     if (this.locks && !live.some((x) => x.heartbeatLeg)) await this.locks.takeAll();
+    if (!live.some((x) => x.heartbeatLeg)) await this.o.capabilityChecks?.refresh(() => this.o.now());
     const declaring = this.declaringList();
     // R-BTN-113, R-BTN-90 (B-188): each claim's running leg's link and finished run, by claim;
     // read at build time, so the answer below clears only what this beat carried.

@@ -186,9 +186,15 @@ A claim ends with `POST /v1/runner/claims/{id}/end`. Its body, stated here once:
 
 ### 9.5 Reaping and the fence
 
-- **Reaping** (unnumbered). The alarm reaps every active claim whose runner has `now −
-  last_seen_at ≥ lease_timeout_ms`: the claim becomes `reaped`, the runner gets `reaped_at` (no
-  other reap sets it, R-BTN-19), and its pending and delivered messages become `expired`. The
+- **Reaping** (unnumbered). Baton records service from successful requests (including
+  not-modified replies) and committed reaper turns, at most once per alarm period. When the
+  gap still exceeds the runner's lease after subtracting the sampling period, Baton gives
+  its active non-legacy claims a full lease from recovery for silence
+  reaping. The alarm reaps once a full lease has passed since the later of the runner's
+  `last_seen_at` and the claim's recovery, if any. Recovery does not record a heartbeat or
+  change a pending fence. A silence reap makes the claim `reaped` and its pending and delivered
+  messages become `expired`. A reap that finds the runner silent sets `reaped_at` only if
+  no other claim still holds (R-BTN-4, R-BTN-19). The
   alarm also reaps a claim whose delivered `release` stays unacknowledged for the end table's
   time (§9.4). The reaps commit on their own, before the rest of the alarm's tick: a reap whose
   end cannot be written is passed over, the tick then fails naming that claim after its other
