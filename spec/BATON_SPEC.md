@@ -499,6 +499,7 @@ is stale. Never edit it by hand.
 | S-BTN-312 | a board post missing a queued leg | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-313 | refresh course versions and request a restart | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-318 | Access sign-in refusal reasons | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-319 | board boundary | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-320 | a read-only agent reviews commit data | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 
 ## Gates

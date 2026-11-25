@@ -313,9 +313,10 @@ numbers.
     released or void) the observation route answers `sync-busy`. A number is void 10 minutes
     after it was handed out.
   - **Release.** A sync run that will not post gives its number back with
-    `POST /v1/sync/observation {release: <number>}`; a release of any number but the
-    outstanding one does nothing.
-  - Renewal, voiding by credential and the bar on a credential that lets numbers lapse are
+    `POST /v1/sync/observation {release: <number>}`. Only the issuer of the outstanding number
+    may release or post it; revoking a sync key voids its number without resetting the counter.
+    See R-BTN-187 for quotas and owner alerts.
+  - Renewal and the bar on a credential that lets numbers lapse are
     proposed in [tickets and sources](../proposals/tickets-and-sources.md).
 
 An identical validated same-head snapshot may reuse its materialization only while its
