@@ -288,6 +288,20 @@ describe('class 7 by name (R-BTN-144)', () => {
     expect(sink.push('-----END OPENSSH PRIVATE KEY-----')).toBe('***');
     expect(sink.flush()).toBe('');
   });
+
+  it('recognizes key banners before a literal match or held tail can change them', () => {
+    const begin = '-----BEGIN OPENSSH PRIVATE KEY-----';
+    const end = '-----END OPENSSH PRIVATE KEY-----';
+    for (const secret of ['-example-secret', 'OPENSSH PRIVATE KEY']) {
+      const sink = createLegMasker([secret]);
+      expect(sink.push(begin)).toBe('');
+      expect(sink.push('key body fixture')).toBe('');
+      expect(sink.push(end)).toBe('***');
+      expect(sink.push('after')).toBe('after');
+      expect(sink.flush()).toBe('');
+      expect(maskLegOutput(`${begin}\nkey body fixture\n${end}`, [secret])).toBe('***\n***\n***');
+    }
+  });
 });
 
 describe('S-BTN-119: builtin executor framing', () => {

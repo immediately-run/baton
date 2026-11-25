@@ -1,0 +1,20 @@
+---
+title: B-42 review round 2
+description: Disposition of the second review of verified leg trees and runner preparation.
+---
+
+Reviewed head: `4fd948a488788ae8908ca9abfaf5a35a29a9e887`.
+[Forge review](https://github.com/immediately-run/baton/pull/349#pullrequestreview-6012171979).
+Verdict: **changes**.
+
+| Finding | Disposition |
+| --- | --- |
+| [Pinned executor skips claim ancestry](https://github.com/immediately-run/baton/pull/349#discussion_r4658065462) | Separate the host ancestry check from executor leg-tree availability. S-BTN-109 covers a pinned executor refusing an off-branch claim. |
+| [Synchronous preparation reads](https://github.com/immediately-run/baton/pull/349#discussion_r4658065469) | The graph, capability decision, and legacy script extraction now use fenced asynchronous Git. S-BTN-109 stalls the graph read. The signed-control history walk and course-selection probe still need the same treatment. |
+| [Second immediate signal skips cleanup](https://github.com/immediately-run/baton/pull/349#discussion_r4658065475) | Route the second immediate signal through the same forced cleanup as the shutdown timer, including active preparation. |
+| [Distinct signed override commit](https://github.com/immediately-run/baton/pull/349#discussion_r4658065477) | Prepare the verified override tree separately and allow its roots on the wrapper call. Generated stubs use it instead of the course tree for the override. |
+
+Carried findings: `baton.off-branch` and the off-branch sync request are explicitly not built in
+current R-BTN-143 and assigned to B-46 and B-57. The legacy generated-stub migration, CLI-owned
+leg helper module, npm install-root semantics, whole-commit ticket and station calls, sourced-course
+migration and interactive capability coverage remain open. This change does not claim to close them.

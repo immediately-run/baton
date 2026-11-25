@@ -3,7 +3,7 @@
 // does for the Worker. `npm run start:local` and `baton test-course` (R3-1248) both run through it.
 import { build } from 'esbuild';
 import { readFile } from 'node:fs/promises';
-import { mkdirSync } from 'node:fs';
+import { copyFileSync, mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -24,6 +24,7 @@ export const LOCAL_LOADERS = { '.sql': 'text', '.html': 'text', '.css': 'text' }
 /** Bundle `entry` (relative to the repository root) to .local/`name` and import it. */
 export async function bundleLocal(entry, name) {
   mkdirSync(OUT, { recursive: true });
+  if (entry === 'src/local/testCourse.ts') copyFileSync(join(ROOT, 'src/runner/legProcess.mjs'), join(OUT, 'legProcess.mjs'));
   const outfile = join(OUT, name);
   await build({
     entryPoints: [join(ROOT, entry)],

@@ -21,6 +21,7 @@ import { dirname, join, relative } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { BatonApi, BatonRefusal, envAuth, type Auth, type Transport } from '../runner/api';
 import { HARNESS_AGENTS, type Harness } from '../runner/harness';
+import { checkLegTreeRequirements } from '../runner/leg-tree-requirements';
 import { syncOnce } from '../shared/batonSync.mjs';
 import { GIT_NONINTERACTIVE_ENV } from '../client/git-env.mjs';
 import { DEFAULT_URL } from '../client/config.mjs';
@@ -452,6 +453,7 @@ async function readBoard(root: string, batonJson: BatonJson, args: SyncArgs, log
       t.depends_at = [...new Set(t.depends_on)].filter((id) => !doneIds.has(id))
         .map((ticket) => ({ ticket, done: true, leg: start }));
     }
+    await checkLegTreeRequirements(root, c.id, course);
     const branchPatterns = [c.branch_pattern ?? DEFAULT_BRANCH_PATTERN, ...(c.previous_branch_pattern ? [c.previous_branch_pattern] : [])];
     const fnCtx = { ...ctx, course: c.id, repository, tickets, closed: closedIds, done: doneIds, facts, branchPatterns, graph: course, ...(record ? { baton: record } : {}) };
     const syncMjs = syncMjsOf(c.id);
@@ -1554,6 +1556,13 @@ export async function run(ctx) {
   const rel = ${JSON.stringify(`.baton/courses/${course}/legs/${leg}${OVERRIDE_SUFFIX}`)};
   // As with the instructions below: only an empty listing means there is no override.
   if (gitRun('git', ['-C', ctx.checkout, 'ls-tree', '--name-only', readSha, '--', rel]).trim() === '') return standard(ctx);
+  if (ctx.snapshot.tree) {
+    const dir = ctx.overrides?.dir;
+    if (!dir && readSha !== (ctx.signed_control?.course || sha)) throw new Error(rel + ' needs a separate verified override tree');
+    const mod = await import(dir ? pathToFileURL(join(dir, 'legs', ${JSON.stringify(`${leg}${OVERRIDE_SUFFIX}`)})).href : new URL(${JSON.stringify(`./${leg}${OVERRIDE_SUFFIX}`)}, import.meta.url).href);
+    if (typeof mod.run !== 'function') throw new Error(rel + ' exports no run(ctx, standard)');
+    return await mod.run(ctx, standard);
+  }
   const dir = mkdtempSync(join(tmpdir(), 'baton-override-'));
   try {
     const file = join(dir, ${JSON.stringify(`${leg}${OVERRIDE_SUFFIX}`)});
@@ -1919,12 +1928,20 @@ const OUTPUT_MAX = ${AGENT_OUTPUT_MAX};
 export async function run(ctx) {
   const sha = ctx.snapshot?.sha;
   if (typeof sha !== 'string' || sha === '') throw new Error('the leg has no snapshot to read its override at');
+  const readSha = ctx.signed_control?.overrides || sha;
   const rel = ${JSON.stringify(`.baton/courses/${course}/legs/${leg}${OVERRIDE_SUFFIX}`)};
-  if (gitRun(['-C', ctx.checkout, 'ls-tree', '--name-only', sha, '--', rel]).trim() === '') return standard(ctx);
+  if (gitRun(['-C', ctx.checkout, 'ls-tree', '--name-only', readSha, '--', rel]).trim() === '') return standard(ctx);
+  if (ctx.snapshot.tree) {
+    const dir = ctx.overrides?.dir;
+    if (!dir && readSha !== (ctx.signed_control?.course || sha)) throw new Error(rel + ' needs a separate verified override tree');
+    const mod = await import(dir ? pathToFileURL(join(dir, 'legs', ${JSON.stringify(`${leg}${OVERRIDE_SUFFIX}`)})).href : new URL(${JSON.stringify(`./${leg}${OVERRIDE_SUFFIX}`)}, import.meta.url).href);
+    if (typeof mod.run !== 'function') throw new Error(rel + ' exports no run(ctx, standard)');
+    return await mod.run(ctx, standard);
+  }
   const dir = mkdtempSync(join(tmpdir(), 'baton-override-'));
   try {
     const file = join(dir, ${JSON.stringify(`${leg}${OVERRIDE_SUFFIX}`)});
-    writeFileSync(file, gitRun(['-C', ctx.checkout, 'show', sha + ':' + rel], { maxBuffer: OUTPUT_MAX }));
+    writeFileSync(file, gitRun(['-C', ctx.checkout, 'show', readSha + ':' + rel], { maxBuffer: OUTPUT_MAX }));
     const mod = await import(pathToFileURL(file).href);
     if (typeof mod.run !== 'function') throw new Error(rel + ' exports no run(ctx, standard)');
     return await mod.run(ctx, standard);

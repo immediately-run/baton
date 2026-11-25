@@ -545,7 +545,7 @@ export function checkOwnerStateStation(row: Record<string, unknown>, path: unkno
   }
 }
 /** §6.5: the `released:` reasons, exactly. */
-export const RELEASE_END_REASONS = ['blocked', 'stale-board', 'cannot-finish:transient', 'cannot-finish:capability', 'cannot-finish:spec', 'cannot-finish:contract-output', 'cannot-finish:contract-input',
+export const RELEASE_END_REASONS = ['blocked', 'stale-board', 'off-branch', 'cannot-finish:transient', 'cannot-finish:capability', 'cannot-finish:spec', 'cannot-finish:contract-output', 'cannot-finish:contract-input',
   'lease-lost', 'requested', 'owner-cancel', 'provider-suspended', 'provider-exhausted', 'course-changed', 'leg-timeout'] as const;
 
 /** A claim's request (§6.2). `bills` is retired (B-168: a `prefer` entry bills no account once

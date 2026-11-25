@@ -86,6 +86,7 @@ export interface Running {
   result: Promise<ExecResult>;
   write(line: string): void;
   kill(): void;
+  signal?(signal: NodeJS.Signals): void;
 }
 
 export interface Handle {
@@ -135,8 +136,8 @@ export interface ExecutorHost {
  *  user — exactly today's `process` mode. A leg can read the runner's state file and use its
  *  ssh-agent: `builtin` binds only cooperating legs (R-BTN-107). `argv[0] === 'node'` runs the
  *  runner's own node. */
-export function builtinExecutor(): Executor {
-  const sessions = new Map<string, { brief: Brief; running: Set<Running> }>();
+export function builtinExecutor(stopDelay = { term: 10_000, kill: 25_000 }): Executor {
+  const sessions = new Map<string, { brief: Brief; running: Set<Running>; stopping?: boolean }>();
   return {
     api: EXECUTOR_API,
     source: 'builtin',
@@ -148,19 +149,20 @@ export function builtinExecutor(): Executor {
     },
     exec(h, argv, o) {
       const s = sessions.get(h.session_id);
-      if (!s) throw new Error(`no session ${h.session_id}`);
+      if (!s || s.stopping) throw new Error(`no active session ${h.session_id}`);
       const [cmd, ...args] = argv;
       const child = spawn(cmd === 'node' ? process.execPath : cmd, args, {
         cwd: o.cwd, detached: true, stdio: ['pipe', 'pipe', 'pipe'],
         env: { ...s.brief.env, ...(o.env ?? {}) },
       });
-      const kill = () => {
+      const signal = (name: NodeJS.Signals) => {
         try {
-          if (child.pid) process.kill(-child.pid, 'SIGKILL');
+          if (child.pid) process.kill(-child.pid, name);
         } catch {
           // The group is already gone.
         }
       };
+      const kill = () => signal('SIGKILL');
       let stdout = '';
       let stderr = '';
       let partial = '';
@@ -214,15 +216,29 @@ export function builtinExecutor(): Executor {
           if (child.stdin && !child.stdin.destroyed) child.stdin.write(line.endsWith('\n') ? line : `${line}\n`);
         },
         kill,
+        signal,
       };
       s.running.add(running);
       void result.then(() => s.running.delete(running));
       return running;
     },
-    async stop(h) {
+    async stop(h, reason) {
       const s = sessions.get(h.session_id);
       if (!s) return;
-      for (const r of s.running) r.kill();
+      // Keep the session reachable during the interrupt ladder so hard-stop can escalate it.
+      s.stopping = true;
+      const running = [...s.running];
+      if (reason === 'preparation-release') {
+        const send = (name: NodeJS.Signals) => { for (const call of s.running) call.signal?.(name); };
+        send('SIGINT');
+        const term = setTimeout(() => send('SIGTERM'), stopDelay.term);
+        const kill = setTimeout(() => send('SIGKILL'), stopDelay.kill);
+        try { await Promise.all(running.map((r) => r.result)); }
+        finally { clearTimeout(term); clearTimeout(kill); }
+      } else {
+        for (const r of running) r.kill();
+        await Promise.all(running.map((r) => r.result));
+      }
       sessions.delete(h.session_id);
     },
     async end(h) {

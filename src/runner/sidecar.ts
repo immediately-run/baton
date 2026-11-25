@@ -1,3 +1,4 @@
+import { LEG_TREES } from './leg-scripts';
 // The runner's heartbeat cadence, lease and spool delivery (R-BTN-6, R-BTN-26).
 import type { BeatAnswer } from '../shared/runner-wire';
 import { appendFileSync, readdirSync, readFileSync, renameSync, rmSync } from 'node:fs';
@@ -31,7 +32,7 @@ export function declarationFrom(held: string[]): string[] {
 }
 
 type SidecarOptions = Pick<RunnerOptions, 'api' | 'apiFor' | 'stateFile' | 'hostname' | 'session' |
-  'harness' | 'capabilities' | 'capabilityChecks' | 'tierCeiling' | 'profile' | 'testHarness' | 'courses' | 'readCourses' | 'repository' | 'legNeeds'> & {
+  'harness' | 'capabilities' | 'capabilityChecks' | 'legTrees' | 'tierCeiling' | 'profile' | 'testHarness' | 'courses' | 'readCourses' | 'repository' | 'legNeeds'> & {
   beatEvery: number;
   concurrency: number;
   now: () => number;
@@ -39,6 +40,7 @@ type SidecarOptions = Pick<RunnerOptions, 'api' | 'apiFor' | 'stateFile' | 'host
 };
 
 interface HeartbeatClaim {
+  readonly preparing?: AbortController | null;
   readonly claimId: number | null;
   readonly ticket: string;
   readonly checkout: string;
@@ -208,7 +210,8 @@ export class Sidecar {
    *  settled list less every lock capability whose file this process does not hold — of the
    *  runners on one machine only the one holding the lock declares it (R-BTN-178). */
   private declaringList(): string[] {
-    const base = (this.declared ?? this.o.capabilities ?? []).filter((name) => this.o.capabilityChecks?.passes(name) ?? true);
+    const base = (this.declared ?? this.o.capabilities ?? []).filter((name) => !name.startsWith('runner:') && (this.o.capabilityChecks?.passes(name) ?? true));
+    if (this.o.legTrees) base.push(LEG_TREES);
     const locks = this.locks;
     return locks ? base.filter((c) => !locks.manages(c) || locks.holds(c)) : base;
   }
@@ -406,7 +409,7 @@ export class Sidecar {
       this.loseLease('lease-timeout');
     } else if (!this.lostLease) {
       for (const x of live) {
-        const id = x.heartbeatLeg?.claimId;
+        const id = x.heartbeatLeg?.claimId ?? (steady && x.preparing ? x.claimId : null);
         if (id != null && !x.lost && !x.ended && !byId.has(id)) this.loseClaim(x);
       }
     }

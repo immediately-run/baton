@@ -18,6 +18,8 @@ import { HARNESS_AGENTS, type Harness } from './harness';
 import { advanceHome, holdHome, legNeeds, readHead } from './home';
 import { cliBehind, cliPinLines, cliProfile, readCliPin } from './cliPin';
 import { Runner, stampLine, withTimestamps, type RunnerOptions } from './runner';
+import { LegTrees } from './leg-trees';
+import { PREPARE_TIMEOUT_MS, requireLegNode } from './preparation';
 import { loadExecutor } from './executor';
 import { readMaskEnv, runnerConfigPath, underBatonDirectory } from './mask';
 import { runnerHome } from '../defaults/homes';
@@ -29,6 +31,7 @@ import { capabilityChecks } from './capabilityChecks';
 const LEG_WRAPPER = fileURLToPath(new URL('./legProcess.mjs', import.meta.url));
 
 export interface RunArgs {
+  prepareTimeoutMs?: number;
   config?: string;
   harness: Harness;
   home: string;
@@ -104,6 +107,13 @@ export function parseRunArgs(argv: string[], env: NodeJS.ProcessEnv = process.en
     else if (a === '--tier') out.tier = value();
     else if (a === '--course') out.course = value();
     else if (a === '--executor') out.executor = value();
+    else if (a === '--prepare-timeout') {
+      const v = value();
+      const duration = /^(\d+)(ms|s|m|h)$/.exec(v);
+      const ms = duration ? Number(duration[1]) * ({ ms: 1, s: 1000, m: 60_000, h: 3_600_000 }[duration[2]] ?? 0) : 0;
+      if (!Number.isSafeInteger(ms) || ms < 1 || ms > 2_147_483_647) throw new Error('--prepare-timeout: a positive duration, e.g. 15m');
+      out.prepareTimeoutMs = ms;
+    }
     else if (a === '--concurrency') {
       const n = Number(value());
       if (!Number.isInteger(n) || n < 1 || n > 32) throw new Error('--concurrency: an integer from 1 to 32 (R-BTN-4)');
@@ -126,6 +136,9 @@ export function parseRunArgs(argv: string[], env: NodeJS.ProcessEnv = process.en
       out.beatEvery = n;
     } else throw new Error(`${a}: not a flag of baton run`);
   }
+  if (out.capabilities?.some((c) => c.startsWith('runner:')) || Object.keys(out.locks).some((c) => c.startsWith('runner:'))) {
+    throw new Error('runner: capabilities are declared by the runner, not configuration (R-BTN-133)');
+  }
   return out;
 }
 
@@ -145,6 +158,7 @@ export const RUN_USAGE = [
   '~/.config/baton/homes.json, whose checkout it works (B-121).',
   '',
   '  --capabilities a,b  narrows what the grant allows; it never enables what the grant does not.',
+  '  --prepare-timeout  bound on leg-tree preparation (default 15m).',
   '                      Absent, the runner declares what the grant allows — no flag is needed to',
   '                      serve the grant. A machine without a browser narrows, e.g. llm-call,create-pr.',
   '  --course <id>       narrows the courses served to this one, of those the home declares.',
@@ -387,6 +401,7 @@ export async function runMain(argv: string[], io: { log?: (l: string) => void; f
     return 0;
   }
   const a = parseRunArgs(argv);
+  requireLegNode();
   // B-121: `--home`/`BATON_HOME` may name a home of ~/.config/baton/homes.json rather than a
   // checkout path — a name resolves to its checkout, refused naming the home when the home has
   // none. A path (a value with `/` or naming an existing directory) keeps R-BTN-131's meaning.
@@ -466,8 +481,18 @@ export async function runMain(argv: string[], io: { log?: (l: string) => void; f
   let exitCode = 0;
   let stopping = false;
   let hardStop: NodeJS.Timeout | null = null;
+  let forceStopping = false;
   let lastHomeNotice = '';
   const codeOf = (signal: NodeJS.Signals): number => (signal === 'SIGINT' ? 130 : signal === 'SIGHUP' ? 129 : 143);
+  const forceStop = () => {
+    if (forceStopping) return;
+    forceStopping = true;
+    if (hardStop != null) clearTimeout(hardStop);
+    const leave = () => { release(); process.exit(exitCode); };
+    hardStop = setTimeout(leave, HARD_STOP_MS);
+    if (runner) void runner.hardStop().then(leave, leave);
+    else leave();
+  };
   const onSignal = (signal: NodeJS.Signals) => {
     // 2026-10-24: SIGTERM drains — the current leg completes, the claim ends at its boundary,
     // and the loop returns to a clean exit 0. A second SIGTERM, SIGINT, or SIGHUP any time, is
@@ -496,18 +521,15 @@ export async function runMain(argv: string[], io: { log?: (l: string) => void; f
       // waited on for at most another HARD_STOP_MS.
       hardStop = setTimeout(() => {
         syncLogStamped(a.verbose, `baton: ${signal} — the leg did not stop; its call is killed, its session stopped, and this process exits`);
-        const leave = () => { release(); process.exit(exitCode); };
-        setTimeout(leave, HARD_STOP_MS);
-        void runner!.hardStop().finally(leave);
+        forceStop();
       }, HARD_STOP_MS);
       hardStop.unref?.();
       return;
     }
-    // A second immediate signal: leave now, the leg's group with us.
+    // A repeated immediate signal skips the grace, but not process-group cleanup.
     syncLogStamped(a.verbose, `baton: ${stopLine(runner, signal)}`);
-    runner?.killInflight();
-    release();
-    process.exit(codeOf(signal));
+    exitCode = codeOf(signal);
+    forceStop();
   };
   process.on('SIGINT', onSignal);
   process.on('SIGTERM', onSignal);
@@ -519,9 +541,13 @@ export async function runMain(argv: string[], io: { log?: (l: string) => void; f
   // R-BTN-107 (B-184): the executor the host chose, loaded before any claim — a pinned bundle
   // whose digest does not match, or a source not built, refuses to start.
   const executor = await loadExecutor(a.executor, { log: say, wrapper: LEG_WRAPPER, node: process.execPath });
+  // The executor v1 interface does not promise a shared filesystem or a cache export.
+  // Only builtin is known to expose these verified host paths to its sessions.
+  const snapshots = new LegTrees(home, executor, LEG_WRAPPER);
+  const legTrees = executor.source === 'builtin' ? snapshots : undefined;
   if (a.executor !== 'builtin') say(`baton: executor ${executor.source}${executor.digest ? ` sha256:${executor.digest}` : ''}${executor.provides.length ? `, provides ${executor.provides.join(', ')}` : ''}`);
   runner = new Runner({
-    executor,
+    executor, legTrees, checkSnapshot: snapshots.onDefault.bind(snapshots), prepareTimeoutMs: a.prepareTimeoutMs ?? PREPARE_TIMEOUT_MS,
     api: new BatonApi({ url: a.url, transport, auth }, say),
     // B-229: the earlier sessions' claims are ended through an API of their own runner's.
     apiFor: (secret: string) => { const other = new BatonApi({ url: a.url, transport, auth }, say); other.setSecret(secret); return other; },
@@ -560,6 +586,7 @@ export async function runMain(argv: string[], io: { log?: (l: string) => void; f
     ...(a.concurrency !== 1 ? { concurrency: a.concurrency } : {}),
   });
   try {
+    await legTrees?.init(AbortSignal.timeout(a.prepareTimeoutMs ?? PREPARE_TIMEOUT_MS));
     const result = await runner.work();
     if (!exitCode) exitCode = result;
   } finally {

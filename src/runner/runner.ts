@@ -1,3 +1,4 @@
+import type { LegTrees } from './leg-trees';
 // The runner allocates checkouts and machine locks, claims tickets and supervises their runs.
 import type { ClaimAnswer } from '../shared/runner-wire';
 import { createHash, randomBytes } from 'node:crypto';
@@ -70,6 +71,9 @@ export interface RunnerOptions {
   agentCommand?: string;
   /** R-BTN-107 (B-184): the executor the runner's host chose — `builtin` when absent. */
   executor?: Executor;
+  legTrees?: LegTrees;
+  checkSnapshot?: LegTrees['onDefault'];
+  prepareTimeoutMs?: number;
   /** Verbose (the owner, 2026-10-23): timestamp every line, name the claim's id and nonce,
    * log the leg's local command, and drain the leg child's stderr into the log — where the
    * stub reports the agent_command it resolved. A slice of B-23's leg observability. */
@@ -262,7 +266,7 @@ export class Runner {
   async hardStop(): Promise<void> {
     this.killInflight();
     const live = this.offlineSlot ? [...this.slots, this.offlineSlot] : [...this.slots];
-    await Promise.all(live.map((x) => x.stopSession('hard-stop')));
+    await Promise.all(live.map((x) => x.hardStop()));
   }
 
   /** B-109: the immediate stop — a safe point, not an abandonment. The leg in flight is

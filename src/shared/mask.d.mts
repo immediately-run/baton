@@ -11,6 +11,7 @@ export declare function maskKeys(text: string): string;
 export declare function maskSecrets(text: string): string;
 
 export interface Masker {
+  readonly holdingKey: boolean;
   /** One line in; the lines that may leave now, joined by `\n` (`''` while a block is held). */
   push(line: string): string;
   /** The stream's end: the `***` a held block leaves, if one is held. */

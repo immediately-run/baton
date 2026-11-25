@@ -159,7 +159,7 @@ export default defineConfig({
           globalSetup: ['./test/global-setup.ts'],
           setupFiles: ['./test/setup.ts'],
           include: ['test/**/*.test.ts'],
-          exclude: [...NODE_ONLY, ...LOAD_TEST, 'test/ui/**', 'test/unit/local-event-archive.test.ts'],
+          exclude: [...NODE_ONLY, ...LOAD_TEST, 'test/ui/**', 'test/unit/local-event-archive.test.ts', 'test/integration/S-BTN-109.leg-trees.test.ts'],
         },
       },
       {

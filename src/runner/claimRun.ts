@@ -1,3 +1,5 @@
+import type { LegTrees } from './leg-trees';
+import { cleanNodeEnv, hardStopPreparation, PREPARE_TIMEOUT_MS, PreparationError } from './preparation';
 // One claim's checkout, executor session, verification and course progression.
 import { git } from '../defaults/git.mjs';
 import { randomBytes } from 'node:crypto';
@@ -10,7 +12,7 @@ import { checkRaise, dispositionOf, errorClassOf, SEVERITIES, type ConditionDecl
 import type { ScopeAction } from '../core/scope';
 import { BatonRefusal, batonUnreachable } from './api';
 import { outsideScope, pushesBetween, readRefState, type RefState } from './audit';
-import { advanceHome, claimScratch, courseOf, dropCourse, ensureSha, extractTicketSource, loadCourse, prepareClone, readHead, type CourseLoad } from './home';
+import { advanceClaimHome, claimScratch, courseOf, dropCourse, ensureSha, extractTicketSource, loadClaimCourse, loadCourse, prepareClone, readHead, type CourseLoad } from './home';
 import type { ExecOptions, Executor, Handle, Running, SessionKind } from './executor';
 import { LegChannel, channelPath, type ChannelAnswer, type ChannelRequest } from './channel';
 import { MIN_SECRET_BYTES, createLegMasker, failureDetail, maskLegOutput, namesASecret, secretValues } from './mask';
@@ -91,7 +93,11 @@ interface Inflight {
   waiters: ((next: NextLegs) => void)[];
 }
 
+type PreparedTree = Awaited<ReturnType<LegTrees['prepare']>>;
+
 interface PreparedClaim {
+  tree?: PreparedTree;
+  overrides?: PreparedTree;
   course: CourseLoad;
   scratch: string;
   signedControl: Record<string, string>;
@@ -130,7 +136,7 @@ interface LegExecution {
 }
 
 type ClaimOptions = Pick<RunnerOptions, 'api' | 'home' | 'repository' | 'courses' | 'fetch' |
-  'stateFile' | 'agentCommand' | 'maskEnv' | 'signalGraceMs' | 'auditRefs'> & {
+  'stateFile' | 'legTrees' | 'checkSnapshot' | 'prepareTimeoutMs' | 'agentCommand' | 'maskEnv' | 'signalGraceMs' | 'auditRefs'> & {
   beatEvery: number;
   verbose: boolean;
   now: () => number;
@@ -155,6 +161,7 @@ export class ClaimRun {
   /** The claim's `request_id` — a claim retried by it answers the same claim (reattach). */
   requestId: string | undefined;
   inflight: Inflight | null = null;
+  preparing: AbortController | null = null;
   /** B-108: the time of the last line drained from the leg child's stderr (—verbose, where the
    *  stub mirrors the agent's streams): a live signal the beat's liveness line counts. */
   legLineAt: number | null = null;
@@ -288,14 +295,15 @@ export class ClaimRun {
    * short wait or between legs is honoured just the same, never dropped. */
 
   signalLeg(signal: PendingAbort['signal'], reason?: string): void {
-    if (!this.inflight) return;
+    if (!this.inflight && !this.preparing) return;
     // A release is the strongest signal: it overrides a regression or a course change that
     // landed first, so its message is never acknowledged away (§6.13, §9).
     if (this.pendingAbort && !(signal === 'release' && this.pendingAbort.signal !== 'release')) return;
     this.pendingAbort = { signal, reason };
     // The wire carries §6.13's closed reason set: a course change stops the leg the way a
     // release does — at its next safe point — so that is the signal it gets.
-    const child = this.inflight.child;
+    this.preparing?.abort(reason ?? signal);
+    const child = this.inflight?.child;
     const wire = signal === 'course-changed' ? 'release' : signal;
     child?.running.write(JSON.stringify({ abort: wire }));
   }
@@ -306,6 +314,7 @@ export class ClaimRun {
 
   fence(): void {
     this.lost = true;
+    this.preparing?.abort('lease-lost');
     this.killLeg();
     void this.stopSession('lease-lost');
   }
@@ -365,8 +374,49 @@ export class ClaimRun {
   /** The environment every session starts from: the runner's, with the parent markers (R-BTN-144). */
   private baseEnv(): Record<string, string> {
     const env: Record<string, string | undefined> = { ...process.env, BATON_PARENT: String(this.state.get().runner_id ?? ''), BATON_STATE: this.o.stateFile };
-    return Object.fromEntries(Object.entries(env).filter((e): e is [string, string] => typeof e[1] === 'string'));
+    return cleanNodeEnv(env);
   }
+  async hardStop(): Promise<void> {
+    const preparation = this.preparing;
+    await Promise.all([this.stopSession('hard-stop'), ...(preparation ? [hardStopPreparation(preparation)] : [])]);
+  }
+
+  private async withPreparation<T>(run: (signal: AbortSignal) => Promise<T>): Promise<T> {
+    const preparation = this.preparing = new AbortController();
+    const deadline = setTimeout(() => preparation.abort('prepare-timeout'), this.o.prepareTimeoutMs ?? PREPARE_TIMEOUT_MS);
+    try {
+      if (this.claimLost()) preparation.abort('lease-lost');
+      else if (this.pendingAbort) preparation.abort(this.pendingAbort.reason ?? this.pendingAbort.signal);
+      preparation.signal.throwIfAborted();
+      const result = await run(preparation.signal);
+      return result;
+    } finally {
+      clearTimeout(deadline);
+      this.preparing = null;
+    }
+  }
+
+  private async settlePreparation(e: unknown, claimId: number, at: string, next?: string): Promise<ClaimOutcome> {
+    if (this.claimLost() || this.host.isStopping()) return { ticket: this.ticket, end_reason: 'released:lease-lost', reached: null, handoff: null };
+    const end_reason = this.pendingAbort?.reason ?? `released:cannot-finish:${e instanceof PreparationError ? e.kind : 'transient'}`;
+    const detail = failureDetail(msg(e), secretValues(process.env, this.o.maskEnv ?? []));
+    this.o.log(`baton: ${this.ticket}'s preparation stopped (${detail ?? 'no detail'})`);
+    return this.finish(claimId, { end_reason, reached: at, detail, ...(next ? { next } : {}) }, null);
+  }
+
+  private async releaseTree(tree?: PreparedTree): Promise<void> {
+    await tree?.release().catch((e) => this.o.log(`baton: leg tree cleanup failed (${msg(e)})`));
+  }
+
+  private async prepareOverrides(trees: LegTrees, claim: ClaimAnswer, control: Record<string, string>,
+    course: CourseLoad, signal: AbortSignal): Promise<PreparedTree | undefined> {
+    const sha = control.overrides ?? claim.snapshot_sha;
+    if (sha === (control.course ?? claim.snapshot_sha)) return undefined;
+    const overrides = await trees.prepare(this.o.repository, sha, course.course, signal);
+    course.roots = [...new Set([...(course.roots ?? []), ...overrides.roots])];
+    return overrides;
+  }
+
   async stopSession(reason: string): Promise<void> {
     const s = this.session;
     this.session = null;
@@ -409,8 +459,9 @@ export class ClaimRun {
     // starts, not re-read as each line arrives: a set assigned or replaced while the
     // call streams (the slot's next leg) never masks this call's lines.
     const secrets = this.legSecrets;
+    const roots = this.inflight?.course?.roots;
     return this.executor.exec(h, ['node', LEG_PROCESS, call, script], {
-      cwd: this.checkout, stdin: `${JSON.stringify(args)}\n`, ...(timeout_s ? { timeout_s } : {}),
+      cwd: this.checkout, stdin: `${JSON.stringify(roots ? { args, roots } : args)}\n`, ...(timeout_s ? { timeout_s } : {}),
       // R-BTN-144: what a leg's stderr carries leaves masked — class 5 and class 6 by the shared
       // pattern, the leg's own class 7 set with it while its run streams, and by the drain after.
       // B-108: a drained line is leg activity either way — the beat's liveness line counts it.
@@ -656,7 +707,12 @@ export class ClaimRun {
   }
 
   async runClaim(claim: ClaimAnswer, reattached?: Resume): Promise<ClaimOutcome> {
-    const prepared = await this.prepareClaim(claim, reattached);
+    let prepared: PreparedClaim | ClaimOutcome;
+    try {
+      prepared = await this.withPreparation((signal) => this.prepareClaim(claim, signal, reattached));
+    } catch (e) {
+      return this.settlePreparation(e, claim.claim_id, claim.station, claim.legs?.[0]);
+    }
     if ('end_reason' in prepared) return prepared;
     try {
       return await this.legLoop(claim, prepared, reattached);
@@ -665,14 +721,19 @@ export class ClaimRun {
     }
   }
 
-  private async prepareClaim(claim: ClaimAnswer, reattached?: Resume): Promise<PreparedClaim | ClaimOutcome> {
+  private async prepareClaim(claim: ClaimAnswer, signal: AbortSignal, reattached?: Resume): Promise<PreparedClaim | ClaimOutcome> {
     const claimId = claim.claim_id;
     const ticket = claim.ticket_id;
     let course: CourseLoad | null = null;
+    let tree: PreparedTree | undefined;
+    let overrides: PreparedTree | undefined;
     let signedControl: Record<string, string> = {};
     try {
       // R-BTN-34: the snapshot must be in the home checkout — one fetch, else stale-board.
-      if (!ensureSha(this.o.home, claim.snapshot_sha, () => this.o.fetch?.(this.o.home))) {
+      if (this.o.checkSnapshot && !await this.o.checkSnapshot(this.o.repository, claim.snapshot_sha, claim.default_branch, signal)) {
+        return await this.finish(claimId, { end_reason: 'released:off-branch', reached: claim.station, detail: claim.snapshot_sha, ...(claim.legs?.[0] ? { next: claim.legs[0] } : {}) }, null);
+      }
+      if (!this.o.checkSnapshot && !ensureSha(this.o.home, claim.snapshot_sha, () => this.o.fetch?.(this.o.home))) {
         return await this.finish(claimId, { end_reason: 'released:stale-board', reached: claim.station, ...(claim.legs?.[0] ? { next: claim.legs[0] } : {}) }, null);
       }
       // B-127 (R-BTN-133's verified tree, extended): where the repository requires owner-signed
@@ -703,35 +764,39 @@ export class ClaimRun {
       // unpenalised): an unsigned course change keeps the last signed course in force, and a
       // course no owner signed does not run.
       const courseSha = typeof signedControl.course === 'string' && signedControl.course !== '' ? signedControl.course : claim.snapshot_sha as string;
-      course = loadCourse(this.o.home, courseSha, this.claimCourse(claim));
+      const courseId = this.claimCourse(claim);
+      const trees = this.o.legTrees;
+      course = await loadClaimCourse(this.o.home, courseSha, courseId, signal, trees ? async () => {
+        tree = await trees.prepare(this.o.repository, courseSha, courseId, signal);
+        return tree;
+      } : undefined);
+      if (tree && trees) overrides = await this.prepareOverrides(trees, claim, signedControl, course, signal);
       // B-228: the legs start from the snapshot's code — the home fast-forwarded to it when it
       // can be; otherwise it runs as it stands, and the log says why. A reattached leg's tree is
       // its running session's, and a claim in a clone of its own is put there below (B-188).
       if (!reattached && this.checkout === this.o.home) {
         let stays: string | null;
         try {
-          stays = advanceHome(this.o.home, claim.snapshot_sha, typeof claim.default_branch === 'string' && claim.default_branch !== '' ? claim.default_branch : null);
+          stays = await advanceClaimHome(this.o.home, claim.snapshot_sha, claim.default_branch || null, signal);
         } catch (e) {
+          signal.throwIfAborted();
           stays = `the fast-forward failed (${msg(e)})`;
         }
         if (stays) this.o.log(`baton: the home stays at its own commit for ${ticket}, not the snapshot ${String(claim.snapshot_sha).slice(0, 10)}: ${stays}`);
         else this.host.homeAdvanced?.();
       }
+      if (!reattached && this.checkout !== this.o.home) {
+        await prepareClone(this.o.home, this.checkout, claim.snapshot_sha, claim.default_branch || null, signal);
+        if (this.o.verbose) this.o.log(`baton: ${ticket} works in its own clone ${this.checkout} (R-BTN-72)`);
+      }
+      signal.throwIfAborted();
     } catch (e) {
+      if (course) dropCourse(course.scratch);
+      await this.releaseTree(tree);
+      await this.releaseTree(overrides);
+      if (course || this.o.legTrees || signal.aborted) throw e;
       this.o.log(`baton: the claim's course would not load (${msg(e)})`);
       return await this.finish(claimId, { end_reason: 'released:stale-board', reached: claim.station, ...(claim.legs?.[0] ? { next: claim.legs[0] } : {}) }, null);
-    }
-    // R-BTN-72 (B-188): a claim beside others works in a clone of its own — its own git dir, put
-    // at the snapshot — so concurrent legs never write one tree, and its audit reads its own refs.
-    if (!reattached && this.checkout !== this.o.home) {
-      try {
-        await prepareClone(this.o.home, this.checkout, String(claim.snapshot_sha), typeof claim.default_branch === 'string' && claim.default_branch !== '' ? claim.default_branch : null);
-      } catch (e) {
-        this.o.log(`baton: ${ticket}'s checkout ${this.checkout} could not be prepared (${msg(e)})`);
-        dropCourse(course.scratch);
-        return await this.finish(claimId, { end_reason: 'released:cannot-finish:transient', reached: claim.station, ...(claim.legs?.[0] ? { next: claim.legs[0] } : {}) }, null);
-      }
-      if (this.o.verbose) this.o.log(`baton: ${ticket} works in its own clone ${this.checkout} (R-BTN-72)`);
     }
     const scratch = claimScratch();
     // B-183 (§4.5, R-BTN-5/R-BTN-34): re-verify the ticket by its version before any leg runs.
@@ -745,6 +810,8 @@ export class ClaimRun {
     if (versionCheck.why != null) {
       this.o.log(`baton: ${ticket}'s ticket moved under the claim — ${versionCheck.why}`);
       dropCourse(course.scratch);
+      await this.releaseTree(tree);
+      await this.releaseTree(overrides);
       rmSync(scratch, { recursive: true, force: true });
       return await this.finish(claimId, { end_reason: 'released:stale-board', reached: claim.station, ...(claim.legs?.[0] ? { next: claim.legs[0] } : {}) }, null);
     }
@@ -768,7 +835,7 @@ export class ClaimRun {
     this.auditScope = Array.isArray(claim.scope) && claim.scope.every((s: unknown) => typeof s === 'string')
       ? claim.scope as string[] : null;
     this.auditWindow = this.auditScope == null ? null : this.readRefs();
-    return { course, scratch, signedControl, ticketFile, read: versionCheck.read };
+    return { course, tree, overrides, scratch, signedControl, ticketFile, read: versionCheck.read };
   }
 
   private async legLoop(claim: ClaimAnswer, prepared: PreparedClaim, reattached?: Resume): Promise<ClaimOutcome> {
@@ -824,11 +891,31 @@ export class ClaimRun {
       gitPath, handoffUrl, resume, advice, legName, at, nextLegs, run, runId, resuming: reattached,
       session: null, ranScript: null, ranCtx: null,
     };
+    let first = true;
     for (;;) {
       if (!state.resuming) {
         const stopped = await this.beforeLeg(claimId, course, state);
         if (stopped) return stopped;
       }
+      if (!first && prepared.tree && this.o.legTrees) {
+        const trees = this.o.legTrees;
+        try {
+          const checked = await this.withPreparation(async (signal) => {
+            if (!await trees.onDefault(this.o.repository, claim.snapshot_sha, claim.default_branch, signal)) return false;
+            await this.releaseTree(prepared.tree);
+            await this.releaseTree(prepared.overrides);
+            prepared.tree = await trees.prepare(this.o.repository, prepared.signedControl.course ?? claim.snapshot_sha, course.course, signal);
+            Object.assign(course, prepared.tree);
+            prepared.overrides = await this.prepareOverrides(trees, claim, prepared.signedControl, course, signal);
+            signal.throwIfAborted();
+            return true;
+          });
+          if (!checked) return await this.finish(claimId, { end_reason: 'released:off-branch', reached: state.at, next: state.legName, detail: claim.snapshot_sha }, null);
+        } catch (e) {
+          return this.settlePreparation(e, claimId, state.at, state.legName);
+        }
+      }
+      first = false;
       const execution = await this.executeLeg(claim, prepared, state);
       const settled = await this.settleLeg(claimId, ticket, prepared, state, execution);
       if (settled) return settled;
@@ -902,7 +989,9 @@ export class ClaimRun {
       ticket: { id: ticket, path: claim.path ?? null, home: this.o.repository, ...(typeof claim.version === 'string' && claim.version !== '' ? { version: claim.version } : {}), ...(ticketFile != null && (!claim.path || course.graph.legs.get(legName)?.readsOnly) ? { file: ticketFile } : {}) },
       claim: { id: claimId, nonce: claim.nonce, station: at },
       leg: legName, run, ...(runId ? { run_id: runId } : {}),
-      snapshot: { sha: claim.snapshot_sha, path: gitPath, next: nextLegs },
+      snapshot: { sha: claim.snapshot_sha, path: gitPath, next: nextLegs, ...(course.tree ? { tree: course.tree } : {}) },
+      ...(course.dir ? { course: { dir: course.dir } } : {}),
+      ...(prepared.overrides ? { overrides: { dir: prepared.overrides.dir } } : {}),
       // B-127: the owner-signed commits a verified board post named — where the repository
       // requires signed control, the legs read `agent_command` and the overrides at these
       // (and the course itself — the graph, these scripts — loaded at the `course` one),
@@ -1117,6 +1206,8 @@ export class ClaimRun {
     this.inflight = null;
     this.pendingAbort = null;
     dropCourse(prepared.course.scratch);
+    await this.releaseTree(prepared.tree);
+    await this.releaseTree(prepared.overrides);
     rmSync(prepared.scratch, { recursive: true, force: true });
   }
 
@@ -1246,7 +1337,7 @@ export class ClaimRun {
     // R-BTN-107 (B-184): the leg runs in a session of the executor the host chose, keyed by its
     // run id's first session; the previous leg's session goes first (its close and hand-off ran).
     await this.stopSession('next-leg');
-    const env = Object.fromEntries(Object.entries(childEnv).filter((e): e is [string, string] => typeof e[1] === 'string'));
+    const env = cleanNodeEnv(childEnv);
     // R-BTN-144 class 7 (B-170): the leg's masked set is computed once, here, from the environment
     // the leg is given — every variable whose name says a secret, and every name `runner.json`
     // `mask_env` lists. The environment spreads the runner's own, so the host's values are in it;
@@ -1269,7 +1360,7 @@ export class ClaimRun {
     try {
       handle = await this.startSession('leg', {
         session_id: sessionId, ...(typeof ctx.run_id === 'string' ? { run_id: ctx.run_id } : {}), ticket: String((ctx.ticket as { id?: string })?.id ?? ''), leg,
-        snapshot_sha: String((ctx.snapshot as { sha?: string })?.sha ?? ''), paths: [scratch, course.scratch, ...(ctx.reads_only === true && this.o.home !== this.checkout ? [this.o.home] : [])], env,
+        snapshot_sha: String((ctx.snapshot as { sha?: string })?.sha ?? ''), paths: [scratch, course.scratch, ...(course.roots ?? []), ...(ctx.reads_only === true && this.o.home !== this.checkout ? [this.o.home] : [])], env,
         channel: channel ? channel.path : null,
         // R-BTN-107: the brief carries the leg's autonomy as a hint — the raise check below is
         // what enforces it, whatever the executor does with the hint.

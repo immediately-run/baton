@@ -11,7 +11,7 @@
 import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { createMasker, maskSecrets } from '../shared/mask.mjs';
+import { createMasker, KEY_BEGIN, maskSecrets } from '../shared/mask.mjs';
 
 /** R-BTN-144 class 7: the name endings the environment decides, compared case-sensitively. */
 export const SECRET_NAME_SUFFIXES = ['_KEY', '_TOKEN', '_SECRET', '_PASSWORD', '_PAT'];
@@ -106,7 +106,7 @@ const maskLiterals = (text: string, literals: readonly string[]): string => {
 
 /** `text` with every class-5, class-6 and class-7 occurrence replaced by `***`. */
 export function maskLegOutput(text: string, secrets: readonly string[]): string {
-  return maskSecrets(maskLiterals(text, secrets));
+  return maskLiterals(maskSecrets(text), secrets);
 }
 
 /** The end `detail` a failed leg's claim carries (§9.4, B-256): the last line of the leg's error —
@@ -212,21 +212,10 @@ function createBoundaryMatcher(literal: string) {
   };
 }
 
-function completeLiterals(text: string, literals: readonly string[]) {
-  const matches: { start: number; end: number }[] = [];
-  for (const literal of literals) {
-    for (let start = text.indexOf(literal); start !== -1; start = text.indexOf(literal, start + 1)) {
-      matches.push({ start, end: start + literal.length });
-    }
-  }
-  return matches.sort((a, b) => a.start - b.start || b.end - a.end);
-}
-
 /** R-BTN-144 across a stream, which a line-at-a-time sink cannot do. Class 6's key block is
  *  `src/shared/mask.mjs`'s stream (`createMasker`: a block's lines are held until its `END` line
- *  or `KEY_HOLD` bytes, and classes 5 and 6 are masked on every line as it leaves) — each line
- *  is masked of its class-7 literals and handed to that stream, never the other way round: a
- *  block's body lines must reach the holder as they came, or the holder never sees the block.
+ *  or `KEY_HOLD` bytes, and classes 5 and 6 are masked on every line as it leaves). Banners and
+ *  body lines reach the block holder intact, before literal redaction can alter a banner.
  *  Class 7 is masked here, as each line is handed on: the tail `holdLiteralTail` says a literal
  *  still extends is held back, unlogged, until the next line completes the literal (masked as
  *  one) or shows it will never complete — and a hold that never completes leaves as `***`,
@@ -305,8 +294,19 @@ export function createLegMasker(secrets: readonly string[]) {
   };
   return {
     push(line: string, frame: '\n' | '\r\n' = '\n'): string {
+      if (block.holdingKey) return block.push(line);
       said.length = 0;
-      take(line);
+      const key = line.search(KEY_BEGIN);
+      if (key < 0) take(line);
+      else {
+        take(line.slice(0, key));
+        if (gone < held.length) said.push(block.push('***'));
+        held = '';
+        gone = 0;
+        offset = 0;
+        for (const matcher of matchers) matcher.reset();
+        said.push(block.push(line.slice(key)));
+      }
       boundary = frame;
       return said.filter(Boolean).join('\n');
     },
