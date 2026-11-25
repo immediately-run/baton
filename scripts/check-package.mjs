@@ -13,7 +13,7 @@ import { join, resolve } from 'node:path';
 
 const ROOT = resolve(import.meta.dirname, '..');
 const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'));
-const ALLOWED = [/^package\.json$/, /^README\.md$/, /^LICENSE$/, /^NOTICE$/, /^dist\/baton\.mjs$/, /^dist\/legProcess\.mjs$/, /^dist\/build\.json$/, /^dist\/defaults\/[\w./-]+\.(mjs|md)$/, /^dist\/defaults\/leg-wrapper\.example$/, /^scripts\/cloud-runner\.sh$/, /^skills\/baton-cloud-runner\/SKILL\.md$/];
+const ALLOWED = [/^package\.json$/, /^README\.md$/, /^LICENSE$/, /^NOTICE$/, /^dist\/baton\.mjs$/, /^dist\/legProcess\.mjs$/, /^dist\/build\.json$/, /^dist\/defaults\/[\w./-]+\.(mjs|md)$/, /^dist\/defaults\/sources\/standard-[\w-]+\/(entry|course)\.json$/, /^dist\/defaults\/leg-wrapper\.example$/, /^scripts\/cloud-runner\.sh$/, /^skills\/baton-cloud-runner\/SKILL\.md$/];
 const REQUIRED = ['package.json', 'LICENSE', 'NOTICE', 'dist/baton.mjs', 'dist/legProcess.mjs', 'dist/build.json', 'dist/defaults/tickets.mjs', 'dist/defaults/stubs/create-pr/implement.mjs', 'dist/defaults/courses/create-pr/implement.md', 'dist/defaults/leg-wrapper.example', 'scripts/cloud-runner.sh', 'skills/baton-cloud-runner/SKILL.md'];
 
 const fail = (msg) => {
@@ -59,7 +59,8 @@ try {
   if (/is not a function/.test(homed.stderr)) fail(`the installed \`baton\` misses a prebuilt export:\n${homed.stdout}${homed.stderr}`);
   // `baton repo init` (G1 of the 2026-10-19 gap run): the installed package scaffolds create-pr
   // with no checkout and no esbuild, naming the commit it was built from as the course's source.
-  const build = JSON.parse(readFileSync(join(app, 'node_modules', '@immediately-run', 'baton', 'dist', 'build.json'), 'utf8'));
+  const buildFile = join(app, 'node_modules', '@immediately-run', 'baton', 'dist', 'build.json');
+  const build = JSON.parse(readFileSync(buildFile, 'utf8'));
   if (build.dirty && process.env.CI) fail(`the package was built from a modified tree (${build.commit}); CI builds a clean one`);
   const repo = join(dir, 'repo');
   git(null, ['init', '-q', '-b', 'main', repo]);
@@ -81,6 +82,28 @@ try {
     const show = spawnSync(join(app, 'node_modules', '.bin', 'baton'), ['course', 'show', 'create-pr'], { cwd: repo, env, encoding: 'utf8' });
     if (show.status !== 0 || !['course.json', 'legs/implement.mjs', 'legs/implement.md'].every((name) => show.stdout.includes(`--- ${name} ---`))) {
       fail(`the installed CLI did not show the bundled course: ${show.error ?? show.stderr}\n${show.stdout?.slice(0, 400)}`);
+    }
+
+    // Use the committed tree, with no parents so the fixture also works in CI's shallow clone.
+    const upstream = join(dir, 'upstream.git');
+    const gitEnv = { GIT_ALTERNATE_OBJECT_DIRECTORIES: git(ROOT, ['rev-parse', '--path-format=absolute', '--git-path', 'objects']).toString().trim(),
+      GIT_AUTHOR_NAME: 'Package check', GIT_AUTHOR_EMAIL: 'package@example.test',
+      GIT_COMMITTER_NAME: 'Package check', GIT_COMMITTER_EMAIL: 'package@example.test' };
+    git(null, ['init', '--bare', '-q', '-b', 'main', upstream]);
+    const pin = execFileSync('git', ['-C', upstream, 'commit-tree', `${build.commit}^{tree}`, '-m', 'source fixture'], { env: { ...env, ...gitEnv }, encoding: 'utf8' }).trim();
+    execFileSync('git', ['-C', upstream, 'update-ref', 'refs/heads/main', pin], { env: { ...env, ...gitEnv } });
+    const baton = (args, extraEnv = {}) => execFileSync(join(app, 'node_modules', '.bin', 'baton'), args, { cwd: repo, env: { ...env, ...extraEnv }, encoding: 'utf8' });
+    // Only the producer's build identity changes; the fixture tree is byte-identical.
+    writeFileSync(buildFile, JSON.stringify({ ...build, commit: pin }));
+    baton(['repo', 'init', '--course', 'review-pr']);
+    execFileSync('git', ['-C', repo, 'add', '.baton']);
+    execFileSync('git', ['-C', repo, '-c', 'user.name=Package check', '-c', 'user.email=package@example.test', 'commit', '-qm', 'review-pr entry']);
+    const bundled = baton(['course', 'show', 'review-pr']);
+    writeFileSync(buildFile, JSON.stringify(build));
+    const fetched = baton(['course', 'show', 'review-pr'], { ...gitEnv, GIT_CONFIG_COUNT: '1',
+      GIT_CONFIG_KEY_0: `url.${upstream}.insteadOf`, GIT_CONFIG_VALUE_0: `https://github.com/${build.repository.toLowerCase()}.git` });
+    if (fetched !== bundled || !['entry.json', 'course.json', 'sync.mjs', 'legs/review.mjs', 'legs/review.md'].every((name) => fetched.includes(`--- ${name} ---`))) {
+      fail('the installed CLI did not read the same review-pr course from a different build pin');
     }
   }
 

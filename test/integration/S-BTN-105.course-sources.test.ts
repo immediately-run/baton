@@ -1,13 +1,13 @@
 // S-BTN-105 / S-BTN-110 (B-139): sourced scripts and graph, home overrides, no home copies.
-import { describe, it, expect, beforeEach, afterEach, inject } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, inject, vi } from 'vitest';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { build } from 'esbuild';
-import { Miniflare } from 'miniflare';
-import { LOCAL_LOADERS, dashboardScriptAsText } from '../../scripts/bundle.mjs';
+import { Miniflare, convertV4MiniflareOptions } from 'miniflare';
+import { RECOMMENDED_CLIENT } from '../../src/core/http';
 import { call as hostCall } from '#host';
 import { initMain, parseSyncArgs, showCourseMain, syncMain } from '../../src/defaults/cli';
 import { dropCourse, loadCourse, sourceContext } from '../../src/runner/home';
@@ -15,9 +15,17 @@ import { BatonApi } from '../../src/runner/api';
 import { Runner } from '../../src/runner/runner';
 import { cutover, ORIGIN, register, rows, setClock, syncToken, TOKENS } from '../helpers';
 
+const headerPairs = (headers: Pick<Headers, 'forEach'>): [string, string][] => {
+  const pairs: [string, string][] = [];
+  headers.forEach((value, name) => pairs.push([name, value]));
+  return pairs;
+};
+
 const T0 = Date.parse('2026-10-18T12:00:00Z');
 const ROOT = resolve(import.meta.dirname, '../..');
 const SHA = execFileSync('git', ['-C', ROOT, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+const LEGACY = '17ae8cce1411b71c413a123e54e4030b967a6e13';
+const hasLegacy = spawnSync('git', ['-C', ROOT, 'cat-file', '-e', `${LEGACY}^{commit}`]).status === 0;
 
 let dir: string;
 let minutes = 0;
@@ -139,6 +147,70 @@ export async function run(ctx, standard) {
     }
   });
 
+  it.each([
+    ['review.run.ts', 'not an override'],
+    ['review.run.cjs', 'multiple run overrides for legs/review.run'],
+  ])('S-BTN-110 refuses %s before posting the board', async (name, error) => {
+    writeFileSync(join(dir, '.baton/courses/create-pr/legs', name), 'throw new Error("invalid override must not run");');
+    commit();
+    await expect(sync()).rejects.toThrow(error);
+    expect(await rows('SELECT ticket_id FROM ticket_stations')).toEqual([]);
+  });
+
+  // Use the actual historical commit when present; CI's shallow checkout may not have it.
+  it.skipIf(!hasLegacy)('S-BTN-110 adapts the verified legacy pin for an entry-only home', async () => {
+    const upstream = join(dir, '.git', 'fixture-upstream');
+    git('init', '--bare', '-q', '-b', 'main', upstream);
+    execFileSync('git', ['-C', ROOT, 'push', '-q', upstream, `${LEGACY}:refs/heads/main`]);
+    vi.stubEnv('GIT_CONFIG_COUNT', '1');
+    vi.stubEnv('GIT_CONFIG_KEY_0', `url.${upstream}.insteadOf`);
+    vi.stubEnv('GIT_CONFIG_VALUE_0', 'https://github.com/immediately-run/baton.git');
+    try {
+      rmSync(join(dir, '.baton/courses/create-pr'), { recursive: true });
+      const agent = join(dir, 'legacy-agent.sh');
+      // Stop before querying the forge, but only after capturing the actual agent input.
+      writeFileSync(agent, '#!/bin/sh\ncat "$BATON_INSTRUCTIONS" > instruction.log\nexit 7\n', { mode: 0o755 });
+      const settings = JSON.parse(readFileSync(settingsFile(), 'utf8'));
+      settings.courses[0].source = `github/immediately-run/baton/${LEGACY}/create-pr`;
+      settings.agent_command = agent;
+      writeFileSync(settingsFile(), JSON.stringify(settings));
+      const graph = JSON.parse(execFileSync('git', ['-C', ROOT, 'show', `${LEGACY}:.baton/courses/create-pr/course.json`], { encoding: 'utf8' }));
+      writeFileSync(join(dir, 'package.json'), JSON.stringify({ scripts: { [graph.test_script]: 'true' } }));
+      const sha = commit();
+      const remote = join(dir, '.git', 'fixture-origin');
+      git('init', '--bare', '-q', '-b', 'main', remote);
+      git('remote', 'add', 'origin', remote);
+      git('push', '-q', 'origin', 'HEAD:refs/heads/claude/T-1-x');
+      await sync();
+      const loaded = await loadCourse(dir, sha, 'create-pr');
+      try {
+        const run = (leg: string, at: string) => {
+          const ctx = { ...sourceContext(loaded), leg, checkout: dir, snapshot: { sha: at }, claim: { station: 'pr-open' }, ticket: { id: 'docs:T-1', path: 'tickets/t1.md', home: 'docs' } };
+          const result = spawnSync(process.execPath, [join(ROOT, 'src/runner/legProcess.mjs'), 'run', loaded.scripts.get(leg)!], {
+            input: `${JSON.stringify([ctx])}\n`, encoding: 'utf8', timeout: 30_000,
+          });
+          expect(result.error, result.stderr).toBeUndefined();
+          return JSON.parse(result.stdout.trim().split('\n').at(-1)!);
+        };
+        expect(run('implement', sha)).toMatchObject({ ok: false, error: expect.stringContaining('exited with code 7') });
+        expect(readFileSync(join(dir, 'instruction.log'))).toEqual(execFileSync('git', ['-C', ROOT, 'show', `${LEGACY}:.baton/courses/create-pr/legs/implement.md`]));
+        expect(run('run-tests', sha)).toMatchObject({ ok: true, result: { tests: 'green', script: graph.test_script } });
+
+        const legs = join(dir, '.baton/courses/create-pr/legs');
+        mkdirSync(legs, { recursive: true });
+        writeFileSync(join(legs, 'implement.md'), 'Snapshot instructions\n');
+        writeFileSync(join(legs, 'implement.run.cjs'), 'exports.run = (ctx, standard) => standard(ctx).catch(e => ({ error: e.message, override: true }));');
+        const overridden = commit();
+        expect(run('implement', overridden)).toMatchObject({ ok: true, result: { error: expect.stringContaining('exited with code 7'), override: true } });
+        expect(readFileSync(join(dir, 'instruction.log'), 'utf8')).toBe('Snapshot instructions\n');
+      } finally {
+        dropCourse(loaded.scratch);
+      }
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  }, 60_000);
+
   it('S-BTN-110 scaffolds only explicitly requested files and prunes identical copies', async () => {
     const graphDir = join(dir, '.baton', 'courses', 'create-pr');
     expect(readdirSync(join(graphDir, 'legs'))).toEqual(['review.run.mjs']);
@@ -151,7 +223,7 @@ export async function run(ctx, standard) {
     const log: string[] = [];
     await initMain(['--prune'], { root: dir, log: (line) => log.push(line) });
     expect(existsSync(join(graphDir, 'course.json'))).toBe(false);
-    expect(readdirSync(join(graphDir, 'legs')).filter((x) => x !== 'review-defaults.json')).toEqual(['review.md']);
+    expect(readdirSync(join(graphDir, 'legs'))).toEqual(['review.md']);
     expect(log.join('\n')).toContain('review.md (differs from source');
     rmSync(graphDir, { recursive: true });
     await initMain([], { root: dir, log: () => {} });
@@ -162,6 +234,74 @@ export async function run(ctx, standard) {
     expect(await showCourseMain(['create-pr', 'implement'], dir, (line) => shown.push(line))).toBe(0);
     expect(shown.join('\n')).toContain('--- legs/implement.md ---');
   });
+
+  it.each(['local', 'cloudflare'])('S-BTN-110 runs an entry-only standard claim on %s', async (host) => {
+    const remote = join(dir, '.git', 'fixture-origin');
+    const agent = join(dir, 'decision-agent.sh');
+    writeFileSync(agent, '#!/bin/sh\ncat "$BATON_INSTRUCTIONS" > instruction.log\n', { mode: 0o755 });
+    await initMain(['--course', 'decision', '--agent-command', agent], { root: dir, log: () => {} });
+    const settings = JSON.parse(readFileSync(settingsFile(), 'utf8'));
+    settings.default_course = 'decision';
+    settings.courses = settings.courses.filter((c: { id: string }) => c.id === 'decision');
+    writeFileSync(settingsFile(), JSON.stringify(settings));
+    expect(existsSync(join(dir, '.baton/courses/decision'))).toBe(false);
+    writeFileSync(join(dir, 'tickets/t1.md'), '---\nid: T-1\ntitle: Build it\n---\n\n## prepare\n\nFixture decision.\n');
+    git('init', '--bare', '-q', '-b', 'main', remote);
+    git('remote', 'add', 'origin', remote);
+    const sha = commit();
+    git('push', '-q', 'origin', 'main');
+    git('update-ref', 'refs/baton/docs/default', sha);
+    let mf: Miniflare | undefined;
+    let transport = hostCall;
+    try {
+      if (host === 'cloudflare') {
+        const { outputFiles } = await build({
+          entryPoints: [join(ROOT, 'src/cloudflare/worker.ts')], bundle: true, write: false,
+          format: 'esm', external: ['cloudflare:workers'], loader: { '.sql': 'text', '.html': 'text', '.css': 'text' },
+          plugins: [{ name: 'dashboard-text', setup(b) {
+            b.onLoad({ filter: /dashboard\/dist\/app\.js$/ }, ({ path }) => ({ contents: readFileSync(path, 'utf8'), loader: 'text' }));
+          } }],
+        });
+        const config = inject('localConfig');
+        const repos = JSON.parse(config.BATON_REPOSITORIES ?? '[]');
+        repos.find((r: { id: string }) => r.id === 'docs').cut_over = true;
+        mf = new Miniflare(convertV4MiniflareOptions({
+          modules: true, script: outputFiles[0].text, compatibilityDate: '2026-09-01',
+          bindings: { ...config, BATON_REPOSITORIES: JSON.stringify(repos) },
+          durableObjects: { BATON: { className: 'Baton', useSQLite: true } },
+        }));
+        const worker = mf;
+        transport = async (req) => {
+          const headers = new Headers(req.headers);
+          if (!headers.has('Baton-Client')) headers.set('Baton-Client', `baton/${RECOMMENDED_CLIENT}`);
+          const response = await worker.dispatchFetch(req.url, {
+            method: req.method, headers: headerPairs(headers), ...(req.body ? { body: await req.text() } : {}),
+          });
+          return new Response(await response.arrayBuffer(), { status: response.status, headers: headerPairs(response.headers) });
+        };
+      } else {
+        await cutover();
+      }
+      const token = await syncToken();
+      const args = parseSyncArgs(['--root', dir, '--url', ORIGIN, '--facts', facts], {});
+      expect(await syncMain({ ...args, auth: () => ({ Authorization: `Bearer ${token}` }), transport, log: () => {} })).toBe(0);
+      const logs: string[] = [];
+      const runner = new Runner({
+        api: new BatonApi({ url: ORIGIN, transport, auth: (_m, _u, _b, secret) => ({ Authorization: `Bearer ${TOKENS['vm-a']}`, ...(secret ? { 'X-Runner-Secret': secret } : {}) }) }),
+        home: dir, repository: 'docs', hostname: 'vm-a', harness: 'opencode', session: 's110-entry',
+        courses: [{ course: 'decision', version: 1 }], stateFile: join(dir, '.git', 'runner-test.json'), beatEvery: 60_000, log: (line) => logs.push(line),
+      });
+      try {
+        const outcome = await runner.runOnce();
+        expect(outcome, logs.join('\n')).toMatchObject({ reached: 'asked' });
+        expect(readFileSync(join(dir, 'instruction.log'), 'utf8')).toBe(readFileSync(join(ROOT, 'src/defaults/courses/decision/prepare.md'), 'utf8'));
+      } finally {
+        runner.stop();
+      }
+    } finally {
+      await mf?.dispose();
+    }
+  }, 60_000);
 
   it('S-BTN-110 reads a fetched pin and rechecks ancestry even when its objects are cached', async () => {
     const upstream = mkdtempSync(join(tmpdir(), 'baton-s105-source-'));

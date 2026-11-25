@@ -1072,7 +1072,7 @@ export async function main(argv) {
   }
   if (argv[0] === 'test-course') return testCourse(argv.slice(1));
   if (argv[0] === 'course' && argv[1] === 'show' && !argv.slice(2).some((a) => a.startsWith('-'))) {
-    const { default: { showCourseMain } } = await import('../scripts/baton-cli.mjs');
+    const { showCourseMain } = (await import('../scripts/baton-cli.mjs')).default;
     return showCourseMain(argv.slice(2));
   }
   if (argv[0] === 'course' && argv[1] === 'test') return testCourse(argv.slice(2));

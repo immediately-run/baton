@@ -30,8 +30,9 @@ Designs for this section that are not built are on the proposal page
     source's default branch and verifies that the pin is a commit on its ancestry, including
     when the reader already has the commit. It never fetches by commit id.
   - **A sourced course keeps its graph.** The sync reads the source's files, with the home's
-    entry fields taking precedence over defaults in the source's `entry.json`. The home changes
-    a sourced course only through its leg instructions and leg overrides (R-BTN-131). Any
+    entry fields taking precedence over defaults in `.baton/courses/<course>/entry.json` in the
+    source repository. The home changes a sourced course only through its leg instructions and
+    leg overrides (R-BTN-131). Any
     other file in the home's sourced course directory fails the sync, naming the path.
   - **Every reader goes through the snapshot.** The sync reads `.baton/` at the commit it posts
     (R-BTN-105), the runner at the claim's `snapshot_sha` (see R-BTN-143), and
