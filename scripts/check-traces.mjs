@@ -8,7 +8,7 @@
 // accept it. A rejected trace is a step the implementation took that the checked model forbids.
 //
 // What the model abstracts (model/README.md, "Not modelled": other repositories, other
-// courses, course changes, held histories, tiers and grants) the recorder already leaves out
+// courses, course changes, held histories and grants) the recorder already leaves out
 // of the projection. A step the model has no action for — a claim the harness wrote itself, a
 // course file that is not the model's, a required bar changed under a run — ends the part of
 // the trace the model can judge; the checked prefix and the reason are printed for every trace,
@@ -43,6 +43,7 @@ const withoutDeadlines = ({ legs, ...course }) => ({ ...course, legs: Object.fro
 const COURSE_SHAPE = JSON.stringify(withoutDeadlines(COURSE));
 
 // ── ITF back to JSON ─────────────────────────────────────────────────────────────────────
+/** @param {unknown} v @returns {unknown} */
 export function fromItf(v) {
   if (Array.isArray(v)) return v.map(fromItf);
   if (v && typeof v === 'object') {
@@ -54,6 +55,9 @@ export function fromItf(v) {
   return v;
 }
 
+/** @typedef {{kind: import('../test/integration/trace').Step['kind'], now: number, method?: string, path?: string, status?: number, body?: unknown, response?: unknown, state: import('../test/integration/trace').Projection}} TraceStep */
+/** @typedef {{scenario: string, test: string, steps: TraceStep[]}} Trace */
+/** @param {string} file @returns {Trace} */
 export function readTrace(file) {
   const t = JSON.parse(readFileSync(file, 'utf8'));
   return { scenario: t['#meta']?.source ?? basename(dirname(file)), test: t['#meta']?.description ?? basename(file), steps: t.states.map((s) => ({ ...s['#meta'], state: fromItf(s.baton) })) };
@@ -66,6 +70,7 @@ const qSet = (xs) => (xs.length ? `Set(${[...new Set(xs)].sort().map(q).join(', 
 const sameSet = (a, b) => JSON.stringify([...new Set(a)].sort()) === JSON.stringify([...new Set(b)].sort());
 
 /** The model's `kind` for an end reason (§6.5). */
+/** @param {string | null | undefined} endReason */
 export function kindOf(endReason) {
   if (endReason == null) return '';
   if (endReason === 'done') return 'done';
@@ -111,6 +116,10 @@ function requiredLegs(required) {
  * expect: [[name, expr]] }], end: { index, reason } | null }`: `end` is the first step the model
  * has no action for; the steps before it are the trace's checked part.
  */
+/** @typedef {{index: number, label: string, actions: string[], expect: string[][]}} ModelStep */
+/** @typedef {{index: number, reason: string}} Stop */
+/** @typedef {{consts: Record<string, string | number>, steps: ModelStep[], end: Stop | null, reject?: Stop & {label: string}, total: number}} Translation */
+/** @param {{steps: readonly TraceStep[]}} trace @returns {Translation} */
 export function translate(trace) {
   const states = trace.steps.map((s) => s.state);
   const empty = { counter: 0, lastAccepted: 0, outstanding: false, tickets: {}, claims: {}, held: {}, ownerBars: [], runners: {}, required: [], courseFile: null };
@@ -176,6 +185,8 @@ export function translate(trace) {
   // ids the model hands out.
   const env = {
     git: Object.fromEntries(T.map((t) => [t, []])),
+    deps: Object.fromEntries(T.map((t) => [t, []])),
+    checkedDeps: Object.fromEntries(T.map((t) => [t, new Map()])),
     withdrawn: Object.fromEntries(T.map((t) => [t, false])),
     posted: Object.fromEntries(T.map((t) => [t, []])),
     gone: Object.fromEntries(T.map((t) => [t, false])),
@@ -187,7 +198,6 @@ export function translate(trace) {
     slots: { 1: { phase: 'idle', obs: 0, voided: false, at: 0 }, 2: { phase: 'idle', obs: 0, voided: false, at: 0 } },
     ids: {},
     nextId: 1,
-    claimTier: {}, // each claim's ticket tier when it was made (R-BTN-35's re-tier)
   };
   const out = [];
   let prev = empty;
@@ -224,15 +234,15 @@ function translateStep(step, P, env, k) {
   };
   for (const [id, d] of Object.entries(Q.claims)) {
     const c = P.claims[id];
-    // R-BTN-35's other "taken away": a re-tier since the claim, or docs' interim status at one
+    // R-BTN-35's other "taken away": docs' interim status at one
     // that ends the item (claims.ts GIT_ENDS) — only when the post shows one (round 1, 1-A-3).
     // The status may have been posted earlier, by a reading not numbered after the claim.
     if (c?.status === 'active' && d.endReason === 'released:stale-board' && Q.tickets[d.ticket]?.present) {
       const after = Q.tickets[d.ticket];
-      if (GIT_ENDS.includes(after.status) || (id in env.claimTier && env.claimTier[id] !== after.tier)) {
-        return { end: `claim ${id} released stale on its ticket's re-tier or interim status (R-BTN-35; tiers are not modelled)` };
+      if (GIT_ENDS.includes(after.status)) {
+        return { end: `claim ${id} released stale on its ticket's interim status (R-BTN-35; interim statuses are not modelled)` };
       }
-      return { reject: `claim ${id} released stale with its ticket still posted, neither withdrawn nor re-tiered` };
+      return { reject: `claim ${id} released stale with its ticket still posted with no ending status` };
     }
     // docs' interim confirmation by the post's own list, naming this claim (round 1, 1-A-3)
     if (c && !c.confirmed && d.confirmed && origin === '/v1/sync/board' && step.body?.state
@@ -312,7 +322,6 @@ function translateStep(step, P, env, k) {
       if (!sameTags(d.runner)) return { end: `runner ${d.runner} claims with other tags than at its first claim (the model’s TAGS are constant)` };
       if (d.leg !== '' || d.finished.length || d.status !== 'active') return { reject: `claim ${id} created already advanced or ended` };
       env.ids[id] = env.nextId++;
-      env.claimTier[id] = Q.tickets[d.ticket]?.tier ?? null;
       acts.push(`heartbeat(${w})`, `claim(${w}, ${q(d.ticket)})`);
       continue;
     }
@@ -445,6 +454,21 @@ function applyPost(Q, env, k) {
     env.posted[t] = g;
     env.gone[t] = env.withdrawn[t];
     if (v?.present) env.seen[t] = true;
+    const deps = (Q.dependencies?.[t]?.entries ?? []).map((e) => {
+      const mode = ['at', 'reached', 'done', 'withdrawn', 'closed'].find((m) => m in e);
+      const other = e.ticket.includes(':') ? e.ticket : `docs:${e.ticket}`;
+      if (!Q.tickets[other]) return null; // visibility, consent and unknown targets are not modelled
+      const stations = [...new Set(Array.isArray(e[mode]) ? e[mode] : [])].sort();
+      const leg = e.leg ?? '';
+      const ref = `${other}@${mode}${stations.length ? `:${stations.join(',')}` : ''}`;
+      return { leg, ref, expr: `{ leg: ${q(leg)}, other: ${q(other)}, mode: ${q(mode)}, stations: ${qSet(stations)} }` };
+    }).filter(Boolean);
+    const old = new Set(env.deps[t].map((d) => d.expr));
+    const next = new Set(deps.map((d) => d.expr));
+    for (const d of old) if (!next.has(d)) acts.push(`gitDepends(${q(t)}, ${d}, false)`);
+    for (const d of next) if (!old.has(d)) acts.push(`gitDepends(${q(t)}, ${d}, true)`);
+    env.deps[t] = deps;
+    for (const d of deps) env.checkedDeps[t].set(d.expr, d);
   }
   return { acts };
 }
@@ -468,6 +492,10 @@ function expectations(Q, env, T, W) {
     e.push([`postedBars ${t}`, `st.postedBars.get(${q(t)}) == ${qSet(env.bars[t])}`]);
     if (env.queued[t] != null) e.push([`queued ${t}`, `st.queued.get(${q(t)}) == ${q(env.queued[t])}`]);
     e.push([`held ${t}`, `st.held.get(${q(t)}) == ${!!Q.held[t]}`]);
+    for (const d of env.checkedDeps[t].values()) {
+      const blocked = (Q.dependencies?.[t]?.blocks ?? []).some((b) => b.ref === d.ref && b.leg === d.leg);
+      e.push([`ticket block ${t} ${d.leg} ${d.ref}`, `ticketRowsIn(st, ${q(t)}).contains(${d.expr}) == ${blocked}`]);
+    }
   }
   const bars = [...new Set(Q.ownerBars.map((b) => `{ tag: ${q(b.tag)}, applies: ${q(b.applies)} }`))];
   e.push(['ownerBars', bars.length ? `st.ownerBars == Set(${bars.join(', ')})` : 'st.ownerBars.size() == 0']);
@@ -686,7 +714,10 @@ function traceFiles(args) {
 export const SCOPE = join(ROOT, 'test', 'integration', 'trace-scope.json');
 const keyOf = (r) => `${r.scenario} › ${r.test}`;
 
-/** The scope errors for accepted results against the allowlist; `whole` also checks stale entries. */
+/** The scope errors for accepted results against the allowlist; `whole` also checks stale entries.
+ * @param {readonly {scenario: string, test: string, ok: boolean, checked: number, end?: {index: number, reason: string} | null}[]} results
+ * @param {Record<string, {at: number, reason: string}>} scope
+ */
 export function scopeErrors(results, scope, whole = true) {
   const errors = [];
   const seen = new Set();

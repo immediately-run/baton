@@ -3,6 +3,7 @@
 // the history, a ticket and its children, a leg's runs, the policy, the stats, the conditions,
 // and the owner's grants and policy log. The dispatcher supplies one principal, one
 // authorization, the ETag and the R-BTN-113 projection for session capabilities (./index.ts).
+import { repositoryRead } from '../routes/public';
 import { BatonError, json } from '../http';
 import { STATS_WINDOW_MS } from '../stats';
 import { withCredentials } from './credentials';
@@ -13,7 +14,7 @@ import type { ReadRoute } from './kit';
 const legacy = (action: string, over: Partial<ReadRoute> = {}): ReadRoute => ({
   action,
   clock: true,
-  run: async (cx, call) => (await cx.core.repositoryRead(call.req, call.url, call.repository!, call.principal, call.sessionLink))
+  run: async (cx, call) => (await repositoryRead(cx.core, call.req, call.url, call.repository!, call.principal, call.sessionLink))
     ?? (() => { throw new BatonError('not-found', `no route GET ${call.url.pathname}`); })(),
   ...over,
 });
@@ -27,6 +28,7 @@ export const REPOSITORY_READS: ReadRoute[] = [
   legacy('ticket.children', { clock: false }),
   legacy('ticket.history', { clock: false }),
   legacy('leg.runs'),
+  legacy('leg.why', { etag: false }),
   // `?runner=me` is a runner session's own answer, decided by its secret after authorization:
   // never conditional, so a `304` is never answered where the secret would have been refused.
   legacy('ticket.blocks', { etag: (call) => !call.url.searchParams.has('runner') && !call.url.searchParams.has('worker') }),
@@ -46,7 +48,7 @@ export const REPOSITORY_READS: ReadRoute[] = [
     // R-BTN-163 (B-234): the conditions list — what a delivery runner polls
     // (`?open=1&type=interact`, R-BTN-195) and the Conditions screen draws. Its own `?cursor=`
     // stays (B-205: existing reads keep their paging).
-    action: 'repo.conditions',
+    action: 'condition.list',
     clock: true,
     // B-195: each entry also carries its `outcome`, `closed_at` and `resolve_url` (./conditions.ts).
     run: (cx, call) => conditionsList(cx, call),

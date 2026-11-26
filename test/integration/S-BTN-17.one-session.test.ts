@@ -6,7 +6,10 @@
 // barred-tag, no hand-off, no stale-board release; the next sync confirms the end. (The required
 // bar those bars meet is an owner setting, R3-1240.) Runs on both hosts.
 import { describe, it, expect, beforeEach } from 'vitest';
-import { advance, beat, claimItem, claimRow, cutover, endClaim, Git, placed, register, rows, setClock } from '../helpers';
+import {
+  advance, beat, claimItem, claimRow, cutover, endClaim, Git, placed, register, rows, setClock,
+  seedTicketOverride,
+} from '../helpers';
 
 const T0 = Date.parse('2026-10-16T12:00:00Z');
 const SEATS = ['family:deepseek', 'family:qwen'];
@@ -89,7 +92,7 @@ describe('S-BTN-17 one session, whole ticket', () => {
     const w = await register('vm-a');
     const { json: c } = await claimItem('vm-a', w.secret);
     await advance('vm-a', w.secret, c.claim_id, { leg: 'implement' });
-    await rows(`INSERT INTO ticket_overrides (ticket_id, hold, hold_reason, set_by, set_at) VALUES ('docs:T-1', 1, 'owner', 'owner:test', 0)`);
+    await seedTicketOverride({ ticket_id: 'docs:T-1', hold: 1, hold_reason: 'owner', set_by: 'owner:test', set_at: 0 });
     expect((await advance('vm-a', w.secret, c.claim_id, { reached: 'pr-open', leg: 'review' })).json).toMatchObject({ code: 'not-eligible', rule: 3, rule_code: 'held' });
     await rows(`UPDATE ticket_overrides SET hold = 0`);
     expect((await advance('vm-a', w.secret, c.claim_id, { reached: 'pr-open', leg: 'review' })).status).toBe(200);

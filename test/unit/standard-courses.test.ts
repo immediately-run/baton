@@ -20,6 +20,8 @@ import { ticketsMarkdown, type SourceTicket } from '../../src/defaults/tickets-m
 
 const instructionsDir = (id: string) => join(__dirname, '..', '..', 'src', 'defaults', 'courses', id);
 const tosOf = (to: string | string[]): string[] => (Array.isArray(to) ? to : [to]);
+const positionOf = (position: string, answer: string | undefined, roundsSpent = false) =>
+  new Function('answer', 'roundsSpent', `return (${position});`)(answer, roundsSpent) as { reached: string; next: string | null; [k: string]: unknown };
 
 describe('the standard courses (R-BTN-131)', () => {
   it('are create-pr, review-pr, bug-report, draft-ticket, decision, build-app, create-spec and spec-to-tickets; create-pr is the default', () => {
@@ -36,7 +38,7 @@ describe('the standard courses (R-BTN-131)', () => {
       it('every leg has a stub and shipped instructions, and nothing else is shipped', () => {
         // A person's leg (R-BTN-116; create-pr's `confirm`, B-257) is answered, never run: no
         // stub, no instructions.
-        const legs = Object.entries(b.course.legs as Record<string, { kind?: string }>).filter(([, l]) => l.kind !== 'person').map(([l]) => l).sort();
+        const legs = Object.entries(b.course.legs as Record<string, { kind?: string; arrives?: object }>).filter(([, l]) => l.kind !== 'person' && !l.arrives).map(([l]) => l).sort();
         expect(Object.keys(b.legs).sort()).toEqual(legs);
         expect(readdirSync(instructionsDir(b.id)).sort()).toEqual(legs.map((l) => `${l}.md`));
         for (const l of legs) expect(readFileSync(join(instructionsDir(b.id), `${l}.md`), 'utf8')).toMatch(new RegExp(`^# ${b.id} · ${l} — `));
@@ -44,6 +46,7 @@ describe('the standard courses (R-BTN-131)', () => {
 
       it('every stub returns an edge for every answer: reached is one of the leg\'s outcomes, next leaves it, null only at an end', () => {
         for (const [leg, stub] of Object.entries(b.legs)) {
+          if (leg === 'reconcile') continue; // S-BTN-309 exercises its evidence-dependent results.
           // B-110's test gate is not a static expression over an answer: the stub reads the
           // claim's station and the script's exit at run time (no agent), so the kit checks its
           // two outcomes at both stations it may run from — each an edge of the course.
@@ -58,11 +61,11 @@ describe('the standard courses (R-BTN-131)', () => {
             continue;
           }
           const answers = stub.ask?.values ?? [undefined];
-          // B-110 round 1: a position may read the run number (`ctx.run`) — create-pr's review
+          // B-110 round 1: a position may depend on the run number — create-pr's review
           // queues the owner's adjudicate on its last round — so each is checked at a first run
           // and at the file's last.
-          for (const answer of answers) for (const run of [1, 3]) {
-            const pos = new Function('answer', 'ctx', `return (${stub.position});`)(answer, { run }) as { reached: string; next: string | null; [k: string]: unknown };
+          for (const answer of answers) for (const spent of stub.reviewBound ? [false, true] : [false]) {
+            const pos = positionOf(stub.position, answer, spent);
             // A suspension may rest where the leg started (R-BTN-71: a give-up), which the file's
             // `to` does not list; every other reached station is an outcome. S-BTN-174 drives
             // create-spec's such stubs end to end.
@@ -77,9 +80,10 @@ describe('the standard courses (R-BTN-131)', () => {
 
       it('every leg that can reach an end tells its agent to close the ticket: the sync reads only status: done (R-BTN-74)', () => {
         for (const [leg, stub] of Object.entries(b.legs)) {
+          if (leg === 'reconcile') continue; // S-BTN-309 exercises its evidence-dependent results.
           if (stub.tests) continue; // B-110: no agent runs the gate, and it reaches no end
           const ends = (stub.ask?.values ?? [undefined]).some((answer) => {
-            const pos = new Function('answer', 'ctx', `return (${stub.position});`)(answer, { run: 1 }) as { reached: string };
+            const pos = positionOf(stub.position, answer);
             return b.course.end.includes(pos.reached);
           });
           if (ends) expect(readFileSync(join(instructionsDir(b.id), `${leg}.md`), 'utf8'), `${b.id}/${leg}`).toMatch(/`?status:`? to `?done`?/);
@@ -107,11 +111,12 @@ describe('the standard courses (R-BTN-131)', () => {
     ]);
     for (const b of BUILT_INS) {
       for (const [leg, stub] of Object.entries(b.legs)) {
+          if (leg === 'reconcile') continue; // S-BTN-309 exercises its evidence-dependent results.
         if (stub.tests) continue; // B-110: the gate suspends nothing — it advances green or red
         for (const answer of stub.ask?.values ?? [undefined]) {
           // A first run's position (B-110: create-pr's review suspends only on its last round,
           // queuing the owner's adjudicate — defaults-cli.test.ts drives that).
-          const pos = new Function('answer', 'ctx', `return (${stub.position});`)(answer, { run: 1 }) as { suspend?: boolean };
+          const pos = positionOf(stub.position, answer);
           const key = [b.id, leg, answer].filter(Boolean).join(' ');
           expect(pos.suspend === true, key).toBe(waits.has(key));
         }
@@ -119,18 +124,33 @@ describe('the standard courses (R-BTN-131)', () => {
     }
   });
 
-  it("create-pr's implement may answer delivered: an outcome whose person leg confirm ends the ticket or sends it back, and its instructions say how (B-257, S-BTN-232)", () => {
+  it("create-pr's implement may answer delivered: confirm queues archive or sends it back (B-257, B-258, S-BTN-232)", () => {
     const b = builtIn('create-pr')!;
     const g = graphOf(b.course);
     expect(b.legs.implement.delivered).toBe(true);
     expect(g.legs.get('implement')!.to).toEqual(['pr-open', 'delivered']);
     // The stub's delivered position, as cli.ts writes it: `delivered` reached, `confirm` queued.
     expect(g.legs.get('confirm')).toMatchObject({ person: true, from: ['delivered'], to: ['confirmed', 'filed'] });
-    expect(g.ends.has('confirmed') && g.ends.has('merged')).toBe(true);
-    expect(onGraph(g, [{ leg: 'implement', reached: 'delivered' }, { leg: 'confirm', reached: 'filed' }, { leg: 'implement', reached: 'delivered' }, { leg: 'confirm', reached: 'confirmed' }])).toBe(true);
+    expect(g.legs.get('archive')).toMatchObject({ from: ['confirmed'], to: ['archived'] });
+    expect([...g.ends]).toEqual(['merged', 'archived']);
+    expect(onGraph(g, [{ leg: 'implement', reached: 'delivered' }, { leg: 'confirm', reached: 'filed' }, { leg: 'implement', reached: 'delivered' }, { leg: 'confirm', reached: 'confirmed' }, { leg: 'archive', reached: 'archived' }])).toBe(true);
     const text = readFileSync(join(instructionsDir('create-pr'), 'implement.md'), 'utf8');
     expect(text).toContain('delivered <sha> <what you ran and what it showed>');
     expect(text).toContain('Your word alone never closes the ticket');
+  });
+
+  it("create-pr's shipped and home reviews may chain from implement and fix, and ask for a different model when available (B-30, lifted 2026-11-25)", () => {
+    const home = join(__dirname, '..', '..', '.baton', 'courses', 'create-pr');
+    const owned = JSON.parse(readFileSync(join(home, 'course.json'), 'utf8'));
+    // The owner, 2026-11-25: with sandboxed, isolated legs a credential rule adds no independence,
+    // and one runner must be able to review its own course's work.
+    expect(owned.legs.review.no_chain_from).toBeUndefined();
+    expect(builtIn('create-pr')!.course.legs.review.no_chain_from).toBeUndefined();
+    for (const dir of [instructionsDir('create-pr'), join(home, 'legs')]) {
+      const text = readFileSync(join(dir, 'review.md'), 'utf8');
+      expect(text, dir).toMatch(/Before launching the reviewer, the runner's\s+command, wrapper or override must select a model different from those used for `implement`\s+and `fix` on this ticket whenever it can/);
+      expect(text, dir).toMatch(/If the authoring models are unknown or a different model is unavailable, say so\s+in your review/);
+    }
   });
 
   it('only implement and fix may ask in-session in either create-pr course (B-325, S-BTN-222)', () => {
@@ -251,6 +271,7 @@ describe('the standard courses (R-BTN-131)', () => {
     const want: Record<string, string> = { 'create-pr/implement': 'pr', 'create-pr/merge': 'merged' };
     for (const b of BUILT_INS) {
       for (const [leg, stub] of Object.entries(b.legs)) {
+        if (leg === 'reconcile') continue; // S-BTN-309 exercises its evidence-dependent results.
         expect(stub.verify, `${b.id}/${leg}`).toBe(want[`${b.id}/${leg}`]);
       }
     }

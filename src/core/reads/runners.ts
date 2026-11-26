@@ -14,9 +14,10 @@
 // B-184): a runner's `executor`, a run's `executor_digest`, `environment` and `instance`. The
 // answer says so in `not_built` instead of inventing them. A run's `log_dir` is the column as
 // stored (`claim_legs.leg_log_dir`), which nothing writes yet (B-23).
-import { isLive, leaseEndsAt } from '../runnerLiveness';
+import { isLive } from '../runnerLiveness';
 import { runnerLatest } from '../runnerLatest';
 import { BatonError } from '../http';
+import { CLAIM_LEASE_END_SQL } from '../claims';
 import { transcriptUrl, type SessionLinkView } from '../links';
 import { graphOf, type Graph } from '../graph';
 import { grantedKeySql } from '../validate';
@@ -68,7 +69,6 @@ export type RunnerRow = {
   harness: string;
   kind: string;
   isolation: string;
-  tier_ceilings: Record<string, string>;
   /** The runner's own statement (R-BTN-174): each capability with the name it declared it by. */
   capabilities: { capability: string; declared: string }[];
   /** The grant's capabilities on this repository; null for a key no grant binds. */
@@ -89,7 +89,7 @@ export type RunnerRow = {
 };
 
 type Raw = {
-  id: number; hostname: string; session_name: string; harness: string; kind: string; isolation: string; tier_ceilings: string; lease_timeout_ms: number;
+  id: number; hostname: string; session_name: string; harness: string; kind: string; isolation: string; lease_timeout_ms: number;
   last_seen_at: number; last_activity_at: number | null; reaped_at: number | null; profile_json: string | null;
   credential_kind: string; created_by: string | null; granted: string | null; role: string | null; trust_domain: string | null;
 };
@@ -113,7 +113,7 @@ function grouped<T extends { runner_id: number }>(rows: T[]): Map<number, T[]> {
  *  name); `only` narrows it to one runner. */
 function rawRows(cx: ReadCtx, repo: string, only: number | null): Raw[] {
   return cx.sql<Raw>(
-    `SELECT w.id, w.hostname, w.session_name, w.harness, w.kind, w.isolation, w.tier_ceilings, w.lease_timeout_ms,
+    `SELECT w.id, w.hostname, w.session_name, w.harness, w.kind, w.isolation, w.lease_timeout_ms,
             w.last_seen_at, w.last_activity_at, w.reaped_at, w.profile_json,
             k.kind AS credential_kind, k.created_by, g.capabilities AS granted, g.role, g.trust_domain
      FROM runners w JOIN credentials k ON k.id = w.credential_id
@@ -146,13 +146,14 @@ export function runnerRows(cx: ReadCtx, repo: string, sessionLink: SessionLinkVi
      WHERE f.repository_id = ? AND f.runner_id IN (SELECT value FROM json_each(?)) ORDER BY f.course_id`, repo, ids));
   // Every live claim of these runners, here or elsewhere, with its running leg, that leg's run
   // number on the ticket and the ticket's backoff — one statement.
-  const claims = grouped(of<{ runner_id: number; id: number; ticket_id: string; station: string; course_id: string | null; claimed_at: number; deadline_at: number | null;
+  const claims = grouped(of<{ runner_id: number; id: number; ticket_id: string; station: string; course_id: string | null; claimed_at: number; deadline_at: number | null; lease_ends_at: number | null;
     leg: string | null; run_id: string | null; session_url: string | null; session_incarnation: number | null; leg_log_dir: string | null; attempt: number | null; retry_after: number | null }>(
     `SELECT c.runner_id, c.id, c.ticket_id, c.station, c.course_id, c.claimed_at, c.deadline_at,
+            CASE WHEN w.kind != 'legacy' THEN ${CLAIM_LEASE_END_SQL} END AS lease_ends_at,
             l.leg, l.run_id, l.session_url, l.session_incarnation, l.leg_log_dir,
             (SELECT COUNT(*) FROM claim_legs x JOIN claims y ON y.id = x.claim_id WHERE y.ticket_id = c.ticket_id AND x.leg = l.leg) AS attempt,
             o.retry_after
-     FROM claims c
+     FROM claims c JOIN runners w ON w.id = c.runner_id
      LEFT JOIN claim_legs l ON l.claim_id = c.id
        AND l.seq = (SELECT MAX(m.seq) FROM claim_legs m WHERE m.claim_id = c.id AND m.finished_at IS NULL AND m.abandoned_at IS NULL)
      LEFT JOIN ticket_overrides o ON o.ticket_id = c.ticket_id
@@ -195,12 +196,11 @@ export function runnerRows(cx: ReadCtx, repo: string, sessionLink: SessionLinkVi
   const profiles = new Map<number, unknown>();
   const rows = raw.map((w): RunnerRow => {
     const mine = claims.get(w.id) ?? [];
-    const leaseEnds = w.kind === 'legacy' ? null : leaseEndsAt(w);
     const here = mine.filter((c) => c.ticket_id.startsWith(prefix)).map((c): RunnerClaim => {
       const a = activity.get(c.id);
       return {
         claim_id: c.id, ticket_id: c.ticket_id, station: c.station, leg: c.leg, run_id: c.run_id, claimed_at: c.claimed_at,
-        lease_ends_at: leaseEnds, deadline_at: c.deadline_at,
+        lease_ends_at: c.lease_ends_at, deadline_at: c.deadline_at,
         attempt: c.leg == null ? null : c.attempt,
         max_runs: c.leg != null && c.course_id != null ? graphs.get(c.course_id)?.legs.get(c.leg)?.maxRuns ?? null : null,
         next_backoff_until: c.retry_after != null && c.retry_after > now ? c.retry_after : null,
@@ -216,7 +216,6 @@ export function runnerRows(cx: ReadCtx, repo: string, sessionLink: SessionLinkVi
       alive: isLive(w, now),
       last_seen_at: w.last_seen_at, last_activity_at: w.last_activity_at, reaped_at: w.reaped_at,
       harness: w.harness, kind: w.kind, isolation: w.isolation,
-      tier_ceilings: parsed<Record<string, string>>(w.tier_ceilings, {}),
       capabilities: (capabilities.get(w.id) ?? []).map(({ capability, declared }) => ({ capability, declared })),
       granted: w.granted == null ? null : parsed<string[]>(w.granted, []),
       tags: (tags.get(w.id) ?? []).map((x) => x.tag),
@@ -285,7 +284,7 @@ function showRunner(cx: ReadCtx, call: ReadCall) {
     }
     for (const a of cx.sql<{ claim_id: number; id: string; parent_id: string | null; kind: string; label: string | null; source: string; started_at: number; ended_at: number | null; outcome: string | null; detail_json: string | null }>(
       `SELECT claim_id, id, parent_id, kind, label, source, started_at, ended_at, outcome, detail_json FROM activities
-       WHERE claim_id IN (SELECT value FROM json_each(?)) ORDER BY claim_id, started_at, rowid`, claimIds)) {
+       WHERE claim_id IN (SELECT value FROM json_each(?)) ORDER BY claim_id, started_at, insertion_order`, claimIds)) {
       activities.set(a.claim_id, [...(activities.get(a.claim_id) ?? []), { id: a.id, parent_id: a.parent_id, kind: a.kind, label: a.label, source: a.source,
         started_at: a.started_at, ended_at: a.ended_at, outcome: a.outcome, detail: parsed<unknown>(a.detail_json, null) }]);
     }

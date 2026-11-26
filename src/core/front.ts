@@ -1,3 +1,4 @@
+/// <reference path="../modules.d.ts" />
 // front.ts — what stands in front of Baton's core (BATON_SPEC §3, §10): it verifies the
 // principal for the path, applies the R-BTN-16 rules, serves the dashboard's static files, and
 // forwards the API to the core — through the Durable Object on Cloudflare, through the request
@@ -187,6 +188,13 @@ async function route(req: Request, env: Config, to: Forward, hasAdmin: () => Pro
     // R-BTN-80, R-BTN-103: a courier key or a machine key signs; the core checks which.
     return under('private', async () => {
       if (!isSigned(req)) throw new BatonError('unauthenticated', 'sign with a courier key or a machine key (R-BTN-13)');
+      return forwardSigned(req, env, to);
+    });
+  }
+  if (pathname.startsWith('/v1/forge-scope/')) {
+    return under('private', async () => {
+      if (req.method !== 'GET') throw new BatonError('not-found', 'no such route');
+      if (!isSigned(req)) throw new BatonError('unauthenticated', 'a forge-scope read must be signed');
       return forwardSigned(req, env, to);
     });
   }

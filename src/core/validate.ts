@@ -4,10 +4,38 @@
 import { BatonError, RECOMMENDED_CLIENT } from './http';
 import { gitPointer, S3_POINTER } from './contractPointers';
 import { FREE_TEXT_MAX, isFreeText } from './text';
-import { COURSE_ID } from './course';
-import { CONDITION_TYPE, CONDITION_TYPE_MAX, RESTART_ID, SEVERITIES } from './conditionTypes';
+import { COURSE_ID, RESOURCE_NAME } from './course';
+import { CONDITION_TYPE, CONDITION_TYPE_MAX, RESTART_ID, SEVERITIES, isCoreOnly, restartFault } from './conditionTypes';
 import { parseSchemaId, VALUE_MAX_BYTES } from '../shared/schema.mjs';
 import { CLIENT_VERSION_MAX, compareVersions, parseVersion } from '../shared/versions.mjs';
+import type { ForgeDispatch } from './ports';
+
+export const DISPATCH_WORKFLOW = /^\.github\/workflows\/[A-Za-z0-9._-]{1,100}\.ya?ml$/;
+const GITEA_DISPATCH_WORKFLOW = /^\.gitea\/workflows\/[A-Za-z0-9._-]{1,100}\.ya?ml$/;
+
+export function checkUnblockedTrigger(value: unknown, forge: string, branch: string, dispatch: ForgeDispatch | null) {
+  const trigger = checkForgeDispatch(value, 'unblocked_trigger', forge, branch, true);
+  if (trigger.kind !== dispatch?.kind || (trigger.kind === 'gitlab-trigger' && dispatch.kind === 'gitlab-trigger' && trigger.project_id !== dispatch.project_id)) {
+    bad('unblocked_trigger', 'must use the repository’s own dispatch target');
+  }
+  return trigger;
+}
+
+/** Only target metadata is accepted. Credentials are host configuration, never a field here. */
+export function checkForgeDispatch(value: unknown, field: string, forge: string, branch: string, unblocked = false): ForgeDispatch & { workflow?: string } {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return bad(field, 'must be a dispatch target');
+  const t = value as Record<string, unknown>;
+  const fields = (...allowed: string[]) => Object.keys(t).every((k) => k === 'kind' || allowed.includes(k));
+  if (forge === 'github' && t.kind === 'github-app') {
+    if (!unblocked && fields()) return { kind: t.kind };
+    if (unblocked && fields('workflow') && typeof t.workflow === 'string' && DISPATCH_WORKFLOW.test(t.workflow)) return { kind: t.kind, workflow: t.workflow };
+  }
+  if (forge === 'gitlab' && t.kind === 'gitlab-trigger' && fields('project_id', 'ref') && typeof t.project_id === 'number'
+      && Number.isSafeInteger(t.project_id) && t.project_id > 0 && t.ref === branch) return { kind: t.kind, project_id: t.project_id, ref: branch };
+  if (forge === 'gitea' && t.kind === 'gitea' && fields('workflow', 'ref') && typeof t.workflow === 'string'
+      && GITEA_DISPATCH_WORKFLOW.test(t.workflow) && t.ref === branch) return { kind: t.kind, workflow: t.workflow, ref: branch };
+  return bad(field, 'must target this repository’s forge and default branch, using only dispatch fields');
+}
 
 /** §5: the harness's own session id, the rule `claim.sh --session` already applies. */
 export const SESSION_NAME = /^[A-Za-z0-9_.:-]{1,128}$/;
@@ -39,8 +67,6 @@ export const GIT_REPO = /^[A-Za-z0-9-]{1,39}\/[A-Za-z0-9._-]{1,100}$/;
 /** What `git check-ref-format --branch` allows, in short: no control, space, `~ ^ : ? * [ \`,
  *  no `..` or `@{`, at most 255 characters. A legal branch the hook asks about is never refused. */
 export const GIT_BRANCH = /^(?!.*\.\.)(?!.*@\{)(?![/.])(?!.*[/.]$)[^\u0000-\u0020\u007f~^:?*[\\]{1,255}$/;
-/** Repositories one heartbeat may name a tier ceiling for (spec-silent, recorded on R3-1231). */
-export const TIER_CEILINGS_MAX = 64;
 /** A course's `version` and a runner's declared one: non-negative, at most this. */
 export const COURSE_VERSION_MAX = 1_000_000_000;
 /** Courses in one registry, and courses one heartbeat declares (spec-silent, recorded on R3-1231). */
@@ -87,7 +113,6 @@ export const TAGS_MAX = 64;
 export const ACTIVITY_KINDS = ['orient', 'implement', 'local-verify', 'open-pr', 'push', 'ci-wait', 'review-round', 'reviewer',
   'fix-findings', 'adjudicate', 'merge', 'reconcile', 'status-write', 'decision-packet', 'other'] as const;
 export const OUTCOMES = ['succeeded', 'failed', 'cancelled', 'abandoned'] as const;
-export const TIERS = ['routine', 'judgement', 'critical'] as const;
 
 export const bad = (field: string, why: string): never => {
   throw new BatonError('invalid-params', `${field}: ${why}`);
@@ -159,7 +184,7 @@ export interface Heartbeat {
   session_name: string;
   secret_hash?: string;
   rekey?: boolean;
-  harness: 'opencode' | 'claude-code';
+  harness: string;
   kind: 'vm' | 'local' | 'cloud';
   model_id?: string;
   /** B-142: the model tables' fields are gone and read nowhere — a heartbeat still carrying
@@ -168,11 +193,8 @@ export interface Heartbeat {
   capabilities: string[];
   /** R-BTN-60: course-defined strings the tag gate matches. */
   tags: string[];
-  tier_ceiling: (typeof TIERS)[number];
   /** R-BTN-107: how the runner isolates a leg — `process` (the default), `attached` or `session`. */
   isolation: 'attached' | 'process' | 'session';
-  /** Per repository (R-BTN-66): `{repository: tier}`, checked against each ladder at the heartbeat. */
-  tier_ceilings: Record<string, string>;
   lease_timeout_s: number;
   /** The courses the runner's checkouts run, at their versions (R-BTN-22, R-BTN-48): rule 9. */
   courses: { repository: string; course: string; version: number }[];
@@ -267,7 +289,7 @@ export function checkHeartbeat(body: unknown, transcriptRepos: string[]): Heartb
   const session_name = matches(SESSION_NAME, 'session_name')(b.session_name);
   const secret_hash = optional(b.secret_hash, matches(SHA256_HEX, 'secret_hash'));
   if (b.rekey !== undefined && typeof b.rekey !== 'boolean') bad('rekey', 'must be a boolean');
-  if (b.harness !== 'opencode' && b.harness !== 'claude-code') bad('harness', "must be 'opencode' or 'claude-code'");
+  const harness = matches(NAME, 'harness')(b.harness);
   if (b.kind !== 'vm' && b.kind !== 'local' && b.kind !== 'cloud') bad('kind', "must be 'vm', 'local' or 'cloud'");
   const model_id = optional(b.model_id, matches(MODEL, 'model_id'));
   // B-104 (R-BTN-174): a declaration may hold a typed holding — `<type>:<value>`, R-BTN-121's
@@ -278,8 +300,6 @@ export function checkHeartbeat(body: unknown, transcriptRepos: string[]): Heartb
   const rawTags = b.tags ?? [];
   if (!Array.isArray(rawTags) || rawTags.length > TAGS_MAX || !rawTags.every((t) => typeof t === 'string' && TAG.test(t))) bad('tags', `must be a list of at most ${TAGS_MAX} tags`);
   const tags = [...new Set(rawTags as string[])];
-  const tier = b.tier_ceiling ?? 'critical'; // absent ⇒ every tier (§5)
-  if (!TIERS.includes(tier as never)) bad('tier_ceiling', `must be one of ${TIERS.join(', ')}`);
   // R-BTN-22: the skills version is each course's version, declared per course; a sidecar that
   // still sends `skills_version` is not refused for it.
   const courses = checkDeclaredCourses(b.courses ?? []);
@@ -314,14 +334,12 @@ export function checkHeartbeat(body: unknown, transcriptRepos: string[]): Heartb
     session_name,
     secret_hash,
     rekey: b.rekey === true,
-    harness: b.harness as Heartbeat['harness'],
+    harness,
     kind: b.kind as Heartbeat['kind'],
     model_id,
     capabilities,
     tags,
-    tier_ceiling: tier as Heartbeat['tier_ceiling'],
     isolation: (b.isolation ?? 'process') as Heartbeat['isolation'],
-    tier_ceilings: checkTierCeilings(b.tier_ceilings),
     lease_timeout_s: clampLease(b.lease_timeout_s),
     courses,
     last_activity_at: b.last_activity_at as number | undefined,
@@ -343,19 +361,6 @@ export function checkHeartbeat(body: unknown, transcriptRepos: string[]): Heartb
     // heartbeat would stop last_seen_at and get a live runner reaped.
     ...splitTranscripts(transcripts, transcriptRepos),
   };
-}
-
-/** A tier name, as a repository's ladder spells it (R-BTN-66). */
-export const TIER_NAME = /^[a-z][a-z0-9-]{0,39}$/;
-
-function checkTierCeilings(v: unknown): Record<string, string> {
-  if (v === undefined) return {};
-  if (!isObj(v) || Object.keys(v).length > TIER_CEILINGS_MAX) bad('tier_ceilings', `must map at most ${TIER_CEILINGS_MAX} repositories to a tier`);
-  const out: Record<string, string> = {};
-  for (const [repo, tier] of Object.entries(v as object)) {
-    out[checkRepositoryId(repo, `tier_ceilings key ${repo}`)] = matches(TIER_NAME, `tier_ceilings.${repo}`)(tier);
-  }
-  return out;
 }
 
 function splitTranscripts(list: unknown[], allowed: string[]) {
@@ -508,6 +513,7 @@ export function checkMessage(body: unknown): { to_runner_id: number; kind: 'rele
   const x = p as Record<string, unknown>;
   const ticket_id = matches(TICKET_ID, 'payload.ticket_id')(x.ticket_id);
   if (!RELEASE_REASONS.includes(x.reason as never)) bad('payload.reason', `must be one of ${RELEASE_REASONS.join(', ')}`);
+  checkConfirm(b);
   return { to_runner_id: b.to_runner_id as number, kind: 'release', payload: { ticket_id, reason: x.reason } };
 }
 
@@ -529,6 +535,20 @@ export function checkShadowReport(body: unknown) {
 
 const REQUEST_ID = /^[A-Za-z0-9._:-]{8,128}$/;
 export const GIT_SHA = /^[0-9a-f]{40}$/;
+
+/** R-BTN-88: the server-owned placement carried by an owner-state export. */
+export function checkOwnerStateStation(row: Record<string, unknown>, path: unknown): void {
+  const id = (v: unknown): boolean => typeof v === 'string' && COURSE_ID.test(v);
+  const n = (v: unknown): boolean => typeof v === 'number' && Number.isSafeInteger(v) && v >= 0;
+  if (typeof row.ticket_id !== 'string' || !TICKET_ID.test(row.ticket_id) || row.next_source !== 'baton'
+    || !id(row.station) || (row.next_leg !== null && !id(row.next_leg))
+    || !Array.isArray(path) || row.path_len !== path.length || path.some((step) => !isObj(step) || !id(step.leg) || !id(step.reached)
+      || Object.keys(step).some((key) => !['leg', 'reached', 'adopted'].includes(key)) || (step.adopted !== undefined && typeof step.adopted !== 'boolean'))
+    || !n(row.to_end) || !n(row.observation) || (row.person_expires_at !== null && !n(row.person_expires_at))
+    || (row.handoff_url !== null && !isHttpsPointer(row.handoff_url)) || typeof row.snapshot_sha !== 'string' || !GIT_SHA.test(row.snapshot_sha)) {
+    bad('ticket_stations row', 'must carry a valid Baton-owned position');
+  }
+}
 /** §6.5: the `released:` reasons, exactly. */
 export const RELEASE_END_REASONS = ['blocked', 'stale-board', 'cannot-finish:transient', 'cannot-finish:capability', 'cannot-finish:spec', 'cannot-finish:contract-output', 'cannot-finish:contract-input',
   'lease-lost', 'requested', 'owner-cancel', 'provider-suspended', 'provider-exhausted', 'course-changed', 'leg-timeout'] as const;
@@ -545,7 +565,7 @@ export function boundedJson(value: unknown, field: string, limit = 4096): string
 
 export interface ClaimPreference { ticket_id: string; leg?: string }
 
-export function checkClaim(body: unknown): { request_id: string; ticket_id: string | null; prefer: ClaimPreference[] | null; rationale: string | null; retired: string[] } {
+export function checkClaim(body: unknown): { request_id: string; ticket_id: string | null; prefer: ClaimPreference[] | null; legs?: string[]; rationale: string | null; retired: string[] } {
   if (!isObj(body)) bad('body', 'must be a JSON object');
   const b = body as Record<string, unknown>;
   const retired = new Set<string>();
@@ -562,11 +582,18 @@ export function checkClaim(body: unknown): { request_id: string; ticket_id: stri
       return { ticket_id: matches(TICKET_ID, `${at}.ticket_id`)(e.ticket_id), leg: optional(e.leg, matches(COURSE_ID, `${at}.leg`)) };
     });
   }
+  let legs: string[] | undefined;
+  if (b.legs !== undefined) {
+    if (!Array.isArray(b.legs) || !b.legs.length || b.legs.length > 50 || b.ticket_id != null || prefer) {
+      bad('legs', 'give 1 to 50 leg names on an unnamed claim');
+    }
+    legs = [...new Set((b.legs as unknown[]).map(matches(COURSE_ID, 'legs')))];
+  }
   const rationale = b.rationale === undefined ? null : boundedJson(b.rationale, 'rationale');
   return {
     request_id: matches(REQUEST_ID, 'request_id')(b.request_id),
     ticket_id: optional(b.ticket_id, matches(TICKET_ID, 'ticket_id')) ?? null,
-    prefer, rationale, retired: [...retired],
+    prefer, ...(legs ? { legs } : {}), rationale, retired: [...retired],
   };
 }
 
@@ -641,7 +668,11 @@ export interface End {
   reached: string | null;
   next: string | null;
   detail: string | null;
+  error: { type: string; message: string } | null;
   ended_at_sha: string | null;
+  verdict_ref: string | null;
+  /** A suspension reporting a completed self-loop, not an abandoned run at the same station. */
+  finished_self_loop: boolean;
   /** `released:<reason>` naming no §6.5 reason: an owner bar's (R-BTN-67), checked by the claims. */
   owner_bar: boolean;
   /** R-BTN-126 (B-104's branch): a `released:blocked` end's failed prerequisite — `capability`,
@@ -784,10 +815,24 @@ export function checkEnd(body: unknown): End {
   if (suspended_at && reached && reached !== suspended_at) bad('reached', `a suspended:${suspended_at} end rests at ${suspended_at}`);
   const next = optional(b.next, matches(COURSE_ID, 'next')) ?? null;
   const detail = b.detail === undefined || b.detail === null ? null : isFreeText(b.detail, 200) ? (b.detail as string) : bad('detail', 'must be §10.4 free text of at most 200 characters');
+  let error: End['error'] = null;
+  if (b.error != null) {
+    if (!reason.startsWith('released:cannot-finish:')) bad('error', 'only an interrupt end carries an error (R-BTN-160)');
+    const fields = isObj(b.error) ? b.error : bad('error', 'must be {type, message}');
+    const type = matches(CONDITION_TYPE, 'error.type')(fields.type);
+    if (type.length > CONDITION_TYPE_MAX || isCoreOnly(type)) bad('error.type', 'must be a leg condition type (R-BTN-160)');
+    const message = isFreeText(fields.message) ? fields.message : bad('error.message', 'must be §10.4 free text');
+    error = { type, message };
+  }
   const ptr = b.ended_at_sha;
   if (ptr !== undefined && ptr !== null && !isPointer(ptr)) bad('ended_at_sha', 'must be a commit sha or an https URL of at most 1000 characters');
   const sha = (ptr as string | undefined | null) ?? null;
+  const verdict = b.verdict_ref;
+  if (verdict != null && (typeof verdict !== 'string' || !isHttpsPointer(verdict) || !/#(?:issuecomment|pullrequestreview)-\d+$/.test(verdict))) bad('verdict_ref', 'must be a verdict comment or review URL');
   if (status! === 'released' && sha) bad('ended_at_sha', 'only a completed end points at its evidence');
+  if (b.finished_self_loop !== undefined && (b.finished_self_loop !== true || !suspended_at || !sha)) {
+    bad('finished_self_loop', 'must be true on a suspension carrying ended_at_sha');
+  }
   // R-BTN-126 (B-104's branch): a blocked end names the prerequisite that failed — `capability`
   // with a holding the runner declares and says it lost. The other kinds are the blocked-end
   // work's; a blocked end without one is malformed.
@@ -817,7 +862,7 @@ export function checkEnd(body: unknown): End {
     spawned = b.spawned as string[];
     if (reason === 'done') bad('spawned', 'a done end spawns nothing — its open children are superseded by the close (R-BTN-86, R-BTN-168)');
   }
-  return { end_reason: reason, status: status!, suspended_at, reached: reached ?? suspended_at, next, detail, ended_at_sha: sha, owner_bar: ownerBar, prerequisite, outputs: checkOutputs(b.outputs), scope_exceeded: checkScopeReport(b.scope_exceeded), exit_status: optional(b.exit_status, exitStatus) ?? null, session_url: carriedSessionUrl(b.session_url), spawned, local_order: checkLocalOrder(b.local_order) };
+  return { end_reason: reason, status: status!, suspended_at, reached: reached ?? suspended_at, next, detail, error, ended_at_sha: sha, verdict_ref: typeof verdict === 'string' ? verdict : null, finished_self_loop: b.finished_self_loop === true, owner_bar: ownerBar, prerequisite, outputs: checkOutputs(b.outputs), scope_exceeded: checkScopeReport(b.scope_exceeded), exit_status: optional(b.exit_status, exitStatus) ?? null, session_url: carriedSessionUrl(b.session_url), spawned, local_order: checkLocalOrder(b.local_order) };
 }
 
 /** B-248 (R-BTN-202): a local order's provenance, as the advance or end that reports the leg
@@ -842,6 +887,7 @@ function checkLocalOrder(v: unknown): LocalOrder | null {
 }
 
 export interface Advance {
+  start_before: number | null;
   course: string | null;
   leg: string;
   reached: string | null;
@@ -1014,8 +1060,10 @@ export function checkAdvance(body: unknown): Advance {
   if (!Array.isArray(raw) || raw.length > TAGS_MAX || !raw.every((t) => typeof t === 'string' && TAG.test(t))) bad('bars', `must be a list of at most ${TAGS_MAX} tags`);
   const head_sha = optional(b.head_sha, matches(GIT_SHA, 'head_sha')) ?? null;
   const course = b.course === undefined ? null : boundedJson(b.course, 'course');
+  const start_before = b.start_before ?? null;
+  if (start_before !== null && !Number.isSafeInteger(start_before)) bad('start_before', 'must be a Unix timestamp in milliseconds');
   retiredFields(b);
-  return { leg, reached, evidence, course, bars: [...new Set(raw as string[])], outputs: checkOutputs(b.outputs), scope_exceeded: checkScopeReport(b.scope_exceeded), head_sha, run_inputs: checkRunInputs(b.run_inputs), session_url: carriedSessionUrl(b.session_url), exit_status: optional(b.exit_status, exitStatus) ?? null, local_order: checkLocalOrder(b.local_order) };
+  return { leg, reached, evidence, course, bars: [...new Set(raw as string[])], outputs: checkOutputs(b.outputs), scope_exceeded: checkScopeReport(b.scope_exceeded), head_sha, run_inputs: checkRunInputs(b.run_inputs), session_url: carriedSessionUrl(b.session_url), exit_status: optional(b.exit_status, exitStatus) ?? null, local_order: checkLocalOrder(b.local_order), start_before: start_before as number | null };
 }
 
 /** §6.7: the sync's confirmations, `[{claim_id, sha}]`. */
@@ -1037,8 +1085,14 @@ export interface ConditionReport {
 export function checkConditionReport(body: unknown): ConditionReport {
   if (!isObj(body)) bad('body', 'must be a JSON object');
   const b = body as Record<string, unknown>;
+  for (const field of Object.keys(b)) {
+    if (!['type', 'disposition', 'handler', 'restarts', 'default', 'severity', 'url'].includes(field)) {
+      bad('body', 'condition reports carry filter fields only (R-BTN-33)');
+    }
+  }
   const type = matches(CONDITION_TYPE, 'type')(b.type);
   if ((type as string).length > CONDITION_TYPE_MAX) bad('type', `must be at most ${CONDITION_TYPE_MAX} characters`);
+  if (isCoreOnly(type)) bad('type', 'baton and baton.* are core-only (R-BTN-160)');
   // The report may carry the disposition the runner's file reads; Baton's own word decides
   // (R-BTN-50), so it is only shape-checked, never trusted.
   if (b.disposition !== undefined && b.disposition !== null && !['interrupt', 'suspend', 'notify'].includes(b.disposition as string)) {
@@ -1047,18 +1101,14 @@ export function checkConditionReport(body: unknown): ConditionReport {
   const severity = b.severity === undefined || b.severity === null ? 'normal' : SEVERITIES.includes(b.severity as never) ? (b.severity as ConditionReport['severity']) : bad('severity', `must be one of ${SEVERITIES.join(', ')}`);
   let restarts: Record<string, string> | null = null;
   if (b.restarts !== undefined && b.restarts !== null) {
-    if (!isObj(b.restarts) || Object.keys(b.restarts).length === 0 || Object.keys(b.restarts).length > 8) bad('restarts', 'must be 1–8 ids with one-line descriptions');
-    for (const [id, text] of Object.entries(b.restarts as Record<string, unknown>)) {
-      if (!RESTART_ID.test(id)) bad(`restarts.${id}`, 'a restart id matches ^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$ (§12.3)');
-      if (!isFreeText(text)) bad(`restarts.${id}`, 'must be §10.4 free text');
-    }
+    const fault = restartFault(b.restarts);
+    if (fault != null) bad('restarts', fault);
     restarts = b.restarts as Record<string, string>;
   }
   const def = optional(b.default, matches(RESTART_ID, 'default')) ?? null;
   if (def != null && (restarts == null || !Object.prototype.hasOwnProperty.call(restarts, def))) bad('default', 'names one of the raise\'s restarts');
   const url = b.url === undefined || b.url === null ? null : isHttpsPointer(b.url) ? (b.url as string) : bad('url', 'must be an https URL of at most 1000 characters');
   if (b.handler !== undefined && b.handler !== null && typeof b.handler !== 'string') bad('handler', 'must be a course id');
-  retiredFields(b);
   return { type: type as string, disposition: (b.disposition as ConditionReport['disposition']) ?? null, severity, restarts, default: def, url };
 }
 
@@ -1083,9 +1133,9 @@ export function checkFenced(v: unknown): { claim_id: number }[] {
   });
 }
 
-/** An owner action that names its own confirmation (§14: force-reap). */
+/** §12.2: only an explicit JSON boolean true confirms a destructive action. */
 export function checkConfirm(body: unknown): void {
-  if (!isObj(body) || body.confirm !== true) bad('confirm', 'must be true');
+  if (!isObj(body) || body.confirm !== true) throw new BatonError('confirm-required', 'this action takes confirm: true');
 }
 
 export function checkAccept(body: unknown): { repository: string; sha: string } {
@@ -1195,7 +1245,7 @@ export const DECISION_TYPE_NAME = 'std:decision@1';
 // ── blocks, external resources and readings (§2g R-BTN-75–78, §2l R-BTN-101; R3-1251) ─────
 
 /** R-BTN-76: an external resource's name — opaque to core (`llm:<model>`, `github-api`). */
-export const RESOURCE_NAME = /^[a-z][a-z0-9:._/-]{0,79}$/;
+export { RESOURCE_NAME };
 /** An instance's name (`opencode-go:go_plus`, a `service` resource's own): the resource rule with
  *  `_` (spec-silent, recorded on R3-1251 — the scenarios' own instances carry it). */
 export const INSTANCE_NAME = /^[a-z][a-z0-9_:./-]{0,79}$/;
@@ -1424,4 +1474,8 @@ export function checkNoticeClaim(v: unknown): number {
   if (b.limit === undefined) return CLAIM_MAX;
   if (!Number.isInteger(b.limit) || (b.limit as number) < 1 || (b.limit as number) > CLAIM_MAX) bad('limit', `must be an integer from 1 to ${CLAIM_MAX}`);
   return b.limit as number;
+}
+/** B-131: the opaque R-BTN-63 run id selects one leg, not all claims of a key. */
+export function checkForgeRun(run: string): void {
+  if (!/^r_[0-9A-HJKMNP-TV-Z]{26}$/.test(run)) bad('run', 'must be a leg run id');
 }

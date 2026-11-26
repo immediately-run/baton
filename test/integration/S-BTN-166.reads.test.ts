@@ -3,7 +3,7 @@
 // queries behind the signed principal, so an operator or an agent with a key can see the
 // instance's state without a browser session. Must hold: each route answers for the seeded
 // two-repository instance (the registry; the repository's owners, grants and settings; the
-// board's repository, ready and per-tier sections); a key without the right role is refused
+// board's repository, ready sections); a key without the right role is refused
 // with its code — an owner reads its own repository and no other, an administrator's key is no
 // owner's, a runner key granted on the repository reads its board and is told what its grant
 // allows, and a key granted nowhere is refused `forbidden`, an unknown one `unauthenticated`.
@@ -93,7 +93,7 @@ describe('S-BTN-166 the CLI’s reads (B-90)', () => {
     expect(res.json.grants).toEqual([{
       credential_id: granted.fingerprint, hostname: 'granted-host', label: null, repository_id: 'docs',
       capabilities: JSON.stringify(['authentication', 'create-pr', 'drivable-browser', 'llm-call']),
-      max_tier: null, max_claims: 1, deliver_interactions: false, granted_by: `owner:${docsOwner.fingerprint}`, granted_at: T0,
+      max_claims: 1, deliver_interactions: false, granted_by: `owner:${docsOwner.fingerprint}`, granted_at: T0,
       // R-BTN-58: the other repositories this key is granted on — none yet.
       other_repositories: [],
       // B-199 (S-BTN-295): the grant's role, domain and who set them — none set.
@@ -111,7 +111,7 @@ describe('S-BTN-166 the CLI’s reads (B-90)', () => {
     expect((await read(stranger, '/v1/owner/docs/grants')).json.code).toBe('unauthenticated');
   });
 
-  it('the board answers its repository, ready and per-tier sections to an owner and to a key granted on it', async () => {
+  it('the board answers its repository, ready sections to an owner and to a key granted on it', async () => {
     for (const key of [docsOwner, granted]) {
       const res = await read(key, '/v1/repositories/docs/board');
       expect(res.status).toBe(200);
@@ -119,9 +119,6 @@ describe('S-BTN-166 the CLI’s reads (B-90)', () => {
       const ready = res.json.ready as { repository_id: string; id: string; leg: string }[];
       expect(ready.length).toBeGreaterThan(0);
       expect(ready.every((r) => r.repository_id === 'docs')).toBe(true);
-      const tiers = Object.values(res.json.ready_by_tier as Record<string, string[]>).flat();
-      expect(tiers.length).toBeGreaterThan(0);
-      expect(tiers.every((id) => id.startsWith('docs:'))).toBe(true);
       // One fact, one answer: the board's two sections are the state's own for this repository —
       // the administrator's key reads `GET /v1/admin/state` (`uiRepo` and `readyRows`).
       const whole = await read(admin, '/v1/admin/state');
@@ -129,12 +126,10 @@ describe('S-BTN-166 the CLI’s reads (B-90)', () => {
       const state = whole.json as Record<string, any>;
       expect(res.json.repository).toEqual(state.repositories.find((r: { id: string }) => r.id === 'docs'));
       expect(res.json.ready).toEqual((state.ready as { repository_id: string }[]).filter((r) => r.repository_id === 'docs'));
-      expect(res.json.ready_by_tier).toEqual(Object.fromEntries(Object.entries(state.ready_by_tier as Record<string, string[]>)
-        .map(([tier, ids]) => [tier, ids.filter((id) => id.startsWith('docs:'))])));
       // A section the dashboard never serves is not invented here: the board is these two, the
       // repository, the key's grant — and, since B-129, the repository's live claims (`holders`),
       // the lock a session claiming through git reads with the same request.
-      expect(Object.keys(res.json).sort()).toEqual(['granted_capabilities', 'holders', 'ready', 'ready_by_tier', 'repository', 'server_time']);
+      expect(Object.keys(res.json).sort()).toEqual(['granted_capabilities', 'holders', 'ready', 'repository', 'server_time']);
       expect(res.json.holders).toEqual([]);
     }
     // A key Baton does not know cannot heartbeat at all — the board read above is its only answer.
@@ -153,7 +148,7 @@ describe('S-BTN-166 the CLI’s reads (B-90)', () => {
     expect((await read(admin, '/v1/repositories/nope/board')).json.code).toBe('forbidden');
     expect((await read(admin, '/v1/admin/repositories/extra')).json.code).toBe('not-found');
     // The grant is the repository's alone: revoked, the read is refused.
-    expect((await keyCall(docsOwner, `/v1/owner/docs/grants/${encodeURIComponent(granted.fingerprint)}/revoke`, {})).status).toBe(200);
+    expect((await keyCall(docsOwner, `/v1/owner/docs/grants/${encodeURIComponent(granted.fingerprint)}/revoke`, { confirm: true })).status).toBe(200);
     const revoked = await read(granted, '/v1/repositories/docs/board');
     expect([revoked.status, revoked.json.code]).toEqual([403, 'forbidden']);
   });

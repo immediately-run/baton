@@ -27,7 +27,7 @@ function maskLines(literals: string[], lines: string[]): string {
   return [...lines.map((line) => sink.push(line)), sink.flush()].filter(Boolean).join('\n');
 }
 
-describe('class 7 by name (R-BTN-144)', () => {
+describe('class 7 by name (R-BTN-144; S-BTN-98, redaction slice)', () => {
   it('the five endings and PGPASSWORD, exactly as the environment spells them — case-sensitive', () => {
     expect(SECRET_NAME_SUFFIXES).toEqual(['_KEY', '_TOKEN', '_SECRET', '_PASSWORD', '_PAT']);
     expect(SECRET_NAME_EXACT).toBe('PGPASSWORD');
@@ -95,6 +95,20 @@ describe('class 7 by name (R-BTN-144)', () => {
     expect(other.push(`end ${KEY.slice(0, 12)}`)).toBe('end ');
     expect(other.push('unrelated text')).toBe('***\nunrelated text');
     expect(other.flush()).toBe('');
+  });
+
+  it('S-BTN-119: masks a complete literal even when its suffix is held for another literal', () => {
+    const sink = createLegMasker(['sample-redaction-13', '13-more-sample']);
+    expect(sink.push('value: sample-redaction-13')).toBe('value: ***');
+    expect(sink.push('-more-sample done')).toBe('*** done');
+    expect(sink.flush()).toBe('');
+  });
+
+  it('S-BTN-119: a separate literal on the next line cannot expose a held suffix', () => {
+    const sink = createLegMasker(['sample-value-13', '13-followup', 'different-value']);
+    expect(sink.push('value: sample-value-13')).toBe('value: ***');
+    expect(sink.push('again: different-value')).toBe('again: ***'); // the held 13 already left inside the first ***
+    expect(sink.flush()).toBe('');
   });
 
   it('a value holding a newline is masked across the boundary the line framing ate', () => {
@@ -273,6 +287,22 @@ describe('class 7 by name (R-BTN-144)', () => {
     expect(sink.push('AAAA')).toBe('');
     expect(sink.push('-----END OPENSSH PRIVATE KEY-----')).toBe('***');
     expect(sink.flush()).toBe('');
+  });
+
+  it('recognizes private-key banners before masking overlapping literals (S-BTN-119)', () => {
+    const begin = '-----BEGIN OPENSSH PRIVATE KEY-----';
+    const end = '-----END OPENSSH PRIVATE KEY-----';
+    const body = 'synthetic-key-body';
+    const after = 'normal output resumes';
+    for (const secret of ['-synthetic-local-value', 'PRIVATE KEY']) {
+      const sink = createLegMasker([secret]);
+      expect(sink.push(begin)).toBe('');
+      expect(sink.push(body)).toBe('');
+      expect(sink.push(end)).toBe('***');
+      expect(sink.push(after)).toBe(after);
+      expect(sink.flush()).toBe('');
+      expect(maskLegOutput([begin, body, end, after].join('\n'), [secret])).toBe(`***\n***\n***\n${after}`);
+    }
   });
 });
 

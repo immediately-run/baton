@@ -2,7 +2,7 @@
 title: "1. What Baton is"
 description: "Baton hands out tickets to runners under fenced leases and shows the work's live state."
 ---
-## 1. What Baton is *(proposal)*
+## 1. What Baton is
 
 Baton hands out **tickets** to **runners** under fenced leases and shows the work's live state.
 Git is the ledger for the work's evidence and the ticket source holds the tickets; Baton's board
@@ -24,7 +24,7 @@ claims and runs legs (§8). The **sync** reads git and posts the repository's **
 resumed by a **restart** (§7). "Workflow" means only a CI workflow; "activity" only a record of
 §9.
 
-- **R-BTN-1 (one home per fact).** Each fact has one authoritative home; a copy elsewhere is
+- **R-BTN-1 (one home per fact).** `status: built` Each fact has one authoritative home; a copy elsewhere is
   derived and says so.
 
   | The ticket source (R-BTN-74) and git: the home repository, and the repositories and PRs its course reads | Baton |
@@ -35,7 +35,7 @@ resumed by a **restart** (§7). "Workflow" means only a CI workflow; "activity" 
   | transcripts | pointers to them |
   | | runners, messages, readings; keys, grants, owners, settings, bars (R-BTN-66); overrides; conditions, timers and the outbox (§7) |
 
-- **R-BTN-193 (git is never a lock or a counter).** Baton is the one place concurrent writers are
+- **R-BTN-193 (git is never a lock or a counter).** `status: partly B-176 B-178 B-289` Baton is the one place concurrent writers are
   serialized: who holds a ticket is Baton's lease (R-BTN-4), and a number that must be unique
   across concurrent branches is one Baton hands out (R-BTN-199). Git records the work; it never
   decides who holds something or which number is next.
@@ -48,7 +48,7 @@ resumed by a **restart** (§7). "Workflow" means only a CI workflow; "activity" 
     (§16); and every passage elsewhere that serves only one of these. A collision one still produces is caught by the sync's duplicate-id
     refusal (R-BTN-74, R-BTN-147) or at merge.
 
-- **R-BTN-33 (Baton holds filter fields, never content).** Per live ticket Baton stores what
+- **R-BTN-33 (Baton holds filter fields, never content).** `status: built` Per live ticket Baton stores what
   matching (§6) and the dashboard's lists read (the `tickets` columns, §13), the position it holds
   (R-BTN-39), and an opaque `display` object of which core reads only `project`, for the ticket's
   row, and `status`, by equality (R-BTN-85). It never stores a body, Status notes, exit
@@ -62,7 +62,7 @@ resumed by a **restart** (§7). "Workflow" means only a CI workflow; "activity" 
     profiles, reports, `rationale`, a reading's `detail`. Core never reads them, so it cannot stop
     a course from putting prose in one; doing so breaks this rule, and the CLI's default sources
     and standard station functions post none.
-- **R-BTN-35 (Baton wins about what it owns; the ticket source and git about the rest).** Baton
+- **R-BTN-35 (Baton wins about what it owns; the ticket source and git about the rest).** `status: built` Baton
   owns each ticket's course history and position (R-BTN-39), claims and leases, attestations
   (R-BTN-181) and owner state (R-BTN-66). Every other ticket fact it holds (existence, filter
   fields, version, closure) is a cache of what the source last posted, which Baton never edits:
@@ -78,13 +78,13 @@ resumed by a **restart** (§7). "Workflow" means only a CI workflow; "activity" 
     ticket (R-BTN-198) leave the claim alone.
   - A ticket gone from its source loses its `tickets` row; its claims, events and course history
     stay.
-- **R-BTN-39 (where a ticket is: Baton's course history).** Baton is the one authority on a
+- **R-BTN-39 (where a ticket is: Baton's course history).** `status: built` Baton is the one authority on a
   ticket's course history (R-BTN-81) and on its position: its station, its path (the legs run,
   each with the station it reached) and its queued leg (R-BTN-83). No ticket file, marker, PR or
   snapshot places a ticket; a note a leg adds to its ticket is evidence for people, never a
   position. A leg's runs and a ticket's arrivals are counted from this record (R-BTN-63).
   - **Where a ticket starts.** A ticket a snapshot posts for the first time stands at its course's
-    `start` with `start_leg` queued (R-BTN-83), unless an import holds its course history
+    `start` with `start_leg` queued (R-BTN-83), unless an import holds its position
     (R-BTN-88), placed in the transaction that accepts the post, before that post's attestations
     are judged.
   - **Who moves a ticket.** Only these, each along an edge of the course file from Baton's current
@@ -140,17 +140,17 @@ resumed by a **restart** (§7). "Workflow" means only a CI workflow; "activity" 
     adopt are not built (R-BTN-83, B-120).
   - **Adopt**, the owner's command that sets a position for legs done outside Baton, is not built
     (B-120): [the ticket-adopt proposal](../proposals/ticket-adopt.md).
-- **R-BTN-8 (git first).** For every `completed` end, `suspended:` included, the runner pushes
+- **R-BTN-8 (git first).** `status: built` For every `completed` end, `suspended:` included, the runner pushes
   the leg's evidence and hand-off first and may pass `ended_at_sha` (a commit sha, or the URL
   of the comment or review that ended the leg), the evidence confirmation looks for
   (R-BTN-10); an end that passes none is confirmed without it.
   A status change under a held claim is an activity (`status-write`), not an end.
-- **R-BTN-18 (no git fallback).** One lock server per repository (R-BTN-56): a session that
+- **R-BTN-18 (no git fallback).** `status: built` One lock server per repository (R-BTN-56): a session that
   cannot reach Baton does not claim, and one whose lease is lost (R-BTN-6) stops.
-- **R-BTN-36 (git never records the holder).** Legacy, removed with its code (R-BTN-193). Nothing
+- **R-BTN-36 (git never records the holder).** `status: retiring B-289` Legacy, removed with its code (R-BTN-193). Nothing
   a mirror or export writes to git (§16) names a session, runner id or hostname; a runner appears
   only as a claim id.
-- **R-BTN-45 (Baton advises; its gates protect the lock, not the work).** Baton **recommends**,
+- **R-BTN-45 (Baton advises; its gates protect the lock, not the work).** `status: built` Baton **recommends**,
   the runner **decides**. Recommendations (R-BTN-61) list the legs a runner may take in Baton's
   default order with Baton's own advice (§6) and the course's opaque fields and hand-off. The
   runner claims one, another ticket it may take, or none. Advice never refuses: a claim against
@@ -158,18 +158,18 @@ resumed by a **restart** (§7). "Workflow" means only a CI workflow; "activity" 
   rules — refuse, at claim and `advance`. A gate is the lock's answer to a cooperating worker,
   never enforcement of the work, which Baton neither does, verifies nor confines. A rule every
   runner must obey is a barred tag or a bar (R-BTN-60, R-BTN-67).
-- **R-BTN-46 (gates bind cooperating runners).** Baton cannot refuse a push, comment or status
+- **R-BTN-46 (gates bind cooperating runners).** `status: built B-46` Baton cannot refuse a push, comment or status
   write, and checks no commit or signature; fencing (§9) catches mistakes, not an uncooperative
   runner. What a repository's policy adds is R-BTN-66's. Every closing marker carries
   `claim=<nonce>`, so a person reading a PR can tell which claim wrote what; Baton reads markers
   only for the outputs they list (R-BTN-82), keeps no record of who else pushed to a ticket's
   branch and raises nothing about it.
-- **R-BTN-53 (instruments hold the secrets; Baton stores what they report).** What a course
+- **R-BTN-53 (instruments hold the secrets; Baton stores what they report).** `status: built` What a course
   needs and cannot learn from git — a provider's remaining quota, a service's health — is
   learned outside Baton by a runner or an instrument key with its own secrets and posted as
   readings (R-BTN-101). Secrets never enter Baton. A reading nobody renews lapses to `unknown`,
   which blocks only a requirement with `missing: block` (R-BTN-76, R-BTN-181).
-- **R-BTN-50 (core acts only on its own vocabulary).** `src/core/` may name only:
+- **R-BTN-50 (core acts only on its own vocabulary).** `status: built` `src/core/` may name only:
 
   | Concept | Core |
   |---|---|
@@ -187,7 +187,7 @@ resumed by a **restart** (§7). "Workflow" means only a CI workflow; "activity" 
   enforces it: its list of course words may not appear in `src/core/` outside contract-test
   fixtures, beyond an exceptions list that only shrinks; `src/defaults/` is exempt and never
   imported by `src/core/`; the toy course `chore` runs the generic scenarios (S-BTN-28).
-- **R-BTN-66 (agents can change anything in git; what they must not change lives in Baton).**
+- **R-BTN-66 (agents can change anything in git; what they must not change lives in Baton).** `status: built`
   An agent can change every byte of a registered repository — `.baton/`, the sync,
   requirements, computed bars and leg states, condition bindings, reviews. Baton does not
   replace or fortify git's security model: whoever can push, or is in `pushers` (R-BTN-139), is a
@@ -210,11 +210,10 @@ resumed by a **restart** (§7). "Workflow" means only a CI workflow; "activity" 
     purpose is to catch a pusher who goes round them. Under `protected`, where control paths and
     ticket files land only by a human (R-BTN-184) and the forge admits only the writers the policy
     names (R-BTN-180, R-BTN-183), the same state is a **boundary**.
-- **R-BTN-98 (Baton runs no repository code; runners rank).** Baton calls and stores no course
+- **R-BTN-98 (Baton runs no repository code; runners rank).** `status: built` Baton calls and stores no course
   code. It decides every gate and its default order (§6), merged across groups (R-BTN-61);
   every judgement that needs a leg's or profile's meaning runs on the runner.
   - A course's own ranking — `rank.mjs` in its course directory, run by the runner over Baton's
     recommendations and views — is not built, and no runner runs one:
     [the proposal](../proposals/courses.md).
   - Estimates stay on the runner; Baton stores no estimate or forecast.
-

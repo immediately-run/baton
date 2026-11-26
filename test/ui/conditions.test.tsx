@@ -132,6 +132,11 @@ describe('the Conditions list (B-219 item 1)', () => {
         unconfirmed: [{ id: 7, ticket_id: 'docs:U', runner_id: 2, ended_at: NOW - 120_000, end_reason: 'done' }],
         adoptions: [{ ticket_id: 'docs:L', session_name: 's-1', requested_at: NOW - 1000 }],
         blocked_capability: [],
+        // S-BTN-56: sync wants and dispatch problems are visible on Conditions.
+        sync_late: [{ repository_id: 'docs', kind: 'baton.sync-late', wanted_at: NOW - 3_600_000 }],
+        mirror_late: [{ repository_id: 'docs', kind: 'baton.mirror-late', wanted_at: NOW - 3_600_000 }],
+        forge_secret_missing: [{ repository_id: 'docs', kind: 'baton.forge-secret-missing', use: 'dispatch' }],
+        sync_control_changes: [{ at: NOW, changes: [{ path: HOSTILE, pusher: 'worker', commit: 'abc' }] }],
         something_new: [{ a: 1 }],
       },
       held_posts: 2,
@@ -141,15 +146,16 @@ describe('the Conditions list (B-219 item 1)', () => {
     expect(document.body.textContent).toContain(HOSTILE);
     const also = screen.getByRole('heading', { name: 'Also waiting' }).closest('section')!;
     const names = [...also.querySelectorAll('.needs-kind')].map((k) => k.textContent);
-    expect(names).toEqual(['◆Unconfirmed', '‖Held', '▲Adoption asked for']);
+    expect(names).toEqual(['◆Unconfirmed', '‖Held', '▲Sync late', '▲Mirror late', '▲Forge secret missing', '▲Control paths changed or unverified', '▲Adoption asked for']);
     expect(within(also as HTMLElement).getByRole('link', { name: 'docs:H' }).getAttribute('href')).toBe('/repositories/docs/tickets/H');
     expect(within(also as HTMLElement).getByRole('link', { name: 'Sync' }).getAttribute('href')).toBe('/repositories/docs/sync');
     // A listing this page has no name for is named as the read names it, never dropped.
     expect(also.textContent).toContain('something_new (1)');
     expect(screen.getByRole('link', { name: /2 held on Sync/ }).getAttribute('href')).toBe('/repositories/docs/sync');
     // Every listing the page names is one the read can serve.
-    expect(LISTINGS.map((l) => l.key).sort()).toEqual(['adoptions', 'bars_mismatch', 'blocked_capability', 'course_changed', 'courses_refused', 'fence_pending', 'held_items',
-      'no_owner_channel', 'policy', 'pool_unclaimed', 'regressed', 'scope', 'stale_skills', 'unacknowledged_releases', 'unconfirmed', 'unsigned_control']);
+    expect(LISTINGS.map((l) => l.key).sort()).toEqual(['adoptions', 'bars_mismatch', 'blocked_capability', 'course_changed', 'courses_refused', 'fence_pending',
+      'forge_secret_missing', 'held_items', 'mirror_late', 'no_owner_channel', 'policy', 'pool_unclaimed', 'regressed', 'scope', 'stale_skills', 'sync_control_changes', 'sync_lapses', 'sync_late',
+      'unacknowledged_releases', 'unconfirmed', 'unsigned_control']);
   });
 
   it('?type= and ?ticket= filter and stay in the URL; ?open=0 reads the whole list', async () => {

@@ -10,7 +10,7 @@
 //
 // A refusal is thrown, and the CLI prints it as one `baton: …` line, exit 2 — a finding keeps
 // exit 1.
-import { execFileSync } from 'node:child_process';
+import { git as gitArgs, gitText } from './git.mjs';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -25,11 +25,11 @@ import { claimMismatch, formatTicket, ticketPathsUnder, ticketPrView } from '../
 import { defaultBranch } from './request';
 import { ownRepositoryId } from './cli';
 import { builtIn, DEFAULT_COURSE } from './courses';
-import { holderRefusal, readTicketPosition, Undetermined, type BatonPosition } from './tickets-baton';
+import { holderRefusal, readDoneTickets, readTicketPosition, Undetermined, type BatonPosition } from './tickets-baton';
 import { batonTarget, nextMain } from './sequences';
 
-const git = (root: string, ...a: string[]): string =>
-  execFileSync('git', ['-C', root, ...a], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, LC_ALL: 'C' } }).trim();
+// B-280: every git call goes through the bounded, prompt-free seam (./git.mjs).
+const git = (root: string, ...a: string[]): string => gitText(root, ...a);
 
 const today = (): string => new Date().toISOString().slice(0, 10);
 
@@ -277,7 +277,7 @@ function isDoneElsewhere(dir: string, id: string): boolean {
   const remote = dependencyRemote(readSettingsJson(dir).repos ?? {}, repository);
   const clone = mkdtempSync(join(tmpdir(), 'baton-dep-'));
   try {
-    execFileSync('git', ['clone', '-q', '--depth', '1', remote, clone], { stdio: ['ignore', 'ignore', 'pipe'], env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } });
+    gitArgs(null, ['clone', '-q', '--depth', '1', '--', remote, clone], { stdio: ['ignore', 'ignore', 'pipe'] });
     const items = ((JSON.parse(readFileSync(join(clone, '.baton', 'baton.json'), 'utf8')) as { items?: string }).items ?? 'tickets').replace(/\/$/, '');
     const found = locate(items, local, (path) => existsSync(join(clone, path)));
     if (!found) throw new Error(`depends_on names ${id}, which is neither live nor archived on ${remote} (B-113)`);
@@ -356,6 +356,9 @@ export async function ticketsCheckMain(argv: string[], io: TicketsIo = {}): Prom
   let prBase: string | null = null;
   let claimedStatusOnly = false;
   let forgePath: string | null = null;
+  let offline = io.offline;
+  let identity = io.identity;
+  let url = io.url;
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const value = (): string => {
@@ -368,12 +371,20 @@ export async function ticketsCheckMain(argv: string[], io: TicketsIo = {}): Prom
     else if (a === '--pr') prBase = value();
     else if (a === '--claimed-status-only') claimedStatusOnly = true;
     else if (a === '--forge') forgePath = value();
+    else if (a === '--offline') offline = true;
+    else if (a === '-i') identity = value();
+    else if (a === '--url') url = value();
     else throw new Error(`${a}: not a flag of baton tickets check`);
   }
   // The settings first: a repository with none has no page to judge, and the check says so.
   const settings = readTicketSettings(root);
   const lines: string[] = [];
-  const code = await checkTicketsMain(['--repo', root], { log: (l) => lines.push(l) });
+  const target = quiet || offline ? null : batonTarget(root, { identity, url });
+  const { keyFile, repository, url: boardUrl } = target ?? {};
+  const code = await checkTicketsMain(['--repo', root], {
+    log: (l) => lines.push(l),
+    ...(keyFile && repository && boardUrl ? { boardDone: () => readDoneTickets({ url: boardUrl, keyFile, repository, fetchImpl: io.fetchImpl }) } : {}),
+  });
   const page = pageFinding(root, settings);
   const last = lines.pop() ?? '';
   const tickets = Number(/(\d+) ticket\(s\)/.exec(last)?.[1] ?? 0);
@@ -395,8 +406,8 @@ function ticketPrFindings(root: string, settings: TicketSettings, base: string |
   if (base == null) return 0;
   // Trimmed stdout for shas, paths and logs; RAW for `show` — a file's bytes are the view's
   // input, and a trimmed trailing newline would read as a body change.
-  const run = (...a: string[]): string => execFileSync('git', ['-C', root, ...a], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, LC_ALL: 'C' } }).trim();
-  const raw = (...a: string[]): string => execFileSync('git', ['-C', root, ...a], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, LC_ALL: 'C' } });
+  const run = (...a: string[]): string => gitText(root, ...a);
+  const raw = (...a: string[]): string => gitArgs(root, a);
   let mergeBase: string;
   try {
     mergeBase = run('merge-base', base, 'HEAD');
@@ -407,10 +418,7 @@ function ticketPrFindings(root: string, settings: TicketSettings, base: string |
   // NUL-separated with quoting off: a path with a non-ASCII byte, `"` or `\` is emitted QUOTED
   // by git's default settings, fails the prefix test and so hides from the computed view — the
   // exact failure B-133 exists to prevent.
-  const paths = ticketPathsUnder(settings.items ?? 'tickets', execFileSync(
-    'git', ['-C', root, '-c', 'core.quotepath=false', 'diff', '--name-only', '--no-renames', '-z', mergeBase],
-    { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, LC_ALL: 'C' } },
-  ).split('\0').filter(Boolean));
+  const paths = ticketPathsUnder(settings.items ?? 'tickets', gitArgs(root, ['-c', 'core.quotepath=false', 'diff', '--name-only', '--no-renames', '-z', mergeBase]).split('\0').filter(Boolean));
   const read = (rev: string, path: string): string | undefined => {
     try {
       return raw('show', `${rev}:${path}`);
@@ -488,6 +496,7 @@ export function ticketsHelp(): string[] {
     '                   --coordinator prints Baton\'s number alone or refuses, never scanning: the',
     '                   command .dibber/config.json\'s coordinator names (B-326)',
     'baton tickets check [--repo DIR] [--quiet]    check the tickets without posting them',
+    '  With -i KEY or BATON_KEY_FILE, report live files for board-done tickets; --offline skips this read.',
     '                   --pr BASE [--claimed-status-only] [--forge FILE]',
     '                                                  also print the computed ticket-PR view',
     '                   against BASE (fields, body and brief diffs, provenance, the status-only',

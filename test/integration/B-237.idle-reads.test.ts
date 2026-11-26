@@ -14,7 +14,10 @@
 // Runs on both hosts (the rows_read case on Cloudflare only).
 import { describe, it, expect, beforeEach } from 'vitest';
 import chore from '../fixtures/courses/chore/course.json';
-import { HOST, Git, beat, claimItem, course, cutover, placed, register, rows, seedClaim, setClock, withCore, runnerCall } from '../helpers';
+import {
+  HOST, Git, beat, claimItem, course, cutover, placed, register, rows, seedClaim, setClock, withCore, runnerCall,
+  setTicketRank, setTicketRankIn, seedTicketOverride,
+} from '../helpers';
 
 const T0 = Date.parse('2026-11-15T12:00:00Z');
 const M = 60_000;
@@ -170,12 +173,12 @@ describe('B-237 the state version and the idle memo (R-BTN-196)', () => {
     // So is any write, and one that changes no row is not.
     await rows(`UPDATE tickets SET rank = rank WHERE id = 'docs:T-1'`);
     expect(await version()).toBe(v1 + 1);
-    await rows(`UPDATE tickets SET rank = 0 WHERE id = 'docs:nothing'`);
+    await setTicketRank('docs:nothing', 0);
     expect(await version()).toBe(v1 + 1);
     // A transaction's writes move it once.
     await withCore((c) => c.store.transaction(() => {
-      c.store.exec(`UPDATE tickets SET rank = 7 WHERE id = 'docs:T-1'`);
-      c.store.exec(`UPDATE tickets SET rank = 8 WHERE id = 'docs:T-2'`);
+      setTicketRankIn(c.store, 'docs:T-1', 7);
+      setTicketRankIn(c.store, 'docs:T-2', 8);
     }));
     expect(await version()).toBe(v1 + 2);
   });
@@ -232,7 +235,7 @@ describe('B-237 the state version and the idle memo (R-BTN-196)', () => {
     expect(await recs(w.secret)).toEqual(['docs:T-1']);
     // A backoff until +12 min on the one eligible ticket: idle, then the memo's 10-minute cap
     // and the deadline both pass with no write.
-    await rows(`INSERT INTO ticket_overrides (ticket_id, expedite, hold, hold_reason, retry_after, set_by, set_at) VALUES ('docs:T-1', 0, 0, NULL, ?, 'test', ?)`, T0 + 12 * M, T0);
+    await seedTicketOverride({ ticket_id: 'docs:T-1', expedite: 0, hold: 0, hold_reason: null, retry_after: T0 + 12 * M, set_by: 'test', set_at: T0 });
     expect(await recs(w.secret)).toEqual([]);
     expect((await claimItem('vm-a', w.secret)).json).toMatchObject({ code: 'no-eligible-ticket' });
     await setClock(T0 + 11 * M);

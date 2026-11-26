@@ -20,10 +20,7 @@
   "tables": {
     "specifiedOnly": {
       "leg_attempts": "B-277",
-      "leg_outputs": "B-277",
-      "reconcile_displaced": "B-277",
-      "ticket_depends": "B-277",
-      "ticket_evidence": "B-277"
+      "ticket_depends": "B-277"
     },
     "builtOnly": {
       "adoptions": "B-277",

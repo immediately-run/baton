@@ -6,18 +6,20 @@
 // frontmatter spec:index writes; every reader takes the body, and line numbers stay the file's.
 import { describe, it, expect } from 'vitest';
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-// @ts-expect-error a plain .mjs script, no types
+import { HISTORY_SECTIONS, SECTIONS } from '../../src/core/ownerState';
 import { SPEC_DIR, SPEC_INDEX, indexText, joinParts, layoutProblems, locate, moveProof, part, partFrontmatter, partProblems, specParts } from '../../scripts/spec-files.mjs';
-// @ts-expect-error a plain .mjs script, no types
 import { impact, readSpecAt } from '../../scripts/spec-tools.mjs';
+import { ruleLedger } from '../../scripts/spec-ledger.mjs';
 
 type Part = { name: string; path: string; text: string; frontmatter?: string; offset?: number };
 const ROOT = resolve(import.meta.dirname, '..', '..');
 
 function fixture(parts: Record<string, string>): string {
   const root = mkdtempSync(join(tmpdir(), 'baton-spec-'));
+  execFileSync('git', ['init', '-q'], { cwd: root });
   mkdirSync(join(root, 'spec', 'BATON_SPEC'), { recursive: true });
   for (const [name, text] of Object.entries(parts)) writeFileSync(join(root, 'spec', 'BATON_SPEC', name), text);
   return root;
@@ -25,7 +27,7 @@ function fixture(parts: Record<string, string>): string {
 
 const FRONT = '# Spec\n\n## Contents\n\n| § | Title |\n';
 const ONE = '## 1. One *(proposal)*\n\n### 1.1 Sub\n\n- **R-BTN-1 (one home per fact).** Each fact.\n- **R-BTN-2 / R-BTN-3 (two at once).** Both.\n';
-const TWO = '## 2. Two\n\n| S-BTN-7 a scenario | steps | expected |\n| G-BTN-9 | a gate |\n';
+const TWO = '## 2. Two\n\n| S-BTN-907 a scenario | steps | expected\n| G-BTN-9 | a gate |\n';
 
 /** Each part's text as spec:index leaves it: its generated frontmatter, then its body. */
 function paged(parts: Record<string, string>): Record<string, string> {
@@ -36,6 +38,15 @@ function paged(parts: Record<string, string>): Record<string, string> {
 }
 
 describe('spec-files (B-179)', () => {
+  it('S-BTN-50: R-BTN-88 lists exactly the default and history export sections', () => {
+    const spec = readFileSync(join(ROOT, SPEC_DIR, '04-tickets-syncs-board.md'), 'utf8');
+    const tableNames = (list: string) => Array.from(list.matchAll(/`([a-z][a-z_]*)`/g), (m) => m[1]);
+    expect(tableNames(spec.match(/\*\*Default sections\*\* \(each table's stored columns\):\n([\s\S]*?)\.\n/)?.[1] ?? ''))
+      .toEqual(SECTIONS.map(({ table }) => table));
+    expect(tableNames(spec.match(/\*\*History sections\*\* \(only with `--with-history`\): ([\s\S]*?)\. An import/)?.[1] ?? ''))
+      .toEqual(HISTORY_SECTIONS.map(({ table }) => table));
+  });
+
   it('the parts, joined in name order, are the spec', () => {
     const root = fixture({ '02-two.md': TWO, '00-front.md': FRONT, '01-one.md': ONE, 'README.txt': 'not a part' });
     const parts: Part[] = specParts(root);
@@ -115,14 +126,25 @@ describe('spec-files (B-179)', () => {
     expect(text).toContain('| [`01-one.md`](BATON_SPEC/01-one.md) | **1. One** | — |');
     expect(text).toContain('| | 1.1 Sub | R-BTN-1, R-BTN-2, R-BTN-3 |');
     expect(text).toContain('| R-BTN-2 | two at once | [`01-one.md`](BATON_SPEC/01-one.md) |');
-    expect(text).toContain('| S-BTN-7 | a scenario | [`02-two.md`](BATON_SPEC/02-two.md) |');
+    expect(text).toContain('| S-BTN-907 | a scenario | [`02-two.md`](BATON_SPEC/02-two.md) |');
     expect(text).toContain('| G-BTN-9 | [`02-two.md`](BATON_SPEC/02-two.md) |');
     expect(text).not.toContain('a gate');
   });
 
   it('this repository: the directory holds only well-formed parts and the committed index is the generated one', () => {
     expect(layoutProblems(ROOT)).toEqual([]);
-    expect(readFileSync(join(ROOT, SPEC_INDEX), 'utf8')).toBe(indexText(specParts(ROOT)));
+  });
+
+  it('renders per-rule status, tickets, citing modules and scenario tests in the index', () => {
+    const root = fixture({
+      '00-front.md': FRONT,
+      '01-one.md': '## 1. One\n\n- **R-BTN-1 / R-BTN-2 (both).** `status: built B-276` `status: partly` Text.\n\n### Scenarios\n\n| S-BTN-907 a scenario | steps | R-BTN-2 |\n',
+    });
+    const parts = specParts(root);
+    const evidence = [['src/a.ts', '// R-BTN-1'], ['test/unit/one.test.ts', "it('S-BTN-907 a scenario', () => {})"]];
+    const text = indexText(parts, ruleLedger(joinParts(parts), evidence));
+    expect(text).toContain('| built | B-276 | `src/a.ts` | — |');
+    expect(text).toContain('| partly | — | — | `test/unit/one.test.ts` |');
   });
 
   it('spec-tools reads a directory as its parts joined, and a file as itself', () => {

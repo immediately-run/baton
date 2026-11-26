@@ -9,7 +9,8 @@
 // lease_timeout_ms > now`, R-BTN-9 and R-BTN-19's fencing) is S-BTN-2's and the alarm-reaper
 // scenarios'; the two edges of the lease are checked here too. Runs on both hosts.
 import { describe, it, expect, afterEach, beforeEach } from 'vitest';
-import { Git, HOST, cutover, register, rows, setClock, tick, withCore } from '../helpers';
+import { Git, HOST, cutover, register, rows, setClock, setMirrorAckedIn, tick, withCore } from '../helpers';
+import type { Ports } from '../../src/core/ports';
 
 const T0 = Date.parse('2026-11-15T12:00:00Z');
 const H = 3_600_000;
@@ -96,6 +97,7 @@ async function quietAlarm() {
 afterEach(async () => {
   await withCore((c) => {
     if (scheduler) (c as unknown as { ports: { scheduler: Scheduler } }).ports.scheduler = scheduler;
+    (c as unknown as { ports: Ports }).ports.archiveEvents = undefined;
   });
   scheduler = null;
 });
@@ -109,6 +111,13 @@ beforeEach(async () => {
   await cutover();
   runner = await register('vm-a');
   await productionSized(runner.id);
+  // Exercise the event lookup with an opted-in archive and a caught-up mirror.
+  await withCore((c) => {
+    (c as unknown as { ports: Ports }).ports.archiveEvents = async () => {
+      throw new Error('no events should be old enough to archive');
+    };
+    setMirrorAckedIn(c.store, 'docs', 'max');
+  });
   // The first ticks do their one-off work: the stalled five are raised, the live set recounted.
   await setClock(T0 + 60_000);
   await tick();

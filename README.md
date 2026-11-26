@@ -191,7 +191,7 @@ stores. The reader test uses vendored fixtures from Dibber's conformance suite.
   only lists, as undetermined, an older ticket without one. It also lists, never as a finding,
   the live tickets citing a rule amended since they were filed or re-read it (`check.rules`), and
   says so when a shallow clone skips that list.
-- `node cli/baton.mjs request "<one sentence>" --course C [--repo DIR] [--tier T] [--branch B]` —
+- `node cli/baton.mjs request "<one sentence>" --course C [--repo DIR] [--branch B]` —
   start a course whose product is a spec or a ticket — `create-spec`, `build-app` — from one
   sentence (B-98). Files one request ticket (the sentence as title and description, `course: C`,
   `tags: [request]`, the next free id under the repository's own prefix) as one commit pushed straight to the repository's default
@@ -280,11 +280,11 @@ baton key create ~/.config/baton/ops_owner                        # the owner's 
 
 ```
 baton admin -i ~/.config/baton/admin repo add immediately-run/ops --id ops --owner-key ops_owner.pub
-baton admin -i ~/.config/baton/admin repo set docs --weight 2        # or --tiers routine,judgement,critical
+baton admin -i ~/.config/baton/admin repo set docs --weight 2
 baton admin -i ~/.config/baton/admin grant docs --key op.pub --hostname op-mac --capabilities human-operator
 baton admin -i ~/.config/baton/admin revoke SHA256:…|bak_…           # any key, at once
 baton admin -i ~/.config/baton/admin open                            # a one-time dashboard link (5 minutes)
-baton owner -i ~/.config/baton/docs_owner grant docs --key vm.pub --hostname vm-a --capabilities agent-venue --max-tier judgement
+baton owner -i ~/.config/baton/docs_owner grant docs --key vm.pub --hostname vm-a --capabilities agent-venue
 baton owner -i ~/.config/baton/docs_owner bar docs --course '*' --tag account:go_plus --applies claim --starts-at 2026-10-17T00:00:00Z --reason go-quota
 baton owner -i ~/.config/baton/docs_owner settings docs --required-bar '*' --course roadmap-pr --except implement,review,adjudicate --tag-prefix family: \
                                                --retry 1h,4h --max-failed 3
@@ -292,10 +292,10 @@ baton owner -i ~/.config/baton/docs_owner settings docs --required-bar '*' --cou
 
 `--url` (or `BATON_URL`) picks the Baton. A key holds one role — administrator, owner, runner,
 probe, courier or sync — and a key in a second is `conflict`. A granted key works only where it
-is granted, with what that repository granted (rules 4 and 7) and under its `max_tier`; only an
+is granted, with what that repository granted (rules 4 and 7); only an
 administrator grants `human-operator`, or takes over a `BATON_KEYS`-seeded key. Owner bars join the posted barred tags of their course
 (or every course, `*`), at claims and, with `--applies claim+advance`, advances; a leg missing a
-required bar's tag prefix waits on `policy` under Needs you. Tiers, `retry` and
+required bar's tag prefix waits on `policy` under Needs you. `retry` and
 `transcript_repos` come only from Baton: a snapshot changes none of them. The dashboard shows them,
 read-only, on a repository's credential and governance screens (`…/grants`, `…/owners`,
 `…/settings`, `…/bars`); the CLI changes them.
@@ -366,7 +366,7 @@ For development and CI (BATON_SPEC §3a): the same core, on a SQLite file. It ne
 later (`node:sqlite` without a flag).
 
 ```
-npm run start:local -- --db ./baton.db --port 8787 [--origin <url>] [--admin-keys <file>] [--github-webhook-secret <file>] [--config <file>]
+npm run start:local -- --db ./baton.db --port 8787 [--origin <url>] [--admin-keys <file>] [--github-webhook-secret <file>] [--config <file>] [--event-archive <file>]
 ```
 
 - `--origin` is the instance's own origin (default `http://<host>:<port>`): the OIDC audience,
@@ -399,6 +399,25 @@ the `CLOUDFLARE_API_TOKEN` secret in the `production` environment (R3-1208): Wor
 Edit on the account, plus Zone: Read and Workers Routes: Edit on the `immediately.run` zone.
 
 The suite uses committed board fixtures and does not require a consumer checkout.
+
+### Event archive
+
+Event deletion is off by default (R-BTN-149). To enable it on Cloudflare, bind a private R2
+bucket as `BATON_EVENT_ARCHIVE` with `[[r2_buckets]]` in the deployment's Wrangler configuration.
+Use one bucket per instance and do not expire the archived objects. Each tick appends NDJSON
+pages to `events/<repository>/<UTC day>.ndjson` by conditionally replacing the daily object.
+If a write fails (including if the daily object exceeds R2's single-write limit), the entire
+event batch stays in SQLite.
+On the local host, pass `--event-archive <file>` to append and sync to a separate private NDJSON
+file in an existing directory on durable storage. Existing files must not grant group or
+other access. Do not share the file between instances or point it at SQLite files.
+
+Each line is a mirror feed page (`events`, `next`, `cutover_at`) plus its `repository`.
+The event records use the feed's projection, including for kinds the live feed omits.
+For replay, collect the pages for the repository, order events by `seq`, and deduplicate by
+`seq`: storage can acknowledge a batch even if the alarm did not get to delete it. A local
+append interrupted by a crash can leave an incomplete final line; the next append removes
+that tail before retrying the rows.
 
 ## Moving a Baton (R-BTN-88)
 

@@ -17,12 +17,12 @@
 //   baton admin -i KEY repo add <forge path> --owner-key PUB[,PUB…] [--id ID (default: the path's last segment)]
 //                [--forge github|gitlab|gitea|git] [--remote URL] [--web-base URL] [--default-branch main]
 //                [--sync-workflow PATH] [--mirror-workflow PATH] [--ci-identity none|github-actions|gitlab:<issuer>|gitlab-mirror:<issuer>]
-//                [--sync-key PUB[,…]] [--mirror-key PUB[,…]] [--weight N] [--tiers a,b,c] [--cut-over]
-//   baton admin -i KEY repo set ID [--weight N] [--tiers a,b,c] [--remote URL] [--web-base URL]
+//                [--sync-key PUB[,…]] [--mirror-key PUB[,…]] [--weight N] [--cut-over]
+//   baton admin -i KEY repo set ID [--weight N] [--remote URL] [--web-base URL]
 //                [--sync-workflow PATH|none] [--mirror-workflow PATH|none] [--ci-identity …]
 //                [--add-owner-key PUB[,…]] [--add-sync-key PUB[,…]] [--add-mirror-key PUB[,…]] [--remove-sync-key FP[,…]]
 //   baton admin -i KEY repo retire ID [--yes]
-//   baton admin -i KEY grant REPO --key PUB [--hostname H] --capabilities a,b [--max-tier T] [--max-claims N] [--deliver-interactions]
+//   baton admin -i KEY grant REPO --key PUB [--hostname H] --capabilities a,b [--max-claims N] [--deliver-interactions]
 //   baton admin -i KEY probe add --key PUB --label L
 //   baton admin -i KEY resource add NAME --scope account|service --schema FILE|JSON    (R-BTN-76)
 //   baton admin -i KEY instance add NAME --serves a,b --repositories x,y
@@ -40,13 +40,14 @@
 //                B-254 R-BTN-197 — raiseable, never below the code's)
 //   baton admin -i KEY resource set INSTANCE (--available | --unavailable [--until ISO]) [--valid-for 1h] [--detail FILE|JSON]
 //   baton blocked -i KEY TICKET                           baton blocked -i KEY --repository R --on KIND:REF [--transitive]
+//   baton leg why -i KEY TICKET [LEG]
 //                — why a ticket cannot move, or what waits on a ticket, a resource, a capability or a
 //                decision (R-BTN-75); `--on decision:*` is every decision waiting on a person
-//   baton admin -i KEY revoke FINGERPRINT                          baton admin -i KEY open
+//   baton admin -i KEY revoke FINGERPRINT [--yes]                  baton admin -i KEY open
 //   baton admin -i KEY state      — what the dashboard draws, as JSON, read with the key (B-118)
-//   baton owner -i KEY grant REPO --key PUB [--hostname H] --capabilities a,b [--label L] [--max-tier T] [--max-claims N] [--deliver-interactions]
-//   baton owner -i KEY revoke REPO FINGERPRINT
-//   baton owner -i KEY owners REPO (--add PUB | --remove FINGERPRINT)
+//   baton owner -i KEY grant REPO --key PUB [--hostname H] --capabilities a,b [--label L] [--max-claims N] [--deliver-interactions]
+//   baton owner -i KEY revoke REPO FINGERPRINT [--yes]
+//   baton owner -i KEY owners REPO (--add PUB | --remove FINGERPRINT [--yes])
 //   baton owner -i KEY sign [--message TEXT] [--repo DIR] -- <paths>…   (B-127: a commit signed
 //                the way require_signed_control counts — git's gpg.format ssh, the SSHSIG
 //                namespace `git`, the key -i names; plain `git commit -S` with git configured
@@ -59,8 +60,8 @@
 //   baton owner -i KEY policy show REPO                     — the signed read (R-BTN-189), as JSON
 //   baton owner -i KEY policy diff REPO FILE                — the knobs FILE's document would change
 //   baton owner -i KEY policy log REPO [--after N]          — the append-only change log
-//   baton owner -i KEY policy set REPO FILE --base N        — a compare-and-set on the version you read
-//   baton owner -i KEY policy apply REPO PRESET --base N    — cooperative | protected | protected-signed | plain-git
+//   baton owner -i KEY policy set REPO FILE --base N [--dry-run] — compare-and-set on the version you read
+//   baton owner -i KEY policy apply REPO PRESET --base N [--dry-run] — preview policy effects without writing
 //   baton owner -i KEY policy floor add REPO NAME --guarantees a,b [--remove-by human|owner]
 //   baton owner -i KEY policy floor remove REPO NAME        (R-BTN-189: needs the floor's remove_by and approvers.policy)
 //   baton owner -i KEY bar REPO --course C|'*' --tag T [--legs a,b] --applies claim|claim+advance
@@ -137,7 +138,7 @@
 //                since they were filed are listed, never a finding (R-BTN-74)
 //   baton tickets --help
 //                — the commands, the tags Baton reads and their meanings, the Requires: clause (B-112)
-//   baton request "<one sentence>" --course C [--repo DIR] [--tier T] [--branch B] [--remote R]
+//   baton request "<one sentence>" --course C [--repo DIR] [--branch B] [--remote R]
 //                [--forge github|gitlab|gitea|git]
 //                — start a course from one sentence, no hand-written ticket (B-98, R-BTN-131):
 //                files ONE request ticket (the sentence as title and description, course: C,
@@ -162,24 +163,18 @@
 //
 // The URL is `--url`, else BATON_URL, else the home in force's origin (B-121), else
 // https://baton.immediately.run.
-import { execFileSync } from 'node:child_process';
+import { git } from '../src/defaults/git.mjs';
 import { createHash, randomBytes } from 'node:crypto';
 import { existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { requestCredential, signHeaders, signingKey } from './sign.mjs';
-import { clientVersion, packageVersion, workingTreeOf } from './version.mjs';
-import { compareVersions, parseClientVersions } from '../src/shared/versions.mjs';
+import { signingKey } from '../src/client/sign.mjs';
+import { send } from '../src/client/send.mjs';
+/** @typedef {import('../src/client/send.mjs').BatonFetch} BatonFetch */
+import { DEFAULT_URL, homesPath } from '../src/client/config.mjs';
+export { send, DEFAULT_URL, homesPath };
+import { clientVersion, packageVersion, workingTreeOf } from '../src/client/version.mjs';
 
-export const DEFAULT_URL = 'https://baton.immediately.run';
-/** Where the CLI's homes.json sits (B-121): `$XDG_CONFIG_HOME` (or `~/.config`)/baton/
- *  homes.json — the directory keys.json, origins.json and runner.json's own rules name
- *  (R-BTN-137, R-BTN-144). Spelled here once and imported by src/defaults/homes.ts, so this
- *  file's fast path and the bundled home resolution read the same file. */
-export function homesPath(env = process.env) {
-  return join(env.XDG_CONFIG_HOME || join(env.HOME || homedir(), '.config'), 'baton', 'homes.json');
-}
 /** The package the pinned release command names (B-138): `npx --yes @immediately-run/baton@<version>`. */
 export const PINNED_PACKAGE = '@immediately-run/baton';
 const UNITS = { m: 60_000, h: 3_600_000, d: 86_400_000 };
@@ -187,9 +182,12 @@ const UNITS = { m: 60_000, h: 3_600_000, d: 86_400_000 };
 /** argv after the command: flags (each `--name value`, or a bare boolean) and positionals. The
  *  `--required-bar` groups keep their order, so each takes the flags that follow it. With
  *  `allowed`, a flag the command does not take is refused — never silently dropped (round 3, 3-A-1). */
+/** @param {readonly string[]} argv @param {readonly string[]} [booleans] @param {readonly string[] | null} [allowed] */
 export function parseArgs(argv, booleans = [], allowed = null, positionals = Infinity) {
+  /** @type {Record<string, string | true | undefined>} */
   const flags = {};
   const positional = [];
+  /** @type {{leg: string, course?: string, except?: string, 'tag-prefix'?: string}[]} */
   const groups = [];
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -208,7 +206,7 @@ export function parseArgs(argv, booleans = [], allowed = null, positionals = Inf
       continue;
     }
     const value = argv[++i];
-    if (value === undefined) throw new Error(`${a} needs a value`);
+    if (value === undefined || value.startsWith('--') || value === '-i') throw new Error(`${a} needs a value`);
     if (name === 'required-bar') groups.push({ leg: value });
     else if (groups.length && ['course', 'except', 'tag-prefix'].includes(name) && flags['required-bar-mode']) groups.at(-1)[name] = value;
     else flags[name] = value;
@@ -252,6 +250,7 @@ const time = (v, what) => {
   if (!Number.isFinite(t)) throw new Error(`${what}: not a date (${v})`);
   return t;
 };
+/** @param {string} v */
 export function duration(v) {
   const m = /^(\d+)([mhd])$/.exec(v);
   if (!m) throw new Error(`a duration is like 30m, 1h or 2d, not ${v}`);
@@ -259,9 +258,9 @@ export function duration(v) {
 }
 
 /** The version of the package this CLI ships in — the pin the B-138 refusal names — and the
- *  `Baton-Client` value every request names (R-BTN-197, B-254): `cli/version.mjs`'s, the leaf
+ *  `Baton-Client` value every request names (R-BTN-197, B-254): `src/client/version.mjs`'s, the leaf
  *  the runner's bundle also takes, re-exported where they have always been imported from. */
-export { clientVersion, packageVersion, workingTreeOf } from './version.mjs';
+export { clientVersion, packageVersion, workingTreeOf } from '../src/client/version.mjs';
 
 /** A word that keeps the shell it is copied into reading one argument (round 1): the refusal's
  *  suggested command must survive a key path with a space in it. */
@@ -279,7 +278,7 @@ function workingTreeRefusal(argv) {
  *  the owner and administrator commands' value-less flags (parseArgs booleans) are named here so
  *  `--yes --dev` still counts. An unknown boolean is read as value-taking, which refuses rather
  *  than bypasses — the safe direction. */
-const NO_VALUE_FLAGS = new Set(['transitive', 'cut-over', 'available', 'unavailable', 'clear', 'yes', 'release-holders', 'no-required-bars', 'require-signed-control', 'no-require-signed-control', 'watch', 'all']);
+const NO_VALUE_FLAGS = new Set(['transitive', 'cut-over', 'available', 'unavailable', 'clear', 'yes', 'release-holders', 'no-required-bars', 'require-signed-control', 'no-require-signed-control', 'watch', 'all', 'dry-run']);
 function devFlagPositions(argv) {
   const at = [];
   for (let i = 1; i < argv.length; i++) {
@@ -300,8 +299,21 @@ function devFlagPositions(argv) {
  * `homesContext` — supplying the repository a missing positional REPO or bare ticket id reads
  * in; a positional REPO or a qualified id always wins over it.
  */
+/** @param {string} role
+ * @param {string[]} argv
+ * @param {(path: string) => string} [readKey]
+ * @param {(path: string) => string} [readJson]
+ * @param {{repository: string | null, names: string[]} | null} [home]
+ * @returns {{method: string, path: string, body?: Record<string, unknown>, file?: string, readFile?: string, confirm?: {question: string, yes: boolean}, preflight?: {method: string, path: string, question: string}, yes?: boolean, resolveCodeRepos?: {repository: string, offline: {repo_id: string, owner_id: string} | null}}}
+ */
 export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? p : readFileSync(p, 'utf8').trim()), readJson = (p) => readFileSync(p, 'utf8'), home = null) {
   const [cmd, ...rest] = argv;
+  if (role === 'leg' && cmd === 'why') {
+    const { positional } = parseArgs(rest, [], [], 2);
+    const { repository, local } = ticketArg(need(positional[0], 'the ticket, <repository>:<id>'), home);
+    const leg = positional[1] ? `?${new URLSearchParams({ leg: positional[1] })}` : '';
+    return { method: 'GET', path: `/v1/repositories/${encodeURIComponent(repository)}/tickets/${encodeURIComponent(local)}/prerequisites${leg}` };
+  }
   if (role === 'blocked') {
     // R-BTN-75: a GET any key granted on the repository, an owner of it or an administrator signs.
     const { flags, positional } = parseArgs(argv, ['transitive'], ['on', 'repository'], 1);
@@ -348,7 +360,7 @@ export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? 
       const [sub, target, ...more] = rest;
       if (sub === 'add') {
         const { flags } = parseArgs(more, ['cut-over'], ['id', 'forge', 'remote', 'web-base', 'default-branch', 'sync-workflow', 'mirror-workflow', 'ci-identity',
-          'sync-key', 'mirror-key', 'weight', 'tiers', 'owner-key'], 0);
+          'sync-key', 'mirror-key', 'weight', 'owner-key'], 0);
         const path = need(target, 'the repository (its forge path, owner/name)');
         const keys = [...(list(flags['sync-key']) ?? []).map((k) => ({ public_key: readKey(k), role: 'sync' })), ...(list(flags['mirror-key']) ?? []).map((k) => ({ public_key: readKey(k), role: 'mirror' }))];
         return { method: 'POST', path: '/v1/admin/repositories', body: {
@@ -356,17 +368,17 @@ export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? 
           ...(flags.forge ? { forge: flags.forge } : {}), ...(flags.remote ? { remote: flags.remote } : {}), ...(flags['web-base'] ? { web_base: flags['web-base'] } : {}),
           ...(flags['sync-workflow'] ? { sync_workflow: flags['sync-workflow'] } : {}), ...(flags['mirror-workflow'] ? { mirror_workflow: flags['mirror-workflow'] } : {}),
           ...(flags['ci-identity'] ? { ci_identity: ciIdentity(flags['ci-identity']) } : {}), ...(keys.length ? { sync_keys: keys } : {}),
-          ...(flags.weight ? { weight: Number(flags.weight) } : {}), ...(flags.tiers ? { tiers: list(flags.tiers) } : {}), ...(flags['cut-over'] ? { cut_over: true } : {}),
+          ...(flags.weight ? { weight: Number(flags.weight) } : {}), ...(flags['cut-over'] ? { cut_over: true } : {}),
           owner_keys: need(list(flags['owner-key']), '--owner-key').map(readKey),
         } };
       }
       if (sub === 'set') {
-        const { flags } = parseArgs(more, [], ['weight', 'tiers', 'remote', 'web-base', 'sync-workflow', 'mirror-workflow', 'ci-identity',
+        const { flags } = parseArgs(more, [], ['weight', 'remote', 'web-base', 'sync-workflow', 'mirror-workflow', 'ci-identity',
           'add-owner-key', 'add-sync-key', 'add-mirror-key', 'remove-sync-key'], 0);
         const add = [...(list(flags['add-sync-key']) ?? []).map((k) => ({ public_key: readKey(k), role: 'sync' })), ...(list(flags['add-mirror-key']) ?? []).map((k) => ({ public_key: readKey(k), role: 'mirror' }))];
         const workflow = (v) => (v === 'none' ? null : v);
         const body = {
-          id: need(target, 'the repository id'), ...(flags.weight ? { weight: Number(flags.weight) } : {}), ...(flags.tiers ? { tiers: list(flags.tiers) } : {}),
+          id: need(target, 'the repository id'), ...(flags.weight ? { weight: Number(flags.weight) } : {}),
           ...(flags.remote ? { remote: flags.remote } : {}), ...(flags['web-base'] ? { web_base: flags['web-base'] } : {}),
           ...(flags['sync-workflow'] ? { sync_workflow: workflow(flags['sync-workflow']) } : {}), ...(flags['mirror-workflow'] ? { mirror_workflow: workflow(flags['mirror-workflow']) } : {}),
           ...(flags['ci-identity'] ? { ci_identity: ciIdentity(flags['ci-identity']) } : {}),
@@ -397,8 +409,12 @@ export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? 
       return { method: 'POST', path: '/v1/admin/probes', body: { public_key: readKey(need(flags.key, '--key')), label: need(flags.label, '--label'), instances: list(flags.instances) ?? [] } };
     }
     if (cmd === 'revoke') {
-      parseArgs(rest.slice(1), [], [], 0);
-      return { method: 'POST', path: `/v1/admin/keys/${encodeURIComponent(need(rest[0], 'the key fingerprint'))}/revoke`, body: {} };
+      const { flags, positional } = parseArgs(rest, ['yes'], [], 1);
+      const fp = need(positional[0], 'the key fingerprint');
+      return {
+        method: 'POST', path: `/v1/admin/keys/${encodeURIComponent(fp)}/revoke`, body: { confirm: true },
+        confirm: { question: `revoke key ${fp} throughout this Baton?`, yes: !!flags.yes },
+      };
     }
     if (cmd === 'open') {
       parseArgs(rest, [], [], 0);
@@ -509,17 +525,23 @@ export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? 
     if (cmd === 'revoke') {
       // B-121: with a home in force the repository position may be omitted, the fingerprint
       // alone remaining.
-      const fpOnly = home?.repository != null && rest.length === 1;
-      const repo = repoOrHome(fpOnly ? undefined : rest[0], home);
-      const fp = need(fpOnly ? rest[0] : rest[1], 'the key fingerprint');
-      parseArgs(rest.slice(fpOnly ? 1 : 2), [], [], 0);
-      return { method: 'POST', path: `/v1/owner/${encodeURIComponent(repo)}/grants/${encodeURIComponent(fp)}/revoke`, body: {} };
+      const { flags, positional } = parseArgs(rest, ['yes'], [], 2);
+      const fpOnly = home?.repository != null && positional.length === 1;
+      const repo = repoOrHome(fpOnly ? undefined : positional[0], home);
+      const fp = need(fpOnly ? positional[0] : positional[1], 'the key fingerprint');
+      return {
+        method: 'POST', path: `/v1/owner/${encodeURIComponent(repo)}/grants/${encodeURIComponent(fp)}/revoke`, body: { confirm: true },
+        confirm: { question: `revoke the grant of ${fp} on ${repo}?`, yes: !!flags.yes },
+      };
     }
     if (cmd === 'owners') {
-      const { flags, positional } = parseArgs(rest, [], ['add', 'remove'], 1);
+      const { flags, positional } = parseArgs(rest, ['yes'], ['add', 'remove'], 1);
       const repo = repoOrHome(positional[0], home);
       if (flags.add) return { method: 'POST', path: `/v1/owner/${repo}/owners`, body: { public_key: readKey(flags.add) } };
-      if (flags.remove) return { method: 'POST', path: `/v1/owner/${repo}/owners`, body: { fingerprint: flags.remove, remove: true } };
+      if (flags.remove) return {
+        method: 'POST', path: `/v1/owner/${repo}/owners`, body: { fingerprint: flags.remove, remove: true, confirm: true },
+        confirm: { question: `remove owner ${flags.remove} from ${repo}?`, yes: !!flags.yes },
+      };
       throw new Error('baton owner owners REPO --add PUB | --remove FINGERPRINT');
     }
     if (cmd === 'bar' && rest[0] === 'lift') {
@@ -617,10 +639,13 @@ export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? 
   throw new Error('baton admin … | baton owner … | baton board REPO');
 }
 
-const GRANT_FLAGS = ['key', 'hostname', 'label', 'capabilities', 'max-tier', 'max-claims'];
+const GRANT_FLAGS = ['key', 'hostname', 'label', 'capabilities', 'max-claims'];
 
 /** §12.2's ask under a destructive action: `--yes` answers the prompt beforehand; without a
  *  TTY the command refuses rather than prompt a pipe. `out` and `in` are injected for the test. */
+/** @typedef {{write(text: string): unknown}} PromptOutput */
+/** @typedef {{isTTY?: boolean, once(event: 'data', listener: (data: unknown) => void): unknown}} PromptInput */
+/** @param {string} question @param {boolean} yes @param {PromptOutput} out @param {PromptInput} input */
 export async function confirmAsk(question, yes, out, input) {
   if (yes) return true;
   if (!input.isTTY) {
@@ -637,6 +662,8 @@ export async function confirmAsk(question, yes, out, input) {
 /** R-BTN-178's confirm (B-106): print every course whose legs require the capability, with the
  *  type's definition in each, then ask. `--yes` answers beforehand; without a TTY the command
  *  refuses rather than prompt a pipe. `out` and `in` are injected for the test. */
+/** @param {{ requiring?: readonly {repository: string, course: string, version: number, legs: string[], type?: {description?: string, values?: string} | null}[], capacities?: readonly {capability: string, capacity: number | null, set_at: number, set_by: string}[] } | null} answer
+ * @param {string} question @param {boolean} yes @param {PromptOutput} out @param {PromptInput} input */
 export async function confirmCapacity(answer, question, yes, out, input) {
   const requiring = Array.isArray(answer?.requiring) ? answer.requiring : [];
   if (requiring.length) {
@@ -668,6 +695,7 @@ function jsonArg(v, readJson) {
  *  resolver fills them from the home's registration); a well-known host implies its forge.
  *  `--forge-ids <repo>,<owner>` supplies the ids offline for one entry; otherwise `main`
  *  reads them from the entry's forge before the PUT goes out. Pure, beside `plan`. */
+/** @param {string} value @param {string | null} [forgeIds] */
 export function codeReposSpec(value, forgeIds = null) {
   const known = { 'github.com': 'github', 'gitlab.com': 'gitlab', 'gitea.com': 'gitea' };
   let offline = null;
@@ -695,6 +723,7 @@ export function codeReposSpec(value, forgeIds = null) {
 }
 
 /** B-182 (R-BTN-139): `--pushers` — `id[@host]`, a comma list; a host-less entry is the home's. */
+/** @param {string} value */
 export function pushersSpec(value) {
   return list(value).map((raw) => {
     const at = raw.lastIndexOf('@');
@@ -711,6 +740,12 @@ export function pushersSpec(value) {
  *  home's forge and host — read from its registration, one signed GET — and each entry's ids are
  *  read from its forge with the operator's token for that host (GITHUB_TOKEN, GITLAB_TOKEN,
  *  GITEA_TOKEN), or taken from the `--forge-ids` the spec already folded in. */
+/** @param {string} url
+ * @param {string} keyFile
+ * @param {{path: string, forge?: string | null, host?: string | null, repo_id?: number | string | null, owner_id?: number | string | null}[]} entries
+ * @param {{repository?: string, fetchImpl?: BatonFetch, env?: NodeJS.ProcessEnv}} [options]
+ * @returns {Promise<{path: string, forge: string, host: string, repo_id: string | number, owner_id: string | number}[]>}
+ */
 export async function resolveCodeRepos(url, keyFile, entries, { repository, fetchImpl = fetch, env = process.env } = {}) {
   let home = null;
   if (entries.some((e) => e.forge == null || e.host == null)) {
@@ -784,7 +819,7 @@ function ciIdentity(v) {
 function grantBody(flags, readKey, extra) {
   return {
     ...extra, public_key: readKey(need(flags.key, '--key')), ...(flags.hostname ? { hostname: flags.hostname } : {}), ...(flags.label ? { label: flags.label } : {}),
-    capabilities: list(flags.capabilities) ?? [], ...(flags['max-tier'] ? { max_tier: flags['max-tier'] } : {}),
+    capabilities: list(flags.capabilities) ?? [],
     // R-BTN-4 (B-188): how many claims the key's runner may hold at once while claiming here.
     ...(flags['max-claims'] ? { max_claims: Number(flags['max-claims']) } : {}),
     ...(flags['deliver-interactions'] ? { deliver_interactions: true } : {}),
@@ -795,6 +830,7 @@ function grantBody(flags, readKey, extra) {
  *  anywhere. FILE (mode 0600) holds the key, for `-i FILE` or a runner's BATON_KEY_FILE;
  *  FILE.pub holds its public line — what BATON_ADMIN_KEYS lists, `--owner-key FILE.pub` or
  *  `--key FILE.pub` registers. */
+/** @param {string} file */
 export function createApiKey(file, comment = '') {
   if (existsSync(file) || existsSync(`${file}.pub`)) throw new Error(`${file} or ${file}.pub already exists`);
   const key = `bak_${randomBytes(8).toString('hex')}_${randomBytes(32).toString('hex')}`;
@@ -804,74 +840,12 @@ export function createApiKey(file, comment = '') {
   return line;
 }
 
-/** A redirect, named for what it is (B-80): an intermediary in front of Baton — Cloudflare
- *  Access's login — answered, so the request never reached Baton. */
-const redirectAnswered = (target, status, to) => new Error(
-  `a redirect answered ${target}${status ? ` (HTTP ${status}${to ? ` to ${to}` : ''})` : ''} — not followed; the request never reached Baton (an Access login in front of it?)`,
-);
-
-/** Send a planned request, signed with `keyFile` — or, when it holds an API key (R-BTN-159),
- *  with that key as a bearer. Returns `{status, json, text}`: `json` is null when the body is
- *  not JSON, `text` the body as it arrived, for the caller to show. A redirect is refused,
- *  never followed (B-80): a 3xx is an error naming what answered — a login page in front of
- *  Baton is not Baton's answer. R-BTN-197 (B-254): every request says which client it is
- *  (`Baton-Client`, `clientVersion`'s one place), and the first answer that names a
- *  `recommended` above it draws the warning — once per command, on stderr, so a script's
- *  stdout stays its own. `client` names the version for a test (a CLI this code never shipped
- *  as); a command's own requests are always `clientVersion()`'s. */
-let saidClientVersions = false;
-export async function send(url, p, keyFile, fetchImpl = fetch, client = clientVersion()) {
-  const cred = requestCredential(keyFile);
-  const target = new URL(p.path, url).toString();
-  // A GET carries no body; its digest is of the empty one.
-  const body = p.method === 'GET' ? undefined : JSON.stringify(p.body ?? {});
-  const auth = cred.bearer ? { Authorization: `Bearer ${cred.bearer}` } : signHeaders({ method: p.method, url: target, body, key: cred.key });
-  const headers = { 'Baton-Client': client, ...(body === undefined ? {} : { 'Content-Type': 'application/json' }), ...auth };
-  // A Baton that does not answer in 30 seconds is reported, never waited on for ever (round 3, 3-A-5).
-  let res;
-  try {
-    // A 3xx is never followed (B-80): `redirect: 'error'` makes fetch refuse it outright.
-    res = await fetchImpl(target, { method: p.method, headers, body, redirect: 'error', signal: AbortSignal.timeout(30_000) });
-  } catch (e) {
-    // `redirect: 'error'` surfaces that refusal as a fetch failure whose cause names it: report
-    // what happened, not the generic failure (B-80).
-    if (/redirect/i.test(`${e?.message ?? ''} ${e?.cause?.message ?? ''}`)) throw redirectAnswered(target);
-    throw e;
-  }
-  // A fetch stand-in may hand the 3xx back instead of throwing: the same refusal (B-80).
-  if (res.status >= 300 && res.status < 400) throw redirectAnswered(target, res.status, res.headers.get('location'));
-  warnClientVersions(res.headers.get('Baton-Client-Versions'), client);
-  const raw = await res.text();
-  let json = null;
-  try {
-    json = JSON.parse(raw);
-  } catch {
-    json = null;
-  }
-  return { status: res.status, json, text: raw };
-}
-
-/** R-BTN-197: `baton: this CLI is <version>; Baton recommends <recommended> and refuses below
- *  <min>`, said at most once per command (one command is one process), only when the
- *  recommendation is above this CLI's version — compared by semver precedence, `+dev` taking no
- *  part. An answer that recommends nothing above it says nothing and spends nothing: a later
- *  answer of the same command that does (an administrator raised it mid-run) still gets its
- *  line. Nothing installs or switches anything: the header carries version numbers only, and
- *  updating stays the operator's act. */
-function warnClientVersions(headerValue, client) {
-  if (saidClientVersions || headerValue == null) return;
-  const served = parseClientVersions(headerValue);
-  if (!served) return;
-  if (compareVersions(client.replace(/^baton\//, ''), served.recommended) >= 0) return;
-  saidClientVersions = true;
-  process.stderr.write(`baton: this CLI is ${client}; Baton recommends ${served.recommended} and refuses below ${served.min}\n`);
-}
-
 /** The base a course change is judged against: `--base`, else the remote's default branch. */
+/** @param {string} root */
 export function defaultBase(root) {
   for (const ref of ['origin/HEAD', 'origin/main']) {
     try {
-      execFileSync('git', ['-C', root, 'rev-parse', '--verify', '--quiet', `${ref}^{commit}`], { stdio: 'ignore' });
+      git(root, ['rev-parse', '--verify', '--quiet', `${ref}^{commit}`], { stdio: 'ignore' });
       return ref;
     } catch {
       // not there: the next one
@@ -890,8 +864,7 @@ async function testCourse(argv) {
   if (base === null && flags.base !== 'none') throw new Error(`no origin/HEAD or origin/main in ${root}: pass --base REF (fetch the base first), or --base none to skip the removal rule`);
   const { bundleLocal } = await import('../scripts/bundle.mjs');
   const kit = await bundleLocal('src/local/testCourse.ts', 'test-course.mjs');
-  const input = await kit.readInputs(root, positional[1], { base, board: flags.board ?? null });
-  const violations = await kit.checkCourse(input);
+  const { input, violations } = await kit.checkCheckout(root, positional[1], { base, board: flags.board ?? null });
   const said = [
     `course ${positional[1]} in ${root}`,
     base ? `against ${base}${input.base ? '' : ' (no such course there: a new course)'}` : 'with --base none (the removal rule is not checked)',
@@ -931,6 +904,7 @@ async function decisionList(argv) {
  * the tests check the request without a Baton. `homeRepository` (B-121) is the home in force's
  * repository, which a bare local id reads in; a qualified id wins over it.
  */
+/** @param {string} ticket @param {string} option @param {string | null} [ref] @param {string | null} [homeRepository] */
 export function answerPlan(ticket, option, ref, homeRepository = null) {
   const s = String(ticket);
   const i = s.indexOf(':');
@@ -980,6 +954,7 @@ const canonical = (v) => Array.isArray(v) ? `[${v.map(canonical).join(',')}]`
 
 /** The knobs a change from `oldDoc` to `newDoc` touches — `baton owner policy diff` (pure, so
  *  the tests check it alone). */
+/** @param {unknown} oldDoc @param {unknown} newDoc */
 export function policyDiff(oldDoc, newDoc) {
   return POLICY_KNOBS.filter((k) => canonical(knobOf(oldDoc, k)) !== canonical(knobOf(newDoc, k)));
 }
@@ -993,6 +968,8 @@ async function policyMain(argv) {
   // REPO` is the documented form — or after it, as every other command takes them. B-121:
   // `--home` rides along the same way, and the home in force supplies the repository the
   // missing positional names and the origin a missing --url/BATON_URL calls.
+  // Validate adjacency before separating global options from command options.
+  parseArgs(argv, ['dry-run', 'yes']);
   const isFlagOrValue = (_, i, a) => a[i] === '-i' || a[i - 1] === '-i' || a[i] === '--url' || a[i - 1] === '--url' || a[i] === '--home' || a[i - 1] === '--home';
   const { flags: globalFlags } = parseArgs(argv.filter(isFlagOrValue));
   const args = argv.filter((x, i, a) => !isFlagOrValue(x, i, a));
@@ -1037,7 +1014,7 @@ async function policyMain(argv) {
     return 0;
   }
   if (sub === 'set' || sub === 'apply') {
-    const { flags, positional } = parseArgs(rest, [], ['base', 'identity', 'url'], 2);
+    const { flags, positional } = parseArgs(rest, ['dry-run'], ['base', 'identity', 'url'], 2);
     // B-121: with a home in force the repository may be omitted — one positional is the file or
     // preset, the named repository (two positionals) always winning over the home.
     const fromHome = home?.repository != null && positional.length === 1;
@@ -1048,6 +1025,7 @@ async function policyMain(argv) {
     // so a concurrent change is a `conflict` the operator sees, never one this overwrites.
     const base = need(baseOf(flags.base), '--base N (the version your change builds on — `baton owner policy show` names it; a stale one answers conflict)');
     const body = sub === 'apply' ? { base_version: base, preset: what } : { base_version: base, policy: JSON.parse(readFileSync(what, 'utf8')) };
+    if (flags['dry-run']) body.dry_run = true;
     const out = await request('PUT', `/v1/owner/${encodeURIComponent(repo)}/policy`, body);
     write(JSON.stringify(out.json));
     return out.status >= 200 && out.status < 300 ? 0 : 1;
@@ -1063,12 +1041,15 @@ async function policyMain(argv) {
     return out.status >= 200 && out.status < 300 ? 0 : 1;
   }
   if (sub === 'floor' && rest[0] === 'remove') {
-    const { positional } = parseArgs(rest.slice(1), [], ['identity', 'url'], 2);
+    const { flags, positional } = parseArgs(rest.slice(1), ['yes'], ['identity', 'url'], 2);
     // B-121: with a home in force the repository may be omitted — one positional is the floor.
     const fromHome = home?.repository != null && positional.length === 1;
     const [repoArg, nameArg] = fromHome ? [home.repository, positional[0]] : positional;
-    const out = await request('POST', `/v1/owner/${encodeURIComponent(repoOrHome(repoArg, home))}/policy/floors`,
-      { name: need(nameArg, 'the floor name'), remove: true, confirm: true });
+    const repo = repoOrHome(repoArg, home);
+    const name = need(nameArg, 'the floor name');
+    if (!(await confirmAsk(`remove policy floor ${name} from ${repo}?`, flags.yes, process.stdout, process.stdin))) return 1;
+    const out = await request('POST', `/v1/owner/${encodeURIComponent(repo)}/policy/floors`,
+      { name, remove: true, confirm: true });
     write(JSON.stringify(out.json));
     return out.status >= 200 && out.status < 300 ? 0 : 1;
   }
@@ -1097,13 +1078,14 @@ const arrived = (text) => (text.length > 300 ? `${text.slice(0, 300)}…` : text
  *  itself); the fast path reads homesPath, spelled once above. */
 async function homesContext(flag, explicitUrl = null) {
   if (flag === undefined && process.env.BATON_HOME == null && !existsSync(homesPath())) return { inForce: null, names: [] };
-  const { resolveHomes } = await import('../scripts/baton-cli.mjs');
+  const { resolveHomes } = (await import('../scripts/baton-cli.mjs')).default;
   return resolveHomes({ flag, env: process.env, explicitUrl });
 }
 
 /** The one management path's exit: 0 when Baton answered its JSON, 1 when the answer was not
  *  Baton's — a refusal, or a 2xx body that is not JSON (B-80) — and any error thrown up to the
  *  caller (the CLI prints `baton: …` and exits 2). Exported for the tests of that contract. */
+/** @param {string[]} argv @returns {Promise<number>} */
 export async function main(argv) {
   // B-138: an owner or administrator key signs with the code that reads it, so the CLI that
   // takes one is a pinned release — never a git working tree, whose code a push (a branch a leg
@@ -1119,6 +1101,11 @@ export async function main(argv) {
     }
   }
   if (argv[0] === 'test-course') return testCourse(argv.slice(1));
+  if (argv[0] === 'course' && argv[1] === 'show' && !argv.slice(2).some((a) => a.startsWith('-'))) {
+    const { showCourseMain } = (await import('../scripts/baton-cli.mjs')).default;
+    return showCourseMain(argv.slice(2));
+  }
+  if (argv[0] === 'course' && argv[1] === 'test') return testCourse(argv.slice(2));
   if (argv[0] === 'key') {
     if (argv[1] !== 'create' || !argv[2]) throw new Error('baton key create FILE [--comment TEXT]');
     const { flags } = parseArgs(argv.slice(3), [], ['comment'], 0);
@@ -1181,7 +1168,7 @@ export async function main(argv) {
         else throw new Error(`${args[i]}: not a flag of \`baton owner sign\` (-m TEXT, --repo DIR, -- <paths>)`);
       }
       if (!paths.length) throw new Error('baton owner sign names no path: commit paths explicitly (`-- .baton/baton.json`), the way a leg does — never the whole tree');
-      const out = execFileSync('git', ['-C', repo, '-c', 'gpg.format=ssh', `-c`, `user.signingkey=${realpathSync(keyFile)}`, 'commit', '-S', '--no-verify', '-m', message, '--', ...paths], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+      const out = git(repo, ['-c', 'gpg.format=ssh', '-c', `user.signingkey=${realpathSync(keyFile)}`, 'commit', '-S', '--no-verify', '-m', message, '--', ...paths]);
       process.stdout.write(out);
       process.stderr.write(`baton: signed with ${keyFile} — a commit \`require_signed_control\` counts (B-127)\n`);
       return 0;
@@ -1210,7 +1197,7 @@ export async function main(argv) {
         process.stdout.write(`${JSON.stringify(read.json)}\n`);
         return 1;
       }
-      const { verifyConfigMain } = await import('../scripts/baton-cli.mjs');
+      const { verifyConfigMain } = (await import('../scripts/baton-cli.mjs')).default;
       // B-121: the resolved repository is passed with the keys, so the omitted-REPOSITORY form
       // names the repository in its own refusal too (verifyConfigMain's word for it).
       return await verifyConfigMain(args, { keys: read.json?.keys ?? [], ...(positional.length ? {} : { repository }) });
@@ -1226,36 +1213,36 @@ export async function main(argv) {
   if (argv[0] === 'home') {
     // B-121: the CLI's homes — local configuration, no request (R-BTN-129's actions are not
     // theirs). The command lives in src/defaults/homes.ts, bundled beside the ticket commands.
-    const { homeMain } = await import('../scripts/baton-cli.mjs');
+    const { homeMain } = (await import('../scripts/baton-cli.mjs')).default;
     return homeMain(argv.slice(1));
   }
   if (argv[0] === 'run' || (argv[0] === 'runner' && argv[1] === 'start')) {
     // §6.13: the runner is TypeScript under src/runner; bundle it (a checkout runs the CLI with
     // its devDependencies), then run it in this process's stead.
-    const { runMain } = await import('../scripts/baton-run.mjs');
+    const { runMain } = (await import('../scripts/baton-run.mjs')).default;
     return runMain(argv.slice(argv[0] === 'run' ? 1 : 2));
   }
   if (argv[0] === 'queue') {
     // R-BTN-202 (B-248): this host's local work queue for the runners on one home — local
     // files only, never a request to Baton.
-    const { queueCommand } = await import('../scripts/baton-run.mjs');
+    const { queueCommand } = (await import('../scripts/baton-run.mjs')).default;
     return queueCommand(argv.slice(1));
   }
   if (argv[0] === 'leg' && argv[1] === 'replay') {
     // §9.8 R-BTN-84: re-run one recorded leg run without a claim — the replay half of the
     // runner-side bundle, read with the owner's or administrator's key the flags name.
-    const { replayMain } = await import('../scripts/baton-run.mjs');
+    const { replayMain } = (await import('../scripts/baton-run.mjs')).default;
     return replayMain(argv.slice(2));
   }
-  if (argv[0] === 'leg' && argv[1] === 'raise') {
-    // R-BTN-106, R-BTN-160, R-BTN-195 (B-234): raise a condition from the leg this command
-    // runs in, on its channel — the runner checks it, answers it, and reports what passes.
-    const { raiseMain } = await import('../scripts/baton-leg.mjs');
-    return raiseMain(argv.slice(2));
+  if (argv[0] === 'leg' && ['raise', 'status', 'output', 'done', 'suspend', 'release'].includes(argv[1])) {
+    // R-BTN-106, R-BTN-160, R-BTN-195 (B-234, B-47): a leg's moves and raises on its channel —
+    // the runner checks each and answers it, and reports what passes.
+    const { legMain } = (await import('../scripts/baton-leg.mjs')).default;
+    return legMain(argv.slice(1));
   }
   if (argv[0] === 'repo' && (argv[1] === 'sync' || argv[1] === 'init' || argv[1] === 'migrate-markers')) {
     // §2f, R-BTN-127's names: the defaults are TypeScript under src/defaults, bundled the same way.
-    const { parseSyncArgs, syncMain, initMain, migrateMarkersMain } = await import('../scripts/baton-cli.mjs');
+    const { parseSyncArgs, syncMain, initMain, migrateMarkersMain } = (await import('../scripts/baton-cli.mjs')).default;
     if (argv[1] === 'sync') return syncMain(parseSyncArgs(argv.slice(2)));
     if (argv[1] === 'migrate-markers') return migrateMarkersMain(argv.slice(2));
     return initMain(argv.slice(2));
@@ -1263,13 +1250,13 @@ export async function main(argv) {
   if (argv[0] === 'tickets') {
     // B-111's check, and B-112's ticket commands: repository commands in the defaults beside
     // `repo sync` (src/defaults/tickets.ts), each writing one commit pushed to the default branch.
-    const { ticketsMain } = await import('../scripts/baton-cli.mjs');
+    const { ticketsMain } = (await import('../scripts/baton-cli.mjs')).default;
     return ticketsMain(argv.slice(1));
   }
   if (argv[0] === 'request') {
     // B-98: a course started from one sentence. A repository command — it commits the request
     // ticket and pushes it — so it lives in the defaults beside `tickets check` (src/defaults/request.ts).
-    const { requestMain } = await import('../scripts/baton-cli.mjs');
+    const { requestMain } = (await import('../scripts/baton-cli.mjs')).default;
     return requestMain(argv.slice(1));
   }
   const [role, ...rest] = argv;

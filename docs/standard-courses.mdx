@@ -18,7 +18,7 @@ rely on it.
 
 | course | what it does | legs | where it ends |
 |---|---|---|---|
-| `create-pr` | builds a ticket in a PR, gates every review round behind a deterministic test run, reviews it in up to three rounds, fixes, hands the third round's blockers to the owner, merges | implement, run-tests, review, fix, adjudicate, merge, and the person leg confirm | `merged`, `confirmed` |
+| `create-pr` | builds a ticket in a PR, gates every review round behind a deterministic test run, reviews it in up to three rounds, fixes, hands the third round's blockers to the owner, merges | implement, run-tests, review, fix, adjudicate, merge, the person leg confirm, and archive | `merged`, `archived` |
 | `review-pr` | reviews a PR someone else opened, in rounds, and concludes with a summary | review, conclude | `approved` or `concluded` |
 | `bug-report` | traces a reported bug to its cause and the artifact that seeded it, dedupes it by cause, files the fix ticket or folds the report into the one that covers it, weighs prevention | trace, origin, dedupe, file or fold, prevent | `closed` |
 | `draft-ticket` | researches, drafts and files a ticket that prescribes its architecture, tests and requirements | research, draft, check | `filed` |
@@ -77,6 +77,13 @@ runs nothing and leaves no marker: it suspends with `review` next, and the sync 
 from that CI. Only a ticket with several PRs at home, which the gate cannot choose between,
 waits on the owner as `run-tests-unreachable`, whose `skip` waives the gate for it.
 
+**Review may run under the credential that wrote the change.** `review` names nothing in
+`no_chain_from` ([R-BTN-106](../spec/BATON_SPEC/08-runners.md#sec-8-3)): each leg runs in its own
+sandbox, isolated from the others, so a different credential adds no independence, and a
+deployment with one runner must still be able to review (the owner, 2026-11-25; B-30 had set
+`implement` and `fix` there). The review instructions require a different model when the runner
+offers one.
+
 ## A ticket already delivered
 
 An `implement` agent that finds the whole ticket already on the default branch opens no PR and
@@ -86,10 +93,22 @@ runner-main.test.ts 47 passed, typecheck clean`. The stub fetches the default br
 every named commit is on it; one that is not refuses the answer and fails the leg. Otherwise the
 leg reaches `delivered` — an outcome, not a failed attempt — with the commit as the end's
 evidence and the line as its detail, shown on the ticket's history. There the person leg
-`confirm` waits, under Needs you: `baton decision answer <repository>:<ticket> confirmed` closes
-it at the end station `confirmed`; `filed` sends it back to `implement`. The agent's word alone
-never closes a ticket. The ticket's file still says what it said; `dibber done <ticket>`
-closes it as for any ticket closed by hand.
+`confirm` waits for a direct answer from the owner under Needs you; an answer in git does not
+count. `baton decision answer <repository>:<ticket> confirmed` queues the deterministic `archive`
+leg; `filed` sends it back to `implement` without writing to git and another delivery opens a
+fresh question. `archive` runs the pinned `dibber done` (the host's `BATON_DIBBER`, else the pin) to
+mark the ticket `done` in place, then `git mv`s it to `archive/` — Dibber has no move verb, and a
+move writes no ticket content — in one commit the leg pushes itself. Dibber finds a ticket by its
+canonical name (`<id>.md` or `<id>.mdx`), so a file named otherwise is refused unwritten; relative
+links in the moved file are left as written. The commit names the
+latest delivery's commits, and the next sync observes the closure without another person step.
+On upgrade, a legacy git confirmation reopens the owner's question rather than queuing archive.
+If a legacy end truncated its commit list, the archive lists only the complete recorded commit
+ids and explicitly notes that the evidence is incomplete.
+Upgrade Baton before posting the new course, and use a runner that declares
+`runner:claim-evidence` for the archive leg. The agent's word
+alone never closes a ticket. If the commit list cannot fit in the end record, the delivered
+answer is refused rather than silently dropping commit ids.
 
 ## Work done outside Baton
 

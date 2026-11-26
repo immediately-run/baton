@@ -16,7 +16,10 @@
 // key keeps its own hold; two tickets of one post never share a key. The sync's and the
 // runner's halves are S-BTN-207's (Node only: real git).
 import { describe, it, expect, beforeEach } from 'vitest';
-import { claimItem, claimRow, cutover, Git, observe, placed, register, rows, setClock, syncCall, withCore } from '../helpers';
+import {
+  claimItem, claimRow, cutover, Git, observe, placed, register, rows, setClock, syncCall, withCore,
+  clearPolicyFloors, seedPolicyFloor, seedTicketOverride,
+} from '../helpers';
 import { checkPayload } from '../../src/core/board';
 
 const T0 = Date.parse('2026-11-06T12:00:00Z');
@@ -27,7 +30,7 @@ const CURRENT = { source: { kind: 'custom' as const, versions: 'current' as cons
  *  ticket), a stable `key`, an opaque `version` — a store stamp over a digest, the spec's
  *  recommendation (§4.2). */
 const tracked = (id: string, version: string, over: Record<string, unknown> = {}) => ({
-  id, version, key: `linear:issue-${id}`, path: undefined, course_id: 'roadmap-pr', title: `${id} — a tracked ticket`, tier: 'routine', requires: [],
+  id, version, key: `linear:issue-${id}`, path: undefined, course_id: 'roadmap-pr', title: `${id} — a tracked ticket`, requires: [],
   operator_only: false, expedite: false, depends_on: [], blocked_by: [], repos: ['immediately-run/docs'], rank: 0, ...over,
 });
 const FILED = placed('filed', [], [['implement', 'ready']]);
@@ -102,7 +105,7 @@ describe('S-BTN-206 opaque ticket versions', () => {
     git.add('T-1', tracked('T-1', 'rev-1:aaaaaaaa'), FILED);
     await git.post(CURRENT);
     // The old id's owner state: a hold with a backoff (§6.10).
-    await rows(`INSERT INTO ticket_overrides (ticket_id, hold, hold_reason, retry_after, set_by, set_at) VALUES ('docs:T-1', 1, 'owner', ?, 'owner:x', ?)`, T0 + 3_600_000, T0);
+    await seedTicketOverride({ ticket_id: 'docs:T-1', hold: 1, hold_reason: 'owner', retry_after: T0 + 3_600_000, set_by: 'owner:x', set_at: T0 });
     // The tracker renumbers: the same key returns under a new id (R-BTN-147).
     git.close('T-1', 'withdrawn');
     git.add('T-9', tracked('T-9', 'rev-1:aaaaaaaa', { key: 'linear:issue-T-1' }), FILED);
@@ -122,7 +125,7 @@ describe('S-BTN-206 opaque ticket versions', () => {
   it('a current source posting to a repository with a tickets-approved floor is refused, naming the guarantee; pinned and markdown posts are not', async () => {
     // The deployment's floor (§12.8, R-BTN-189), seeded as the owner route writes it: the
     // guarantee is defined over a ticket file's approval (R-BTN-184).
-    await rows(`INSERT INTO policy_floors (repository_id, name, guarantees, remove_by, added_by, added_at) VALUES ('docs', 'floor', '["tickets-approved"]', 'human', 'admin:x', ?)`, T0);
+    await seedPolicyFloor({ repository_id: 'docs', name: 'floor', guarantees: '["tickets-approved"]', remove_by: 'human', added_by: 'admin:x', added_at: T0 });
     try {
       const git = new Git();
       git.add('T-1', tracked('T-1', 'rev-1:aaaaaaaa'), FILED);
@@ -137,7 +140,7 @@ describe('S-BTN-206 opaque ticket versions', () => {
       expect(await git.post({ source: { kind: 'custom', versions: 'pinned', cli: '0.0.0-test' } })).toMatchObject({ status: 200, ok: true });
       expect(await git.post({ source: { kind: 'markdown', versions: 'pinned', cli: '0.0.0-test' } })).toMatchObject({ status: 200, ok: true });
     } finally {
-      await rows(`DELETE FROM policy_floors WHERE repository_id = 'docs'`);
+      await clearPolicyFloors('docs');
     }
   });
 
@@ -230,7 +233,7 @@ describe('S-BTN-206 opaque ticket versions', () => {
     const out = await withCore(async (c) => {
       const core = c as unknown as {
         registry: { get(id: string): unknown };
-        rowsFor: (repo: unknown, p: { sha: string }) => Promise<unknown>;
+        rowsFor: (p: { sha: string }) => Promise<unknown>;
         board: (repo: unknown, p: unknown) => Promise<unknown>;
         observations: { observe: (r: string) => { observation: number } };
       };
@@ -240,8 +243,8 @@ describe('S-BTN-206 opaque ticket versions', () => {
       let release!: () => void;
       const gate = new Promise<void>((r) => { release = r; });
       // Hold only the refresh's hashing (its payload's sha is the head); the second run's flows on.
-      core.rowsFor = async (r2, p) => {
-        const hashed = await orig(r2, p);
+      core.rowsFor = async (p) => {
+        const hashed = await orig(p);
         if (p.sha === head) await gate;
         return hashed;
       };
@@ -295,8 +298,8 @@ describe('S-BTN-206 opaque ticket versions', () => {
     git.add('T-1', tracked('T-1', 'rev-1:aaaaaaaa'), FILED);
     git.add('T-2', tracked('T-2', 'rev-1:dddddddd'), FILED);
     await git.post(CURRENT);
-    await rows(`INSERT INTO ticket_overrides (ticket_id, hold, hold_reason, retry_after, set_by, set_at) VALUES ('docs:T-1', 1, 'one', ?, 'owner:x', ?)`, T0 + 3_600_000, T0);
-    await rows(`INSERT INTO ticket_overrides (ticket_id, hold, hold_reason, retry_after, set_by, set_at) VALUES ('docs:T-2', 1, 'two', ?, 'owner:y', ?)`, T0 + 7_200_000, T0);
+    await seedTicketOverride({ ticket_id: 'docs:T-1', hold: 1, hold_reason: 'one', retry_after: T0 + 3_600_000, set_by: 'owner:x', set_at: T0 });
+    await seedTicketOverride({ ticket_id: 'docs:T-2', hold: 1, hold_reason: 'two', retry_after: T0 + 7_200_000, set_by: 'owner:y', set_at: T0 });
     // The post drops T-1 while the SURVIVING T-2 takes its key: the move the spec names is a
     // post that ADDS a ticket at the key of one it drops (R-BTN-147) — T-2 was already on the
     // board, so nothing moves: no event, and each keeps its own hold.

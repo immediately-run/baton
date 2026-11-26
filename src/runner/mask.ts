@@ -11,7 +11,7 @@
 import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { createMasker, maskSecrets } from '../shared/mask.mjs';
+import { BEARER_TOKEN, createMasker, KEY_BEGIN, KEY_END, KEY_HOLD, maskKeys } from '../shared/mask.mjs';
 
 /** R-BTN-144 class 7: the name endings the environment decides, compared case-sensitively. */
 export const SECRET_NAME_SUFFIXES = ['_KEY', '_TOKEN', '_SECRET', '_PASSWORD', '_PAT'];
@@ -106,7 +106,9 @@ const maskLiterals = (text: string, literals: readonly string[]): string => {
 
 /** `text` with every class-5, class-6 and class-7 occurrence replaced by `***`. */
 export function maskLegOutput(text: string, secrets: readonly string[]): string {
-  return maskSecrets(maskLiterals(text, secrets));
+  // B-311: key blocks first, on the raw text — a literal masked inside a banner must not hide
+  // the block from its own pattern — then the literals, then class 5.
+  return maskLiterals(maskKeys(text), secrets).replace(new RegExp(BEARER_TOKEN.source, 'g'), '***');
 }
 
 /** The end `detail` a failed leg's claim carries (§9.4, B-256): the last line of the leg's error —
@@ -212,6 +214,16 @@ function createBoundaryMatcher(literal: string) {
   };
 }
 
+function completeLiterals(text: string, literals: readonly string[]) {
+  const matches: { start: number; end: number }[] = [];
+  for (const literal of literals) {
+    for (let start = text.indexOf(literal); start !== -1; start = text.indexOf(literal, start + 1)) {
+      matches.push({ start, end: start + literal.length });
+    }
+  }
+  return matches.sort((a, b) => a.start - b.start || b.end - a.end);
+}
+
 /** R-BTN-144 across a stream, which a line-at-a-time sink cannot do. Class 6's key block is
  *  `src/shared/mask.mjs`'s stream (`createMasker`: a block's lines are held until its `END` line
  *  or `KEY_HOLD` bytes, and classes 5 and 6 are masked on every line as it leaves) — each line
@@ -293,9 +305,37 @@ export function createLegMasker(secrets: readonly string[]) {
     gone = Math.min(nextGone, held.length);
     offset = end;
   };
+  // B-311: a key block is recognized on the raw line, before any literal is masked — a literal
+  // that overlaps a banner must not break the banner and leak the block. While a block is held
+  // its lines go to the block stream as they came; the literal state restarts after it.
+  let keyBytes = -1;
+  const restart = () => {
+    if (held !== '' && gone < held.length) said.push(block.push('***'));
+    held = '';
+    gone = 0;
+    offset = 0;
+    boundary = '';
+    for (const matcher of matchers) matcher.reset();
+  };
   return {
     push(line: string, frame: '\n' | '\r\n' = '\n'): string {
       said.length = 0;
+      if (keyBytes >= 0) {
+        keyBytes += line.length + 1;
+        said.push(block.push(line));
+        if (KEY_END.test(line) || keyBytes >= KEY_HOLD) keyBytes = -1;
+        return said.filter(Boolean).join('\n');
+      }
+      const open = line.search(KEY_BEGIN);
+      if (open >= 0) {
+        // What precedes the banner on its line is ordinary text, masked as any other line.
+        if (open > 0) take(line.slice(0, open));
+        restart();
+        const rest = line.slice(open);
+        said.push(block.push(rest));
+        keyBytes = rest.length;
+        return said.filter(Boolean).join('\n');
+      }
       take(line);
       boundary = frame;
       return said.filter(Boolean).join('\n');
@@ -309,6 +349,7 @@ export function createLegMasker(secrets: readonly string[]) {
       gone = 0;
       offset = 0;
       boundary = '';
+      keyBytes = -1;
       for (const matcher of matchers) matcher.reset();
       said.push(block.flush());
       return said.filter(Boolean).join('\n');

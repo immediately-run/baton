@@ -6,8 +6,9 @@ import { sha256HexSync } from './policy';
 import type { Cursor, Row, Store } from './ports';
 
 /** The tables whose writes are bookkeeping, never state a reader keys on: the request nonces
- *  (R-BTN-13, a replay guard) and the migration ledger. */
-const UNVERSIONED = new Set(['request_nonces', '_baton_migrations', 'state_version', 'sync_fingerprints']);
+ *  (R-BTN-13, a replay guard), the migration ledger and deprecated-field sightings (the audit
+ *  event still invalidates activity reads). */
+const UNVERSIONED = new Set(['request_nonces', '_baton_migrations', 'state_version', 'sync_fingerprints', 'sync_quota', 'deprecated_fields']);
 
 const kinds = new Map<string, { write: boolean; table: string | null }>();
 /** Whether `query` may write, and the table it names first — read once per statement text. */
@@ -70,11 +71,13 @@ export function versionedStore(inner: Store): VersionedStore {
     self.exec('UPDATE state_version SET v = v + 1, scheduling_v = scheduling_v + ?, board_v = board_v + ?, activity_v = activity_v + ? WHERE id = 1', Number(schedulingDirty), Number(boardDirty), Number(activityDirty));
   };
   const activityTables = new Set(['activities', 'transcripts', 'pending_transcripts', 'messages', 'events', 'ticket_history']);
-  const nonSchedulingTables = new Set([...activityTables, 'board_snapshots', 'push_deliveries', 'webhook_deliveries', 'webhook_dispatch', 'webhook_syncs', 'sequences', 'deprecated_fields']);
+  const nonSchedulingTables = new Set([...activityTables, 'board_snapshots', 'push_deliveries', 'webhook_deliveries', 'webhook_dispatch', 'webhook_syncs', 'sequences']);
   const reset = () => { dirty = schedulingDirty = boardDirty = activityDirty = false; };
   const wrote = (rows: number, table: string | null = null) => {
     if (!tracking || quiet || rows <= 0) return;
     written += rows;
+    // The owner's dispatch queue and idle timer are accounting writes, not scheduling changes.
+    if (table === 'runner_idle' || table === 'unblocked_dispatch') return;
     const activity = table != null && activityTables.has(table);
     activityDirty ||= activity;
     boardDirty ||= !activity;

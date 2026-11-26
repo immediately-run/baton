@@ -33,7 +33,7 @@ export function screenRoutes(text: string, url: string, actions: unknown[] = [],
   };
   const runner = {
     runner_id: 3, hostname: 'host-a', session_name: 'sess-three', alive: true, last_seen_at: now - MIN, last_activity_at: now - 5 * MIN, reaped_at: null,
-    harness: 'harness-a', kind: 'vm', isolation: 'process', tier_ceilings: { docs: 'routine' }, capabilities: [{ capability: 'cap-a', declared: text }], granted: ['cap-a'], tags: [text],
+    harness: 'harness-a', kind: 'vm', isolation: 'process', capabilities: [{ capability: 'cap-a', declared: text }], granted: ['cap-a'], tags: [text],
     courses: [{ course: 'course-a', version: 3, min_runner_version: 3 }], lease_timeout_s: 900, credential: { kind: 'runner', granted: true, role: null, domain: null },
     last_report: { payload: { text }, sent_at: now - 2 * MIN }, transcript_url: url, claim, claims: [claim], busy_elsewhere: false, reaped_claim: null,
   };
@@ -44,9 +44,9 @@ export function screenRoutes(text: string, url: string, actions: unknown[] = [],
     // The Tickets table: a held row with its reason, and a running one.
     '/v1/repositories/docs/tickets': {
       tickets: [
-        { ticket_id: 'docs:HELD', title: text, course: 'course-a', tier: 'routine', requires: [], requires_unmet: [], tags: [text], order: null, parent: null, expedite: false,
+        { ticket_id: 'docs:HELD', title: text, course: 'course-a', requires: [], requires_unmet: [], tags: [text], order: null, parent: null, expedite: false,
           position: { station: 'station-a', path_len: 0, next_leg: 'leg-a' }, state: 'held', reasons: [], detail: { set_by: 'owner:abc', reason: text, since: now - 2 * HOUR } },
-        { ticket_id: 'docs:T-1', title: text, course: 'course-a', tier: 'routine', requires: [], requires_unmet: [], tags: [], order: null, parent: null, expedite: false,
+        { ticket_id: 'docs:T-1', title: text, course: 'course-a', requires: [], requires_unmet: [], tags: [], order: null, parent: null, expedite: false,
           position: { station: 'station-b', path_len: 1, next_leg: 'leg-b' }, state: 'running', reasons: [],
           detail: { claim_id: 7, runner_id: 3, hostname: 'host-a', session_name: text, leg: 'leg-b', since: now - HOUR, lease_ends_at: now + HOUR, last_activity_at: now - MIN, alive: true, stalled: false, condition_wait: null } },
       ],
@@ -55,8 +55,7 @@ export function screenRoutes(text: string, url: string, actions: unknown[] = [],
 
     // The ticket's page and the reads it gathers.
     [ticket]: {
-      ticket_id: 'docs:T-1', repository: 'docs', course_id: 'course-a', course: 'course-a', title: text, path: 'tickets/T-1.mdx', tier: 'routine',
-      requires: ['cap-a'], requires_unmet: [], tags: [text], order: null, parent: null, expedite: false, children: [],
+      ticket_id: 'docs:T-1', repository: 'docs', course_id: 'course-a', course: 'course-a', title: text, path: 'tickets/T-1.mdx', requires: ['cap-a'], requires_unmet: [], tags: [text], order: null, parent: null, expedite: false, children: [],
       station: { station: 'station-b', path: [{ leg: 'leg-a', reached: 'station-b' }], next_leg: 'leg-b', to_end: 2 },
       position: { station: 'station-b', path_len: 1, next_leg: 'leg-b', next_source: 'course' },
       last_written_by: { pusher: text, commit: 'abcdef0123456789', at: now - HOUR, human: false },

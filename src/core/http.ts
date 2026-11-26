@@ -4,10 +4,11 @@ import { clientVersionsValue, maxVersion, parseVersion } from '../shared/version
 
 /** Every response carries these (R-BTN-16): no framing, nothing loaded from elsewhere. */
 export const SECURITY_HEADERS: Record<string, string> = {
-  'Content-Security-Policy': "default-src 'self'; frame-ancestors 'none'",
+  'Content-Security-Policy': "default-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'",
   'X-Frame-Options': 'DENY',
   'X-Content-Type-Options': 'nosniff',
   'Referrer-Policy': 'no-referrer',
+  'Cross-Origin-Resource-Policy': 'same-origin',
 };
 
 // ── the client versions Baton serves (§11.3 R-BTN-197, B-254) ───────────────────────────
@@ -48,7 +49,7 @@ export function servedClientVersions(config: { BATON_TEST_BINDINGS?: string; TES
 
 export type ErrorCode =
   | 'unauthenticated' | 'forbidden' | 'invalid-params' | 'not-found' | 'too-large'
-  | 'head-moved' | 'snapshot-rejected' | 'stale-observation' | 'sync-busy' | 'unavailable' | 'internal'
+  | 'head-moved' | 'snapshot-rejected' | 'stale-observation' | 'sync-busy' | 'rate-limited' | 'unavailable' | 'internal'
   | 'session-taken' | 'runner-reaped' | 'claim-ended' | 'not-holder'
   | 'not-eligible' | 'no-eligible-ticket' | 'provider-suspended' | 'stale-skills' | 'backing-off' | 'not-cut-over' | 'conflict' | 'barred-tag' | 'blocked' | 'closed' | 'invalid-prerequisite'
   | 'client-too-old' // §11 (R-BTN-197): a Baton-Client below the served min
@@ -60,7 +61,7 @@ export type ErrorCode =
 const STATUS: Record<ErrorCode, number> = {
   unauthenticated: 401, forbidden: 403, 'invalid-params': 400, 'not-found': 404,
   'too-large': 413, // §11: a body over a route's cap (R-BTN-73's delivery routes), refused before it is read past it
-  'head-moved': 409, 'snapshot-rejected': 409, 'stale-observation': 409, 'sync-busy': 409, unavailable: 503, internal: 500,
+  'head-moved': 409, 'snapshot-rejected': 409, 'stale-observation': 409, 'sync-busy': 409, 'rate-limited': 429, unavailable: 503, internal: 500,
   'session-taken': 409, 'runner-reaped': 409, 'claim-ended': 409, 'not-holder': 409,
   'not-eligible': 409, 'no-eligible-ticket': 404, 'provider-suspended': 409, 'stale-skills': 409, 'backing-off': 409, 'barred-tag': 409,
   'not-cut-over': 409, conflict: 409, 'invalid-prerequisite': 409, // §11: a key in another role (R-BTN-57, R-BTN-93); R-BTN-126's invalid end
@@ -142,4 +143,12 @@ export function noStore(res: Response): Response {
   const { status } = res;
   const body = status === 101 || status === 204 || status === 205 || status === 304 ? null : res.body;
   return new Response(body, { status, statusText: res.statusText, headers });
+}
+
+export async function readJson(req: Request): Promise<unknown> {
+  try {
+    return await req.json();
+  } catch {
+    throw new BatonError('invalid-params', 'the body is not JSON');
+  }
 }

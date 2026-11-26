@@ -2,7 +2,7 @@
 // src/local entry with the schema migrations and the dashboard as text, as wrangler's Text rule
 // does for the Worker. `npm run start:local` and `baton test-course` (R3-1248) both run through it.
 import { build } from 'esbuild';
-import { readFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -25,9 +25,10 @@ export const LOCAL_LOADERS = { '.sql': 'text', '.html': 'text', '.css': 'text' }
 export async function bundleLocal(entry, name) {
   mkdirSync(OUT, { recursive: true });
   const outfile = join(OUT, name);
-  await build({
+  const { outputFiles: [output] } = await build({
     entryPoints: [join(ROOT, entry)],
     outfile,
+    write: false,
     bundle: true,
     platform: 'node',
     format: 'esm',
@@ -37,5 +38,14 @@ export async function bundleLocal(entry, name) {
     plugins: [dashboardScriptAsText],
     logLevel: 'warning',
   });
+  // Another process may be importing outfile. Replace it without truncating its open file.
+  const staging = await mkdtemp(join(OUT, '.bundle-'));
+  try {
+    const temp = join(staging, 'bundle.mjs');
+    await writeFile(temp, output.contents);
+    await rename(temp, outfile);
+  } finally {
+    await rm(staging, { recursive: true, force: true });
+  }
   return import(pathToFileURL(outfile).href);
 }

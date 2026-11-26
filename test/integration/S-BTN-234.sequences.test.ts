@@ -12,11 +12,14 @@
 // walks the CLI's floor, the fallback and the coordinator's refusals); no `branch_pattern` matches `baton-ticket/*`
 // (R-BTN-190, the unit half). The CLI's half runs on the local host alone: it writes a real
 // repository and runs git and the CLI.
+import { GitRepo } from '../lib/gitRepo';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { Sequences } from '../../src/core/sequences';
+import type { Row } from '../../src/core/ports';
 import { call as hostCall, HOST } from '#host';
 import { initMain, parseSyncArgs, syncMain } from '../../src/defaults/cli';
 import { nextMain } from '../../src/defaults/sequences';
@@ -67,6 +70,26 @@ beforeEach(async () => {
 });
 
 describe('S-BTN-234 Baton hands out the identifiers (B-176)', () => {
+  it('reads the stored number inside the allocation transaction', async () => {
+    await withCore((core) => {
+      const store = core.store;
+      let allocating = false;
+      const sequences = new Sequences({ now: () => core.now(), store: {
+        ...store,
+        exec<T = Row>(query: string, ...params: unknown[]) {
+          if (/^SELECT last_number FROM sequences\b/.test(query)) expect(allocating).toBe(true);
+          return store.exec<T>(query, ...params);
+        },
+        transaction: (fn) => store.transaction(() => {
+          allocating = true;
+          try { return fn(); } finally { allocating = false; }
+        }),
+      } });
+      expect(sequences.next('ops', 'migration', 40, 'test', null)).toEqual({ kind: 'migration', number: 41 });
+      expect(sequences.next('ops', 'migration', null, 'test', null)).toEqual({ kind: 'migration', number: 42 });
+    });
+  });
+
   it('a retired repository hands out no number — not-found, as one never registered (R-BTN-47)', async () => {
     expect(await take(opsOwner, 'ops', 'ticket-b', { floor: 5 })).toMatchObject({ status: 200, json: { number: 6 } });
     expect((await keyCall(admin, '/v1/admin/repositories', { id: 'ops', retire: true, confirm: true })).status).toBe(200);
@@ -208,19 +231,13 @@ describe('S-BTN-234 Baton hands out the identifiers (B-176)', () => {
 
 /** A checkout whose origin is a bare repository — a `git` forge — with `.baton/` as
  *  `baton repo init` writes it, its `repos` map naming the bare path as `ops`, committed. */
-class Repo {
-  readonly dir = mkdtempSync(join(tmpdir(), 'baton-s222-'));
-  readonly bare = mkdtempSync(join(tmpdir(), 'baton-s222-origin-'));
+class SequenceTickets extends GitRepo {
+
   constructor() {
-    execFileSync('git', ['init', '-q', '--bare', '-b', 'main', this.bare], { stdio: 'ignore' });
-    for (const a of [['init', '-q', '-b', 'main'], ['config', 'user.email', 's222@test'], ['config', 'user.name', 's222'], ['remote', 'add', 'origin', this.bare]]) {
-      execFileSync('git', ['-C', this.dir, ...a], { stdio: 'ignore' });
-    }
+    super('baton-234-', { origin: true });
     mkdirSync(join(this.dir, 'tickets'), { recursive: true });
   }
-  git(...a: string[]): string {
-    return execFileSync('git', ['-C', this.dir, ...a], { encoding: 'utf8' }).trim();
-  }
+
   publish(): void {
     this.git('add', '-A');
     this.git('commit', '-qm', 'scaffold');
@@ -252,14 +269,14 @@ class Repo {
   }
 }
 
-let repo: Repo | null;
+let repo: SequenceTickets | null;
 let minutes = 0;
 /** Each sync takes an observation number; the next is refused until ten minutes pass (R-BTN-62). */
 const later = () => setClock(T0 + (minutes += 11) * 60_000);
 /** The runtime guard of S-BTN-175's: mkdtemp throws on the Workers runtime's `node:fs` stub. */
-const onNode = (): Repo | null => {
+const onNode = (): SequenceTickets | null => {
   try {
-    return new Repo();
+    return new SequenceTickets();
   } catch {
     return null;
   }
@@ -277,8 +294,7 @@ beforeEach(async () => {
 });
 afterEach(() => {
   if (!repo) return;
-  rmSync(repo.dir, { recursive: true, force: true });
-  rmSync(repo.bare, { recursive: true, force: true });
+  repo.dispose();
 });
 
 describe('S-BTN-234 the CLI half: Baton is Dibber\'s coordinator (B-176, B-326)', () => {

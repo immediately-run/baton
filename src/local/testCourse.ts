@@ -3,21 +3,24 @@
 // `.baton/`. It is the local host, not a second implementation: the course file is checked by
 // `validateCourse` and accepted or refused by the core exactly as a sync's post would be, every
 // live ticket's path is replayed under the proposed file, and a generic run — claim, every leg of
-// the shortest route, done, confirmed — goes through the core's own claim, advance and end.
+// the shortest route, done, confirmed — goes through the core's own claim, advance and end,
+// handing off to a fresh credential when independence requires it (S-BTN-63).
 // It needs no access to production. A violation names its rule; none is a pass.
-import { execFileSync } from 'node:child_process';
+import { git as runGit } from '../defaults/git.mjs';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { validateCourse } from '../core/course';
 import { graphOf, onGraph, resolvePath, signatureOf, type Graph, type Step } from '../core/graph';
+import { BatonError } from '../core/http';
 import { signatureConditions } from '../core/conditionTypes';
 import { checkPayload, DEFAULT_COURSE } from '../core/board';
 import { baseChain, checkSchemaSet, parseSchemaId, POST_STATES_MAX, refinementGaps, type Schema } from '../shared/schema.mjs';
 import { stdSchema } from '../shared/std.mjs';
 import { builtIn } from '../defaults/courses';
-import { courseSchemas } from '../defaults/cli';
+import { instructionsOf, resolveSource, runnerLegs, schemasIn, writeStub } from '../defaults/cli';
+import { coursePath, isOverride, writeCourseTree } from '../defaults/course-tree';
 import { parseSource } from '../defaults/course-source';
 import { LocalHost } from './host';
 import { openStore } from './store';
@@ -53,6 +56,7 @@ export interface KitInput {
   /** The repository root the kit read (readInputs); null over constructed inputs. The no-op run
    * (B-81) needs it to import the working tree's leg scripts. */
   root?: string | null;
+  sourceDir?: string;
   /** The course entry's `source` (B-33), when .baton/baton.json names one: the standard course
    * whose files the repository scaffolds — how the kit tells a PR course filed under another id
    * (docs' `roadmap-pr`, sourced from `create-pr`) from the marker courses. */
@@ -121,12 +125,27 @@ export function staticViolations(k: KitInput): KitViolation[] {
   const out: KitViolation[] = validateCourse(k.proposed).map((v) => ({ rule: 'course', message: `${v.path}: ${v.message} (${v.rule})` }));
   for (const v of legacyPathReport(k)) out.push(v);
   if (out.length) return out;
+  const selectable = new Map([[k.course, k.proposed], ...(k.others ?? []).map((c): [string, unknown] => [c.id, c.file])]);
+  for (const [leg, def] of Object.entries(asRecord(asRecord(k.proposed).legs))) {
+    const entries = asRecord(asRecord(def).requires).tickets;
+    if (!Array.isArray(entries)) continue;
+    for (const entry of entries) {
+      const names = entry.at ?? entry.reached ?? [];
+      const courses = entry.select === 'posted' ? [...selectable.entries()] : [[entry.course ?? k.course, selectable.get(entry.course ?? k.course)]];
+      for (const [course, file] of courses) {
+        if (!file) out.push({ rule: 'course', message: `legs.${leg}: unknown selectable course ${course}` });
+        else for (const station of names) if (!Object.hasOwn(asRecord(asRecord(file).stations), station)) {
+          out.push({ rule: 'course', message: `legs.${leg}: unknown selectable station ${course}:${station}` });
+        }
+      }
+    }
+  }
   if (k.legScripts) {
     const all = asRecord(asRecord(k.proposed).legs);
     const legs = Object.keys(all);
     const scripts = k.legScripts.map((x) => x.name);
-    // A person's leg (R-BTN-116) is answered, never run: it needs no script (B-257's `confirm`).
-    const runs = legs.filter((x) => asRecord(all[x]).kind !== 'person');
+    // Person and fact legs are answered or applied by core, never run by a script.
+    const runs = legs.filter((x) => asRecord(all[x]).kind !== 'person' && !asRecord(all[x]).arrives);
     for (const l of runs.filter((x) => !scripts.includes(x))) out.push({ rule: 'legs-scripts', message: `leg ${l} has no legs/${l}.mjs` });
     for (const s of scripts.filter((x) => !legs.includes(x))) out.push({ rule: 'legs-scripts', message: `legs/${s}.mjs is no leg of the course` });
     // §6.13: "The test kit fails a script without all three" (round 1, 1-A-9).
@@ -373,7 +392,7 @@ export function shortestRoute(g: Graph): Step[] | null {
       for (const [leg, l] of [...g.legs].sort(([a], [b]) => (a < b ? -1 : 1))) {
         // A person's leg is answered, never advanced into (R-BTN-116, rule person): the generic
         // run is a runner's, so its route takes runner legs alone (B-257's `confirm`).
-        if (!l.from.includes(s) || l.person) continue;
+        if (!l.from.includes(s) || l.person || l.arrives || l.reconciles) continue;
         for (const to of l.to) if (!prev.has(to)) { prev.set(to, { from: s, step: { leg, reached: to } }); next.push(to); }
       }
     }
@@ -383,21 +402,24 @@ export function shortestRoute(g: Graph): Step[] | null {
 }
 
 const REPO = 'kit'; // the repository under test, as the kit's own local host registers it
-const CRED = 'test-course';
 const SHA = (n: number) => n.toString(16).padStart(40, '0');
 
 /** The core's verdict, on a fresh in-memory local host: the base file then the proposed one posted
  *  as a sync would post them (accepted, not refused — R-BTN-69), and one generic run of a ticket
  *  along the proposed course's shortest route: claim, each leg, done, confirmed by the next post. */
 export async function coreViolations(k: KitInput): Promise<KitViolation[]> {
+  const proposed = graphOf(k.proposed);
+  const route = shortestRoute(proposed) ?? [];
+  // Each step can need at most one fresh synthetic credential.
+  const credentials = Array.from({ length: Math.max(1, route.length) }, (_, i) => `test-course-${i + 1}`);
   let clock = Date.parse('2026-01-01T00:00:00Z');
   const { store } = openStore(':memory:');
   const host = new LocalHost({
     store, alarm: 'manual',
     config: {
       BATON_ORIGIN: 'http://127.0.0.1', OIDC_ISSUER: '', OIDC_JWKS_URL: '', ACCESS_TEAM_DOMAIN: '', ACCESS_AUD: '', OWNER_EMAILS: '',
-      CREDENTIALS: JSON.stringify({ [CRED]: { hostname: 'test-course', allowed_capabilities: ['agent-venue'] } }),
-      TOKEN_HASHES: JSON.stringify({ [CRED]: 'unused' }),
+      CREDENTIALS: JSON.stringify(Object.fromEntries(credentials.map((cred) => [cred, { hostname: cred, allowed_capabilities: ['agent-venue'] }]))),
+      TOKEN_HASHES: JSON.stringify(Object.fromEntries(credentials.map((cred) => [cred, 'unused']))),
       BATON_REPOSITORIES: JSON.stringify([{ id: REPO, github: 'local/kit', default_branch: 'main', sync_workflow: '.github/workflows/baton-sync.yml' }]),
     },
   });
@@ -410,7 +432,7 @@ export async function coreViolations(k: KitInput): Promise<KitViolation[]> {
   // schemas included, read by the same `courseSchemas` (R-BTN-108, R-BTN-134).
   const entry = (id: string, course: unknown, v: Versions, schemas: KitSchema[]) => ({ id, version: v.version, min_runner_version: v.min_runner_version, skill: id,
     course, step_kinds: ['other'], branch_pattern: 'claude/{ticket}-*', ...(schemas.length ? { schemas } : {}) });
-  const ticket = (id: string) => ({ id, course_id: k.course, path: `tickets/${id}.md`, title: id, tier: 'routine', requires: [], operator_only: false,
+  const ticket = (id: string) => ({ id, course_id: k.course, path: `tickets/${id}.md`, title: id, requires: [], operator_only: false,
     expedite: false, depends_on: [], blocked_by: [], repos: [], rank: 1 });
   let n = 0;
   const post = async (registry: unknown[], stations: Record<string, unknown>, closed: { id: string; as: 'done' }[] = []) => {
@@ -422,13 +444,12 @@ export async function coreViolations(k: KitInput): Promise<KitViolation[]> {
     const p = checkPayload({ registry, sha: SHA(++n), parent_sha: n === 1 ? null : SHA(n - 1), tickets, closed, stations, observation });
     return (await core.board(repo, p)) as Record<string, unknown>;
   };
-  const placedAt = (g: Graph, path: Step[]) => {
+  const placedAt = (g: Graph, path: Step[], queued?: string) => {
     const at = path.length ? path[path.length - 1].reached : g.start;
     const next = [...g.legs].filter(([, l]) => l.from.includes(at)).map(([leg]) => ({ leg, state: 'ready' }));
-    return { station: at, path, next_leg: next[0]?.leg ?? null, next_source: 'marker', next, bars: {} };
+    return { station: at, path, next_leg: queued ?? next[0]?.leg ?? null, next_source: 'marker', next, bars: {} };
   };
   try {
-    const proposed = graphOf(k.proposed);
     // The registry of each post: the other listed courses beside the one under test — their
     // files as the working tree holds them — and its own schemas spread in (R-BTN-108).
     const registry = (ownCourse: unknown, v: Versions, schemas: KitSchema[]): unknown[] => [
@@ -437,8 +458,8 @@ export async function coreViolations(k: KitInput): Promise<KitViolation[]> {
     ];
     // The base file first, with the live tickets where it placed them; then the proposed one.
     if (k.base) await post(registry(k.base, k.baseVersions ?? version, []), Object.fromEntries((k.live ?? []).filter((t) => onGraph(graphOf(k.base), t.path)).map((t) => [t.id, placedAt(graphOf(k.base), t.path)])));
-    const route = shortestRoute(proposed) ?? [];
-    await post(registry(k.proposed, version, k.schemas ?? []), { 'KIT-1': placedAt(proposed, []) });
+    const proposedRegistry = registry(k.proposed, version, k.schemas ?? []);
+    await post(proposedRegistry, { 'KIT-1': placedAt(proposed, []) });
     const refused = core.courses.refusals().filter((r) => r.course_id === k.course);
     for (const r of refused) for (const v of r.violations) out.push({ rule: 'accepted', message: `the core refuses the file: ${v.path}: ${v.message} (${v.rule})` });
     if (refused.length) return out;
@@ -448,12 +469,14 @@ export async function coreViolations(k: KitInput): Promise<KitViolation[]> {
     core.store.transaction(() => core.cutover.cutover('test-course', { repository: REPO, confirm: true }));
     const secret = 'test-course-secret';
     const hash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(secret)))].map((b) => b.toString(16).padStart(2, '0')).join('');
-    const hb = await core.runners.heartbeat(CRED, null, { hostname: 'test-course', session_name: 'test-course', harness: 'claude-code', kind: 'vm', capabilities: ['agent-venue'],
-      model_id: 'anthropic/kit',
-      tier_ceiling: 'critical', lease_timeout_s: 3600, secret_hash: hash, courses: [{ repository: REPO, course: k.course, version: version.version }] }) as { runner_id: number };
     const tx = <T>(f: () => T) => core.store.transaction(f);
-    const claim = tx(() => core.claims.claim(hb.runner_id, { request_id: 'test-course-1', ticket_id: `${REPO}:KIT-1` })) as { claim_id?: number; code?: string; message?: string };
-    if (!claim.claim_id) return [{ rule: 'generic-run', message: `the claim at ${proposed.start} was refused: ${claim.code ?? ''} ${claim.message ?? ''}`.trim() }];
+    const take = async (cred: string) => {
+      const { runner_id } = await core.runners.heartbeat(cred, null, { hostname: cred, session_name: 'test-course', harness: 'claude-code', kind: 'vm', capabilities: ['agent-venue'],
+        model_id: 'anthropic/kit', lease_timeout_s: 3600, secret_hash: hash, courses: [{ repository: REPO, course: k.course, version: version.version }] }) as { runner_id: number };
+      const { claim_id } = tx(() => core.claims.claim(runner_id, { request_id: cred, ticket_id: `${REPO}:KIT-1` })) as { claim_id: number };
+      return { runner_id, claim_id };
+    };
+    let holder = await take(credentials[0]);
     // R-BTN-109: an arrival at a station with an `entry` must carry each output it names — the
     // generic run gives one by pointer (a git: uri the kit's own commit answers for), which the
     // arrival check reads by name and schema as a holder's would be.
@@ -465,17 +488,26 @@ export async function coreViolations(k: KitInput): Promise<KitViolation[]> {
     };
     let at = proposed.start;
     let previous: Step | undefined;
-    for (const step of route) {
+    for (const [i, step] of route.entries()) {
       clock += 60_000;
-      const r = tx(() => core.claims.advance(hb.runner_id, claim.claim_id!, { leg: step.leg, ...(previous ? { reached: at, outputs: outputsAt(previous) } : {}) })) as { ok?: boolean; code?: string; rule_code?: string };
-      if (!r.ok) return [{ rule: 'generic-run', message: `advance into ${step.leg} from ${at} was refused: ${r.code ?? ''} ${r.rule_code ?? ''}`.trim() }];
+      try {
+        tx(() => core.claims.advance(holder.runner_id, holder.claim_id, { leg: step.leg, ...(previous ? { reached: at, outputs: outputsAt(previous) } : {}) }));
+      } catch (e) {
+        if (!previous || !(e instanceof BatonError) || e.extra.rule_code !== 'chain') throw e;
+        const from = previous;
+        tx(() => core.claims.end(holder.runner_id, holder.claim_id, { end_reason: `suspended:${at}`, reached: at, next: step.leg, outputs: outputsAt(from) }));
+        const posted = await post(proposedRegistry, { 'KIT-1': placedAt(proposed, route.slice(0, i), step.leg) });
+        if (!posted.confirmed) return [{ rule: 'generic-run', message: `the hand-off at ${at} was not confirmed by a snapshot queuing ${step.leg}` }];
+        holder = await take(credentials[i]);
+        tx(() => core.claims.advance(holder.runner_id, holder.claim_id, { leg: step.leg }));
+      }
       at = step.reached;
       previous = step;
     }
     clock += 60_000;
-    const end = tx(() => core.claims.end(hb.runner_id, claim.claim_id!, { end_reason: 'done', reached: at, ended_at_sha: SHA(999), outputs: outputsAt(route[route.length - 1]) })) as { ok?: boolean; code?: string };
+    const end = tx(() => core.claims.end(holder.runner_id, holder.claim_id, { end_reason: 'done', reached: at, ended_at_sha: SHA(999), outputs: outputsAt(route[route.length - 1]) })) as { ok?: boolean; code?: string };
     if (!end.ok) return [{ rule: 'generic-run', message: `the done end at ${at} was refused: ${end.code ?? ''}` }];
-    const posted = await post(registry(k.proposed, version, k.schemas ?? []), { 'KIT-1': placedAt(proposed, route) });
+    const posted = await post(proposedRegistry, { 'KIT-1': placedAt(proposed, route) });
     if (!posted.confirmed) out.push({ rule: 'generic-run', message: `the done end at ${at} was not confirmed by a snapshot placing the ticket there` });
   } catch (e) {
     out.push({ rule: 'generic-run', message: `the local host failed: ${(e as Error).message}` });
@@ -502,15 +534,16 @@ export async function noopViolations(k: KitInput): Promise<KitViolation[]> {
     standard = undefined; // a source that is not a name: the sync's to refuse, not the kit's
   }
   if (standard?.reads !== 'prs') return [];
-  const startLeg = graphOf(k.proposed).startLeg;
-  const script = join(k.root, '.baton', 'courses', k.course, 'legs', `${startLeg}.mjs`);
+  const graph = graphOf(k.proposed);
+  const startLeg = graph.startLeg;
+  const script = join(k.sourceDir ?? join(k.root, coursePath(k.course)), 'legs', `${startLeg}.mjs`);
   if (!existsSync(script)) return []; // a missing script is the legs-scripts rule's own failure
   const dir = mkdtempSync(join(tmpdir(), 'baton-kit-noop-'));
   try {
     // The scratch checkout: a no-op agent_command at the snapshot, and an origin no forge
     // answers, so the verification cannot succeed and must say so.
     const git = (out: boolean, ...args: string[]) =>
-      String(execFileSync('git', ['-C', dir, '-c', 'user.name=kit', '-c', 'user.email=kit@baton.test', ...args], { stdio: ['ignore', out ? 'pipe' : 'ignore', 'ignore'], ...(out ? { encoding: 'utf8' } : {}) }));
+      runGit(dir, ['-c', 'user.name=kit', '-c', 'user.email=kit@baton.test', ...args], { stdio: ['ignore', out ? 'pipe' : 'ignore', 'ignore'] });
     git(false, 'init', '-q', '-b', 'main');
     git(false, 'remote', 'add', 'origin', 'https://127.0.0.1:1/kit/no-forge.git');
     mkdirSync(join(dir, '.baton'), { recursive: true });
@@ -523,6 +556,9 @@ export async function noopViolations(k: KitInput): Promise<KitViolation[]> {
     if (typeof run !== 'function') return []; // a script that exports no run is the legs-scripts rule's
     try {
       const result = await (run as (ctx: unknown) => Promise<unknown>)({ ticket: { id: `${REPO}:KIT-1`, home: REPO }, leg: startLeg, checkout: dir, snapshot: { sha } });
+      // Create-spec can wait for the owner to finish the conversation without claiming a PR opened.
+      const answer = asRecord(result);
+      if (standard.id === 'create-spec' && answer.suspend === true && answer.reached === graph.start && answer.next === startLeg) return [];
       return [{ rule: 'no-op', message: `legs/${startLeg}.mjs returned ${JSON.stringify(result)} for an agent_command that exits 0 with no PR — the course opens PRs, so its start leg must verify one on the forge before returning its position, failing the leg naming what it looked for (B-81)` }];
     } catch {
       return []; // the leg refused the no-op: what B-81 asks
@@ -548,16 +584,16 @@ export async function ticketViolations(k: KitInput): Promise<KitViolation[]> {
   }
   if (standard?.reads !== 'markers') return [];
   const startLeg = graphOf(k.proposed).startLeg;
-  const script = join(k.root, '.baton', 'courses', k.course, 'legs', `${startLeg}.mjs`);
+  const script = join(k.sourceDir ?? join(k.root, coursePath(k.course)), 'legs', `${startLeg}.mjs`);
   if (!existsSync(script)) return []; // a missing script is the legs-scripts rule's own failure
   const dir = mkdtempSync(join(tmpdir(), 'baton-kit-ticket-'));
   // A local bare origin the close can really fetch (round 1, finding 5): the rule must reach
   // the close's own checks, not pass on a fetch that cannot connect.
   const origin = mkdtempSync(join(tmpdir(), 'baton-kit-ticket-origin-'));
   try {
-    execFileSync('git', ['-C', origin, 'init', '-q', '--bare', '-b', 'main'], { stdio: 'ignore' });
+    runGit(origin, ['init', '-q', '--bare', '-b', 'main'], { stdio: 'ignore' });
     const git = (out: boolean, ...args: string[]) =>
-      String(execFileSync('git', ['-C', dir, '-c', 'user.name=kit', '-c', 'user.email=kit@baton.test', ...args], { stdio: ['ignore', out ? 'pipe' : 'ignore', 'ignore'], ...(out ? { encoding: 'utf8' } : {}) }));
+      runGit(dir, ['-c', 'user.name=kit', '-c', 'user.email=kit@baton.test', ...args], { stdio: ['ignore', out ? 'pipe' : 'ignore', 'ignore'] });
     git(false, 'init', '-q', '-b', 'main');
     git(false, 'remote', 'add', 'origin', origin);
     mkdirSync(join(dir, 'tickets'), { recursive: true });
@@ -625,65 +661,115 @@ export async function checkCourse(k: KitInput): Promise<KitViolation[]> {
  *  live tickets from a board payload file, and each leg script's exports (imported: the kit runs
  *  in the repository's own CI, on its own code). */
 export async function readInputs(root: string, course: string, opts: { base?: string | null; board?: string | null } = {}): Promise<KitInput> {
-  const dir = join(root, '.baton', 'courses', course);
-  const file = join(dir, 'course.json');
-  if (!existsSync(file)) throw new Error(`${file}: no such course file`);
-  const proposed = JSON.parse(readFileSync(file, 'utf8'));
+  return readFrom(root, course, opts);
+}
+
+/** Keep the materialized source alive for the kit's probe runs, then discard it. */
+export async function checkCheckout(root: string, course: string, opts: { base?: string | null; board?: string | null }) {
+  const scratch = mkdtempSync(join(tmpdir(), 'baton-kit-source-'));
+  try {
+    const input = await readFrom(root, course, opts, scratch);
+    return { input, violations: await checkCourse(input) };
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
+}
+
+async function readFrom(root: string, course: string, opts: { base?: string | null; board?: string | null }, scratch?: string): Promise<KitInput> {
+  const dir = join(root, coursePath(course));
   const versionsOf = (json: unknown, id: string): Versions | null => {
     const c = (asRecord(json).courses as unknown[] | undefined)?.map(asRecord).find((x) => x.id === id);
     return c && Number.isInteger(c.version) && Number.isInteger(c.min_runner_version) ? { version: c.version, min_runner_version: c.min_runner_version } : null;
   };
   const batonJson = join(root, '.baton', 'baton.json');
   const settings = existsSync(batonJson) ? asRecord(JSON.parse(readFileSync(batonJson, 'utf8'))) : {};
-  const proposedVersions = versionsOf(settings, course);
+  const entries = (settings.courses as unknown[] | undefined)?.map(asRecord) ?? [];
+  const entry = entries.find((x) => x.id === course);
+  const courseSource = typeof entry?.source === 'string' ? entry.source : null;
+  const source = courseSource && scratch ? await resolveSource(course, courseSource, scratch) : null;
+  let sourceDir: string | undefined;
+  if (source) {
+    sourceDir = mkdtempSync(join(scratch!, 'course-'));
+    const checkCopies = (sub: string) => {
+      if (!existsSync(join(dir, sub))) return;
+      for (const f of readdirSync(join(dir, sub), { withFileTypes: true })) {
+        const path = sub ? `${sub}/${f.name}` : f.name;
+        if (f.isDirectory()) checkCopies(path);
+        else if (!f.isFile() || !isOverride(path)) throw new Error(`${coursePath(course)}/${path}: not an override of a sourced course`);
+      }
+    };
+    checkCopies('');
+    if (source.standard) {
+      mkdirSync(join(sourceDir, 'legs'));
+      for (const leg of runnerLegs(source.standard)) {
+        await writeStub(source.standard, leg, join(sourceDir, 'legs', `${leg}.mjs`));
+        writeFileSync(join(sourceDir, 'legs', `${leg}.md`), instructionsOf(course, leg));
+      }
+    } else if (source.files) writeCourseTree(sourceDir, source.files, false);
+  }
+  const file = join(dir, 'course.json');
+  if (!source && !existsSync(file)) throw new Error(`${file}: no such course file`);
+  const proposed = JSON.parse(source?.graph ?? readFileSync(file, 'utf8'));
+  const proposedVersions = versionsOf({ courses: [{ ...source?.entry, ...entry }] }, course);
   // B-52 (R-BTN-134, R-BTN-108): the course's schemas, from `schemas/` of its course directory
   // through the same `courseSchemas` the sync's post spreads in — one reader, one path — and
   // the repository's other listed courses beside it, whose files, schemas and versions the
   // spawns check, the signature print and the kit's own registry post read. A sourced course's
   // schemas sit in its source's directory, which B-43 wires to `courseSchemas`.
-  const schemas = courseSchemas(root, course).schemas ?? null;
-  const others = ((settings.courses as unknown[] | undefined) ?? []).map(asRecord).map((x) => x.id).filter((id): id is string => typeof id === 'string')
-    .filter((id) => id !== course).map((id) => {
-      const otherFile = join(root, '.baton', 'courses', id, 'course.json');
-      return { id, file: existsSync(otherFile) ? JSON.parse(readFileSync(otherFile, 'utf8')) : null, schemas: courseSchemas(root, id).schemas ?? [], versions: versionsOf(settings, id) };
-    });
-  // The course entry's source (B-33), where it names one: the standard course whose files the
-  // repository scaffolds, however the course is filed here.
-  const entry = (settings.courses as unknown[] | undefined)?.map(asRecord).find((x) => x.id === course);
-  const courseSource = typeof entry?.source === 'string' ? entry.source : null;
-  const git = (...args: string[]) => execFileSync('git', ['-C', root, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 16 << 20 });
+  const schemas = schemasIn(sourceDir ?? dir, course).schemas ?? null;
+  const others: NonNullable<KitInput['others']> = [];
+  for (const other of entries) {
+    const id = other.id;
+    if (typeof id !== 'string' || id === course) continue;
+    const otherDir = join(root, coursePath(id));
+    const otherFile = join(otherDir, 'course.json');
+    const src = typeof other.source === 'string' && scratch ? await resolveSource(id, other.source, scratch) : null;
+    const schemaDir = src ? mkdtempSync(join(scratch!, 'schemas-')) : otherDir;
+    if (src?.files) writeCourseTree(schemaDir, src.files.filter((f) => f.path.startsWith('schemas/')), false);
+    others.push({ id, file: src ? JSON.parse(src.graph) : existsSync(otherFile) ? JSON.parse(readFileSync(otherFile, 'utf8')) : null,
+      schemas: schemasIn(schemaDir, id).schemas ?? [], versions: versionsOf({ courses: [{ ...src?.entry, ...other }] }, id) });
+  }
+  const gitAtRoot = (...args: string[]) => runGit(root, args);
   let base: unknown = null;
   let baseVersions: Versions | null = null;
   if (opts.base) {
     // A base that does not resolve is an error, never "a new course" (round 1, 1-A-2/1-B-0).
     try {
-      git('rev-parse', '--verify', '--quiet', `${opts.base}^{commit}`);
+      gitAtRoot('rev-parse', '--verify', '--quiet', `${opts.base}^{commit}`);
     } catch {
       throw new Error(`--base ${opts.base}: not a commit in ${root} (fetch it, or pass --base none to skip the removal rule)`);
     }
     // Only a path the base does not have reads as absent; a file that is there must parse.
     const show = (path: string) => {
       try {
-        git('cat-file', '-e', `${opts.base}:${path}`);
+        gitAtRoot('cat-file', '-e', `${opts.base}:${path}`);
       } catch {
         return null;
       }
-      return JSON.parse(git('show', `${opts.base}:${path}`));
+      return JSON.parse(gitAtRoot('show', `${opts.base}:${path}`));
     };
-    base = show(`.baton/courses/${course}/course.json`);
-    baseVersions = versionsOf(show('.baton/baton.json'), course);
+    const baseSettings = asRecord(show('.baton/baton.json'));
+    const baseEntry = (baseSettings.courses as unknown[] | undefined)?.map(asRecord).find((x) => x.id === course);
+    const src = typeof baseEntry?.source === 'string' && scratch ? await resolveSource(course, baseEntry.source, scratch) : null;
+    base = src ? JSON.parse(src.graph) : show(`${coursePath(course)}/course.json`);
+    baseVersions = versionsOf({ courses: [{ ...src?.entry, ...baseEntry }] }, course);
   }
-  const legsDir = join(dir, 'legs');
+  const legsDir = join(sourceDir ?? dir, 'legs');
+  const homeLegs = join(dir, 'legs');
   let legScripts: KitInput['legScripts'] = null;
   const instructions: { name: string; text: string }[] = [];
   const overrides: NonNullable<KitInput['overrides']> = [];
   if (existsSync(legsDir)) {
     legScripts = [];
-    for (const f of readdirSync(legsDir).filter((x) => x.endsWith('.md')).sort()) {
+    const prompts = new Set(readdirSync(legsDir).filter((x) => x.endsWith('.md')));
+    if (sourceDir && existsSync(homeLegs)) for (const f of readdirSync(homeLegs).filter((x) => x.endsWith('.md'))) prompts.add(f);
+    for (const f of [...prompts].sort()) {
       const name = f.slice(0, -'.md'.length);
-      instructions.push({ name, text: readFileSync(join(legsDir, f), 'utf8') });
+      instructions.push({ name, text: readFileSync(join(existsSync(join(homeLegs, f)) ? homeLegs : legsDir, f), 'utf8') });
     }
-    for (const f of readdirSync(legsDir).filter((x) => x.endsWith('.mjs')).sort()) {
+    const scripts = readdirSync(legsDir).filter((x) => x.endsWith('.mjs') && (!sourceDir || !x.endsWith('.run.mjs')));
+    if (sourceDir && existsSync(homeLegs)) scripts.push(...readdirSync(homeLegs).filter((x) => x.endsWith('.run.mjs')));
+    for (const f of scripts.sort()) {
       const override = f.endsWith('.run.mjs');
       const name = f.slice(0, override ? -'.run.mjs'.length : -'.mjs'.length);
       const into = override ? overrides : legScripts;
@@ -691,7 +777,7 @@ export async function readInputs(root: string, course: string, opts: { base?: st
         // An override runs only through a leg script that looks it up: one from before overrides does not.
         // The script must name this course's own override path: a copy of another course's reads that one's.
         const loaded = override ? (existsSync(join(legsDir, `${name}.mjs`)) && readFileSync(join(legsDir, `${name}.mjs`), 'utf8').includes(`.baton/courses/${course}/legs/${name}.run.mjs`)) : undefined;
-        into.push({ name, exports: legExports(await import(pathToFileURL(join(legsDir, f)).href)), ...(override ? { loaded } : {}) });
+        into.push({ name, exports: legExports(await import(pathToFileURL(join(override ? homeLegs : legsDir, f)).href)), ...(override ? { loaded } : {}) });
       } catch (e) {
         into.push({ name, exports: [], error: (e as Error).message.split('\n')[0] });
       }
@@ -704,5 +790,5 @@ export async function readInputs(root: string, course: string, opts: { base?: st
     live = Object.entries(asRecord(b.stations)).filter(([id]) => (courseOf.get(id) ?? course) === course)
       .map(([id, st]) => ({ id, path: (asRecord(st).path as Step[] | undefined) ?? [] }));
   }
-  return { course, proposed, base, proposedVersions, baseVersions, root, source: courseSource, legScripts, overrides, instructions, schemas, others, live };
+  return { course, proposed, base, proposedVersions, baseVersions, root, sourceDir, source: courseSource, legScripts, overrides, instructions, schemas, others, live };
 }

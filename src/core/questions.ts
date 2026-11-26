@@ -86,6 +86,11 @@ function optionAction(g: Graph, station: string): string {
   return `moves the ticket to ‘${station}’${next.length ? `, which queues ${next.join(', ')}` : g.ends.has(station) ? ' — the course’s end' : ''}`;
 }
 
+/** A person leg carries only its decision as entry evidence (R-BTN-109). */
+function unmetAnswerEntry(g: Graph, station: string) {
+  return g.entry.get(station)?.find((r) => r.output !== 'answer' || r.schema !== DECISION_TYPE);
+}
+
 /** A `std:decision@1` value as the library's schema shapes it (§5.5). */
 export interface DecisionValue {
   id: string;
@@ -277,6 +282,7 @@ export class Questions {
     if (!g || leg == null || !def?.person) {
       return bad(value.leg ? `the answer names ${value.leg}, which is not a person leg of ${where.course}` : `${id} has no queued leg to answer`);
     }
+    if (who.by === 'sync' && def.answerSource === 'person') return aside('this leg requires an answer directly from a person');
     const stored = this.rows<QuestionRow>('SELECT * FROM ticket_questions WHERE ticket_id = ?', id)[0] ?? null;
     // The row holds one ask at a time; its answer closes the ask it names. A row closed over a
     // previous leg does not close this one — the ticket queued this leg after that answer.
@@ -306,11 +312,8 @@ export class Questions {
       return { reached: station };
     }
     // R-BTN-109: the station reached takes the answer as its entry, if it asks for anything.
-    for (const r of g.entry.get(option.reached) ?? []) {
-      if (r.output !== 'answer' || r.schema !== DECISION_TYPE) {
-        return bad(`${option.reached}'s entry asks for ${r.output} (${r.schema}); a person leg arrives with answer (${DECISION_TYPE}) alone`);
-      }
-    }
+    const unmetEntry = unmetAnswerEntry(g, option.reached);
+    if (unmetEntry) return bad(`${option.reached}'s entry asks for ${unmetEntry.output} (${unmetEntry.schema}); a person leg arrives with answer (${DECISION_TYPE}) alone`);
     // R-BTN-39: deferred, not refused, while held — an answer that has passed every other check
     // and fails only because a claim holds the ticket waits, kept with its ref, and is applied
     // when the hold ends if it still meets every other condition then (`applyPending`, the
@@ -363,7 +366,7 @@ export class Questions {
   }
 
   /** The leg's options: the question's when it has them, else each outcome under its own name. */
-  private optionsOf(g: Graph, leg: string, stored: QuestionRow | null): QuestionOption[] {
+  private optionsOf(g: Graph, leg: string, stored: Pick<QuestionRow, 'leg' | 'options_json'> | null): QuestionOption[] {
     const posted = stored != null && stored.leg === leg ? (JSON.parse(stored.options_json) as QuestionOption[]) : [];
     if (posted.length) return posted;
     return (g.legs.get(leg)?.to ?? []).map((reached) => ({ id: reached, reached }));
@@ -443,15 +446,15 @@ export class Questions {
     }
     // The legs leaving the outcome it reached, in the file's order: the ticket waits at the
     // station, `next_source: baton` (R-BTN-83), and the next snapshot places it properly.
-    const next = [...g.legs.entries()].filter(([, l]) => l.from.includes(option.reached)).map(([name]) => name);
+    const next = [...g.legs.entries()].filter(([, l]) => !l.arrives && !l.reconciles && l.from.includes(option.reached)).map(([name]) => name);
     // §6.4: the expiry instant is set when the person leg becomes the queued leg — a Baton move
     // is one of the ways it becomes queued ("at a route that queues it", R-BTN-83), so a settle
     // that queues another person leg with `expires` arms its clock itself, counting from this
     // moment; any other queued leg has none.
     const nextDef = next[0] != null ? g.legs.get(next[0]) : undefined;
     const expiresAt = nextDef?.person && nextDef.expires != null ? now + nextDef.expires.afterS * 1000 : null;
-    this.exec(`UPDATE ticket_stations SET station = ?, path = ?, path_len = ?, to_end = ?, next_leg = ?, next_source = 'baton', person_expires_at = ?
-               WHERE ticket_id = ?`, option.reached, JSON.stringify(path), path.length, g.toEnd.get(option.reached) ?? 0, next[0] ?? null, expiresAt, id);
+    this.exec(`UPDATE ticket_stations SET station = ?, path = ?, path_len = ?, to_end = ?, next_leg = ?, next_source = 'baton', person_expires_at = ?, changed_at = ?
+               WHERE ticket_id = ?`, option.reached, JSON.stringify(path), path.length, g.toEnd.get(option.reached) ?? 0, next[0] ?? null, expiresAt, now, id);
     this.exec('DELETE FROM ticket_next_legs WHERE ticket_id = ?', id);
     for (const name of next) {
       const wait = ticketInputs(this.c.store, id, g, name).wait;
@@ -477,6 +480,7 @@ export class Questions {
       this.c.history.record(id, { kind: 'fact-arrival', leg, reached: option.reached, next_leg: next[0] ?? null, detail: { option: option.id, answered_by: meta.by, ...(meta.ref ? { ref: meta.ref } : {}) } });
       this.c.history.record(id, { kind: 'question-answered', leg, detail: { option: option.id, answered_by: meta.by } });
     }
+    if (next[0] === leg) this.exec('DELETE FROM ticket_questions WHERE ticket_id = ?', id);
     if (next.length || g.ends.has(option.reached)) this.c.closeMissingNext(id, now);
     this.c.queued(id);
     this.c.reevaluate(id);
@@ -498,6 +502,32 @@ export class Questions {
 
   // ── reads ────────────────────────────────────────────────────────────────────────────────
 
+  /** S-BTN-197: the answer paths a policy change can remove. Unlike Needs you, an explicit
+   *  answer may name any person leg leaving the station. A live claim only defers an answer. */
+  answerableLegs(repository: string): { ticket_id: string; leg: string }[] {
+    const tickets = this.rows<{ ticket_id: string; course_id: string; station: string;
+      question_leg: string | null; options_json: string | null; answered_at: number | null }>(
+      `SELECT t.id AS ticket_id, t.course_id, s.station, q.leg AS question_leg, q.options_json, q.answered_at
+       FROM tickets t JOIN ticket_stations s ON s.ticket_id = t.id
+       LEFT JOIN ticket_questions q ON q.ticket_id = t.id
+       WHERE t.repository_id = ? AND NOT EXISTS (SELECT 1 FROM closed_tickets c WHERE c.ticket_id = t.id)
+       ORDER BY t.id`, repository);
+    const out: { ticket_id: string; leg: string }[] = [];
+    for (const t of tickets) {
+      const g = this.c.graph(repository, t.course_id);
+      if (!g) continue;
+      const station = resolveStation(g, t.station) ?? t.station;
+      const question = t.question_leg != null && t.options_json != null ? { leg: t.question_leg, options_json: t.options_json } : null;
+      for (const [leg, def] of g.legs) {
+        if (!def.person || !def.from.includes(station) || (t.question_leg === leg && t.answered_at != null)) continue;
+        if (this.optionsOf(g, leg, question).some(({ reached }) => !unmetAnswerEntry(g, reached))) {
+          out.push({ ticket_id: t.ticket_id, leg });
+        }
+      }
+    }
+    return out;
+  }
+
   /** Where the ticket is and what its course is, as the question's checks read it. */
   private where(id: string): { course: string; station: { station: string; next_leg: string | null } } | null {
     const r = this.rows<{ course_id: string; station: string; next_leg: string | null }>(
@@ -510,7 +540,7 @@ export class Questions {
    *  The row's question is the leg's own: one a previous leg's answer closed names nothing here.
    *  B-133: each option carries its COMPUTED action — the station it reaches and the legs that
    *  leave it, person or runner, from the course graph — beside the packet's words. */
-  needsYou() {
+  needsYou(repository?: string) {
     const waiting = this.rows<{ ticket_id: string; leg: string; person_expires_at: number | null; course_id: string; repository_id: string; title: string;
       question_id: string | null; url: string | null; severity: string | null; options_json: string | null }>(
       `SELECT s.ticket_id, s.next_leg AS leg, s.person_expires_at, t.course_id, t.repository_id, t.title,
@@ -520,7 +550,8 @@ export class Questions {
               CASE WHEN q.leg = s.next_leg THEN q.options_json END AS options_json
        FROM ticket_stations s JOIN tickets t ON t.id = s.ticket_id LEFT JOIN ticket_questions q ON q.ticket_id = s.ticket_id
        WHERE s.next_leg IS NOT NULL AND (q.ticket_id IS NULL OR q.answered_at IS NULL OR q.leg != s.next_leg)
-       ORDER BY t.repository_id, s.ticket_id`);
+       ${repository === undefined ? '' : 'AND t.repository_id = ?'}
+       ORDER BY t.repository_id, s.ticket_id`, ...(repository === undefined ? [] : [repository]));
     const out: { ticket_id: string; leg: string; asks: string | null; title: string; question_id: string | null; url: string | null; severity: string | null; options: (QuestionOption & { action: string })[]; expires_at?: number }[] = [];
     for (const w of waiting) {
       const g = this.c.graph(w.repository_id, w.course_id);

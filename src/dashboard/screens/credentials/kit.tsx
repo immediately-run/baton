@@ -43,7 +43,7 @@ export function Actor({ value }: { value: unknown }) {
   return <span className="actor"><Text value={value.slice(0, at)} />: <Fingerprint value={value.slice(at + 1)} /></span>;
 }
 
-/** A list of names — capabilities, tiers, hosts — as chips; "none" for an empty one. */
+/** A list of names — capabilities and hosts — as chips; "none" for an empty one. */
 export function Chips({ values, none = 'none' }: { values: unknown; none?: ReactNode }) {
   const list = listOf<unknown>(values);
   if (list.length === 0) return <span className="mut">{none}</span>;

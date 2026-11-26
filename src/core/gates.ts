@@ -3,14 +3,13 @@
 // its mirror, and G-BTN-40 checks the two against each other. Everything else Baton says about
 // scheduling — the order, the expedite lane's bound, a course's advice — is advice and never
 // refuses (`advice-overridden`). No rule reads what a leg, a station or a tag means.
-import { capabilitiesOf, fitsTier } from '../shared/vocabulary.mjs';
+import { capabilitiesOf } from '../shared/vocabulary.mjs';
 
 /** Who asks: the runner as its heartbeat declared it (§5, R-BTN-60). */
 export interface GateRunner {
-  /** Capability and role names as declared. */
-  declared: string[];
-  /** Its ceiling in the ticket's repository's ladder, resolved by the caller (R-BTN-66). */
-  tier_ceiling: string;
+  declared?: string[];
+  /** Database-backed callers pass the expanded rows, minus any holdings lost since the heartbeat. */
+  holdings?: ReadonlySet<string>;
   tags: string[];
   courses: { repository: string; course: string; version: number }[];
   /** R-BTN-58: the key's grants by repository, each with the capabilities it may use there; null
@@ -25,14 +24,11 @@ export interface GateRunner {
 export interface GateTicket {
   repository: string;
   course: string;
-  tier: string | null;
   /** The clause's names, null with none (rule 4). */
   requires: string[] | null;
   /** Shown, never read: rule 6 is retired (R-BTN-121 as amended, B-104), so an operator-only
    *  ticket is held by rule 4's `human-operator` literal like any capability. */
   operator_only: boolean;
-  /** Its repository's tier ladder, lowest first (R-BTN-66). */
-  tiers: string[];
 }
 
 /** The leg: at a claim the ticket's queued leg as posted; at an advance the leg being started. */
@@ -60,6 +56,8 @@ export interface GateLeg {
 }
 
 export interface GateContext {
+  /** On a diagnostic read, collect the missing rule-4 names without changing its verdict. */
+  missingCapabilities?: (names: string[]) => void;
   now: number;
   /** The ticket's claims; at an advance, without the advancing one. */
   claims: { status: string; confirmed_at: number | null; fence_pending: number }[];
@@ -99,7 +97,6 @@ export const GATE_CODES = {
   3: 'claimed',
   7: 'not-granted',
   4: 'missing-capability',
-  5: 'above-tier-ceiling',
   8: 'barred-tag',
   9: 'stale-skills',
   10: 'backing-off',
@@ -117,7 +114,7 @@ export function claimHolds(c: { status: string; confirmed_at: number | null; fen
 /**
  * Whether `runner` may take `leg` of `ticket` now, at a claim or at an advance, naming the first
  * rule that refuses. At a claim: the leg is ready and a sync has run since the ticket's last end
- * (rule 1), the lease (3), the grant (7), capabilities (4), tier (5), operator-only (6), the
+ * (rule 1), the lease (3), the grant (7), capabilities (4), the
  * barred tags — posted and owner bars — (8), `chain` and `isolation` (§2m), the course version
  * (9) and the backoff (10). At an advance only the rules that bind a holder (§7.2): the hold
  * (3), 4–7, 8 with the holder's own bars and the owner bars that apply at advances joined,
@@ -131,11 +128,12 @@ export function gatesFor(runner: GateRunner | null, ticket: GateTicket, leg: Gat
   // the whole ticket or on the leg refuses a claim of it and an advance into it — never fails open.
   const blocks = facts.blocks ?? [];
   const decided = blocks.some((b) => b.kind === 'decision' && (b.leg === '' || b.leg === leg.name));
+  const dependency = blocks.some((b) => b.kind === 'ticket' && (b.leg === '' || b.leg === leg.name));
   if (phase === 'claim') {
     if (leg.state !== 'ready') return refuse(1);
-    if (decided || blocks.some((b) => b.kind === 'ticket')) return refuse(1, 'blocked');
+    if (decided || dependency) return refuse(1, 'blocked');
     if (facts.claims.some(claimHolds)) return refuse(3);
-  } else if (decided) {
+  } else if (decided || dependency) {
     return refuse(1, 'blocked');
   }
   if (facts.override?.hold) return refuse(3, 'held');
@@ -154,17 +152,17 @@ export function gatesFor(runner: GateRunner | null, ticket: GateTicket, leg: Gat
     // only (§12.5), `human-operator` included as the literal R-BTN-121 compares — rule 6 is
     // retired, so it is met by declaring it and granted like any capability (R-BTN-121 as
     // amended).
-    const held = capabilitiesOf(runner.declared);
+    const held = runner.holdings ?? capabilitiesOf(runner.declared);
     const granted = grant ? new Set(grant.capabilities) : null;
     // R-BTN-58: a grant entry `<type>:*` admits every holding of that type.
     const admits = (capability: string) => granted ? granted.has(capability) || granted.has(`${capability.split(':')[0]}:*`) : true;
     // R-BTN-178: rule 11 reads the same set — every capability with a capacity in it holds a seat.
-    for (const need of needs) {
-      if (!held.has(need) || !(need.startsWith('runner:') || admits(need))) return refuse(4);
+    const missing = [...needs].filter((need) => !held.has(need) || !(need.startsWith('runner:') || admits(need)));
+    if (missing.length) {
+      facts.missingCapabilities?.(missing);
+      return refuse(4);
     }
 
-    // Rule 5: the caller passes the lower of the declared ceiling and the grant's max_tier.
-    if (!fitsTier(ticket.tier, runner.tier_ceiling, ticket.tiers)) return refuse(5);
 
     // Rule 6 is retired (R-BTN-121 as amended): `human-operator` is a runner's own statement,
     // checked by rule 4 like any capability — declared by that name and granted by that name.
@@ -194,9 +192,10 @@ export function gatesFor(runner: GateRunner | null, ticket: GateTicket, leg: Gat
   // Rule 11 (R-BTN-178, §6.11): every capability with a capacity in rule 4's set for this leg
   // has a seat no other claim holds. The fact's `held` already excludes the asking claim's own
   // seats, so an advance into a leg with the same requirements never refuses itself.
-  if (facts.seats) {
+  const seats = facts.seats;
+  if (seats) {
     for (const need of needs) {
-      const s = facts.seats[need];
+      const s = seats[need];
       if (s && s.held >= s.capacity) return { ok: false, rule: 11, code: GATE_CODES[11], capability: need };
     }
   }

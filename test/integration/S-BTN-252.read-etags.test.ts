@@ -14,7 +14,10 @@
 // Runs on both hosts (the rows_read case on Cloudflare only).
 import { describe, it, expect, beforeEach } from 'vitest';
 import { CLOCK_BUCKET_MS } from '../../src/core/stateVersion';
-import { HOST, adminSession, cutover, Git, keyCall, ORIGIN, rows, sessionCall, setAdminKeys, setClock, withCore } from '../helpers';
+import {
+  HOST, adminSession, cutover, Git, keyCall, ORIGIN, rows, sessionCall, setAdminKeys, setClock, withCore,
+  removeRepositoryOwner,
+} from '../helpers';
 import { makeKey, signedRequest, type TestKey } from '../lib/sshKeys';
 import { call as hostCall } from '#host';
 
@@ -117,7 +120,7 @@ describe('S-BTN-252 the reads’ ETags (B-205)', () => {
     // An owner whose ETag was good, once it owns the repository no more.
     const mine = (await signed(owner, BOARD)).headers.get('ETag')!;
     expect((await signed(owner, BOARD, { 'If-None-Match': mine })).status).toBe(304);
-    await rows('UPDATE repository_owners SET removed_at = ? WHERE fingerprint = ?', T0, owner.fingerprint);
+    await removeRepositoryOwner(owner.fingerprint, T0);
     const revoked = await signed(owner, BOARD, { 'If-None-Match': mine });
     expect([401, 403]).toContain(revoked.status);
   });
@@ -127,7 +130,7 @@ describe('S-BTN-252 the reads’ ETags (B-205)', () => {
     expect(board.status).toBe(200);
     expect(board.headers.get('ETag')).toMatch(/^"[0-9a-f]{64}"$/);
     const body = (await board.json()) as Record<string, unknown>;
-    expect(Object.keys(body).sort()).toEqual(['granted_capabilities', 'holders', 'ready', 'ready_by_tier', 'repository', 'server_time']);
+    expect(Object.keys(body).sort()).toEqual(['granted_capabilities', 'holders', 'ready', 'repository', 'server_time']);
     expect(body.server_time).toBe(T0);
     const direct = await withCore((c) => JSON.stringify(c.boardView('docs', null)));
     expect(JSON.stringify(body)).toBe(direct);

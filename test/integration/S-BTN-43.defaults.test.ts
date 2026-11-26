@@ -18,6 +18,8 @@
 // open), and three failed rounds post `review-rounds-3`, which the owner answers through Baton —
 // `round` granting one review run, the fourth round asking `review-rounds-4`, `owner` parking
 // it. Node only: it writes a real repository and runs git.
+import { keepLegacyPrPlacement } from '../lib/legacy-pr-course';
+import { GitRepo } from '../lib/gitRepo';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -29,21 +31,16 @@ import { initMain, parseSyncArgs, syncMain } from '../../src/defaults/cli';
 const init = (root: string, ...argv: string[]) => initMain(argv, { root, log: () => {} });
 import type { PrFact } from '../../src/defaults/course-pr';
 import type { BranchCommit } from '../../src/defaults/pr-markers';
-import { ORIGIN, keyCall, register, rows, setAdminKeys, setClock, syncToken } from '../helpers';
+import { ORIGIN, keyCall, register, rows, setAdminKeys, setClock, syncToken, seedClaim, seedClaimLeg } from '../helpers';
 import { makeKey } from '../lib/sshKeys';
 
 const T0 = Date.parse('2026-10-16T12:00:00Z');
 
 /** The fixture repository: a git tree with a tickets/ wiki, no course code of its own. */
-class Repo {
-  readonly dir: string;
+class DefaultsBoard extends GitRepo {
   facts: PrFact[] = [];
   constructor() {
-    this.dir = mkdtempSync(join(tmpdir(), 'baton-s43-'));
-    const g = (...a: string[]) => execFileSync('git', ['-C', this.dir, ...a], { encoding: 'utf8', stdio: 'ignore' });
-    g('init', '-q', '-b', 'main');
-    g('config', 'user.email', 'relay@test');
-    g('config', 'user.name', 'relay test');
+    super('baton-43-');
     mkdirSync(join(this.dir, 'tickets'), { recursive: true });
     this.write('tickets/first.md', '---\nid: T-1\ntitle: First\ntier: routine\nmystery: unknown-field\n---\n');
     this.write('tickets/second.md', '---\nid: T-2\ntitle: Second\ndepends_on: [T-1]\n---\n');
@@ -55,14 +52,8 @@ class Repo {
     this.write('tickets/noid.md', '---\ntitle: no id here\n---\n');
     this.write('tickets/notes.txt', 'not markdown\n');
   }
-  write(path: string, text: string): void {
-    writeFileSync(join(this.dir, path), text);
-  }
-  commit(): string {
-    execFileSync('git', ['-C', this.dir, 'add', '-A'], { stdio: 'ignore' });
-    execFileSync('git', ['-C', this.dir, 'commit', '--allow-empty', '-qm', 'wiki'], { stdio: 'ignore' });
-    return execFileSync('git', ['-C', this.dir, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
-  }
+
+  commit(message = 'wiki'): string { return super.commit(message); }
   /** One sync: recorded facts, the harness's sync credential, the local host's transport. */
   async sync(...extra: string[]): Promise<void> {
     const facts = join(this.dir, '.baton', 'facts.json');
@@ -73,18 +64,19 @@ class Repo {
   }
 }
 
-let repo: Repo;
+let repo: DefaultsBoard;
 beforeEach(async () => {
   await setClock(T0);
-  repo = new Repo();
+  repo = new DefaultsBoard();
   gateRunner = null;
 });
-afterEach(() => rmSync(repo.dir, { recursive: true, force: true }));
+afterEach(() => repo.dispose());
 
 type StationRow = { station: string; next_leg: string | null };
 type NextRow = { leg: string; state: string; waiting_on: string | null };
 const stationOf = (id: string): Promise<StationRow[]> => rows('SELECT station, next_leg FROM ticket_stations WHERE ticket_id = ?', `docs:${id}`);
 const nextOf = (id: string): Promise<NextRow[]> => rows('SELECT leg, state, waiting_on FROM ticket_next_legs WHERE ticket_id = ? ORDER BY leg', `docs:${id}`);
+const recommendable = (id: string) => rows('SELECT 1 FROM ready_ticket_source WHERE ticket_id = ?', `docs:${id}`);
 
 /** One run-tests gate run (B-110): its marker on the branch, and the claim whose run-tests leg
  *  Baton recorded with that marker as its evidence — the only way a marker counts (round 1,
@@ -128,15 +120,22 @@ async function recorded(...gates: Gate[]): Promise<void> {
   gateRunner ??= (await register('vm-a')).id;
   for (const g of gates) {
     if ((await rows('SELECT 1 FROM claims WHERE request_id = ?', `gate:${g.nonce}`)).length) continue;
-    await rows(`INSERT INTO claims (ticket_id, runner_id, request_id, nonce, snapshot_sha, claimed_at, status, ended_at, end_reason) VALUES ('docs:T-1', ?, ?, ?, '', 0, 'released', 1, 'released:requested')`, gateRunner, `gate:${g.nonce}`, g.nonce);
+    await seedClaim({
+      ticket_id: 'docs:T-1', runner_id: gateRunner, request_id: `gate:${g.nonce}`, nonce: g.nonce, snapshot_sha: '',
+      claimed_at: 0, status: 'released', ended_at: 1, end_reason: 'released:requested',
+    });
     const [{ id }] = await rows<{ id: number }>('SELECT id FROM claims WHERE request_id = ?', `gate:${g.nonce}`);
-    await rows(`INSERT INTO claim_legs (claim_id, seq, leg, from_station, to_station, started_at, started_observation, finished_at, evidence) VALUES (?, 1, 'run-tests', 'pr-open', 'pr-open', 0, 0, 1, ?)`, id, g.sha);
+    await seedClaimLeg({
+      claim_id: id, seq: 1, leg: 'run-tests', from_station: 'pr-open', to_station: 'pr-open', started_at: 0,
+      started_observation: 0, finished_at: 1, evidence: g.sha,
+    });
   }
 }
 
 describe('S-BTN-43 a repository with no course code', () => {
   it('init then sync: four tickets on the pr course, the dependent not ready, the timeline to merged', async () => {
-    expect(await init(repo.dir)).toBe(0);
+    expect(await init(repo.dir, '--own')).toBe(0);
+    keepLegacyPrPlacement(repo.dir);
     repo.commit();
     await repo.sync();
     // Four tickets from five items — the no-id file (and the .txt) are none; the done one is
@@ -151,7 +150,9 @@ describe('S-BTN-43 a repository with no course code', () => {
     expect((await nextOf('T-3'))[0]).toMatchObject({ leg: 'implement', state: 'ready' });
     // The dependent ticket is not ready until its dependency is done.
     expect((await stationOf('T-2'))[0]).toMatchObject({ station: 'filed', next_leg: 'implement' });
-    expect((await nextOf('T-2'))[0]).toMatchObject({ state: 'waiting', waiting_on: 'dependencies' });
+    expect(await recommendable('T-2')).toHaveLength(0);
+    expect(await rows("SELECT leg, ref FROM ticket_blocks WHERE ticket_id = ? AND kind = 'ticket'", 'docs:T-2'))
+      .toEqual([{ leg: 'implement', ref: 'docs:T-1@done' }]);
 
     // A PR opens for T-1: the run-tests gate comes before every review round (B-110), so with
     // no marker on the head the gate is ready — not review, whatever the checks say.
@@ -207,10 +208,12 @@ describe('S-BTN-43 a repository with no course code', () => {
     await repo.sync();
     expect((await stationOf('T-2'))[0]).toMatchObject({ station: 'filed', next_leg: 'implement' });
     expect((await nextOf('T-2'))[0]).toMatchObject({ state: 'ready', waiting_on: null });
+    expect(await recommendable('T-2')).toHaveLength(1);
   }, 60_000);
 
   it('--eject tickets, then an edit to the copy: the edited source’s tickets are posted', async () => {
-    await init(repo.dir);
+    await init(repo.dir, '--own');
+    keepLegacyPrPlacement(repo.dir);
     repo.commit();
     await repo.sync();
     expect(await rows('SELECT count(*) AS n FROM tickets')).toEqual([{ n: 3 }]);
@@ -226,7 +229,8 @@ describe('S-BTN-43 a repository with no course code', () => {
   }, 60_000);
 
   it('one identity, comment-only verdict reviews, moves the same way; a red check makes review ready once the gate stands green', async () => {
-    await init(repo.dir);
+    await init(repo.dir, '--own');
+    keepLegacyPrPlacement(repo.dir);
     repo.commit();
     // The same identity authors and reviews; GitHub refuses self-approval, so the verdict is
     // the marker line a comment-only review opens with. The gate's green marker precedes each
@@ -245,7 +249,8 @@ describe('S-BTN-43 a repository with no course code', () => {
   }, 60_000);
 
   it('three failed reviews hand the blockers to the owner — a decision in Needs you — who answers through Baton (B-110)', async () => {
-    await init(repo.dir);
+    await init(repo.dir, '--own');
+    keepLegacyPrPlacement(repo.dir);
     repo.commit();
     await repo.sync();
     // The owner of docs, who answers through Baton's owner route — never a line in git (the
@@ -309,7 +314,8 @@ describe('S-BTN-43 the sync refuses, posting nothing', () => {
   it('a course with no sync.mjs that is not a standard course, a ticket on an unlisted course, a bad stations return, no baton.json', async () => {
     mkdirSync(join(repo.dir, '.baton')); // the harness keeps its recorded facts there
     await expect(repo.sync()).rejects.toThrow('has no .baton/baton.json — run `baton repo init` first');
-    await init(repo.dir);
+    await init(repo.dir, '--own');
+    keepLegacyPrPlacement(repo.dir);
     const settingsFile = join(repo.dir, '.baton', 'baton.json');
     const settings = JSON.parse(readFileSync(settingsFile, 'utf8'));
 
@@ -338,7 +344,8 @@ describe('S-BTN-43 the sync refuses, posting nothing', () => {
   }, 60_000);
 
   it('a checkout behind the head posts nothing: a slow run for an older push never moves the board back', async () => {
-    await init(repo.dir);
+    await init(repo.dir, '--own');
+    keepLegacyPrPlacement(repo.dir);
     const older = repo.commit();
     repo.write('tickets/fourth.md', '---\nid: T-4\ntitle: Fourth\n---\n');
     repo.commit();
@@ -353,7 +360,8 @@ describe('S-BTN-43 the sync refuses, posting nothing', () => {
 
 describe('S-BTN-43 --latest, as the workflow runs it', () => {
   it('after its number the run fetches the newest main and posts that board, not the older checkout it started on', async () => {
-    await init(repo.dir);
+    await init(repo.dir, '--own');
+    keepLegacyPrPlacement(repo.dir);
     repo.commit();
     // A bare origin, and a second clone that pushes one commit the local checkout lacks.
     const bare = mkdtempSync(join(tmpdir(), 'baton-s43-origin-'));
