@@ -127,8 +127,7 @@ export interface Config {
   BATON_FORGE_SECRETS?: string;
   /** R-BTN-73: the GitHub App's webhook secret. Absent, every delivery is refused. */
   BATON_GITHUB_WEBHOOK_SECRET?: string;
-  /** R-BTN-185: the host's break-glass keys, one OpenSSH public key per line. R-BTN-188
-   *  defines their reach; they are set outside Baton. */
+  /** R-BTN-185: the host's break-glass keys, one OpenSSH public key per line, set outside Baton. */
   BATON_HUMAN_KEYS?: string;
   /** R-BTN-185: deployment minimum for human-only keys, `any` or `hardware`. */
   BATON_HUMAN_KEY?: string;
