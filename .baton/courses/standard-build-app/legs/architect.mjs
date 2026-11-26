@@ -277,7 +277,7 @@ function readOnlyHarness(words, prompt, readConfig = () => null) {
     const config = {};
     for (const path of ["opencode.json", "opencode.jsonc", ".opencode/opencode.json", ".opencode/opencode.jsonc"]) {
       const snapshot2 = configObject(readConfig(path), path);
-      for (const field of ["model", "default_agent"]) if (typeof snapshot2[field] === "string") config[field] = snapshot2[field];
+      for (const field2 of ["model", "default_agent"]) if (typeof snapshot2[field2] === "string") config[field2] = snapshot2[field2];
       config.providers = { ...object(config.providers), ...object(snapshot2.providers) };
       const agents = Object.fromEntries(Object.entries(object(snapshot2.agents)).map(([id, value]) => [
         id,
@@ -486,12 +486,12 @@ var NAME = /^[a-z0-9][a-z0-9-]{0,63}$/;
 var HOLDING_TYPE = "[a-z][a-z0-9-]{0,31}";
 var HOLDING_VALUE = "[A-Za-z0-9:._/@-]{1,128}";
 var HOLDING = new RegExp(`^${HOLDING_TYPE}:${HOLDING_VALUE}$`);
-var bad = (field, why) => {
-  throw new BatonError("invalid-params", `${field}: ${why}`);
+var bad = (field2, why) => {
+  throw new BatonError("invalid-params", `${field2}: ${why}`);
 };
 var isObj = (v) => !!v && typeof v === "object" && !Array.isArray(v);
 var optional = (v, check) => v === void 0 || v === null ? void 0 : check(v);
-var matches = (re, field) => (v) => typeof v === "string" && re.test(v) ? v : bad(field, `must match ${re}`);
+var matches = (re, field2) => (v) => typeof v === "string" && re.test(v) ? v : bad(field2, `must match ${re}`);
 var REPORT_HORIZON_MS = 6 * 36e5;
 var NUM = "number";
 var BOOL = "boolean";
@@ -638,6 +638,15 @@ var sha = (v) => typeof v === "string" && /^[a-f0-9]{40}$/.test(v);
 var prNumber = (v) => typeof v === "number" && Number.isInteger(v) && v > 0 && v <= 999999999;
 var immutableId = (id) => typeof id === "number" && Number.isSafeInteger(id) && id > 0;
 var sameRepository = (head, base) => immutableId(head) && head === base;
+function field(v, ...keys) {
+  let at = v;
+  for (const key of keys) {
+    if (typeof at !== "object" || at === null) return void 0;
+    at = at[key];
+  }
+  return at;
+}
+var prState = (v) => v === "open" || v === "merged" || v === "closed" ? v : void 0;
 function openRef(number2, branch, oid) {
   if (!prNumber(number2) || typeof branch !== "string" || !branch || branch.length > 1024 || !sha(oid)) throw new Error("malformed PR head");
   return { number: number2, headRefName: branch, headRefOid: oid };
@@ -701,13 +710,14 @@ var PR_DETAIL = `fragment D on PullRequest {
 }`;
 
 // src/defaults/forges/rest-facts.ts
+var time = (v) => Date.parse(String(v));
 async function readRestFacts(repo, read, ctx, adapter, api, pageSizeKey, canPush) {
   const list = (path2) => api.list(path2, pageSizeKey);
   const shape = adapter.restFacts;
   const path = repo.path;
   if (read.entry) {
     const ids = await api.request(shape.identity(path));
-    if (String(ids?.id) !== read.entry.repo_id || String(shape.ownerId(ids)) !== read.entry.owner_id) {
+    if (String(field(ids, "id")) !== read.entry.repo_id || String(shape.ownerId(ids)) !== read.entry.owner_id) {
       throw new Error(`${path}: forge ids differ from code_repos (R-BTN-138)`);
     }
   }
@@ -718,12 +728,12 @@ async function readRestFacts(repo, read, ctx, adapter, api, pageSizeKey, canPush
     const { number: number2, headRefName: head, headRefOid: oid, sameRepository: sameRepository2 } = adapter.head(p);
     const state = shape.state(p);
     if (!state) throw new Error(`${path} #${number2}: invalid PR state`);
-    const fact = { number: number2, head, state, repository: path, sameRepository: sameRepository2, headOid: oid, url: opened(repo, p[adapter.url]), pushedAt: 0, reviews: [], checks: [] };
+    const fact = { number: number2, head, state, repository: path, sameRepository: sameRepository2, headOid: oid, url: opened(repo, field(p, adapter.url)), pushedAt: 0, reviews: [], checks: [] };
     if (ctx.owns(fact)) {
       const raw = (await list(shape.commits(path, number2))).map(shape.commit);
       const trees = new Map(raw.map((c) => [c.oid, c.tree]));
       const commits = raw.map((c) => {
-        const at = Date.parse(c.date);
+        const at = time(c.date);
         if (!sha(c.oid) || !Number.isFinite(at)) throw new Error(`${path} #${number2}: invalid commit facts`);
         return { sha: c.oid, at, parent: sha(c.parent) ? c.parent : null, empty: sha(c.tree) && c.tree === trees.get(c.parent), message: typeof c.message === "string" ? c.message.slice(0, 16384) : "" };
       });
@@ -742,19 +752,23 @@ async function readRestFacts(repo, read, ctx, adapter, api, pageSizeKey, canPush
       }
       const add = async (c, user, state2) => {
         const author = shape.author(user ?? {});
-        const submittedAt = Date.parse(shape.reviewDate(c));
+        const submittedAt = time(shape.reviewDate(c));
         if (typeof author !== "string" || !author || author.length > 128 || !Number.isFinite(submittedAt)) return;
-        if (c.updated_at != null && c.updated_at !== (c.created_at ?? c.submitted_at) && (!immutableId(user?.id) || c.updated_by?.id !== user.id)) return;
-        if (!pushers.has(String(user?.id)) && !await canPush(user?.id, author)) return;
-        fact.reviews.push({ author, state: state2, submittedAt, body: typeof c.body === "string" ? c.body.slice(0, 16384) : "" });
+        const userId = field(user, "id");
+        const updatedAt = field(c, "updated_at");
+        if (updatedAt != null && updatedAt !== (field(c, "created_at") ?? field(c, "submitted_at")) && (!immutableId(userId) || field(c, "updated_by", "id") !== userId)) return;
+        if (!pushers.has(String(userId)) && !await canPush(userId, author)) return;
+        const body = field(c, "body");
+        fact.reviews.push({ author, state: state2, submittedAt, body: typeof body === "string" ? body.slice(0, 16384) : "" });
       };
       const comments = adapter.comments(path, number2);
       for (const c of await (shape.unpagedComments ? api.unpaged(comments) : list(comments))) await add(c, shape.user(c), "COMMENTED");
       if (shape.reviews) {
         for (const c of await list(shape.reviews(path, number2))) {
-          if (c.dismissed || c.stale) continue;
-          if (c.state === "APPROVED" || c.state === "REQUEST_CHANGES" || c.state === "COMMENT") {
-            await add(c, shape.user(c), c.state === "REQUEST_CHANGES" ? "CHANGES_REQUESTED" : c.state === "COMMENT" ? "COMMENTED" : "APPROVED");
+          if (field(c, "dismissed") || field(c, "stale")) continue;
+          const verdict = field(c, "state");
+          if (verdict === "APPROVED" || verdict === "REQUEST_CHANGES" || verdict === "COMMENT") {
+            await add(c, shape.user(c), verdict === "REQUEST_CHANGES" ? "CHANGES_REQUESTED" : verdict === "COMMENT" ? "COMMENTED" : "APPROVED");
           }
         }
       }
@@ -785,7 +799,7 @@ function githubEvidence(url) {
 }
 var pulls = (path) => `/repos/${path}/pulls`;
 var issues = (path, n) => `/repos/${path}/issues/${n}/comments`;
-var pullHead = (p, branch = p?.head?.ref) => ({ ...openRef(p?.number, branch, p?.head?.sha), sameRepository: sameRepository(p?.head?.repo?.id, p?.base?.repo?.id) });
+var pullHead = (p, branch = field(p, "head", "ref")) => ({ ...openRef(field(p, "number"), branch, field(p, "head", "sha")), sameRepository: sameRepository(field(p, "head", "repo", "id"), field(p, "base", "repo", "id")) });
 var pullBody = ({ title, head, base, body }) => ({ title, head, base, body });
 var project = (path) => `/projects/${encodeURIComponent(path)}`;
 var mergeRequests = (path) => `${project(path)}/merge_requests`;
@@ -813,22 +827,28 @@ var ADAPTERS = {
     comments: (path, n) => `${mergeRequests(path)}/${n}/notes`,
     openBody: ({ title, head, base, body }) => ({ title, source_branch: head, target_branch: base, description: body }),
     url: "web_url",
-    head: (p) => ({ ...openRef(p?.iid, p?.source_branch, p?.sha), sameRepository: sameRepository(p?.source_project_id, p?.target_project_id) }),
+    head: (p) => ({ ...openRef(field(p, "iid"), field(p, "source_branch"), field(p, "sha")), sameRepository: sameRepository(field(p, "source_project_id"), field(p, "target_project_id")) }),
     openQuery: "state=opened",
     protectedRefusal: (s) => /not allowed to push code to protected branches/i.test(s),
     restFacts: {
-      state: (p) => p.state === "merged" ? "merged" : p.state === "opened" ? "open" : p.state === "closed" ? "closed" : null,
+      state: (p) => {
+        const s = field(p, "state");
+        return s === "merged" ? "merged" : s === "opened" ? "open" : s === "closed" ? "closed" : null;
+      },
       identity: (path) => project(path),
-      ownerId: (p) => p.namespace?.id,
+      ownerId: (p) => field(p, "namespace", "id"),
       commits: (path, n) => `${mergeRequests(path)}/${n}/commits`,
-      commit: (c) => ({ oid: c.id, date: c.committed_date, message: c.message, parent: c.parent_ids?.[0] }),
+      commit: (c) => ({ oid: field(c, "id"), date: field(c, "committed_date"), message: field(c, "message"), parent: field(c, "parent_ids", 0) }),
       checks: (path, oid) => `${project(path)}/repository/commits/${oid}/statuses`,
-      conclusion: (c) => status(c.status),
-      user: (note) => note.system === true ? null : note.author,
-      author: (u) => u.username,
-      reviewDate: (n) => n.created_at,
+      conclusion: (c) => status(field(c, "status")),
+      user: (note) => field(note, "system") === true ? null : field(note, "author"),
+      author: (u) => field(u, "username"),
+      reviewDate: (n) => field(n, "created_at"),
       permission: (path, id) => `${project(path)}/members/all/${id}`,
-      canPush: (p, id) => p?.id === id && Number.isSafeInteger(p.access_level) && p.access_level >= 30,
+      canPush: (p, id) => {
+        const level = field(p, "access_level");
+        return field(p, "id") === id && typeof level === "number" && Number.isSafeInteger(level) && level >= 30;
+      },
       scopeRefusal: (msg) => /insufficient_scope/i.test(msg),
       gitTrees: true
     }
@@ -841,7 +861,7 @@ var ADAPTERS = {
     openBody: pullBody,
     url: "html_url",
     // `label` is the source branch; `ref` may become the synthetic PR ref after deletion.
-    head: (p) => ({ ...openRef(p?.number, p?.head?.label || p?.head?.ref, p?.head?.sha), sameRepository: sameRepository(p?.head?.repo_id, p?.base?.repo_id) }),
+    head: (p) => ({ ...openRef(field(p, "number"), field(p, "head", "label") || field(p, "head", "ref"), field(p, "head", "sha")), sameRepository: sameRepository(field(p, "head", "repo_id"), field(p, "base", "repo_id")) }),
     openQuery: "state=open",
     allQuery: "state=all",
     auth: "token",
@@ -849,23 +869,29 @@ var ADAPTERS = {
     protectedRefusal: (s) => /not allowed to push to protected branch/i.test(s),
     restFacts: {
       listQuery: "state=all",
-      state: (p) => p.merged === true || p.merged_at ? "merged" : p.state === "open" || p.state === "closed" ? p.state : null,
+      state: (p) => {
+        const s = field(p, "state");
+        return field(p, "merged") === true || field(p, "merged_at") ? "merged" : s === "open" || s === "closed" ? s : null;
+      },
       identity: (path) => `/repos/${path}`,
-      ownerId: (p) => p.owner?.id,
+      ownerId: (p) => field(p, "owner", "id"),
       commits: (path, n) => `${pulls(path)}/${n}/commits`,
-      commit: (c) => ({ oid: c.sha, date: c.commit?.committer?.date, message: c.commit?.message, parent: c.parents?.[0]?.sha, tree: c.commit?.tree?.sha }),
+      commit: (c) => ({ oid: field(c, "sha"), date: field(c, "commit", "committer", "date"), message: field(c, "commit", "message"), parent: field(c, "parents", 0, "sha"), tree: field(c, "commit", "tree", "sha") }),
       newestCommitFirst: true,
       treeOf: (path, oid) => `/repos/${path}/git/commits/${oid}`,
       checks: (path, oid) => `/repos/${path}/commits/${oid}/status`,
-      checkItems: (p) => p?.statuses ?? (p && (p.total_count === 0 || Object.keys(p).length === 0) ? [] : void 0),
-      conclusion: (c) => status(c.status),
-      user: (c) => c.user,
-      author: (u) => u.login,
-      reviewDate: (c) => c.submitted_at ?? c.created_at,
+      checkItems: (p) => field(p, "statuses") ?? (p && (field(p, "total_count") === 0 || Object.keys(p).length === 0) ? [] : void 0),
+      conclusion: (c) => status(field(c, "status")),
+      user: (c) => field(c, "user"),
+      author: (u) => field(u, "login"),
+      reviewDate: (c) => field(c, "submitted_at") ?? field(c, "created_at"),
       reviews: (path, n) => `${pulls(path)}/${n}/reviews`,
       unpagedComments: true,
       permission: (path, _id, login) => `/repos/${path}/collaborators/${encodeURIComponent(login)}/permission`,
-      canPush: (p, id) => p?.user?.id === id && ["write", "admin", "owner"].includes(p.permission),
+      canPush: (p, id) => {
+        const permission = field(p, "permission");
+        return field(p, "user", "id") === id && typeof permission === "string" && ["write", "admin", "owner"].includes(permission);
+      },
       scopeRefusal: (msg) => /token.*scope|Only admins can query all permissions/i.test(msg)
     }
   }
@@ -904,7 +930,7 @@ function forgeClient(repo, opts = {}, reader) {
   const repoFlag = repo.webBase.startsWith(`${FORGE_SHAPES[DEFAULT_FORGE].defaultOrigin}/`) ? path : `${new URL(repo.webBase).host}/${path}`;
   return {
     async openPr(pr) {
-      const url = cli ? cli(["pr", "create", "--repo", repoFlag, "--head", pr.head, "--base", pr.base, "--title", pr.title, "--body", pr.body ?? ""]).split("\n").at(-1) : (await api.request(pulls2, adapter.openBody(pr)))?.[adapter.url];
+      const url = cli ? cli(["pr", "create", "--repo", repoFlag, "--head", pr.head, "--base", pr.base, "--title", pr.title, "--body", pr.body ?? ""]).split("\n").at(-1) : field(await api.request(pulls2, adapter.openBody(pr)), adapter.url);
       return opened(repo, url);
     },
     async listOpenPrs() {
@@ -914,16 +940,18 @@ function forgeClient(repo, opts = {}, reader) {
     async listPrs() {
       if (cli) return listCli(cli, repoFlag, "all");
       const query = adapter.allQuery ?? (adapter.cli ? "state=all" : "");
-      return (await all(`${pulls2}${query ? `?${query}` : ""}`)).map((p) => ({ ...adapter.head(p), state: adapter.restFacts?.state(p) ?? (p.merged_at ? "merged" : p.state) }));
+      return (await all(`${pulls2}${query ? `?${query}` : ""}`)).map((p) => ({ ...adapter.head(p), state: adapter.restFacts?.state(p) ?? (field(p, "merged_at") ? "merged" : prState(field(p, "state"))) }));
     },
     async comment(number2, body) {
       if (!prNumber(number2)) throw new Error("invalid PR number");
       const prUrl = `${repo.webBase}${FORGE_SHAPES[repo.forge].pr}${number2}`;
       if (cli) return commentUrl(prUrl, cli(["pr", "comment", prUrl, "--body", body]));
       const response = await api.request(adapter.comments(path, number2), { body });
-      if (typeof response?.html_url === "string") return commentUrl(prUrl, response.html_url);
-      if (!immutableId(response?.id)) throw new Error(`${repo.forge} answered no comment id`);
-      return `${prUrl}#${adapter.restFacts?.reviews ? "issuecomment-" : "note_"}${response.id}`;
+      const html = field(response, "html_url");
+      if (typeof html === "string") return commentUrl(prUrl, html);
+      const id = field(response, "id");
+      if (!immutableId(id)) throw new Error(`${repo.forge} answered no comment id`);
+      return `${prUrl}#${adapter.restFacts?.reviews ? "issuecomment-" : "note_"}${id}`;
     },
     async facts(read) {
       if (!reader) throw new Error("no fact context");
