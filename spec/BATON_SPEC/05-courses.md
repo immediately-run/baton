@@ -22,24 +22,41 @@ Designs for this section that are not built are on the proposal page
     (R-BTN-108) and leg overrides (R-BTN-131). A standard course (R-BTN-131) with no `sync.mjs`
     runs the CLI's station function for it; any other course without one fails the sync.
   - **A source** is `courses[].source` = `<provider>/<namespace>/<repository>/<ref>/<course>`:
-    `<ref>` is defined by R-BTN-131, and `github` is the only
+    `<ref>` is a full lowercase 40-hex commit (pinned) or a Git branch name using only
+    `[A-Za-z0-9._/-]`, without `..` (unpinned); it never names a tag. `github` is the only
     provider. The short `id` is the name tickets, rows, rule 9 and branch patterns use. A course
-    with no `source` is the repository's own. A source names the CLI's own repository; any other
-    is refused.
-  - **A sourced course keeps its graph.** The sync posts nothing while the home's `course.json`
-    differs from the source commit's, or while the home has a `sync.mjs` for the course. The
-    home changes a sourced course only through its leg instructions and leg overrides
-    (R-BTN-131).
+    with no `source` is the repository's own. A fetched source's course directory is
+    `.baton/courses/<course>/` in the source repository. A CLI may use its own bundled standard
+    course when the repository and commit match exactly. Otherwise the reader fetches the
+    source's default branch and verifies that the pin is a commit on its ancestry, including
+    when the reader already has the commit. It never fetches by commit id. For a branch source,
+    each sync fetches that exact branch, uses the commit returned by that fetch, and posts nothing
+    if the branch cannot be resolved. It logs `course <id> follows branch <b> (unpinned): resolved to <sha10>`
+    for the workflow to annotate. The snapshot records `{branch, sha}` per unpinned course in
+    `course_sources`. A refresh that does not apply the registry refuses branch-derived placements
+    whose registry differs from the one in force; only a refresh read at the current home head
+    may update its resolutions. A claim retains its own `course_source: {branch, sha}` from the
+    snapshot at allocation. Readers of that claim use only that commit, checked against the
+    named branch's ancestry, or fail without falling back to another commit.
+  - **A sourced course keeps its graph.** The sync reads the source's files, with the home's
+    entry fields taking precedence over defaults in `.baton/courses/<course>/entry.json` in the
+    source repository. The home changes a sourced course only through its leg instructions and
+    leg overrides (R-BTN-131). Any
+    other file in the home's sourced course directory fails the sync, naming the path.
   - **Every reader goes through the snapshot.** The sync reads `.baton/` at the commit it posts
     (R-BTN-105), the runner at the claim's `snapshot_sha` (see R-BTN-143), and
     re-verification at the commit it verifies (R-BTN-5), so all three use the same bytes.
     Station functions and ticket sources run through the wrapper (R-BTN-133) in a read-only
     worktree of that commit, never in `ctx.checkout`.
-  - **`baton repo init`** (R-BTN-127) scaffolds a standard course: its files, its `courses[]`
-    entry with the source at the CLI's own commit, and the sync workflow, which pins the CLI by
-    version. Re-run with a newer CLI it moves the pin and each pinned source together (R-BTN-131). It never
-    overwrites the home's leg instructions or overrides. With no `--course` it takes
-    `default_course`, else `create-pr`.
+  - **`baton repo init`** (R-BTN-127) writes a standard course's `courses[]` entry with the source
+    at the CLI's own commit, and the sync workflow, which pins the CLI by version.
+    `--course <id> --source-branch <branch>` instead follows that branch without changing the
+    workflow pin. Re-run with
+    a newer CLI it moves the pin and each source together, and rewrites none of a sourced
+    course's files in the home: the newer course arrives through its source. It writes a home override only when
+    requested (`--override` or `--instructions`), never overwriting one. `--prune` compares
+    existing files against the current pins, removes identical copies and reports differing
+    files without changing the pins. With no `--course` it takes `default_course`, else `create-pr`.
   - **Trust.** Naming a source adopts its code with the rights of where it runs: the station
     function in the sync job's environment, leg scripts on runners (R-BTN-133).
 
@@ -503,19 +520,6 @@ Designs for this section that are not built are on the proposal page
     facts it reads and the lines it writes — is stated in
     [the standard courses](../../docs/standard-courses.mdx) and the course's own files. The
     bullets below bind the CLI and the runner for every course.
-  - **Source refs.** The default is the CLI's full 40-hex commit; a pinned source must match
-    the CLI's commit. `baton repo init --course <id> --source-branch <branch>` writes an unpinned
-    source instead, leaving the workflow's CLI pinned. A branch uses only `[A-Za-z0-9._/-]`, has
-    no `..`, is a valid Git branch name, and is not 40 hex characters. Tags are not sources.
-    Each sync resolves the branch to its head once and uses that commit's graph and station
-    function (R-BTN-134). An unresolved branch fails the sync, naming the branch, without falling
-    back. The post carries `course_sources`, keyed by course id with `{branch, sha}`; the snapshot
-    and Sync read show the latest accepted resolution read at that home commit. If the resolved
-    station function changes the course's `facts`, Baton refuses a same-home refresh: the home
-    commit must advance to apply the new registry. The sync logs
-    `course <id> follows branch <b> (unpinned): resolved to <sha10>` and the generated workflow
-    annotates it. The runner still uses the home's committed graph at the claim's snapshot
-    (R-BTN-22), never re-resolving the source branch.
   - **Request courses.** A course whose file carries `starts_from: request` is entered by
     `baton ticket request "<one sentence>" --course <course>` (R-BTN-127); no other course is.
     The command files one ticket (R-BTN-74's source): the id from R-BTN-199's allocator, the

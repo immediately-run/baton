@@ -13,8 +13,7 @@ would join the rule when built.
 
 R-BTN-134 (proposed). Today a `source` names only the CLI's own repository, a scaffolded course's
 files live in the home's `.baton/courses/<course>/`, and the sync holds its course file to the
-source's. R-BTN-131 defines commit and branch refs for those sources. The design below reads a
-course from a course directory in any repository; its cross-repository fetching design is not built.
+source's. The design below reads a course from a course directory in any repository.
 
 - R-BTN-134 (proposed; a course is what its source names). Every reader — the sync, the runner, the
   test kit, `baton repo init` — reads a course from one course directory at one commit. The CLI

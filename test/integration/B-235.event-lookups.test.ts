@@ -7,7 +7,7 @@
 // lists keep the log's order. On the Cloudflare host the lookups' rows_read
 // (`SqlStorageCursor.rowsRead`) stays the same while the log grows. Runs on both hosts.
 import { describe, it, expect, beforeEach } from 'vitest';
-import { Git, HOST, adminSession, cutover, rows, sessionCall, setAdminKeys, setClock, withCore, keyCall } from '../helpers';
+import { Git, HOST, adminSession, cutover, rows, sessionCall, setAdminKeys, setClock, withCore, keyCall, seedEvent } from '../helpers';
 import { makeKey, type TestKey } from '../lib/sshKeys';
 
 const T0 = Date.parse('2026-11-15T12:00:00Z');
@@ -55,7 +55,7 @@ const fill = (n: number, kind: string, at: number, detail: string) => rows(
    INSERT INTO events (at, kind, actor, detail_json, repository_id) SELECT ?, ?, 'test', ?, 'docs' FROM k`, n, at, kind, detail);
 
 const event = (at: number, kind: string, detail: unknown, ticket: string | null = null) =>
-  rows(`INSERT INTO events (at, kind, actor, detail_json, ticket_id, repository_id) VALUES (?, ?, 'test', ?, ?, 'docs')`, at, kind, JSON.stringify(detail), ticket);
+  seedEvent({ at, kind, actor: 'test', detail_json: JSON.stringify(detail), ticket_id: ticket, repository_id: 'docs' });
 
 let admin: TestKey;
 let session: string;

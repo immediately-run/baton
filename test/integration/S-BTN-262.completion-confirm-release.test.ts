@@ -12,7 +12,7 @@
 // B-76: no confirmation code and no owner session exist, so the routes act at once for the
 // only session there is, as `claim.force-reap` does. Runs on both hosts.
 import { describe, it, expect, beforeEach } from 'vitest';
-import { adminSession, claimRow, cutover, Git, ORIGIN, register, rows, sessionCall, setAdminKeys, setClock } from '../helpers';
+import { adminSession, claimRow, cutover, Git, ORIGIN, register, rows, sessionCall, setAdminKeys, setClock, seedClaim } from '../helpers';
 import { makeKey, type TestKey } from '../lib/sshKeys';
 import { call as hostCall } from '#host';
 
@@ -30,8 +30,10 @@ const post = async (path: string, body: unknown) => {
 const stateOf = async (local: string) => ((await (await sessionCall(cookie, `/v1/repositories/docs/tickets/${local}`)).json()) as Row);
 /** An unconfirmed completion on `local`, seeded as a runner's `done` end leaves it. */
 async function completion(local: string): Promise<number> {
-  await rows(`INSERT INTO claims (ticket_id, runner_id, request_id, nonce, snapshot_sha, claimed_at, status, ended_at, end_reason, ended_at_sha)
-              VALUES (?, ?, ?, 'abc123', '', ?, 'completed', ?, 'done', ?)`, `docs:${local}`, runner, `seed:${local}`, T0 - 60_000, T0, 'c'.repeat(40));
+  await seedClaim({
+    ticket_id: `docs:${local}`, runner_id: runner, request_id: `seed:${local}`, nonce: 'abc123', snapshot_sha: '',
+    claimed_at: T0 - 60_000, status: 'completed', ended_at: T0, end_reason: 'done', ended_at_sha: 'c'.repeat(40),
+  });
   return (await rows<{ id: number }>(`SELECT id FROM claims WHERE ticket_id = ? AND status = 'completed'`, `docs:${local}`))[0].id;
 }
 const events = async (claim: number) => (await rows<{ kind: string; actor: string }>('SELECT kind, actor FROM events WHERE claim_id = ? ORDER BY seq', claim));

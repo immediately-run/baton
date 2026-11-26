@@ -7,11 +7,11 @@
 // repositories to register, as a JSON string —, ACCESS_*, OWNER_EMAILS, TOKEN_HASHES,
 // CREDENTIALS, BATON_KEYS, BATON_GITHUB_WEBHOOK_SECRET, BATON_FORGE_SECRETS,
 // BATON_SESSION_HOSTS — the hosts whose session links the instance accepts, R-BTN-113 —,
-// GITHUB_DISPATCH_TOKEN). The test
+// BATON_GITHUB_APP_ID and BATON_GITHUB_APP_KEY). The test
 // bindings are refused: only the test harness, in-process, may set them.
-import { readFileSync } from 'node:fs';
+import { closeSync, constants, fstatSync, openSync, readFileSync, realpathSync, statSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
 import { isIP } from 'node:net';
-import { resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { parseAdminKeys } from '../core/auth';
 import { BatonError } from '../core/http';
@@ -62,9 +62,29 @@ export function localConfig(file: Record<string, unknown>, origin: string): Conf
     BATON_SESSION_HOSTS: opt('BATON_SESSION_HOSTS'),
     BATON_IDLE_NOTIFY_AFTER_S: opt('BATON_IDLE_NOTIFY_AFTER_S'),
     BATON_GITHUB_WEBHOOK_SECRET: opt('BATON_GITHUB_WEBHOOK_SECRET'),
+    BATON_GITHUB_APP_ID: opt('BATON_GITHUB_APP_ID'),
+    BATON_GITHUB_APP_KEY: opt('BATON_GITHUB_APP_KEY'),
     BATON_FORGE_SECRETS: opt('BATON_FORGE_SECRETS'),
-    GITHUB_DISPATCH_TOKEN: opt('GITHUB_DISPATCH_TOKEN'),
   };
+}
+
+export class SecretFileModeError extends Error {}
+
+function readSecret(path: string, option: string): string {
+  const parent = dirname(resolve(path));
+  if (statSync(realpathSync(parent)).mode & 0o022) {
+    throw new SecretFileModeError(`${option}: secret directory must not be group- or world-writable`);
+  }
+  const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  try {
+    const stat = fstatSync(fd);
+    if (!stat.isFile() || (stat.mode & 0o066)) {
+      throw new SecretFileModeError(`${option}: secret must be a regular file without group or world read/write permissions`);
+    }
+    return readFileSync(fd, 'utf8');
+  } finally {
+    closeSync(fd);
+  }
 }
 
 export async function main(argv: string[]) {
@@ -76,6 +96,9 @@ export async function main(argv: string[]) {
       host: { type: 'string', default: '127.0.0.1' },
       origin: { type: 'string' },
       'admin-keys': { type: 'string' },
+      'forge-secrets': { type: 'string' },
+      'github-app-id': { type: 'string' },
+      'github-app-key': { type: 'string' },
       'access-identities': { type: 'string' },
       'github-webhook-secret': { type: 'string' },
       'event-archive': { type: 'string' },
@@ -105,14 +128,17 @@ export async function main(argv: string[]) {
     parsed = null;
   }
   if (parsed !== origin) throw new Error(`--origin ${origin}: must be an origin, such as https://baton.example.com or http://127.0.0.1:8787, with no path`);
-  const file = values.config ? JSON.parse(readFileSync(values.config, 'utf8')) : {};
+  const file = values.config ? JSON.parse(readSecret(values.config, '--config')) : {};
   if (!file || typeof file !== 'object' || Array.isArray(file)) throw new Error('--config must hold a JSON object');
 
-  const { store } = openStore(values.db);
   const config = localConfig(file, origin);
   // R-BTN-55: the GitHub App's webhook secret, from the file `--github-webhook-secret` names
   // (a file, so the secret is in no process list); it wins over a --config value.
-  if (values['github-webhook-secret']) config.BATON_GITHUB_WEBHOOK_SECRET = readFileSync(values['github-webhook-secret'], 'utf8').trim();
+  if (values['forge-secrets']) config.BATON_FORGE_SECRETS = readSecret(values['forge-secrets'], '--forge-secrets');
+  if (values['github-app-id']) config.BATON_GITHUB_APP_ID = values['github-app-id'];
+  if (values['github-app-key']) config.BATON_GITHUB_APP_KEY = readSecret(values['github-app-key'], '--github-app-key');
+  if (values['github-webhook-secret']) config.BATON_GITHUB_WEBHOOK_SECRET = readSecret(values['github-webhook-secret'], '--github-webhook-secret').trim();
+  const { store } = openStore(values.db);
   const host = new LocalHost({ store, config, adminKeys: adminKeysFrom(values['admin-keys']), accessIdentities: accessIdentitiesFrom(values['access-identities']),
     archiveEvents: archive ? fileEventArchive(archive, values.db === ':memory:' ? null : resolve(values.db)) : undefined });
   await host.start();

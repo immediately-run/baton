@@ -8,6 +8,34 @@ import { COURSE_ID, RESOURCE_NAME } from './course';
 import { CONDITION_TYPE, CONDITION_TYPE_MAX, RESTART_ID, SEVERITIES, isCoreOnly, restartFault } from './conditionTypes';
 import { parseSchemaId, VALUE_MAX_BYTES } from '../shared/schema.mjs';
 import { CLIENT_VERSION_MAX, compareVersions, parseVersion } from '../shared/versions.mjs';
+import type { ForgeDispatch } from './ports';
+
+export const DISPATCH_WORKFLOW = /^\.github\/workflows\/[A-Za-z0-9._-]{1,100}\.ya?ml$/;
+const GITEA_DISPATCH_WORKFLOW = /^\.gitea\/workflows\/[A-Za-z0-9._-]{1,100}\.ya?ml$/;
+
+export function checkUnblockedTrigger(value: unknown, forge: string, branch: string, dispatch: ForgeDispatch | null) {
+  const trigger = checkForgeDispatch(value, 'unblocked_trigger', forge, branch, true);
+  if (trigger.kind !== dispatch?.kind || (trigger.kind === 'gitlab-trigger' && dispatch.kind === 'gitlab-trigger' && trigger.project_id !== dispatch.project_id)) {
+    bad('unblocked_trigger', 'must use the repository’s own dispatch target');
+  }
+  return trigger;
+}
+
+/** Only target metadata is accepted. Credentials are host configuration, never a field here. */
+export function checkForgeDispatch(value: unknown, field: string, forge: string, branch: string, unblocked = false): ForgeDispatch & { workflow?: string } {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return bad(field, 'must be a dispatch target');
+  const t = value as Record<string, unknown>;
+  const fields = (...allowed: string[]) => Object.keys(t).every((k) => k === 'kind' || allowed.includes(k));
+  if (forge === 'github' && t.kind === 'github-app') {
+    if (!unblocked && fields()) return { kind: t.kind };
+    if (unblocked && fields('workflow') && typeof t.workflow === 'string' && DISPATCH_WORKFLOW.test(t.workflow)) return { kind: t.kind, workflow: t.workflow };
+  }
+  if (forge === 'gitlab' && t.kind === 'gitlab-trigger' && fields('project_id', 'ref') && typeof t.project_id === 'number'
+      && Number.isSafeInteger(t.project_id) && t.project_id > 0 && t.ref === branch) return { kind: t.kind, project_id: t.project_id, ref: branch };
+  if (forge === 'gitea' && t.kind === 'gitea' && fields('workflow', 'ref') && typeof t.workflow === 'string'
+      && GITEA_DISPATCH_WORKFLOW.test(t.workflow) && t.ref === branch) return { kind: t.kind, workflow: t.workflow, ref: branch };
+  return bad(field, 'must target this repository’s forge and default branch, using only dispatch fields');
+}
 
 /** §5: the harness's own session id, the rule `claim.sh --session` already applies. */
 export const SESSION_NAME = /^[A-Za-z0-9_.:-]{1,128}$/;
@@ -672,6 +700,7 @@ export interface End {
   detail: string | null;
   error: { type: string; message: string } | null;
   ended_at_sha: string | null;
+  verdict_ref: string | null;
   /** A suspension reporting a completed self-loop, not an abandoned run at the same station. */
   finished_self_loop: boolean;
   /** `released:<reason>` naming no §6.5 reason: an owner bar's (R-BTN-67), checked by the claims. */
@@ -828,6 +857,8 @@ export function checkEnd(body: unknown): End {
   const ptr = b.ended_at_sha;
   if (ptr !== undefined && ptr !== null && !isPointer(ptr)) bad('ended_at_sha', 'must be a commit sha or an https URL of at most 1000 characters');
   const sha = (ptr as string | undefined | null) ?? null;
+  const verdict = b.verdict_ref;
+  if (verdict != null && (typeof verdict !== 'string' || !isHttpsPointer(verdict) || !/#(?:issuecomment|pullrequestreview)-\d+$/.test(verdict))) bad('verdict_ref', 'must be a verdict comment or review URL');
   if (status! === 'released' && sha) bad('ended_at_sha', 'only a completed end points at its evidence');
   if (b.finished_self_loop !== undefined && (b.finished_self_loop !== true || !suspended_at || !sha)) {
     bad('finished_self_loop', 'must be true on a suspension carrying ended_at_sha');
@@ -861,7 +892,7 @@ export function checkEnd(body: unknown): End {
     spawned = b.spawned as string[];
     if (reason === 'done') bad('spawned', 'a done end spawns nothing — its open children are superseded by the close (R-BTN-86, R-BTN-168)');
   }
-  return { end_reason: reason, status: status!, suspended_at, reached: reached ?? suspended_at, next, detail, error, ended_at_sha: sha, finished_self_loop: b.finished_self_loop === true, owner_bar: ownerBar, prerequisite, outputs: checkOutputs(b.outputs), scope_exceeded: checkScopeReport(b.scope_exceeded), exit_status: optional(b.exit_status, exitStatus) ?? null, session_url: carriedSessionUrl(b.session_url), spawned, local_order: checkLocalOrder(b.local_order) };
+  return { end_reason: reason, status: status!, suspended_at, reached: reached ?? suspended_at, next, detail, error, ended_at_sha: sha, verdict_ref: typeof verdict === 'string' ? verdict : null, finished_self_loop: b.finished_self_loop === true, owner_bar: ownerBar, prerequisite, outputs: checkOutputs(b.outputs), scope_exceeded: checkScopeReport(b.scope_exceeded), exit_status: optional(b.exit_status, exitStatus) ?? null, session_url: carriedSessionUrl(b.session_url), spawned, local_order: checkLocalOrder(b.local_order) };
 }
 
 /** B-248 (R-BTN-202): a local order's provenance, as the advance or end that reports the leg

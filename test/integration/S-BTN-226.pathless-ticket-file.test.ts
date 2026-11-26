@@ -7,6 +7,8 @@
 // verification looks in the sibling repository the ticket names — and names the file to its
 // agent in BATON_TICKET_FILE. A source whose `read` returns an object, and the markdown source,
 // give the legs no `file`: the markdown source's ctx is what it was.
+import { runnerApi, testRunner } from '../lib/runnerRig';
+import { GitRepo } from '../lib/gitRepo';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -16,8 +18,7 @@ import { pathToFileURL } from 'node:url';
 import { call as hostCall } from '#host';
 import { initMain, parseSyncArgs, syncMain } from '../../src/defaults/cli';
 import { Runner } from '../../src/runner/runner';
-import { BatonApi } from '../../src/runner/api';
-import { ORIGIN, TOKENS, cutover, setClock, syncToken } from '../helpers';
+import { ORIGIN, cutover, setClock, syncToken } from '../helpers';
 
 const T0 = Date.parse('2026-11-16T12:00:00Z');
 
@@ -67,36 +68,25 @@ export async function close() { return 'https://example.test/close'; }
 
 const TICKET = { id: 'T-300', title: 'A ticket that lives in a tracker', body: 'Change the sibling repository.', repos: ['immediately-run/sibling'] };
 
-class Repo {
-  readonly dir: string;
+class PathlessTickets extends GitRepo {
   readonly store: string;
   constructor(private readonly tracker: boolean) {
-    this.dir = mkdtempSync(join(tmpdir(), tracker ? 'baton-s226t-' : 'baton-s226m-'));
-    this.store = join(mkdtempSync(join(tmpdir(), 'baton-s226-store-')), 'store.json');
-    this.git('init', '-q', '-b', 'main');
-    this.git('config', 'user.email', 'relay@test');
-    this.git('config', 'user.name', 'relay test');
-    this.git('remote', 'add', 'origin', 'https://github.com/immediately-run/docs.git');
+    super('baton-226-', { origin: 'https://github.com/immediately-run/docs.git' });
+    this.store = join(this.root, 'store.json');
     mkdirSync(join(this.dir, 'tickets'), { recursive: true });
     if (tracker) writeFileSync(join(this.dir, 'tickets', 'README.md'), 'the tickets wiki\n');
     else writeFileSync(join(this.dir, 'tickets', 'one.mdx'), '---\nid: T-1\ntitle: One\ntier: routine\n---\nThe body.\n');
   }
-  git(...a: string[]): string {
-    return execFileSync('git', ['-C', this.dir, ...a], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
-  }
-  async setup(leg: string | null, store: Record<string, unknown> = { rev: 1, tickets: [TICKET] }): Promise<Repo> {
-    expect(await initMain([], { root: this.dir, log: () => {} })).toBe(0);
+
+  async setup(leg: string | null, store: Record<string, unknown> = { rev: 1, tickets: [TICKET] }): Promise<PathlessTickets> {
+    expect(await initMain(['--own'], { root: this.dir, log: () => {} })).toBe(0);
     if (this.tracker) writeFileSync(join(this.dir, '.baton', 'tickets.mjs'), trackerSource(this.store));
     if (leg != null) writeFileSync(join(this.dir, '.baton', 'courses', 'create-pr', 'legs', 'implement.mjs'), leg);
     writeFileSync(this.store, JSON.stringify(store));
     this.commit();
     return this;
   }
-  commit(message = 'wiki'): string {
-    this.git('add', '-A');
-    this.git('commit', '--allow-empty', '-qm', message);
-    return this.git('rev-parse', 'HEAD');
-  }
+  commit(message = 'wiki'): string { return super.commit(message); }
   async sync(): Promise<string> {
     const facts = join(this.dir, '.baton', 'facts.json');
     writeFileSync(facts, '[]');
@@ -107,15 +97,11 @@ class Repo {
     return `exit ${code}: ${lines.at(-1) ?? ''}`;
   }
   runner(session: string): Runner {
-    const api = new BatonApi({
-      url: ORIGIN,
-      transport: (req) => hostCall(req),
-      auth: (_m, _u, _b, secret) => ({ Authorization: `Bearer ${TOKENS['vm-a']}`, ...(secret ? { 'X-Runner-Secret': secret } : {}) }),
-    });
-    return new Runner({
-      api, home: this.dir, repository: 'docs', hostname: 'vm-a', harness: 'opencode', session,
-      courses: [{ course: 'create-pr', version: 2 }], stateFile: join(tmpdir(), `baton-s226-${session}.json`),
-      beatEvery: 60_000, log: () => {},
+    const api = runnerApi();
+    return testRunner({
+      api, home: this.dir, session,
+      courses: [{ course: 'create-pr', version: 3 }], stateFile: join(tmpdir(), `baton-s226-${session}.json`),
+      beatEvery: 60_000,
     });
   }
   saw(): { ticket: Record<string, unknown>; text: string | null; mode: number | null } {
@@ -124,17 +110,19 @@ class Repo {
 }
 
 const cleanup: string[] = [];
+const repos: GitRepo[] = [];
 beforeEach(async () => {
   await setClock(T0);
   await cutover();
 });
 afterEach(() => {
+  while (repos.length) repos.pop()!.dispose();
   for (const d of cleanup) rmSync(d, { recursive: true, force: true });
   cleanup.length = 0;
 });
-const repoOf = (tracker: boolean): Repo => {
-  const r = new Repo(tracker);
-  cleanup.push(r.dir);
+const repoOf = (tracker: boolean): PathlessTickets => {
+  const r = new PathlessTickets(tracker);
+  repos.push(r);
   return r;
 };
 

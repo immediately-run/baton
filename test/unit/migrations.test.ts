@@ -8,6 +8,7 @@ import { mintRunId } from '../../src/core/db';
 import type { Store } from '../../src/core/ports';
 
 import { dropDerivedSchema } from '../lib/migrationRewind';
+import { seedAdminRunnerSql, seedLegacyReviewerSql, seedSettingsSql } from '../helpers';
 
 describe('migration 0076: retire reviewer settings (B-285, S-BTN-26)', () => {
   it('drops the old reviewer data without changing other instance settings', async () => {
@@ -18,10 +19,10 @@ describe('migration 0076: retire reviewer settings (B-285, S-BTN-26)', () => {
       dropDerivedSchema(sql);
       for (const o of sql.exec("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%'").toArray()) sql.exec(`DROP TABLE "${o.name}"`);
       for (const m of MIGRATIONS.filter((x) => x.id < 76)) sql.exec(m.sql);
-      sql.exec(`INSERT INTO reviewer_agents (name, reviews_on, family, bills) VALUES ('review', 'm', 'family', '[]')`);
+      seedLegacyReviewerSql(sql);
       const settings = () => sql.exec('SELECT key, value FROM baton_settings ORDER BY key').toArray();
       const before = settings();
-      sql.exec(`INSERT INTO baton_settings (key, value) VALUES ('reviewer_matrix', '{}'), ('reviewer_catalog', '{}')`);
+      seedSettingsSql(sql, [['reviewer_matrix', '{}'], ['reviewer_catalog', '{}']]);
       sql.exec(MIGRATIONS.find((m) => m.id === 76)!.sql);
       expect(sql.exec("SELECT name FROM sqlite_master WHERE name = 'reviewer_agents'").toArray()).toEqual([]);
       expect(settings()).toEqual(before);
@@ -248,7 +249,7 @@ describe('migration 0008: observations (R3-1231)', () => {
       const objects = sql.exec("SELECT name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' AND type = 'table'").toArray() as { name: string }[];
       for (const o of objects) sql.exec(`DROP TABLE IF EXISTS "${o.name}"`);
       for (const m of MIGRATIONS.filter((x) => x.id <= 5)) sql.exec(m.sql);
-      sql.exec(`INSERT INTO baton_settings (key, value) VALUES ('cutover_at', '900')`); // a cutover, no board yet
+      seedSettingsSql(sql, [['cutover_at', '900']]); // a cutover, no board yet
       for (const m of MIGRATIONS.filter((x) => x.id >= 6 && x.id <= 8)) sql.exec(m.sql);
       const all = (q: string) => sql.exec(q).toArray() as Record<string, unknown>[];
       expect(all('SELECT id FROM repositories')).toEqual([{ id: 'docs' }]);
@@ -747,11 +748,7 @@ describe('migration 0065: normalized matching inputs and ready candidates', () =
       expect(all('SELECT * FROM ready_tickets EXCEPT SELECT * FROM ready_ticket_source')).toEqual([]);
       expect(all('SELECT * FROM ready_ticket_source EXCEPT SELECT * FROM ready_tickets')).toEqual([]);
       // B-239: upgrade the populated 0065 projection, not just an empty database.
-      sql.exec("UPDATE credentials SET created_by = 'admin:test' WHERE id = 'key'");
-      sql.exec(`INSERT INTO runners (id, hostname, session_name, secret_hash, credential_id, harness, kind,
-                tier_ceiling, lease_timeout_ms, settings_hash, first_seen_at, last_seen_at)
-                VALUES (1, 'host', 's', 'hash', 'key', 'opencode', 'vm', 'routine', 900000, '', 0, 0)`);
-      sql.exec("INSERT INTO runner_capabilities (runner_id, capability, declared) VALUES (1, 'new', 'new'), (1, 'missing', 'missing')");
+      seedAdminRunnerSql(sql, 'key', 1, ['new', 'missing']);
       sql.exec(MIGRATIONS.find((m) => m.id === 124)!.sql);
       expect(all('SELECT * FROM runner_effective_caps')).toEqual([{ runner_id: 1, repository_id: 'docs', capability: 'new' }]);
       expect(all('SELECT repository_key, repository_id FROM ticket_repositories')).toEqual([{ repository_key: 'o/docs', repository_id: 'docs' }]);

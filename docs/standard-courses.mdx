@@ -77,10 +77,12 @@ runs nothing and leaves no marker: it suspends with `review` next, and the sync 
 from that CI. Only a ticket with several PRs at home, which the gate cannot choose between,
 waits on the owner as `run-tests-unreachable`, whose `skip` waives the gate for it.
 
-**Review uses a different credential.** `review` names `implement` and `fix` in `no_chain_from`
-([R-BTN-106](../spec/BATON_SPEC/08-runners.md#sec-8-3)), so passing the test gate never makes
-an authoring credential eligible to review the ticket. The review instructions also require a
-different model when the runner offers one; Baton gates on credentials, not models.
+**Review may run under the credential that wrote the change.** `review` names nothing in
+`no_chain_from` ([R-BTN-106](../spec/BATON_SPEC/08-runners.md#sec-8-3)): each leg runs in its own
+sandbox, isolated from the others, so a different credential adds no independence, and a
+deployment with one runner must still be able to review (the owner, 2026-11-25; B-30 had set
+`implement` and `fix` there). The review instructions require a different model when the runner
+offers one.
 
 ## A ticket already delivered
 
@@ -395,25 +397,20 @@ Each course `init` scaffolds names its source in `.baton/baton.json`, in immedia
 form: provider, owner, repository, commit, then the course.
 
 ```
-"source": "github/immediately-run/baton/<commit>/create-pr"
+"source": "github/immediately-run/baton/<commit>/standard-create-pr"
 ```
 
-The commit is the CLI's own, the one that wrote the files, so the name always means one graph.
-The sync holds the course to it: if `.baton/courses/create-pr/course.json` differs from that
-commit's, nothing is posted until `npx baton repo init --course create-pr --force` restores it.
-Upgrading is re-running `init` with a newer CLI: it moves the workflow's pin and each pinned course's
-source together, rewriting the course files and leg scripts and keeping your instructions and
-overrides. For now a source names the CLI's own repository; a course from another repository is
-refused as not supported yet.
+The default pin names the CLI's commit, so the name always means one graph. Sync and the runner
+load the course from its source, not from a home copy. Re-running `init` with a newer CLI moves
+the workflow and pinned standard sources without overwriting instructions or overrides.
 
 During development, `baton repo init --course create-pr --source-branch main` can follow a
-branch instead. Each sync resolves the branch anew, checks the home's committed graph against
-that exact source commit, and logs an unpinned warning. The Sync read shows the branch and
-commit used. A missing branch or a changed graph that hasn't been scaffolded into the home
-fails the sync; to update the files, run init with `--force` and the same `--source-branch`
-using the CLI at the resolved commit. Following a branch trusts everyone who can push to it.
-Commit the source selection before syncing. If the new station function changes which facts it
-reads, advance the home commit so Baton can accept the new registry. Branch fetches work with
+branch instead. Each sync uses the committed selection to resolve the branch anew, loads the
+course at that exact commit, and logs an unpinned warning. The Sync read shows the branch and
+commit used. Claims keep their original resolved commit and fail closed if it is no longer
+reachable from the branch. Following a branch trusts everyone who can push to it. If the
+course's graph or required facts change, advance the home commit so Baton can accept the new
+registry. Branch fetches work with
 public sources by default; a private source needs separate Git read access configured outside the
 checkout. The sync's forge API token and the CLI checkout's local credentials are not reused.
 Keep the default commit pin for a protected home.

@@ -123,6 +123,7 @@ export function lineage(spec) {
 
 /** The problems with a spec, given the code's texts by path, the ticket ids that exist, the
  *  history file and the names of test/integration/'s files. */
+/** @returns {string[] & {warnings: string[]}} */
 export function check(spec, code, tickets, history = '', testNames = [], allowed = [], retiredAllowed = {}) {
   const problems = [];
   const retiredCitations = [];

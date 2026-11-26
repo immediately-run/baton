@@ -1,6 +1,6 @@
 // B-244 extends S-BTN-47's retries queue and S-BTN-44's owner dispatch on both hosts.
 import { expect, it } from 'vitest';
-import { Git, course, cutover, keyCall, setAdminKeys, setClock, syncToken, tick, withCore } from '../helpers';
+import { Git, course, cutover, keyCall, seedUnblockedDispatchIn, setAdminKeys, setClock, syncToken, tick, withCore } from '../helpers';
 import { grantedRunner } from '../lib/fleet';
 import { makeKey } from '../lib/sshKeys';
 import { idleFixture } from '../lib/idleFixture';
@@ -72,7 +72,7 @@ it('keeps the stale-skills refusal and queues the retries alert behind a full un
   const sent: Workflow[] = [];
   await withCore((c) => {
     c.dispatcher = async (wf) => { if (wf.kind === 'unblocked') sent.push(wf); return true; };
-    c.store.exec('INSERT INTO unblocked_dispatch (repository_id, pending_json, due_at) VALUES (?, ?, ?)', 'docs', JSON.stringify(batch), due);
+    seedUnblockedDispatchIn(c.store, { repository_id: 'docs', pending_json: JSON.stringify(batch), due_at: due });
   });
   expect(await take(3)).toMatchObject(refusal);
   await tick();

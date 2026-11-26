@@ -385,7 +385,7 @@ The fingerprint stores no ticket content and is an optimization, never authority
 { sha, parent_sha, observation, force?,                                   -- R-BTN-11, R-BTN-62
   read_sha?,                                                      -- the commit the tickets were read at (§4.3)
   source: { kind: 'markdown' | 'custom', versions?, cli },         -- R-BTN-74
-  course_sources?: { <course>: { branch, sha } },                  -- R-BTN-131
+  course_sources?: { <course>: { branch, sha } },                  -- R-BTN-134
   contains?: [<sha>],                                            -- the provisional commits (R-BTN-126) this post contains
   registry: [{ id, version, min_runner_version, skill?,
                course: <course.json with its schemas>,           -- R-BTN-69, R-BTN-108

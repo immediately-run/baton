@@ -10,11 +10,8 @@ import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { HISTORY_SECTIONS, SECTIONS } from '../../src/core/ownerState';
-// @ts-expect-error a plain .mjs script, no types
 import { SPEC_DIR, SPEC_INDEX, indexText, joinParts, layoutProblems, locate, moveProof, part, partFrontmatter, partProblems, specParts } from '../../scripts/spec-files.mjs';
-// @ts-expect-error a plain .mjs script, no types
 import { impact, readSpecAt } from '../../scripts/spec-tools.mjs';
-// @ts-expect-error a plain .mjs script, no types
 import { ruleLedger } from '../../scripts/spec-ledger.mjs';
 
 type Part = { name: string; path: string; text: string; frontmatter?: string; offset?: number };

@@ -362,7 +362,11 @@ export function checkPayload(body: unknown, repo?: string): BoardPayload {
   // type's own validation — and whether Baton applies the fact — is where the type is read
   // (R-BTN-116 reads `std:decision@1`; the other types arrive with B-146 and B-120).
   if (p.attestations !== undefined) {
-    if (!Array.isArray(p.attestations) || p.attestations.length > 100) throw new BatonError('invalid-params', `attestations must be a list of at most 100`);
+    if (!Array.isArray(p.attestations)) throw new BatonError('invalid-params', 'attestations must be a list');
+    // Outside work can report many refs in one observation. Keep the complete window atomic,
+    // bounded by bytes rather than by the old person-answer count.
+    if (new TextEncoder().encode(JSON.stringify(p.attestations)).length > (1 << 20)) throw new BatonError('invalid-params', 'attestations exceed 1 MiB');
+    let other = 0;
     for (const [i, a] of p.attestations.entries()) {
       const at = `attestations[${i}]`;
       if (!isObj(a) || typeof (a as PostedAttestation).type !== 'string' || !/^[a-z][a-z0-9.-]*(:[a-z][a-z0-9.-]*)?@\d+$/.test((a as PostedAttestation).type)) {
@@ -374,6 +378,7 @@ export function checkPayload(body: unknown, repo?: string): BoardPayload {
         throw new BatonError('invalid-params', `${at}.ref must be a short string or null`);
       }
       if (!isObj((a as PostedAttestation).value)) throw new BatonError('invalid-params', `${at}.value must be an object`);
+      if (a.type !== 'std:arrival@1' && a.type !== 'std:evidence@1' && a.type !== GIT_EVIDENCE_TYPE && ++other > 100) throw new BatonError('invalid-params', 'at most 100 other attestations are allowed');
       // R-BTN-10: the sync's word on the evidence an unconfirmed end named — `{claim, evidence,
       // found}`, the evidence exactly as the observation listed it.
       if ((a as PostedAttestation).type === GIT_EVIDENCE_TYPE) {
@@ -418,7 +423,11 @@ export function checkPayload(body: unknown, repo?: string): BoardPayload {
       if (u.fields !== undefined && (!Array.isArray(u.fields) || !u.fields.every((x) => x === 'EXPEDITE'))) badControl(`${at}.fields`, 'may name only EXPEDITE');
     }
   }
-  return p.registry === undefined ? p : { ...p, registry: checkRegistry(p.registry) };
+  const registry = p.registry === undefined ? undefined : checkRegistry(p.registry);
+  if (Object.keys(p.course_sources ?? {}).some((id) => !registry?.some((e) => e.id === id))) {
+    throw new BatonError('invalid-params', 'every course_sources entry needs a matching registry entry');
+  }
+  return registry === undefined ? p : { ...p, registry };
 }
 
 /** A forge path as `repos` carries it (R-BTN-92): `owner/name`, a GitLab `group/…/name`; docs'

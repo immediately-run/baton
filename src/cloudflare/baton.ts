@@ -4,7 +4,7 @@
 // gate is what runs one request at a time between awaits (§3).
 import { DurableObject } from 'cloudflare:workers';
 import { BatonCore } from '../core/baton';
-import { dispatchWorkflow } from '../core/mirror';
+import { sendForgeDispatch } from '../core/dispatch';
 import { parseAdminKeys } from '../core/auth';
 import type { Cursor, EventArchive, Row, SqlValue, Store } from '../core/ports';
 
@@ -74,7 +74,7 @@ export class Baton extends DurableObject<Env> {
       scheduler: { get: () => ctx.storage.getAlarm(), set: (at) => ctx.storage.setAlarm(at) },
       archiveEvents: archive && r2EventArchive(archive),
       config: env,
-      dispatch: { send: (target) => dispatchWorkflow(env.GITHUB_DISPATCH_TOKEN, target), defer: (work) => ctx.waitUntil(work) },
+      dispatch: { send: (target) => sendForgeDispatch(env, target, this.core.now()), defer: (work) => ctx.waitUntil(work) },
       adminKeys: { list: () => parseAdminKeys(env.BATON_ADMIN_KEYS ?? '') },
       accessIdentities: { read: () => env.ACCESS_IDENTITIES ?? '' },
     });

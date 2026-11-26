@@ -3,7 +3,7 @@
 // accepted without an override, never refused (R-BTN-45, S-BTN-24).
 import { describe, it, expect, beforeEach } from 'vitest';
 import { gatesFor, type GateContext, type GateLeg, type GateTicket, type GateRunner } from '../../src/core/gates';
-import { claimItem, cutover, payload, recommended, register, rows, setClock, syncCall, seedClaim } from '../helpers';
+import { claimItem, cutover, payload, recommended, register, rows, setClock, syncCall, seedClaim, seedTicketOverride } from '../helpers';
 import { inject } from 'vitest';
 
 const T0 = Date.parse('2026-10-16T12:00:00Z');
@@ -167,7 +167,7 @@ describe('advice is never a gate (R-BTN-45, S-BTN-24): every advice input is acc
   });
 
   it('the expedite lane’s bound: over it, an expedited ticket is still claimable, its override recorded', async () => {
-    for (const t of ['R3-9001', 'R3-9002', 'R3-9004']) await rows(`INSERT INTO ticket_overrides (ticket_id, expedite, set_by, set_at) VALUES (?, 1, 'owner:test', 0)`, `docs:${t}`);
+    for (const t of ['R3-9001', 'R3-9002', 'R3-9004']) await seedTicketOverride({ ticket_id: `docs:${t}`, expedite: 1, set_by: 'owner:test', set_at: 0 });
     const a = await register('vm-a');
     const b = await register('vm-b');
     await seedClaim(a.id, 'docs:R3-9004');

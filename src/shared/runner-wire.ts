@@ -7,7 +7,10 @@ import type { PointerReach } from '../core/contractPointers';
 
 export type NextLegs = { leg: string; state: string; waiting_on?: string }[];
 
+export interface CourseResolution { branch: string; sha: string }
+
 export interface ClaimAnswer {
+  course_source?: CourseResolution;
   claim_id: number;
   ticket_id: string;
   course_id?: string | null;
@@ -25,6 +28,9 @@ export interface ClaimAnswer {
   /** B-39: where the leg's declared pointers may reach (R-BTN-109). */
   pointer_reach?: PointerReach;
   brief?: { signed: boolean; signer?: string; commit: string };
+  /** B-311: a reconcile leg's displaced leg and the evidence Baton captured for it. */
+  displaced?: string;
+  evidence?: { ref: string; kind: string }[];
   last_written_by?: LastWrittenBy;
   default_branch?: string;
   handoff_url?: string;
