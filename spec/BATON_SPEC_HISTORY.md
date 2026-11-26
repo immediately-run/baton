@@ -66,6 +66,22 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
     supported". `exec(handle, argv, {cwd, timeout_s, stdin, env, onStderr}) → {result, write,
     kill}`, as `src/runner/executor.ts` and Fieldhouse's E2B executor implement it; no executor
     implements the old shape, so `executor_api` stays 1.
+  - **Review, round one**: two fresh reviewers given the diff and the impact list. Found: under
+    `human_key: any` a session is a human, and a session can be opened by an administrator's
+    one-time link today and, once B-76 builds it, by a code an ordinary owner key binds, so an
+    agent holding no human-only key could pass `[human]` lists, a loosening the entry did not
+    name (named above; how to close it is put to the owner); `human-gates-hardware` said it rested
+    on no custody; "a key can meet `hardware`" had three readings (now a `human_only` owner key
+    of the repository) and "held" read the policy's values only (now the whole cell, at the
+    moment of computing); the *Decisions in full* entry still stated the reversed choice; floors
+    on `human-gates` changing meaning, Fieldhouse's R-FH-3 among them; no "Not built" for
+    `human-gates` while the code returns `false` (B-189 builds it; S-BTN-185 and S-BTN-190 say
+    so); B-164's title and description, `docs/hardware-policy-upgrade.mdx`, and the vocabulary
+    and product pages' "only a human-only key"; the custody list restated in a cell;
+    `intervener`, a capability a grant admits, called a setting; five more noun uses of "mark";
+    `exec`'s `status` on a kill or timeout, `env` overriding past R-BTN-144's filter, R-BTN-145's
+    "the leg call returning", and the leg-log proposal reading a stdout `exec` does not stream;
+    strikes that re-added the struck word. Each was checked against the text and fixed.
 - **2026-11-26 — A protected repository accepts a branch course source (R-BTN-134).**
   Rules changed: R-BTN-134 (*A branch source*). #395 left open whether a protected repository
   (R-BTN-188) should refuse branch sources. The owner's ruling, 2026-11-26: "No, the #395 warning
