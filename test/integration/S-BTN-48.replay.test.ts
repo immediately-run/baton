@@ -83,7 +83,7 @@ class Repo {
 
   /** `baton repo init`, the fixture source and the runnable leg: everything after the tree. */
   async setup(o: { unsafe?: boolean } = {}): Promise<Repo> {
-    expect(await initMain([], { root: this.dir, log: () => {} })).toBe(0);
+    expect(await initMain(['--own'], { root: this.dir, log: () => {} })).toBe(0);
     if (this.tracker) {
       writeFileSync(join(this.dir, '.baton', 'tickets.mjs'), trackerSource(this.store));
       this.writeStore({ rev: 5, tickets: [{ id: 'T-1', key: 'C-1', title: 'The tracked ticket', body: 'As first filed.', rank: 0 }] });
@@ -210,7 +210,7 @@ describe('S-BTN-48 replay: a recorded run re-run without a claim', () => {
     const configPath = join(repo.dir, '.baton', 'baton.json');
     const config = JSON.parse(readFileSync(configPath, 'utf8'));
     delete config.courses[0].source;
-    // B-311 raised create-pr's min_runner_version for its reconcile leg; this graph has none.
+    config.courses[0].version = 1;
     config.courses[0].min_runner_version = 1;
     writeFileSync(configPath, JSON.stringify(config));
     const dir = join(repo.dir, '.baton', 'courses', 'create-pr');
@@ -247,7 +247,7 @@ describe('S-BTN-48 replay: a recorded run re-run without a claim', () => {
     const configPath = join(repo.dir, '.baton', 'baton.json');
     const config = JSON.parse(readFileSync(configPath, 'utf8'));
     delete config.courses[0].source;
-    // B-311 raised create-pr's min_runner_version for its reconcile leg; this graph has none.
+    config.courses[0].version = 1;
     config.courses[0].min_runner_version = 1;
     writeFileSync(configPath, JSON.stringify(config));
     const dir = join(repo.dir, '.baton', 'courses', 'create-pr');
@@ -259,8 +259,12 @@ describe('S-BTN-48 replay: a recorded run re-run without a claim', () => {
     repo.commit('output contract');
     await repo.sync();
     const { secret } = await register('vm-a', { courses: [{ repository: 'docs', course: 'create-pr', version: 1 }] });
-    const offered = (await claimItem('vm-a', secret, { ticket_id: 'docs:T-1' })).json;
-    const started = (await advance('vm-a', secret, offered.claim_id, { leg: 'implement' })).json;
+    const offer = await claimItem('vm-a', secret, { ticket_id: 'docs:T-1' });
+    expect(offer.status).toBe(200);
+    const offered = offer.json;
+    const start = await advance('vm-a', secret, offered.claim_id, { leg: 'implement' });
+    expect(start.status).toBe(200);
+    const started = start.json;
     const ghCalls: string[][] = [];
     const origin = g('config', 'remote.origin.url');
     const localRemote = g('remote', 'get-url', 'origin');

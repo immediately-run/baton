@@ -85,7 +85,7 @@ class Repo {
 
   /** `baton repo init`, the fixture source and the runnable leg: everything after the tree. */
   async setup(): Promise<Repo> {
-    expect(await initMain([], { root: this.dir, log: () => {} })).toBe(0);
+    expect(await initMain(['--own'], { root: this.dir, log: () => {} })).toBe(0);
     if (this.tracker) writeFileSync(join(this.dir, '.baton', 'tickets.mjs'), trackerSource(this.store));
     // A leg the runner can run: it writes its marker and ends the claim, so one claim is one leg.
     writeFileSync(join(this.dir, '.baton', 'courses', 'create-pr', 'legs', 'implement.mjs'), `import { writeFileSync } from 'node:fs';

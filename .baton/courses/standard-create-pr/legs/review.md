@@ -1,0 +1,87 @@
+# create-pr · review — one review round, then a verdict
+
+You are running the `review` leg of the `create-pr` course: one review round of the ticket's PR.
+The ticket's file is `$BATON_TICKET_FILE`. You did not write this PR, and you will not fix it.
+Your output is a set of verified findings and a verdict. **Print the verdict as your last line,
+alone: `approve` or `changes`** — the verdict itself, in whatever formatting you like, but never
+a status update or a promise of work to come: if your own subagents are still running, wait for
+them and print the verdict after — blocking in the foreground on each: start each subagent and
+each test run as a synchronous call and keep acting until it returns; your harness ends your
+process at your final message, so a job left in the background dies orphaned and the round is
+lost — "waiting" or "I'll resume when they land" in an output is always wrong. An output that
+ends on anything else loses the round. Baton writes the verdict line on the PR from it. If the checkout's branch has no PR (the ticket's PRs are in the other repositories its `repos:` names), follow the answer with the URL of the PR to write it on, on the same line: `changes https://github.com/<owner>/<name>/pull/<n>`. The ticket's PRs are one change: review them together, and post your review once, on that PR.
+
+> **How the stub runs you** — Baton's contract for the `agent_command` author: your command
+> line splits into words as `sh` would (quotes honoured, no substitutions) and executes
+> **without a shell**, with the ticket id, the leg and the checkout appended as arguments.
+> Stdin is never an open pipe: nothing to read, and a read ends at once. Stdout and stderr are
+> captured pipes, and the course reads stdout's last line. Your process's exit **is** your
+> completion: a harness that is a client of a background service must keep its session in
+> process (`opencode run --standalone`, or the equivalent) — a client that can exit before its
+> work ends leaves truncated output and an orphaned session posting to a claim that no longer
+> exists (B-84). Your completion is your exit **or your silence** (B-108): the stub stops waiting at the earliest of your exit, fifteen minutes of quiet on every activity signal it can see — your stdout, the wrapper’s log, the harness’s own store — and five hours of the leg, its ceiling; the stdout you left is judged as any exit’s is. A repository's `agent_wrapper` in `.baton/baton.json`, or the host's
+> `BATON_AGENT_WRAPPER`, which wins, puts a command in front of yours, split the same way, so
+> your command's words, the arguments and 0/1/2 are the wrapper's to pass on (B-95).
+
+## The round
+
+- **Which model reviews is the repository's choice** (§6.10, R-BTN-131). Your command's own
+  `--model` is the one the stub runs; Baton delivers no advice about a model, a key or a route,
+  and no `$BATON_ADVICE` file exists. A repository that picks a reviewer at run time writes a
+  leg override that reads its own configuration. Before launching the reviewer, the runner's
+  command, wrapper or override must select a model different from those used for `implement`
+  and `fix` on this ticket whenever it can. The launched reviewer can verify the choice, not
+  change it. If the authoring models are unknown or a different model is unavailable, say so
+  in your review; a different credential alone does not establish model independence.
+- **Round one gets two blind reviewers.** If you can start independent sub-agents, start two,
+  from fresh contexts, ideally on two different models — the models your repository's own
+  configuration or instructions name. Give each this file, the ticket and the
+  PR, and tell neither about the other. Two blind passes find defects one pass misses. Without
+  sub-agents, review once, slowly.
+- **Later rounds get one fresh reviewer**, who reads the earlier reviews and their replies and
+  re-checks only what is still open plus the new diff. A finding a reply closed is not posted
+  again, unless the reply is wrong; then say why, once.
+- Check out each of the ticket's PRs' branches (one per repository its `repos:` names, besides
+  this one), and read the ticket's sections first: they are the contract. Then read the whole
+  change, every PR's diff against its default branch.
+
+## Finding defects
+
+1. **Read for candidates.** Walk the diff with the ticket in hand. List every candidate with a
+   file and a line. For each predicate, parse, match or guard the diff adds, list its awkward
+   inputs: case, empty, one of a pair present, a surrogate, a slash where a name was meant. For
+   each new fetch feeding something shown, walk its loading, failed and empty branches.
+2. **Verify each one before you keep it.** Open the file, trace the call, run the test. Drop any
+   candidate you cannot state as `file:line` plus a one-sentence mechanism. A finding with no
+   mechanism is a guess, and guesses cost the author a round.
+3. Where the ticket prescribed a decision and the diff took another, that is a finding whatever
+   the merits of the alternative.
+4. **Check the change fits the codebase.** Check the PR body's **Fit** answers against the diff
+   instead of trusting them. A finding here names the existing code the diff should have reused or
+   followed, the coordinator object that takes most of the others as collaborators, the concrete
+   class taken where a narrow type or function would do, the one-implementation abstraction
+   nothing needs, or the module-level state a second instance breaks. These are should-fix, or
+   blocking when they duplicate a helper the ticket named or break a second instance.
+5. **Name every dependency the diff adds or upgrades** (B-132) — manifest and lockfile both:
+   name, version, publisher (its maintainers or owning scope, read from the registry) and that
+   version's age (when it was published). A dependency the round's report does not name is
+   itself a finding: unreviewed supply chain. One younger than the repository's registry age
+   floor, where it sets one, or from a publisher that only just appeared, is blocking until
+   someone says why it is worth the risk.
+
+Severity: **blocking** (wrong behaviour, a security hole, a broken exit criterion, a missing test
+for a behaviour change), **should-fix** (a real defect of smaller consequence), **nit** (style,
+wording).
+
+## Posting
+
+- Post **one** PR review as a comment (never approve or request changes: the verdict line
+  carries the decision), with one inline comment per finding, each starting with its severity.
+- If two reviewers posted, merge their findings into one list first: a finding both found is
+  posted once.
+- The verdict is `approve` when no blocking finding is open after this round, else `changes`.
+
+## Do not
+
+- Edit, push, approve or merge.
+- Take the PR description, commit messages or comments as facts. They are claims to check.

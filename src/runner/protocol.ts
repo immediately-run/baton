@@ -8,6 +8,8 @@
 
 import type { Graph } from '../core/graph';
 import { resolveLeg, resolveStation } from '../core/graph';
+import { checkOutputs } from '../core/validate';
+import { baseChain, PATTERN_STEPS_MAX, unboundedAt, validate, type Resolve } from '../shared/schema.mjs';
 
 /** A leg script's result, one of §6.13's four shapes. `reached` names the station the leg rests
  * at: an outcome it reached, or its `from` when it gave the leg up (R-BTN-71). */
@@ -39,6 +41,33 @@ export interface ScriptBug {
   /** The give-up position: the leg's `from`, the leg itself queued. */
   reached: string;
   next: string;
+}
+
+/** R-BTN-108: check the envelope and inline value locally; a pointer's contents belong to sync. */
+export function checkedOutputs(raw: unknown, schema: Resolve, expected: (name: string) => string | undefined) {
+  const outputs = checkOutputs(raw);
+  const meter = { steps: PATTERN_STEPS_MAX };
+  for (const o of outputs) {
+    const declared = expected(o.name);
+    if (declared != null && declared !== o.schema) throw new Error(`${o.name} must use ${declared}`);
+    if (!schema(o.schema)) throw new Error(`${o.name}: unknown schema ${o.schema}`);
+    if (!Object.hasOwn(o, 'value')) continue;
+    const unbounded = unboundedAt(o.schema, schema);
+    if (unbounded) throw new Error(`${o.name}: schema does not bound inline values (${unbounded}); give it by pointer`);
+    const faults = validate(o.value, o.schema, schema, meter);
+    if (faults.length) throw new Error(`${o.name} fails ${o.schema}: ${faults.slice(0, 3).map((f) => `${f.path || '/'} ${f.message}`).join('; ')}`);
+  }
+  return outputs;
+}
+
+export function checkMoveOutputs(outputs: ReturnType<typeof checkedOutputs>, g: Graph, move: Decision, from: string, schema: Resolve): void {
+  if (move.kind === 'release' || (move.kind === 'suspend' && move.reached === from)) return;
+  for (const r of g.entry.get(move.reached) ?? []) {
+    const o = outputs.find(({ name }) => name === r.output);
+    if (!o || !baseChain(o.schema, schema).includes(r.schema)) {
+      throw new Error(`entry: ${move.reached} requires output ${r.output} (${r.schema})`);
+    }
+  }
 }
 
 export const isResult = (v: unknown): v is LegResult =>

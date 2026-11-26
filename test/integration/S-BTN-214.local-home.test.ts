@@ -117,7 +117,7 @@ describe('S-BTN-214 a plain-git home on a GitHub code repository', () => {
       sync_keys: [{ public_key: syncKey.publicKey, role: 'sync' }], owner_keys: [owner.publicKey], cut_over: true,
     })).status).toBe(200);
     // The scaffold: create-pr (a PR course) and bug-report (a marker course, no PR facts).
-    expect(await initMain(['--course', 'create-pr'], { root: dir, log: () => {} })).toBe(0);
+    expect(await initMain(['--own', '--course', 'create-pr'], { root: dir, log: () => {} })).toBe(0);
     keepLegacyPrPlacement(dir);
     expect(await initMain(['--course', 'bug-report'], { root: dir, log: () => {} })).toBe(0);
     const batonJson = join(dir, '.baton', 'baton.json');
@@ -194,7 +194,7 @@ describe('S-BTN-214 a plain-git home on a GitHub code repository', () => {
     expect(await rows<{ facts: string }>('SELECT facts FROM courses WHERE repository_id = ? AND id = ?', 'home', 'create-pr')).toEqual([{ facts: '["prs"]' }]);
     expect(await rows<{ facts: string }>('SELECT facts FROM courses WHERE repository_id = ? AND id = ?', 'home', 'bug-report')).toEqual([{ facts: '[]' }]);
     expect(await rows<{ policy_json: string }>('SELECT policy_json FROM repository_policies WHERE repository_id = ?', 'home')).toMatchObject([{ policy_json: expect.not.stringContaining('"leg_state"') }]);
-    const courses = [{ repository: 'home', course: 'create-pr', version: 1 }, { repository: 'home', course: 'bug-report', version: 1 }];
+    const courses = [{ repository: 'home', course: 'create-pr', version: 3 }, { repository: 'home', course: 'bug-report', version: 1 }];
     const a = await register('vm-a', { courses, capabilities: ['agent-venue', 'runner:leg-trees'] });
     const claim = await claimItem('vm-a', a.secret, { ticket_id: 'home:LIN-1' });
     if (claim.status !== 200) throw new Error(`claim: ${JSON.stringify(claim.json)}`);

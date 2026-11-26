@@ -288,9 +288,43 @@ export class Stations {
    * Needs you; a renamed one is read through `renamed_from`. Run when a course file is accepted —
    * a snapshot's stations are judged as they are written.
    */
-  recheckCourse(repo: string, course: string) {
+  recheckCourse(repo: string, course: string, previous: Graph | null = null) {
     const g = this.graph(repo, course);
     if (!g) return;
+    // A previously terminal person answer still stands. If the new graph gives it a single
+    // runner continuation, queue that leg from the recorded position, not from git's shorter path.
+    const continued = [...(previous?.ends ?? [])].filter((s) => g.stations.has(s) && !g.ends.has(s));
+    for (const s of continued) {
+      const next = [...g.legs].filter(([, l]) => l.from.includes(s));
+      if (next.length !== 1 || next[0][1].person) continue;
+      for (const t of this.rows<{ id: string; path: string; leg: string; answered_by: string }>(
+        `SELECT t.id, s.path, q.leg, q.answered_by FROM tickets t JOIN ticket_stations s ON s.ticket_id = t.id
+         JOIN ticket_questions q ON q.ticket_id = t.id
+         WHERE t.repository_id = ? AND t.course_id = ? AND s.station = ? AND s.next_leg IS NULL
+           AND s.next_source = 'baton' AND q.option IS NOT NULL AND q.answered_at IS NOT NULL`, repo, course, s)) {
+        const last = (JSON.parse(t.path) as Step[]).at(-1);
+        if (last?.leg !== t.leg || last.reached !== s) continue;
+        const answered = g.legs.get(resolveLeg(g, t.leg) ?? '');
+        if (!answered?.person || !answered.to.includes(s)) continue;
+        if (answered.answerSource === 'person' && !/^(owner|human):/.test(t.answered_by)) {
+          const path = (JSON.parse(t.path) as Step[]).slice(0, -1);
+          const from = path.at(-1)?.reached ?? g.start;
+          const leg = resolveLeg(g, t.leg)!;
+          if (!answered.from.includes(from)) continue;
+          const now = this.c.now();
+          const expires = answered.expires == null ? null : now + answered.expires.afterS * 1000;
+          this.exec(`UPDATE ticket_stations SET station = ?, path = ?, path_len = ?, to_end = ?, next_leg = ?, person_expires_at = ?
+                     WHERE ticket_id = ?`, from, JSON.stringify(path), path.length, g.toEnd.get(from) ?? 0, leg, expires, t.id);
+          // The working question row is replaceable; the applied answer stays in history and outputs.
+          this.exec('DELETE FROM ticket_questions WHERE ticket_id = ?', t.id);
+          this.exec(`INSERT INTO ticket_next_legs (ticket_id, leg, state, ready_since) VALUES (?, ?, 'ready', ?)`, t.id, leg, now);
+          continue;
+        }
+        const [leg] = next[0];
+        this.exec('UPDATE ticket_stations SET next_leg = ?, to_end = ? WHERE ticket_id = ?', leg, g.toEnd.get(s) ?? 0, t.id);
+        this.exec(`INSERT INTO ticket_next_legs (ticket_id, leg, state, ready_since) VALUES (?, ?, 'ready', ?)`, t.id, leg, this.c.now());
+      }
+    }
     for (const t of this.rows<{ id: string; station: string; next_leg: string | null }>(
       `SELECT t.id, s.station, s.next_leg FROM tickets t JOIN ticket_stations s ON s.ticket_id = t.id
        WHERE t.repository_id = ? AND t.course_id = ? AND s.next_leg IS NOT NULL`, repo, course)) {
@@ -381,6 +415,7 @@ export class Stations {
       // row's other columns (`handoff_url`, `next_source`, the path's spelling) restart nothing,
       // or a churny one would extend the wait without bound.
       const moved = !stored || stored.station !== st.station || stored.next_leg !== st.next_leg;
+      if (moved && def?.person) this.exec('DELETE FROM ticket_questions WHERE ticket_id = ? AND leg = ? AND answered_at IS NOT NULL', id, st.next_leg);
       const set = moved ? wanted : wanted == null ? null : have ?? wanted;
       if (set !== have) this.exec('UPDATE ticket_stations SET person_expires_at = ? WHERE ticket_id = ?', set, id);
     }

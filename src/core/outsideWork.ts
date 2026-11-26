@@ -127,7 +127,12 @@ export class OutsideWork {
   private move(pos: Position, g: Graph, step: Step, next: string | null) {
     const id = pos.ticket_id;
     const path = [...JSON.parse(pos.path) as Step[], step];
-    const person = next == null ? undefined : g.legs.get(next)?.expires;
+    const nextLeg = next == null ? undefined : g.legs.get(next);
+    const person = nextLeg?.expires;
+    // A new visit to a person leg needs a new answer; the old answer stays in history.
+    if (nextLeg?.person && (pos.station !== step.reached || pos.next_leg !== next)) {
+      this.c.store.exec('DELETE FROM ticket_questions WHERE ticket_id = ? AND leg = ? AND answered_at IS NOT NULL', id, next);
+    }
     this.c.store.exec('DELETE FROM reconcile_displaced WHERE ticket_id = ?', id);
     this.c.store.exec(`UPDATE ticket_stations SET station = ?, path = ?, path_len = ?, to_end = ?, next_leg = ?, next_source = 'baton',
       handoff_url = NULL, person_expires_at = ?, changed_at = ? WHERE ticket_id = ?`, step.reached, JSON.stringify(path), path.length, g.toEnd.get(step.reached) ?? 0, next,

@@ -10,7 +10,7 @@ import { authenticated, verifySigned, type PersonPrincipal } from './principal';
 
 const RESYNC_WINDOW_MS = 30_000; // B-201: a session's resync, once per repository per R-BTN-73's dispatch window
 
-type OwnerCore = Pick<BatonCore, 'registry' | 'admin' | 'store' | 'now' | 'policies' | 'claims' | 'humanBreakGlass' | 'questions' | 'blocks'>;
+type OwnerCore = Pick<BatonCore, 'registry' | 'admin' | 'store' | 'now' | 'policies' | 'claims' | 'humanBreakGlass' | 'questions' | 'blocks' | 'requestSync'>;
 
 export async function ownerRoute(core: OwnerCore, req: Request, url: URL, principal: PersonPrincipal): Promise<Response | null> {
   const { cred: fp, administrator } = principal;
@@ -34,6 +34,10 @@ export async function ownerRoute(core: OwnerCore, req: Request, url: URL, princi
   // B-127: the repository's owner signing keys — public keys of its human-only owners — the
   // read `baton owner verify-config` carries into a checkout (the same list the sync's
   // observation serves its own credential).
+  if (m === 'POST' && rest === 'sync-want') {
+    core.requestSync(repo);
+    return json({ ok: true });
+  }
   if (m === 'GET' && rest === 'signing-keys') return json({ keys: await core.admin.signingKeys(repo) });
   if (m === 'POST' && rest === 'grants') return json(await core.admin.grant(actor, repo, await body(), 'owner'));
   const rg = /^grants\/([^/]+)\/revoke$/.exec(rest);
@@ -91,7 +95,7 @@ export async function dashboardSessionRoute(core: Pick<BatonCore, 'admin'>, req:
   return null;
 }
 
-export async function dashboardWriteRoute(core: Pick<BatonCore, 'store' | 'runners' | 'claims' | 'cutover' | 'registry' | 'scope' | 'sql' | 'now' | 'syncNow'>, req: Request, url: URL, owner: string): Promise<Response | null> {
+export async function dashboardWriteRoute(core: Pick<BatonCore, 'store' | 'runners' | 'claims' | 'cutover' | 'registry' | 'scope' | 'sql' | 'now' | 'queueSync'>, req: Request, url: URL, owner: string): Promise<Response | null> {
   const p = url.pathname;
   if (!p.startsWith('/v1/ui/') || req.method !== 'POST') return null;
   const tx = <T>(f: () => T): T => core.store.transaction(f);
@@ -167,8 +171,7 @@ export async function dashboardWriteRoute(core: Pick<BatonCore, 'store' | 'runne
   // its post. A forced resync is not built and is refused by name (`checkResync`).
   if (p === '/v1/ui/resync') {
     const { repository } = checkResync(await readJson(req));
-    const repo = liveRepoParam(core.registry, repository, () => ['forbidden', 'this repository is not yours or does not exist']);
-    if (!repo.sync_workflow) throw new BatonError('conflict', `${repository} registers no sync workflow: Baton has nothing to dispatch for it`);
+    liveRepoParam(core.registry, repository, () => ['forbidden', 'this repository is not yours or does not exist']);
     tx(() => {
       const now = core.now();
       // The request is an `admin` event (`act: resync`), as an administrator's other acts are:
@@ -177,9 +180,9 @@ export async function dashboardWriteRoute(core: Pick<BatonCore, 'store' | 'runne
         `SELECT at FROM events WHERE kind = 'admin' AND at > ? AND repository_id = ? AND json_extract(detail_json, '$.act') = 'resync' ORDER BY at DESC, seq DESC LIMIT 1`,
         now - RESYNC_WINDOW_MS, repository)[0];
       if (last) throw new BatonError('conflict', `a resync of ${repository} was asked for under ${RESYNC_WINDOW_MS / 1000} seconds ago`);
+      core.queueSync({ repository, kind: 'sync', own: true });
       logEvent(core.store, now, 'admin', `owner:${owner}`, { act: 'resync' }, null, null, repository);
     });
-    core.syncNow([repository]);
     return json({ ok: true });
   }
 

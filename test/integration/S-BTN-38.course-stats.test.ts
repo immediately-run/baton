@@ -10,7 +10,8 @@ import chore from '../fixtures/courses/chore/course.json';
 import { makeKey, signedRequest, type TestKey } from '../lib/sshKeys';
 import { call as hostCall } from '#host';
 
-const T0 = Date.parse('2026-10-16T12:00:00Z');
+// Drive time explicitly; do not let a real workerd alarm race a simulated clock jump.
+const T0 = Date.parse('2030-10-16T12:00:00Z');
 const MIN = 60_000;
 let docsKey: TestKey;
 let opsKey: TestKey;

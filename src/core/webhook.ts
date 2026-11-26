@@ -34,7 +34,7 @@ export const ACTIONS_BOT = 'github-actions[bot]';
 // and what it writes read the same in the code and in §7.1.
 /** The live repositories whose stamp is stale — strictly, `<` the threshold's milliseconds. */
 const STALE_QUERY = `SELECT s.repository_id FROM webhook_syncs s
-  JOIN repositories r ON r.id = s.repository_id AND r.retired_at IS NULL
+  JOIN repositories r ON r.id = s.repository_id AND r.retired_at IS NULL AND r.dispatch IS NOT NULL
   WHERE s.last_dispatch_at < ? ORDER BY s.repository_id`;
 /** A send's stamp. */
 const STAMP_UPSERT = `INSERT INTO webhook_syncs (repository_id, last_dispatch_at) VALUES (?, ?)
@@ -43,13 +43,14 @@ const STAMP_UPSERT = `INSERT INTO webhook_syncs (repository_id, last_dispatch_at
 const STAMP_UPDATE = 'UPDATE webhook_syncs SET last_dispatch_at = ? WHERE repository_id = ?';
 /** The earliest live repository's stamp. */
 const EARLIEST_STAMP = `SELECT min(s.last_dispatch_at) AS at FROM webhook_syncs s
-  JOIN repositories r ON r.id = s.repository_id AND r.retired_at IS NULL`;
+  JOIN repositories r ON r.id = s.repository_id AND r.retired_at IS NULL AND r.dispatch IS NOT NULL`;
 
 /** What the core may know of a delivery: R-BTN-73's fields, and nothing more. */
 export interface Delivery {
   event: WebhookEvent;
   id: string;
   repository: string;
+  repository_id?: string;
   /** `workflow_run.path`, for a workflow_run. */
   workflow_path?: string;
   /** `pull_request.merged`, for a pull_request (B-89: a merge moved the default branch). */
@@ -142,7 +143,9 @@ export function pickDelivery(event: string | null, id: string | null, payload: u
   if (!id || !DELIVERY_ID.test(id)) return null;
   const repository = str(at(at(payload, 'repository'), 'full_name'));
   if (!repository || !GIT_REPO.test(repository)) return null;
-  const d: Delivery = { event: event as WebhookEvent, id, repository };
+  const repoId = at(at(payload, 'repository'), 'id');
+  const d: Delivery = { event: event as WebhookEvent, id, repository,
+    ...(typeof repoId === 'number' && Number.isSafeInteger(repoId) && repoId > 0 ? { repository_id: String(repoId) } : {}) };
   if (event === 'workflow_run') {
     const path = str(at(at(payload, 'workflow_run'), 'path'));
     if (!path || path.length > MAX_WORKFLOW_PATH) return null;
@@ -229,7 +232,7 @@ export class Webhooks {
   constructor(private readonly c: { store: Store; now: () => number; /** B-134: the forge
    *  cross-check — a push by a named runner pusher to a repository no open claim covers (rule
    *  3's reading of still holding, as `openScopes` reads it) raises `unclaimed-write`. */
-   scope: { pushDelivery(d: Delivery): void } }) {}
+    scope: { pushDelivery(d: Delivery): void }; want: (repository: string) => void }) {}
 
   private rows<T>(q: string, ...p: unknown[]): T[] {
     return this.c.store.exec(q, ...p).toArray() as T[];
@@ -270,45 +273,36 @@ export class Webhooks {
     // B-89: a merge is the trigger; a pull_request the App sends for an opened, synchronised or
     // closed-without-merging PR moves the default branch nowhere, so the board owes nothing.
     if (d.event === 'pull_request' && d.merged !== true) return { outcome: 'not-a-merge' };
-    const targets = this.targets(full, registered);
-    // B-89: every sync this path sends is timed here — a merge's own, another repository's
-    // want's, the alarm's backstop resend and a window's trailing send included — in the
-    // transaction that decides to send it (the trailing send stamps when the window closes
-    // and the alarm sends it), so the row is the path's last send and what the alarm reads.
+    const targets = this.targets(full, registered, d.repository_id);
     const own = d.event === 'pull_request' ? registered.find((r) => r.github.toLowerCase() === full)?.id : undefined;
-    // B-89: a merge of the repository's own sends its own sync — the trigger that fires
-    // when GitHub's schedule does not. R-BTN-73 held it back before the cutover only because
-    // `claim.sh` sent the syncs then; a sync that reads git from GitHub needs no mirror, so a
-    // merge sends one the moment it arrives, and the schedule is the backstop. Its own want
-    // leads the merged tickets' — as a ticket's `repos:` naming the repository once did — and
-    // is one entry however many of them named it.
     const nowDue: string[] = [];
     const trailing: string[] = [];
-    let seenOwn = false;
-    const write = (repository: string): void => {
-      if (nowDue.includes(repository) || trailing.includes(repository)) {
-        if (own === repository) seenOwn = true;
-        return;
-      }
-      const row = this.rows<{ last_dispatch_at: number }>('SELECT last_dispatch_at FROM webhook_dispatch WHERE repository_id = ?', repository)[0];
-      if (!row || now - row.last_dispatch_at >= DISPATCH_WINDOW_MS) {
-        this.c.store.exec(`INSERT INTO webhook_dispatch (repository_id, last_dispatch_at, trailing_at) VALUES (?, ?, NULL)
-                           ON CONFLICT (repository_id) DO UPDATE SET last_dispatch_at = excluded.last_dispatch_at, trailing_at = NULL`, repository, now);
-        nowDue.push(repository);
-      } else {
-        // One write per window, not one per suppressed delivery (§3's write budget).
-        this.c.store.exec('UPDATE webhook_dispatch SET trailing_at = ? WHERE repository_id = ? AND trailing_at IS NULL', row.last_dispatch_at + DISPATCH_WINDOW_MS, repository);
-        trailing.push(repository);
-      }
-      if (own === repository) seenOwn = true;
-    };
-    // The merge's own want first, then the tickets' — as a ticket's `repos:` naming the
-    // repository once led.
-    if (own) write(own);
-    for (const id of targets) write(id);
-    if (own && !seenOwn) nowDue.push(own);
-    this.stamp(nowDue, now);
+    for (const repository of new Set(own ? [own, ...targets] : targets)) {
+      this.c.want(repository);
+      const decision = this.queueSync(repository);
+      if (decision === 'now') this.stamp([repository], now);
+      // A non-webhook producer may have opened the window first. Enrol this repository
+      // in the backstop even if its trailing hint ends up answered by a pull.
+      if (decision === 'trailing') this.c.store.exec(`INSERT INTO webhook_syncs (repository_id, last_dispatch_at)
+        SELECT repository_id, last_dispatch_at FROM webhook_dispatch WHERE repository_id = ? ON CONFLICT DO NOTHING`, repository);
+      if (decision) (decision === 'now' ? nowDue : trailing).push(repository);
+    }
     return { outcome: 'dispatched', now: nowDue, trailing };
+  }
+
+  /** R-BTN-94: all sync producers share the same persisted window. Call in the want's transaction. */
+  queueSync(repository: string): 'now' | 'trailing' | null {
+    if (!this.rows(`SELECT 1 FROM repositories WHERE id = ? AND retired_at IS NULL AND dispatch IS NOT NULL`, repository).length) return null;
+    const now = this.c.now();
+    const row = this.rows<{ last_dispatch_at: number }>('SELECT last_dispatch_at FROM webhook_dispatch WHERE repository_id = ?', repository)[0];
+    if (!row || now - row.last_dispatch_at >= DISPATCH_WINDOW_MS) {
+      this.c.store.exec(`INSERT INTO webhook_dispatch (repository_id, last_dispatch_at, trailing_at) VALUES (?, ?, NULL)
+        ON CONFLICT (repository_id) DO UPDATE SET last_dispatch_at = excluded.last_dispatch_at, trailing_at = NULL`, repository, now);
+      this.c.store.exec(STAMP_UPDATE, now, repository);
+      return 'now';
+    }
+    this.c.store.exec('UPDATE webhook_dispatch SET trailing_at = ? WHERE repository_id = ? AND trailing_at IS NULL', row.last_dispatch_at + DISPATCH_WINDOW_MS, repository);
+    return 'trailing';
   }
 
   /** B-89: the path's own clock for each repository it sends this delivery's sync to — the row
@@ -327,13 +321,13 @@ export class Webhooks {
    *  the path only serves repositories its deliveries led it to. */
   dueSync(): string[] {
     const now = this.c.now();
-    const due = this.rows<{ repository_id: string }>(STALE_QUERY, now - SYNC_STALE_MS).map((r) => r.repository_id);
-    for (const id of due) {
-      this.c.store.exec(`INSERT INTO webhook_dispatch (repository_id, last_dispatch_at, trailing_at) VALUES (?, ?, NULL)
-                         ON CONFLICT (repository_id) DO UPDATE SET last_dispatch_at = excluded.last_dispatch_at, trailing_at = NULL`, id, now);
+    const stale = this.rows<{ repository_id: string }>(STALE_QUERY, now - SYNC_STALE_MS);
+    return stale.flatMap(({ repository_id: id }) => {
+      this.c.want(id);
+      const decision = this.queueSync(id);
       this.c.store.exec(STAMP_UPDATE, now, id);
-    }
-    return due;
+      return decision === 'now' ? [id] : [];
+    });
   }
 
   /** B-89: the instant the earliest live repository's stamp falls stale — one millisecond after
@@ -361,17 +355,23 @@ export class Webhooks {
    *  owner/name once the sync resolves them, and meanwhile docs' interim short names, read as
    *  that name under the home repository's own owner — so another owner's repository of the
    *  same name names nothing (round 1, 1-B-1). */
-  private targets(full: string, registered: Registered[]): string[] {
+  private targets(full: string, registered: Registered[], id?: string): string[] {
     const slash = full.indexOf('/');
     const owner = full.slice(0, slash);
     const name = full.slice(slash + 1);
-    return registered.filter((r) => {
+    const out = new Set(registered.filter((r) => {
       const home = r.github.toLowerCase();
       if (home === full) return true;
       const short = !name.includes('/') && home.startsWith(`${owner}/`) ? name : full;
       return this.rows(`SELECT 1 FROM ticket_repositories INDEXED BY ticket_repositories_reverse
         WHERE repository_key IN (?, ?) AND repository_id = ? LIMIT 1`, full, short, r.id).length > 0;
-    }).map((r) => r.id).sort();
+    }).map((r) => r.id));
+    if (id !== undefined) {
+      for (const r of this.rows<{ repository_id: string }>(`SELECT c.repository_id FROM code_repos c
+        JOIN repositories r ON r.id = c.repository_id AND r.retired_at IS NULL
+        WHERE c.forge = 'github' AND c.host = 'github.com' AND c.repo_id = ?`, id)) out.add(r.repository_id);
+    }
+    return [...out].sort();
   }
 
   /** The alarm: the repositories whose trailing dispatch is due, each starting a new window. */
@@ -379,13 +379,13 @@ export class Webhooks {
     const now = this.c.now();
     // A repository retired inside its window owes nothing (round 1, 1-B-5).
     this.c.store.exec(`UPDATE webhook_dispatch SET trailing_at = NULL WHERE trailing_at IS NOT NULL
-                       AND repository_id IN (SELECT id FROM repositories WHERE retired_at IS NOT NULL)`);
+                       AND repository_id IN (SELECT id FROM repositories WHERE retired_at IS NOT NULL OR dispatch IS NULL)`);
     const due = this.rows<{ repository_id: string }>('SELECT repository_id FROM webhook_dispatch WHERE trailing_at IS NOT NULL AND trailing_at <= ? ORDER BY repository_id', now).map((r) => r.repository_id);
     for (const id of due) this.c.store.exec('UPDATE webhook_dispatch SET last_dispatch_at = ?, trailing_at = NULL WHERE repository_id = ?', now, id);
     // The window's send is the path's own too: §7.1 times every dispatch here, and a backstop
     // counting from the delivery's stamp — up to a window early — would resend a just-sent
     // sync (round 5, 5-r1-2).
-    this.stamp(due, now);
+    for (const id of due) this.c.store.exec(STAMP_UPDATE, now, id);
     return due;
   }
 

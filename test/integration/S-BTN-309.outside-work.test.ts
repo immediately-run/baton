@@ -61,7 +61,7 @@ it.each(['unchanged verified no change', 'delivered abcdef0 tests passed'])('que
   expect(claim.json).toMatchObject({ displaced: 'implement', evidence: attestations.map((a) => a.value) });
   const id = claim.json.claim_id;
   expect((await advance('vm-a', runner.secret, id, { leg: 'reconcile' })).status).toBe(200);
-  const run: PrExec = (_cmd, args) => args[0] === 'rev-parse' ? sha(1) : '';
+  const run: PrExec = (_cmd, args) => args[0] === 'rev-parse' ? 'abcdef0'.padEnd(40, 'a') : '';
   const result = reconcileAnswer(answer, { checkout: '.', ticket: { id: 'B-166' }, ticketText: null, from: 'filed', displaced: 'implement', to: CREATE_PR_COURSE.legs.reconcile.reconciles.to, branch: 'main' }, run);
   expect(await endClaim('vm-a', runner.secret, id, { ...result, end_reason: 'done' })).toMatchObject({ status: 200 });
   expect(await placement()).toEqual([{ station: result.reached, next_leg: result.next }]);

@@ -72,7 +72,7 @@ beforeEach(async () => {
     id: 'home', github: 'you/home', forge: 'git', remote: 'ssh://git@localhost/home.git', default_branch: 'main',
     sync_keys: [{ public_key: syncKey.publicKey, role: 'sync' }], owner_keys: [owner.publicKey], cut_over: true,
   })).status).toBe(200);
-  expect(await initMain(['--course', 'create-pr'], { root: dir, log: () => {} })).toBe(0);
+  expect(await initMain(['--own', '--course', 'create-pr'], { root: dir, log: () => {} })).toBe(0);
   keepLegacyPrPlacement(dir);
   const batonJson = join(dir, '.baton', 'baton.json');
   const config = JSON.parse(readFileSync(batonJson, 'utf8')) as Record<string, unknown>;

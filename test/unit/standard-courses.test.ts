@@ -124,15 +124,16 @@ describe('the standard courses (R-BTN-131)', () => {
     }
   });
 
-  it("create-pr's implement may answer delivered: an outcome whose person leg confirm ends the ticket or sends it back, and its instructions say how (B-257, S-BTN-232)", () => {
+  it("create-pr's implement may answer delivered: confirm queues archive or sends it back (B-257, B-258, S-BTN-232)", () => {
     const b = builtIn('create-pr')!;
     const g = graphOf(b.course);
     expect(b.legs.implement.delivered).toBe(true);
     expect(g.legs.get('implement')!.to).toEqual(['pr-open', 'delivered']);
     // The stub's delivered position, as cli.ts writes it: `delivered` reached, `confirm` queued.
     expect(g.legs.get('confirm')).toMatchObject({ person: true, from: ['delivered'], to: ['confirmed', 'filed'] });
-    expect(g.ends.has('confirmed') && g.ends.has('merged')).toBe(true);
-    expect(onGraph(g, [{ leg: 'implement', reached: 'delivered' }, { leg: 'confirm', reached: 'filed' }, { leg: 'implement', reached: 'delivered' }, { leg: 'confirm', reached: 'confirmed' }])).toBe(true);
+    expect(g.legs.get('archive')).toMatchObject({ from: ['confirmed'], to: ['archived'] });
+    expect([...g.ends]).toEqual(['merged', 'archived']);
+    expect(onGraph(g, [{ leg: 'implement', reached: 'delivered' }, { leg: 'confirm', reached: 'filed' }, { leg: 'implement', reached: 'delivered' }, { leg: 'confirm', reached: 'confirmed' }, { leg: 'archive', reached: 'archived' }])).toBe(true);
     const text = readFileSync(join(instructionsDir('create-pr'), 'implement.md'), 'utf8');
     expect(text).toContain('delivered <sha> <what you ran and what it showed>');
     expect(text).toContain('Your word alone never closes the ticket');

@@ -379,15 +379,22 @@ export function verifyDelivered(ask: DeliveredAsk, run: PrExec): string[] {
   } catch (e) {
     throw new Error(`cannot verify the delivered answer — fetching ${branch} from origin failed: ${msg(e)}`);
   }
-  return ask.shas.map((sha) => {
+  return resolveDelivered(ask.shas, tracking, ask.checkout, run);
+}
+
+/** Check the delivery evidence against a fetched ref, or the transaction's detached HEAD. */
+export function resolveDelivered(shas: string[], ref: string, checkout: string, run: PrExec): string[] {
+  return shas.map((sha) => {
+    if (!/^[0-9a-f]{7,40}$/.test(sha)) throw new Error('invalid delivered commit id');
     let full: string;
     try {
-      full = run('git', ['rev-parse', '--verify', '--quiet', `${sha}^{commit}`], ask.checkout).trim();
+      full = run('git', ['rev-parse', '--verify', '--quiet', `${sha}^{commit}`], checkout).trim();
     } catch {
       throw new Error(`the implement agent answered delivered at ${sha}, which names no commit this checkout knows — refused`);
     }
-    if (!/^[0-9a-f]{40}$/.test(full)) throw new Error(`the implement agent answered delivered at ${sha}, which names no commit this checkout knows — refused`);
-    if (!ancestor(full, tracking, run, ask.checkout)) {
+    if (!/^[0-9a-f]{40}$/.test(full) || !full.startsWith(sha)) throw new Error(`the implement agent answered delivered at ${sha}, which names no commit this checkout knows — refused`);
+    if (!ancestor(full, ref, run, checkout)) {
+      const branch = ref.replace(/^refs\/remotes\/origin\//, '');
       throw new Error(`the implement agent answered delivered at ${sha}, which is not on ${branch} — refused: the commit a delivered answer names is on the default branch`);
     }
     return full;
@@ -398,6 +405,7 @@ export function verifyDelivered(ask: DeliveredAsk, run: PrExec): string[] {
  *  commits, shortened, and the agent's evidence with every character free text refuses blanked. */
 export function deliveredDetail(shas: string[], evidence: string): string {
   const head = `delivered at ${shas.map((s) => s.slice(0, 10)).join(', ')}`;
+  if (head.length > 198) throw new Error('too many delivered commits to record in the end detail');
   const said = evidence.replace(/[\u0000-\u001f\u007f-\u009f<>{}]/g, ' ').replace(/\s+/g, ' ').trim();
   const text = said === '' ? head : `${head}: ${said}`;
   return text.length <= 200 ? text : `${text.slice(0, 199)}…`;

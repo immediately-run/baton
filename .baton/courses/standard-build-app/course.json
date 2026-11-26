@@ -1,0 +1,79 @@
+{
+  "start": "requested",
+  "start_leg": "define",
+  "end": [
+    "shipped"
+  ],
+  "starts_from": "request",
+  "stations": {
+    "requested": {
+      "label": "Requested"
+    },
+    "defined": {
+      "label": "Product definition drafted"
+    },
+    "designed": {
+      "label": "Interface designed"
+    },
+    "architected": {
+      "label": "Architecture drafted"
+    },
+    "planned": {
+      "label": "Plan drafted"
+    },
+    "building": {
+      "label": "Tickets filed, being built"
+    },
+    "shipped": {
+      "label": "Verified against the definition"
+    }
+  },
+  "legs": {
+    "define": {
+      "from": [
+        "requested"
+      ],
+      "to": "defined",
+      "label": "Draft the product definition"
+    },
+    "design": {
+      "from": [
+        "defined"
+      ],
+      "to": "designed",
+      "label": "Design the interface and mock it up"
+    },
+    "architect": {
+      "from": [
+        "designed"
+      ],
+      "to": "architected",
+      "label": "Decide the architecture and operations"
+    },
+    "plan": {
+      "from": [
+        "architected"
+      ],
+      "to": "planned",
+      "label": "Plan the tickets"
+    },
+    "file": {
+      "from": [
+        "planned"
+      ],
+      "to": "building",
+      "label": "File the planned tickets"
+    },
+    "verify": {
+      "from": [
+        "building"
+      ],
+      "to": [
+        "shipped",
+        "building"
+      ],
+      "max_runs": 3,
+      "label": "Verify the build, file fixes"
+    }
+  }
+}

@@ -46,6 +46,7 @@ export interface Leg {
   reconciles?: Record<string, string | null>;
   /** R-BTN-116: who answers a person's leg; null on any other. */
   asks: string | null;
+  answerSource?: 'person';
   /** R-BTN-116: a person leg's expiry — unanswered this long, it reaches `reached`; null with none. */
   expires: { afterS: number; reached: string } | null;
   /** R-BTN-82/R-BTN-84: false when the leg has side effects outside git and its forge, so
@@ -121,7 +122,7 @@ export function graphOf(json: unknown): Graph {
     capability_roles?: Record<string, string[]>;
     stations: Record<string, { renamed_from?: string | string[]; entry?: { output: string; schema: string }[] }>;
     legs: Record<string, { from: string[]; to: string | string[]; max_runs?: number; max_queue?: number; renamed_from?: string | string[]; no_chain_from?: string[]; isolation?: 'session'; requires?: { capabilities?: string[] };
-      kind?: 'person'; asks?: string; expires?: { after_s: number; reached: string }; replay_safe?: boolean; max_duration?: number; conditions?: string[]; autonomous?: boolean; reads_only?: boolean;
+      kind?: 'person'; asks?: string; answer_source?: 'person'; expires?: { after_s: number; reached: string }; replay_safe?: boolean; max_duration?: number; conditions?: string[]; autonomous?: boolean; reads_only?: boolean;
       arrives?: FactArrival; reconciles?: { to: Record<string, string | null> } } & ContractFields>;
   };
   const legs = new Map<string, Leg>();
@@ -133,6 +134,7 @@ export function graphOf(json: unknown): Graph {
       ...(l.arrives ? { arrives: l.arrives } : {}), ...(l.reconciles ? { reconciles: l.reconciles.to } : {}),
       noChainFrom: [...new Set(l.no_chain_from ?? [])], isolation: l.isolation ?? null, requires: legCapabilities(l.requires, f.capability_roles),
       person: l.kind === 'person', asks: l.kind === 'person' ? l.asks ?? null : null, expires: l.kind === 'person' && l.expires ? { afterS: l.expires.after_s, reached: l.expires.reached } : null,
+      ...(l.answer_source === 'person' ? { answerSource: 'person' as const } : {}),
       replaySafe: l.replay_safe !== false, maxDuration: l.max_duration ?? null,
       conditionTypes: Array.isArray(l.conditions) ? [...new Set(l.conditions)] : null, autonomous: l.autonomous === true, readsOnly: l.reads_only === true });
     for (const old of names(l.renamed_from)) legRenames.set(old, id);
