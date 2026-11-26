@@ -853,6 +853,7 @@ describe('baton repo init, through the built CLI', () => {
     const dir = mkdtempSync(join(tmpdir(), 'baton-check-trees-'));
     try {
       const tree = join(dir, '.baton/courses/standard-decision');
+      mkdirSync(dirname(tree), { recursive: true });
       execFileSync('cp', ['-R', join(ROOT, '.baton/courses/standard-decision'), tree]);
       mkdirSync(join(dir, '.baton/courses/standard-nonesuch'));
       const log: string[] = [];
