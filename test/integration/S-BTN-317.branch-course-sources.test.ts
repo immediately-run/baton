@@ -1,4 +1,5 @@
 // BATON_SPEC §15 S-BTN-317: a branch source is resolved again for each sync, never for a claim.
+// Its warning's wording is S-BTN-325's (test/integration/S-BTN-325.unpinned-warning.test.ts).
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -51,6 +52,7 @@ it('S-BTN-317 uses and records the current branch commit, warns on each sync, an
     const branchConfig = readFileSync(settings, 'utf8');
 
     const [, owner, repo] = branchSource.split('/');
+    const unpinned = (sha: string) => `baton: warning: course create-pr follows branch main of ${owner}/${repo} (resolved to ${sha.slice(0, 10)}): unpinned, no trust check — for development only; pin a commit for production`;
     const globalConfig = join(dir, 'global-config');
     git(home, 'config', '--file', globalConfig, `url.${pathToFileURL(remote).href}.insteadOf`, `https://github.com/${owner}/${repo}.git`);
     vi.stubEnv('TMPDIR', dir);
@@ -89,7 +91,7 @@ it('S-BTN-317 uses and records the current branch commit, warns on each sync, an
       } });
     expect(await sync()).toBe(0);
     expect(posted.at(-1)?.course_sources).toBeUndefined();
-    expect(logs).not.toContain(`course create-pr follows branch main (unpinned): resolved to ${first.slice(0, 10)}`);
+    expect(logs.filter((l) => l.includes('unpinned'))).toEqual([]);
     const homeSha = commit(home, 'follow branch', '.baton/baton.json');
 
     const homeEnv = { dir: process.env.GIT_DIR, tree: process.env.GIT_WORK_TREE };
@@ -111,7 +113,7 @@ it('S-BTN-317 uses and records the current branch commit, warns on each sync, an
       expect(await sync(), logs.join('\n')).toBe(0);
       expect(posted.at(-1)?.course_data).toEqual({ 'create-pr': revision });
       expect(JSON.parse((await snapshot())!)).toEqual({ 'create-pr': { branch: 'main', sha: resolved } });
-      expect(logs).toContain(`course create-pr follows branch main (unpinned): resolved to ${resolved.slice(0, 10)}`);
+      expect(logs).toContain(unpinned(resolved));
     };
     await synced('first', first);
     writeFileSync(settings, fixturePin);
@@ -168,7 +170,7 @@ it('S-BTN-317 uses and records the current branch commit, warns on each sync, an
     const step = workflow.jobs.sync.steps.find((s: { name?: string }) => s.name === 'Annotate unpinned course sources');
     writeFileSync(join(home, 'sync.log'), `${logs.join('\n')}\n`);
     const annotations = execFileSync('bash', ['-e', '-c', step.run], { cwd: home, encoding: 'utf8' });
-    expect(annotations).toContain(`::warning title=unpinned course source::course create-pr follows branch main (unpinned): resolved to ${first.slice(0, 10)}`);
+    expect(annotations).toContain(`::warning title=unpinned course source::${unpinned(first).replace(/^baton: warning: /, '')}`);
   } finally {
     vi.unstubAllEnvs();
     rmSync(dir, { recursive: true, force: true });

@@ -29,15 +29,22 @@ Designs for this section that are not built are on the proposal page
     `.baton/courses/<course>/` in the source repository. A CLI may use its own bundled standard
     course when the repository and commit match exactly. Otherwise the reader fetches the
     source's default branch and verifies that the pin is a commit on its ancestry, including
-    when the reader already has the commit. It never fetches by commit id. For a branch source,
-    each sync fetches that exact branch, uses the commit returned by that fetch, and posts nothing
-    if the branch cannot be resolved. It logs `course <id> follows branch <b> (unpinned): resolved to <sha10>`
-    for the workflow to annotate. The snapshot records `{branch, sha}` per unpinned course in
+    when the reader already has the commit. It never fetches by commit id.
+  - **A branch source** has no trust check: no reader checks its commit against the source's
+    default branch, so the course is whatever anyone who can push to that branch puts there. It
+    is for development. Every reader of one — `baton repo init`, `baton course show`, the sync
+    and a runner's claim — prints `baton: warning: course <id> follows branch <branch> of
+    <owner>/<name> (resolved to <sha10>): unpinned, no trust check — for development only; pin a
+    commit for production` (`init`, which reads no commit, omits the commit), and the sync
+    workflow annotates the sync's line. Each sync fetches that exact branch, uses the commit
+    returned by that fetch, and posts nothing if the branch cannot be resolved. The snapshot records `{branch, sha}` per unpinned course in
     `course_sources`. A refresh that does not apply the registry refuses branch-derived placements
     whose registry differs from the one in force; only a refresh read at the current home head
     may update its resolutions. A claim retains its own `course_source: {branch, sha}` from the
     snapshot at allocation. Readers of that claim use only that commit, checked against the
-    named branch's ancestry, or fail without falling back to another commit.
+    named branch's ancestry, or fail without falling back to another commit. The Sync read
+    shows each course's `{branch, sha}` with the same warning. A pin keeps every rule of the
+    bullet above.
   - **A sourced course keeps its graph.** The sync reads the source's files, with the home's
     entry fields taking precedence over defaults in `.baton/courses/<course>/entry.json` in the
     source repository. The home changes a sourced course only through its leg instructions and
@@ -52,7 +59,7 @@ Designs for this section that are not built are on the proposal page
     at the CLI's own commit, and the sync workflow, which pins the CLI by version.
     `--course <id> --source-branch <branch>` instead follows that branch without changing the
     workflow pin. Re-run with
-    a newer CLI it moves the pin and each source together, and rewrites none of a sourced
+    a newer CLI it moves the pin and each pinned source together, never a branch source, and rewrites none of a sourced
     course's files in the home: the newer course arrives through its source. It writes a home override only when
     requested (`--override` or `--instructions`), never overwriting one. `--prune` compares
     existing files against the current pins, removes identical copies and reports differing

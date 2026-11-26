@@ -16,6 +16,7 @@ import { DISCREPANCY_WINDOW_MS } from '../history';
 import { isAdministrator } from './conditions';
 import { queryOf, type ReadCall, type ReadCtx, type ReadRoute } from './kit';
 import type { Row } from '../ports';
+import { unpinnedSourceWarning } from '../board';
 
 /** `?since=` reaches back at most this far (B-201). */
 export const SYNC_SINCE_MAX_MS = 30 * 86_400_000;
@@ -74,7 +75,9 @@ export const SYNC_READS: ReadRoute[] = [
       const head = h?.sha
         ? { sha: h.sha, parent_sha: h.parent_sha, received_at: h.received_at, ticket_count: h.ticket_count, observation: h.observation,
             source: h.source_kind ? { kind: h.source_kind, versions: h.source_versions } : null,
-            ...(h.course_sources_json ? { course_sources: JSON.parse(h.course_sources_json) } : {}) }
+            // B-315 (R-BTN-134): each branch source, the commit read, and the owner's warning.
+            ...(h.course_sources_json ? { course_sources: Object.fromEntries(Object.entries(JSON.parse(h.course_sources_json) as Record<string, { branch: string; sha: string }>)
+              .map(([course, s]) => [course, { ...s, warning: unpinnedSourceWarning(course, s) }])) } : {}) }
         : null;
       // R-BTN-62: the number handed out and not yet posted, with its age; past ten minutes it
       // is void, and the next sync is handed the next one.

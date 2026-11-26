@@ -1,4 +1,9 @@
 import { boundedJson, GIT_SHA, isSourceBranch } from './validate';
+
+/** The owner's ruling (2026-11-26, R-BTN-134): a branch source has no trust model, and wherever
+ *  Baton shows one it says so. `repository` is named where the reader knows it. */
+export const unpinnedSourceWarning = (course: string, s: { branch: string; sha?: string; repository?: string }): string =>
+  `course ${course} follows branch ${s.branch}${s.repository ? ` of ${s.repository}` : ''}${s.sha ? ` (resolved to ${s.sha.slice(0, 10)})` : ''}: unpinned, no trust check — for development only; pin a commit for production`;
 // board.ts — what a board snapshot becomes in the `tickets` cache (BATON_SPEC §4, §7.1,
 // R-BTN-33/35). Pure: the core does the SQL, on either host. Only filter fields survive — an item's
 // body, Status notes, exit criteria and PR list never reach Baton; the dashboard links each

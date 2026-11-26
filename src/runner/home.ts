@@ -28,6 +28,8 @@ export interface CourseLoad {
   scratch: string;
   schema: Resolve;
   outputSchema(leg: string, name: string): string | undefined;
+  /** B-315 (R-BTN-134): a branch source's warning — unpinned, no trust check — for the log. */
+  warning?: string;
 }
 
 /** The course id the home repository runs, from the snapshot's `.baton/baton.json`: the spec's
@@ -183,7 +185,8 @@ export async function loadCourse(home: string, sha: string, course: string, sett
     }
     if (selected.pinned && resolution) throw new CourseSourceUnavailable(`course ${course} is pinned but the snapshot names a branch`);
     const cache = join(git(home, ['rev-parse', '--absolute-git-dir']).trim(), 'baton-sources');
-    const resolved = await resolveSource(course, source, cache, resolution?.sha);
+    let warning: string | undefined;
+    const resolved = await resolveSource(course, source, cache, resolution?.sha, (line) => { warning = line; });
     const graph = graphOf(JSON.parse(resolved.graph));
     const scratch = mkdtempSync(join(tmpdir(), 'baton-legs-'));
     const scripts = new Map<string, string>();
@@ -216,7 +219,7 @@ export async function loadCourse(home: string, sha: string, course: string, sett
       };
       // B-47: a leg's declared output schema, from the source's graph as from a home's.
       const legs = (JSON.parse(resolved.graph) as { legs?: Record<string, { outputs?: Record<string, { schema: string }> }> }).legs ?? {};
-      return { course, sourced: true, fetched, graph, scripts, scratch, schema,
+      return { course, sourced: true, fetched, graph, scripts, scratch, schema, ...(warning ? { warning } : {}),
         outputSchema(leg, name) {
           const outputs = legs[leg]?.outputs;
           return outputs && Object.hasOwn(outputs, name) ? outputs[name].schema : undefined;

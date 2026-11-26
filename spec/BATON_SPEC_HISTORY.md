@@ -18,6 +18,21 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
 
 ## Changelog
 
+- **2026-11-26 — A course source may follow a branch, with no trust check (R-BTN-134, S-BTN-317, S-BTN-325).**
+  Rules changed: R-BTN-134 (*A source*, a new *A branch source* bullet, *`baton repo init`*);
+  §4.4's `course_sources`; §13's `board_snapshots`; S-BTN-317; S-BTN-325 is new. B-315 asked for
+  a branch in place of a pin (the owner, 2026-11-22: "it should be possible to specify a branch
+  instead of a specific commit for the pin, which should trigger a warning but should be okay"),
+  first built on the model B-139 replaced; B-139 made a source any repository, read from its own
+  `.baton/courses/<course>/` at a pin verified on the default branch's ancestry. The owner,
+  2026-11-26, on the two together: "As you say, there is no trust model when course is pinned to
+  a branch. This is useful during development for fast iteration and should trigger a warning
+  saying so." So a branch source of any repository is read at the branch's head with no
+  default-branch ancestry check, every reader prints one warning saying it is unpinned and
+  unchecked, and the sync records the commit it read (a claim keeps its own). B-315's
+  CLI-repository-only rule, its home copy of the graph and its build of the branch's standard
+  registry are gone. Pins keep B-139's rules.
+
 - **2026-11-25 — Ticket files are Dibber's to write (R-BTN-74, R-BTN-199, S-BTN-189, S-BTN-234).**
   Rules changed: R-BTN-74, R-BTN-199, R-BTN-193 (its legacy list: the git-lock ticket commands are
   gone); §11's CLI table; S-BTN-189, S-BTN-199, S-BTN-234, S-BTN-241;

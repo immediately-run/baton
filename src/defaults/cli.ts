@@ -34,7 +34,7 @@ import { commitsOf, type BranchCommit } from './pr-markers';
 import { COMMENTING_LEGS, PR_URL as PR_URL_RE } from './pr-close';
 import { GIT_SHA, isSourceBranch } from '../core/validate';
 import type { BoardPayload } from '../core/board';
-import { parseSource, printSource } from './course-source';
+import { parseSource, printSource, unpinnedWarning } from './course-source';
 import { courseFiles, coursePath, dropCourseTree, fetchCourse, isOverride, writeCourseTree, type CourseFile } from './course-tree';
 import { stampMarkdownVersions } from './ticket-versions';
 import { closeTicket, closesByTicket, closesOfCommits, exec, machineOf, setMachineKeys, stationsTickets, ticketsBranch, CLOSE_TIMEOUT_MS, RUN_TESTS_TIMEOUT_MS } from './ticket-state';
@@ -381,12 +381,8 @@ async function readBoard(root: string, at: string, batonJson: BatonJson, args: S
       if (run && runs.has(run)) throw new Error(`${coursePath(c.id)}/${f.path}: multiple run overrides for ${run}`);
       if (run) runs.add(run);
     }
-    const source = await resolveSource(c.id, c.source, args.sourceCache!);
-    if (source.resolution) {
-      const { branch, sha } = source.resolution;
-      courseSources[c.id] = source.resolution;
-      log(`course ${c.id} follows branch ${branch} (unpinned): resolved to ${sha.slice(0, 10)}`);
-    }
+    const source = await resolveSource(c.id, c.source, args.sourceCache!, undefined, log);
+    if (source.resolution) courseSources[c.id] = source.resolution;
     sources.set(c.id, source);
     courses.push({ ...source.entry, ...c });
   }
@@ -629,7 +625,12 @@ function packagedSource(dir: string, prefix = ''): CourseFile[] {
   });
 }
 
-export async function resolveSource(id: string, source: string, cache: string, resolved?: string): Promise<{
+/** Where a branch source's warning goes when the caller names no log: stderr, never silence. */
+const warnOnStderr = (line: string): void => { process.stderr.write(`${line}\n`); };
+
+/** A course from its source (R-BTN-134). A branch source (B-315) is read at `resolved`, or at the
+ * branch's head, with no trust check: `warn` says so each time, naming the commit read. */
+export async function resolveSource(id: string, source: string, cache: string, resolved?: string, warn: (line: string) => void = warnOnStderr): Promise<{
   graph: string; entry: Partial<CourseEntry> & { facts?: string[] }; standard?: BuiltIn; files?: CourseFile[]; legacy?: true;
   resolution?: { branch: string; sha: string };
 }> {
@@ -638,6 +639,7 @@ export async function resolveSource(id: string, source: string, cache: string, r
   if (standard && pin.course === id) return { graph: courseFileText(standard), entry: {}, standard };
   try {
     const fetched = standard ? null : await fetchCourse(pin, cache, resolved);
+    if (!pin.pinned && fetched) warn(unpinnedWarning(id, pin, fetched.sha));
     const files = standard
       ? fromSource()
         ? courseFiles(packageRoot(), pin.ref, pin.course)
@@ -2599,6 +2601,10 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
   }
   refusePin(settings.courses ?? []);
   if (changed) log(changed);
+  // B-315 (R-BTN-134): every branch source this home names, said at every init.
+  for (const c of settings.courses ?? []) {
+    if (c.source && !parseSource(c.source).pinned) log(unpinnedWarning(c.id, parseSource(c.source)));
+  }
   if (!kept.includes('.baton/baton.json')) {
     mkdirSync(dirname(settingsPath), { recursive: true });
     writeFileSync(settingsPath, `${JSON.stringify(settings, null, 2)}\n`);
@@ -2659,7 +2665,7 @@ async function pruneCourses(root: string, courses: CourseEntry[], log: (line: st
   try {
     for (const entry of courses) {
       if (entry.source === undefined) continue;
-      const src = await resolveSource(entry.id, entry.source, scratch);
+      const src = await resolveSource(entry.id, entry.source, scratch, undefined, log);
       const dir = join(root, coursePath(entry.id));
       // Do not follow links when deciding what to delete.
       if (!['.baton', '.baton/courses', coursePath(entry.id)].every((p) =>
@@ -2704,7 +2710,7 @@ export async function showCourseMain(argv: string[], root = process.env.BATON_HO
   if (!entry) throw new Error(`.baton/baton.json does not list ${id}`);
   const scratch = mkdtempSync(join(tmpdir(), 'baton-show-'));
   try {
-    const src = entry.source === undefined ? null : await resolveSource(id, entry.source, scratch);
+    const src = entry.source === undefined ? null : await resolveSource(id, entry.source, scratch, undefined, log);
     const show = (path: string, text: string) => log(`--- ${path} ---\n${text.trimEnd()}`);
     if (src?.standard) {
       if (!leg) show('course.json', src.graph);
@@ -2814,9 +2820,7 @@ jobs:
         if: \${{ !cancelled() }}
         run: |
           if [ -f sync.log ]; then
-            while IFS= read -r warning; do
-              printf '::warning title=unpinned course source::%s\\n' "$warning"
-            done < <(grep -E '^course [a-z0-9-]+ follows branch [A-Za-z0-9._/-]+ [(]unpinned[)]: resolved to [0-9a-f]{10}$' sync.log)
+            grep -E '^baton: warning: course [a-z0-9-]+ follows branch ' sync.log | sed 's/^baton: warning: /::warning title=unpinned course source::/' || true
           fi
       # B-89: a run that posted nothing is an annotation, never a green check — a held board
       # from another run's reading in flight (\`busy\`), or any failed post. The step above

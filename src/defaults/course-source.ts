@@ -7,6 +7,7 @@
 // printing only; what a source may name is the sync's check (cli.ts).
 import { COURSE_ID } from '../core/course';
 import { GIT_SHA, isSourceBranch } from '../core/validate';
+import { unpinnedSourceWarning } from '../core/board';
 
 export interface CourseSource {
   provider: string;
@@ -40,5 +41,10 @@ export function parseSource(s: string): CourseSource {
   if (!COURSE_ID.test(course)) throw new Error(`${s}: ${course || '(none)'} is not a course id`);
   return { provider, namespace, repository, ref, pinned, course };
 }
+
+/** The line every reader of a branch source prints (B-315, R-BTN-134; the owner, 2026-11-26):
+ * it follows whatever the branch holds, with no trust check. `sha` is the commit read, if any. */
+export const unpinnedWarning = (id: string, src: CourseSource, sha?: string): string =>
+  `baton: warning: ${unpinnedSourceWarning(id, { branch: src.ref, sha, repository: `${src.namespace}/${src.repository}` })}`;
 
 export const printSource = (s: Omit<CourseSource, 'pinned'>): string => [s.provider, s.namespace, s.repository, s.ref, s.course].join('/');
