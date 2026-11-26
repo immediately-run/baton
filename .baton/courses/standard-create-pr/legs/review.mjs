@@ -989,7 +989,7 @@ async function standard(ctx) {
   const graphSha = ctx.replay?.against ?? sha;
   const readCourseFile = (path) => gitRun("git", ["-C", ctx.checkout, "show", graphSha + ":" + path], { maxBuffer: 67108864 });
   const courseFile = ".baton/courses/create-pr/course.json";
-  const graph = ctx.graph ?? (ctx.sourced_course === true ? { "legs": { "review": { "from": ["pr-open", "fixed", "reviewed"], "to": "reviewed", "max_runs": 3, "no_chain_from": ["implement", "fix"], "autonomous": true, "label": "Review round" } } } : JSON.parse(readCourseFile(courseFile)));
+  const graph = ctx.graph ?? (ctx.sourced_course === true ? { "legs": { "review": { "from": ["pr-open", "fixed", "reviewed"], "to": "reviewed", "max_runs": 3, "autonomous": true, "label": "Review round" } } } : JSON.parse(readCourseFile(courseFile)));
   const review = graph.legs instanceof Map ? graph.legs.get("review")?.maxRuns : graph.legs?.review?.max_runs;
   const roundsSpent = (ctx.run ?? 1) >= (review ?? (ctx.sourced_course === true ? 3 : readReviewDefault(readCourseFile(".baton/courses/create-pr/review-defaults.json"))));
   const rel = ".baton/courses/create-pr/legs/review.md";
