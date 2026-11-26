@@ -3,7 +3,7 @@
  *  `file://` remote, which is no forge's. An `http(s)` URL's explicit port rides along
  *  (`git.example:8443` — it serves the forge's API as it serves the repository); an `ssh://`
  *  URL's names the ssh channel, never the API's origin, so it does not.
- *  The local forms are plainGitRemote's (cli.ts): the two must agree on what is no forge. */
+ *  The local forms are plainGitRemote's (facts.ts): the two must agree on what is no forge. */
 export function hostOf(url: string): string | null {
   const u = url.trim();
   if (/^(file:|\/|\.{1,2}[\\/]|~)/.test(u) || /^[A-Za-z]:[\\/]/.test(u)) return null;

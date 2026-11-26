@@ -24,7 +24,7 @@ import { filingDate, firstCommit, historyEntries, rulesConfig, staleIds, staleLi
 import { ticketsMarkdown } from './tickets-markdown';
 import { claimMismatch, formatTicket, ticketPathsUnder, ticketPrView } from '../shared/ticketPr.mjs';
 import { defaultBranch } from './request';
-import { ownRepositoryId } from './cli';
+import { ownRepositoryId } from './remote-slug';
 import { builtIn, DEFAULT_COURSE } from './courses';
 import { holderRefusal, readDoneTickets, readTicketPosition, Undetermined, type BatonPosition } from './tickets-baton';
 import { batonTarget, nextMain } from './sequences';

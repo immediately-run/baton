@@ -64,11 +64,11 @@
       "description": "Topic words the board groups by."
     },
     "owns": {
-      "type": "array",
-      "items": {
-        "type": "string"
-      },
-      "description": "Paths or areas the ticket owns, for overlap checks."
+      "type": [
+        "object",
+        "array"
+      ],
+      "description": "What the ticket owns, for overlap checks: a map (the store's convention, usually `{}`) or a list of paths."
     },
     "prs": {
       "type": "array",

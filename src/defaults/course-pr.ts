@@ -70,6 +70,7 @@ export interface StationsResult {
 /** R-BTN-51's default `branch_pattern`. */
 export const DEFAULT_BRANCH_PATTERN = 'claude/{ticket}-*';
 
+export const REVIEW_DEFAULTS_PATH = '.baton/courses/create-pr/review-defaults.json';
 export const DEFAULT_CREATE_PR_REVIEW_ROUNDS = 3;
 
 export function readReviewDefault(text: string): number {
