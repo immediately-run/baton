@@ -229,7 +229,8 @@ const VERDICT: Ask = { name: 'verdict', values: ['approve', 'changes'] };
 
 const CREATE_PR: BuiltIn = {
   id: 'create-pr',
-  version: 4,
+  // 5: B-311's reconcile leg (min_runner_version 3).
+  version: 5,
   summary: 'implement a ticket in a PR, gate every review round behind its tests, review it in up to three blind rounds, fix, hand the third round\'s blockers to the owner, merge',
   course: CREATE_PR_COURSE,
   reads: 'prs',
@@ -267,6 +268,7 @@ const CREATE_PR: BuiltIn = {
     // R-BTN-131: the stub reads the forge before it reports `merged`.
     merge: { position: "{ reached: 'merged', next: null }", verify: 'merged' },
     archive: { position: "{ reached: 'archived', next: null }", archive: true },
+    reconcile: { position: 'null' },
   },
   skill: 'baton-create-pr',
 };
@@ -275,6 +277,7 @@ export const BUILT_INS: BuiltIn[] = [
   CREATE_PR,
   {
     id: 'review-pr',
+    version: 2,
     summary: "review a PR someone else opened, in rounds, and conclude with a summary",
     course: REVIEW_PR_COURSE,
     reads: 'prs',
@@ -282,6 +285,7 @@ export const BUILT_INS: BuiltIn[] = [
     legs: {
       // Changes: the next round waits on the author's push, so the claim suspends.
       review: { ask: VERDICT, position: "{ ...(answer === 'approve' ? {} : { suspend: true }), reached: answer === 'approve' ? 'approved' : 'changes-requested', next: answer === 'approve' ? null : 'review', verdict: answer }" },
+      reconcile: { position: 'null' },
       conclude: { position: "{ reached: 'concluded', next: null }" },
     },
     skill: 'baton-review-pr',
@@ -350,6 +354,7 @@ export const BUILT_INS: BuiltIn[] = [
   },
   {
     id: 'create-spec',
+    version: 2,
     summary: 'design a specification in conversation with the owner, review it adversarially, address blocking findings in conversation, merge',
     course: CREATE_SPEC_COURSE,
     reads: 'prs',
@@ -368,6 +373,7 @@ export const BUILT_INS: BuiltIn[] = [
       // the claim suspends until they do.
       adjudicate: { ask: { name: 'adjudication', values: ['merge', 'owner'] }, position: "{ ...(answer === 'owner' ? { suspend: true } : {}), reached: 'adjudicated', next: 'merge', adjudication: answer }" },
       merge: { position: "{ reached: 'merged', next: null }" },
+      reconcile: { position: 'null' },
     },
     skill: 'baton-create-spec',
   },

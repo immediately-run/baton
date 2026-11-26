@@ -125,73 +125,6 @@ var gitText = (root, ...args) => git(root, args).trim();
 // src/defaults/course-pr.ts
 var CREATE_PR_ASK_DEADLINE_S = 3 * 60 * 60;
 
-// src/defaults/tickets-markdown.ts
-function parseFrontmatter(text) {
-  const m = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text);
-  if (!m) return null;
-  const out = {};
-  const lines = m[1].split(/\r?\n/);
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    const kv = /^([A-Za-z][A-Za-z0-9_-]*):\s*(.*)$/.exec(line);
-    if (!kv) continue;
-    const [, key, rest] = kv;
-    if (rest.trim() === "") {
-      const items = [];
-      while (i + 1 < lines.length && /^\s+-\s+/.test(lines[i + 1])) {
-        i++;
-        items.push(unquote(lines[i].replace(/^\s+-\s+/, "")));
-      }
-      out[key] = items;
-    } else if (/^\[.*\]$/.test(rest.trim())) {
-      out[key] = rest.trim().slice(1, -1).split(",").map(unquote).filter(Boolean);
-    } else {
-      out[key] = unquote(rest);
-    }
-  }
-  return out;
-}
-var unquote = (v) => {
-  const t = v.trim();
-  return /^(["']).*\1$/.test(t) && t.length >= 2 ? t.slice(1, -1) : t;
-};
-
-// src/defaults/pr-verify.ts
-var ancestor = (a, b, run2, checkout) => {
-  try {
-    run2("git", ["merge-base", "--is-ancestor", a, b], checkout);
-    return true;
-  } catch {
-    return false;
-  }
-};
-function resolveDelivered(shas, ref, checkout, run2) {
-  return shas.map((sha) => {
-    if (!/^[0-9a-f]{7,40}$/.test(sha)) throw new Error("invalid delivered commit id");
-    let full;
-    try {
-      full = run2("git", ["rev-parse", "--verify", "--quiet", `${sha}^{commit}`], checkout).trim();
-    } catch {
-      throw new Error(`the implement agent answered delivered at ${sha}, which names no commit this checkout knows \u2014 refused`);
-    }
-    if (!/^[0-9a-f]{40}$/.test(full) || !full.startsWith(sha)) throw new Error(`the implement agent answered delivered at ${sha}, which names no commit this checkout knows \u2014 refused`);
-    if (!ancestor(full, ref, run2, checkout)) {
-      const branch = ref.replace(/^refs\/remotes\/origin\//, "");
-      throw new Error(`the implement agent answered delivered at ${sha}, which is not on ${branch} \u2014 refused: the commit a delivered answer names is on the default branch`);
-    }
-    return full;
-  });
-}
-
-// src/defaults/read-items.ts
-import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { join, relative, sep } from "node:path";
-function readItems(root, items = "tickets") {
-  const dir = join(root, items);
-  if (!existsSync(dir)) return [];
-  return readdirSync(dir, { recursive: true, withFileTypes: true }).filter((e) => e.isFile()).map((e) => relative(dir, join(e.parentPath, e.name)).split(sep).join("/")).sort().map((path) => ({ path, text: readFileSync(join(dir, path), "utf8") }));
-}
-
 // src/shared/schema.mjs
 var SCHEMA_MAX_BYTES = 32 * 1024;
 
@@ -276,6 +209,73 @@ var DETAIL_SCHEMAS = {
 };
 var CAPABILITY_NAME = new RegExp(`^(?:${NAME.source}|${HOLDING.source.slice(1, -1)})$`);
 var VALID_FOR = { default_s: 3600, state_s: 24 * 3600, measure_s: 31 * 24 * 3600 };
+
+// src/defaults/tickets-markdown.ts
+function parseFrontmatter(text) {
+  const m = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text);
+  if (!m) return null;
+  const out = {};
+  const lines = m[1].split(/\r?\n/);
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const kv = /^([A-Za-z][A-Za-z0-9_-]*):\s*(.*)$/.exec(line);
+    if (!kv) continue;
+    const [, key, rest] = kv;
+    if (rest.trim() === "") {
+      const items = [];
+      while (i + 1 < lines.length && /^\s+-\s+/.test(lines[i + 1])) {
+        i++;
+        items.push(unquote(lines[i].replace(/^\s+-\s+/, "")));
+      }
+      out[key] = items;
+    } else if (/^\[.*\]$/.test(rest.trim())) {
+      out[key] = rest.trim().slice(1, -1).split(",").map(unquote).filter(Boolean);
+    } else {
+      out[key] = unquote(rest);
+    }
+  }
+  return out;
+}
+var unquote = (v) => {
+  const t = v.trim();
+  return /^(["']).*\1$/.test(t) && t.length >= 2 ? t.slice(1, -1) : t;
+};
+
+// src/defaults/pr-verify.ts
+var ancestor = (a, b, run2, checkout) => {
+  try {
+    run2("git", ["merge-base", "--is-ancestor", a, b], checkout);
+    return true;
+  } catch {
+    return false;
+  }
+};
+function resolveDelivered(shas, ref, checkout, run2) {
+  return shas.map((sha) => {
+    if (!/^[0-9a-f]{7,40}$/.test(sha)) throw new Error("invalid delivered commit id");
+    let full;
+    try {
+      full = run2("git", ["rev-parse", "--verify", "--quiet", `${sha}^{commit}`], checkout).trim();
+    } catch {
+      throw new Error(`the implement agent answered delivered at ${sha}, which names no commit this checkout knows \u2014 refused`);
+    }
+    if (!/^[0-9a-f]{40}$/.test(full) || !full.startsWith(sha)) throw new Error(`the implement agent answered delivered at ${sha}, which names no commit this checkout knows \u2014 refused`);
+    if (!ancestor(full, ref, run2, checkout)) {
+      const branch = ref.replace(/^refs\/remotes\/origin\//, "");
+      throw new Error(`the implement agent answered delivered at ${sha}, which is not on ${branch} \u2014 refused: the commit a delivered answer names is on the default branch`);
+    }
+    return full;
+  });
+}
+
+// src/defaults/read-items.ts
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { join, relative, sep } from "node:path";
+function readItems(root, items = "tickets") {
+  const dir = join(root, items);
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir, { recursive: true, withFileTypes: true }).filter((e) => e.isFile()).map((e) => relative(dir, join(e.parentPath, e.name)).split(sep).join("/")).sort().map((path) => ({ path, text: readFileSync(join(dir, path), "utf8") }));
+}
 
 // src/defaults/output-evidence.ts
 var MAX = 256 * 1024;

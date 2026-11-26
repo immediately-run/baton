@@ -773,6 +773,12 @@ export function removeRepositoryOwner(fingerprint: string, at: number) {
 export function setRepositoryWeight(id: string, weight: number) {
   return rows("UPDATE repositories SET weight = ? WHERE id = ?", weight, id);
 }
+export function setRepositoryRetry(id: string, retry: { backoff_ms: number[]; max_failed: number }) {
+  return rows('UPDATE repositories SET retry = ? WHERE id = ?', JSON.stringify(retry), id);
+}
+export function confirmClaimForScenario(id: number, at: number) {
+  return rows('UPDATE claims SET confirmed_at = ? WHERE id = ?', at, id);
+}
 export function setTranscriptRepositories(id: string, repositories: string) {
   return rows("UPDATE repositories SET transcript_repos = ? WHERE id = ?", repositories, id);
 }

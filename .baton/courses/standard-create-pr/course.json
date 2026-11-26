@@ -131,6 +131,77 @@
         ]
       },
       "label": "Archive the confirmed ticket"
+    },
+    "opened-by-hand": {
+      "from": [
+        "filed"
+      ],
+      "to": "pr-open",
+      "arrives": {
+        "fact": "pr-opened",
+        "next": "run-tests"
+      }
+    },
+    "reviewed-by-hand": {
+      "from": [
+        "pr-open",
+        "fixed",
+        "reviewed"
+      ],
+      "to": "reviewed",
+      "max_runs": 3,
+      "arrives": {
+        "fact": "pr-verdict",
+        "next": {
+          "approve": "merge",
+          "changes": "fix"
+        }
+      }
+    },
+    "fixed-by-hand": {
+      "from": [
+        "pr-open",
+        "reviewed",
+        "fixed"
+      ],
+      "to": "fixed",
+      "max_runs": 3,
+      "arrives": {
+        "fact": "pr-pushed",
+        "next": "run-tests"
+      }
+    },
+    "merged-by-hand": {
+      "from": [
+        "filed",
+        "pr-open",
+        "fixed",
+        "reviewed",
+        "adjudicated"
+      ],
+      "to": "merged",
+      "arrives": {
+        "fact": "pr-merged"
+      }
+    },
+    "reconcile": {
+      "from": [
+        "filed",
+        "pr-open",
+        "fixed",
+        "reviewed",
+        "adjudicated"
+      ],
+      "max_runs": 3,
+      "reconciles": {
+        "to": {
+          "pr-open": "run-tests",
+          "fixed": "run-tests",
+          "reviewed": "merge",
+          "merged": null,
+          "delivered": "confirm"
+        }
+      }
     }
   }
 }

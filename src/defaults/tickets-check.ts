@@ -106,7 +106,7 @@ export interface CheckSettings {
  *  children's `blocked_by`, never into a `depends_on` a rule order could wait on, so a parent
  *  cycle is not one the board holds. A cycle finding names the first ticket's file. The check
  *  reads; it never writes. `settings` overrides the file's, as `readBoard`'s caller does. */
-export async function checkTickets(root: string, settings: MarkdownSettings = {}, check: CheckSettings = {}, opts: { today?: string } = {}): Promise<TicketsCheckResult> {
+export async function checkTickets(root: string, settings: MarkdownSettings = {}, check: CheckSettings = {}, opts: { today?: string; boardDone?: () => Promise<ReadonlySet<string>> } = {}): Promise<TicketsCheckResult> {
   const findings: TicketFinding[] = [];
   const settingsPath = join(root, '.baton', 'baton.json');
   if (!existsSync(settingsPath)) throw new Error(`${root} has no .baton/baton.json — run \`baton repo init\` first`);
@@ -284,6 +284,16 @@ export async function checkTickets(root: string, settings: MarkdownSettings = {}
     }
   }
   const notes: string[] = [];
+  if (opts.boardDone) {
+    try {
+      const done = await opts.boardDone();
+      for (const t of live) {
+        if (done.has(t.id) && t.path && existsSync(join(root, t.path))) notes.push(`${t.path}: ${t.id} is done on Baton's board but its file is still live (reported, not a finding)`);
+      }
+    } catch (e) {
+      notes.push(`baton tickets check: board-done report unavailable (${(e as Error).message}; not a finding)`);
+    }
+  }
   if (entries.length && shallow) notes.push('baton tickets check: a shallow clone — the stale-rule report is skipped, since its dates need the whole history (`git fetch --unshallow` to read it; never a finding)');
   if (undetermined.length) notes.push(`baton tickets check: ${undetermined.length} ticket(s) lacking ### Trust or ### Invariants, with no _filed line and a first commit this shallow clone does not show, not judged against check.sections_since (${since})${fromId ? ` — each below check.sections_from_id (${check.sections_from_id})` : ''}: ${undetermined.join(', ')}`);
   return { findings, counts, ...(stale.length ? { stale } : {}), ...(notes.length ? { notes } : {}) };
@@ -313,7 +323,7 @@ function headOf(root: string): string {
  *  stdout, then a count, so a CI log holds both; exit 1 with findings, 0 without. `--quiet` keeps
  *  stdout for the exit code alone. An unreadable root or a `.baton/baton.json` that is not JSON
  *  throws, which the CLI prints as `baton: …` and exits 2 on. */
-export async function checkTicketsMain(argv: string[], io: { log?: (l: string) => void } = {}): Promise<number> {
+export async function checkTicketsMain(argv: string[], io: { log?: (l: string) => void; boardDone?: () => Promise<ReadonlySet<string>> } = {}): Promise<number> {
   const log = io.log ?? ((l: string) => process.stdout.write(`${l}\n`));
   let root = process.env.BATON_HOME ?? process.cwd();
   let quiet = false;
@@ -338,7 +348,7 @@ export async function checkTicketsMain(argv: string[], io: { log?: (l: string) =
       throw new Error(`.baton/baton.json is not JSON: ${(e as Error).message.split('\n')[0]}`);
     }
   }
-  const { findings, counts, stale, notes } = await checkTickets(root, {}, check);
+  const { findings, counts, stale, notes } = await checkTickets(root, {}, check, { boardDone: quiet ? undefined : io.boardDone });
   if (!quiet) for (const f of findings) log(`${f.path}: ${f.message}`);
   if (!quiet) for (const l of [...staleLines(stale ?? []), ...(notes ?? [])]) log(l);
   if (findings.length) {

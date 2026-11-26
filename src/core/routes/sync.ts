@@ -1,7 +1,7 @@
 import type { BatonCore } from '../baton';
 import { BatonError, json, readJson } from '../http';
 import { parseSshKey, type SyncCredential } from '../auth';
-import { head, ticketVersions } from '../sync';
+import { head, outsideWorkRecord, ticketVersions } from '../sync';
 import { checkPayload, retiredBoardFields, type BoardPayload } from '../board';
 import { checkDependenciesRead } from '../validate';
 import { resolveDependencies } from '../dependencies';
@@ -36,7 +36,8 @@ export async function syncRoute(core: SyncCore, req: Request, url: URL, principa
       const { repo: { id: repo }, req: signed, issuer } = await principal('sync');
       // R-BTN-62 (Release): a run that will not post gives its number back; only the
       // outstanding number is voided, so a stale release voids nothing.
-      const release = ((await readJson(signed).catch(() => null)) as { release?: unknown } | null)?.release;
+      const request = (await readJson(signed).catch(() => null)) as { release?: unknown; outside_work?: unknown } | null;
+      const release = request?.release;
       if (release !== undefined) {
         if (!Number.isSafeInteger(release)) throw new BatonError('invalid-params', 'release must be the number this credential was handed (R-BTN-62)');
         core.observations.release(repo, release as number, issuer);
@@ -57,7 +58,8 @@ export async function syncRoute(core: SyncCore, req: Request, url: URL, principa
       // B-182 (R-BTN-140): and the effective `code_repos`, each entry with its forge, host,
       // ids and web_base, and the owners' `pushers` host-qualified — what the fact adapter
       // reads each repository by, and whose words count there.
-      return json({ ...core.observations.observe(repo, issuer), bars: core.admin.bars([repo], core.now(), true).map(({ repository_id: _r, ...b }) => b), code_repos: codeReposOf(core.store, repo), pushers: pushersOf(core.store, repo), ...core.claims.syncRecord(repo), versions: ticketVersions(core, repo), signing_keys: await core.admin.signingKeys(repo), require_signed_control: !!core.sql<{ flag: number }>('SELECT require_signed_control AS flag FROM repositories WHERE id = ?', repo)[0]?.flag });
+      const observation = core.observations.observe(repo, issuer);
+      return json({ ...observation, ...(request?.outside_work === true ? outsideWorkRecord(core, repo, observation.sha) : {}), bars: core.admin.bars([repo], core.now(), true).map(({ repository_id: _r, ...b }) => b), code_repos: codeReposOf(core.store, repo), pushers: pushersOf(core.store, repo), ...core.claims.syncRecord(repo), versions: ticketVersions(core, repo), signing_keys: await core.admin.signingKeys(repo), require_signed_control: !!core.sql<{ flag: number }>('SELECT require_signed_control AS flag FROM repositories WHERE id = ?', repo)[0]?.flag });
     }
     if (req.method === 'POST' && url.pathname === '/v1/sync/board') {
       const { repo, req: signed, issuer } = await principal('sync');

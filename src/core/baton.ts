@@ -7,6 +7,7 @@ import { servedClientVersions, withClientVersions } from './http';
 import type { BoardPayload } from './board';
 import { Stations } from './stations';
 import { Questions } from './questions';
+import { OutsideWork, EVIDENCE_TYPE } from './outsideWork';
 import { Conditions } from './conditions';
 import { Admin } from './admin';
 import { batonNow } from '../shared/baton.mjs';
@@ -80,6 +81,7 @@ export class BatonCore {
   readonly provenance: Provenance;
   /** §6.4 (R-BTN-116): the person legs' questions, their answers and their expiry. */
   readonly questions: Questions;
+  readonly outsideWork: OutsideWork;
   /** §7.1 (R-BTN-160, R-BTN-195; B-234): the raised conditions — the report route, the
    *  Needs-you list, and the run's end closing its open `interact`. */
   readonly conditions: Conditions;
@@ -186,6 +188,9 @@ export class BatonCore {
       contractWaits: (repo, at, ticket) => this.conditions.contractWaits(repo, at, ticket),
       linkBases: (ticket) => this.blocks.linkBases(ticket), answersFrom: (repo) => this.policies.current(repo)?.policy.inputs.answers ?? 'git',
       dispatch: (kind, ticketId) => want({ repository: repositoryOf(ticketId), kind }) });
+    this.outsideWork = new OutsideWork({ store, now: () => this.now(), graph: (repo, course) => this.stations.graph(repo, course),
+      record: (id, row) => this.history.record(id, row), held: (id) => this.blocks.isHeld(id), changed: (id) => this.blocks.write([id]),
+      admits: (repo, type) => this.policies.current(repo)?.policy.attestations[type]?.includes('sync') ?? (type === EVIDENCE_TYPE) });
     // B-234 (R-BTN-160, R-BTN-195): the raised conditions — a course's own vocabulary decides a
     // disposition (never the runner's word), a `suspend` url keeps only under R-BTN-92's link
     // bases (as a question's), and the Needs-you and list reads a delivery runner polls.
@@ -195,7 +200,7 @@ export class BatonCore {
       schema: (repo, id) => this.courses.schema(repo, id), intake: (repo, course) => this.queues.intake(repo, course),
       dispatch: (kind, ticketId) => want({ repository: repositoryOf(ticketId), kind }) ,
       policies: this.policies, forgeOf: (repo) => this.registry.get(repo)?.forge ?? 'github', scope: this.scope, deprecated: this.deprecated,
-      conditions: this.conditions, sessionHosts: () => this.instance.sessionHosts() });
+      conditions: this.conditions, sessionHosts: () => this.instance.sessionHosts(), outsideWork: this.outsideWork });
     this.cutover = new Cutover({ store, now: () => this.now(), held: (ticket) => this.blocks.held(ticket, true) });
     this.stats = new Stats(store, this.queues);
     this.mirror = new Mirror({ store, now: () => this.now(), held: (ticket) => this.blocks.held(ticket, true) });
@@ -435,6 +440,7 @@ export class BatonCore {
         stage = 'questions';
         this.questions.applyPending();
         this.questions.expireDue(this.now());
+        this.outsideWork.pending();
         stage = 'unblocked';
         this.takeUnblocked();
         // R-BTN-80: lapsed leases and due reminders queue again; old closed notices go.

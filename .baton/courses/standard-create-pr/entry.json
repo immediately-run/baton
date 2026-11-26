@@ -1,7 +1,7 @@
 {
   "id": "create-pr",
-  "version": 4,
-  "min_runner_version": 2,
+  "version": 5,
+  "min_runner_version": 3,
   "skill": "baton-create-pr",
   "step_kinds": [
     "implement",
@@ -11,7 +11,12 @@
     "adjudicate",
     "merge",
     "confirm",
-    "archive"
+    "archive",
+    "opened-by-hand",
+    "reviewed-by-hand",
+    "fixed-by-hand",
+    "merged-by-hand",
+    "reconcile"
   ],
   "branch_pattern": "claude/{ticket}-*",
   "protocol_files": [],

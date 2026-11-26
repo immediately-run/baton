@@ -18,6 +18,7 @@
 // open), and three failed rounds post `review-rounds-3`, which the owner answers through Baton —
 // `round` granting one review run, the fourth round asking `review-rounds-4`, `owner` parking
 // it. Node only: it writes a real repository and runs git.
+import { keepLegacyPrPlacement } from '../lib/legacy-pr-course';
 import { GitRepo } from '../lib/gitRepo';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { execFileSync } from 'node:child_process';
@@ -133,7 +134,8 @@ async function recorded(...gates: Gate[]): Promise<void> {
 
 describe('S-BTN-43 a repository with no course code', () => {
   it('init then sync: four tickets on the pr course, the dependent not ready, the timeline to merged', async () => {
-    expect(await init(repo.dir)).toBe(0);
+    expect(await init(repo.dir, '--own')).toBe(0);
+    keepLegacyPrPlacement(repo.dir);
     repo.commit();
     await repo.sync();
     // Four tickets from five items — the no-id file (and the .txt) are none; the done one is
@@ -210,7 +212,8 @@ describe('S-BTN-43 a repository with no course code', () => {
   }, 60_000);
 
   it('--eject tickets, then an edit to the copy: the edited source’s tickets are posted', async () => {
-    await init(repo.dir);
+    await init(repo.dir, '--own');
+    keepLegacyPrPlacement(repo.dir);
     repo.commit();
     await repo.sync();
     expect(await rows('SELECT count(*) AS n FROM tickets')).toEqual([{ n: 3 }]);
@@ -226,7 +229,8 @@ describe('S-BTN-43 a repository with no course code', () => {
   }, 60_000);
 
   it('one identity, comment-only verdict reviews, moves the same way; a red check makes review ready once the gate stands green', async () => {
-    await init(repo.dir);
+    await init(repo.dir, '--own');
+    keepLegacyPrPlacement(repo.dir);
     repo.commit();
     // The same identity authors and reviews; GitHub refuses self-approval, so the verdict is
     // the marker line a comment-only review opens with. The gate's green marker precedes each
@@ -245,7 +249,8 @@ describe('S-BTN-43 a repository with no course code', () => {
   }, 60_000);
 
   it('three failed reviews hand the blockers to the owner — a decision in Needs you — who answers through Baton (B-110)', async () => {
-    await init(repo.dir);
+    await init(repo.dir, '--own');
+    keepLegacyPrPlacement(repo.dir);
     repo.commit();
     await repo.sync();
     // The owner of docs, who answers through Baton's owner route — never a line in git (the
@@ -310,6 +315,7 @@ describe('S-BTN-43 the sync refuses, posting nothing', () => {
     mkdirSync(join(repo.dir, '.baton')); // the harness keeps its recorded facts there
     await expect(repo.sync()).rejects.toThrow('has no .baton/baton.json — run `baton repo init` first');
     await init(repo.dir, '--own');
+    keepLegacyPrPlacement(repo.dir);
     const settingsFile = join(repo.dir, '.baton', 'baton.json');
     const settings = JSON.parse(readFileSync(settingsFile, 'utf8'));
 
@@ -338,7 +344,8 @@ describe('S-BTN-43 the sync refuses, posting nothing', () => {
   }, 60_000);
 
   it('a checkout behind the head posts nothing: a slow run for an older push never moves the board back', async () => {
-    await init(repo.dir);
+    await init(repo.dir, '--own');
+    keepLegacyPrPlacement(repo.dir);
     const older = repo.commit();
     repo.write('tickets/fourth.md', '---\nid: T-4\ntitle: Fourth\n---\n');
     repo.commit();
@@ -353,7 +360,8 @@ describe('S-BTN-43 the sync refuses, posting nothing', () => {
 
 describe('S-BTN-43 --latest, as the workflow runs it', () => {
   it('after its number the run fetches the newest main and posts that board, not the older checkout it started on', async () => {
-    await init(repo.dir);
+    await init(repo.dir, '--own');
+    keepLegacyPrPlacement(repo.dir);
     repo.commit();
     // A bare origin, and a second clone that pushes one commit the local checkout lacks.
     const bare = mkdtempSync(join(tmpdir(), 'baton-s43-origin-'));

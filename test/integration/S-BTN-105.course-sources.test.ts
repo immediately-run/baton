@@ -13,7 +13,7 @@ import { initMain, parseSyncArgs, showCourseMain, syncMain } from '../../src/def
 import { dropCourse, loadCourse, sourceContext } from '../../src/runner/home';
 import { BatonApi } from '../../src/runner/api';
 import { Runner } from '../../src/runner/runner';
-import { cutover, ORIGIN, register, rows, setClock, syncToken, TOKENS, seedClaim, seedClaimLeg } from '../helpers';
+import { advance, claimItem, confirmClaimForScenario, cutover, endClaim, ORIGIN, register, rows, setClock, syncToken, TOKENS } from '../helpers';
 
 const headerPairs = (headers: Pick<Headers, 'forEach'>): [string, string][] => {
   const pairs: [string, string][] = [];
@@ -67,29 +67,28 @@ describe('S-BTN-105 a course from its source, one leg overridden', () => {
     expect(settings.courses[0].source).toMatch(new RegExp(`^github/[^/]+/[^/]+/${SHA}/standard-create-pr$`));
     await sync();
     const at = async () => (await rows<{ station: string; next_leg: string | null }>('SELECT station, next_leg FROM ticket_stations WHERE ticket_id = ?', 'docs:T-1'))[0];
-    // The gate comes before every review round (B-110): with no marker on the head it is the
-    // gate that is ready, not the round.
-    expect(await at()).toMatchObject({ station: 'pr-open', next_leg: 'run-tests' });
-    // The gate stands green on the head — a Baton-Tests marker commit, the evidence a claim's
-    // run-tests leg recorded (B-110 round 1, finding 3) — and the round queues.
-    const work = 'c'.repeat(40);
-    const commits = [
-      { sha: work, at: T0, parent: null, empty: false, message: 'the work' },
-      { sha: 'a'.repeat(40), at: T0 + 30_000, parent: work, empty: true, message: `baton: tests green for T-1\n\nBaton-Tests: green\nBaton-Tested: ${work}\nBaton-Claim: n0` },
-    ];
-    const { id: runner } = await register('vm-a');
-    await seedClaim({
-      ticket_id: 'docs:T-1', runner_id: runner, request_id: 'gate:n0', nonce: 'n0', snapshot_sha: '', claimed_at: 0,
-      status: 'released', ended_at: 1, end_reason: 'released:requested',
-    });
-    const [{ id: claim }] = await rows<{ id: number }>(`SELECT id FROM claims WHERE request_id = 'gate:n0'`);
-    await seedClaimLeg({
-      claim_id: claim, seq: 1, leg: 'run-tests', from_station: 'pr-open', to_station: 'pr-open', started_at: 0,
-      started_observation: 0, finished_at: 1, evidence: 'a'.repeat(40),
-    });
-    writeFileSync(facts, JSON.stringify([{ number: 7, head: 'claude/T-1-x', state: 'open', pushedAt: T0 + 30_000, pushes: [T0, T0 + 30_000], checks: ['success'], reviews: [], commits }]));
+    expect(await at()).toMatchObject({ station: 'filed', next_leg: 'implement' });
+    await cutover();
+    const runner = await register('vm-a', { courses: [{ repository: 'docs', course: 'create-pr', version: 3 }] });
+    const held = await claimItem('vm-a', runner.secret, { ticket_id: 'docs:T-1' });
+    expect(held.status).toBe(200);
+    const claim = held.json.claim_id;
+    expect((await advance('vm-a', runner.secret, claim, { leg: 'implement' })).status).toBe(200);
+    expect((await advance('vm-a', runner.secret, claim, { leg: 'run-tests', reached: 'pr-open' })).status).toBe(200);
+    // B-30: the implementer's key never chains into the review; its gate run suspends at
+    // `pr-open`, finished, and another key takes the round.
+    expect((await endClaim('vm-a', runner.secret, claim, { end_reason: 'suspended:pr-open', reached: 'pr-open', next: 'review',
+      finished_self_loop: true, ended_at_sha: 'a'.repeat(40) })).status).toBe(200);
     await sync();
+    // What this scenario reads is the review's source; git's confirmation of the gate's end
+    // (R-BTN-10) is S-BTN-63's, so it is taken as given here.
+    await confirmClaimForScenario(claim, T0);
     expect(await at()).toMatchObject({ station: 'pr-open', next_leg: 'review' });
+    const reviewer = await register('vm-b', { courses: [{ repository: 'docs', course: 'create-pr', version: 3 }] });
+    const round = await claimItem('vm-b', reviewer.secret, { ticket_id: 'docs:T-1' });
+    expect(round.status).toBe(200);
+    const reviewClaim = round.json.claim_id;
+    expect((await advance('vm-b', reviewer.secret, reviewClaim, { leg: 'review' })).status).toBe(200);
 
     // The repository's review: its own check, then the course's run with an agent that asks for changes.
     const agent = join(dir, 'agent.sh');
@@ -127,8 +126,8 @@ export async function run(ctx, standard) {
       expect(await leg.close(ctx, result)).toBe('https://github.com/o/r/pull/7#issuecomment-1');
       const body = readFileSync(join(bin, 'body'), 'utf8');
       expect(body.split('\n')[0]).toBe('<!-- baton:verdict changes -->');
-      // The forge now carries that comment: the next sync reads it as the review's verdict.
-      writeFileSync(facts, JSON.stringify([{ number: 7, head: 'claude/T-1-x', state: 'open', pushedAt: T0, pushes: [T0], checks: ['success'], reviews: [{ author: 'baton', state: 'COMMENTED', submittedAt: T0 + 60_000, body }], commits }]));
+      expect((await endClaim('vm-b', reviewer.secret, reviewClaim, { end_reason: 'done', reached: result.reached, next: result.next,
+        ended_at_sha: 'https://github.com/o/r/pull/7#issuecomment-1' })).status).toBe(200);
     } finally {
       process.env.PATH = path;
       dropCourse(loaded.scratch);

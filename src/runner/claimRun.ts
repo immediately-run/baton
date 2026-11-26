@@ -912,6 +912,8 @@ export class ClaimRun {
       inputs,
       ticket: { id: ticket, path: claim.path ?? null, home: this.o.repository, ...(typeof claim.version === 'string' && claim.version !== '' ? { version: claim.version } : {}), ...(ticketFile != null && (!claim.path || course.graph.legs.get(legName)?.readsOnly) ? { file: ticketFile } : {}) },
       claim: { id: claimId, nonce: claim.nonce, station: at },
+      // B-311: a reconcile leg's displaced leg and the evidence Baton captured for it.
+      ...(typeof claim.displaced === 'string' ? { displaced: claim.displaced, evidence: claim.evidence ?? [] } : {}),
       leg: legName, run, ...(runId ? { run_id: runId } : {}),
       snapshot: { sha: claim.snapshot_sha, path: gitPath, next: nextLegs },
       ...sourceContext(course),
@@ -1015,7 +1017,7 @@ export class ClaimRun {
       }
       const reason = abort.reason ?? `suspended:${at}`;
       // A released end points at no evidence (§6.5); the marker close wrote is in git.
-      return await this.finish(claimId, { end_reason: reason, reached, ...(next != null ? { next } : {}), ...(abort.error ? { error: abort.error } : {}) }, await this.callHandoff(script, ctx));
+      return await this.finish(claimId, { end_reason: reason, reached, ...(next != null ? { next } : {}), ...(abort.error ? { error: abort.error } : {}), ...(legName === 'review' && closed && /#(?:issuecomment|pullrequestreview)-\d+$/.test(closed) ? { verdict_ref: closed } : {}) }, await this.callHandoff(script, ctx));
     }
     if (outcome.kind === 'contract-input') {
       return await this.finish(claimId, { end_reason: 'released:cannot-finish:contract-input', reached: at, next: legName, ...(outcome.detail ? { detail: outcome.detail } : {}) }, null);
@@ -1059,7 +1061,7 @@ export class ClaimRun {
     if (verdict.kind === 'done') {
       // A done end carries no hand-off (R-BTN-44 writes one for suspensions and releases);
       // the closing marker and the resume record are its record.
-      const done = { end_reason: 'done', reached: verdict.reached, ...(verdict.detail ? { detail: verdict.detail } : {}), ...(verdict.outputs ? { outputs: verdict.outputs } : {}), ...(closed ? { ended_at_sha: closed } : {}) };
+      const done = { end_reason: 'done', reached: verdict.reached, ...(verdict.next !== undefined ? { next: verdict.next } : {}), ...(verdict.detail ? { detail: verdict.detail } : {}), ...(verdict.outputs ? { outputs: verdict.outputs } : {}), ...(closed ? { ended_at_sha: closed } : {}) };
       return await this.finish(claimId, done, null, () => this.callHandoff(script, ctx));
     }
     if (verdict.kind === 'suspend' || verdict.kind === 'release') {
@@ -1070,6 +1072,7 @@ export class ClaimRun {
         ...(verdict.kind === 'suspend' && verdict.outputs ? { outputs: verdict.outputs } : {}),
         ...(verdict.kind === 'suspend' && verdict.detail ? { detail: verdict.detail } : {}),
         ...(verdict.kind === 'suspend' && closed ? { ended_at_sha: closed } : {}),
+        ...(verdict.kind === 'release' && legName === 'review' && closed && /#(?:issuecomment|pullrequestreview)-\d+$/.test(closed) ? { verdict_ref: closed } : {}),
       }, await this.callHandoff(script, ctx));
     }
     return await this.advanceLeg(claimId, ticket, prepared, state, execution, verdict, result, closed);

@@ -25,6 +25,9 @@ export interface ClaimAnswer {
   /** B-39: where the leg's declared pointers may reach (R-BTN-109). */
   pointer_reach?: PointerReach;
   brief?: { signed: boolean; signer?: string; commit: string };
+  /** B-311: a reconcile leg's displaced leg and the evidence Baton captured for it. */
+  displaced?: string;
+  evidence?: { ref: string; kind: string }[];
   last_written_by?: LastWrittenBy;
   default_branch?: string;
   handoff_url?: string;

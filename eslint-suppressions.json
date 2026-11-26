@@ -49,11 +49,6 @@
       "count": 1
     }
   },
-  "src/defaults/cli.ts": {
-    "@typescript-eslint/no-explicit-any": {
-      "count": 27
-    }
-  },
   "src/defaults/courses.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 1

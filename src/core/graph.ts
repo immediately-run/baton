@@ -6,6 +6,7 @@
 
 import { capabilitiesOf } from '../shared/vocabulary.mjs';
 import { declaredConditions, type ConditionDeclaration } from './conditionTypes';
+import type { FactArrival } from './course';
 
 /** One step of a ticket's path: the leg run and the station it reached (R-BTN-70). */
 export interface Step {
@@ -41,6 +42,8 @@ export interface Leg {
   /** R-BTN-116: a person's leg — no runner may take it (rule `person`); it arrives when a person
    *  answers it with a `std:decision@1`. */
   person: boolean;
+  arrives?: FactArrival;
+  reconciles?: Record<string, string | null>;
   /** R-BTN-116: who answers a person's leg; null on any other. */
   asks: string | null;
   answerSource?: 'person';
@@ -77,6 +80,8 @@ export interface Graph {
   /** Legs on the shortest route from each station to an end (`to_end`, §2e). */
   toEnd: Map<string, number>;
 }
+
+export const modelsOutsideWork = (g: Graph): boolean => [...g.legs.values()].some((l) => l.arrives || l.reconciles);
 
 const names = (v: unknown): string[] => (typeof v === 'string' ? [v] : Array.isArray(v) ? (v as string[]) : []);
 
@@ -117,14 +122,16 @@ export function graphOf(json: unknown): Graph {
     capability_roles?: Record<string, string[]>;
     stations: Record<string, { renamed_from?: string | string[]; entry?: { output: string; schema: string }[] }>;
     legs: Record<string, { from: string[]; to: string | string[]; max_runs?: number; max_queue?: number; renamed_from?: string | string[]; no_chain_from?: string[]; isolation?: 'session'; requires?: { capabilities?: string[] };
-      kind?: 'person'; asks?: string; answer_source?: 'person'; expires?: { after_s: number; reached: string }; replay_safe?: boolean; max_duration?: number; conditions?: string[]; autonomous?: boolean; reads_only?: boolean } & ContractFields>;
+      kind?: 'person'; asks?: string; answer_source?: 'person'; expires?: { after_s: number; reached: string }; replay_safe?: boolean; max_duration?: number; conditions?: string[]; autonomous?: boolean; reads_only?: boolean;
+      arrives?: FactArrival; reconciles?: { to: Record<string, string | null> } } & ContractFields>;
   };
   const legs = new Map<string, Leg>();
   const legRenames = new Map<string, string>();
   const stationRenames = new Map<string, string>();
   for (const [id, l] of Object.entries(f.legs)) {
-    legs.set(id, { from: [...new Set(l.from)], to: [...new Set(names(l.to))], maxRuns: l.max_runs ?? null, maxQueue: l.max_queue ?? null,
+    legs.set(id, { from: [...new Set(l.from)], to: [...new Set(l.reconciles ? [...l.from, ...Object.keys(l.reconciles.to)] : names(l.to))], maxRuns: l.max_runs ?? null, maxQueue: l.max_queue ?? null,
       version: l.version ?? 0, inputs: l.inputs, outputs: l.outputs,
+      ...(l.arrives ? { arrives: l.arrives } : {}), ...(l.reconciles ? { reconciles: l.reconciles.to } : {}),
       noChainFrom: [...new Set(l.no_chain_from ?? [])], isolation: l.isolation ?? null, requires: legCapabilities(l.requires, f.capability_roles),
       person: l.kind === 'person', asks: l.kind === 'person' ? l.asks ?? null : null, expires: l.kind === 'person' && l.expires ? { afterS: l.expires.after_s, reached: l.expires.reached } : null,
       ...(l.answer_source === 'person' ? { answerSource: 'person' as const } : {}),

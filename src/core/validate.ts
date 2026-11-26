@@ -693,6 +693,7 @@ export interface End {
   detail: string | null;
   error: { type: string; message: string } | null;
   ended_at_sha: string | null;
+  verdict_ref: string | null;
   /** A suspension reporting a completed self-loop, not an abandoned run at the same station. */
   finished_self_loop: boolean;
   /** `released:<reason>` naming no §6.5 reason: an owner bar's (R-BTN-67), checked by the claims. */
@@ -849,6 +850,8 @@ export function checkEnd(body: unknown): End {
   const ptr = b.ended_at_sha;
   if (ptr !== undefined && ptr !== null && !isPointer(ptr)) bad('ended_at_sha', 'must be a commit sha or an https URL of at most 1000 characters');
   const sha = (ptr as string | undefined | null) ?? null;
+  const verdict = b.verdict_ref;
+  if (verdict != null && (typeof verdict !== 'string' || !isHttpsPointer(verdict) || !/#(?:issuecomment|pullrequestreview)-\d+$/.test(verdict))) bad('verdict_ref', 'must be a verdict comment or review URL');
   if (status! === 'released' && sha) bad('ended_at_sha', 'only a completed end points at its evidence');
   if (b.finished_self_loop !== undefined && (b.finished_self_loop !== true || !suspended_at || !sha)) {
     bad('finished_self_loop', 'must be true on a suspension carrying ended_at_sha');
@@ -882,7 +885,7 @@ export function checkEnd(body: unknown): End {
     spawned = b.spawned as string[];
     if (reason === 'done') bad('spawned', 'a done end spawns nothing — its open children are superseded by the close (R-BTN-86, R-BTN-168)');
   }
-  return { end_reason: reason, status: status!, suspended_at, reached: reached ?? suspended_at, next, detail, error, ended_at_sha: sha, finished_self_loop: b.finished_self_loop === true, owner_bar: ownerBar, prerequisite, outputs: checkOutputs(b.outputs), scope_exceeded: checkScopeReport(b.scope_exceeded), exit_status: optional(b.exit_status, exitStatus) ?? null, session_url: carriedSessionUrl(b.session_url), spawned, local_order: checkLocalOrder(b.local_order) };
+  return { end_reason: reason, status: status!, suspended_at, reached: reached ?? suspended_at, next, detail, error, ended_at_sha: sha, verdict_ref: typeof verdict === 'string' ? verdict : null, finished_self_loop: b.finished_self_loop === true, owner_bar: ownerBar, prerequisite, outputs: checkOutputs(b.outputs), scope_exceeded: checkScopeReport(b.scope_exceeded), exit_status: optional(b.exit_status, exitStatus) ?? null, session_url: carriedSessionUrl(b.session_url), spawned, local_order: checkLocalOrder(b.local_order) };
 }
 
 /** B-248 (R-BTN-202): a local order's provenance, as the advance or end that reports the leg

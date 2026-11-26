@@ -42,6 +42,31 @@
       ],
       "to": "concluded",
       "label": "Summarise and stop"
+    },
+    "approved-by-hand": {
+      "from": [
+        "requested",
+        "changes-requested"
+      ],
+      "to": "approved",
+      "arrives": {
+        "fact": "pr-verdict",
+        "verdict": "approve"
+      }
+    },
+    "reconcile": {
+      "from": [
+        "requested",
+        "changes-requested"
+      ],
+      "max_runs": 3,
+      "reconciles": {
+        "to": {
+          "changes-requested": "review",
+          "approved": null,
+          "concluded": null
+        }
+      }
     }
   }
 }

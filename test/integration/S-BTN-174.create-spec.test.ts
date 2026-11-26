@@ -15,6 +15,7 @@
 // The runs mirror create-pr's (review 4, three address rounds): the fourth review is the one that
 // finds the rounds spent, and it is reachable.
 // Node only: it writes a real repository and runs git.
+import { keepLegacyPrPlacement } from '../lib/legacy-pr-course';
 import { GitRepo } from '../lib/gitRepo';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { execFileSync } from 'node:child_process';
@@ -111,7 +112,8 @@ const adjudicated = (v: 'merge' | 'owner', at: number): PrFact['reviews'][number
 
 describe('S-BTN-174 the create-spec course', () => {
   it('converse suspends with its pair; the conversation’s PR advances the board; the address round-trip to merged', async () => {
-    expect(await init(repo.dir, '--course', 'create-spec')).toBe(0);
+    expect(await init(repo.dir, '--own', '--course', 'create-spec')).toBe(0);
+    keepLegacyPrPlacement(repo.dir, 'create-spec');
     // A bare origin, so a leg's close can push the marker it writes — the branch the sync reads.
     const bare = mkdtempSync(join(tmpdir(), 'baton-s174-origin-'));
     try {
@@ -267,7 +269,8 @@ describe('S-BTN-174 the create-spec course', () => {
   }, 180_000);
 
   it('a conversation’s PR closed unmerged counts as none: the ticket waits on the owner, never re-offered', async () => {
-    expect(await init(repo.dir, '--course', 'create-spec')).toBe(0);
+    expect(await init(repo.dir, '--own', '--course', 'create-spec')).toBe(0);
+    keepLegacyPrPlacement(repo.dir, 'create-spec');
     const bare = mkdtempSync(join(tmpdir(), 'baton-s174-origin-'));
     try {
       execFileSync('git', ['clone', '-q', '--bare', repo.dir, bare], { stdio: 'ignore' });

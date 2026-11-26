@@ -171,8 +171,8 @@ export class BatonApi {
   }
   /** §7.1: the sync's three calls — the observation first (R-BTN-62), then the head, then the
    * board post carrying it. */
-  observation(): Promise<Observation & Record<string, unknown>> {
-    return this.call('POST', '/v1/sync/observation', {}) as Promise<Observation & Record<string, unknown>>;
+  observation(outsideWork = false): Promise<Observation & Record<string, unknown>> {
+    return this.call('POST', '/v1/sync/observation', outsideWork ? { outside_work: true } : {}) as Promise<Observation & Record<string, unknown>>;
   }
   /** R-BTN-62: give back a number this run will not post under. */
   releaseObservation(n: number): Promise<Record<string, any>> {

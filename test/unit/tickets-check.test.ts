@@ -360,6 +360,17 @@ describe('checkTickets: an ejected .baton/tickets.mjs', () => {
 });
 
 describe('checkTicketsMain: exit codes, the count line, --quiet', () => {
+  it('reports board-done live files without a finding (S-BTN-309)', async () => {
+    const dir = repo({ 'tickets/A-1.md': ticket('id: A-1'), 'tickets/A-2.md': ticket('id: A-2') });
+    const said: string[] = [];
+    const boardDone = async () => new Set(['A-1']);
+    expect(await checkTicketsMain(['--repo', dir], { boardDone, log: (l) => said.push(l) })).toBe(0);
+    expect(said).toEqual([
+      'tickets/A-1.md: A-1 is done on Baton\'s board but its file is still live (reported, not a finding)',
+      'baton tickets check: 2 ticket(s), ✓ no findings',
+    ]);
+  });
+
   it('0 with a count when clean, 1 with one line per finding otherwise, 2 by throwing on a bad flag', async () => {
     const clean = repo({ 'tickets/A-1.md': ticket('id: A-1') });
     const said: string[] = [];

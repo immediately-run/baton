@@ -19,7 +19,7 @@ import { join } from 'node:path';
 import { call as hostCall } from '#host';
 import { initMain, parseSyncArgs, syncMain } from '../../src/defaults/cli';
 import { Runner } from '../../src/runner/runner';
-import { ORIGIN, TOKENS, claimRow, claimItem, cutover, observe, register, rows, setClock, syncToken } from '../helpers';
+import { ORIGIN, claimRow, claimItem, cutover, observe, register, rows, setClock, syncToken } from '../helpers';
 
 const T0 = Date.parse('2026-11-06T12:00:00Z');
 
@@ -123,8 +123,9 @@ export async function close() { return 'https://example.test/close'; }
     const api = runnerApi();
     return testRunner({
       api, home: this.dir, session,
-      courses: [{ course: 'create-pr', version: 2 }], stateFile: join(tmpdir(), `baton-s203-${session}.json`),
-      beatEvery: 60_000, });
+      courses: [{ course: 'create-pr', version: 3 }], stateFile: join(tmpdir(), `baton-s203-${session}.json`),
+      beatEvery: 60_000,
+    });
   }
 }
 
@@ -228,7 +229,7 @@ describe('S-BTN-207 ticket versions through the sync and the runner', () => {
     ]);
     // A claim on T-1, then an unrelated commit: T-1's blob id — its version — cannot move, and
     // the reading does not stale the claim (R-BTN-35: progress is not staleness).
-    const { secret } = await register('vm-a', { courses: [{ repository: 'docs', course: 'create-pr', version: 2 }] });
+    const { secret } = await register('vm-a', { courses: [{ repository: 'docs', course: 'create-pr', version: 3 }] });
     const c = await claimItem('vm-a', secret, { ticket_id: 'docs:T-1' });
     expect(c.json).toMatchObject({ version: one, ticket_source: { kind: 'markdown', versions: 'pinned' } });
     writeFileSync(join(repo.dir, 'README.md'), 'an unrelated change\n');

@@ -77,6 +77,7 @@ import accessSignIn from './0071_access_sign_in.sql';
 import sessionLinkSecrets from './0079_session_link_secrets.sql';
 import interactionDeliveryGrant from './0080_interaction_delivery_grant.sql';
 import sessionLinkIncarnation from './0081_session_link_incarnation.sql';
+import outsideWork from './0120_outside_work.sql';
 import harnessNames from './0141_harness_names.sql';
 import conditionRecords from './0085_condition_records.sql';
 import syncLimits from './0104_sync_limits.sql';
@@ -242,6 +243,7 @@ export const MIGRATIONS: Migration[] = [
   { id: 82, sql: legTimeoutFence },
   { id: 83, sql: postedHead },
   { id: 84, sql: backfillPostedHead },
+  { id: 120, sql: outsideWork },
   { id: 85, sql: conditionRecords },
   { id: 100, sql: legContracts },
   { id: 101, sql: pinnedContracts },

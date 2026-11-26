@@ -270,7 +270,7 @@ async function run(ctx) {
     rmSync(dir, { recursive: true, force: true });
   }
 }
-function verdictOf(cwd, script) {
+function verdictOf2(cwd, script) {
   try {
     execFileSync3("npm", ["run", script], {
       cwd,
@@ -353,7 +353,7 @@ async function standard(ctx) {
     if (declared && !existsSync(join(tree, "node_modules"))) {
       throw new Error("npm run " + script + " cannot run: " + branch + " declares dependencies and neither the tested tree nor the home checkout has node_modules \u2014 install them where the leg runs (npm ci); the tests never ran: no verdict, no marker");
     }
-    verdict = verdictOf(tree, script);
+    verdict = verdictOf2(tree, script);
   } finally {
     try {
       unlinkSync(join(tree, "node_modules"));

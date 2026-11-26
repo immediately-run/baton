@@ -77,7 +77,7 @@ function makeRunner(log: string[]) {
   return testRunner({
     home: dir,
     capabilities: [...capabilitiesOf(['agent-venue'])],
-    session: `s203-${Date.now()}`, courses: [{ course: 'create-pr', version: 2 }], stateFile: join(tmpdir(), `baton-s203-${process.pid}-${Date.now()}.json`),
+    session: `s203-${Date.now()}`, courses: [{ course: 'create-pr', version: 3 }], stateFile: join(tmpdir(), `baton-s203-${process.pid}-${Date.now()}.json`),
     beatEvery: 60_000, log: (l) => log.push(l),
   });
 }

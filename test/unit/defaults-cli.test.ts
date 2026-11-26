@@ -23,6 +23,7 @@ import { validateCourse } from '../../src/core/course';
 import { createHash } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { githubFake } from '../githubFake';
+import { changedBeyondBase } from '../../src/defaults/push-work';
 import { graphOf } from '../../src/core/graph';
 import { decide } from '../../src/runner/protocol';
 import { replayMain } from '../../src/runner/replay';
@@ -824,7 +825,7 @@ describe('baton repo init, through the built CLI', () => {
     expect(settings.agent_command).not.toMatch(/[<>|]/);
     expect(splitWords(settings.agent_command).at(0)).toBe('opencode');
     expect(settings).toMatchObject({ items: 'tickets', default_course: 'create-pr' });
-    expect(settings.courses).toEqual([{ id: 'create-pr', version: 4, min_runner_version: 2, skill: 'baton-create-pr', step_kinds: ['implement', 'run-tests', 'review', 'fix', 'adjudicate', 'merge', 'confirm', 'archive'], branch_pattern: 'claude/{ticket}-*', protocol_files: [] }]);
+    expect(settings.courses).toEqual([{ id: 'create-pr', version: 5, min_runner_version: 3, skill: 'baton-create-pr', step_kinds: ['implement', 'run-tests', 'review', 'fix', 'adjudicate', 'merge', 'confirm', 'archive', 'opened-by-hand', 'reviewed-by-hand', 'fixed-by-hand', 'merged-by-hand', 'reconcile'], branch_pattern: 'claude/{ticket}-*', protocol_files: [] }]);
     expect(JSON.parse(readFileSync(join(root, '.baton', 'courses', 'create-pr', 'course.json'), 'utf8'))).toEqual(JSON.parse(JSON.stringify(CREATE_PR_COURSE)));
     const workflow = readFileSync(join(root, '.github', 'workflows', 'baton-sync.yml'), 'utf8');
     expect(workflow).toBe(syncWorkflow(PIN));
@@ -937,7 +938,7 @@ describe('baton repo init, through the built CLI', () => {
   it('each leg stub imports only Node built-ins, so a scratch copy runs as the runner loads it', async () => {
     // A stub and its instructions per leg (R-BTN-131); the runner and the kit read only the .mjs.
     const files = readdirSync(join(root, '.baton', 'courses', 'create-pr', 'legs')).sort();
-    const legNames = ['adjudicate', 'archive', 'fix', 'implement', 'merge', 'review', 'run-tests'];
+    const legNames = ['adjudicate', 'archive', 'fix', 'implement', 'merge', 'reconcile', 'review', 'run-tests'];
     expect(files).toEqual(legNames.flatMap((l) => [`${l}.md`, `${l}.mjs`]));
     const legs = files.filter((f) => f.endsWith('.mjs'));
     for (const leg of legs) {
@@ -2193,7 +2194,7 @@ writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));
       baton(root, 'repo', 'init', '--own', '--pin', PIN, '--force');
       const forced = JSON.parse(readFileSync(settingsFile, 'utf8'));
       expect(forced).toMatchObject({ repos: { docs: 'o/docs' }, agent_command: 'my-agent', default_course: 'create-pr' });
-      expect(forced.courses.map((c: { id: string; version: number }) => [c.id, c.version])).toEqual([['create-pr', 4], ['bug-report', 1]]);
+      expect(forced.courses.map((c: { id: string; version: number }) => [c.id, c.version])).toEqual([['create-pr', 5], ['bug-report', 1]]);
       expect(readFileSync(stub, 'utf8')).not.toContain('// edited by hand');
     } finally {
       writeFileSync(settingsFile, settings);
@@ -2449,6 +2450,27 @@ describe('githubFacts (R-BTN-96’s GitHub adapter) against a recorded GitHub', 
   const who = (author_association: string, body: string, at: string, login = 'x') => ({ user: { login }, author_association, body, created_at: at, submitted_at: at, state: 'COMMENTED' });
   /** R-BTN-139: what the forge says `login` may do in `repo` — the read that decides a verdict's author. */
   const may = (repo: string, login: string, permission: string) => ({ [`/repos/${repo}/collaborators/${login}/permission`]: { permission } });
+
+  it('uses GitHub ref activity, not the committer, to identify a current-head push (S-BTN-309)', async () => {
+    const at = '2026-10-04T00:00:00Z';
+    const ref = 'refs/heads/work/A-1';
+    const pull = { ...pr(1, 'work/A-1', 'open'), user: { login: 'author' },
+      head: { ref: 'work/A-1', sha: 's1', repo: { id: 1 } }, base: { ref: 'main', repo: { id: 1 } } };
+    serve({
+      '/repos/o/r': { default_branch: 'main' },
+      '/repos/o/r/pulls?state=all': [pull],
+      '/repos/o/r/commits/s1/check-runs': { check_runs: [] },
+      '/repos/o/r/pulls/1/commits': [{ sha: 's1', committer: { login: 'not-the-pusher' }, commit: { committer: { date: '2026-10-01T00:00:00Z' } } }],
+      '/repos/o/r/pulls/1/reviews': [],
+      '/repos/o/r/issues/1/comments': [who('MEMBER', '<!-- baton:verdict approve -->', '2026-10-05T00:00:00Z')],
+      [`/repos/o/r/activity?ref=${encodeURIComponent(ref)}&direction=desc`]: [{ ref, after: 's1', actor: { login: 'pushed-branch' }, timestamp: at, activity_type: 'push' }],
+      ...may('o/r', 'x', 'write'), ...may('o/r', 'author', 'write'),
+    });
+    const [fact] = await githubFacts(dir, () => {}, () => true, [], { outside: { sha: null, observed_at: Date.parse('2026-10-06T00:00:00Z'),
+      head_accepted_at: null, runner_pushers: ['runner'], positions: {}, verdict_refs: {}, claim_prs: {}, claim_shas: {}, merge_refs: {} } });
+    expect(fact.headPush).toEqual({ actor: 'pushed-branch', at: Date.parse(at), changesWork: false });
+    expect(fact.pushedAt).toBe(Date.parse('2026-10-01T00:00:00Z'));
+  });
 
   it('S-BTN-48: emits closing outputs only from pusher-verified comments on the ticket PR', async () => {
     const base = pr(1, 'claude/A-1-x', 'open');
@@ -2877,7 +2899,7 @@ describe('baton repo init --course, the standard courses (R-BTN-131)', () => {
     root = mkdtempSync(join(tmpdir(), 'baton-courses-'));
     gitInit(root);
     baton(root, 'repo', 'init', '--own', '--pin', PIN);
-    for (const c of ['bug-report', 'decision', 'review-pr', 'draft-ticket', 'spec-to-tickets']) baton(root, 'repo', 'init', '--own', '--course', c, '--pin', PIN);
+    for (const c of ['bug-report', 'decision', 'review-pr', 'draft-ticket', 'spec-to-tickets', 'create-spec']) baton(root, 'repo', 'init', '--own', '--course', c, '--pin', PIN);
     commitAll(root);
   }, 240_000);
   afterAll(() => rmSync(root, { recursive: true, force: true }));
@@ -2885,10 +2907,10 @@ describe('baton repo init --course, the standard courses (R-BTN-131)', () => {
   it('a second course joins the first: its entry is added to baton.json, the default stays, its files are written', () => {
     const settings = JSON.parse(readFileSync(join(root, '.baton', 'baton.json'), 'utf8'));
     expect(settings.default_course).toBe('create-pr');
-    expect(settings.courses.map((c: { id: string }) => c.id)).toEqual(['create-pr', 'bug-report', 'decision', 'review-pr', 'draft-ticket', 'spec-to-tickets']);
+    expect(settings.courses.map((c: { id: string }) => c.id)).toEqual(['create-pr', 'bug-report', 'decision', 'review-pr', 'draft-ticket', 'spec-to-tickets', 'create-spec']);
     expect(settings.courses[1]).toEqual({ id: 'bug-report', version: 1, min_runner_version: 1, skill: 'baton-bug-report', step_kinds: ['trace', 'origin', 'dedupe', 'file', 'fold', 'prevent'], branch_pattern: 'claude/{ticket}-*', protocol_files: [] });
     expect(settings.courses[5]).toEqual({ id: 'spec-to-tickets', version: 1, min_runner_version: 1, skill: 'baton-spec-to-tickets', step_kinds: ['decompose', 'check', 'file'], branch_pattern: 'claude/{ticket}-*', protocol_files: [] });
-    for (const [course, legs] of [['bug-report', 6], ['decision', 2], ['review-pr', 2], ['draft-ticket', 3], ['spec-to-tickets', 3]] as const) {
+    for (const [course, legs] of [['bug-report', 6], ['decision', 2], ['review-pr', 3], ['draft-ticket', 3], ['spec-to-tickets', 3]] as const) {
       expect(readdirSync(join(root, '.baton', 'courses', course, 'legs')).length, course).toBe(legs * 2);
     }
     expect(JSON.parse(readFileSync(join(root, '.baton', 'courses', 'bug-report', 'course.json'), 'utf8')).start).toBe('reported');
@@ -2958,7 +2980,7 @@ describe('baton repo init --course, the standard courses (R-BTN-131)', () => {
   });
 
   it('the course test kit passes on each scaffolded course: its file, its stubs, one generic run to its end', () => {
-    for (const c of ['create-pr', 'review-pr', 'bug-report', 'draft-ticket', 'decision', 'spec-to-tickets']) {
+    for (const c of ['create-pr', 'review-pr', 'create-spec', 'bug-report', 'draft-ticket', 'decision', 'spec-to-tickets']) {
       expect(baton(root, 'test-course', root, c, '--base', 'none'), c).toContain('✓ no violations');
     }
   }, 240_000);
@@ -3082,7 +3104,7 @@ describe('course sources and leg overrides (B-33)', () => {
     try {
       expect(baton(root, 'repo', 'init', '--pin', PIN)).toContain(`create-pr now from ${SELF.sha.slice(0, 10)}`);
       const moved = JSON.parse(readFileSync(settingsFile, 'utf8'));
-      expect(moved).toMatchObject({ agent_command: 'mine', courses: [{ id: 'create-pr', version: 4, source: sourceOf('create-pr') }] });
+      expect(moved).toMatchObject({ agent_command: 'mine', courses: [{ id: 'create-pr', version: 5, source: sourceOf('create-pr') }] });
       expect(local()).toEqual(untouched);
 
       // Through the source: the course in force is the source's graph and leg script, with the
@@ -3449,4 +3471,38 @@ describe('readBoard resolves qualified dependencies against their boards (B-113)
     expect(done.asked).toEqual([]);
     expect(done.stations()['T-1'].next).toEqual([{ leg: 'implement', state: 'ready', waiting_on: null }]);
   }, 30_000);
+});
+
+// S-BTN-309: an ordinary base merge is not implementation work; an edited merge can be.
+it('compares the full push to the tree from just merging the base', () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'baton-push-test-'));
+  const git = (...args: string[]) => execFileSync('git', ['-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', '-c', 'commit.gpgsign=false', ...args],
+    { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+  const write = (file: string, content: string) => { writeFileSync(join(cwd, file), content); git('add', file); };
+  try {
+    git('init', '-b', 'main');
+    git('commit', '--allow-empty', '-m', 'initial');
+    git('branch', 'work');
+    write('base', 'new base content');
+    git('commit', '-m', 'base change');
+    git('switch', 'work');
+    write('implementation', 'first draft');
+    git('commit', '-m', 'implementation');
+    const before = git('rev-parse', 'HEAD');
+    git('merge', '--no-ff', 'main', '-m', 'base only');
+    expect(changedBeyondBase(git, before, 'HEAD', 'main')).toBe(false);
+    const merged = git('rev-parse', 'HEAD');
+    git('commit', '--allow-empty', '-m', 'no tree change');
+    expect(changedBeyondBase(git, merged, 'HEAD', 'main')).toBe(false);
+    write('implementation', 'fix after the merge, in the same push');
+    git('commit', '-m', 'fix');
+    expect(changedBeyondBase(git, before, 'HEAD', 'main')).toBe(true);
+    git('switch', '-c', 'edited-merge', before);
+    git('merge', '--no-ff', '--no-commit', 'main');
+    write('implementation', 'fix in the merge itself');
+    git('commit', '-m', 'base plus fix');
+    expect(changedBeyondBase(git, before, 'HEAD', 'main')).toBe(true);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
 });

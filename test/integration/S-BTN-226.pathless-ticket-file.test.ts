@@ -18,7 +18,7 @@ import { pathToFileURL } from 'node:url';
 import { call as hostCall } from '#host';
 import { initMain, parseSyncArgs, syncMain } from '../../src/defaults/cli';
 import { Runner } from '../../src/runner/runner';
-import { ORIGIN, TOKENS, cutover, setClock, syncToken } from '../helpers';
+import { ORIGIN, cutover, setClock, syncToken } from '../helpers';
 
 const T0 = Date.parse('2026-11-16T12:00:00Z');
 
@@ -100,8 +100,9 @@ class PathlessTickets extends GitRepo {
     const api = runnerApi();
     return testRunner({
       api, home: this.dir, session,
-      courses: [{ course: 'create-pr', version: 2 }], stateFile: join(tmpdir(), `baton-s226-${session}.json`),
-      beatEvery: 60_000, });
+      courses: [{ course: 'create-pr', version: 3 }], stateFile: join(tmpdir(), `baton-s226-${session}.json`),
+      beatEvery: 60_000,
+    });
   }
   saw(): { ticket: Record<string, unknown>; text: string | null; mode: number | null } {
     return JSON.parse(readFileSync(join(this.dir, 'leg-saw.json'), 'utf8'));

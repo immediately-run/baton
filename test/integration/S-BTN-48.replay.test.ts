@@ -148,8 +148,9 @@ export async function close() { return 'https://example.test/close'; }
     const api = runnerApi({ transport });
     return testRunner({
       api, home: this.dir, session,
-      courses: [{ course: 'create-pr', version: 2 }], stateFile: join(tmpdir(), `baton-s48-${session}.json`),
-      beatEvery: 60_000, });
+      courses: [{ course: 'create-pr', version: 3 }], stateFile: join(tmpdir(), `baton-s48-${session}.json`),
+      beatEvery: 60_000,
+    });
   }
 }
 
@@ -294,6 +295,8 @@ describe('S-BTN-48 replay: a recorded run re-run without a claim', () => {
     const configPath = join(repo.dir, '.baton', 'baton.json');
     const config = JSON.parse(readFileSync(configPath, 'utf8'));
     delete config.courses[0].source;
+    // B-311 raised create-pr's min_runner_version for its reconcile leg; this graph has none.
+    config.courses[0].min_runner_version = 1;
     writeFileSync(configPath, JSON.stringify(config));
     writeFileSync(join(repo.dir, 'plan.json'), JSON.stringify(mode === 'bad-output' ? { wrong: true } : { url: 'https://example.test' }));
     const artifact = repo.commit('plan artifact');
@@ -497,7 +500,7 @@ export function handoff() { return null; }
     writeFileSync(join(repo.dir, 'plan.txt'), 'the plan as the run read it\n');
     const planSha = repo.commit('the plan');
     const uri = `git:immediately-run/docs@${planSha}:plan.txt`;
-    const { secret } = await register('vm-a', { courses: [{ repository: 'docs', course: 'create-pr', version: 2 }] });
+    const { secret } = await register('vm-a', { courses: [{ repository: 'docs', course: 'create-pr', version: 3 }] });
     const claim = await claimItem('vm-a', secret, { ticket_id: 'docs:T-1' });
     const started = await advance('vm-a', secret, claim.json.claim_id, {
       leg: 'implement',

@@ -12,10 +12,11 @@ import { logEvent } from './db';
 import { DispatchTransportError } from './dispatch';
 import { adjustCounts } from './capacity';
 import type { ClosingPosition, Seen } from './stations';
+import { isOutsideWork } from './outsideWork';
 
 const HELD_AUTO_ACCEPT_MS = 24 * 3_600_000; // R-BTN-11: measured from the first post of the held history.
 
-type BoardPostCore = Pick<BatonCore, 'store' | 'sql' | 'now' | 'observations' | 'claims' | 'ownerState' | 'stations' | 'blocks' | 'courses' | 'policies' | 'questions' | 'history' | 'provenance' | 'queues' | 'admin' | 'registry' | 'conditions' | 'syncWants'>;
+type BoardPostCore = Pick<BatonCore, 'store' | 'sql' | 'now' | 'observations' | 'claims' | 'ownerState' | 'stations' | 'blocks' | 'courses' | 'policies' | 'questions' | 'history' | 'provenance' | 'queues' | 'admin' | 'registry' | 'conditions' | 'outsideWork' | 'syncWants'>;
 
 /** A repository's head snapshot (R-BTN-11, per repository), or null before its first. */
 export function headOf(core: Pick<BatonCore, 'sql'>, repo: string): string | null {
@@ -257,7 +258,7 @@ async function boardPost(core: BoardPostCore, repo: Repository, p: BoardPayload,
     // `answer:` — applied as the leg's arrival (R-BTN-39), which may move the ticket before
     // the blocks are re-evaluated below.
     core.questions.posted(r, p.tickets ?? [], new Set(stations.keys()));
-    core.questions.attestations(r, p.attestations ?? []);
+    applyBoardAttestations(core, r, p.attestations ?? []);
   core.conditions.missingNext(r, core.stations.missingNext(r), at);
   core.conditions.contractWaits(r, at);
     // B-129 (R-BTN-85, both values): a post whose ticket frontmatter says `available` while
@@ -563,6 +564,53 @@ function settleSpawned(core: Pick<BatonCore, 'sql' | 'history' | 'store'>, r: st
   void at;
 }
 
+/** B-311 (R-BTN-203): a post's outside-work attestations go to their own module; the rest to
+ *  the questions, as before. Fact arrivals a hold deferred are retried after either. */
+function applyBoardAttestations(core: Pick<BatonCore, 'questions' | 'outsideWork'>, repo: string, attestations: NonNullable<BoardPayload['attestations']>) {
+  core.questions.attestations(repo, attestations.filter((a) => !isOutsideWork(a)));
+  core.outsideWork.posted(repo, attestations.filter(isOutsideWork));
+  core.outsideWork.pending(repo);
+}
+
+/** B-311: Baton's own record the outside-work reading judges git against — positions, and
+ *  the refs its claims reported, grouped by kind. */
+export function outsideWorkRecord(core: Pick<BatonCore, 'sql' | 'now'>, repo: string, sha: string | null) {
+  const positions = core.sql<{ ticket: string; station: string; path: string; path_len: number; next_leg: string | null; changed_at: number }>(`
+    SELECT t.local_id AS ticket, s.station, s.path, s.path_len, s.next_leg, s.changed_at
+      FROM ticket_stations s JOIN tickets t ON t.id = s.ticket_id
+      WHERE t.repository_id = ? AND NOT EXISTS (SELECT 1 FROM closed_tickets x WHERE x.ticket_id = t.id)`, repo);
+  const refs = core.sql<{ ticket: string; leg: string; ref: string }>(`
+    SELECT t.local_id AS ticket, l.leg, l.evidence AS ref FROM claim_legs l JOIN claims c ON c.id = l.claim_id JOIN tickets t ON t.id = c.ticket_id
+      WHERE t.repository_id = ? AND l.evidence IS NOT NULL
+    UNION
+    SELECT t.local_id, COALESCE((SELECT leg FROM claim_legs WHERE claim_id = c.id ORDER BY seq DESC LIMIT 1), c.offered_leg), c.ended_at_sha
+      FROM claims c JOIN tickets t ON t.id = c.ticket_id WHERE t.repository_id = ? AND c.ended_at_sha != ''
+    UNION
+    SELECT t.local_id, 'reported-pr', p.value
+      FROM claims c JOIN tickets t ON t.id = c.ticket_id, json_each(c.resume_json, '$.prs') p
+      WHERE t.repository_id = ? AND p.type = 'text'`, repo, repo, repo);
+  const group = (matches: (r: typeof refs[number]) => boolean) => {
+    const result = new Map<string, Set<string>>();
+    for (const r of refs) if (matches(r)) {
+      const have = result.get(r.ticket) ?? new Set();
+      have.add(r.ref);
+      result.set(r.ticket, have);
+    }
+    return Object.fromEntries([...result].map(([ticket, values]) => [ticket, [...values]]));
+  };
+  return {
+    outside_work: true,
+    observed_at: core.now(),
+    head_accepted_at: sha == null ? null : core.sql<{ received_at: number }>('SELECT received_at FROM board_snapshots WHERE repository_id = ? AND sha = ?', repo, sha)[0]?.received_at ?? null,
+    runner_pushers: JSON.parse(core.sql<{ runner_pushers: string | null }>('SELECT runner_pushers FROM repositories WHERE id = ?', repo)[0]?.runner_pushers ?? 'null'),
+    positions: Object.fromEntries(positions.map(({ ticket, path, ...p }) => [ticket, { ...p, path: JSON.parse(path) }])),
+    verdict_refs: group((r) => /#(?:issuecomment|pullrequestreview)-\d+$/.test(r.ref)),
+    claim_prs: group((r) => /\/pull\/\d+$/.test(r.ref) && r.leg !== 'merge'),
+    claim_shas: group((r) => /^[a-f0-9]{40}$/i.test(r.ref)),
+    merge_refs: group((r) => r.leg === 'merge'),
+  };
+}
+
 /** A refresh's stations (§4.3, R-BTN-62): the head's tickets as the refresh materialized them,
  *  where each is replaced. `wrote` is the refresh's own materialization (B-183) — null on a
  *  held history's refresh, which changes no ticket. */
@@ -589,7 +637,7 @@ function refreshStations(core: BoardPostCore, r: string, p: BoardPayload, n: num
   // R-BTN-116: a refresh carries the tickets' questions and the run's attestations like a new
   // head (§4.4) — each is idempotent, so a re-post of the same question or answer moves nothing.
   core.questions.posted(r, (p.tickets ?? []).filter((t) => live.has(t.id)), new Set(stations.keys()));
-  core.questions.attestations(r, p.attestations ?? []);
+  applyBoardAttestations(core, r, held ? (p.attestations ?? []).filter((a) => !isOutsideWork(a)) : p.attestations ?? []);
   core.conditions.missingNext(r, core.stations.missingNext(r), at);
   core.conditions.contractWaits(r, at);
   // A refresh's stations carry `needs` and `decisions` too (R-BTN-76); a refresh that

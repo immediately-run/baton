@@ -68,7 +68,12 @@ var CREATE_PR_COURSE = {
     // B-257: the person's confirmation — no runner is offered it (R-BTN-116); its options are
     // its outcomes, `confirmed` and `filed`.
     confirm: { from: ["delivered"], to: ["confirmed", "filed"], kind: "person", asks: "owner", answer_source: "person", max_runs: 3, label: "A person confirms it was already delivered" },
-    archive: { from: ["confirmed"], to: "archived", requires: { capabilities: ["runner:claim-evidence"] }, label: "Archive the confirmed ticket" }
+    archive: { from: ["confirmed"], to: "archived", requires: { capabilities: ["runner:claim-evidence"] }, label: "Archive the confirmed ticket" },
+    "opened-by-hand": { from: ["filed"], to: "pr-open", arrives: { fact: "pr-opened", next: "run-tests" } },
+    "reviewed-by-hand": { from: ["pr-open", "fixed", "reviewed"], to: "reviewed", max_runs: 3, arrives: { fact: "pr-verdict", next: { approve: "merge", changes: "fix" } } },
+    "fixed-by-hand": { from: ["pr-open", "reviewed", "fixed"], to: "fixed", max_runs: 3, arrives: { fact: "pr-pushed", next: "run-tests" } },
+    "merged-by-hand": { from: ["filed", "pr-open", "fixed", "reviewed", "adjudicated"], to: "merged", arrives: { fact: "pr-merged" } },
+    reconcile: { from: ["filed", "pr-open", "fixed", "reviewed", "adjudicated"], max_runs: 3, reconciles: { to: { "pr-open": "run-tests", fixed: "run-tests", reviewed: "merge", merged: null, delivered: "confirm" } } }
   }
 };
 var CREATE_SPEC_COURSE = {
@@ -91,7 +96,11 @@ var CREATE_SPEC_COURSE = {
     review: { from: ["spec-open"], to: "reviewed", max_runs: 4, label: "Adversarial review round" },
     address: { from: ["reviewed"], to: "spec-open", max_runs: 3, label: "Address the blocking findings with the owner" },
     adjudicate: { from: ["reviewed"], to: "adjudicated", label: "Reproduce the findings left open" },
-    merge: { from: ["reviewed", "adjudicated"], to: "merged", label: "Merge and close the ticket" }
+    merge: { from: ["reviewed", "adjudicated"], to: "merged", label: "Merge and close the ticket" },
+    "opened-by-hand": { from: ["requested"], to: "spec-open", arrives: { fact: "pr-opened", next: "review" } },
+    "pushed-by-hand": { from: ["reviewed"], to: "spec-open", max_runs: 3, arrives: { fact: "pr-pushed", next: "review" } },
+    "merged-by-hand": { from: ["requested", "spec-open", "reviewed", "adjudicated"], to: "merged", arrives: { fact: "pr-merged" } },
+    reconcile: { from: ["requested", "spec-open", "reviewed", "adjudicated"], max_runs: 3, reconciles: { to: { "spec-open": "review", reviewed: "merge", merged: null } } }
   }
 };
 var REVIEW_PR_COURSE = {
@@ -107,7 +116,9 @@ var REVIEW_PR_COURSE = {
   },
   legs: {
     review: { from: ["requested", "changes-requested"], to: ["approved", "changes-requested"], max_runs: 3, label: "Review round" },
-    conclude: { from: ["requested", "changes-requested"], to: "concluded", label: "Summarise and stop" }
+    conclude: { from: ["requested", "changes-requested"], to: "concluded", label: "Summarise and stop" },
+    "approved-by-hand": { from: ["requested", "changes-requested"], to: "approved", arrives: { fact: "pr-verdict", verdict: "approve" } },
+    reconcile: { from: ["requested", "changes-requested"], max_runs: 3, reconciles: { to: { "changes-requested": "review", approved: null, concluded: null } } }
   }
 };
 var VERDICT = /^<!--\s*baton:verdict\s+(approve|changes)\s*-->/;
@@ -473,7 +484,10 @@ function stationsReviewPr(ctx) {
       continue;
     }
     if (fact.state !== "open" || path.length >= rounds) {
-      stations[t.id] = at(station, path, [{ leg: "conclude", state: "ready", waiting_on: null }]);
+      stations[t.id] = at(station, path, [
+        { leg: "conclude", state: "ready", waiting_on: null },
+        ...ctx.graph?.legs?.reconcile ? [{ leg: "review", state: "waiting", waiting_on: "exhausted" }] : []
+      ]);
       continue;
     }
     const pushes = fact.pushes?.length ? fact.pushes : [fact.pushedAt];
@@ -765,7 +779,8 @@ var ticketStations = (waits) => (ctx) => stationsTickets({ tickets: ctx.tickets,
 var VERDICT2 = { name: "verdict", values: ["approve", "changes"] };
 var CREATE_PR = {
   id: "create-pr",
-  version: 4,
+  // 5: B-311's reconcile leg (min_runner_version 3).
+  version: 5,
   summary: "implement a ticket in a PR, gate every review round behind its tests, review it in up to three blind rounds, fix, hand the third round's blockers to the owner, merge",
   course: CREATE_PR_COURSE,
   reads: "prs",
@@ -802,7 +817,8 @@ var CREATE_PR = {
     adjudicate: { ask: { name: "adjudication", values: ["merge", "owner"] }, position: "{ ...(answer === 'owner' ? { suspend: true } : {}), reached: 'adjudicated', next: 'merge', adjudication: answer }" },
     // R-BTN-131: the stub reads the forge before it reports `merged`.
     merge: { position: "{ reached: 'merged', next: null }", verify: "merged" },
-    archive: { position: "{ reached: 'archived', next: null }", archive: true }
+    archive: { position: "{ reached: 'archived', next: null }", archive: true },
+    reconcile: { position: "null" }
   },
   skill: "baton-create-pr"
 };
@@ -810,6 +826,7 @@ var BUILT_INS = [
   CREATE_PR,
   {
     id: "review-pr",
+    version: 2,
     summary: "review a PR someone else opened, in rounds, and conclude with a summary",
     course: REVIEW_PR_COURSE,
     reads: "prs",
@@ -817,6 +834,7 @@ var BUILT_INS = [
     legs: {
       // Changes: the next round waits on the author's push, so the claim suspends.
       review: { ask: VERDICT2, position: "{ ...(answer === 'approve' ? {} : { suspend: true }), reached: answer === 'approve' ? 'approved' : 'changes-requested', next: answer === 'approve' ? null : 'review', verdict: answer }" },
+      reconcile: { position: "null" },
       conclude: { position: "{ reached: 'concluded', next: null }" }
     },
     skill: "baton-review-pr"
@@ -885,6 +903,7 @@ var BUILT_INS = [
   },
   {
     id: "create-spec",
+    version: 2,
     summary: "design a specification in conversation with the owner, review it adversarially, address blocking findings in conversation, merge",
     course: CREATE_SPEC_COURSE,
     reads: "prs",
@@ -902,7 +921,8 @@ var BUILT_INS = [
       // `merge`: no open blocking finding reproduced; `owner`: one did, and the owner decides —
       // the claim suspends until they do.
       adjudicate: { ask: { name: "adjudication", values: ["merge", "owner"] }, position: "{ ...(answer === 'owner' ? { suspend: true } : {}), reached: 'adjudicated', next: 'merge', adjudication: answer }" },
-      merge: { position: "{ reached: 'merged', next: null }" }
+      merge: { position: "{ reached: 'merged', next: null }" },
+      reconcile: { position: "null" }
     },
     skill: "baton-create-spec"
   },

@@ -175,7 +175,7 @@ describe('S-BTN-175 the request', () => {
 
     // A runner's claim offers `converse`: the course starts, from one sentence.
     await cutover();
-    const w1 = await register('vm-a', { courses: [{ repository: 'docs', course: 'create-spec', version: 1 }] });
+    const w1 = await register('vm-a', { courses: [{ repository: 'docs', course: 'create-spec', version: 2 }] });
     const { status, json } = await claimItem('vm-a', w1.secret);
     expect(status).toBe(200);
     expect(json).toMatchObject({ ticket_id: 'docs:B-1', station: 'requested', legs: ['converse'] });
@@ -228,7 +228,7 @@ describe('S-BTN-175 the request', () => {
 
     // And the claim offers `converse` all the same.
     await cutover();
-    const w1 = await register('vm-a', { courses: [{ repository: 'docs', course: 'create-spec', version: 1 }] });
+    const w1 = await register('vm-a', { courses: [{ repository: 'docs', course: 'create-spec', version: 2 }] });
     const { status, json } = await claimItem('vm-a', w1.secret);
     expect(status).toBe(200);
     expect(json).toMatchObject({ ticket_id: 'docs:B-1', station: 'requested', legs: ['converse'] });

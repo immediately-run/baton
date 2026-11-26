@@ -63,6 +63,55 @@
       ],
       "to": "merged",
       "label": "Merge and close the ticket"
+    },
+    "opened-by-hand": {
+      "from": [
+        "requested"
+      ],
+      "to": "spec-open",
+      "arrives": {
+        "fact": "pr-opened",
+        "next": "review"
+      }
+    },
+    "pushed-by-hand": {
+      "from": [
+        "reviewed"
+      ],
+      "to": "spec-open",
+      "max_runs": 3,
+      "arrives": {
+        "fact": "pr-pushed",
+        "next": "review"
+      }
+    },
+    "merged-by-hand": {
+      "from": [
+        "requested",
+        "spec-open",
+        "reviewed",
+        "adjudicated"
+      ],
+      "to": "merged",
+      "arrives": {
+        "fact": "pr-merged"
+      }
+    },
+    "reconcile": {
+      "from": [
+        "requested",
+        "spec-open",
+        "reviewed",
+        "adjudicated"
+      ],
+      "max_runs": 3,
+      "reconciles": {
+        "to": {
+          "spec-open": "review",
+          "reviewed": "merge",
+          "merged": null
+        }
+      }
     }
   }
 }
