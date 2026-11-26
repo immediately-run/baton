@@ -43,6 +43,12 @@ and §14's table equal.
 Design: [sign-in, sessions and confirmed actions](people-and-dashboard.md#3-sign-in-sessions-and-confirmed-actions)
 (B-206).
 
+BATON_SPEC R-BTN-155, R-BTN-185, R-BTN-204 and §13.2 govern where they and this section differ:
+sessions of three roles (members too), one per tab under one rotating cookie
+(`dashboard_cookies`), repositories read on every request rather than stored, sign-in codes
+with no role (the binding key's role is the session's), a session's attestation carrying writer
+classes `human` and its role, and the confirmed acts R-BTN-155 names.
+
 - `dashboard_sessions` gains `role` (`administrator`\|`owner`) and `repositories` JSON (an
   owner's: those its key owned at binding).
 - Callers: *admin session*, a session whose role is administrator; *owner session*, one whose
@@ -124,7 +130,7 @@ Runners drain the outbox through the two routes below, never through a claim.
 
 | Route | Caller | Body or query | Response | Rules |
 |---|---|---|---|---|
-| `POST /v1/runner/outbox/claim` | machine, SSH-signed, on a grant whose role the repository policy's `outbox` admits | `{limit?}` (≤ 50) | `{entries: [{repository, id, kind, ticket, fields}]}` of the classes it declared, each leased 10 minutes; a ticket's entries of one class together, in `id` order | R-BTN-171, R-BTN-115 |
+| `POST /v1/runner/outbox/claim` | machine, SSH-signed, on an accepted grant (a source entry only where the policy's `outbox.source` admits `runner`) | `{limit?}` (≤ 50) | `{entries: [{repository, id, kind, ticket, fields}]}` of the classes it declared, each leased 10 minutes; a ticket's entries of one class together, in `id` order | R-BTN-171, R-BTN-115 |
 | `POST /v1/runner/outbox/{repository}/{id}` | the entry's claimer | `{state: "delivered", ref}` (recorded as its `std:effect@1` attestation, R-BTN-191) or `{state: "failed", reason: "transient" \| "refused"}` | `{ok: true}`; `forbidden` for another runner's entry | R-BTN-171 |
 
 ## Checks
@@ -188,7 +194,6 @@ Design: BATON_SPEC §12.8's unbuilt parts (B-136, B-146, B-147).
 |---|---|---|---|---|
 | `POST /v1/repositories/{repository}/attestations` | also an owner session (writer `owner`) or a `service` key | as §14 | `{id}` | R-BTN-181 |
 | `DELETE /v1/repositories/{repository}/attestations/{id}` | its writer; for a `human` type, a `human_only` key | `{confirm: true}` | `{ok: true}` | R-BTN-181, R-BTN-185 |
-| `PUT /v1/owner/{repository}/grants/{fingerprint}/role` | an approver on `approvers.roles` | `{role: "runner" \| "trusted-runner", domain?, checker?}` | `{ok: true}`; `invalid-params` for `trusted-runner` on an API key, or a `checker` mark R-BTN-180 refuses | R-BTN-180, R-BTN-188 |
 | `GET /v1/repositories/{repository}/fact-legs` | a trusted runner whose `service:` key the policy names for `std:arrival@1` (the fact reader) | — | `{tickets: [{ticket, station, path_len, leg, fact, waiting_since}]}` | R-BTN-192 |
 
 ## The doorbell
@@ -205,7 +210,7 @@ Design: R-BTN-146 (proposed). The heartbeat response carries `pending_grants[]`.
 
 | Route | Caller | Body or query | Response | Rules |
 |---|---|---|---|---|
-| `POST /v1/runner/grants/{repository}/accept`, `…/decline` | machine alone | accept: `{confirm_span?}` | `{ok, span}`; an acceptance that raises the span without `confirm_span` is `conflict` listing the repositories that would lose sync | R-BTN-146 |
+| `POST /v1/runner/grants/{repository}/accept`, `…/decline` | machine alone | — | `{ok}` | R-BTN-146 |
 | `PUT /v1/owner/{repository}/grants/{fingerprint}/flags` | owner | `{sync}` | `{ok: true}` | R-BTN-146, R-BTN-186 |
 
 ## Code-repository consents

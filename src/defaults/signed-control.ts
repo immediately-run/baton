@@ -38,12 +38,12 @@ export interface SigningKey {
  *  not carry refuses the claim as a missing script, so no pushed code runs either way. */
 export const CONTROL_GROUPS = {
   agent_command: [':(glob).baton/baton.json'],
-  overrides: [':(glob).baton/courses/**/*.run.mjs'],
+  overrides: [':(glob).baton/courses/**/*.run.*'],
   rank: [':(glob).baton/courses/**/rank.mjs'],
   // Round 2: git parses ONE magic prefix, so the exclude spells its glob inside the prefix —
   // `:(exclude):(glob)…` read the second prefix literally and matched no path, leaving
   // `.run.mjs` overrides course-group paths too (round 2, verified on git 2.47.3).
-  course: [':(glob).baton/courses/**/legs/**/*.mjs', ':(glob).baton/courses/**/legs/**/*.md', ':(exclude,glob).baton/courses/**/*.run.mjs'],
+  course: [':(glob).baton/courses/**/legs/**/*.mjs', ':(glob).baton/courses/**/legs/**/*.md', ':(exclude,glob).baton/courses/**/*.run.*'],
 } as const;
 export type ControlGroup = keyof typeof CONTROL_GROUPS;
 /** Every group's name, the post's protocol constant (board.ts validates the same list core-side;
@@ -54,8 +54,7 @@ export const CONTROL_GROUP_NAMES = Object.keys(CONTROL_GROUPS) as ControlGroup[]
  *  and everything a privileged interactive session loads or executes (security model reach 1;
  *  OWASP ASI05). The ticket frontmatter field `EXPEDITE` is watched as a field, not a path. A
  *  broader list — workflows, dependency manifests, more frontmatter — is B-126's detection
- *  watch; this is the gate's, deliberately narrower (a ticket's `tier` routes no new credentials
- *  and is not one, the owner 2026-10-27). */
+ *  watch; this is the gate's deliberately narrower list. */
 export const SIGNED_CONTROL_PATTERNS = [
   '.baton/**',
   '**/goals/**',

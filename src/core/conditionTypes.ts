@@ -8,12 +8,47 @@
 // disposition's full life (bindings, waits, restarts — R-BTN-161, R-BTN-162) is not built here:
 // this table only names types.
 
+import { isFreeText } from './text';
+
 /** R-BTN-160: a condition type — dotted segments, each `^[a-z][a-z0-9-]*$`, at most 64 chars. */
 export const CONDITION_TYPE = /^[a-z][a-z0-9-]*(\.[a-z][a-z0-9-]*)*$/;
 export const CONDITION_TYPE_MAX = 64;
 
 /** §12.3: a restart id (a decision id) — `baton.` reserved to core. */
 export const RESTART_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/;
+export const RESTARTS_MAX = 8;
+
+/** Shape shared by the channel and HTTP boundary; an empty map offers no restarts. */
+export function restartFault(value: unknown): string | null {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return 'restarts must map ids to descriptions';
+  const entries = Object.entries(value);
+  if (entries.length > RESTARTS_MAX) return `restarts must have at most ${RESTARTS_MAX} entries`;
+  for (const [id, description] of entries) {
+    if (!RESTART_ID.test(id) || id.startsWith('baton.')) return `restarts.${id}: invalid restart id (§12.3)`;
+    if (!isFreeText(description)) return `restarts.${id}: a description is §10.4 free text`;
+  }
+  return null;
+}
+
+export function raiseRestarts(type: string, declared: Map<string, ConditionDeclaration>, offered: unknown, chosen: unknown):
+  { ok: true; restarts: Record<string, string>; defaultRestart?: string } | { ok: false; reason: string } {
+  const lineage = [type, ...ancestorsOf(type)];
+  const declaration = lineage.map((t) => declared.get(t)).find((d) => d?.restarts != null);
+  const allowed = declaration?.restarts ?? {};
+  const restarts = offered ?? allowed;
+  const reason = restartFault(restarts);
+  if (reason != null) return { ok: false, reason };
+  const options = restarts as Record<string, string>;
+  const free = declaration?.restarts == null && lineage.some((t) => STANDARD_CONDITION_TYPES.has(t));
+  if (!free && Object.entries(options).some(([id, description]) => !Object.hasOwn(allowed, id) || allowed[id] !== description)) {
+    return { ok: false, reason: 'restarts must be a subset of the declared restarts (R-BTN-160)' };
+  }
+  const defaultRestart = chosen ?? (declaration?.default && Object.hasOwn(options, declaration.default) ? declaration.default : undefined);
+  if (defaultRestart != null && (typeof defaultRestart !== 'string' || !Object.hasOwn(options, defaultRestart))) {
+    return { ok: false, reason: 'default must name one of the offered restarts (R-BTN-160)' };
+  }
+  return { ok: true, restarts: options, defaultRestart };
+}
 
 /** R-BTN-160: what follows from a raise. */
 export type Disposition = 'interrupt' | 'suspend' | 'notify';
@@ -41,6 +76,7 @@ export interface StandardType {
  *  (a bare `error` and `error.transient` are `transient`); a subtype takes the nearest declared
  *  or standard ancestor's class. */
 export function errorClassOf(type: string, declared: Map<string, ConditionDeclaration>): 'transient' | 'capability' | 'spec' | 'contract-input' | 'contract-output' {
+  if (type === 'error' || type === 'error.transient') return 'transient';
   if (type === 'error.capability') return 'capability';
   if (type === 'error.contract-input') return 'contract-input';
   if (type === 'error.contract-output') return 'contract-output';
@@ -50,9 +86,7 @@ export function errorClassOf(type: string, declared: Map<string, ConditionDeclar
   const std = STANDARD_CONDITION_TYPES.get(type);
   if (std != null) return std.retryable === false ? 'spec' : 'transient';
   for (const prefix of ancestorsOf(type)) {
-    const inherited = declared.get(prefix);
-    if (inherited != null) return inherited.retryable === true ? 'transient' : 'spec';
-    if (STANDARD_CONDITION_TYPES.has(prefix)) return errorClassOf(prefix, declared);
+    if (declared.has(prefix) || STANDARD_CONDITION_TYPES.has(prefix)) return errorClassOf(prefix, declared);
   }
   return 'spec';
 }
@@ -95,10 +129,13 @@ export function declaredConditions(json: unknown): Map<string, ConditionDeclarat
   if (typeof json !== 'object' || json === null || Array.isArray(json)) return out;
   const raw = (json as { conditions?: unknown }).conditions;
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return out;
-  for (const [type, def] of Object.entries(raw as Record<string, unknown>)) {
+  // Parents precede children regardless of the order of declarations in the file.
+  for (const [type, def] of Object.entries(raw).sort(([a], [b]) => a.length - b.length)) {
+    if (!CONDITION_TYPE.test(type) || type.length > CONDITION_TYPE_MAX || isCoreOnly(type)) continue;
     if (typeof def !== 'object' || def === null || Array.isArray(def)) continue;
     const d = def as Record<string, unknown>;
-    const disposition = d.disposition === 'interrupt' || d.disposition === 'suspend' || d.disposition === 'notify' ? d.disposition : null;
+    const disposition = d.disposition === 'interrupt' || d.disposition === 'suspend' || d.disposition === 'notify' ? d.disposition
+      : !Object.hasOwn(d, 'disposition') ? ancestorsOf(type).map((prefix) => out.get(prefix) ?? STANDARD_CONDITION_TYPES.get(prefix)).find((parent) => parent != null)?.disposition : null;
     if (disposition == null) continue;
     const decl: ConditionDeclaration = { disposition };
     if (typeof d.wait_s === 'number') decl.waitS = d.wait_s;

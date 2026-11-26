@@ -11,9 +11,9 @@ find out which before anything else:
   finding to answer.
 - **A PR's CI is red in another repository.** A PR in a repository the ticket's `repos:` names
   is gated by its own CI, not by the marker: a check on its head concluded red (failed,
-  cancelled, timed out). Read which and why (`gh pr checks <the PR URL>`, then the failing run's
-  log), then follow *A red gate* below in that PR's repository. There is no marker and no review
-  finding.
+   cancelled, timed out). Read the checks on the current head and the failing run's log in the
+   registered forge's web UI or with its own client. Then follow *A red gate* below in that PR’s
+   repository. There is no marker and no review finding.
 - **The last review round asked for changes** on the ticket's PRs: one per repository its
   `repos:` names, besides this one, and the review may have posted its findings on any of them.
   When you finish, every finding of that round is closed: fixed in a pushed commit, or answered

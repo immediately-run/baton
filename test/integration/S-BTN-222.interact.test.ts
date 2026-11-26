@@ -16,7 +16,7 @@
 // unjoined one's `leg-timeout` — is S-BTN-222.runner-half.test.ts.
 import { describe, it, expect, beforeEach } from 'vitest';
 import roadmapPr from '../fixtures/courses/roadmap-pr/course.json';
-import { advance, claimItem, course, cutover, endClaim, Git, keyCall, ORIGIN, placed, register, rows, setAdminKeys, setClock, tick, withCore, runnerCall } from '../helpers';
+import { advance, claimItem, course, cutover, endClaim, Git, keyCall, ORIGIN, placed, register, rows, seedCoreConditionIn, setAdminKeys, setClock, tick, withCore, runnerCall } from '../helpers';
 import { beat } from '../helpers';
 import { makeKey, signedRequest, type TestKey } from '../lib/sshKeys';
 import { call as hostCall } from '#host';
@@ -142,6 +142,10 @@ describe('S-BTN-222: an interaction request (R-BTN-195)', () => {
     // The runner-check refusals the core holds too: baton is core's alone; an unknown type is
     // neither standard nor declared.
     expect((await raise1('vm-a', w.secret, c.claim_id, { type: 'baton.retries', disposition: 'notify' })).json.code).toBe('invalid-params');
+    expect((await raise1('vm-a', w.secret, c.claim_id, { type: 'baton', disposition: 'notify' })).json.code).toBe('invalid-params');
+    for (const forbidden of [{ subject: 'not a filter field' }, { body: 'not a filter field' }, { extra: true }]) {
+      expect((await raise1('vm-a', w.secret, c.claim_id, { type: 'warning', disposition: 'notify', ...forbidden })).json.code).toBe('invalid-params');
+    }
     expect((await raise1('vm-a', w.secret, c.claim_id, { type: 'unheard-of', disposition: 'notify' })).json.code).toBe('invalid-params');
     // The heartbeat carried a good link meanwhile: hitl records open (unbound: the debugger's,
     // R-BTN-163), an unbound notify only records, and a suspend's url is kept only under
@@ -299,6 +303,55 @@ describe('S-BTN-222: an interaction request (R-BTN-195)', () => {
     expect(past.json.code).toBe('quota');
     // Needs you orders by severity, then age (R-BTN-163): the critical ask first.
     expect((await needsYou()).map((x) => x.severity)).toEqual(['critical', ...Array<string>(19).fill('normal')]);
+  });
+
+  it('S-BTN-131: one open core condition per repository, type, ticket and ref, even without a ticket', async () => {
+    await withCore((core) => {
+      const insert = (ticket: string | null, ref: string, outcome = 'open') => seedCoreConditionIn(core.store,
+        { repository_id: 'docs', ticket_id: ticket, ref, type: 'baton.stalled', disposition: 'notify', raised_at: T0, outcome });
+      for (const ticket of ['docs:A', null]) {
+        insert(ticket, 'x');
+        expect(() => insert(ticket, 'x')).toThrow(/UNIQUE/i);
+        insert(ticket, 'y');
+        insert(ticket, 'x', 'closed');
+      }
+    });
+  });
+
+  it('S-BTN-222: keeps the claim index for condition quotas and retention', async () => {
+    expect(await rows("SELECT name FROM pragma_index_info('conditions_by_claim')")).toEqual([{ name: 'claim_id' }]);
+  });
+
+  it('G-BTN-146: records an unbound warning, its activity and history on the same run, without private text', async () => {
+    const w = await register('vm-a');
+    const { json: c } = await claimItem('vm-a', w.secret, { ticket_id: 'docs:A' });
+    const { json: a } = await advance('vm-a', w.secret, c.claim_id, { leg: 'implement' });
+    const rejected = await raise1('vm-a', w.secret, c.claim_id, { type: 'warning', body: 'private' });
+    expect(rejected.json.code).toBe('invalid-params');
+    const accepted = await raise1('vm-a', w.secret, c.claim_id, { type: 'warning' });
+    expect(accepted.status).toBe(200);
+    expect(await conditionRows()).toEqual([expect.objectContaining({ id: accepted.json.condition_id, run_id: a.run_id, outcome: 'recorded' })]);
+    expect(await rows(`SELECT kind, source, run_id, outcome, detail_json FROM activities WHERE claim_id = ?`, c.claim_id)).toEqual([
+      { kind: 'condition', source: 'baton', run_id: a.run_id, outcome: 'succeeded', detail_json: JSON.stringify({ condition_id: accepted.json.condition_id, type: 'warning', disposition: 'notify' }) },
+    ]);
+    expect(await rows(`SELECT kind, run_id FROM ticket_history WHERE ticket_id = 'docs:A' AND kind = 'condition'`)).toEqual([{ kind: 'condition', run_id: a.run_id }]);
+  });
+
+  it('counts closed raises against the daily ticket quota and pages the list', async () => {
+    const w = await register('vm-a');
+    const { json: c } = await claimItem('vm-a', w.secret, { ticket_id: 'docs:A' });
+    expect((await advance('vm-a', w.secret, c.claim_id, { leg: 'implement' })).status).toBe(200);
+    for (let i = 0; i < 200; i++) {
+      expect((await raise1('vm-a', w.secret, c.claim_id, { type: 'warning.quota', disposition: 'notify', restarts: {} })).status).toBe(200);
+    }
+    expect((await raise1('vm-a', w.secret, c.claim_id, { type: 'warning', disposition: 'notify' })).json.code).toBe('quota');
+    const path = '/v1/repositories/docs/conditions?type=warning&ticket=docs%3AA';
+    const first = await readAs(reader, path);
+    expect(first.json.conditions).toHaveLength(100);
+    expect(first.json.cursor).toBeTruthy();
+    const second = await readAs(reader, `${path}&cursor=${first.json.cursor}`);
+    expect(second.json.conditions).toHaveLength(100);
+    expect(second.json.conditions[0].condition_id).not.toBe(first.json.conditions[0].condition_id);
   });
 
   it('a course file with autonomous beside a conditions list naming hitl.x is refused naming the leg', async () => {

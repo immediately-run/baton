@@ -59,14 +59,17 @@ await build({
 });
 // The runner spawns its leg process by path (src/runner/claimRun.ts LEG_PROCESS), beside the bundle.
 copyFileSync(join(ROOT, 'src/runner/legProcess.mjs'), join(OUT, 'legProcess.mjs'));
+copyFileSync(join(ROOT, 'src/runner/legClient.mjs'), join(OUT, 'legClient.mjs'));
+copyFileSync(join(ROOT, 'src/runner/legClient.d.mts'), join(OUT, 'legClient.d.mts'));
 
 // What `baton repo init` writes, prebuilt (a package has no src/ and no esbuild), and the commit
 // it was built from, which the package names as its courses' source and its workflow's pin
-// (src/defaults/cli.ts cliPin). A modified tree is recorded as such, and that package pins nothing.
+// (src/defaults/repo-source.ts cliPin). A modified tree is recorded as such, and that package pins nothing.
 const git = (...args) => gitText(ROOT, ...args);
 const { prebuildDefaults, remoteSlug } = (await import('./baton-cli.mjs')).default;
 const repository = process.env.GITHUB_REPOSITORY ?? remoteSlug(ROOT);
 if (!repository) throw new Error('build-cli: no origin remote names the repository the package is built from');
 const dirty = git('status', '--porcelain', '--untracked-files=no') !== '';
 const files = await prebuildDefaults(OUT, { repository, commit: git('rev-parse', 'HEAD'), ...(dirty ? { dirty: true } : {}) });
-process.stderr.write(`build-cli: dist/baton.mjs and ${files} prebuilt defaults, ${repository}@${git('rev-parse', '--short', 'HEAD')}${dirty ? ' (modified tree)' : ''}\n`);
+const manifest = JSON.parse(readFileSync(join(OUT, 'build.json'), 'utf8'));
+process.stderr.write(`build-cli: dist/baton.mjs and ${files} prebuilt defaults, ${repository}@${manifest.commit.slice(0, 10)}${manifest.dirty ? ' (modified tree)' : ''}\n`);

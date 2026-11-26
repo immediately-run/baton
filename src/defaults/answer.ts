@@ -18,6 +18,8 @@
 //
 // The stub carries this module, bundled, like `agent-words.ts`: edit it here, never in a checkout.
 
+import { PR_URL } from '../core/forges';
+
 /** One answer read from an agent's output: the value word it gave, and the PR its line names. */
 export interface ReadAnswer {
   /** The value word, one of `values` as given. */
@@ -27,9 +29,6 @@ export interface ReadAnswer {
   /** The line the answer was read from, trimmed — what is reported when the line is malformed. */
   line: string;
 }
-
-/** A PR URL, as `pr-close.ts` writes and reads it (B-29). */
-const PR_URL = /^https?:\/\/[^\s/]+\/[^\s/]+\/[^\s/]+\/pull\/\d+$/;
 
 /** Markdown and quote marks an agent may wrap a lone value word in — `` `changes` ``,
  *  `**approve**`, `"changes"`: a balanced pair, stripped before the whole-word check. Found

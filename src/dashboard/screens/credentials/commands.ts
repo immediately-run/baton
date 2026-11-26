@@ -5,6 +5,8 @@
 // own, and `argv` is one worked instance of the line the test hands to the CLI's parser.
 // `-i <key>` (the signing key) is left off every line: each screen's note says whose key signs.
 
+import { DEFAULT_FORGE } from '../../../core/forges';
+
 export interface Command {
   /** The line as the screen draws it. */
   line: string;
@@ -19,7 +21,7 @@ const KEY = 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExample';
 
 export const COMMANDS = {
   // ── credentials (an owner's key) ──
-  grantAdd: { line: 'baton owner grant <repository> --key <public key> --capabilities <a,b> [--hostname <name>] [--label <label>] [--max-tier <tier>] [--max-claims <n>]', role: 'owner', argv: ['grant', 'docs', '--key', KEY, '--capabilities', 'a,b', '--hostname', 'box', '--label', 'l', '--max-tier', 'routine', '--max-claims', '2'] },
+  grantAdd: { line: 'baton owner grant <repository> --key <public key> --capabilities <a,b> [--hostname <name>] [--label <label>] [--max-claims <n>]', role: 'owner', argv: ['grant', 'docs', '--key', KEY, '--capabilities', 'a,b', '--hostname', 'box', '--label', 'l', '--max-claims', '2'] },
   grantRevoke: { line: 'baton owner revoke <repository> <fingerprint>', role: 'owner', argv: ['revoke', 'docs', 'SHA256:abc'] },
   ownerAdd: { line: 'baton owner owners <repository> --add <public key>', role: 'owner', argv: ['owners', 'docs', '--add', KEY] },
   ownerRemove: { line: 'baton owner owners <repository> --remove <fingerprint>', role: 'owner', argv: ['owners', 'docs', '--remove', 'SHA256:abc'] },
@@ -33,14 +35,14 @@ export const COMMANDS = {
   policyApply: { line: 'baton owner policy apply <repository> <preset> --base <version>', role: 'owner', argv: null },
   policyFloorAdd: { line: 'baton owner policy floor add <repository> <name> --guarantees <a,b>', role: 'owner', argv: null },
   settingsSet: { line: 'baton owner settings <repository> [--retry <a,b> --max-failed <n>] [--transcript-repos <a,b>] [--code-repos <a,b>] [--pushers <id,…>] [--remind-after <duration>] [--require-signed-control]', role: 'owner', argv: ['settings', 'docs', '--retry', '1m,5m', '--max-failed', '3', '--transcript-repos', 'a/b', '--code-repos', 'example-org/app', '--pushers', '12345', '--remind-after', '1h', '--require-signed-control'] },
-  registrySet: { line: 'baton admin repo set <repository> [--weight <n>] [--tiers <a,b>]', role: 'admin', argv: ['repo', 'set', 'docs', '--weight', '2', '--tiers', 'a,b'] },
+  registrySet: { line: 'baton admin repo set <repository> [--weight <n>]', role: 'admin', argv: ['repo', 'set', 'docs', '--weight', '2'] },
   barAdd: { line: 'baton owner bar <repository> --course <course> --tag <tag> --applies <claim|claim+advance> --reason <reason> [--legs <a,b>] [--starts-at <time>] [--ends-at <time>] [--release-holders]', role: 'owner', argv: ['bar', 'docs', '--course', 'c', '--tag', 't', '--applies', 'claim', '--reason', 'r', '--legs', 'a,b', '--starts-at', '2026-01-01T00:00:00Z', '--ends-at', '2026-01-02T00:00:00Z', '--release-holders'] },
   barLift: { line: 'baton owner bar lift <repository> <id>', role: 'owner', argv: ['bar', 'lift', 'docs', '7'] },
   requiredBarsSet: { line: 'baton owner settings <repository> --required-bar <leg> --course <course> --tag-prefix <prefix> [--except <a,b>]', role: 'owner', argv: ['settings', 'docs', '--required-bar', '*', '--course', 'c', '--tag-prefix', 'family:', '--except', 'a,b'] },
   requiredBarsClear: { line: 'baton owner settings <repository> --no-required-bars', role: 'owner', argv: ['settings', 'docs', '--no-required-bars'] },
   // ── tenant (an administrator's key) ──
-  repoAdd: { line: 'baton admin repo add <forge path> --owner-key <public key> [--id <id>] [--forge <forge>] [--default-branch <branch>] [--tiers <a,b>] [--weight <n>]', role: 'admin', argv: ['repo', 'add', 'org/name', '--owner-key', KEY, '--id', 'name', '--forge', 'github', '--default-branch', 'main', '--tiers', 'a,b', '--weight', '1'] },
-  repoSet: { line: 'baton admin repo set <repository> [--weight <n>] [--tiers <a,b>] [--web-base <url>] [--add-owner-key <public key>]', role: 'admin', argv: ['repo', 'set', 'docs', '--weight', '1', '--tiers', 'a,b', '--web-base', 'https://example.org/o/n', '--add-owner-key', KEY] },
+  repoAdd: { line: 'baton admin repo add <forge path> --owner-key <public key> [--id <id>] [--forge <forge>] [--default-branch <branch>] [--weight <n>]', role: 'admin', argv: ['repo', 'add', 'org/name', '--owner-key', KEY, '--id', 'name', '--forge', DEFAULT_FORGE, '--default-branch', 'main', '--weight', '1'] },
+  repoSet: { line: 'baton admin repo set <repository> [--weight <n>] [--web-base <url>] [--add-owner-key <public key>]', role: 'admin', argv: ['repo', 'set', 'docs', '--weight', '1', '--web-base', 'https://example.org/o/n', '--add-owner-key', KEY] },
   repoRetire: { line: 'baton admin repo retire <repository>', role: 'admin', argv: ['repo', 'retire', 'docs'] },
   readingSet: { line: 'baton admin resource set <instance> --available | --unavailable [--until <time>] [--valid-for <duration>] [--detail <json>]', role: 'admin', argv: ['resource', 'set', 'acct:one', '--unavailable', '--until', '2026-01-01T00:00:00Z', '--valid-for', '1h', '--detail', '{"used":1}'] },
   resourceAdd: { line: 'baton admin resource add <name> --scope <account|service> --schema <json>', role: 'admin', argv: ['resource', 'add', 'llm:cap', '--scope', 'account', '--schema', '{"type":"object"}'] },

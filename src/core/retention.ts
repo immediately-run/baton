@@ -8,6 +8,7 @@
 //      rows that hang off them — a claim an event, a condition or a scope finding still names
 //      waits for it, so its events go first (step 1).
 // Every step finds its rows through an index (0053).
+import { HAS_MIRROR } from './syncWants';
 import { HELD_CLAIMS_SQL } from './blocks';
 import { groupBy } from './db';
 import { eventPage, type EventRow } from './mirror';
@@ -75,8 +76,7 @@ export class Retention {
   private mirrorBound(): number | null {
     return this.rows<{ b: number | null }>(
       `SELECT MIN(r.mirror_acked_seq) AS b FROM repositories r WHERE r.retired_at IS NULL
-         AND (r.mirror_workflow IS NOT NULL
-              OR EXISTS (SELECT 1 FROM sync_keys k WHERE k.repository_id = r.id AND k.role = 'mirror' AND k.revoked_at IS NULL))`)[0]?.b ?? null;
+         AND ${HAS_MIRROR}`)[0]?.b ?? null;
   }
 
   private eventBound(): number {

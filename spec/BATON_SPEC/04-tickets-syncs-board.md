@@ -12,7 +12,7 @@ numbers.
 
 ### 4.1 The `.baton/` folder and the registry
 
-- **R-BTN-51 (the `.baton/` folder).** A registered repository describes itself in one folder
+- **R-BTN-51 (the `.baton/` folder).** `status: built` A registered repository describes itself in one folder
   at its root:
 
   ```
@@ -47,7 +47,7 @@ numbers.
     course's author drops it.
   - `protocol_files`: the paths whose change bumps `version` (R-BTN-22).
 
-- **R-BTN-48 (a ticket names its course; Baton does not know what the course does).** Each
+- **R-BTN-48 (a ticket names its course; Baton does not know what the course does).** `status: built` Each
   repository's sync posts a **registry** from `.baton/baton.json`: per course, the fields of
   R-BTN-51 and its course file (§4.4). Each ticket names its course. Course logic runs outside
   Baton, in the sync's station function (R-BTN-39, R-BTN-74); Baton validates every station and
@@ -57,7 +57,7 @@ numbers.
 
 ### 4.2 What a sync runs
 
-- **R-BTN-74 (the ticket source and the station function, with defaults).** `baton repo sync`
+- **R-BTN-74 (the ticket source and the station function, with defaults).** `status: built B-112` `baton repo sync`
   builds the board post from two pieces of repository code. `course.json` is always the
   commit's own (or its source's): the sync posts and `baton runner start` loads the same file.
   - **The ticket source**, `.baton/tickets.mjs`, reads one ticket store — a git folder, an
@@ -206,7 +206,7 @@ numbers.
     `confirmed` a notice; `held`, `busy` or `busy:again` a warning that nothing was posted;
     anything else, or no line, an error.
 
-- **R-BTN-203 (work done outside Baton).** Baton works in an open world: where only part of an
+- **R-BTN-203 (work done outside Baton).** `status: specified B-311` Baton works in an open world: where only part of an
   organization uses it, any of a ticket's legs may be done by people and sessions that never
   claim it, and Baton cannot prevent it — it gates only its own state (R-BTN-35). Its job is to
   detect such moves and place the ticket accordingly; a deployment that needs a course followed
@@ -301,7 +301,7 @@ numbers.
   rows that changed (R-BTN-70), so a post costs rows in proportion to what moved (R-BTN-2). The
   protocol is the CLI's; the repository supplies only its ticket source and station functions.
 
-- **R-BTN-62 / R-BTN-150 (observations are ordered by Baton).**
+- **R-BTN-62 / R-BTN-150 (observations are ordered by Baton).** `status: built` `status: built`
   - Each `POST /v1/sync/observation` hands out the next number of a per-repository counter;
     the post carries it back. A post is accepted or refused **whole**, and refused
     `stale-observation` unless its number is the outstanding one and greater than the last
@@ -325,7 +325,7 @@ from the fingerprint; mutable ticket versions and submitted placements are inclu
 number validation, relevant claim reconciliation and spawned-child settlement still run.
 The fingerprint stores no ticket content and is an optimization, never authority to accept a post.
 
-- **R-BTN-11 (snapshots advance by compare-and-set on ancestry).** Per repository, Baton accepts
+- **R-BTN-11 (snapshots advance by compare-and-set on ancestry).** `status: built` Per repository, Baton accepts
   a snapshot only when `parent_sha` equals its head (a refresh: both equal the head) and its
   observation is newer, then moves the head. A first snapshot is accepted with `parent_sha:
   null` only while no head exists. A lost race is `head-moved`; the sync re-reads and retries.
@@ -340,14 +340,14 @@ The fingerprint stores no ticket content and is an optimization, never authority
   An administrator's adoption of a rewritten default branch
   (a forced Resync) is proposed in [tickets and sources](../proposals/tickets-and-sources.md).
 
-- **R-BTN-147 (a renumbered ticket keeps its hold and backoff).** Each ticket is posted with a
+- **R-BTN-147 (a renumbered ticket keeps its hold and backoff).** `status: built` Each ticket is posted with a
   `key`, the source's stable name for it, defaulting to its `path`; two live tickets of one
   post never share a key. A post that adds a ticket at the `key` of a ticket it drops has
   renumbered it: the new id takes the old one's hold and backoff, logged as a `renumbered`
   event (actor `sync`). The founded-head check, the lagging-fetch and dropped-ticket conditions
   are proposed in [tickets and sources](../proposals/tickets-and-sources.md).
 
-- **R-BTN-199 (Baton hands out every identifier that concurrent branches write to git).** A
+- **R-BTN-199 (Baton hands out every identifier that concurrent branches write to git).** `status: built B-176` A
   number that must be unique across concurrent branches is one Baton hands out (R-BTN-193),
   from a per-repository, per-kind sequence.
   - **The route.** `POST /v1/repositories/{repository}/sequences/{kind}/next` → `{kind,
@@ -385,6 +385,7 @@ The fingerprint stores no ticket content and is an optimization, never authority
 { sha, parent_sha, observation, force?,                                   -- R-BTN-11, R-BTN-62
   read_sha?,                                                      -- the commit the tickets were read at (§4.3)
   source: { kind: 'markdown' | 'custom', versions?, cli },         -- R-BTN-74
+  course_sources?: { <course>: { branch, sha } },                  -- R-BTN-134
   contains?: [<sha>],                                            -- the provisional commits (R-BTN-126) this post contains
   registry: [{ id, version, min_runner_version, skill?,
                course: <course.json with its schemas>,           -- R-BTN-69, R-BTN-108
@@ -457,7 +458,7 @@ The fingerprint stores no ticket content and is an optimization, never authority
   repository. The read makes the post's own refusals (an unconsented target is `forbidden`), so
   the sync fails whole before it posts.
 - Free text and identifiers are validated on write (§12.3).
-- **R-BTN-194 (every ticket carries who last wrote it).** Provenance is information, never a
+- **R-BTN-194 (every ticket carries who last wrote it).** `status: built` Provenance is information, never a
   gate: nothing is refused, held or raised for it. In the transaction that accepts a post
   moving the head, Baton reads its own record of the forge's push deliveries for the range
   (R-BTN-73), never the post's account, and records on each ticket whose file changed
@@ -480,7 +481,7 @@ The fingerprint stores no ticket content and is an optimization, never authority
 
 ### 4.5 Reading the ticket
 
-- **R-BTN-5 / R-BTN-34 (the runner reads and re-verifies the ticket from git, by its version).**
+- **R-BTN-5 / R-BTN-34 (the runner reads and re-verifies the ticket from git, by its version).** `status: built B-46` `status: built`
   - The claim response names the ticket's `path`, the `snapshot_sha` it was decided on, its
     `version` as the board holds it, and how its source reads (`ticket_source`: `{kind,
     versions}`; absent when the board declared no source, and `version` is `''` when the board
@@ -512,7 +513,7 @@ The fingerprint stores no ticket content and is an optimization, never authority
 
 ### 4.6 Children
 
-- **R-BTN-86 (tickets are sequential; child tickets are how work runs in parallel).** A ticket
+- **R-BTN-86 (tickets are sequential; child tickets are how work runs in parallel).** `status: built` A ticket
   has one holder and one position at a time; no two legs of one ticket run at once. Parallel
   work is **child tickets**.
   - **Spawning.** A leg writes child tickets to the ticket source first, each naming
@@ -537,7 +538,7 @@ The fingerprint stores no ticket content and is an optimization, never authority
 
 ### 4.7 History and discrepancies
 
-- **R-BTN-81 (the ticket's history: a running record, not a replay log).** Per ticket Baton
+- **R-BTN-81 (the ticket's history: a running record, not a replay log).** `status: built` Per ticket Baton
   appends one row per thing it saw: a leg started, finished or given up (claim, runner, course
   version, contract version, position, run number, `run_id` (R-BTN-63), `snapshot_sha`, `head_sha`); a position
   confirmed; a fact arrival, and an arrival not applied (R-BTN-39); an adoption; a re-route; a
@@ -556,7 +557,7 @@ The fingerprint stores no ticket content and is an optimization, never authority
     most 200 a page) by the principals that may read the ticket's blocks, and on the dashboard's
     ticket view.
 
-- **R-BTN-85 (every disagreement with git is logged).** When an accepted snapshot disagrees
+- **R-BTN-85 (every disagreement with git is logged).** `status: built` When an accepted snapshot disagrees
   with something Baton holds, Baton logs, in the same transaction, an event and a history row of
   kind `discrepancy`: `{sub, baton: <value and its source>, git: <the snapshot's value>,
   observation}`, and, where git states a value, adopts it at once (R-BTN-35). The subs:
@@ -579,7 +580,7 @@ The fingerprint stores no ticket content and is an optimization, never authority
 
 ### 4.8 Owner state
 
-- **R-BTN-88 (owner state and course history are exportable; the ticket source and git hold the work).** Baton
+- **R-BTN-88 (owner state and course history are exportable; the ticket source and git hold the work).** `status: built` Baton
   rebuilds tickets and readiness from the ticket source and git. **Owner state** and **course
   history** live only in Baton's store (R-BTN-66, R-BTN-39); the tenant's administrator exports
   them and imports them into another Baton.

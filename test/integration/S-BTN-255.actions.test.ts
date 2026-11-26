@@ -112,6 +112,7 @@ describe('S-BTN-255 the session’s actions (B-204)', () => {
   it('rejects legacy runner tokens and unauthenticated requests', async () => {
     const token = await hostCall(new Request(`${ORIGIN}/v1/actions`, { headers: { Authorization: `Bearer ${TOKENS['vm-a']}` } }));
     expect(token.status).toBe(403);
+    // An unknown bearer must be rejected; the delegated bearer of R-BTN-130 is not built.
     const api = await makeApiKey();
     expect((await hostCall(new Request(`${ORIGIN}/v1/actions`, { headers: { Authorization: `Bearer ${api.key}` } }))).status).toBe(401);
     expect((await read(await makeKey('ssh-ed25519', 'stranger'), '/v1/actions')).status).toBe(401);

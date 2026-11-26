@@ -2,7 +2,8 @@
 // principal, the event feed, the foreign-claim report, and the dispatches after a transition.
 import { describe, it, expect, inject, beforeEach } from 'vitest';
 import {
-  beat, captureDispatches, claimItem, cutover, endClaim, ORIGIN, ownerCall, payload, register, rows, setClock, syncCall, tick, runnerCall, mirrorCall,
+  beat, captureDispatches, claimItem, cutover, endClaim, ORIGIN, ownerCall, payload, register, rows, setClock,
+  syncCall, tick, runnerCall, mirrorCall, setTicketBlockedSince, seedTicketBlock,
 } from '../helpers';
 
 const board = inject('board');
@@ -104,8 +105,8 @@ describe('§12: foreign claims', () => {
 
   it('an imported claim holds a blocked ticket: blocked_since clears (R-BTN-75)', async () => {
     await cutover(T0);
-    await rows(`INSERT INTO ticket_blocks (repository_id, ticket_id, kind, ref, since) VALUES ('docs', 'docs:R3-9001', 'decision', 'd1', ?)`, T0);
-    await rows(`UPDATE tickets SET blocked_since = ? WHERE id = 'docs:R3-9001'`, T0);
+    await seedTicketBlock({ repository_id: 'docs', ticket_id: 'docs:R3-9001', kind: 'decision', ref: 'd1', since: T0 });
+    await setTicketBlockedSince('docs:R3-9001', T0);
     expect(await (await report({})).json()).toMatchObject({ imported: true });
     expect(await rows(`SELECT blocked_since AS b FROM tickets WHERE id = 'docs:R3-9001'`)).toEqual([{ b: null }]);
   });
@@ -119,7 +120,10 @@ describe('§12: foreign claims', () => {
 });
 
 describe('§10.3: Baton dispatches the workflows after a transition', () => {
-  it('nothing before cutover; after it, a claim and an end dispatch the mirror and the sync (R-BTN-73)', async () => {
+  it('nothing before cutover; after it, claim and end dispatch the mirror and share the sync window (R-BTN-94)', async () => {
+    // Keep workerd's real-time alarm from racing the explicit tick.
+    const start = Date.parse('2030-10-13T12:00:00Z');
+    await setClock(start);
     const sent = await captureDispatches();
     const { secret } = await register('vm-a');
     await runnerCall('/v1/runner/shadow-report', { secret, body: { transition: 'claim', ticket_id: 'docs:R3-9001', status: 'in-progress', nonce: 'aaaaaa', at: T0 } });
@@ -130,6 +134,9 @@ describe('§10.3: Baton dispatches the workflows after a transition', () => {
     const { json: c } = await claimItem('vm-a', secret);
     expect(sent).toEqual(['docs:mirror', 'docs:sync']);
     await endClaim('vm-a', secret, c.claim_id, { end_reason: 'done', ended_at_sha: sha.A });
+    expect(sent).toEqual(['docs:mirror', 'docs:sync', 'docs:mirror']);
+    await setClock(start + 30_000);
+    await tick();
     expect(sent).toEqual(['docs:mirror', 'docs:sync', 'docs:mirror', 'docs:sync']);
   });
 

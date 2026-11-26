@@ -1,12 +1,17 @@
 #!/usr/bin/env node
 // B-277: compare method/path shapes and table names (not contracts or columns).
-import { readFileSync } from 'node:fs';
+// scripts/check-api-exceptions.json lists each discrepancy against the ticket that resolves it
+// (`"POST /v1/widgets": "B-338"`). The lists are exact, and only shrink against the default
+// branch, except that a new entry may name an open ticket that builds it — a file in tickets/,
+// not tickets/archive/, whose status is not done, superseded or withdrawn (owner ruling
+// 2026-11-26, BATON_SPEC §90). Remove the entry when that ticket's code lands.
+import { readdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { pathToFileURL } from 'node:url';
 import { build } from 'esbuild';
 import { LOCAL_LOADERS } from './bundle.mjs';
-import { exceptionProblems, priorExceptions } from './lib/check-exceptions.mjs';
+import { exceptionProblems, openTickets, priorExceptions } from './lib/check-exceptions.mjs';
 import { legacyRoutes, readMethods, routeKey, writeActionIds } from './lib/core-routes.mjs';
 
 const ROOT = resolve(import.meta.dirname, '..');
@@ -59,11 +64,11 @@ export function migratedTables(migrations) {
   }
 }
 
-export function comparisonProblems(label, specified, built, exceptions, prior) {
+export function comparisonProblems(label, specified, built, exceptions, prior, open) {
   const only = (left, right) => [...left].filter((entry) => !right.has(entry));
   return [
-    ...exceptionProblems(`${label} specified but not built`, only(specified, built), exceptions.specifiedOnly, prior?.specifiedOnly),
-    ...exceptionProblems(`${label} built but not specified`, only(built, specified), exceptions.builtOnly, prior?.builtOnly),
+    ...exceptionProblems(`${label} specified but not built`, only(specified, built), exceptions.specifiedOnly, prior?.specifiedOnly, open),
+    ...exceptionProblems(`${label} built but not specified`, only(built, specified), exceptions.builtOnly, prior?.builtOnly, open),
   ];
 }
 
@@ -86,19 +91,21 @@ async function run() {
   const [{ ACTIONS }, { READS }, { MIGRATIONS }] = await Promise.all([
     load('src/core/actions.ts'), load('src/core/reads/index.ts'), load('src/migrations/index.ts'),
   ]);
-  const core = read('src/core/baton.ts');
-  const routes = legacyRoutes(core);
+  // B-272: the dispatchers moved out of baton.ts into src/core/routes/; each file is read alone.
+  const routeFiles = ['src/core/baton.ts', ...readdirSync(resolve(ROOT, 'src/core/routes')).filter((f) => f.endsWith('.ts')).sort().map((f) => `src/core/routes/${f}`)];
+  const routes = new Set(routeFiles.flatMap((path) => [...legacyRoutes(read(path))]));
   for (const route of registeredReadRoutes(ACTIONS, READS, readMethods(read('src/core/reads/index.ts')))) routes.add(route);
-  for (const route of registeredWriteRoutes(ACTIONS, writeActionIds(core))) routes.add(route);
+  for (const route of registeredWriteRoutes(ACTIONS, routeFiles.flatMap((path) => [...writeActionIds(read(path))]))) routes.add(route);
   const tables = migratedTables(MIGRATIONS);
   const specRoutes = specifiedRoutes(read('spec/BATON_SPEC/14-api.md'));
   const specTables = specifiedTables(read('spec/BATON_SPEC/13-data-model.md'));
   const file = 'scripts/check-api-exceptions.json';
   const exceptions = JSON.parse(read(file));
   const prior = priorExceptions(ROOT, file);
+  const open = openTickets(ROOT);
   const problems = [
-    ...comparisonProblems('route', specRoutes, routes, exceptions.routes, prior.routes),
-    ...comparisonProblems('table', specTables, tables, exceptions.tables, prior.tables),
+    ...comparisonProblems('route', specRoutes, routes, exceptions.routes, prior.routes, open),
+    ...comparisonProblems('table', specTables, tables, exceptions.tables, prior.tables, open),
   ];
   for (const problem of problems) console.error(`check:api: ${problem}`);
   if (problems.length) return 1;

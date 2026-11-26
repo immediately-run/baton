@@ -1,0 +1,81 @@
+{
+  "start": "reported",
+  "start_leg": "trace",
+  "end": [
+    "closed"
+  ],
+  "stations": {
+    "reported": {
+      "label": "Reported"
+    },
+    "traced": {
+      "label": "Cause found"
+    },
+    "explained": {
+      "label": "Origin traced"
+    },
+    "new-cause": {
+      "label": "Not a duplicate"
+    },
+    "duplicate": {
+      "label": "Duplicate of an open ticket"
+    },
+    "ticketed": {
+      "label": "Fix ticket filed"
+    },
+    "folded": {
+      "label": "Folded into the existing ticket"
+    },
+    "closed": {
+      "label": "Prevention weighed"
+    }
+  },
+  "legs": {
+    "trace": {
+      "from": [
+        "reported"
+      ],
+      "to": "traced",
+      "label": "Trace the symptom to a cause"
+    },
+    "origin": {
+      "from": [
+        "traced"
+      ],
+      "to": "explained",
+      "label": "Trace the cause to its origin"
+    },
+    "dedupe": {
+      "from": [
+        "explained"
+      ],
+      "to": [
+        "new-cause",
+        "duplicate"
+      ],
+      "label": "Dedupe by cause"
+    },
+    "file": {
+      "from": [
+        "new-cause"
+      ],
+      "to": "ticketed",
+      "label": "File the fix ticket"
+    },
+    "fold": {
+      "from": [
+        "duplicate"
+      ],
+      "to": "folded",
+      "label": "Fold into the existing ticket"
+    },
+    "prevent": {
+      "from": [
+        "ticketed",
+        "folded"
+      ],
+      "to": "closed",
+      "label": "Weigh prevention"
+    }
+  }
+}

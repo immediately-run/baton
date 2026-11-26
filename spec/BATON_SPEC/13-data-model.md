@@ -2,7 +2,7 @@
 title: "13. Data model"
 description: "One SQLite database per tenant, in the tenant's Durable Object (or the local host's file)."
 ---
-## 13. Data model *(proposal)*
+## 13. Data model
 
 One SQLite database per tenant, in the tenant's Durable Object (or the local host's file).
 The numbered, append-only migrations in `src/migrations/` reach the schema, each new one's
@@ -20,7 +20,7 @@ behaviour, bounds and defaults. The tables of designs not built yet are in
   `repositories.id`; `credential_id` and `fingerprint` are a key's fingerprint (`SHA256:…` for an
   SSH key, `bak_<id>` for an API key); `runner_id` and `claim_id` are integers.
 - An actor column (`set_by`, `added_by`, `granted_by`, `created_by`, `actor`) holds
-  `admin:<fp>`, `owner:<fp>`, `runner:<id>`, `runner:<fp>` (a runner key with no runner session
+  `admin:<fp>`, `owner:<fp>`, `member:<fp>`, `runner:<id>`, `runner:<fp>` (a runner key with no runner session
   behind the call), `sync`, `alarm` (or `alarm:<reason>`, e.g. `alarm:leg-timeout`) or `server`.
 - When a ticket leaves the board (closed or dropped), exactly its board rows are deleted:
   `tickets`, `ticket_requires`, `ticket_depends`, `ticket_stations`, `ticket_next_legs`,
@@ -36,7 +36,7 @@ behaviour, bounds and defaults. The tables of designs not built yet are in
 
 | Table | Key | Columns | Purpose |
 |---|---|---|---|
-| `repositories` | `id`. Unique among live rows: `(forge, forge_host, forge_repo_id)`, and the forge path | `github` (the forge path, case-insensitive; `~retired/<id>` on a retired row), `forge`, `remote`, `web_base`, `forge_host`, `forge_repo_id`, `forge_owner_id` (decimal strings), `forge_ids_seen` JSON (`{mismatch}`), `former_paths` JSON, `ci_identity` JSON, `dispatch` JSON, `default_branch`, `sync_workflow`, `sync_wanted_at`, `sync_wanted_after`, `weight`, `protection_json` (`{matched, reading_hash, at, runner_id}`), `retired_at`, and the owner settings below | A registered repository (R-BTN-47, R-BTN-92, R-BTN-93, R-BTN-94, R-BTN-138); the protection checker's last report (R-BTN-180) |
+| `repositories` | `id`. Unique among live rows: `(forge, forge_host, forge_repo_id)`, and the forge path | `github` (the forge path, case-insensitive; `~retired/<id>` on a retired row), `forge`, `remote`, `web_base`, `forge_host`, `forge_repo_id`, `forge_owner_id` (decimal strings), `forge_ids_seen` JSON (`{mismatch}`), `former_paths` JSON, `ci_identity` JSON, `dispatch` JSON, `default_branch`, `sync_workflow`, `sync_wanted_at`, `sync_wanted_after`, `weight`, `retired_at`, and the owner settings below | A registered repository (R-BTN-47, R-BTN-92, R-BTN-93, R-BTN-94, R-BTN-138) |
 | `courses` | `(repository_id, id)` | `version`, `skill`, `course_json` (the validated course file), `leg_capabilities_json` (each leg id → the capabilities its `requires` names, roles expanded; written in the statement that writes the file), `step_kinds` JSON, `min_runner_version`, `branch_pattern`, `previous_branch_pattern` | Each course as the last accepted snapshot posted it (R-BTN-48, R-BTN-69, R-BTN-121, R-BTN-134); `course_legs` and `course_leg_capabilities` are derived from it |
 | `course_legs` | `(repository_id, course_id, leg)` | `person` (0/1) | Each course's legs, derived from `courses` in the statement that writes it; what matching reads (§6.6, R-BTN-116) |
 | `course_leg_capabilities` | `(repository_id, course_id, leg, capability)` | — | Each leg's required capabilities, derived the same way (§6.6 rule 4, R-BTN-120) |
@@ -65,18 +65,23 @@ behaviour, bounds and defaults. The tables of designs not built yet are in
 ### 13.2 Credentials and sign-in
 
 Administrator keys are the host's `BATON_ADMIN_KEYS` value, never a row (R-BTN-57). One role per
-key holds across `credentials`, `repository_owners`, `sync_keys` and the administrator set,
+key holds across `credentials`, `repository_owners`, `repository_members`, `sync_keys` and the
+administrator set,
 checked in the transaction that adds or first accepts a key (§12.1).
 
 | Table | Key | Columns | Purpose |
 |---|---|---|---|
-| `credentials` | `id` (fingerprint) | `kind` (`runner` — a machine key; `probe` — an instrument key), `public_key` (an SSH public key or an API key's public line; unique), `label`, `hostname` (machine keys; unique among live ones), `expires_at`, `last_used_at`, `created_by`, `revoked_at` | Every key but owners', sync keys and administrators' (R-BTN-13, R-BTN-102, R-BTN-117, R-BTN-159) |
+| `credentials` | `id` (fingerprint) | `kind` (`runner` — a machine key; `probe` — an instrument key), `public_key` (an SSH public key or an API key's public line; unique), `label`, `hostname` (machine keys; unique among live ones), `expires_at`, `last_used_at`, `created_by`, `revoked_at` | Every key but owners', members', sync keys and administrators' (R-BTN-13, R-BTN-102, R-BTN-117, R-BTN-159) |
 | `repository_owners` | `(repository_id, fingerprint)` | `public_key`, `human_only`, `fido_attestation`, `added_by`, `added_at`, `removed_at` | Owner keys (R-BTN-58, R-BTN-185) |
-| `runner_grants` | `(credential_id, repository_id)` | `capabilities` JSON (expanded), `sync`, `role`, `checker` (0/1), `domain` (a label; NULL when unset), `max_claims`, `set_by` (the credential that set the role, mark and domain), `granted_by`, `granted_at`, `accepted_at` (NULL while pending), `revoked_at` | What a machine key may do where (R-BTN-4, R-BTN-58, R-BTN-146, R-BTN-180, R-BTN-188) |
+| `repository_members` | `(repository_id, fingerprint)` | `public_key`, `answers` JSON (the `asks` labels it answers), `added_by`, `added_at`, `changed_by`, `changed_at`, `removed_at` | Member keys (R-BTN-204); not built (B-338) |
+| `runner_grants` | `(credential_id, repository_id)` | `capabilities` JSON (expanded), `max_claims`, `granted_by`, `granted_at`, `accepted_at` (NULL while pending), `revoked_at` | What a machine key may do where (R-BTN-4, R-BTN-58, R-BTN-146) |
 | `grant_capabilities` | `(credential_id, repository_id, capability_pattern)` | — | A grant's capabilities as rows, derived from `runner_grants.capabilities` in the statement that writes it (§6.6 rule 4) |
 | `sync_keys` | `fingerprint` | `repository_id`, `role`, `public_key` (unique), `added_by`, `added_at`, `revoked_at` | Sync keys, one repository each (R-BTN-93) |
 | `repository_policies` | `(repository_id, version)` | `policy_json` (its `floors` list a field), `hash`, `previous_hash`, `changed_by`, `approver`, `preset`, `at` | Each policy version, append-only (R-BTN-188, R-BTN-189) |
-| `dashboard_sessions` | `id_hash` (SHA-256 of the cookie value) | `admin_key`, `access_email_hash` (SHA-256 of the Access email; NULL for a link's session), `created_at`, `expires_at`, `revoked_at` | A dashboard session (R-BTN-155) |
+| `dashboard_cookies` | `value_hash` (SHA-256 of a cookie value) | `browser_id`, `replaced_at` (NULL for the browser's current value), `expires_at` | A browser's cookie values, kept while any of its sessions lives, so a replaced one in use ends them (R-BTN-155); not built (B-76) |
+| `webauthn_credentials` | `credential_id` | `for_key` (the person's key it serves), `public_key`, `signed_by` (the human-only key), `registered_at`, `suspended_at`, `revoked_at` | Security keys for a session's human acts under `hardware` (R-BTN-185); not built (B-340) |
+| `human_challenges` | `challenge_hash` | `session_id`, `action`, `params_hash`, `expires_at`, `used_at` | One-time WebAuthn challenges (R-BTN-185); not built (B-340) |
+| `dashboard_sessions` | `id` (the `session_id` a tab sends, 128 random bits; no secret) | `browser_id` (the browser whose cookie it is bound to, `dashboard_cookies`), `role` (`administrator`, `owner` or `member`), `key_fingerprint`, `access_email_hash` (SHA-256 of the Access email; NULL for a link's session), `created_at`, `expires_at`, `revoked_at` | A dashboard session, one tab's (R-BTN-155); an owner's or member's repositories are its key's, read on every request. Today's table is keyed by `id_hash` with `admin_key` alone; the per-tab and per-role columns are B-76's migration |
 | `login_links` | `token_hash` (SHA-256 of the link's token) | `admin_key`, `expires_at`, `used_at` | A one-time sign-in link (R-BTN-155) |
 | `request_nonces` | `(key_fingerprint, nonce)` | `seen_at` | Replay cache for every signed request (R-BTN-13) |
 | `webhook_deliveries` | `delivery_id` | `received_at` | Deliveries seen (R-BTN-73) |
@@ -99,7 +104,7 @@ checked in the transaction that adds or first accepts a key (§12.1).
 
 | Table | Key | Columns | Purpose |
 |---|---|---|---|
-| `board_snapshots` | `(repository_id, sha)` | `parent_sha`, `received_at`, `ticket_count`, `posted_by` | Accepted posts (R-BTN-11, R-BTN-102) |
+| `board_snapshots` | `(repository_id, sha)` | `parent_sha`, `received_at`, `ticket_count`, `posted_by`, `course_sources_json` | Accepted posts (R-BTN-11, R-BTN-102, R-BTN-134) |
 | `board_head` | `repository_id` | `fleet_version`, `course_data` (opaque JSON by course), `sha`, `observation`, `last_handed_out`, `observation_issued_at`, `stations_observation` (the latest accepted snapshot to post stations), `source_kind`, `source_versions` (the last accepted post's ticket-source declaration) | The head and the observation counter (R-BTN-11, R-BTN-62, R-BTN-70, R-BTN-74, R-BTN-150) |
 | `sync_quota` | `(issuer, kind)` | `hour`, `used` | Each sync issuer's posts this hour, by kind; a refused post uses the quota too (R-BTN-62, R-BTN-187) |
 | `sync_lapses` | `(repository_id, issuer)` | `day`, `lapses`, `at` | Observations an issuer let expire, counted per day, for Needs you; a revoked sync key's row goes (R-BTN-62, R-BTN-187) |
@@ -113,7 +118,7 @@ checked in the transaction that adds or first accepts a key (§12.1).
 | `ticket_repositories` | `(ticket_id, repository_key)` | `repository_key` (lowercase) | The repositories a ticket names, derived from `tickets.repos` in the statement that writes it |
 | `ticket_stations` | `ticket_id` | `station`, `path` JSON `[{leg, reached, adopted?}]`, `path_len`, `to_end`, `next_leg`, `next_source`, `runs_from` (the `ticket_history` id the queued leg's run count restarts from), `handoff_url`, `snapshot_sha`, `observation` (the snapshot that last changed the row) | Where the ticket is: Baton's course history (R-BTN-39, R-BTN-63, R-BTN-70, R-BTN-83, R-BTN-165) |
 | `ticket_next_legs` | `(ticket_id, leg)` | `state` (`ready`\|`waiting`), `waiting_on` (a label), `course_json` (opaque), `ready_since`, `waiting_since`, `not_before` | Legs leaving the station (R-BTN-83, R-BTN-89) |
-| `ready_tickets` | `ticket_id` | `repository_id`, `course_id`, `leg` (the queued leg), `expedite`, `to_end`, `rank`, `ready_since`, `tier_position`, `retry_after`, `last_end_observation`, `required_caps` (the ticket's `requires`, a sorted JSON array) | The candidate projection matching reads (§6.6): one row per ticket whose queued leg is `ready`, with no hold, no claim rule 3 counts and no ticket or decision block on the ticket or its queued leg (a block on a later leg binds only that leg, R-BTN-75). The view `ready_ticket_source` defines membership; triggers refresh a ticket's row in the transaction that changes a source row, and a rebuild reads the same view. Backoff and observation freshness are compared at read time |
+| `ready_tickets` | `ticket_id` | `repository_id`, `course_id`, `leg` (the queued leg), `expedite`, `to_end`, `rank`, `ready_since`, `retry_after`, `last_end_observation`, `required_caps` (the ticket's `requires`, a sorted JSON array) | The candidate projection matching reads (§6.6): one row per ticket whose queued leg is `ready`, with no hold, no claim rule 3 counts and no ticket or decision block on the ticket or its queued leg (a block on a later leg binds only that leg, R-BTN-75). The view `ready_ticket_source` defines membership; triggers refresh a ticket's row in the transaction that changes a source row, and a rebuild reads the same view. Backoff and observation freshness are compared at read time |
 | `ticket_bars` | `(ticket_id, leg, tag)` | — | Tags barred from a leg (R-BTN-60) |
 | `ticket_questions` | `ticket_id` | `question_id`, `leg`, `url`, `severity`, `options` JSON `[{id, reached}]`, `posted_at`, `answered_at`, `answered_by`, `option` | The queued person leg's question and its answer or expiry (R-BTN-116, R-BTN-163) |
 | `closed_tickets` | `ticket_id` | `closed_as` (`done`\|`withdrawn`\|`dropped`), `final_station`, `final_path` JSON, `parent`, `observation`, `closed_at`, `purged_at`, `claims_due_at` (NULL once its claims are pruned), `kept_json` (kept past the purge) | What a snapshot reported closed or dropped; deleted if the ticket returns, after `kept_json` is restored (R-BTN-10, R-BTN-12, R-BTN-81, R-BTN-86, R-BTN-149) |
@@ -129,11 +134,11 @@ checked in the transaction that adds or first accepts a key (§12.1).
 |---|---|---|---|
 | `runner_reports` | `(runner_id, repository_id, claim_id, key)`; `claim_id` 0 for a repository report | `received_at`, `payload` (opaque JSON) | Latest bounded runner reports, retained for six hours (R-BTN-99) |
 | `claims` | `id`; one `active` row per ticket; `request_id` unique per `runner_id` | `ticket_id`, `runner_id`, `request_id`, `nonce` (public), `snapshot_sha`, `station`, `leg`, `start_path` JSON, `claim_observation`, `end_observation`, `claimed_at`, `status` (`active`\|`completed`\|`released`\|`reaped`), `ended_at`, `end_reason`, `end_detail`, `ended_at_sha`, `error_type`, `blocked_kind`, `blocked_ref`, `confirmed_at`, `fence_pending`, `fence_incarnation`, `failed_attempt`, `resume_json`, `deadline_at`, `course_advance_json`, `advice_json` (Baton's advice and optional opaque runner rationale) | The lease. `status = 'active'` exactly when `ended_at` is NULL; `confirmed_at` only on `completed` (R-BTN-4, R-BTN-10, R-BTN-19, R-BTN-90, R-BTN-100, R-BTN-126) |
-| `claim_legs` | `id`; `run_id` unique | `repository_id`, `ticket_id`, `claim_id` (NULL for a run an adoption added; not exported), `seq` (per claim; NULL with the claim), `run_id`, `domain` (the grant's domain at the run's start), `leg`, `from_station`, `to_station`, `next_leg`, `head_sha`, `bars` JSON, `session_url`, `leg_log_dir`, `started_at`, `finished_at`, `abandoned_at`, `evidence` | The legs a claim started, on the holder's word, and the runs an adoption added: a ticket's run counts (R-BTN-39, R-BTN-63, R-BTN-84, R-BTN-113, R-BTN-128) |
+| `claim_legs` | `id`; `run_id` unique | `repository_id`, `ticket_id`, `claim_id` (NULL for a run an adoption added; not exported), `seq` (per claim; NULL with the claim), `run_id`, `leg`, `from_station`, `to_station`, `next_leg`, `head_sha`, `bars` JSON, `session_url`, `leg_log_dir`, `started_at`, `finished_at`, `abandoned_at`, `evidence` | The legs a claim started, on the holder's word, and the runs an adoption added: a ticket's run counts (R-BTN-39, R-BTN-63, R-BTN-84, R-BTN-113, R-BTN-128) |
 | `leg_outputs` | `(ticket_id, leg, run, name)` | `schema`, `uri`, `digest`, `value_json`, `course_version`, `leg_version`, `claim_id`, `source` (`holder`\|`sync`), `confirmed`, `recorded_at` | Output envelopes, by pointer or bounded inline value (R-BTN-82, R-BTN-108) |
 | `leg_run_inputs` | `(claim_id, seq, name)` | `ticket_id`, `from_leg`, `from_run`, `uri`, `digest`, `value_json`, `leg_version` | What each leg run was given; replay reads it (R-BTN-82, R-BTN-84) |
 | `transcripts` | `id`; unique `(runner_id, repo, path, claim_id)` | `runner_id`, `claim_id`, `repo`, `path`, `role` (`session`\|`subagent`), `activity_id`, `first_seen_at`, `last_pushed_at` | Archived transcript pointers (R-BTN-20) |
-| `activities` | `(runner_id, id)`; unique `(runner_id, call_id)` | `claim_id` (NULL only before a claim), `parent_id`, `call_id`, `kind`, `seq`, `label`, `source` (`skill`\|`hook`), `started_at` (runner clock), `ended_at`, `outcome` (set exactly when ended), `received_at`, `detail_json` | The runner's timeline (§9) |
+| `activities` | `(runner_id, id)`; unique `(runner_id, call_id)` | `claim_id` (NULL only before a claim), `run_id` (on a `condition` activity), `parent_id`, `call_id`, `kind`, `seq`, `label`, `source` (`skill`\|`hook`\|`baton`), `started_at`, `ended_at`, `outcome` (set exactly when ended), `received_at`, `detail_json` | The runner's timeline (§9, R-BTN-160) |
 | `ticket_history` | `id` | `rationale_json` (opaque, claim rows only), `repository_id`, `ticket_id`, `at`, `kind`, `claim_id`, `runner_id`, `leg`, `reached`, `next_leg`, `run`, `run_id`, `snapshot_sha`, `head_sha`, `course_version`, `leg_version`, `detail_json` | The ticket's running record and course history (R-BTN-39, R-BTN-81) |
 
 `ticket_history.kind` is one of `leg-started`, `leg-finished`, `leg-abandoned`,
@@ -151,6 +156,7 @@ or one of the event kinds §13.8 marks as history rows.
 | `ticket_overrides` | `ticket_id` | `expedite`, `hold`, `hold_reason`, `route_leg`, `route_station`, `override_kind` (`owner`\|`baton`), `set_by`, `set_at` | Expedite and hold (§6), and the queued leg Baton or the owner chose, held until the station changes (R-BTN-12, R-BTN-83, R-BTN-116, R-BTN-122) |
 | `ticket_evidence` | `(ticket_id, ref)` | `kind` (`merged-early`, `mention`, `fact`), `leg` (for `fact`), `found_at`, `claim_id` (the reconcile leg's claim that carried it), `weighed_at` (NULL until that leg's finishing position) | Evidence of work done outside Baton (R-BTN-203, R-BTN-39) |
 | `reconcile_displaced` | `ticket_id` | `leg`, `station`, `recorded_at` | The leg a queued reconcile leg displaced, at the station it was queued; cleared as R-BTN-39 says (R-BTN-39) |
+| `pending_fact_arrivals` | `(ticket_id, ref)` | `leg`, `reached`, `next_leg`, `found_at` | A fact arrival that reached a held ticket, applied in `found_at` order once the hold lifts (R-BTN-203, R-BTN-39) |
 | `owner_bars` | `id` | `repository_id`, `course` (an id or `*`), `tag`, `legs` JSON, `applies` (`claim`\|`claim+advance`), `starts_at`, `ends_at`, `release_holders`, `reason`, `set_by`, `lifted_at` | R-BTN-67 |
 | `conditions` | `id`; an open core condition is unique on `(repository_id, type, ticket_id, ref)` | `repository_id`, `ticket_id` (NULL for a repository's), `ref` (what a core condition is about), `claim_id`, `leg`, `run`, `type`, `disposition`, `restarts` JSON, `default`, `severity`, `url`, `detail` JSON (a core condition's identifiers and numbers), `raised_at`, `closed_at`, `outcome`, `restart`, `reason`, `answered_by` | Raised conditions, filter fields only (R-BTN-160, R-BTN-163, R-BTN-195) |
 

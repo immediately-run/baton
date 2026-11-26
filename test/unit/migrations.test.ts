@@ -6,8 +6,116 @@ import { env, runInDurableObject } from 'cloudflare:test';
 import { MIGRATIONS } from '../../src/migrations';
 import { mintRunId } from '../../src/core/db';
 import type { Store } from '../../src/core/ports';
+import { RECOMMENDED_CLIENT } from '../../src/core/http';
+import { front } from '../../src/core/front';
+import { clockBucket, stateEtag } from '../../src/core/stateVersion';
+import type { Baton } from '../../src/cloudflare/baton';
+import { Git, hbBody, ORIGIN, sha256, syncToken } from '../helpers';
+import { makeKey, signedRequest } from '../lib/sshKeys';
 
-import { dropDerivedSchema } from '../lib/migrationRewind';
+import { dropDerivedSchema, seedPreTierDropBoard, setTierDropReady, setTierDropRank, TIER_DROP_FORGE_REPO } from '../lib/migrationRewind';
+import { seedAdminRunnerSql, seedLegacyReviewerSql, seedSettingsSql } from '../helpers';
+
+describe('migration 0142: retire tiers (B-322)', () => {
+  it('preserves provenance (S-BTN-220) and lets the same capped key claim after upgrade (S-BTN-39)', async () => {
+    const stub = env.BATON.get(env.BATON.idFromName('migrations-0142'));
+    const key = await makeKey('ssh-ed25519', 'capped');
+    const secret = 'migration-test';
+    const secretHash = await sha256(secret);
+    const at = Date.parse('2026-11-24T12:00:00Z');
+    const oldHead = '1'.repeat(40);
+    const newHead = '2'.repeat(40);
+    const author = JSON.stringify({ pusher: 'known', pusher_id: 42, commit: oldHead, at });
+    const ticketsPath = '/v1/repositories/docs/tickets';
+    // The 0076 row builders hashed the raw parent even when resolution discarded it.
+    const oldHash = (id: string, parent: string, rank: number, tier: string, tierPosition: number) => sha256(JSON.stringify({
+      id, path: `tickets/${id}.md`, version: '', key: `tickets/${id}.md`, title: id, project: null,
+      status: '', node: '', queue: '', tags: '[]', tier, requires_clause: 'none', operator_only: 0,
+      depends_on: '[]', blocked_by: '[]', repos: JSON.stringify([TIER_DROP_FORGE_REPO]), ord: null, rank,
+      course_id: 'roadmap-pr', parent, requires: [], since: null, holder: null, expedite: 0, display: null,
+      brief: null, tier_position: tierPosition,
+    }));
+    const aHash = await oldHash('A', 'B', 4, 'critical', 2);
+    const bHash = await oldHash('B', 'A', 5, 'routine', 0);
+    await runInDurableObject(stub, (_o: unknown, state: DurableObjectState) => {
+      const sql = state.storage.sql;
+      sql.exec('PRAGMA foreign_keys = OFF');
+      dropDerivedSchema(sql);
+      for (const o of sql.exec("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%'").toArray()) sql.exec(`DROP TABLE "${o.name}"`);
+      for (const m of MIGRATIONS.filter((x) => x.id < 142)) sql.exec(m.sql);
+    });
+    const oldTag = await runInDurableObject(stub, (o: Baton, state: DurableObjectState) => {
+      o.core.now = () => at;
+      const sql = state.storage.sql;
+      sql.exec('PRAGMA foreign_keys = ON');
+      seedPreTierDropBoard(sql, { fingerprint: key.fingerprint, publicKey: key.publicKey, secretHash, at, oldHead, aHash, bHash, author });
+      const all = (q: string) => sql.exec(q).toArray();
+      // The original gate 5 compared the position against the lower of the grant and runner
+      // ceilings: judgement (1) refused critical (2), even with a critical runner ceiling.
+      expect(all(`SELECT tier_position > max_tier AS refused FROM tickets JOIN runner_grants USING (repository_id) WHERE tickets.id = 'docs:A'`)).toEqual([{ refused: 1 }]);
+      const ready = () => all('SELECT ticket_id, leg, rank, ready_since FROM ready_tickets INDEXED BY ready_tickets_order');
+      expect(ready()).toEqual([{ ticket_id: 'docs:A', leg: 'implement', rank: 4, ready_since: 1 }]);
+      // Hold the route, caller and clock bucket fixed to isolate 0142's invalidation (S-BTN-243).
+      const tag = () => stateEtag(o.core.store, `key:runner:${key.fingerprint}`, `repo.tickets\n${ticketsPath}\n\nredacted`, clockBucket(at), false);
+      const before = tag();
+      sql.exec(MIGRATIONS.find((m) => m.id === 142)!.sql);
+      expect(tag()).not.toBe(before);
+      expect(ready()).toEqual([{ ticket_id: 'docs:A', leg: 'implement', rank: 4, ready_since: 1 }]);
+      expect(all('SELECT credential_id, capabilities FROM runner_grants')).toEqual([{ credential_id: key.fingerprint, capabilities: '["agent-venue"]' }]);
+      expect(all('SELECT id, credential_id FROM runners')).toEqual([{ id: 7, credential_id: key.fingerprint }]);
+      expect(all("SELECT name FROM sqlite_master WHERE sql LIKE '%tier%' AND name NOT LIKE '_cf_%'")).toEqual([]);
+      expect(all('PRAGMA foreign_key_check')).toEqual([]);
+      setTierDropRank(sql, 5);
+      expect(ready()).toEqual([{ ticket_id: 'docs:A', leg: 'implement', rank: 5, ready_since: 1 }]);
+      setTierDropReady(sql, 'waiting');
+      expect(ready()).toEqual([]);
+      setTierDropRank(sql, 4);
+      setTierDropReady(sql, 'ready');
+      for (const m of MIGRATIONS.filter((x) => x.id > 142)) sql.exec(m.sql);
+      return before;
+    });
+
+    const syncAuth = await syncToken({
+      repository: TIER_DROP_FORGE_REPO,
+      job_workflow_ref: `${TIER_DROP_FORGE_REPO}/.github/workflows/baton-sync.yml@refs/heads/main`,
+    });
+    const client = { 'Baton-Client': `baton/${RECOMMENDED_CLIENT}` };
+    const send = (req: Request) => front(req, env, (forwarded) => stub.fetch(forwarded));
+    const sync = (path: string, body: unknown) => send(new Request(ORIGIN + path, {
+      method: 'POST', headers: { ...client, Authorization: `Bearer ${syncAuth}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    }));
+    const refreshed = await send(await signedRequest(key, ORIGIN + ticketsPath, {
+      method: 'GET', created: at / 1000, headers: { ...client, 'If-None-Match': oldTag },
+    }));
+    expect(refreshed.status).toBe(200);
+    expect(refreshed.headers.get('ETag')).not.toBe(oldTag);
+    const { tickets } = await refreshed.json<{ tickets: { id: string }[] }>();
+    expect(tickets).toHaveLength(2);
+    for (const ticket of tickets) expect(ticket).not.toHaveProperty('tier');
+
+    // Only B edits its posted parent, breaking the cycle. A's stored parent now resolves.
+    const git = new Git().add('A', { path: 'tickets/A.md', title: 'A', rank: 4, parent: 'B', repos: [TIER_DROP_FORGE_REPO] })
+      .add('B', { path: 'tickets/B.md', title: 'B', rank: 5, repos: [TIER_DROP_FORGE_REPO] });
+    const observed = await sync('/v1/sync/observation', {});
+    const { observation } = await observed.json<{ observation: number }>();
+    expect(observed.status).toBe(200);
+    const posted = await sync('/v1/sync/board', git.body(newHead, oldHead, { observation }));
+    expect(await posted.json()).toMatchObject({ ok: true, upserted: 1 });
+    await runInDurableObject(stub, (_o: Baton, state: DurableObjectState) => {
+      expect(state.storage.sql.exec('SELECT local_id, parent, snapshot_sha, row_hash, last_written_by FROM tickets ORDER BY local_id').toArray()).toEqual([
+        { local_id: 'A', parent: 'docs:B', snapshot_sha: oldHead, row_hash: expect.stringMatching(/^v2:/), last_written_by: author },
+        { local_id: 'B', parent: null, snapshot_sha: newHead, row_hash: expect.stringMatching(/^v2:/), last_written_by: JSON.stringify({ pusher: 'pusher-unknown', commit: newHead, at }) },
+      ]);
+    });
+    const runner = async (path: string, body: unknown) => send(await signedRequest(key, ORIGIN + path, {
+      created: at / 1000, body: JSON.stringify(body), headers: { ...client, 'X-Runner-Secret': secret },
+    }));
+    const beat = await runner('/v1/runner/heartbeat', hbBody('vm-a', { hostname: 'host', session_name: 's', secret_hash: secretHash }));
+    expect(await beat.json()).toMatchObject({ runner_id: 7 });
+    const claimed = await runner('/v1/runner/claim', { request_id: 'migration-test', ticket_id: 'docs:A' });
+    expect(await claimed.json()).toMatchObject({ ticket_id: 'docs:A', claim_id: expect.any(Number) });
+  });
+});
 
 describe('migration 0076: retire reviewer settings (B-285, S-BTN-26)', () => {
   it('drops the old reviewer data without changing other instance settings', async () => {
@@ -18,10 +126,10 @@ describe('migration 0076: retire reviewer settings (B-285, S-BTN-26)', () => {
       dropDerivedSchema(sql);
       for (const o of sql.exec("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%'").toArray()) sql.exec(`DROP TABLE "${o.name}"`);
       for (const m of MIGRATIONS.filter((x) => x.id < 76)) sql.exec(m.sql);
-      sql.exec(`INSERT INTO reviewer_agents (name, reviews_on, family, bills) VALUES ('review', 'm', 'family', '[]')`);
+      seedLegacyReviewerSql(sql);
       const settings = () => sql.exec('SELECT key, value FROM baton_settings ORDER BY key').toArray();
       const before = settings();
-      sql.exec(`INSERT INTO baton_settings (key, value) VALUES ('reviewer_matrix', '{}'), ('reviewer_catalog', '{}')`);
+      seedSettingsSql(sql, [['reviewer_matrix', '{}'], ['reviewer_catalog', '{}']]);
       sql.exec(MIGRATIONS.find((m) => m.id === 76)!.sql);
       expect(sql.exec("SELECT name FROM sqlite_master WHERE name = 'reviewer_agents'").toArray()).toEqual([]);
       expect(settings()).toEqual(before);
@@ -248,7 +356,7 @@ describe('migration 0008: observations (R3-1231)', () => {
       const objects = sql.exec("SELECT name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' AND type = 'table'").toArray() as { name: string }[];
       for (const o of objects) sql.exec(`DROP TABLE IF EXISTS "${o.name}"`);
       for (const m of MIGRATIONS.filter((x) => x.id <= 5)) sql.exec(m.sql);
-      sql.exec(`INSERT INTO baton_settings (key, value) VALUES ('cutover_at', '900')`); // a cutover, no board yet
+      seedSettingsSql(sql, [['cutover_at', '900']]); // a cutover, no board yet
       for (const m of MIGRATIONS.filter((x) => x.id >= 6 && x.id <= 8)) sql.exec(m.sql);
       const all = (q: string) => sql.exec(q).toArray() as Record<string, unknown>[];
       expect(all('SELECT id FROM repositories')).toEqual([{ id: 'docs' }]);
@@ -747,11 +855,7 @@ describe('migration 0065: normalized matching inputs and ready candidates', () =
       expect(all('SELECT * FROM ready_tickets EXCEPT SELECT * FROM ready_ticket_source')).toEqual([]);
       expect(all('SELECT * FROM ready_ticket_source EXCEPT SELECT * FROM ready_tickets')).toEqual([]);
       // B-239: upgrade the populated 0065 projection, not just an empty database.
-      sql.exec("UPDATE credentials SET created_by = 'admin:test' WHERE id = 'key'");
-      sql.exec(`INSERT INTO runners (id, hostname, session_name, secret_hash, credential_id, harness, kind,
-                tier_ceiling, lease_timeout_ms, settings_hash, first_seen_at, last_seen_at)
-                VALUES (1, 'host', 's', 'hash', 'key', 'opencode', 'vm', 'routine', 900000, '', 0, 0)`);
-      sql.exec("INSERT INTO runner_capabilities (runner_id, capability, declared) VALUES (1, 'new', 'new'), (1, 'missing', 'missing')");
+      seedAdminRunnerSql(sql, 'key', 1, ['new', 'missing']);
       sql.exec(MIGRATIONS.find((m) => m.id === 124)!.sql);
       expect(all('SELECT * FROM runner_effective_caps')).toEqual([{ runner_id: 1, repository_id: 'docs', capability: 'new' }]);
       expect(all('SELECT repository_key, repository_id FROM ticket_repositories')).toEqual([{ repository_key: 'o/docs', repository_id: 'docs' }]);

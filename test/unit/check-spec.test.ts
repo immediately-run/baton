@@ -2,9 +2,7 @@
 // tickets that exist here, and carries none of the scrubbed terms; every test/integration/ file
 // named for a scenario names one §15 defines and not one the history retired (B-71).
 import { describe, expect, it } from 'vitest';
-// @ts-expect-error a plain .mjs script, no types
 import { check, definedIds, lineage, retiredIds, retiredScenarioIds, RULES_LINE_SINCE, scenarioIds, unnamedEntries } from '../../scripts/check-spec.mjs';
-// @ts-expect-error a plain .mjs script, no types
 import { impact, patchNotes, render, units } from '../../scripts/spec-tools.mjs';
 
 const SPEC = [
@@ -101,6 +99,14 @@ describe('check-spec', () => {
     expect([...check(spec, [], new Set(['R3-1205']), '', [], ['R-BTN-5'])]).toEqual([]);
     expect([...check(SPEC, [], new Set(['R3-1205']), '', [], ['R-BTN-5'])]).toEqual([
       'R-BTN-5 no longer has a patch note: remove it from PATCH_NOTES_ALLOWED',
+    ]);
+  });
+
+  it('still rejects an opening patch note after rule status tokens', () => {
+    const spec = '- **R-BTN-5 / R-BTN-6 (gates).** `status: built` `status: partly` *Except under the policy.* Body.';
+    const plain = '- **R-BTN-7 (plain).** `status: built` Body with an *emphasis*.';
+    expect([...check(`${spec}\n${plain}`, [], new Set())]).toEqual([
+      'R-BTN-5 opens with an italic patch note: rewrite the rule so its body says it',
     ]);
   });
 });

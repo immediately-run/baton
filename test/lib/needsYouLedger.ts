@@ -59,6 +59,9 @@ export const LEDGER: Record<string, Home[]> = {
   questions: [{ action: 'repo.needs-you', field: 'questions', screen: 'repository/conditions', holds: 'repository' }],
   conditions: [{ action: 'repo.needs-you', field: 'conditions', screen: 'repository/conditions', holds: 'repository' }],
   unsigned_control: [listing('unsigned_control')],
+  sync_late: [listing('sync_late')],
+  mirror_late: [listing('mirror_late')],
+  forge_secret_missing: [listing('forge_secret_missing')],
   sync_lapses: [listing('sync_lapses')],
   sync_control_changes: [listing('sync_control_changes')],
 };

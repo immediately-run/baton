@@ -1,0 +1,13 @@
+{
+  "id": "decision",
+  "version": 1,
+  "min_runner_version": 1,
+  "skill": "baton-decision",
+  "step_kinds": [
+    "prepare",
+    "carry-out"
+  ],
+  "branch_pattern": "claude/{ticket}-*",
+  "protocol_files": [],
+  "facts": []
+}

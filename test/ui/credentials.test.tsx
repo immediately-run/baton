@@ -20,9 +20,9 @@ const answer = {
     { repository_id: 'docs', fingerprint: 'bak_0123456789abcdef', added_by: `owner:${FP}`, added_at: T, kind: 'api', human_only: false },
   ],
   grants: [
-    { credential_id: FP2, hostname: 'lab-box', label: HOSTILE, repository_id: 'docs', capabilities: '["agent-venue","key:x"]', max_tier: 'careful', max_claims: 2,
+    { credential_id: FP2, hostname: 'lab-box', label: HOSTILE, repository_id: 'docs', capabilities: '["agent-venue","key:x"]', max_claims: 2,
       granted_by: `owner:${FP}`, granted_at: T, other_repositories: ['ops'], role: 'trusted-runner', domain: 'lab.example', set_by: `owner:${FP}` },
-    { credential_id: 'SHA256:short', hostname: 'vm-2', label: null, repository_id: 'docs', capabilities: '[]', max_tier: null, max_claims: 1,
+    { credential_id: 'SHA256:short', hostname: 'vm-2', label: null, repository_id: 'docs', capabilities: '[]', max_claims: 1,
       granted_by: `admin:${FP}`, granted_at: T, other_repositories: [], role: null, domain: null, set_by: null },
   ],
   settings: { repository_id: 'docs' },
@@ -48,9 +48,9 @@ describe('the credential screens (B-199)', () => {
     await screen.findByRole('table', { name: 'Grants in force' });
     const rows = tableText(container, 'Grants in force');
     expect(rows).toHaveLength(2);
-    expect(rows[0].slice(1, 7)).toEqual(['lab-box', HOSTILE, 'agent-venuekey:x', 'careful', '2', `trusted-runner · domain lab.exampleset by owner: ${FP.slice(0, 18)}…${FP}`]);
-    expect(rows[1].slice(1, 7)).toEqual(['vm-2', '—', 'none', 'any', '1', 'runner']);
-    expect(rows[1][7]).toMatch(/by admin: SHA256:/);
+    expect(rows[0].slice(1, 6)).toEqual(['lab-box', HOSTILE, 'agent-venuekey:x', '2', `trusted-runner · domain lab.exampleset by owner: ${FP.slice(0, 18)}…${FP}`]);
+    expect(rows[1].slice(1, 6)).toEqual(['vm-2', '—', 'none', '1', 'runner']);
+    expect(rows[1][6]).toMatch(/by admin: SHA256:/);
     // The fingerprint: short, the whole of it one focus away, and never a link.
     const fp = container.querySelector('tbody th .fp') as HTMLElement;
     expect([fp.getAttribute('title'), fp.getAttribute('tabindex'), fp.querySelector('.fp-short')?.textContent]).toEqual([FP2, '0', `${FP2.slice(0, 18)}…`]);

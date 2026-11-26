@@ -14,7 +14,10 @@
 // Owner sessions do not exist yet (B-76): their branch is written and not reachable here.
 // Runs on both hosts.
 import { describe, it, expect, beforeEach } from 'vitest';
-import { adminSession, cutover, Git, keyCall, ORIGIN, rows, sessionCall, setAdminKeys, setClock, withCore } from '../helpers';
+import {
+  adminSession, cutover, Git, keyCall, ORIGIN, rows, sessionCall, setAdminKeys, setClock, withCore,
+  retireRepository,
+} from '../helpers';
 import { makeKey, signedRequest, type TestKey } from '../lib/sshKeys';
 import { call as hostCall } from '#host';
 
@@ -107,7 +110,7 @@ describe('S-BTN-250 sessions read the repository reads (B-192)', () => {
     expect(refused(await read(granted, '/v1/repositories/ops/policy'))).toEqual([403, 'forbidden']);
     expect(refused(await read(docsOwner, '/v1/owner/ops/grants'))).toEqual([403, 'forbidden']);
     // Retired: as one never registered (R-BTN-47).
-    await rows('UPDATE repositories SET retired_at = ? WHERE id = ?', T0, 'ops');
+    await retireRepository('ops', T0);
     expect(refused(await session('/v1/repositories/ops/board'))).toEqual([403, 'forbidden']);
     expect(refused(await read(admin, '/v1/repositories/ops/board'))).toEqual([403, 'forbidden']);
     // Its owner's key owns nothing live any more: Baton does not know it (R-BTN-58), and still
@@ -124,7 +127,7 @@ describe('S-BTN-250 sessions read the repository reads (B-192)', () => {
   it('the keys read as before: an owner its repository, a granted runner its repository, never a leg’s runs', async () => {
     const board = await read(granted, '/v1/repositories/docs/board');
     expect(board.status).toBe(200);
-    expect(Object.keys(board.json).sort()).toEqual(['granted_capabilities', 'holders', 'ready', 'ready_by_tier', 'repository', 'server_time']);
+    expect(Object.keys(board.json).sort()).toEqual(['granted_capabilities', 'holders', 'ready', 'repository', 'server_time']);
     expect(board.json.granted_capabilities).toEqual(['authentication', 'create-pr', 'drivable-browser', 'llm-call']);
     expect((await read(docsOwner, '/v1/repositories/docs/board')).json.granted_capabilities).toBeNull();
     expect((await read(admin, '/v1/repositories/docs/board')).status).toBe(200);

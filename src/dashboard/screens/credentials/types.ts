@@ -50,7 +50,6 @@ export interface GrantRow {
   hostname?: string | null;
   label?: string | null;
   capabilities?: unknown;
-  max_tier?: string | null;
   max_claims?: number | null;
   granted_by?: string | null;
   granted_at?: number | null;
@@ -115,7 +114,6 @@ export interface RegistryRow {
   web_base?: string | null;
   default_branch?: string | null;
   weight?: number;
-  tiers?: string[];
   head?: { sha?: string; received_at?: number | null } | null;
   /** `{mode: 'shadow' | 'cut-over'}` as the registry's rows carry it. */
   mode?: { mode?: string } | string;

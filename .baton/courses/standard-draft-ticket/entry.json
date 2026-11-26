@@ -1,0 +1,14 @@
+{
+  "id": "draft-ticket",
+  "version": 1,
+  "min_runner_version": 1,
+  "skill": "baton-draft-ticket",
+  "step_kinds": [
+    "research",
+    "draft",
+    "check"
+  ],
+  "branch_pattern": "claude/{ticket}-*",
+  "protocol_files": [],
+  "facts": []
+}

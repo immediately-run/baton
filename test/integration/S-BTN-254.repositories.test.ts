@@ -13,7 +13,10 @@
 //   5. a runner key is `forbidden`, a stranger `unauthenticated`.
 // Owner sessions do not exist yet (B-76). Runs on both hosts.
 import { describe, it, expect, beforeEach } from 'vitest';
-import { adminSession, claimItem, cutover, Git, hbBody, keyCall, ORIGIN, register, rows, sessionCall, setAdminKeys, setClock, sha256, TOKENS, withCore } from '../helpers';
+import {
+  adminSession, claimItem, cutover, Git, hbBody, keyCall, ORIGIN, register, rows, sessionCall, setAdminKeys,
+  setClock, sha256, TOKENS, withCore, retireRepository,
+} from '../helpers';
 import { makeKey, signedRequest, type TestKey } from '../lib/sshKeys';
 import { call as hostCall } from '#host';
 
@@ -73,7 +76,7 @@ describe('S-BTN-254 the root read (B-204)', () => {
 
     const docs = rowOf(answer, 'docs');
     expect(Object.keys(docs).sort()).toEqual(['courses', 'default_branch', 'discrepancies_7d', 'exclusive_goal', 'forge', 'github', 'head', 'id', 'mode',
-      'needs_you', 'ready', 'runners_alive', 'runners_total', 'running', 'tiers', 'web_base', 'weight']);
+      'needs_you', 'ready', 'runners_alive', 'runners_total', 'running', 'web_base', 'weight']);
     const reg = (registry.json.repositories as Row[]).find((r) => r.id === 'docs')!;
     for (const k of ['id', 'github', 'forge', 'web_base', 'default_branch', 'weight']) expect([k, docs[k]]).toEqual([k, reg[k]]);
     expect(docs.courses).toEqual((reg.courses as Row[]).map((c) => ({ id: c.id, version: c.version })));
@@ -81,7 +84,6 @@ describe('S-BTN-254 the root read (B-204)', () => {
     expect(docs.mode).toBe('cut-over');
     expect(rowOf(answer, 'ops').mode).toBe('shadow');
     expect(rowOf(answer, 'ops').head).toBeNull();
-    expect(Array.isArray(docs.tiers)).toBe(true);
     expect(docs.exclusive_goal).toBeNull();
 
     // An administrator's key: the same rows, and no session.
@@ -112,7 +114,7 @@ describe('S-BTN-254 the root read (B-204)', () => {
     expect((await hostCall(new Request(`${ORIGIN}/v1/repositories`))).status).toBe(401);
 
     // A retired repository is no one's to list.
-    await rows('UPDATE repositories SET retired_at = ? WHERE id = ?', T0, 'ops');
+    await retireRepository('ops', T0);
     expect((await list()).repositories.map((r: Row) => r.id)).toEqual(['baton', 'docs']);
     // …and its owner's key, owning nothing live, is no key Baton knows.
     expect((await read(opsOwner, '/v1/repositories')).status).toBe(401);

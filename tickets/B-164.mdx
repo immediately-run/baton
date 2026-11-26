@@ -47,7 +47,7 @@ immediately-run/baton#150; the restructure, B-166, writes them into the spec):
    `protected`.
 3. `signed-authorship` either specified with a host-side signer or removed until one is
    designed; continuity ranges kept.
-4. `independent-review`'s machinery cut to what it needs: a review count and a domain label.
+4. `independent-review`'s machinery cut to what it needs: a review count ~~and a domain label~~ (each review its own `reads_only` run of the exact head).
 
 ### Exit criteria
 
@@ -60,3 +60,7 @@ immediately-run/baton#150; the restructure, B-166, writes them into the spec):
 - 2026-11-01: filed from the whole-spec review.
 - 2026-11-01: decided by the owner (above); written into the spec by the restructure, B-166.
 - 2026-11-02: written by the spec restructure's part 2 (B-166, the PR `baton-spec-restructure-p2`): `human-gates` holds only where every `approvers.*` list is human-only **and** `human_key` is `hardware`, so `protected` does not claim it and `protected-hardware` (the renamed `protected-signed`) holds it; `human-gates-hardware` is merged into it (R-BTN-189). `signed-authorship` and `authorship: signed` are gone; continuity ranges stay (R-BTN-183). `independent-review` needs `merge.reviews.count` and distinct domain labels, nothing about model families (item 4). B-140 and B-147 rescoped.
+
+_(2026-11-24: item 4 is done in the spec by B-189's spec PR (`spec/BATON_SPEC_HISTORY.md`, the entry of 2026-11-24), on the owner's rulings of 2026-11-09 and 2026-11-24 (runners trusted, legs not): `independent-review` is `merge.reviews.count` reviews of the exact head, each its own `reads_only` run, with no domain label, key comparison or `std:ran@1` (R-BTN-183, R-BTN-189); the struck clause said otherwise.)_
+
+_(2026-11-24: rules re-read: R-BTN-183, R-BTN-189)_

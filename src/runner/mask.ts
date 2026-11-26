@@ -11,7 +11,7 @@
 import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { createKeyBoundary, maskBearerTokens, maskSecrets } from '../shared/mask.mjs';
+import { createKeyBoundary, maskBearerTokens, maskKeys } from '../shared/mask.mjs';
 
 /** R-BTN-144 class 7: the name endings the environment decides, compared case-sensitively. */
 export const SECRET_NAME_SUFFIXES = ['_KEY', '_TOKEN', '_SECRET', '_PASSWORD', '_PAT'];
@@ -106,7 +106,8 @@ const maskLiterals = (text: string, literals: readonly string[]): string => {
 
 /** `text` with every class-5, class-6 and class-7 occurrence replaced by `***`. */
 export function maskLegOutput(text: string, secrets: readonly string[]): string {
-  return maskSecrets(maskLiterals(text, secrets));
+  // Recognize key blocks before literal masking can change a banner.
+  return maskBearerTokens(maskLiterals(maskKeys(text), secrets));
 }
 
 /** The end `detail` a failed leg's claim carries (§9.4, B-256): the last line of the leg's error —

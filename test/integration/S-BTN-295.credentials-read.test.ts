@@ -13,7 +13,10 @@
 //      owner, a runner's key and an administrator's key are `forbidden`.
 // Runs on both hosts.
 import { describe, it, expect, beforeEach } from 'vitest';
-import { adminSession, cutover, Git, keyCall, makeApiKey, ORIGIN, rows, sessionCall, setAdminKeys, setClock, withCore } from '../helpers';
+import {
+  adminSession, cutover, Git, keyCall, makeApiKey, ORIGIN, rows, sessionCall, setAdminKeys, setClock, withCore,
+  setOwnerHumanOnly,
+} from '../helpers';
 import { makeKey, signedRequest, type TestKey } from '../lib/sshKeys';
 import { call as hostCall } from '#host';
 
@@ -85,7 +88,7 @@ describe('S-BTN-295 the grants read, extended (B-199)', () => {
     expect(owners.map((o) => [o.fingerprint, o.kind, o.human_only]).sort()).toEqual([
       [docsOwner.fingerprint, 'ssh', false], [api.key.slice(0, 20), 'api', false]].sort());
     for (const o of owners) expect(Object.keys(o).sort()).toEqual(['added_at', 'added_by', 'fingerprint', 'human_only', 'kind', 'repository_id']);
-    await rows('UPDATE repository_owners SET human_only = 1 WHERE fingerprint = ?', docsOwner.fingerprint);
+    await setOwnerHumanOnly(docsOwner.fingerprint);
     await rows(`UPDATE runner_grants SET role = 'trusted-runner', trust_domain = 'lab.example', trust_set_by = ? WHERE credential_id = ?`, `owner:${docsOwner.fingerprint}`, granted.fingerprint);
     const again = (await read(docsOwner, '/v1/owner/docs/grants')).json;
     expect((again.owners as Row[]).find((o) => o.fingerprint === docsOwner.fingerprint)!.human_only).toBe(true);

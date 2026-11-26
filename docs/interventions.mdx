@@ -964,3 +964,64 @@ Entry shape: **When** · **Host** · **Tickets** · **Why it was needed** · **R
   or check placement before the claim — and resume when placement succeeds; a placement failure
   should be named as one, not as a moved ticket, and should not cost the ticket a retry.
   *No ticket yet.*
+
+## 2026-11-25 17:28 – 2026-11-26 04:24 — review refused after every fix: B-30's independent-review rule with one runner
+
+- **Host:** bering (one runner, one key)
+- **Tickets:** B-139, B-147, B-8, B-25, B-294, B-42, B-45, B-258, B-273, B-281, B-136, B-146, B-55,
+  R3-1263 — each suspended at `fixed` on green tests, some several times
+- **Why it was needed:**
+  - #347 (B-30, merged 2026-11-25 17:28) set `no_chain_from: [implement, fix]` on create-pr's
+    `review`, in both the shipped course and this repository's `.baton/` course: the key that
+    implemented or fixed a ticket may not run its review (R-BTN-106).
+  - bering's runner has one key. After any fix it could not advance into review, so the claim
+    ended `suspended:fixed`; no other runner existed to take the review, and Baton offered the
+    ticket back to the same runner, which ran run-tests again and suspended again.
+  - The runner's log said only "next the end"; the refusal (`chain`) was found by reading a
+    ticket's history and its stub's result (green, `next: review`).
+- **Resolution:**
+  - The owner, 2026-11-25: "i don't think this makes sense now that legs are sandboxed and
+    isolated." #432 drops the rule from both create-pr graphs, moves the course to version 4,
+    keeps the review instructions' different-model rule and the gate itself (R-BTN-106) for
+    courses that opt in; the standard course sources were regenerated and the spec index
+    refreshed. Merged at the owner's word 2026-11-26 04:24 after CI.
+  - Around 05:55 B-322's green tests went straight to review in the same claim: the server checks
+    `chain` against the course in force, so version 4 applied from the next sync.
+- **Autonomous handling:** a course rule that no registered runner can satisfy should be refused
+  when the course is posted, or at least named in the runner's log, not found by reading
+  histories. *No ticket yet.*
+
+## 2026-11-26 — run-tests ↔ fix loops on B-322 and B-8: B-231's check was off for nearly every ticket
+
+- **Host:** bering
+- **Tickets:** B-322 (17 run-tests rounds on a branch whose PR #407 had merged at 06:11), B-8 (15)
+- **Why it was needed:**
+  - Each round: run-tests failed, the fix leg's agent pushed nothing, the fix still reached
+    `fixed`, run-tests added an empty `tests red` marker and tested the same code again — up to
+    the gate's 30 runs. B-322's fix agents said every round that #407 was merged and there was
+    nothing to push; its branch, 62 commits behind `main`, failed `main`'s newer type-coverage
+    allowlist.
+  - B-231 should end such a round ("the fix leg pushed nothing … no fix, no position"), but the
+    stub made the check only when `ticketRepositories(...)` was empty (B-255's exemption for
+    tickets whose PRs may live in another repository). `repos: [baton]`, the ticket's own home,
+    resolved to `immediately-run/baton` and counted as another repository — so for nearly every
+    Baton ticket the check was off.
+  - B-8's branch merges `main` each round; its agent reports the remaining failures (S-BTN-48's
+    replay answering 422, B-337's unlinked spec citations) reproduce on clean `main` in the
+    runner's sandbox, though `main`'s CI is green. Not resolved.
+- **Resolution:**
+  - #446 marks B-322 done (#407) and archives it, so the next sync ends its claim (R-BTN-35);
+    #407's docs-side follow-ups are noted there.
+  - #447: the fix stub drops the home repository (the checkout's origin, and `ctx.ticket.home`
+    through `baton.json`'s `repos` map) before deciding the PRs may live elsewhere; tested in
+    `defaults-cli`'s B-231 case. The standard sources are regenerated in it; this repository's
+    own `.baton/courses/create-pr/legs/*.mjs` are not — regenerating them brings ~4,000 lines of
+    other runtime changes merged since they were last built, so that is the owner's separate
+    decision, and until then bering's runner keeps the old check.
+- **Autonomous handling:**
+  - B-231 with #447, once this repository's stubs are regenerated.
+  - run-tests should ask whether the ticket's PRs have merged before testing a branch again; a
+    gate that fails on what a fix cannot change (the sandbox's own failures) should not cost 30
+    rounds. *No ticket yet.*
+  - Generated stubs that lag their source by thousands of lines should fail a check. *No ticket
+    yet.*
