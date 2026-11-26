@@ -1,5 +1,5 @@
 ---
-title: "B-340 — A person on the dashboard is a human: sessions write as `human` and meet human-only lists, with a security-key touch per act under `human_key: hardware`"
+title: "B-340 — A person on the dashboard is a human: sessions write as `human` and meet human-only lists, under `any` only when their sign-in proves it, with a security-key touch per act under `human_key: hardware`"
 id: B-340
 project: baton
 status: available
@@ -9,7 +9,7 @@ repos:
 tags:
   - roadmap-item
 tier: judgement
-description: "Build R-BTN-185 as amended 2026-11-23: every administrator's, owner's and member's dashboard session acts as `human` beside its key's role — its attestations recorded with writers `human` and the role, counted where the policy admits either; a `human` approver entry matched by a session whose role may take the action. Under `human_key: hardware`, a session's act that counts only because it is `human` also carries a WebAuthn assertion over the action and its parameters, by a security key registered with a human-only key's signature (`baton human-key webauthn add`, one migration for the credentials), else `forbidden`. S-BTN-324. Requires: B-76, B-195."
+description: "Build R-BTN-185 as amended 2026-11-23 and 2026-11-26: every administrator's, owner's and member's dashboard session (under `human_key: any`, one Cloudflare Access or a `human_only` key's code opened) acts as `human` beside its key's role — its attestations recorded with writers `human` and the role, counted where the policy admits either; a `human` approver entry matched by a session whose role may take the action. Under `human_key: hardware`, a session's act that counts only because it is `human` also carries a WebAuthn assertion over the action and its parameters, by a security key registered with a human-only key's signature (`baton human-key webauthn add`, one migration for the credentials), else `forbidden`. S-BTN-324. Requires: B-76, B-195."
 topics:
   - baton
 owns: {}
@@ -37,8 +37,8 @@ under `human_key: hardware`, "only with a per-act key touch".
 1. **Writers.** A session's attestation carries writer classes `human` and its key's role; the
    policy check admits it when its entry names either (`src/core/` attestation path). `GET
    …/attestations` shows both.
-2. **Approvers.** R-BTN-188's `human` entry matches a session ~~whose role may take the action~~
-   that acts as `human` (item 5) and whose role may take the action; the approver check is the
+2. **Approvers.** R-BTN-188's `human` entry matches a session that acts as `human` (item 5) and
+   whose role may take the action; the approver check is the
    one `authorize` uses for keys.
 3. **The touch under `hardware`** (R-BTN-185's *Under `hardware`*).
    - **Registration.** `baton human-key webauthn add --for <fingerprint>` sends `POST
@@ -60,10 +60,12 @@ under `human_key: hardware`, "only with a per-act key touch".
 4. **The conditions read** (`answerWord` in `src/core/reads/conditions.ts`) says a session may
    answer where the policy admits `human`, and names the touch where `hardware` asks for it.
 5. **The sign-in's proof** (R-BTN-185 as amended 2026-11-26). The session row records which
-   sign-in opened it. One opened through Cloudflare Access, or by a code a `human_only` key binds,
-   acts as `human` (items 1 and 2); one opened by an ordinary key's one-time link or sign-in code
-   acts as its key's role only, writes no `human` attestation and matches no `human` entry. A path
-   not named in R-BTN-185 proves no human. A session row from before this item counts as its
+   sign-in opened it (an Access sign-in is already recorded, `access_email_hash`,
+   `src/core/admin.ts`). Under `human_key: any`, one opened through Cloudflare Access, or by a code
+   a `human_only` key binds, acts as `human` (items 1 and 2); one opened by an ordinary key's
+   one-time link or sign-in code acts as its key's role only, writes no `human` attestation and matches no `human` entry. A path
+   not named in R-BTN-185 proves no human. Under `hardware` every session acts as `human`, each
+   human act with its touch (item 3). A session row from before this item counts as its
    key's role only. Tests: S-BTN-324's link case.
 
 ### Trust
@@ -101,3 +103,5 @@ _(Filed with the spec PR for every person role on the dashboard. Number taken by
 scan: the filing session held no Baton key.)_
 
 _(2026-11-26: rules re-read: R-BTN-189, R-BTN-185. The amendment of that date (`spec/BATON_SPEC_HISTORY.md`) is written into this plan: the hardware promise is `human-gates-hardware`'s; `human-gates` rests on custody.)_
+
+_(2026-11-26: rules re-read: R-BTN-185, R-BTN-188. The owner narrowed this ticket's 2026-11-23 ruling for `human_key: any` only: a session acts as `human` only when Cloudflare Access or a `human_only` key's code opened it; under `hardware` every session does, with its touch. Item 5, the title and the description say so.)_

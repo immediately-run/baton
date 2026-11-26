@@ -286,7 +286,8 @@ section that are not built are in [the proposal page](../proposals/checks-and-ex
       `{status, stdout, stderr}` when it ends, `status` null when the call did not exit by itself
       (killed, past `timeout_s`, or never started); `write(line)` adds a line to its stdin after
       the `stdin` text, stdin staying open until the call ends (an executor that cannot stream
-      stdin queues the lines; a `write` after the end is ignored); `kill()` stops the call's
+      stdin may hold the lines, which then never reach the command, and R-BTN-119's stop ends
+      the call by `kill()`; a `write` after the end is ignored); `kill()` stops the call's
       processes; `onStderr(line, frame?)` receives each stderr line as it arrives, `frame` the
       line ending when supplied; `env` sets variables over the session's for this call, part of
       what the runner hands the executor (R-BTN-144), filtered as the brief's environment is,

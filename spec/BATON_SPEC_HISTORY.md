@@ -19,8 +19,8 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
 ## Changelog
 
 - **2026-11-26 — Two human gates, `protected` claims the custody one, `exec` streams, and "mark" leaves the vocabulary (R-BTN-189, R-BTN-185, R-BTN-107).**
-  Rules changed: R-BTN-189, R-BTN-185, R-BTN-188, R-BTN-107, R-BTN-145, R-BTN-186, R-BTN-57,
-  §12.1; S-BTN-324, S-BTN-185, S-BTN-190, S-BTN-192, S-BTN-299; one Decisions entry; the linked proposals (people and
+  Rules changed: R-BTN-189, R-BTN-185, R-BTN-188, R-BTN-155, R-BTN-107, R-BTN-145, R-BTN-186,
+  R-BTN-57, §12.1; S-BTN-324, S-BTN-278, S-BTN-321, S-BTN-185, S-BTN-190, S-BTN-192, S-BTN-299; one Decisions entry; the linked proposals (people and
   dashboard, intervention sessions, conditions, data model and API, scenarios: S-BTN-100,
   S-BTN-197). From the code-against-spec review of 2026-11-24
   (`docs/review/code-vs-spec-review-2026-11-24.mdx`), whose owner decisions these are.
@@ -39,9 +39,9 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
     condition) … no migration successor"), and R-BTN-185's "no guarantee claims it as a human
     gate". What it loosens: under `human_key: any`, `protected` now claims a human gate that any
     agent session defeats which can use a human-only key or open a dashboard session (a session
-    is a human, R-BTN-185): driving a signed-in browser; today, minting an administrator's
-    one-time link with an administrator key; and, once owners' sessions are built (B-76), binding
-    a sign-in code with an ordinary owner key. Baton cannot tell, which is why the promise names
+    is a human, R-BTN-185): driving a signed-in browser; and, before the narrowing below, an
+    administrator's one-time link minted with an administrator key, or, once owners' sessions are
+    built (B-76), a sign-in code bound with an ordinary owner key. Baton cannot tell, which is why the promise names
     custody. A floor on `human-gates`, which from 2026-11-02 pinned `human_key: hardware`, now
     pins only the two lists: an `approvers.policy` approver can lower `hardware` to `any` without
     `floor-violated`, so a deployment that relied on the hardware meaning floors
@@ -51,27 +51,32 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
     custody-only gates; computing `human-gates` from the lists again is B-189's item 2, which already reads them,
     with `human-gates-hardware` held `false` until B-136's attestation is built; S-BTN-190's
     legacy cases are B-293's.
-  - **A session proves a human only as strongly as its sign-in.** Review round one found the
-    gap above. The owner sent it, 2026-11-26, to the session writing the human-intent page
-    (its principle written in `docs/context/human-intent.mdx`, baton#449). That work splits who
-    drives a session (the dashboard is always a person; the owner, 2026-11-26, in that session:
-    "Baton Dashboard UI: Human drive (policy may dictate hardware-key proof of this, but the
-    assumption is that this is always a person)") from how strongly that is proven, which is the
-    credential's, and implied
-    the narrowing: R-BTN-185 counts a session as `human` only when Cloudflare Access or a
-    `human_only` key's code opened it; an ordinary key's one-time link or code proves only that
-    key's role and satisfies no human-only list; a sign-in path not named, the proposed forge
-    sign-in among them, proves no human until the owner rules on it. R-BTN-188's `human` entry,
-    R-BTN-57's administrator line and S-BTN-324 follow. B-340 builds it (its item 5); until
-    then every session acts as `human`. Rejected: keeping the rule and naming custody of every
-    ordinary key that can open a session, which the split exists to avoid; and sessions never
-    satisfying human-only lists, against "the dashboard is always a person".
+  - **Under `any`, a session proves a human only as strongly as its sign-in.** Review round one
+    found the gap above. The owner first sent it, 2026-11-26, to the session writing the
+    human-intent page (its principle in `docs/context/human-intent.mdx`, baton#449), which splits
+    who drives a session (the owner, 2026-11-26, in that session: "Baton Dashboard UI: Human
+    drive (policy may dictate hardware-key proof of this, but the assumption is that this is
+    always a person)") from how strongly that is proven, and read it as the narrowing. Round two
+    found that the narrowing revised the owner's ruling of 2026-11-23 (B-340: every person's
+    session "however it was opened", with a per-act key touch under `hardware`). Asked with the
+    three rulings side by side, the owner chose, 2026-11-26, "Narrow under `any` only": under
+    `human_key: any` a session acts as `human` only when Cloudflare Access opened it (either of
+    R-BTN-155's Access modes) or a code a `human_only` key binds; an ordinary key's one-time link
+    or code proves only that key's role and satisfies no human-only list; a sign-in path not
+    named, the proposed forge sign-in among them, proves no human until the owner rules on it.
+    Under `hardware` the ruling of 2026-11-23 stands: every session, each act with its touch.
+    R-BTN-188's `human` entry and its session sentence, R-BTN-155, R-BTN-57, §12.1's rows, §12.8's
+    custody bullet, S-BTN-278, S-BTN-321 and S-BTN-324 follow. No session acts as `human` today
+    (`src/core/policy.ts`: a `human` entry matches only `human_only` owners and break-glass
+    lines); B-340 builds it, its item 5 the sign-in's proof, and B-195 writes no `human` writer
+    before it. Rejected: every session however opened, with `human-gates` under `any` resting
+    on custody of every key that can open a session; and `protected` not claiming `human-gates`.
   - **The protection checker.** The owner, 2026-11-26, chose a grant role over a mark. B-189's
     amendment of 2026-11-24 had already retired the protection checker, grant roles and the
     checker mark, so nothing changes here.
   - **"Mark" is not a noun of Baton's.** The owner, 2026-11-26: "Marks are not present on the
     dashboard and cli. Is this a bit of vocabulary baton truly needs?", and, offered dropping
-    it: "yes, drop it". The spec and the proposals called five things a mark: a key's `human_only` (§12.1, R-BTN-57), the registry's `delegated` value (R-BTN-186,
+    it: "yes, drop it". The spec and the proposals called six things a mark, G-BTN-172's retired "brief mark" among them: a key's `human_only` (§12.1, R-BTN-57), the registry's `delegated` value (R-BTN-186,
     the people-and-dashboard and intervention-sessions proposals, S-BTN-100), whether the
     tenant is frozen (S-BTN-299), an outbox delivery report (the conditions and data-model
     proposals) and a grant's admitting the capability `intervener` (the intervention-sessions
@@ -99,6 +104,18 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
     `exec`'s `status` on a kill or timeout, `env` overriding past R-BTN-144's filter, R-BTN-145's
     "the leg call returning", and the leg-log proposal reading a stdout `exec` does not stream;
     strikes that re-added the struck word. Each was checked against the text and fixed.
+  - **Review, round two**: one fresh reviewer given the whole diff, round one's fixes and the
+    impact list. Every round-one item was found fixed. Found: R-BTN-185's "Not built" said every
+    session acts as `human` until B-340, where today none does; the narrowing revised the owner's
+    2026-11-23 ruling without quoting a new one (put to the owner, who chose it for `any` only,
+    above); restatements of "a session is a human" in R-BTN-188, R-BTN-155, §12.1, §12.8's
+    custody bullet, S-BTN-278, S-BTN-321, the open questions, the security proposal and the
+    context pages; B-195 writing `human` for every session before B-340 decides which act as
+    one, an interim hole once B-76 builds owner sign-in codes, and B-213, B-338 and B-340's title
+    and description; "over the policy" and `held` reading the policy's values only; this
+    entry's loosening paragraph listing paths the narrowing closes; `exec`'s held stdin lines and
+    the leg-log proposal's `onStdout` against `executor_api`; S-BTN-324 having no test; and
+    G-BTN-172 missing from the mark count. Each was checked against the text and fixed.
 - **2026-11-26 — A protected repository accepts a branch course source (R-BTN-134).**
   Rules changed: R-BTN-134 (*A branch source*). #395 left open whether a protected repository
   (R-BTN-188) should refuse branch sources. The owner's ruling, 2026-11-26: "No, the #395 warning

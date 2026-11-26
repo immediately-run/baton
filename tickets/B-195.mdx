@@ -72,8 +72,9 @@ The §14 rows first, then the code.
 4. **A session writes an owner's or member's attestation.** `POST
    /v1/repositories/{repository}/attestations` accepts a dashboard session — the front resolves
    the cookie and the tab's `Baton-Session` on it under R-BTN-16's checks, as B-192 does for
-   GETs — with the writers recorded as `human` and its key's role, `owner` or `member`
-   (R-BTN-181, R-BTN-185: a person using the dashboard is a human; a member's only for a
+   GETs — with the writers recorded as ~~`human` and~~ its key's role, `owner` or `member`, and
+   `human` only where the session acts as `human`, which B-340 item 5 decides; until B-340
+   lands, no `human` (R-BTN-181, R-BTN-185 as amended 2026-11-26: a person using the dashboard is a human, as strongly as its sign-in proves; a member's only for a
    `std:decision@1` whose leg's `asks` label it holds, R-BTN-204, with B-338); an
    administrator's session is refused a person's answer (R-BTN-181). R-BTN-185's
    security-key touch under `hardware` is B-340's. The route's existing key path is unchanged. A
@@ -146,3 +147,5 @@ judged by its `answers` (R-BTN-204, B-338). The rest of this ticket shipped with
 (`664cd2b`); item 4 did not — the route still takes only a signature or a bearer.)_
 
 _(2026-11-23: rules re-read: R-BTN-181, R-BTN-155, R-BTN-116)_
+
+_(2026-11-26: rules re-read: R-BTN-185, R-BTN-181. Under `human_key: any` a session acts as `human` only when Cloudflare Access or a `human_only` key's code opened it (the owner, 2026-11-26; `spec/BATON_SPEC_HISTORY.md`); the clauses that said every session are rewritten or struck in place.)_

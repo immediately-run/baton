@@ -478,7 +478,7 @@ Built: the column `claim_legs.leg_log_dir`, and the masking of a leg's output (R
     digests. The runner writes a run only when the reply that started it named a directory.
   - **What.** Runs whose executor streams the leg's output (R-BTN-107): `builtin` does; the
     shipped `session` and `attached` executors stream none, their session's transcript being its
-    log; a `"stream": false` leg writes none. The runner reads the stderr `exec` streams (`onStderr`, R-BTN-107) and the stdout `result` carries when the call ends (streaming stdout needs an `onStdout` beside `onStderr`, which this design adds to R-BTN-107 when it is built), and writes JSON-lines
+    log; a `"stream": false` leg writes none. The runner reads the stderr `exec` streams (`onStderr`, R-BTN-107) and the stdout `result` carries when the call ends (streaming stdout needs an `onStdout` beside `onStderr`, which this design adds to R-BTN-107 when it is built, as an optional option so `executor_api` stays 1), and writes JSON-lines
     frames `{seq, at, stream: "stdout" | "stderr", text}`, `seq` counting from 0 across the run;
     `text` is the masked bytes (R-BTN-144) as UTF-8 (invalid bytes → U+FFFD), ≤ 8 KB per frame,
     cut between code points.

@@ -331,7 +331,7 @@ built; their design is [the people and dashboard proposal](../proposals/people-a
     same scope, but R-BTN-186's key-only acts, and no other (R-BTN-129). An owner's or member's
     session reaches only
     the repositories its key still owns or is a member of. A session is also a human
-    (R-BTN-185).
+    where its sign-in proves one (R-BTN-185).
   - **Authentication first, then one role.** A sign-in authenticates the person, then opens a
     session for one key the person holds. Where the person holds keys of more than one role, or
     of one role more than once, the page asks which after authenticating and before any session

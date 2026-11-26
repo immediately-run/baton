@@ -148,9 +148,8 @@ tab, opened by its link or a code its holder confirms, or by an email Cloudflare
 that `ACCESS_IDENTITIES` binds to the key — the person picking the key after authenticating
 where they hold several; one principal, carrying its key's role and able to do what that key
 can, an owner's or member's reaching only the repositories the key still holds (R-BTN-155). A
-person using the dashboard is a human: a session opened through Cloudflare Access or a
-`human_only` key acts as `human` beside its role, one opened by an ordinary key's link only as
-that role (R-BTN-185).
+person using the dashboard is a human: a session acts as `human` beside its role, under
+`human_key: any` only when Cloudflare Access or a `human_only` key opened it (R-BTN-185).
 
 **Screen.** One entity's page of the dashboard — sign in, pick a repository, one entity per
 screen — named `root`, `tenant/<segment>` or `repository/<segment>[/{param}]`; what it draws is
@@ -213,4 +212,4 @@ whose grant names that leg's capability; the merge runner is the first
 only by a human ([proposed, not built](../../spec/proposals/security.md)).
 
 **Human-only key.** A key used for nothing else and kept out of every agent's reach; only it,
-or a person's dashboard session (R-BTN-185), satisfies a human gate.
+or a dashboard session its sign-in proves human (R-BTN-185), satisfies a human gate.

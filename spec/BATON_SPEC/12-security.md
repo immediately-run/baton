@@ -31,10 +31,10 @@ stated once, in the rule it cites.
 | Instrument (probe) | `/v1/probe/*` | SSH-signed | post readings of any registered instance (R-BTN-101) |
 | Registration token (proposed, R-BTN-117) | `POST /v1/register` | `Authorization: Baton-Token <token>` | register one credential within its scope (R-BTN-117, R-BTN-157) |
 | Administrator | `/v1/admin/*`; any claim's leg runs | a `BATON_ADMIN_KEYS` line, SSH-signed or API key | R-BTN-57 |
-| Dashboard session | `/v1/ui/*`, and the key routes of the actions its role may call (R-BTN-155) | the session cookie with the tab's `Baton-Session`, and no key (R-BTN-155) | as `session` carrying its key's role (R-BTN-129): an administrator's, an owner's or a member's, each every action §14 lists a session of its role on, on its key's scope, but R-BTN-186's key-only acts; an authority-changing act waits for its key's confirmation (R-BTN-155); and as a human (R-BTN-185). Owners' and members' sessions are not built (B-76, B-338); confirmation codes are proposed ([people and dashboard, §3](../proposals/people-and-dashboard.md#3-sign-in-sessions-and-confirmed-actions)) |
+| Dashboard session | `/v1/ui/*`, and the key routes of the actions its role may call (R-BTN-155) | the session cookie with the tab's `Baton-Session`, and no key (R-BTN-155) | as `session` carrying its key's role (R-BTN-129): an administrator's, an owner's or a member's, each every action §14 lists a session of its role on, on its key's scope, but R-BTN-186's key-only acts; an authority-changing act waits for its key's confirmation (R-BTN-155); and as a human where its sign-in proves one (R-BTN-185). Owners' and members' sessions are not built (B-76, B-338); confirmation codes are proposed ([people and dashboard, §3](../proposals/people-and-dashboard.md#3-sign-in-sessions-and-confirmed-actions)) |
 | Repository member | the repository's reads; `POST …/attestations` as writer `member` | a member key, SSH-signed or API key | R-BTN-204 |
 | Repository owner | `/v1/owner/{repository}/*`; the repository's reads and leg runs | an owner key, SSH-signed or API key | R-BTN-58 |
-| Human-only key | `POST /v1/human-keys`; `POST`, `DELETE …/attestations` as writer `human`; as an owner, or as a break-glass line on every repository it satisfies (R-BTN-188), the owner's routes | an SSH key registered `human_only` (R-BTN-185), on an owner key or a key of no other role | open human gates (R-BTN-185), `human-key.add` and `human-key.revoke` among them; as an owner, R-BTN-58; its session is a human as every person's is (R-BTN-185) |
+| Human-only key | `POST /v1/human-keys`; `POST`, `DELETE …/attestations` as writer `human`; as an owner, or as a break-glass line on every repository it satisfies (R-BTN-188), the owner's routes | an SSH key registered `human_only` (R-BTN-185), on an owner key or a key of no other role | open human gates (R-BTN-185), `human-key.add` and `human-key.revoke` among them; as an owner, R-BTN-58; its session is a human, as one a `human_only` key opens always is (R-BTN-185) |
 | MCP key (a delegated key; proposed, [people and dashboard, §2](../proposals/people-and-dashboard.md#2-mcp)) | `POST /v1/mcp` only | bearer `bmcp_…` | as `owner` on one repository, narrowed to the ids listed at minting: R-BTN-186, R-BTN-130 |
 | Public | `POST /v1/login`, the dashboard shell's three assets — its page, its one script, its one stylesheet | none, or on `POST /v1/login` a verified Cloudflare Access assertion (R-BTN-155) | start a sign-in |
 
@@ -333,8 +333,8 @@ told about everything else and verifies none of it:
 - custody of a human-only key, of a break-glass line and of the human identity's forge
   credential: an agent session that can use one is, to Baton and to the forge, the human;
 - custody of the dashboard's sign-in — the Cloudflare Access configuration, a browser holding a
-  session, and every key that can bind a sign-in code: whatever can open or drive a session is,
-  to Baton, a human (R-BTN-185);
+  session, and every key whose sign-in code opens a session that acts as `human`: whatever can
+  open or drive such a session is, to Baton, a human (R-BTN-185);
 - the forge beyond the default branch and the tags: its secrets, environments and privileged
   jobs, and what the forge runs from a ref a leg pushes;
 - whether a human read what they approved.
@@ -449,7 +449,8 @@ confines a leg's credentials; a compromised forge; and a compromised Baton.
     - `key:<fingerprint>`: that one key while it is an owner of the repository, meeting
       `human_key` when it is a `human_only` key, and a session of that key.
 
-    A session matches the entries its key matches, and `human` (R-BTN-185); a session never
+    A session matches the entries its key matches, and `human` where it acts as `human`
+    (R-BTN-185); a session never
     matches an entry for an action its role may not take.
 
     A key becomes an owner of a repository only by that repository's `approvers.members` action;
@@ -469,7 +470,7 @@ confines a leg's credentials; a compromised forge; and a compromised Baton.
     meet `hardware` satisfies nothing on a repository that requires it. It is set outside Baton
     and is the only recovery from a lost key.
 - **R-BTN-189 (guarantees and floors).** `status: partly B-145 B-147 B-189`
-  - **A guarantee** is a named condition over the policy, defined here, and held or broken for
+  - **A guarantee** is a named condition over the policy and the facts its cells name, defined here, and held or broken for
     each version. A deployment defines its own guarantees in its own specification, out of these
     and of what it enforces itself; Baton knows only these. A version or a `floors` entry naming
     any other guarantee is refused `invalid-params`.
@@ -536,8 +537,8 @@ confines a leg's credentials; a compromised forge; and a compromised Baton.
     held | broken}, floors, check_app_id, at, valid_until}`. `check_app_id` is the instance
     setting (§12.7). The response is unsigned; `valid_until` equals `at` for CLI 0.1.3 and
     0.1.4 compatibility, not as a validity guarantee. A trusted runner and a deployment's
-    audit read the same route, each with its own key. `held` says the policy's values meet the
-    guarantee's conditions, never that the deployment keeps §12.8's duty, which Baton cannot see:
+    audit read the same route, each with its own key. `held` says the guarantee's conditions are met as
+    R-BTN-189 evaluates them, never that the deployment keeps §12.8's duty, which Baton cannot see:
     under `builtin` a held guarantee protects nothing.
 - **R-BTN-180 (what lands on the default branch).** `status: partly B-140 B-147 B-189`
   - **No runner role and no domain.** Every grant is a runner's. Which runner may take a trusted
@@ -679,19 +680,21 @@ confines a leg's credentials; a compromised forge; and a compromised Baton.
   - Until FIDO attestation verification is built, no key, including a break-glass line, meets
     the repository's `hardware` minimum. A stored attestation marker alone is not evidence.
   - **A session is a human, as strongly as its sign-in proves.** An administrator's, owner's or
-    member's session (R-BTN-155) opened through Cloudflare Access, or by a code a `human_only` key
-    binds, acts as `human` beside its key's role. One opened by an ordinary key's one-time link or
-    sign-in code carries only that key's proof: it acts as its key's role, never as `human`, and
-    satisfies no human-only list. A sign-in path not named here proves no human. A session that
-    acts as `human` has its attestations recorded with writer `human` and its role, and whether
-    the act carried the touch below; a policy entry admitting either
+    member's session (R-BTN-155) acts as `human` beside its key's role. Under `human_key: any` it
+    does so only when Cloudflare Access opened it (in either of R-BTN-155's Access modes) or a
+    code a `human_only` key binds; one an ordinary key's one-time link or sign-in code opened
+    carries only that key's proof, acts as its key's role, never as `human`, and satisfies no
+    human-only list; and a sign-in path not named here proves no human. Under `hardware` every
+    session acts as `human`, each human act carrying the touch below. A session that acts as
+    `human` has its attestations recorded with writer `human` and its role, and whether the act
+    carried the touch below; a policy entry admitting either
     counts them, an untouched one as `human` only while the repository's `human_key` is `any`.
     Which approver entries it matches is R-BTN-188's. It gains no action its role lacks.
-    Baton cannot tell a browser a person drives from one an agent drives, so whoever can open a
-    session through Cloudflare Access or with a `human_only` key can act as a human; under `any`
-    that is a promise about the deployment's sign-in, as a human-only key's custody is.
-    **Not built** (B-340): Baton recording which sign-in opened a session; until it does, every
-    session acts as `human`.
+    Baton cannot tell a browser a person drives from one an agent drives, so under `any` whoever
+    can open a session through Cloudflare Access or with a `human_only` key can act as a human: a
+    promise about the deployment's sign-in, as a human-only key's custody is.
+    **Not built** (B-340): a session acting as `human`, and Baton recording which sign-in opened
+    it; until then a session acts as its key's role only.
   - **Under `hardware`**, a session's human act — one that counts only because the session is
     `human` — also carries a WebAuthn assertion; without a valid one it is refused `forbidden`.
     - **The credential** is registered for one key of a person role by a human-only key's
