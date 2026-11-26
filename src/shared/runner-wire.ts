@@ -7,7 +7,10 @@ import type { PointerReach } from '../core/contractPointers';
 
 export type NextLegs = { leg: string; state: string; waiting_on?: string }[];
 
+export interface CourseResolution { branch: string; sha: string }
+
 export interface ClaimAnswer {
+  course_source?: CourseResolution;
   claim_id: number;
   ticket_id: string;
   course_id?: string | null;
