@@ -5,16 +5,17 @@
 // close's three attempts spend is pinned under the lease's margin; the runner can state its
 // claim, its leg and its last beat in one line for a signal or `exit` hook.
 // Node only: it spawns processes and drives the production seams with a real hanging git.
-import { afterAll, afterEach, describe, it, expect } from 'vitest';
+import { afterAll, afterEach, describe, it, expect, vi } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { exec, closeTicket, CLOSE_TIMEOUT_MS, GIT_NONINTERACTIVE_ENV, RUN_TESTS_TIMEOUT_MS } from '../../src/defaults/ticket-state';
+import { exec, closeTicket, CLOSE_TIMEOUT_MS, RUN_TESTS_TIMEOUT_MS } from '../../src/defaults/ticket-state';
 import { testsClose } from '../../src/defaults/pr-close';
-import { testsStubSource } from '../../src/defaults/cli';
+import { stubBytes } from '../../src/defaults/stubs';
 import { builtIn } from '../../src/defaults/courses';
-import { git, GIT_TIMEOUT_MS } from '../../src/runner/home';
+import { git, gitAsync, GIT_TIMEOUT_MS } from '../../src/defaults/git.mjs';
+import { GIT_NONINTERACTIVE_ENV } from '../../src/client/git-env.mjs';
 import { BEAT_MS, Runner } from '../../src/runner/runner';
 import type { BatonApi } from '../../src/runner/api';
 import { exitHook, stopLine } from '../../src/runner/main';
@@ -64,7 +65,7 @@ describe('the defaults’ close is bounded and non-interactive (B-94)', () => {
     expect(3 * CLOSE_TIMEOUT_MS).toBeLessThan(900_000 - 240_000);
   });
 
-  it('the run-tests gate’s close is one bounded push, under the close’s own arithmetic; its script run is the leg’s own process (B-110 round 1, finding 15)', () => {
+  it('the run-tests gate’s close is one bounded push, under the close’s own arithmetic; its script run is the leg’s own process (B-110 round 1, finding 15)', async () => {
     // The gate's script and the stub's own git reads run in the leg's process (legProcess.mjs),
     // where the runner keeps beating; what blocks the runner's loop is the close alone — one
     // git call per attempt, so its three attempts are 3 × CLOSE_TIMEOUT_MS, pinned above.
@@ -79,11 +80,11 @@ describe('the defaults’ close is bounded and non-interactive (B-94)', () => {
     // The generated stub carries the gate's bound by name, and bounds its own git and npm the
     // way B-94 bounds every child: SIGKILL at the bound, stdin never an open pipe, no prompt.
     expect(RUN_TESTS_TIMEOUT_MS).toBeGreaterThan(0);
-    const stub = testsStubSource(builtIn('create-pr')!, 'create-pr', 'run-tests');
-    expect(stub).toContain(`const RUN_TESTS_TIMEOUT_MS = ${RUN_TESTS_TIMEOUT_MS};`);
-    expect(stub).toContain(`const GIT_BOUND_MS = ${CLOSE_TIMEOUT_MS}`);
-    expect(stub).toContain("stdio: ['ignore', 'pipe', 'pipe']"); // stdin never an open pipe (B-84)
-    expect(stub).toContain("killSignal: 'SIGKILL'");
+    const stub = (await stubBytes(builtIn('create-pr')!, 'run-tests')).toString('utf8');
+    expect(stub).toMatch(/timeoutMs: RUN_TESTS_TIMEOUT_MS/);
+    expect(stub).toContain("timeout: opts.timeoutMs ?? CLOSE_TIMEOUT_MS");
+    expect(stub).toContain('stdio: ["ignore", "pipe", "pipe"]'); // stdin never an open pipe (B-84)
+    expect(stub).toContain('killSignal: "SIGKILL"');
     expect(stub).toContain('GIT_TERMINAL_PROMPT');
   });
 
@@ -128,13 +129,59 @@ describe('the runner’s own git is bounded and non-interactive (B-94)', () => {
     expect(GIT_NONINTERACTIVE_ENV.GIT_SSH_COMMAND).toContain('ConnectTimeout=');
   });
 
+  it('does not run inherited askpass helpers when git needs a credential (S-BTN-41, B-280)', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'baton-askpass-'));
+    const helper = join(dir, 'askpass');
+    writeFileSync(helper, '#!/bin/sh\necho unexpected\n', { mode: 0o755 });
+    try {
+      vi.stubEnv('GIT_ASKPASS', helper);
+      vi.stubEnv('SSH_ASKPASS', helper);
+      expect(() => git(dir, ['-c', 'credential.helper=', 'credential', 'fill'], {
+        input: 'protocol=https\nhost=example.invalid\n\n',
+      })).toThrow(/terminal prompts disabled/);
+    } finally {
+      vi.unstubAllEnvs();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('preserves configured SSH transports and uses batch mode only for the default (S-BTN-41)', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'baton-ssh-transport-'));
+    const repo = join(dir, 'repo');
+    const ssh = (file: string, expected: string) => writeFileSync(file,
+      `#!/bin/sh\n${expected}\nexec git-upload-pack '${repo}'\n`, { mode: 0o755 });
+    const transport = join(dir, 'configured-ssh');
+    const remote = ['ls-remote', 'ssh://example.invalid/repo'];
+    try {
+      vi.stubEnv('PATH', `${dir}:${process.env.PATH}`);
+      vi.stubEnv('GIT_CONFIG_NOSYSTEM', '1');
+      vi.stubEnv('GIT_CONFIG_GLOBAL', '/dev/null');
+      vi.stubEnv('GIT_SSH_COMMAND', undefined);
+      vi.stubEnv('GIT_SSH', undefined);
+      git(null, ['init', '--bare', '-q', repo]);
+      ssh(join(dir, 'ssh'), '[ "$1 $2 $3 $4" = "-o BatchMode=yes -o ConnectTimeout=20" ] || exit 1');
+      expect(git(repo, remote)).toBe('');
+      ssh(transport, '[ "$1" = configured ] || exit 1');
+      writeFileSync(join(dir, 'ssh'), '#!/bin/sh\nexit 1\n');
+      git(repo, ['config', 'core.sshCommand', `${transport} configured`]);
+      expect(git(repo, remote)).toBe('');
+      await expect(gitAsync(repo, remote, 5_000)).resolves.toBe('');
+      git(repo, ['config', 'core.sshCommand', 'false']);
+      vi.stubEnv('GIT_SSH_COMMAND', `${transport} configured`);
+      expect(git(repo, remote)).toBe('');
+    } finally {
+      vi.unstubAllEnvs();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('the real git kills a hanging git at its bound (review round 1: the production seam)', () => {
     const dir = mkdtempSync(join(tmpdir(), 'baton-hang-'));
     execFileSync('git', ['-C', dir, 'init', '-q'], { stdio: 'ignore' });
     const started = Date.now();
     let killed = false;
     try {
-      git(dir, HANGING_GIT_ARGS, 150);
+      git(dir, HANGING_GIT_ARGS, { timeoutMs: 150 });
     } catch (e) {
       killed = (e as NodeJS.ErrnoException).code === 'ETIMEDOUT' || (e as { killed?: boolean }).killed === true || String(e).includes('SPAWN');
     } finally {

@@ -1,5 +1,5 @@
 // tickets-baton.ts — the ticket commands' Baton reads (B-129; R-BTN-179's one-answer rule, §9's
-// branch-holder query, R-BTN-81's history): before `baton tickets claim` writes, it asks Baton
+// branch-holder query, R-BTN-81's history): before a claim — `baton tickets check <id> --claimable`, B-326 — it asks Baton
 // where the ticket stands — the pickup side of the owner's ruling that Baton owns a ticket's
 // course history (B-120; R-BTN-35: about what Baton owns, Baton wins and the disagreement is
 // logged). One wrong `status: available` line over an open PR (B-91, 2026-10-27) then hands the
@@ -23,8 +23,8 @@
 // key cannot sign runner routes, and the board's `holders` has already answered the ticket's own
 // lock, so that one read is skipped, not fatal.
 import { readFileSync } from 'node:fs';
-import { send } from '../../cli/baton.mjs';
-import { requestCredential } from '../../cli/sign.mjs';
+import { send } from '../client/send.mjs';
+import { requestCredential } from '../client/sign.mjs';
 
 /** One live claim on a ticket, as the board's `holders` answers it (B-129). */
 export interface Holder {
@@ -124,6 +124,28 @@ export function checkKey(keyFile: string): void {
   } catch (e) {
     throw new Undetermined('the key', `key unreadable: ${(e as Error).message}`);
   }
+}
+
+/** Read terminal positions and explicit done closures for the informational ticket check. */
+export async function readDoneTickets(o: { url: string; keyFile: string; repository: string; fetchImpl?: typeof fetch }): Promise<Set<string>> {
+  checkKey(o.keyFile);
+  const done = new Set<string>();
+  const cursors = new Set<string>();
+  let cursor = '';
+  do {
+    const path = `/v1/repositories/${encodeURIComponent(o.repository)}/tickets?state=closed${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`;
+    const page = await getJson({ ...o, path, which: `closed tickets of ${o.repository}` });
+    const prefix = `${o.repository}:`;
+    if (!Array.isArray(page?.tickets)) throw new Undetermined(path, 'invalid ticket list');
+    for (const row of page.tickets) {
+      if (typeof row?.ticket_id === 'string' && row.ticket_id.startsWith(prefix)
+        && (row.detail?.end === 'done' || (row.detail?.at === null && typeof row.detail?.end === 'string'))) done.add(row.ticket_id.slice(prefix.length));
+    }
+    cursor = typeof page.next_cursor === 'string' ? page.next_cursor : '';
+    if (cursor && cursors.has(cursor)) throw new Undetermined(path, 'repeated pagination cursor');
+    cursors.add(cursor);
+  } while (cursor);
+  return done;
 }
 
 /** Read where Baton holds `ticket` (a local id) in `repository` (Baton's id for it), with

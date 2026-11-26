@@ -9,16 +9,44 @@
 // course that reads no PR facts keeps `leg_state: branch`; the registry carries each course's
 // `facts` (R-BTN-134) and the claim's scope resolves `repos:` through the list. Node only: it
 // writes a real repository and runs git.
+import { keepLegacyPrPlacement } from '../lib/legacy-pr-course';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { execFileSync } from 'node:child_process';
+import { once } from 'node:events';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { call as hostCall } from '#host';
+import { RECOMMENDED_CLIENT } from '../../src/core/http';
 import { initMain, parseSyncArgs, syncMain } from '../../src/defaults/cli';
-import { claimItem, endClaim, keyCall, ORIGIN, register, rows, setAdminKeys, setClock } from '../helpers';
-import { makeKey } from '../lib/sshKeys';
+import { serve } from '../../src/local/server';
 import { githubFake } from '../githubFake';
+import { claimItem, endClaim, keyCall, makeApiKey, ORIGIN, register, rows, setAdminKeys, setClock } from '../helpers';
+import { current } from '../hosts/local';
+import { makeKey } from '../lib/sshKeys';
+
+it('S-BTN-311: the local listener distinguishes an empty API-key POST from malformed JSON', async () => {
+  const admin = await makeApiKey('test administrator');
+  const target = await makeApiKey('test revocation target');
+  await setAdminKeys(admin.line);
+  const server = serve(current(), ORIGIN).listen(0, '127.0.0.1');
+  try {
+    await once(server, 'listening');
+    const address = server.address();
+    if (!address || typeof address === 'string') throw new Error('expected a listening TCP socket');
+    const url = `http://127.0.0.1:${address.port}/v1/admin/keys/${target.fingerprint}/revoke`;
+    for (const [body, status, code] of [['', 428, 'confirm-required'], ['{', 400, 'invalid-params']] as const) {
+      const res = await fetch(url, {
+        method: 'POST', body,
+        headers: { Authorization: `Bearer ${admin.key}`, 'Content-Type': 'application/json', 'Baton-Client': `baton/${RECOMMENDED_CLIENT}` },
+      });
+      expect({ status: res.status, json: await res.json() }).toMatchObject({ status, json: { code } });
+    }
+    expect(await rows('SELECT 1 FROM credentials WHERE id = ?', target.fingerprint)).toEqual([]);
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
 
 // The sync signs with the system clock (the stub runs under the real one), so the two must
 // agree within the signature window (5 minutes), as S-BTN-156 sets out: each test starts three
@@ -42,7 +70,7 @@ function keyPair(name: string): { file: string; publicKey: string } {
 
 /** The ids the fake forge reports for `acme/monorepo`, and the routes reading PR 7. */
 const MONO_IDS = { id: 7001, owner: { id: 31 } };
-const pull = (merged = false) => ({ number: 7, head: { ref: 'claude/LIN-1-fix', sha: 's7' }, state: merged ? 'closed' : 'open', merged_at: merged ? '2026-11-12T13:00:00Z' : null });
+const pull = (merged = false) => ({ number: 7, head: { ref: 'claude/LIN-1-fix', sha: 's7', repo: { id: 17 } }, base: { repo: { id: 17 } }, state: merged ? 'closed' : 'open', merged_at: merged ? '2026-11-12T13:00:00Z' : null });
 const detail = (comments: unknown[] = []) => ({
   [`/repos/acme/monorepo/commits/s7/check-runs`]: { check_runs: [{ conclusion: 'success' }] },
   [`/repos/acme/monorepo/pulls/7/commits`]: [{ sha: 'c7', commit: { message: 'the work', committer: { date: '2026-11-12T11:00:00Z' } } }],
@@ -68,54 +96,55 @@ async function sync(): Promise<number> {
 const stationOf = async (id: string) => (await rows<{ station: string; next_leg: string | null }>('SELECT station, next_leg FROM ticket_stations WHERE ticket_id = ?', `home:${id}`))[0];
 const nextOf = (id: string) => rows<{ leg: string; state: string; waiting_on: string | null }>('SELECT leg, state, waiting_on FROM ticket_next_legs WHERE ticket_id = ? ORDER BY leg', `home:${id}`);
 
-beforeEach(async () => {
-  minutes = 0;
-  await setClock(T0);
-  scratch = mkdtempSync(join(tmpdir(), 'baton-s214-keys-'));
-  dir = mkdtempSync(join(tmpdir(), 'baton-s214-'));
-  remote = mkdtempSync(join(tmpdir(), 'baton-s214-remote-'));
-  execFileSync('git', ['init', '-q', '--bare', '-b', 'main', remote], { stdio: 'ignore' });
-  for (const a of [['init', '-q', '-b', 'main'], ['config', 'user.email', 's214@test'], ['config', 'user.name', 's214'], ['remote', 'add', 'origin', remote]]) execFileSync('git', ['-C', dir, ...a], { stdio: 'ignore' });
-  // The home: registered as plain git, with its owner and sync keys; `code_repos` names the
-  // GitHub repository with the ids the fake forge reports.
-  const admin = await makeKey('ssh-ed25519', 'admin');
-  const owner = await makeKey('ssh-ed25519', 'owner');
-  const syncKey = keyPair('sync');
-  syncFile = syncKey.file;
-  await setAdminKeys(admin);
-  expect((await keyCall(admin, '/v1/admin/repositories', {
-    id: 'home', github: 'you/home', forge: 'git', remote: 'ssh://git@localhost/home.git', default_branch: 'main',
-    sync_keys: [{ public_key: syncKey.publicKey, role: 'sync' }], owner_keys: [owner.publicKey], cut_over: true,
-  })).status).toBe(200);
-  // The scaffold: create-pr (a PR course) and bug-report (a marker course, no PR facts).
-  expect(await initMain(['--course', 'create-pr'], { root: dir, log: () => {} })).toBe(0);
-  expect(await initMain(['--course', 'bug-report'], { root: dir, log: () => {} })).toBe(0);
-  const batonJson = join(dir, '.baton', 'baton.json');
-  const config = JSON.parse(readFileSync(batonJson, 'utf8')) as Record<string, unknown>;
-  writeFileSync(batonJson, JSON.stringify({ ...config, baton_url: ORIGIN, repos: { mono: 'acme/monorepo' }, ticket_prefix: 'LIN' }, null, 2));
-  writeFileSync(join(dir, 'tickets', 'LIN-1.md'), '---\nid: LIN-1\ntitle: Ship the fix\nrepos: [mono]\n---\n\nWhat to change.\n\n## Status\n');
-  writeFileSync(join(dir, 'tickets', 'LIN-2.md'), '---\nid: LIN-2\ntitle: The save button does nothing\ncourse: bug-report\n---\n\n## trace\n\nWhat the trace found.\n\n## origin\n\nWhere it began.\n\n## dedupe\n\nThe dedupe verdict.\n\n## fold\n\nThe fold.\n\n## prevent\n\nThe prevention weighed.\n');
-  git('add', '-A');
-  git('commit', '-qm', 'home');
-  const set = await keyCall(owner, '/v1/owner/home/settings', {
-    code_repos: [{ path: 'acme/monorepo', forge: 'github', host: 'github.com', repo_id: '7001', owner_id: '31' }],
-  }, 'PUT');
-  if (set.status !== 200) throw new Error(`settings: ${JSON.stringify(set.json)}`);
-  github = { '/repos/acme/monorepo': MONO_IDS };
-  asked.length = 0;
-  process.env.GITHUB_TOKEN = 't';
-  forge();
-});
-
-afterEach(() => {
-  vi.unstubAllGlobals();
-  delete process.env.GITHUB_TOKEN;
-  rmSync(dir, { recursive: true, force: true });
-  rmSync(remote, { recursive: true, force: true });
-  rmSync(scratch, { recursive: true, force: true });
-});
-
 describe('S-BTN-214 a plain-git home on a GitHub code repository', () => {
+  beforeEach(async () => {
+    minutes = 0;
+    await setClock(T0);
+    scratch = mkdtempSync(join(tmpdir(), 'baton-s214-keys-'));
+    dir = mkdtempSync(join(tmpdir(), 'baton-s214-'));
+    remote = mkdtempSync(join(tmpdir(), 'baton-s214-remote-'));
+    execFileSync('git', ['init', '-q', '--bare', '-b', 'main', remote], { stdio: 'ignore' });
+    for (const a of [['init', '-q', '-b', 'main'], ['config', 'user.email', 's214@test'], ['config', 'user.name', 's214'], ['remote', 'add', 'origin', remote]]) execFileSync('git', ['-C', dir, ...a], { stdio: 'ignore' });
+    // The home: registered as plain git, with its owner and sync keys; `code_repos` names the
+    // GitHub repository with the ids the fake forge reports.
+    const admin = await makeKey('ssh-ed25519', 'admin');
+    const owner = await makeKey('ssh-ed25519', 'owner');
+    const syncKey = keyPair('sync');
+    syncFile = syncKey.file;
+    await setAdminKeys(admin);
+    expect((await keyCall(admin, '/v1/admin/repositories', {
+      id: 'home', github: 'you/home', forge: 'git', remote: 'ssh://git@localhost/home.git', default_branch: 'main',
+      sync_keys: [{ public_key: syncKey.publicKey, role: 'sync' }], owner_keys: [owner.publicKey], cut_over: true,
+    })).status).toBe(200);
+    // The scaffold: create-pr (a PR course) and bug-report (a marker course, no PR facts).
+    expect(await initMain(['--own', '--course', 'create-pr'], { root: dir, log: () => {} })).toBe(0);
+    keepLegacyPrPlacement(dir);
+    expect(await initMain(['--course', 'bug-report'], { root: dir, log: () => {} })).toBe(0);
+    const batonJson = join(dir, '.baton', 'baton.json');
+    const config = JSON.parse(readFileSync(batonJson, 'utf8')) as Record<string, unknown>;
+    writeFileSync(batonJson, JSON.stringify({ ...config, baton_url: ORIGIN, repos: { mono: 'acme/monorepo' }, ticket_prefix: 'LIN' }, null, 2));
+    writeFileSync(join(dir, 'tickets', 'LIN-1.md'), '---\nid: LIN-1\ntitle: Ship the fix\nrepos: [mono]\n---\n\nWhat to change.\n\n## Status\n');
+    writeFileSync(join(dir, 'tickets', 'LIN-2.md'), '---\nid: LIN-2\ntitle: The save button does nothing\ncourse: bug-report\n---\n\n## trace\n\nWhat the trace found.\n\n## origin\n\nWhere it began.\n\n## dedupe\n\nThe dedupe verdict.\n\n## fold\n\nThe fold.\n\n## prevent\n\nThe prevention weighed.\n');
+    git('add', '-A');
+    git('commit', '-qm', 'home');
+    const set = await keyCall(owner, '/v1/owner/home/settings', {
+      code_repos: [{ path: 'acme/monorepo', forge: 'github', host: 'github.com', repo_id: '7001', owner_id: '31' }],
+    }, 'PUT');
+    if (set.status !== 200) throw new Error(`settings: ${JSON.stringify(set.json)}`);
+    github = { '/repos/acme/monorepo': MONO_IDS };
+    asked.length = 0;
+    process.env.GITHUB_TOKEN = 't';
+    forge();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    delete process.env.GITHUB_TOKEN;
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(remote, { recursive: true, force: true });
+    rmSync(scratch, { recursive: true, force: true });
+  });
+
   it('a create-pr ticket walks to merged from the code repository\'s PRs, and its rounds live in the PR conversation', async () => {
     github = { '/repos/acme/monorepo': MONO_IDS, '/repos/acme/monorepo/pulls?state=all': [pull()], ...detail() };
     expect(await sync()).toBe(0);
@@ -165,7 +194,7 @@ describe('S-BTN-214 a plain-git home on a GitHub code repository', () => {
     expect(await rows<{ facts: string }>('SELECT facts FROM courses WHERE repository_id = ? AND id = ?', 'home', 'create-pr')).toEqual([{ facts: '["prs"]' }]);
     expect(await rows<{ facts: string }>('SELECT facts FROM courses WHERE repository_id = ? AND id = ?', 'home', 'bug-report')).toEqual([{ facts: '[]' }]);
     expect(await rows<{ policy_json: string }>('SELECT policy_json FROM repository_policies WHERE repository_id = ?', 'home')).toMatchObject([{ policy_json: expect.not.stringContaining('"leg_state"') }]);
-    const courses = [{ repository: 'home', course: 'create-pr', version: 1 }, { repository: 'home', course: 'bug-report', version: 1 }];
+    const courses = [{ repository: 'home', course: 'create-pr', version: 3 }, { repository: 'home', course: 'bug-report', version: 1 }];
     const a = await register('vm-a', { courses, capabilities: ['agent-venue', 'runner:leg-trees'] });
     const claim = await claimItem('vm-a', a.secret, { ticket_id: 'home:LIN-1' });
     if (claim.status !== 200) throw new Error(`claim: ${JSON.stringify(claim.json)}`);

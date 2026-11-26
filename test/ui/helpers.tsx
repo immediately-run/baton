@@ -66,7 +66,7 @@ export function mockFetch(routes: Record<string, Route>): { calls: Call[]; route
 /** A `repo.list` row with every count, for a fixture. */
 export function repoRow(id: string, over: Partial<RepoRow> = {}): RepoRow {
   return {
-    id, github: `example-org/${id}`, forge: 'github', web_base: `https://github.com/example-org/${id}`, default_branch: 'main', weight: 1, tiers: ['routine'],
+    id, github: `example-org/${id}`, forge: 'github', web_base: `https://github.com/example-org/${id}`, default_branch: 'main', weight: 1,
     courses: [{ id: 'course-a', version: 3 }], head: { sha: 'cabec94c0123456789abcdef0123456789abcdef', received_at: Date.now() - 60_000, observation: 7 },
     mode: 'cut-over', running: 2, ready: 5, needs_you: 0, runners_alive: 3, runners_total: 4, discrepancies_7d: 1, exclusive_goal: null, ...over,
   };

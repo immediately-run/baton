@@ -1,18 +1,18 @@
 ---
-title: "11. People: administrators, owners and their surfaces"
-description: "Two kinds of people hold authority in a tenant: its administrators and each repository's owners."
+title: "11. People: administrators, owners, members and their surfaces"
+description: "Three kinds of people act in a tenant: its administrators, and each repository's owners and members."
 ---
-## 11. People: administrators, owners and their surfaces *(partly built)*
+## 11. People: administrators, owners, members and their surfaces
 
-Two kinds of people hold authority in a tenant: its **administrators** and each repository's
-**owners**. They act through the CLI and the dashboard. What every principal may do is in the
-principal table (§12.1). The action registry, MCP, owners' dashboard sessions and the screens'
-contents are not built; their design is
-[the people and dashboard proposal](../proposals/people-and-dashboard.md).
+Three kinds of people act in a tenant: its **administrators**, and each repository's **owners**
+and **members**. Each acts through the CLI and the dashboard, which offer a person the same
+actions (R-BTN-186). What every principal may do is in the principal table (§12.1). The action
+registry, MCP, members, owners' and members' dashboard sessions and the screens' contents are not
+built; their design is [the people and dashboard proposal](../proposals/people-and-dashboard.md).
 
 ### 11.1 Keys
 
-- **R-BTN-13 (SSH keys and signed requests).**
+- **R-BTN-13 (SSH keys and signed requests).** `status: built R3-1213`
   - **Keys.** An SSH key is one of `ssh-ed25519`, `ecdsa-sha2-nistp256`,
     `sk-ssh-ed25519@openssh.com` or `sk-ecdsa-sha2-nistp256@openssh.com`. Baton stores only the
     public key; a credential's id is its fingerprint (`SHA256:…`). A credential is valid in one
@@ -43,12 +43,13 @@ contents are not built; their design is
   - **Signing.** Signers sign through `ssh-agent` or the key file and never write the private
     key to a log or transcript.
 
-- **R-BTN-159 (an SSH key or an API key).** An administrator, an owner and a runner each hold
+- **R-BTN-159 (an SSH key or an API key).** `status: built B-8` An administrator, an owner and a runner each hold
   either an SSH key, whose every request is signed (R-BTN-13), or an API key, sent as a bearer.
   Role, grants, revocation and the one-role rule (§12.1) are the same for both kinds. The kinds
   differ only as this rule says.
   - **Where only an SSH key serves.** Sync, mirror, instrument, check-runner and `human_only`
-    (R-BTN-185) keys are SSH keys; a sync may use a CI identity instead (R-BTN-93). An API-key
+    (R-BTN-185) keys are SSH keys, and so is a runner's that takes a trusted leg (rule
+    `trusted`, R-BTN-182); a sync may use a CI identity instead (R-BTN-93). An API-key
     runner never syncs or delivers (R-BTN-171): `/v1/sync/*`, `/v1/probe/*` and
     `/v1/runner/outbox/*` accept no API key.
   - **The key.** `baton key create FILE` writes `bak_<id>_<secret>` (64 random bits of id, 256
@@ -58,24 +59,25 @@ contents are not built; their design is
     (R-BTN-117), or `baton owner grant add --api-key --name <name>` (`POST
     /v1/owner/{repository}/grants {name, api_key: true, capabilities}`).
   - **Where it is registered.** Wherever an SSH public key goes for that role: a
-    `BATON_ADMIN_KEYS` line (`--admin-keys` locally), an owner key, a grant's `public_key`.
+    `BATON_ADMIN_KEYS` line (`--admin-keys` locally), an owner key, a member key, a grant's
+    `public_key`.
   - **How it is sent.** `Authorization: Bearer <key>` in place of a signature, on `/v1/admin/*`,
     `/v1/owner/*`, `/v1/runner/*` and the repository reads; a runner adds its secret
-    (R-BTN-14). `baton … -i FILE`, `BATON_KEY_FILE` and `BATON_KEY` send it; no client sends a
-    bearer over non-loopback `http` (R-BTN-158). Baton hashes the key and compares every byte
+    (R-BTN-14). `baton … -i FILE`, `BATON_KEY_FILE` and `BATON_KEY` send it. Client refusal over clear HTTP is not built (R-BTN-158). Baton hashes the key and compares every byte
     with the hash on the public line its fingerprint names. An unknown fingerprint, a wrong
     secret or a malformed bearer is `unauthenticated`.
-  - **Records and revocation.** Acts are recorded as `admin:bak_<id>` or `owner:bak_<id>`.
-    A runner's or owner's key of either kind stops at its next call after `baton admin key
-    revoke` (R-BTN-57); an administrator's stops when its line leaves `BATON_ADMIN_KEYS`.
+  - **Records and revocation.** Acts are recorded as `admin:bak_<id>`, `owner:bak_<id>` or
+    `member:bak_<id>`. A runner's, owner's or member's key of either kind stops at its next call
+    after `baton admin key revoke` (R-BTN-57); an administrator's stops when its line leaves
+    `BATON_ADMIN_KEYS`.
   - **Lifetime.** An API-key runner credential lives at most 90 days and ends after 7 days
     without an authenticated call (a token-registered one per R-BTN-117, if sooner). An
-    administrator's or owner's API key lasts until it is revoked or its line removed. The
+    administrator's, owner's or member's API key lasts until it is revoked or its line removed. The
     repository setting `api_keys: false` (R-BTN-66) refuses API-key runners on that repository.
 
-### 11.2 Administrators and owners
+### 11.2 Administrators, owners and members
 
-- **R-BTN-57 (administrators: whoever controls the deployment).**
+- **R-BTN-57 (administrators: whoever controls the deployment).** `status: built`
   - **The root of trust.** Whoever can deploy a Baton or set its secrets can replace its code,
     so that control is the root of trust (R-BTN-136). Where `ACCESS_IDENTITIES` binds an email
     (R-BTN-155), whoever can make the deployment's Cloudflare Access application assert that
@@ -90,11 +92,13 @@ contents are not built; their design is
     (R-BTN-128), and the whole state in one request, `GET /v1/admin/state`, built of the
     functions the entity reads use (R-BTN-179), with no session. Each act is an `admin` event.
   - **Grants and owners.** Making or changing a grant, changing a key's hostname and adding an
-    owner are `approvers.members` actions (R-BTN-188). An administrator's request is `forbidden`
-    where that list is human-only: an administrator key carries no `human_only` mark (§12.1).
+    owner are `approvers.members` actions (R-BTN-188). An administrator key's request is
+    `forbidden` where that list is human-only, since it carries no `human_only` mark (§12.1); an
+    administrator's session is a human (R-BTN-185).
   - **Revocation.** An administrator revokes any key at once but an administrator's. Revoking
     an owner key removes it from every repository it owns, the last owner included (an
-    administrator then adds one with `owner_keys_add`). A revocation that would leave an
+    administrator then adds one with `owner_keys_add`), and revoking a member key removes it
+    from every repository it is a member of (R-BTN-204). A revocation that would leave an
     approver list unsatisfiable is refused `unsatisfiable-approvers` (R-BTN-188). An administrator's key is removed only from the secret (`baton admin keys
     set`); `admin key revoke` naming one is `invalid-params`.
   - **One management path.** `baton admin …` and `baton owner …` call the same validated
@@ -113,7 +117,7 @@ contents are not built; their design is
 
     `baton admin check-app create` makes the check App the same way (§12.7).
 
-- **R-BTN-58 (repository owners).**
+- **R-BTN-58 (repository owners).** `status: built`
   - **Owners act for one repository.** Each registered repository has owner keys
     (`repository_owners`), SSH or API (R-BTN-159). An owner calls `/v1/owner/{repository}/*`
     and acts for that repository only; owning one repository confers nothing on another. Its
@@ -130,17 +134,43 @@ contents are not built; their design is
     naming another hostname for the key is refused `conflict`; only an administrator changes
     it.
 
+- **R-BTN-204 (repository members).** `status: specified B-338`
+  - **Members read and answer for one repository.** A repository's members
+    (`repository_members`) are keys its owners add with `baton owner member add <repository>
+    <pub> --answers <label,…>` (`POST /v1/owner/{repository}/members`), change with `owner member
+    answers` and remove with `owner member remove` (destructive, §12.2). Adding, changing and
+    removing a member are `approvers.members` actions (R-BTN-188). A member key is an SSH or API
+    key (R-BTN-159) holding the `member` role (§12.1); being a member of one repository confers
+    nothing on another, and one key may be a member of several.
+  - **What a member may do.** A member calls the reads §14 lists for a *reader* of its repository
+    and for a member (the board and a leg's runs among them; not the owners' grants and policy
+    log, which list the repository's credentials and the policy's history), and answers a person leg whose `asks` label (R-BTN-116) is one of its `answers`,
+    as writer `member` (R-BTN-181). It holds no other action: no grant, owner, hold, bar,
+    override, resolve, route, sync, setting, policy or credential.
+  - **The label is the course's.** A leg's `asks` label is written in its course file, so which
+    member's answer counts is as strong as that file: where courses are a control path that lands
+    only by a human's approval (R-BTN-184), so is the label; elsewhere a pusher who can change the
+    course can change who answers, as it can change the course's legs (§12's *Pushers are
+    legitimate*).
+  - **Ending.** A member key stops acting for a repository at its next call after `owner member
+    remove` there; its revocation everywhere is R-BTN-57's, and its sessions' end R-BTN-155's.
+    Its acts are recorded as `member:<fingerprint>`.
+  - **Where its answers count.** Where the policy's `attestations` entry for `std:decision@1`
+    admits `member` (R-BTN-188, whose table gives the presets' defaults); a policy stored before
+    members existed admits it once an owner adds `member` to it.
+
 ### 11.3 The actions, the CLI and MCP
 
-- **R-BTN-129 (principals, scopes and effects).** Every route and command is an action: an id,
+- **R-BTN-129 (principals, scopes and effects).** `status: partly B-25` Every route and command is an action: an id,
   the principals that may call it with their scopes, and an effect.
-  - **Principals.** `administrator`, `owner`, `session` (a dashboard session, R-BTN-155),
+  - **Principals.** `administrator`, `owner`, `member` (a member key, R-BTN-204), `session` (a
+    dashboard session carrying its key's role, R-BTN-155),
     `runner`, `check-runner`, `probe` (an instrument key), `sync`, `mirror`, `token` (a
     registration token), `webhook` (the GitHub App's signature), `forge` (a forge verifier),
     `human` (a `human_only` key, R-BTN-185) and `public` (no credential). §12.1 says how each
     authenticates and what it may do.
   - **Scopes.** `instance` (this tenant; no action is the operator's, R-BTN-136), `repository`
-    (a repository the key owns or is granted on), `claim-holder` (the key holds the claim's
+    (a repository the key owns, is a member of or is granted on), `claim-holder` (the key holds the claim's
     lease) and `own` (its own credential or outbox entries).
   - **Effect** is `read`, `write` or `destructive` (§12.2).
   - **Ids.** An action is named in R-BTN-127's nouns, with dots: `leg.stop`, `ticket.expedite`,
@@ -153,7 +183,7 @@ contents are not built; their design is
     [the proposal, §1](../proposals/people-and-dashboard.md#1-the-action-registry). Until it
     is, §14 lists each route with its callers and R-BTN-127's table each command.
 
-- **R-BTN-127 (the CLI is a tree of nouns and verbs).**
+- **R-BTN-127 (the CLI is a tree of nouns and verbs).** `status: built B-22 B-23`
   - **Grammar.** Every command is `baton <noun> <verb> [<arguments>] [<flags>]`; the only
     top-level verbs are `help` and `version`. Under `owner` and `admin`, a verb that acts on a
     kind of thing is two words, `<thing> <act>`, the thing singular (`owner policy apply`,
@@ -205,7 +235,7 @@ contents are not built; their design is
   | `leg log <ticket> [<leg>] [--run <n>] [-f] [--transcripts] [--json]` | `leg.runs`, then reads the log directory | R-BTN-128 |
   | `leg runs <ticket> [<leg>]` | a leg's runs | R-BTN-128 |
   | `leg replay <ticket> <leg> [--run <n>] [--against <sha>]` | `leg.runs`, then replays locally | R-BTN-84 |
-  | `leg stop <ticket>` | stops the running leg | R-BTN-119 |
+   | `leg stop <ticket>` | *proposed* ([B-9](../../tickets/B-9.mdx)) | R-BTN-119 |
   | `leg status`, `output`, `done`, `suspend`, `release`, `next`, `yield`, `raise` | the local channel, inside a leg; `leg await`, `events` and `ticket` are proposed ([conditions](../proposals/conditions.md)) | R-BTN-106, R-BTN-160 |
   | `ticket blocked [<ticket>] [--on <kind>:<ref>]` | a ticket's or the repository's blocks (`repo.blocked`) | R-BTN-75 |
   | `ticket history <ticket>` | a ticket's history | R-BTN-81 |
@@ -213,7 +243,7 @@ contents are not built; their design is
   | `ticket route <ticket> <leg> \| --clear` | queues or clears a leg (proposed: [data model and API](../proposals/data-model-and-api.md#other-reads-and-owner-routes)) | R-BTN-83 |
   | `ticket adopt <ticket> [--at <station>] [--next <leg>] [--ran <leg>,…]` | places a ticket on its course (proposed: [ticket adopt](../proposals/ticket-adopt.md)) | R-BTN-39 |
   | `ticket resolve <ticket> <restart> [--condition <id>]` | resolves a condition | R-BTN-163 |
-  | `ticket new`, `ticket claim <id>`, `ticket set <id> <status>`, `ticket done <id>`, `ticket check`, `ticket request "<one sentence>" --course <course>` | local: the ticket source in git | R-BTN-74, R-BTN-131 |
+  | `ticket next <kind>`, `ticket check [<id> --claimable]`, `ticket request "<one sentence>" --course <course>` | local: the ticket source in git, read; Dibber writes the ticket files | R-BTN-74, R-BTN-199, R-BTN-131 |
   | `decision list [--all] [--watch]` | `condition.list`: what waits for a person | R-BTN-163 |
   | `decision answer <ticket> <option>` | `attestation.add`: a person leg's answer | R-BTN-116, R-BTN-181 |
   | `attestation add <repository> --type <type> --subject <json> --value <json> [--lapses <duration>]`, `attestation revoke <repository> <id>` | writes or revokes an attestation (proposed: [security](../proposals/security.md)) | R-BTN-181 |
@@ -232,11 +262,10 @@ contents are not built; their design is
   | `home list`, `home use <name>`, `home add [<name>] --repository <id> [--origin <url>] [--checkout <path>]`, `home remove <name>`, `home show` | local: the homes file | R-BTN-127 |
   | `server start --db <file> --admin-keys <file>` | local: starts the local host | R-BTN-56, R-BTN-158 |
   | `owner grant list <repository>` | owners, grants, settings and bars | R-BTN-179, R-BTN-146 |
-  | `owner grant add <repository> --key <pub> --capabilities <a,b> [--hostname <h>] [--label <l>] [--max-claims <n>] [--confirm-span]`, or `--api-key --name <name>` | grants a runner key | R-BTN-58, R-BTN-146, R-BTN-159 |
+  | `owner grant add <repository> --key <pub> --capabilities <a,b> [--hostname <h>] [--label <l>] [--max-claims <n>]`, or `--api-key --name <name>` | grants a runner key | R-BTN-58, R-BTN-146, R-BTN-159 |
   | `owner grant revoke <repository> <fingerprint>` | revokes a grant | R-BTN-58 |
-  | `owner grant role <repository> <fingerprint> --role runner\|trusted-runner [--domain <label>] [--checker]` | sets a grant's role, domain and checker mark (proposed: [security](../proposals/security.md)) | R-BTN-180 |
-  | `owner grant flags <repository> <fingerprint> --sync\|--no-sync` | sets a grant's `sync` flag | R-BTN-146 |
   | `owner owner add <repository> <pub>`, `owner owner remove <repository> <fingerprint>` | adds or removes an owner | R-BTN-58 |
+  | `owner member add <repository> <pub> --answers <label,…>`, `owner member answers <repository> <fingerprint> <label,…>`, `owner member remove <repository> <fingerprint>` | adds, changes or removes a member (proposed: B-338) | R-BTN-204 |
   | `owner bar add <repository> --course <c> --tag <t>`, `owner bar lift <repository> <id>`, `owner bar follow <repository> <course>` | the owner's bars | R-BTN-67, R-BTN-142 |
   | `owner settings show <repository>`, `owner settings set <repository>` | reads (`owner.grant.list`) or sets the owner settings | R-BTN-66, R-BTN-140 |
   | `owner policy show <repository>`, `owner policy diff <repository> [<version>]`, `owner policy log <repository>`, `owner policy set <repository> <file>`, `owner policy apply <repository> <preset>` | reads (`repo.policy`, `owner.policy.log`) or sets the policy | R-BTN-188 |
@@ -258,10 +287,10 @@ contents are not built; their design is
   | `admin freeze`, `admin unfreeze`, `admin seal`, `admin export [--with-history]`, `admin import <file>` | freeze, seal, export, import | R-BTN-88 |
   | `admin state` | the state in one request | R-BTN-57, R-BTN-179 |
   | `admin open` | an administrator's dashboard sign-in | R-BTN-155 |
-  | `owner open`, `admin confirm <code>`, `owner confirm <code>`, `admin sessions revoke --all`, `owner sessions revoke` | owners' sign-in, confirmations and session revocation (proposed: [people and dashboard](../proposals/people-and-dashboard.md#3-sign-in-sessions-and-confirmed-actions)) | R-BTN-155 |
+  | `owner open`, `member open`, `admin confirm <code>`, `owner confirm <code>`, `admin sessions revoke --all`, `owner sessions revoke` | sign-in by code, confirmations and session revocation (proposed: [people and dashboard](../proposals/people-and-dashboard.md#3-sign-in-sessions-and-confirmed-actions)) | R-BTN-155 |
   | `owner mcp-key create <repository> --name <name> [--actions read \| <id>,…] [--ttl <days>]`, `owner mcp-key revoke <repository> <name>` | MCP keys (proposed: [people and dashboard](../proposals/people-and-dashboard.md#2-mcp)) | R-BTN-130 |
 
-- **R-BTN-197 (Baton states the client versions it serves).**
+- **R-BTN-197 (Baton states the client versions it serves).** `status: built`
   - **The client says what it is.** Every request the CLI sends carries `Baton-Client:
     baton/<version>`, its package's version, with `+dev` appended when it runs from a git
     working tree (`baton/0.1.4+dev`). A request without the header is compared as `0.0.0`.
@@ -287,7 +316,7 @@ contents are not built; their design is
     ends as its lease lapses (R-BTN-9). No client installs, fetches or switches its version on
     Baton's answer, and the header carries version numbers only (R-BTN-107).
 
-- **R-BTN-130 (MCP and delegated keys).** Baton serves no MCP endpoint and registers no
+- **R-BTN-130 (MCP and delegated keys).** `status: specified B-25` Baton serves no MCP endpoint and registers no
   delegated key (B-25, B-124). What a delegated key may do is R-BTN-186's. The design of
   `POST /v1/mcp` and the MCP key is
   [the proposal, §2](../proposals/people-and-dashboard.md#2-mcp); OAuth for MCP clients that
@@ -295,43 +324,107 @@ contents are not built; their design is
 
 ### 11.4 The dashboard
 
-- **R-BTN-155 (dashboard sign-in and sessions).**
-  - **Sign-in.** `baton admin open` asks `POST /v1/admin/login-links` with an administrator
-    key for a one-time link, `<origin>/login#<token>`, valid 5 minutes and used once. The page
-    sends `POST /v1/login {token}`, which answers the session cookie `__Host-baton_session`
-    (R-BTN-16) only while the minting key is an administrator's.
-  - **Sessions.** A session is its key's: the administrator key whose link opened it, or the
-    one its Access line names. It lives 12 hours and ends as
-    soon as the key leaves `BATON_ADMIN_KEYS`, checked on every request. It calls `/v1/ui/*`
-    and reads the `GET`s §14 lists a session on (§14, R-BTN-16); a destructive action carries `confirm: true` (§12.2). Link tokens and session values
-    are stored as hashes (§12.1).
+- **R-BTN-155 (dashboard sign-in and sessions).** `status: partly B-46 B-204 B-252 B-310 B-76 B-338`
+  - **Every person signs in, and a session is one key's.** An administrator (R-BTN-57), an owner
+    (R-BTN-58) and a member (R-BTN-204) each sign in to the dashboard. A session is one key's and
+    carries that key's role: it may call every action the key may call through the CLI, on the
+    same scope, but R-BTN-186's key-only acts, and no other (R-BTN-129). An owner's or member's
+    session reaches only
+    the repositories its key still owns or is a member of. A session is also a human
+    (R-BTN-185).
+  - **Authentication first, then one role.** A sign-in authenticates the person, then opens a
+    session for one key the person holds. Where the person holds keys of more than one role, or
+    of one role more than once, the page asks which after authenticating and before any session
+    opens; one key opens its session without asking.
+  - **A one-time link.** `baton admin open` asks `POST /v1/admin/login-links` with an
+    administrator key for a one-time link, `<origin>/login#<token>`, valid 5 minutes and used
+    once. The page sends `POST /v1/login {token}`, which opens the minting key's session only
+    while the key is an administrator's.
   - **Sign-in through Cloudflare Access.** Behind Cloudflare Access a person signs in with no
     terminal, by one explicit act: `/login` offers "Sign in with Cloudflare Access", and only that
     click sends `POST /v1/login {access: true}`. The page never sends it by itself, after a
     logout or a session's end included. Baton verifies the request's `Cf-Access-Jwt-Assertion`
-    against the team's keys and the application's audience and reads its `email` claim. The
-    secret `ACCESS_IDENTITIES` binds emails to keys: one `<email> <fingerprint>` line each,
-    emails ASCII and compared ASCII-lowercased, at most one line per email, several emails to
-    one key allowed. Whoever controls the deployment sets it (R-BTN-57). An email bound to an
-    administrator key gets a session of that key, as its link would open it; that session's key
-    is the line's. An absent, unverified or expired assertion, one with no or a non-ASCII email,
-    and an email bound to no key in `BATON_ADMIN_KEYS` are `unauthenticated` and set no cookie;
-    an unreadable key set is `unavailable`. A value of `ACCESS_IDENTITIES` with a malformed or
-    duplicated line binds nothing: every Access sign-in is `unavailable` until it is fixed, and
-    nothing else is affected. Each sign-in is recorded as an event of its key,
-    `{act: "login", via: "access"}`, with the email's SHA-256, never the email. Each request
-    a session so opened authorizes also checks its line: the session ends as soon as the email
-    leaves `ACCESS_IDENTITIES` or its line names another key. Baton reads no assertion after
-    the sign-in, so ending the Access session does not end Baton's.
+    against the team's keys and the application's audience and reads its `email` claim.
+    - **Lines.** The secret `ACCESS_IDENTITIES` binds emails to keys: one `<email> <fingerprint>`
+      line per pair, emails ASCII and compared ASCII-lowercased, each pair at most once; an email
+      may be bound to several keys and a key to several emails. Whoever controls the deployment
+      sets it (R-BTN-57).
+    - **The keys an email opens** are its lines' keys that hold a person role now: an
+      administrator key in `BATON_ADMIN_KEYS`, an owner key owning a live repository, or a member
+      key a member of one. Where there is one, `{access: true}` opens its session. Where there
+      are several, it answers `{choose: [{fingerprint, role, repositories}]}`, sets no cookie and
+      opens nothing; the page draws the choice, and `POST /v1/login {access: true, key:
+      <fingerprint>}`, with the assertion verified again, opens that key's session. A `key` that
+      is not among them is `unauthenticated`.
+    - **Refusals.** An Access sign-in refusal with `unauthenticated` sets no cookie and carries
+      one `reason`, checked in this order: `not-configured` if either `ACCESS_TEAM_DOMAIN` or
+      `ACCESS_AUD` is absent; `no-assertion` if no assertion reached Baton; `unverified` if the
+      assertion did not verify or lacks a usable ASCII email; `not-bound` if the verified email
+      has no line or opens no key. Both binding failures have the same answer; no refusal echoes
+      the email. The page explains the reason as text and still offers a one-time link. An
+      unreadable key set is `unavailable`. A value of `ACCESS_IDENTITIES` with a malformed or
+      duplicated line binds nothing: an Access sign-in that reaches the binding check is
+      `unavailable` until it is fixed.
+    - **Records.** Each successful sign-in is recorded as an event of its key, `{act: "login", via:
+      "access"}`, with the email's SHA-256, never the email. Each request a session so opened
+      authorizes also checks its line: the session ends as soon as the line binding its email to
+      its key leaves `ACCESS_IDENTITIES`. Baton reads no assertion after the sign-in, so ending
+      the Access session does not end Baton's.
+  - **One session per tab; the browser is the security unit.** A sign-in opens a session for the
+    tab that signed in. Another tab of the same browser signs in as another key, or the same one,
+    without ending the first. The tabs keep a person's roles apart in the page, not from each
+    other: whoever holds the browser's cookie holds every session bound to it.
+    - The browser holds one cookie, `__Host-baton_session` (R-BTN-16). Every sign-in sets a new
+      value and rebinds the browser's live sessions to it, so a value read before a sign-in opens
+      none of the sessions after it; the cookie lives as long as the longest of them. Baton
+      keeps the hashes of the values a browser's cookie replaced while any of its sessions
+      lives, and a request carrying one ends every session bound to that browser: a replaced
+      value in use means two holders, and neither keeps the sessions.
+      `POST /v1/login` answers the opened session's `session_id`, which is no secret: the page
+      keeps it in the tab's `sessionStorage` and sends it as `Baton-Session: <session_id>` on
+      every request. Link
+      tokens and the cookie's values are stored as hashes (§12.1).
+    - A request under `/v1/` carrying no signature and no `Authorization` header is a session's
+      only when it carries the cookie and a `Baton-Session` naming a live session bound to it;
+      one without the other is `unauthenticated`. A signed or bearer request is its key's,
+      whatever cookie it carries (R-BTN-16). A page load sends no header: the dashboard's pages
+      need no session, and `GET /conditions/{id}` redirects, when its `Sec-Fetch-Site` is
+      `same-origin` or `none` or absent, for any session bound to the cookie whose repositories
+      hold the id (R-BTN-163); any other request gets the shell.
+    - A tab with no session id — a new tab, or one whose session ended — signs in; Baton lists no
+      session to a tab that has not.
+    - `POST /v1/ui/logout` ends the tab's own session; `{all: true}` ends every session bound to
+      the cookie and clears it, and the page offers it beside the other.
+  - **Sessions.** A session lives 12 hours. It ends as soon as its key leaves its role, checked on
+    every request: an administrator's when the key leaves `BATON_ADMIN_KEYS`; an owner's or
+    member's when its key owns, or is a member of, no live repository, losing each repository its
+    key leaves before then (R-BTN-58, R-BTN-204, R-BTN-47); any session when its key is revoked
+    (R-BTN-57).
+  - **Where a session calls.** A session calls an action at the action's own route, the one its
+    key would call — `/v1/owner/{repository}/*`, `/v1/admin/*`, `POST …/attestations`, the
+    repository reads — and the core authorizes it as its key's role (R-BTN-129). `/v1/ui/*`
+    holds the acts §14 lists there; one that is also a key route's action is that action, under
+    the same rules. A `/v1/ui/*` route naming a ticket, claim, runner or finding acts only within
+    the session's repositories, and answers for another repository's id as for an unknown one
+    (§12's *No existence oracle*). A destructive action carries `confirm: true` (§12.2).
+  - **Authority-changing acts are confirmed by the key.** A session's act that an `approvers.*`
+    list governs (R-BTN-188), that adds, changes or removes an owner, a member, a grant or
+    another credential, or that freezes, unfreezes or seals the tenant (R-BTN-88), takes effect
+    only once the session's key confirms it through a channel
+    other than that session ([the proposal's confirmation code](../proposals/people-and-dashboard.md#3-sign-in-sessions-and-confirmed-actions)).
+    Until a confirmation is built, such an act is taken with the key, and its control is drawn
+    disabled, naming the command.
   - **Cloudflare Access, with no administrator key.** While `BATON_ADMIN_KEYS` names no key, a
     request to `/v1/ui/*` is authenticated by a verified Cloudflare Access
     assertion alone (verified as above, for an email in `OWNER_EMAILS`; `ACCESS_IDENTITIES` plays
     no part). Once an administrator key is configured, only a session authenticates `/v1/ui/*`
     (R-BTN-16).
-  - **Not built:** sign-in by a code the key holder confirms, owners' sessions, session
-    revocation and confirmation codes
+  - **Not built:** owners' and members' sessions, the role chosen after authentication, one
+    session per tab and signing out of the browser (B-76, B-338); sign-in by a code the key
+    holder confirms (`baton admin open`, `owner open` or `member open` binding it with that key,
+    the session that key's), session revocation and confirmation codes
     ([the proposal, §3](../proposals/people-and-dashboard.md#3-sign-in-sessions-and-confirmed-actions);
-    B-206).
+    B-76, B-206).
 
 - **The screens.** `src/core/screens.ts` is the one table of screens: each has an id (`root`,
   `tenant/<segment>` or `repository/<segment>[/{param}]`), a path, and the session role that may
@@ -340,7 +433,7 @@ contents are not built; their design is
   - `/` is `root`.
   - Under `/repositories/{repository}`: `/board`, `/tickets`, `/tickets/{ticket}`, `/goals`,
     `/courses`, `/courses/{course}`, `/conditions`, `/conditions/{condition}`, `/runners`,
-    `/runners/{runner}`, `/grants`, `/owners`, `/tokens`, `/mcp-keys`, `/sync-keys`,
+    `/runners/{runner}`, `/grants`, `/owners`, `/members`, `/tokens`, `/mcp-keys`, `/sync-keys`,
     `/check-runners`, `/policy`, `/settings`, `/bars`, `/consents`, `/attestations`, `/sync`.
   - The tenant screens, an administrator's session only: `/repositories`, `/instances`,
     `/resources`, `/capacities`, `/settings`, `/state`, `/sessions`.

@@ -12,10 +12,12 @@ import { FORGE_HOST, FORGE_ID } from './validate';
 import { isForgePath, isWebBase, type Forge } from './links';
 import type { Store } from './ports';
 
+import { hasPrs, isForge, PR_FORGES, type PrForge } from './forges';
+
 /** A forge a code repository may sit on (R-BTN-140): a `git` code repository has no PR facts to
  *  read and is refused, so the home's `git` is not among these. */
-export const CODE_FORGES = ['github', 'gitlab', 'gitea'] as const;
-export type CodeForge = (typeof CODE_FORGES)[number];
+export const CODE_FORGES = PR_FORGES;
+export type CodeForge = PrForge;
 
 /** One code repository as Baton stores it (R-BTN-140) — and as the observation hands it to the
  *  sync, ids and web_base with it. */
@@ -83,18 +85,18 @@ export function checkCodeRepos(v: unknown, home: HomeForge, at = 'code_repos'): 
     // B-182: omitted forge and host are the home's; a git home has none to default to. An
     // explicit `git` is refused on any home: a git code repository has no PR facts to read.
     const forge = e.forge === undefined ? home.forge : e.forge;
-    if (e.forge === undefined && home.forge === 'git') {
+    if (e.forge === undefined && !hasPrs(home.forge)) {
       bad(`${where}.forge`, "a git home names no forge of its own: each entry's forge is required, one of github, gitlab, gitea");
     }
-    if (forge === 'git') {
+    if (isForge(forge) && !hasPrs(forge)) {
       bad(`${where}.forge`, 'a git code repository has no PR facts to read — one of github, gitlab, gitea');
     }
-    if (!(CODE_FORGES as readonly string[]).includes(forge as string)) {
+    if (!isForge(forge) || !hasPrs(forge)) {
       bad(`${where}.forge`, `must be one of ${CODE_FORGES.join(', ')}`);
     }
     const host = e.host === undefined ? home.host : e.host;
     if (typeof host !== 'string' || !FORGE_HOST.test(host)) {
-      bad(`${where}.host`, home.forge === 'git' && e.host === undefined
+      bad(`${where}.host`, !hasPrs(home.forge) && e.host === undefined
         ? "a git home names no host of its own: each entry's host is required"
         : 'must be a lowercased DNS name with optional port');
     }
@@ -122,7 +124,7 @@ export function checkPushers(v: unknown, home: HomeForge, at = 'pushers'): { hos
     for (const k of Object.keys(e)) if (!['host', 'id'].includes(k)) bad(`${where}.${k}`, 'unknown field');
     const host = e.host === undefined ? home.host : e.host;
     if (typeof host !== 'string' || !FORGE_HOST.test(host)) {
-      bad(`${where}.host`, home.forge === 'git' && e.host === undefined ? 'a git home names no host of its own: a pushers entry on it needs one' : 'must be a lowercased DNS name with optional port');
+      bad(`${where}.host`, !hasPrs(home.forge) && e.host === undefined ? 'a git home names no host of its own: a pushers entry on it needs one' : 'must be a lowercased DNS name with optional port');
     }
     const id = typeof e.id === 'string' && FORGE_ID.test(e.id) ? e.id : bad(`${where}.id`, 'must be an immutable forge user id as a decimal string');
     out.push({ host: host as string, id });
@@ -194,7 +196,7 @@ export function homeForgeOf(store: Store, repository: string): HomeForge | null 
 export function crossHostEntries(store: Store, repository: string): CodeRepo[] {
   const home = homeForgeOf(store, repository);
   if (!home) return [];
-  const homeHost = home.forge === 'git' ? null : home.host;
+  const homeHost = !hasPrs(home.forge) ? null : home.host;
   return codeReposOf(store, repository).filter((e) => homeHost == null || e.host !== homeHost);
 }
 
@@ -226,7 +228,7 @@ export function ticketRepositories(store: Store, repository: string, repos: stri
   const add = (base: RepoBase) => {
     if (!out.some((b) => b.webBase.toLowerCase() === base.webBase.toLowerCase())) out.push(base);
   };
-  if (home.forge !== 'git' && home.host != null) add({ forge: home.forge, webBase: `https://${home.host}/${home.github}` });
+  if (hasPrs(home.forge) && home.host != null) add({ forge: home.forge, webBase: `https://${home.host}/${home.github}` });
   if (entries.length) {
     for (const r of repos) {
       const entry = entries.find((e) => e.path.toLowerCase() === full(r).toLowerCase());
@@ -236,7 +238,7 @@ export function ticketRepositories(store: Store, repository: string, repos: stri
     // Today's reading (R-BTN-92 as before B-182): every `repos:` name under the home's host.
     for (const r of repos) {
       const path = full(r);
-      if (home.forge !== 'git' && home.host != null && isForgePath(home.forge, path)) add({ forge: home.forge, webBase: `https://${home.host}/${path}` });
+      if (hasPrs(home.forge) && home.host != null && isForgePath(home.forge, path)) add({ forge: home.forge, webBase: `https://${home.host}/${path}` });
     }
   }
   return out;

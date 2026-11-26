@@ -3,12 +3,12 @@
 // never changes a repository Baton knows; a sync token binds to exactly one repository's
 // workflow on its default branch; a dispatch names that repository's workflow. S-BTN-26.
 import { describe, it, expect, vi } from 'vitest';
+import { dispatchWorkflow } from '../../src/core/dispatch';
 import { checkRegistration } from '../../src/core/registry';
 import { branchMatches } from '../../src/core/claims';
 import { checkRegistry } from '../../src/core/courses';
 import type { DispatchTarget } from '../../src/core/ports';
-import { dispatchWorkflow } from '../../src/core/mirror';
-import { rows, withCore } from '../helpers';
+import { rows, withCore, retireRepositoryIn, seedEventIn, setUnblockedTriggerIn, SYNC_REPO_PATH } from '../helpers';
 
 const OPS = { id: 'ops', github: 'immediately-run/ops', default_branch: 'trunk', sync_workflow: '.github/workflows/sync.yml' };
 const claimsOf = (repository: string, workflow: string, branch = 'trunk') =>
@@ -17,10 +17,10 @@ const claimsOf = (repository: string, workflow: string, branch = 'trunk') =>
 describe('checkRegistration', () => {
   it('fills the defaults and keeps what it was given', () => {
     expect(checkRegistration(OPS)).toEqual({
-      ...OPS, mirror_workflow: null, weight: 100, tiers: ['routine', 'judgement', 'critical'], transcript_repos: [], cut_over: false,
+      ...OPS, mirror_workflow: null, weight: 100, transcript_repos: [], cut_over: false,
       // R-BTN-92/93 (R3-1262): a GitHub repository's forge fields and CI identity default from its path.
       forge: 'github', remote: 'https://github.com/immediately-run/ops.git', web_base: 'https://github.com/immediately-run/ops',
-      ci_identity: { kind: 'github-actions' }, sync_keys: [],
+      ci_identity: { kind: 'github-actions' }, sync_keys: [], dispatch: { kind: 'github-app' },
     });
   });
 
@@ -32,8 +32,6 @@ describe('checkRegistration', () => {
     ['a workflow outside .github/workflows', { sync_workflow: 'sync.yml' }],
     ['a negative weight', { weight: -1 }],
     ['a fractional weight', { weight: 1.5 }],
-    ['repeated tiers', { tiers: ['a', 'a'] }],
-    ['no tiers', { tiers: [] }],
     ['a transcript repository that is not owner/name', { transcript_repos: ['x'] }],
     ['a cut_over that is not boolean', { cut_over: 'yes' }],
   ])('refuses %s', (_what, over) => {
@@ -86,7 +84,7 @@ describe('the registry', () => {
       expect(() => c.registry.forSync(claimsOf('immediately-run/ops', 'sync.yml'), 'mirror')).toThrow(forbidden);
       // A workflow ref naming another repository's file does not pass for this one's.
       expect(() => c.registry.forSync({ ...claimsOf('immediately-run/ops', 'sync.yml'), job_workflow_ref: 'immediately-run/docs/.github/workflows/sync.yml@refs/heads/trunk' }, 'sync')).toThrow(forbidden);
-      c.store.exec(`UPDATE repositories SET retired_at = 1 WHERE id = 'ops'`);
+      retireRepositoryIn(c.store, 'ops', 1);
       expect(() => c.registry.forSync(claimsOf('immediately-run/ops', 'sync.yml'), 'sync')).toThrow(forbidden);
       expect(c.registry.all().map((r) => r.id)).toEqual(['baton', 'docs']);
     });
@@ -97,6 +95,8 @@ describe('the registry', () => {
       c.registry.register(OPS);
       const got: DispatchTarget[] = [];
       (c as unknown as { ports: { dispatch: { send: (t: DispatchTarget) => Promise<boolean> } } }).ports.dispatch = { send: async (t) => (got.push(t), true) };
+      c.syncWants.request('ops');
+      seedEventIn(c.store, { repository_id: 'docs', at: 1, kind: 'claimed', actor: 'baton', detail_json: '{}', ticket_id: null });
       expect(await c.dispatcher({ repository: 'ops', kind: 'sync' })).toBe(true);
       expect(await c.dispatcher({ repository: 'docs', kind: 'mirror' })).toBe(true);
       expect(await c.dispatcher({ repository: 'ops', kind: 'mirror' })).toBe(false);
@@ -104,8 +104,8 @@ describe('the registry', () => {
       return got;
     });
     expect(sent).toEqual([
-      { github: 'immediately-run/ops', workflow: 'sync.yml', ref: 'trunk' },
-      { github: 'immediately-run/docs', workflow: 'baton-mirror.yml', ref: 'main' }]);
+      expect.objectContaining({ path: 'immediately-run/ops', workflow: 'sync.yml', ref: 'trunk' }),
+      expect.objectContaining({ path: SYNC_REPO_PATH, workflow: 'baton-mirror.yml', ref: 'main' })]);
   });
 
   it('an unblocked dispatch sends the owners’ workflow with one `tickets` input; a trigger it cannot send is false (R-BTN-77)', async () => {
@@ -116,14 +116,14 @@ describe('the registry', () => {
       (c as unknown as { ports: { dispatch: { send: (t: DispatchTarget) => Promise<boolean> } } }).ports.dispatch = { send: async (t) => (got.push(t), true) };
       // No trigger set: nothing to send.
       expect(await c.dispatcher({ repository: 'docs', kind: 'unblocked', tickets })).toBe(false);
-      c.store.exec(`UPDATE repositories SET unblocked_trigger = ? WHERE id = 'docs'`, JSON.stringify({ kind: 'github-app', workflow: '.github/workflows/baton-unblocked.yml' }));
+      setUnblockedTriggerIn(c.store, 'docs', JSON.stringify({ kind: 'github-app', workflow: '.github/workflows/baton-unblocked.yml' }));
       expect(await c.dispatcher({ repository: 'docs', kind: 'unblocked', tickets })).toBe(true);
       // GitLab's and Gitea's adapters are R3-1263's: not sent.
-      c.store.exec(`UPDATE repositories SET unblocked_trigger = ? WHERE id = 'ops'`, JSON.stringify({ kind: 'gitlab-trigger', project_id: 7, ref: 'trunk' }));
+      setUnblockedTriggerIn(c.store, 'ops', JSON.stringify({ kind: 'gitlab-trigger', project_id: 7, ref: 'trunk' }));
       expect(await c.dispatcher({ repository: 'ops', kind: 'unblocked', tickets })).toBe(false);
       return got;
     });
-    expect(sent).toEqual([{ github: 'immediately-run/docs', workflow: 'baton-unblocked.yml', ref: 'main', inputs: { tickets: JSON.stringify(tickets) } }]);
+    expect(sent).toEqual([expect.objectContaining({ path: SYNC_REPO_PATH, workflow: 'baton-unblocked.yml', ref: 'main', inputs: { tickets: JSON.stringify(tickets) } })]);
   });
 
   it('dispatchWorkflow posts `inputs` only when the target has them', async () => {
@@ -135,14 +135,52 @@ describe('the registry', () => {
       return new Response(null, { status: 204 });
     });
     try {
-      expect(await dispatchWorkflow('tok', { github: 'immediately-run/docs', workflow: 'baton-unblocked.yml', ref: 'main', inputs: { tickets: '[]' } })).toBe(true);
-      expect(await dispatchWorkflow('tok', { github: 'immediately-run/docs', workflow: 'baton-mirror.yml', ref: 'main' })).toBe(true);
-      expect(await dispatchWorkflow(undefined, { github: 'immediately-run/docs', workflow: 'baton-mirror.yml', ref: 'main' })).toBe(false);
+      expect(await dispatchWorkflow('tok', { path: SYNC_REPO_PATH, workflow: 'baton-unblocked.yml', ref: 'main', inputs: { tickets: '[]' } })).toBe(true);
+      expect(await dispatchWorkflow('tok', { path: SYNC_REPO_PATH, workflow: 'baton-mirror.yml', ref: 'main' })).toBe(true);
+      expect(await dispatchWorkflow(undefined, { path: SYNC_REPO_PATH, workflow: 'baton-mirror.yml', ref: 'main' })).toBe(false);
     } finally {
       vi.unstubAllGlobals();
     }
-    expect(urls).toEqual(['https://api.github.com/repos/immediately-run/docs/actions/workflows/baton-unblocked.yml/dispatches', 'https://api.github.com/repos/immediately-run/docs/actions/workflows/baton-mirror.yml/dispatches']);
+    expect(urls).toEqual([`https://api.github.com/repos/${SYNC_REPO_PATH}/actions/workflows/baton-unblocked.yml/dispatches`, `https://api.github.com/repos/${SYNC_REPO_PATH}/actions/workflows/baton-mirror.yml/dispatches`]);
     expect(bodies).toEqual([{ ref: 'main', inputs: { tickets: '[]' } }, { ref: 'main' }]);
+  });
+
+  it.each([
+    ['plain text', () => new Response('<p>Workflow\r\n not found</p>', { status: 404 }), 'HTTP 404: Workflow not found'],
+    ['bracket-prefixed plain text', () => new Response('[deploy] Invalid ref', { status: 422 }), 'HTTP 422: [deploy] Invalid ref'],
+    ['JSON without a declared type', () => new Response(new TextEncoder().encode('{"message":"Invalid ref"}'), { status: 422 }), 'HTTP 422: Invalid ref'],
+    ['oversized body', () => new Response('x'.repeat(8193), { status: 404 }), 'HTTP 404'],
+    ['malformed JSON', () => new Response('{', { status: 404, headers: { 'Content-Type': 'application/json' } }), 'HTTP 404'],
+    ['no body', () => new Response(null, { status: 404 }), 'HTTP 404'],
+  ])('dispatchWorkflow reports %s safely', async (_case, reply, reason) => {
+    vi.stubGlobal('fetch', async () => reply());
+    try {
+      await expect(dispatchWorkflow('test-dispatch-credential', { path: SYNC_REPO_PATH, workflow: 'baton-sync.yml', ref: 'main' })).rejects.toMatchObject({ message: reason });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('bounds a stalled refusal body and cancels it without waiting for cancellation', async () => {
+    vi.useFakeTimers();
+    let finishCancel: (() => void) | undefined;
+    const cancel = vi.fn(() => new Promise<void>((resolve) => { finishCancel = resolve; }));
+    const body = new ReadableStream({
+      start(controller) { controller.enqueue(new TextEncoder().encode('partial reason')); },
+      cancel,
+    });
+    vi.stubGlobal('fetch', async () => new Response(body, { status: 422 }));
+    try {
+      await Promise.all([
+        expect(dispatchWorkflow('test-dispatch-credential', { path: SYNC_REPO_PATH, workflow: 'baton-sync.yml', ref: 'main' })).rejects.toMatchObject({ status: 422, message: 'HTTP 422' }),
+        vi.advanceTimersByTimeAsync(1000),
+      ]);
+      expect(cancel).toHaveBeenCalledOnce();
+    } finally {
+      finishCancel?.();
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+    }
   });
 });
 
@@ -204,4 +242,3 @@ describe('the reserved branch namespaces (R-BTN-190, B-174)', () => {
     expect(checkRegistry([entry(branch_pattern as string)])[0].branch_pattern).toBe(branch_pattern);
   });
 });
-

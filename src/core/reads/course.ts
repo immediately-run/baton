@@ -23,7 +23,7 @@ export const COURSE_SHOW_READS: ReadRoute[] = [
       if (!COURSE_ID.test(id)) throw new BatonError('not-found', 'no such course');
       const after = summary ? null : cursorOf<CoursePosition>(cx, call);
       if (after !== null && !isCoursePosition(after)) throw new BatonError('invalid-params', 'cursor: not a page of this read');
-      const view = courseView(cx, call.repository!, id, { since, summary, after });
+      const view = courseView(cx, call.repository!, id, { since, summary, after, sessionLink: call.sessionLink });
       // A course the repository's registry does not hold is `not-found` (B-197).
       if (!view) throw new BatonError('not-found', 'no such course');
       if (!('next' in view)) return view;

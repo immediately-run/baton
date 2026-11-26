@@ -65,14 +65,14 @@ describe('S-BTN-32 owners and grants', () => {
     // ops' owner cannot touch docs' grant, nor take K's hostname. B-104 (R-BTN-121 as
     // amended, rule 6 retired): human-operator is granted like any capability — by an owner
     // and by an administrator alike.
-    expect((await keyCall(opsOwner, `/v1/owner/docs/grants/${encodeURIComponent(k.fingerprint)}/revoke`, {})).json.code).toBe('forbidden');
+    expect((await keyCall(opsOwner, `/v1/owner/docs/grants/${encodeURIComponent(k.fingerprint)}/revoke`, { confirm: true })).json.code).toBe('forbidden');
     expect((await keyCall(opsOwner, '/v1/owner/ops/grants', { public_key: k.publicKey, hostname: 'other-host', capabilities: [] })).json.code).toBe('conflict');
     const other = await makeKey('ssh-ed25519', 'other');
     expect((await keyCall(opsOwner, '/v1/owner/ops/grants', { public_key: other.publicKey, hostname: 'op-host', capabilities: ['human-operator'] })).status).toBe(200);
     // An administrator may grant it too.
     expect((await keyCall(admin, '/v1/admin/grants', { repository: 'ops', public_key: other.publicKey, hostname: 'op-host', capabilities: ['human-operator'] })).status).toBe(200);
     // Removing docs' last owner is refused.
-    expect((await keyCall(docsOwner, '/v1/owner/docs/owners', { fingerprint: docsOwner.fingerprint, remove: true })).json.code).toBe('conflict');
+    expect((await keyCall(docsOwner, '/v1/owner/docs/owners', { fingerprint: docsOwner.fingerprint, remove: true, confirm: true })).json.code).toBe('conflict');
     // An administrator's key is never a runner's.
     expect((await keyCall(docsOwner, '/v1/owner/docs/grants', { public_key: admin.publicKey, hostname: 'admin-host', capabilities: [] })).json.code).toBe('conflict');
   });
@@ -87,15 +87,6 @@ describe('S-BTN-32 owners and grants', () => {
     // R3-9002 requires agent-venue: granted on ops, not on docs.
     expect((await runnerAs(k, '/v1/runner/claim', { request_id: 'req-k-docs-2', ticket_id: 'docs:R3-9002' }, secret)).json).toMatchObject({ code: 'not-eligible', rule: 4 });
     expect((await runnerAs(k, '/v1/runner/claim', { request_id: 'req-k-ops-2', ticket_id: 'ops:R3-9002' }, secret)).json).toMatchObject({ ticket_id: 'ops:R3-9002' });
-  });
-
-  it('a grant’s max_tier caps the key in that repository', async () => {
-    await keyCall(docsOwner, '/v1/owner/docs/grants', { public_key: k.publicKey, hostname: 'k-host', capabilities: ['agent-venue'], max_tier: 'routine' });
-    const secret = 'secret-k';
-    const hb = await runnerAs(k, '/v1/runner/heartbeat', hbBody('vm-a', { hostname: 'k-host', session_name: 'k', secret_hash: await sha256(secret), tier_ceiling: 'critical' }));
-    // R3-9002 is judgement: above the grant's routine.
-    expect((await runnerAs(k, '/v1/runner/claim', { request_id: 'req-k-docs-3', ticket_id: 'docs:R3-9002' }, secret)).json).toMatchObject({ code: 'not-eligible', rule: 5 });
-    expect(await recommended(hb.json.runner_id as number)).toEqual(['docs:R3-9001']);
   });
 
   it('a login link works once, within 5 minutes; its session ends when its key leaves BATON_ADMIN_KEYS', async () => {
@@ -127,7 +118,7 @@ describe('S-BTN-32 owners and grants', () => {
     await keyCall(docsOwner, '/v1/owner/docs/grants', { public_key: k.publicKey, hostname: 'k-host', capabilities: ['agent-venue'] });
     const secret = 'secret-k';
     expect((await runnerAs(k, '/v1/runner/heartbeat', hbBody('vm-a', { hostname: 'k-host', session_name: 'k', secret_hash: await sha256(secret) }))).status).toBe(200);
-    expect((await keyCall(admin, `/v1/admin/keys/${encodeURIComponent(k.fingerprint)}/revoke`, {})).status).toBe(200);
+    expect((await keyCall(admin, `/v1/admin/keys/${encodeURIComponent(k.fingerprint)}/revoke`, { confirm: true })).status).toBe(200);
     expect((await runnerAs(k, '/v1/runner/heartbeat', hbBody('vm-a', { hostname: 'k-host', session_name: 'k' }), secret)).status).toBe(401);
     expect(await rows(`SELECT count(*) AS n FROM events WHERE kind = 'admin'`)).toEqual([{ n: 4 }]);
   });

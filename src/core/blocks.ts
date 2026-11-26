@@ -20,6 +20,7 @@ import { underWebBase } from '../shared/links.mjs';
 import type { PostedStation } from './board';
 import type { Store } from './ports';
 import type { History } from './history';
+import { TicketPrerequisites } from './ticketPrerequisites';
 
 export const BLOCK_KINDS = ['ticket', 'capability', 'resource', 'decision'] as const;
 export type BlockKind = (typeof BLOCK_KINDS)[number];
@@ -66,11 +67,12 @@ export interface Ctx {
   /** R-BTN-79: whatever is re-evaluated here — the queued leg, the course, the hold — is what
    *  moves a ticket between leg queues, in the same transaction (Queues.touch). */
   queued: (ticketId: string) => void;
+  syncWanted: (repository: string) => void;
 }
 
 /** R-BTN-78: the decisions Baton raises itself, each `asks: owner` on the whole ticket, answered in
  *  Baton (`resolve`). `baton:contract` arrives with B-39. */
-export const BATON_DECISIONS = ['baton:retries', 'baton:stalled'] as const;
+export const BATON_DECISIONS = ['baton:retries', 'baton:stalled', 'baton.contract'] as const;
 export type BatonDecision = (typeof BATON_DECISIONS)[number];
 
 /** B-133 (OWASP ASI09): the exact action each option of a decision takes, computed — what
@@ -81,12 +83,12 @@ export type BatonDecision = (typeof BATON_DECISIONS)[number];
  *  of a leg on this ticket, never a credential. Pure, so every surface prints the same action
  *  for the same answer. */
 export function decisionOptionActions(decision: string, options: readonly { id: string; grants?: { leg: string; runs: number } }[] | null): { id: string; action: string }[] {
-  if (decision === 'baton:retries' || decision === 'baton:stalled') {
+  if ((BATON_DECISIONS as readonly string[]).includes(decision)) {
     return [
-      { id: 'retry', action: decision === 'baton:retries'
+      { id: 'retry', action: decision !== 'baton:stalled'
         ? 'lifts the hold and clears its backoff — the failed-attempt count starts again and the ticket becomes claimable'
         : 'closes this decision and restarts the queued leg’s 72-hour stall clock from now' },
-      { id: 'park', action: decision === 'baton:retries'
+      { id: 'park', action: decision !== 'baton:stalled'
         ? 'keeps the hold — the ticket stays parked until an owner lifts the hold'
         : 'holds the ticket (parked) until an owner lifts the hold' },
     ];
@@ -145,8 +147,41 @@ export const BLOCK_SQL = {
   page: 'SELECT id, blocked_since FROM tickets INDEXED BY tickets_blocked WHERE repository_id = ? AND blocked_since IS NOT NULL AND id > ? ORDER BY id LIMIT ?',
 } as const;
 
+// Whole-ticket and leg-specific requirements share the same fleet counts.
+const CAPABILITY_NEEDS = `SELECT t.repository_id, t.id AS ticket_id, '' AS leg, r.name FROM tickets t JOIN ticket_requires r ON r.ticket_id = t.id
+  UNION ALL SELECT t.repository_id, t.id, c.leg, c.capability FROM tickets t JOIN course_leg_capabilities c
+    ON c.repository_id = t.repository_id AND c.course_id = t.course_id`;
+
 export class Blocks {
-  constructor(private readonly c: Ctx) {}
+  private readonly ticketPrerequisites: TicketPrerequisites;
+
+  constructor(private readonly c: Ctx) {
+    this.ticketPrerequisites = new TicketPrerequisites(c.store, c.now);
+  }
+
+  postPrerequisites(repo: string) {
+    this.write(this.ticketPrerequisites.posted(repo), ['ticket']);
+  }
+
+  refreshPrerequisiteVisibility() {
+    this.write(this.ticketPrerequisites.refresh([]), ['ticket']);
+  }
+
+  courseCapabilitiesChanged(repo: string) {
+    const ids = this.rows<{ id: string }>(`SELECT t.id FROM tickets t WHERE t.repository_id = ? AND (
+      EXISTS (SELECT 1 FROM course_leg_capabilities c WHERE c.repository_id = t.repository_id AND c.course_id = t.course_id)
+      OR EXISTS (SELECT 1 FROM ticket_blocks b WHERE b.ticket_id = t.id AND b.kind = 'capability' AND b.leg <> ''))`, repo);
+    if (!ids.length) return;
+    this.recount();
+    this.write(ids.map((t) => t.id), ['capability']);
+  }
+
+  positionChanged(id: string) {
+    this.batch(() => {
+      this.write([id]);
+      this.write(this.ticketPrerequisites.refresh([], id), ['ticket']);
+    });
+  }
 
   private rows<T>(q: string, ...p: unknown[]): T[] {
     return this.c.store.exec<T>(q, ...p).toArray();
@@ -323,13 +358,17 @@ export class Blocks {
   private desired(id: string, repo: string, blockedBy: string, kind: BlockKind): BlockRow[] {
     if (kind === 'ticket') {
       // The posted list taken as given: the course's sync knows what is still open (R-BTN-75).
-      return [...new Set(JSON.parse(blockedBy) as string[])].map((local) => ({ kind, ref: TICKET_ID.test(local) ? local : qualify(repo, local), leg: '', until: null }));
+      return [
+        ...[...new Set(JSON.parse(blockedBy) as string[])].map((local) => ({ kind, ref: TICKET_ID.test(local) ? local : qualify(repo, local), leg: '', until: null })),
+        ...this.rows<{ leg: string; ref: string }>('SELECT DISTINCT leg, ref FROM ticket_dependents WHERE ticket_id = ? AND why IS NOT NULL', id)
+          .map((r) => ({ ...r, kind, until: null })),
+      ];
     }
     if (kind === 'capability') {
       // Absent from the counts is zero: a count is written for every needed pair (`recount`).
-      return this.rows<{ name: string }>(
-        `SELECT r.name FROM ticket_requires r LEFT JOIN fleet_capabilities f ON f.repository_id = ? AND f.capability = r.name
-         WHERE r.ticket_id = ? AND COALESCE(f.runners, 0) = 0`, repo, id).map((r) => ({ kind, ref: r.name, leg: '', until: null }));
+      return this.rows<{ name: string; leg: string }>(
+        `SELECT r.name, r.leg FROM (${CAPABILITY_NEEDS}) r LEFT JOIN fleet_capabilities f ON f.repository_id = ? AND f.capability = r.name
+         WHERE r.ticket_id = ? AND COALESCE(f.runners, 0) = 0`, repo, id).map((r) => ({ kind, ref: r.name, leg: r.leg, until: null }));
     }
     if (kind === 'resource') {
       // No row while the repository has no live runner or no usable instance: unanswerable, so
@@ -399,6 +438,7 @@ export class Blocks {
 
   /** A ticket left the board: its rows go with it (its claims and events stay). */
   forget(id: string) {
+    this.ticketPrerequisites.forget(id);
     this.exec('DELETE FROM ticket_blocks WHERE ticket_id = ?', id);
     this.exec('DELETE FROM leg_needs WHERE ticket_id = ?', id);
     // Its decisions close with it, and so do their notices (R-BTN-80).
@@ -415,9 +455,9 @@ export class Blocks {
 
   /** Raise Baton's decision `id` on the whole ticket, `asks: owner`, in the caller's transaction:
    *  a `decision` block with its notices (R-BTN-78, R-BTN-80). A decision already open is left. */
-  raise(ticket: string, id: BatonDecision): boolean {
+  raise(ticket: string, id: BatonDecision, detail: string | null = null): boolean {
     if (this.hasDecision(ticket, id)) return false;
-    this.exec(`INSERT INTO ticket_decisions (ticket_id, decision_id, leg, asks, url, source) VALUES (?, ?, '', 'owner', NULL, 'baton')`, ticket, id);
+    this.exec(`INSERT INTO ticket_decisions (ticket_id, decision_id, leg, asks, url, source, question) VALUES (?, ?, '', 'owner', NULL, 'baton', ?)`, ticket, id, detail);
     this.c.decisions.opened(ticket, [id]);
     this.write([ticket], ['decision']);
     return true;
@@ -500,6 +540,9 @@ export class Blocks {
     const dropped: string[] = [];
     const home = this.rows<{ id: string }>('SELECT id FROM repositories WHERE id = ?', repo)[0];
     const registered = new Set(this.rows<{ name: string }>('SELECT name FROM external_resources').map((r) => r.name));
+    const courseNeeds = new Map(this.rows<{ id: string; course_json: string }>('SELECT id, course_json FROM courses WHERE repository_id = ? AND instr(course_json, \'"resources"\') > 0', repo)
+      .map(({ id, course_json }) => [id, (JSON.parse(course_json) as { legs: Record<string, { requires?: { resources?: string[] } }> }).legs]));
+    const ticketCourses = courseNeeds.size ? new Map(this.rows<{ local_id: string; course_id: string }>('SELECT local_id, course_id FROM tickets WHERE repository_id = ?', repo).map((t) => [t.local_id, t.course_id])) : null;
     // B-241: what the repository's tickets hold — their owner-answered decisions, needs and the
     // sync's decisions — read once for the post, not three times per ticket; each ticket's
     // writes below touch only its own rows.
@@ -542,14 +585,18 @@ export class Blocks {
         if (!RESOURCE_NAME.test(r)) dropped.push(`${id}:needs:${r.slice(0, 100)}`);
         else if (!registered.has(r)) dropped.push(`${id}:needs:${r}:unregistered`);
       }
-      const needs = (st?.next ?? []).flatMap((n) => (n.needs ?? []).filter((r) => RESOURCE_NAME.test(r)).map((r) => `${n.leg}\u0000${r}`)).sort();
+      const configured = courseNeeds.get(ticketCourses?.get(local) ?? '') ?? {};
+      const needs = [...new Set([
+        ...(st?.next ?? []).flatMap((n) => (n.needs ?? []).filter((r) => RESOURCE_NAME.test(r)).map((r) => `${n.leg}\u0000${r}`)),
+        ...Object.entries(configured).flatMap(([leg, def]) => (def.requires?.resources ?? []).map((r) => `${leg}\u0000${r}`)),
+      ])].sort();
       const repos = () => basesOf(id);
       // B-110: a decision the owner has answered (`decision_answers`) is never posted open again —
       // a sync that read its observation before the answer would otherwise reopen it.
       const answered = new Set((answeredAll.get(id) ?? []).map((r) => r.decision_id));
       const decisions = (st?.decisions ?? []).filter((d) => {
         if (answered.has(d.id)) return false;
-        if (!d.id.startsWith('baton:')) return true;
+        if (!d.id.startsWith('baton:') && d.id !== 'baton.contract') return true;
         dropped.push(`${id}:decision:${d.id}`);
         return false;
       }).map((d) => ({
@@ -610,6 +657,7 @@ export class Blocks {
   // ── unblocking wakes work (R-BTN-77) ──────────────────────────────────────────────────────
 
   private unblocked(repo: string, ticket: string, cleared: Cleared[]) {
+    this.c.syncWanted(repo);
     const now = this.c.now();
     const entry = { ticket_id: ticket, cleared };
     // One pending `unblocked` message per alive, idle runner granted on the repository that the
@@ -636,12 +684,23 @@ export class Blocks {
     }
     // The repository's unblocked trigger, coalesced: one dispatch per window per repository, with
     // a trailing one carrying every ticket the window unblocked (`due`).
-    if (this.rows<{ t: string | null }>('SELECT unblocked_trigger AS t FROM repositories WHERE id = ?', repo)[0]?.t == null) return;
+    this.queueTrigger(repo, { ticket, cleared });
+  }
+
+  /** Idle alerts share the owner's dispatch window, but carry no unblocked tickets. */
+  queueIdleTrigger(repo: string): boolean {
+    return this.queueTrigger(repo, 'runner-idle');
+  }
+
+  private queueTrigger(repo: string, entry: 'runner-idle' | { ticket: string; cleared: { kind: string; ref: string }[] }): boolean {
+    if (this.rows<{ t: string | null }>('SELECT unblocked_trigger AS t FROM repositories WHERE id = ?', repo)[0]?.t == null) return false;
+    const now = this.c.now();
     const row = this.rows<{ last_sent_at: number | null; pending_json: string }>('SELECT last_sent_at, pending_json FROM unblocked_dispatch WHERE repository_id = ?', repo)[0];
-    const pending = [...(row ? (JSON.parse(row.pending_json) as unknown[]) : []), { ticket: ticket, cleared }];
+    const pending = [...(row ? (JSON.parse(row.pending_json) as unknown[]) : []), entry];
     const due = row?.last_sent_at == null ? now : Math.max(now, row.last_sent_at + DISPATCH_WINDOW_MS);
     this.exec(`INSERT INTO unblocked_dispatch (repository_id, pending_json, due_at) VALUES (?, ?, ?)
                ON CONFLICT (repository_id) DO UPDATE SET pending_json = excluded.pending_json, due_at = excluded.due_at`, repo, JSON.stringify(pending), due);
+    return true;
   }
 
   /** The unblocked dispatches due now, taken: each repository's window's tickets, at most 100,
@@ -651,8 +710,16 @@ export class Blocks {
     const out: { repository: string; tickets: unknown[] }[] = [];
     for (const r of this.rows<{ repository_id: string; pending_json: string }>(`SELECT repository_id, pending_json FROM unblocked_dispatch WHERE due_at IS NOT NULL AND due_at <= ?`, now)) {
       const all = JSON.parse(r.pending_json) as unknown[];
-      const tickets = all.length > UNBLOCKED_DISPATCH_MAX ? [...all.slice(0, UNBLOCKED_DISPATCH_MAX), { truncated: all.length - UNBLOCKED_DISPATCH_MAX }] : all;
-      this.exec(`UPDATE unblocked_dispatch SET pending_json = '[]', due_at = NULL, last_sent_at = ? WHERE repository_id = ?`, now, r.repository_id);
+      // An idle alert is its own dispatch with `tickets: []`. Never count it as a truncated
+      // unblock, or let later unblocks push it back. Leave the tail for the next window.
+      const idle = all.indexOf('runner-idle');
+      const unblocks = idle < 0 ? all : all.slice(0, idle);
+      const rest = idle < 0 ? [] : all.slice(idle === 0 ? 1 : idle);
+      const tickets = unblocks.length > UNBLOCKED_DISPATCH_MAX
+        ? [...unblocks.slice(0, UNBLOCKED_DISPATCH_MAX), { truncated: unblocks.length - UNBLOCKED_DISPATCH_MAX }]
+        : unblocks;
+      this.exec(`UPDATE unblocked_dispatch SET pending_json = ?, due_at = ?, last_sent_at = ? WHERE repository_id = ?`,
+        JSON.stringify(rest), rest.length ? now + DISPATCH_WINDOW_MS : null, now, r.repository_id);
       if (all.length) out.push({ repository: r.repository_id, tickets });
     }
     return out;
@@ -723,6 +790,17 @@ export class Blocks {
     return [...info.instances].filter(([, repos]) => repos.includes(repo)).map(([name]) => name);
   }
 
+  unavailableReadings(repo: string, resources: string[], read: (instance: string) => { available: number; source: string; until: number | null } | undefined) {
+    const info = this.resources();
+    return resources.flatMap((resource) => {
+      const r = info.get(resource);
+      return r ? this.usable(repo, resource, r).sort().flatMap((instance) => {
+        const reading = read(instance);
+        return reading?.available === 0 ? [{ resource, instance, writer: reading.source, until: reading.until }] : [];
+      }) : [];
+    });
+  }
+
   /**
    * Recount what changed: per (repository, capability) a ticket requires, the live runners granted
    * there that declare it; per (repository, resource) a posted leg needs, the repository's usable
@@ -750,7 +828,7 @@ export class Blocks {
     };
     // Capabilities.
     const needCaps = this.rows<{ repository_id: string; name: string }>(
-      'SELECT DISTINCT t.repository_id, r.name FROM ticket_requires r JOIN tickets t ON t.id = r.ticket_id');
+      `SELECT DISTINCT repository_id, name FROM (${CAPABILITY_NEEDS})`);
     const haveCaps = new Map(this.rows<{ repository_id: string; capability: string; runners: number }>('SELECT repository_id, capability, runners FROM fleet_capabilities')
       .map((f) => [`${f.repository_id}\u0000${f.capability}`, f.runners]));
     const touched = new Set<string>();
@@ -763,7 +841,7 @@ export class Blocks {
       this.exec(`INSERT INTO fleet_capabilities (repository_id, capability, runners) VALUES (?, ?, ?)
                  ON CONFLICT (repository_id, capability) DO UPDATE SET runners = excluded.runners`, n.repository_id, n.name, count);
       if (before === undefined || (before === 0) !== (count === 0)) {
-        for (const t of this.rows<{ id: string }>('SELECT t.id FROM ticket_requires r JOIN tickets t ON t.id = r.ticket_id WHERE r.name = ? AND t.repository_id = ?', n.name, n.repository_id)) touched.add(t.id);
+        for (const t of this.rows<{ ticket_id: string }>(`SELECT DISTINCT ticket_id FROM (${CAPABILITY_NEEDS}) WHERE name = ? AND repository_id = ?`, n.name, n.repository_id)) touched.add(t.ticket_id);
       }
     }
     for (const key of haveCaps.keys()) {
@@ -857,10 +935,10 @@ export class Blocks {
     // B-104 (round 1 B8, round 2 r2-3): the asking runner's own answer is rule 4's — its
     // declarations with the grant's wildcards (fleet() serves them expanded) and `runner:`
     // beside; an interim credential's map entry is its allow-list, never null.
-    const grantAdmits = (c: string) => (g ? g.has(c) : true);
+    const grantAdmits = (c: string) => g !== undefined && (g === null || g.has(c));
     const caps = new Set([...w.caps].filter((c) => c.startsWith('runner:') || grantAdmits(c)));
-    const blocks: Block[] = this.rows<{ name: string }>('SELECT name FROM ticket_requires WHERE ticket_id = ? ORDER BY name', ticketId)
-      .filter((r) => !caps.has(r.name)).map((r) => ({ kind: 'capability' as const, ref: r.name, since: now }));
+    const blocks: Block[] = this.rows<{ name: string; leg: string }>(`SELECT name, leg FROM (${CAPABILITY_NEEDS}) WHERE ticket_id = ? ORDER BY name`, ticketId)
+      .filter((r) => !caps.has(r.name)).map((r) => ({ kind: 'capability' as const, ref: r.name, since: now, ...(r.leg ? { leg: r.leg } : {}) }));
     const info = this.resources();
     const noInstance: RunnerAnswer['noInstance'] = [];
     for (const n of this.rows<{ leg: string; resource: string }>('SELECT leg, resource FROM leg_needs WHERE ticket_id = ? ORDER BY leg, resource', ticketId)) {
@@ -929,6 +1007,92 @@ export class Blocks {
          WHERE l.ticket_id = ? AND (COALESCE(f.live_runner, 0) = 0 OR COALESCE(f.usable_instances, 0) = 0) ORDER BY l.leg, l.resource`, ticketId)) other.push({ kind: 'no-instance', detail: n });
     }
     return { blocked, ...(t.blocked_since != null && runnerId == null ? { since: t.blocked_since } : {}), blocks, other };
+  }
+
+  /** Read the stored answers and block rows, never re-evaluate a referenced ticket. */
+  prerequisitesOf(id: string, requested: string | null, runner: number | null) {
+    const t = this.rows<{ station: string | null; next_leg: string | null; course_id: string }>(
+      'SELECT s.station, s.next_leg, t.course_id FROM tickets t LEFT JOIN ticket_stations s ON s.ticket_id = t.id WHERE t.id = ?', id)[0];
+    if (!t) throw new BatonError('not-found', `${id} is not on the board`);
+    const leg = requested ?? t.next_leg;
+    const repo = repositoryOf(id);
+    const applies = (legOf: string | undefined) => !legOf || legOf === leg;
+    const blocks = new Map(this.blockRows(id).filter((b) => applies(b.leg)).map((b) => [rowKey(b), b]));
+    const prerequisites: { kind: string; ref: string; met: boolean; why: string | null; since?: number; until?: number; station?: string | null }[] = [];
+    const add = (kind: BlockKind, ref: string, leg: string, why: string | null, detail = {}) => {
+      const key = rowKey({ kind, ref, leg });
+      const block = why == null ? undefined : blocks.get(key);
+      prerequisites.push({ kind, ref, met: why == null, why, ...(block && { since: block.since, ...(block.until != null ? { until: block.until } : {}) }), ...detail });
+      if (why != null) blocks.delete(key);
+    };
+    const indexedTicketRefs = new Set<string>();
+    for (const r of this.rows<{ ref: string; leg: string; why: string | null; station: string | null }>(
+      'SELECT ref, leg, why, station FROM ticket_dependents WHERE ticket_id = ? AND leg IN (\'\', ?) ORDER BY leg, ref, selector', id, leg)) {
+      add('ticket', r.ref, r.leg, r.why, { station: r.station });
+      indexedTicketRefs.add(rowKey({ kind: 'ticket', ref: r.ref, leg: r.leg }));
+    }
+    for (const r of this.rows<{ name: string; leg: string }>(`SELECT name, leg FROM (${CAPABILITY_NEEDS}) WHERE ticket_id = ? AND leg IN ('', ?) ORDER BY leg, name`, id, leg)) {
+      const key = rowKey({ kind: 'capability', ref: r.name, leg: r.leg });
+      const personal = runner == null ? null : this.named<{ declared: number; granted: number }>(`SELECT
+        EXISTS (SELECT 1 FROM runner_capabilities WHERE runner_id = w.id AND capability = :cap) AS declared,
+        CASE WHEN :builtin THEN 1 WHEN COALESCE(${grantedKeySql('c.created_by')}, 0) THEN EXISTS (
+          SELECT 1 FROM runner_grants g JOIN grant_capabilities p USING (credential_id, repository_id)
+          WHERE g.credential_id = c.id AND g.repository_id = :repo AND g.revoked_at IS NULL AND p.capability_pattern IN (:cap, :wildcard))
+        ELSE EXISTS (SELECT 1 FROM json_each(c.allowed_capabilities) WHERE value = :cap) END AS granted
+        FROM runners w JOIN credentials c ON c.id = w.credential_id WHERE w.id = :runner`, {
+          runner, repo, cap: r.name, builtin: r.name.startsWith('runner:') ? 1 : 0,
+          wildcard: r.name.includes(':') ? `${r.name.split(':')[0]}:*` : r.name,
+        })[0];
+      let why = runner == null ? (blocks.has(key) ? 'no-live-runner' : null)
+        : !personal?.declared ? 'not-declared' : !personal.granted ? 'not-granted' : null;
+      const seats = why == null ? this.rows<{ id: number; ticket_id: string; capacity: number }>(
+        `SELECT k.id, k.ticket_id, c.capacity FROM capability_capacity c JOIN claim_seats s ON s.capability = c.capability
+         JOIN claims k ON k.id = s.claim_id WHERE c.capability = ? AND (k.status = 'active' OR (k.status = 'reaped' AND k.fence_pending = 1))
+         ORDER BY k.id`, r.name) : [];
+      if (seats.length && seats.length >= seats[0].capacity) why = 'full';
+      add('capability', r.name, r.leg, why, why === 'full' ? {
+        holders: seats.filter((s) => repositoryOf(s.ticket_id) === repositoryOf(id)).map(({ id: claim_id, ticket_id }) => ({ claim_id, ticket_id })),
+      } : {});
+      blocks.delete(key);
+    }
+    for (const r of this.rows<{ resource: string; leg: string }>('SELECT resource, leg FROM leg_needs WHERE ticket_id = ? AND leg IN (\'\', ?) ORDER BY leg, resource', id, leg)) {
+      const blocked = blocks.has(rowKey({ kind: 'resource', ref: r.resource, leg: r.leg }));
+      add('resource', r.resource, r.leg, blocked ? 'unavailable' : null);
+    }
+    for (const key of indexedTicketRefs) blocks.delete(key);
+    for (const b of [...blocks.values()]) add(b.kind, b.ref, b.leg ?? '', b.kind === 'ticket' ? 'not-done' : 'open');
+    const at = leg == null ? null : this.rows<{ state: string; waiting_on: string | null }>(
+      'SELECT state, waiting_on FROM ticket_next_legs WHERE ticket_id = ? AND leg = ?', id, leg)[0];
+    if (leg != null) prerequisites.unshift({ kind: 'station', ref: leg, met: !!at, why: at ? null : 'not-at', station: t.station });
+    const now = this.c.now();
+    const other: { kind: string; detail: unknown }[] = [];
+    if (at?.state === 'waiting' && at.waiting_on) other.push({ kind: 'waiting_on', detail: { leg, on: at.waiting_on } });
+    for (const h of this.rows<{ id: number; status: string }>(`SELECT id, status FROM claims WHERE ticket_id = ? AND
+      (status = 'active' OR (status = 'completed' AND confirmed_at IS NULL) OR (status = 'reaped' AND fence_pending = 1)) ORDER BY id`, id)) {
+      other.push({ kind: h.status === 'active' ? 'claimed' : h.status === 'completed' ? 'unconfirmed-end' : 'fence-pending', detail: { claim_id: h.id } });
+    }
+    const o = this.rows<{ hold: number; hold_reason: string | null; retry_after: number | null }>(
+      'SELECT hold, hold_reason, retry_after FROM ticket_overrides WHERE ticket_id = ?', id)[0];
+    if (o?.hold) other.push({ kind: 'hold', detail: { reason: o.hold_reason } });
+    if (o?.retry_after != null && o.retry_after > now) other.push({ kind: 'backoff', detail: { retry_after: o.retry_after } });
+    // Match the requested leg and use only the eligibility facts needed for the bar, not fleet holdings.
+    for (const b of this.named<{ id: number; tag: string }>(`WITH eligible AS (
+      SELECT w.id FROM runners w JOIN credentials c ON c.id = w.credential_id WHERE ${claimFleetSql(':now')}
+      AND (:runner IS NULL OR w.id = :runner)
+      AND (NOT COALESCE(${grantedKeySql('c.created_by')}, 0) OR EXISTS (
+        SELECT 1 FROM runner_grants g WHERE g.credential_id = c.id AND g.repository_id = :repo AND g.revoked_at IS NULL))
+    ) SELECT b.id, b.tag FROM owner_bars b WHERE b.repository_id = :repo AND b.lifted_at IS NULL
+      AND b.starts_at <= :now AND (b.ends_at IS NULL OR b.ends_at > :now) AND b.course IN ('*', :course)
+      AND (b.legs = '[]' OR EXISTS (SELECT 1 FROM json_each(b.legs) WHERE value = :leg))
+      AND EXISTS (SELECT 1 FROM eligible) AND NOT EXISTS (SELECT 1 FROM eligible w WHERE NOT EXISTS (
+        SELECT 1 FROM runner_tags r WHERE r.runner_id = w.id AND r.tag = b.tag)) ORDER BY b.id`,
+      { repo, now, runner, course: t.course_id, leg })) other.push({ kind: 'bars', detail: { bar: b.id, tag: b.tag } });
+    for (const n of this.rows<{ leg: string; resource: string }>(`SELECT l.leg, l.resource FROM leg_needs l
+      JOIN external_resources e ON e.name = l.resource LEFT JOIN resource_fleet f ON f.repository_id = l.repository_id AND f.resource = l.resource
+      WHERE l.ticket_id = ? AND l.leg IN ('', ?) AND (COALESCE(f.live_runner, 0) = 0 OR COALESCE(f.usable_instances, 0) = 0)`, id, leg)) {
+      other.push({ kind: 'no-instance', detail: n });
+    }
+    return { leg, ready: at?.state === 'ready' && !other.some((r) => r.kind !== 'no-instance') && prerequisites.every((p) => p.met), prerequisites, other };
   }
 
   /** `GET …/blocked?on=<kind>:<ref>[&transitive=1]` (R-BTN-75): every ticket of the repository

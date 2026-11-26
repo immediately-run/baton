@@ -1,3 +1,4 @@
+/// <reference path="../modules.d.ts" />
 // front.ts — what stands in front of Baton's core (BATON_SPEC §3, §10): it verifies the
 // principal for the path, applies the R-BTN-16 rules, serves the dashboard's static files, and
 // forwards the API to the core — through the Durable Object on Cloudflare, through the request
@@ -190,6 +191,13 @@ async function route(req: Request, env: Config, to: Forward, hasAdmin: () => Pro
       return forwardSigned(req, env, to);
     });
   }
+  if (pathname.startsWith('/v1/forge-scope/')) {
+    return under('private', async () => {
+      if (req.method !== 'GET') throw new BatonError('not-found', 'no such route');
+      if (!isSigned(req)) throw new BatonError('unauthenticated', 'a forge-scope read must be signed');
+      return forwardSigned(req, env, to);
+    });
+  }
   if (pathname === '/v1/probe/readings') {
     // R-BTN-53, R-BTN-101: a probe key signs; the core checks it is one.
     return under('private', async () => {
@@ -267,8 +275,12 @@ async function route(req: Request, env: Config, to: Forward, hasAdmin: () => Pro
         throw new BatonError('invalid-params', 'the body is not JSON');
       }
       const login = checkLogin(body);
-      const email = 'access' in login ? await verifyAccess(req, env) : null;
-      return forward(withBody(req, bytes), to, email ? { 'X-Baton-Access-Email': email } : {});
+      if ('access' in login) {
+        const access = await verifyAccess(req, env);
+        if ('reason' in access) throw new BatonError('unauthenticated', 'no verified Cloudflare Access email', { reason: access.reason });
+        return forward(withBody(req, bytes), to, { 'X-Baton-Access-Email': access.email });
+      }
+      return forward(withBody(req, bytes), to, {});
     });
   }
   const located = await conditionRedirect(req, env, to, pathname);

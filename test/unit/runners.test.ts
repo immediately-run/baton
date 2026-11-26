@@ -3,7 +3,12 @@
 import { describe, it, expect, inject, beforeEach } from 'vitest';
 import { env } from 'cloudflare:test';
 import { runnerAuth } from '../lib/runnerAuth';
-import { beat, call, hbBody, keyCall, ORIGIN, ownerCall, payload, register, rows, seedClaim, setAdminKeys, setClock, sha256, syncCall, runnerCall , tick, withCore, stateView } from '../helpers';
+import { RunnerApi } from '../../src/core/runnerApi';
+import {
+  beat, call, hbBody, keyCall, ORIGIN, ownerCall, payload, register, rows, seedClaim, setAdminKeys, setClock,
+  sha256, syncCall, runnerCall, tick, withCore, stateView, releaseAllSeededClaims, releaseSeededClaim,
+  setCredentialHostname, setRunnerReaped, setTranscriptRepositoriesForAll, seedTicketRow,
+} from '../helpers';
 import { makeKey, signedRequest } from '../lib/sshKeys';
 import { call as hostCall } from '#host';
 
@@ -20,6 +25,20 @@ beforeEach(async () => {
 });
 
 describe('G-BTN-5: identity — the secret, the hostname and the capability allow-list', () => {
+  it('rejects malformed harness names before registering a runner (B-284, S-BTN-41)', async () => {
+    const secret_hash = await sha256('harness-name-test');
+    for (const harness of ['', '-agent', 'agent\n', '<agent>', 'a'.repeat(65), 123]) {
+      const res = await runnerCall('/v1/runner/heartbeat', { cred: 'vm-a', body: hbBody('vm-a', { harness, secret_hash }) });
+      expect(res.status).toBe(400);
+      expect(await res.json()).toMatchObject({ code: 'invalid-params', message: expect.stringContaining('harness') });
+    }
+    expect(await rows('SELECT id FROM runners')).toEqual([]);
+    const harness = 'a'.repeat(64);
+    const res = await runnerCall('/v1/runner/heartbeat', { cred: 'vm-a', body: hbBody('vm-a', { harness, secret_hash }) });
+    expect(res.status).toBe(200);
+    expect(await rows('SELECT harness FROM runners')).toEqual([{ harness }]);
+  });
+
   it('a first heartbeat registers; later calls need the secret; a wrong one is session-taken', async () => {
     const { id, secret, first } = await register('vm-a');
     expect(first).toMatchObject({ runner_id: id, incarnation: 1, lease_timeout_s: 900, claim: null, mode: { docs: 'shadow' }, stale_courses: [] });
@@ -129,13 +148,13 @@ describe('G-BTN-17: a retried first heartbeat, and re-keys', () => {
     await seedClaim(id, 'docs:R3-9001');
     const refused = await runnerCall('/v1/runner/heartbeat', { body: hbBody('vm-a', { rekey: true, secret_hash: await sha256('new') }) });
     expect([refused.status, await code(refused)]).toEqual([409, 'session-taken']);
-    await rows(`UPDATE claims SET status = 'released', ended_at = 1, end_reason = 'released:requested'`);
+    await releaseAllSeededClaims(1);
     const ok = await (await runnerCall('/v1/runner/heartbeat', { body: hbBody('vm-a', { rekey: true, secret_hash: await sha256('new') }) })).json() as { incarnation: number };
     expect(ok.incarnation).toBe(2);
     expect((await runnerCall('/v1/runner/activities', { secret, body: { activities: [] } })).status).toBe(401); // the old secret is gone
     expect(await rows(`SELECT kind FROM events WHERE kind = 'rekeyed'`)).toHaveLength(1);
     // Reaped (R3-1212 sets this): every call is runner-reaped until a re-key.
-    await rows('UPDATE runners SET reaped_at = 5 WHERE id = ?', id);
+    await setRunnerReaped(id, 5);
     expect((await beat('vm-a', 'new')).json.code).toBe('runner-reaped');
     const back = await (await runnerCall('/v1/runner/heartbeat', { body: hbBody('vm-a', { rekey: true, secret_hash: await sha256('newer') }) })).json() as { incarnation: number };
     expect(back.incarnation).toBe(3);
@@ -174,9 +193,12 @@ describe('G-BTN-13: free text and identifiers are validated before any write', (
     expect(await refusedOf(await post({ secret: 'x' }))).toBe(1);
     // A ticket's repos — owner/name or docs' short names under the home's owner (round 1, 1-A-8); the claim above,
     // whose ticket the board does not carry, took any registered repository's.
-    await rows(`INSERT INTO tickets (id, repository_id, local_id, path, title, status, node, queue, tags, requires_clause, depends_on, blocked_by, repos, snapshot_sha, row_hash)
-                VALUES ('docs:R3-9777', 'docs', 'R3-9777', 'p', 't', 'in-progress', 'ready', 'ready-autonomous', '[]', 'listed', '[]', '[]', '["baton","immediately-run/sandbox"]', 'a', 'h')`);
-    await rows(`UPDATE claims SET status = 'released', ended_at = 1 WHERE id = ?`, claim); // one active claim per runner
+    await seedTicketRow({
+      id: 'docs:R3-9777', repository_id: 'docs', local_id: 'R3-9777', path: 'p', title: 't', status: 'in-progress',
+      node: 'ready', queue: 'ready-autonomous', tags: '[]', requires_clause: 'listed', depends_on: '[]',
+      blocked_by: '[]', repos: '["baton","immediately-run/sandbox"]', snapshot_sha: 'a', row_hash: 'h',
+    });
+    await releaseSeededClaim(claim, 1); // one active claim per runner
     const withRepos = await seedClaim(id, 'docs:R3-9777', 1);
     const postOn = (claimId: number | null, pr: string) => runnerCall('/v1/runner/activities', { secret, body: { activities: [{ id: `e${Math.random()}`, claim_id: claimId, kind: 'open-pr', source: 'hook', started_at: T0, detail: { pr } }] } });
     expect(await refusedOf(await postOn(withRepos, 'https://github.com/immediately-run/baton/pull/1'))).toBe(0);
@@ -247,7 +269,7 @@ describe('G-BTN-24: activities', () => {
     const claim = await seedClaim(id, 'docs:R3-9001');
     const post = (activities: unknown[]) => runnerCall('/v1/runner/activities', { secret, body: { activities } }).then((r) => r.json() as Promise<{ refused: { code: string }[] }>);
     await post([{ id: 'push-1', claim_id: claim, kind: 'push', source: 'hook', started_at: T0 }, { id: 'push-2', claim_id: claim, kind: 'push', source: 'hook', started_at: T0 }]);
-    await rows(`UPDATE claims SET status = 'released', ended_at = ?, end_reason = 'released:requested'`, T0);
+    await releaseAllSeededClaims(T0);
     await setClock(T0 + 5 * 60_000);
     expect((await post([{ id: 'push-1', claim_id: claim, kind: 'push', source: 'hook', started_at: T0, ended_at: T0 + 1, outcome: 'succeeded' }])).refused).toEqual([]);
     expect((await post([{ id: 'new', claim_id: claim, kind: 'push', source: 'hook', started_at: T0 }])).refused[0].code).toBe('claim-ended');
@@ -272,13 +294,13 @@ describe('messages (§9)', () => {
     const { id } = await register('vm-a');
     const bad = await owner('/v1/ui/messages', { to_runner_id: id, kind: 'release', payload: { ticket_id: 'docs:R3-9001', reason: 'because' } });
     expect([bad.status, await code(bad)]).toEqual([400, 'invalid-params']);
-    expect((await owner('/v1/ui/messages', { to_runner_id: id, kind: 'release', payload: { ticket_id: 'docs:R3-9001', reason: 'owner-cancel' } })).status).toBe(200);
+    expect((await owner('/v1/ui/messages', { to_runner_id: id, kind: 'release', confirm: true, payload: { ticket_id: 'docs:R3-9001', reason: 'owner-cancel' } })).status).toBe(200);
   });
 
   it('the alarm expires a reaped runner’s open messages', async () => {
     const { id } = await register('vm-a');
     await owner('/v1/ui/messages', { to_runner_id: id, kind: 'status_request' });
-    await rows('UPDATE runners SET reaped_at = 1 WHERE id = ?', id);
+    await setRunnerReaped(id, 1);
     await tick();
     expect(await rows(`SELECT status FROM messages WHERE kind = 'status_request'`)).toEqual([{ status: 'expired' }]);
   });
@@ -331,12 +353,12 @@ describe('round-one review fixes (baton#4)', () => {
     expect((await rekey(h2)).status).toBe(200);
     expect((await rekey(h2)).status).toBe(200); // a lost response, retried
     expect(await rows('SELECT incarnation FROM runners WHERE id = ?', id)).toEqual([{ incarnation: 2 }]);
-    await rows('UPDATE runners SET reaped_at = 5 WHERE id = ?', id);
+    await setRunnerReaped(id, 5);
     const same = await rekey(h2);
     expect([same.status, await code(same)]).toEqual([400, 'invalid-params']);
     expect(await rows('SELECT reaped_at, incarnation FROM runners WHERE id = ?', id)).toEqual([{ reaped_at: 5, incarnation: 2 }]);
     // Once the new secret has been presented, repeating its hash as a re-key is no bearer token.
-    await rows('UPDATE runners SET reaped_at = NULL WHERE id = ?', id);
+    await setRunnerReaped(id, null);
     expect((await beat('vm-a', 'two')).status).toBe(200);
     const replay = await rekey(h2);
     expect([replay.status, await code(replay)]).toEqual([409, 'session-taken']);
@@ -346,7 +368,7 @@ describe('round-one review fixes (baton#4)', () => {
     const { secret } = await register('vm-a');
     expect(await rows(`SELECT id FROM credentials WHERE revoked_at IS NOT NULL`)).toEqual([{ id: 'gone' }]);
     // Tamper with the mirror: an unchanged secret is not re-mirrored, so the tampered row stands.
-    await rows(`UPDATE credentials SET hostname = 'elsewhere' WHERE id = 'vm-a'`);
+    await setCredentialHostname('vm-a', 'elsewhere');
     expect((await beat('vm-a', secret)).json.code).toBe('forbidden');
     // A changed secret is mirrored: the hash removed revokes vm-a.
     await withCore((o) => {
@@ -398,7 +420,7 @@ describe('round-one review fixes (baton#4)', () => {
     // allow-list is the union over every registered repository (§6.8): the deployment seed's baton
     // (R3-1266) names none, so its list is the default — set it too, or the default swallows the
     // refusal this test asserts.
-    await rows(`UPDATE repositories SET transcript_repos = '["immediately-run/other-transcripts"]'`);
+    await setTranscriptRepositoriesForAll('["immediately-run/other-transcripts"]');
     await syncCall('/v1/sync/board', payload(board.shas.B, board.shas.A, board.states.B, { transcript_repos: ['immediately-run/claude-sessions'] }));
     expect((await beat('vm-a', secret, { transcripts: [{ repo: 'immediately-run/other-transcripts', path: 'a.md' }] })).json.transcripts_refused).toBeUndefined();
     expect((await beat('vm-a', secret, { transcripts: [{ repo: 'immediately-run/claude-sessions', path: 'a.md' }] })).json.transcripts_refused).toHaveLength(1);

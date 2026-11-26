@@ -8,10 +8,11 @@
 // output; `invalid-params` from the CLI, the sync's dropped `answer-invalid`; the expiry arriving
 // at `reached` with `question-expired`, the late answer `arrival-unapplied`. Runs on both hosts.
 import { describe, it, expect, beforeEach } from 'vitest';
+import { call as hostCall } from '#host';
 import roadmapPr from '../fixtures/courses/roadmap-pr/course.json';
 import { answerPlan } from '../../cli/baton.mjs';
-import { claimItem, course, cutover, Git, keyCall, placed, register, rows, setAdminKeys, setClock, tick, withCore } from '../helpers';
-import { makeKey, type TestKey } from '../lib/sshKeys';
+import { claimItem, course, cutover, Git, keyCall, ORIGIN, placed, register, rows, setAdminKeys, setClock, setHumanKeys, tick, withCore } from '../helpers';
+import { makeKey, signedRequest, sshsig, type TestKey } from '../lib/sshKeys';
 
 const T0 = Date.parse('2026-11-04T09:00:00Z');
 const REVIEWED: [string, string][] = [['implement', 'pr-open'], ['review', 'reviewed']];
@@ -40,6 +41,10 @@ const kinds = async (local: string) => (await rows<{ kind: string }>('SELECT kin
 const answerRow = (local: string) => rows<{ option: string | null; answered_by: string | null }>('SELECT option, answered_by FROM ticket_questions WHERE ticket_id = ?', `docs:${local}`);
 const needsYou = async (local: string) => (await withCore((core) => core.questions.needsYou())).find((x) => x.ticket_id === `docs:${local}`);
 const atDecide = (local: string) => git.add(local, { question: QUESTION }, placed('reviewed', REVIEWED, [['decide', 'ready']]));
+const answerBesideFix = (key: TestKey, local: string) => {
+  const { path, body } = answerPlan(`docs:${local}`, 'adjudicated');
+  return keyCall(key, path, { ...body, value: { ...body.value, leg: 'decide' } });
+};
 
 beforeEach(async () => {
   await setClock(T0);
@@ -95,6 +100,88 @@ it('the owner answers with baton decision answer: the same arrival through the a
   expect(res.json).toMatchObject({ ok: true, reached: 'adjudicated', option: 'ship' });
   expect(await station('C')).toEqual([{ station: 'adjudicated', next_leg: 'merge', next_source: 'baton' }]);
   expect(await answerRow('C')).toEqual([{ option: 'ship', answered_by: `owner:${owner.fingerprint}` }]);
+});
+
+it('under protected a human key can answer the person leg, but the sync and ordinary owner cannot', async () => {
+  atDecide('P');
+  expect((await git.post()).status).toBe(200);
+  const human = await makeKey('ssh-ed25519', 'human');
+  await setHumanKeys(human);
+  expect((await keyCall(owner, '/v1/owner/docs/owners', { public_key: human.publicKey })).status).toBe(200);
+  const preview = await keyCall(owner, '/v1/owner/docs/policy', { base_version: 1, preset: 'protected', dry_run: true }, 'PUT');
+  expect(preview.status).toBe(200);
+  expect(preview.json.stops).toEqual({ legs: [], tickets: [] });
+  expect((await keyCall(owner, '/v1/owner/docs/policy', { base_version: 1, preset: 'protected' }, 'PUT')).status).toBe(200);
+
+  expect((await git.post({ attestations: [decision('P', 'ship', 'f'.padEnd(40, '1'))] })).status).toBe(200);
+  expect(await station('P')).toEqual([{ station: 'reviewed', next_leg: 'decide', next_source: 'marker' }]);
+  const p = answerPlan('docs:P', 'ship');
+  expect((await keyCall(owner, p.path, p.body)).json.code).toBe('forbidden');
+  expect((await keyCall(human, p.path, p.body)).json).toMatchObject({ ok: true, reached: 'adjudicated' });
+  expect(await answerRow('P')).toEqual([{ option: 'ship', answered_by: `human:${human.fingerprint}` }]);
+});
+
+async function attestationOnly() {
+  const { json: { version, policy } } = await keyCall(owner, '/v1/repositories/docs/policy', undefined, 'GET');
+  return { base_version: version, policy: { ...policy, inputs: { ...policy.inputs, answers: 'attestation' } } };
+}
+
+it('S-BTN-197: preview identifies person legs that lose both answer paths, even beside a runner leg', async () => {
+  const breakGlass = await makeKey('ssh-ed25519', 'break-glass');
+  await setHumanKeys(breakGlass);
+  atDecide('P');
+  git.add('A', {}, placed('reviewed', REVIEWED, [['fix', 'ready']]));
+  git.add('B', {}, placed('reviewed', REVIEWED, [['fix', 'ready']]));
+  git.add('U', {}, placed('pr-open', [['implement', 'pr-open']], [['review', 'ready']]));
+  expect((await git.post()).status).toBe(200);
+  expect(await needsYou('A')).toBeUndefined();
+  const path = '/v1/owner/docs/policy';
+  const candidate = await attestationOnly();
+  const preview = await keyCall(owner, path, { ...candidate, dry_run: true }, 'PUT');
+  expect(preview.status).toBe(200);
+  expect(preview.json.changed).toEqual(['inputs.answers']);
+  expect(preview.json.stops).toEqual({
+    legs: [{ ticket_id: 'docs:A', leg: 'decide' }, { ticket_id: 'docs:B', leg: 'decide' }, { ticket_id: 'docs:P', leg: 'decide' }],
+    tickets: ['docs:A', 'docs:B', 'docs:P'],
+  });
+  // A preview has not disabled the old answer path.
+  expect((await answerBesideFix(owner, 'B')).json).toMatchObject({ ok: true, reached: 'adjudicated' });
+  const after = await keyCall(owner, path, candidate, 'PUT');
+  expect(after.status).toBe(200);
+  const p = answerPlan('docs:P', 'ship');
+  expect((await keyCall(owner, p.path, p.body)).json.code).toBe('forbidden');
+  expect((await answerBesideFix(owner, 'A')).json.code).toBe('forbidden');
+  expect((await answerBesideFix(breakGlass, 'A')).json.code).toBe('unauthenticated');
+  const syncAnswer = decision('A', 'ship', 'f'.padEnd(40, '3'));
+  syncAnswer.value.option = 'adjudicated'; // With no posted question, the station is the option.
+  expect((await git.post({ attestations: [decision('P', 'ship', 'f'.padEnd(40, '2')), syncAnswer] })).status).toBe(200);
+  expect(await station('A')).toMatchObject([{ station: 'reviewed', next_leg: 'fix' }]);
+  expect(await station('P')).toMatchObject([{ station: 'reviewed', next_leg: 'decide' }]);
+  const same = await keyCall(owner, path, { ...candidate, base_version: after.json.version, dry_run: true }, 'PUT');
+  expect(same.status).toBe(200);
+  expect(same.json.stops).toEqual({ legs: [], tickets: [] });
+});
+
+it('S-BTN-197: a registered human who owns no repository preserves the answer path', async () => {
+  const breakGlass = await makeKey('ssh-ed25519', 'break-glass');
+  const human = await makeKey('ssh-ed25519', 'human');
+  await setHumanKeys(breakGlass);
+  const signature = await sshsig(breakGlass, new TextEncoder().encode(human.publicKey.trim()), 'baton-human-keys@1');
+  const enrolled = await hostCall(await signedRequest(breakGlass, ORIGIN + '/v1/human-keys', {
+    created: T0 / 1000, method: 'POST', body: JSON.stringify({ public_key: human.publicKey, signature: btoa(String.fromCharCode(...signature)) }),
+  }));
+  expect(enrolled.status).toBe(200);
+  expect(await rows('SELECT 1 FROM repository_owners WHERE fingerprint = ?', human.fingerprint)).toEqual([]);
+  atDecide('P');
+  expect((await git.post()).status).toBe(200);
+  const path = '/v1/owner/docs/policy';
+  const candidate = await attestationOnly();
+  const preview = await keyCall(owner, path, { ...candidate, dry_run: true }, 'PUT');
+  expect(preview.status).toBe(200);
+  expect(preview.json.stops).toEqual({ legs: [], tickets: [] });
+  expect((await keyCall(owner, path, candidate, 'PUT')).status).toBe(200);
+  const p = answerPlan('docs:P', 'ship');
+  expect((await keyCall(human, p.path, p.body)).json).toMatchObject({ ok: true, reached: 'adjudicated' });
 });
 
 it('an answer naming an option the question lacks: invalid-params from the CLI, dropped answer-invalid from the sync', async () => {

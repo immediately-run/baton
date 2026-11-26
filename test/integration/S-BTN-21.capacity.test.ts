@@ -81,8 +81,7 @@ async function runnerAs(key: TestKey, path: string, body?: unknown, secret?: str
 async function up(key: TestKey, hostname: string, name: string, repository: string, over: Record<string, unknown> = {}) {
   const secret = `secret-${name}`;
   const hb = await runnerAs(key, '/v1/runner/heartbeat', {
-    hostname, session_name: name, harness: 'opencode', kind: 'vm', billing: {}, capabilities: [CAP],
-    tier_ceiling: 'critical', lease_timeout_s: 900, courses: [{ repository, course: 'rdp-course', version: 1 }],
+    hostname, session_name: name, harness: 'opencode', kind: 'vm', billing: {}, capabilities: [CAP], lease_timeout_s: 900, courses: [{ repository, course: 'rdp-course', version: 1 }],
     secret_hash: await sha256(secret), ...over,
   });
   expect(hb.status).toBe(200);
@@ -219,8 +218,7 @@ describe('S-BTN-21 capacity (R-BTN-178)', () => {
     expect((await claimAs(w2, W2.secret, { ticket_id: 'ops:RDP-OPS' })).status).toBe(409);
     // The sidecar reports the fence: the seat releases with it.
     const cleared = await runnerAs(w1, '/v1/runner/heartbeat', {
-      hostname: 'vm-12', session_name: 'w1', harness: 'opencode', kind: 'vm', billing: {}, capabilities: [CAP],
-      tier_ceiling: 'critical', lease_timeout_s: 900, courses: [{ repository: 'docs', course: 'rdp-course', version: 1 }],
+      hostname: 'vm-12', session_name: 'w1', harness: 'opencode', kind: 'vm', billing: {}, capabilities: [CAP], lease_timeout_s: 900, courses: [{ repository: 'docs', course: 'rdp-course', version: 1 }],
       fenced: { claim_id: c1.json.claim_id, terminated: true },
     }, W1.secret);
     expect(cleared.status).toBe(200);
@@ -230,7 +228,9 @@ describe('S-BTN-21 capacity (R-BTN-178)', () => {
     expect(await seatsOf(took.json.claim_id)).toEqual([CAP]);
 
     // A silent reap — W2 stops beating, its lease lapses — frees the seat at once (not fenced).
-    await setClock(T0 + 2 * 3_600_000);
+    await setClock(T0 + 14 * 60_000);
+    await tick(); // Baton is still serving; only W2 went silent.
+    await setClock(T0 + 15 * 60_000);
     await tick();
     expect((await rows<{ status: string }>('SELECT status FROM claims WHERE id = ?', took.json.claim_id))[0].status).toBe('reaped');
     expect(await seatsOf(took.json.claim_id)).toEqual([]);

@@ -1,0 +1,17 @@
+{
+  "id": "build-app",
+  "version": 1,
+  "min_runner_version": 1,
+  "skill": "baton-build-app",
+  "step_kinds": [
+    "define",
+    "design",
+    "architect",
+    "plan",
+    "file",
+    "verify"
+  ],
+  "branch_pattern": "claude/{ticket}-*",
+  "protocol_files": [],
+  "facts": []
+}

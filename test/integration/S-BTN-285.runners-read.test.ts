@@ -16,9 +16,9 @@
 //      elsewhere and a stranger are refused; an unknown parameter is `invalid-params`.
 // Runs on both hosts.
 import { describe, it, expect, beforeEach } from 'vitest';
-import { register, rows, sessionCall, setClock, tick, runnerCall } from '../helpers';
+import { register, rows, sessionCall, setClock, tick, runnerCall, seedClaim, seedMessage, seedTranscript } from '../helpers';
 import { makeKey } from '../lib/sshKeys';
-import { claimAndStart, claimElsewhere, fleet, grantedRunner, heartbeat, signed, type Fleet, type Granted, type Json } from '../lib/runnerFleet';
+import { claimAndStart, fleet, grantedRunner, heartbeat, signed, type Fleet, type Granted, type Json } from '../lib/runnerFleet';
 
 const T0 = Date.parse('2026-11-20T12:00:00Z');
 const MIN = 60_000;
@@ -53,11 +53,13 @@ describe('S-BTN-285 the repository’s runners (B-196)', () => {
       { id: 'act-1', claim_id: held.claim_id, kind: 'push', source: 'skill', started_at: T0, ended_at: T0 + 1000, outcome: 'succeeded', detail: { branch: 'claude/T-1-x' } },
       { id: 'act-2', claim_id: held.claim_id, kind: 'implement', source: 'skill', label: 'writing the read', started_at: T0 + 2000 },
     ] }, a.secret)).status).toBe(200);
-    await claimElsewhere(busy.id, 'ops:X-1', T0);
-    await rows(`INSERT INTO messages (kind, payload_json, from_runner_id, to_runner_id, sent_at, delivered_at, acknowledged_at, status)
-                VALUES ('status_report', ?, ?, ?, ?, ?, ?, 'acknowledged')`, JSON.stringify({ text: 'on the read' }), a.id, a.id, T0 + 3000, T0 + 3000, T0 + 3000);
-    await rows(`INSERT INTO transcripts (runner_id, claim_id, repo, path, role, first_seen_at) VALUES (?, ?, 'immediately-run/claude-sessions', 'claude-code/s-a.jsonl', 'session', ?)`,
-      a.id, held.claim_id, T0);
+    await seedClaim(busy.id, 'ops:X-1', T0);
+    await seedMessage({
+      kind: 'status_report', payload_json: JSON.stringify({ text: 'on the read' }), from_runner_id: a.id,
+      to_runner_id: a.id, sent_at: T0 + 3000, delivered_at: T0 + 3000, acknowledged_at: T0 + 3000,
+      status: 'acknowledged',
+    });
+    await seedTranscript({ runner_id: a.id, claim_id: held.claim_id, repo: 'immediately-run/claude-sessions', path: 'claude-code/s-a.jsonl', role: 'session', first_seen_at: T0 });
     const seed = await register('vm-b');
 
     const answer = await list();
@@ -69,7 +71,7 @@ describe('S-BTN-285 the repository’s runners (B-196)', () => {
 
     const ra = rowOf(answer, a.id);
     expect(Object.keys(ra).sort()).toEqual(['alive', 'busy_elsewhere', 'capabilities', 'claim', 'claims', 'courses', 'credential', 'granted', 'harness', 'hostname', 'isolation', 'kind',
-      'last_activity_at', 'last_report', 'last_seen_at', 'lease_timeout_s', 'reaped_at', 'reaped_claim', 'runner_id', 'session_name', 'tags', 'tier_ceilings', 'transcript_url']);
+      'last_activity_at', 'last_report', 'last_seen_at', 'lease_timeout_s', 'reaped_at', 'reaped_claim', 'runner_id', 'session_name', 'tags', 'transcript_url']);
     expect(ra).toMatchObject({ hostname: 'host-a', session_name: 's-host-a', alive: true, reaped_at: null, harness: 'opencode', kind: 'vm', lease_timeout_s: 900,
       busy_elsewhere: false, reaped_claim: null });
     expect(ra.credential).toMatchObject({ kind: 'runner', granted: true });
@@ -83,7 +85,7 @@ describe('S-BTN-285 the repository’s runners (B-196)', () => {
     expect(ra.claim).toEqual({
       claim_id: held.claim_id, ticket_id: 'docs:T-1', station: 'filed', leg: 'implement', run_id: expect.stringMatching(/^r_/), claimed_at: T0,
       lease_ends_at: ra.last_seen_at + 900_000, deadline_at: null, attempt: 1, max_runs: null, next_backoff_until: null,
-      session_url: null, log_dir: null, activity: { kind: 'implement', label: 'writing the read', started_at: T0 + 2000 },
+      session_url: null, session_link: false, log_dir: null, activity: { kind: 'implement', label: 'writing the read', started_at: T0 + 2000 },
     });
     expect(ra.claims).toEqual([ra.claim]);
     // No model, no profile on the list (B-196).

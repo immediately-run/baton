@@ -140,7 +140,7 @@ doorbell. Today Baton's only outbound act is a workflow dispatch, and runners wr
 - **The agent seam** (`agent_command`): spawned without a shell, stdin never an open
   pipe, the process's exit the agent's completion (B-84's contract); result-dependent
   legs' answers are machine-read last lines; the model configuration is the repository's
-  choice (`baton.json`), the wrapper hook the repository's freedom (B-95).
+  choice (`.baton/baton.json`), the wrapper hook the repository's freedom (B-95).
 - **The state seam** (B-100, B-149): the ticket is the record — one heading per leg for the
   work, on the ticket's branch, schema-checked at the boundary; where the ticket is, is Baton's
   course history. Every course that records work is one ticket, one PR, one merge.

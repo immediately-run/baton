@@ -3,7 +3,7 @@
 // the never-landed one is flagged at 6 h and never re-issued. The sync is the real decision code
 // (scripts/lib/batonSync.mjs, vendored) over the fixture repository's real ancestry.
 import { describe, it, expect, inject, beforeEach } from 'vitest';
-import { syncOnce } from '../../src/vendor/batonSync.mjs';
+import { syncOnce, type PostResult, type Head } from '../../src/shared/batonSync.mjs';
 import { claimItem, claimRow, cutover, endClaim, observe, ownerCall, payload, register, setClock, syncCall , tick, stateView } from '../helpers';
 
 const board = inject('board');
@@ -18,13 +18,13 @@ const sync = (next: Label) => syncOnce(sha[next], {
   // R-BTN-62: the run's number first, from the real route.
   observe: async () => {
     const o = await observe();
-    return o.status === 200 ? o.json : { ok: false, code: o.json.code };
+    return o.status === 200 ? o.json : { ok: false, code: o.json.code ?? `HTTP ${o.status}` };
   },
-  readHead: async () => (await syncCall('/v1/sync/head')).json(),
+  readHead: async (): Promise<Head> => (await syncCall('/v1/sync/head')).json(),
   post: async (body: unknown) => {
     const res = await syncCall('/v1/sync/board', body);
     const json = (await res.json()) as Record<string, unknown>;
-    return res.ok ? { ok: true, ...json } : json;
+    return (res.ok ? { ok: true, ...json } : json) as PostResult;
   },
   isAncestor: async (a: string, b: string) => board.ancestry[`${labelOf(a)}<${labelOf(b)}`] === true,
   buildPayload: async () => board.states[next],

@@ -3,8 +3,8 @@
 // `protected` applied to one writes plain-git's three values with it; the protected preset
 // applied by an owner key holding no human_only key is refused (its human-only approver lists
 // would have no live credential), by one with a human_only key stored — without the preset's
-// name in the document; every guarantee but signed-authorship and human-gates-hardware holds
-// except no-runner-lands, which holds once the protection checker reports a match; the owner
+// name in the document; the protection checker must report a match for no-runner-lands;
+// custody-only keys establish neither human-gates guarantee; the owner
 // key's policy changes are forbidden both ways under approvers.policy: [human], the human
 // key's accepted and logged with `changed`; two owners setting from one base_version: the
 // second conflict; setting approvers.trust: [human] clears every owner-set trust level to
@@ -13,7 +13,10 @@
 // export — nothing of either is in the code yet; the PR body says so. Runs on both hosts.
 import { describe, it, expect, beforeEach, inject } from 'vitest';
 import { call as hostCall } from '#host';
-import { cutover, course, keyCall, ORIGIN, payload, rows, setAdminKeys, setClock, setHumanKeys, syncCall, withCore } from '../helpers';
+import {
+  cutover, course, keyCall, ORIGIN, payload, rows, setAdminKeys, setClock, setHumanKeys, syncCall, withCore,
+  revokeRunnerGrants, setGrantRole, setGrantTrust,
+} from '../helpers';
 import { makeKey, sshsig, signedRequest, type TestKey } from '../lib/sshKeys';
 import { COOPERATIVE, PLAIN_GIT, legStateOf } from '../../src/core/policy';
 
@@ -58,6 +61,33 @@ beforeEach(async () => {
 });
 
 describe('S-BTN-189 the repository policy', () => {
+  // S-BTN-197 (policy dry run, B-155).
+  it('previews protected with the same preconditions and trust clearing as apply, but writes nothing', async () => {
+    const path = '/v1/owner/ops/policy';
+    const proposed = { base_version: 1, preset: 'protected' };
+    const preview = { ...proposed, dry_run: true };
+    expect((await as(owner, path, preview, 'PUT')).json.code).toBe('unsatisfiable-approvers');
+    await addHumanOwner('ops');
+    const grant = await as(owner, '/v1/owner/ops/couriers', { public_key: checkerKey.publicKey, asks: ['owner', 'reviewer'], trust_level: 'trusted', trust_domain: 'host-a' });
+    expect(grant.status).toBe(200);
+    const snapshot = () => Promise.all([rows('SELECT * FROM repository_policies'), rows('SELECT * FROM events'), rows('SELECT * FROM couriers')]);
+    const before = await snapshot();
+    expect((await as(owner, path, { ...preview, dry_run: 'true' }, 'PUT')).json.code).toBe('invalid-params');
+    expect((await as(owner, path, { ...preview, base_version: 2 }, 'PUT')).json.code).toBe('conflict');
+    const dry = await as(owner, path, preview, 'PUT');
+    expect(dry.status).toBe(200);
+    expect(dry.json.trust_cleared).toEqual([`courier:${checkerKey.fingerprint}`]);
+    expect(dry.json.stops).toEqual({ legs: [], tickets: [] });
+    expect(dry.json.not_evaluated).toContain('trusted-merge');
+    expect(await snapshot()).toEqual(before);
+
+    const applied = await as(owner, path, proposed, 'PUT');
+    expect(applied.status).toBe(200);
+    expect(dry.json).toMatchObject({ changed: applied.json.changed, guarantees: applied.json.guarantees });
+    expect((await rows('SELECT DISTINCT trust_level, trust_domain FROM couriers WHERE repository_id = ?', 'ops'))).toEqual([{ trust_level: 'untrusted', trust_domain: null }]);
+    expect((await as(owner, path, { ...preview, base_version: 2 }, 'PUT')).json.code).toBe('forbidden');
+  });
+
   it('a new repository gets version 1, the cooperative column, in the same transaction', async () => {
     const row = await policyRow('ops');
     expect(row.version).toBe(1);
@@ -82,8 +112,8 @@ describe('S-BTN-189 the repository policy', () => {
     // applied documents carry no `leg_state`, and the claim answer follows the PRs: `branch` on a
     // git home for a course that reads no PR facts, `forge` for one that reads them.
     expect(doc.leg_state).toBeUndefined();
-    expect(legStateOf(doc, 'git')).toBe('branch');
-    expect(legStateOf(doc, 'git', true)).toBe('forge');
+    expect(legStateOf('git')).toBe('branch');
+    expect(legStateOf('git', true)).toBe('forge');
     expect(doc.inputs.board).toEqual(['sync-key']);
     expect(doc.outbox['forge-check'].deliverers).toEqual([]);
     expect(doc.approvers.policy).toEqual(['human']);
@@ -117,15 +147,12 @@ describe('S-BTN-189 the repository policy', () => {
     const applied = await as(human, '/v1/owner/ops/policy', { base_version: 1, preset: 'protected' }, 'PUT');
     expect(applied.status).toBe(200);
     expect(applied.json.changed).toContain('approvers.policy');
-    // Before any protection report: every guarantee but signed-authorship and
-    // human-gates-hardware holds EXCEPT no-runner-lands and every guarantee including it.
+    // Before any protection report, only trusted-domain-separate holds.
     expect(applied.json.guarantees['no-runner-lands']).toBe(false);
-    for (const g of ['control-paths-human', 'tickets-approved', 'independent-review', 'signed-authorship', 'board-from-trusted', 'human-gates-hardware']) {
+    for (const g of ['control-paths-human', 'tickets-approved', 'independent-review', 'signed-authorship', 'board-from-trusted', 'human-gates', 'human-gates-hardware']) {
       expect(applied.json.guarantees[g], g).toBe(false);
     }
-    for (const g of ['trusted-domain-separate', 'human-gates']) {
-      expect(applied.json.guarantees[g], g).toBe(true);
-    }
+    expect(applied.json.guarantees['trusted-domain-separate']).toBe(true);
 
     const read = await policyRead('ops', owner);
     expect(read.status).toBe(200);
@@ -219,12 +246,14 @@ describe('S-BTN-189 the repository policy', () => {
   });
 
   it('claims keep leg_state but no longer carry policy hashes (S-BTN-190)', async () => {
+    const current = await policyRow('docs');
+    expect((await as(owner, '/v1/owner/docs/policy', { base_version: current.version, policy: { ...JSON.parse(current.policy_json), leg_state: 'branch' } }, 'PUT')).status).toBe(200);
     const w = await makeKey('ssh-ed25519', 'w');
     expect((await keyCall(owner, '/v1/owner/docs/grants', { public_key: w.publicKey, hostname: 'w-host', capabilities: ['agent-venue'] })).status).toBe(200);
     const secret = 'secret-w';
     const created = Math.floor((await withCore((c) => c.now())) / 1000);
     const hb = await hostCall(await signedRequest(w, ORIGIN + '/v1/runner/heartbeat', {
-      created, body: JSON.stringify({ hostname: 'w-host', session_name: 'w', harness: 'opencode', kind: 'vm', billing: {}, capabilities: ['agent-venue'], tier_ceiling: 'critical', lease_timeout_s: 900, secret_hash: await sha256Of(secret), courses: [{ repository: 'docs', course: 'roadmap-pr', version: 3 }] }),
+      created, body: JSON.stringify({ hostname: 'w-host', session_name: 'w', harness: 'opencode', kind: 'vm', billing: {}, capabilities: ['agent-venue'], lease_timeout_s: 900, secret_hash: await sha256Of(secret), courses: [{ repository: 'docs', course: 'roadmap-pr', version: 3 }] }),
     }));
     expect(hb.status).toBe(200);
     const hbJson = (await hb.json()) as Record<string, any>;
@@ -248,8 +277,8 @@ describe('S-BTN-189 the repository policy', () => {
     for (const [k, host] of [[r1, 'runner-1-host'], [r2, 'runner-2-host']] as const) {
       expect((await keyCall(owner, `/v1/owner/ops/grants`, { public_key: k.publicKey, hostname: host, capabilities: ['agent-venue'] })).status).toBe(200);
     }
-    await rows(`UPDATE runner_grants SET trust_level = 'trusted', trust_domain = 'host-a' WHERE credential_id = ?`, r1.fingerprint);
-    await rows(`UPDATE runner_grants SET trust_level = 'untrusted', trust_domain = 'host-a' WHERE credential_id = ?`, r2.fingerprint);
+    await setGrantTrust(r1.fingerprint, 'trusted', 'host-a');
+    await setGrantTrust(r2.fingerprint, 'untrusted', 'host-a');
     const { version, doc } = await policyRow('ops').then((r) => ({ version: r.version, doc: JSON.parse(r.policy_json) }));
     // grants.trusted_domain: separate — the trusted grant's domain is shared with another grant,
     // untrusted included (round 1, finding 6: the untrusted one was skipped before).
@@ -263,7 +292,7 @@ describe('S-BTN-189 the repository policy', () => {
     // The second grant gone, a courier in a domain of its own — registered once per ask, two
     // rows — does not refuse the change against itself: a courier is not a grant, and one
     // courier is one courier.
-    await rows(`UPDATE runner_grants SET revoked_at = ? WHERE credential_id = ?`, Date.now(), r2.fingerprint);
+    await revokeRunnerGrants(r2.fingerprint, Date.now());
     const courier = await makeKey('ssh-ed25519', 'courier');
     expect((await as(owner, '/v1/owner/ops/couriers', { public_key: courier.publicKey, asks: ['owner', 'hi'], trust_level: 'untrusted', trust_domain: 'host-b' })).status).toBe(200);
     const ok = await as(owner, '/v1/owner/ops/policy', { base_version: version, policy: { ...doc, grants: { ...doc.grants, one_per_domain: true, trusted_domain: 'separate' } } }, 'PUT');
@@ -331,14 +360,14 @@ async function addHumanOwner(repository: string) {
  *  (R-BTN-180 — the role's own routes are B-147's, so the scenario writes it as its grant). */
 async function makeChecker(repository: string) {
   expect((await keyCall(owner, `/v1/owner/${repository}/grants`, { public_key: checkerKey.publicKey, hostname: 'checker-host', capabilities: ['agent-venue'] })).status).toBe(200);
-  await rows('UPDATE runner_grants SET role = ? WHERE credential_id = ? AND repository_id = ?', 'protection-checker', checkerKey.fingerprint, repository);
+  await setGrantRole(repository, 'protection-checker', checkerKey.fingerprint);
 }
 
 /** The checker's heartbeat, carrying its protection report. */
 async function checkerBeat(repository: string, matched: boolean, readingHash: string) {
   const created = Math.floor((await withCore((c) => c.now())) / 1000);
   const res = await hostCall(await signedRequest(checkerKey, ORIGIN + '/v1/runner/heartbeat', {
-    created, body: JSON.stringify({ hostname: 'checker-host', session_name: 'checker', harness: 'opencode', kind: 'vm', billing: {}, capabilities: [], tier_ceiling: 'critical', lease_timeout_s: 900, secret_hash: await sha256Of('checker-secret'), courses: [], protection: [{ repository, matched, reading_hash: readingHash }] }),
+    created, body: JSON.stringify({ hostname: 'checker-host', session_name: 'checker', harness: 'opencode', kind: 'vm', billing: {}, capabilities: [], lease_timeout_s: 900, secret_hash: await sha256Of('checker-secret'), courses: [], protection: [{ repository, matched, reading_hash: readingHash }] }),
   }));
   expect(res.status).toBe(200);
   return (await res.json()) as Record<string, any>;

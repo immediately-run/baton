@@ -2,7 +2,7 @@
 title: "16. Adoption"
 description: "Legacy, removed with its code (R-BTN-193)."
 ---
-## 16. Adoption *(appendix; legacy)*
+## 16. Adoption
 
 Legacy, removed with its code (R-BTN-193). This section states what the built cutover and
 mirror code still does for a repository that coordinated its claims through git before Baton.
@@ -11,7 +11,7 @@ elsewhere that serves only it, is deleted when the code is removed.
 
 ### 16.1 Cutover
 
-- **R-BTN-28 (cutover is one-way server state).** Legacy, removed with its code (R-BTN-193).
+- **R-BTN-28 (cutover is one-way server state).** `status: retiring B-289` Legacy, removed with its code (R-BTN-193).
   Cutover is per repository: `repositories.cutover_at`, set once; no call clears it. A
   repository registered with `cut_over: true` (`POST /v1/admin/repositories`) starts cut over.
   - **Before cutover** Baton shadows git. Runner claim calls return `not-cut-over`; a git claim
@@ -48,7 +48,7 @@ sync key, R-BTN-93), kept outside Baton, that writes Baton's claim events into g
   `repositories.mirror_acked_seq`, which a seal waits for (R-BTN-88). The mirror is wanted
   while an event of a kind it writes has a seq above it (R-BTN-94). An ended claim's events
   carry its activities and transcript pointers; nothing in the feed names a holder (R-BTN-36).
-- **R-BTN-17 (preconditions, or skip).** Legacy, removed with its code (R-BTN-193). The mirror
+- **R-BTN-17 (preconditions, or skip).** `status: retiring B-289` Legacy, removed with its code (R-BTN-193). The mirror
   writes one commit per ticket transition, only over the status the event expects: `claimed`
   writes `in-progress` only over `available`; `released` and `reaped` write `available` only
   over `in-progress`. Any other status skips and logs the event; nothing is overwritten.
@@ -58,3 +58,10 @@ sync key, R-BTN-93), kept outside Baton, that writes Baton's claim events into g
   `POST /v1/sync/foreign-claim`. Over an active Baton claim it is logged `foreign-claim`, the
   holder keeps its claim, and the mirror writes the holder's status back. With no
   Baton claim it is imported as a legacy claim (§16.1).
+
+### 16.4 The interim board post
+
+Legacy (R3-1233, superseded by B-31). The pre-standard-course sync posted `state: { items }`
+with `ready` in `rankReady` order, not §4.4's ticket and station lists. Core still accepts this
+shape for older posters, but refuses a post mixing the two shapes. Interim items start at the
+course's start station; the post supplies no station map.

@@ -6,7 +6,7 @@
 // staleness and regression from it (claims.ts).
 import { nonScheduling } from './stateVersion';
 import { logEvent } from './db';
-import { extendsPath, graphOf, leaves, onGraph, resolveLeg, type Graph, type Step } from './graph';
+import { extendsPath, graphOf, leaves, modelsOutsideWork, onGraph, resolveLeg, type Graph, type Step } from './graph';
 import { missingQueuedLeg, type PostedStation } from './board';
 import type { Store } from './ports';
 import { meetsRequiredBar, requiredBarCovers, type RequiredBar } from './admin';
@@ -14,6 +14,7 @@ import { qualify } from './validate';
 import { repositoryOf } from './registry';
 import type { History } from './history';
 import { BATON_WAITS } from './blocks';
+import { ticketInputs } from './contracts';
 
 /** What one snapshot showed of one ticket, against the previous accepted one. */
 export interface Seen {
@@ -23,6 +24,8 @@ export interface Seen {
   prev: Step[] | null;
   bars: Record<string, string[]>;
 }
+
+export type ClosingPosition = { parent: string | null; course_id: string; station: string | null; path: string | null };
 
 /** A queued or next leg as `ticket_next_legs` holds it. */
 type NextRow = { leg: string; state: string; waiting_on: string | null; ready_since: number | null; waiting_since: number | null };
@@ -95,7 +98,7 @@ export class Stations {
    * path that neither extends the previous one by edges nor is shorter is stored (git wins) and
    * logs `off-graph`. Returns what each placed ticket showed, by qualified id.
    */
-  apply(repo: string, sha: string, observation: number, stations: Map<string, PostedStation>, closed: { id: string; as: 'done' | 'withdrawn' }[], at: number, closingParents?: ReadonlyMap<string, string | null>): Map<string, Seen> {
+  apply(repo: string, sha: string, observation: number, stations: Map<string, PostedStation>, closed: { id: string; as: 'done' | 'withdrawn' }[], at: number, closingPositions?: ReadonlyMap<string, ClosingPosition>): Map<string, Seen> {
     const seen = new Map<string, Seen>();
     // The reading that placed every station row before this one (R-BTN-62): a row this post
     // leaves unchanged keeps its own, older `observation`, so the repository's stands for it.
@@ -106,14 +109,38 @@ export class Stations {
     // others stays true while the loop runs.
     const stored = this.storedOf(repo);
     const required = this.c.requiredBars(repo);
-    for (const [local, st] of stations) {
+    for (const [local, given] of stations) {
       const id = qualify(repo, local);
       const t = stored.get(id);
       if (!t) continue;
       const g = this.graph(repo, t.course_id);
-      const unknown = !g ? 'no course in force' : this.unknownNames(g, st);
       const prevRow = t.station;
       const prev = prevRow ? (JSON.parse(prevRow.path) as Step[]) : null;
+      // PR facts can describe readiness but cannot bypass the course's outside-work edges.
+      let st = given;
+      if (g && modelsOutsideWork(g)) {
+        const station = prevRow?.station ?? g.start;
+        const queued = prevRow ? prevRow.next_leg : g.startLeg;
+        const waiting = queued == null ? undefined : g.legs.get(queued);
+        const replacement = given.next_leg == null ? undefined : g.legs.get(given.next_leg);
+        // A station function can retire a queued runner leg and offer an alternative at
+        // the same station. It still cannot supply a new station or amend Baton's path.
+        const switchExhausted = waiting && !waiting.arrives && !waiting.reconciles && !waiting.person
+          && replacement?.from.includes(station)
+          && !replacement.arrives && !replacement.reconciles && !replacement.person && !prevRow?.handoff_url
+          && !t.next.some((n) => n.leg === queued && ['routed', 'expired'].includes(n.waiting_on ?? ''))
+          && given.next.some((n) => n.leg === queued && n.state === 'waiting' && n.waiting_on === 'exhausted')
+          && given.next.some((n) => n.leg === given.next_leg && n.state === 'ready')
+          && !this.rows("SELECT 1 FROM claims WHERE ticket_id = ? AND status = 'active'", id).length;
+        const next_leg = switchExhausted ? given.next_leg : queued;
+        const old = t.next.find((n) => n.leg === next_leg);
+        const posted = switchExhausted || given.station === station ? given.next.find((n) => n.leg === next_leg) : undefined;
+        st = { ...given, station, next_leg, path: prev ?? [], next_source: (prevRow?.next_source ?? 'course') as PostedStation['next_source'],
+          handoff_url: prevRow?.handoff_url ?? null, next: next_leg == null ? [] : [posted ?? {
+            leg: next_leg, state: old?.state === 'waiting' ? 'waiting' : 'ready', waiting_on: old?.waiting_on ?? null,
+          }] };
+      }
+      const unknown = !g ? 'no course in force' : this.unknownNames(g, st);
       if (unknown) {
         this.clear(id);
         // Once per distinct fault, not on every snapshot that repeats it (the sync posts every
@@ -161,11 +188,16 @@ export class Stations {
       // R-BTN-86: the relation outlives the close — the parent the closing ticket's row held,
       // passed by the materialization that just dropped it (or read from the row a held
       // history's refresh still leaves standing).
-      const parent = closingParents?.get(c.id)
+      const closing = closingPositions?.get(c.id);
+      const parent = closing?.parent
         ?? this.rows<{ parent: string | null }>('SELECT parent FROM tickets WHERE id = ?', qualify(repo, c.id))[0]?.parent
         ?? null;
-      this.exec('INSERT INTO closed_tickets (ticket_id, closed_as, observation, closed_at, parent) VALUES (?, ?, ?, ?, ?) ON CONFLICT (ticket_id) DO NOTHING',
-        qualify(repo, c.id), c.as, observation, at, parent);
+      const id = qualify(repo, c.id);
+      const previous = stored.get(id);
+      const position = previous?.station;
+      this.exec(`INSERT INTO closed_tickets (ticket_id, closed_as, observation, closed_at, parent, final_station, final_path, course_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (ticket_id) DO NOTHING`,
+        id, c.as, observation, at, parent, closing?.station ?? position?.station ?? null, closing?.path ?? position?.path ?? null, closing?.course_id ?? previous?.course_id ?? null);
     }
     return seen;
   }
@@ -256,9 +288,43 @@ export class Stations {
    * Needs you; a renamed one is read through `renamed_from`. Run when a course file is accepted —
    * a snapshot's stations are judged as they are written.
    */
-  recheckCourse(repo: string, course: string) {
+  recheckCourse(repo: string, course: string, previous: Graph | null = null) {
     const g = this.graph(repo, course);
     if (!g) return;
+    // A previously terminal person answer still stands. If the new graph gives it a single
+    // runner continuation, queue that leg from the recorded position, not from git's shorter path.
+    const continued = [...(previous?.ends ?? [])].filter((s) => g.stations.has(s) && !g.ends.has(s));
+    for (const s of continued) {
+      const next = [...g.legs].filter(([, l]) => l.from.includes(s));
+      if (next.length !== 1 || next[0][1].person) continue;
+      for (const t of this.rows<{ id: string; path: string; leg: string; answered_by: string }>(
+        `SELECT t.id, s.path, q.leg, q.answered_by FROM tickets t JOIN ticket_stations s ON s.ticket_id = t.id
+         JOIN ticket_questions q ON q.ticket_id = t.id
+         WHERE t.repository_id = ? AND t.course_id = ? AND s.station = ? AND s.next_leg IS NULL
+           AND s.next_source = 'baton' AND q.option IS NOT NULL AND q.answered_at IS NOT NULL`, repo, course, s)) {
+        const last = (JSON.parse(t.path) as Step[]).at(-1);
+        if (last?.leg !== t.leg || last.reached !== s) continue;
+        const answered = g.legs.get(resolveLeg(g, t.leg) ?? '');
+        if (!answered?.person || !answered.to.includes(s)) continue;
+        if (answered.answerSource === 'person' && !/^(owner|human):/.test(t.answered_by)) {
+          const path = (JSON.parse(t.path) as Step[]).slice(0, -1);
+          const from = path.at(-1)?.reached ?? g.start;
+          const leg = resolveLeg(g, t.leg)!;
+          if (!answered.from.includes(from)) continue;
+          const now = this.c.now();
+          const expires = answered.expires == null ? null : now + answered.expires.afterS * 1000;
+          this.exec(`UPDATE ticket_stations SET station = ?, path = ?, path_len = ?, to_end = ?, next_leg = ?, person_expires_at = ?
+                     WHERE ticket_id = ?`, from, JSON.stringify(path), path.length, g.toEnd.get(from) ?? 0, leg, expires, t.id);
+          // The working question row is replaceable; the applied answer stays in history and outputs.
+          this.exec('DELETE FROM ticket_questions WHERE ticket_id = ?', t.id);
+          this.exec(`INSERT INTO ticket_next_legs (ticket_id, leg, state, ready_since) VALUES (?, ?, 'ready', ?)`, t.id, leg, now);
+          continue;
+        }
+        const [leg] = next[0];
+        this.exec('UPDATE ticket_stations SET next_leg = ?, to_end = ? WHERE ticket_id = ?', leg, g.toEnd.get(s) ?? 0, t.id);
+        this.exec(`INSERT INTO ticket_next_legs (ticket_id, leg, state, ready_since) VALUES (?, ?, 'ready', ?)`, t.id, leg, this.c.now());
+      }
+    }
     for (const t of this.rows<{ id: string; station: string; next_leg: string | null }>(
       `SELECT t.id, s.station, s.next_leg FROM tickets t JOIN ticket_stations s ON s.ticket_id = t.id
        WHERE t.repository_id = ? AND t.course_id = ? AND s.next_leg IS NOT NULL`, repo, course)) {
@@ -290,6 +356,27 @@ export class Stations {
                                       THEN ticket_next_legs.waiting_since ELSE excluded.waiting_since END`, id, leg, since);
   }
 
+  /** Rebuild the queue an imported person-leg arrival left, using the course now in force.
+   *  A stale first placement may leave this queue standing (R-BTN-39, S-BTN-50). */
+  restoreNext(repo: string, id: string, station: string, queued: string | null, at: number) {
+    const ticket = this.rows<{ course_id: string }>('SELECT course_id FROM tickets WHERE id = ?', id)[0];
+    const g = ticket && this.graph(repo, ticket.course_id);
+    if (!g) return;
+    const required = this.c.requiredBars?.(repo) ?? [];
+    for (const [leg, def] of g.legs) {
+      if (!def.from.includes(station)) continue;
+      // No posted bars for this restored queue have been accepted yet.
+      const unmet = required.some((bar) => requiredBarCovers(bar, ticket.course_id, leg, g));
+      this.exec(`INSERT INTO ticket_next_legs (ticket_id, leg, state, waiting_on, ready_since, waiting_since) VALUES (?, ?, ?, ?, ?, ?)`,
+        id, leg, unmet ? 'waiting' : 'ready', unmet ? 'policy' : null, unmet ? null : at, unmet ? at : null);
+    }
+    if (queued != null) {
+      const leg = resolveLeg(g, queued) ?? queued;
+      if (leg !== queued) this.exec('UPDATE ticket_stations SET next_leg = ? WHERE ticket_id = ?', leg, id);
+      if (!leaves(g, leg, station)) this.courseChanged(id, leg, at);
+    }
+  }
+
   /** Store where a snapshot places the ticket, writing only what changed (R-BTN-70): the sync
    *  re-posts every live ticket on every push and every refresh, and rows rewritten unchanged
    *  are what spend a plan's rows written (R-BTN-2; S-BTN-188). */
@@ -308,6 +395,9 @@ export class Stations {
                    to_end = excluded.to_end, next_leg = excluded.next_leg, next_source = excluded.next_source, handoff_url = excluded.handoff_url,
                    snapshot_sha = excluded.snapshot_sha, observation = excluded.observation`,
         id, ...row, sha, observation);
+      if (!stored || stored.station !== st.station || stored.path !== row[1] || stored.next_leg !== st.next_leg) {
+        this.exec('UPDATE ticket_stations SET changed_at = ? WHERE ticket_id = ?', at, id);
+      }
     }
     // R-BTN-116, R-BTN-167: a person leg's expiry instant. Set when the person leg becomes the
     // queued leg — the row above just changed, or no instant is held yet — counting from this
@@ -325,6 +415,7 @@ export class Stations {
       // row's other columns (`handoff_url`, `next_source`, the path's spelling) restart nothing,
       // or a churny one would extend the wait without bound.
       const moved = !stored || stored.station !== st.station || stored.next_leg !== st.next_leg;
+      if (moved && def?.person) this.exec('DELETE FROM ticket_questions WHERE ticket_id = ? AND leg = ? AND answered_at IS NOT NULL', id, st.next_leg);
       const set = moved ? wanted : wanted == null ? null : have ?? wanted;
       if (set !== have) this.exec('UPDATE ticket_stations SET person_expires_at = ? WHERE ticket_id = ?', set, id);
     }
@@ -333,7 +424,8 @@ export class Stations {
       // R-BTN-67: a leg a required bar covers whose posted bars hold no tag with its prefix is
       // stored waiting on `policy` — the board still moves — and listed under Needs you.
       const unmet = required.some((r) => requiredBarCovers(r, course, posted.leg, g) && !meetsRequiredBar(r, Object.hasOwn(st.bars, posted.leg) ? st.bars[posted.leg] : []));
-      const n = unmet ? { leg: posted.leg, state: 'waiting' as const, waiting_on: 'policy' } : posted;
+      const wait = unmet ? 'policy' : posted.state === 'ready' ? ticketInputs(this.c.store, id, g, posted.leg).wait : undefined;
+      const n = wait ? { leg: posted.leg, state: 'waiting' as const, waiting_on: wait } : posted;
       const b = before.get(n.leg);
       // Age (the default order's fourth key) runs from the first snapshot that showed the leg
       // ready, and an unbroken wait from the first that showed it waiting. A wait git posts never

@@ -4,14 +4,3 @@ declare module '*.sql' { const text: string; export default text; }
 declare module '*.html' { const text: string; export default text; }
 declare module '*.css' { const text: string; export default text; }
 declare module '*/dashboard/dist/app.js' { const text: string; export default text; }
-declare module '*/vendor/baton.mjs';
-declare module '*/vendor/vocabulary.mjs';
-declare module '*/vendor/sessionUsage.mjs';
-declare module '*/vendor/batonSync.mjs';
-declare module '*/cli/baton.mjs';
-declare module '*/cli/version.mjs';
-declare module '*/cli/decisions.mjs';
-declare module '*/cli/sign.mjs';
-declare module '*/scripts/check-traces.mjs';
-declare module '*/scripts/check-model-links.mjs';
-declare module '*/scripts/model-report.mjs';

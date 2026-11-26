@@ -12,6 +12,7 @@
 // pushed branch is printed and the exit is non-zero; a branch already present takes the next
 // free id; a `git` forge, and any refusal that is not protection, stay git's own words, nothing
 // opened, non-zero. Node only: it writes a real repository and runs git and the CLI.
+import { GitRepo } from '../lib/gitRepo';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -32,20 +33,13 @@ const said = (stderr: string): string[] => stderr.split('\n').filter((l) => !l.s
 // No --pin: the CLI pins its own commit, the one its courses' sources name (B-33).
 const init = (root: string, ...argv: string[]) => initMain(argv, { root, log: () => {} });
 
-class Repo {
-  readonly dir = mkdtempSync(join(tmpdir(), 'baton-s175-'));
-  /** The bare origin the request pushes to — what the sync workflow's checkout is level with. */
-  readonly bare = mkdtempSync(join(tmpdir(), 'baton-s175-origin-'));
+class RequestCheckout extends GitRepo {
+
   constructor() {
-    execFileSync('git', ['init', '-q', '--bare', '-b', 'main', this.bare], { stdio: 'ignore' });
-    for (const a of [['init', '-q', '-b', 'main'], ['config', 'user.email', 's175@test'], ['config', 'user.name', 's175'], ['remote', 'add', 'origin', this.bare]]) {
-      execFileSync('git', ['-C', this.dir, ...a], { stdio: 'ignore' });
-    }
+    super('baton-175-', { origin: true });
     mkdirSync(join(this.dir, 'tickets'), { recursive: true });
   }
-  git(...a: string[]): string {
-    return execFileSync('git', ['-C', this.dir, ...a], { encoding: 'utf8' }).trim();
-  }
+
   /** The scaffold and the fixtures' first ticket, committed and pushed to the origin's main. */
   publish(): void {
     this.git('add', '-A');
@@ -85,6 +79,10 @@ const refuseMain = (origin: string): string => {
   const realGit = execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim();
   const shim = [
     '#!/bin/sh',
+    // The local rewrite fakes transport only, not the push destination seen by the PR client.
+    'if [ "$3 $4 $5 $6" = "remote get-url --push origin" ]; then',
+    `  exec ${JSON.stringify(realGit)} -C "$2" config --get remote.origin.url`,
+    'fi',
     'n=0',
     'for a in "$@"; do if [ "$a" = "push" ]; then n=1; fi; done',
     'if [ "$n" = "1" ]; then',
@@ -115,15 +113,15 @@ const prFetch = (url: string): { calls: Request[]; fetchImpl: typeof fetch } => 
   return { calls, fetchImpl };
 };
 
-let repo: Repo | null;
+let repo: RequestCheckout | null;
 let minutes = 0;
 /** The repository a run works in, or null in a runtime that writes none: this scenario mkdtemps,
  *  pushes and spawns the CLI, so the Workers runtime — which has neither (`node:fs` is a stub
  *  there) — skips it (R-BTN-29, S-BTN-31) instead of failing on them. Asked by the call itself:
  *  `tryMkdtemp` is node's own in Node, and throws on the Workers runtime's stub. */
-const onNode = (): Repo | null => {
+const onNode = (): RequestCheckout | null => {
   try {
-    return new Repo();
+    return new RequestCheckout();
   } catch {
     return null;
   }
@@ -137,7 +135,7 @@ beforeEach(async () => {
 });
 afterEach(() => {
   if (!repo) return;
-  rmSync(repo.dir, { recursive: true, force: true });
+  repo.dispose();
   rmSync(repo.bare, { recursive: true, force: true });
 });
 
@@ -181,7 +179,7 @@ describe('S-BTN-175 the request', () => {
 
     // A runner's claim offers `converse`: the course starts, from one sentence.
     await cutover();
-    const w1 = await register('vm-a', { courses: [{ repository: 'docs', course: 'create-spec', version: 1 }] });
+    const w1 = await register('vm-a', { courses: [{ repository: 'docs', course: 'create-spec', version: 2 }] });
     const { status, json } = await claimItem('vm-a', w1.secret);
     expect(status).toBe(200);
     expect(json).toMatchObject({ ticket_id: 'docs:B-1', station: 'requested', legs: ['converse'] });
@@ -198,7 +196,10 @@ describe('S-BTN-175 the request', () => {
     const before = execFileSync('git', ['-C', repo.bare, 'rev-parse', 'main'], { encoding: 'utf8' }).trim();
 
     const bin = refuseMain(repo.bare);
-    const pr = prFetch('https://github.com/immediately-run/docs/pull/7');
+    const url = 'https://github.com/o/requests.git';
+    execFileSync('git', ['-C', repo.dir, 'config', `url.${repo.bare}.insteadOf`, url]);
+    execFileSync('git', ['-C', repo.dir, 'config', 'remote.origin.url', url]);
+    const pr = prFetch('https://github.com/o/requests/pull/7');
     const out: string[] = [];
     const path = process.env.PATH;
     process.env.PATH = `${bin}:${path}`;
@@ -213,7 +214,7 @@ describe('S-BTN-175 the request', () => {
     // The request landed on the side branch — the commit is the ticket file alone — and the PR
     // opened from it with the caller's credential; the default branch never moved.
     expect(code).toBe(0);
-    expect(out).toEqual(['baton request: filed B-1 (course create-spec) on baton-request/B-1 — the default branch refused the push as protected; PR https://github.com/immediately-run/docs/pull/7; its merge starts converse at requested']);
+    expect(out).toEqual(['baton request: filed B-1 (course create-spec) on baton-request/B-1 — the default branch refused the push as protected; PR https://github.com/o/requests/pull/7; its merge starts converse at requested']);
     expect(pr.calls.length).toBe(1);
     expect(JSON.parse(await pr.calls[0].text())).toMatchObject({ head: 'baton-request/B-1', base: 'main' });
     expect(execFileSync('git', ['-C', repo.bare, 'rev-parse', 'main'], { encoding: 'utf8' }).trim()).toBe(before);
@@ -234,7 +235,7 @@ describe('S-BTN-175 the request', () => {
 
     // And the claim offers `converse` all the same.
     await cutover();
-    const w1 = await register('vm-a', { courses: [{ repository: 'docs', course: 'create-spec', version: 1 }] });
+    const w1 = await register('vm-a', { courses: [{ repository: 'docs', course: 'create-spec', version: 2 }] });
     const { status, json } = await claimItem('vm-a', w1.secret);
     expect(status).toBe(200);
     expect(json).toMatchObject({ ticket_id: 'docs:B-1', station: 'requested', legs: ['converse'] });
@@ -257,7 +258,10 @@ describe('S-BTN-175 the request', () => {
 
     // The same request again, the credential now set and the PR injected: `baton-request/B-1` is
     // present and still open, so the request takes the NEXT free id — B-2, its own branch.
-    const pr = prFetch('https://github.com/immediately-run/docs/pull/9');
+    const url = 'https://github.com/o/requests.git';
+    execFileSync('git', ['-C', repo.dir, 'config', `url.${repo.bare}.insteadOf`, url]);
+    execFileSync('git', ['-C', repo.dir, 'config', 'remote.origin.url', url]);
+    const pr = prFetch('https://github.com/o/requests/pull/9');
     const out: string[] = [];
     const path = process.env.PATH;
     process.env.PATH = `${bin}:${path}`;

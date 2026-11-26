@@ -15,7 +15,7 @@ import { createHash } from 'node:crypto';
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { hostname, userInfo } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
-import { batonNow } from '../vendor/baton.mjs';
+import { batonNow } from '../shared/baton.mjs';
 
 /** An order the host's user gave: a ticket, and the leg to run when Baton cannot be asked. */
 export interface LocalOrder {

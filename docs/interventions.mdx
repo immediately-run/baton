@@ -678,6 +678,54 @@ Entry shape: **When** · **Host** · **Tickets** · **Why it was needed** · **R
     never fix an unrelated failure inside a ticket's PR (ticket filed).
   - The executor should salvage unpushed commits (ticket filed).
 
+## 2026-11-22 09:20 – 2026-11-23 10:50 — implement legs stopped for owner decisions; the rulings were written into the tickets
+
+- **Host:** bering (runner-1 and runner-2)
+- **Tickets:** B-27, B-270, B-286, B-299 (with R3-1268)
+- **Why it was needed:** four implement legs stopped, correctly, on a question their ticket left to the owner:
+  - B-27: refuse a board post whose ticket has no queued leg, or keep it and raise a condition;
+  - B-270: bound the Runners view by retention, or by serving the latest only for recently-seen runners;
+  - B-286: who owns `baton.mjs`;
+  - B-299: confirm the ten runner-spec rows proposed in #339.
+
+  Each stopped leg counted as a failed attempt. A ticket whose ruling had not landed on `main` was claimed again and stopped again (B-27 twice, B-270 three times). B-286 also ran once more and went through to merge (#379, a move of the vendored files to `src/vendor/` with docs kept as the source) before its question was answered.
+- **Resolution:** the supervisor put each question to the owner and wrote the answer into the ticket, in a PR the owner merged (or authorized):
+  - B-27: accept the post and raise a condition (#346);
+  - B-270: bounded serving (#368);
+  - B-299: all ten rows confirmed, row 5 on condition that the masker itself stays with B-316 (#383);
+  - R3-1268: Baton owns `baton.mjs`, so #312 is to be rebased over #379 (#383).
+
+  B-27 was then built and merged. #383 was merged with its `test` check red: the failure was `S-BTN-41` on `main` (next entry), not the ticket text, but the merge should have waited (see lessons).
+- **Autonomous handling:** a leg that stops for an owner decision should end as a raised condition that waits for an answer (R-BTN-163), not a failed attempt that is retried before the answer lands. A ticket that names an open owner decision should not be claimable until it is answered. *No ticket yet.*
+
+## 2026-11-22 13:20 – 2026-11-23 04:50 — fix legs edited files outside their tickets
+
+- **Host:** bering
+- **Tickets:** B-244 (#352), B-249 (#353), B-278 (#371), B-282 (#374)
+- **Why it was needed:**
+  - **The masker.** After the flaky masking test (2026-11-22 13:50 entry) turned their `run-tests` red, the `fix` legs of B-244 and B-249 each patched `src/runner/mask.ts` inside their own PRs. B-278's PR (a SQL dialect lint) also rewrote `mask.ts`, the vendored `src/shared/mask.mjs` and `src/runner/executor.ts`, and its `run-tests` failed a different test each round. That is a shared write target across separate tickets, and an edit to vendored files.
+  - **Dependencies.** B-282 (ESLint) changes `package-lock.json`, but `run-tests` links the home checkout's `node_modules` (installed from `main`'s lockfile) into the tested tree (`.baton/courses/create-pr/legs/run-tests.mjs:241`). Its `fix` leg worked around this inside the ticket, in `scripts/build-ui.mjs`.
+- **Resolution:** a scope note on #352, #353 and #371 asking the next `fix` leg to restore the out-of-scope files to `main` (the masker belongs to #354 and B-316). B-282's workaround was left for its review to judge.
+- **Autonomous handling:**
+  - B-317 (#362, merged): implement and fix legs push past a failure that also fails on `main`, and never fix an unrelated failure inside a ticket's PR.
+  - `run-tests` should `npm ci` in the tested tree when its lockfile differs from the home's. *No ticket yet;* the owner has not answered whether to make the change.
+
+## 2026-11-23 08:50–13:00 — runners idle for hours: a false "merged", a starved sync, a red `main`
+
+- **Host:** bering (runner-2 idle from 08:50, runner-1 from 09:15; both alive and heartbeating, with no claim)
+- **Tickets:** B-259 (#357), B-318 (#384)
+- **Why it was needed:** three faults together.
+  1. **A false "merged".** B-259's merge agent rightly refused to merge #357 (CI red twice on `S-BTN-41.runner.test.ts:295`) and said so. But the merge leg returns `{reached: "merged"}` whenever the agent exits 0 (`merge.mjs:511`), so Baton ended the claim "done at merged" with the PR open. The unconfirmed completion now holds B-259.
+  2. **A starved sync.** `baton-sync.yml`'s `*/15` schedule ran about 5 times in 24 h, and R-BTN-94's alarm dispatch has not fired since 2026-11-10. Parked tickets get their next leg only when a sync posts, so with no push to `main` the runners found nothing to claim.
+  3. **A red `main`.** `S-BTN-41` ("a short wait that never clears suspends after 30 minutes") now fails on `main`, so every PR's `test` check is red, ticket-only PRs included (#383, #384). No CI run on `main` has completed (each is cancelled or pending), so nothing showed it.
+- **Resolution:**
+  - **Syncs:** the supervisor dispatched the sync by hand (09:22 and 10:00 UTC); both posted.
+  - **Merge leg:** at the owner's word, #385 (merged, `a26608c3`) makes the merge leg verify with the forge that the ticket's PRs are merged before it reports `merged`.
+  - **Sync schedule:** B-318 (#384, open: its `test` is red on `S-BTN-41`) lays out the options. Its first step is diagnosing why R-BTN-94's alarm dispatch is not firing.
+  - **#326 (old B-23) closed** at the owner's word: #380 rewrote B-23.
+  - **B-259:** releasing its claim and lifting any holds on B-270 and B-299 are session actions. The supervisor gave the owner a console script; not yet run.
+- **Autonomous handling:** #385 for (1); B-318 for (2); (3) needs a ticket or a fix (owner asked; not yet answered). A runner idle while tickets are parked should raise a condition (the intervention-sessions proposal's `baton.no-runner` / `baton.unclaimable`).
+
 ## 2026-11-23 21:57 UTC — one runner at concurrency 2; it idled because one ticket was claimable and that one sat off the tier ladder
 
 - **Host:** bering
@@ -694,3 +742,286 @@ Entry shape: **When** · **Host** · **Tickets** · **Why it was needed** · **R
     - 36 are `held` for `attempts-exhausted`: each needs `baton owner resolve … retry|park`.
   - The runner logs nothing on `no-eligible-ticket`, so an idle runner looks the same as a stuck one.
 - **Autonomous handling:** the supervisor reads `?state=ready`'s `failed_rule` first, before the runner code. Follow-up: an idle runner should log, once, why nothing fits.
+  - **Outcome (2026-11-24):** once #401 merged, the runner claimed B-319 and B-320 side by side, then B-322. Concurrency 2 works on bering. Before those claims, its log has 32 `fetch failed` lines (heartbeats and claims that did not reach Baton). It recovered without help. The log has no timestamps, so the outage window is unknown.
+
+## 2026-11-24 — the owner merged every mergeable PR; why the course is not merging them itself
+
+- **Host:** bering (one runner, `--concurrency 2`)
+- **What was done, at the owner's word ("Please merge all mergeable PRs"):**
+  - The supervisor merged 13 PRs, one at a time, each after re-reading its state just before the merge: not a draft, `MERGEABLE`/`CLEAN`, no failing or pending check. They were #392 (the S-BTN-41 lease race), #401, #393 (B-322), #400, #397, #394, #398, #390, #366, #351, #331 and #330.
+  - Six that were clean at the start became conflicting as the others landed: #386, #395, #359, #317, #337 and #399. About 30 runner PRs were already conflicting. #357, #384, #352, #323 and #311 have failing tests, and the drafts were left alone.
+  - Each merge to `main` started `baton-deploy` and cancelled the run before it. The last run (`5ade89aa`, 07:11 UTC) sat `pending` with no jobs. #400's fix is not live until it deploys.
+  - A `git pull` in the owner's checkout fast-forwarded its branch `fix/confirm-suspension-without-sha` to `main`. Nothing was lost: its work was #400, already merged.
+- **Why the course merges almost nothing on its own:** `create-pr` merges only from `reviewed` after an `approve` verdict, or after the owner's `adjudicate` answer. Four things keep tickets from getting there:
+  1. **The review stub still stops at round 3.** On 2026-11-22 the owner raised `review.max_runs` to 8 in `.baton/courses/create-pr/course.json` (entry *2026-11-22 06:42*).
+     - The stub `.baton/courses/create-pr/legs/review.mjs` (last generated 2026-11-21) still hard-codes `(ctx.run ?? 1) >= 3 ? { suspend: true } … 'adjudicate'`. It is generated from `src/defaults/courses.ts` with `CREATE_PR_COURSE.legs.review.max_runs`, which is 3 in `src/defaults/course-pr.ts`.
+     - So every round from the third on that asks for changes ends the claim `suspended:reviewed`, next `adjudicate`, waiting on the owner.
+     - Baton's own station function reads 8 and shows `fix` next. Same course, two different answers.
+     - On 2026-11-24, 42 tickets sat in this state, B-312 among them.
+  2. **Those suspensions were never confirmed.** A review's suspension names no commit, so Baton waited forever for git to confirm it. The ticket showed `unconfirmed` and was offered to nobody: neither a `fix` nor the owner's question. #400 confirms it on the next accepted snapshot, once deployed.
+  3. **Held tickets wait on the owner.**
+     - 25 tickets are held at `filed` after `implement` attempts ended `released:cannot-finish:transient`. The three sampled (B-156 to B-158) failed within the same 2026-11-21 window, about 12:48–13:32 UTC. Each held ticket opened a `baton:retries` decision, which nothing retries without an answer.
+     - 9 more are held at `merged`, with holds from 2026-11-02 to 2026-11-16 that the later `git-moved … merged` did not clear (B-110, B-125, B-129 among them).
+  4. **Red `main` and conflicts.**
+     - The merge leg never merges red. The S-BTN-41 flake made PR tests fail (#357, #384) until #392.
+     - A conflicting PR is resolved only inside a `fix` or `merge` leg, so a parked PR falls further behind `main` with every merge.
+- **Autonomous handling:**
+  - The stub's round bound should come from the course file the stub runs under, not the built-in default, or the two should be checked against each other. B-324 (#408).
+  - The runner also counted a claim's runs twice (entry *2026-11-24 09:45–19:07* below), so a claim's second round already reached the stub's 3. *Handled by B-335* (#412).
+  - A hold whose ticket git already shows merged should clear itself, or be listed as stale. *No ticket yet.*
+
+## 2026-11-24 10:19 and 13:50 — syncs dispatched by hand: nothing syncs between pushes to `main`
+
+- **Host:** bering (the runner); the sync runs in GitHub Actions
+- **Tickets:** B-322 (`awaiting-sync` after its claim ended at 08:26, with nothing else claimable)
+- **Why it was needed:**
+  - A claim's end is confirmed only by a sync observed after it (R-BTN-10), and nothing else
+    is offered while every candidate waits. The last push to `main` was at 08:09, so the last
+    sync was too.
+  - `baton-sync.yml`'s 15-minute `schedule` is in the file and the workflow is active, but
+    GitHub ran it three times in about 20 hours (2026-11-23 10:27 and 22:09, 2026-11-24 05:58).
+    *The backstop sync's cron does not fire* (lessons) still holds.
+  - Every `baton sync` run on 2026-11-24 came from a push or a person. None came from Baton,
+    though the server dispatches a sync after every advance (R-BTN-73). Why is not yet known.
+- **Resolution:** at the owner's word, `gh workflow run baton-sync.yml --ref main` twice: run
+  45373500181 (10:19, accepted, B-322 claimed again at once) and run 45408090862 (13:50,
+  accepted; nothing became claimable, see the next entry).
+- **Autonomous handling:** B-318 (#384, red) gives a suspended ticket its next leg without a
+  push to `main`. The server's own dispatch after an advance or an end should be checked for
+  producing runs. *No ticket yet* for that check.
+
+## 2026-11-24 10:19–13:50 — the gateway key was re-issued under a running runner; every leg failed 401
+
+- **Host:** bering
+- **Tickets:** B-322 (its run-tests leg at 10:19, then held `attempts-exhausted`)
+- **Why it was needed:**
+  - `~/factory/secrets/gateway/r1.key` was rewritten at 10:13 UTC (`issue-key.sh`, a new key
+    with the old one revoked), and the gateway restarted at 10:10 with fieldhouse's
+    `gateway/postgres` deploy.
+  - The executor reads the key file once, when the runner starts (`gatewaySettings`). The
+    runner, started 2026-11-23 21:59, went on sending the revoked key, and B-322's run-tests
+    leg failed "the gateway answered the runner's key with HTTP 401" before its session
+    started.
+  - That was B-322's third `cannot-finish:transient` release (claims 561, 563, 566), so Baton
+    held it `attempts-exhausted`. Two of the three were not the ticket's fault: this one and
+    the agent's exit code (lessons, *2026-11-24 — a leg that succeeded failed on its agent's
+    exit code*).
+- **Resolution:**
+  - The new key file answered `/v1/models` 200. Nothing read or changed a credential: the
+    runner reads the file at start.
+  - 13:35: the runner was stopped with Ctrl-C (no claim). `baton-cli` moved from `52baaccc`
+    to `main`'s tip `42e2d5ea` (`BATON_CLI_PIN=branch:main` requires it), and the runner was
+    started at `--concurrency 2` from a copy of `start-runner.sh` (session
+    `run-20261124-143732-r1`).
+  - 13:50: a sync (entry above); then the owner ran
+    `baton owner resolve baton B-322 baton:retries retry`, and the runner claimed B-322 at
+    `pr-open`; its session started without a 401.
+- **Autonomous handling:** the executor should re-read its key file on a 401 from the
+  gateway, rather than holding the copy it read at start. *No ticket yet.*
+
+## 2026-11-24 09:45–19:07 — the runner numbered a claim's runs 1, 3, 5; the second review round already went to `adjudicate`
+
+- **Host:** bering
+- **Tickets:** B-324 (suspended 09:17), B-322 (suspended 14:50); B-335 filed for it
+- **Why it was needed:**
+  - B-324 ended `suspended:reviewed`, next `adjudicate`, after its second review round, though
+    Baton's history said review run 2 of 8. B-322 did the same in the afternoon.
+  - The runner handed each leg `ctx.run` as `runNumber(gitPath, leg, own)`, while every leg the
+    claim finished had already joined `gitPath`. On one claim each earlier run counted twice;
+    the review stub suspends at `ctx.run >= 3` (B-324's subject), so the second round that
+    asked for changes did. It predates B-274.
+  - The supervisor first reported both tickets as waiting on the owner's adjudication. They
+    were not: both were `unconfirmed` (entry *2026-11-24 20:00*), and Baton's own station showed
+    `fix` next. See lessons, *the runner's log is not Baton's state*.
+- **Resolution:**
+  - At the owner's word ("fix now"), B-335 was filed (#411) and built in #412: Baton's advance
+    reply names the run's number, counted as `max_runs` counts it; the runner hands that to
+    the leg and its fallback counts once; the "finished … next" log line names the leg it
+    started. R-BTN-63, §14 and S-BTN-204 amended. The owner merged #412 and #411 at 19:07.
+  - 20:05: the runner was drained (SIGTERM to its PID; B-325's run-tests finished, its claim
+    released at `fixed`), `baton-cli` moved to `main`'s `d78f5339`, and the runner restarted at
+    `--concurrency 2` (session `run-20261124-210538-r1`).
+- **Autonomous handling:** *handled by B-335.* The class — a component recounting or copying a
+  fact another owns, and no test running the shipped course — is in lessons, *2026-11-24 — four
+  failures, one shape*.
+
+## 2026-11-24 19:10 — "merge all the PRs that are ready": two of 51
+
+- **Host:** the supervisor's checkout on bering
+- **What was done, at the owner's word:** every open PR was read in increasing order. Ready meant:
+  not a draft, `MERGEABLE`/`CLEAN` when re-read just before the merge, every check `SUCCESS` or
+  `SKIPPED`, no `changes` as the last Baton verdict, and no note in the PR asking it not be
+  merged. Two were: #406 (files B-325) and #409 (files B-326), merged 19:10.
+- **Left, and why:**
+  - 33 conflicting PRs (#307–#395, #386, #399); every runner PR among them also ends on a
+    `changes` verdict.
+  - #407 (B-322) and #408 (B-324): clean and green, but their last review asked for changes.
+  - #317 and #320 say not to merge; #410 (B-189's spec) asks for the owner's approval of a
+    policy and security-model change.
+  - Red: #311, #321, #323, #352, #357, #364, #384, #404. Drafts: #300, #321, #335, #349, #350,
+    #382. #341 ran no checks.
+  - `main` shows no branch protection to this key (the API answered 404), so a green PR merged
+    onto a much newer `main` is not tested before it lands.
+- **After:** B-326 was claimed at once and failed `implement`: its agent found that Dibber's
+  DIB-30, which the ticket's **Needs:** line names, is not released, and opened no PR. The
+  ticket declares no dependency, so Baton will offer it until it is held.
+- **Autonomous handling:** a ticket's external **Needs:** should be a declared prerequisite
+  (R-BTN-120) that keeps it off the board. *No ticket yet.*
+
+## 2026-11-24 20:00 — 44 parked tickets never confirmed: their ends name evidence, and nothing attests it
+
+- **Host:** bering (the runners whose ends wait); the supervisor's checkout on bering
+- **Tickets:** 44 parked at `reviewed`, all `unconfirmed` — B-312, B-39, B-60, R3-1263, B-155,
+  R3-1268, B-55, B-47, B-8, B-10, B-25, B-131, B-136, B-137, B-139, B-141, B-146, B-147, B-293,
+  B-294, B-299, B-300, B-302, B-311, B-239, B-244, B-249, B-258, B-272, B-273, B-276, B-277,
+  B-278, B-279, B-280, B-281, B-282, B-284, B-30, B-315, B-322, B-324, B-42, B-45
+- **Why it was needed:**
+  - #400 (deployed 07:12 UTC) confirms a suspension that named **no** evidence on the next
+    accepted snapshot. Six accepted syncs later none of these was confirmed, and B-322 and
+    B-324 joined them the same day.
+  - A review leg's close posts its verdict with `gh pr comment` and returns the comment's URL;
+    the runner sends whatever close returns as `ended_at_sha`, and the server accepts a commit or
+    an https URL there. A fix or run-tests close returns `HEAD`. So a parked end almost always
+    names evidence: the entry above's "a review's suspension names no commit" was wrong, and
+    #400 fixed a case that barely occurs.
+  - For an end that names evidence, R-BTN-10 wants the sync's `std:git.evidence@1` with
+    `found: true`. Nothing built it — the sync posted no such attestation and the server read
+    none — so `endShown` fell back to a git path, which git no longer carries (R-BTN-39). Every
+    such end waited for the owner.
+- **Resolution:**
+  - At the owner's word, the supervisor wrote a script that confirms the 43 whose PRs are
+    open, through `POST /v1/ui/claims/{id}/confirm` in a dashboard session minted from the
+    administrator key. The supervisor may not use that key, so the owner runs it, one claim
+    (B-39's 437) first. B-136 (PR #331 already merged) and B-271 (a `done` end) are left for
+    the owner. The owner's run failed before confirming anything: Cloudflare Access fronts
+    `/v1/login` and answered the script with a `302` to its own sign-in, so no session can be
+    minted from a key alone. Not used.
+  - #415 was merged and deployed (2026-11-24 22:37 UTC), yet the next sync (01:24 UTC) attested
+    nothing and 54 ends stayed `unconfirmed`: `.github/workflows/baton-sync.yml` checks the
+    sync's CLI out at a pinned commit (`17ae8cce`, from #314), which predates #415 and ignores
+    the observation's list. At the owner's word, #417 moved that pin to #415's merge
+    (`d8f10fc0`).
+  - The sync #417's merge started (2026-11-25 07:51 UTC) logged `baton: evidence — 51
+    unconfirmed ends named evidence; attested 51 (0 not found)` and was accepted. `?state=unconfirmed`
+    fell from 54 to 3, and `ready` rose from 0 to 44: every parked ticket above is claimable again.
+    Three are left for the owner: B-271 (claim 523, a `done` end, confirmed only by closure or
+    the ticket's absence), and B-127 (claim 106, vltava2) and B-176 (claim 240, bering), old ends
+    with no position.
+  - The owner resolved the three on 2026-11-25; `?state=unconfirmed` is empty.
+    - **B-271 (claim 523):** confirmed from the dashboard, though its `done` was false. The
+      merge leg of 2026-11-22 reported `merged` while PR #364 stayed open; it predates
+      `696bbeab` (2026-11-23), which makes the leg report `merged` only when the forge shows the
+      PR merged. Release was the right action. The confirm only set `confirmed_at` and logged a
+      `confirmed` event; it closed nothing, since closure is git's. Baton still holds B-271 at
+      `reviewed` with `merge` next, as a release would have, and PR #364 conflicts with `main`.
+    - **B-127 (claim 106) and B-176 (claim 240):** parked ends from before git closed both
+      tickets as done (2026-11-12, 2026-11-18). Nothing could confirm them: the observation lists
+      only live tickets' ends, and R-BTN-10 confirms a suspension's evidence, not its ticket's
+      closure. The dashboard could not resolve them either: the Unconfirmed tab lists them, but
+      the ticket page answers "No such ticket". The owner confirmed both from the browser
+      console with `POST /v1/ui/claims/{id}/confirm` and `{action: 'confirm', confirm: true}`.
+      Filed as B-337 (#426).
+  - `std:git.evidence@1` is built in #415: the observation lists each unconfirmed end's
+    evidence, the sync checks it (a commit in git or on the forge; a comment, review, PR or
+    commit URL on a known GitHub host) and attests it, and the server confirms only on
+    `found: true` for exactly that evidence.
+- **Autonomous handling:** #415, live since #417 moved the sync's pinned CLI. A server change
+  the sync must answer is not live until the pin moves; the 2026-11-21 entry's lag report would
+  have caught it. *No ticket yet.*
+
+## 2026-11-25 11:30–12:47 — bering overloaded; the runner churned 43 tickets through sandboxes E2B could not place
+
+- **Host:** bering (runner session `run-20261124-210538-r1`, `--concurrency 2`)
+- **Tickets:** 43 released in a few minutes, 39 `released:stale-board` and 4
+  `released:cannot-finish:transient` (B-141, B-279, B-30, B-60); R3-1263 (its fix's agent died
+  with exit code 135, its hand-off with `EIO`)
+- **Why it was needed:**
+  - Between about 11:30 and 12:47 UTC the host's load average reached about 216. The desktop
+    session crash-looped (`gnome-shell` and its helpers restarting every few seconds), and
+    `/tmp`, a 16 GB `tmpfs` in RAM, held 12 GB, 11 GB of it other Claude sessions' scratchpads.
+    The kernel log was not readable to the supervisor, so the cause is not known.
+  - The runner could not reach Baton for about 50 minutes; Baton reaped it, and it re-keyed
+    (incarnation 2) once the network answered.
+  - Then every leg's sandbox was refused: "Failed to place sandbox: this node cannot map 4096 MiB
+    of guest memory: its memory pool is too small or in use by running sandboxes" (47 times).
+    The runner claimed the next ready ticket after each failure, so it went through the whole
+    queue in minutes. A failure to start the ticket source's sandbox was reported as "ticket
+    moved under the claim" and released `stale-board`; a failure to start a leg's session was
+    released `cannot-finish:transient`, which counts against the ticket's retries.
+  - Each release is an end a sync must confirm (R-BTN-10), so all 43 went from ready to
+    `awaiting-sync`, and stayed there: the last sync had run at 12:19.
+- **Resolution:**
+  - None needed for the host: by 12:47 the load fell (1.2 at 12:50) and sandboxes started again.
+    The supervisor deleted nothing in `/tmp`; the large scratchpads are other sessions'.
+  - The supervisor meant to drain the runner when the failures started. Its process search
+    matched its own shell, which received the SIGTERM instead; by the time the runner's real PID
+    was found (its process name is `MainThread`, not `node`), sandboxes were starting again, so
+    it was left running.
+  - The 43 wait for the next sync; nothing about their positions or PRs changed.
+- **Autonomous handling:** the owner, 2026-11-25: "The runner should not advertise its ability
+  to start an e2b sandbox if it turns out that it lacks sufficient memory." A runner whose
+  executor cannot place a sandbox should stop claiming — declare no capacity in its heartbeat,
+  or check placement before the claim — and resume when placement succeeds; a placement failure
+  should be named as one, not as a moved ticket, and should not cost the ticket a retry.
+  *No ticket yet.*
+
+## 2026-11-25 17:28 – 2026-11-26 04:24 — review refused after every fix: B-30's independent-review rule with one runner
+
+- **Host:** bering (one runner, one key)
+- **Tickets:** B-139, B-147, B-8, B-25, B-294, B-42, B-45, B-258, B-273, B-281, B-136, B-146, B-55,
+  R3-1263 — each suspended at `fixed` on green tests, some several times
+- **Why it was needed:**
+  - #347 (B-30, merged 2026-11-25 17:28) set `no_chain_from: [implement, fix]` on create-pr's
+    `review`, in both the shipped course and this repository's `.baton/` course: the key that
+    implemented or fixed a ticket may not run its review (R-BTN-106).
+  - bering's runner has one key. After any fix it could not advance into review, so the claim
+    ended `suspended:fixed`; no other runner existed to take the review, and Baton offered the
+    ticket back to the same runner, which ran run-tests again and suspended again.
+  - The runner's log said only "next the end"; the refusal (`chain`) was found by reading a
+    ticket's history and its stub's result (green, `next: review`).
+- **Resolution:**
+  - The owner, 2026-11-25: "i don't think this makes sense now that legs are sandboxed and
+    isolated." #432 drops the rule from both create-pr graphs, moves the course to version 4,
+    keeps the review instructions' different-model rule and the gate itself (R-BTN-106) for
+    courses that opt in; the standard course sources were regenerated and the spec index
+    refreshed. Merged at the owner's word 2026-11-26 04:24 after CI.
+  - Around 05:55 B-322's green tests went straight to review in the same claim: the server checks
+    `chain` against the course in force, so version 4 applied from the next sync.
+- **Autonomous handling:** a course rule that no registered runner can satisfy should be refused
+  when the course is posted, or at least named in the runner's log, not found by reading
+  histories. *No ticket yet.*
+
+## 2026-11-26 — run-tests ↔ fix loops on B-322 and B-8: B-231's check was off for nearly every ticket
+
+- **Host:** bering
+- **Tickets:** B-322 (17 run-tests rounds on a branch whose PR #407 had merged at 06:11), B-8 (15)
+- **Why it was needed:**
+  - Each round: run-tests failed, the fix leg's agent pushed nothing, the fix still reached
+    `fixed`, run-tests added an empty `tests red` marker and tested the same code again — up to
+    the gate's 30 runs. B-322's fix agents said every round that #407 was merged and there was
+    nothing to push; its branch, 62 commits behind `main`, failed `main`'s newer type-coverage
+    allowlist.
+  - B-231 should end such a round ("the fix leg pushed nothing … no fix, no position"), but the
+    stub made the check only when `ticketRepositories(...)` was empty (B-255's exemption for
+    tickets whose PRs may live in another repository). `repos: [baton]`, the ticket's own home,
+    resolved to `immediately-run/baton` and counted as another repository — so for nearly every
+    Baton ticket the check was off.
+  - B-8's branch merges `main` each round; its agent reports the remaining failures (S-BTN-48's
+    replay answering 422, B-337's unlinked spec citations) reproduce on clean `main` in the
+    runner's sandbox, though `main`'s CI is green. Not resolved.
+- **Resolution:**
+  - #446 marks B-322 done (#407) and archives it, so the next sync ends its claim (R-BTN-35);
+    #407's docs-side follow-ups are noted there.
+  - #447: the fix stub drops the home repository (the checkout's origin, and `ctx.ticket.home`
+    through `baton.json`'s `repos` map) before deciding the PRs may live elsewhere; tested in
+    `defaults-cli`'s B-231 case. The standard sources are regenerated in it; this repository's
+    own `.baton/courses/create-pr/legs/*.mjs` are not — regenerating them brings ~4,000 lines of
+    other runtime changes merged since they were last built, so that is the owner's separate
+    decision, and until then bering's runner keeps the old check.
+- **Autonomous handling:**
+  - B-231 with #447, once this repository's stubs are regenerated.
+  - run-tests should ask whether the ticket's PRs have merged before testing a branch again; a
+    gate that fails on what a fix cannot change (the sandbox's own failures) should not cost 30
+    rounds. *No ticket yet.*
+  - Generated stubs that lag their source by thousands of lines should fail a check. *No ticket
+    yet.*

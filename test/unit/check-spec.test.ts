@@ -2,9 +2,7 @@
 // tickets that exist here, and carries none of the scrubbed terms; every test/integration/ file
 // named for a scenario names one §15 defines and not one the history retired (B-71).
 import { describe, expect, it } from 'vitest';
-// @ts-expect-error a plain .mjs script, no types
 import { check, definedIds, lineage, retiredIds, retiredScenarioIds, RULES_LINE_SINCE, scenarioIds, unnamedEntries } from '../../scripts/check-spec.mjs';
-// @ts-expect-error a plain .mjs script, no types
 import { impact, patchNotes, render, units } from '../../scripts/spec-tools.mjs';
 
 const SPEC = [
@@ -36,12 +34,20 @@ describe('check-spec', () => {
     expect([...definedIds('- **R-BTN-117 / R-BTN-159 (keys).** Text.')].sort()).toEqual(['R-BTN-117', 'R-BTN-159']);
   });
 
-  it('warns, and does not fail, on code citing a retired rule', () => {
-    const history = '## Retired requirements\n\n| Id | Title |\n|---|---|\n| R-BTN-80 | notices |\n\n## Other\n| R-BTN-3 | not retired |\n';
-    expect([...retiredIds(history)]).toEqual(['R-BTN-80']);
-    const problems = check(SPEC, [['src/a.ts', '// R-BTN-80, R-BTN-3']], new Set(['R3-1205']), history);
-    expect([...problems]).toEqual(['src/a.ts cites R-BTN-3, which the spec does not define']);
-    expect(problems.warnings).toEqual(['src/a.ts cites R-BTN-80, which is retired (spec/BATON_SPEC_HISTORY.md)']);
+  it('rejects retired citations unless their exact path and id are allowed, and rejects stale exceptions', () => {
+    const retired = ['R-BTN', '99999'].join('-');
+    const history = `## Retired requirements\n\n| Id | Title |\n|---|---|\n| ${retired} | fixture |\n\n## Other\n| R-BTN-3 | not retired |\n`;
+    const code = [['src/a.ts', `// ${retired}, R-BTN-3`]];
+    const tickets = new Set(['R3-1205']);
+    expect([...retiredIds(history)]).toEqual([retired]);
+    expect(check(SPEC, code, tickets, history)).toEqual([
+      'src/a.ts cites R-BTN-3, which the spec does not define',
+      `retired rule citation: src/a.ts ${retired}`,
+    ]);
+    expect(check(SPEC, code, tickets, history, [], [], { [`src/a.ts ${retired}`]: 'B-277' }))
+      .toEqual(['src/a.ts cites R-BTN-3, which the spec does not define']);
+    expect(check(SPEC, [], tickets, history, [], [], { [`src/a.ts ${retired}`]: 'B-277' }))
+      .toEqual([`retired rule citation: remove stale exception src/a.ts ${retired}`]);
   });
 
   it('reads the retired scenarios and the §15 rows', () => {
@@ -93,6 +99,14 @@ describe('check-spec', () => {
     expect([...check(spec, [], new Set(['R3-1205']), '', [], ['R-BTN-5'])]).toEqual([]);
     expect([...check(SPEC, [], new Set(['R3-1205']), '', [], ['R-BTN-5'])]).toEqual([
       'R-BTN-5 no longer has a patch note: remove it from PATCH_NOTES_ALLOWED',
+    ]);
+  });
+
+  it('still rejects an opening patch note after rule status tokens', () => {
+    const spec = '- **R-BTN-5 / R-BTN-6 (gates).** `status: built` `status: partly` *Except under the policy.* Body.';
+    const plain = '- **R-BTN-7 (plain).** `status: built` Body with an *emphasis*.';
+    expect([...check(`${spec}\n${plain}`, [], new Set())]).toEqual([
+      'R-BTN-5 opens with an italic patch note: rewrite the rule so its body says it',
     ]);
   });
 });

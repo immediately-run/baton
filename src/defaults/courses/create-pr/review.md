@@ -9,7 +9,7 @@ them and print the verdict after — blocking in the foreground on each: start e
 each test run as a synchronous call and keep acting until it returns; your harness ends your
 process at your final message, so a job left in the background dies orphaned and the round is
 lost — "waiting" or "I'll resume when they land" in an output is always wrong. An output that
-ends on anything else loses the round. Baton writes the verdict line on the PR from it. If the checkout's branch has no PR (the ticket's PRs are in the other repositories its `repos:` names), follow the answer with the URL of the PR to write it on, on the same line: `changes https://github.com/<owner>/<name>/pull/<n>`. The ticket's PRs are one change: review them together, and post your review once, on that PR.
+ends on anything else loses the round. Baton writes the verdict line on the PR from it. If the checkout's branch has no PR (the ticket's PRs are in the other repositories its `repos:` names), follow the answer with the URL of the PR to write it on, on the same line: `changes <PR URL>`. The ticket's PRs are one change: review them together, and post your review once, on that PR.
 
 > **How the stub runs you** — Baton's contract for the `agent_command` author: your command
 > line splits into words as `sh` would (quotes honoured, no substitutions) and executes
@@ -28,7 +28,11 @@ ends on anything else loses the round. Baton writes the verdict line on the PR f
 - **Which model reviews is the repository's choice** (§6.10, R-BTN-131). Your command's own
   `--model` is the one the stub runs; Baton delivers no advice about a model, a key or a route,
   and no `$BATON_ADVICE` file exists. A repository that picks a reviewer at run time writes a
-  leg override that reads its own configuration.
+  leg override that reads its own configuration. Before launching the reviewer, the runner's
+  command, wrapper or override must select a model different from those used for `implement`
+  and `fix` on this ticket whenever it can. The launched reviewer can verify the choice, not
+  change it. If the authoring models are unknown or a different model is unavailable, say so
+  in your review; a different credential alone does not establish model independence.
 - **Round one gets two blind reviewers.** If you can start independent sub-agents, start two,
   from fresh contexts, ideally on two different models — the models your repository's own
   configuration or instructions name. Give each this file, the ticket and the

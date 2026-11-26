@@ -7,10 +7,10 @@ import { join } from 'node:path';
 import { call as hostCall } from '#host';
 import { BatonApi } from '../../src/runner/api';
 import { cliBehind, readCliPin } from '../../src/runner/cliPin';
-import { git } from '../../src/runner/home';
+import { git } from '../../src/defaults/git.mjs';
 import { courseReader, refreshHome } from '../../src/runner/main';
 import { Runner } from '../../src/runner/runner';
-import { claimItem, course, cutover, placed, register, rows, setClock, syncCall, syncToken, ticket, TOKENS } from '../helpers';
+import { claimItem, course, cutover, placed, register, rows, setClock, setRepositoryDefaultBranch, syncCall, syncToken, ticket, TOKENS } from '../helpers';
 import relay from '../fixtures/courses/relay/course.json';
 
 const settings = '.baton/baton.json';
@@ -138,7 +138,7 @@ describe('S-BTN-313 refresh course versions and request a restart', () => {
     git(home, ['fetch', '-q', 'origin', 'trunk']);
     git(home, ['switch', '-q', '--track', 'origin/trunk']);
     git(home, ['symbolic-ref', '--delete', 'refs/remotes/origin/HEAD']);
-    await rows("UPDATE repositories SET default_branch = 'trunk' WHERE id = 'docs'");
+    await setRepositoryDefaultBranch('docs', 'trunk');
     const token = await syncToken({ ref: 'refs/heads/trunk', job_workflow_ref: 'immediately-run/docs/.github/workflows/baton-sync.yml@refs/heads/trunk' });
     const r = makeRunner();
     writeCourses(source, 2);
