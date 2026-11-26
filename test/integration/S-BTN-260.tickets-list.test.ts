@@ -16,7 +16,11 @@
 // Runs on both hosts.
 import { describe, it, expect, beforeEach } from 'vitest';
 import roadmapPr from '../fixtures/courses/roadmap-pr/course.json';
-import { adminSession, claimItem, course, cutover, Git, keyCall, ORIGIN, placed, register, rows, sessionCall, setAdminKeys, setClock, withCore } from '../helpers';
+import {
+  adminSession, claimItem, course, cutover, Git, keyCall, ORIGIN, placed, register, rows, sessionCall,
+  setAdminKeys, setClock, withCore, setClosedTicketTime, setRunnerLastActivity, setTicketBlockedSince, seedClaim,
+  seedCondition, seedTicketBlock, seedTicketOverride,
+} from '../helpers';
 import { makeKey, signedRequest, type TestKey } from '../lib/sshKeys';
 import { call as hostCall } from '#host';
 
@@ -85,21 +89,27 @@ async function fixture() {
   const run2 = await claimItem('vm-b', b.secret, { ticket_id: 'docs:RUN2' });
   expect([run1.status, run2.status]).toEqual([200, 200]);
   // RUN1's runner is alive and silent for three hours: stalled. RUN2's leg waits on a condition.
-  await rows('UPDATE runners SET last_activity_at = ? WHERE id = ?', T0 - 3 * HOUR, a.id);
-  await rows(`INSERT INTO conditions (repository_id, ticket_id, claim_id, run_id, leg, type, disposition, severity, restarts_json, raised_at, outcome)
-              VALUES ('docs', 'docs:RUN2', ?, 'r_1', 'implement', 'x.wait', 'interrupt', 'normal', '{}', ?, 'open')`, run2.json.claim_id, T0);
+  await setRunnerLastActivity(a.id, T0 - 3 * HOUR);
+  await seedCondition({
+    repository_id: 'docs', ticket_id: 'docs:RUN2', claim_id: run2.json.claim_id, run_id: 'r_1', leg: 'implement',
+    type: 'x.wait', disposition: 'interrupt', severity: 'normal', restarts_json: '{}', raised_at: T0,
+    outcome: 'open',
+  });
   const waits = (await rows<{ id: number }>(`SELECT id FROM conditions WHERE ticket_id = 'docs:RUN2'`))[0].id;
   // HB is held by the owner and blocked on another ticket; B is blocked alone.
   const hold = await sessionCall(cookie, `/v1/ui/overrides/${encodeURIComponent('docs:HB')}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ hold: true }) });
   expect(hold.status).toBe(200);
   for (const t of ['docs:HB', 'docs:B']) {
-    await rows(`INSERT INTO ticket_blocks (repository_id, ticket_id, leg, kind, ref, since) VALUES ('docs', ?, '', 'ticket', 'docs:R', ?)`, t, T0 - HOUR);
-    await rows('UPDATE tickets SET blocked_since = ? WHERE id = ?', T0 - HOUR, t);
+    await seedTicketBlock({ repository_id: 'docs', ticket_id: t, leg: '', kind: 'ticket', ref: 'docs:R', since: T0 - HOUR });
+    await setTicketBlockedSince(t, T0 - HOUR);
   }
   // BO backs off for an hour; U's completion is not confirmed.
-  await rows(`INSERT INTO ticket_overrides (ticket_id, expedite, hold, hold_reason, retry_after, set_by, set_at) VALUES ('docs:BO', 0, 0, NULL, ?, 'baton', ?)`, T0 + HOUR, T0);
-  await rows(`INSERT INTO claims (ticket_id, runner_id, request_id, nonce, snapshot_sha, claimed_at, status, ended_at, end_reason, ended_at_sha)
-              VALUES ('docs:U', ?, 'seed:U', 'abc123', '', ?, 'completed', ?, 'done', ?)`, idle.id, T0 - HOUR, T0 - 60_000, 'c'.repeat(40));
+  await seedTicketOverride({ ticket_id: 'docs:BO', expedite: 0, hold: 0, hold_reason: null, retry_after: T0 + HOUR, set_by: 'baton', set_at: T0 });
+  await seedClaim({
+    ticket_id: 'docs:U', runner_id: idle.id, request_id: 'seed:U', nonce: 'abc123', snapshot_sha: '',
+    claimed_at: T0 - HOUR, status: 'completed', ended_at: T0 - 60_000, end_reason: 'done',
+    ended_at_sha: 'c'.repeat(40),
+  });
   return { a, b, idle, run1: run1.json.claim_id as number, run2: run2.json.claim_id as number, waits };
 }
 
@@ -154,7 +164,7 @@ describe('S-BTN-260 the tickets list (B-194)', () => {
     expect(ids(answer).slice(0, 2)).toEqual((board.ready as Row[]).map((t) => t.local_id).filter((id) => id === 'R' || id === 'K'));
 
     // A closure older than a day is no longer listed.
-    await rows(`UPDATE closed_tickets SET closed_at = ? WHERE ticket_id = 'docs:C'`, T0 - 25 * HOUR);
+    await setClosedTicketTime('docs:C', T0 - 25 * HOUR);
     const later = await tickets();
     expect(ids(later)).not.toContain('C');
     expect(later.counts.closed).toBe(0);

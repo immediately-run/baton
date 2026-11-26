@@ -170,6 +170,7 @@ import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { signingKey } from '../src/client/sign.mjs';
 import { send } from '../src/client/send.mjs';
+/** @typedef {import('../src/client/send.mjs').BatonFetch} BatonFetch */
 import { DEFAULT_URL, homesPath } from '../src/client/config.mjs';
 export { send, DEFAULT_URL, homesPath };
 import { clientVersion, packageVersion, workingTreeOf } from '../src/client/version.mjs';
@@ -181,9 +182,12 @@ const UNITS = { m: 60_000, h: 3_600_000, d: 86_400_000 };
 /** argv after the command: flags (each `--name value`, or a bare boolean) and positionals. The
  *  `--required-bar` groups keep their order, so each takes the flags that follow it. With
  *  `allowed`, a flag the command does not take is refused — never silently dropped (round 3, 3-A-1). */
+/** @param {readonly string[]} argv @param {readonly string[]} [booleans] @param {readonly string[] | null} [allowed] */
 export function parseArgs(argv, booleans = [], allowed = null, positionals = Infinity) {
+  /** @type {Record<string, string | true | undefined>} */
   const flags = {};
   const positional = [];
+  /** @type {{leg: string, course?: string, except?: string, 'tag-prefix'?: string}[]} */
   const groups = [];
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -246,6 +250,7 @@ const time = (v, what) => {
   if (!Number.isFinite(t)) throw new Error(`${what}: not a date (${v})`);
   return t;
 };
+/** @param {string} v */
 export function duration(v) {
   const m = /^(\d+)([mhd])$/.exec(v);
   if (!m) throw new Error(`a duration is like 30m, 1h or 2d, not ${v}`);
@@ -293,6 +298,13 @@ function devFlagPositions(argv) {
  * `home` (B-121) is the home in force's planning half — `{repository, names}` from
  * `homesContext` — supplying the repository a missing positional REPO or bare ticket id reads
  * in; a positional REPO or a qualified id always wins over it.
+ */
+/** @param {string} role
+ * @param {string[]} argv
+ * @param {(path: string) => string} [readKey]
+ * @param {(path: string) => string} [readJson]
+ * @param {{repository: string | null, names: string[]} | null} [home]
+ * @returns {{method: string, path: string, body?: Record<string, unknown>, file?: string, readFile?: string, confirm?: {question: string, yes: boolean}, preflight?: {method: string, path: string, question: string}, yes?: boolean, resolveCodeRepos?: {repository: string, offline: {repo_id: string, owner_id: string} | null}}}
  */
 export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? p : readFileSync(p, 'utf8').trim()), readJson = (p) => readFileSync(p, 'utf8'), home = null) {
   const [cmd, ...rest] = argv;
@@ -631,6 +643,9 @@ const GRANT_FLAGS = ['key', 'hostname', 'label', 'capabilities', 'max-claims'];
 
 /** §12.2's ask under a destructive action: `--yes` answers the prompt beforehand; without a
  *  TTY the command refuses rather than prompt a pipe. `out` and `in` are injected for the test. */
+/** @typedef {{write(text: string): unknown}} PromptOutput */
+/** @typedef {{isTTY?: boolean, once(event: 'data', listener: (data: unknown) => void): unknown}} PromptInput */
+/** @param {string} question @param {boolean} yes @param {PromptOutput} out @param {PromptInput} input */
 export async function confirmAsk(question, yes, out, input) {
   if (yes) return true;
   if (!input.isTTY) {
@@ -647,6 +662,8 @@ export async function confirmAsk(question, yes, out, input) {
 /** R-BTN-178's confirm (B-106): print every course whose legs require the capability, with the
  *  type's definition in each, then ask. `--yes` answers beforehand; without a TTY the command
  *  refuses rather than prompt a pipe. `out` and `in` are injected for the test. */
+/** @param {{ requiring?: readonly {repository: string, course: string, version: number, legs: string[], type?: {description?: string, values?: string} | null}[], capacities?: readonly {capability: string, capacity: number | null, set_at: number, set_by: string}[] } | null} answer
+ * @param {string} question @param {boolean} yes @param {PromptOutput} out @param {PromptInput} input */
 export async function confirmCapacity(answer, question, yes, out, input) {
   const requiring = Array.isArray(answer?.requiring) ? answer.requiring : [];
   if (requiring.length) {
@@ -678,6 +695,7 @@ function jsonArg(v, readJson) {
  *  resolver fills them from the home's registration); a well-known host implies its forge.
  *  `--forge-ids <repo>,<owner>` supplies the ids offline for one entry; otherwise `main`
  *  reads them from the entry's forge before the PUT goes out. Pure, beside `plan`. */
+/** @param {string} value @param {string | null} [forgeIds] */
 export function codeReposSpec(value, forgeIds = null) {
   const known = { 'github.com': 'github', 'gitlab.com': 'gitlab', 'gitea.com': 'gitea' };
   let offline = null;
@@ -705,6 +723,7 @@ export function codeReposSpec(value, forgeIds = null) {
 }
 
 /** B-182 (R-BTN-139): `--pushers` — `id[@host]`, a comma list; a host-less entry is the home's. */
+/** @param {string} value */
 export function pushersSpec(value) {
   return list(value).map((raw) => {
     const at = raw.lastIndexOf('@');
@@ -721,6 +740,12 @@ export function pushersSpec(value) {
  *  home's forge and host — read from its registration, one signed GET — and each entry's ids are
  *  read from its forge with the operator's token for that host (GITHUB_TOKEN, GITLAB_TOKEN,
  *  GITEA_TOKEN), or taken from the `--forge-ids` the spec already folded in. */
+/** @param {string} url
+ * @param {string} keyFile
+ * @param {{path: string, forge?: string | null, host?: string | null, repo_id?: number | string | null, owner_id?: number | string | null}[]} entries
+ * @param {{repository?: string, fetchImpl?: BatonFetch, env?: NodeJS.ProcessEnv}} [options]
+ * @returns {Promise<{path: string, forge: string, host: string, repo_id: string | number, owner_id: string | number}[]>}
+ */
 export async function resolveCodeRepos(url, keyFile, entries, { repository, fetchImpl = fetch, env = process.env } = {}) {
   let home = null;
   if (entries.some((e) => e.forge == null || e.host == null)) {
@@ -805,6 +830,7 @@ function grantBody(flags, readKey, extra) {
  *  anywhere. FILE (mode 0600) holds the key, for `-i FILE` or a runner's BATON_KEY_FILE;
  *  FILE.pub holds its public line — what BATON_ADMIN_KEYS lists, `--owner-key FILE.pub` or
  *  `--key FILE.pub` registers. */
+/** @param {string} file */
 export function createApiKey(file, comment = '') {
   if (existsSync(file) || existsSync(`${file}.pub`)) throw new Error(`${file} or ${file}.pub already exists`);
   const key = `bak_${randomBytes(8).toString('hex')}_${randomBytes(32).toString('hex')}`;
@@ -815,6 +841,7 @@ export function createApiKey(file, comment = '') {
 }
 
 /** The base a course change is judged against: `--base`, else the remote's default branch. */
+/** @param {string} root */
 export function defaultBase(root) {
   for (const ref of ['origin/HEAD', 'origin/main']) {
     try {
@@ -837,8 +864,7 @@ async function testCourse(argv) {
   if (base === null && flags.base !== 'none') throw new Error(`no origin/HEAD or origin/main in ${root}: pass --base REF (fetch the base first), or --base none to skip the removal rule`);
   const { bundleLocal } = await import('../scripts/bundle.mjs');
   const kit = await bundleLocal('src/local/testCourse.ts', 'test-course.mjs');
-  const input = await kit.readInputs(root, positional[1], { base, board: flags.board ?? null });
-  const violations = await kit.checkCourse(input);
+  const { input, violations } = await kit.checkCheckout(root, positional[1], { base, board: flags.board ?? null });
   const said = [
     `course ${positional[1]} in ${root}`,
     base ? `against ${base}${input.base ? '' : ' (no such course there: a new course)'}` : 'with --base none (the removal rule is not checked)',
@@ -878,6 +904,7 @@ async function decisionList(argv) {
  * the tests check the request without a Baton. `homeRepository` (B-121) is the home in force's
  * repository, which a bare local id reads in; a qualified id wins over it.
  */
+/** @param {string} ticket @param {string} option @param {string | null} [ref] @param {string | null} [homeRepository] */
 export function answerPlan(ticket, option, ref, homeRepository = null) {
   const s = String(ticket);
   const i = s.indexOf(':');
@@ -927,6 +954,7 @@ const canonical = (v) => Array.isArray(v) ? `[${v.map(canonical).join(',')}]`
 
 /** The knobs a change from `oldDoc` to `newDoc` touches — `baton owner policy diff` (pure, so
  *  the tests check it alone). */
+/** @param {unknown} oldDoc @param {unknown} newDoc */
 export function policyDiff(oldDoc, newDoc) {
   return POLICY_KNOBS.filter((k) => canonical(knobOf(oldDoc, k)) !== canonical(knobOf(newDoc, k)));
 }
@@ -1057,6 +1085,7 @@ async function homesContext(flag, explicitUrl = null) {
 /** The one management path's exit: 0 when Baton answered its JSON, 1 when the answer was not
  *  Baton's — a refusal, or a 2xx body that is not JSON (B-80) — and any error thrown up to the
  *  caller (the CLI prints `baton: …` and exits 2). Exported for the tests of that contract. */
+/** @param {string[]} argv @returns {Promise<number>} */
 export async function main(argv) {
   // B-138: an owner or administrator key signs with the code that reads it, so the CLI that
   // takes one is a pinned release — never a git working tree, whose code a push (a branch a leg
@@ -1072,6 +1101,10 @@ export async function main(argv) {
     }
   }
   if (argv[0] === 'test-course') return testCourse(argv.slice(1));
+  if (argv[0] === 'course' && argv[1] === 'show' && !argv.slice(2).some((a) => a.startsWith('-'))) {
+    const { showCourseMain } = (await import('../scripts/baton-cli.mjs')).default;
+    return showCourseMain(argv.slice(2));
+  }
   if (argv[0] === 'course' && argv[1] === 'test') return testCourse(argv.slice(2));
   if (argv[0] === 'key') {
     if (argv[1] !== 'create' || !argv[2]) throw new Error('baton key create FILE [--comment TEXT]');
@@ -1201,11 +1234,11 @@ export async function main(argv) {
     const { replayMain } = (await import('../scripts/baton-run.mjs')).default;
     return replayMain(argv.slice(2));
   }
-  if (argv[0] === 'leg' && argv[1] === 'raise') {
-    // R-BTN-106, R-BTN-160, R-BTN-195 (B-234): raise a condition from the leg this command
-    // runs in, on its channel — the runner checks it, answers it, and reports what passes.
-    const { raiseMain } = (await import('../scripts/baton-leg.mjs')).default;
-    return raiseMain(argv.slice(2));
+  if (argv[0] === 'leg' && ['raise', 'status', 'output', 'done', 'suspend', 'release'].includes(argv[1])) {
+    // R-BTN-106, R-BTN-160, R-BTN-195 (B-234, B-47): a leg's moves and raises on its channel —
+    // the runner checks each and answers it, and reports what passes.
+    const { legMain } = (await import('../scripts/baton-leg.mjs')).default;
+    return legMain(argv.slice(1));
   }
   if (argv[0] === 'repo' && (argv[1] === 'sync' || argv[1] === 'init' || argv[1] === 'migrate-markers')) {
     // §2f, R-BTN-127's names: the defaults are TypeScript under src/defaults, bundled the same way.

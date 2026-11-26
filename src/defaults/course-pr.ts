@@ -27,7 +27,18 @@ export interface PrFact {
   checks: (string | null)[];
   /** The PR's reviews and its plain comments — a comment is `COMMENTED`, read only for a
    * verdict line (R-BTN-74: "a comment or comment-only review"). */
-  reviews: { author: string; state: 'APPROVED' | 'CHANGES_REQUESTED' | 'COMMENTED'; submittedAt: number; body?: string }[];
+  reviews: { author: string; state: 'APPROVED' | 'CHANGES_REQUESTED' | 'COMMENTED'; submittedAt: number; body?: string; url?: string; headSha?: string }[];
+  author?: string;
+  pusher?: boolean;
+  headSha?: string;
+  /** Actual ref update from the forge, not a date or author on the commit object. */
+  headPush?: { actor: string; at: number; changesWork: boolean };
+  base?: string;
+  defaultBranch?: string;
+  mergeSha?: string;
+  mergedAt?: number;
+  title?: string;
+  body?: string;
   /** The branch's commits, oldest first, when the adapter reads them (B-110, `pr-markers.ts`):
    *  each one's sha, date, first parent, whether it changes no tree, and message — what the
    *  run-tests gate's state is read from (a counted marker is no push; everything else is). The
@@ -84,14 +95,14 @@ const CREATE_PR_ASK_DEADLINE_S = 3 * 60 * 60;
  *
  * B-257: an implement leg that finds the ticket already on the default branch answers
  * `delivered <sha> <evidence>`; the stub checks the commit is on the default branch and the leg
- * reaches `delivered`, where the person leg `confirm` waits on a person — `confirmed` closes the
- * ticket, `filed` sends it back to `implement`. The leg's word alone never closes it, and the
+ * reaches `delivered`, where `confirm` waits on the owner. `confirmed` queues `archive`, while
+ * `filed` sends it back to `implement`. The leg's word alone never closes it, and the
  * answer is an outcome, never a failed attempt (R-BTN-122). `confirm`'s `max_runs` is the bound
  * R-BTN-69 asks of the cycle `filed → delivered → filed`; every pass of it is a person's. */
 export const CREATE_PR_COURSE = {
   start: 'filed',
   start_leg: 'implement',
-  end: ['merged', 'confirmed'],
+  end: ['merged', 'archived'],
   short_waits: ['ci'],
   // B-110: the deterministic gate's script — `npm run <test_script>` in the checkout.
   test_script: 'test',
@@ -99,6 +110,7 @@ export const CREATE_PR_COURSE = {
     filed: { label: 'Filed, no PR yet' }, 'pr-open': { label: 'PR open' }, reviewed: { label: 'Reviewed' },
     fixed: { label: 'Findings addressed' }, adjudicated: { label: 'Open findings adjudicated' }, merged: { label: 'Merged' },
     delivered: { label: 'Found already delivered' }, confirmed: { label: 'Already delivered, confirmed by a person' },
+    archived: { label: 'Confirmed ticket archived' },
   },
   legs: {
     implement: { from: ['filed'], to: ['pr-open', 'delivered'], max_duration: CREATE_PR_ASK_DEADLINE_S, label: 'Implement it and open the PR, or find it delivered' },
@@ -113,7 +125,13 @@ export const CREATE_PR_COURSE = {
     merge: { from: ['reviewed', 'adjudicated'], to: 'merged', autonomous: true, label: 'Merge and close the ticket' },
     // B-257: the person's confirmation — no runner is offered it (R-BTN-116); its options are
     // its outcomes, `confirmed` and `filed`.
-    confirm: { from: ['delivered'], to: ['confirmed', 'filed'], kind: 'person', asks: 'owner', max_runs: 3, label: 'A person confirms it was already delivered' },
+    confirm: { from: ['delivered'], to: ['confirmed', 'filed'], kind: 'person', asks: 'owner', answer_source: 'person', max_runs: 3, label: 'A person confirms it was already delivered' },
+    archive: { from: ['confirmed'], to: 'archived', requires: { capabilities: ['runner:claim-evidence'] }, label: 'Archive the confirmed ticket' },
+    'opened-by-hand': { from: ['filed'], to: 'pr-open', arrives: { fact: 'pr-opened', next: 'run-tests' } },
+    'reviewed-by-hand': { from: ['pr-open', 'fixed', 'reviewed'], to: 'reviewed', max_runs: 3, arrives: { fact: 'pr-verdict', next: { approve: 'merge', changes: 'fix' } } },
+    'fixed-by-hand': { from: ['pr-open', 'reviewed', 'fixed'], to: 'fixed', max_runs: 3, arrives: { fact: 'pr-pushed', next: 'run-tests' } },
+    'merged-by-hand': { from: ['filed', 'pr-open', 'fixed', 'reviewed', 'adjudicated'], to: 'merged', arrives: { fact: 'pr-merged' } },
+    reconcile: { from: ['filed', 'pr-open', 'fixed', 'reviewed', 'adjudicated'], max_runs: 3, reconciles: { to: { 'pr-open': 'run-tests', fixed: 'run-tests', reviewed: 'merge', merged: null, delivered: 'confirm' } } },
   },
 };
 
@@ -145,6 +163,10 @@ export const CREATE_SPEC_COURSE = {
     address: { from: ['reviewed'], to: 'spec-open', max_runs: 3, label: 'Address the blocking findings with the owner' },
     adjudicate: { from: ['reviewed'], to: 'adjudicated', label: 'Reproduce the findings left open' },
     merge: { from: ['reviewed', 'adjudicated'], to: 'merged', label: 'Merge and close the ticket' },
+    'opened-by-hand': { from: ['requested'], to: 'spec-open', arrives: { fact: 'pr-opened', next: 'review' } },
+    'pushed-by-hand': { from: ['reviewed'], to: 'spec-open', max_runs: 3, arrives: { fact: 'pr-pushed', next: 'review' } },
+    'merged-by-hand': { from: ['requested', 'spec-open', 'reviewed', 'adjudicated'], to: 'merged', arrives: { fact: 'pr-merged' } },
+    reconcile: { from: ['requested', 'spec-open', 'reviewed', 'adjudicated'], max_runs: 3, reconciles: { to: { 'spec-open': 'review', reviewed: 'merge', merged: null } } },
   },
 };
 
@@ -163,6 +185,8 @@ export const REVIEW_PR_COURSE = {
   legs: {
     review: { from: ['requested', 'changes-requested'], to: ['approved', 'changes-requested'], max_runs: 3, label: 'Review round' },
     conclude: { from: ['requested', 'changes-requested'], to: 'concluded', label: 'Summarise and stop' },
+    'approved-by-hand': { from: ['requested', 'changes-requested'], to: 'approved', arrives: { fact: 'pr-verdict', verdict: 'approve' } },
+    reconcile: { from: ['requested', 'changes-requested'], max_runs: 3, reconciles: { to: { 'changes-requested': 'review', approved: null, concluded: null } } },
   },
 };
 
@@ -188,6 +212,11 @@ export function verdictOf(r: PrFact['reviews'][number]): 'approve' | 'changes' |
     if (m) return m[1] === 'approve' ? 'approve' : 'changes';
   }
   return null;
+}
+
+export function latestHeadVerdict(f: Pick<PrFact, 'reviews' | 'headSha'>, pushedAt: number) {
+  return f.reviews.filter((v) => verdictOf(v) && (v.headSha != null ? v.headSha === f.headSha : v.submittedAt > pushedAt))
+    .sort((a, b) => b.submittedAt - a.submittedAt || Number(verdictOf(b) === 'changes') - Number(verdictOf(a) === 'changes'))[0];
 }
 
 /** Whether the head's checks have finished: every conclusion non-null. No checks counts as
@@ -391,6 +420,7 @@ function adjudicationOf(fact: PrFact): 'merge' | 'owner' | null {
  *  `Claims.syncRecord`): the owner's answers to the decisions the sync posted, and the legs
  *  claims finished with an evidence pointer — what a marker in git is judged against. */
 export interface BatonRecord {
+  outside?: import('./outside-work').OutsideRecord;
   /** Each answer's time is Baton's clock: a `round` answer opens a round of its own on the head
    *  the third round refused, its verdict a round apart from the one before it. */
   answers?: { ticket: string; decision: string; answer: string; answered_at?: number }[];
@@ -623,7 +653,7 @@ export const matchPatterns = (branchPatterns?: string[]): string[] =>
 /** Whether fact `f` is in a repository ticket `t` reads: its home (`home`; a fact with no
  * `repository` is the home's), or one its `repos:` names (B-29). The adapter reads a sibling's
  * reviews and checks only for a ticket naming it, so a match outside these is a list-only fact. */
-const readsRepo = (t: SourceTicket, f: { repository?: string }, home?: string | null): boolean => {
+const readsRepo = (t: Pick<SourceTicket, 'repos'>, f: { repository?: string }, home?: string | null): boolean => {
   const repo = f.repository ?? home ?? null;
   return repo == null || home == null || sameRepo(repo, home) || (t.repos ?? []).some((r) => sameRepo(r, repo));
 };
@@ -632,7 +662,7 @@ const readsRepo = (t: SourceTicket, f: { repository?: string }, home?: string | 
  * is one of ticket `t`'s: listed in its `prs:`, or on a branch one of `patterns` (from
  * `matchPatterns`) maps to it. A PR in another repository is the ticket's only when the ticket
  * names that repository in `repos:` (B-29). */
-export function ticketOwns(t: SourceTicket, pr: { number: number; head: string; repository?: string }, patterns: string[], repository?: string | null): boolean {
+export function ticketOwns(t: Pick<SourceTicket, 'id' | 'repos' | 'course'>, pr: { number: number; head: string; repository?: string }, patterns: string[], repository?: string | null): boolean {
   if (!readsRepo(t, pr, repository)) return false;
   return prRefs((t.course as { prs?: unknown[] } | undefined)?.prs ?? [], repository).some((r) => refNames(r, pr, repository))
     || patterns.some((p) => branchMatches(p.replace(/\{ticket\}/g, t.id), pr.head));
@@ -878,7 +908,8 @@ export function stationsReviewPr(ctx: { tickets: SourceTicket[]; facts: PrFact[]
       continue;
     }
     if (fact.state !== 'open' || path.length >= rounds) {
-      stations[t.id] = at(station, path, [{ leg: 'conclude', state: 'ready', waiting_on: null }]);
+      stations[t.id] = at(station, path, [{ leg: 'conclude', state: 'ready', waiting_on: null },
+        ...(ctx.graph?.legs?.reconcile ? [{ leg: 'review', state: 'waiting' as const, waiting_on: 'exhausted' }] : [])]);
       continue;
     }
     const pushes = fact.pushes?.length ? fact.pushes : [fact.pushedAt];

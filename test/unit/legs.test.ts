@@ -4,7 +4,10 @@
 // a closed ticket as closed; an advance on an ended claim is claim-ended.
 import { describe, it, expect, beforeEach } from 'vitest';
 import roadmapPr from '../fixtures/courses/roadmap-pr/course.json';
-import { advance, beat, claimItem, course, cutover, endClaim, Git, ownerCall, placed, recommended, register, rows, setClock, syncCall, withCore, stateView } from '../helpers';
+import {
+  advance, beat, claimItem, course, cutover, endClaim, Git, ownerCall, placed, recommended, register, rows,
+  setClock, syncCall, withCore, stateView, seedClaimLeg,
+} from '../helpers';
 
 const T0 = Date.parse('2026-10-16T12:00:00Z');
 const REVIEWED: [string, string][] = [['implement', 'pr-open'], ['review', 'reviewed']];
@@ -139,7 +142,7 @@ describe('round 2 fixes', () => {
     await git.refresh(); // a seat substituted later
     expect(await rows(`SELECT 1 FROM events WHERE kind = 'bars-mismatch'`)).toEqual([]);
     // A run started as fix, judged after a rename to address, reads address's bars.
-    await rows(`INSERT INTO claim_legs (claim_id, seq, leg, from_station, bars, started_at, started_observation) VALUES (?, 2, 'fix', 'reviewed', '["family:qwen"]', 0, 0)`, c.claim_id);
+    await seedClaimLeg({ claim_id: c.claim_id, seq: 2, leg: 'fix', from_station: 'reviewed', bars: '["family:qwen"]', started_at: 0, started_observation: 0 });
     const { fix, ...others } = roadmapPr.legs;
     git.registry = [course(4, 3, { course: { ...roadmapPr, legs: { ...others, address: { ...fix, renamed_from: 'fix' } } } })];
     git.place('T-1', placed('reviewed', REVIEWED, [['address', 'ready']], { bars: { address: ['family:deepseek'] } }));

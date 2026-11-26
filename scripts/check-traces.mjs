@@ -43,6 +43,7 @@ const withoutDeadlines = ({ legs, ...course }) => ({ ...course, legs: Object.fro
 const COURSE_SHAPE = JSON.stringify(withoutDeadlines(COURSE));
 
 // ── ITF back to JSON ─────────────────────────────────────────────────────────────────────
+/** @param {unknown} v @returns {unknown} */
 export function fromItf(v) {
   if (Array.isArray(v)) return v.map(fromItf);
   if (v && typeof v === 'object') {
@@ -54,6 +55,9 @@ export function fromItf(v) {
   return v;
 }
 
+/** @typedef {{kind: import('../test/integration/trace').Step['kind'], now: number, method?: string, path?: string, status?: number, body?: unknown, response?: unknown, state: import('../test/integration/trace').Projection}} TraceStep */
+/** @typedef {{scenario: string, test: string, steps: TraceStep[]}} Trace */
+/** @param {string} file @returns {Trace} */
 export function readTrace(file) {
   const t = JSON.parse(readFileSync(file, 'utf8'));
   return { scenario: t['#meta']?.source ?? basename(dirname(file)), test: t['#meta']?.description ?? basename(file), steps: t.states.map((s) => ({ ...s['#meta'], state: fromItf(s.baton) })) };
@@ -66,6 +70,7 @@ const qSet = (xs) => (xs.length ? `Set(${[...new Set(xs)].sort().map(q).join(', 
 const sameSet = (a, b) => JSON.stringify([...new Set(a)].sort()) === JSON.stringify([...new Set(b)].sort());
 
 /** The model's `kind` for an end reason (§6.5). */
+/** @param {string | null | undefined} endReason */
 export function kindOf(endReason) {
   if (endReason == null) return '';
   if (endReason === 'done') return 'done';
@@ -111,6 +116,10 @@ function requiredLegs(required) {
  * expect: [[name, expr]] }], end: { index, reason } | null }`: `end` is the first step the model
  * has no action for; the steps before it are the trace's checked part.
  */
+/** @typedef {{index: number, label: string, actions: string[], expect: string[][]}} ModelStep */
+/** @typedef {{index: number, reason: string}} Stop */
+/** @typedef {{consts: Record<string, string | number>, steps: ModelStep[], end: Stop | null, reject?: Stop & {label: string}, total: number}} Translation */
+/** @param {{steps: readonly TraceStep[]}} trace @returns {Translation} */
 export function translate(trace) {
   const states = trace.steps.map((s) => s.state);
   const empty = { counter: 0, lastAccepted: 0, outstanding: false, tickets: {}, claims: {}, held: {}, ownerBars: [], runners: {}, required: [], courseFile: null };
@@ -705,7 +714,10 @@ function traceFiles(args) {
 export const SCOPE = join(ROOT, 'test', 'integration', 'trace-scope.json');
 const keyOf = (r) => `${r.scenario} › ${r.test}`;
 
-/** The scope errors for accepted results against the allowlist; `whole` also checks stale entries. */
+/** The scope errors for accepted results against the allowlist; `whole` also checks stale entries.
+ * @param {readonly {scenario: string, test: string, ok: boolean, checked: number, end?: {index: number, reason: string} | null}[]} results
+ * @param {Record<string, {at: number, reason: string}>} scope
+ */
 export function scopeErrors(results, scope, whole = true) {
   const errors = [];
   const seen = new Set();

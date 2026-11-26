@@ -4,7 +4,9 @@ import { describe, it, expect, inject, beforeEach } from 'vitest';
 import { confirmations } from '../../src/shared/batonSync.mjs';
 import { gatesFor } from '../../src/core/gates';
 import {
-  beat, claimItem, claimRow, course, cutover, q, endClaim, hbBody, keyCall, ORIGIN, ownerCall, payload, recommended, refresh, register, requestId, rows, setAdminKeys, setClock, sha256, syncCall, syncToken, withCore, runnerCall, tick,
+  beat, claimItem, claimRow, course, cutover, q, endClaim, hbBody, keyCall, ORIGIN, ownerCall, payload,
+  recommended, refresh, register, requestId, rows, setAdminKeys, setClock, sha256, syncCall, syncToken, withCore,
+  runnerCall, tick, clearCourseRegistry, seedClaim,
 } from '../helpers';
 import { makeKey, signedRequest } from '../lib/sshKeys';
 import { capabilitiesOf } from '../../src/shared/vocabulary.mjs';
@@ -224,7 +226,7 @@ describe('the claim and end contracts (§11, §6.5, §11)', () => {
 
   it('G-BTN-40, rule 9: a ticket whose course is not registered fits no runner, in the query and gatesFor alike', async () => {
     const { id, secret } = await register('vm-a');
-    await rows(`DELETE FROM courses`); // a head posted before the registry existed
+    await clearCourseRegistry(); // a head posted before the registry existed
     expect(await recommended(id)).toEqual([]);
     expect(await claimItem('vm-a', secret, { ticket_id: 'docs:R3-9001' })).toMatchObject({ status: 409, json: { code: 'stale-skills', rule: 9 } });
   });
@@ -362,11 +364,9 @@ describe('G-BTN-1: one active claim per item, and per runner up to its bound (R-
     expect(await claimItem('vm-a', a.secret)).toMatchObject({ status: 409, json: { code: 'not-eligible', rule: 'max-claims' } });
     // R-BTN-4 (B-188): the per-runner index is gone — the bound is the claim transaction's — and
     // the per-ticket one stays.
-    await rows(`INSERT INTO claims (ticket_id, runner_id, request_id, nonce, snapshot_sha, claimed_at, status)
-                VALUES ('docs:R3-9002', ?, 'raw-1', 'abcdef', '', 0, 'active')`, a.id);
+    await seedClaim({ ticket_id: 'docs:R3-9002', runner_id: a.id, request_id: 'raw-1', nonce: 'abcdef', snapshot_sha: '', claimed_at: 0, status: 'active' });
     const b = await register('vm-b');
-    await expect(rows(`INSERT INTO claims (ticket_id, runner_id, request_id, nonce, snapshot_sha, claimed_at, status)
-                       VALUES ('docs:R3-9002', ?, 'raw-2', 'abcdef', '', 0, 'active')`, b.id)).rejects.toThrow(/UNIQUE/);
+    await expect(seedClaim({ ticket_id: 'docs:R3-9002', runner_id: b.id, request_id: 'raw-2', nonce: 'abcdef', snapshot_sha: '', claimed_at: 0, status: 'active' })).rejects.toThrow(/UNIQUE/);
   });
 });
 

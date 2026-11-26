@@ -28,6 +28,7 @@
 import { gitText } from './git.mjs';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { resolveSource } from './cli';
 import { dirname, join, resolve } from 'node:path';
 import { batonTarget, fallbackNote, floorFor, parseKind, takeNumber } from './sequences';
 import { hostOf, NAMED_FORGES, openRequestPr, protectedRefusal, requestForge, tokenOf, type PrForge } from './forge';
@@ -47,7 +48,7 @@ export const REQUEST_ENTRY = 'request';
 interface BatonJson {
   items?: string;
   default_course?: string;
-  courses?: { id: string }[];
+  courses?: { id: string; source?: string }[];
 }
 
 /** A request as `requestMain` plans it, before any git runs: what it files, on which course, and
@@ -221,7 +222,7 @@ export function nextId(root: string, items: string, prefix = ticketPrefix(root, 
 
 /** Read and judge the checkout before any git runs: the `.baton/baton.json` the request must be
  *  listed in, the course file that must opt in. Each refusal names what to do. */
-export function readRequestPlan(root: string, course: string, sentence: string, at = resolve(root), where?: string): RequestPlan {
+export function readRequestPlan(root: string, course: string, sentence: string, at = resolve(root), where?: string, sourceGraph?: string): RequestPlan {
   // `where` names the tree in a refusal: a landing read's `at` is a throwaway worktree, useless
   // to an operator — the branch is what they can act on (round 3, 3-r1-1).
   const site = where ?? at;
@@ -241,10 +242,10 @@ export function readRequestPlan(root: string, course: string, sentence: string, 
     throw new Error(`${site}: course ${course} is not one .baton/baton.json lists (${listed.length ? listed.join(', ') : 'none'}) — add it to \`courses\` with \`baton repo init --course ${course}\``);
   }
   const courseFile = join(at, '.baton', 'courses', course, 'course.json');
-  if (!existsSync(courseFile)) throw new Error(`${site}: .baton/courses/${course}/course.json is missing — run \`baton repo init --course ${course}\``);
+  if (sourceGraph === undefined && !existsSync(courseFile)) throw new Error(`${site}: .baton/courses/${course}/course.json is missing — run \`baton repo init --course ${course}\``);
   let graph: { starts_from?: unknown; start?: unknown; start_leg?: unknown };
   try {
-    graph = JSON.parse(readFileSync(courseFile, 'utf8')) as typeof graph;
+    graph = JSON.parse(sourceGraph ?? readFileSync(courseFile, 'utf8')) as typeof graph;
   } catch (e) {
     throw new Error(`.baton/courses/${course}/course.json is not JSON: ${(e as Error).message.split('\n')[0]}`);
   }
@@ -324,7 +325,11 @@ export async function fileRequest(plan: RequestPlan, opts: RequestOptions = {}):
       // The landing tree's own word (round 1, 1-A-2): the course must be listed and opted in on
       // the branch this ticket will be read from, never only on one the caller stands on. The
       // plan's root is swapped for the worktree for this try.
-      const atHead = readRequestPlan(plan.root, plan.course, plan.sentence, dir, `${remote}/${branch()}`);
+      const settingsFile = join(dir, '.baton', 'baton.json');
+      const settings = existsSync(settingsFile) ? JSON.parse(readFileSync(settingsFile, 'utf8')) as BatonJson : null;
+      const source = settings?.courses?.find((c) => c.id === plan.course)?.source;
+      const sourceGraph = source === undefined ? undefined : (await resolveSource(plan.course, source, join(dir, '.git-baton-sources'))).graph;
+      const atHead = readRequestPlan(plan.root, plan.course, plan.sentence, dir, `${remote}/${branch()}`, sourceGraph);
       // B-176: Baton's id when it gave one under this tree's prefix; else the scan, where
       // (R-BTN-131, B-174) the open request branches' ids count too, so two requests waiting on
       // their branches never share an id. The head the commit sits on is the worktree's own.

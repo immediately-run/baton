@@ -1,9 +1,11 @@
 {
   "compilerOptions": {
     "target": "es2023",
-    "module": "nodenext",
-    "moduleResolution": "nodenext",
-    "types": ["node"],
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "types": [
+      "node"
+    ],
     "strict": true,
     "noEmit": true,
     "allowImportingTsExtensions": true,
@@ -11,5 +13,12 @@
     "checkJs": false,
     "skipLibCheck": true
   },
-  "include": ["test/global-setup.ts", "test/provided.d.ts", "test/lib/*.mjs", "scripts/*.mjs", "vitest.config.ts"]
+  "include": [
+    "*.ts",
+    "*.mts",
+    "scripts",
+    "cli",
+    "model",
+    "test/global-setup.ts"
+  ]
 }

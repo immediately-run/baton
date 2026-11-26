@@ -5,7 +5,10 @@
 // `pending_owner_state` for the first snapshot that creates their ticket. The integration half
 // is S-BTN-50.
 import { describe, it, expect, beforeEach } from 'vitest';
-import { Git, adminSession, keyCall, mirrorCall, rows, setAdminKeys, setClock, sessionCall, syncCall, tick, withCore } from '../helpers';
+import {
+  Git, adminSession, keyCall, mirrorCall, rows, setAdminKeys, setClock, sessionCall, syncCall, tick, withCore,
+  clearSettingIn,
+} from '../helpers';
 import { makeKey, type TestKey } from '../lib/sshKeys';
 import { SECTIONS, OWNER_STATE_FORMAT } from '../../src/core/ownerState';
 
@@ -118,7 +121,7 @@ describe('R-BTN-88: the export', () => {
   });
 
   it('is sealed only', async () => {
-    await withCore((c) => c.store.exec(`DELETE FROM baton_settings WHERE key = 'sealed_at'`));
+    await withCore((c) => clearSettingIn(c.store, 'sealed_at'));
     expect(((await call('/v1/admin/export')).json as { code?: string }).code).toBe('conflict');
   });
 

@@ -7,7 +7,11 @@ import roadmapPr from '../fixtures/courses/roadmap-pr/course.json';
 import chore from '../fixtures/courses/chore/course.json';
 import { requiredBarCovers, isOwnerBarReason, checkRetry } from '../../src/core/admin';
 import { graphOf } from '../../src/core/graph';
-import { accessToken as accessTokenFor, adminSession, ownerCall, runnerCall, call, captureDispatches, claimItem, hbBody, ORIGIN, sessionCall, sha256, tick, withCore, course, cutover, Git, keyCall, placed, recommended, register, rows, setAdminKeys, setClock } from '../helpers';
+import {
+  accessToken as accessTokenFor, adminSession, ownerCall, runnerCall, call, captureDispatches, claimItem, hbBody,
+  ORIGIN, sessionCall, sha256, tick, withCore, course, cutover, Git, keyCall, placed, recommended, register,
+  rows, setAdminKeys, setClock, clearSetting, seedCredential,
+} from '../helpers';
 import { makeKey, signedRequest, type TestKey } from '../lib/sshKeys';
 import { call as hostCall } from '#host';
 
@@ -247,8 +251,10 @@ describe('round 1: one role per key, revocations that stay, bars that name what 
   });
 
   it('an owner grants no BATON_KEYS-seeded key; an administrator takes it over (1-B-0)', async () => {
-    await rows(`INSERT INTO credentials (id, hostname, allowed_capabilities, kind, public_key, created_by) VALUES (?, 'seeded', '["agent-venue"]', 'runner', ?, 'seed')`,
-      runner.fingerprint, runner.publicKey.split(' ').slice(0, 2).join(' '));
+    await seedCredential({
+      id: runner.fingerprint, hostname: 'seeded', allowed_capabilities: '["agent-venue"]', kind: 'runner',
+      public_key: runner.publicKey.split(' ').slice(0, 2).join(' '), created_by: 'seed',
+    });
     expect(await code(own('/grants', { public_key: runner.publicKey, capabilities: [] }))).toBe('conflict');
     expect(await rows('SELECT created_by FROM credentials WHERE id = ?', runner.fingerprint)).toEqual([{ created_by: 'seed' }]);
     expect(await code(adm('/grants', { repository: 'docs', public_key: runner.publicKey, capabilities: [] }))).toBe(200);
@@ -297,7 +303,7 @@ describe('round 2', () => {
     const refused = (await hb()).status;
     expect(refused).not.toBe(200);
     // The secrets change: the mirror runs again, and the revoke stands.
-    await rows(`DELETE FROM baton_settings WHERE key = 'credentials_marker'`);
+    await clearSetting('credentials_marker');
     expect((await hb()).status).toBe(refused);
     expect(await rows(`SELECT revoked_by FROM credentials WHERE id = 'vm-a'`)).toEqual([{ revoked_by: `admin:${admin.fingerprint}` }]);
   });

@@ -13,7 +13,10 @@
 //   5. a runner key is `forbidden`, a stranger `unauthenticated`.
 // Owner sessions do not exist yet (B-76). Runs on both hosts.
 import { describe, it, expect, beforeEach } from 'vitest';
-import { adminSession, claimItem, cutover, Git, hbBody, keyCall, ORIGIN, register, rows, sessionCall, setAdminKeys, setClock, sha256, TOKENS, withCore } from '../helpers';
+import {
+  adminSession, claimItem, cutover, Git, hbBody, keyCall, ORIGIN, register, rows, sessionCall, setAdminKeys,
+  setClock, sha256, TOKENS, withCore, retireRepository,
+} from '../helpers';
 import { makeKey, signedRequest, type TestKey } from '../lib/sshKeys';
 import { call as hostCall } from '#host';
 
@@ -111,7 +114,7 @@ describe('S-BTN-254 the root read (B-204)', () => {
     expect((await hostCall(new Request(`${ORIGIN}/v1/repositories`))).status).toBe(401);
 
     // A retired repository is no one's to list.
-    await rows('UPDATE repositories SET retired_at = ? WHERE id = ?', T0, 'ops');
+    await retireRepository('ops', T0);
     expect((await list()).repositories.map((r: Row) => r.id)).toEqual(['baton', 'docs']);
     // …and its owner's key, owning nothing live, is no key Baton knows.
     expect((await read(opsOwner, '/v1/repositories')).status).toBe(401);

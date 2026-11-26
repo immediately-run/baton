@@ -8,7 +8,7 @@ import type { SqlValue } from './ports';
 
 type StateViewCore = Pick<BatonCore, 'sql' | 'now' | 'capacityFigures' | 'registry' | 'courses' | 'queues'
   | 'runners' | 'claims' | 'admin' | 'instance' | 'blocks' | 'notices' | 'stations' | 'cutover' | 'capacity'
-  | 'scope' | 'questions' | 'conditions' | 'history' | 'resources' | 'observations' | 'provenance'>;
+  | 'scope' | 'questions' | 'conditions' | 'history' | 'resources' | 'observations' | 'provenance' | 'syncNeedsYou'>;
 
 /** Needs you: a BATON_KEYS list that was refused, or that names a revoked key (R3-1239). */
 export function keysNotice(core: Pick<BatonCore, 'sql'>): { refused?: string; revoked_listed?: string[] } | null {
@@ -175,7 +175,7 @@ export function stateView(core: StateViewCore) {
     // client's link gate checks against (§12.3).
     instance: core.instance.view(),
     // R-BTN-69: a refused course file, the previous one staying in force.
-    needs_you: { ...core.claims.needsYou(now), ...core.blocks.needsYou(now), ...core.notices.needsYou(now), ...core.stations.needsYou(), adoptions: core.cutover.adoptions(), courses_refused: core.courses.refusals(), keys: keysNotice(core),
+    needs_you: { ...core.syncNeedsYou(now), ...core.claims.needsYou(now), ...core.blocks.needsYou(now), ...core.notices.needsYou(now), ...core.stations.needsYou(), adoptions: core.cutover.adoptions(), courses_refused: core.courses.refusals(), keys: keysNotice(core),
       // R-BTN-87 (R3-1258): the figures over 80% of the envelope — `baton.capacity` through
       // today's path, until B-57 converts it to a condition.
       ...core.capacity.needsYou(figures),

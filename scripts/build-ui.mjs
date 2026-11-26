@@ -20,7 +20,7 @@
 // never the lockfile. On a clean checkout (`npm ci && npm test`) the check passes and nothing
 // is installed; the heal is for the tree that arrives stale.
 import { spawnSync } from 'node:child_process';
-import { copyFileSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { copyFileSync, lstatSync, mkdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join, resolve } from 'node:path';
 
@@ -74,6 +74,10 @@ const staleNodeModules = () => {
 // environment restores a stale tree after every leg; see the header). Bounded, because a hung
 // install must not hold the test that runs it.
 const installFromLockfile = () => {
+  // The gate lends its worktree the home checkout's dependencies as a symlink. npm ci
+  // can empty the target before replacing the link; detach it before installing locally.
+  const modules = join(ROOT, 'node_modules');
+  if (lstatSync(modules, { throwIfNoEntry: false })?.isSymbolicLink()) unlinkSync(modules);
   const run = spawnSync('npm', ['ci', '--ignore-scripts', '--no-audit', '--no-fund'], {
     cwd: ROOT,
     stdio: 'inherit',
@@ -116,3 +120,5 @@ await build({
   logLevel: 'warning',
 });
 copyFileSync(join(SRC, 'index.html'), join(OUT, 'index.html'));
+// The server's text-module loaders import the IIFE as a string, not as executable JS.
+writeFileSync(join(OUT, 'app.d.ts'), 'declare const text: string;\nexport default text;\n');
