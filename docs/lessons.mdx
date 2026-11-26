@@ -525,3 +525,17 @@ a runner must not offer to take work it cannot place; until that is built, a sup
 sees placement failures should drain the runner (SIGTERM to the `MainThread` process running
 `baton.mjs run`, found by its full command line — a pattern search can match the searching
 shell) and restart it once sandboxes start.
+
+## 2026-11-26 — an exemption keyed on "any repository named" switched a guard off everywhere
+
+Evidence: [interventions, 2026-11-26 run-tests ↔ fix loops](interventions.mdx); B-322's branch
+(eight `tests red` markers in two hours, no fix commits between them); #447.
+
+**A guard's exemption must be tested on the case it exempts, and on the common case it must
+not: B-255 meant "PRs may live in another repository", the code said "`repos:` names any
+repository", and `repos: [baton]` — the home itself, on nearly every ticket — turned B-231 off.**
+The loop it allowed is quiet: every leg "finishes", the log reads like progress, and only the
+branch history (markers with nothing between them) or the agents' own "nothing to push" shows
+it. What changed: #447, with a test for a ticket naming its home. A supervisor seeing
+`run-tests … next fix (run N of 30)` climb should read the branch's commits before the agents'
+code.
