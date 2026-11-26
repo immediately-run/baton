@@ -170,6 +170,9 @@ kinds.
 
 Everything else is shared: the entry it starts from, one intervention per subject and takeover,
 the warning at the start, the intervention ticket as its record, reports and the end. The
+read-only tail after an entry closes binds the agent-driven kind's key; a human-driven
+intervention's acts stop being tagged to it when it ends, and the person's credential is
+otherwise untouched. The
 sections below are written for the agent-driven kind; where they constrain the session's powers —
 [the intervention key](#the-intervention-key), [requests](#requests), a batch's confirmation —
 they do not apply to a human-driven one. A policy may require a stronger proof for some acts (a

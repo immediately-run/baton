@@ -81,13 +81,33 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
       an unwatched agent, are stated as accepted risk, and a key-signed proof level for governance
       acts goes to hardening.
     - Fixed in the text: approval is always a recorded `std:approval@1` of a defined hash, and
-      `claim: true` waits for it; an unwritten ticket's provenance carries no `human`; how an MCP
+      `claim: true` is refused until it exists; an unwritten ticket's provenance carries no `human`; how an MCP
       session claim moves, which gates bind a person, the branch recorded per claim; agent-driven
       starts name their claim; ambiguous ids refused and a recovered id confirmed by an owner; one
       person per forge account, never a runner's; a notifier is a principal of its own, alone
       attesting deliveries, on a host that runs no legs; recipients limited to the arena's people;
       verification codes and webhook limits; replay to a fresh notifier and an administrator's
       first-key code stated as accepted risk.
+  - **Round three** (2026-11-26, the last): one fresh reviewer over everything, after the branch
+    took in main (members, R-BTN-204; owners' and members' sessions, R-BTN-155). Every finding was
+    within the owner's rulings and is fixed in the text:
+    - A forge sign-in's session carries no key's role — the roster's acts and their reads only —
+      so taking over a forge account takes over no owner key; a person is created only for an
+      account on some arena's roster or one an owner names; the forge OAuth is named a new outbound
+      call and secret.
+    - A ticket an agent-driven credential starts runs nowhere before a human approves its text
+      wherever `tickets.created` is `proposed`, whatever the guarantees.
+    - An interactive grant is not a delegated key: it writes as the new writer `person`; a session
+      claim is bound to the person, so a fresh grant continues it; an approval names a written
+      ticket's posted version or an unwritten one's text hash.
+    - The CLI's `baton session claim` renews by `claim.renew`, and the `pre-push` holder query
+      asked with a person's key answers for their own claims; a lapsed claim of either form is
+      requeued the same way.
+    - `std:roster@1` is written by the sync key or CI identity alone, never a runner's.
+    - A runner's legs on a machine holding a person's keys can act as that person today: stated as
+      accepted risk, its fix in hardening.
+    - Smaller: owners' and members' sessions are not roster-gated; the notifier condition, the
+      channels it reads for codes, rate limits on every channel; the intervention tail.
 
 - **2026-11-26 — A protected repository accepts a branch course source (R-BTN-134).**
   Rules changed: R-BTN-134 (*A branch source*). #395 left open whether a protected repository

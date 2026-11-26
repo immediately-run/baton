@@ -241,14 +241,15 @@ repository, or who belong to the forge organisation that owns it, as the arena c
 
 **Interactive grant** ([proposed, not built](../../spec/proposals/people-and-dashboard.md#5-people-identities-and-the-roster)).
 A person's MCP credential: an OAuth grant they approve for their own agent, short-lived and ended
-by idleness, human-driven, acting with the person's role within the grant's consent and at the
-proof a token carries.
+by idleness, human-driven, acting with the role of the session it was approved from within the
+grant's consent and at the proof a token carries. It is not a delegated key: it writes as the
+person (the writer `person`).
 
 **Session claim** ([proposed, not built](../../spec/proposals/ticket-ownership.md)). A claim held
 by a person's own session rather than a runner: over MCP with an interactive grant, or from the
 person's CLI (`baton session claim`), which holds the lease and the `pre-push` fence and runs no
-queued legs. One claim like any other, leased and fenced; a lapsed MCP one is requeued onto a fresh
-branch.
+queued legs. One claim like any other, leased; fenced where the CLI holds it; a lapsed one is
+requeued onto a fresh branch.
 
 **Unwritten ticket** ([proposed, not built](../../spec/proposals/ticket-ownership.md)). A ticket
 Baton started (`course.start`) that its ticket source does not hold yet. Baton keeps its start

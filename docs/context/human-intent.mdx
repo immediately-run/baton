@@ -33,7 +33,7 @@ The channel says nothing about it:
 
 | Channel | Who drives |
 |---|---|
-| The dashboard | always a person: someone signed in. A session never satisfies a list that requires a `human_only` or hardware key (§2). |
+| The dashboard | always a person: someone signed in. A session acts as `human` only as strongly as its sign-in proves a person (R-BTN-185); a forge sign-in proves none unless the owner rules otherwise (§2). |
 | The CLI | the key's: a person's own SSH key is human-driven; a runner's key, in a sandbox or anywhere, is agent-driven. |
 | MCP | the credential's: a person's **interactive grant** is human-driven; a key minted for an agent's purpose is agent-driven. |
 
@@ -44,14 +44,17 @@ The channel says nothing about it:
   own agent ([BATON_MCP_OAUTH_SPEC](../../spec/BATON_MCP_OAUTH_SPEC.md), amended): a short-lived
   access token, its refresh capped and ended by idleness, so a grant left in an agent's
   configuration does not outlive the work it was made for. No long-lived bearer key is
-  human-driven. A person who owns no key signs in with the forge to get one.
+  human-driven. A person who owns no key signs in with the forge to get a session.
 - **A person's own CLI holds a claim without becoming a runner.** `baton session claim` keeps a
   claim's lease and installs the `pre-push` fence for the person's own interactive session, and
   runs no queued legs ([ticket ownership](../../spec/proposals/ticket-ownership.md#session-claims)).
 - **A runner is always agent-driven.** A runner key carries a runner. `human-operator` is a
   runner's own statement, matched to route legs that want a person at the runner's terminal; it
-  never makes the runner human-driven. A runner on a machine that also holds a person's keys must
-  not let its legs reach them ([hardening](../../spec/proposals/hardening.md)).
+  never makes the runner human-driven. But today a runner's legs can use its host's `ssh-agent`
+  (R-BTN-107): on a machine that also holds a person's keys, a leg can sign with the person's key,
+  and by this rule its acts are then human-driven — creating and claiming at once, and whatever
+  governance acts that key admits. That is an accepted risk; keeping legs from a person's keys is in
+  the [hardening proposal](../../spec/proposals/hardening.md).
 - **An agent-driven key carries a purpose**, and its runner where it has one — a leg run, an
   intervention, an automation an owner minted it for — is scoped to what that purpose needs, and
   ends with it.
@@ -146,8 +149,8 @@ team is a pull from Needs you, or one push to a channel the team already shares.
 
 ## What is built and what is proposed
 
-- **Built:** runner keys and their grants; owner and administrator keys; administrators' dashboard
-  sessions; the `human-operator` capability; `human_only` keys and the policy's human-only lists;
+- **Built:** runner keys and their grants; owner and administrator keys; dashboard sessions for
+  administrators, and in part for owners and members (R-BTN-155; members, R-BTN-204, specified); the `human-operator` capability; `human_only` keys and the policy's human-only lists;
   `human_identity`.
 - **Proposed:** owners' dashboard sessions and MCP
   ([people and dashboard](../../spec/proposals/people-and-dashboard.md)), with interactive grants
@@ -158,8 +161,9 @@ team is a pull from Needs you, or one push to a channel the team already shares.
   ([intervention sessions](../../spec/proposals/intervention-sessions.md)); sealed personal secrets
   and notification ([personal secrets](../../spec/proposals/personal-secrets.md)).
 - **To amend when built:** BATON_MCP_OAUTH_SPEC §5, §7 and §8 and G-BTN-157 (an interactive grant
-  is a person's own, short-lived, acting with their role within the consent's ticks; a grant
-  scoped to an intervention stays agent-driven); R-BTN-186 — its limits (tighten only, never as `human`, never resolving
+  is a person's own, short-lived, acting with their role within the consent's ticks, and is not a
+  delegated key; a grant scoped to an intervention stays agent-driven); R-BTN-181 (the writer
+  `person`, for a person's grant and session claims); R-BTN-186 — its limits (tighten only, never as `human`, never resolving
   a condition, never writing an attestation or answering a person leg) bind agent-driven delegated
   keys, while an interactive grant acts with its person's role at its proof; R-BTN-188 ("a
   delegated key matches no entry" binds agent-driven keys; `tickets.created` speaks of agent-driven

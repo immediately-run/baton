@@ -120,8 +120,10 @@ From #300, unchanged in substance:
   told: [<person>], unreachable: [<person>]}`, naming no channel and no address. Only a key on the
   arena's notifier list writes it, whatever the policy admits for other types; a runner's word
   that someone was told counts for nothing. Needs you shows who was told.
-- **A silent notifier is a condition.** Where the policy admits a writer for `std:notified@1`, an
-  entry unattested for 15 minutes raises `baton.notifier-silent` on the arena.
+- **A silent notifier is a condition.** Where the arena lists a notifier key, an entry unattested
+  for 15 minutes raises `baton.notifier-silent` on the arena.
+- **Channels awaiting verification** are read too, by the same notifier, only to send their codes;
+  nothing else is sent to them.
 
 For a channel that needs a secret, the notifier also:
 
@@ -159,7 +161,8 @@ yet confirmed, receives nothing.
 
 **A webhook is sent with care.** A notifier posts only to an `https` URL, refuses an address that
 resolves to a private, loopback or link-local network, follows no redirect, and sends at most a
-few requests a minute to one webhook — verification codes included.
+few requests a minute to one webhook. Verification sends on every channel, email included, are
+limited the same way.
 
 ## Preferences
 
