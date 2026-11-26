@@ -251,7 +251,7 @@ describe('S-BTN-189 the repository policy', () => {
     const secret = 'secret-w';
     const created = Math.floor((await withCore((c) => c.now())) / 1000);
     const hb = await hostCall(await signedRequest(w, ORIGIN + '/v1/runner/heartbeat', {
-      created, body: JSON.stringify({ hostname: 'w-host', session_name: 'w', harness: 'opencode', kind: 'vm', billing: {}, capabilities: ['agent-venue'], tier_ceiling: 'critical', lease_timeout_s: 900, secret_hash: await sha256Of(secret), courses: [{ repository: 'docs', course: 'roadmap-pr', version: 3 }] }),
+      created, body: JSON.stringify({ hostname: 'w-host', session_name: 'w', harness: 'opencode', kind: 'vm', billing: {}, capabilities: ['agent-venue'], lease_timeout_s: 900, secret_hash: await sha256Of(secret), courses: [{ repository: 'docs', course: 'roadmap-pr', version: 3 }] }),
     }));
     expect(hb.status).toBe(200);
     const hbJson = (await hb.json()) as Record<string, any>;
@@ -365,7 +365,7 @@ async function makeChecker(repository: string) {
 async function checkerBeat(repository: string, matched: boolean, readingHash: string) {
   const created = Math.floor((await withCore((c) => c.now())) / 1000);
   const res = await hostCall(await signedRequest(checkerKey, ORIGIN + '/v1/runner/heartbeat', {
-    created, body: JSON.stringify({ hostname: 'checker-host', session_name: 'checker', harness: 'opencode', kind: 'vm', billing: {}, capabilities: [], tier_ceiling: 'critical', lease_timeout_s: 900, secret_hash: await sha256Of('checker-secret'), courses: [], protection: [{ repository, matched, reading_hash: readingHash }] }),
+    created, body: JSON.stringify({ hostname: 'checker-host', session_name: 'checker', harness: 'opencode', kind: 'vm', billing: {}, capabilities: [], lease_timeout_s: 900, secret_hash: await sha256Of('checker-secret'), courses: [], protection: [{ repository, matched, reading_hash: readingHash }] }),
   }));
   expect(res.status).toBe(200);
   return (await res.json()) as Record<string, any>;

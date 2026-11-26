@@ -15,7 +15,6 @@ export interface RepoRow {
   web_base?: string | null;
   default_branch?: string | null;
   weight?: number;
-  tiers?: unknown;
   courses?: { id: string; version?: unknown }[];
   head?: { sha: string; received_at?: number | string | null; observation?: unknown } | null;
   mode?: string;

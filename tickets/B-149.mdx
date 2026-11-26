@@ -10,7 +10,7 @@ tags:
   - roadmap-item
 order: 1164
 tier: critical
-description: "The marker courses (bug-report, draft-ticket, decision, build-app, spec-to-tickets) commit each leg's work to the default branch, which `no-runner-lands` forbids. Build R-BTN-131 as amended on 2026-11-01: every standard course that writes work commits on the ticket's branch and ends at `merged` (the owner's `merged-by-hand`); `build-app` becomes a parent ticket filing one `draft-doc` child per stage. S-BTN-104, S-BTN-107, S-BTN-194. Requires: B-120, B-140, B-7, B-62, B-154."
+description: "The marker courses (bug-report, draft-ticket, decision, build-app, spec-to-tickets) commit each leg's work to the default branch, which `merge.trusted` forbids (no course commits to the default branch, R-BTN-180). Build R-BTN-131 as amended on 2026-11-01: every standard course that writes work commits on the ticket's branch and ends at `merged` (the owner's `merged-by-hand`); `build-app` becomes a parent ticket filing one `draft-doc` child per stage. S-BTN-104, S-BTN-107, S-BTN-194. Requires: B-120, B-140, B-7, B-62, B-154."
 topics:
   - baton
 owns: {}
@@ -179,3 +179,7 @@ S-BTN-104, S-BTN-107 and S-BTN-194, every case in their rows, and each row of it
 _(2026-11-02: the spec restructure's part 2 (B-166, the PR `baton-spec-restructure-p2`) renames the `protected-signed` preset `protected-hardware` (B-164); the note above reads so.)_
 
 _(2026-11-20: the spec simplification of 2026-11-19 (baton#299; `spec/BATON_SPEC_HISTORY.md`, that date) moved the unbuilt parts of the design this ticket builds out of the section files, with their rule ids, to proposal pages: the standard courses as PR record courses, with the course table, are part 4 of [the courses proposal](../spec/proposals/courses.md); the shipped courses' contract is `docs/standard-courses.mdx`, which the building change also updates. S-BTN-194 is no longer a row of the verification section: it is in [the proposals' scenarios](../spec/proposals/scenarios.md), under "The standard courses as PR record courses, and the leg-state branch". Each rule keeps its id and a line in its section, which links the page. The pull request that builds this ticket moves the rules it builds back into the section files, and the scenarios and gates it makes pass back into [the verification section](../spec/BATON_SPEC/15-verification.md#sec-15), in the same change. The plan above is otherwise as the earlier note of this day leaves it.)_
+
+_(2026-11-24: the description named `no-runner-lands`, which B-189's spec PR (`spec/BATON_SPEC_HISTORY.md`, the entry of 2026-11-24), on the owner's rulings of 2026-11-09 and 2026-11-24 (runners trusted, legs not) retires; the guarantees now rest on `merge.trusted`, under which no course commits to the default branch (R-BTN-180, R-BTN-189) — the premise this plan already cites. The plan is unchanged.)_
+
+_(2026-11-24: rules re-read: R-BTN-180, R-BTN-189)_

@@ -36,7 +36,7 @@ stating them as built, the way §6 and §7 now open with a "Not built" list.
 | 1 | R-BTN-93; §12.2's `owner.sync-key.revoke`; R-BTN-127's `owner sync-key add`, `revoke` | owners add and revoke a sync key: `POST /v1/owner/{repository}/sync-keys`, `…/sync-keys/{fingerprint}/revoke` | no such route: `sync-keys` occurs in `src/core/` only as a screen's path (`screens.ts:36`). A sync key is added or removed by an administrator alone, at registration or with `sync_keys_add` and `sync_keys_remove` on the repository change (`src/core/admin.ts:374`, `:398-411`; `baton admin repo … --add-sync-key`, `--remove-sync-key`, `cli/baton.mjs:23`, `:374`) | none (B-199 draws the screen and assumes the commands) |
 | 2 | R-BTN-94, *Coalescing* | dispatches of one workflow coalesce into one per repository and workflow per 30 seconds, with a trailing dispatch | the window (`DISPATCH_WINDOW_MS`, `src/core/webhook.ts:24`) and its `webhook_syncs` row, keyed by repository alone, are the webhook path's. A dispatch a claim, an advance, an end or a bar asks for is de-duplicated only within its own transaction (`pendingDispatch`, `src/core/baton.ts:123`, `:160`) and sent after it | none |
 | 3 | R-BTN-94, first paragraph | Baton dispatches a sync for a claim, an advance, an end, an answer, a bar and a notification | all but the webhook's own and the unblocked trigger are sent only for a repository after its cutover (`flushDispatch`, `src/core/baton.ts:278-285`: `own(wf) or cutoverAt(wf.repository) != null`) | B-288 removes `cutover.ts` and must decide what the filter becomes (added to its plan) |
-| 4 | R-BTN-93, R-BTN-102, the policy's `inputs.board: machine` | a machine key granted on the repository may sync | `verifySync` admits a sync key or a CI identity token and refuses every other key `forbidden` (`src/core/baton.ts:326-352`) | R3-1270 builds it; B-137 and B-189 item 7 would retire it |
+| 4 | R-BTN-93, R-BTN-102 ~~, the policy's `inputs.board: machine`~~ | a machine key granted on the repository may sync | `verifySync` admits a sync key or a CI identity token and refuses every other key `forbidden` (`src/core/baton.ts:326-352`) | R3-1270 builds it ~~; B-137 and B-189 item 7 would retire it~~ |
 | 5 | R-BTN-138 | `forge_ids_seen` and `baton.forge-ids-mismatch`; a verified rename with `repo-renamed`; `baton.remote-stale`; a held rename, `baton.rename-held` and §6.6's rule 13; `former_paths_remove` | none of these names occurs in `src/` or `cli/` | B-45 |
 | 6 | R-BTN-139 | `baton.pushers-degraded` | no occurrence | B-46 item 1, B-163 |
 | 7 | R-BTN-140 | `repos.unlisted`, `by-name`, `baton.repo-not-listed` | no occurrence | B-264; the knob's place in the policy is B-293's |
@@ -65,10 +65,11 @@ stating them as built, the way §6 and §7 now open with a "Not built" list.
    when both are open, that R-BTN-94's first paragraph and the code agree after B-288.
 4. **Rows 4 to 10: one "Not built" list at the head of §3**, each entry a rule id, the part
    that has no code, and its ticket, restating no design. For row 4 the PR also asks the owner
-   which way the rule goes, because two tickets point opposite ways: R3-1270 builds
+   which way the rule goes ~~, because two tickets point opposite ways: R3-1270 builds
    machine-key sync, and B-137 with B-189 item 7 remove machine keys from `inputs.board`. Until
    that is ruled, §3.2 says a machine key cannot sync and the `machine` value of `inputs.board`
-   admits nobody.
+   admits nobody~~ : row 4 needs no ruling — the owner ruled it (B-189, 2026-11-24): a granted
+   machine key may sync, R3-1270 builds it, and there is no `inputs.board`.
 5. **Spec mechanics.** History entry with `Rules changed:` naming R-BTN-93 and R-BTN-94 (and
    any other whose sentence changes); `npm run spec:index`; `npm run spec:impact` over the ids
    and the terms `sync key`, `coalesc`, `dispatch`.
@@ -108,3 +109,7 @@ deployment's secrets; `baton repo init`'s CI configuration is unchanged.
 _filed 2026-11-20._ From the adversarial review of PR #299 (the spec simplification of
 2026-11-19), the fix round's lists for §3 and §12. Related: B-45, B-46, B-79, B-137, B-163,
 B-189, B-199, B-264, B-288, B-293, B-294, B-299, R3-1263, R3-1264, R3-1270.
+
+_(2026-11-24: row 4's open question is answered: B-189's spec PR (`spec/BATON_SPEC_HISTORY.md`, the entry of 2026-11-24) retires the policy's `inputs.board` and the machine-key board distinction on the owner's rulings of 2026-11-09 and 2026-11-24; a machine key granted on a repository syncs it (R-BTN-93, R-BTN-102), which R3-1270 builds. The clauses saying otherwise are struck in item 4 and row 4. Row 4 stays in the "Not built" list until R3-1270 lands.)_
+
+_(2026-11-24: rules re-read: R-BTN-93, R-BTN-102, R-BTN-188)_

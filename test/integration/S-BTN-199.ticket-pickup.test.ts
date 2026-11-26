@@ -49,7 +49,7 @@ async function legacyClaim(ticket: string) {
   await rows(`INSERT INTO credentials (id, hostname, allowed_capabilities, kind) VALUES ('legacy', 'legacy', '[]', 'legacy') ON CONFLICT (id) DO NOTHING`);
   await seedRunner({
     hostname: 'legacy', session_name: `item-${ticket.split(':')[1]}`, secret_hash: 'x', credential_id: 'legacy',
-    harness: 'claude-code', kind: 'legacy', tier_ceiling: 'critical', lease_timeout_ms: 0, settings_hash: '',
+    harness: 'claude-code', kind: 'legacy', lease_timeout_ms: 0, settings_hash: '',
     first_seen_at: T0, last_seen_at: T0,
   });
   const runner = (await rows<{ id: number }>(`SELECT id FROM runners WHERE kind = 'legacy' ORDER BY id DESC LIMIT 1`))[0].id;

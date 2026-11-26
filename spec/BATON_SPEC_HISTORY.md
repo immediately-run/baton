@@ -59,6 +59,108 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   starts a run answers `run`, counted as `max_runs` counts it, and the holder hands that to the
   leg; a run an earlier claim abandoned is not one of them, as it never was for `max_runs`
   (the history row's `run`, R-BTN-81, still counts every row). B-335.
+- **2026-11-24 — Trusted runners, untrusted legs: the runner-distrust machinery retires (R-BTN-180, R-BTN-189, §12.8; B-189).**
+  Rules changed: R-BTN-180 (retitled *what lands on the default branch*), R-BTN-182, R-BTN-187,
+  R-BTN-188, R-BTN-189, R-BTN-93, R-BTN-102, R-BTN-107, R-BTN-115, R-BTN-137, R-BTN-144,
+  R-BTN-146, §12.1,
+  §12.8's preamble and lists, §12.9, §3.2, §6.6 rule `floor`, §11's CLI table, §13, §14; S-BTN-55,
+  S-BTN-190, S-BTN-295, G-BTN-87;
+  nine Decisions entries (one merged into another); the linked proposals (security, checks and executors, conditions,
+  courses, data model and API, intervention sessions, scenarios: S-BTN-120, S-BTN-136,
+  S-BTN-180, S-BTN-182, S-BTN-183, S-BTN-187, S-BTN-191, S-BTN-193, S-BTN-197, S-BTN-237,
+  G-BTN-140, G-BTN-156, G-BTN-165, G-BTN-166; leg conversations; rule `trusted`); the context
+  pages product and vocabulary; `docs/security-model.mdx`. The owner, 2026-11-09: "no-runner-lands
+  is a vestigial structure from when the runner was assumed to be untrusted because it executed
+  repository code unsandboxed. This is not the case any longer, as we have transitioned to
+  keeping the runner outside the sandbox"; and, of the forge, "responsibility of securing the
+  forge also belongs to the Fieldhouse owner. Fieldhouse providing tooling goes above and beyond
+  its own responsibility. It should not try to claim ownership for forge policy"; and, offered
+  that plain Baton under `builtin` makes no security promise, "Ok". The owner, 2026-11-24, on
+  review independence by domain: "This provision seems to be a vestigal structure from the time
+  when baton's runner was executing within the sanbox. The runner is now a trusted component,
+  executing on the host, and all course legs including implement and review are sandboxed (each
+  leg receiving a blank-state separate sandbox). In addition, each leg receives transient
+  local-only git and llm api keys which they can use to communicate with the local proxy backed
+  by llm providers and the git forge. The contamination risk is therefore no longer something
+  that warrants any extra complexity"; and, asked whether those proxies replace forge actions a
+  runner performs for a leg, "Proxy replaces it"; and "if we have git and LLM proxies, I don't
+  think reviews need a separate 3rd party api key. Every leg should get leg-duration keys to be
+  used by sandboxed code." §12.8 assumed a runner may be compromised because it ran repository
+  code in its own trust boundary. With every call into repository code going through an
+  executor (R-BTN-107) and each leg holding only credentials confined to its claim, nothing a
+  push or a leg writes reaches a runner's key or the merge credential, so the machinery that
+  guarded against a runner goes. Retired: the guarantee `no-runner-lands`; the `refs.*`,
+  `approvers.roles`, `outbox.git`, `outbox.forge-check` and `inputs.board` knobs and the refusals
+  that read them; grant roles, domains and the checker mark, with *How runs compare*,
+  `runner_grants.role`, `checker`, `domain` and `set_by`, and `claim_legs.domain`; the
+  protection checker, its heartbeat `protection`, `repositories.protection_json` and
+  `baton.unprotected`; `std:ran@1` and writer domains; the key span, a grant's `sync` flag,
+  `baton.span-changed`, `--confirm-span` and `owner grant flags`; `baton.machine-post`; and §2's
+  one machine key per tenant. What replaces them: §12.8 states the deployment's duty (no
+  repository code in a runner's trust boundary; no leg credential reaching past its claim;
+  every leg starting afresh; the forge admitting only the merge credential and the human
+  identity to the default branch and tags), and says that under `builtin` Baton makes no
+  security promise; the guarantees rest on a landing condition (`merge.trusted`,
+  `tickets.created: proposed`, `paths.control` not `any`) in place of `no-runner-lands`;
+  `independent-review` counts reviews, each its own `reads_only` run of the exact head, and
+  compares no runner, key or domain; a trusted leg goes only to an SSH key's grant naming its
+  capability exactly (rule `trusted`, proposed), which the owner names only where the host
+  holds the leg's credential; `paths.control`'s `trusted-runner` value is
+  renamed `approval`; R-BTN-107's brief carries the claim's scope and the ticket's branches, so
+  an executor can confine a leg's forge reach; `baton repo protect --print | --check` is a tool
+  a person runs, which no rule reads. `no_chain_from` stays a course rule no guarantee requires.
+  The built code still has the retired knobs, `no-runner-lands` and the report store; B-189
+  removes them, following every stored policy version whose `floors` names `no-runner-lands`
+  with a new version logged `admin`. Decisions superseded, their text as it stood: "Chose that a
+  domain that runs a branch's code is one of its writers, so reviewers read the change and never
+  run it"; "Chose a grant's role and a domain label as the whole of a grant's trust, over a
+  separate trust level, a model family or a separate-domain guarantee"; "Chose a separate
+  protection checker, a trusted runner that merges nothing, over the merge runner holding a
+  credential that can rewrite rulesets"; and the git proxy rejected in "Chose a protected
+  default branch that only a deterministic merge runner and humans update, over a git proxy,
+  per-worker forks or verified signatures", which a deployment may now run to confine its legs.
+  Loosenings the change makes, each named per repository by B-189's migration: machine keys
+  post the board where `inputs.board` excluded them; `refs.*` statements, which only the forge
+  enforced, go; a floor on `no-runner-lands` is dropped; a repository floored on a guarantee
+  that included it, broken today for want of a checker report, resumes claims if its landing
+  condition holds; a policy whose `approvers.roles` was stricter than `approvers.members`
+  loses the difference; `independent-review` keeps its name but no longer requires distinct
+  domains, so a deployment floored on it accepts one key writing and reviewing; and with
+  `outbox.git` gone any runner declaring the class delivers git entries. Review, round one: two fresh reviewers given the diff found R-BTN-144
+  handing a leg the runner's credentials (now the executor's to replace, and a trusted leg
+  requires no `credential:`); trusted legs routable through a wildcard, a `runner:`
+  capability, a token's grant or an API key (rule `trusted` re-defined over capabilities); the
+  forge clause of the duty unconditional while `cooperative` needs runners on the default
+  branch (now under `merge.trusted`, and `merge.trusted` with `tickets.created: filed`
+  refused); the guarantees no longer requiring `paths.control` not `any` or proposed tickets
+  (the landing condition restores both); review supersession by runner key making a count of
+  two unreachable for one key, and re-sampling a head (supersession by run id; a rejection at a
+  head voids its approvals); forge jobs a leg's push starts left outside the duty; the
+  no-promise statement limited to `builtin`; option 17 wrongly marked superseded; stale
+  scenarios (S-BTN-55, S-BTN-182, S-BTN-183, S-BTN-193, G-BTN-87, G-BTN-156, G-BTN-166) and role,
+  domain, span and refs text in §3, §14, five proposals and the context pages; an unknown floor
+  name with no rule refusing it; and the placeholder this replaces. Each was checked against the
+  text and fixed; the security model's dated supersession notes are kept, the page being a
+  context page with dated rulings throughout. Round two, one fresh reviewer given the diff:
+  rule `trusted` had no builder and two homes (B-140 builds it; R-BTN-180 cites the proposal);
+  "ended without approving" could not be read from Baton's record and counted a crashed run
+  (`approves: <station>` names the approving outcome; abandoned, released and reaped runs void
+  nothing; "whose run started at `H`"); the migration named `repositories.protection_json`
+  and `worker_grants` for the code's `protection_reports` and `runner_grants` and missed
+  `model_family`; B-189 and this history disagreed on the heartbeat's `protection` (a 30-day
+  sunset); three loosenings unlisted (above); R-BTN-182 and the dry run said "admits" for
+  "names exactly"; R-BTN-159's SSH-only list lacked trusted legs; R-BTN-144 claimed no trusted
+  credential reaches a leg under `builtin`; an ejected markdown source's deliveries writing the
+  default branch under `merge.trusted` (now refused, and the duty's first clause names a source
+  delivery's store credential); stale lines in B-137, B-141, B-146, B-147, B-163, B-199 and B-297;
+  and S-BTN-182 cases that tested nothing. Each was checked and fixed. Round three, one fresh
+  reviewer: the ejected-source refusal could not be built (Baton cannot tell an ejected source's
+  store; replaced by a statement of the consequence); the duty's source exception did not cover
+  a source's reads; `credential:` values a course requires were forbidden by the duty and handed
+  over by R-BTN-144 (now the duty's named exception); part 7 did not hold a `runner:`-only
+  trusted leg S-BTN-182 expects held; `reads_only` and `approves` had no home or builder (part 4,
+  B-140); B-146 kept use-once consumption and SSHSIG signatures; R-BTN-182's absolute claim
+  under `builtin`; and stale "admits" and "rewriting" wording. Each was checked and fixed.
 
 - **2026-11-24 — Access sign-in refusals name the failed check (R-BTN-155, S-BTN-318).**
   Previously missing settings, missing or unverifiable assertions, and missing administrator
@@ -4081,6 +4183,23 @@ The simplification of 2026-11-19 moved the scenarios and gates of unbuilt design
 
 Each entry is a transition the specification no longer describes. The code keeps the old form
 working until the stated condition holds, then removes it.
+
+- **Runner-distrust state (2026-11-24, B-189).** A heartbeat's `protection` is accepted and
+  ignored, never refused, until no request has carried it for 30 days, then refused
+  `invalid-params`. A migration drops the `protection_reports` table (the spec's
+  `repositories.protection_json`), closes every open `baton.unprotected` with a logged reason,
+  and drops `runner_grants`' `trust_level`, `trust_domain`, `role`, `trust_set_by` and
+  `model_family` after one release in which nothing reads them (the couriers' go with B-293's
+  removal of couriers); an owner-state import accepts an older export carrying a
+  grant's role, domain or mark and ignores them. Every floor naming `no-runner-lands` or the
+  code's `trusted-domain-separate`, in a `policy_floors` row or a version's `floors`, is dropped
+  by one new policy version per repository, made by the migration rather than an approver,
+  logged `admin` with both hashes, the knobs dropped, and whether the repository's floors were
+  broken before and hold after; stored versions and their hashes are never rewritten. A stored
+  version with `merge.trusted` and `tickets.created: filed` stays in force but is named in that event, and the next change to it must
+  fix it, the refusal applying then. Stored
+  `paths.control: trusted-runner` reads as `approval`, and the retired knobs in a stored
+  version are ignored when it is read, until the next version drops them.
 
 - **Tier fields from older clients (2026-11-23).** The server changes first: gate 5, the
   re-tier release in `staleBoard` and the tier reads go before any CLI or sync stops sending a

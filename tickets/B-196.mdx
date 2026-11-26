@@ -10,7 +10,7 @@ tags:
   - roadmap-item
 order: 1195
 tier: judgement
-description: "The two reads the Runners screens of BATON-UI-V2 lack. repo.runners: every runner row Baton holds with an accepted grant on the repository — alive is last_seen_at within its lease timeout and not reaped — with its name, harness, kind, isolation, ~~tier ceilings,~~ declared and granted capabilities, tags, courses for this repository, lease timeout, last seen and last activity, credential kind and grant role and domain, and the claim it holds here (ticket, leg, run id, lease, deadline, attempt and backoff, session link, log directory, current activity) or busy_elsewhere; keyed by runner_id, the URL's segment. runner.show: that row plus ?since= (24 hours default, 7 days at most) of its claims on the repository with nested activities, and its earlier attempts on its live ticket. Requires: B-192, B-205."
+description: "The two reads the Runners screens of BATON-UI-V2 lack. repo.runners: every runner row Baton holds with an accepted grant on the repository — alive is last_seen_at within its lease timeout and not reaped — with its name, harness, kind, isolation, ~~tier ceilings,~~ declared and granted capabilities, tags, courses for this repository, lease timeout, last seen and last activity, credential kind ~~and grant role and domain~~, and the claim it holds here (ticket, leg, run id, lease, deadline, attempt and backoff, session link, log directory, current activity) or busy_elsewhere; keyed by runner_id, the URL's segment. runner.show: that row plus ?since= (24 hours default, 7 days at most) of its claims on the repository with nested activities, and its earlier attempts on its live ticket. Requires: B-192, B-205."
 topics:
   - baton
 owns: {}
@@ -34,8 +34,8 @@ declared and granted capabilities), [§6.7](../spec/BATON_SPEC/06-prerequisites-
 key reads), [§9.9](../spec/BATON_SPEC/09-claims.md#sec-9-9) (activities and transcripts),
 [§8.3](../spec/BATON_SPEC/08-runners.md#sec-8-3) ([R-BTN-113](../spec/BATON_SPEC/08-runners.md#sec-8-3)),
 [§8.5](../spec/BATON_SPEC/08-runners.md#sec-8-5) ([R-BTN-128](../spec/BATON_SPEC/08-runners.md#sec-8-5)),
-[§12.8](../spec/BATON_SPEC/12-security.md#sec-12-8) ([R-BTN-180](../spec/BATON_SPEC/12-security.md#sec-12-8):
-role and domain), [§14](../spec/BATON_SPEC/14-api.md#sec-14) (`GET /v1/runner/fleet`).
+[§12.8](../spec/BATON_SPEC/12-security.md#sec-12-8) (~~[R-BTN-180](../spec/BATON_SPEC/12-security.md#sec-12-8):
+role and domain~~), [§14](../spec/BATON_SPEC/14-api.md#sec-14) (`GET /v1/runner/fleet`).
 
 **Depends on:** B-192 (sessions read the repository reads), B-205 (the response convention; the
 window parameter).
@@ -52,7 +52,7 @@ The two §14 rows first, then the code, reusing `workerApi.ts`'s `workersView` a
    accepted (R-BTN-146) — Baton prunes no runner row, so a dead one stays until its key is
    revoked — each `{runner_id, hostname, session_name, alive, last_seen_at, last_activity_at,
    reaped_at, harness, kind, isolation, ~~tier_ceilings,~~ capabilities, granted, tags, courses,
-   lease_timeout_s, credential: {kind, token_id?, role, domain?}, executor, last_report,
+   lease_timeout_s, credential: {kind, token_id?}, executor, last_report,
    transcript_url, claim, busy_elsewhere}`:
    `executor` the runner's `executor_json` — `{source, digest, provides}` from its last
    heartbeat (R-BTN-107), null for a sidecar — as §11.4's runner card shows it;
@@ -145,3 +145,7 @@ the 2026-11-14 and 2026-11-15 `rows_read` outages and B-250's finding that a per
 grows with every runner ever registered._
 
 _2026-11-23 — tiers retired (spec/retire-tiers: [BATON_SPEC §6.6](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-6) gate 5, [R-BTN-66](../spec/BATON_SPEC/01-what-baton-is.md#sec-1)): the struck tier clauses are gone from the spec — no ticket tier, runner ceiling, grant `max_tier`, ladder, `ready_by_tier` or `?tier=`. Build the rest without them._
+
+_(2026-11-24: a grant's role and domain are struck from the row: B-189's spec PR (`spec/BATON_SPEC_HISTORY.md`, the entry of 2026-11-24), on the owner's rulings of 2026-11-09 and 2026-11-24 (runners trusted, legs not) retires them (R-BTN-180); a credential is its kind and token alone.)_
+
+_(2026-11-24: rules re-read: R-BTN-180)_

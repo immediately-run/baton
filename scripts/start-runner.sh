@@ -107,7 +107,7 @@ if [ -n "${BATON_KEY_FILE:-}" ]; then
 elif [ -n "${BATON_KEY:-}" ]; then CRED="BATON_KEY"
 elif [ -n "${BATON_TOKEN:-}" ]; then CRED="BATON_TOKEN"
 else
-  die "no credential: set BATON_KEY_FILE (~/.ssh/baton_worker; runbook step 5: ssh-keygen, then the owner runs 'npx --yes @immediately-run/baton@<version> owner grant baton --key worker.pub --hostname <hostname> --capabilities create-pr,llm-call,agent-venue --max-tier judgement')"
+  die "no credential: set BATON_KEY_FILE (~/.ssh/baton_worker; runbook step 5: ssh-keygen, then the owner runs 'npx --yes @immediately-run/baton@<version> owner grant baton --key worker.pub --hostname <hostname> --capabilities create-pr,llm-call,agent-venue')"
 fi
 
 # ---- the CLI the runner runs (B-138): a pinned release, never a working tree -------------

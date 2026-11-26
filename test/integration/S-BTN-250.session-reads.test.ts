@@ -127,7 +127,7 @@ describe('S-BTN-250 sessions read the repository reads (B-192)', () => {
   it('the keys read as before: an owner its repository, a granted runner its repository, never a leg’s runs', async () => {
     const board = await read(granted, '/v1/repositories/docs/board');
     expect(board.status).toBe(200);
-    expect(Object.keys(board.json).sort()).toEqual(['granted_capabilities', 'holders', 'ready', 'ready_by_tier', 'repository', 'server_time']);
+    expect(Object.keys(board.json).sort()).toEqual(['granted_capabilities', 'holders', 'ready', 'repository', 'server_time']);
     expect(board.json.granted_capabilities).toEqual(['authentication', 'create-pr', 'drivable-browser', 'llm-call']);
     expect((await read(docsOwner, '/v1/repositories/docs/board')).json.granted_capabilities).toBeNull();
     expect((await read(admin, '/v1/repositories/docs/board')).status).toBe(200);

@@ -273,6 +273,14 @@ is required* is step 1 done and the route reachable. Read either as done only wh
 
 ## 5. Workers
 
+**Tier retirement (B-322).** Before deploying the server with migration `0077`, owners
+who relied on a grant's `max_tier` must re-scope it by capability (gate 4). This includes
+the former Bering `judgement` grants. After the migration, a key may claim any eligible
+ticket its capabilities fit; the former cap is gone. Upgrade the server before upgrading
+CLI, runner, or sync clients: the old server treats untiered tickets as top-tier work.
+Monitor `deprecated-field` events to find legacy senders; after 30 days without legacy
+tier traffic, requests carrying the retired fields are refused with `invalid-params`.
+
 On each machine that will work baton tickets:
 
 ```sh
@@ -283,7 +291,7 @@ Then, as the repository's owner, grant that key (copy its `.pub` over first):
 
 ```sh
 npx --yes @immediately-run/baton@0.1.3 owner -i ~/.ssh/baton_repo_owner grant baton --key worker.pub \
-  --hostname <the worker's hostname> --capabilities create-pr,llm-call,agent-venue,key:opencode-go,key:deepinfra,key:claude-subscription,key:zai --max-tier judgement
+  --hostname <the worker's hostname> --capabilities create-pr,llm-call,agent-venue,key:opencode-go,key:deepinfra,key:claude-subscription,key:zai
 ```
 
 The hostname must be what the machine reports (`hostname`, or `BATON_HOSTNAME`), or its heartbeats
@@ -306,6 +314,11 @@ leg requires says so in one line at startup (`missing-capability`) rather than i
 Once the `pr` course's legs exist (R3-1249), the worker runs (B-138: the runner's CLI is the
 pinned release, never the checkout's — `scripts/start-runner.sh` installs it and watches the
 runner; `baton run` alone starts it too):
+
+The `0.1.3` runner pin below is transitional: it sends a retired heartbeat field even with
+no tier flag. After the server upgrade, replace this pin and the launcher pin with a published
+release that includes B-322 as soon as it is available. Do not start new `0.1.3` runners after
+the compatibility window closes; their heartbeats will be refused.
 
 ```sh
 BATON_KEY_FILE=~/.ssh/baton_worker BATON_REPOSITORY=baton \

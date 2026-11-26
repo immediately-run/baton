@@ -27,9 +27,9 @@ const fakeIn = (line?: string) => {
 
 describe('plan: one request per command', () => {
   it('admin commands', () => {
-    expect(plan('admin', ['repo', 'add', 'immediately-run/ops', '--id', 'ops', '--owner-key', PUB, '--weight', '2', '--tiers', 'routine,critical', '--cut-over'], key)).toEqual({
+    expect(plan('admin', ['repo', 'add', 'immediately-run/ops', '--id', 'ops', '--owner-key', PUB, '--weight', '2', '--cut-over'], key)).toEqual({
       method: 'POST', path: '/v1/admin/repositories',
-      body: { id: 'ops', github: 'immediately-run/ops', default_branch: 'main', weight: 2, tiers: ['routine', 'critical'], cut_over: true, owner_keys: [PUB] },
+      body: { id: 'ops', github: 'immediately-run/ops', default_branch: 'main', weight: 2, cut_over: true, owner_keys: [PUB] },
     });
     // §12.2: retire is destructive — the plan carries the ask, and --yes answers it beforehand.
     expect(plan('admin', ['repo', 'retire', 'ops'], key)).toEqual({
@@ -129,8 +129,8 @@ describe('plan: one request per command', () => {
   });
 
   it('owner commands, the required bars in their groups', () => {
-    expect(plan('owner', ['grant', 'docs', '--key', PUB, '--capabilities', 'agent-venue', '--max-tier', 'routine'], key))
-      .toEqual({ method: 'POST', path: '/v1/owner/docs/grants', body: { public_key: PUB, capabilities: ['agent-venue'], max_tier: 'routine' } });
+    expect(plan('owner', ['grant', 'docs', '--key', PUB, '--capabilities', 'agent-venue'], key))
+      .toEqual({ method: 'POST', path: '/v1/owner/docs/grants', body: { public_key: PUB, capabilities: ['agent-venue'] } });
     expect(plan('owner', ['owners', 'docs', '--remove', 'SHA256:x'], key).body).toEqual({ fingerprint: 'SHA256:x', remove: true, confirm: true });
     expect(plan('owner', ['bar', 'docs', '--course', '*', '--tag', 'account:go_plus', '--applies', 'claim', '--starts-at', '2026-10-16T13:00:00Z', '--reason', 'go-quota', '--release-holders'], key).body)
       .toEqual({ course: '*', tag: 'account:go_plus', applies: 'claim', starts_at: Date.parse('2026-10-16T13:00:00Z'), release_holders: true, reason: 'go-quota' });

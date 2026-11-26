@@ -8,7 +8,7 @@
 // accept it. A rejected trace is a step the implementation took that the checked model forbids.
 //
 // What the model abstracts (model/README.md, "Not modelled": other repositories, other
-// courses, course changes, held histories, tiers and grants) the recorder already leaves out
+// courses, course changes, held histories and grants) the recorder already leaves out
 // of the projection. A step the model has no action for — a claim the harness wrote itself, a
 // course file that is not the model's, a required bar changed under a run — ends the part of
 // the trace the model can judge; the checked prefix and the reason are printed for every trace,
@@ -198,7 +198,6 @@ export function translate(trace) {
     slots: { 1: { phase: 'idle', obs: 0, voided: false, at: 0 }, 2: { phase: 'idle', obs: 0, voided: false, at: 0 } },
     ids: {},
     nextId: 1,
-    claimTier: {}, // each claim's ticket tier when it was made (R-BTN-35's re-tier)
   };
   const out = [];
   let prev = empty;
@@ -235,15 +234,15 @@ function translateStep(step, P, env, k) {
   };
   for (const [id, d] of Object.entries(Q.claims)) {
     const c = P.claims[id];
-    // R-BTN-35's other "taken away": a re-tier since the claim, or docs' interim status at one
+    // R-BTN-35's other "taken away": docs' interim status at one
     // that ends the item (claims.ts GIT_ENDS) — only when the post shows one (round 1, 1-A-3).
     // The status may have been posted earlier, by a reading not numbered after the claim.
     if (c?.status === 'active' && d.endReason === 'released:stale-board' && Q.tickets[d.ticket]?.present) {
       const after = Q.tickets[d.ticket];
-      if (GIT_ENDS.includes(after.status) || (id in env.claimTier && env.claimTier[id] !== after.tier)) {
-        return { end: `claim ${id} released stale on its ticket's re-tier or interim status (R-BTN-35; tiers are not modelled)` };
+      if (GIT_ENDS.includes(after.status)) {
+        return { end: `claim ${id} released stale on its ticket's interim status (R-BTN-35; interim statuses are not modelled)` };
       }
-      return { reject: `claim ${id} released stale with its ticket still posted, neither withdrawn nor re-tiered` };
+      return { reject: `claim ${id} released stale with its ticket still posted with no ending status` };
     }
     // docs' interim confirmation by the post's own list, naming this claim (round 1, 1-A-3)
     if (c && !c.confirmed && d.confirmed && origin === '/v1/sync/board' && step.body?.state
@@ -323,7 +322,6 @@ function translateStep(step, P, env, k) {
       if (!sameTags(d.runner)) return { end: `runner ${d.runner} claims with other tags than at its first claim (the model’s TAGS are constant)` };
       if (d.leg !== '' || d.finished.length || d.status !== 'active') return { reject: `claim ${id} created already advanced or ended` };
       env.ids[id] = env.nextId++;
-      env.claimTier[id] = Q.tickets[d.ticket]?.tier ?? null;
       acts.push(`heartbeat(${w})`, `claim(${w}, ${q(d.ticket)})`);
       continue;
     }

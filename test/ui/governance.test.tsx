@@ -1,6 +1,6 @@
 // governance.test.tsx — B-200 and B-198: the governance screens, read-only, from reads that
 // exist — `/policy` (the policy read and its log: guarantees met, the floors marked, the
-// versions newest first), `/settings` (the grants read's settings, and `tiers` and `weight`
+// versions newest first), `/settings` (the grants read's settings, and `weight`
 // from `repo.list`), `/bars` (owner bars in force and scheduled, required bars), `/consents`
 // (the dependency consents and the code repositories) — and `/goals`, which says goals are not
 // built. Each names its commands, draws no control, and draws a hostile reason as text.
@@ -16,7 +16,7 @@ const GRANTS = '/v1/owner/docs/grants';
 const T = Date.parse('2026-11-20T12:00:00Z');
 const DAY = 86_400_000;
 
-const repos = repoList([repoRow('docs', { tiers: ['routine', 'careful'], weight: 3 })]);
+const repos = repoList([repoRow('docs', { weight: 3 })]);
 const at = (id: string) => propsFor(id, repos, { repository: 'docs' });
 
 const grants = {
@@ -85,7 +85,7 @@ describe('the governance screens (B-200)', () => {
     expect(container.querySelectorAll('.guarantees li')).toHaveLength(3);
   });
 
-  it('/settings shows each owner setting with its meaning, and tiers and weight from repo.list', async () => {
+  it('/settings shows each owner setting with its meaning, and weight from repo.list', async () => {
     const { calls } = mockFetch({ [GRANTS]: grants });
     const { container } = renderWithShell(<SettingsScreen {...at('repository/settings')} />, { repos });
     await screen.findByRole('table', { name: 'Owner settings' });
@@ -100,7 +100,7 @@ describe('the governance screens (B-200)', () => {
     expect(byKey.code_repos[1]).toContain('"path": "example-org/app"');
     expect(byKey.a_setting_this_page_does_not_know.slice(1)).toEqual([HOSTILE, '—']);
     const kv = Object.fromEntries([...container.querySelectorAll('.kv-row')].map((r) => [r.querySelector('dt')?.textContent, r.querySelector('dd')?.textContent]));
-    expect([kv.tiers, kv.weight]).toEqual(['routinecareful', '3']);
+    expect(kv.weight).toBe('3');
     expect(cliLines(container)).toEqual([COMMANDS.settingsSet.line, COMMANDS.registrySet.line]);
     expect(within(container).getByRole('link', { name: 'Bars' }).getAttribute('href')).toBe('/repositories/docs/bars');
     // One read: no administrator read is needed for the registry's two fields.
