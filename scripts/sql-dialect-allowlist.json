@@ -1,6 +1,5 @@
 {
   "src/core/admin.ts | changes() | db51bfac85b0fb5d": 1,
-  "src/core/baton.ts | IS ? | 60ae3ca92855aa9f": 1,
   "src/core/claims.ts | COLLATE NOCASE | d8643aa263637034": 1,
   "src/core/claims.ts | INSERT OR | c5005b1a5847ce51": 1,
   "src/core/claims.ts | IS ? | 9e3e7f63c3f12162": 3,
