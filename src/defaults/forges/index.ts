@@ -1,7 +1,7 @@
 import { DEFAULT_FORGE, FORGE_SHAPES, hasPrs, PR_FORGES, type Forge, type PrForge } from '../../core/forges';
 import { isForgePath, isWebBase } from '../../core/links';
 import { githubFactReader } from './github-facts';
-import { immutableId, openRef, opened, prNumber, rest, sameRepository } from './rest';
+import { field, immutableId, openRef, opened, prNumber, prState, rest, sameRepository } from './rest';
 import { readRestFacts, type RestFactShape } from './rest-facts';
 import type { FactContext, ForgeClient, ForgeOptions, ForgeRegistration, ForgeRepo, OpenPr } from './types';
 
@@ -12,7 +12,7 @@ interface Adapter {
   comments: (path: string, n: number) => string;
   openBody: (pr: OpenPr) => object;
   url: string;
-  head: (raw: any) => ReturnType<typeof openRef>;
+  head: (raw: unknown) => ReturnType<typeof openRef>;
   openQuery: string;
   allQuery?: string;
   graphql?: (origin: string) => string;
@@ -54,7 +54,7 @@ function githubEvidence(url: URL): { repo: string; api: string } | null {
 }
 const pulls = (path: string) => `/repos/${path}/pulls`;
 const issues = (path: string, n: number) => `/repos/${path}/issues/${n}/comments`;
-const pullHead = (p: any, branch = p?.head?.ref) => ({ ...openRef(p?.number, branch, p?.head?.sha), sameRepository: sameRepository(p?.head?.repo?.id, p?.base?.repo?.id) });
+const pullHead = (p: unknown, branch = field(p, 'head', 'ref')) => ({ ...openRef(field(p, 'number'), branch, field(p, 'head', 'sha')), sameRepository: sameRepository(field(p, 'head', 'repo', 'id'), field(p, 'base', 'repo', 'id')) });
 const pullBody = ({ title, head, base, body }: OpenPr) => ({ title, head, base, body });
 const project = (path: string) => `/projects/${encodeURIComponent(path)}`;
 const mergeRequests = (path: string) => `${project(path)}/merge_requests`;
@@ -74,18 +74,18 @@ const ADAPTERS: Record<PrForge, Adapter> = {
     publicHost: 'gitlab.com', api: (origin) => `${origin}/api/v4`, prs: mergeRequests,
     comments: (path, n) => `${mergeRequests(path)}/${n}/notes`,
     openBody: ({ title, head, base, body }) => ({ title, source_branch: head, target_branch: base, description: body }),
-    url: 'web_url', head: (p) => ({ ...openRef(p?.iid, p?.source_branch, p?.sha), sameRepository: sameRepository(p?.source_project_id, p?.target_project_id) }), openQuery: 'state=opened',
+    url: 'web_url', head: (p) => ({ ...openRef(field(p, 'iid'), field(p, 'source_branch'), field(p, 'sha')), sameRepository: sameRepository(field(p, 'source_project_id'), field(p, 'target_project_id')) }), openQuery: 'state=opened',
     protectedRefusal: (s) => /not allowed to push code to protected branches/i.test(s),
     restFacts: {
-      state: (p) => p.state === 'merged' ? 'merged' : p.state === 'opened' ? 'open' : p.state === 'closed' ? 'closed' : null,
-      identity: (path) => project(path), ownerId: (p) => p.namespace?.id,
+      state: (p) => { const s = field(p, 'state'); return s === 'merged' ? 'merged' : s === 'opened' ? 'open' : s === 'closed' ? 'closed' : null; },
+      identity: (path) => project(path), ownerId: (p) => field(p, 'namespace', 'id'),
       commits: (path, n) => `${mergeRequests(path)}/${n}/commits`,
-      commit: (c) => ({ oid: c.id, date: c.committed_date, message: c.message, parent: c.parent_ids?.[0] }),
+      commit: (c) => ({ oid: field(c, 'id'), date: field(c, 'committed_date'), message: field(c, 'message'), parent: field(c, 'parent_ids', 0) }),
       checks: (path, oid) => `${project(path)}/repository/commits/${oid}/statuses`,
-      conclusion: (c) => status(c.status), user: (note) => note.system === true ? null : note.author,
-      author: (u) => u.username, reviewDate: (n) => n.created_at,
+      conclusion: (c) => status(field(c, 'status')), user: (note) => field(note, 'system') === true ? null : field(note, 'author'),
+      author: (u) => field(u, 'username'), reviewDate: (n) => field(n, 'created_at'),
       permission: (path, id) => `${project(path)}/members/all/${id}`,
-      canPush: (p, id) => p?.id === id && Number.isSafeInteger(p.access_level) && p.access_level >= 30,
+      canPush: (p, id) => { const level = field(p, 'access_level'); return field(p, 'id') === id && typeof level === 'number' && Number.isSafeInteger(level) && level >= 30; },
       scopeRefusal: (msg) => /insufficient_scope/i.test(msg),
       gitTrees: true,
     },
@@ -94,25 +94,25 @@ const ADAPTERS: Record<PrForge, Adapter> = {
     publicHost: 'gitea.com', api: (origin) => `${origin}/api/v1`, prs: pulls, comments: issues,
     openBody: pullBody, url: 'html_url',
     // `label` is the source branch; `ref` may become the synthetic PR ref after deletion.
-    head: (p) => ({ ...openRef(p?.number, p?.head?.label || p?.head?.ref, p?.head?.sha), sameRepository: sameRepository(p?.head?.repo_id, p?.base?.repo_id) }),
+    head: (p) => ({ ...openRef(field(p, 'number'), field(p, 'head', 'label') || field(p, 'head', 'ref'), field(p, 'head', 'sha')), sameRepository: sameRepository(field(p, 'head', 'repo_id'), field(p, 'base', 'repo_id')) }),
     openQuery: 'state=open', allQuery: 'state=all', auth: 'token', pageSizeKey: 'limit',
     protectedRefusal: (s) => /not allowed to push to protected branch/i.test(s),
     restFacts: {
       listQuery: 'state=all',
-      state: (p) => p.merged === true || p.merged_at ? 'merged' : p.state === 'open' || p.state === 'closed' ? p.state : null,
-      identity: (path) => `/repos/${path}`, ownerId: (p) => p.owner?.id,
+      state: (p) => { const s = field(p, 'state'); return field(p, 'merged') === true || field(p, 'merged_at') ? 'merged' : s === 'open' || s === 'closed' ? s : null; },
+      identity: (path) => `/repos/${path}`, ownerId: (p) => field(p, 'owner', 'id'),
       commits: (path, n) => `${pulls(path)}/${n}/commits`,
-      commit: (c) => ({ oid: c.sha, date: c.commit?.committer?.date, message: c.commit?.message, parent: c.parents?.[0]?.sha, tree: c.commit?.tree?.sha }),
+      commit: (c) => ({ oid: field(c, 'sha'), date: field(c, 'commit', 'committer', 'date'), message: field(c, 'commit', 'message'), parent: field(c, 'parents', 0, 'sha'), tree: field(c, 'commit', 'tree', 'sha') }),
       newestCommitFirst: true,
       treeOf: (path, oid) => `/repos/${path}/git/commits/${oid}`,
       checks: (path, oid) => `/repos/${path}/commits/${oid}/status`,
-      checkItems: (p) => p?.statuses ?? (p && (p.total_count === 0 || Object.keys(p).length === 0) ? [] : undefined),
-      conclusion: (c) => status(c.status),
-      user: (c) => c.user, author: (u) => u.login, reviewDate: (c) => c.submitted_at ?? c.created_at,
+      checkItems: (p) => field(p, 'statuses') ?? (p && (field(p, 'total_count') === 0 || Object.keys(p).length === 0) ? [] : undefined),
+      conclusion: (c) => status(field(c, 'status')),
+      user: (c) => field(c, 'user'), author: (u) => field(u, 'login'), reviewDate: (c) => field(c, 'submitted_at') ?? field(c, 'created_at'),
       reviews: (path, n) => `${pulls(path)}/${n}/reviews`,
       unpagedComments: true,
       permission: (path, _id, login) => `/repos/${path}/collaborators/${encodeURIComponent(login)}/permission`,
-      canPush: (p, id) => p?.user?.id === id && ['write', 'admin', 'owner'].includes(p.permission),
+      canPush: (p, id) => { const permission = field(p, 'permission'); return field(p, 'user', 'id') === id && typeof permission === 'string' && ['write', 'admin', 'owner'].includes(permission); },
       scopeRefusal: (msg) => /token.*scope|Only admins can query all permissions/i.test(msg),
     },
   },
@@ -192,7 +192,7 @@ export function forgeClient(repo: ForgeRepo, opts: ForgeOptions = {}, reader?: {
     async openPr(pr) {
       const url = cli
         ? cli(['pr', 'create', '--repo', repoFlag, '--head', pr.head, '--base', pr.base, '--title', pr.title, '--body', pr.body ?? '']).split('\n').at(-1)
-        : (await api.request(pulls, adapter.openBody(pr)))?.[adapter.url];
+        : field(await api.request(pulls, adapter.openBody(pr)), adapter.url);
       return opened(repo, url);
     },
     async listOpenPrs() {
@@ -202,16 +202,18 @@ export function forgeClient(repo: ForgeRepo, opts: ForgeOptions = {}, reader?: {
     async listPrs() {
       if (cli) return listCli(cli, repoFlag, 'all');
       const query = adapter.allQuery ?? (adapter.cli ? 'state=all' : '');
-      return (await all(`${pulls}${query ? `?${query}` : ''}`)).map((p) => ({ ...adapter.head(p), state: adapter.restFacts?.state(p) ?? (p.merged_at ? 'merged' : p.state) }));
+      return (await all(`${pulls}${query ? `?${query}` : ''}`)).map((p) => ({ ...adapter.head(p), state: adapter.restFacts?.state(p) ?? (field(p, 'merged_at') ? 'merged' : prState(field(p, 'state'))) }));
     },
     async comment(number, body) {
       if (!prNumber(number)) throw new Error('invalid PR number');
       const prUrl = `${repo.webBase}${FORGE_SHAPES[repo.forge].pr}${number}`;
       if (cli) return commentUrl(prUrl, cli(['pr', 'comment', prUrl, '--body', body]));
       const response = await api.request(adapter.comments(path, number), { body });
-      if (typeof response?.html_url === 'string') return commentUrl(prUrl, response.html_url);
-      if (!immutableId(response?.id)) throw new Error(`${repo.forge} answered no comment id`);
-      return `${prUrl}#${adapter.restFacts?.reviews ? 'issuecomment-' : 'note_'}${response.id}`;
+      const html = field(response, 'html_url');
+      if (typeof html === 'string') return commentUrl(prUrl, html);
+      const id = field(response, 'id');
+      if (!immutableId(id)) throw new Error(`${repo.forge} answered no comment id`);
+      return `${prUrl}#${adapter.restFacts?.reviews ? 'issuecomment-' : 'note_'}${id}`;
     },
     async facts(read) {
       if (!reader) throw new Error('no fact context');

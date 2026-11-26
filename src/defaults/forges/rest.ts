@@ -7,6 +7,17 @@ export const sha = (v: unknown): v is string => typeof v === 'string' && /^[a-f0
 export const prNumber = (v: unknown): v is number => typeof v === 'number' && Number.isInteger(v) && v > 0 && v <= 999_999_999;
 export const immutableId = (id: unknown): id is number => typeof id === 'number' && Number.isSafeInteger(id) && id > 0;
 export const sameRepository = (head: unknown, base: unknown): boolean => immutableId(head) && head === base;
+/** A forge's JSON answer is untrusted input: the value at `keys` under `v`, or undefined where a
+ *  step along the way is not an object. Callers narrow what it answers before using it. */
+export function field(v: unknown, ...keys: (string | number)[]): unknown {
+  let at = v;
+  for (const key of keys) {
+    if (typeof at !== 'object' || at === null) return undefined;
+    at = (at as Record<string | number, unknown>)[key];
+  }
+  return at;
+}
+export const prState = (v: unknown): OpenPrRef['state'] => v === 'open' || v === 'merged' || v === 'closed' ? v : undefined;
 export function openRef(number: unknown, branch: unknown, oid: unknown): OpenPrRef {
   if (!prNumber(number) || typeof branch !== 'string' || !branch || branch.length > 1024 || !sha(oid)) throw new Error('malformed PR head');
   return { number, headRefName: branch, headRefOid: oid };
@@ -33,9 +44,9 @@ export function rest(api: string, name: string, token: () => string, fetchImpl: 
     if (!res.ok) throw new Error(`${name} answered ${res.status} at ${path.split('?')[0]}`);
     return res;
   };
-  const request = async (path: string, payload?: object): Promise<any> => (await checked(path, payload)).json();
-  const list = async (path: string, sizeKey = 'per_page', unpack: (body: any) => unknown = (body) => body): Promise<any[]> => {
-    const out: any[] = [];
+  const request = async (path: string, payload?: object): Promise<unknown> => (await checked(path, payload)).json();
+  const list = async (path: string, sizeKey = 'per_page', unpack: (body: unknown) => unknown = (body) => body): Promise<unknown[]> => {
+    const out: unknown[] = [];
     for (let page = 1; page <= MAX_PAGES; page++) {
       const res = await checked(`${path}${path.includes('?') ? '&' : '?'}${sizeKey}=${PAGE_SIZE}&page=${page}`);
       const got = unpack(await res.json());
@@ -50,7 +61,7 @@ export function rest(api: string, name: string, token: () => string, fetchImpl: 
     }
     throw new Error(`${name} exceeded ${MAX_PAGES} pages; refusing a partial reading`);
   };
-  const unpaged = async (path: string): Promise<any[]> => {
+  const unpaged = async (path: string): Promise<unknown[]> => {
     const got: unknown = await request(path);
     if (!Array.isArray(got) || got.length > MAX_PAGES * PAGE_SIZE) throw new Error(`${name} answered an oversized or malformed list`);
     return got;

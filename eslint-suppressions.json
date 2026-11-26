@@ -54,21 +54,6 @@
       "count": 1
     }
   },
-  "src/defaults/forges/index.ts": {
-    "@typescript-eslint/no-explicit-any": {
-      "count": 2
-    }
-  },
-  "src/defaults/forges/rest-facts.ts": {
-    "@typescript-eslint/no-explicit-any": {
-      "count": 13
-    }
-  },
-  "src/defaults/forges/rest.ts": {
-    "@typescript-eslint/no-explicit-any": {
-      "count": 5
-    }
-  },
   "src/local/testCourse.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 2

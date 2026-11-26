@@ -1,24 +1,25 @@
 import type { PrFact } from '../course-pr';
 import { markerOf, type BranchCommit } from '../pr-markers';
-import { immutableId, opened, sha, type rest } from './rest';
+import { field, immutableId, opened, sha, type rest } from './rest';
 import type { FactContext, FactRead, ForgeRepo, OpenPrRef } from './types';
 
+/** How a REST forge's answers read as PR facts. Each reader takes the forge's untrusted JSON. */
 export interface RestFactShape {
   listQuery?: string;
-  state: (p: any) => PrFact['state'] | null;
+  state: (p: unknown) => PrFact['state'] | null;
   identity: (path: string) => string;
-  ownerId: (p: any) => unknown;
+  ownerId: (p: unknown) => unknown;
   commits: (path: string, n: number) => string;
-  commit: (c: any) => { oid: unknown; date: string; message: unknown; parent: unknown; tree?: unknown };
+  commit: (c: unknown) => { oid: unknown; date: unknown; message: unknown; parent: unknown; tree?: unknown };
   checks: (path: string, oid: string) => string;
-  checkItems?: (p: any) => unknown;
-  conclusion: (c: any) => string | null;
+  checkItems?: (p: unknown) => unknown;
+  conclusion: (c: unknown) => string | null;
   reviews?: (path: string, n: number) => string;
-  user: (c: any) => any;
-  author: (u: any) => unknown;
-  reviewDate: (c: any) => string;
+  user: (c: unknown) => unknown;
+  author: (u: unknown) => unknown;
+  reviewDate: (c: unknown) => unknown;
   permission: (path: string, id: number, login: string) => string;
-  canPush: (p: any, id: number) => boolean;
+  canPush: (p: unknown, id: number) => boolean;
   scopeRefusal: (message: string) => boolean;
   gitTrees?: boolean;
   newestCommitFirst?: boolean;
@@ -31,8 +32,11 @@ interface FactAdapter {
   prs: (path: string) => string;
   comments: (path: string, n: number) => string;
   url: string;
-  head: (pr: any) => OpenPrRef;
+  head: (pr: unknown) => OpenPrRef;
 }
+
+/** `Date.parse` reads its argument as a string; this says so for an untrusted value. */
+const time = (v: unknown): number => Date.parse(String(v));
 
 export async function readRestFacts(repo: ForgeRepo, read: FactRead, ctx: FactContext, adapter: FactAdapter,
   api: ReturnType<typeof rest>, pageSizeKey: string | undefined, canPush: (id: unknown, login: string) => Promise<boolean>): Promise<PrFact[]> {
@@ -41,7 +45,7 @@ export async function readRestFacts(repo: ForgeRepo, read: FactRead, ctx: FactCo
   const path = repo.path;
   if (read.entry) {
     const ids = await api.request(shape.identity(path));
-    if (String(ids?.id) !== read.entry.repo_id || String(shape.ownerId(ids)) !== read.entry.owner_id) {
+    if (String(field(ids, 'id')) !== read.entry.repo_id || String(shape.ownerId(ids)) !== read.entry.owner_id) {
       throw new Error(`${path}: forge ids differ from code_repos (R-BTN-138)`);
     }
   }
@@ -52,12 +56,12 @@ export async function readRestFacts(repo: ForgeRepo, read: FactRead, ctx: FactCo
     const { number, headRefName: head, headRefOid: oid, sameRepository } = adapter.head(p);
     const state = shape.state(p);
     if (!state) throw new Error(`${path} #${number}: invalid PR state`);
-    const fact: PrFact = { number, head, state, repository: path, sameRepository, headOid: oid, url: opened(repo, p[adapter.url]), pushedAt: 0, reviews: [], checks: [] };
+    const fact: PrFact = { number, head, state, repository: path, sameRepository, headOid: oid, url: opened(repo, field(p, adapter.url)), pushedAt: 0, reviews: [], checks: [] };
     if (ctx.owns(fact)) {
       const raw = (await list(shape.commits(path, number))).map(shape.commit);
       const trees = new Map(raw.map((c) => [c.oid, c.tree]));
       const commits = raw.map((c): BranchCommit => {
-        const at = Date.parse(c.date);
+        const at = time(c.date);
         if (!sha(c.oid) || !Number.isFinite(at)) throw new Error(`${path} #${number}: invalid commit facts`);
         return { sha: c.oid, at, parent: sha(c.parent) ? c.parent : null, empty: sha(c.tree) && c.tree === trees.get(c.parent), message: typeof c.message === 'string' ? c.message.slice(0, 16_384) : '' };
       });
@@ -75,23 +79,27 @@ export async function readRestFacts(repo: ForgeRepo, read: FactRead, ctx: FactCo
         }
         fact.commits = commits;
       }
-      const add = async (c: any, user: any, state: PrFact['reviews'][number]['state']) => {
+      const add = async (c: unknown, user: unknown, state: PrFact['reviews'][number]['state']) => {
         const author = shape.author(user ?? {});
-        const submittedAt = Date.parse(shape.reviewDate(c));
+        const submittedAt = time(shape.reviewDate(c));
         if (typeof author !== 'string' || !author || author.length > 128 || !Number.isFinite(submittedAt)) return;
+        const userId = field(user, 'id');
+        const updatedAt = field(c, 'updated_at');
         // An edit with no attributable writer cannot be a verdict (R-BTN-139).
-        if (c.updated_at != null && c.updated_at !== (c.created_at ?? c.submitted_at)
-            && (!immutableId(user?.id) || c.updated_by?.id !== user.id)) return;
-        if (!pushers.has(String(user?.id)) && !await canPush(user?.id, author)) return;
-        fact.reviews.push({ author, state, submittedAt, body: typeof c.body === 'string' ? c.body.slice(0, 16_384) : '' });
+        if (updatedAt != null && updatedAt !== (field(c, 'created_at') ?? field(c, 'submitted_at'))
+            && (!immutableId(userId) || field(c, 'updated_by', 'id') !== userId)) return;
+        if (!pushers.has(String(userId)) && !await canPush(userId, author)) return;
+        const body = field(c, 'body');
+        fact.reviews.push({ author, state, submittedAt, body: typeof body === 'string' ? body.slice(0, 16_384) : '' });
       };
       const comments = adapter.comments(path, number);
       for (const c of await (shape.unpagedComments ? api.unpaged(comments) : list(comments))) await add(c, shape.user(c), 'COMMENTED');
       if (shape.reviews) {
         for (const c of await list(shape.reviews(path, number))) {
-          if (c.dismissed || c.stale) continue;
-          if (c.state === 'APPROVED' || c.state === 'REQUEST_CHANGES' || c.state === 'COMMENT') {
-            await add(c, shape.user(c), c.state === 'REQUEST_CHANGES' ? 'CHANGES_REQUESTED' : c.state === 'COMMENT' ? 'COMMENTED' : 'APPROVED');
+          if (field(c, 'dismissed') || field(c, 'stale')) continue;
+          const verdict = field(c, 'state');
+          if (verdict === 'APPROVED' || verdict === 'REQUEST_CHANGES' || verdict === 'COMMENT') {
+            await add(c, shape.user(c), verdict === 'REQUEST_CHANGES' ? 'CHANGES_REQUESTED' : verdict === 'COMMENT' ? 'COMMENTED' : 'APPROVED');
           }
         }
       }
