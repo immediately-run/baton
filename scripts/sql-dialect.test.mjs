@@ -82,8 +82,20 @@ it('caps SQL debt at the checked-in allowlist and requires unused entries to be 
   expect(excess(allowed, counts), 'remove or lower unused allowances').toEqual([]);
 
   const baseline = baseAllowlist(root, process.env);
-  if (baseline !== undefined) expect(excess(allowed, baseline), 'the allowlist may only shrink').toEqual([]);
+  // Per statement, not per file: code moved to another file (B-272's split of baton.ts) carries
+  // its allowance with it, but no statement's total may grow.
+  if (baseline !== undefined) expect(excess(byStatement(allowed), byStatement(baseline)), 'the allowlist may only shrink').toEqual([]);
 });
+
+/** `file | kind | hash` counts summed over files into `kind | hash`. */
+function byStatement(counts) {
+  const totals = {};
+  for (const [key, count] of Object.entries(counts)) {
+    const statement = key.slice(key.indexOf(' | ') + 3);
+    totals[statement] = (totals[statement] ?? 0) + count;
+  }
+  return totals;
+}
 
 it('requires the exact PR base even in a depth-one checkout', () => {
   const dir = mkdtempSync(resolve(tmpdir(), 'sql-dialect-base-'));

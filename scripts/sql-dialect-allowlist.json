@@ -1,6 +1,5 @@
 {
   "src/core/admin.ts | changes() | db51bfac85b0fb5d": 1,
-  "src/core/baton.ts | IS ? | 60ae3ca92855aa9f": 1,
   "src/core/claims.ts | COLLATE NOCASE | d8643aa263637034": 1,
   "src/core/claims.ts | INSERT OR | c5005b1a5847ce51": 1,
   "src/core/claims.ts | IS ? | 9e3e7f63c3f12162": 3,
@@ -18,6 +17,7 @@
   "src/core/stations.ts | scalar MAX | 26a2bb6af4df584b": 1,
   "src/core/stats.ts | scalar MAX | c339dda5e2f340a0": 1,
   "src/core/stats.ts | scalar MAX | d8f1dc5de7661bb1": 1,
+  "src/core/sync.ts | IS ? | 60ae3ca92855aa9f": 1,
   "src/local/store.ts | PRAGMA | 467abdee67b59781": 1,
   "src/local/store.ts | PRAGMA | 54d7e3bdadce5f6e": 1,
   "src/local/store.ts | PRAGMA | b182c8c25f93aac7": 1,
