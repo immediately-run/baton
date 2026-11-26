@@ -1,5 +1,6 @@
 // Validate successful runner replies before they can renew a lease or move a claim (S-BTN-26, S-BTN-41).
 import type { AdvanceAnswer, BeatAnswer, ClaimAnswer } from '../shared/runner-wire';
+import { GIT_SHA, isSourceBranch } from '../core/validate';
 
 type Check = (v: unknown) => boolean;
 export const record = (v: unknown): v is Record<string, unknown> => v != null && typeof v === 'object' && !Array.isArray(v);
@@ -21,6 +22,7 @@ const claim = shape({
   claim_id: id, ticket_id: nonempty, nonce: nonempty, snapshot_sha: nonempty, station: nonempty,
   legs: array(nonempty), next: optional(next),
   course_id: optional(nullable(text)), course_version: optional(nullable(number)),
+  course_source: optional(shape({ branch: isSourceBranch, sha: (v) => typeof v === 'string' && GIT_SHA.test(v) })),
   path: optional(nullable(text)), version: optional(text), default_branch: optional(text), handoff_url: optional(text),
   leg_state: optional((v) => v === 'forge' || v === 'branch'), scope: optional(strings),
   ticket_source: optional(nullable(shape({ kind: text, versions: nullable(text) }))),

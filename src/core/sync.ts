@@ -8,7 +8,7 @@ import { checkConfirmations } from './validate';
 import { checkCrossBoardCycle, checkCrossRepository } from './dependencies';
 import { qualify, type Repository } from './registry';
 import { DEFAULT_FORGE, FORGE_SHAPES } from './forges';
-import { sha256HexSync } from './policy';
+import { canonicalJson, sha256HexSync } from './policy';
 import { logEvent } from './db';
 import { DispatchTransportError } from './dispatch';
 import { adjustCounts } from './capacity';
@@ -87,6 +87,7 @@ async function boardPost(core: BoardPostCore, repo: Repository, p: BoardPayload,
     // are a refresh against the current head, its number being newer, so confirmations and
     // staleness do not stall for the hold's 24 hours. Its interim confirmations likewise.
     core.store.transaction(() => {
+      requireBranchRegistryInForce(core, r, p);
       core.observations.accept(r, n);
       core.syncWants.posted(r, n, p.sha);
       const seen = normative ? refreshStations(core, r, p, n, at, null, true) : new Map<string, Seen>();
@@ -177,9 +178,15 @@ async function boardPost(core: BoardPostCore, repo: Repository, p: BoardPayload,
       // rows with this older reading's and drop every ticket it added.
       if (!core.observations.newest(r, n)) throw new BatonError('stale-observation', `a newer reading than ${n} was accepted while this post was judged; take a new number and retry (R-BTN-62)`);
       if (headOf(core, r) !== head) throw new BatonError('head-moved', `the head moved to ${headOf(core, r) ?? 'unset'} while this post was judged; re-read it and retry`);
+      requireBranchRegistryInForce(core, r, p);
       core.observations.accept(r, n);
       core.syncWants.posted(r, n, p.sha);
-      if (readAtHead) rememberSource(core, r, p);
+      if (readAtHead) {
+        rememberSource(core, r, p);
+        if (p.course_sources) core.store.exec(`UPDATE board_snapshots SET course_sources_json = ?
+          WHERE repository_id = ? AND sha = ? AND course_sources_json IS NOT ?`,
+          JSON.stringify(p.course_sources), r, p.sha, JSON.stringify(p.course_sources));
+      }
       // B-127: the record rides a refresh too (the latest post's word stands); the head has not
       // moved, so no `unsigned-control` event is raised for it again.
       applyControl(core, r, p, at, head);
@@ -229,6 +236,9 @@ async function boardPost(core: BoardPostCore, repo: Repository, p: BoardPayload,
     // The course registry first (R-BTN-48, R-BTN-69): every ticket must name a course in
     // force, and a refused file with none to keep refuses the whole post.
     const refused = applyRegistry(core, r, p, rows.map(({ row }) => row.course_id), at);
+    if (refused.some((id) => Object.hasOwn(p.course_sources ?? {}, id))) {
+      throw new BatonError('conflict', 'a branch course registry was refused; the snapshot must use one exact source');
+    }
     checkPrerequisiteLegs(core, r, p);
     if (refused.length) changed.courses_refused = refused;
     const legsBefore = queuedLegs(core, r);
@@ -271,7 +281,10 @@ async function boardPost(core: BoardPostCore, repo: Repository, p: BoardPayload,
     // where each ticket is queued — rewrite the changed tickets' blocks in this transaction.
     const dropped = applyBlocks(core, r, stations, upserted, legsBefore, changed.deleted > 0, !!p.registry);
     if (dropped.length) changed.dropped = dropped.slice(0, 100);
-    core.store.exec('INSERT INTO board_snapshots (repository_id, sha, parent_sha, received_at, ticket_count) VALUES (?, ?, ?, ?, ?) ON CONFLICT (repository_id, sha) DO NOTHING', r, p.sha, p.parent_sha, at, ticketCount);
+    core.store.exec(`INSERT INTO board_snapshots (repository_id, sha, parent_sha, received_at, ticket_count, course_sources_json) VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT (repository_id, sha) DO UPDATE SET course_sources_json = excluded.course_sources_json
+      WHERE board_snapshots.course_sources_json IS NOT excluded.course_sources_json`,
+      r, p.sha, p.parent_sha, at, ticketCount, p.course_sources ? JSON.stringify(p.course_sources) : null);
     core.store.exec('INSERT INTO board_head (repository_id, sha) VALUES (?, ?) ON CONFLICT (repository_id) DO UPDATE SET sha = excluded.sha', r, p.sha);
     // B-127: the post's signed-control record stands for the repository (the latest post's
     // word on what counts), and a post that moved the head onto unsigned control inputs —
@@ -520,6 +533,21 @@ function refuseCurrentUnderApprovalFloor(core: Pick<BatonCore, 'policies'>, repo
   if (!floored.length) return;
   throw new BatonError('invalid-params',
     `this repository's policy floors include the tickets-approved guarantee, which is defined over a ticket file's approval (R-BTN-184) — a custom ticket source with versions: "current" cannot post it (B-183)`);
+}
+
+/** Refreshes can apply placements but cannot change the registry that interprets them. */
+function requireBranchRegistryInForce(core: BoardPostCore, r: string, p: BoardPayload): void {
+  for (const id of Object.keys(p.course_sources ?? {})) {
+    const entry = p.registry?.find((e) => e.id === id);
+    const current = core.sql<{ course_json: string; facts: string; version: number; skill: string; step_kinds: string; min_runner_version: number; branch_pattern: string | null; previous_branch_pattern: string | null }>(
+      `SELECT course_json, facts, version, skill, step_kinds, min_runner_version, branch_pattern, previous_branch_pattern FROM courses WHERE repository_id = ? AND id = ?`, r, id)[0];
+    if (!entry || !current || current.version !== entry.version || current.skill !== entry.skill ||
+        current.min_runner_version !== entry.min_runner_version || current.branch_pattern !== entry.branch_pattern ||
+        current.previous_branch_pattern !== entry.previous_branch_pattern || current.step_kinds !== JSON.stringify(entry.step_kinds) ||
+        canonicalJson(JSON.parse(current.course_json)) !== canonicalJson(entry.course) || current.facts !== JSON.stringify(entry.facts)) {
+      throw new BatonError('conflict', `course ${id}'s branch registry differs from the one in force — advance the home commit before syncing`);
+    }
+  }
 }
 
 /** B-183: the last accepted post's ticket-source declaration, kept on the head for the claim

@@ -634,6 +634,7 @@ export class Runner {
       try {
         sha = readHead(this.o.home);
         course = await loadCourse(this.o.home, sha, courseOf(this.o.home, sha, this.o.courses[0].course));
+        if (course.warning) this.log(course.warning);
       } catch (e) {
         wait(order.ticket_id, `the home's course would not load (${msg(e)})`);
         continue;

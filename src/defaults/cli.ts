@@ -36,8 +36,9 @@ import { DEFAULT_FORGE, FORGE_SHAPES, PR_URL as PR_URL_RE } from '../core/forges
 import { evidenceReader, prRepo, registration, witnessed } from './forges';
 import { fromRemote } from './forges/targets';
 import type { ForgeRepo } from './forges/types';
-import { GIT_SHA } from '../core/validate';
-import { parseSource, printSource } from './course-source';
+import { GIT_SHA, isSourceBranch } from '../core/validate';
+import type { BoardPayload } from '../core/board';
+import { parseSource, printSource, unpinnedWarning } from './course-source';
 import { courseFiles, coursePath, dropCourseTree, fetchCourse, isOverride, writeCourseTree, type CourseFile } from './course-tree';
 import { stampMarkdownVersions } from './ticket-versions';
 import { closeTicket, closesByTicket, closesOfCommits, exec, machineOf, setMachineKeys, stationsTickets, ticketsBranch, CLOSE_TIMEOUT_MS, RUN_TESTS_TIMEOUT_MS } from './ticket-state';
@@ -374,6 +375,7 @@ async function readBoard(root: string, at: string, batonJson: BatonJson, args: S
   // with no station function fails the sync — nothing is posted).
   const homeEntries = batonJson.courses ?? [{ id: batonJson.default_course ?? DEFAULT_COURSE, version: 1 }];
   const sources = new Map<string, Awaited<ReturnType<typeof resolveSource>>>();
+  const courseSources: NonNullable<BoardPayload['course_sources']> = Object.create(null);
   const courses: CourseEntry[] = [];
   for (const c of homeEntries) {
     if (c.source === undefined) { courses.push(c); continue; }
@@ -384,7 +386,8 @@ async function readBoard(root: string, at: string, batonJson: BatonJson, args: S
       if (run && runs.has(run)) throw new Error(`${coursePath(c.id)}/${f.path}: multiple run overrides for ${run}`);
       if (run) runs.add(run);
     }
-    const source = await resolveSource(c.id, c.source, args.sourceCache!);
+    const source = await resolveSource(c.id, c.source, args.sourceCache!, undefined, log);
+    if (source.resolution) courseSources[c.id] = source.resolution;
     sources.set(c.id, source);
     courses.push({ ...source.entry, ...c });
   }
@@ -601,6 +604,7 @@ async function readBoard(root: string, at: string, batonJson: BatonJson, args: S
       // their raw markers may be promoted to a std:git.output attestation here.
       registry, tickets: result.tickets.map((t) => sourceKind === 'markdown' && t.depends_at ? { ...t, depends_on: [] } : t),
       closed: result.closed, stations, markers, course_data: courseData, ...controlField,
+      ...(Object.keys(courseSources).length ? { course_sources: courseSources } : {}),
       ...(attestations.length ? { attestations } : {}),
     },
     outputEvidence,
@@ -622,7 +626,7 @@ const sourceFileOfLegacyStation = () => source(`legacy/${LEGACY_CREATE_PR}`);
 export function builtInSource(id: string, source: string): BuiltIn | undefined {
   const src = parseSource(source);
   const self = cliSelf();
-  if (!self || !sameRepo(src, self) || src.ref.toLowerCase() !== self.sha) return;
+  if (!src.pinned || !self || !sameRepo(src, self) || src.ref !== self.sha) return;
   const b = builtIn(src.course.replace(/^standard-/, ''));
   return b?.id === id ? b : undefined;
 }
@@ -636,18 +640,26 @@ function packagedSource(dir: string, prefix = ''): CourseFile[] {
   });
 }
 
-export async function resolveSource(id: string, source: string, cache: string): Promise<{
+/** Where a branch source's warning goes when the caller names no log: stderr, never silence. */
+const warnOnStderr = (line: string): void => { process.stderr.write(`${line}\n`); };
+
+/** A course from its source (R-BTN-134). A branch source (B-315) is read at `resolved`, or at the
+ * branch's head, with no trust check: `warn` says so each time, naming the commit read. */
+export async function resolveSource(id: string, source: string, cache: string, resolved?: string, warn: (line: string) => void = warnOnStderr): Promise<{
   graph: string; entry: Partial<CourseEntry> & { facts?: string[] }; standard?: BuiltIn; files?: CourseFile[]; legacy?: true;
+  resolution?: { branch: string; sha: string };
 }> {
   const pin = parseSource(source);
   const standard = builtInSource(id, source);
   if (standard && pin.course === id) return { graph: courseFileText(standard), entry: {}, standard };
   try {
+    const fetched = standard ? null : await fetchCourse(pin, cache, resolved);
+    if (!pin.pinned && fetched) warn(unpinnedWarning(id, pin, fetched.sha));
     const files = standard
       ? fromSource()
         ? courseFiles(packageRoot(), pin.ref, pin.course)
         : packagedSource(prebuilt('sources', pin.course))
-      : await fetchCourse(pin, cache);
+      : fetched!.files;
     const text = (path: string): string | undefined => files.find((f) => f.path === path && f.regular)?.read().toString('utf8');
     const graph = text('course.json');
     if (graph === undefined) throw new Error(`${coursePath(parseSource(source).course)}/course.json is missing`);
@@ -659,9 +671,11 @@ export async function resolveSource(id: string, source: string, cache: string): 
       files.push({ path: 'sync.mjs', regular: true, read: () => readFileSync(file) });
       return { graph, entry: { facts: ['prs'] }, files, legacy: true };
     }
-    return { graph, entry: JSON.parse(text('entry.json') ?? '{}'), files };
+    return { graph, entry: JSON.parse(text('entry.json') ?? '{}'), files,
+      ...(!pin.pinned && fetched ? { resolution: { branch: pin.ref, sha: fetched.sha } } : {}) };
   } catch (e) {
-    throw new CourseSourceUnavailable(`cannot load ${source}; CLI commit ${cliSelf()?.sha ?? '(unknown)'}: ${(e as Error).message}`);
+    const detail = pin.pinned ? `cannot load ${source}; CLI commit ${cliSelf()?.sha ?? '(unknown)'}` : `cannot load course source branch ${pin.ref} (${source})`;
+    throw new CourseSourceUnavailable(`${detail}: ${(e as Error).message}`);
   }
 }
 
@@ -1913,6 +1927,7 @@ function cliPin(): string {
 export async function initMain(argv: string[], io: { root?: string; log?: (l: string) => void } = {}): Promise<number> {
   const log = io.log ?? ((l: string) => process.stdout.write(`${l}\n`));
   let named: string | null = null;
+  let sourceBranch: string | null = null;
   let eject: 'tickets' | 'stations' | null = null;
   let pin: string | null = null;
   let force = false;
@@ -1931,6 +1946,7 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
       return v;
     };
     if (a === '--course') named = value();
+    else if (a === '--source-branch') sourceBranch = value();
     else if (a === '--pin') pin = value();
     else if (a === '--force') force = true;
     else if (a === '--override') overrides.push(value());
@@ -1989,6 +2005,10 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
   const own = cliSelf();
   const pinned = pin ? parsePin(pin) : null;
   const self = own ?? pinned;
+  if (sourceBranch !== null) {
+    if (!isSourceBranch(sourceBranch)) throw new Error('--source-branch: expected a valid branch name, not a commit');
+    if (!named || !self || ownCourse || prune || eject) throw new Error('--source-branch requires a sourced --course and cannot be combined with --own, --prune or --eject');
+  }
   const sourceOf = (id: string): string | null => (self ? printSource({ provider: DEFAULT_FORGE, namespace: self.namespace, repository: self.repository, ref: self.sha, course: `standard-${id}` }) : null);
   const kept: string[] = [];
   /** Write `rel` when it is missing, or when `rewrite` (Baton's file, and its course is being
@@ -2021,7 +2041,7 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
     if (!c.source || !self) return false;
     const src = parseSource(c.source);
     // An entry whose source names another course than its id is the sync's to refuse, not init's to move.
-    return sameRepo(src, self) && src.ref !== self.sha && [c.id, `standard-${c.id}`].includes(src.course) && builtIn(c.id) != null;
+    return src.pinned && sameRepo(src, self) && src.ref !== self.sha && [c.id, `standard-${c.id}`].includes(src.course) && builtIn(c.id) != null;
   };
   const moveSource = (c: CourseEntry): CourseEntry => {
     const source = sourceOf(c.id)!;
@@ -2059,7 +2079,9 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
   for (const leg of [...overrides, ...instructions]) {
     if (!runnerLegs(b).includes(leg)) throw new Error(`${overrides.includes(leg) ? '--override' : '--instructions'} ${leg}: ${b.id} has no such leg — its legs are ${runnerLegs(b).join(', ')}`);
   }
-  const entry = { ...courseEntry(b), ...(!ownCourse && sourceOf(b.id) ? { source: sourceOf(b.id)! } : {}) };
+  const pinSource = sourceOf(b.id);
+  const selected = pinSource && sourceBranch !== null ? printSource({ ...parseSource(pinSource), ref: sourceBranch }) : pinSource;
+  const entry = { ...courseEntry(b), ...(!ownCourse && selected ? { source: selected } : {}) };
   let settings: BatonJson;
   let changed: string | null = null;
   let commandMoved = false;
@@ -2069,8 +2091,10 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
     // `--force` this course's own entry is replaced — never the file, which holds the others.
     const courses = existing.courses ?? [{ id: existing.default_course ?? DEFAULT_COURSE, version: 1 }];
     const listed = courses.some((c) => c.id === b.id);
+    const followsBranch = sourceBranch !== null && courses.some((c) => c.id === b.id && c.source !== selected);
     const next = courses.map((c) => {
       if (c.id === b.id && force) return entry;
+      if (c.id === b.id && followsBranch) return { ...c, source: selected! };
       if (moves(c)) {
         moved.push(c.id);
         return moveSource(c);
@@ -2087,9 +2111,9 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
     const now = agentCommand ?? (agentNamed || was === 'echo' ? agent.agentCommand : null);
     if (now != null && now !== was) settings.agent_command = now;
     commandMoved = now != null && now !== was;
-    if (!listed || force || moved.length || commandMoved) {
+    if (!listed || force || followsBranch || moved.length || commandMoved) {
       changed = [
-        !listed || force || moved.length ? `baton: .baton/baton.json lists course ${b.id}${listed ? (force ? ' afresh' : '') : ' now'}${moved.length ? `; ${moved.join(', ')} now from ${self!.sha.slice(0, 10)}` : ''}` : null,
+        !listed || force || followsBranch || moved.length ? `baton: .baton/baton.json lists course ${b.id}${listed ? (force ? ' afresh' : '') : ' now'}${moved.length ? `; ${moved.join(', ')} now from ${self!.sha.slice(0, 10)}` : ''}` : null,
         commandMoved ? `baton: agent_command ${was === 'echo' ? '"echo" — the no-op stub — ' : ''}is now ${agentCommand != null ? 'the command --agent-command named' : `the ${agent} command`}` : null,
       ].filter(Boolean).join('; ');
     } else kept.push('.baton/baton.json');
@@ -2105,6 +2129,10 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
   }
   refusePin(settings.courses ?? []);
   if (changed) log(changed);
+  // B-315 (R-BTN-134): every branch source this home names, said at every init.
+  for (const c of settings.courses ?? []) {
+    if (c.source && !parseSource(c.source).pinned) log(unpinnedWarning(c.id, parseSource(c.source)));
+  }
   if (!kept.includes('.baton/baton.json')) {
     mkdirSync(dirname(settingsPath), { recursive: true });
     writeFileSync(settingsPath, `${JSON.stringify(settings, null, 2)}\n`);
@@ -2165,7 +2193,7 @@ async function pruneCourses(root: string, courses: CourseEntry[], log: (line: st
   try {
     for (const entry of courses) {
       if (entry.source === undefined) continue;
-      const src = await resolveSource(entry.id, entry.source, scratch);
+      const src = await resolveSource(entry.id, entry.source, scratch, undefined, log);
       const dir = join(root, coursePath(entry.id));
       // Do not follow links when deciding what to delete.
       if (!['.baton', '.baton/courses', coursePath(entry.id)].every((p) =>
@@ -2210,7 +2238,7 @@ export async function showCourseMain(argv: string[], root = process.env.BATON_HO
   if (!entry) throw new Error(`.baton/baton.json does not list ${id}`);
   const scratch = mkdtempSync(join(tmpdir(), 'baton-show-'));
   try {
-    const src = entry.source === undefined ? null : await resolveSource(id, entry.source, scratch);
+    const src = entry.source === undefined ? null : await resolveSource(id, entry.source, scratch, undefined, log);
     const show = (path: string, text: string) => log(`--- ${path} ---\n${text.trimEnd()}`);
     if (src?.standard) {
       if (!leg) show('course.json', src.graph);
@@ -2316,6 +2344,12 @@ jobs:
           node .baton-cli/cli/baton.mjs repo sync --latest main 2>&1 | tee sync.log
         env:
           GITHUB_TOKEN: \${{ secrets.GITHUB_TOKEN }}
+      - name: Annotate unpinned course sources
+        if: \${{ !cancelled() }}
+        run: |
+          if [ -f sync.log ]; then
+            grep -E '^baton: warning: course [a-z0-9-]+ follows branch ' sync.log | sed 's/^baton: warning: /::warning title=unpinned course source::/' || true
+          fi
       # B-89: a run that posted nothing is an annotation, never a green check — a held board
       # from another run's reading in flight (\`busy\`), or any failed post. The step above
       # fails on a failed post, so this runs even then (\`!cancelled()\`).

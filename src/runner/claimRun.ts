@@ -710,7 +710,8 @@ export class ClaimRun {
       // course no owner signed does not run.
       const courseSha = typeof signedControl.course === 'string' && signedControl.course !== '' ? signedControl.course : claim.snapshot_sha as string;
       const settingsSha = signedControl.agent_command || String(claim.snapshot_sha);
-      course = await loadCourse(this.o.home, courseSha, this.claimCourse(claim), settingsSha);
+      course = await loadCourse(this.o.home, courseSha, this.claimCourse(claim), settingsSha, claim.course_source);
+      if (course.warning) this.o.log(course.warning);
       // B-228: the legs start from the snapshot's code — the home fast-forwarded to it when it
       // can be; otherwise it runs as it stands, and the log says why. A reattached leg's tree is
       // its running session's, and a claim in a clone of its own is put there below (B-188).
