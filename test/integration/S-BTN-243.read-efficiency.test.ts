@@ -1,7 +1,7 @@
 // B-287: mixed busy/idle polling, a cold indexed decision, unchanged snapshots and paged UI.
 import { beforeEach, describe, expect, it } from 'vitest';
 import { schedulingVersion } from '../../src/core/stateVersion';
-import { Git, HOST, adminSession, beat, call, captureDispatches, claimItem, cutover, endClaim, register, rows, runnerCall, sessionCall, setAdminKeys, setClock, ticket, webhookCall, withCore } from '../helpers';
+import { Git, HOST, adminSession, beat, call, captureDispatches, claimItem, cutover, endClaim, register, rows, runnerCall, sessionCall, setAdminKeys, setClock, tick, ticket, webhookCall, withCore } from '../helpers';
 import { makeKey } from '../lib/sshKeys';
 
 const T0 = Date.parse('2026-11-19T12:00:00Z');
@@ -135,7 +135,14 @@ describe('S-BTN-243 bounded reads without changing matching', { timeout: 120_000
     const claim = await measure(() => claimItem('vm-a', idle.secret));
     expect(claim.value.json.ticket_id).toBe('docs:T-1');
 
-    await setClock(T0 + 60_000); // beyond the sync window opened by the claim
+    // R3-1263 (S-BTN-56): the post and the claim share one sync window, whose trailing dispatch
+    // the alarm sends. Send it here, with the clock at or past the real one: on workerd an alarm
+    // armed in the past runs in the background, and one landing among the pushes below would be
+    // counted as theirs.
+    const settled = Math.max(T0 + 60_000, Date.now());
+    await setClock(settled);
+    await tick();
+    await setClock(settled + 60_000); // beyond the window that trailing dispatch opened
     const sent = await captureDispatches();
     const push = (repo: string) => webhookCall('push', { repository: { full_name: repo }, pusher: { name: 'alice' },
       head_commit: { author: { email: 'alice@example.com' } },
