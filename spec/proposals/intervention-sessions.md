@@ -175,7 +175,7 @@ On a Needs-you entry the dashboard draws **Start an intervention**: the registry
    entry such as `baton.no-runner` or `baton.queue-over`) — or the **batch** of every open ticket
    entry of its type and cause ([Batches](#batches));
 2. **the agent**: a **sandboxed leg** ([The leg form](#the-leg-form)), naming the runner that will
-   claim it or leaving it to any runner whose grant has `intervener` set; or **an
+   claim it or leaving it to any runner whose grant admits the capability `intervener` (R-BTN-174); or **an
    existing agent over MCP** ([The MCP form](#the-mcp-form)).
 
 There is no powers menu: what the key may do is fixed by the subject's kind (below); everything
@@ -251,7 +251,7 @@ else is a request.
     again), the intervention ends `file-conflict`, and `baton.intervention-mismatch` names it.
     Nothing overwrites the file. R-BTN-171's `outbox-refused` hold applies to no ticket here: the
     intervention ticket is not on the board, and the subject is not the entry's ticket; a
-    `refused` mark (the deliverer's credential refused) holds nothing and raises
+    `refused` report (the deliverer's credential refused) holds nothing and raises
     `baton.outbox-late`.
   - **A mismatch.** While the posted ticket's `course`, `intervenes` or `baton_write` differ from
     Baton's row, or the snapshot's `extra: true` flag says the file carries a body or a field
@@ -708,4 +708,4 @@ G-BTN-149 (Baton files the intervention ticket through the outbox); S-BTN-275 an
 - The pieces it needs, roughly in order: B-312; the registry (B-25, B-124); owners' sessions and
   confirmed actions (B-76, B-207); the outbox (R-BTN-171); the MCP endpoint (B-25) and OAuth
   (B-73); then the new parts — the record and key, requests, the outbox kind, the gate rule and
-  the grant's `intervener` setting, the screen, the new conditions, and a course template.
+  the `intervener` capability, the screen, the new conditions, and a course template.

@@ -141,7 +141,7 @@ One line per decision in force; the reasoning and the rejected alternatives in f
 - Chose stopping a leg through the authenticated release path over control from a viewer's stream (R-BTN-119).
 - Chose a noun-verb CLI renamed outright over aliases, in one tree whose help is generated from the registry's command table (R-BTN-127).
 - Chose each leg run's output as create-only chunks in an owners' bucket or local directory, over a git transcript repository or relaying through Baton (R-BTN-128).
-- Chose one action registry from which REST, the CLI, the dashboard and the MCP endpoint derive, an MCP key being a delegated key marked per action (R-BTN-129, R-BTN-130, R-BTN-186).
+- Chose one action registry from which REST, the CLI, the dashboard and the MCP endpoint derive, an MCP key being a delegated key that each action's `delegated` value admits or refuses (R-BTN-129, R-BTN-130, R-BTN-186).
 - Chose a leg that waits on an effect git or the forge shows over waiting on "sent" (R-BTN-116).
 - Chose check courses whose verdict is a command's exit status, the forge's own check runs being enough for `merge.checks: required` (R-BTN-114, R-BTN-153, R-BTN-183).
 - Chose either an SSH key or an API key for every administrator, owner and runner, over one kind per role (R-BTN-13, R-BTN-159).

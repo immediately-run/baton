@@ -84,7 +84,7 @@ print its way to `success`.
        `released:stale-board`, not a failed attempt, and Baton records a sync want (R-BTN-94).
     2. It runs the command **first**, in the leg's session checked out at `check_sha`, before
        any agent touches that session, by the executor's `exec(handle, argv, {cwd, timeout_s})`
-       (R-BTN-107), reading its `status`.
+       (R-BTN-107), reading its `result`'s `status` (null for a timeout or an `exec` error).
   - **Mapping the status.** Status 0 reaches the station mapped to `success`; any other status
     the one mapped to `failure`; a timeout or an `exec` error the one mapped to `timed_out`, or
     to `failure` where the map names no `timed_out`. An
@@ -478,7 +478,7 @@ Built: the column `claim_legs.leg_log_dir`, and the masking of a leg's output (R
     digests. The runner writes a run only when the reply that started it named a directory.
   - **What.** Runs whose executor streams the leg's output (R-BTN-107): `builtin` does; the
     shipped `session` and `attached` executors stream none, their session's transcript being its
-    log; a `"stream": false` leg writes none. The runner reads the streamed stdout and stderr and writes JSON-lines
+    log; a `"stream": false` leg writes none. The runner reads the stderr `exec` streams (`onStderr`, R-BTN-107) and the stdout `result` carries when the call ends (streaming stdout needs an `onStdout` beside `onStderr`, which this design adds to R-BTN-107 when it is built), and writes JSON-lines
     frames `{seq, at, stream: "stdout" | "stderr", text}`, `seq` counting from 0 across the run;
     `text` is the masked bytes (R-BTN-144) as UTF-8 (invalid bytes → U+FFFD), ≤ 8 KB per frame,
     cut between code points.
