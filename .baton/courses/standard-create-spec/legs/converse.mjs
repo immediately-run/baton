@@ -2070,7 +2070,28 @@ function positionOf(spec, answer, run2 = 1, reviewLimit = Infinity) {
   return { ...atRun && run2 >= (atRun.min === "review-limit" ? reviewLimit : atRun.min) ? atRun.position : position, ...spec.ask.name !== "outcome" ? { [spec.ask.name]: answer } : {} };
 }
 
+// src/defaults/remote-slug.ts
+function remoteSlug(root, remote = "origin") {
+  try {
+    return slugOfUrl(gitText(root, "remote", "get-url", remote));
+  } catch (e) {
+    const { status: status2, stderr } = e ?? {};
+    const said = typeof stderr === "string" ? stderr : stderr ? new TextDecoder().decode(stderr) : e instanceof Error ? e.message : "";
+    const noRemote = status2 === 2 || said.includes(`No such remote '${remote}'`);
+    const noRepository = /not a git repository \(/.test(said);
+    if (noRemote || noRepository) return null;
+    throw new Error(`git remote get-url ${remote} failed in ${root}${status2 != null ? ` (exit ${status2})` : ""}: ${said.trim() || "no stderr"}`);
+  }
+}
+
 // src/defaults/stub-runtime.ts
+function homeSlug(checkout) {
+  try {
+    return remoteSlug(checkout);
+  } catch {
+    return null;
+  }
+}
 var OUTPUT_MAX = 64 * 1024 * 1024;
 var AGENT_IDLE_MS = 9e5;
 var LEG_CEILING_MS = 18e6;
@@ -2183,7 +2204,9 @@ async function runAgent(ctx, { course, leg, names, spec, readsOnly: readsOnly2, 
   const ticketText = verify || pushes || reconcile ? ticketTextOf(ctx) : null;
   const redEdge = ctx.claim?.station === "pr-open" || ctx.claim?.station === "fixed";
   const prHeads = () => matchingHeads(ctx, entry).heads.sort().join("\n");
-  const headsBefore = pushes && redEdge && ticketRepositories(ticketText, settings.repos).length === 0 ? prHeads() : "";
+  const homeRepos = new Set([homeSlug(ctx.checkout), ctx.ticket.home ? settings.repos?.[ctx.ticket.home] ?? null : null].filter((r) => typeof r === "string" && r !== "").map((r) => r.toLowerCase()));
+  const otherRepos = ticketRepositories(ticketText, settings.repos).filter((r) => !homeRepos.has(r.toLowerCase()));
+  const headsBefore = pushes && redEdge && otherRepos.length === 0 ? prHeads() : "";
   const signedCourse = ctx.signed_control?.course;
   const courseSha = typeof signedCourse === "string" && signedCourse !== "" ? signedCourse : sha2;
   let reviewLimit;
