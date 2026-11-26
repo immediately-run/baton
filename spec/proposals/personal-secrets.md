@@ -58,7 +58,8 @@ Settled 2026-11-26; not reopened by a review.
     assignee, or one whose assignee is not among the arena's people, is listed on the dashboard's
     Needs you and notifies nobody.
 12. **Removing a person deletes their sealed secrets** (2026-11-26), with their channels and
-    preferences; the tombstones of their versions stay, so nothing older is accepted again.
+    preferences; the tombstones of their versions stay, so Baton accepts nothing older again
+    (notifiers' own replay protection is the [hardening proposal](hardening.md)'s).
 
 ## Prior art
 
@@ -75,7 +76,7 @@ Settled 2026-11-26; not reopened by a review.
 | Part | What it is | Where it lives |
 |---|---|---|
 | **Person** | someone Baton knows, with SSH keys and linked identities ([people](people-and-dashboard.md#5-people-identities-and-the-roster)) | Baton |
-| **Notifier** | a delivery runner (R-BTN-163) with a **notifier key** of its own: an SSH key pair, registered as a notifier of an arena, whose private half never leaves its host. `notifier` is a principal of its own, never a runner's key; it signs its requests as every key does (R-BTN-13). A notifier's host runs no legs, so no leg can read its key. | the deployment, beside the team's channel credentials |
+| **Notifier** | a deliverer of notifications (R-BTN-163's delivery runners, in role; it holds no runner key and sends no heartbeat) with a **notifier key** of its own: an SSH key pair, registered as a notifier of an arena, whose private half never leaves its host. `notifier` is a principal of its own, never a runner's key; it signs its requests as every key does (R-BTN-13). A notifier's host runs no legs, so no leg can read its key. | the deployment, beside the team's channel credentials |
 | **Notifier keys** | each arena's list of notifier public keys, set by its owners | Baton |
 | **Sealed secret** | a person's secret for one arena: its name, purpose, version, recipients and inner hash in the clear, its value in age ciphertext | Baton, ciphertext only |
 | **Channels** | the ways a person is reached, each verified, and preferences over them | Baton: identifiers and preferences only |
@@ -118,7 +119,8 @@ From #300, unchanged in substance:
   dashboard's Needs you only (decision 11). So whoever can edit an assignee can route an entry only
   to the arena's own people.
 - **One read, no cursor.** `GET /v1/needs-you?due=1` answers, across the arenas the notifier
-  serves, every open entry that no notifier has yet attested, with its recipients, their verified
+  serves, every open entry with a recipient no notifier has yet attested `told`, with its
+  recipients, their verified
   channels and their preferences, resolved as the read is made. A notifier keeps no cursor: it
   reads, sends, attests, and reads again a minute later; a restart or a second notifier needs no
   place carried over, and two that race may both send. The one thing it keeps on its host is the
@@ -128,7 +130,9 @@ From #300, unchanged in substance:
   arena's notifier list writes it, whatever the policy admits for other types; a runner's word
   that someone was told counts for nothing. Needs you shows who was told.
 - **A silent notifier is a condition.** Where the arena lists a notifier key, an entry unattested
-  for 15 minutes raises `baton.notifier-silent` on the arena.
+  for 15 minutes raises `baton.notifier-silent` on the arena. A recipient attested only
+  `unreachable` is due again after 15 minutes, then hourly, so a channel the person fixes is used;
+  Needs you shows them unreachable meanwhile.
 - **Channels awaiting verification** are read too, by the same notifier, only to send their codes;
   nothing else is sent to them.
 
@@ -166,8 +170,9 @@ version is refused `conflict`. The person confirms it with their SSH key (`baton
 <channel> <code>`), at most five tries per code. An unconfirmed channel, or a secret version not
 yet confirmed, receives nothing.
 
-**A webhook is sent with care.** A notifier posts only to an `https` URL, refuses an address that
-resolves to a private, loopback or link-local network, follows no redirect, and sends at most a
+**A webhook is sent with care.** A notifier posts only to an `https` URL, resolves its host once,
+refuses an address in a private, loopback or link-local network, connects only to the address it
+checked, follows no redirect, and sends at most a
 few requests a minute to one webhook. Verification sends on every channel, email included, are
 limited the same way.
 

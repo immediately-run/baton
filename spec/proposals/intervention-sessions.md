@@ -53,7 +53,7 @@ Settled 2026-11-21; not reopened by a review.
    ([R-BTN-188](../BATON_SPEC/12-security.md#sec-12-8)) confirms on Baton's own page, reached
    from the page or from a delivery runner's channel (ntfy, Slack) — never by a code handed to
    the agent. A **human-driven** session — a person's own agent, over MCP with their interactive
-   grant — **acts directly**, within what the person's role admits at the proof the credential
+   grant, or their own CLI — **acts directly**, within what the person's role admits at the proof the credential
    carries: no request, no confirmation step, every act recorded against the intervention
    ([Who drives](#who-drives-two-kinds-of-intervention)). For the agent-driven kind: What a delegated key may do is
    unchanged: the intervention key's powers are a subset of
@@ -127,7 +127,7 @@ Settled 2026-11-21; not reopened by a review.
   `baton.stalled`: [R-BTN-167](../BATON_SPEC/07-conditions.md#sec-7-5)'s stalled time counts only
   while the sync attests the leg `waiting`. A leg posted `ready` that no runner can take raises at
   most `baton.capability-missing` (R-BTN-75, a capability no live runner declares) or
-  `baton.queue-over` (R-BTN-79), and often nothing — a tier ceiling, a barred tag or
+  `baton.queue-over` (R-BTN-79), and often nothing — a barred tag or
   `awaiting-sync` raise no condition. It needs a new ticket condition, **`baton.unclaimable`**,
   owned by R-BTN-75 beside `baton.capability-missing`
   ([§6.2](../BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-2), with §6.6's gates): a leg
@@ -223,8 +223,14 @@ On a Needs-you entry the dashboard draws **Start an intervention**: the registry
 There is no powers menu: what the key may do is fixed by the subject's kind (below); everything
 else is a request.
 
-- **Who starts, by path.** Starting mints a credential, so it is an `approvers.members` act
-  (R-BTN-188), as minting an MCP key is.
+- **A human-driven one is started as a course is.** The person calls `course.start` on the
+  arena's intervention course with `claim: true` ([ticket ownership](ticket-ownership.md#starting-a-course)),
+  under its gates: on the roster or holding an owner's or member's key. The ticket is unwritten
+  until its first leg writes it, and the person's session holds its start leg as a session claim
+  (the intervention course's legs say `sessions: allow`). Nothing is minted and no outbox entry
+  files it. What follows is the agent-driven kind's.
+- **Who starts, by path.** Starting an agent-driven one mints a credential, so it is an
+  `approvers.members` act (R-BTN-188), as minting an MCP key is.
 
   | Path | Starter | `starter_role` | `starter_human_only` |
   |---|---|---|---|
@@ -234,8 +240,9 @@ else is a request.
   | an administrator's dashboard session, under `emergency` only ([Emergencies](#emergencies)) | the session's administrator key | `administrator` | false |
 
   An administrator key signs no `/v1/owner/*` route (§12.1), so an administrator starts only from
-  a session. Where `approvers.members` is human-only (`protected`), no session satisfies it
-  (R-BTN-185): only the second row starts one. `emergency` from anyone but an administrator's
+  a session. Where `approvers.members` is human-only (`protected`), a session satisfies it only
+  where it acts as `human` (R-BTN-185, [human intent](../../docs/context/human-intent.mdx) §1);
+  otherwise only the second row starts one. `emergency` from anyone but an administrator's
   session is `invalid-params`.
 - **The warning, on every path.** Before the start is sent, the page shows — and the CLI prints —
   "A fresh agent session is strongly advised: one that holds no owner key and no owner forge
@@ -399,8 +406,8 @@ A delegated key in R-BTN-186's sense, minted per intervention and dying with it.
 
   **Deny** closes the request. Both are `delegated: false`, and no `intervention` or delegated
   principal is among their callers; `check:actions` fails an entry that admits one.
-- **Under a human-only list** no session confirms (R-BTN-185): the page names the CLI command and
-  the request id for a `human_only` key; the command prints the same effect statement and pins.
+- **Under a human-only list** only a session that acts as `human` confirms (R-BTN-185); for any
+  other the page names the CLI command and the request id for a `human_only` key; the command prints the same effect statement and pins.
 - **A merge is informational.** `action: "pr.merge"` names no registry action: its `targets` name
   one PR of the subject's own — its head repository the home, its head branch matching the
   repository's branch pattern for the subject ticket — pinned to its head SHA. An owner or

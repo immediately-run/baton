@@ -109,7 +109,8 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
     - Smaller: owners' and members' sessions are not roster-gated; the notifier condition, the
       channels it reads for codes, rate limits on every channel; the intervention tail.
   - **After round three**, the owner's rulings: a session counts as `human` for a human-only list
-    as R-BTN-185 rules (under `human_key: any`, only one Cloudflare Access or a `human_only` key's
+    as R-BTN-185 is to rule once [#451](https://github.com/immediately-run/baton/pull/451) lands
+    (under `human_key: any`, only one Cloudflare Access or a `human_only` key's
     code opened; under `hardware`, every session, each act with its touch), and a forge sign-in
     never proves a human: "a forge signin doesn't prove human intent, because autonomous agents can
     also use forge credentials". Dibber's R-DIB-2 now closes a ticket in place, which ticket
@@ -126,6 +127,32 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
     ticket, with no legs working from the content they last read; and the courses that commit to
     the default branch gain reconcile legs before closure flips. The tracker writer (R-BTN-171) is
     recorded as a dependency of tracker sources, not a decision.
+  - **Round four**, at the owner's request beyond the three-round cap: two fresh reviewers given the
+    diff, one for consistency and executability, one for security. Every finding was verified
+    against the text. Fixed:
+    - R-BTN-185's narrowing is cited as [#451](https://github.com/immediately-run/baton/pull/451)'s
+      amendment, not today's rule, and R-BTN-185 and R-BTN-188's `human` entry join the amends;
+    - tiers, retired on 2026-11-23, are gone from ticket ownership;
+    - an interactive grant never exceeds the session it came from: its authority-changing acts wait
+      for the key's confirmation (R-BTN-155), it takes no key-only act, and it writes as its
+      session's role where an entry names that role;
+    - a human-driven intervention starts through `course.start` with a session claim; the leftover
+      "no session satisfies a human-only list" lines follow R-BTN-185;
+    - who holds a session claim (the roster, or an owner's or member's key), and rule 4 binding a
+      session claim;
+    - approval by a human-driven session's act: its advance carries the approval naming the blob id,
+      bound once a post shows that version;
+    - a reappearing ticket keeps an approval of its version; the unwritten ticket's hash covers its
+      course and fields; `started_by` outlives the first write;
+    - agent-driven starts are limited per claim, as R-BTN-187 limits a sync; human-driven starts are
+      not, nor a person's claims (no ceiling, the owner);
+    - a key is never both a person's and an agent's; every key attached is announced; each roster
+      change is an event naming its poster;
+    - an `unreachable` recipient is due again; webhooks connect only to the address checked;
+    - anchors, `runner_pushers`' and the board's citations, the built list, the notifier's wording.
+    Deferred to hardening: confirming accounts a roster adds, and revoking a first key attached from
+    a forge session. Put to the owner: what a person on an `org-members` roster who cannot push to
+    the config repository may do.
 
 - **2026-11-26 — A protected repository accepts a branch course source (R-BTN-134).**
   Rules changed: R-BTN-134 (*A branch source*). #395 left open whether a protected repository

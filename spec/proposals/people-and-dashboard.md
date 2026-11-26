@@ -341,13 +341,15 @@ and Baton does not do access control the forge already does (the owner, 2026-11-
     the forge vouched for, verified in that one step, and creates a person only for an account on
     some arena's roster or one an owner names; any other sign-in is refused. One forge account
     belongs to at most one person, and an account Baton knows as a runner's, the sync's or a
-    deliverer's identity (R-BTN-139's `runner_pushers`, the sync's) is refused.
+    deliverer's identity (the owners' `runner_pushers`, §3, or the sync's) is refused.
   - **A forge sign-in's session carries no key's role.** It is human-driven and acts only as the
     roster allows: `course.start` and session claims on the arenas whose roster holds the person,
     and the reads that need — the arena's board, its tickets, and the Needs-you entries for the
     tickets the person started or is the assignee of. It never acts as an owner, an administrator
     or a member, even for a person who also holds such a key: those acts take a session that key
-    opened (R-BTN-155), so taking over a person's forge account never takes over their keys. It
+    opened (R-BTN-155), so taking over a person's forge account never takes over the keys they
+    hold. (A keyless person's forge session may attach their first key, below; that attach is
+    announced like every other.) It
     proves no human for a human-only list (R-BTN-185): agents use forge credentials too, so a forge
     sign-in shows whose account it is, never that a person rather than an agent signed in (the
     owner, 2026-11-26). It approves
@@ -358,7 +360,10 @@ and Baton does not do access control the forge already does (the owner, 2026-11-
     code, so a key is attached only by whoever holds it. An interactive grant or any other token
     never mints one, and neither does a forge sign-in's session, except for the person's first key.
     An administrator mints a code only for a person's first key, where the person has no other way
-    in (plain git), and the person is told on their verified channels. Attaching
+    in (plain git). Every key attached, by any path, is announced on the person's verified channels
+    and listed on their page, with the path it came by. A key Baton knows as a runner's, a sync's,
+    a notifier's or a delegated key is refused `conflict`, and a person's key is refused in any of
+    those roles the same way, so no key is both a person's and an agent's. Attaching
     confers nothing: a key attached to a person is an owner of an arena only by that arena's
     `approvers.members` act, as today.
   - **Interactive grants.** A person's MCP credential is an OAuth grant
@@ -368,12 +373,16 @@ and Baton does not do access control the forge already does (the owner, 2026-11-
     the grant's ceiling; within them it acts with the role of the session it was approved from — an
     owner's or member's acts for a session their key opened, the roster's acts for a forge
     sign-in's — at the proof a token carries ([human intent](../../docs/context/human-intent.mdx)
-    §2).
+    §2). It never exceeds that session: an authority-changing act waits for the key's confirmation
+    as the session's does (R-BTN-155), and R-BTN-186's key-only acts, minting a credential among
+    them, are never a grant's.
   - **An interactive grant is not a delegated key.** R-BTN-186's limits on delegated keys bind
     agent-driven keys alone. Its acts are the person's: it writes attestations as the writer
     `person` — a session claim's arrivals, an approval where the policy admits `person` — which
     R-BTN-181 gains beside `runner` and `human`, and the policy's defaults admit `person` wherever
-    they admit the holder's `runner`. Under `protected`, where `std:approval@1` and
+    they admit the holder's `runner`. Where an entry names its session's role (`owner`, `member`,
+    as `std:decision@1` names `member` under `cooperative`, R-BTN-204), the grant writes as that
+    role too, so a member's grant answers the person legs its key's labels admit. Under `protected`, where `std:approval@1` and
     `std:decision@1` admit `human` alone, a grant's word counts for neither.
   - **A session claim is bound to the person, not to one grant.** Any live credential of theirs
     whose consent covers the claim actions renews it and moves it, so a refresh that hits its cap
@@ -400,8 +409,9 @@ and Baton does not do access control the forge already does (the owner, 2026-11-
   - **The sync posts it.** Baton's server holds no forge read credential, so the arena's sync,
     which does, reads the list and posts it as an attestation, `std:roster@1`
     (`{host, source, members: [<forge user id>]}`). Its standard writer is the arena's sync key or
-    CI identity alone, never a runner's machine key, even where the board itself is admitted from
-    one (`inputs.board`), so no runner writes the roster.
+    CI identity alone, never a runner's machine key, even where a machine key posts the board
+    itself (R-BTN-93), so no runner writes the roster. Each roster change is an event in the arena's
+    history naming the credential that posted it and the accounts it added or dropped.
   - **Fresh, or nothing.** The latest roster counts for 24 hours. Every `course.start`, session
     claim and renewal is checked against it; an older roster raises `baton.roster-stale` on the
     arena and those acts are refused `unavailable` until a newer one arrives. A person dropped from
@@ -436,7 +446,7 @@ and Baton does not do access control the forge already does (the owner, 2026-11-
   (`baton.roster-stale`); R-BTN-13 and R-BTN-159 (a key attached to a person), R-BTN-58 (unchanged
   in substance: roles stay on keys), R-BTN-129 and §12.1 (the person as the actor recorded beside
   the key; attach codes), R-BTN-130 and §2 (the two kinds of MCP credential), R-BTN-155 (a session
-  as its person's), R-BTN-139 (the roster asks the forge as pushers do), R-BTN-194
+  as its person's; a grant's authority-changing acts wait for its key's confirmation), R-BTN-139 (the roster asks the forge as pushers do), R-BTN-194
   (`last_written_by` may name the person whose linked account pushed, never whether a person or
   their agent did), §13 (the people tables), and the vocabulary (*Person*, *Roster*, *Interactive
   grant*).

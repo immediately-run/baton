@@ -33,7 +33,7 @@ The channel says nothing about it:
 
 | Channel | Who drives |
 |---|---|
-| The dashboard | always a person: someone signed in. For a human-only list, a session counts as `human` only as strongly as its sign-in proves a person (R-BTN-185): under `human_key: any`, only one Cloudflare Access opened or a `human_only` key's code opened, never an ordinary key's link or code, nor a forge sign-in, since agents use forge credentials too; under `hardware`, every session, each act with its touch (§2). |
+| The dashboard | always a person: someone signed in. For a human-only list, a session counts as `human` only as strongly as its sign-in proves a person (the owner, 2026-11-26; R-BTN-185 as [#451](https://github.com/immediately-run/baton/pull/451) amends it — today every session counts): under `human_key: any`, only one Cloudflare Access opened or a `human_only` key's code opened, never an ordinary key's link or code, nor a forge sign-in, since agents use forge credentials too; under `hardware`, every session, each act with its touch (§2). |
 | The CLI | the key's: a person's own SSH key is human-driven; a runner's key, in a sandbox or anywhere, is agent-driven. |
 | MCP | the credential's: a person's **interactive grant** is human-driven; a key minted for an agent's purpose is agent-driven. |
 
@@ -72,7 +72,10 @@ The channel says nothing about it:
 Who drives decides how Baton **behaves**. How much proof an act needs is the arena's **policy**,
 per action ([BATON_SPEC §12.8](../../spec/BATON_SPEC/12-security.md#sec-12-8)); its approver lists
 already speak in proofs: `[owner]` admits any owner key, `[human]` a `human_only` key kept out of
-every agent's reach, and the policy may require that key to be a hardware key.
+every agent's reach, and the policy may require that key to be a hardware key. (A grant is approved
+from a session and never exceeds it: an act a session takes only once its key confirms it
+(R-BTN-155) waits for that confirmation from a grant too, and R-BTN-186's key-only acts — minting a
+credential among them — are never a grant's.)
 
 | Credential | The proof it carries |
 |---|---|
@@ -128,7 +131,9 @@ scheduled supervising agent holding the owner's SSH key — is human-driven all 
 the key decides. Baton accepts this rather than ranking channels, and limits it three ways:
 interactive grants are short-lived (§1); a policy that wants a governance act made only with a
 human-only or hardware key says so, and a token then cannot make it (§2); and every act is
-recorded as the person's. A proof level that admits key-signed requests but not tokens, for
+recorded as the person's. An authority-changing act made with a grant also waits, as a
+session's does, for its key's confirmation (R-BTN-155), and no grant mints a credential (§2). A
+proof level that admits key-signed requests but not tokens, for
 governance acts, is in the [hardening proposal](../../spec/proposals/hardening.md). Protecting a person's own session is the
 harness's work (its permission prompts). Where a person connects an agent to Baton, Baton warns
 that a fresh session holding nothing else is strongly advised.
@@ -150,7 +155,7 @@ team is a pull from Needs you, or one push to a channel the team already shares.
 ## What is built and what is proposed
 
 - **Built:** runner keys and their grants; owner and administrator keys; dashboard sessions for
-  administrators, and in part for owners and members (R-BTN-155; members, R-BTN-204, specified); the `human-operator` capability; `human_only` keys and the policy's human-only lists;
+  administrators (owners' and members' are specified, not built: R-BTN-155, R-BTN-204); the `human-operator` capability; `human_only` keys and the policy's human-only lists;
   `human_identity`.
 - **Proposed:** MCP ([people and dashboard](../../spec/proposals/people-and-dashboard.md)), with interactive grants
   and agent-driven keys; people, their linked identities and the roster
@@ -168,7 +173,10 @@ team is a pull from Needs you, or one push to a channel the team already shares.
   delegated key matches no entry" binds agent-driven keys; `tickets.created` speaks of agent-driven
   filers); R-BTN-130 (the two kinds of MCP credential); R-BTN-163 (resolving a condition); R-BTN-185
   (the owner's agent: a person's key used by their agent is human-driven at owner-key proof, and
-  still never satisfies `[human]`); R-BTN-189's guarantees that read "a human" (they mean the proof
+  still never satisfies `[human]`; and which sessions act as `human` under `human_key: any`, unless
+  [#451](https://github.com/immediately-run/baton/pull/451) lands it first), with R-BTN-188's
+  `human` approver entry, which today admits any dashboard session; R-BTN-155 (an interactive
+  grant's authority-changing acts wait for its key's confirmation, as its session's do); R-BTN-189's guarantees that read "a human" (they mean the proof
   they name); the Decisions entry on authority by credential; and the
   [vocabulary](vocabulary.mdx)'s *Delegated key*, *Human-only key* and *Capability* entries, so each
   names one axis.

@@ -44,6 +44,16 @@ From [people and dashboard §5](people-and-dashboard.md#5-people-identities-and-
   `ssh-agent` (R-BTN-107); on a machine where a person's own keys live, that is the person's
   human-driven key. To close it: such a runner runs its legs in an executor that does not expose
   the person's agent or key files.
+- **A roster post the sync forges.** The sync's word decides who is a person: a sync key, a
+  compromised sync host or a CI identity reached through a pushed workflow can post a roster that
+  adds an outsider, who then signs in with the forge and acts human-driven — starts, creates and
+  claims at once, session claims. The roster change is recorded as an event naming its poster
+  (people §5), which detects it and does not stop it. To close it: an account a roster adds acts
+  only once an owner confirms it on Needs you.
+- **A first key attached from a forge session.** Someone holding a keyless person's forge account
+  can attach a key of their own, which outlives the account's recovery; the attach is announced on
+  the person's channels and listed on their page. To close it: a first key attached from a forge
+  session may be revoked from a later forge session until a session that key opened confirms it.
 - **Governance acts by key signature only.** A proof level that admits a request signed with a key
   but not a bearer or OAuth token, which a policy may require for its `approvers.*` acts, so an
   injected instruction holding a person's grant cannot add owners, mint keys or list notifiers.

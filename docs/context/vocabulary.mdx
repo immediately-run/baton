@@ -248,8 +248,8 @@ person (the writer `person`).
 **Session claim** ([proposed, not built](../../spec/proposals/ticket-ownership.md)). A claim held
 by a person's own session rather than a runner: over MCP with an interactive grant, or from the
 person's CLI (`baton session claim`), which holds the lease and the `pre-push` fence and runs no
-queued legs. One claim like any other, leased; fenced where the CLI holds it; a lapsed one is
-requeued onto a fresh branch.
+queued legs. One claim like any other, leased; fenced where the CLI holds it; a lapsed MCP one
+is requeued onto a fresh branch.
 
 **Unwritten ticket** ([proposed, not built](../../spec/proposals/ticket-ownership.md)). A ticket
 Baton started (`course.start`) that its ticket source does not hold yet. Baton keeps its start
@@ -257,6 +257,7 @@ text, at most 1,024 Unicode code points, until the store's first read of it, whi
 fields the store's.
 
 **Notifier, sealed secret** ([proposed, not built](../../spec/proposals/personal-secrets.md)). A
-**notifier** is a delivery runner with a notifier key of its own; a **sealed secret** is a person's
+**notifier** is a deliverer of notifications with a notifier key of its own, a principal that
+holds no runner key and runs no legs; a **sealed secret** is a person's
 secret signed with their SSH key and encrypted with age to an arena's notifier keys, which Baton
 stores and the person who set it may overwrite, never read.
