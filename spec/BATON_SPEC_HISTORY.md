@@ -108,6 +108,12 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
       accepted risk, its fix in hardening.
     - Smaller: owners' and members' sessions are not roster-gated; the notifier condition, the
       channels it reads for codes, rate limits on every channel; the intervention tail.
+  - **After round three**, the owner's rulings: a session counts as `human` for a human-only list
+    as R-BTN-185 rules (under `human_key: any`, only one Cloudflare Access or a `human_only` key's
+    code opened; under `hardware`, every session, each act with its touch), and a forge sign-in
+    never proves a human: "a forge signin doesn't prove human intent, because autonomous agents can
+    also use forge credentials". Dibber's R-DIB-2 now closes a ticket in place, which ticket
+    ownership follows.
 
 - **2026-11-26 — A protected repository accepts a branch course source (R-BTN-134).**
   Rules changed: R-BTN-134 (*A branch source*). #395 left open whether a protected repository

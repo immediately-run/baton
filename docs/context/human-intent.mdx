@@ -33,7 +33,7 @@ The channel says nothing about it:
 
 | Channel | Who drives |
 |---|---|
-| The dashboard | always a person: someone signed in. For a human-only list, a session counts as `human` only as strongly as its sign-in proves a person (R-BTN-185): under `human_key: any`, only one Cloudflare Access opened or a `human_only` key's code opened, never an ordinary key's link or code, nor a forge sign-in unless the owner rules otherwise; under `hardware`, every session, each act with its touch (§2). |
+| The dashboard | always a person: someone signed in. For a human-only list, a session counts as `human` only as strongly as its sign-in proves a person (R-BTN-185): under `human_key: any`, only one Cloudflare Access opened or a `human_only` key's code opened, never an ordinary key's link or code, nor a forge sign-in, since agents use forge credentials too; under `hardware`, every session, each act with its touch (§2). |
 | The CLI | the key's: a person's own SSH key is human-driven; a runner's key, in a sandbox or anywhere, is agent-driven. |
 | MCP | the credential's: a person's **interactive grant** is human-driven; a key minted for an agent's purpose is agent-driven. |
 

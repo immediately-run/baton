@@ -348,7 +348,9 @@ and Baton does not do access control the forge already does (the owner, 2026-11-
     tickets the person started or is the assignee of. It never acts as an owner, an administrator
     or a member, even for a person who also holds such a key: those acts take a session that key
     opened (R-BTN-155), so taking over a person's forge account never takes over their keys. It
-    proves no human for a human-only list until the owner rules otherwise (R-BTN-185), and approves
+    proves no human for a human-only list (R-BTN-185): agents use forge credentials too, so a forge
+    sign-in shows whose account it is, never that a person rather than an agent signed in (the
+    owner, 2026-11-26). It approves
     no OAuth grant tick that needs a key-minted session (BATON_MCP_OAUTH_SPEC §5).
   - **Keys.** A person's SSH keys, attached by their holder: the person, with an SSH key they
     already hold or from a session such a key opened, mints a one-time **attach code** (eight characters, ten minutes, used
