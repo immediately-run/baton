@@ -1,3 +1,4 @@
+/// <reference path="../../src/env.d.ts" />
 // cloudflare.ts — the integration harness's Cloudflare host (BATON_SPEC §13a S-BTN-31): the
 // Runner and its Durable Object in workerd, through @cloudflare/vitest-plugin.
 import { env, reset as resetStorage, runInDurableObject } from 'cloudflare:test';
@@ -5,9 +6,12 @@ import { exports } from 'cloudflare:workers';
 import { durableStore, type Baton } from '../../src/cloudflare/baton';
 import type { BatonCore } from '../../src/core/baton';
 import type { Config, Store } from '../../src/core/ports';
+import type { AssertHost } from './contract';
 import { RECOMMENDED_CLIENT } from '../../src/core/http';
 
-export const HOST = 'cloudflare';
+type _Host = AssertHost<typeof import('./cloudflare')>;
+
+export const HOST: 'cloudflare' | 'local' = 'cloudflare';
 export const config: Config = env;
 
 /** The fixed object. */

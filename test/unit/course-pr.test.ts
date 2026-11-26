@@ -476,11 +476,12 @@ describe('review-pr', () => {
     expect(of({ depends_on: ['A'] }, new Set(), [verdict(T0, false)])).toMatchObject({ leg: 'review', state: 'ready' });
   });
 
-  it('approved is the end; three rounds spent, or the PR merged or closed, queues conclude alone; a concluded comment is the other end', () => {
+  it('approved is the end; three rounds spent, or the PR merged or closed, offers only conclude; a concluded comment is the other end', () => {
     expect(place([fact({ reviews: [verdict(T0, false), verdict(T0 + 10, true)] })])).toMatchObject({ station: 'approved', next_leg: null, next: [] });
     const spent = place([fact({ pushes: [T0 + 5, T0 + 15, T0 + 25], reviews: [verdict(T0, false), verdict(T0 + 10, false), verdict(T0 + 20, false)] })]);
-    expect(spent).toMatchObject({ station: 'changes-requested', next_leg: 'conclude', next: [{ leg: 'conclude', state: 'ready', waiting_on: null }] });
-    expect(place([fact({ state: 'closed' })])).toMatchObject({ station: 'requested', next_leg: 'conclude' });
+    const next = [{ leg: 'conclude', state: 'ready', waiting_on: null }, { leg: 'review', state: 'waiting', waiting_on: 'exhausted' }];
+    expect(spent).toMatchObject({ station: 'changes-requested', next_leg: 'conclude', next });
+    expect(place([fact({ state: 'closed' })])).toMatchObject({ station: 'requested', next_leg: 'conclude', next });
     const done = place([fact({ state: 'merged', reviews: [verdict(T0, false), { author: 'r', state: 'COMMENTED', submittedAt: T0 + 9, body: '<!-- baton:concluded -->\nsummary' }] })]);
     expect(done).toMatchObject({ station: 'concluded', next: [], path: [{ leg: 'review', reached: 'changes-requested' }, { leg: 'conclude', reached: 'concluded' }] });
   });

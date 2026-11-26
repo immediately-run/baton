@@ -10,17 +10,23 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { graphOf, legCapabilities, type Graph } from '../core/graph';
+import { builtInSource, resolveSource, runnerLegs, writeStub } from '../defaults/cli';
+import { dropCourseTree, writeCourseTree } from '../defaults/course-tree';
+
 import { git, gitAsync } from '../defaults/git.mjs';
 import { parseSchemaId, type Resolve } from '../shared/schema.mjs';
 import { stdSchema } from '../shared/std.mjs';
 
 export interface CourseLoad {
   course: string;
+  sourced?: true;
+  fetched?: Record<string, string>;
   graph: Graph;
   /** The extracted `legs/<leg>.mjs` of the snapshot, by leg name — file paths on disk. */
   scripts: Map<string, string>;
   scratch: string;
-  schema?: Resolve;
+  schema: Resolve;
+  outputSchema(leg: string, name: string): string | undefined;
 }
 
 /** The course id the home repository runs, from the snapshot's `.baton/baton.json`: the spec's
@@ -144,12 +150,78 @@ export async function prepareClone(home: string, dir: string, sha: string, branc
   await gitAsync(dir, ['clean', '-fdq'], CLONE_TIMEOUT_MS);
 }
 
+/** Only the explicitly recognized 17ae8cce pin needs this bridge. Its historical
+ * generated stubs predate entry-only homes. Expose their original standard run
+ * and reroute its two home-copy lookups to the verified source and dispatcher. */
+function legacyLeg(path: string, bytes: Buffer, graph: string): Buffer {
+  const anchor = path === 'legs/run-tests.mjs'
+    ? 'JSON.parse(show(".baton/courses/create-pr/course.json"))'
+    : 'present ? show(rel) : null';
+  const replacement = path === 'legs/run-tests.mjs'
+    ? `(${JSON.stringify({ test_script: JSON.parse(graph).test_script })})`
+    : "ctx.instructions ? readFileSync(ctx.instructions, 'utf8') : null";
+  const text = bytes.toString('utf8');
+  if (text.split(anchor).length !== 2 || !text.includes('async function standard(ctx)')) {
+    throw new Error(`${path}: unexpected legacy source layout`);
+  }
+  return Buffer.from(`${text.replace(anchor, () => replacement)}\nexport { standard };\n`);
+}
+
 /** Load a claim's course from the snapshot: the graph, and every leg script the snapshot's
  * `legs/` holds, extracted to a scratch directory (deleted by the runner when the claim ends). */
-export function loadCourse(home: string, sha: string, course: string): CourseLoad {
+export async function loadCourse(home: string, sha: string, course: string, settingsSha = sha): Promise<CourseLoad> {
+  const batonJson = courseSettings(home, settingsSha);
+  const source = batonJson?.courses?.find((c) => c.id === course)?.source;
+  if (source !== undefined) {
+    const cache = join(git(home, ['rev-parse', '--absolute-git-dir']).trim(), 'baton-sources');
+    const resolved = await resolveSource(course, source, cache);
+    const graph = graphOf(JSON.parse(resolved.graph));
+    const scratch = mkdtempSync(join(tmpdir(), 'baton-legs-'));
+    const scripts = new Map<string, string>();
+    let fetched: CourseLoad['fetched'];
+    try {
+      if (resolved.standard) {
+        for (const leg of runnerLegs(resolved.standard)) {
+          const to = join(scratch, `${leg}.mjs`);
+          await writeStub(resolved.standard, leg, to);
+          scripts.set(leg, to);
+        }
+      } else if (resolved.files) {
+        const dir = join(scratch, 'source');
+        const files = resolved.legacy ? resolved.files.map((file) => {
+          if (!/^legs\/[a-z-]+\.mjs$/.test(file.path)) return file;
+          return { ...file, read: () => legacyLeg(file.path, file.read(), resolved.graph) };
+        }) : resolved.files;
+        fetched = writeCourseTree(dir, files);
+        for (const { path } of resolved.files) {
+          const leg = /^legs\/([a-z][a-z0-9-]*)\.mjs$/.exec(path)?.[1];
+          if (leg) scripts.set(leg, join(dir, path));
+        }
+      }
+      const schema: Resolve = (id) => {
+        const parts = parseSchemaId(id);
+        if (!parts || parts.prefix === 'std') return stdSchema(id);
+        if (parts.prefix !== course) return null;
+        const file = resolved.files?.find((f) => f.path === `schemas/${parts.name}@${parts.version}.json` && f.regular);
+        return file ? JSON.parse(file.read().toString('utf8')) : null;
+      };
+      // B-47: a leg's declared output schema, from the source's graph as from a home's.
+      const legs = (JSON.parse(resolved.graph) as { legs?: Record<string, { outputs?: Record<string, { schema: string }> }> }).legs ?? {};
+      return { course, sourced: true, fetched, graph, scripts, scratch, schema,
+        outputSchema(leg, name) {
+          const outputs = legs[leg]?.outputs;
+          return outputs && Object.hasOwn(outputs, name) ? outputs[name].schema : undefined;
+        },
+      };
+    } catch (e) {
+      dropCourse(scratch);
+      throw e;
+    }
+  }
   const file = readAt(home, sha, `.baton/courses/${course}/course.json`);
   if (file == null) throw new Error(`the snapshot ${sha.slice(0, 10)} has no .baton/courses/${course}/course.json`);
-  const graph = graphOf(JSON.parse(file));
+  const raw = JSON.parse(file) as { legs: Record<string, { outputs?: Record<string, { schema: string }> }> };
+  const graph = graphOf(raw);
   const scratch = mkdtempSync(join(tmpdir(), 'baton-legs-'));
   const scripts = new Map<string, string>();
   let listing: string[];
@@ -180,7 +252,17 @@ export function loadCourse(home: string, sha: string, course: string): CourseLoa
     schemas.set(id, value);
     return value;
   };
-  return { course, graph, scripts, scratch, schema };
+  return { course, graph, scripts, scratch, schema,
+    outputSchema(leg, name) {
+      const outputs = raw.legs[leg]?.outputs;
+      return outputs && Object.hasOwn(outputs, name) ? outputs[name].schema : undefined;
+    },
+  };
+}
+
+function courseSettings(home: string, sha: string): { courses?: { id?: string; source?: string }[] } | null {
+  const file = sha ? readAt(home, sha, '.baton/baton.json') : null;
+  return file == null ? null : JSON.parse(file);
 }
 
 /** B-183 (§4.5, R-BTN-74): the repository's ticket source at the claim's snapshot — its
@@ -216,6 +298,13 @@ export function readHead(home: string): string {
  *  finding 1). One file that will not parse, or one the file does not describe, adds nothing: this
  *  is only the never-eligible runner's why, never a gate. An empty `sha` reads the working tree. */
 export function legNeeds(home: string, sha: string, course: string): string[] {
+  try {
+    const source = courseSettings(home, sha)?.courses?.find((c) => c.id === course)?.source;
+    if (source !== undefined) {
+      const b = builtInSource(course, source);
+      return b ? needsOf(b.course) : [];
+    }
+  } catch { return []; }
   const path = `.baton/courses/${course}/course.json`;
   const file = sha ? readAt(home, sha, path) : (() => {
     try {
@@ -225,12 +314,14 @@ export function legNeeds(home: string, sha: string, course: string): string[] {
     }
   })();
   if (file == null) return [];
-  let parsed: { capability_roles?: unknown; legs?: Record<string, { requires?: { capabilities?: unknown } }> };
   try {
-    parsed = JSON.parse(file) as typeof parsed;
+    return needsOf(JSON.parse(file));
   } catch {
     return [];
   }
+}
+
+function needsOf(parsed: { capability_roles?: unknown; legs?: Record<string, { requires?: unknown } | null | undefined> }): string[] {
   const out: string[] = [];
   for (const leg of Object.values(parsed.legs ?? {})) out.push(...legCapabilities(leg?.requires, parsed.capability_roles));
   return out;
@@ -238,7 +329,12 @@ export function legNeeds(home: string, sha: string, course: string): string[] {
 
 /** Drop a claim's scratch directory. */
 export function dropCourse(scratch: string): void {
+  dropCourseTree(join(scratch, 'source'));
   rmSync(scratch, { recursive: true, force: true });
+}
+
+export function sourceContext(course: CourseLoad) {
+  return { ...(course.sourced ? { sourced_course: true as const, sourced_course_id: course.course } : {}), ...(course.fetched ? { fetched_course: { id: course.course, blobs: course.fetched } } : {}) };
 }
 
 /** The scratch directory the runner itself uses for a claim's ctx and result files. */

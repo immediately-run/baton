@@ -1,5 +1,9 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { comparisonProblems, migratedTables, registeredReadRoutes, specifiedRoutes, specifiedTables } from './check-api.mjs';
+import { openTickets } from './lib/check-exceptions.mjs';
 import { legacyRoutes, readMethods } from './lib/core-routes.mjs';
 
 // B-277 exercises the repository verification under R-BTN-31, not a runtime API change.
@@ -42,6 +46,37 @@ describe('check:api', () => {
       'route built but not specified: invalid ticket for exception GET /v1/core',
       'route built but not specified: new exception GET /v1/core; the list may only shrink',
     ]);
+  });
+
+  it('admits a new exception only when it names an open ticket (owner ruling 2026-11-26)', () => {
+    const open = new Set(['B-338']);
+    const prior = { specifiedOnly: {}, builtOnly: {} };
+    const check = (ticket) => comparisonProblems('route', new Set(['GET /v1/spec']), new Set(), {
+      specifiedOnly: { 'GET /v1/spec': ticket }, builtOnly: {},
+    }, prior, open);
+    expect(check('B-338')).toEqual([]);
+    expect(check('B-1')).toEqual(['route specified but not built: new exception GET /v1/spec; B-1 is not an open ticket in tickets/']);
+    expect(check(null)).toEqual([
+      'route specified but not built: invalid ticket for exception GET /v1/spec',
+      'route specified but not built: new exception GET /v1/spec; a new entry names the open ticket that builds it',
+    ]);
+  });
+
+  it('reads open tickets from tickets/, not tickets/archive/, and not done, superseded or withdrawn', () => {
+    const root = mkdtempSync(join(tmpdir(), 'baton-open-tickets-'));
+    try {
+      mkdirSync(join(root, 'tickets/archive'), { recursive: true });
+      const ticket = (path, status) => writeFileSync(join(root, path), `---\ntitle: "x"\nstatus: ${status}\n---\nBody status: done\n`);
+      ticket('tickets/B-1.mdx', 'available');
+      ticket('tickets/B-2.mdx', 'in-review');
+      ticket('tickets/B-3.mdx', 'done');
+      ticket('tickets/B-4.mdx', 'superseded');
+      ticket('tickets/B-5.mdx', 'withdrawn');
+      ticket('tickets/archive/B-6.mdx', 'available');
+      expect(openTickets(root)).toEqual(new Set(['B-1', 'B-2']));
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it('compares methods and path shapes, including abbreviated routes and regex alternatives', () => {

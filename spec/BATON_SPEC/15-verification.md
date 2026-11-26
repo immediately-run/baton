@@ -24,9 +24,11 @@ description: "BATON_SPEC — 15. Verification: the model, the harness, scenarios
 - **R-BTN-30 (scenarios are tested or pending by name).** `status: built B-276` Each `S-BTN-<n>` scenario has a test
   under `test/` that names its id in the filename or a literal test or suite title, or is listed by id in
   [`spec/scenarios-pending.json`](../scenarios-pending.json). `npm run check:spec` checks both and
-  refuses pending additions against the default branch (its previous tip on a push to that branch).
-  When a scenario gains a test or is
-  retired, remove its pending entry. A gate
+  refuses a pending entry the default branch (its previous tip on a push to that branch) lacks,
+  unless the entry names the open ticket that builds it, as `{ "id": "S-BTN-<n>", "ticket": "B-<n>" }`:
+  a ticket file in `tickets/`, not `tickets/archive/`, whose status is not `done`, `superseded`
+  or `withdrawn`. So a spec change may add a scenario its ticket builds later. When a scenario
+  gains a test or is retired, remove its pending entry. A gate
   `G-BTN-<n>` is an invariant the implementation must establish, proved by the scenarios or
   tests its row names. Every scenario that has a test passes on the hosts it runs on (G-BTN-37).
 - **R-BTN-31 (scenarios are part of drafting).** `status: built` Every ticket that changes Baton's behaviour
@@ -132,9 +134,9 @@ Scenarios for designs that are not built are in
 | S-BTN-107 the build-app course | `build-app` files its stage documents as children that wait on one another, plans from the merged plan, never verifies while a child is open, routes a stuck verification to a person, is abandoned when a stage is withdrawn, and under proposed tickets waits for each approval. | R-BTN-131 |
 | S-BTN-175 the request | `baton ticket request` files a one-sentence ticket alone on the default branch, the caller's checkout untouched, and its first leg is offered after the sync; against a protected branch it opens a PR from its own request branch, or prints the branch and exits non-zero where it has no forge credential. | R-BTN-131, R-BTN-74 |
 | S-BTN-174 the create-spec course | `create-spec` runs from its conversation leg through review, bounded address rounds, adjudication and the owner's merge, each station's next leg ready or waiting on `owner` or `ci` as the facts stand. | R-BTN-131 |
-| S-BTN-110 courses from their sources | The CLI holds no course: `--course` and `--source` read a course at a full default-branch commit with the home's overrides; a copied course file, an off-branch commit, a missing station function and an outside import are each refused by name. | R-BTN-134 |
+| S-BTN-110 courses from their sources | The sync refuses a named home copy; a runner ignores it, runs a standard claim in an entry-only home, and releases `cannot-finish:capability` when the source pin leaves the default branch. Matching and fetched pins take the snapshot's overrides; `repo init --prune` removes only unchanged copies. | R-BTN-131, R-BTN-134 |
 | S-BTN-117 bars and renames | A course file that drops or renames a barred or exempt leg is held and raised; a `renamed_from` collision is refused; a valid rename carries the bar and its exceptions over. | R-BTN-142 |
-| S-BTN-232 a ticket already delivered | When `implement` finds the ticket's work already on the default branch it ends `delivered` with the commit and its evidence — no failed attempt, nothing held — and a person leg confirms it or files it back; a commit off the default branch, or no evidence, fails the leg. | R-BTN-131, R-BTN-116 |
+| S-BTN-232 a ticket already delivered | When `implement` finds the work on the default branch it ends `delivered` with commit evidence, without a failed attempt or a hold. A git answer cannot confirm it. The owner's `filed` answer writes nothing and opens a fresh question after another delivery; `confirmed` queues a compatible runner, which pushes the archive with the latest delivery evidence, and sync observes the closure. On upgrade, a legacy owner confirmation queues archive; a legacy git answer reopens the owner question without losing history. Truncated legacy end evidence is identified as incomplete in the archive, and duplicate status fields are refused. Delivery off the default branch, or without evidence, fails the leg. | R-BTN-131, R-BTN-116, R-BTN-64 |
 | **§6** | | |
 | S-BTN-10 no reviewer capacity | With every review seat barred, `review` is posted `waiting` and its holder suspends; the leg is offered again after the lift; `baton.stalled` is raised at R-BTN-167's default. | R-BTN-67, R-BTN-167 |
 | S-BTN-20 the leg's account exhausted mid-leg | A leg whose account instance runs out ends `released:blocked` on `resource` with a reading for that instance, not failed; an override claim is accepted and work on another instance continues. | R-BTN-126, R-BTN-76 |
@@ -175,7 +177,7 @@ Scenarios for designs that are not built are in
 | S-BTN-64 executor-only legs | A leg requiring a capability its course declares executor-provided is offered only to a runner whose executor provides it; declaring the name, or being granted it, does not count (`missing-capability`); with no providing runner live the leg has a `capability` block. | R-BTN-107, R-BTN-121 |
 | S-BTN-69 registration and API keys | A registration token bounds what registers with it: SSH and API registrations get grants within its scope, and one beyond it is refused; with `api_keys: false` an API-key runner is refused at its next call; revoking the token revokes what it registered. | R-BTN-117, R-BTN-159 |
 | S-BTN-71 stopping a leg | A leg that ignores a release abort is stopped according to R-BTN-119; the claim ends `released:requested` with no hold. Enforcement of the end-to-end bound in R-BTN-145 is pending. | R-BTN-119, R-BTN-145 |
-| S-BTN-75 a bounded run | A runner started with a leg list, a leg count and an end time claims only the named legs, suspends before any other, and starts nothing after the time. | R-BTN-72 |
+| S-BTN-75 a bounded run | A runner started with a leg list, a leg count and an end time claims only the named legs, suspends before any other, and starts nothing after the time. A first or successor advance arriving at the cutoff leaves no start in the record. | R-BTN-72, R-BTN-106 |
 | S-BTN-77 host allowlists | A `session_url` is kept only on an allowlisted host and within R-BTN-113's bounds; others are dropped and logged; a host added to the list is kept from then on. | R-BTN-113 |
 | S-BTN-78 the `session` executor | A leg run by the shipped `session` executor gets a brief with no top-level claim id or credential fields; its `env` follows R-BTN-144, including credential inheritance. The runner checks its result like any move. | R-BTN-107, R-BTN-106, R-BTN-144 |
 | S-BTN-208 the `builtin` executor | A runner with no executor configured declares the `builtin` executor and runs legs as child processes with the same environment, channel, log, masking and stop behaviour; every other scenario passes on it. | R-BTN-107 |

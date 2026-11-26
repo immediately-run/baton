@@ -63,6 +63,7 @@ export interface RunArgs {
    *  1 to 32, default 1 (one claim in the home checkout, as before); each claim beside another
    *  works in a clone of its own. */
   concurrency: number;
+  bounds?: { legs?: string[]; maxLegs?: number; until?: number };
   restartWhenBehind: boolean;
 }
 
@@ -102,6 +103,20 @@ export function parseRunArgs(argv: string[], env: NodeJS.ProcessEnv = process.en
     else if (a === '--tier') out.tier = value();
     else if (a === '--course') out.course = value();
     else if (a === '--executor') out.executor = value();
+    else if (a === '--legs') {
+      const legs = [...new Set(value().split(',').map((leg) => leg.trim()))];
+      if (legs.length > 50 || legs.some((leg) => !/^[a-z][a-z0-9-]{0,39}$/.test(leg))) throw new Error('--legs: 1 to 50 comma-separated leg names');
+      (out.bounds ??= {}).legs = legs;
+    } else if (a === '--max-legs') {
+      const n = Number(value());
+      if (!Number.isSafeInteger(n) || n < 1) throw new Error('--max-legs: a positive integer');
+      (out.bounds ??= {}).maxLegs = n;
+    } else if (a === '--until') {
+      const instant = value();
+      const until = Date.parse(instant);
+      if (!Number.isFinite(until) || !/(?:Z|[+-]\d\d:\d\d)$/i.test(instant)) throw new Error('--until: an ISO timestamp with a time zone');
+      (out.bounds ??= {}).until = until;
+    }
     else if (a === '--concurrency') {
       const n = Number(value());
       if (!Number.isInteger(n) || n < 1 || n > 32) throw new Error('--concurrency: an integer from 1 to 32 (R-BTN-4)');
@@ -149,6 +164,9 @@ export const RUN_USAGE = [
   '                      serve the grant. A machine without a browser narrows, e.g. llm-call,create-pr.',
   '  --course <id>       narrows the courses served to this one, of those the home declares.',
   '                      Absent, the runner serves and declares every course the home declares.',
+  '  --legs a,b         claims and chains into only these named legs.',
+  '  --max-legs <n>     suspends before running more than n legs in one claim (default 8).',
+  '  --until <instant>  stops starting legs at this timestamp (ISO with time zone).',
   '  --executor <source> how legs run (R-BTN-107): builtin (the default — child processes) or',
   '                      pinned:<dir>@sha256:<digest>, a host bundle loaded only when its digest',
   '                      matches. Also BATON_EXECUTOR; never read from the repository.',
@@ -563,11 +581,13 @@ export async function runMain(argv: string[], io: { log?: (l: string) => void; f
     ...(a.testHarness ? { testHarness: true } : {}),
     ...(maskEnv ? { maskEnv } : {}),
     ...(a.concurrency !== 1 ? { concurrency: a.concurrency } : {}),
+    ...(a.bounds ? { bounds: a.bounds } : {}),
   });
   try {
     const result = await runner.work();
     if (!exitCode) exitCode = result;
   } finally {
+    runner.stop();
     process.off('SIGINT', onSignal);
     process.off('SIGTERM', onSignal);
     process.off('SIGHUP', onSignal);

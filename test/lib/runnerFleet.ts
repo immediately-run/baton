@@ -2,7 +2,7 @@
 // two repositories, their owners, and runners registered with granted keys through the runner
 // routes themselves — a heartbeat, a claim, an advance, activities — each signed with its key.
 import { expect } from 'vitest';
-import { adminSession, cutover, Git, hbBody, keyCall, ORIGIN, requestId, rows, setAdminKeys, setClock, sha256, withCore } from '../helpers';
+import { adminSession, cutover, Git, hbBody, keyCall, ORIGIN, requestId, setAdminKeys, setClock, sha256, withCore } from '../helpers';
 import { makeKey, signedRequest, type TestKey } from './sshKeys';
 import { call as hostCall } from '#host';
 
@@ -66,11 +66,4 @@ export async function fleet(at: number): Promise<Fleet> {
   expect((await git.post()).status).toBe(200);
   await cutover(at);
   return { admin, docsOwner, opsOwner, git, cookie: await adminSession(admin) };
-}
-
-/** An active claim on a ticket of another repository, seeded as the harness does (the read
- *  under test only tells that it exists). */
-export async function claimElsewhere(runner: number, ticket: string, at: number) {
-  await rows(`INSERT INTO claims (ticket_id, runner_id, request_id, nonce, snapshot_sha, claimed_at, status) VALUES (?, ?, ?, 'abc123', '', ?, 'active')`,
-    ticket, runner, `seed:${runner}:${ticket}`, at);
 }

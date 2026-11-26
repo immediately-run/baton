@@ -14,7 +14,10 @@
 // Runs on both hosts (the rows_read case on Cloudflare only).
 import { describe, it, expect, beforeEach } from 'vitest';
 import { CLOCK_BUCKET_MS } from '../../src/core/stateVersion';
-import { HOST, adminSession, cutover, Git, keyCall, ORIGIN, rows, sessionCall, setAdminKeys, setClock, withCore } from '../helpers';
+import {
+  HOST, adminSession, cutover, Git, keyCall, ORIGIN, rows, sessionCall, setAdminKeys, setClock, withCore,
+  removeRepositoryOwner,
+} from '../helpers';
 import { makeKey, signedRequest, type TestKey } from '../lib/sshKeys';
 import { call as hostCall } from '#host';
 
@@ -117,7 +120,7 @@ describe('S-BTN-252 the reads’ ETags (B-205)', () => {
     // An owner whose ETag was good, once it owns the repository no more.
     const mine = (await signed(owner, BOARD)).headers.get('ETag')!;
     expect((await signed(owner, BOARD, { 'If-None-Match': mine })).status).toBe(304);
-    await rows('UPDATE repository_owners SET removed_at = ? WHERE fingerprint = ?', T0, owner.fingerprint);
+    await removeRepositoryOwner(owner.fingerprint, T0);
     const revoked = await signed(owner, BOARD, { 'If-None-Match': mine });
     expect([401, 403]).toContain(revoked.status);
   });

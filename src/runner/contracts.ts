@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { TextDecoder } from 'node:util';
 import { gitPointer, pointerAllowed, S3_POINTER, type PointerReach, type PointerRepository } from '../core/contractPointers';
 import { declaredOutputFault, type ResolvedInput } from '../core/contracts';
 import { checkOutputs, type Output } from '../core/validate';
