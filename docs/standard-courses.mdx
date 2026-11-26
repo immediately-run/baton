@@ -77,10 +77,12 @@ runs nothing and leaves no marker: it suspends with `review` next, and the sync 
 from that CI. Only a ticket with several PRs at home, which the gate cannot choose between,
 waits on the owner as `run-tests-unreachable`, whose `skip` waives the gate for it.
 
-**Review uses a different credential.** `review` names `implement` and `fix` in `no_chain_from`
-([R-BTN-106](../spec/BATON_SPEC/08-runners.md#sec-8-3)), so passing the test gate never makes
-an authoring credential eligible to review the ticket. The review instructions also require a
-different model when the runner offers one; Baton gates on credentials, not models.
+**Review may run under the credential that wrote the change.** `review` names nothing in
+`no_chain_from` ([R-BTN-106](../spec/BATON_SPEC/08-runners.md#sec-8-3)): each leg runs in its own
+sandbox, isolated from the others, so a different credential adds no independence, and a
+deployment with one runner must still be able to review (the owner, 2026-11-25; B-30 had set
+`implement` and `fix` there). The review instructions require a different model when the runner
+offers one.
 
 ## A ticket already delivered
 
