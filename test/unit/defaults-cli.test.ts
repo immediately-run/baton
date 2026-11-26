@@ -44,7 +44,9 @@ const REAL_GIT = execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8'
  * resolve; a child process reads it where git's stderr would print. */
 mkdirSync(join(ROOT, '.local'), { recursive: true });
 const BUNDLE = join(mkdtempSync(join(ROOT, '.local', 'baton-cli-bundle-')), 'baton-cli.mjs');
-const baton = (cwd: string, ...args: string[]) => execFileSync('node', [CLI, ...args], { cwd, encoding: 'utf8', env: { ...process.env, BATON_HOME: cwd } });
+// `course show` prints every leg's bundled stub: past Node's 1 MiB default once the stubs carry
+// the forge clients (B-273), so the buffer is the control walks' 16 MiB.
+const baton = (cwd: string, ...args: string[]) => execFileSync('node', [CLI, ...args], { cwd, encoding: 'utf8', env: { ...process.env, BATON_HOME: cwd }, maxBuffer: 16 * 1024 * 1024 });
 const gitInit = (dir: string) => {
   execFileSync('git', ['init', '-q', '-b', 'main', dir], { stdio: 'ignore' });
   execFileSync('git', ['-C', dir, 'config', 'user.email', 't@t'], { stdio: 'ignore' });
