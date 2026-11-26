@@ -24,7 +24,7 @@ Today five things set a ticket's queued leg (the finishing leg's `next`, the syn
 
 ### What to build
 
-1. **Settle the proposal first.** Its §9 holds three open questions (a default selector, the `because` text under R-BTN-33, the selector's budget and an untaken want's timeout). Put them to the owner, then amend the spec by pull request before any code.
+1. **Settle the proposal first.** The owner ruled on two of its §9 questions on 2026-11-26: a built-in default selector ("Yes"), and `because` as JSON ("JSON, can contain url to reason file or simple text in "reason" field"). The third, the selector's budget and an untaken want's timeout, the owner left open ("not sure"): measure the standard selectors and propose values in the spec PR. Amend the spec by pull request before any code.
 2. **The selector and its verdict.** `select.mjs` per course, `select(ctx)` through the wrapper (R-BTN-133). Core builds `ctx` from Baton's record alone: position, outputs, facts, subscribed readings, dependencies, fleet and `now`. It checks the verdict (`run`, `wait`, `attention`) and stores it with the input digest, the course version and the runner key.
 3. **Selection by runners.** The finishing runner selects with its `advance` or end over the `ctx` core hands it. Otherwise a selection want is offered to any live runner granted for the repository and course.
 4. **`needs` matching.** Core matches a `run` verdict's `needs` against runners' declared dimensions when offering the leg, and distinguishes waiting for capacity from no registered runner being able to take it.

@@ -85,11 +85,12 @@ a pointer, since fetching would end its purity.
 ```js
 { run: "merge",
   needs: { memory_mb: 4096, capabilities: ["github-api"] },
-  because: [{ check: "approved", ok: true, value: "2 reviews at 3f2a1c" },
-            { check: "ci-green", ok: true }] }
+  because: [{ check: "approved", ok: true, reason: "2 reviews at 3f2a1c" },
+            { check: "ci-green", ok: true,
+              url: "https://github.com/immediately-run/baton/actions/runs/123" }] }
 
 { wait: { until: "2026-11-26T15:02:00Z", on: ["reading:github-api/rate"] },
-  because: [{ check: "github-rate", ok: false, value: "0 of 5000, resets 15:02" }] }
+  because: [{ check: "github-rate", ok: false, reason: "0 of 5000, resets 15:02" }] }
 
 { attention: "review requested changes and fix has run 3 of 3 times",
   because: [...] }
@@ -101,9 +102,13 @@ a pointer, since fetching would end its purity.
   type, a reading, a dependency). At least one of the two is required: a wait that names neither
   is refused as an `attention`.
 - **`attention`** says that no leg can be chosen without a person, and why.
-- **`because`** lists the checks the selector made, each `{check, ok, value?}`: `check` an
-  identifier, `value` at most 128 characters. Core stores it bounded like an inline value
-  (R-BTN-108) and the dashboard shows it as text (§10.4).
+- **`because`** is JSON: a list of the checks the selector made, each `{check, ok, reason?,
+  url?}` (the owner, 2026-11-26: "JSON, can contain url to reason file or simple text in
+  "reason" field"). `check` is an identifier; `reason` is simple text; `url` points to a file
+  that gives the reason at length, a pointer in R-BTN-82's schemes, which Baton checks and never
+  fetches. Core stores the list bounded like an inline value (R-BTN-108: fixed keys, every string
+  bounded), which keeps it within R-BTN-33, and the dashboard shows `reason` as text and `url` as a
+  link (§10.4).
 
 ### 3.3 What core does with it
 
@@ -149,7 +154,7 @@ Core runs no repository code. A selection is a small job a runner takes:
 - **Otherwise** — a fact, a reading, a dependency or an `until` fired — core records a
   **selection want** for the ticket, carrying the built `ctx`. Any live runner with a grant for the
   repository and the course in its declared `courses` takes it, runs the selector and posts the
-  verdict in a signed request. A want no runner takes within a set time (§9, question 3) shows
+  verdict in a signed request. A want no runner takes within a set time (§9, item 3) shows
   as "awaiting selection: no runner can take it", with its age.
 
 Sandboxing is the runner host's executor, as for a leg (R-BTN-107): Fieldhouse's E2B executor
@@ -189,17 +194,23 @@ checkout and seconds of time, it can take the executor's strictest profile.
 The owner's route stays, as an explicit pin over the selector (`next_source: owner`), as do Baton's
 own transitions (R-BTN-116, R-BTN-122).
 
-## 9. Open questions
+## 9. Rulings and the open question
 
-1. **Course order.** Should a course with no `select.mjs` fall back to a built-in default — the
-   first leg out of the station, in course order, whose declared `needs` the fleet meets — or
-   should every course be required to ship one? The standard courses would ship theirs either
-   way.
-2. **The `because` text and R-BTN-33.** Baton stores no item text. `because` values are
-   course-written: bounded to 128 characters and shown as text, or kept to identifiers and
-   numbers only?
+Ruled by the owner, 2026-11-26:
+
+1. **A default selector: "Yes".** A course with no `select.mjs` uses the CLI's built-in default:
+   the first leg out of the station, in course order, with the `needs` the leg declares in
+   `course.json`. It verdicts `run` on that leg, or `attention` when no leg leaves the station.
+   The standard courses ship their own selectors where they branch.
+2. **`because` is JSON**, with simple text in `reason` or a `url` to a reason file (§3.2).
+
+Still open — the owner, 2026-11-26: "not sure":
+
 3. **The selector's own budget.** Time and memory limits per call, what a runner declares to take
-   selection wants, and how long an untaken want waits before the board says no runner can take it.
+   selection wants, and how long an untaken want waits before the board says no runner can take
+   it. B-351 measures the standard selectors and proposes values in its spec PR. Starting point,
+   to be replaced by those measurements: 10 seconds and 256 MB per call, and a want untaken for 15
+   minutes (one sync interval) shown as "no runner can take it".
 
 ## 10. Scenarios (to be numbered when built)
 
