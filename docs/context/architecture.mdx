@@ -119,7 +119,7 @@ doorbell. Today Baton's only outbound act is a workflow dispatch, and runners wr
 ## Where code lives
 
 - **Course code never core.** `src/defaults/` (the standard courses, the CLI's sync and
-  init) is exempt from the boundary test and core imports nothing from it: what a
+  init) is exempt from the boundary test and core imports nothing from it: what an
   arena does with its tickets is that arena's code, shippable and versioned
   apart from the engine.
 - **One core, both hosts.** `src/core/` runs unchanged on the Durable Object and the

@@ -23,17 +23,46 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   The front gains a terminology note: the unit Baton coordinates — one ticket source, its
   configuration and everything Baton owns about its tickets — is an **arena** in the vocabulary
   (the owner, 2026-11-26: "repository" made Baton read as if it could serve only git-held
-  tickets, while a ticket source may be a tracker such as Linear; "home", the CLI's word, was
-  retired with it). The spec keeps writing it `repository` until a rename of its own, staged with
-  the API's and the CLI's names, the old names accepted meanwhile. Recorded beside it, as
-  proposals and context, not rules: [human intent and autonomy](../docs/context/human-intent.mdx)
-  (who drives an act is the acting credential's; Baton constrains autonomy, not people, never the
-  lock or the record), [ticket ownership](proposals/ticket-ownership.md),
-  [personal secrets](proposals/personal-secrets.md), people as entities
-  ([people and dashboard §5](proposals/people-and-dashboard.md#5-people-roles-and-identities)) and
-  interventions split by driver ([intervention sessions](proposals/intervention-sessions.md)).
-  Dibber, the git-native ticket format, moved to its own repository,
-  [immediately-run/dibber](https://github.com/immediately-run/dibber).
+  tickets, while a ticket source may be a tracker such as Linear; "home" retires with it). The
+  spec keeps writing it a registered repository, and a ticket's arena its home, until a rename of
+  its own, staged with the API's and the CLI's names, the old names accepted meanwhile.
+  Recorded beside it, as proposals and context, not rules:
+  [human intent and autonomy](../docs/context/human-intent.mdx) (the key decides who drives,
+  never the channel; Baton constrains agent-driven work, not people, never the lock or the
+  record), [ticket ownership](proposals/ticket-ownership.md),
+  [personal secrets and notification](proposals/personal-secrets.md), people for accountability and
+  notification ([people and dashboard §5](proposals/people-and-dashboard.md#5-people-identities-and-the-roster)),
+  interventions split by driver ([intervention sessions](proposals/intervention-sessions.md)), and
+  what waits for unattended operation ([hardening](proposals/hardening.md)). Dibber, the git-native
+  ticket format, lives in its own repository, [immediately-run/dibber](https://github.com/immediately-run/dibber).
+  - **Round one** (2026-11-26, PR #449): three fresh reviewers — consistency, security,
+    executability — given the diff and the impact list. Every finding checked against the text.
+    - Found in all three: `human-operator` is a runner's own statement, so making such a runner
+      human-driven let an agent create and claim at once. The owner: a runner is always
+      agent-driven.
+    - The session claim had no fence (the `pre-push` hook is a runner's) and its lease no runner
+      row: an MCP session claim is requeued onto a fresh branch, a late push is outside work, and
+      the CLI's attached-runner mode is the second form.
+    - An unwritten ticket contradicted §9.1, R-BTN-5/34 and R-BTN-33: the owner allows Baton the
+      start text, at most 1,024 characters, until the store has it; the claim answer carries it;
+      under `tickets-approved` no leg runs before its hash is approved.
+    - Whoever controls the notifier key list could read every secret, against the proposal's
+      claim: stated as an accepted risk, its fix parked in the hardening proposal (the owner:
+      premature before Baton runs unattended). Versions never reset; a re-encryption keeps the
+      inner hash; channels are verified per secret version; secrets are set only by SSH keys.
+    - "Interactive keys never satisfy the approver lists" was withdrawn: the owner ruled the key
+      decides, never the channel; a token's proof is what a `human_only` or hardware list refuses.
+      Interactive grants are short-lived OAuth grants, built now.
+    - A forge identity cannot say who drives (the owner): linked forge accounts attribute only;
+      `human_identity` stays as the spec has it, and "several people's forge identities" was
+      dropped.
+    - People carry no authority (the owner: no RBAC in Baton, leave it to the forge): the
+      contributor role became the roster, read from the forge; no groups, no `answerers`, no
+      escalation steps. From the earlier users-and-groups proposal (#300, closed) the notifier's
+      due read, `std:notified@1`, `baton.notifier-silent` and the attach code were kept.
+    - Text: "autonomous" for credentials became **agent-driven** (an autonomous leg is R-BTN-195's);
+      "dashboard sessions" built only for administrators; the terminology note on "home"; every
+      proposal's Amends list completed (R-BTN-53, R-BTN-130, R-BTN-163, R-BTN-5/34, §9).
 
 - **2026-11-21 — Sign-in through Cloudflare Access (R-BTN-155, R-BTN-57, S-BTN-308).**
   Rules changed: R-BTN-155, R-BTN-57, R-BTN-16, R-BTN-149, R-BTN-185, R-BTN-188; G-BTN-144, S-BTN-124. The

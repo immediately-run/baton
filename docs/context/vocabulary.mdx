@@ -13,7 +13,8 @@ belongs to a course, and Baton passes it through unread.</Lede>
 (`.baton/`), kept in a git repository, the arena's **config repository**; everything Baton owns
 about those tickets — where each stands in its course, its history, claims and attestations; and
 the arena's owners, its policy and its grants (and, proposed, its people's roles and its notifier
-keys). Its sync tells Baton where every ticket is. One Baton serves many arenas. What an arena
+keys). Its sync tells Baton which tickets its source holds and what git shows of them; where each
+stands is Baton's own record (R-BTN-39). One Baton serves many arenas. What an arena
 covers is its owners' choice (the owner, 2026-11-26). **The spec, the API, the CLI and the
 dashboard still write an arena as a `repository`** — `/v1/repositories/{repository}`, `--repo`,
 the screens `repository/…`, `repository_owners` — **and the arena a CLI command acts on as its
@@ -24,7 +25,8 @@ accepted meanwhile.
 else. An arena's configuration lives in its config repository; a Dibber ticket store usually lives
 there too. The repositories an arena's tickets' work changes are its **code repositories**: its
 owners list them in `code_repos` (an arena that lists none reaches them by name where its policy's
-`repos.unlisted` allows, R-BTN-140), and they hold no tickets of their own.
+`repos.unlisted` allows, R-BTN-140). A code repository holds no tickets, unless it is also the
+arena's config repository.
 
 **Ticket.** A unit of work, filed in its arena's ticket source. Baton knows its id, course,
 tier and requirements, never its body.
@@ -99,7 +101,7 @@ position and count Baton owns, are a **coordination record** for runners that co
 pusher can re-file a ticket or edit its course and Baton does not try to notice; under
 `protected` the forge and the trusted runners make the same state a boundary (R-BTN-66).
 
-**Sync, snapshot, observation.** The arena's sync reads git and posts a **snapshot**.
+**Sync, snapshot, observation.** The arena's sync reads its ticket source and git and posts a **snapshot**.
 Each carries an **observation** number, so a stale reading never overrules a newer one.
 
 **Confirmation.** A completion counts once a later snapshot shows its evidence; its position
@@ -221,26 +223,35 @@ only by a human ([proposed, not built](../../spec/proposals/security.md)).
 **Human-only key.** A key used for nothing else and kept out of every agent's reach; only it
 satisfies a human gate.
 
-**Human-driven, autonomous.** Who drives an act is the acting credential's: one that carries a
-person's identity is **human-driven**, one that carries a runner and a purpose is **autonomous**.
-A human-driven act may relax the safeguards made for autonomous work, never the lock or the
-record; how strongly a person must prove it is the policy's, a separate axis
-([human intent](human-intent.mdx)). An agent leg a person joins stays autonomous.
+**Human-driven, agent-driven.** Who drives an act is decided by the credential that makes it, never
+by the channel: one that carries a person is **human-driven**, one that carries a runner and a
+purpose is **agent-driven**. A runner is always agent-driven, `human-operator` included; a forge
+identity never says who drives. A human-driven act may relax the safeguards made for agent-driven
+work, never the lock or the record; how strongly a person must prove an act is the policy's, a
+separate axis ([human intent](human-intent.mdx)). An agent leg a person joins stays agent-driven.
+Not to be confused with an **autonomous leg**, which never asks for a person (R-BTN-195).
 
-**Person, contributor** ([proposed, not built](../../spec/proposals/people-and-dashboard.md#5-people-roles-and-identities)).
-A person is an entity of the tenant: the keys they authenticate with and the identities linked to
-them. Roles belong to people, per arena: owner, and **contributor** for everyone else who starts
-courses, claims, answers and is notified; keys prove who is acting.
+**Person, roster** ([proposed, not built](../../spec/proposals/people-and-dashboard.md#5-people-identities-and-the-roster)).
+A person is the tenant's record of someone, for accountability and notification: their own keys
+and the identities linked to them. A person confers no authority; roles stay on keys. An arena's
+**roster** is the people who may start a course or hold a claim there: those whose linked forge
+account can push to its config repository, as the forge says.
+
+**Interactive grant** ([proposed, not built](../../spec/proposals/people-and-dashboard.md#5-people-identities-and-the-roster)).
+A person's MCP credential: an OAuth grant, short-lived and ended with its session, human-driven,
+acting with the person's role at the proof a token carries.
 
 **Session claim** ([proposed, not built](../../spec/proposals/ticket-ownership.md)). A claim held
-by a person's interactive delegated key instead of a runner key: one claim like any other, leased
-and fenced, renewed by the session's calls, requeued when abandoned.
+by a person's own session rather than a runner: through MCP with an interactive grant, or through
+the CLI's attached-runner mode. One claim like any other, leased and fenced; a lapsed one is
+requeued onto a fresh branch.
 
 **Unwritten ticket** ([proposed, not built](../../spec/proposals/ticket-ownership.md)). A ticket
-Baton started (`course.start`) that its ticket source does not hold yet; the store's first read of
-it makes its store-owned fields the store's.
+Baton started (`course.start`) that its ticket source does not hold yet. Baton keeps its start
+text, at most 1,024 characters, until the store's first read of it, which makes its store-owned
+fields the store's.
 
 **Notifier, sealed secret** ([proposed, not built](../../spec/proposals/personal-secrets.md)). A
-**notifier** is a delivery runner holding a notifier key; a **sealed secret** is a person's secret
-signed with their SSH key and encrypted with age to an arena's notifier keys, which Baton stores
-and its owner may overwrite, never read.
+**notifier** is a delivery runner with a notifier key of its own; a **sealed secret** is a person's
+secret signed with their SSH key and encrypted with age to an arena's notifier keys, which Baton
+stores and the person who set it may overwrite, never read.

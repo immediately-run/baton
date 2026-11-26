@@ -1,6 +1,6 @@
 ---
 title: Human intent and autonomy
-description: Who is driving an act — a person or an autonomous agent — is a property of the credential that makes it; Baton constrains autonomy, not people, and never relaxes the lock or the record for anyone.
+description: Who drives an act — a person or an agent — is decided by the key that makes it, never by the channel; Baton constrains agent-driven work, not people, and never relaxes the lock or the record for anyone.
 nav: Human intent
 order: 2
 tags: [context]
@@ -11,57 +11,84 @@ exist because much of that work runs with no human watching. A person, though, h
 credentials — inference, the forge, the cloud — to do anything outside Baton that Baton could
 forbid inside it. So Baton's aim is not to straitjacket people: it is to make mixed human, agentic
 and deterministic workflows **predictable, observable and safe**. This page says how Baton tells
-the two apart and what changes when a human drives (the owner, 2026-11-25 and 2026-11-26).</Lede>
+the two apart and what changes when a person drives (the owner, 2026-11-25 and 2026-11-26).</Lede>
 
 The rules here are the owner's decisions and stand now. Most of the mechanisms that carry them —
-interactive and autonomous delegated keys, session claims — are
+interactive MCP grants, session claims, people — are
 [proposed, not built](#what-is-built-and-what-is-proposed); until they are, a rule that names
 them is the design those mechanisms follow.
 
-## 1. Who drives is a property of the acting credential
+## 1. The key decides who drives, never the channel
 
-Baton cannot observe who is typing: an agent session making calls looks the same whether a person
-steers it or it runs in a loop. So "human-driven" is defined by **the credential that acts**, as a
-capability is: a statement Baton records and matches and never verifies ([values](values.mdx)
-#12).
+Baton cannot observe who is typing: an agent making calls looks the same whether a person steers
+it or it runs in a loop. So who drives is decided by **the credential that acts**, a statement
+Baton records and matches and never verifies ([values](values.mdx) #12).
 
 | A credential that carries… | Is | Its acts are attributed to |
 |---|---|---|
-| **a person's identity** | **human-driven** | that person |
-| **a runner and a purpose** (generally one leg run) | **autonomous** | that runner's run |
+| **a person** | **human-driven** | that person |
+| **a runner and a purpose** (generally one leg run) | **agent-driven** | that runner's run |
 
-- **Human-driven credentials:** a dashboard session (someone signed in); an owner key used from a
-  person's own terminal; an **interactive** delegated (MCP) key; a runner key granted to a person,
-  the runner declaring `human-operator`.
-- **Autonomous credentials:** a runner key without `human-operator`; an **autonomous** delegated
-  key.
-- **An interactive key bakes in its holder's identity** and is minted only for oneself: no one
-  mints a key that acts as someone else. **An autonomous key carries its runner and its purpose**
-  — a leg run, an intervention — is scoped to what that purpose needs, and dies with it.
+The channel says nothing about it:
+
+| Channel | Who drives |
+|---|---|
+| The dashboard | always a person: someone signed in. The policy may ask for a hardware key to prove it (§2). |
+| The CLI | the key's: a person's own SSH key is human-driven; a runner's key, in a sandbox or anywhere, is agent-driven. |
+| MCP | the credential's: a person's **interactive grant** is human-driven; a key minted for an agent's purpose is agent-driven. |
+
+- **A person's credentials are their own.** A person registers their own keys and signs in for
+  themselves; no one gets a credential that acts as someone else. Claude Code driven by a person
+  uses that person's credential, and its acts are the person's.
+- **An interactive MCP grant is short-lived and ends with its session.** It is an OAuth grant
+  ([BATON_MCP_OAUTH_SPEC](../../spec/BATON_MCP_OAUTH_SPEC.md)): a short-lived access token, its
+  refresh capped and ended by idleness, so a grant left in an agent's configuration does not
+  outlive the session it was made for. No long-lived bearer key is human-driven.
+- **A runner is always agent-driven.** A runner key carries a runner. `human-operator` is a
+  runner's own statement, matched to route legs that want a person at the runner's terminal; it
+  never makes the runner human-driven.
+- **An agent-driven key carries its runner and its purpose** — a leg run, an intervention — is
+  scoped to what that purpose needs, and dies with it.
 - **An agent leg a person joins stays agent-driven.** Its actor is the runner that claimed it; the
-  person who opens its session link (R-BTN-195) holds no credential in Baton and acts in the
-  harness, not in Baton. Joining a session is not taking it over.
+  person who opens its session link (R-BTN-195) acts in the harness, not in Baton. Joining a
+  session is not taking it over. (An **autonomous leg** is another thing: a leg that never asks for
+  a person at all, R-BTN-195.)
+- **A forge identity never says who drives.** A forge cannot tell a person's push from their
+  agent's. A forge account linked to a person says *which* person — attribution — never that a
+  person, not an agent, acted. The policy's `human_identity` (R-BTN-188) stays what the spec makes
+  it: a promise of custody, which Baton cannot check.
 
-## 2. How strongly intent is proven is a separate axis
+## 2. How strongly a person must prove it is a separate axis
 
-Who drives decides how Baton **behaves**. How much proof an act needs that a human made it — a
-dashboard sign-in, a `human_only` key, a hardware key — is the arena's **policy**, per action
-([BATON_SPEC §12.8](../../spec/BATON_SPEC/12-security.md#sec-12-8)). The two never stand in for
-each other: no rule reads a proof level as the driver, and no rule reads the driver as a proof.
-Under `cooperative` the identity a credential carries is enough; a stricter policy may ask a
-human-driven act for a stronger proof, and the act is refused, not reclassified, without it.
+Who drives decides how Baton **behaves**. How much proof an act needs is the arena's **policy**,
+per action ([BATON_SPEC §12.8](../../spec/BATON_SPEC/12-security.md#sec-12-8)); its approver lists
+already speak in proofs: `[owner]` admits any owner key, `[human]` a `human_only` key kept out of
+every agent's reach, and the policy may require that key to be a hardware key.
+
+| Credential | The proof it carries |
+|---|---|
+| a dashboard session | the sign-in that opened it |
+| a request the CLI signs with an SSH key | that key; a hardware key, a touch for each signature |
+| an MCP bearer or OAuth token | the token alone: whose credential it is, never that the person was present |
+
+The two axes never stand in for each other: no rule reads a proof as the driver or the driver as a
+proof. Under `cooperative`, a person's interactive grant is admitted wherever their key's role is
+— governance acts on an `[owner]` list included. Under `protected`, a list that requires a
+`human_only` or hardware key refuses a token for its proof, not for its channel, and the act is
+refused, never reclassified.
 
 ## 3. What a human-driven act may relax, and what it never does
 
-**It may relax the safeguards that exist for autonomous work**, because the same act done outside
-Baton would not meet them either:
+**It may relax the safeguards that exist for agent-driven work**, because the same act done
+outside Baton would not meet them either:
 
-- creating a ticket and claiming it at once — for an autonomous credential, remote code execution;
-  for a person, what they could do with their own forge credential;
-- loosening what a delegated key may otherwise only tighten (R-BTN-186);
-- filing a ticket that is not a proposal (`tickets.created: proposed` is for autonomous filers);
+- creating a ticket and claiming it at once — for an agent-driven credential, remote code
+  execution; for a person, what they could do with their own forge credential;
+- what a delegated key may otherwise only tighten (R-BTN-186), up to what the person's own role
+  and proof admit;
+- filing a ticket that is not a proposal (`tickets.created: proposed` is for agent-driven filers);
 - approving content it wrote: work a human-driven session wrote and committed is approved by that
-  act, unless the policy asks for a stronger proof (section 2).
+  act at the proof it carries, unless the policy asks for a stronger one (§2).
 
 **It never relaxes two things:**
 
@@ -72,48 +99,60 @@ Baton would not meet them either:
 - **The record.** Every act is recorded with who drove it and the proof it carried. Allowed never
   means invisible: an act a person made directly is as findable afterwards as one a runner made.
 
-## 4. Channels are not drivers
+## 4. An agent-driven act beyond its scope
 
-MCP, the CLI, the HTTP API and the dashboard are channels. The same channel serves both kinds of
-credential, with different behaviour:
+Today Baton refuses it (`forbidden`). Where an intervention runs agent-driven
+([proposed](../../spec/proposals/intervention-sessions.md)), such an act becomes a **request** an
+approver confirms on Baton's own page, reached from the page or from a delivery runner's channel
+(ntfy, Slack) that links there. A human-driven credential files no request: the person acts
+directly, within what their role and proof admit.
 
-- With an **autonomous** credential, an act beyond its scope is a **request** a person confirms —
-  on Baton's own page, or through a delivery runner's channel (ntfy, Slack) that links there.
-- With a **human-driven** credential, the person **acts directly**: no confirmation step stands
-  between them and an act their credential may take.
+## 5. The accepted risk
 
-## 5. The caveat, and why it does not change the rule
-
-In a human-driven agent session, the agent issues the calls, and it reads text anyone who can push
-wrote. An injected instruction can act through the person's session. That is no different from
-what the same agent can already do with the person's forge and inference credentials outside
-Baton: protecting a person's own session is the harness's work (its permission prompts), not
-Baton's. Baton's part is the record, so the act is found afterwards, and a warning where a person
-connects an agent to it: a fresh session that holds nothing else is strongly advised.
+In a human-driven agent session the agent issues the calls, and it reads text anyone who can push
+wrote; an injected instruction acts through the person's credential. Outside Baton that agent
+already holds the person's forge and inference credentials. **Inside Baton it gains reach those do
+not give**: holds, adopts, expedites, and whatever governance acts the person's role admits at the
+proof the credential carries. Baton accepts this rather than ranking channels, and limits it three
+ways: interactive grants are short-lived and end with their session (§1); a policy that wants a
+governance act made only with a human-only or hardware key says so, and a token then cannot make
+it (§2); and every act is recorded as the person's. Protecting a person's own session is the
+harness's work (its permission prompts). Where a person connects an agent to Baton, Baton warns
+that a fresh session holding nothing else is strongly advised.
 
 ## 6. People
 
-A person is an entity of its own: an id, the keys they authenticate with, and the identities
-linked to them (forge accounts, emails, tracker accounts, contact identifiers). **Roles belong to
-people**, per arena — owner, and contributor for everyone else who starts courses, claims,
-answers and is notified — and **keys prove who is acting**. Several people may each declare a
-forge identity no agent uses, and a person's session claims have no ceiling beyond the lock (the
-owner, 2026-11-26; [people, roles and identities](../../spec/proposals/people-and-dashboard.md#5-people-roles-and-identities)).
-A person's secrets are sealed on their own machine and never readable by Baton
-([personal secrets](../../spec/proposals/personal-secrets.md)).
+A person is for **accountability and notification**: the credentials that are theirs, so every act
+is attributed; the identities linked to them; and how to reach them. A person confers **no
+authority**: roles stay on keys as the spec has them (owner keys, `human_only` keys, runner grants),
+and the policy's lists name roles, never people or groups. Access beyond Baton's own lock and
+policy is the forge's: an arena's **roster** — who may start a course or hold a claim — is the
+people whose linked forge account can push to its config repository, as the forge says, never a
+list Baton keeps ([people](../../spec/proposals/people-and-dashboard.md#5-people-identities-and-the-roster)).
+A person's secrets are sealed on their own machine, never readable by Baton
+([personal secrets](../../spec/proposals/personal-secrets.md)). Baton keeps no groups: notifying a
+team is a pull from Needs you, or one push to a channel the team already shares.
 
 ## What is built and what is proposed
 
-- **Built:** runner keys and their grants; owner and administrator keys; dashboard sessions; the
-  `human-operator` capability; `human_only` keys and the policy's human-only lists.
-- **Proposed:** delegated MCP keys at all, and their interactive and autonomous kinds
-  ([people and dashboard](../../spec/proposals/people-and-dashboard.md)); session claims held by an
-  interactive key, and creating then claiming a ticket in one session
+- **Built:** runner keys and their grants; owner and administrator keys; administrators' dashboard
+  sessions; the `human-operator` capability; `human_only` keys and the policy's human-only lists;
+  `human_identity`.
+- **Proposed:** owners' dashboard sessions and MCP
+  ([people and dashboard](../../spec/proposals/people-and-dashboard.md)), with interactive grants
+  and agent-driven keys; people, their linked identities and the roster
+  ([§5](../../spec/proposals/people-and-dashboard.md#5-people-identities-and-the-roster)); session
+  claims, and creating then claiming a ticket at once
   ([ticket ownership](../../spec/proposals/ticket-ownership.md)); interventions split by driver
-  ([intervention sessions](../../spec/proposals/intervention-sessions.md)); people as entities,
-  with roles and linked identities ([people and dashboard §5](../../spec/proposals/people-and-dashboard.md#5-people-roles-and-identities));
-  sealed personal secrets and notification preferences ([personal secrets](../../spec/proposals/personal-secrets.md)).
-- **To amend when built:** R-BTN-186 (tighten-only binds autonomous delegated keys, not
-  interactive ones), R-BTN-189's guarantees that read "a human" (they mean a human-driven act at
-  the proof the policy names), and the [vocabulary](vocabulary.mdx)'s *Delegated key*,
-  *Human-only key* and *Capability* entries, so each names one axis.
+  ([intervention sessions](../../spec/proposals/intervention-sessions.md)); sealed personal secrets
+  and notification ([personal secrets](../../spec/proposals/personal-secrets.md)).
+- **To amend when built:** R-BTN-186 — its limits (tighten only, never as `human`, never resolving
+  a condition, never writing an attestation or answering a person leg) bind agent-driven delegated
+  keys, while an interactive grant acts with its person's role at its proof; R-BTN-188 ("a
+  delegated key matches no entry" binds agent-driven keys; `tickets.created` speaks of agent-driven
+  filers); R-BTN-130 (the two kinds of MCP credential); R-BTN-163 (resolving a condition); R-BTN-185
+  (the owner's agent: a person's key used by their agent is human-driven at owner-key proof, and
+  still never satisfies `[human]`); R-BTN-189's guarantees that read "a human" (they mean the proof
+  they name); the Decisions entry on authority by credential; and the
+  [vocabulary](vocabulary.mdx)'s *Delegated key*, *Human-only key* and *Capability* entries, so each
+  names one axis.

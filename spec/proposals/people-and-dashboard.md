@@ -78,6 +78,10 @@ BATON_SPEC's sections are named with a rule or as `§11.3`, `§12.2`.
 ## 2. MCP
 
 - R-BTN-130 (proposed) — Baton serves MCP; a delegated key reaches what R-BTN-186 admits.
+  - **Two kinds of MCP credential** (2026-11-26, §5): a person's own agent signs in with an
+    **interactive grant**, human-driven and short-lived; the `bmcp_` key below is
+    **agent-driven**, minted for a runner and a purpose. The rest of this section describes the
+    `bmcp_` key.
   - **The MCP key is a delegated key** (R-BTN-186): an owner of one repository, for the action
     ids listed at its minting, within the registry's `delegated` marks (§1).
   - **Minting.** An approver on the repository's `approvers.members` (R-BTN-188) mints one:
@@ -300,50 +304,67 @@ BATON_SPEC's sections are named with a rule or as `§11.3`, `§12.2`.
   - **Controls.** Every control calls a registry action through `authorize`; what it takes is
     §3's table.
 
-## 5. People, roles and identities
+## 5. People, identities and the roster
 
 The owner's decisions of 2026-11-26, resting on
 [human intent and autonomy](../../docs/context/human-intent.mdx). Baton today knows keys, not
-people: administrators are keys, owners are keys per arena (written `repository` in the spec), a dashboard session is one key's,
-and the identities a person has — an Access email, a forge account, the policy's one
-`human_identity` — are not tied to each other. Nothing here is built.
+people: administrators are keys, owners are keys per arena (written `repository` in the spec), a
+dashboard session is one key's, and the identities a person has — an Access email, a forge
+account — are not tied to each other. Nothing here is built. It takes from the earlier
+*users and groups* proposal (immediately-run/baton#300, closed) the one-time attach code, and leaves
+the rest of it: groups, acceptance, approver entries naming people and `answerers` carry authority,
+and Baton does not do access control the forge already does (the owner, 2026-11-26).
 
-- **A person is an entity of the tenant.** It has an id, a display name, and:
-  - **its keys**, SSH or API, with which it authenticates (R-BTN-13): owner keys, `human_only`
-    keys, interactive delegated keys (§2), the runner keys of runners it operates
-    (`human-operator`), and the dashboard sessions any of them open;
-  - **its linked identities**: forge accounts by their immutable ids, Access emails, tracker
-    accounts, and contact identifiers (a Slack user id, an email address). Secrets are not
-    identities: they are sealed ([personal secrets](personal-secrets.md)).
+- **A person is for accountability and notification, never authority.** A person is the tenant's
+  record of someone: an id, a display name, the keys that are theirs and the identities linked to
+  them. It confers no role. Roles stay on keys, as the spec has them — owner keys (R-BTN-58),
+  `human_only` keys (R-BTN-185), runner grants — and the policy's lists name roles, never people
+  or groups. Baton keeps no groups: notifying a team is a pull from Needs you, or one push to a
+  channel the team already shares ([personal secrets](personal-secrets.md)).
+- **A person's credentials, and who drives.**
+  - **Keys.** A person's SSH keys, attached by their holder: a key the person already holds, or
+    an administrator, mints a one-time **attach code** (eight characters, ten minutes, used once,
+    stored as a hash), and the new key attaches itself with a request it signs carrying the code,
+    so a key is attached only by whoever holds it. Attaching confers nothing: a key attached to a
+    person is an owner of an arena only by that arena's `approvers.members` act, as today, and a
+    key attached by a key of lower proof carries no more proof than it.
+  - **Interactive grants.** A person's MCP credential is an OAuth grant
+    ([BATON_MCP_OAUTH_SPEC](../BATON_MCP_OAUTH_SPEC.md)) they approve for themselves: a short-lived
+    access token, its refresh capped (twelve hours, as a dashboard session) and ended by an idle
+    timeout. It is human-driven and acts with the role of the person's key that approved it, at
+    the proof a token carries ([human intent](../../docs/context/human-intent.mdx) §2). The MCP
+    endpoint stays stateless: a session claim or an intervention binds to the grant, whose
+    lifetime is the session's.
+  - **Agent-driven keys.** A `bmcp_` key (§2) is minted for a runner and a purpose, carries them,
+    and dies with the purpose; it is never human-driven. A person's own agent uses an interactive
+    grant instead.
+  - **A runner is always agent-driven**, `human-operator` included.
+- **Linked identities** — forge accounts by their immutable ids, Access emails, tracker accounts,
+  contact identifiers — say who a person is elsewhere: for attributing an act, resolving a
+  ticket's assignee, and reaching them. A linked forge account never says that a person rather
+  than their agent acted: a forge cannot tell. The policy's `human_identity` (R-BTN-188) stays as
+  the spec has it. A linked identity is used only once verified as the person's, and an
+  unverified one receives nothing.
+- **The roster.** An arena's roster is the people who may start a course there (`course.start`)
+  and hold a session claim: those whose linked, verified forge account can push to the arena's
+  config repository, as the forge reports it — the same question Baton already asks for pushers
+  (R-BTN-139). Baton keeps no list of them; who may push is the forge's to decide.
+- **No ceiling on a person's claims.** A person's session claims count against nothing but the
+  lock: one holder per ticket. `max_claims` bounds runners' grants.
+- **Self-serve.** A person manages their own keys (by attach code), linked identities, channels,
+  preferences and sealed secrets. An administrator creates and retires people, and may mint an
+  attach code for one.
+- **Migration.** Each owner key becomes a person holding it; a human with several owner keys
+  merges them by attach codes, one person per human. Each `ACCESS_IDENTITIES` line becomes an email
+  linked to its key's person; administrator keys become administrators' people. No key changes,
+  no role moves, and no request a key signs today is refused afterwards.
+- **Amends** when built: R-BTN-13 and R-BTN-159 (a key attached to a person), R-BTN-58 (unchanged
+  in substance: roles stay on keys), R-BTN-129 and §12.1 (the person as the actor recorded beside
+  the key; attach codes), R-BTN-130 and §2 (the two kinds of MCP credential), R-BTN-155 (a session
+  as its person's), R-BTN-139 (the roster asks the forge as pushers do), R-BTN-194
+  (`last_written_by` may name the person whose linked account pushed, never whether a person or
+  their agent did), §13 (the people tables), and the vocabulary (*Person*, *Roster*, *Interactive
+  grant*).
 
-  A credential bound to a person is human-driven; its proof is the credential's own (a session,
-  a key, a `human_only` key, a hardware key) — two axes, never one
-  ([human intent](../../docs/context/human-intent.mdx) §1–§2).
-- **Roles belong to people, per arena; keys prove who is acting.**
-  - **Owner** (R-BTN-58): what an owner key may do today, now a person's role.
-  - **Contributor** (new): may start a course (`course.start`), hold session claims, answer person
-    legs, approve ticket content where the policy lets a contributor, and be a ticket's assignee
-    and an interaction request's recipient. It changes no setting, grant, policy or membership.
-  - **Administrator**: a person with tenant-wide authority, as `BATON_ADMIN_KEYS` names keys today.
-
-  The policy's approver lists name roles and, where it wants one, a minimum proof: an owner at
-  `human_only`, say, which is what `[human]` means today (R-BTN-185, R-BTN-188).
-- **Several people's forge identities.** The policy's single `human_identity` becomes each
-  person's own: a person who lands work by hand declares a forge identity no agent uses — the
-  custody promise a `human_only` key makes (R-BTN-185) — and `last_written_by.human` (R-BTN-194)
-  is true when the pusher is such an identity of a person with a role on the arena.
-- **No ceiling on a person's claims.** A person's session claims (ticket ownership,
-  *Session claims*) count against nothing but the lock: one holder per ticket. `max_claims` bounds
-  runners' grants, which are autonomous.
-- **Self-serve, by the person's own key.** A person adds and removes their own keys (signed by a
-  key they already hold, as `baton human-key add` is), their linked identities, their channels and
-  preferences, and their sealed secrets. An owner adds a person to an arena, gives or takes
-  their role, and removes them (`approvers.members`).
-- **Migration.** Each owner key becomes a person holding it, with the role owner on its
-  arenas; each `ACCESS_IDENTITIES` line becomes an email linked to its key's person;
-  administrator keys become administrators' people. No key changes, and no request a key signs
-  today is refused afterwards.
-
-Open: how a linked forge or tracker identity is verified as the person's (an OAuth sign-in to the
-forge, or a code posted from the account); the role's final name, `contributor` being a working
-name chosen because `approvers.members` already means who changes membership.
+Open: how a linked forge or tracker identity is verified (an OAuth sign-in to it, or a code posted
+from it); who is on the roster of a plain git arena, where no forge says who may push.

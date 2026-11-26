@@ -21,11 +21,12 @@ in [`spec/BATON_SPEC_HISTORY.md`](../BATON_SPEC_HISTORY.md).
 
 > **Terminology: arena.** The unit Baton coordinates — one ticket source, its configuration and
 > everything Baton owns about its tickets — is an **arena** in the
-> [vocabulary](../../docs/context/vocabulary.mdx). This spec still writes
-> it a **repository** (a registered repository, `/v1/repositories/{repository}`), and the CLI's
-> chosen one a **home**; the rename comes in stages, the old names accepted meanwhile. Where this
-> spec means a git repository — a code repository, the repository a ticket store lives in — it
-> says so.
+> [vocabulary](../../docs/context/vocabulary.mdx). This spec still writes it a **registered
+> repository**, and a ticket's arena its **home** (§3); the CLI's chosen one is "the home in
+> force". Where the spec names a registered repository's or a home's path, forge, host, commits,
+> branches, files or checkout, it means the arena's **config repository**, the git repository its
+> `.baton/` lives in; a code repository it names as one. The rename of these words comes in
+> stages, with the old names accepted meanwhile.
 
 ## Contents
 
