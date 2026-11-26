@@ -23,7 +23,7 @@ depends_on:
 > - the baton spec has changed considerably since the model was authored, whether the two are in sync is questionable
 > - the biggest issues requiring intervention have been various non-livelock / deadlock related runner problems which the model would most likely not have helped with.
 
-They agreed with the supervisor's answer: retire the model rather than fix or rebuild it, and keep what it taught as ordinary tests. A future concurrency protocol (allocation, fencing, observation numbering, lease recovery) starts with a short-lived design-time model, written for the design question and archived after, never a gate. The checks that replace it are tracked by the meta-ticket over B-345, B-343, B-346 and B-347.
+They agreed with the supervisor's answer: retire the model rather than fix or rebuild it, and keep what it taught as ordinary tests. A future concurrency protocol (allocation, fencing, observation numbering, lease recovery) starts with a short-lived design-time model, written for the design question and archived after, never a gate. The checks that replace it are tracked by the meta-ticket B-350, over B-345, B-343, B-346 and B-347.
 
 This replaces the 2026-11-19 scope ("shrink the formal model": keep a one-minute design-time core). Nothing of the model is kept as a check.
 
@@ -66,11 +66,7 @@ In this order, in one PR, each step a commit of its own so the review can read t
    
    Each change goes in a ticket's own `## Status` line naming this ticket.
 
-**For the owner to land, not the runner:**
-- delete `.github/workflows/model-report.yml`;
-- fix the model lines in `.github/workflows/ci.yml`'s comments, which say `npm test` runs the model's regressions and traces.
-
-The leg prepares that diff in its PR description and stops for the owner there.
+**The `.github/` part is the owner's, in #443:** it deletes `.github/workflows/model-report.yml` and fixes `ci.yml`'s model comments. The leg touches nothing under `.github/`; if #443 has not merged, it says so in its PR.
 
 ### Trust
 
