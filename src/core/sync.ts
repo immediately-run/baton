@@ -530,9 +530,7 @@ function refuseCurrentUnderApprovalFloor(core: Pick<BatonCore, 'policies'>, repo
     `this repository's policy floors include the tickets-approved guarantee, which is defined over a ticket file's approval (R-BTN-184) — a custom ticket source with versions: "current" cannot post it (B-183)`);
 }
 
-/** B-183: the last accepted post's ticket-source declaration, kept on the head for the claim
- *  answer (§4.5: the runner re-verifies by the source's own way of reading). A post that
- *  declares none keeps what stood — an older CLI's post undeclares nothing. */
+/** Refreshes can apply placements but cannot change the registry that interprets them. */
 function requireBranchRegistryInForce(core: BoardPostCore, r: string, p: BoardPayload): void {
   for (const id of Object.keys(p.course_sources ?? {})) {
     const entry = p.registry?.find((e) => e.id === id);
@@ -547,6 +545,9 @@ function requireBranchRegistryInForce(core: BoardPostCore, r: string, p: BoardPa
   }
 }
 
+/** B-183: the last accepted post's ticket-source declaration, kept on the head for the claim
+ *  answer (§4.5: the runner re-verifies by the source's own way of reading). A post that
+ *  declares none keeps what stood — an older CLI's post undeclares nothing. */
 function rememberSource(core: Pick<BatonCore, 'store'>, r: string, p: BoardPayload): void {
   if (p.course_data !== undefined) core.store.exec('UPDATE board_head SET course_data = ? WHERE repository_id = ?', JSON.stringify(p.course_data), r);
   if (!p.source) return;

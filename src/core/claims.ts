@@ -317,9 +317,6 @@ export class Claims {
   private anyCutOver() {
     return this.rows('SELECT 1 FROM repositories WHERE cutover_at IS NOT NULL AND retired_at IS NULL').length > 0;
   }
-  private headOf(repo: string) {
-    return this.rows<{ sha: string | null }>('SELECT sha FROM board_head WHERE repository_id = ?', repo)[0]?.sha ?? null;
-  }
 
   // ── the repository policy's stops (§12.8, B-145) ────────────────────────────────────────
 
@@ -1415,10 +1412,12 @@ export class Claims {
       // §2d's course record: how long the offered leg had been ready (R3-1248, 2-r2-2).
       const readySince = st.next_leg == null ? null
         : this.rows<{ ready_since: number | null }>(`SELECT ready_since FROM ticket_next_legs WHERE ticket_id = ? AND leg = ? AND state = 'ready'`, item.id, st.next_leg)[0]?.ready_since ?? null;
+      const head = this.rows<{ sha: string | null; last_handed_out: number }>(
+        'SELECT sha, last_handed_out FROM board_head WHERE repository_id = ?', item.repository)[0];
       id = this.exec<{ id: number }>(`INSERT INTO claims (ticket_id, runner_id, request_id, nonce, snapshot_sha, claimed_at, status, claim_observation,
                    station, course_id, start_path, offered_leg, advice_json, offered_ready_since)
                  VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
-        item.id, runnerId, b.request_id, randomHex(3), this.headOf(item.repository) ?? '', now, this.handedOut(item.repository),
+        item.id, runnerId, b.request_id, randomHex(3), head?.sha ?? '', now, head?.last_handed_out ?? 0,
         st.station, item.course, JSON.stringify(st.path), st.next_leg, savedAdvice ? JSON.stringify(savedAdvice) : null, readySince).one().id;
     } catch (e) {
       // R-BTN-4: the partial unique indexes refuse a second holder of the ticket or the runner.
