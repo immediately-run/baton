@@ -63,7 +63,9 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
     `human_key: any` a session acts as `human` only when Cloudflare Access opened it (either of
     R-BTN-155's Access modes) or a code a `human_only` key binds; an ordinary key's one-time link
     or code proves only that key's role and satisfies no human-only list; a sign-in path not
-    named, the proposed forge sign-in among them, proves no human until the owner rules on it.
+    named proves no human, the proposed forge sign-in included (the owner, 2026-11-26, as
+    baton#449 records it: "a forge signin doesn't prove human intent, because autonomous agents can
+    also use forge credentials").
     Under `hardware` the ruling of 2026-11-23 stands: every session, each act with its touch.
     R-BTN-188's `human` entry and its session sentence, R-BTN-155, R-BTN-57, §12.1's rows, §12.8's
     custody bullet, S-BTN-278, S-BTN-321 and S-BTN-324 follow. No session acts as `human` today

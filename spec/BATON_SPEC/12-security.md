@@ -686,7 +686,7 @@ confines a leg's credentials; a compromised forge; and a compromised Baton.
     `ACCESS_IDENTITIES`) or a code a `human_only` key binds opened it; the keyless Access mode of
     R-BTN-155 opens no session and acts as no `human`; one an ordinary key's one-time link or sign-in code opened
     carries only that key's proof, acts as its key's role, never as `human`, and satisfies no
-    human-only list; and a sign-in path not named here proves no human. Under `hardware` every
+    human-only list; and a sign-in path not named here, a forge sign-in included, proves no human. Under `hardware` every
     session acts as `human`, each human act carrying the touch below. A session that acts as
     `human` has its attestations recorded with writer `human` and its role, and whether the act
     carried the touch below, except that an untouched act of a session an ordinary key's link or
