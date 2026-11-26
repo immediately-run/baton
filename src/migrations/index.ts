@@ -1,5 +1,5 @@
 import { DROP_TIERS_MIGRATION } from '../core/deprecated';
-import dropTiers from './0127_drop_tiers.sql';
+import dropTiers from './0142_drop_tiers.sql';
 // The numbered schema migrations, applied in order before the object serves (BATON_SPEC §3).
 // A migration is never edited once merged: a change is a new file and a new entry here.
 import init from './0001_init.sql';
@@ -77,11 +77,14 @@ import accessSignIn from './0071_access_sign_in.sql';
 import sessionLinkSecrets from './0079_session_link_secrets.sql';
 import interactionDeliveryGrant from './0080_interaction_delivery_grant.sql';
 import sessionLinkIncarnation from './0081_session_link_incarnation.sql';
+import harnessNames from './0141_harness_names.sql';
+import conditionRecords from './0085_condition_records.sql';
 import syncLimits from './0104_sync_limits.sql';
 import ticketPrerequisites from './0102_ticket_prerequisites.sql';
 import prerequisiteIdentityAndReady from './0103_prerequisite_identity_and_ready.sql';
 import runnerIdle from './0121_runner_idle.sql';
 import runnerIdleRepositories from './0122_runner_idle_repositories.sql';
+import insertionOrder from './0140_insertion_order.sql';
 import eligibilityInputs from './0124_eligibility_inputs.sql';
 import readyRequirements from './0125_ready_requirements.sql';
 import readyLegBlocks from './0126_ready_leg_blocks.sql';
@@ -237,16 +240,19 @@ export const MIGRATIONS: Migration[] = [
   { id: 80, sql: interactionDeliveryGrant },
   { id: 81, sql: sessionLinkIncarnation },
   { id: 82, sql: legTimeoutFence },
+  { id: 85, sql: conditionRecords },
   { id: 100, sql: legContracts },
   { id: 101, sql: pinnedContracts },
+  { id: 141, sql: harnessNames },
   { id: 104, sql: syncLimits },
   { id: 102, sql: ticketPrerequisites },
   { id: 103, sql: prerequisiteIdentityAndReady },
   { id: 121, sql: runnerIdle },
   { id: 122, sql: runnerIdleRepositories },
+  { id: 140, sql: insertionOrder },
   { id: 124, sql: eligibilityInputs },
   { id: 125, sql: readyRequirements },
   { id: 126, sql: readyLegBlocks },
-  { id: DROP_TIERS_MIGRATION, sql: dropTiers },
   { id: 123, sql: leaseRecovery },
+  { id: DROP_TIERS_MIGRATION, sql: dropTiers },
 ];

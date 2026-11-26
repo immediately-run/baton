@@ -15,9 +15,9 @@ import { makeKey, signedRequest } from '../lib/sshKeys';
 
 import { dropDerivedSchema } from '../lib/migrationRewind';
 
-describe('migration 0127: retire tiers (B-322)', () => {
+describe('migration 0142: retire tiers (B-322)', () => {
   it('preserves provenance (S-BTN-220) and lets the same capped key claim after upgrade (S-BTN-39)', async () => {
-    const stub = env.BATON.get(env.BATON.idFromName('migrations-0127'));
+    const stub = env.BATON.get(env.BATON.idFromName('migrations-0142'));
     const key = await makeKey('ssh-ed25519', 'capped');
     const secret = 'migration-test';
     const secretHash = await sha256(secret);
@@ -41,7 +41,7 @@ describe('migration 0127: retire tiers (B-322)', () => {
       sql.exec('PRAGMA foreign_keys = OFF');
       dropDerivedSchema(sql);
       for (const o of sql.exec("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%'").toArray()) sql.exec(`DROP TABLE "${o.name}"`);
-      for (const m of MIGRATIONS.filter((x) => x.id < 127)) sql.exec(m.sql);
+      for (const m of MIGRATIONS.filter((x) => x.id < 142)) sql.exec(m.sql);
     });
     const oldTag = await runInDurableObject(stub, (o: Baton, state: DurableObjectState) => {
       o.core.now = () => at;
@@ -68,10 +68,10 @@ describe('migration 0127: retire tiers (B-322)', () => {
       expect(all(`SELECT tier_position > max_tier AS refused FROM tickets JOIN runner_grants USING (repository_id) WHERE tickets.id = 'docs:A'`)).toEqual([{ refused: 1 }]);
       const ready = () => all('SELECT ticket_id, leg, rank, ready_since FROM ready_tickets INDEXED BY ready_tickets_order');
       expect(ready()).toEqual([{ ticket_id: 'docs:A', leg: 'implement', rank: 4, ready_since: 1 }]);
-      // Hold the route, caller and clock bucket fixed to isolate 0127's invalidation (S-BTN-243).
+      // Hold the route, caller and clock bucket fixed to isolate 0142's invalidation (S-BTN-243).
       const tag = () => stateEtag(o.core.store, `key:runner:${key.fingerprint}`, `repo.tickets\n${ticketsPath}\n\nredacted`, clockBucket(at), false);
       const before = tag();
-      sql.exec(MIGRATIONS.find((m) => m.id === 127)!.sql);
+      sql.exec(MIGRATIONS.find((m) => m.id === 142)!.sql);
       expect(tag()).not.toBe(before);
       expect(ready()).toEqual([{ ticket_id: 'docs:A', leg: 'implement', rank: 4, ready_since: 1 }]);
       expect(all('SELECT credential_id, capabilities FROM runner_grants')).toEqual([{ credential_id: key.fingerprint, capabilities: '["agent-venue"]' }]);
@@ -83,7 +83,7 @@ describe('migration 0127: retire tiers (B-322)', () => {
       sql.exec("UPDATE ticket_next_legs SET state = 'waiting' WHERE ticket_id = 'docs:A'");
       expect(ready()).toEqual([]);
       sql.exec("UPDATE tickets SET rank = 4 WHERE id = 'docs:A'; UPDATE ticket_next_legs SET state = 'ready' WHERE ticket_id = 'docs:A'");
-      for (const m of MIGRATIONS.filter((x) => x.id > 127)) sql.exec(m.sql);
+      for (const m of MIGRATIONS.filter((x) => x.id > 142)) sql.exec(m.sql);
       return before;
     });
 

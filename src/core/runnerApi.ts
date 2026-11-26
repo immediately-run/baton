@@ -5,6 +5,7 @@
 // whose rows the unique indexes guard. The model tables are gone (B-142): a heartbeat may still
 // carry `model_provider_id`, `billing`, `usage` and `rate_limits`, all accepted and ignored,
 // and an unavailable provider is a reading (§6.3, R-BTN-76), never a table core keeps.
+import { hasGrant } from './grants';
 import type { BeatAnswer } from '../shared/runner-wire';
 import { isLive, liveRunnerSql, type Lease } from './runnerLiveness';
 import { runnerLatest } from './runnerLatest';
@@ -83,8 +84,8 @@ export class RunnerApi {
   private rows<T = Row>(q: string, ...p: unknown[]): T[] {
     return this.c.store.exec(q, ...p).toArray() as T[];
   }
-  private exec(q: string, ...p: unknown[]) {
-    return this.c.store.exec(q, ...p);
+  private exec<T = Row>(q: string, ...p: unknown[]) {
+    return this.c.store.exec<T>(q, ...p);
   }
   private event(kind: string, actor: string, detail: unknown, ticketId: string | null = null, claimId: number | null = null) {
     logEvent(this.c.store, this.c.now(), kind, actor, detail, ticketId, claimId);
@@ -416,10 +417,10 @@ export class RunnerApi {
       && stored.model_id === (hb.model_id ?? null)
       && stored.lease_timeout_ms === hb.lease_timeout_s * 1000 && stored.isolation === hb.isolation && stored.profile_json === profileJson && stored.secret_seen >= secretSeen
       && stored.concurrency === hb.concurrency;
-    const beat = () => this.exec(`UPDATE runners SET last_seen_at = ?, secret_seen = MAX(secret_seen, ?), last_activity_at = COALESCE(?, last_activity_at), harness = ?, kind = ?,
+    const beat = () => this.exec(`UPDATE runners SET last_seen_at = ?, secret_seen = CASE WHEN secret_seen > ? THEN secret_seen ELSE ? END, last_activity_at = COALESCE(?, last_activity_at), harness = ?, kind = ?,
                  model_id = ?, lease_timeout_ms = ?, isolation = ?, profile_json = ?, concurrency = ?, client_version = ?,
                  legacy_names_at = CASE WHEN ? THEN ? ELSE legacy_names_at END WHERE id = ?`,
-      now, secretSeen, hb.last_activity_at ?? null, hb.harness, hb.kind, hb.model_id ?? null,
+      now, secretSeen, secretSeen, hb.last_activity_at ?? null, hb.harness, hb.kind, hb.model_id ?? null,
       hb.lease_timeout_s * 1000, hb.isolation, profileJson, hb.concurrency, clientVersion, legacyName ? 1 : 0, now, w.id);
     if (beatOnly) liveness(this.c.store, beat);
     else beat();
@@ -436,7 +437,7 @@ export class RunnerApi {
     const protectionRefused: { repository: string; code: string }[] = [];
     for (const report of hb.protection) {
       if (this.c.policies.recordProtection(report.repository, report, cred.id)) continue;
-      if (this.rows('SELECT 1 FROM runner_grants WHERE credential_id = ? AND repository_id = ? AND revoked_at IS NULL', cred.id, report.repository).length) {
+      if (hasGrant(this.c.store, cred.id, report.repository)) {
         this.event('discrepancy', `runner:${w.id}`, { kind: 'protection-report', repository: report.repository, matched: report.matched, by: cred.id }, null, null);
         protectionRefused.push({ repository: report.repository, code: 'not-checker' });
       } else {
@@ -570,12 +571,13 @@ export class RunnerApi {
         continue;
       }
       const scope = [runner, repo, claim] as const;
-      this.exec(`INSERT INTO runner_reports (runner_id, repository_id, claim_id, key, received_at, payload)
-        VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT DO UPDATE SET received_at = excluded.received_at, payload = excluded.payload`,
+      this.exec(`INSERT INTO runner_reports (runner_id, repository_id, claim_id, key, received_at, payload, insertion_order)
+        VALUES (?, ?, ?, ?, ?, ?, (SELECT COALESCE(MAX(insertion_order), 0) + 1 FROM runner_reports))
+        ON CONFLICT (runner_id, repository_id, claim_id, key) DO UPDATE SET received_at = excluded.received_at, payload = excluded.payload`,
         ...scope, report.key, now, report.payload);
       this.exec(`DELETE FROM runner_reports WHERE runner_id = ? AND repository_id = ? AND claim_id = ? AND key IN (
         SELECT key FROM runner_reports WHERE runner_id = ? AND repository_id = ? AND claim_id = ?
-        ORDER BY received_at DESC, rowid DESC LIMIT -1 OFFSET ?)`, ...scope, ...scope, REPORT_KEYS_MAX);
+        ORDER BY received_at DESC, insertion_order DESC LIMIT -1 OFFSET ?)`, ...scope, ...scope, REPORT_KEYS_MAX);
     }
     return refused;
   }
@@ -669,9 +671,9 @@ export class RunnerApi {
   sendMessage(owner: string, body: unknown) {
     const m = checkMessage(body);
     if (!this.rows('SELECT 1 FROM runners WHERE id = ?', m.to_runner_id).length) throw new BatonError('not-found', 'no such runner');
-    this.exec(`INSERT INTO messages (kind, payload_json, from_principal, to_runner_id, sent_at, status) VALUES (?, ?, ?, ?, ?, 'pending')`,
-      m.kind, m.payload ? JSON.stringify(m.payload) : null, `owner:${owner}`, m.to_runner_id, this.c.now());
-    return { id: this.rows<{ id: number }>('SELECT last_insert_rowid() AS id')[0].id };
+    return this.exec<{ id: number }>(`INSERT INTO messages (kind, payload_json, from_principal, to_runner_id, sent_at, status)
+      VALUES (?, ?, ?, ?, ?, 'pending') RETURNING id`,
+      m.kind, m.payload ? JSON.stringify(m.payload) : null, `owner:${owner}`, m.to_runner_id, this.c.now()).one();
   }
 
   /** `POST /v1/runner/messages/{id}/ack`: the runner acknowledges; a status request's reply is
@@ -769,8 +771,8 @@ export class RunnerApi {
         a.label ?? null, a.detail ? JSON.stringify(a.detail) : null, a.ended_at ?? null, a.outcome ?? null, a.seq ?? null, now, runnerId, a.id);
       return;
     }
-    this.exec(`INSERT INTO activities (runner_id, id, claim_id, parent_id, call_id, kind, seq, label, source, started_at, ended_at, outcome, received_at, detail_json)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    this.exec(`INSERT INTO activities (runner_id, id, claim_id, parent_id, call_id, kind, seq, label, source, started_at, ended_at, outcome, received_at, detail_json, insertion_order)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, (SELECT COALESCE(MAX(insertion_order), 0) + 1 FROM activities))`,
       runnerId, a.id, a.claim_id, parent, a.call_id ?? null, a.kind, a.seq ?? null, a.label ?? null, a.source, a.started_at,
       a.ended_at ?? null, a.outcome ?? null, now, a.detail ? JSON.stringify(a.detail) : null);
     if (a.kind === 'reviewer' && typeof a.detail?.substituted_for === 'string') {
@@ -785,8 +787,8 @@ export class RunnerApi {
   /** The expiry of a reaped runner's open messages (§9). R3-1212 adds reaping. */
   alarm() {
     const now = this.c.now();
-    this.exec(`DELETE FROM runner_reports WHERE rowid IN (
-      SELECT rr.rowid FROM ${REPORTS_FROM} WHERE (${REPORT_AGE_FROM}) <= ?)`, now - REPORT_HORIZON_MS);
+    this.exec(`DELETE FROM runner_reports WHERE insertion_order IN (
+      SELECT rr.insertion_order FROM ${REPORTS_FROM} WHERE (${REPORT_AGE_FROM}) <= ?)`, now - REPORT_HORIZON_MS);
     // B-236: driven from the open messages (`messages_by_status`), each runner read by its key —
     // never from the reaped runners, whose rows are kept forever (R-BTN-3).
     this.exec(`UPDATE messages SET status = 'expired' WHERE status IN ('pending','delivered')
@@ -826,12 +828,11 @@ export class RunnerApi {
       if (mine) return conflict(`runner-holds:${mine.ticket_id}`);
       const head = this.rows<{ sha: string | null }>('SELECT sha FROM board_head WHERE repository_id = ?', repo)[0]?.sha ?? '';
       // R-BTN-62: as any claim, judged only by a reading numbered after it.
-      this.exec(`INSERT INTO claims (ticket_id, runner_id, request_id, nonce, snapshot_sha, claimed_at, status, claim_observation, station, start_path, course_id)
+      const { id } = this.exec<{ id: number }>(`INSERT INTO claims (ticket_id, runner_id, request_id, nonce, snapshot_sha, claimed_at, status, claim_observation, station, start_path, course_id)
                  VALUES (?, ?, ?, ?, ?, ?, 'active', COALESCE((SELECT last_handed_out FROM board_head WHERE repository_id = ?), 0),
                          COALESCE((SELECT station FROM ticket_stations WHERE ticket_id = ?), ''), COALESCE((SELECT path FROM ticket_stations WHERE ticket_id = ?), '[]'),
-                         (SELECT course_id FROM tickets WHERE id = ?))`,
-        r.ticket_id, runnerId, `shadow:${runnerId}:${r.ticket_id}:${r.nonce}`, r.nonce!, head, r.at, repo, r.ticket_id, r.ticket_id, r.ticket_id);
-      const id = this.rows<{ id: number }>('SELECT last_insert_rowid() AS id')[0].id;
+                         (SELECT course_id FROM tickets WHERE id = ?)) RETURNING id`,
+        r.ticket_id, runnerId, `shadow:${runnerId}:${r.ticket_id}:${r.nonce}`, r.nonce!, head, r.at, repo, r.ticket_id, r.ticket_id, r.ticket_id).one();
       this.event('claimed', actor, { shadow: true, nonce: r.nonce }, r.ticket_id, id);
       this.c.held(r.ticket_id, true); // a claim's start is silent (R-BTN-77)
       return { ok: true, claim_id: id };

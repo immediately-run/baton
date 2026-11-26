@@ -1100,6 +1100,7 @@ module baton {
   }
   // A post is accepted whole only when its number is greater than the last accepted.
   // @impl src/core/baton.ts#board
+  // @impl src/core/sync.ts#boardPost
   // @impl src/core/observations.ts#use
   // @impl src/core/claims.ts#judge
   // @impl src/core/claims.ts#staleBoard

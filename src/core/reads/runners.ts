@@ -284,7 +284,7 @@ function showRunner(cx: ReadCtx, call: ReadCall) {
     }
     for (const a of cx.sql<{ claim_id: number; id: string; parent_id: string | null; kind: string; label: string | null; source: string; started_at: number; ended_at: number | null; outcome: string | null; detail_json: string | null }>(
       `SELECT claim_id, id, parent_id, kind, label, source, started_at, ended_at, outcome, detail_json FROM activities
-       WHERE claim_id IN (SELECT value FROM json_each(?)) ORDER BY claim_id, started_at, rowid`, claimIds)) {
+       WHERE claim_id IN (SELECT value FROM json_each(?)) ORDER BY claim_id, started_at, insertion_order`, claimIds)) {
       activities.set(a.claim_id, [...(activities.get(a.claim_id) ?? []), { id: a.id, parent_id: a.parent_id, kind: a.kind, label: a.label, source: a.source,
         started_at: a.started_at, ended_at: a.ended_at, outcome: a.outcome, detail: parsed<unknown>(a.detail_json, null) }]);
     }

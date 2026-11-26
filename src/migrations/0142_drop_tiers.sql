@@ -41,7 +41,7 @@ ALTER TABLE repositories DROP COLUMN tiers;
 -- ready_tickets' columns are), without tier_position.
 CREATE VIEW ready_ticket_source AS
 SELECT t.id AS ticket_id, t.repository_id, t.course_id, s.next_leg AS leg,
-  MAX(t.expedite, COALESCE(o.expedite, 0)) AS expedite,
+  CASE WHEN COALESCE(o.expedite, 0) > t.expedite THEN o.expedite ELSE t.expedite END AS expedite,
   s.to_end, t.rank, n.ready_since, o.retry_after,
   COALESCE((SELECT MAX(c.end_observation) FROM claims c WHERE c.ticket_id = t.id), -1) AS last_end_observation,
   COALESCE((SELECT r.required_caps FROM ready_ticket_requirements r WHERE r.ticket_id = t.id), '[]') AS required_caps

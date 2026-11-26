@@ -1,7 +1,6 @@
-import { createHash } from 'node:crypto';
 import { readdirSync, statSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { harnessActivityPaths } from './harness';
 
 export const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -37,25 +36,10 @@ export function newestWrite(path: string, depth = 0): number {
  *  agent command here (the runner does not resolve it — the stub does, at its snapshot): every
  *  path that does not exist answers 0 and never reads as live, so watching all of them is only
  *  ever the safe direction for the line that reads them. */
-export function legActivity(home: string, ticket: string, leg: string): { name: string; at: number }[] {
-  const dashed = home.split('/').join('-');
-  const dataHome = process.env.XDG_DATA_HOME && process.env.XDG_DATA_HOME !== '' ? process.env.XDG_DATA_HOME : join(homedir(), '.local', 'share');
-  const opencode = join(dataHome, 'opencode');
-  const store = [join(opencode, 'opencode.db'), join(opencode, 'opencode.db-wal'), join(opencode, 'opencode.db-shm'), join(opencode, 'project', dashed)];
-  const key = createHash('sha1').update(home).digest('hex');
-  const snapshots = join(opencode, 'snapshot');
-  let instances: string[] = [];
-  try {
-    instances = readdirSync(snapshots);
-  } catch {
-    // No snapshots directory: no instances to walk.
-  }
-  for (const i of instances) store.push(join(snapshots, i, key));
-  const claude = process.env.CLAUDE_CONFIG_DIR && process.env.CLAUDE_CONFIG_DIR !== '' ? process.env.CLAUDE_CONFIG_DIR : join(homedir(), '.claude');
-  store.push(join(claude, 'projects', dashed));
+export function legActivity(home: string, ticket: string, leg: string, activityPaths: (checkout: string) => string[] = harnessActivityPaths): { name: string; at: number }[] {
   return [
     { name: 'wrapper-log', at: newestWrite(join(home, '.baton', 'logs', `${ticket}-${leg}.log`)) },
-    { name: 'harness-store', at: store.reduce((best, p) => Math.max(best, newestWrite(p)), 0) },
+    { name: 'harness-store', at: activityPaths(home).reduce((best, p) => Math.max(best, newestWrite(p)), 0) },
   ];
 }
 

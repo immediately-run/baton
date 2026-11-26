@@ -10,7 +10,7 @@ import { BatonError } from './http';
 import type { Store } from './ports';
 
 export const DAY_MS = 86_400_000;
-export const DROP_TIERS_MIGRATION = 127;
+export const DROP_TIERS_MIGRATION = 142;
 const TIER_FIELDS = ['ticket.tier', 'heartbeat.tier_ceiling', 'heartbeat.tier_ceilings', 'grant.max_tier', 'repository.tiers', 'tickets.tier'];
 
 /** The one Deprecated: the store, and the days this process has logged (`field\0actor\0day`). */
@@ -34,7 +34,7 @@ export class Deprecated {
         const inserted = this.store.exec(`INSERT INTO deprecated_fields (field, actor, day, seen_at) VALUES (?, ?, ?, ?)
           ON CONFLICT (field, actor, day) DO NOTHING RETURNING field`, field, actor, day, now).toArray().length;
         if (inserted) logEvent(this.store, now, 'deprecated-field', actor, { field, what }, null, null, repository);
-        else this.store.exec('UPDATE deprecated_fields SET seen_at = MAX(seen_at, ?) WHERE field = ? AND actor = ? AND day = ?', now, field, actor, day);
+        else this.store.exec('UPDATE deprecated_fields SET seen_at = CASE WHEN seen_at > ? THEN seen_at ELSE ? END WHERE field = ? AND actor = ? AND day = ?', now, now, field, actor, day);
       }
     });
   }

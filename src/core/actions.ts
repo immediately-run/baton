@@ -153,7 +153,7 @@ export const ACTIONS: Action[] = [
     callers: REPOSITORY_READERS, input: NONE,
   },
   {
-    id: 'repo.conditions', summary: 'The repository’s raised conditions, open ones first.',
+    id: 'condition.list', summary: 'The repository’s raised conditions, open ones first.',
     effect: 'read', http: { method: 'GET', path: '/v1/repositories/{repository}/conditions' },
     callers: REPOSITORY_READERS,
     input: { type: 'object', properties: {

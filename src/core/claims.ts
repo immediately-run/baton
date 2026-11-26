@@ -284,8 +284,8 @@ export class Claims {
   private rows<T = Row>(q: string, ...p: unknown[]): T[] {
     return this.c.store.exec(q, ...p).toArray() as T[];
   }
-  private exec(q: string, ...p: unknown[]) {
-    return this.c.store.exec(q, ...p);
+  private exec<T = Row>(q: string, ...p: unknown[]) {
+    return this.c.store.exec<T>(q, ...p);
   }
   /** A query with `:name` parameters, bound in the order they occur. */
   private named<T>(q: string, params: Record<string, unknown>): T[] {
@@ -658,14 +658,15 @@ export class Claims {
     const rows = this.named<Candidate>(
       `SELECT id, repository_id, course_id, weight, expedite, to_end, rank, ready_since, n FROM (
          SELECT w.id, w.repository_id, w.course_id, p.weight, s.to_end, w.rank, a.ready_since,
-                MAX(w.expedite, COALESCE((SELECT o.expedite FROM ticket_overrides o WHERE o.ticket_id = w.id), 0)) AS expedite,
+                CASE WHEN COALESCE(xo.expedite, 0) > w.expedite THEN xo.expedite ELSE w.expedite END AS expedite,
                 ROW_NUMBER() OVER (PARTITION BY w.repository_id, w.course_id
-                                   ORDER BY MAX(w.expedite, COALESCE((SELECT o.expedite FROM ticket_overrides o WHERE o.ticket_id = w.id), 0)) DESC,
+                                   ORDER BY CASE WHEN COALESCE(xo.expedite, 0) > w.expedite THEN xo.expedite ELSE w.expedite END DESC,
                                             s.to_end, w.rank IS NULL, w.rank, a.ready_since, w.id) AS n
          FROM tickets w
          JOIN repositories p ON p.id = w.repository_id
          JOIN ticket_stations s ON s.ticket_id = w.id
          JOIN ticket_next_legs a ON a.ticket_id = w.id AND a.leg = s.next_leg AND a.state = 'ready'          -- rule 1
+         LEFT JOIN ticket_overrides xo ON xo.ticket_id = w.id                                                 -- the owner's expedite beside the ticket's
          WHERE p.cutover_at IS NOT NULL AND p.retired_at IS NULL
            AND NOT EXISTS (SELECT 1 FROM ticket_bars b JOIN runner_tags t ON t.tag = b.tag
                            WHERE b.ticket_id = w.id AND b.leg = a.leg AND t.runner_id = :runner)                -- rule 8's posted bars
@@ -1347,23 +1348,23 @@ export class Claims {
     const rationale = b.rationale === null ? undefined : JSON.parse(b.rationale) as unknown;
     const savedAdvice = rationale === undefined ? advice : { ...advice, rationale };
     const st = item.station!;
+    let id: number;
     try {
       // R-BTN-62: the counter's last handed-out number now; only a reading numbered above it can
       // make this claim stale.
       // §2d's course record: how long the offered leg had been ready (R3-1248, 2-r2-2).
       const readySince = st.next_leg == null ? null
         : this.rows<{ ready_since: number | null }>(`SELECT ready_since FROM ticket_next_legs WHERE ticket_id = ? AND leg = ? AND state = 'ready'`, item.id, st.next_leg)[0]?.ready_since ?? null;
-      this.exec(`INSERT INTO claims (ticket_id, runner_id, request_id, nonce, snapshot_sha, claimed_at, status, claim_observation,
+      id = this.exec<{ id: number }>(`INSERT INTO claims (ticket_id, runner_id, request_id, nonce, snapshot_sha, claimed_at, status, claim_observation,
                    station, course_id, start_path, offered_leg, advice_json, offered_ready_since)
-                 VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?)`,
+                 VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
         item.id, runnerId, b.request_id, randomHex(3), this.headOf(item.repository) ?? '', now, this.handedOut(item.repository),
-        st.station, item.course, JSON.stringify(st.path), st.next_leg, savedAdvice ? JSON.stringify(savedAdvice) : null, readySince);
+        st.station, item.course, JSON.stringify(st.path), st.next_leg, savedAdvice ? JSON.stringify(savedAdvice) : null, readySince).one().id;
     } catch (e) {
       // R-BTN-4: the partial unique indexes refuse a second holder of the ticket or the runner.
       if (isUniqueViolation(e)) throw new BatonError('not-eligible', `${item.id} is already held`, { rule: 3, rule_code: GATE_CODES[3] });
       throw e;
     }
-    const id = this.rows<{ id: number }>('SELECT last_insert_rowid() AS id')[0].id;
     this.exec(`UPDATE claims SET (contract_course_json, contract_course_version) =
       (SELECT course_json, version FROM courses WHERE repository_id = ? AND id = ?) WHERE id = ?`, item.repository, item.course, id);
     this.event('claimed', `runner:${runnerId}`, { request_id: b.request_id, station: st.station, leg: st.next_leg }, item.id, id);
@@ -1855,7 +1856,7 @@ export class Claims {
     // R-BTN-202 (B-248): an end finishing a leg run under a local order records its provenance
     // on the end's event, as an advance does.
     const localOrder = e.local_order && finished ? { leg: this.runningLeg(c.id)?.leg ?? null, ...e.local_order } : null;
-    this.finish(c.id, c.ticket_id, e.status, e.end_reason, `runner:${runnerId}`, { ended_at_sha: e.ended_at_sha, detail: e.detail, reached, finished, evidence: e.ended_at_sha, next: e.next, localOrder });
+    this.finish(c.id, c.ticket_id, e.status, e.end_reason, `runner:${runnerId}`, { ended_at_sha: e.ended_at_sha, detail: e.detail, error: e.error, reached, finished, evidence: e.ended_at_sha, next: e.next, localOrder });
     return { ok: true, ...(sessionUrlDropped != null ? { session_url_dropped: sessionUrlDropped } : {}) };
   }
 
@@ -2069,7 +2070,7 @@ export class Claims {
    *  `from` (R-BTN-71), open activities close `abandoned` (§6.9), the resume record is written
    *  for every end (R-BTN-24), and the end is logged. */
   private finish(claimId: number, ticketId: string, status: 'completed' | 'released' | 'reaped', reason: string, actor: string,
-    opts: { ended_at_sha?: string | null; fence?: { incarnation: number; deadline?: number } | null; detail?: string | null; reached?: string | null; finished?: boolean; evidence?: string | null; next?: string | null; localOrder?: { leg: string | null; by: string; ran_at: string } | null } = {}) {
+    opts: { ended_at_sha?: string | null; fence?: { incarnation: number; deadline?: number } | null; detail?: string | null; error?: End['error']; reached?: string | null; finished?: boolean; evidence?: string | null; next?: string | null; localOrder?: { leg: string | null; by: string; ran_at: string } | null } = {}) {
     const now = this.c.now();
     const c = this.rows<{ station: string; runner_id: number; regressed_since: number | null }>('SELECT station, runner_id, regressed_since FROM claims WHERE id = ?', claimId)[0];
     const run = this.runningLeg(claimId);
@@ -2104,7 +2105,7 @@ export class Claims {
     // reaped incarnation may still be driving (R-BTN-19): those go at `fence-cleared` or the
     // fence deadline (the alarm's lapse, or `fenced`).
     if (!opts.fence) this.exec('DELETE FROM claim_seats WHERE claim_id = ?', claimId);
-    this.event(status, actor, { end_reason: reason, reached, ...(opts.detail ? { detail: opts.detail } : {}), ...(opts.ended_at_sha ? { ended_at_sha: opts.ended_at_sha } : {}), ...(opts.fence ? { fence_pending: true } : {}), ...(opts.localOrder ? { local_order: opts.localOrder } : {}) }, ticketId, claimId);
+    this.event(status, actor, { end_reason: reason, reached, ...(opts.detail ? { detail: opts.detail } : {}), ...(opts.error ? { error: opts.error } : {}), ...(opts.ended_at_sha ? { ended_at_sha: opts.ended_at_sha } : {}), ...(opts.fence ? { fence_pending: true } : {}), ...(opts.localOrder ? { local_order: opts.localOrder } : {}) }, ticketId, claimId);
     // §12: the mirror writes the end; R-BTN-73: every end dispatches a sync, which confirms a
     // completion (R-BTN-10) without waiting for an unrelated push and makes the ticket claimable.
     this.c.dispatch('mirror', ticketId);
@@ -2583,8 +2584,7 @@ export class Claims {
 
   /** `POST /v1/ui/board/accept`: the owner accepts a held history; the sync's next force post
    *  of it then becomes the head (§7.1). */
-  acceptHeld(owner: string, body: unknown) {
-    const { repository, sha } = checkAccept(body);
+  acceptHeld(owner: string, { repository, sha }: { repository: string; sha: string }) {
     const held = this.rows<{ accepted_at: number | null }>('SELECT accepted_at FROM held_snapshots WHERE repository_id = ? AND sha = ?', repository, sha)[0];
     if (!held) throw new BatonError('not-found', 'no such held history');
     if (held.accepted_at == null) {
@@ -3067,13 +3067,13 @@ export class Claims {
        WHERE c.status = 'active' ORDER BY c.claimed_at`);
     // B-240: every active claim's events and activities in one query each, not two per claim —
     // each list in the order the per-claim read served it (events by `seq`; activities by
-    // `started_at`, ties in `activities_by_claim`'s order, which is the rowid's).
+    // `started_at`, ties in insertion order).
     const ids = JSON.stringify(active.map((c) => c.id));
     const events = groupBy(this.forIds(ids,
       `SELECT claim_id, at, kind, actor, detail_json FROM events WHERE claim_id IN (SELECT value FROM json_each(?)) ORDER BY claim_id, seq`, ids));
     const activities = groupBy(this.forIds(ids,
       `SELECT claim_id, id, kind, label, started_at, ended_at, outcome, parent_id FROM activities
-       WHERE claim_id IN (SELECT value FROM json_each(?)) ORDER BY claim_id, started_at, rowid`, ids));
+       WHERE claim_id IN (SELECT value FROM json_each(?)) ORDER BY claim_id, started_at, insertion_order`, ids));
     return active.map(({ has_session_link, ...c }) => {
       const alive = isClaimLeaseLive(c, now);
       return {
@@ -3111,7 +3111,7 @@ export class Claims {
        WHERE claim_id IN (SELECT value FROM json_each(?)) ORDER BY claim_id, seq`, ids));
     const activities = groupBy(this.forIds(ids,
       `SELECT claim_id, id, kind, seq, label, started_at, ended_at, outcome, parent_id, detail_json FROM activities
-       WHERE claim_id IN (SELECT value FROM json_each(?)) ORDER BY claim_id, started_at, rowid`, ids));
+       WHERE claim_id IN (SELECT value FROM json_each(?)) ORDER BY claim_id, started_at, insertion_order`, ids));
     // §6.8: a link built only from validated parts — the activity's own transcript, else the
     // session's; of several, the first stored (lowest id).
     const own = new Map<string, { repo: string; path: string }>();
