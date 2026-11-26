@@ -26,7 +26,7 @@ export function GrantsScreen({ params }: ScreenProps) {
   const read = useGrants(params.repository);
   return (
     <>
-      <PageHeader title="Grants" sub="The runner keys that may work on this repository, each with the capabilities and the tier its grant allows." />
+      <PageHeader title="Grants" sub="The runner keys that may work on this repository, each with the capabilities its grant allows." />
       <ReadGate read={read} entity="repository" id={params.repository}>
         {(data) => {
           const grants = listOf<GrantRow>(data.grants);
@@ -44,7 +44,6 @@ export function GrantsScreen({ params }: ScreenProps) {
                     { head: 'Hostname', cell: (g) => <Text mono value={g.hostname} /> },
                     { head: 'Label', cell: (g) => <Text value={g.label} className="label-cell" /> },
                     { head: 'Capabilities', cell: (g) => <Chips values={parsedList(g.capabilities)} /> },
-                    { head: 'Max tier', cell: (g) => (g.max_tier == null ? <span className="mut">any</span> : <Text mono value={g.max_tier} />) },
                     { head: 'Claims at once', cell: (g) => <Text value={g.max_claims} /> },
                     { head: 'Role', cell: (g) => <GrantRole grant={g} /> },
                     { head: 'Granted', cell: (g) => <><RelTime at={g.granted_at} /><div className="sub-line">by <Actor value={g.granted_by} /></div></> },

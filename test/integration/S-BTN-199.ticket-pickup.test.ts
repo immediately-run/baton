@@ -14,10 +14,12 @@
 // course field and stores no PR list (R-BTN-50, R-BTN-33), so a release that kept its PRs logs
 // one too. Runs on both hosts.
 import { describe, it, expect, beforeEach } from 'vitest';
-import { adminSession, advance, claimItem, cutover, endClaim, Git, keyCall, placed, register, rows, sessionCall, setAdminKeys, setClock, runnerCall } from '../helpers';
 import { makeKey, signedRequest, type TestKey } from '../lib/sshKeys';
 import { call as hostCall, HOST } from '#host';
-import { ORIGIN } from '../helpers';
+import {
+  ORIGIN, seedClaim, seedEvent, seedRunner, adminSession, advance, claimItem, cutover, endClaim, Git, keyCall,
+  placed, register, rows, sessionCall, setAdminKeys, setClock, runnerCall,
+} from '../helpers';
 
 const T0 = Date.parse('2026-10-27T12:00:00Z');
 const PR = 'https://github.com/immediately-run/docs/pull/109';
@@ -45,10 +47,13 @@ beforeEach(async () => {
  *  holder with no lease the alarm would end. */
 async function legacyClaim(ticket: string) {
   await rows(`INSERT INTO credentials (id, hostname, allowed_capabilities, kind) VALUES ('legacy', 'legacy', '[]', 'legacy') ON CONFLICT (id) DO NOTHING`);
-  await rows(`INSERT INTO runners (hostname, session_name, secret_hash, credential_id, harness, kind, tier_ceiling, lease_timeout_ms, settings_hash, first_seen_at, last_seen_at)
-              VALUES ('legacy', ?, 'x', 'legacy', 'claude-code', 'legacy', 'critical', 0, '', ?, ?)`, `item-${ticket.split(':')[1]}`, T0, T0);
+  await seedRunner({
+    hostname: 'legacy', session_name: `item-${ticket.split(':')[1]}`, secret_hash: 'x', credential_id: 'legacy',
+    harness: 'claude-code', kind: 'legacy', lease_timeout_ms: 0, settings_hash: '',
+    first_seen_at: T0, last_seen_at: T0,
+  });
   const runner = (await rows<{ id: number }>(`SELECT id FROM runners WHERE kind = 'legacy' ORDER BY id DESC LIMIT 1`))[0].id;
-  await rows(`INSERT INTO claims (ticket_id, runner_id, request_id, nonce, snapshot_sha, claimed_at, status) VALUES (?, ?, ?, 'abc123', '', ?, 'active')`, ticket, runner, `legacy:${ticket}`, T0);
+  await seedClaim({ ticket_id: ticket, runner_id: runner, request_id: `legacy:${ticket}`, nonce: 'abc123', snapshot_sha: '', claimed_at: T0, status: 'active' });
   return runner;
 }
 
@@ -215,8 +220,10 @@ describe('S-BTN-199 the pickup asks Baton', () => {
     // otherwise, are none.
     // Another case's discrepancy on the same ticket since (R-BTN-85's `regressed`, logged as the
     // core logs it): the dedup reads the last `position-disagrees` row, not the last row.
-    await rows(`INSERT INTO events (at, kind, ticket_id, claim_id, actor, detail_json, repository_id) VALUES (?, 'discrepancy', 'docs:T-1', NULL, 'sync', ?, 'docs')`,
-      T0, JSON.stringify({ sub: 'regressed', baton: {}, git: {}, observation: 2 }));
+    await seedEvent({
+      at: T0, kind: 'discrepancy', ticket_id: 'docs:T-1', claim_id: null, actor: 'sync',
+      detail_json: JSON.stringify({ sub: 'regressed', baton: {}, git: {}, observation: 2 }), repository_id: 'docs',
+    });
     await git.post();
     expect(await disagreements()).toHaveLength(2);
     git.add('T-9', { display: { status: 'available' } });

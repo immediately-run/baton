@@ -14,6 +14,7 @@ import { makeKey, type TestKey } from '../lib/sshKeys';
 
 const T0 = Date.parse('2026-10-19T12:00:00Z');
 const CHAINED = { ...roadmapPr, legs: { ...roadmapPr.legs, review: { ...roadmapPr.legs.review, no_chain_from: ['implement'] } } };
+const GATED_PR = { ...CREATE_PR_COURSE, legs: { ...CREATE_PR_COURSE.legs, review: { ...CREATE_PR_COURSE.legs.review, no_chain_from: ['implement', 'fix'] } } };
 const AT_PR_OPEN = placed('pr-open', [['implement', 'pr-open']], [['review', 'ready']]);
 let git: Git;
 let admin: TestKey;
@@ -46,8 +47,20 @@ async function implementAndSuspend() {
 }
 
 describe('S-BTN-63 no review by its author’s key', () => {
-  it('create-pr refuses both the implementer and the fixer after the test gate; a third key reviews', async () => {
+  it('the shipped create-pr lets the key that implemented a ticket review it (B-30 lifted, 2026-11-25)', async () => {
     git.registry = [course(1, 1, { id: 'create-pr', course: CREATE_PR_COURSE })];
+    git.add('T-1', { rank: 1, course_id: 'create-pr' });
+    expect((await git.post()).status).toBe(200);
+    const a = await register('vm-a', { courses: [{ repository: 'docs', course: 'create-pr', version: 1 }] });
+    const { json: c } = await claimItem('vm-a', a.secret, { ticket_id: 'docs:T-1' });
+    expect((await advance('vm-a', a.secret, c.claim_id, { leg: 'implement' })).status).toBe(200);
+    expect((await advance('vm-a', a.secret, c.claim_id, { reached: 'pr-open', leg: 'run-tests' })).status).toBe(200);
+    expect((await advance('vm-a', a.secret, c.claim_id, { reached: 'pr-open', leg: 'review' })).status).toBe(200);
+  });
+
+  it('a create-pr that names implement and fix in no_chain_from refuses both after the test gate; a third key reviews', async () => {
+    // The shipped create-pr no longer names them (lifted 2026-11-25); a course that opts in keeps the gate.
+    git.registry = [course(1, 1, { id: 'create-pr', course: GATED_PR })];
     git.add('T-1', { rank: 1, course_id: 'create-pr' });
     expect((await git.post()).status).toBe(200);
     const runner = { courses: [{ repository: 'docs', course: 'create-pr', version: 1 }] };
@@ -64,7 +77,7 @@ describe('S-BTN-63 no review by its author’s key', () => {
       const { json } = await observe();
       const { legs } = json as typeof json & { legs: RecordedLeg[] };
       const { stations, markers } = stationsPr({
-        tickets: [git.tickets.get('T-1') as unknown as SourceTicket], closed: new Set(), graph: CREATE_PR_COURSE,
+        tickets: [git.tickets.get('T-1') as unknown as SourceTicket], closed: new Set(), graph: GATED_PR,
         facts: [{ number: 1, head: 'claude/T-1-work', state: 'open', pushedAt: commits.at(-1)!.at, checks: [], reviews: [], commits }],
         baton: { legs },
       });

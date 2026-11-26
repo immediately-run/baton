@@ -14,10 +14,11 @@
 //      segment that is no runner id; a key granted elsewhere is refused before either.
 // Runs on both hosts.
 import { describe, it, expect, beforeEach } from 'vitest';
-import { sessionCall, setClock } from '../helpers';
-import { claimAndStart, claimElsewhere, fleet, grantedRunner, heartbeat, signed, type Fleet, type Granted, type Json } from '../lib/runnerFleet';
+import { sessionCall, setClock, seedClaim } from '../helpers';
+import { claimAndStart, fleet, grantedRunner, heartbeat, signed, type Fleet, type Granted, type Json } from '../lib/runnerFleet';
 
-const T0 = Date.parse('2026-11-20T12:00:00Z');
+// Drive time explicitly; do not let a real workerd alarm race a simulated clock jump.
+const T0 = Date.parse('2030-11-20T12:00:00Z');
 const H = 3_600_000;
 const PROFILE = { cli: { version: '1.2.3' }, note: '<b>mine</b>' };
 
@@ -50,7 +51,7 @@ describe('S-BTN-287 one runner with its window (B-196)', () => {
       { id: 'reviewer', claim_id: second.claim_id, parent_id: 'round', kind: 'reviewer', source: 'skill', label: 'review-pr (v4)', started_at: T0 + 12 * 60_000, ended_at: T0 + 13 * 60_000, outcome: 'failed', detail: { findings: 2 } },
     ] }, a.secret);
     expect([posted.status, JSON.stringify(posted.json)]).toEqual([200, expect.not.stringContaining('invalid')]);
-    await claimElsewhere(a.id, 'ops:X-1', T0);
+    await seedClaim(a.id, 'ops:X-1', T0);
 
     const { status, json } = await show(String(a.id));
     expect(status).toBe(200);

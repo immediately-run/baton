@@ -3,7 +3,7 @@
 // `/consents`. Read-only: a policy, a setting, a bar and a consent are a key's or an approver's
 // to change (R-BTN-186), so each screen names the command and draws no control.
 //   /policy    GET …/policy and GET /v1/owner/{r}/policy/log
-//   /settings  the grants read's `settings`, and the registry's `tiers` and `weight` from
+//   /settings  the grants read's `settings`, and the registry's `weight` from
 //              `repo.list` (the row the shell hands down)
 //   /bars      the grants read's `bars` and `settings.required_bars`
 //   /consents  the grants read's `dependency_consents` and `settings.code_repos`
@@ -183,7 +183,6 @@ export function SettingsScreen({ params, repository }: ScreenProps) {
               </Section>
               <Section title="The registry’s" hint="An administrator’s, shown here so an owner need not ask.">
                 <KeyValues rows={[
-                  ['tiers', <Chips values={repository?.tiers} none="none" />],
                   ['weight', <Text mono value={repository?.weight} />],
                   ['forge', <Text mono value={repository?.forge ?? settings.forge} />],
                   ['default branch', <Text mono value={repository?.default_branch} />],

@@ -26,7 +26,7 @@ const props = (id: string, params: Record<string, string>) => ({ screen: screenO
 
 const runner = (id: number, over: Partial<RunnerRow> = {}): RunnerRow => ({
   runner_id: id, hostname: 'host-a', session_name: `s-${id}`, alive: true, last_seen_at: NOW - MIN, last_activity_at: NOW - 5 * MIN, reaped_at: null,
-  harness: 'opencode', kind: 'vm', isolation: 'process', tier_ceilings: { docs: 'critical' },
+  harness: 'opencode', kind: 'vm', isolation: 'process',
   capabilities: [{ capability: 'cap-one', declared: 'cap-one' }, { capability: 'cap-two', declared: 'role-x' }], granted: ['cap-one'], tags: [],
   courses: [{ course: 'course-a', version: 3, min_runner_version: 3 }], lease_timeout_s: 900,
   credential: { kind: 'runner', granted: true, role: null, domain: null }, last_report: null, transcript_url: null,

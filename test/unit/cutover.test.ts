@@ -2,7 +2,10 @@
 // refusals, the legacy import's name collisions, and adoption requests that went stale.
 import { describe, it, expect, inject, beforeEach } from 'vitest';
 import { calendarDate } from '../../src/core/board';
-import { hbBody, ORIGIN, ownerCall, payload, register, rows, setClock, syncCall, tick, runnerCall, stateView } from '../helpers';
+import {
+  hbBody, ORIGIN, ownerCall, payload, register, rows, setClock, syncCall, tick, runnerCall, stateView,
+  setTicketBlockedSince, seedTicketBlock,
+} from '../helpers';
 
 const board = inject('board');
 const sha = board.shas;
@@ -66,8 +69,8 @@ describe('the cutover’s refusals and the import’s names', () => {
     }
     await syncCall('/v1/sync/board', payload(sha.B, sha.A, { ...board.states.B, state: { items }, ready: ['R3-9003'] }));
     // A blocked ticket imported as a legacy claim is held, no longer blocked (R-BTN-75).
-    await rows(`INSERT INTO ticket_blocks (repository_id, ticket_id, kind, ref, since) VALUES ('docs', 'docs:R3-9001', 'decision', 'd1', 1)`);
-    await rows(`UPDATE tickets SET blocked_since = 1 WHERE id = 'docs:R3-9001'`);
+    await seedTicketBlock({ repository_id: 'docs', ticket_id: 'docs:R3-9001', kind: 'decision', ref: 'd1', since: 1 });
+    await setTicketBlockedSince('docs:R3-9001', 1);
     expect(await (await owner('/v1/ui/cutover', { repository: 'docs', confirm: true })).json()).toMatchObject({ imported: ['docs:R3-9001', 'docs:R3-9002'] });
     expect(await rows(`SELECT blocked_since AS b FROM tickets WHERE id = 'docs:R3-9001'`)).toEqual([{ b: null }]);
     expect(await rows(`SELECT c.ticket_id, w.session_name FROM claims c JOIN runners w ON w.id = c.runner_id ORDER BY c.ticket_id`)).toEqual([

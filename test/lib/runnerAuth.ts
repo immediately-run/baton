@@ -6,6 +6,6 @@ export function runnerAuth(c: Pick<Ctx, 'store' | 'config' | 'now'>): RunnerApi 
   return new RunnerApi({ ...c,
     fenced: unexpected, legFinished: unexpected, claimView: unexpected, bars: unexpected,
     couriers: unexpected, policies: { recordProtection: unexpected }, fleetChanged: unexpected,
-    held: unexpected, deprecated: { note: unexpected }, sessionHosts: unexpected,
+    held: unexpected, deprecated: { note: unexpected, tierFields: unexpected }, sessionHosts: unexpected,
   });
 }

@@ -1,7 +1,9 @@
 {
   "routes": {
     "specifiedOnly": {
-      "POST /v1/forges/{}/notify": "B-277"
+      "POST /v1/forges/{}/notify": "B-277",
+      "POST /v1/owner/{}/members": "B-338",
+      "POST /v1/ui/human-challenge": "B-340"
     },
     "builtOnly": {
       "GET /v1/courier/decisions": "B-277",
@@ -19,10 +21,12 @@
   },
   "tables": {
     "specifiedOnly": {
+      "dashboard_cookies": "B-76",
+      "human_challenges": "B-340",
       "leg_attempts": "B-277",
-      "reconcile_displaced": "B-277",
+      "repository_members": "B-338",
       "ticket_depends": "B-277",
-      "ticket_evidence": "B-277"
+      "webauthn_credentials": "B-340"
     },
     "builtOnly": {
       "adoptions": "B-277",

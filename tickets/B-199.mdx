@@ -39,7 +39,7 @@ command tree), [§3.2](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-2)
 sync keys), [§3.4](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-4) ([R-BTN-140](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-4):
 code-repository consents), [§10](../spec/BATON_SPEC/10-checks.md#sec-10) ([R-BTN-114](../spec/BATON_SPEC/10-checks.md#sec-10):
 check-runners), [§12.8](../spec/BATON_SPEC/12-security.md#sec-12-8) ([R-BTN-180](../spec/BATON_SPEC/12-security.md#sec-12-8):
-role, domain, checker; [R-BTN-185](../spec/BATON_SPEC/12-security.md#sec-12-8): human-only),
+~~role, domain, checker~~ ; [R-BTN-185](../spec/BATON_SPEC/12-security.md#sec-12-8): human-only),
 [§14](../spec/BATON_SPEC/14-api.md#sec-14) (`GET /v1/owner/{repository}/grants`).
 
 **Depends on:** B-208 (the shell; a session reads the grants read since B-192; no control from
@@ -71,7 +71,7 @@ The §14 row first, then the code (`admin.ts`'s `grantsView`).
    sync|mirror`~~; `baton owner check-runner add <repository> <pub> --name <hostname> […]`~~) as
    text:
    - `/grants`: fingerprint (short, full on focus), hostname, label, capabilities as chips, ~~max
-     tier,~~ role and domain, checker, sync, pending (marked), set by, granted by and at, other
+     tier,~~ ~~role and domain, checker, sync,~~ pending (marked), ~~set by,~~ granted by and at, other
      repositories;
    - `/owners`: fingerprint, kind, human-only, added at; the `seed_owners` notice where
      `repo.list` flags the repository (R-BTN-58);
@@ -133,3 +133,7 @@ additions, since `grantsView` does not answer it today._
 _(2026-11-20: the owner cut the check-runner on 2026-11-19 (`docs/review/spec-simplification-review-2026-11-19.mdx`, ruling 5; the spec simplification of that date, baton#299), and B-290 removes what is built of it, the check-runners screen row included. The `check_runners` field, the `check-runner add` command line, the `/check-runners` screen and the fixture's check-runner are struck: five screens remain, where the title and the description say six and name check-runners.)_
 
 _2026-11-23 — tiers retired (spec/retire-tiers: [BATON_SPEC §6.6](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-6) gate 5, [R-BTN-66](../spec/BATON_SPEC/01-what-baton-is.md#sec-1)): the struck tier clauses are gone from the spec — no ticket tier, runner ceiling, grant `max_tier`, ladder, `ready_by_tier` or `?tier=`. Build the rest without them._
+
+_(2026-11-24: grant role, domain, checker mark and `sync` flag are struck: B-189's spec PR (`spec/BATON_SPEC_HISTORY.md`, the entry of 2026-11-24) retires them; the grants read no longer answers them.)_
+
+_(2026-11-24: rules re-read: R-BTN-180, R-BTN-146)_

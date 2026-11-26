@@ -159,7 +159,7 @@ describe.skipIf(!nodeOnly)('S-BTN-159 a quiet start', () => {
       const claim = run.mock.calls[0][0];
       expect(claim.ticket_id).toBe('docs:RETRY');
       expect(lines.filter((l) => l.startsWith('baton: idle'))).toEqual([
-        "baton: idle — no-eligible-ticket: no ready ticket fits this worker: 1 held attempts-exhausted (baton:retries open: docs:RETRY), 1 above the grant's max_tier judgement (docs:HIGH)",
+        "baton: idle — no-eligible-ticket: no ready ticket fits this worker: 1 held attempts-exhausted (baton:retries open: docs:RETRY), 1 missing capability (rule 4) (docs:HIGH; human-operator)",
         `baton: idle for 31m, ended by claim ${claim.claim_id}`,
       ]);
     } finally {

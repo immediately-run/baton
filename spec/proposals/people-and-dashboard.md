@@ -141,6 +141,13 @@ BATON_SPEC's sections are named with a rule or as `§11.3`, `§12.2`.
 
 ## 3. Sign-in, sessions and confirmed actions
 
+R-BTN-155 governs where it and this section differ: one cookie per browser, its value replaced at
+every sign-in (`__Host-baton_session`, not a `bds_` value per session), with a session per tab;
+sessions of 12 hours; an owner's or member's repositories read on every request; sign-in codes
+with no role, bound by `baton admin open`, `owner open` or `member open` (`POST
+/v1/member/login-links` for a member key) and taking the binding key's role; the key chosen after
+authentication; and the confirmed acts R-BTN-155 names.
+
 - R-BTN-155 (proposed) — dashboard sign-in is a code a key holder confirms. An administrator signs in
   with `baton admin open` and an administrator key, an owner with `baton owner open` and an
   owner key; the session has that key's role. Its row records the role (`administrator` or
@@ -203,14 +210,17 @@ BATON_SPEC's sections are named with a rule or as `§11.3`, `§12.2`.
     |---|---|---|
     | cut over (`POST /v1/ui/cutover`, R-BTN-28); force-reap (`POST /v1/ui/claims/{id}/reap`); clear a fence (`POST /v1/ui/claims/{id}/fence-clear`, R-BTN-19); force a resync onto a rewritten default branch's head (`POST /v1/ui/resync` with `force: true` and `sha`, R-BTN-11); confirm or release an unconfirmed completion (`POST /v1/ui/claims/{id}/confirm`, `…/release`); confirm an adoption (`POST /v1/ui/adoptions/{claim}/confirm`) | an administrator's | the code |
     | lift a hold, set or clear expedite (`POST /v1/ui/overrides/{ticket}` with `hold: false` or `expedite`) | either | the code |
-    | approve an MCP grant naming a destructive action (`owner.mcp-key.approve`, `BATON_MCP_OAUTH_SPEC` §5) | an owner's | the code |
+    | any act an `approvers.*` list governs, or that adds, changes or removes an owner, a member, a grant or another credential (R-BTN-155) | an administrator's or an owner's | the code |
+    | approve an MCP grant (`owner.mcp-key.approve`, `BATON_MCP_OAUTH_SPEC` §5), whatever it names (R-BTN-186) | an owner's | the code |
     | Stop (`leg.stop`: `POST /v1/ui/messages` `{kind: "release", payload: {ticket_id, reason: "requested"}, confirm: true}`, R-BTN-119) | either | §12.2 confirmation dialog; no code |
     | any other destructive action (§12.2), cancel among them | either | its dialog, which sends `confirm: true` |
-    | everything else a session may call: a hold, a resync, a status request, resolving a condition (`POST /v1/ui/conditions/{condition}/resolve`, R-BTN-163), a person leg's answer (R-BTN-116), an OAuth request, its status, a denial or an approval naming no destructive action, `ui.logout` | either | nothing |
+    | everything else a session may call: a hold, a resync, a status request, resolving a condition (`POST /v1/ui/conditions/{condition}/resolve`, R-BTN-163), a person leg's answer (R-BTN-116; an owner's or member's session, never an administrator's, R-BTN-181), an OAuth request, its status, a denial, `ui.logout` | either | nothing |
 
-    An owner's session acts only on its repositories, and an administrator's controls are not
-    drawn for it. The credential, governance and tenant screens are read-only, each naming the
-    CLI command that changes what it shows, and the tenant's export is the CLI's alone.
+    An owner's or member's session acts only on its repositories, and an administrator's
+    controls are not drawn for it. Every screen draws the controls its session's role may call
+    (R-BTN-186): the credential, governance and tenant screens included, each also naming the
+    CLI command that does the same. A member's session holds no action in this table but its
+    answer (R-BTN-204).
 
 ## 4. The screens
 

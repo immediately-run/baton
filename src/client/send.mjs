@@ -18,12 +18,19 @@ const redirectAnswered = (target, status, to) => new Error(
  *  stdout stays its own. `client` names the version for a test (a CLI this code never shipped
  *  as); a command's own requests are always `clientVersion()`'s. */
 let saidClientVersions = false;
+/** @typedef {(url: string, init: RequestInit) => Promise<Response>} BatonFetch */
+/** @param {string} url
+ * @param {{path: string, method: string, body?: unknown}} p
+ * @param {string} keyFile
+ * @param {BatonFetch} [fetchImpl]
+ * @returns {Promise<{status: number, json: unknown, text: string}>}
+ */
 export async function send(url, p, keyFile, fetchImpl = fetch, client = clientVersion()) {
   const cred = requestCredential(keyFile);
   const target = new URL(p.path, url).toString();
   // A GET carries no body; its digest is of the empty one.
   const body = p.method === 'GET' ? undefined : JSON.stringify(p.body ?? {});
-  const auth = cred.bearer ? { Authorization: `Bearer ${cred.bearer}` } : signHeaders({ method: p.method, url: target, body, key: cred.key });
+  const auth = cred.bearer !== undefined ? { Authorization: `Bearer ${cred.bearer}` } : signHeaders({ method: p.method, url: target, body, key: cred.key });
   const headers = { 'Baton-Client': client, ...(body === undefined ? {} : { 'Content-Type': 'application/json' }), ...auth };
   // A Baton that does not answer in 30 seconds is reported, never waited on for ever (round 3, 3-A-5).
   let res;

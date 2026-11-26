@@ -12,7 +12,7 @@
 //   4. an administrator's session reads what the key reads.
 // Runs on both hosts.
 import { describe, it, expect, beforeEach } from 'vitest';
-import { adminSession, keyCall, ORIGIN, rows, sessionCall, setAdminKeys, setClock, withCore } from '../helpers';
+import { adminSession, keyCall, ORIGIN, rows, sessionCall, setAdminKeys, setClock, withCore, setReadingLapse } from '../helpers';
 import { makeKey, signedRequest, type TestKey } from '../lib/sshKeys';
 import { SCHEMA } from '../lib/fleet';
 import { call as hostCall } from '#host';
@@ -70,7 +70,7 @@ describe('S-BTN-298 the instance and resource reads (B-202)', () => {
     expect([service.state, service.readings]).toEqual(['unknown', []]);
 
     // 2. A reading past its end that the alarm has not dropped yet is marked, not judged.
-    await rows(`UPDATE instance_readings SET lapses_at = ? WHERE instance = 'acct:two'`, T0);
+    await setReadingLapse('acct:two', T0);
     const later = (await signed(admin, '/v1/admin/instances')).json;
     // (A host whose alarm ran first has dropped the row and the state with it: then no reading
     // is served, and the instance is `unknown` — never a lapsed reading served as in force.)

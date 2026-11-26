@@ -1,5 +1,5 @@
 ---
-title: "B-137 — Board posts are an attack surface: machine keys out of the policy's inputs.board below the human level, control changes and signatures computed server-side, and rate limits per key (R-BTN-187)"
+title: "B-137 — Board posts are an attack surface: ~~machine keys out of the policy's inputs.board below the human level,~~ control changes and signatures computed server-side, and rate limits per key (R-BTN-187)"
 id: B-137
 project: baton
 status: available
@@ -10,7 +10,7 @@ tags:
   - roadmap-item
 order: 1160
 tier: critical
-description: "Adversarial review findings 4 and 18 (2026-10-27): any runner key can post the board and any leg can read that key, so B-126's detection and B-127's signature check, computed client-side, are computed by the attacker. the policy's `inputs.board` excludes machine keys on homes with runners below the human level; Baton reads control-path changes from push deliveries (the signature half retired 2026-11-19, see Status); observation and post rate limits per key. Requires: none."
+description: "Adversarial review findings 4 and 18 (2026-10-27): any runner key can post the board and any leg can read that key, so B-126's detection and B-127's signature check, computed client-side, are computed by the attacker. ~~the policy's `inputs.board` excludes machine keys on homes with runners below the human level;~~ Baton reads control-path changes from push deliveries (the signature half retired 2026-11-19, see Status); observation and post rate limits per key. Requires: none."
 topics:
   - baton
 owns: {}
@@ -34,10 +34,10 @@ cannot observe, and no rule); `docs/security-model.mdx` (reach 7, reach 8).
 
 ### What to build
 
-1. **No machine-key posts below the human level**: on every repository with a runner below the
+1. ~~**No machine-key posts below the human level**: on every repository with a runner below the
    human level, the policy's `inputs.board` excludes `machine` (the `protected` preset does; R-BTN-93,
    R-BTN-188), changed only by an approver on `approvers.policy`. Existing homes are switched by
-   their owners now (`machine_sync: false` until B-145 lands).
+   their owners now (`machine_sync: false` until B-145 lands).~~
 2. **What Baton must trust, Baton computes.** Control-path changes (B-126) come from the push
    deliveries' `commits[].added/modified/removed` and `sender.id`, server-side; a missing delivery
    is `pusher-unknown`, fail closed. ~~Signatures (B-127) are verified by Baton over the raw commit
@@ -50,13 +50,13 @@ cannot observe, and no rule); `docs/security-model.mdx` (reach 7, reach 8).
 
 - A scenario (the next free S-BTN number): a machine key posting a board that drops a control
   change is contradicted by the server's own reading of the delivery and raises a condition; a
-  key posting faster than its limit is refused; with `machine` out of `inputs.board` a machine
-  key's post is `forbidden`; and **S-BTN-187** (R-BTN-187: a station a trusted leg acts on is not
+  key posting faster than its limit is refused; ~~with `machine` out of `inputs.board` a machine
+  key's post is `forbidden`;~~ and **S-BTN-187** (R-BTN-187: a station a trusted leg acts on is not
   reached from a git verdict under `inputs.answers: attestation`).
 
 ### Exit criteria
 
-- [ ] `machine` out of `inputs.board` on every VM-runner home; S-BTN-187 and the scenario pass on
+- [ ] ~~`machine` out of `inputs.board` on every VM-runner home;~~ S-BTN-187 and the scenario pass on
   both hosts
 
 ## Status
@@ -72,3 +72,7 @@ _(2026-11-20: the spec simplification of 2026-11-19 (baton#299; `spec/BATON_SPEC
 _(2026-11-20: the spec simplification of 2026-11-19 (baton#299; `spec/BATON_SPEC_HISTORY.md`, that date) moved the unbuilt parts of the design this ticket builds out of the section files, with their rule ids, to proposal pages: per-key limits on the board are part 11 of [the security proposal](../spec/proposals/security.md). S-BTN-187 is no longer a row of the verification section: it is in [the proposals' scenarios](../spec/proposals/scenarios.md), under "The repository policy's enforcement". Each rule keeps its id and a line in its section, which links the page. The pull request that builds this ticket moves the rules it builds back into the section files, and the scenarios and gates it makes pass back into [the verification section](../spec/BATON_SPEC/15-verification.md#sec-15), in the same change. The plan above is otherwise as the earlier note of this day leaves it.)_
 
 _(2026-11-20: rules re-read: R-BTN-97)_
+
+_(2026-11-24: item 1, its test clause and its exit clause are struck: B-189's spec PR (`spec/BATON_SPEC_HISTORY.md`, the entry of 2026-11-24) retires the policy's `inputs.board` on the owner's rulings of 2026-11-09 and 2026-11-24 — runners are trusted, and where the deployment keeps §12.8's duty no leg reaches its runner's key, so a machine key posts the board as any sync credential does (R-BTN-93, R-BTN-102). Under `builtin` a leg can still read the key, and Baton makes no security promise there. Items 2–4 (control-path changes and the facts a trusted leg acts on computed server-side, per-key limits, the security model) keep their value. The ticket's PR, baton#332, is held by another session: only the clauses are struck. The title's and description's `inputs.board` half is stale with them.)_
+
+_(2026-11-24: rules re-read: R-BTN-93, R-BTN-102, R-BTN-187, R-BTN-188)_

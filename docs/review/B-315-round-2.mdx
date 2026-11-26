@@ -1,0 +1,16 @@
+---
+title: B-315 review round 2
+description: Disposition of the source-selection and refresh findings on PR 395.
+---
+
+The [forge review](https://github.com/immediately-run/baton/pull/395#pullrequestreview-6026699378)
+asked for changes on `72802c049ddd31af9757ecb616d4366979b0378a`.
+
+| Finding | Disposition |
+| --- | --- |
+| Dirty branch-to-pin edits could select the pinned station function and clear accepted branch provenance. | Merged B-139's loader, which takes the source selection only from the committed home config. S-BTN-317 now covers both directions. |
+| Held and behind-home readings could use branch-derived placements without matching the facts in force. | All refresh paths that can apply new placements without the registry check compatibility first. S-BTN-317 exercises the same-home, confirm-only, and held paths. |
+
+B-139 keeps the course files in the source rather than in a home copy. The merge therefore also
+records the claim's resolved SHA separately from the mutable head snapshot, so the runner does not
+re-resolve a live claim when a branch moves.

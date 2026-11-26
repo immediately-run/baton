@@ -61,11 +61,11 @@ describe('B-203: the retired routes are named nowhere under src/', () => {
   });
 
   it('the administrator route has no GET branch for the registry or the capacities: the reads dispatcher answers them', () => {
-    const core = readFileSync(join(SRC, 'core', 'baton.ts'), 'utf8');
+    const core = readFileSync(join(SRC, 'core', 'routes', 'admin.ts'), 'utf8');
     expect(core).not.toMatch(/m === 'GET' && p === '\/v1\/admin\/(repositories|capacities)'/);
     // Their writes, and the state's read, are the route's still.
     expect(core).toMatch(/m === 'POST' && p === '\/v1\/admin\/repositories'/);
     expect(core).toMatch(/m === 'PUT' && p === '\/v1\/admin\/capacities'/);
-    expect(core).toMatch(/m === 'GET' && p === '\/v1\/admin\/state'\) return json\(this\.stateView\(\)\)/);
+    expect(core).toMatch(/m === 'GET' && p === '\/v1\/admin\/state'\) return json\(stateView\(core\)\)/);
   });
 });

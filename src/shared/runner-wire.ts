@@ -1,5 +1,7 @@
 // Successful replies on the runner wire (§11). Opaque or extensible data still needs
 // validation where it is consumed; these types do not validate JSON.
+import type { Forge } from '../core/forges';
+import type { CodeRepo } from '../core/codeRepos';
 import type { LastWrittenBy } from '../core/provenance';
 
 import type { ResolvedInput } from '../core/contracts';
@@ -7,7 +9,10 @@ import type { PointerReach } from '../core/contractPointers';
 
 export type NextLegs = { leg: string; state: string; waiting_on?: string }[];
 
+export interface CourseResolution { branch: string; sha: string }
+
 export interface ClaimAnswer {
+  course_source?: CourseResolution;
   claim_id: number;
   ticket_id: string;
   course_id?: string | null;
@@ -21,21 +26,28 @@ export interface ClaimAnswer {
   version?: string;
   ticket_source?: { kind: string; versions: string | null } | null;
   leg_state?: 'forge' | 'branch';
+  forge_home?: { forge: Forge; path: string; webBase: string | null };
+  forge_repositories?: CodeRepo[];
   scope?: string[];
   /** B-39: where the leg's declared pointers may reach (R-BTN-109). */
   pointer_reach?: PointerReach;
   brief?: { signed: boolean; signer?: string; commit: string };
+  /** B-311: a reconcile leg's displaced leg and the evidence Baton captured for it. */
+  displaced?: string;
+  evidence?: { ref: string; kind: string }[];
   last_written_by?: LastWrittenBy;
   default_branch?: string;
   handoff_url?: string;
   control?: { required: boolean; keys: string[]; register_moved?: boolean; [group: string]: unknown };
   advice?: unknown;
+  person_answer?: { leg: string; option: string; answered_at: number; answered_by: string };
   previous_attempts?: {
     claim_id: number;
     status: string;
     end_reason: string | null;
     detail: string | null;
     ended_at: number | null;
+    ended_at_sha?: string;
     resume: unknown;
     legs: { leg: string; run_id?: string; from: string; reached: string | null; outcome: string }[];
   }[];

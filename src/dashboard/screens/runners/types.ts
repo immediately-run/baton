@@ -33,7 +33,6 @@ export interface RunnerRow {
   harness: string;
   kind: string;
   isolation: string;
-  tier_ceilings: Record<string, string>;
   capabilities: { capability: string; declared: string }[];
   granted: string[] | null;
   tags: string[];

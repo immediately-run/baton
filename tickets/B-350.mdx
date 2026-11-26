@@ -1,0 +1,67 @@
+---
+title: "B-350 — Verify Baton where it meets the outside world: the four checks that replace the Quint model"
+id: B-350
+project: baton
+status: available
+updated: 2026-11-26
+repos:
+  - baton
+tags:
+  - roadmap-item
+tier: judgement
+description: "Meta-ticket, nothing of its own to build: tracks B-345 (property tests over the real core), B-343 (course tests with a fake GitHub), B-346 (contract checks between separately shipped parts) and B-347 (failure classification), the checks that would have caught the 2026-11-22 to 25 incidents the model could not. Closes when the four are done. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-345
+  - B-343
+  - B-346
+  - B-347
+---
+
+**Brief:** the owner, 2026-11-26 (in a Claude Code session on bering). They decided to retire the Quint model ("I don't think the quint model as currently implemented really helps"; B-271 re-scoped), and asked for "a 'meta-ticket' for implementing these suggestions": the supervisor's four checks that would have caught the incidents of 2026-11-22 to 2026-11-25, none of which the model describes.
+
+**Spec:** [BATON_SPEC §15](../spec/BATON_SPEC/15-verification.md#sec-15) [R-BTN-31](../spec/BATON_SPEC/15-verification.md#sec-15) and [R-BTN-68](../spec/BATON_SPEC/15-verification.md#sec-15) (what is checked, as B-271 amends it).
+
+**Depends on:** B-345, B-343, B-346, B-347.
+
+### Why
+
+The model checks claim, fence and lease interleavings. This week's interventions were elsewhere:
+- a leg's evidence nothing attested;
+- a pinned sync CLI that predated the protocol it had to answer;
+- a merge leg reporting `merged` with its PR open;
+- refusals retried as transient until tickets were held.
+
+See `docs/interventions.mdx`, 2026-11-24 20:00. These four tickets replace the model's role with checks that run in `npm test` or on every sync, and that test the shipped code itself.
+
+### The four
+
+1. **B-345:** property tests over the real core on the local host. Random interleavings of claims, heartbeats, syncs and owner actions, asserting the invariants `model/replay.qnt` checks today. B-271 retires the replay after it.
+2. **B-343:** end-to-end course tests with a fake GitHub. The shipped `create-pr` leg scripts against scripted forge answers.
+3. **B-346:** contract checks between parts that ship separately. The server flags a sync that cannot answer its protocol, and CI flags a lagging sync pin.
+4. **B-347:** failure classification. A refusal a retry cannot fix does not end `transient`.
+
+### What to build
+
+Nothing of its own. This ticket tracks the four and closes when they are done. If, while doing them, a fifth gap of the same kind shows up (a part of Baton that meets the outside world with no test of the meeting), file it as its own ticket and add it here.
+
+### Trust
+
+No new input.
+
+### Invariants
+
+- [R-BTN-31](../spec/BATON_SPEC/15-verification.md#sec-15): every behaviour change names its scenario. Each of the four keeps it, and this ticket changes no behaviour.
+- Each of the four is done, and lands, on its own: none waits for another, and this ticket only tracks them.
+
+### Exit criteria
+
+- B-345, B-343, B-346 and B-347 are done.
+- The spec section that replaces R-BTN-68 (B-271) names these checks as what verifies Baton.
+
+## Status
+
+_filed 2026-11-26._

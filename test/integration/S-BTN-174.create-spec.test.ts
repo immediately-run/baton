@@ -15,6 +15,8 @@
 // The runs mirror create-pr's (review 4, three address rounds): the fourth review is the one that
 // finds the rounds spent, and it is reachable.
 // Node only: it writes a real repository and runs git.
+import { keepLegacyPrPlacement } from '../lib/legacy-pr-course';
+import { GitRepo } from '../lib/gitRepo';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -23,6 +25,7 @@ import { join } from 'node:path';
 import { call as hostCall } from '#host';
 import { initMain, parseSyncArgs, syncMain } from '../../src/defaults/cli';
 import type { PrFact } from '../../src/defaults/course-pr';
+import { positionOf } from '../../src/defaults/stub-config';
 import { BUILT_INS } from '../../src/defaults/courses';
 import { closesOfHistory } from '../../src/defaults/ticket-state';
 import { prClose } from '../../src/defaults/pr-close';
@@ -32,24 +35,17 @@ const T0 = Date.parse('2026-10-27T12:00:00Z');
 // No --pin: the CLI pins its own commit, the one its courses' sources name (B-33).
 const init = (root: string, ...argv: string[]) => initMain(argv, { root, log: () => {} });
 
-class Repo {
-  readonly dir = mkdtempSync(join(tmpdir(), 'baton-s174-'));
+class CreateSpecCourse extends GitRepo {
   facts: PrFact[] = [];
   constructor() {
-    const g = (...a: string[]) => execFileSync('git', ['-C', this.dir, ...a], { encoding: 'utf8', stdio: 'ignore' });
-    g('init', '-q', '-b', 'main');
-    g('config', 'user.email', 's174@test');
-    g('config', 'user.name', 's174 test');
+    super('baton-174-');
     mkdirSync(join(this.dir, 'tickets'), { recursive: true });
   }
-  write(path: string, text: string): void {
-    writeFileSync(join(this.dir, path), text);
-  }
-  commit(): void {
-    execFileSync('git', ['-C', this.dir, 'add', '-A'], { stdio: 'ignore' });
-    execFileSync('git', ['-C', this.dir, 'commit', '--allow-empty', '-qm', 'step'], { stdio: 'ignore' });
-    // Before a test adds its origin there is none to push to (the fixture's own setup commits).
-    if (this.git('remote').includes('origin')) execFileSync('git', ['-C', this.dir, 'push', '-q', 'origin', 'main'], { stdio: 'ignore' });
+
+  commit(): string {
+    const sha = super.commit('step');
+    if (this.git('remote').includes('origin')) this.git('push', '-q', 'origin', 'main');
+    return sha;
   }
   /** The checkout as a sync sees it: main, including the marker a close pushed there. The
    *  marker close commits on the default branch, never on this checkout's HEAD (B-96's review
@@ -58,9 +54,7 @@ class Repo {
     execFileSync('git', ['-C', this.dir, 'fetch', '-q', 'origin'], { stdio: 'ignore' });
     execFileSync('git', ['-C', this.dir, 'reset', '-q', '--hard', 'origin/main'], { stdio: 'ignore' });
   }
-  git(...args: string[]): string {
-    return execFileSync('git', ['-C', this.dir, ...args], { encoding: 'utf8' }).trim();
-  }
+
   /** A leg's `close` as the stub calls it (B-96's review round 1, B-100): `prClose` writes the
    *  leg's machine state from its result into the ticket's own frontmatter, commits that file
    *  alone and pushes it — the default branch, which is what the sync reads. The origin is this
@@ -87,16 +81,16 @@ class Repo {
   }
 }
 
-let repo: Repo;
+let repo: CreateSpecCourse;
 let minutes = 0;
 /** Each sync takes an observation number; the next is refused until ten minutes pass (R-BTN-62). */
 const later = () => setClock(T0 + (minutes += 11) * 60_000);
 beforeEach(async () => {
   minutes = 0;
   await setClock(T0);
-  repo = new Repo();
+  repo = new CreateSpecCourse();
 });
-afterEach(() => rmSync(repo.dir, { recursive: true, force: true }));
+afterEach(() => repo.dispose());
 
 type StationRow = { station: string; next_leg: string | null; next_source: string; path_len: number };
 const stationOf = async (id: string): Promise<StationRow> => (await rows<StationRow>('SELECT station, next_leg, next_source, path_len FROM ticket_stations WHERE ticket_id = ?', `docs:${id}`))[0];
@@ -119,7 +113,8 @@ const adjudicated = (v: 'merge' | 'owner', at: number): PrFact['reviews'][number
 
 describe('S-BTN-174 the create-spec course', () => {
   it('converse suspends with its pair; the conversation’s PR advances the board; the address round-trip to merged', async () => {
-    expect(await init(repo.dir, '--course', 'create-spec')).toBe(0);
+    expect(await init(repo.dir, '--own', '--course', 'create-spec')).toBe(0);
+    keepLegacyPrPlacement(repo.dir, 'create-spec');
     // A bare origin, so a leg's close can push the marker it writes — the branch the sync reads.
     const bare = mkdtempSync(join(tmpdir(), 'baton-s174-origin-'));
     try {
@@ -140,7 +135,9 @@ describe('S-BTN-174 the create-spec course', () => {
       // `{ suspend: true, reached: 'requested', next: 'converse' }` (BUILT_INS): the claim ends at
       // `requested` and nothing else moves; the one record the leg leaves is its close's marker.
       const spec = BUILT_INS.find((b) => b.id === 'create-spec')!;
-      const stub = new Function('answer', `return (${spec.legs.converse.position});`)(undefined) as { suspend: boolean; reached: string; next: string };
+      const converseLeg = spec.legs.converse;
+      if (converseLeg.tests) throw new Error('converse is an agent leg');
+      const stub = positionOf(converseLeg);
       expect(stub).toEqual({ suspend: true, reached: 'requested', next: 'converse' });
       await repo.close('converse', { reached: 'requested', next: 'review' });
       // The line the close wrote is the one `parseMarkers` reads back — the ticket bare, at the
@@ -181,7 +178,9 @@ describe('S-BTN-174 the create-spec course', () => {
       await repo.sync();
       expect(await stationOf('SPEC-1')).toMatchObject({ station: 'reviewed', next_leg: 'address', path_len: 2 });
       expect(await nextOf('SPEC-1')).toEqual([{ leg: 'address', state: 'ready', waiting_on: null }]);
-      const addressStub = new Function('answer', `return (${spec.legs.address.position});`)(undefined) as { suspend: boolean; reached: string; next: string };
+      const addressLeg = spec.legs.address;
+      if (addressLeg.tests) throw new Error('address is an agent leg');
+      const addressStub = positionOf(addressLeg);
       expect(addressStub).toEqual({ suspend: true, reached: 'reviewed', next: 'address' });
 
       // The round's claim ends and its close writes the round's marker: `address` waits on the
@@ -275,7 +274,8 @@ describe('S-BTN-174 the create-spec course', () => {
   }, 180_000);
 
   it('a conversation’s PR closed unmerged counts as none: the ticket waits on the owner, never re-offered', async () => {
-    expect(await init(repo.dir, '--course', 'create-spec')).toBe(0);
+    expect(await init(repo.dir, '--own', '--course', 'create-spec')).toBe(0);
+    keepLegacyPrPlacement(repo.dir, 'create-spec');
     const bare = mkdtempSync(join(tmpdir(), 'baton-s174-origin-'));
     try {
       execFileSync('git', ['clone', '-q', '--bare', repo.dir, bare], { stdio: 'ignore' });

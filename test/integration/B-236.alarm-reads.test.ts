@@ -9,7 +9,7 @@
 // lease_timeout_ms > now`, R-BTN-9 and R-BTN-19's fencing) is S-BTN-2's and the alarm-reaper
 // scenarios'; the two edges of the lease are checked here too. Runs on both hosts.
 import { describe, it, expect, afterEach, beforeEach } from 'vitest';
-import { Git, HOST, cutover, register, rows, setClock, tick, withCore } from '../helpers';
+import { Git, HOST, cutover, register, rows, setClock, setMirrorAckedIn, tick, withCore } from '../helpers';
 import type { Ports } from '../../src/core/ports';
 
 const T0 = Date.parse('2026-11-15T12:00:00Z');
@@ -116,7 +116,7 @@ beforeEach(async () => {
     (c as unknown as { ports: Ports }).ports.archiveEvents = async () => {
       throw new Error('no events should be old enough to archive');
     };
-    c.store.exec(`UPDATE repositories SET mirror_acked_seq = (SELECT MAX(seq) FROM events) WHERE id = 'docs'`);
+    setMirrorAckedIn(c.store, 'docs', 'max');
   });
   // The first ticks do their one-off work: the stalled five are raised, the live set recounted.
   await setClock(T0 + 60_000);

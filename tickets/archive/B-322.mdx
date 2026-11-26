@@ -2,8 +2,8 @@
 title: "B-322 — Retire tiers in Baton: gate 5, the ladder, ceilings, max_tier and the tier reads, server first"
 id: B-322
 project: baton
-status: available
-updated: 2026-11-23
+status: done
+updated: 2026-11-26
 tier: judgement
 repos:
   - baton
@@ -13,13 +13,14 @@ description: "Build #391's spec change: remove gate 5 (above-tier-ceiling), re-t
 topics:
   - baton
 owns: {}
-prs: []
+prs:
+  - https://github.com/immediately-run/baton/pull/407
 depends_on: []
 ---
 
 **Brief:** the owner, 2026-11-23: "If possible, I would like to get rid of tiers entirely." The spec half landed in #391 (merged by the owner on 2026-11-23): gate 5 (`above-tier-ceiling`), the repository's `tiers` ladder, the heartbeat's `tier_ceiling` and `tier_ceilings`, the grant's `max_tier`, a ticket's `tier` in the board post and every read, `?tier=`, `ready_by_tier` and re-tier staleness are gone. This ticket builds it in Baton. The history's migration entry *Tier fields from older clients (2026-11-23)* is the plan's order and its end.
 
-**Spec:** [BATON_SPEC §6.6](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-6) (gate 5 retired; [R-BTN-45](../spec/BATON_SPEC/01-what-baton-is.md#sec-1)), [R-BTN-66](../spec/BATON_SPEC/01-what-baton-is.md#sec-1), [R-BTN-35](../spec/BATON_SPEC/01-what-baton-is.md#sec-1) (staleness), [R-BTN-9](../spec/BATON_SPEC/08-runners.md#sec-8-1) (the heartbeat), [R-BTN-58](../spec/BATON_SPEC/11-people.md#sec-11-2) (grants), [R-BTN-74](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-2) (the markdown source), [R-BTN-127](../spec/BATON_SPEC/11-people.md#sec-11-3) (the CLI), [§13](../spec/BATON_SPEC/13-data-model.md#sec-13) and [§14](../spec/BATON_SPEC/14-api.md#sec-14); `spec/BATON_SPEC_HISTORY.md`, the 2026-11-23 changelog and migration entries.
+**Spec:** [BATON_SPEC §6.6](../../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-6) (gate 5 retired; [R-BTN-45](../../spec/BATON_SPEC/01-what-baton-is.md#sec-1)), [R-BTN-66](../../spec/BATON_SPEC/01-what-baton-is.md#sec-1), [R-BTN-35](../../spec/BATON_SPEC/01-what-baton-is.md#sec-1) (staleness), [R-BTN-9](../../spec/BATON_SPEC/08-runners.md#sec-8-1) (the heartbeat), [R-BTN-58](../../spec/BATON_SPEC/11-people.md#sec-11-2) (grants), [R-BTN-74](../../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-2) (the markdown source), [R-BTN-127](../../spec/BATON_SPEC/11-people.md#sec-11-3) (the CLI), [§13](../../spec/BATON_SPEC/13-data-model.md#sec-13) and [§14](../../spec/BATON_SPEC/14-api.md#sec-14); `spec/BATON_SPEC_HISTORY.md`, the 2026-11-23 changelog and migration entries.
 
 **Depends on:** none. The docs-owned decision library (`isEligible`'s rule 5, `TIERS`, `fitsTier`) is retired by its own docs ticket; until it is vendored, stop calling it here rather than editing `src/vendor/`.
 
@@ -59,7 +60,7 @@ In this order: the server first, since an old server counts an untiered ticket a
 
 ### Invariants
 
-- **[R-BTN-33](../spec/BATON_SPEC/01-what-baton-is.md#sec-1), filter fields only.** Nothing new is stored, and the migration only drops columns.
+- **[R-BTN-33](../../spec/BATON_SPEC/01-what-baton-is.md#sec-1), filter fields only.** Nothing new is stored, and the migration only drops columns.
 - **Migrations are append-only.** The drop is a new file.
 - **A heartbeat is never refused for a retired field (§8).** The fields are ignored, never validated, so a runner on an old CLI is not reaped.
 - **Gate numbers are stable (§6.6).** 5 stays unused, as 6 and 12 do.
@@ -81,5 +82,7 @@ In this order: the server first, since an old server counts an untiered ticket a
 - [ ] `npm test` and `npm run typecheck` pass.
 
 ## Status
+
+_(2026-11-26: done — #407 merged 2026-11-26 06:11 UTC. Closed by the supervising session at the owner's word, to end a run-tests ↔ fix loop on the merged branch: the claim kept testing `claude/B-322-retire-tiers` 62 commits behind `main`, each fix agent found nothing to push, and only red markers were added (run-tests 17 of 30). Left outside this ticket, as #407 reports: the docs-owned `ticketPr.mjs` still classifies a tier edit as a control-field change (a docs ticket, at the owner's word); the pinned upstream fixture snapshots stay unchanged until `npm run fixtures` runs with a docs checkout.)_
 
 _filed 2026-11-23._
