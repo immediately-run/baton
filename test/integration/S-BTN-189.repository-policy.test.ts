@@ -112,8 +112,8 @@ describe('S-BTN-189 the repository policy', () => {
     // applied documents carry no `leg_state`, and the claim answer follows the PRs: `branch` on a
     // git home for a course that reads no PR facts, `forge` for one that reads them.
     expect(doc.leg_state).toBeUndefined();
-    expect(legStateOf(doc, 'git')).toBe('branch');
-    expect(legStateOf(doc, 'git', true)).toBe('forge');
+    expect(legStateOf('git')).toBe('branch');
+    expect(legStateOf('git', true)).toBe('forge');
     expect(doc.inputs.board).toEqual(['sync-key']);
     expect(doc.outbox['forge-check'].deliverers).toEqual([]);
     expect(doc.approvers.policy).toEqual(['human']);
@@ -246,6 +246,8 @@ describe('S-BTN-189 the repository policy', () => {
   });
 
   it('claims keep leg_state but no longer carry policy hashes (S-BTN-190)', async () => {
+    const current = await policyRow('docs');
+    expect((await as(owner, '/v1/owner/docs/policy', { base_version: current.version, policy: { ...JSON.parse(current.policy_json), leg_state: 'branch' } }, 'PUT')).status).toBe(200);
     const w = await makeKey('ssh-ed25519', 'w');
     expect((await keyCall(owner, '/v1/owner/docs/grants', { public_key: w.publicKey, hostname: 'w-host', capabilities: ['agent-venue'] })).status).toBe(200);
     const secret = 'secret-w';

@@ -70,7 +70,7 @@ function keyPair(name: string): { file: string; publicKey: string } {
 
 /** The ids the fake forge reports for `acme/monorepo`, and the routes reading PR 7. */
 const MONO_IDS = { id: 7001, owner: { id: 31 } };
-const pull = (merged = false) => ({ number: 7, head: { ref: 'claude/LIN-1-fix', sha: 's7' }, state: merged ? 'closed' : 'open', merged_at: merged ? '2026-11-12T13:00:00Z' : null });
+const pull = (merged = false) => ({ number: 7, head: { ref: 'claude/LIN-1-fix', sha: 's7', repo: { id: 17 } }, base: { repo: { id: 17 } }, state: merged ? 'closed' : 'open', merged_at: merged ? '2026-11-12T13:00:00Z' : null });
 const detail = (comments: unknown[] = []) => ({
   [`/repos/acme/monorepo/commits/s7/check-runs`]: { check_runs: [{ conclusion: 'success' }] },
   [`/repos/acme/monorepo/pulls/7/commits`]: [{ sha: 'c7', commit: { message: 'the work', committer: { date: '2026-11-12T11:00:00Z' } } }],

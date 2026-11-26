@@ -6,7 +6,7 @@ import { gatesFor } from '../../src/core/gates';
 import {
   beat, claimItem, claimRow, course, cutover, q, endClaim, hbBody, keyCall, ORIGIN, ownerCall, payload,
   recommended, refresh, register, requestId, rows, setAdminKeys, setClock, sha256, syncCall, syncToken, withCore,
-  runnerCall, tick, clearCourseRegistry, seedClaim,
+  runnerCall, tick, clearCourseRegistry, seedClaim, SYNC_REPO_PATH,
 } from '../helpers';
 import { makeKey, signedRequest } from '../lib/sshKeys';
 import { capabilitiesOf } from '../../src/shared/vocabulary.mjs';
@@ -52,6 +52,7 @@ describe('the claim and end contracts (§11, §6.5, §11)', () => {
     // the home itself, so one path).
     expect(c.json).toEqual({ claim_id: expect.any(Number), ticket_id: 'docs:R3-9001', course_id: 'roadmap-pr', course_version: 3, default_branch: 'main',
       leg_state: 'forge',
+      forge_home: { forge: 'github', path: SYNC_REPO_PATH, webBase: `https://github.com/${SYNC_REPO_PATH}` }, forge_repositories: [],
       station: 'filed', legs: ['implement'], next: [{ leg: 'implement', state: 'ready' }], scope: ['immediately-run/docs'],
       path: 'content/roadmap/R3-9001.mdx', nonce: expect.stringMatching(/^[0-9a-f]{6}$/), snapshot_sha: sha.A, previous_attempts: [],
       // B-183 (§4.5): the ticket's version as the board holds it ('' — the interim post carries none)

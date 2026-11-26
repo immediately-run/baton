@@ -14,7 +14,7 @@ import { lastLine, requireAnswer } from './answer';
 import { DEFAULT_BRANCH_PATTERN, REVIEW_DEFAULTS_PATH, branchMatches, matchPatterns, readReviewDefault } from './course-pr';
 import { archiveClose } from './pr-archive';
 import { COMMENTING_LEGS, PR_URL, prClose, testsClose, type CloseCtx } from './pr-close';
-import { deliveredDetail, findDelivered, reconcileAnswer, ticketRepositories, verifyDelivered, verifyPrOpen, verifyPrsMerged, type PrExec } from './pr-verify';
+import { deliveredDetail, findDelivered, reconcileAnswer, ticketPrRefs, ticketRepositories, verifyDelivered, verifyPrOpen, verifyPrsMerged, type PrExec } from './pr-verify';
 import { positionOf, type AgentLeg, type StubConfig } from './stub-config';
 import { bareTicketId, closeTicket, execRaw, RUN_TESTS_TIMEOUT_MS, ticketsBranch } from './ticket-state';
 import type { BatonJson, CourseEntry } from './repo-source';
@@ -395,7 +395,7 @@ async function runAgent(ctx: LegCtx, { course, leg, names, spec, readsOnly, ship
       // The forge read before the position (R-BTN-131): `pr` an open PR (B-81), `merged` every PR
       // of the ticket merged and none open — the merge agent's exit 0 is not a merge.
       if (verify === 'merged') {
-        const merged = verifyPrsMerged({ checkout: ctx.checkout, ticket: ctx.ticket, branchPatterns: patterns, repositories: ticketRepositories(ticketText, settings.repos) }, legRun);
+        const merged = await verifyPrsMerged({ checkout: ctx.checkout, ticket: ctx.ticket, forge_home: ctx.forge_home, forge_repositories: ctx.forge_repositories, branchPatterns: patterns, repositories: ticketRepositories(ticketText, settings.repos), prRefs: ticketPrRefs(ticketText) }, legRun);
         if (process.env.BATON_VERBOSE) process.stderr.write(`${heading}the forge verified ${merged.join(', ')} merged, none open, on a branch matching ${patterns.join(' or ')}\n`);
       } else if (verify === 'pr') {
         const claimed = delivered && !names ? findDelivered(out) : null;
@@ -404,7 +404,7 @@ async function runAgent(ctx: LegCtx, { course, leg, names, spec, readsOnly, ship
           if (process.env.BATON_VERBOSE) process.stderr.write(`${heading}delivered at ${shas.join(', ')}, on the default branch — a person confirms\n`);
           return { suspend: true, reached: 'delivered', next: 'confirm', delivered: shas[0], detail: deliveredDetail(shas, claimed.evidence), ...concluded };
         }
-        verifyPrOpen({ checkout: ctx.checkout, ticket: ctx.ticket, branchPatterns: patterns, repositories: ticketRepositories(ticketText, settings.repos) }, legRun);
+        await verifyPrOpen({ checkout: ctx.checkout, ticket: ctx.ticket, forge_home: ctx.forge_home, forge_repositories: ctx.forge_repositories, branchPatterns: patterns, repositories: ticketRepositories(ticketText, settings.repos), prRefs: ticketPrRefs(ticketText) }, legRun);
         if (process.env.BATON_VERBOSE) process.stderr.write(`${heading}the forge verified an open PR on a branch matching ${patterns.join(' or ')}\n`);
       }
       return { ...positionOf(spec, answer?.answer, ctx.run ?? 1, reviewLimit), ...(on ? { pr: on } : {}), ...concluded };

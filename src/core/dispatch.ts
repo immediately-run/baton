@@ -1,6 +1,7 @@
 // R-BTN-55: both host shells use these adapters behind the Dispatch port. No store access.
 import { importPKCS8, SignJWT } from 'jose';
 import { dispatchToken } from './forgeSecrets';
+import { DEFAULT_FORGE, FORGE_SHAPES } from './forges';
 import type { Config, DispatchTarget } from './ports';
 
 const headers = { 'Content-Type': 'application/json', Accept: 'application/json', 'User-Agent': 'baton' };
@@ -44,7 +45,7 @@ async function installationToken(config: Config, path: string, now: number) {
     throw new Error('GitHub App key could not sign');
   }
   const appHeaders = { ...headers, Accept: 'application/vnd.github+json', Authorization: `Bearer ${jwt}` };
-  const root = 'https://api.github.com';
+  const root = FORGE_SHAPES[DEFAULT_FORGE].dispatchOrigin;
   const installation = await request(`${root}/repos/${path}/installation`, { headers: appHeaders }, 'GitHub App installation lookup');
   const id = (await installation.json().catch(() => null) as { id?: number } | null)?.id;
   if (typeof id !== 'number' || !Number.isSafeInteger(id) || id <= 0) throw new Error('GitHub App installation lookup: invalid id');
@@ -57,8 +58,8 @@ async function installationToken(config: Config, path: string, now: number) {
 }
 
 export async function sendForgeDispatch(config: Config, target: DispatchTarget, now: number): Promise<boolean | null> {
-  const { adapter, origin, github, workflow, ref, inputs } = target;
-  const path = github.split('/').map(encodeURIComponent).join('/');
+  const { adapter, origin, workflow, ref, inputs } = target;
+  const path = target.path.split('/').map(encodeURIComponent).join('/');
   const body = JSON.stringify(inputs ? { ref, inputs } : { ref });
   if (!adapter || adapter.kind === 'github-app') {
     const token = await installationToken(config, path, Math.floor(now / 1000));
@@ -146,8 +147,8 @@ async function dispatchRefusal(res: Response, token: string): Promise<string> {
 export async function dispatchWorkflow(token: string | undefined, target: DispatchTarget): Promise<boolean> {
   token = token?.trim();
   if (!token) return false;
-  const path = target.github.split('/').map(encodeURIComponent).join('/');
-  await request(`https://api.github.com/repos/${path}/actions/workflows/${encodeURIComponent(target.workflow)}/dispatches`, {
+  const path = target.path.split('/').map(encodeURIComponent).join('/');
+  await request(`${FORGE_SHAPES[DEFAULT_FORGE].dispatchOrigin}/repos/${path}/actions/workflows/${encodeURIComponent(target.workflow)}/dispatches`, {
     method: 'POST', headers: { ...headers, Accept: 'application/vnd.github+json', Authorization: `Bearer ${token}` },
     body: JSON.stringify(target.inputs ? { ref: target.ref, inputs: target.inputs } : { ref: target.ref }),
   }, 'GitHub workflow dispatch', token);

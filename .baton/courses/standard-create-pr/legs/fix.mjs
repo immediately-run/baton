@@ -201,7 +201,7 @@ function readOnlyHarness(words, prompt, readConfig = () => null) {
     const config = {};
     for (const path of ["opencode.json", "opencode.jsonc", ".opencode/opencode.json", ".opencode/opencode.jsonc"]) {
       const snapshot2 = configObject(readConfig(path), path);
-      for (const field of ["model", "default_agent"]) if (typeof snapshot2[field] === "string") config[field] = snapshot2[field];
+      for (const field2 of ["model", "default_agent"]) if (typeof snapshot2[field2] === "string") config[field2] = snapshot2[field2];
       config.providers = { ...object(config.providers), ...object(snapshot2.providers) };
       const agents = Object.fromEntries(Object.entries(object(snapshot2.agents)).map(([id, value]) => [
         id,
@@ -380,15 +380,15 @@ var CONTROL = /* @__PURE__ */ new Set([
   ".mcp.json"
 ]);
 function readOnlyWorkspace(ctx, instructions, git2, byteLimit) {
-  const { sha } = ctx.snapshot;
+  const { sha: sha2 } = ctx.snapshot;
   const head = ctx.review_head;
-  if (typeof head !== "string" || !OBJECT_ID.test(head) || !OBJECT_ID.test(sha)) {
+  if (typeof head !== "string" || !OBJECT_ID.test(head) || !OBJECT_ID.test(sha2)) {
     throw new Error("reads_only needs ctx.review_head: the exact review commit in the home object store (R-BTN-183)");
   }
-  for (const commit of [sha, head]) {
+  for (const commit of [sha2, head]) {
     if (git2(["cat-file", "-t", commit]).toString().trim() !== "commit") throw new Error("reads_only expects a commit");
   }
-  const base = git2(["merge-base", sha, head]).toString().trim();
+  const base = git2(["merge-base", sha2, head]).toString().trim();
   const diff = ["diff", "--no-ext-diff", "--no-textconv", "--no-color", "--no-renames", "--no-relative", "--ignore-submodules=none"];
   const tmp = realpathSync(tmpdir());
   for (const checkout of [ctx.checkout, ctx.review_store]) {
@@ -430,9 +430,9 @@ function readOnlyWorkspace(ctx, instructions, git2, byteLimit) {
       save(ticket, readFileSync(ctx.ticket.file));
     } else if (ctx.ticket.version) {
       throw new Error("reads_only needs verified ticket text from the ticket source");
-    } else if (ctx.ticket.path && git2(["--literal-pathspecs", "ls-tree", "-z", sha, "--", ctx.ticket.path]).length) {
+    } else if (ctx.ticket.path && git2(["--literal-pathspecs", "ls-tree", "-z", sha2, "--", ctx.ticket.path]).length) {
       ticket = join3(cwd, "ticket.md");
-      save(ticket, git2(["cat-file", "blob", `${sha}:${ctx.ticket.path}`]));
+      save(ticket, git2(["cat-file", "blob", `${sha2}:${ctx.ticket.path}`]));
     }
     return { cwd, instructions: instructionFile, ticket, cleanup };
   } catch (error) {
@@ -441,8 +441,30 @@ function readOnlyWorkspace(ctx, instructions, git2, byteLimit) {
   }
 }
 
+// src/core/forges.ts
+var FORGE_SHAPES = {
+  github: { depth: [2, 2], pr: "/pull/", blob: "/blob/", commit: "/commit/", dispatch: "github-app", dispatchOrigin: "https://api.github.com", dispatchInput: "workflow-path", defaultOrigin: "https://github.com", ci: "github-actions" },
+  gitlab: { depth: [2, 4], pr: "/-/merge_requests/", blob: "/-/blob/", commit: "/-/commit/", dispatch: "gitlab-trigger", dispatchInput: "project-ref", defaultOrigin: null, ci: "gitlab-ci" },
+  gitea: { depth: [2, 2], pr: "/pulls/", blob: "/src/branch/", commit: "/commit/", dispatch: "gitea", dispatchInput: "workflow-ref", defaultOrigin: null, ci: null },
+  git: { depth: [2, 2], pr: null, blob: null, commit: null, dispatch: null, dispatchInput: null, defaultOrigin: null, ci: null }
+};
+var FORGES = Object.keys(FORGE_SHAPES);
+var DEFAULT_FORGE = FORGES.find((f) => FORGE_SHAPES[f].defaultOrigin !== null);
+var PR_FORGES = FORGES.filter((f) => FORGE_SHAPES[f].pr !== null);
+var hasPrs = (forge) => FORGE_SHAPES[forge].pr !== null;
+var number = "(\\d{1,9})";
+var suffix = (forge) => `${FORGE_SHAPES[forge].pr}${number}`;
+var prSuffix = (forge) => new RegExp(`^${suffix(forge)}$`);
+var PR_URL = new RegExp(`^https?://[^/\\s?#]+(?:${PR_FORGES.map((forge) => {
+  const [min, max] = FORGE_SHAPES[forge].depth;
+  return `((?:/[A-Za-z0-9_.-]{1,100}){${min},${max}})${suffix(forge)}`;
+}).join("|")})$`);
+function parsePrUrl(url) {
+  const groups = PR_URL.exec(url)?.slice(1).filter((v) => v !== void 0);
+  return groups ? { path: groups[0].slice(1), number: groups[1] } : null;
+}
+
 // src/defaults/answer.ts
-var PR_URL = /^https?:\/\/[^\s/]+\/[^\s/]+\/[^\s/]+\/pull\/\d+$/;
 var WRAPPED = /^([`'"*_]+)(.+)\1$/;
 function answerOn(line, values) {
   const words = line.split(/\s+/);
@@ -451,9 +473,9 @@ function answerOn(line, values) {
   const wrapped = WRAPPED.exec(answer);
   if (wrapped && values.includes(wrapped[2])) answer = wrapped[2];
   if (!values.includes(answer)) return null;
-  const rest = words.slice(1);
-  if (rest.length === 0) return { answer, pr: null, line };
-  if (rest.length === 1 && PR_URL.test(rest[0])) return { answer, pr: rest[0], line };
+  const rest2 = words.slice(1);
+  if (rest2.length === 0) return { answer, pr: null, line };
+  if (rest2.length === 1 && PR_URL.test(rest2[0])) return { answer, pr: rest2[0], line };
   return null;
 }
 function findAnswer(out, values, opts = {}) {
@@ -476,9 +498,32 @@ function requireAnswer(out, ask, leg, opts = {}) {
   const found = findAnswer(out, ask.values, opts);
   if (found != null) return found;
   const last = lastLine(out);
-  const opened = answerOn(last, ask.values) === null && ask.values.includes(last.split(/\s+/)[0] ?? "");
-  if (opened) throw new Error(`the ${leg} agent's last line names no PR URL after its ${ask.name}`);
+  const opened2 = answerOn(last, ask.values) === null && ask.values.includes(last.split(/\s+/)[0] ?? "");
+  if (opened2) throw new Error(`the ${leg} agent's last line names no PR URL after its ${ask.name}`);
   throw new Error(`the ${leg} agent printed no ${ask.name} (${values}) as its last line${last === "" ? " \u2014 its output was empty" : ` \u2014 its last line was ${JSON.stringify(last)}`}`);
+}
+
+// src/defaults/pr-markers.ts
+function trailersOf(message) {
+  const paragraphs = message.split(/\r?\n\s*\r?\n/).map((p) => p.trim()).filter((p) => p !== "");
+  const block = paragraphs.at(-1) ?? "";
+  const out = {};
+  for (const line of block.split(/\r?\n/)) {
+    const m = /^([A-Za-z][A-Za-z0-9-]*):\s*(\S.*)$/.exec(line);
+    if (m) out[m[1]] = m[2].trim();
+  }
+  return out;
+}
+var SHA = /^[0-9a-f]{40}$/;
+function markerOf(c) {
+  if (typeof c.message !== "string" || !c.empty) return null;
+  const t = trailersOf(c.message);
+  const tests = t["Baton-Tests"];
+  const tested = t["Baton-Tested"];
+  const claim = t["Baton-Claim"];
+  if (tests !== "green" && tests !== "red" || tested == null || !SHA.test(tested) || claim == null || claim === "") return null;
+  if (c.parent !== tested) return null;
+  return { sha: c.sha, at: c.at, tests, tested, claim };
 }
 
 // src/defaults/course-pr.ts
@@ -537,8 +582,15 @@ function prRefs(prs, home) {
   for (const p of prs) {
     const text = String(p).trim();
     if (/^#?\d+$/.test(text)) out.push({ repository: home ?? null, number: text.replace(/^#/, "") });
-    const m = /^https?:\/\/[^/]+\/([^/]+\/[^/]+)\/pull\/(\d+)(?:[/#?].*)?$/.exec(text);
-    if (m) out.push({ repository: m[1], number: m[2] });
+    let url = text.replace(/[?#].*$/, "");
+    for (let i = 0; i < 8 && url.startsWith("http"); i++) {
+      const ref = parsePrUrl(url);
+      if (ref) {
+        out.push({ repository: ref.path, number: ref.number });
+        break;
+      }
+      url = url.slice(0, url.lastIndexOf("/"));
+    }
   }
   return out;
 }
@@ -554,7 +606,7 @@ var readsRepo = (t, f, home) => {
 };
 function ticketOwns(t, pr, patterns, repository) {
   if (!readsRepo(t, pr, repository)) return false;
-  return prRefs(t.course?.prs ?? [], repository).some((r) => refNames(r, pr, repository)) || patterns.some((p) => branchMatches(p.replace(/\{ticket\}/g, t.id), pr.head));
+  return prRefs(t.course?.prs ?? [], repository).some((r) => refNames(r, pr, repository)) || pr.sameRepository !== false && patterns.some((p) => branchMatches(p.replace(/\{ticket\}/g, t.id), pr.head));
 }
 
 // src/defaults/pr-archive.ts
@@ -562,6 +614,60 @@ import { execFileSync as execFileSync3 } from "node:child_process";
 import { lstatSync as lstatSync2, mkdirSync as mkdirSync2, mkdtempSync as mkdtempSync2, readFileSync as readFileSync4, rmSync as rmSync3 } from "node:fs";
 import { tmpdir as tmpdir2 } from "node:os";
 import { basename as basename2, dirname as dirname2, join as join7 } from "node:path";
+
+// src/shared/links.mjs
+function cleanUrl(text, allowQuery) {
+  if (text.length > 1e3 || /[\\\s\u0000-\u001f\u007f]/.test(text)) return null;
+  if (!text.startsWith("https://") || text.includes("#") || !allowQuery && text.includes("?")) return null;
+  let u;
+  try {
+    u = new URL(text);
+  } catch {
+    return null;
+  }
+  if (u.protocol !== "https:" || u.username || u.password || u.hash) return null;
+  if (!allowQuery && u.search) return null;
+  const written = /^https:\/\/[^/?#]*(\/[^?#]*)?/i.exec(text)?.[1] ?? "";
+  const raw = written.split("/").slice(1);
+  for (const seg of raw) {
+    let dec;
+    try {
+      dec = decodeURIComponent(seg);
+    } catch {
+      return null;
+    }
+    if (dec === "" || dec === "." || dec === ".." || /[/\\]/.test(dec)) return null;
+  }
+  return u;
+}
+function underWebBase(url, webBase) {
+  const u = cleanUrl(url, true);
+  const b = cleanUrl(webBase, false);
+  if (!u || !b) return false;
+  if (u.hostname.toLowerCase() !== b.hostname.toLowerCase() || u.port !== b.port) return false;
+  const us = u.pathname.split("/").slice(1).map((s) => s.toLowerCase());
+  const bs = b.pathname.split("/").slice(1).map((s) => s.toLowerCase());
+  return bs.length <= us.length && bs.every((s, i) => us[i] === s);
+}
+
+// src/core/links.ts
+var SEGMENT = /^[A-Za-z0-9_.-]{1,100}$/;
+function isForgePath(forge, path) {
+  const segs = path.split("/");
+  const [min, max] = FORGE_SHAPES[forge].depth;
+  if (segs.length < min || segs.length > max) return false;
+  return segs.every((s) => SEGMENT.test(s) && s !== "." && s !== ".." && !s.toLowerCase().endsWith(".git"));
+}
+function isWebBase(forge, webBase, path) {
+  if (!hasPrs(forge)) return false;
+  const u = cleanUrl(webBase, false);
+  return u !== null && !webBase.endsWith("/") && u.pathname.slice(1).toLowerCase() === path.toLowerCase() && isForgePath(forge, u.pathname.slice(1));
+}
+function isPullRequestUrl(forge, url, webBase) {
+  if (!underWebBase(url, webBase)) return false;
+  const rest2 = new URL(url).pathname.slice(new URL(webBase).pathname.length);
+  return hasPrs(forge) && prSuffix(forge).test(rest2) && !url.includes("?");
+}
 
 // src/core/http.ts
 var BatonError = class extends Error {
@@ -650,12 +756,12 @@ var NAME = /^[a-z0-9][a-z0-9-]{0,63}$/;
 var HOLDING_TYPE = "[a-z][a-z0-9-]{0,31}";
 var HOLDING_VALUE = "[A-Za-z0-9:._/@-]{1,128}";
 var HOLDING = new RegExp(`^${HOLDING_TYPE}:${HOLDING_VALUE}$`);
-var bad = (field, why) => {
-  throw new BatonError("invalid-params", `${field}: ${why}`);
+var bad = (field2, why) => {
+  throw new BatonError("invalid-params", `${field2}: ${why}`);
 };
 var isObj = (v) => !!v && typeof v === "object" && !Array.isArray(v);
 var optional = (v, check) => v === void 0 || v === null ? void 0 : check(v);
-var matches = (re, field) => (v) => typeof v === "string" && re.test(v) ? v : bad(field, `must match ${re}`);
+var matches = (re, field2) => (v) => typeof v === "string" && re.test(v) ? v : bad(field2, `must match ${re}`);
 var REPORT_HORIZON_MS = 6 * 36e5;
 var NUM = "number";
 var BOOL = "boolean";
@@ -719,6 +825,461 @@ function checkOutputs(v) {
 var CAPABILITY_NAME = new RegExp(`^(?:${NAME.source}|${HOLDING.source.slice(1, -1)})$`);
 var VALID_FOR = { default_s: 3600, state_s: 24 * 3600, measure_s: 31 * 24 * 3600 };
 
+// src/defaults/output-evidence.ts
+var PREFIX = "Baton-Output: ";
+var MAX = 256 * 1024;
+var TICKET_OUTPUT_WITNESS = "baton: ticket close outputs";
+function outputLine(ctx, raw) {
+  const outputs = checkOutputs(raw);
+  if (!outputs.length) return null;
+  if (!ctx.run_id || !ctx.claim?.nonce) throw new Error("output evidence requires an online run and claim nonce");
+  const ticket = ctx.ticket.id.split(":").at(-1);
+  return PREFIX + encodeURIComponent(JSON.stringify({ ticket, leg: ctx.leg, run_id: ctx.run_id, claim_nonce: ctx.claim.nonce, outputs }));
+}
+
+// src/defaults/forges/rest.ts
+var MAX_PAGES = 50;
+var PAGE_SIZE = 50;
+var sha = (v) => typeof v === "string" && /^[a-f0-9]{40}$/.test(v);
+var prNumber = (v) => typeof v === "number" && Number.isInteger(v) && v > 0 && v <= 999999999;
+var immutableId = (id) => typeof id === "number" && Number.isSafeInteger(id) && id > 0;
+var sameRepository = (head, base) => immutableId(head) && head === base;
+function field(v, ...keys) {
+  let at = v;
+  for (const key of keys) {
+    if (typeof at !== "object" || at === null) return void 0;
+    at = at[key];
+  }
+  return at;
+}
+var prState = (v) => v === "open" || v === "merged" || v === "closed" ? v : void 0;
+function openRef(number2, branch, oid) {
+  if (!prNumber(number2) || typeof branch !== "string" || !branch || branch.length > 1024 || !sha(oid)) throw new Error("malformed PR head");
+  return { number: number2, headRefName: branch, headRefOid: oid };
+}
+function opened(repo, url) {
+  if (typeof url !== "string" || !isPullRequestUrl(repo.forge, url, repo.webBase)) throw new Error(`${repo.forge} answered no PR URL for ${repo.path}`);
+  return url;
+}
+function rest(api, name, token, fetchImpl, auth = "Bearer", budget = () => {
+}) {
+  const response = async (path, payload) => {
+    budget();
+    const authorization = `${auth} ${token()}`;
+    const res = await fetchImpl(`${api}${path}`, {
+      headers: { Authorization: authorization, Accept: "application/json", "Content-Type": "application/json", "User-Agent": "baton-cli" },
+      ...payload ? { method: "POST", body: JSON.stringify(payload) } : {},
+      redirect: "error",
+      signal: AbortSignal.timeout(3e4)
+    }).catch(() => {
+      throw new Error(`${name} was not reached`);
+    });
+    return res;
+  };
+  const checked = async (path, payload) => {
+    const res = await response(path, payload);
+    if (!res.ok) throw new Error(`${name} answered ${res.status} at ${path.split("?")[0]}`);
+    return res;
+  };
+  const request = async (path, payload) => (await checked(path, payload)).json();
+  const list = async (path, sizeKey = "per_page", unpack = (body) => body) => {
+    const out = [];
+    for (let page = 1; page <= MAX_PAGES; page++) {
+      const res = await checked(`${path}${path.includes("?") ? "&" : "?"}${sizeKey}=${PAGE_SIZE}&page=${page}`);
+      const got = unpack(await res.json());
+      if (!Array.isArray(got) || got.length > PAGE_SIZE) throw new Error(`${name} answered a malformed page`);
+      out.push(...got);
+      const next = res.headers.get("x-next-page");
+      const total = Number(res.headers.get("x-total-count") ?? NaN);
+      const link = res.headers.get("link");
+      if (next || link && /;\s*rel="?next(?:"|\s|,|$)/i.test(link) || Number.isSafeInteger(total) && total > out.length) continue;
+      if (next !== null || link !== null || got.length < PAGE_SIZE) return out;
+    }
+    throw new Error(`${name} exceeded ${MAX_PAGES} pages; refusing a partial reading`);
+  };
+  const unpaged = async (path) => {
+    const got = await request(path);
+    if (!Array.isArray(got) || got.length > MAX_PAGES * PAGE_SIZE) throw new Error(`${name} answered an oversized or malformed list`);
+    return got;
+  };
+  return { request, list, unpaged, response };
+}
+
+// src/defaults/forges/github-facts.ts
+var COMMENT_FIELDS = "author { login ... on User { databaseId } ... on Bot { databaseId } ... on Organization { databaseId } ... on Mannequin { databaseId } } authorAssociation body lastEditedAt includesCreatedEdit";
+var PR_COMMENTS = `pageInfo { hasNextPage endCursor } nodes { ${COMMENT_FIELDS} createdAt url }`;
+var PR_DETAIL = `fragment D on PullRequest {
+  head: commits(last: 1) { nodes { commit { oid checkSuites(first: 10) { pageInfo { hasNextPage } nodes { checkRuns(first: 100, filterBy: { checkType: LATEST }) { pageInfo { hasNextPage } nodes { status conclusion } } } } } } }
+  commits(first: 100) { pageInfo { hasNextPage } nodes { commit { oid committedDate message tree { oid } parents(first: 1) { nodes { oid tree { oid } } } } } }
+  reviews(first: 100) { pageInfo { hasNextPage } nodes { author { login } authorAssociation state submittedAt body url commit { oid } } }
+  comments(first: 100) { ${PR_COMMENTS} }
+}`;
+
+// src/defaults/forges/rest-facts.ts
+var time = (v) => Date.parse(String(v));
+async function readRestFacts(repo, read, ctx, adapter, api, pageSizeKey, canPush) {
+  const list = (path2) => api.list(path2, pageSizeKey);
+  const shape = adapter.restFacts;
+  const path = repo.path;
+  if (read.entry) {
+    const ids = await api.request(shape.identity(path));
+    if (String(field(ids, "id")) !== read.entry.repo_id || String(shape.ownerId(ids)) !== read.entry.owner_id) {
+      throw new Error(`${path}: forge ids differ from code_repos (R-BTN-138)`);
+    }
+  }
+  const host = new URL(repo.webBase).host;
+  const pushers = new Set(ctx.pushers.filter((p) => p.host === host).map((p) => p.id));
+  const out = [];
+  for (const p of await list(`${adapter.prs(path)}${shape.listQuery ? `?${shape.listQuery}` : ""}`)) {
+    const { number: number2, headRefName: head, headRefOid: oid, sameRepository: sameRepository2 } = adapter.head(p);
+    const state = shape.state(p);
+    if (!state) throw new Error(`${path} #${number2}: invalid PR state`);
+    const fact = { number: number2, head, state, repository: path, sameRepository: sameRepository2, headOid: oid, url: opened(repo, field(p, adapter.url)), pushedAt: 0, reviews: [], checks: [] };
+    if (ctx.owns(fact)) {
+      const raw = (await list(shape.commits(path, number2))).map(shape.commit);
+      const trees = new Map(raw.map((c) => [c.oid, c.tree]));
+      const commits = raw.map((c) => {
+        const at = time(c.date);
+        if (!sha(c.oid) || !Number.isFinite(at)) throw new Error(`${path} #${number2}: invalid commit facts`);
+        return { sha: c.oid, at, parent: sha(c.parent) ? c.parent : null, empty: sha(c.tree) && c.tree === trees.get(c.parent), message: typeof c.message === "string" ? c.message.slice(0, 16384) : "" };
+      });
+      if (shape.newestCommitFirst) commits.reverse();
+      if (!shape.gitTrees) {
+        for (const c of commits) {
+          const tree = trees.get(c.sha);
+          if (shape.treeOf && c.parent && sha(tree) && !trees.has(c.parent) && markerOf({ ...c, empty: true })) {
+            const parent = shape.commit(await api.request(shape.treeOf(path, c.parent)));
+            if (parent.oid !== c.parent || !sha(parent.tree)) throw new Error(`${path} #${number2}: invalid parent tree facts`);
+            trees.set(c.parent, parent.tree);
+            c.empty = tree === parent.tree;
+          }
+        }
+        fact.commits = commits;
+      }
+      const add = async (c, user, state2) => {
+        const author = shape.author(user ?? {});
+        const submittedAt = time(shape.reviewDate(c));
+        if (typeof author !== "string" || !author || author.length > 128 || !Number.isFinite(submittedAt)) return;
+        const userId = field(user, "id");
+        const updatedAt = field(c, "updated_at");
+        if (updatedAt != null && updatedAt !== (field(c, "created_at") ?? field(c, "submitted_at")) && (!immutableId(userId) || field(c, "updated_by", "id") !== userId)) return;
+        if (!pushers.has(String(userId)) && !await canPush(userId, author)) return;
+        const body = field(c, "body");
+        fact.reviews.push({ author, state: state2, submittedAt, body: typeof body === "string" ? body.slice(0, 16384) : "" });
+      };
+      const comments = adapter.comments(path, number2);
+      for (const c of await (shape.unpagedComments ? api.unpaged(comments) : list(comments))) await add(c, shape.user(c), "COMMENTED");
+      if (shape.reviews) {
+        for (const c of await list(shape.reviews(path, number2))) {
+          if (field(c, "dismissed") || field(c, "stale")) continue;
+          const verdict = field(c, "state");
+          if (verdict === "APPROVED" || verdict === "REQUEST_CHANGES" || verdict === "COMMENT") {
+            await add(c, shape.user(c), verdict === "REQUEST_CHANGES" ? "CHANGES_REQUESTED" : verdict === "COMMENT" ? "COMMENTED" : "APPROVED");
+          }
+        }
+      }
+      fact.checks = (await api.list(shape.checks(path, oid), pageSizeKey, shape.checkItems)).map(shape.conclusion);
+      fact.pushes = commits.map((c) => c.at);
+      fact.pushedAt = Math.max(0, ...fact.pushes);
+    }
+    out.push(fact);
+  }
+  return out;
+}
+
+// src/defaults/forges/index.ts
+function githubEvidence(url) {
+  const m = /^\/([^/]+)\/([^/]+)\/(pull|issues|commit)\/([^/]+)\/?$/.exec(url.pathname);
+  if (!m) return null;
+  const [, owner, name, kind, id] = m;
+  const at = (api) => ({ repo: `${owner}/${name}`, api: `/repos/${owner}/${name}${api}` });
+  const hash = url.hash.slice(1);
+  if (kind === "commit") return /^[0-9a-f]{7,40}$/.test(id) ? at(`/commits/${id}`) : null;
+  if (!/^\d+$/.test(id)) return null;
+  let f;
+  if (f = /^issuecomment-(\d+)$/.exec(hash)) return at(`/issues/comments/${f[1]}`);
+  if (kind === "issues") return hash === "" ? at(`/issues/${id}`) : null;
+  if (f = /^pullrequestreview-(\d+)$/.exec(hash)) return at(`/pulls/${id}/reviews/${f[1]}`);
+  if (f = /^discussion_r(\d+)$/.exec(hash)) return at(`/pulls/comments/${f[1]}`);
+  return hash === "" ? at(`/pulls/${id}`) : null;
+}
+var pulls = (path) => `/repos/${path}/pulls`;
+var issues = (path, n) => `/repos/${path}/issues/${n}/comments`;
+var pullHead = (p, branch = field(p, "head", "ref")) => ({ ...openRef(field(p, "number"), branch, field(p, "head", "sha")), sameRepository: sameRepository(field(p, "head", "repo", "id"), field(p, "base", "repo", "id")) });
+var pullBody = ({ title, head, base, body }) => ({ title, head, base, body });
+var project = (path) => `/projects/${encodeURIComponent(path)}`;
+var mergeRequests = (path) => `${project(path)}/merge_requests`;
+var publicOrigin = FORGE_SHAPES[DEFAULT_FORGE].defaultOrigin;
+var publicApi = FORGE_SHAPES[DEFAULT_FORGE].dispatchOrigin;
+var ADAPTERS = {
+  github: {
+    publicHost: new URL(publicOrigin).host,
+    api: (origin) => origin === publicOrigin ? publicApi : `${origin}/api/v3`,
+    graphql: (origin) => origin === publicOrigin ? `${publicApi}/graphql` : `${origin}/api/graphql`,
+    prs: pulls,
+    comments: issues,
+    openBody: pullBody,
+    url: "html_url",
+    head: (p) => pullHead(p),
+    openQuery: "state=open",
+    cli: true,
+    attest: { commit: (path, sha2) => `/repos/${path}/commits/${sha2}`, evidence: githubEvidence, witness: (path, sha2) => `/repos/${path}/commits/${sha2}/comments` },
+    protectedRefusal: (s) => /GH006/i.test(s) || /GH013/i.test(s) && !/secret|push protection/i.test(s) && /pull request|update rule|required status check/i.test(s)
+  },
+  gitlab: {
+    publicHost: "gitlab.com",
+    api: (origin) => `${origin}/api/v4`,
+    prs: mergeRequests,
+    comments: (path, n) => `${mergeRequests(path)}/${n}/notes`,
+    openBody: ({ title, head, base, body }) => ({ title, source_branch: head, target_branch: base, description: body }),
+    url: "web_url",
+    head: (p) => ({ ...openRef(field(p, "iid"), field(p, "source_branch"), field(p, "sha")), sameRepository: sameRepository(field(p, "source_project_id"), field(p, "target_project_id")) }),
+    openQuery: "state=opened",
+    protectedRefusal: (s) => /not allowed to push code to protected branches/i.test(s),
+    restFacts: {
+      state: (p) => {
+        const s = field(p, "state");
+        return s === "merged" ? "merged" : s === "opened" ? "open" : s === "closed" ? "closed" : null;
+      },
+      identity: (path) => project(path),
+      ownerId: (p) => field(p, "namespace", "id"),
+      commits: (path, n) => `${mergeRequests(path)}/${n}/commits`,
+      commit: (c) => ({ oid: field(c, "id"), date: field(c, "committed_date"), message: field(c, "message"), parent: field(c, "parent_ids", 0) }),
+      checks: (path, oid) => `${project(path)}/repository/commits/${oid}/statuses`,
+      conclusion: (c) => status(field(c, "status")),
+      user: (note) => field(note, "system") === true ? null : field(note, "author"),
+      author: (u) => field(u, "username"),
+      reviewDate: (n) => field(n, "created_at"),
+      permission: (path, id) => `${project(path)}/members/all/${id}`,
+      canPush: (p, id) => {
+        const level = field(p, "access_level");
+        return field(p, "id") === id && typeof level === "number" && Number.isSafeInteger(level) && level >= 30;
+      },
+      scopeRefusal: (msg2) => /insufficient_scope/i.test(msg2),
+      gitTrees: true
+    }
+  },
+  gitea: {
+    publicHost: "gitea.com",
+    api: (origin) => `${origin}/api/v1`,
+    prs: pulls,
+    comments: issues,
+    openBody: pullBody,
+    url: "html_url",
+    // `label` is the source branch; `ref` may become the synthetic PR ref after deletion.
+    head: (p) => ({ ...openRef(field(p, "number"), field(p, "head", "label") || field(p, "head", "ref"), field(p, "head", "sha")), sameRepository: sameRepository(field(p, "head", "repo_id"), field(p, "base", "repo_id")) }),
+    openQuery: "state=open",
+    allQuery: "state=all",
+    auth: "token",
+    pageSizeKey: "limit",
+    protectedRefusal: (s) => /not allowed to push to protected branch/i.test(s),
+    restFacts: {
+      listQuery: "state=all",
+      state: (p) => {
+        const s = field(p, "state");
+        return field(p, "merged") === true || field(p, "merged_at") ? "merged" : s === "open" || s === "closed" ? s : null;
+      },
+      identity: (path) => `/repos/${path}`,
+      ownerId: (p) => field(p, "owner", "id"),
+      commits: (path, n) => `${pulls(path)}/${n}/commits`,
+      commit: (c) => ({ oid: field(c, "sha"), date: field(c, "commit", "committer", "date"), message: field(c, "commit", "message"), parent: field(c, "parents", 0, "sha"), tree: field(c, "commit", "tree", "sha") }),
+      newestCommitFirst: true,
+      treeOf: (path, oid) => `/repos/${path}/git/commits/${oid}`,
+      checks: (path, oid) => `/repos/${path}/commits/${oid}/status`,
+      checkItems: (p) => field(p, "statuses") ?? (p && (field(p, "total_count") === 0 || Object.keys(p).length === 0) ? [] : void 0),
+      conclusion: (c) => status(field(c, "status")),
+      user: (c) => field(c, "user"),
+      author: (u) => field(u, "login"),
+      reviewDate: (c) => field(c, "submitted_at") ?? field(c, "created_at"),
+      reviews: (path, n) => `${pulls(path)}/${n}/reviews`,
+      unpagedComments: true,
+      permission: (path, _id, login) => `/repos/${path}/collaborators/${encodeURIComponent(login)}/permission`,
+      canPush: (p, id) => {
+        const permission = field(p, "permission");
+        return field(p, "user", "id") === id && typeof permission === "string" && ["write", "admin", "owner"].includes(permission);
+      },
+      scopeRefusal: (msg2) => /token.*scope|Only admins can query all permissions/i.test(msg2)
+    }
+  }
+};
+function status(v) {
+  if (v === "success" || v === "skipped" || v === "neutral") return v;
+  if (v === "failed" || v === "failure" || v === "error" || v === "canceled" || v === "cancelled") return "failure";
+  return null;
+}
+var tokenOf = (forge) => `${forge.toUpperCase()}_TOKEN`;
+var publicHost = (forge) => ADAPTERS[forge].publicHost;
+var inferForge = (host) => PR_FORGES.find((f) => publicHost(f) === host) ?? null;
+function prRepo(r) {
+  if (!hasPrs(r.forge)) return null;
+  if (!r.webBase || !isWebBase(r.forge, r.webBase, r.path)) throw new Error(`invalid registered web base for ${r.path}`);
+  return { ...r, forge: r.forge, webBase: r.webBase };
+}
+function forgeClient(repo, opts = {}, reader) {
+  const adapter = ADAPTERS[repo.forge];
+  const env = opts.env ?? process.env;
+  const given = (adapter.cli ? env.GH_TOKEN : void 0) || env[tokenOf(repo.forge)];
+  const token = () => {
+    if (!given) throw new Error(`no ${tokenOf(repo.forge)} to read or write ${repo.path}`);
+    return given;
+  };
+  const origin = new URL(repo.webBase).origin;
+  let requests = 0;
+  const api = rest(adapter.api(origin), repo.forge, token, opts.fetchImpl ?? fetch, adapter.auth, () => {
+    if (reader) reader.spend();
+    else if (++requests > 200) throw new Error(`${repo.forge} exceeded its request budget for ${repo.path}`);
+  });
+  const path = repo.path;
+  const pulls2 = adapter.prs(path);
+  const all = (endpoint) => api.list(endpoint, adapter.pageSizeKey);
+  const cli = adapter.cli && !given && opts.run && opts.checkout ? (args) => opts.run("gh", args, opts.checkout).trim() : null;
+  const repoFlag = repo.webBase.startsWith(`${FORGE_SHAPES[DEFAULT_FORGE].defaultOrigin}/`) ? path : `${new URL(repo.webBase).host}/${path}`;
+  return {
+    async openPr(pr) {
+      const url = cli ? cli(["pr", "create", "--repo", repoFlag, "--head", pr.head, "--base", pr.base, "--title", pr.title, "--body", pr.body ?? ""]).split("\n").at(-1) : field(await api.request(pulls2, adapter.openBody(pr)), adapter.url);
+      return opened(repo, url);
+    },
+    async listOpenPrs() {
+      if (!cli) return (await all(`${pulls2}?${adapter.openQuery}`)).map(adapter.head);
+      return listCli(cli, repoFlag);
+    },
+    async listPrs() {
+      if (cli) return listCli(cli, repoFlag, "all");
+      const query = adapter.allQuery ?? (adapter.cli ? "state=all" : "");
+      return (await all(`${pulls2}${query ? `?${query}` : ""}`)).map((p) => ({ ...adapter.head(p), state: adapter.restFacts?.state(p) ?? (field(p, "merged_at") ? "merged" : prState(field(p, "state"))) }));
+    },
+    async comment(number2, body) {
+      if (!prNumber(number2)) throw new Error("invalid PR number");
+      const prUrl = `${repo.webBase}${FORGE_SHAPES[repo.forge].pr}${number2}`;
+      if (cli) return commentUrl(prUrl, cli(["pr", "comment", prUrl, "--body", body]));
+      const response = await api.request(adapter.comments(path, number2), { body });
+      const html = field(response, "html_url");
+      if (typeof html === "string") return commentUrl(prUrl, html);
+      const id = field(response, "id");
+      if (!immutableId(id)) throw new Error(`${repo.forge} answered no comment id`);
+      return `${prUrl}#${adapter.restFacts?.reviews ? "issuecomment-" : "note_"}${id}`;
+    },
+    async facts(read) {
+      if (!reader) throw new Error("no fact context");
+      if (!adapter.restFacts) return reader.github(repo, read, token(), { rest: adapter.api(origin), graphql: adapter.graphql(origin) });
+      const shape = adapter.restFacts;
+      const canPush = (id, login) => {
+        if (!immutableId(id)) return Promise.resolve(false);
+        const key = `${repo.webBase.toLowerCase()}\0${id}`;
+        if (!reader.permissions.has(key)) reader.permissions.set(key, (async () => {
+          const res = await api.response(shape.permission(path, id, login));
+          if (res.ok) return shape.canPush(await res.json(), id);
+          if (res.status === 404) return false;
+          if (res.status === 403 && !res.headers.has("retry-after") && res.headers.get("x-ratelimit-remaining") !== "0") {
+            const msg2 = await res.text();
+            if (shape.scopeRefusal(msg2) || /insufficient_scope/i.test(res.headers.get("www-authenticate") ?? "")) {
+              if (!reader.degraded.has(repo.webBase)) reader.facts.log(`baton.pushers-degraded: ${repo.path}: token cannot read push permissions; only listed pushers count`);
+              reader.degraded.add(repo.webBase);
+              return false;
+            }
+          }
+          throw new Error(`${repo.path}: push permission read failed (${res.status})`);
+        })());
+        return reader.permissions.get(key);
+      };
+      return readRestFacts(repo, read, reader.facts, adapter, api, adapter.pageSizeKey, canPush);
+    },
+    async witness(sha2, body) {
+      const attest = adapter.attest;
+      if (!attest || !SHA2.test(sha2)) return false;
+      if (cli) cli(["api", "--hostname", new URL(repo.webBase).host, "-X", "POST", attest.witness(path, sha2).slice(1), "-f", `body=${body}`]);
+      else await api.request(attest.witness(path, sha2), { body });
+      return true;
+    },
+    evidence(ref) {
+      const attest = adapter.attest;
+      if (!attest || !given) return null;
+      let at;
+      if (SHA2.test(ref)) at = attest.commit(path, ref);
+      else {
+        let url;
+        try {
+          url = new URL(ref);
+        } catch {
+          return null;
+        }
+        const read = url.protocol === "https:" && url.origin === origin ? attest.evidence(url) : null;
+        if (!read || read.repo.toLowerCase() !== path.toLowerCase()) return null;
+        at = read.api;
+      }
+      return async () => {
+        try {
+          return (await api.response(at)).status;
+        } catch {
+          return null;
+        }
+      };
+    },
+    protectedRefusal: adapter.protectedRefusal
+  };
+}
+var SHA2 = /^[0-9a-f]{40}$/;
+function listCli(run2, repository, state = "open") {
+  const text = run2(["pr", "list", "--state", state, "--limit", "300", "--json", "number,headRefName,headRefOid,isCrossRepository,state", ...repository ? ["--repo", repository] : []]);
+  let items;
+  try {
+    items = JSON.parse(text);
+  } catch {
+  }
+  if (!Array.isArray(items) || items.length > 300) throw new Error(`gh pr list answered no PR list: ${text.slice(0, 200)}`);
+  return items.map((p) => ({ ...openRef(p?.number, p?.headRefName, p?.headRefOid), sameRepository: p?.isCrossRepository === false, state: p?.state?.toLowerCase() }));
+}
+function commentUrl(prUrl, url) {
+  if (url.length > 1e3 || url.split("#")[0] !== prUrl || !/^#[A-Za-z0-9_-]+$/.test(new URL(url).hash)) throw new Error("forge answered no comment URL on the requested PR");
+  return url;
+}
+
+// src/defaults/forges/remote.ts
+function hostOf(url) {
+  const u = url.trim();
+  if (/^(file:|\/|\.{1,2}[\\/]|~)/.test(u) || /^[A-Za-z]:[\\/]/.test(u)) return null;
+  try {
+    const parsed = new URL(u);
+    if (parsed.hostname) return (parsed.protocol === "https:" || parsed.protocol === "http:" ? parsed.host : parsed.hostname).toLowerCase();
+  } catch {
+  }
+  const withUser = /^[^@/]+@([^/:]+):/.exec(u);
+  if (withUser) return withUser[1].toLowerCase();
+  const userLess = /^([a-z0-9][a-z0-9.-]*\.[a-z0-9-]+):/i.exec(u);
+  return userLess ? userLess[1].toLowerCase() : null;
+}
+var slugOfUrl = (url) => url.replace(/^git@[^:]+:/, "").replace(/^https?:\/\/[^/]+\//, "").replace(/^[A-Za-z0-9][A-Za-z0-9.-]*\.[A-Za-z0-9-]+:(?=[^/])/, "").replace(/\.git$/, "").replace(/^git\/(?=[^/]+\/[^/]+$)/, "");
+
+// src/defaults/forges/targets.ts
+function fromRemote(url, legacy = false) {
+  const host = hostOf(url);
+  const forge = inferForge(host) ?? (legacy && host ? DEFAULT_FORGE : null);
+  const path = slugOfUrl(url);
+  return forge && isForgePath(forge, path) ? prRepo({ forge, path, webBase: `https://${host}/${path}` }) : null;
+}
+function targetOf(ctx, path) {
+  const home = ctx.forge_home;
+  if (!home) return null;
+  if (!path || path.toLowerCase() === home.path.toLowerCase()) return prRepo(home);
+  const entries = ctx.forge_repositories ?? [];
+  const entry = entries.find((r) => r.path.toLowerCase() === path.toLowerCase());
+  if (entry) return prRepo({ forge: entry.forge, path: entry.path, webBase: entry.web_base });
+  if (entries.length) return null;
+  const base = prRepo(home);
+  const forge = base?.forge ?? DEFAULT_FORGE;
+  if (!isForgePath(forge, path)) return null;
+  const origin = base ? new URL(base.webBase).origin : `https://${publicHost(forge)}`;
+  return prRepo({ forge, path, webBase: `${origin}/${path}` });
+}
+function targetPr(ctx, url) {
+  const ref = parsePrUrl(url);
+  if (!ref || ctx.scope && !ctx.scope.includes(ref.path.toLowerCase())) return null;
+  const { path } = ref;
+  const repo = targetOf(ctx, path);
+  if (!repo || !isPullRequestUrl(repo.forge, url, repo.webBase)) return null;
+  return { repo, number: Number(ref.number) };
+}
+
 // src/defaults/outside-work.ts
 var repoName = (name) => name.toLowerCase().replace(/\.git$/, "");
 function mappedMerges(facts, repos, home) {
@@ -738,18 +1299,18 @@ function parseFrontmatter(text) {
     const line = lines[i];
     const kv = /^([A-Za-z][A-Za-z0-9_-]*):\s*(.*)$/.exec(line);
     if (!kv) continue;
-    const [, key, rest] = kv;
-    if (rest.trim() === "") {
+    const [, key, rest2] = kv;
+    if (rest2.trim() === "") {
       const items = [];
       while (i + 1 < lines.length && /^\s+-\s+/.test(lines[i + 1])) {
         i++;
         items.push(unquote(lines[i].replace(/^\s+-\s+/, "")));
       }
       out[key] = items;
-    } else if (/^\[.*\]$/.test(rest.trim())) {
-      out[key] = rest.trim().slice(1, -1).split(",").map(unquote).filter(Boolean);
+    } else if (/^\[.*\]$/.test(rest2.trim())) {
+      out[key] = rest2.trim().slice(1, -1).split(",").map(unquote).filter(Boolean);
     } else {
-      out[key] = unquote(rest);
+      out[key] = unquote(rest2);
     }
   }
   return out;
@@ -758,6 +1319,13 @@ var unquote = (v) => {
   const t = v.trim();
   return /^(["']).*\1$/.test(t) && t.length >= 2 ? t.slice(1, -1) : t;
 };
+var str = (v) => typeof v === "string" && v !== "" ? v : null;
+var strList = (v) => (Array.isArray(v) ? v : v == null || v === "" ? [] : [v]).map(str).filter((x) => x != null);
+function resolveTicketRepo(name, aliases) {
+  const valid = (path2) => FORGES.some((f) => isForgePath(f, path2));
+  const path = valid(name) ? name : aliases && Object.hasOwn(aliases, name) ? aliases[name] : void 0;
+  return typeof path === "string" && valid(path) ? path : null;
+}
 
 // src/defaults/pr-verify.ts
 function reconcileAnswer(out, ask, run2) {
@@ -767,7 +1335,7 @@ function reconcileAnswer(out, ask, run2) {
   const repos = [home, ...ask.repositories ?? []].map((r) => r?.toLowerCase());
   const prs = parseFrontmatter(ask.ticketText ?? "")?.prs;
   const ticket = { id: bareId(ask.ticket), repos: ask.repositories ?? [], course: { prs: Array.isArray(prs) ? prs : [] } };
-  const owns = (number, head, repository) => ticketOwns(ticket, { number, head, repository }, matchPatterns(ask.branchPatterns), home);
+  const owns2 = (number2, head, repository) => ticketOwns(ticket, { number: number2, head, repository }, matchPatterns(ask.branchPatterns), home);
   const apiRun = (host, repo, path) => run2("gh", ["api", "--hostname", host, `repos/${repo}${path ? `/${path}` : ""}`], ask.checkout);
   const list = (host, repo, path) => {
     const pages = JSON.parse(run2("gh", ["api", "--hostname", host, "--paginate", "--slurp", `repos/${repo}/${path}`], ask.checkout));
@@ -784,7 +1352,7 @@ function reconcileAnswer(out, ask, run2) {
     const api2 = (path) => JSON.parse(apiRun(m2[1], m2[2], path));
     const pr2 = JSON.parse(run2("gh", ["pr", "view", m2[3], "--repo", repo, "--json", "state,headRefName,headRefOid,baseRefName,mergeCommit,updatedAt"], ask.checkout));
     if (pr2.baseRefName !== api2("").default_branch) throw new Error("PR does not target the default branch");
-    if (owned && !owns(Number(m2[3]), pr2.headRefName, m2[2])) throw new Error("PR is not mapped to this ticket");
+    if (owned && !owns2(Number(m2[3]), pr2.headRefName, m2[2])) throw new Error("PR is not mapped to this ticket");
     return { pr: pr2, m: m2, api: api2 };
   };
   const delivered = /^delivered\s+(\S+)\s+(\S.*)$/.exec(line);
@@ -795,7 +1363,7 @@ function reconcileAnswer(out, ask, run2) {
       if (m2[4] || pr2.state !== "MERGED" || !pr2.mergeCommit?.oid) throw new Error("delivered requires a merged PR or commit");
       if (m2[2].toLowerCase() !== home?.toLowerCase()) return null;
       return String(pr2.mergeCommit.oid);
-    }).filter((sha) => sha != null);
+    }).filter((sha2) => sha2 != null);
     const checked = shas.length ? verifyDelivered({ checkout: ask.checkout, branch: ask.branch, shas }, run2) : [];
     return { end: "done", reached: "delivered", next: "confirm", detail: deliveredDetail(checked.length ? checked : delivered[1].split(","), delivered[2]) };
   }
@@ -809,7 +1377,7 @@ function reconcileAnswer(out, ask, run2) {
     const mapped = [...new Set(repos.filter((r) => r != null))].flatMap((repository) => {
       const defaultBranch2 = JSON.parse(apiRun(m[1], repository, "")).default_branch;
       if (typeof defaultBranch2 !== "string" || !defaultBranch2) throw new Error("cannot verify the default branch");
-      return list(m[1], repository, "pulls?state=all&per_page=100").filter((p) => owns(p.number, p.head.ref, repository)).map((p) => ({
+      return list(m[1], repository, "pulls?state=all&per_page=100").filter((p) => owns2(p.number, p.head.ref, repository)).map((p) => ({
         repository,
         state: p.merged_at ? "merged" : p.state === "open" ? "open" : "closed",
         base: p.base.ref,
@@ -860,9 +1428,17 @@ var bareId = (t) => {
 var msg = (e) => e instanceof Error ? e.message : String(e);
 function ticketRepositories(text, reposMap) {
   const fm = text == null ? null : parseFrontmatter(text);
-  const names = Array.isArray(fm?.repos) ? fm.repos : fm?.repos == null || fm.repos === "" ? [] : [fm.repos];
-  return names.map((r) => typeof r === "string" && /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(r) ? r : reposMap?.[r]).filter((r) => typeof r === "string" && r !== "");
+  return strList(fm?.repos).map((r) => resolveTicketRepo(r, reposMap)).filter((r) => r !== null);
 }
+function ticketPrRefs(text) {
+  return strList(text == null ? void 0 : parseFrontmatter(text)?.prs);
+}
+var owns = (ask, home, repo, pr) => ticketOwns(
+  { id: bareId(ask.ticket), repos: ask.repositories ?? [], course: { prs: ask.prRefs } },
+  { number: pr.number, head: pr.headRefName, repository: repo ?? home ?? void 0, sameRepository: pr.sameRepository === true },
+  matchPatterns(ask.branchPatterns),
+  home
+);
 function originSlug(run2, checkout) {
   try {
     const url = run2("git", ["remote", "get-url", "origin"], checkout);
@@ -887,36 +1463,25 @@ var ancestor = (a, b, run2, checkout) => {
     return false;
   }
 };
-function verifyPrOpen(ask, run2) {
+async function verifyPrOpen(ask, run2) {
   const id = bareId(ask.ticket);
   const patterns = matchPatterns(ask.branchPatterns).map((p) => p.replace(/\{ticket\}/g, id));
-  const slug = originSlug(run2, ask.checkout);
+  const slug = ask.forge_home?.path ?? originSlug(run2, ask.checkout);
   const siblings = (ask.repositories ?? []).filter((r, i, all) => all.indexOf(r) === i && (slug == null || r.toLowerCase() !== slug.toLowerCase()));
   const label = (repo) => repo ?? slug ?? "the checkout\u2019s repository";
-  const of = (repo) => {
-    const args = ["pr", "list", "--state", "open", "--limit", "300", "--json", "number,headRefName,headRefOid", ...repo ? ["--repo", repo] : []];
-    let text;
-    try {
-      text = run2("gh", args, ask.checkout);
-    } catch (e) {
-      throw new Error(msg(e));
-    }
-    let prs;
-    try {
-      prs = JSON.parse(text);
-    } catch {
-      prs = null;
-    }
-    if (!Array.isArray(prs)) throw new Error(`gh pr list${repo ? ` --repo ${repo}` : ""} answered no PR list: ${text.slice(0, 200)}`);
-    return prs.filter((p) => p != null && typeof p === "object" && typeof p.headRefName === "string" && patterns.some((pat) => branchMatches(pat, p.headRefName)));
+  const of = async (repo) => {
+    const target = targetOf(ask, repo ?? void 0);
+    const prs = target ? await forgeClient(target, { run: run2, checkout: ask.checkout }).listOpenPrs() : ask.forge_home ? [] : listCli((args) => run2("gh", args, ask.checkout), repo ?? void 0);
+    return prs.filter((p) => owns(ask, slug, repo, p));
   };
-  const found = [null, ...siblings].map((repo) => {
+  const found = [];
+  for (const repo of [null, ...siblings]) {
     try {
-      return { repo, prs: of(repo), error: null };
+      found.push({ repo, prs: await of(repo), error: null });
     } catch (e) {
-      return { repo, prs: null, error: msg(e) };
+      found.push({ repo, prs: null, error: msg(e) });
     }
-  });
+  }
   let branch = "";
   try {
     branch = run2("git", ["branch", "--show-current"], ask.checkout);
@@ -931,7 +1496,7 @@ function verifyPrOpen(ask, run2) {
       head = null;
     }
     for (const pr of found[0].prs ?? []) {
-      if (pr.headRefName !== branch || typeof pr.headRefOid !== "string" || pr.headRefOid === "" || head == null) continue;
+      if (pr.sameRepository !== true || pr.headRefName !== branch || typeof pr.headRefOid !== "string" || pr.headRefOid === "" || head == null) continue;
       if (head === pr.headRefOid) continue;
       if (!known(pr.headRefOid, run2, ask.checkout)) continue;
       if (!ancestor(head, pr.headRefOid, run2, ask.checkout)) {
@@ -947,31 +1512,28 @@ function verifyPrOpen(ask, run2) {
   }
   throw new Error(`the implement agent exited 0, but no open PR on a branch matching ${patterns.join(" or ")} for ticket ${id} exists in ${read.join(" or ")}${unread.length ? ` \u2014 ${unread.map((f) => label(f.repo)).join(" or ")} could not be read` : ""} \u2014 open one from a matching branch with its head pushed, or the leg fails here`);
 }
-function verifyPrsMerged(ask, run2) {
+async function verifyPrsMerged(ask, run2) {
   const id = bareId(ask.ticket);
   const patterns = matchPatterns(ask.branchPatterns).map((p) => p.replace(/\{ticket\}/g, id));
-  const slug = originSlug(run2, ask.checkout);
+  const slug = ask.forge_home?.path ?? originSlug(run2, ask.checkout);
   const siblings = (ask.repositories ?? []).filter((r, i, all) => all.indexOf(r) === i && (slug == null || r.toLowerCase() !== slug.toLowerCase()));
   const label = (repo) => repo ?? slug ?? "the checkout\u2019s repository";
-  const list = (repo, state) => {
-    const args = ["pr", "list", "--state", state, "--limit", "300", "--json", "number,headRefName", ...repo ? ["--repo", repo] : []];
-    const text = run2("gh", args, ask.checkout);
-    let prs;
+  const found = [];
+  for (const repo of [null, ...siblings]) {
     try {
-      prs = JSON.parse(text);
-    } catch {
-      prs = null;
-    }
-    if (!Array.isArray(prs)) throw new Error(`gh pr list --state ${state}${repo ? ` --repo ${repo}` : ""} answered no PR list: ${text.slice(0, 200)}`);
-    return prs.filter((p) => p != null && typeof p === "object" && typeof p.headRefName === "string" && patterns.some((pat) => branchMatches(pat, p.headRefName)));
-  };
-  const found = [null, ...siblings].map((repo) => {
-    try {
-      return { repo, open: list(repo, "open"), merged: list(repo, "merged"), error: null };
+      const target = targetOf(ask, repo ?? void 0);
+      const eligible = (prs) => prs.filter((pr) => owns(ask, slug, repo, pr));
+      if (target || ask.forge_home) {
+        const prs = eligible(target ? await forgeClient(target, { run: run2, checkout: ask.checkout }).listPrs() : []);
+        found.push({ repo, open: prs.filter((p) => p.state === "open"), merged: prs.filter((p) => p.state === "merged"), error: null });
+      } else {
+        const list = (state) => eligible(listCli((args) => run2("gh", args, ask.checkout), repo ?? void 0, state));
+        found.push({ repo, open: list("open"), merged: list("merged"), error: null });
+      }
     } catch (e) {
-      return { repo, open: null, merged: null, error: msg(e) };
+      found.push({ repo, open: null, merged: null, error: msg(e) });
     }
-  });
+  }
   const name = (f, p) => `${f.repo ? f.repo : ""}#${String(p.number)} (${String(p.headRefName)})`;
   const unread = found.filter((f) => f.error != null);
   if (unread.length > 0) {
@@ -1012,18 +1574,18 @@ function verifyDelivered(ask, run2) {
   return resolveDelivered(ask.shas, tracking, ask.checkout, run2);
 }
 function resolveDelivered(shas, ref, checkout, run2) {
-  return shas.map((sha) => {
-    if (!/^[0-9a-f]{7,40}$/.test(sha)) throw new Error("invalid delivered commit id");
+  return shas.map((sha2) => {
+    if (!/^[0-9a-f]{7,40}$/.test(sha2)) throw new Error("invalid delivered commit id");
     let full;
     try {
-      full = run2("git", ["rev-parse", "--verify", "--quiet", `${sha}^{commit}`], checkout).trim();
+      full = run2("git", ["rev-parse", "--verify", "--quiet", `${sha2}^{commit}`], checkout).trim();
     } catch {
-      throw new Error(`the implement agent answered delivered at ${sha}, which names no commit this checkout knows \u2014 refused`);
+      throw new Error(`the implement agent answered delivered at ${sha2}, which names no commit this checkout knows \u2014 refused`);
     }
-    if (!/^[0-9a-f]{40}$/.test(full) || !full.startsWith(sha)) throw new Error(`the implement agent answered delivered at ${sha}, which names no commit this checkout knows \u2014 refused`);
+    if (!/^[0-9a-f]{40}$/.test(full) || !full.startsWith(sha2)) throw new Error(`the implement agent answered delivered at ${sha2}, which names no commit this checkout knows \u2014 refused`);
     if (!ancestor(full, ref, run2, checkout)) {
       const branch = ref.replace(/^refs\/remotes\/origin\//, "");
-      throw new Error(`the implement agent answered delivered at ${sha}, which is not on ${branch} \u2014 refused: the commit a delivered answer names is on the default branch`);
+      throw new Error(`the implement agent answered delivered at ${sha2}, which is not on ${branch} \u2014 refused: the commit a delivered answer names is on the default branch`);
     }
     return full;
   });
@@ -1044,36 +1606,6 @@ function readItems(root, items = "tickets") {
   if (!existsSync(dir)) return [];
   return readdirSync3(dir, { recursive: true, withFileTypes: true }).filter((e) => e.isFile()).map((e) => relative2(dir, join4(e.parentPath, e.name)).split(sep2).join("/")).sort().map((path) => ({ path, text: readFileSync2(join4(dir, path), "utf8") }));
 }
-
-// src/defaults/output-evidence.ts
-var PREFIX = "Baton-Output: ";
-var MAX = 256 * 1024;
-var TICKET_OUTPUT_WITNESS = "baton: ticket close outputs";
-function outputLine(ctx, raw) {
-  const outputs = checkOutputs(raw);
-  if (!outputs.length) return null;
-  if (!ctx.run_id || !ctx.claim?.nonce) throw new Error("output evidence requires an online run and claim nonce");
-  const ticket = ctx.ticket.id.split(":").at(-1);
-  return PREFIX + encodeURIComponent(JSON.stringify({ ticket, leg: ctx.leg, run_id: ctx.run_id, claim_nonce: ctx.claim.nonce, outputs }));
-}
-
-// src/defaults/forge.ts
-function hostOf(url) {
-  const u = url.trim();
-  if (/^(file:|\/|\.{1,2}[\\/]|~)/.test(u) || /^[A-Za-z]:[\\/]/.test(u)) return null;
-  try {
-    const parsed = new URL(u);
-    if (parsed.hostname) return (parsed.protocol === "https:" || parsed.protocol === "http:" ? parsed.host : parsed.hostname).toLowerCase();
-  } catch {
-  }
-  const withUser = /^[^@/]+@([^/:]+):/.exec(u);
-  if (withUser) return withUser[1].toLowerCase();
-  const userLess = /^([a-z0-9][a-z0-9.-]*\.[a-z0-9-]+):/i.exec(u);
-  return userLess ? userLess[1].toLowerCase() : null;
-}
-
-// src/defaults/remote-slug.ts
-var slugOfUrl = (url) => url.replace(/^git@[^:]+:/, "").replace(/^https?:\/\/[^/]+\//, "").replace(/^[A-Za-z0-9][A-Za-z0-9.-]*\.[A-Za-z0-9-]+:(?=[^/])/, "").replace(/\.git$/, "").replace(/^git\/(?=[^/]+\/[^/]+$)/, "");
 
 // src/defaults/ticket-state.ts
 import { execFileSync as execFileSync2 } from "node:child_process";
@@ -1220,8 +1752,7 @@ async function closeTicket(ctx, result, run2 = exec) {
   const state = { station: result.reached, next_leg: result.next ?? null, claim: ctx.claim?.nonce ?? null };
   const branch = ticketsBranch(ctx.checkout, ctx.default_branch ?? null, run2);
   const git2 = (args, opts = {}) => run2("git", args, ctx.checkout, opts);
-  const origin = marker ? git2(["remote", "get-url", "origin"]) : null;
-  const githubRepo = origin && hostOf(origin) === "github.com" ? slugOfUrl(origin) : null;
+  const witnessTo = marker ? ctx.forge_home ? targetOf(ctx) : fromRemote(git2(["remote", "get-url", "origin"])) : null;
   const ref = `origin/${branch}`;
   const index = tmpIndex(ctx.checkout, run2);
   const env = { GIT_INDEX_FILE: index };
@@ -1263,16 +1794,7 @@ async function closeTicket(ctx, result, run2 = exec) {
         if (!movedOnRemote(e) || tries >= PUSH_TRIES) throw e;
         continue;
       }
-      if (githubRepo) run2("gh", [
-        "api",
-        "--hostname",
-        "github.com",
-        "-X",
-        "POST",
-        `repos/${githubRepo}/commits/${commit}/comments`,
-        "-f",
-        `body=${TICKET_OUTPUT_WITNESS}`
-      ], ctx.checkout);
+      if (witnessTo) await forgeClient(witnessTo, { run: run2, checkout: ctx.checkout }).witness(commit, TICKET_OUTPUT_WITNESS);
       return commit;
     }
   } finally {
@@ -1295,18 +1817,18 @@ function readTicketSettings(root, where = root) {
     throw new Error(`.baton/baton.json is not JSON: ${e.message.split("\n")[0]}`);
   }
   const texts = (v) => (Array.isArray(v) ? v : typeof v === "string" && v !== "" ? [v] : []).filter((x) => typeof x === "string" && x.trim() !== "").map((x) => x.trim());
-  const str = (v) => typeof v === "string" && v.trim() !== "" ? v.trim() : void 0;
-  const project = str(json.project);
-  if (json.project != null && project === void 0) throw new Error(".baton/baton.json: project is a project id, not an empty value");
+  const str2 = (v) => typeof v === "string" && v.trim() !== "" ? v.trim() : void 0;
+  const project2 = str2(json.project);
+  if (json.project != null && project2 === void 0) throw new Error(".baton/baton.json: project is a project id, not an empty value");
   const legacy_ids = texts(json.legacy_ids);
   return {
-    items: str(json.items),
-    ticket_prefix: str(json.ticket_prefix),
+    items: str2(json.items),
+    ticket_prefix: str2(json.ticket_prefix),
     legacy_ids,
-    project,
-    prefixes: prefixesOf(json.prefixes, legacy_ids, str(json.ticket_prefix)),
+    project: project2,
+    prefixes: prefixesOf(json.prefixes, legacy_ids, str2(json.ticket_prefix)),
     tags: tagsOf(json),
-    projects: str(json.projects) ?? "projects"
+    projects: str2(json.projects) ?? "projects"
   };
 }
 function tagsOf(json) {
@@ -1470,7 +1992,6 @@ ${limitation}` : ""}` };
 }
 
 // src/defaults/pr-close.ts
-var PR_URL2 = /^https?:\/\/[^\s/]+\/[^\s/]+\/[^\s/]+\/pull\/\d+$/;
 var COMMENTING_LEGS = /* @__PURE__ */ new Set(["review", "adjudicate", "conclude"]);
 var verdictLine = (verdict) => `<!-- baton:verdict ${verdict} -->`;
 function commentLine(leg, result) {
@@ -1495,7 +2016,23 @@ async function prClose(ctx, result, run2 = exec) {
   const comment = commentLine(ctx.leg, result);
   if (comment != null || marker && !MARKER_LEGS.has(ctx.leg)) {
     const body = [comment, `baton: ${ctx.ticket.id} ${ctx.leg}, claim ${ctx.claim?.nonce ?? "?"}`, marker].filter(Boolean).join("\n");
-    if (result?.pr != null && !(typeof result.pr === "string" && PR_URL2.test(result.pr))) throw new Error(`the ${ctx.leg} leg named no PR URL to write on, got ${JSON.stringify(result.pr)}`);
+    if (result?.pr != null && !(typeof result.pr === "string" && PR_URL.test(result.pr))) throw new Error(`the ${ctx.leg} leg named no PR URL to write on, got ${JSON.stringify(result.pr)}`);
+    if (ctx.forge_home) {
+      const opts = { run: run2, checkout: ctx.checkout };
+      if (typeof result.pr === "string") {
+        const named = targetPr(ctx, result.pr);
+        if (!named) throw new Error("the named PR does not belong to a registered forge repository");
+        return forgeClient(named.repo, opts).comment(named.number, body);
+      }
+      const repo = targetOf(ctx);
+      if (!repo) throw new Error("the checkout\u2019s repository has no PR conversation");
+      const client = forgeClient(repo, opts);
+      const branch = run2("git", ["branch", "--show-current"], ctx.checkout);
+      const prs = ctx.leg === "conclude" ? await client.listPrs() : await client.listOpenPrs();
+      const matches2 = prs.filter((p) => p.sameRepository !== false && branch !== "" && p.headRefName === branch);
+      if (matches2.length !== 1) throw new Error("the checkout branch does not name exactly one eligible PR; name its URL explicitly");
+      return client.comment(matches2[0].number, body);
+    }
     return run2("gh", ["pr", "comment", ...typeof result?.pr === "string" ? [result.pr] : [], "--body", body], ctx.checkout);
   }
   if (typeof result?.reached !== "string" || result.reached === "") throw new Error(`the ${ctx.leg} leg returned no station reached`);
@@ -1515,10 +2052,10 @@ function testsClose(ctx, result, run2 = exec) {
     throw new Error(`the run-tests gate returned neither green nor red, got ${JSON.stringify(result?.tests)}`);
   }
   if (typeof result?.reached !== "string" || result.reached === "") throw new Error("the run-tests gate returned no station reached");
-  const sha = /^[0-9a-f]{40}$/;
+  const sha2 = /^[0-9a-f]{40}$/;
   if (typeof result.branch !== "string" || result.branch === "" || result.branch.startsWith("-")) throw new Error("the run-tests gate returned no PR branch it tested");
-  if (typeof result.tested !== "string" || !sha.test(result.tested)) throw new Error("the run-tests gate returned no tested head");
-  if (typeof result.marker !== "string" || !sha.test(result.marker)) throw new Error("the run-tests gate returned no marker commit");
+  if (typeof result.tested !== "string" || !sha2.test(result.tested)) throw new Error("the run-tests gate returned no tested head");
+  if (typeof result.marker !== "string" || !sha2.test(result.marker)) throw new Error("the run-tests gate returned no marker commit");
   run2("git", ["push", "origin", `${result.marker}:refs/heads/${result.branch}`], ctx.checkout);
   return result.marker;
 }
@@ -1543,11 +2080,11 @@ function defaultBranch(ctx) {
 function gitAt(checkout, args, opts) {
   return execRaw("git", ["-C", checkout, ...args], void 0, opts);
 }
-function show(checkout, sha, rel, maxBuffer = OUTPUT_MAX) {
-  return gitAt(checkout, ["show", `${sha}:${rel}`], { maxBuffer });
+function show(checkout, sha2, rel, maxBuffer = OUTPUT_MAX) {
+  return gitAt(checkout, ["show", `${sha2}:${rel}`], { maxBuffer });
 }
-function hasPath(checkout, sha, rel) {
-  return gitAt(checkout, ["ls-tree", "--name-only", sha, "--", rel]).trim() !== "";
+function hasPath(checkout, sha2, rel) {
+  return gitAt(checkout, ["ls-tree", "--name-only", sha2, "--", rel]).trim() !== "";
 }
 function ticketTextOf({ ticket, checkout }) {
   try {
@@ -1597,15 +2134,15 @@ function makeLeg({ course, leg, reads, spec, overridePath, shipped }) {
     readsOnly: readsOnly2,
     standard: standard2,
     async run(ctx) {
-      const sha = ctx.snapshot?.sha;
-      if (typeof sha !== "string" || sha === "") throw new Error("the leg has no snapshot to read its override at");
-      const graphSha = ctx.signed_control?.course || sha;
+      const sha2 = ctx.snapshot?.sha;
+      if (typeof sha2 !== "string" || sha2 === "") throw new Error("the leg has no snapshot to read its override at");
+      const graphSha = ctx.signed_control?.course || sha2;
       const graphPath = `.baton/courses/${course}/course.json`;
       if (!spec.tests && (!ctx.reads_only || !ctx.review_store) && hasPath(ctx.checkout, graphSha, graphPath) && JSON.parse(show(ctx.checkout, graphSha, graphPath)).legs?.[leg]?.reads_only === true) {
         throw new Error("this runner cannot enforce reads_only (R-BTN-183)");
       }
       const overrideSha = ctx.signed_control?.overrides;
-      const readSha = !spec.tests && typeof overrideSha === "string" && overrideSha !== "" ? overrideSha : sha;
+      const readSha = !spec.tests && typeof overrideSha === "string" && overrideSha !== "" ? overrideSha : sha2;
       if (!hasPath(ctx.checkout, readSha, overridePath)) return standard2(ctx);
       const dir = mkdtempSync3(join8(tmpdir3(), "baton-override-"));
       try {
@@ -1630,11 +2167,11 @@ function makeLeg({ course, leg, reads, spec, overridePath, shipped }) {
 async function runAgent(ctx, { course, leg, names, spec, readsOnly: readsOnly2, shipped }) {
   const { ask, verify, pushes, delivered, reconcile } = spec;
   const heading = `baton: ${course}/${leg} ticket ${ctx.ticket.id}: `;
-  const sha = ctx.snapshot?.sha;
-  if (typeof sha !== "string" || sha === "") throw new Error("the leg has no snapshot to read .baton/baton.json at");
+  const sha2 = ctx.snapshot?.sha;
+  if (typeof sha2 !== "string" || sha2 === "") throw new Error("the leg has no snapshot to read .baton/baton.json at");
   if (ctx.reads_only && (!readsOnly2 || !ctx.review_store)) throw new Error("reads_only requires a compatible runner and non-writing stub (R-BTN-183)");
   const canInteract = course === "create-pr" && (leg === "implement" || leg === "fix") && ctx.can_interact === true;
-  const settingsSha = typeof ctx.signed_control?.agent_command === "string" && ctx.signed_control.agent_command !== "" ? ctx.signed_control.agent_command : sha;
+  const settingsSha = typeof ctx.signed_control?.agent_command === "string" && ctx.signed_control.agent_command !== "" ? ctx.signed_control.agent_command : sha2;
   const settings = JSON.parse(show(ctx.checkout, settingsSha, ".baton/baton.json"));
   const settingsCommand = typeof settings.agent_command === "string" && settings.agent_command !== "" ? settings.agent_command : process.env.BATON_AGENT_COMMAND ?? "";
   if (settingsCommand === "") throw new Error(".baton/baton.json names no agent_command \u2014 run `baton repo init --agent opencode` (or --agent claude-code, or --agent-command <cmd>); baton run --harness <harness> runs its command when the settings name none");
@@ -1648,10 +2185,10 @@ async function runAgent(ctx, { course, leg, names, spec, readsOnly: readsOnly2, 
   const prHeads = () => matchingHeads(ctx, entry).heads.sort().join("\n");
   const headsBefore = pushes && redEdge && ticketRepositories(ticketText, settings.repos).length === 0 ? prHeads() : "";
   const signedCourse = ctx.signed_control?.course;
-  const courseSha = typeof signedCourse === "string" && signedCourse !== "" ? signedCourse : sha;
+  const courseSha = typeof signedCourse === "string" && signedCourse !== "" ? signedCourse : sha2;
   let reviewLimit;
   if (course === "create-pr" && leg === "review") {
-    const graphSha = ctx.replay?.against ?? sha;
+    const graphSha = ctx.replay?.against ?? sha2;
     const graph = ctx.graph ?? (ctx.sourced_course === true ? { legs: shipped.reviewMaxRuns != null ? { review: { max_runs: shipped.reviewMaxRuns } } : {} } : JSON.parse(show(ctx.checkout, graphSha, `.baton/courses/${course}/course.json`)));
     const limits2 = graph.legs;
     reviewLimit = (limits2 instanceof Map ? limits2.get("review")?.maxRuns : limits2?.review?.max_runs) ?? (ctx.sourced_course === true ? void 0 : readReviewDefault(show(ctx.checkout, graphSha, REVIEW_DEFAULTS_PATH)));
@@ -1674,7 +2211,7 @@ Claim context (references only): ${JSON.stringify({ station: ctx.claim?.station,
     }
   );
   const workspace = reviewStore ? readOnlyWorkspace(
-    { ...ctx, snapshot: { sha }, review_store: reviewStore, ticket: { ...ctx.ticket, file: ctx.ticket.file ?? void 0 } },
+    { ...ctx, snapshot: { sha: sha2 }, review_store: reviewStore, ticket: { ...ctx.ticket, file: ctx.ticket.file ?? void 0 } },
     text,
     (args) => gitBuffer(reviewStore, ["--no-replace-objects", ...args], { maxBuffer: OUTPUT_MAX }),
     OUTPUT_MAX
@@ -1837,10 +2374,10 @@ Claim context (references only): ${JSON.stringify({ station: ctx.claim?.station,
     try {
       const answer = ask ? requireAnswer(out, ask, leg) : null;
       const last = names && !ask ? lastLine(out) : "";
-      const on = names ? answer?.pr ?? (PR_URL2.test(last) ? last : null) : null;
+      const on = names ? answer?.pr ?? (PR_URL.test(last) ? last : null) : null;
       const concluded = conclusion ? { conclusion } : {};
       if (verify === "merged") {
-        const merged = verifyPrsMerged({ checkout: ctx.checkout, ticket: ctx.ticket, branchPatterns: patterns, repositories: ticketRepositories(ticketText, settings.repos) }, legRun);
+        const merged = await verifyPrsMerged({ checkout: ctx.checkout, ticket: ctx.ticket, forge_home: ctx.forge_home, forge_repositories: ctx.forge_repositories, branchPatterns: patterns, repositories: ticketRepositories(ticketText, settings.repos), prRefs: ticketPrRefs(ticketText) }, legRun);
         if (process.env.BATON_VERBOSE) process.stderr.write(`${heading}the forge verified ${merged.join(", ")} merged, none open, on a branch matching ${patterns.join(" or ")}
 `);
       } else if (verify === "pr") {
@@ -1851,7 +2388,7 @@ Claim context (references only): ${JSON.stringify({ station: ctx.claim?.station,
 `);
           return { suspend: true, reached: "delivered", next: "confirm", delivered: shas[0], detail: deliveredDetail(shas, claimed.evidence), ...concluded };
         }
-        verifyPrOpen({ checkout: ctx.checkout, ticket: ctx.ticket, branchPatterns: patterns, repositories: ticketRepositories(ticketText, settings.repos) }, legRun);
+        await verifyPrOpen({ checkout: ctx.checkout, ticket: ctx.ticket, forge_home: ctx.forge_home, forge_repositories: ctx.forge_repositories, branchPatterns: patterns, repositories: ticketRepositories(ticketText, settings.repos), prRefs: ticketPrRefs(ticketText) }, legRun);
         if (process.env.BATON_VERBOSE) process.stderr.write(`${heading}the forge verified an open PR on a branch matching ${patterns.join(" or ")}
 `);
       }
@@ -1887,9 +2424,9 @@ function runTests(ctx, course, leg, shipped) {
   if (station !== "pr-open" && station !== "fixed") {
     throw new Error("the run-tests gate runs at pr-open or fixed, not " + JSON.stringify(station ?? null));
   }
-  const sha = ctx.snapshot?.sha;
-  if (typeof sha !== "string" || sha === "") throw new Error("the leg has no snapshot to read the course file at");
-  const readAt = (rel) => show(ctx.checkout, sha, rel, 1024 * 1024);
+  const sha2 = ctx.snapshot?.sha;
+  if (typeof sha2 !== "string" || sha2 === "") throw new Error("the leg has no snapshot to read the course file at");
+  const readAt = (rel) => show(ctx.checkout, sha2, rel, 1024 * 1024);
   const git2 = (...args) => gitAt(ctx.checkout, args);
   const heading = `baton: ${course}/${leg} ticket ${ctx.ticket.id}: `;
   let script = "test";
@@ -1959,7 +2496,7 @@ function runTests(ctx, course, leg, shipped) {
 }
 
 // baton-default-entry.ts
-var { run, close, handoff, readsOnly, standard } = makeLeg({ "course": "create-pr", "leg": "fix", "reads": "prs", "spec": { "position": { "reached": "fixed", "next": "run-tests" }, "pushes": "after-red" }, "overridePath": ".baton/courses/create-pr/legs/fix.run.mjs", "shipped": { "instructions": "# create-pr \xB7 fix \u2014 make the gate green, and close every finding the last round posted\n\nYou are running the `fix` leg of the `create-pr` course. You are here for one of three reasons \u2014\nfind out which before anything else:\n\n- **The test gate is red.** The `run-tests` leg ran the repository's test script on the PR's\n  head and it failed. This happens after `implement` too, before any review round: making the\n  tests green is fixing. The newest commit on the PR branch is the gate's empty marker,\n  `baton: tests red for <ticket>`; its message names the script that failed and its last lines\n  (`git log -1 --format=%B origin/<the branch>`). Follow *A red gate* below. There is no review\n  finding to answer.\n- **A PR's CI is red in another repository.** A PR in a repository the ticket's `repos:` names\n  is gated by its own CI, not by the marker: a check on its head concluded red (failed,\n  cancelled, timed out). Read which and why (`gh pr checks <the PR URL>`, then the failing run's\n  log), then follow *A red gate* below in that PR's repository. There is no marker and no review\n  finding.\n- **The last review round asked for changes** on the ticket's PRs: one per repository its\n  `repos:` names, besides this one, and the review may have posted its findings on any of them.\n  When you finish, every finding of that round is closed: fixed in a pushed commit, or answered\n  on its own thread.\n\nThe ticket's file is `$BATON_TICKET_FILE`. Any push is tested again by the gate before the next\nround reviews it.\n\n> **How the stub runs you** \u2014 Baton's contract for the `agent_command` author: your command\n> line splits into words as `sh` would (quotes honoured, no substitutions) and executes\n> **without a shell**, with the ticket id, the leg and the checkout appended as arguments.\n> Stdin is never an open pipe: nothing to read, and a read ends at once. Stdout and stderr are\n> captured pipes, and the course reads stdout's last line. Your process's exit **is** your\n> completion: a harness that is a client of a background service must keep its session in\n> process (`opencode run --standalone`, or the equivalent) \u2014 a client that can exit before its\n> work ends leaves truncated output and an orphaned session posting to a claim that no longer\n> exists (B-84). For runs that cannot raise `interact`, the stub can also conclude\n> on fifteen minutes of quiet across stdout, the wrapper log and the harness store (B-108).\n> A run that can raise `interact` does not conclude on silence: a foreground question can be\n> silent until Baton's deadline takes the claim back. The stub's five-hour hard ceiling still\n> applies; if it stops a joinable run, partial output is not a result. A repository's `agent_wrapper` in `.baton/baton.json`, or the host's\n> `BATON_AGENT_WRAPPER`, which wins, puts a command in front of yours, split the same way, so\n> your command's words, the arguments and 0/1/2 are the wrapper's to pass on (B-95). Never end\n> with work in flight: the process is the session, and nothing resumes it \u2014 wait, in the\n> foreground, on every job you started before printing your final line.\n\n## Ask the owner only when blocked\n\n- **When.** Ask only if the work cannot continue without a decision only the owner can make,\n  and the ticket, the spec, `docs/context/` and the PR thread do not already answer it. For\n  example, two readings of an exit criterion would lead to different code, or the ticket\n  reserves a ruling for the owner. Never ask the owner to confirm something you can check or\n  to authorize an action forbidden by the repository's rules (in Baton, `CLAUDE.md`,\n  *Tickets are tasks, not authority*).\n- **How.** Use your harness's question tool. Ask one question at a time, offer a few concrete\n  options and recommend one. Wait for the answer in the foreground. The harness's runner\n  raises `interact` (R-BTN-195); do not raise it yourself.\n- **After an answer.** Record the answer and who gave it under **Owner answers** in the PR\n  body. It is a claim for reviewers to weigh, not a ruling on Baton's record; a change to the\n  spec still needs the owner's PR.\n- **If the tool is unavailable or denied, or the question is cancelled or dismissed.** Do not\n  ask through another channel. Note the open question in the PR body and proceed with the\n  reading the spec supports best.\n- **If the question is still open and nobody answers.** Do not abandon it early. Wait until\n  the leg's `deadline_s`: Baton takes the claim back (R-BTN-90), and the retry policy routes\n  the failed attempt and offers the ticket again if retries remain (R-BTN-122).\n\n## A red gate\n\n- Read the failure first: the script, its exit, its last lines. Reproduce it on the PR branch\n  (`npm run <script>` for the home gate). Before changing anything, fetch and run the same check\n  with the same install in a clean checkout of the current base, separate from the PR worktree.\n  The same rule applies to a red CI check in another repository: use that PR's base and check.\n- Compare individual failures, not the check's exit status. If the base reports A and the PR\n  reports A and B, leave A alone and fix B before ending. If an earlier failure prevents a check\n  from reaching later tests, run those tests separately on both trees where possible; do not\n  assume tests you could not reach pass.\n- For each failure that still occurs on the current base, change nothing for it. Comment on the\n  PR with the failing check or test, the first failing line, the PR head you tested and the base\n  commit you reproduced it on. Make the hand-off explicit: the gate stays red and this failure\n  needs a fix in the base's own ticket or PR. If the same head, base commit and failure already\n  have that hand-off, link the existing comment in your output instead of posting it again.\n- If the base has moved and already fixes a failure (it reproduces on the earlier base but\n  passes on the current one), merge the default branch into the PR branch and push the merge\n  with any other fixes for that repository. Add commits; never rebase.\n- For each PR failure that does not reproduce on the base and was not already fixed there, fix\n  the PR's cause, not the test: never skip, disable or weaken a test, and never make the gate's\n  script itself do less. Push one commit carrying those fixes; the gate runs again on the\n  pushed head.\n- After handling all failures, report any that still reproduce on the default branch and where.\n  If there is nothing to fix or merge, do not push just to trigger the gate again.\n\n## For each finding, most severe first\n\nIf the home repository keeps a per-ticket review archive, follow its instructions to record\nthe findings and their disposition. Do not edit a shared findings log.\n\n- **Fix it and push**, or **reply on its thread** with why it is wrong or out of the ticket's\n  scope. Every blocking finding gets one of the two. A should-fix may be answered. A nit may be\n  left, or carried into a push you are making anyway.\n- A finding two reviewers both posted is closed once; on the second thread, link the first.\n- Treat each finding as a claim. Trace a real path from a real input to the failure before you\n  build anything for it. When the path is far-fetched, or the fix costs more than it prevents,\n  say so on the thread with the path you traced, rather than widening the PR.\n\n## Before you push\n\n- Run the repository's own checks, the same ones CI runs.\n- Install the way the implement leg's dependency hygiene says (B-132): `npm ci` from the\n  lockfile, lifecycle scripts off (`ignore-scripts=true`) but for `.baton/baton.json`'s\n  `allow_install_scripts` \u2014 never an `npm install` that rewrites the lockfile to make a failure\n  go away.\n- Re-read your diff as a hostile reviewer would: what would make the next round reject it?\n- Make one push per repository carrying every fix there, not one push per finding: each\n  repository's PR branch, of the same name, in its own checkout.\n- Reply on the threads you fixed, naming the commit.\n\n## Do not\n\n- A leg never edits a file another ticket's leg may edit \u2014 no CHANGELOG, no index, no\n  aggregate; a release note belongs in the PR body.\n- Fix a failure that also fails on the base inside this PR.\n- Skip, disable or weaken a test to get green.\n- Rewrite the branch's history; add commits.\n- Merge the PR.\n", "reviewMaxRuns": 3, "testScript": "test" } });
+var { run, close, handoff, readsOnly, standard } = makeLeg({ "course": "create-pr", "leg": "fix", "reads": "prs", "spec": { "position": { "reached": "fixed", "next": "run-tests" }, "pushes": "after-red" }, "overridePath": ".baton/courses/create-pr/legs/fix.run.mjs", "shipped": { "instructions": "# create-pr \xB7 fix \u2014 make the gate green, and close every finding the last round posted\n\nYou are running the `fix` leg of the `create-pr` course. You are here for one of three reasons \u2014\nfind out which before anything else:\n\n- **The test gate is red.** The `run-tests` leg ran the repository's test script on the PR's\n  head and it failed. This happens after `implement` too, before any review round: making the\n  tests green is fixing. The newest commit on the PR branch is the gate's empty marker,\n  `baton: tests red for <ticket>`; its message names the script that failed and its last lines\n  (`git log -1 --format=%B origin/<the branch>`). Follow *A red gate* below. There is no review\n  finding to answer.\n- **A PR's CI is red in another repository.** A PR in a repository the ticket's `repos:` names\n  is gated by its own CI, not by the marker: a check on its head concluded red (failed,\n   cancelled, timed out). Read the checks on the current head and the failing run's log in the\n   registered forge's web UI or with its own client. Then follow *A red gate* below in that PR\u2019s\n   repository. There is no marker and no review finding.\n- **The last review round asked for changes** on the ticket's PRs: one per repository its\n  `repos:` names, besides this one, and the review may have posted its findings on any of them.\n  When you finish, every finding of that round is closed: fixed in a pushed commit, or answered\n  on its own thread.\n\nThe ticket's file is `$BATON_TICKET_FILE`. Any push is tested again by the gate before the next\nround reviews it.\n\n> **How the stub runs you** \u2014 Baton's contract for the `agent_command` author: your command\n> line splits into words as `sh` would (quotes honoured, no substitutions) and executes\n> **without a shell**, with the ticket id, the leg and the checkout appended as arguments.\n> Stdin is never an open pipe: nothing to read, and a read ends at once. Stdout and stderr are\n> captured pipes, and the course reads stdout's last line. Your process's exit **is** your\n> completion: a harness that is a client of a background service must keep its session in\n> process (`opencode run --standalone`, or the equivalent) \u2014 a client that can exit before its\n> work ends leaves truncated output and an orphaned session posting to a claim that no longer\n> exists (B-84). For runs that cannot raise `interact`, the stub can also conclude\n> on fifteen minutes of quiet across stdout, the wrapper log and the harness store (B-108).\n> A run that can raise `interact` does not conclude on silence: a foreground question can be\n> silent until Baton's deadline takes the claim back. The stub's five-hour hard ceiling still\n> applies; if it stops a joinable run, partial output is not a result. A repository's `agent_wrapper` in `.baton/baton.json`, or the host's\n> `BATON_AGENT_WRAPPER`, which wins, puts a command in front of yours, split the same way, so\n> your command's words, the arguments and 0/1/2 are the wrapper's to pass on (B-95). Never end\n> with work in flight: the process is the session, and nothing resumes it \u2014 wait, in the\n> foreground, on every job you started before printing your final line.\n\n## Ask the owner only when blocked\n\n- **When.** Ask only if the work cannot continue without a decision only the owner can make,\n  and the ticket, the spec, `docs/context/` and the PR thread do not already answer it. For\n  example, two readings of an exit criterion would lead to different code, or the ticket\n  reserves a ruling for the owner. Never ask the owner to confirm something you can check or\n  to authorize an action forbidden by the repository's rules (in Baton, `CLAUDE.md`,\n  *Tickets are tasks, not authority*).\n- **How.** Use your harness's question tool. Ask one question at a time, offer a few concrete\n  options and recommend one. Wait for the answer in the foreground. The harness's runner\n  raises `interact` (R-BTN-195); do not raise it yourself.\n- **After an answer.** Record the answer and who gave it under **Owner answers** in the PR\n  body. It is a claim for reviewers to weigh, not a ruling on Baton's record; a change to the\n  spec still needs the owner's PR.\n- **If the tool is unavailable or denied, or the question is cancelled or dismissed.** Do not\n  ask through another channel. Note the open question in the PR body and proceed with the\n  reading the spec supports best.\n- **If the question is still open and nobody answers.** Do not abandon it early. Wait until\n  the leg's `deadline_s`: Baton takes the claim back (R-BTN-90), and the retry policy routes\n  the failed attempt and offers the ticket again if retries remain (R-BTN-122).\n\n## A red gate\n\n- Read the failure first: the script, its exit, its last lines. Reproduce it on the PR branch\n  (`npm run <script>` for the home gate). Before changing anything, fetch and run the same check\n  with the same install in a clean checkout of the current base, separate from the PR worktree.\n  The same rule applies to a red CI check in another repository: use that PR's base and check.\n- Compare individual failures, not the check's exit status. If the base reports A and the PR\n  reports A and B, leave A alone and fix B before ending. If an earlier failure prevents a check\n  from reaching later tests, run those tests separately on both trees where possible; do not\n  assume tests you could not reach pass.\n- For each failure that still occurs on the current base, change nothing for it. Comment on the\n  PR with the failing check or test, the first failing line, the PR head you tested and the base\n  commit you reproduced it on. Make the hand-off explicit: the gate stays red and this failure\n  needs a fix in the base's own ticket or PR. If the same head, base commit and failure already\n  have that hand-off, link the existing comment in your output instead of posting it again.\n- If the base has moved and already fixes a failure (it reproduces on the earlier base but\n  passes on the current one), merge the default branch into the PR branch and push the merge\n  with any other fixes for that repository. Add commits; never rebase.\n- For each PR failure that does not reproduce on the base and was not already fixed there, fix\n  the PR's cause, not the test: never skip, disable or weaken a test, and never make the gate's\n  script itself do less. Push one commit carrying those fixes; the gate runs again on the\n  pushed head.\n- After handling all failures, report any that still reproduce on the default branch and where.\n  If there is nothing to fix or merge, do not push just to trigger the gate again.\n\n## For each finding, most severe first\n\nIf the home repository keeps a per-ticket review archive, follow its instructions to record\nthe findings and their disposition. Do not edit a shared findings log.\n\n- **Fix it and push**, or **reply on its thread** with why it is wrong or out of the ticket's\n  scope. Every blocking finding gets one of the two. A should-fix may be answered. A nit may be\n  left, or carried into a push you are making anyway.\n- A finding two reviewers both posted is closed once; on the second thread, link the first.\n- Treat each finding as a claim. Trace a real path from a real input to the failure before you\n  build anything for it. When the path is far-fetched, or the fix costs more than it prevents,\n  say so on the thread with the path you traced, rather than widening the PR.\n\n## Before you push\n\n- Run the repository's own checks, the same ones CI runs.\n- Install the way the implement leg's dependency hygiene says (B-132): `npm ci` from the\n  lockfile, lifecycle scripts off (`ignore-scripts=true`) but for `.baton/baton.json`'s\n  `allow_install_scripts` \u2014 never an `npm install` that rewrites the lockfile to make a failure\n  go away.\n- Re-read your diff as a hostile reviewer would: what would make the next round reject it?\n- Make one push per repository carrying every fix there, not one push per finding: each\n  repository's PR branch, of the same name, in its own checkout.\n- Reply on the threads you fixed, naming the commit.\n\n## Do not\n\n- A leg never edits a file another ticket's leg may edit \u2014 no CHANGELOG, no index, no\n  aggregate; a release note belongs in the PR body.\n- Fix a failure that also fails on the base inside this PR.\n- Skip, disable or weaken a test to get green.\n- Rewrite the branch's history; add commits.\n- Merge the PR.\n", "reviewMaxRuns": 3, "testScript": "test" } });
 export {
   close,
   handoff,

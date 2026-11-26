@@ -1,3 +1,5 @@
+import { registration } from './forges';
+import type { ForgeRegistration } from './forges/types';
 // sequences.ts — the CLI's half of Baton's identifier sequences (B-176, BATON_SPEC §4.3
 // R-BTN-199): the kinds the CLI names (`ticket-b`, `rule`, `scenario`, `gate`, `migration`), the
 // `floor` each kind's is seeded by, and `baton tickets next <kind>`, the command a PR author
@@ -149,7 +151,7 @@ export async function takeNumber(o: {
   floor?: number | null;
   forTicket?: string | null;
   fetchImpl?: typeof fetch;
-}): Promise<{ kind: string; number: number }> {
+}): Promise<{ kind: string; number: number; home?: ForgeRegistration }> {
   checkKey(o.keyFile);
   let answer: { status: number; json: Record<string, unknown> | null; text: string };
   try {
@@ -162,7 +164,8 @@ export async function takeNumber(o: {
     throw new Undetermined(`the ${o.kind} sequence of ${o.repository}`, `Baton at ${o.url} is unreachable (${e instanceof Error ? e.message : String(e)})`);
   }
   if (answer.status >= 200 && answer.status < 300 && Number.isSafeInteger(answer.json?.number)) {
-    return { kind: o.kind, number: answer.json!.number as number };
+    const home = registration(answer.json?.home);
+    return { kind: o.kind, number: answer.json!.number as number, ...(home ? { home } : {}) };
   }
   const code = typeof answer.json?.code === 'string' ? answer.json.code : null;
   throw new Undetermined(`the ${o.kind} sequence of ${o.repository}`, code ? `${code} — ${String(answer.json?.message ?? '')}`.trim() : `HTTP ${answer.status}`);

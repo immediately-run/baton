@@ -18,6 +18,8 @@ const SYNC_CLAIMS = {
   job_workflow_ref: 'immediately-run/docs/.github/workflows/baton-sync.yml@refs/heads/main',
 };
 
+export const SYNC_REPO_PATH = SYNC_CLAIMS.repository;
+
 async function sign(claims: Record<string, unknown>, { issuer, audience }: { issuer: string; audience: string }) {
   const key = await importJWK(JSON.parse(env.TEST_SIGNING_JWK!), 'ES256');
   return new SignJWT(claims).setProtectedHeader({ alg: 'ES256', kid: 'baton-test' })

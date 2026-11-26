@@ -7,6 +7,7 @@ import { HARNESS_ADAPTERS, selectHarness } from '../runner/harness';
 import { DEFAULT_BRANCH_PATTERN, DEFAULT_CREATE_PR_REVIEW_ROUNDS, REVIEW_DEFAULTS_PATH } from './course-pr';
 import { parseSource, printSource, unpinnedWarning } from './course-source';
 import { isSourceBranch } from '../core/validate';
+import { DEFAULT_FORGE } from '../core/forges';
 import { DEFAULT_COURSE, builtIn, scaffoldable, type BuiltIn } from './courses';
 import { cliPin, cliSelf, cliVersion, courseEntry, courseFileText, parsePin, sameRepo, type BatonJson, type CourseEntry } from './repo-source';
 import { OVERRIDE_SUFFIX } from './stub-config';
@@ -229,7 +230,7 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
     if (!isSourceBranch(sourceBranch)) throw new Error('--source-branch: expected a valid branch name, not a commit');
     if (!named || !self || ownCourse || prune || eject) throw new Error('--source-branch requires a sourced --course and cannot be combined with --own, --prune or --eject');
   }
-  const sourceOf = (id: string): string | null => (self ? printSource({ provider: 'github', namespace: self.namespace, repository: self.repository, ref: self.sha, course: `standard-${id}` }) : null);
+  const sourceOf = (id: string): string | null => (self ? printSource({ provider: DEFAULT_FORGE, namespace: self.namespace, repository: self.repository, ref: self.sha, course: `standard-${id}` }) : null);
   const kept: string[] = [];
   /** Write `rel` when it is missing, or when `rewrite` (Baton's file, and its course is being
    * rewritten); otherwise it is kept. */

@@ -1,0 +1,12 @@
+---
+title: B-273 review round 2
+description: Second-round findings and fixes for the forge client PR.
+---
+
+Reviewed head: `cc0bd3c9f1d549a3a9d30d75bff1bb5999ba3fb9`. [Forge review](https://github.com/immediately-run/baton/pull/369#pullrequestreview-6015049992). Verdict: **changes**.
+
+- [Blocking: Gitea home gate ordering](https://github.com/immediately-run/baton/pull/369#discussion_r4660505987). Fixed by reversing the tip-first commit stream without sorting timestamps. A same-second history test checks that the recorded green marker wins.
+- [Blocking: GitLab note IDs](https://github.com/immediately-run/baton/pull/369#discussion_r4660505992). Fixed by validating a comment ID as a positive safe integer, independently of the PR number limit. The contract covers a billion-ID note with no returned URL.
+- [Blocking: fork ownership](https://github.com/immediately-run/baton/pull/369#discussion_r4660505999). Verification now requires affirmative same-repository identity for branch discovery and uses the sync's ticket ownership predicate for explicit references.
+- [Blocking: forge selectors](https://github.com/immediately-run/baton/pull/369#discussion_r4660506006). Dispatch kind, public API origin and the bare dependency remote default come from the forge table. The merge with main preserves B-326's retirement of `baton tickets new` in favor of Dibber.
+- [Should-fix: reused branches](https://github.com/immediately-run/baton/pull/369#discussion_r4660506010). The conclude instructions now require the exact PR URL even for home PRs. A bare answer remains compatible when branch lookup returns exactly one PR.

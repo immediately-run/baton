@@ -9,8 +9,8 @@ import { BatonApi, BatonRefusal, envAuth, type Auth, type Transport } from '../r
 import { syncOnce } from '../shared/batonSync.mjs';
 import { DEFAULT_URL } from '../client/config.mjs';
 import { API_KEY, signingKey } from '../client/sign.mjs';
-import { DEFAULT_BRANCH_PATTERN, DEFAULT_CREATE_PR_REVIEW_ROUNDS, REVIEW_DEFAULTS_PATH, readReviewDefault, matchPatterns, sameRepo as sameRepoName, ticketOwns, type BatonRecord, type CodeRepoEntry, type PrFact, type StationsResult } from './course-pr';
-import { commitsOf, type BranchCommit } from './pr-markers';
+import { DEFAULT_BRANCH_PATTERN, DEFAULT_CREATE_PR_REVIEW_ROUNDS, REVIEW_DEFAULTS_PATH, readReviewDefault, matchPatterns, sameRepo as sameRepoName, ticketOwns, type BatonRecord, type PrFact, type StationsResult } from './course-pr';
+import { readHomePrCommits } from './pr-markers';
 import { parseSource, unpinnedWarning } from './course-source';
 import type { BoardPayload } from '../core/board';
 import { stampMarkdownVersions } from './ticket-versions';
@@ -23,7 +23,12 @@ import { clampUnsignedList, marksOf, signedControlOf, unsignedAgentConfig } from
 import { nodeKeygen } from '../shared/commitSign.mjs';
 import type { PostedControl, PostedAttestation } from '../core/board';
 import { ownRepositoryId, remoteSlug } from './remote-slug';
-import { githubFacts, githubConn, plainGitRemote, FETCH_TIMEOUT_MS } from './facts';
+import { plainGitRemote, FETCH_TIMEOUT_MS } from './facts';
+import { readForgeFacts } from './forges/facts';
+import { FORGE_SHAPES } from '../core/forges';
+import { evidenceReader, prRepo, registration, witnessed } from './forges';
+import { fromRemote } from './forges/targets';
+import type { ForgeRepo } from './forges/types';
 import { cliSelf, cliVersion, courseFileText, defaultSkill, fromSource, LEGACY_CREATE_PR, packageRoot, prebuilt, sameRepo, sourceFileOfLegacyStation, type BatonJson, type CourseEntry } from './repo-source';
 import { graphOf } from '../core/graph';
 import { validateCourse } from '../core/course';
@@ -33,9 +38,9 @@ import { OVERRIDE_SUFFIX } from './stub-config';
 
 /** The retired markers file's path (B-100): the sync no longer reads it — `baton repo
  *  migrate-markers` does, once, and deletes it. */
-import { hostOf } from './forge';
+import { hostOf } from './forges/remote';
 import { git, gitText } from './git.mjs';
-import { attestEvidence, type EvidenceAttestation, type UnconfirmedEnd } from './evidence';
+import { attestEvidence, type EvidenceAttestation, type EvidencePorts, type UnconfirmedEnd } from './evidence';
 import { outputAttestation, syncAttestationBatch } from './output-evidence';
 
 const MARKERS_FILE_RETIRED = join('.baton', 'markers.jsonl');
@@ -246,13 +251,14 @@ async function readBoard(root: string, at: string, batonJson: BatonJson, args: S
   if (stray) throw new Error(`ticket ${stray.id} is on course ${stray.course_id}, which .baton/baton.json's courses do not list`);
 
   // The PR facts: recorded (tests) or the forge's own, gathered through the adapter's seam.
-  const repository = remoteSlug(root);
+  const originSlug = remoteSlug(root);
+  const repository = record?.home?.path ?? originSlug;
   // A PR is a live ticket's when its course's patterns or the ticket's `prs:` name it.
   const owners = courses.map((c) => ({
     patterns: matchPatterns([c.branch_pattern ?? DEFAULT_BRANCH_PATTERN, ...(c.previous_branch_pattern ? [c.previous_branch_pattern] : [])]),
     tickets: result.tickets.filter((t) => t.course_id === c.id && !closedIds.has(t.id)),
   }));
-  const owns = (pr: { number: number; head: string; repository?: string }) => owners.some((o) => o.tickets.some((t) => ticketOwns(t, pr, o.patterns, repository)));
+  const owns = (pr: Pick<PrFact, 'number' | 'head' | 'repository' | 'sameRepository'>) => owners.some((o) => o.tickets.some((t) => ticketOwns(t, pr, o.patterns, repository)));
   const syncMjsOf = (id: string): string => join(root, '.baton', 'courses', id, 'sync.mjs');
   // The forge is read only when a course reads PRs: a repository on the marker courses alone
   // (bug-report, draft-ticket, decision) needs no forge token. A course's own sync.mjs may read
@@ -285,16 +291,30 @@ async function readBoard(root: string, at: string, batonJson: BatonJson, args: S
   // frontmatter's machine state beside them (a migration's record, or a hand-edited file: git's
   // history is the authority, never the working tree). No second input, no shared file: a
   // checkout git cannot answer for has no close history, and its frontmatter state stands.
-  const origin = repository != null ? gitText(root, 'remote', 'get-url', 'origin') : null;
-  const plain = origin != null && plainGitRemote(origin);
-  const githubHome = origin != null && hostOf(origin) === 'github.com';
+  const origin = originSlug != null ? gitText(root, 'remote', 'get-url', 'origin') : null;
+  // A checkout whose origin is a local path (a `file://` URL or a directory) reads its history
+  // from git alone, whatever forge the home is registered on: no forge is read for it, so a
+  // repository on the marker courses alone syncs with no forge token, as before B-273.
+  const localOrigin = origin != null && hostOf(origin) === null;
+  const forgeHome = localOrigin ? undefined : record?.home;
+  const plain = localOrigin || (forgeHome ? FORGE_SHAPES[forgeHome.forge].pr === null : origin != null && plainGitRemote(origin));
+  // R-BTN-82: a forge home's close outputs count only with a pusher's witness on the close
+  // commit, read by the home's forge adapter — on a forge whose adapter reads none, they do not.
+  let witnessHome = false;
+  if (!plain && origin != null) {
+    try {
+      witnessHome = witnessed(forgeHome ? prRepo(forgeHome) : fromRemote(origin));
+    } catch {
+      witnessHome = false;
+    }
+  }
   const closeCommits = closesByTicket((args) => gitText(root, ...args));
   for (const t of result.tickets) {
     if (closedIds.has(t.id) || t.path == null) continue; // a pathless ticket (a tracker's) has no file to close on
     const commits = closeCommits.get(t.id) ?? [];
     const fm = existsSync(join(root, t.path)) ? parseFrontmatter(readFileSync(join(root, t.path), 'utf8')) : null;
     if (!commits.length && fm?.station === undefined) continue;
-    if (plain || githubHome) for (const { sha, leg } of commits) {
+    if (plain || witnessHome) for (const { sha, leg } of commits) {
       const a = outputAttestation(gitText(root, 'show', '-s', '--format=%b', sha), sha);
       if (a?.ticket === t.id && (a.value as { leg: string }).leg === leg) (plain ? outputEvidence : ticketOutputEvidence).push(a);
     }
@@ -303,8 +323,9 @@ async function readBoard(root: string, at: string, batonJson: BatonJson, args: S
   }
 
   const mentionSince = outside ? args.backfillMentions ?? outside.head_accepted_at : null;
-  const facts: PrFact[] = args.factsFile ? (JSON.parse(readFileSync(args.factsFile, 'utf8')) as PrFact[]) : readsPrs || ticketOutputEvidence.length ? await githubFacts(root, log, owns, [...siblings.values()], { codeRepos: record?.code_repos, pushers: record?.pushers, outputEvidence, ticketOutputEvidence, readPrs: readsPrs, outside, mentionSince,
-    ownsOutput: (ticket, pr, fork) => owners.some((o) => o.tickets.some((t) => t.id === ticket && ticketOwns(t, pr, fork ? [] : o.patterns, repository))),
+  const facts: PrFact[] = args.factsFile ? (JSON.parse(readFileSync(args.factsFile, 'utf8')) as PrFact[]) : readsPrs || ticketOutputEvidence.length ? await readForgeFacts(root, log, owns, [...siblings.values()], {
+    ...record, home: forgeHome, outputEvidence, ticketOutputEvidence, readPrs: readsPrs, outside, mentionSince,
+    ownsOutput: (ticket, pr) => owners.some((o) => o.tickets.some((t) => t.id === ticket && ticketOwns(t, pr, o.patterns, repository))),
   }) : [];
   const commits: MentionCommit[] = [];
   if (outside && mentionSince != null) {
@@ -320,10 +341,9 @@ async function readBoard(root: string, at: string, batonJson: BatonJson, args: S
   // its fact as it is (its gate stays open).
   const boundedGit = (a: string[]): string => git(root, a, { timeoutMs: CLOSE_TIMEOUT_MS });
   for (const f of facts) {
-    if (f.commits || f.state !== 'open' || (f.repository != null && repository != null && !sameRepoName(f.repository, repository)) || !owns(f)) continue;
+    if (f.commits || f.state !== 'open' || f.sameRepository === false || (f.repository != null && repository != null && !sameRepoName(f.repository, repository)) || !owns(f)) continue;
     try {
-      boundedGit(['fetch', '-q', '--no-tags', 'origin', `refs/heads/${f.head}`]);
-      f.commits = commitsOf(boundedGit, ['FETCH_HEAD', '--not', 'HEAD']);
+      f.commits = readHomePrCommits(boundedGit, f.head, f.headOid);
     } catch (e) {
       log(`baton: ${f.head}'s commits could not be read from git (${e instanceof Error ? e.message.split('\n')[0] : String(e)}) — its gate reads as open`);
     }
@@ -750,6 +770,7 @@ async function syncWithSources(args: SyncArgs & { sourceCache: string }): Promis
           // B-182 (R-BTN-140): the effective `code_repos` and `pushers` the observation hands
           // back — what the fact adapter reads each named repository by, and whose words count
           // there (R-BTN-139).
+          ...(registration(got.home) ? { home: registration(got.home) } : {}),
           ...(Array.isArray(got.code_repos) ? { code_repos: got.code_repos as BatonRecord['code_repos'] } : {}),
           ...(Array.isArray(got.pushers) ? { pushers: got.pushers as BatonRecord['pushers'] } : {}),
           // B-127: the repository's owner signing keys and whether it requires signed control —
@@ -776,7 +797,7 @@ async function syncWithSources(args: SyncArgs & { sourceCache: string }): Promis
         const answer = await api.dependencies([...ids]);
         return (Array.isArray(answer.dependencies) ? answer.dependencies : []).map((d) => ({ ticket: String(d.ticket), done: d.done === true }));
       });
-      evidence = unconfirmed.length ? await attestEvidence(unconfirmed, evidencePorts(root, record?.code_repos ?? [], log)) : [];
+      evidence = unconfirmed.length ? await attestEvidence(unconfirmed, evidencePorts(root, record, log)) : [];
       return at;
     },
     readHead: () => asResult(() => api.head()),
@@ -865,21 +886,12 @@ function syncKeyAuth(file: string): Auth {
   return auth;
 }
 
-/** R-BTN-10: what the evidence check reads through — the home checkout's git, and the REST API
- *  of the GitHub hosts this repository is on (github.com, its home's host, its `code_repos`
- *  entries'), with the sync's `GITHUB_TOKEN`. Without a token only commits are looked at. */
-function evidencePorts(root: string, codeRepos: readonly CodeRepoEntry[], log: (l: string) => void): Parameters<typeof attestEvidence>[1] {
-  const token = process.env.GITHUB_TOKEN;
-  const slug = remoteSlug(root);
-  let originHost: string | null = null;
-  try {
-    const u = gitText(root, 'remote', 'get-url', 'origin');
-    originHost = /^https:\/\//.test(u) ? new URL(u).host : (/^[^@]+@([^:]+):/.exec(u)?.[1] ?? null);
-  } catch {
-    originHost = null;
-  }
-  const hosts = new Set<string>(['github.com', ...codeRepos.filter((e) => e.forge === 'github').map((e) => e.host)]);
-  const homeHost = originHost === 'github.com' || (originHost != null && hosts.has(originHost)) ? originHost : null;
+/** R-BTN-10: what the evidence check reads through — the home checkout's git, and the forge
+ *  adapters (`evidenceReader`): the registered home's for a commit, and for a URL the adapter of
+ *  the host it names, among the adapters' public hosts and the registered repositories' (the
+ *  home and its `code_repos` entries), each with the sync's own forge credential. Without one
+ *  only commits are looked at. */
+function evidencePorts(root: string, record: BatonRecord | undefined, log: (l: string) => void): EvidencePorts {
   const hasObject = (sha: string) => {
     try {
       git(root, ['cat-file', '-e', `${sha}^{commit}`], { stdio: 'ignore' });
@@ -888,6 +900,21 @@ function evidencePorts(root: string, codeRepos: readonly CodeRepoEntry[], log: (
       return false;
     }
   };
+  let home: ForgeRepo | null = null;
+  try {
+    home = record?.home ? prRepo(record.home) : fromRemote(gitText(root, 'remote', 'get-url', 'origin'));
+  } catch {
+    home = null; // no origin, or a registration no adapter reads: commits only
+  }
+  const known: ForgeRepo[] = [];
+  for (const e of record?.code_repos ?? []) {
+    try {
+      const r = prRepo({ forge: e.forge, path: e.path, webBase: e.web_base });
+      if (r) known.push(r);
+    } catch {
+      // an entry no adapter can address is not a host the credential goes to
+    }
+  }
   return {
     hasCommit: (sha) => {
       if (hasObject(sha)) return true;
@@ -898,16 +925,7 @@ function evidencePorts(root: string, codeRepos: readonly CodeRepoEntry[], log: (
       }
       return hasObject(sha);
     },
-    home: token && slug && homeHost ? { host: homeHost, slug } : null,
-    hosts: token ? hosts : new Set(),
-    get: async (host, path) => {
-      try {
-        const res = await fetch(`${githubConn(host).rest}${path}`, { headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json', 'User-Agent': 'baton-sync' }, redirect: 'error', signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
-        return res.status;
-      } catch {
-        return null;
-      }
-    },
+    forgeRead: evidenceReader(home, known),
     log,
   };
 }

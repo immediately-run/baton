@@ -9,6 +9,7 @@ import type { SessionLinkView } from '../links';
 import type { ReadPrincipal } from '../reads/kit';
 import { liveRepoParam, pathSegment, requireGrant, runnerSecret, ticketOf } from './kit';
 import { authenticated } from './principal';
+import { forgeCoordinates } from '../registry';
 
 export async function publicRoute(core: Pick<BatonCore, 'admin'>, req: Request, url: URL, principal: { accessEmail: string | null }): Promise<Response | null> {
   if (req.method === 'POST' && url.pathname === '/v1/login') {
@@ -76,7 +77,8 @@ export async function sequenceRoute(core: Parameters<typeof authenticated>[0] & 
     }
   }
   const take = checkSequenceTake(body);
-  return json(core.sequences.next(repo, kind, take.floor, actor, take.forTicket));
+  const home = core.registry.get(repo)!;
+  return json({ ...core.sequences.next(repo, kind, take.floor, actor, take.forTicket), home: forgeCoordinates(home) });
 }
 
 /**

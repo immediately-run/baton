@@ -1,3 +1,4 @@
+import { hasPrs } from './forges';
 // admin.ts — Baton's administration, the one set of validated functions behind `/v1/admin/*`,
 // `/v1/owner/{repository}/*` and `POST /v1/login`, which `baton admin` and `baton owner` call on
 // either host (BATON_SPEC §10.6 R-BTN-57/-58, R-BTN-66/-67, R-BTN-16). Every limit the owners
@@ -1077,7 +1078,7 @@ export class Admin {
       codeRepos = checkCodeRepos(b.code_repos, home);
       // B-182 point 7 (R-BTN-188): no human identity or floor while a code repository sits on
       // another host — here, an entry being added while one stands is the refused order.
-      const homeHost = home.forge === 'git' ? null : home.host;
+      const homeHost = hasPrs(home.forge) ? home.host : null;
       const cross = codeRepos.find((e) => homeHost == null || e.host !== homeHost);
       if (cross) {
         const cur = this.c.policies.current(repository);

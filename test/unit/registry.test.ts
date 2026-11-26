@@ -8,7 +8,7 @@ import { checkRegistration } from '../../src/core/registry';
 import { branchMatches } from '../../src/core/claims';
 import { checkRegistry } from '../../src/core/courses';
 import type { DispatchTarget } from '../../src/core/ports';
-import { rows, withCore, retireRepositoryIn, seedEventIn, setUnblockedTriggerIn } from '../helpers';
+import { rows, withCore, retireRepositoryIn, seedEventIn, setUnblockedTriggerIn, SYNC_REPO_PATH } from '../helpers';
 
 const OPS = { id: 'ops', github: 'immediately-run/ops', default_branch: 'trunk', sync_workflow: '.github/workflows/sync.yml' };
 const claimsOf = (repository: string, workflow: string, branch = 'trunk') =>
@@ -104,8 +104,8 @@ describe('the registry', () => {
       return got;
     });
     expect(sent).toEqual([
-      expect.objectContaining({ github: 'immediately-run/ops', workflow: 'sync.yml', ref: 'trunk' }),
-      expect.objectContaining({ github: 'immediately-run/docs', workflow: 'baton-mirror.yml', ref: 'main' })]);
+      expect.objectContaining({ path: 'immediately-run/ops', workflow: 'sync.yml', ref: 'trunk' }),
+      expect.objectContaining({ path: SYNC_REPO_PATH, workflow: 'baton-mirror.yml', ref: 'main' })]);
   });
 
   it('an unblocked dispatch sends the owners’ workflow with one `tickets` input; a trigger it cannot send is false (R-BTN-77)', async () => {
@@ -123,7 +123,7 @@ describe('the registry', () => {
       expect(await c.dispatcher({ repository: 'ops', kind: 'unblocked', tickets })).toBe(false);
       return got;
     });
-    expect(sent).toEqual([expect.objectContaining({ github: 'immediately-run/docs', workflow: 'baton-unblocked.yml', ref: 'main', inputs: { tickets: JSON.stringify(tickets) } })]);
+    expect(sent).toEqual([expect.objectContaining({ path: SYNC_REPO_PATH, workflow: 'baton-unblocked.yml', ref: 'main', inputs: { tickets: JSON.stringify(tickets) } })]);
   });
 
   it('dispatchWorkflow posts `inputs` only when the target has them', async () => {
@@ -135,13 +135,13 @@ describe('the registry', () => {
       return new Response(null, { status: 204 });
     });
     try {
-      expect(await dispatchWorkflow('tok', { github: 'immediately-run/docs', workflow: 'baton-unblocked.yml', ref: 'main', inputs: { tickets: '[]' } })).toBe(true);
-      expect(await dispatchWorkflow('tok', { github: 'immediately-run/docs', workflow: 'baton-mirror.yml', ref: 'main' })).toBe(true);
-      expect(await dispatchWorkflow(undefined, { github: 'immediately-run/docs', workflow: 'baton-mirror.yml', ref: 'main' })).toBe(false);
+      expect(await dispatchWorkflow('tok', { path: SYNC_REPO_PATH, workflow: 'baton-unblocked.yml', ref: 'main', inputs: { tickets: '[]' } })).toBe(true);
+      expect(await dispatchWorkflow('tok', { path: SYNC_REPO_PATH, workflow: 'baton-mirror.yml', ref: 'main' })).toBe(true);
+      expect(await dispatchWorkflow(undefined, { path: SYNC_REPO_PATH, workflow: 'baton-mirror.yml', ref: 'main' })).toBe(false);
     } finally {
       vi.unstubAllGlobals();
     }
-    expect(urls).toEqual(['https://api.github.com/repos/immediately-run/docs/actions/workflows/baton-unblocked.yml/dispatches', 'https://api.github.com/repos/immediately-run/docs/actions/workflows/baton-mirror.yml/dispatches']);
+    expect(urls).toEqual([`https://api.github.com/repos/${SYNC_REPO_PATH}/actions/workflows/baton-unblocked.yml/dispatches`, `https://api.github.com/repos/${SYNC_REPO_PATH}/actions/workflows/baton-mirror.yml/dispatches`]);
     expect(bodies).toEqual([{ ref: 'main', inputs: { tickets: '[]' } }, { ref: 'main' }]);
   });
 
@@ -155,7 +155,7 @@ describe('the registry', () => {
   ])('dispatchWorkflow reports %s safely', async (_case, reply, reason) => {
     vi.stubGlobal('fetch', async () => reply());
     try {
-      await expect(dispatchWorkflow('test-dispatch-credential', { github: 'immediately-run/docs', workflow: 'baton-sync.yml', ref: 'main' })).rejects.toMatchObject({ message: reason });
+      await expect(dispatchWorkflow('test-dispatch-credential', { path: SYNC_REPO_PATH, workflow: 'baton-sync.yml', ref: 'main' })).rejects.toMatchObject({ message: reason });
     } finally {
       vi.unstubAllGlobals();
     }
@@ -172,7 +172,7 @@ describe('the registry', () => {
     vi.stubGlobal('fetch', async () => new Response(body, { status: 422 }));
     try {
       await Promise.all([
-        expect(dispatchWorkflow('test-dispatch-credential', { github: 'immediately-run/docs', workflow: 'baton-sync.yml', ref: 'main' })).rejects.toMatchObject({ status: 422, message: 'HTTP 422' }),
+        expect(dispatchWorkflow('test-dispatch-credential', { path: SYNC_REPO_PATH, workflow: 'baton-sync.yml', ref: 'main' })).rejects.toMatchObject({ status: 422, message: 'HTTP 422' }),
         vi.advanceTimersByTimeAsync(1000),
       ]);
       expect(cancel).toHaveBeenCalledOnce();
