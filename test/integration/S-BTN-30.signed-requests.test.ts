@@ -10,7 +10,10 @@
 // a reading outside the instances it was registered with is accepted; a key in another role is
 // refused at the probe's route.
 import { describe, it, expect, beforeEach } from 'vitest';
-import { HOST, ORIGIN, call, hbBody, keyCall, register, setAdminKeys, rows, setClock, sha256, signedCall, SSH_KEYS, withCore } from '../helpers';
+import {
+  HOST, ORIGIN, call, hbBody, keyCall, register, setAdminKeys, rows, setClock, sha256, signedCall, SSH_KEYS,
+  withCore, revokeCredential, seedCredentialIn,
+} from '../helpers';
 import { makeKey, signedRequest } from '../lib/sshKeys';
 import { runnerAuth } from '../lib/runnerAuth';
 import { call as hostCall, config } from '#host';
@@ -72,7 +75,7 @@ describe(`S-BTN-30 signed requests (${HOST})`, () => {
   it('a request by a revoked key is refused, and its runner stops at its next call', async () => {
     const secret = 'secret-revoked';
     expect((await signedCall('vm-sk-ed', '/v1/runner/heartbeat', { body: await keyBeat('vm-sk-ed', secret) })).res.status).toBe(200);
-    await rows(`UPDATE credentials SET revoked_at = ? WHERE id = ?`, T0, SSH_KEYS['vm-sk-ed'].fingerprint);
+    await revokeCredential(SSH_KEYS['vm-sk-ed'].fingerprint, T0);
     const { res } = await signedCall('vm-sk-ed', '/v1/runner/heartbeat', { secret, body: hbBody('vm-a', { hostname: 'vm-sk-ed', session_name: 's-vm-sk-ed' }) });
     expect(res.status).toBe(401);
     expect(await code(res)).toBe('unauthenticated');
@@ -170,7 +173,7 @@ describe(`S-BTN-30 signed requests (${HOST})`, () => {
   it('a session never moves between two bearer tokens, even for one name (round 2, 2-A-3)', async () => {
     const { secret } = await register('vm-a');
     await withCore((c) => {
-      c.store.exec(`INSERT INTO credentials (id, hostname, allowed_capabilities) VALUES ('vm-a-2', 'vm-a', '["agent-venue"]')`);
+      seedCredentialIn(c.store, { id: 'vm-a-2', hostname: 'vm-a', allowed_capabilities: '["agent-venue"]' });
       return expect(c.runners.heartbeat('vm-a-2', secret, hbBody('vm-a'))).rejects.toMatchObject({ code: 'forbidden' });
     });
     expect(await rows('SELECT credential_id FROM runners')).toEqual([{ credential_id: 'vm-a' }]);

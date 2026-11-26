@@ -16,6 +16,7 @@
 // finds the rounds spent, and it is reachable.
 // Node only: it writes a real repository and runs git.
 import { keepLegacyPrPlacement } from '../lib/legacy-pr-course';
+import { GitRepo } from '../lib/gitRepo';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -33,24 +34,17 @@ const T0 = Date.parse('2026-10-27T12:00:00Z');
 // No --pin: the CLI pins its own commit, the one its courses' sources name (B-33).
 const init = (root: string, ...argv: string[]) => initMain(argv, { root, log: () => {} });
 
-class Repo {
-  readonly dir = mkdtempSync(join(tmpdir(), 'baton-s174-'));
+class CreateSpecCourse extends GitRepo {
   facts: PrFact[] = [];
   constructor() {
-    const g = (...a: string[]) => execFileSync('git', ['-C', this.dir, ...a], { encoding: 'utf8', stdio: 'ignore' });
-    g('init', '-q', '-b', 'main');
-    g('config', 'user.email', 's174@test');
-    g('config', 'user.name', 's174 test');
+    super('baton-174-');
     mkdirSync(join(this.dir, 'tickets'), { recursive: true });
   }
-  write(path: string, text: string): void {
-    writeFileSync(join(this.dir, path), text);
-  }
-  commit(): void {
-    execFileSync('git', ['-C', this.dir, 'add', '-A'], { stdio: 'ignore' });
-    execFileSync('git', ['-C', this.dir, 'commit', '--allow-empty', '-qm', 'step'], { stdio: 'ignore' });
-    // Before a test adds its origin there is none to push to (the fixture's own setup commits).
-    if (this.git('remote').includes('origin')) execFileSync('git', ['-C', this.dir, 'push', '-q', 'origin', 'main'], { stdio: 'ignore' });
+
+  commit(): string {
+    const sha = super.commit('step');
+    if (this.git('remote').includes('origin')) this.git('push', '-q', 'origin', 'main');
+    return sha;
   }
   /** The checkout as a sync sees it: main, including the marker a close pushed there. The
    *  marker close commits on the default branch, never on this checkout's HEAD (B-96's review
@@ -59,9 +53,7 @@ class Repo {
     execFileSync('git', ['-C', this.dir, 'fetch', '-q', 'origin'], { stdio: 'ignore' });
     execFileSync('git', ['-C', this.dir, 'reset', '-q', '--hard', 'origin/main'], { stdio: 'ignore' });
   }
-  git(...args: string[]): string {
-    return execFileSync('git', ['-C', this.dir, ...args], { encoding: 'utf8' }).trim();
-  }
+
   /** A leg's `close` as the stub calls it (B-96's review round 1, B-100): `prClose` writes the
    *  leg's machine state from its result into the ticket's own frontmatter, commits that file
    *  alone and pushes it — the default branch, which is what the sync reads. The origin is this
@@ -88,16 +80,16 @@ class Repo {
   }
 }
 
-let repo: Repo;
+let repo: CreateSpecCourse;
 let minutes = 0;
 /** Each sync takes an observation number; the next is refused until ten minutes pass (R-BTN-62). */
 const later = () => setClock(T0 + (minutes += 11) * 60_000);
 beforeEach(async () => {
   minutes = 0;
   await setClock(T0);
-  repo = new Repo();
+  repo = new CreateSpecCourse();
 });
-afterEach(() => rmSync(repo.dir, { recursive: true, force: true }));
+afterEach(() => repo.dispose());
 
 type StationRow = { station: string; next_leg: string | null; next_source: string; path_len: number };
 const stationOf = async (id: string): Promise<StationRow> => (await rows<StationRow>('SELECT station, next_leg, next_source, path_len FROM ticket_stations WHERE ticket_id = ?', `docs:${id}`))[0];

@@ -6,7 +6,7 @@
 // the claims of a ticket whose history R-BTN-81 purged go with their legs and activities once
 // their events have gone — an open ticket's claims stay (R-BTN-24, R-BTN-106). Runs on both hosts.
 import { describe, it, expect, afterEach, beforeEach } from 'vitest';
-import { Git, HOST, advance, claimItem, cutover, endClaim, mirrorCall, register, rows, setClock, tick, withCore, runnerCall } from '../helpers';
+import { Git, HOST, addEventRow, addEventRowIn, advance, claimItem, cutover, endClaim, mirrorCall, register, rows, setClock, setMirrorAcked, setMirrorAckedIn, tick, withCore, runnerCall } from '../helpers';
 import type { EventArchive, Ports } from '../../src/core/ports';
 
 const T0 = Date.parse('2026-08-01T12:00:00Z');
@@ -121,7 +121,7 @@ describe('S-BTN-244 R-BTN-149 retention', () => {
     expect((await git.post()).status).toBe(200);
     expect(git.head).not.toBe(expired);
     const snapshots = () => count(`SELECT COUNT(*) AS n FROM board_snapshots WHERE repository_id = 'docs' AND sha = ?`, expired);
-    await rows(`INSERT INTO events (at, kind, actor, detail_json, repository_id) VALUES (?, 'admin', 'test', '{}', 'docs')`, T0);
+    await addEventRow({ at: T0, kind: 'admin', actor: 'test', detail_json: '{}', repository_id: 'docs' });
     await setClock(T0 + 91 * DAY);
     await ack(await maxSeq());
     const oldRows = () => rows('SELECT seq FROM events WHERE repository_id IS NOT NULL AND at = ? ORDER BY seq', T0);
@@ -150,7 +150,7 @@ describe('S-BTN-244 R-BTN-149 retention', () => {
       expect(writes).toBe(1);
       expect(await snapshots()).toBe(0);
       expect(await oldRows()).toEqual(before);
-      await rows(`UPDATE repositories SET mirror_acked_seq = 0 WHERE id = 'docs'`);
+      await setMirrorAcked('docs', 0);
     } finally {
       release();
       await Promise.all([pruning, nextTurn]);
@@ -159,8 +159,7 @@ describe('S-BTN-244 R-BTN-149 retention', () => {
   });
 
   it('after archive failure retains all events; the retry exports the mirror format and deletes only that batch', async () => {
-    const add = (kind: string) => rows<{ seq: number }>(`INSERT INTO events
-      (at, kind, actor, detail_json, repository_id) VALUES (?, ?, 'owner:private', '{"reason":"test","session":"private"}', 'docs') RETURNING seq`, T0, kind);
+    const add = async (kind: string) => [await addEventRow({ at: T0, kind, actor: 'owner:private', detail_json: '{"reason":"test","session":"private"}', repository_id: 'docs' })];
     const [visible] = await add('admin');
     const [internal] = await add('blocked');
     const [later] = await add('admin');
@@ -188,8 +187,8 @@ describe('S-BTN-244 R-BTN-149 retention', () => {
         expect(page).toMatchObject({ cutover_at: feed.cutover_at, next: internal.seq });
         expect(docs.ndjson).not.toContain('private');
         archived.push(...parts.flatMap((p) => JSON.parse(p.ndjson).events.map((e: { seq: number }) => e.seq)));
-        c.store.exec(`INSERT INTO events (at, kind, actor) VALUES (?, 'admin', 'test')`, T0);
-        c.store.exec(`UPDATE repositories SET mirror_acked_seq = (SELECT MAX(seq) FROM events) WHERE id = 'docs'`);
+        addEventRowIn(c.store, { at: T0, kind: 'admin', actor: 'test' });
+        setMirrorAckedIn(c.store, 'docs', 'max');
       };
     });
     await tick();

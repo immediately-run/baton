@@ -8,7 +8,7 @@
 // tampered import and a second one refused. The unit half (the digest, the section list, the
 // pending rows) is test/unit/ownerState.test.ts.
 import { describe, it, expect, beforeEach } from 'vitest';
-import { adminSession, claimItem, course, cutover, endClaim, Git, keyCall, makeApiKey, mirrorCall, placed, register, rows, setAdminKeys, setClock, setHumanKeys, sessionCall, tick, withCore } from '../helpers';
+import { adminSession, clearRepositoryDispatch, claimItem, course, cutover, endClaim, Git, keyCall, makeApiKey, mirrorCall, placed, register, rows, seedInstanceSettings, setAdminKeys, setClock, setHumanKeys, sessionCall, tick, withCore } from '../helpers';
 import { makeKey, sshsig, type TestKey } from '../lib/sshKeys';
 import roadmapPr from '../fixtures/courses/roadmap-pr/course.json';
 import { SECTIONS } from '../../src/core/ownerState';
@@ -212,7 +212,7 @@ describe('S-BTN-50 owner state exported (R3-1258)', () => {
   });
 
   it('lets a pull-only mirror reach the seal even when no local mirror-written events are pending', async () => {
-    await rows("UPDATE repositories SET dispatch = NULL WHERE id = 'docs'");
+    await clearRepositoryDispatch('docs');
     expect(await (await mirrorCall('/v1/sync/wanted')).json()).toMatchObject({ wanted: false });
     expect((await adminPost('/v1/admin/freeze')).status).toBe(200);
     expect(await (await mirrorCall('/v1/sync/wanted')).json()).toMatchObject({ wanted: true });
@@ -259,7 +259,7 @@ describe('S-BTN-50 owner state exported (R3-1258)', () => {
     // The import on the target (an empty Baton, fabricated by the wipe).
     await wipe();
     await setClock(T0 + 5 * 60_000);
-    await rows("INSERT INTO instance_settings (id, link_hosts) VALUES (1, '[]')");
+    await seedInstanceSettings({ id: 1, link_hosts: '[]' });
     expect((await adminPost('/v1/admin/import', { ...first, digest: '0'.repeat(64) })).json.code).toBe('invalid-params');
     const canonical = (v: unknown): string => Array.isArray(v) ? `[${v.map(canonical).join(',')}]`
       : v && typeof v === 'object' ? `{${Object.entries(v).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)

@@ -10,7 +10,7 @@ import { env } from 'cloudflare:test';
 const envAtCodesFloor = { ...env, TEST_MIN_CLIENT: undefined } as typeof env;
 import { deliverySignature, pickDelivery, verifyDelivery, Webhooks, ACTIONS_BOT, MIRROR_EMAIL } from '../../src/core/webhook';
 import { front } from '../../src/core/front';
-import { armedAt, ORIGIN, withCore } from '../helpers';
+import { armedAt, ORIGIN, withCore, retireRepositoryIn, setWebhookTrailingTimeIn, seedWebhookDispatchIn } from '../helpers';
 
 const SECRET = env.BATON_GITHUB_WEBHOOK_SECRET!;
 const enc = new TextEncoder();
@@ -272,7 +272,7 @@ describe('the core: self-filter, repository map, window (R-BTN-73)', () => {
     // docs' was sent; ops' is still owed, sooner than the next 60-second tick.
     expect(await armedAt()).toBe(B + 10_000);
     await withCore(async (c) => {
-      c.store.exec(`UPDATE webhook_dispatch SET trailing_at = ? WHERE repository_id = 'ops'`, B + 15_000);
+      setWebhookTrailingTimeIn(c.store, 'ops', B + 15_000);
       await (c as unknown as { ports: { scheduler: { set(at: number): Promise<void> } } }).ports.scheduler.set(B + 60_000);
       await c.start();
     });
@@ -282,8 +282,8 @@ describe('the core: self-filter, repository map, window (R-BTN-73)', () => {
   it('a repository retired inside its window owes no trailing dispatch (1-B-5)', async () => {
     await withCore((c) => {
       c.registry.register({ id: 'ops', github: 'immediately-run/ops', default_branch: 'main', sync_workflow: '.github/workflows/sync.yml' });
-      c.store.exec(`INSERT INTO webhook_dispatch (repository_id, last_dispatch_at, trailing_at) VALUES ('ops', 0, 30000)`);
-      c.store.exec(`UPDATE repositories SET retired_at = 1 WHERE id = 'ops'`);
+      seedWebhookDispatchIn(c.store, { repository_id: 'ops', last_dispatch_at: 0, trailing_at: 30000 });
+      retireRepositoryIn(c.store, 'ops', 1);
       const w = new Webhooks({ store: c.store, scope: c.scope, want: () => {}, now: () => 30_000 });
       expect(w.dueTrailing()).toEqual([]);
       expect(w.nextTrailing()).toBeNull();

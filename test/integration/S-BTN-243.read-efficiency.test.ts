@@ -1,7 +1,12 @@
 // B-287: mixed busy/idle polling, a cold indexed decision, unchanged snapshots and paged UI.
 import { beforeEach, describe, expect, it } from 'vitest';
 import { schedulingVersion } from '../../src/core/stateVersion';
-import { Git, HOST, adminSession, beat, call, captureDispatches, claimItem, cutover, endClaim, register, rows, runnerCall, sessionCall, setAdminKeys, setClock, tick, ticket, webhookCall, withCore } from '../helpers';
+import {
+  Git, HOST, adminSession, beat, call, captureDispatches, claimItem, cutover, endClaim, register, rows, runnerCall, sessionCall,
+  setAdminKeys, setClock, tick, ticket, webhookCall, withCore, clearTicketRequirements, setTicketRankIn, seedClaim, seedMessage,
+  seedTicketOverride, seedTicketOverrideIn, setCourseLegCapabilities, setCredentialAllowedCapabilities, putRunnerGrant,
+  setCoursePersonLegs, setCredentialCreatedBy, revokeRunnerGrants, removeRunnerCapability, revokeCredentialIn,
+} from '../helpers';
 import { makeKey } from '../lib/sshKeys';
 
 const T0 = Date.parse('2026-11-19T12:00:00Z');
@@ -73,12 +78,9 @@ describe('S-BTN-243 bounded reads without changing matching', { timeout: 120_000
         } finally { c.claims.reference = false; }
       });
     };
-    const courseCaps = (caps: string[]) => rows(`UPDATE courses SET leg_capabilities_json = ? WHERE repository_id = 'docs' AND id = 'roadmap-pr'`,
-      JSON.stringify({ implement: caps }));
-    const allow = (caps: string[]) => rows("UPDATE credentials SET allowed_capabilities = ? WHERE id = 'vm-a'", JSON.stringify(caps));
-    const grant = (caps: string[]) => rows(`INSERT INTO runner_grants (credential_id, repository_id, capabilities, granted_by, granted_at)
-      VALUES ('vm-a', 'docs', ?, 'admin:test', ?) ON CONFLICT (credential_id, repository_id)
-      DO UPDATE SET capabilities = excluded.capabilities, revoked_at = NULL`, JSON.stringify(caps), T0);
+    const courseCaps = (caps: string[]) => setCourseLegCapabilities('docs', 'roadmap-pr', { implement: caps });
+    const allow = (caps: string[]) => setCredentialAllowedCapabilities('vm-a', caps);
+    const grant = (caps: string[]) => putRunnerGrant({ credential_id: 'vm-a', repository_id: 'docs', capabilities: caps, granted_by: 'admin:test', granted_at: T0 });
 
     await agreement(['PLAIN', 'RUNNER']); // declaration without admission; runner: is exempt
     await allow(['key:one']);
@@ -94,27 +96,27 @@ describe('S-BTN-243 bounded reads without changing matching', { timeout: 120_000
     await agreement([]); // a leg's own need is independent of the ticket clause
     await courseCaps(['key:one']);
     await agreement(['NEEDS', 'PLAIN', 'RUNNER']);
-    await rows(`UPDATE courses SET person_legs_json = '["implement"]' WHERE repository_id = 'docs' AND id = 'roadmap-pr'`);
+    await setCoursePersonLegs('docs', 'roadmap-pr', ['implement']);
     await agreement([]);
-    await rows(`UPDATE courses SET person_legs_json = '[]' WHERE repository_id = 'docs' AND id = 'roadmap-pr'`);
+    await setCoursePersonLegs('docs', 'roadmap-pr', []);
 
-    await rows("UPDATE credentials SET created_by = 'admin:test' WHERE id = 'vm-a'");
+    await setCredentialCreatedBy('vm-a', 'admin:test');
     await grant(['key:*']);
     await agreement(['NEEDS', 'PLAIN', 'RUNNER']); // a literal first-segment wildcard
     await grant(['key:other']);
     await agreement([]);
     await grant(['key:one']);
     await agreement(['NEEDS', 'PLAIN', 'RUNNER']);
-    await rows("UPDATE runner_grants SET revoked_at = ? WHERE credential_id = 'vm-a'", T0);
+    await revokeRunnerGrants('vm-a', T0);
     await agreement([]);
     await grant(['key:*']);
     await courseCaps([]);
-    await rows("DELETE FROM runner_capabilities WHERE runner_id = ? AND capability = 'key:one'", w.id);
+    await removeRunnerCapability(w.id, 'key:one');
     await agreement(['PLAIN', 'RUNNER']); // a lost holding is removed without waiting for heartbeat
 
     await withCore((c) => {
       expect(() => c.store.transaction(() => {
-        c.store.exec("UPDATE credentials SET revoked_at = ? WHERE id = 'vm-a'", T0);
+        revokeCredentialIn(c.store, 'vm-a', T0);
         expect(c.store.exec('SELECT capability FROM runner_effective_caps WHERE runner_id = ?', w.id).toArray()).toEqual([]);
         throw new Error('rollback');
       })).toThrow('rollback');
@@ -287,7 +289,7 @@ describe('S-BTN-243 bounded reads without changing matching', { timeout: 120_000
     expect((await beat('vm-a', idle.secret, { tags: ['new-tag'] })).status).toBe(200);
     expect(await version()).toBeGreaterThan(v);
     await sameProjection();
-    await rows("DELETE FROM ticket_requires WHERE ticket_id = 'docs:T-180'");
+    await clearTicketRequirements('docs:T-180');
     const accepted = await measure(() => claimItem('vm-a', idle.secret));
     expect(accepted.value.json.ticket_id).toBe('docs:T-180');
     if (HOST === 'cloudflare') {
@@ -303,8 +305,11 @@ describe('S-BTN-243 bounded reads without changing matching', { timeout: 120_000
     const w = await register('vm-a');
     await runnerCall('/v1/runner/state', { cred: 'vm-a', secret: w.secret });
     const h = (await rows<{ n: number }>("SELECT last_handed_out + 1 AS n FROM board_head WHERE repository_id='docs'"))[0];
-    await rows(`INSERT INTO claims(ticket_id, runner_id, request_id, nonce, snapshot_sha, claimed_at, status, end_reason, ended_at, confirmed_at, ended_at_sha, end_observation)
-      VALUES ('docs:A', ?, 'previous', 'n', ?, ?, 'completed', 'suspended:reviewed', ?, ?, ?, ?)`, w.id, git.head, T0, T0, T0, git.head, h.n);
+    await seedClaim({
+      ticket_id: 'docs:A', runner_id: w.id, request_id: 'previous', nonce: 'n', snapshot_sha: git.head,
+      claimed_at: T0, status: 'completed', end_reason: 'suspended:reviewed', ended_at: T0, confirmed_at: T0,
+      ended_at_sha: git.head, end_observation: h.n,
+    });
     await git.refresh(); // observation equals the end: not fresh enough yet
     expect((await claimItem('vm-a', w.secret)).json.code).toBe('no-eligible-ticket');
     const v = await version();
@@ -323,14 +328,14 @@ describe('S-BTN-243 bounded reads without changing matching', { timeout: 120_000
     const before = await version();
     await withCore((c) => {
       expect(() => c.store.transaction(() => {
-        c.store.exec("UPDATE tickets SET rank = -100 WHERE id = 'docs:B'");
-        c.store.exec("INSERT INTO ticket_overrides(ticket_id, hold, set_by, set_at) VALUES ('docs:A', 1, 'test', 0)");
+        setTicketRankIn(c.store, 'docs:B', -100);
+        seedTicketOverrideIn(c.store, { ticket_id: 'docs:A', hold: 1, set_by: 'test', set_at: 0 });
         throw new Error('rollback');
       })).toThrow('rollback');
     });
     expect(await version()).toBe(before);
     await sameProjection();
-    await rows("INSERT INTO ticket_overrides(ticket_id, hold, set_by, set_at) VALUES ('docs:A', 1, 'test', 0)");
+    await seedTicketOverride({ ticket_id: 'docs:A', hold: 1, set_by: 'test', set_at: 0 });
     await sameProjection();
     expect(await rows("SELECT ticket_id FROM ready_tickets WHERE ticket_id='docs:A'")).toEqual([]);
     await rows("UPDATE ticket_overrides SET hold=0, retry_after=? WHERE ticket_id='docs:A'", T0+1000);
@@ -383,7 +388,7 @@ describe('S-BTN-243 bounded reads without changing matching', { timeout: 120_000
     const first = await sessionCall(cookie, path);
     expect(((await first.json()) as { tickets: unknown[] }).tickets).toHaveLength(30);
     const tag = first.headers.get('ETag')!;
-    await rows("INSERT INTO messages(kind, from_runner_id, to_runner_id, sent_at, status, payload_json) VALUES ('status_report', ?, ?, ?, 'pending', '{}')", w.id, w.id, T0);
+    await seedMessage({ kind: 'status_report', from_runner_id: w.id, to_runner_id: w.id, sent_at: T0, status: 'pending', payload_json: '{}' });
     expect((await sessionCall(cookie, path, { headers: { 'If-None-Match': tag } })).status).toBe(304);
     expect((await call(path, { headers: { 'If-None-Match': tag } })).status).toBe(401);
     await rows(`WITH RECURSIVE k(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM k WHERE i<3000)

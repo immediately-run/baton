@@ -13,7 +13,7 @@ import { initMain, parseSyncArgs, showCourseMain, syncMain } from '../../src/def
 import { dropCourse, loadCourse, sourceContext } from '../../src/runner/home';
 import { BatonApi } from '../../src/runner/api';
 import { Runner } from '../../src/runner/runner';
-import { advance, claimItem, cutover, endClaim, ORIGIN, register, rows, setClock, syncToken, TOKENS } from '../helpers';
+import { advance, claimItem, confirmClaimForScenario, cutover, endClaim, ORIGIN, register, rows, setClock, syncToken, TOKENS } from '../helpers';
 
 const headerPairs = (headers: Pick<Headers, 'forEach'>): [string, string][] => {
   const pairs: [string, string][] = [];
@@ -82,7 +82,7 @@ describe('S-BTN-105 a course from its source, one leg overridden', () => {
     await sync();
     // What this scenario reads is the review's source; git's confirmation of the gate's end
     // (R-BTN-10) is S-BTN-63's, so it is taken as given here.
-    await rows('UPDATE claims SET confirmed_at = ? WHERE id = ?', T0, claim);
+    await confirmClaimForScenario(claim, T0);
     expect(await at()).toMatchObject({ station: 'pr-open', next_leg: 'review' });
     const reviewer = await register('vm-b', { courses: [{ repository: 'docs', course: 'create-pr', version: 3 }] });
     const round = await claimItem('vm-b', reviewer.secret, { ticket_id: 'docs:T-1' });

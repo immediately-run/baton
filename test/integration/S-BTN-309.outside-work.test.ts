@@ -1,6 +1,6 @@
 // S-BTN-309 work done outside Baton (BATON_SPEC §15): the sync finds, and core places.
 import { expect, it } from 'vitest';
-import { course, Git, cutover, rows, claimItem, claimRow, register, advance, endClaim, withCore } from '../helpers';
+import { course, Git, cutover, rows, claimItem, claimRow, register, advance, endClaim, withCore, seedRepositoryPolicyIn, setRepositoryRetry } from '../helpers';
 import { CREATE_PR_COURSE, CREATE_SPEC_COURSE, REVIEW_PR_COURSE, stationsReviewPr, type PrFact } from '../../src/defaults/course-pr';
 import { graphOf } from '../../src/core/graph';
 import { validateCourse } from '../../src/core/course';
@@ -156,7 +156,7 @@ it('posts merged-early to a narrowed course and queues its reconcile leg', async
 it.each([[3, 1], [1, 3]])('restores the displaced leg at the first exhausted limit (runs %i, retries %i)', async (max_runs, max_failed) => {
   const graph = { ...CREATE_PR_COURSE, legs: { ...CREATE_PR_COURSE.legs, reconcile: { ...CREATE_PR_COURSE.legs.reconcile, max_runs } } };
   const git = await setup(graph);
-  await rows(`UPDATE repositories SET retry = ? WHERE id = 'docs'`, JSON.stringify({ backoff_ms: [60_000], max_failed }));
+  await setRepositoryRetry('docs', { backoff_ms: [60_000], max_failed });
   const attestations = classify(facts166);
   expect(await git.post({ attestations })).toMatchObject({ status: 200 });
   const runner = await register('vm-a', { courses: [{ repository: 'docs', course: 'roadmap-pr', version: 3 }] });
@@ -232,9 +232,15 @@ it('leaves outside evidence waiting behind a suspended leg', async () => {
 
 it('keeps a policy-refused hand merge as evidence, including under a pre-evidence policy', async () => {
   const git = await setup();
-  await rows(`INSERT INTO repository_policies (repository_id, version, policy_json, hash, previous_hash, changed_by, at)
-    SELECT repository_id, version + 1, json_remove(policy_json, '$.attestations."std:arrival@1"', '$.attestations."std:evidence@1"'), ?, hash, changed_by, at
-    FROM repository_policies WHERE repository_id = 'docs'`, 'a'.repeat(64));
+  const [previous] = await rows<{ version: number; policy_json: string; hash: string; changed_by: string; at: number }>(
+    'SELECT version, policy_json, hash, changed_by, at FROM repository_policies WHERE repository_id = ? ORDER BY version DESC LIMIT 1', 'docs');
+  const policy = JSON.parse(previous.policy_json) as { attestations: Record<string, unknown> };
+  delete policy.attestations['std:arrival@1'];
+  delete policy.attestations['std:evidence@1'];
+  await withCore((core) => seedRepositoryPolicyIn(core.store, {
+    repository_id: 'docs', version: previous.version + 1, policy_json: JSON.stringify(policy), hash: 'a'.repeat(64), previous_hash: previous.hash,
+    changed_by: previous.changed_by, at: previous.at, approver: null, preset: null,
+  }));
   const attestations = classify([pr(1, { head: 'work/B-166' })]);
   expect(await git.post({ attestations: [...attestations, ...classify(facts166)] })).toMatchObject({ status: 200 });
   expect(await placement()).toEqual([{ station: 'filed', next_leg: 'reconcile' }]);
