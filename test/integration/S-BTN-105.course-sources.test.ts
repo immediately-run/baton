@@ -368,7 +368,8 @@ export const close = () => 'source close';`);
       const runner = new Runner({
         api: new BatonApi({ url: ORIGIN, transport: hostCall, auth: (_m, _u, _b, secret) => ({ Authorization: `Bearer ${TOKENS['vm-a']}`, ...(secret ? { 'X-Runner-Secret': secret } : {}) }) }),
         home: dir, repository: 'docs', hostname: 'vm-a', harness: 'opencode', session: 's105-source',
-        courses: [{ course: 'create-pr', version: 1 }], stateFile: join(dir, '.git', 'runner-test.json'), beatEvery: 60_000, log: () => {},
+        // create-pr's entry asks runner course version 2 since B-258 (min_runner_version).
+        courses: [{ course: 'create-pr', version: settings.courses[0].min_runner_version ?? 1 }], stateFile: join(dir, '.git', 'runner-test.json'), beatEvery: 60_000, log: () => {},
       });
       git('update-ref', 'refs/baton/docs/default', sha);
       try {

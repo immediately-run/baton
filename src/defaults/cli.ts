@@ -183,7 +183,7 @@ const defaultSkill = (course: string): string => `baton-${course}`;
  * them where the spec says rather than discovering them. Never `min_worker_version`: init
  * writes the new name only; the window is on the read (above). */
 function courseEntry(b: BuiltIn): Required<Omit<CourseEntry, 'previous_branch_pattern' | 'source' | 'min_worker_version'>> {
-  return { id: b.id, version: b.version ?? 1, min_runner_version: 1, skill: b.skill, step_kinds: Object.keys(b.course.legs), branch_pattern: DEFAULT_BRANCH_PATTERN, protocol_files: [] };
+  return { id: b.id, version: b.version ?? 1, min_runner_version: b.id === 'create-pr' ? 2 : 1, skill: b.skill, step_kinds: Object.keys(b.course.legs), branch_pattern: DEFAULT_BRANCH_PATTERN, protocol_files: [] };
 }
 
 export interface SyncArgs {
@@ -1513,7 +1513,12 @@ const AGENT_WRAPPER_ENV = 'BATON_AGENT_WRAPPER';
  * not the leg's outcome. The bundled `close` writes the closing marker where the course's
  * convention puts it. */
 export function stubSource(b: BuiltIn, course: string, leg: string): string {
-  const { ask, position, verify, pushes, delivered, reviewBound } = b.legs[leg];
+  const { ask, position, verify, pushes, delivered, archive, reviewBound } = b.legs[leg];
+  if (archive) return `import { archiveClose } from ${JSON.stringify(source('pr-archive.ts'))};
+export const run = () => (${position});
+export const close = archiveClose;
+export async function handoff() { return null; }
+`;
   const asksOwner = b.id === 'create-pr' && (leg === 'implement' || leg === 'fix');
   // A leg whose close writes a line on a PR may name that PR after its answer (B-29): a ticket's
   // PRs may sit in other repositories, and its home may have none.
@@ -2387,6 +2392,14 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
     // An entry whose source names another course than its id is the sync's to refuse, not init's to move.
     return sameRepo(src, self) && src.ref !== self.sha && [c.id, `standard-${c.id}`].includes(src.course) && builtIn(c.id) != null;
   };
+  const moveSource = (c: CourseEntry): CourseEntry => {
+    const source = sourceOf(c.id)!;
+    if (c.id !== 'create-pr') return { ...c, source };
+    const { min_worker_version, ...rest } = c;
+    const min_runner_version = Math.max(2, c.min_runner_version ?? min_worker_version ?? c.version);
+    return { ...rest, source, version: Math.max(builtIn(c.id)?.version ?? 1, c.version), min_runner_version,
+      step_kinds: [...new Set([...(c.step_kinds ?? []), ...Object.keys(builtIn(c.id)!.course.legs)])] };
+  };
   /** The sources name this CLI's repository at its commit, whose registry writes the files; a
    * workflow pinned to another repository or commit would run a CLI that refuses them
    * (checkSource). So a --pin that differs is refused — before any write — whenever the courses
@@ -2404,7 +2417,7 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
     refusePin(courses);
     const movedHere = courses.filter(moves).map((c) => c.id);
     if (movedHere.length) {
-      writeFileSync(settingsPath, `${JSON.stringify({ ...existing, courses: courses.map((c) => (moves(c) ? { ...c, source: sourceOf(c.id)! } : c)) }, null, 2)}\n`);
+      writeFileSync(settingsPath, `${JSON.stringify({ ...existing, courses: courses.map((c) => (moves(c) ? moveSource(c) : c)) }, null, 2)}\n`);
       log(`baton: ${movedHere.join(', ')} now from ${self!.sha.slice(0, 10)}`);
     }
     writeWorkflow();
@@ -2429,7 +2442,7 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
       if (c.id === b.id && force) return entry;
       if (moves(c)) {
         moved.push(c.id);
-        return { ...c, source: sourceOf(c.id)! };
+        return moveSource(c);
       }
       return c;
     });

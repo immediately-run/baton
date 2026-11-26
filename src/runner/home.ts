@@ -25,7 +25,8 @@ export interface CourseLoad {
   /** The extracted `legs/<leg>.mjs` of the snapshot, by leg name — file paths on disk. */
   scripts: Map<string, string>;
   scratch: string;
-  schema?: Resolve;
+  schema: Resolve;
+  outputSchema(leg: string, name: string): string | undefined;
 }
 
 /** The course id the home repository runs, from the snapshot's `.baton/baton.json`: the spec's
@@ -204,7 +205,14 @@ export async function loadCourse(home: string, sha: string, course: string, sett
         const file = resolved.files?.find((f) => f.path === `schemas/${parts.name}@${parts.version}.json` && f.regular);
         return file ? JSON.parse(file.read().toString('utf8')) : null;
       };
-      return { course, sourced: true, fetched, graph, scripts, scratch, schema };
+      // B-47: a leg's declared output schema, from the source's graph as from a home's.
+      const legs = (JSON.parse(resolved.graph) as { legs?: Record<string, { outputs?: Record<string, { schema: string }> }> }).legs ?? {};
+      return { course, sourced: true, fetched, graph, scripts, scratch, schema,
+        outputSchema(leg, name) {
+          const outputs = legs[leg]?.outputs;
+          return outputs && Object.hasOwn(outputs, name) ? outputs[name].schema : undefined;
+        },
+      };
     } catch (e) {
       dropCourse(scratch);
       throw e;
@@ -212,7 +220,8 @@ export async function loadCourse(home: string, sha: string, course: string, sett
   }
   const file = readAt(home, sha, `.baton/courses/${course}/course.json`);
   if (file == null) throw new Error(`the snapshot ${sha.slice(0, 10)} has no .baton/courses/${course}/course.json`);
-  const graph = graphOf(JSON.parse(file));
+  const raw = JSON.parse(file) as { legs: Record<string, { outputs?: Record<string, { schema: string }> }> };
+  const graph = graphOf(raw);
   const scratch = mkdtempSync(join(tmpdir(), 'baton-legs-'));
   const scripts = new Map<string, string>();
   let listing: string[];
@@ -243,7 +252,12 @@ export async function loadCourse(home: string, sha: string, course: string, sett
     schemas.set(id, value);
     return value;
   };
-  return { course, graph, scripts, scratch, schema };
+  return { course, graph, scripts, scratch, schema,
+    outputSchema(leg, name) {
+      const outputs = raw.legs[leg]?.outputs;
+      return outputs && Object.hasOwn(outputs, name) ? outputs[name].schema : undefined;
+    },
+  };
 }
 
 function courseSettings(home: string, sha: string): { courses?: { id?: string; source?: string }[] } | null {

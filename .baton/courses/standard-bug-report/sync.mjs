@@ -39,7 +39,7 @@ var CREATE_PR_ASK_DEADLINE_S = 3 * 60 * 60;
 var CREATE_PR_COURSE = {
   start: "filed",
   start_leg: "implement",
-  end: ["merged", "confirmed"],
+  end: ["merged", "archived"],
   short_waits: ["ci"],
   // B-110: the deterministic gate's script — `npm run <test_script>` in the checkout.
   test_script: "test",
@@ -51,7 +51,8 @@ var CREATE_PR_COURSE = {
     adjudicated: { label: "Open findings adjudicated" },
     merged: { label: "Merged" },
     delivered: { label: "Found already delivered" },
-    confirmed: { label: "Already delivered, confirmed by a person" }
+    confirmed: { label: "Already delivered, confirmed by a person" },
+    archived: { label: "Confirmed ticket archived" }
   },
   legs: {
     implement: { from: ["filed"], to: ["pr-open", "delivered"], max_duration: CREATE_PR_ASK_DEADLINE_S, label: "Implement it and open the PR, or find it delivered" },
@@ -66,7 +67,8 @@ var CREATE_PR_COURSE = {
     merge: { from: ["reviewed", "adjudicated"], to: "merged", autonomous: true, label: "Merge and close the ticket" },
     // B-257: the person's confirmation — no runner is offered it (R-BTN-116); its options are
     // its outcomes, `confirmed` and `filed`.
-    confirm: { from: ["delivered"], to: ["confirmed", "filed"], kind: "person", asks: "owner", max_runs: 3, label: "A person confirms it was already delivered" }
+    confirm: { from: ["delivered"], to: ["confirmed", "filed"], kind: "person", asks: "owner", answer_source: "person", max_runs: 3, label: "A person confirms it was already delivered" },
+    archive: { from: ["confirmed"], to: "archived", requires: { capabilities: ["runner:claim-evidence"] }, label: "Archive the confirmed ticket" }
   }
 };
 var CREATE_SPEC_COURSE = {
@@ -763,7 +765,7 @@ var ticketStations = (waits) => (ctx) => stationsTickets({ tickets: ctx.tickets,
 var VERDICT2 = { name: "verdict", values: ["approve", "changes"] };
 var CREATE_PR = {
   id: "create-pr",
-  version: 2,
+  version: 4,
   summary: "implement a ticket in a PR, gate every review round behind its tests, review it in up to three blind rounds, fix, hand the third round's blockers to the owner, merge",
   course: CREATE_PR_COURSE,
   reads: "prs",
@@ -798,10 +800,9 @@ var CREATE_PR = {
     // (`baton owner resolve … merge|owner|round`). No agent reproduces anything, so no runner is
     // offered the leg: the position below is what a holder would report if one ever ran it by hand.
     adjudicate: { ask: { name: "adjudication", values: ["merge", "owner"] }, position: "{ ...(answer === 'owner' ? { suspend: true } : {}), reached: 'adjudicated', next: 'merge', adjudication: answer }" },
-    // R-BTN-131: the stub reads the forge before it reports `merged` — every PR of the ticket
-    // merged, none open. On 2026-11-23 B-259's merge agent rightly refused PR #357 over red CI and
-    // exited 0; the leg said `merged` and Baton ended the claim done with the PR open.
-    merge: { position: "{ reached: 'merged', next: null }", verify: "merged" }
+    // R-BTN-131: the stub reads the forge before it reports `merged`.
+    merge: { position: "{ reached: 'merged', next: null }", verify: "merged" },
+    archive: { position: "{ reached: 'archived', next: null }", archive: true }
   },
   skill: "baton-create-pr"
 };
