@@ -83,7 +83,7 @@ class Repo {
 
   /** `baton repo init`, the fixture source and the runnable leg: everything after the tree. */
   async setup(o: { unsafe?: boolean } = {}): Promise<Repo> {
-    expect(await initMain([], { root: this.dir, log: () => {} })).toBe(0);
+    expect(await initMain(['--own'], { root: this.dir, log: () => {} })).toBe(0);
     if (this.tracker) {
       writeFileSync(join(this.dir, '.baton', 'tickets.mjs'), trackerSource(this.store));
       this.writeStore({ rev: 5, tickets: [{ id: 'T-1', key: 'C-1', title: 'The tracked ticket', body: 'As first filed.', rank: 0 }] });
