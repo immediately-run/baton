@@ -1,6 +1,6 @@
 ---
 title: "Proposal — intervention sessions: an agent a person starts on one Needs-you entry"
-description: "A recommendation, not built: a person selects a Needs-you entry and starts an intervention — a ticket filed on a course the repository adopts, worked by a sandboxed leg or by an existing agent over MCP — holding a key scoped to one subject that reads, may only tighten, and files every other act as a pinned request an approver confirms on Baton's page."
+description: "A recommendation, not built: a person selects a Needs-you entry and starts an intervention — a ticket filed on a course the repository adopts, worked by a sandboxed leg or by an agent over MCP. An autonomous session holds a key scoped to one subject that reads, may only tighten, and files every other act as a pinned request a person confirms; a session a person drives acts directly with that person's own key, every act recorded against the intervention."
 ---
 # Proposal — intervention sessions: an agent a person starts on one Needs-you entry
 
@@ -9,7 +9,9 @@ description: "A recommendation, not built: a person selects a Needs-you entry an
 rule; every rule or proposal it would change is in [Amends](#amends). The owner settled its four
 design choices on 2026-11-21, after two adversarial reviews ([The owner's
 decisions](#the-owners-decisions)); [Open decisions](#open-decisions) holds only what is still
-open.
+open. **Amended 2026-11-26** by [human intent and autonomy](../../docs/context/human-intent.mdx):
+what an intervention may do now depends on who drives it ([Who drives](#who-drives-two-kinds-of-intervention));
+the design below the amendment is the autonomous kind's.
 
 **Its home when built:** one new rule, **R-BTN-n (interventions)**, in
 [§7.3](../BATON_SPEC/07-conditions.md#sec-7-3) beside R-BTN-163, holding the start, one
@@ -41,11 +43,17 @@ handle these interventions through MCP."
 
 Settled 2026-11-21; not reopened by a review.
 
-1. **Authority: diagnose and request.** The session reads, and may tighten or stop. Every
-   loosening (lifting another credential's hold, `retry` on a non-retryable hold), every route,
-   adopt, expedite and merge is a **request** the session files, which an approver on the list
-   that governs that act ([R-BTN-188](../BATON_SPEC/12-security.md#sec-12-8)) confirms on
-   Baton's own page — never by a code handed to the agent. What a delegated key may do is
+1. **Authority: by who drives** (2026-11-21; amended 2026-11-26). An **autonomous** session — the
+   leg form, or an agent over MCP with an autonomous key — **diagnoses and requests**: it reads,
+   and may tighten or stop. Every loosening (lifting another credential's hold, `retry` on a
+   non-retryable hold), every route, adopt, expedite and merge is a **request** the session files,
+   which an approver on the list that governs that act
+   ([R-BTN-188](../BATON_SPEC/12-security.md#sec-12-8)) confirms on Baton's own page, reached
+   from the page or from a delivery runner's channel (ntfy, Slack) — never by a code handed to
+   the agent. A **human-driven** session — a person's own agent, over MCP with their interactive
+   key — **acts directly**, with that person's own powers: no request, no confirmation step,
+   every act recorded against the intervention
+   ([Who drives](#who-drives-two-kinds-of-intervention)). For the autonomous kind: What a delegated key may do is
    unchanged: the intervention key's powers are a subset of
    [R-BTN-186](../BATON_SPEC/12-security.md#sec-12-8)'s, and a confirmation is the approver's own
    act under R-BTN-188, so neither rule's powers change, nor Fieldhouse's R-FH-92–94. What does
@@ -61,7 +69,7 @@ Settled 2026-11-21; not reopened by a review.
    admin (the latter being reserved for major emergencies only)." Any agent may connect; every
    start warns and records the person's acknowledgement ([The MCP form](#the-mcp-form)); an
    administrator starts one only as an emergency ([Emergencies](#emergencies)). Confirmation of
-   every request stays on Baton's page.
+   every request stays on Baton's page; a human-driven session files none (decision 1).
 4. **Batches: yes, per type.** A person may start one intervention over every open entry of one
    type with one cause (every `baton.retries` holding `attempts-exhausted` after the same error,
    say): it diagnoses once and settles each ticket. Every act is still per ticket and confirmed;
@@ -76,9 +84,10 @@ Settled 2026-11-21; not reopened by a review.
 - **Not automatic.** A person starts each one. Binding conditions to handlers that start by
   themselves is R-BTN-161's (proposed); an intervention could later be started by such a binding
   as a handler course (an [open decision](#open-decisions)).
-- **Not a way around the course or the approvers.** The session's own powers only tighten. What
-  moves a ticket on — a restart, an unhold, a route, an adopt — is the act it already is, by the
-  credential that already may take it, at the session's request.
+- **Not a way around the course or the approvers.** An autonomous session's own powers only
+  tighten. What moves a ticket on — a restart, an unhold, a route, an adopt — is the act it
+  already is, by the credential that already may take it, at the session's request. A
+  human-driven session takes those acts itself, because its credential already may.
 
 ## What exists today (2026-11-21)
 
@@ -138,6 +147,29 @@ Settled 2026-11-21; not reopened by a review.
   with `baton.unclaimable` by R-BTN-75), would.
 
 ## The design
+
+### Who drives: two kinds of intervention
+
+Who drives an intervention is a property of the credential its session acts with
+([human intent and autonomy](../../docs/context/human-intent.mdx) §1), never of the channel: MCP
+serves both kinds.
+
+| | Autonomous | Human-driven |
+|---|---|---|
+| **Its session** | the leg form; or an agent over MCP whose key is autonomous | a person's own agent over MCP, with the person's interactive key |
+| **Its key** | the intervention key below, minted for the intervention, scoped to its subject, dying with it | the person's own interactive key, carrying their identity; Baton mints nothing for the intervention |
+| **What it may do** | read and tighten; everything else is a [request](#requests) | whatever the person's key may, directly |
+| **Its acts are recorded** | as `intervention:<id>` | as the person's, each tagged with the intervention's id, so the intervention's page and the subject's history list them together |
+| **Confirmation** | each request by a person, on Baton's page, reached from the page or a delivery channel | none: the person is driving |
+| **The lock** | binds | binds: a human-driven act never takes a claim another holds, nor writes past a fence |
+
+Everything else is shared: the entry it starts from, one intervention per subject and takeover,
+the warning at the start, the intervention ticket as its record, reports and the end. The
+sections below are written for the autonomous kind; where they constrain the session's powers —
+[the intervention key](#the-intervention-key), [requests](#requests), a batch's confirmation —
+they do not apply to a human-driven one. A policy may still require a stronger proof of a person
+for some acts (a hardware key): that is the policy's per action, and the act is refused, not
+turned into a request, without it.
 
 ### The parts
 
@@ -577,6 +609,9 @@ for a condition.
 
 What building this changes, each in its owning place:
 
+- **[Human intent and autonomy](../../docs/context/human-intent.mdx)** (2026-11-26) is the
+  ground for the split by driver: R-BTN-186's tighten-only powers bind autonomous delegated keys,
+  the intervention key among them, and not a person's interactive key.
 - **A new R-BTN-n (interventions), §7.3**: the whole of [The design](#the-design), with
   `baton.intervention-emergency` and `baton.intervention-mismatch`.
 - **R-BTN-75 (§6.2)**: `baton.unclaimable` and `baton.no-runner`. **§8.3**: `baton.runner-starved`.
@@ -699,6 +734,8 @@ G-BTN-149 (Baton files the intervention ticket through the outbox); S-BTN-275 an
 5. Whether R-BTN-161 bindings may later start interventions with no person — for example a
    diagnose-only intervention on every `baton.retries`.
 6. A subject-scoped, masked export of the leg archive and the runner's log for the leg form.
+7. How a human-driven session's acts are tied to its intervention: a parameter on each call,
+   or the person's MCP session bound to the intervention when it starts.
 
 ## Where to start when this is picked up
 
