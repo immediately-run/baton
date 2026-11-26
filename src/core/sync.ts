@@ -7,6 +7,7 @@ import { nonScheduling, schedulingVersion } from './stateVersion';
 import { checkConfirmations } from './validate';
 import { checkCrossBoardCycle, checkCrossRepository } from './dependencies';
 import { qualify, type Repository } from './registry';
+import { DEFAULT_FORGE, FORGE_SHAPES } from './forges';
 import { canonicalJson, sha256HexSync } from './policy';
 import { logEvent } from './db';
 import { DispatchTransportError } from './dispatch';
@@ -789,12 +790,12 @@ export async function sendDispatch(core: Pick<BatonCore, 'registry' | 'sql' | 's
   if (trigger?.kind === 'gitlab-trigger' && (adapter.kind !== 'gitlab-trigger' || trigger.project_id !== adapter.project_id || trigger.ref !== adapter.ref)) return false;
   if (wf.kind === 'mirror' && (!repo.mirror_workflow || (!wf.own && !core.syncWants.wanted(repo.id, 'mirror').wanted))) return false;
   const origin = new URL(repo.web_base).origin;
-  if (adapter.kind === 'github-app' && (repo.forge !== 'github' || origin !== 'https://github.com')) return false;
+  if (adapter.kind === FORGE_SHAPES[DEFAULT_FORGE].dispatch && (repo.forge !== DEFAULT_FORGE || origin !== FORGE_SHAPES[DEFAULT_FORGE].defaultOrigin)) return false;
   const path = wf.kind === 'mirror' ? repo.mirror_workflow : trigger?.workflow
     ?? (adapter.kind === 'gitea' ? adapter.workflow : repo.sync_workflow);
   if (!path && adapter.kind !== 'gitlab-trigger') return false;
   const target: DispatchTarget = {
-    adapter, origin, github: repo.github, repository: repo.id,
+    adapter, origin, path: repo.github, repository: repo.id,
     workflow: path?.split('/').at(-1) ?? '', ref: repo.default_branch,
     ...(trigger ? { inputs: { tickets: JSON.stringify(wf.tickets ?? []) } } : {}),
   };

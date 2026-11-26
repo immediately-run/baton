@@ -1,3 +1,4 @@
+import { publicHost } from './forges';
 // request.ts — `baton request "<one sentence>" --course <course>` (B-98, BATON_SPEC §5.8
 // R-BTN-131, §2f R-BTN-74): a course whose product is tickets or specs — `create-spec`,
 // `build-app` — is not started ticket-less. It is started by a **request ticket**: one sentence,
@@ -32,7 +33,7 @@ import { resolveSource } from './cli';
 import { dirname, join, resolve } from 'node:path';
 import { batonTarget, fallbackNote, floorFor, parseKind, takeNumber } from './sequences';
 import { hostOf, NAMED_FORGES, openRequestPr, protectedRefusal, requestForge, tokenOf, type PrForge } from './forge';
-import { remoteSlug, slugOfUrl } from './remote-slug';
+import { slugOfUrl } from './remote-slug';
 import { openRequestNumbers, requestBranch, requestHeads } from './request-branches';
 import { ticketCommitMessage } from './tickets';
 
@@ -114,7 +115,7 @@ const refusalWords = (e: unknown): string => {
  *  no remote, and is the URL the request pushed to all the same. */
 const remoteUrl = (root: string, remote: string): string | null => {
   try {
-    return gitText(root, 'remote', 'get-url', remote);
+    return gitText(root, 'remote', 'get-url', '--push', remote);
   } catch {
     return remote.trim() !== '' ? remote : null;
   }
@@ -382,9 +383,7 @@ export async function fileRequest(plan: RequestPlan, opts: RequestOptions = {}):
   throw new Error('baton request: no try ran');
 }
 
-/** A forge's own public host, for a PR opened where the origin names none (a `--forge` adapter
- *  on a local path): GitHub's, GitLab's, Gitea's. */
-const publicHost = (forge: PrForge): string => (forge === 'github' ? 'github.com' : forge === 'gitlab' ? 'gitlab.com' : 'gitea.com');
+
 
 /** The protected-branch fallback (B-174, R-BTN-131): the commit the worktree `dir` already
  *  holds — the request `id` on the default branch's head — goes to `baton-request/<ID>`
@@ -451,7 +450,7 @@ async function fileOnRequestBranch(
     {
       forge,
       host: host ?? publicHost(forge),
-      repo: remoteSlug(plan.root, remote) ?? (pushed != null && host != null ? slugOfUrl(pushed) : ''),
+      repo: pushed != null && host != null ? slugOfUrl(pushed) : '',
       head: on,
       base,
       title: filed.message,

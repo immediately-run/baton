@@ -165,7 +165,7 @@ of every repository the ticket names, and reads them together, as one change.
 - Hold back a push because a check fails on the base too: the run-tests leg is the gate, and
   unpushed work is lost when the leg's environment ends.
 - Exit without a PR and without saying why. Whatever stops you — the ticket already delivered,
-  a stop the repository's rules name, a failure your change causes that you cannot fix, a push or `gh pr create`
+  a stop the repository's rules name, a failure your change causes that you cannot fix, a push or PR creation
   that fails, a model or provider that refuses (balance, quota, rate limit) — your last lines
   say what it was, in plain words: an exit with no PR fails the leg, and those lines are all
   that is kept of it (B-256). Your process exits 0 whatever you say, so saying it is the only

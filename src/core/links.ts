@@ -7,9 +7,8 @@
 // link.
 import { cleanUrl, underWebBase } from '../shared/links.mjs';
 
-/** The forges a repository may be on (R-BTN-92); fixed for the repository's life. */
-export const FORGES = ['github', 'gitlab', 'gitea', 'git'] as const;
-export type Forge = (typeof FORGES)[number];
+import { DEFAULT_FORGE, FORGE_SHAPES, hasPrs, isForge, prSuffix, type Forge } from './forges';
+export { FORGES, type Forge } from './forges';
 
 const SEGMENT = /^[A-Za-z0-9_.-]{1,100}$/;
 
@@ -17,7 +16,7 @@ const SEGMENT = /^[A-Za-z0-9_.-]{1,100}$/;
  *  `.git`, two of them on GitHub, Gitea and `git`, two to four on GitLab. */
 export function isForgePath(forge: Forge, path: string): boolean {
   const segs = path.split('/');
-  const [min, max] = forge === 'gitlab' ? [2, 4] : [2, 2];
+  const [min, max] = FORGE_SHAPES[forge].depth;
   if (segs.length < min || segs.length > max) return false;
   return segs.every((s) => SEGMENT.test(s) && s !== '.' && s !== '..' && !s.toLowerCase().endsWith('.git'));
 }
@@ -25,7 +24,7 @@ export function isForgePath(forge: Forge, path: string): boolean {
 /** A `web_base` as registration takes it (R-BTN-92): `https://<host>[:<port>]/<forge path>`, with
  *  no userinfo, query or fragment, whose path is `path`. */
 export function isWebBase(forge: Forge, webBase: string, path: string): boolean {
-  if (forge === 'git') return false;
+  if (!hasPrs(forge)) return false;
   const u = cleanUrl(webBase, false);
   return u !== null && !webBase.endsWith('/') && u.pathname.slice(1).toLowerCase() === path.toLowerCase() && isForgePath(forge, u.pathname.slice(1));
 }
@@ -35,20 +34,20 @@ export function isWebBase(forge: Forge, webBase: string, path: string): boolean 
 export function isPullRequestUrl(forge: Forge, url: string, webBase: string): boolean {
   if (!underWebBase(url, webBase)) return false;
   const rest = new URL(url).pathname.slice(new URL(webBase).pathname.length);
-  const re = forge === 'github' ? /^\/pull\/\d{1,9}$/ : forge === 'gitea' ? /^\/pulls\/\d{1,9}$/ : forge === 'gitlab' ? /^\/-\/merge_requests\/\d{1,9}$/ : null;
-  return re !== null && re.test(rest) && !new URL(url).search;
+  return hasPrs(forge) && prSuffix(forge).test(rest) && !url.includes('?');
 }
 
 /** A `transcript_repos` entry (§6.8): a GitHub `owner/name`, or `<forge>:<web_base>`. */
 export function parseTranscriptRepo(entry: string): { forge: Forge; webBase: string } | null {
-  const m = /^(github|gitlab|gitea):(https:\/\/.+)$/.exec(entry);
+  const m = /^([^:]+):(https:\/\/.+)$/.exec(entry);
   if (m) {
-    const forge = m[1] as Forge;
+    const forge = m[1];
+    if (!isForge(forge) || !hasPrs(forge)) return null;
     const u = cleanUrl(m[2], false);
     if (!u || m[2].endsWith('/') || !isForgePath(forge, u.pathname.slice(1))) return null;
     return { forge, webBase: m[2] };
   }
-  return isForgePath('github', entry) ? { forge: 'github', webBase: `https://github.com/${entry}` } : null;
+  return isForgePath(DEFAULT_FORGE, entry) ? { forge: DEFAULT_FORGE, webBase: `${FORGE_SHAPES[DEFAULT_FORGE].defaultOrigin}/${entry}` } : null;
 }
 
 /** R-BTN-113: a leg run's session link — `https`, at most 512 characters, no userinfo,
@@ -102,16 +101,14 @@ export const SESSION_HOSTS = {
 export function transcriptUrl(entry: string, path: string): string | null {
   const r = parseTranscriptRepo(entry);
   if (!r || !/^[A-Za-z0-9._/-]{1,256}$/.test(path) || path.split('/').some((s) => s === '' || s === '.' || s === '..')) return null;
-  const file = r.forge === 'github' ? '/blob/HEAD/' : r.forge === 'gitlab' ? '/-/blob/HEAD/' : '/src/branch/HEAD/';
-  const url = `${r.webBase}${file}${path}`;
-  return underWebBase(url, r.webBase) ? url : null;
+  return fileUrl(r.forge, r.webBase, 'HEAD', path);
 }
 
 /** A file's page in a repository at a branch (the dashboard's ticket links, §14): the `web_base`
  *  and its forge's file path, or null for a `git` repository, which has no pages. */
 export function fileUrl(forge: Forge, webBase: string | null, branch: string, path: string): string | null {
-  if (forge === 'git' || !webBase) return null;
-  const file = forge === 'github' ? '/blob/' : forge === 'gitlab' ? '/-/blob/' : '/src/branch/';
+  const file = FORGE_SHAPES[forge].blob;
+  if (!file || !webBase) return null;
   const url = `${webBase}${file}${branch}/${path}`;
   return underWebBase(url, webBase) ? url : null;
 }

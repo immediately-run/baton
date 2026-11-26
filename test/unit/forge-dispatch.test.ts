@@ -5,7 +5,7 @@ import { sendForgeDispatch } from '../../src/core/dispatch';
 import type { DispatchTarget } from '../../src/core/ports';
 
 const base = { BATON_ORIGIN: '', OIDC_ISSUER: '', OIDC_JWKS_URL: '' };
-const target = { repository: 'sample', github: 'owner/sample', workflow: 'sync.yml', ref: 'main', inputs: { tickets: '[]' } };
+const target = { repository: 'sample', path: 'owner/sample', workflow: 'sync.yml', ref: 'main', inputs: { tickets: '[]' } };
 afterEach(() => vi.unstubAllGlobals());
 
 it('uses a GitLab trigger token and maps the tickets input to a pipeline variable', async () => {

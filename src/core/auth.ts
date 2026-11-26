@@ -1,3 +1,4 @@
+import { forgeForCi } from './forges';
 // auth.ts — Baton's principals (BATON_SPEC §10.1): the board sync, by GitHub
 // Actions OIDC (R-BTN-15), and the owner, by Cloudflare Access (R-BTN-16) — and machines, by
 // SSH-signed requests (R-BTN-13 as amended, below). Nothing but a verified JWT or signature is
@@ -78,14 +79,14 @@ export async function verifySyncToken(req: Request, env: Config): Promise<SyncCl
 /** A CI identity token's claims, as the front verified them (R-BTN-93): GitHub Actions OIDC, bound
  *  in the core by `Registry.forSync`, or GitLab CI `id_tokens`, bound by `Registry.forGitlab`. */
 export type SyncCredential =
-  | ({ kind: 'github' } & SyncClaims)
-  | { kind: 'gitlab'; issuer: string; project_path: string; ref: string; ref_type: string; role: 'sync' | 'mirror' };
+  | ({ kind: 'github-actions' } & SyncClaims)
+  | { kind: 'gitlab-ci'; issuer: string; project_path: string; ref: string; ref_type: string; role: 'sync' | 'mirror' };
 
 /** The GitLab issuers the deployment names (R-BTN-94's `BATON_FORGE_SECRETS`, `gitlab_issuer`): the
  *  Worker fetches a key set for these only, never for a token's own `iss`. */
 export function gitlabIssuers(env: Config): string[] {
   const entries = forgeSecrets(env);
-  return [...new Set(Object.values(entries ?? {}).filter((e) => e && e.forge === 'gitlab' && typeof e.gitlab_issuer === 'string').map((e) => e.gitlab_issuer as string))];
+  return [...new Set(Object.values(entries ?? {}).filter((e) => e && e.forge === forgeForCi('gitlab-ci') && typeof e.gitlab_issuer === 'string').map((e) => e.gitlab_issuer as string))];
 }
 
 /**
@@ -103,7 +104,7 @@ export async function verifySyncCredential(req: Request, env: Config): Promise<S
   } catch {
     throw new BatonError('unauthenticated', 'the token is not a JWT');
   }
-  if (iss === env.OIDC_ISSUER) return { kind: 'github', ...(await verifySyncToken(req, env)) };
+  if (iss === env.OIDC_ISSUER) return { kind: 'github-actions', ...(await verifySyncToken(req, env)) };
   if (typeof iss !== 'string' || !gitlabIssuers(env).includes(iss)) throw new BatonError('unauthenticated', 'the token is from no issuer this Baton trusts');
   const keys = testKeys(env, env.TEST_GITLAB_JWKS) ?? remote(`${iss}/oauth/discovery/keys`);
   let claims: Record<string, unknown>;
@@ -118,7 +119,7 @@ export async function verifySyncCredential(req: Request, env: Config): Promise<S
   if (roles.length !== 1 || typeof project_path !== 'string' || typeof ref !== 'string' || typeof ref_type !== 'string') {
     throw new BatonError('forbidden', 'the GitLab token names no one role, project, ref and ref type');
   }
-  return { kind: 'gitlab', issuer: iss, project_path, ref, ref_type, role: roles[0] };
+  return { kind: 'gitlab-ci', issuer: iss, project_path, ref, ref_type, role: roles[0] };
 }
 
 type AccessVerification = { email: string } | { reason: 'not-configured' | 'no-assertion' | 'unverified' };

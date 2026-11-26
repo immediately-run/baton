@@ -10,6 +10,7 @@
 //
 // A refusal is thrown, and the CLI prints it as one `baton: …` line, exit 2 — a finding keeps
 // exit 1.
+import { DEFAULT_FORGE, FORGE_SHAPES } from '../core/forges';
 import { git as gitArgs, gitText } from './git.mjs';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -23,7 +24,7 @@ import { filingDate, firstCommit, historyEntries, rulesConfig, staleIds, staleLi
 import { ticketsMarkdown } from './tickets-markdown';
 import { claimMismatch, formatTicket, ticketPathsUnder, ticketPrView } from '../shared/ticketPr.mjs';
 import { defaultBranch } from './request';
-import { ownRepositoryId } from './cli';
+import { ownRepositoryId } from './remote-slug';
 import { builtIn, DEFAULT_COURSE } from './courses';
 import { holderRefusal, readDoneTickets, readTicketPosition, Undetermined, type BatonPosition } from './tickets-baton';
 import { batonTarget, nextMain } from './sequences';
@@ -264,7 +265,7 @@ function isDoneLocal(dir: string, settings: TicketSettings, id: string): boolean
 export function dependencyRemote(map: Record<string, string>, repository: string): string {
   const path = map[repository];
   if (path == null) throw new Error(`${repository}: the baton.json repos map does not resolve it — a qualified dependency names a repository the map knows (B-113)`);
-  return /^(?:[a-z][a-z0-9+.-]*:\/\/|git@|[.\\/])/.test(path) ? path : `https://github.com/${path}`;
+  return /^(?:[a-z][a-z0-9+.-]*:\/\/|git@|[.\\/])/.test(path) ? path : `${FORGE_SHAPES[DEFAULT_FORGE].defaultOrigin}/${path}`;
 }
 
 /** A qualified dependency's own half, read from the target repository's default branch at

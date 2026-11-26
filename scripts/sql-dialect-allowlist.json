@@ -7,8 +7,6 @@
   "src/core/claims.ts | scalar MAX | 698e812f5e025eef": 1,
   "src/core/courses.ts | INSERT OR | 59a2313a05c1f25f": 1,
   "src/core/ownerState.ts | PRAGMA | a207f7b04a7d6524": 1,
-  "src/core/registry.ts | COLLATE NOCASE | 19c21a4b93de5889": 1,
-  "src/core/registry.ts | COLLATE NOCASE | c5fb39b4cd958049": 1,
   "src/core/registry.ts | COLLATE NOCASE | f1b6897b79cf697f": 1,
   "src/core/retention.ts | rowid | 43effc75be262f37": 2,
   "src/core/runnerLatest.ts | rowid | 29150ac4611ad086": 2,

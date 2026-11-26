@@ -1,3 +1,4 @@
+import { DEFAULT_FORGE, FORGE_SHAPES } from './forges';
 // webhook.ts — GitHub App deliveries trigger repository syncs (BATON_SPEC §7.1 R-BTN-73, §10.1;
 // R3-1247). A delivery is only a trigger: the sync still computes everything from git. A push
 // delivery is also recorded (`push_deliveries`, B-126): its immutable pusher and the commits it
@@ -264,7 +265,7 @@ export class Webhooks {
     const full = d.repository.toLowerCase();
     // The App serves github.com repositories alone (R-BTN-92, round 1 of R3-1262).
     const registered = this.rows<Registered>(`SELECT id, github, sync_workflow, mirror_workflow FROM repositories
-       WHERE retired_at IS NULL AND forge = 'github' AND lower(web_base) = 'https://github.com/' || lower(github)`);
+       WHERE retired_at IS NULL AND forge = ? AND lower(web_base) = ? || '/' || lower(github)`, DEFAULT_FORGE, FORGE_SHAPES[DEFAULT_FORGE].defaultOrigin);
     if (this.ownWork(d, full, registered)) return { outcome: 'own-work' };
     // B-134's control: every push delivery — a duplicate was dropped above, Baton's own work
     // just before — is cross-checked against the claims open now, whatever repositories the

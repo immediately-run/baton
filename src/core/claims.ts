@@ -3,6 +3,8 @@
 // reaps, the fence before re-issue (R-BTN-19), confirmation by ancestry, and git winning over a
 // stale claim (R-BTN-35). The lock is the two partial unique indexes: a claim inserts and lets
 // SQLite refuse a second holder, never check-then-insert without them (R-BTN-4).
+import { codeReposOf } from './codeRepos';
+import type { Forge } from './forges';
 import type { AdvanceAnswer, ClaimAnswer, CourseResolution, NextLegs } from '../shared/runner-wire';
 import { expiredClaimFenceSql, expiredLeaseSql, isClaimLeaseLive, liveDeclaringRunnerSql, liveRunnerSql, type Lease } from './runnerLiveness';
 import { BatonError } from './http';
@@ -16,7 +18,7 @@ import { type ClaimPreference, checkAccept, checkAdvance, checkClaim, checkConfi
 import { declaredOutputFault, pointerReach, ticketInputs } from './contracts';
 import { pointerAllowed } from './contractPointers';
 import { GIT_EVIDENCE_TYPE, type PostedAttestation } from './board';
-import { repositoryOf, transcriptReposOf } from './registry';
+import { forgeCoordinates, repositoryOf, transcriptReposOf } from './registry';
 import { GATE_CODES, gatesFor, type GateContext, type GateLeg, type GateTicket, type GateVerdict, type Phase } from './gates';
 import { extendsPath, graphOf, leaves, modelsOutsideWork, resolveLeg, resolveStation, runsOf, type Graph, type Step } from './graph';
 import type { OutsideWork } from './outsideWork';
@@ -1447,7 +1449,8 @@ export class Claims {
       'SELECT source_kind, source_versions FROM board_head WHERE repository_id = ?', repositoryOf(c.ticket_id))[0];
     // R-BTN-34's default branch (§11's claim answer lists it): the branch a marker leg's line is
     // committed on, whatever branch the runner's checkout was left on (B-96's review round 3).
-    const defaultBranch = this.rows<{ default_branch: string }>('SELECT default_branch FROM repositories WHERE id = ?', repositoryOf(c.ticket_id))[0]?.default_branch ?? null;
+    const home = this.rows<{ default_branch: string; forge: Forge; github: string; web_base: string | null }>('SELECT default_branch, forge, github, web_base FROM repositories WHERE id = ?', repositoryOf(c.ticket_id))[0];
+    const defaultBranch = home?.default_branch ?? null;
     const handoff = this.rows<{ handoff_url: string | null }>('SELECT handoff_url FROM ticket_stations WHERE ticket_id = ?', c.ticket_id)[0]?.handoff_url ?? null;
     const previous = this.rows<{ id: number; status: string; end_reason: string | null; end_detail: string | null; ended_at_sha: string | null; ended_at: number | null; resume_json: string | null }>(
       `SELECT id, status, end_reason, end_detail, ended_at_sha, ended_at, resume_json FROM claims WHERE ticket_id = ? AND id < ? AND status != 'active' ORDER BY id DESC`, c.ticket_id, id);
@@ -1459,9 +1462,8 @@ export class Claims {
     // conversation, on whichever forge holds the PR — the course's `facts` (R-BTN-134), as the
     // registry posted it, says whether it reads any.
     const repo = repositoryOf(c.ticket_id);
-    const cur = this.c.policies.current(repo);
     const readsPrs = c.course_id != null && (this.rows<{ facts: string }>('SELECT facts FROM courses WHERE repository_id = ? AND id = ?', repo, c.course_id)[0]?.facts ?? '[]').includes('"prs"');
-    const legState = cur ? legStateOf(cur.policy, this.c.forgeOf(repo), readsPrs) : null;
+    const legState = this.c.forgeOf ? legStateOf(this.c.forgeOf(repo), readsPrs) : null;
     // B-127: the brief's mark (item 7 — marked whether or not signed control is required), and,
     // while the repository requires it, the signed-control record the runners load from and
     // verify. `control.required` is Baton's own setting — never the post's word — and its keys
@@ -1474,6 +1476,8 @@ export class Claims {
       ? this.c.outsideWork?.displaced(c.ticket_id) : undefined;
     return {
       claim_id: c.id, ticket_id: c.ticket_id, course_id: c.course_id, course_version: courseVersion,
+      ...(home ? { forge_home: forgeCoordinates(home) } : {}),
+      ...(home ? { forge_repositories: codeReposOf(this.c.store, repo) } : {}),
       ...(c.course_source_json ? { course_source: JSON.parse(c.course_source_json) as CourseResolution } : {}),
       ...(legState ? { leg_state: legState } : {}),
       ...(brief ? { brief } : {}),

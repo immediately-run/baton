@@ -1,5 +1,7 @@
 // Successful replies on the runner wire (§11). Opaque or extensible data still needs
 // validation where it is consumed; these types do not validate JSON.
+import type { Forge } from '../core/forges';
+import type { CodeRepo } from '../core/codeRepos';
 import type { LastWrittenBy } from '../core/provenance';
 
 import type { ResolvedInput } from '../core/contracts';
@@ -24,6 +26,8 @@ export interface ClaimAnswer {
   version?: string;
   ticket_source?: { kind: string; versions: string | null } | null;
   leg_state?: 'forge' | 'branch';
+  forge_home?: { forge: Forge; path: string; webBase: string | null };
+  forge_repositories?: CodeRepo[];
   scope?: string[];
   /** B-39: where the leg's declared pointers may reach (R-BTN-109). */
   pointer_reach?: PointerReach;

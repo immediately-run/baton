@@ -34,6 +34,7 @@ import { Provenance } from './provenance';
 import { Capacity, RequestRing } from './capacity';
 import { OwnerState } from './ownerState';
 import { Registry, repositoryOf, type Repository } from './registry';
+import { DEFAULT_FORGE } from './forges';
 import { Policies } from './policy';
 import { Scope } from './scope';
 import { systemRandom } from './db';
@@ -199,7 +200,7 @@ export class BatonCore {
     this.claims = new Claims({ store, now: () => this.now(), random: (n) => this.random(n), stations: this.stations, admin: this.admin, blocks: this.blocks, history: this.history, resourceReadings: this.resources,
       schema: (repo, id) => this.courses.schema(repo, id), intake: (repo, course) => this.queues.intake(repo, course),
       dispatch: (kind, ticketId) => want({ repository: repositoryOf(ticketId), kind }) ,
-      policies: this.policies, forgeOf: (repo) => this.registry.get(repo)?.forge ?? 'github', scope: this.scope, deprecated: this.deprecated,
+      policies: this.policies, forgeOf: (repo) => this.registry.get(repo)?.forge ?? DEFAULT_FORGE, scope: this.scope, deprecated: this.deprecated,
       conditions: this.conditions, sessionHosts: () => this.instance.sessionHosts(), outsideWork: this.outsideWork });
     this.cutover = new Cutover({ store, now: () => this.now(), held: (ticket) => this.blocks.held(ticket, true) });
     this.stats = new Stats(store, this.queues);

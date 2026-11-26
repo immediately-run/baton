@@ -78,7 +78,7 @@ export type ForgeDispatch = { kind: 'github-app' } | { kind: 'gitlab-trigger'; p
   | { kind: 'gitea'; workflow: string; ref: string };
 
 export interface DispatchTarget {
-  github: string;
+  path: string;
   repository?: string;
   origin?: string;
   adapter?: ForgeDispatch;

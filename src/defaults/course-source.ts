@@ -20,7 +20,9 @@ export interface CourseSource {
 }
 
 /** The providers a source may name. The grammar is general; another provider is refused by name. */
-export const SOURCE_PROVIDERS = ['github'] as const;
+import { DEFAULT_FORGE } from '../core/forges';
+
+export const SOURCE_PROVIDERS = [DEFAULT_FORGE] as const;
 
 /** An owner or repository name as GitHub allows it; `.` and `..` are never a name. */
 const NAME = /^[A-Za-z0-9_.-]{1,100}$/;

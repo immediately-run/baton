@@ -33,7 +33,7 @@ function keyPair(name: string): { file: string; publicKey: string } {
 }
 
 const MONO_IDS = { id: 7001, owner: { id: 31 } };
-const pull = () => ({ number: 7, head: { ref: 'claude/LIN-1-fix', sha: 's7' }, state: 'open', merged_at: null });
+const pull = () => ({ number: 7, head: { ref: 'claude/LIN-1-fix', sha: 's7', repo: { id: 17 } }, base: { repo: { id: 17 } }, state: 'open', merged_at: null });
 const detail = (comments: unknown[] = []) => ({
   [`/repos/acme/monorepo/commits/s7/check-runs`]: { check_runs: [{ conclusion: 'success' }] },
   [`/repos/acme/monorepo/pulls/7/commits`]: [{ sha: 'c7', commit: { message: 'the work', committer: { date: '2026-11-12T11:00:00Z' } } }],
