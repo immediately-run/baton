@@ -122,8 +122,22 @@ function git(root, args, options = {}) {
 }
 var gitText = (root, ...args) => git(root, args).trim();
 
-// src/defaults/course-pr.ts
-var CREATE_PR_ASK_DEADLINE_S = 3 * 60 * 60;
+// src/core/forges.ts
+var FORGE_SHAPES = {
+  github: { depth: [2, 2], pr: "/pull/", blob: "/blob/", commit: "/commit/", dispatch: "github-app", dispatchOrigin: "https://api.github.com", dispatchInput: "workflow-path", defaultOrigin: "https://github.com", ci: "github-actions" },
+  gitlab: { depth: [2, 4], pr: "/-/merge_requests/", blob: "/-/blob/", commit: "/-/commit/", dispatch: "gitlab-trigger", dispatchInput: "project-ref", defaultOrigin: null, ci: "gitlab-ci" },
+  gitea: { depth: [2, 2], pr: "/pulls/", blob: "/src/branch/", commit: "/commit/", dispatch: "gitea", dispatchInput: "workflow-ref", defaultOrigin: null, ci: null },
+  git: { depth: [2, 2], pr: null, blob: null, commit: null, dispatch: null, dispatchInput: null, defaultOrigin: null, ci: null }
+};
+var FORGES = Object.keys(FORGE_SHAPES);
+var DEFAULT_FORGE = FORGES.find((f) => FORGE_SHAPES[f].defaultOrigin !== null);
+var PR_FORGES = FORGES.filter((f) => FORGE_SHAPES[f].pr !== null);
+var number = "(\\d{1,9})";
+var suffix = (forge) => `${FORGE_SHAPES[forge].pr}${number}`;
+var PR_URL = new RegExp(`^https?://[^/\\s?#]+(?:${PR_FORGES.map((forge) => {
+  const [min, max] = FORGE_SHAPES[forge].depth;
+  return `((?:/[A-Za-z0-9_.-]{1,100}){${min},${max}})${suffix(forge)}`;
+}).join("|")})$`);
 
 // src/shared/schema.mjs
 var SCHEMA_MAX_BYTES = 32 * 1024;
@@ -210,6 +224,141 @@ var DETAIL_SCHEMAS = {
 var CAPABILITY_NAME = new RegExp(`^(?:${NAME.source}|${HOLDING.source.slice(1, -1)})$`);
 var VALID_FOR = { default_s: 3600, state_s: 24 * 3600, measure_s: 31 * 24 * 3600 };
 
+// src/defaults/output-evidence.ts
+var MAX = 256 * 1024;
+
+// src/defaults/course-pr.ts
+var CREATE_PR_ASK_DEADLINE_S = 3 * 60 * 60;
+
+// src/defaults/forges/rest.ts
+var sha = (v) => typeof v === "string" && /^[a-f0-9]{40}$/.test(v);
+var prNumber = (v) => typeof v === "number" && Number.isInteger(v) && v > 0 && v <= 999999999;
+var immutableId = (id) => typeof id === "number" && Number.isSafeInteger(id) && id > 0;
+var sameRepository = (head, base) => immutableId(head) && head === base;
+function openRef(number2, branch, oid) {
+  if (!prNumber(number2) || typeof branch !== "string" || !branch || branch.length > 1024 || !sha(oid)) throw new Error("malformed PR head");
+  return { number: number2, headRefName: branch, headRefOid: oid };
+}
+
+// src/defaults/forges/github-facts.ts
+var COMMENT_FIELDS = "author { login ... on User { databaseId } ... on Bot { databaseId } ... on Organization { databaseId } ... on Mannequin { databaseId } } authorAssociation body lastEditedAt includesCreatedEdit";
+var PR_COMMENTS = `pageInfo { hasNextPage endCursor } nodes { ${COMMENT_FIELDS} createdAt url }`;
+var PR_DETAIL = `fragment D on PullRequest {
+  head: commits(last: 1) { nodes { commit { oid checkSuites(first: 10) { pageInfo { hasNextPage } nodes { checkRuns(first: 100, filterBy: { checkType: LATEST }) { pageInfo { hasNextPage } nodes { status conclusion } } } } } } }
+  commits(first: 100) { pageInfo { hasNextPage } nodes { commit { oid committedDate message tree { oid } parents(first: 1) { nodes { oid tree { oid } } } } } }
+  reviews(first: 100) { pageInfo { hasNextPage } nodes { author { login } authorAssociation state submittedAt body url commit { oid } } }
+  comments(first: 100) { ${PR_COMMENTS} }
+}`;
+
+// src/defaults/forges/index.ts
+function githubEvidence(url) {
+  const m = /^\/([^/]+)\/([^/]+)\/(pull|issues|commit)\/([^/]+)\/?$/.exec(url.pathname);
+  if (!m) return null;
+  const [, owner, name, kind, id] = m;
+  const at = (api) => ({ repo: `${owner}/${name}`, api: `/repos/${owner}/${name}${api}` });
+  const hash = url.hash.slice(1);
+  if (kind === "commit") return /^[0-9a-f]{7,40}$/.test(id) ? at(`/commits/${id}`) : null;
+  if (!/^\d+$/.test(id)) return null;
+  let f;
+  if (f = /^issuecomment-(\d+)$/.exec(hash)) return at(`/issues/comments/${f[1]}`);
+  if (kind === "issues") return hash === "" ? at(`/issues/${id}`) : null;
+  if (f = /^pullrequestreview-(\d+)$/.exec(hash)) return at(`/pulls/${id}/reviews/${f[1]}`);
+  if (f = /^discussion_r(\d+)$/.exec(hash)) return at(`/pulls/comments/${f[1]}`);
+  return hash === "" ? at(`/pulls/${id}`) : null;
+}
+var pulls = (path) => `/repos/${path}/pulls`;
+var issues = (path, n) => `/repos/${path}/issues/${n}/comments`;
+var pullHead = (p, branch = p?.head?.ref) => ({ ...openRef(p?.number, branch, p?.head?.sha), sameRepository: sameRepository(p?.head?.repo?.id, p?.base?.repo?.id) });
+var pullBody = ({ title, head, base, body }) => ({ title, head, base, body });
+var project = (path) => `/projects/${encodeURIComponent(path)}`;
+var mergeRequests = (path) => `${project(path)}/merge_requests`;
+var publicOrigin = FORGE_SHAPES[DEFAULT_FORGE].defaultOrigin;
+var publicApi = FORGE_SHAPES[DEFAULT_FORGE].dispatchOrigin;
+var ADAPTERS = {
+  github: {
+    publicHost: new URL(publicOrigin).host,
+    api: (origin) => origin === publicOrigin ? publicApi : `${origin}/api/v3`,
+    graphql: (origin) => origin === publicOrigin ? `${publicApi}/graphql` : `${origin}/api/graphql`,
+    prs: pulls,
+    comments: issues,
+    openBody: pullBody,
+    url: "html_url",
+    head: (p) => pullHead(p),
+    openQuery: "state=open",
+    cli: true,
+    attest: { commit: (path, sha2) => `/repos/${path}/commits/${sha2}`, evidence: githubEvidence, witness: (path, sha2) => `/repos/${path}/commits/${sha2}/comments` },
+    protectedRefusal: (s) => /GH006/i.test(s) || /GH013/i.test(s) && !/secret|push protection/i.test(s) && /pull request|update rule|required status check/i.test(s)
+  },
+  gitlab: {
+    publicHost: "gitlab.com",
+    api: (origin) => `${origin}/api/v4`,
+    prs: mergeRequests,
+    comments: (path, n) => `${mergeRequests(path)}/${n}/notes`,
+    openBody: ({ title, head, base, body }) => ({ title, source_branch: head, target_branch: base, description: body }),
+    url: "web_url",
+    head: (p) => ({ ...openRef(p?.iid, p?.source_branch, p?.sha), sameRepository: sameRepository(p?.source_project_id, p?.target_project_id) }),
+    openQuery: "state=opened",
+    protectedRefusal: (s) => /not allowed to push code to protected branches/i.test(s),
+    restFacts: {
+      state: (p) => p.state === "merged" ? "merged" : p.state === "opened" ? "open" : p.state === "closed" ? "closed" : null,
+      identity: (path) => project(path),
+      ownerId: (p) => p.namespace?.id,
+      commits: (path, n) => `${mergeRequests(path)}/${n}/commits`,
+      commit: (c) => ({ oid: c.id, date: c.committed_date, message: c.message, parent: c.parent_ids?.[0] }),
+      checks: (path, oid) => `${project(path)}/repository/commits/${oid}/statuses`,
+      conclusion: (c) => status(c.status),
+      user: (note) => note.system === true ? null : note.author,
+      author: (u) => u.username,
+      reviewDate: (n) => n.created_at,
+      permission: (path, id) => `${project(path)}/members/all/${id}`,
+      canPush: (p, id) => p?.id === id && Number.isSafeInteger(p.access_level) && p.access_level >= 30,
+      scopeRefusal: (msg) => /insufficient_scope/i.test(msg),
+      gitTrees: true
+    }
+  },
+  gitea: {
+    publicHost: "gitea.com",
+    api: (origin) => `${origin}/api/v1`,
+    prs: pulls,
+    comments: issues,
+    openBody: pullBody,
+    url: "html_url",
+    // `label` is the source branch; `ref` may become the synthetic PR ref after deletion.
+    head: (p) => ({ ...openRef(p?.number, p?.head?.label || p?.head?.ref, p?.head?.sha), sameRepository: sameRepository(p?.head?.repo_id, p?.base?.repo_id) }),
+    openQuery: "state=open",
+    allQuery: "state=all",
+    auth: "token",
+    pageSizeKey: "limit",
+    protectedRefusal: (s) => /not allowed to push to protected branch/i.test(s),
+    restFacts: {
+      listQuery: "state=all",
+      state: (p) => p.merged === true || p.merged_at ? "merged" : p.state === "open" || p.state === "closed" ? p.state : null,
+      identity: (path) => `/repos/${path}`,
+      ownerId: (p) => p.owner?.id,
+      commits: (path, n) => `${pulls(path)}/${n}/commits`,
+      commit: (c) => ({ oid: c.sha, date: c.commit?.committer?.date, message: c.commit?.message, parent: c.parents?.[0]?.sha, tree: c.commit?.tree?.sha }),
+      newestCommitFirst: true,
+      treeOf: (path, oid) => `/repos/${path}/git/commits/${oid}`,
+      checks: (path, oid) => `/repos/${path}/commits/${oid}/status`,
+      checkItems: (p) => p?.statuses ?? (p && (p.total_count === 0 || Object.keys(p).length === 0) ? [] : void 0),
+      conclusion: (c) => status(c.status),
+      user: (c) => c.user,
+      author: (u) => u.login,
+      reviewDate: (c) => c.submitted_at ?? c.created_at,
+      reviews: (path, n) => `${pulls(path)}/${n}/reviews`,
+      unpagedComments: true,
+      permission: (path, _id, login) => `/repos/${path}/collaborators/${encodeURIComponent(login)}/permission`,
+      canPush: (p, id) => p?.user?.id === id && ["write", "admin", "owner"].includes(p.permission),
+      scopeRefusal: (msg) => /token.*scope|Only admins can query all permissions/i.test(msg)
+    }
+  }
+};
+function status(v) {
+  if (v === "success" || v === "skipped" || v === "neutral") return v;
+  if (v === "failed" || v === "failure" || v === "error" || v === "canceled" || v === "cancelled") return "failure";
+  return null;
+}
+
 // src/defaults/tickets-markdown.ts
 function parseFrontmatter(text) {
   const m = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text);
@@ -220,18 +369,18 @@ function parseFrontmatter(text) {
     const line = lines[i];
     const kv = /^([A-Za-z][A-Za-z0-9_-]*):\s*(.*)$/.exec(line);
     if (!kv) continue;
-    const [, key, rest] = kv;
-    if (rest.trim() === "") {
+    const [, key, rest2] = kv;
+    if (rest2.trim() === "") {
       const items = [];
       while (i + 1 < lines.length && /^\s+-\s+/.test(lines[i + 1])) {
         i++;
         items.push(unquote(lines[i].replace(/^\s+-\s+/, "")));
       }
       out[key] = items;
-    } else if (/^\[.*\]$/.test(rest.trim())) {
-      out[key] = rest.trim().slice(1, -1).split(",").map(unquote).filter(Boolean);
+    } else if (/^\[.*\]$/.test(rest2.trim())) {
+      out[key] = rest2.trim().slice(1, -1).split(",").map(unquote).filter(Boolean);
     } else {
-      out[key] = unquote(rest);
+      out[key] = unquote(rest2);
     }
   }
   return out;
@@ -251,18 +400,18 @@ var ancestor = (a, b, run2, checkout) => {
   }
 };
 function resolveDelivered(shas, ref, checkout, run2) {
-  return shas.map((sha) => {
-    if (!/^[0-9a-f]{7,40}$/.test(sha)) throw new Error("invalid delivered commit id");
+  return shas.map((sha2) => {
+    if (!/^[0-9a-f]{7,40}$/.test(sha2)) throw new Error("invalid delivered commit id");
     let full;
     try {
-      full = run2("git", ["rev-parse", "--verify", "--quiet", `${sha}^{commit}`], checkout).trim();
+      full = run2("git", ["rev-parse", "--verify", "--quiet", `${sha2}^{commit}`], checkout).trim();
     } catch {
-      throw new Error(`the implement agent answered delivered at ${sha}, which names no commit this checkout knows \u2014 refused`);
+      throw new Error(`the implement agent answered delivered at ${sha2}, which names no commit this checkout knows \u2014 refused`);
     }
-    if (!/^[0-9a-f]{40}$/.test(full) || !full.startsWith(sha)) throw new Error(`the implement agent answered delivered at ${sha}, which names no commit this checkout knows \u2014 refused`);
+    if (!/^[0-9a-f]{40}$/.test(full) || !full.startsWith(sha2)) throw new Error(`the implement agent answered delivered at ${sha2}, which names no commit this checkout knows \u2014 refused`);
     if (!ancestor(full, ref, run2, checkout)) {
       const branch = ref.replace(/^refs\/remotes\/origin\//, "");
-      throw new Error(`the implement agent answered delivered at ${sha}, which is not on ${branch} \u2014 refused: the commit a delivered answer names is on the default branch`);
+      throw new Error(`the implement agent answered delivered at ${sha2}, which is not on ${branch} \u2014 refused: the commit a delivered answer names is on the default branch`);
     }
     return full;
   });
@@ -276,9 +425,6 @@ function readItems(root, items = "tickets") {
   if (!existsSync(dir)) return [];
   return readdirSync(dir, { recursive: true, withFileTypes: true }).filter((e) => e.isFile()).map((e) => relative(dir, join(e.parentPath, e.name)).split(sep).join("/")).sort().map((path) => ({ path, text: readFileSync(join(dir, path), "utf8") }));
 }
-
-// src/defaults/output-evidence.ts
-var MAX = 256 * 1024;
 
 // src/defaults/ticket-state.ts
 import { execFileSync as execFileSync2 } from "node:child_process";
@@ -324,14 +470,14 @@ function readTicketSettings(root, where = root) {
   }
   const texts = (v) => (Array.isArray(v) ? v : typeof v === "string" && v !== "" ? [v] : []).filter((x) => typeof x === "string" && x.trim() !== "").map((x) => x.trim());
   const str = (v) => typeof v === "string" && v.trim() !== "" ? v.trim() : void 0;
-  const project = str(json.project);
-  if (json.project != null && project === void 0) throw new Error(".baton/baton.json: project is a project id, not an empty value");
+  const project2 = str(json.project);
+  if (json.project != null && project2 === void 0) throw new Error(".baton/baton.json: project is a project id, not an empty value");
   const legacy_ids = texts(json.legacy_ids);
   return {
     items: str(json.items),
     ticket_prefix: str(json.ticket_prefix),
     legacy_ids,
-    project,
+    project: project2,
     prefixes: prefixesOf(json.prefixes, legacy_ids, str(json.ticket_prefix)),
     tags: tagsOf(json),
     projects: str(json.projects) ?? "projects"

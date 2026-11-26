@@ -1,3 +1,24 @@
+// src/core/forges.ts
+var FORGE_SHAPES = {
+  github: { depth: [2, 2], pr: "/pull/", blob: "/blob/", commit: "/commit/", dispatch: "github-app", dispatchOrigin: "https://api.github.com", dispatchInput: "workflow-path", defaultOrigin: "https://github.com", ci: "github-actions" },
+  gitlab: { depth: [2, 4], pr: "/-/merge_requests/", blob: "/-/blob/", commit: "/-/commit/", dispatch: "gitlab-trigger", dispatchInput: "project-ref", defaultOrigin: null, ci: "gitlab-ci" },
+  gitea: { depth: [2, 2], pr: "/pulls/", blob: "/src/branch/", commit: "/commit/", dispatch: "gitea", dispatchInput: "workflow-ref", defaultOrigin: null, ci: null },
+  git: { depth: [2, 2], pr: null, blob: null, commit: null, dispatch: null, dispatchInput: null, defaultOrigin: null, ci: null }
+};
+var FORGES = Object.keys(FORGE_SHAPES);
+var DEFAULT_FORGE = FORGES.find((f) => FORGE_SHAPES[f].defaultOrigin !== null);
+var PR_FORGES = FORGES.filter((f) => FORGE_SHAPES[f].pr !== null);
+var number = "(\\d{1,9})";
+var suffix = (forge) => `${FORGE_SHAPES[forge].pr}${number}`;
+var PR_URL = new RegExp(`^https?://[^/\\s?#]+(?:${PR_FORGES.map((forge) => {
+  const [min, max] = FORGE_SHAPES[forge].depth;
+  return `((?:/[A-Za-z0-9_.-]{1,100}){${min},${max}})${suffix(forge)}`;
+}).join("|")})$`);
+function parsePrUrl(url) {
+  const groups = PR_URL.exec(url)?.slice(1).filter((v) => v !== void 0);
+  return groups ? { path: groups[0].slice(1), number: groups[1] } : null;
+}
+
 // src/defaults/pr-markers.ts
 function trailersOf(message) {
   const paragraphs = message.split(/\r?\n\s*\r?\n/).map((p) => p.trim()).filter((p) => p !== "");
@@ -70,7 +91,12 @@ var CREATE_PR_COURSE = {
     // B-257: the person's confirmation — no runner is offered it (R-BTN-116); its options are
     // its outcomes, `confirmed` and `filed`.
     confirm: { from: ["delivered"], to: ["confirmed", "filed"], kind: "person", asks: "owner", answer_source: "person", max_runs: 3, label: "A person confirms it was already delivered" },
-    archive: { from: ["confirmed"], to: "archived", requires: { capabilities: ["runner:claim-evidence"] }, label: "Archive the confirmed ticket" }
+    archive: { from: ["confirmed"], to: "archived", requires: { capabilities: ["runner:claim-evidence"] }, label: "Archive the confirmed ticket" },
+    "opened-by-hand": { from: ["filed"], to: "pr-open", arrives: { fact: "pr-opened", next: "run-tests" } },
+    "reviewed-by-hand": { from: ["pr-open", "fixed", "reviewed"], to: "reviewed", max_runs: 3, arrives: { fact: "pr-verdict", next: { approve: "merge", changes: "fix" } } },
+    "fixed-by-hand": { from: ["pr-open", "reviewed", "fixed"], to: "fixed", max_runs: 3, arrives: { fact: "pr-pushed", next: "run-tests" } },
+    "merged-by-hand": { from: ["filed", "pr-open", "fixed", "reviewed", "adjudicated"], to: "merged", arrives: { fact: "pr-merged" } },
+    reconcile: { from: ["filed", "pr-open", "fixed", "reviewed", "adjudicated"], max_runs: 3, reconciles: { to: { "pr-open": "run-tests", fixed: "run-tests", reviewed: "merge", merged: null, delivered: "confirm" } } }
   }
 };
 var CREATE_SPEC_COURSE = {
@@ -93,7 +119,11 @@ var CREATE_SPEC_COURSE = {
     review: { from: ["spec-open"], to: "reviewed", max_runs: 4, label: "Adversarial review round" },
     address: { from: ["reviewed"], to: "spec-open", max_runs: 3, label: "Address the blocking findings with the owner" },
     adjudicate: { from: ["reviewed"], to: "adjudicated", label: "Reproduce the findings left open" },
-    merge: { from: ["reviewed", "adjudicated"], to: "merged", label: "Merge and close the ticket" }
+    merge: { from: ["reviewed", "adjudicated"], to: "merged", label: "Merge and close the ticket" },
+    "opened-by-hand": { from: ["requested"], to: "spec-open", arrives: { fact: "pr-opened", next: "review" } },
+    "pushed-by-hand": { from: ["reviewed"], to: "spec-open", max_runs: 3, arrives: { fact: "pr-pushed", next: "review" } },
+    "merged-by-hand": { from: ["requested", "spec-open", "reviewed", "adjudicated"], to: "merged", arrives: { fact: "pr-merged" } },
+    reconcile: { from: ["requested", "spec-open", "reviewed", "adjudicated"], max_runs: 3, reconciles: { to: { "spec-open": "review", reviewed: "merge", merged: null } } }
   }
 };
 var REVIEW_PR_COURSE = {
@@ -109,7 +139,9 @@ var REVIEW_PR_COURSE = {
   },
   legs: {
     review: { from: ["requested", "changes-requested"], to: ["approved", "changes-requested"], max_runs: 3, label: "Review round" },
-    conclude: { from: ["requested", "changes-requested"], to: "concluded", label: "Summarise and stop" }
+    conclude: { from: ["requested", "changes-requested"], to: "concluded", label: "Summarise and stop" },
+    "approved-by-hand": { from: ["requested", "changes-requested"], to: "approved", arrives: { fact: "pr-verdict", verdict: "approve" } },
+    reconcile: { from: ["requested", "changes-requested"], max_runs: 3, reconciles: { to: { "changes-requested": "review", approved: null, concluded: null } } }
   }
 };
 var VERDICT = /^<!--\s*baton:verdict\s+(approve|changes)\s*-->/;
@@ -156,25 +188,25 @@ function timelineOf(f, legs = CREATE_PR_LEGS, gate = false, markers = [], rounds
   let red = false;
   let run = false;
   for (const ev of events) {
-    const rest = path.at(-1).reached;
+    const rest2 = path.at(-1).reached;
     if (ev.kind === "round") {
       granted = true;
     } else if (ev.kind === "verdict") {
-      if (rest !== "reviewed" || granted) path.push({ leg: "review", reached: "reviewed" });
+      if (rest2 !== "reviewed" || granted) path.push({ leg: "review", reached: "reviewed" });
       granted = false;
       red = false;
       run = false;
     } else if (ev.kind === "push") {
       if (run) continue;
-      if (rest === "reviewed" || (rest === legs.backTo || rest === legs.opened) && red) {
+      if (rest2 === "reviewed" || (rest2 === legs.backTo || rest2 === legs.opened) && red) {
         path.push({ leg: legs.back, reached: legs.backTo });
         red = false;
         run = true;
       }
-    } else if (rest === legs.opened || rest === legs.backTo) {
+    } else if (rest2 === legs.opened || rest2 === legs.backTo) {
       red = ev.m.tests === "red";
       run = false;
-      path.push({ leg: "run-tests", reached: rest });
+      path.push({ leg: "run-tests", reached: rest2 });
     }
   }
   return path;
@@ -218,8 +250,8 @@ function adjudicationOf(fact) {
 var NO_GATE = { gate: "green", markers: [], answers: /* @__PURE__ */ new Map(), rounds: [], url: null, unreachable: [] };
 var ordinal = (n) => {
   const tens = n % 100;
-  const suffix = tens >= 11 && tens <= 13 ? "th" : { 1: "st", 2: "nd", 3: "rd" }[n % 10] ?? "th";
-  return `${n}${suffix}`;
+  const suffix2 = tens >= 11 && tens <= 13 ? "th" : { 1: "st", 2: "nd", 3: "rd" }[n % 10] ?? "th";
+  return `${n}${suffix2}`;
 };
 var roundsDecision = (rounds, url) => ({
   id: `review-rounds-${rounds}`,
@@ -309,8 +341,15 @@ function prRefs(prs, home) {
   for (const p of prs) {
     const text = String(p).trim();
     if (/^#?\d+$/.test(text)) out.push({ repository: home ?? null, number: text.replace(/^#/, "") });
-    const m = /^https?:\/\/[^/]+\/([^/]+\/[^/]+)\/pull\/(\d+)(?:[/#?].*)?$/.exec(text);
-    if (m) out.push({ repository: m[1], number: m[2] });
+    let url = text.replace(/[?#].*$/, "");
+    for (let i = 0; i < 8 && url.startsWith("http"); i++) {
+      const ref = parsePrUrl(url);
+      if (ref) {
+        out.push({ repository: ref.path, number: ref.number });
+        break;
+      }
+      url = url.slice(0, url.lastIndexOf("/"));
+    }
   }
   return out;
 }
@@ -326,7 +365,7 @@ var readsRepo = (t, f, home) => {
 };
 function ticketOwns(t, pr, patterns, repository) {
   if (!readsRepo(t, pr, repository)) return false;
-  return prRefs(t.course?.prs ?? [], repository).some((r) => refNames(r, pr, repository)) || patterns.some((p) => branchMatches(p.replace(/\{ticket\}/g, t.id), pr.head));
+  return prRefs(t.course?.prs ?? [], repository).some((r) => refNames(r, pr, repository)) || pr.sameRepository !== false && patterns.some((p) => branchMatches(p.replace(/\{ticket\}/g, t.id), pr.head));
 }
 function together(facts) {
   if (facts.length === 1) return facts[0];
@@ -475,7 +514,10 @@ function stationsReviewPr(ctx) {
       continue;
     }
     if (fact.state !== "open" || path.length >= rounds) {
-      stations[t.id] = at(station, path, [{ leg: "conclude", state: "ready", waiting_on: null }]);
+      stations[t.id] = at(station, path, [
+        { leg: "conclude", state: "ready", waiting_on: null },
+        ...ctx.graph?.legs?.reconcile ? [{ leg: "review", state: "waiting", waiting_on: "exhausted" }] : []
+      ]);
       continue;
     }
     const pushes = fact.pushes?.length ? fact.pushes : [fact.pushedAt];
@@ -576,6 +618,135 @@ var VALID_FOR = { default_s: 3600, state_s: 24 * 3600, measure_s: 31 * 24 * 3600
 
 // src/defaults/output-evidence.ts
 var MAX = 256 * 1024;
+
+// src/defaults/forges/rest.ts
+var sha = (v) => typeof v === "string" && /^[a-f0-9]{40}$/.test(v);
+var prNumber = (v) => typeof v === "number" && Number.isInteger(v) && v > 0 && v <= 999999999;
+var immutableId = (id) => typeof id === "number" && Number.isSafeInteger(id) && id > 0;
+var sameRepository = (head, base) => immutableId(head) && head === base;
+function openRef(number2, branch, oid) {
+  if (!prNumber(number2) || typeof branch !== "string" || !branch || branch.length > 1024 || !sha(oid)) throw new Error("malformed PR head");
+  return { number: number2, headRefName: branch, headRefOid: oid };
+}
+
+// src/defaults/forges/github-facts.ts
+var COMMENT_FIELDS = "author { login ... on User { databaseId } ... on Bot { databaseId } ... on Organization { databaseId } ... on Mannequin { databaseId } } authorAssociation body lastEditedAt includesCreatedEdit";
+var PR_COMMENTS = `pageInfo { hasNextPage endCursor } nodes { ${COMMENT_FIELDS} createdAt url }`;
+var PR_DETAIL = `fragment D on PullRequest {
+  head: commits(last: 1) { nodes { commit { oid checkSuites(first: 10) { pageInfo { hasNextPage } nodes { checkRuns(first: 100, filterBy: { checkType: LATEST }) { pageInfo { hasNextPage } nodes { status conclusion } } } } } } }
+  commits(first: 100) { pageInfo { hasNextPage } nodes { commit { oid committedDate message tree { oid } parents(first: 1) { nodes { oid tree { oid } } } } } }
+  reviews(first: 100) { pageInfo { hasNextPage } nodes { author { login } authorAssociation state submittedAt body url commit { oid } } }
+  comments(first: 100) { ${PR_COMMENTS} }
+}`;
+
+// src/defaults/forges/index.ts
+function githubEvidence(url) {
+  const m = /^\/([^/]+)\/([^/]+)\/(pull|issues|commit)\/([^/]+)\/?$/.exec(url.pathname);
+  if (!m) return null;
+  const [, owner, name, kind, id] = m;
+  const at2 = (api) => ({ repo: `${owner}/${name}`, api: `/repos/${owner}/${name}${api}` });
+  const hash = url.hash.slice(1);
+  if (kind === "commit") return /^[0-9a-f]{7,40}$/.test(id) ? at2(`/commits/${id}`) : null;
+  if (!/^\d+$/.test(id)) return null;
+  let f;
+  if (f = /^issuecomment-(\d+)$/.exec(hash)) return at2(`/issues/comments/${f[1]}`);
+  if (kind === "issues") return hash === "" ? at2(`/issues/${id}`) : null;
+  if (f = /^pullrequestreview-(\d+)$/.exec(hash)) return at2(`/pulls/${id}/reviews/${f[1]}`);
+  if (f = /^discussion_r(\d+)$/.exec(hash)) return at2(`/pulls/comments/${f[1]}`);
+  return hash === "" ? at2(`/pulls/${id}`) : null;
+}
+var pulls = (path) => `/repos/${path}/pulls`;
+var issues = (path, n) => `/repos/${path}/issues/${n}/comments`;
+var pullHead = (p, branch = p?.head?.ref) => ({ ...openRef(p?.number, branch, p?.head?.sha), sameRepository: sameRepository(p?.head?.repo?.id, p?.base?.repo?.id) });
+var pullBody = ({ title, head, base, body }) => ({ title, head, base, body });
+var project = (path) => `/projects/${encodeURIComponent(path)}`;
+var mergeRequests = (path) => `${project(path)}/merge_requests`;
+var publicOrigin = FORGE_SHAPES[DEFAULT_FORGE].defaultOrigin;
+var publicApi = FORGE_SHAPES[DEFAULT_FORGE].dispatchOrigin;
+var ADAPTERS = {
+  github: {
+    publicHost: new URL(publicOrigin).host,
+    api: (origin) => origin === publicOrigin ? publicApi : `${origin}/api/v3`,
+    graphql: (origin) => origin === publicOrigin ? `${publicApi}/graphql` : `${origin}/api/graphql`,
+    prs: pulls,
+    comments: issues,
+    openBody: pullBody,
+    url: "html_url",
+    head: (p) => pullHead(p),
+    openQuery: "state=open",
+    cli: true,
+    attest: { commit: (path, sha2) => `/repos/${path}/commits/${sha2}`, evidence: githubEvidence, witness: (path, sha2) => `/repos/${path}/commits/${sha2}/comments` },
+    protectedRefusal: (s) => /GH006/i.test(s) || /GH013/i.test(s) && !/secret|push protection/i.test(s) && /pull request|update rule|required status check/i.test(s)
+  },
+  gitlab: {
+    publicHost: "gitlab.com",
+    api: (origin) => `${origin}/api/v4`,
+    prs: mergeRequests,
+    comments: (path, n) => `${mergeRequests(path)}/${n}/notes`,
+    openBody: ({ title, head, base, body }) => ({ title, source_branch: head, target_branch: base, description: body }),
+    url: "web_url",
+    head: (p) => ({ ...openRef(p?.iid, p?.source_branch, p?.sha), sameRepository: sameRepository(p?.source_project_id, p?.target_project_id) }),
+    openQuery: "state=opened",
+    protectedRefusal: (s) => /not allowed to push code to protected branches/i.test(s),
+    restFacts: {
+      state: (p) => p.state === "merged" ? "merged" : p.state === "opened" ? "open" : p.state === "closed" ? "closed" : null,
+      identity: (path) => project(path),
+      ownerId: (p) => p.namespace?.id,
+      commits: (path, n) => `${mergeRequests(path)}/${n}/commits`,
+      commit: (c) => ({ oid: c.id, date: c.committed_date, message: c.message, parent: c.parent_ids?.[0] }),
+      checks: (path, oid) => `${project(path)}/repository/commits/${oid}/statuses`,
+      conclusion: (c) => status(c.status),
+      user: (note) => note.system === true ? null : note.author,
+      author: (u) => u.username,
+      reviewDate: (n) => n.created_at,
+      permission: (path, id) => `${project(path)}/members/all/${id}`,
+      canPush: (p, id) => p?.id === id && Number.isSafeInteger(p.access_level) && p.access_level >= 30,
+      scopeRefusal: (msg) => /insufficient_scope/i.test(msg),
+      gitTrees: true
+    }
+  },
+  gitea: {
+    publicHost: "gitea.com",
+    api: (origin) => `${origin}/api/v1`,
+    prs: pulls,
+    comments: issues,
+    openBody: pullBody,
+    url: "html_url",
+    // `label` is the source branch; `ref` may become the synthetic PR ref after deletion.
+    head: (p) => ({ ...openRef(p?.number, p?.head?.label || p?.head?.ref, p?.head?.sha), sameRepository: sameRepository(p?.head?.repo_id, p?.base?.repo_id) }),
+    openQuery: "state=open",
+    allQuery: "state=all",
+    auth: "token",
+    pageSizeKey: "limit",
+    protectedRefusal: (s) => /not allowed to push to protected branch/i.test(s),
+    restFacts: {
+      listQuery: "state=all",
+      state: (p) => p.merged === true || p.merged_at ? "merged" : p.state === "open" || p.state === "closed" ? p.state : null,
+      identity: (path) => `/repos/${path}`,
+      ownerId: (p) => p.owner?.id,
+      commits: (path, n) => `${pulls(path)}/${n}/commits`,
+      commit: (c) => ({ oid: c.sha, date: c.commit?.committer?.date, message: c.commit?.message, parent: c.parents?.[0]?.sha, tree: c.commit?.tree?.sha }),
+      newestCommitFirst: true,
+      treeOf: (path, oid) => `/repos/${path}/git/commits/${oid}`,
+      checks: (path, oid) => `/repos/${path}/commits/${oid}/status`,
+      checkItems: (p) => p?.statuses ?? (p && (p.total_count === 0 || Object.keys(p).length === 0) ? [] : void 0),
+      conclusion: (c) => status(c.status),
+      user: (c) => c.user,
+      author: (u) => u.login,
+      reviewDate: (c) => c.submitted_at ?? c.created_at,
+      reviews: (path, n) => `${pulls(path)}/${n}/reviews`,
+      unpagedComments: true,
+      permission: (path, _id, login) => `/repos/${path}/collaborators/${encodeURIComponent(login)}/permission`,
+      canPush: (p, id) => p?.user?.id === id && ["write", "admin", "owner"].includes(p.permission),
+      scopeRefusal: (msg) => /token.*scope|Only admins can query all permissions/i.test(msg)
+    }
+  }
+};
+function status(v) {
+  if (v === "success" || v === "skipped" || v === "neutral") return v;
+  if (v === "failed" || v === "failure" || v === "error" || v === "canceled" || v === "cancelled") return "failure";
+  return null;
+}
 
 // src/client/git-env.mjs
 var GIT_NONINTERACTIVE_ENV = {
@@ -767,7 +938,8 @@ var ticketStations = (waits) => (ctx) => stationsTickets({ tickets: ctx.tickets,
 var VERDICT2 = { name: "verdict", values: ["approve", "changes"] };
 var CREATE_PR = {
   id: "create-pr",
-  version: 4,
+  // 5: B-311's reconcile leg (min_runner_version 3).
+  version: 5,
   summary: "implement a ticket in a PR, gate every review round behind its tests, review it in up to three blind rounds, fix, hand the third round's blockers to the owner, merge",
   course: CREATE_PR_COURSE,
   reads: "prs",
@@ -804,7 +976,8 @@ var CREATE_PR = {
     adjudicate: { ask: { name: "adjudication", values: ["merge", "owner"] }, position: "{ ...(answer === 'owner' ? { suspend: true } : {}), reached: 'adjudicated', next: 'merge', adjudication: answer }" },
     // R-BTN-131: the stub reads the forge before it reports `merged`.
     merge: { position: "{ reached: 'merged', next: null }", verify: "merged" },
-    archive: { position: "{ reached: 'archived', next: null }", archive: true }
+    archive: { position: "{ reached: 'archived', next: null }", archive: true },
+    reconcile: { position: "null" }
   },
   skill: "baton-create-pr"
 };
@@ -812,6 +985,7 @@ var BUILT_INS = [
   CREATE_PR,
   {
     id: "review-pr",
+    version: 2,
     summary: "review a PR someone else opened, in rounds, and conclude with a summary",
     course: REVIEW_PR_COURSE,
     reads: "prs",
@@ -819,6 +993,7 @@ var BUILT_INS = [
     legs: {
       // Changes: the next round waits on the author's push, so the claim suspends.
       review: { ask: VERDICT2, position: "{ ...(answer === 'approve' ? {} : { suspend: true }), reached: answer === 'approve' ? 'approved' : 'changes-requested', next: answer === 'approve' ? null : 'review', verdict: answer }" },
+      reconcile: { position: "null" },
       conclude: { position: "{ reached: 'concluded', next: null }" }
     },
     skill: "baton-review-pr"
@@ -887,6 +1062,7 @@ var BUILT_INS = [
   },
   {
     id: "create-spec",
+    version: 2,
     summary: "design a specification in conversation with the owner, review it adversarially, address blocking findings in conversation, merge",
     course: CREATE_SPEC_COURSE,
     reads: "prs",
@@ -904,7 +1080,8 @@ var BUILT_INS = [
       // `merge`: no open blocking finding reproduced; `owner`: one did, and the owner decides —
       // the claim suspends until they do.
       adjudicate: { ask: { name: "adjudication", values: ["merge", "owner"] }, position: "{ ...(answer === 'owner' ? { suspend: true } : {}), reached: 'adjudicated', next: 'merge', adjudication: answer }" },
-      merge: { position: "{ reached: 'merged', next: null }" }
+      merge: { position: "{ reached: 'merged', next: null }" },
+      reconcile: { position: "null" }
     },
     skill: "baton-create-spec"
   },
