@@ -47,4 +47,11 @@ export interface ForgeClient {
   comment(number: number, body: string): Promise<string>;
   facts(read: FactRead): Promise<PrFact[]>;
   protectedRefusal(detail: string): boolean;
+  /** R-BTN-82: post a ticket close's output witness on its commit; false where this forge's
+   *  adapter reads no witness back. */
+  witness(sha: string, body: string): Promise<boolean>;
+  /** R-BTN-10: the read answering whether a commit of this repository, or an object a URL on it
+   *  names, exists — its HTTP status, or null when the request failed — or null when this
+   *  adapter has no credential or does not read that form. */
+  evidence(ref: string): (() => Promise<number | null>) | null;
 }

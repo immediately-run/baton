@@ -21,6 +21,36 @@ interface Adapter {
   cli?: boolean;
   auth?: string;
   pageSizeKey?: string;
+  /** The sync's attestations' reads (R-BTN-10, R-BTN-82), on the forges whose adapter reads them:
+   *  whether a commit or a web URL's object exists, and where a ticket close's output witness is
+   *  posted on its commit. A forge with none answers no evidence and posts no witness. */
+  attest?: Attest;
+}
+interface Attest {
+  /** The REST path answering whether `sha` is a commit of `path`. */
+  commit: (path: string, sha: string) => string;
+  /** A web URL's repository path and the REST path answering whether its object exists, or
+   *  null for a URL form this adapter does not read. */
+  evidence: (url: URL) => { repo: string; api: string } | null;
+  /** The REST path a commit comment is posted to. */
+  witness: (path: string, sha: string) => string;
+}
+/** GitHub's evidence forms (R-BTN-10): an issue or PR comment, a review, a review comment, a PR,
+ *  an issue or a commit, each the REST object that answers 200 when it exists. */
+function githubEvidence(url: URL): { repo: string; api: string } | null {
+  const m = /^\/([^/]+)\/([^/]+)\/(pull|issues|commit)\/([^/]+)\/?$/.exec(url.pathname);
+  if (!m) return null;
+  const [, owner, name, kind, id] = m;
+  const at = (api: string) => ({ repo: `${owner}/${name}`, api: `/repos/${owner}/${name}${api}` });
+  const hash = url.hash.slice(1);
+  if (kind === 'commit') return /^[0-9a-f]{7,40}$/.test(id) ? at(`/commits/${id}`) : null;
+  if (!/^\d+$/.test(id)) return null;
+  let f: RegExpExecArray | null;
+  if ((f = /^issuecomment-(\d+)$/.exec(hash))) return at(`/issues/comments/${f[1]}`);
+  if (kind === 'issues') return hash === '' ? at(`/issues/${id}`) : null;
+  if ((f = /^pullrequestreview-(\d+)$/.exec(hash))) return at(`/pulls/${id}/reviews/${f[1]}`);
+  if ((f = /^discussion_r(\d+)$/.exec(hash))) return at(`/pulls/comments/${f[1]}`);
+  return hash === '' ? at(`/pulls/${id}`) : null;
 }
 const pulls = (path: string) => `/repos/${path}/pulls`;
 const issues = (path: string, n: number) => `/repos/${path}/issues/${n}/comments`;
@@ -37,6 +67,7 @@ const ADAPTERS: Record<PrForge, Adapter> = {
     publicHost: new URL(publicOrigin).host, api: (origin) => origin === publicOrigin ? publicApi : `${origin}/api/v3`,
     graphql: (origin) => origin === publicOrigin ? `${publicApi}/graphql` : `${origin}/api/graphql`,
     prs: pulls, comments: issues, openBody: pullBody, url: 'html_url', head: (p) => pullHead(p), openQuery: 'state=open', cli: true,
+    attest: { commit: (path, sha) => `/repos/${path}/commits/${sha}`, evidence: githubEvidence, witness: (path, sha) => `/repos/${path}/commits/${sha}/comments` },
     protectedRefusal: (s) => /GH006/i.test(s) || (/GH013/i.test(s) && !/secret|push protection/i.test(s) && /pull request|update rule|required status check/i.test(s)),
   },
   gitlab: {
@@ -99,6 +130,11 @@ export const publicHost = (forge: PrForge): string => ADAPTERS[forge].publicHost
 export const protectedRefusal = (forge: PrForge, detail: string): boolean => ADAPTERS[forge].protectedRefusal(detail);
 export const legacyProtectedRefusal = (detail: string): boolean => PR_FORGES.some((f) => protectedRefusal(f, detail));
 export const inferForge = (host: string | null): PrForge | null => PR_FORGES.find((f) => publicHost(f) === host) ?? null;
+/** R-BTN-82: whether a repository's forge adapter posts and reads back a ticket close's output
+ *  witness (a comment on the close commit, by a pusher). */
+export const witnessed = (repo: ForgeRepo | null): boolean => repo != null && ADAPTERS[repo.forge].attest != null;
+/** The REST object a forge's adapter reads for an evidence URL, or null for a form it does not read. */
+export const evidenceApiPath = (forge: PrForge, url: URL): { repo: string; api: string } | null => ADAPTERS[forge].attest?.evidence(url) ?? null;
 
 export function prRepo(r: ForgeRegistration): ForgeRepo | null {
   if (!hasPrs(r.forge)) return null;
@@ -202,7 +238,63 @@ export function forgeClient(repo: ForgeRepo, opts: ForgeOptions = {}, reader?: {
       };
       return readRestFacts(repo, read, reader.facts, adapter, api, adapter.pageSizeKey, canPush);
     },
+    async witness(sha, body) {
+      const attest = adapter.attest;
+      if (!attest || !SHA.test(sha)) return false;
+      // The forge authenticates the commenter: the comment vouches for this commit alone.
+      if (cli) cli(['api', '--hostname', new URL(repo.webBase).host, '-X', 'POST', attest.witness(path, sha).slice(1), '-f', `body=${body}`]);
+      else await api.request(attest.witness(path, sha), { body });
+      return true;
+    },
+    evidence(ref) {
+      const attest = adapter.attest;
+      if (!attest || !given) return null;
+      let at: string;
+      if (SHA.test(ref)) at = attest.commit(path, ref);
+      else {
+        let url: URL;
+        try { url = new URL(ref); } catch { return null; }
+        const read = url.protocol === 'https:' && url.origin === origin ? attest.evidence(url) : null;
+        if (!read || read.repo.toLowerCase() !== path.toLowerCase()) return null;
+        at = read.api;
+      }
+      return async () => {
+        try {
+          return (await api.response(at)).status;
+        } catch {
+          return null;
+        }
+      };
+    },
     protectedRefusal: adapter.protectedRefusal,
+  };
+}
+
+const SHA = /^[0-9a-f]{40}$/;
+
+/** R-BTN-10: the forge reads the sync's `std:git.evidence@1` check makes, each through the adapter
+ *  of the forge the evidence is on — a commit at the registered home's forge, a URL at the forge
+ *  whose host it names (an adapter's public host, or a registered repository's). Null for
+ *  evidence no adapter may be asked about (no credential, an unknown host, a form it does not
+ *  read), so a credential is never sent anywhere but a known host's API. */
+export function evidenceReader(home: ForgeRepo | null, known: readonly ForgeRepo[], opts: ForgeOptions = {}): (evidence: string) => (() => Promise<number | null>) | null {
+  const hosts = new Map<string, PrForge>();
+  for (const f of PR_FORGES) if (ADAPTERS[f].attest) hosts.set(ADAPTERS[f].publicHost, f);
+  for (const r of [...(home ? [home] : []), ...known]) if (ADAPTERS[r.forge].attest) hosts.set(new URL(r.webBase).host, r.forge);
+  const clients = new Map<string, ForgeClient>();
+  const client = (r: ForgeRepo): ForgeClient => {
+    const key = `${r.forge}\0${r.webBase.toLowerCase()}`;
+    if (!clients.has(key)) clients.set(key, forgeClient(r, opts));
+    return clients.get(key)!;
+  };
+  return (evidence) => {
+    if (SHA.test(evidence)) return home ? client(home).evidence(evidence) : null;
+    let url: URL;
+    try { url = new URL(evidence); } catch { return null; }
+    const forge = url.protocol === 'https:' ? hosts.get(url.host) : undefined;
+    const at = forge ? ADAPTERS[forge].attest!.evidence(url) : null;
+    if (!forge || !at || !isForgePath(forge, at.repo)) return null;
+    return client({ forge, path: at.repo, webBase: `${url.origin}/${at.repo}` }).evidence(evidence);
   };
 }
 

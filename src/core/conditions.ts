@@ -12,7 +12,7 @@
 import { BatonError } from './http';
 import { logEvent } from './db';
 import { checkConditionReport, repositoryOf, type ConditionReport } from './validate';
-import { dispositionOf, isCoreOnly, type ConditionDeclaration } from './conditionTypes';
+import { dispositionOf, type ConditionDeclaration } from './conditionTypes';
 import type { Graph } from './graph';
 import type { History } from './history';
 import type { Store } from './ports';
@@ -41,7 +41,7 @@ export interface Ctx {
 interface ConditionRow {
   id: number;
   repository_id: string;
-  ticket_id: string;
+  ticket_id: string | null;
   run_id: string | null;
   leg: string | null;
   type: string;
@@ -58,7 +58,7 @@ interface ConditionRow {
 /** An entry of the Needs-you list and the conditions route. */
 export interface ConditionEntry {
   condition_id: number;
-  ticket_id: string;
+  ticket_id: string | null;
   leg: string | null;
   run_id: string | null;
   type: string;
@@ -168,7 +168,6 @@ export class Conditions {
     if (!run?.run_id) throw new BatonError('invalid-params', 'the claim is running no leg: a condition is raised from a run');
     // R-BTN-160: Baton's own vocabulary decides the disposition — the standard table, else the
     // course's declaration at the registry's file; core reads no course meaning (R-BTN-50).
-    if (isCoreOnly(b.type)) throw new BatonError('invalid-params', `${b.type} is core's alone: a leg raises no baton condition (R-BTN-160)`);
     const g = c.course_id ? this.c.graph(repo, c.course_id) : null;
     const declared: Map<string, ConditionDeclaration> = g?.conditionTypes ?? new Map();
     const disposition = dispositionOf(b.type, declared);
@@ -210,10 +209,15 @@ export class Conditions {
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       id, repo, c.ticket_id, claimId, run.run_id, run.leg, b.type, disposition, b.severity, url, JSON.stringify(restarts), b.default ?? null, now,
       closesAtRaise ? 'recorded' : 'open', closesAtRaise ? now : null, closesAtRaise ? 'raised' : null);
-    const detail = { type: b.type, disposition, ...(b.severity !== 'normal' ? { severity: b.severity } : {}), ...(url && !isInteraction(b.type) ? { url } : {}) };
+    const detail = { condition_id: id, type: b.type, disposition, ...(b.severity !== 'normal' ? { severity: b.severity } : {}) };
+    // '/' is outside the client activity-id grammar, so a runner cannot preempt this row.
+    this.exec(`INSERT INTO activities (runner_id, id, claim_id, run_id, kind, label, source, started_at, ended_at, outcome, received_at, detail_json)
+               VALUES (?, ?, ?, ?, 'condition', ?, 'baton', ?, ?, 'succeeded', ?, ?)`,
+      runnerId, `condition/${id}`, claimId, run.run_id, b.type, now, now, now, JSON.stringify(detail));
+    const recorded = { ...detail, ...(url && !isInteraction(b.type) ? { url } : {}) };
     logEvent(this.c.store, now, 'condition', `runner:${runnerId}`,
-      { ticket: c.ticket_id, leg: run.leg, run_id: run.run_id, ...detail }, c.ticket_id, claimId, repo);
-    this.c.history.record(c.ticket_id, { kind: 'condition', claim_id: claimId, leg: run.leg, run_id: run.run_id, detail });
+      { ...recorded, ticket: c.ticket_id, leg: run.leg, run_id: run.run_id }, c.ticket_id, claimId, repo);
+    this.c.history.record(c.ticket_id, { kind: 'condition', claim_id: claimId, leg: run.leg, run_id: run.run_id, detail: recorded });
     return { ok: true, condition_id: id, disposition };
   }
 
@@ -250,7 +254,7 @@ export class Conditions {
    */
   retired(repository: string): void {
     const now = this.c.now();
-    const open = this.rows<{ id: number; ticket_id: string; claim_id: number | null; type: string }>(
+    const open = this.rows<{ id: number; ticket_id: string | null; claim_id: number | null; type: string }>(
       `SELECT id, ticket_id, claim_id, type FROM conditions WHERE repository_id = ? AND outcome = 'open'`, repository);
     if (!open.length) return;
     this.exec(`UPDATE conditions SET outcome = 'closed', closed_at = ?, closed_how = 'retired'

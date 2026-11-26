@@ -10,8 +10,9 @@ export type Row = Record<string, SqlValue>;
 export interface Cursor<T> {
   toArray(): T[];
   one(): T;
-  /** The rows a writing statement changed, once drained (the Durable Object's `rowsWritten`);
-   *  absent where the host cannot say, which counts as a change (B-237's state version). */
+  /** Host write count once the cursor is drained. Durable Object SQLite counts index writes;
+   *  Node SQLite counts directly changed table rows. Absent where the host cannot say, which
+   *  counts as a change (B-237's state version). */
   readonly rowsWritten?: number;
 }
 

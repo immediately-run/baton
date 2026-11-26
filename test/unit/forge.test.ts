@@ -174,7 +174,7 @@ describe('opening the request’s PR with the caller’s forge credential', () =
 });
 
 // S-BTN-231, S-BTN-106: each wire format serves the same course contract.
-it.each(['github', 'gitlab', 'gitea'] as const)('%s client opens, lists, comments, reads facts, and recognizes protection', async (forge) => {
+it.each(['github', 'gitlab', 'gitea'] as const)('%s client opens, lists, comments, reads facts, recognizes protection, and witnesses and reads evidence where its adapter does', async (forge) => {
   const path = forge === 'gitlab' ? 'o/group/r' : 'o/r';
   const host = `${forge}.example`;
   const base = `https://${host}/${path}`;
@@ -191,6 +191,7 @@ it.each(['github', 'gitlab', 'gitea'] as const)('%s client opens, lists, comment
     expect(init?.redirect).toBe('error');
     expect(new Headers(init?.headers).get('Authorization')).toBe(forge === 'gitea' ? 'token fake' : 'Bearer fake');
     if (url.pathname.endsWith(end)) return Response.json(init?.method === 'POST' ? pr : [pr]);
+    if (url.pathname.endsWith(`/repos/${path}/commits/${sha}`) && init?.method !== 'POST') return new Response(null, { status: 200 });
     if (init?.method === 'POST') return Response.json(gl ? { id: 1_000_000_000 } : { html_url: `${page}#issuecomment-2` });
     throw new Error(`unexpected request ${url}`);
   });
@@ -205,7 +206,15 @@ it.each(['github', 'gitlab', 'gitea'] as const)('%s client opens, lists, comment
     expect(await client.facts({ tickets: [] })).toEqual([{ number: 9, head: branch, repository: path, state: 'open', url: page, sameRepository: true, ...(forge === 'github' ? {} : { headOid: sha }), pushedAt: 0, checks: [], reviews: [] }]);
     expect(client.protectedRefusal(gl ? 'not allowed to push code to protected branches' : forge === 'gitea' ? 'not allowed to push to protected branch' : 'GH006')).toBe(true);
     expect(client.protectedRefusal('access denied')).toBe(false);
-    expect(fetchImpl).toHaveBeenCalledTimes(4);
+    // R-BTN-82 / R-BTN-10: the attestations' reads are the adapter's — GitHub's alone today.
+    const attests = forge === 'github';
+    expect(await client.witness(sha, 'baton: ticket close outputs')).toBe(attests);
+    const read = client.evidence(sha);
+    expect(read != null).toBe(attests);
+    if (read) expect(await read()).toBe(200);
+    expect(client.evidence(`${page}#issuecomment-2`) != null).toBe(attests);
+    expect(client.evidence(`https://elsewhere.example/${path}/pull/9`)).toBeNull();
+    expect(fetchImpl).toHaveBeenCalledTimes(attests ? 6 : 4);
   } finally {
     vi.unstubAllGlobals();
   }

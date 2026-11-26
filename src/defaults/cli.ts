@@ -13,7 +13,6 @@ export { readForgeFacts as githubFacts } from './forges/facts';
 
 import { git, gitText } from './git.mjs';
 import { outputAttestation, syncAttestationBatch } from './output-evidence';
-import { hostOf } from './forges/remote';
 import type { PostedAttestation } from '../core/board';
 import { execFileSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -22,7 +21,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { BatonApi, BatonRefusal, envAuth, type Auth, type Transport } from '../runner/api';
-import { HARNESS_AGENTS, type Harness } from '../runner/harness';
+import { HARNESS_ADAPTERS, selectHarness } from '../runner/harness';
 import { syncOnce } from '../shared/batonSync.mjs';
 import { GIT_NONINTERACTIVE_ENV } from '../client/git-env.mjs';
 import { DEFAULT_URL } from '../client/config.mjs';
@@ -31,7 +30,9 @@ import { DEFAULT_BRANCH_PATTERN, DEFAULT_CREATE_PR_REVIEW_ROUNDS, matchPatterns,
 import { readHomePrCommits } from './pr-markers';
 import { COMMENTING_LEGS } from './pr-close';
 import { DEFAULT_FORGE, FORGE_SHAPES, PR_URL as PR_URL_RE } from '../core/forges';
-import { forgeApi, publicHost, registration, tokenOf } from './forges';
+import { evidenceReader, prRepo, registration, witnessed } from './forges';
+import { fromRemote } from './forges/targets';
+import type { ForgeRepo } from './forges/types';
 import { GIT_SHA } from '../core/validate';
 import { parseSource, printSource } from './course-source';
 import { stampMarkdownVersions } from './ticket-versions';
@@ -48,7 +49,7 @@ import { nodeKeygen } from '../shared/commitSign.mjs';
 import type { PostedControl } from '../core/board';
 import { readTicketSettings } from './tickets-config';
 import { ownRepositoryId, remoteSlug } from './remote-slug';
-import { attestEvidence, type EvidenceAttestation, type UnconfirmedEnd } from './evidence';
+import { attestEvidence, type EvidenceAttestation, type EvidencePorts, type UnconfirmedEnd } from './evidence';
 import { PAGE_NAME, ticketsPage } from './tickets-page';
 import { dibberConfig } from './dibber';
 
@@ -402,14 +403,23 @@ async function readBoard(root: string, batonJson: BatonJson, args: SyncArgs, log
   // checkout git cannot answer for has no close history, and its frontmatter state stands.
   const origin = originSlug != null ? gitText(root, 'remote', 'get-url', 'origin') : null;
   const plain = record?.home ? FORGE_SHAPES[record.home.forge].pr === null : origin != null && plainGitRemote(origin);
-  const githubHome = !plain && origin != null && hostOf(origin) === publicHost(DEFAULT_FORGE);
+  // R-BTN-82: a forge home's close outputs count only with a pusher's witness on the close
+  // commit, read by the home's forge adapter — on a forge whose adapter reads none, they do not.
+  let witnessHome = false;
+  if (!plain && origin != null) {
+    try {
+      witnessHome = witnessed(record?.home ? prRepo(record.home) : fromRemote(origin));
+    } catch {
+      witnessHome = false;
+    }
+  }
   const closeCommits = closesByTicket((args) => gitText(root, ...args));
   for (const t of result.tickets) {
     if (closedIds.has(t.id) || t.path == null) continue; // a pathless ticket (a tracker's) has no file to close on
     const commits = closeCommits.get(t.id) ?? [];
     const fm = existsSync(join(root, t.path)) ? parseFrontmatter(readFileSync(join(root, t.path), 'utf8')) : null;
     if (!commits.length && fm?.station === undefined) continue;
-    if (plain || githubHome) for (const { sha, leg } of commits) {
+    if (plain || witnessHome) for (const { sha, leg } of commits) {
       const a = outputAttestation(gitText(root, 'show', '-s', '--format=%b', sha), sha);
       if (a?.ticket === t.id && (a.value as { leg: string }).leg === leg) (plain ? outputEvidence : ticketOutputEvidence).push(a);
     }
@@ -813,7 +823,7 @@ export async function syncMain(args: SyncArgs): Promise<number> {
         const answer = await api.dependencies([...ids]);
         return (Array.isArray(answer.dependencies) ? answer.dependencies : []).map((d) => ({ ticket: String(d.ticket), done: d.done === true }));
       });
-      evidence = unconfirmed.length ? await attestEvidence(unconfirmed, evidencePorts(root, record?.code_repos ?? [], log)) : [];
+      evidence = unconfirmed.length ? await attestEvidence(unconfirmed, evidencePorts(root, record, log)) : [];
       return gitText(root, 'rev-parse', 'HEAD');
     },
     readHead: () => asResult(() => api.head()),
@@ -900,21 +910,12 @@ function syncKeyAuth(file: string): Auth {
   return auth;
 }
 
-/** R-BTN-10: what the evidence check reads through — the home checkout's git, and the REST API
- *  of the GitHub hosts this repository is on (github.com, its home's host, its `code_repos`
- *  entries'), with the sync's `GITHUB_TOKEN`. Without a token only commits are looked at. */
-function evidencePorts(root: string, codeRepos: readonly CodeRepoEntry[], log: (l: string) => void): Parameters<typeof attestEvidence>[1] {
-  const token = process.env[tokenOf(DEFAULT_FORGE)];
-  const slug = remoteSlug(root);
-  let originHost: string | null = null;
-  try {
-    const u = gitText(root, 'remote', 'get-url', 'origin');
-    originHost = /^https:\/\//.test(u) ? new URL(u).host : (/^[^@]+@([^:]+):/.exec(u)?.[1] ?? null);
-  } catch {
-    originHost = null;
-  }
-  const hosts = new Set<string>([publicHost(DEFAULT_FORGE), ...codeRepos.filter((e) => e.forge === DEFAULT_FORGE).map((e) => e.host)]);
-  const homeHost = originHost != null && hosts.has(originHost) ? originHost : null;
+/** R-BTN-10: what the evidence check reads through — the home checkout's git, and the forge
+ *  adapters (`evidenceReader`): the registered home's for a commit, and for a URL the adapter of
+ *  the host it names, among the adapters' public hosts and the registered repositories' (the
+ *  home and its `code_repos` entries), each with the sync's own forge credential. Without one
+ *  only commits are looked at. */
+function evidencePorts(root: string, record: BatonRecord | undefined, log: (l: string) => void): EvidencePorts {
   const hasObject = (sha: string) => {
     try {
       git(root, ['cat-file', '-e', `${sha}^{commit}`], { stdio: 'ignore' });
@@ -923,6 +924,21 @@ function evidencePorts(root: string, codeRepos: readonly CodeRepoEntry[], log: (
       return false;
     }
   };
+  let home: ForgeRepo | null = null;
+  try {
+    home = record?.home ? prRepo(record.home) : fromRemote(gitText(root, 'remote', 'get-url', 'origin'));
+  } catch {
+    home = null; // no origin, or a registration no adapter reads: commits only
+  }
+  const known: ForgeRepo[] = [];
+  for (const e of record?.code_repos ?? []) {
+    try {
+      const r = prRepo({ forge: e.forge, path: e.path, webBase: e.web_base });
+      if (r) known.push(r);
+    } catch {
+      // an entry no adapter can address is not a host the credential goes to
+    }
+  }
   return {
     hasCommit: (sha) => {
       if (hasObject(sha)) return true;
@@ -933,16 +949,7 @@ function evidencePorts(root: string, codeRepos: readonly CodeRepoEntry[], log: (
       }
       return hasObject(sha);
     },
-    home: token && slug && homeHost ? { host: homeHost, slug } : null,
-    hosts: token ? hosts : new Set(),
-    get: async (host, path) => {
-      try {
-        const res = await fetch(`${forgeApi(DEFAULT_FORGE, host)}${path}`, { headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json', 'User-Agent': 'baton-sync' }, redirect: 'error', signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
-        return res.status;
-      } catch {
-        return null;
-      }
-    },
+    forgeRead: evidenceReader(home, known),
     log,
   };
 }
@@ -1044,14 +1051,13 @@ export function stubSource(b: BuiltIn, course: string, leg: string): string {
   if (process.env.BATON_VERBOSE) process.stderr.write('baton: ' + ${JSON.stringify(`${b.id}/${leg}`)} + ' ticket ' + ctx.ticket.id + ': the forge verified an open PR on a branch matching ' + patterns.join(' or ') + '\\n');
 ` : '';
   return `import { execFile, execFileSync, spawn } from 'node:child_process';
-import { createHash } from 'node:crypto';
 import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { homedir, tmpdir } from 'node:os';
-import { basename, join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { splitWords } from ${JSON.stringify(source('agent-words.ts'))};
 import { readOnlyWorkspace } from ${JSON.stringify(source('read-only-workspace.ts'))};
-import { readOnlyHarness, readOnlyVersionSupported } from ${JSON.stringify(join(packageRoot(), 'src', 'runner', 'harness.ts'))};
+import { builtinAgentActivityPaths, readOnlyHarness, readOnlyVersionSupported } from ${JSON.stringify(join(packageRoot(), 'src', 'runner', 'harness.ts'))};
 import { dibberWords } from ${JSON.stringify(source('dibber.ts'))};
 // B-94: every git and gh call this stub makes — the snapshot probes, the override and
 // instructions reads, the forge verification — is bounded and non-interactive, the same bound
@@ -1286,22 +1292,12 @@ ${pushes ? `  // B-231: run from the gate's red (pr-open, fixed), this leg must 
   // the agent's activity.
   const startedAt = Date.now();
   const wrapperLog = join(ctx.checkout, '.baton', 'logs', ctx.ticket.id + '-${leg}.log');
-  const agentBin = basename(command);
-  const storePaths = [];
-  if (agentBin === 'opencode' || agentBin === 'claude') {
-    const dataHome = process.env.XDG_DATA_HOME && process.env.XDG_DATA_HOME !== '' ? process.env.XDG_DATA_HOME : join(homedir(), '.local', 'share');
-    const dashed = cwd.split('/').join('-');
-    if (agentBin === 'opencode') {
-      const root = join(dataHome, 'opencode');
-      storePaths.push(join(root, 'opencode.db'), join(root, 'opencode.db-wal'), join(root, 'opencode.db-shm'), join(root, 'project', dashed));
-      const key = createHash('sha1').update(cwd).digest('hex');
-      let instances = [];
-      try { instances = readdirSync(join(root, 'snapshot')); } catch { /* none yet */ }
-      for (const i of instances) storePaths.push(join(root, 'snapshot', i, key));
-    } else {
-      storePaths.push(join(process.env.CLAUDE_CONFIG_DIR && process.env.CLAUDE_CONFIG_DIR !== '' ? process.env.CLAUDE_CONFIG_DIR : join(homedir(), '.claude'), 'projects', dashed));
-    }
-  }
+  // A runtime adapter can supply paths as data, but only for the command that actually won.
+  // Match the entire command, not the executable: unrelated agents can share 'node', etc.
+  const activity = ctx.agent_activity;
+  const storePaths = typeof activity?.command === 'string' && activity.command.trim() === settingsCommand.trim()
+    && Array.isArray(activity.paths) && activity.paths.every((path) => typeof path === 'string')
+    ? activity.paths : builtinAgentActivityPaths(command, cwd);
   // The agent's last output (2026-10-24; B-256): the last lines of both streams, bounded — what a
   // failed leg's error carries, so the runner's log alone can diagnose it, whether the agent
   // exited non-zero or exited 0 and the checks after it failed.
@@ -1772,7 +1768,7 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
   let eject: 'tickets' | 'stations' | null = null;
   let pin: string | null = null;
   let force = false;
-  let agent: Harness = 'opencode';
+  let agent = selectHarness('opencode')!;
   let agentNamed = false;
   let agentCommand: string | null = null;
   const overrides: string[] = [];
@@ -1789,8 +1785,9 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
     else if (a === '--override') overrides.push(value());
     else if (a === '--agent') {
       const v = value();
-      if (v !== 'opencode' && v !== 'claude-code') throw new Error('--agent: opencode or claude-code');
-      agent = v;
+      const adapter = selectHarness(v);
+      if (!adapter) throw new Error(`--agent: ${HARNESS_ADAPTERS.map((entry) => entry.name).join(' or ')}`);
+      agent = adapter;
       agentNamed = true;
     } else if (a === '--agent-command') agentCommand = value();
     else if (a === '--eject') {
@@ -1924,7 +1921,7 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
     // is replaced by the default harness's command, and any other named command — the
     // repository's own — is kept.
     const was = typeof existing.agent_command === 'string' ? existing.agent_command : '';
-    const now = agentCommand ?? (agentNamed || was === 'echo' ? HARNESS_AGENTS[agent] : null);
+    const now = agentCommand ?? (agentNamed || was === 'echo' ? agent.agentCommand : null);
     if (now != null && now !== was) settings.agent_command = now;
     commandMoved = now != null && now !== was;
     if (!listed || force || moved.length || commandMoved) {
@@ -1937,7 +1934,7 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
     // B-83: a fresh repository names a real agent from the start — the chosen harness's command,
     // printed below for the unfamiliar. The bare `echo` stub is written only when named
     // explicitly, never by default.
-    const chosen = agentCommand ?? HARNESS_AGENTS[agent];
+    const chosen = agentCommand ?? agent.agentCommand;
     if (chosen === 'echo' && agentCommand !== 'echo') {
       throw new Error('baton repo init refuses to write the no-op agent_command "echo" — pass --agent opencode or --agent claude-code for a real command, or --agent-command echo to name the stub explicitly');
     }

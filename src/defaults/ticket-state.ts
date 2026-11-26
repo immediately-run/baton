@@ -9,8 +9,8 @@
 // presence of this leg's heading: trust nothing the agent touched, check everything the
 // machine reads (the owner's decision, 2026-10-22). Course code in the CLI, never core (§2b).
 import { outputLine, TICKET_OUTPUT_WITNESS } from './output-evidence';
-import { hostOf } from './forge';
-import { slugOfUrl } from './remote-slug';
+import { forgeClient } from './forges';
+import { fromRemote, targetOf, type RegisteredTargets } from './forges/targets';
 import { execFileSync } from 'node:child_process';
 import { GIT_NONINTERACTIVE_ENV } from '../client/git-env.mjs';
 import { git } from './git.mjs';
@@ -305,7 +305,7 @@ export function checkMachine(state: MachineState): string[] {
  * Returns the pushed commit's sha, the close's evidence. Every call is bounded
  * (`CLOSE_TIMEOUT_MS`), so a remote that stops answering fails the leg in seconds. */
 export async function closeTicket(
-  ctx: { checkout: string; ticket: { id: string; path?: string | null; home?: string | null }; leg: string; run_id?: string; claim?: { nonce?: string }; default_branch?: string | null; heading?: boolean },
+  ctx: RegisteredTargets & { checkout: string; ticket: { id: string; path?: string | null; home?: string | null }; leg: string; run_id?: string; claim?: { nonce?: string }; default_branch?: string | null; heading?: boolean },
   result: { reached?: string; next?: string | null; outputs?: unknown },
   run: Exec = exec,
 ): Promise<string> {
@@ -316,8 +316,9 @@ export async function closeTicket(
   const state: MachineState = { station: result.reached, next_leg: result.next ?? null, claim: ctx.claim?.nonce ?? null };
   const branch = ticketsBranch(ctx.checkout, ctx.default_branch ?? null, run);
   const git = (args: string[], opts: { env?: Record<string, string>; input?: string } = {}): string => run('git', args, ctx.checkout, opts);
-  const origin = marker ? git(['remote', 'get-url', 'origin']) : null;
-  const githubRepo = origin && hostOf(origin) === 'github.com' ? slugOfUrl(origin) : null;
+  // R-BTN-82: the repository whose forge adapter witnesses the outputs — the registered home the
+  // claim named, or (an older claim naming none) the origin's public forge; plain git, none.
+  const witnessTo = marker ? (ctx.forge_home ? targetOf(ctx) : fromRemote(git(['remote', 'get-url', 'origin']))) : null;
   const ref = `origin/${branch}`;
   const index = tmpIndex(ctx.checkout, run);
   const env = { GIT_INDEX_FILE: index };
@@ -368,10 +369,10 @@ export async function closeTicket(
         if (!movedOnRemote(e) || tries >= PUSH_TRIES) throw e;
         continue;
       }
-      // The commit API authenticates the commenter. The comment only vouches for this SHA;
-      // outputs (possibly larger than a GitHub comment) stay in the unchanged commit message.
-      if (githubRepo) run('gh', ['api', '--hostname', 'github.com', '-X', 'POST',
-        `repos/${githubRepo}/commits/${commit}/comments`, '-f', `body=${TICKET_OUTPUT_WITNESS}`], ctx.checkout);
+      // The forge authenticates the commenter. The comment only vouches for this SHA; outputs
+      // (possibly larger than a forge comment) stay in the unchanged commit message. A forge
+      // whose adapter reads no witness gets none.
+      if (witnessTo) await forgeClient(witnessTo, { run, checkout: ctx.checkout }).witness(commit, TICKET_OUTPUT_WITNESS);
       return commit;
     }
   } finally {
