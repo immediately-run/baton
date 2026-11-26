@@ -11,7 +11,7 @@ import { gitBuffer } from './git.mjs';
 import { readOnlyWorkspace } from './read-only-workspace';
 import { splitWords } from './agent-words';
 import { lastLine, requireAnswer } from './answer';
-import { DEFAULT_BRANCH_PATTERN, DEFAULT_CREATE_PR_REVIEW_ROUNDS, REVIEW_DEFAULTS_PATH, branchMatches, matchPatterns, readReviewDefault } from './course-pr';
+import { DEFAULT_BRANCH_PATTERN, REVIEW_DEFAULTS_PATH, branchMatches, matchPatterns, readReviewDefault } from './course-pr';
 import { archiveClose } from './pr-archive';
 import { COMMENTING_LEGS, PR_URL, prClose, testsClose, type CloseCtx } from './pr-close';
 import { deliveredDetail, findDelivered, reconcileAnswer, ticketRepositories, verifyDelivered, verifyPrOpen, verifyPrsMerged, type PrExec } from './pr-verify';
@@ -201,7 +201,7 @@ async function runAgent(ctx: LegCtx, { course, leg, names, spec, readsOnly, ship
       : JSON.parse(show(ctx.checkout, graphSha, `.baton/courses/${course}/course.json`)));
     const limits = graph.legs;
     reviewLimit = (limits instanceof Map ? limits.get('review')?.maxRuns : limits?.review?.max_runs)
-      ?? (ctx.sourced_course === true ? DEFAULT_CREATE_PR_REVIEW_ROUNDS : readReviewDefault(show(ctx.checkout, graphSha, REVIEW_DEFAULTS_PATH)));
+      ?? (ctx.sourced_course === true ? undefined : readReviewDefault(show(ctx.checkout, graphSha, REVIEW_DEFAULTS_PATH)));
   }
   const rel = `.baton/courses/${course}/legs/${leg}.md`;
   // B-139: the runner's leg process hands a sourced run its instructions as a file; a sourced

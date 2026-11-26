@@ -484,7 +484,6 @@ function requireAnswer(out, ask, leg, opts = {}) {
 // src/defaults/course-pr.ts
 var DEFAULT_BRANCH_PATTERN = "claude/{ticket}-*";
 var REVIEW_DEFAULTS_PATH = ".baton/courses/create-pr/review-defaults.json";
-var DEFAULT_CREATE_PR_REVIEW_ROUNDS = 3;
 function readReviewDefault(text) {
   const rounds = JSON.parse(text).rounds;
   if (typeof rounds !== "number" || !Number.isSafeInteger(rounds) || rounds < 1) {
@@ -1655,7 +1654,7 @@ async function runAgent(ctx, { course, leg, names, spec, readsOnly: readsOnly2, 
     const graphSha = ctx.replay?.against ?? sha;
     const graph = ctx.graph ?? (ctx.sourced_course === true ? { legs: shipped.reviewMaxRuns != null ? { review: { max_runs: shipped.reviewMaxRuns } } : {} } : JSON.parse(show(ctx.checkout, graphSha, `.baton/courses/${course}/course.json`)));
     const limits2 = graph.legs;
-    reviewLimit = (limits2 instanceof Map ? limits2.get("review")?.maxRuns : limits2?.review?.max_runs) ?? (ctx.sourced_course === true ? DEFAULT_CREATE_PR_REVIEW_ROUNDS : readReviewDefault(show(ctx.checkout, graphSha, REVIEW_DEFAULTS_PATH)));
+    reviewLimit = (limits2 instanceof Map ? limits2.get("review")?.maxRuns : limits2?.review?.max_runs) ?? (ctx.sourced_course === true ? void 0 : readReviewDefault(show(ctx.checkout, graphSha, REVIEW_DEFAULTS_PATH)));
   }
   const rel = `.baton/courses/${course}/legs/${leg}.md`;
   let text = typeof ctx.instructions === "string" && ctx.instructions !== "" ? readFileSync5(ctx.instructions, "utf8") : hasPath(ctx.checkout, courseSha, rel) ? show(ctx.checkout, courseSha, rel) : ctx.sourced_course === true ? shipped.instructions : null;
