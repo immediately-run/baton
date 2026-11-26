@@ -12,17 +12,27 @@
 // session's claim is refused, since it carries BATON_PARENT, and leg sessions register no
 // runner of their own; an `unblocked` message is acknowledged. Node only: it spawns the legs'
 // child processes and runs git.
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { runnerApi, testRunner, until } from '../lib/runnerRig';
+import { GitRepo } from '../lib/gitRepo';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { build } from 'esbuild';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { BatonApi, BatonRefusal } from '../../src/runner/api';
 import { Runner, legActivity, newestWrite } from '../../src/runner/runner';
+import { runMain } from '../../src/runner/main';
+import { HARNESS_ADAPTERS, type HarnessAdapter } from '../../src/runner/harness';
+import { stubSource } from '../../src/defaults/stubs';
+import { builtIn } from '../../src/defaults/courses';
 import { legNeeds, readHead } from '../../src/runner/home';
 import { capabilitiesOf } from '../../src/shared/vocabulary.mjs';
 import { call as hostCall } from '#host';
-import { course, cutover, evidenceFound, observe, ORIGIN, ownerCall, placed, rows, setClock, syncCall, tick, ticket, TOKENS } from '../helpers';
+import {
+  course, cutover, evidenceFound, observe, ORIGIN, ownerCall, placed, rows, setClock, syncCall, tick, ticket, TOKENS, clearRunnerCapabilities,
+  setAllRunnersReaped, seedClaim, seedMessage, seedRunnerCapability,
+} from '../helpers';
 import relay from '../fixtures/courses/relay/course.json';
 
 const T0 = Date.parse('2026-10-16T12:00:00Z');
@@ -30,16 +40,16 @@ const T0 = Date.parse('2026-10-16T12:00:00Z');
 /** One leg script: `run` is the body given; `close` commits its closing record and returns the
  * commit (the position is in git before it is reported, R-BTN-83); `handoff` records its call.
  * Every line the test asserts on lands in `<home>/.baton/evidence.jsonl`. */
-function legFile(run: string, defaultExport = false): string {
+function legFile(run: string | null, defaultExport = false): string {
   return `import { appendFileSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 const at = (ctx, name) => [ctx.checkout, '.baton', name].join('/');
 const ev = (ctx, line) => appendFileSync(at(ctx, 'evidence.jsonl'), line + '\\n');
 const out = (ctx, o) => { const f = at(ctx, 'evidence.jsonl'); const was = existsSync(f) ? readFileSync(f, 'utf8') : ''; writeFileSync(f, was + JSON.stringify(o) + '\\n'); };
 const git = (ctx, ...a) => execFileSync('git', ['-C', ctx.checkout, ...a], { encoding: 'utf8' }).trim();
-${defaultExport ? 'export default' : 'export'} async function run(ctx) {
+${run === null ? '' : `${defaultExport ? 'export default' : 'export'} async function run(ctx) {
 ${run}
-}
+}`}
 export async function close(ctx, result) {
   appendFileSync(at(ctx, 'closes.jsonl'), JSON.stringify({ leg: ctx.leg, ...(result && result.reached ? { reached: result.reached } : {}), claim: ctx.claim.nonce }) + '\\n');
   git(ctx, 'add', '.baton/closes.jsonl');
@@ -56,33 +66,20 @@ export async function handoff(ctx) {
 
 /** The home repository: a real git checkout whose `.baton/` the runner reads at the claim's
  * snapshot, and whose board posts carry the real head sha (R-BTN-34's fetch never fires). */
-class Home {
-  readonly dir: string;
+class RelayCourse extends GitRepo {
   head: string | null = null;
   constructor() {
-    this.dir = mkdtempSync(join(tmpdir(), 'baton-home-'));
-    const g = (...a: string[]) => execFileSync('git', ['-C', this.dir, ...a], { encoding: 'utf8', stdio: 'ignore' });
-    g('init', '-q', '-b', 'main');
-    g('config', 'user.email', 'relay@test');
-    g('config', 'user.name', 'relay test');
+    super('baton-41-');
     this.write('.baton/courses/relay/course.json', `${JSON.stringify(relay, null, 2)}\n`);
     this.write('.baton/baton.json', `${JSON.stringify({ course: 'relay', skills_version: 3 }, null, 2)}\n`);
   }
-  write(path: string, text: string): void {
-    const file = join(this.dir, path);
-    mkdirSync(dirname(file), { recursive: true });
-    writeFileSync(file, text);
-  }
+
   leg(name: string, run: string, defaultExport = false): void {
     this.write(`.baton/courses/relay/legs/${name}.mjs`, legFile(run, defaultExport));
   }
-  sha(): string {
-    return execFileSync('git', ['-C', this.dir, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
-  }
+
   commit(): string {
-    execFileSync('git', ['-C', this.dir, 'add', '.baton'], { stdio: 'ignore' });
-    execFileSync('git', ['-C', this.dir, 'commit', '--no-gpg-sign', '-q', '-m', 'legs'], { stdio: 'ignore' });
-    return this.sha();
+    return super.commit('legs', ['.baton']);
   }
   async post(stations: Record<string, unknown>, tickets: unknown[] = [ticket('T-1', { course_id: 'relay' })], registryOver: Record<string, unknown> = {}): Promise<void> {
     const sha = this.sha();
@@ -108,7 +105,7 @@ class Home {
   }
 }
 
-let home: Home;
+let home: RelayCourse;
 let n = 0;
 const clock = { now: T0 };
 const runners: Runner[] = [];
@@ -117,16 +114,10 @@ const stateFiles = new Map<Runner, string>();
 /** A runner against this test's Baton (the local host), heartbeating as credential vm-a. */
 function makeRunner(over: Record<string, unknown> = {}, transport: (req: Request) => Promise<Response> = hostCall): Runner {
   const stateFile = join(tmpdir(), `baton-runner-${process.pid}-${++n}.json`);
-  const api = new BatonApi({
-    url: ORIGIN,
-    transport,
-    auth: (_m, _u, _b, secret) => ({ Authorization: `Bearer ${TOKENS['vm-a']}`, ...(secret ? { 'X-Runner-Secret': secret } : {}) }),
-  });
-  const runner = new Runner({
-    api, home: home.dir, repository: 'docs', hostname: 'vm-a', harness: 'opencode',
-    session: `runner-${n}`, courses: [{ course: 'relay', version: 3 }],
-    stateFile, beatEvery: 40, now: () => clock.now, log: () => {},
-    ...over,
+  const api = runnerApi({ transport });
+  const runner = testRunner({
+    api, home: home.dir, session: `runner-${n}`, courses: [{ course: 'relay', version: 3 }],
+    stateFile, beatEvery: 40, now: () => clock.now,     ...over,
   });
   runners.push(runner);
   stateFiles.set(runner, stateFile);
@@ -138,20 +129,7 @@ function makeRunner(over: Record<string, unknown> = {}, transport: (req: Request
 async function beatAt(runner: Runner, t: number): Promise<void> {
   clock.now = t;
   const file = stateFiles.get(runner)!;
-  await until(() => (existsSync(file) && (JSON.parse(readFileSync(file, 'utf8')).last_ok ?? 0) >= t ? [1] : []));
-}
-
-/** Wait until `q` returns a non-empty list — the test's window into the runner's progress. */
-async function until(q: () => Promise<unknown[]> | unknown[]): Promise<unknown[]> {
-  // Wall time, not a count of polls: a loaded machine outruns 400 polls of 10 ms (S-BTN-21's
-  // twin failed so on CI, 2026-11-10).
-  const end = Date.now() + 20_000;
-  while (Date.now() < end) {
-    const r = await q();
-    if (r.length) return r;
-    await new Promise((r2) => setTimeout(r2, 10));
-  }
-  throw new Error('condition never became true in 20 s');
+  await until(() => existsSync(file) && (JSON.parse(readFileSync(file, 'utf8')).last_ok ?? 0) >= t, Boolean, `a beat at ${t}`);
 }
 
 /** Wait until `pid` is gone — a killed process group's proof. */
@@ -175,16 +153,82 @@ const ABORTABLE = `await new Promise((resolve) => {
 beforeEach(async () => {
   clock.now = T0;
   await setClock(T0);
-  home = new Home();
+  home = new RelayCourse();
   await cutover();
 });
 
 afterEach(async () => {
   for (const r of runners.splice(0)) r.stop();
-  rmSync(home.dir, { recursive: true, force: true });
+  home.dispose();
 });
 
 describe('S-BTN-41 the runner', () => {
+  it('claims and runs a standard stub with a third harness that stays active only in its store (B-284)', async () => {
+    const store = '.baton/third harness.store';
+    home.write('.baton/third-agent.mjs', `import { appendFileSync } from 'node:fs';
+      for (let i = 0; i < 24; i++) {
+        appendFileSync(${JSON.stringify(store)}, 'active\\n');
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      console.log('built');`);
+    const standard = stubSource({
+      ...builtIn('draft-ticket')!, id: 'relay',
+      legs: { build: { ask: { name: 'outcome', values: ['built'] }, positions: { built: { suspend: true, reached: 'built', next: 'check' } } } },
+    }, 'build');
+    // B-281: the stub is compiled from the typed runtime; this copy shortens its idle bound.
+    const idle = 'const AGENT_IDLE_MS = 900_000;';
+    const bundle = await build({
+      stdin: { contents: standard, resolveDir: process.cwd() },
+      bundle: true, platform: 'node', format: 'esm', write: false,
+      plugins: [{
+        name: 'short-idle',
+        setup(b) {
+          b.onLoad({ filter: /stub-runtime\.ts$/ }, (args) => {
+            const text = readFileSync(args.path, 'utf8');
+            expect(text).toContain(idle);
+            return { contents: text.replace(idle, 'const AGENT_IDLE_MS = 1000;'), loader: 'ts' };
+          });
+        },
+      }],
+    });
+    home.write('.baton/courses/relay/legs/standard.mjs', bundle.outputFiles[0].text);
+    home.write('.baton/courses/relay/legs/build.mjs', `${legFile(null)}\nexport { run } from './standard.mjs';\n`);
+    home.commit();
+    await home.post({ 'T-1': placed('filed', [], [['build', 'ready']]) });
+    const third: HarnessAdapter = {
+      name: 'third-agent', agentCommand: 'node .baton/third-agent.mjs',
+      activityPaths(checkout) { return [join(checkout, store)]; },
+      usage: () => ({ records: [], children: [] }),
+    };
+    vi.stubEnv('BATON_PARENT', undefined);
+    vi.stubEnv('BATON_TOKEN', TOKENS['vm-a']);
+    vi.stubEnv('BATON_KEY', undefined);
+    vi.stubEnv('BATON_KEY_FILE', undefined);
+    vi.stubEnv('HOME', home.dir);
+    const handlers = new Set(process.listeners('SIGTERM'));
+    let finished = false;
+    const running = runMain([
+      '--harness', third.name, '--home', home.dir, '--hostname', 'vm-a', '--session', 'third-harness',
+      '--url', ORIGIN, '--repository', 'docs', '--executor', 'builtin', '--beat-every', '50',
+    ], { harnesses: [...HARNESS_ADAPTERS, third], transport: hostCall, fetch: () => {}, log: () => {} })
+      .then((code) => ({ code }), (error: unknown) => ({ error }))
+      .finally(() => { finished = true; });
+    const drain = process.listeners('SIGTERM').find((handler) => !handlers.has(handler)) as ((s: NodeJS.Signals) => void) | undefined;
+    try {
+      expect(drain).toBeDefined();
+      await until(async () => {
+        if (finished) throw new Error('runner stopped before completing its leg');
+        return rows('SELECT end_reason FROM claims WHERE end_reason IS NOT NULL');
+      }, (values) => values.length > 0, 'the leg to end');
+      expect(await rows('SELECT end_reason FROM claims')).toEqual([{ end_reason: 'suspended:built' }]);
+      expect(await rows('SELECT harness FROM runners WHERE session_name = ?', 'third-harness')).toEqual([{ harness: third.name }]);
+      expect(readFileSync(join(home.dir, store), 'utf8')).toBe('active\n'.repeat(24));
+    } finally {
+      if (!finished) drain?.('SIGTERM');
+      try { expect(await running).toEqual({ code: 0 }); } finally { vi.unstubAllEnvs(); }
+    }
+  }, 30_000);
+
   it('claims a ticket and takes the leg each result names, never inferring one', async () => {
     home.leg('build', `out(ctx, { leg: 'build', parent: process.env.BATON_PARENT ?? null, hasState: !!process.env.BATON_STATE, hasOldMarkers: !!(process.env.IR_BATON_PARENT || process.env.IR_BATON_STATE), session: ctx.session ?? null, run: ctx.run });
   return { reached: 'built', next: 'check', session: 's-1' };`);
@@ -326,7 +370,7 @@ describe('S-BTN-41 the runner', () => {
     });
     const result = runner.runOnce();
     try {
-      await until(() => home.evidence().filter(line => line === 'close merge'));
+      await until(() => home.evidence().filter(line => line === 'close merge'), (values) => values.length > 0);
       expect(sendBeat).toBeDefined();
       const [{ deadline_at }] = await rows<{ deadline_at: number }>('SELECT deadline_at FROM claims');
       expect(deadline_at).toBe(T0 + 40 * 60_000);
@@ -362,11 +406,11 @@ describe('S-BTN-41 the runner', () => {
     const runner = makeRunner();
     runner.start();
     const done = runner.runOnce();
-    await until(() => rows(`SELECT 1 FROM claim_legs WHERE leg = 'build'`));
+    await until(() => rows(`SELECT 1 FROM claim_legs WHERE leg = 'build'`), (values) => values.length > 0);
     // While build runs, the snapshot moves: the ticket is built and check waits on ci — the
     // advance into check then reads the wait, deterministically.
     await home.post({ 'T-1': placed('built', [['build', 'built']], [['check', 'waiting', 'ci']]) });
-    await until(() => rows(`SELECT 1 FROM claim_legs WHERE leg = 'check'`));
+    await until(() => rows(`SELECT 1 FROM claim_legs WHERE leg = 'check'`), (values) => values.length > 0);
     // The claim is held through the wait — check started only when the wait cleared? No: the
     // advance started check, the wait governs running it. The claim stays active meanwhile.
     expect(await rows('SELECT status FROM claims')).toEqual([{ status: 'active' }]);
@@ -385,9 +429,9 @@ describe('S-BTN-41 the runner', () => {
     const runner = makeRunner();
     runner.start();
     const done = runner.runOnce();
-    await until(() => rows(`SELECT 1 FROM claim_legs WHERE leg = 'build'`));
+    await until(() => rows(`SELECT 1 FROM claim_legs WHERE leg = 'build'`), (values) => values.length > 0);
     await home.post({ 'T-1': placed('built', [['build', 'built']], [['check', 'waiting', 'ci']]) });
-    await until(() => rows(`SELECT 1 FROM claim_legs WHERE leg = 'check'`));
+    await until(() => rows(`SELECT 1 FROM claim_legs WHERE leg = 'check'`), (values) => values.length > 0);
     await new Promise((r) => setTimeout(r, 120));
     expect(await rows('SELECT status FROM claims')).toEqual([{ status: 'active' }]); // still waiting
     // The budget is spent (R-BTN-40). Time passes as on a host, in steps the lease outlives,
@@ -413,9 +457,9 @@ describe('S-BTN-41 the runner', () => {
     const runner = makeRunner();
     runner.start();
     const done = runner.runOnce();
-    await until(() => rows('SELECT 1 FROM claims'));
+    await until(() => rows('SELECT 1 FROM claims'), (values) => values.length > 0);
     await home.post({ 'T-1': placed('built', [['build', 'built']], [['check', 'waiting', 'ci']]) });
-    await until(() => rows(`SELECT 1 FROM claim_legs WHERE leg = 'check'`)); // the wait holds
+    await until(() => rows(`SELECT 1 FROM claim_legs WHERE leg = 'check'`), (values) => values.length > 0); // the wait holds
     const runnerId = (await rows<{ id: number }>('SELECT id FROM runners ORDER BY id DESC LIMIT 1'))[0].id;
     const send = await ownerCall('/v1/ui/messages', { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: ORIGIN }, body: JSON.stringify({ kind: 'release', confirm: true, to_runner_id: runnerId, payload: { ticket_id: 'docs:T-1', reason: 'requested' } }) });
     expect(send.status).toBe(200);
@@ -423,7 +467,7 @@ describe('S-BTN-41 the runner', () => {
     // suspended, and the message is acked because it was acted on.
     expect(await done).toMatchObject({ end_reason: 'released:requested', reached: 'built' });
     expect(await rows('SELECT end_reason FROM claims')).toEqual([{ end_reason: 'released:requested' }]);
-    await until(() => rows(`SELECT 1 FROM messages WHERE status = 'acknowledged'`));
+    await until(() => rows(`SELECT 1 FROM messages WHERE status = 'acknowledged'`), (values) => values.length > 0);
     expect(home.evidence().at(-1)).toMatch(/^handoff build/); // the leg that ran writes it
   }, 30_000);
 
@@ -445,9 +489,9 @@ describe('S-BTN-41 the runner', () => {
     const runner = makeRunner();
     runner.start();
     const done = runner.runOnce();
-    await until(() => rows(`SELECT 1 FROM claim_legs WHERE leg = 'build'`));
+    await until(() => rows(`SELECT 1 FROM claim_legs WHERE leg = 'build'`), (values) => values.length > 0);
     await home.post({ 'T-1': placed('built', [['build', 'built']], [['check', 'waiting', 'ci']]) });
-    await until(() => rows(`SELECT 1 FROM claim_legs WHERE leg = 'check'`));
+    await until(() => rows(`SELECT 1 FROM claim_legs WHERE leg = 'check'`), (values) => values.length > 0);
     // The lease goes while the wait holds it: no waiting out the 30 minutes, no hand-off.
     const claim = (await rows<{ id: number }>('SELECT id FROM claims'))[0].id;
     const reap = await ownerCall(`/v1/ui/claims/${claim}/reap`, { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: ORIGIN }, body: JSON.stringify({ confirm: true }) });
@@ -534,7 +578,7 @@ describe('S-BTN-41 the runner', () => {
     const runner = makeRunner();
     runner.start();
     const done = runner.runOnce();
-    await until(() => rows(`SELECT 1 FROM claim_legs WHERE leg = 'check'`));
+    await until(() => rows(`SELECT 1 FROM claim_legs WHERE leg = 'check'`), (values) => values.length > 0);
     // The PR closed under the leg: git's path went backwards (§2e) — shorter than the
     // snapshot before it and the claim's start_path.
     await home.post({ 'T-1': placed('filed', [], [['build', 'ready']]) });
@@ -553,7 +597,7 @@ describe('S-BTN-41 the runner', () => {
     const runner = makeRunner();
     runner.start();
     const done = runner.runOnce();
-    await until(() => rows(`SELECT 1 FROM claim_legs WHERE leg = 'check'`));
+    await until(() => rows(`SELECT 1 FROM claim_legs WHERE leg = 'check'`), (values) => values.length > 0);
     const runnerId = (await rows<{ id: number }>('SELECT id FROM runners ORDER BY id DESC LIMIT 1'))[0].id;
     const send = await ownerCall('/v1/ui/messages', { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: ORIGIN }, body: JSON.stringify({ kind: 'release', confirm: true, to_runner_id: runnerId, payload: { ticket_id: 'docs:T-1', reason: 'requested' } }) });
     expect(send.status).toBe(200);
@@ -567,7 +611,7 @@ describe('S-BTN-41 the runner', () => {
     expect(await rows('SELECT end_reason, status FROM claims')).toEqual([{ end_reason: 'released:requested', status: 'released' }]);
     expect((await rows<{ resume_json: string }>('SELECT resume_json FROM claims'))[0].resume_json).toMatch(/"next":"merge"/); // the script's own word (R-BTN-83)
     // The message is acknowledged once acted on (§9).
-    await until(() => rows(`SELECT 1 FROM messages WHERE status = 'acknowledged'`));
+    await until(() => rows(`SELECT 1 FROM messages WHERE status = 'acknowledged'`), (values) => values.length > 0);
   }, 30_000);
 
   it('a wind-down message drains the runner through the same flag as the signal: the leg completes, the claim ends at its boundary, the message acknowledged — twice a no-op (B-109)', async () => {
@@ -579,7 +623,7 @@ describe('S-BTN-41 the runner', () => {
     const runner = makeRunner();
     runner.start();
     const done = runner.runOnce();
-    await until(() => rows(`SELECT 1 FROM claim_legs WHERE leg = 'check'`));
+    await until(() => rows(`SELECT 1 FROM claim_legs WHERE leg = 'check'`), (values) => values.length > 0);
     const runnerId = (await rows<{ id: number }>('SELECT id FROM runners ORDER BY id DESC LIMIT 1'))[0].id;
     // Two wind-downs, the owner's ask: the first sets the drain flag, the second changes nothing.
     for (let i = 0; i < 2; i++) {
@@ -593,7 +637,7 @@ describe('S-BTN-41 the runner', () => {
     const lines = home.evidence();
     expect(lines.indexOf('close check')).toBeLessThan(lines.indexOf('handoff check'));
     expect(home.closes().at(-1)).toMatchObject({ leg: 'check', reached: 'checked' });
-    await until(() => rows(`SELECT COUNT(*) = 2 AS ok FROM messages WHERE status = 'acknowledged'`));
+    await until(() => rows(`SELECT COUNT(*) = 2 AS ok FROM messages WHERE status = 'acknowledged'`), (values) => values.length > 0);
     expect(runner.isDraining()).toBe(true);
   }, 30_000);
 
@@ -608,7 +652,7 @@ describe('S-BTN-41 the runner', () => {
     runner.start();
     const done = runner.runOnce();
     // The leg is running (not merely recorded): a stop before it starts releases at `built`.
-    await until(() => home.evidence().filter((l) => l === 'check started'));
+    await until(() => home.evidence().filter((l) => l === 'check started'), (values) => values.length > 0);
     runner.stopNow();
     expect(await done).toMatchObject({ end_reason: 'released:requested', reached: 'checked' });
     const lines = home.evidence();
@@ -629,7 +673,7 @@ describe('S-BTN-41 the runner', () => {
     const runner = makeRunner();
     runner.start();
     const done = runner.runOnce();
-    await until(() => rows(`SELECT 1 FROM claim_legs WHERE leg = 'check'`));
+    await until(() => rows(`SELECT 1 FROM claim_legs WHERE leg = 'check'`), (values) => values.length > 0);
     let pid = 0;
     for (let i = 0; i < 400 && !(pid > 0); i++) {
       pid = Number((home.evidence().find((l) => l.startsWith('grandchild ')) ?? '').split(' ')[1]);
@@ -657,7 +701,7 @@ describe('S-BTN-41 the runner', () => {
     const runner = makeRunner();
     runner.start();
     const done = runner.runOnce();
-    await until(() => (home.evidence().some((l) => l.startsWith('grandchild')) ? [1] : []));
+    await until(() => (home.evidence().some((l) => l.startsWith('grandchild')) ? [1] : []), (values) => values.length > 0);
     const pid = Number(/grandchild (\d+)/.exec(home.evidence().find((l) => l.startsWith('grandchild')) ?? '')?.[1]);
     expect(pid).toBeTruthy();
     // The lease goes: the owner reaps the claim (§6.6), so the heartbeat no longer lists it.
@@ -670,7 +714,7 @@ describe('S-BTN-41 the runner', () => {
     expect(home.evidence().some((l) => l.startsWith('handoff'))).toBe(false);
     // R-BTN-19: the next heartbeat reports the fence it cleared, so the ticket is re-issued
     // instead of waiting for the runner to go silent…
-    await until(() => rows('SELECT 1 FROM claims WHERE fence_pending = 0'));
+    await until(() => rows('SELECT 1 FROM claims WHERE fence_pending = 0'), (values) => values.length > 0);
     // The owner's reap ended the claim first; the runner's own end was answered claim-ended and
     // the outcome stands — the ticket is re-issued, not fence-pending.
     expect((await rows<{ end_reason: string }>('SELECT end_reason FROM claims'))[0].end_reason).toBe('reaped:owner');
@@ -716,7 +760,7 @@ describe('S-BTN-41 the runner', () => {
     await home.post({ 'T-1': placed('filed', [], [['build', 'ready']]) });
     const runner = makeRunner();
     const done = runner.runOnce();
-    await until(() => rows('SELECT 1 FROM claims'));
+    await until(() => rows('SELECT 1 FROM claims'), (values) => values.length > 0);
     // The course changes under the claim: check is gone (no renamed_from — R-BTN-64's other
     // half), on a new head — the runner's claim still carries the old snapshot.
     const CHANGED = { ...relay, legs: { ...(relay.legs as Record<string, unknown>), audit: { from: ['built'], to: 'checked' } } } as Record<string, unknown>;
@@ -737,7 +781,7 @@ describe('S-BTN-41 the runner', () => {
     const runner = makeRunner();
     runner.start();
     const done = runner.runOnce();
-    await until(() => rows(`SELECT 1 FROM claim_legs WHERE leg = 'check'`));
+    await until(() => rows(`SELECT 1 FROM claim_legs WHERE leg = 'check'`), (values) => values.length > 0);
     // A file that drops the claim's station: the heartbeat says unknown (R-BTN-64), on a new head.
     const CHANGED = {
       ...relay,
@@ -819,8 +863,10 @@ describe('S-BTN-41 the runner', () => {
     const first = makeRunner({ stateFile, session: 'orphan' } as Record<string, unknown>);
     await first.tick();
     const runnerId = (await rows<{ id: number }>('SELECT id FROM runners'))[0].id;
-    await rows(`INSERT INTO claims (ticket_id, runner_id, request_id, nonce, snapshot_sha, claimed_at, status, station, start_path, course_id)
-                 VALUES ('docs:T-1', ?, 'seed:orphan', 'orphan1', '', ?, 'active', 'built', '[]', 'relay')`, runnerId, clock.now);
+    await seedClaim({
+      ticket_id: 'docs:T-1', runner_id: runnerId, request_id: 'seed:orphan', nonce: 'orphan1', snapshot_sha: '',
+      claimed_at: clock.now, status: 'active', station: 'built', start_path: '[]', course_id: 'relay',
+    });
     const orphan = (await rows<{ id: number }>('SELECT id FROM claims'))[0].id;
     const state = JSON.parse(readFileSync(stateFile, 'utf8')) as Record<string, unknown>;
     state.claim = { id: orphan, ticket_id: 'docs:T-1', nonce: 'orphan1' };
@@ -850,32 +896,30 @@ describe('S-BTN-41 the runner', () => {
     // Two earlier sessions in one state directory, each registered and holding a claim: one went
     // silent past its lease (a restart's predecessor), one still beats (a live sibling runner).
     const dir = mkdtempSync(join(tmpdir(), 'baton-b229-'));
-    const seedClaim = async (session: string, ticket: string): Promise<{ file: string; claim: number }> => {
+    const seedSessionClaim = async (session: string, ticket: string): Promise<{ file: string; claim: number }> => {
       const file = join(dir, `${session}.json`);
       const r = makeRunner({ stateFile: file, session } as Record<string, unknown>);
       await r.tick();
       const runnerId = (await rows<{ id: number }>('SELECT id FROM runners WHERE session_name = ?', session))[0].id;
-      await rows(`INSERT INTO claims (ticket_id, runner_id, request_id, nonce, snapshot_sha, claimed_at, status, station, start_path, course_id)
-                   VALUES (?, ?, ?, 'n', '', ?, 'active', 'built', '[]', 'relay')`, `docs:${ticket}`, runnerId, `seed:${session}`, clock.now);
+      await seedClaim({
+        ticket_id: `docs:${ticket}`, runner_id: runnerId, request_id: `seed:${session}`, nonce: 'n', snapshot_sha: '',
+        claimed_at: clock.now, status: 'active', station: 'built', start_path: '[]', course_id: 'relay',
+      });
       const claim = (await rows<{ id: number }>('SELECT id FROM claims WHERE runner_id = ?', runnerId))[0].id;
       const state = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
       state.claim = { id: claim, ticket_id: `docs:${ticket}`, nonce: 'n' };
       writeFileSync(file, JSON.stringify(state));
       return { file, claim };
     };
-    const earlier = await seedClaim('earlier', 'T-1');
+    const earlier = await seedSessionClaim('earlier', 'T-1');
     // 12 minutes on: past the earlier session's lease by its own clock (15 min − the 4-min margin),
     // short of the server's reap; the sibling beats now, so its lease holds.
     clock.now += 12 * 60_000;
     await setClock(clock.now);
-    const sibling = await seedClaim('sibling', 'T-2');
+    const sibling = await seedSessionClaim('sibling', 'T-2');
     const lines: string[] = [];
     const apiFor = (secret: string) => {
-      const other = new BatonApi({
-        url: ORIGIN,
-        transport: (req) => hostCall(req),
-        auth: (_m, _u, _b, s) => ({ Authorization: `Bearer ${TOKENS['vm-a']}`, ...(s ? { 'X-Runner-Secret': s } : {}) }),
-      });
+      const other = runnerApi();
       other.setSecret(secret);
       return other;
     };
@@ -898,7 +942,7 @@ describe('S-BTN-41 the runner', () => {
     await runner.tick();
     const stateFile = (runner as unknown as { o: { stateFile: string } }).o.stateFile;
     const before = JSON.parse(readFileSync(stateFile, 'utf8')) as { secret: string };
-    await rows(`UPDATE runners SET reaped_at = ?`, clock.now); // the alarm's verdict arrived
+    await setAllRunnersReaped(clock.now); // the alarm's verdict arrived
     await runner.tick(); // the beat that learns it and parks the re-key
     expect(JSON.parse(readFileSync(stateFile, 'utf8')).lease_lost).toBe(true);
     await runner.tick(); // the beat that re-keys
@@ -983,11 +1027,11 @@ describe('S-BTN-41 the runner', () => {
       const declaring = (body.capabilities ?? []) as string[];
       seen.beats.push(declaring);
       if (typeof answer.runner_id === 'number') {
-        await rows('DELETE FROM runner_capabilities WHERE runner_id = ?', answer.runner_id);
+        await clearRunnerCapabilities(answer.runner_id);
         const stored = new Set<string>();
         for (const name of declaring) {
-          for (const cap of capabilitiesOf([name])) if (!stored.has(cap)) { stored.add(cap); await rows('INSERT INTO runner_capabilities (runner_id, capability, declared) VALUES (?, ?, ?)', answer.runner_id, cap, name); }
-          if (name === 'human-operator' && !stored.has(name)) { stored.add(name); await rows('INSERT INTO runner_capabilities (runner_id, capability, declared) VALUES (?, ?, ?)', answer.runner_id, name, name); }
+          for (const cap of capabilitiesOf([name])) if (!stored.has(cap)) { stored.add(cap); await seedRunnerCapability({ runner_id: answer.runner_id, capability: cap, declared: name }); }
+          if (name === 'human-operator' && !stored.has(name)) { stored.add(name); await seedRunnerCapability({ runner_id: answer.runner_id, capability: name, declared: name }); }
         }
       }
       return answer;
@@ -1053,7 +1097,7 @@ describe('S-BTN-41 the runner', () => {
     // five's fix the boot beat was still in flight, `tick` returned on its guard, and the first
     // claims went out while the server recorded `null` and then `[]`.
     const running = runner.work();
-    await until(() => rows(`SELECT 1 FROM claim_legs WHERE leg = 'build'`));
+    await until(() => rows(`SELECT 1 FROM claim_legs WHERE leg = 'build'`), (values) => values.length > 0);
     runner.stop();
     await running;
     // The boot beat asks with nothing (the grant is unknown: `runner.ts`'s `declaring`), the next
@@ -1338,7 +1382,7 @@ describe('S-BTN-41 the runner', () => {
     const runner = makeRunner();
     await runner.tick();
     const [{ id: runnerId }] = await rows<{ id: number }>('SELECT id FROM runners');
-    await rows(`INSERT INTO messages (kind, payload_json, from_principal, to_runner_id, sent_at, status) VALUES ('unblocked', '{"tickets":[]}', 'baton', ?, ?, 'pending')`, runnerId, T0);
+    await seedMessage({ kind: 'unblocked', payload_json: '{"tickets":[]}', from_principal: 'baton', to_runner_id: runnerId, sent_at: T0, status: 'pending' });
     await runner.tick(); // delivered, and acknowledged at once: the runner holds no claim
     expect(await rows(`SELECT status FROM messages WHERE kind = 'unblocked'`)).toEqual([{ status: 'acknowledged' }]);
   }, 30_000);
@@ -1358,15 +1402,15 @@ describe('S-BTN-41 the runner', () => {
     home.commit();
     await home.post({ 'T-1': placed('filed', [], [['build', 'ready']]) });
     const done = runner.work();
-    await until(async () => lines.filter((l) => l.includes("docs:T-1's build has run")));
+    await until(async () => lines.filter((l) => l.includes("docs:T-1's build has run")), (values) => values.length > 0);
     // Registration may already have unblocked build's own capability prerequisite.
     const receivedBefore = lines.filter((l) => l.includes('baton: message unblocked received')).length;
     const [{ id: runnerId }] = await rows<{ id: number }>('SELECT id FROM runners');
-    await rows(`INSERT INTO messages (kind, payload_json, from_principal, to_runner_id, sent_at, status) VALUES ('unblocked', '{"tickets":[]}', 'baton', ?, ?, 'pending')`, runnerId, Date.now());
+    await seedMessage({ kind: 'unblocked', payload_json: '{"tickets":[]}', from_principal: 'baton', to_runner_id: runnerId, sent_at: Date.now(), status: 'pending' });
     // Acknowledged while the build leg still runs — not held for the claim's end.
-    await until(async () => await rows(`SELECT 1 FROM messages WHERE kind = 'unblocked' AND payload_json = '{"tickets":[]}' AND status = 'acknowledged'`));
+    await until(async () => await rows(`SELECT 1 FROM messages WHERE kind = 'unblocked' AND payload_json = '{"tickets":[]}' AND status = 'acknowledged'`), (values) => values.length > 0);
     expect(lines.join('\n')).not.toContain('build ran');
-    await until(async () => lines.filter((l) => l.includes('docs:T-1 done at')));
+    await until(async () => lines.filter((l) => l.includes('docs:T-1 done at')), (values) => values.length > 0);
     runner.stop();
     await done;
     expect(lines.filter((l) => l.includes('baton: message unblocked received'))).toHaveLength(receivedBefore + 1);
@@ -1404,7 +1448,7 @@ describe('S-BTN-41 the runner', () => {
       // writes its evidence before its process exits, and stopping between the two kills it as
       // a lost lease (a loaded machine widens that window — found when B-173's scenarios joined
       // the suite).
-      await until(async () => lines.filter((l) => l.includes('docs:T-1 done at')));
+      await until(async () => lines.filter((l) => l.includes('docs:T-1 done at')), (values) => values.length > 0);
       runner.stop();
       await done;
       const outcome = lines.join('\n');

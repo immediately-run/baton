@@ -8,12 +8,13 @@
 // leg's evidence in git; the holder's claim through the lock legs runs, and the lock releases at
 // the claim's end. Node only: it runs git, spawns the legs' child processes and takes real
 // file locks (the S-BTN-41 pattern).
+import { runnerApi, testRunner, until } from '../lib/runnerRig';
+import { GitRepo } from '../lib/gitRepo';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { BatonApi } from '../../src/runner/api';
 import { lockWatcherArgv, Runner, type RunnerOptions } from '../../src/runner/runner';
 import { call as hostCall } from '#host';
 import { course, cutover, ORIGIN, placed, rows, setClock, syncCall, tick, ticket, TOKENS } from '../helpers';
@@ -63,35 +64,22 @@ export async function close(ctx, result) {
 
 /** The home repository: a real git checkout whose `.baton/` the runner reads at the claim's
  * snapshot, and whose board posts carry the real head sha. */
-class Home {
-  readonly dir: string;
+class LockCourse extends GitRepo {
   readonly course: Record<string, unknown>;
   head: string | null = null;
   constructor(file: Record<string, unknown>) {
-    this.dir = mkdtempSync(join(tmpdir(), 'baton-s21l-'));
-    const g = (...a: string[]) => execFileSync('git', ['-C', this.dir, ...a], { encoding: 'utf8', stdio: 'ignore' });
-    g('init', '-q', '-b', 'main');
-    g('config', 'user.email', 's21l@test');
-    g('config', 'user.name', 's21l test');
+    super('baton-21-');
     this.course = file;
     this.write('.baton/courses/lockcourse/course.json', `${JSON.stringify(file, null, 2)}\n`);
     this.write('.baton/baton.json', `${JSON.stringify({ courses: [{ id: 'lockcourse', version: 1 }] }, null, 2)}\n`);
   }
-  write(path: string, text: string): void {
-    const file = join(this.dir, path);
-    execFileSync('mkdir', ['-p', dirname(file)], { stdio: 'ignore' });
-    writeFileSync(file, text);
-  }
+
   leg(name: string, run: string): void {
     this.write(`.baton/courses/lockcourse/legs/${name}.mjs`, legFile(run));
   }
-  sha(): string {
-    return execFileSync('git', ['-C', this.dir, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
-  }
+
   commit(): string {
-    execFileSync('git', ['-C', this.dir, 'add', '.baton'], { stdio: 'ignore' });
-    execFileSync('git', ['-C', this.dir, 'commit', '--no-gpg-sign', '-q', '-m', 'legs'], { stdio: 'ignore' });
-    return this.sha();
+    return super.commit('legs', ['.baton']);
   }
   async post(stations: Record<string, unknown>, tickets: unknown[], extra: Record<string, unknown> = {}): Promise<void> {
     const sha = this.sha();
@@ -108,7 +96,7 @@ class Home {
   }
 }
 
-let home: Home;
+let home: LockCourse;
 let lockPath: string;
 let n = 0;
 const clock = { now: T0 };
@@ -118,34 +106,16 @@ const logs: string[][] = [];
 /** A runner against this test's Baton, on credential `cred`, configured for the machine lock. */
 function makeRunner(cred: keyof typeof TOKENS, over: Partial<RunnerOptions> = {}): Runner {
   const stateFile = join(tmpdir(), `baton-s21l-${process.pid}-${++n}.json`);
-  const api = new BatonApi({
-    url: ORIGIN,
-    transport: (req) => hostCall(req),
-    auth: (_m, _u, _b, secret) => ({ Authorization: `Bearer ${TOKENS[cred]}`, ...(secret ? { 'X-Runner-Secret': secret } : {}) }),
-  });
+  const api = runnerApi({ credential: cred });
   const log: string[] = [];
   logs.push(log);
-  const runner = new Runner({
-    api, home: home.dir, repository: 'docs', hostname: cred === 'vm-a' ? 'vm-a' : 'vm-b', harness: 'opencode',
-    session: `s21l-${n}`, courses: [{ course: 'lockcourse', version: 1 }],
+  const runner = testRunner({
+    api, home: home.dir, hostname: cred === 'vm-a' ? 'vm-a' : 'vm-b', session: `s21l-${n}`, courses: [{ course: 'lockcourse', version: 1 }],
     capabilities: [LOCKED], locks: { [LOCKED]: lockPath },
     stateFile, beatEvery: 40, now: () => clock.now, log: (l: string) => log.push(l), ...over,
   });
   runners.push(runner);
   return runner;
-}
-
-/** Wait until `q` is true, for up to UNTIL_MS of wall time — not a count of polls: a loaded
- *  machine (CI, a host beside a live leg) starts a runner process in more than the 5 s that 500
- *  polls of 10 ms allowed (S-BTN-21 failed so on CI, 2026-11-10). */
-const UNTIL_MS = 20_000;
-async function until(q: () => boolean | Promise<boolean>): Promise<void> {
-  const end = Date.now() + UNTIL_MS;
-  while (Date.now() < end) {
-    if (await q()) return;
-    await new Promise((r) => setTimeout(r, 10));
-  }
-  throw new Error(`condition never became true in ${UNTIL_MS / 1000} s`);
 }
 
 /** An outsider's hold on the machine's lock: `flock` kept alive; kill it to release. A day's
@@ -173,7 +143,7 @@ const killOutsider = (child: ReturnType<typeof spawn>) => {
 beforeEach(async () => {
   clock.now = T0;
   await setClock(T0);
-  home = new Home(GAP);
+  home = new LockCourse(GAP);
   lockPath = join(tmpdir(), `baton-s21l-lock-${process.pid}-${++n}`);
   await cutover();
 });
@@ -184,12 +154,12 @@ afterEach(async () => {
   // trace of that test then opens with a 404 no model action explains. Draining the in-flight
   // attempt keeps each trace the model can replay.
   await new Promise((r) => setTimeout(r, 150));
-  rmSync(home.dir, { recursive: true, force: true });
+  home.dispose();
 });
 
 describe('S-BTN-21 the machine lock (R-BTN-178)', () => {
   it('of two runners on one machine, only the lock holder declares the capability and claims the leg', async () => {
-    home = new Home(THROUGH);
+    home = new LockCourse(THROUGH);
     home.leg('rdp1', `ev(ctx, 'run rdp1'); return { reached: 'lab', next: 'rdp3' };`);
     home.leg('rdp3', `ev(ctx, 'run rdp3'); return { reached: 'review', next: 'plain' };`);
     home.leg('plain', `ev(ctx, 'run plain'); return { reached: 'done' };`);

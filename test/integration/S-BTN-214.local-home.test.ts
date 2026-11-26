@@ -9,6 +9,7 @@
 // course that reads no PR facts keeps `leg_state: branch`; the registry carries each course's
 // `facts` (R-BTN-134) and the claim's scope resolves `repos:` through the list. Node only: it
 // writes a real repository and runs git.
+import { keepLegacyPrPlacement } from '../lib/legacy-pr-course';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { once } from 'node:events';
@@ -80,7 +81,7 @@ function keyPair(name: string): { file: string; publicKey: string } {
 
 /** The ids the fake forge reports for `acme/monorepo`, and the routes reading PR 7. */
 const MONO_IDS = { id: 7001, owner: { id: 31 } };
-const pull = (merged = false) => ({ number: 7, head: { ref: 'claude/LIN-1-fix', sha: 's7' }, state: merged ? 'closed' : 'open', merged_at: merged ? '2026-11-12T13:00:00Z' : null });
+const pull = (merged = false) => ({ number: 7, head: { ref: 'claude/LIN-1-fix', sha: 's7', repo: { id: 17 } }, base: { repo: { id: 17 } }, state: merged ? 'closed' : 'open', merged_at: merged ? '2026-11-12T13:00:00Z' : null });
 const detail = (comments: unknown[] = []) => ({
   [`/repos/acme/monorepo/commits/s7/check-runs`]: { check_runs: [{ conclusion: 'success' }] },
   [`/repos/acme/monorepo/pulls/7/commits`]: [{ sha: 'c7', commit: { message: 'the work', committer: { date: '2026-11-12T11:00:00Z' } } }],
@@ -127,7 +128,8 @@ describe('S-BTN-214 a plain-git home on a GitHub code repository', () => {
       sync_keys: [{ public_key: syncKey.publicKey, role: 'sync' }], owner_keys: [owner.publicKey], cut_over: true,
     })).status).toBe(200);
     // The scaffold: create-pr (a PR course) and bug-report (a marker course, no PR facts).
-    expect(await initMain(['--course', 'create-pr'], { root: dir, log: () => {} })).toBe(0);
+    expect(await initMain(['--own', '--course', 'create-pr'], { root: dir, log: () => {} })).toBe(0);
+    keepLegacyPrPlacement(dir);
     expect(await initMain(['--course', 'bug-report'], { root: dir, log: () => {} })).toBe(0);
     const batonJson = join(dir, '.baton', 'baton.json');
     const config = JSON.parse(readFileSync(batonJson, 'utf8')) as Record<string, unknown>;
@@ -203,7 +205,7 @@ describe('S-BTN-214 a plain-git home on a GitHub code repository', () => {
     expect(await rows<{ facts: string }>('SELECT facts FROM courses WHERE repository_id = ? AND id = ?', 'home', 'create-pr')).toEqual([{ facts: '["prs"]' }]);
     expect(await rows<{ facts: string }>('SELECT facts FROM courses WHERE repository_id = ? AND id = ?', 'home', 'bug-report')).toEqual([{ facts: '[]' }]);
     expect(await rows<{ policy_json: string }>('SELECT policy_json FROM repository_policies WHERE repository_id = ?', 'home')).toMatchObject([{ policy_json: expect.not.stringContaining('"leg_state"') }]);
-    const courses = [{ repository: 'home', course: 'create-pr', version: 1 }, { repository: 'home', course: 'bug-report', version: 1 }];
+    const courses = [{ repository: 'home', course: 'create-pr', version: 3 }, { repository: 'home', course: 'bug-report', version: 1 }];
     const a = await register('vm-a', { courses, capabilities: ['agent-venue', 'runner:leg-trees'] });
     const claim = await claimItem('vm-a', a.secret, { ticket_id: 'home:LIN-1' });
     if (claim.status !== 200) throw new Error(`claim: ${JSON.stringify(claim.json)}`);

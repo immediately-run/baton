@@ -58,7 +58,7 @@ beforeEach(async () => {
   cookie = await adminSession(admin);
 });
 
-describe('B-242 the dashboard poll’s ETag', () => {
+describe('B-242 the dashboard poll’s ETag (S-BTN-235)', () => {
   it('answers 304 to the ETag it served, and no body; a write moves it', async () => {
     const first = await poll();
     expect(first.status).toBe(200);

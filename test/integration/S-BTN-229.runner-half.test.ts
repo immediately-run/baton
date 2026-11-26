@@ -8,16 +8,21 @@
 // `released:cannot-finish:transient`, and reattaches through an executor that can. A runner at
 // the default 1 is the rest of the runner suites, unchanged. The server half is
 // S-BTN-229.several-claims.test.ts.
+import { runnerApi, runnerClock, testRunner, until } from '../lib/runnerRig';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { GitRepo } from '../lib/gitRepo';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
-import { BatonApi } from '../../src/runner/api';
+import { callChannel, channelPath } from '../../src/runner/channel';
 import { Runner } from '../../src/runner/runner';
 import { builtinExecutor, type Executor, type Handle } from '../../src/runner/executor';
 import { call as hostCall } from '#host';
-import { course, cutover, ORIGIN, ownerCall, placed, rows, setClock, syncCall, ticket, TOKENS } from '../helpers';
+import {
+  course, cutover, ORIGIN, ownerCall, placed, rows, setClock, syncCall, ticket, TOKENS, claimRows,
+  grantRunnerConcurrency, runnerId, seedClaim, seedClaimLeg,
+} from '../helpers';
 import relay from '../fixtures/courses/relay/course.json';
 
 const T0 = Date.parse('2026-11-17T12:00:00Z');
@@ -49,7 +54,8 @@ let head: string | null;
 let log: string;
 let gates: string;
 let n = 0;
-const clock = { now: T0 };
+const clock = runnerClock(T0);
+const work: Promise<unknown>[] = [];
 const runners: Runner[] = [];
 /** Baton out of reach: every runner call fails, as a dropped network does. */
 let down = false;
@@ -57,22 +63,15 @@ let down = false;
  *  the beats waiting on `held`. */
 let held: Promise<void> | null = null;
 let caught = 0;
+let releaseBeat: (() => void) | undefined;
 
 function writeHome(): string {
   homeDir = join(dir, 'home');
-  mkdirSync(homeDir, { recursive: true });
-  const g = (...a: string[]) => execFileSync('git', ['-C', homeDir, ...a], { encoding: 'utf8' });
-  g('init', '-q', '-b', 'main');
-  const write = (path: string, text: string) => {
-    mkdirSync(dirname(join(homeDir, path)), { recursive: true });
-    writeFileSync(join(homeDir, path), text);
-  };
-  write('.baton/courses/relay/course.json', `${JSON.stringify(relay, null, 2)}\n`);
-  write('.baton/baton.json', `${JSON.stringify({ course: 'relay', skills_version: 3 }, null, 2)}\n`);
-  write('.baton/courses/relay/legs/check.mjs', checkLeg(log, gates));
-  g('add', '-A');
-  g('-c', 'user.email=b188@test', '-c', 'user.name=b188 test', 'commit', '--no-gpg-sign', '-qm', 'courses');
-  return g('rev-parse', 'HEAD').trim();
+  const home = new GitRepo('baton-229-home-', { dir: homeDir });
+  home.write('.baton/courses/relay/course.json', `${JSON.stringify(relay, null, 2)}\n`);
+  home.write('.baton/baton.json', `${JSON.stringify({ course: 'relay', skills_version: 3 }, null, 2)}\n`);
+  home.write('.baton/courses/relay/legs/check.mjs', checkLeg(log, gates));
+  return home.commit('courses');
 }
 
 async function post(ids: string[]): Promise<void> {
@@ -87,9 +86,7 @@ async function post(ids: string[]): Promise<void> {
 }
 
 function makeRunner(over: Record<string, unknown> = {}, beats?: Record<string, any>[]): Runner {
-  const api = new BatonApi({
-    url: ORIGIN,
-    transport: async (req) => {
+  const api = runnerApi({ transport: async (req) => {
       if (down) throw new Error('the network is down');
       const beat = new URL(req.url).pathname === '/v1/runner/heartbeat';
       if (beats && beat) beats.push(await req.clone().json() as Record<string, any>);
@@ -99,14 +96,11 @@ function makeRunner(over: Record<string, unknown> = {}, beats?: Record<string, a
         await held;
       }
       return res;
-    },
-    auth: (_m, _u, _b, secret) => ({ Authorization: `Bearer ${TOKENS['vm-a']}`, ...(secret ? { 'X-Runner-Secret': secret } : {}) }),
-  });
-  const r = new Runner({
-    api, home: homeDir, repository: 'docs', hostname: 'vm-a', harness: 'opencode',
-    session: `b188-${++n}`, courses: [{ course: 'relay', version: 3 }],
+    } });
+  const r = testRunner({
+    api, home: homeDir, session: `b188-${++n}`, courses: [{ course: 'relay', version: 3 }],
     stateFile: join(dir, 'state', `b188-${n}.json`), clonesDir: join(dir, 'clones'),
-    beatEvery: 60, now: () => clock.now, log: () => {}, signalGraceMs: 500,
+    beatEvery: 60_000, now: clock.now, signalGraceMs: 500,
     ...over,
   });
   runners.push(r);
@@ -118,39 +112,22 @@ function makeRunner(over: Record<string, unknown> = {}, beats?: Record<string, a
 async function grant(r: Runner, maxClaims: number): Promise<void> {
   await r.tick();
   await r.tick();
-  const [{ id, credential_id }] = await rows<{ id: number; credential_id: string }>('SELECT id, credential_id FROM runners');
-  const caps = (await rows<{ capability: string }>('SELECT capability FROM runner_capabilities WHERE runner_id = ?', id)).map((x) => x.capability);
-  await rows(`UPDATE credentials SET created_by = 'owner:owner@example.com' WHERE id = ?`, credential_id);
-  await rows(`INSERT INTO runner_grants (credential_id, repository_id, capabilities, max_tier, max_claims, granted_by, granted_at)
-              VALUES (?, 'docs', ?, NULL, ?, 'owner:owner@example.com', 0)`, credential_id, JSON.stringify(caps), maxClaims);
+  await grantRunnerConcurrency(await runnerId(), maxClaims);
   await r.tick();
 }
 
 const said = (): { ev: string; ticket: string; checkout?: string; aborted?: boolean }[] =>
   (existsSync(log) ? readFileSync(log, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)) : []);
 
-async function until<T>(q: () => Promise<T> | T, ok: (v: T) => boolean, what: string): Promise<T> {
-  const end = Date.now() + 30_000;
-  for (;;) {
-    const v = await q();
-    if (ok(v)) return v;
-    if (Date.now() > end) throw new Error(`never: ${what}`);
-    await new Promise((res) => setTimeout(res, 20));
-  }
-}
-
-const claimRows = () => rows<{ id: number; ticket_id: string; status: string; end_reason: string | null; fence_pending: number }>(
-  'SELECT id, ticket_id, status, end_reason, fence_pending FROM claims ORDER BY id');
 const owner = (path: string, body: unknown) =>
   ownerCall(path, { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: ORIGIN }, body: JSON.stringify(body) });
 const gate = (id: string) => writeFileSync(join(gates, id), '');
 
 beforeEach(async () => {
-  clock.now = T0;
+  await clock.set(T0);
   down = false;
   held = null;
   caught = 0;
-  await setClock(T0);
   dir = mkdtempSync(join(tmpdir(), 'baton-229-'));
   log = join(dir, 'legs.jsonl');
   gates = join(dir, 'gates');
@@ -160,12 +137,15 @@ beforeEach(async () => {
   await cutover();
 });
 
-afterEach(() => {
+afterEach(async () => {
+  releaseBeat?.();
+  releaseBeat = undefined;
   for (const r of runners.splice(0)) {
     r.drain('test end');
     r.killInflight();
     r.stop();
   }
+  await Promise.allSettled(work.splice(0));
   rmSync(dir, { recursive: true, force: true });
 });
 
@@ -176,6 +156,7 @@ describe('S-BTN-229 (the runner half): a runner holds several claims (R-BTN-4, R
     const r = makeRunner({ concurrency: 2 }, beats);
     await grant(r, 2);
     const working = r.work();
+    work.push(working);
 
     // Two legs start, side by side, before either ends — and no third claim is taken.
     const starts = await until(() => said().filter((x) => x.ev === 'start'), (v) => v.length === 2, 'two legs running');
@@ -203,8 +184,9 @@ describe('S-BTN-229 (the runner half): a runner holds several claims (R-BTN-4, R
 
     // A release message for one ticket stops that claim alone (R-BTN-119), with its hand-off.
     const [first, second] = starts.map((x) => x.ticket);
-    const [{ id: runner }] = await rows<{ id: number }>('SELECT id FROM runners');
+    const runner = await runnerId();
     expect((await owner('/v1/ui/messages', { kind: 'release', confirm: true, to_runner_id: runner, payload: { ticket_id: first, reason: 'requested' } })).status).toBe(200);
+    await r.tick(); // Deliver the release explicitly, not on a wall-clock interval.
     await until(claimRows, (v) => v.some((c) => c.ticket_id === first && c.end_reason === 'released:requested'), 'the released claim ends');
     expect(said()).toContainEqual({ ev: 'end', ticket: first, aborted: true });
     expect(said()).toContainEqual({ ev: 'handoff', ticket: first });
@@ -232,6 +214,7 @@ describe('S-BTN-229 (the runner half): a runner holds several claims (R-BTN-4, R
     const r = makeRunner({ concurrency: 2}, beats);
     await grant(r, 2);
     const working = r.work();
+    work.push(working);
     const starts = await until(() => said().filter((x) => x.ev === 'start'), (v) => v.length === 2, 'two legs running');
     const claims = await claimRows();
     const reaped = claims.find((c) => c.ticket_id === starts[0].ticket)!;
@@ -240,7 +223,8 @@ describe('S-BTN-229 (the runner half): a runner holds several claims (R-BTN-4, R
     // An administrator's force-reap of one claim: the answer stops listing it, so that leg stops
     // at once with no hand-off, the fence is reported (R-BTN-19), and the other claim runs on.
     expect((await owner(`/v1/ui/claims/${reaped.id}/reap`, { confirm: true })).status).toBe(200);
-    await until(claimRows, (v) => v.find((c) => c.id === reaped.id)?.fence_pending === 0, 'the fence is reported');
+    await until(async () => { await r.tick(); return claimRows(); },
+      (v) => v.find((c) => c.id === reaped.id)?.fence_pending === 0, 'the fence is reported');
     expect(beats.some((b) => Array.isArray(b.fenced) && b.fenced.some((f: { claim_id: number }) => f.claim_id === reaped.id))).toBe(true);
     expect(said().some((x) => x.ev === 'handoff' && x.ticket === reaped.ticket_id)).toBe(false);
     expect((await claimRows()).find((c) => c.id === other.id)?.status).toBe('active');
@@ -254,12 +238,14 @@ describe('S-BTN-229 (the runner half): a runner holds several claims (R-BTN-4, R
     // renews the lease from when it left — never from when it was read, which would hold the
     // lease (and this leg) for as long as the outage lasts.
     r.drain('test'); // no new claim after it
-    let read!: () => void;
-    held = new Promise<void>((res) => { read = res; });
+    held = new Promise<void>((res) => { releaseBeat = res; });
+    const delayed = r.tick();
+    work.push(delayed);
     await until(() => caught, (v) => v > 0, 'a beat answered and not yet read');
     down = true;
-    clock.now = T0 + 20 * 60_000;
-    read();
+    await clock.set(T0 + 20 * 60_000);
+    releaseBeat!();
+    await delayed;
     await working;
     expect(said().some((x) => x.ev === 'handoff' && x.ticket === other.ticket_id)).toBe(false);
     expect(said().some((x) => x.ev === 'end' && x.ticket === other.ticket_id)).toBe(false); // killed, never returned
@@ -270,19 +256,18 @@ describe('S-BTN-229 (the runner half): a runner holds several claims (R-BTN-4, R
     await post(['T-1', 'T-2']);
     const first = makeRunner({ concurrency: 2 });
     await grant(first, 2);
-    const [{ id: runner }] = await rows<{ id: number }>('SELECT id FROM runners');
+    const runner = await runnerId();
     const stateFile = (first as unknown as { o: { stateFile: string } }).o.stateFile;
     const session = (first as unknown as { o: { session: string } }).o.session;
     first.stop();
     // The two claims the first process held when it died mid-leg, as its state file left them:
     // each with its run, its executor's handle and its leg's place.
     const seed = async (id: string, request: string) => {
-      await rows(`INSERT INTO claims (ticket_id, runner_id, request_id, nonce, snapshot_sha, claimed_at, status, station, start_path, course_id)
-                   VALUES (?, ?, ?, ?, ?, ?, 'active', 'built', '[]', 'relay')`, id, runner, request, `n-${request}`, head, clock.now);
-      const claimId = (await rows<{ id: number }>('SELECT id FROM claims WHERE request_id = ?', request))[0].id;
-      // Its first leg advanced into and running, as the first process's advance left it.
-      await rows(`UPDATE claims SET leg = 'check' WHERE id = ?`, claimId);
-      await rows(`INSERT INTO claim_legs (claim_id, seq, leg, from_station, started_at, started_observation) VALUES (?, 1, 'check', 'built', ?, 0)`, claimId, clock.now);
+      const claimId = await seedClaim({
+        ticket_id: id, runner_id: runner, request_id: request, nonce: `n-${request}`, snapshot_sha: head!,
+        claimed_at: clock.now(), status: 'active', station: 'built', start_path: '[]', course_id: 'relay', leg: 'check',
+      });
+      await seedClaimLeg({ claim_id: claimId, seq: 1, leg: 'check', from_station: 'built', started_at: clock.now(), started_observation: 0 });
       return claimId;
     };
     const one = await seed('docs:T-1', 'run-one-0001');
@@ -292,7 +277,7 @@ describe('S-BTN-229 (the runner half): a runner holds several claims (R-BTN-4, R
       ctx: { ticket: { id: ticketId }, claim: { id, nonce: `n-${request}`, station: 'built' }, leg: 'check', run: 1, checkout: homeDir, snapshot: { sha: head, path: [{ leg: 'build', reached: 'built' }], next: [] } },
     });
     const state = JSON.parse(readFileSync(stateFile, 'utf8')) as Record<string, unknown>;
-    writeFileSync(stateFile, JSON.stringify({ ...state, claims: [place(one, 'docs:T-1', 'run-one-0001')], claim: { id: one, ticket_id: 'docs:T-1', nonce: 'n-run-one-0001' }, last_ok: clock.now }));
+    writeFileSync(stateFile, JSON.stringify({ ...state, claims: [place(one, 'docs:T-1', 'run-one-0001')], claim: { id: one, ticket_id: 'docs:T-1', nonce: 'n-run-one-0001' }, last_ok: clock.now() }));
 
     // `builtin` offers no reattach: the restarted runner — its secret resumed, no re-key — ends
     // the claim cannot-finish:transient and says why.
@@ -323,13 +308,18 @@ describe('S-BTN-229 (the runner half): a runner holds several claims (R-BTN-4, R
         return { ...h, reattached: true } as Handle;
       },
       async end(h) {
-        if (h.reattached) return { status: 'ended', result: { suspend: true, reached: 'checked' } };
+        if (h.reattached) {
+          const socket = channelPath(stateFile, h.session_id);
+          expect(await callChannel(socket, { op: 'status' })).toMatchObject({ ok: true, leg: 'check', station: 'built' });
+          expect(await callChannel(socket, { op: 'suspend', reached: 'checked' })).toEqual({ ok: true });
+          return { status: 'ended', result: (await h.posted!).result };
+        }
         return base.end(h);
       },
     };
     const two = await seed('docs:T-2', 'run-two-0002');
     const again = JSON.parse(readFileSync(stateFile, 'utf8')) as Record<string, unknown>;
-    writeFileSync(stateFile, JSON.stringify({ ...again, claims: [place(two, 'docs:T-2', 'run-two-0002')], claim: { id: two, ticket_id: 'docs:T-2', nonce: 'n-run-two-0002' }, last_ok: clock.now, lease_lost: false }));
+    writeFileSync(stateFile, JSON.stringify({ ...again, claims: [place(two, 'docs:T-2', 'run-two-0002')], claim: { id: two, ticket_id: 'docs:T-2', nonce: 'n-run-two-0002' }, last_ok: clock.now(), lease_lost: false }));
     const resumed = makeRunner({ session, stateFile, concurrency: 1, executor: reattaching, log: (l: string) => lines.push(l) });
     const out = await resumed.runOnce();
     expect(reattached).toEqual([{ session_id: 's-run-two-0002' }]);
@@ -358,9 +348,11 @@ describe('S-BTN-229 (the runner half): a runner holds several claims (R-BTN-4, R
     const lines: string[] = [];
     const r = makeRunner({ concurrency: 2, log: (l: string) => lines.push(l) });
     await grant(r, 2);
-    const [{ id: runner }] = await rows<{ id: number }>('SELECT id FROM runners');
-    await rows(`INSERT INTO claims (ticket_id, runner_id, request_id, nonce, snapshot_sha, claimed_at, status, station, start_path, course_id)
-                 VALUES ('docs:T-1', ?, 'stray', 'n-stray', ?, ?, 'active', 'built', '[]', 'relay')`, runner, head, clock.now);
+    const runner = await runnerId();
+    await seedClaim({
+      ticket_id: 'docs:T-1', runner_id: runner, request_id: 'stray', nonce: 'n-stray', snapshot_sha: head,
+      claimed_at: clock.now(), status: 'active', station: 'built', start_path: '[]', course_id: 'relay',
+    });
     await r.tick();
     expect((await claimRows())[0]).toMatchObject({ status: 'released', end_reason: 'released:lease-lost' });
     expect(lines.some((l) => l.includes('which this runner does not hold'))).toBe(true);

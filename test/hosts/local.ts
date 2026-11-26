@@ -1,9 +1,11 @@
+/// <reference path="../provided.d.ts" />
 // local.ts — the integration harness's local host (BATON_SPEC §13a S-BTN-31): the same core on
 // `node:sqlite` behind the request queue, in this Node process, with the run's test bindings
 // (vitest.config.ts provides them; a local start refuses them).
 import { inject } from 'vitest';
 import type { BatonCore } from '../../src/core/baton';
-import type { Config } from '../../src/core/ports';
+import type { Config, Store } from '../../src/core/ports';
+import type { AssertHost } from './contract';
 import { RECOMMENDED_CLIENT } from '../../src/core/http';
 import { LocalHost } from '../../src/local/host';
 import { openStore } from '../../src/local/store';
@@ -11,6 +13,8 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
 import { beginTrace, recordingStore, takeSteps, toItf, type Origin } from '../integration/trace';
+
+type _Host = AssertHost<typeof import('./local')>;
 
 export const HOST = 'local';
 export const config: Config = inject('localConfig');
@@ -72,6 +76,16 @@ function parse(text: string | undefined): unknown {
 /** Run `fn` with the core, in its turn in the queue. */
 export function withCore<T>(fn: (core: BatonCore) => T | Promise<T>): Promise<T> {
   return host.queue.run(() => fn(host.core));
+}
+
+/** The host adapter without core's versioning or the trace recorder. */
+export async function withStore<T>(fn: (store: Store) => T): Promise<T> {
+  const { db, store } = openStore(':memory:');
+  try {
+    return fn(store);
+  } finally {
+    db.close();
+  }
 }
 
 /** One alarm tick, in its turn — its commits are steps of the trace too (R3-1244). */

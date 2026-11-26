@@ -4,7 +4,7 @@
 // S-BTN-13 drives the shared syncOnce against the real host with committed payloads
 // captured from a consumer sync. Ancestry comes from the fixture git repository.
 import { describe, it, expect, inject } from 'vitest';
-import { syncOnce } from '../../src/shared/batonSync.mjs';
+import { syncOnce, type PostResult, type Head, type SyncDeps } from '../../src/shared/batonSync.mjs';
 import { observe, ownerCall, setClock, syncCall, stateView } from '../helpers';
 
 type Label = 'A' | 'B' | 'C' | 'D';
@@ -13,22 +13,22 @@ const sha = board.shas;
 const labelOf = (s: string | null) => (Object.entries(sha).find(([, v]) => v === s)?.[0] ?? null) as Label | null;
 const isAncestor = async (a: string, b: string) => board.ancestry[`${labelOf(a)}<${labelOf(b)}`] === true;
 
-const readHead = async () => (await (await syncCall('/v1/sync/head')).json()) as { sha: string | null; unconfirmed: unknown[] };
+const readHead = async (): Promise<Head> => (await syncCall('/v1/sync/head')).json();
 const post = async (body: unknown) => {
   const res = await syncCall('/v1/sync/board', body);
   const json = (await res.json()) as Record<string, unknown>;
-  return res.ok ? { ok: true, ...json } : json;
+  return (res.ok ? { ok: true, ...json } : json) as PostResult;
 };
 
 /** The sync's dependencies for the run that will post `next`; `seen` is the head that run read
  *  when it started (possibly long ago), after which it reads the live head as the real one does. */
-function depsFor(next: Label, seen?: { sha: string | null; unconfirmed: unknown[] }) {
+function depsFor(next: Label, seen?: Head): SyncDeps {
   let first = seen;
   return {
     // R-BTN-62: the run's number, from the real route, before it reads anything.
     observe: async () => {
       const o = await observe();
-      return o.status === 200 ? o.json : { ok: false, code: o.json.code };
+      return o.status === 200 ? o.json : { ok: false, code: o.json.code ?? `HTTP ${o.status}` };
     },
     readHead: async () => {
       if (first) {

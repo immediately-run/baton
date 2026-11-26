@@ -48,8 +48,8 @@ export function git(root, args, options = {}) {
 
 export const gitText = (root, ...args) => git(root, args).trim();
 
-export function gitBuffer(root, args) {
-  return gitSync(root, args, {}, { stdio: ['ignore', 'pipe', 'pipe'] });
+export function gitBuffer(root, args, options = {}) {
+  return gitSync(root, args, options, { stdio: ['ignore', 'pipe', 'pipe'] });
 }
 
 /** Clone/fetch in a runner slot must not block the heartbeat. */

@@ -2,18 +2,14 @@
 // R-BTN-116; B-213): a repository's typed statements with their writers, and the types this
 // caller may write.
 //
-// R-BTN-181's attestation store is not built (B-146). The one attestation Baton reads and
-// applies today is a person leg's answer, a `std:decision@1` (questions.ts), and what it keeps
-// of each applied one is its `question-answered` event: the ticket, the leg, the option and
-// who answered — the sync reading git, an owner key, or a human-only key. This read serves
-// exactly those, newest first, in R-BTN-181's row shape as far as the record goes: no
-// attestation of another type, none that lapses and none revoked exists to list, and
-// `not_built` says so. Nothing is invented.
+// The general attestation store is not built (B-146). This read projects the statements
+// Baton actually keeps: person answers, applied forge arrivals, and outside-work evidence.
 //
 // `writable_types` is the types the caller may write through `POST …/attestations` — the rule
 // that route judges by (`answerWord`): `std:decision@1` for an owner key of the repository
 // where the policy admits one, nothing for anyone else. No dashboard session writes one: an
 // administrator's is no owner (R-BTN-57), and an owner's session is B-76's.
+import { ARRIVAL_TYPE, EVIDENCE_TYPE } from '../outsideWork';
 import { BatonError } from '../http';
 import { DECISION_TYPE_NAME, TICKET_ID } from '../validate';
 import { answerWord } from './conditions';
@@ -37,11 +33,11 @@ export const ATTESTATION_READS: ReadRoute[] = [
       const tail = {
         writable_types: word.answerable ? [DECISION_TYPE_NAME] : [],
         writable_why: word.why,
-        types: [DECISION_TYPE_NAME],
+        types: [DECISION_TYPE_NAME, ARRIVAL_TYPE, EVIDENCE_TYPE],
         not_built: { store: 'B-146', session_write: 'B-76', revoke: 'B-146' },
       };
       // One type is held: any other names nothing to list.
-      if (q.type !== undefined && q.type !== DECISION_TYPE_NAME) {
+      if (q.type !== undefined && !tail.types.includes(q.type)) {
         if (!/^[a-z][a-z0-9.-]*:[a-z][a-z0-9.-]*@[0-9]+$/.test(q.type)) throw new BatonError('invalid-params', 'type: a schema id, <library>:<name>@<version>');
         return { attestations: [], ...tail };
       }
@@ -54,8 +50,9 @@ export const ATTESTATION_READS: ReadRoute[] = [
       }
       const after = cursorOf<[number, number]>(cx, call);
       if (after !== null && !(Array.isArray(after) && after.length === 2 && after.every((n) => Number.isSafeInteger(n)))) throw new BatonError('invalid-params', 'cursor: the previous page’s');
-      const where = [`kind = 'question-answered'`, 'repository_id = ?'];
-      const params: unknown[] = [repository];
+      const where: string[] = ['1 = 1'];
+      const params: unknown[] = [repository, repository, repository];
+      if (q.type !== undefined) { where.push('type = ?'); params.push(q.type); }
       if (subject !== null) {
         where.push('ticket_id = ?');
         params.push(subject);
@@ -65,8 +62,19 @@ export const ATTESTATION_READS: ReadRoute[] = [
         params.push(after[0], after[0], after[1]);
       }
       const limit = 100;
-      const rows = cx.sql<{ seq: number; at: number; ticket_id: string; actor: string; detail_json: string | null }>(
-        `SELECT seq, at, ticket_id, actor, detail_json FROM events WHERE ${where.join(' AND ')} ORDER BY at DESC, seq DESC LIMIT ?`, ...params, limit + 1);
+      const rows = cx.sql<{ seq: number; at: number; ticket_id: string; actor: string; detail_json: string | null; type: string }>(
+        `SELECT * FROM (
+          SELECT seq * 3 AS seq, at, ticket_id, actor, detail_json, '${DECISION_TYPE_NAME}' AS type
+            FROM events WHERE repository_id = ? AND kind = 'question-answered'
+          UNION ALL
+          SELECT h.id * 3 + 1, h.at, h.ticket_id, 'sync',
+            json_object('ref', json_extract(h.detail_json, '$.ref'), 'leg', h.leg, 'reached', h.reached, 'next', h.next_leg), '${ARRIVAL_TYPE}'
+            FROM tickets t JOIN ticket_history h ON h.ticket_id = t.id
+            WHERE t.repository_id = ? AND h.kind = 'fact-arrival' AND json_extract(h.detail_json, '$.outside') = 1
+          UNION ALL
+          SELECT e.insertion_order * 3 + 2, e.found_at, e.ticket_id, 'sync', json_object('ref', e.ref, 'kind', e.kind, 'leg', e.leg), '${EVIDENCE_TYPE}'
+            FROM tickets t JOIN ticket_evidence e ON e.ticket_id = t.id WHERE t.repository_id = ?
+        ) WHERE ${where.join(' AND ')} ORDER BY at DESC, seq DESC LIMIT ?`, ...params, limit + 1);
       const p = pageOf(cx, call, rows, (last) => [last.at, last.seq], limit);
       return {
         attestations: p.items.map((e) => {
@@ -76,9 +84,9 @@ export const ATTESTATION_READS: ReadRoute[] = [
           } catch { /* stored by the core: never malformed */ }
           return {
             id: e.seq,
-            type: DECISION_TYPE_NAME,
+            type: e.type,
             subject: { ticket: e.ticket_id },
-            value: { leg: d.leg ?? null, option: d.option ?? null },
+            value: e.type === DECISION_TYPE_NAME ? { leg: d.leg ?? null, option: d.option ?? null } : d,
             writer: writerOf(typeof d.answered_by === 'string' ? d.answered_by : e.actor),
             domain: null,
             at: e.at,

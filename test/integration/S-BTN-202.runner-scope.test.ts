@@ -8,12 +8,13 @@
 // The pushed ref's stand-in: a push leaves the remote-tracking ref moved, and the tracking ref
 // is the runner's evidence — so the leg moves tracking refs directly (`git update-ref
 // refs/remotes/<remote>/<branch>`), exactly the state a push of that branch would leave behind.
+import { runnerApi, testRunner } from '../lib/runnerRig';
+import { GitRepo } from '../lib/gitRepo';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { BatonApi } from '../../src/runner/api';
 import { Runner } from '../../src/runner/runner';
 import { outsideScope, pushesBetween, readRefState, repoOfUrl, type RefState } from '../../src/runner/audit';
 import { scopePaths } from '../../src/core/scope';
@@ -226,15 +227,10 @@ export async function close(ctx, result) {
 
 /** The home repository: a real git checkout whose `.baton/` the runner reads at the claim's
  *  snapshot, posting its real head sha (R-BTN-34's fetch never fires). */
-class Home {
-  readonly dir: string;
+class ScopedRelay extends GitRepo {
   head: string | null = null;
   constructor(buildLeg: string = PUSHING_LEG) {
-    this.dir = mkdtempSync(join(tmpdir(), 'baton-s202-'));
-    const g = (...a: string[]) => execFileSync('git', ['-C', this.dir, ...a], { encoding: 'utf8', stdio: 'ignore' });
-    g('init', '-q', '-b', 'main');
-    g('config', 'user.email', 's202@test');
-    g('config', 'user.name', 's202');
+    super('baton-202-');
     this.write('.baton/baton.json', `${JSON.stringify({ course: 'relay', skills_version: 3 })}\n`);
     this.write('.baton/courses/relay/course.json', `${JSON.stringify(relay, null, 2)}\n`);
     this.write('.baton/courses/relay/legs/build.mjs', buildLeg);
@@ -251,14 +247,8 @@ export async function close(ctx) {
 `);
     }
   }
-  write(path: string, text: string): void {
-    const file = join(this.dir, path);
-    mkdirSync(dirname(file), { recursive: true });
-    writeFileSync(file, text);
-  }
-  sha(): string {
-    return execFileSync('git', ['-C', this.dir, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
-  }
+
+
   async post(): Promise<void> {
     execFileSync('git', ['-C', this.dir, 'add', '.baton'], { stdio: 'ignore' });
     execFileSync('git', ['-C', this.dir, 'commit', '--no-gpg-sign', '-q', '-m', 'legs'], { stdio: 'ignore' });
@@ -273,37 +263,31 @@ export async function close(ctx) {
   }
 }
 
-let home: Home;
+let home: ScopedRelay;
 let n = 0;
 const clock = { now: T0 };
 let runner: Runner | null = null;
 
 function makeRunner(): Runner {
   const stateFile = join(tmpdir(), `baton-s202-runner-${process.pid}-${++n}.json`);
-  const api = new BatonApi({
-    url: ORIGIN,
-    transport: (req) => hostCall(req),
-    auth: (_m, _u, _b, secret) => ({ Authorization: `Bearer ${TOKENS['vm-a']}`, ...(secret ? { 'X-Runner-Secret': secret } : {}) }),
-  });
-  runner = new Runner({
-    api, home: home.dir, repository: 'docs', hostname: 'vm-a', harness: 'opencode',
-    session: `s202-${n}`, courses: [{ course: 'relay', version: 3 }],
-    stateFile, beatEvery: 40, now: () => clock.now, log: () => {},
-  });
+  const api = runnerApi();
+  runner = testRunner({
+    api, home: home.dir, session: `s202-${n}`, courses: [{ course: 'relay', version: 3 }],
+    stateFile, beatEvery: 40, now: () => clock.now, });
   return runner;
 }
 
 beforeEach(async () => {
   clock.now = T0;
   await setClock(T0);
-  home = new Home();
+  home = new ScopedRelay();
   await cutover();
 });
 
 afterEach(() => {
   runner?.stop();
   runner = null;
-  rmSync(home.dir, { recursive: true, force: true });
+  home.dispose();
 });
 
 describe('S-BTN-202 the runner audits a leg\'s pushes (B-134)', () => {
@@ -325,8 +309,8 @@ describe('S-BTN-202 the runner audits a leg\'s pushes (B-134)', () => {
   });
 
   it('a leg that only fetches from an out-of-scope remote is reported as having pushed nothing', async () => {
-    rmSync(home.dir, { recursive: true, force: true });
-    home = new Home(FETCHING_LEG);
+    home.dispose();
+    home = new ScopedRelay(FETCHING_LEG);
     await home.post();
     const out = await makeRunner().runOnce();
     expect(out).toMatchObject({ ticket: 'docs:T-1', end_reason: 'done', reached: 'merged' });
@@ -337,8 +321,8 @@ describe('S-BTN-202 the runner audits a leg\'s pushes (B-134)', () => {
   });
 
   it('eighteen out-of-scope pushes report sixteen actions and the count of the other two, logged scope-invalid', async () => {
-    rmSync(home.dir, { recursive: true, force: true });
-    home = new Home(MANY_PUSH_LEG);
+    home.dispose();
+    home = new ScopedRelay(MANY_PUSH_LEG);
     await home.post();
     const out = await makeRunner().runOnce();
     expect(out).toMatchObject({ ticket: 'docs:T-1', end_reason: 'done', reached: 'merged' });

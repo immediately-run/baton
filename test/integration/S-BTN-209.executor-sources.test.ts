@@ -52,9 +52,9 @@ describe('S-BTN-209: the executor source is the host\'s choice (R-BTN-107)', () 
     const kill = vi.spyOn(process, 'kill').mockReturnValue(true);
     try {
       const ex = await loadExecutor('builtin', host);
-      const handle = await ex.start({ brief: { kind: 'leg', session_id: 'replay', paths: [], wrapper: host.wrapper, env: {} } });
+      const handle = await ex.start({ brief: { kind: 'leg', session_id: 'replay', checkout: process.cwd(), paths: [], wrapper: host.wrapper, env: {} } });
       const lines: string[] = [];
-      const { result } = ex.exec(handle, ['node', host.wrapper], { onStderr: (line) => lines.push(line) });
+      const { result } = ex.exec(handle, ['node', host.wrapper], { cwd: process.cwd(), onStderr: (line) => { lines.push(line); } });
       child.stderr.write('note\n');
       child.emit('exit', 0, null);
       expect(kill).toHaveBeenCalledWith(-child.pid, 'SIGKILL');

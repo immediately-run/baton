@@ -1,0 +1,17 @@
+{
+  "id": "bug-report",
+  "version": 1,
+  "min_runner_version": 1,
+  "skill": "baton-bug-report",
+  "step_kinds": [
+    "trace",
+    "origin",
+    "dedupe",
+    "file",
+    "fold",
+    "prevent"
+  ],
+  "branch_pattern": "claude/{ticket}-*",
+  "protocol_files": [],
+  "facts": []
+}

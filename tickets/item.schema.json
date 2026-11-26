@@ -55,6 +55,27 @@
       "type": "string",
       "pattern": "^[A-Za-z0-9._-]{1,64}$",
       "description": "The claim nonce of the ticket's last close, its evidence (B-100)."
+    },
+    "topics": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Topic words the board groups by."
+    },
+    "owns": {
+      "type": [
+        "object",
+        "array"
+      ],
+      "description": "What the ticket owns, for overlap checks: a map (the store's convention, usually `{}`) or a list of paths."
+    },
+    "prs": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "The pull requests that carry the ticket, one URL each."
     }
   },
   "propertyNames": {

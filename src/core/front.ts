@@ -1,3 +1,4 @@
+/// <reference path="../modules.d.ts" />
 // front.ts — what stands in front of Baton's core (BATON_SPEC §3, §10): it verifies the
 // principal for the path, applies the R-BTN-16 rules, serves the dashboard's static files, and
 // forwards the API to the core — through the Durable Object on Cloudflare, through the request

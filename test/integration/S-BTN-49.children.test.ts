@@ -6,7 +6,10 @@
 // a child the first snapshot after the end does not post is `spawned-unposted` (R-BTN-85). The
 // pure half is test/unit/children.test.ts.
 import { describe, it, expect, beforeEach } from 'vitest';
-import { advance, claimItem, endClaim, cutover, Git, keyCall, placed, q, register, rows, setAdminKeys, setClock } from '../helpers';
+import {
+  advance, claimItem, endClaim, cutover, Git, keyCall, placed, q, register, rows, setAdminKeys, setClock,
+  seedTicketBlock,
+} from '../helpers';
 import { makeKey, type TestKey } from '../lib/sshKeys';
 
 const T0 = Date.parse('2026-11-18T12:00:00Z');
@@ -78,7 +81,7 @@ describe('S-BTN-49 child tickets (R3-1258: the non-call cases)', () => {
       { ticket_id: 'docs:C2', station: 'filed', blocked: false },
     ]);
     // A blocked child shows it; a closed one shows its closure.
-    await rows(`INSERT INTO ticket_blocks (ticket_id, repository_id, kind, ref, leg, since) VALUES ('docs:C2', 'docs', 'capability', 'no-such', '', 0)`);
+    await seedTicketBlock({ ticket_id: 'docs:C2', repository_id: 'docs', kind: 'capability', ref: 'no-such', leg: '', since: 0 });
     git.close('C1', 'done');
     expect((await git.post()).status).toBe(200);
     const after = await childrenOf('T');

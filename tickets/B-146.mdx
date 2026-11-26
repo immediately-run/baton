@@ -10,7 +10,7 @@ tags:
   - roadmap-item
 order: 1165
 tier: critical
-description: "Build R-BTN-181 as amended 2026-10-30: the attestation store and routes, writers recorded from the credential, SSHSIG signatures, supersession by attested key, `once` consumption by compare-and-swap, Baton's own `std:wrote@1`/`std:ran@1`/`std:review@1`; readings as attestations about a resource instance; `requires.attestations` and `requires.resources` with `binds: gate|advice`, `missing: block|allow` and `where` (`eq`, `in`, `glob`, `superset-of`, `gte`, `lte`); the `attestation` block kind and `ticket_blocks.binds`; rule 1 refusing gate-binding rows. S-BTN-181, S-BTN-24, G-BTN-70. Requires: none."
+description: "Build R-BTN-181 as amended 2026-10-30: the attestation store and routes, writers recorded from the credential, SSHSIG signatures, supersession by attested key (a `std:review@1` by run id), `once` consumption by compare-and-swap, Baton's own `std:wrote@1`/ ~~`std:ran@1`/~~ `std:review@1`; readings as attestations about a resource instance; `requires.attestations` and `requires.resources` with `binds: gate|advice`, `missing: block|allow` and `where` (`eq`, `in`, `glob`, `superset-of`, `gte`, `lte`); the `attestation` block kind and `ticket_blocks.binds`; rule 1 refusing gate-binding rows. S-BTN-181, S-BTN-24, G-BTN-70. Requires: none."
 topics:
   - baton
 owns: {}
@@ -54,10 +54,11 @@ requirement's choice; B-140's merge runner, B-141's harness and every trusted le
      `admin`, and `service:<fingerprint>` for its own key); work attested only by `human`, `owner`,
      `service` and `baton`; the SSHSIG signature over the RFC 8785 canonical JSON in namespace
      `baton-attestation@1`; revoking a `human` attestation a human gate.
-   - Supersession only when type, subject, writer and attested key match; a `once` attestation
-     consumed by compare-and-swap.
-   - Baton writes `std:wrote@1`, `std:ran@1` and `std:review@1` at the `advance` or end that earns
-     them, signed with its attestation key; the subject from values Baton holds, never a runner's
+   - Supersession only when type, subject, writer and attested key match — a `std:review@1` only
+     by one of its own run id~~; a `once` attestation
+     consumed by compare-and-swap~~ (no use-once bookkeeping: an attestation is bound by its subject).
+   - Baton writes `std:wrote@1` ~~, `std:ran@1`~~ and `std:review@1` (with the review run's run id, R-BTN-63) at the `advance` or end that earns
+     them~~, signed with its attestation key~~ (an attestation carries no signature of its own, R-BTN-181); the subject from values Baton holds, never a runner's
      output.
 3. **Readings as attestations.** A reading's `type` is its resource's schema id and its value
    `{available?, until?, detail}`. The reading routes accept `nonce` and `signature`; an API-key
@@ -116,3 +117,11 @@ _(2026-11-02: the spec restructure's part 3 (B-166, the PR `spec-restructure-han
 - 2026-11-03: item 8 added — R-BTN-191's supersession across all three posters, corrected by the 2026-11-02 security review (PR #165) and moved here from B-169, which has no store to build it on.
 
 _(2026-11-20: the spec simplification of 2026-11-19 (baton#299; `spec/BATON_SPEC_HISTORY.md`, that date) moved the unbuilt parts of the design this ticket builds out of the section files, with their rule ids, to proposal pages: attestations beyond a person's answer, and the sync's and the holder's attestations, are parts 4 and 5 of [the security proposal](../spec/proposals/security.md), with their tables and routes under "Attestations, roles and fact legs" in [the tables-and-routes proposal](../spec/proposals/data-model-and-api.md). S-BTN-181 is no longer a row of the verification section: it is in [the proposals' scenarios](../spec/proposals/scenarios.md), under "The repository policy's enforcement". Each rule keeps its id and a line in its section, which links the page. The pull request that builds this ticket moves the rules it builds back into the section files, and the scenarios and gates it makes pass back into [the verification section](../spec/BATON_SPEC/15-verification.md#sec-15), in the same change. The plan above is unchanged.)_
+
+_(2026-11-24: `std:ran@1` is struck: B-189's spec PR (`spec/BATON_SPEC_HISTORY.md`, the entry of 2026-11-24), on the owner's rulings of 2026-11-09 and 2026-11-24 (runners trusted, legs not) retires it with writer domains; `std:wrote@1` carries the range and the runner key, no domain, and `std:review@1` the review run's run id, by which R-BTN-183 counts each review as its own run of the exact head ([the security proposal](../spec/proposals/security.md), part 4).)_
+
+_(2026-11-24: rules re-read: R-BTN-181, R-BTN-183)_
+
+_(2026-11-24: B-189's spec PR (`spec/BATON_SPEC_HISTORY.md`, the entry of 2026-11-24), review round two: a `std:review@1` supersedes only one of its own run id, so two review runs by one runner key at one head both count; it names its run id and is written only for a run that finished at the leg's approving outcome (`approves: <station>`, or `to`'s first station for `true`). Description and item 2 updated.)_
+
+_(2026-11-24: rules re-read: R-BTN-181, R-BTN-183)_

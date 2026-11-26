@@ -6,18 +6,25 @@
 import { BatonError } from './http';
 import { parseSshKey } from './auth';
 import { logEvent } from './db';
-import type { Config, Store } from './ports';
-import { REPOSITORY_ID, TIER_NAME } from './validate';
-import { FORGES, isForgePath, isWebBase, parseTranscriptRepo, type Forge } from './links';
+import type { Config, ForgeDispatch, Store } from './ports';
+import { checkForgeDispatch, REPOSITORY_ID } from './validate';
+import { isForgePath, isWebBase, parseTranscriptRepo, type Forge } from './links';
+import { DEFAULT_FORGE, FORGES, FORGE_SHAPES, forgeForCi, WORKFLOW_PATH, hasPrs, isForge } from './forges';
 
 export { REPOSITORY_ID, TICKET_ID, qualify, repositoryOf, localOf } from './validate';
 
 /** A default branch, registered by the administrator: stricter than any branch a push may name
  *  (GIT_BRANCH), as it goes unencoded into the dashboard's GitHub links. */
 const BRANCH = /^(?!.*\.\.)[A-Za-z0-9._/-]{1,100}$/;
-const WORKFLOW = /^\.github\/workflows\/[A-Za-z0-9._-]{1,100}\.ya?ml$/;
-const TIER = TIER_NAME;
-const DEFAULT_TIERS = ['routine', 'judgement', 'critical'];
+export function checkRegisteredDispatch(value: unknown, field: string, forge: Forge, path: unknown, webBase: unknown, branch: unknown) {
+  if (typeof path !== 'string' || !isForgePath(forge, path) || typeof webBase !== 'string' || !isWebBase(forge, webBase, path)) {
+    return bad(field, 'needs the registered repository web base');
+  }
+  if (typeof branch !== 'string' || !BRANCH.test(branch)) return bad(field, 'needs the registered default branch');
+  // The App serves the default forge's own host alone (R-BTN-92).
+  const onDefaultOrigin = usesDefaultForgeOrigin({ forge, github: path, web_base: webBase });
+  return checkForgeDispatch(value, field, forge === DEFAULT_FORGE && !onDefaultOrigin ? 'git' : forge, branch);
+}
 
 /** How a repository's sync proves itself besides a sync key (R-BTN-93): GitHub Actions OIDC from its
  *  sync and mirror workflows, or a GitLab CI `id_tokens` JWT from its issuer. */
@@ -36,7 +43,6 @@ export interface Repository {
   mirror_workflow: string | null;
   weight: number;
   transcript_repos: string[];
-  tiers: string[];
   cutover_at: number | null;
   retired_at: number | null;
   /** R-BTN-138 (B-173): the paths a retirement moved off the row, latest first. They reach
@@ -57,20 +63,20 @@ export interface Registration {
   remote: string;
   web_base: string | null;
   ci_identity: CiIdentity | null;
+  dispatch: ForgeDispatch | null;
   sync_keys: { public_key: string; role: 'sync' | 'mirror' }[];
   default_branch: string;
   /** '' for none (R-BTN-93: only with a github-actions identity). */
   sync_workflow: string;
   mirror_workflow: string | null;
   weight: number;
-  tiers: string[];
   transcript_repos: string[];
   cut_over: boolean;
 }
 
 /** A registered repository's fields — every field a registration has but the owner keys, which
  *  live in `repository_owners` (R-BTN-58), above a registration's own (B-91). */
-const REGISTRATION_FIELDS = ['github', 'forge', 'remote', 'web_base', 'ci_identity', 'sync_keys', 'default_branch', 'sync_workflow', 'mirror_workflow', 'weight', 'tiers', 'transcript_repos', 'cut_over'] as const;
+const REGISTRATION_FIELDS = ['github', 'forge', 'remote', 'web_base', 'ci_identity', 'dispatch', 'sync_keys', 'default_branch', 'sync_workflow', 'mirror_workflow', 'weight', 'transcript_repos', 'cut_over'] as const;
 
 /** BATON_REPOSITORIES' entries, each with its checked registration and its place (`at`), for the
  *  start's three passes over the seed — the registration, its sync keys and its owner keys
@@ -86,8 +92,11 @@ export function seedEntries(config: Config): { entry: unknown; r: Registration; 
     throw new Error('BATON_REPOSITORIES is not JSON');
   }
   if (!Array.isArray(list)) throw new Error('BATON_REPOSITORIES must be a JSON array');
-  return list.map((entry, i) => {
+  return list.map((rawEntry, i) => {
     const at = `BATON_REPOSITORIES[${i}]`;
+    // Old environment seeds are not requests and may stay configured across restarts.
+    const entry = rawEntry && typeof rawEntry === 'object' && !Array.isArray(rawEntry)
+      ? Object.fromEntries(Object.entries(rawEntry).filter(([k]) => k !== 'tiers')) : rawEntry;
     return { entry, r: checkRegistration(entry, at), at };
   });
 }
@@ -102,9 +111,6 @@ export function checkRegistration(v: unknown, at = 'repository'): Registration {
   const known = new Set(['id', ...REGISTRATION_FIELDS, 'owner_keys']);
   for (const k of Object.keys(r)) if (!known.has(k)) bad(`${at}.${k}`, 'unknown field');
   const str = (k: string, re: RegExp) => (typeof r[k] === 'string' && re.test(r[k] as string) ? (r[k] as string) : bad(`${at}.${k}`, `must match ${re}`));
-  const tiers = r.tiers === undefined ? DEFAULT_TIERS
-    : Array.isArray(r.tiers) && r.tiers.length >= 1 && r.tiers.length <= 16 && r.tiers.every((t) => typeof t === 'string' && TIER.test(t)) && new Set(r.tiers).size === r.tiers.length
-      ? (r.tiers as string[]) : bad(`${at}.tiers`, 'must be 1–16 distinct tier names, lowest first');
   const transcript = r.transcript_repos === undefined ? []
     : Array.isArray(r.transcript_repos) && r.transcript_repos.length <= 20 && r.transcript_repos.every((x) => typeof x === 'string' && parseTranscriptRepo(x) !== null)
       ? (r.transcript_repos as string[]) : bad(`${at}.transcript_repos`, 'must be at most 20 repositories, each a GitHub owner/name or <forge>:<web_base>');
@@ -112,24 +118,26 @@ export function checkRegistration(v: unknown, at = 'repository'): Registration {
     : Number.isInteger(r.weight) && (r.weight as number) >= 0 && (r.weight as number) <= 10_000 ? (r.weight as number) : bad(`${at}.weight`, 'must be an integer from 0 to 10000');
   if (r.cut_over !== undefined && typeof r.cut_over !== 'boolean') bad(`${at}.cut_over`, 'must be true or false');
   // R-BTN-92: the forge, its path's grammar, the remote, the page every link is built from.
-  const forge = (r.forge ?? 'github') as Forge;
-  if (!(FORGES as readonly string[]).includes(forge)) bad(`${at}.forge`, `must be one of ${FORGES.join(', ')}`);
-  const github = typeof r.github === 'string' && isForgePath(forge, r.github) ? r.github : bad(`${at}.github`, `must be a ${forge} forge path (owner/name${forge === 'gitlab' ? ', up to four segments' : ''})`);
-  const webBase = r.web_base !== undefined ? r.web_base : forge === 'github' ? `https://github.com/${github}` : undefined;
-  if (forge === 'git' ? webBase != null : typeof webBase !== 'string' || !isWebBase(forge, webBase, github)) {
-    bad(`${at}.web_base`, forge === 'git' ? 'a git repository has none' : 'must be https://<host>[:<port>]/<forge path>, with no userinfo, query or fragment');
+  const named = r.forge ?? DEFAULT_FORGE;
+  const forge = isForge(named) ? named : bad(`${at}.forge`, `must be one of ${FORGES.join(', ')}`);
+  const github = typeof r.github === 'string' && isForgePath(forge, r.github) ? r.github : bad(`${at}.github`, `must be a ${forge} forge path (owner/name${FORGE_SHAPES[forge].depth[1] > 2 ? ', up to four segments' : ''})`);
+  const origin = FORGE_SHAPES[forge].defaultOrigin;
+  const defaultBase = origin && `${origin}/${github}`;
+  const webBase = r.web_base !== undefined ? r.web_base : defaultBase ?? undefined;
+  if (!hasPrs(forge) ? webBase != null : typeof webBase !== 'string' || !isWebBase(forge, webBase, github)) {
+    bad(`${at}.web_base`, !hasPrs(forge) ? 'a git repository has none' : 'must be https://<host>[:<port>]/<forge path>, with no userinfo, query or fragment');
   }
-  const remote = r.remote !== undefined ? r.remote : forge === 'github' ? `https://github.com/${github}.git` : undefined;
+  const remote = r.remote !== undefined ? r.remote : defaultBase ? `${defaultBase}.git` : undefined;
   // No credential ever reaches SQLite (R-BTN-94): an https remote has no userinfo, an ssh one a user
   // name at most (round 1, 1-A-5, 1-B-2).
   if (typeof remote !== 'string' || remote.length > 500
     || !/^(https:\/\/[A-Za-z0-9.-]+(:\d+)?\/|ssh:\/\/([A-Za-z0-9._-]+@)?[A-Za-z0-9.-]+(:\d+)?\/|[A-Za-z0-9._-]+@[A-Za-z0-9.-]+:)[^\s\\@?#\u0000-\u001f\u007f]+$/.test(remote)) {
     bad(`${at}.remote`, 'must be an https:// URL with no userinfo, an ssh:// URL, or user@host:path — never a credential');
   }
-  const syncWorkflow = r.sync_workflow == null ? '' : str('sync_workflow', WORKFLOW);
+  const syncWorkflow = r.sync_workflow == null ? '' : str('sync_workflow', WORKFLOW_PATH);
   // GitHub Actions workflows and the App serve github.com alone (R-BTN-92): another forge, or a
   // GitHub Enterprise host, has none (round 1, 1-A-0, 1-A-6, 1-B-0).
-  const onGithubCom = forge === 'github' && typeof webBase === 'string' && webBase.toLowerCase() === `https://github.com/${github.toLowerCase()}`;
+  const onGithubCom = defaultBase != null && typeof webBase === 'string' && webBase.toLowerCase() === defaultBase.toLowerCase();
   if ((syncWorkflow || r.mirror_workflow != null) && !onGithubCom) bad(`${at}.sync_workflow`, 'workflows are GitHub Actions on github.com only');
   // A mirror workflow posts with the Actions identity; a repository of sync keys has its mirror key
   // instead (round 2, 2-A-0).
@@ -143,6 +151,9 @@ export function checkRegistration(v: unknown, at = 'repository'): Registration {
     : Array.isArray(r.sync_keys) && r.sync_keys.length <= 4 && r.sync_keys.every((k) => k && typeof k === 'object' && typeof (k as Record<string, unknown>).public_key === 'string' && ['sync', 'mirror'].includes((k as Record<string, unknown>).role as string))
       ? (r.sync_keys as Registration['sync_keys']) : bad(`${at}.sync_keys`, 'must be at most 4 {public_key, role: sync|mirror}');
   if (!ci && !keys.some((k) => k.role === 'sync')) bad(at, 'a repository needs a CI identity or a sync key for its sync (R-BTN-93)');
+  const branch = str('default_branch', BRANCH);
+  const dispatch = r.dispatch === undefined ? (onGithubCom ? { kind: 'github-app' } as const : null)
+    : r.dispatch === null ? null : checkRegisteredDispatch(r.dispatch, `${at}.dispatch`, forge, github, webBase, branch);
   return {
     id: str('id', REPOSITORY_ID),
     github,
@@ -150,12 +161,12 @@ export function checkRegistration(v: unknown, at = 'repository'): Registration {
     remote: remote as string,
     web_base: (webBase ?? null) as string | null,
     ci_identity: ci,
+    dispatch,
     sync_keys: keys,
-    default_branch: str('default_branch', BRANCH),
+    default_branch: branch,
     sync_workflow: syncWorkflow,
-    mirror_workflow: r.mirror_workflow == null ? null : str('mirror_workflow', WORKFLOW),
+    mirror_workflow: r.mirror_workflow == null ? null : str('mirror_workflow', WORKFLOW_PATH),
     weight,
-    tiers,
     transcript_repos: transcript,
     cut_over: r.cut_over === true,
   };
@@ -165,18 +176,18 @@ export function checkRegistration(v: unknown, at = 'repository'): Registration {
  *  `github-actions` (the shape every registration had before R3-1262); a GitLab one names its
  *  issuer; `null` means sync keys only. */
 function checkCiIdentity(v: unknown, forge: Forge, syncWorkflow: string, at: string): CiIdentity | null {
-  if (v === undefined) return forge === 'github' && syncWorkflow ? { kind: 'github-actions' } : null;
+  if (v === undefined) return FORGE_SHAPES[forge].ci === 'github-actions' && syncWorkflow ? { kind: 'github-actions' } : null;
   if (v === null) {
     if (syncWorkflow) bad(at, 'a sync_workflow needs the github-actions identity');
     return null;
   }
   const o = v as Record<string, unknown>;
   if (o && o.kind === 'github-actions' && Object.keys(o).length === 1) {
-    if (forge !== 'github' || !syncWorkflow) bad(at, 'github-actions needs a github repository and its sync_workflow');
+    if (FORGE_SHAPES[forge].ci !== o.kind || !syncWorkflow) bad(at, 'github-actions needs a github repository and its sync_workflow');
     return { kind: 'github-actions' };
   }
   if (o && o.kind === 'gitlab-ci' && typeof o.issuer === 'string' && (o.mirror === undefined || typeof o.mirror === 'boolean') && Object.keys(o).every((k) => ['kind', 'issuer', 'mirror'].includes(k))) {
-    if (forge !== 'gitlab') bad(at, 'gitlab-ci needs a gitlab repository');
+    if (FORGE_SHAPES[forge].ci !== o.kind) bad(at, 'gitlab-ci needs a gitlab repository');
     if (syncWorkflow) bad(at, 'sync_workflow is the github-actions identity\'s');
     let u: URL | null = null;
     try {
@@ -190,6 +201,15 @@ function checkCiIdentity(v: unknown, forge: Forge, syncWorkflow: string, at: str
   return bad(at, "must be {kind: 'github-actions'} or {kind: 'gitlab-ci', issuer, mirror?}");
 }
 
+function usesDefaultForgeOrigin(r: Pick<Repository, 'forge' | 'github' | 'web_base'>): boolean {
+  const origin = FORGE_SHAPES[r.forge].defaultOrigin;
+  return origin !== null && r.web_base?.toLowerCase() === `${origin}/${r.github.toLowerCase()}`;
+}
+
+export function forgeCoordinates(r: Pick<Repository, 'forge' | 'github' | 'web_base'>) {
+  return { forge: r.forge, path: r.github, webBase: r.web_base };
+}
+
 /** §6.8: the transcript repositories, for a repository that has named none yet. */
 export const DEFAULT_TRANSCRIPT_REPOS = ['immediately-run/claude-sessions', 'immediately-run-worker/session-transcripts'];
 
@@ -200,23 +220,6 @@ export function transcriptReposOf(store: Store, repo: string): string[] {
   return list.length ? list : DEFAULT_TRANSCRIPT_REPOS;
 }
 
-/** A runner's ceiling in one repository's ladder (§7.2 rule 5, R-BTN-66): the one it declared
- *  for that repository; else its single `tier_ceiling` where the ladder has that name; else the
- *  ladder's top if that ceiling is the unrestricted default (`critical`, docs' top), and the
- *  ladder's bottom otherwise — a restricted runner is never widened by a ladder it did not name.
- *  A grant's `max_tier` caps it further (R-BTN-58, Claims.ceiling). */
-export function ceilingIn(repo: string, ladder: string[], ceilings: Record<string, string>, legacy: string): string {
-  const named = ceilings[repo];
-  if (named !== undefined) return ladder.includes(named) ? named : ladder[0]; // a ceiling it named, never widened
-  if (ladder.includes(legacy)) return legacy;
-  return legacy === 'critical' ? ladder[ladder.length - 1] : ladder[0];
-}
-
-/** A ticket tier's position in its repository's ladder: null untiered (fits only the top); a name
- *  the ladder lacks is the ladder's length, which fits nothing. */
-export const tierPosition = (ladder: string[], tier: string | null) =>
-  tier == null ? null : ladder.includes(tier) ? ladder.indexOf(tier) : ladder.length;
-
 /** The claims of a verified GitHub Actions OIDC token that bind it (R-BTN-15). */
 export interface SyncClaims {
   repository: string;
@@ -224,12 +227,13 @@ export interface SyncClaims {
   job_workflow_ref: string;
 }
 
-type RepoRow = Omit<Repository, 'transcript_repos' | 'tiers' | 'ci_identity' | 'former_paths'> & { transcript_repos: string; tiers: string; ci_identity: string | null; former_paths: string | null };
-const parse = (r: RepoRow): Repository => ({ ...r, transcript_repos: JSON.parse(r.transcript_repos), tiers: JSON.parse(r.tiers), ci_identity: r.ci_identity ? JSON.parse(r.ci_identity) : null, former_paths: r.former_paths ? JSON.parse(r.former_paths) : [] });
-const REPO_COLUMNS = 'id, github, forge, remote, web_base, ci_identity, default_branch, sync_workflow, mirror_workflow, weight, transcript_repos, tiers, cutover_at, retired_at, former_paths';
+type RepoRow = Omit<Repository, 'transcript_repos' | 'ci_identity' | 'former_paths'> & { transcript_repos: string; ci_identity: string | null; former_paths: string | null };
+const parse = (r: RepoRow): Repository => ({ ...r, transcript_repos: JSON.parse(r.transcript_repos), ci_identity: r.ci_identity ? JSON.parse(r.ci_identity) : null, former_paths: r.former_paths ? JSON.parse(r.former_paths) : [] });
+const REPO_COLUMNS = 'id, github, forge, remote, web_base, ci_identity, default_branch, sync_workflow, mirror_workflow, weight, transcript_repos, cutover_at, retired_at, former_paths';
 
 export class Registry {
-  constructor(private readonly c: { store: Store; now: () => number; ensurePolicy: (repository: string, forge: Forge) => void }) {}
+  constructor(private readonly c: { store: Store; now: () => number; ensurePolicy: (repository: string, forge: Forge) => void;
+    secretForge: (repository: string) => unknown }) {}
 
   private rows<T>(q: string, ...p: unknown[]): T[] {
     return this.c.store.exec<T>(q, ...p).toArray();
@@ -239,6 +243,8 @@ export class Registry {
    *  `invalid-params` (retiring and changing one are the administrator's, R3-1240). */
   register(input: unknown, opts: { keysAddedLater?: boolean } = {}): Repository {
     const r = checkRegistration(input);
+    const secretForge = this.c.secretForge(r.id);
+    if (secretForge !== undefined && secretForge !== r.forge) bad('forge', 'does not match the configured forge secret');
     // Keys are added by registerWithKeys or the seed's seedSyncKeys (their fingerprints need
     // WebCrypto, an await); never dropped in silence (round 1, 1-A-7).
     if (r.sync_keys.length && !opts.keysAddedLater) bad('sync_keys', 'are added with registerWithKeys');
@@ -246,12 +252,11 @@ export class Registry {
       bad('repository', `${r.id} (${r.github}) is already registered`);
     }
     this.c.store.exec(
-      `INSERT INTO repositories (id, github, forge, remote, web_base, ci_identity, dispatch, default_branch, sync_workflow, mirror_workflow, weight, transcript_repos, tiers, cutover_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO repositories (id, github, forge, remote, web_base, ci_identity, dispatch, default_branch, sync_workflow, mirror_workflow, weight, transcript_repos, cutover_at, insertion_order)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, (SELECT COALESCE(MAX(insertion_order), 0) + 1 FROM repositories))`,
       r.id, r.github, r.forge, r.remote, r.web_base, r.ci_identity ? JSON.stringify(r.ci_identity) : null,
-      // The App serves github.com alone (round 2, 2-A-4).
-      r.forge === 'github' && r.web_base?.toLowerCase() === `https://github.com/${r.github.toLowerCase()}` ? '{"kind":"github-app"}' : null,
-      r.default_branch, r.sync_workflow, r.mirror_workflow, r.weight, JSON.stringify(r.transcript_repos), JSON.stringify(r.tiers),
+      r.dispatch ? JSON.stringify(r.dispatch) : null,
+      r.default_branch, r.sync_workflow, r.mirror_workflow, r.weight, JSON.stringify(r.transcript_repos),
       r.cut_over ? this.c.now() : null);
     this.c.store.exec('INSERT INTO board_head (repository_id, sha) VALUES (?, NULL) ON CONFLICT (repository_id) DO NOTHING', r.id);
     // §12.8 (B-145): version 1 with the repository — the `cooperative` preset on a forge,
@@ -385,7 +390,7 @@ export class Registry {
    *  audience names — `mirror` only where the identity says the repository has a GitLab mirror. */
   forGitlab(c: { issuer: string; project_path: string; ref: string; ref_type: string; role: 'sync' | 'mirror' }, role: 'sync' | 'mirror'): Repository {
     const row = this.rows<RepoRow>(
-      `SELECT ${REPO_COLUMNS} FROM repositories WHERE github = ? COLLATE NOCASE AND forge = 'gitlab' AND retired_at IS NULL`, c.project_path)[0];
+      `SELECT ${REPO_COLUMNS} FROM repositories WHERE lower(github) = lower(?) AND forge = ? AND retired_at IS NULL`, c.project_path, forgeForCi('gitlab-ci'))[0];
     const ci = row?.ci_identity ? (JSON.parse(row.ci_identity) as CiIdentity) : null;
     if (!row || ci?.kind !== 'gitlab-ci' || ci.issuer !== c.issuer) throw new BatonError('forbidden', 'the GitLab token is from a project this Baton does not serve');
     if (c.ref_type !== 'branch' || c.ref !== row.default_branch) throw new BatonError('forbidden', `the GitLab token is not from ${row.github}'s default branch`);
@@ -398,16 +403,22 @@ export class Registry {
    *  `job_workflow_ref` is its sync workflow (role `sync`) or its mirror workflow (`mirror`)
    *  on that branch. Anything else is `forbidden`. */
   forSync(claims: SyncClaims, role: 'sync' | 'mirror'): Repository {
+    return this.bindGithubSync(claims, role).repo;
+  }
+
+  bindGithubSync(claims: SyncClaims, role?: 'sync' | 'mirror'): { repo: Repository; role: 'sync' | 'mirror' } {
     const row = this.rows<RepoRow>(
-      `SELECT ${REPO_COLUMNS} FROM repositories WHERE github = ? COLLATE NOCASE AND forge = 'github'
-       AND lower(web_base) = 'https://github.com/' || lower(github) AND retired_at IS NULL`, claims.repository)[0];
+      `SELECT ${REPO_COLUMNS} FROM repositories WHERE lower(github) = lower(?) AND forge = ?
+       AND lower(web_base) = ? || '/' || lower(github) AND retired_at IS NULL`, claims.repository, DEFAULT_FORGE, FORGE_SHAPES[DEFAULT_FORGE].defaultOrigin)[0];
     if (!row) throw new BatonError('forbidden', 'the OIDC token is from a repository this Baton does not serve');
     const branch = `refs/heads/${row.default_branch}`;
-    const workflow = role === 'sync' ? row.sync_workflow : row.mirror_workflow;
+    const matches = (workflow: string | null) => !!workflow && claims.job_workflow_ref === `${claims.repository}/${workflow}@${branch}`;
+    const selected = role ?? (matches(row.sync_workflow) ? 'sync' : 'mirror');
+    const workflow = selected === 'sync' ? row.sync_workflow : row.mirror_workflow;
     // GitHub spells the repository its own way; it matched case-insensitively above.
-    if (!workflow || JSON.parse(row.ci_identity ?? 'null')?.kind !== 'github-actions' || claims.ref !== branch || claims.job_workflow_ref !== `${claims.repository}/${workflow}@${branch}`) {
+    if (!matches(workflow) || JSON.parse(row.ci_identity ?? 'null')?.kind !== 'github-actions' || claims.ref !== branch) {
       throw new BatonError('forbidden', `the OIDC token is not from this route’s workflow on ${row.github} ${row.default_branch}`);
     }
-    return parse(row);
+    return { repo: parse(row), role: selected };
   }
 }

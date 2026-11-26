@@ -10,6 +10,7 @@
 //
 // A refusal is thrown, and the CLI prints it as one `baton: …` line, exit 2 — a finding keeps
 // exit 1.
+import { DEFAULT_FORGE, FORGE_SHAPES } from '../core/forges';
 import { git as gitArgs, gitText } from './git.mjs';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -23,9 +24,9 @@ import { filingDate, firstCommit, historyEntries, rulesConfig, staleIds, staleLi
 import { ticketsMarkdown } from './tickets-markdown';
 import { claimMismatch, formatTicket, ticketPathsUnder, ticketPrView } from '../shared/ticketPr.mjs';
 import { defaultBranch } from './request';
-import { ownRepositoryId } from './cli';
+import { ownRepositoryId } from './remote-slug';
 import { builtIn, DEFAULT_COURSE } from './courses';
-import { holderRefusal, readTicketPosition, Undetermined, type BatonPosition } from './tickets-baton';
+import { holderRefusal, readDoneTickets, readTicketPosition, Undetermined, type BatonPosition } from './tickets-baton';
 import { batonTarget, nextMain } from './sequences';
 
 // B-280: every git call goes through the bounded, prompt-free seam (./git.mjs).
@@ -264,7 +265,7 @@ function isDoneLocal(dir: string, settings: TicketSettings, id: string): boolean
 export function dependencyRemote(map: Record<string, string>, repository: string): string {
   const path = map[repository];
   if (path == null) throw new Error(`${repository}: the baton.json repos map does not resolve it — a qualified dependency names a repository the map knows (B-113)`);
-  return /^(?:[a-z][a-z0-9+.-]*:\/\/|git@|[.\\/])/.test(path) ? path : `https://github.com/${path}`;
+  return /^(?:[a-z][a-z0-9+.-]*:\/\/|git@|[.\\/])/.test(path) ? path : `${FORGE_SHAPES[DEFAULT_FORGE].defaultOrigin}/${path}`;
 }
 
 /** A qualified dependency's own half, read from the target repository's default branch at
@@ -356,6 +357,9 @@ export async function ticketsCheckMain(argv: string[], io: TicketsIo = {}): Prom
   let prBase: string | null = null;
   let claimedStatusOnly = false;
   let forgePath: string | null = null;
+  let offline = io.offline;
+  let identity = io.identity;
+  let url = io.url;
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const value = (): string => {
@@ -368,12 +372,20 @@ export async function ticketsCheckMain(argv: string[], io: TicketsIo = {}): Prom
     else if (a === '--pr') prBase = value();
     else if (a === '--claimed-status-only') claimedStatusOnly = true;
     else if (a === '--forge') forgePath = value();
+    else if (a === '--offline') offline = true;
+    else if (a === '-i') identity = value();
+    else if (a === '--url') url = value();
     else throw new Error(`${a}: not a flag of baton tickets check`);
   }
   // The settings first: a repository with none has no page to judge, and the check says so.
   const settings = readTicketSettings(root);
   const lines: string[] = [];
-  const code = await checkTicketsMain(['--repo', root], { log: (l) => lines.push(l) });
+  const target = quiet || offline ? null : batonTarget(root, { identity, url });
+  const { keyFile, repository, url: boardUrl } = target ?? {};
+  const code = await checkTicketsMain(['--repo', root], {
+    log: (l) => lines.push(l),
+    ...(keyFile && repository && boardUrl ? { boardDone: () => readDoneTickets({ url: boardUrl, keyFile, repository, fetchImpl: io.fetchImpl }) } : {}),
+  });
   const page = pageFinding(root, settings);
   const last = lines.pop() ?? '';
   const tickets = Number(/(\d+) ticket\(s\)/.exec(last)?.[1] ?? 0);
@@ -485,6 +497,7 @@ export function ticketsHelp(): string[] {
     '                   --coordinator prints Baton\'s number alone or refuses, never scanning: the',
     '                   command .dibber/config.json\'s coordinator names (B-326)',
     'baton tickets check [--repo DIR] [--quiet]    check the tickets without posting them',
+    '  With -i KEY or BATON_KEY_FILE, report live files for board-done tickets; --offline skips this read.',
     '                   --pr BASE [--claimed-status-only] [--forge FILE]',
     '                                                  also print the computed ticket-PR view',
     '                   against BASE (fields, body and brief diffs, provenance, the status-only',

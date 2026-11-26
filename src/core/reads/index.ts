@@ -23,6 +23,8 @@
 // for a list, the convention `{<items>: [...], next_cursor?, counts?}` with `cursorOf` and
 // `pageOf` (./kit.ts), timestamps as epoch milliseconds; filter fields only (R-BTN-33). A read
 // writes nothing.
+import { pathSegment } from '../routes/kit';
+import { readPrincipal } from '../routes/principal';
 import { hiddenSessionLink, type SessionLinkView } from '../links';
 import { sha256Hex } from '../runnerApi';
 import { BatonError, json, noStore } from '../http';
@@ -61,15 +63,6 @@ function routeOf(action: string): ReadRoute | undefined {
   return byAction.get(action);
 }
 
-/** One path segment, decoded: a malformed escape is the caller's error, never a 500. */
-function decoded(raw: string): string {
-  try {
-    return decodeURIComponent(raw);
-  } catch {
-    throw new BatonError('invalid-params', 'a malformed path segment');
-  }
-}
-
 type ReportingRunner = { id: number; incarnation: number };
 
 /** B-205: the strong ETag of this call's answer — the state version, the caller, the action,
@@ -106,9 +99,9 @@ export async function dispatchRead(cx: ReadCtx, req: Request, url: URL): Promise
   const route = routeOf(hit.action.id)!;
   // One principal, then the one check (R-BTN-129): the caller against the entry, then the
   // repository the path names.
-  const who = await cx.core.readPrincipal(req);
+  const who = await readPrincipal(cx.core, req);
   const caller = authorizeAction(who.principal, hit.action);
-  const params = Object.fromEntries(Object.entries(hit.params).map(([k, v]) => [k, decoded(v)]));
+  const params = Object.fromEntries(Object.entries(hit.params).map(([k, v]) => [k, pathSegment(v)]));
   let repository: string | null = null;
   if ('repository' in params) {
     repository = checkRepositoryId(params.repository);
@@ -120,8 +113,15 @@ export async function dispatchRead(cx: ReadCtx, req: Request, url: URL): Promise
   const sessionLink: SessionLinkView = (link, holder, incarnation) =>
     link !== null && (principal.kind === 'session' || (runner?.id === holder && runner.incarnation === incarnation))
       ? { session_url: link, session_link: true } : hiddenSessionLink(link, holder, incarnation);
+  // Check before the conditional response and strip before both ETag and cursor scoping.
+  if (hit.action.id === 'repo.tickets' && url.searchParams.has('tier')) {
+    const p = principal;
+    const actor = p.kind === 'session' ? `session:${p.id}` : `${p.role === 'runner' ? 'credential' : p.role}:${p.cred}`;
+    cx.core.deprecated.tierFields(cx.now(), actor, ['tickets.tier'], 'tickets list', repository);
+    url.searchParams.delete('tier');
+  }
   const open = url.searchParams.get('open');
-  const deliverInteractions = hit.action.id === 'repo.conditions' && principal.kind === 'key' && principal.role === 'runner'
+  const deliverInteractions = hit.action.id === 'condition.list' && principal.kind === 'key' && principal.role === 'runner'
     && repository !== null && (open === '1' || open === 'true') && url.searchParams.get('type') === 'interact'
     && cx.sql(`SELECT 1 FROM runner_grants WHERE credential_id = ? AND repository_id = ?
                AND revoked_at IS NULL AND deliver_interactions = 1`, principal.cred, repository).length > 0;

@@ -1,3 +1,4 @@
+import { publicHost } from './forges';
 // request.ts — `baton request "<one sentence>" --course <course>` (B-98, BATON_SPEC §5.8
 // R-BTN-131, §2f R-BTN-74): a course whose product is tickets or specs — `create-spec`,
 // `build-app` — is not started ticket-less. It is started by a **request ticket**: one sentence,
@@ -28,10 +29,11 @@
 import { gitText } from './git.mjs';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { resolveSource } from './cli';
 import { dirname, join, resolve } from 'node:path';
 import { batonTarget, fallbackNote, floorFor, parseKind, takeNumber } from './sequences';
 import { hostOf, NAMED_FORGES, openRequestPr, protectedRefusal, requestForge, tokenOf, type PrForge } from './forge';
-import { remoteSlug, slugOfUrl } from './remote-slug';
+import { slugOfUrl } from './remote-slug';
 import { openRequestNumbers, requestBranch, requestHeads } from './request-branches';
 import { ticketCommitMessage } from './tickets';
 
@@ -47,7 +49,7 @@ export const REQUEST_ENTRY = 'request';
 interface BatonJson {
   items?: string;
   default_course?: string;
-  courses?: { id: string }[];
+  courses?: { id: string; source?: string }[];
 }
 
 /** A request as `requestMain` plans it, before any git runs: what it files, on which course, and
@@ -113,7 +115,7 @@ const refusalWords = (e: unknown): string => {
  *  no remote, and is the URL the request pushed to all the same. */
 const remoteUrl = (root: string, remote: string): string | null => {
   try {
-    return gitText(root, 'remote', 'get-url', remote);
+    return gitText(root, 'remote', 'get-url', '--push', remote);
   } catch {
     return remote.trim() !== '' ? remote : null;
   }
@@ -149,7 +151,7 @@ const scalar = (v: string): string => {
 /** The request ticket's file (§2f): the sentence as title and description, the course, `available`,
  *  `tags: [request]`; the body names the course and the command that filed it, and its `## Status`
  *  the `_filed` day. */
-export function requestFile(id: string, course: string, sentence: string, tier?: string, date = today()): string {
+export function requestFile(id: string, course: string, sentence: string, date = today()): string {
   return [
     '---',
     `title: ${scalar(`${id} — ${sentence}`)}`,
@@ -158,7 +160,6 @@ export function requestFile(id: string, course: string, sentence: string, tier?:
     `updated: ${date}`,
     'tags:',
     '  - request',
-    ...(tier ? [`tier: ${scalar(tier)}`] : []),
     `course: ${scalar(course)}`,
     `description: ${scalar(sentence)}`,
     'owns: {}',
@@ -222,7 +223,7 @@ export function nextId(root: string, items: string, prefix = ticketPrefix(root, 
 
 /** Read and judge the checkout before any git runs: the `.baton/baton.json` the request must be
  *  listed in, the course file that must opt in. Each refusal names what to do. */
-export function readRequestPlan(root: string, course: string, sentence: string, at = resolve(root), where?: string): RequestPlan {
+export function readRequestPlan(root: string, course: string, sentence: string, at = resolve(root), where?: string, sourceGraph?: string): RequestPlan {
   // `where` names the tree in a refusal: a landing read's `at` is a throwaway worktree, useless
   // to an operator — the branch is what they can act on (round 3, 3-r1-1).
   const site = where ?? at;
@@ -242,10 +243,10 @@ export function readRequestPlan(root: string, course: string, sentence: string, 
     throw new Error(`${site}: course ${course} is not one .baton/baton.json lists (${listed.length ? listed.join(', ') : 'none'}) — add it to \`courses\` with \`baton repo init --course ${course}\``);
   }
   const courseFile = join(at, '.baton', 'courses', course, 'course.json');
-  if (!existsSync(courseFile)) throw new Error(`${site}: .baton/courses/${course}/course.json is missing — run \`baton repo init --course ${course}\``);
+  if (sourceGraph === undefined && !existsSync(courseFile)) throw new Error(`${site}: .baton/courses/${course}/course.json is missing — run \`baton repo init --course ${course}\``);
   let graph: { starts_from?: unknown; start?: unknown; start_leg?: unknown };
   try {
-    graph = JSON.parse(readFileSync(courseFile, 'utf8')) as typeof graph;
+    graph = JSON.parse(sourceGraph ?? readFileSync(courseFile, 'utf8')) as typeof graph;
   } catch (e) {
     throw new Error(`.baton/courses/${course}/course.json is not JSON: ${(e as Error).message.split('\n')[0]}`);
   }
@@ -278,7 +279,6 @@ export interface RequestOptions {
   branch?: string;
   /** The remote name (`origin`), or its path. */
   remote?: string;
-  tier?: string;
   /** B-174: the forge whose adapter decides the protected-branch fallback (R-BTN-131) — the
    *  `--forge` flag. Unset, the origin's host decides (`github` on github.com; else none). */
   forge?: string;
@@ -326,14 +326,18 @@ export async function fileRequest(plan: RequestPlan, opts: RequestOptions = {}):
       // The landing tree's own word (round 1, 1-A-2): the course must be listed and opted in on
       // the branch this ticket will be read from, never only on one the caller stands on. The
       // plan's root is swapped for the worktree for this try.
-      const atHead = readRequestPlan(plan.root, plan.course, plan.sentence, dir, `${remote}/${branch()}`);
+      const settingsFile = join(dir, '.baton', 'baton.json');
+      const settings = existsSync(settingsFile) ? JSON.parse(readFileSync(settingsFile, 'utf8')) as BatonJson : null;
+      const source = settings?.courses?.find((c) => c.id === plan.course)?.source;
+      const sourceGraph = source === undefined ? undefined : (await resolveSource(plan.course, source, join(dir, '.git-baton-sources'))).graph;
+      const atHead = readRequestPlan(plan.root, plan.course, plan.sentence, dir, `${remote}/${branch()}`, sourceGraph);
       // B-176: Baton's id when it gave one under this tree's prefix; else the scan, where
       // (R-BTN-131, B-174) the open request branches' ids count too, so two requests waiting on
       // their branches never share an id. The head the commit sits on is the worktree's own.
       const id = opts.allocated?.startsWith(`${atHead.prefix}-`)
         ? opts.allocated
         : nextId(dir, atHead.items, atHead.prefix, openRequestNumbers(dir, remote, atHead.items, `${atHead.prefix}-`, gitText(dir, 'rev-parse', 'HEAD'), warn));
-      const text = requestFile(id, atHead.course, plan.sentence, opts.tier, opts.date);
+      const text = requestFile(id, atHead.course, plan.sentence, opts.date);
       const message = requestMessage(id, plan.course, plan.sentence);
       const file = join(dir, atHead.items, `${id}.mdx`);
       mkdirSync(dirname(file), { recursive: true });
@@ -379,9 +383,7 @@ export async function fileRequest(plan: RequestPlan, opts: RequestOptions = {}):
   throw new Error('baton request: no try ran');
 }
 
-/** A forge's own public host, for a PR opened where the origin names none (a `--forge` adapter
- *  on a local path): GitHub's, GitLab's, Gitea's. */
-const publicHost = (forge: PrForge): string => (forge === 'github' ? 'github.com' : forge === 'gitlab' ? 'gitlab.com' : 'gitea.com');
+
 
 /** The protected-branch fallback (B-174, R-BTN-131): the commit the worktree `dir` already
  *  holds — the request `id` on the default branch's head — goes to `baton-request/<ID>`
@@ -409,7 +411,7 @@ async function fileOnRequestBranch(
     gitText(dir, 'reset', '-q', '--hard', 'HEAD~1');
     const moved = join(dir, atHead.items, `${taken}.mdx`);
     mkdirSync(dirname(moved), { recursive: true });
-    writeFileSync(moved, requestFile(taken, atHead.course, plan.sentence, opts.tier, opts.date));
+    writeFileSync(moved, requestFile(taken, atHead.course, plan.sentence, opts.date));
     gitText(dir, 'add', '--', `${atHead.items}/${taken}.mdx`);
     gitText(dir, 'commit', '-q', '-m', requestCommitMessage(requestMessage(taken, plan.course, plan.sentence), opts.env));
   }
@@ -424,7 +426,7 @@ async function fileOnRequestBranch(
   }
   const filed: Filed = {
     id: taken,
-    text: requestFile(taken, atHead.course, plan.sentence, opts.tier, opts.date),
+    text: requestFile(taken, atHead.course, plan.sentence, opts.date),
     message: requestMessage(taken, plan.course, plan.sentence),
     course: atHead.course,
     start: atHead.start,
@@ -448,7 +450,7 @@ async function fileOnRequestBranch(
     {
       forge,
       host: host ?? publicHost(forge),
-      repo: remoteSlug(plan.root, remote) ?? (pushed != null && host != null ? slugOfUrl(pushed) : ''),
+      repo: pushed != null && host != null ? slugOfUrl(pushed) : '',
       head: on,
       base,
       title: filed.message,
@@ -469,7 +471,7 @@ const topOf = (root: string): string | null => {
 };
 
 /**
- * `baton request "<one sentence>" --course <course> [--repo DIR] [--tier T] [--branch B]
+ * `baton request "<one sentence>" --course <course> [--repo DIR] [--branch B]
  * [--remote R] [--forge github|gitlab|gitea|git] [-i KEY] [--url URL] [--offline]` (B-98, B-174,
  * B-176): files ONE request ticket on a course that opts in, as one commit pushed straight to the
  * repository's default branch — the push triggers the sync, the board places the ticket, the next
@@ -493,7 +495,6 @@ export async function requestMain(
   const warn = io.warn ?? ((l: string) => process.stderr.write(`${l}\n`));
   let root = io.root ?? process.env.BATON_HOME ?? process.cwd();
   let course: string | undefined;
-  let tier: string | undefined;
   let branch: string | undefined;
   let remote: string | undefined;
   let forge: string | undefined;
@@ -512,7 +513,7 @@ export async function requestMain(
       break;
     }
     if (a === '--help' || a === '-h') {
-      log('baton request "<one sentence>" --course <id> [--repo DIR] [--tier T] [--branch B] [--remote R] [--forge github|gitlab|gitea|git] [-i KEY] [--url URL] [--offline]');
+      log('baton request "<one sentence>" --course <id> [--repo DIR] [--branch B] [--remote R] [--forge github|gitlab|gitea|git] [-i KEY] [--url URL] [--offline]');
       log('  files one request ticket on a course whose course.json says starts_from: request, commits');
       log('  it to the default branch and pushes it: the push starts the sync, the board places the');
       log('  ticket, the next claim starts the course. -- ends the flags: a sentence may start with -.');
@@ -527,7 +528,6 @@ export async function requestMain(
     }
     if (a === '--course') course = value();
     else if (a === '--repo') root = value();
-    else if (a === '--tier') tier = value();
     else if (a === '--branch') branch = value();
     else if (a === '--remote') remote = value();
     else if (a === '--forge') forge = value();
@@ -586,7 +586,6 @@ export async function requestMain(
       ...(branch ? { branch } : {}),
       ...(remote ? { remote } : {}),
       ...(forge ? { forge } : {}),
-      ...(tier ? { tier } : {}),
       ...(io.date ? { date: io.date } : {}),
       ...(io.env ? { env: io.env } : {}),
       ...(io.fetchImpl ? { fetchImpl: io.fetchImpl } : {}),

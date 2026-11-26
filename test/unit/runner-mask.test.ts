@@ -27,7 +27,7 @@ function maskLines(literals: string[], lines: string[]): string {
   return [...lines.map((line) => sink.push(line)), sink.flush()].filter(Boolean).join('\n');
 }
 
-describe('class 7 by name (R-BTN-144)', () => {
+describe('class 7 by name (R-BTN-144; S-BTN-98, redaction slice)', () => {
   it('the five endings and PGPASSWORD, exactly as the environment spells them — case-sensitive', () => {
     expect(SECRET_NAME_SUFFIXES).toEqual(['_KEY', '_TOKEN', '_SECRET', '_PASSWORD', '_PAT']);
     expect(SECRET_NAME_EXACT).toBe('PGPASSWORD');
@@ -287,6 +287,22 @@ describe('class 7 by name (R-BTN-144)', () => {
     expect(sink.push('AAAA')).toBe('');
     expect(sink.push('-----END OPENSSH PRIVATE KEY-----')).toBe('***');
     expect(sink.flush()).toBe('');
+  });
+
+  it('recognizes private-key banners before masking overlapping literals (S-BTN-119)', () => {
+    const begin = '-----BEGIN OPENSSH PRIVATE KEY-----';
+    const end = '-----END OPENSSH PRIVATE KEY-----';
+    const body = 'synthetic-key-body';
+    const after = 'normal output resumes';
+    for (const secret of ['-synthetic-local-value', 'PRIVATE KEY']) {
+      const sink = createLegMasker([secret]);
+      expect(sink.push(begin)).toBe('');
+      expect(sink.push(body)).toBe('');
+      expect(sink.push(end)).toBe('***');
+      expect(sink.push(after)).toBe(after);
+      expect(sink.flush()).toBe('');
+      expect(maskLegOutput([begin, body, end, after].join('\n'), [secret])).toBe(`***\n***\n***\n${after}`);
+    }
   });
 });
 

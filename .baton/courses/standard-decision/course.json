@@ -1,0 +1,34 @@
+{
+  "start": "raised",
+  "start_leg": "prepare",
+  "end": [
+    "decided"
+  ],
+  "stations": {
+    "raised": {
+      "label": "Raised"
+    },
+    "asked": {
+      "label": "Waiting on the owner"
+    },
+    "decided": {
+      "label": "Answer carried out"
+    }
+  },
+  "legs": {
+    "prepare": {
+      "from": [
+        "raised"
+      ],
+      "to": "asked",
+      "label": "Write the decision packet"
+    },
+    "carry-out": {
+      "from": [
+        "asked"
+      ],
+      "to": "decided",
+      "label": "Carry the answer out"
+    }
+  }
+}

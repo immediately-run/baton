@@ -9,17 +9,18 @@
 // through the ordinary claim, and a refusal drops it; an order waits while no claim answer has
 // said the repository requires no owner-signed control. Node only: it spawns the legs' child
 // processes and runs git.
+import { runnerApi, testRunner, until } from '../lib/runnerRig';
+import { GitRepo } from '../lib/gitRepo';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { BatonApi } from '../../src/runner/api';
 import { Runner } from '../../src/runner/runner';
 import { LocalQueue, queueMain, queuePath } from '../../src/runner/queue';
 import { checkAdvance, checkEnd } from '../../src/core/validate';
 import { call as hostCall } from '#host';
-import { ORIGIN, course, cutover, placed, rows, setClock, syncCall, ticket, TOKENS } from '../helpers';
+import { course, cutover, placed, rows, setClock, syncCall, ticket } from '../helpers';
 import relay from '../fixtures/courses/relay/course.json';
 
 const T0 = Date.parse('2026-11-19T12:00:00Z');
@@ -50,33 +51,20 @@ export async function handoff(ctx) {
 `;
 }
 
-class Home {
-  readonly dir: string;
+class QueuedRelay extends GitRepo {
   head: string | null = null;
   constructor() {
-    this.dir = mkdtempSync(join(tmpdir(), 'baton-home-242-'));
-    const g = (...a: string[]) => execFileSync('git', ['-C', this.dir, ...a], { stdio: 'ignore' });
-    g('init', '-q', '-b', 'main');
-    g('config', 'user.email', 'relay@test');
-    g('config', 'user.name', 'relay test');
+    super('baton-242-');
     this.write('.baton/courses/relay/course.json', `${JSON.stringify(relay, null, 2)}\n`);
     this.write('.baton/baton.json', `${JSON.stringify({ course: 'relay', skills_version: 3 }, null, 2)}\n`);
   }
-  write(path: string, text: string): void {
-    const file = join(this.dir, path);
-    mkdirSync(dirname(file), { recursive: true });
-    writeFileSync(file, text);
-  }
+
   leg(name: string, run: string): void {
     this.write(`.baton/courses/relay/legs/${name}.mjs`, legFile(run));
   }
-  sha(): string {
-    return execFileSync('git', ['-C', this.dir, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
-  }
+
   commit(): string {
-    execFileSync('git', ['-C', this.dir, 'add', '.baton'], { stdio: 'ignore' });
-    execFileSync('git', ['-C', this.dir, 'commit', '--no-gpg-sign', '-q', '-m', 'legs'], { stdio: 'ignore' });
-    return this.sha();
+    return super.commit('legs', ['.baton']);
   }
   async post(stations: Record<string, unknown>, tickets: unknown[] = [ticket('T-1', { course_id: 'relay' })]): Promise<void> {
     const sha = this.sha();
@@ -93,7 +81,7 @@ class Home {
   }
 }
 
-let home: Home;
+let home: QueuedRelay;
 let scratch: string;
 let queue: LocalQueue;
 let n = 0;
@@ -103,32 +91,18 @@ let down = false;
 const lines: string[] = [];
 const runners: Runner[] = [];
 
-function makeRunner(): Runner {
-  const api = new BatonApi({
-    url: ORIGIN,
-    transport: (req) => down
+function makeRunner(bounds?: { legs: string[] }): Runner {
+  const api = runnerApi({ transport: (req) => down
       ? Promise.resolve(new Response(JSON.stringify({ code: 'internal', message: 'internal error' }), { status: 500, headers: { 'Content-Type': 'application/json' } }))
-      : hostCall(req),
-    auth: (_m, _u, _b, secret) => ({ Authorization: `Bearer ${TOKENS['vm-a']}`, ...(secret ? { 'X-Runner-Secret': secret } : {}) }),
-  });
-  const runner = new Runner({
-    api, home: home.dir, repository: 'docs', hostname: 'vm-a', harness: 'opencode',
-    session: `runner-242-${++n}`, courses: [{ course: 'relay', version: 3 }],
+      : hostCall(req) });
+  const runner = testRunner({
+    api, home: home.dir, session: `runner-242-${++n}`, courses: [{ course: 'relay', version: 3 }],
     stateFile: join(scratch, `state-${n}.json`), beatEvery: 40,
     // The runner's own wall clock: its idle wait counts beats on it.
-    now: () => Date.now(), log: (l) => lines.push(l), queue,
+    now: () => Date.now(), log: (l) => lines.push(l), queue, bounds,
   });
   runners.push(runner);
   return runner;
-}
-
-async function until(q: () => boolean): Promise<void> {
-  const end = Date.now() + 20_000;
-  while (Date.now() < end) {
-    if (q()) return;
-    await new Promise((r) => setTimeout(r, 10));
-  }
-  throw new Error('condition never became true in 20 s');
 }
 
 const legs = () => {
@@ -140,7 +114,7 @@ const legs = () => {
 
 beforeEach(async () => {
   await setClock(T0);
-  home = new Home();
+  home = new QueuedRelay();
   scratch = mkdtempSync(join(tmpdir(), 'baton-242-'));
   queue = new LocalQueue(queuePath(scratch, home.dir));
   down = false;
@@ -150,18 +124,19 @@ beforeEach(async () => {
 
 afterEach(async () => {
   for (const r of runners.splice(0)) r.stop();
-  rmSync(home.dir, { recursive: true, force: true });
+  home.dispose();
   rmSync(scratch, { recursive: true, force: true });
 });
 
 describe('S-BTN-242 a runner\'s local queue', () => {
-  it('Baton down: idle with nothing queued, then an order runs offline with the warning, and on recovery its result is reported once, gated as usual', async () => {
+  it.each([false, true])('runs an offline order once and reports it on recovery (leg filter: %s)', async (filtered) => {
     legs();
     await home.post({ 'T-1': placed('filed', [], [['build', 'ready']]) });
     // A claim answer said, before the outage, that the repository requires no signed control.
     queue.setControlRequired(false);
     down = true;
-    const runner = makeRunner();
+    const bounds = filtered ? { legs: ['build', 'check', 'merge'] } : undefined;
+    const runner = makeRunner(bounds);
     const working = runner.work();
     // Idle: the loop fails on Baton's errors and runs nothing.
     await until(() => lines.filter((l) => l.includes('the loop failed')).length >= 3);
@@ -181,7 +156,7 @@ describe('S-BTN-242 a runner\'s local queue', () => {
     // again), and the course goes on — check and merge run as usual.
     down = false;
     lines.length = 0;
-    const out = await makeRunner().runOnce();
+    const out = await makeRunner(bounds).runOnce();
     expect(out).toMatchObject({ ticket: 'docs:T-1', end_reason: 'done', reached: 'merged' });
     expect(home.evidence().filter((l) => l.startsWith('run build'))).toHaveLength(1);
     expect(home.evidence().filter((l) => l.startsWith('close build'))).toHaveLength(1);

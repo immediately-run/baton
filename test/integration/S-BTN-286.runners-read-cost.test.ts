@@ -7,7 +7,8 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { rows, sessionCall, withCore } from '../helpers';
 import { claimAndStart, fleet, grantedRunner, type Fleet, type Granted, type Json } from '../lib/runnerFleet';
 
-const T0 = Date.parse('2026-11-20T12:00:00Z');
+// Keep real workerd alarms outside the SQL capture for the simulated clock.
+const T0 = Date.parse('2030-11-20T12:00:00Z');
 const DAY = 86_400_000;
 
 let f: Fleet;
@@ -48,9 +49,8 @@ async function counted(path: string): Promise<{ json: Json; statements: number }
 async function more(count: number, tag: string) {
   const cred = (await rows<{ credential_id: string }>('SELECT credential_id FROM runners WHERE id = ?', a.id))[0].credential_id;
   await rows(`WITH RECURSIVE k(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM k WHERE i < ?)
-              INSERT INTO runners (hostname, session_name, secret_hash, credential_id, harness, kind, tier_ceiling,
-                                   tier_ceilings, lease_timeout_ms, settings_hash, first_seen_at, last_seen_at, reaped_at)
-              SELECT 'host-a', '${tag}-' || k.i, '${tag}-' || k.i, ?, 'opencode', 'vm', 'critical', '{}', 900000, '',
+              INSERT INTO runners (hostname, session_name, secret_hash, credential_id, harness, kind, lease_timeout_ms, settings_hash, first_seen_at, last_seen_at, reaped_at)
+              SELECT 'host-a', '${tag}-' || k.i, '${tag}-' || k.i, ?, 'opencode', 'vm', 900000, '',
                      CASE WHEN k.i % 3 = 2 THEN ${T0 - 40 * DAY} ELSE ${T0} END, CASE WHEN k.i % 3 = 2 THEN ${T0 - 40 * DAY} ELSE ${T0} END,
                      CASE WHEN k.i % 3 = 1 THEN ${T0} ELSE NULL END
               FROM k`, count, cred);

@@ -31,11 +31,8 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-latest
-    # No Quint on hosted runners (R-BTN-68, amended 2026-10-20, owner: baton was the org's most
-    # expensive repository in Actions minutes). The suite without quint takes ~9 minutes; the
-    # model's checks — the scenario traces among them — run on the author's machine in
-    # `npm run model:pr` (and weekly in `model:full`), whose report model-report.yml reads from
-    # the PR body.
+    # No Quint here: the owner retired the Quint model on 2026-11-26 (B-271), and its removal
+    # from the repository follows. The suite takes ~9 minutes.
     timeout-minutes: 25
     outputs:
       publish: ${{ steps.version.outputs.publish }}
@@ -134,13 +131,6 @@ jobs:
           else
             echo "publish=true" >> "$GITHUB_OUTPUT"
           fi
-
-  # The model's simulation, witnesses, 1,000-trace replay and Apalache proof do not run here
-  # (R-BTN-68, amended 2026-10-17): they outgrew hosted runners' time limits, so the author runs
-  # `npm run model:full` and pastes its report, stamped with the commit, into the PR, which
-  # model-report.yml checks against the head. npm test
-  # above keeps the deterministic part: the model's typecheck and regression runs, the scenario
-  # traces checked against it, the @impl/@model links and 200 model-drawn traces driving the core.
 
   # The CLI's npm release: `@immediately-run/baton@<version>`, published by OIDC trusted
   # publishing (no npm token exists), with provenance, when `main`'s package.json names a

@@ -2,7 +2,7 @@
 // `GET …/tickets` (`repo.tickets`) alone — a real table of ticket (qualified id, title linking
 // its page), state (shape and word) with the reason band under the row, course position, and
 // requires as chips with one no live runner declares marked. The tabs carry the read's `counts`;
-// the tab, the text filter and the tier ceiling are `?state=`, `?q=` and `?tier=` in the URL,
+// the tab and the text filter are `?state=` and `?q=` in the URL,
 // so a view is a link. "Showing n of total" and a load-more follow the read's cursor. No sort
 // control: the order is Baton's (R-BTN-61). No control and nothing computed here: the state,
 // its reasons and the counts are the read's. At phone width each row is a card, state first.
@@ -44,14 +44,14 @@ export function tabCount(counts: Record<string, unknown> | undefined, states: re
 }
 
 /** The screen's query, read from and written to the URL. */
-function useQuery(): { state: string; q: string; tier: string; set: (part: Partial<{ state: string; q: string; tier: string }>) => void } {
+function useQuery(): { state: string; q: string; set: (part: Partial<{ state: string; q: string }>) => void } {
   const search = useSearch();
   const p = new URLSearchParams(search);
-  const cur = { state: p.get('state') ?? '', q: p.get('q') ?? '', tier: p.get('tier') ?? '' };
+  const cur = { state: p.get('state') ?? '', q: p.get('q') ?? '' };
   const set = (part: Partial<typeof cur>) => {
     const next = { ...cur, ...part };
     const out = new URLSearchParams();
-    for (const k of ['state', 'q', 'tier'] as const) if (next[k] !== '') out.set(k, next[k]);
+    for (const k of ['state', 'q'] as const) if (next[k] !== '') out.set(k, next[k]);
     const qs = out.toString();
     navigate(`${window.location.pathname}${qs ? `?${qs}` : ''}`, { replace: 'q' in part });
   };
@@ -95,7 +95,6 @@ function Row({ row, repository }: { row: TicketRow; repository: string }) {
           {row.reasons?.length ? <span className="tk-also mut"> also {row.reasons.map((r, i) => <span key={r}>{i ? ', ' : ''}<Text value={r} /></span>)}</span> : null}
         </td>
         <td data-label="Position"><Position row={row} repository={repository} /></td>
-        <td data-label="Tier">{row.tier != null ? <Text value={row.tier} /> : <span className="mut">—</span>}</td>
         <td data-label="Requires"><Chips names={row.requires ?? []} unmet={row.requires_unmet} empty="none" /></td>
       </tr>
       {reason ? (
@@ -107,17 +106,15 @@ function Row({ row, repository }: { row: TicketRow; repository: string }) {
   );
 }
 
-export function TicketsScreen({ params, repository }: ScreenProps) {
+export function TicketsScreen({ params }: ScreenProps) {
   const repo = params.repository;
   const query = useQuery();
   // The text box holds what is typed; the URL (and so the read) follows it.
   const [typed, setTyped] = useState(query.q);
   useEffect(() => setTyped(query.q), [query.q]);
-  const tiers = Array.isArray(repository?.tiers) ? repository.tiers.filter((t): t is string => typeof t === 'string') : [];
   const qs = new URLSearchParams();
   if (query.state) qs.set('state', query.state);
   if (query.q) qs.set('q', query.q);
-  if (query.tier) qs.set('tier', query.tier);
   const base = `/v1/repositories/${encodeURIComponent(repo)}/tickets${qs.toString() ? `?${qs.toString()}` : ''}`;
   const pages = useTicketPages(base);
   // The tabs' counts are the whole repository's, whatever the filter: the last answer's stand
@@ -132,13 +129,6 @@ export function TicketsScreen({ params, repository }: ScreenProps) {
         <Tabs label="Ticket states" tabs={tabs} value={TICKET_TABS.some((t) => t.id === query.state) ? query.state : ''} onChange={(id) => query.set({ state: id })} />
         <div className="tk-filters">
           <FilterInput label="Filter by id or title" placeholder="Filter by id or title" value={typed} onChange={(v) => { setTyped(v); query.set({ q: v }); }} />
-          <label className="tk-tier">
-            <span className="mut">Tier ceiling </span>
-            <select className="input" value={query.tier} onChange={(e) => query.set({ tier: e.target.value })}>
-              <option value="">any</option>
-              {tiers.map((t) => <option key={t} value={t}>{t}</option>)}
-            </select>
-          </label>
         </div>
       </div>
       {query.state && !TICKET_TABS.some((t) => t.id === query.state) ? <Band>Showing the state <Text mono value={query.state} />.</Band> : null}
@@ -148,7 +138,7 @@ export function TicketsScreen({ params, repository }: ScreenProps) {
           return (
             <>
               {pages.rows.length === 0 ? (
-                <Empty>{query.state || query.q || query.tier ? 'No ticket matches this view.' : 'This repository has no ticket on its board.'}</Empty>
+                <Empty>{query.state || query.q ? 'No ticket matches this view.' : 'This repository has no ticket on its board.'}</Empty>
               ) : (
                 <div className="table-wrap tk-wrap">
                   <table className="table tk-table" aria-label="Tickets">
@@ -157,7 +147,7 @@ export function TicketsScreen({ params, repository }: ScreenProps) {
                         <th scope="col">Ticket</th>
                         <th scope="col">State</th>
                         <th scope="col">Position</th>
-                        <th scope="col">Tier</th>
+
                         <th scope="col">Requires</th>
                       </tr>
                     </thead>

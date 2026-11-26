@@ -3,15 +3,15 @@
 // accepted without an override, never refused (R-BTN-45, S-BTN-24).
 import { describe, it, expect, beforeEach } from 'vitest';
 import { gatesFor, type GateContext, type GateLeg, type GateTicket, type GateRunner } from '../../src/core/gates';
-import { claimItem, cutover, payload, recommended, register, rows, setClock, syncCall, seedClaim } from '../helpers';
+import { claimItem, cutover, payload, recommended, register, rows, setClock, syncCall, seedClaim, seedTicketOverride } from '../helpers';
 import { inject } from 'vitest';
 
 const T0 = Date.parse('2026-10-16T12:00:00Z');
 const runner = (over: Partial<GateRunner> = {}): GateRunner => ({
-  declared: ['agent-venue'], tier_ceiling: 'critical', tags: ['family:glm'], courses: [{ repository: 'docs', course: 'roadmap-pr', version: 3 }], grants: null, ...over,
+  declared: ['agent-venue'], tags: ['family:glm'], courses: [{ repository: 'docs', course: 'roadmap-pr', version: 3 }], grants: null, ...over,
 });
 const ticket = (over: Partial<GateTicket> = {}): GateTicket => ({
-  repository: 'docs', course: 'roadmap-pr', tier: 'judgement', requires: ['agent-venue'], operator_only: false, tiers: ['routine', 'judgement', 'critical'], ...over,
+  repository: 'docs', course: 'roadmap-pr', requires: ['agent-venue'], operator_only: false, ...over,
 });
 const leg = (over: Partial<GateLeg> = {}): GateLeg => ({ name: 'fix', state: 'ready', bars: [], ...over });
 const facts = (over: Partial<GateContext> = {}): GateContext => ({
@@ -35,7 +35,6 @@ describe('gatesFor: every gate of the table', () => {
     ['rule 3: a hold', () => [runner(), ticket(), leg(), 'claim', facts({ override: { hold: 1, retry_after: null } })], { rule: 3, code: 'held' }, { rule: 3, code: 'held' }],
     ['rule 4: a missing capability', () => [runner({ declared: [] }), ticket(), leg(), 'claim', facts()], { rule: 4, code: 'missing-capability' }, { rule: 4, code: 'missing-capability' }],
     ['rule 4: the leg’s own requires names a capability the runner lacks (R-BTN-120)', () => [runner({ declared: ['llm-call'] }), ticket({ requires: [] }), leg({ requires: ['create-pr'] }), 'claim', facts()], { rule: 4, code: 'missing-capability' }, { rule: 4, code: 'missing-capability' }],
-    ['rule 5: above the tier ceiling', () => [runner({ tier_ceiling: 'routine' }), ticket(), leg(), 'claim', facts()], { rule: 5, code: 'above-tier-ceiling' }, { rule: 5, code: 'above-tier-ceiling' }],
     ['rule 8: a posted barred tag', () => [runner(), ticket(), leg({ bars: ['family:glm'] }), 'claim', facts()], { rule: 8, code: 'barred-tag' }, { rule: 8, code: 'barred-tag' }],
     ['rule 9: an older course version', () => [runner({ courses: [{ repository: 'docs', course: 'roadmap-pr', version: 2 }] }), ticket(), leg(), 'claim', facts()], { rule: 9, code: 'stale-skills' }, null],
     ['rule 9: a course not declared', () => [runner({ courses: [] }), ticket(), leg(), 'claim', facts()], { rule: 9, code: 'stale-skills' }, null],
@@ -134,8 +133,7 @@ describe('gatesFor: every gate of the table', () => {
     expect(gatesFor(runner({ declared: ['human-operator'], grants: { docs: { capabilities: ['llm-call'] } } }), ticket({ requires: [] }), hands, 'claim', facts())).toEqual({ ok: false, rule: 4, code: 'missing-capability' });
   });
 
-  it('an untiered ticket fits only the top tier; a role in the clause needs all its capabilities', () => {
-    expect(gatesFor(runner({ tier_ceiling: 'judgement' }), ticket({ tier: null }), leg(), 'claim', facts())).toMatchObject({ rule: 5 });
+  it('a role in the clause needs all its capabilities', () => {
     expect(gatesFor(runner({ declared: ['agent-venue'] }), ticket({ requires: ['authentication', 'llm-call'] }), leg(), 'claim', facts())).toEqual({ ok: true });
     expect(gatesFor(runner({ declared: ['llm-call'] }), ticket({ requires: ['agent-venue'] }), leg(), 'claim', facts())).toMatchObject({ rule: 4 });
   });
@@ -167,7 +165,7 @@ describe('advice is never a gate (R-BTN-45, S-BTN-24): every advice input is acc
   });
 
   it('the expedite lane’s bound: over it, an expedited ticket is still claimable, its override recorded', async () => {
-    for (const t of ['R3-9001', 'R3-9002', 'R3-9004']) await rows(`INSERT INTO ticket_overrides (ticket_id, expedite, set_by, set_at) VALUES (?, 1, 'owner:test', 0)`, `docs:${t}`);
+    for (const t of ['R3-9001', 'R3-9002', 'R3-9004']) await seedTicketOverride({ ticket_id: `docs:${t}`, expedite: 1, set_by: 'owner:test', set_at: 0 });
     const a = await register('vm-a');
     const b = await register('vm-b');
     await seedClaim(a.id, 'docs:R3-9004');

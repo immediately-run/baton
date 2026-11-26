@@ -9,17 +9,18 @@
 // runner stops the session; a joinable session nobody joins ends `leg-timeout` at its
 // `deadline_s`, a failed attempt, its condition closing with it. The API side is
 // S-BTN-222.interact.test.ts, on both hosts.
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { callChannel } from '../../src/runner/channel';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import roadmapPr from '../fixtures/courses/roadmap-pr/course.json';
-import { ORIGIN, course as courseEntry, cutover, Git, keyCall, placed, register, rows, setAdminKeys, setClock, syncCall, tick, ticket, TOKENS } from '../helpers';
+import { course as courseEntry, cutover, Git, keyCall, placed, register, rows, setAdminKeys, setClock, syncCall, tick, ticket } from '../helpers';
 import { makeKey } from '../lib/sshKeys';
-import { Runner } from '../../src/runner/runner';
-import { BatonApi } from '../../src/runner/api';
+import { runnerApi, testRunner, until } from '../lib/runnerRig';
+import type { BatonApi } from '../../src/runner/api';
 import { builtinExecutor, type Executor, type Handle } from '../../src/runner/executor';
 import { graphOf } from '../../src/core/graph';
 import { CREATE_PR_COURSE } from '../../src/defaults/course-pr';
@@ -140,7 +141,7 @@ export async function run(ctx) {
 }
 
 /** A scratch home checkout: both courses, their leg scripts, the settings naming them. */
-function writeHome(scripts: Record<string, string>): { home: string; sha: string } {
+function writeHome(scripts: Record<string, string>, graph = COURSE): { home: string; sha: string } {
   const home = mkdtempSync(join(tmpdir(), 'baton-222-'));
   const g = (...a: string[]) => execFileSync('git', ['-C', home, ...a], { encoding: 'utf8' });
   g('init', '-q', '-b', 'main');
@@ -148,11 +149,11 @@ function writeHome(scripts: Record<string, string>): { home: string; sha: string
     mkdirSync(dirname(join(home, path)), { recursive: true });
     writeFileSync(join(home, path), text);
   };
-  write('.baton/courses/roadmap-pr/course.json', `${JSON.stringify(COURSE, null, 2)}\n`);
+  write('.baton/courses/roadmap-pr/course.json', `${JSON.stringify(graph, null, 2)}\n`);
   write('.baton/courses/timeout-pr/course.json', `${JSON.stringify(TIMEOUT_COURSE, null, 2)}\n`);
   write('.baton/baton.json', `${JSON.stringify({ courses: [{ id: 'roadmap-pr', version: 3 }, { id: 'timeout-pr', version: 1 }] }, null, 2)}\n`);
   for (const [name, text] of Object.entries(scripts)) write(`.baton/courses/roadmap-pr/legs/${name}.mjs`, text);
-  write('.baton/courses/timeout-pr/legs/linger.mjs', scripts.linger!);
+  if (scripts.linger != null) write('.baton/courses/timeout-pr/legs/linger.mjs', scripts.linger);
   g('add', '-A');
   g('-c', 'user.email=b234@test', '-c', 'user.name=b234 test', 'commit', '--no-gpg-sign', '-qm', 'courses');
   return { home, sha: g('rev-parse', 'HEAD').trim() };
@@ -192,19 +193,17 @@ beforeEach(async () => {
   stateFile = join(tmpdir(), `baton-222-${process.pid}-${Math.random().toString(16).slice(2)}.json`);
 });
 
-const newRunner = (home: string, log: (l: string) => void, over: Record<string, unknown> = {}, onBeat?: (body: Record<string, any>) => Response | void) => new Runner({
-  api: new BatonApi({
-    url: ORIGIN,
+const newRunner = (home: string, log: (l: string) => void, over: Record<string, unknown> = {}, onBeat?: (body: Record<string, any>) => Response | void, transport = hostCall) => testRunner({
+  api: runnerApi({
     transport: async (req) => {
       if (onBeat && new URL(req.url).pathname === '/v1/runner/heartbeat') {
         const response = onBeat(await req.clone().json() as Record<string, any>);
         if (response) return response;
       }
-      return hostCall(req);
+      return transport(req);
     },
-    auth: (_m, _u, _b, secret) => ({ Authorization: `Bearer ${TOKENS['vm-a']}`, ...(secret ? { 'X-Runner-Secret': secret } : {}) }),
   }),
-  home, repository: 'docs', hostname: 'vm-a', harness: 'opencode', capabilities: ['key:zai'],
+  home, capabilities: ['key:zai'],
   session: `b234-${Math.random().toString(16).slice(2, 8)}`, courses: [{ course: 'roadmap-pr', version: 3 }, { course: 'timeout-pr', version: 1 }],
   stateFile, beatEvery: 150, log, executor: linkingExecutor(LINK), signalGraceMs: 500, ...over,
 });
@@ -215,8 +214,208 @@ const conditionRows = (ticket: string) => rows<{ type: string; disposition: stri
 const cleanup = (home: string) => {
   rmSync(home, { recursive: true, force: true });
   rmSync(stateFile, { force: true });
+  rmSync(`${stateFile}.view`, { force: true });
   rmSync(`${stateFile}.spool.jsonl`, { force: true });
 };
+
+describe('S-BTN-62 and S-BTN-75: channel results and bounded chains', () => {
+  const scripts = {
+    linger: 'export async function run() { return null; }',
+    implement: `export async function run() { await new Promise((resolve) => setInterval(resolve, 60000)); }
+export async function close() { return 'https://example.test/evidence'; }
+export async function handoff() { return 'https://example.test/handoff'; }`,
+    review: `export async function run() { return { suspend: true, reached: 'reviewed' }; }
+export async function close() { return null; }
+export async function handoff() { return 'https://example.test/handoff'; }`,
+  };
+
+  it('refuses invalid moves locally, then arrives with a staged output and suspends before an unlisted leg', async () => {
+    // The output is this test's own: a declared output is required of every completed run (B-39),
+    // so the shared course, whose other tests produce none, declares none.
+    const legs = COURSE.legs as Record<string, Record<string, unknown>>;
+    const graph = { ...COURSE, legs: { ...legs, implement: { ...legs.implement, outputs: { effect: { schema: 'std:effect@1' } } } },
+      stations: { ...roadmapPr.stations, 'pr-open': { entry: [{ output: 'effect', schema: 'std:effect@1' }] } } };
+    git.registry[0] = courseEntry(3, 3, { course: graph });
+    const { home, sha } = writeHome(scripts, graph);
+    boardSha = sha;
+    await postBoard([{ id: 'A' }, { id: 'B' }], {
+      A: placed('pr-open', [['implement', 'pr-open']], [['review', 'ready']]),
+      B: placed('filed', [], [['implement', 'ready']]),
+    });
+    await register('vm-a');
+    const base = builtinExecutor();
+    let started!: (o: Parameters<Executor['start']>[0]) => void;
+    const ready = new Promise<Parameters<Executor['start']>[0]>((resolve) => { started = resolve; });
+    const executor: Executor = { ...base, async start(o) {
+      const handle = await base.start(o);
+      if (o.channel) started(o);
+      return handle;
+    } };
+    const runner = newRunner(home, () => {}, { executor, bounds: { legs: ['implement'] }, now: () => T0 });
+    const locks = vi.spyOn(runner as unknown as { ensureLegLocks(run: unknown, leg: string): Promise<boolean> }, 'ensureLegLocks')
+      .mockImplementation(async (_run, leg) => leg !== 'review');
+    const running = runner.runOnce();
+    try {
+      const { channel, brief } = await Promise.race([ready, running.then(() => { throw new Error('runner ended before serving'); })]);
+      expect(statSync(channel!).mode & 0o777).toBe(0o600);
+      const call = (op: string, fields: Record<string, unknown> = {}) => callChannel(channel!, { op, ...fields });
+      const view = JSON.parse(readFileSync(brief.env.BATON_STATE, 'utf8'));
+      expect(view.secret).toBeUndefined();
+      expect(view.claim).toMatchObject({ ticket_id: 'docs:B', nonce: expect.any(String) });
+      expect(brief.env.BATON_TOKEN).toBeUndefined();
+      expect(await call('status')).toMatchObject({ ok: true, leg: 'implement' });
+      expect(await call('done', { reached: 'merged' })).toMatchObject({ ok: false, error: expect.stringContaining('not an outcome') });
+      expect(await call('done', { reached: 'pr-open', next: 'review' })).toMatchObject({ ok: false, error: expect.stringContaining('requires output effect') });
+      expect(await call('output', { name: 'effect', value: { kind: 'test' } })).toMatchObject({ ok: false, error: expect.stringContaining('fails std:effect@1') });
+      expect(await rows('SELECT leg FROM claim_legs ORDER BY seq')).toEqual([{ leg: 'implement' }]);
+      expect(await call('output', { name: 'effect', value: { kind: 'test', at: new Date(T0).toISOString() } })).toEqual({ ok: true });
+      expect(await call('done', { result: { suspend: true, reached: 'pr-open', next: 'review', detail: 'x'.repeat(201) } }))
+        .toMatchObject({ ok: false, error: expect.stringContaining('200 characters') });
+      expect(await call('done', { reached: 'pr-open', next: 'review' })).toEqual({ ok: true });
+      expect(await running).toMatchObject({ ticket: 'docs:B', end_reason: 'suspended:pr-open', reached: 'pr-open', handoff: 'https://example.test/handoff' });
+      expect(locks.mock.calls.map(([, leg]) => leg)).toEqual(['implement']);
+      expect(await rows('SELECT leg FROM claim_legs ORDER BY seq')).toEqual([{ leg: 'implement' }]);
+      expect(await runner.runOnce()).toBeNull(); // the bounded claim does not take A's review
+    } finally {
+      runner.stopNow();
+      await running.catch(() => {});
+      runner.stop();
+      cleanup(home);
+    }
+  });
+
+  it('accepts a corrected post and advances to an allowed next leg', async () => {
+    git.registry = [courseEntry(3, 3)];
+    const { home, sha } = writeHome(scripts, roadmapPr);
+    boardSha = sha;
+    await postBoard([{ id: 'A' }], { A: placed('filed', [], [['implement', 'ready']]) });
+    await register('vm-a');
+    const base = builtinExecutor();
+    let started!: (socket: string) => void;
+    const ready = new Promise<string>((resolve) => { started = resolve; });
+    const executor: Executor = { ...base, async start(o) {
+      if (o.brief.leg === 'implement' && o.channel) started(o.channel);
+      return base.start(o);
+    } };
+    const runner = newRunner(home, () => {}, { executor, bounds: { legs: ['implement', 'review'] } });
+    const running = runner.runOnce();
+    try {
+      const socket = await Promise.race([ready, running.then(() => { throw new Error('runner ended before serving'); })]);
+      expect(await callChannel(socket, { op: 'done', reached: 'pr-open', next: 'merge' })).toMatchObject({ ok: false, error: expect.stringContaining('does not leave') });
+      expect(await callChannel(socket, { op: 'done', reached: 'pr-open', next: 'review' })).toEqual({ ok: true });
+      expect(await running).toMatchObject({ ticket: 'docs:A', end_reason: 'suspended:reviewed' });
+      expect(await rows('SELECT leg FROM claim_legs ORDER BY seq')).toEqual([{ leg: 'implement' }, { leg: 'review' }]);
+    } finally {
+      runner.stopNow();
+      await running.catch(() => {});
+      runner.stop();
+      cleanup(home);
+    }
+  });
+
+  it.each(['count', 'deadline'])('suspends at the completed leg when the %s bound is reached', async (bound) => {
+    git.registry = [courseEntry(3, 3)];
+    const { home, sha } = writeHome({ ...scripts, implement: scripts.implement.replace(
+      'await new Promise((resolve) => setInterval(resolve, 60000));', "return { reached: 'pr-open', next: 'review' };",
+    ) }, roadmapPr);
+    boardSha = sha;
+    await postBoard([{ id: 'A' }], { A: placed('filed', [], [['implement', 'ready']]) });
+    await register('vm-a');
+    let now = T0;
+    const base = builtinExecutor();
+    const executor: Executor = { ...base, exec(h, argv, opts) {
+      if (bound === 'deadline' && argv[2] === 'run') now = T0 + 1000;
+      return base.exec(h, argv, opts);
+    } };
+    const runner = newRunner(home, () => {}, { executor, now: () => now,
+      bounds: bound === 'count' ? { legs: ['implement', 'review'], maxLegs: 1 } : { until: T0 + 1000 },
+    });
+    try {
+      expect(await runner.runOnce()).toMatchObject({ ticket: 'docs:A', end_reason: 'suspended:pr-open' });
+      expect(await rows('SELECT leg FROM claim_legs ORDER BY seq')).toEqual([{ leg: 'implement' }]);
+      if (bound === 'deadline') expect(await runner.runOnce()).toBeNull();
+    } finally {
+      runner.stop();
+      cleanup(home);
+    }
+  });
+
+  it.each(['first', 'successor'])('does not dispatch or record a %s start when /advance crosses the deadline', async (boundary) => {
+    git.registry = [courseEntry(3, 3)];
+    const { home, sha } = writeHome({ ...scripts, implement: scripts.implement.replace(
+      'await new Promise((resolve) => setInterval(resolve, 60000));', "return { reached: 'pr-open', next: 'review' };",
+    ) }, roadmapPr);
+    boardSha = sha;
+    await postBoard([{ id: 'A' }], { A: placed('filed', [], [['implement', 'ready']]) });
+    await register('vm-a');
+    const runs: string[] = [];
+    const base = builtinExecutor();
+    const executor: Executor = { ...base, exec(h, argv, opts) {
+      if (argv[2] === 'run') runs.push(basename(argv[3]));
+      return base.exec(h, argv, opts);
+    } };
+    const runner = newRunner(home, () => {}, { executor, now: () => T0, bounds: { until: T0 + 1000 } }, undefined, async (req) => {
+      if (new URL(req.url).pathname.endsWith('/advance')) {
+        const { leg, start_before } = await req.clone().json() as { leg: string; start_before: number };
+        expect(start_before).toBe(T0 + 1000);
+        if (leg === (boundary === 'first' ? 'implement' : 'review')) await setClock(T0 + 1000);
+      }
+      return hostCall(req);
+    });
+    try {
+      const station = boundary === 'first' ? 'filed' : 'pr-open';
+      expect(await runner.runOnce()).toMatchObject({ end_reason: `suspended:${station}`, reached: station });
+      expect(await rows('SELECT leg FROM claim_legs ORDER BY seq')).toEqual(boundary === 'first' ? [] : [{ leg: 'implement' }]);
+      expect(runs).toEqual(boundary === 'first' ? [] : ['implement.mjs']);
+    } finally {
+      runner.stop();
+      cleanup(home);
+    }
+  });
+
+  it.each(['executor setup', 'link heartbeat'])('does not dispatch past the deadline during %s, and retries the final end', async (phase) => {
+    git.registry = [courseEntry(3, 3)];
+    const { home, sha } = writeHome(scripts, roadmapPr);
+    boardSha = sha;
+    await postBoard([{ id: 'A' }], { A: placed('filed', [], [['implement', 'ready']]) });
+    await register('vm-a');
+    let now = T0;
+    const calls: string[] = [];
+    const ends: unknown[] = [];
+    const base = builtinExecutor();
+    const executor: Executor = { ...base, async start(o) {
+      const h = await base.start(o);
+      if (o.brief.leg !== 'implement') return h;
+      if (phase === 'executor setup') now = T0 + 1000;
+      return { ...h, link: LINK };
+    }, exec(h, argv, opts) {
+      calls.push(argv[2]);
+      // If dispatch were incorrectly allowed, let the test reach its assertion promptly.
+      if (argv[2] === 'run') return { result: Promise.resolve({ status: 1, stdout: '', stderr: 'unexpected run' }), write() {}, kill() {} };
+      return base.exec(h, argv, opts);
+    } };
+    const runner = newRunner(home, () => {}, { executor, now: () => now, bounds: { until: T0 + 1000 } }, (body) => {
+      if (phase === 'link heartbeat' && body.session_url === LINK) now = T0 + 1000;
+    }, async (req) => {
+      if (new URL(req.url).pathname.endsWith('/end')) {
+        ends.push(await req.clone().json());
+        if (ends.length === 1) return Response.json({ code: 'unavailable' }, { status: 503 });
+      }
+      return hostCall(req);
+    });
+    try {
+      await runner.work();
+      expect(calls).not.toContain('run');
+      expect(ends).toHaveLength(2);
+      expect(ends[0]).toEqual(ends[1]);
+      expect(ends[1]).toMatchObject({ end_reason: 'suspended:filed', reached: 'filed', next: 'implement' });
+      expect(await rows('SELECT end_reason FROM claims')).toEqual([{ end_reason: 'suspended:filed' }]);
+    } finally {
+      runner.stop();
+      cleanup(home);
+    }
+  });
+});
 
 describe('S-BTN-222 (the runner half): the channel checks a raise (R-BTN-160, R-BTN-195)', () => {
   it('a linked run raises interact twice and hitl; a leg with no deadline raises no interact; the subject and body stay in the runner\'s log', async () => {
@@ -271,12 +470,10 @@ describe('S-BTN-222 (the runner half): the channel checks a raise (R-BTN-160, R-
       expect(lines.join('\n')).toContain('ended at the result posted on its channel');
       expect(lines.join('\n')).toContain('evil.example/phish');
       const person = Number(readFileSync(`${rec}.person`, 'utf8'));
-      let alive = 'alive';
-      for (let i = 0; i < 100 && alive === 'alive'; i++) {
-        try { process.kill(person, 0); } catch { alive = 'gone'; }
-        if (alive === 'alive') await new Promise((res) => setTimeout(res, 50));
-      }
-      expect(alive).toBe('gone');
+      await until(() => {
+        try { process.kill(person, 0); return false; }
+        catch (error) { if ((error as NodeJS.ErrnoException).code === 'ESRCH') return true; throw error; }
+      }, Boolean, 'the session child to exit');
     } finally {
       cleanup(home);
     }
@@ -304,6 +501,10 @@ describe('S-BTN-222 (the runner half): the channel checks a raise (R-BTN-160, R-
       expect(await conditionRows('docs:B')).toEqual([
         { type: 'error.needs-person', disposition: 'interrupt', outcome: 'recorded', url: null, closed_how: 'raised' },
       ]);
+      expect(await rows(`SELECT json_extract(detail_json, '$.error.type') AS type,
+                                json_extract(detail_json, '$.error.message') AS message
+                         FROM events WHERE kind = 'released' AND ticket_id = ?`, 'docs:B'))
+        .toEqual([{ type: 'error.needs-person', message: 'The leg raised error.needs-person.' }]);
       // A non-retryable class holds the ticket (R-BTN-122): the owner's to clear.
       expect(await rows<{ hold: number; hold_reason: string | null }>('SELECT hold, hold_reason FROM ticket_overrides WHERE ticket_id = ?', 'docs:B'))
         .toEqual([{ hold: 1, hold_reason: 'non-retryable:spec' }]);
@@ -359,14 +560,48 @@ describe('S-BTN-222 (the runner half): the channel checks a raise (R-BTN-160, R-
     }
   }, 240_000);
 
+  it.each([
+    { thrown: `new LegError('error.spec', 'declared failure')`, type: 'error.spec', cls: 'spec', message: 'declared failure' },
+    { thrown: `new Error('plain failure')`, type: 'error.transient', cls: 'transient', message: 'plain failure' },
+  ])('G-BTN-146: ctx.raise and a script that throws $type', async ({ thrown, type, cls, message }) => {
+    const { home, sha } = writeHome({ implement: `
+      import { LegError } from '@immediately-run/baton/leg';
+      export async function run(ctx) {
+        await ctx.raise('warning', { subject: 'private subject', body: 'private body' });
+        throw ${thrown};
+      }
+    ` });
+    boardSha = sha;
+    await postBoard([{ id: 'A' }], { A: placed('filed', [], [['implement', 'ready']]) });
+    await register('vm-a');
+    const r = newRunner(home, () => {});
+    try {
+      expect(await r.runOnce()).toMatchObject({ ticket: 'docs:A', end_reason: `released:cannot-finish:${cls}` });
+      expect((await conditionRows('docs:A')).map(({ type, outcome }) => ({ type, outcome }))).toEqual([
+        { type: 'warning', outcome: 'recorded' },
+        ...(cls === 'spec' ? [{ type, outcome: 'recorded' }] : []),
+      ]);
+      expect(await rows(`SELECT json_extract(detail_json, '$.error.type') AS type,
+                                json_extract(detail_json, '$.error.message') AS message
+                         FROM events WHERE kind = 'released' AND ticket_id = 'docs:A'`)).toEqual([{ type, message }]);
+    } finally {
+      r.stop();
+      cleanup(home);
+    }
+  }, 240_000);
+
   it('the channel refuses invalid raises and honors standard create-pr\'s question policy (B-325)', async () => {
     const { home } = writeHome(legScripts(join(tmpdir(), `baton-222-rec-${process.pid}.jsonl`)));
     try {
       let reported = 0;
-      const r = new Runner({
-        api: { setSecret: () => {}, conditions: async () => { reported++; return { condition_id: 1, disposition: 'notify' }; } } as unknown as BatonApi,
-        home, repository: 'docs', hostname: 'vm-a', harness: 'opencode', session: 'b234-checks',
-        courses: [{ course: 'roadmap-pr', version: 3 }], stateFile, beatEvery: 60_000, log: () => {},
+      const r = testRunner({
+        api: { setSecret: () => {}, conditions: async (_: number, body: Record<string, unknown>) => {
+          expect(body).not.toHaveProperty('restarts'); // old servers require omission for an empty map
+          reported++;
+          return { condition_id: 1, disposition: 'notify' };
+        } } as unknown as BatonApi,
+        home, session: 'b234-checks',
+        courses: [{ course: 'roadmap-pr', version: 3 }], stateFile, beatEvery: 60_000,
       });
       // A live claim's shape, as the raise handler reads it; the run holds no link.
       const claim = (r as unknown as { makeRun(path: string): unknown }).makeRun(home);
@@ -379,6 +614,10 @@ describe('S-BTN-222 (the runner half): the channel checks a raise (R-BTN-160, R-
       expect(await ask({ op: 'raise', type: 'baton.retries', subject: 'x' })).toMatchObject({ ok: false, error: expect.stringContaining("core's alone") });
       expect(await ask({ op: 'raise', type: 'unheard-of', subject: 'x' })).toMatchObject({ ok: false, error: expect.stringContaining('declares') });
       expect(await ask({ op: 'raise', type: 'warning', subject: 'x', severity: 'loud' })).toMatchObject({ ok: false, error: expect.stringContaining('severity') });
+      const narrowed = { ...course, graph: graphOf({ ...COURSE, legs: { ...roadmapPr.legs, implement: { ...roadmapPr.legs.implement, conditions: [] } } }) };
+      expect(await ask({ op: 'raise', type: 'warning', subject: 'x' }, narrowed)).toMatchObject({ ok: false, error: expect.stringContaining('narrow') }); // S-BTN-130
+      expect(await ask({ op: 'raise', type: 'ask.owner', subject: 'x', restarts: { park: 'park' } })).toMatchObject({ ok: false, error: expect.stringContaining('subset') });
+      expect(await ask({ op: 'raise', type: 'ask.owner', subject: 'x', default: 'park' })).toMatchObject({ ok: false, error: expect.stringContaining('default') });
       expect(reported).toBe(0); // nothing reached Baton
       expect(await ask({ op: 'raise', type: 'warning', subject: 'a note' })).toMatchObject({ ok: true, condition_id: 1 });
       expect(reported).toBe(1);
