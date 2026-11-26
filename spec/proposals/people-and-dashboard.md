@@ -387,6 +387,11 @@ and Baton does not do access control the forge already does (the owner, 2026-11-
   the spec has it. A linked identity is used only once verified as the person's — a forge account
   by signing in with the forge, a channel by a code ([personal secrets](personal-secrets.md)) —
   and an unverified one receives nothing.
+  - **A tracker account** is verified by the person signing in with the tracker's own OAuth, where
+    the tracker offers it; where it does not, an owner of the arena links it to the person, and the
+    link is recorded as that owner's act (the owner, 2026-11-26). An email the tracker shows that
+    matches one of the person's, or a mapping the sync reads from the tracker, never verifies one:
+    either would let whoever controls that text receive the person's interaction requests.
 - **The roster.** An arena's roster is the people who may start a course there (`course.start`)
   and hold a session claim. It is read from the forge, never kept by Baton:
   - **Its source** is the arena's setting `roster.source` (R-BTN-66): `repo-writers`, the default,
@@ -435,5 +440,3 @@ and Baton does not do access control the forge already does (the owner, 2026-11-
   (`last_written_by` may name the person whose linked account pushed, never whether a person or
   their agent did), §13 (the people tables), and the vocabulary (*Person*, *Roster*, *Interactive
   grant*).
-
-Open: how a tracker identity is verified, where the tracker offers no sign-in.

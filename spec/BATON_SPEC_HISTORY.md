@@ -119,6 +119,9 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
     MCP session claim's lease is 15 minutes by default; `requires` is store-owned, like course and
     tier; and `baton ticket request` with Baton unreachable fails loudly, never falling back to
     git-only legacy mechanics.
+  - **Tracker identities**, the owner, 2026-11-26: a tracker account is verified by the tracker's
+    own OAuth sign-in where it offers one, and otherwise linked by an owner of the arena; a
+    matching email or a mapping the sync reads never verifies one.
 
 - **2026-11-26 — A protected repository accepts a branch course source (R-BTN-134).**
   Rules changed: R-BTN-134 (*A branch source*). #395 left open whether a protected repository
