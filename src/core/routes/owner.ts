@@ -4,13 +4,18 @@ import { SESSION_COOKIE } from '../admin';
 import { checkAccept, checkAttestation, checkResync } from '../validate';
 import { consentRoute } from '../dependencies';
 import { logEvent } from '../db';
-import { acceptsUnattestedHumanKey } from '../policy';
+import { acceptsUnattestedHumanKey, type HumanKeyMinimum } from '../policy';
 import { liveRepoParam, pathSegment, qualifiedTicket, ticketOf } from './kit';
 import { authenticated, verifySigned, type PersonPrincipal } from './principal';
 
 const RESYNC_WINDOW_MS = 30_000; // B-201: a session's resync, once per repository per R-BTN-73's dispatch window
 
 type OwnerCore = Pick<BatonCore, 'registry' | 'admin' | 'store' | 'now' | 'policies' | 'claims' | 'humanBreakGlass' | 'questions' | 'blocks' | 'requestSync'>;
+
+export function admitsBreakGlass(method: string, pathname: string): boolean {
+  return (method === 'PUT' && /^\/v1\/owner\/[^/]+\/policy$/.test(pathname))
+    || (method === 'POST' && /^\/v1\/owner\/[^/]+\/(policy\/floors|owners)$/.test(pathname));
+}
 
 export async function ownerRoute(core: OwnerCore, req: Request, url: URL, principal: PersonPrincipal): Promise<Response | null> {
   const { cred: fp, administrator } = principal;
@@ -26,7 +31,7 @@ export async function ownerRoute(core: OwnerCore, req: Request, url: URL, princi
   // An administrator's key is no owner's, even one added as an owner before it was listed (R-BTN-57).
   if (administrator) throw new BatonError('forbidden', 'an administrator key is never an owner key (R-BTN-57)');
   // Owning one repository confers nothing on another (R-BTN-58).
-  if (!core.admin.owns(fp, repo)) throw new BatonError('forbidden', `this key does not own ${repo}`);
+  if (!principal.breakGlass && !core.admin.owns(fp, repo)) throw new BatonError('forbidden', `this key does not own ${repo}`);
   const actor = `owner:${fp}`;
   const rest = o[2];
   // B-90: the repository's grants and settings — and the policy's log below — are read in
@@ -59,7 +64,7 @@ export async function ownerRoute(core: OwnerCore, req: Request, url: URL, princi
     const b = await body();
     const breakGlass = new Set((await core.humanBreakGlass()).keys());
     const admins = await core.admin.adminFingerprints();
-    const personAnswerStops = () => core.admin.hasHumanDecisionWriter(breakGlass, admins) ? []
+    const personAnswerStops = (minimum: HumanKeyMinimum) => acceptsUnattestedHumanKey(minimum) && core.admin.hasHumanDecisionWriter(breakGlass, admins) ? []
       : core.questions.answerableLegs(repo);
     return json(core.store.transaction(() => core.policies.put(repo, b, forge, { credential: fp, label: actor }, { breakGlass, personAnswerStops })));
   }
@@ -204,7 +209,7 @@ export async function humanKeysRoute(core: Parameters<typeof verifySigned>[0] & 
   return json(await core.admin.humanKeys(body, signed.cred, new Set(breakGlass.keys())));
 }
 
-export async function attestationRoute(core: Parameters<typeof authenticated>[0] & Pick<BatonCore, 'registry' | 'admin' | 'policies' | 'store' | 'questions'>, req: Request, url: URL): Promise<Response | null> {
+export async function attestationRoute(core: Parameters<typeof authenticated>[0] & Pick<BatonCore, 'registry' | 'admin' | 'policies' | 'store' | 'questions' | 'humanBreakGlass'>, req: Request, url: URL): Promise<Response | null> {
   // R-BTN-181's envelope (§14), B-7's slice: `POST /v1/repositories/{repository}/attestations`
   // with a `std:decision@1` — a person's answer to the ticket's queued person leg
   // (R-BTN-116), what `baton decision answer` writes (R-BTN-127). An owner key of the
@@ -217,16 +222,15 @@ export async function attestationRoute(core: Parameters<typeof authenticated>[0]
       throw new BatonError('unauthenticated', 'sign with an owner key of the repository or a human-only key, or send its API key');
     }
     const admins = await core.admin.adminFingerprints();
-    // R-BTN-185: an owner key of the repository, or a human-only one — a registered human
-    // key's own public line serves the signature lookup, not the host's break-glass lines
-    // alone (a key registered through POST /v1/human-keys owns nothing, but answers).
-    const signed = await authenticated(core, req, (fp) => admins.get(fp) ?? core.admin.decisionKeyLine(fp));
+    // R-BTN-185: an owner key, a registered human-only key, or a signed break-glass line.
+    const breakGlass = req.headers.has('X-Baton-Api-Key') ? undefined : await core.humanBreakGlass();
+    const signed = await authenticated(core, req, (fp) => admins.get(fp) ?? core.admin.decisionKeyLine(fp) ?? breakGlass?.get(fp) ?? null);
     const fp = signed.cred;
-    const human = await core.admin.isHumanKey(fp);
+    const human = !!breakGlass?.has(fp) || await core.admin.isHumanKey(fp);
     const policy = core.policies.current(repo)?.policy;
     if (admins.has(fp)) throw new BatonError('forbidden', 'an administrator’s key is never an owner key (R-BTN-57); a person’s answer is an owner’s or a human-only key’s');
     if (!human && !core.admin.owns(fp, repo)) throw new BatonError('forbidden', `this key neither owns ${repo} nor is a human-only key (R-BTN-116, R-BTN-185)`);
-    if (human && !acceptsUnattestedHumanKey(policy?.human_key ?? 'any')) {
+    if (human && !acceptsUnattestedHumanKey(core.policies.effectiveHumanKey(policy?.human_key))) {
       throw new BatonError('forbidden', `${repo}'s policy requires an attested hardware key for a human answer (R-BTN-185)`);
     }
     // §12.8, R-BTN-191: where the policy's `inputs.answers` is `attestation` (`protected`),
