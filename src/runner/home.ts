@@ -10,7 +10,8 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { graphOf, legCapabilities, type Graph } from '../core/graph';
-import { builtInSource, resolveSource, runnerLegs, writeStub } from '../defaults/cli';
+import { builtInSource, CourseSourceUnavailable, resolveSource, runnerLegs, writeStub } from '../defaults/cli';
+import { parseSource } from '../defaults/course-source';
 import { dropCourseTree, writeCourseTree } from '../defaults/course-tree';
 
 import { git, gitAsync } from '../defaults/git.mjs';
@@ -27,6 +28,8 @@ export interface CourseLoad {
   scratch: string;
   schema: Resolve;
   outputSchema(leg: string, name: string): string | undefined;
+  /** B-315 (R-BTN-134): a branch source's warning — unpinned, no trust check — for the log. */
+  warning?: string;
 }
 
 /** The course id the home repository runs, from the snapshot's `.baton/baton.json`: the spec's
@@ -169,12 +172,21 @@ function legacyLeg(path: string, bytes: Buffer, graph: string): Buffer {
 
 /** Load a claim's course from the snapshot: the graph, and every leg script the snapshot's
  * `legs/` holds, extracted to a scratch directory (deleted by the runner when the claim ends). */
-export async function loadCourse(home: string, sha: string, course: string, settingsSha = sha): Promise<CourseLoad> {
+export async function loadCourse(home: string, sha: string, course: string, settingsSha = sha, resolution?: { branch: string; sha: string }): Promise<CourseLoad> {
   const batonJson = courseSettings(home, settingsSha);
   const source = batonJson?.courses?.find((c) => c.id === course)?.source;
+  if (resolution && courseSettings(home, sha)?.courses?.find((c) => c.id === course)?.source !== source) {
+    throw new CourseSourceUnavailable('the verified course source differs from the snapshot selection');
+  }
   if (source !== undefined) {
+    const selected = parseSource(source);
+    if (!selected.pinned && resolution?.branch !== selected.ref) {
+      throw new CourseSourceUnavailable(`course ${course} needs the snapshot resolution of branch ${selected.ref}`);
+    }
+    if (selected.pinned && resolution) throw new CourseSourceUnavailable(`course ${course} is pinned but the snapshot names a branch`);
     const cache = join(git(home, ['rev-parse', '--absolute-git-dir']).trim(), 'baton-sources');
-    const resolved = await resolveSource(course, source, cache);
+    let warning: string | undefined;
+    const resolved = await resolveSource(course, source, cache, resolution?.sha, (line) => { warning = line; });
     const graph = graphOf(JSON.parse(resolved.graph));
     const scratch = mkdtempSync(join(tmpdir(), 'baton-legs-'));
     const scripts = new Map<string, string>();
@@ -207,7 +219,7 @@ export async function loadCourse(home: string, sha: string, course: string, sett
       };
       // B-47: a leg's declared output schema, from the source's graph as from a home's.
       const legs = (JSON.parse(resolved.graph) as { legs?: Record<string, { outputs?: Record<string, { schema: string }> }> }).legs ?? {};
-      return { course, sourced: true, fetched, graph, scripts, scratch, schema,
+      return { course, sourced: true, fetched, graph, scripts, scratch, schema, ...(warning ? { warning } : {}),
         outputSchema(leg, name) {
           const outputs = legs[leg]?.outputs;
           return outputs && Object.hasOwn(outputs, name) ? outputs[name].schema : undefined;

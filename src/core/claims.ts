@@ -3,7 +3,7 @@
 // reaps, the fence before re-issue (R-BTN-19), confirmation by ancestry, and git winning over a
 // stale claim (R-BTN-35). The lock is the two partial unique indexes: a claim inserts and lets
 // SQLite refuse a second holder, never check-then-insert without them (R-BTN-4).
-import type { AdvanceAnswer, ClaimAnswer, NextLegs } from '../shared/runner-wire';
+import type { AdvanceAnswer, ClaimAnswer, CourseResolution, NextLegs } from '../shared/runner-wire';
 import { expiredLeaseSql, isClaimLeaseLive, liveDeclaringRunnerSql, liveRunnerSql, type Lease } from './runnerLiveness';
 import { BatonError } from './http';
 import { sessionLinkWhy, transcriptUrl, type SessionLinkView } from './links';
@@ -311,9 +311,6 @@ export class Claims {
   }
   private anyCutOver() {
     return this.rows('SELECT 1 FROM repositories WHERE cutover_at IS NOT NULL AND retired_at IS NULL').length > 0;
-  }
-  private headOf(repo: string) {
-    return this.rows<{ sha: string | null }>('SELECT sha FROM board_head WHERE repository_id = ?', repo)[0]?.sha ?? null;
   }
 
   // ── the repository policy's stops (§12.8, B-145) ────────────────────────────────────────
@@ -1373,10 +1370,12 @@ export class Claims {
       // §2d's course record: how long the offered leg had been ready (R3-1248, 2-r2-2).
       const readySince = st.next_leg == null ? null
         : this.rows<{ ready_since: number | null }>(`SELECT ready_since FROM ticket_next_legs WHERE ticket_id = ? AND leg = ? AND state = 'ready'`, item.id, st.next_leg)[0]?.ready_since ?? null;
+      const head = this.rows<{ sha: string | null; last_handed_out: number }>(
+        'SELECT sha, last_handed_out FROM board_head WHERE repository_id = ?', item.repository)[0];
       id = this.exec<{ id: number }>(`INSERT INTO claims (ticket_id, runner_id, request_id, nonce, snapshot_sha, claimed_at, status, claim_observation,
                    station, course_id, start_path, offered_leg, advice_json, offered_ready_since)
                  VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
-        item.id, runnerId, b.request_id, randomHex(3), this.headOf(item.repository) ?? '', now, this.handedOut(item.repository),
+        item.id, runnerId, b.request_id, randomHex(3), head?.sha ?? '', now, head?.last_handed_out ?? 0,
         st.station, item.course, JSON.stringify(st.path), st.next_leg, savedAdvice ? JSON.stringify(savedAdvice) : null, readySince).one().id;
     } catch (e) {
       // R-BTN-4: the partial unique indexes refuse a second holder of the ticket or the runner.
@@ -1384,7 +1383,10 @@ export class Claims {
       throw e;
     }
     this.exec(`UPDATE claims SET (contract_course_json, contract_course_version) =
-      (SELECT course_json, version FROM courses WHERE repository_id = ? AND id = ?) WHERE id = ?`, item.repository, item.course, id);
+      (SELECT course_json, version FROM courses WHERE repository_id = ? AND id = ?),
+      course_source_json = (SELECT j.value FROM board_snapshots s, json_each(s.course_sources_json) j
+        WHERE s.repository_id = ? AND s.sha = claims.snapshot_sha AND j.key = ?) WHERE id = ?`,
+    item.repository, item.course, item.repository, item.course, id);
     if (st.next_leg && this.stations.graph(item.repository, item.course)?.legs.get(st.next_leg)?.reconciles) this.c.outsideWork?.capture(item.id, id);
     this.event('claimed', `runner:${runnerId}`, { request_id: b.request_id, station: st.station, leg: st.next_leg }, item.id, id);
     if (b.rationale !== null) this.c.history.record(item.id, { kind: 'claimed', claim_id: id, runner_id: runnerId, leg: st.next_leg, rationale_json: b.rationale });
@@ -1424,8 +1426,8 @@ export class Claims {
    *  while the repository requires signed control — the record of what counts, with the owner
    *  keys a runner verifies the named commits against itself. */
   private claimResponse(id: number): ClaimAnswer {
-    const c = this.rows<{ id: number; ticket_id: string; nonce: string; snapshot_sha: string; station: string; offered_leg: string | null; course_id: string | null }>(
-      'SELECT id, ticket_id, nonce, snapshot_sha, station, offered_leg, course_id FROM claims WHERE id = ?', id)[0];
+    const c = this.rows<{ id: number; ticket_id: string; nonce: string; snapshot_sha: string; station: string; offered_leg: string | null; course_id: string | null; course_source_json: string | null }>(
+      'SELECT id, ticket_id, nonce, snapshot_sha, station, offered_leg, course_id, course_source_json FROM claims WHERE id = ?', id)[0];
     // R-BTN-81's reading of the same two facts (`legFacts`): the course in force for the claim's
     // repository, at the version the registry holds for it.
     const courseVersion = c.course_id
@@ -1468,6 +1470,7 @@ export class Claims {
       ? this.c.outsideWork?.displaced(c.ticket_id) : undefined;
     return {
       claim_id: c.id, ticket_id: c.ticket_id, course_id: c.course_id, course_version: courseVersion,
+      ...(c.course_source_json ? { course_source: JSON.parse(c.course_source_json) as CourseResolution } : {}),
       ...(legState ? { leg_state: legState } : {}),
       ...(brief ? { brief } : {}),
       station: c.station, legs: c.offered_leg ? [c.offered_leg] : [], next: this.nextLegs(c.ticket_id, c.station),
@@ -1506,9 +1509,9 @@ export class Claims {
    *  reported, and the run's recorded inputs (the ticket's version and its read's digest among
    *  them, `leg_run_inputs`). `end` is the claim's end reason once the claim ended. */
   runsOf(ticketId: string, leg: string, sessionLink: SessionLinkView) {
-    const runs = this.rows<{ claim_id: number; seq: number; leg: string; contract_leg: string | null; run_id: string | null; head_sha: string | null; from_station: string; started_at: number; finished_at: number | null; abandoned_at: number | null; session_url: string | null; session_incarnation: number | null; snapshot_sha: string; course_id: string | null; status: string; end_reason: string | null; ended_at: number | null; runner_id: number; contract_version: number | null; contract_course_version: number | null }>(
+    const runs = this.rows<{ claim_id: number; seq: number; leg: string; contract_leg: string | null; run_id: string | null; head_sha: string | null; from_station: string; started_at: number; finished_at: number | null; abandoned_at: number | null; session_url: string | null; session_incarnation: number | null; snapshot_sha: string; course_id: string | null; status: string; end_reason: string | null; ended_at: number | null; runner_id: number; contract_version: number | null; contract_course_version: number | null; course_source_json: string | null }>(
       `SELECT l.claim_id, l.seq, l.leg, l.contract_leg, l.run_id, l.head_sha, l.from_station, l.started_at, l.finished_at, l.abandoned_at, l.session_url, l.session_incarnation,
-              c.snapshot_sha, c.course_id, c.status, c.end_reason, c.ended_at, c.runner_id, l.contract_version, l.contract_course_version
+              c.snapshot_sha, c.course_id, c.status, c.end_reason, c.ended_at, c.runner_id, l.contract_version, l.contract_course_version, c.course_source_json
        FROM claim_legs l JOIN claims c ON c.id = l.claim_id
        WHERE c.ticket_id = ? AND (l.leg = ? OR l.contract_leg = ?) ORDER BY l.claim_id, l.seq`, ticketId, leg, leg);
     const inputs = this.rows<{ claim_id: number; seq: number; name: string; schema: string | null; from_leg: string | null; from_run: number | null; uri: string | null; digest: string | null; value_json: string | null; leg_version: number | null; ticket_version: string | null; read_digest: string | null }>(
@@ -1530,6 +1533,7 @@ export class Claims {
           ended_at: r.finished_at ?? r.abandoned_at ?? null,
           end: r.status === 'active' ? null : r.end_reason,
           snapshot_sha: r.snapshot_sha, head_sha: r.head_sha,
+          ...(r.course_source_json ? { course_source: JSON.parse(r.course_source_json) as CourseResolution } : {}),
           // R-BTN-113 (B-4): the run's session link, as the run list draws it (§11.4).
           ...sessionLink(r.session_url, r.runner_id, r.session_incarnation),
           course: r.course_id, course_version: r.contract_course_version ?? courseVersion(r), leg_version: r.contract_version,

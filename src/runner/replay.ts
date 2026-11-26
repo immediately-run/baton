@@ -158,6 +158,7 @@ export interface RecordedRun {
   head_sha?: string | null;
   course?: string | null;
   course_version?: number | null;
+  course_source?: { branch: string; sha: string };
   ticket?: { version?: string; read_digest?: string };
   inputs: { name: string; schema?: string; from_leg?: string; from_run?: number; uri?: string; digest?: string; value?: unknown; leg_version?: number }[];
 }
@@ -319,7 +320,7 @@ export async function replayMain(argv: string[], io: ReplayIo = {}): Promise<num
   // 3. The course's scripts at the snapshot, and the leg's own safety marker.
   let course: CourseLoad;
   try {
-    course = await loadCourse(a.home, run.snapshot_sha, run.course ?? courseAt(a.home, run.snapshot_sha));
+    course = await loadCourse(a.home, run.snapshot_sha, run.course ?? courseAt(a.home, run.snapshot_sha), run.snapshot_sha, run.course_source);
   } catch (e) {
     return refuse(`the course's scripts would not load at the snapshot (${msg(e)})`);
   }
