@@ -12,8 +12,24 @@
 // gap-analysis-2026-10-21.mdx findings 8–9, B-80's PR #81 and B-81; claude-code headless on
 // 2026-10-21) validated the same words before B-84 moved the spawn.
 
-/** The harnesses whose agent commands the CLI knows (the heartbeat's own two, §8.1). */
-export type Harness = 'opencode' | 'claude-code';
+import { createHash } from 'node:crypto';
+import { readdirSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { basename, join } from 'node:path';
+import { claudeRecords, opencodeRecords } from '../shared/sessionUsage.mjs';
+import { splitWords } from '../defaults/agent-words';
+
+const activityIO = { createHash, readdirSync, homedir, join };
+
+export interface HarnessAdapter {
+  name: string;
+  agentCommand: string;
+  activityPaths: (checkout: string, io: typeof activityIO & { env: NodeJS.ProcessEnv }) => string[];
+  usage: (transcript: string, scope?: string) => {
+    records: object[];
+    children: { sessionId: string; scope: string }[];
+  };
+}
 
 /** The briefing every harness command hands its agent. No shell stands between the stub and the
  * agent (B-84), so nothing in it expands: it names the `BATON_*` environment variables the stub
@@ -40,10 +56,46 @@ const quotedBriefing = `"${AGENT_PROMPT.replaceAll('"', '\\"')}"`;
  * `baton run --harness <harness>` runs when `.baton/baton.json` names none. `--auto` and
  * `--permission-mode bypassPermissions` are the unattended modes — a leg's agent edits the
  * working tree, runs the checks and pushes, with nobody watching to answer a prompt. */
-export const HARNESS_AGENTS: Record<Harness, string> = {
-  opencode: `opencode run --auto --model zai-coding-plan/glm-5.3 ${quotedBriefing}`,
-  'claude-code': `claude -p --permission-mode bypassPermissions --model sonnet ${quotedBriefing}`,
-};
+export const HARNESS_ADAPTERS: readonly HarnessAdapter[] = [
+  {
+    name: 'opencode',
+    agentCommand: `opencode run --auto --model zai-coding-plan/glm-5.3 ${quotedBriefing}`,
+    activityPaths(checkout, { createHash, readdirSync, homedir, join, env }) {
+      const root = join(env.XDG_DATA_HOME || join(homedir(), '.local', 'share'), 'opencode');
+      const dashed = checkout.split('/').join('-');
+      const paths = [join(root, 'opencode.db'), join(root, 'opencode.db-wal'), join(root, 'opencode.db-shm'), join(root, 'project', dashed)];
+      const snapshots = join(root, 'snapshot');
+      const key = createHash('sha1').update(checkout).digest('hex');
+      try {
+        for (const instance of readdirSync(snapshots)) paths.push(join(snapshots, instance, key));
+      } catch { /* no snapshots yet */ }
+      return paths;
+    },
+    usage: (transcript, scope) => opencodeRecords(JSON.parse(transcript), scope),
+  },
+  {
+    name: 'claude-code',
+    agentCommand: `claude -p --permission-mode bypassPermissions --model sonnet ${quotedBriefing}`,
+    activityPaths: (checkout, { homedir, join, env }) => [
+      join(env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude'), 'projects', checkout.split('/').join('-')),
+    ],
+    usage: (transcript, scope) => ({ records: claudeRecords(transcript, scope), children: [] }),
+  },
+];
+
+export function selectHarness(name: string, adapters = HARNESS_ADAPTERS): HarnessAdapter | undefined {
+  return adapters.find((adapter) => adapter.name === name);
+}
+
+export function harnessActivityPaths(checkout: string, adapters = HARNESS_ADAPTERS): string[] {
+  return adapters.flatMap((adapter) => adapter.activityPaths(checkout, { ...activityIO, env: process.env }));
+}
+
+/** Bundled into standard stubs so built-in paths resolve in the executor's environment. */
+export function builtinAgentActivityPaths(command: string, checkout: string): string[] {
+  const adapter = HARNESS_ADAPTERS.find((entry) => basename(splitWords(entry.agentCommand)[0]) === basename(command));
+  return adapter ? harnessActivityPaths(checkout, [adapter]) : [];
+}
 
 /** B-141: reconstruct argv rather than forwarding flags that might change the workspace,
  * connect to another session, load plugins, or bypass the tool policy. */

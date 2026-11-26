@@ -20,7 +20,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { BatonApi, BatonRefusal, envAuth, type Auth, type Transport } from '../runner/api';
-import { HARNESS_AGENTS, type Harness } from '../runner/harness';
+import { HARNESS_ADAPTERS, selectHarness } from '../runner/harness';
 import { syncOnce } from '../shared/batonSync.mjs';
 import { GIT_NONINTERACTIVE_ENV } from '../client/git-env.mjs';
 import { DEFAULT_URL } from '../client/config.mjs';
@@ -1460,14 +1460,13 @@ export function stubSource(b: BuiltIn, course: string, leg: string): string {
   if (process.env.BATON_VERBOSE) process.stderr.write('baton: ' + ${JSON.stringify(`${b.id}/${leg}`)} + ' ticket ' + ctx.ticket.id + ': the forge verified an open PR on a branch matching ' + patterns.join(' or ') + '\\n');
 ` : '';
   return `import { execFile, execFileSync, spawn } from 'node:child_process';
-import { createHash } from 'node:crypto';
 import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { homedir, tmpdir } from 'node:os';
-import { basename, join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { splitWords } from ${JSON.stringify(source('agent-words.ts'))};
 import { readOnlyWorkspace } from ${JSON.stringify(source('read-only-workspace.ts'))};
-import { readOnlyHarness, readOnlyVersionSupported } from ${JSON.stringify(join(packageRoot(), 'src', 'runner', 'harness.ts'))};
+import { builtinAgentActivityPaths, readOnlyHarness, readOnlyVersionSupported } from ${JSON.stringify(join(packageRoot(), 'src', 'runner', 'harness.ts'))};
 import { dibberWords } from ${JSON.stringify(source('dibber.ts'))};
 // B-94: every git and gh call this stub makes — the snapshot probes, the override and
 // instructions reads, the forge verification — is bounded and non-interactive, the same bound
@@ -1702,22 +1701,12 @@ ${pushes ? `  // B-231: run from the gate's red (pr-open, fixed), this leg must 
   // the agent's activity.
   const startedAt = Date.now();
   const wrapperLog = join(ctx.checkout, '.baton', 'logs', ctx.ticket.id + '-${leg}.log');
-  const agentBin = basename(command);
-  const storePaths = [];
-  if (agentBin === 'opencode' || agentBin === 'claude') {
-    const dataHome = process.env.XDG_DATA_HOME && process.env.XDG_DATA_HOME !== '' ? process.env.XDG_DATA_HOME : join(homedir(), '.local', 'share');
-    const dashed = cwd.split('/').join('-');
-    if (agentBin === 'opencode') {
-      const root = join(dataHome, 'opencode');
-      storePaths.push(join(root, 'opencode.db'), join(root, 'opencode.db-wal'), join(root, 'opencode.db-shm'), join(root, 'project', dashed));
-      const key = createHash('sha1').update(cwd).digest('hex');
-      let instances = [];
-      try { instances = readdirSync(join(root, 'snapshot')); } catch { /* none yet */ }
-      for (const i of instances) storePaths.push(join(root, 'snapshot', i, key));
-    } else {
-      storePaths.push(join(process.env.CLAUDE_CONFIG_DIR && process.env.CLAUDE_CONFIG_DIR !== '' ? process.env.CLAUDE_CONFIG_DIR : join(homedir(), '.claude'), 'projects', dashed));
-    }
-  }
+  // A runtime adapter can supply paths as data, but only for the command that actually won.
+  // Match the entire command, not the executable: unrelated agents can share 'node', etc.
+  const activity = ctx.agent_activity;
+  const storePaths = typeof activity?.command === 'string' && activity.command.trim() === settingsCommand.trim()
+    && Array.isArray(activity.paths) && activity.paths.every((path) => typeof path === 'string')
+    ? activity.paths : builtinAgentActivityPaths(command, cwd);
   // The agent's last output (2026-10-24; B-256): the last lines of both streams, bounded — what a
   // failed leg's error carries, so the runner's log alone can diagnose it, whether the agent
   // exited non-zero or exited 0 and the checks after it failed.
@@ -2188,7 +2177,7 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
   let eject: 'tickets' | 'stations' | null = null;
   let pin: string | null = null;
   let force = false;
-  let agent: Harness = 'opencode';
+  let agent = selectHarness('opencode')!;
   let agentNamed = false;
   let agentCommand: string | null = null;
   const overrides: string[] = [];
@@ -2205,8 +2194,9 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
     else if (a === '--override') overrides.push(value());
     else if (a === '--agent') {
       const v = value();
-      if (v !== 'opencode' && v !== 'claude-code') throw new Error('--agent: opencode or claude-code');
-      agent = v;
+      const adapter = selectHarness(v);
+      if (!adapter) throw new Error(`--agent: ${HARNESS_ADAPTERS.map((entry) => entry.name).join(' or ')}`);
+      agent = adapter;
       agentNamed = true;
     } else if (a === '--agent-command') agentCommand = value();
     else if (a === '--eject') {
@@ -2340,7 +2330,7 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
     // is replaced by the default harness's command, and any other named command — the
     // repository's own — is kept.
     const was = typeof existing.agent_command === 'string' ? existing.agent_command : '';
-    const now = agentCommand ?? (agentNamed || was === 'echo' ? HARNESS_AGENTS[agent] : null);
+    const now = agentCommand ?? (agentNamed || was === 'echo' ? agent.agentCommand : null);
     if (now != null && now !== was) settings.agent_command = now;
     commandMoved = now != null && now !== was;
     if (!listed || force || moved.length || commandMoved) {
@@ -2353,7 +2343,7 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
     // B-83: a fresh repository names a real agent from the start — the chosen harness's command,
     // printed below for the unfamiliar. The bare `echo` stub is written only when named
     // explicitly, never by default.
-    const chosen = agentCommand ?? HARNESS_AGENTS[agent];
+    const chosen = agentCommand ?? agent.agentCommand;
     if (chosen === 'echo' && agentCommand !== 'echo') {
       throw new Error('baton repo init refuses to write the no-op agent_command "echo" — pass --agent opencode or --agent claude-code for a real command, or --agent-command echo to name the stub explicitly');
     }
