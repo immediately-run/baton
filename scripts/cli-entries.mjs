@@ -6,7 +6,7 @@ export const CLI_ENTRIES = {
     { entry: 'src/defaults/request.ts', exports: ['requestMain'] },
     { entry: 'src/defaults/homes.ts', exports: ['homeMain', 'resolveHomes'] },
   ],
-  'baton-leg.mjs': [{ entry: 'src/runner/leg.ts', exports: ['raiseMain'] }],
+  'baton-leg.mjs': [{ entry: 'src/runner/leg.ts', exports: ['legMain', 'raiseMain'] }],
   'baton-run.mjs': [
     { entry: 'src/runner/main.ts', exports: ['runMain', 'queueCommand'] },
     { entry: 'src/runner/replay.ts', exports: ['replayMain'] },

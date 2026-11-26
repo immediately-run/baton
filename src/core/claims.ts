@@ -676,7 +676,23 @@ export class Claims {
    * refuses, and one reading serves the recommendation and a refusal's `stale-skills` check
    * alike (B-237).
    */
-  private referenceCandidates(w: RunnerFacts, page = 0, rule9 = true): Candidate[] {
+  /** The reference query's legs never offered, by `<repository>/<course>`: each course's person
+   *  legs (R-BTN-116), and with a bounded claim's leg list (R-BTN-72, S-BTN-75) every leg outside
+   *  it — the same exclusion, so the query's text, and its SQL dialect inventory, stay as they are. */
+  private unofferedLegs(only?: readonly string[]): Record<string, string[]> {
+    const out: Record<string, string[]> = {};
+    for (const k of this.rows<{ r: string; c: string; legs: string }>('SELECT repository_id AS r, id AS c, person_legs_json AS legs FROM courses WHERE person_legs_json IS NOT NULL')) {
+      out[`${k.r}/${k.c}`] = JSON.parse(k.legs) as string[];
+    }
+    if (only) {
+      for (const l of this.rows<{ r: string; c: string; leg: string }>('SELECT repository_id AS r, course_id AS c, leg FROM course_legs')) {
+        if (!only.includes(l.leg)) (out[`${l.r}/${l.c}`] ??= []).push(l.leg);
+      }
+    }
+    return out;
+  }
+
+  private referenceCandidates(w: RunnerFacts, page = 0, rule9 = true, only?: readonly string[]): Candidate[] {
     const rows = this.named<Candidate>(
       `SELECT id, repository_id, course_id, weight, expedite, to_end, rank, ready_since, n FROM (
          SELECT w.id, w.repository_id, w.course_id, p.weight, s.to_end, w.rank, a.ready_since,
@@ -744,8 +760,7 @@ export class Claims {
        ORDER BY repository_id, course_id, n`,
       { runner: w.id, now: this.c.now(), ceiling: JSON.stringify(this.ceilingPositions(w)), page,
         heads: JSON.stringify(Object.fromEntries(this.rows<{ r: string; n: number }>('SELECT repository_id AS r, observation AS n FROM board_head').map((h) => [h.r, h.n]))),
-        person: JSON.stringify(Object.fromEntries(this.rows<{ r: string; c: string; legs: string }>('SELECT repository_id AS r, id AS c, person_legs_json AS legs FROM courses WHERE person_legs_json IS NOT NULL')
-          .map((k) => [`${k.r}/${k.c}`, JSON.parse(k.legs) as unknown]))),
+        person: JSON.stringify(this.unofferedLegs(only)),
         // A leg's `requires` is compared as `graphOf` expanded it: the registry writes that view to
         // `leg_capabilities_json` from `legNeedsOf` when it accepts a file (§12.5), so the query reads
         // capabilities only. Rule 4 matches them by name against the declared holdings the grant
@@ -767,8 +782,8 @@ export class Claims {
    * The projection contains runner-independent facts; all runner gates remain authoritative.
    * JSON parameters below are small request-local sets, expanded once, never stored documents
    * expanded for every candidate. Page cursors live only for this synchronous decision. */
-  candidates(w: RunnerFacts, page = 0, rule9 = true, wanted: string[] | null = null, skipExpedited?: ReadonlySet<string>, batch = 50): Candidate[] {
-    if (this.reference) return this.referenceCandidates(w, page, rule9);
+  candidates(w: RunnerFacts, page = 0, rule9 = true, wanted: string[] | null = null, skipExpedited?: ReadonlySet<string>, batch = 50, only?: readonly string[]): Candidate[] {
+    if (this.reference) return this.referenceCandidates(w, page, rule9, only);
     const groups = this.rows<{ repository_id: string; course_id: string; weight: number; min_runner_version: number; observation: number; tiers: string }>(
       `SELECT k.repository_id, k.id AS course_id, p.weight, k.min_runner_version, h.observation, p.tiers
        FROM courses k JOIN repositories p ON p.id = k.repository_id JOIN board_head h ON h.repository_id = p.id
@@ -791,7 +806,8 @@ export class Claims {
         AND NOT EXISTS (SELECT 1 FROM course_leg_capabilities c
           WHERE c.repository_id = l.repository_id AND c.course_id = l.course_id AND c.leg = l.leg
           AND c.capability NOT IN (${effectiveCaps}))`, g.repository_id, g.course_id, w.id, g.repository_id).map((l) => l.leg);
-      if (!legs.length) continue;
+      const allowed = only ? legs.filter((leg) => only.includes(leg)) : legs;
+      if (!allowed.length) continue;
       const prior = page > 0 ? this.cache?.candidatePages.get(key) : undefined;
       if (prior && prior.count < page * size) continue;
       // One read of the repo's effective set. A scalar lookup in that object avoids
@@ -812,7 +828,7 @@ export class Claims {
          ORDER BY -q.expedite, q.to_end, q.rank IS NULL, COALESCE(q.rank, 0), COALESCE(q.ready_since, -1), q.ticket_id
          LIMIT ?${page > 0 && !prior ? ' OFFSET ?' : ''}`,
         g.repository_id, g.course_id, g.observation, this.c.now(), tiers.length - 1, ceiling,
-        JSON.stringify(legs), caps, w.id, ...(prior?.cursor ?? []), size, ...(page > 0 && !prior ? [page * size] : []));
+        JSON.stringify(allowed), caps, w.id, ...(prior?.cursor ?? []), size, ...(page > 0 && !prior ? [page * size] : []));
       const last = found.at(-1);
       if (last) this.cache?.candidatePages.set(key, {
         cursor: [-last.expedite, last.to_end, Number(last.rank == null), last.rank ?? 0, last.ready_since ?? -1, last.id],
@@ -847,7 +863,7 @@ export class Claims {
    * `limit`; the answer is the one gating every candidate gives. `page0` is the first reading,
    * every group's, rule 9's included, for a refusal's `stale-skills` check.
    */
-  private recommend(w: RunnerFacts, limit: number, out?: { page0?: Candidate[]; needsFullPrefix?: boolean }, all = false): Recommendation[] {
+  private recommend(w: RunnerFacts, limit: number, out?: { page0?: Candidate[]; needsFullPrefix?: boolean }, all = false, only?: readonly string[]): Recommendation[] {
     const groups = new Map<string, { rows: (Candidate & { item: ItemFacts })[]; done: boolean; passed: [number, number]; cut: boolean }>();
     // B-127 (fail closed, unpenalised): no ticket of a repository whose required control has no
     // signed version is recommended — see unsignedControlBlocked.
@@ -865,7 +881,7 @@ export class Claims {
       if (wanted && !wanted.length) break;
       let read: Candidate[];
       if (page === 0 && lazy) {
-        const all = this.candidates(w, 0, false, null, undefined, batch);
+        const all = this.candidates(w, 0, false, null, undefined, batch, only);
         if (out) out.page0 = all;
         read = all.filter((r) => r.r9);
         if (full && limit === 1 && out) {
@@ -883,7 +899,7 @@ export class Claims {
         // With the lane full, expedited rows are the first sorted run. Once it cannot
         // contribute more to the merged prefix, page only the unexpedited run.
         const skipExpedited = all && full && lazy ? new Set(wanted?.filter((k) => groups.get(k)!.passed[1] >= limit)) : undefined;
-        read = this.candidates(w, page, false, wanted, skipExpedited, batch);
+        read = this.candidates(w, page, false, wanted, skipExpedited, batch, only);
       }
       // Keep page membership and the existing stopping point, but gate a small prefix in
       // the order we'll actually return it. At most `limit` passes from any one page can
@@ -1047,7 +1063,7 @@ export class Claims {
   }
 
   /** A named or preferred ticket goes through the same gate as the default offer. */
-  private decide(w: RunnerFacts, wanted: string | null, prefer: ClaimPreference[] | null = null): { item: ItemFacts; advice: Record<string, unknown> | null } {
+  private decide(w: RunnerFacts, wanted: string | null, prefer: ClaimPreference[] | null = null, only?: readonly string[]): { item: ItemFacts; advice: Record<string, unknown> | null } {
     if (prefer) {
       for (const { ticket_id } of prefer) {
         if ((!w.grants || w.grants[repositoryOf(ticket_id)]) && !this.item(ticket_id)) {
@@ -1068,9 +1084,9 @@ export class Claims {
     if (wanted) return this.decideNamed(w, wanted);
     const read: { page0?: Candidate[]; needsFullPrefix?: boolean } = {};
     // Don't gate 50 tickets to claim the first where the prefix is conclusive.
-    const prefix = this.reference ? null : this.recommend(w, 1, read);
+    const prefix = this.reference ? null : this.recommend(w, 1, read, false, only);
     const recs = prefix && !read.needsFullPrefix && (!prefix.length || this.canOffer(prefix[0].ticket_id, w))
-      ? prefix : this.recommend(w, 50, read);
+      ? prefix : this.recommend(w, 50, read, false, only);
     // §12.8 (B-145): a recommended ticket is offered only where the floor rule lets it be — the
     // first one that is not on a stopped repository.
     const first = recs.find((r) => this.canOffer(r.ticket_id, w))
@@ -1084,7 +1100,7 @@ export class Claims {
     // courses the runner declares count; a runner declaring no course is stale on every course.
     // B-237: the recommendation's own first reading, not a second query — only its rule-9
     // groups can refuse by rule 9 (the gate's rule 9 reads what the query's does).
-    const page0 = this.reference ? this.candidates(w, 0, false) : (read.page0 ?? []).filter((c) => !c.r9);
+    const page0 = this.reference ? this.candidates(w, 0, false, null, undefined, 50, only) : (read.page0 ?? []).filter((c) => !c.r9);
     if (page0.some((c) => {
       const item = this.item(c.id);
       return !!item?.station?.next_leg && (!w.courses.length || w.courses.some((k) => k.repository === item.repository && k.course === item.course))
@@ -1339,11 +1355,11 @@ export class Claims {
 
   /** `decide` with the per-request reads cached, and a claim with no ticket named that finds
    *  nothing noted as idle (B-237). */
-  private decideNoting(w: RunnerFacts, wanted: string | null, version: number, prefer: ClaimPreference[] | null = null): { item: ItemFacts; advice: Record<string, unknown> | null } {
+  private decideNoting(w: RunnerFacts, wanted: string | null, version: number, prefer: ClaimPreference[] | null = null, only?: readonly string[]): { item: ItemFacts; advice: Record<string, unknown> | null } {
     try {
-      return this.cached(() => this.decide(w, wanted, prefer));
+      return this.cached(() => this.decide(w, wanted, prefer, only));
     } catch (e) {
-      if (!wanted && !prefer && e instanceof BatonError && (e.code === 'no-eligible-ticket' || e.code === 'stale-skills')) this.idleNote(w.id, version, e);
+      if (!wanted && !prefer && !only && e instanceof BatonError && (e.code === 'no-eligible-ticket' || e.code === 'stale-skills')) this.idleNote(w.id, version, e);
       throw e;
     }
   }
@@ -1383,10 +1399,10 @@ export class Claims {
     const w = this.runner(runnerId);
     this.refuseFull(w, null);
     // B-237 (R-BTN-196): an idle runner asking again with nothing changed gets the same refusal.
-    const idle = b.ticket_id || b.prefer ? null : this.idleHit(runnerId);
+    const idle = b.ticket_id || b.prefer || b.legs ? null : this.idleHit(runnerId);
     if (idle?.refusal) throw idle.refusal;
     const version = schedulingVersion(this.c.store);
-    const { item, advice } = this.decideNoting(w, b.ticket_id, version, b.prefer);
+    const { item, advice } = this.decideNoting(w, b.ticket_id, version, b.prefer, b.legs);
     const rationale = b.rationale === null ? undefined : JSON.parse(b.rationale) as unknown;
     const savedAdvice = rationale === undefined ? advice : { ...advice, rationale };
     const st = item.station!;
@@ -1702,11 +1718,15 @@ export class Claims {
     }
     const resolved = ticketInputs(this.c.store, c.ticket_id, contract.graph, scriptLeg, g);
     if (resolved.wait) throw new BatonError('not-eligible', `${leg}: ${resolved.wait}`, { rule: 1, rule_code: resolved.wait });
+    // R-BTN-106 / S-BTN-75: use the same instant for the cutoff and the start row.
+    const now = this.c.now();
+    if (b.start_before != null && now >= b.start_before) {
+      throw new BatonError('not-eligible', 'the requested leg start deadline has passed', { rule_code: 'run-deadline' });
+    }
     // R-BTN-76: an advance into a leg blocked on a resource is accepted — the holder may know better.
     const resources = this.resourceAdvice(runnerId, c.ticket_id, leg);
     if (resources.length) this.event('advice-overridden', `runner:${runnerId}`, { overridden: [{ advice: 'resource', leg, resources }] }, c.ticket_id, claimId);
 
-    const now = this.c.now();
     const n = this.handedOut(repo);
     // R-BTN-113 (B-4): the advance may carry the session link of the leg it finishes — stored on
     // the finished run's row as a heartbeat's is. One that fails the rule, or one carried by the

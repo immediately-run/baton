@@ -20,7 +20,8 @@ export interface CourseLoad {
   /** The extracted `legs/<leg>.mjs` of the snapshot, by leg name — file paths on disk. */
   scripts: Map<string, string>;
   scratch: string;
-  schema?: Resolve;
+  schema: Resolve;
+  outputSchema(leg: string, name: string): string | undefined;
 }
 
 /** The course id the home repository runs, from the snapshot's `.baton/baton.json`: the spec's
@@ -149,7 +150,8 @@ export async function prepareClone(home: string, dir: string, sha: string, branc
 export function loadCourse(home: string, sha: string, course: string): CourseLoad {
   const file = readAt(home, sha, `.baton/courses/${course}/course.json`);
   if (file == null) throw new Error(`the snapshot ${sha.slice(0, 10)} has no .baton/courses/${course}/course.json`);
-  const graph = graphOf(JSON.parse(file));
+  const raw = JSON.parse(file) as { legs: Record<string, { outputs?: Record<string, { schema: string }> }> };
+  const graph = graphOf(raw);
   const scratch = mkdtempSync(join(tmpdir(), 'baton-legs-'));
   const scripts = new Map<string, string>();
   let listing: string[];
@@ -180,7 +182,12 @@ export function loadCourse(home: string, sha: string, course: string): CourseLoa
     schemas.set(id, value);
     return value;
   };
-  return { course, graph, scripts, scratch, schema };
+  return { course, graph, scripts, scratch, schema,
+    outputSchema(leg, name) {
+      const outputs = raw.legs[leg]?.outputs;
+      return outputs && Object.hasOwn(outputs, name) ? outputs[name].schema : undefined;
+    },
+  };
 }
 
 /** B-183 (§4.5, R-BTN-74): the repository's ticket source at the claim's snapshot — its
