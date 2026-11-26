@@ -131,6 +131,7 @@ function listingsOf(cx: ReadCtx, repository: string, now: number, administrator:
   const notices = cx.core.notices.needsYou(now);
   const stations = cx.core.stations.needsYou();
   return {
+    ...cx.core.syncNeedsYou(now, repository),
     unconfirmed: (claims.unconfirmed as Row[]).filter(byTicket),
     unacknowledged_releases: (claims.unacknowledged_releases as Row[])
       .map(({ payload_json, ...m }) => ({ ...m, payload: parsed(payload_json) }))

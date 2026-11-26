@@ -7,7 +7,8 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { rows, sessionCall, withCore } from '../helpers';
 import { claimAndStart, fleet, grantedRunner, type Fleet, type Granted, type Json } from '../lib/runnerFleet';
 
-const T0 = Date.parse('2026-11-20T12:00:00Z');
+// Keep real workerd alarms outside the SQL capture for the simulated clock.
+const T0 = Date.parse('2030-11-20T12:00:00Z');
 const DAY = 86_400_000;
 
 let f: Fleet;

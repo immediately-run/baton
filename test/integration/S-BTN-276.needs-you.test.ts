@@ -81,8 +81,8 @@ describe('S-BTN-276 what waits on a person (B-195, B-219)', () => {
     expect((await postSession(f.cookie, '/v1/ui/overrides/docs:A', { hold: true })).status).toBe(200);
     const docs = await readSession(f.cookie, '/v1/repositories/docs/needs-you');
     expect(docs.json.listings.held_items).toEqual([expect.objectContaining({ ticket_id: 'docs:A' })]);
-    expect(Object.keys(docs.json.listings).sort()).toEqual(['adoptions', 'bars_mismatch', 'blocked_capability', 'course_changed', 'courses_refused', 'fence_pending', 'held_items',
-      'no_owner_channel', 'policy', 'pool_unclaimed', 'prerequisite_issues', 'regressed', 'scope', 'stale_skills', 'sync_control_changes', 'sync_lapses', 'unacknowledged_releases', 'unconfirmed', 'unsigned_control']);
+    expect(Object.keys(docs.json.listings).sort()).toEqual(['adoptions', 'bars_mismatch', 'blocked_capability', 'course_changed', 'courses_refused', 'fence_pending', 'forge_secret_missing', 'held_items',
+      'mirror_late', 'no_owner_channel', 'policy', 'pool_unclaimed', 'prerequisite_issues', 'regressed', 'scope', 'stale_skills', 'sync_control_changes', 'sync_lapses', 'sync_late', 'unacknowledged_releases', 'unconfirmed', 'unsigned_control']);
     expect(docs.json.elsewhere).toEqual(['instances_unknown', 'keys', 'capacity', 'stale_clients', 'stale_skills_no_course']);
     const ops = await readSession(f.cookie, '/v1/repositories/ops/needs-you');
     expect(ops.json.listings.held_items).toEqual([]);

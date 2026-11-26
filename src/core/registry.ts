@@ -6,8 +6,8 @@
 import { BatonError } from './http';
 import { parseSshKey } from './auth';
 import { logEvent } from './db';
-import type { Config, Store } from './ports';
-import { REPOSITORY_ID, TIER_NAME } from './validate';
+import type { Config, ForgeDispatch, Store } from './ports';
+import { checkForgeDispatch, DISPATCH_WORKFLOW, REPOSITORY_ID, TIER_NAME } from './validate';
 import { FORGES, isForgePath, isWebBase, parseTranscriptRepo, type Forge } from './links';
 
 export { REPOSITORY_ID, TICKET_ID, qualify, repositoryOf, localOf } from './validate';
@@ -15,9 +15,18 @@ export { REPOSITORY_ID, TICKET_ID, qualify, repositoryOf, localOf } from './vali
 /** A default branch, registered by the administrator: stricter than any branch a push may name
  *  (GIT_BRANCH), as it goes unencoded into the dashboard's GitHub links. */
 const BRANCH = /^(?!.*\.\.)[A-Za-z0-9._/-]{1,100}$/;
-const WORKFLOW = /^\.github\/workflows\/[A-Za-z0-9._-]{1,100}\.ya?ml$/;
+const WORKFLOW = DISPATCH_WORKFLOW;
 const TIER = TIER_NAME;
 const DEFAULT_TIERS = ['routine', 'judgement', 'critical'];
+
+export function checkRegisteredDispatch(value: unknown, field: string, forge: Forge, path: unknown, webBase: unknown, branch: unknown) {
+  if (typeof path !== 'string' || !isForgePath(forge, path) || typeof webBase !== 'string' || !isWebBase(forge, webBase, path)) {
+    return bad(field, 'needs the registered repository web base');
+  }
+  if (typeof branch !== 'string' || !BRANCH.test(branch)) return bad(field, 'needs the registered default branch');
+  const onGithubCom = webBase.toLowerCase() === `https://github.com/${path.toLowerCase()}`;
+  return checkForgeDispatch(value, field, forge === 'github' && !onGithubCom ? 'git' : forge, branch);
+}
 
 /** How a repository's sync proves itself besides a sync key (R-BTN-93): GitHub Actions OIDC from its
  *  sync and mirror workflows, or a GitLab CI `id_tokens` JWT from its issuer. */
@@ -57,6 +66,7 @@ export interface Registration {
   remote: string;
   web_base: string | null;
   ci_identity: CiIdentity | null;
+  dispatch: ForgeDispatch | null;
   sync_keys: { public_key: string; role: 'sync' | 'mirror' }[];
   default_branch: string;
   /** '' for none (R-BTN-93: only with a github-actions identity). */
@@ -70,7 +80,7 @@ export interface Registration {
 
 /** A registered repository's fields — every field a registration has but the owner keys, which
  *  live in `repository_owners` (R-BTN-58), above a registration's own (B-91). */
-const REGISTRATION_FIELDS = ['github', 'forge', 'remote', 'web_base', 'ci_identity', 'sync_keys', 'default_branch', 'sync_workflow', 'mirror_workflow', 'weight', 'tiers', 'transcript_repos', 'cut_over'] as const;
+const REGISTRATION_FIELDS = ['github', 'forge', 'remote', 'web_base', 'ci_identity', 'dispatch', 'sync_keys', 'default_branch', 'sync_workflow', 'mirror_workflow', 'weight', 'tiers', 'transcript_repos', 'cut_over'] as const;
 
 /** BATON_REPOSITORIES' entries, each with its checked registration and its place (`at`), for the
  *  start's three passes over the seed — the registration, its sync keys and its owner keys
@@ -143,6 +153,9 @@ export function checkRegistration(v: unknown, at = 'repository'): Registration {
     : Array.isArray(r.sync_keys) && r.sync_keys.length <= 4 && r.sync_keys.every((k) => k && typeof k === 'object' && typeof (k as Record<string, unknown>).public_key === 'string' && ['sync', 'mirror'].includes((k as Record<string, unknown>).role as string))
       ? (r.sync_keys as Registration['sync_keys']) : bad(`${at}.sync_keys`, 'must be at most 4 {public_key, role: sync|mirror}');
   if (!ci && !keys.some((k) => k.role === 'sync')) bad(at, 'a repository needs a CI identity or a sync key for its sync (R-BTN-93)');
+  const branch = str('default_branch', BRANCH);
+  const dispatch = r.dispatch === undefined ? (onGithubCom ? { kind: 'github-app' } as const : null)
+    : r.dispatch === null ? null : checkRegisteredDispatch(r.dispatch, `${at}.dispatch`, forge, github, webBase, branch);
   return {
     id: str('id', REPOSITORY_ID),
     github,
@@ -150,8 +163,9 @@ export function checkRegistration(v: unknown, at = 'repository'): Registration {
     remote: remote as string,
     web_base: (webBase ?? null) as string | null,
     ci_identity: ci,
+    dispatch,
     sync_keys: keys,
-    default_branch: str('default_branch', BRANCH),
+    default_branch: branch,
     sync_workflow: syncWorkflow,
     mirror_workflow: r.mirror_workflow == null ? null : str('mirror_workflow', WORKFLOW),
     weight,
@@ -229,7 +243,8 @@ const parse = (r: RepoRow): Repository => ({ ...r, transcript_repos: JSON.parse(
 const REPO_COLUMNS = 'id, github, forge, remote, web_base, ci_identity, default_branch, sync_workflow, mirror_workflow, weight, transcript_repos, tiers, cutover_at, retired_at, former_paths';
 
 export class Registry {
-  constructor(private readonly c: { store: Store; now: () => number; ensurePolicy: (repository: string, forge: Forge) => void }) {}
+  constructor(private readonly c: { store: Store; now: () => number; ensurePolicy: (repository: string, forge: Forge) => void;
+    secretForge: (repository: string) => unknown }) {}
 
   private rows<T>(q: string, ...p: unknown[]): T[] {
     return this.c.store.exec<T>(q, ...p).toArray();
@@ -239,6 +254,8 @@ export class Registry {
    *  `invalid-params` (retiring and changing one are the administrator's, R3-1240). */
   register(input: unknown, opts: { keysAddedLater?: boolean } = {}): Repository {
     const r = checkRegistration(input);
+    const secretForge = this.c.secretForge(r.id);
+    if (secretForge !== undefined && secretForge !== r.forge) bad('forge', 'does not match the configured forge secret');
     // Keys are added by registerWithKeys or the seed's seedSyncKeys (their fingerprints need
     // WebCrypto, an await); never dropped in silence (round 1, 1-A-7).
     if (r.sync_keys.length && !opts.keysAddedLater) bad('sync_keys', 'are added with registerWithKeys');
@@ -249,8 +266,7 @@ export class Registry {
       `INSERT INTO repositories (id, github, forge, remote, web_base, ci_identity, dispatch, default_branch, sync_workflow, mirror_workflow, weight, transcript_repos, tiers, cutover_at, insertion_order)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, (SELECT COALESCE(MAX(insertion_order), 0) + 1 FROM repositories))`,
       r.id, r.github, r.forge, r.remote, r.web_base, r.ci_identity ? JSON.stringify(r.ci_identity) : null,
-      // The App serves github.com alone (round 2, 2-A-4).
-      r.forge === 'github' && r.web_base?.toLowerCase() === `https://github.com/${r.github.toLowerCase()}` ? '{"kind":"github-app"}' : null,
+      r.dispatch ? JSON.stringify(r.dispatch) : null,
       r.default_branch, r.sync_workflow, r.mirror_workflow, r.weight, JSON.stringify(r.transcript_repos), JSON.stringify(r.tiers),
       r.cut_over ? this.c.now() : null);
     this.c.store.exec('INSERT INTO board_head (repository_id, sha) VALUES (?, NULL) ON CONFLICT (repository_id) DO NOTHING', r.id);
@@ -398,16 +414,22 @@ export class Registry {
    *  `job_workflow_ref` is its sync workflow (role `sync`) or its mirror workflow (`mirror`)
    *  on that branch. Anything else is `forbidden`. */
   forSync(claims: SyncClaims, role: 'sync' | 'mirror'): Repository {
+    return this.bindGithubSync(claims, role).repo;
+  }
+
+  bindGithubSync(claims: SyncClaims, role?: 'sync' | 'mirror'): { repo: Repository; role: 'sync' | 'mirror' } {
     const row = this.rows<RepoRow>(
       `SELECT ${REPO_COLUMNS} FROM repositories WHERE github = ? COLLATE NOCASE AND forge = 'github'
        AND lower(web_base) = 'https://github.com/' || lower(github) AND retired_at IS NULL`, claims.repository)[0];
     if (!row) throw new BatonError('forbidden', 'the OIDC token is from a repository this Baton does not serve');
     const branch = `refs/heads/${row.default_branch}`;
-    const workflow = role === 'sync' ? row.sync_workflow : row.mirror_workflow;
+    const matches = (workflow: string | null) => !!workflow && claims.job_workflow_ref === `${claims.repository}/${workflow}@${branch}`;
+    const selected = role ?? (matches(row.sync_workflow) ? 'sync' : 'mirror');
+    const workflow = selected === 'sync' ? row.sync_workflow : row.mirror_workflow;
     // GitHub spells the repository its own way; it matched case-insensitively above.
-    if (!workflow || JSON.parse(row.ci_identity ?? 'null')?.kind !== 'github-actions' || claims.ref !== branch || claims.job_workflow_ref !== `${claims.repository}/${workflow}@${branch}`) {
+    if (!matches(workflow) || JSON.parse(row.ci_identity ?? 'null')?.kind !== 'github-actions' || claims.ref !== branch) {
       throw new BatonError('forbidden', `the OIDC token is not from this route’s workflow on ${row.github} ${row.default_branch}`);
     }
-    return parse(row);
+    return { repo: parse(row), role: selected };
   }
 }

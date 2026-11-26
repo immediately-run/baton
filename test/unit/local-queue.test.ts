@@ -4,7 +4,7 @@
 // server answers as the Worker does; a local start refuses the test bindings.
 import { describe, it, expect, inject, beforeEach } from 'vitest';
 import type { AddressInfo } from 'node:net';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { claimItem, cutover, hbBody, payload, register, rows, setClock, sha256, syncCall } from '../helpers';
@@ -12,7 +12,7 @@ import { current } from '../hosts/local';
 import { RequestQueue } from '../../src/local/queue';
 import { MAX_BODY, serve } from '../../src/local/server';
 import { openStore } from '../../src/local/store';
-import { accessIdentitiesFrom, adminKeysFrom, concreteHost, localConfig, main } from '../../src/local/main';
+import { accessIdentitiesFrom, adminKeysFrom, concreteHost, localConfig, main, SecretFileModeError } from '../../src/local/main';
 import { RECOMMENDED_CLIENT, SECURITY_HEADERS } from '../../src/core/http';
 
 const board = inject('board');
@@ -218,6 +218,25 @@ describe('a local start', () => {
   it('refuses an --origin that is not an origin', async () => {
     for (const origin of ['baton.local', 'http://x/base', 'ftp//x']) {
       await expect(main(['--db', ':memory:', '--origin', origin])).rejects.toThrow(/must be an origin/);
+    }
+  });
+
+  it.each(['--forge-secrets', '--github-app-key'])('S-BTN-56: refuses unsafe %s files before opening the database', async (option) => {
+    const dir = mkdtempSync(join(tmpdir(), 'baton-forge-fixture-'));
+    const secret = join(dir, 'fixture');
+    const db = join(dir, 'database');
+    try {
+      writeFileSync(secret, 'test fixture');
+      for (const mode of [0o640, 0o604, 0o620, 0o602]) {
+        chmodSync(secret, mode);
+        await expect(main(['--db', db, option, secret])).rejects.toThrow(SecretFileModeError);
+      }
+      chmodSync(secret, 0o600);
+      chmodSync(dir, 0o720);
+      await expect(main(['--db', db, option, secret])).rejects.toThrow(/secret directory/);
+      expect(existsSync(db)).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
     }
   });
 

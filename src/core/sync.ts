@@ -1,6 +1,6 @@
 // sync.ts — accepting a repository's board post and reading its sync record.
 import type { BatonCore } from './baton';
-import type { Dispatch, DispatchTarget, Workflow } from './ports';
+import type { Dispatch, DispatchTarget, ForgeDispatch, Workflow } from './ports';
 import { DEFAULT_COURSE, resolveParents, rowFor, rowForTicket, rowHash, stationOf, type BoardPayload, type PostedStation, type TicketRow } from './board';
 import { BatonError } from './http';
 import { nonScheduling, schedulingVersion } from './stateVersion';
@@ -9,13 +9,13 @@ import { checkCrossBoardCycle, checkCrossRepository } from './dependencies';
 import { qualify, tierPosition, type Repository } from './registry';
 import { sha256HexSync } from './policy';
 import { logEvent } from './db';
-import { DispatchRefused } from './mirror';
+import { DispatchTransportError } from './dispatch';
 import { adjustCounts } from './capacity';
 import type { ClosingPosition, Seen } from './stations';
 
 const HELD_AUTO_ACCEPT_MS = 24 * 3_600_000; // R-BTN-11: measured from the first post of the held history.
 
-type BoardPostCore = Pick<BatonCore, 'store' | 'sql' | 'now' | 'observations' | 'claims' | 'ownerState' | 'stations' | 'blocks' | 'courses' | 'policies' | 'questions' | 'history' | 'provenance' | 'queues' | 'admin' | 'registry' | 'conditions'>;
+type BoardPostCore = Pick<BatonCore, 'store' | 'sql' | 'now' | 'observations' | 'claims' | 'ownerState' | 'stations' | 'blocks' | 'courses' | 'policies' | 'questions' | 'history' | 'provenance' | 'queues' | 'admin' | 'registry' | 'conditions' | 'syncWants'>;
 
 /** A repository's head snapshot (R-BTN-11, per repository), or null before its first. */
 export function headOf(core: Pick<BatonCore, 'sql'>, repo: string): string | null {
@@ -86,6 +86,7 @@ async function boardPost(core: BoardPostCore, repo: Repository, p: BoardPayload,
     // staleness do not stall for the hold's 24 hours. Its interim confirmations likewise.
     core.store.transaction(() => {
       core.observations.accept(r, n);
+      core.syncWants.posted(r, n, p.sha);
       const seen = normative ? refreshStations(core, r, p, n, at, null, true) : new Map<string, Seen>();
       core.claims.confirm(confirmations, n);
       core.claims.judge(r, n, seen, core.claims.evidenceOf(r, p.attestations));
@@ -121,6 +122,7 @@ async function boardPost(core: BoardPostCore, repo: Repository, p: BoardPayload,
     if (prior?.digest === fingerprint && prior.scheduling_v === schedulingVersion(core.store)) {
       return core.store.transaction(() => {
         core.observations.accept(r, n);
+        core.syncWants.posted(r, n, p.sha);
         // The snapshot is identical but a later observation may now confirm a completion
         // or judge a run whose observation equalled the previous snapshot's. Read only those
         // claims' placements, preserving a Baton-owned position instead of replaying git.
@@ -174,6 +176,7 @@ async function boardPost(core: BoardPostCore, repo: Repository, p: BoardPayload,
       if (!core.observations.newest(r, n)) throw new BatonError('stale-observation', `a newer reading than ${n} was accepted while this post was judged; take a new number and retry (R-BTN-62)`);
       if (headOf(core, r) !== head) throw new BatonError('head-moved', `the head moved to ${headOf(core, r) ?? 'unset'} while this post was judged; re-read it and retry`);
       core.observations.accept(r, n);
+      core.syncWants.posted(r, n, p.sha);
       if (readAtHead) rememberSource(core, r, p);
       // B-127: the record rides a refresh too (the latest post's word stands); the head has not
       // moved, so no `unsigned-control` event is raised for it again.
@@ -288,6 +291,7 @@ async function boardPost(core: BoardPostCore, repo: Repository, p: BoardPayload,
     const control = core.policies.current(r)?.policy.paths.control;
     core.provenance.advance(repo, head, p.sha, at, rows.map(({ row }) => row), new Set(upserted.map((id) => id.slice(r.length + 1))), control != null && control !== 'any');
     core.observations.accept(r, n);
+    core.syncWants.posted(r, n, p.sha);
     const confirmed = core.claims.confirm(confirmations, n);
     // R-BTN-10, R-BTN-35, §2e: git confirms ends, takes tickets away and goes backwards.
     const judged = core.claims.judge(r, n, seen, core.claims.evidenceOf(r, p.attestations));
@@ -691,32 +695,44 @@ function event(core: Pick<BatonCore, 'store'>, repo: string, kind: string, detai
 /** §10.3: a repository's sync or mirror workflow, on its default branch. A repository with no
  *  mirror has nothing to dispatch for it; a retired one has nothing at all (R-BTN-47, B-173). A
  *  dispatch the forge refuses is logged with its reason (R-BTN-94); the sync backstop still applies. */
-export async function sendDispatch(core: Pick<BatonCore, 'registry' | 'sql' | 'store' | 'now'>, dispatch: Dispatch, wf: Workflow): Promise<unknown> {
+export async function sendDispatch(core: Pick<BatonCore, 'registry' | 'sql' | 'store' | 'now' | 'syncWants'>, dispatch: Dispatch, wf: Workflow): Promise<unknown> {
   const repo = core.registry.live(wf.repository);
   if (!repo) return false;
-  let target: DispatchTarget | null = null;
-  if (wf.kind === 'unblocked') {
-    // R-BTN-77: one input, `tickets`, JSON — every id and ref in it passed its rule (§10.4). Only
-    // the GitHub App's dispatch is built here; GitLab's and Gitea's adapters are R3-1263's.
-    const trigger = core.sql<{ t: string | null }>('SELECT unblocked_trigger AS t FROM repositories WHERE id = ?', wf.repository)[0]?.t;
-    const t = trigger ? (JSON.parse(trigger) as { kind: string; workflow?: string }) : null;
-    if (t?.kind !== 'github-app' || !t.workflow) return false;
-    // R-BTN-94 (B-168): Baton reads no workflow file — one declaring no manual dispatch, or no
-    // `tickets` input, is the forge's to refuse at dispatch, and the refusal is logged below.
-    target = { github: repo.github, workflow: t.workflow.slice(t.workflow.lastIndexOf('/') + 1), ref: repo.default_branch, inputs: { tickets: JSON.stringify(wf.tickets ?? []) } };
-  } else {
-    const path = wf.kind === 'sync' ? repo.sync_workflow : repo.mirror_workflow;
-    if (!path) return false;
-    target = { github: repo.github, workflow: path.slice(path.lastIndexOf('/') + 1), ref: repo.default_branch };
+  if (wf.kind === 'sync' && !core.syncWants.wanted(repo.id, 'sync').wanted) return false;
+  const settings = core.sql<{ dispatch: string | null; unblocked_trigger: string | null }>(
+    'SELECT dispatch, unblocked_trigger FROM repositories WHERE id = ?', wf.repository)[0];
+  if (!settings.dispatch || !repo.web_base) return false;
+  const adapter: ForgeDispatch = JSON.parse(settings.dispatch);
+  const trigger: (ForgeDispatch & { workflow?: string }) | null = wf.kind === 'unblocked' && settings.unblocked_trigger
+    ? JSON.parse(settings.unblocked_trigger) : null;
+  if (wf.kind === 'unblocked' && (!trigger || trigger.kind !== adapter.kind)) return false;
+  if (trigger?.kind === 'gitlab-trigger' && (adapter.kind !== 'gitlab-trigger' || trigger.project_id !== adapter.project_id || trigger.ref !== adapter.ref)) return false;
+  if (wf.kind === 'mirror' && (!repo.mirror_workflow || (!wf.own && !core.syncWants.wanted(repo.id, 'mirror').wanted))) return false;
+  const origin = new URL(repo.web_base).origin;
+  if (adapter.kind === 'github-app' && (repo.forge !== 'github' || origin !== 'https://github.com')) return false;
+  const path = wf.kind === 'mirror' ? repo.mirror_workflow : trigger?.workflow
+    ?? (adapter.kind === 'gitea' ? adapter.workflow : repo.sync_workflow);
+  if (!path && adapter.kind !== 'gitlab-trigger') return false;
+  const target: DispatchTarget = {
+    adapter, origin, github: repo.github, repository: repo.id,
+    workflow: path?.split('/').at(-1) ?? '', ref: repo.default_branch,
+    ...(trigger ? { inputs: { tickets: JSON.stringify(wf.tickets ?? []) } } : {}),
+  };
+  let reason: string | null = null;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const sent = await dispatch.send(target);
+      if (sent === null) return false; // not configured
+      if (sent !== false) return true;
+    } catch (e) {
+      // Network failures are retried, but do not count as forge refusals.
+      if (!(e instanceof DispatchTransportError)) {
+        reason = e instanceof Error ? e.message.slice(0, 500) : 'dispatch failed';
+      }
+    }
   }
-  try {
-    return await dispatch.send(target);
-  } catch (e) {
-    if (!(e instanceof DispatchRefused)) return false;
-    // R-BTN-94: identifiers and the adapter's short text reason, never the response payload.
-    core.store.transaction(() => logEvent(core.store, core.now(), 'discrepancy', 'baton',
-      { kind: 'dispatch-refused', repository: wf.repository, workflow: wf.kind, reason: e.message },
-      null, null, wf.repository));
-    return false;
-  }
+  // R-BTN-94: identifiers and the adapter's short text reason, never the response payload.
+  if (reason !== null) core.store.transaction(() => logEvent(core.store, core.now(), 'discrepancy', 'baton',
+    { kind: 'dispatch-refused', repository: wf.repository, workflow: wf.kind, reason }, null, null, wf.repository));
+  return false;
 }
