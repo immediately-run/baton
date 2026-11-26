@@ -60,7 +60,9 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
     the people-and-dashboard and intervention-sessions proposals, S-BTN-100), whether the
     tenant is frozen (S-BTN-299), an outbox delivery report (the conditions and data-model
     proposals) and a grant's admitting the capability `intervener` (the intervention-sessions
-    proposal). Each now names the property, value or report; none changes. The verb ("marks the lease lost") stays.
+    proposal). Each now names the property, value or report; none changes. A mark as a glyph on the
+    dashboard (the tickets' "mode mark" and "state mark") is a different sense and stays: the owner,
+    2026-11-26, "this is fine, let them stay". The verb ("marks the lease lost") stays.
   - **`exec` streams.** The owner, 2026-11-24, asked whether R-BTN-107's `exec` returns
     `{status, stdout, stderr}` or the streaming object the code returns: "streaming needs to be
     supported". `exec(handle, argv, {cwd, timeout_s, stdin, env, onStderr}) → {result, write,
