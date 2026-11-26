@@ -302,14 +302,14 @@ export const ACTIONS: Action[] = [
     effect: 'destructive', http: { method: 'POST', path: '/v1/ui/claims/{claim}/confirm' },
     callers: [SESSION_ADMIN],
     input: { type: 'object', required: ['confirm'], properties: { confirm: CONFIRM } },
-    ui: { view: ['repository/tickets/{ticket}'] },
+    ui: { view: ['repository/tickets/{ticket}', 'repository/tickets'] },
   },
   {
     id: 'claim.release', summary: 'Release an unconfirmed completion: the ticket is offered again.',
     effect: 'destructive', http: { method: 'POST', path: '/v1/ui/claims/{claim}/release' },
     callers: [SESSION_ADMIN],
     input: { type: 'object', required: ['confirm'], properties: { confirm: CONFIRM } },
-    ui: { view: ['repository/tickets/{ticket}'] },
+    ui: { view: ['repository/tickets/{ticket}', 'repository/tickets'] },
   },
   {
     id: 'scope.resolve', summary: 'Resolve a scope finding: the acknowledgement that it was looked at.',

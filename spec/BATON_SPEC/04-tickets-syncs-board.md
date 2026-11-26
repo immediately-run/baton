@@ -274,8 +274,8 @@ numbers.
      (R-BTN-39), a ticket absent from it being at its course's `start`; `versions`, each live
      ticket's last accepted version; `legs`, the runs claims finished with evidence, newest
      first, each `{ticket, leg, claim_nonce, evidence, reached}`, by which a station function
-     judges a marker; and `unconfirmed`, every unconfirmed end's `{ticket, claim, evidence?}`
-     with the `ended_at_sha` it named (R-BTN-10);
+     judges a marker; and `unconfirmed`, the live tickets' unconfirmed suspensions that named
+     evidence, as `{ticket, claim, evidence}` with the `ended_at_sha` each named (R-BTN-10);
   2. fetches and sets `new` to `origin/<default branch>` (the registered branch), then reads
      the ticket source, PRs and code repositories, so everything posted was read after the
      number was handed out; confirmation's every-input rule (R-BTN-10, R-BTN-62) relies on it;

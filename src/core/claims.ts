@@ -2637,10 +2637,8 @@ export class Claims {
     }
   }
 
-  /** `POST /v1/ui/claims/{id}/confirm` and `…/release` (§6.7; B-222's two routes, each handing
-   *  its own `action`): an unconfirmed completion is never confirmed automatically; the owner
-   *  confirms it (git does carry it) or releases it (it never landed), which makes the item
-   *  claimable again. The commit it named stays in the event. */
+  /** `POST /v1/ui/claims/{id}/confirm` and `…/release` (R-BTN-10): the administrator
+   *  resolves an end still waiting on evidence. The evidence it named stays in the event. */
   // @model ownerResolve sha256:70b8eaf75df7
   resolve(owner: string, claimId: number, body: unknown) {
     const { action } = checkResolve(body);
@@ -2650,17 +2648,18 @@ export class Claims {
     if (action === 'confirm') {
       this.exec('UPDATE claims SET confirmed_at = ? WHERE id = ?', this.c.now(), claimId);
       this.event('confirmed', `owner:${owner}`, { by: 'owner', sha: c.ended_at_sha }, c.ticket_id, claimId);
+      this.c.blocks.held(c.ticket_id, false);
     } else {
-      this.exec(`UPDATE claims SET status = 'released', end_reason = 'released:requested', ended_at_sha = NULL WHERE id = ?`, claimId);
       this.c.dispatch('mirror', c.ticket_id);
-      this.event('released', `owner:${owner}`, { by: 'owner', unconfirmed: { end_reason: c.end_reason, ended_at_sha: c.ended_at_sha } }, c.ticket_id, claimId);
+      this.releaseCompletion({ id: claimId, ...c }, 'released:requested', `owner:${owner}`, { by: 'owner' });
     }
-    // Both resolutions end the hold the unconfirmed completion kept — a confirm and a release
-    // alike can only set or leave `blocked_since` (the ticket was held, so nothing clears),
-    // never an unblocking, and one that leaves the ticket blocked logs `blocked` (R-BTN-75 as
-    // amended by R3-1254, B-26).
-    this.c.blocks.held(c.ticket_id, false);
     return { ok: true };
+  }
+
+  private releaseCompletion(c: { id: number; ticket_id: string; end_reason: string; ended_at_sha: string | null }, reason: 'released:requested' | 'released:ticket-closed', actor: string, detail: Record<string, unknown>) {
+    this.exec(`UPDATE claims SET status = 'released', end_reason = ?, ended_at_sha = NULL WHERE id = ?`, reason, c.id);
+    this.event('released', actor, { ...detail, unconfirmed: { end_reason: c.end_reason, ended_at_sha: c.ended_at_sha } }, c.ticket_id, c.id);
+    this.c.blocks.held(c.ticket_id, false);
   }
 
   /** `POST /v1/ui/board/accept`: the owner accepts a held history; the sync's next force post
@@ -2840,7 +2839,8 @@ export class Claims {
    *   (R-BTN-39) and git has nothing of it to show; one that named evidence (a commit or a URL)
    *   when this post carries the sync's `std:git.evidence@1` for that claim and that evidence with
    *   `found: true` (`evidence`) — confirmation checks the evidence, never where git puts the
-   *   ticket;
+   *   ticket's position. An accepted ticket-source read that removes its ticket releases the
+   *   suspension instead;
    * - R-BTN-35: an active claim from before the reading whose ticket git took away — withdrawn,
    *   gone without a `done` closure, or (the interim post)
    *   at a status that ends the item — ends `released:stale-board`; a station that lags never does;
@@ -2849,18 +2849,23 @@ export class Claims {
    * - R-BTN-63: a holder's declared bars the snapshot posts that leg's bars without log
    *   `bars-mismatch`.
    */
-  // @model syncPost sha256:7c0efc930fe7
-  judge(repo: string, observation: number, seen: Map<string, Seen>, evidence: PostedEvidence = new Map()) {
+  // @model syncPost sha256:de22f143bc15
+  judge(repo: string, observation: number, seen: Map<string, Seen>, evidence: PostedEvidence, readTickets = false) {
     let confirmed = 0;
     // A `done` is also confirmed by a reading numbered after the claim's latest advance that shows
     // the ticket at an end station — read before the end, posted after it (G-BTN-44: a closure
     // "with an observation greater than the claim's"; found by R3-1244's model-based tests).
-    for (const c of this.rows<{ id: number; ticket_id: string; end_reason: string; ended_at_sha: string | null; start_path: string; ended_regressed: number; course_id: string | null; end_observation: number | null }>(
-      `SELECT id, ticket_id, end_reason, ended_at_sha, start_path, ended_regressed, course_id, end_observation FROM claims
+    // An authoritative read already removed both explicit closures and drops from `tickets`.
+    for (const c of this.rows<{ id: number; ticket_id: string; end_reason: string; ended_at_sha: string | null; start_path: string; course_id: string | null; end_observation: number | null; ticket_gone: number }>(
+      `SELECT id, ticket_id, end_reason, ended_at_sha, start_path, course_id, end_observation,
+              CASE WHEN ? AND end_reason GLOB 'suspended:*' THEN NOT EXISTS (SELECT 1 FROM tickets WHERE id = claims.ticket_id) ELSE 0 END AS ticket_gone
+       FROM claims INDEXED BY claims_unconfirmed
        WHERE status = 'completed' AND confirmed_at IS NULL
          AND (COALESCE(end_observation, 0) < ? OR (end_reason = 'done' AND claim_observation < ?))
-         AND substr(ticket_id, 1, length(?) + 1) = ? || ':'`, observation, observation, repo, repo)) {
-      if (this.endShown(c, observation, evidence)) {
+         AND ticket_id >= ? || ':' AND ticket_id < ? || ';'`, +readTickets, observation, observation, repo, repo)) {
+      if (c.ticket_gone) {
+        this.releaseCompletion(c, 'released:ticket-closed', 'sync', { by: 'closure', observation });
+      } else if (this.endShown(c, observation, evidence)) {
         this.exec('UPDATE claims SET confirmed_at = ? WHERE id = ?', this.c.now(), c.id);
         this.event('confirmed', 'sync', { observation }, c.ticket_id, c.id);
         this.c.blocks.held(c.ticket_id, false);
@@ -2932,13 +2937,12 @@ export class Claims {
   }
 
   /** R-BTN-10's test of one completed end against the head snapshot. */
-  private endShown(c: { id: number; ticket_id: string; end_reason: string; ended_at_sha: string | null; start_path: string; ended_regressed: number; course_id: string | null; end_observation: number | null }, observation: number, evidence: PostedEvidence): boolean {
-    const st = this.stations.placed(c.ticket_id);
-    const live = this.rows('SELECT 1 FROM tickets WHERE id = ?', c.ticket_id).length > 0;
-    const g = c.course_id ? this.stations.graph(repositoryOf(c.ticket_id), c.course_id) : null;
+  private endShown(c: { id: number; ticket_id: string; end_reason: string; ended_at_sha: string | null; start_path: string; course_id: string | null; end_observation: number | null }, observation: number, evidence: PostedEvidence): boolean {
     if (c.end_reason === 'done') {
       // absent from a snapshot observed after the end
-      if (!live) return (c.end_observation ?? 0) < observation;
+      if (!this.rows('SELECT 1 FROM tickets WHERE id = ?', c.ticket_id).length) return (c.end_observation ?? 0) < observation;
+      const st = this.stations.placed(c.ticket_id);
+      const g = c.course_id ? this.stations.graph(repositoryOf(c.ticket_id), c.course_id) : null;
       if (g && st && st.observation >= observation && (c.end_observation ?? 0) < observation) {
         const last = this.rows<{ leg: string; to_station: string | null }>(
           'SELECT leg, to_station FROM claim_legs WHERE claim_id = ? AND finished_at IS NOT NULL ORDER BY seq DESC LIMIT 1', c.id)[0];
@@ -2988,7 +2992,7 @@ export class Claims {
    *  or at an interim status that ends the item — ends `released:stale-board`, and the holder is
    *  told. A station that lags the holder's advances is never staleness (§2e). Before cutover git
    *  decides alone and the shadow reports end claims. */
-  // @model syncPost sha256:7c0efc930fe7
+  // @model syncPost sha256:de22f143bc15
   private staleBoard(repo: string, observation: number) {
     if (!this.rows('SELECT 1 FROM repositories WHERE id = ? AND cutover_at IS NOT NULL', repo).length) return 0;
     const active = this.rows<{ id: number; ticket_id: string; runner_id: number; kind: string }>(

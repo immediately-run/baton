@@ -55,7 +55,7 @@ export async function board(core: BoardPostCore, repo: Repository, p: BoardPaylo
   }
 }
 
-// @model syncPost sha256:7c0efc930fe7
+// @model syncPost sha256:de22f143bc15
 async function boardPost(core: BoardPostCore, repo: Repository, p: BoardPayload, hashRows: typeof rowsFor, issuer: string | null) {
   const r = repo.id;
   // R-BTN-62: the post's number is used first, whatever becomes of the post; an older reading
@@ -144,7 +144,7 @@ async function boardPost(core: BoardPostCore, repo: Repository, p: BoardPayload,
         nonScheduling(core.store, () => core.store.exec('UPDATE board_head SET stations_observation = ? WHERE repository_id = ?', n, r));
         settleSpawned(core, r, p, n, at);
         const confirmed = core.claims.confirm(confirmations, n);
-        const judged = core.claims.judge(r, n, seen, core.claims.evidenceOf(r, p.attestations));
+        const judged = core.claims.judge(r, n, seen, core.claims.evidenceOf(r, p.attestations), p.read_sha === p.sha);
         remember();
         return { ok: true, unchanged: true, ...(p.read_sha === p.sha ? { tickets_upserted: 0, tickets_deleted: 0 } : {}),
           confirmed: confirmed + judged.confirmed, stale_released: judged.stale_released };
@@ -209,7 +209,7 @@ async function boardPost(core: BoardPostCore, repo: Repository, p: BoardPayload,
       }
       const seen = normative ? refreshStations(core, r, p, n, at, wrote) : new Map<string, Seen>();
       const confirmed = core.claims.confirm(confirmations, n);
-      const judged = core.claims.judge(r, n, seen, core.claims.evidenceOf(r, p.attestations));
+      const judged = core.claims.judge(r, n, seen, core.claims.evidenceOf(r, p.attestations), readAtHead);
       remember();
       return {
         ok: true, unchanged: true,
@@ -309,7 +309,7 @@ async function boardPost(core: BoardPostCore, repo: Repository, p: BoardPayload,
     core.syncWants.posted(r, n, p.sha);
     const confirmed = core.claims.confirm(confirmations, n);
     // R-BTN-10, R-BTN-35, §2e: git confirms ends, takes tickets away and goes backwards.
-    const judged = core.claims.judge(r, n, seen, core.claims.evidenceOf(r, p.attestations));
+    const judged = core.claims.judge(r, n, seen, core.claims.evidenceOf(r, p.attestations), true);
     changed.confirmed = confirmed + judged.confirmed;
     changed.stale_released = judged.stale_released;
     remember();
