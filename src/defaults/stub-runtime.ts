@@ -292,7 +292,7 @@ async function runAgent(ctx: LegCtx, { course, leg, names, spec, readsOnly, ship
       let so = '', se = '';
       // B-108: stdout is the one signal read off the pipe — timestamped as it drains.
       let lastOut = startedAt;
-      let watch: NodeJS.Timeout | undefined;
+      let watch: NodeJS.Timeout | undefined = undefined; // Set once below; the handlers above read it first.
       child.stdout.on('data', (c) => {
         lastOut = new Date().getTime();
         so += c;

@@ -427,13 +427,17 @@ source needs separate Git read access configured outside the checkout. The sync'
 and the CLI checkout's local credentials are not reused. Pin a commit for production, and always
 for a protected home.
 
-Run `baton repo init --check` with the CLI built from the recorded source commit (or a source
-checkout with unmodified build inputs) to compare the generated leg scripts in the working tree.
-It reports changed, missing or non-regular stubs, and nested scripts that share a standard stub's
-name. It does not rewrite or execute them. Instructions and `.run.mjs` overrides are yours and
-are not compared. Add `--course <id>` to check one pinned course rather than all of them.
-A mismatch or a pin this CLI cannot check exits nonzero. A pin that predates `--check` cannot be
-verified by this command: upgrade the course with `baton repo init` before checking it.
+Run `baton repo init --check` to find what the sync would refuse before it does. A sourced
+course's home directory holds only your overrides — `legs/<leg>.md` and `legs/<leg>.run.mjs`,
+which are yours and are not compared — so the check reports any other file there: a copy that
+differs from the course's source, an identical copy (`baton repo init --prune` removes those), a
+file that is no part of the source, and a link or non-regular file. Run it with the CLI built from
+the recorded source commit (or a source checkout with unmodified build inputs); a pin this CLI
+cannot check is reported, and upgrading the course with `baton repo init` moves the pin. In a
+checkout that commits standard course sources (`.baton/courses/standard-<id>/`, as Baton's own
+repository does), it also compares each source tree with what the checkout builds, reporting
+changed, missing and extra files. It does not rewrite or execute anything. Add `--course <id>` to
+check one course rather than all of them. Any finding, or a pin it cannot check, exits nonzero.
 
 ## Overriding a leg
 

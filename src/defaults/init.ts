@@ -10,7 +10,7 @@ import { isSourceBranch } from '../core/validate';
 import { DEFAULT_COURSE, builtIn, scaffoldable, type BuiltIn } from './courses';
 import { cliPin, cliSelf, cliVersion, courseEntry, courseFileText, parsePin, sameRepo, type BatonJson, type CourseEntry } from './repo-source';
 import { OVERRIDE_SUFFIX } from './stub-config';
-import { instructionsOf, overrideSource, requireCleanStubInputs, runnerLegs, stubBytes, wrapperExample, WRAPPER_EXAMPLE, writeStub, writeWrapper } from './stubs';
+import { instructionsOf, overrideSource, requireCleanStubInputs, runnerLegs, standardSourceFiles, stubBytes, wrapperExample, WRAPPER_EXAMPLE, writeStub, writeWrapper } from './stubs';
 import { resolveSource } from './sync';
 import { courseFiles, coursePath, isOverride } from './course-tree';
 import { git, gitText } from './git.mjs';
@@ -34,67 +34,85 @@ function nonDirectory(root: string, rel: string): string | null {
   return null;
 }
 
-/** Compare working-tree stubs to the recorded source, without loading or writing them. */
+/** Every path under `dir`, read without following a link: a regular file's bytes or null. */
+function treeFiles(dir: string, rel = ''): Map<string, Buffer | null> {
+  const out = new Map<string, Buffer | null>();
+  for (const f of readdirSync(join(dir, rel), { withFileTypes: true }).sort((x, y) => (x.name < y.name ? -1 : 1))) {
+    const path = rel ? `${rel}/${f.name}` : f.name;
+    if (f.isDirectory()) for (const [p, bytes] of treeFiles(dir, path)) out.set(p, bytes);
+    else out.set(path, f.isFile() ? readFileSync(join(dir, path)) : null);
+  }
+  return out;
+}
+
+/** `baton repo init --check` (B-281, re-scoped to B-139 by the owner, 2026-11-26): read-only,
+ * it loads, writes and runs nothing. (a) Each committed `.baton/courses/standard-<id>/` source
+ * tree must be what this checkout builds. (b) Each sourced standard course's home directory may
+ * hold only overrides (R-BTN-134): any other file is a home copy the sync refuses, reported as
+ * differing from its source or as an identical copy `--prune` removes. (b) compares only with the
+ * CLI at the course's pin. */
 async function checkStubs(root: string, settings: BatonJson | null, named: string | null, log: (line: string) => void): Promise<number> {
+  const courses = join(root, '.baton', 'courses');
+  const trees = nonDirectory(root, '.baton/courses') || !existsSync(courses) ? []
+    : readdirSync(courses, { withFileTypes: true }).filter((e) => e.name.startsWith('standard-') && (named == null || e.name === `standard-${named}`));
   const sourced = (settings?.courses ?? []).filter((c) => c.source != null && (named == null || c.id === named));
-  if (!sourced.length) {
-    log(`baton: no pinned course${named ? ` named ${named}` : 's'} in .baton/baton.json`);
+  if (!trees.length && !sourced.length) {
+    log(`baton: nothing to check: no .baton/courses/standard-${named ?? '<id>'}/ source tree and no sourced course${named ? ` named ${named}` : ''} in .baton/baton.json`);
     return 1;
   }
   requireCleanStubInputs();
-  const self = cliSelf();
   let failed = false;
-  let checked = 0;
+  const report = (line: string) => { failed = true; log(`baton: ${line}`); };
+
+  // (a) The committed source trees, against this checkout's build.
+  for (const t of trees) {
+    const rel = coursePath(t.name);
+    const b = builtIn(t.name.slice('standard-'.length));
+    if (!b) { report(`${rel} names no standard course this CLI builds`); continue; }
+    if (!t.isDirectory()) { report(`${rel} is not a regular directory`); continue; }
+    const want = await standardSourceFiles(b);
+    for (const [path, bytes] of treeFiles(join(root, rel))) {
+      const expected = want.get(path);
+      if (bytes === null) report(`${rel}/${path} is not a regular file`);
+      else if (!expected) report(`${rel}/${path} is not part of the source this checkout builds`);
+      else if (!bytes.equals(expected)) report(`${rel}/${path} differs from this checkout's build`);
+      want.delete(path);
+    }
+    for (const path of want.keys()) report(`${rel}/${path} is missing (this checkout builds it)`);
+  }
+
+  // (b) The sourced homes: overrides only. A copy is judged against the source it names.
+  const self = cliSelf();
+  let overrides = 0;
   for (const c of sourced) {
     const src = parseSource(c.source!);
     const b = builtIn(c.id);
-    if (b?.id !== c.id || src.course !== c.id) {
-      failed = true;
-      log(`baton: cannot check ${c.id} against ${c.source} — not a supported standard course source`);
+    if (b?.id !== c.id || ![c.id, `standard-${c.id}`].includes(src.course)) {
+      report(`cannot check ${c.id} against ${c.source} — not a supported standard course source`);
       continue;
     }
     if (!self || !sameRepo(src, self) || src.ref !== self.sha) {
-      failed = true;
-      log(`baton: cannot check ${c.id} against ${c.source} — use the CLI at that pin if it supports --check; older pins cannot be checked until upgraded`);
+      report(`cannot check ${c.id} against ${c.source} — use the CLI at that pin if it supports --check; older pins cannot be checked until upgraded`);
       continue;
     }
-    const legs = `.baton/courses/${c.id}/legs`;
-    const badPath = nonDirectory(root, legs);
-    if (badPath) {
-      log(`baton: ${badPath} is not a regular directory (pinned to ${c.source})`);
-      failed = true;
-      continue;
-    }
-    const dir = join(root, legs);
-    const names = new Map(runnerLegs(b).map((leg) => [`${leg}.mjs`, leg]));
-    // The runner extracts recursively and keys by basename, but init installs only top-level stubs.
-    const nested = existsSync(dir) ? readdirSync(dir, { recursive: true, withFileTypes: true }) : [];
-    for (const entry of nested) {
-      if (entry.parentPath === dir || entry.isDirectory() || !names.has(entry.name)) continue;
-      log(`baton: ${relative(root, join(entry.parentPath, entry.name))} shadows a standard leg stub (pinned to ${c.source})`);
-      failed = true;
-    }
-    for (const [name, leg] of names) {
-      const rel = `${legs}/${name}`;
-      const stat = lstatSync(join(root, rel), { throwIfNoEntry: false });
-      if (!stat) {
-        log(`baton: ${rel} is missing (pinned to ${c.source})`);
-        failed = true;
-        continue;
-      }
-      if (!stat.isFile()) {
-        log(`baton: ${rel} is not a regular file (pinned to ${c.source})`);
-        failed = true;
-        continue;
-      }
-      checked++;
-      if (!readFileSync(join(root, rel)).equals(await stubBytes(b, leg))) {
-        log(`baton: ${rel} differs from ${c.source}`);
-        failed = true;
-      }
+    const rel = coursePath(c.id);
+    const badPath = nonDirectory(root, rel);
+    if (badPath) { report(`${badPath} is not a regular directory (pinned to ${c.source})`); continue; }
+    if (!existsSync(join(root, rel))) continue;
+    const source = await standardSourceFiles(b);
+    for (const [path, bytes] of treeFiles(join(root, rel))) {
+      if (bytes !== null && isOverride(path)) { overrides++; continue; }
+      const expected = source.get(path);
+      if (bytes === null) report(`${rel}/${path} is not a regular file — not an override of ${c.source}`);
+      else if (!expected) report(`${rel}/${path} is not an override of ${c.source}, nor part of it`);
+      else if (!bytes.equals(expected)) report(`${rel}/${path} differs from ${c.source}`);
+      else report(`${rel}/${path} is an identical copy of ${c.source} — the sync refuses it; \`baton repo init --prune\` removes it`);
     }
   }
-  if (!failed) log(`baton: ${checked} leg stubs match their pinned sources`);
+  if (!failed) {
+    if (trees.length) log(`baton: ${trees.length} standard course source tree${trees.length === 1 ? ' matches' : 's match'} this checkout's build`);
+    if (sourced.length) log(`baton: ${sourced.length} sourced course${sourced.length === 1 ? ' holds' : 's hold'} no home copies (${overrides} override${overrides === 1 ? '' : 's'}, yours, not compared)`);
+  }
   return failed ? 1 : 0;
 }
 

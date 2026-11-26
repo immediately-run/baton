@@ -1720,7 +1720,7 @@ Claim context (references only): ${JSON.stringify({ station: ctx.claim?.station,
       });
       let so = "", se = "";
       let lastOut = startedAt;
-      let watch;
+      let watch = void 0;
       child.stdout.on("data", (c) => {
         lastOut = (/* @__PURE__ */ new Date()).getTime();
         so += c;

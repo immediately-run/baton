@@ -133,18 +133,22 @@ course that handles a leg's condition (R-BTN-160, R-BTN-161). A **leg event** go
 cancelled; Baton alone queues it, and the ticket is withdrawn when it ends (R-BTN-168;
 [proposed, not built](../../spec/proposals/conditions.md)).
 
-**Administrator, owner, grant.** Administrators run the instance; each repository's owners
-grant runner keys access to it.
+**Administrator, owner, member, grant.** Administrators run the instance; each repository's owners
+grant runner keys access to it; its members read it and answer the person legs whose `asks`
+labels they hold (R-BTN-204). Each is a person's key, and the CLI and the dashboard carry all
+three (R-BTN-186); MCP carries an owner's alone so far (an open question).
 
 **Action, registry.** Everything a credential can ask Baton to do is one action in one registry,
 named `<noun>.<verb>`, with the principals that may call it; the API, the CLI, the dashboard and
 MCP are generated from it and checked by one `authorize`. The CLI is `baton <noun> <verb>`, and
 its help comes from the registry (R-BTN-127, R-BTN-129).
 
-**Session.** A dashboard sign-in of an administrator's or owner's key, opened by its link or a
-code its holder confirms, or by an email Cloudflare Access verified that `ACCESS_IDENTITIES`
-binds to the key; one principal, carrying its key's role, an owner's reaching only the
-repositories the key still owns (R-BTN-155).
+**Session.** A dashboard sign-in of one administrator's, owner's or member's key, for one browser
+tab, opened by its link or a code its holder confirms, or by an email Cloudflare Access verified
+that `ACCESS_IDENTITIES` binds to the key — the person picking the key after authenticating
+where they hold several; one principal, carrying its key's role and able to do what that key
+can, an owner's or member's reaching only the repositories the key still holds (R-BTN-155). A
+person using the dashboard is a human: a session acts as `human` beside its role (R-BTN-185).
 
 **Screen.** One entity's page of the dashboard — sign in, pick a repository, one entity per
 screen — named `root`, `tenant/<segment>` or `repository/<segment>[/{param}]`; what it draws is

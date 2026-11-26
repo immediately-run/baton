@@ -174,18 +174,28 @@ export async function writeWrapper(kind: 'tickets' | 'stations', course: string,
   else copyFileSync(kind === 'tickets' ? prebuilt('tickets.mjs') : prebuilt('stations', `${course}.mjs`), abs);
 }
 
+/** A standard course's source tree as this CLI builds it (B-139): the files
+ *  `.baton/courses/standard-<id>/` commits, by path, from source in a checkout, else from
+ *  build:cli's copies. `baton repo init --check` compares against the same bytes. */
+export async function standardSourceFiles(b: BuiltIn): Promise<Map<string, Buffer>> {
+  const files = new Map<string, Buffer>([
+    ['course.json', Buffer.from(courseFileText(b))],
+    ['entry.json', Buffer.from(`${JSON.stringify({ ...courseEntry(b), facts: b.reads === 'prs' ? ['prs'] : [] }, null, 2)}\n`)],
+    ['sync.mjs', fromSource() ? await bundleSource(WRAPPERS.stations(b.id)) : readFileSync(prebuilt('stations', `${b.id}.mjs`))],
+  ]);
+  for (const leg of runnerLegs(b)) {
+    files.set(`legs/${leg}.mjs`, await stubBytes(b, leg));
+    files.set(`legs/${leg}.md`, Buffer.from(instructionsOf(b.id, leg)));
+  }
+  return files;
+}
+
 /** Regenerate the committed source trees. No consumer needs esbuild to read a pin. */
 export async function writeStandardSources(): Promise<void> {
   for (const b of BUILT_INS) {
     const dir = join(packageRoot(), coursePath(`standard-${b.id}`));
     mkdirSync(join(dir, 'legs'), { recursive: true });
-    writeFileSync(join(dir, 'course.json'), courseFileText(b));
-    writeFileSync(join(dir, 'entry.json'), `${JSON.stringify({ ...courseEntry(b), facts: b.reads === 'prs' ? ['prs'] : [] }, null, 2)}\n`);
-    writeFileSync(join(dir, 'sync.mjs'), await bundleSource(WRAPPERS.stations(b.id)));
-    for (const leg of runnerLegs(b)) {
-      writeFileSync(join(dir, 'legs', `${leg}.mjs`), await stubBytes(b, leg));
-      writeFileSync(join(dir, 'legs', `${leg}.md`), instructionsOf(b.id, leg));
-    }
+    for (const [path, bytes] of await standardSourceFiles(b)) writeFileSync(join(dir, path), bytes);
   }
 }
 

@@ -63,7 +63,11 @@ Designs for this section that are not built are on the proposal page
     course's files in the home: the newer course arrives through its source. It writes a home override only when
     requested (`--override` or `--instructions`), never overwriting one. `--prune` compares
     existing files against the current pins, removes identical copies and reports differing
-    files without changing the pins. With no `--course` it takes `default_course`, else `create-pr`.
+    files without changing the pins. `--check` writes and runs nothing: it reports each file in a
+    sourced standard course's home directory that is not a leg override — against the pinned
+    source, with the CLI at that pin — and each committed `.baton/courses/standard-<id>/` source
+    tree that differs from what the checkout builds, and exits nonzero on any finding or a pin
+    it cannot check. With no `--course` it takes `default_course`, else `create-pr`.
   - **Trust.** Naming a source adopts its code with the rights of where it runs: the station
     function in the sync job's environment, leg scripts on runners (R-BTN-133).
 

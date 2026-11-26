@@ -3,14 +3,14 @@ title: "B-219 — Conditions screens: /conditions is what waits on a person, wit
 id: B-219
 project: baton-ui-v2
 status: available
-updated: 2026-11-16
+updated: 2026-11-23
 repos:
   - baton
 tags:
   - roadmap-item
 order: 1218
 tier: judgement
-description: "The screens of BATON-UI-V2's Conditions entity on B-195's reads. /conditions: the mockup's Needs-you rows from GET …/conditions?open=1&person=1 — kind mark, plain type name, ticket, detail as text, age, what it unblocks — with each restart a one-click button (POST /v1/ui/conditions/{condition}/resolve) and a person leg's options as buttons where answerable, else the baton decision answer line as text; ?type= and ?ticket= as URL query, closed ones behind a toggle. /conditions/{condition}: the Resolve page from condition.show — the condition, its detail through View where its type's schema has a view, large restart buttons, the ticket's position, what it unblocks — the shell's sign-in in place when signed out, polling until closed_at after a resolve. Both at 375 px. Requires: B-195, B-207."
+description: "The screens of BATON-UI-V2's Conditions entity on B-195's reads. /conditions: the mockup's Needs-you rows from GET …/conditions?open=1&person=1 — kind mark, plain type name, ticket, detail as text, age, what it unblocks — with each restart a one-click button (POST /v1/ui/conditions/{condition}/resolve) and a person leg's options as buttons where answerable, each with its baton decision answer line beside it (never instead, R-BTN-186), and where not answerable the line and who can answer (an owner, a member holding the leg's asks label, or a human-only key); ?type= and ?ticket= as URL query, closed ones behind a toggle. /conditions/{condition}: the Resolve page from condition.show — the condition, its detail through View where its type's schema has a view, large restart buttons, the ticket's position, what it unblocks — the shell's sign-in in place when signed out, polling until closed_at after a resolve. Both at 375 px. Requires: B-195, B-207."
 topics:
   - baton
 owns: {}
@@ -54,7 +54,9 @@ dialogs).
    a one-click button (`ticket.resolve` by `ui.view` on `repository/conditions/{condition}`,
    drawn in the row too), only where `allowed` names it; a person leg's options as buttons
    where `answerable` (each an `attestation.add` of a `std:decision@1` for the ticket's queued
-   leg), else `baton decision answer <ticket> <option>` as text; the question's `url` as a link
+   leg), each with `baton decision answer <ticket> <option>` beside it as text (never instead,
+   R-BTN-186), and where not `answerable` the line and who can answer — an owner, a member
+   holding the leg's `asks` label (R-BTN-204) or a human-only key; the question's `url` as a link
    when `links.mjs` passes it on the client with the repository's `web_base` and `link_hosts`
    from `repo.list`. An **interaction request** (`interact`, R-BTN-195) is a row of its own:
    the ticket and leg, and its `url` — the leg's session link Baton holds
@@ -117,3 +119,11 @@ not only the `person=1` floor, which never returned the `notify` names this tick
 reconcile (Needs you lists every unhandled condition; `person=1` serves the floor)._
 
 _(2026-11-16: rules re-read: R-BTN-163, R-BTN-195)_
+
+_(2026-11-23: under R-BTN-186 the `baton decision answer` line is drawn beside the option buttons,
+never instead of them, and where the read says the caller may not answer, the row says who can
+(an owner, a member holding the leg's `asks` label, or a human-only key) — the dashboard's UX rule
+4. The shipped screen (`src/dashboard/screens/conditions/kit.tsx`, `Options`) draws only the CLI
+line, because no session is answerable until B-76 and B-195's item 4 land.)_
+
+_(2026-11-23: rules re-read: R-BTN-116, R-BTN-155, R-BTN-186)_

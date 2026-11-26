@@ -814,18 +814,20 @@ describe('baton repo init, through the built CLI', () => {
   }, 120_000);
   afterAll(() => rmSync(root, { recursive: true, force: true }));
 
-  it('checks pinned stubs read-only, reporting modified and missing files but ignoring overrides (S-BTN-105)', async () => {
+  // B-281's `--check`, re-scoped to B-139 by the owner (2026-11-26): a sourced home holds only
+  // overrides, so the check reports any other file there — against the source it names — and
+  // compares the committed `standard-<id>` source trees with what this checkout builds.
+  it('checks sourced homes read-only: overrides pass, a home copy is reported as differing or identical (S-BTN-105)', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'baton-check-stubs-'));
     try {
       baton(dir, 'repo', 'init', '--override', 'implement');
       baton(dir, 'repo', 'init', '--course', 'decision');
       const legs = join(dir, '.baton/courses/create-pr/legs');
-      const override = join(legs, 'implement.run.mjs');
-      writeFileSync(override, 'throw new Error("check must not load overrides");\n');
-      expect(baton(dir, 'repo', 'init', '--check')).toContain('8 leg stubs match their pinned sources');
+      writeFileSync(join(legs, 'implement.run.mjs'), 'throw new Error("check must not load overrides");\n');
+      expect(baton(dir, 'repo', 'init', '--check')).toContain('2 sourced courses hold no home copies (1 override, yours, not compared)');
       const changed = 'throw new Error("check must not load stubs");\n';
       writeFileSync(join(legs, 'implement.mjs'), changed);
-      rmSync(join(legs, 'run-tests.mjs'));
+      copyFileSync(join(ROOT, '.baton/courses/standard-create-pr/legs/run-tests.mjs'), join(legs, 'run-tests.mjs'));
 
       const log: string[] = [];
       const workflow = join(dir, '.github/workflows/baton-sync.yml');
@@ -834,18 +836,49 @@ describe('baton repo init, through the built CLI', () => {
       const settingsBefore = readFileSync(settings);
       expect(await initMain(['--check'], { root: dir, log: (line) => log.push(line) })).toBe(1);
       expect(log).toEqual([
-        expect.stringContaining(`create-pr/legs/implement.mjs differs from ${sourceOf('create-pr')}`),
-        expect.stringContaining(`create-pr/legs/run-tests.mjs is missing (pinned to ${sourceOf('create-pr')})`),
+        `baton: .baton/courses/create-pr/legs/implement.mjs differs from ${sourceOf('create-pr')}`,
+        `baton: .baton/courses/create-pr/legs/run-tests.mjs is an identical copy of ${sourceOf('create-pr')} — the sync refuses it; \`baton repo init --prune\` removes it`,
       ]);
       expect(readFileSync(join(legs, 'implement.mjs'), 'utf8')).toBe(changed);
-      expect(existsSync(join(legs, 'run-tests.mjs'))).toBe(false);
       expect(readFileSync(workflow)).toEqual(workflowBefore);
       expect(readFileSync(settings)).toEqual(settingsBefore);
-      expect(baton(dir, 'repo', 'init', '--check', '--course', 'decision')).toContain('2 leg stubs match');
+      expect(baton(dir, 'repo', 'init', '--check', '--course', 'decision')).toContain('1 sourced course holds no home copies');
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
   }, 30_000);
+
+  it('checks the committed standard-<id> source trees against what this checkout builds (S-BTN-105)', async () => {
+    expect(baton(ROOT, 'repo', 'init', '--check')).toContain(`${readdirSync(join(ROOT, '.baton/courses')).filter((d) => d.startsWith('standard-')).length} standard course source trees match this checkout's build`);
+    const dir = mkdtempSync(join(tmpdir(), 'baton-check-trees-'));
+    try {
+      const tree = join(dir, '.baton/courses/standard-decision');
+      execFileSync('cp', ['-R', join(ROOT, '.baton/courses/standard-decision'), tree]);
+      mkdirSync(join(dir, '.baton/courses/standard-nonesuch'));
+      const log: string[] = [];
+      const check = () => initMain(['--check'], { root: dir, log: (line) => log.push(line) });
+      expect(await check()).toBe(1);
+      expect(log).toEqual(['baton: .baton/courses/standard-nonesuch names no standard course this CLI builds']);
+      rmSync(join(dir, '.baton/courses/standard-nonesuch'), { recursive: true });
+      log.length = 0;
+      expect(await check()).toBe(0);
+      expect(log).toEqual(["baton: 1 standard course source tree matches this checkout's build"]);
+
+      writeFileSync(join(tree, 'course.json'), '{}\n');
+      rmSync(join(tree, 'sync.mjs'));
+      writeFileSync(join(tree, 'legs/extra.mjs'), '');
+      log.length = 0;
+      expect(await check()).toBe(1);
+      expect(log).toEqual([
+        "baton: .baton/courses/standard-decision/course.json differs from this checkout's build",
+        'baton: .baton/courses/standard-decision/legs/extra.mjs is not part of the source this checkout builds',
+        'baton: .baton/courses/standard-decision/sync.mjs is missing (this checkout builds it)',
+      ]);
+      expect(readFileSync(join(tree, 'course.json'), 'utf8')).toBe('{}\n');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 60_000);
 
   it('asks for the pinned CLI instead of claiming drift against a different commit (S-BTN-105)', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'baton-check-pin-'));
@@ -875,10 +908,9 @@ describe('baton repo init, through the built CLI', () => {
         cwd: home, encoding: 'utf8', env: { ...process.env, BATON_HOME: home },
       });
       expect(run('--course', 'decision').status).toBe(0);
-      expect(run('--check').stdout).toContain('2 leg stubs match');
+      expect(run('--check').stdout).toContain('1 sourced course holds no home copies');
       const settings = join(home, '.baton/baton.json');
-      const stub = join(home, '.baton/courses/decision/legs/prepare.mjs');
-      const before = [readFileSync(settings, 'utf8'), readFileSync(stub, 'utf8')];
+      const before = readFileSync(settings, 'utf8');
       const runtime = join(checkout, 'src/defaults/stub-runtime.ts');
       writeFileSync(runtime, readFileSync(runtime, 'utf8').replaceAll('BATON_INSTRUCTIONS', 'EXAMPLE_INSTRUCTIONS'));
       const refuses = () => {
@@ -894,42 +926,50 @@ describe('baton repo init, through the built CLI', () => {
       refuses();
       execFileSync('npm', ['run', 'build:cli'], { cwd: checkout, stdio: 'pipe', timeout: 30_000 });
       expect(JSON.parse(readFileSync(join(checkout, 'dist/build.json'), 'utf8'))).toMatchObject({ commit: SELF.sha, dirty: true });
-      expect([readFileSync(settings, 'utf8'), readFileSync(stub, 'utf8')]).toEqual(before);
+      expect(readFileSync(settings, 'utf8')).toBe(before);
+      expect(existsSync(join(home, '.baton/courses/decision'))).toBe(false);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
   }, 60_000);
 
-  it('rejects nested names and symlinks even when their target bytes match (S-BTN-105)', async () => {
+  it('reports nested names and links in a sourced home even when their target bytes match (S-BTN-105)', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'baton-check-paths-'));
     try {
       baton(dir, 'repo', 'init', '--course', 'decision');
+      const source = sourceOf('decision');
       const legs = join(dir, '.baton/courses/decision/legs');
-      const stub = join(legs, 'prepare.mjs');
       const nested = join(legs, 'z/nested');
       mkdirSync(nested, { recursive: true });
-      copyFileSync(stub, join(nested, 'prepare.mjs'));
+      copyFileSync(join(ROOT, '.baton/courses/standard-decision/legs/prepare.mjs'), join(nested, 'prepare.mjs'));
       const log: string[] = [];
       const check = () => initMain(['--check'], { root: dir, log: (line) => log.push(line) });
       expect(await check()).toBe(1);
-      expect(log).toEqual([expect.stringContaining('z/nested/prepare.mjs shadows a standard leg stub')]);
+      expect(log).toEqual([`baton: .baton/courses/decision/legs/z/nested/prepare.mjs is not an override of ${source}, nor part of it`]);
 
-      rmSync(join(nested, 'prepare.mjs'));
+      rmSync(join(legs, 'z'), { recursive: true });
       const target = join(dir, 'same-bytes.mjs');
-      renameSync(stub, target);
-      symlinkSync(target, stub);
+      writeFileSync(target, 'export async function run() {}\n');
+      symlinkSync(target, join(legs, 'prepare.run.mjs'));
       log.length = 0;
       expect(await check()).toBe(1);
-      expect(log).toEqual([expect.stringContaining('legs/prepare.mjs is not a regular file')]);
+      expect(log).toEqual([`baton: .baton/courses/decision/legs/prepare.run.mjs is not a regular file — not an override of ${source}`]);
 
-      rmSync(stub);
-      renameSync(target, stub);
+      rmSync(join(legs, 'prepare.run.mjs'));
       const moved = join(dir, 'moved-legs');
       renameSync(legs, moved);
       symlinkSync(moved, legs, 'dir');
       log.length = 0;
       expect(await check()).toBe(1);
-      expect(log).toEqual([expect.stringContaining('decision/legs is not a regular directory')]);
+      expect(log).toEqual([`baton: .baton/courses/decision/legs is not a regular file — not an override of ${source}`]);
+
+      rmSync(legs);
+      const course = join(dir, '.baton/courses/decision');
+      renameSync(course, join(dir, 'moved-course'));
+      symlinkSync(join(dir, 'moved-course'), course, 'dir');
+      log.length = 0;
+      expect(await check()).toBe(1);
+      expect(log).toEqual([`baton: .baton/courses/decision is not a regular directory (pinned to ${source})`]);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

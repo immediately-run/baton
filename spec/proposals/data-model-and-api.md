@@ -43,6 +43,12 @@ and §14's table equal.
 Design: [sign-in, sessions and confirmed actions](people-and-dashboard.md#3-sign-in-sessions-and-confirmed-actions)
 (B-206).
 
+BATON_SPEC R-BTN-155, R-BTN-185, R-BTN-204 and §13.2 govern where they and this section differ:
+sessions of three roles (members too), one per tab under one rotating cookie
+(`dashboard_cookies`), repositories read on every request rather than stored, sign-in codes
+with no role (the binding key's role is the session's), a session's attestation carrying writer
+classes `human` and its role, and the confirmed acts R-BTN-155 names.
+
 - `dashboard_sessions` gains `role` (`administrator`\|`owner`) and `repositories` JSON (an
   owner's: those its key owned at binding).
 - Callers: *admin session*, a session whose role is administrator; *owner session*, one whose
