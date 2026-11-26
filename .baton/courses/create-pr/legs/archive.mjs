@@ -1,3 +1,9 @@
+// src/defaults/pr-archive.ts
+import { execFileSync as execFileSync3 } from "node:child_process";
+import { lstatSync, mkdirSync, mkdtempSync, readFileSync as readFileSync3, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { basename, dirname, join as join3 } from "node:path";
+
 // src/defaults/agent-words.ts
 function splitWords(command) {
   const words = [];
@@ -116,12 +122,6 @@ function git(root, args, options = {}) {
 }
 var gitText = (root, ...args) => git(root, args).trim();
 
-// src/defaults/tickets-transaction.ts
-import { execFileSync as execFileSync2 } from "node:child_process";
-import { lstatSync, mkdirSync, mkdtempSync, readFileSync as readFileSync3, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { dirname, join as join3 } from "node:path";
-
 // src/defaults/course-pr.ts
 var CREATE_PR_ASK_DEADLINE_S = 3 * 60 * 60;
 
@@ -183,198 +183,13 @@ function resolveDelivered(shas, ref, checkout, run2) {
   });
 }
 
-// src/defaults/tickets-config.ts
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
-var NUMBER = "\\d+";
-function readTicketSettings(root, where = root) {
-  const path = join(root, ".baton", "baton.json");
-  if (!existsSync(path)) throw new Error(`${where} has no .baton/baton.json \u2014 the ticket commands write the tickets a sync reads; run \`baton repo init\` there first`);
-  let json;
-  try {
-    json = JSON.parse(readFileSync(path, "utf8"));
-  } catch (e) {
-    throw new Error(`.baton/baton.json is not JSON: ${e.message.split("\n")[0]}`);
-  }
-  const texts = (v) => (Array.isArray(v) ? v : typeof v === "string" && v !== "" ? [v] : []).filter((x) => typeof x === "string" && x.trim() !== "").map((x) => x.trim());
-  const str = (v) => typeof v === "string" && v.trim() !== "" ? v.trim() : void 0;
-  const project = str(json.project);
-  if (json.project != null && project === void 0) throw new Error(".baton/baton.json: project is a project id, not an empty value");
-  const legacy_ids = texts(json.legacy_ids);
-  return {
-    items: str(json.items),
-    ticket_prefix: str(json.ticket_prefix),
-    legacy_ids,
-    project,
-    prefixes: prefixesOf(json.prefixes, legacy_ids, str(json.ticket_prefix)),
-    tags: tagsOf(json),
-    projects: str(json.projects) ?? "projects"
-  };
-}
-function tagsOf(json) {
-  const v = json.tags;
-  const tags = (Array.isArray(v) ? v : typeof v === "string" && v !== "" ? [v] : []).filter((x) => typeof x === "string" && x.trim() !== "").map((x) => x.trim());
-  return tags.length ? tags : ["roadmap-item"];
-}
-var SOURCE_FORM = /^\\d(\+|(\{\d+\}|\[a-z\]\?\d\*)?)$/;
-function prefixesOf(prefixes, legacy, allocating) {
-  if (prefixes != null && (typeof prefixes !== "object" || Array.isArray(prefixes))) throw new Error(".baton/baton.json: prefixes maps an id prefix to its pattern source");
-  const map = {};
-  for (const [prefix, source] of Object.entries(prefixes ?? {})) {
-    if (!/^[A-Za-z][A-Za-z0-9]*-$/.test(prefix) || typeof source !== "string" || !SOURCE_FORM.test(source)) {
-      throw new Error(`.baton/baton.json: prefixes.${prefix} is an id prefix (\`B-\`) whose pattern this release cannot read \u2014 write its number as \\d+ or \\d{7}, not ${JSON.stringify(source)}`);
-    }
-    map[prefix] = source;
-  }
-  for (const id of legacy) {
-    const m = /^([A-Za-z][A-Za-z0-9]*)-([^()^$|]*\\d[^()^$|]*)$/.exec(id);
-    if (!m) throw new Error(`.baton/baton.json: legacy_ids names ${id}, which is not an id pattern (\`R3-\\d+\`)`);
-    map[`${m[1]}-`] = m[2];
-  }
-  const allocatingPrefix = allocating && /^[A-Za-z][A-Za-z0-9]*$/.test(allocating) ? `${allocating}-` : "B-";
-  if (map[allocatingPrefix] == null) map[allocatingPrefix] = NUMBER;
-  return map;
-}
-
 // src/defaults/read-items.ts
-import { existsSync as existsSync2, readdirSync, readFileSync as readFileSync2 } from "node:fs";
-import { join as join2, relative, sep } from "node:path";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { join, relative, sep } from "node:path";
 function readItems(root, items = "tickets") {
-  const dir = join2(root, items);
-  if (!existsSync2(dir)) return [];
-  return readdirSync(dir, { recursive: true, withFileTypes: true }).filter((e) => e.isFile()).map((e) => relative(dir, join2(e.parentPath, e.name)).split(sep).join("/")).sort().map((path) => ({ path, text: readFileSync2(join2(dir, path), "utf8") }));
-}
-
-// src/defaults/tickets-transaction.ts
-var TICKET_TRIES = 6;
-var git2 = gitText;
-var movedOnPush = (detail) => /non-fast-forward|fetch first|stale info/.test(detail);
-function ticketCommitMessage(message, trailers, requireTrailers = false) {
-  const lines = trailers.trim();
-  if (!lines) {
-    if (requireTrailers) throw new Error("TICKET_REQUIRE_TRAILERS=1, but TICKET_TRAILERS is empty \u2014 set it to the session's provenance lines (the agent-provenance trailers, then Claude-Session and Co-Authored-By), or unset TICKET_REQUIRE_TRAILERS to commit without them");
-    return message;
-  }
-  return `${message}
-
-${lines}`;
-}
-function transact(root, branch, describe, change) {
-  const trailers = (process.env.TICKET_TRAILERS ?? "").trim();
-  const requireTrailers = process.env.TICKET_REQUIRE_TRAILERS === "1";
-  for (let attempt = 1; attempt <= TICKET_TRIES; attempt++) {
-    git2(root, "fetch", "-q", "origin", branch);
-    const dir = mkdtempSync(join3(tmpdir(), "baton-tickets-"));
-    try {
-      git2(root, "worktree", "add", "-q", "--detach", dir, "FETCH_HEAD");
-      const changed = change(dir);
-      if ("existing" in changed) return changed.existing;
-      const { message, from, to, text } = changed;
-      mkdirSync(dirname(join3(dir, to)), { recursive: true });
-      writeFileSync(join3(dir, to), text, { flag: "wx" });
-      rmSync(join3(dir, from));
-      git2(dir, "--literal-pathspecs", "add", "-A", "--", from, to);
-      git2(dir, "commit", "-q", "-m", ticketCommitMessage(message, trailers, requireTrailers));
-      try {
-        git2(dir, "push", "-q", "origin", `HEAD:refs/heads/${branch}`);
-        return git2(dir, "rev-parse", "HEAD");
-      } catch (e) {
-        const detail = String(e.stderr || e.message);
-        if (!movedOnPush(detail)) {
-          const why = detail.trim().split("\n").map((l) => l.trim()).filter((l) => l !== "" && !/^To /.test(l) && !/failed to push some refs/.test(l));
-          throw new Error(`${describe}: the push was refused: ${why.join("; ") || "no reason given"}`);
-        }
-        if (attempt === TICKET_TRIES) throw new Error(`${describe}: push refused ${TICKET_TRIES} times: ${detail.trim().split("\n").at(-1)}`);
-      }
-    } finally {
-      try {
-        git2(root, "worktree", "remove", "--force", dir);
-      } catch {
-        rmSync(dir, { recursive: true, force: true });
-      }
-    }
-  }
-  throw new Error(`${describe}: no transaction attempt completed`);
-}
-function regularDirs(root, path, missingOk = false) {
-  const parts = path.split("/");
-  if (parts.some((part) => !part || part === "." || part === ".." || part.toLowerCase() === ".git")) throw new Error(`invalid ticket directory: ${path}`);
-  for (const part of parts) {
-    root = join3(root, part);
-    const stat = lstatSync(root, { throwIfNoEntry: false });
-    if (!stat && missingOk) return;
-    if (!stat?.isDirectory()) throw new Error(`not a regular ticket directory: ${path}`);
-  }
-}
-function doneText(id, target, files, words) {
-  if (!/^[A-Za-z0-9]+-[A-Za-z0-9]+$/.test(id)) throw new Error(`${id}: invalid archive ticket id`);
-  const root = mkdtempSync(join3(tmpdir(), "baton-dibber-archive-"));
-  const selected = join3(root, "tickets", `${id}.md`);
-  try {
-    for (const f of files) {
-      if (!/\.mdx?$/i.test(f.path)) continue;
-      const dest = f.path === target ? selected : join3(root, "tickets", "source", f.path);
-      mkdirSync(dirname(dest), { recursive: true });
-      writeFileSync(dest, f.text);
-    }
-    execFileSync2(words[0], [...words.slice(1), "done", id, "--root", root], {
-      cwd: root,
-      timeout: 3e4,
-      stdio: ["ignore", "pipe", "pipe"],
-      env: { ...process.env, npm_config_ignore_scripts: "true" }
-    });
-    const text = readFileSync3(selected, "utf8");
-    const meta = parseFrontmatter(text);
-    if (meta?.status !== "done" || meta.id !== id) throw new Error(`${id}: Dibber did not mark the ticket done`);
-    return text;
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-}
-function archiveTicket(root, branch, id, delivered) {
-  return transact(root, branch, `${id} \u2192 done`, (dir) => {
-    const settings = readTicketSettings(dir, dir);
-    const items = (settings.items ?? "tickets").replace(/\/$/, "");
-    regularDirs(dir, items, true);
-    const files = readItems(dir, items);
-    const matches = files.filter((f) => /\.mdx?$/i.test(f.path) && parseFrontmatter(f.text)?.id === id);
-    if (!matches.length) throw new Error(`${id}: no ${items}/${id}.mdx on origin/${branch}`);
-    if (matches.length !== 1) throw new Error(`${id}: archive cannot identify a single ticket file`);
-    const { path, text } = matches[0];
-    const archived = path.startsWith("archive/");
-    const from = `${items}/${path}`;
-    const to = `${items}/archive/${path}`;
-    if (delivered.path !== (archived ? `${items}/${path.slice("archive/".length)}` : from)) {
-      throw new Error(`${id}: archive requires the markdown source's current ticket path`);
-    }
-    const shas = resolveDelivered(delivered.shas, "HEAD", dir, (_cmd, args, cwd) => git2(cwd, ...args));
-    const subject = `tickets: ${id} done (archived)`;
-    const delivery = `Delivered by: ${shas.join(", ")}`;
-    const limitation = "Delivery evidence incomplete: the legacy end record was truncated; unrecorded commits are not listed.";
-    if (archived) {
-      if (parseFrontmatter(text)?.status !== "done") throw new Error(`${id} is archived (done)`);
-      const existing = git2(dir, "--literal-pathspecs", "log", "-1", "--first-parent", "--no-renames", "--diff-filter=A", "--format=%H", "--", from);
-      if (existing) {
-        const [first, , third, , note] = git2(dir, "show", "-s", "--format=%B", existing).split("\n");
-        if (first === subject && third === delivery && note === limitation === delivered.truncated) return { existing };
-      }
-      throw new Error(`${id}: the archive does not record this delivery`);
-    }
-    regularDirs(dir, dirname(to), true);
-    if (lstatSync(join3(dir, to), { throwIfNoEntry: false })) throw new Error(`${id}: archive destination already exists`);
-    const frontmatter = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text)?.[1] ?? "";
-    if ((frontmatter.match(/^status:/gm) ?? []).length > 1) throw new Error(`${id}: duplicate status fields; archive refused`);
-    const message = `${subject}
-
-${delivery}${delivered.truncated ? `
-
-${limitation}` : ""}`;
-    const updated = doneText(id, path, files, delivered.dibber);
-    return { message, from, to, text: deepenRelativeLinks(updated) };
-  });
-}
-function deepenRelativeLinks(text) {
-  return text.replace(/\]\((\.\.?\/)/g, (_m, lead) => `](${lead === "./" ? "../" : "../../"}`);
+  const dir = join(root, items);
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir, { recursive: true, withFileTypes: true }).filter((e) => e.isFile()).map((e) => relative(dir, join(e.parentPath, e.name)).split(sep).join("/")).sort().map((path) => ({ path, text: readFileSync(join(dir, path), "utf8") }));
 }
 
 // src/shared/schema.mjs
@@ -466,9 +281,9 @@ var VALID_FOR = { default_s: 3600, state_s: 24 * 3600, measure_s: 31 * 24 * 3600
 var MAX = 256 * 1024;
 
 // src/defaults/ticket-state.ts
-import { execFileSync as execFileSync3 } from "node:child_process";
+import { execFileSync as execFileSync2 } from "node:child_process";
 var CLOSE_TIMEOUT_MS = 12e4;
-var exec = (cmd, args, cwd, opts = {}) => cmd === "git" ? git(null, args, { ...opts, cwd, timeoutMs: opts.timeoutMs ?? CLOSE_TIMEOUT_MS }).trim() : execFileSync3(cmd, args, {
+var exec = (cmd, args, cwd, opts = {}) => cmd === "git" ? git(null, args, { ...opts, cwd, timeoutMs: opts.timeoutMs ?? CLOSE_TIMEOUT_MS }).trim() : execFileSync2(cmd, args, {
   cwd,
   encoding: "utf8",
   timeout: opts.timeoutMs ?? CLOSE_TIMEOUT_MS,
@@ -492,6 +307,59 @@ function ticketsBranch(checkout, named, run2 = exec) {
   } catch {
     return DEFAULT_TICKETS_BRANCH;
   }
+}
+
+// src/defaults/tickets-config.ts
+import { existsSync as existsSync2, readFileSync as readFileSync2 } from "node:fs";
+import { join as join2 } from "node:path";
+var NUMBER = "\\d+";
+function readTicketSettings(root, where = root) {
+  const path = join2(root, ".baton", "baton.json");
+  if (!existsSync2(path)) throw new Error(`${where} has no .baton/baton.json \u2014 the ticket commands write the tickets a sync reads; run \`baton repo init\` there first`);
+  let json;
+  try {
+    json = JSON.parse(readFileSync2(path, "utf8"));
+  } catch (e) {
+    throw new Error(`.baton/baton.json is not JSON: ${e.message.split("\n")[0]}`);
+  }
+  const texts = (v) => (Array.isArray(v) ? v : typeof v === "string" && v !== "" ? [v] : []).filter((x) => typeof x === "string" && x.trim() !== "").map((x) => x.trim());
+  const str = (v) => typeof v === "string" && v.trim() !== "" ? v.trim() : void 0;
+  const project = str(json.project);
+  if (json.project != null && project === void 0) throw new Error(".baton/baton.json: project is a project id, not an empty value");
+  const legacy_ids = texts(json.legacy_ids);
+  return {
+    items: str(json.items),
+    ticket_prefix: str(json.ticket_prefix),
+    legacy_ids,
+    project,
+    prefixes: prefixesOf(json.prefixes, legacy_ids, str(json.ticket_prefix)),
+    tags: tagsOf(json),
+    projects: str(json.projects) ?? "projects"
+  };
+}
+function tagsOf(json) {
+  const v = json.tags;
+  const tags = (Array.isArray(v) ? v : typeof v === "string" && v !== "" ? [v] : []).filter((x) => typeof x === "string" && x.trim() !== "").map((x) => x.trim());
+  return tags.length ? tags : ["roadmap-item"];
+}
+var SOURCE_FORM = /^\\d(\+|(\{\d+\}|\[a-z\]\?\d\*)?)$/;
+function prefixesOf(prefixes, legacy, allocating) {
+  if (prefixes != null && (typeof prefixes !== "object" || Array.isArray(prefixes))) throw new Error(".baton/baton.json: prefixes maps an id prefix to its pattern source");
+  const map = {};
+  for (const [prefix, source] of Object.entries(prefixes ?? {})) {
+    if (!/^[A-Za-z][A-Za-z0-9]*-$/.test(prefix) || typeof source !== "string" || !SOURCE_FORM.test(source)) {
+      throw new Error(`.baton/baton.json: prefixes.${prefix} is an id prefix (\`B-\`) whose pattern this release cannot read \u2014 write its number as \\d+ or \\d{7}, not ${JSON.stringify(source)}`);
+    }
+    map[prefix] = source;
+  }
+  for (const id of legacy) {
+    const m = /^([A-Za-z][A-Za-z0-9]*)-([^()^$|]*\\d[^()^$|]*)$/.exec(id);
+    if (!m) throw new Error(`.baton/baton.json: legacy_ids names ${id}, which is not an id pattern (\`R3-\\d+\`)`);
+    map[`${m[1]}-`] = m[2];
+  }
+  const allocatingPrefix = allocating && /^[A-Za-z][A-Za-z0-9]*$/.test(allocating) ? `${allocating}-` : "B-";
+  if (map[allocatingPrefix] == null) map[allocatingPrefix] = NUMBER;
+  return map;
 }
 
 // src/defaults/pr-archive.ts
@@ -520,8 +388,116 @@ function archiveClose(ctx, result) {
     dibber: dibberWords(settings)
   });
 }
+var TRIES = 6;
+var movedOnPush = (detail) => /non-fast-forward|fetch first|stale info/.test(detail);
+function regularDirs(root, path, missingOk = false) {
+  const parts = path.split("/");
+  if (parts.some((part) => !part || part === "." || part === ".." || part.toLowerCase() === ".git")) throw new Error(`invalid ticket directory: ${path}`);
+  for (const part of parts) {
+    root = join3(root, part);
+    const stat = lstatSync(root, { throwIfNoEntry: false });
+    if (!stat && missingOk) return;
+    if (!stat?.isDirectory()) throw new Error(`not a regular ticket directory: ${path}`);
+  }
+}
+function archiveTicket(root, branch, id, delivered) {
+  if (!/^[A-Za-z0-9]+-[A-Za-z0-9]+$/.test(id)) throw new Error(`${id}: invalid archive ticket id`);
+  const describe = `${id} \u2192 done`;
+  for (let attempt = 1; attempt <= TRIES; attempt++) {
+    gitText(root, "fetch", "-q", "origin", branch);
+    const dir = mkdtempSync(join3(tmpdir(), "baton-archive-"));
+    try {
+      gitText(root, "worktree", "add", "-q", "--detach", dir, "FETCH_HEAD");
+      const done = archiveIn(dir, branch, id, delivered);
+      if ("existing" in done) return done.existing;
+      const trailers = (process.env.TICKET_TRAILERS ?? "").trim();
+      if (!trailers && process.env.TICKET_REQUIRE_TRAILERS === "1") throw new Error(`${describe}: TICKET_REQUIRE_TRAILERS=1, but TICKET_TRAILERS is empty`);
+      gitText(dir, "commit", "-q", "-m", trailers ? `${done.message}
 
-// generated archive entry
+${trailers}` : done.message);
+      try {
+        gitText(dir, "push", "-q", "origin", `HEAD:refs/heads/${branch}`);
+        return gitText(dir, "rev-parse", "HEAD");
+      } catch (e) {
+        const detail = String(e.stderr || e.message);
+        if (!movedOnPush(detail)) {
+          const why = detail.trim().split("\n").map((l) => l.trim()).filter((l) => l !== "" && !/^To /.test(l) && !/failed to push some refs/.test(l));
+          throw new Error(`${describe}: the push was refused: ${why.join("; ") || "no reason given"}`);
+        }
+        if (attempt === TRIES) throw new Error(`${describe}: push refused ${TRIES} times: ${detail.trim().split("\n").at(-1)}`);
+      }
+    } finally {
+      try {
+        gitText(root, "worktree", "remove", "--force", dir);
+      } catch {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }
+  }
+  throw new Error(`${describe}: no archive attempt completed`);
+}
+function archiveIn(dir, branch, id, delivered) {
+  const settings = readTicketSettings(dir, dir);
+  const items = (settings.items ?? "tickets").replace(/\/$/, "");
+  regularDirs(dir, items, true);
+  const matches = readItems(dir, items).filter((f) => /\.mdx?$/i.test(f.path) && parseFrontmatter(f.text)?.id === id);
+  if (!matches.length) throw new Error(`${id}: no ${items}/${id}.mdx on origin/${branch}`);
+  if (matches.length !== 1) throw new Error(`${id}: archive cannot identify a single ticket file`);
+  const { path, text } = matches[0];
+  const archived = path.startsWith("archive/");
+  const from = `${items}/${path}`;
+  const to = `${items}/archive/${path}`;
+  if (delivered.path !== (archived ? `${items}/${path.slice("archive/".length)}` : from)) {
+    throw new Error(`${id}: archive requires the markdown source's current ticket path`);
+  }
+  const shas = resolveDelivered(delivered.shas, "HEAD", dir, (_cmd, args2, cwd) => gitText(cwd, ...args2));
+  const subject = `tickets: ${id} done (archived)`;
+  const delivery = `Delivered by: ${shas.join(", ")}`;
+  const limitation = "Delivery evidence incomplete: the legacy end record was truncated; unrecorded commits are not listed.";
+  if (archived) {
+    if (parseFrontmatter(text)?.status !== "done") throw new Error(`${id} is archived (done)`);
+    const existing = gitText(dir, "--literal-pathspecs", "log", "-1", "--first-parent", "--no-renames", "--diff-filter=A", "--format=%H", "--", from);
+    if (existing) {
+      const [first, , third, , note] = gitText(dir, "show", "-s", "--format=%B", existing).split("\n");
+      if (first === subject && third === delivery && note === limitation === delivered.truncated) return { existing };
+    }
+    throw new Error(`${id}: the archive does not record this delivery`);
+  }
+  if (!new RegExp(`^${id}\\.mdx?$`).test(basename(path))) {
+    throw new Error(`${id}: ${from} is not named ${id}.md or ${id}.mdx, so Dibber cannot write it \u2014 rename it, then archive again`);
+  }
+  regularDirs(dir, dirname(to), true);
+  if (lstatSync(join3(dir, to), { throwIfNoEntry: false })) throw new Error(`${id}: archive destination already exists`);
+  const frontmatter = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text)?.[1] ?? "";
+  if ((frontmatter.match(/^status:/gm) ?? []).length > 1) throw new Error(`${id}: duplicate status fields; archive refused`);
+  const [cmd, ...args] = delivered.dibber;
+  let said;
+  try {
+    said = JSON.parse(execFileSync3(cmd, [...args, "done", id, "--root", dir, "--json"], {
+      cwd: dir,
+      encoding: "utf8",
+      timeout: 12e4,
+      stdio: ["ignore", "pipe", "pipe"],
+      env: { ...process.env, npm_config_ignore_scripts: "true" }
+    }));
+  } catch (e) {
+    const why = String(e.stderr || e.message).trim().split("\n").at(-1);
+    throw new Error(`${id}: dibber done failed: ${why}`);
+  }
+  if (said?.id !== id || said.file !== from || said.status !== "done" || parseFrontmatter(readFileSync3(join3(dir, from), "utf8"))?.status !== "done") {
+    throw new Error(`${id}: Dibber did not mark ${from} done`);
+  }
+  mkdirSync(dirname(join3(dir, to)), { recursive: true });
+  gitText(dir, "--literal-pathspecs", "mv", from, to);
+  gitText(dir, "--literal-pathspecs", "add", "--", to);
+  return { message: `${subject}
+
+${delivery}${delivered.truncated ? `
+
+${limitation}` : ""}` };
+}
+
+// ../../.cache/baton-test-tmp/baton-bundle-DHA4Wz/entry.ts
 var run = () => ({ reached: "archived", next: null });
 var close = archiveClose;
 async function handoff() {

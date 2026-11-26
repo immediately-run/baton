@@ -94,8 +94,11 @@ evidence and the line as its detail, shown on the ticket's history. There the pe
 `confirm` waits for a direct answer from the owner under Needs you; an answer in git does not
 count. `baton decision answer <repository>:<ticket> confirmed` queues the deterministic `archive`
 leg; `filed` sends it back to `implement` without writing to git and another delivery opens a
-fresh question. `archive` uses the pinned `dibber done` to mark the ticket `done`, then moves it to
-`archive/` and rewrites its relative links in the same git commit. The commit names the
+fresh question. `archive` runs the pinned `dibber done` (the host's `BATON_DIBBER`, else the pin) to
+mark the ticket `done` in place, then `git mv`s it to `archive/` — Dibber has no move verb, and a
+move writes no ticket content — in one commit the leg pushes itself. Dibber finds a ticket by its
+canonical name (`<id>.md` or `<id>.mdx`), so a file named otherwise is refused unwritten; relative
+links in the moved file are left as written. The commit names the
 latest delivery's commits, and the next sync observes the closure without another person step.
 On upgrade, a legacy git confirmation reopens the owner's question rather than queuing archive.
 If a legacy end truncated its commit list, the archive lists only the complete recorded commit

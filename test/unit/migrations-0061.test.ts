@@ -37,7 +37,8 @@ describe('migration 0061 (B-68): the runner rename on a database with credential
       sql.exec(`INSERT INTO repositories (id, github, default_branch, sync_workflow) VALUES ('docs', 'immediately-run/docs', 'main', '.github/workflows/baton-sync.yml')`);
       sql.exec(`INSERT INTO credentials (id, hostname, allowed_capabilities, kind) VALUES ('vm-a', 'vm-a', '[]', 'worker'), ('probe-1', 'probe-1', '[]', 'probe')`);
       sql.exec(`INSERT INTO workers (id, hostname, session_name, secret_hash, credential_id, harness, kind, tier_ceiling, tier_ceilings, lease_timeout_ms, settings_hash, first_seen_at, last_seen_at)
-                VALUES (7, 'vm-a', 's', 'h', 'vm-a', 'opencode', 'vm', 'routine', '{}', 900000, '', 1, 1)`);
+                VALUES (7, 'vm-a', 's', 'h', 'vm-a', 'claude-code', 'vm', 'routine', '{}', 900000, '', 1, 1)`);
+      sql.exec(`INSERT INTO worker_capabilities (worker_id, capability, declared) VALUES (7, 'agent-venue', 1)`);
       sql.exec(`INSERT INTO worker_grants (credential_id, repository_id, granted_at, granted_by) VALUES ('vm-a', 'docs', 1, 'admin')`);
       const store = { exec: (q: string, ...p: unknown[]) => sql.exec(q, ...p) } as never;
       for (const m of MIGRATIONS.filter((x) => x.id >= 61)) {
@@ -53,7 +54,9 @@ describe('migration 0061 (B-68): the runner rename on a database with credential
       const all = (q: string) => state.storage.sql.exec(q).toArray() as Rows;
       expect(all(`SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('runners', 'workers', 'credentials_0061')`)).toEqual([{ name: 'runners' }]);
       expect(all(`SELECT id, kind FROM credentials WHERE id IN ('probe-1', 'vm-a') ORDER BY id`)).toEqual([{ id: 'probe-1', kind: 'probe' }, { id: 'vm-a', kind: 'runner' }]);
-      expect(all('SELECT id, credential_id FROM runners')).toEqual([{ id: 7, credential_id: 'vm-a' }]);
+      // The B-284 migration preserves the existing name and dependent records (S-BTN-41).
+      expect(all('SELECT id, credential_id, harness FROM runners')).toEqual([{ id: 7, credential_id: 'vm-a', harness: 'claude-code' }]);
+      expect(all('SELECT runner_id, capability FROM runner_capabilities')).toEqual([{ runner_id: 7, capability: 'agent-venue' }]);
       expect(all('SELECT credential_id, repository_id FROM runner_grants')).toEqual([{ credential_id: 'vm-a', repository_id: 'docs' }]);
       expect(all('PRAGMA foreign_key_check')).toEqual([]);
       // Every child still names `credentials`, never the scratch table.

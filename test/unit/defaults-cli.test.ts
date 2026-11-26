@@ -18,7 +18,7 @@ import { Runner } from '../../src/runner/runner';
 import { call as hostCall } from '#host';
 import { advance, claimItem, claimRow, cutover, endClaim, keyCall, ORIGIN, register, rows, setAdminKeys, setClock, syncToken, TOKENS } from '../helpers';
 import { makeKey } from '../lib/sshKeys';
-import { HARNESS_AGENTS, readOnlyHarness, readOnlyVersionSupported } from '../../src/runner/harness';
+import { readOnlyHarness, readOnlyVersionSupported, selectHarness } from '../../src/runner/harness';
 import { validateCourse } from '../../src/core/course';
 import { createHash } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
@@ -65,6 +65,8 @@ const PIN = `${SELF.slug}@${SELF.sha}`;
 const OTHER_PIN = 'immediately-run/baton@abababababababababababababababababababab';
 const sourceOf = (course: string) => `github/${SELF.slug}/${SELF.sha}/${course}`;
 const load = async (file: string) => import(`${pathToFileURL(file).href}?t=${Math.random()}`);
+/** A stand-in for the pinned dibber (B-326): the archive leg's BATON_DIBBER in these tests. */
+const DIBBER_STAND_IN = join(ROOT, 'test', 'lib', 'dibberStandIn.mjs');
 
 /** A scaffolded leg stub's text: which close it routes to is what the stub's source says. */
 const stubSourceOf = (root: string, course: string, leg: string): string =>
@@ -77,6 +79,10 @@ it('S-BTN-232: an owner returns a delivery, then confirms the next one; the runn
   const factsFile = join(dir, 'facts.json');
   const g = (...args: string[]) => execFileSync('git', ['-C', root, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
   const logs: string[] = [];
+  // B-326: the archive's status write is the pinned dibber's — here a stand-in, as the host's BATON_DIBBER.
+  const env = { BATON_DIBBER: process.env.BATON_DIBBER, DIBBER_LOG: process.env.DIBBER_LOG };
+  process.env.BATON_DIBBER = `node ${JSON.stringify(DIBBER_STAND_IN)}`;
+  process.env.DIBBER_LOG = join(dir, 'dibber.log');
   try {
     gitInit(root);
     execFileSync('git', ['init', '-q', '--bare', '-b', 'main', remote]);
@@ -86,7 +92,7 @@ it('S-BTN-232: an owner returns a delivery, then confirms the next one; the runn
       copyFileSync(join(ROOT, file), join(root, file));
     }
     mkdirSync(join(root, 'tickets/nested'), { recursive: true });
-    writeFileSync(join(root, 'tickets/nested/Delivery.MD'), '---\nid: B-1\ntitle: Delivery\nstatus: available\n---\nSee [work](../../evidence.txt).\n');
+    writeFileSync(join(root, 'tickets/nested/B-1.md'), '---\nid: B-1\ntitle: Delivery\nstatus: available\n---\nSee [work](../../evidence.txt).\n');
     writeFileSync(factsFile, '[]');
     const first = commitAll(root);
     g('push', '-q', 'origin', 'HEAD:refs/heads/main');
@@ -133,8 +139,9 @@ it('S-BTN-232: an owner returns a delivery, then confirms the next one; the runn
     const archive = g('ls-remote', 'origin', 'refs/heads/main').split(/\s/)[0];
     expect(g('rev-parse', `${archive}^`)).toBe(second);
     expect(g('show', '-s', '--format=%B', archive)).toBe(`tickets: B-1 done (archived)\n\nDelivered by: ${second}`);
-    expect(g('show', `${archive}:tickets/archive/nested/Delivery.MD`)).toContain('status: done');
-    expect(g('show', `${archive}:tickets/archive/nested/Delivery.MD`)).toContain('[work](../../../evidence.txt)');
+    // Dibber wrote the status; git moved the file, its content otherwise as filed.
+    expect(g('show', `${archive}:tickets/archive/nested/B-1.md`)).toBe('---\nid: B-1\ntitle: Delivery\nstatus: done\n---\nSee [work](../../evidence.txt).');
+    expect(readFileSync(join(dir, 'dibber.log'), 'utf8').trim().split('\n').map((l) => JSON.parse(l) as string[]).map((a) => a.slice(0, 2))).toEqual([['done', 'B-1']]);
     const [claim] = await rows<{ id: number; ended_at_sha: string; confirmed_at: number | null }>(
       `SELECT id, ended_at_sha, confirmed_at FROM claims WHERE ticket_id = ? AND end_reason = 'done'`, 'docs:B-1');
     expect(claim).toMatchObject({ ended_at_sha: archive, confirmed_at: null });
@@ -142,6 +149,7 @@ it('S-BTN-232: an owner returns a delivery, then confirms the next one; the runn
     expect(await rows('SELECT closed_as FROM closed_tickets WHERE ticket_id = ?', 'docs:B-1')).toEqual([{ closed_as: 'done' }]);
     expect((await claimRow(claim.id)).confirmed_at).not.toBeNull();
   } finally {
+    for (const [k, v] of Object.entries(env)) if (v === undefined) delete process.env[k]; else process.env[k] = v;
     rmSync(dir, { recursive: true, force: true });
   }
 }, 30_000);
@@ -807,7 +815,7 @@ describe('baton repo init, through the built CLI', () => {
     const settings = JSON.parse(readFileSync(join(root, '.baton', 'baton.json'), 'utf8'));
     // B-83: a fresh scaffold names a real agent — the opencode command by default, never the
     // bare `echo` stub.
-    expect(settings.agent_command).toBe(HARNESS_AGENTS.opencode);
+    expect(settings.agent_command).toBe(selectHarness('opencode')?.agentCommand);
     // B-84: the command runs with no shell — it names the BATON_* environment the stub sets
     // (nothing expands), carries no redirection, and splits into the argv the stub spawns.
     expect(settings.agent_command).toContain('BATON_INSTRUCTIONS');
@@ -873,7 +881,7 @@ describe('baton repo init, through the built CLI', () => {
     // BATON_* environment (no shell expands it, B-84) — and init prints it for the unfamiliar.
     const def = scaffold();
     try {
-      expect(def.command).toBe(HARNESS_AGENTS.opencode);
+      expect(def.command).toBe(selectHarness('opencode')?.agentCommand);
       expect(def.command).toContain('--model zai-coding-plan/glm-5.3');
       expect(def.command).toContain('BATON_INSTRUCTIONS');
       expect(def.command).not.toMatch(/[<>|]/); // no redirection: the stub closes stdin itself
@@ -883,7 +891,7 @@ describe('baton repo init, through the built CLI', () => {
     }
     const cc = scaffold('--agent', 'claude-code');
     try {
-      expect(cc.command).toBe(HARNESS_AGENTS['claude-code']);
+      expect(cc.command).toBe(selectHarness('claude-code')?.agentCommand);
       expect(cc.command).toContain('--permission-mode bypassPermissions');
       expect(cc.said).toContain(cc.command);
     } finally {
@@ -909,11 +917,11 @@ describe('baton repo init, through the built CLI', () => {
     try {
       const command = (): string => (JSON.parse(readFileSync(join(old.dir, '.baton', 'baton.json'), 'utf8')) as { agent_command: string }).agent_command;
       const replaced = baton(old.dir, 'repo', 'init', '--pin', PIN);
-      expect(command()).toBe(HARNESS_AGENTS.opencode);
+      expect(command()).toBe(selectHarness('opencode')?.agentCommand);
       expect(replaced).toContain('no-op stub');
-      expect(replaced).toContain(HARNESS_AGENTS.opencode);
+      expect(replaced).toContain(selectHarness('opencode')?.agentCommand);
       baton(old.dir, 'repo', 'init', '--pin', PIN, '--agent', 'claude-code');
-      expect(command()).toBe(HARNESS_AGENTS['claude-code']);
+      expect(command()).toBe(selectHarness('claude-code')?.agentCommand);
       baton(old.dir, 'repo', 'init', '--pin', PIN, '--agent-command', 'mine');
       expect(command()).toBe('mine');
       const kept = baton(old.dir, 'repo', 'init', '--pin', PIN);
@@ -988,8 +996,13 @@ describe('baton repo init, through the built CLI', () => {
     }
   });
 
-  it.each([false, true])('archives only an owner-confirmed delivery (legacy truncation: %s, S-BTN-232)', async (legacy) => {
+  it.each([false, true])('archives only an owner-confirmed delivery, its status written by dibber (legacy truncation: %s, S-BTN-232, B-326)', async (legacy) => {
     const dir = mkdtempSync(join(tmpdir(), 'baton-archive-fixture-'));
+    const env = { BATON_DIBBER: process.env.BATON_DIBBER, DIBBER_LOG: process.env.DIBBER_LOG };
+    const dibberLog = join(dir, 'dibber.log');
+    const dibberCalls = () => existsSync(dibberLog) ? readFileSync(dibberLog, 'utf8').trim().split('\n').map((l) => (JSON.parse(l) as string[]).slice(0, 2)) : [];
+    process.env.BATON_DIBBER = `node ${JSON.stringify(DIBBER_STAND_IN)}`;
+    process.env.DIBBER_LOG = dibberLog;
     const origin = join(dir, 'origin');
     const checkout = join(dir, 'checkout');
     mkdirSync(checkout);
@@ -1002,8 +1015,8 @@ describe('baton repo init, through the built CLI', () => {
       writeFileSync(join(checkout, '.baton/baton.json'), JSON.stringify({ items: 'tickets', ticket_prefix: 'B' }));
       const first = commitAll(checkout);
       mkdirSync(join(checkout, 'tickets/nested'), { recursive: true });
-      const path = 'tickets/nested/Delivery [1].MD';
-      const archived = 'tickets/archive/nested/Delivery [1].MD';
+      const path = 'tickets/nested/B-1.md';
+      const archived = 'tickets/archive/nested/B-1.md';
       writeFileSync(join(checkout, path), '---\nid: B-1\ntitle: Delivery\nstatus: available\n---\nSee [work](../../evidence.txt).\n');
       const second = commitAll(checkout);
       const commits = [first, second];
@@ -1033,6 +1046,14 @@ describe('baton repo init, through the built CLI', () => {
         expect(g('ls-remote', 'origin', 'refs/heads/main')).toContain(head);
       }
       if (!legacy) {
+        // Dibber finds a ticket by its canonical name: a file named otherwise is refused, unwritten.
+        g('mv', path, 'tickets/nested/Delivery [1].MD');
+        const renamed = commitAll(checkout);
+        g('push', '-q', 'origin', 'HEAD:refs/heads/main');
+        await expect(Promise.resolve().then(() => stub.close({ ...ctx, ticket: { ...ctx.ticket, path: 'tickets/nested/Delivery [1].MD' } }, result))).rejects.toThrow('is not named B-1.md or B-1.mdx, so Dibber cannot write it');
+        expect(g('ls-remote', 'origin', 'refs/heads/main')).toContain(renamed);
+        g('revert', '--no-edit', renamed);
+        g('push', '-q', 'origin', 'HEAD:refs/heads/main');
         writeFileSync(join(checkout, path), `---\nid: B-1\ntitle: Delivery\nstatus: available\nstatus: in-progress\n---\n`);
         const duplicate = commitAll(checkout);
         g('push', '-q', 'origin', 'HEAD:refs/heads/main');
@@ -1047,8 +1068,9 @@ describe('baton repo init, through the built CLI', () => {
       expect(g('rev-parse', `${sha}^`)).toBe(beforeArchive);
       const note = legacy ? '\n\nDelivery evidence incomplete: the legacy end record was truncated; unrecorded commits are not listed.' : '';
       expect(g('log', '-1', '--format=%B', sha)).toBe(`tickets: B-1 done (archived)\n\nDelivered by: ${commits.slice(0, 15).join(', ')}${note}`);
-      expect(g('show', `${sha}:${archived}`)).toContain('status: done');
-      expect(g('show', `${sha}:${archived}`)).toContain('[work](../../../evidence.txt)');
+      // Dibber wrote the status, in place; git moved the file. Nothing else of it changed.
+      expect(g('show', `${sha}:${archived}`)).toBe('---\nid: B-1\ntitle: Delivery\nstatus: done\n---\nSee [work](../../evidence.txt).');
+      expect(dibberCalls()).toEqual([['done', 'B-1']]);
       expect(g('--literal-pathspecs', 'ls-tree', sha, '--', path)).toBe('');
       expect(g('rev-parse', 'HEAD')).toBe(beforeArchive);
       g('switch', '--detach', sha);
@@ -1056,7 +1078,9 @@ describe('baton repo init, through the built CLI', () => {
       commitAll(checkout);
       g('push', '-q', 'origin', 'HEAD:refs/heads/main');
       expect(await stub.close(ctx, result)).toBe(sha);
+      expect(dibberCalls()).toEqual([['done', 'B-1']]);
     } finally {
+      for (const [k, v] of Object.entries(env)) if (v === undefined) delete process.env[k]; else process.env[k] = v;
       rmSync(dir, { recursive: true, force: true });
     }
   });

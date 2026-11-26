@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // B-277: compare method/path shapes and table names (not contracts or columns).
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { pathToFileURL } from 'node:url';
@@ -77,7 +77,9 @@ async function run() {
   const [{ ACTIONS }, { READS }, { MIGRATIONS }] = await Promise.all([
     load('src/core/actions.ts'), load('src/core/reads/index.ts'), load('src/migrations/index.ts'),
   ]);
-  const routes = legacyRoutes(read('src/core/baton.ts'));
+  // B-272: the dispatchers moved out of baton.ts into src/core/routes/; each file is read alone.
+  const routeFiles = ['src/core/baton.ts', ...readdirSync(resolve(ROOT, 'src/core/routes')).filter((f) => f.endsWith('.ts')).sort().map((f) => `src/core/routes/${f}`)];
+  const routes = new Set(routeFiles.flatMap((path) => [...legacyRoutes(read(path))]));
   for (const route of registeredReadRoutes(ACTIONS, READS, readMethods(read('src/core/reads/index.ts')))) routes.add(route);
   const tables = migratedTables(MIGRATIONS);
   const specRoutes = specifiedRoutes(read('spec/BATON_SPEC/14-api.md'));
