@@ -1,0 +1,12 @@
+---
+title: B-258 review round 2
+description: Disposition of the review findings on delivered-ticket archiving.
+---
+
+[Forge review](https://github.com/immediately-run/baton/pull/356#pullrequestreview-6013369986) on `03aefec172a914b6105e863464c3542303d5bb9d`. Verdict: **changes**.
+
+- [Blocking: legacy git confirmation](https://github.com/immediately-run/baton/pull/356#discussion_r4659040670). On upgrade, reopen the owner question at the preceding station when the saved answer source is no longer allowed. The old answer remains in history. S-BTN-232 goes through the signed owner API after the upgrade.
+- [Blocking: truncated legacy evidence](https://github.com/immediately-run/baton/pull/356#discussion_r4659040678). Recover and verify only the complete commit identifiers. The archive explicitly notes that the legacy evidence is incomplete; the partial hash and missing tail are never guessed. S-BTN-232 checks the pushed commit and retry.
+- [Should fix: duplicate status](https://github.com/immediately-run/baton/pull/356#discussion_r4659040680). Refuse duplicate status fields before pushing, and check that the markdown source will read the pinned Dibber output as `done` before committing it. S-BTN-232 checks that this refusal leaves the remote unchanged.
+
+The branch also incorporates B-326 from `main`: `baton tickets done` stays retired. The archive close uses pinned Dibber to mark the file done, and manages the move, link rewriting and git transaction itself.

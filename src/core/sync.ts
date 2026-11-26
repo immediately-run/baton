@@ -663,6 +663,7 @@ function checkQualifiedDependencies(core: Pick<BatonCore, 'sql'>, r: string, liv
  *  every course the post's tickets name must be in force — a refused file with none to keep,
  *  or a course the registry dropped while a ticket still names it, refuses the post. */
 function applyRegistry(core: Pick<BatonCore, 'courses' | 'stations' | 'claims' | 'queues'>, r: string, p: BoardPayload, ticketCourses: string[], at: number): string[] {
+  const previous = new Map((p.registry ?? []).map((e) => [e.id, core.stations.graph(r, e.id)]));
   const refused = p.registry ? core.courses.apply(r, p.registry, p.sha, at) : [];
   core.stations.reset();
   requireCoursesInForce(core, r, ticketCourses);
@@ -671,7 +672,7 @@ function applyRegistry(core: Pick<BatonCore, 'courses' | 'stations' | 'claims' |
     if (refused.includes(e.id)) continue;
     core.claims.renameActive(r, e.id);
     // R-BTN-83: a ticket queued for a leg the accepted file no longer has there waits on course-changed.
-    core.stations.recheckCourse(r, e.id);
+    core.stations.recheckCourse(r, e.id, previous.get(e.id) ?? null);
   }
   // R-BTN-79: every course in force — accepted now or kept over a refused file — has its renamed
   // legs' tickets moved and each leg's bound judged against the row's, so a bound never waits on

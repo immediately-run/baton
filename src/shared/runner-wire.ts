@@ -30,12 +30,14 @@ export interface ClaimAnswer {
   handoff_url?: string;
   control?: { required: boolean; keys: string[]; register_moved?: boolean; [group: string]: unknown };
   advice?: unknown;
+  person_answer?: { leg: string; option: string; answered_at: number; answered_by: string };
   previous_attempts?: {
     claim_id: number;
     status: string;
     end_reason: string | null;
     detail: string | null;
     ended_at: number | null;
+    ended_at_sha?: string;
     resume: unknown;
     legs: { leg: string; run_id?: string; from: string; reached: string | null; outcome: string }[];
   }[];
