@@ -4,12 +4,12 @@ import type { Store } from './ports';
 import { scopePaths } from './scope';
 import { checkForgeRun } from './validate';
 
-/** S-BTN-310: unlike the scope audit, this read never authorizes by-name reach. */
+/** B-131: unlike the scope audit, this read never authorizes by-name reach. */
 export function forgeScope(store: Store, now: number, run: string, session?: { credential: string; secretHash: string }) {
   checkForgeRun(run);
   const row = store.exec<{ repository_id: string; github: string; repos: string; valid_until: number }>(`
     SELECT p.id AS repository_id, p.github, t.repos,
-           min(w.last_seen_at + w.lease_timeout_ms, coalesce(c.deadline_at, 9007199254740991)) AS valid_until
+           min(w.last_seen_at + w.lease_timeout_ms, coalesce(l.forge_deadline_at, c.deadline_at, 9007199254740991)) AS valid_until
     FROM claim_legs l JOIN claims c ON c.id = l.claim_id JOIN runners w ON w.id = c.runner_id
     JOIN credentials k ON k.id = w.credential_id JOIN tickets t ON t.id = c.ticket_id
     JOIN repositories p ON p.id = t.repository_id
