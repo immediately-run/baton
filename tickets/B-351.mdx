@@ -1,0 +1,60 @@
+---
+id: B-351
+status: available
+topics: [courses, scheduling]
+owns: {}
+prs: []
+title: "B-351 — Leg selection: one selector per course, run by a runner, with a stored verdict that says why"
+depends_on: [B-120]
+tags: [roadmap-item]
+project: baton
+repos: [baton]
+description: "A course-owned selector chooses each ticket's next leg from Baton's record, run by a runner through its executor; a stored verdict says why, what it waits for, or that a person must act."
+---
+
+**Brief:** the owner, 2026-11-26 (in a Claude Code session on bering), on how Baton chooses a ticket's next leg: "I feel this is a key mechanic which is too challenging to grasp right now." The owner's constraints from the same session are quoted in full in [the proposal](../spec/proposals/leg-selection.md#2-the-owners-constraints): the selection is entirely customizable; a leg may wait on prerequisites that readings express (host memory, a GitHub rate limit); it sandboxes like any custom logic, as in Fieldhouse; the dashboard and CLI say why a leg was chosen; and where none can start, they say when the next decision comes or that a person must act. Git is not assumed to be the channel between legs. The owner's answer to "write this up as the proposal page and ticket": "Yes".
+
+**Spec:** [the leg-selection proposal](../spec/proposals/leg-selection.md). It would change [R-BTN-83](../spec/BATON_SPEC/05-courses.md#sec-5-3) (the position a leg reports, and who queues the next leg), [R-BTN-70](../spec/BATON_SPEC/05-courses.md#sec-5-3) (readiness), [R-BTN-74](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-2) (the station function) and [R-BTN-133](../spec/BATON_SPEC/08-runners.md#sec-8-3) (the wrapper's calls), and add two conditions to [R-BTN-163](../spec/BATON_SPEC/07-conditions.md#sec-7-3). Run `npm run spec:impact` on each.
+
+**Depends on:** B-120 (the sync stops posting positions).
+
+### Why
+
+Today five things set a ticket's queued leg (the finishing leg's `next`, the sync's board post, Baton's own transitions, the owner's route, `start_leg`) and two more filter it (the station function's readiness, core's gates). The proposal replaces the choosing part with one course-owned function and one stored verdict.
+
+### What to build
+
+1. **Settle the proposal first.** Its §9 holds three open questions (a default selector, the `because` text under R-BTN-33, the selector's budget and an untaken want's timeout). Put them to the owner, then amend the spec by pull request before any code.
+2. **The selector and its verdict.** `select.mjs` per course, `select(ctx)` through the wrapper (R-BTN-133). Core builds `ctx` from Baton's record alone: position, outputs, facts, subscribed readings, dependencies, fleet and `now`. It checks the verdict (`run`, `wait`, `attention`) and stores it with the input digest, the course version and the runner key.
+3. **Selection by runners.** The finishing runner selects with its `advance` or end over the `ctx` core hands it. Otherwise a selection want is offered to any live runner granted for the repository and course.
+4. **`needs` matching.** Core matches a `run` verdict's `needs` against runners' declared dimensions when offering the leg, and distinguishes waiting for capacity from no registered runner being able to take it.
+5. **Seeing why.** `baton ticket why <id>` with `--replay`, the ticket's dashboard view, and each ticket's verdict kind on the board.
+6. **The standard courses' selectors**, with create-pr first, since it branches most: `pr-open` leads to run-tests, review or fix, and `reviewed` to review, fix, adjudicate or merge. Their branching verdicts become inline leg outputs.
+7. **Remove what it replaces**: the holder's `next` in `decide()`, readiness posting, `baton.missing-next` and the `resource` advice rows.
+
+### Trust
+
+A verdict is a claim, like a holder's `next` today. Nothing that protects something may move from `gatesFor` into a selector. Under `protected`, `select.mjs` is a protected path (R-BTN-184).
+
+### Invariants
+
+- **Core runs no repository code** ([R-BTN-133](../spec/BATON_SPEC/08-runners.md#sec-8-3)): the selector runs only through a runner's executor; core builds its input and checks its output.
+- **Baton holds every position** ([R-BTN-39](../spec/BATON_SPEC/01-what-baton-is.md#sec-1), [R-BTN-83](../spec/BATON_SPEC/05-courses.md#sec-5-3)): a verdict queues a leg through a signed request; no snapshot of git sets one.
+- **Gates are the only refusal** (§7.2): a verdict never admits what `gatesFor` refuses, and nothing that protects something moves into a selector.
+- **Filter fields only** ([R-BTN-33](../spec/BATON_SPEC/01-what-baton-is.md#sec-1)): `because` is bounded like an inline value, and no ticket text is stored.
+- **One clock** ([R-BTN-32](../spec/BATON_SPEC/02-deployments.md#sec-2-1)): the selector reads `ctx.now`, never its own.
+
+### Tests
+
+The scenarios in the proposal's §10, numbered with `baton tickets next scenario` when the spec amendment lands, on both hosts.
+
+### Exit criteria
+
+- [ ] The proposal's open questions are ruled on and the spec is amended by PR.
+- [ ] Every standard course selects through its selector, and no git marker sets a queued leg.
+- [ ] `baton ticket why` and the dashboard show every live ticket's verdict, and `--replay` reproduces it.
+- [ ] `npm test`, `npm run typecheck` and `npm run check:spec` green; merged under the review gate.
+
+## Status
+
+_filed 2026-11-26._
