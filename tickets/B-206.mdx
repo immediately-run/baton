@@ -3,14 +3,14 @@ title: "B-206 — The shell's frame: layout, the Text and View rendering compone
 id: B-206
 project: baton-ui-v2
 status: available
-updated: 2026-11-09
+updated: 2026-11-23
 repos:
   - baton
 tags:
   - roadmap-item
 order: 1205
 tier: judgement
-description: "The second shell ticket of BATON-UI-V2: the mockup's frame (sidebar with the brand, the entries and their counts, the freshness line; a main column with a page header), the two components every screen renders a value through — Text (string coercion only) and View (R-BTN-112's ui renderer: its node tree mapped to React elements, schemas fetched once per id from B-217's repo.schemas) — sign-in per role: /login?as=… runs R-BTN-155's code flow, and any screen that answers unauthenticated draws the same sign-in in place with two buttons, keeping its URL; and POST /v1/ui/logout (ui.logout), which §14 lists and no code serves. No router, polling or entity screen yet. Requires: B-193, B-192, B-204, B-217, B-76."
+description: "The second shell ticket of BATON-UI-V2: the mockup's frame (sidebar with the brand, the entries and their counts, the freshness line; a main column with a page header), the two components every screen renders a value through — Text (string coercion only) and View (R-BTN-112's ui renderer: its node tree mapped to React elements, schemas fetched once per id from B-217's repo.schemas) — sign-in: /login runs R-BTN-155's code flow, the role the binding key's, and any screen that answers unauthenticated draws the same sign-in in place, with the key choice where the person holds several, keeping its URL; and POST /v1/ui/logout (ui.logout), which §14 lists and no code serves. No router, polling or entity screen yet. Requires: B-193, B-192, B-204, B-217, B-76."
 topics:
   - baton
 owns: {}
@@ -58,18 +58,21 @@ logout and revoke"; the logout route is built here and B-46's item cites this ti
    `{tag, cls, text, children}`; `View` maps that tree to React elements with text children only
    — no `innerHTML`, no ref'd container. A schema the read does not know, or one with no view,
    falls back to pretty-printed JSON as text (§12.3).
-4. **Sign-in.** `/login?as=administrator|owner` heads itself by role and runs R-BTN-155's steps:
-   `POST /v1/login {role}`, show the eight-character code with the one CLI line that binds it
-   (`baton admin open` or `baton owner open`), poll `{poll: true}` every two seconds, and on
+4. **Sign-in.** `/login` runs R-BTN-155's steps (B-76 item 1): `POST /v1/login {code_request:
+   true}`, show the eight-character code with the CLI lines that bind it (`baton admin open`,
+   `baton owner open` or `baton member open`, the session taking the binding key's role), poll `{poll: true}` every two seconds, and on
    the session cookie go to `/`. On any screen whose read answers `unauthenticated`, the shell
-   draws the same sign-in in place with two buttons — administrator sign-in and owner sign-in
-   — keeps the URL it is on and continues there once signed in; no return URL is carried in a
+   draws the same sign-in in place — Cloudflare Access where the instance has it, the code
+   sign-in otherwise, then the key choice R-BTN-155 asks for where the person holds several —
+   keeps the URL it is on and
+   continues there once signed in; no return URL is carried in a
    query (an open-redirect surface).
-5. **`POST /v1/ui/logout`** (`ui.logout`): §14 lists it and no code serves it; build it — a
-   session's own, ends the session row and clears the cookie, `{ok: true}` — and draw it in
+5. **`POST /v1/ui/logout`** (`ui.logout`): §14 lists it and no code serves it; build it — the
+   tab's own session, ending its row, the cookie cleared when no session of the browser remains,
+   `{ok: true}` — and draw it in
    the sidebar's footer, back to the sign-in.
 6. **Tests** under `test/ui/`: the sign-in page runs the code flow and lands on `/`; an
-   `unauthenticated` answer draws the two-button sign-in and keeps the URL; `Text` and `View`
+   `unauthenticated` answer draws the sign-in in place and keeps the URL; `Text` and `View`
    render a hostile string as text; `View` maps a fixture node tree and falls back to JSON for
    an unknown schema; logout ends the session (a scenario on both hosts for the route).
 
@@ -118,3 +121,9 @@ session's role._
 _(2026-11-20: the spec simplification of 2026-11-19 (baton#299; `spec/BATON_SPEC_HISTORY.md`, that date) moved the unbuilt parts of the design this ticket builds out of the section files, with their rule ids, to proposal pages: sign-in, sessions and confirmed actions, and the screens, are parts 3 and 4 of [the people-and-dashboard proposal](../spec/proposals/people-and-dashboard.md), with their tables and routes under "Sign-in by code, owners' sessions and confirmed actions" in [the tables-and-routes proposal](../spec/proposals/data-model-and-api.md). Each rule keeps its id and a line in its section, which links the page. The pull request that builds this ticket moves the rules it builds back into the section files, and the scenarios and gates it makes pass back into [the verification section](../spec/BATON_SPEC/15-verification.md#sec-15), in the same change. The plan above is unchanged.)_
 
 _(2026-11-20: rules re-read: R-BTN-155)_
+
+_(2026-11-23: R-BTN-155 rewritten for every person role, the key chosen after authenticating and
+one session per tab (B-76 item 8). Item 4's in-place sign-in and item 5's logout rewritten to
+match; a member's session (B-338) signs in the same way.)_
+
+_(2026-11-23: rules re-read: R-BTN-155)_

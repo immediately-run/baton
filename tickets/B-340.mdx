@@ -1,0 +1,94 @@
+---
+title: "B-340 — A person on the dashboard is a human: sessions write as `human` and meet human-only lists, with a security-key touch per act under `human_key: hardware`"
+id: B-340
+project: baton
+status: available
+updated: 2026-11-23
+repos:
+  - baton
+tags:
+  - roadmap-item
+tier: judgement
+description: "Build R-BTN-185 as amended 2026-11-23: every administrator's, owner's and member's dashboard session acts as `human` beside its key's role — its attestations recorded with writers `human` and the role, counted where the policy admits either; a `human` approver entry matched by a session whose role may take the action. Under `human_key: hardware`, a session's act that counts only because it is `human` also carries a WebAuthn assertion over the action and its parameters, by a security key registered with a human-only key's signature (`baton human-key webauthn add`, one migration for the credentials), else `forbidden`. S-BTN-324. Requires: B-76, B-195."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-76
+  - B-195
+---
+
+**Brief:** the owner, 2026-11-23: "I think a human using the dashboard should be considered a
+human." Asked which sessions, the owner chose every person's session however it was opened, and,
+under `human_key: hardware`, "only with a per-act key touch".
+
+**Spec:** [BATON_SPEC §12.8](../spec/BATON_SPEC/12-security.md#sec-12-8) ([R-BTN-185](../spec/BATON_SPEC/12-security.md#sec-12-8),
+[R-BTN-181](../spec/BATON_SPEC/12-security.md#sec-12-8): the `human` writer,
+[R-BTN-188](../spec/BATON_SPEC/12-security.md#sec-12-8): the `human` approver entry),
+[§11.4](../spec/BATON_SPEC/11-people.md#sec-11-4) ([R-BTN-155](../spec/BATON_SPEC/11-people.md#sec-11-4)),
+[§12.1](../spec/BATON_SPEC/12-security.md#sec-12-1), [§13](../spec/BATON_SPEC/13-data-model.md#sec-13).
+
+**Depends on:** B-76 (owners' and members' sessions), B-195 (a session's path onto `POST
+…/attestations`).
+
+### What to build
+
+1. **Writers.** A session's attestation carries writer classes `human` and its key's role; the
+   policy check admits it when its entry names either (`src/core/` attestation path). `GET
+   …/attestations` shows both.
+2. **Approvers.** R-BTN-188's `human` entry matches a session whose role may take the action;
+   the approver check is the one `authorize` uses for keys.
+3. **The touch under `hardware`** (R-BTN-185's *Under `hardware`*).
+   - **Registration.** `baton human-key webauthn add --for <fingerprint>` sends `POST
+     /v1/human-keys {webauthn: {for_key, credential_id, public_key, attestation}}` signed by a
+     human-only key that owns the repository (or a break-glass line) and meets its `human_key`;
+     the attestation must meet what `hardware` requires (B-136). Stored in
+     `webauthn_credentials` (§13.2); suspended and revoked with its signing key.
+   - **Challenge.** The page asks `POST /v1/ui/human-challenge {action, params}` and gets a
+     challenge bound to the session, the action and the canonical parameters' hash, used once,
+     two minutes (`human_challenges`).
+   - **Assertion.** The act carries `webauthn: {credential_id, authenticator_data,
+     client_data_json, signature}`; Baton checks the challenge is the one issued for this
+     session, act and parameters and unused, the RP ID hash against the tenant's host, the
+     origin against `BATON_ORIGIN`, the type, user presence, the signature with WebCrypto on
+     both hosts, and that the credential is registered for the session's key. Anything else:
+     `forbidden`.
+   - **Untouched writes.** A session's attestation records `touched`; an untouched one counts as
+     `human` only while the repository's `human_key` is `any`.
+4. **The conditions read** (`answerWord` in `src/core/reads/conditions.ts`) says a session may
+   answer where the policy admits `human`, and names the touch where `hardware` asks for it.
+
+### Trust
+
+- **A WebAuthn credential** — registered only with a human-only key's signature over it; stored
+  as its public key and id; validated in `src/core/validate.ts`.
+- **An assertion** — verified against a registered credential, its challenge bound to the
+  action and parameters, user presence required; never stored beyond its event.
+- **A session's `human`** — the session cookie and `Baton-Session` under R-BTN-16's checks; no
+  new input.
+
+### Invariants
+
+- **R-BTN-185**: a key outside a session is `human` only when `human_only`; a session gains no
+  action its role lacks by being `human`.
+- **`human-gates`** (R-BTN-189): under `hardware` every human approval is made on a hardware key.
+- **R-BTN-186**: the session-only touch is the dashboard's way to carry the human; the CLI keeps
+  the human-only key's signature.
+- **Both hosts** (R-BTN-55); migrations append-only.
+
+### Tests
+
+- S-BTN-324 on both hosts; S-BTN-278 and S-BTN-321 as amended.
+
+### Exit criteria
+
+- [ ] S-BTN-324 passes on both hosts
+- [ ] `npm test`, `npm run typecheck`, `npm run check:spec` and `npm run check:tickets` green
+
+## Status
+
+_filed 2026-11-23._
+
+_(Filed with the spec PR for every person role on the dashboard. Number taken by the offline
+scan: the filing session held no Baton key.)_

@@ -20,7 +20,7 @@ behaviour, bounds and defaults. The tables of designs not built yet are in
   `repositories.id`; `credential_id` and `fingerprint` are a key's fingerprint (`SHA256:…` for an
   SSH key, `bak_<id>` for an API key); `runner_id` and `claim_id` are integers.
 - An actor column (`set_by`, `added_by`, `granted_by`, `created_by`, `actor`) holds
-  `admin:<fp>`, `owner:<fp>`, `runner:<id>`, `runner:<fp>` (a runner key with no runner session
+  `admin:<fp>`, `owner:<fp>`, `member:<fp>`, `runner:<id>`, `runner:<fp>` (a runner key with no runner session
   behind the call), `sync`, `alarm` (or `alarm:<reason>`, e.g. `alarm:leg-timeout`) or `server`.
 - When a ticket leaves the board (closed or dropped), exactly its board rows are deleted:
   `tickets`, `ticket_requires`, `ticket_depends`, `ticket_stations`, `ticket_next_legs`,
@@ -65,20 +65,25 @@ behaviour, bounds and defaults. The tables of designs not built yet are in
 ### 13.2 Credentials and sign-in
 
 Administrator keys are the host's `BATON_ADMIN_KEYS` value, never a row (R-BTN-57). One role per
-key holds across `credentials`, `repository_owners`, `sync_keys` and the administrator set,
+key holds across `credentials`, `repository_owners`, `repository_members`, `sync_keys` and the
+administrator set,
 checked in the transaction that adds or first accepts a key (§12.1).
 
 | Table | Key | Columns | Purpose |
 |---|---|---|---|
-| `credentials` | `id` (fingerprint) | `kind` (`runner` — a machine key; `probe` — an instrument key), `public_key` (an SSH public key or an API key's public line; unique), `label`, `hostname` (machine keys; unique among live ones), `registration_token_id`, `expires_at`, `last_used_at`, `created_by`, `revoked_at` | Every key but owners', sync keys and administrators' (R-BTN-13, R-BTN-102, R-BTN-117, R-BTN-159) |
+| `credentials` | `id` (fingerprint) | `kind` (`runner` — a machine key; `probe` — an instrument key), `public_key` (an SSH public key or an API key's public line; unique), `label`, `hostname` (machine keys; unique among live ones), `registration_token_id`, `expires_at`, `last_used_at`, `created_by`, `revoked_at` | Every key but owners', members', sync keys and administrators' (R-BTN-13, R-BTN-102, R-BTN-117, R-BTN-159) |
 | `registration_tokens` | `id` | `repository_id`, `secret_hash`, `capabilities`, `uses_left`, `grant_ttl_s`, `expires_at`, `created_by`, `created_at`, `revoked_at` | Runner enrollment (R-BTN-117) |
 | `token_registrations` | — | `token_id`, `at` | Recent registrations, for burst detection (R-BTN-117) |
 | `repository_owners` | `(repository_id, fingerprint)` | `public_key`, `human_only`, `fido_attestation`, `added_by`, `added_at`, `removed_at` | Owner keys (R-BTN-58, R-BTN-185) |
+| `repository_members` | `(repository_id, fingerprint)` | `public_key`, `answers` JSON (the `asks` labels it answers), `added_by`, `added_at`, `changed_by`, `changed_at`, `removed_at` | Member keys (R-BTN-204); not built (B-338) |
 | `runner_grants` | `(credential_id, repository_id)` | `capabilities` JSON (expanded), `max_claims`, `granted_by`, `granted_at`, `accepted_at` (NULL while pending), `revoked_at` | What a machine key may do where (R-BTN-4, R-BTN-58, R-BTN-146) |
 | `grant_capabilities` | `(credential_id, repository_id, capability_pattern)` | — | A grant's capabilities as rows, derived from `runner_grants.capabilities` in the statement that writes it (§6.6 rule 4) |
 | `sync_keys` | `fingerprint` | `repository_id`, `role`, `public_key` (unique), `added_by`, `added_at`, `revoked_at` | Sync keys, one repository each (R-BTN-93) |
 | `repository_policies` | `(repository_id, version)` | `policy_json` (its `floors` list a field), `hash`, `previous_hash`, `changed_by`, `approver`, `preset`, `at` | Each policy version, append-only (R-BTN-188, R-BTN-189) |
-| `dashboard_sessions` | `id_hash` (SHA-256 of the cookie value) | `admin_key`, `access_email_hash` (SHA-256 of the Access email; NULL for a link's session), `created_at`, `expires_at`, `revoked_at` | A dashboard session (R-BTN-155) |
+| `dashboard_cookies` | `value_hash` (SHA-256 of a cookie value) | `browser_id`, `replaced_at` (NULL for the browser's current value), `expires_at` | A browser's cookie values, kept while any of its sessions lives, so a replaced one in use ends them (R-BTN-155); not built (B-76) |
+| `webauthn_credentials` | `credential_id` | `for_key` (the person's key it serves), `public_key`, `signed_by` (the human-only key), `registered_at`, `suspended_at`, `revoked_at` | Security keys for a session's human acts under `hardware` (R-BTN-185); not built (B-340) |
+| `human_challenges` | `challenge_hash` | `session_id`, `action`, `params_hash`, `expires_at`, `used_at` | One-time WebAuthn challenges (R-BTN-185); not built (B-340) |
+| `dashboard_sessions` | `id` (the `session_id` a tab sends, 128 random bits; no secret) | `browser_id` (the browser whose cookie it is bound to, `dashboard_cookies`), `role` (`administrator`, `owner` or `member`), `key_fingerprint`, `access_email_hash` (SHA-256 of the Access email; NULL for a link's session), `created_at`, `expires_at`, `revoked_at` | A dashboard session, one tab's (R-BTN-155); an owner's or member's repositories are its key's, read on every request. Today's table is keyed by `id_hash` with `admin_key` alone; the per-tab and per-role columns are B-76's migration |
 | `login_links` | `token_hash` (SHA-256 of the link's token) | `admin_key`, `expires_at`, `used_at` | A one-time sign-in link (R-BTN-155) |
 | `request_nonces` | `(key_fingerprint, nonce)` | `seen_at` | Replay cache for every signed request (R-BTN-13) |
 | `webhook_deliveries` | `delivery_id` | `received_at` | Deliveries seen (R-BTN-73) |
@@ -101,7 +106,7 @@ checked in the transaction that adds or first accepts a key (§12.1).
 
 | Table | Key | Columns | Purpose |
 |---|---|---|---|
-| `board_snapshots` | `(repository_id, sha)` | `parent_sha`, `received_at`, `ticket_count`, `posted_by` | Accepted posts (R-BTN-11, R-BTN-102) |
+| `board_snapshots` | `(repository_id, sha)` | `parent_sha`, `received_at`, `ticket_count`, `posted_by`, `course_sources_json` | Accepted posts (R-BTN-11, R-BTN-102, R-BTN-134) |
 | `board_head` | `repository_id` | `fleet_version`, `course_data` (opaque JSON by course), `sha`, `observation`, `last_handed_out`, `observation_issued_at`, `stations_observation` (the latest accepted snapshot to post stations), `source_kind`, `source_versions` (the last accepted post's ticket-source declaration) | The head and the observation counter (R-BTN-11, R-BTN-62, R-BTN-70, R-BTN-74, R-BTN-150) |
 | `sync_quota` | `(issuer, kind)` | `hour`, `used` | Each sync issuer's posts this hour, by kind; a refused post uses the quota too (R-BTN-62, R-BTN-187) |
 | `sync_lapses` | `(repository_id, issuer)` | `day`, `lapses`, `at` | Observations an issuer let expire, counted per day, for Needs you; a revoked sync key's row goes (R-BTN-62, R-BTN-187) |

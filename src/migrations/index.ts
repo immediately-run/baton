@@ -54,6 +54,7 @@ import conditions from './0048_conditions.sql';
 import coreConditions from './0075_core_conditions.sql';
 import retireReviewerSettings from './0076_retire_reviewer_settings.sql';
 import legTimeoutFence from './0082_leg_timeout_fence.sql';
+import courseSourceResolutions from './0143_course_source_resolutions.sql';
 import eventLookups from './0049_event_lookups.sql';
 import alarmIndexes from './0052_alarm_indexes.sql';
 import retention from './0053_retention.sql';
@@ -263,6 +264,7 @@ export const MIGRATIONS: Migration[] = [
   { id: 126, sql: readyLegBlocks },
   { id: 123, sql: leaseRecovery },
   { id: DROP_TIERS_MIGRATION, sql: dropTiers },
+  { id: 143, sql: courseSourceResolutions },
   { id: 86, sql: registrationTokens, backfill: (store, _random, now) => {
     const at = now();
     store.exec(`UPDATE credentials SET expires_at = ?, last_used_at = ?

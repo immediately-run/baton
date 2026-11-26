@@ -1,0 +1,62 @@
+---
+title: "B-347 — Failure classification: a refusal a retry cannot fix, such as a merge refused or a PR conflicting, does not end transient"
+id: B-347
+project: baton
+status: available
+updated: 2026-11-26
+repos:
+  - baton
+tags:
+  - roadmap-item
+tier: judgement
+description: "A leg that throws ends released:cannot-finish:transient (errorClassOf maps error to transient), so a merge refusal or conflict is retried until the ticket is held. Let a leg close with a non-transient class through the declared-condition path, use it in create-pr's merge leg (PR still open, conflict, red check, refused merge) and audit the other legs' errors; a non-transient end opens a decision instead of spending the next attempt. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the owner, 2026-11-26 (in a Claude Code session on bering), asked for the supervisor's replacement checks for the Quint model as tickets under a meta-ticket. This is the fourth: "Failure classification tests: a merge refusal or conflict must not count as transient. That's B-259 and B-271's two abandoned runs."
+
+**Spec:** [BATON_SPEC §9.7](../spec/BATON_SPEC/09-claims.md#sec-9-7) (failed attempts), [§15](../spec/BATON_SPEC/15-verification.md#sec-15) [R-BTN-31](../spec/BATON_SPEC/15-verification.md#sec-15).
+
+**Depends on:** none.
+
+### Why
+
+A leg that throws ends `released:cannot-finish:transient`: `errorClassOf` (`src/core/conditionTypes.ts`) maps a plain `error` to `transient`, and the runner ends such a claim with it. So a refusal that will not change on retry is retried until the ticket's attempts are spent and it is held for `baton:retries`. The examples:
+- B-271's merge leg was abandoned twice on 2026-11-25 (21:32 and 23:37 UTC) while PR #364 conflicted with `main`, and the ticket was held;
+- B-259's merge refusal was logged as transient too.
+
+A retry cannot fix either case, and neither tells the owner what to decide.
+
+### What to build
+
+1. **The classes a leg can say.** A leg's close can end with a class other than `transient`: `spec` (the work as specified cannot finish), `contract-output`, or a new class the spec names for a refusal outside the leg's control, such as `blocked`. Use the existing declared-condition path (`std:` error types with `retryable: false`) where it fits, rather than a new mechanism.
+2. **The shipped `create-pr` merge leg uses it.** "PR still open" after the agent exits, a conflict the leg will not resolve, a required check red, and a merge refused by the forge each end with a non-transient class, quoting the reason. A failed request to the forge stays transient.
+3. **The other shipped legs:** go through each `create-pr` leg's thrown errors and list which are transient. A missing tool, a missing file or a refused push is not.
+4. **What the owner sees:** a non-transient end opens a decision naming the reason. It does not silently spend the next attempt.
+
+### Trust
+
+No new input. A leg's class is the leg's own word about its failure. It changes only whether Baton retries, never what is confirmed.
+
+### Invariants
+
+- A network or forge failure that a retry can fix stays transient.
+- A failed attempt is still counted (§9.7). Only the retry and the decision differ.
+
+### Tests
+
+- A unit test per class mapping in `errorClassOf`.
+- A scenario: a merge leg ends on an open PR, the claim ends non-transient, and the ticket is not offered `merge` again until the owner answers.
+- With B-343's fake forge, if it has landed: a conflicting PR's merge leg ends non-transient.
+
+### Exit criteria
+
+- B-271's 2026-11-25 sequence, replayed, would have opened one decision after the first abandoned merge instead of retrying until held.
+
+## Status
+
+_filed 2026-11-26._
