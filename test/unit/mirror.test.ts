@@ -2,7 +2,8 @@
 // principal, the event feed, the foreign-claim report, and the dispatches after a transition.
 import { describe, it, expect, inject, beforeEach } from 'vitest';
 import {
-  beat, captureDispatches, claimItem, cutover, endClaim, ORIGIN, ownerCall, payload, register, rows, setClock, syncCall, tick, runnerCall, mirrorCall,
+  beat, captureDispatches, claimItem, cutover, endClaim, ORIGIN, ownerCall, payload, register, rows, setClock,
+  syncCall, tick, runnerCall, mirrorCall, setTicketBlockedSince, seedTicketBlock,
 } from '../helpers';
 
 const board = inject('board');
@@ -104,8 +105,8 @@ describe('§12: foreign claims', () => {
 
   it('an imported claim holds a blocked ticket: blocked_since clears (R-BTN-75)', async () => {
     await cutover(T0);
-    await rows(`INSERT INTO ticket_blocks (repository_id, ticket_id, kind, ref, since) VALUES ('docs', 'docs:R3-9001', 'decision', 'd1', ?)`, T0);
-    await rows(`UPDATE tickets SET blocked_since = ? WHERE id = 'docs:R3-9001'`, T0);
+    await seedTicketBlock({ repository_id: 'docs', ticket_id: 'docs:R3-9001', kind: 'decision', ref: 'd1', since: T0 });
+    await setTicketBlockedSince('docs:R3-9001', T0);
     expect(await (await report({})).json()).toMatchObject({ imported: true });
     expect(await rows(`SELECT blocked_since AS b FROM tickets WHERE id = 'docs:R3-9001'`)).toEqual([{ b: null }]);
   });

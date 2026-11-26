@@ -13,7 +13,7 @@ import { initMain, parseSyncArgs, showCourseMain, syncMain } from '../../src/def
 import { dropCourse, loadCourse, sourceContext } from '../../src/runner/home';
 import { BatonApi } from '../../src/runner/api';
 import { Runner } from '../../src/runner/runner';
-import { cutover, ORIGIN, register, rows, setClock, syncToken, TOKENS } from '../helpers';
+import { cutover, ORIGIN, register, rows, setClock, syncToken, TOKENS, seedClaim, seedClaimLeg } from '../helpers';
 
 const headerPairs = (headers: Pick<Headers, 'forEach'>): [string, string][] => {
   const pairs: [string, string][] = [];
@@ -78,9 +78,15 @@ describe('S-BTN-105 a course from its source, one leg overridden', () => {
       { sha: 'a'.repeat(40), at: T0 + 30_000, parent: work, empty: true, message: `baton: tests green for T-1\n\nBaton-Tests: green\nBaton-Tested: ${work}\nBaton-Claim: n0` },
     ];
     const { id: runner } = await register('vm-a');
-    await rows(`INSERT INTO claims (ticket_id, runner_id, request_id, nonce, snapshot_sha, claimed_at, status, ended_at, end_reason) VALUES ('docs:T-1', ?, 'gate:n0', 'n0', '', 0, 'released', 1, 'released:requested')`, runner);
+    await seedClaim({
+      ticket_id: 'docs:T-1', runner_id: runner, request_id: 'gate:n0', nonce: 'n0', snapshot_sha: '', claimed_at: 0,
+      status: 'released', ended_at: 1, end_reason: 'released:requested',
+    });
     const [{ id: claim }] = await rows<{ id: number }>(`SELECT id FROM claims WHERE request_id = 'gate:n0'`);
-    await rows(`INSERT INTO claim_legs (claim_id, seq, leg, from_station, to_station, started_at, started_observation, finished_at, evidence) VALUES (?, 1, 'run-tests', 'pr-open', 'pr-open', 0, 0, 1, ?)`, claim, 'a'.repeat(40));
+    await seedClaimLeg({
+      claim_id: claim, seq: 1, leg: 'run-tests', from_station: 'pr-open', to_station: 'pr-open', started_at: 0,
+      started_observation: 0, finished_at: 1, evidence: 'a'.repeat(40),
+    });
     writeFileSync(facts, JSON.stringify([{ number: 7, head: 'claude/T-1-x', state: 'open', pushedAt: T0 + 30_000, pushes: [T0, T0 + 30_000], checks: ['success'], reviews: [], commits }]));
     await sync();
     expect(await at()).toMatchObject({ station: 'pr-open', next_leg: 'review' });

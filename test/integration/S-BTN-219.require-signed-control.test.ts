@@ -14,11 +14,13 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { call as hostCall } from '#host';
-import { BatonApi } from '../../src/runner/api';
-import { Runner } from '../../src/runner/runner';
+import { testRunner } from '../lib/runnerRig';
 import { capabilitiesOf } from '../../src/shared/vocabulary.mjs';
 import { initMain, parseSyncArgs, syncMain, type SyncArgs } from '../../src/defaults/cli';
-import { cutover, keyCall, ORIGIN, rows, setAdminKeys, setClock, syncToken, TOKENS } from '../helpers';
+import {
+  cutover, keyCall, ORIGIN, rows, setAdminKeys, setClock, syncToken, replaceSignedControl, seedHumanKey,
+  seedRepositoryOwner,
+} from '../helpers';
 import { makeKey, type TestKey } from '../lib/sshKeys';
 
 // A clock a minute behind the real one `syncMain` signs with (S-BTN-157's reason: the CI
@@ -71,19 +73,13 @@ async function sync(): Promise<{ code: number; lines: string[] }> {
 }
 
 /** A runner against this test's Baton (S-BTN-26's shape), its log captured. */
-function makeRunner(log: string[]): Runner {
-  const api = new BatonApi({
-    url: 'https://baton.test',
-    transport: (req) => hostCall(req),
-    auth: (_m, _u, _b, secret) => ({ Authorization: `Bearer ${TOKENS['vm-a']}`, ...(secret ? { 'X-Runner-Secret': secret } : {}) }),
-  });
-  const runner = new Runner({
-    api, home: dir, repository: 'docs', hostname: 'vm-a', harness: 'opencode',
+function makeRunner(log: string[]) {
+  return testRunner({
+    home: dir,
     capabilities: [...capabilitiesOf(['agent-venue'])],
     session: `s203-${Date.now()}`, courses: [{ course: 'create-pr', version: 2 }], stateFile: join(tmpdir(), `baton-s203-${process.pid}-${Date.now()}.json`),
     beatEvery: 60_000, log: (l) => log.push(l),
   });
-  return runner;
 }
 
 beforeEach(async () => {
@@ -101,7 +97,7 @@ beforeEach(async () => {
   ownerHttp = await makeKey('ssh-ed25519', 'docs-owner-http');
   await setAdminKeys(admin);
   expect((await keyCall(admin, '/v1/admin/repositories', { id: 'docs', owner_keys_add: [ownerPub, ownerHttp.publicKey] })).status).toBe(200);
-  await rows('INSERT INTO human_keys (fingerprint, public_key, added_by, added_at) VALUES (?, ?, ?, ?)', ownerFp, ownerPub, 'admin:test', T0);
+  await seedHumanKey({ fingerprint: ownerFp, public_key: ownerPub, added_by: 'admin:test', added_at: T0 });
   home();
   token = await syncToken();
   await cutover();
@@ -228,7 +224,7 @@ describe('S-BTN-219 require_signed_control', () => {
     const forgedRecord = JSON.parse(record.control_json);
     forgedRecord.groups.agent_command.read = pushed;
     forgedRecord.groups.agent_command.key = ownerFp;
-    await rows('UPDATE signed_control SET control_json = ? WHERE repository_id = ?', JSON.stringify(forgedRecord), 'docs');
+    await replaceSignedControl('docs', JSON.stringify(forgedRecord));
     const log: string[] = [];
     const runner = makeRunner(log);
     try {
@@ -345,7 +341,7 @@ describe('S-BTN-219 require_signed_control', () => {
     const record = (await rows<{ control_json: string }>('SELECT control_json FROM signed_control WHERE repository_id = ?', 'docs'))[0];
     const lying = JSON.parse(record.control_json);
     lying.groups.agent_command = { read: baseline, key: null };
-    await rows('UPDATE signed_control SET control_json = ? WHERE repository_id = ?', JSON.stringify(lying), 'docs');
+    await replaceSignedControl('docs', JSON.stringify(lying));
     const log: string[] = [];
     const runner = makeRunner(log);
     try {
@@ -379,7 +375,7 @@ describe('S-BTN-219 require_signed_control', () => {
     const record = (await rows<{ control_json: string }>('SELECT control_json FROM signed_control WHERE repository_id = ?', 'docs'))[0];
     const lying = JSON.parse(record.control_json);
     for (const g of ['agent_command', 'overrides', 'rank', 'course']) lying.groups[g] = { read: pushed, key: null, unsigned: [] };
-    await rows('UPDATE signed_control SET control_json = ? WHERE repository_id = ?', JSON.stringify(lying), 'docs');
+    await replaceSignedControl('docs', JSON.stringify(lying));
     const log: string[] = [];
     const runner = makeRunner(log);
     try {
@@ -416,8 +412,8 @@ describe('S-BTN-219 require_signed_control', () => {
     // so the record was computed under one key and the runner's walk runs under two.
     const otherPub = readFileSync(`${otherFile}.pub`, 'utf8').trim();
     const otherFp = /(\bSHA256:[A-Za-z0-9+/]{43}\b)/.exec(execFileSync('ssh-keygen', ['-lf', `${otherFile}.pub`], { encoding: 'utf8' }))![1];
-    await rows('INSERT INTO repository_owners (repository_id, public_key, fingerprint, added_by, added_at) VALUES (?, ?, ?, ?, ?)', 'docs', otherPub, otherFp, 'admin:test', clock);
-    await rows('INSERT INTO human_keys (fingerprint, public_key, added_by, added_at) VALUES (?, ?, ?, ?)', otherFp, otherPub, 'admin:test', clock);
+    await seedRepositoryOwner({ repository_id: 'docs', public_key: otherPub, fingerprint: otherFp, added_by: 'admin:test', added_at: clock });
+    await seedHumanKey({ fingerprint: otherFp, public_key: otherPub, added_by: 'admin:test', added_at: clock });
     const log: string[] = [];
     const runner = makeRunner(log);
     try {
@@ -460,7 +456,7 @@ describe('S-BTN-219 require_signed_control', () => {
     const record = (await rows<{ control_json: string }>('SELECT control_json FROM signed_control WHERE repository_id = ?', 'docs'))[0];
     const lying = JSON.parse(record.control_json);
     lying.groups.agent_command = { read: side, key: ownerFp };
-    await rows('UPDATE signed_control SET control_json = ? WHERE repository_id = ?', JSON.stringify(lying), 'docs');
+    await replaceSignedControl('docs', JSON.stringify(lying));
     const log: string[] = [];
     const runner = makeRunner(log);
     try {
@@ -547,7 +543,7 @@ describe('S-BTN-219 require_signed_control', () => {
     // finding), and the baseline's settings would run in place of the owner's newest words.
     // The runner recomputes the walk at the claim's snapshot and refuses what disagrees.
     control.groups.agent_command.read = baseline;
-    await rows('UPDATE signed_control SET control_json = ? WHERE repository_id = ?', JSON.stringify(control), 'docs');
+    await replaceSignedControl('docs', JSON.stringify(control));
     const log: string[] = [];
     const runner = makeRunner(log);
     try {

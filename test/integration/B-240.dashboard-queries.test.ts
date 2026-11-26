@@ -11,7 +11,10 @@
 // or lanes, the lookups search their indexes (migration 0055), and on the Cloudflare host a
 // state whose history is out of the window costs rows of its window, not of its history.
 import { describe, it, expect, beforeEach } from 'vitest';
-import { Git, HOST, adminSession, cutover, register, rows, sessionCall, setAdminKeys, setClock, withCore, keyCall } from '../helpers';
+import {
+  Git, HOST, adminSession, cutover, register, rows, sessionCall, setAdminKeys, setClock, withCore, keyCall,
+  setLastServedAt, setRunnerLastSeen, setRunnerReaped, seedActivity, seedClaim, seedClaimLeg, seedEvent, seedTranscript,
+} from '../helpers';
 import { makeKey, type TestKey } from '../lib/sshKeys';
 import { transcriptUrl } from '../../src/core/links';
 
@@ -124,28 +127,31 @@ async function sameAsBefore(session: string, now: number) {
 let n = 0;
 async function claim(runner: number, ticket: string, claimedAt: number, endedAt: number | null) {
   n++;
-  await rows(`INSERT INTO claims (ticket_id, runner_id, request_id, nonce, snapshot_sha, claimed_at, status, ended_at, end_reason)
-              VALUES (?, ?, ?, ?, '', ?, ?, ?, ?)`, ticket, runner, `b240:${n}`, `n${n}`, claimedAt, endedAt == null ? 'active' : 'released', endedAt,
-  endedAt == null ? null : 'released:owner');
+  await seedClaim({
+    ticket_id: ticket, runner_id: runner, request_id: `b240:${n}`, nonce: `n${n}`, snapshot_sha: '',
+    claimed_at: claimedAt, status: endedAt == null ? 'active' : 'released', ended_at: endedAt,
+    end_reason: endedAt == null ? null : 'released:owner',
+  });
   return (await rows<{ id: number }>('SELECT MAX(id) AS id FROM claims'))[0].id;
 }
 
 /** Three activities, two started at one instant, the last still open. */
 async function activities(runner: number, claimId: number, at: number) {
   for (const [i, [kind, started, ended]] of ([['implement', at, at + 60_000], ['push', at, at + 30_000], ['ci-wait', at + 120_000, null]] as const).entries()) {
-    await rows(`INSERT INTO activities (runner_id, id, claim_id, kind, label, source, started_at, ended_at, outcome, received_at, detail_json)
-                VALUES (?, ?, ?, ?, ?, 'skill', ?, ?, ?, ?, ?)`, runner, `a${claimId}-${i}`, claimId, kind, `${kind} ${i}`, started, ended,
-    ended == null ? null : 'succeeded', started, JSON.stringify({ n: i }));
+    await seedActivity({
+      runner_id: runner, id: `a${claimId}-${i}`, claim_id: claimId, kind, label: `${kind} ${i}`,
+      source: 'skill', started_at: started, ended_at: ended, outcome: ended == null ? null : 'succeeded',
+      received_at: started, detail_json: JSON.stringify({ n: i }),
+    });
   }
 }
 
 async function transcript(runner: number, claimId: number, path: string, activity: string | null = null) {
-  await rows(`INSERT INTO transcripts (runner_id, claim_id, repo, path, role, activity_id, first_seen_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    runner, claimId, TRANSCRIPTS, path, activity ? 'subagent' : 'session', activity, T0);
+  await seedTranscript({ runner_id: runner, claim_id: claimId, repo: TRANSCRIPTS, path, role: activity ? 'subagent' : 'session', activity_id: activity, first_seen_at: T0 });
 }
 
 async function event(claimId: number, ticket: string, at: number, kind = 'advanced') {
-  await rows(`INSERT INTO events (at, kind, actor, detail_json, ticket_id, claim_id, repository_id) VALUES (?, ?, 'test', '{}', ?, ?, 'docs')`, at, kind, ticket, claimId);
+  await seedEvent({ at, kind, actor: 'test', detail_json: '{}', ticket_id: ticket, claim_id: claimId, repository_id: 'docs' });
 }
 
 /** The window's claims for one runner — two claimed at one instant, one active — with their
@@ -162,8 +168,10 @@ async function fill(runner: number, tickets: string[], { active = true } = {}) {
   await transcript(runner, b, `claude-code/sub-${b}.jsonl`, `a${b}-1`);
   await transcript(runner, b, `claude-code/s-${b}.jsonl`);
   for (const [seq, leg, finished] of [[2, 'review', null], [1, 'implement', T0 - 4 * H]] as const) {
-    await rows(`INSERT INTO claim_legs (claim_id, seq, run_id, leg, from_station, started_at, started_observation, finished_at, session_url)
-                VALUES (?, ?, ?, ?, 'filed', ?, 0, ?, ?)`, b, seq, `r-${b}-${seq}`, leg, T0 - 5 * H + seq, finished, seq === 1 ? 'https://claude.ai/code/s1' : null);
+    await seedClaimLeg({
+      claim_id: b, seq, run_id: `r-${b}-${seq}`, leg, from_station: 'filed', started_at: T0 - 5 * H + seq,
+      started_observation: 0, finished_at: finished, session_url: seq === 1 ? 'https://claude.ai/code/s1' : null,
+    });
   }
   if (!active) return;
   const c = await claim(runner, tickets[3], T0 - H, null);
@@ -198,7 +206,7 @@ describe('B-240 Running and Timeline in joined queries', { timeout: 120_000 }, (
     await fill(a.id, tickets.slice(0, 4));
     await fill(b.id, tickets.slice(4, 8));
     await fill(gone.id, tickets.slice(8, 12), { active: false });
-    await rows('UPDATE runners SET reaped_at = ? WHERE id = ?', T0 - 1, gone.id);
+    await setRunnerReaped(gone.id, T0 - 1);
     const s = await sameAsBefore(session, T0);
     // The state exercises what it claims to: two lanes, the window's claims and its ties, an
     // activity's own transcript and the session's.
@@ -214,8 +222,8 @@ describe('B-240 Running and Timeline in joined queries', { timeout: 120_000 }, (
     await setClock(T0 + 21 * H);
     // This is elapsed time on a serving Baton, not a 21-hour outage. Stand in for the
     // intervening service ticks without running the reaper over the test's fixture.
-    await rows("UPDATE baton_settings SET value = ? WHERE key = 'last_served_at'", String(T0 + 21 * H - 60_000));
-    await rows('UPDATE runners SET last_seen_at = ? WHERE id = ?', T0 + 21 * H, a.id);
+    await setLastServedAt(T0 + 21 * H - 60_000);
+    await setRunnerLastSeen(a.id, T0 + 21 * H);
     session = await adminSession(admin); // a session lives 4 hours (R-BTN-155)
     await sameAsBefore(session, T0 + 21 * H);
   });

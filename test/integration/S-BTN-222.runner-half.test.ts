@@ -17,10 +17,10 @@ import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import roadmapPr from '../fixtures/courses/roadmap-pr/course.json';
-import { course as courseEntry, cutover, Git, keyCall, placed, register, rows, setAdminKeys, setClock, syncCall, tick, ticket, TOKENS } from '../helpers';
+import { course as courseEntry, cutover, Git, keyCall, placed, register, rows, setAdminKeys, setClock, syncCall, tick, ticket } from '../helpers';
 import { makeKey } from '../lib/sshKeys';
-import { Runner } from '../../src/runner/runner';
-import { BatonApi } from '../../src/runner/api';
+import { runnerApi, testRunner, until } from '../lib/runnerRig';
+import type { BatonApi } from '../../src/runner/api';
 import { builtinExecutor, type Executor, type Handle } from '../../src/runner/executor';
 import { graphOf } from '../../src/core/graph';
 import { CREATE_PR_COURSE } from '../../src/defaults/course-pr';
@@ -193,9 +193,8 @@ beforeEach(async () => {
   stateFile = join(tmpdir(), `baton-222-${process.pid}-${Math.random().toString(16).slice(2)}.json`);
 });
 
-const newRunner = (home: string, log: (l: string) => void, over: Record<string, unknown> = {}, onBeat?: (body: Record<string, any>) => Response | void, transport = hostCall) => new Runner({
-  api: new BatonApi({
-    url: 'https://baton.test',
+const newRunner = (home: string, log: (l: string) => void, over: Record<string, unknown> = {}, onBeat?: (body: Record<string, any>) => Response | void, transport = hostCall) => testRunner({
+  api: runnerApi({
     transport: async (req) => {
       if (onBeat && new URL(req.url).pathname === '/v1/runner/heartbeat') {
         const response = onBeat(await req.clone().json() as Record<string, any>);
@@ -203,9 +202,8 @@ const newRunner = (home: string, log: (l: string) => void, over: Record<string, 
       }
       return transport(req);
     },
-    auth: (_m, _u, _b, secret) => ({ Authorization: `Bearer ${TOKENS['vm-a']}`, ...(secret ? { 'X-Runner-Secret': secret } : {}) }),
   }),
-  home, repository: 'docs', hostname: 'vm-a', harness: 'opencode', capabilities: ['key:zai'],
+  home, capabilities: ['key:zai'],
   session: `b234-${Math.random().toString(16).slice(2, 8)}`, courses: [{ course: 'roadmap-pr', version: 3 }, { course: 'timeout-pr', version: 1 }],
   stateFile, beatEvery: 150, log, executor: linkingExecutor(LINK), signalGraceMs: 500, ...over,
 });
@@ -472,12 +470,10 @@ describe('S-BTN-222 (the runner half): the channel checks a raise (R-BTN-160, R-
       expect(lines.join('\n')).toContain('ended at the result posted on its channel');
       expect(lines.join('\n')).toContain('evil.example/phish');
       const person = Number(readFileSync(`${rec}.person`, 'utf8'));
-      let alive = 'alive';
-      for (let i = 0; i < 100 && alive === 'alive'; i++) {
-        try { process.kill(person, 0); } catch { alive = 'gone'; }
-        if (alive === 'alive') await new Promise((res) => setTimeout(res, 50));
-      }
-      expect(alive).toBe('gone');
+      await until(() => {
+        try { process.kill(person, 0); return false; }
+        catch (error) { if ((error as NodeJS.ErrnoException).code === 'ESRCH') return true; throw error; }
+      }, Boolean, 'the session child to exit');
     } finally {
       cleanup(home);
     }
@@ -598,14 +594,14 @@ describe('S-BTN-222 (the runner half): the channel checks a raise (R-BTN-160, R-
     const { home } = writeHome(legScripts(join(tmpdir(), `baton-222-rec-${process.pid}.jsonl`)));
     try {
       let reported = 0;
-      const r = new Runner({
+      const r = testRunner({
         api: { setSecret: () => {}, conditions: async (_: number, body: Record<string, unknown>) => {
           expect(body).not.toHaveProperty('restarts'); // old servers require omission for an empty map
           reported++;
           return { condition_id: 1, disposition: 'notify' };
         } } as unknown as BatonApi,
-        home, repository: 'docs', hostname: 'vm-a', harness: 'opencode', session: 'b234-checks',
-        courses: [{ course: 'roadmap-pr', version: 3 }], stateFile, beatEvery: 60_000, log: () => {},
+        home, session: 'b234-checks',
+        courses: [{ course: 'roadmap-pr', version: 3 }], stateFile, beatEvery: 60_000,
       });
       // A live claim's shape, as the raise handler reads it; the run holds no link.
       const claim = (r as unknown as { makeRun(path: string): unknown }).makeRun(home);

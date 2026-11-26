@@ -1,6 +1,6 @@
 // S-BTN-56 / G-BTN-83: pulls survive failed hints and a run cannot clear a mid-run want.
 import { describe, expect, it } from 'vitest';
-import { captureDispatches, Git, HOST, keyCall, mirrorCall, payload, placed, rows, setAdminKeys, setClock, syncCall, tick, webhookCall, withCore } from '../helpers';
+import { captureDispatches, clearRepositoryDispatch, restorePrePostedHeadBackfillIn, seedWebhookSync, Git, HOST, keyCall, mirrorCall, payload, placed, rows, setAdminKeys, setClock, syncCall, tick, webhookCall, withCore } from '../helpers';
 import { makeKey } from '../lib/sshKeys';
 import type { Ports } from '../../src/core/ports';
 import { logEvent } from '../../src/core/db';
@@ -55,8 +55,7 @@ describe(`S-BTN-56 sync wants (${HOST})`, () => {
     expect((await board(await observe(), d, a, true)).status).toBe(409);
     expect((await board(await observe(), b, a, true)).status).toBe(409);
     await withCore((c) => {
-      c.store.exec("UPDATE board_head SET posted_sha = NULL WHERE repository_id = 'docs'");
-      c.store.exec('DELETE FROM _baton_migrations WHERE id = 84');
+      restorePrePostedHeadBackfillIn(c.store, 'docs');
       c.migrate();
     });
     expect(await wanted()).toEqual({ wanted: false, head_sha: b });
@@ -121,7 +120,7 @@ describe(`S-BTN-56 sync wants (${HOST})`, () => {
     expect((await keyCall(owner, '/v1/owner/plain/settings', { code_repos: [
       { path: 'immediately-run/docs', forge: 'github', host: 'github.com', repo_id: '42', owner_id: '1' },
     ] }, 'PUT')).status).toBe(200);
-    await rows("UPDATE repositories SET dispatch = NULL WHERE id = 'docs'");
+    await clearRepositoryDispatch('docs');
     const sent = await captureDispatches();
     const push = { repository: { id: 42, full_name: 'immediately-run/docs' }, pusher: { name: 'alice' }, head_commit: null };
     expect((await webhookCall('push', push)).status).toBe(204);
@@ -130,7 +129,7 @@ describe(`S-BTN-56 sync wants (${HOST})`, () => {
     expect(await rows('SELECT repository_id FROM webhook_syncs')).toEqual([]);
     expect((await board(await observe(), 'a'.repeat(40), null)).status).toBe(200);
     // A stamp from before the target was removed must not re-wake the repository.
-    await rows("INSERT INTO webhook_syncs (repository_id, last_dispatch_at) VALUES ('docs', ?)", T0);
+    await seedWebhookSync({ repository_id: 'docs', last_dispatch_at: T0 });
     await setClock(T0 + 10 * 60_000 + 1);
     await tick();
     expect(await wanted()).toMatchObject({ wanted: false });
@@ -139,7 +138,7 @@ describe(`S-BTN-56 sync wants (${HOST})`, () => {
 
   it('records an unblocking even with no push target or trigger', async () => {
     await setClock(T0);
-    await rows("UPDATE repositories SET dispatch = NULL WHERE id = 'docs'");
+    await clearRepositoryDispatch('docs');
     const git = new Git().add('B', {}, placed('filed', [], [['implement', 'ready']]))
       .add('A', { blocked_by: ['B'] }, placed('filed', [], [['implement', 'ready']]));
     expect((await git.post()).status).toBe(200);
