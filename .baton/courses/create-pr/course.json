@@ -3,7 +3,7 @@
   "start_leg": "implement",
   "end": [
     "merged",
-    "confirmed"
+    "archived"
   ],
   "short_waits": [
     "ci"
@@ -33,6 +33,9 @@
     },
     "confirmed": {
       "label": "Already delivered, confirmed by a person"
+    },
+    "archived": {
+      "label": "Confirmed ticket archived"
     }
   },
   "legs": {
@@ -44,6 +47,7 @@
         "pr-open",
         "delivered"
       ],
+      "max_duration": 10800,
       "label": "Implement it and open the PR, or find it delivered"
     },
     "run-tests": {
@@ -56,6 +60,7 @@
         "fixed"
       ],
       "max_runs": 30,
+      "autonomous": true,
       "label": "Run the deterministic tests"
     },
     "review": {
@@ -65,7 +70,8 @@
         "reviewed"
       ],
       "to": "reviewed",
-      "max_runs": 3,
+      "max_runs": 8,
+      "autonomous": true,
       "label": "Review round"
     },
     "fix": {
@@ -76,6 +82,7 @@
       ],
       "to": "fixed",
       "max_runs": 30,
+      "max_duration": 10800,
       "label": "Fix or answer the findings"
     },
     "adjudicate": {
@@ -83,7 +90,8 @@
         "reviewed"
       ],
       "to": "adjudicated",
-      "label": "The owner answers the third round"
+      "autonomous": true,
+      "label": "The owner answers the last round"
     },
     "merge": {
       "from": [
@@ -91,6 +99,7 @@
         "adjudicated"
       ],
       "to": "merged",
+      "autonomous": true,
       "label": "Merge and close the ticket"
     },
     "confirm": {
@@ -103,8 +112,15 @@
       ],
       "kind": "person",
       "asks": "owner",
+      "answer_source": "person",
       "max_runs": 3,
       "label": "A person confirms it was already delivered"
+    },
+    "archive": {
+      "from": ["confirmed"],
+      "to": "archived",
+      "requires": { "capabilities": ["runner:claim-evidence"] },
+      "label": "Archive the confirmed ticket"
     }
   }
 }

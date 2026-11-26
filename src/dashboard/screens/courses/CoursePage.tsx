@@ -73,7 +73,7 @@ function LegPanel({ repository, file, leg }: { repository: string; file: unknown
           { head: 'Started', cell: (r) => <UtcTime at={r.started_at} /> },
           { head: 'Ended', cell: (r) => (r.ended_at != null ? <UtcTime at={r.ended_at} /> : <span className="mut">running</span>) },
           { head: 'End', cell: (r) => <><Text value={r.outcome} />{r.end != null ? <> · <Text mono value={r.end} /></> : null}</> },
-          { head: 'Session', cell: (r) => (r.session_url != null ? <ExtLink href={r.session_url} kind="session" showHost><Text value={r.session_url} /></ExtLink> : <span className="mut">—</span>) },
+          { head: 'Session', cell: (r) => (r.session_url != null ? <ExtLink href={r.session_url} kind="session" showHost /> : <span className="mut">—</span>) },
           { head: 'Transcripts', cell: (r) => (r.transcripts?.length ? r.transcripts.map((t, i) => <span key={i}>{i ? ', ' : ''}<Text mono value={`${t.repo}:${t.path}`} /></span>) : <span className="mut">—</span>) },
           { head: 'Log', cell: (r) => <>{r.log_dir != null ? <Text mono value={r.log_dir} /> : <span className="mut">no directory recorded</span>} <CliLine>baton leg log <Text value={r.ticket_id} /> <Text value={r.leg} /></CliLine></> },
         ]}

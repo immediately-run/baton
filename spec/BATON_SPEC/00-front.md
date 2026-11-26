@@ -1,13 +1,12 @@
 ---
 title: "Baton — the work's live state, off git"
 description: "BATON_SPEC's front: its title, status, companions and contents."
-status: proposal
 updated: 2026-11-19
 ---
 
 # Baton — the work's live state, off git
 
-**Status:** proposal — Baton's specification as it stands. How it got here — dated
+Each rule records its implementation status. How the specification got here — dated
 amendments, rationale, retired requirement ids and the map from the old section numbers — is
 in [`spec/BATON_SPEC_HISTORY.md`](../BATON_SPEC_HISTORY.md).
 
@@ -51,4 +50,3 @@ in [`spec/BATON_SPEC_HISTORY.md`](../BATON_SPEC_HISTORY.md).
 | — | Decisions | each decision still in force, one line |
 | — | Open questions | what is not yet settled |
 | — | Load-bearing assumptions | what `check:spec` checks |
-

@@ -1,14 +1,22 @@
 name: ci
 
 # Baton's gate: the type check and the whole suite (unit tests and the S-BTN integration
-# scenarios, BATON_SPEC §13a) on every pull request and on main. docs is private, so this job
+# scenarios, BATON_SPEC §13a) on every pull request. docs is private, so this job
 # cannot see it: the vendored library and the board fixtures are checked against their
 # manifest and recorded shas here, and against docs itself wherever an agent runs the suite
 # beside a docs checkout (R-BTN-37). Deploying is R3-1207's workflow, not this one.
+#
+# Actions minutes (owner, 2026-11-23): main's own gate is baton-deploy.yml's test job, which
+# runs on every push there, so this workflow no longer runs the suite a second time on each
+# merge. It runs on main only for a push that changes package.json — the one that can carry a
+# release — so the `release` job below asks for the `npm` approval only when there may be
+# something to publish. And a pull request that changes ticket files alone
+# (scripts/ci-scope.mjs) runs the ticket checks, not the suite.
 on:
   pull_request:
   push:
     branches: [main]
+    paths: [package.json]
 
 permissions:
   contents: read
@@ -16,35 +24,56 @@ permissions:
 
 concurrency:
   # A newer push supersedes a pull request's run. On main each commit is its own group, so no
-  # run is cancelled or displaced from the queue: every commit there is verified to the end.
+  # run is cancelled or displaced from the queue: every release candidate is verified to the end.
   group: ci-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   test:
     runs-on: ubuntu-latest
-    # No Quint on hosted runners (R-BTN-68, amended 2026-10-20, owner: baton was the org's most
-    # expensive repository in Actions minutes). The suite without quint takes ~9 minutes; the
-    # model's checks — the scenario traces among them — run on the author's machine in
-    # `npm run model:pr` (and weekly in `model:full`), whose report model-report.yml reads from
-    # the PR body.
+    # No Quint here: the owner retired the Quint model on 2026-11-26 (B-271), and its removal
+    # from the repository follows. The suite takes ~9 minutes.
     timeout-minutes: 25
+    outputs:
+      publish: ${{ steps.version.outputs.publish }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          # A pull request's checkout is its merge commit; its first parent is main, so the
+          # scope below diffs exactly what the pull request changes.
+          fetch-depth: 2
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
+      # Ticket files alone skip the suite (scripts/ci-scope.mjs); anything else, or a change
+      # the script cannot read, runs it.
+      - name: Scope
+        id: scope
+        env:
+          BASE: ${{ github.event_name == 'pull_request' && 'HEAD^1' || github.event.before }}
+        run: |
+          if [ "$BASE" = 'HEAD^1' ]; then BASE=$(git rev-parse HEAD^1 2>/dev/null || true); fi
+          node scripts/ci-scope.mjs "$BASE" HEAD >> "$GITHUB_OUTPUT"
       - run: npm ci
       - run: npm run typecheck
+        if: steps.scope.outputs.code != 'false'
       - run: npm run test:no-quint
+        if: steps.scope.outputs.code != 'false'
+      # The one test that reads every ticket page: each must parse under the safe renderer
+      # (R3-1340). The suite above runs it with the rest; a ticket-only change runs it alone.
+      - name: Ticket pages parse under the safe renderer
+        if: steps.scope.outputs.code == 'false'
+        run: |
+          npm run build:ui
+          npx vitest run --project local test/unit/safe-render.test.ts
       - run: npm run check:wiki   # content/, the tickets' wiki
       - run: npm run check:tickets   # tickets/: the board post's validation, depends_on, no cycle (B-111)
       # B-133: the ticket-PR check — what this PR changes under tickets/, COMPUTED (fields, body
       # and brief diffs, provenance, the status-only label), printed where the owner approves.
       # A PR whose own description claims "status-only" that its diff contradicts fails here;
-      # the label is this check's, never the description's. The checkout is depth-1 of the PR's
-      # merge commit: the view needs the merge-base, so main comes with its history. CI also
+      # the label is this check's, never the description's. The checkout is a shallow one of the
+      # PR's merge commit: the view needs the merge-base, so main comes with its history. CI also
       # passes the forge's reading of the PR's commits (B-126) — the account the commit's
       # author and committer emails map to, and its signature verification — beside git's own
       # reading, which anyone can set.
@@ -85,13 +114,23 @@ jobs:
           node cli/baton.mjs tickets check --repo . --pr origin/main "${FORGE_ARGS[@]}" "${CLAIM[@]}"
       - run: npm run check:spec   # spec/BATON_SPEC.md defines every R-BTN-n the code cites
       - run: npm run check:package   # the npm tarball installs and its `baton` starts
-
-  # The model's simulation, witnesses, 1,000-trace replay and Apalache proof do not run here
-  # (R-BTN-68, amended 2026-10-17): they outgrew hosted runners' time limits, so the author runs
-  # `npm run model:full` and pastes its report, stamped with the commit, into the PR, which
-  # model-report.yml checks against the head. npm test
-  # above keeps the deterministic part: the model's typecheck and regression runs, the scenario
-  # traces checked against it, the @impl/@model links and 200 model-drawn traces driving the core.
+        if: steps.scope.outputs.code != 'false'
+      # On main, whether package.json names a version npm does not have: only then does the
+      # `release` job start, and with it the `npm` environment's approval request. Before this,
+      # every push to main asked for an approval nobody gave, and the next push cancelled it, so
+      # main's runs read as cancelled with the suite green.
+      - name: Version
+        id: version
+        if: github.event_name == 'push'
+        run: |
+          PKG_NAME=$(node -p "require('./package.json').name")
+          PKG_VER=$(node -p "require('./package.json').version")
+          if npm view "$PKG_NAME@$PKG_VER" version >/dev/null 2>&1; then
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::$PKG_NAME@$PKG_VER is already on npm — nothing to release."
+          else
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
 
   # The CLI's npm release: `@immediately-run/baton@<version>`, published by OIDC trusted
   # publishing (no npm token exists), with provenance, when `main`'s package.json names a
@@ -107,7 +146,7 @@ jobs:
   #     that page to exist, so its first version is published once by hand (README, Releasing).
   release:
     needs: test
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.test.outputs.publish == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: npm

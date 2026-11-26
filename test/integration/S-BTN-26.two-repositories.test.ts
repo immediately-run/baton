@@ -8,7 +8,11 @@
 // is refused while either is held. The recommendation clauses — each repository in its own
 // hook's or default order, the per-group limit with 60 ready docs legs — are R3-1232's.
 import { describe, it, expect, inject, beforeEach } from 'vitest';
-import { beat, captureDispatches, claimItem, claimRow, course, cutover, endClaim, ORIGIN, ownerCall, payload, recommended, register, rows, setClock, syncCall, syncToken, withCore, runnerCall, stateView } from '../helpers';
+import {
+  beat, captureDispatches, claimItem, claimRow, course, cutover, endClaim, ORIGIN, ownerCall, payload,
+  recommended, register, rows, setClock, syncCall, syncToken, withCore, runnerCall, stateView,
+  setRepositoryWeight, setTranscriptRepositories,
+} from '../helpers';
 
 const board = inject('board');
 const sha = board.shas;
@@ -110,7 +114,7 @@ describe('S-BTN-26 two repositories (registry half)', () => {
     expect(firstOps).toBeGreaterThan(0);
     expect(got.slice(firstOps).every((t) => t.startsWith('ops:'))).toBe(true);
     expect(got.slice(firstOps)).toEqual(['ops:R3-9001', 'ops:T-1']); // ops' own order within it
-    await rows(`UPDATE repositories SET weight = 200 WHERE id = 'ops'`);
+    await setRepositoryWeight('ops', 200);
     expect((await candidates()).slice(0, 2)).toEqual(['ops:R3-9001', 'ops:T-1']);
   });
 
@@ -139,26 +143,19 @@ describe('S-BTN-26 two repositories (registry half)', () => {
     expect(await rows(`SELECT ticket_id FROM claims`)).toEqual([{ ticket_id: 'ops:R3-9001' }]);
   });
 
-  it('only the fleet repository writes the instance’s fleet data (interim until part 2b)', async () => {
-    const fleet = () => rows(`SELECT key, value FROM baton_settings WHERE key = 'reviewer_matrix'`);
-    const before = await fleet();
-    expect(before.length).toBe(1);
-    const res = await opsCall('/v1/sync/board', payload('e'.repeat(40), OPS_SHA, opsBoard, { matrix: { ...(board.states.A.matrix as Record<string, unknown>), families: {} }, providers: board.states.A.providers }));
-    expect(await res.json()).toMatchObject({ ok: true, fleet_ignored: true });
-    expect(await fleet()).toEqual(before);
-    // B-142: `providers` is no longer fleet data — an ops post carrying it alone (residue the
-    // sync still posts through the window) is ignored on its own, without the fleet refusal.
-    const residueOnly = await opsCall('/v1/sync/board', payload('f'.repeat(40), 'e'.repeat(40), opsBoard, { providers: board.states.A.providers }));
-    expect(residueOnly.status).toBe(200);
-    expect(await residueOnly.json()).not.toHaveProperty('fleet_ignored');
-    // docs' own post still writes it, and says nothing was ignored.
-    const docs = await (await syncCall('/v1/sync/board', payload(sha.B, sha.A, board.states.B, { matrix: { ...(board.states.A.matrix as Record<string, unknown>), families: {} } }))).json();
-    expect(docs).not.toHaveProperty('fleet_ignored');
-    expect(JSON.parse((await fleet())[0].value as string).families).toEqual({});
+  it('ignores the old reviewer fields without widening sync credentials (B-285)', async () => {
+    const legacy = { matrix: { families: { stale: ['('] } }, reviewers: 'ignored' };
+    const body = payload(sha.B, OPS_SHA, opsBoard, legacy);
+    expect((await opsCall('/v1/sync/board', body, 'baton-mirror.yml')).status).toBe(403);
+    const res = await opsCall('/v1/sync/board', body);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ ok: true });
+    expect(await (await opsCall('/v1/sync/head')).json()).toMatchObject({ sha: sha.B });
+    expect(await (await syncCall('/v1/sync/head')).json()).toMatchObject({ sha: sha.A });
   });
 
   it('§6.8: a transcript pointer names one of its claim’s own repository’s transcript repositories', async () => {
-    await rows(`UPDATE repositories SET transcript_repos = '["immediately-run/ops-sessions"]' WHERE id = 'ops'`);
+    await setTranscriptRepositories('ops', '["immediately-run/ops-sessions"]');
     const { secret } = await register('vm-a', BOTH);
     await cutover(1, 'ops');
     await claimItem('vm-a', secret, { ticket_id: 'ops:R3-9001' });
@@ -168,8 +165,8 @@ describe('S-BTN-26 two repositories (registry half)', () => {
   });
 
   it('a repository that names no transcript repositories keeps the defaults when another names its own', async () => {
-    await rows(`UPDATE repositories SET transcript_repos = '["immediately-run/docs-sessions"]' WHERE id = 'docs'`);
-    await rows(`UPDATE repositories SET transcript_repos = '[]' WHERE id = 'ops'`);
+    await setTranscriptRepositories('docs', '["immediately-run/docs-sessions"]');
+    await setTranscriptRepositories('ops', '[]');
     const { secret } = await register('vm-a', BOTH);
     await cutover(1, 'ops');
     await claimItem('vm-a', secret, { ticket_id: 'ops:R3-9001' });
@@ -179,7 +176,7 @@ describe('S-BTN-26 two repositories (registry half)', () => {
   });
 
   it('a pointer reported before the claim is linked only if the claim’s repository allows it', async () => {
-    await rows(`UPDATE repositories SET transcript_repos = '["immediately-run/ops-sessions"]' WHERE id = 'ops'`);
+    await setTranscriptRepositories('ops', '["immediately-run/ops-sessions"]');
     const { secret } = await register('vm-a', BOTH);
     await cutover(1, 'ops');
     await beat('vm-a', secret, { ...BOTH, transcripts: [{ repo: 'immediately-run/claude-sessions', path: 'cc/a.jsonl' }, { repo: 'immediately-run/ops-sessions', path: 'cc/b.jsonl' }] });
@@ -191,7 +188,7 @@ describe('S-BTN-26 two repositories (registry half)', () => {
     const { id } = await register('vm-a', BOTH);
     await cutover(1, 'docs');
     await cutover(1, 'ops');
-    await rows(`UPDATE repositories SET weight = 100 WHERE id = 'ops'`);
+    await setRepositoryWeight('ops', 100);
     const got = await recommended(id);
     // Each repository's first candidate comes before either's second.
     expect(got.slice(0, 2).sort()).toEqual(['docs:R3-9001', 'ops:R3-9001']);

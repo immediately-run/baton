@@ -13,7 +13,7 @@
 // after the ticket answered for it (filed, or re-read) is reported — a count and a line each,
 // never a finding, so a ruling cannot turn every older ticket's pull request red.
 // Course code in the CLI, never core (§2b): defaults import core, never the reverse.
-import { execFileSync } from 'node:child_process';
+import { git } from './git.mjs';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -106,7 +106,7 @@ export interface CheckSettings {
  *  children's `blocked_by`, never into a `depends_on` a rule order could wait on, so a parent
  *  cycle is not one the board holds. A cycle finding names the first ticket's file. The check
  *  reads; it never writes. `settings` overrides the file's, as `readBoard`'s caller does. */
-export async function checkTickets(root: string, settings: MarkdownSettings = {}, check: CheckSettings = {}, opts: { today?: string } = {}): Promise<TicketsCheckResult> {
+export async function checkTickets(root: string, settings: MarkdownSettings = {}, check: CheckSettings = {}, opts: { today?: string; boardDone?: () => Promise<ReadonlySet<string>> } = {}): Promise<TicketsCheckResult> {
   const findings: TicketFinding[] = [];
   const settingsPath = join(root, '.baton', 'baton.json');
   if (!existsSync(settingsPath)) throw new Error(`${root} has no .baton/baton.json — run \`baton repo init\` first`);
@@ -157,7 +157,7 @@ export async function checkTickets(root: string, settings: MarkdownSettings = {}
   const counts = { tickets: result.tickets.length, closed: result.closed.length };
 
   // The board post's validation, run here so a pull request fails instead of the sync: the one
-  // throw it makes is one finding — the validator names its field (`tickets[3].tier: …`) — at
+  // throw it makes is one finding — the validator names its field (`tickets[3].requires: …`) — at
   // `board`, or, a cycle, at the first ticket's file, which the author opens.
   // B-113 (§3.1, round 1): this repository's own id spelled qualified reads as the local id
   // alone — in the cycle graph here, in `checkPayload` (which the board's own judgment passes
@@ -197,7 +197,7 @@ export async function checkTickets(root: string, settings: MarkdownSettings = {}
     said.add(key);
   };
   // A qualified id (B-113) names another repository's ticket: not this repository's to check —
-  // `baton tickets claim` resolves it through the repos map, the sync's dependencies read
+  // `baton tickets check <id> --claimable` resolves it through the repos map, the sync's dependencies read
   // against its board, and the post's judgment refuses what neither resolves. This
   // repository's own id spelled qualified is the local id's own (§3.1), checked as one.
   for (const t of live) {
@@ -284,6 +284,16 @@ export async function checkTickets(root: string, settings: MarkdownSettings = {}
     }
   }
   const notes: string[] = [];
+  if (opts.boardDone) {
+    try {
+      const done = await opts.boardDone();
+      for (const t of live) {
+        if (done.has(t.id) && t.path && existsSync(join(root, t.path))) notes.push(`${t.path}: ${t.id} is done on Baton's board but its file is still live (reported, not a finding)`);
+      }
+    } catch (e) {
+      notes.push(`baton tickets check: board-done report unavailable (${(e as Error).message}; not a finding)`);
+    }
+  }
   if (entries.length && shallow) notes.push('baton tickets check: a shallow clone — the stale-rule report is skipped, since its dates need the whole history (`git fetch --unshallow` to read it; never a finding)');
   if (undetermined.length) notes.push(`baton tickets check: ${undetermined.length} ticket(s) lacking ### Trust or ### Invariants, with no _filed line and a first commit this shallow clone does not show, not judged against check.sections_since (${since})${fromId ? ` — each below check.sections_from_id (${check.sections_from_id})` : ''}: ${undetermined.join(', ')}`);
   return { findings, counts, ...(stale.length ? { stale } : {}), ...(notes.length ? { notes } : {}) };
@@ -303,7 +313,7 @@ export function staleLines(stale: NonNullable<TicketsCheckResult['stale']>): str
  *  readBoard's `?at=`): the clock alone where the directory is no git checkout. */
 function headOf(root: string): string {
   try {
-    return execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    return git(root, ['rev-parse', 'HEAD'], { stdio: ['ignore', 'pipe', 'ignore'] }).trim();
   } catch {
     return String(Date.now());
   }
@@ -313,7 +323,7 @@ function headOf(root: string): string {
  *  stdout, then a count, so a CI log holds both; exit 1 with findings, 0 without. `--quiet` keeps
  *  stdout for the exit code alone. An unreadable root or a `.baton/baton.json` that is not JSON
  *  throws, which the CLI prints as `baton: …` and exits 2 on. */
-export async function checkTicketsMain(argv: string[], io: { log?: (l: string) => void } = {}): Promise<number> {
+export async function checkTicketsMain(argv: string[], io: { log?: (l: string) => void; boardDone?: () => Promise<ReadonlySet<string>> } = {}): Promise<number> {
   const log = io.log ?? ((l: string) => process.stdout.write(`${l}\n`));
   let root = process.env.BATON_HOME ?? process.cwd();
   let quiet = false;
@@ -338,7 +348,7 @@ export async function checkTicketsMain(argv: string[], io: { log?: (l: string) =
       throw new Error(`.baton/baton.json is not JSON: ${(e as Error).message.split('\n')[0]}`);
     }
   }
-  const { findings, counts, stale, notes } = await checkTickets(root, {}, check);
+  const { findings, counts, stale, notes } = await checkTickets(root, {}, check, { boardDone: quiet ? undefined : io.boardDone });
   if (!quiet) for (const f of findings) log(`${f.path}: ${f.message}`);
   if (!quiet) for (const l of [...staleLines(stale ?? []), ...(notes ?? [])]) log(l);
   if (findings.length) {

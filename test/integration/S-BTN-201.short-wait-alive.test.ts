@@ -28,8 +28,9 @@ const r = new Runner({ api: { setSecret: () => {} } as never, home, repository: 
   session: 'waitout', courses: [], stateFile: join(home, 's.json'), beatEvery: 50, log: () => {} });
 const state: Record<string, unknown> = { runner_id: 1, claim: null };
 (r as unknown as { state: unknown }).state = { get: () => state, set: () => {}, spool: join(home, 'spool.jsonl') };
-(r as unknown as { inflight: unknown }).inflight = { claimId: 1, ticket: 'baton:B-x', child: null, waiters: [] };
-const leg = (r as unknown as { waitOut(leg: string, course: unknown): Promise<string> });
+const claim = (r as unknown as { makeRun(path: string): unknown }).makeRun(home);
+(claim as { inflight: unknown }).inflight = { claimId: 1, ticket: 'baton:B-x', child: null, waiters: [] };
+const leg = (claim as { waitOut(leg: string, course: unknown): Promise<string> });
 process.stdout.write('waiting\\n');
 void leg.waitOut('review', { graph: { shortWaits: [] } }).then(
   (how) => process.stdout.write('done ' + how + '\\n'),

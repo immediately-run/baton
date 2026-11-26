@@ -7,13 +7,15 @@
 // narrows the declaration to that one course alone. Node only: it runs git and spawns the legs'
 // child processes (the S-BTN-41 pattern), so it sits in `NODE_ONLY` beside S-BTN-41; the
 // registry half of the scenario stays on both hosts in S-BTN-26.two-repositories.test.ts.
+import { runnerApi, testRunner } from '../lib/runnerRig';
+import { GitRepo } from '../lib/gitRepo';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { BatonApi } from '../../src/runner/api';
 import { Runner } from '../../src/runner/runner';
+import type { BatonApi } from '../../src/runner/api';
 import { declareCourses, servedCourses } from '../../src/runner/main';
 import { capabilitiesOf } from '../../src/shared/vocabulary.mjs';
 import { call as hostCall } from '#host';
@@ -44,24 +46,15 @@ export async function close(ctx, result) {
 
 /** The home checkout: a real git repository carrying two courses — the board's `roadmap-pr` and
  *  `chore` — each with its own leg scripts, and a `.baton/baton.json` declaring both (B-103). */
-class Home {
-  readonly dir: string;
+class TwoCourseHome extends GitRepo {
   head: string | null = null;
   constructor() {
-    this.dir = mkdtempSync(join(tmpdir(), 'baton-s26-'));
-    const g = (...a: string[]) => execFileSync('git', ['-C', this.dir, ...a], { encoding: 'utf8', stdio: 'ignore' });
-    g('init', '-q', '-b', 'main');
-    g('config', 'user.email', 'b103@test');
-    g('config', 'user.name', 'b103 test');
+    super('baton-26-');
     this.write('.baton/courses/roadmap-pr/course.json', `${JSON.stringify(roadmapPr, null, 2)}\n`);
     this.write('.baton/courses/chore/course.json', `${JSON.stringify(chore, null, 2)}\n`);
     this.write('.baton/baton.json', `${JSON.stringify({ courses: [{ id: 'roadmap-pr', version: 3 }, { id: 'chore', version: 3 }] }, null, 2)}\n`);
   }
-  write(path: string, text: string): void {
-    const file = join(this.dir, path);
-    mkdirSync(dirname(file), { recursive: true });
-    writeFileSync(file, text);
-  }
+
   /** A leg of one course: `run` is the body, and the leg is written under ITS course directory —
    *  each course has its own legs/ file, so a claim served by the wrong course fails to run it
    *  at all, which is a sharper signal than a name in the evidence. */
@@ -69,13 +62,9 @@ class Home {
     this.write(`.baton/courses/${course}/legs/${name}.mjs`, legFile(`out(ctx, { course: '${course}', leg: '${name}', ticket: ctx.ticket.id, run: ctx.run });
 ${run}`));
   }
-  sha(): string {
-    return execFileSync('git', ['-C', this.dir, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
-  }
+
   commit(): string {
-    execFileSync('git', ['-C', this.dir, 'add', '.baton'], { stdio: 'ignore' });
-    execFileSync('git', ['-C', this.dir, 'commit', '--no-gpg-sign', '-q', '-m', 'courses'], { stdio: 'ignore' });
-    return this.sha();
+    return super.commit('courses', ['.baton']);
   }
   /** Post the board: the home's head, its two-course registry, and the tickets given. */
   async post(tickets: unknown[], stations: Record<string, unknown>): Promise<void> {
@@ -94,25 +83,19 @@ ${run}`));
   }
 }
 
-let home: Home;
+let home: TwoCourseHome;
 let n = 0;
 const runners: Runner[] = [];
 
 /** A runner against this test's Baton, heartbeating as credential vm-a, serving `courses`. */
 function makeRunner(courses: { course: string; version: number }[], over: Record<string, unknown> = {}): Runner {
-  const api = new BatonApi({
-    url: 'https://baton.test',
-    transport: (req) => hostCall(req),
-    auth: (_m, _u, _b, secret) => ({ Authorization: `Bearer ${TOKENS['vm-a']}`, ...(secret ? { 'X-Runner-Secret': secret } : {}) }),
-  });
-  const runner = new Runner({
-    api, home: home.dir, repository: 'docs', hostname: 'vm-a', harness: 'opencode',
-    // B-86: vm-a's grant expands `agent-venue` to the capabilities whose roles it carries, so the
+  const api = runnerApi({ url: 'https://baton.test' });
+  const runner = testRunner({
+    api, home: home.dir,     // B-86: vm-a's grant expands `agent-venue` to the capabilities whose roles it carries, so the
     // declaration is what the grant allows (the legs here require nothing; the grant is realistic).
     capabilities: [...capabilitiesOf(['agent-venue'])],
     session: `s26-${++n}`, courses, stateFile: join(tmpdir(), `baton-s26-${process.pid}-${n}.json`),
-    beatEvery: 60_000, log: () => {},
-    ...over,
+    beatEvery: 60_000,     ...over,
   });
   runners.push(runner);
   return runner;
@@ -120,13 +103,13 @@ function makeRunner(courses: { course: string; version: number }[], over: Record
 
 beforeEach(async () => {
   await setClock(T0);
-  home = new Home();
+  home = new TwoCourseHome();
   await cutover();
 });
 
 afterEach(() => {
   for (const r of runners.splice(0)) r.stop();
-  if (home) rmSync(home.dir, { recursive: true, force: true });
+  if (home) home.dispose();
 });
 
 describe('S-BTN-26 the runner half (B-103): one runner, one checkout, two courses', () => {
@@ -152,7 +135,7 @@ describe('S-BTN-26 the runner half (B-103): one runner, one checkout, two course
     const beat = api.heartbeat;
     api.heartbeat = async (body: Record<string, unknown>) => {
       sent.push((body.courses ?? []) as { repository: string; course: string; version: number }[]);
-      return await beat.call(api, body) as Record<string, any>;
+      return await beat.call(api, body);
     };
     // The first claim: either course, the server's choice. Both tickets are ready and docs is
     // cut over, so the recommendation's first pick is what the runner takes.
@@ -198,7 +181,7 @@ describe('S-BTN-26 the runner half (B-103): one runner, one checkout, two course
     // the runner must not choose one from the snapshot's list.
     const api = (runner as unknown as { o: { api: BatonApi } }).o.api;
     const claim = api.claim;
-    api.claim = async (body: { request_id: string; ticket_id?: string }) => ({ ...await claim.call(api, body) as Record<string, unknown>, course_id: null });
+    api.claim = async (body: { request_id: string; ticket_id?: string }) => ({ ...await claim.call(api, body), course_id: null });
     const lines: string[] = [];
     (runner as unknown as { log: (l: string) => void }).log = (l: string) => lines.push(l);
     const out = await runner.runOnce();
@@ -222,7 +205,7 @@ describe('S-BTN-26 the runner half (B-103): one runner, one checkout, two course
     const beat = api.heartbeat;
     api.heartbeat = async (body: Record<string, unknown>) => {
       sent.push(body.courses);
-      return await beat.call(api, body) as Record<string, any>;
+      return await beat.call(api, body);
     };
     const out = await runner.runOnce();
     expect(out).toMatchObject({ ticket: 'docs:C-1' });
@@ -245,7 +228,7 @@ describe('S-BTN-26 the runner half (B-103): one runner, one checkout, two course
     const api = (runner as unknown as { o: { api: BatonApi } }).o.api;
     const claim = api.claim;
     api.claim = async (body: { request_id: string; ticket_id?: string }) => ({
-      ...await claim.call(api, body) as Record<string, unknown>,
+      ...await claim.call(api, body),
       course_id: 'roadmap-pr',
     });
     const lines: string[] = [];

@@ -1,6 +1,6 @@
-// S-BTN-199 the git-lock pickup asks Baton (B-129; R-BTN-179's one-answer rule, R-BTN-81's
-// history, §9's branch-holder query, R-BTN-85 both values): `baton tickets claim` reads the
-// ticket from Baton before it writes, so one wrong `status: available` line over an open PR (the
+// S-BTN-199 the pickup asks Baton (B-129, B-326; R-BTN-179's one-answer rule, R-BTN-81's
+// history, §9's branch-holder query, R-BTN-85 both values): `baton tickets check <id>
+// --claimable` reads the ticket from Baton before a claim, so one wrong `status: available` line over an open PR (the
 // 2026-10-27 release over PR #109) hands the next session Baton's position instead of a fresh
 // start. Must hold: the board read answers the station, the ready leg and — the field B-129 adds —
 // the repository's live claims, each with its holder and when its lease ends; the history read
@@ -14,10 +14,12 @@
 // course field and stores no PR list (R-BTN-50, R-BTN-33), so a release that kept its PRs logs
 // one too. Runs on both hosts.
 import { describe, it, expect, beforeEach } from 'vitest';
-import { adminSession, advance, claimItem, cutover, endClaim, Git, keyCall, placed, register, rows, sessionCall, setAdminKeys, setClock, runnerCall } from '../helpers';
 import { makeKey, signedRequest, type TestKey } from '../lib/sshKeys';
 import { call as hostCall, HOST } from '#host';
-import { ORIGIN } from '../helpers';
+import {
+  ORIGIN, seedClaim, seedEvent, seedRunner, adminSession, advance, claimItem, cutover, endClaim, Git, keyCall,
+  placed, register, rows, sessionCall, setAdminKeys, setClock, runnerCall,
+} from '../helpers';
 
 const T0 = Date.parse('2026-10-27T12:00:00Z');
 const PR = 'https://github.com/immediately-run/docs/pull/109';
@@ -45,10 +47,13 @@ beforeEach(async () => {
  *  holder with no lease the alarm would end. */
 async function legacyClaim(ticket: string) {
   await rows(`INSERT INTO credentials (id, hostname, allowed_capabilities, kind) VALUES ('legacy', 'legacy', '[]', 'legacy') ON CONFLICT (id) DO NOTHING`);
-  await rows(`INSERT INTO runners (hostname, session_name, secret_hash, credential_id, harness, kind, tier_ceiling, lease_timeout_ms, settings_hash, first_seen_at, last_seen_at)
-              VALUES ('legacy', ?, 'x', 'legacy', 'claude-code', 'legacy', 'critical', 0, '', ?, ?)`, `item-${ticket.split(':')[1]}`, T0, T0);
+  await seedRunner({
+    hostname: 'legacy', session_name: `item-${ticket.split(':')[1]}`, secret_hash: 'x', credential_id: 'legacy',
+    harness: 'claude-code', kind: 'legacy', lease_timeout_ms: 0, settings_hash: '',
+    first_seen_at: T0, last_seen_at: T0,
+  });
   const runner = (await rows<{ id: number }>(`SELECT id FROM runners WHERE kind = 'legacy' ORDER BY id DESC LIMIT 1`))[0].id;
-  await rows(`INSERT INTO claims (ticket_id, runner_id, request_id, nonce, snapshot_sha, claimed_at, status) VALUES (?, ?, ?, 'abc123', '', ?, 'active')`, ticket, runner, `legacy:${ticket}`, T0);
+  await seedClaim({ ticket_id: ticket, runner_id: runner, request_id: `legacy:${ticket}`, nonce: 'abc123', snapshot_sha: '', claimed_at: T0, status: 'active' });
   return runner;
 }
 
@@ -67,7 +72,7 @@ async function implementAndRelease(cred: 'vm-a' | 'vm-b', ticket: string, branch
   return w;
 }
 
-describe('S-BTN-199 the git-lock pickup asks Baton', () => {
+describe('S-BTN-199 the pickup asks Baton', () => {
   it('the board answers the lock with each holder and its lease\'s end; the history answers the PRs a false frontmatter lost', async () => {
     const git = new Git()
       .add('T-1', { display: { status: 'in-progress' } }, placed('filed', [], [['implement', 'ready']]))
@@ -87,7 +92,7 @@ describe('S-BTN-199 the git-lock pickup asks Baton', () => {
     const board = await read(reader, '/v1/repositories/docs/board');
     expect(board.status).toBe(200);
     expect(board.json.ready.find((t: Record<string, unknown>) => t.local_id === 'T-2')).toMatchObject({ station: 'pr-open', leg: 'review' });
-    expect(board.json.holders).toEqual([{ ticket_id: 'docs:T-2', runner_id: w2.id, hostname: 'vm-b', session_name: 'claude-review', lease_ends_at: T0 + 3_600_000 }]);
+    expect(board.json.holders).toEqual([{ ticket_id: 'docs:T-2', runner_id: w2.id, hostname: 'vm-b', session_name: 'claude-review', lease_ends_at: T0 + 3_600_000, session_url: null, session_link: false }]);
 
     // The history's `resume` is the PR a false `prs: []` lost, and the branch to continue on.
     const history = await read(reader, '/v1/repositories/docs/tickets/docs:T-1/history');
@@ -110,7 +115,7 @@ describe('S-BTN-199 the git-lock pickup asks Baton', () => {
     // would end, so `lease_ends_at` is null — and a claim through git is refused by it.
     const legacy = await legacyClaim('docs:T-2');
     expect((await read(reader, '/v1/repositories/docs/board')).json.holders).toEqual([
-      { ticket_id: 'docs:T-2', runner_id: legacy, hostname: 'legacy', session_name: 'item-T-2', lease_ends_at: null }]);
+      { ticket_id: 'docs:T-2', runner_id: legacy, hostname: 'legacy', session_name: 'item-T-2', lease_ends_at: null, session_url: null, session_link: false }]);
   });
 
   it('the history\'s resume keeps the PR when the newest ended claim is a review that pushed nothing (B-91\'s shape)', async () => {
@@ -215,8 +220,10 @@ describe('S-BTN-199 the git-lock pickup asks Baton', () => {
     // otherwise, are none.
     // Another case's discrepancy on the same ticket since (R-BTN-85's `regressed`, logged as the
     // core logs it): the dedup reads the last `position-disagrees` row, not the last row.
-    await rows(`INSERT INTO events (at, kind, ticket_id, claim_id, actor, detail_json, repository_id) VALUES (?, 'discrepancy', 'docs:T-1', NULL, 'sync', ?, 'docs')`,
-      T0, JSON.stringify({ sub: 'regressed', baton: {}, git: {}, observation: 2 }));
+    await seedEvent({
+      at: T0, kind: 'discrepancy', ticket_id: 'docs:T-1', claim_id: null, actor: 'sync',
+      detail_json: JSON.stringify({ sub: 'regressed', baton: {}, git: {}, observation: 2 }), repository_id: 'docs',
+    });
     await git.post();
     expect(await disagreements()).toHaveLength(2);
     git.add('T-9', { display: { status: 'available' } });

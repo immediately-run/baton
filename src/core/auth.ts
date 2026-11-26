@@ -1,12 +1,15 @@
+import { forgeForCi } from './forges';
 // auth.ts — Baton's principals (BATON_SPEC §10.1): the board sync, by GitHub
 // Actions OIDC (R-BTN-15), and the owner, by Cloudflare Access (R-BTN-16) — and machines, by
 // SSH-signed requests (R-BTN-13 as amended, below). Nothing but a verified JWT or signature is
 // trusted: no header, cookie or query parameter stands in for one.
 import { createLocalJWKSet, createRemoteJWKSet, decodeJwt, errors, jwtVerify, type JWTVerifyGetKey } from 'jose';
+import { forgeSecrets } from './forgeSecrets';
 import { BatonError } from './http';
 import type { Config } from './ports';
 import type { SyncClaims } from './registry';
-import { SHA256_HEX } from './validate';
+import { accessEmail, KEY_FINGERPRINT, SHA256_HEX } from './validate';
+export { API_KEY_FINGERPRINT, KEY_FINGERPRINT } from './validate';
 
 const remoteSets = new Map<string, JWTVerifyGetKey>();
 
@@ -76,19 +79,14 @@ export async function verifySyncToken(req: Request, env: Config): Promise<SyncCl
 /** A CI identity token's claims, as the front verified them (R-BTN-93): GitHub Actions OIDC, bound
  *  in the core by `Registry.forSync`, or GitLab CI `id_tokens`, bound by `Registry.forGitlab`. */
 export type SyncCredential =
-  | ({ kind: 'github' } & SyncClaims)
-  | { kind: 'gitlab'; issuer: string; project_path: string; ref: string; ref_type: string; role: 'sync' | 'mirror' };
+  | ({ kind: 'github-actions' } & SyncClaims)
+  | { kind: 'gitlab-ci'; issuer: string; project_path: string; ref: string; ref_type: string; role: 'sync' | 'mirror' };
 
 /** The GitLab issuers the deployment names (R-BTN-94's `BATON_FORGE_SECRETS`, `gitlab_issuer`): the
  *  Worker fetches a key set for these only, never for a token's own `iss`. */
 export function gitlabIssuers(env: Config): string[] {
-  let entries: Record<string, { forge?: unknown; gitlab_issuer?: unknown }> = {};
-  try {
-    entries = JSON.parse(env.BATON_FORGE_SECRETS ?? '{}');
-  } catch {
-    throw new BatonError('unavailable', 'the forge secrets are unreadable');
-  }
-  return [...new Set(Object.values(entries ?? {}).filter((e) => e && e.forge === 'gitlab' && typeof e.gitlab_issuer === 'string').map((e) => e.gitlab_issuer as string))];
+  const entries = forgeSecrets(env);
+  return [...new Set(Object.values(entries ?? {}).filter((e) => e && e.forge === forgeForCi('gitlab-ci') && typeof e.gitlab_issuer === 'string').map((e) => e.gitlab_issuer as string))];
 }
 
 /**
@@ -106,7 +104,7 @@ export async function verifySyncCredential(req: Request, env: Config): Promise<S
   } catch {
     throw new BatonError('unauthenticated', 'the token is not a JWT');
   }
-  if (iss === env.OIDC_ISSUER) return { kind: 'github', ...(await verifySyncToken(req, env)) };
+  if (iss === env.OIDC_ISSUER) return { kind: 'github-actions', ...(await verifySyncToken(req, env)) };
   if (typeof iss !== 'string' || !gitlabIssuers(env).includes(iss)) throw new BatonError('unauthenticated', 'the token is from no issuer this Baton trusts');
   const keys = testKeys(env, env.TEST_GITLAB_JWKS) ?? remote(`${iss}/oauth/discovery/keys`);
   let claims: Record<string, unknown>;
@@ -121,30 +119,38 @@ export async function verifySyncCredential(req: Request, env: Config): Promise<S
   if (roles.length !== 1 || typeof project_path !== 'string' || typeof ref !== 'string' || typeof ref_type !== 'string') {
     throw new BatonError('forbidden', 'the GitLab token names no one role, project, ref and ref type');
   }
-  return { kind: 'gitlab', issuer: iss, project_path, ref, ref_type, role: roles[0] };
+  return { kind: 'gitlab-ci', issuer: iss, project_path, ref, ref_type, role: roles[0] };
 }
 
-/**
- * The owner principal (R-BTN-16): the Access JWT in `Cf-Access-Jwt-Assertion`, verified
- * against the team's certs with the application's `aud`, for an email in OWNER_EMAILS.
- * Returns that email. No deployment configures Access (R3-1208's restatement, 2026-10-20), so
- * the settings may be absent — an assertion arriving at such an instance is refused here,
- * never an internal error, until B-46 removes this read outright.
- */
-export async function verifyOwner(req: Request, env: Config): Promise<string> {
-  const token = req.headers.get('Cf-Access-Jwt-Assertion') ?? '';
-  if (!token) throw new BatonError('unauthenticated', 'Cloudflare Access is required');
+type AccessVerification = { email: string } | { reason: 'not-configured' | 'no-assertion' | 'unverified' };
+
+/** R-BTN-155: verify the application's assertion, without assigning a role to the email. */
+export async function verifyAccess(req: Request, env: Config): Promise<AccessVerification> {
   const team = env.ACCESS_TEAM_DOMAIN;
-  const owners = (env.OWNER_EMAILS ?? '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
-  if (!team || !env.ACCESS_AUD || !owners.length) throw new BatonError('forbidden', 'Access is not configured');
-  const keys = testKeys(env, env.TEST_ACCESS_JWKS) ?? remote(`https://${team}/cdn-cgi/access/certs`);
-  let claims: Record<string, unknown>;
+  if (!team || !env.ACCESS_AUD) return { reason: 'not-configured' };
+  const token = req.headers.get('Cf-Access-Jwt-Assertion');
+  if (token === null) return { reason: 'no-assertion' };
+  if (token === '') return { reason: 'unverified' };
   try {
-    ({ payload: claims } = await jwtVerify(token, keys, { issuer: `https://${team}`, audience: env.ACCESS_AUD }));
+    const keys = testKeys(env, env.TEST_ACCESS_JWKS) ?? remote(`https://${team}/cdn-cgi/access/certs`);
+    const { payload } = await jwtVerify(token, keys, { issuer: `https://${team}`, audience: env.ACCESS_AUD, requiredClaims: ['exp'] });
+    const email = accessEmail(payload.email);
+    return email ? { email } : { reason: 'unverified' };
   } catch (e) {
-    throw verifyFailure(e, 'Access');
+    const failure = verifyFailure(e, 'Access');
+    if (failure.code === 'unauthenticated') return { reason: 'unverified' };
+    throw failure;
   }
-  const email = typeof claims.email === 'string' ? claims.email.toLowerCase() : '';
+}
+
+/** The legacy Access-only dashboard principal (R-BTN-16), allowed by OWNER_EMAILS only
+ *  when no administrator key is configured. Access sign-in does not use that allowlist. */
+export async function verifyOwner(req: Request, env: Config): Promise<string> {
+  const owners = (env.OWNER_EMAILS ?? '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
+  if (!env.ACCESS_TEAM_DOMAIN || !env.ACCESS_AUD || !owners.length) throw new BatonError('forbidden', 'Access is not configured');
+  const access = await verifyAccess(req, env);
+  if ('reason' in access) throw new BatonError('unauthenticated', 'the Access token did not verify for an email');
+  const { email } = access;
   if (!owners.includes(email)) throw new BatonError('forbidden', 'not an owner');
   return email;
 }
@@ -199,6 +205,22 @@ export function parseAdminKeys(text: string): string[] {
   return text.split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));
 }
 
+export const sshPublicLine = (key: SshKey, text: string) => `${key.type} ${text.trim().split(/\s+/)[1]}`;
+
+/** The deployment's valid administrator key lines by fingerprint (R-BTN-57). */
+export async function adminFingerprints(lines: string[]): Promise<Map<string, string>> {
+  const keys = new Map<string, string>();
+  for (const line of lines) {
+    const api = parseApiKeyLine(line);
+    if (api) keys.set(api.fingerprint, api.line);
+    else {
+      const ssh = await parseSshKey(line).catch(() => null);
+      if (ssh) keys.set(ssh.fingerprint, sshPublicLine(ssh, line));
+    }
+  }
+  return keys;
+}
+
 // ── signed requests (§10.1 R-BTN-13 as amended; R3-1239) ──────────────────────────────────
 // A machine's identity is an SSH key. Every call it makes carries an RFC 9421 signature whose
 // value is an SSHSIG (OpenSSH PROTOCOL.sshsig) in the `baton-request` namespace, so ssh-agent
@@ -223,7 +245,6 @@ export const MAX_SIGNED_BODY = 1 << 20;
 const LABEL_AND_PARAMS = /^([a-z][a-z0-9_-]{0,31})=(\("@method" "@authority" "@path" "@query" "content-digest"\)((?:;[a-z]+=(?:"[\x20\x21\x23-\x5b\x5d-\x7e]*"|[0-9]{1,15})){4}))$/;
 const PARAM = /;([a-z]+)=(?:"([\x20\x21\x23-\x5b\x5d-\x7e]*)"|([0-9]{1,15}))/g;
 const NONCE = /^[A-Za-z0-9+/_=-]{22,64}$/;
-export const KEY_FINGERPRINT = /^SHA256:[A-Za-z0-9+/]{43}$/;
 
 /** An API key (R-BTN-159): `bak_<id>_<secret>`, 64 random bits of id and 256 of secret, hex —
  *  an administrator's, an owner's or a runner's, beside SSH keys at the holder's choice. Its
@@ -231,7 +252,6 @@ export const KEY_FINGERPRINT = /^SHA256:[A-Za-z0-9+/]{43}$/;
  *  `bak_<id> sha256:<SHA-256 of the whole key>`, with an optional comment; its fingerprint is
  *  `bak_<id>`. A sync, probe or courier key stays an SSH key: no API key is accepted there. */
 export const API_KEY = /^bak_[0-9a-f]{16}_[0-9a-f]{64}$/;
-export const API_KEY_FINGERPRINT = /^bak_[0-9a-f]{16}$/;
 const API_KEY_LINE = /^(bak_[0-9a-f]{16}) sha256:([0-9a-f]{64})(?: [\x20-\x7e]{0,200})?$/;
 
 /** An API key's public line, or null when `line` is not one. */

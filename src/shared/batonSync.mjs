@@ -1,9 +1,7 @@
 // batonSync.mjs — the board sync's decisions (BATON_SPEC §7.1, R3-1207), pure.
 //
-// `scripts/baton-sync.mjs` runs them for real (git, factory-state, GitHub OIDC, fetch); the
-// Baton repository vendors this module (R-BTN-37) so its S-BTN-13 scenario drives the same
-// code against the real Worker. Every effect is an injected function, so the module imports
-// nothing.
+// Consumers vendor this source (R-BTN-37); S-BTN-13 drives it against the real host.
+// Every effect is an injected function, so the module imports nothing.
 
 /**
  * §7.1 step 3: what a run that found Baton at `head` does with `next` (the current

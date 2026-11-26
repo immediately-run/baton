@@ -20,6 +20,7 @@
 // (`RequestRing`, R-BTN-87 — in memory, emptied by a restart), the counts the envelope's own
 // (`Capacity.counts`), and what no store holds — a session's last use and client address, the
 // store's size in bytes, a probe's added time — is left out and named in `not_built`.
+import { keysNotice } from '../views';
 import { sha256Hex } from '../runnerApi';
 import type { ReadCtx, ReadRoute } from './kit';
 import type { Row } from '../ports';
@@ -105,7 +106,7 @@ function capacities(cx: ReadCtx, capability: string | undefined) {
 }
 
 /** `admin.repo.list`: `BatonCore.adminView`'s rows — `stateView()`'s repository rows — each
- *  with the registry's `tiers`, `sync_keys`, `ci_identity` and `retired_at`; with `?retired=1`
+ *  with the registry's `sync_keys`, `ci_identity` and `retired_at`; with `?retired=1`
  *  the retired rows too (R-BTN-47), which have no head and no courses in force. */
 function registry(cx: ReadCtx, withRetired: boolean) {
   const keys = new Map<string, { fingerprint: string; role: string }[]>();
@@ -114,7 +115,7 @@ function registry(cx: ReadCtx, withRetired: boolean) {
   }
   const extras = (id: string) => {
     const r = cx.core.registry.get(id);
-    return { tiers: r?.tiers ?? [], sync_keys: keys.get(id) ?? [], ci_identity: r?.ci_identity ?? null, retired_at: r?.retired_at ?? null };
+    return { sync_keys: keys.get(id) ?? [], ci_identity: r?.ci_identity ?? null, retired_at: r?.retired_at ?? null };
   };
   const live = cx.core.adminView().repositories.map((row) => ({ ...row, ...extras(row.id) }));
   const retired = !withRetired ? [] : cx.sql<{ id: string }>('SELECT id FROM repositories WHERE retired_at IS NOT NULL ORDER BY id').flatMap(({ id }) => {
@@ -145,7 +146,7 @@ function tenant(cx: ReadCtx) {
     frozen_at: cx.core.ownerState.frozenAt(),
     sealed_at: cx.core.ownerState.sealedAt(),
     needs_you: {
-      keys: cx.core.keysNotice(),
+      keys: keysNotice(cx.core),
       ...cx.core.capacity.needsYou(figures),
       instances_unknown: cx.core.blocks.needsYou(now).instances_unknown,
       stale_clients: cx.core.runners.staleClients(cx.core.runners.runnersView(now), cx.core.instance.recommendedClient()),
@@ -167,11 +168,16 @@ async function sessions(cx: ReadCtx, own: string | null) {
   const now = cx.now();
   const admins = await cx.core.admin.adminFingerprints();
   const mine = own == null ? null : await sha256Hex(own);
-  const live = cx.sql<{ id_hash: string; admin_key: string; created_at: number; expires_at: number }>(
-    'SELECT id_hash, admin_key, created_at, expires_at FROM dashboard_sessions WHERE revoked_at IS NULL AND expires_at > ? ORDER BY created_at DESC, id_hash LIMIT ?', now, SESSIONS_MAX)
-    .filter((s) => admins.has(s.admin_key));
+  const access = await cx.core.admin.accessFingerprints();
+  const live = cx.sql<{ id_hash: string; admin_key: string; access_email_hash: string | null; created_at: number; expires_at: number }>(
+    `SELECT id_hash, admin_key, access_email_hash, created_at, expires_at FROM dashboard_sessions
+     WHERE revoked_at IS NULL AND expires_at > ?
+       AND admin_key IN (SELECT value FROM json_each(?))
+       AND (access_email_hash IS NULL OR (access_email_hash, admin_key) IN (SELECT key, value FROM json_each(?)))
+     ORDER BY created_at DESC, id_hash LIMIT ?`,
+    now, JSON.stringify([...admins.keys()]), JSON.stringify(Object.fromEntries(access)), SESSIONS_MAX);
   return {
-    sessions: live.map((s) => ({ role: 'administrator' as const, key_fingerprint: s.admin_key, created_at: s.created_at, expires_at: s.expires_at, current: mine != null && s.id_hash === mine })),
+    sessions: live.map((s) => ({ role: 'administrator' as const, key_fingerprint: s.admin_key, via: s.access_email_hash === null ? 'link' : 'access', created_at: s.created_at, expires_at: s.expires_at, current: mine != null && s.id_hash === mine })),
     // What the ticket lists and no store holds: a session's last use and its client's address.
     not_built: { last_seen_at: 'B-76', client_addr: 'B-76' },
     server_time: now,

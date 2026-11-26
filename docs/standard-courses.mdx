@@ -18,7 +18,7 @@ rely on it.
 
 | course | what it does | legs | where it ends |
 |---|---|---|---|
-| `create-pr` | builds a ticket in a PR, gates every review round behind a deterministic test run, reviews it in up to three rounds, fixes, hands the third round's blockers to the owner, merges | implement, run-tests, review, fix, adjudicate, merge, and the person leg confirm | `merged`, `confirmed` |
+| `create-pr` | builds a ticket in a PR, gates every review round behind a deterministic test run, reviews it in up to three rounds, fixes, hands the third round's blockers to the owner, merges | implement, run-tests, review, fix, adjudicate, merge, the person leg confirm, and archive | `merged`, `archived` |
 | `review-pr` | reviews a PR someone else opened, in rounds, and concludes with a summary | review, conclude | `approved` or `concluded` |
 | `bug-report` | traces a reported bug to its cause and the artifact that seeded it, dedupes it by cause, files the fix ticket or folds the report into the one that covers it, weighs prevention | trace, origin, dedupe, file or fold, prevent | `closed` |
 | `draft-ticket` | researches, drafts and files a ticket that prescribes its architecture, tests and requirements | research, draft, check | `filed` |
@@ -77,6 +77,13 @@ runs nothing and leaves no marker: it suspends with `review` next, and the sync 
 from that CI. Only a ticket with several PRs at home, which the gate cannot choose between,
 waits on the owner as `run-tests-unreachable`, whose `skip` waives the gate for it.
 
+**Review may run under the credential that wrote the change.** `review` names nothing in
+`no_chain_from` ([R-BTN-106](../spec/BATON_SPEC/08-runners.md#sec-8-3)): each leg runs in its own
+sandbox, isolated from the others, so a different credential adds no independence, and a
+deployment with one runner must still be able to review (the owner, 2026-11-25; B-30 had set
+`implement` and `fix` there). The review instructions require a different model when the runner
+offers one.
+
 ## A ticket already delivered
 
 An `implement` agent that finds the whole ticket already on the default branch opens no PR and
@@ -86,10 +93,22 @@ runner-main.test.ts 47 passed, typecheck clean`. The stub fetches the default br
 every named commit is on it; one that is not refuses the answer and fails the leg. Otherwise the
 leg reaches `delivered` — an outcome, not a failed attempt — with the commit as the end's
 evidence and the line as its detail, shown on the ticket's history. There the person leg
-`confirm` waits, under Needs you: `baton decision answer <repository>:<ticket> confirmed` closes
-it at the end station `confirmed`; `filed` sends it back to `implement`. The agent's word alone
-never closes a ticket. The ticket's file still says what it said; `baton tickets done <ticket>`
-archives it as for any ticket closed by hand.
+`confirm` waits for a direct answer from the owner under Needs you; an answer in git does not
+count. `baton decision answer <repository>:<ticket> confirmed` queues the deterministic `archive`
+leg; `filed` sends it back to `implement` without writing to git and another delivery opens a
+fresh question. `archive` runs the pinned `dibber done` (the host's `BATON_DIBBER`, else the pin) to
+mark the ticket `done` in place, then `git mv`s it to `archive/` — Dibber has no move verb, and a
+move writes no ticket content — in one commit the leg pushes itself. Dibber finds a ticket by its
+canonical name (`<id>.md` or `<id>.mdx`), so a file named otherwise is refused unwritten; relative
+links in the moved file are left as written. The commit names the
+latest delivery's commits, and the next sync observes the closure without another person step.
+On upgrade, a legacy git confirmation reopens the owner's question rather than queuing archive.
+If a legacy end truncated its commit list, the archive lists only the complete recorded commit
+ids and explicitly notes that the evidence is incomplete.
+Upgrade Baton before posting the new course, and use a runner that declares
+`runner:claim-evidence` for the archive leg. The agent's word
+alone never closes a ticket. If the commit list cannot fit in the end record, the delivered
+answer is refused rather than silently dropping commit ids.
 
 ## Work done outside Baton
 
@@ -378,16 +397,47 @@ Each course `init` scaffolds names its source in `.baton/baton.json`, in immedia
 form: provider, owner, repository, commit, then the course.
 
 ```
-"source": "github/immediately-run/baton/<commit>/create-pr"
+"source": "github/immediately-run/baton/<commit>/standard-create-pr"
 ```
 
-The commit is the CLI's own, the one that wrote the files, so the name always means one graph.
-The sync holds the course to it: if `.baton/courses/create-pr/course.json` differs from that
-commit's, nothing is posted until `npx baton repo init --course create-pr --force` restores it.
-Upgrading is re-running `init` with a newer CLI: it moves the workflow's pin and every course's
-source together, rewriting the course files and leg scripts and keeping your instructions and
-overrides. For now a source names the CLI's own repository; a course from another repository is
-refused as not supported yet.
+The default pin names the CLI's commit, so the name always means one graph. Sync and the runner
+load the course from its source, not from a home copy. Re-running `init` with a newer CLI moves
+the workflow and pinned standard sources without overwriting instructions or overrides.
+
+During development a source may name a branch instead of a commit:
+`baton repo init --course create-pr --source-branch main` writes
+`github/immediately-run/baton/main/standard-create-pr`, and a hand-written entry may name a branch
+of any repository. Each sync uses the committed selection to resolve the branch anew and loads
+`.baton/courses/<course>/` at that exact commit; the Sync read shows the branch and commit used.
+Claims keep their original resolved commit and fail closed if it is no longer reachable from the
+branch. If the course's graph or required facts change, advance the home commit so Baton can
+accept the new registry.
+
+There is no trust model for a branch source: no default-branch ancestry is checked, and the
+course runs whatever anyone who can push to that branch puts there. So every reader says so —
+`init`, `baton course show`, each sync and each claim:
+
+```
+baton: warning: course create-pr follows branch main of immediately-run/baton (resolved to 1a2b3c4d5e): unpinned, no trust check — for development only; pin a commit for production
+```
+
+The sync workflow turns the line into an annotation, and the Sync read carries the same warning
+beside the branch and commit. Branch fetches work with public sources by default; a private
+source needs separate Git read access configured outside the checkout. The sync's forge API token
+and the CLI checkout's local credentials are not reused. Pin a commit for production, and always
+for a protected home.
+
+Run `baton repo init --check` to find what the sync would refuse before it does. A sourced
+course's home directory holds only your overrides — `legs/<leg>.md` and `legs/<leg>.run.mjs`,
+which are yours and are not compared — so the check reports any other file there: a copy that
+differs from the course's source, an identical copy (`baton repo init --prune` removes those), a
+file that is no part of the source, and a link or non-regular file. Run it with the CLI built from
+the recorded source commit (or a source checkout with unmodified build inputs); a pin this CLI
+cannot check is reported, and upgrading the course with `baton repo init` moves the pin. In a
+checkout that commits standard course sources (`.baton/courses/standard-<id>/`, as Baton's own
+repository does), it also compares each source tree with what the checkout builds, reporting
+changed, missing and extra files. It does not rewrite or execute anything. Add `--course <id>` to
+check one course rather than all of them. Any finding, or a pin it cannot check, exits nonzero.
 
 ## Overriding a leg
 

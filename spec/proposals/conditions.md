@@ -12,17 +12,13 @@ writes are written through the ticket source (§12.8).
 
 ## 1. Raising: what joins R-BTN-160
 
-- A leg script raises with `ctx.raise(type, {subject, body?, restarts?, default?, wait_s?,
-  severity?})` from `@immediately-run/baton/leg` (R-BTN-133); a session's `baton leg raise` takes
-  `--wait <s>`.
-- `LegError(type, message)` raises an `interrupt` type. A `LegError` naming a `prerequisite` ends
+- `ctx.raise` takes `wait_s?`; a session's `baton leg raise` takes `--wait <s>`.
+- A `LegError` naming a `prerequisite` ends
   the claim `released:blocked` (R-BTN-126).
 - The standard courses declare `error.no-answer` (`interrupt`, `retryable: false`).
 - The raise's report carries `handler?`, and Baton answers a bound raise with the handler's id,
   `handler_id`; the runner then writes the handler ticket under that id. The report's `url` is
   sent only for an unbound `suspend`.
-- The runner checks that a raise's `restarts` are the declared ones or a subset of them (a standard
-  type with none declared takes the raise's own).
 - A settlement costs one write (§2's write budget).
 - Dispositions, bound and unbound:
 
@@ -336,7 +332,7 @@ a `suspend` would. Only the runner knows the binding, so it reports the raise wi
   a workflow is its own call (R-BTN-94). Each git write, check run or ticket-store write Baton
   intends is an **outbox entry**. A
   **deliverer** — a runner (R-BTN-3) whose host holds the credential the effect needs, on a grant
-  whose role the repository policy's `outbox` admits (R-BTN-188) — claims the entry under a lease,
+  that declares the class, admitted by R-BTN-188's `outbox.source` for a source entry — claims the entry under a lease,
   delivers it and reports it with a `std:effect@1` attestation (R-BTN-191); Baton then confirms it
   by reading the effect back, in a snapshot, wherever the ticket source's reader posts it.
   - **Entries.** Each entry is an `outbox` row: `id` (an integer per repository, increasing),
@@ -364,10 +360,9 @@ a `suspend` would. Only the runner knows the binding, so it reports the raise wi
     §13), and Baton offers it the entries of those classes on the repositories its grant covers.
     A deliverer is a signed machine key: an API-key runner never delivers, as it never syncs
     (R-BTN-159).
-    - **Who may deliver** is the repository policy's `outbox` section (R-BTN-188), one entry per
-      class, `{deliverers}` naming the grant roles admitted: `runner` (any accepted grant) or
-      `trusted-runner` (R-BTN-182; never a grant marked `checker`, R-BTN-180). Baton applies it at
-      each claim, so a change binds the next
+    - **Who may deliver** a `git` or `forge-check` entry is any runner with an accepted grant
+      that declares the class; a `source` entry, only where the policy's `outbox.source` admits
+      `runner` (R-BTN-188). Baton applies the policy at each claim, so a change binds the next
       claim and never a lease already held, and refuses a claim from a grant the policy does not
       admit, `forbidden` with the unmet knob.
     - The credential the effect needs lives only on the deliverer's host, never in Baton: push
@@ -379,9 +374,9 @@ a `suspend` would. Only the runner knows the binding, so it reports the raise wi
       (R-BTN-200).
     - **Woken, not polling.** A deliverer's doorbell socket (R-BTN-91) is rung `outbox` when an
       entry of a class it delivers is queued on a repository it serves; it then claims at once.
-    - Admitting `runner` for `forge-check` lets any granted runner withhold a check. It still
+    - Any granted runner delivering `forge-check` can withhold a check. It still
       cannot post one Baton did not issue unseen (R-BTN-115).
-    - **A trusted-runner deliverer runs no repository code.** It never loads the source's code:
+    - **A `git` deliverer runs no repository code.** It never loads the source's code:
       it writes from the CLI's own markdown-source templates, so it delivers no source entry,
       which only the source's own code can write. Every outbox write of a custom source
       (`.baton/tickets.mjs`, an ejected markdown source included) is a source entry, waiting for
@@ -552,7 +547,7 @@ a `suspend` would. Only the runner knows the binding, so it reports the raise wi
       and, on the markdown source, the version required to be the blob at the ticket's path at
       `snapshot_sha`. It refuses, with these reasons:
       - `off-branch`: `snapshot_sha` is not on the default branch (R-BTN-143);
-      - `closed`: the version is closed or archived, or its tier is above the runner's ceiling;
+      - `closed`: the version is closed or archived;
       - `bounds-changed`: its `repos`, `course` or `requires` differ from the claim's, since they
         bound the claim's scope, course and runner (§12.9, R-BTN-121);
       - `moved`: a current source holds a newer version, or a markdown version is not the blob at

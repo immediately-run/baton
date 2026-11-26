@@ -57,7 +57,6 @@ function Head({ t, repository }: { t: TicketShow; repository: string }) {
       <KeyValues rows={[
         ['State', <><StateMark state={t.state} />{t.reasons?.length ? <span className="mut"> also {t.reasons.map((r, i) => <span key={r}>{i ? ', ' : ''}<Text value={r} /></span>)}</span> : null}</>],
         ['Course', <Text mono value={t.course ?? t.course_id ?? '—'} />],
-        ['Tier', t.tier != null ? <Text value={t.tier} /> : dash],
         ['Tags', <Chips names={t.tags ?? []} empty="none" />],
         ['Requires', <Chips names={t.requires ?? []} unmet={t.requires_unmet} empty="none" />],
         ['Parent', t.parent ? <TicketLink id={t.parent} repository={repository} /> : dash],

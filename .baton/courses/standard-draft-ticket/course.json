@@ -1,0 +1,44 @@
+{
+  "start": "requested",
+  "start_leg": "research",
+  "end": [
+    "filed"
+  ],
+  "stations": {
+    "requested": {
+      "label": "Requested"
+    },
+    "researched": {
+      "label": "Researched"
+    },
+    "drafted": {
+      "label": "Drafted"
+    },
+    "filed": {
+      "label": "Filed"
+    }
+  },
+  "legs": {
+    "research": {
+      "from": [
+        "requested"
+      ],
+      "to": "researched",
+      "label": "Read the code and the sources"
+    },
+    "draft": {
+      "from": [
+        "researched"
+      ],
+      "to": "drafted",
+      "label": "Write the ticket"
+    },
+    "check": {
+      "from": [
+        "drafted"
+      ],
+      "to": "filed",
+      "label": "Check it, split it, file it"
+    }
+  }
+}

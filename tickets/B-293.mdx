@@ -15,7 +15,8 @@ topics:
   - baton
   - security
 owns: {}
-prs: []
+prs:
+  - https://github.com/immediately-run/baton/pull/337
 depends_on: []
 ---
 
@@ -30,28 +31,28 @@ the code disagree*).
 
 | In the code | In §12.8 |
 |---|---|
-| `approvers.trust` | `approvers.roles` |
-| `grants.default_trust`, `grants.one_per_domain`, `grants.trusted_domain` | no knob: a grant has a role, a domain and the checker mark (R-BTN-180) |
-| `refs.baton`, `refs.legs` | `refs.default_branch`, `refs.tags`, `refs.other` only |
-| `courier` in `REF_WRITERS` and in an outbox route's `deliverers` | writers `runner`, `trusted-runner`, `mirror`, `human`; deliverers `runner`, `trusted-runner` |
-| an outbox route's `trust` and `min_release` | a route is its `deliverers` alone |
+| `approvers.trust` | ~~`approvers.roles`~~ no knob (retired, B-189) |
+| `grants.default_trust`, `grants.one_per_domain`, `grants.trusted_domain` | no knob ~~: a grant has a role, a domain and the checker mark (R-BTN-180)~~ |
+| `refs.baton`, `refs.legs` | ~~`refs.default_branch`, `refs.tags`, `refs.other` only~~ no `refs.*` knob (retired, B-189) |
+| `courier` in `REF_WRITERS` and in an outbox route's `deliverers` | ~~writers `runner`, `trusted-runner`, `mirror`, `human`; deliverers `runner`, `trusted-runner`~~ no ref writers and no `outbox.git` or `outbox.forge-check` route; `outbox.source` is `[runner]` or `[]` (B-189) |
+| an outbox route's `trust` and `min_release` | ~~a route is its `deliverers` alone~~ only `outbox.source` remains (B-189) |
 | `merge.reviews.distinct` | `merge.reviews` is its `count` alone |
 | `authorship`, `leg_state`, `inputs.answers` | absent |
 | preset `protected-signed` | preset `protected-hardware` |
 | floors as rows of `policy_floors` (`name`, `guarantees`, `remove_by`), written by `POST …/policy/floors` | `floors`, a knob of the document listing guarantees by name |
 | `policy_pins` and `PolicyPin` (a runner's pinned hash and floors hash) | "a trusted runner pins nothing" |
-| absent | `outbox.source`, `repos.unlisted`, `approvers.roles`, the `floors` knob |
-| nine guarantee names (`GUARANTEE_NAMES`, `src/core/policy.ts:465-468`): the spec's six and `signed-authorship`, `trusted-domain-separate`, `human-gates-hardware` | six guarantees in R-BTN-189's table |
+| absent | `outbox.source`, `repos.unlisted`, ~~`approvers.roles`,~~ the `floors` knob |
+| nine guarantee names (`GUARANTEE_NAMES`, `src/core/policy.ts:465-468`): the spec's six and `signed-authorship`, `trusted-domain-separate`, `human-gates-hardware` | ~~six~~ five guarantees in R-BTN-189's table (`no-runner-lands` retired, B-189) |
 | the policy read is signed: Ed25519 over `baton-policy@1` and the canonical fields, with `kid`, `signature`, `guarantees_hash`, `floors_hash` and `valid_until` (`src/core/baton.ts:866-893`) | "Baton signs no outbox entry and no policy read and publishes no signing key" (§12.8's opening); §14's row lists none of those fields |
 | a preset apply stores the preset's whole document (`policy.ts:751-754`: the document is `policyForPreset`, a clone of `PRESETS[name]`) | *Applying a preset* writes only the knobs the preset has a value for, never `floors` or `human_identity`, and keeps the document's `service:` entries in `attestations` |
 | an owner key's answer to a person leg is refused where `inputs.answers` is `attestation` (`baton.ts:774-778`) | R-BTN-181 and R-BTN-191 put that refusal on the `attestations` entry for `std:decision@1`; there is no `inputs.answers` |
-| no route sets a grant's role, domain or checker mark; the columns are `trust_level`, `trust_domain`, `role`, `trust_set_by` | R-BTN-180's role, domain and mark (marked proposed in the fix round; B-147 builds them) |
+| no route sets a grant's role, domain or checker mark; the columns are `trust_level`, `trust_domain`, `role`, `trust_set_by` | ~~R-BTN-180's role, domain and mark (marked proposed in the fix round; B-147 builds them)~~ none: B-189 drops the columns (B-147 superseded) |
 
 The last five rows were added on 2026-11-20 from the fix round of PR #299, each read in the
 code that day.
 
 **Spec:** [BATON_SPEC §12.8](../spec/BATON_SPEC/12-security.md#sec-12-8) ([R-BTN-188](../spec/BATON_SPEC/12-security.md#sec-12-8), [R-BTN-189](../spec/BATON_SPEC/12-security.md#sec-12-8), [R-BTN-180](../spec/BATON_SPEC/12-security.md#sec-12-8), [R-BTN-185](../spec/BATON_SPEC/12-security.md#sec-12-8), [R-BTN-186](../spec/BATON_SPEC/12-security.md#sec-12-8)), [§7.8](../spec/BATON_SPEC/07-conditions.md#sec-7-8)
-([R-BTN-171](../spec/BATON_SPEC/07-conditions.md#sec-7-8)), [§3.4](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-4) ([R-BTN-140](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-4)), [§13](../spec/BATON_SPEC/13-data-model.md#sec-13), [§14](../spec/BATON_SPEC/14-api.md#sec-14), [§15](../spec/BATON_SPEC/15-verification.md#sec-15) ([S-BTN-189](../spec/BATON_SPEC/15-verification.md#scenarios), [S-BTN-190](../spec/BATON_SPEC/15-verification.md#scenarios), [S-BTN-192](../spec/BATON_SPEC/15-verification.md#scenarios)).
+([R-BTN-171](../spec/BATON_SPEC/07-conditions.md#sec-7-8)), [§3.4](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-4) ([R-BTN-140](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-4)), [§13](../spec/BATON_SPEC/13-data-model.md#sec-13), [§14](../spec/BATON_SPEC/14-api.md#sec-14), [§15](../spec/BATON_SPEC/15-verification.md#sec-15) ([S-BTN-197](../spec/BATON_SPEC/15-verification.md#scenarios), [S-BTN-190](../spec/BATON_SPEC/15-verification.md#scenarios), [S-BTN-192](../spec/BATON_SPEC/15-verification.md#scenarios)).
 
 ## Plan
 
@@ -59,9 +60,9 @@ code that day.
    moves to the spec": the spec was just rewritten to what the owner ruled, and the code is
    older. For each row the PR either confirms that, or amends §12.8 to keep the code's knob.
    The rows where the code may be right and the owner decides:
-   - **floors.** Named floors with `remove_by` let a floor be removed by a `human` where
-     `approvers.policy` is `owner`. §12.8's one list cannot say that. Keep `remove_by`, or drop
-     it and state that shortening `floors` needs `approvers.policy` as it stood.
+   - **floors.** The old removal path checks both `remove_by` and `approvers.policy`.
+     Shortening `floors` needs the prior `approvers.policy`; R-BTN-189 refuses conversion
+     if that gate cannot preserve the old restriction across later versions.
    - **pins.** `policy_pins` records what a runner last saw; R-BTN-188 says a runner pins
      nothing. Remove the table and the pin check, or state what the pin is for.
    - **`leg_state`** (R-BTN-190, where leg state lives) and **`refs.legs`**, which the `branch`
@@ -71,12 +72,11 @@ code that day.
    - **the guarantees.** `trusted-domain-separate` and `human-gates-hardware` are in the code
      and not in R-BTN-189's table. A floor may name either today (`POST …/policy/floors`
      validates against `GUARANTEE_NAMES`), so removing a name needs the stored floors read
-     first: a floor naming a removed guarantee stops the migration, as the invariant below
-     says for a broken one.
+     first. Use R-BTN-189's successor mapping and refusal rules; a floor without a successor
+     stops the migration.
    - **the signed read.** B-160 item 3 removes the signature, the hashes and `policy_pins`
-     on the owner's ruling of 2026-11-01. This ticket does not build that removal; it leaves
-     the read's shape to B-160 and notes there that §14's row is wrong until it lands
-     (B-297 lists the row).
+     on the owner's ruling of 2026-11-01. [B-160](archive/B-160.mdx) has landed; do not
+     reintroduce the removed fields or add the migration's effective hash to claims.
    - **preset apply.** Decide whether an apply replaces the document, as the code does, or
      merges, as the rule says. The rule's version is the safer one: a whole-document apply
      drops a `service:` writer and any knob the owner set outside the preset. Recommended:
@@ -92,18 +92,20 @@ code that day.
    `protected-signed` with one line naming the new word. Update `cli/baton.mjs`'s `KNOBS`.
 4. **Stored versions.** `repository_policies` is an append-only log of documents with their
    hashes. A new migration (number from `node cli/baton.mjs tickets next migration --for
-   B-293`) does not rewrite a stored version. The reader maps an old document to the new shape
-   (a renamed knob renamed, a removed knob dropped, a `courier` writer read as `runner` only if
-   the spec PR says so, otherwise dropped), and each repository's next policy write stores the
-   new shape. The current version's hash, which a claim response carries, is recomputed over
-   the new shape in one place and the change is logged as an `admin` event per repository, so a
-   consumer comparing hashes sees why it moved. `policy_floors` rows become the `floors` knob
-   or stay, by step 1.
-5. **Tests.** S-BTN-189, S-BTN-190 and S-BTN-192 are rewritten to the ruled names. New cases:
-   every preset's document validates and yields the guarantees R-BTN-189's table says; a stored
-   old-shape version reads back in the new shape with the same guarantees held or broken as
-   before the migration (a table-driven test over each preset and one hand-made document per
-   removed knob); an old knob name on `PUT …/policy` is `invalid-params` naming the knob.
+   B-293`) does not rewrite a stored version. Project only the current legacy version as in
+   R-BTN-188, dropping `courier` rather than changing it to `runner`. The next policy write stores the
+   new shape. The policy read's effective hash is recomputed over the new shape in one place
+   and the change is logged as an `admin` event per repository. Stored hashes and links remain
+   unchanged. Keep live `policy_floors` backing rows until the new document is materialized;
+   preserve them through export and import as required by R-BTN-88.
+5. **Tests.** S-BTN-197 (the policy scenario, formerly numbered S-BTN-189), S-BTN-190 and
+   S-BTN-192 are rewritten to the ruled names. New cases:
+   every preset's document validates and yields the guarantees R-BTN-189's table says;
+   exercise the R-BTN-188 and R-BTN-189 migration checks in table-driven fixtures (each old
+   preset and a document per removed knob), asserting either preservation of held comparable
+   guarantees and the required audit or atomic refusal with the expected reason. Check
+   historical reads against the stored history, not against the projection. An old knob name
+   on `PUT …/policy` is `invalid-params` naming the knob.
 
 ### Trust
 
@@ -113,10 +115,13 @@ list stood before the change (R-BTN-188), validated in `policy.ts` before any SQ
 the `outbox.source` knob, written the same way. The mapping of a stored version is Baton's own
 code, run on documents their approvers wrote; it may drop or rename, and must never widen: no
 mapped document admits a writer, a deliverer or an approver the stored one did not. The PR
-shows this with the table-driven test of step 5 and a property: for every stored version in a
-copy of the reference deployment's log, the set of held guarantees after mapping is a superset
-of the set before. The copy is read with an administrator's key the owner supplies; this
-ticket changes no key, grant, floor or approver list on any live repository.
+shows this with the table-driven test of step 5 and a dry run on an owner-supplied offline copy
+of the reference deployment's log and backing data. For each current legacy version, check no
+new authority, no loss of a held comparable guarantee, and all floor and approver checks;
+record report-only guarantee losses and any repository that blocks migration. Verify every
+stored version's original hash and chain links stay intact. An implement leg does
+not read a live deployment or use its administrator key. This ticket changes no key, grant,
+floor or approver list on any live repository.
 
 ### Invariants
 
@@ -129,8 +134,8 @@ ticket changes no key, grant, floor or approver list on any live repository.
   mapped.
 - BATON_SPEC [R-BTN-188](../spec/BATON_SPEC/12-security.md#sec-12-8), *No gate without a key to open it*: re-checked on the mapped lists
   (`listSatisfiable`), under the repository's `human_key` ([R-BTN-185](../spec/BATON_SPEC/12-security.md#sec-12-8)).
-- BATON_SPEC [R-BTN-180](../spec/BATON_SPEC/12-security.md#sec-12-8): a grant's role, domain and mark keep their meaning; removing the
-  `grants.*` knobs changes no stored grant.
+- ~~BATON_SPEC [R-BTN-180](../spec/BATON_SPEC/12-security.md#sec-12-8): a grant's role, domain and mark keep their meaning; removing the
+  `grants.*` knobs changes no stored grant.~~
 - Migrations are append-only; `repository_policies` stays append-only too.
 
 ## Status
@@ -138,3 +143,13 @@ ticket changes no key, grant, floor or approver list on any live repository.
 _filed 2026-11-20._ From the spec simplification review of 2026-11-19, *Where the spec and the
 code disagree* (PR #299). Related: B-264 (`repos.unlisted`), B-165 (constant knobs), B-147
 (grants' trust, written for the older `grants.*` shape), B-263, B-64, B-294 (break-glass).
+
+- 2026-11-22, spec-first hand-off: B-293 takes the policy-knob code half of B-165; its
+  other simplifications stay with B-165. B-160 already retired signed policy reads and pins.
+  The code and schema migration follow spec approval. The PR proposes R-BTN-189's explicit
+  comparison instead of comparing differently defined guarantees by name; no legacy floor
+  is silently waived.
+
+_(2026-11-24: B-189's spec PR (`spec/BATON_SPEC_HISTORY.md`, the entry of 2026-11-24) rules on these rows, on the owner's rulings of 2026-11-09 and 2026-11-24 (runners trusted, legs not): `approvers.trust`/`approvers.roles`, the `grants.*` knobs, every `refs.*` knob (`refs.baton` and `refs.legs` included), `courier` and the role-based outbox routes (`outbox.git`, `outbox.forge-check`), `inputs.board`, `merge.reviews.distinct`, the grants' role, domain and mark columns, and the guarantees `no-runner-lands` and `trusted-domain-separate` all retire; `paths.control`'s `trusted-runner` value becomes `approval`. The struck cells said otherwise. B-293's projection drops each retired knob, translating none (B-189 item 1). A stored floor naming `no-runner-lands` or `trusted-domain-separate` is dropped by a new version logged `admin` — the owner's ruling for those two names, not a migration stop; the no-successor stop applies to every other name (B-189 item 2). The ticket's PR, baton#337, is held by another session: only clauses are struck here, and the PR's spec half (its `approvers.roles` rename and the comparison of `no-runner-lands`) must rebase on B-189's.)_
+
+_(2026-11-24: rules re-read: R-BTN-180, R-BTN-188, R-BTN-189)_

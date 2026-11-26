@@ -8,7 +8,12 @@
 // frontmatter against the repository's own item schema, the machine fields' types, and the
 // presence of this leg's heading: trust nothing the agent touched, check everything the
 // machine reads (the owner's decision, 2026-10-22). Course code in the CLI, never core (§2b).
+import { outputLine, TICKET_OUTPUT_WITNESS } from './output-evidence';
+import { forgeClient } from './forges';
+import { fromRemote, targetOf, type RegisteredTargets } from './forges/targets';
 import { execFileSync } from 'node:child_process';
+import { GIT_NONINTERACTIVE_ENV } from '../client/git-env.mjs';
+import { git } from './git.mjs';
 import { rmSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
 import type { PostedStation } from '../core/board';
@@ -81,16 +86,6 @@ export const CLOSE_TIMEOUT_MS = 120_000;
  * took about 14½ (2 vCPUs), too close to the bound for a suite that only grows. */
 export const RUN_TESTS_TIMEOUT_MS = 1_800_000;
 
-/** B-94: git's environment for every call the close and the runner's own git make —
- * non-interactive by construction, so a credential prompt or an ssh host-key question can never
- * wait on a terminal the runner does not have: no terminal prompt from git itself, and ssh in
- * batch mode, failing rather than asking. One definition (B-94's review round 1): the runner
- * and the generated stubs import it from here. */
-export const GIT_NONINTERACTIVE_ENV: Record<string, string> = {
-  GIT_TERMINAL_PROMPT: '0',
-  GIT_SSH_COMMAND: 'ssh -o BatchMode=yes -o ConnectTimeout=20',
-};
-
 /** The real command runner every standard course's `close` uses; tests inject their own. B-94: it
  * is bounded — a command still running at its bound is killed with SIGKILL and its failure
  * thrown (Node reports it as a timeout error) — and never interactive. */
@@ -99,12 +94,21 @@ export const exec = (
   args: string[],
   cwd: string,
   opts: { env?: Record<string, string>; input?: string; timeoutMs?: number } = {},
+): string => execRaw(cmd, args, cwd, opts).trim();
+
+/** The same bound for snapshot reads and scripts that need untrimmed stdout. */
+export const execRaw = (
+  cmd: string,
+  args: string[],
+  cwd: string | undefined,
+  opts: { env?: Record<string, string>; input?: string; timeoutMs?: number; maxBuffer?: number } = {},
 ): string =>
-  execFileSync(cmd, args, {
+  cmd === 'git' ? git(null, args, { ...opts, cwd, timeoutMs: opts.timeoutMs ?? CLOSE_TIMEOUT_MS }) : execFileSync(cmd, args, {
     cwd, encoding: 'utf8', timeout: opts.timeoutMs ?? CLOSE_TIMEOUT_MS, killSignal: 'SIGKILL',
+    ...(opts.maxBuffer != null ? { maxBuffer: opts.maxBuffer } : {}),
     ...(opts.input != null ? { input: opts.input } : { stdio: ['ignore', 'pipe', 'pipe'] }),
     env: { ...process.env, ...GIT_NONINTERACTIVE_ENV, ...opts.env },
-  }).trim();
+  });
 
 /** The bare ticket id a close names: the sync reads ids as the repository's ticket files carry
  * them (`B-1`), while a claim's `ctx.ticket.id` is repository-qualified (`docs:B-1`, R-BTN-51). */
@@ -310,16 +314,20 @@ export function checkMachine(state: MachineState): string[] {
  * Returns the pushed commit's sha, the close's evidence. Every call is bounded
  * (`CLOSE_TIMEOUT_MS`), so a remote that stops answering fails the leg in seconds. */
 export async function closeTicket(
-  ctx: { checkout: string; ticket: { id: string; path?: string | null; home?: string | null }; leg: string; claim?: { nonce?: string }; default_branch?: string | null; heading?: boolean },
-  result: { reached?: string; next?: string | null },
+  ctx: RegisteredTargets & { checkout: string; ticket: { id: string; path?: string | null; home?: string | null }; leg: string; run_id?: string; claim?: { nonce?: string }; default_branch?: string | null; heading?: boolean },
+  result: { reached?: string; next?: string | null; outputs?: unknown },
   run: Exec = exec,
 ): Promise<string> {
   if (typeof result?.reached !== 'string' || result.reached === '') throw new Error(`the ${ctx.leg} leg returned no station reached`);
   if (ctx.ticket.path == null || ctx.ticket.path === '') throw new Error(`the ${ctx.leg} leg's ticket has no file path to write`);
   const id = bareTicketId(ctx.ticket);
+  const marker = outputLine(ctx, result.outputs);
   const state: MachineState = { station: result.reached, next_leg: result.next ?? null, claim: ctx.claim?.nonce ?? null };
   const branch = ticketsBranch(ctx.checkout, ctx.default_branch ?? null, run);
   const git = (args: string[], opts: { env?: Record<string, string>; input?: string } = {}): string => run('git', args, ctx.checkout, opts);
+  // R-BTN-82: the repository whose forge adapter witnesses the outputs — the registered home the
+  // claim named, or (an older claim naming none) the origin's public forge; plain git, none.
+  const witnessTo = marker ? (ctx.forge_home ? targetOf(ctx) : fromRemote(git(['remote', 'get-url', 'origin']))) : null;
   const ref = `origin/${branch}`;
   const index = tmpIndex(ctx.checkout, run);
   const env = { GIT_INDEX_FILE: index };
@@ -363,13 +371,18 @@ export async function closeTicket(
       git(['read-tree', parent], { env });
       git(['update-index', '--add', '--cacheinfo', `100644,${blob},${ctx.ticket.path}`], { env });
       const tree = git(['write-tree'], { env });
-      const commit = git(['commit-tree', tree, '-p', parent, '-m', `baton:close ${id} ${ctx.leg}`]);
+      const commit = git(['commit-tree', tree, '-p', parent, '-m', `baton:close ${id} ${ctx.leg}`, ...(marker ? ['-m', marker] : [])]);
       try {
         git(['push', 'origin', `${commit}:refs/heads/${branch}`]);
-        return commit;
       } catch (e) {
         if (!movedOnRemote(e) || tries >= PUSH_TRIES) throw e;
+        continue;
       }
+      // The forge authenticates the commenter. The comment only vouches for this SHA; outputs
+      // (possibly larger than a forge comment) stay in the unchanged commit message. A forge
+      // whose adapter reads no witness gets none.
+      if (witnessTo) await forgeClient(witnessTo, { run, checkout: ctx.checkout }).witness(commit, TICKET_OUTPUT_WITNESS);
+      return commit;
     }
   } finally {
     // The index and git's lock for it: a close killed at its timeout leaves the lock, and every

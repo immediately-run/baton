@@ -8,7 +8,7 @@
 // suspension is confirmed by the path the first snapshot observed after it places the ticket on,
 // never by ancestry, and the next claimant starts at git's station.
 import { describe, it, expect, inject, beforeEach } from 'vitest';
-import { advance, claimItem, claimRow, cutover, endClaim, Git, observe, payload, placed, register, rows, setClock, syncCall, tick } from '../helpers';
+import { advance, claimItem, claimRow, cutover, endClaim, evidenceFound, Git, observe, payload, placed, register, rows, setClock, syncCall, tick } from '../helpers';
 
 const board = inject('board');
 const sha = board.shas;
@@ -125,7 +125,8 @@ describe('S-BTN-36 (station half, R3-1232)', () => {
     await setClock(T0 + 11 * MIN);
     // The newer run: a refresh of docs' unchanged head, its station read from the PR.
     git.place('T-1', placed('fixed', [...reviewed, ['fix', 'fixed']], [['review', 'ready']]));
-    expect(await git.refresh()).toMatchObject({ status: 200, unchanged: true, confirmed: 1 });
+    // It carries the sync's word that the fix's commit is found (R-BTN-10) — what confirms the end.
+    expect(await git.refresh(evidenceFound(c.claim_id, 'a'.repeat(40)))).toMatchObject({ status: 200, confirmed: 1 });
     expect((await claimRow(c.claim_id)).confirmed_at).toBe(T0 + 11 * MIN);
     // The stalled run arrives after it, still at reviewed: refused whole, changing nothing.
     git.place('T-1', placed('reviewed', reviewed, [['fix', 'ready']]));

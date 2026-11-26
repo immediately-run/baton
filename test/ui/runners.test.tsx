@@ -1,11 +1,11 @@
 // runners.test.tsx — B-211: the runner screens on B-196's reads. The cards group by hostname
 // and order by state within a host; the claim block draws the lease bar; the newest status
-// report is text under its card; Stop sends `release` with no dialog and draws a `forbidden` as
+// report is text under its card; Stop confirms `release` and draws a `forbidden` as
 // text; an unlisted session link is text; the timeline's bars and nested segments match the
 // fixture, each a focusable group with a name, and the table lists the same rows; a hostile
 // label is text; `?since=` round-trips through the URL.
 import { afterEach, describe, expect, it } from 'vitest';
-import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { ACTIONS, actionsFor } from '../../src/core/actions';
 import { SCREENS } from '../../src/core/screens';
 import { RunnerScreen } from '../../src/dashboard/screens/runners/RunnerScreen';
@@ -26,7 +26,7 @@ const props = (id: string, params: Record<string, string>) => ({ screen: screenO
 
 const runner = (id: number, over: Partial<RunnerRow> = {}): RunnerRow => ({
   runner_id: id, hostname: 'host-a', session_name: `s-${id}`, alive: true, last_seen_at: NOW - MIN, last_activity_at: NOW - 5 * MIN, reaped_at: null,
-  harness: 'opencode', kind: 'vm', isolation: 'process', tier_ceilings: { docs: 'critical' },
+  harness: 'opencode', kind: 'vm', isolation: 'process',
   capabilities: [{ capability: 'cap-one', declared: 'cap-one' }, { capability: 'cap-two', declared: 'role-x' }], granted: ['cap-one'], tags: [],
   courses: [{ course: 'course-a', version: 3, min_runner_version: 3 }], lease_timeout_s: 900,
   credential: { kind: 'runner', granted: true, role: null, domain: null }, last_report: null, transcript_url: null,
@@ -87,8 +87,8 @@ describe('the Runners list (B-211 item 1)', () => {
     expect(cards[0].textContent).toContain('executor: not recorded (B-184)');
 
     // An unlisted session link is text, never a link.
-    expect(within(cards[1]).queryByRole('link', { name: /Open session/ })).toBeNull();
-    expect(cards[1].textContent).toContain('Open session');
+    expect(within(cards[1]).queryByRole('link', { name: /Open leg page/ })).toBeNull();
+    expect(cards[1].textContent).toContain('Open leg page');
     expect(cards[2].textContent).toContain('idle since');
     expect(cards[3].querySelector('.runner-reap')!.textContent).toMatch(/^lost its heartbeat; reaped at 2026-11-20 11:00 UTC; its claim on docs:T-9 was reaped$/);
     expect(cards[4].textContent).toContain('working on another repository');
@@ -96,19 +96,21 @@ describe('the Runners list (B-211 item 1)', () => {
 
     // Controls come from the registry: Stop only where a claim is held, none on a reaped runner.
     const names = (c: HTMLElement) => within(c).queryAllByRole('button').map((b) => b.textContent);
-    expect(names(cards[0])).toEqual(['Status', 'Wind down', 'Stop']);
+    expect(names(cards[0])).toEqual(['Status', 'Wind down', 'Stop…']);
     expect(names(cards[2])).toEqual(['Status', 'Wind down']);
     expect(names(cards[3])).toEqual([]);
   });
 
-  it('Stop sends release in one click, with no dialog, and draws a forbidden as text', async () => {
+  it('Stop confirms release and draws a forbidden as text', async () => {
     const { calls } = mockFetch({ '/v1/repositories/docs/runners': LIST, 'POST /v1/ui/messages': () => refuse('forbidden', `not this runner's ticket ${HOSTILE}`) });
     renderWithShell(<RunnersScreen {...props('repository/runners', { repository: 'docs' })} />, { actions, repos, now: NOW });
     await screen.findByText('4 alive of 5');
     const card = document.querySelector('.runner-card') as HTMLElement;
-    fireEvent.click(within(card).getByRole('button', { name: 'Stop' }));
+    fireEvent.click(within(card).getByRole('button', { name: 'Stop…' }));
+    expect(calls.some((c) => c.method === 'POST')).toBe(false);
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Stop' }));
     await waitFor(() => expect(calls.some((c) => c.method === 'POST')).toBe(true));
-    expect(calls.find((c) => c.method === 'POST')).toMatchObject({ path: '/v1/ui/messages', body: { to_runner_id: 3, kind: 'release', payload: { ticket_id: 'docs:T-1', reason: 'requested' } } });
+    expect(calls.find((c) => c.method === 'POST')).toMatchObject({ path: '/v1/ui/messages', body: { to_runner_id: 3, kind: 'release', confirm: true, payload: { ticket_id: 'docs:T-1', reason: 'requested' } } });
     expect(screen.queryByRole('dialog')).toBeNull();
     await waitFor(() => expect(card.querySelector('.control-refusal')?.textContent).toContain('forbidden'));
     expect(card.querySelector('.control-refusal')!.textContent).toContain(HOSTILE);
@@ -118,6 +120,31 @@ describe('the Runners list (B-211 item 1)', () => {
     fireEvent.click(within(card).getByRole('button', { name: 'Status' }));
     await waitFor(() => expect(calls.filter((c) => c.method === 'POST').length).toBe(2));
     expect(calls.filter((c) => c.method === 'POST')[1].body).toEqual({ to_runner_id: 3, kind: 'status_request' });
+  });
+
+  it('S-BTN-311: closes an open Stop confirmation when a refresh replaces the claim', async () => {
+    let fleet = LIST;
+    const { calls } = mockFetch({ '/v1/repositories/docs/runners': () => ({ body: fleet }), 'POST /v1/ui/messages': {} });
+    const { store } = renderWithShell(<RunnersScreen {...props('repository/runners', { repository: 'docs' })} />, { actions, repos, now: NOW });
+    await screen.findByText('4 alive of 5');
+    const controls = () => within(screen.getByRole('group', { name: 'Actions on runner 3' }));
+    fireEvent.click(controls().getByRole('button', { name: 'Stop…' }));
+    expect(within(screen.getByRole('dialog')).getByText('docs:T-1')).toBeDefined();
+
+    const next = claim({ claim_id: 9, ticket_id: 'docs:T-3' }) as NonNullable<RunnerRow['claim']>;
+    fleet = { ...LIST, runners: FLEET.map((r) => r.runner_id === 3 ? { ...r, claim: next, claims: [next] } : r) };
+    await act(() => store.refresh());
+    expect(screen.getByRole('link', { name: 'docs:T-3' })).toBeDefined();
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(calls.filter((c) => c.method === 'POST')).toEqual([]);
+
+    fireEvent.click(controls().getByRole('button', { name: 'Stop…' }));
+    expect(within(screen.getByRole('dialog')).getByText('docs:T-3')).toBeDefined();
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Stop' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(calls.filter((c) => c.method === 'POST')).toMatchObject([
+      { path: '/v1/ui/messages', body: { to_runner_id: 3, kind: 'release', confirm: true, payload: { ticket_id: 'docs:T-3' } } },
+    ]);
   });
 
   it('says so when no runner is granted, and draws the repository refusal', async () => {
@@ -197,14 +224,14 @@ describe('one runner’s page (B-211 item 2)', () => {
     expect(panel.textContent).toContain(HOSTILE);
     expect(segs[0].getAttribute('aria-pressed')).toBe('true');
     // The claim's session link passed `session_hosts`: a link, its host shown.
-    const link = within(panel).getByRole('link', { name: /Open session/ });
-    expect([link.getAttribute('href'), link.textContent]).toEqual(['https://claude.ai/code/session_1', 'Open session (claude.ai)']);
+    const link = within(panel).getByRole('link', { name: /Open leg page/ });
+    expect([link.getAttribute('href'), link.textContent]).toEqual(['https://claude.ai/code/session_1', 'Open leg page (claude.ai)']);
     expect(panel.textContent).toContain('digest, environment and instance are not recorded (B-184)');
     // The other claim's link is on no list: text.
     fireEvent.click(bars[1]);
     const second = screen.getByRole('region', { name: 'The chosen segment' });
-    expect(within(second).queryByRole('link', { name: /Open session/ })).toBeNull();
-    expect(second.textContent).toContain('Open session');
+    expect(within(second).queryByRole('link', { name: /Open leg page/ })).toBeNull();
+    expect(second.textContent).toContain('Open leg page');
     expect(second.textContent).toContain('/var/log/baton/r_01');
     expect(second.textContent).toContain('baton leg log docs:T-1 leg-one');
 

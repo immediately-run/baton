@@ -3,7 +3,7 @@ title: "B-299 — The runner rules §8.4 and §9 state and the reference runner 
 id: B-299
 project: baton
 status: available
-updated: 2026-11-20
+updated: 2026-11-23
 repos:
   - baton
 tags:
@@ -15,9 +15,12 @@ topics:
   - baton
   - security
 owns: {}
-prs: []
+prs:
+  - https://github.com/immediately-run/baton/pull/339
 depends_on: []
 ---
+
+**Owner ruling, 2026-11-23** (the owner: "Yes to both", on the ten rows proposed in #339). **Rows 1–4 and 6–10 are confirmed as proposed.** **Row 5 is confirmed with a condition:** B-299 adds the runner secret and the runner's credentials to the leg mask set through the existing secret-set inputs (`maskEnv`, the secret-name pattern, `secretValues`), and does not change the masker itself. `createLegMasker`, `literalSpans` and `maskLiterals` in `src/runner/mask.ts` belong to B-316 (after #354); separate tickets never share a write target. **Plan item 5 (the four builder tickets):** the separate hand-off is authorized. Each builder ticket keeps its own write target, and B-299's code phase touches none of theirs.
 
 **Brief:** the spec simplification of 2026-11-19 cut the spec to what is built, and its review
 found rules in §8 and §9 that the text already stated before the rewrite and that the reference
@@ -125,6 +128,12 @@ setting, a CI workflow or a deploy.
 - One home per statement: each "not built" line names the ticket and restates no design.
 
 ## Status
+
+_2026-11-22 — spec rulings proposed for owner confirmation._ B-299 retains the live ancestry
+check, runner credential stripping and masking classes 1–2 for its code phase. B-46 retains
+credential scoping, `BATON_RESUME`, class 3 and the off-branch condition; B-79 retains the fixed
+fence deadline and pending condition. B-9 retains Stop work and gains the CLI command. B-184
+should use the executor-owned stop mechanism and R-BTN-145's bound, not a prescribed ladder.
 
 _filed 2026-11-20._ From the adversarial review of PR #299 (the spec simplification of
 2026-11-19), findings A4-8 to A4-11 and the fix round's list for §8 and §9. Related: B-46

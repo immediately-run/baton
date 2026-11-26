@@ -12,8 +12,8 @@ describe('the course record at size', () => {
     const { store } = openStore(':memory:');
     for (const m of MIGRATIONS) store.script(m.sql);
     store.exec(`INSERT INTO credentials (id, hostname, allowed_capabilities) VALUES ('c', 'h', '[]')`);
-    store.exec(`INSERT INTO runners (id, credential_id, hostname, session_name, harness, kind, secret_hash, tier_ceiling, lease_timeout_ms, settings_hash, first_seen_at, last_seen_at)
-                VALUES (1, 'c', 'h', 's', 'claude-code', 'vm', 'x', 'critical', 900000, 'x', 0, 0)`);
+    store.exec(`INSERT INTO runners (id, credential_id, hostname, session_name, harness, kind, secret_hash, lease_timeout_ms, settings_hash, first_seen_at, last_seen_at)
+                VALUES (1, 'c', 'h', 's', 'claude-code', 'vm', 'x', 900000, 'x', 0, 0)`);
     const T0 = Date.parse('2026-10-01T00:00:00Z');
     store.transaction(() => {
       for (let i = 0; i < 8000; i++) {
@@ -26,7 +26,7 @@ describe('the course record at size', () => {
       }
     });
     const start = performance.now();
-    const r = new Stats(store).of('docs', T0, T0 + 8000 * 60_000);
+    const r = new Stats(store, { all: () => [], intake: () => 'open' }).of('docs', T0, T0 + 8000 * 60_000);
     const ms = performance.now() - start;
     expect(r.courses['roadmap-pr'].legs.implement.started).toBe(8000);
     expect(r.courses['roadmap-pr'].legs.review.waited).toEqual({ count: 8000, median_s: 1, max_s: 1 });

@@ -18,7 +18,11 @@
 // `inputs.answers: attestation`), a held ticket's due expiry arms nothing in the past, and the
 // expiry clock restarts only when the ticket's station changes.
 import { describe, it, expect, beforeEach } from 'vitest';
-import { Git, course, cutover, keyCall, makeApiKey, placed, rows, setClock, tick, withCore, claimItem, register, recommended, setAdminKeys, apiKeyCall, seedClaim, setHumanKeys, ORIGIN } from '../helpers';
+import {
+  Git, course, cutover, keyCall, makeApiKey, placed, rows, setClock, tick, withCore, claimItem, register,
+  recommended, setAdminKeys, apiKeyCall, seedClaim, setHumanKeys, ORIGIN, releaseActiveTicketClaim,
+  releaseSeededClaim, seedRepositoryPolicyIn,
+} from '../helpers';
 import { call as hostCall } from '#host';
 import { makeKey, sshsig, signedRequest, type TestKey } from '../lib/sshKeys';
 import roadmapPr from '../fixtures/courses/roadmap-pr/course.json';
@@ -212,7 +216,9 @@ describe('R-BTN-116, R-BTN-39: the answer', () => {
         // The same store and graph, one knob swapped: `inputs.answers: attestation`, under which
         // an answer read from git does not count.
         const strict = new Questions({ store: core.store, now: core.now, graph: (repo, course_) => core.stations.graph(repo, course_),
-          answersFrom: () => 'attestation' });
+          history: core.history, queued: (id) => core.queues.touch(id), reevaluate: (id) => core.blocks.write([id]),
+          closeMissingNext: (id, at) => core.conditions.closeMissingNext(id, at), isHeld: (id) => core.blocks.isHeld(id),
+          linkBases: (id) => core.blocks.linkBases(id), answersFrom: () => 'attestation', dispatch: () => {} });
         strict.attestations('docs', [DECISION('a')]);
       });
     });
@@ -327,7 +333,7 @@ describe('R-BTN-39: an answer that arrives while a claim holds the ticket', () =
     expect(await history('fact-arrival')).toEqual([]);
     // The hold ends; the tick applies what waited.
     await setClock(T0 + 10_000);
-    await rows(`UPDATE claims SET status = 'released', ended_at = ? WHERE id = ?`, T0 + 10_000, claim.json.claim_id);
+    await releaseSeededClaim(claim.json.claim_id, T0 + 10_000);
     await tick();
     expect(await station('Q')).toEqual([expect.objectContaining({ station: 'adjudicated', next_leg: 'merge', next_source: 'baton' })]);
     expect(await question()).toEqual([expect.objectContaining({ leg: 'decide', option: 'a', answered_at: T0 + 10_000, pending_option: null })]);
@@ -343,9 +349,10 @@ describe('R-BTN-185, R-BTN-191: who may answer through the route', () => {
       core.store.transaction(() => {
         const cur = core.policies.current('docs')!;
         const doc = { ...cur.policy, inputs: { ...cur.policy.inputs, answers: 'attestation' as const } };
-        core.store.exec(`INSERT INTO repository_policies (repository_id, version, policy_json, hash, previous_hash, changed_by, approver, preset, at)
-                         VALUES (?, ?, ?, ?, ?, 'test', NULL, NULL, ?)`,
-          'docs', cur.version + 1, JSON.stringify(doc), 'test'.repeat(16), cur.hash, core.now());
+        seedRepositoryPolicyIn(core.store, {
+          repository_id: 'docs', version: cur.version + 1, policy_json: JSON.stringify(doc), hash: 'test'.repeat(16),
+          previous_hash: cur.hash, changed_by: 'test', approver: null, preset: null, at: core.now(),
+        });
       });
     });
     const refused = await answer(owner, { option: 'a' });
@@ -414,7 +421,7 @@ describe('R-BTN-116: expiry', () => {
     expect(await station('Q')).toEqual([expect.objectContaining({ station: 'reviewed', person_expires_at: T0 + 60_000 })]);
     expect(await withCore((core) => core.questions.nextDue())).toBe(null);
     // The hold ends; the tick takes the deferred expiry.
-    await rows(`UPDATE claims SET status = 'released', ended_at = ? WHERE ticket_id = ? AND status = 'active'`, T0 + 61_500, 'docs:Q');
+    await releaseActiveTicketClaim('docs:Q', T0 + 61_500);
     await tick();
     expect(await station('Q')).toEqual([expect.objectContaining({ station: 'parked', next_source: 'baton', person_expires_at: null })]);
     expect(await history('question-expired')).toEqual([expect.objectContaining({ leg: 'decide', reached: 'parked' })]);

@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { answerPlan, confirmAsk, confirmCapacity, createApiKey, duration, main, parseArgs, plan, policyDiff, send, workingTreeOf } from '../../cli/baton.mjs';
 import { formatDecision, listOnce, plain, watch, WATCH_EVERY_MS } from '../../cli/decisions.mjs';
-import { ORIGIN, setAdminKeys, setClock } from '../helpers';
+import { Git, ORIGIN, setAdminKeys, setClock } from '../helpers';
 import type { TestKey } from '../lib/sshKeys';
 import { call as hostCall } from '#host';
 
@@ -27,16 +27,16 @@ const fakeIn = (line?: string) => {
 
 describe('plan: one request per command', () => {
   it('admin commands', () => {
-    expect(plan('admin', ['repo', 'add', 'immediately-run/ops', '--id', 'ops', '--owner-key', PUB, '--weight', '2', '--tiers', 'routine,critical', '--cut-over'], key)).toEqual({
+    expect(plan('admin', ['repo', 'add', 'immediately-run/ops', '--id', 'ops', '--owner-key', PUB, '--weight', '2', '--cut-over'], key)).toEqual({
       method: 'POST', path: '/v1/admin/repositories',
-      body: { id: 'ops', github: 'immediately-run/ops', default_branch: 'main', weight: 2, tiers: ['routine', 'critical'], cut_over: true, owner_keys: [PUB] },
+      body: { id: 'ops', github: 'immediately-run/ops', default_branch: 'main', weight: 2, cut_over: true, owner_keys: [PUB] },
     });
     // §12.2: retire is destructive — the plan carries the ask, and --yes answers it beforehand.
     expect(plan('admin', ['repo', 'retire', 'ops'], key)).toEqual({
       method: 'POST', path: '/v1/admin/repositories', body: { id: 'ops', retire: true, confirm: true },
       confirm: { question: 'retire ops? everything scoped to it ends — sessions, keys, grants, claims — and its id is never registered again', yes: false },
     });
-    expect(plan('admin', ['repo', 'retire', 'ops', '--yes'], key).confirm.yes).toBe(true);
+    expect(plan('admin', ['repo', 'retire', 'ops', '--yes'], key).confirm?.yes).toBe(true);
     expect(plan('admin', ['grant', 'docs', '--key', PUB, '--hostname', 'h', '--capabilities', 'human-operator'], key).body)
       .toEqual({ repository: 'docs', public_key: PUB, hostname: 'h', capabilities: ['human-operator'] });
     expect(plan('admin', ['revoke', 'SHA256:a/b'], key).path).toBe('/v1/admin/keys/SHA256%3Aa%2Fb/revoke');
@@ -47,7 +47,7 @@ describe('plan: one request per command', () => {
     // retired flag is not quietly dropped (B-105's finding).
     expect(plan('admin', ['resource', 'add', 'anthropic-capacity', '--scope', 'account', '--schema', '{"type":"object"}'], key).body)
       .toEqual({ name: 'anthropic-capacity', scope: 'account', detail_schema: { type: 'object' } });
-    expect(plan('admin', ['resource', 'add', 'disk:fs-1', '--scope', 'service', '--schema', '{"type":"object"}'], key).body.scope).toBe('service');
+    expect(plan('admin', ['resource', 'add', 'disk:fs-1', '--scope', 'service', '--schema', '{"type":"object"}'], key).body?.scope).toBe('service');
     expect(() => plan('admin', ['resource', 'add', 'x', '--scope', 'runner', '--schema', '{"type":"object"}'], key)).toThrow('retired');
     expect(() => plan('admin', ['resource', 'add', 'x', '--scope', 'sometimes', '--schema', '{"type":"object"}'], key)).toThrow('account or service');
     expect(() => plan('admin', ['resource', 'add', 'x', '--scope', 'account', '--schema', '{"type":"object"}', '--atoms-from', 'any'], key)).toThrow('not a flag');
@@ -116,10 +116,22 @@ describe('plan: one request per command', () => {
     expect(lines.at(-1)).toContain('not confirmed');
   });
 
+  it('S-BTN-311: destructive credential commands plan a prompt or accept --yes', () => {
+    const home = { repository: 'docs', names: [] };
+    for (const [role, args] of [
+      ['admin', ['revoke', 'SHA256:x']],
+      ['owner', ['revoke', 'SHA256:x']],
+      ['owner', ['owners', '--remove', 'SHA256:x']],
+    ] as const) {
+      expect(plan(role, [...args], key, undefined, home)).toMatchObject({ body: { confirm: true }, confirm: { yes: false } });
+      expect(plan(role, [...args, '--yes'], key, undefined, home)).toMatchObject({ body: { confirm: true }, confirm: { yes: true } });
+    }
+  });
+
   it('owner commands, the required bars in their groups', () => {
-    expect(plan('owner', ['grant', 'docs', '--key', PUB, '--capabilities', 'agent-venue', '--max-tier', 'routine'], key))
-      .toEqual({ method: 'POST', path: '/v1/owner/docs/grants', body: { public_key: PUB, capabilities: ['agent-venue'], max_tier: 'routine' } });
-    expect(plan('owner', ['owners', 'docs', '--remove', 'SHA256:x'], key).body).toEqual({ fingerprint: 'SHA256:x', remove: true });
+    expect(plan('owner', ['grant', 'docs', '--key', PUB, '--capabilities', 'agent-venue'], key))
+      .toEqual({ method: 'POST', path: '/v1/owner/docs/grants', body: { public_key: PUB, capabilities: ['agent-venue'] } });
+    expect(plan('owner', ['owners', 'docs', '--remove', 'SHA256:x'], key).body).toEqual({ fingerprint: 'SHA256:x', remove: true, confirm: true });
     expect(plan('owner', ['bar', 'docs', '--course', '*', '--tag', 'account:go_plus', '--applies', 'claim', '--starts-at', '2026-10-16T13:00:00Z', '--reason', 'go-quota', '--release-holders'], key).body)
       .toEqual({ course: '*', tag: 'account:go_plus', applies: 'claim', starts_at: Date.parse('2026-10-16T13:00:00Z'), release_holders: true, reason: 'go-quota' });
     expect(plan('owner', ['bar', 'lift', 'docs', '7'], key).path).toBe('/v1/owner/docs/bars/7/lift');
@@ -240,7 +252,7 @@ describe('plan: one request per command', () => {
       id: 'proj', github: 'group/sub/proj', default_branch: 'main', forge: 'gitlab', remote: 'https://gitlab.example.com/group/sub/proj.git', web_base: 'https://gitlab.example.com/group/sub/proj',
       ci_identity: { kind: 'gitlab-ci', issuer: 'https://gitlab.example.com', mirror: false }, sync_keys: [{ public_key: PUB, role: 'mirror' }], owner_keys: [PUB],
     });
-    expect(plan('admin', ['repo', 'add', 'o/r', '--sync-key', PUB, '--owner-key', PUB], key).body.sync_keys).toEqual([{ public_key: PUB, role: 'sync' }]);
+    expect(plan('admin', ['repo', 'add', 'o/r', '--sync-key', PUB, '--owner-key', PUB], key).body?.sync_keys).toEqual([{ public_key: PUB, role: 'sync' }]);
     expect(plan('admin', ['repo', 'set', 'docs', '--remote', 'git@github.com:o/r.git', '--sync-workflow', 'none', '--ci-identity', 'none', '--add-owner-key', PUB,
       '--add-sync-key', PUB, '--remove-sync-key', 'SHA256:x'], key).body).toEqual({
       id: 'docs', remote: 'git@github.com:o/r.git', sync_workflow: null, ci_identity: null, owner_keys_add: [PUB], sync_keys_add: [{ public_key: PUB, role: 'sync' }], sync_keys_remove: ['SHA256:x'],
@@ -303,6 +315,22 @@ describe('send: signed with a key file, verified by Baton', () => {
   });
   afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
+  it('S-BTN-74: baton leg why prints the indexed answer for the requested leg', async () => {
+    const identity = join(dir, 'admin.key');
+    await setAdminKeys(createApiKey(identity, 'admin'));
+    expect(await new Git().add('B', { depends_at: [{ ticket: 'P', done: true, leg: 'review' }] }).add('P').post()).toMatchObject({ status: 200 });
+    const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation((url, init) => hostCall(new Request(url, init)));
+    const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    try {
+      expect(await main(['leg', 'why', 'docs:B', 'review', '-i', identity, '--url', ORIGIN])).toBe(0);
+      expect(JSON.parse(String(output.mock.calls.at(-1)?.[0]))).toMatchObject({ leg: 'review', ready: false,
+        prerequisites: expect.arrayContaining([expect.objectContaining({ ref: 'docs:P@done', why: 'not-done' })]) });
+    } finally {
+      output.mockRestore();
+      fetch.mockRestore();
+    }
+  });
+
   it('an administrator’s key file signs a request Baton accepts; another key is unauthenticated', async () => {
     const file = join(dir, 'admin');
     expect(spawnSync('ssh-keygen', ['-q', '-t', 'ed25519', '-N', '', '-f', file]).status).toBe(0);
@@ -314,7 +342,7 @@ describe('send: signed with a key file, verified by Baton', () => {
     const fetchImpl = (url: string, init: RequestInit) => hostCall(new Request(url, init));
     const ok = await send(ORIGIN, plan('admin', ['open']), file, fetchImpl);
     expect(ok.status).toBe(200);
-    expect(ok.json.url).toMatch(/\/login#[0-9a-f]{64}$/);
+    expect(ok.json).toMatchObject({ url: expect.stringMatching(/\/login#[0-9a-f]{64}$/) });
     expect(await send(ORIGIN, plan('admin', ['open']), other, fetchImpl)).toMatchObject({ status: 401, json: { code: 'unauthenticated' } });
   });
 
@@ -332,7 +360,7 @@ describe('send: signed with a key file, verified by Baton', () => {
     const ok = await send(ORIGIN, plan('admin', ['open']), file, fetchImpl);
     expect(ok.status).toBe(200);
     // The owner-key flag reads the public line from its file, as it reads an SSH public key.
-    expect(plan('admin', ['repo', 'add', 'o/r', '--owner-key', `${file}.pub`]).body.owner_keys).toEqual([line]);
+    expect(plan('admin', ['repo', 'add', 'o/r', '--owner-key', `${file}.pub`]).body?.owner_keys).toEqual([line]);
   });
 });
 
@@ -694,12 +722,16 @@ describe('baton owner policy: the CLI of §12.8 (B-145)', () => {
       await expect(run(['log', 'ops', '--after', '2'])).resolves.toBe(0);
       await expect(run(['set', 'ops', policyFile, '--base', '4'])).resolves.toBe(0);
       await expect(run(['apply', 'ops', 'protected', '--base', '5'])).resolves.toBe(0);
+      await expect(main(['owner', '-i', file, 'policy', 'apply', 'ops', 'protected', '--base', '5', '--dry-run', '--dev', '--url', ORIGIN])).resolves.toBe(0);
       await expect(run(['floor', 'add', 'ops', 'fieldhouse', '--guarantees', 'no-runner-lands,human-gates', '--remove-by', 'owner'])).resolves.toBe(0);
-      await expect(run(['floor', 'remove', 'ops', 'fieldhouse'])).resolves.toBe(0);
+      await expect(run(['floor', 'remove', 'ops', 'fieldhouse', '--yes'])).resolves.toBe(0);
       // Round 1, findings 9 and 10: `set` without --base refuses rather than fetch-and-overwrite
       // (the compare-and-set builds on the version the operator read), and `baton owner -i KEY
       // policy show REPO` — the documented form — reaches the policy commands.
       await expect(run(['set', 'ops', policyFile])).rejects.toThrow(/--base/);
+      for (const flag of ['--base', '-i', '--identity', '--url', '--home']) {
+        await expect(run(['apply', 'ops', 'protected', flag, '--dry-run', '--base', '5'])).rejects.toThrow(`${flag} needs a value`);
+      }
       await expect(main(['owner', '-i', file, 'policy', 'show', 'ops', '--dev', '--url', ORIGIN])).resolves.toBe(0);
     } finally {
       globalThis.fetch = was;
@@ -711,6 +743,7 @@ describe('baton owner policy: the CLI of §12.8 (B-145)', () => {
       'GET /v1/owner/ops/policy/log?after=2',
       'PUT /v1/owner/ops/policy',
       'PUT /v1/owner/ops/policy',
+      'PUT /v1/owner/ops/policy',
       'POST /v1/owner/ops/policy/floors',
       'POST /v1/owner/ops/policy/floors',
       'GET /v1/repositories/ops/policy',
@@ -718,8 +751,9 @@ describe('baton owner policy: the CLI of §12.8 (B-145)', () => {
     // The compare-and-set builds on the version the operator named, never one the CLI fetched.
     expect(requests[3].body).toEqual({ base_version: 4, policy: { ...READ.policy, human_key: 'hardware' } });
     expect(requests[4].body).toEqual({ base_version: 5, preset: 'protected' });
-    expect(requests[5].body).toEqual({ name: 'fieldhouse', guarantees: ['no-runner-lands', 'human-gates'], remove_by: 'owner' });
-    expect(requests[6].body).toEqual({ name: 'fieldhouse', remove: true, confirm: true });
+    expect(requests[5].body).toEqual({ base_version: 5, preset: 'protected', dry_run: true });
+    expect(requests[6].body).toEqual({ name: 'fieldhouse', guarantees: ['no-runner-lands', 'human-gates'], remove_by: 'owner' });
+    expect(requests[7].body).toEqual({ name: 'fieldhouse', remove: true, confirm: true });
     // diff printed the one knob; show printed the read it verified the fields of.
     expect(outs.join('')).toContain('human_key');
   });
@@ -760,7 +794,7 @@ describe('baton owner policy: the CLI of §12.8 (B-145)', () => {
       await expect(run(['set', policyFile, '--base', '4'])).resolves.toBe(0);
       await expect(run(['apply', 'protected', '--base', '5'])).resolves.toBe(0);
       await expect(run(['floor', 'add', 'fieldhouse', '--guarantees', 'no-runner-lands'])).resolves.toBe(0);
-      await expect(run(['floor', 'remove', 'fieldhouse'])).resolves.toBe(0);
+      await expect(run(['floor', 'remove', 'fieldhouse', '--yes'])).resolves.toBe(0);
       // A named repository (two positionals) still wins over the home.
       await expect(run(['diff', 'docs', policyFile])).resolves.toBe(0);
     } finally {

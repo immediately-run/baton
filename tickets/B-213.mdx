@@ -3,14 +3,14 @@ title: "B-213 — Attestations: GET …/attestations lists a repository's typed 
 id: B-213
 project: baton-ui-v2
 status: available
-updated: 2026-11-09
+updated: 2026-11-23
 repos:
   - baton
 tags:
   - roadmap-item
 order: 1212
 tier: judgement
-description: "The attestations read and screen of BATON-UI-V2. attestation.list: every attestation of the repository — id, type, subject, value as a blob, writer (fingerprint or mcp id, and the writer class the policy judged it as), domain where the grant carries one, written at, lapses at, revoked at — all readable by the repository reads' principals and a session; ?subject=, ?type=, ?live=1 and ?cursor=; and writable_types, the types the caller may write as owner under the policy in force, computed by authorize. /attestations: the table with the filters as URL query, each value expandable through R-BTN-112's renderer or as pretty-printed text, lapsed and revoked rows marked, and one control by ui.view — Add attestation (attestation.add, writer owner) with its type a select of writable_types; revocation is the CLI's. Requires: B-207, B-195, B-146, B-205."
+description: "The attestations read and screen of BATON-UI-V2. attestation.list: every attestation of the repository — id, type, subject, value as a blob, writer (fingerprint or mcp id, and the writer class the policy judged it as), ~~domain where the grant carries one,~~ written at, lapses at, revoked at — all readable by the repository reads' principals and a session; ?subject=, ?type=, ?live=1 and ?cursor=; and writable_types, the types the caller may write as owner under the policy in force, computed by authorize. /attestations: the table with the filters as URL query, each value expandable through R-BTN-112's renderer or as pretty-printed text, lapsed and revoked rows marked, and one control by ui.view — Add attestation (attestation.add, writer owner) with its type a select of writable_types; revocation is the CLI's. Requires: B-207, B-195, B-146, B-205."
 topics:
   - baton
 owns: {}
@@ -26,8 +26,8 @@ depends_on:
 
 **Spec:** [BATON_SPEC §12.8](../spec/BATON_SPEC/12-security.md#sec-12-8) ([R-BTN-181](../spec/BATON_SPEC/12-security.md#sec-12-8):
 attestations, their writers, lapses, `attestation.add` and `attestation.revoke`; [R-BTN-185](../spec/BATON_SPEC/12-security.md#sec-12-8):
-a session is `owner`, never `human`; [R-BTN-180](../spec/BATON_SPEC/12-security.md#sec-12-8):
-the grant's domain), [§11.4](../spec/BATON_SPEC/11-people.md#sec-11-4) (the `allowed` rule as
+a session writes as `human` beside its key's role; ~~[R-BTN-180](../spec/BATON_SPEC/12-security.md#sec-12-8):
+the grant's domain~~), [§11.4](../spec/BATON_SPEC/11-people.md#sec-11-4) (the `allowed` rule as
 B-191 amends it; [R-BTN-155](../spec/BATON_SPEC/11-people.md#sec-11-4): an attestation is not a confirmed action), [§5.5](../spec/BATON_SPEC/05-courses.md#sec-5-5)
 ([R-BTN-112](../spec/BATON_SPEC/05-courses.md#sec-5-5): a value with a view is drawn by the `ui`
 renderer), [§12.3](../spec/BATON_SPEC/12-security.md#sec-12-3), [§14](../spec/BATON_SPEC/14-api.md#sec-14)
@@ -47,8 +47,8 @@ The §14 row first, then the code.
    reads' principals and a session — every attestation of a repository is readable by its
    readers, there is no narrower class): `attestations`, each `id`, `type`, `subject`, `value`,
    `writer` (`credential`, and `class` as R-BTN-181 names writers: `human`, `owner`, `baton`,
-   `instrument`, `runner`, `admin`, `sync`, or `service:<fingerprint>`), `domain` where the
-   grant carries one, `at`, `lapses_at`, `revoked_at` (R-BTN-181's
+   `instrument`, `runner`, `admin`, `sync`, or `service:<fingerprint>`), ~~`domain` where the
+   grant carries one,~~ `at`, `lapses_at`, `revoked_at` (R-BTN-181's
    shape); then
    `next_cursor` and `writable_types` (a list of types); `?subject=`
    (a ticket id or commit), `?type=`, `?live=1` (not lapsed, not revoked), `?cursor=`, 100 a
@@ -57,7 +57,7 @@ The §14 row first, then the code.
    `allowed` rule); empty for a key or session the policy admits for none.
 2. **`/repositories/{r}/attestations`** (`src/dashboard/screens/governance/Attestations.tsx`):
    the `<table>` — type, subject (a ticket id linking its page, a commit as text), writer and
-   class, domain, at, lapses at — with the filters as URL query, load-more
+   class, ~~domain,~~ at, lapses at — with the filters as URL query, load-more
    by cursor, lapsed and revoked rows marked by word; each row expands to its `value` through
    `View` where the type's schema has a view (R-BTN-112), else pretty-printed text. One control
    by `ui.view` on `repository/attestations` through B-207: **Add attestation**
@@ -73,7 +73,7 @@ The §14 row first, then the code.
 
 - No policy read in the client: `writable_types` is the server's word; the control is drawn on
   it and the server decides again on the call.
-- No `human` attestation from a session (R-BTN-185); no revoke from a session.
+- No `human` attestation or revocation beyond what R-BTN-185 gives a session (its role's acts, with a security-key touch under `hardware`); a revocation from a session is `attestation.revoke` under the same rule.
 - No value rendered as markup: `View` or pretty-printed text only.
 
 ### Trust
@@ -86,7 +86,7 @@ The §14 row first, then the code.
 
 ### Invariants
 
-- **A session writes as `owner`, never `human`** (R-BTN-185); **an attestation is not confirmed**
+- **A session writes as `human` beside its key's role** (R-BTN-185); **an attestation is not confirmed**
   (R-BTN-155).
 - **Text, never markup** (§12.3); **an owner's session, its repositories** (R-BTN-155); **both
   hosts** (R-BTN-55).
@@ -117,3 +117,14 @@ session's write path); R-BTN-181's field name `at` and its writer list used._
 _(2026-11-20: the spec simplification of 2026-11-19 (baton#299; `spec/BATON_SPEC_HISTORY.md`, that date) removed per-run domains on the owner's ruling: an attestation carries no run label. The description, the spec line, item 1's row shape and the table's columns are rewritten to the grant's domain alone.)_
 
 _(2026-11-20: rules re-read: R-BTN-180)_
+
+_(2026-11-23: the owner ruled that a person using the dashboard is a human (R-BTN-185, amended):
+every person's session writes as `human` beside its role and matches a `human` approver entry,
+with a security-key touch per act under `hardware` (B-340). Clauses above that keep `human` from
+a session are rewritten where this ticket states them.)_
+
+_(2026-11-23: rules re-read: R-BTN-185, R-BTN-188)_
+
+_(2026-11-24: the domain column and field are struck: B-189's spec PR (`spec/BATON_SPEC_HISTORY.md`, the entry of 2026-11-24), on the owner's rulings of 2026-11-09 and 2026-11-24 (runners trusted, legs not) retires grant domains (R-BTN-180); an attestation's writer is its credential and class alone.)_
+
+_(2026-11-24: rules re-read: R-BTN-180, R-BTN-181)_

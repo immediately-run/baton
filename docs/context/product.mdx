@@ -1,90 +1,108 @@
 ---
 title: What Baton is
-description: Baton's product definition and value proposition — what it is, who it is for, what it owns, and what it deliberately is not.
+description: Baton's product definition and value proposition — combining people, deterministic tools and AI agents into one explicit process, what Baton owns, and what it deliberately is not.
 nav: Product
 order: 1
 tags: [context]
 ---
 
-<Lede>Baton lets teams of people and AI agents build software together, each ticket moving
-along a course the team defines in its arena's configuration. The same Baton suits a small team that wants
-the simplest course that works, and a factory that needs strict security and quality-assurance
-guarantees.</Lede>
-
-**Baton coordinates the work, and holds the record no push may change.** It decides who may take
-each ticket and keeps that claim alive with a lease. It moves each ticket along its course, and
-shows the whole team live. It also owns the state that someone pushing to the repository must not
-be able to write: each ticket's course history, the attestations that count as evidence, the
-arena's policy, the grants and the owners' bars. The ticket source — git by default —
-holds every ticket and its body, and git the work's evidence. Baton does not do, verify or confine the work. Its permissions cover
-its own state, its gates protect the lock, and it advises on everything else. An arena can opt
-into one exception through its policy: Baton's trusted runners decide what lands, and the forge
-lets only them and a human land it ([BATON_SPEC §12.8](../../spec/BATON_SPEC/12-security.md#sec-12-8)). The policy
-can declare this today; the trusted runners that enforce it are
-[proposed, not built](../../spec/proposals/security.md).
+<Lede>Software is now built by people, deterministic tools and AI agents together. Baton
+combines them into one explicit process, with each trusted for what it is, so a team can change
+how it builds software and know whether the change worked.</Lede>
 
 ## The problem
 
-A team that coordinates people and agents through git alone pays costs that grow with the team
-and with what is at stake:
+Three kinds of actor build software today, and they differ in exactly the ways that matter:
 
-- **A dead claim blocks a ticket for days.** Nothing watches liveness all the time, so a dead
-  holder is found only when someone sweeps for one.
-- **Eligibility is self-judged.** An agent decides for itself whether it can do a ticket, and
-  only finds out it could not after claiming it.
-- **People and agents work in different places.** A question for a person, a review, an approval
-  and an agent's leg all travel through separate channels, and no single place shows what is
-  waiting on whom.
-- **One process fits nobody.** A tool with a fixed process is too heavy for two people and a few
-  agents, and too loose for a team that must prove who reviewed and approved what.
-- **Anything in git can be rewritten by a push.** Once agents can push, a record kept only in git
-  can be edited by the very agent it is meant to constrain: who approved a change, which review
-  counted, what the rules are. A compromised runner included.
-- **Nobody can see the factory.** Which runners are up, what each could take, what is running and
-  what needs a person is pieced together after the fact, or not at all.
+| | Cost and availability | How far it can be trusted | Predictability |
+|---|---|---|---|
+| **People** | Scarce, slow, available only at certain hours | Accountable, but cannot review everything | Variable |
+| **Deterministic tools** — CI, compilers, deploy scripts | Cheap and fast | Trusted to do the same thing every time, but only check what they were built to check | Reproducible |
+| **AI agents** — coding, review, manager and debug agents | Cheaper than people, but limited by tokens and rate limits | Capable, but not trusted by default | Noisy |
+
+Most teams combine them through habits and ad-hoc pipelines. That costs them four things:
+
+- **A process nobody can see or change.** The way work moves lives in conventions, so it cannot be
+  tested, compared or improved, and assumptions that no longer fit — "my pull request" against
+  "yours", when agents write every pull request from the same specs — stay because nobody wrote
+  them down.
+- **Trust that does not match the actor.** An agent's claim, a test result and a person's sign-off
+  get treated alike. A person skimming a generated pull request is not a security control, least
+  of all at today's volume, and once agents can push, a record kept only in git can be rewritten by
+  the agent it is meant to constrain — a compromised runner included.
+- **Opinions instead of measurements.** Which model, which harness, a manager agent or not, how
+  many review rounds: these are measurable questions, but nobody can say which change made things
+  better when the process was never recorded.
+- **Scarce resources spent by accident.** People's attention, compute and tokens are limited, and
+  how much of each there is changes by the hour. Without one view of what is waiting on whom, a
+  person's time goes where an agent would do and a dead claim blocks a ticket for days.
 
 ## What Baton gives a team
 
-- **One fenced lease per ticket.** A runner claims a ticket and keeps it by heartbeat. A runner that goes silent loses the claim when its lease runs out, and a fence stops
-  a revived one from writing.
-- **People and agents on one course.** Agents run legs. A person takes part in two ways: by
-  working a leg at a runner that declares `human-operator`, or by answering a person leg, the one
-  way a course waits on a person (R-BTN-116). A suspended or released claim leaves a
-  hand-off for whoever comes next. *Needs you* lists everything waiting on a person.
-- **Courses, defined by the team.** A course is the team's workflow: the stations a ticket rests
-  at and the legs it runs between them. Each arena keeps its courses in the `.baton/` folder of its config repository
-  and changes them with a commit, not a Baton deploy. Baton ships standard courses that cover the
-  simple end; a team writes its own for the rest.
-- **State no push can write.** Course history, attestations, the policy, grants and owner bars
-  live in Baton. Some of it is copied into git for people to read, and some of it is in git
-  nowhere. If Baton loses that state, it fails closed: the work is reviewed and approved again,
-  never restored from git (the owner, 2026-10-28).
+Baton puts people, tools and agents on one course, under the same leases, rules and record.
+
+- **An explicit process.** A course is the team's workflow written down: the stations a ticket
+  rests at and the legs it runs between them, and which kind of actor runs each. Each arena
+  keeps its courses in the `.baton/` folder of its config repository and changes them with a commit, not a Baton deploy.
+  Baton ships standard courses that cover the simple end; a team writes its own for the rest. A
+  ticket belongs to whoever holds its lease, and a suspended or released claim leaves a hand-off
+  for whoever comes next, so ownership moves from who wrote a change to who owns the ticket and
+  the course.
+- **People, tools and agents as peers.** Agents run legs. A person takes part by working a leg at
+  a runner that declares `human-operator`, or by answering a person leg, the one way a course
+  waits on a person (R-BTN-116). Tools take part through the attestations they write — a check
+  run, a build, a provider's remaining quota — and through the legs runners run with them.
+- **Trust that matches the actor.** An attestation counts for what its writer is worth, and the
+  arena's policy says whose count: a review only from an independent domain, a human gate
+  only by a human-only key. Course history, attestations, the policy, grants and owner bars live
+  in Baton, where no push can write them. Some of it is copied into git for people to read, and
+  some of it is in git nowhere. If Baton loses that state, it fails closed: the work is reviewed
+  and approved again, never restored from git (the owner, 2026-10-28).
+- **Measurable change.** Because the course is versioned and every leg's history is recorded where
+  the agents being measured cannot rewrite it, a change to one leg — another model, another
+  harness, a linter in place of a review — can be tied to what happened next. Baton makes such
+  experiments possible and attributable; running them, and judging when a result is significant,
+  is the factory's work, not Baton's.
+- **Scarce resources, scheduled on purpose.** One fenced lease per ticket: a runner claims a ticket
+  and keeps it by heartbeat, a runner that goes silent loses the claim when its lease runs out, and
+  a fence stops a revived one from writing. Capabilities and their seats say who can take what, so
+  no runner finds out after claiming that it could not do the work. *Needs you* lists everything
+  waiting on a person, so attention goes only where nothing cheaper will do.
 - **Gates protect the lock; the rest is advice.** Baton refuses only what would make cooperating
   runners collide, or take work they have said they cannot do: a second holder, a missing
-  capability or seat, a tier above the runner's ceiling, a barred tag. Everything else it offers
-  in a default order that a runner may override, and every override is logged.
+  capability or seat, a barred tag. Everything else it offers in a default order that a runner may override, and every override is logged.
 - **A live view.** Workers, claims, timelines, what is ready, what is blocked and what needs a
   person, all on one dashboard, along with the course's own record of how long things take. Advice
   is never older than the last write Baton accepted for the runner reading it. Fleet-wide views
   catch up within one alarm cycle.
+
+**Baton coordinates the work, and holds the record no push may change.** It does not do, verify
+or confine the work: it runs no repository code, its permissions cover its own state, and its
+gates protect the lock. The ticket source — git by default — holds every ticket and its body, and
+git the work's evidence. An arena can opt into one exception through its policy: Baton's
+trusted runners decide what lands, and the forge lets only them and a human land it
+([BATON_SPEC §12.8](../../spec/BATON_SPEC/12-security.md#sec-12-8)). The policy can declare this today;
+the trusted runners that enforce it are [proposed, not built](../../spec/proposals/security.md).
 
 ## From one machine to a factory
 
 Baton scales from one person running a few agents on their own machine to a software factory with
 a threat model of its own. Both ends run the same core. What differs is the arena's
 **policy**: one versioned document, held in Baton and never read from git, that decides who lands
-on which refs, who approves what, and whose attestations count (BATON_SPEC [R-BTN-188](../../spec/BATON_SPEC/12-security.md#sec-12-8)).
+what, who approves what, and whose attestations count (BATON_SPEC [R-BTN-188](../../spec/BATON_SPEC/12-security.md#sec-12-8)).
 
 - **The simple end.** The `cooperative` preset and the standard courses: leases, courses and the
   live view, for runners that cooperate. At this end, owner bars and positions are a
   coordination record, not a boundary, and no guarantee is required.
 - **The strict end.** The `protected` and `protected-hardware` presets turn the same state into a
-  boundary. Trusted runners (proposed, not built) land only what the policy's attestations allow. Reviews count only
-  from independent domains, and human gates are satisfied only by a human-only key. A deployment
-  that depends on Baton requires named **guarantees**, such as `no-runner-lands`,
+  boundary, where the deployment keeps repository code out of its runners' reach and gives each
+  leg only credentials confined to its claim; under the default `builtin` executor Baton makes no
+  security promise ([BATON_SPEC §12.8](../../spec/BATON_SPEC/12-security.md#sec-12-8)). Trusted runners (proposed, not built) land only what the policy's attestations allow. Reviews count only
+  as separate `reads_only` runs of the exact head, and human gates are satisfied only by a human-only key. A deployment
+  that depends on Baton requires named **guarantees**, such as `control-paths-human`,
   `independent-review`, `tickets-approved` and `human-gates`, and lists them as **floors**. Baton
   then refuses any policy change that would break one of them, and stops the arena while one
-  is broken (R-BTN-189).
+  is broken ([R-BTN-189](../../spec/BATON_SPEC/12-security.md#sec-12-8)).
 - **Everything between.** A preset is a starting point, not a mode: an owner applies one, then
   tunes it knob by knob. No rule reads a preset's name.
 
@@ -107,7 +125,7 @@ to see at a glance what the team is doing and what it needs from a person.
 - **Not a gatekeeper of the work.** Baton never verifies or confines what a runner does. A
   capability, `human-operator` included, is the runner's own statement, which Baton records and
   matches but never grants or checks. A threat that needs a runner stopped belongs to the
-  sandbox, the forge or the credential proxy. The one exception is the trusted-runner merge a
+  sandbox, the forge or the credential proxy. The one exception is the trusted merge leg a
   policy opts into (proposed, not built). A team chooses to adopt Baton for an arena; once it has, Baton's refusals bind every
   runner that uses it, and a runner that ignores them is outside the factory, not stopped by it
   (the owner, 2026-10-22).

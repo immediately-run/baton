@@ -3,14 +3,16 @@
 // the Worker. For development and CI, using the same core as the Worker.
 import { BatonCore } from '../core/baton';
 import { front } from '../core/front';
-import { dispatchWorkflow } from '../core/mirror';
-import type { AdminKeys, Config, Scheduler, Store } from '../core/ports';
+import { sendForgeDispatch } from '../core/dispatch';
+import type { AccessIdentities, AdminKeys, Config, EventArchive, Scheduler, Store } from '../core/ports';
 import { RequestQueue } from './queue';
 
 export interface LocalOptions {
   store: Store;
   config: Config;
+  archiveEvents?: EventArchive;
   adminKeys?: AdminKeys;
+  accessIdentities?: AccessIdentities;
   /** R3-1236's local `workerd` runner; until it lands, tests inject a fake. */
   /** `timer` fires the alarm by the clock; `manual` only records it (a test ticks it). */
   alarm?: 'timer' | 'manual';
@@ -57,14 +59,16 @@ export class LocalHost {
       store: opts.store,
       scheduler: this.scheduler,
       config: opts.config,
+      archiveEvents: opts.archiveEvents,
       dispatch: {
-        send: (target) => dispatchWorkflow(opts.config.GITHUB_DISPATCH_TOKEN, target),
+        send: (target) => sendForgeDispatch(opts.config, target, this.core.now()),
         defer: (work) => {
           const p = work.catch(() => {}).finally(() => this.deferred.delete(p));
           this.deferred.add(p);
         },
       },
       adminKeys: opts.adminKeys ?? { list: () => [] },
+      accessIdentities: opts.accessIdentities,
       gate: { outside: (work) => this.queue.outside(work) },
     });
   }
@@ -76,7 +80,8 @@ export class LocalHost {
 
   /** A request from outside, answered as the Worker answers it. */
   handle(req: Request): Promise<Response> {
-    return front(req, this.opts.config, (r) => this.queue.run(() => this.core.fetch(r)));
+    return front(req, this.opts.config, (r) => this.queue.run(() => this.core.fetch(r)),
+      async () => (await this.core.admin.adminFingerprints()).size > 0);
   }
 
   /** One alarm tick now, in its turn. */

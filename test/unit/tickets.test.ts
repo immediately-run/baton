@@ -29,8 +29,8 @@ describe('the tickets cache', () => {
   });
 
   it('stores requires expanded, the clause kind, and operator_only (§7.2 rules 4 and 6)', async () => {
-    const extra = { id: 'R3-9010', title: 'clause only', status: 'available', tags: ['FEAT'], requires: ['human-operator'], tier: 'routine', queue: 'operator', node: 'ready-operator' };
-    const legacy = { id: 'R3-9011', title: 'legacy name', status: 'available', tags: [], requires: ['mcp-chrome'], tier: 'routine', queue: 'autonomous', node: 'ready-autonomous' };
+    const extra = { id: 'R3-9010', title: 'clause only', status: 'available', tags: ['FEAT'], requires: ['human-operator'], queue: 'operator', node: 'ready-operator' };
+    const legacy = { id: 'R3-9011', title: 'legacy name', status: 'available', tags: [], requires: ['mcp-chrome'], queue: 'autonomous', node: 'ready-autonomous' };
     await post(A, null, { items: [...stateA.items, extra, legacy], ready: [...stateA.ready, 'R3-9010', 'R3-9011'] });
     const caps = ['authentication', 'create-pr', 'drivable-browser', 'llm-call'];
     expect(await requiresOf('R3-9002')).toEqual(caps); // agent-venue → its four capabilities
@@ -69,8 +69,8 @@ describe('the tickets cache', () => {
       for (const row of await rows(`SELECT * FROM ${name}`)) expect(JSON.stringify(row)).not.toContain(leak);
     }
     const cols = (await rows<{ name: string }>(`SELECT name FROM pragma_table_info('tickets')`)).map((c) => c.name);
-    expect(cols).toEqual(['id', 'repository_id', 'local_id', 'path', 'title', 'project', 'status', 'node', 'queue', 'tags', 'tier', 'requires_clause', 'operator_only',
-      'depends_on', 'blocked_by', 'repos', 'ord', 'rank', 'snapshot_sha', 'row_hash', 'since', 'holder', 'course_id', 'tier_position', 'expedite', 'display', 'blocked_since', 'answer_lost',
+    expect(cols).toEqual(['id', 'repository_id', 'local_id', 'path', 'title', 'project', 'status', 'node', 'queue', 'tags', 'requires_clause', 'operator_only',
+      'depends_on', 'blocked_by', 'repos', 'ord', 'rank', 'snapshot_sha', 'row_hash', 'since', 'holder', 'course_id', 'expedite', 'display', 'blocked_since', 'answer_lost',
       // B-183: the ticket's opaque version ('' when the source posts none) and stable key.
       'version', 'key',
       // B-127: the brief's mark (0040).
@@ -78,16 +78,15 @@ describe('the tickets cache', () => {
       // B-126: who last pushed the ticket's body (R-BTN-194).
       'last_written_by',
       // R-BTN-86 (R3-1258): the parent's qualified id — an id, never body text.
-      'parent', 'course_fields_json']);
+      'parent', 'course_fields_json', 'depends_at']);
   });
 });
 
 describe('reference data and the dashboard state', () => {
-  it('materializes the reviewer catalog; the advisory blocks post through the window and store nothing (B-142)', async () => {
-    await post(A, null, stateA, reference);
-    expect(await rows('SELECT name, family, bills, models FROM reviewer_agents ORDER BY name')).toEqual([
-      { name: 'review-pr-claude', family: 'claude', bills: '["zai-coding-plan","anthropic"]', models: '{"zai-coding-plan":"zai-coding-plan/glm-5.3-flash","anthropic":"claude-opus-5-5"}' },
-      { name: 'review-pr-glm', family: 'glm', bills: '["zai-coding-plan"]', models: null }]);
+  it('accepts legacy advisory blocks without storing them (B-142, B-285)', async () => {
+    expect((await post(A, null, stateA, reference)).status).toBe(200);
+    expect(await rows(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'reviewer_agents'`)).toEqual([]);
+    expect(await rows(`SELECT key FROM baton_settings WHERE key IN ('reviewer_matrix', 'reviewer_catalog')`)).toEqual([]);
     // min_skills_version is gone (R-BTN-22): the registry carries each course's version.
     expect(await rows(`SELECT id, version, min_runner_version FROM courses`)).toEqual([{ id: 'roadmap-pr', version: 3, min_runner_version: 3 }]);
     // The `providers` and `prices` the reference still carries (the sync keeps posting them
@@ -95,16 +94,14 @@ describe('reference data and the dashboard state', () => {
     expect(await rows(`SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('model_providers', 'provider_models', 'peak_schedules', 'provider_suspensions')`)).toEqual([]);
   });
 
-  it('the Ready view orders each tier ceiling by rank', async () => {
+  it('the Ready view orders tickets by rank', async () => {
     await post(A, null, stateA, reference);
     const s = (await stateView()) as {
       repositories: { id: string; head: { sha: string; ticket_count: number } }[];
       ready: { id: string; title: string; url: string; rank_reason: string; requires: string[]; operator_only: boolean }[];
-      ready_by_tier: Record<string, string[]>;
     };
     expect(s.repositories.find((r) => r.id === 'docs')!.head).toMatchObject({ sha: A, ticket_count: 4 });
     expect(s.ready.map((r) => r.id)).toEqual(stateA.ready.map(q));
-    expect(s.ready_by_tier).toEqual({ routine: [q('R3-9001')], judgement: [q('R3-9001'), q('R3-9002')], critical: [q('R3-9001'), q('R3-9002'), q('R3-9003')] });
     expect(s.ready[0]).toMatchObject({ repository_id: 'docs', local_id: 'R3-9001', url: 'https://github.com/immediately-run/docs/blob/main/content/roadmap/R3-9001.mdx', rank_reason: 'autonomous queue · order 10' });
     expect(s.ready.find((r) => r.id === q('R3-9003'))).toMatchObject({ operator_only: true });
     // B-142: the state serves neither advisory view — no providers, no suspensions.

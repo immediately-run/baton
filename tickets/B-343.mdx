@@ -1,0 +1,62 @@
+---
+title: "B-343 — End-to-end course tests with a fake GitHub: the shipped create-pr legs against scripted forge answers"
+id: B-343
+project: baton
+status: available
+updated: 2026-11-26
+repos:
+  - baton
+tags:
+  - roadmap-item
+tier: judgement
+description: "A fake gh and forge API for the local host, backed by one scripted state of PRs, comments, reviews, checks and merges; the shipped create-pr leg scripts run under the local runner with a scripted agent, through close, end, sync attestation and confirmation. Cases: a review's comment URL confirmed as evidence; merge with the PR open, conflicting, red or merged elsewhere never reports merged. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the owner, 2026-11-26 (in a Claude Code session on bering), asked for the supervisor's replacement checks for the Quint model as tickets under a meta-ticket. This is the second: "End-to-end course tests with a fake GitHub: the real leg scripts against fake GitHub answers. This catches a leg returning a URL where a commit was assumed, or merged while the PR is open."
+
+**Spec:** [BATON_SPEC §9.6](../spec/BATON_SPEC/09-claims.md#sec-9-6) [R-BTN-10](../spec/BATON_SPEC/09-claims.md#sec-9-6) (what an end names, and what confirms it), [§15](../spec/BATON_SPEC/15-verification.md#sec-15) [R-BTN-31](../spec/BATON_SPEC/15-verification.md#sec-15).
+
+**Depends on:** none.
+
+### Why
+
+Two incidents of 2026-11-22 to 2026-11-25 were the shipped `create-pr` legs meeting GitHub, not the core:
+- the review leg's close returns the `gh pr comment` URL. The runner sends it as `ended_at_sha`, and nothing attested it, so 44 parked tickets waited for the owner (`docs/interventions.mdx`, 2026-11-24 20:00);
+- the merge leg reported `merged` on B-271 while PR #364 was open (fixed by `696bbeab`, with no test of the course against a forge that refuses).
+
+### What to build
+
+1. **A fake `gh` and forge** for the local host: a `gh` executable on the leg's `PATH` and a fake REST API. Both are backed by one in-memory state of PRs, comments, reviews, checks and merges. The state is scripted per test: a PR open or merged, conflicting, a check red or pending, a merge refused.
+2. **The real legs:** run the shipped `create-pr` leg scripts (`.baton/courses/create-pr/legs/*.mjs`, as the runner loads them) under the local host's runner, with a scripted agent in place of the model. The flow is: a claim, the leg, its close, the runner's end, a sync with the evidence attestation, and confirmation.
+3. **The cases**, at least:
+   - review → its comment URL is the end's evidence, attested found, and the end is confirmed;
+   - fix or run-tests → a commit is the evidence and is confirmed;
+   - merge with the PR still open, conflicting, or a required check red → the leg fails and the ticket stays at `reviewed`, never `merged`;
+   - merge with the PR merged into a branch other than the default → not `merged`;
+   - the merged path → the ticket closes, the end is confirmed by closure.
+
+### Trust
+
+No new input: test code and test fixtures only.
+
+### Invariants
+
+- The legs under test are the shipped files, not copies.
+
+### Tests
+
+The tests are the deliverable. Name each scenario; take numbers with `baton tickets next scenario`.
+
+### Exit criteria
+
+- The cases above pass in `npm test` on the local host.
+- Reverting `696bbeab`'s check in a scratch branch makes the open-PR merge case fail. Say so in the PR.
+
+## Status
+
+_filed 2026-11-26._

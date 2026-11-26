@@ -45,6 +45,13 @@ repository closes tickets another way. If an exit criterion turned out to need s
 ticket cannot do, such as a live check or a step only a person can take, file it as its own
 ticket rather than leaving this one open.
 
+## When you do not merge
+
+If a check is red, a blocking finding is open or the merge is refused, do not merge: end with
+lines that say which PR and why. The stub reads the forge after you exit and reports `merged`
+only when every PR of the ticket is merged and none is open; otherwise the leg fails, quoting
+your last lines, and the ticket stays where it was.
+
 ## Do not
 
 - Merge with a reproduced blocking finding the owner has not decided.

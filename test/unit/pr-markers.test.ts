@@ -5,6 +5,7 @@
 // order (finding 17), and the plain-git variant end to end (finding 12) — a real branch, its
 // commits read from the checkout's own git (`gh` nowhere in sight), the run-tests close pushing a
 // marker and the station function reading it back. S-BTN-43's gate, at the unit level.
+import { GitRepo } from '../lib/gitRepo';
 import { describe, it, expect } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -57,21 +58,15 @@ describe('markerOf, verifiedMarkers and gateOfBranch', () => {
 });
 
 /** One fixture repository: a bare origin and a clone whose PR branch the gate marks. */
-class Repo {
-  readonly dir = mkdtempSync(join(tmpdir(), 'baton-b110-'));
-  readonly origin = mkdtempSync(join(tmpdir(), 'baton-b110-origin-'));
+class MarkerHistory extends GitRepo {
+  get origin(): string { return this.bare; }
   private n = 0;
   constructor() {
-    execFileSync('git', ['init', '-q', '--bare', '-b', 'main', this.origin], { stdio: 'ignore' });
-    for (const a of [['init', '-q', '-b', 'main'], ['config', 'user.email', 'b110@test'], ['config', 'user.name', 'b110'], ['remote', 'add', 'origin', this.origin]]) {
-      execFileSync('git', ['-C', this.dir, ...a], { stdio: 'ignore' });
-    }
+    super('baton-markers-', { origin: true });
   }
-  git(...args: string[]): string {
-    return execFileSync('git', ['-C', this.dir, ...args], { encoding: 'utf8' }).trim();
-  }
+
   /** One content commit at a controlled time. */
-  commit(at: Date, message: string): string {
+  datedCommit(at: Date, message: string): string {
     writeFileSync(join(this.dir, 'work.log'), `${++this.n}\n`);
     execFileSync('git', ['-C', this.dir, 'add', '-A'], { stdio: 'ignore' });
     execFileSync('git', ['-C', this.dir, 'commit', '-q', '-m', message, '--date', at.toISOString()], { env: { ...process.env, GIT_COMMITTER_DATE: at.toISOString() } });
@@ -82,21 +77,18 @@ class Repo {
     const env = at ? { ...process.env, GIT_COMMITTER_DATE: at.toISOString(), GIT_AUTHOR_DATE: at.toISOString() } : process.env;
     return execFileSync('git', ['-C', this.dir, 'commit-tree', `${tested}^{tree}`, '-p', tested, '-m', `baton: tests ${tests} for B-1`, '-m', `Baton-Tests: ${tests}\nBaton-Tested: ${tested}\nBaton-Claim: ${nonce}`], { encoding: 'utf8', env }).trim();
   }
-  dispose(): void {
-    rmSync(this.dir, { recursive: true, force: true });
-    rmSync(this.origin, { recursive: true, force: true });
-  }
+
 }
 
 describe('the plain-git variant (B-110)', () => {
   const ticket: PostedTicket = { id: 'B-1', course_id: 'create-pr', path: 'tickets/B-1.mdx', title: 'B-1', requires: [], operator_only: false, expedite: false, depends_on: [], blocked_by: [], repos: [] };
 
   it('the close pushes the marker the run made to the branch it tested; a moved branch refuses it', () => {
-    const repo = new Repo();
+    const repo = new MarkerHistory();
     try {
-      repo.commit(new Date(1_000_000), 'base');
+      repo.datedCommit(new Date(1_000_000), 'base');
       repo.git('push', '-q', 'origin', 'HEAD:refs/heads/main');
-      const tested = repo.commit(new Date(1_001_000), 'the work');
+      const tested = repo.datedCommit(new Date(1_001_000), 'the work');
       repo.git('push', '-q', 'origin', 'HEAD:refs/heads/claude/B-1-x');
       const marker = repo.marker(tested, 'red', 'n1');
       const ctx = { checkout: repo.dir, ticket: { id: 'docs:B-1', home: 'docs' }, leg: 'run-tests', claim: { nonce: 'n1' } };
@@ -117,14 +109,14 @@ describe('the plain-git variant (B-110)', () => {
   });
 
   it('the gate routes from the branch\'s own commits — no forge, no adapter, no gh — counting only Baton\'s recorded evidence', () => {
-    const repo = new Repo();
+    const repo = new MarkerHistory();
     try {
-      repo.commit(new Date(1_000_000), 'base');
+      repo.datedCommit(new Date(1_000_000), 'base');
       const base = repo.git('rev-parse', 'HEAD');
-      const work = repo.commit(new Date(1_001_000), 'the work');
+      const work = repo.datedCommit(new Date(1_001_000), 'the work');
       const red = repo.marker(work, 'red', 'n1', new Date(1_002_000));
       repo.git('reset', '-q', '--hard', red);
-      const fix = repo.commit(new Date(1_003_000), 'the fix');
+      const fix = repo.datedCommit(new Date(1_003_000), 'the fix');
       const green = repo.marker(fix, 'green', 'n2', new Date(1_004_000));
       repo.git('reset', '-q', '--hard', green);
       const run = (args: string[]) => execFileSync('git', ['-C', repo.dir, ...args], { encoding: 'utf8' });

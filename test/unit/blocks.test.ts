@@ -4,7 +4,11 @@
 // reading's `until` passing on the fake clock; `transitive=1` over a chain; and the query plans
 // G-BTN-70's cost claim rests on.
 import { describe, it, expect, beforeEach } from 'vitest';
-import { Git, armedAt, cutover, keyCall, placed, register, beat, claimItem, endClaim, rows, seedClaim, setAdminKeys, setClock, tick, withCore, runnerCall, adminSession, sessionCall } from '../helpers';
+import {
+  Git, armedAt, cutover, keyCall, placed, register, beat, claimItem, endClaim, rows, seedClaim, setAdminKeys,
+  setClock, tick, withCore, runnerCall, adminSession, sessionCall, clearInstanceReadings, seedTicketOverride,
+  seedUnblockedDispatchIn,
+} from '../helpers';
 import { makeKey, type TestKey } from '../lib/sshKeys';
 import { grantedRunner, signed, SCHEMA } from '../lib/fleet';
 import type { Workflow } from '../../src/core/ports';
@@ -660,12 +664,12 @@ describe('R-BTN-76, R-BTN-77: the alarm after a restart', () => {
       await c.start();
     });
     await withCore((c) => {
-      c.store.exec(`INSERT INTO unblocked_dispatch (repository_id, last_sent_at, pending_json, due_at) VALUES ('docs', ?, '[]', ?)`, B - 30_000, B + 20_000);
+      seedUnblockedDispatchIn(c.store, { repository_id: 'docs', last_sent_at: B - 30_000, pending_json: '[]', due_at: B + 20_000 });
       c.store.exec(`INSERT INTO instance_readings (instance, source, kind, available, observed_at, lapses_at, posted_by) VALUES (?, 'admin', 'state', 0, ?, ?, 'admin:x')`, GO, B - 30_000, B + 10_000);
     });
     await restart();
     expect(await armedAt()).toBe(B + 10_000);
-    await rows('DELETE FROM instance_readings');
+    await clearInstanceReadings();
     await restart();
     expect(await armedAt()).toBe(B + 20_000);
   });
@@ -721,10 +725,16 @@ describe('R-BTN-75: asking', () => {
     await bar('another-course', 'night', []); // another course: not this ticket's
     await bar('roadmap-pr', 'night', ['merge']); // a leg that is not queued
     await bar('*', 'day', []); // a tag the live runner lacks
-    await rows(`INSERT INTO ticket_overrides (ticket_id, hold, hold_reason, retry_after, set_by, set_at) VALUES ('docs:O', 1, 'owner', ?, 'owner:test', 0)`, T0 + MIN);
+    await seedTicketOverride({ ticket_id: 'docs:O', hold: 1, hold_reason: 'owner', retry_after: T0 + MIN, set_by: 'owner:test', set_at: 0 });
     const active = await seedClaim(w.id, 'docs:O', T0);
-    await rows(`INSERT INTO claims (ticket_id, runner_id, request_id, nonce, snapshot_sha, claimed_at, status, ended_at, ended_at_sha) VALUES ('docs:O', ?, 'seed:done', 'abc124', '', ?, 'completed', ?, 'abc')`, w.id, T0, T0);
-    await rows(`INSERT INTO claims (ticket_id, runner_id, request_id, nonce, snapshot_sha, claimed_at, status, fence_pending, ended_at) VALUES ('docs:O', ?, 'seed:reaped', 'abc125', '', ?, 'reaped', 1, ?)`, w.id, T0, T0);
+    await seedClaim({
+      ticket_id: 'docs:O', runner_id: w.id, request_id: 'seed:done', nonce: 'abc124', snapshot_sha: '',
+      claimed_at: T0, status: 'completed', ended_at: T0, ended_at_sha: 'abc',
+    });
+    await seedClaim({
+      ticket_id: 'docs:O', runner_id: w.id, request_id: 'seed:reaped', nonce: 'abc125', snapshot_sha: '',
+      claimed_at: T0, status: 'reaped', fence_pending: 1, ended_at: T0,
+    });
     const [done, reaped] = (await rows<{ id: number }>(`SELECT id FROM claims WHERE ticket_id = 'docs:O' AND status != 'active' ORDER BY id`)).map((r) => r.id);
     expect(await other()).toEqual([
       { kind: 'claimed', detail: { claim_id: active } },

@@ -8,9 +8,11 @@
 // tampered import and a second one refused. The unit half (the digest, the section list, the
 // pending rows) is test/unit/ownerState.test.ts.
 import { describe, it, expect, beforeEach } from 'vitest';
-import { adminSession, claimItem, cutover, endClaim, Git, keyCall, makeApiKey, mirrorCall, placed, register, rows, setAdminKeys, setClock, sessionCall, tick, withCore } from '../helpers';
-import { makeKey, type TestKey } from '../lib/sshKeys';
+import { adminSession, clearRepositoryDispatch, claimItem, course, cutover, endClaim, Git, keyCall, makeApiKey, mirrorCall, placed, register, rows, seedInstanceSettings, setAdminKeys, setClock, setHumanKeys, sessionCall, tick, withCore } from '../helpers';
+import { makeKey, sshsig, type TestKey } from '../lib/sshKeys';
+import roadmapPr from '../fixtures/courses/roadmap-pr/course.json';
 import { SECTIONS } from '../../src/core/ownerState';
+import { canonicalJson, sha256HexSync } from '../../src/core/policy';
 
 const T0 = Date.parse('2026-11-18T12:00:00Z');
 
@@ -30,6 +32,7 @@ beforeEach(async () => {
 });
 
 const adminPost = (path: string, body: unknown = {}) => keyCall(admin, path, body);
+const withDigest = (backup: Record<string, unknown>) => ({ ...backup, digest: sha256HexSync(canonicalJson(backup)) });
 
 /** Empty the instance for an import (§4.8): the harness fabricates a fresh Baton, as the move's
  *  target is one; the policy log's append-only triggers (R-BTN-188) go for the wipe alone. */
@@ -52,6 +55,137 @@ async function wipe() {
 }
 
 describe('S-BTN-50 owner state exported (R3-1258)', () => {
+  it('preserves protected policy versions, floors and registered human keys on a move', async () => {
+    const root = await makeKey('ssh-ed25519', 'test-break-glass');
+    const human = await makeKey('ssh-ed25519', 'test-human');
+    await setHumanKeys(root);
+    const blob = await sshsig(root, new TextEncoder().encode(human.publicKey.trim()), 'baton-human-keys@1');
+    expect((await keyCall(root, '/v1/human-keys', { public_key: human.publicKey, signature: btoa(String.fromCharCode(...blob)) })).status).toBe(200);
+    expect((await keyCall(owner, '/v1/owner/docs/owners', { public_key: human.publicKey })).status).toBe(200);
+    const path = '/v1/repositories/docs/policy';
+    expect((await keyCall(owner, '/v1/owner/docs/policy', { base_version: 1, preset: 'protected' }, 'PUT')).status).toBe(200);
+    expect((await keyCall(human, '/v1/owner/docs/policy/floors', { name: 'protected', guarantees: ['no-runner-lands'] })).status).toBe(200);
+    const before = (await keyCall(owner, path)).json;
+    const versions = await rows('SELECT * FROM repository_policies ORDER BY repository_id, version');
+    const keys = await rows('SELECT * FROM human_keys ORDER BY fingerprint');
+    expect(keys).toHaveLength(1);
+    expect((await adminPost('/v1/admin/freeze')).status).toBe(200);
+    await mirrorCall('/v1/sync/events?after=1000000');
+    expect((await adminPost('/v1/admin/seal')).status).toBe(200);
+    const exported = (await keyCall(admin, '/v1/admin/export')).json;
+    await wipe();
+    await setClock(T0 + 60_000);
+    const { digest: _digest, ...backup } = exported;
+    const versionsWithoutFirst = versions.filter((r) => r.repository_id !== 'docs' || r.version !== 1);
+    for (const [policies, message] of [
+      [versions.filter((r) => r.repository_id !== 'docs'), 'no policy'],
+      [versionsWithoutFirst, 'versions must chain'],
+      [versions.map((r) => r.repository_id === 'docs' && r.version === 2 ? { ...r, previous_hash: null } : r), 'versions must chain'],
+      [versions.map((r) => r.repository_id === 'docs' && r.version === 2 ? { ...r, hash: '0'.repeat(64) } : r), 'does not match'],
+    ] as const) {
+      const incomplete = { ...backup, sections: { ...backup.sections, repository_policies: policies } };
+      const response = await adminPost('/v1/admin/import', withDigest(incomplete));
+      expect(response.json.code).toBe('invalid-params');
+      expect(JSON.stringify(response.json)).toContain(message);
+      expect(await rows('SELECT id FROM repositories')).toEqual([]);
+    }
+    const badFloor = { ...backup, sections: { ...backup.sections, policy_floors: [
+      { ...backup.sections.policy_floors[0], guarantees: '["human-gates-hardware"]' },
+    ] } };
+    expect((await adminPost('/v1/admin/import', withDigest(badFloor))).json.code).toBe('floor-violated');
+    for (const table of ['repositories', 'repository_policies', 'policy_floors', 'human_keys']) {
+      expect(await rows(`SELECT * FROM ${table}`)).toEqual([]);
+    }
+
+    // The destination must not assign the imported human key its administrator role too.
+    await setAdminKeys(admin, human);
+    expect((await adminPost('/v1/admin/import', exported)).json.code).toBe('invalid-params');
+    expect(await rows('SELECT id FROM repositories')).toEqual([]);
+    await setAdminKeys(admin);
+    expect((await adminPost('/v1/admin/import', exported)).status).toBe(200);
+    const after = await keyCall(owner, path);
+    expect(after.status).toBe(200);
+    expect({ version: after.json.version, hash: after.json.hash, floors: after.json.floors, keys: (await rows('SELECT * FROM human_keys')).length })
+      .toEqual({ version: 2, hash: before.hash, floors: before.floors, keys: 1 });
+    expect(await rows('SELECT * FROM repository_policies ORDER BY repository_id, version')).toEqual(versions);
+    expect(await rows('SELECT * FROM human_keys ORDER BY fingerprint')).toEqual(keys);
+  });
+
+  it.each(['first post', 'refresh', 'new head'])('restores a person-leg arrival across two moves on a stale placement at %s', async (when) => {
+    const person = {
+      ...roadmapPr,
+      legs: { ...roadmapPr.legs, decide: { from: ['reviewed'], to: ['adjudicated'], kind: 'person', asks: 'owner' } },
+    };
+    const registry = [course(4, 4, { course: person })];
+    const question = { id: 'q-1', options: [{ id: 'ship', reached: 'adjudicated' }] };
+    const stale = placed('reviewed', [['implement', 'pr-open'], ['review', 'reviewed']], [['decide', 'ready']]);
+    git.registry = registry;
+    git.add('A', { question }, stale);
+    expect((await git.post()).status).toBe(200);
+    expect((await keyCall(owner, '/v1/repositories/docs/attestations', {
+      type: 'std:decision@1', subject: { ticket: 'A' }, value: { option: 'ship' },
+    })).status).toBe(200);
+    await mirrorCall('/v1/sync/events?after=1000000');
+    expect((await adminPost('/v1/admin/seal')).status).toBe(200);
+    const backup = (await keyCall(admin, '/v1/admin/export')).json;
+    expect(backup.sections.ticket_stations).toMatchObject([{ ticket_id: 'docs:A', station: 'adjudicated', next_source: 'baton' }]);
+    await wipe();
+    await setClock(T0 + 60_000);
+    expect((await adminPost('/v1/admin/import', backup)).status).toBe(200);
+    expect(await rows('SELECT * FROM ticket_stations')).toEqual([]);
+    expect((await adminPost('/v1/admin/freeze')).status).toBe(200);
+    await mirrorCall('/v1/sync/events?after=1000000');
+    expect((await adminPost('/v1/admin/seal')).status).toBe(200);
+    const secondBackup = (await keyCall(admin, '/v1/admin/export')).json;
+    expect(secondBackup.sections.ticket_stations).toEqual(backup.sections.ticket_stations);
+    await wipe();
+    await setClock(T0 + 120_000);
+    expect((await adminPost('/v1/admin/import', secondBackup)).status).toBe(200);
+    const target = new Git().add('A', { question }, stale);
+    target.registry = registry;
+    if (when === 'first post') {
+      expect((await target.post()).status).toBe(200);
+    } else {
+      expect((await target.post({ stations: {} })).status).toBe(200);
+    }
+    const runner = await register('vm-a', { courses: [{ repository: 'docs', course: 'roadmap-pr', version: 4 }] });
+    if (when !== 'first post') {
+      const unplaced = await claimItem('vm-a', runner.secret);
+      expect(unplaced.json.code).toBe('no-eligible-ticket');
+      expect(await rows('SELECT * FROM ticket_stations WHERE ticket_id = ?', 'docs:A')).toEqual([]);
+      expect(await rows('SELECT kind FROM pending_owner_state WHERE ticket_id = ?', 'docs:A')).toEqual([{ kind: 'station' }]);
+      const placedPost = when === 'refresh' ? await target.refresh() : await target.post();
+      expect(placedPost.status).toBe(200);
+    }
+    expect(await rows('SELECT station, next_source FROM ticket_stations WHERE ticket_id = ?', 'docs:A'))
+      .toEqual([{ station: 'adjudicated', next_source: 'baton' }]);
+    expect(await rows('SELECT * FROM pending_owner_state')).toEqual([]);
+    const claim = await claimItem('vm-a', runner.secret);
+    expect(claim.status, JSON.stringify(claim.json)).toBe(200);
+    expect(claim.json).toMatchObject({ ticket_id: 'docs:A', station: 'adjudicated', legs: ['merge'] });
+  });
+
+  it('preserves the SQL NULL session-host reset and refuses JSON null text', async () => {
+    const setHosts = (session_hosts: string[] | null) => keyCall(admin, '/v1/admin/settings', { session_hosts }, 'PUT');
+    expect((await setHosts(['example.test'])).status).toBe(200);
+    expect((await setHosts(null)).status).toBe(200);
+    await mirrorCall('/v1/sync/events?after=1000000');
+    expect((await adminPost('/v1/admin/seal')).status).toBe(200);
+    const exported = (await keyCall(admin, '/v1/admin/export')).json;
+    const { digest: _digest, ...backup } = exported;
+    expect(backup.sections.instance_settings[0].session_hosts).toBeNull();
+    await wipe();
+    await setClock(T0 + 60_000);
+    const invalid = { ...backup, sections: { ...backup.sections, instance_settings: [
+      { ...backup.sections.instance_settings[0], session_hosts: 'null' },
+    ] } };
+    expect((await adminPost('/v1/admin/import', withDigest(invalid))).json.code).toBe('invalid-params');
+    expect((await adminPost('/v1/admin/import', exported)).status).toBe(200);
+    expect(await rows('SELECT session_hosts FROM instance_settings')).toEqual([{ session_hosts: null }]);
+    const state = await keyCall(admin, '/v1/admin/state');
+    expect(state.json.instance.session_hosts).toEqual(['claude.ai']);
+  });
+
   it('a fence-pending claim holds the seal; the clear is accepted while frozen, and the seal then proceeds; a lagging mirror is named and dispatched', async () => {
     const sent = await import('../helpers').then((h) => h.captureDispatches());
     const w = await register('vm-a');
@@ -77,7 +211,21 @@ describe('S-BTN-50 owner state exported (R3-1258)', () => {
     expect((await adminPost('/v1/admin/seal')).status).toBe(200);
   });
 
+  it('lets a pull-only mirror reach the seal even when no local mirror-written events are pending', async () => {
+    await clearRepositoryDispatch('docs');
+    expect(await (await mirrorCall('/v1/sync/wanted')).json()).toMatchObject({ wanted: false });
+    expect((await adminPost('/v1/admin/freeze')).status).toBe(200);
+    expect(await (await mirrorCall('/v1/sync/wanted')).json()).toMatchObject({ wanted: true });
+    expect((await adminPost('/v1/admin/seal')).json.lagging_mirrors).toEqual(['docs']);
+    const { next } = await (await mirrorCall('/v1/sync/events')).json() as { next: number };
+    await mirrorCall(`/v1/sync/events?after=${next}`);
+    expect(await (await mirrorCall('/v1/sync/wanted')).json()).toMatchObject({ wanted: false });
+    expect((await adminPost('/v1/admin/seal')).status).toBe(200);
+  });
+
   it('the export is identical over exactly the owner state; the source serves nothing but an administrator\'s read; a tampered and a second import are refused', async () => {
+    expect((await keyCall(admin, '/v1/admin/capacities', { capability: 'device:test', capacity: 2 }, 'PUT')).status).toBe(200);
+    expect((await keyCall(admin, '/v1/admin/settings', { link_hosts: ['example.test'], session_hosts: [] }, 'PUT')).status).toBe(200);
     // Owner state worth keeping: a grant with a role and a domain, a bar, a hold, a reading.
     const granted = await makeKey('ssh-ed25519', 'granted');
     expect((await keyCall(owner, '/v1/owner/docs/grants', { public_key: granted.publicKey, hostname: 'g-1', capabilities: ['agent-venue'] })).status).toBe(200);
@@ -92,6 +240,9 @@ describe('S-BTN-50 owner state exported (R3-1258)', () => {
     await mirrorCall('/v1/sync/events?after=1000000');
     expect((await adminPost('/v1/admin/seal')).status).toBe(200);
     const first = (await keyCall(admin, '/v1/admin/export')).json;
+    const exportedRepo = first.sections.repositories.find((r: { id: string }) => r.id === 'docs');
+    expect(exportedRepo).not.toHaveProperty('sync_wanted_at');
+    expect(exportedRepo).not.toHaveProperty('sync_wanted_after');
     const second = (await keyCall(admin, '/v1/admin/export?with_history=1')).json;
     expect(second).not.toEqual(first); // --with-history adds the history sections
     const again = (await keyCall(admin, '/v1/admin/export')).json;
@@ -108,14 +259,31 @@ describe('S-BTN-50 owner state exported (R3-1258)', () => {
     // The import on the target (an empty Baton, fabricated by the wipe).
     await wipe();
     await setClock(T0 + 5 * 60_000);
+    await seedInstanceSettings({ id: 1, link_hosts: '[]' });
     expect((await adminPost('/v1/admin/import', { ...first, digest: '0'.repeat(64) })).json.code).toBe('invalid-params');
+    const canonical = (v: unknown): string => Array.isArray(v) ? `[${v.map(canonical).join(',')}]`
+      : v && typeof v === 'object' ? `{${Object.entries(v).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)
+        .map(([k, val]) => `${JSON.stringify(k)}:${canonical(val)}`).join(',')}}` : JSON.stringify(v);
+    for (const overrides of [
+      { dispatch: JSON.stringify({ kind: 'github-app', token: 'not-runtime-config' }) },
+      { unblocked_trigger: JSON.stringify({ kind: 'gitlab-trigger', project_id: 99, ref: 'main' }) },
+    ]) {
+      const { digest: _digest, ...changed } = structuredClone(first);
+      Object.assign(changed.sections.repositories.find((r: { id: string }) => r.id === 'docs'), overrides);
+      const refused = await adminPost('/v1/admin/import', { ...changed, digest: sha256HexSync(canonical(changed)) });
+      expect(refused.json).toMatchObject({ code: 'invalid-params', message: expect.stringMatching(/dispatch|unblocked_trigger/) });
+      expect(await rows('SELECT id FROM repositories')).toEqual([]);
+    }
     expect((await adminPost('/v1/admin/import', first)).status).toBe(200);
+    expect(await rows(`SELECT sync_wanted_at, sync_wanted_after FROM repositories WHERE id = 'docs'`)).toEqual([{ sync_wanted_at: null, sync_wanted_after: null }]);
     expect((await adminPost('/v1/admin/import', first)).json.code).toBe('conflict');
     // The state stands: the grant with its expanded capabilities, the bar, the reading, the repository.
     expect((await rows<{ capabilities: string }>('SELECT capabilities FROM runner_grants')).map((r) => JSON.parse(r.capabilities) as string[])).toContainEqual(expect.arrayContaining(['create-pr', 'llm-call']));
     expect((await rows<{ reason: string }>('SELECT reason FROM owner_bars')).map((r) => r.reason)).toContainEqual('glm-down');
     expect((await rows<{ instance: string; available: number }>('SELECT instance, available FROM instance_readings')).map((r) => [r.instance, r.available])).toContainEqual(['vpn-1', 1]);
     expect((await rows<{ id: string }>('SELECT id FROM repositories')).map((r) => r.id).sort()).toEqual(['baton', 'docs']);
+    expect(await rows('SELECT * FROM capability_capacity')).toEqual(first.sections.capability_capacity);
+    expect(await rows('SELECT * FROM instance_settings')).toEqual(first.sections.instance_settings);
     // The hold waits for the ticket's first snapshot, then applies.
     expect((await rows('SELECT 1 FROM ticket_overrides')).length).toBe(0);
     git = new Git().add('A', {}, placed('filed', [], [['implement', 'ready']]));

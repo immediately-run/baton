@@ -1,6 +1,7 @@
 // reads/repositories.ts — the two reads the shell itself needs (B-204): `GET /v1/repositories`
 // (`repo.list`), the caller's repositories with the counts the sidebar and the strip draw, and
 // `GET /v1/actions` (`actions.list`), a session's own registry entries.
+import { liveRunnerSql } from '../runnerLiveness';
 import { BatonError } from '../http';
 import { actionsFor } from '../actions';
 import { DISCREPANCY_WINDOW_MS } from '../history';
@@ -17,7 +18,6 @@ export type RepositoryRow = {
   web_base: string | null;
   default_branch: string;
   weight: number;
-  tiers: string[];
   /** The courses in force, ids and versions. */
   courses: { id: string; version: number }[];
   /** The head snapshot — its commit, when its post was accepted, and that post's observation
@@ -82,7 +82,7 @@ export function repositoriesAnswer(cx: ReadCtx, principal: ReadPrincipal): Repos
      WHERE g.revoked_at IS NULL AND w.reaped_at IS NULL GROUP BY g.repository_id`);
   const alive = countBy(cx,
     `SELECT g.repository_id AS r, COUNT(*) AS n FROM runner_grants g JOIN runners w ON w.credential_id = g.credential_id
-     WHERE g.revoked_at IS NULL AND w.reaped_at IS NULL AND ? - w.last_seen_at < w.lease_timeout_ms GROUP BY g.repository_id`, now);
+     WHERE g.revoked_at IS NULL AND ${liveRunnerSql('w.')} GROUP BY g.repository_id`, now);
   const discrepancies = countBy(cx,
     `SELECT COALESCE(repository_id, ${prefix}) AS r, COUNT(*) AS n FROM events WHERE kind = 'discrepancy' AND at > ? GROUP BY r`, now - DISCREPANCY_WINDOW_MS);
   const instance = cx.core.instance.view();
@@ -92,7 +92,7 @@ export function repositoriesAnswer(cx: ReadCtx, principal: ReadPrincipal): Repos
     repositories: repos.map((r) => {
       const h = heads.get(r.id);
       return {
-        id: r.id, github: r.github, forge: r.forge, web_base: r.web_base, default_branch: r.default_branch, weight: r.weight, tiers: r.tiers,
+        id: r.id, github: r.github, forge: r.forge, web_base: r.web_base, default_branch: r.default_branch, weight: r.weight,
         courses: courses.get(r.id) ?? [],
         head: h?.sha ? { sha: h.sha, received_at: h.received_at, observation: h.observation } : null,
         mode: r.cutover_at != null ? 'cut-over' as const : 'shadow' as const,

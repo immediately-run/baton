@@ -7,34 +7,35 @@
 // half (`parseRunArgs`, `declareCourses`, `servedCourses`, `envAuth`) is unit-tested in
 // test/unit/runner-main.test.ts; the wiring is exercised end-to-end by S-BTN-41 against the
 // local host.
-import { execFileSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, writeSync } from 'node:fs';
+import { git, gitText } from '../defaults/git.mjs';
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync, writeSync } from 'node:fs';
 import { homedir, hostname } from 'node:os';
-import { join } from 'node:path';
-import { DEFAULT_URL } from '../../cli/baton.mjs';
+import { dirname, isAbsolute, join, relative } from 'node:path';
+import { DEFAULT_URL } from '../client/config.mjs';
+import { checkDeclaredCourses } from '../core/validate';
 import { BatonApi, envAuth } from './api';
-import { HARNESS_AGENTS, type Harness } from './harness';
-import { holdHome, legNeeds, readHead } from './home';
-import { cliPinLines, cliProfile, readCliPin } from './cliPin';
-import { GIT_NONINTERACTIVE_ENV } from '../defaults/ticket-state';
-import { Runner, stampLine, withTimestamps } from './runner';
+import { HARNESS_ADAPTERS, harnessActivityPaths, selectHarness, type HarnessAdapter } from './harness';
+import { advanceHome, holdHome, legNeeds, readHead } from './home';
+import { cliBehind, cliPinLines, cliProfile, readCliPin } from './cliPin';
+import { Runner, stampLine, withTimestamps, type RunnerOptions } from './runner';
 import { loadExecutor } from './executor';
 import { readMaskEnv, runnerConfigPath, underBatonDirectory } from './mask';
 import { runnerHome } from '../defaults/homes';
 import { LocalQueue, queueMain, queuePath } from './queue';
 import { fileURLToPath } from 'node:url';
+import { capabilityChecks } from './capabilityChecks';
 
 /** The CLI's wrapper (R-BTN-133), which every executor runs. */
 const LEG_WRAPPER = fileURLToPath(new URL('./legProcess.mjs', import.meta.url));
 
 export interface RunArgs {
-  harness: Harness;
+  config?: string;
+  harness: HarnessAdapter;
   home: string;
   url: string;
   session: string;
   repository: string;
   hostname: string;
-  tier: string;
   /** B-86: `--capabilities`, which narrows. Null when the flag is absent — the runner then
    *  declares what the grant allows (`grant.capabilities` on its first answer). */
   capabilities: string[] | null;
@@ -61,22 +62,25 @@ export interface RunArgs {
    *  1 to 32, default 1 (one claim in the home checkout, as before); each claim beside another
    *  works in a clone of its own. */
   concurrency: number;
+  bounds?: { legs?: string[]; maxLegs?: number; until?: number };
+  restartWhenBehind: boolean;
 }
 
 /** `baton run [--harness opencode|claude-code] [--home <checkout|home name>] [--url <url>] [--session <id>]
- * [--repository <id>] [--hostname <name>] [--tier <tier>] [--capabilities a,b] [--beat-every <ms>]
+ * [--repository <id>] [--hostname <name>] [--capabilities a,b] [--beat-every <ms>]
  * [--course <id>] [--lock <capability>=<path>]… [--test-harness] [--verbose]`.
  * Unknown flags are refused, never dropped. `--capabilities` narrows the grant: without it the
  * runner declares what the grant allows (B-86). `--home` keeps R-BTN-131's meaning for a
  * checkout path; a name resolves to its home's `checkout` (B-121). `--help` prints this,
  * before any credential. */
-export function parseRunArgs(argv: string[], env: NodeJS.ProcessEnv = process.env): RunArgs {
-  const out: RunArgs = {
-    harness: 'opencode', home: env.BATON_HOME ?? process.cwd(), url: env.BATON_URL ?? DEFAULT_URL,
+export function parseRunArgs(argv: string[], env: NodeJS.ProcessEnv = process.env, adapters = HARNESS_ADAPTERS): RunArgs {
+  let harness = 'opencode';
+  const out: Omit<RunArgs, 'harness'> = {
+    home: env.BATON_HOME ?? process.cwd(), url: env.BATON_URL ?? DEFAULT_URL,
     session: env.BATON_SESSION ?? `run-${Math.random().toString(16).slice(2, 10)}`,
     repository: env.BATON_REPOSITORY ?? 'docs', hostname: env.BATON_HOSTNAME ?? hostname(),
-    tier: 'critical', capabilities: null, beatEvery: 2 * 60_000, testHarness: false, verbose: false, locks: {},
-    executor: env.BATON_EXECUTOR ?? 'builtin', concurrency: 1,
+    capabilities: null, beatEvery: 2 * 60_000, testHarness: false, verbose: false, locks: {},
+    executor: env.BATON_EXECUTOR ?? 'builtin', concurrency: 1, restartWhenBehind: false,
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -85,20 +89,32 @@ export function parseRunArgs(argv: string[], env: NodeJS.ProcessEnv = process.en
       if (v === undefined) throw new Error(`${a} needs a value`);
       return v;
     };
-    if (a === '--harness') {
-      const v = value();
-      if (v !== 'opencode' && v !== 'claude-code') throw new Error('--harness: opencode or claude-code');
-      out.harness = v;
-    } else if (a === '--test-harness') out.testHarness = true;
+    if (a === '--harness') harness = value();
+    else if (a === '--test-harness') out.testHarness = true;
     else if (a === '--verbose') out.verbose = true;
+    else if (a === '--restart-when-behind') out.restartWhenBehind = true;
     else if (a === '--home') out.home = value();
+    else if (a === '--config') out.config = value();
     else if (a === '--url') out.url = value();
     else if (a === '--session') out.session = value();
     else if (a === '--repository') out.repository = value();
     else if (a === '--hostname') out.hostname = value();
-    else if (a === '--tier') out.tier = value();
     else if (a === '--course') out.course = value();
     else if (a === '--executor') out.executor = value();
+    else if (a === '--legs') {
+      const legs = [...new Set(value().split(',').map((leg) => leg.trim()))];
+      if (legs.length > 50 || legs.some((leg) => !/^[a-z][a-z0-9-]{0,39}$/.test(leg))) throw new Error('--legs: 1 to 50 comma-separated leg names');
+      (out.bounds ??= {}).legs = legs;
+    } else if (a === '--max-legs') {
+      const n = Number(value());
+      if (!Number.isSafeInteger(n) || n < 1) throw new Error('--max-legs: a positive integer');
+      (out.bounds ??= {}).maxLegs = n;
+    } else if (a === '--until') {
+      const instant = value();
+      const until = Date.parse(instant);
+      if (!Number.isFinite(until) || !/(?:Z|[+-]\d\d:\d\d)$/i.test(instant)) throw new Error('--until: an ISO timestamp with a time zone');
+      (out.bounds ??= {}).until = until;
+    }
     else if (a === '--concurrency') {
       const n = Number(value());
       if (!Number.isInteger(n) || n < 1 || n > 32) throw new Error('--concurrency: an integer from 1 to 32 (R-BTN-4)');
@@ -121,7 +137,9 @@ export function parseRunArgs(argv: string[], env: NodeJS.ProcessEnv = process.en
       out.beatEvery = n;
     } else throw new Error(`${a}: not a flag of baton run`);
   }
-  return out;
+  const adapter = selectHarness(harness, adapters);
+  if (!adapter) throw new Error(`--harness: ${adapters.map((entry) => entry.name).join(' or ')}`);
+  return { ...out, harness: adapter };
 }
 
 /** B-86: `baton run --help` (and `-h`) — the usage `parseRunArgs` reads, and what the ticket's
@@ -130,10 +148,10 @@ export function parseRunArgs(argv: string[], env: NodeJS.ProcessEnv = process.en
  * the courses served, and absent it the runner serves every course its home declares (B-103).
  * Printed before any credential or network work, and the exit is 0. */
 export const RUN_USAGE = [
-  'usage: baton run [--harness opencode|claude-code] [--home <checkout|home name>] [--url <url>] [--session <id>]',
-  '                 [--repository <id>] [--hostname <name>] [--tier <tier>] [--capabilities a,b]',
+  'usage: baton runner start (or baton run) [--harness opencode|claude-code] [--home <checkout|home name>] [--url <url>] [--session <id>]',
+  '                 [--repository <id>] [--hostname <name>] [--capabilities a,b]',
   '                 [--beat-every <ms>] [--course <id>] [--executor <source>] [--concurrency <k>]',
-  '                 [--test-harness] [--verbose]',
+  '                 [--config FILE] [--test-harness] [--verbose] [--restart-when-behind]',
   '',
   'Runs this machine\'s runner: it heartbeats, claims a ticket of a course its home checkout',
   'declares and runs each claim\'s legs one at a time. --home names a checkout, or a home of',
@@ -144,6 +162,9 @@ export const RUN_USAGE = [
   '                      serve the grant. A machine without a browser narrows, e.g. llm-call,create-pr.',
   '  --course <id>       narrows the courses served to this one, of those the home declares.',
   '                      Absent, the runner serves and declares every course the home declares.',
+  '  --legs a,b         claims and chains into only these named legs.',
+  '  --max-legs <n>     suspends before running more than n legs in one claim (default 8).',
+  '  --until <instant>  stops starting legs at this timestamp (ISO with time zone).',
   '  --executor <source> how legs run (R-BTN-107): builtin (the default — child processes) or',
   '                      pinned:<dir>@sha256:<digest>, a host bundle loaded only when its digest',
   '                      matches. Also BATON_EXECUTOR; never read from the repository.',
@@ -151,6 +172,7 @@ export const RUN_USAGE = [
   '                      each claim\'s legs run one at a time, claims side by side, each beside',
   '                      another in a clone of the home of its own. The owner\'s grant bounds it',
   '                      (--max-claims).',
+  '  --restart-when-behind  exit 75 between claims if this CLI is behind its local tracking ref.',
   '  --lock cap=path     one machine\'s singleton (R-BTN-178), repeatable: the capability is declared',
   '                      only while this runner holds an exclusive lock on the file, and it takes',
   '                      the lock before a claim for, or the advance into, a leg requiring it.',
@@ -160,21 +182,22 @@ export const RUN_USAGE = [
 /** B-86: whether the arguments ask for the usage — `--help` or `-h`, anywhere in them. */
 export const asksHelp = (argv: string[]): boolean => argv.includes('--help') || argv.includes('-h');
 
-/** A home checkout's settings files, as JSON (null for one that is absent or not JSON —
- *  `declareCourses` names that failure its own way). */
+/** A missing settings file is not the same as an unreadable or malformed declaration. */
 function settingsOf(home: string, path: string): Record<string, unknown> | null {
   try {
-    return JSON.parse(readFileSync(join(home, path), 'utf8')) as Record<string, unknown>;
-  } catch {
-    return null;
+    const value = JSON.parse(readFileSync(join(home, path), 'utf8'));
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('expected a JSON object');
+    return value;
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw new Error(`${path}: ${e instanceof Error ? e.message : String(e)}`);
   }
 }
 
 /** The version the home checkout names for every course it declares: `.baton/baton.json`'s
  *  `skills_version` first, then docs' interim `scripts/data/baton.json`; null when neither does. */
-const homeVersion = (home: string): number | null => {
-  const batonJson = settingsOf(home, '.baton/baton.json');
-  if (batonJson && typeof batonJson.skills_version === 'number') return batonJson.skills_version;
+const homeVersion = (home: string, batonJson: Record<string, unknown> | null): number | null => {
+  if (typeof batonJson?.skills_version === 'number') return batonJson.skills_version;
   const data = settingsOf(home, 'scripts/data/baton.json');
   return typeof data?.skills_version === 'number' ? data.skills_version : null;
 };
@@ -185,27 +208,31 @@ const homeVersion = (home: string): number | null => {
  * runner refuses to guess a version it cannot find — a wrong declaration silences rule 9.
  * B-103: an entry that names no version (`{"courses": [{"id": "create-spec"}]}`) is served at
  * the version the home names — skills_version is every course's version — never at a guess. */
-export function declareCourses(home: string): { course: string; version: number }[] {
-  const batonJson = settingsOf(home, '.baton/baton.json');
-  const version = homeVersion(home);
-  if (batonJson && Array.isArray(batonJson.courses) && batonJson.courses.length) {
+export function declareCourses(home: string, batonJson = settingsOf(home, '.baton/baton.json'), inferLegacy = true): RunnerOptions['courses'] {
+  if (batonJson?.courses !== undefined) {
+    if (!Array.isArray(batonJson.courses)) throw new Error('.baton/baton.json courses must be an array');
     const named: { course: string; version: number | null }[] = [];
+    let fallback: number | null | undefined;
     for (const c of batonJson.courses as Record<string, unknown>[]) {
-      if (typeof c.id !== 'string' || (c.version !== undefined && typeof c.version !== 'number')) throw new Error('.baton/baton.json courses[] entries must be {id, version?, ...}');
-      named.push({ course: c.id, version: typeof c.version === 'number' ? c.version : version });
+      if (!c || typeof c.id !== 'string' || (c.version !== undefined && typeof c.version !== 'number')) throw new Error('.baton/baton.json courses[] entries must be {id, version?, ...}');
+      if (c.version === undefined && fallback === undefined) fallback = homeVersion(home, batonJson);
+      named.push({ course: c.id, version: typeof c.version === 'number' ? c.version : fallback ?? null });
     }
     const missing = named.filter((c) => c.version == null).map((c) => c.course);
     if (missing.length) throw new Error(`the home checkout names no course version for ${missing.join(', ')} (.baton/baton.json courses[] or skills_version, or scripts/data/baton.json)`);
     return named.map((c) => ({ course: c.course, version: c.version as number }));
   }
   if (typeof batonJson?.course === 'string') {
+    const version = homeVersion(home, batonJson);
     if (version == null) throw new Error('the home checkout names no course version (.baton/baton.json courses[] or skills_version, or scripts/data/baton.json)');
     return [{ course: batonJson.course, version }];
   }
+  if (!inferLegacy) return [];
   const coursesDir = join(home, '.baton', 'courses');
   if (!existsSync(coursesDir)) throw new Error(`${home} has no .baton/courses`);
   const listed = readdirSync(coursesDir).filter((d) => existsSync(join(coursesDir, d, 'course.json')));
   if (listed.length !== 1) throw new Error(`the home checkout runs ${listed.length} courses and .baton/baton.json names none: ${listed.join(', ')}`);
+  const version = homeVersion(home, batonJson);
   if (version == null) throw new Error('the home checkout names no course version (.baton/baton.json courses[] or skills_version, or scripts/data/baton.json)');
   return [{ course: listed[0], version }];
 }
@@ -216,12 +243,32 @@ export function declareCourses(home: string): { course: string; version: number 
  * one runner loads each claim's course from the snapshot and serves several courses from one
  * checkout; its only limit is one leg at a time (rule 3, §6.13). The flag is a loud refusal when
  * it names a course the home does not declare — the one thing the runner cannot serve. */
-export function servedCourses(home: string, chosen?: string): { course: string; version: number }[] {
-  const declared = declareCourses(home);
+export function servedCourses(home: string, chosen?: string): RunnerOptions['courses'] {
+  return selectCourses(declareCourses(home), chosen, false);
+}
+
+function selectCourses(declared: RunnerOptions['courses'], chosen: string | undefined, refreshing: boolean): RunnerOptions['courses'] {
   if (chosen == null) return declared;
   const one = declared.find((c) => c.course === chosen);
-  if (!one) throw new Error(`--course ${chosen}: the home checkout declares ${declared.map((c) => c.course).join(', ')}`);
+  if (!one) {
+    if (refreshing) return [];
+    throw new Error(`--course ${chosen}: the home checkout declares ${declared.map((c) => c.course).join(', ')}`);
+  }
   return [one];
+}
+
+/** Once the home uses explicit declarations, removing them must not revive leftover directories. */
+export function courseReader(home: string, repository: string, chosen?: string): () => RunnerOptions['courses'] {
+  let inferLegacy = true;
+  let refreshing = false;
+  return () => {
+    const config = settingsOf(home, '.baton/baton.json');
+    const next = selectCourses(declareCourses(home, config, inferLegacy), chosen, refreshing);
+    checkDeclaredCourses(next.map((course) => ({ ...course, repository })));
+    if (config?.courses !== undefined || typeof config?.course === 'string') inferLegacy = false;
+    refreshing = true;
+    return next;
+  };
 }
 
 /** R-BTN-144 class 7 (B-170): the names `runner.json` `mask_env` lists for this runner's host,
@@ -258,14 +305,41 @@ export function queueCommand(argv: string[]): number {
  * can never cost the lease it was fetching for. */
 export const FETCH_TIMEOUT_MS = 20_000;
 
-export function fetchMain(home: string, log: (l: string) => void = () => {}): void {
+export function fetchMain(home: string, log: (l: string) => void = () => {}, branch = 'main'): boolean {
   try {
-    execFileSync('git', ['-C', home, 'fetch', 'origin', 'main'], {
-      stdio: 'ignore', timeout: FETCH_TIMEOUT_MS, killSignal: 'SIGKILL', env: { ...process.env, ...GIT_NONINTERACTIVE_ENV },
-    });
+    git(home, ['fetch', 'origin', `refs/heads/${branch}`], { stdio: 'ignore', timeoutMs: FETCH_TIMEOUT_MS });
+    return true;
   } catch (e) {
     log(`baton: the snapshot fetch failed (${e instanceof Error ? e.message : String(e)})`);
+    return false;
   }
+}
+
+/** Only idle runners move the shared home towards a newly fetched default branch. */
+export function refreshHome(home: string, log: (l: string) => void): boolean {
+  let branch: string | undefined;
+  try {
+    branch = git(home, ['symbolic-ref', '-q', 'refs/remotes/origin/HEAD']).trim().match(/^refs\/remotes\/origin\/(.+)$/)?.[1];
+  } catch { /* fetch-only checkouts need not have origin/HEAD */ }
+  if (!branch) {
+    try {
+      branch = git(home, ['ls-remote', '--symref', 'origin', 'HEAD'], { timeoutMs: FETCH_TIMEOUT_MS })
+        .match(/^ref: refs\/heads\/(.+)\tHEAD$/m)?.[1];
+    } catch { /* log below and keep the last declaration */ }
+    if (!branch) {
+      log('baton: keeping the last course declaration: cannot resolve the default branch of origin');
+      return false;
+    }
+  }
+  if (!fetchMain(home, log, branch)) return false;
+  let stays: string | null;
+  try {
+    stays = advanceHome(home, 'FETCH_HEAD', branch);
+  } catch (e) {
+    stays = `the fast-forward failed (${e instanceof Error ? e.message : String(e)})`;
+  }
+  if (stays) log(`baton: keeping the last course declaration: ${stays}`);
+  return stays == null;
 }
 
 /** The `agent_command` the home checkout's `.baton/baton.json` names ('' when it names none,
@@ -313,7 +387,7 @@ export const syncLogStamped = (verbose: boolean, l: string): void => syncLog(ver
  * permanent listener. One slot: the previous hook comes off before the next goes on. */
 let exitHookFn: ((code: number | undefined) => void) | null = null;
 
-export async function runMain(argv: string[], io: { log?: (l: string) => void; fetch?: (home: string) => void; transport?: (req: Request) => Promise<Response>; env?: NodeJS.ProcessEnv } = {}): Promise<number> {
+export async function runMain(argv: string[], io: { log?: (l: string) => void; fetch?: (home: string) => void; transport?: (req: Request) => Promise<Response>; env?: NodeJS.ProcessEnv; harnesses?: readonly HarnessAdapter[] } = {}): Promise<number> {
   // §6.13: a leg session never claims — the runner that started it does. A nested `baton run`
   // is exactly that session trying, so it is refused before anything else. BATON_PARENT is the
   // runner's name for it (B-97: the transition's IR_BATON_PARENT is gone).
@@ -328,11 +402,25 @@ export async function runMain(argv: string[], io: { log?: (l: string) => void; f
     (io.log ?? ((l: string) => process.stdout.write(`${l}\n`)))(RUN_USAGE);
     return 0;
   }
-  const a = parseRunArgs(argv);
+  const a = parseRunArgs(argv, process.env, io.harnesses);
   // B-121: `--home`/`BATON_HOME` may name a home of ~/.config/baton/homes.json rather than a
   // checkout path — a name resolves to its checkout, refused naming the home when the home has
   // none. A path (a value with `/` or naming an existing directory) keeps R-BTN-131's meaning.
   const home = runnerHome(a.home);
+  const configPath = a.config ?? runnerConfigPath();
+  const checks = a.config || existsSync(configPath) ? (() => {
+    const file = realpathSync(configPath);
+    if (underBatonDirectory(file)) throw new Error('runner capability checks must be configured outside .baton');
+    const config: unknown = JSON.parse(readFileSync(file, 'utf8'));
+    if (!config || typeof config !== 'object' || !('capabilities' in config)) return undefined;
+    const fromCheckout = relative(realpathSync(home), file);
+    if (!isAbsolute(fromCheckout) && !fromCheckout.startsWith('..')) throw new Error('runner capability checks must be configured outside the checkout');
+    return capabilityChecks(config, dirname(file), io.env ?? process.env);
+  })() : undefined;
+  if (checks) {
+    if (checks.origin && !process.env.BATON_URL && !argv.includes('--url')) a.url = checks.origin;
+    a.capabilities = a.capabilities?.filter((name) => checks.names.includes(name)) ?? checks.names;
+  }
   const log = io.log ?? ((l: string) => process.stdout.write(`${l}\n`));
   // Verbose (the owner, 2026-10-23): every line carries the time it was written.
   const say = a.verbose ? withTimestamps(log) : log;
@@ -347,13 +435,15 @@ export async function runMain(argv: string[], io: { log?: (l: string) => void; f
   // B-83: `--harness` drives — the home's settings name no agent_command, so the legs run the
   // harness the flag names (the snapshot's settings stay authoritative when they name one: the
   // stub prefers them, and BATON_AGENT_COMMAND only ever fills an absence).
-  const agentCommand = named === '' && !a.testHarness ? HARNESS_AGENTS[a.harness] : undefined;
-  if (agentCommand) say(`baton: .baton/baton.json names no agent_command — the legs will run the ${a.harness} command (--harness); \`baton repo init --agent ${a.harness}\` names it in the settings`);
+  const agentCommand = named === '' && !a.testHarness ? a.harness.agentCommand : undefined;
+  const hostAdapter = !HARNESS_ADAPTERS.includes(a.harness) ? a.harness : undefined;
+  if (agentCommand) say(`baton: .baton/baton.json names no agent_command — the legs will run the ${a.harness.name} command (--harness)`);
   // B-253 (R-BTN-72): the CLI says what its own code is — its commit, and whether a push moves
   // it — before any credential is read, so an operator starting a runner whose key is missing
   // still learns the code is unpinned. The same statement rides every heartbeat as
   // `profile.cli`: reported, never a refusal.
-  const cli = readCliPin(fileURLToPath(import.meta.url));
+  const cliFile = fileURLToPath(import.meta.url);
+  const cli = readCliPin(cliFile);
   for (const line of cliPinLines(cli)) say(line);
   const auth = envAuth(process.env, (material) => {
     const file = join(cacheDir(), 'key');
@@ -364,7 +454,8 @@ export async function runMain(argv: string[], io: { log?: (l: string) => void; f
   });
   // Every course the home declares, or the one `--course` narrows to (B-103): refused at startup,
   // loudly, when the flag names one the home does not declare — not per claim.
-  const courses = servedCourses(home, a.course);
+  const readCourses = courseReader(home, a.repository, a.course);
+  const courses = readCourses();
   // R-BTN-144 class 7 (B-170): the names this host's `runner.json` `mask_env` lists are masked
   // with the ones that say a secret by their ending. A repository's own settings file is never
   // read for it: only the runner host's configuration names what its legs must not print. The
@@ -381,7 +472,7 @@ export async function runMain(argv: string[], io: { log?: (l: string) => void; f
   // historical log this week began with no hint of what code produced it. B-103: the courses
   // field names every course the heartbeat declares (`--course` narrowed it, or the home's list).
   try {
-    const head = execFileSync('git', ['-C', home, 'rev-parse', '--short', 'HEAD'], { encoding: 'utf8' }).trim();
+    const head = gitText(home, 'rev-parse', '--short', 'HEAD');
     say(`baton: runner starting: home ${home} @ ${head}, capabilities ${declared}, course${courses.length === 1 ? '' : 's'} ${courses.map((c) => `${c.course}@${c.version}`).join(', ')}, host ${a.hostname}, session ${a.session}`);
   } catch { /* a home with no git yet: the rest of the banner still names the run */ }
   // One runner per home checkout: its legs run in the working tree (R-BTN-131). Node's default
@@ -392,6 +483,7 @@ export async function runMain(argv: string[], io: { log?: (l: string) => void; f
   let exitCode = 0;
   let stopping = false;
   let hardStop: NodeJS.Timeout | null = null;
+  let lastHomeNotice = '';
   const codeOf = (signal: NodeJS.Signals): number => (signal === 'SIGINT' ? 130 : signal === 'SIGHUP' ? 129 : 143);
   const onSignal = (signal: NodeJS.Signals) => {
     // 2026-10-24: SIGTERM drains — the current leg completes, the claim ends at its boundary,
@@ -450,9 +542,24 @@ export async function runMain(argv: string[], io: { log?: (l: string) => void; f
     api: new BatonApi({ url: a.url, transport, auth }, say),
     // B-229: the earlier sessions' claims are ended through an API of their own runner's.
     apiFor: (secret: string) => { const other = new BatonApi({ url: a.url, transport, auth }, say); other.setSecret(secret); return other; },
-    home, repository: a.repository, hostname: a.hostname, harness: a.harness, session: a.session,
-    tierCeiling: a.tier, ...(a.capabilities ? { capabilities: a.capabilities } : {}),
+    home, repository: a.repository, hostname: a.hostname, harness: a.harness.name, session: a.session,
+    activityPaths: (checkout) => harnessActivityPaths(checkout, io.harnesses),
+    ...(hostAdapter ? { agentActivity: (checkout: string) => ({
+      command: hostAdapter.agentCommand, paths: harnessActivityPaths(checkout, [hostAdapter]),
+    }) } : {}),
+    ...(a.capabilities ? { capabilities: a.capabilities } : {}),
+    capabilityChecks: checks,
     courses,
+    readCourses,
+    refreshHome: () => {
+      const ok = refreshHome(home, (line) => {
+        if (line !== lastHomeNotice) say(line);
+        lastHomeNotice = line;
+      });
+      if (ok) lastHomeNotice = '';
+      return ok;
+    },
+    ...(a.restartWhenBehind ? { restartReason: () => cliBehind(cliFile, cli) } : {}),
     // B-253 (R-BTN-72): the runner's own statement about its CLI — the start line's subject,
     // carried on every heartbeat as `profile.cli`.
     profile: cliProfile(cli),
@@ -462,7 +569,7 @@ export async function runMain(argv: string[], io: { log?: (l: string) => void; f
     // B-86: the legs the runner's courses require, from the home checkout's working tree — what
     // a never-eligible runner says it lacks at startup. B-103: every served course's legs, as each
     // of them must declare by its own version (rule 9 per course).
-    legNeeds: () => courses.flatMap((c) => legNeeds(home, readHead(home), c.course)),
+    legNeeds: (served) => served.flatMap((c) => legNeeds(home, readHead(home), c.course)),
     stateFile: join(cacheDir(), `${a.session}.json`),
     // R-BTN-202 (B-248): the home's local work queue, shared with `baton queue` and its other runners.
     queue: new LocalQueue(queuePath(cacheDir(), home)),
@@ -472,10 +579,13 @@ export async function runMain(argv: string[], io: { log?: (l: string) => void; f
     ...(a.testHarness ? { testHarness: true } : {}),
     ...(maskEnv ? { maskEnv } : {}),
     ...(a.concurrency !== 1 ? { concurrency: a.concurrency } : {}),
+    ...(a.bounds ? { bounds: a.bounds } : {}),
   });
   try {
-    await runner.work();
+    const result = await runner.work();
+    if (!exitCode) exitCode = result;
   } finally {
+    runner.stop();
     process.off('SIGINT', onSignal);
     process.off('SIGTERM', onSignal);
     process.off('SIGHUP', onSignal);
