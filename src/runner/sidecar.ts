@@ -210,7 +210,9 @@ export class Sidecar {
   private declaringList(): string[] {
     const base = (this.declared ?? this.o.capabilities ?? []).filter((name) => this.o.capabilityChecks?.passes(name) ?? true);
     const locks = this.locks;
-    return locks ? base.filter((c) => !locks.manages(c) || locks.holds(c)) : base;
+    const held = locks ? base.filter((c) => !locks.manages(c) || locks.holds(c)) : base;
+    return this.courses().some((c) => c.course === 'create-pr' && c.version >= 4)
+      ? [...new Set([...held, 'runner:claim-evidence'])] : held;
   }
 
   private async beatOnce(): Promise<void> {
