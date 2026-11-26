@@ -422,8 +422,8 @@ ticket is named, with why it does not cover the draft. Numbers come from Baton a
 | Draft | What | Nearest open ticket, and why not it |
 |---|---|---|
 | **D1** | Mask class 6 on every runner stream. `wrapperCall`'s drain and replay's `onStderr` go through a stateful masker; one test feeds a key block line by line to each sink. (S1) | B-316 is scoped to `createLegMasker`'s own defects. Its own ticket (the owner, 2026-11-24) |
-| **D2a** | **Spec amendment, from the owner's ruling of 2026-11-24.** `human-gates` keeps a variant without hardware keys: §12.8's table states `human-gates` (the three `approvers.*` lists human-only, any `human_key`) and `human-gates-hardware` (the same, with `human_key: hardware`), as `src/core/policy.ts:506-507` computes them. Reaches R-BTN-189's table and its preset sentence ("`protected` holds all but `human-gates`"), the Decisions line at `91-decisions.md:17`, S-BTN-185 and S-BTN-192, R-BTN-185's break-glass sentence, `docs/context/product.mdx`'s floors list and `docs/security-model.mdx`. The history entry records that this reverses B-164's absorption of 2026-11-02. One question follows for the owner (*Owner decisions*): whether `protected` then claims `human-gates`. | none: the reversal is new. B-293 must keep `human-gates-hardware` when it reconciles the knobs |
-| **D2** | The policy's guarantees as §12.8 states them, apart from S2: the protection checker's role can be granted (or the guarantee reads its mark, R-BTN-180); the `sync` and `runner` writer classes; `board-from-trusted` reads `attestations`; the readings entry applied. (S3) | B-293 reconciles the knobs and presets, not the guarantee formulas. Its own ticket (the owner, 2026-11-24) |
+| **D2a** | **Spec amendment, from the owner's rulings of 2026-11-24.** (1) `human-gates` keeps a variant without hardware keys: §12.8's table states `human-gates` (the three `approvers.*` lists human-only, any `human_key`) and `human-gates-hardware` (the same, with `human_key: hardware`), as `src/core/policy.ts:506-507` computes them. (2) `protected` claims `human-gates`: R-BTN-189's preset sentence becomes "`protected` holds all but `human-gates-hardware`, and `protected-hardware` all seven". (3) The protection checker is a grant role: R-BTN-180's roles are `runner`, `trusted-runner` and `protection-checker`, as `policy.ts:983` reads; the `checker` mark, its column in §13 (`runner_grants.checker`), `--checker` in R-BTN-127's table and the mark's exceptions ("offered no leg, admitted to no `outbox` class", the floor-release exemption) go, because a `protection-checker` grant is offered no leg by its role. The refusals R-BTN-180 puts on marking (a null or shared domain, a grant that has claimed a trusted leg or delivers a class) move to setting the role. (4) If the owner agrees, "mark" leaves the spec as a noun (*Owner decisions*). Reaches R-BTN-180, R-BTN-185, R-BTN-189, §12.1's role table, §13, the Decisions line at `91-decisions.md:17`, S-BTN-185 and S-BTN-192, `docs/context/product.mdx`, `docs/context/vocabulary.mdx` and `docs/security-model.mdx`. The history entry records that (1) and (2) reverse B-164's ruling of 2026-11-02. | none: the rulings are new. B-293 must keep `human-gates-hardware` when it reconciles the knobs; B-147's role route sets the new role |
+| **D2** | The policy's guarantees as §12.8 states them, apart from S2: the `protection-checker` role can be granted, once B-147's role route is built, so `no-runner-lands` can hold (S3); the `sync` and `runner` writer classes; `board-from-trusted` reads `attestations`; the readings entry applied. | B-293 reconciles the knobs and presets, not the guarantee formulas. Its own ticket (the owner, 2026-11-24) |
 | **D3** | Refusals that name no role: the five `admin.ts` sites answer the §12.1 form. (S4) | none |
 | **D4** | Activity kinds are the course's. Remove `ACTIVITY_KINDS` and the `review-round` and `push` special cases from core; validate a reported kind against the course's `step_kinds`; build or drop the resume record's `resume` key. | none (B-271 shrinks the model, B-162 moves route choices) |
 | **D5** | One implementation per rule, and no test-only production code. Remove `referenceCandidates` and the `reference` branches; rule 4 through one function; `HELD_CLAIMS_SQL` everywhere; `Registry.live()` for every live-repository filter, and retirement clean-up done once; one branch matcher; drop `invalidateRecommend`, `matchAction`, `bodyMatches`, `recommendations()`, `drainLines`; `repositoryRead`'s dead branches and `PUT …/policy`'s second check. | B-237 and B-243 are performance tickets; B-272 moves code out of `baton.ts` without merging duplicates. D5 can follow B-272 |
@@ -451,25 +451,9 @@ prescribe a removed design*. **Reopen:** B-285.
   secret. The spec follows the code under B-301 (*Corrections*).
 - 2026-11-24: **The executor's `exec` streams** ("streaming needs to be supported"). The spec
   follows the code's `{result, write, kill}` (D13).
+- 2026-11-24: **`protected` claims the hardware-free `human-gates`**, as the code does; `protected-hardware` adds `human-gates-hardware` (D2a).
+- 2026-11-24: **The protection checker is a grant role**, `protection-checker`, as the code reads; not a mark on a `trusted-runner` grant (D2a).
 
 **Owner decisions surfaced, still open:**
 
-- Whether the protection checker is a grant role or a mark (S3, D2). A **role** is the one kind a
-  grant is (`runner` or `trusted-runner` today). It decides which legs the grant is offered and
-  which refs it may update. A **mark** is a yes/no flag beside the role, `runner_grants.checker`
-  in §13, set by the same `approvers.roles` approver. R-BTN-180 specifies a mark: only a
-  `trusted-runner` grant with its own domain may carry it; while marked, the grant is offered no
-  leg and delivers nothing; only its `protection` report counts; and clearing the mark voids
-  that report. The code looks for a third role value, `protection-checker`, which nothing sets.
-  Recommended: a role. The exceptions the mark needs ("offered no leg, admitted to no outbox
-  class, exempt from the floor release") then follow from the role, and the simplification
-  review's "one role, two jobs" weld goes. The code already expects a role, so R-BTN-180 changes
-  instead of `policy.ts`. Either way, the role route (B-147's design) must be built before any
-  report counts.
-
-- Whether `protected` claims the hardware-free `human-gates`. The code says yes: the preset's
-  three lists are `['human']`, so `human-gates` holds and `human-gates-hardware` does not. The
-  spec says `protected` "holds all but `human-gates`", for a reason the history records: under
-  `human_key: any` a human-only list rests on key custody alone (R-BTN-185). Recommended: yes, as
-  the code does. The variant exists to be claimed without hardware, and `human-gates-hardware`
-  names the stronger promise.
+- Whether "mark" stays as a noun. With the checker a role, the spec uses it for three yes/no properties: a key's `human_only` mark (§11.2, §12.1), the action registry's `delegated` marks (§12.8, unbuilt with the registry) and the tenant's "freeze mark" (S-BTN-299). The vocabulary page does not define it, and the dashboard and CLI never say it: they say "human-only key", "delegated key" and "frozen". Recommended: drop the noun, and write the property instead ("a `human_only` key", "an action open to delegated keys", "the tenant is frozen"). The properties stay; `human_only` is what `human-gates` reads. The verb ("marks the lease lost") is plain English and stays.
