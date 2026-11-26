@@ -118,8 +118,10 @@ export const CREATE_PR_COURSE = {
     // B-110: review also leaves `reviewed` — the owner's `round` answer grants exactly one more
     // round on the same head (the answer itself carries the run, §6.8; the round's verdict is
     // its marker, and a round still asking for changes comes straight back to the owner).
-    // B-30 (S-BTN-63): review cannot be claimed or chained by a credential that wrote the change.
-    review: { from: ['pr-open', 'fixed', 'reviewed'], to: 'reviewed', max_runs: DEFAULT_CREATE_PR_REVIEW_ROUNDS, no_chain_from: ['implement', 'fix'], autonomous: true, label: 'Review round' },
+    // B-30's `no_chain_from: [implement, fix]` was lifted on 2026-11-25 (the owner: it does not
+    // make sense now that legs are sandboxed and isolated); a deployment with one runner could
+    // review nothing. The review instructions still ask for a different model when one is offered.
+    review: { from: ['pr-open', 'fixed', 'reviewed'], to: 'reviewed', max_runs: DEFAULT_CREATE_PR_REVIEW_ROUNDS, autonomous: true, label: 'Review round' },
     fix: { from: ['reviewed', 'pr-open', 'fixed'], to: 'fixed', max_runs: 30, max_duration: CREATE_PR_ASK_DEADLINE_S, label: 'Fix or answer the findings' },
     adjudicate: { from: ['reviewed'], to: 'adjudicated', autonomous: true, label: 'The owner answers the third round' },
     merge: { from: ['reviewed', 'adjudicated'], to: 'merged', autonomous: true, label: 'Merge and close the ticket' },

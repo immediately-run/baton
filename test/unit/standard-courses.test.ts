@@ -139,11 +139,13 @@ describe('the standard courses (R-BTN-131)', () => {
     expect(text).toContain('Your word alone never closes the ticket');
   });
 
-  it("create-pr's shipped and home reviews require independent credentials and a different model when available (B-30, S-BTN-63)", () => {
+  it("create-pr's shipped and home reviews may chain from implement and fix, and ask for a different model when available (B-30, lifted 2026-11-25)", () => {
     const home = join(__dirname, '..', '..', '.baton', 'courses', 'create-pr');
     const owned = JSON.parse(readFileSync(join(home, 'course.json'), 'utf8'));
-    expect(owned.legs.review.no_chain_from).toEqual(['implement', 'fix']);
-    expect(builtIn('create-pr')!.course.legs.review).toMatchObject({ no_chain_from: ['implement', 'fix'] });
+    // The owner, 2026-11-25: with sandboxed, isolated legs a credential rule adds no independence,
+    // and one runner must be able to review its own course's work.
+    expect(owned.legs.review.no_chain_from).toBeUndefined();
+    expect(builtIn('create-pr')!.course.legs.review.no_chain_from).toBeUndefined();
     for (const dir of [instructionsDir('create-pr'), join(home, 'legs')]) {
       const text = readFileSync(join(dir, 'review.md'), 'utf8');
       expect(text, dir).toMatch(/Before launching the reviewer, the runner's\s+command, wrapper or override must select a model different from those used for `implement`\s+and `fix` on this ticket whenever it can/);
