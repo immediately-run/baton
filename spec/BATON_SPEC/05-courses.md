@@ -32,7 +32,9 @@ Designs for this section that are not built are on the proposal page
     when the reader already has the commit. It never fetches by commit id.
   - **A branch source** has no trust check: no reader checks its commit against the source's
     default branch, so the course is whatever anyone who can push to that branch puts there. It
-    is for development. Every reader of one — `baton repo init`, `baton course show`, the sync
+    is for development, and a protected repository (R-BTN-188) accepts one too: the warning is the
+    safeguard, not a refusal, because course development is iterative everywhere and a forced pin
+    per change invites workarounds that leave Baton out. Every reader of one — `baton repo init`, `baton course show`, the sync
     and a runner's claim — prints `baton: warning: course <id> follows branch <branch> of
     <owner>/<name> (resolved to <sha10>): unpinned, no trust check — for development only; pin a
     commit for production` (`init`, which reads no commit, omits the commit), and the sync
