@@ -1,7 +1,7 @@
 // R-BTN-135: the origin and handshake parts of S-BTN-111 and G-BTN-131 on both hosts.
 import { expect, inject, it } from 'vitest';
 import { config, tickHost } from '#host';
-import { call, claimItem, claimRow, cutover, ORIGIN, payload, rawCall, register, rows, setClock, syncCall, syncToken, withCore } from '../helpers';
+import { call, claimItem, claimRow, clearSetting, cutover, ORIGIN, payload, rawCall, register, rows, setClock, syncCall, syncToken } from '../helpers';
 import { servedClientVersions, VERSIONS_HEADER } from '../../src/core/http';
 import { clientVersionsValue } from '../../src/shared/versions.mjs';
 
@@ -35,7 +35,8 @@ it('reaps on the first post-upgrade alarm, before traffic binds the store (S-BTN
   const claim = await claimItem('vm-a', runner.secret, { ticket_id: 'docs:R3-9001' });
   expect(claim.status).toBe(200);
   // Represent storage as it was on the pre-handshake deployment, with a lease already live.
-  await withCore(({ store }) => store.exec("DELETE FROM baton_settings WHERE key IN ('tenant_id', 'tenant_handshake_required')").toArray());
+  await clearSetting('tenant_id');
+  await clearSetting('tenant_handshake_required');
   await setClock(now + 900_000);
   await tickHost();
   expect(await binding()).toEqual([{ value: 'baton' }]);

@@ -9,6 +9,7 @@ import type { Store } from '../../src/core/ports';
 import { RECOMMENDED_CLIENT } from '../../src/core/http';
 import { front } from '../../src/core/front';
 import { clockBucket, stateEtag } from '../../src/core/stateVersion';
+import { forTenant, TENANT_ID } from '../../src/shell/tenant';
 import type { Baton } from '../../src/cloudflare/baton';
 import { Git, hbBody, ORIGIN, sha256, syncToken } from '../helpers';
 import { makeKey, signedRequest } from '../lib/sshKeys';
@@ -80,7 +81,7 @@ describe('migration 0142: retire tiers (B-322)', () => {
       job_workflow_ref: `${TIER_DROP_FORGE_REPO}/.github/workflows/baton-sync.yml@refs/heads/main`,
     });
     const client = { 'Baton-Client': `baton/${RECOMMENDED_CLIENT}` };
-    const send = (req: Request) => front(req, env, (forwarded) => stub.fetch(forwarded));
+    const send = (req: Request) => front(req, env, (forwarded) => stub.fetch(forTenant(forwarded, TENANT_ID)));
     const sync = (path: string, body: unknown) => send(new Request(ORIGIN + path, {
       method: 'POST', headers: { ...client, Authorization: `Bearer ${syncAuth}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body),
     }));
