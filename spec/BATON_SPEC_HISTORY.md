@@ -18,6 +18,47 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
 
 ## Changelog
 
+- **2026-11-26 — Two human gates, `protected` claims the custody one, `exec` streams, and "mark" leaves the vocabulary (R-BTN-189, R-BTN-185, R-BTN-107).**
+  Rules changed: R-BTN-189, R-BTN-185, R-BTN-107, R-BTN-186, R-BTN-57, §12.1; S-BTN-185,
+  S-BTN-190, S-BTN-192, S-BTN-299; one Decisions entry; the linked proposals (people and
+  dashboard, intervention sessions, conditions, data model and API, scenarios: S-BTN-100,
+  S-BTN-197). From the code-against-spec review of 2026-11-24
+  (`docs/review/code-vs-spec-review-2026-11-24.mdx`), whose owner decisions these are.
+  - **Two human gates.** The owner, 2026-11-24, asked whether `human-gates` keeps a variant
+    without hardware keys: "yes"; and, 2026-11-26, whether the `protected` preset claims it:
+    "yes". R-BTN-189 again names two guarantees: `human-gates` (`approvers.members` and
+    `approvers.policy` human-only, any `human_key`), resting on the custody §12.8 lists as not
+    observed, as every guarantee rests on the deployment's duty; and `human-gates-hardware`
+    (the same, `human_key: hardware`, and a key that can meet it), which holds nowhere until
+    FIDO attestation verification is built (R-BTN-185, B-136). `protected` holds all but
+    `human-gates-hardware`; `protected-hardware` all six once a key can meet `hardware`.
+    Legacy `human-gates` and `human-gates-hardware` compare by name, and a floor keeps its
+    guarantee's name. This reverses the restructure's part 2 of 2026-11-02 (B-164: "Only
+    protected-signed", `human-gates-hardware` absorbed into `human-gates`), the legacy
+    comparison B-293's spec half wrote on 2026-11-22 ("Legacy `human-gates` (the weaker
+    condition) … no migration successor"), and R-BTN-185's "no guarantee claims it as a human
+    gate". What it loosens: under `human_key: any`, `protected` now claims a human gate that an
+    agent session holding a human-only key, or driving a signed-in browser, defeats; Baton
+    cannot tell, which is why the promise names custody. The code is behind: B-136 (#331,
+    2026-11-24) returns `false` for both guarantees (`src/core/policy.ts`), refusing
+    custody-only gates; computing `human-gates` from the lists again, and S-BTN-190's legacy
+    cases, are the policy-guarantee ticket the review drafted as D2, to file.
+  - **The protection checker.** The owner, 2026-11-26, chose a grant role over a mark. B-189's
+    amendment of 2026-11-24 had already retired the protection checker, grant roles and the
+    checker mark, so nothing changes here.
+  - **"Mark" is not a noun of Baton's.** The owner, 2026-11-26: "Marks are not present on the
+    dashboard and cli. Is this a bit of vocabulary baton truly needs?", and, offered dropping
+    it: "yes, drop it". The spec named three yes/no properties a mark, and the proposals two
+    more: a key's `human_only` (§12.1, R-BTN-57), the registry's `delegated` value (R-BTN-186,
+    the people-and-dashboard and intervention-sessions proposals, S-BTN-100), whether the
+    tenant is frozen (S-BTN-299), an outbox delivery report (the conditions and data-model
+    proposals) and a grant's `intervener` setting (the intervention-sessions proposal). Each
+    now names the property; none changes. The verb ("marks the lease lost") stays.
+  - **`exec` streams.** The owner, 2026-11-24, asked whether R-BTN-107's `exec` returns
+    `{status, stdout, stderr}` or the streaming object the code returns: "streaming needs to be
+    supported". `exec(handle, argv, {cwd, timeout_s, stdin, env, onStderr}) → {result, write,
+    kill}`, as `src/runner/executor.ts` and Fieldhouse's E2B executor implement it; no executor
+    implements the old shape, so `executor_api` stays 1.
 - **2026-11-26 — A protected repository accepts a branch course source (R-BTN-134).**
   Rules changed: R-BTN-134 (*A branch source*). #395 left open whether a protected repository
   (R-BTN-188) should refuse branch sources. The owner's ruling, 2026-11-26: "No, the #395 warning

@@ -58,8 +58,8 @@ repository, its owners, its members and administrators, except where a route's r
   and is null for a key no grant binds there, an owner's or an administrator's included.
 
 - **One role per key.** In a tenant every key holds exactly one role: administrator, owner,
-  member, runner, check-runner, instrument, sync or mirror; `human_only` is a mark, not a role, carried
-  by an owner key or by a key of no other role (R-BTN-185). Registering a key that holds
+  member, runner, check-runner, instrument, sync or mirror; `human_only` is not a role but a property
+  of an owner key or of a key of no other role (R-BTN-185). Registering a key that holds
   another role is refused `conflict`, whatever its kind (SSH or API); the refusal does not name
   the role. A machine key whose every grant is pending and was never accepted holds no role yet,
   so a grant naming any public key reserves nothing; its acceptance is checked as a
@@ -478,19 +478,20 @@ confines a leg's credentials; a compromised forge; and a compromised Baton.
     | `control-paths-human` | no control path (R-BTN-184) changes without a human landing it | the landing condition, and `paths.control` is `human` |
     | `tickets-approved` | no ticket or goal changes, and no ticket a runner creates is filed, without a human approval of that file: a `std:approval@1`, or the human's merge of the PR carrying it | the landing condition; `paths.tickets` is `approval`; `attestations` admits only `human` for `std:approval@1`; and the last accepted post's ticket source is the markdown source (`source.kind: markdown`, R-BTN-74) |
     | `independent-review` | a change the merge leg lands has at least two reviews of its exact head, each from its own run of a `reads_only` review leg (R-BTN-183); what the human merges by hand, the human has reviewed | the landing condition; `merge.reviews.count` ≥ 2; and `attestations` admits only `baton` for `std:review@1` and `std:wrote@1` |
-    | `human-gates` | no owner's agent session, and no delegated key, changes owners, members, grants and their capabilities, or the policy, and every human approval is made on a hardware key | `approvers.members` and `approvers.policy` are human-only lists, and the repository's `human_key` is `hardware` |
+    | `human-gates` | no owner's agent session, and no delegated key, changes owners, members, grants and their capabilities, or the policy, so long as the deployment keeps every human-only key and the dashboard's sign-in from agent sessions (custody, which Baton does not observe; R-BTN-185) | `approvers.members` and `approvers.policy` are human-only lists |
+    | `human-gates-hardware` | what `human-gates` promises, without resting on custody: every human approval is made on a hardware key Baton has verified | `human-gates`'s condition, the repository's `human_key` is `hardware`, and a key can meet `hardware` (R-BTN-185); until FIDO attestation verification is built none can, so it holds nowhere |
     | `board-from-trusted` | nothing a trusted leg acts on comes from a board post's word or from git verdicts | the landing condition, and the `attestations` entries admit no `sync` writer for `std:arrival@1` or `std:decision@1`, and only `human` for `std:decision@1` |
 
     Every guarantee holds against hostile legs, pushers and content where the deployment keeps
     §12.8's duty, within what its knobs' enforcers enforce and nothing §12.8's lists exclude;
-    none holds against a compromised runner. Each of the other four rests on the **landing
-    condition** — `merge.trusted`, `tickets.created` is `proposed`, and `paths.control` is not
+    none holds against a compromised runner. Each but `human-gates` and `human-gates-hardware`
+    rests on the **landing condition** — `merge.trusted`, `tickets.created` is `proposed`, and `paths.control` is not
     `any` — under which a change reaches the default branch only through the merge leg
     (R-BTN-183) or the human identity's own merge (R-BTN-180), and the courses and
     configuration the merge leg's checks rest on never land by those checks alone. Against an injected owner's agent, one holds only together with
     `human-gates`: an `owner` approver can add a member or admit a trusted leg's capability on a
     grant, which no other guarantee constrains. The `protected` preset holds all but
-    `human-gates`, and `protected-hardware` all five.
+    `human-gates-hardware`, and `protected-hardware` all six once a key can meet `hardware`.
   - **Floors.** The policy's `floors` knob lists guarantees by name. Setting it is a policy change
     like any other, refused when a listed guarantee's policy conditions are not met by the
     document after the change. From then on Baton refuses any policy change after which a
@@ -500,19 +501,17 @@ confines a leg's credentials; a compromised forge; and a compromised Baton.
     holds. A consumer reads the `floors` list and the computed `guarantees`, never a floor's name
     alone.
   - **Comparing legacy guarantees.** Compare policy conditions on the same repository facts.
-    Compare `control-paths-human`, `tickets-approved`, `independent-review` and
-    `board-from-trusted` by name, and compare legacy `human-gates-hardware` to current
-    `human-gates`. A held comparable guarantee becoming broken stops the migration, even if
-    unfloored. Legacy `human-gates` (the weaker condition) and `signed-authorship` have no
+    Compare `control-paths-human`, `tickets-approved`, `independent-review`,
+    `board-from-trusted`, `human-gates` and `human-gates-hardware` by name. A held comparable
+    guarantee becoming broken stops the migration, even if unfloored. `signed-authorship` has no
     migration successor. Report each such held guarantee that was not floored in the
     repository's migration audit; it does not by itself prevent migration. A floor naming the
     retired `no-runner-lands` or `trusted-domain-separate` is dropped, not compared (B-189; the
     history's *Migrations the implementation still carries*). This comparison does not replace
     R-BTN-188's check against widening authority.
   - **Legacy floors.** Project the union of the guarantees the named rows list, using the
-    comparison's successor names. A floor on `human-gates-hardware` thus becomes a floor on
-    `human-gates`, provided its policy conditions and removal restriction are preserved. A
-    floor with no successor or whose successor's policy conditions are unmet stops migration.
+    comparison's successor names. A floor keeps its guarantee's name, provided its policy conditions and
+    removal restriction are preserved. A floor with no successor or whose successor's policy conditions are unmet stops migration.
     The prior `approvers.policy` gate must imply the old `remove_by` gate not only now but in
     every allowed later version that retains the floor. Reject a floor if the document cannot
     preserve that restriction: `[human]` today does not preserve `remove_by: human` if a later
@@ -666,7 +665,8 @@ confines a leg's credentials; a compromised forge; and a compromised Baton.
     key registered before the switch that does not meet it; what meets it, and what the CLI
     shows before a signature, are [proposed](../proposals/security.md) (B-136). Under `any` a
     human-only list is a custody promise: Baton cannot tell a key an agent session can use, so
-    no guarantee claims it as a human gate (`human-gates`, R-BTN-189).
+    `human-gates` rests on that custody, and only `human-gates-hardware` claims a key Baton has
+    verified (R-BTN-189).
   - Until FIDO attestation verification is built, no key, including a break-glass line, meets
     the repository's `hardware` minimum. A stored attestation marker alone is not evidence.
   - **A session is a human.** Every administrator's, owner's and member's session (R-BTN-155)
@@ -715,9 +715,9 @@ confines a leg's credentials; a compromised forge; and a compromised Baton.
     it could not lift (R-BTN-163); never writes an attestation or answers a person's leg; never
     holds credential management (`check_runners`, `api_keys`); never sets
     or changes `checks` or `unblocked_trigger`, in either direction; and never performs an action
-    an `approvers.*` list governs. This is the one rule of what a delegated key may do; the
-    registry's `delegated` marks derive from it and R-BTN-130 exposes over MCP exactly what they
-    admit (R-BTN-129).
+    an `approvers.*` list governs. This is the one rule of what a delegated key may do; which
+    registry entries a delegated key may call derives from it, and R-BTN-130 exposes over MCP
+    exactly those (R-BTN-129).
   - **Loosening** what another credential set — lifting another's hold, removing or narrowing
     another's bar, any change that loosens an R-BTN-66 setting — is an `approvers.policy`
     approver's (R-BTN-188): an owner's under `[owner]`, a human's under a human-only list.

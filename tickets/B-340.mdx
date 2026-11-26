@@ -72,7 +72,7 @@ under `human_key: hardware`, "only with a per-act key touch".
 
 - **R-BTN-185**: a key outside a session is `human` only when `human_only`; a session gains no
   action its role lacks by being `human`.
-- **`human-gates`** (R-BTN-189): under `hardware` every human approval is made on a hardware key.
+- **`human-gates-hardware`** (R-BTN-189): under `hardware` every human approval is made on a hardware key; ~~`human-gates`~~ `human-gates` rests on custody and holds under `any` (2026-11-26).
 - **R-BTN-186**: the session-only touch is the dashboard's way to carry the human; the CLI keeps
   the human-only key's signature.
 - **Both hosts** (R-BTN-55); migrations append-only.
@@ -92,3 +92,5 @@ _filed 2026-11-23._
 
 _(Filed with the spec PR for every person role on the dashboard. Number taken by the offline
 scan: the filing session held no Baton key.)_
+
+_(2026-11-26: rules re-read: R-BTN-189, R-BTN-185. The amendment of that date (`spec/BATON_SPEC_HISTORY.md`) is written into this plan: the hardware promise is `human-gates-hardware`'s; `human-gates` rests on custody.)_

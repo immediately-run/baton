@@ -281,8 +281,13 @@ section that are not built are in [the proposal page](../proposals/checks-and-ex
       credential inheritance is governed by R-BTN-144. `channel` is the address of the leg's
       channel (R-BTN-106). A handle may name
       the session's link, which the runner reports as R-BTN-113 says.
-    - `exec(handle, argv, {cwd, timeout_s, stdin}) → {status, stdout, stderr}` runs a command
-      where the session runs; the call's stdin stays open for further lines until it ends.
+    - `exec(handle, argv, {cwd, timeout_s, stdin, env, onStderr}) → {result, write, kill}` runs
+      a command where the session runs and returns at once, while it runs: `result` resolves to
+      `{status, stdout, stderr}` when it ends; `write(line)` adds a line to its stdin after
+      `stdin`'s first, which stays open until the call ends (an executor that cannot stream stdin
+      queues the lines); `kill()` stops the call's processes; `onStderr(line)` receives each
+      stderr line as it arrives; `env` adds variables to the session's for this call, within
+      R-BTN-144.
     - `stop(handle, reason)` stops the session. The executor chooses how to stop it;
       R-BTN-145 governs the total time, including the runner's handling before this call.
     - `end(handle) → {status, result}` waits for the session's end. A session that does not exit

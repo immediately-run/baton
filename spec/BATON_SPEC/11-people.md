@@ -93,7 +93,7 @@ built; their design is [the people and dashboard proposal](../proposals/people-a
     functions the entity reads use (R-BTN-179), with no session. Each act is an `admin` event.
   - **Grants and owners.** Making or changing a grant, changing a key's hostname and adding an
     owner are `approvers.members` actions (R-BTN-188). An administrator key's request is
-    `forbidden` where that list is human-only, since it carries no `human_only` mark (§12.1); an
+    `forbidden` where that list is human-only, since an administrator key is never `human_only` (§12.1); an
     administrator's session is a human (R-BTN-185).
   - **Revocation.** An administrator revokes any key at once but an administrator's. Revoking
     an owner key removes it from every repository it owns, the last owner included (an

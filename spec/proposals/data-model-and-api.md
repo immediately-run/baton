@@ -310,7 +310,7 @@ surfaces of actions the dashboard or the heartbeat serves today.
   - exhausts its registration tokens; the credentials those tokens registered are not revoked
     (R-BTN-117);
   - drops its `queued`, `claimed` and `delivered` outbox entries, logging each; a deliverer's
-    later mark of one is ignored (R-BTN-171);
+    later report on one is ignored (R-BTN-171);
   - deletes its sync wants, its ticket timers and every consent row it gave or was given
     (R-BTN-94, R-BTN-167, R-BTN-140).
 - **Consent (R-BTN-140).** A `code_repos` entry whose `{host, repo_id}` is a registered
