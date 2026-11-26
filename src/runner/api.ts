@@ -9,6 +9,7 @@ import type { AdvanceAnswer, BeatAnswer, ClaimAnswer } from '../shared/runner-wi
 import { readFileSync } from 'node:fs';
 import { API_KEY, signHeaders, signingKey } from '../client/sign.mjs';
 import { clientVersion } from '../client/version.mjs';
+import type { Head, Observation } from '../shared/batonSync.mjs';
 import { compareVersions, parseClientVersions } from '../shared/versions.mjs';
 import { isAdvanceAnswer, isBeatAnswer, isClaimAnswer, record } from './replies';
 
@@ -170,15 +171,15 @@ export class BatonApi {
   }
   /** §7.1: the sync's three calls — the observation first (R-BTN-62), then the head, then the
    * board post carrying it. */
-  observation(): Promise<Record<string, any>> {
-    return this.call('POST', '/v1/sync/observation', {});
+  observation(): Promise<Observation & Record<string, unknown>> {
+    return this.call('POST', '/v1/sync/observation', {}) as Promise<Observation & Record<string, unknown>>;
   }
   /** R-BTN-62: give back a number this run will not post under. */
   releaseObservation(n: number): Promise<Record<string, any>> {
     return this.call('POST', '/v1/sync/observation', { release: n });
   }
-  head(): Promise<Record<string, any>> {
-    return this.call('GET', '/v1/sync/head');
+  head(): Promise<Head> {
+    return this.call('GET', '/v1/sync/head') as Promise<Head>;
   }
   /** B-113 (§4.3): the sync's dependencies read — the qualified `depends_on` entries of other
    *  repositories the posting repository's tickets name, resolved against their boards (their
@@ -186,7 +187,7 @@ export class BatonApi {
   dependencies(ids: string[]): Promise<Record<string, any>> {
     return this.call('POST', '/v1/sync/dependencies', { ids });
   }
-  board(body: Record<string, unknown>): Promise<Record<string, any>> {
+  board(body: Record<string, unknown>): Promise<Record<string, unknown>> {
     return this.call('POST', '/v1/sync/board', body);
   }
   claim(body: { request_id: string; ticket_id?: string; legs?: string[] }): Promise<ClaimAnswer> {

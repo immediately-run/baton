@@ -105,7 +105,7 @@ function listOnce(dirs: string[], answer: { fail: true } | { line: string }): { 
     'for a in "$@"; do if [ "$a" = "ls-remote" ]; then n=1; fi; done',
     `if [ "$n" = "1" ] && [ ! -e ${flag} ]; then`,
     `  touch ${flag}`,
-    ...(answer.fail ? ['  exit 1'] : [`  printf '%b\\n' ${JSON.stringify(answer.line)}`]),
+    ...('fail' in answer ? ['  exit 1'] : [`  printf '%b\\n' ${JSON.stringify(answer.line)}`]),
     '  exit 0',
     'fi',
     `exec ${JSON.stringify(realGit)} "$@"`,

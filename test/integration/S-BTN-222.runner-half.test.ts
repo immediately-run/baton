@@ -234,7 +234,8 @@ export async function handoff() { return 'https://example.test/handoff'; }`,
   it('refuses invalid moves locally, then arrives with a staged output and suspends before an unlisted leg', async () => {
     // The output is this test's own: a declared output is required of every completed run (B-39),
     // so the shared course, whose other tests produce none, declares none.
-    const graph = { ...COURSE, legs: { ...COURSE.legs, implement: { ...COURSE.legs.implement, outputs: { effect: { schema: 'std:effect@1' } } } },
+    const legs = COURSE.legs as Record<string, Record<string, unknown>>;
+    const graph = { ...COURSE, legs: { ...legs, implement: { ...legs.implement, outputs: { effect: { schema: 'std:effect@1' } } } },
       stations: { ...roadmapPr.stations, 'pr-open': { entry: [{ output: 'effect', schema: 'std:effect@1' }] } } };
     git.registry[0] = courseEntry(3, 3, { course: graph });
     const { home, sha } = writeHome(scripts, graph);

@@ -1,0 +1,407 @@
+{
+  "cli/default-url.d.mts": {
+    "baton/file-name": {
+      "count": 1
+    }
+  },
+  "cli/default-url.mjs": {
+    "baton/file-name": {
+      "count": 1
+    }
+  },
+  "scripts/check-standalone.self-test.mjs": {
+    "baton/file-name": {
+      "count": 1
+    }
+  },
+  "scripts/lib/check-exceptions.mjs": {
+    "baton/file-name": {
+      "count": 1
+    }
+  },
+  "scripts/lib/core-routes.mjs": {
+    "baton/file-name": {
+      "count": 1
+    }
+  },
+  "scripts/lib/spec-code.mjs": {
+    "baton/file-name": {
+      "count": 1
+    }
+  },
+  "scripts/lib/sql-dialect.mjs": {
+    "baton/file-name": {
+      "count": 1
+    }
+  },
+  "scripts/lib/wiki-references.mjs": {
+    "baton/file-name": {
+      "count": 1
+    }
+  },
+  "src/client/git-env.d.mts": {
+    "baton/file-name": {
+      "count": 1
+    }
+  },
+  "src/client/git-env.mjs": {
+    "baton/file-name": {
+      "count": 1
+    }
+  },
+  "src/defaults/cli.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 27
+    }
+  },
+  "src/defaults/courses.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "src/local/testCourse.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 2
+    }
+  },
+  "src/runner/api.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 8
+    }
+  },
+  "src/runner/claimRun.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 3
+    }
+  },
+  "src/shared/runner-wire.ts": {
+    "baton/file-name": {
+      "count": 1
+    }
+  },
+  "test/githubFake.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 7
+    }
+  },
+  "test/helpers.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 11
+    }
+  },
+  "test/integration/B-169.security-corrections.test.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "test/integration/B-175.check-conclusions.test.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "test/integration/B-235.event-lookups.test.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 2
+    }
+  },
+  "test/integration/B-237.idle-reads.test.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "test/integration/B-240.dashboard-queries.test.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 10
+    }
+  },
+  "test/integration/B-249.lease-recovery.test.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "test/integration/B-250.runners-view-reads.test.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 12
+    }
+  },
+  "test/integration/S-BTN-126.people-api-keys.test.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "test/integration/S-BTN-166.reads.test.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 4
+    }
+  },
+  "test/integration/S-BTN-189.repository-policy.test.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 5
+    }
+  },
+  "test/integration/S-BTN-190.guarantees-floors.test.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 4
+    }
+  },
+  "test/integration/S-BTN-192.approver-lists.test.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "test/integration/S-BTN-199.ticket-pickup.test.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 4
+    }
+  },
+  "test/integration/S-BTN-202.leg-scope.test.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "test/integration/S-BTN-206.opaque-versions.test.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 6
+    }
+  },
+  "test/integration/S-BTN-21.capacity.test.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "test/integration/S-BTN-222.interact.test.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 2
+    }
+  },
+  "test/integration/S-BTN-222.runner-half.test.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 4
+    }
+  },
+  "test/integration/S-BTN-227.client-versions.test.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "test/integration/S-BTN-229.runner-half.test.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 5
+    }
+  },
+  "test/integration/S-BTN-234.sequences.test.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 3
+    }
+  },
+  "test/integration/S-BTN-250.session-reads.test.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 3
+    }
+  },
+  "test/integration/S-BTN-251.session-or-key.test.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "test/integration/S-BTN-254.repositories.test.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "test/integration/S-BTN-255.actions.test.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "test/integration/S-BTN-256.small-reads.test.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "test/integration/S-BTN-260.tickets-list.test.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "test/integration/S-BTN-261.ticket-show.test.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "test/integration/S-BTN-262.completion-confirm-release.test.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "test/integration/S-BTN-288.course-show.test.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "test/integration/S-BTN-289.course-summary.test.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "test/integration/S-BTN-295.credentials-read.test.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "test/integration/S-BTN-296.registry-read.test.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "test/integration/S-BTN-297.capacities-read.test.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "test/integration/S-BTN-298.instances-resources-reads.test.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "test/integration/S-BTN-299.tenant-read.test.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "test/integration/S-BTN-300.sessions-read.test.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "test/integration/S-BTN-301.tenant-callers.test.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "test/integration/S-BTN-32.owners-grants.test.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "test/integration/S-BTN-37.course-renames.test.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 2
+    }
+  },
+  "test/integration/S-BTN-38.course-stats.test.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "test/integration/S-BTN-39.limits.test.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 2
+    }
+  },
+  "test/integration/S-BTN-4.hung-runner.test.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "test/integration/S-BTN-41.runner.test.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 4
+    }
+  },
+  "test/integration/S-BTN-48.replay.test.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 2
+    }
+  },
+  "test/integration/S-BTN-77.host-allowlists.test.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "test/integration/S-BTN-77.runner-half.test.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 4
+    }
+  },
+  "test/lib/fleet.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 3
+    }
+  },
+  "test/lib/needsYouFixture.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "test/lib/runnerFleet.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "test/model/replay.test.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 12
+    }
+  },
+  "test/unit/admin.test.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 2
+    }
+  },
+  "test/unit/alarm-reaper.test.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 4
+    }
+  },
+  "test/unit/claims-gate.test.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 4
+    }
+  },
+  "test/unit/claims.test.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 15
+    }
+  },
+  "test/unit/cli.test.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 5
+    }
+  },
+  "test/unit/course.test.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "test/unit/defaults-cli.test.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "test/unit/graph.test.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "test/unit/mirror.test.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "test/unit/queues.test.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "test/unit/runners.test.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "test/unit/ticket-state.test.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  }
+}

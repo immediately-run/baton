@@ -9,6 +9,7 @@ import { Stations } from './stations';
 import { Questions } from './questions';
 import { Conditions } from './conditions';
 import { Admin } from './admin';
+import { batonNow } from '../shared/baton.mjs';
 import { RunnerApi } from './runnerApi';
 import { Claims } from './claims';
 import { forgeScope } from './forgeScope';
@@ -111,7 +112,7 @@ export class BatonCore {
   readonly outside: <T>(work: () => Promise<T>) => Promise<T>;
 
   constructor(private readonly ports: Ports) {
-    this.now = ports.clock ?? (() => Date.now());
+    this.now = ports.clock ?? batonNow;
     this.random = ports.random ?? systemRandom;
     this.store = versionedStore(ports.store);
     this.dispatcher = (wf) => sendDispatch(this, ports.dispatch, wf);

@@ -36,7 +36,7 @@ describe('plan: one request per command', () => {
       method: 'POST', path: '/v1/admin/repositories', body: { id: 'ops', retire: true, confirm: true },
       confirm: { question: 'retire ops? everything scoped to it ends — sessions, keys, grants, claims — and its id is never registered again', yes: false },
     });
-    expect(plan('admin', ['repo', 'retire', 'ops', '--yes'], key).confirm.yes).toBe(true);
+    expect(plan('admin', ['repo', 'retire', 'ops', '--yes'], key).confirm?.yes).toBe(true);
     expect(plan('admin', ['grant', 'docs', '--key', PUB, '--hostname', 'h', '--capabilities', 'human-operator'], key).body)
       .toEqual({ repository: 'docs', public_key: PUB, hostname: 'h', capabilities: ['human-operator'] });
     expect(plan('admin', ['revoke', 'SHA256:a/b'], key).path).toBe('/v1/admin/keys/SHA256%3Aa%2Fb/revoke');
@@ -47,7 +47,7 @@ describe('plan: one request per command', () => {
     // retired flag is not quietly dropped (B-105's finding).
     expect(plan('admin', ['resource', 'add', 'anthropic-capacity', '--scope', 'account', '--schema', '{"type":"object"}'], key).body)
       .toEqual({ name: 'anthropic-capacity', scope: 'account', detail_schema: { type: 'object' } });
-    expect(plan('admin', ['resource', 'add', 'disk:fs-1', '--scope', 'service', '--schema', '{"type":"object"}'], key).body.scope).toBe('service');
+    expect(plan('admin', ['resource', 'add', 'disk:fs-1', '--scope', 'service', '--schema', '{"type":"object"}'], key).body?.scope).toBe('service');
     expect(() => plan('admin', ['resource', 'add', 'x', '--scope', 'runner', '--schema', '{"type":"object"}'], key)).toThrow('retired');
     expect(() => plan('admin', ['resource', 'add', 'x', '--scope', 'sometimes', '--schema', '{"type":"object"}'], key)).toThrow('account or service');
     expect(() => plan('admin', ['resource', 'add', 'x', '--scope', 'account', '--schema', '{"type":"object"}', '--atoms-from', 'any'], key)).toThrow('not a flag');
@@ -252,7 +252,7 @@ describe('plan: one request per command', () => {
       id: 'proj', github: 'group/sub/proj', default_branch: 'main', forge: 'gitlab', remote: 'https://gitlab.example.com/group/sub/proj.git', web_base: 'https://gitlab.example.com/group/sub/proj',
       ci_identity: { kind: 'gitlab-ci', issuer: 'https://gitlab.example.com', mirror: false }, sync_keys: [{ public_key: PUB, role: 'mirror' }], owner_keys: [PUB],
     });
-    expect(plan('admin', ['repo', 'add', 'o/r', '--sync-key', PUB, '--owner-key', PUB], key).body.sync_keys).toEqual([{ public_key: PUB, role: 'sync' }]);
+    expect(plan('admin', ['repo', 'add', 'o/r', '--sync-key', PUB, '--owner-key', PUB], key).body?.sync_keys).toEqual([{ public_key: PUB, role: 'sync' }]);
     expect(plan('admin', ['repo', 'set', 'docs', '--remote', 'git@github.com:o/r.git', '--sync-workflow', 'none', '--ci-identity', 'none', '--add-owner-key', PUB,
       '--add-sync-key', PUB, '--remove-sync-key', 'SHA256:x'], key).body).toEqual({
       id: 'docs', remote: 'git@github.com:o/r.git', sync_workflow: null, ci_identity: null, owner_keys_add: [PUB], sync_keys_add: [{ public_key: PUB, role: 'sync' }], sync_keys_remove: ['SHA256:x'],
@@ -342,7 +342,7 @@ describe('send: signed with a key file, verified by Baton', () => {
     const fetchImpl = (url: string, init: RequestInit) => hostCall(new Request(url, init));
     const ok = await send(ORIGIN, plan('admin', ['open']), file, fetchImpl);
     expect(ok.status).toBe(200);
-    expect(ok.json.url).toMatch(/\/login#[0-9a-f]{64}$/);
+    expect(ok.json).toMatchObject({ url: expect.stringMatching(/\/login#[0-9a-f]{64}$/) });
     expect(await send(ORIGIN, plan('admin', ['open']), other, fetchImpl)).toMatchObject({ status: 401, json: { code: 'unauthenticated' } });
   });
 
@@ -360,7 +360,7 @@ describe('send: signed with a key file, verified by Baton', () => {
     const ok = await send(ORIGIN, plan('admin', ['open']), file, fetchImpl);
     expect(ok.status).toBe(200);
     // The owner-key flag reads the public line from its file, as it reads an SSH public key.
-    expect(plan('admin', ['repo', 'add', 'o/r', '--owner-key', `${file}.pub`]).body.owner_keys).toEqual([line]);
+    expect(plan('admin', ['repo', 'add', 'o/r', '--owner-key', `${file}.pub`]).body?.owner_keys).toEqual([line]);
   });
 });
 

@@ -31,7 +31,7 @@ import { prClose, verdictLine, type Exec } from '../../src/defaults/pr-close';
 import { splitWords } from '../../src/defaults/agent-words';
 import { ticketsMarkdown } from '../../src/defaults/tickets-markdown';
 import { stampMarkdownVersions } from '../../src/defaults/ticket-versions';
-import { syncOnce } from '../../src/shared/batonSync.mjs';
+import { syncOnce, type Unconfirmed } from '../../src/shared/batonSync.mjs';
 
 const ROOT = resolve(import.meta.dirname, '../..');
 const CLI = join(ROOT, 'cli', 'baton.mjs');
@@ -700,7 +700,7 @@ describe('the sync reads a course floor spelled either way (B-68’s window)', (
 describe('syncOnce’s confirm-only re-post (B-183, review round 1)', () => {
   /** `syncOnce` with every effect injected (the module is pure): a head, a payload and an
    * ancestry the test scripts, recording the one board post. */
-  const run = async (over: { head: string; next: string; ancestor?: boolean; unconfirmed?: unknown[] }) => {
+  const run = async (over: { head: string; next: string; ancestor?: boolean; unconfirmed?: Unconfirmed[] }) => {
     const posts: Record<string, unknown>[] = [];
     const out = await syncOnce(over.next, {
       observe: async () => ({ sha: over.head, observation: 7 }),
@@ -708,7 +708,7 @@ describe('syncOnce’s confirm-only re-post (B-183, review round 1)', () => {
       readHead: async () => ({ sha: over.head, unconfirmed: over.unconfirmed ?? [] }),
       post: async (body: Record<string, unknown>) => {
         posts.push(body);
-        return { ok: true };
+        return { ok: true } as const;
       },
       // `next` is the head, an ancestor of it (the checkout behind), or ahead of it, as scripted.
       isAncestor: async (a: string, b: string) => (over.ancestor ? a !== over.head || b === over.head : a === over.head),
@@ -2676,7 +2676,7 @@ describe('githubFacts (R-BTN-96’s GitHub adapter) against a recorded GitHub', 
     vi.stubGlobal('fetch', async (url: string, init?: { body?: string }) => {
       const res = await real(url, init);
       if (!url.endsWith('/graphql')) return res;
-      const body = await res.json();
+      const body: { data: { repository: { p1: { head: { nodes: { commit: unknown }[] } } } } } = await res.json();
       body.data.repository.p1.head.nodes[0].commit = { oid: 'older', checkSuites: null };
       return Response.json(body);
     });
