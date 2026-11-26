@@ -183,6 +183,95 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   failure (B-319). The front now answers verification refusals itself; both binding failures
   still share one answer to avoid revealing whether the verified email has a line.
 
+- **2026-11-23 — Every person role on the dashboard: members, sessions per role and per tab, a
+  person on the dashboard a human (R-BTN-155, R-BTN-204, R-BTN-186, R-BTN-185).**
+  Rules changed: R-BTN-155 (rewritten), R-BTN-186, R-BTN-181, R-BTN-116, R-BTN-129, R-BTN-127,
+  R-BTN-57, R-BTN-159, R-BTN-16, the policy table's `attestations` default, §11's preamble,
+  §12.1, §13.2, §14; S-BTN-308, G-BTN-57. Added: R-BTN-204, S-BTN-321, S-BTN-322, S-BTN-323,
+  G-BTN-174, S-BTN-324; four open questions; one Decisions entry added. Also changed: S-BTN-124,
+  S-BTN-185, S-BTN-250, S-BTN-270, S-BTN-276, S-BTN-278, S-BTN-279, R-BTN-185, R-BTN-188,
+  R-BTN-191, §12.2, §12.8's deployment list, `human-gates`, three Decisions entries changed and
+  one replaced, the linked proposals (people and dashboard, data model and API, security) and
+  `docs/security-model.mdx`. The new ids and B-338–B-340 were taken by R-BTN-199's offline scan,
+  the session holding no Baton key; the duplicate check at merge is their guard. The
+  owner, 2026-11-23, on finding that the dashboard could not answer a person leg ("This page cannot
+  answer it — an administrator's session answers no person leg"): "this is fundamentally
+  incompatible with Baton's promise that MCP, CLI and the dashboard UI are all equivalent baton
+  interfaces each self-sufficient and capable of accomplishing baton-related tasks", and "the
+  dashboard should also be available for repo owners and regular users as well (naturally only
+  allowing the actions these user types may perform)". The owner chose the regular user to be a
+  repository member — a key an owner adds, which reads the repository and answers the person legs
+  whose `asks` labels it holds — over a read-only viewer, forge read access and a runner
+  operator; and chose "one session per browser tab / window — you should be able to sign in as a
+  different role in a different tab. If you have several roles then you should need to pick one
+  during the sign-in process (post authentication)", over one session holding every role. The
+  promise was already R-BTN-186's first sentence; what broke it was that the dashboard carried
+  only an administrator's key, so R-BTN-186 now says a surface carries each person's role and a
+  role it cannot carry is a defect. One cookie stays (R-BTN-16): the browser's sessions are bound
+  to it and each tab names its own in a header, which a cross-origin page cannot send. Replaced:
+  the Decisions entry "a session's controls narrower than the CLI's: the tenant screens
+  read-only, `ticket.route` and `ticket.adopt` the CLI's", which R-BTN-186 contradicts. Left open
+  for the owner: human-only acts from a session and over MCP, confirmations without a terminal,
+  members' Access lines, and MCP for administrators and members. Found and left to tickets: ten
+  session routes have no key route and no CLI command — force-reap, clearing a fence, confirming
+  or releasing a completion, confirming an adoption, resolving a scope finding, accepting a held
+  post, cutover, a resync dispatch, a status request and wind-down — the same defect the other
+  way (B-339). Review, round one: two fresh reviewers given the diff, one for consistency, one
+  for security. Security found that "a session may do what its key may" let a session mint
+  sessions, confirm its own acts, and mint API, registration and MCP credentials that outlive it,
+  and take the tenant's export; that authority-changing acts lost their confirmation; that a
+  cookie set once and a tab listing the browser's sessions let one tab reach another's role; that
+  logout left the browser's other sessions; that `approvers.members` did not list members; and
+  that a member's reach follows the course file's `asks` label. Fixed: R-BTN-186's key-only acts
+  (opening or confirming a session, minting a bearer credential, export and import); R-BTN-155's
+  confirmation of authority-changing acts by the key through another channel, CLI-only until one
+  is built; a new cookie value at every sign-in, no session listing, `logout {all: true}`, and the
+  browser named the security unit; the `approvers.members` row; R-BTN-204's statement that the
+  label is as strong as the course file. Consistency found that the rules let a session do its
+  key's writes but routed it only to `/v1/ui/*` and reads; that §14's *session* left six rows with
+  no caller; S-BTN-270, S-BTN-278 and S-BTN-279 contradicting the amendment; the header rule
+  breaking the condition redirect's page load; no sign-in for a member but Access; §12.2, R-BTN-191,
+  `human-gates`, §13.2 and the design brief behind; facts stated in several places; and three
+  more session-only acts. Fixed: R-BTN-155's *Where a session calls* (a session calls an action at
+  its key route), with R-BTN-16, §12.1 and §14 rewritten to match; the header rule scoped to
+  `/v1/` requests; each of the rest. The key-only acts and the key's confirmation of authority-changing
+  session acts narrow the owner's promise, to keep a stolen session from outliving its key; asked
+  whether to accept both, and whether to run a second review round, the owner answered "Yes and
+  yes" (2026-11-23).
+  The owner, 2026-11-23, on the open question of human-only acts from the dashboard: "I think a
+  human using the dashboard should be considered a human." Asked which sessions, the owner chose
+  every person's session — administrator's, owner's and member's, however it was opened — over a
+  human-only key's session alone and over Access sign-ins alone, accepting that an agent holding
+  an owner key and a browser can open a session by code and act as the human; and, where a
+  repository's `human_key` is `hardware`, a security-key touch per human act, over the session
+  alone, so `human-gates` stays true. R-BTN-185 now says so; R-BTN-181's `human` writer, R-BTN-188's
+  `human` approver entry, R-BTN-57, §12.1, S-BTN-278, S-BTN-321, the Decisions entry on human-only
+  credentials and the open question (now MCP's alone) follow; S-BTN-324 added; B-340 builds it.
+  Review, round two (the owner: "yes" to a second round): the same two kinds of fresh reviewer, on
+  the whole branch. Security found that the hardware touch could come from a software
+  authenticator registered by any human-only key, was replayable and bound to no person, and that
+  untouched `human` attestations would count after a switch to `hardware`; that §14 set the
+  cookie only for a browser with none; that a cookie thief could rotate the victim out; that an
+  administrator's session could freeze and seal the tenant unconfirmed; that id-taking `/v1/ui`
+  routes had no repository scope; a stale administrator clause; and an existence oracle in the
+  condition redirect. Fixed: the credential registered for one person's key by an owning
+  human-only key meeting `human_key`, with attestation; a one-time two-minute challenge Baton
+  issues (`POST /v1/ui/human-challenge`) with origin and relying-party checks; `touched`
+  recorded, an untouched `human` counting only under `any`; a new cookie value at every sign-in
+  and a replaced value in use ending the browser's sessions (`dashboard_cookies`); freeze, unfreeze
+  and seal confirmed; id-taking `/v1/ui` routes scoped and foreign ids answered as unknown; the
+  redirect only for `Sec-Fetch-Site` `same-origin` or `none`. Consistency found three scenarios the
+  diff had not touched (S-BTN-185, S-BTN-276, S-BTN-250), approver entries patched rather than
+  rewritten, a member reading grants through the new *session* default, three designs of the
+  touch, the replaced cookie value specified two ways, B-76 contradicting itself, proposals
+  behind, one writer class for two writers, revocation from a session, four more acts with
+  commands but no key route (hold, unhold, expedite, Stop), the security model page, facts in
+  several homes, and S-BTN-124's trigger. Fixed: each, R-BTN-188 now the one home of which session
+  matches which approver entry and R-BTN-155 of when a request is a session's. A member reads the
+  repository reads, the board and a leg's runs, but not the owners' grants or policy log — narrower
+  than "reads everything" in the option the owner chose; asked, the owner accepted it ("your
+  proposal is accepted on this", 2026-11-23).
+
 - **2026-11-23 — Tiers retired (§6.6 gate 5, R-BTN-66).**
   Rules changed: R-BTN-5, R-BTN-9, R-BTN-34, R-BTN-35, R-BTN-50, R-BTN-58, R-BTN-66, R-BTN-74,
   R-BTN-114, R-BTN-117, R-BTN-127, R-BTN-159, R-BTN-179, R-BTN-196, the board post (§4.4), §6.6,
