@@ -13,7 +13,7 @@ import type { Baton } from '../../src/cloudflare/baton';
 import { Git, hbBody, ORIGIN, sha256, syncToken } from '../helpers';
 import { makeKey, signedRequest } from '../lib/sshKeys';
 
-import { dropDerivedSchema, seedPreTierDropBoard, setTierDropReady, setTierDropRank } from '../lib/migrationRewind';
+import { dropDerivedSchema, seedPreTierDropBoard, setTierDropReady, setTierDropRank, TIER_DROP_FORGE_REPO } from '../lib/migrationRewind';
 import { seedAdminRunnerSql, seedLegacyReviewerSql, seedSettingsSql } from '../helpers';
 
 describe('migration 0142: retire tiers (B-322)', () => {
@@ -31,7 +31,7 @@ describe('migration 0142: retire tiers (B-322)', () => {
     const oldHash = (id: string, parent: string, rank: number, tier: string, tierPosition: number) => sha256(JSON.stringify({
       id, path: `tickets/${id}.md`, version: '', key: `tickets/${id}.md`, title: id, project: null,
       status: '', node: '', queue: '', tags: '[]', tier, requires_clause: 'none', operator_only: 0,
-      depends_on: '[]', blocked_by: '[]', repos: '["immediately-run/docs"]', ord: null, rank,
+      depends_on: '[]', blocked_by: '[]', repos: JSON.stringify([TIER_DROP_FORGE_REPO]), ord: null, rank,
       course_id: 'roadmap-pr', parent, requires: [], since: null, holder: null, expedite: 0, display: null,
       brief: null, tier_position: tierPosition,
     }));
@@ -75,7 +75,10 @@ describe('migration 0142: retire tiers (B-322)', () => {
       return before;
     });
 
-    const syncAuth = await syncToken();
+    const syncAuth = await syncToken({
+      repository: TIER_DROP_FORGE_REPO,
+      job_workflow_ref: `${TIER_DROP_FORGE_REPO}/.github/workflows/baton-sync.yml@refs/heads/main`,
+    });
     const client = { 'Baton-Client': `baton/${RECOMMENDED_CLIENT}` };
     const send = (req: Request) => front(req, env, (forwarded) => stub.fetch(forwarded));
     const sync = (path: string, body: unknown) => send(new Request(ORIGIN + path, {
@@ -91,8 +94,8 @@ describe('migration 0142: retire tiers (B-322)', () => {
     for (const ticket of tickets) expect(ticket).not.toHaveProperty('tier');
 
     // Only B edits its posted parent, breaking the cycle. A's stored parent now resolves.
-    const git = new Git().add('A', { path: 'tickets/A.md', title: 'A', rank: 4, parent: 'B' })
-      .add('B', { path: 'tickets/B.md', title: 'B', rank: 5 });
+    const git = new Git().add('A', { path: 'tickets/A.md', title: 'A', rank: 4, parent: 'B', repos: [TIER_DROP_FORGE_REPO] })
+      .add('B', { path: 'tickets/B.md', title: 'B', rank: 5, repos: [TIER_DROP_FORGE_REPO] });
     const observed = await sync('/v1/sync/observation', {});
     const { observation } = await observed.json<{ observation: number }>();
     expect(observed.status).toBe(200);
