@@ -192,7 +192,7 @@ else is a request.
   | an administrator's dashboard session, under `emergency` only ([Emergencies](#emergencies)) | the session's administrator key | `administrator` | false |
 
   An administrator key signs no `/v1/owner/*` route (§12.1), so an administrator starts only from
-  a session. Where `approvers.members` is human-only (`protected`), no session satisfies it
+  a session. Where `approvers.members` is human-only (`protected`), no session but one that acts as `human` satisfies it
   (R-BTN-185): only the second row starts one. `emergency` from anyone but an administrator's
   session is `invalid-params`.
 - **The warning, on every path.** Before the start is sent, the page shows — and the CLI prints —

@@ -53,8 +53,11 @@ under `human_key: hardware`, "only with a per-act key touch".
      client_data_json, signature}`; Baton checks the challenge is the one issued for this
      session, act and parameters and unused, the RP ID hash against the tenant's host, the
      origin against `BATON_ORIGIN`, the type, user presence, the signature with WebCrypto on
-     both hosts, and that the credential is registered for the session's key. Anything else:
-     `forbidden`.
+     both hosts, that the credential is registered for the session's key, and that its signing
+     human-only key is, at the act, an owner of the act's repository (or a break-glass line)
+     meeting its `human_key`. Anything else: `forbidden`. The touch is required on every act a
+     `human` entry or a human-only `key:` entry admits, a `human_only` owner key's session
+     included (2026-11-26).
    - **Untouched writes.** A session's attestation records `touched`; an untouched one counts as
      `human` only while the repository's `human_key` is `any`.
 4. **The conditions read** (`answerWord` in `src/core/reads/conditions.ts`) says a session may

@@ -20,7 +20,7 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
 
 - **2026-11-26 — Two human gates, `protected` claims the custody one, `exec` streams, and "mark" leaves the vocabulary (R-BTN-189, R-BTN-185, R-BTN-107).**
   Rules changed: R-BTN-189, R-BTN-185, R-BTN-188, R-BTN-155, R-BTN-107, R-BTN-145, R-BTN-186,
-  R-BTN-57, §12.1; S-BTN-324, S-BTN-278, S-BTN-321, S-BTN-185, S-BTN-190, S-BTN-192, S-BTN-299; one Decisions entry; the linked proposals (people and
+  R-BTN-57, §12.1, §12.8; S-BTN-324, S-BTN-278, S-BTN-321, S-BTN-185, S-BTN-190, S-BTN-192, S-BTN-299; one Decisions entry; the linked proposals (people and
   dashboard, intervention sessions, conditions, data model and API, scenarios: S-BTN-100,
   S-BTN-197). From the code-against-spec review of 2026-11-24
   (`docs/review/code-vs-spec-review-2026-11-24.mdx`), whose owner decisions these are.
@@ -38,8 +38,8 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
     comparison B-293's spec half wrote on 2026-11-22 ("Legacy `human-gates` (the weaker
     condition) … no migration successor"), and R-BTN-185's "no guarantee claims it as a human
     gate". What it loosens: under `human_key: any`, `protected` now claims a human gate that any
-    agent session defeats which can use a human-only key or open a dashboard session (a session
-    is a human, R-BTN-185): driving a signed-in browser; and, before the narrowing below, an
+    agent session defeats which can use a human-only key or open a dashboard session (one Access or a
+    `human_only` key's code opened, R-BTN-185): driving a signed-in browser; and, before the narrowing below, an
     administrator's one-time link minted with an administrator key, or, once owners' sessions are
     built (B-76), a sign-in code bound with an ordinary owner key. Baton cannot tell, which is why the promise names
     custody. A floor on `human-gates`, which from 2026-11-02 pinned `human_key: hardware`, now
@@ -116,6 +116,20 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
     entry's loosening paragraph listing paths the narrowing closes; `exec`'s held stdin lines and
     the leg-log proposal's `onStdout` against `executor_api`; S-BTN-324 having no test; and
     G-BTN-172 missing from the mark count. Each was checked against the text and fixed.
+  - **Review, round three** (the last): one fresh reviewer given the whole diff, round two's
+    fixes and the impact list. Every round-two item was found fixed. Found: under `hardware` a
+    `human_only` owner key's session matched `[human]` through its key, so no act it took needed
+    the touch `human-gates-hardware` promises (now every act a `human` or human-only `key:` entry
+    admits carries it); an ordinary key's session under `hardware` left untouched `human`
+    attestations that would count after a lowering to `any` (now recorded with its role only);
+    the touch's credential not bound to the act's repository (now its signing human-only key must
+    own it at the act); "either Access mode", though the keyless mode opens no session (now only
+    the `ACCESS_IDENTITIES` sign-in, the keyless mode acting as no `human`); "where its sign-in
+    proves one" and §12.8's custody bullet false under `hardware`; the Decisions line,
+    `docs/security-model.mdx`, the UX page, the intervention-sessions proposal and B-195's
+    invariant; S-BTN-324 lacking the new cases; and this entry's "a session is a human" and
+    missing §12.8. Each was checked against the text and fixed. Three rounds being the most a spec
+    PR runs, round three's fixes were not reviewed again; the PR says so.
 - **2026-11-26 — A protected repository accepts a branch course source (R-BTN-134).**
   Rules changed: R-BTN-134 (*A branch source*). #395 left open whether a protected repository
   (R-BTN-188) should refuse branch sources. The owner's ruling, 2026-11-26: "No, the #395 warning
