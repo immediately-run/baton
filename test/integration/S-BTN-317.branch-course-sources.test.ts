@@ -109,7 +109,9 @@ it('S-BTN-317 uses and records the current branch commit, warns on each sync, an
       expect(logs).toContain(`course create-pr follows branch main (unpinned): resolved to ${resolved.slice(0, 10)}`);
     };
     await synced('first', first);
-    const runner = await register('vm-a', { courses: [{ repository: 'docs', course: 'create-pr', version: 1 }] });
+    // Advertise the scaffolded course version, as a runner loading this home would.
+    const { version } = JSON.parse(branchConfig).courses[0] as { version: number };
+    const runner = await register('vm-a', { courses: [{ repository: 'docs', course: 'create-pr', version }] });
     const claim = await claimItem('vm-a', runner.secret, { ticket_id: 'docs:T-1' });
     expect(claim.json).toMatchObject({ snapshot_sha: homeSha, legs: ['implement'] });
     expect(claim.status).toBe(200);
