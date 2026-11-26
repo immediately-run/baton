@@ -4,7 +4,7 @@
 // sidecar's lease-lost flag — everything a harness hook or a leg session reads through
 // `BATON_STATE` (read-only for them) and everything the fence computes from (R-BTN-26). The
 // spool of transcript pointers and activity rows sits beside it (never in it, R-BTN-20).
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
 export interface RunnerState {
@@ -78,7 +78,12 @@ export class StateFile {
     mkdirSync(dirname(this.path), { recursive: true, mode: 0o700 });
     writeFileSync(this.path, JSON.stringify(this.s), { mode: 0o600 });
     chmodSync(this.path, 0o600);
+    const { secret: _secret, claims, ...view } = this.s;
+    const publicClaims = claims?.map(({ id, ticket_id, nonce, run_id, leg, at }) => ({ id, ticket_id, nonce, run_id, leg, at }));
+    writeFileSync(`${this.view}.tmp`, JSON.stringify({ ...view, claims: publicClaims }), { mode: 0o600 });
+    renameSync(`${this.view}.tmp`, this.view);
   }
+  get view(): string { return `${this.path}.view`; }
   /** The spool beside the state file (§6.8): JSON lines a leg session appends, the runner drains. */
   get spool(): string {
     return join(`${this.path}.spool.jsonl`);

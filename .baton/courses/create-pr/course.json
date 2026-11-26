@@ -3,7 +3,7 @@
   "start_leg": "implement",
   "end": [
     "merged",
-    "confirmed"
+    "archived"
   ],
   "short_waits": [
     "ci"
@@ -33,6 +33,9 @@
     },
     "confirmed": {
       "label": "Already delivered, confirmed by a person"
+    },
+    "archived": {
+      "label": "Confirmed ticket archived"
     }
   },
   "legs": {
@@ -113,8 +116,15 @@
       ],
       "kind": "person",
       "asks": "owner",
+      "answer_source": "person",
       "max_runs": 3,
       "label": "A person confirms it was already delivered"
+    },
+    "archive": {
+      "from": ["confirmed"],
+      "to": "archived",
+      "requires": { "capabilities": ["runner:claim-evidence"] },
+      "label": "Archive the confirmed ticket"
     }
   }
 }
