@@ -187,7 +187,7 @@ export interface Heartbeat {
   session_name: string;
   secret_hash?: string;
   rekey?: boolean;
-  harness: 'opencode' | 'claude-code';
+  harness: string;
   kind: 'vm' | 'local' | 'cloud';
   model_id?: string;
   /** B-142: the model tables' fields are gone and read nowhere — a heartbeat still carrying
@@ -295,7 +295,7 @@ export function checkHeartbeat(body: unknown, transcriptRepos: string[]): Heartb
   const session_name = matches(SESSION_NAME, 'session_name')(b.session_name);
   const secret_hash = optional(b.secret_hash, matches(SHA256_HEX, 'secret_hash'));
   if (b.rekey !== undefined && typeof b.rekey !== 'boolean') bad('rekey', 'must be a boolean');
-  if (b.harness !== 'opencode' && b.harness !== 'claude-code') bad('harness', "must be 'opencode' or 'claude-code'");
+  const harness = matches(NAME, 'harness')(b.harness);
   if (b.kind !== 'vm' && b.kind !== 'local' && b.kind !== 'cloud') bad('kind', "must be 'vm', 'local' or 'cloud'");
   const model_id = optional(b.model_id, matches(MODEL, 'model_id'));
   // B-104 (R-BTN-174): a declaration may hold a typed holding — `<type>:<value>`, R-BTN-121's
@@ -342,7 +342,7 @@ export function checkHeartbeat(body: unknown, transcriptRepos: string[]): Heartb
     session_name,
     secret_hash,
     rekey: b.rekey === true,
-    harness: b.harness as Heartbeat['harness'],
+    harness,
     kind: b.kind as Heartbeat['kind'],
     model_id,
     capabilities,

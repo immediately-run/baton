@@ -284,7 +284,7 @@ async function boardPost(core: BoardPostCore, repo: Repository, p: BoardPayload,
     // head came back to that sha; an unanswered one is moot (main moved on), and a re-post of
     // its sha is held afresh. So every row left is a hold against the current head. Their
     // history stays in the events.
-    core.store.exec('DELETE FROM held_snapshots WHERE repository_id = ? AND head_sha IS ?', r, head);
+    core.store.exec('DELETE FROM held_snapshots WHERE repository_id = ? AND (head_sha = ? OR (head_sha IS NULL AND ? IS NULL))', r, head, head);
     event(core, r, 'snapshot-accepted', { sha: p.sha, parent_sha: p.parent_sha, ticket_count: ticketCount, ...changed, ...(accepted ? { held: true } : {}) }, at);
     // R-BTN-194 and R-BTN-187: ticket provenance and control notices share the server's
     // push chain. Neither gates the post or relies on what the sync says changed.

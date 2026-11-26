@@ -283,8 +283,8 @@ export class Webhooks {
       if (decision === 'now') this.stamp([repository], now);
       // A non-webhook producer may have opened the window first. Enrol this repository
       // in the backstop even if its trailing hint ends up answered by a pull.
-      if (decision === 'trailing') this.c.store.exec(`INSERT OR IGNORE INTO webhook_syncs (repository_id, last_dispatch_at)
-        SELECT repository_id, last_dispatch_at FROM webhook_dispatch WHERE repository_id = ?`, repository);
+      if (decision === 'trailing') this.c.store.exec(`INSERT INTO webhook_syncs (repository_id, last_dispatch_at)
+        SELECT repository_id, last_dispatch_at FROM webhook_dispatch WHERE repository_id = ? ON CONFLICT DO NOTHING`, repository);
       if (decision) (decision === 'now' ? nowDue : trailing).push(repository);
     }
     return { outcome: 'dispatched', now: nowDue, trailing };

@@ -289,8 +289,8 @@ export class Claims {
   private rows<T = Row>(q: string, ...p: unknown[]): T[] {
     return this.c.store.exec(q, ...p).toArray() as T[];
   }
-  private exec(q: string, ...p: unknown[]) {
-    return this.c.store.exec(q, ...p);
+  private exec<T = Row>(q: string, ...p: unknown[]) {
+    return this.c.store.exec<T>(q, ...p);
   }
   /** A query with `:name` parameters, bound in the order they occur. */
   private named<T>(q: string, params: Record<string, unknown>): T[] {
@@ -1390,23 +1390,23 @@ export class Claims {
     const rationale = b.rationale === null ? undefined : JSON.parse(b.rationale) as unknown;
     const savedAdvice = rationale === undefined ? advice : { ...advice, rationale };
     const st = item.station!;
+    let id: number;
     try {
       // R-BTN-62: the counter's last handed-out number now; only a reading numbered above it can
       // make this claim stale.
       // §2d's course record: how long the offered leg had been ready (R3-1248, 2-r2-2).
       const readySince = st.next_leg == null ? null
         : this.rows<{ ready_since: number | null }>(`SELECT ready_since FROM ticket_next_legs WHERE ticket_id = ? AND leg = ? AND state = 'ready'`, item.id, st.next_leg)[0]?.ready_since ?? null;
-      this.exec(`INSERT INTO claims (ticket_id, runner_id, request_id, nonce, snapshot_sha, claimed_at, status, claim_observation,
+      id = this.exec<{ id: number }>(`INSERT INTO claims (ticket_id, runner_id, request_id, nonce, snapshot_sha, claimed_at, status, claim_observation,
                    station, course_id, start_path, offered_leg, advice_json, offered_ready_since)
-                 VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?)`,
+                 VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
         item.id, runnerId, b.request_id, randomHex(3), this.headOf(item.repository) ?? '', now, this.handedOut(item.repository),
-        st.station, item.course, JSON.stringify(st.path), st.next_leg, savedAdvice ? JSON.stringify(savedAdvice) : null, readySince);
+        st.station, item.course, JSON.stringify(st.path), st.next_leg, savedAdvice ? JSON.stringify(savedAdvice) : null, readySince).one().id;
     } catch (e) {
       // R-BTN-4: the partial unique indexes refuse a second holder of the ticket or the runner.
       if (isUniqueViolation(e)) throw new BatonError('not-eligible', `${item.id} is already held`, { rule: 3, rule_code: GATE_CODES[3] });
       throw e;
     }
-    const id = this.rows<{ id: number }>('SELECT last_insert_rowid() AS id')[0].id;
     this.exec(`UPDATE claims SET (contract_course_json, contract_course_version) =
       (SELECT course_json, version FROM courses WHERE repository_id = ? AND id = ?) WHERE id = ?`, item.repository, item.course, id);
     this.event('claimed', `runner:${runnerId}`, { request_id: b.request_id, station: st.station, leg: st.next_leg }, item.id, id);
@@ -3113,13 +3113,13 @@ export class Claims {
        WHERE c.status = 'active' ORDER BY c.claimed_at`);
     // B-240: every active claim's events and activities in one query each, not two per claim —
     // each list in the order the per-claim read served it (events by `seq`; activities by
-    // `started_at`, ties in `activities_by_claim`'s order, which is the rowid's).
+    // `started_at`, ties in insertion order).
     const ids = JSON.stringify(active.map((c) => c.id));
     const events = groupBy(this.forIds(ids,
       `SELECT claim_id, at, kind, actor, detail_json FROM events WHERE claim_id IN (SELECT value FROM json_each(?)) ORDER BY claim_id, seq`, ids));
     const activities = groupBy(this.forIds(ids,
       `SELECT claim_id, id, kind, label, started_at, ended_at, outcome, parent_id FROM activities
-       WHERE claim_id IN (SELECT value FROM json_each(?)) ORDER BY claim_id, started_at, rowid`, ids));
+       WHERE claim_id IN (SELECT value FROM json_each(?)) ORDER BY claim_id, started_at, insertion_order`, ids));
     return active.map(({ has_session_link, ...c }) => {
       const alive = isClaimLeaseLive(c, now);
       return {
@@ -3157,7 +3157,7 @@ export class Claims {
        WHERE claim_id IN (SELECT value FROM json_each(?)) ORDER BY claim_id, seq`, ids));
     const activities = groupBy(this.forIds(ids,
       `SELECT claim_id, id, kind, seq, label, started_at, ended_at, outcome, parent_id, detail_json FROM activities
-       WHERE claim_id IN (SELECT value FROM json_each(?)) ORDER BY claim_id, started_at, rowid`, ids));
+       WHERE claim_id IN (SELECT value FROM json_each(?)) ORDER BY claim_id, started_at, insertion_order`, ids));
     // §6.8: a link built only from validated parts — the activity's own transcript, else the
     // session's; of several, the first stored (lowest id).
     const own = new Map<string, { repo: string; path: string }>();

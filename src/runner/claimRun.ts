@@ -132,7 +132,7 @@ interface LegExecution {
 }
 
 type ClaimOptions = Pick<RunnerOptions, 'api' | 'home' | 'repository' | 'courses' | 'fetch' |
-  'stateFile' | 'agentCommand' | 'maskEnv' | 'signalGraceMs' | 'auditRefs'> & {
+  'stateFile' | 'agentCommand' | 'agentActivity' | 'maskEnv' | 'signalGraceMs' | 'auditRefs'> & {
   beatEvery: number;
   verbose: boolean;
   now: () => number;
@@ -215,7 +215,7 @@ export class ClaimRun {
   cloneIndex: number | null = null;
   /** R-BTN-72 (B-188): the running leg's place, persisted for a restart's reattach. */
   place: Pick<PersistedClaim, 'run_id' | 'seq' | 'leg' | 'at' | 'handle' | 'ctx'> = {};
-  /** R-BTN-202 (B-248): a leg run under a local order while Baton is unreachable — no claim, no
+  /** R-BTN-202 (B-248): a leg run under a local order while Baton is unreachable — no claim (R-BTN-18), no
    *  lease: nothing fences it, and no beat reports it. */
   offline = false;
   /** R-BTN-202 (B-248): the leg this claim's ticket already ran under a local order, offline —
@@ -1204,6 +1204,8 @@ export class ClaimRun {
       ctx.reads_only = true;
       ctx.review_store = this.o.home;
     }
+    const agentActivity = this.o.agentActivity?.(this.checkout);
+    const runCtx = agentActivity ? { ...ctx, agent_activity: agentActivity } : ctx;
     const tag = randomBytes(4).toString('hex');
     // R-BTN-107 (B-184): the session key — its run id's first session, or a tag when the advance
     // named none.
@@ -1318,7 +1320,7 @@ export class ClaimRun {
     // Give it potential eligibility: a cadence beat can still land the link if startup failed.
     // The actual raise is checked separately against the link Baton already holds.
     const canInteract = channel != null && checkRaise('interact', course.graph?.conditionTypes ?? new Map(), this.raisePolicy(course, leg, this.legSessionUrl)).ok;
-    const running = this.wrapperCall(handle, 'run', script, [{ ...ctx, can_interact: canInteract }], undefined, () => sink);
+    const running = this.wrapperCall(handle, 'run', script, [{ ...runCtx, can_interact: canInteract }], undefined, () => sink);
     return await this.awaitLeg(leg, handle, channel, running, sink);
   }
 
@@ -1574,7 +1576,7 @@ export class ClaimRun {
     return undefined;
   }
 
-  /** `handoff(ctx)` (R-BTN-44): before any suspension or release; its failure is logged and the
+  /** `handoff(ctx)` (R-BTN-38, R-BTN-44): before any suspension or release; its failure is logged and the
    * resume record covers the rest. */
   private async callHandoff(script: string | null, ctx: Record<string, unknown>, why?: string, liveRun?: string): Promise<string | null> {
     if (script == null) return null;
