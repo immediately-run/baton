@@ -18,6 +18,18 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
 
 ## Changelog
 
+- **2026-11-26 — Ticketed growth of the pending and inventory lists (R-BTN-30).**
+  Rules changed: R-BTN-30; §90's account of `npm run check:api` (B-277 gave that check no rule of
+  its own). The owner's ruling, 2026-11-26, "Allow ticketed growth": a spec PR may add a pending
+  scenario (`spec/scenarios-pending.json`) or an API inventory exception
+  (`scripts/check-api-exceptions.json`) "when the new entry names an open ticket that builds it",
+  and "the entry is removed when that ticket's code lands". Until then both lists only shrank
+  against the default branch (B-276, B-277), so a spec-only PR adding scenarios, routes or tables
+  built by later tickets could not pass `check:spec` or `check:api`. A new pending entry is
+  `{ "id": "S-BTN-<n>", "ticket": "B-<n>" }`; an inventory entry already maps to its ticket. An
+  open ticket is a file in `tickets/`, not `tickets/archive/`, whose status is not `done`,
+  `superseded` or `withdrawn`. Untagged growth still fails, as does a removal left undone.
+
 - **2026-11-25 — Ticket files are Dibber's to write (R-BTN-74, R-BTN-199, S-BTN-189, S-BTN-234).**
   Rules changed: R-BTN-74, R-BTN-199, R-BTN-193 (its legacy list: the git-lock ticket commands are
   gone); §11's CLI table; S-BTN-189, S-BTN-199, S-BTN-234, S-BTN-241;

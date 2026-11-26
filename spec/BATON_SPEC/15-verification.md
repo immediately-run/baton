@@ -24,9 +24,11 @@ description: "BATON_SPEC — 15. Verification: the model, the harness, scenarios
 - **R-BTN-30 (scenarios are tested or pending by name).** `status: built B-276` Each `S-BTN-<n>` scenario has a test
   under `test/` that names its id in the filename or a literal test or suite title, or is listed by id in
   [`spec/scenarios-pending.json`](../scenarios-pending.json). `npm run check:spec` checks both and
-  refuses pending additions against the default branch (its previous tip on a push to that branch).
-  When a scenario gains a test or is
-  retired, remove its pending entry. A gate
+  refuses a pending entry the default branch (its previous tip on a push to that branch) lacks,
+  unless the entry names the open ticket that builds it, as `{ "id": "S-BTN-<n>", "ticket": "B-<n>" }`:
+  a ticket file in `tickets/`, not `tickets/archive/`, whose status is not `done`, `superseded`
+  or `withdrawn`. So a spec change may add a scenario its ticket builds later. When a scenario
+  gains a test or is retired, remove its pending entry. A gate
   `G-BTN-<n>` is an invariant the implementation must establish, proved by the scenarios or
   tests its row names. Every scenario that has a test passes on the hosts it runs on (G-BTN-37).
 - **R-BTN-31 (scenarios are part of drafting).** `status: built` Every ticket that changes Baton's behaviour

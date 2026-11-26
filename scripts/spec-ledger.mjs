@@ -126,12 +126,22 @@ export function ruleLedger(spec, code) {
   return { rules, scenarios, covered, problems };
 }
 
+/** The pending list: an array whose entries are a scenario id (`"S-BTN-3"`) or, for an entry
+ * added since the owner's 2026-11-26 ruling, `{ "id": "S-BTN-321", "ticket": "B-338" }` naming
+ * the open ticket that builds it. Returns id → ticket (null for a bare id). */
 export function pendingIds(raw) {
-  const ids = JSON.parse(raw);
-  if (!Array.isArray(ids) || ids.some((id) => typeof id !== 'string' || !SCENARIO_ID.test(id)) || new Set(ids).size !== ids.length) {
-    throw new Error(`${PENDING}: expected a JSON array of unique scenario ids`);
+  const entries = JSON.parse(raw);
+  const bad = () => new Error(`${PENDING}: expected a JSON array of unique scenario ids, each a string or { "id", "ticket" }`);
+  if (!Array.isArray(entries)) throw bad();
+  const pending = new Map();
+  for (const entry of entries) {
+    const tagged = entry !== null && typeof entry === 'object' && !Array.isArray(entry);
+    const id = tagged ? entry.id : entry;
+    if (typeof id !== 'string' || !SCENARIO_ID.test(id) || pending.has(id)) throw bad();
+    if (tagged && (typeof entry.ticket !== 'string' || Object.keys(entry).some((k) => k !== 'id' && k !== 'ticket'))) throw bad();
+    pending.set(id, tagged ? entry.ticket : null);
   }
-  return new Set(ids);
+  return pending;
 }
 
 /** Read the default branch's list, not the branch being checked. At first landing the
@@ -139,7 +149,7 @@ export function pendingIds(raw) {
 export function basePending(root, base, verificationPath) {
   const git = (...args) => gitAt(root, args);
   const tree = git('ls-tree', '-r', '--name-only', base, '--', PENDING, 'test').trim().split('\n');
-  if (tree.includes(PENDING)) return pendingIds(git('show', `${base}:${PENDING}`));
+  if (tree.includes(PENDING)) return new Set(pendingIds(git('show', `${base}:${PENDING}`)).keys());
   const scenarios = scenarioIds(git('show', `${base}:${verificationPath}`));
   for (const path of tree.filter(isScenarioTest)) {
     for (const id of testScenarios(path, git('show', `${base}:${path}`))) scenarios.delete(id);
@@ -163,7 +173,9 @@ export function pendingBaseRef(root, env = process.env) {
   return before;
 }
 
-export function ledgerProblems(ledger, archived, pending, baseline) {
+/** `pending` is pendingIds' map (a Set of bare ids also works); `baseline` the default
+ * branch's ids. An entry not in the baseline must name a ticket in `open` (openTickets). */
+export function ledgerProblems(ledger, archived, pending, baseline, open = new Set()) {
   const { rules, scenarios, covered, problems } = ledger;
   const out = [...problems];
   for (const [id, rule] of rules) {
@@ -175,8 +187,12 @@ export function ledgerProblems(ledger, archived, pending, baseline) {
   for (const id of scenarios.keys()) {
     if (!covered.has(id) && !pending.has(id)) out.push(`${id} has neither a test nor a pending entry`);
   }
-  for (const id of pending) {
-    if (!baseline.has(id)) out.push(`${id} adds to the shrink-only pending list`);
+  const tickets = pending instanceof Map ? pending : new Map([...pending].map((id) => [id, null]));
+  for (const [id, ticket] of tickets) {
+    if (!baseline.has(id)) {
+      if (ticket === null) out.push(`${id} adds to the pending list without a ticket; a new entry is { "id", "ticket" } naming the open ticket that builds it`);
+      else if (!open.has(ticket)) out.push(`${id} adds to the pending list naming ${ticket}, which is not an open ticket in tickets/`);
+    }
     if (!scenarios.has(id) || covered.has(id)) out.push(`${id} no longer needs a pending entry; remove it`);
   }
   return out;
