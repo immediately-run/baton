@@ -10,7 +10,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import roadmapPr from '../fixtures/courses/roadmap-pr/course.json';
 import chore from '../fixtures/courses/chore/course.json';
-import { adminSession, advance, beat, captureDispatches, claimItem, course, cutover, endClaim, Git, hbBody, keyCall, ORIGIN, placed, register, rows, sessionCall, setAdminKeys, setClock, sha256, tick, withCore } from '../helpers';
+import { adminSession, advance, beat, captureDispatches, claimItem, course, cutover, endClaim, Git, hbBody, keyCall, ORIGIN, placed, register, rows, sessionCall, setAdminKeys, setClock, setMigrationAppliedAt, sha256, tick, withCore } from '../helpers';
 import { makeKey, signedRequest, type TestKey } from '../lib/sshKeys';
 import { call as hostCall } from '#host';
 import { DAY_MS, DROP_TIERS_MIGRATION } from '../../src/core/deprecated';
@@ -38,6 +38,7 @@ async function runnerAs(key: TestKey, path: string, body?: unknown, secret?: str
 
 beforeEach(async () => {
   await setClock(T0);
+  await setMigrationAppliedAt(DROP_TIERS_MIGRATION, T0);
   admin = await makeKey('ssh-ed25519', 'admin');
   owner = await makeKey('ssh-ed25519', 'docs-owner');
   await setAdminKeys(admin);
@@ -78,7 +79,6 @@ describe('S-BTN-39 limits agents cannot change', () => {
   });
 
   it('expires 30 days after the last sighting, including a same-day repeat', async () => {
-    await rows('UPDATE _baton_migrations SET applied_at = ? WHERE id = ?', T0, DROP_TIERS_MIGRATION);
     const change = () => keyCall(admin, '/v1/admin/repositories', { id: 'docs', tiers: false });
     expect((await change()).status).toBe(200);
     await setClock(T0 + H);

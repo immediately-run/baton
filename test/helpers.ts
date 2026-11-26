@@ -947,6 +947,12 @@ export function seedLegacyReviewerSql(sql: SqlExec): void {
 export function seedSettingsSql(sql: SqlExec, entries: [string, string][]): void {
   for (const [key, value] of entries) sql.exec('INSERT INTO baton_settings (key, value) VALUES (?, ?)', key, value);
 }
+/** Align a migration's recorded time with a scenario's simulated clock. */
+export function setMigrationAppliedAt(id: number, at: number): Promise<void> {
+  return withCore(({ store }) => {
+    store.exec('UPDATE _baton_migrations SET applied_at = ? WHERE id = ?', at, id).toArray();
+  });
+}
 /** Migration tests (B-239): an administrator-made key's runner holding `capabilities`. */
 export function seedAdminRunnerSql(sql: SqlExec, credential: string, runner: number, capabilities: string[]): void {
   sql.exec("UPDATE credentials SET created_by = 'admin:test' WHERE id = ?", credential);

@@ -13,7 +13,7 @@ import type { Baton } from '../../src/cloudflare/baton';
 import { Git, hbBody, ORIGIN, sha256, syncToken } from '../helpers';
 import { makeKey, signedRequest } from '../lib/sshKeys';
 
-import { dropDerivedSchema } from '../lib/migrationRewind';
+import { dropDerivedSchema, seedPreTierDropBoard, setTierDropReady, setTierDropRank } from '../lib/migrationRewind';
 import { seedAdminRunnerSql, seedLegacyReviewerSql, seedSettingsSql } from '../helpers';
 
 describe('migration 0142: retire tiers (B-322)', () => {
@@ -48,21 +48,7 @@ describe('migration 0142: retire tiers (B-322)', () => {
       o.core.now = () => at;
       const sql = state.storage.sql;
       sql.exec('PRAGMA foreign_keys = ON');
-      sql.exec(`INSERT INTO repositories (id, github, default_branch, sync_workflow, cutover_at, web_base, ci_identity)
-        VALUES ('docs', 'immediately-run/docs', 'main', '.github/workflows/baton-sync.yml', 1, 'https://github.com/immediately-run/docs', '{"kind":"github-actions"}')`);
-      sql.exec('INSERT INTO board_head (repository_id, sha) VALUES (?, ?)', 'docs', oldHead);
-      sql.exec(`INSERT INTO credentials (id, hostname, allowed_capabilities, kind, public_key) VALUES (?, 'host', '["agent-venue"]', 'runner', ?)`, key.fingerprint, key.publicKey);
-      sql.exec(`INSERT INTO runner_grants (credential_id, repository_id, capabilities, max_tier, granted_by, granted_at) VALUES (?, 'docs', '["agent-venue"]', 1, 'owner:k', 1)`, key.fingerprint);
-      sql.exec(`INSERT INTO runners (id, hostname, session_name, secret_hash, credential_id, harness, kind, tier_ceiling, tier_ceilings, lease_timeout_ms, settings_hash, first_seen_at, last_seen_at)
-          VALUES (7, 'host', 's', ?, ?, 'opencode', 'vm', 'critical', '{"docs":"critical"}', 900000, '', ?, ?)`, secretHash, key.fingerprint, at, at);
-      sql.exec(`INSERT INTO tickets (id, repository_id, local_id, path, title, status, node, queue, tags, requires_clause, depends_on, blocked_by, repos, snapshot_sha, row_hash, tier, tier_position, course_id, rank, key, last_written_by)
-          VALUES ('docs:A', 'docs', 'A', 'tickets/A.md', 'A', '', '', '', '[]', 'none', '[]', '[]', '["immediately-run/docs"]', ?, ?, 'critical', 2, 'roadmap-pr', 4, 'tickets/A.md', ?)`, oldHead, aHash, author);
-      sql.exec(`INSERT INTO tickets (id, repository_id, local_id, path, title, status, node, queue, tags, requires_clause, depends_on, blocked_by, repos, snapshot_sha, row_hash, tier, tier_position, course_id, rank, key, last_written_by)
-          VALUES ('docs:B', 'docs', 'B', 'tickets/B.md', 'B', '', '', '', '[]', 'none', '[]', '[]', '["immediately-run/docs"]', ?, ?, 'routine', 0, 'roadmap-pr', 5, 'tickets/B.md', ?)`, oldHead, bHash, author);
-      sql.exec(`
-        INSERT INTO ticket_stations (ticket_id, station, path, path_len, to_end, next_leg, next_source, snapshot_sha, observation)
-          VALUES ('docs:A', 'filed', '[]', 0, 1, 'implement', 'course', '', 1);
-        INSERT INTO ticket_next_legs (ticket_id, leg, state, ready_since) VALUES ('docs:A', 'implement', 'ready', 1);`);
+      seedPreTierDropBoard(sql, { fingerprint: key.fingerprint, publicKey: key.publicKey, secretHash, at, oldHead, aHash, bHash, author });
       const all = (q: string) => sql.exec(q).toArray();
       // The original gate 5 compared the position against the lower of the grant and runner
       // ceilings: judgement (1) refused critical (2), even with a critical runner ceiling.
@@ -79,11 +65,12 @@ describe('migration 0142: retire tiers (B-322)', () => {
       expect(all('SELECT id, credential_id FROM runners')).toEqual([{ id: 7, credential_id: key.fingerprint }]);
       expect(all("SELECT name FROM sqlite_master WHERE sql LIKE '%tier%' AND name NOT LIKE '_cf_%'")).toEqual([]);
       expect(all('PRAGMA foreign_key_check')).toEqual([]);
-      sql.exec("UPDATE tickets SET rank = 5 WHERE id = 'docs:A'");
+      setTierDropRank(sql, 5);
       expect(ready()).toEqual([{ ticket_id: 'docs:A', leg: 'implement', rank: 5, ready_since: 1 }]);
-      sql.exec("UPDATE ticket_next_legs SET state = 'waiting' WHERE ticket_id = 'docs:A'");
+      setTierDropReady(sql, 'waiting');
       expect(ready()).toEqual([]);
-      sql.exec("UPDATE tickets SET rank = 4 WHERE id = 'docs:A'; UPDATE ticket_next_legs SET state = 'ready' WHERE ticket_id = 'docs:A'");
+      setTierDropRank(sql, 4);
+      setTierDropReady(sql, 'ready');
       for (const m of MIGRATIONS.filter((x) => x.id > 142)) sql.exec(m.sql);
       return before;
     });
