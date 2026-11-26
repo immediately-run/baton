@@ -1,70 +1,98 @@
 ---
-title: "B-271 — Shrink the formal model to a design-time core: retire the proof, the trace check, the stamps and the report gate"
+title: "B-271 — Retire the Quint model: remove model/, the @model stamps, the trace check and the report gate; keep the defects it found as scenarios"
 id: B-271
 project: baton
 status: available
-updated: 2026-11-19
+updated: 2026-11-26
 tags:
   - roadmap-item
-description: "The owner's decision of 2026-11-19: keep baton.qnt, the properties, regressions and witnesses and a one-minute check; retire verify, full, liveness, the trace check, model-report and the @model stamps; replace replay.qnt with a property test over the real core; amend R-BTN-68 and value 10"
+description: "The owner's decision of 2026-11-26, re-scoping the 2026-11-19 one after #364 was closed: retire the Quint model entirely — model/, test/model/replay.test.ts, the 32 @model stamps and model:links, the scenario-trace check, model-report and test:full — after B-345's property test replaces the replay; keep the four defects the model found as scenarios; replace R-BTN-68 with what verifies Baton now and a rule that a new concurrency protocol starts with a design-time model that is never a gate; close the tickets that extend the model."
 topics:
   - baton
 owns: {}
 prs: []
-depends_on: []
+depends_on:
+  - B-345
 ---
 
-**Brief:** the owner, 2026-11-19, on the architecture review's question of whether to retire the
-Quint model: "shrink the formal model". Keep a design-time core that checks in about a minute;
-retire the proof, the trace check, the hash stamps and the report gate.
+**Brief:** the owner, 2026-11-26 (in a Claude Code session on bering), after #364 was closed at their word on 2026-11-25 ("it deleted model tooling main has kept building on"):
 
-From the architecture review of 2026-11-19 (`docs/review/architecture-review-2026-11-19.mdx`, on the branch `review/architecture-2026-11-19` until it lands).
+> I don't think the quint model as currently implemented really helps.
+> - the full exercising of the model takes too long to run in the CI pipeline
+> - the fast check verifies only a small part of how baton works
+> - the baton spec has changed considerably since the model was authored, whether the two are in sync is questionable
+> - the biggest issues requiring intervention have been various non-livelock / deadlock related runner problems which the model would most likely not have helped with.
 
-**Why:** the model found two spec defects and two code defects in its first six days and nothing
-since. Nothing is proved: the bounded check reaches depth 4 on one ticket. No Quint runs in CI or
-in `npm test`, and `npm run test:full` takes hours. One invariant, `oneClaimPerRunner`
-(`model/properties.qnt`), contradicts [BATON_SPEC §9.1](../spec/BATON_SPEC/09-claims.md#sec-9-1) ([R-BTN-4](../spec/BATON_SPEC/09-claims.md#sec-9-1)) since B-188 let a runner hold
-several claims.
+They agreed with the supervisor's answer: retire the model rather than fix or rebuild it, and keep what it taught as ordinary tests. A future concurrency protocol (allocation, fencing, observation numbering, lease recovery) starts with a short-lived design-time model, written for the design question and archived after, never a gate. The checks that replace it are tracked by the meta-ticket over B-345, B-343, B-346 and B-347.
+
+This replaces the 2026-11-19 scope ("shrink the formal model": keep a one-minute design-time core). Nothing of the model is kept as a check.
+
+**Spec:** [BATON_SPEC §15](../spec/BATON_SPEC/15-verification.md#sec-15) [R-BTN-68](../spec/BATON_SPEC/15-verification.md#sec-15) (the core is a checked model) and [R-BTN-31](../spec/BATON_SPEC/15-verification.md#sec-15); the Decisions entry that chose "a Quint model checked on the author's machine and against every scenario's trace" (`spec/BATON_SPEC/91-decisions.md`); every gate and scenario row in §15 that names the model, Quint, a trace or `@model`; `spec/BATON_SPEC/00-front.md`'s mention. Run `npm run spec:impact` on R-BTN-68 and on the terms `Quint`, `@model`, `model:links`, `trace` and `test:full`.
+
+**Depends on:** B-345 (property tests over the real core), which carries `replay.qnt`'s invariants over before the replay goes.
+
+### Why
+
+- The model found two spec defects and two code defects in its first six days, and nothing since.
+- Nothing runs it in CI: `npm test` sets `BATON_SKIP_QUINT=1`, so only the stamp check (`model:links`) runs. The trace check and the model-drawn replay run only in `test:full`, which takes hours.
+- The stamps make the model follow the code, not the spec. On 2026-11-24 the model and the code agreed that a named end is confirmed by where git places the ticket, and both were wrong (`docs/interventions.mdx`, 2026-11-24 20:00). Every change to modelled state re-stamps every stamp: #415 re-stamped 20.
+- #364 failed because the model kept growing while it waited: 763 commits behind and 27 conflicting files in six days. So the steps below are ordered, small and quick to land.
 
 ### What to build
 
-1. Fix or drop `oneClaimPerRunner` so the model agrees with R-BTN-4.
-2. Keep `model/baton.qnt`, `properties.qnt`, `regressions.qnt`, `witnesses.qnt`, `check.mjs`
-   and the `sim` instance. `npm run model:quick` is the one model command.
-3. Add a property test over the real core on the local host asserting the nine interleaving
-   invariants `replay.qnt` checks today; then retire `replay.qnt`.
-4. Retire `verify.mjs`, `full.mjs`, `liveness.qnt`, `lightQuestion.qnt`, the `small` instance,
-   `check-traces.mjs` and `trace-scope.json`, `model-report.mjs`, `check-model-links.mjs` and the
-   25 `@model` stamps in `src/`, and the npm scripts that run them (`test:full` included).
-5. Amend the spec in the same pull request: [BATON_SPEC §15](../spec/BATON_SPEC/15-verification.md#sec-15) ([R-BTN-68](../spec/BATON_SPEC/15-verification.md#sec-15)) says what is now checked
-   and that nothing is proved; [§16.1](../spec/BATON_SPEC/16-adoption.md#sec-16-1)'s cutover precondition and the Decisions entry that names
-   the proof follow it. Amend `docs/context/values.mdx` (value 10), the architecture page's "the
-   formal model names the code", and the Commands line of `CLAUDE.md`.
-6. Close B-37 and B-50 as superseded; narrow R3-1254 to what remains.
+In this order, in one PR, each step a commit of its own so the review can read them one at a time. Open the PR early and keep it current with `main`: the model is what conflicts.
 
-**For the owner to land, not the runner:** removing the model-report workflow and adding
-`model:quick` to CI on changes under `model/` are edits to `.github/workflows/`. The leg prepares
-the diff and stops for the owner there.
+1. **Spec first.** Replace R-BTN-68 with a rule that says what verifies Baton now:
+   - the scenarios (R-BTN-31);
+   - B-345's property tests over the real core;
+   - B-343's course tests with a fake forge;
+   - B-346's contract checks;
+   - the rule above on design-time models.
+   
+   Retire or reword each §15 gate and scenario row that names the model. Add a Decisions entry for 2026-11-26 that supersedes the Quint one. Amend `docs/context/values.mdx` (value 10) and `docs/context/architecture.mdx` ("the formal model names the code"). Run `npm run spec:index`.
+2. **The defects stay covered.** Identify the four defects the model found (`model/regressions.qnt`, `model/README.md`, and their history). Each keeps, or gets, a scenario in `test/` that names it. List the four and their scenarios in the PR.
+3. **Remove the stamps.** Remove the 32 `// @model` lines in `src/`, `scripts/check-model-links.mjs`, the `model:links` script, and its place in `npm test` and `test:no-quint`.
+4. **Remove the trace check and the replay.** This step only after B-345 is done:
+   - `scripts/check-traces.mjs`, `test/unit/check-traces.test.ts`, `test/integration/trace.ts` and `test/integration/trace-scope.json`;
+   - the trace hook in `test/hosts/local.ts`;
+   - `test/model/replay.test.ts`;
+   - the `traces` script.
+5. **Remove the model.** Remove `model/` (every file, `README.md` included), `scripts/model-report.mjs` and `test/unit/model-report.test.ts`. Remove the npm scripts `model`, `model:quick`, `model:full`, `model:pr`, `model:verify` and `test:full`. Remove `BATON_SKIP_QUINT` from `vitest.config.ts`, `scripts/build-ui.mjs` and wherever else it is read. Remove any JVM, Quint or Apalache setup. Update the Commands line of `CLAUDE.md` and `README.md`.
+6. **The tickets that extend the model:**
+   - close B-37, B-50 and R3-1254 as `superseded` by this ticket;
+   - close B-48's trace part, or the whole ticket if nothing else is left;
+   - strike the re-stamp steps from B-68 and B-49;
+   - repoint B-72's and B-179's mentions of the model.
+   
+   Each change goes in a ticket's own `## Status` line naming this ticket.
 
-**Done when:** `npm test` needs no JVM and names no Quint; CI checks the model in about a minute
-on changes under `model/`; no document claims a proof.
+**For the owner to land, not the runner:**
+- delete `.github/workflows/model-report.yml`;
+- fix the model lines in `.github/workflows/ci.yml`'s comments, which say `npm test` runs the model's regressions and traces.
+
+The leg prepares that diff in its PR description and stops for the owner there.
 
 ### Trust
 
-No new input. The change removes checks and their scripts and amends prose; nothing a runner or
-an owner sends is read differently. The workflow edits are the owner's own.
+No new input. The change removes checks and their scripts and amends prose. Nothing a runner or an owner sends is read differently. The workflow edits are the owner's own. `CLAUDE.md`, `docs/context/` and the spec are standing guidance, so their changes land only through the owner's PR review.
 
 ### Invariants
 
-- [BATON_SPEC §15](../spec/BATON_SPEC/15-verification.md#sec-15) ([R-BTN-31](../spec/BATON_SPEC/15-verification.md#sec-15)): every behaviour change names its scenario. Unchanged, and now the
-  only gate on the core's behaviour, so the property test of step 3 lands before `replay.qnt`
-  goes.
-- The four defects the model found stay covered: each keeps its regression in
-  `regressions.qnt` or a scenario that names it.
-- `src/shared/` and the migrations are not touched.
+- R-BTN-31 is unchanged: every behaviour change names its scenario.
+- No step removes a check before its replacement is in: `replay.qnt` and the replay test go only after B-345, and the four defects keep their scenarios.
+- No change to `src/` behaviour: step 3 removes comments only. `src/shared/`, `src/vendor/` and the migrations are not touched.
+
+### Exit criteria
+
+- `npm test` names no Quint, no model and no trace check, needs no JVM, and is green.
+- No page in `spec/`, `docs/context/`, `CLAUDE.md` or `README.md` says Baton's core is a checked model or that anything is proved.
+- The four defects are listed with their scenarios in a PR.
+- B-37, B-50 and R3-1254 are closed as superseded.
 
 ## Status
 
 _filed 2026-11-19._
 
 _2026-11-25: #364 closed at the owner's word: it deleted model tooling main has kept building on. Re-scope this ticket against today's main (the newer model work included) before a fresh PR._
+
+_2026-11-26: re-scoped at the owner's word: retire the model entirely (Brief above). Held `attempts-exhausted` since 2026-11-25 23:37 by its merge leg's runs on the closed #364. Lift the hold (`baton:retries`) once this re-scope is merged._
