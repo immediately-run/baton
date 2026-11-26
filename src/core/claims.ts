@@ -676,6 +676,22 @@ export class Claims {
    * refuses, and one reading serves the recommendation and a refusal's `stale-skills` check
    * alike (B-237).
    */
+  /** The reference query's legs never offered, by `<repository>/<course>`: each course's person
+   *  legs (R-BTN-116), and with a bounded claim's leg list (R-BTN-72, S-BTN-75) every leg outside
+   *  it — the same exclusion, so the query's text, and its SQL dialect inventory, stay as they are. */
+  private unofferedLegs(only?: readonly string[]): Record<string, string[]> {
+    const out: Record<string, string[]> = {};
+    for (const k of this.rows<{ r: string; c: string; legs: string }>('SELECT repository_id AS r, id AS c, person_legs_json AS legs FROM courses WHERE person_legs_json IS NOT NULL')) {
+      out[`${k.r}/${k.c}`] = JSON.parse(k.legs) as string[];
+    }
+    if (only) {
+      for (const l of this.rows<{ r: string; c: string; leg: string }>('SELECT repository_id AS r, course_id AS c, leg FROM course_legs')) {
+        if (!only.includes(l.leg)) (out[`${l.r}/${l.c}`] ??= []).push(l.leg);
+      }
+    }
+    return out;
+  }
+
   private referenceCandidates(w: RunnerFacts, page = 0, rule9 = true, only?: readonly string[]): Candidate[] {
     const rows = this.named<Candidate>(
       `SELECT id, repository_id, course_id, weight, expedite, to_end, rank, ready_since, n FROM (
@@ -689,7 +705,6 @@ export class Claims {
          JOIN ticket_stations s ON s.ticket_id = w.id
          JOIN ticket_next_legs a ON a.ticket_id = w.id AND a.leg = s.next_leg AND a.state = 'ready'          -- rule 1
          WHERE p.cutover_at IS NOT NULL AND p.retired_at IS NULL
-           AND (:legs IS NULL OR a.leg IN (SELECT value FROM json_each(:legs)))
            AND NOT EXISTS (SELECT 1 FROM ticket_bars b JOIN runner_tags t ON t.tag = b.tag
                            WHERE b.ticket_id = w.id AND b.leg = a.leg AND t.runner_id = :runner)                -- rule 8's posted bars
            AND json_extract(:heads, '$."' || w.repository_id || '"')                                         -- (each head's observation, read once: B-237)
@@ -745,14 +760,13 @@ export class Claims {
        ORDER BY repository_id, course_id, n`,
       { runner: w.id, now: this.c.now(), ceiling: JSON.stringify(this.ceilingPositions(w)), page,
         heads: JSON.stringify(Object.fromEntries(this.rows<{ r: string; n: number }>('SELECT repository_id AS r, observation AS n FROM board_head').map((h) => [h.r, h.n]))),
-        person: JSON.stringify(Object.fromEntries(this.rows<{ r: string; c: string; legs: string }>('SELECT repository_id AS r, id AS c, person_legs_json AS legs FROM courses WHERE person_legs_json IS NOT NULL')
-          .map((k) => [`${k.r}/${k.c}`, JSON.parse(k.legs) as unknown]))),
+        person: JSON.stringify(this.unofferedLegs(only)),
         // A leg's `requires` is compared as `graphOf` expanded it: the registry writes that view to
         // `leg_capabilities_json` from `legNeedsOf` when it accepts a file (§12.5), so the query reads
         // capabilities only. Rule 4 matches them by name against the declared holdings the grant
         // admits (R-BTN-174); rule 6 is retired, so `human-operator` is the one literal both sides
         // compare. A grant stores capabilities only, so no role is bound.
-        legs: only ? JSON.stringify(only) : null, granted: w.grants ? 1 : 0, credential: w.credential_id });
+        granted: w.grants ? 1 : 0, credential: w.credential_id });
     // Rule 9, per group: a course the runner declares at its registered min_runner_version or
     // above (an unregistered course fits no runner) — read once, not once a ticket.
     const min = new Map(this.rows<{ repository_id: string; id: string; v: number }>('SELECT repository_id, id, min_runner_version AS v FROM courses')
