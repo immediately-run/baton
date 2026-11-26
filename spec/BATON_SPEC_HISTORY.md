@@ -18,6 +18,13 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
 
 ## Changelog
 
+- **2026-11-26 — A protected repository accepts a branch course source (R-BTN-134).**
+  Rules changed: R-BTN-134 (*A branch source*). #395 left open whether a protected repository
+  (R-BTN-188) should refuse branch sources. The owner's ruling, 2026-11-26: "No, the #395 warning
+  is correct. The reason: even protected mode requires iterative course development, making this
+  artificially difficult by requiring pinning to commits during development is counterproductive
+  and invites worse workarounds or sidestepping baton." A branch source is accepted under every
+  policy; the unpinned warning is the safeguard.
 - **2026-11-26 — `baton repo init --check` re-scoped to sourced courses (R-BTN-134, S-BTN-105).**
   Rules changed: R-BTN-134 (*`baton repo init`* gains `--check`). B-281 built `--check` to
   compare a home's committed leg stubs (`.baton/courses/<id>/legs/<leg>.mjs`) with what the
