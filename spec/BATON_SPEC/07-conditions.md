@@ -2,7 +2,7 @@
 title: "7. Conditions"
 description: "A leg that cannot go on alone (it needs a person, it hit an error or it has something to report) raises a condition."
 ---
-## 7. Conditions *(partly built)*
+## 7. Conditions
 
 A leg that cannot go on alone (it needs a person, it hit an error or it has something to report)
 **raises a condition**. Baton records it and lists the open ones under **Needs you**, and raises
@@ -28,7 +28,7 @@ Not built either, each a design its rule below still states:
 
 ### 7.1 Raising a condition
 
-- **R-BTN-160 (conditions: typed, declared, raised by any leg).**
+- **R-BTN-160 (conditions: typed, declared, raised by any leg).** `status: built B-55`
   - **Type.** A condition is a typed event that a running leg raises. Its type matches
     `^[a-z][a-z0-9-]*(\.[a-z][a-z0-9-]*)*$` and is at most 64 characters long. The dots form a
     hierarchy: `hitl.spec-contradiction` is a `hitl`, so a declaration for `hitl` covers it.
@@ -49,9 +49,9 @@ Not built either, each a design its rule below still states:
   - **Declaring.** A course declares its own types in the course file (R-BTN-69):
     `"conditions": {<type>: {"disposition": "interrupt" | "suspend" | "notify",
     "restarts": {<id>: <description>}, "default": <id>, "wait_s": <n>, "retryable": <bool>, "description":
-    …}}`. Only `disposition` is required. A restart id matches §12.3's decision-id pattern, and
-    `wait_s` is 0 to 900. A subtype inherits the disposition of its nearest declared or standard
-    ancestor unless it states its own.
+    …}}`. Only `disposition` is required, and a subtype may instead inherit it from its nearest
+    declared or standard ancestor. A restart id matches §12.3's decision-id pattern, and
+    `wait_s` is 0 to 900.
   - **Error types are `interrupt` conditions.**
     - `retryable` decides whether the retry policy retries the type, for every leg; no policy
       overrides it (R-BTN-122).
@@ -62,12 +62,19 @@ Not built either, each a design its rule below still states:
     own types and, unless a leg narrows them, the standard ones. `baton course test` prints the
     signature.
   - **Raising.** A session in a leg calls `baton leg raise <type> --subject … [--body <file>]
-    [--restarts <json>] [--default <id>] [--severity …]` on the local channel (R-BTN-106). The
-    runner checks a raise as it checks a move, and answers one that fails on the channel with the
-    reason:
+    [--restarts <json>] [--default <id>] [--severity …]` on the local channel (R-BTN-106). A
+    script's `run(ctx)` uses the same channel through `await ctx.raise(type, options)` and
+    receives the answer or an exception with the refusal. The options are `subject`, `body?`,
+    `restarts?`, `default?` and `severity?`. A script can also throw `LegError(type, message)`
+    from `@immediately-run/baton/leg` to raise an `interrupt` type, with the message on the end
+    rather than in the report. The runner checks a raise as it checks a move:
     - the type is well formed, standard or declared, and allowed to the leg;
     - the leg's `autonomous` and the `interact` checks pass (R-BTN-195);
-    - `restarts` map ids to descriptions, and `default` is one of them;
+    - `restarts` map ids to descriptions. The raise takes the restarts from the nearest
+      declaration that names them, or supplies a subset with the same descriptions. A standard
+      type or subtype with no declared restarts may supply its own. `default` names an offered
+      restart; an omitted default takes the
+      declaration's default if it is offered;
     - `severity` is valid (R-BTN-125).
   - **Dispositions.**
 
@@ -78,7 +85,7 @@ Not built either, each a design its rule below still states:
     | `notify` | The raise is recorded and returns at once, and the leg goes on |
 
   - **Reported before it takes effect.** The runner reports each raise with `POST
-    /v1/runner/claims/{id}/conditions` and the body `{type, disposition, restarts, default?,
+    /v1/runner/claims/{id}/conditions` and the body `{type, disposition, restarts?, default?,
     severity?, url?}`.
     - The body holds filter fields only (R-BTN-33), never the subject or the body, which stay
       with the runner.
@@ -87,11 +94,11 @@ Not built either, each a design its rule below still states:
     - A `suspend` condition's `url` points to where git holds the question and is kept only under
       R-BTN-92's link rule. An `interact` condition's `url` is Baton's own (R-BTN-195). No other
       condition carries one.
-    - Baton answers with a `condition_id`, stores the `conditions` row and records a `condition`
-      event in the ticket's history (R-BTN-81).
+    - Baton answers with a `condition_id` and writes the `conditions` row, a `condition`
+      activity on the raising run and a `condition` row in the ticket's history (R-BTN-81)
+      in one transaction.
     - A claim may hold at most 20 open conditions, and a ticket may raise at most 200 a day.
       Past either limit the request is refused with `quota`.
-    - A raise costs two writes (§2's write budget).
   - **Closing.** A condition is open until it closes:
 
     | Condition | Closes when |
@@ -103,7 +110,7 @@ Not built either, each a design its rule below still states:
     | core `baton.<sub>` | the cause the owning rule names ends |
     | core `baton.retries`, `baton.contract` or `baton.stalled` | per R-BTN-163 |
 
-- **R-BTN-125 (severity).**
+- **R-BTN-125 (severity).** `status: built`
   - **Values.** A condition carries `severity`: `critical`, `high` or `normal`. The default is
     `normal`.
   - **Who sets it.**
@@ -112,7 +119,7 @@ Not built either, each a design its rule below still states:
     - Core conditions are `normal`, except `baton.contract`, which is `high`.
   - **What it does.** Severity is data for the order of the Needs-you list (R-BTN-163). It routes
     nothing and gates nothing.
-- **R-BTN-195 (an interaction request asks a person into the leg's session).** A leg that wants
+- **R-BTN-195 (an interaction request asks a person into the leg's session).** `status: built B-234` A leg that wants
   a person raises `interact`; the person joins the leg's agent session in its harness's own UI,
   and everything they and the agent say passes there, never through Baton.
   - **Autonomous legs.** A leg declared `"autonomous": true` (R-BTN-69) never asks for a person:
@@ -140,17 +147,17 @@ Not built either, each a design its rule below still states:
 
 ### 7.2 Handlers
 
-- **R-BTN-161 (bindings choose a handler course; the handler is a ticket).** Not built. No binding
+- **R-BTN-161 (bindings choose a handler course; the handler is a ticket).** `status: specified B-58` Not built. No binding
   applies and no handler ticket is filed, so every leg-raised condition is only recorded and
   listed (R-BTN-160, R-BTN-163).
   The design is in the [conditions proposal](../proposals/conditions.md).
-- **R-BTN-162 (a suspended leg waits, then resumes with a restart).** Not built. A `suspend` raise
+- **R-BTN-162 (a suspended leg waits, then resumes with a restart).** `status: specified B-59` Not built. A `suspend` raise
   is recorded and returns (R-BTN-160); nothing waits on it and no claim resumes from it. The
   design is in the [conditions proposal](../proposals/conditions.md).
 
 ### 7.3 The debugger and Baton's own conditions
 
-- **R-BTN-163 (the debugger: unhandled conditions, waiting people, and core's own).**
+- **R-BTN-163 (the debugger: unhandled conditions, waiting people, and core's own).** `status: partly B-56 B-57 B-195`
   - **Needs you is the debugger.** **Needs you**, which the dashboard's Conditions screen draws
     (§11.4), lists, until each closes:
     - every open condition, with its type, restarts, default, detail and `url`;
@@ -209,7 +216,7 @@ Not built either, each a design its rule below still states:
 
 ### 7.4 Retries
 
-- **R-BTN-122 / R-BTN-23 (retries: the default handler of `error`).** The retry policy handles
+- **R-BTN-122 / R-BTN-23 (retries: the default handler of `error`).** `status: partly B-11` `status: partly B-11` The retry policy handles
   every `interrupt` condition.
   - **State.** Attempts are counted **per ticket and leg**, with §9's rules for what counts as a
     failed attempt, in `leg_attempts`: repository, ticket, leg, `attempts`, `retry_after` and
@@ -264,7 +271,7 @@ Not built either, each a design its rule below still states:
 
 ### 7.5 Deadlines
 
-- **R-BTN-167 (two clocks on a leg: a deadline on its run, and the stalled notice).**
+- **R-BTN-167 (two clocks on a leg: a deadline on its run, and the stalled notice).** `status: partly B-60 B-61`
   - **`deadline_s`**, optional on a leg (60 s to 604,800 s): how long one run may take. The clock
     starts at the `advance` that starts the run, by Baton's clock, and the instant is the claim's
     `deadline_at` (R-BTN-90). A leg with no `deadline_s` has no deadline: Baton relies on the
@@ -280,7 +287,7 @@ Not built either, each a design its rule below still states:
     state (R-BTN-88): an instant restarts only when the ticket's station changes, never when a
     Baton moves. A deadline lives in its claim alone and dies with it.
 
-- **R-BTN-90 (the deadline in a claim).** Baton cannot stop a runner. It takes the claim away and
+- **R-BTN-90 (the deadline in a claim).** `status: built B-60` Baton cannot stop a runner. It takes the claim away and
   tells the runner to stop, and fencing makes a runner that ignores it harmless (R-BTN-19,
   R-BTN-26).
   - **Arming.** The `advance` that starts a leg with `deadline_s` sets the claim's `deadline_at`
@@ -305,21 +312,21 @@ Not built either, each a design its rule below still states:
 
 ### 7.6 Calls
 
-- **R-BTN-165 (a call leg runs a course and waits for it).** Not built: the validator refuses
+- **R-BTN-165 (a call leg runs a course and waits for it).** `status: specified B-62` Not built: the validator refuses
   `"kind": "call"`. A leg that files children declares `spawns` (R-BTN-111) and reports them
   (R-BTN-86); a ticket that waits for other tickets does so by a `ticket` prerequisite
   (R-BTN-120). The design is in the [conditions proposal](../proposals/conditions.md).
 
 ### 7.7 Cancellation
 
-- **R-BTN-168 (supersession, lifetime and the cancel leg).** Not built. A ticket its source posts
+- **R-BTN-168 (supersession, lifetime and the cancel leg).** `status: specified B-65` Not built. A ticket its source posts
   withdrawn closes `withdrawn` (R-BTN-74); Baton supersedes no ticket and queues no `cancel` leg.
   The validator accepts a `spawns` declaration's `"lifetime": "parent" | "station"` and nothing
   reads it. The design is in the [conditions proposal](../proposals/conditions.md).
 
 ### 7.8 The outbox
 
-- **R-BTN-171 (the outbox).** Not built: Baton queues no outbox entry and no runner delivers one.
+- **R-BTN-171 (the outbox).** `status: specified B-64 B-152` Not built: Baton queues no outbox entry and no runner delivers one.
   The repository policy's `outbox` section is checked and stored (R-BTN-188). The design is in
   the [conditions proposal](../proposals/conditions.md).
 
@@ -330,7 +337,7 @@ No handler course ships. The design of `ask`, `deliver` and `announce` is in the
 
 ### 7.10 Leg events
 
-- **R-BTN-198 (leg events: what Baton tells a running leg).** Not built: the runner
+- **R-BTN-198 (leg events: what Baton tells a running leg).** `status: specified B-260` Not built: the runner
   stops a leg as R-BTN-119 says and hands it no event. The design of the
   `ticket.changed` and `release` events is in the
   [conditions proposal](../proposals/conditions.md).

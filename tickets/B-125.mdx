@@ -50,7 +50,7 @@ cheapest measures: today revocation is improvised.
 **After the adversarial review** (2026-10-27, `docs/security-model.mdx` *Review*):
 
 - **The runbook starts with the key, not the identity** (finding 18): revoke the compromised
-  runner key, drop `machine` from the policy's `inputs.board` (an approver on `approvers.policy`; R-BTN-188, B-137), then bar and revoke as written. It covers a
+  runner key, ~~drop `machine` from the policy's `inputs.board` (an approver on `approvers.policy`; R-BTN-188, B-137),~~ then bar and revoke as written. It covers a
   compromised server or Cloudflare account too (B-135): rotate the GitHub App key, the webhook
   secrets and the administrator keys, and redeploy from a known commit.
 
@@ -66,6 +66,10 @@ cheapest measures: today revocation is improvised.
 
 ## Status
 
-_(2026-10-30: `machine_sync` is retired as a setting: whether a machine key may post the board is the repository policy's `inputs.board` (`machine`), R-BTN-188, built by B-145. Read it through `src/core/policy.ts` once B-145 lands.)_
+~~_(2026-10-30: `machine_sync` is retired as a setting: whether a machine key may post the board is the repository policy's `inputs.board` (`machine`), R-BTN-188, built by B-145. Read it through `src/core/policy.ts` once B-145 lands.)_~~
 
 _(2026-11-01: the spec restructure's part 1 (B-166, the PR `baton-spec-restructure-p1`): the runbook's "find what changed" step cannot rely on `foreign-write` discrepancies, which are retired (R-BTN-46, R-BTN-85); it reads the forge and git directly.)_
+
+_(2026-11-24: the note of 2026-10-30 is struck: B-189's spec PR (`spec/BATON_SPEC_HISTORY.md`, the entry of 2026-11-24) retires the policy's `inputs.board` on the owner's rulings of 2026-11-09 and 2026-11-24 (runners trusted, legs not). A machine key granted on a repository posts its board as any sync credential does (R-BTN-93, R-BTN-102); no knob governs it. The runbook's "drop `machine` from `inputs.board`" step is struck; a compromised runner is outside every guarantee (§12.8), and revoking its key is the step)_
+
+_(2026-11-24: rules re-read: R-BTN-93, R-BTN-102, R-BTN-188)_

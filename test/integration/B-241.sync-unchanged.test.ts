@@ -9,7 +9,7 @@
 // and the leg runs it judges are read through `claim_legs_unjudged` (0055). The sync scenarios
 // (S-BTN-40, -44, -45, -46, -47, -67, -188 and the rest) keep what a post does.
 import { describe, it, expect, beforeEach } from 'vitest';
-import { Git, HOST, cutover, placed, register, rows, setClock, withCore } from '../helpers';
+import { Git, HOST, cutover, placed, register, rows, setClock, withCore, seedClaim, seedClaimLeg } from '../helpers';
 
 const T0 = Date.parse('2026-11-15T12:00:00Z');
 
@@ -108,11 +108,12 @@ describe('B-241 a board post reads its tickets once and skips the unchanged', { 
     // A leg run on T-4 declaring a tag the snapshot's bars for `review` lack, started before
     // the next reading: the first post after it logs one `bars-mismatch`, a later one none.
     const w = await register('vm-a');
-    await rows(`INSERT INTO claims (ticket_id, runner_id, request_id, nonce, snapshot_sha, claimed_at, status, ended_at, end_reason)
-                VALUES ('docs:T-4', ?, 'b241', 'n', '', ?, 'released', ?, 'released:owner')`, w.id, T0 - 2, T0 - 1);
+    await seedClaim({
+      ticket_id: 'docs:T-4', runner_id: w.id, request_id: 'b241', nonce: 'n', snapshot_sha: '', claimed_at: T0 - 2,
+      status: 'released', ended_at: T0 - 1, end_reason: 'released:owner',
+    });
     const claim = (await rows<{ id: number }>('SELECT MAX(id) AS id FROM claims'))[0].id;
-    await rows(`INSERT INTO claim_legs (claim_id, seq, run_id, leg, from_station, bars, started_at, started_observation)
-                VALUES (?, 1, 'r-b241', 'review', 'pr-open', '["model:b"]', ?, 0)`, claim, T0 - 2);
+    await seedClaimLeg({ claim_id: claim, seq: 1, run_id: 'r-b241', leg: 'review', from_station: 'pr-open', bars: '["model:b"]', started_at: T0 - 2, started_observation: 0 });
     const log = await captured(() => git.refresh());
     const judged = log.filter((l) => /FROM claim_legs l CROSS JOIN claims c/.test(l.sql));
     expect(judged).toHaveLength(1);

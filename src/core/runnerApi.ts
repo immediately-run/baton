@@ -5,6 +5,7 @@
 // whose rows the unique indexes guard. The model tables are gone (B-142): a heartbeat may still
 // carry `model_provider_id`, `billing`, `usage` and `rate_limits`, all accepted and ignored,
 // and an unavailable provider is a reading (§6.3, R-BTN-76), never a table core keeps.
+import { hasGrant } from './grants';
 import type { BeatAnswer } from '../shared/runner-wire';
 import { isLive, liveRunnerSql, type Lease } from './runnerLiveness';
 import { runnerLatest } from './runnerLatest';
@@ -72,7 +73,7 @@ export interface Ctx {
    *  B-26). */
   held: (ticketId: string, silent: boolean) => void;
   /** The retired-fields window's one writer (B-168): a heartbeat's `uses`. */
-  deprecated: Pick<Deprecated, 'note'>;
+  deprecated: Pick<Deprecated, 'note' | 'tierFields'>;
   /** B-4 (R-BTN-113): the instance's session-host allowlist, `instance_settings` first, else the
    *  deploy's BATON_SESSION_HOSTS. */
   sessionHosts: () => string[];
@@ -84,8 +85,8 @@ export class RunnerApi {
   private rows<T = Row>(q: string, ...p: unknown[]): T[] {
     return this.c.store.exec(q, ...p).toArray() as T[];
   }
-  private exec(q: string, ...p: unknown[]) {
-    return this.c.store.exec(q, ...p);
+  private exec<T = Row>(q: string, ...p: unknown[]) {
+    return this.c.store.exec<T>(q, ...p);
   }
   private event(kind: string, actor: string, detail: unknown, ticketId: string | null = null, claimId: number | null = null) {
     logEvent(this.c.store, this.c.now(), kind, actor, detail, ticketId, claimId);
@@ -311,21 +312,9 @@ export class RunnerApi {
     if (body && typeof body === 'object' && !Array.isArray(body) && (body as { uses?: unknown }).uses !== undefined) {
       this.c.deprecated.note(this.c.now(), `credential:${credentialId}`, 'heartbeat.uses', 'heartbeat');
     }
+    const fields = ['tier_ceiling', 'tier_ceilings'].filter((f) => body != null && Object.hasOwn(Object(body), f));
+    this.c.deprecated.tierFields(this.c.now(), `credential:${credentialId}`, fields.map((f) => `heartbeat.${f}`), 'heartbeat');
     const hb = checkHeartbeat(body, this.transcriptRepos());
-    // R-BTN-66: a per-repository ceiling names a tier of that registered repository's ladder.
-    // One for a repository Baton does not serve (unknown or retired) is kept and reported, never
-    // refusing the heartbeat — which would cost the runner its leases everywhere — and, once that
-    // repository registers, holds if its ladder has the name and is its bottom if not (ceilingIn).
-    const ignoredCeilings: string[] = [];
-    for (const [repo, tier] of Object.entries(hb.tier_ceilings)) {
-      const r = this.rows<{ tiers: string }>('SELECT tiers FROM repositories WHERE id = ? AND retired_at IS NULL', repo)[0];
-      if (!r) {
-        ignoredCeilings.push(repo);
-        continue;
-      }
-      const ladder = JSON.parse(r.tiers) as string[];
-      if (!ladder.includes(tier)) throw new BatonError('invalid-params', `tier_ceilings.${repo}: must be one of ${ladder.join(', ')}`);
-    }
     // R-BTN-47 (B-173): a course the heartbeat declares of a retired repository is dropped,
     // never a refusal (R-BTN-3) — the old holder can still heartbeat and report its fence.
     // Dropped before the settings hash, so what is hashed is what is stored; a course of an
@@ -344,8 +333,7 @@ export class RunnerApi {
     const presented = secretHeader ? await sha256Hex(secretHeader) : null;
     const settingsHash = await sha256Hex(JSON.stringify({
       harness: hb.harness, kind: hb.kind, model_id: hb.model_id ?? null,
-      capabilities: [...hb.capabilities].sort(), tier: hb.tier_ceiling,
-      tiers: Object.entries(hb.tier_ceilings).sort(),
+      capabilities: [...hb.capabilities].sort(),
       lease: hb.lease_timeout_s,
       courses: hb.courses.map((c) => `${c.repository}:${c.course}@${c.version}`).sort(),
       tags: [...hb.tags].sort(),
@@ -354,7 +342,6 @@ export class RunnerApi {
     const answer = this.c.store.transaction(() => this.heartbeatTx(credentialId, presented, settingsHash, hb, clientVersion, legacyName));
     return {
       ...answer,
-      ...(ignoredCeilings.length ? { tier_ceilings_unregistered: ignoredCeilings } : {}),
       ...(coursesRetired.length ? { courses_retired: [...new Set(coursesRetired)] } : {}),
     };
   }
@@ -388,10 +375,10 @@ export class RunnerApi {
     if (!w) {
       if (!hb.secret_hash) bad('secret_hash', 'the first heartbeat of a session carries its SHA-256');
       this.exec(`INSERT INTO runners (hostname, session_name, secret_hash, credential_id, harness, kind, model_id,
-                   tier_ceiling, tier_ceilings, lease_timeout_ms, profile_json, settings_hash, client_version, first_seen_at, last_seen_at, last_activity_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?)`,
+                   lease_timeout_ms, profile_json, settings_hash, client_version, first_seen_at, last_seen_at, last_activity_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?)`,
         hb.hostname, hb.session_name, hb.secret_hash, cred.id, hb.harness, hb.kind, hb.model_id ?? null,
-        hb.tier_ceiling, JSON.stringify(hb.tier_ceilings), hb.lease_timeout_s * 1000, profileJson, clientVersion, now, now, hb.last_activity_at ?? null);
+        hb.lease_timeout_s * 1000, profileJson, clientVersion, now, now, hb.last_activity_at ?? null);
       w = this.rows<typeof w>('SELECT id, secret_hash, credential_id, reaped_at, incarnation, settings_hash, secret_seen FROM runners WHERE hostname = ? AND session_name = ?', hb.hostname, hb.session_name)[0];
     } else {
       // R3-1239's handover: a session registered under a bearer token, or under a key since
@@ -438,16 +425,16 @@ export class RunnerApi {
     // caller's own `client_version` (R-BTN-197, B-254) is liveness in every path that records
     // it — this beat and `authRunnerTx`'s `seen` — like `last_seen_at` beside it: the runner's
     // statement of itself, never a state change.
-    const stored = this.rows<{ harness: string; kind: string; model_id: string | null; tier_ceiling: string; tier_ceilings: string; lease_timeout_ms: number; isolation: string | null; profile_json: string | null; secret_seen: number; concurrency: number }>(
-      'SELECT harness, kind, model_id, tier_ceiling, tier_ceilings, lease_timeout_ms, isolation, profile_json, secret_seen, concurrency FROM runners WHERE id = ?', w.id)[0];
+    const stored = this.rows<{ harness: string; kind: string; model_id: string | null; lease_timeout_ms: number; isolation: string | null; profile_json: string | null; secret_seen: number; concurrency: number }>(
+      'SELECT harness, kind, model_id, lease_timeout_ms, isolation, profile_json, secret_seen, concurrency FROM runners WHERE id = ?', w.id)[0];
     const beatOnly = !legacyName && !!was?.live && !rekeyed && stored != null && stored.harness === hb.harness && stored.kind === hb.kind
-      && stored.model_id === (hb.model_id ?? null) && stored.tier_ceiling === hb.tier_ceiling && stored.tier_ceilings === JSON.stringify(hb.tier_ceilings)
+      && stored.model_id === (hb.model_id ?? null)
       && stored.lease_timeout_ms === hb.lease_timeout_s * 1000 && stored.isolation === hb.isolation && stored.profile_json === profileJson && stored.secret_seen >= secretSeen
       && stored.concurrency === hb.concurrency;
-    const beat = () => this.exec(`UPDATE runners SET last_seen_at = ?, secret_seen = MAX(secret_seen, ?), last_activity_at = COALESCE(?, last_activity_at), harness = ?, kind = ?,
-                 model_id = ?, tier_ceiling = ?, tier_ceilings = ?, lease_timeout_ms = ?, isolation = ?, profile_json = ?, concurrency = ?, client_version = ?,
+    const beat = () => this.exec(`UPDATE runners SET last_seen_at = ?, secret_seen = CASE WHEN secret_seen > ? THEN secret_seen ELSE ? END, last_activity_at = COALESCE(?, last_activity_at), harness = ?, kind = ?,
+                 model_id = ?, lease_timeout_ms = ?, isolation = ?, profile_json = ?, concurrency = ?, client_version = ?,
                  legacy_names_at = CASE WHEN ? THEN ? ELSE legacy_names_at END WHERE id = ?`,
-      now, secretSeen, hb.last_activity_at ?? null, hb.harness, hb.kind, hb.model_id ?? null, hb.tier_ceiling, JSON.stringify(hb.tier_ceilings),
+      now, secretSeen, secretSeen, hb.last_activity_at ?? null, hb.harness, hb.kind, hb.model_id ?? null,
       hb.lease_timeout_s * 1000, hb.isolation, profileJson, hb.concurrency, clientVersion, legacyName ? 1 : 0, now, w.id);
     if (beatOnly) liveness(this.c.store, beat);
     else beat();
@@ -464,7 +451,7 @@ export class RunnerApi {
     const protectionRefused: { repository: string; code: string }[] = [];
     for (const report of hb.protection) {
       if (this.c.policies.recordProtection(report.repository, report, cred.id)) continue;
-      if (this.rows('SELECT 1 FROM runner_grants WHERE credential_id = ? AND repository_id = ? AND revoked_at IS NULL', cred.id, report.repository).length) {
+      if (hasGrant(this.c.store, cred.id, report.repository)) {
         this.event('discrepancy', `runner:${w.id}`, { kind: 'protection-report', repository: report.repository, matched: report.matched, by: cred.id }, null, null);
         protectionRefused.push({ repository: report.repository, code: 'not-checker' });
       } else {
@@ -615,12 +602,13 @@ export class RunnerApi {
         continue;
       }
       const scope = [runner, repo, claim] as const;
-      this.exec(`INSERT INTO runner_reports (runner_id, repository_id, claim_id, key, received_at, payload)
-        VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT DO UPDATE SET received_at = excluded.received_at, payload = excluded.payload`,
+      this.exec(`INSERT INTO runner_reports (runner_id, repository_id, claim_id, key, received_at, payload, insertion_order)
+        VALUES (?, ?, ?, ?, ?, ?, (SELECT COALESCE(MAX(insertion_order), 0) + 1 FROM runner_reports))
+        ON CONFLICT (runner_id, repository_id, claim_id, key) DO UPDATE SET received_at = excluded.received_at, payload = excluded.payload`,
         ...scope, report.key, now, report.payload);
       this.exec(`DELETE FROM runner_reports WHERE runner_id = ? AND repository_id = ? AND claim_id = ? AND key IN (
         SELECT key FROM runner_reports WHERE runner_id = ? AND repository_id = ? AND claim_id = ?
-        ORDER BY received_at DESC, rowid DESC LIMIT -1 OFFSET ?)`, ...scope, ...scope, REPORT_KEYS_MAX);
+        ORDER BY received_at DESC, insertion_order DESC LIMIT -1 OFFSET ?)`, ...scope, ...scope, REPORT_KEYS_MAX);
     }
     return refused;
   }
@@ -722,9 +710,9 @@ export class RunnerApi {
   sendMessage(owner: string, body: unknown) {
     const m = checkMessage(body);
     if (!this.rows('SELECT 1 FROM runners WHERE id = ?', m.to_runner_id).length) throw new BatonError('not-found', 'no such runner');
-    this.exec(`INSERT INTO messages (kind, payload_json, from_principal, to_runner_id, sent_at, status) VALUES (?, ?, ?, ?, ?, 'pending')`,
-      m.kind, m.payload ? JSON.stringify(m.payload) : null, `owner:${owner}`, m.to_runner_id, this.c.now());
-    return { id: this.rows<{ id: number }>('SELECT last_insert_rowid() AS id')[0].id };
+    return this.exec<{ id: number }>(`INSERT INTO messages (kind, payload_json, from_principal, to_runner_id, sent_at, status)
+      VALUES (?, ?, ?, ?, ?, 'pending') RETURNING id`,
+      m.kind, m.payload ? JSON.stringify(m.payload) : null, `owner:${owner}`, m.to_runner_id, this.c.now()).one();
   }
 
   /** `POST /v1/runner/messages/{id}/ack`: the runner acknowledges; a status request's reply is
@@ -826,8 +814,8 @@ export class RunnerApi {
         a.label ?? null, a.detail ? JSON.stringify(a.detail) : null, a.ended_at ?? null, a.outcome ?? null, a.seq ?? null, now, runnerId, a.id);
       return;
     }
-    this.exec(`INSERT INTO activities (runner_id, id, claim_id, parent_id, call_id, kind, seq, label, source, started_at, ended_at, outcome, received_at, detail_json)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    this.exec(`INSERT INTO activities (runner_id, id, claim_id, parent_id, call_id, kind, seq, label, source, started_at, ended_at, outcome, received_at, detail_json, insertion_order)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, (SELECT COALESCE(MAX(insertion_order), 0) + 1 FROM activities))`,
       runnerId, a.id, a.claim_id, parent, a.call_id ?? null, a.kind, a.seq ?? null, a.label ?? null, a.source, a.started_at,
       a.ended_at ?? null, a.outcome ?? null, now, a.detail ? JSON.stringify(a.detail) : null);
     if (a.kind === 'reviewer' && typeof a.detail?.substituted_for === 'string') {
@@ -842,8 +830,8 @@ export class RunnerApi {
   /** The expiry of a reaped runner's open messages (§9). R3-1212 adds reaping. */
   alarm() {
     const now = this.c.now();
-    this.exec(`DELETE FROM runner_reports WHERE rowid IN (
-      SELECT rr.rowid FROM ${REPORTS_FROM} WHERE (${REPORT_AGE_FROM}) <= ?)`, now - REPORT_HORIZON_MS);
+    this.exec(`DELETE FROM runner_reports WHERE insertion_order IN (
+      SELECT rr.insertion_order FROM ${REPORTS_FROM} WHERE (${REPORT_AGE_FROM}) <= ?)`, now - REPORT_HORIZON_MS);
     // B-236: driven from the open messages (`messages_by_status`), each runner read by its key —
     // never from the reaped runners, whose rows are kept forever (R-BTN-3).
     this.exec(`UPDATE messages SET status = 'expired' WHERE status IN ('pending','delivered')
@@ -885,12 +873,11 @@ export class RunnerApi {
       if (mine) return conflict(`runner-holds:${mine.ticket_id}`);
       const head = this.rows<{ sha: string | null }>('SELECT sha FROM board_head WHERE repository_id = ?', repo)[0]?.sha ?? '';
       // R-BTN-62: as any claim, judged only by a reading numbered after it.
-      this.exec(`INSERT INTO claims (ticket_id, runner_id, request_id, nonce, snapshot_sha, claimed_at, status, claim_observation, station, start_path, course_id)
+      const { id } = this.exec<{ id: number }>(`INSERT INTO claims (ticket_id, runner_id, request_id, nonce, snapshot_sha, claimed_at, status, claim_observation, station, start_path, course_id)
                  VALUES (?, ?, ?, ?, ?, ?, 'active', COALESCE((SELECT last_handed_out FROM board_head WHERE repository_id = ?), 0),
                          COALESCE((SELECT station FROM ticket_stations WHERE ticket_id = ?), ''), COALESCE((SELECT path FROM ticket_stations WHERE ticket_id = ?), '[]'),
-                         (SELECT course_id FROM tickets WHERE id = ?))`,
-        r.ticket_id, runnerId, `shadow:${runnerId}:${r.ticket_id}:${r.nonce}`, r.nonce!, head, r.at, repo, r.ticket_id, r.ticket_id, r.ticket_id);
-      const id = this.rows<{ id: number }>('SELECT last_insert_rowid() AS id')[0].id;
+                         (SELECT course_id FROM tickets WHERE id = ?)) RETURNING id`,
+        r.ticket_id, runnerId, `shadow:${runnerId}:${r.ticket_id}:${r.nonce}`, r.nonce!, head, r.at, repo, r.ticket_id, r.ticket_id, r.ticket_id).one();
       this.event('claimed', actor, { shadow: true, nonce: r.nonce }, r.ticket_id, id);
       this.c.held(r.ticket_id, true); // a claim's start is silent (R-BTN-77)
       return { ok: true, claim_id: id };
@@ -936,7 +923,7 @@ export class RunnerApi {
    *  roster is already read for the response; `isLive` selects the same set as a range
    *  read through `runners_live`, without a second roster query. */
   runnersView(now: number, page?: { repository: string; after: number; limit: number }) {
-    const runners = this.rows<Row & Lease & { reaped_at: number | null }>(`SELECT id, hostname, session_name, harness, kind, isolation, model_id, tier_ceiling, tier_ceilings, lease_timeout_ms,
+    const runners = this.rows<Row & Lease & { reaped_at: number | null }>(`SELECT id, hostname, session_name, harness, kind, isolation, model_id, lease_timeout_ms,
                                        first_seen_at, last_seen_at, last_activity_at, reaped_at, incarnation, profile_json, client_version, legacy_names_at FROM runners ${page ? `w WHERE w.id IN (SELECT DISTINCT runner_id FROM runner_courses WHERE repository_id = ? AND runner_id > ? ORDER BY runner_id LIMIT ?)
                                        ORDER BY w.id` : 'ORDER BY hostname, id'}`, ...(page ? [page.repository, page.after, page.limit] : []));
     const ids = JSON.stringify(runners.map((r) => r.id));
@@ -965,7 +952,6 @@ export class RunnerApi {
       const report = reports.get(id);
       return {
         ...w,
-        tier_ceilings: JSON.parse(w.tier_ceilings as string) as Record<string, string>,
         // B-253 (R-BTN-72): the runner's own opaque statement, stored as received — its `cli`
         // key names the CLI's pinning. NULL until a heartbeat carried one.
         profile: w.profile_json == null ? null : JSON.parse(w.profile_json as string) as Record<string, unknown>,

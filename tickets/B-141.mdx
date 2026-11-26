@@ -58,3 +58,7 @@ deployment makes it true"), R-BTN-131 (the standard courses' scope).
 ## Status
 
 _(2026-11-20: the spec simplification of 2026-11-19 (baton#299; `spec/BATON_SPEC_HISTORY.md`, that date) moved the unbuilt parts of the design this ticket builds out of the section files, with their rule ids, to proposal pages: what the merge runner merges, which names this ticket, is part 8 of [the security proposal](../spec/proposals/security.md). Each rule keeps its id and a line in its section, which links the page. The pull request that builds this ticket moves the rules it builds back into the section files, and the scenarios and gates it makes pass back into [the verification section](../spec/BATON_SPEC/15-verification.md#sec-15), in the same change. The plan above is unchanged.)_
+
+_(2026-11-24: B-189's spec PR (`spec/BATON_SPEC_HISTORY.md`, the entry of 2026-11-24) retires "a domain that runs a branch's code is a writer" (the Decision is superseded, `std:ran@1` retired): review is independent because each review is its own `reads_only` run of the exact head. This ticket's harness rule — a `reads_only` leg runs no branch code and loads no branch configuration — is unchanged and is what that independence rests on; read the brief's citation as R-BTN-183's part 8 as it now stands.)_
+
+_(2026-11-24: rules re-read: R-BTN-183)_

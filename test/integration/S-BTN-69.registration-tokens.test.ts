@@ -15,7 +15,7 @@ async function register(token: string, body: unknown, bearer?: string) {
   const headers = { 'Content-Type': 'application/json', Authorization: bearer ? `Bearer ${bearer}` : `Baton-Token ${token}`,
     ...(bearer ? { 'Baton-Registration-Token': token } : {}) };
   const res = await hostCall(new Request(`${ORIGIN}/v1/register`, { method: 'POST', headers, body: JSON.stringify(body) }));
-  return { status: res.status, json: await res.json() as Record<string, any> };
+  return { status: res.status, json: await res.json() as { api_key: string; credential_id: string; grant: unknown } };
 }
 
 beforeEach(async () => {

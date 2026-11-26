@@ -8,13 +8,15 @@
 
 import type { Graph } from '../core/graph';
 import { resolveLeg, resolveStation } from '../core/graph';
+import { checkOutputs } from '../core/validate';
+import { baseChain, PATTERN_STEPS_MAX, unboundedAt, validate, type Resolve } from '../shared/schema.mjs';
 
 /** A leg script's result, one of §6.13's four shapes. `reached` names the station the leg rests
  * at: an outcome it reached, or its `from` when it gave the leg up (R-BTN-71). */
 export type LegResult =
   | { reached: string; next?: string | null; bars?: string[]; session?: string; not_before?: number; outputs?: unknown[] }
   | { suspend: true; reached: string; next?: string | null; detail?: string; outputs?: unknown[] }
-  | { end: 'done'; reached: string; detail?: string; outputs?: unknown[] }
+  | { end: 'done'; reached: string; next?: string | null; detail?: string; outputs?: unknown[] }
   | { release: string; reached: string; next?: string | null };
 
 /** The `released:` reasons a script may choose itself (§6.5): the runner's own are
@@ -26,7 +28,7 @@ export const SCRIPT_RELEASE_REASONS = ['stale-board', 'cannot-finish:transient',
 /** What the runner does with a validated result. */
 export type Decision =
   | { kind: 'advance'; reached: string; leg: string; bars: string[]; session?: string; notBefore?: number; outputs?: unknown[] }
-  | { kind: 'done'; reached: string; detail?: string; outputs?: unknown[] }
+  | { kind: 'done'; reached: string; next?: string | null; detail?: string; outputs?: unknown[] }
   | { kind: 'suspend'; reached: string; next: string | null; detail?: string; outputs?: unknown[] }
   | { kind: 'release'; reason: string; reached: string; next: string | null };
 
@@ -39,6 +41,33 @@ export interface ScriptBug {
   /** The give-up position: the leg's `from`, the leg itself queued. */
   reached: string;
   next: string;
+}
+
+/** R-BTN-108: check the envelope and inline value locally; a pointer's contents belong to sync. */
+export function checkedOutputs(raw: unknown, schema: Resolve, expected: (name: string) => string | undefined) {
+  const outputs = checkOutputs(raw);
+  const meter = { steps: PATTERN_STEPS_MAX };
+  for (const o of outputs) {
+    const declared = expected(o.name);
+    if (declared != null && declared !== o.schema) throw new Error(`${o.name} must use ${declared}`);
+    if (!schema(o.schema)) throw new Error(`${o.name}: unknown schema ${o.schema}`);
+    if (!Object.hasOwn(o, 'value')) continue;
+    const unbounded = unboundedAt(o.schema, schema);
+    if (unbounded) throw new Error(`${o.name}: schema does not bound inline values (${unbounded}); give it by pointer`);
+    const faults = validate(o.value, o.schema, schema, meter);
+    if (faults.length) throw new Error(`${o.name} fails ${o.schema}: ${faults.slice(0, 3).map((f) => `${f.path || '/'} ${f.message}`).join('; ')}`);
+  }
+  return outputs;
+}
+
+export function checkMoveOutputs(outputs: ReturnType<typeof checkedOutputs>, g: Graph, move: Decision, from: string, schema: Resolve): void {
+  if (move.kind === 'release' || (move.kind === 'suspend' && move.reached === from)) return;
+  for (const r of g.entry.get(move.reached) ?? []) {
+    const o = outputs.find(({ name }) => name === r.output);
+    if (!o || !baseChain(o.schema, schema).includes(r.schema)) {
+      throw new Error(`entry: ${move.reached} requires output ${r.output} (${r.schema})`);
+    }
+  }
 }
 
 export const isResult = (v: unknown): v is LegResult =>
@@ -81,7 +110,9 @@ export function decide(result: unknown, g: Graph, legName: string, from: string)
   if ('end' in result) {
     const reached = resolved(result.reached);
     if (!rests.has(reached)) return bug(`ends at ${result.reached}, which is not ${from} or an outcome of ${leg}`);
-    return { kind: 'done', reached, ...(result.detail != null ? { detail: result.detail } : {}), ...outputsOf(result) };
+    const next = def.reconciles ? nextLeaving(result.next, reached) : null;
+    if (def.reconciles && ((result.next != null && next == null) || (next == null && !g.ends.has(reached)))) return bug('reconcile must name a continuation except at an end');
+    return { kind: 'done', reached, ...(def.reconciles ? { next } : {}), ...(result.detail != null ? { detail: result.detail } : {}), ...outputsOf(result) };
   }
   if ('release' in result) {
     if (!(SCRIPT_RELEASE_REASONS as readonly string[]).includes(result.release)) {

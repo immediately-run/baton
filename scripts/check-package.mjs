@@ -13,8 +13,8 @@ import { join, resolve } from 'node:path';
 
 const ROOT = resolve(import.meta.dirname, '..');
 const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'));
-const ALLOWED = [/^package\.json$/, /^README\.md$/, /^LICENSE$/, /^NOTICE$/, /^dist\/baton\.mjs$/, /^dist\/legProcess\.mjs$/, /^dist\/build\.json$/, /^dist\/defaults\/[\w./-]+\.(mjs|md)$/, /^dist\/defaults\/leg-wrapper\.example$/, /^scripts\/cloud-runner\.sh$/, /^skills\/baton-cloud-runner\/SKILL\.md$/];
-const REQUIRED = ['package.json', 'LICENSE', 'NOTICE', 'dist/baton.mjs', 'dist/legProcess.mjs', 'dist/build.json', 'dist/defaults/tickets.mjs', 'dist/defaults/stubs/create-pr/implement.mjs', 'dist/defaults/courses/create-pr/implement.md', 'dist/defaults/leg-wrapper.example', 'scripts/cloud-runner.sh', 'skills/baton-cloud-runner/SKILL.md'];
+const ALLOWED = [/^package\.json$/, /^README\.md$/, /^LICENSE$/, /^NOTICE$/, /^dist\/baton\.mjs$/, /^dist\/legProcess\.mjs$/, /^dist\/legClient\.(mjs|d\.mts)$/, /^dist\/build\.json$/, /^dist\/defaults\/[\w./-]+\.(mjs|md)$/, /^dist\/defaults\/sources\/standard-[\w-]+\/(entry|course)\.json$/, /^dist\/defaults\/leg-wrapper\.example$/, /^scripts\/cloud-runner\.sh$/, /^skills\/baton-cloud-runner\/SKILL\.md$/];
+const REQUIRED = ['package.json', 'LICENSE', 'NOTICE', 'dist/baton.mjs', 'dist/legProcess.mjs', 'dist/legClient.mjs', 'dist/legClient.d.mts', 'dist/build.json', 'dist/defaults/tickets.mjs', 'dist/defaults/stubs/create-pr/implement.mjs', 'dist/defaults/courses/create-pr/implement.md', 'dist/defaults/leg-wrapper.example', 'scripts/cloud-runner.sh', 'skills/baton-cloud-runner/SKILL.md'];
 
 const fail = (msg) => {
   process.stderr.write(`check-package: ${msg}\n`);
@@ -41,6 +41,21 @@ try {
   // The runner bundle and its leg wrapper load: `run` reaches its credential check (§6.4) and
   // stops there, so nothing contacts a Baton. The environment is cleared of any real credential.
   const env = { PATH: process.env.PATH, HOME: dir };
+  // Match loadCourse: the leg is outside the consumer's node_modules ancestry.
+  const script = join(mkdtempSync(join(dir, 'baton-legs-')), 'leg.mjs');
+  writeFileSync(script, `import { LegError } from '@immediately-run/baton/leg';
+export function run(ctx) { if (typeof ctx.raise === 'function') throw new LegError('error.spec', 'test'); }
+export function close(ctx, result) { return result; }
+export function handoff(ctx) { return ctx.ticket; }
+`);
+  const wrapper = join(app, 'node_modules', pkg.name, 'dist', 'legProcess.mjs');
+  const invoke = (call, args) => spawnSync(process.execPath, [wrapper, call, script], { cwd: app, env, input: JSON.stringify(args) + '\n', encoding: 'utf8' });
+  const leg = invoke('run', [{}]);
+  if (leg.status !== 4 || !leg.stdout.includes('"errorType":"error.spec"')) fail(`the installed leg wrapper lost the typed error:\n${leg.stdout}${leg.stderr}`);
+  for (const [call, args, result] of [['close', [{}, 'marker'], 'marker'], ['handoff', [{ ticket: 'example:T' }], 'example:T']]) {
+    const callback = invoke(call, args);
+    if (callback.status !== 0 || !callback.stdout.includes(JSON.stringify({ ok: true, result }))) fail(`the installed leg wrapper could not call ${call}:\n${callback.stdout}${callback.stderr}`);
+  }
   const run = spawnSync(join(app, 'node_modules', '.bin', 'baton'), ['run'], { cwd: app, env, encoding: 'utf8' });
   if (!/no credential: BATON_KEY_FILE/.test(run.stderr)) fail(`the installed \`baton run\` did not reach its credential check:\n${run.stdout}${run.stderr}`);
   // B-97: the release dropped the transition's IR_BATON_* spellings — only they set, the same check.
@@ -59,7 +74,8 @@ try {
   if (/is not a function/.test(homed.stderr)) fail(`the installed \`baton\` misses a prebuilt export:\n${homed.stdout}${homed.stderr}`);
   // `baton repo init` (G1 of the 2026-10-19 gap run): the installed package scaffolds create-pr
   // with no checkout and no esbuild, naming the commit it was built from as the course's source.
-  const build = JSON.parse(readFileSync(join(app, 'node_modules', '@immediately-run', 'baton', 'dist', 'build.json'), 'utf8'));
+  const buildFile = join(app, 'node_modules', '@immediately-run', 'baton', 'dist', 'build.json');
+  const build = JSON.parse(readFileSync(buildFile, 'utf8'));
   if (build.dirty && process.env.CI) fail(`the package was built from a modified tree (${build.commit}); CI builds a clean one`);
   const repo = join(dir, 'repo');
   git(null, ['init', '-q', '-b', 'main', repo]);
@@ -69,12 +85,41 @@ try {
   } else {
     if (init.status !== 0) fail(`the installed \`baton repo init\` failed:\n${init.stdout}${init.stderr}`);
     const settings = JSON.parse(readFileSync(join(repo, '.baton', 'baton.json'), 'utf8'));
-    const want = `github/${build.repository}/${build.commit}/create-pr`;
+    const want = `github/${build.repository}/${build.commit}/standard-create-pr`;
     if (settings.courses?.[0]?.source !== want) fail(`init named the source ${settings.courses?.[0]?.source}, not ${want}`);
-    for (const f of ['.baton/courses/create-pr/course.json', '.baton/courses/create-pr/legs/implement.mjs', '.baton/courses/create-pr/legs/implement.md', '.github/workflows/baton-sync.yml', '.baton/leg-wrapper.example']) {
+    for (const f of ['.github/workflows/baton-sync.yml', '.baton/leg-wrapper.example']) {
       if (!existsSync(join(repo, f))) fail(`the installed \`baton repo init\` wrote no ${f}`);
     }
     if (!readFileSync(join(repo, '.github', 'workflows', 'baton-sync.yml'), 'utf8').includes(`ref: ${build.commit}`)) fail('the sync workflow does not pin the commit the package was built from');
+    if (existsSync(join(repo, '.baton/courses/create-pr'))) fail('the installed init copied a sourced course into the home');
+    execFileSync('git', ['-C', repo, 'add', '.baton']);
+    execFileSync('git', ['-C', repo, '-c', 'user.name=Package check', '-c', 'user.email=package@example.test', 'commit', '-qm', 'course entry']);
+    const show = spawnSync(join(app, 'node_modules', '.bin', 'baton'), ['course', 'show', 'create-pr'], { cwd: repo, env, encoding: 'utf8' });
+    if (show.status !== 0 || !['course.json', 'legs/implement.mjs', 'legs/implement.md'].every((name) => show.stdout.includes(`--- ${name} ---`))) {
+      fail(`the installed CLI did not show the bundled course: ${show.error ?? show.stderr}\n${show.stdout?.slice(0, 400)}`);
+    }
+
+    // Use the committed tree, with no parents so the fixture also works in CI's shallow clone.
+    const upstream = join(dir, 'upstream.git');
+    const gitEnv = { ...env, GIT_AUTHOR_NAME: 'Package check', GIT_AUTHOR_EMAIL: 'package@example.test',
+      GIT_COMMITTER_NAME: 'Package check', GIT_COMMITTER_EMAIL: 'package@example.test' };
+    git(null, ['init', '--bare', '-q', '-b', 'main', upstream]);
+    writeFileSync(join(upstream, 'objects', 'info', 'alternates'), git(ROOT, ['rev-parse', '--path-format=absolute', '--git-path', 'objects']));
+    const pin = execFileSync('git', ['-C', upstream, 'commit-tree', `${build.commit}^{tree}`, '-m', 'source fixture'], { env: gitEnv, encoding: 'utf8' }).trim();
+    execFileSync('git', ['-C', upstream, 'update-ref', 'refs/heads/main', pin], { env: gitEnv });
+    const baton = (args, extraEnv = {}) => execFileSync(join(app, 'node_modules', '.bin', 'baton'), args, { cwd: repo, env: { ...env, ...extraEnv }, encoding: 'utf8' });
+    // Only the producer's build identity changes; the fixture tree is byte-identical.
+    writeFileSync(buildFile, JSON.stringify({ ...build, commit: pin }));
+    baton(['repo', 'init', '--course', 'review-pr']);
+    execFileSync('git', ['-C', repo, 'add', '.baton']);
+    execFileSync('git', ['-C', repo, '-c', 'user.name=Package check', '-c', 'user.email=package@example.test', 'commit', '-qm', 'review-pr entry']);
+    const bundled = baton(['course', 'show', 'review-pr']);
+    writeFileSync(buildFile, JSON.stringify(build));
+    const fetched = baton(['course', 'show', 'review-pr'], { GIT_CONFIG_COUNT: '1',
+      GIT_CONFIG_KEY_0: `url.${upstream}.insteadOf`, GIT_CONFIG_VALUE_0: `https://github.com/${build.repository.toLowerCase()}.git` });
+    if (fetched !== bundled || !['entry.json', 'course.json', 'sync.mjs', 'legs/review.mjs', 'legs/review.md'].every((name) => fetched.includes(`--- ${name} ---`))) {
+      fail('the installed CLI did not read the same review-pr course from a different build pin');
+    }
   }
 
   process.stdout.write(`check-package OK — ${pkg.name}@${pkg.version}: ${files.length} files, ${Math.round(packed.size / 1024)} KB packed; the installed bin runs${build.dirty ? '; init refuses a modified-tree build' : `; init scaffolds create-pr at ${build.commit.slice(0, 10)}`}\n`);

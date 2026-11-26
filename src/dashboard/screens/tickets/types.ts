@@ -14,7 +14,6 @@ export interface TicketRow {
   ticket_id: string;
   title: string | null;
   course: string | null;
-  tier: string | null;
   requires: string[];
   requires_unmet?: string[];
   tags?: string[];
@@ -150,6 +149,5 @@ export interface RunsAnswer {
 }
 
 export interface BoardAnswer {
-  ready_by_tier?: Record<string, unknown[]>;
   granted_capabilities?: string[] | null;
 }

@@ -4,6 +4,7 @@
 import { importJWK, SignJWT } from 'jose';
 import roadmapPr from './fixtures/courses/roadmap-pr/course.json';
 import { ACTIVITY_KINDS } from '../src/core/validate';
+import type { Store } from '../src/core/ports';
 import { call as hostCall, config as env, raw as hostRaw, tick as hostTick, withCore } from '#host';
 import { signedRequest, type SignOptions, type TestKey } from './lib/sshKeys';
 import { deliverySignature } from '../src/core/webhook';
@@ -175,8 +176,7 @@ export async function signedCall(name: string, path: string, o: Omit<SignOptions
 export function hbBody(cred: keyof typeof TOKENS, over: Record<string, unknown> = {}) {
   return {
     hostname: HOSTS[cred], session_name: `s-${cred}`, harness: 'opencode', kind: 'vm', model_id: 'zai-coding-plan/glm-5.3',
-    capabilities: ['agent-venue'],
-    tier_ceiling: 'critical', lease_timeout_s: 900, courses: [{ repository: 'docs', course: 'roadmap-pr', version: 3 }], ...over,
+    capabilities: ['agent-venue'], lease_timeout_s: 900, courses: [{ repository: 'docs', course: 'roadmap-pr', version: 3 }], ...over,
   };
 }
 
@@ -193,13 +193,6 @@ export async function register(cred: keyof typeof TOKENS = 'vm-a', over: Record<
 export async function beat(cred: keyof typeof TOKENS, secret: string, over: Record<string, unknown> = {}) {
   const res = await runnerCall('/v1/runner/heartbeat', { cred, secret, body: hbBody(cred, over) });
   return { status: res.status, json: (await res.json()) as Record<string, any> };
-}
-
-/** An active claim row, seeded directly: claims are R3-1212's; R3-1211 only reads them. */
-export async function seedClaim(runnerId: number, item: string, at = 0) {
-  await rows(`INSERT INTO claims (ticket_id, runner_id, request_id, nonce, snapshot_sha, claimed_at, status)
-              VALUES (?, ?, ?, 'abc123', '', ?, 'active')`, item, runnerId, `seed:${runnerId}:${item}`, at);
-  return (await rows<{ id: number }>(`SELECT id FROM claims WHERE ticket_id = ? AND status = 'active'`, item))[0].id;
 }
 
 // ── claims (R3-1212) ──────────────────────────────────────────────────────────────────────
@@ -282,7 +275,7 @@ export function armedAt() {
 
 /** A ticket of §7.1's normative post. */
 export function ticket(id: string, over: Record<string, unknown> = {}) {
-  return { id, course_id: 'roadmap-pr', path: `content/roadmap/${id}.mdx`, title: `${id} — a fixture ticket`, tier: 'routine', requires: [],
+  return { id, course_id: 'roadmap-pr', path: `content/roadmap/${id}.mdx`, title: `${id} — a fixture ticket`, requires: [],
     operator_only: false, expedite: false, depends_on: [], blocked_by: [], repos: ['immediately-run/docs'], rank: 0, ...over };
 }
 
@@ -406,8 +399,602 @@ export function sessionCall(cookie: string, path: string, init: RequestInit = {}
   return hostCall(new Request(ORIGIN + path, { ...init, headers }));
 }
 
+// Storage fixtures for states that a scenario cannot cheaply arrange through the API.
+// Keep supplied columns as explicit fields: a schema change must update the seeder contract.
+// Use the public request helpers instead when the write itself is under test.
+type FixtureValue = string | number | null;
+
+function insertFixture(store: Pick<Store, 'exec'>, table: string, fields: Record<string, FixtureValue | undefined>): void {
+  const entries = Object.entries(fields).filter(([, value]) => value !== undefined);
+  store.exec(`INSERT INTO ${table} (${entries.map(([key]) => key).join(', ')}) VALUES (${entries.map(() => '?').join(', ')})`,
+    ...entries.map(([, value]) => value)).toArray();
+}
+
+type ActivitySeed = {
+  runner_id: number; id: string; claim_id: number | null; kind: string; label: string; source: string;
+  started_at: number; ended_at: number | null; outcome: string | null; received_at: number; detail_json?: string;
+};
+export function seedActivity(fields: ActivitySeed): Promise<void> {
+  return withCore((core) => insertFixture(core.store, 'activities', fields));
+}
+
+type ClaimLegSeed = {
+  claim_id: number; seq: number; run_id?: string; leg: string; from_station: string; started_at: number;
+  started_observation: number; finished_at?: number | null; session_url?: string | null; bars?: string; to_station?: string;
+  evidence?: string; leg_log_dir?: string;
+};
+export function seedClaimLeg(fields: ClaimLegSeed): Promise<void> {
+  return withCore((core) => insertFixture(core.store, 'claim_legs', fields));
+}
+
+type ClaimSeatSeed = {
+  claim_id: number; capability: string;
+};
+export function seedClaimSeat(fields: ClaimSeatSeed): Promise<void> {
+  return withCore((core) => insertFixture(core.store, 'claim_seats', fields));
+}
+
+type ClaimSeed = {
+  ticket_id: string; runner_id: number; request_id: string; nonce: string; snapshot_sha: string | null;
+  claimed_at: number; status: string; ended_at?: number | null; end_reason?: string | null; station?: string;
+  start_path?: string; course_id?: string; confirmed_at?: number; ended_at_sha?: string | null;
+  end_observation?: number; leg?: string; fence_pending?: number; reap_after?: number;
+};
+/** Seed an already-held claim (or a historical claim) when allocation itself is not under test. */
+export function seedClaim(runnerId: number, ticket: string, at?: number): Promise<number>;
+export function seedClaim(fields: ClaimSeed): Promise<number>;
+export function seedClaim(runnerOrFields: number | ClaimSeed, ticket?: string, at = 0): Promise<number> {
+  const fields: ClaimSeed = typeof runnerOrFields === 'number' ? {
+    ticket_id: ticket!, runner_id: runnerOrFields, request_id: `seed:${runnerOrFields}:${ticket}`,
+    nonce: 'abc123', snapshot_sha: '', claimed_at: at, status: 'active',
+  } : runnerOrFields;
+  return withCore((core) => {
+    insertFixture(core.store, 'claims', fields);
+    return core.store.exec<{ id: number }>('SELECT id FROM claims WHERE runner_id = ? AND request_id = ?', fields.runner_id, fields.request_id).toArray()[0].id;
+  });
+}
+
+type ConditionSeed = {
+  repository_id: string; ticket_id: string; claim_id: number; run_id: string; leg: string; type: string;
+  disposition: string; severity: string; restarts_json: string; raised_at: number; outcome: string;
+};
+export function seedCondition(fields: ConditionSeed): Promise<void> {
+  return withCore((core) => insertFixture(core.store, 'conditions', fields));
+}
+/** A core condition row (R-BTN-160's `baton.*`), written in the caller's store so a schema
+ *  test can watch the open-condition unique index refuse a second one (S-BTN-131). */
+type CoreConditionSeed = {
+  repository_id: string; ticket_id: string | null; ref: string; type: string; disposition: string;
+  raised_at: number; outcome: string;
+};
+export function seedCoreConditionIn(store: Pick<Store, 'exec'>, fields: CoreConditionSeed): void {
+  insertFixture(store, 'conditions', fields);
+}
+
+type CredentialSeed = {
+  id: string; hostname: string; allowed_capabilities: string; kind?: string; public_key?: string;
+  created_by?: string;
+};
+export function seedCredentialIn(store: Pick<Store, 'exec'>, fields: CredentialSeed): void {
+  insertFixture(store, 'credentials', fields);
+}
+export function seedCredential(fields: CredentialSeed): Promise<void> {
+  return withCore((core) => seedCredentialIn(core.store, fields));
+}
+
+type EventSeed = {
+  at: number; kind: string; actor: string; detail_json: string; ticket_id: string | null; repository_id: string;
+  claim_id?: number | null;
+};
+export function seedEvent(fields: EventSeed): Promise<void> {
+  return withCore((core) => seedEventIn(core.store, fields));
+}
+export function seedEventIn(store: Pick<Store, 'exec'>, fields: EventSeed): void {
+  insertFixture(store, 'events', fields);
+}
+
+type ResourceSeed = {
+  name: string; scope: string; detail_schema: string;
+};
+export function seedResource(fields: ResourceSeed): Promise<void> {
+  return withCore((core) => insertFixture(core.store, 'external_resources', fields));
+}
+
+type HumanKeySeed = {
+  fingerprint: string; public_key: string; added_by: string; added_at: number;
+};
+export function seedHumanKey(fields: HumanKeySeed): Promise<void> {
+  return withCore((core) => insertFixture(core.store, 'human_keys', fields));
+}
+
+type InstanceServesSeed = {
+  instance: string; resource: string;
+};
+export function seedInstanceServes(fields: InstanceServesSeed): Promise<void> {
+  return withCore((core) => insertFixture(core.store, 'instance_serves', fields));
+}
+
+type InstanceStateSeed = {
+  instance: string; state: string; changed_at: number;
+};
+export function seedInstanceState(fields: InstanceStateSeed): Promise<void> {
+  return withCore((core) => insertFixture(core.store, 'instance_states', fields));
+}
+
+/** The instance's one settings row (id 1), as a fresh Baton holds it before an import (§4.8). */
+type InstanceSettingsSeed = { id: 1; link_hosts: string };
+export function seedInstanceSettings(fields: InstanceSettingsSeed): Promise<void> {
+  return withCore((core) => insertFixture(core.store, 'instance_settings', fields));
+}
+
+type LegQueueSeed = {
+  repository_id: string; course_id: string; leg: string; depth: number; max_queue: number;
+};
+export function seedLegQueue(fields: LegQueueSeed): Promise<void> {
+  return withCore((core) => insertFixture(core.store, 'leg_queues', fields));
+}
+
+type MessageSeed = {
+  kind: string; payload_json: string; from_runner_id?: number; to_runner_id: number; sent_at: number;
+  delivered_at?: number; acknowledged_at?: number | null; status: string; from_principal?: string;
+};
+export function seedMessage(fields: MessageSeed): Promise<void> {
+  return withCore((core) => insertFixture(core.store, 'messages', fields));
+}
+
+type PendingTranscriptSeed = {
+  runner_id: number; repo: string; path: string; role: string; first_seen_at: number; last_pushed_at: number | null;
+};
+export function seedPendingTranscript(fields: PendingTranscriptSeed): Promise<void> {
+  return withCore((core) => insertFixture(core.store, 'pending_transcripts', fields));
+}
+
+type PolicyFloorSeed = {
+  repository_id: string; name: string; guarantees: string; remove_by: string; added_by: string; added_at: number;
+};
+export function seedPolicyFloor(fields: PolicyFloorSeed): Promise<void> {
+  return withCore((core) => insertFixture(core.store, 'policy_floors', fields));
+}
+
+type RepositoryOwnerSeed = {
+  repository_id: string; public_key: string; fingerprint: string; added_by: string; added_at: number;
+};
+export function seedRepositoryOwnerIn(store: Pick<Store, 'exec'>, fields: RepositoryOwnerSeed): void {
+  insertFixture(store, 'repository_owners', fields);
+}
+export function seedRepositoryOwner(fields: RepositoryOwnerSeed): Promise<void> {
+  return withCore((core) => seedRepositoryOwnerIn(core.store, fields));
+}
+
+type RepositoryPolicySeed = {
+  repository_id: string; version: number; policy_json: string; hash: string; previous_hash: string;
+  changed_by: string; approver: string | null; preset: string | null; at: number;
+};
+export function seedRepositoryPolicyIn(store: Pick<Store, 'exec'>, fields: RepositoryPolicySeed): void {
+  insertFixture(store, 'repository_policies', fields);
+}
+
+type ResourceInstanceSeed = {
+  name: string; repositories: string;
+};
+export function seedResourceInstance(fields: ResourceInstanceSeed): Promise<void> {
+  return withCore((core) => insertFixture(core.store, 'resource_instances', fields));
+}
+
+type RunnerCapabilitySeed = {
+  runner_id: number; capability: string; declared: string;
+};
+export function seedRunnerCapability(fields: RunnerCapabilitySeed): Promise<void> {
+  return withCore((core) => insertFixture(core.store, 'runner_capabilities', fields));
+}
+
+type RunnerCourseSeed = {
+  runner_id: number; repository_id: string; course_id: string; version: number;
+};
+export function seedRunnerCourse(fields: RunnerCourseSeed): Promise<void> {
+  return withCore((core) => insertFixture(core.store, 'runner_courses', fields));
+}
+
+type RunnerGrantSeed = {
+  credential_id: string; repository_id: string; capabilities: string;
+  max_claims?: number; granted_by: string; granted_at: number;
+};
+export function seedRunnerGrant(fields: RunnerGrantSeed): Promise<void> {
+  return withCore((core) => insertFixture(core.store, 'runner_grants', fields));
+}
+
+type RunnerSeed = {
+  hostname: string; session_name: string; secret_hash: string; credential_id: string; harness: string;
+  kind: string; lease_timeout_ms: number; settings_hash: string; first_seen_at: number;
+  last_seen_at: number;
+};
+export function seedRunner(fields: RunnerSeed): Promise<void> {
+  return withCore((core) => insertFixture(core.store, 'runners', fields));
+}
+
+type ScopeFindingSeed = {
+  repository_id: string; ticket_id: string; claim_id: number; kind: string; target: string; detail_json: string;
+  raised_at: number; updated_at: number;
+};
+export function seedScopeFinding(fields: ScopeFindingSeed): Promise<void> {
+  return withCore((core) => insertFixture(core.store, 'scope_findings', fields));
+}
+
+type TicketBlockSeed = {
+  repository_id: string; ticket_id: string; leg?: string; kind: string; ref: string; since: number;
+};
+export function seedTicketBlock(fields: TicketBlockSeed): Promise<void> {
+  return withCore((core) => insertFixture(core.store, 'ticket_blocks', fields));
+}
+
+type TicketOverrideSeed = {
+  ticket_id: string; expedite?: number; hold?: number; hold_reason?: string | null; retry_after?: number;
+  set_by: string; set_at: number;
+};
+export function seedTicketOverrideIn(store: Pick<Store, 'exec'>, fields: TicketOverrideSeed): void {
+  insertFixture(store, 'ticket_overrides', fields);
+}
+export function seedTicketOverride(fields: TicketOverrideSeed): Promise<void> {
+  return withCore((core) => seedTicketOverrideIn(core.store, fields));
+}
+
+type TicketRowSeed = {
+  id: string; repository_id: string; local_id: string; path: string; title: string; status: string; node: string;
+  queue: string; tags: string; requires_clause: string; depends_on: string; blocked_by: string; repos: string;
+  snapshot_sha: string; row_hash: string;
+};
+export function seedTicketRow(fields: TicketRowSeed): Promise<void> {
+  return withCore((core) => insertFixture(core.store, 'tickets', fields));
+}
+
+type TranscriptSeed = {
+  runner_id: number; claim_id: number | null; repo: string; path: string; role: string; activity_id?: string | null;
+  first_seen_at: number; last_pushed_at?: number | null;
+};
+export function seedTranscript(fields: TranscriptSeed): Promise<void> {
+  return withCore((core) => insertFixture(core.store, 'transcripts', fields));
+}
+
+type UnblockedDispatchSeed = {
+  repository_id: string; pending_json: string; due_at: number; last_sent_at?: number;
+};
+export function seedUnblockedDispatchIn(store: Pick<Store, 'exec'>, fields: UnblockedDispatchSeed): void {
+  insertFixture(store, 'unblocked_dispatch', fields);
+}
+export function seedUnblockedDispatch(fields: UnblockedDispatchSeed): Promise<void> {
+  return withCore((core) => seedUnblockedDispatchIn(core.store, fields));
+}
+
+type WebhookDispatchSeed = {
+  repository_id: string; last_dispatch_at: number; trailing_at: number;
+};
+export function seedWebhookDispatchIn(store: Pick<Store, 'exec'>, fields: WebhookDispatchSeed): void {
+  insertFixture(store, 'webhook_dispatch', fields);
+}
+export function seedWebhookDispatch(fields: WebhookDispatchSeed): Promise<void> {
+  return withCore((core) => seedWebhookDispatchIn(core.store, fields));
+}
+export function upsertWebhookDispatch({ repository_id, last_dispatch_at, trailing_at }: WebhookDispatchSeed): Promise<void> {
+  return withCore(({ store }) => {
+    store.exec(`INSERT INTO webhook_dispatch (repository_id, last_dispatch_at, trailing_at) VALUES (?, ?, ?)
+      ON CONFLICT (repository_id) DO UPDATE SET last_dispatch_at = excluded.last_dispatch_at, trailing_at = excluded.trailing_at`,
+    repository_id, last_dispatch_at, trailing_at).toArray();
+  });
+}
+export function clearWebhookDispatchIn(store: Pick<Store, 'exec'>, repository: string): void {
+  store.exec('DELETE FROM webhook_dispatch WHERE repository_id = ?', repository).toArray();
+}
+
+type WebhookSyncSeed = {
+  repository_id: string; last_dispatch_at: number;
+};
+export function seedWebhookSyncIn(store: Pick<Store, 'exec'>, fields: WebhookSyncSeed): void {
+  insertFixture(store, 'webhook_syncs', fields);
+}
+export function seedWebhookSync(fields: WebhookSyncSeed): Promise<void> {
+  return withCore((core) => seedWebhookSyncIn(core.store, fields));
+}
+
+// Recorded state transitions used by scenario setup, not by the request under test.
+export function setTicketRankIn(store: Pick<Store, 'exec'>, ticket: string, rank: number): void {
+  store.exec("UPDATE tickets SET rank = ? WHERE id = ?", rank, ticket).toArray();
+}
+export function setTicketRank(ticket: string, rank: number) {
+  return withCore((core) => setTicketRankIn(core.store, ticket, rank));
+}
+export function setRunnerReaped(runner: number, at: number | null) {
+  return rows("UPDATE runners SET reaped_at = ? WHERE id = ?", at, runner);
+}
+export function setRunnerLastSeen(runner: number, at: number) {
+  return rows("UPDATE runners SET last_seen_at = ? WHERE id = ?", at, runner);
+}
+export function setGrantTrust(credential: string, level: string, domain: string) {
+  return rows("UPDATE runner_grants SET trust_level = ?, trust_domain = ? WHERE credential_id = ?", level, domain, credential);
+}
+export function revokeRunnerGrants(credential: string, at: number) {
+  return rows("UPDATE runner_grants SET revoked_at = ? WHERE credential_id = ?", at, credential);
+}
+export function setGrantRole(repository: string, role: string, credential: string) {
+  return rows("UPDATE runner_grants SET role = ? WHERE credential_id = ? AND repository_id = ?", role, credential, repository);
+}
+export function setOwnerAttestation(fingerprint: string, attestation: string) {
+  return rows("UPDATE repository_owners SET fido_attestation = ? WHERE fingerprint = ?", attestation, fingerprint);
+}
+export function setRepositoryGrantTrust(repository: string, level: string, domain: string, credential: string) {
+  return rows("UPDATE runner_grants SET trust_level = ?, trust_domain = ? WHERE credential_id = ? AND repository_id = ?", level, domain, credential, repository);
+}
+export function clearPolicyFloors(repository: string) {
+  return rows("DELETE FROM policy_floors WHERE repository_id = ?", repository);
+}
+export function replaceClaimControl(claim: number, control: string) {
+  return rows("UPDATE claims SET control_json = ? WHERE id = ?", control, claim);
+}
+export function replaceSignedControl(repository: string, control: string) {
+  return rows("UPDATE signed_control SET control_json = ? WHERE repository_id = ?", control, repository);
+}
+export function setCredentialCreatedBy(credential: string, createdBy: string) {
+  return rows("UPDATE credentials SET created_by = ? WHERE id = ?", createdBy, credential);
+}
+export function revokeCredentialIn(store: Pick<Store, 'exec'>, credential: string, at: number): void {
+  store.exec("UPDATE credentials SET revoked_at = ? WHERE id = ?", at, credential).toArray();
+}
+export function setCredentialAllowedCapabilities(credential: string, capabilities: string[]) {
+  return rows("UPDATE credentials SET allowed_capabilities = ? WHERE id = ?", JSON.stringify(capabilities), credential);
+}
+export function setCourseLegCapabilities(repository: string, course: string, legCapabilities: Record<string, string[]>) {
+  return rows("UPDATE courses SET leg_capabilities_json = ? WHERE repository_id = ? AND id = ?", JSON.stringify(legCapabilities), repository, course);
+}
+export function setCoursePersonLegs(repository: string, course: string, legs: string[]) {
+  return rows("UPDATE courses SET person_legs_json = ? WHERE repository_id = ? AND id = ?", JSON.stringify(legs), repository, course);
+}
+/** A grant written, or rewritten and un-revoked, with these capabilities. */
+export function putRunnerGrant(fields: { credential_id: string; repository_id: string; capabilities: string[]; granted_by: string; granted_at: number }) {
+  return rows(`INSERT INTO runner_grants (credential_id, repository_id, capabilities, granted_by, granted_at)
+    VALUES (?, ?, ?, ?, ?) ON CONFLICT (credential_id, repository_id)
+    DO UPDATE SET capabilities = excluded.capabilities, revoked_at = NULL`,
+  fields.credential_id, fields.repository_id, JSON.stringify(fields.capabilities), fields.granted_by, fields.granted_at);
+}
+export function removeRunnerCapability(runner: number, capability: string) {
+  return rows("DELETE FROM runner_capabilities WHERE runner_id = ? AND capability = ?", runner, capability);
+}
+export function clearTicketRequirements(ticket: string) {
+  return rows("DELETE FROM ticket_requires WHERE ticket_id = ?", ticket);
+}
+export function retireRepositoryIn(store: Pick<Store, 'exec'>, id: string, at: number): void {
+  store.exec("UPDATE repositories SET retired_at = ? WHERE id = ?", at, id).toArray();
+}
+export function retireRepository(id: string, at: number) {
+  return withCore((core) => retireRepositoryIn(core.store, id, at));
+}
+export function removeRepositoryOwner(fingerprint: string, at: number) {
+  return rows("UPDATE repository_owners SET removed_at = ? WHERE fingerprint = ?", at, fingerprint);
+}
+export function setRepositoryWeight(id: string, weight: number) {
+  return rows("UPDATE repositories SET weight = ? WHERE id = ?", weight, id);
+}
+export function setRepositoryRetry(id: string, retry: { backoff_ms: number[]; max_failed: number }) {
+  return rows('UPDATE repositories SET retry = ? WHERE id = ?', JSON.stringify(retry), id);
+}
+export function confirmClaimForScenario(id: number, at: number) {
+  return rows('UPDATE claims SET confirmed_at = ? WHERE id = ?', at, id);
+}
+export function setTranscriptRepositories(id: string, repositories: string) {
+  return rows("UPDATE repositories SET transcript_repos = ? WHERE id = ?", repositories, id);
+}
+export function setRunnerLastActivity(runner: number, at: number) {
+  return rows("UPDATE runners SET last_activity_at = ? WHERE id = ?", at, runner);
+}
+export function setTicketBlockedSince(ticket: string, at: number) {
+  return rows("UPDATE tickets SET blocked_since = ? WHERE id = ?", at, ticket);
+}
+export function setClosedTicketTime(ticket: string, at: number) {
+  return rows("UPDATE closed_tickets SET closed_at = ? WHERE ticket_id = ?", at, ticket);
+}
+export function setTicketRetry(ticket: string, at: number) {
+  return rows("UPDATE ticket_overrides SET retry_after = ? WHERE ticket_id = ?", at, ticket);
+}
+export function setOwnerHumanOnly(fingerprint: string) {
+  return rows("UPDATE repository_owners SET human_only = 1 WHERE fingerprint = ?", fingerprint);
+}
+export function setReadingLapse(instance: string, at: number) {
+  return rows("UPDATE instance_readings SET lapses_at = ? WHERE instance = ?", at, instance);
+}
+export function revokeCredential(credential: string, at: number) {
+  return rows("UPDATE credentials SET revoked_at = ? WHERE id = ?", at, credential);
+}
+export function setAllRunnersReaped(at: number) {
+  return rows("UPDATE runners SET reaped_at = ?", at);
+}
+export function clearRunnerCapabilities(runner: number) {
+  return rows("DELETE FROM runner_capabilities WHERE runner_id = ?", runner);
+}
+export function replaceRecordedInputDigest(input: string, digest: string) {
+  return rows("UPDATE leg_run_inputs SET digest = ? WHERE name = ?", digest, input);
+}
+export function replaceClaimSnapshot(ticket: string, sha: string) {
+  return rows("UPDATE claims SET snapshot_sha = ? WHERE ticket_id = ?", sha, ticket);
+}
+export function clearSettingIn(store: Pick<Store, 'exec'>, key: string): void {
+  store.exec("DELETE FROM baton_settings WHERE key = ?", key).toArray();
+}
+/** B-259 (S-BTN-244, B-236): an events row as retention sees it — only the columns given are
+ *  written, the rest take the table's defaults; the new row's `seq`. */
+type EventRowSeed = { at: number; kind: string; actor: string; detail_json?: string; repository_id?: string };
+function eventInsert(e: EventRowSeed): [string, unknown[]] {
+  const cols = Object.entries(e).filter(([, v]) => v !== undefined);
+  return [`INSERT INTO events (${cols.map(([k]) => k).join(', ')}) VALUES (${cols.map(() => '?').join(', ')}) RETURNING seq`, cols.map(([, v]) => v)];
+}
+export async function addEventRow(e: EventRowSeed): Promise<{ seq: number }> {
+  const [sql, params] = eventInsert(e);
+  return (await rows<{ seq: number }>(sql, ...params))[0];
+}
+export function addEventRowIn(store: Pick<Store, 'exec'>, e: EventRowSeed): void {
+  const [sql, params] = eventInsert(e);
+  store.exec(sql, ...params).toArray();
+}
+/** B-259: the mirror's acknowledged cursor — `seq`, or the newest event's when `'max'`; for one
+ *  repository, or every one when `repository` is null. */
+function mirrorAck(repository: string | null, seq: number | 'max'): [string, unknown[]] {
+  const value = seq === 'max' ? '(SELECT MAX(seq) FROM events)' : '?';
+  return [`UPDATE repositories SET mirror_acked_seq = ${value}${repository == null ? '' : ' WHERE id = ?'}`,
+    [...(seq === 'max' ? [] : [seq]), ...(repository == null ? [] : [repository])]];
+}
+export function setMirrorAcked(repository: string | null, seq: number | 'max') {
+  const [sql, params] = mirrorAck(repository, seq);
+  return rows(sql, ...params);
+}
+export function setMirrorAckedIn(store: Pick<Store, 'exec'>, repository: string | null, seq: number | 'max'): void {
+  const [sql, params] = mirrorAck(repository, seq);
+  store.exec(sql, ...params).toArray();
+}
+/** B-249: the instant Baton last served, so a clock jump reads as elapsed service time, not an outage. */
+export function setLastServedAt(at: number) {
+  return rows("UPDATE baton_settings SET value = ? WHERE key = 'last_served_at'", String(at));
+}
+export function clearSetting(key: string) {
+  return withCore((core) => clearSettingIn(core.store, key));
+}
+export function clearInstanceReadings() {
+  return rows("DELETE FROM instance_readings");
+}
+export function clearCourseRegistry() {
+  return rows("DELETE FROM courses");
+}
+export function releaseSeededClaim(claim: number, at: number) {
+  return rows("UPDATE claims SET status = 'released', ended_at = ? WHERE id = ?", at, claim);
+}
+export function releaseActiveTicketClaim(ticket: string, at: number) {
+  return rows("UPDATE claims SET status = 'released', ended_at = ? WHERE ticket_id = ? AND status = 'active'", at, ticket);
+}
+export function setUnblockedTriggerIn(store: Pick<Store, 'exec'>, id: string, trigger: string): void {
+  store.exec("UPDATE repositories SET unblocked_trigger = ? WHERE id = ?", trigger, id).toArray();
+}
+export function releaseAllSeededClaims(at: number) {
+  return rows("UPDATE claims SET status = 'released', ended_at = ?, end_reason = 'released:requested'", at);
+}
+export function setCredentialHostname(credential: string, hostname: string) {
+  return rows("UPDATE credentials SET hostname = ? WHERE id = ?", hostname, credential);
+}
+export function setTranscriptRepositoriesForAll(repositories: string) {
+  return rows("UPDATE repositories SET transcript_repos = ?", repositories);
+}
+export function removeAllRepositoryOwnersIn(store: Pick<Store, 'exec'>, at: number): void {
+  store.exec("UPDATE repository_owners SET removed_at = ?", at).toArray();
+}
+export function removeRepositoryOwnersIn(store: Pick<Store, 'exec'>, repository: string, at: number): void {
+  store.exec("UPDATE repository_owners SET removed_at = ? WHERE repository_id = ?", at, repository).toArray();
+}
+export function removeRepositoryOwners(repository: string, at: number) {
+  return withCore((core) => removeRepositoryOwnersIn(core.store, repository, at));
+}
+export function setSyncDispatchTimeIn(store: Pick<Store, 'exec'>, repository: string, at: number): void {
+  store.exec("UPDATE webhook_syncs SET last_dispatch_at = ? WHERE repository_id = ?", at, repository).toArray();
+}
+export function clearRepositoryDispatch(repository: string): Promise<void> {
+  return withCore(({ store }) => {
+    store.exec('UPDATE repositories SET dispatch = NULL WHERE id = ?', repository).toArray();
+  });
+}
+/** Recreate the missing posted head that migration 0084 backfills. */
+export function restorePrePostedHeadBackfillIn(store: Pick<Store, 'exec'>, repository: string): void {
+  store.exec('UPDATE board_head SET posted_sha = NULL WHERE repository_id = ?', repository).toArray();
+  store.exec('DELETE FROM _baton_migrations WHERE id = 84').toArray();
+}
+export function setWebhookTrailingTimeIn(store: Pick<Store, 'exec'>, repository: string, at: number): void {
+  store.exec("UPDATE webhook_dispatch SET trailing_at = ? WHERE repository_id = ?", at, repository).toArray();
+}
+
+export function claimRows() {
+  return rows<{ id: number; ticket_id: string; status: string; end_reason: string | null; fence_pending: number }>(
+    'SELECT id, ticket_id, status, end_reason, fence_pending FROM claims ORDER BY id');
+}
+
+export async function runnerId(session?: string): Promise<number> {
+  const found = session === undefined
+    ? await rows<{ id: number }>('SELECT id FROM runners')
+    : await rows<{ id: number }>('SELECT id FROM runners WHERE session_name = ?', session);
+  if (found.length !== 1) throw new Error(`Expected one runner, found ${found.length}`);
+  return found[0].id;
+}
+
+/** Replace the implicit bootstrap grant with an owner grant covering the runner's declaration. */
+export function grantRunnerConcurrency(runner: number, maxClaims: number) {
+  return withCore(({ store }) => store.transaction(() => {
+    const { credential_id } = store.exec<{ credential_id: string }>('SELECT credential_id FROM runners WHERE id = ?', runner).one();
+    const caps = store.exec<{ capability: string }>('SELECT capability FROM runner_capabilities WHERE runner_id = ?', runner).toArray();
+    const owner = 'owner:owner@example.com';
+    store.exec('UPDATE credentials SET created_by = ? WHERE id = ?', owner, credential_id).toArray();
+    store.exec(`INSERT INTO runner_grants (credential_id, repository_id, capabilities, max_claims, granted_by, granted_at)
+                VALUES (?, 'docs', ?, ?, ?, 0)
+                ON CONFLICT (credential_id, repository_id) DO UPDATE SET max_claims = excluded.max_claims`,
+      credential_id, JSON.stringify(caps.map((c) => c.capability)), maxClaims, owner).toArray();
+  }));
+}
+
 /** R-BTN-10: the post fields of a sync that found the evidence an unconfirmed end named — its
  *  `std:git.evidence@1` for that claim, `ticket` a local id. Spread into `Git.refresh`/`post`. */
 export function evidenceFound(claim: number, evidence: string, ticket = 'T-1', found = true) {
   return { attestations: [{ type: 'std:git.evidence@1', ticket, ref: String(claim), value: { claim, evidence, found } }] };
+}
+
+// Recorded setup that main's later scenarios wrote inline (B-279's ratchet: named here, never
+// in a scenario file).
+type SqlExec = { exec(query: string, ...bindings: unknown[]): unknown };
+/** Migration tests: the legacy reviewer rows and settings migration 0076 retires. */
+export function seedLegacyReviewerSql(sql: SqlExec): void {
+  sql.exec(`INSERT INTO reviewer_agents (name, reviews_on, family, bills) VALUES ('review', 'm', 'family', '[]')`);
+}
+export function seedSettingsSql(sql: SqlExec, entries: [string, string][]): void {
+  for (const [key, value] of entries) sql.exec('INSERT INTO baton_settings (key, value) VALUES (?, ?)', key, value);
+}
+/** Align a migration's recorded time with a scenario's simulated clock. */
+export function setMigrationAppliedAt(id: number, at: number): Promise<void> {
+  return withCore(({ store }) => {
+    store.exec('UPDATE _baton_migrations SET applied_at = ? WHERE id = ?', at, id).toArray();
+  });
+}
+/** Migration tests (B-239): an administrator-made key's runner holding `capabilities`. */
+export function seedAdminRunnerSql(sql: SqlExec, credential: string, runner: number, capabilities: string[]): void {
+  sql.exec("UPDATE credentials SET created_by = 'admin:test' WHERE id = ?", credential);
+  sql.exec(`INSERT INTO runners (id, hostname, session_name, secret_hash, credential_id, harness, kind,
+            tier_ceiling, lease_timeout_ms, settings_hash, first_seen_at, last_seen_at)
+            VALUES (?, 'host', 's', 'hash', ?, 'opencode', 'vm', 'routine', 900000, '', 0, 0)`, runner, credential);
+  for (const c of capabilities) sql.exec('INSERT INTO runner_capabilities (runner_id, capability, declared) VALUES (?, ?, ?)', runner, c, c);
+}
+/** S-BTN-243: months of history for one runner — `count` linked and pending transcripts and
+ *  status reports, half an hour apart from `from`. */
+export async function seedRunnerHistory(runner: number, count: number, repo: string, from: number, step: number): Promise<void> {
+  const series = 'WITH RECURSIVE k(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM k WHERE i < ?)';
+  await rows(`${series}
+    INSERT INTO transcripts (runner_id, claim_id, repo, path, role, first_seen_at)
+    SELECT c.runner_id, c.id, ?, 'linked-' || i, 'session', ? + i * ? FROM k CROSS JOIN claims c WHERE c.runner_id = ?`,
+    count, repo, from, step, runner);
+  await rows(`${series}
+    INSERT INTO pending_transcripts (runner_id, repo, path, role, first_seen_at)
+    SELECT ?, ?, 'pending-' || i, 'session', ? + i * ? FROM k`, count, runner, repo, from, step);
+  await rows(`${series}
+    INSERT INTO messages (kind, from_runner_id, to_runner_id, sent_at, status, payload_json)
+    SELECT 'status_report', ?, ?, ? + i * ?, 'acknowledged', '{"text":"history"}' FROM k`, count, runner, runner, from, step);
+}
+/** S-BTN-243: an ended claim, a linked and a pending transcript and a report for every
+ *  `extra-*` runner. */
+export async function seedExtraRunnersHistory(ticket: string, claimedAt: number, endedAt: number, repo: string): Promise<void> {
+  await rows(`INSERT INTO claims (ticket_id, runner_id, request_id, nonce, snapshot_sha, claimed_at, status, ended_at)
+    SELECT ?, id, 'history-' || id, 'test', '', ?, 'released', ? FROM runners WHERE hostname GLOB 'extra-*'`, ticket, claimedAt, endedAt);
+  await rows(`INSERT INTO transcripts (runner_id, claim_id, repo, path, role, first_seen_at)
+    SELECT c.runner_id, c.id, ?, 'linked-' || c.runner_id, 'session', ? FROM claims c WHERE c.ticket_id = ?`, repo, endedAt, ticket);
+  await rows(`INSERT INTO pending_transcripts (runner_id, repo, path, role, first_seen_at)
+    SELECT id, ?, 'pending-' || id, 'session', ? FROM runners WHERE hostname GLOB 'extra-*'`, repo, endedAt);
+  await rows(`INSERT INTO messages (kind, from_runner_id, to_runner_id, sent_at, status, payload_json)
+    SELECT 'status_report', id, id, ?, 'acknowledged', '{"text":"extra"}' FROM runners WHERE hostname GLOB 'extra-*'`, endedAt);
+}
+/** An event and a ticket-history row as an older Baton wrote them (S-BTN-310's migration). */
+export function seedLegacyEvent(at: number, kind: string, detail: string) {
+  return rows('INSERT INTO events (at, kind, actor, detail_json) VALUES (?, ?, \'baton\', ?)', at, kind, detail);
+}
+export function seedTicketHistory(repository: string, ticket: string, at: number, kind: string, detail: string) {
+  return rows('INSERT INTO ticket_history (repository_id, ticket_id, at, kind, detail_json) VALUES (?, ?, ?, ?, ?)', repository, ticket, at, kind, detail);
+}
+export function setRepositoryDefaultBranch(id: string, branch: string) {
+  return rows('UPDATE repositories SET default_branch = ? WHERE id = ?', branch, id);
 }

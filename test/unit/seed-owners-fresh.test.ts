@@ -7,6 +7,7 @@
 // an instance seeded as before, nothing owns it and `seed_owners` names it. A unit test,
 // not a scenario — the local project's setup is the one that reads wrangler.toml
 // (test/unit/auth.test.ts does the same).
+import { removeAllRepositoryOwnersIn } from '../helpers';
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -74,7 +75,7 @@ describe('B-91: a rebuilt instance serves the owner CLI without a manual re-add'
     };
     const first = new LocalHost({ store, alarm: 'manual', config, adminKeys: { list: () => [admin.publicKey] } });
     await first.start();
-    first.core.store.exec(`UPDATE repository_owners SET removed_at = 1`);
+    removeAllRepositoryOwnersIn(first.core.store, 1);
     // The same database, the same config: the next start is the rebuilt instance.
     const rebuilt = new LocalHost({ store, alarm: 'manual', config, adminKeys: { list: () => [admin.publicKey] } });
     await rebuilt.start();

@@ -20,9 +20,7 @@ the code as it still runs.
 
 The control inputs are `.baton/**` (the settings, `agent_command`, course sources, overrides,
 `rank.mjs`, `sync.mjs`), goal files, the `EXPEDITE` tag, and agent configuration (`.claude/**`,
-every `CLAUDE.md` and `AGENTS.md`, `.mcp.json`, plugin manifests). A ticket's `tier` is
-deliberately not one: a tier routes work by quality, not privilege, so a changed tier sends a
-ticket to no runner whose credentials it could not already reach through its body.
+every `CLAUDE.md` and `AGENTS.md`, `.mcp.json`, plugin manifests).
 
 Only a key of the repository's owners that **no agent session holds** counts — the human-only
 register (R-BTN-185): a key registered with the tenant (`BATON_HUMAN_KEYS` on the host, or

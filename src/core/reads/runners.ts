@@ -69,7 +69,6 @@ export type RunnerRow = {
   harness: string;
   kind: string;
   isolation: string;
-  tier_ceilings: Record<string, string>;
   /** The runner's own statement (R-BTN-174): each capability with the name it declared it by. */
   capabilities: { capability: string; declared: string }[];
   /** The grant's capabilities on this repository; null for a key no grant binds. */
@@ -90,7 +89,7 @@ export type RunnerRow = {
 };
 
 type Raw = {
-  id: number; hostname: string; session_name: string; harness: string; kind: string; isolation: string; tier_ceilings: string; lease_timeout_ms: number;
+  id: number; hostname: string; session_name: string; harness: string; kind: string; isolation: string; lease_timeout_ms: number;
   last_seen_at: number; last_activity_at: number | null; reaped_at: number | null; profile_json: string | null;
   credential_kind: string; created_by: string | null; granted: string | null; role: string | null; trust_domain: string | null;
 };
@@ -114,7 +113,7 @@ function grouped<T extends { runner_id: number }>(rows: T[]): Map<number, T[]> {
  *  name); `only` narrows it to one runner. */
 function rawRows(cx: ReadCtx, repo: string, only: number | null): Raw[] {
   return cx.sql<Raw>(
-    `SELECT w.id, w.hostname, w.session_name, w.harness, w.kind, w.isolation, w.tier_ceilings, w.lease_timeout_ms,
+    `SELECT w.id, w.hostname, w.session_name, w.harness, w.kind, w.isolation, w.lease_timeout_ms,
             w.last_seen_at, w.last_activity_at, w.reaped_at, w.profile_json,
             k.kind AS credential_kind, k.created_by, g.capabilities AS granted, g.role, g.trust_domain
      FROM runners w JOIN credentials k ON k.id = w.credential_id
@@ -217,7 +216,6 @@ export function runnerRows(cx: ReadCtx, repo: string, sessionLink: SessionLinkVi
       alive: isLive(w, now),
       last_seen_at: w.last_seen_at, last_activity_at: w.last_activity_at, reaped_at: w.reaped_at,
       harness: w.harness, kind: w.kind, isolation: w.isolation,
-      tier_ceilings: parsed<Record<string, string>>(w.tier_ceilings, {}),
       capabilities: (capabilities.get(w.id) ?? []).map(({ capability, declared }) => ({ capability, declared })),
       granted: w.granted == null ? null : parsed<string[]>(w.granted, []),
       tags: (tags.get(w.id) ?? []).map((x) => x.tag),
@@ -286,7 +284,7 @@ function showRunner(cx: ReadCtx, call: ReadCall) {
     }
     for (const a of cx.sql<{ claim_id: number; id: string; parent_id: string | null; kind: string; label: string | null; source: string; started_at: number; ended_at: number | null; outcome: string | null; detail_json: string | null }>(
       `SELECT claim_id, id, parent_id, kind, label, source, started_at, ended_at, outcome, detail_json FROM activities
-       WHERE claim_id IN (SELECT value FROM json_each(?)) ORDER BY claim_id, started_at, rowid`, claimIds)) {
+       WHERE claim_id IN (SELECT value FROM json_each(?)) ORDER BY claim_id, started_at, insertion_order`, claimIds)) {
       activities.set(a.claim_id, [...(activities.get(a.claim_id) ?? []), { id: a.id, parent_id: a.parent_id, kind: a.kind, label: a.label, source: a.source,
         started_at: a.started_at, ended_at: a.ended_at, outcome: a.outcome, detail: parsed<unknown>(a.detail_json, null) }]);
     }
