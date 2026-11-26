@@ -2,7 +2,7 @@
 title: "2. Deployments: tenants, hosts and the service"
 description: "A tenant is one Baton: one origin, one Durable Object with SQLite, its administrators and everything they govern."
 ---
-## 2. Deployments: tenants, hosts and the service *(partly built — B-45, B-46)*
+## 2. Deployments: tenants, hosts and the service
 
 A **tenant** is one Baton: one origin, one Durable Object with SQLite, its administrators and
 everything they govern. The same code runs on Cloudflare in production and as a local Node
@@ -39,14 +39,14 @@ process for development and CI. Nothing crosses a tenant.
 - **Code.** Schema migrations are numbered and append-only; the object refuses to serve until
   all are applied. There is no staging instance: a home repository binds to one Baton
   (R-BTN-56).
-- **R-BTN-37 (shared modules are vendored by hash).** Baton maintains `baton.mjs`, `vocabulary.mjs`,
+- **R-BTN-37 (shared modules are vendored by hash).** `status: built` Baton maintains `baton.mjs`, `vocabulary.mjs`,
   `sessionUsage.mjs`, `batonSync.mjs` and `ticketPr.mjs` as sources under `src/shared/`.
   Consumers use byte-identical copies pinned to a Baton commit and check their hashes, or
   consume the modules from a pinned Baton CLI release that exposes them. Baton builds and
   tests without a consumer checkout. Code with course meaning (`locate`, ranking, activity
   matchers) stays with its course: the sync posts its results, and core compares strings and
   integers only.
-- **R-BTN-32 (one clock, with a production-inert test seam).** Every component reads time
+- **R-BTN-32 (one clock, with a production-inert test seam).** `status: built` Every component reads time
   through one function — `batonNow()` in the client library, the core through its injected
   clock (`this.now`, set in tests by `setClock`) — never `Date.now()` directly; in production
   it is the wall clock. No environment variable is ever read for time. The only override is a
@@ -54,7 +54,7 @@ process for development and CI. Nothing crosses a tenant.
   written by a sidecar started with `--test-harness`, which refuses to start unless Baton's URL
   is loopback. Such a sidecar declares `test_harness: true` on its heartbeat, and Baton refuses
   that flag from any credential but the test one (`forbidden`).
-- **R-BTN-55 (a thin platform shell over portable logic).** Everything Baton decides is plain
+- **R-BTN-55 (a thin platform shell over portable logic).** `status: built` Everything Baton decides is plain
   TypeScript that names no platform. Each platform service is one interface with two
   implementations, handed to the object by the host shell for its tenant:
 
@@ -77,9 +77,8 @@ process for development and CI. Nothing crosses a tenant.
   - The Durable Object class is wiring only; `src/core/` imports no `cloudflare:*` module (a
     build check enforces it). Every integration scenario runs against both hosts. Signed
     requests (§11.1) and administration (§11) need no Cloudflare service.
-  - The local host binds loopback unless `--bind` says otherwise; TLS is its operator's
-    (R-BTN-158).
-- **R-BTN-2 (the day's usage against the plan's limits).** The dashboard shows the day's
+  - The local host's binding (`--host`) and operator-managed TLS follow R-BTN-158.
+- **R-BTN-2 (the day's usage against the plan's limits).** `status: built R3-1258` The dashboard shows the day's
   Durable Object requests and SQLite rows written against the plan's limits. The limits are the
   one Worker var `BATON_PLAN_LIMITS` — `{"requests": <n>, "rows_written": <n>}` a UTC day,
   defaulting to 100,000 each. Baton refuses nothing at a limit; the platform fails further
@@ -88,7 +87,7 @@ process for development and CI. Nothing crosses a tenant.
 
 ### 2.2 Tenants
 
-- **R-BTN-135 (a tenant is a Baton, named by its origin).**
+- **R-BTN-135 (a tenant is a Baton, named by its origin).** `status: partly B-45`
   - **What it is.** Everything one Baton holds and its administrators. It is Baton's own
     partition, not the platform's tenant.
   - **Its origin.** `https://<host>[:<port>]`, no path; a local host's is
@@ -112,7 +111,7 @@ process for development and CI. Nothing crosses a tenant.
     shell's ports (R-BTN-55) and the host's `Config` (R-BTN-136).
   - A deployment serving several tenants is a router in front of this and changes no rule here.
     It is not built: [the multi-tenancy proposal](../proposals/multi-tenancy.md).
-- **R-BTN-136 (the operator; configuration, secrets and administrators per tenant).**
+- **R-BTN-136 (the operator; configuration, secrets and administrators per tenant).** `status: partly B-45`
   - The **operator** is whoever controls the deployment (the platform account; locally, the
     process). It is the root of trust and not a Baton principal: it acts through the platform
     (`wrangler`, the host's files), never Baton's API, and owns no registry action (R-BTN-129).
@@ -126,7 +125,7 @@ process for development and CI. Nothing crosses a tenant.
   - **Administrators belong to a tenant.** Nothing in a tenant's storage can add an
     administrator to it. An administrator's, a dashboard session's and every `instance`-scoped
     action's powers end at the tenant.
-- **R-BTN-137 (a credential is valid in one tenant; a key in two tenants is two keys).**
+- **R-BTN-137 (a credential is valid in one tenant; a key in two tenants is two keys).** `status: built`
   - A signature verifies only at its origin; a bearer secret (API key, MCP key, registration
     token, pending sign-in, dashboard session) is stored hashed in one tenant and unknown in
     every other unless R-BTN-88 moved it; nonces, rate limits and revocations are per tenant.
@@ -149,7 +148,7 @@ process for development and CI. Nothing crosses a tenant.
     under another origin.
   - `~/.config/baton/keys.json` maps each origin to its roles; the CLI offers only the called
     origin's.
-- **R-BTN-56 (one Baton per repository).** Two Batons serving one repository are two lock
+- **R-BTN-56 (one Baton per repository).** `status: built` Two Batons serving one repository are two lock
   servers (R-BTN-18). `.baton/baton.json`'s `baton_url` names the repository's one Baton; its
   sync posts only there. Each Baton checks a CI token's audience against its origin (R-BTN-15),
   and the sync requests its token for `baton_url`, the same string: `BATON_ORIGIN` verbatim,
@@ -159,7 +158,7 @@ process for development and CI. Nothing crosses a tenant.
 
 ### 2.3 Capacity and admission
 
-- **R-BTN-87 (the capacity envelope: one Baton per team, not sharded).** One Durable Object
+- **R-BTN-87 (the capacity envelope: one Baton per team, not sharded).** `status: built` One Durable Object
   serializes every request of a tenant; readings and fleet counts are per tenant.
   - **The envelope** (targets, not platform limits): 50 live runners, 20 repositories, 5,000
     live tickets, 1,000,000 history rows; 20 requests a second as a 5-minute mean; bursts of
@@ -173,7 +172,7 @@ process for development and CI. Nothing crosses a tenant.
     caps do. `npm run test:load` proves it (§15).
   - Beyond the envelope the answer is another Baton: repositories partition across Batons
     (R-BTN-56).
-- **R-BTN-196 (an idle runner's beat reads about nothing).** Every write to a tenant's state
+- **R-BTN-196 (an idle runner's beat reads about nothing).** `status: built B-287` Every write to a tenant's state
   moves the **state version** in the write's own commit, and a rollback takes the move back.
   A write to an input of eligibility or advice — what a runner declares, a grant, a position,
   a claim, a block, an instance's availability — also moves the **scheduling version**, as
@@ -194,7 +193,7 @@ process for development and CI. Nothing crosses a tenant.
     anything it declares (harness, kind, model, lease timeout, isolation,
     concurrency, profile, capabilities, tags, courses) changed, it re-keys, or it carries
     something to record.
-- **R-BTN-149 (hard caps per repository).** Safety limits at twice the envelope; none refuses
+- **R-BTN-149 (hard caps per repository).** `status: built` Safety limits at twice the envelope; none refuses
   lease upkeep.
 
   | Cap | Limit | Past it |
@@ -207,8 +206,11 @@ process for development and CI. Nothing crosses a tenant.
     [the proposal](../proposals/multi-tenancy.md).
   - **Retention.** Runner rows unseen for 30 days lose their capability, tag, course and report
     rows. The alarm deletes `board_snapshots` older than 90 days (never the head's) and
-    repository `events` older than 90 days — while a repository has a mirror (§16), only below
-    its `mirror_acked_seq` — then the claims of a ticket whose history R-BTN-81 purged, with
+    repository `events` older than 90 days, below every live mirror's `mirror_acked_seq` (§16).
+    Event deletion is off unless the instance configures an archive. The alarm deletes only
+    events acknowledged by the archive, in the mirror feed's shape (§12); a failed archive
+    batch leaves all its events in SQLite. The latest sequence remains as a cursor watermark.
+    The alarm also deletes the claims of a ticket whose history R-BTN-81 purged, with
     their legs, activities and the rows that name them; a claim still held (R-BTN-39), or named
     by an event, a condition or a scope finding, waits and its ticket is tried again a day
     later. The alarm deletes at most 1,000 rows a tick, oldest first, each prune through an

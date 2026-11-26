@@ -61,7 +61,6 @@ export function parseRaiseArgs(argv: string[]): RaiseArgs {
   }
   if (out.type === '') throw new Error('usage: baton leg raise <type> --subject TEXT [--body <file>] (R-BTN-160)');
   if (out.type !== '\0help' && out.subject.trim() === '') throw new Error('--subject TEXT is required (R-BTN-160)');
-  if (out.default != null && out.restarts == null) throw new Error('--default names one of --restarts');
   return out;
 }
 

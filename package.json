@@ -18,6 +18,10 @@
     "provenance": true
   },
   "type": "module",
+  "exports": {
+    "./leg": "./dist/legClient.mjs",
+    "./*": "./*"
+  },
   "description": "Baton — work-item leases, runners and the factory dashboard, on a Cloudflare Durable Object or as a local Node process (BATON_SPEC §3a).",
   "engines": {
     "node": ">=22.13"
@@ -26,7 +30,7 @@
     "baton": "dist/baton.mjs"
   },
   "scripts": {
-    "test": "BATON_SKIP_QUINT=1 vitest run && npm run model:links",
+    "test": "BATON_SKIP_QUINT=1 vitest run && npm run model:links && npm run check:api && npm run check:spec && npm run check:wiki && node scripts/link-spec-refs.mjs --check",
     "pretest": "npm run build:ui",
     "test:full": "rm -rf test/.traces && vitest run && npm run model:links && npm run traces && npm run model:quick",
     "test:baton": "vitest run",
@@ -53,6 +57,7 @@
     "traces": "node scripts/check-traces.mjs",
     "model:verify": "node model/verify.mjs",
     "check:wiki": "node scripts/check-wiki.mjs",
+    "check:api": "node scripts/check-api.mjs",
     "check:actions": "node scripts/check-actions.mjs",
     "check:tickets": "node cli/baton.mjs tickets check --repo .",
     "spec:impact": "node scripts/spec-tools.mjs impact",

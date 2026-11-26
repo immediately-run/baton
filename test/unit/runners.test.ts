@@ -20,6 +20,20 @@ beforeEach(async () => {
 });
 
 describe('G-BTN-5: identity — the secret, the hostname and the capability allow-list', () => {
+  it('rejects malformed harness names before registering a runner (B-284, S-BTN-41)', async () => {
+    const secret_hash = await sha256('harness-name-test');
+    for (const harness of ['', '-agent', 'agent\n', '<agent>', 'a'.repeat(65), 123]) {
+      const res = await runnerCall('/v1/runner/heartbeat', { cred: 'vm-a', body: hbBody('vm-a', { harness, secret_hash }) });
+      expect(res.status).toBe(400);
+      expect(await res.json()).toMatchObject({ code: 'invalid-params', message: expect.stringContaining('harness') });
+    }
+    expect(await rows('SELECT id FROM runners')).toEqual([]);
+    const harness = 'a'.repeat(64);
+    const res = await runnerCall('/v1/runner/heartbeat', { cred: 'vm-a', body: hbBody('vm-a', { harness, secret_hash }) });
+    expect(res.status).toBe(200);
+    expect(await rows('SELECT harness FROM runners')).toEqual([{ harness }]);
+  });
+
   it('a first heartbeat registers; later calls need the secret; a wrong one is session-taken', async () => {
     const { id, secret, first } = await register('vm-a');
     expect(first).toMatchObject({ runner_id: id, incarnation: 1, lease_timeout_s: 900, claim: null, mode: { docs: 'shadow' }, stale_courses: [] });
@@ -272,7 +286,7 @@ describe('messages (§9)', () => {
     const { id } = await register('vm-a');
     const bad = await owner('/v1/ui/messages', { to_runner_id: id, kind: 'release', payload: { ticket_id: 'docs:R3-9001', reason: 'because' } });
     expect([bad.status, await code(bad)]).toEqual([400, 'invalid-params']);
-    expect((await owner('/v1/ui/messages', { to_runner_id: id, kind: 'release', payload: { ticket_id: 'docs:R3-9001', reason: 'owner-cancel' } })).status).toBe(200);
+    expect((await owner('/v1/ui/messages', { to_runner_id: id, kind: 'release', confirm: true, payload: { ticket_id: 'docs:R3-9001', reason: 'owner-cancel' } })).status).toBe(200);
   });
 
   it('the alarm expires a reaped runner’s open messages', async () => {

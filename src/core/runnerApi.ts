@@ -5,6 +5,8 @@
 // whose rows the unique indexes guard. The model tables are gone (B-142): a heartbeat may still
 // carry `model_provider_id`, `billing`, `usage` and `rate_limits`, all accepted and ignored,
 // and an unavailable provider is a reading (§6.3, R-BTN-76), never a table core keeps.
+import { hasGrant } from './grants';
+import type { BeatAnswer } from '../shared/runner-wire';
 import { isLive, liveRunnerSql, type Lease } from './runnerLiveness';
 import { runnerLatest } from './runnerLatest';
 import { BatonError } from './http';
@@ -82,8 +84,8 @@ export class RunnerApi {
   private rows<T = Row>(q: string, ...p: unknown[]): T[] {
     return this.c.store.exec(q, ...p).toArray() as T[];
   }
-  private exec(q: string, ...p: unknown[]) {
-    return this.c.store.exec(q, ...p);
+  private exec<T = Row>(q: string, ...p: unknown[]) {
+    return this.c.store.exec<T>(q, ...p);
   }
   private event(kind: string, actor: string, detail: unknown, ticketId: string | null = null, claimId: number | null = null) {
     logEvent(this.c.store, this.c.now(), kind, actor, detail, ticketId, claimId);
@@ -289,9 +291,9 @@ export class RunnerApi {
    *  claim, the messages, the stale courses and the mode. A `uses` a runner still sends is its
    *  retired declaration that it uses account instances (B-168): the heartbeat reads it as
    *  absent, logging `deprecated-field`. */
-  // @model heartbeat sha256:9c0136704c87
-  // @model declare sha256:828f5e6ae833
-  async heartbeat(credentialId: string, secretHeader: string | null, body: unknown, clientVersion: string | null = null, legacyName = false) {
+  // @model heartbeat sha256:576daa5cf97c
+  // @model declare sha256:d9cef42a9b45
+  async heartbeat(credentialId: string, secretHeader: string | null, body: unknown, clientVersion: string | null = null, legacyName = false): Promise<BeatAnswer> {
     // B-168 (R-BTN-76): `uses` is retired — a runner uses the repository's instances, never a set
     // it declares — and read as absent while the history's Migrations entry lasts.
     if (body && typeof body === 'object' && !Array.isArray(body) && (body as { uses?: unknown }).uses !== undefined) {
@@ -345,7 +347,7 @@ export class RunnerApi {
     };
   }
 
-  private heartbeatTx(credentialId: string, presented: string | null, settingsHash: string, hb: Heartbeat, clientVersion: string | null, legacyName: boolean) {
+  private heartbeatTx(credentialId: string, presented: string | null, settingsHash: string, hb: Heartbeat, clientVersion: string | null, legacyName: boolean): BeatAnswer {
     // B-253: the profile, serialized once — the same bytes compared, stored and hashed.
     const profileJson = hb.profile ? JSON.stringify(hb.profile) : null;
     const cred = this.credential(credentialId);
@@ -412,6 +414,7 @@ export class RunnerApi {
         if (w.reaped_at != null) throw new BatonError('runner-reaped', 'this runner was reaped; re-key to start a new incarnation');
       }
       if (moving) this.exec('UPDATE runners SET credential_id = ? WHERE id = ?', cred.id, w.id);
+      if (moving || rekeyed) this.exec('DELETE FROM runner_idle WHERE runner_id = ?', w.id);
     }
 
     const current = rekeyed ? hb.secret_hash : w.secret_hash; // the hash stored now
@@ -448,7 +451,7 @@ export class RunnerApi {
     const protectionRefused: { repository: string; code: string }[] = [];
     for (const report of hb.protection) {
       if (this.c.policies.recordProtection(report.repository, report, cred.id)) continue;
-      if (this.rows('SELECT 1 FROM runner_grants WHERE credential_id = ? AND repository_id = ? AND revoked_at IS NULL', cred.id, report.repository).length) {
+      if (hasGrant(this.c.store, cred.id, report.repository)) {
         this.event('discrepancy', `runner:${w.id}`, { kind: 'protection-report', repository: report.repository, matched: report.matched, by: cred.id }, null, null);
         protectionRefused.push({ repository: report.repository, code: 'not-checker' });
       } else {
@@ -582,12 +585,13 @@ export class RunnerApi {
         continue;
       }
       const scope = [runner, repo, claim] as const;
-      this.exec(`INSERT INTO runner_reports (runner_id, repository_id, claim_id, key, received_at, payload)
-        VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT DO UPDATE SET received_at = excluded.received_at, payload = excluded.payload`,
+      this.exec(`INSERT INTO runner_reports (runner_id, repository_id, claim_id, key, received_at, payload, insertion_order)
+        VALUES (?, ?, ?, ?, ?, ?, (SELECT COALESCE(MAX(insertion_order), 0) + 1 FROM runner_reports))
+        ON CONFLICT (runner_id, repository_id, claim_id, key) DO UPDATE SET received_at = excluded.received_at, payload = excluded.payload`,
         ...scope, report.key, now, report.payload);
       this.exec(`DELETE FROM runner_reports WHERE runner_id = ? AND repository_id = ? AND claim_id = ? AND key IN (
         SELECT key FROM runner_reports WHERE runner_id = ? AND repository_id = ? AND claim_id = ?
-        ORDER BY received_at DESC, rowid DESC LIMIT -1 OFFSET ?)`, ...scope, ...scope, REPORT_KEYS_MAX);
+        ORDER BY received_at DESC, insertion_order DESC LIMIT -1 OFFSET ?)`, ...scope, ...scope, REPORT_KEYS_MAX);
     }
     return refused;
   }
@@ -666,7 +670,7 @@ export class RunnerApi {
 
   /** Delivery is the heartbeat (§9): pending messages become delivered; delivered ones not yet
    *  acknowledged are sent again, so a lost response loses nothing. */
-  // @model deliverTimeout sha256:1916e7aa5051
+  // @model deliverTimeout sha256:f961aa2db6e7
   private deliver(runnerId: number, now: number) {
     const out = this.rows<{ id: number; kind: string; payload_json: string | null; sent_at: number }>(
       `SELECT id, kind, payload_json, sent_at FROM messages WHERE to_runner_id = ? AND status IN ('pending','delivered')
@@ -681,9 +685,9 @@ export class RunnerApi {
   sendMessage(owner: string, body: unknown) {
     const m = checkMessage(body);
     if (!this.rows('SELECT 1 FROM runners WHERE id = ?', m.to_runner_id).length) throw new BatonError('not-found', 'no such runner');
-    this.exec(`INSERT INTO messages (kind, payload_json, from_principal, to_runner_id, sent_at, status) VALUES (?, ?, ?, ?, ?, 'pending')`,
-      m.kind, m.payload ? JSON.stringify(m.payload) : null, `owner:${owner}`, m.to_runner_id, this.c.now());
-    return { id: this.rows<{ id: number }>('SELECT last_insert_rowid() AS id')[0].id };
+    return this.exec<{ id: number }>(`INSERT INTO messages (kind, payload_json, from_principal, to_runner_id, sent_at, status)
+      VALUES (?, ?, ?, ?, ?, 'pending') RETURNING id`,
+      m.kind, m.payload ? JSON.stringify(m.payload) : null, `owner:${owner}`, m.to_runner_id, this.c.now()).one();
   }
 
   /** `POST /v1/runner/messages/{id}/ack`: the runner acknowledges; a status request's reply is
@@ -781,8 +785,8 @@ export class RunnerApi {
         a.label ?? null, a.detail ? JSON.stringify(a.detail) : null, a.ended_at ?? null, a.outcome ?? null, a.seq ?? null, now, runnerId, a.id);
       return;
     }
-    this.exec(`INSERT INTO activities (runner_id, id, claim_id, parent_id, call_id, kind, seq, label, source, started_at, ended_at, outcome, received_at, detail_json)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    this.exec(`INSERT INTO activities (runner_id, id, claim_id, parent_id, call_id, kind, seq, label, source, started_at, ended_at, outcome, received_at, detail_json, insertion_order)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, (SELECT COALESCE(MAX(insertion_order), 0) + 1 FROM activities))`,
       runnerId, a.id, a.claim_id, parent, a.call_id ?? null, a.kind, a.seq ?? null, a.label ?? null, a.source, a.started_at,
       a.ended_at ?? null, a.outcome ?? null, now, a.detail ? JSON.stringify(a.detail) : null);
     if (a.kind === 'reviewer' && typeof a.detail?.substituted_for === 'string') {
@@ -797,8 +801,8 @@ export class RunnerApi {
   /** The expiry of a reaped runner's open messages (§9). R3-1212 adds reaping. */
   alarm() {
     const now = this.c.now();
-    this.exec(`DELETE FROM runner_reports WHERE rowid IN (
-      SELECT rr.rowid FROM ${REPORTS_FROM} WHERE (${REPORT_AGE_FROM}) <= ?)`, now - REPORT_HORIZON_MS);
+    this.exec(`DELETE FROM runner_reports WHERE insertion_order IN (
+      SELECT rr.insertion_order FROM ${REPORTS_FROM} WHERE (${REPORT_AGE_FROM}) <= ?)`, now - REPORT_HORIZON_MS);
     // B-236: driven from the open messages (`messages_by_status`), each runner read by its key —
     // never from the reaped runners, whose rows are kept forever (R-BTN-3).
     this.exec(`UPDATE messages SET status = 'expired' WHERE status IN ('pending','delivered')
@@ -838,12 +842,11 @@ export class RunnerApi {
       if (mine) return conflict(`runner-holds:${mine.ticket_id}`);
       const head = this.rows<{ sha: string | null }>('SELECT sha FROM board_head WHERE repository_id = ?', repo)[0]?.sha ?? '';
       // R-BTN-62: as any claim, judged only by a reading numbered after it.
-      this.exec(`INSERT INTO claims (ticket_id, runner_id, request_id, nonce, snapshot_sha, claimed_at, status, claim_observation, station, start_path, course_id)
+      const { id } = this.exec<{ id: number }>(`INSERT INTO claims (ticket_id, runner_id, request_id, nonce, snapshot_sha, claimed_at, status, claim_observation, station, start_path, course_id)
                  VALUES (?, ?, ?, ?, ?, ?, 'active', COALESCE((SELECT last_handed_out FROM board_head WHERE repository_id = ?), 0),
                          COALESCE((SELECT station FROM ticket_stations WHERE ticket_id = ?), ''), COALESCE((SELECT path FROM ticket_stations WHERE ticket_id = ?), '[]'),
-                         (SELECT course_id FROM tickets WHERE id = ?))`,
-        r.ticket_id, runnerId, `shadow:${runnerId}:${r.ticket_id}:${r.nonce}`, r.nonce!, head, r.at, repo, r.ticket_id, r.ticket_id, r.ticket_id);
-      const id = this.rows<{ id: number }>('SELECT last_insert_rowid() AS id')[0].id;
+                         (SELECT course_id FROM tickets WHERE id = ?)) RETURNING id`,
+        r.ticket_id, runnerId, `shadow:${runnerId}:${r.ticket_id}:${r.nonce}`, r.nonce!, head, r.at, repo, r.ticket_id, r.ticket_id, r.ticket_id).one();
       this.event('claimed', actor, { shadow: true, nonce: r.nonce }, r.ticket_id, id);
       this.c.held(r.ticket_id, true); // a claim's start is silent (R-BTN-77)
       return { ok: true, claim_id: id };

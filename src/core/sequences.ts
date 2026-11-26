@@ -29,17 +29,10 @@ export class Sequences {
    *  `sequence` event logged, naming the caller and, when given, the ticket it is for. Core
    *  knows no kind's meaning (value 3): `kind` reached here already matches SEQUENCE_KIND. */
   next(repo: string, kind: string, floor: number | null, actor: string, forTicket: string | null): { kind: string; number: number } {
-    const stored = this.c.store.exec<Row>('SELECT last_number FROM sequences WHERE repository_id = ? AND kind = ?', repo, kind).toArray()[0]?.last_number ?? 0;
     const f = floor ?? 0;
-    if (f > stored + FLOOR_CAP) {
-      // The refusal is logged, then thrown (B-176's Trust: an inflated floor is "refused
-      // `invalid-params` and logged") — outside the take's transaction, which the throw would
-      // roll back, and with no number in it: nothing was issued.
-      logEvent(this.c.store, this.c.now(), 'sequence', actor, { kind, floor: f, refused: 'floor-cap' },
-        forTicket != null ? `${repo}:${forTicket}` : null, null, repo);
-      throw new BatonError('invalid-params', `floor: more than ${FLOOR_CAP} above the stored number (${stored}) is refused — gaps are harmless, and a floor that large only burns numbers (R-BTN-199)`);
-    }
-    return this.c.store.transaction(() => {
+    const result = this.c.store.transaction(() => {
+      const stored = this.c.store.exec<Row>('SELECT last_number FROM sequences WHERE repository_id = ? AND kind = ?', repo, kind).toArray()[0]?.last_number ?? 0;
+      if (f > stored + FLOOR_CAP) return { refused: stored } as const;
       const n = Math.max(stored, f) + 1;
       this.c.store.exec(
         'INSERT INTO sequences (repository_id, kind, last_number) VALUES (?, ?, ?) ON CONFLICT (repository_id, kind) DO UPDATE SET last_number = excluded.last_number',
@@ -48,5 +41,10 @@ export class Sequences {
         forTicket != null ? `${repo}:${forTicket}` : null, null, repo);
       return { kind, number: n };
     });
+    if (result.refused === undefined) return result;
+    // Throw only after recording the refusal, outside the allocation transaction (S-BTN-234).
+    logEvent(this.c.store, this.c.now(), 'sequence', actor, { kind, floor: f, refused: 'floor-cap' },
+      forTicket != null ? `${repo}:${forTicket}` : null, null, repo);
+    throw new BatonError('invalid-params', `floor: more than ${FLOOR_CAP} above the stored number (${result.refused}) is refused — gaps are harmless, and a floor that large only burns numbers (R-BTN-199)`);
   }
 }

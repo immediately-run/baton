@@ -5,10 +5,12 @@
 // call that cannot reach Baton throws. R-BTN-197 (B-254): every call says which client it is
 // (`Baton-Client`), and the served versions each answer names are warned on — once at start and
 // again whenever they change.
+import type { AdvanceAnswer, BeatAnswer, ClaimAnswer } from '../shared/runner-wire';
 import { readFileSync } from 'node:fs';
-import { API_KEY, signHeaders, signingKey } from '../../cli/sign.mjs';
-import { clientVersion } from '../../cli/version.mjs';
+import { API_KEY, signHeaders, signingKey } from '../client/sign.mjs';
+import { clientVersion } from '../client/version.mjs';
 import { compareVersions, parseClientVersions } from '../shared/versions.mjs';
+import { isAdvanceAnswer, isBeatAnswer, isClaimAnswer, record } from './replies';
 
 /** §6.3: every heartbeat request — and every call a fence depends on — has a 30-second timeout. */
 export const CALL_TIMEOUT_MS = 30_000;
@@ -18,7 +20,8 @@ export const CALL_TIMEOUT_MS = 30_000;
  *  served `min` and `recommended` — for the runner to log before it exits. */
 export class BatonRefusal extends Error {
   constructor(readonly code: string, readonly ruleCode: string | undefined, message: string, readonly status: number,
-    readonly versions: { client: string; min: string; recommended: string } | undefined = undefined) {
+    readonly versions: { client: string; min: string; recommended: string } | undefined = undefined,
+    readonly detail?: unknown) {
     super(message);
   }
 }
@@ -50,7 +53,7 @@ export interface ApiOptions {
   kind?: string;
 }
 
-// The SSHSIG signing itself is cli/sign.mjs's (the one `baton admin` uses — the same verifier
+// The SSHSIG signing itself is src/client/sign.mjs's (the one `baton admin` uses — the same verifier
 // shape docs' batonSign.mjs implements); imported, never copied.
 
 /** The auth a production runner uses: the machine's key (`BATON_KEY_FILE`, or `BATON_KEY`,
@@ -97,7 +100,15 @@ export class BatonApi {
     this.secret = s;
   }
 
-  private async call(method: string, path: string, body?: unknown): Promise<Record<string, any>> {
+  /** Host-only proof for a pinned executor's credential broker, never part of a leg brief. */
+  forgeProof(run: string): Record<string, string> {
+    const url = new URL(`/v1/forge-scope/runner/${encodeURIComponent(run)}`, this.o.url);
+    return this.o.auth('GET', url.toString(), '', this.secret);
+  }
+
+  private async call(method: string, path: string, body?: unknown): Promise<Record<string, any>>;
+  private async call<T>(method: string, path: string, body: unknown, check: (v: unknown) => v is T): Promise<T>;
+  private async call(method: string, path: string, body?: unknown, check?: (v: unknown) => boolean): Promise<unknown> {
     const url = new URL(path, this.o.url).toString();
     const text = body === undefined ? '' : JSON.stringify(body);
     const headers = new Headers(this.o.auth(method, url, text, this.secret));
@@ -111,22 +122,22 @@ export class BatonApi {
       throw new BatonUnreachable(e instanceof Error ? e.message : String(e), { cause: e });
     }
     this.warnVersions(res.headers.get('Baton-Client-Versions'));
-    let json: Record<string, any> | null = null;
+    let raw: unknown;
     try {
-      json = (await res.json()) as Record<string, any>;
-    } catch {
-      json = null;
-    }
+      raw = await res.json();
+    } catch { /* Non-JSON refusals still report their status; typed successes fail below. */ }
     if (!res.ok) {
+      const json = record(raw) ? raw : null;
       const code = typeof json?.code === 'string' ? json.code : 'unavailable';
       // R-BTN-197: the one refusal a client below min gets names the versions it compares.
       const versions = [json?.client, json?.min, json?.recommended].every((v) => typeof v === 'string')
         ? { client: json!.client as string, min: json!.min as string, recommended: json!.recommended as string }
         : undefined;
       throw new BatonRefusal(code, typeof json?.rule_code === 'string' ? json.rule_code : undefined,
-        typeof json?.message === 'string' ? json.message : `${method} ${path}: ${res.status}`, res.status, versions);
+        typeof json?.message === 'string' ? json.message : `${method} ${path}: ${res.status}`, res.status, versions, json?.detail);
     }
-    return json ?? {};
+    if (check && !check(raw)) throw new Error(`baton: ${method} ${path}: malformed successful reply`);
+    return raw ?? {};
   }
 
   /** R-BTN-197: `baton: this <kind> is <version>; Baton recommends <recommended> and refuses
@@ -146,8 +157,8 @@ export class BatonApi {
     }
   }
 
-  heartbeat(body: Record<string, unknown>): Promise<Record<string, any>> {
-    return this.call('POST', '/v1/runner/heartbeat', body);
+  heartbeat(body: Record<string, unknown>): Promise<BeatAnswer> {
+    return this.call('POST', '/v1/runner/heartbeat', body, isBeatAnswer);
   }
   /** §11: the sorted legs this runner may take — what an idle runner asks for (R-BTN-45). */
   recommendations(limit = 10): Promise<Record<string, any>> {
@@ -178,11 +189,11 @@ export class BatonApi {
   board(body: Record<string, unknown>): Promise<Record<string, any>> {
     return this.call('POST', '/v1/sync/board', body);
   }
-  claim(body: { request_id: string; ticket_id?: string; legs?: string[] }): Promise<Record<string, any>> {
-    return this.call('POST', '/v1/runner/claim', body);
+  claim(body: { request_id: string; ticket_id?: string; legs?: string[] }): Promise<ClaimAnswer> {
+    return this.call('POST', '/v1/runner/claim', body, isClaimAnswer);
   }
-  advance(claimId: number, body: { reached?: string; leg: string; bars?: string[]; evidence?: string; outputs?: unknown[]; taken?: { choice: string; alternative: string; dead: string[] }[]; run_inputs?: { ticket?: { version: string; read_digest: string }; inputs: unknown[] }; head_sha?: string | null; session_url?: string; local_order?: { by: string; ran_at: string } }): Promise<Record<string, any>> {
-    return this.call('POST', `/v1/runner/claims/${claimId}/advance`, body);
+  advance(claimId: number, body: { reached?: string; leg: string; bars?: string[]; evidence?: string; outputs?: unknown[]; taken?: { choice: string; alternative: string; dead: string[] }[]; run_inputs?: { ticket?: { version: string; read_digest: string }; inputs: unknown[] }; head_sha?: string | null; session_url?: string; local_order?: { by: string; ran_at: string }; start_before?: number }): Promise<AdvanceAnswer> {
+    return this.call('POST', `/v1/runner/claims/${claimId}/advance`, body, isAdvanceAnswer);
   }
   end(claimId: number, body: Record<string, unknown>): Promise<Record<string, any>> {
     return this.call('POST', `/v1/runner/claims/${claimId}/end`, body);

@@ -81,16 +81,11 @@ Tickets: B-10, B-41, B-21.
 
 | Scenario | Sets up | Expects |
 |---|---|---|
-| S-BTN-72 tickets at stations | `requires.tickets` on a parent `reached` and a `depends_at` `at`; a missing parent; a holder advancing into the leg while its `ticket` row stands | one `ticket` row until the dependency arrives; `reached` holds past it; the missing parent raises `baton.prerequisite-unmet`; the advance refused `blocked` (rule 1) |
-| S-BTN-74 why a leg cannot start | four unmet prerequisites; an asker lacking a capability | `baton leg why` lists each with its `why`, plus `not-declared`, from the blocks index alone |
-| S-BTN-82 cycles and closed tickets | a two-ticket cycle; a withdrawn dependency; `reached` on a closed ticket | `prerequisite-cycle` raised; never met; met from `final_path` |
 | S-BTN-108 one primitive per prerequisite | `depends_on`; a parent whose call leg waits on its children beside another leg; an `OP` tag; a post with a reserved `waiting_on`; a course file with `select: "run"` in `requires.tickets` | start leg waits `ticket@done`; the other leg ready; rule 4; post refused naming the ticket; file refused, previous kept |
 | S-BTN-95 blocked ends are bounded | six blocked ends on one leg in a day; one runner blocked 21 times | ticket held `blocked-exhausted`, `baton.retries`; lifting resets; `baton.blocked-ends` |
 
 | Gate | Must hold | Proved by |
 |---|---|---|
-| G-BTN-97 | A leg is offered only when every prerequisite holds; each unmet one is a block row on the leg | S-BTN-72, -74 |
-| G-BTN-104 | Cycles keep their blocks and are raised; a withdrawn ticket meets nothing; `reached` reads a closed ticket's final path | S-BTN-82 |
 | G-BTN-127 | Ticket prerequisites reach core only as `requires.tickets` (`parent`, `posted`) or `depends_at`, and a parent waits on its children only through a call; `human-operator` by rule 4; `waiting_on` is never `dependencies`, `children`, `owner` or `policy` | S-BTN-108 |
 | G-BTN-115 | Blocked ends per (ticket, leg) past `max_blocked` (5) in 24 h hold the ticket with `baton.retries`; call blocks are not counted | S-BTN-95 |
 
@@ -103,11 +98,11 @@ The design: [conditions](conditions.md). Tickets: B-55, B-58, B-59, B-66.
 | S-BTN-127 answered within the wait | `hitl` bound to `ask`; a raise with restarts, `wait_s` 600; a runner runs `open` within the wait; an answer from the dashboard before the source posts the question and one after; an answer naming no restart | ask file pushed before return, the raise recording a sync want; once `open` reaches `waiting`, the `answer` leg is on Needs you with the restarts as its options, its question once the source posts it; the first answer settles the condition, `handled` rung, `ctx.raise` returns `{restart: "b", reason: "chosen"}` in the claim; the second is `arrival-unapplied`; `deliver` superseded, its `retract` run; `invalid-params` |
 | S-BTN-128 answered after the wait, withdrawn | no answer in 120 s, one 3 h later; a withdrawn ask; one answered 1 s after the wait; a waiting holder reaped, released `requested`, or reaped by `leg-timeout` | `released:blocked` on the `condition`, not failed; resumed by another runner with `resume`; default restart `withdrawn`; no block row, resumed at once; each writes the `condition` block, and no claim asks again |
 | S-BTN-129 expiry and asking again | an ask waits 2 days; push retries fail; a late answer; a retry | `answer` expires to `unanswered` (`question-expired`), the raiser resumes `restart: null`; the late answer `arrival-unapplied`; `email` queued; `error.no-answer` holds; the retry files a new ask |
-| S-BTN-130 dynamic binding | repository and epic-scope bindings; a narrowed leg; a restart-less handler course; an unmerged binding | innermost scope, longest prefix; raise refused on the channel; `course test` refuses; inert; `baton leg why` names each |
+| Dynamic binding (extends S-BTN-130) | repository and epic-scope bindings; a restart-less handler course; an unmerged binding | innermost scope, longest prefix; `course test` refuses; inert; `baton leg why` names each |
 
 | Gate | Must hold | Proved by |
 |---|---|---|
-| G-BTN-146 | A raise is checked and reported before effect; its handler is pushed before it returns; no subject or body is stored; legs cannot raise `baton` or `baton.*` | S-BTN-127 |
+| Bound raises (extends G-BTN-146) | A raise's handler is pushed before the raise returns | S-BTN-127 |
 | G-BTN-147 | A `suspend` waits ≤ `min(wait_s, 900 s)`, resumes only with a restart Baton formed from its handler's end, and past the wait blocks with no failed attempt; any other end or reap of the wait blocks on the condition too, so no question is asked twice; no answer is lost; withdrawn → default | S-BTN-127, -128 |
 
 ## Retries per leg
@@ -131,7 +126,7 @@ The design: [conditions](conditions.md). Tickets: B-61.
 
 | Scenario | Sets up | Expects |
 |---|---|---|
-| S-BTN-134 deadlines and the stalled notice | a leg's `stalled_s` at 1 day; a `deadline_s` of 30 s and of 8 days; a file with `max_duration`, `max_ready_s`, `max_attempts_s`, `error_types`, `timers`, `after_s`, `choice`, `compensate`, `isolation`, a leg's `call`, `checks` or `retry.non_retryable` | `baton.stalled` raised after 1 day, not 3, and closed when the leg is posted `ready`; each refused naming the leg and field, previous kept |
+| Deadlines and the stalled notice (extends S-BTN-134) | a leg's `stalled_s` at 1 day; a `deadline_s` of 30 s and of 8 days; a file with `max_duration`, `max_ready_s`, `max_attempts_s`, `timers`, `after_s`, `choice`, `compensate`, `isolation`, a leg's `call`, `checks` or `retry.non_retryable` | `baton.stalled` raised after 1 day, not 3, and closed when the leg is posted `ready`; each refused naming the leg and field, previous kept |
 
 ## Calls, supersession and the cancel leg
 

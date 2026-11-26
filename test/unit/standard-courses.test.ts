@@ -20,6 +20,8 @@ import { ticketsMarkdown, type SourceTicket } from '../../src/defaults/tickets-m
 
 const instructionsDir = (id: string) => join(__dirname, '..', '..', 'src', 'defaults', 'courses', id);
 const tosOf = (to: string | string[]): string[] => (Array.isArray(to) ? to : [to]);
+const positionOf = (position: string, answer: string | undefined, roundsSpent = false) =>
+  new Function('answer', 'roundsSpent', `return (${position});`)(answer, roundsSpent) as { reached: string; next: string | null; [k: string]: unknown };
 
 describe('the standard courses (R-BTN-131)', () => {
   it('are create-pr, review-pr, bug-report, draft-ticket, decision, build-app, create-spec and spec-to-tickets; create-pr is the default', () => {
@@ -58,11 +60,11 @@ describe('the standard courses (R-BTN-131)', () => {
             continue;
           }
           const answers = stub.ask?.values ?? [undefined];
-          // B-110 round 1: a position may read the run number (`ctx.run`) — create-pr's review
+          // B-110 round 1: a position may depend on the run number — create-pr's review
           // queues the owner's adjudicate on its last round — so each is checked at a first run
           // and at the file's last.
-          for (const answer of answers) for (const run of [1, 3]) {
-            const pos = new Function('answer', 'ctx', `return (${stub.position});`)(answer, { run }) as { reached: string; next: string | null; [k: string]: unknown };
+          for (const answer of answers) for (const spent of stub.reviewBound ? [false, true] : [false]) {
+            const pos = positionOf(stub.position, answer, spent);
             // A suspension may rest where the leg started (R-BTN-71: a give-up), which the file's
             // `to` does not list; every other reached station is an outcome. S-BTN-174 drives
             // create-spec's such stubs end to end.
@@ -79,7 +81,7 @@ describe('the standard courses (R-BTN-131)', () => {
         for (const [leg, stub] of Object.entries(b.legs)) {
           if (stub.tests) continue; // B-110: no agent runs the gate, and it reaches no end
           const ends = (stub.ask?.values ?? [undefined]).some((answer) => {
-            const pos = new Function('answer', 'ctx', `return (${stub.position});`)(answer, { run: 1 }) as { reached: string };
+            const pos = positionOf(stub.position, answer);
             return b.course.end.includes(pos.reached);
           });
           if (ends) expect(readFileSync(join(instructionsDir(b.id), `${leg}.md`), 'utf8'), `${b.id}/${leg}`).toMatch(/`?status:`? to `?done`?/);
@@ -111,7 +113,7 @@ describe('the standard courses (R-BTN-131)', () => {
         for (const answer of stub.ask?.values ?? [undefined]) {
           // A first run's position (B-110: create-pr's review suspends only on its last round,
           // queuing the owner's adjudicate — defaults-cli.test.ts drives that).
-          const pos = new Function('answer', 'ctx', `return (${stub.position});`)(answer, { run: 1 }) as { suspend?: boolean };
+          const pos = positionOf(stub.position, answer);
           const key = [b.id, leg, answer].filter(Boolean).join(' ');
           expect(pos.suspend === true, key).toBe(waits.has(key));
         }
@@ -131,6 +133,18 @@ describe('the standard courses (R-BTN-131)', () => {
     const text = readFileSync(join(instructionsDir('create-pr'), 'implement.md'), 'utf8');
     expect(text).toContain('delivered <sha> <what you ran and what it showed>');
     expect(text).toContain('Your word alone never closes the ticket');
+  });
+
+  it("create-pr's shipped and home reviews require independent credentials and a different model when available (B-30, S-BTN-63)", () => {
+    const home = join(__dirname, '..', '..', '.baton', 'courses', 'create-pr');
+    const owned = JSON.parse(readFileSync(join(home, 'course.json'), 'utf8'));
+    expect(owned.legs.review.no_chain_from).toEqual(['implement', 'fix']);
+    expect(builtIn('create-pr')!.course.legs.review).toMatchObject({ no_chain_from: ['implement', 'fix'] });
+    for (const dir of [instructionsDir('create-pr'), join(home, 'legs')]) {
+      const text = readFileSync(join(dir, 'review.md'), 'utf8');
+      expect(text, dir).toMatch(/Before launching the reviewer, the runner's\s+command, wrapper or override must select a model different from those used for `implement`\s+and `fix` on this ticket whenever it can/);
+      expect(text, dir).toMatch(/If the authoring models are unknown or a different model is unavailable, say so\s+in your review/);
+    }
   });
 
   it('only implement and fix may ask in-session in either create-pr course (B-325, S-BTN-222)', () => {

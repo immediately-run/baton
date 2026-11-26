@@ -15,7 +15,9 @@
 // carries. The outcome is stdout's LAST line: `{"ok": true, "result": …}` or `{"ok": false,
 // "error": …, "aborted": …}`, written synchronously before the process exits.
 import { writeSync } from 'node:fs';
+import { register } from 'node:module';
 import { pathToFileURL } from 'node:url';
+import { legErrorType, raise } from './legClient.mjs';
 
 const [, , call, script] = process.argv;
 const stop = new AbortController();
@@ -69,6 +71,16 @@ const args = await new Promise((resolveArgs, rejectArgs) => {
 
 try {
   if (!Array.isArray(args)) throw new Error('legProcess: the arguments are not a JSON array');
+  if (call === 'run' || call === 'close' || call === 'handoff') {
+    // Extracted scripts have no node_modules. Bind only Baton's public leg API to this wrapper's
+    // client, without changing how any other import resolves. `register` also works on Node 22.13.
+    const client = new URL('./legClient.mjs', import.meta.url).href;
+    const hook = `export function resolve(name, context, next) {
+      if (name === '@immediately-run/baton/leg') return { url: ${JSON.stringify(client)}, shortCircuit: true };
+      return next(name, context);
+    }`;
+    register(`data:text/javascript,${encodeURIComponent(hook)}`);
+  }
   const mod = await import(pathToFileURL(script).href);
   const holder = mod.default != null && typeof mod.default === 'object' ? mod.default : null;
   // `describe`: what a ticket source declares (§4.2) — its `versions`, and whether it reads.
@@ -79,9 +91,14 @@ try {
   const owner = typeof mod[call] === 'function' ? mod : holder != null && typeof holder[call] === 'function' ? holder : null;
   const fn = owner != null ? owner[call] : call === 'run' && typeof mod.default === 'function' ? mod.default : undefined;
   if (typeof fn !== 'function') throw new Error(`the script exports no ${call}()`);
-  if (call === 'run') args[0] = { ...args[0], signal: stop.signal };
+  if (call === 'run') {
+    if (args[0]?.reads_only === true && mod.readsOnly !== true) {
+      throw new Error('a reads_only leg needs a stub that supports reads_only (R-BTN-183)');
+    }
+    args[0] = { ...args[0], signal: stop.signal, raise };
+  }
   const result = await fn.apply(owner, args);
   finish({ ok: true, result: result === undefined ? null : result }, 0);
 } catch (e) {
-  finish({ ok: false, error: e instanceof Error ? e.message : String(e), aborted: stop.signal.reason === undefined ? null : String(stop.signal.reason) }, stop.signal.reason === undefined ? 4 : 5);
+  finish({ ok: false, error: e instanceof Error ? e.message : String(e), errorType: call === 'run' ? legErrorType(e) : undefined, aborted: stop.signal.reason === undefined ? null : String(stop.signal.reason) }, stop.signal.reason === undefined ? 4 : 5);
 }

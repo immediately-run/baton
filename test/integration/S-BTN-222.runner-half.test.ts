@@ -40,7 +40,7 @@ const COURSE = {
   conditions: { 'ask.owner': { disposition: 'suspend', restarts: { retry: 'again' } } },
   legs: {
     ...roadmapPr.legs,
-    implement: { from: ['filed'], to: 'pr-open', max_duration: 600, outputs: { effect: { schema: 'std:effect@1' } } },
+    implement: { from: ['filed'], to: 'pr-open', max_duration: 600 },
     review: { from: ['pr-open', 'fixed'], to: 'reviewed' },
     merge: { from: ['reviewed', 'adjudicated'], to: 'merged', max_duration: 600 },
     'auto-review': { from: ['pr-open'], to: 'reviewed', autonomous: true, max_duration: 600 },
@@ -153,7 +153,7 @@ function writeHome(scripts: Record<string, string>, graph = COURSE): { home: str
   write('.baton/courses/timeout-pr/course.json', `${JSON.stringify(TIMEOUT_COURSE, null, 2)}\n`);
   write('.baton/baton.json', `${JSON.stringify({ courses: [{ id: 'roadmap-pr', version: 3 }, { id: 'timeout-pr', version: 1 }] }, null, 2)}\n`);
   for (const [name, text] of Object.entries(scripts)) write(`.baton/courses/roadmap-pr/legs/${name}.mjs`, text);
-  write('.baton/courses/timeout-pr/legs/linger.mjs', scripts.linger!);
+  if (scripts.linger != null) write('.baton/courses/timeout-pr/legs/linger.mjs', scripts.linger);
   g('add', '-A');
   g('-c', 'user.email=b234@test', '-c', 'user.name=b234 test', 'commit', '--no-gpg-sign', '-qm', 'courses');
   return { home, sha: g('rev-parse', 'HEAD').trim() };
@@ -232,7 +232,10 @@ export async function handoff() { return 'https://example.test/handoff'; }`,
   };
 
   it('refuses invalid moves locally, then arrives with a staged output and suspends before an unlisted leg', async () => {
-    const graph = { ...COURSE, stations: { ...roadmapPr.stations, 'pr-open': { entry: [{ output: 'effect', schema: 'std:effect@1' }] } } };
+    // The output is this test's own: a declared output is required of every completed run (B-39),
+    // so the shared course, whose other tests produce none, declares none.
+    const graph = { ...COURSE, legs: { ...COURSE.legs, implement: { ...COURSE.legs.implement, outputs: { effect: { schema: 'std:effect@1' } } } },
+      stations: { ...roadmapPr.stations, 'pr-open': { entry: [{ output: 'effect', schema: 'std:effect@1' }] } } };
     git.registry[0] = courseEntry(3, 3, { course: graph });
     const { home, sha } = writeHome(scripts, graph);
     boardSha = sha;
@@ -501,6 +504,10 @@ describe('S-BTN-222 (the runner half): the channel checks a raise (R-BTN-160, R-
       expect(await conditionRows('docs:B')).toEqual([
         { type: 'error.needs-person', disposition: 'interrupt', outcome: 'recorded', url: null, closed_how: 'raised' },
       ]);
+      expect(await rows(`SELECT json_extract(detail_json, '$.error.type') AS type,
+                                json_extract(detail_json, '$.error.message') AS message
+                         FROM events WHERE kind = 'released' AND ticket_id = ?`, 'docs:B'))
+        .toEqual([{ type: 'error.needs-person', message: 'The leg raised error.needs-person.' }]);
       // A non-retryable class holds the ticket (R-BTN-122): the owner's to clear.
       expect(await rows<{ hold: number; hold_reason: string | null }>('SELECT hold, hold_reason FROM ticket_overrides WHERE ticket_id = ?', 'docs:B'))
         .toEqual([{ hold: 1, hold_reason: 'non-retryable:spec' }]);
@@ -556,12 +563,46 @@ describe('S-BTN-222 (the runner half): the channel checks a raise (R-BTN-160, R-
     }
   }, 240_000);
 
+  it.each([
+    { thrown: `new LegError('error.spec', 'declared failure')`, type: 'error.spec', cls: 'spec', message: 'declared failure' },
+    { thrown: `new Error('plain failure')`, type: 'error.transient', cls: 'transient', message: 'plain failure' },
+  ])('G-BTN-146: ctx.raise and a script that throws $type', async ({ thrown, type, cls, message }) => {
+    const { home, sha } = writeHome({ implement: `
+      import { LegError } from '@immediately-run/baton/leg';
+      export async function run(ctx) {
+        await ctx.raise('warning', { subject: 'private subject', body: 'private body' });
+        throw ${thrown};
+      }
+    ` });
+    boardSha = sha;
+    await postBoard([{ id: 'A' }], { A: placed('filed', [], [['implement', 'ready']]) });
+    await register('vm-a');
+    const r = newRunner(home, () => {});
+    try {
+      expect(await r.runOnce()).toMatchObject({ ticket: 'docs:A', end_reason: `released:cannot-finish:${cls}` });
+      expect((await conditionRows('docs:A')).map(({ type, outcome }) => ({ type, outcome }))).toEqual([
+        { type: 'warning', outcome: 'recorded' },
+        ...(cls === 'spec' ? [{ type, outcome: 'recorded' }] : []),
+      ]);
+      expect(await rows(`SELECT json_extract(detail_json, '$.error.type') AS type,
+                                json_extract(detail_json, '$.error.message') AS message
+                         FROM events WHERE kind = 'released' AND ticket_id = 'docs:A'`)).toEqual([{ type, message }]);
+    } finally {
+      r.stop();
+      cleanup(home);
+    }
+  }, 240_000);
+
   it('the channel refuses invalid raises and honors standard create-pr\'s question policy (B-325)', async () => {
     const { home } = writeHome(legScripts(join(tmpdir(), `baton-222-rec-${process.pid}.jsonl`)));
     try {
       let reported = 0;
       const r = new Runner({
-        api: { setSecret: () => {}, conditions: async () => { reported++; return { condition_id: 1, disposition: 'notify' }; } } as unknown as BatonApi,
+        api: { setSecret: () => {}, conditions: async (_: number, body: Record<string, unknown>) => {
+          expect(body).not.toHaveProperty('restarts'); // old servers require omission for an empty map
+          reported++;
+          return { condition_id: 1, disposition: 'notify' };
+        } } as unknown as BatonApi,
         home, repository: 'docs', hostname: 'vm-a', harness: 'opencode', session: 'b234-checks',
         courses: [{ course: 'roadmap-pr', version: 3 }], stateFile, beatEvery: 60_000, log: () => {},
       });
@@ -576,6 +617,10 @@ describe('S-BTN-222 (the runner half): the channel checks a raise (R-BTN-160, R-
       expect(await ask({ op: 'raise', type: 'baton.retries', subject: 'x' })).toMatchObject({ ok: false, error: expect.stringContaining("core's alone") });
       expect(await ask({ op: 'raise', type: 'unheard-of', subject: 'x' })).toMatchObject({ ok: false, error: expect.stringContaining('declares') });
       expect(await ask({ op: 'raise', type: 'warning', subject: 'x', severity: 'loud' })).toMatchObject({ ok: false, error: expect.stringContaining('severity') });
+      const narrowed = { ...course, graph: graphOf({ ...COURSE, legs: { ...roadmapPr.legs, implement: { ...roadmapPr.legs.implement, conditions: [] } } }) };
+      expect(await ask({ op: 'raise', type: 'warning', subject: 'x' }, narrowed)).toMatchObject({ ok: false, error: expect.stringContaining('narrow') }); // S-BTN-130
+      expect(await ask({ op: 'raise', type: 'ask.owner', subject: 'x', restarts: { park: 'park' } })).toMatchObject({ ok: false, error: expect.stringContaining('subset') });
+      expect(await ask({ op: 'raise', type: 'ask.owner', subject: 'x', default: 'park' })).toMatchObject({ ok: false, error: expect.stringContaining('default') });
       expect(reported).toBe(0); // nothing reached Baton
       expect(await ask({ op: 'raise', type: 'warning', subject: 'a note' })).toMatchObject({ ok: true, condition_id: 1 });
       expect(reported).toBe(1);

@@ -39,7 +39,7 @@ const severityRank = (s: unknown): number => (s === 'critical' ? 0 : s === 'high
 interface ConditionRow {
   id: number;
   repository_id: string;
-  ticket_id: string;
+  ticket_id: string | null;
   claim_id: number | null;
   run_id: string | null;
   leg: string | null;
@@ -129,6 +129,7 @@ function listingsOf(cx: ReadCtx, repository: string, now: number, administrator:
   const claims = cx.core.claims.needsYou(now);
   const blocks = cx.core.blocks.needsYou(now);
   const notices = cx.core.notices.needsYou(now);
+  const stations = cx.core.stations.needsYou();
   return {
     unconfirmed: (claims.unconfirmed as Row[]).filter(byTicket),
     unacknowledged_releases: (claims.unacknowledged_releases as Row[])
@@ -141,12 +142,19 @@ function listingsOf(cx: ReadCtx, repository: string, now: number, administrator:
     bars_mismatch: (claims.bars_mismatch as Row[]).filter(byTicket).map(({ detail_json, ...e }) => ({ ...e, detail: parsed(detail_json) })),
     held_items: claims.held_items.filter((h) => mine(h.ticket_id)),
     blocked_capability: (blocks.blocked_capability as Row[]).filter(byTicket),
+    prerequisite_issues: cx.sql(`SELECT ticket_id, leg, ref, why,
+      CASE WHEN cycle = 1 THEN 'baton.prerequisite-cycle' ELSE 'baton.prerequisite-unmet' END AS type
+      FROM ticket_dependents WHERE ticket_id >= ? || ':' AND ticket_id < ? || ';'
+        AND (cycle = 1 OR why IN ('no-parent', 'unknown-ticket', 'withdrawn', 'empty-selection'))
+      ORDER BY ticket_id, leg, ref LIMIT 100`, repository, repository),
     pool_unclaimed: (notices.pool_unclaimed as Row[]).filter(here),
     no_owner_channel: (notices.no_owner_channel as Row[]).filter(here),
-    course_changed: (cx.core.stations.needsYou().course_changed as Row[]).filter(byTicket),
+    course_changed: (stations.course_changed as Row[]).filter(byTicket),
     courses_refused: cx.core.courses.refusals().filter((r) => r.repository_id === repository),
     scope: cx.core.scope.needsYou().filter((f) => f.repository_id === repository),
     unsigned_control: cx.core.unsignedControlView(now).filter((u) => u.repository_id === repository),
+    sync_lapses: cx.core.observations.needsYou(now, repository),
+    sync_control_changes: cx.core.provenance.needsYou(now, repository),
     // R-BTN-28: an adoption is an administrator's to confirm, on the Sync screen.
     ...(administrator ? { adoptions: (cx.core.cutover.adoptions() as Row[]).filter(byTicket) } : {}),
   };
@@ -205,7 +213,7 @@ export const CONDITION_READS: ReadRoute[] = [
         `SELECT t.title, t.course_id, s.station, s.next_leg FROM tickets t LEFT JOIN ticket_stations s ON s.ticket_id = t.id WHERE t.id = ?`, row.ticket_id)[0] ?? null;
       // What its closing would let move: the tickets with a `ticket` block on the condition's
       // ticket (`ticket_blocks`) — no block names a condition itself.
-      const unblocks = row.outcome === 'open' ? cx.core.blocks.blockedOn(repository, { kind: 'ticket', ref: row.ticket_id }, false).tickets.map((t) => t.ticket_id) : [];
+      const unblocks = row.outcome === 'open' && row.ticket_id != null ? cx.core.blocks.blockedOn(repository, { kind: 'ticket', ref: row.ticket_id }, false).tickets.map((t) => t.ticket_id) : [];
       return {
         ...conditionOf(row, call.showInteractionLinks),
         repository,

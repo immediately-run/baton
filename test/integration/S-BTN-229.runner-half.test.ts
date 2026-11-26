@@ -205,7 +205,7 @@ describe('S-BTN-229 (the runner half): a runner holds several claims (R-BTN-4, R
     // A release message for one ticket stops that claim alone (R-BTN-119), with its hand-off.
     const [first, second] = starts.map((x) => x.ticket);
     const [{ id: runner }] = await rows<{ id: number }>('SELECT id FROM runners');
-    expect((await owner('/v1/ui/messages', { kind: 'release', to_runner_id: runner, payload: { ticket_id: first, reason: 'requested' } })).status).toBe(200);
+    expect((await owner('/v1/ui/messages', { kind: 'release', confirm: true, to_runner_id: runner, payload: { ticket_id: first, reason: 'requested' } })).status).toBe(200);
     await until(claimRows, (v) => v.some((c) => c.ticket_id === first && c.end_reason === 'released:requested'), 'the released claim ends');
     expect(said()).toContainEqual({ ev: 'end', ticket: first, aborted: true });
     expect(said()).toContainEqual({ ev: 'handoff', ticket: first });
