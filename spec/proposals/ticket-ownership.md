@@ -62,9 +62,11 @@ Not reopened by a review.
    a team that lives in its tracker need not learn Baton's ids. The store also keeps a copy of
    Baton's id on the issue, so an import after a lost Baton finds the same id again; it is the
    one Baton-owned fact a store holds, read back only when importing into a Baton that has lost
-   its state, only for an issue no other issue's copy names, and with the sequence then advanced
-   past it. Anywhere else a copied id is ignored, so nobody takes over `B-41` by writing it onto
-   another issue.
+   its state, only for an issue no other issue's copy names, confirmed by an owner before it
+   counts, and with the sequence then advanced past it. Anywhere else a copied id is ignored, and
+   a copy that changes raises `baton.id-copy-changed`, so nobody takes over `B-41` by writing it
+   onto another issue. A name that reads as both a Baton id and a store key is refused as
+   ambiguous: the arena's prefix is reserved, and a tracker key in it is never accepted as a name.
 4. **Course and tier are the store's** (2026-11-22). They are properties of the work, written by
    whoever files the ticket and changed where the store changes things. `requires` is taken to be
    the same kind, as a gate input like tier; the owner has not ruled on it separately.
@@ -83,11 +85,13 @@ Not reopened by a review.
    key's, never the channel's, and a runner is always agent-driven
    ([human intent](../../docs/context/human-intent.mdx)).
 10. **Baton holds an unwritten ticket's start text** (2026-11-26) — its title and description, at
-    most 1,024 characters — until the store has the ticket: a stated exception to R-BTN-33, which
+    most 1,024 Unicode code points — until the store has the ticket: a stated exception to R-BTN-33, which
     ends with the store's first read. Baton never holds more of a ticket than that.
-11. **The roster decides who may start and claim** (2026-11-26): the people whose linked forge
-    account can push to the arena's config repository, as the forge says. Baton keeps no list of
-    them ([people](people-and-dashboard.md#5-people-identities-and-the-roster)).
+11. **The roster decides which people may start and hold session claims** (2026-11-26): read from
+    the forge — the accounts that can push to the config repository, or the members of its forge
+    organisation, as the arena chooses — and posted by the sync; Baton keeps no list of them. A
+    person signs in with the forge to get a credential
+    ([people](people-and-dashboard.md#5-people-identities-and-the-roster)).
 
 ## The two kinds of field
 
@@ -138,17 +142,30 @@ open world, extended from the position to every Baton-owned fact.
   - **Its row survives posts that do not name it.** The `tickets` row carries `unwritten: true`,
     and a board post that leaves it out neither drops nor closes it (R-BTN-35's "the next accepted
     snapshot overwrites it" does not reach an unwritten row).
-  - **Its first leg is handed the start text.** The claim answer carries `start: {title,
-    description}`; the leg's stub writes it as the ticket's text, and `BATON_TICKET_FILE` names
-    that copy, as for a ticket posted with no `path` (R-BTN-74). A claim of an unwritten ticket is
+  - **Its legs are handed the start text.** While it is unwritten, every claim answer for it
+    carries `start: {title, description}`; the leg's stub writes it as the ticket's text, and
+    `BATON_TICKET_FILE` names that copy, as for a ticket posted with no `path` (R-BTN-74). A claim of an unwritten ticket is
     not refused `unknown-ticket` (§9.1), and the runner does not release it `stale-board` for a
     missing file (R-BTN-5/34): there is no file yet.
   - **The store makes it written.** For Dibber, the first leg writes the ticket file as part of its
     work; for a tracker, a writer creates the issue (R-BTN-74's `file`,
     [proposed](tickets-and-sources.md)). The first post that shows it clears `unwritten`, drops the
     start text, and from then on the store's copy of every store-owned field wins.
-  - **A ticket never written is seen.** One still unwritten a day after it started raises
-    `baton.ticket-unwritten` on itself, closed when the store shows it or an approver withdraws it.
+  - **A ticket never written is seen.** One unwritten with no claim active on it for a day raises
+    `baton.ticket-unwritten` on itself, closed when the store shows it or it is withdrawn.
+  - **Withdrawing it is Baton's while it is unwritten.** The store has no copy, so Baton owns the
+    whole ticket until it does: its starter or an owner withdraws it (`ticket.withdraw`, refused
+    once the store has it, when withdrawal is the store's again).
+  - **Its provenance is never a human's word.** An unwritten ticket's `last_written_by`
+    (R-BTN-194) carries no `human`; Baton records beside it who started it and who drove the start
+    (`started_by: {person | runner, driver}`), so a start never makes a `**Brief:**` line read as
+    the owner's.
+  - **The first leg writing its file creates no ticket.** The file is the started ticket's own
+    content, approved by hash where the policy wants approval; `tickets.created` (R-BTN-188) speaks
+    of tickets a runner's action creates, and this one a `course.start` created.
+  - **What Baton keeps** (§13): the `tickets` row's `unwritten` flag; the start text, until the
+    store has the ticket; and each caller's `request_id`s, for 24 hours, with the hash of the body
+    each filed.
 - **A ticket created in the store is imported.** One the sync finds that Baton has never seen is
   placed at its course's start, as a first post is today (R-BTN-39), under the id its Dibber file
   carries. A tracker's issue gets a new Baton id, written back to the issue once the tracker's
@@ -194,21 +211,28 @@ sources come with their writer.
 `tickets-approved` (R-BTN-189) already accepts either "a `std:approval@1`, or the human's merge of
 the PR carrying it". Under this proposal:
 
-- **An approval binds to the bytes approved.** A `std:approval@1` names the ticket and a hash of
-  the content the approver was shown; the runner reads the ticket at that content and checks the
-  hash before a leg that requires approval acts on it. An edit in the store is new content, which
-  needs approving again. That is the whole guarantee, and it holds for any store.
+- **An approval binds to the bytes approved.** A `std:approval@1` names the ticket and the
+  SHA-256 of the content the approver was shown: the ticket's bytes as its source's `read` returns
+  them at a version, or, for an unwritten ticket, of its canonical `{title, description}`. Baton
+  serves the hash with the claim, and the holder — a runner's stub, or Baton itself for a session
+  claim, comparing the hash of the text it serves — checks it before a leg that requires approval
+  acts. An edit in the store is new content, which needs approving again. That is the whole
+  guarantee, and it holds for any store. (The security proposal's `{paths, blobs}` value gains this
+  ticket form.)
 - **The guarantee's condition becomes the source's ability, not its kind.** "The last accepted
   post's ticket source is the markdown source" becomes "the ticket source reads a ticket at a
   version" (`versions: "pinned"`): that, not git, is what lets the runner read the bytes that were
   approved. Dibber meets it; a tracker meets it when its source reads past revisions.
 - **An unwritten ticket is approved by its start text's hash.** Under `tickets-approved` no leg of
-  it is offered until a human-driven act approves that hash; a ticket an agent-driven credential
-  starts is a proposal (`tickets.created: proposed`).
+  it is offered, and no session claim of one is granted, until a writer the policy admits for
+  `std:approval@1` — `human` alone, under that guarantee — approves the hash; `claim: true` on such
+  a start is refused `invalid-params`, so the CLI approves and then claims. A ticket an
+  agent-driven credential starts is a proposal (`tickets.created: proposed`).
 - **The human's merge of the PR carrying the file** stays as the second form, on Dibber.
 - **Who approves is a matter of driver and proof** ([human intent](../../docs/context/human-intent.mdx)
-  §2–3). Content a human-driven session wrote and committed is approved by that act at the proof
-  the credential carries; the policy may require a stronger one, which the act then needs. Content
+  §2–3). Every approval is a recorded `std:approval@1` checked against the policy's writers.
+  Content a human-driven session wrote is approved by that person's act at the proof the
+  credential carries; where the policy admits only `human`, it takes their `human_only` key. Content
   an agent-driven leg wrote — a `describe-bug` agent's ticket body — is approved by a human-driven
   act on its hash: the person saying "that's right" on Baton's page, or in their own session with
   their interactive grant, at the proof the policy names.
@@ -221,16 +245,20 @@ fields?, claim?}`.
 
 - **The body.** `request_id`, the caller's own id for the request, so a retry files one ticket:
   the same id with the same body answers the ticket it filed, with another body `conflict`.
-  `title` and `description`, at most 1,024 characters together (decision 10). `fields`, the
-  store-owned fields it starts with: `depends_on` and `parent`; tier, `requires` and the assignee
-  only from a human-driven caller. `claim: true` claims the start leg in the same transaction.
+  `title` and `description`, at most 1,024 Unicode code points together (decision 10). `fields`,
+  the store-owned fields it starts with: `depends_on` and `parent`; tier, `requires` and the
+  assignee only from a human-driven caller. `claim: true` claims the start leg in the same
+  transaction, where the leg admits session claims. An agent-driven caller also names `claim_id`,
+  the claim it holds; its `parent` must be that claim's ticket.
 - **What it does.** Baton allocates the id from the arena's sequence — never below the highest id
   any accepted post of the arena has shown, so a fresh or recovered Baton never reissues one
   (R-BTN-199) — creates the ticket **unwritten** at the course's start with `start_leg` queued, and
   answers `{ticket, leg, claim?}`.
-- **Refusals.** `not-found` for a course the arena does not list; `invalid-params` for a course
-  without `starts_from: request` or text over the limit; `forbidden` for a caller not on the
-  roster, or an agent-driven caller outside its purpose; `conflict` as above.
+- **Refusals.** `not-found` for a course the arena does not list; `invalid-params` for a
+  top-level start on a course without `starts_from: request` (a child, with `parent`, may start on
+  any course the arena lists), for text over the limit, or for `claim: true` where approval comes
+  first; `forbidden` for a person neither on the roster nor an owner, or an agent-driven caller
+  outside its claim; `unavailable` while the roster is stale; `conflict` as above.
 - **The CLI.** `baton course start <course> "<title>"`; `baton ticket request` (R-BTN-131) becomes
   its client and pushes nothing.
 
@@ -238,8 +266,8 @@ fields?, claim?}`.
 
 | Caller | May start | May claim what it started |
 |---|---|---|
-| human-driven: a person on the arena's roster — signed in to the dashboard, with their own key from the CLI, or with their interactive grant over MCP | any course the arena lists | yes, with `claim: true`, where the start leg admits session claims |
-| agent-driven: a runner, an agent-driven key | only children of the ticket its purpose names (`parent`), never setting tier, `requires` or the assignee; proposals where `tickets.created: proposed` | never |
+| human-driven: a person on the arena's roster or an owner — signed in to the dashboard, with their own key from the CLI, or with their interactive grant over MCP | any course the arena lists | yes, with `claim: true`, where the start leg admits session claims |
+| agent-driven: a runner, an agent-driven key | only children of the ticket its claim holds (`parent`), never setting tier, `requires` or the assignee; proposals where `tickets.created: proposed` | not in the same call; afterwards as any child is claimed today |
 
 **The three ways in:**
 
@@ -252,7 +280,7 @@ fields?, claim?}`.
   opens it, and moves to the ticket's page; the session page closes itself when the leg ends where
   it was opened by the dashboard (Fieldhouse's leg page, R-FH-80).
 - **A person's own agent session.** Claude Code over MCP calls the action with `claim: true`, or a
-  person with a checkout runs the CLI's attached-runner mode; either way the session holds the
+  person with a checkout runs `baton course start --claim` from their CLI; either way the session holds the
   start leg's claim at once — no runner is offered it, so nothing races — and works it with the
   person ([Session claims](#session-claims)).
 
@@ -267,31 +295,44 @@ human-driven: its acts are the person's ([human intent](../../docs/context/human
 
 - **A leg admits it, or not.** A leg takes session claims only where its course file says
   `sessions: allow`; no existing leg does. A leg marked `trusted` never does.
-- **The lock binds it.** One holder per ticket; it never takes a ticket another claim holds. The
-  `chain` gate (§6.6) counts the person as one credential, so a person never claims the review of
-  work their own session wrote.
+- **The gates, for a person.** Rule 1 (blocks) and rule 3 (one holder) bind it as any claim.
+  Rule 4 matches no capabilities: a leg that admits sessions requires none of a runner's. Rule 5's
+  tier ceiling and rule 7's grant do not apply: the roster stands in for the grant. Rule 9
+  (`stale-skills`) does not apply. The `chain` gate counts the person as one credential, so a person
+  never claims the review of work their own session wrote. (§6.6 and R-BTN-106 are amended for
+  this.)
 - **Two forms, one claim.**
-  - **The CLI's attached-runner mode** (R-BTN-107's `attached`), for a person with a checkout: the
-    `baton` CLI runs as a runner bound to the person, with its sidecar, its heartbeat and the
-    `pre-push` fence (R-BTN-6, R-BTN-26). Nothing new.
-  - **MCP, with an interactive grant**, for an agent such as Claude Code. The lease is renewed by
-    every call the session makes on the claim and by an explicit `claim.renew`; every reply
+  - **From the person's CLI**, `baton session claim <ticket>`: signed with the person's own key, it
+    holds the lease with a small heartbeat process and installs the `pre-push` fence in the
+    person's checkout (R-BTN-6, R-BTN-26), for the person's own interactive session to work in.
+    It is no runner: it runs no queued legs, and nothing it runs reaches the person's keys.
+  - **Over MCP, with an interactive grant**, for an agent such as Claude Code. Its moves are the
+    claim actions a runner uses — `claim`, `advance`, `end`, `handoff` — called as MCP tools with
+    the grant, and Baton applies the same checks it applies to a runner's: the edge, the run
+    limit, the gates, and the outputs and entry requirements it holds (R-BTN-108, R-BTN-109). The
+    lease is renewed by every call on the claim and by `claim.renew {claim_id}`; every reply
     carries the claim's state and its pending messages (a release, a stop), as a heartbeat's reply
     does. Its length is within R-BTN-9's bounds; the default is open.
-- **A lapsed MCP claim cannot collide.** The session runs no `pre-push` fence, so the design makes
-  a late push harmless instead of impossible: when its lease lapses Baton reaps the claim, and the
-  leg is requeued **onto a fresh branch** (`claude/B-41-2`; the course's branch pattern already
-  admits a suffix), so the next holder never shares a write target with the old session.
-  Whatever the old session pushes later lands on its own branch, where the sync finds it as
-  outside work (R-BTN-203) and the course weighs it; it is never merged silently. A reaped session
-  claim is not a failed attempt: a person closing a window is not a failure (R-BTN-122).
+- **A lapsed MCP claim cannot collide unnoticed.** The session runs no `pre-push` fence, so the
+  design makes a late push visible instead of impossible:
+  - when its lease lapses Baton reaps the claim and requeues the leg **onto a fresh branch**: the
+    next claim's answer names it (`claude/B-41-2`), and Baton records which branch belongs to which
+    claim (§4.2's branch pattern already admits a suffix);
+  - a push to any other branch of the ticket, the old session's included, is outside work the sync
+    finds (R-BTN-203), weighed by the course, never merged silently;
+  - the new holder checks before it closes that the remote head of its branch is its own last push;
+  - a reaped session claim is not a failed attempt: a person closing a window is not a failure
+    (R-BTN-122).
+
+  The old session still holds the person's forge credential and can push to the new branch; a
+  hook that fences it is in the [hardening proposal](hardening.md).
 - **Abandoned, it is requeued.** A runner claims the leg and raises `interact`, the ticket's
   partial text its hand-off — content an agent-driven leg then treats as unapproved.
-- **It ends its claim itself, and the checks move.** A runner's stub checks a leg's work before
-  its close (the ticket's schema, the leg's heading); a session claim through MCP ends directly, so
-  those checks fall to the next reader — the sync's schema check and the next leg. That is a
-  change to the architecture's *verification at the boundary*, for session claims only, and is
-  named as one in [Amends](#amends).
+- **The checks a stub makes move to the next reader.** A runner's stub checks the ticket's schema
+  and the leg's heading before its close; a session claim through MCP has no stub, so those fall
+  to the sync's schema check and the next leg, and the leg-end scope check (§12.9) runs on the
+  session's pushes from the sync's facts. That is a change to the architecture's *verification at
+  the boundary*, for session claims only, named in [Amends](#amends).
 
 ## Migration
 
@@ -352,7 +393,12 @@ issue kept (decision 3).
     from where), R-BTN-199 (ids for every ticket, the server's floor), R-BTN-120 (`depends_on`
     reads Baton's end), §4.4's post (`unwritten` rows);
   - §5: [R-BTN-131](../BATON_SPEC/05-courses.md#sec-5-8) (`baton ticket request` as a client of
-    `course.start`), R-BTN-69 (`sessions: allow`);
+    `course.start`), R-BTN-69 (`sessions: allow`), R-BTN-108 and R-BTN-109 (outputs and entry
+    requirements checked for a session claim);
+  - §4.2's `branch_pattern` and R-BTN-190 (a branch recorded per claim; pushes to another branch as
+    outside work), R-BTN-194 (an unwritten ticket's provenance, `started_by`);
+  - §6.6 (rules 4, 5, 7 and 9, and `chain`, for a session claim) and R-BTN-106 (moves made over
+    MCP);
   - §9: §9.1 (`unknown-ticket` and unwritten tickets), R-BTN-4, R-BTN-9, R-BTN-19, R-BTN-26, §9.5
     and §9.7 (session claims: the lease, reaping onto a fresh branch, not a failed attempt),
     R-BTN-10 (confirmation by end station), R-BTN-122;
@@ -361,7 +407,13 @@ issue kept (decision 3).
     [human intent](../../docs/context/human-intent.mdx));
   - §7 and §11: R-BTN-129 and R-BTN-130 (`course.start`, `claim.renew`, the interactive grant),
     R-BTN-163 and R-BTN-160's table (`baton.ticket-missing`, `baton.ticket-unwritten`);
-  - §14: the claim answer's `start`, and `course.start`'s route.
+  - §13: the `unwritten` flag, the start text, `started_by`, `request_id` records, a claim's branch;
+  - §14: the claim answer's `start` and approval hash, `course.start`'s route, `claim.renew`,
+    `ticket.withdraw` for an unwritten ticket.
+- The [security proposal](security.md): `std:approval@1`'s value gains a ticket's content hash.
+- [BATON_MCP_OAUTH_SPEC](../BATON_MCP_OAUTH_SPEC.md): session claims and `course.start` over an
+  interactive grant (as [people](people-and-dashboard.md#5-people-identities-and-the-roster)
+  amends it).
 - Its home when built: one new rule in §1 beside R-BTN-35 for the field table and the evidence
   rule; one in §4 for originating, importing and absence; one in §9 for session claims; and
   `course.start` with R-BTN-131.
@@ -378,5 +430,3 @@ issue kept (decision 3).
   tracker, not on Dibber.
 - **`baton ticket request` offline:** whether it keeps today's git path, filing with a scanned id,
   when Baton does not answer.
-- **The roster on plain git**, where no forge says who may push: the git host reporting it, or the
-  arena's owners alone.

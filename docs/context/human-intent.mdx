@@ -33,22 +33,28 @@ The channel says nothing about it:
 
 | Channel | Who drives |
 |---|---|
-| The dashboard | always a person: someone signed in. The policy may ask for a hardware key to prove it (§2). |
+| The dashboard | always a person: someone signed in. A session never satisfies a list that requires a `human_only` or hardware key (§2). |
 | The CLI | the key's: a person's own SSH key is human-driven; a runner's key, in a sandbox or anywhere, is agent-driven. |
 | MCP | the credential's: a person's **interactive grant** is human-driven; a key minted for an agent's purpose is agent-driven. |
 
 - **A person's credentials are their own.** A person registers their own keys and signs in for
   themselves; no one gets a credential that acts as someone else. Claude Code driven by a person
   uses that person's credential, and its acts are the person's.
-- **An interactive MCP grant is short-lived and ends with its session.** It is an OAuth grant
-  ([BATON_MCP_OAUTH_SPEC](../../spec/BATON_MCP_OAUTH_SPEC.md)): a short-lived access token, its
-  refresh capped and ended by idleness, so a grant left in an agent's configuration does not
-  outlive the session it was made for. No long-lived bearer key is human-driven.
+- **An interactive MCP grant is short-lived.** It is an OAuth grant a person approves for their
+  own agent ([BATON_MCP_OAUTH_SPEC](../../spec/BATON_MCP_OAUTH_SPEC.md), amended): a short-lived
+  access token, its refresh capped and ended by idleness, so a grant left in an agent's
+  configuration does not outlive the work it was made for. No long-lived bearer key is
+  human-driven. A person who owns no key signs in with the forge to get one.
+- **A person's own CLI holds a claim without becoming a runner.** `baton session claim` keeps a
+  claim's lease and installs the `pre-push` fence for the person's own interactive session, and
+  runs no queued legs ([ticket ownership](../../spec/proposals/ticket-ownership.md#session-claims)).
 - **A runner is always agent-driven.** A runner key carries a runner. `human-operator` is a
   runner's own statement, matched to route legs that want a person at the runner's terminal; it
-  never makes the runner human-driven.
-- **An agent-driven key carries its runner and its purpose** — a leg run, an intervention — is
-  scoped to what that purpose needs, and dies with it.
+  never makes the runner human-driven. A runner on a machine that also holds a person's keys must
+  not let its legs reach them ([hardening](../../spec/proposals/hardening.md)).
+- **An agent-driven key carries a purpose**, and its runner where it has one — a leg run, an
+  intervention, an automation an owner minted it for — is scoped to what that purpose needs, and
+  ends with it.
 - **An agent leg a person joins stays agent-driven.** Its actor is the runner that claimed it; the
   person who opens its session link (R-BTN-195) acts in the harness, not in Baton. Joining a
   session is not taking it over. (An **autonomous leg** is another thing: a leg that never asks for
@@ -113,10 +119,14 @@ In a human-driven agent session the agent issues the calls, and it reads text an
 wrote; an injected instruction acts through the person's credential. Outside Baton that agent
 already holds the person's forge and inference credentials. **Inside Baton it gains reach those do
 not give**: holds, adopts, expedites, and whatever governance acts the person's role admits at the
-proof the credential carries. Baton accepts this rather than ranking channels, and limits it three
-ways: interactive grants are short-lived and end with their session (§1); a policy that wants a
-governance act made only with a human-only or hardware key says so, and a token then cannot make
-it (§2); and every act is recorded as the person's. Protecting a person's own session is the
+proof the credential carries. Some of those **outlive the session**: an owner key added, an agent
+key minted, a notifier key listed. And a person's key used by an agent nobody watches — a
+scheduled supervising agent holding the owner's SSH key — is human-driven all the same, because
+the key decides. Baton accepts this rather than ranking channels, and limits it three ways:
+interactive grants are short-lived (§1); a policy that wants a governance act made only with a
+human-only or hardware key says so, and a token then cannot make it (§2); and every act is
+recorded as the person's. A proof level that admits key-signed requests but not tokens, for
+governance acts, is in the [hardening proposal](../../spec/proposals/hardening.md). Protecting a person's own session is the
 harness's work (its permission prompts). Where a person connects an agent to Baton, Baton warns
 that a fresh session holding nothing else is strongly advised.
 
@@ -126,9 +136,10 @@ A person is for **accountability and notification**: the credentials that are th
 is attributed; the identities linked to them; and how to reach them. A person confers **no
 authority**: roles stay on keys as the spec has them (owner keys, `human_only` keys, runner grants),
 and the policy's lists name roles, never people or groups. Access beyond Baton's own lock and
-policy is the forge's: an arena's **roster** — who may start a course or hold a claim — is the
-people whose linked forge account can push to its config repository, as the forge says, never a
-list Baton keeps ([people](../../spec/proposals/people-and-dashboard.md#5-people-identities-and-the-roster)).
+policy is the forge's: an arena's **roster** — who may start a course or hold a session claim —
+is read from the forge by the arena's sync (the accounts that can push to its config repository,
+or the members of the forge organisation that owns it, as the arena chooses), never a list Baton
+keeps. A person signs in with the forge, which links and verifies their forge account in one step ([people](../../spec/proposals/people-and-dashboard.md#5-people-identities-and-the-roster)).
 A person's secrets are sealed on their own machine, never readable by Baton
 ([personal secrets](../../spec/proposals/personal-secrets.md)). Baton keeps no groups: notifying a
 team is a pull from Needs you, or one push to a channel the team already shares.
@@ -146,7 +157,9 @@ team is a pull from Needs you, or one push to a channel the team already shares.
   ([ticket ownership](../../spec/proposals/ticket-ownership.md)); interventions split by driver
   ([intervention sessions](../../spec/proposals/intervention-sessions.md)); sealed personal secrets
   and notification ([personal secrets](../../spec/proposals/personal-secrets.md)).
-- **To amend when built:** R-BTN-186 — its limits (tighten only, never as `human`, never resolving
+- **To amend when built:** BATON_MCP_OAUTH_SPEC §5, §7 and §8 and G-BTN-157 (an interactive grant
+  is a person's own, short-lived, acting with their role within the consent's ticks; a grant
+  scoped to an intervention stays agent-driven); R-BTN-186 — its limits (tighten only, never as `human`, never resolving
   a condition, never writing an attestation or answering a person leg) bind agent-driven delegated
   keys, while an interactive grant acts with its person's role at its proof; R-BTN-188 ("a
   delegated key matches no entry" binds agent-driven keys; `tickets.created` speaks of agent-driven

@@ -66,8 +66,8 @@ Settled 2026-11-21; not reopened by a review.
    ([conditions proposal, §2](conditions.md#2-handlers)), on a course the arena adopts — never a
    course core ships (values #3). An agent-driven intervention is claimed by a runner like any
    ticket; a human-driven one is held by the person's own session, a session claim
-   ([ticket ownership](ticket-ownership.md#session-claims)), the one claim kind added beside the
-   runner's.
+   ([ticket ownership](ticket-ownership.md#session-claims)): a claim like any other, held by a
+   person's session rather than a runner.
 3. **MCP: accept the risk, and warn.** The owner: "Accept the risk. If there is a way to issue a
    warning to the user that a fresh session is strongly advised we should do so but it's
    ultimately up to the user's judgement. MCP connections should be possible as repo owner or

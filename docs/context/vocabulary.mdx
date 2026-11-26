@@ -12,7 +12,7 @@ belongs to a course, and Baton passes it through unread.</Lede>
 **Arena.** What one Baton coordinates as a unit: one **ticket source**; one Baton configuration
 (`.baton/`), kept in a git repository, the arena's **config repository**; everything Baton owns
 about those tickets — where each stands in its course, its history, claims and attestations; and
-the arena's owners, its policy and its grants (and, proposed, its people's roles and its notifier
+the arena's owners, its policy and its grants (and, proposed, its roster and its notifier
 keys). Its sync tells Baton which tickets its source holds and what git shows of them; where each
 stands is Baton's own record (R-BTN-39). One Baton serves many arenas. What an arena
 covers is its owners' choice (the owner, 2026-11-26). **The spec, the API, the CLI and the
@@ -233,22 +233,26 @@ Not to be confused with an **autonomous leg**, which never asks for a person (R-
 
 **Person, roster** ([proposed, not built](../../spec/proposals/people-and-dashboard.md#5-people-identities-and-the-roster)).
 A person is the tenant's record of someone, for accountability and notification: their own keys
-and the identities linked to them. A person confers no authority; roles stay on keys. An arena's
-**roster** is the people who may start a course or hold a claim there: those whose linked forge
-account can push to its config repository, as the forge says.
+and the identities linked to them, a forge account verified by signing in with the forge. A
+person confers no authority; roles stay on keys. An arena's **roster** is the people who may start
+a course or hold a session claim there: those whose linked forge account can push to its config
+repository, or who belong to the forge organisation that owns it, as the arena chooses
+(`roster.source`); the arena's sync reads it from the forge and posts it.
 
 **Interactive grant** ([proposed, not built](../../spec/proposals/people-and-dashboard.md#5-people-identities-and-the-roster)).
-A person's MCP credential: an OAuth grant, short-lived and ended with its session, human-driven,
-acting with the person's role at the proof a token carries.
+A person's MCP credential: an OAuth grant they approve for their own agent, short-lived and ended
+by idleness, human-driven, acting with the person's role within the grant's consent and at the
+proof a token carries.
 
 **Session claim** ([proposed, not built](../../spec/proposals/ticket-ownership.md)). A claim held
-by a person's own session rather than a runner: through MCP with an interactive grant, or through
-the CLI's attached-runner mode. One claim like any other, leased and fenced; a lapsed one is
-requeued onto a fresh branch.
+by a person's own session rather than a runner: over MCP with an interactive grant, or from the
+person's CLI (`baton session claim`), which holds the lease and the `pre-push` fence and runs no
+queued legs. One claim like any other, leased and fenced; a lapsed MCP one is requeued onto a fresh
+branch.
 
 **Unwritten ticket** ([proposed, not built](../../spec/proposals/ticket-ownership.md)). A ticket
 Baton started (`course.start`) that its ticket source does not hold yet. Baton keeps its start
-text, at most 1,024 characters, until the store's first read of it, which makes its store-owned
+text, at most 1,024 Unicode code points, until the store's first read of it, which makes its store-owned
 fields the store's.
 
 **Notifier, sealed secret** ([proposed, not built](../../spec/proposals/personal-secrets.md)). A

@@ -52,7 +52,7 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
       inner hash; channels are verified per secret version; secrets are set only by SSH keys.
     - "Interactive keys never satisfy the approver lists" was withdrawn: the owner ruled the key
       decides, never the channel; a token's proof is what a `human_only` or hardware list refuses.
-      Interactive grants are short-lived OAuth grants, built now.
+      Interactive grants are short-lived OAuth grants, designed now rather than left to hardening.
     - A forge identity cannot say who drives (the owner): linked forge accounts attribute only;
       `human_identity` stays as the spec has it, and "several people's forge identities" was
       dropped.
@@ -61,8 +61,34 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
       escalation steps. From the earlier users-and-groups proposal (#300, closed) the notifier's
       due read, `std:notified@1`, `baton.notifier-silent` and the attach code were kept.
     - Text: "autonomous" for credentials became **agent-driven** (an autonomous leg is R-BTN-195's);
-      "dashboard sessions" built only for administrators; the terminology note on "home"; every
-      proposal's Amends list completed (R-BTN-53, R-BTN-130, R-BTN-163, R-BTN-5/34, §9).
+      "dashboard sessions" built only for administrators; the terminology note on "home"; the
+      Amends lists extended (R-BTN-53, R-BTN-130, R-BTN-163, R-BTN-5/34, §9).
+  - **Round two** (2026-11-26): two fresh reviewers — consistency with executability, and
+    security. Every finding checked against the text.
+    - Both found the CLI form of a session claim was a runner, hence agent-driven by the page's own
+      rule, and that its `ssh-agent` would hand queued legs the person's key. The owner: it is
+      `baton session claim`, which holds the lease and the `pre-push` fence and runs no queued
+      legs; a runner on a person's machine keeping its legs from the person's keys is hardening.
+    - The interactive grant contradicted BATON_MCP_OAUTH_SPEC (a grant is an MCP key, as long-lived
+      as one, approved only by owners): its §5, §7, §8 and G-BTN-157 are named as amended; an hour's
+      token, a twelve-hour refresh cap, an hour idle; the consent's ticks a ceiling.
+    - The roster could not be computed by a server that holds no forge credential, and a non-owner
+      had no credential at all. The owner: people sign in with the forge, which verifies their
+      account; the roster's source is the arena's choice (`roster.source`: `repo-writers` or
+      `org-members`), read and posted by the sync as `std:roster@1`, fresh within 24 hours,
+      re-checked at every start, claim and renewal; on plain git, the owners' people.
+    - The owner kept "the key decides": governance acts outliving a session, and a person's key in
+      an unwatched agent, are stated as accepted risk, and a key-signed proof level for governance
+      acts goes to hardening.
+    - Fixed in the text: approval is always a recorded `std:approval@1` of a defined hash, and
+      `claim: true` waits for it; an unwritten ticket's provenance carries no `human`; how an MCP
+      session claim moves, which gates bind a person, the branch recorded per claim; agent-driven
+      starts name their claim; ambiguous ids refused and a recovered id confirmed by an owner; one
+      person per forge account, never a runner's; a notifier is a principal of its own, alone
+      attesting deliveries, on a host that runs no legs; recipients limited to the arena's people;
+      verification codes and webhook limits; replay to a fresh notifier and an administrator's
+      first-key code stated as accepted risk.
+
 
 - **2026-11-21 — Sign-in through Cloudflare Access (R-BTN-155, R-BTN-57, S-BTN-308).**
   Rules changed: R-BTN-155, R-BTN-57, R-BTN-16, R-BTN-149, R-BTN-185, R-BTN-188; G-BTN-144, S-BTN-124. The

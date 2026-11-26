@@ -70,7 +70,7 @@ Settled 2026-11-26; not reopened by a review.
 | Part | What it is | Where it lives |
 |---|---|---|
 | **Person** | someone Baton knows, with SSH keys and linked identities ([people](people-and-dashboard.md#5-people-identities-and-the-roster)) | Baton |
-| **Notifier** | a delivery runner (R-BTN-163) with a **notifier key** of its own: an SSH key pair, registered as a notifier of an arena, whose private half never leaves its host. It is never a runner's key, and it signs its requests as every key does (R-BTN-13). | the deployment, beside the team's channel credentials |
+| **Notifier** | a delivery runner (R-BTN-163) with a **notifier key** of its own: an SSH key pair, registered as a notifier of an arena, whose private half never leaves its host. `notifier` is a principal of its own, never a runner's key; it signs its requests as every key does (R-BTN-13). A notifier's host runs no legs, so no leg can read its key. | the deployment, beside the team's channel credentials |
 | **Notifier keys** | each arena's list of notifier public keys, set by its owners | Baton |
 | **Sealed secret** | a person's secret for one arena: its name, purpose, version, recipients and inner hash in the clear, its value in age ciphertext | Baton, ciphertext only |
 | **Channels** | the ways a person is reached, each verified, and preferences over them | Baton: identifiers and preferences only |
@@ -84,7 +84,7 @@ person is on (or the one `--repo` names):
 
 1. **Builds the bundle**, canonical JSON: `{v: 1, baton, person, arena, name, purpose, version,
    value, signed_at}`, `baton` the instance's origin. `version` is one more than the highest
-   version Baton has ever held for that person and name, deletions included.
+   version Baton has ever held for that person, arena and name, deletions included.
 2. **Signs it** with the person's SSH key, `ssh-keygen -Y sign -n baton-secret` (through
    `ssh-agent` where the key is there), so a signature made for anything else does not verify.
 3. **Encrypts bundle and signature together** with age to every notifier key the arena lists,
@@ -108,15 +108,18 @@ From #300, unchanged in substance:
 
 - **Each Needs-you entry carries its recipients**: the person a ticket's assignee resolves to
   through their verified linked identities (decision 5 of [ticket ownership](ticket-ownership.md)),
-  else the arena's owners' people.
+  when that person is on the arena's roster or one of its owners; else the arena's owners' people.
+  So whoever can edit an assignee can route an entry only to the arena's own people.
 - **One read, no cursor.** `GET /v1/needs-you?due=1` answers, across the arenas the notifier
   serves, every open entry that no notifier has yet attested, with its recipients, their verified
-  channels and their preferences, resolved as the read is made. A notifier keeps nothing of its
-  own: it reads, sends, attests, and reads again a minute later; a restart or a second notifier
-  needs nothing carried over, and two that race may both send.
+  channels and their preferences, resolved as the read is made. A notifier keeps no cursor: it
+  reads, sends, attests, and reads again a minute later; a restart or a second notifier needs no
+  place carried over, and two that race may both send. The one thing it keeps on its host is the
+  highest version it has seen of each secret (below).
 - **The notifier's word.** For each entry it worked, a notifier attests `std:notified@1`: `{entry,
-  told: [<person>], unreachable: [<person>]}`, naming no channel and no address, from a writer the
-  arena's policy admits for the type. Needs you shows who was told.
+  told: [<person>], unreachable: [<person>]}`, naming no channel and no address. Only a key on the
+  arena's notifier list writes it, whatever the policy admits for other types; a runner's word
+  that someone was told counts for nothing. Needs you shows who was told.
 - **A silent notifier is a condition.** Where the policy admits a writer for `std:notified@1`, an
   entry unattested for 15 minutes raises `baton.notifier-silent` on the arena.
 
@@ -147,9 +150,16 @@ Each channel kind says what the person supplies:
 
 **Every channel is verified before it is used, and again for every new secret behind it.** When a
 person adds a channel or sets a new version of its secret, the next notifier to read it mints a
-code, sends it through the channel, and stores its hash in Baton against the channel and the
-secret's version; the person confirms it with their SSH key (`baton notify verify <channel>
-<code>`). An unconfirmed channel, or a secret version not yet confirmed, receives nothing.
+code — eight Crockford base32 characters, valid fifteen minutes — sends it through the channel,
+and stores its hash in Baton against the channel and the secret's version
+(`POST /v1/notify/verifications`, a notifier's call); a second notifier's code for the same
+version is refused `conflict`. The person confirms it with their SSH key (`baton notify verify
+<channel> <code>`), at most five tries per code. An unconfirmed channel, or a secret version not
+yet confirmed, receives nothing.
+
+**A webhook is sent with care.** A notifier posts only to an `https` URL, refuses an address that
+resolves to a private, loopback or link-local network, follows no redirect, and sends at most a
+few requests a minute to one webhook — verification codes included.
 
 ## Preferences
 
@@ -172,9 +182,11 @@ No one else edits them.
 
 - **The person**: their own secrets' metadata, their preferences, their channels.
 - **A notifier key on the arena's list**: the ciphertext, verified channels and preferences of the
-  people on that arena.
-- **Owners and administrators**: who an entry will reach, and on which kinds of channel; never a
-  contact identifier, never ciphertext.
+  arena's people — those on its roster and its owners' people — and the due entries, with their
+  session links.
+- **Owners and administrators**: through their own reads, who an entry will reach and on which
+  kinds of channel, never a contact identifier or ciphertext. An owner who adds a notifier key of
+  their own reads all a notifier reads ([Accepted risk](#accepted-risk)).
 - **No runner key, no other person, no delegated credential** reads any of it.
 - **Events** record each set, overwrite, delete, re-encryption, verification and notifier key
   change, with the person, the name and the version — never a value, never a contact identifier.
@@ -186,7 +198,8 @@ Stated as it is, for now (decision 9):
 - **Whoever controls the notifier key list can read secrets.** The CLI seals to the list Baton
   serves, and honest notifiers re-encrypt every secret to the list Baton serves. So an owner who
   adds a notifier key whose private half they hold, or a compromised Baton that lists a key of its
-  own, can read every secret sealed or re-encrypted from then on. The fix — the CLI and notifiers
+  own, can read every secret sealed or re-encrypted from then on — and every channel, preference
+  and due entry, session links included, that a notifier reads. The fix — the CLI and notifiers
   confirming list changes out of band, and each person told when their secrets' recipients change
   — is in the [hardening proposal](hardening.md).
 - **A compromised Baton can forge a person's secret.** Notifiers check signatures against the SSH
@@ -194,6 +207,13 @@ Stated as it is, for now (decision 9):
   seal a secret in their name — redirecting their notifications, which carry session links, to a
   topic it reads. Baton's own server is trusted and its compromise recovered from, not resisted
   ([architecture](../../docs/context/architecture.mdx), *Four nouns at the boundary*).
+- **A fresh notifier can be replayed to.** The rollback check rests on the highest version a
+  notifier has seen, kept on its host: a new or re-keyed notifier has seen none, so a compromised
+  Baton can serve it an older signed version, or one the person deleted. Durable marks carried
+  across rotation, and tombstones the person signs, are in the [hardening proposal](hardening.md).
+- **An administrator can enter as a person once.** An administrator mints the attach code for a
+  person's first key where nothing else lets the person in (plain git); the person is told on their
+  verified channels, and an administrator who keeps the code for themselves acts as that person.
 - **What leaks in the clear:** each secret's name, purpose, version and size (age does not pad).
 
 **Recovery.** Replace every notifier key; have every person **change** each secret at its source — a
