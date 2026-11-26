@@ -18,6 +18,14 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
 
 ## Changelog
 
+- **2026-11-26 — Gating on a reading deferred (R-BTN-76, R-BTN-181).**
+  No rule changed. The 2026-10-30 brief let a course gate a leg on a reading ("eg: account
+  funds"); the 2026-11-19 ruling cut the `resource` prerequisite and kept readings as advice, and
+  left open whether R-BTN-181's `requires.attestations` instance form may bind as a gate. The
+  owner's ruling, 2026-11-26: "Theoretically, it makes sense for readings to be an input to leg
+  decisions, but I also don't think we'll need this for a while still." The instance form stays on
+  the security proposal page, unbuilt, with S-BTN-181's funds, `count: 2` and latest-per-writer
+  cases; B-146 builds work attestations only. It is ruled on when a course first needs it.
 - **2026-11-25 — Ticket files are Dibber's to write (R-BTN-74, R-BTN-199, S-BTN-189, S-BTN-234).**
   Rules changed: R-BTN-74, R-BTN-199, R-BTN-193 (its legacy list: the git-lock ticket commands are
   gone); §11's CLI table; S-BTN-189, S-BTN-199, S-BTN-234, S-BTN-241;

@@ -63,23 +63,23 @@ removed the resource prerequisite and block and kept readings as advice (R-BTN-7
    facts. Reconcile the proposal's machine-key supersession text with R-BTN-203 before changing
    who can post fact arrivals or outside-work evidence. Permission to post a board is not, by
    itself, permission to post those facts.
-6. **Readings.** B-291 owns removal of the existing fleet advice prerequisite and block. Before
-   implementing the separate `requires.attestations` instance form, resolve whether it can bind
-   as a gate under the November 19 advice-only ruling. Until then, leave the instance form and
-   its funds and latest-per-writer scenarios as proposals. Do not add a reading signature, a
-   reading nonce, or a `signed` policy knob.
+6. **Readings: deferred (the owner, 2026-11-26).** B-291 owns removal of the existing fleet
+   advice prerequisite and block. The `requires.attestations` instance form (`subject: instance`,
+   a requirement on readings) is not built here: it stays on the proposal page, with S-BTN-181's
+   funds, `count: 2` and latest-per-writer cases, until a course needs it, and is ruled on then.
+   Do not add a reading signature, a reading nonce, or a `signed` policy knob.
 
 ### Tests
 
-- **S-BTN-181** on both hosts once the proposal's scope and scenario are reconciled. The funds
-  predicate and per-instance cases depend on the instance-form decision above.
+- **S-BTN-181**'s work-attestation cases on both hosts. The funds
+  predicate and per-instance cases are deferred with the instance form (item 6).
 - **S-BTN-24** and **G-BTN-70** remain regressions for advice versus existing gates and for
   stored block transitions respectively; neither requires a new resource gate.
 - Unit: nonce idempotency, supersession by attested key, subject binding and each `where` op.
 
 ### Exit criteria
 
-- [ ] S-BTN-181 and S-BTN-24 pass on both hosts; G-BTN-70 holds
+- [ ] S-BTN-181's work-attestation cases and S-BTN-24 pass on both hosts; G-BTN-70 holds
 - [ ] `npm test`, `npm run typecheck` and `npm run check:spec` green; merged under the review gate
 
 ## Status
@@ -98,3 +98,7 @@ _(2026-11-20: the spec simplification of 2026-11-19 (baton#299; `spec/BATON_SPEC
 _(2026-11-22: PR #335 withdrew its short-form resource gates after review. The plan above
 uses the current work-attestation proposal and leaves the unresolved instance and sync scope
 for a decision before implementation. The attestation exit criteria are still open.)_
+
+_(2026-11-26: the owner deferred the instance form: "Theoretically, it makes sense for readings
+to be an input to leg decisions, but I also don't think we'll need this for a while still." Item 6
+and the tests say so; `spec/BATON_SPEC_HISTORY.md` records it.)_
