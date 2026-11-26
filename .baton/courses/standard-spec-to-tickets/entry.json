@@ -1,0 +1,14 @@
+{
+  "id": "spec-to-tickets",
+  "version": 1,
+  "min_runner_version": 1,
+  "skill": "baton-spec-to-tickets",
+  "step_kinds": [
+    "decompose",
+    "check",
+    "file"
+  ],
+  "branch_pattern": "claude/{ticket}-*",
+  "protocol_files": [],
+  "facts": []
+}

@@ -1,0 +1,15 @@
+{
+  "id": "review-pr",
+  "version": 1,
+  "min_runner_version": 1,
+  "skill": "baton-review-pr",
+  "step_kinds": [
+    "review",
+    "conclude"
+  ],
+  "branch_pattern": "claude/{ticket}-*",
+  "protocol_files": [],
+  "facts": [
+    "prs"
+  ]
+}
