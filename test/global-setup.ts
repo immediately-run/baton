@@ -18,6 +18,10 @@ export default function setup(project: TestProject) {
     for (const [x, a] of Object.entries(repo.shas)) {
       for (const [y, b] of Object.entries(repo.shas)) ancestry[`${x}<${y}`] = repo.isAncestor(a, b);
     }
+    // B-322: tiers are retired; the recorded snapshots keep theirs, the wire carries none.
+    for (const snapshot of Object.values(committed.states) as { state: { items: { tier?: unknown }[] } }[]) {
+      for (const item of snapshot.state.items) delete item.tier;
+    }
     project.provide('board', { shas: repo.shas, states: committed.states, ancestry });
   } finally {
     rmSync(repo.root, { recursive: true, force: true });

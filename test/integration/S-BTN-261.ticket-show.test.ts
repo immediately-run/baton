@@ -21,7 +21,7 @@ import { call as hostCall } from '#host';
 
 const T0 = Date.parse('2026-11-20T12:00:00Z');
 const HOUR = 3_600_000;
-const LEGACY = ['ticket_id', 'repository', 'course_id', 'title', 'path', 'tier', 'requires', 'operator_only', 'expedite', 'rank', 'snapshot_sha', 'parent', 'children', 'station'];
+const LEGACY = ['ticket_id', 'repository', 'course_id', 'title', 'path', 'requires', 'operator_only', 'expedite', 'rank', 'snapshot_sha', 'parent', 'children', 'station'];
 
 type Row = Record<string, any>;
 let admin: TestKey;

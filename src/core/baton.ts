@@ -172,7 +172,7 @@ export class BatonCore {
     this.queues = new Queues({ store, now: () => this.now(), held: (ticket) => this.blocks.isHeld(ticket),
       graph: (repo, course) => this.stations.graph(repo, course), notices: this.notices });
     this.resources = new Resources({ store, now: () => this.now(), blocks: this.blocks, deprecated: this.deprecated });
-    this.admin = new Admin({ store, now: () => this.now(), registry: this.registry, adminKeys: () => ports.adminKeys.list(),
+    this.admin = new Admin({ store, deprecated: this.deprecated, now: () => this.now(), registry: this.registry, adminKeys: () => ports.adminKeys.list(),
       accessIdentities: () => ports.accessIdentities?.read() ?? '', origin: ports.config.BATON_ORIGIN,
       dispatchSync: (repository) => want({ repository, kind: 'sync' }), fleetChanged: () => this.blocks.recount(), notices: this.notices,
       dependencyVisibilityChanged: () => this.blocks.refreshPrerequisiteVisibility(),

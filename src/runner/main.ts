@@ -36,7 +36,6 @@ export interface RunArgs {
   session: string;
   repository: string;
   hostname: string;
-  tier: string;
   /** B-86: `--capabilities`, which narrows. Null when the flag is absent — the runner then
    *  declares what the grant allows (`grant.capabilities` on its first answer). */
   capabilities: string[] | null;
@@ -68,7 +67,7 @@ export interface RunArgs {
 }
 
 /** `baton run [--harness opencode|claude-code] [--home <checkout|home name>] [--url <url>] [--session <id>]
- * [--repository <id>] [--hostname <name>] [--tier <tier>] [--capabilities a,b] [--beat-every <ms>]
+ * [--repository <id>] [--hostname <name>] [--capabilities a,b] [--beat-every <ms>]
  * [--course <id>] [--lock <capability>=<path>]… [--test-harness] [--verbose]`.
  * Unknown flags are refused, never dropped. `--capabilities` narrows the grant: without it the
  * runner declares what the grant allows (B-86). `--home` keeps R-BTN-131's meaning for a
@@ -80,7 +79,7 @@ export function parseRunArgs(argv: string[], env: NodeJS.ProcessEnv = process.en
     home: env.BATON_HOME ?? process.cwd(), url: env.BATON_URL ?? DEFAULT_URL,
     session: env.BATON_SESSION ?? `run-${Math.random().toString(16).slice(2, 10)}`,
     repository: env.BATON_REPOSITORY ?? 'docs', hostname: env.BATON_HOSTNAME ?? hostname(),
-    tier: 'critical', capabilities: null, beatEvery: 2 * 60_000, testHarness: false, verbose: false, locks: {},
+    capabilities: null, beatEvery: 2 * 60_000, testHarness: false, verbose: false, locks: {},
     executor: env.BATON_EXECUTOR ?? 'builtin', concurrency: 1, restartWhenBehind: false,
   };
   for (let i = 0; i < argv.length; i++) {
@@ -100,7 +99,6 @@ export function parseRunArgs(argv: string[], env: NodeJS.ProcessEnv = process.en
     else if (a === '--session') out.session = value();
     else if (a === '--repository') out.repository = value();
     else if (a === '--hostname') out.hostname = value();
-    else if (a === '--tier') out.tier = value();
     else if (a === '--course') out.course = value();
     else if (a === '--executor') out.executor = value();
     else if (a === '--legs') {
@@ -151,7 +149,7 @@ export function parseRunArgs(argv: string[], env: NodeJS.ProcessEnv = process.en
  * Printed before any credential or network work, and the exit is 0. */
 export const RUN_USAGE = [
   'usage: baton runner start (or baton run) [--harness opencode|claude-code] [--home <checkout|home name>] [--url <url>] [--session <id>]',
-  '                 [--repository <id>] [--hostname <name>] [--tier <tier>] [--capabilities a,b]',
+  '                 [--repository <id>] [--hostname <name>] [--capabilities a,b]',
   '                 [--beat-every <ms>] [--course <id>] [--executor <source>] [--concurrency <k>]',
   '                 [--config FILE] [--test-harness] [--verbose] [--restart-when-behind]',
   '',
@@ -549,7 +547,7 @@ export async function runMain(argv: string[], io: { log?: (l: string) => void; f
     ...(hostAdapter ? { agentActivity: (checkout: string) => ({
       command: hostAdapter.agentCommand, paths: harnessActivityPaths(checkout, [hostAdapter]),
     }) } : {}),
-    tierCeiling: a.tier, ...(a.capabilities ? { capabilities: a.capabilities } : {}),
+    ...(a.capabilities ? { capabilities: a.capabilities } : {}),
     capabilityChecks: checks,
     courses,
     readCourses,

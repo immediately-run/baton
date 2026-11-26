@@ -1,3 +1,5 @@
+import { DROP_TIERS_MIGRATION } from '../core/deprecated';
+import dropTiers from './0142_drop_tiers.sql';
 // The numbered schema migrations, applied in order before the object serves (BATON_SPEC §3).
 // A migration is never edited once merged: a change is a new file and a new entry here.
 import backfillPostedHead from './0084_backfill_posted_head.sql';
@@ -258,4 +260,5 @@ export const MIGRATIONS: Migration[] = [
   { id: 125, sql: readyRequirements },
   { id: 126, sql: readyLegBlocks },
   { id: 123, sql: leaseRecovery },
+  { id: DROP_TIERS_MIGRATION, sql: dropTiers },
 ];

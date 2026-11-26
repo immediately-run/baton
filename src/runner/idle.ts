@@ -11,15 +11,12 @@ export function idleReason(refusal: BatonRefusal): string {
   const groups = repos.flatMap((repo) => {
     const { repository, gates } = record(repo);
     const reasons = list(gates).flatMap((entry) => {
-      const { gate, count, tickets, limit, capabilities, readings } = record(entry);
+      const { gate, count, tickets, capabilities, readings } = record(entry);
       if (typeof gate !== 'string' || typeof count !== 'number' || count <= 0 || !Number.isSafeInteger(count)) return [];
       const ids = names(tickets).slice(0, 5);
       if (count > ids.length && ids.length) ids.push('…');
       const samples = ids.join(', ');
-      const cap = typeof limit === 'string' ? ` ${limit}` : '';
-      const reason = gate === 'grant-max-tier' ? `above the grant's max_tier${cap}`
-        : gate === 'declared-tier-ceiling' ? `above the declared tier ceiling${cap}`
-        : gate === 'attempts-exhausted' ? 'held attempts-exhausted'
+      const reason = gate === 'attempts-exhausted' ? 'held attempts-exhausted'
         : gate === 'unconfirmed-end' ? `unconfirmed end${count === 1 ? '' : 's'}`
         : gate === 'missing-capability' ? 'missing capability (rule 4)'
         : gate === 'barred-tag' ? 'barred tag (rule 8)'

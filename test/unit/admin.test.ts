@@ -68,12 +68,8 @@ describe('R-BTN-57: administrators', () => {
     expect(await code(adm('/repositories', { id: 'nope', retire: true }))).toBe('not-found');
   });
 
-  it('a change refuses bad weights and tiers; tiers recompute a grant’s max_tier by name', async () => {
+  it('a change refuses bad weights', async () => {
     expect(await code(adm('/repositories', { id: 'docs', weight: -1 }))).toBe('invalid-params');
-    expect(await code(adm('/repositories', { id: 'docs', tiers: ['a', 'a'] }))).toBe('invalid-params');
-    await own('/grants', { public_key: runner.publicKey, hostname: 'w-host', capabilities: [], max_tier: 'judgement' });
-    expect(await code(adm('/repositories', { id: 'docs', tiers: ['trivial', 'routine', 'judgement', 'critical'] }))).toBe(200);
-    expect(await rows('SELECT max_tier FROM runner_grants')).toEqual([{ max_tier: 2 }]);
   });
 
   it('a probe key is one role: an owner or runner key is refused', async () => {
@@ -97,13 +93,12 @@ describe('R-BTN-57: administrators', () => {
 });
 
 describe('R-BTN-58: owners', () => {
-  it('a grant takes human-operator from an owner like any capability (B-104), and refuses an unknown key without a hostname, a taken hostname, another hostname, a bad max_tier', async () => {
+  it('a grant takes human-operator from an owner like any capability (B-104), and refuses an unknown key without a hostname, a taken hostname, or another hostname', async () => {
     expect(await code(own('/grants', { public_key: runner.publicKey, hostname: 'w-host', capabilities: ['human-operator'] }))).toBe(200);
     // An unknown key without a hostname is still malformed (R-BTN-58) — a fresh key for it,
     // since the grant above made `runner` known.
     const unknown = await makeKey('ssh-ed25519', 'b104-unknown');
     expect(await code(own('/grants', { public_key: unknown.publicKey, capabilities: [] }))).toBe('invalid-params');
-    expect(await code(own('/grants', { public_key: runner.publicKey, hostname: 'w-host', capabilities: [], max_tier: 'epic' }))).toBe('invalid-params');
     expect(await code(own('/grants', { public_key: runner.publicKey, hostname: 'w-host', capabilities: ['Bad Name'] }))).toBe('invalid-params');
     expect(await code(own('/grants', { public_key: runner.publicKey, hostname: 'w-host', capabilities: ['agent-venue'] }))).toBe(200);
     expect(await code(own('/grants', { public_key: runner.publicKey, hostname: 'w-other', capabilities: [] }))).toBe('conflict');

@@ -137,7 +137,6 @@ export function ticketsMarkdown(files: MarkdownFile[], settings: MarkdownSetting
       course_id: str(fm.course) ?? defaultCourse,
       path: `${itemsDir.replace(/\/$/, '')}/${f.path}`,
       title: str(fm.title) ?? id,
-      ...(str(fm.tier) != null ? { tier: str(fm.tier) } : {}),
       requires: strList(fm.requires),
       operator_only: tags.includes('OP'),
       expedite: tags.includes('EXPEDITE'),

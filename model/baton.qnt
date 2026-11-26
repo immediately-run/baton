@@ -22,7 +22,7 @@
 // among it).
 // Abstracted: wall-clock time (timeouts and the 30-minute and 6-hour flags are
 // "eventually"), held histories (R-BTN-11), more than one repository (R-BTN-61), course
-// changes and renames (R-BTN-64), tiers, grants and requires (rules 4-7). README.md says why.
+// changes and renames (R-BTN-64), repository grants (rule 7); rules 5 and 6 are retired. README.md says why.
 module baton {
   // ---- sizes, set by the instance (instances.qnt; regressions.qnt) ----
   const TICKETS: Set[str]

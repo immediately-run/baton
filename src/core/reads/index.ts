@@ -113,6 +113,13 @@ export async function dispatchRead(cx: ReadCtx, req: Request, url: URL): Promise
   const sessionLink: SessionLinkView = (link, holder, incarnation) =>
     link !== null && (principal.kind === 'session' || (runner?.id === holder && runner.incarnation === incarnation))
       ? { session_url: link, session_link: true } : hiddenSessionLink(link, holder, incarnation);
+  // Check before the conditional response and strip before both ETag and cursor scoping.
+  if (hit.action.id === 'repo.tickets' && url.searchParams.has('tier')) {
+    const p = principal;
+    const actor = p.kind === 'session' ? `session:${p.id}` : `${p.role === 'runner' ? 'credential' : p.role}:${p.cred}`;
+    cx.core.deprecated.tierFields(cx.now(), actor, ['tickets.tier'], 'tickets list', repository);
+    url.searchParams.delete('tier');
+  }
   const open = url.searchParams.get('open');
   const deliverInteractions = hit.action.id === 'condition.list' && principal.kind === 'key' && principal.role === 'runner'
     && repository !== null && (open === '1' || open === 'true') && url.searchParams.get('type') === 'interact'

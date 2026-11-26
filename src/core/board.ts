@@ -6,6 +6,7 @@ import { boundedJson } from './validate';
 import { capabilitiesOf } from '../shared/vocabulary.mjs';
 import { parseTranscriptRepo } from './links';
 import { BatonError } from './http';
+import { sha256HexSync } from './policy';
 import { checkRegistry, COURSE_ID, type RegistryEntry } from './courses';
 import { requirementKeys, requirementOf, type PostedDependency } from './ticketRequirement';
 import { ASKS, COURSE_ID as LEG_ID, DECISION_GRANT_MAX, DECISION_ID, DECISION_OPTION, DECISION_OPTIONS_MAX, DECISION_QUESTION, DECISIONS_MAX, DEPENDENCY_ID, isHttpsPointer, LOCAL_ID, NEEDS_MAX, SESSION_NAME, TAG, HOLDING_TYPE, HOLDING_VALUE, repositoryOf } from './validate';
@@ -26,7 +27,6 @@ export interface StateItem {
   order?: number | null;
   tags?: string[];
   requires?: string[] | null;
-  tier?: string | null;
   queue: string;
   node: string;
   dependsOn?: string[];
@@ -64,7 +64,6 @@ export interface PostedTicket {
    *  re-added ticket is detected as `renumbered`. Absent: the ticket's `path`. */
   key?: string;
   title: string;
-  tier?: string | null;
   requires: string[];
   operator_only: boolean;
   expedite: boolean;
@@ -231,7 +230,6 @@ export interface TicketRow {
   node: string;
   queue: string;
   tags: string;
-  tier: string | null;
   requires_clause: 'absent' | 'none' | 'listed';
   operator_only: 0 | 1;
   depends_on: string;
@@ -241,8 +239,6 @@ export interface TicketRow {
   ord: string | null;
   rank: number | null;
   course_id: string;
-  /** The tier's position in the repository's ladder (R-BTN-66), set by the core, which knows it. */
-  tier_position?: number | null;
   /** R-BTN-86: the parent AS POSTED (a local id, or null) — an input of `row_hash`, so a parent
    *  that changes rewrites the row. The column the snapshot stores is the resolved qualified id
    *  (`resolveParents`), which this raw value decides but never is. */
@@ -295,6 +291,23 @@ export function retiredBoardFields(body: unknown): string[] {
     }
   }
   return [...out];
+}
+
+/** Strip the retired input before validation and before hashing the snapshot. */
+export function stripBoardTier(body: unknown): boolean {
+  if (!isObj(body)) return false;
+  const items = [body.tickets, isObj(body.state) ? body.state.items : undefined];
+  let found = false;
+  for (const list of items) {
+    if (!Array.isArray(list)) continue;
+    for (const item of list) {
+      if (isObj(item) && Object.hasOwn(item, 'tier')) {
+        delete item.tier;
+        found = true;
+      }
+    }
+  }
+  return found;
 }
 
 /** Validate the snapshot's shape before anything is written; refuses rather than guesses. A post
@@ -439,7 +452,6 @@ function checkInterim(p: BoardPayload, repo?: string) {
     for (const [k, v] of [['status', it.status], ['queue', it.queue], ['node', it.node]] as const) {
       if (typeof v !== 'string' || !NAME.test(v)) throw new BatonError('invalid-params', `${it.id}: ${k} is malformed`);
     }
-    if (it.tier != null && !NAME.test(it.tier)) throw new BatonError('invalid-params', `${it.id}: tier is malformed`);
     if (it.project != null && !NAME.test(it.project)) throw new BatonError('invalid-params', `${it.id}: project is malformed`);
     if (it.order != null && !Number.isFinite(it.order)) throw new BatonError('invalid-params', `${it.id}: order must be a number`);
     list(it.tags, /^[A-Za-z0-9-]{1,64}$/, `${it.id}: tags`);
@@ -518,7 +530,6 @@ function checkNormative(p: BoardPayload, repo?: string) {
       seenKeys.add(stableKey);
     }
     if (typeof t.title !== 'string' || !TEXT.test(t.title)) fail(`${t.id}.title`, 'must be short plain text');
-    if (t.tier != null && !NAME.test(t.tier)) fail(`${t.id}.tier`, 'must be a tier name');
     if (!Array.isArray(t.requires)) fail(`${t.id}.requires`, 'must be a list (`none` and no clause are [])');
     // B-106 (R-BTN-178, §4.4): `requires` arrives expanded to capabilities — the normative post
     // admits the typed names the interim one does (B-104), or a ticket whose clause names a
@@ -799,7 +810,6 @@ export function rowFor(it: StateItem, rankOf: Map<string, number>): TicketRow {
     node: it.node,
     queue: it.queue,
     tags: JSON.stringify(tags),
-    tier: it.tier ?? null,
     requires_clause: clause,
     operator_only: tags.includes('OP') || (names ?? []).includes('human-operator') ? 1 : 0,
     depends_on: JSON.stringify(it.dependsOn ?? []),
@@ -835,7 +845,6 @@ export function rowForTicket(t: PostedTicket): TicketRow {
     node: '',
     queue: '',
     tags: '[]',
-    tier: t.tier ?? null,
     requires_clause: names.length ? 'listed' : 'none',
     operator_only: t.operator_only ? 1 : 0,
     depends_on: JSON.stringify(t.depends_on),
@@ -865,11 +874,30 @@ export function calendarDate(v: unknown): string | null {
   return Number.isFinite(t) && new Date(t).toISOString().slice(0, 10) === v ? v : null;
 }
 
+/** B-322: compare against the exact pre-0077 digest, with the posted (not resolved) parent.
+ *  Migration 0077 wraps the digest with the two dropped inputs. No client supplies either. */
+export function matchesPreTierDropHash(stored: string, row: TicketRow): boolean {
+  if (!stored.startsWith('v1:')) return false;
+  const [digest, tier, position] = JSON.parse(stored.slice(3));
+  // The old row builders both inserted tier after tags and appended its position last.
+  const { requires_clause, ...fields } = row;
+  const old: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(fields)) {
+    old[key] = value;
+    if (key === 'tags') {
+      old.tier = tier;
+      old.requires_clause = requires_clause;
+    }
+  }
+  old.tier_position = position;
+  return sha256HexSync(JSON.stringify(old)) === digest;
+}
+
 /** The row's hash: what decides whether an accepted snapshot rewrites it (§7.1). */
 export async function rowHash(row: TicketRow): Promise<string> {
   const bytes = new TextEncoder().encode(JSON.stringify(row));
   const digest = await crypto.subtle.digest('SHA-256', bytes);
-  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
+  return 'v2:' + [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
 // ── §4.6 children (R-BTN-86, R3-1258) ────────────────────────────────────────────────────

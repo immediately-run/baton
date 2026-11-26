@@ -40,11 +40,11 @@ describe('parseRunArgs', () => {
     expect(legacy.session).not.toBe('old');
     expect(legacy.hostname).not.toBe('vm-old');
     // B-86: no --capabilities is null, never a default: the grant's capabilities are declared.
-    expect(a).toMatchObject({ harness: { name: 'opencode' }, home: '/h', url: 'https://b', session: 's', repository: 'docs', hostname: 'vm-x', tier: 'critical', capabilities: null, testHarness: false, verbose: false });
+    expect(a).toMatchObject({ harness: { name: 'opencode' }, home: '/h', url: 'https://b', session: 's', repository: 'docs', hostname: 'vm-x', capabilities: null, testHarness: false, verbose: false });
   });
   it('takes its flags, refusing the unknown and the malformed', () => {
-    const a = parseRunArgs(['--harness', 'claude-code', '--home', '/x', '--url', 'https://u', '--session', 's2', '--repository', 'ops', '--tier', 'routine', '--capabilities', 'a,b', '--beat-every', '5000'], {});
-    expect(a).toMatchObject({ harness: { name: 'claude-code' }, home: '/x', url: 'https://u', session: 's2', repository: 'ops', tier: 'routine', capabilities: ['a', 'b'], beatEvery: 5000 });
+    const a = parseRunArgs(['--harness', 'claude-code', '--home', '/x', '--url', 'https://u', '--session', 's2', '--repository', 'ops', '--capabilities', 'a,b', '--beat-every', '5000'], {});
+    expect(a).toMatchObject({ harness: { name: 'claude-code' }, home: '/x', url: 'https://u', session: 's2', repository: 'ops', capabilities: ['a', 'b'], beatEvery: 5000 });
     expect(() => parseRunArgs(['--nope'], {})).toThrow('not a flag of baton run');
     expect(() => parseRunArgs(['--harness', 'vim'], {})).toThrow('opencode or claude-code');
     expect(() => parseRunArgs(['--beat-every', '10'], {})).toThrow('at least 50 ms');
