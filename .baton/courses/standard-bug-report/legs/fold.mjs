@@ -1,9 +1,8 @@
 // baton-default.ts
 import { execFileSync as execFileSync3, spawn } from "node:child_process";
-import { createHash } from "node:crypto";
-import { mkdtempSync as mkdtempSync2, readFileSync as readFileSync2, readdirSync, rmSync as rmSync3, statSync, writeFileSync as writeFileSync2 } from "node:fs";
-import { homedir, tmpdir as tmpdir2 } from "node:os";
-import { basename, join as join3 } from "node:path";
+import { mkdtempSync as mkdtempSync2, readFileSync as readFileSync2, readdirSync as readdirSync2, rmSync as rmSync3, statSync, writeFileSync as writeFileSync2 } from "node:fs";
+import { tmpdir as tmpdir2 } from "node:os";
+import { join as join4 } from "node:path";
 import { pathToFileURL } from "node:url";
 
 // src/defaults/agent-words.ts
@@ -139,12 +138,124 @@ function readOnlyWorkspace(ctx, instructions, git2, byteLimit) {
 }
 
 // src/runner/harness.ts
+import { createHash } from "node:crypto";
+import { readdirSync } from "node:fs";
+import { homedir } from "node:os";
+import { basename, join as join2 } from "node:path";
+
+// src/shared/sessionUsage.mjs
+function claudeRecords(text, scope = "main") {
+  const byId = /* @__PURE__ */ new Map();
+  for (const line of text.split("\n")) {
+    if (!line.trim()) continue;
+    let e;
+    try {
+      e = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (e.type !== "assistant" || !e.message?.usage) continue;
+    const model = e.message.model;
+    if (!model || model === "<synthetic>") continue;
+    const u = e.message.usage;
+    const id = e.message.id || e.requestId || e.uuid;
+    const cc = u.cache_creation ?? {};
+    const has1h = typeof cc.ephemeral_1h_input_tokens === "number";
+    const w1h = has1h ? cc.ephemeral_1h_input_tokens : 0;
+    const w5m = typeof cc.ephemeral_5m_input_tokens === "number" ? cc.ephemeral_5m_input_tokens : (u.cache_creation_input_tokens ?? 0) - w1h;
+    const rec = {
+      id,
+      at: e.timestamp,
+      model,
+      // An in-file sidechain line is a subagent's call in the older layout.
+      scope: e.isSidechain && scope === "main" ? "sub" : scope,
+      input: u.input_tokens ?? 0,
+      cacheWrite5m: Math.max(0, w5m),
+      cacheWrite1h: w1h,
+      cacheRead: u.cache_read_input_tokens ?? 0,
+      output: u.output_tokens ?? 0
+    };
+    const prev = byId.get(id);
+    if (!prev || rec.output > prev.output) byId.set(id, prev ? { ...rec, at: prev.at } : rec);
+  }
+  return [...byId.values()];
+}
+function opencodeRecords(exported, scope = "main") {
+  const records = [];
+  const children = [];
+  for (const m of exported?.messages ?? []) {
+    const info = m.info ?? m;
+    const isAssistant = info.role === "assistant" || m.type === "assistant";
+    const t = info.tokens;
+    if (isAssistant && t) {
+      const ms = info.time?.completed ?? info.time?.created;
+      const provider = m.model?.providerID ?? info.providerID;
+      const model = m.model?.id ?? info.modelID;
+      records.push({
+        id: info.id,
+        at: typeof ms === "number" ? new Date(ms).toISOString() : null,
+        model: provider ? `${provider}/${model}` : model ?? "unknown",
+        scope,
+        input: t.input ?? 0,
+        // opencode does not say which TTL a write used; Anthropic's default is 5 minutes
+        // and the other providers in use have a single write price.
+        cacheWrite5m: t.cache?.write ?? 0,
+        cacheWrite1h: 0,
+        cacheRead: t.cache?.read ?? 0,
+        output: (t.output ?? 0) + (t.reasoning ?? 0)
+      });
+    }
+    for (const p of m.parts ?? m.content ?? []) {
+      if (p.type !== "tool") continue;
+      if ((p.tool ?? p.name) !== "task") continue;
+      const sid = p.state?.metadata?.sessionId ?? p.state?.metadata?.sessionID;
+      if (!sid) continue;
+      const agent = p.state?.input?.subagent_type ?? p.state?.input?.agent;
+      children.push({ sessionId: sid, scope: agent ? `sub:${agent}` : "sub" });
+    }
+  }
+  return { records, children };
+}
+var LEDGER_RULE = "|" + "---|".repeat(15);
+
+// src/runner/harness.ts
+var activityIO = { createHash, readdirSync, homedir, join: join2 };
 var AGENT_PROMPT = `You are a Baton leg agent. The file named by the BATON_INSTRUCTIONS environment variable holds your instructions for this leg: read them and follow them exactly. The environment names your course (BATON_COURSE), your leg (BATON_LEG), the ticket's file (BATON_TICKET_FILE) and the answer rule for your last line (BATON_ANSWER, when one is set); the arguments after this message are the ticket id, your leg and the repository checkout. Work in the current repository checkout. When BATON_ANSWER is set, a machine parses the LAST line of your output: exactly the value word (optionally followed by one PR URL) and nothing else after it. Your process's exit is the leg's completion, and nothing resumes it: no scheduler, no wake-up, stdin is closed for good. If your leg instructions allow it and only the owner can unblock you, ask through the harness's question tool and wait for the answer in the foreground. That wait is not work pending; if nobody answers, let Baton take the claim back at the leg deadline. Never exit with work pending \u2014 wait for every test, subagent and verification in the foreground before your final line. Do not leave "background jobs" or say you will resume later. When you have met the completion criteria in the leg instructions, exit immediately.`;
 var quotedBriefing = `"${AGENT_PROMPT.replaceAll('"', '\\"')}"`;
-var HARNESS_AGENTS = {
-  opencode: `opencode run --auto --model zai-coding-plan/glm-5.3 ${quotedBriefing}`,
-  "claude-code": `claude -p --permission-mode bypassPermissions --model sonnet ${quotedBriefing}`
-};
+var HARNESS_ADAPTERS = [
+  {
+    name: "opencode",
+    agentCommand: `opencode run --auto --model zai-coding-plan/glm-5.3 ${quotedBriefing}`,
+    activityPaths(checkout, { createHash: createHash2, readdirSync: readdirSync3, homedir: homedir2, join: join5, env }) {
+      const root = join5(env.XDG_DATA_HOME || join5(homedir2(), ".local", "share"), "opencode");
+      const dashed = checkout.split("/").join("-");
+      const paths = [join5(root, "opencode.db"), join5(root, "opencode.db-wal"), join5(root, "opencode.db-shm"), join5(root, "project", dashed)];
+      const snapshots = join5(root, "snapshot");
+      const key = createHash2("sha1").update(checkout).digest("hex");
+      try {
+        for (const instance of readdirSync3(snapshots)) paths.push(join5(snapshots, instance, key));
+      } catch {
+      }
+      return paths;
+    },
+    usage: (transcript, scope) => opencodeRecords(JSON.parse(transcript), scope)
+  },
+  {
+    name: "claude-code",
+    agentCommand: `claude -p --permission-mode bypassPermissions --model sonnet ${quotedBriefing}`,
+    activityPaths: (checkout, { homedir: homedir2, join: join5, env }) => [
+      join5(env.CLAUDE_CONFIG_DIR || join5(homedir2(), ".claude"), "projects", checkout.split("/").join("-"))
+    ],
+    usage: (transcript, scope) => ({ records: claudeRecords(transcript, scope), children: [] })
+  }
+];
+function harnessActivityPaths(checkout, adapters = HARNESS_ADAPTERS) {
+  return adapters.flatMap((adapter) => adapter.activityPaths(checkout, { ...activityIO, env: process.env }));
+}
+function builtinAgentActivityPaths(command, checkout) {
+  const adapter = HARNESS_ADAPTERS.find((entry) => basename(splitWords(entry.agentCommand)[0]) === basename(command));
+  return adapter ? harnessActivityPaths(checkout, [adapter]) : [];
+}
 function readOnlyHarness(words, prompt, readConfig = () => null) {
   const [bin, mode, ...options] = words;
   const opencode = bin === "opencode" && mode === "run";
@@ -491,7 +602,7 @@ var slugOfUrl = (url) => url.replace(/^git@[^:]+:/, "").replace(/^https?:\/\/[^/
 // src/defaults/ticket-state.ts
 import { execFileSync as execFileSync2 } from "node:child_process";
 import { rmSync as rmSync2 } from "node:fs";
-import { join as join2 } from "node:path";
+import { join as join3 } from "node:path";
 
 // src/defaults/tickets-markdown.ts
 function parseFrontmatter(text) {
@@ -561,7 +672,7 @@ function ticketsBranch(checkout, named, run2 = exec) {
 var tmpIndexName = "baton-ticket-index";
 function tmpIndex(checkout, run2 = exec) {
   const rel = run2("git", ["rev-parse", "--git-path", tmpIndexName], checkout).trim();
-  return /^\//.test(rel) ? rel : join2(checkout, rel);
+  return /^\//.test(rel) ? rel : join3(checkout, rel);
 }
 function itemSchemaPath(ticketPath) {
   const dir = ticketPath.split("/").slice(0, -1).join("/");
@@ -741,11 +852,11 @@ var newestWrite = (p, depth = 0) => {
   if (!st.isDirectory() || depth >= 5) return best;
   let names = [];
   try {
-    names = readdirSync(p);
+    names = readdirSync2(p);
   } catch {
     return best;
   }
-  for (let i = 0; i < names.length && i < 512; i++) best = Math.max(best, newestWrite(join3(p, names[i]), depth + 1));
+  for (let i = 0; i < names.length && i < 512; i++) best = Math.max(best, newestWrite(join4(p, names[i]), depth + 1));
   return best;
 };
 var gitRun = (cmd, args, opts = {}) => execFileSync3(cmd, args, { encoding: "utf8", timeout: GIT_BOUND_MS, killSignal: "SIGKILL", env: { ...process.env, ...GIT_ENV }, stdio: ["ignore", "pipe", "pipe"], ...opts });
@@ -764,9 +875,9 @@ async function run(ctx) {
   const readSha = typeof ctx.signed_control?.overrides === "string" && ctx.signed_control.overrides !== "" ? ctx.signed_control.overrides : sha;
   const rel = ".baton/courses/bug-report/legs/fold.run.mjs";
   if (gitRun("git", ["-C", ctx.checkout, "ls-tree", "--name-only", readSha, "--", rel]).trim() === "") return standard(ctx);
-  const dir = mkdtempSync2(join3(tmpdir2(), "baton-override-"));
+  const dir = mkdtempSync2(join4(tmpdir2(), "baton-override-"));
   try {
-    const file = join3(dir, "fold.run.mjs");
+    const file = join4(dir, "fold.run.mjs");
     writeFileSync2(file, gitRun("git", ["-C", ctx.checkout, "show", readSha + ":" + rel], { maxBuffer: 67108864 }));
     const mod = await import(pathToFileURL(file).href);
     if (typeof mod.run !== "function") throw new Error(rel + " exports no run(ctx, standard)");
@@ -814,8 +925,8 @@ async function standard(ctx) {
   );
   const cwd = workspace?.cwd ?? ctx.checkout;
   const argv2 = restricted?.argv ?? ordinaryArgv;
-  const dir = workspace != null || text == null ? null : mkdtempSync2(join3(tmpdir2(), "baton-leg-"));
-  const instructions = workspace?.instructions ?? (dir == null ? "" : join3(dir, "fold.md"));
+  const dir = workspace != null || text == null ? null : mkdtempSync2(join4(tmpdir2(), "baton-leg-"));
+  const instructions = workspace?.instructions ?? (dir == null ? "" : join4(dir, "fold.md"));
   if (dir != null) writeFileSync2(instructions, text);
   if (restricted != null && command === "opencode") {
     try {
@@ -830,26 +941,9 @@ async function standard(ctx) {
   }
   if (process.env.BATON_VERBOSE) process.stderr.write("baton: bug-report/fold ticket " + ctx.ticket.id + ": agent_command: " + agentCommand + (wrapper != null ? "; wrapper: " + wrapper : "") + "; argv: " + argv2.join(" ") + "\n");
   const startedAt = Date.now();
-  const wrapperLog = join3(ctx.checkout, ".baton", "logs", ctx.ticket.id + "-fold.log");
-  const agentBin = basename(command);
-  const storePaths = [];
-  if (agentBin === "opencode" || agentBin === "claude") {
-    const dataHome = process.env.XDG_DATA_HOME && process.env.XDG_DATA_HOME !== "" ? process.env.XDG_DATA_HOME : join3(homedir(), ".local", "share");
-    const dashed = cwd.split("/").join("-");
-    if (agentBin === "opencode") {
-      const root = join3(dataHome, "opencode");
-      storePaths.push(join3(root, "opencode.db"), join3(root, "opencode.db-wal"), join3(root, "opencode.db-shm"), join3(root, "project", dashed));
-      const key = createHash("sha1").update(cwd).digest("hex");
-      let instances = [];
-      try {
-        instances = readdirSync(join3(root, "snapshot"));
-      } catch {
-      }
-      for (const i of instances) storePaths.push(join3(root, "snapshot", i, key));
-    } else {
-      storePaths.push(join3(process.env.CLAUDE_CONFIG_DIR && process.env.CLAUDE_CONFIG_DIR !== "" ? process.env.CLAUDE_CONFIG_DIR : join3(homedir(), ".claude"), "projects", dashed));
-    }
-  }
+  const wrapperLog = join4(ctx.checkout, ".baton", "logs", ctx.ticket.id + "-fold.log");
+  const activity = ctx.agent_activity;
+  const storePaths = typeof activity?.command === "string" && activity.command.trim() === settingsCommand.trim() && Array.isArray(activity.paths) && activity.paths.every((path) => typeof path === "string") ? activity.paths : builtinAgentActivityPaths(command, cwd);
   const lastOutput = (so, se) => (so + "\n" + se).split("\n").map((l) => l.trimEnd()).filter((l) => l.trim() !== "").slice(-20).join("\n  ");
   const received = await new Promise((resolve, reject) => {
     const echo = process.env.BATON_VERBOSE === "1";

@@ -27,7 +27,7 @@ function maskLines(literals: string[], lines: string[]): string {
   return [...lines.map((line) => sink.push(line)), sink.flush()].filter(Boolean).join('\n');
 }
 
-describe('class 7 by name (R-BTN-144)', () => {
+describe('class 7 by name (R-BTN-144; S-BTN-98, redaction slice)', () => {
   it('the five endings and PGPASSWORD, exactly as the environment spells them — case-sensitive', () => {
     expect(SECRET_NAME_SUFFIXES).toEqual(['_KEY', '_TOKEN', '_SECRET', '_PASSWORD', '_PAT']);
     expect(SECRET_NAME_EXACT).toBe('PGPASSWORD');

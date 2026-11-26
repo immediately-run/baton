@@ -14,7 +14,7 @@ import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { courseSchemas, githubFacts, initMain, parseSyncArgs, plainGitRemote, remoteSlug, syncMain, syncWorkflow } from '../../src/defaults/cli';
 import type { Transport } from '../../src/runner/api';
-import { HARNESS_AGENTS, readOnlyHarness, readOnlyVersionSupported } from '../../src/runner/harness';
+import { readOnlyHarness, readOnlyVersionSupported, selectHarness } from '../../src/runner/harness';
 import { validateCourse } from '../../src/core/course';
 import { createHash } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
@@ -730,7 +730,7 @@ describe('baton repo init, through the built CLI', () => {
     const settings = JSON.parse(readFileSync(join(root, '.baton', 'baton.json'), 'utf8'));
     // B-83: a fresh scaffold names a real agent — the opencode command by default, never the
     // bare `echo` stub.
-    expect(settings.agent_command).toBe(HARNESS_AGENTS.opencode);
+    expect(settings.agent_command).toBe(selectHarness('opencode')?.agentCommand);
     // B-84: the command runs with no shell — it names the BATON_* environment the stub sets
     // (nothing expands), carries no redirection, and splits into the argv the stub spawns.
     expect(settings.agent_command).toContain('BATON_INSTRUCTIONS');
@@ -796,7 +796,7 @@ describe('baton repo init, through the built CLI', () => {
     // BATON_* environment (no shell expands it, B-84) — and init prints it for the unfamiliar.
     const def = scaffold();
     try {
-      expect(def.command).toBe(HARNESS_AGENTS.opencode);
+      expect(def.command).toBe(selectHarness('opencode')?.agentCommand);
       expect(def.command).toContain('--model zai-coding-plan/glm-5.3');
       expect(def.command).toContain('BATON_INSTRUCTIONS');
       expect(def.command).not.toMatch(/[<>|]/); // no redirection: the stub closes stdin itself
@@ -806,7 +806,7 @@ describe('baton repo init, through the built CLI', () => {
     }
     const cc = scaffold('--agent', 'claude-code');
     try {
-      expect(cc.command).toBe(HARNESS_AGENTS['claude-code']);
+      expect(cc.command).toBe(selectHarness('claude-code')?.agentCommand);
       expect(cc.command).toContain('--permission-mode bypassPermissions');
       expect(cc.said).toContain(cc.command);
     } finally {
@@ -832,11 +832,11 @@ describe('baton repo init, through the built CLI', () => {
     try {
       const command = (): string => (JSON.parse(readFileSync(join(old.dir, '.baton', 'baton.json'), 'utf8')) as { agent_command: string }).agent_command;
       const replaced = baton(old.dir, 'repo', 'init', '--own', '--pin', PIN);
-      expect(command()).toBe(HARNESS_AGENTS.opencode);
+      expect(command()).toBe(selectHarness('opencode')?.agentCommand);
       expect(replaced).toContain('no-op stub');
-      expect(replaced).toContain(HARNESS_AGENTS.opencode);
+      expect(replaced).toContain(selectHarness('opencode')?.agentCommand);
       baton(old.dir, 'repo', 'init', '--own', '--pin', PIN, '--agent', 'claude-code');
-      expect(command()).toBe(HARNESS_AGENTS['claude-code']);
+      expect(command()).toBe(selectHarness('claude-code')?.agentCommand);
       baton(old.dir, 'repo', 'init', '--own', '--pin', PIN, '--agent-command', 'mine');
       expect(command()).toBe('mine');
       const kept = baton(old.dir, 'repo', 'init', '--own', '--pin', PIN);
@@ -2879,27 +2879,85 @@ describe('course sources and leg overrides (B-33)', () => {
     }
   }, 120_000);
 
-  it('init moves a course’s source to this CLI’s commit, without overwriting any of the repository’s files', () => {
+  it('init moves a course’s source to this CLI’s commit and leaves the course’s files alone: the upgrade arrives through the source (B-139)', () => {
+    // The owner's ruling on #333 (2026-11-26), "hands off": a sourced course comes from its
+    // pinned source, so init rewrites none of its local files — not the course file, not a leg
+    // script, not an instruction. Moving the pin is the carry-over.
     const settingsFile = join(root, '.baton', 'baton.json');
     const stub = join(legs(), 'fix.mjs');
-    const original = readFileSync(stub);
+    const graph = join(legs(), '..', 'course.json');
+    const instructions = ['implement', 'fix'].map((leg) => join(legs(), `${leg}.md`));
+    const override = join(legs(), 'review.run.mjs');
+    const before = [stub, graph, override, ...instructions].map((file) => readFileSync(file, 'utf8'));
     const settings = JSON.parse(readFileSync(settingsFile, 'utf8'));
     const old = `github/${SELF.slug}/${'1'.repeat(40)}/create-pr`;
-    writeFileSync(settingsFile, JSON.stringify({ ...settings, agent_command: 'mine', courses: [{ ...settings.courses[0], source: old, version: 4 }] }, null, 2));
+    writeFileSync(settingsFile, JSON.stringify({ ...settings, agent_command: 'mine', courses: [{ ...settings.courses[0], source: old, version: 1 }] }, null, 2));
     writeFileSync(stub, '// an older release\n');
-    writeFileSync(join(legs(), 'review.run.mjs'), '// ours\nexport async function run(ctx, standard) { return standard(ctx); }\n');
+    const legacy = JSON.parse(before[1]);
+    for (const leg of Object.values(legacy.legs) as Record<string, unknown>[]) {
+      delete leg.max_duration;
+      delete leg.autonomous;
+    }
+    writeFileSync(graph, JSON.stringify(legacy));
+    for (const file of instructions) writeFileSync(file, '<!-- home-owned instructions -->\n');
+    writeFileSync(override, '// ours\nexport async function run(ctx, standard) { return standard(ctx); }\n');
+    const local = () => [stub, graph, override, ...instructions].map((file) => readFileSync(file, 'utf8'));
+    const untouched = local();
     try {
       expect(baton(root, 'repo', 'init', '--pin', PIN)).toContain(`create-pr now from ${SELF.sha.slice(0, 10)}`);
       const moved = JSON.parse(readFileSync(settingsFile, 'utf8'));
-      expect(moved).toMatchObject({ agent_command: 'mine', courses: [{ id: 'create-pr', version: 4, source: sourceOf('create-pr') }] });
-      expect(readFileSync(stub, 'utf8')).toBe('// an older release\n');
-      expect(readFileSync(join(legs(), 'review.run.mjs'), 'utf8')).toContain('// ours');
+      expect(moved).toMatchObject({ agent_command: 'mine', courses: [{ id: 'create-pr', version: 1, source: sourceOf('create-pr') }] });
+      expect(local()).toEqual(untouched);
+
+      // Through the source: the course in force is the source's graph and leg script, with the
+      // home's instructions and run override laid over the source's as overrides.
+      commitAll(root);
+      const shown = baton(root, 'course', 'show', 'create-pr');
+      const parts = shown.split(/^--- (.+) ---\n/m);
+      const blocks = new Map(parts.slice(1).flatMap((part, k, all) => (k % 2 ? [] : [[part, all[k + 1].trimEnd()] as const])));
+      const block = (name: string) => blocks.get(name);
+      expect(JSON.parse(block('course.json')!)).toEqual(CREATE_PR_COURSE);
+      expect(block('legs/fix.mjs')).not.toContain('// an older release');
+      expect(block('legs/fix.mjs')).toContain('.baton/courses/create-pr/legs/fix.run.mjs'); // the current leg script, bundled
+      expect(block('legs/fix.md')).toContain('Ask the owner only when blocked');
+      expect(block('home override: legs/fix.md')).toBe('<!-- home-owned instructions -->');
+      expect(block('home override: legs/review.run.mjs')).toContain('// ours');
+
+      // What the home owns, it carries over itself — its entry's version and its agent's
+      // briefing, taken from a scratch home's defaults — and a home-owned instruction keeps the
+      // source's standard text it wants. init keeps all of it, and still writes none of the course's files.
+      const fresh = mkdtempSync(join(tmpdir(), 'baton-create-pr-v2-'));
+      try {
+        gitInit(fresh);
+        baton(fresh, 'repo', 'init', '--course', 'create-pr');
+        const defaults = JSON.parse(readFileSync(join(fresh, '.baton', 'baton.json'), 'utf8'));
+        moved.courses[0].version = defaults.courses[0].version;
+        moved.agent_command += ` ${defaults.agent_command.slice(defaults.agent_command.indexOf(' "You are a Baton leg agent.'))}`;
+        writeFileSync(settingsFile, JSON.stringify(moved));
+        for (const file of instructions) {
+          // The standard text is the source's, as the course shows it; the home owns its copy.
+          const standard = `${block(`legs/${file.split('/').at(-1)!}`)!}\n`;
+          writeFileSync(file, readFileSync(file, 'utf8') + standard);
+        }
+        const carried = local();
+        baton(root, 'repo', 'init', '--pin', PIN);
+        expect(JSON.parse(readFileSync(settingsFile, 'utf8'))).toMatchObject({
+          agent_command: expect.stringMatching(/^mine .*harness's question tool/),
+          courses: [{ version: defaults.courses[0].version, source: sourceOf('create-pr') }],
+        });
+        expect(local()).toEqual(carried);
+        for (const file of instructions) {
+          expect(readFileSync(file, 'utf8')).toMatch(/^<!-- home-owned instructions -->[\s\S]*Ask the owner only when blocked/);
+        }
+      } finally {
+        rmSync(fresh, { recursive: true, force: true });
+      }
     } finally {
       writeFileSync(settingsFile, `${JSON.stringify(settings, null, 2)}\n`);
-      writeFileSync(stub, original);
+      [stub, graph, override, ...instructions].forEach((file, i) => writeFileSync(file, before[i]));
       commitAll(root);
     }
-  }, 120_000);
+  }, 180_000);
 
   it('the leg script runs the override at the claim’s snapshot, keeping its own close; one only in the working tree is not run; one with no run fails the leg', async () => {
     const agent = join(root, 'agent.sh');

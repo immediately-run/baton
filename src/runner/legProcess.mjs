@@ -17,9 +17,11 @@
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { lstatSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync, writeSync } from 'node:fs';
+import { register } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { legErrorType, raise } from './legClient.mjs';
 
 const [, , call, script] = process.argv;
 const stop = new AbortController();
@@ -145,6 +147,16 @@ try {
   if (!Array.isArray(args)) throw new Error('legProcess: the arguments are not a JSON array');
   const source = ['run', 'close', 'handoff'].includes(call) ? args[0]?.fetched_course : null;
   if (source) verifySource(dirname(dirname(script)), source.blobs);
+  if (call === 'run' || call === 'close' || call === 'handoff') {
+    // Extracted scripts have no node_modules. Bind only Baton's public leg API to this wrapper's
+    // client, without changing how any other import resolves. `register` also works on Node 22.13.
+    const client = new URL('./legClient.mjs', import.meta.url).href;
+    const hook = `export function resolve(name, context, next) {
+      if (name === '@immediately-run/baton/leg') return { url: ${JSON.stringify(client)}, shortCircuit: true };
+      return next(name, context);
+    }`;
+    register(`data:text/javascript,${encodeURIComponent(hook)}`);
+  }
   const mod = await import(pathToFileURL(script).href);
   const holder = mod.default != null && typeof mod.default === 'object' ? mod.default : null;
   // `describe`: what a ticket source declares (§4.2) — its `versions`, and whether it reads.
@@ -159,7 +171,7 @@ try {
     if (args[0]?.reads_only === true && mod.readsOnly !== true) {
       throw new Error('a reads_only leg needs a stub that supports reads_only (R-BTN-183)');
     }
-    args[0] = { ...args[0], signal: stop.signal };
+    args[0] = { ...args[0], signal: stop.signal, raise };
   }
   if (call === 'stations') args[0] = { ...args[0], closed: new Set(args[0].closed), done: new Set(args[0].done) };
   const result = call === 'run' && args[0]?.sourced_course_id
@@ -167,5 +179,5 @@ try {
     : await fn.apply(owner, args);
   finish({ ok: true, result: result === undefined ? null : result }, 0);
 } catch (e) {
-  finish({ ok: false, error: e instanceof Error ? e.message : String(e), aborted: stop.signal.reason === undefined ? null : String(stop.signal.reason) }, stop.signal.reason === undefined ? 4 : 5);
+  finish({ ok: false, error: e instanceof Error ? e.message : String(e), errorType: call === 'run' ? legErrorType(e) : undefined, aborted: stop.signal.reason === undefined ? null : String(stop.signal.reason) }, stop.signal.reason === undefined ? 4 : 5);
 }

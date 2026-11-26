@@ -120,7 +120,7 @@ export function legacyRoutes(source) {
           const rejected = guarded && methodTest(expr, ts.SyntaxKind.ExclamationEqualsEqualsToken, METHOD_SUBJECTS);
           if (rejected) guardMethods.push(rejected);
           const subject = expr.left.getText(file);
-          if (!guarded && op === ts.SyntaxKind.EqualsEqualsEqualsToken && ['p', 'url.pathname', 'rest', 'view'].includes(subject)) {
+          if (!guarded && op === ts.SyntaxKind.EqualsEqualsEqualsToken && ['p', 'path', 'url.pathname', 'rest', 'view'].includes(subject)) {
             paths.push(prefix(subject) + value);
           }
         }
@@ -140,10 +140,34 @@ export function legacyRoutes(source) {
         ts.forEachChild(n, (child) => { visit(child, method); });
       }
     }
-    visit(node.body);
+    // B-272: a routes/ function may open with `if (!p.startsWith(…) || req.method !== 'POST')
+    // return null`; the statements after it serve that one method.
+    let method;
+    for (const statement of node.body.statements) {
+      if (ts.isIfStatement(statement) && ts.isReturnStatement(statement.thenStatement)
+          && statement.thenStatement.expression?.kind === ts.SyntaxKind.NullKeyword) {
+        const expr = unwrap(statement.expression);
+        if (ts.isBinaryExpression(expr) && expr.operatorToken.kind === ts.SyntaxKind.BarBarToken) {
+          const rejected = methodTest(unwrap(expr.right), ts.SyntaxKind.ExclamationEqualsEqualsToken, METHOD_SUBJECTS);
+          if (rejected && !ts.isIdentifier(unwrap(expr.left).operand ?? expr.left)) { method = [rejected]; continue; }
+          // …or with `if (req.method !== 'POST' || url.pathname !== '/v1/…') return null`: one route.
+          const left = methodTest(unwrap(expr.left), ts.SyntaxKind.ExclamationEqualsEqualsToken, METHOD_SUBJECTS);
+          const right = unwrap(expr.right);
+          if (left && ts.isBinaryExpression(right) && right.operatorToken.kind === ts.SyntaxKind.ExclamationEqualsEqualsToken
+              && ts.isStringLiteral(right.right) && right.right.text.startsWith('/v1/') && ['p', 'url.pathname', 'path'].includes(right.left.getText(file))) {
+            routes.add(routeKey(left, right.right.text));
+            method = [left];
+            continue;
+          }
+        }
+      }
+      visit(statement, method);
+    }
   }
   function walk(node) {
-    if (ts.isMethodDeclaration(node) && node.body && ROUTERS.has(node.name.getText(file))) router(node);
+    // B-272: the dispatchers are functions in src/core/routes/, beside any left as methods.
+    const name = (ts.isMethodDeclaration(node) || ts.isFunctionDeclaration(node)) && node.body ? node.name?.getText(file) : null;
+    if (name && (ROUTERS.has(name) || ts.isFunctionDeclaration(node) && /Route$/.test(name))) router(node);
     else ts.forEachChild(node, walk);
   }
   walk(file);

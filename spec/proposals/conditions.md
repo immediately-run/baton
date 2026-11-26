@@ -12,17 +12,13 @@ writes are written through the ticket source (§12.8).
 
 ## 1. Raising: what joins R-BTN-160
 
-- A leg script raises with `ctx.raise(type, {subject, body?, restarts?, default?, wait_s?,
-  severity?})` from `@immediately-run/baton/leg` (R-BTN-133); a session's `baton leg raise` takes
-  `--wait <s>`.
-- `LegError(type, message)` raises an `interrupt` type. A `LegError` naming a `prerequisite` ends
+- `ctx.raise` takes `wait_s?`; a session's `baton leg raise` takes `--wait <s>`.
+- A `LegError` naming a `prerequisite` ends
   the claim `released:blocked` (R-BTN-126).
 - The standard courses declare `error.no-answer` (`interrupt`, `retryable: false`).
 - The raise's report carries `handler?`, and Baton answers a bound raise with the handler's id,
   `handler_id`; the runner then writes the handler ticket under that id. The report's `url` is
   sent only for an unbound `suspend`.
-- The runner checks that a raise's `restarts` are the declared ones or a subset of them (a standard
-  type with none declared takes the raise's own).
 - A settlement costs one write (§2's write budget).
 - Dispositions, bound and unbound:
 
