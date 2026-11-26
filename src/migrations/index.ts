@@ -1,3 +1,5 @@
+import { DROP_TIERS_MIGRATION } from '../core/deprecated';
+import dropTiers from './0142_drop_tiers.sql';
 // The numbered schema migrations, applied in order before the object serves (BATON_SPEC §3).
 // A migration is never edited once merged: a change is a new file and a new entry here.
 import backfillPostedHead from './0084_backfill_posted_head.sql';
@@ -52,7 +54,7 @@ import conditions from './0048_conditions.sql';
 import coreConditions from './0075_core_conditions.sql';
 import retireReviewerSettings from './0076_retire_reviewer_settings.sql';
 import legTimeoutFence from './0082_leg_timeout_fence.sql';
-import courseSourceResolutions from './0142_course_source_resolutions.sql';
+import courseSourceResolutions from './0143_course_source_resolutions.sql';
 import eventLookups from './0049_event_lookups.sql';
 import alarmIndexes from './0052_alarm_indexes.sql';
 import retention from './0053_retention.sql';
@@ -248,7 +250,6 @@ export const MIGRATIONS: Migration[] = [
   { id: 85, sql: conditionRecords },
   { id: 100, sql: legContracts },
   { id: 101, sql: pinnedContracts },
-  { id: 142, sql: courseSourceResolutions },
   { id: 141, sql: harnessNames },
   { id: 104, sql: syncLimits },
   { id: 102, sql: ticketPrerequisites },
@@ -260,4 +261,6 @@ export const MIGRATIONS: Migration[] = [
   { id: 125, sql: readyRequirements },
   { id: 126, sql: readyLegBlocks },
   { id: 123, sql: leaseRecovery },
+  { id: DROP_TIERS_MIGRATION, sql: dropTiers },
+  { id: 143, sql: courseSourceResolutions },
 ];

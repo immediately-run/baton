@@ -69,7 +69,6 @@ export type RunnerRow = {
   harness: string;
   kind: string;
   isolation: string;
-  tier_ceilings: Record<string, string>;
   /** The runner's own statement (R-BTN-174): each capability with the name it declared it by. */
   capabilities: { capability: string; declared: string }[];
   /** The grant's capabilities on this repository; null for a key no grant binds. */
@@ -90,7 +89,7 @@ export type RunnerRow = {
 };
 
 type Raw = {
-  id: number; hostname: string; session_name: string; harness: string; kind: string; isolation: string; tier_ceilings: string; lease_timeout_ms: number;
+  id: number; hostname: string; session_name: string; harness: string; kind: string; isolation: string; lease_timeout_ms: number;
   last_seen_at: number; last_activity_at: number | null; reaped_at: number | null; profile_json: string | null;
   credential_kind: string; created_by: string | null; granted: string | null; role: string | null; trust_domain: string | null;
 };
@@ -114,7 +113,7 @@ function grouped<T extends { runner_id: number }>(rows: T[]): Map<number, T[]> {
  *  name); `only` narrows it to one runner. */
 function rawRows(cx: ReadCtx, repo: string, only: number | null): Raw[] {
   return cx.sql<Raw>(
-    `SELECT w.id, w.hostname, w.session_name, w.harness, w.kind, w.isolation, w.tier_ceilings, w.lease_timeout_ms,
+    `SELECT w.id, w.hostname, w.session_name, w.harness, w.kind, w.isolation, w.lease_timeout_ms,
             w.last_seen_at, w.last_activity_at, w.reaped_at, w.profile_json,
             k.kind AS credential_kind, k.created_by, g.capabilities AS granted, g.role, g.trust_domain
      FROM runners w JOIN credentials k ON k.id = w.credential_id
@@ -217,7 +216,6 @@ export function runnerRows(cx: ReadCtx, repo: string, sessionLink: SessionLinkVi
       alive: isLive(w, now),
       last_seen_at: w.last_seen_at, last_activity_at: w.last_activity_at, reaped_at: w.reaped_at,
       harness: w.harness, kind: w.kind, isolation: w.isolation,
-      tier_ceilings: parsed<Record<string, string>>(w.tier_ceilings, {}),
       capabilities: (capabilities.get(w.id) ?? []).map(({ capability, declared }) => ({ capability, declared })),
       granted: w.granted == null ? null : parsed<string[]>(w.granted, []),
       tags: (tags.get(w.id) ?? []).map((x) => x.tag),

@@ -17,7 +17,7 @@ const claimsOf = (repository: string, workflow: string, branch = 'trunk') =>
 describe('checkRegistration', () => {
   it('fills the defaults and keeps what it was given', () => {
     expect(checkRegistration(OPS)).toEqual({
-      ...OPS, mirror_workflow: null, weight: 100, tiers: ['routine', 'judgement', 'critical'], transcript_repos: [], cut_over: false,
+      ...OPS, mirror_workflow: null, weight: 100, transcript_repos: [], cut_over: false,
       // R-BTN-92/93 (R3-1262): a GitHub repository's forge fields and CI identity default from its path.
       forge: 'github', remote: 'https://github.com/immediately-run/ops.git', web_base: 'https://github.com/immediately-run/ops',
       ci_identity: { kind: 'github-actions' }, sync_keys: [], dispatch: { kind: 'github-app' },
@@ -32,8 +32,6 @@ describe('checkRegistration', () => {
     ['a workflow outside .github/workflows', { sync_workflow: 'sync.yml' }],
     ['a negative weight', { weight: -1 }],
     ['a fractional weight', { weight: 1.5 }],
-    ['repeated tiers', { tiers: ['a', 'a'] }],
-    ['no tiers', { tiers: [] }],
     ['a transcript repository that is not owner/name', { transcript_repos: ['x'] }],
     ['a cut_over that is not boolean', { cut_over: 'yes' }],
   ])('refuses %s', (_what, over) => {

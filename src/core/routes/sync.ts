@@ -2,7 +2,7 @@ import type { BatonCore } from '../baton';
 import { BatonError, json, readJson } from '../http';
 import { parseSshKey, type SyncCredential } from '../auth';
 import { head, outsideWorkRecord, ticketVersions } from '../sync';
-import { checkPayload, retiredBoardFields, type BoardPayload } from '../board';
+import { checkPayload, retiredBoardFields, stripBoardTier, type BoardPayload } from '../board';
 import { checkDependenciesRead } from '../validate';
 import { resolveDependencies } from '../dependencies';
 import { codeReposOf, pushersOf } from '../codeRepos';
@@ -62,7 +62,7 @@ export async function syncRoute(core: SyncCore, req: Request, url: URL, principa
       return json({ ...observation, ...(request?.outside_work === true ? outsideWorkRecord(core, repo, observation.sha) : {}), bars: core.admin.bars([repo], core.now(), true).map(({ repository_id: _r, ...b }) => b), code_repos: codeReposOf(core.store, repo), pushers: pushersOf(core.store, repo), ...core.claims.syncRecord(repo), versions: ticketVersions(core, repo), signing_keys: await core.admin.signingKeys(repo), require_signed_control: !!core.sql<{ flag: number }>('SELECT require_signed_control AS flag FROM repositories WHERE id = ?', repo)[0]?.flag });
     }
     if (req.method === 'POST' && url.pathname === '/v1/sync/board') {
-      const { repo, req: signed, issuer } = await principal('sync');
+      const { repo, req: signed, issuer, actor } = await principal('sync');
       const release = (body: unknown) => {
         const n = (body as { observation?: unknown } | null)?.observation;
         if (Number.isSafeInteger(n)) core.observations.release(repo.id, n as number, issuer);
@@ -85,6 +85,7 @@ export async function syncRoute(core: SyncCore, req: Request, url: URL, principa
       try {
         // The posting repository's id reads a self-qualified `depends_on` entry as the local
         // id alone in the one-board cycle graph (§3.1, B-113 round 1).
+        if (stripBoardTier(body)) core.deprecated.tierFields(core.now(), actor, ['ticket.tier'], 'board', repo.id);
         p = checkPayload(body, repo.id);
       } catch (e) {
         // A refused post uses its number too (R-BTN-62), malformed or not, so the sync's
@@ -135,7 +136,7 @@ export async function syncRoute(core: SyncCore, req: Request, url: URL, principa
  *  (signed; its signature, clock and nonce checked here, as every key's are), or a CI identity
  *  token the front verified (GitHub Actions OIDC, GitLab CI `id_tokens`). Anything else is
  *  refused. Returns the request with a signed body put back. */
-async function verifySync(core: SyncCore, req: Request, role?: 'sync' | 'mirror'): Promise<{ repo: Repository; req: Request; role: 'sync' | 'mirror'; issuer: string }> {
+async function verifySync(core: SyncCore, req: Request, role?: 'sync' | 'mirror'): Promise<{ repo: Repository; req: Request; role: 'sync' | 'mirror'; issuer: string; actor: string }> {
   if (req.headers.has('X-Baton-Signed')) {
     // Every key Baton knows verifies here, so a key in another role is told `forbidden`, not
     // `unauthenticated` — an administrator's included (round 1, 1-A-9).
@@ -157,7 +158,7 @@ async function verifySync(core: SyncCore, req: Request, role?: 'sync' | 'mirror'
     if (role && key.role !== role) throw new BatonError('forbidden', `this sync key serves its repository's ${key.role}, not its ${role}`);
     const repo = liveRepoParam(core.registry, key.repository);
     if (key.role === 'sync') requireBoardInput(core, repo.id, 'sync-key');
-    return { repo, req: signed, role: key.role, issuer: cred };
+    return { repo, req: signed, role: key.role, issuer: cred, actor: `sync:${cred}` };
   }
   const raw = req.headers.get('X-Baton-Sync');
   if (!raw) throw new BatonError('unauthenticated', 'no sync principal');
@@ -169,7 +170,7 @@ async function verifySync(core: SyncCore, req: Request, role?: 'sync' | 'mirror'
   } else if (role) bound = { repo: core.registry.forSync(claims, role), role };
   else bound = core.registry.bindGithubSync(claims);
   if (bound.role === 'sync') requireBoardInput(core, bound.repo.id, 'ci-identity');
-  return { ...bound, req, issuer: `ci:${bound.repo.id}` };
+  return { ...bound, req, issuer: `ci:${bound.repo.id}`, actor: `sync:${bound.repo.id}` };
 }
 
 function requireBoardInput(core: SyncCore, repo: string, input: 'sync-key' | 'ci-identity') {

@@ -50,8 +50,8 @@ describe('S-BTN-306 the cutover’s retired routes (B-203)', () => {
 
   it('the registry and the capacities are the reads’ for every caller; their writes keep the administrator’s route', async () => {
     const registry = await readAs(f.admin, '/v1/admin/repositories');
-    // `tiers` and `sync_keys` are the read's own (B-202): the older branch never served them.
-    expect([registry.status, registry.json.repositories.every((r: Record<string, unknown>) => Array.isArray(r.tiers) && Array.isArray(r.sync_keys))]).toEqual([200, true]);
+    // `sync_keys` is the read's own (B-202): the older branch never served them.
+    expect([registry.status, registry.json.repositories.every((r: Record<string, unknown>) => Array.isArray(r.sync_keys))]).toEqual([200, true]);
     expect((await keyCall(f.admin, '/v1/admin/capacities', { capability: 'key:anthropic', capacity: 2 }, 'PUT')).status).toBe(200);
     const capacities = await readAs(f.admin, '/v1/admin/capacities');
     expect([capacities.status, capacities.json.capacities.map((c: Record<string, unknown>) => [c.capability, c.held, c.holders])]).toEqual([200, [['key:anthropic', 0, []]]]);

@@ -162,24 +162,19 @@ touch credentials or the policy (R-BTN-186, R-BTN-130). No delegated key can be 
 MCP is [proposed, not built](../../spec/proposals/people-and-dashboard.md).
 
 **Policy, preset, guarantee, floor.** A repository's policy is the one versioned document of
-every rule about authority and trust — who lands on which refs, who approves what, whose
+every rule about authority and trust — who lands what, who approves what, whose
 attestations count — held in Baton, never in git. A preset (`cooperative`, `protected`,
 `protected-hardware`) is a set of values an owner applies and then tunes. A guarantee is a named
 condition over the policy; `floors` is the knob listing the guarantees Baton refuses to let any
 change break (§12.8). Baton's own server is trusted: a compromised Baton is recovered, not
 resisted, so nothing is signed for a verifier outside it.
 
-**Role, domain.** What a grant says about its runner's trust: its role (`runner`, or
-`trusted-runner` for the legs marked `trusted`) and its domain, a label whose meaning is the
-deployment's, both set by the policy's `approvers.roles` approver. Two reviews count as independent when
-their domains differ. Baton compares the labels and verifies nothing about them (R-BTN-180).
-
 **Run id.** The opaque id Baton mints for every leg run at its start (`r_` and a ULID), carried
 by the history, the resume record and leg logs (R-BTN-63).
 
 **Pusher.** A forge author whose words count — a verdict, a marker, an approval — because the
 forge reports they can push the PR's base, or the owners list them in `pushers`. The one sense in
-which a forge author is trusted; "trusted" otherwise names the runner role (R-BTN-139).
+which a forge author is trusted; "trusted" otherwise names a leg property and the runner that runs such a leg (R-BTN-139, R-BTN-182).
 
 **Attestation, reading.** Everything Baton is told about the world: a typed statement it records —
 a review, a check run, a human's approval or answer, a runner's report of where its leg reached,
@@ -194,7 +189,7 @@ command may carry an attestation: an advance moves the lease and reports where t
 
 **Outbox, deliverer** ([proposed, not built](../../spec/proposals/conditions.md)). Every git write, check run and ticket-store write Baton intends — a
 ticket's withdrawal, a merge check, the status a ticket store shows — is an outbox entry; a deliverer, a runner whose host holds the credential the effect
-needs and whose grant role the policy admits, delivers it, and Baton confirms it by reading it
+needs, delivers it, and Baton confirms it by reading it
 back. Baton itself holds no credential that writes git, posts a check or writes a ticket store; a workflow dispatch is
 its own call, made with the App key it holds (R-BTN-94, R-BTN-171).
 
@@ -202,9 +197,10 @@ its own call, made with the App key it holds (R-BTN-94, R-BTN-171).
 read. The fourth noun: Baton **learns** through attestations, **is asked** through commands,
 **acts** through deliverers and its own dispatches, and **answers** in replies.
 
-**Trusted runner.** A runner that claims only legs marked `trusted`, runs no repository code, and
-acts on attestations alone; the merge runner is the first
-([proposed, not built](../../spec/proposals/security.md)).
+**Trusted runner.** A runner whose host holds the credential a leg marked `trusted` needs and
+whose grant names that leg's capability; the merge runner is the first
+([proposed, not built](../../spec/proposals/security.md)). Runners are trusted and legs are not
+([BATON_SPEC §12.8](../../spec/BATON_SPEC/12-security.md#sec-12-8)).
 
 **Protected path.** A path whose changes a trusted runner never merges alone: a computed floor
 (`.baton/`, workflows, agent configuration, tickets) plus the owners' own; control paths land

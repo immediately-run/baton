@@ -176,8 +176,7 @@ export async function signedCall(name: string, path: string, o: Omit<SignOptions
 export function hbBody(cred: keyof typeof TOKENS, over: Record<string, unknown> = {}) {
   return {
     hostname: HOSTS[cred], session_name: `s-${cred}`, harness: 'opencode', kind: 'vm', model_id: 'zai-coding-plan/glm-5.3',
-    capabilities: ['agent-venue'],
-    tier_ceiling: 'critical', lease_timeout_s: 900, courses: [{ repository: 'docs', course: 'roadmap-pr', version: 3 }], ...over,
+    capabilities: ['agent-venue'], lease_timeout_s: 900, courses: [{ repository: 'docs', course: 'roadmap-pr', version: 3 }], ...over,
   };
 }
 
@@ -276,7 +275,7 @@ export function armedAt() {
 
 /** A ticket of §7.1's normative post. */
 export function ticket(id: string, over: Record<string, unknown> = {}) {
-  return { id, course_id: 'roadmap-pr', path: `content/roadmap/${id}.mdx`, title: `${id} — a fixture ticket`, tier: 'routine', requires: [],
+  return { id, course_id: 'roadmap-pr', path: `content/roadmap/${id}.mdx`, title: `${id} — a fixture ticket`, requires: [],
     operator_only: false, expedite: false, depends_on: [], blocked_by: [], repos: ['immediately-run/docs'], rank: 0, ...over };
 }
 
@@ -597,7 +596,7 @@ export function seedRunnerCourse(fields: RunnerCourseSeed): Promise<void> {
 }
 
 type RunnerGrantSeed = {
-  credential_id: string; repository_id: string; capabilities: string; max_tier?: string | null;
+  credential_id: string; repository_id: string; capabilities: string;
   max_claims?: number; granted_by: string; granted_at: number;
 };
 export function seedRunnerGrant(fields: RunnerGrantSeed): Promise<void> {
@@ -606,7 +605,7 @@ export function seedRunnerGrant(fields: RunnerGrantSeed): Promise<void> {
 
 type RunnerSeed = {
   hostname: string; session_name: string; secret_hash: string; credential_id: string; harness: string;
-  kind: string; tier_ceiling: string; lease_timeout_ms: number; settings_hash: string; first_seen_at: number;
+  kind: string; lease_timeout_ms: number; settings_hash: string; first_seen_at: number;
   last_seen_at: number;
 };
 export function seedRunner(fields: RunnerSeed): Promise<void> {
@@ -925,8 +924,8 @@ export function grantRunnerConcurrency(runner: number, maxClaims: number) {
     const caps = store.exec<{ capability: string }>('SELECT capability FROM runner_capabilities WHERE runner_id = ?', runner).toArray();
     const owner = 'owner:owner@example.com';
     store.exec('UPDATE credentials SET created_by = ? WHERE id = ?', owner, credential_id).toArray();
-    store.exec(`INSERT INTO runner_grants (credential_id, repository_id, capabilities, max_tier, max_claims, granted_by, granted_at)
-                VALUES (?, 'docs', ?, NULL, ?, ?, 0)
+    store.exec(`INSERT INTO runner_grants (credential_id, repository_id, capabilities, max_claims, granted_by, granted_at)
+                VALUES (?, 'docs', ?, ?, ?, 0)
                 ON CONFLICT (credential_id, repository_id) DO UPDATE SET max_claims = excluded.max_claims`,
       credential_id, JSON.stringify(caps.map((c) => c.capability)), maxClaims, owner).toArray();
   }));
@@ -947,6 +946,12 @@ export function seedLegacyReviewerSql(sql: SqlExec): void {
 }
 export function seedSettingsSql(sql: SqlExec, entries: [string, string][]): void {
   for (const [key, value] of entries) sql.exec('INSERT INTO baton_settings (key, value) VALUES (?, ?)', key, value);
+}
+/** Align a migration's recorded time with a scenario's simulated clock. */
+export function setMigrationAppliedAt(id: number, at: number): Promise<void> {
+  return withCore(({ store }) => {
+    store.exec('UPDATE _baton_migrations SET applied_at = ? WHERE id = ?', at, id).toArray();
+  });
 }
 /** Migration tests (B-239): an administrator-made key's runner holding `capabilities`. */
 export function seedAdminRunnerSql(sql: SqlExec, credential: string, runner: number, capabilities: string[]): void {

@@ -1,7 +1,6 @@
 // views.ts — the dashboard and terminal read models, shared by their entity reads.
 import type { BatonCore } from './baton';
 import { headOf } from './sync';
-import { fitsTier, TIERS } from '../shared/vocabulary.mjs';
 import { fileUrl, hiddenSessionLink } from './links';
 import { briefMark, writtenBy } from './provenance';
 import type { Repository } from './registry';
@@ -58,7 +57,7 @@ export function adminView(core: Pick<BatonCore, 'registry' | 'sql' | 'courses' |
  *  grants on it, and its owners' settings — the dashboard's state's own reads, for its owners. */
 export function grantsView(core: Pick<BatonCore, 'admin' | 'now'>, repo: string) {
   // The same four sections `stateView().limits` serves, over one repository: owners, grants
-  // (their max_tier as its name in the repository's ladder), settings and the bars in force.
+  // settings and the bars in force.
   const limits = core.admin.view(core.now());
   return {
     repository: repo,
@@ -68,7 +67,7 @@ export function grantsView(core: Pick<BatonCore, 'admin' | 'now'>, repo: string)
     // (`other_repositories`, revoked grants excluded).
     grants: limits.grants.filter((g) => g.repository_id === repo).map((g) => ({
       credential_id: g.credential_id, hostname: g.hostname, label: g.label, repository_id: g.repository_id,
-      capabilities: g.capabilities, max_tier: g.max_tier, max_claims: g.max_claims, granted_by: g.granted_by, granted_at: g.granted_at,
+      capabilities: g.capabilities, max_claims: g.max_claims, granted_by: g.granted_by, granted_at: g.granted_at,
       deliver_interactions: g.deliver_interactions,
       other_repositories: limits.grants.filter((o) => o.credential_id === g.credential_id && o.repository_id !== repo).map((o) => o.repository_id).sort(),
     })),
@@ -80,7 +79,7 @@ export function grantsView(core: Pick<BatonCore, 'admin' | 'now'>, repo: string)
 }
 
 /** `GET /v1/repositories/{repository}/board` (B-90): the dashboard's view of one repository —
- *  the repository as the state lists it, its `ready` tickets and the per-tier order,
+ *  the repository as the state lists it, its `ready` tickets,
  *  derived by the same `readyRows` it derives them with, for one repository — and one field the
  *  dashboard does not have. `granted_capabilities` is the key's grant's capabilities — the
  *  heartbeat answer's field — so a granted runner knows its grant from the read alone; null
@@ -94,7 +93,6 @@ export function boardView(core: Pick<BatonCore, 'now' | 'registry' | 'sql' | 'co
   return {
     repository,
     ready,
-    ready_by_tier: readyByTier(core, ready, [repo]),
     holders: core.claims.holdersOf(repo, sessionLink),
     granted_capabilities: granted,
     server_time: now,
@@ -107,7 +105,7 @@ export function boardView(core: Pick<BatonCore, 'now' | 'registry' | 'sql' | 'co
 function readyRows(core: Pick<BatonCore, 'sql'>, repositories: ReturnType<typeof uiRepo>[], repository_id?: string) {
   const byId = new Map(repositories.map((r) => [r.id, r]));
   const items = core.sql<Record<string, SqlValue>>(
-    `SELECT t.id, t.repository_id, t.local_id, t.path, t.title, t.project, t.status, t.node, t.queue, t.tags, t.tier, t.requires_clause, t.operator_only, t.ord, t.rank,
+    `SELECT t.id, t.repository_id, t.local_id, t.path, t.title, t.project, t.status, t.node, t.queue, t.tags, t.requires_clause, t.operator_only, t.ord, t.rank,
             t.expedite, t.snapshot_sha, t.last_written_by, t.brief, s.station, s.next_leg, s.to_end
      FROM tickets t JOIN repositories p ON p.id = t.repository_id
      JOIN ticket_stations s ON s.ticket_id = t.id
@@ -125,8 +123,7 @@ function readyRows(core: Pick<BatonCore, 'sql'>, repositories: ReturnType<typeof
     title: r.title,
     url: ((w) => fileUrl(w.forge, w.web_base, w.default_branch, r.path as string))(byId.get(r.repository_id as string)!),
     project: r.project,
-    tier: r.tier,
-    // The commit that last changed the ticket's row — a re-tier shows beside it (S-BTN-39).
+    // The commit that last changed the ticket's row.
     changed_in: r.snapshot_sha,
     // B-126 (R-BTN-194): the pusher of the commit that last changed the ticket's file, and
     // B-127's brief mark (signed, and by whom), so a privileged session can see whose words
@@ -146,19 +143,6 @@ function readyRows(core: Pick<BatonCore, 'sql'>, repositories: ReturnType<typeof
   }));
 }
 
-/** Per tier ceiling, the order a runner under it would be offered (§13 step 1's exit). Each
- *  tier name of any ladder, lowest first; a ticket appears under the names of its own
- *  repository's ladder that it fits (R-BTN-66). Derived from the `ready` rows given, so the
- *  board's tier order is its own repository's and never a filtering of another's (B-90). */
-function readyByTier(core: Pick<BatonCore, 'registry'>, ready: { id: unknown; repository_id: unknown; tier: unknown }[], only?: string[]) {
-  const ladders = new Map(core.registry.all().filter((x) => !only || only.includes(x.id)).map((x) => [x.id, x.tiers]));
-  const names = [...new Set([...ladders.values()].flat())];
-  return Object.fromEntries(names.map((t) => [t, ready.filter((r) => {
-    const ladder = ladders.get(r.repository_id as string) ?? [...TIERS];
-    return ladder.includes(t) && fitsTier((r.tier as string | null) ?? null, t, ladder);
-  }).map((r) => r.id)]));
-}
-
 /** `GET /v1/admin/state` (R-BTN-57, R-BTN-179; B-118, B-216's Decision 4a): the state in one
  *  request for a terminal, an administrator's key's alone — built by the functions the entity
  *  reads use (`readyRows`, `claims.running`, `runners.runnersView`, `history.view`, the
@@ -172,7 +156,6 @@ export function stateView(core: StateViewCore) {
   // Each registered repository: its own head and its own mode (R-BTN-47, R-BTN-28).
   const repositories = adminView(core).repositories;
   const ready = readyRows(core, repositories);
-  const byTier = readyByTier(core, ready);
   // The Runners view, read once for both the rows it serves and Needs you's stale clients
   // (R-BTN-197, B-254) — one read, B-240's statement budget kept.
   const runners = core.runners.runnersView(now);
@@ -184,7 +167,7 @@ export function stateView(core: StateViewCore) {
   // gone; an unavailable provider is a reading (§6.3, R-BTN-76) and a peak preference a rule
   // in the course (§6.10), never a dashboard row.
   return {
-    server_time: now, repositories, ready, ready_by_tier: byTier, held, runners,
+    server_time: now, repositories, ready, held, runners,
     running: core.claims.running(now), timeline: core.claims.timeline(now),
     // R-BTN-66: owners, grants, owner bars and settings — read-only; the CLI changes them.
     limits: core.admin.view(now),

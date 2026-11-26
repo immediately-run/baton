@@ -1,12 +1,12 @@
 // sync.ts — accepting a repository's board post and reading its sync record.
 import type { BatonCore } from './baton';
 import type { Dispatch, DispatchTarget, ForgeDispatch, Workflow } from './ports';
-import { DEFAULT_COURSE, resolveParents, rowFor, rowForTicket, rowHash, stationOf, type BoardPayload, type PostedStation, type TicketRow } from './board';
+import { DEFAULT_COURSE, matchesPreTierDropHash, resolveParents, rowFor, rowForTicket, rowHash, stationOf, type BoardPayload, type PostedStation, type TicketRow } from './board';
 import { BatonError } from './http';
 import { nonScheduling, schedulingVersion } from './stateVersion';
 import { checkConfirmations } from './validate';
 import { checkCrossBoardCycle, checkCrossRepository } from './dependencies';
-import { qualify, tierPosition, type Repository } from './registry';
+import { qualify, type Repository } from './registry';
 import { canonicalJson, sha256HexSync } from './policy';
 import { logEvent } from './db';
 import { DispatchTransportError } from './dispatch';
@@ -167,7 +167,7 @@ async function boardPost(core: BoardPostCore, repo: Repository, p: BoardPayload,
     // source's versions are blob ids, so no version changes without a new commit and its
     // refreshes still write no ticket row.
     const readAtHead = normative && p.read_sha === p.sha;
-    const refreshed = readAtHead ? await hashRows(repo, p) : null;
+    const refreshed = readAtHead ? await hashRows(p) : null;
     return core.store.transaction(() => {
       // The row hashes were awaited after the number was used, so another run may have posted
       // meanwhile (round 1, finding 2): this reading must still be the newest, over the head it
@@ -220,7 +220,7 @@ async function boardPost(core: BoardPostCore, repo: Repository, p: BoardPayload,
   if (!accepted && p.parent_sha !== head) throw new BatonError('head-moved', `the head is ${head ?? 'unset'}; re-read it and retry`);
 
   // Hash every row before the transaction: the digest is async, the transaction is not.
-  const rows = await hashRows(repo, p);
+  const rows = await hashRows(p);
   const changed: { upserted: number; deleted: number; renumbered?: { from: string; to: string; key: string }[]; confirmed?: number; stale_released?: number; courses_refused?: string[]; dropped?: string[] } = { upserted: 0, deleted: 0 };
   core.store.transaction(() => {
     // The row hashes were awaited after the number was used, so another run may have posted
@@ -391,14 +391,12 @@ function notePositionDisagreements(core: Pick<BatonCore, 'sql' | 'history'>, r: 
  *  rewrites its row (B-183). The interim post's items (docs until R3-1233) become rows the
  *  same way; only a refresh skips materialization for them (§4.3: the interim post carries no
  *  versions, and its refreshes change no ticket). */
-export async function rowsFor(repo: Repository, p: BoardPayload): Promise<{ row: TicketRow; hash: string }[]> {
+export async function rowsFor(p: BoardPayload): Promise<{ row: TicketRow; hash: string }[]> {
   const rankOf = new Map((p.ready ?? []).map((id, i) => [id, i]));
   const posted = p.tickets !== undefined
     ? p.tickets.map(rowForTicket)
     : p.state!.items.map((it) => rowFor(it, rankOf));
-  return await Promise.all(posted.map(async (base) => {
-    // R-BTN-66: tiers arrive by name and are matched as positions in this repository's ladder.
-    const row = { ...base, tier_position: tierPosition(repo.tiers, base.tier ?? null) };
+  return await Promise.all(posted.map(async (row) => {
     return { row, hash: await rowHash(row) };
   }));
 }
@@ -447,29 +445,35 @@ function materialize(core: Pick<BatonCore, 'store' | 'sql' | 'claims' | 'history
     const before = have.get(row.id);
     have.delete(row.id);
     const parent = parents.parentOf.get(row.id)?.qualified ?? null;
+    const id = qualify(r, row.id);
     if (before?.row_hash === hash) {
       // The row is unchanged as posted; its stored parent may still move — the same raw value
       // resolves differently against a board that changed around it (an orphan's parent
       // posted, a cycle closed by other tickets).
-      if (before?.parent !== parent) core.store.exec('UPDATE tickets SET parent = ? WHERE id = ?', parent, qualify(r, row.id));
+      if (before.parent !== parent) core.store.exec('UPDATE tickets SET parent = ? WHERE id = ?', parent, id);
       continue;
     }
-    const id = qualify(r, row.id);
+    // B-322 / S-BTN-220: an unchanged posted row only needs its hash upgraded and its
+    // derived parent refreshed. Neither is a new source edit or changes attribution.
+    if (before && matchesPreTierDropHash(before.row_hash, row)) {
+      core.store.exec('UPDATE tickets SET row_hash = ?, parent = ? WHERE id = ?', hash, parent, id);
+      continue;
+    }
     core.store.exec(
-      `INSERT INTO tickets (id, repository_id, local_id, path, title, project, status, node, queue, tags, tier, requires_clause, operator_only,
-         depends_on, blocked_by, repos, ord, rank, snapshot_sha, row_hash, since, holder, course_id, tier_position, expedite, display, version, key, brief, parent, course_fields_json, depends_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO tickets (id, repository_id, local_id, path, title, project, status, node, queue, tags, requires_clause, operator_only,
+         depends_on, blocked_by, repos, ord, rank, snapshot_sha, row_hash, since, holder, course_id, expedite, display, version, key, brief, parent, course_fields_json, depends_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (id) DO UPDATE SET path = excluded.path, title = excluded.title, project = excluded.project,
          status = excluded.status, node = excluded.node, queue = excluded.queue, tags = excluded.tags,
-         tier = excluded.tier, requires_clause = excluded.requires_clause, operator_only = excluded.operator_only,
+         requires_clause = excluded.requires_clause, operator_only = excluded.operator_only,
          depends_on = excluded.depends_on, blocked_by = excluded.blocked_by, repos = excluded.repos,
          ord = excluded.ord, rank = excluded.rank, snapshot_sha = excluded.snapshot_sha, row_hash = excluded.row_hash,
-         since = excluded.since, holder = excluded.holder, course_id = excluded.course_id, tier_position = excluded.tier_position,
+         since = excluded.since, holder = excluded.holder, course_id = excluded.course_id,
          expedite = excluded.expedite, display = excluded.display, version = excluded.version, key = excluded.key, brief = excluded.brief,
          parent = excluded.parent, course_fields_json = excluded.course_fields_json, depends_at = excluded.depends_at`,
-      id, r, row.id, row.path, row.title, row.project, row.status, row.node, row.queue, row.tags, row.tier,
+      id, r, row.id, row.path, row.title, row.project, row.status, row.node, row.queue, row.tags,
       row.requires_clause, row.operator_only, row.depends_on, row.blocked_by, row.repos, row.ord, row.rank, sha, hash, row.since, row.holder, row.course_id,
-      row.tier_position, row.expedite, row.display, row.version, row.key, row.brief ?? null, parent, row.course_fields ?? null, row.depends_at ?? '[]');
+      row.expedite, row.display, row.version, row.key, row.brief ?? null, parent, row.course_fields ?? null, row.depends_at ?? '[]');
     core.store.exec('DELETE FROM ticket_requires WHERE ticket_id = ?', id);
     for (const name of row.requires) core.store.exec('INSERT INTO ticket_requires (ticket_id, name) VALUES (?, ?)', id, name);
     upserted.push(id);

@@ -179,9 +179,8 @@ route, with the events and fields the table lists for it, is
 ### 3.2 Who may post a board
 
 - **R-BTN-93 (sync keys and the one verifier).** `status: built` A repository's sync authenticates with a sync
-  key or a CI identity token (R-BTN-15); see R-BTN-102 for the unbuilt machine-key input. A
-  board post from a class the policy's `inputs.board` excludes (`sync-key`,
-  `ci-identity`, `machine`; R-BTN-188) is refused `forbidden`.
+  key, a CI identity token (R-BTN-15) or a machine key granted on the repository (R-BTN-102,
+  R-BTN-146; the machine-key input is not yet built).
   - **A sync key** is an SSH key of R-BTN-13's types in one `sync_keys` row: exactly one
     repository and one role. Owners add and revoke it
     (`POST /v1/owner/{repository}/sync-keys`, `…/sync-keys/{fingerprint}/revoke`); an
@@ -193,8 +192,8 @@ route, with the events and fields the table lists for it, is
     configuration in which only default-branch runs can read it.
   - **`verifySync(req) → {repository, role}`** is the only check. It refuses `unauthenticated`
     (no credential, bad signature, unknown or revoked key, a token that fails) or `forbidden`
-    (another role or a key that is no sync credential). Every `/v1/sync/*` route uses only its
-    answer.
+    (another role, a key that is no sync credential, a machine key with no grant
+    there). Every `/v1/sync/*` route uses only its answer.
   - **The mirror.** Legacy, removed with its code (R-BTN-193). A sync key's role is `sync` or
     `mirror`; a repository has a mirror when it has a `mirror_workflow`, `ci_identity.mirror` is
     true, or it has a `mirror`-role sync key. Only sync keys and CI tokens act as the mirror
@@ -341,7 +340,7 @@ route, with the events and fields the table lists for it, is
   read only pushers' facts; the adapter exports `pusher` to a course's own `sync.mjs`; whatever
   station function runs, the CLI drops every posted marker and output whose author is not a
   pusher, and the sync log counts them per PR. `pusher` is the word for this trust in a forge
-  author; `trusted` is kept for the runner role (R-BTN-182).
+  author; `trusted` is kept for the leg property (R-BTN-182).
   - **PRs that count.** A PR found by `branch_pattern` counts only when its head repository is
     its base repository by id (the adapter table) and its base is the home or a `repos:` entry
     with reach (R-BTN-140). A fork's PR counts only when a pusher names it in `prs:`; its

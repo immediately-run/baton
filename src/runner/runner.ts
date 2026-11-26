@@ -53,7 +53,6 @@ export interface RunnerOptions {
    *  each time it is asked, so a runner whose declaration lacks one says so at startup. Injected by
    *  `baton run`; absent, no such line. B-103: every served course's legs, not one course's. */
   legNeeds?: (courses: RunnerOptions['courses']) => Promise<string[]> | string[];
-  tierCeiling?: string;
   /** The courses this runner serves and declares (B-103, rule 9): every course its home checkout
    *  declares, or the one `--course` narrowed it to. The claim it takes names the ticket's course
    *  (`course_id`), which `runClaim` loads from the claim's snapshot — so one runner, one checkout,

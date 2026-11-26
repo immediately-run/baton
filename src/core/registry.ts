@@ -7,7 +7,7 @@ import { BatonError } from './http';
 import { parseSshKey } from './auth';
 import { logEvent } from './db';
 import type { Config, ForgeDispatch, Store } from './ports';
-import { checkForgeDispatch, DISPATCH_WORKFLOW, REPOSITORY_ID, TIER_NAME } from './validate';
+import { checkForgeDispatch, DISPATCH_WORKFLOW, REPOSITORY_ID } from './validate';
 import { FORGES, isForgePath, isWebBase, parseTranscriptRepo, type Forge } from './links';
 
 export { REPOSITORY_ID, TICKET_ID, qualify, repositoryOf, localOf } from './validate';
@@ -16,8 +16,6 @@ export { REPOSITORY_ID, TICKET_ID, qualify, repositoryOf, localOf } from './vali
  *  (GIT_BRANCH), as it goes unencoded into the dashboard's GitHub links. */
 const BRANCH = /^(?!.*\.\.)[A-Za-z0-9._/-]{1,100}$/;
 const WORKFLOW = DISPATCH_WORKFLOW;
-const TIER = TIER_NAME;
-const DEFAULT_TIERS = ['routine', 'judgement', 'critical'];
 
 export function checkRegisteredDispatch(value: unknown, field: string, forge: Forge, path: unknown, webBase: unknown, branch: unknown) {
   if (typeof path !== 'string' || !isForgePath(forge, path) || typeof webBase !== 'string' || !isWebBase(forge, webBase, path)) {
@@ -45,7 +43,6 @@ export interface Repository {
   mirror_workflow: string | null;
   weight: number;
   transcript_repos: string[];
-  tiers: string[];
   cutover_at: number | null;
   retired_at: number | null;
   /** R-BTN-138 (B-173): the paths a retirement moved off the row, latest first. They reach
@@ -73,14 +70,13 @@ export interface Registration {
   sync_workflow: string;
   mirror_workflow: string | null;
   weight: number;
-  tiers: string[];
   transcript_repos: string[];
   cut_over: boolean;
 }
 
 /** A registered repository's fields — every field a registration has but the owner keys, which
  *  live in `repository_owners` (R-BTN-58), above a registration's own (B-91). */
-const REGISTRATION_FIELDS = ['github', 'forge', 'remote', 'web_base', 'ci_identity', 'dispatch', 'sync_keys', 'default_branch', 'sync_workflow', 'mirror_workflow', 'weight', 'tiers', 'transcript_repos', 'cut_over'] as const;
+const REGISTRATION_FIELDS = ['github', 'forge', 'remote', 'web_base', 'ci_identity', 'dispatch', 'sync_keys', 'default_branch', 'sync_workflow', 'mirror_workflow', 'weight', 'transcript_repos', 'cut_over'] as const;
 
 /** BATON_REPOSITORIES' entries, each with its checked registration and its place (`at`), for the
  *  start's three passes over the seed — the registration, its sync keys and its owner keys
@@ -96,8 +92,11 @@ export function seedEntries(config: Config): { entry: unknown; r: Registration; 
     throw new Error('BATON_REPOSITORIES is not JSON');
   }
   if (!Array.isArray(list)) throw new Error('BATON_REPOSITORIES must be a JSON array');
-  return list.map((entry, i) => {
+  return list.map((rawEntry, i) => {
     const at = `BATON_REPOSITORIES[${i}]`;
+    // Old environment seeds are not requests and may stay configured across restarts.
+    const entry = rawEntry && typeof rawEntry === 'object' && !Array.isArray(rawEntry)
+      ? Object.fromEntries(Object.entries(rawEntry).filter(([k]) => k !== 'tiers')) : rawEntry;
     return { entry, r: checkRegistration(entry, at), at };
   });
 }
@@ -112,9 +111,6 @@ export function checkRegistration(v: unknown, at = 'repository'): Registration {
   const known = new Set(['id', ...REGISTRATION_FIELDS, 'owner_keys']);
   for (const k of Object.keys(r)) if (!known.has(k)) bad(`${at}.${k}`, 'unknown field');
   const str = (k: string, re: RegExp) => (typeof r[k] === 'string' && re.test(r[k] as string) ? (r[k] as string) : bad(`${at}.${k}`, `must match ${re}`));
-  const tiers = r.tiers === undefined ? DEFAULT_TIERS
-    : Array.isArray(r.tiers) && r.tiers.length >= 1 && r.tiers.length <= 16 && r.tiers.every((t) => typeof t === 'string' && TIER.test(t)) && new Set(r.tiers).size === r.tiers.length
-      ? (r.tiers as string[]) : bad(`${at}.tiers`, 'must be 1–16 distinct tier names, lowest first');
   const transcript = r.transcript_repos === undefined ? []
     : Array.isArray(r.transcript_repos) && r.transcript_repos.length <= 20 && r.transcript_repos.every((x) => typeof x === 'string' && parseTranscriptRepo(x) !== null)
       ? (r.transcript_repos as string[]) : bad(`${at}.transcript_repos`, 'must be at most 20 repositories, each a GitHub owner/name or <forge>:<web_base>');
@@ -169,7 +165,6 @@ export function checkRegistration(v: unknown, at = 'repository'): Registration {
     sync_workflow: syncWorkflow,
     mirror_workflow: r.mirror_workflow == null ? null : str('mirror_workflow', WORKFLOW),
     weight,
-    tiers,
     transcript_repos: transcript,
     cut_over: r.cut_over === true,
   };
@@ -214,23 +209,6 @@ export function transcriptReposOf(store: Store, repo: string): string[] {
   return list.length ? list : DEFAULT_TRANSCRIPT_REPOS;
 }
 
-/** A runner's ceiling in one repository's ladder (§7.2 rule 5, R-BTN-66): the one it declared
- *  for that repository; else its single `tier_ceiling` where the ladder has that name; else the
- *  ladder's top if that ceiling is the unrestricted default (`critical`, docs' top), and the
- *  ladder's bottom otherwise — a restricted runner is never widened by a ladder it did not name.
- *  A grant's `max_tier` caps it further (R-BTN-58, Claims.ceiling). */
-export function ceilingIn(repo: string, ladder: string[], ceilings: Record<string, string>, legacy: string): string {
-  const named = ceilings[repo];
-  if (named !== undefined) return ladder.includes(named) ? named : ladder[0]; // a ceiling it named, never widened
-  if (ladder.includes(legacy)) return legacy;
-  return legacy === 'critical' ? ladder[ladder.length - 1] : ladder[0];
-}
-
-/** A ticket tier's position in its repository's ladder: null untiered (fits only the top); a name
- *  the ladder lacks is the ladder's length, which fits nothing. */
-export const tierPosition = (ladder: string[], tier: string | null) =>
-  tier == null ? null : ladder.includes(tier) ? ladder.indexOf(tier) : ladder.length;
-
 /** The claims of a verified GitHub Actions OIDC token that bind it (R-BTN-15). */
 export interface SyncClaims {
   repository: string;
@@ -238,9 +216,9 @@ export interface SyncClaims {
   job_workflow_ref: string;
 }
 
-type RepoRow = Omit<Repository, 'transcript_repos' | 'tiers' | 'ci_identity' | 'former_paths'> & { transcript_repos: string; tiers: string; ci_identity: string | null; former_paths: string | null };
-const parse = (r: RepoRow): Repository => ({ ...r, transcript_repos: JSON.parse(r.transcript_repos), tiers: JSON.parse(r.tiers), ci_identity: r.ci_identity ? JSON.parse(r.ci_identity) : null, former_paths: r.former_paths ? JSON.parse(r.former_paths) : [] });
-const REPO_COLUMNS = 'id, github, forge, remote, web_base, ci_identity, default_branch, sync_workflow, mirror_workflow, weight, transcript_repos, tiers, cutover_at, retired_at, former_paths';
+type RepoRow = Omit<Repository, 'transcript_repos' | 'ci_identity' | 'former_paths'> & { transcript_repos: string; ci_identity: string | null; former_paths: string | null };
+const parse = (r: RepoRow): Repository => ({ ...r, transcript_repos: JSON.parse(r.transcript_repos), ci_identity: r.ci_identity ? JSON.parse(r.ci_identity) : null, former_paths: r.former_paths ? JSON.parse(r.former_paths) : [] });
+const REPO_COLUMNS = 'id, github, forge, remote, web_base, ci_identity, default_branch, sync_workflow, mirror_workflow, weight, transcript_repos, cutover_at, retired_at, former_paths';
 
 export class Registry {
   constructor(private readonly c: { store: Store; now: () => number; ensurePolicy: (repository: string, forge: Forge) => void;
@@ -263,11 +241,11 @@ export class Registry {
       bad('repository', `${r.id} (${r.github}) is already registered`);
     }
     this.c.store.exec(
-      `INSERT INTO repositories (id, github, forge, remote, web_base, ci_identity, dispatch, default_branch, sync_workflow, mirror_workflow, weight, transcript_repos, tiers, cutover_at, insertion_order)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, (SELECT COALESCE(MAX(insertion_order), 0) + 1 FROM repositories))`,
+      `INSERT INTO repositories (id, github, forge, remote, web_base, ci_identity, dispatch, default_branch, sync_workflow, mirror_workflow, weight, transcript_repos, cutover_at, insertion_order)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, (SELECT COALESCE(MAX(insertion_order), 0) + 1 FROM repositories))`,
       r.id, r.github, r.forge, r.remote, r.web_base, r.ci_identity ? JSON.stringify(r.ci_identity) : null,
       r.dispatch ? JSON.stringify(r.dispatch) : null,
-      r.default_branch, r.sync_workflow, r.mirror_workflow, r.weight, JSON.stringify(r.transcript_repos), JSON.stringify(r.tiers),
+      r.default_branch, r.sync_workflow, r.mirror_workflow, r.weight, JSON.stringify(r.transcript_repos),
       r.cut_over ? this.c.now() : null);
     this.c.store.exec('INSERT INTO board_head (repository_id, sha) VALUES (?, NULL) ON CONFLICT (repository_id) DO NOTHING', r.id);
     // §12.8 (B-145): version 1 with the repository — the `cooperative` preset on a forge,

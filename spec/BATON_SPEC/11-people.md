@@ -48,7 +48,8 @@ contents are not built; their design is
   Role, grants, revocation and the one-role rule (§12.1) are the same for both kinds. The kinds
   differ only as this rule says.
   - **Where only an SSH key serves.** Sync, mirror, instrument, check-runner and `human_only`
-    (R-BTN-185) keys are SSH keys; a sync may use a CI identity instead (R-BTN-93). An API-key
+    (R-BTN-185) keys are SSH keys, and so is a runner's that takes a trusted leg (rule
+    `trusted`, R-BTN-182); a sync may use a CI identity instead (R-BTN-93). An API-key
     runner never syncs or delivers (R-BTN-171): `/v1/sync/*`, `/v1/probe/*` and
     `/v1/runner/outbox/*` accept no API key.
   - **The key.** `baton key create FILE` writes `bak_<id>_<secret>` (64 random bits of id, 256
@@ -231,10 +232,8 @@ contents are not built; their design is
   | `home list`, `home use <name>`, `home add [<name>] --repository <id> [--origin <url>] [--checkout <path>]`, `home remove <name>`, `home show` | local: the homes file | R-BTN-127 |
   | `server start --db <file> --admin-keys <file>` | local: starts the local host | R-BTN-56, R-BTN-158 |
   | `owner grant list <repository>` | owners, grants, settings and bars | R-BTN-179, R-BTN-146 |
-  | `owner grant add <repository> --key <pub> --capabilities <a,b> [--hostname <h>] [--label <l>] [--max-claims <n>] [--confirm-span]`, or `--api-key --name <name>` | grants a runner key | R-BTN-58, R-BTN-146, R-BTN-159 |
+  | `owner grant add <repository> --key <pub> --capabilities <a,b> [--hostname <h>] [--label <l>] [--max-claims <n>]`, or `--api-key --name <name>` | grants a runner key | R-BTN-58, R-BTN-146, R-BTN-159 |
   | `owner grant revoke <repository> <fingerprint>` | revokes a grant | R-BTN-58 |
-  | `owner grant role <repository> <fingerprint> --role runner\|trusted-runner [--domain <label>] [--checker]` | sets a grant's role, domain and checker mark (proposed: [security](../proposals/security.md)) | R-BTN-180 |
-  | `owner grant flags <repository> <fingerprint> --sync\|--no-sync` | sets a grant's `sync` flag | R-BTN-146 |
   | `owner owner add <repository> <pub>`, `owner owner remove <repository> <fingerprint>` | adds or removes an owner | R-BTN-58 |
   | `owner bar add <repository> --course <c> --tag <t>`, `owner bar lift <repository> <id>`, `owner bar follow <repository> <course>` | the owner's bars | R-BTN-67, R-BTN-142 |
   | `owner settings show <repository>`, `owner settings set <repository>` | reads (`owner.grant.list`) or sets the owner settings | R-BTN-66, R-BTN-140 |

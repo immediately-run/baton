@@ -65,7 +65,6 @@ export function RegistryScreen(_props: ScreenProps) {
                     { head: 'Forge', cell: (r) => <Text mono value={r.forge} /> },
                     { head: 'Branch', cell: (r) => <Text mono value={r.default_branch} /> },
                     { head: 'Weight', cell: (r) => <Text value={r.weight} /> },
-                    { head: 'Tiers', cell: (r) => <Chips values={r.tiers} /> },
                     { head: 'Head', cell: (r) => (r.head?.sha ? <><Text mono value={shortSha(r.head.sha)} /> · <RelTime at={r.head.received_at} /></> : <span className="mut nw">no board yet</span>) },
                     { head: 'Mode', cell: (r) => <Text mono value={modeOf(r.mode)} /> },
                     { head: 'Courses', cell: (r) => <Chips values={listOf<{ id: string }>(r.courses).map((c) => c.id)} /> },

@@ -356,7 +356,7 @@
   },
   "test/unit/claims.test.ts": {
     "@typescript-eslint/no-explicit-any": {
-      "count": 15
+      "count": 14
     }
   },
   "test/unit/cli.test.ts": {

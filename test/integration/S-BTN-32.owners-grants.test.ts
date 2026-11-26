@@ -89,15 +89,6 @@ describe('S-BTN-32 owners and grants', () => {
     expect((await runnerAs(k, '/v1/runner/claim', { request_id: 'req-k-ops-2', ticket_id: 'ops:R3-9002' }, secret)).json).toMatchObject({ ticket_id: 'ops:R3-9002' });
   });
 
-  it('a grant’s max_tier caps the key in that repository', async () => {
-    await keyCall(docsOwner, '/v1/owner/docs/grants', { public_key: k.publicKey, hostname: 'k-host', capabilities: ['agent-venue'], max_tier: 'routine' });
-    const secret = 'secret-k';
-    const hb = await runnerAs(k, '/v1/runner/heartbeat', hbBody('vm-a', { hostname: 'k-host', session_name: 'k', secret_hash: await sha256(secret), tier_ceiling: 'critical' }));
-    // R3-9002 is judgement: above the grant's routine.
-    expect((await runnerAs(k, '/v1/runner/claim', { request_id: 'req-k-docs-3', ticket_id: 'docs:R3-9002' }, secret)).json).toMatchObject({ code: 'not-eligible', rule: 5 });
-    expect(await recommended(hb.json.runner_id as number)).toEqual(['docs:R3-9001']);
-  });
-
   it('a login link works once, within 5 minutes; its session ends when its key leaves BATON_ADMIN_KEYS', async () => {
     const login = (token: string) => hostCall(new Request(`${ORIGIN}/v1/login`, { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: ORIGIN }, body: JSON.stringify({ token }) }));
     const { json: link } = await keyCall(admin, '/v1/admin/login-links', {});

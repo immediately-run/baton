@@ -5,7 +5,6 @@ export interface IdleGate {
   gate: string;
   count: number;
   tickets: string[];
-  limit?: string;
   capabilities?: string[];
   readings?: { resource: string; instance: string; writer: string; until: number | null }[];
 }

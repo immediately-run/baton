@@ -64,12 +64,6 @@
   gap: 8px 12px;
 }
 
-.tk-tier {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  white-space: nowrap;
-}
 
 .tk-foot {
   margin: 10px 0 0;
@@ -175,10 +169,6 @@
 
 /* ── the board ── */
 
-.bd-tiers {
-  margin: 0 0 10px;
-  font-size: 13px;
-}
 
 .bd-wait {
   display: inline-block;
