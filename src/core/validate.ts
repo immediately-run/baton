@@ -8,6 +8,34 @@ import { COURSE_ID, RESOURCE_NAME } from './course';
 import { CONDITION_TYPE, CONDITION_TYPE_MAX, RESTART_ID, SEVERITIES, isCoreOnly, restartFault } from './conditionTypes';
 import { parseSchemaId, VALUE_MAX_BYTES } from '../shared/schema.mjs';
 import { CLIENT_VERSION_MAX, compareVersions, parseVersion } from '../shared/versions.mjs';
+import type { ForgeDispatch } from './ports';
+
+export const DISPATCH_WORKFLOW = /^\.github\/workflows\/[A-Za-z0-9._-]{1,100}\.ya?ml$/;
+const GITEA_DISPATCH_WORKFLOW = /^\.gitea\/workflows\/[A-Za-z0-9._-]{1,100}\.ya?ml$/;
+
+export function checkUnblockedTrigger(value: unknown, forge: string, branch: string, dispatch: ForgeDispatch | null) {
+  const trigger = checkForgeDispatch(value, 'unblocked_trigger', forge, branch, true);
+  if (trigger.kind !== dispatch?.kind || (trigger.kind === 'gitlab-trigger' && dispatch.kind === 'gitlab-trigger' && trigger.project_id !== dispatch.project_id)) {
+    bad('unblocked_trigger', 'must use the repository’s own dispatch target');
+  }
+  return trigger;
+}
+
+/** Only target metadata is accepted. Credentials are host configuration, never a field here. */
+export function checkForgeDispatch(value: unknown, field: string, forge: string, branch: string, unblocked = false): ForgeDispatch & { workflow?: string } {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return bad(field, 'must be a dispatch target');
+  const t = value as Record<string, unknown>;
+  const fields = (...allowed: string[]) => Object.keys(t).every((k) => k === 'kind' || allowed.includes(k));
+  if (forge === 'github' && t.kind === 'github-app') {
+    if (!unblocked && fields()) return { kind: t.kind };
+    if (unblocked && fields('workflow') && typeof t.workflow === 'string' && DISPATCH_WORKFLOW.test(t.workflow)) return { kind: t.kind, workflow: t.workflow };
+  }
+  if (forge === 'gitlab' && t.kind === 'gitlab-trigger' && fields('project_id', 'ref') && typeof t.project_id === 'number'
+      && Number.isSafeInteger(t.project_id) && t.project_id > 0 && t.ref === branch) return { kind: t.kind, project_id: t.project_id, ref: branch };
+  if (forge === 'gitea' && t.kind === 'gitea' && fields('workflow', 'ref') && typeof t.workflow === 'string'
+      && GITEA_DISPATCH_WORKFLOW.test(t.workflow) && t.ref === branch) return { kind: t.kind, workflow: t.workflow, ref: branch };
+  return bad(field, 'must target this repository’s forge and default branch, using only dispatch fields');
+}
 
 /** §5: the harness's own session id, the rule `claim.sh --session` already applies. */
 export const SESSION_NAME = /^[A-Za-z0-9_.:-]{1,128}$/;
@@ -560,7 +588,7 @@ export function boundedJson(value: unknown, field: string, limit = 4096): string
 
 export interface ClaimPreference { ticket_id: string; leg?: string }
 
-export function checkClaim(body: unknown): { request_id: string; ticket_id: string | null; prefer: ClaimPreference[] | null; rationale: string | null; retired: string[] } {
+export function checkClaim(body: unknown): { request_id: string; ticket_id: string | null; prefer: ClaimPreference[] | null; legs?: string[]; rationale: string | null; retired: string[] } {
   if (!isObj(body)) bad('body', 'must be a JSON object');
   const b = body as Record<string, unknown>;
   const retired = new Set<string>();
@@ -577,11 +605,18 @@ export function checkClaim(body: unknown): { request_id: string; ticket_id: stri
       return { ticket_id: matches(TICKET_ID, `${at}.ticket_id`)(e.ticket_id), leg: optional(e.leg, matches(COURSE_ID, `${at}.leg`)) };
     });
   }
+  let legs: string[] | undefined;
+  if (b.legs !== undefined) {
+    if (!Array.isArray(b.legs) || !b.legs.length || b.legs.length > 50 || b.ticket_id != null || prefer) {
+      bad('legs', 'give 1 to 50 leg names on an unnamed claim');
+    }
+    legs = [...new Set((b.legs as unknown[]).map(matches(COURSE_ID, 'legs')))];
+  }
   const rationale = b.rationale === undefined ? null : boundedJson(b.rationale, 'rationale');
   return {
     request_id: matches(REQUEST_ID, 'request_id')(b.request_id),
     ticket_id: optional(b.ticket_id, matches(TICKET_ID, 'ticket_id')) ?? null,
-    prefer, rationale, retired: [...retired],
+    prefer, ...(legs ? { legs } : {}), rationale, retired: [...retired],
   };
 }
 
@@ -872,6 +907,7 @@ function checkLocalOrder(v: unknown): LocalOrder | null {
 }
 
 export interface Advance {
+  start_before: number | null;
   course: string | null;
   leg: string;
   reached: string | null;
@@ -1044,8 +1080,10 @@ export function checkAdvance(body: unknown): Advance {
   if (!Array.isArray(raw) || raw.length > TAGS_MAX || !raw.every((t) => typeof t === 'string' && TAG.test(t))) bad('bars', `must be a list of at most ${TAGS_MAX} tags`);
   const head_sha = optional(b.head_sha, matches(GIT_SHA, 'head_sha')) ?? null;
   const course = b.course === undefined ? null : boundedJson(b.course, 'course');
+  const start_before = b.start_before ?? null;
+  if (start_before !== null && !Number.isSafeInteger(start_before)) bad('start_before', 'must be a Unix timestamp in milliseconds');
   retiredFields(b);
-  return { leg, reached, evidence, course, bars: [...new Set(raw as string[])], outputs: checkOutputs(b.outputs), scope_exceeded: checkScopeReport(b.scope_exceeded), head_sha, run_inputs: checkRunInputs(b.run_inputs), session_url: carriedSessionUrl(b.session_url), exit_status: optional(b.exit_status, exitStatus) ?? null, local_order: checkLocalOrder(b.local_order) };
+  return { leg, reached, evidence, course, bars: [...new Set(raw as string[])], outputs: checkOutputs(b.outputs), scope_exceeded: checkScopeReport(b.scope_exceeded), head_sha, run_inputs: checkRunInputs(b.run_inputs), session_url: carriedSessionUrl(b.session_url), exit_status: optional(b.exit_status, exitStatus) ?? null, local_order: checkLocalOrder(b.local_order), start_before: start_before as number | null };
 }
 
 /** §6.7: the sync's confirmations, `[{claim_id, sha}]`. */

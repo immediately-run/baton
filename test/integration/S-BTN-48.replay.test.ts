@@ -83,7 +83,7 @@ class ReplayCheckout extends GitRepo {
 
   /** `baton repo init`, the fixture source and the runnable leg: everything after the tree. */
   async setup(o: { unsafe?: boolean } = {}): Promise<ReplayCheckout> {
-    expect(await initMain([], { root: this.dir, log: () => {} })).toBe(0);
+    expect(await initMain(['--own'], { root: this.dir, log: () => {} })).toBe(0);
     if (this.tracker) {
       writeFileSync(join(this.dir, '.baton', 'tickets.mjs'), trackerSource(this.store));
       this.writeStore({ rev: 5, tickets: [{ id: 'T-1', key: 'C-1', title: 'The tracked ticket', body: 'As first filed.', rank: 0 }] });
@@ -148,7 +148,7 @@ export async function close() { return 'https://example.test/close'; }
     const api = runnerApi({ transport });
     return testRunner({
       api, home: this.dir, session,
-      courses: [{ course: 'create-pr', version: 1 }], stateFile: join(tmpdir(), `baton-s48-${session}.json`),
+      courses: [{ course: 'create-pr', version: 2 }], stateFile: join(tmpdir(), `baton-s48-${session}.json`),
       beatEvery: 60_000, });
   }
 }
@@ -199,6 +199,8 @@ describe('S-BTN-48 replay: a recorded run re-run without a claim', () => {
     const configPath = join(repo.dir, '.baton', 'baton.json');
     const config = JSON.parse(readFileSync(configPath, 'utf8'));
     delete config.courses[0].source;
+    config.courses[0].version = 1;
+    config.courses[0].min_runner_version = 1;
     writeFileSync(configPath, JSON.stringify(config));
     const dir = join(repo.dir, '.baton', 'courses', 'create-pr');
     const graph = (name: string, extras = {}) => ({ start: 'filed', start_leg: name, end: ['done'], stations: { filed: {}, done: {} }, legs: { [name]: { from: ['filed'], to: 'done', ...extras } } });
@@ -234,6 +236,8 @@ describe('S-BTN-48 replay: a recorded run re-run without a claim', () => {
     const configPath = join(repo.dir, '.baton', 'baton.json');
     const config = JSON.parse(readFileSync(configPath, 'utf8'));
     delete config.courses[0].source;
+    config.courses[0].version = 1;
+    config.courses[0].min_runner_version = 1;
     writeFileSync(configPath, JSON.stringify(config));
     const dir = join(repo.dir, '.baton', 'courses', 'create-pr');
     writeFileSync(join(dir, 'course.json'), JSON.stringify({ start: 'filed', start_leg: 'implement', end: ['done'], stations: { filed: {}, planned: {}, done: {} }, legs: {
@@ -244,8 +248,12 @@ describe('S-BTN-48 replay: a recorded run re-run without a claim', () => {
     repo.commit('output contract');
     await repo.sync();
     const { secret } = await register('vm-a', { courses: [{ repository: 'docs', course: 'create-pr', version: 1 }] });
-    const offered = (await claimItem('vm-a', secret, { ticket_id: 'docs:T-1' })).json;
-    const started = (await advance('vm-a', secret, offered.claim_id, { leg: 'implement' })).json;
+    const offer = await claimItem('vm-a', secret, { ticket_id: 'docs:T-1' });
+    expect(offer.status).toBe(200);
+    const offered = offer.json;
+    const start = await advance('vm-a', secret, offered.claim_id, { leg: 'implement' });
+    expect(start.status).toBe(200);
+    const started = start.json;
     const ghCalls: string[][] = [];
     const origin = g('config', 'remote.origin.url');
     const localRemote = g('remote', 'get-url', 'origin');
@@ -489,7 +497,7 @@ export function handoff() { return null; }
     writeFileSync(join(repo.dir, 'plan.txt'), 'the plan as the run read it\n');
     const planSha = repo.commit('the plan');
     const uri = `git:immediately-run/docs@${planSha}:plan.txt`;
-    const { secret } = await register('vm-a', { courses: [{ repository: 'docs', course: 'create-pr', version: 1 }] });
+    const { secret } = await register('vm-a', { courses: [{ repository: 'docs', course: 'create-pr', version: 2 }] });
     const claim = await claimItem('vm-a', secret, { ticket_id: 'docs:T-1' });
     const started = await advance('vm-a', secret, claim.json.claim_id, {
       leg: 'implement',

@@ -79,7 +79,7 @@ class PathlessTickets extends GitRepo {
   }
 
   async setup(leg: string | null, store: Record<string, unknown> = { rev: 1, tickets: [TICKET] }): Promise<PathlessTickets> {
-    expect(await initMain([], { root: this.dir, log: () => {} })).toBe(0);
+    expect(await initMain(['--own'], { root: this.dir, log: () => {} })).toBe(0);
     if (this.tracker) writeFileSync(join(this.dir, '.baton', 'tickets.mjs'), trackerSource(this.store));
     if (leg != null) writeFileSync(join(this.dir, '.baton', 'courses', 'create-pr', 'legs', 'implement.mjs'), leg);
     writeFileSync(this.store, JSON.stringify(store));
@@ -100,7 +100,7 @@ class PathlessTickets extends GitRepo {
     const api = runnerApi();
     return testRunner({
       api, home: this.dir, session,
-      courses: [{ course: 'create-pr', version: 1 }], stateFile: join(tmpdir(), `baton-s226-${session}.json`),
+      courses: [{ course: 'create-pr', version: 2 }], stateFile: join(tmpdir(), `baton-s226-${session}.json`),
       beatEvery: 60_000, });
   }
   saw(): { ticket: Record<string, unknown>; text: string | null; mode: number | null } {

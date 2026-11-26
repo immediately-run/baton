@@ -91,7 +91,7 @@ let down = false;
 const lines: string[] = [];
 const runners: Runner[] = [];
 
-function makeRunner(): Runner {
+function makeRunner(bounds?: { legs: string[] }): Runner {
   const api = runnerApi({ url: 'https://baton.test', transport: (req) => down
       ? Promise.resolve(new Response(JSON.stringify({ code: 'internal', message: 'internal error' }), { status: 500, headers: { 'Content-Type': 'application/json' } }))
       : hostCall(req) });
@@ -99,7 +99,7 @@ function makeRunner(): Runner {
     api, home: home.dir, session: `runner-242-${++n}`, courses: [{ course: 'relay', version: 3 }],
     stateFile: join(scratch, `state-${n}.json`), beatEvery: 40,
     // The runner's own wall clock: its idle wait counts beats on it.
-    now: () => Date.now(), log: (l) => lines.push(l), queue,
+    now: () => Date.now(), log: (l) => lines.push(l), queue, bounds,
   });
   runners.push(runner);
   return runner;
@@ -129,13 +129,14 @@ afterEach(async () => {
 });
 
 describe('S-BTN-242 a runner\'s local queue', () => {
-  it('Baton down: idle with nothing queued, then an order runs offline with the warning, and on recovery its result is reported once, gated as usual', async () => {
+  it.each([false, true])('runs an offline order once and reports it on recovery (leg filter: %s)', async (filtered) => {
     legs();
     await home.post({ 'T-1': placed('filed', [], [['build', 'ready']]) });
     // A claim answer said, before the outage, that the repository requires no signed control.
     queue.setControlRequired(false);
     down = true;
-    const runner = makeRunner();
+    const bounds = filtered ? { legs: ['build', 'check', 'merge'] } : undefined;
+    const runner = makeRunner(bounds);
     const working = runner.work();
     // Idle: the loop fails on Baton's errors and runs nothing.
     await until(() => lines.filter((l) => l.includes('the loop failed')).length >= 3);
@@ -155,7 +156,7 @@ describe('S-BTN-242 a runner\'s local queue', () => {
     // again), and the course goes on — check and merge run as usual.
     down = false;
     lines.length = 0;
-    const out = await makeRunner().runOnce();
+    const out = await makeRunner(bounds).runOnce();
     expect(out).toMatchObject({ ticket: 'docs:T-1', end_reason: 'done', reached: 'merged' });
     expect(home.evidence().filter((l) => l.startsWith('run build'))).toHaveLength(1);
     expect(home.evidence().filter((l) => l.startsWith('close build'))).toHaveLength(1);

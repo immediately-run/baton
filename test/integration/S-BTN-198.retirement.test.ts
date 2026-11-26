@@ -20,7 +20,7 @@ import {
   adminSession, captureDispatches, claimItem, claimRow, course, ORIGIN, placed, register, rows, sessionCall,
   setAdminKeys, setClock, setHumanKeys, sha256, syncCall, tick, ticket, withCore, webhookCall, runnerCall,
   seedInstanceServes, seedInstanceState, seedResource, seedResourceInstance, seedUnblockedDispatch,
-  seedWebhookDispatch, seedWebhookSync,
+  upsertWebhookDispatch, seedWebhookSync,
 } from '../helpers';
 import { makeKey, signedRequest, sshsig, type TestKey } from '../lib/sshKeys';
 import { call as hostCall } from '#host';
@@ -84,7 +84,7 @@ async function aLiveRepository(): Promise<void> {
   // The rows retirement deletes: a stale webhook stamp, a pending trailing dispatch, a pending
   // unblocked dispatch, and an account instance listing the repository (R-BTN-73, R-BTN-77, R-BTN-76).
   await seedWebhookSync({ repository_id: 'ops', last_dispatch_at: T0 - 11 * 60_000 });
-  await seedWebhookDispatch({ repository_id: 'ops', last_dispatch_at: T0 - 60_000, trailing_at: T0 + 30_000 });
+  await upsertWebhookDispatch({ repository_id: 'ops', last_dispatch_at: T0 - 60_000, trailing_at: T0 + 30_000 });
   await seedUnblockedDispatch({ repository_id: 'ops', pending_json: JSON.stringify([{ ticket: 'ops:T-1', cleared: [] }]), due_at: T0 + 30_000 });
   await seedResource({ name: 'acme', scope: 'account', detail_schema: '{}' });
   await seedResourceInstance({ name: 'acme', repositories: JSON.stringify(['ops', 'docs']) });

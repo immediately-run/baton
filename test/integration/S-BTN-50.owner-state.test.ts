@@ -8,7 +8,7 @@
 // tampered import and a second one refused. The unit half (the digest, the section list, the
 // pending rows) is test/unit/ownerState.test.ts.
 import { describe, it, expect, beforeEach } from 'vitest';
-import { adminSession, claimItem, course, cutover, Git, keyCall, makeApiKey, mirrorCall, placed, register, rows, seedInstanceSettings, setAdminKeys, setClock, setHumanKeys, sessionCall, withCore } from '../helpers';
+import { adminSession, clearRepositoryDispatch, claimItem, course, cutover, endClaim, Git, keyCall, makeApiKey, mirrorCall, placed, register, rows, seedInstanceSettings, setAdminKeys, setClock, setHumanKeys, sessionCall, tick, withCore } from '../helpers';
 import { makeKey, sshsig, type TestKey } from '../lib/sshKeys';
 import roadmapPr from '../fixtures/courses/roadmap-pr/course.json';
 import { SECTIONS } from '../../src/core/ownerState';
@@ -211,6 +211,18 @@ describe('S-BTN-50 owner state exported (R3-1258)', () => {
     expect((await adminPost('/v1/admin/seal')).status).toBe(200);
   });
 
+  it('lets a pull-only mirror reach the seal even when no local mirror-written events are pending', async () => {
+    await clearRepositoryDispatch('docs');
+    expect(await (await mirrorCall('/v1/sync/wanted')).json()).toMatchObject({ wanted: false });
+    expect((await adminPost('/v1/admin/freeze')).status).toBe(200);
+    expect(await (await mirrorCall('/v1/sync/wanted')).json()).toMatchObject({ wanted: true });
+    expect((await adminPost('/v1/admin/seal')).json.lagging_mirrors).toEqual(['docs']);
+    const { next } = await (await mirrorCall('/v1/sync/events')).json() as { next: number };
+    await mirrorCall(`/v1/sync/events?after=${next}`);
+    expect(await (await mirrorCall('/v1/sync/wanted')).json()).toMatchObject({ wanted: false });
+    expect((await adminPost('/v1/admin/seal')).status).toBe(200);
+  });
+
   it('the export is identical over exactly the owner state; the source serves nothing but an administrator\'s read; a tampered and a second import are refused', async () => {
     expect((await keyCall(admin, '/v1/admin/capacities', { capability: 'device:test', capacity: 2 }, 'PUT')).status).toBe(200);
     expect((await keyCall(admin, '/v1/admin/settings', { link_hosts: ['example.test'], session_hosts: [] }, 'PUT')).status).toBe(200);
@@ -228,6 +240,9 @@ describe('S-BTN-50 owner state exported (R3-1258)', () => {
     await mirrorCall('/v1/sync/events?after=1000000');
     expect((await adminPost('/v1/admin/seal')).status).toBe(200);
     const first = (await keyCall(admin, '/v1/admin/export')).json;
+    const exportedRepo = first.sections.repositories.find((r: { id: string }) => r.id === 'docs');
+    expect(exportedRepo).not.toHaveProperty('sync_wanted_at');
+    expect(exportedRepo).not.toHaveProperty('sync_wanted_after');
     const second = (await keyCall(admin, '/v1/admin/export?with_history=1')).json;
     expect(second).not.toEqual(first); // --with-history adds the history sections
     const again = (await keyCall(admin, '/v1/admin/export')).json;
@@ -246,7 +261,21 @@ describe('S-BTN-50 owner state exported (R3-1258)', () => {
     await setClock(T0 + 5 * 60_000);
     await seedInstanceSettings({ id: 1, link_hosts: '[]' });
     expect((await adminPost('/v1/admin/import', { ...first, digest: '0'.repeat(64) })).json.code).toBe('invalid-params');
+    const canonical = (v: unknown): string => Array.isArray(v) ? `[${v.map(canonical).join(',')}]`
+      : v && typeof v === 'object' ? `{${Object.entries(v).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)
+        .map(([k, val]) => `${JSON.stringify(k)}:${canonical(val)}`).join(',')}}` : JSON.stringify(v);
+    for (const overrides of [
+      { dispatch: JSON.stringify({ kind: 'github-app', token: 'not-runtime-config' }) },
+      { unblocked_trigger: JSON.stringify({ kind: 'gitlab-trigger', project_id: 99, ref: 'main' }) },
+    ]) {
+      const { digest: _digest, ...changed } = structuredClone(first);
+      Object.assign(changed.sections.repositories.find((r: { id: string }) => r.id === 'docs'), overrides);
+      const refused = await adminPost('/v1/admin/import', { ...changed, digest: sha256HexSync(canonical(changed)) });
+      expect(refused.json).toMatchObject({ code: 'invalid-params', message: expect.stringMatching(/dispatch|unblocked_trigger/) });
+      expect(await rows('SELECT id FROM repositories')).toEqual([]);
+    }
     expect((await adminPost('/v1/admin/import', first)).status).toBe(200);
+    expect(await rows(`SELECT sync_wanted_at, sync_wanted_after FROM repositories WHERE id = 'docs'`)).toEqual([{ sync_wanted_at: null, sync_wanted_after: null }]);
     expect((await adminPost('/v1/admin/import', first)).json.code).toBe('conflict');
     // The state stands: the grant with its expanded capabilities, the bar, the reading, the repository.
     expect((await rows<{ capabilities: string }>('SELECT capabilities FROM runner_grants')).map((r) => JSON.parse(r.capabilities) as string[])).toContainEqual(expect.arrayContaining(['create-pr', 'llm-call']));

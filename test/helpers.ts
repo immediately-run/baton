@@ -488,7 +488,10 @@ type EventSeed = {
   claim_id?: number | null;
 };
 export function seedEvent(fields: EventSeed): Promise<void> {
-  return withCore((core) => insertFixture(core.store, 'events', fields));
+  return withCore((core) => seedEventIn(core.store, fields));
+}
+export function seedEventIn(store: Pick<Store, 'exec'>, fields: EventSeed): void {
+  insertFixture(store, 'events', fields);
 }
 
 type ResourceSeed = {
@@ -671,6 +674,16 @@ export function seedWebhookDispatchIn(store: Pick<Store, 'exec'>, fields: Webhoo
 }
 export function seedWebhookDispatch(fields: WebhookDispatchSeed): Promise<void> {
   return withCore((core) => seedWebhookDispatchIn(core.store, fields));
+}
+export function upsertWebhookDispatch({ repository_id, last_dispatch_at, trailing_at }: WebhookDispatchSeed): Promise<void> {
+  return withCore(({ store }) => {
+    store.exec(`INSERT INTO webhook_dispatch (repository_id, last_dispatch_at, trailing_at) VALUES (?, ?, ?)
+      ON CONFLICT (repository_id) DO UPDATE SET last_dispatch_at = excluded.last_dispatch_at, trailing_at = excluded.trailing_at`,
+    repository_id, last_dispatch_at, trailing_at).toArray();
+  });
+}
+export function clearWebhookDispatchIn(store: Pick<Store, 'exec'>, repository: string): void {
+  store.exec('DELETE FROM webhook_dispatch WHERE repository_id = ?', repository).toArray();
 }
 
 type WebhookSyncSeed = {
@@ -871,6 +884,16 @@ export function removeRepositoryOwners(repository: string, at: number) {
 }
 export function setSyncDispatchTimeIn(store: Pick<Store, 'exec'>, repository: string, at: number): void {
   store.exec("UPDATE webhook_syncs SET last_dispatch_at = ? WHERE repository_id = ?", at, repository).toArray();
+}
+export function clearRepositoryDispatch(repository: string): Promise<void> {
+  return withCore(({ store }) => {
+    store.exec('UPDATE repositories SET dispatch = NULL WHERE id = ?', repository).toArray();
+  });
+}
+/** Recreate the missing posted head that migration 0084 backfills. */
+export function restorePrePostedHeadBackfillIn(store: Pick<Store, 'exec'>, repository: string): void {
+  store.exec('UPDATE board_head SET posted_sha = NULL WHERE repository_id = ?', repository).toArray();
+  store.exec('DELETE FROM _baton_migrations WHERE id = 84').toArray();
 }
 export function setWebhookTrailingTimeIn(store: Pick<Store, 'exec'>, repository: string, at: number): void {
   store.exec("UPDATE webhook_dispatch SET trailing_at = ? WHERE repository_id = ?", at, repository).toArray();

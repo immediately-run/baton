@@ -79,7 +79,7 @@ class VersionedTickets extends GitRepo {
 
   /** `baton repo init`, the fixture source and the runnable leg: everything after the tree. */
   async setup(): Promise<VersionedTickets> {
-    expect(await initMain([], { root: this.dir, log: () => {} })).toBe(0);
+    expect(await initMain(['--own'], { root: this.dir, log: () => {} })).toBe(0);
     if (this.tracker) writeFileSync(join(this.dir, '.baton', 'tickets.mjs'), trackerSource(this.store));
     // A leg the runner can run: it writes its marker and ends the claim, so one claim is one leg.
     writeFileSync(join(this.dir, '.baton', 'courses', 'create-pr', 'legs', 'implement.mjs'), `import { writeFileSync } from 'node:fs';
@@ -123,7 +123,7 @@ export async function close() { return 'https://example.test/close'; }
     const api = runnerApi();
     return testRunner({
       api, home: this.dir, session,
-      courses: [{ course: 'create-pr', version: 1 }], stateFile: join(tmpdir(), `baton-s203-${session}.json`),
+      courses: [{ course: 'create-pr', version: 2 }], stateFile: join(tmpdir(), `baton-s203-${session}.json`),
       beatEvery: 60_000, });
   }
 }
@@ -228,7 +228,7 @@ describe('S-BTN-207 ticket versions through the sync and the runner', () => {
     ]);
     // A claim on T-1, then an unrelated commit: T-1's blob id — its version — cannot move, and
     // the reading does not stale the claim (R-BTN-35: progress is not staleness).
-    const { secret } = await register('vm-a', { courses: [{ repository: 'docs', course: 'create-pr', version: 1 }] });
+    const { secret } = await register('vm-a', { courses: [{ repository: 'docs', course: 'create-pr', version: 2 }] });
     const c = await claimItem('vm-a', secret, { ticket_id: 'docs:T-1' });
     expect(c.json).toMatchObject({ version: one, ticket_source: { kind: 'markdown', versions: 'pinned' } });
     writeFileSync(join(repo.dir, 'README.md'), 'an unrelated change\n');

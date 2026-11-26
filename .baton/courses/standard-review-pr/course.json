@@ -1,0 +1,47 @@
+{
+  "start": "requested",
+  "start_leg": "review",
+  "end": [
+    "approved",
+    "concluded"
+  ],
+  "short_waits": [
+    "ci"
+  ],
+  "stations": {
+    "requested": {
+      "label": "Review requested"
+    },
+    "changes-requested": {
+      "label": "Changes requested"
+    },
+    "approved": {
+      "label": "Approved"
+    },
+    "concluded": {
+      "label": "Review concluded"
+    }
+  },
+  "legs": {
+    "review": {
+      "from": [
+        "requested",
+        "changes-requested"
+      ],
+      "to": [
+        "approved",
+        "changes-requested"
+      ],
+      "max_runs": 3,
+      "label": "Review round"
+    },
+    "conclude": {
+      "from": [
+        "requested",
+        "changes-requested"
+      ],
+      "to": "concluded",
+      "label": "Summarise and stop"
+    }
+  }
+}

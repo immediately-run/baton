@@ -837,8 +837,7 @@ async function testCourse(argv) {
   if (base === null && flags.base !== 'none') throw new Error(`no origin/HEAD or origin/main in ${root}: pass --base REF (fetch the base first), or --base none to skip the removal rule`);
   const { bundleLocal } = await import('../scripts/bundle.mjs');
   const kit = await bundleLocal('src/local/testCourse.ts', 'test-course.mjs');
-  const input = await kit.readInputs(root, positional[1], { base, board: flags.board ?? null });
-  const violations = await kit.checkCourse(input);
+  const { input, violations } = await kit.checkCheckout(root, positional[1], { base, board: flags.board ?? null });
   const said = [
     `course ${positional[1]} in ${root}`,
     base ? `against ${base}${input.base ? '' : ' (no such course there: a new course)'}` : 'with --base none (the removal rule is not checked)',
@@ -1072,6 +1071,10 @@ export async function main(argv) {
     }
   }
   if (argv[0] === 'test-course') return testCourse(argv.slice(1));
+  if (argv[0] === 'course' && argv[1] === 'show' && !argv.slice(2).some((a) => a.startsWith('-'))) {
+    const { showCourseMain } = (await import('../scripts/baton-cli.mjs')).default;
+    return showCourseMain(argv.slice(2));
+  }
   if (argv[0] === 'course' && argv[1] === 'test') return testCourse(argv.slice(2));
   if (argv[0] === 'key') {
     if (argv[1] !== 'create' || !argv[2]) throw new Error('baton key create FILE [--comment TEXT]');
@@ -1201,11 +1204,11 @@ export async function main(argv) {
     const { replayMain } = (await import('../scripts/baton-run.mjs')).default;
     return replayMain(argv.slice(2));
   }
-  if (argv[0] === 'leg' && argv[1] === 'raise') {
-    // R-BTN-106, R-BTN-160, R-BTN-195 (B-234): raise a condition from the leg this command
-    // runs in, on its channel — the runner checks it, answers it, and reports what passes.
-    const { raiseMain } = (await import('../scripts/baton-leg.mjs')).default;
-    return raiseMain(argv.slice(2));
+  if (argv[0] === 'leg' && ['raise', 'status', 'output', 'done', 'suspend', 'release'].includes(argv[1])) {
+    // R-BTN-106, R-BTN-160, R-BTN-195 (B-234, B-47): a leg's moves and raises on its channel —
+    // the runner checks each and answers it, and reports what passes.
+    const { legMain } = (await import('../scripts/baton-leg.mjs')).default;
+    return legMain(argv.slice(1));
   }
   if (argv[0] === 'repo' && (argv[1] === 'sync' || argv[1] === 'init' || argv[1] === 'migrate-markers')) {
     // §2f, R-BTN-127's names: the defaults are TypeScript under src/defaults, bundled the same way.

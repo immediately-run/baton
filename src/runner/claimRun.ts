@@ -10,11 +10,13 @@ import { checkRaise, dispositionOf, errorClassOf, raiseRestarts, SEVERITIES, typ
 import type { ScopeAction } from '../core/scope';
 import { BatonRefusal, batonUnreachable } from './api';
 import { outsideScope, pushesBetween, readRefState, type RefState } from './audit';
-import { advanceHome, claimScratch, courseOf, dropCourse, ensureSha, extractTicketSource, loadCourse, prepareClone, readHead, type CourseLoad } from './home';
+import { CourseSourceUnavailable } from '../defaults/cli';
+import { sourceContext, advanceHome, claimScratch, courseOf, dropCourse, ensureSha, extractTicketSource, loadCourse, prepareClone, readHead, type CourseLoad } from './home';
 import type { ExecOptions, Executor, Handle, Running, SessionKind } from './executor';
 import { LegChannel, channelPath, type ChannelAnswer, type ChannelRequest } from './channel';
 import { MIN_SECRET_BYTES, createLegMasker, failureDetail, maskLegOutput, namesASecret, secretValues } from './mask';
-import { decide, refusalKind, runNumber, shortWaitSpent, waitState } from './protocol';
+import { checkEnd, type Output } from '../core/validate';
+import { checkedOutputs, checkMoveOutputs, decide, refusalKind, runNumber, shortWaitSpent, waitState } from './protocol';
 import { leaseLostFrom, type PersistedClaim, type StateFile } from './state';
 import { bareTicketId } from '../defaults/ticket-state';
 import { digestOfRead, MARKDOWN_SOURCE } from '../defaults/ticket-versions';
@@ -107,6 +109,7 @@ interface LegProgress {
   at: string;
   legName: string;
   nextLegs: NextLegs;
+  starts: number;
   gitPath: { leg: string; reached: string }[];
   /** B-335 (R-BTN-63): the run's number as Baton's advance reply named it — the count its
    *  `max_runs` check reads; null from a server that does not send it. */
@@ -121,7 +124,7 @@ interface LegProgress {
   ranCtx: Record<string, unknown> | null;
 }
 
-type LegOutcome = { kind: 'contract-input'; detail: string | null } | { kind: 'ok'; result: unknown } | { kind: 'crashed'; error: string; errorType?: unknown } | { kind: 'missing' } | { kind: 'lease-lost' };
+type LegOutcome = { kind: 'contract-input'; detail: string | null } | { kind: 'ok'; result: unknown } | { kind: 'crashed'; error: string; errorType?: unknown } | { kind: 'missing' } | { kind: 'lease-lost' } | { kind: 'past-deadline' };
 
 interface LegExecution {
   outcome: LegOutcome;
@@ -132,7 +135,7 @@ interface LegExecution {
 }
 
 type ClaimOptions = Pick<RunnerOptions, 'api' | 'home' | 'repository' | 'courses' | 'fetch' |
-  'stateFile' | 'agentCommand' | 'agentActivity' | 'maskEnv' | 'signalGraceMs' | 'auditRefs'> & {
+  'stateFile' | 'bounds' | 'queue' | 'agentCommand' | 'agentActivity' | 'maskEnv' | 'signalGraceMs' | 'auditRefs'> & {
   beatEvery: number;
   verbose: boolean;
   now: () => number;
@@ -226,7 +229,7 @@ export class ClaimRun {
   constructor(
     readonly checkout: string,
     private readonly o: ClaimOptions,
-    private readonly state: Pick<StateFile, 'get'>,
+    private readonly state: Pick<StateFile, 'get' | 'view'>,
     private readonly executor: Pick<Executor, 'source' | 'start' | 'stop' | 'exec' | 'end'>,
     private readonly sidecar: Pick<Sidecar, 'tick' | 'leaseLost' | 'parkEnd' | 'ackEnd'>,
     private readonly host: ClaimHost,
@@ -366,7 +369,8 @@ export class ClaimRun {
 
   /** The environment every session starts from: the runner's, with the parent markers (R-BTN-144). */
   private baseEnv(): Record<string, string> {
-    const env: Record<string, string | undefined> = { ...process.env, BATON_PARENT: String(this.state.get().runner_id ?? ''), BATON_STATE: this.o.stateFile };
+    const { BATON_TOKEN: _token, BATON_KEY: _key, BATON_KEY_FILE: _keyFile, BATON_SOCKET: _socket, ...host } = process.env;
+    const env: Record<string, string | undefined> = { ...host, BATON_PARENT: String(this.state.get().runner_id ?? ''), BATON_STATE: this.state.view };
     return Object.fromEntries(Object.entries(env).filter((e): e is [string, string] => typeof e[1] === 'string'));
   }
   async stopSession(reason: string): Promise<void> {
@@ -705,7 +709,8 @@ export class ClaimRun {
       // unpenalised): an unsigned course change keeps the last signed course in force, and a
       // course no owner signed does not run.
       const courseSha = typeof signedControl.course === 'string' && signedControl.course !== '' ? signedControl.course : claim.snapshot_sha as string;
-      course = loadCourse(this.o.home, courseSha, this.claimCourse(claim));
+      const settingsSha = signedControl.agent_command || String(claim.snapshot_sha);
+      course = await loadCourse(this.o.home, courseSha, this.claimCourse(claim), settingsSha);
       // B-228: the legs start from the snapshot's code — the home fast-forwarded to it when it
       // can be; otherwise it runs as it stands, and the log says why. A reattached leg's tree is
       // its running session's, and a claim in a clone of its own is put there below (B-188).
@@ -721,6 +726,10 @@ export class ClaimRun {
       }
     } catch (e) {
       this.o.log(`baton: the claim's course would not load (${msg(e)})`);
+      if (e instanceof CourseSourceUnavailable) {
+        const detail = (failureDetail(msg(e), this.legSecrets) ?? 'course source unavailable').replace(/[<>{}]/g, ' ').slice(0, 200);
+        return await this.finish(claimId, { end_reason: 'released:cannot-finish:capability', reached: claim.station, detail, ...(claim.legs?.[0] ? { next: claim.legs[0] } : {}) }, null);
+      }
       return await this.finish(claimId, { end_reason: 'released:stale-board', reached: claim.station, ...(claim.legs?.[0] ? { next: claim.legs[0] } : {}) }, null);
     }
     // R-BTN-72 (B-188): a claim beside others works in a clone of its own — its own git dir, put
@@ -808,7 +817,7 @@ export class ClaimRun {
       if (Array.isArray(g?.next)) nextLegs = g.next;
     } else {
       const firstAnswer = await this.advance(claimId, { leg: legName, ...this.runInputsReport(prepared.read) }, at);
-      if ('settle' in firstAnswer) return await this.finish(claimId, firstAnswer.settle, null);
+      if ('settle' in firstAnswer) return await this.finish(claimId, firstAnswer.settle, handoffUrl);
       resolvedInputs = firstAnswer.inputs ?? [];
       at = firstAnswer.station ?? at;
       nextLegs = firstAnswer.next ?? nextLegs;
@@ -822,7 +831,7 @@ export class ClaimRun {
       this.legSeq = typeof firstAnswer.seq === 'number' ? firstAnswer.seq : null;
     }
     const state: LegProgress = {
-      reach: claim.pointer_reach ?? NO_REACH, resolvedInputs,
+      starts: this.legSeq ?? 1, reach: claim.pointer_reach ?? NO_REACH, resolvedInputs,
       gitPath, handoffUrl, resume, advice, legName, at, nextLegs, run, runId, resuming: reattached,
       session: null, ranScript: null, ranCtx: null,
     };
@@ -905,6 +914,7 @@ export class ClaimRun {
       claim: { id: claimId, nonce: claim.nonce, station: at },
       leg: legName, run, ...(runId ? { run_id: runId } : {}),
       snapshot: { sha: claim.snapshot_sha, path: gitPath, next: nextLegs },
+      ...sourceContext(course),
       // B-127: the owner-signed commits a verified board post named — where the repository
       // requires signed control, the legs read `agent_command` and the overrides at these
       // (and the course itself — the graph, these scripts — loaded at the `course` one),
@@ -916,8 +926,10 @@ export class ClaimRun {
       // to the branch the sync reads whatever branch this checkout is on.
       ...(typeof claim.default_branch === 'string' && claim.default_branch !== '' ? { default_branch: claim.default_branch } : {}),
       handoff: handoffUrl, resume, advice,
+      ...(claim.previous_attempts?.length ? { previous_attempts: claim.previous_attempts } : {}),
+      ...(claim.person_answer ? { person_answer: claim.person_answer } : {}),
       checkout: this.checkout, session: state.session,
-      state: this.o.stateFile, runner: this.state.get().runner_id,
+      state: this.state.view, runner: this.state.get().runner_id,
     };
     // R-BTN-202 (B-248): the leg this ticket already ran under a local order while Baton was
     // unreachable — Baton offered that same leg from that same station, so its result is
@@ -926,13 +938,14 @@ export class ClaimRun {
     // git stays there for the leg that runs now.
     const pre = this.preworked;
     this.preworked = null;
+    if (pre) this.o.queue?.takeWorked(ticket);
     const usePre = pre != null && !resuming && pre.leg === legName && pre.at === at;
     if (pre != null && !usePre) this.o.log(`baton: ${ticket}'s ${pre.leg} ran offline from ${pre.at} under ${pre.by}'s order, but Baton offers ${legName} at ${at} — the offline result is not reported, and ${legName} runs as offered (what the offline leg pushed stays in git) (R-BTN-202)`);
     if (usePre) {
       this.localOrder = { by: pre.by, ran_at: pre.ran_at };
       this.o.log(`baton: ${ticket}'s ${legName} ran offline at ${pre.ran_at} under ${pre.by}'s order — its result is reported now, gated as usual (R-BTN-202)`);
     }
-    const outcome = usePre ? { kind: 'ok' as const, result: pre.result } : resuming ? await this.reattachedLeg(course, legName, resuming.handle) : await this.runLeg(course, legName, ctx, scratch);
+    const outcome = usePre ? { kind: 'ok' as const, result: pre.result } : resuming ? await this.reattachedLeg(course, legName, resuming.handle, ctx) : await this.runLeg(course, legName, ctx, scratch);
     state.resuming = undefined;
     // R-BTN-72 (B-188): the run is over — nothing of it is left for a restart to reattach to.
     if (this.place.handle) {
@@ -940,7 +953,7 @@ export class ClaimRun {
       this.host.savePlace(this);
     }
     const script = course.scripts.get(legName) ?? null;
-    if (outcome.kind !== 'lease-lost' && outcome.kind !== 'missing') {
+    if (outcome.kind === 'ok' || outcome.kind === 'crashed') {
       state.ranScript = script;
       state.ranCtx = ctx;
     }
@@ -966,6 +979,11 @@ export class ClaimRun {
     if (outcome.kind === 'lease-lost' || this.claimLost()) {
       // The group is dead; no close, no hand-off (R-BTN-24's resume record covers the leg).
       return await this.finish(claimId, { end_reason: 'released:lease-lost', reached: at, next: legName }, null);
+    }
+    if (outcome.kind === 'past-deadline') {
+      const end_reason = this.abortSignal()?.reason ?? `suspended:${at}`;
+      return await this.finish(claimId, { end_reason, reached: at, next: legName },
+        await this.callHandoff(state.ranScript, state.ranCtx ?? {}) ?? state.handoffUrl);
     }
     if (outcome.kind === 'missing') {
       this.o.log(`baton: the snapshot has no legs/${legName}.mjs — a script bug the test kit owns (§2d)`);
@@ -1072,11 +1090,16 @@ export class ClaimRun {
     // finished leg's evidence already in git (R-BTN-121, R-BTN-71).
     // S-BTN-63 (B-30): distinguish a closed self-loop from abandoning the run at its start.
     const loopEnd = closed && verdict.reached === state.at ? { finished_self_loop: true, ended_at_sha: closed } : {};
+    const suspendHere = async () => this.finish(claimId, {
+      end_reason: `suspended:${verdict.reached}`, reached: verdict.reached, next: verdict.leg,
+      ...(verdict.outputs ? { outputs: verdict.outputs } : {}), ...loopEnd, ...(closed ? { ended_at_sha: closed } : {}),
+    }, await this.callHandoff(script, ctx) ?? handoffUrl);
+    const bounds = this.o.bounds;
+    if (this.pastRunDeadline() || (bounds?.legs && !bounds.legs.includes(verdict.leg))
+      || state.starts >= (bounds?.maxLegs ?? 8)) return await suspendHere();
     const locked = await this.host.ensureLegLocks(this, verdict.leg, course);
     if (this.claimLost()) return await this.finish(claimId, { end_reason: 'released:lease-lost', reached: state.at, next: legName }, null);
-    if (!locked) {
-      return await this.finish(claimId, { end_reason: `suspended:${verdict.reached}`, reached: verdict.reached, next: verdict.leg, ...(verdict.outputs ? { outputs: verdict.outputs } : {}), ...loopEnd, ...(closed ? { ended_at_sha: closed } : {}) }, await this.callHandoff(script, ctx) ?? handoffUrl);
-    }
+    if (!locked) return await suspendHere();
     this.auditLeg();
     // R-BTN-113 (B-4): the advance that finishes the leg carries its session link beside the
     // beats — the last word for the finished run, as the end's is for a claim's last one.
@@ -1095,9 +1118,11 @@ export class ClaimRun {
     const howEnded = typeof (result as { conclusion?: { cause?: unknown } } | null)?.conclusion?.cause === 'string' ? ` — the agent ${(result as { conclusion: { cause: string } }).conclusion.cause}` : '';
     this.o.log(`baton: ${ticket}'s ${legName} finished: reached ${verdict.reached}, next ${'settle' in answer ? 'the end' : verdict.leg} (run ${run} of ${course.graph.legs.get(legName)?.maxRuns ?? 1})${howEnded}`);
     if ('settle' in answer) {
+      if (answer.deadline) return await suspendHere();
       const end = answer.settle.end_reason === `suspended:${verdict.reached}` ? { ...answer.settle, ...loopEnd } : answer.settle;
       return await this.finish(claimId, end, await this.callHandoff(script, ctx) ?? handoffUrl);
     }
+    state.starts++;
     state.gitPath = [...state.gitPath, { leg: legName, reached: verdict.reached }];
     state.at = answer.station ?? verdict.reached;
     state.nextLegs = answer.next ?? state.nextLegs;
@@ -1143,19 +1168,24 @@ export class ClaimRun {
 
   /** One `advance`, its refusal settled by §6.13: off-graph ends `released:course-changed`; an
    * `entry` refusal (R-BTN-109) ends `released:cannot-finish:contract-output`; a delivered
-   * deadline ends `released:leg-timeout` (R-BTN-90); other refusals suspend. */
-  private async advance(claimId: number, body: { leg: string; reached?: string; bars?: string[]; evidence?: string; outputs?: unknown[]; run_inputs?: { ticket?: { version: string; read_digest: string }; inputs: unknown[] }; head_sha?: string | null; session_url?: string; local_order?: { by: string; ran_at: string } }, fallbackStation: string): Promise<AdvanceAnswer | { settle: Record<string, unknown> }> {
+   * deadline ends `released:leg-timeout` (R-BTN-90); a bounded claim's passed run deadline
+   * suspends at the station the claim reached; other refusals suspend. */
+  private async advance(claimId: number, body: { leg: string; reached?: string; bars?: string[]; evidence?: string; outputs?: unknown[]; run_inputs?: { ticket?: { version: string; read_digest: string }; inputs: unknown[] }; head_sha?: string | null; session_url?: string; local_order?: { by: string; ran_at: string } }, fallbackStation: string): Promise<AdvanceAnswer | { settle: Record<string, unknown>; deadline?: true }> {
     // R-BTN-202 (B-248): the advance that finishes a leg run under a local order says who gave
     // it — once; a refused advance's settling end carries it instead (`finish`).
     if (this.localOrder && body.reached) {
       body = { ...body, local_order: this.localOrder };
     }
+    const until = this.o.bounds?.until;
+    const expired = () => ({ deadline: true as const, settle: { end_reason: `suspended:${fallbackStation}`, reached: fallbackStation, next: body.leg } });
+    if (this.pastRunDeadline()) return expired();
     try {
-      const answer = await this.o.api.advance(claimId, body);
+      const answer = await this.o.api.advance(claimId, { ...body, ...(until != null ? { start_before: until } : {}) });
       if (body.local_order) this.localOrder = null;
       return answer;
     } catch (e) {
       if (!(e instanceof BatonRefusal)) throw e;
+      if (e.ruleCode === 'run-deadline') return expired();
       if (e.ruleCode === 'leg-timeout') return { settle: { end_reason: 'released:leg-timeout' } };
       const kind = refusalKind(e.ruleCode);
       if (kind === 'course-changed') {
@@ -1172,11 +1202,16 @@ export class ClaimRun {
   /** Hold a short wait (R-BTN-40): each beat re-reads the snapshot's legs; 30 minutes spends it.
    * A beat that brought no reading (the fallback timeout) settles nothing — only the clock — and
    * a signal that landed while no leg ran aborts the wait, honoured by the caller. */
+  private pastRunDeadline(): boolean {
+    return this.o.bounds?.until != null && this.o.now() >= this.o.bounds.until;
+  }
+
   private async waitOut(leg: string, course: CourseLoad): Promise<'cleared' | 'spent' | 'abort' | 'lost'> {
     const waitedSince = this.o.now();
     for (;;) {
       if (this.claimLost() || leaseLostFrom(this.state.get(), this.o.now())) return 'lost';
       if (this.pendingAbort) return 'abort';
+      if (this.pastRunDeadline()) return 'spent';
       const shown = await new Promise<NextLegs | null>((resolve) => {
         if (!this.inflight) return resolve(null);
         this.inflight.waiters.push((n) => resolve(n));
@@ -1227,15 +1262,14 @@ export class ClaimRun {
     if (channel) {
       this.legChannel = channel;
       // B-188: the channel's requests are this claim's, whatever context the socket calls from.
-      channel.listen((req) => this.onChannel(req, course, leg, ctx));
+      channel.listen(this.channelHandler(course, leg, ctx));
     }
     // Detached: its own process group, so a lost lease kills the leg and everything it started
     // (§6.13) without touching the runner. The env names the parent every leg session checks
     // (BATON_PARENT — such a session never claims; BATON_STATE — the fence and the spool). B-97
     // dropped the transition's IR_BATON_* spellings: these two names are the only ones set.
-    const parent = String(this.state.get().runner_id ?? '');
     const childEnv: Record<string, string | undefined> = {
-      ...process.env, BATON_PARENT: parent, BATON_STATE: this.o.stateFile,
+      ...this.baseEnv(),
       // R-BTN-144 (B-185): the run's id, and its session — `<run_id>.r0`, the first session;
       // a refresh (R-BTN-123, B-12) counts on from there. Absent when the advance named none.
       ...(typeof ctx.run_id === 'string' ? { BATON_RUN_ID: ctx.run_id, BATON_SESSION_ID: `${ctx.run_id}.r0` } : {}),
@@ -1256,6 +1290,7 @@ export class ClaimRun {
     // R-BTN-107 (B-184): the leg runs in a session of the executor the host chose, keyed by its
     // run id's first session; the previous leg's session goes first (its close and hand-off ran).
     await this.stopSession('next-leg');
+    if (this.pastRunDeadline()) return { kind: 'past-deadline' };
     const env = Object.fromEntries(Object.entries(childEnv).filter((e): e is [string, string] => typeof e[1] === 'string'));
     // R-BTN-144 class 7 (B-170): the leg's masked set is computed once, here, from the environment
     // the leg is given — every variable whose name says a secret, and every name `runner.json`
@@ -1320,6 +1355,10 @@ export class ClaimRun {
     // Give it potential eligibility: a cadence beat can still land the link if startup failed.
     // The actual raise is checked separately against the link Baton already holds.
     const canInteract = channel != null && checkRaise('interact', course.graph?.conditionTypes ?? new Map(), this.raisePolicy(course, leg, this.legSessionUrl)).ok;
+    if (this.pastRunDeadline()) {
+      await this.stopSession('run-deadline');
+      return { kind: 'past-deadline' };
+    }
     const running = this.wrapperCall(handle, 'run', script, [{ ...runCtx, can_interact: canInteract }], undefined, () => sink);
     return await this.awaitLeg(leg, handle, channel, running, sink);
   }
@@ -1435,17 +1474,18 @@ export class ClaimRun {
    *  the session's posted or final result is the leg's, checked as any result is. A lost lease
    *  or claim stops it, no hand-off; a release stops it after the grace, as a leg that will not
    *  take its release is stopped. */
-  private async reattachedLeg(course: CourseLoad, leg: string, handle: Handle): Promise<{ kind: 'ok'; result: unknown } | { kind: 'crashed'; error: string; errorType?: unknown } | { kind: 'lease-lost' }> {
+  private async reattachedLeg(course: CourseLoad, leg: string, handle: Handle, ctx: Record<string, unknown>): Promise<{ kind: 'ok'; result: unknown } | { kind: 'crashed'; error: string; errorType?: unknown } | { kind: 'lease-lost' }> {
     let channel: LegChannel | null = null;
     try {
       channel = await LegChannel.serve(channelPath(this.o.stateFile, handle.session_id));
-      channel.listen((req) => this.onChannel(req, course, leg, this.place.ctx ?? {}));
+      channel.listen(this.channelHandler(course, leg, ctx));
       this.legChannel = channel;
     } catch (e) {
       this.o.log(`baton: the reattached leg's channel could not serve (${msg(e)}) — the leg runs on with no way to raise (R-BTN-106)`);
     }
     handle.posted = channel ? channel.posted : null;
     this.session = { handle, checkout: this.checkout };
+    this.persistPlace(handle, leg, ctx);
     if (typeof handle.link === 'string' && handle.link !== '') {
       this.legSessionUrl = handle.link;
       this.sessionLinkSeq++;
@@ -1502,6 +1542,57 @@ export class ClaimRun {
    * substitute is `error.needs-person`, which it raises like any error. The suspend wait
    * (R-BTN-162) is not built: a `suspend` raise records and returns, nothing waits.
    */
+  private channelHandler(course: CourseLoad, leg: string, ctx: Record<string, unknown>) {
+    const staged = new Map<string, Output>();
+    const from = String((ctx.claim as { station?: string } | undefined)?.station ?? '');
+    const expected = (name: string) => course.outputSchema(leg, name);
+    return async (req: ChannelRequest): Promise<ChannelAnswer> => {
+      if (this.abortSignal() || this.claimLost()) return { ok: false, error: 'the leg is stopping' };
+      if (req.op === 'raise') return this.onChannel(req, course, leg, ctx);
+      if (req.op === 'status') {
+        const duration = course.graph.legs.get(leg)?.maxDuration;
+        const deadline = duration != null && this.inflight ? this.inflight.legAt + duration * 1000 : null;
+        return { ok: true, leg, station: from, deadline, grant: this.state.get().declared ?? [], refresh: false, outputs: [...staged.keys()] };
+      }
+      if (req.op === 'output') {
+        const schema = typeof req.name === 'string' ? expected(req.name) : undefined;
+        if (!schema) return { ok: false, error: 'the leg declares no output of that name' };
+        const content = Object.hasOwn(req, 'value') ? { value: req.value } : { uri: req.uri, digest: req.digest };
+        if (Object.hasOwn(req, 'value') && (req.uri != null || req.digest != null)) {
+          return { ok: false, error: 'give either a value or a pointer' };
+        }
+        const [output] = checkedOutputs([{ name: req.name, schema, ...content }], course.schema, expected);
+        staged.set(output.name, output);
+        return { ok: true };
+      }
+      const posted = req.result;
+      const raw = req.op === 'release' ? { release: req.reason, reached: from, next: leg }
+        : req.op === 'suspend' ? { suspend: true, reached: req.reached, next: req.next }
+        : posted ?? { reached: req.reached, next: req.next };
+      if (typeof raw !== 'object' || raw == null || Array.isArray(raw)) return { ok: false, error: 'expected a leg result' };
+      const result = { ...raw } as Record<string, unknown>;
+      const fields = new Set(['reached', 'next', 'end', 'suspend', 'release', 'outputs', 'detail']);
+      if (Object.keys(result).some((key) => !fields.has(key))) return { ok: false, error: 'unexpected field in channel result' };
+      if (typeof result.reached !== 'string' || (result.next != null && typeof result.next !== 'string')
+        || (result.end !== undefined && result.end !== 'done') || (result.suspend !== undefined && result.suspend !== true)
+        || (result.release !== undefined && typeof result.release !== 'string') || (result.detail !== undefined && typeof result.detail !== 'string')
+        || ['end', 'suspend', 'release'].filter((key) => result[key] !== undefined).length > 1) {
+        return { ok: false, error: 'malformed channel result' };
+      }
+      const move = decide(result, course.graph, leg, from);
+      if ('bug' in move) return { ok: false, error: move.why };
+      const outputs = checkedOutputs(result.outputs ?? [...staged.values()], course.schema, expected);
+      checkMoveOutputs(outputs, course.graph, move, from, course.schema);
+      if (move.kind !== 'advance') {
+        checkEnd({ end_reason: move.kind === 'suspend' ? `suspended:${move.reached}` : move.kind === 'release' ? `released:${move.reason}` : 'done',
+          reached: move.reached, next: move.kind === 'done' ? null : move.next, detail: result.detail });
+      } else if (result.detail !== undefined) {
+        return { ok: false, error: 'detail is only available on an end' };
+      }
+      return { ok: true, result: { ...result, ...(move.kind !== 'release' && outputs.length ? { outputs } : {}) } };
+    };
+  }
+
   private async onChannel(req: ChannelRequest, course: CourseLoad, leg: string, ctx: Record<string, unknown>, typedMessage?: string): Promise<ChannelAnswer> {
     if (req.op !== 'raise') return { ok: false, error: `the channel carries raise and done, nothing else (R-BTN-106)` };
     const ticket = String((ctx.ticket as { id?: string })?.id ?? '');
@@ -1687,11 +1778,13 @@ export class ClaimRun {
         local_order: { by: order.by, ran_at: ranAt },
         leg, run: runNumber(course.graph, [], leg, []),
         snapshot: { sha, path: [], next: [] },
+        ...sourceContext(course),
         handoff: null, resume: null, advice: null,
         checkout: this.o.home, session: null,
-        state: this.o.stateFile, runner: this.state.get().runner_id,
+        state: this.state.view, runner: this.state.get().runner_id,
       };
       const outcome = await this.runLeg(course, leg, ctx, scratch);
+      if (outcome.kind === 'past-deadline') return; // Keep the unstarted order.
       if (outcome.kind !== 'ok') {
         const what = outcome.kind === 'crashed' ? `failed (${maskLegOutput(outcome.error, this.legSecrets)})` : outcome.kind === 'missing' ? `has no legs/${leg}.mjs at ${sha.slice(0, 10)}` : 'was stopped';
         q.dropOrder(ticket);

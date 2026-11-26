@@ -244,8 +244,9 @@ describe('B-240 Running and Timeline in joined queries', { timeout: 120_000 }, (
     expect(large.length).toBe(small.length);
     // 80 of B-240's joined reads, the one version row B-242's ETag reads before them, and
     // R3-1258's fixed Capacity statements: the envelope's two counted figures, the maintained
-    // two's one row, the day's usage row read — and the request's own usage write in the tail.
-    expect(large.length).toBeLessThanOrEqual(89);
+    // two's one row, the day's usage row read — and the request's own usage write in the tail;
+    // and S-BTN-56's two fixed Needs-you reads (the repositories' dispatch settings, the late wants).
+    expect(large.length).toBeLessThanOrEqual(91);
     // The joined reads, explained: each searches an index and none scans its table.
     const lookups = large.filter((l) => /FROM (claims|activities|transcripts|events|ticket_next_legs n|ticket_stations s JOIN ticket_next_legs n)\b/.test(l.sql) && /json_each|fence_pending|confirmed_at IS NULL AND ended_at <=|waiting_on = 'policy'|waiting_on = 'course-changed'/.test(l.sql));
     expect(lookups.length).toBeGreaterThanOrEqual(9);

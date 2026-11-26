@@ -3,12 +3,12 @@
 // never changes a repository Baton knows; a sync token binds to exactly one repository's
 // workflow on its default branch; a dispatch names that repository's workflow. S-BTN-26.
 import { describe, it, expect, vi } from 'vitest';
+import { dispatchWorkflow } from '../../src/core/dispatch';
 import { checkRegistration } from '../../src/core/registry';
 import { branchMatches } from '../../src/core/claims';
 import { checkRegistry } from '../../src/core/courses';
 import type { DispatchTarget } from '../../src/core/ports';
-import { dispatchWorkflow } from '../../src/core/mirror';
-import { rows, withCore, retireRepositoryIn, setUnblockedTriggerIn } from '../helpers';
+import { rows, withCore, retireRepositoryIn, seedEventIn, setUnblockedTriggerIn } from '../helpers';
 
 const OPS = { id: 'ops', github: 'immediately-run/ops', default_branch: 'trunk', sync_workflow: '.github/workflows/sync.yml' };
 const claimsOf = (repository: string, workflow: string, branch = 'trunk') =>
@@ -20,7 +20,7 @@ describe('checkRegistration', () => {
       ...OPS, mirror_workflow: null, weight: 100, tiers: ['routine', 'judgement', 'critical'], transcript_repos: [], cut_over: false,
       // R-BTN-92/93 (R3-1262): a GitHub repository's forge fields and CI identity default from its path.
       forge: 'github', remote: 'https://github.com/immediately-run/ops.git', web_base: 'https://github.com/immediately-run/ops',
-      ci_identity: { kind: 'github-actions' }, sync_keys: [],
+      ci_identity: { kind: 'github-actions' }, sync_keys: [], dispatch: { kind: 'github-app' },
     });
   });
 
@@ -97,6 +97,8 @@ describe('the registry', () => {
       c.registry.register(OPS);
       const got: DispatchTarget[] = [];
       (c as unknown as { ports: { dispatch: { send: (t: DispatchTarget) => Promise<boolean> } } }).ports.dispatch = { send: async (t) => (got.push(t), true) };
+      c.syncWants.request('ops');
+      seedEventIn(c.store, { repository_id: 'docs', at: 1, kind: 'claimed', actor: 'baton', detail_json: '{}', ticket_id: null });
       expect(await c.dispatcher({ repository: 'ops', kind: 'sync' })).toBe(true);
       expect(await c.dispatcher({ repository: 'docs', kind: 'mirror' })).toBe(true);
       expect(await c.dispatcher({ repository: 'ops', kind: 'mirror' })).toBe(false);
@@ -104,8 +106,8 @@ describe('the registry', () => {
       return got;
     });
     expect(sent).toEqual([
-      { github: 'immediately-run/ops', workflow: 'sync.yml', ref: 'trunk' },
-      { github: 'immediately-run/docs', workflow: 'baton-mirror.yml', ref: 'main' }]);
+      expect.objectContaining({ github: 'immediately-run/ops', workflow: 'sync.yml', ref: 'trunk' }),
+      expect.objectContaining({ github: 'immediately-run/docs', workflow: 'baton-mirror.yml', ref: 'main' })]);
   });
 
   it('an unblocked dispatch sends the owners’ workflow with one `tickets` input; a trigger it cannot send is false (R-BTN-77)', async () => {
@@ -123,7 +125,7 @@ describe('the registry', () => {
       expect(await c.dispatcher({ repository: 'ops', kind: 'unblocked', tickets })).toBe(false);
       return got;
     });
-    expect(sent).toEqual([{ github: 'immediately-run/docs', workflow: 'baton-unblocked.yml', ref: 'main', inputs: { tickets: JSON.stringify(tickets) } }]);
+    expect(sent).toEqual([expect.objectContaining({ github: 'immediately-run/docs', workflow: 'baton-unblocked.yml', ref: 'main', inputs: { tickets: JSON.stringify(tickets) } })]);
   });
 
   it('dispatchWorkflow posts `inputs` only when the target has them', async () => {

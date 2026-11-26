@@ -77,7 +77,7 @@ function makeRunner(log: string[]) {
   return testRunner({
     home: dir,
     capabilities: [...capabilitiesOf(['agent-venue'])],
-    session: `s203-${Date.now()}`, courses: [{ course: 'create-pr', version: 1 }], stateFile: join(tmpdir(), `baton-s203-${process.pid}-${Date.now()}.json`),
+    session: `s203-${Date.now()}`, courses: [{ course: 'create-pr', version: 2 }], stateFile: join(tmpdir(), `baton-s203-${process.pid}-${Date.now()}.json`),
     beatEvery: 60_000, log: (l) => log.push(l),
   });
 }
@@ -132,7 +132,7 @@ async function scaffold(ceremony = true): Promise<{ baseline: string; filed: str
   // No --agent-command at the scaffold: the owner-signed baseline must CHANGE the settings to
   // count (the walk reads the commit that last changed a group; an empty signature signs
   // nothing), so it is the commit that names the agent.
-  expect(await initMain([], { root: dir, log: () => {} })).toBe(0);
+  expect(await initMain(['--own'], { root: dir, log: () => {} })).toBe(0);
   write('agent.mjs', "import { appendFileSync } from 'node:fs';\nappendFileSync('ran-agent.txt', process.argv.slice(2).join(' ') + '\\n');\n");
   write('evil-agent.mjs', "import { appendFileSync } from 'node:fs';\nappendFileSync('ran-agent.txt', 'THE PUSHED AGENT\\n');\n");
   write('tickets/B-9001.mdx', '---\nid: B-9001\ntitle: Signed control\n---\n\n**Brief:** the owner, 2026-11-06: hold the line.\n\nWork.\n');
