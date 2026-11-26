@@ -10,7 +10,7 @@ tags:
   - roadmap-item
 order: 1104
 tier: judgement
-description: "Couriers, the fact reader, the protection checker, check-runners, instruments, the dispatch courier and the adoption-era mirror and shadow machinery are each an actor with its own role, registration and conditions. The review finds most collapse into trusted runners, the sync, grant roles or service keys without weakening any guarantee in R-BTN-189. Decide each and amend the spec."
+description: "Couriers, the fact reader, ~~the protection checker,~~ check-runners, instruments, the dispatch courier and the adoption-era mirror and shadow machinery are each an actor with its own role, registration and conditions. The review finds most collapse into trusted runners, the sync, grant roles or service keys without weakening any guarantee in R-BTN-189. Decide each and amend the spec."
 topics:
   - baton
 owns: {}
@@ -29,10 +29,10 @@ verifies each against the text before changing anything.
 ### Why
 
 Review finding 3 and section 1.1, candidate by candidate:
-- git courier → `runner` the cooperative deliverer, `trusted-runner` the protected one (today
+- git courier → `runner` the ~~cooperative~~ deliverer ~~, `trusted-runner` the protected one~~ (today
   a one-machine user with `--bind-conditions` must run a courier or notifications never leave);
 - fact reader → the sync, under `protected` restricted to `sync-key`/`ci-identity`;
-- protection checker → a mode of the merge runner;
+- ~~protection checker → a mode of the merge runner;~~
 - ~~check-runner → a grant role;~~ instrument → a `service:` key;
 - dispatch courier → delete (it guards reach 0 only; see B-160);
 - mirror, shadow mode, legacy runners, adoption requests, cutover → an adoption appendix that
@@ -44,7 +44,7 @@ Review finding 3 and section 1.1, candidate by candidate:
 immediately-run/baton#150; the restructure, B-166, writes them into the spec):
 
 - Couriers merge into runners ("Couriers into runners"); the dispatch courier is dropped ("Drop
-  it", with B-160). Kept as they are: the fact reader, the protection checker, ~~check-runners,~~
+  it", with B-160). Kept as they are: the fact reader, ~~the protection checker,~~ ~~check-runners,~~
   instruments, and the mirror and adoption machinery.
 
 ### What to build
@@ -52,8 +52,8 @@ immediately-run/baton#150; the restructure, B-166, writes them into the spec):
 1. **A spec PR first**, under the babysit skill's *Spec PRs*: two fresh reviewers, the impact list,
    every rule restating the same fact changed with it.
 2. For each candidate, the PR states the merge or removal and what (if anything) it loses.
-3. Tickets that build the removed actors (B-140's fact reader, B-152's dispatch courier, the
-   protection checker) are rewritten or superseded with a map, per the babysit skill.
+3. Tickets that build the removed actors (B-140's fact reader, B-152's dispatch courier ~~, the
+   protection checker~~) are rewritten or superseded with a map, per the babysit skill.
 
 ### Exit criteria
 
@@ -68,3 +68,7 @@ immediately-run/baton#150; the restructure, B-166, writes them into the spec):
 - 2026-11-02: written by the spec restructure's part 2 (B-166, the PR `baton-spec-restructure-p2`): couriers are gone as a key role — a deliverer is a runner whose grant role the policy's `outbox` admits (R-BTN-171, §12.1, §13.2, §14 `/v1/runner/outbox/*`); the dispatch courier and the `dispatch` outbox kind are gone, Baton dispatching workflows itself with the App key it holds (R-BTN-94, §12.7); the fact reader, the protection checker, check-runners, instruments and the mirror stay. Build tickets rescoped: B-64, B-5, B-6, B-120, B-135, R3-1208, B-8, B-157.
 
 _(2026-11-20: the owner cut the check-runner and the forge-check deliverer on 2026-11-19 (`docs/review/spec-simplification-review-2026-11-19.mdx`, ruling 5), which replaces "kept as they are" for check-runners: the two clauses naming them are struck. B-290 removes what is built of the checks.)_
+
+_(2026-11-24: the protection checker is struck throughout: B-189's spec PR (`spec/BATON_SPEC_HISTORY.md`, the entry of 2026-11-24), on the owner's rulings of 2026-11-09 and 2026-11-24 (runners trusted, legs not) retires it — `baton repo protect --print | --check` is a tool a person runs and Baton reads nothing from it (§12.8) — and retires the trusted-runner role, so any runner declaring `git` delivers it.)_
+
+_(2026-11-24: rules re-read: R-BTN-171, R-BTN-180, R-BTN-182)_

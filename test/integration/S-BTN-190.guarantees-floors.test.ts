@@ -10,7 +10,10 @@
 import { describe, it, expect, beforeEach, inject } from 'vitest';
 import { hashOfDocument, PROTECTED } from '../../src/core/policy';
 import { call as hostCall } from '#host';
-import { cutover, keyCall, ORIGIN, payload, rows, setAdminKeys, setClock, setHumanKeys, syncCall, syncToken, tick, withCore } from '../helpers';
+import {
+  cutover, keyCall, ORIGIN, payload, rows, setAdminKeys, setClock, setHumanKeys, syncCall, syncToken, tick,
+  withCore, setGrantRole, setOwnerAttestation, setRepositoryGrantTrust, seedPolicyFloor, seedRepositoryPolicyIn,
+} from '../helpers';
 import { makeKey, sshsig, signedRequest, type TestKey } from '../lib/sshKeys';
 
 const board = inject('board');
@@ -44,7 +47,7 @@ async function runnerBeatAs(session: string, secret: string, over: Record<string
   const known = runnerSessions.has(session);
   const res = await hostCall(await signedRequest(runnerKey, ORIGIN + '/v1/runner/heartbeat', {
     created, ...(known ? { headers: { 'X-Runner-Secret': secret } } : {}),
-    body: JSON.stringify({ hostname: 'runner-host', session_name: session, harness: 'opencode', kind: 'vm', billing: {}, capabilities: ['agent-venue'], tier_ceiling: 'critical', lease_timeout_s: 900, ...(known ? {} : { secret_hash: await sha256Of(secret) }), courses: [{ repository: 'ops', course: 'roadmap-pr', version: 3 }], ...over }),
+    body: JSON.stringify({ hostname: 'runner-host', session_name: session, harness: 'opencode', kind: 'vm', billing: {}, capabilities: ['agent-venue'], lease_timeout_s: 900, ...(known ? {} : { secret_hash: await sha256Of(secret) }), courses: [{ repository: 'ops', course: 'roadmap-pr', version: 3 }], ...over }),
   }));
   if (res.status === 200) runnerSessions.add(session);
   return { status: res.status, json: (await res.json()) as Record<string, any> };
@@ -64,7 +67,7 @@ async function checkerBeatAs(session: string, secret: string, repository: string
   // report carries it (round 1, finding 15).
   const res = await hostCall(await signedRequest(checkerKey, ORIGIN + '/v1/runner/heartbeat', {
     created, ...(checkerSessions.has(session) ? { headers: { 'X-Runner-Secret': secret } } : {}),
-    body: JSON.stringify({ hostname: 'checker-host', session_name: session, harness: 'opencode', kind: 'vm', billing: {}, capabilities: [], tier_ceiling: 'critical', lease_timeout_s: 900, ...(checkerSessions.has(session) ? {} : { secret_hash: await sha256Of(secret) }), courses: [], protection: [{ repository, matched, reading_hash: readingHash, legs: { count: 2, tickets: 5 } }] }),
+    body: JSON.stringify({ hostname: 'checker-host', session_name: session, harness: 'opencode', kind: 'vm', billing: {}, capabilities: [], lease_timeout_s: 900, ...(checkerSessions.has(session) ? {} : { secret_hash: await sha256Of(secret) }), courses: [], protection: [{ repository, matched, reading_hash: readingHash, legs: { count: 2, tickets: 5 } }] }),
   }));
   if (res.status === 200) checkerSessions.add(session);
   expect(res.status).toBe(200);
@@ -104,10 +107,10 @@ async function protectedWithSignedAuthorship() {
 
 async function makeChecker() {
   expect((await keyCall(owner, '/v1/owner/ops/grants', { public_key: checkerKey.publicKey, hostname: 'checker-host', capabilities: ['agent-venue'] })).status).toBe(200);
-  await rows('UPDATE runner_grants SET role = ? WHERE credential_id = ? AND repository_id = ?', 'protection-checker', checkerKey.fingerprint, 'ops');
+  await setGrantRole('ops', 'protection-checker', checkerKey.fingerprint);
   const created = Math.floor((await withCore((c) => c.now())) / 1000);
   await hostCall(await signedRequest(checkerKey, ORIGIN + '/v1/runner/heartbeat', {
-    created, body: JSON.stringify({ hostname: 'checker-host', session_name: 'checker', harness: 'opencode', kind: 'vm', billing: {}, capabilities: [], tier_ceiling: 'critical', lease_timeout_s: 900, secret_hash: await sha256Of(CHECKER_SECRET), courses: [] }),
+    created, body: JSON.stringify({ hostname: 'checker-host', session_name: 'checker', harness: 'opencode', kind: 'vm', billing: {}, capabilities: [], lease_timeout_s: 900, secret_hash: await sha256Of(CHECKER_SECRET), courses: [] }),
   }));
   checkerSessions.add('checker');
 }
@@ -191,8 +194,7 @@ describe('S-BTN-190 guarantees and floors', () => {
     await protectedWithSignedAuthorship();
     await checkerBeat('ops', true, 'reading-1');
     // Persist the legacy floor directly: the current API correctly cannot create it.
-    await rows('INSERT INTO policy_floors (repository_id, name, guarantees, remove_by, added_by, added_at) VALUES (?, ?, ?, ?, ?, ?)',
-      'ops', 'legacy', JSON.stringify([guarantee]), 'human', human.fingerprint, T0);
+    await seedPolicyFloor({ repository_id: 'ops', name: 'legacy', guarantees: JSON.stringify([guarantee]), remove_by: 'human', added_by: human.fingerprint, added_at: T0 });
     const read = await as(owner, '/v1/repositories/ops/policy');
     expect(read.json.guarantees[guarantee]).toBe(false);
     expect((await claimAsRunner()).json.rule_code).toBe('floor-broken');
@@ -209,10 +211,8 @@ describe('S-BTN-190 guarantees and floors', () => {
     await checkerBeat('ops', true, 'reading-1');
     // Simulate a pre-upgrade version and floor; neither can be installed on the new binary.
     const hardware = { ...doc, human_key: 'hardware' };
-    await rows('INSERT INTO repository_policies (repository_id, version, policy_json, hash, previous_hash, changed_by, approver, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-      'ops', version + 1, JSON.stringify(hardware), hashOfDocument(hardware), hashOfDocument(doc), breakGlass.fingerprint, 'human', T0);
-    await rows('INSERT INTO policy_floors (repository_id, name, guarantees, remove_by, added_by, added_at) VALUES (?, ?, ?, ?, ?, ?)',
-      'ops', 'legacy', JSON.stringify(['human-gates-hardware']), 'human', breakGlass.fingerprint, T0);
+    await withCore((core) => seedRepositoryPolicyIn(core.store, { repository_id: 'ops', version: version + 1, policy_json: JSON.stringify(hardware), hash: hashOfDocument(hardware), previous_hash: hashOfDocument(doc), changed_by: breakGlass.fingerprint, approver: 'human', preset: null, at: T0 }));
+    await seedPolicyFloor({ repository_id: 'ops', name: 'legacy', guarantees: JSON.stringify(['human-gates-hardware']), remove_by: 'human', added_by: breakGlass.fingerprint, added_at: T0 });
     expect((await claimAsRunner()).json.rule_code).toBe('floor-broken');
     expect((await as(breakGlass, '/v1/owner/ops/policy/floors', { name: 'legacy', remove: true, confirm: true })).status).toBe(403);
     expect((await as(breakGlass, '/v1/owner/ops/policy', { base_version: version + 1, policy: doc }, 'PUT')).status).toBe(403);
@@ -301,7 +301,7 @@ describe('S-BTN-190 guarantees and floors', () => {
 
   it('ignores a legacy runner policy pin without gating claims or opening a condition', async () => {
     await protectedWithSignedAuthorship();
-    await rows('UPDATE runner_grants SET trust_level = ?, trust_domain = ? WHERE credential_id = ? AND repository_id = ?', 'trusted', 'runner-host', runnerKey.fingerprint, 'ops');
+    await setRepositoryGrantTrust('ops', 'trusted', 'runner-host', runnerKey.fingerprint);
     const beat = await runnerBeat('runner-secret', { policy_pins: [{ repository: 'ops', hash: 'e'.repeat(64) }] });
     expect(beat.status).toBe(200);
     expect(beat.json).not.toHaveProperty('policies');

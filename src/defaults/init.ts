@@ -1,26 +1,25 @@
 // `baton repo init` (R-BTN-74, R-BTN-131): scaffold standard courses and check their stubs.
-import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import { DEFAULT_URL } from '../client/config.mjs';
 import { HARNESS_ADAPTERS, selectHarness } from '../runner/harness';
 import { DEFAULT_BRANCH_PATTERN, DEFAULT_CREATE_PR_REVIEW_ROUNDS, REVIEW_DEFAULTS_PATH } from './course-pr';
 import { parseSource, printSource } from './course-source';
 import { DEFAULT_COURSE, builtIn, scaffoldable, type BuiltIn } from './courses';
-import { cliPin, cliSelf, cliVersion, courseFileText, parsePin, sameRepo, type BatonJson, type CourseEntry } from './repo-source';
+import { cliPin, cliSelf, cliVersion, courseEntry, courseFileText, parsePin, sameRepo, type BatonJson, type CourseEntry } from './repo-source';
 import { OVERRIDE_SUFFIX } from './stub-config';
-import { instructionsOf, overrideSource, requireCleanStubInputs, runnerLegs, stubBytes, wrapperExample, WRAPPER_EXAMPLE, writeWrapper } from './stubs';
+import { instructionsOf, overrideSource, requireCleanStubInputs, runnerLegs, stubBytes, wrapperExample, WRAPPER_EXAMPLE, writeStub, writeWrapper } from './stubs';
+import { resolveSource } from './sync';
+import { courseFiles, coursePath, isOverride } from './course-tree';
+import { git, gitText } from './git.mjs';
+
+const gitRaw = (root: string, ...args: string[]): string => git(root, args);
 import { dibberConfig } from './dibber';
 import { readTicketSettings } from './tickets-config';
 import { PAGE_NAME, ticketsPage } from './tickets-page';
 
 export { prebuildDefaults } from './stubs';
-
-/** The `courses` entry `baton repo init` writes: every R-BTN-51 field, so a repository edits
- * them where the spec says rather than discovering them. Never `min_worker_version`: init
- * writes the new name only; the window is on the read (above). */
-function courseEntry(b: BuiltIn): Required<Omit<CourseEntry, 'previous_branch_pattern' | 'source' | 'min_worker_version'>> {
-  return { id: b.id, version: b.version ?? 1, min_runner_version: 1, skill: b.skill, step_kinds: Object.keys(b.course.legs), branch_pattern: DEFAULT_BRANCH_PATTERN, protocol_files: [] };
-}
 
 /** The first non-directory component, including symlinks the runner cannot traverse in Git. */
 function nonDirectory(root: string, rel: string): string | null {
@@ -131,6 +130,9 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
   let agentNamed = false;
   let agentCommand: string | null = null;
   const overrides: string[] = [];
+  const instructions: string[] = [];
+  let prune = false;
+  let ownCourse = false;
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const value = (): string => {
@@ -143,6 +145,9 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
     else if (a === '--force') force = true;
     else if (a === '--check') check = true;
     else if (a === '--override') overrides.push(value());
+    else if (a === '--instructions') instructions.push(value());
+    else if (a === '--prune') prune = true;
+    else if (a === '--own') ownCourse = true;
     else if (a === '--agent') {
       const v = value();
       const adapter = selectHarness(v);
@@ -159,6 +164,10 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
   const root = io.root ?? process.env.BATON_HOME ?? process.cwd();
   const settingsPath = join(root, '.baton', 'baton.json');
   const existing = existsSync(settingsPath) ? (JSON.parse(readFileSync(settingsPath, 'utf8')) as BatonJson) : null;
+  if (prune) {
+    if (!existing || argv.some((a) => a !== '--prune' && a !== '--course' && a !== named)) throw new Error('usage: baton repo init --prune [--course <id>] (on an existing home)');
+    return pruneCourses(root, (existing.courses ?? []).filter((c) => !named || c.id === named), log);
+  }
   if (check) {
     if (force || pin || eject || overrides.length || agentNamed || agentCommand != null) throw new Error('--check is read-only and takes only --course');
     return checkStubs(root, existing, named, log);
@@ -195,7 +204,7 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
   const own = cliSelf();
   const pinned = pin ? parsePin(pin) : null;
   const self = own ?? pinned;
-  const sourceOf = (id: string): string | null => (self ? printSource({ provider: 'github', namespace: self.namespace, repository: self.repository, ref: self.sha, course: id }) : null);
+  const sourceOf = (id: string): string | null => (self ? printSource({ provider: 'github', namespace: self.namespace, repository: self.repository, ref: self.sha, course: `standard-${id}` }) : null);
   const kept: string[] = [];
   /** Write `rel` when it is missing, or when `rewrite` (Baton's file, and its course is being
    * rewritten); otherwise it is kept. */
@@ -227,7 +236,15 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
     if (!c.source || !self) return false;
     const src = parseSource(c.source);
     // An entry whose source names another course than its id is the sync's to refuse, not init's to move.
-    return sameRepo(src, self) && src.ref !== self.sha && src.course === c.id && builtIn(src.course) != null;
+    return sameRepo(src, self) && src.ref !== self.sha && [c.id, `standard-${c.id}`].includes(src.course) && builtIn(c.id) != null;
+  };
+  const moveSource = (c: CourseEntry): CourseEntry => {
+    const source = sourceOf(c.id)!;
+    if (c.id !== 'create-pr') return { ...c, source };
+    const { min_worker_version, ...rest } = c;
+    const min_runner_version = Math.max(2, c.min_runner_version ?? min_worker_version ?? c.version);
+    return { ...rest, source, version: Math.max(builtIn(c.id)?.version ?? 1, c.version), min_runner_version,
+      step_kinds: [...new Set([...(c.step_kinds ?? []), ...Object.keys(builtIn(c.id)!.course.legs)])] };
   };
   /** The sources name this CLI's repository at its commit, whose registry writes the files; a
    * workflow pinned to another repository or commit would run a CLI that refuses them
@@ -239,7 +256,7 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
     }
   };
   if (named == null && standard && standard.id !== course) {
-    if (overrides.length) throw new Error(`--override: course ${course} is now ${standard.id} — \`baton repo init --course ${standard.id}\` scaffolds it first`);
+    if (overrides.length || instructions.length) throw new Error(`course ${course} is now ${standard.id} — \`baton repo init --course ${standard.id}\` scaffolds it first`);
     // A repository still on `pr` may list sourced courses beside it: the pin and their sources
     // move together here too, as on every init.
     const courses = existing?.courses ?? [];
@@ -247,8 +264,7 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
     const movedHere = courses.filter(moves).map((c) => c.id);
     if (movedHere.length) {
       requireCleanStubInputs();
-      writeFileSync(settingsPath, `${JSON.stringify({ ...existing, courses: courses.map((c) => (moves(c) ? { ...c, source: sourceOf(c.id)! } : c)) }, null, 2)}\n`);
-      for (const id of movedHere) await scaffold(builtIn(id)!, true);
+      writeFileSync(settingsPath, `${JSON.stringify({ ...existing, courses: courses.map((c) => (moves(c) ? moveSource(c) : c)) }, null, 2)}\n`);
       log(`baton: ${movedHere.join(', ')} now from ${self!.sha.slice(0, 10)}`);
     }
     writeWorkflow();
@@ -257,13 +273,12 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
   }
   const b = scaffoldable(course);
   requireCleanStubInputs();
-  for (const leg of overrides) {
-    if (!runnerLegs(b).includes(leg)) throw new Error(`--override ${leg}: ${b.id} has no such leg — its legs are ${runnerLegs(b).join(', ')}`);
+  for (const leg of [...overrides, ...instructions]) {
+    if (!runnerLegs(b).includes(leg)) throw new Error(`${overrides.includes(leg) ? '--override' : '--instructions'} ${leg}: ${b.id} has no such leg — its legs are ${runnerLegs(b).join(', ')}`);
   }
-  const entry = { ...courseEntry(b), ...(sourceOf(b.id) ? { source: sourceOf(b.id)! } : {}) };
+  const entry = { ...courseEntry(b), ...(!ownCourse && sourceOf(b.id) ? { source: sourceOf(b.id)! } : {}) };
   let settings: BatonJson;
   let changed: string | null = null;
-  let rewriteNamed = force;
   let commandMoved = false;
   const moved: string[] = [];
   if (existing) {
@@ -275,8 +290,7 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
       if (c.id === b.id && force) return entry;
       if (moves(c)) {
         moved.push(c.id);
-        if (c.id === b.id) rewriteNamed = true;
-        return { ...c, source: sourceOf(parseSource(c.source!).course)! };
+        return moveSource(c);
       }
       return c;
     });
@@ -314,12 +328,14 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
     // B-83: the command printed for the unfamiliar, whenever this init named one.
     if (!existing || commandMoved) log(`baton: agent_command${agentCommand != null ? ' (--agent-command)' : ` (the ${agent} harness)`}: ${settings.agent_command}`);
   }
-  await scaffold(b, rewriteNamed || !existing);
-  for (const id of moved.filter((m) => m !== b.id)) await scaffold(builtIn(id)!, true);
+  if (!settings.courses?.find((c) => c.id === b.id)?.source) await scaffold(b, force || !existing);
+  for (const leg of instructions) {
+    await put(`${coursePath(b.id)}/legs/${leg}.md`, (abs) => writeFileSync(abs, instructionsOf(b.id, leg)));
+  }
   for (const leg of overrides) {
-    // The leg script is what loads the override, so an older one (from before overrides) is
-    // replaced: it is Baton's file.
-    await put(`.baton/courses/${b.id}/legs/${leg}.mjs`, async (abs) => writeFileSync(abs, await stubBytes(b, leg)), true);
+    if (!settings.courses?.find((c) => c.id === b.id)?.source) {
+      await put(`${coursePath(b.id)}/legs/${leg}.mjs`, async (abs) => writeFileSync(abs, await stubBytes(b, leg)), true);
+    }
     await put(`.baton/courses/${b.id}/legs/${leg}${OVERRIDE_SUFFIX}`, (abs) => writeFileSync(abs, overrideSource(b, leg)));
     log(`baton: .baton/courses/${b.id}/legs/${leg}${OVERRIDE_SUFFIX} — this repository's run of ${leg}; edit it, and the leg script runs it in place of its own`);
   }
@@ -359,6 +375,82 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
   if (kept.length) log(`baton: kept ${kept.join(', ')} (already there; --force rewrites Baton's files, never your instructions or overrides)`);
   log(`baton: .baton/ scaffolded (course ${b.id}: ${b.summary}) — commit it, add tickets/*.md, and the workflow does the rest`);
   return 0;
+}
+
+async function pruneCourses(root: string, courses: CourseEntry[], log: (line: string) => void): Promise<number> {
+  const scratch = mkdtempSync(join(tmpdir(), 'baton-prune-'));
+  try {
+    for (const entry of courses) {
+      if (entry.source === undefined) continue;
+      const src = await resolveSource(entry.id, entry.source, scratch);
+      const dir = join(root, coursePath(entry.id));
+      // Do not follow links when deciding what to delete.
+      if (!['.baton', '.baton/courses', coursePath(entry.id)].every((p) =>
+        readdirSync(join(root, dirname(p)), { withFileTypes: true }).some((e) => e.name === p.split('/').at(-1) && e.isDirectory()))) continue;
+      const expected = new Map((src.files ?? []).filter((f) => f.regular).map((f) => [f.path, f.read]));
+      if (src.standard) {
+        expected.set('course.json', () => Buffer.from(src.graph));
+        for (const leg of runnerLegs(src.standard)) {
+          const file = join(scratch, `${entry.id}-${leg}.mjs`);
+          await writeStub(src.standard, leg, file);
+          expected.set(`legs/${leg}.mjs`, () => readFileSync(file));
+          expected.set(`legs/${leg}.md`, () => Buffer.from(instructionsOf(entry.id, leg)));
+        }
+      }
+      const walk = (rel: string) => {
+        for (const f of readdirSync(join(dir, rel), { withFileTypes: true })) {
+          const path = rel ? `${rel}/${f.name}` : f.name;
+          if (f.isDirectory()) { walk(path); continue; }
+          const original = expected.get(path);
+          if (f.isFile() && original && readFileSync(join(dir, path)).equals(original())) {
+            rmSync(join(dir, path));
+            log(`baton: removed ${coursePath(entry.id)}/${path} (identical to source)`);
+          } else if (original || !f.isFile() || !isOverride(path)) {
+            log(`baton: kept ${coursePath(entry.id)}/${path} (differs from source; keep as an override or remove)`);
+          }
+        }
+      };
+      walk('');
+    }
+    return 0;
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
+}
+
+export async function showCourseMain(argv: string[], root = process.env.BATON_HOME ?? process.cwd(), log = console.log): Promise<number> {
+  const [id, leg] = argv;
+  if (!id || argv.length > 2) throw new Error('usage: baton course show <course> [<leg>]');
+  const at = gitText(root, 'rev-parse', 'HEAD');
+  const settings = JSON.parse(gitRaw(root, 'show', `${at}:.baton/baton.json`)) as BatonJson;
+  const entry = settings.courses?.find((c) => c.id === id);
+  if (!entry) throw new Error(`.baton/baton.json does not list ${id}`);
+  const scratch = mkdtempSync(join(tmpdir(), 'baton-show-'));
+  try {
+    const src = entry.source === undefined ? null : await resolveSource(id, entry.source, scratch);
+    const show = (path: string, text: string) => log(`--- ${path} ---\n${text.trimEnd()}`);
+    if (src?.standard) {
+      if (!leg) show('course.json', src.graph);
+      const legs = runnerLegs(src.standard);
+      if (leg && !legs.includes(leg)) throw new Error(`${id}: no runnable leg ${leg}`);
+      for (const name of legs.filter((name) => !leg || name === leg)) {
+        const file = join(scratch, `${name}.mjs`);
+        await writeStub(src.standard, name, file);
+        show(`legs/${name}.mjs`, readFileSync(file, 'utf8'));
+        show(`legs/${name}.md`, instructionsOf(id, name));
+      }
+    } else {
+      const wanted = (src?.files ?? courseFiles(root, at, id)).filter((f) => f.regular && (!leg || f.path.startsWith(`legs/${leg}.`)));
+      if (!wanted.length) throw new Error(`${id}: no files${leg ? ` for leg ${leg}` : ''}`);
+      for (const f of wanted) show(f.path, f.read().toString('utf8'));
+    }
+    if (src) for (const f of courseFiles(root, at, id)) {
+      if (f.regular && isOverride(f.path) && (!leg || f.path.startsWith(`legs/${leg}.`))) show(`home override: ${f.path}`, f.read().toString('utf8'));
+    }
+    return 0;
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
 }
 
 

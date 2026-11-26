@@ -106,7 +106,7 @@ function capacities(cx: ReadCtx, capability: string | undefined) {
 }
 
 /** `admin.repo.list`: `BatonCore.adminView`'s rows — `stateView()`'s repository rows — each
- *  with the registry's `tiers`, `sync_keys`, `ci_identity` and `retired_at`; with `?retired=1`
+ *  with the registry's `sync_keys`, `ci_identity` and `retired_at`; with `?retired=1`
  *  the retired rows too (R-BTN-47), which have no head and no courses in force. */
 function registry(cx: ReadCtx, withRetired: boolean) {
   const keys = new Map<string, { fingerprint: string; role: string }[]>();
@@ -115,7 +115,7 @@ function registry(cx: ReadCtx, withRetired: boolean) {
   }
   const extras = (id: string) => {
     const r = cx.core.registry.get(id);
-    return { tiers: r?.tiers ?? [], sync_keys: keys.get(id) ?? [], ci_identity: r?.ci_identity ?? null, retired_at: r?.retired_at ?? null };
+    return { sync_keys: keys.get(id) ?? [], ci_identity: r?.ci_identity ?? null, retired_at: r?.retired_at ?? null };
   };
   const live = cx.core.adminView().repositories.map((row) => ({ ...row, ...extras(row.id) }));
   const retired = !withRetired ? [] : cx.sql<{ id: string }>('SELECT id FROM repositories WHERE retired_at IS NOT NULL ORDER BY id').flatMap(({ id }) => {

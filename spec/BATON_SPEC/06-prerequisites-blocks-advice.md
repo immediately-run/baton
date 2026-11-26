@@ -289,7 +289,8 @@ Not built, each a design its rule below still states:
     posted, each outcome is an option under its own name. Baton stores the question in
     `ticket_questions`, logs `question-posted` once per id, and shows it on the leg's Needs-you
     entry; a question posted for a ticket whose queued leg is not a person's is dropped and
-    logged `question-dropped`.
+    logged `question-dropped`. If the ticket loops back to the same leg, its previous answer
+    stays in history and does not close the new question.
   - **The answer** is a `std:decision@1` attestation (R-BTN-191), `{id, leg, option, reached,
     ref?, answered_by?, commit?}`: `leg` a `kind: person` leg leaving Baton's station, `option` one
     of its options, `reached` the outcome that option names, `id` the question's when one is
@@ -297,7 +298,9 @@ Not built, each a design its rule below still states:
     Needs-you entry, the latter only where the policy's `attestations` entry for
     `std:decision@1` admits `owner`, a session's writer (R-BTN-185); never by a delegated key
     (R-BTN-186) — or attested by the sync from the answer the ticket shows (the markdown
-    source's `answer:` field, R-BTN-74), where the policy's entry admits `sync`. Under
+    source's `answer:` field, R-BTN-74), where the policy's entry admits `sync` and the leg does
+    not set `"answer_source": "person"`. A leg that sets it requires a direct answer and an
+    answer from sync leaves the question open. Under
     `protected` the entry admits `human` alone, so an answer in git does not count there
     (R-BTN-191). An answer naming a leg that is not a person's, an `option` the leg does not
     offer, a `reached` other than the option's, or an `id` other than the posted question's is
@@ -371,7 +374,7 @@ never refuses, and acting against it is accepted and recorded `advice-overridden
   | 11 | Every capability with a capacity in rule 4's set for the leg has a seat no other claim holds (R-BTN-178) | claim, advance | `capacity-full`, naming the holders where the caller may see them |
   | 13 | No repository of the ticket (home, or a `repos:` entry with reach, R-BTN-140) has a held rename (R-BTN-138) | claim | `rename-held` |
   | `person` | The leg is not a person's (R-BTN-116) | claim, advance | `person` |
-  | `floor` | Every guarantee a floor names holds on every repository the ticket reaches: its home and each `repos:` entry with reach (R-BTN-140, R-BTN-189); the protection checker is exempt | claim, advance | `floor-broken` |
+  | `floor` | Every guarantee a floor names holds on every repository the ticket reaches: its home and each `repos:` entry with reach (R-BTN-140, R-BTN-189) | claim, advance | `floor-broken` |
 
   Rules `chain` (R-BTN-106), `isolation` (R-BTN-107), `entry` (R-BTN-109) and `not-queued`
   (R-BTN-72) are gates too; `trusted` is proposed (R-BTN-182). `isEligible`, in the shared decision

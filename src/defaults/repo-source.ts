@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { GIT_SHA } from '../core/validate';
 import type { BuiltIn } from './courses';
 import { remoteSlug } from './remote-slug';
+import { DEFAULT_BRANCH_PATTERN } from './course-pr';
 import { gitText } from './git.mjs';
 
 /** The baton package's root: the nearest directory above this module whose package.json is
@@ -24,6 +25,11 @@ export function packageRoot(from: string = dirname(fileURLToPath(import.meta.url
  * (`dist/build.json`), which stands in for the checkout's HEAD as the courses' source. */
 export const fromSource = (): boolean => existsSync(join(packageRoot(), 'src', 'defaults', 'cli.ts'));
 export const prebuilt = (...path: string[]): string => join(packageRoot(), 'dist', 'defaults', ...path);
+
+/** The deployed create-pr pin that predates portable station modules (B-139): its station
+ *  function, bundled from that exact revision, ships beside the defaults. */
+export const LEGACY_CREATE_PR = 'create-pr-17ae8cce.mjs';
+export const sourceFileOfLegacyStation = (): string => join(packageRoot(), 'src', 'defaults', 'legacy', LEGACY_CREATE_PR);
 
 /** One `courses` entry of `.baton/baton.json` (R-BTN-51). An older file's `{id, version}` takes
  * the defaults below. */
@@ -98,6 +104,14 @@ export function cliPin(): string {
   return `${slug}@${sha}`;
 }
 
+
+/** The `courses` entry `baton repo init` writes: every R-BTN-51 field, so a repository edits
+ * them where the spec says rather than discovering them. Never `min_worker_version`: init
+ * writes the new name only; the window is on the read (above). */
+export function courseEntry(b: BuiltIn): Required<Omit<CourseEntry, 'previous_branch_pattern' | 'source' | 'min_worker_version'>> {
+  // B-311: a course with a reconcile leg needs a runner that hands it `displaced` and `evidence`.
+  return { id: b.id, version: b.version ?? 1, min_runner_version: b.course.legs.reconcile ? (b.id === 'create-pr' ? 3 : 2) : b.id === 'create-pr' ? 2 : 1, skill: b.skill, step_kinds: Object.keys(b.course.legs), branch_pattern: DEFAULT_BRANCH_PATTERN, protocol_files: [] };
+}
 
 /** A standard course's file as init writes it, and as the sync holds a sourced course to. */
 export const courseFileText = (b: BuiltIn): string => `${JSON.stringify(b.course, null, 2)}\n`;

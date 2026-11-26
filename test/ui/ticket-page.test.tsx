@@ -24,8 +24,7 @@ afterEach(() => {
 });
 
 const show = (over: Partial<TicketShow> = {}): TicketShow => ({
-  ticket_id: 'docs:T-1', repository: 'docs', course_id: 'course-a', course: 'course-a', title: 'The first ticket', path: 'tickets/T-1.mdx', tier: 'routine',
-  requires: ['cap-a', 'cap-x'], requires_unmet: ['cap-x'], tags: ['tag-a'], order: null, parent: 'docs:T-0', expedite: false,
+  ticket_id: 'docs:T-1', repository: 'docs', course_id: 'course-a', course: 'course-a', title: 'The first ticket', path: 'tickets/T-1.mdx', requires: ['cap-a', 'cap-x'], requires_unmet: ['cap-x'], tags: ['tag-a'], order: null, parent: 'docs:T-0', expedite: false,
   children: [{ ticket_id: 'docs:T-2', station: 'station-a' }],
   station: { station: 'station-b', path: [{ leg: 'leg-a', reached: 'station-b' }], next_leg: 'leg-b', to_end: 2 },
   position: { station: 'station-b', path_len: 1, next_leg: 'leg-b', next_source: 'course' },

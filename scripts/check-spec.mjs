@@ -20,6 +20,9 @@
 // - every dated history entry after RULES_LINE_SINCE names the rule ids it amended — in its bold
 //   title, or on a `Rules changed: <ids>` line (or `Rules changed: none.`) directly under the line
 //   the title closes on — since the stale-rule guard reads only those (R-BTN-74).
+// - every scenario has a test or a spec/scenarios-pending.json entry (R-BTN-30, B-276); the list
+//   only shrinks against the default branch, except that a new entry may be
+//   `{ "id": "S-BTN-n", "ticket": "B-n" }` naming an open ticket in tickets/ that builds it.
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -29,7 +32,7 @@ import { stripFrontmatter } from './lib/stripFrontmatter.mjs';
 import { basePending, citedIds, codeTexts, definedIds, fileScenario, ledgerProblems, PENDING, pendingBaseRef, pendingIds, ruleLedger, scenarioIds } from './spec-ledger.mjs';
 
 export { citedIds, definedIds, fileScenario, scenarioIds };
-import { exceptionProblems, newExceptionProblems, priorExceptions } from './lib/check-exceptions.mjs';
+import { exceptionProblems, newExceptionProblems, openTickets, priorExceptions } from './lib/check-exceptions.mjs';
 import { readSpecCode } from './lib/spec-code.mjs';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -123,6 +126,7 @@ export function lineage(spec) {
 
 /** The problems with a spec, given the code's texts by path, the ticket ids that exist, the
  *  history file and the names of test/integration/'s files. */
+/** @returns {string[] & {warnings: string[]}} */
 export function check(spec, code, tickets, history = '', testNames = [], allowed = [], retiredAllowed = {}) {
   const problems = [];
   const retiredCitations = [];
@@ -208,7 +212,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   try {
     const pending = pendingIds(readFileSync(join(REPO, PENDING), 'utf8'));
     const baseline = basePending(REPO, pendingBaseRef(REPO), 'spec/BATON_SPEC/15-verification.md');
-    problems.push(...ledgerProblems(ledger, archived, pending, baseline));
+    problems.push(...ledgerProblems(ledger, archived, pending, baseline, openTickets(REPO)));
   } catch (e) {
     problems.push(`could not check the pending list against the default-branch baseline: ${e.message}`);
   }

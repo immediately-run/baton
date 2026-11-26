@@ -1,8 +1,8 @@
 // src/defaults/stub-runtime.ts
-import { execFileSync as execFileSync3, spawn } from "node:child_process";
-import { existsSync, mkdtempSync as mkdtempSync2, readFileSync as readFileSync2, rmSync as rmSync3, symlinkSync, unlinkSync, writeFileSync as writeFileSync2 } from "node:fs";
-import { tmpdir as tmpdir2 } from "node:os";
-import { basename as basename2, join as join5 } from "node:path";
+import { execFileSync as execFileSync4, spawn } from "node:child_process";
+import { existsSync as existsSync3, mkdtempSync as mkdtempSync3, readFileSync as readFileSync5, rmSync as rmSync4, symlinkSync, unlinkSync, writeFileSync as writeFileSync2 } from "node:fs";
+import { tmpdir as tmpdir3 } from "node:os";
+import { basename as basename3, join as join8 } from "node:path";
 import { pathToFileURL } from "node:url";
 
 // src/runner/log.ts
@@ -150,14 +150,14 @@ var HARNESS_ADAPTERS = [
   {
     name: "opencode",
     agentCommand: `opencode run --auto --model zai-coding-plan/glm-5.3 ${quotedBriefing}`,
-    activityPaths(checkout, { createHash: createHash2, readdirSync: readdirSync3, homedir: homedir2, join: join6, env }) {
-      const root = join6(env.XDG_DATA_HOME || join6(homedir2(), ".local", "share"), "opencode");
+    activityPaths(checkout, { createHash: createHash2, readdirSync: readdirSync4, homedir: homedir2, join: join9, env }) {
+      const root = join9(env.XDG_DATA_HOME || join9(homedir2(), ".local", "share"), "opencode");
       const dashed = checkout.split("/").join("-");
-      const paths = [join6(root, "opencode.db"), join6(root, "opencode.db-wal"), join6(root, "opencode.db-shm"), join6(root, "project", dashed)];
-      const snapshots = join6(root, "snapshot");
+      const paths = [join9(root, "opencode.db"), join9(root, "opencode.db-wal"), join9(root, "opencode.db-shm"), join9(root, "project", dashed)];
+      const snapshots = join9(root, "snapshot");
       const key = createHash2("sha1").update(checkout).digest("hex");
       try {
-        for (const instance of readdirSync3(snapshots)) paths.push(join6(snapshots, instance, key));
+        for (const instance of readdirSync4(snapshots)) paths.push(join9(snapshots, instance, key));
       } catch {
       }
       return paths;
@@ -167,8 +167,8 @@ var HARNESS_ADAPTERS = [
   {
     name: "claude-code",
     agentCommand: `claude -p --permission-mode bypassPermissions --model sonnet ${quotedBriefing}`,
-    activityPaths: (checkout, { homedir: homedir2, join: join6, env }) => [
-      join6(env.CLAUDE_CONFIG_DIR || join6(homedir2(), ".claude"), "projects", checkout.split("/").join("-"))
+    activityPaths: (checkout, { homedir: homedir2, join: join9, env }) => [
+      join9(env.CLAUDE_CONFIG_DIR || join9(homedir2(), ".claude"), "projects", checkout.split("/").join("-"))
     ],
     usage: (transcript, scope) => ({ records: claudeRecords(transcript, scope), children: [] })
   }
@@ -356,6 +356,7 @@ function git(root, args, options = {}) {
   const { input, stdio = [input == null ? "ignore" : "pipe", "pipe", "pipe"] } = options;
   return gitSync(root, args, options, { encoding: "utf8", stdio, input });
 }
+var gitText = (root, ...args) => git(root, args).trim();
 function gitBuffer(root, args, options = {}) {
   return gitSync(root, args, options, { stdio: ["ignore", "pipe", "pipe"] });
 }
@@ -483,6 +484,7 @@ function requireAnswer(out, ask, leg, opts = {}) {
 // src/defaults/course-pr.ts
 var DEFAULT_BRANCH_PATTERN = "claude/{ticket}-*";
 var REVIEW_DEFAULTS_PATH = ".baton/courses/create-pr/review-defaults.json";
+var DEFAULT_CREATE_PR_REVIEW_ROUNDS = 3;
 function readReviewDefault(text) {
   const rounds = JSON.parse(text).rounds;
   if (typeof rounds !== "number" || !Number.isSafeInteger(rounds) || rounds < 1) {
@@ -491,6 +493,19 @@ function readReviewDefault(text) {
   return rounds;
 }
 var CREATE_PR_ASK_DEADLINE_S = 3 * 60 * 60;
+var VERDICT = /^<!--\s*baton:verdict\s+(approve|changes)\s*-->/;
+function verdictOf(r) {
+  if (r.state === "APPROVED") return "approve";
+  if (r.state === "CHANGES_REQUESTED") return "changes";
+  if (r.state === "COMMENTED") {
+    const m = VERDICT.exec((r.body ?? "").trim());
+    if (m) return m[1] === "approve" ? "approve" : "changes";
+  }
+  return null;
+}
+function latestHeadVerdict(f, pushedAt) {
+  return f.reviews.filter((v) => verdictOf(v) && (v.headSha != null ? v.headSha === f.headSha : v.submittedAt > pushedAt)).sort((a, b) => b.submittedAt - a.submittedAt || Number(verdictOf(b) === "changes") - Number(verdictOf(a) === "changes"))[0];
+}
 function branchMatches(pattern, branch) {
   const p = pattern.toLowerCase();
   const b = branch.toLowerCase();
@@ -517,7 +532,37 @@ function branchMatches(pattern, branch) {
   while (j < p.length && p[j] === "*") j++;
   return j === p.length;
 }
+var sameRepo = (a, b) => a.toLowerCase() === b.toLowerCase();
+function prRefs(prs, home) {
+  const out = [];
+  for (const p of prs) {
+    const text = String(p).trim();
+    if (/^#?\d+$/.test(text)) out.push({ repository: home ?? null, number: text.replace(/^#/, "") });
+    const m = /^https?:\/\/[^/]+\/([^/]+\/[^/]+)\/pull\/(\d+)(?:[/#?].*)?$/.exec(text);
+    if (m) out.push({ repository: m[1], number: m[2] });
+  }
+  return out;
+}
+var refNames = (ref, f, home) => {
+  if (ref.number !== String(f.number)) return false;
+  const repo = f.repository ?? home ?? null;
+  return ref.repository == null || repo == null || sameRepo(ref.repository, repo);
+};
 var matchPatterns = (branchPatterns) => (branchPatterns?.length ? branchPatterns : [DEFAULT_BRANCH_PATTERN]).map((p) => p.replace(/\{repository\}/g, "*"));
+var readsRepo = (t, f, home) => {
+  const repo = f.repository ?? home ?? null;
+  return repo == null || home == null || sameRepo(repo, home) || (t.repos ?? []).some((r) => sameRepo(r, repo));
+};
+function ticketOwns(t, pr, patterns, repository) {
+  if (!readsRepo(t, pr, repository)) return false;
+  return prRefs(t.course?.prs ?? [], repository).some((r) => refNames(r, pr, repository)) || patterns.some((p) => branchMatches(p.replace(/\{ticket\}/g, t.id), pr.head));
+}
+
+// src/defaults/pr-archive.ts
+import { execFileSync as execFileSync3 } from "node:child_process";
+import { lstatSync as lstatSync2, mkdirSync as mkdirSync2, mkdtempSync as mkdtempSync2, readFileSync as readFileSync4, rmSync as rmSync3 } from "node:fs";
+import { tmpdir as tmpdir2 } from "node:os";
+import { basename as basename2, dirname as dirname2, join as join7 } from "node:path";
 
 // src/core/http.ts
 var BatonError = class extends Error {
@@ -675,6 +720,332 @@ function checkOutputs(v) {
 var CAPABILITY_NAME = new RegExp(`^(?:${NAME.source}|${HOLDING.source.slice(1, -1)})$`);
 var VALID_FOR = { default_s: 3600, state_s: 24 * 3600, measure_s: 31 * 24 * 3600 };
 
+// src/defaults/outside-work.ts
+var repoName = (name) => name.toLowerCase().replace(/\.git$/, "");
+function mappedMerges(facts, repos, home) {
+  const merged = facts.filter((f) => f.state === "merged" && f.mergeSha && (f.defaultBranch == null || f.base === f.defaultBranch));
+  const mergedRepos = new Set(merged.map((f) => repoName(f.repository ?? home ?? "")));
+  const expected = new Set([...facts.filter((f) => f.state !== "closed").map((f) => f.repository ?? home ?? ""), ...repos].map(repoName));
+  return { merged, complete: merged.length > 0 && !facts.some((f) => f.state === "open") && [...expected].every((r) => mergedRepos.has(r)) };
+}
+
+// src/defaults/tickets-markdown.ts
+function parseFrontmatter(text) {
+  const m = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text);
+  if (!m) return null;
+  const out = {};
+  const lines = m[1].split(/\r?\n/);
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const kv = /^([A-Za-z][A-Za-z0-9_-]*):\s*(.*)$/.exec(line);
+    if (!kv) continue;
+    const [, key, rest] = kv;
+    if (rest.trim() === "") {
+      const items = [];
+      while (i + 1 < lines.length && /^\s+-\s+/.test(lines[i + 1])) {
+        i++;
+        items.push(unquote(lines[i].replace(/^\s+-\s+/, "")));
+      }
+      out[key] = items;
+    } else if (/^\[.*\]$/.test(rest.trim())) {
+      out[key] = rest.trim().slice(1, -1).split(",").map(unquote).filter(Boolean);
+    } else {
+      out[key] = unquote(rest);
+    }
+  }
+  return out;
+}
+var unquote = (v) => {
+  const t = v.trim();
+  return /^(["']).*\1$/.test(t) && t.length >= 2 ? t.slice(1, -1) : t;
+};
+
+// src/defaults/pr-verify.ts
+function reconcileAnswer(out, ask, run2) {
+  const line = out.trim().split("\n").at(-1)?.trim() ?? "";
+  if (/^unchanged\s+\S/.test(line)) return { end: "done", reached: ask.from, next: ask.displaced };
+  const home = originSlug(run2, ask.checkout);
+  const repos = [home, ...ask.repositories ?? []].map((r) => r?.toLowerCase());
+  const prs = parseFrontmatter(ask.ticketText ?? "")?.prs;
+  const ticket = { id: bareId(ask.ticket), repos: ask.repositories ?? [], course: { prs: Array.isArray(prs) ? prs : [] } };
+  const owns = (number, head, repository) => ticketOwns(ticket, { number, head, repository }, matchPatterns(ask.branchPatterns), home);
+  const apiRun = (host, repo, path) => run2("gh", ["api", "--hostname", host, `repos/${repo}${path ? `/${path}` : ""}`], ask.checkout);
+  const list = (host, repo, path) => {
+    const pages = JSON.parse(run2("gh", ["api", "--hostname", host, "--paginate", "--slurp", `repos/${repo}/${path}`], ask.checkout));
+    if (!Array.isArray(pages) || pages.some((p) => !Array.isArray(p))) throw new Error("forge did not return a complete PR reading");
+    return pages.flat();
+  };
+  const readPr = (ref, owned) => {
+    const m2 = /^https:\/\/([\w.-]+)\/([\w.-]+\/[\w.-]+)\/pull\/(\d+)(?:#(issuecomment|pullrequestreview)-(\d+))?$/.exec(ref);
+    if (!m2 || !repos.includes(m2[2].toLowerCase())) throw new Error("name a PR in the ticket repositories");
+    const remote = run2("git", ["remote", "get-url", "origin"], ask.checkout);
+    const host = /^(?:https?:\/\/|ssh:\/\/(?:[^@/]+@)?|[^@/]+@)([\w.-]+)[/:]/.exec(remote)?.[1];
+    if (m2[1] !== host) throw new Error("PR is not on the checkout forge");
+    const repo = `${m2[1]}/${m2[2]}`;
+    const api2 = (path) => JSON.parse(apiRun(m2[1], m2[2], path));
+    const pr2 = JSON.parse(run2("gh", ["pr", "view", m2[3], "--repo", repo, "--json", "state,headRefName,headRefOid,baseRefName,mergeCommit,updatedAt"], ask.checkout));
+    if (pr2.baseRefName !== api2("").default_branch) throw new Error("PR does not target the default branch");
+    if (owned && !owns(Number(m2[3]), pr2.headRefName, m2[2])) throw new Error("PR is not mapped to this ticket");
+    return { pr: pr2, m: m2, api: api2 };
+  };
+  const delivered = /^delivered\s+(\S+)\s+(\S.*)$/.exec(line);
+  if (delivered && ask.to.delivered === "confirm") {
+    const shas = delivered[1].split(",").map((ref) => {
+      if (/^[a-f0-9]{7,40}$/i.test(ref)) return ref;
+      const { pr: pr2, m: m2 } = readPr(ref, false);
+      if (m2[4] || pr2.state !== "MERGED" || !pr2.mergeCommit?.oid) throw new Error("delivered requires a merged PR or commit");
+      if (m2[2].toLowerCase() !== home?.toLowerCase()) return null;
+      return String(pr2.mergeCommit.oid);
+    }).filter((sha) => sha != null);
+    const checked = shas.length ? verifyDelivered({ checkout: ask.checkout, branch: ask.branch, shas }, run2) : [];
+    return { end: "done", reached: "delivered", next: "confirm", detail: deliveredDetail(checked.length ? checked : delivered[1].split(","), delivered[2]) };
+  }
+  const at = /^at\s+(\S+)\s+(\S+)/.exec(line);
+  if (!at || !Object.hasOwn(ask.to, at[1]) || at[1] === "delivered") throw new Error("expected unchanged <reason>, at <station> <ref>, or delivered <refs> <evidence>");
+  const station = at[1];
+  const { pr, m, api } = readPr(at[2], true);
+  if (station === "merged" ? pr.state !== "MERGED" : station !== "concluded" && pr.state !== "OPEN") throw new Error(`PR does not support ${station}`);
+  if (station === "concluded" && pr.state === "OPEN") throw new Error("PR is still open");
+  if (station === "merged") {
+    const mapped = [...new Set(repos.filter((r) => r != null))].flatMap((repository) => {
+      const defaultBranch2 = JSON.parse(apiRun(m[1], repository, "")).default_branch;
+      if (typeof defaultBranch2 !== "string" || !defaultBranch2) throw new Error("cannot verify the default branch");
+      return list(m[1], repository, "pulls?state=all&per_page=100").filter((p) => owns(p.number, p.head.ref, repository)).map((p) => ({
+        repository,
+        state: p.merged_at ? "merged" : p.state === "open" ? "open" : "closed",
+        base: p.base.ref,
+        defaultBranch: defaultBranch2,
+        mergeSha: p.merge_commit_sha,
+        number: p.number
+      }));
+    });
+    const { complete, merged } = mappedMerges(mapped, ticket.repos, home);
+    if (m[4] || !complete || !merged.some((p) => p.repository === m[2].toLowerCase() && p.number === Number(m[3]))) {
+      throw new Error("not all mapped repositories have merged PRs, or a mapped PR is still open");
+    }
+  }
+  if (["reviewed", "approved", "changes-requested"].includes(station)) {
+    if (m[4] !== "pullrequestreview") throw new Error("name a review on the current PR head");
+    const mapped = (r, comment = false) => ({
+      author: r.user?.login ?? "",
+      body: r.body,
+      state: comment ? "COMMENTED" : r.state,
+      headSha: comment ? void 0 : r.commit_id,
+      submittedAt: Date.parse((comment ? r.created_at : r.submitted_at) ?? ""),
+      url: r.html_url
+    });
+    const permissions = /* @__PURE__ */ new Map();
+    const counts = (r) => {
+      if (!verdictOf(r) || !/^[\w-]+$/.test(r.author)) return false;
+      if (!permissions.has(r.author)) {
+        permissions.set(r.author, ["write", "maintain", "admin"].includes(api(`collaborators/${r.author}/permission`).permission));
+      }
+      return permissions.get(r.author);
+    };
+    const native = list(m[1], m[2], `pulls/${m[3]}/reviews?per_page=100`).map((r) => mapped(r)).filter(counts);
+    const named = native.find((r) => r.url === at[2] && r.headSha === pr.headRefOid);
+    if (!named) throw new Error("review is not a qualifying verdict on the current PR head");
+    const comments = list(m[1], m[2], `issues/${m[3]}/comments?per_page=100`).map((r) => mapped(r, true)).filter((r) => r.submittedAt >= named.submittedAt).filter(counts);
+    const latest = latestHeadVerdict({ headSha: pr.headRefOid, reviews: [...native, ...comments] }, named.submittedAt - 1);
+    if (latest?.url !== at[2] || verdictOf(latest) !== (station === "changes-requested" ? "changes" : "approve")) {
+      throw new Error("review is not the latest qualifying verdict on the current PR head");
+    }
+  }
+  return { end: "done", reached: station, next: ask.to[station] };
+}
+var bareId = (t) => {
+  if (t.home && t.id.startsWith(`${t.home}:`)) return t.id.slice(t.home.length + 1);
+  const colon = t.id.indexOf(":");
+  return colon < 0 ? t.id : t.id.slice(colon + 1);
+};
+var msg = (e) => e instanceof Error ? e.message : String(e);
+function ticketRepositories(text, reposMap) {
+  const fm = text == null ? null : parseFrontmatter(text);
+  const names = Array.isArray(fm?.repos) ? fm.repos : fm?.repos == null || fm.repos === "" ? [] : [fm.repos];
+  return names.map((r) => typeof r === "string" && /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(r) ? r : reposMap?.[r]).filter((r) => typeof r === "string" && r !== "");
+}
+function originSlug(run2, checkout) {
+  try {
+    const url = run2("git", ["remote", "get-url", "origin"], checkout);
+    return /[:/]([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+?)(?:\.git)?\s*$/.exec(url)?.[1] ?? null;
+  } catch {
+    return null;
+  }
+}
+var known = (oid, run2, checkout) => {
+  try {
+    run2("git", ["cat-file", "-e", oid], checkout);
+    return true;
+  } catch {
+    return false;
+  }
+};
+var ancestor = (a, b, run2, checkout) => {
+  try {
+    run2("git", ["merge-base", "--is-ancestor", a, b], checkout);
+    return true;
+  } catch {
+    return false;
+  }
+};
+function verifyPrOpen(ask, run2) {
+  const id = bareId(ask.ticket);
+  const patterns = matchPatterns(ask.branchPatterns).map((p) => p.replace(/\{ticket\}/g, id));
+  const slug = originSlug(run2, ask.checkout);
+  const siblings = (ask.repositories ?? []).filter((r, i, all) => all.indexOf(r) === i && (slug == null || r.toLowerCase() !== slug.toLowerCase()));
+  const label = (repo) => repo ?? slug ?? "the checkout\u2019s repository";
+  const of = (repo) => {
+    const args = ["pr", "list", "--state", "open", "--limit", "300", "--json", "number,headRefName,headRefOid", ...repo ? ["--repo", repo] : []];
+    let text;
+    try {
+      text = run2("gh", args, ask.checkout);
+    } catch (e) {
+      throw new Error(msg(e));
+    }
+    let prs;
+    try {
+      prs = JSON.parse(text);
+    } catch {
+      prs = null;
+    }
+    if (!Array.isArray(prs)) throw new Error(`gh pr list${repo ? ` --repo ${repo}` : ""} answered no PR list: ${text.slice(0, 200)}`);
+    return prs.filter((p) => p != null && typeof p === "object" && typeof p.headRefName === "string" && patterns.some((pat) => branchMatches(pat, p.headRefName)));
+  };
+  const found = [null, ...siblings].map((repo) => {
+    try {
+      return { repo, prs: of(repo), error: null };
+    } catch (e) {
+      return { repo, prs: null, error: msg(e) };
+    }
+  });
+  let branch = "";
+  try {
+    branch = run2("git", ["branch", "--show-current"], ask.checkout);
+  } catch {
+    branch = "";
+  }
+  if (branch !== "") {
+    let head = null;
+    try {
+      head = run2("git", ["rev-parse", "HEAD"], ask.checkout);
+    } catch {
+      head = null;
+    }
+    for (const pr of found[0].prs ?? []) {
+      if (pr.headRefName !== branch || typeof pr.headRefOid !== "string" || pr.headRefOid === "" || head == null) continue;
+      if (head === pr.headRefOid) continue;
+      if (!known(pr.headRefOid, run2, ask.checkout)) continue;
+      if (!ancestor(head, pr.headRefOid, run2, ask.checkout)) {
+        throw new Error(`the checkout\u2019s branch ${branch} is at ${head.slice(0, 10)}, but its open PR #${String(pr.number)} is at ${pr.headRefOid.slice(0, 10)} \u2014 push the branch: the review reads what is pushed`);
+      }
+    }
+  }
+  if (found.some((f) => (f.prs ?? []).length > 0)) return;
+  const unread = found.filter((f) => f.error != null);
+  const read = found.filter((f) => f.prs != null).map((f) => label(f.repo));
+  if (read.length === 0) {
+    throw new Error(`cannot verify ${id}\u2019s PR \u2014 no repository the ticket reads could be read: ${unread.map((f) => `${label(f.repo)} (${f.error})`).join("; ")}`);
+  }
+  throw new Error(`the implement agent exited 0, but no open PR on a branch matching ${patterns.join(" or ")} for ticket ${id} exists in ${read.join(" or ")}${unread.length ? ` \u2014 ${unread.map((f) => label(f.repo)).join(" or ")} could not be read` : ""} \u2014 open one from a matching branch with its head pushed, or the leg fails here`);
+}
+function verifyPrsMerged(ask, run2) {
+  const id = bareId(ask.ticket);
+  const patterns = matchPatterns(ask.branchPatterns).map((p) => p.replace(/\{ticket\}/g, id));
+  const slug = originSlug(run2, ask.checkout);
+  const siblings = (ask.repositories ?? []).filter((r, i, all) => all.indexOf(r) === i && (slug == null || r.toLowerCase() !== slug.toLowerCase()));
+  const label = (repo) => repo ?? slug ?? "the checkout\u2019s repository";
+  const list = (repo, state) => {
+    const args = ["pr", "list", "--state", state, "--limit", "300", "--json", "number,headRefName", ...repo ? ["--repo", repo] : []];
+    const text = run2("gh", args, ask.checkout);
+    let prs;
+    try {
+      prs = JSON.parse(text);
+    } catch {
+      prs = null;
+    }
+    if (!Array.isArray(prs)) throw new Error(`gh pr list --state ${state}${repo ? ` --repo ${repo}` : ""} answered no PR list: ${text.slice(0, 200)}`);
+    return prs.filter((p) => p != null && typeof p === "object" && typeof p.headRefName === "string" && patterns.some((pat) => branchMatches(pat, p.headRefName)));
+  };
+  const found = [null, ...siblings].map((repo) => {
+    try {
+      return { repo, open: list(repo, "open"), merged: list(repo, "merged"), error: null };
+    } catch (e) {
+      return { repo, open: null, merged: null, error: msg(e) };
+    }
+  });
+  const name = (f, p) => `${f.repo ? f.repo : ""}#${String(p.number)} (${String(p.headRefName)})`;
+  const unread = found.filter((f) => f.error != null);
+  if (unread.length > 0) {
+    throw new Error(`cannot verify ${id}\u2019s PRs merged \u2014 ${unread.map((f) => `${label(f.repo)} (${f.error})`).join("; ")} could not be read: the leg reports merged only when the forge shows every PR merged`);
+  }
+  const open = found.flatMap((f) => (f.open ?? []).map((p) => name(f, p)));
+  if (open.length > 0) {
+    throw new Error(`the merge agent exited 0, but ${id}\u2019s PR ${open.join(", ")} is still open \u2014 not merged; the leg reports merged only when every PR of the ticket is`);
+  }
+  const merged = found.flatMap((f) => (f.merged ?? []).map((p) => `${f.repo ? f.repo : ""}#${String(p.number)}`));
+  if (merged.length === 0) {
+    throw new Error(`the merge agent exited 0, but no merged PR on a branch matching ${patterns.join(" or ")} for ticket ${id} exists in ${found.map((f) => label(f.repo)).join(" or ")} \u2014 the leg reports merged only when the forge shows one`);
+  }
+  return merged;
+}
+var DELIVERED_LINE = /^delivered\s+([0-9a-f]{7,40}(?:,[0-9a-f]{7,40})*)(?:\s+(.*))?$/;
+function findDelivered(out) {
+  const lines = out.split("\n").map((l) => l.trim()).filter((l) => l !== "");
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const m = DELIVERED_LINE.exec(lines[i]);
+    if (m == null) continue;
+    const evidence = (m[2] ?? "").trim();
+    if (evidence === "") throw new Error(`the implement agent answered ${JSON.stringify(lines[i])} with no evidence \u2014 the line is \`delivered <sha> <what you ran to find it delivered>\``);
+    return { shas: [...new Set(m[1].split(","))], evidence, line: lines[i] };
+  }
+  return null;
+}
+function verifyDelivered(ask, run2) {
+  if (ask.shas.length === 0) throw new Error("the implement agent answered delivered naming no commit");
+  const branch = ask.branch;
+  if (!/^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(branch) || branch.includes("..")) throw new Error(`cannot verify the delivered answer \u2014 ${JSON.stringify(branch)} is no branch name`);
+  const tracking = `refs/remotes/origin/${branch}`;
+  try {
+    run2("git", ["fetch", "-q", "origin", `+refs/heads/${branch}:${tracking}`], ask.checkout);
+  } catch (e) {
+    throw new Error(`cannot verify the delivered answer \u2014 fetching ${branch} from origin failed: ${msg(e)}`);
+  }
+  return resolveDelivered(ask.shas, tracking, ask.checkout, run2);
+}
+function resolveDelivered(shas, ref, checkout, run2) {
+  return shas.map((sha) => {
+    if (!/^[0-9a-f]{7,40}$/.test(sha)) throw new Error("invalid delivered commit id");
+    let full;
+    try {
+      full = run2("git", ["rev-parse", "--verify", "--quiet", `${sha}^{commit}`], checkout).trim();
+    } catch {
+      throw new Error(`the implement agent answered delivered at ${sha}, which names no commit this checkout knows \u2014 refused`);
+    }
+    if (!/^[0-9a-f]{40}$/.test(full) || !full.startsWith(sha)) throw new Error(`the implement agent answered delivered at ${sha}, which names no commit this checkout knows \u2014 refused`);
+    if (!ancestor(full, ref, run2, checkout)) {
+      const branch = ref.replace(/^refs\/remotes\/origin\//, "");
+      throw new Error(`the implement agent answered delivered at ${sha}, which is not on ${branch} \u2014 refused: the commit a delivered answer names is on the default branch`);
+    }
+    return full;
+  });
+}
+function deliveredDetail(shas, evidence) {
+  const head = `delivered at ${shas.map((s) => s.slice(0, 10)).join(", ")}`;
+  if (head.length > 198) throw new Error("too many delivered commits to record in the end detail");
+  const said = evidence.replace(/[\u0000-\u001f\u007f-\u009f<>{}]/g, " ").replace(/\s+/g, " ").trim();
+  const text = said === "" ? head : `${head}: ${said}`;
+  return text.length <= 200 ? text : `${text.slice(0, 199)}\u2026`;
+}
+
+// src/defaults/read-items.ts
+import { existsSync, readdirSync as readdirSync3, readFileSync as readFileSync2 } from "node:fs";
+import { join as join4, relative as relative2, sep as sep2 } from "node:path";
+function readItems(root, items = "tickets") {
+  const dir = join4(root, items);
+  if (!existsSync(dir)) return [];
+  return readdirSync3(dir, { recursive: true, withFileTypes: true }).filter((e) => e.isFile()).map((e) => relative2(dir, join4(e.parentPath, e.name)).split(sep2).join("/")).sort().map((path) => ({ path, text: readFileSync2(join4(dir, path), "utf8") }));
+}
+
 // src/defaults/output-evidence.ts
 var PREFIX = "Baton-Output: ";
 var MAX = 256 * 1024;
@@ -708,40 +1079,7 @@ var slugOfUrl = (url) => url.replace(/^git@[^:]+:/, "").replace(/^https?:\/\/[^/
 // src/defaults/ticket-state.ts
 import { execFileSync as execFileSync2 } from "node:child_process";
 import { rmSync as rmSync2 } from "node:fs";
-import { join as join4 } from "node:path";
-
-// src/defaults/tickets-markdown.ts
-function parseFrontmatter(text) {
-  const m = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text);
-  if (!m) return null;
-  const out = {};
-  const lines = m[1].split(/\r?\n/);
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    const kv = /^([A-Za-z][A-Za-z0-9_-]*):\s*(.*)$/.exec(line);
-    if (!kv) continue;
-    const [, key, rest] = kv;
-    if (rest.trim() === "") {
-      const items = [];
-      while (i + 1 < lines.length && /^\s+-\s+/.test(lines[i + 1])) {
-        i++;
-        items.push(unquote(lines[i].replace(/^\s+-\s+/, "")));
-      }
-      out[key] = items;
-    } else if (/^\[.*\]$/.test(rest.trim())) {
-      out[key] = rest.trim().slice(1, -1).split(",").map(unquote).filter(Boolean);
-    } else {
-      out[key] = unquote(rest);
-    }
-  }
-  return out;
-}
-var unquote = (v) => {
-  const t = v.trim();
-  return /^(["']).*\1$/.test(t) && t.length >= 2 ? t.slice(1, -1) : t;
-};
-
-// src/defaults/ticket-state.ts
+import { join as join5 } from "node:path";
 var MACHINE_KEYS = ["station", "next_leg", "claim"];
 var CLOSE_TIMEOUT_MS = 12e4;
 var RUN_TESTS_TIMEOUT_MS = 18e5;
@@ -781,7 +1119,7 @@ function ticketsBranch(checkout, named, run2 = exec) {
 var tmpIndexName = "baton-ticket-index";
 function tmpIndex(checkout, run2 = exec) {
   const rel = run2("git", ["rev-parse", "--git-path", tmpIndexName], checkout).trim();
-  return /^\//.test(rel) ? rel : join4(checkout, rel);
+  return /^\//.test(rel) ? rel : join5(checkout, rel);
 }
 function itemSchemaPath(ticketPath) {
   const dir = ticketPath.split("/").slice(0, -1).join("/");
@@ -944,6 +1282,194 @@ async function closeTicket(ctx, result, run2 = exec) {
   }
 }
 
+// src/defaults/tickets-config.ts
+import { existsSync as existsSync2, readFileSync as readFileSync3 } from "node:fs";
+import { join as join6 } from "node:path";
+var NUMBER = "\\d+";
+function readTicketSettings(root, where = root) {
+  const path = join6(root, ".baton", "baton.json");
+  if (!existsSync2(path)) throw new Error(`${where} has no .baton/baton.json \u2014 the ticket commands write the tickets a sync reads; run \`baton repo init\` there first`);
+  let json;
+  try {
+    json = JSON.parse(readFileSync3(path, "utf8"));
+  } catch (e) {
+    throw new Error(`.baton/baton.json is not JSON: ${e.message.split("\n")[0]}`);
+  }
+  const texts = (v) => (Array.isArray(v) ? v : typeof v === "string" && v !== "" ? [v] : []).filter((x) => typeof x === "string" && x.trim() !== "").map((x) => x.trim());
+  const str = (v) => typeof v === "string" && v.trim() !== "" ? v.trim() : void 0;
+  const project = str(json.project);
+  if (json.project != null && project === void 0) throw new Error(".baton/baton.json: project is a project id, not an empty value");
+  const legacy_ids = texts(json.legacy_ids);
+  return {
+    items: str(json.items),
+    ticket_prefix: str(json.ticket_prefix),
+    legacy_ids,
+    project,
+    prefixes: prefixesOf(json.prefixes, legacy_ids, str(json.ticket_prefix)),
+    tags: tagsOf(json),
+    projects: str(json.projects) ?? "projects"
+  };
+}
+function tagsOf(json) {
+  const v = json.tags;
+  const tags = (Array.isArray(v) ? v : typeof v === "string" && v !== "" ? [v] : []).filter((x) => typeof x === "string" && x.trim() !== "").map((x) => x.trim());
+  return tags.length ? tags : ["roadmap-item"];
+}
+var SOURCE_FORM = /^\\d(\+|(\{\d+\}|\[a-z\]\?\d\*)?)$/;
+function prefixesOf(prefixes, legacy, allocating) {
+  if (prefixes != null && (typeof prefixes !== "object" || Array.isArray(prefixes))) throw new Error(".baton/baton.json: prefixes maps an id prefix to its pattern source");
+  const map = {};
+  for (const [prefix, source] of Object.entries(prefixes ?? {})) {
+    if (!/^[A-Za-z][A-Za-z0-9]*-$/.test(prefix) || typeof source !== "string" || !SOURCE_FORM.test(source)) {
+      throw new Error(`.baton/baton.json: prefixes.${prefix} is an id prefix (\`B-\`) whose pattern this release cannot read \u2014 write its number as \\d+ or \\d{7}, not ${JSON.stringify(source)}`);
+    }
+    map[prefix] = source;
+  }
+  for (const id of legacy) {
+    const m = /^([A-Za-z][A-Za-z0-9]*)-([^()^$|]*\\d[^()^$|]*)$/.exec(id);
+    if (!m) throw new Error(`.baton/baton.json: legacy_ids names ${id}, which is not an id pattern (\`R3-\\d+\`)`);
+    map[`${m[1]}-`] = m[2];
+  }
+  const allocatingPrefix = allocating && /^[A-Za-z][A-Za-z0-9]*$/.test(allocating) ? `${allocating}-` : "B-";
+  if (map[allocatingPrefix] == null) map[allocatingPrefix] = NUMBER;
+  return map;
+}
+
+// src/defaults/pr-archive.ts
+function archiveClose(ctx, result) {
+  const answer = ctx.person_answer;
+  if (ctx.leg !== "archive" || ctx.claim?.station !== "confirmed" || result?.reached !== "archived" || answer?.leg !== "confirm" || answer.option !== "confirmed" || !/^(owner|human):/.test(answer.answered_by)) {
+    throw new Error("archive requires the owner's applied confirmed answer");
+  }
+  const end = ctx.previous_attempts?.find((p) => p.end_reason === "suspended:delivered" && p.legs.some((l) => l.reached === "delivered" && l.outcome === "finished"));
+  const first = end?.ended_at_sha;
+  const detail = end?.detail ?? "";
+  const legacy = /^delivered at ((?:[0-9a-f]{10}, ){14}[0-9a-f]{10}), [0-9a-f]{6}…$/.exec(detail);
+  const commits = (legacy?.[1] ?? /^delivered at ([0-9a-f]{10}(?:, [0-9a-f]{10})*)(?:: |$)/.exec(detail)?.[1])?.split(", ");
+  if (!end || end.ended_at == null || end.ended_at > answer.answered_at || !first || !/^[0-9a-f]{40}$/.test(first) || commits?.[0] !== first.slice(0, 10)) {
+    throw new Error("archive requires the confirmed delivery's end evidence");
+  }
+  if (!ctx.ticket.path) throw new Error("archive requires a ticket file in git");
+  const branch = ticketsBranch(ctx.checkout, ctx.default_branch);
+  const pin = ctx.signed_control?.agent_command ?? ctx.snapshot?.sha;
+  if (!pin || !/^[0-9a-f]{40}$/.test(pin)) throw new Error("archive requires its snapshot to read the Dibber pin");
+  const settings = JSON.parse(gitText(ctx.checkout, "show", `${pin}:.baton/baton.json`));
+  return archiveTicket(ctx.checkout, branch, bareTicketId(ctx.ticket), {
+    path: ctx.ticket.path,
+    shas: [first, ...commits.slice(1)],
+    truncated: legacy != null,
+    dibber: dibberWords(settings)
+  });
+}
+var TRIES = 6;
+var movedOnPush = (detail) => /non-fast-forward|fetch first|stale info/.test(detail);
+function regularDirs(root, path, missingOk = false) {
+  const parts = path.split("/");
+  if (parts.some((part) => !part || part === "." || part === ".." || part.toLowerCase() === ".git")) throw new Error(`invalid ticket directory: ${path}`);
+  for (const part of parts) {
+    root = join7(root, part);
+    const stat = lstatSync2(root, { throwIfNoEntry: false });
+    if (!stat && missingOk) return;
+    if (!stat?.isDirectory()) throw new Error(`not a regular ticket directory: ${path}`);
+  }
+}
+function archiveTicket(root, branch, id, delivered) {
+  if (!/^[A-Za-z0-9]+-[A-Za-z0-9]+$/.test(id)) throw new Error(`${id}: invalid archive ticket id`);
+  const describe = `${id} \u2192 done`;
+  for (let attempt = 1; attempt <= TRIES; attempt++) {
+    gitText(root, "fetch", "-q", "origin", branch);
+    const dir = mkdtempSync2(join7(tmpdir2(), "baton-archive-"));
+    try {
+      gitText(root, "worktree", "add", "-q", "--detach", dir, "FETCH_HEAD");
+      const done = archiveIn(dir, branch, id, delivered);
+      if ("existing" in done) return done.existing;
+      const trailers = (process.env.TICKET_TRAILERS ?? "").trim();
+      if (!trailers && process.env.TICKET_REQUIRE_TRAILERS === "1") throw new Error(`${describe}: TICKET_REQUIRE_TRAILERS=1, but TICKET_TRAILERS is empty`);
+      gitText(dir, "commit", "-q", "-m", trailers ? `${done.message}
+
+${trailers}` : done.message);
+      try {
+        gitText(dir, "push", "-q", "origin", `HEAD:refs/heads/${branch}`);
+        return gitText(dir, "rev-parse", "HEAD");
+      } catch (e) {
+        const detail = String(e.stderr || e.message);
+        if (!movedOnPush(detail)) {
+          const why = detail.trim().split("\n").map((l) => l.trim()).filter((l) => l !== "" && !/^To /.test(l) && !/failed to push some refs/.test(l));
+          throw new Error(`${describe}: the push was refused: ${why.join("; ") || "no reason given"}`);
+        }
+        if (attempt === TRIES) throw new Error(`${describe}: push refused ${TRIES} times: ${detail.trim().split("\n").at(-1)}`);
+      }
+    } finally {
+      try {
+        gitText(root, "worktree", "remove", "--force", dir);
+      } catch {
+        rmSync3(dir, { recursive: true, force: true });
+      }
+    }
+  }
+  throw new Error(`${describe}: no archive attempt completed`);
+}
+function archiveIn(dir, branch, id, delivered) {
+  const settings = readTicketSettings(dir, dir);
+  const items = (settings.items ?? "tickets").replace(/\/$/, "");
+  regularDirs(dir, items, true);
+  const matches2 = readItems(dir, items).filter((f) => /\.mdx?$/i.test(f.path) && parseFrontmatter(f.text)?.id === id);
+  if (!matches2.length) throw new Error(`${id}: no ${items}/${id}.mdx on origin/${branch}`);
+  if (matches2.length !== 1) throw new Error(`${id}: archive cannot identify a single ticket file`);
+  const { path, text } = matches2[0];
+  const archived = path.startsWith("archive/");
+  const from = `${items}/${path}`;
+  const to = `${items}/archive/${path}`;
+  if (delivered.path !== (archived ? `${items}/${path.slice("archive/".length)}` : from)) {
+    throw new Error(`${id}: archive requires the markdown source's current ticket path`);
+  }
+  const shas = resolveDelivered(delivered.shas, "HEAD", dir, (_cmd, args2, cwd) => gitText(cwd, ...args2));
+  const subject = `tickets: ${id} done (archived)`;
+  const delivery = `Delivered by: ${shas.join(", ")}`;
+  const limitation = "Delivery evidence incomplete: the legacy end record was truncated; unrecorded commits are not listed.";
+  if (archived) {
+    if (parseFrontmatter(text)?.status !== "done") throw new Error(`${id} is archived (done)`);
+    const existing = gitText(dir, "--literal-pathspecs", "log", "-1", "--first-parent", "--no-renames", "--diff-filter=A", "--format=%H", "--", from);
+    if (existing) {
+      const [first, , third, , note] = gitText(dir, "show", "-s", "--format=%B", existing).split("\n");
+      if (first === subject && third === delivery && note === limitation === delivered.truncated) return { existing };
+    }
+    throw new Error(`${id}: the archive does not record this delivery`);
+  }
+  if (!new RegExp(`^${id}\\.mdx?$`).test(basename2(path))) {
+    throw new Error(`${id}: ${from} is not named ${id}.md or ${id}.mdx, so Dibber cannot write it \u2014 rename it, then archive again`);
+  }
+  regularDirs(dir, dirname2(to), true);
+  if (lstatSync2(join7(dir, to), { throwIfNoEntry: false })) throw new Error(`${id}: archive destination already exists`);
+  const frontmatter = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text)?.[1] ?? "";
+  if ((frontmatter.match(/^status:/gm) ?? []).length > 1) throw new Error(`${id}: duplicate status fields; archive refused`);
+  const [cmd, ...args] = delivered.dibber;
+  let said;
+  try {
+    said = JSON.parse(execFileSync3(cmd, [...args, "done", id, "--root", dir, "--json"], {
+      cwd: dir,
+      encoding: "utf8",
+      timeout: 12e4,
+      stdio: ["ignore", "pipe", "pipe"],
+      env: { ...process.env, npm_config_ignore_scripts: "true" }
+    }));
+  } catch (e) {
+    const why = String(e.stderr || e.message).trim().split("\n").at(-1);
+    throw new Error(`${id}: dibber done failed: ${why}`);
+  }
+  if (said?.id !== id || said.file !== from || said.status !== "done" || parseFrontmatter(readFileSync4(join7(dir, from), "utf8"))?.status !== "done") {
+    throw new Error(`${id}: Dibber did not mark ${from} done`);
+  }
+  mkdirSync2(dirname2(join7(dir, to)), { recursive: true });
+  gitText(dir, "--literal-pathspecs", "mv", from, to);
+  gitText(dir, "--literal-pathspecs", "add", "--", to);
+  return { message: `${subject}
+
+${delivery}${delivered.truncated ? `
+
+${limitation}` : ""}` };
+}
+
 // src/defaults/pr-close.ts
 var PR_URL2 = /^https?:\/\/[^\s/]+\/[^\s/]+\/[^\s/]+\/pull\/\d+$/;
 var COMMENTING_LEGS = /* @__PURE__ */ new Set(["review", "adjudicate", "conclude"]);
@@ -998,187 +1524,9 @@ function testsClose(ctx, result, run2 = exec) {
   return result.marker;
 }
 
-// src/defaults/pr-verify.ts
-var bareId = (t) => {
-  if (t.home && t.id.startsWith(`${t.home}:`)) return t.id.slice(t.home.length + 1);
-  const colon = t.id.indexOf(":");
-  return colon < 0 ? t.id : t.id.slice(colon + 1);
-};
-var msg = (e) => e instanceof Error ? e.message : String(e);
-function ticketRepositories(text, reposMap) {
-  const fm = text == null ? null : parseFrontmatter(text);
-  const names = Array.isArray(fm?.repos) ? fm.repos : fm?.repos == null || fm.repos === "" ? [] : [fm.repos];
-  return names.map((r) => typeof r === "string" && /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(r) ? r : reposMap?.[r]).filter((r) => typeof r === "string" && r !== "");
-}
-function originSlug(run2, checkout) {
-  try {
-    const url = run2("git", ["remote", "get-url", "origin"], checkout);
-    return /[:/]([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+?)(?:\.git)?\s*$/.exec(url)?.[1] ?? null;
-  } catch {
-    return null;
-  }
-}
-var known = (oid, run2, checkout) => {
-  try {
-    run2("git", ["cat-file", "-e", oid], checkout);
-    return true;
-  } catch {
-    return false;
-  }
-};
-var ancestor = (a, b, run2, checkout) => {
-  try {
-    run2("git", ["merge-base", "--is-ancestor", a, b], checkout);
-    return true;
-  } catch {
-    return false;
-  }
-};
-function verifyPrOpen(ask, run2) {
-  const id = bareId(ask.ticket);
-  const patterns = matchPatterns(ask.branchPatterns).map((p) => p.replace(/\{ticket\}/g, id));
-  const slug = originSlug(run2, ask.checkout);
-  const siblings = (ask.repositories ?? []).filter((r, i, all) => all.indexOf(r) === i && (slug == null || r.toLowerCase() !== slug.toLowerCase()));
-  const label = (repo) => repo ?? slug ?? "the checkout\u2019s repository";
-  const of = (repo) => {
-    const args = ["pr", "list", "--state", "open", "--limit", "300", "--json", "number,headRefName,headRefOid", ...repo ? ["--repo", repo] : []];
-    let text;
-    try {
-      text = run2("gh", args, ask.checkout);
-    } catch (e) {
-      throw new Error(msg(e));
-    }
-    let prs;
-    try {
-      prs = JSON.parse(text);
-    } catch {
-      prs = null;
-    }
-    if (!Array.isArray(prs)) throw new Error(`gh pr list${repo ? ` --repo ${repo}` : ""} answered no PR list: ${text.slice(0, 200)}`);
-    return prs.filter((p) => p != null && typeof p === "object" && typeof p.headRefName === "string" && patterns.some((pat) => branchMatches(pat, p.headRefName)));
-  };
-  const found = [null, ...siblings].map((repo) => {
-    try {
-      return { repo, prs: of(repo), error: null };
-    } catch (e) {
-      return { repo, prs: null, error: msg(e) };
-    }
-  });
-  let branch = "";
-  try {
-    branch = run2("git", ["branch", "--show-current"], ask.checkout);
-  } catch {
-    branch = "";
-  }
-  if (branch !== "") {
-    let head = null;
-    try {
-      head = run2("git", ["rev-parse", "HEAD"], ask.checkout);
-    } catch {
-      head = null;
-    }
-    for (const pr of found[0].prs ?? []) {
-      if (pr.headRefName !== branch || typeof pr.headRefOid !== "string" || pr.headRefOid === "" || head == null) continue;
-      if (head === pr.headRefOid) continue;
-      if (!known(pr.headRefOid, run2, ask.checkout)) continue;
-      if (!ancestor(head, pr.headRefOid, run2, ask.checkout)) {
-        throw new Error(`the checkout\u2019s branch ${branch} is at ${head.slice(0, 10)}, but its open PR #${String(pr.number)} is at ${pr.headRefOid.slice(0, 10)} \u2014 push the branch: the review reads what is pushed`);
-      }
-    }
-  }
-  if (found.some((f) => (f.prs ?? []).length > 0)) return;
-  const unread = found.filter((f) => f.error != null);
-  const read = found.filter((f) => f.prs != null).map((f) => label(f.repo));
-  if (read.length === 0) {
-    throw new Error(`cannot verify ${id}\u2019s PR \u2014 no repository the ticket reads could be read: ${unread.map((f) => `${label(f.repo)} (${f.error})`).join("; ")}`);
-  }
-  throw new Error(`the implement agent exited 0, but no open PR on a branch matching ${patterns.join(" or ")} for ticket ${id} exists in ${read.join(" or ")}${unread.length ? ` \u2014 ${unread.map((f) => label(f.repo)).join(" or ")} could not be read` : ""} \u2014 open one from a matching branch with its head pushed, or the leg fails here`);
-}
-function verifyPrsMerged(ask, run2) {
-  const id = bareId(ask.ticket);
-  const patterns = matchPatterns(ask.branchPatterns).map((p) => p.replace(/\{ticket\}/g, id));
-  const slug = originSlug(run2, ask.checkout);
-  const siblings = (ask.repositories ?? []).filter((r, i, all) => all.indexOf(r) === i && (slug == null || r.toLowerCase() !== slug.toLowerCase()));
-  const label = (repo) => repo ?? slug ?? "the checkout\u2019s repository";
-  const list = (repo, state) => {
-    const args = ["pr", "list", "--state", state, "--limit", "300", "--json", "number,headRefName", ...repo ? ["--repo", repo] : []];
-    const text = run2("gh", args, ask.checkout);
-    let prs;
-    try {
-      prs = JSON.parse(text);
-    } catch {
-      prs = null;
-    }
-    if (!Array.isArray(prs)) throw new Error(`gh pr list --state ${state}${repo ? ` --repo ${repo}` : ""} answered no PR list: ${text.slice(0, 200)}`);
-    return prs.filter((p) => p != null && typeof p === "object" && typeof p.headRefName === "string" && patterns.some((pat) => branchMatches(pat, p.headRefName)));
-  };
-  const found = [null, ...siblings].map((repo) => {
-    try {
-      return { repo, open: list(repo, "open"), merged: list(repo, "merged"), error: null };
-    } catch (e) {
-      return { repo, open: null, merged: null, error: msg(e) };
-    }
-  });
-  const name = (f, p) => `${f.repo ? f.repo : ""}#${String(p.number)} (${String(p.headRefName)})`;
-  const unread = found.filter((f) => f.error != null);
-  if (unread.length > 0) {
-    throw new Error(`cannot verify ${id}\u2019s PRs merged \u2014 ${unread.map((f) => `${label(f.repo)} (${f.error})`).join("; ")} could not be read: the leg reports merged only when the forge shows every PR merged`);
-  }
-  const open = found.flatMap((f) => (f.open ?? []).map((p) => name(f, p)));
-  if (open.length > 0) {
-    throw new Error(`the merge agent exited 0, but ${id}\u2019s PR ${open.join(", ")} is still open \u2014 not merged; the leg reports merged only when every PR of the ticket is`);
-  }
-  const merged = found.flatMap((f) => (f.merged ?? []).map((p) => `${f.repo ? f.repo : ""}#${String(p.number)}`));
-  if (merged.length === 0) {
-    throw new Error(`the merge agent exited 0, but no merged PR on a branch matching ${patterns.join(" or ")} for ticket ${id} exists in ${found.map((f) => label(f.repo)).join(" or ")} \u2014 the leg reports merged only when the forge shows one`);
-  }
-  return merged;
-}
-var DELIVERED_LINE = /^delivered\s+([0-9a-f]{7,40}(?:,[0-9a-f]{7,40})*)(?:\s+(.*))?$/;
-function findDelivered(out) {
-  const lines = out.split("\n").map((l) => l.trim()).filter((l) => l !== "");
-  for (let i = lines.length - 1; i >= 0; i--) {
-    const m = DELIVERED_LINE.exec(lines[i]);
-    if (m == null) continue;
-    const evidence = (m[2] ?? "").trim();
-    if (evidence === "") throw new Error(`the implement agent answered ${JSON.stringify(lines[i])} with no evidence \u2014 the line is \`delivered <sha> <what you ran to find it delivered>\``);
-    return { shas: [...new Set(m[1].split(","))], evidence, line: lines[i] };
-  }
-  return null;
-}
-function verifyDelivered(ask, run2) {
-  if (ask.shas.length === 0) throw new Error("the implement agent answered delivered naming no commit");
-  const branch = ask.branch;
-  if (!/^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(branch) || branch.includes("..")) throw new Error(`cannot verify the delivered answer \u2014 ${JSON.stringify(branch)} is no branch name`);
-  const tracking = `refs/remotes/origin/${branch}`;
-  try {
-    run2("git", ["fetch", "-q", "origin", `+refs/heads/${branch}:${tracking}`], ask.checkout);
-  } catch (e) {
-    throw new Error(`cannot verify the delivered answer \u2014 fetching ${branch} from origin failed: ${msg(e)}`);
-  }
-  return ask.shas.map((sha) => {
-    let full;
-    try {
-      full = run2("git", ["rev-parse", "--verify", "--quiet", `${sha}^{commit}`], ask.checkout).trim();
-    } catch {
-      throw new Error(`the implement agent answered delivered at ${sha}, which names no commit this checkout knows \u2014 refused`);
-    }
-    if (!/^[0-9a-f]{40}$/.test(full)) throw new Error(`the implement agent answered delivered at ${sha}, which names no commit this checkout knows \u2014 refused`);
-    if (!ancestor(full, tracking, run2, ask.checkout)) {
-      throw new Error(`the implement agent answered delivered at ${sha}, which is not on ${branch} \u2014 refused: the commit a delivered answer names is on the default branch`);
-    }
-    return full;
-  });
-}
-function deliveredDetail(shas, evidence) {
-  const head = `delivered at ${shas.map((s) => s.slice(0, 10)).join(", ")}`;
-  const said = evidence.replace(/[\u0000-\u001f\u007f-\u009f<>{}]/g, " ").replace(/\s+/g, " ").trim();
-  const text = said === "" ? head : `${head}: ${said}`;
-  return text.length <= 200 ? text : `${text.slice(0, 199)}\u2026`;
-}
-
 // src/defaults/stub-config.ts
 function positionOf(spec, answer, run2 = 1, reviewLimit = Infinity) {
+  if (spec.reconcile) throw new Error("a reconcile leg's position is its checked answer, not a static one");
   if (!spec.ask) return spec.position;
   const route = answer == null ? void 0 : spec.positions[answer];
   if (!route) throw new Error(`no position for ${spec.ask.name} ${JSON.stringify(answer)}`);
@@ -1204,7 +1552,7 @@ function hasPath(checkout, sha, rel) {
 }
 function ticketTextOf({ ticket, checkout }) {
   try {
-    return ticket.file ? readFileSync2(ticket.file, "utf8") : ticket.path ? readFileSync2(join5(checkout, ticket.path), "utf8") : null;
+    return ticket.file ? readFileSync5(ticket.file, "utf8") : ticket.path ? readFileSync5(join8(checkout, ticket.path), "utf8") : null;
   } catch {
     return null;
   }
@@ -1230,12 +1578,25 @@ var legRun = (cmd, args, cwd) => {
     throw new Error(`${cmd} ${args.join(" ")} failed: ${why}`);
   }
 };
-function makeLeg({ course, leg, reads, spec, overridePath }) {
+function makeLeg({ course, leg, reads, spec, overridePath, shipped }) {
+  if (spec.archive) {
+    const position = spec.position;
+    return {
+      readsOnly: false,
+      run: () => position,
+      standard: async () => position,
+      close: archiveClose,
+      async handoff() {
+        return null;
+      }
+    };
+  }
   const readsOnly2 = !spec.tests && !spec.verify && !spec.pushes;
-  const standard = spec.tests ? async (ctx) => runTests(ctx, course, leg) : (ctx) => runAgent(ctx, { course, leg, names: reads === "prs" && COMMENTING_LEGS.has(leg), spec, readsOnly: readsOnly2 });
+  const standard2 = spec.tests ? async (ctx) => runTests(ctx, course, leg, shipped) : (ctx) => runAgent(ctx, { course, leg, names: reads === "prs" && COMMENTING_LEGS.has(leg), spec, readsOnly: readsOnly2, shipped });
   const closeLeg = spec.tests ? testsClose : reads === "prs" ? prClose : closeTicket;
   return {
     readsOnly: readsOnly2,
+    standard: standard2,
     async run(ctx) {
       const sha = ctx.snapshot?.sha;
       if (typeof sha !== "string" || sha === "") throw new Error("the leg has no snapshot to read its override at");
@@ -1246,19 +1607,20 @@ function makeLeg({ course, leg, reads, spec, overridePath }) {
       }
       const overrideSha = ctx.signed_control?.overrides;
       const readSha = !spec.tests && typeof overrideSha === "string" && overrideSha !== "" ? overrideSha : sha;
-      if (!hasPath(ctx.checkout, readSha, overridePath)) return standard(ctx);
-      const dir = mkdtempSync2(join5(tmpdir2(), "baton-override-"));
+      if (!hasPath(ctx.checkout, readSha, overridePath)) return standard2(ctx);
+      const dir = mkdtempSync3(join8(tmpdir3(), "baton-override-"));
       try {
-        const file = join5(dir, basename2(overridePath));
+        const file = join8(dir, basename3(overridePath));
         writeFileSync2(file, show(ctx.checkout, readSha, overridePath));
         const mod = await import(pathToFileURL(file).href);
         if (typeof mod.run !== "function") throw new Error(overridePath + " exports no run(ctx, standard)");
-        return await mod.run(ctx, standard);
+        return await mod.run(ctx, standard2);
       } finally {
-        rmSync3(dir, { recursive: true, force: true });
+        rmSync4(dir, { recursive: true, force: true });
       }
     },
     close(ctx, result) {
+      if (spec.reconcile) return null;
       return closeLeg({ ...ctx, default_branch: defaultBranch(ctx) }, result);
     },
     async handoff() {
@@ -1266,8 +1628,8 @@ function makeLeg({ course, leg, reads, spec, overridePath }) {
     }
   };
 }
-async function runAgent(ctx, { course, leg, names, spec, readsOnly: readsOnly2 }) {
-  const { ask, verify, pushes, delivered } = spec;
+async function runAgent(ctx, { course, leg, names, spec, readsOnly: readsOnly2, shipped }) {
+  const { ask, verify, pushes, delivered, reconcile } = spec;
   const heading = `baton: ${course}/${leg} ticket ${ctx.ticket.id}: `;
   const sha = ctx.snapshot?.sha;
   if (typeof sha !== "string" || sha === "") throw new Error("the leg has no snapshot to read .baton/baton.json at");
@@ -1282,7 +1644,7 @@ async function runAgent(ctx, { course, leg, names, spec, readsOnly: readsOnly2 }
   const dibberCommand = process.env.BATON_DIBBER?.trim() || dibberWords(settings).join(" ");
   const entry = courseEntry(settings, course);
   const patterns = [entry.branch_pattern, entry.previous_branch_pattern].filter((p) => typeof p === "string" && p !== "");
-  const ticketText = verify || pushes ? ticketTextOf(ctx) : null;
+  const ticketText = verify || pushes || reconcile ? ticketTextOf(ctx) : null;
   const redEdge = ctx.claim?.station === "pr-open" || ctx.claim?.station === "fixed";
   const prHeads = () => matchingHeads(ctx, entry).heads.sort().join("\n");
   const headsBefore = pushes && redEdge && ticketRepositories(ticketText, settings.repos).length === 0 ? prHeads() : "";
@@ -1291,12 +1653,16 @@ async function runAgent(ctx, { course, leg, names, spec, readsOnly: readsOnly2 }
   let reviewLimit;
   if (course === "create-pr" && leg === "review") {
     const graphSha = ctx.replay?.against ?? sha;
-    const graph = ctx.graph ?? JSON.parse(show(ctx.checkout, graphSha, `.baton/courses/${course}/course.json`));
+    const graph = ctx.graph ?? (ctx.sourced_course === true ? { legs: shipped.reviewMaxRuns != null ? { review: { max_runs: shipped.reviewMaxRuns } } : {} } : JSON.parse(show(ctx.checkout, graphSha, `.baton/courses/${course}/course.json`)));
     const limits2 = graph.legs;
-    reviewLimit = (limits2 instanceof Map ? limits2.get("review")?.maxRuns : limits2?.review?.max_runs) ?? readReviewDefault(show(ctx.checkout, graphSha, REVIEW_DEFAULTS_PATH));
+    reviewLimit = (limits2 instanceof Map ? limits2.get("review")?.maxRuns : limits2?.review?.max_runs) ?? (ctx.sourced_course === true ? DEFAULT_CREATE_PR_REVIEW_ROUNDS : readReviewDefault(show(ctx.checkout, graphSha, REVIEW_DEFAULTS_PATH)));
   }
   const rel = `.baton/courses/${course}/legs/${leg}.md`;
-  const text = hasPath(ctx.checkout, courseSha, rel) ? show(ctx.checkout, courseSha, rel) : null;
+  let text = typeof ctx.instructions === "string" && ctx.instructions !== "" ? readFileSync5(ctx.instructions, "utf8") : hasPath(ctx.checkout, courseSha, rel) ? show(ctx.checkout, courseSha, rel) : ctx.sourced_course === true ? shipped.instructions : null;
+  if (reconcile) text = `${text ?? ""}
+
+Claim context (references only): ${JSON.stringify({ station: ctx.claim?.station, displaced: ctx.displaced, evidence: ctx.evidence })}
+`;
   const reviewStore = ctx.reads_only ? ctx.review_store : void 0;
   const restricted = reviewStore && readOnlyHarness(
     agentWords,
@@ -1315,8 +1681,8 @@ async function runAgent(ctx, { course, leg, names, spec, readsOnly: readsOnly2 }
     OUTPUT_MAX
   ) : null;
   const cwd = workspace?.cwd ?? ctx.checkout;
-  const dir = workspace || text == null ? null : mkdtempSync2(join5(tmpdir2(), "baton-leg-"));
-  const instructions = workspace?.instructions ?? (dir == null ? "" : join5(dir, `${leg}.md`));
+  const dir = workspace || text == null ? null : mkdtempSync3(join8(tmpdir3(), "baton-leg-"));
+  const instructions = workspace?.instructions ?? (dir == null ? "" : join8(dir, `${leg}.md`));
   try {
     if (dir != null && text != null) writeFileSync2(instructions, text);
     const [command, ...words] = agentWords;
@@ -1327,12 +1693,12 @@ async function runAgent(ctx, { course, leg, names, spec, readsOnly: readsOnly2 }
     const [wrapped, ...wrapping] = wrapper == null ? [] : splitWords(wrapper);
     const argv2 = (restricted ? restricted.argv : null) ?? (wrapped === void 0 ? [command, ...words, ctx.ticket.id, leg, ctx.checkout] : [wrapped, ...wrapping, command, ...words, ctx.ticket.id, leg, ctx.checkout]);
     if (restricted && command === "opencode") {
-      const version = execFileSync3(command, ["--version"], { cwd, env: restricted.env, encoding: "utf8", timeout: 5e3, killSignal: "SIGKILL", stdio: ["ignore", "pipe", "pipe"] }).trim();
+      const version = execFileSync4(command, ["--version"], { cwd, env: restricted.env, encoding: "utf8", timeout: 5e3, killSignal: "SIGKILL", stdio: ["ignore", "pipe", "pipe"] }).trim();
       if (!readOnlyVersionSupported(version)) throw new Error("reads_only requires OpenCode v2.2.3 or newer in the v2 series (R-BTN-183)");
     }
     if (process.env.BATON_VERBOSE) process.stderr.write(heading + "agent_command: " + agentCommand + (wrapper != null ? "; wrapper: " + wrapper : "") + "; argv: " + argv2.join(" ") + "\n");
     const startedAt = (/* @__PURE__ */ new Date()).getTime();
-    const wrapperLog = join5(ctx.checkout, ".baton", "logs", `${ctx.ticket.id}-${leg}.log`);
+    const wrapperLog = join8(ctx.checkout, ".baton", "logs", `${ctx.ticket.id}-${leg}.log`);
     const activity = ctx.agent_activity;
     const storePaths = typeof activity?.command === "string" && activity.command.trim() === settingsCommand.trim() && Array.isArray(activity.paths) && activity.paths.every((path) => typeof path === "string") ? activity.paths : builtinAgentActivityPaths(command, cwd);
     const lastOutput = (so, se) => (so + "\n" + se).split("\n").map((l) => l.trimEnd()).filter((l) => l.trim() !== "").slice(-20).join("\n  ");
@@ -1447,6 +1813,24 @@ async function runAgent(ctx, { course, leg, names, spec, readsOnly: readsOnly2 }
     const said = lastOutput(out, stderr);
     const failed = (e) => new Error((e instanceof Error ? e.message : String(e)) + (said !== "" ? `; the agent's last output:
   ${said}` : "; the agent printed nothing"));
+    if (reconcile) {
+      try {
+        const graph = JSON.parse(show(ctx.checkout, courseSha, `.baton/courses/${course}/course.json`));
+        return reconcileAnswer(out, {
+          checkout: ctx.checkout,
+          ticket: ctx.ticket,
+          ticketText,
+          repositories: ticketRepositories(ticketText, settings.repos),
+          branchPatterns: patterns,
+          branch: ticketsBranch(ctx.checkout, ctx.default_branch ?? null),
+          from: ctx.claim?.station ?? "",
+          displaced: ctx.displaced ?? "",
+          to: graph.legs.reconcile.reconciles.to
+        }, legRun);
+      } catch (e) {
+        throw failed(e);
+      }
+    }
     if (headsBefore !== "" && prHeads() === headsBefore) {
       const heads = headsBefore.split("\n").map((line) => line.split("	")[1].slice("refs/heads/".length) + " at " + line.slice(0, 10));
       throw failed(`the ${leg} leg pushed nothing: ${heads.join(", ")} is the head the run-tests gate tested red, unchanged \u2014 no fix, no position (B-231)`);
@@ -1478,10 +1862,10 @@ async function runAgent(ctx, { course, leg, names, spec, readsOnly: readsOnly2 }
     }
   } finally {
     workspace?.cleanup();
-    if (dir != null) rmSync3(dir, { recursive: true, force: true });
+    if (dir != null) rmSync4(dir, { recursive: true, force: true });
   }
 }
-function verdictOf(cwd, script) {
+function verdictOf2(cwd, script) {
   try {
     execRaw("npm", ["run", script], cwd, { timeoutMs: RUN_TESTS_TIMEOUT_MS, maxBuffer: OUTPUT_MAX });
     return { tests: "green" };
@@ -1499,7 +1883,7 @@ function verdictOf(cwd, script) {
     throw new Error("npm run " + script + " could not run (" + (e?.code ?? e?.message ?? String(e)) + ") \u2014 no verdict, no marker");
   }
 }
-function runTests(ctx, course, leg) {
+function runTests(ctx, course, leg, shipped) {
   const station = ctx.claim?.station;
   if (station !== "pr-open" && station !== "fixed") {
     throw new Error("the run-tests gate runs at pr-open or fixed, not " + JSON.stringify(station ?? null));
@@ -1511,7 +1895,7 @@ function runTests(ctx, course, leg) {
   const heading = `baton: ${course}/${leg} ticket ${ctx.ticket.id}: `;
   let script = "test";
   try {
-    const file = JSON.parse(readAt(`.baton/courses/${course}/course.json`));
+    const file = ctx.sourced_course === true ? { test_script: shipped.testScript } : JSON.parse(readAt(`.baton/courses/${course}/course.json`));
     if (file && typeof file.test_script === "string" && /^[\w:.+-]{1,64}$/.test(file.test_script)) script = file.test_script;
   } catch {
   }
@@ -1537,26 +1921,26 @@ function runTests(ctx, course, leg) {
   git2("fetch", "-q", "--no-tags", "origin", "refs/heads/" + branch);
   const tested = git2("rev-parse", "FETCH_HEAD").trim();
   if (process.env.BATON_VERBOSE) process.stderr.write(heading + "npm run " + script + " on " + branch + " at " + tested.slice(0, 10) + " (" + station + ")\n");
-  const dir = mkdtempSync2(join5(tmpdir2(), "baton-run-tests-"));
-  const tree = join5(dir, "tree");
+  const dir = mkdtempSync3(join8(tmpdir3(), "baton-run-tests-"));
+  const tree = join8(dir, "tree");
   let verdict;
   try {
     git2("worktree", "add", "-q", "--detach", tree, tested);
-    const modules = join5(ctx.checkout, "node_modules");
-    if (existsSync(modules) && !existsSync(join5(tree, "node_modules"))) symlinkSync(modules, join5(tree, "node_modules"), "dir");
+    const modules = join8(ctx.checkout, "node_modules");
+    if (existsSync3(modules) && !existsSync3(join8(tree, "node_modules"))) symlinkSync(modules, join8(tree, "node_modules"), "dir");
     let pkg = {};
     try {
-      pkg = JSON.parse(readFileSync2(join5(tree, "package.json"), "utf8"));
+      pkg = JSON.parse(readFileSync5(join8(tree, "package.json"), "utf8"));
     } catch {
     }
     const declared = [pkg?.dependencies, pkg?.devDependencies].some((deps) => deps !== null && typeof deps === "object" && Object.keys(deps).length > 0);
-    if (declared && !existsSync(join5(tree, "node_modules"))) {
+    if (declared && !existsSync3(join8(tree, "node_modules"))) {
       throw new Error("npm run " + script + " cannot run: " + branch + " declares dependencies and neither the tested tree nor the home checkout has node_modules \u2014 install them where the leg runs (npm ci); the tests never ran: no verdict, no marker");
     }
-    verdict = verdictOf(tree, script);
+    verdict = verdictOf2(tree, script);
   } finally {
     try {
-      unlinkSync(join5(tree, "node_modules"));
+      unlinkSync(join8(tree, "node_modules"));
     } catch {
     }
     try {
@@ -1567,7 +1951,7 @@ function runTests(ctx, course, leg) {
       git2("worktree", "prune");
     } catch {
     }
-    rmSync3(dir, { recursive: true, force: true });
+    rmSync4(dir, { recursive: true, force: true });
   }
   const trailers = ["Baton-Tests: " + verdict.tests, "Baton-Tested: " + tested, ...ctx.claim?.nonce ? ["Baton-Claim: " + ctx.claim.nonce] : []].join("\n");
   const paragraphs = ["baton: tests " + verdict.tests + " for " + id, ...verdict.tests === "red" ? [verdict.tail] : [], trailers];
@@ -1576,10 +1960,11 @@ function runTests(ctx, course, leg) {
 }
 
 // baton-default-entry.ts
-var { run, close, handoff, readsOnly } = makeLeg({ "course": "create-pr", "leg": "implement", "reads": "prs", "spec": { "position": { "reached": "pr-open", "next": "run-tests" }, "verify": "pr", "delivered": true }, "overridePath": ".baton/courses/create-pr/legs/implement.run.mjs" });
+var { run, close, handoff, readsOnly, standard } = makeLeg({ "course": "create-pr", "leg": "implement", "reads": "prs", "spec": { "position": { "reached": "pr-open", "next": "run-tests" }, "verify": "pr", "delivered": true }, "overridePath": ".baton/courses/create-pr/legs/implement.run.mjs", "shipped": { "instructions": "# create-pr \xB7 implement \u2014 build the ticket and open its PR\n\nYou are running the `implement` leg of the `create-pr` course for one ticket. The ticket's file\nis `$BATON_TICKET_FILE`; you are in a checkout of the repository. When you finish, a PR for the\nticket is open and its checks are running. Baton's closing marker is written for you after you\nreturn; do not write it.\n\nThe model you run on is the repository's own choice (\xA76.10, R-BTN-131): the stub runs this\nrepository's `agent_command` exactly as `.baton/baton.json` writes it, and Baton delivers no\nadvice about a model, a key or a route. A repository whose leg picks its model at run time\nwrites a leg override that reads its own configuration. If the model or a provider key the\ncommand needs is unusable, say so in your final output and carry on with what works \u2014 not by\ndeclaring a capability you no longer hold.\n\n> **How the stub runs you** \u2014 Baton's contract for the `agent_command` author: your command\n> line splits into words as `sh` would (quotes honoured, no substitutions) and executes\n> **without a shell**, with the ticket id, the leg and the checkout appended as arguments.\n> Stdin is never an open pipe: nothing to read, and a read ends at once. Stdout and stderr are\n> captured pipes, and the course reads stdout's last line. Your process's exit **is** your\n> completion: a harness that is a client of a background service must keep its session in\n> process (`opencode run --standalone`, or the equivalent) \u2014 a client that can exit before its\n> work ends leaves truncated output and an orphaned session posting to a claim that no longer\n> exists (B-84). For runs that cannot raise `interact`, the stub can also conclude\n> on fifteen minutes of quiet across stdout, the wrapper log and the harness store (B-108).\n> A run that can raise `interact` does not conclude on silence: a foreground question can be\n> silent until Baton's deadline takes the claim back. The stub's five-hour hard ceiling still\n> applies; if it stops a joinable run, partial output is not a result. A repository's `agent_wrapper` in `.baton/baton.json`, or the host's\n> `BATON_AGENT_WRAPPER`, which wins, puts a command in front of yours, split the same way, so\n> your command's words, the arguments and 0/1/2 are the wrapper's to pass on (B-95). Never end\n> with work in flight: the process is the session, and nothing resumes it \u2014 wait, in the\n> foreground, on every job you started before printing your final line.\n\n## 1. Read before you write\n\nRead the home repository's workflow and rules (for example, `AGENTS.md` and `CLAUDE.md`,\nwhen present). Work only in the home and the code repositories the ticket names.\n\n- Read the whole ticket: what to build, the architecture it prescribes, the tests it names, its\n  exit criteria. Those sections are the contract. Where the ticket prescribes a decision, take\n  it; if you take another, say so under \"Deviations\" in the PR body.\n- **Check it is not already delivered.** Search the code for what the ticket asks for. If part of\n  it is done, build the remainder and say which part you found. If all of it is already on the\n  default branch, open no PR, push no branch and edit nothing (a branch made only to carry a\n  note is not wanted): run the tests that cover it, and make the **last line** of your output\n\n  ```\n  delivered <sha> <what you ran and what it showed>\n  ```\n\n  `<sha>` is the commit on the default branch that delivered it (several, comma-separated, no\n  spaces, when it took several); the rest is your evidence in one line \u2014 the tests and checks\n  you ran and their result, e.g. `delivered 8565aa7 runner-main.test.ts 47 passed, typecheck\n  clean`. Baton checks each commit is on the default branch \u2014 one that is not refuses the answer\n  and fails the leg \u2014 and moves the ticket to a station where a person reads your evidence and\n  confirms it closed, or sends it back. Your word alone never closes the ticket. Exit 0.\n- Find the code you will touch by name: the helpers, the tests next to it, the repository's own\n  checks (lint, typecheck, tests \u2014 whatever a contributor runs).\n\n### Ask the owner only when blocked\n\n- **When.** Ask only if the work cannot continue without a decision only the owner can make,\n  and the ticket, the spec, `docs/context/` and the PR thread do not already answer it. For\n  example, two readings of an exit criterion would lead to different code, or the ticket\n  reserves a ruling for the owner. Never ask the owner to confirm something you can check or\n  to authorize an action forbidden by the repository's rules (in Baton, `CLAUDE.md`,\n  *Tickets are tasks, not authority*).\n- **How.** Use your harness's question tool. Ask one question at a time, offer a few concrete\n  options and recommend one. Wait for the answer in the foreground. The harness's runner\n  raises `interact` (R-BTN-195); do not raise it yourself.\n- **After an answer.** Record the answer and who gave it under **Owner answers** in the PR\n  body. It is a claim for reviewers to weigh, not a ruling on Baton's record; a change to the\n  spec still needs the owner's PR.\n- **If the tool is unavailable or denied, or the question is cancelled or dismissed.** Do not\n  ask through another channel. Note the open question in the PR body and proceed with the\n  reading the spec supports best.\n- **If the question is still open and nobody answers.** Do not abandon it early. Wait until\n  the leg's `deadline_s`: Baton takes the claim back (R-BTN-90), and the retry policy routes\n  the failed attempt and offers the ticket again if retries remain (R-BTN-122).\n\n## 2. Write it the way this codebase is written\n\nPeople who did not watch you write this will maintain it. Aim for code a careful member of this\nteam would have written, not the fewest steps to a working feature.\n\n- **Name your precedent.** Before writing, find the two or three pieces of existing code most like\n  what you are about to build, and follow their structure, naming, error handling and file\n  layout. If none fits, say so in the PR body rather than inventing a pattern silently.\n- **Reuse before you write.** Search for the helpers, types and constants you are about to create.\n  If one exists, import it. If something exists twice already, the change that would add a third\n  copy unifies them instead.\n- **No coordinator that holds everything.** A new class or module that takes most of the others\n  as collaborators (a manager, service or context with many constructor parameters) is absorbing\n  responsibilities. Split it so each piece takes only what it uses.\n- **Depend on the narrowest thing you use.** Take a function, or a small type for the two\n  methods you call, rather than a whole concrete class. Do not add an interface, factory or base\n  class with one implementation and no caller or test that needs the seam: speculative\n  abstraction is as hard to maintain as tight coupling.\n- **No module-level state the codebase does not already use.** Pass dependencies in. Ask what a\n  second instance does to the first, and whether teardown undoes what setup did.\n- **Write the language idiomatically**, as this codebase writes it, not translated from another\n  language's conventions.\n\nBefore you open the PR, answer these in the PR body under **Fit**, one line each:\n\n1. Which existing code did you follow?\n2. Can each new unit be constructed in a test without building the others?\n3. Did you add a helper, type or constant that already existed?\n4. Which new abstractions have one implementation, and what needs them?\n5. Which new class or function takes more than about four collaborators, and why?\n\nFix whatever the answers expose before you push.\n\n## 3. Build it on a branch\n\n- Fetch, then branch from the default branch's tip. Name the branch so this course finds it: the\n  `branch_pattern` of this course in `.baton/baton.json` (`claude/<ticket id>-<slug>` by default).\n  An earlier attempt's branch for this ticket is continued, not replaced.\n- Implement what the ticket says, with its tests. A behaviour change without a test that would\n  fail without it is not finished.\n- Run the repository's checks yourself. Compare individual failures, not the check's exit status.\n  Fix failures your change causes before you push, even if the same check also reports a\n  pre-existing failure.\n- **A failure that also fails on the base is not yours.** Re-run the same command with the same\n  install in a clean checkout of the base (`git worktree add --detach <tmp> origin/<default branch>`),\n  never in your own tree. If the same failure occurs there, push and open the PR anyway.\n  In the PR body, under **Pre-existing failures**: name the test, its first failing line and the\n  base commit you reproduced it on. When you confirm such a failure, say in your last lines that\n  the default branch is red and where, before any required machine-read answer line.\n- **Never fix an unrelated failure** in the ticket's PR, even a one-line fix. It belongs to the\n  ticket or PR that owns that code.\n- **Install dependencies with hygiene** (B-132): from the lockfile only \u2014 `npm ci`, never an\n  `npm install` that rewrites it \u2014 unless the ticket itself asks for a dependency change; and\n  with lifecycle scripts off (`npm ci --ignore-scripts`: pass the flag every time \u2014 never\n  count on an image's `ignore-scripts=true` being there). A package whose install script the repository needs\n  is listed in `.baton/baton.json` (`allow_install_scripts: [<package>]`, a control input under\n  B-127): run exactly those packages' scripts \u2014 `npm rebuild <package>\n  --ignore-scripts=false` \u2014 never scripts for all. Where the repository sets a registry age\n  floor (npm's `before` setting, or a proxy at the fence), install inside it, never around it.\n- Commit with explicit paths (`git commit -- <paths>`), never `git add -A`: the checkout may hold\n  other work.\n\n## 4. Open the PR\n\nOpen one PR per repository the ticket touches, its title starting with the ticket's id. The\nticket's `repos:` lists the repositories besides this one; each gets its PR from a branch of the\nsame name, in its own checkout. This repository may get none. The body, in this order:\n\n- **What** \u2014 three lines.\n- **Architecture decisions taken**, and **Deviations** from the ticket, if any, each with why.\n- **Fit** \u2014 the five answers from section 2.\n- **Tests added** \u2014 `file: test names`.\n- **Untested and why.**\n- **Exit criteria** \u2014 each of the ticket's, with how it was checked (the test, the command, the\n  output).\n\nThen add every PR's URL to the ticket's `prs:` list if the ticket keeps one. Baton reads the PRs\nof every repository the ticket names, and reads them together, as one change.\n\n## Do not\n\n- A leg never edits a file another ticket's leg may edit \u2014 no CHANGELOG, no index, no\n  aggregate; a release note belongs in the PR body.\n- Merge, approve or review your own PR; later legs do that.\n- Leave the PR without a pushed head: the review reads what is pushed.\n- Hold back a push because a check fails on the base too: the run-tests leg is the gate, and\n  unpushed work is lost when the leg's environment ends.\n- Exit without a PR and without saying why. Whatever stops you \u2014 the ticket already delivered,\n  a stop the repository's rules name, a failure your change causes that you cannot fix, a push or `gh pr create`\n  that fails, a model or provider that refuses (balance, quota, rate limit) \u2014 your last lines\n  say what it was, in plain words: an exit with no PR fails the leg, and those lines are all\n  that is kept of it (B-256). Your process exits 0 whatever you say, so saying it is the only\n  way anyone learns it.\n", "reviewMaxRuns": 3, "testScript": "test" } });
 export {
   close,
   handoff,
   readsOnly,
-  run
+  run,
+  standard
 };

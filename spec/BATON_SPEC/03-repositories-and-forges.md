@@ -179,9 +179,8 @@ route, with the events and fields the table lists for it, is
 ### 3.2 Who may post a board
 
 - **R-BTN-93 (sync keys and the one verifier).** `status: built` A repository's sync authenticates with a sync
-  key or a CI identity token (R-BTN-15); see R-BTN-102 for the unbuilt machine-key input. A
-  board post from a class the policy's `inputs.board` excludes (`sync-key`,
-  `ci-identity`, `machine`; R-BTN-188) is refused `forbidden`.
+  key, a CI identity token (R-BTN-15) or a machine key granted on the repository (R-BTN-102,
+  R-BTN-146; the machine-key input is not yet built).
   - **A sync key** is an SSH key of R-BTN-13's types in one `sync_keys` row: exactly one
     repository and one role. Owners add and revoke it
     (`POST /v1/owner/{repository}/sync-keys`, `…/sync-keys/{fingerprint}/revoke`); an
@@ -193,8 +192,8 @@ route, with the events and fields the table lists for it, is
     configuration in which only default-branch runs can read it.
   - **`verifySync(req) → {repository, role}`** is the only check. It refuses `unauthenticated`
     (no credential, bad signature, unknown or revoked key, a token that fails) or `forbidden`
-    (another role or a key that is no sync credential). Every `/v1/sync/*` route uses only its
-    answer.
+    (another role, a key that is no sync credential, a machine key with no grant
+    there). Every `/v1/sync/*` route uses only its answer.
   - **The mirror.** Legacy, removed with its code (R-BTN-193). A sync key's role is `sync` or
     `mirror`; a repository has a mirror when it has a `mirror_workflow`, `ci_identity.mirror` is
     true, or it has a `mirror`-role sync key. Only sync keys and CI tokens act as the mirror
@@ -224,28 +223,28 @@ route, with the events and fields the table lists for it, is
 
 ### 3.3 Triggering a sync
 
-- **R-BTN-94 (Baton dispatches a sync after the commit that wants one).** `status: partly B-152` Where this
-  specification says Baton dispatches a sync, the object records the dispatch in the transaction
-  that causes it — a claim, an `advance`, an end, a person's answer held in Baton, an owner bar
-  set or lifted, an owners' `required_bars` change, a forge notification — once per repository
-  and workflow, and the host shell performs it through `Dispatch` (R-BTN-55) after the
-  transaction commits, for a request and for the alarm alike, awaited by neither (for a
-  repository before its cutover, §16, only a forge notification's and the unblocked trigger's
-  are sent). A repository without a dispatch target is synced by
-  whatever runs `baton repo sync` for it: a CI schedule or a cron loop.
-  - **Not built:** a stored want that stands until a post answers it, its routes
-    (`GET /v1/sync/wanted`, `POST /v1/sync/want`, the owner's `sync-want`), runners that pull
-    it, the dashboard's **Resync** and `baton.sync-late`:
-    [the proposal](../proposals/tickets-and-sources.md).
+- **R-BTN-94 (Baton dispatches a sync after the commit that wants one).** `status: partly B-152` Baton records
+  a sync want in the transaction that causes it, including on unblocking (R-BTN-77), without
+  requiring a dispatch target. It keeps the earliest request time and fences the want at
+  the last observation number handed out, or zero before the first. A post numbered above
+  that fence clears the want (R-BTN-62), including a legacy held post. The host shell may send
+  a hint through `Dispatch` (R-BTN-55) after commit; the want does not depend on delivery.
+  - **Pulling.** The routes in §14 expose the want and the most recently posted `head_sha`, even
+    when the board head did not move. A sync or owner may request a want. Polling is read-only
+    except for the signing nonce; usage is accounted for separately. Runner polling is
+    [proposed, not built](../proposals/tickets-and-sources.md).
+  - **Diagnostics.** Needs you shows `baton.sync-late` and `baton.mirror-late` after 30 minutes,
+    and `baton.forge-secret-missing` for a configured dispatch or webhook missing its secret.
   - **Dispatch targets** (`dispatch`, §13) name what Baton calls, per forge (the adapter table).
     Baton holds their credentials as host secrets (R-BTN-55), never in SQLite or an export
     (§12.8). Without a target (every `git` repository) Baton dispatches nothing; a dispatch the
-    forge refuses is logged with its reason. Baton dispatches only the repository's `sync_workflow` and the owners' unblocked
-    trigger's workflow (§12.7).
+    forge refuses is retried at most once, then logged with its reason. Baton dispatches only
+    the registered repository's own target (§12.7).
   - **Coalescing.** Dispatches of one workflow coalesce into one per repository and workflow per
     30 seconds; one wanted inside a window is sent at its end, the
-    **trailing dispatch**. The window is the `webhook_syncs` row of that repository and
-    workflow (§13), which the alarm reads.
+    **trailing dispatch**, unless a post has answered the sync want. The sync window is
+    persisted in `webhook_dispatch` and shared by every sync producer; the unblocked trigger
+    has its own window.
   - **The unblocked trigger** (`unblocked_trigger`, owners' setting): NULL or a target of
     `dispatch`'s shape, dispatched when a ticket unblocks (R-BTN-77) with its `tickets` input,
     with the repository's own dispatch credential and in its own coalescing window. Owners choose
@@ -260,7 +259,9 @@ route, with the events and fields the table lists for it, is
     another forge.
   - **The mirror.** Legacy, removed with its code (R-BTN-193). Baton dispatches the
     `mirror_workflow` for the events a mirror writes and at a seal; a mirror run acknowledges
-    what it read with the `GET /v1/sync/events` it ends with (§16).
+    what it read with the `GET /v1/sync/events` it ends with (§16). Mirror polling shows
+    unwritten mirror events; while frozen it also shows pending acknowledgment of the global
+    cursor required by R-BTN-88.
 - **R-BTN-73 / R-BTN-95 (forge notifications are only triggers).** `status: built` `status: built` A notification has Baton
   dispatch a sync (R-BTN-94); it never computes or carries state. Baton reads from it only the fields the adapter
   table lists.
@@ -339,7 +340,7 @@ route, with the events and fields the table lists for it, is
   read only pushers' facts; the adapter exports `pusher` to a course's own `sync.mjs`; whatever
   station function runs, the CLI drops every posted marker and output whose author is not a
   pusher, and the sync log counts them per PR. `pusher` is the word for this trust in a forge
-  author; `trusted` is kept for the runner role (R-BTN-182).
+  author; `trusted` is kept for the leg property (R-BTN-182).
   - **PRs that count.** A PR found by `branch_pattern` counts only when its head repository is
     its base repository by id (the adapter table) and its base is the home or a `repos:` entry
     with reach (R-BTN-140). A fork's PR counts only when a pusher names it in `prs:`; its

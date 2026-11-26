@@ -1,9 +1,10 @@
 // Build standalone leg modules and ejected defaults (R-BTN-131), for init and for npm pack.
 import { createHash } from 'node:crypto';
-import { copyFileSync, lstatSync, mkdirSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs';
+import { copyFileSync, cpSync, lstatSync, mkdirSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { BUILT_INS, DEFAULT_COURSE, type BuiltIn } from './courses';
-import { cliPin, fromSource, packageRoot, prebuilt } from './repo-source';
+import { cliPin, courseEntry, courseFileText, fromSource, LEGACY_CREATE_PR, packageRoot, prebuilt, sourceFileOfLegacyStation } from './repo-source';
+import { coursePath } from './course-tree';
 import { git, gitText } from './git.mjs';
 import { OVERRIDE_SUFFIX, type StubConfig } from './stub-config';
 
@@ -54,12 +55,16 @@ async function bundleSource(contents: string): Promise<Buffer> {
 }
 
 export function stubSource(b: BuiltIn, leg: string): string {
+  const graph = b.course as { test_script?: string; legs: Record<string, { max_runs?: number }> };
   const config: StubConfig = {
     course: b.id, leg, reads: b.reads, spec: b.legs[leg],
     overridePath: `.baton/courses/${b.id}/legs/${leg}${OVERRIDE_SUFFIX}`,
+    shipped: { instructions: shippedInstructions(b.id, leg), reviewMaxRuns: graph.legs.review?.max_runs, testScript: graph.test_script },
   };
+  // `standard` is exported for a sourced course's run (B-139): the runner's leg process loads
+  // the leg's overrides itself and calls the course's own run.
   return `import { makeLeg } from './src/defaults/stub-runtime.ts';
-export const { run, close, handoff, readsOnly } = makeLeg(${JSON.stringify(config)});
+export const { run, close, handoff, readsOnly, standard } = makeLeg(${JSON.stringify(config)});
 `;
 }
 
@@ -136,10 +141,21 @@ export const wrapperExample = (): string =>
 export const instructionsOf = (course: string, leg: string): string =>
   readFileSync(fromSource() ? join(packageRoot(), 'src', 'defaults', 'courses', course, `${leg}.md`) : prebuilt('courses', course, `${leg}.md`), 'utf8');
 
+/** The shipped instructions for a leg, or null for a leg this release ships none for (a course
+ * built in a test from another's stub): its stub then embeds none to fall back on. */
+const shippedInstructions = (course: string, leg: string): string | null => {
+  try {
+    return instructionsOf(course, leg);
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw e;
+  }
+};
+
 /** The legs of a standard course a runner runs, each with a stub and instructions: every leg
  *  but a person's (R-BTN-116, B-257's `confirm`), which no runner is offered and no script runs. */
 export const runnerLegs = (b: BuiltIn): string[] =>
-  Object.entries(b.course.legs as Record<string, { kind?: unknown }>).filter(([, l]) => l?.kind !== 'person').map(([leg]) => leg);
+  Object.entries(b.course.legs as Record<string, { kind?: unknown; arrives?: unknown }>).filter(([, l]) => l?.kind !== 'person' && !l?.arrives).map(([leg]) => leg);
 
 /** The source bytes init writes and --check expects: build from this checkout, or read the
  * published package's prebuilt copy. Never load the repository's own stub to compare it. */
@@ -147,10 +163,30 @@ export async function stubBytes(b: BuiltIn, leg: string): Promise<Buffer> {
   return fromSource() ? bundleSource(stubSource(b, leg)) : readFileSync(prebuilt('stubs', b.id, `${leg}.mjs`));
 }
 
+/** A leg stub, bundled with its `close`: from source in a checkout, else build:cli's copy. */
+export async function writeStub(b: BuiltIn, leg: string, abs: string): Promise<void> {
+  writeFileSync(abs, await stubBytes(b, leg));
+}
+
 /** An ejected default (`--eject`): from source in a checkout, else build:cli's copy. */
 export async function writeWrapper(kind: 'tickets' | 'stations', course: string, abs: string): Promise<void> {
   if (fromSource()) writeFileSync(abs, await bundleSource(WRAPPERS[kind](course)));
   else copyFileSync(kind === 'tickets' ? prebuilt('tickets.mjs') : prebuilt('stations', `${course}.mjs`), abs);
+}
+
+/** Regenerate the committed source trees. No consumer needs esbuild to read a pin. */
+export async function writeStandardSources(): Promise<void> {
+  for (const b of BUILT_INS) {
+    const dir = join(packageRoot(), coursePath(`standard-${b.id}`));
+    mkdirSync(join(dir, 'legs'), { recursive: true });
+    writeFileSync(join(dir, 'course.json'), courseFileText(b));
+    writeFileSync(join(dir, 'entry.json'), `${JSON.stringify({ ...courseEntry(b), facts: b.reads === 'prs' ? ['prs'] : [] }, null, 2)}\n`);
+    writeFileSync(join(dir, 'sync.mjs'), await bundleSource(WRAPPERS.stations(b.id)));
+    for (const leg of runnerLegs(b)) {
+      writeFileSync(join(dir, 'legs', `${leg}.mjs`), await stubBytes(b, leg));
+      writeFileSync(join(dir, 'legs', `${leg}.md`), instructionsOf(b.id, leg));
+    }
+  }
 }
 
 /** What build:cli writes into `dist/` for an installed package: every standard course's leg
@@ -172,13 +208,16 @@ export async function prebuildDefaults(dist: string, build: { repository: string
         files++;
       }
     }
+    cpSync(join(packageRoot(), coursePath(`standard-${b.id}`)), join(out, 'sources', `standard-${b.id}`), { recursive: true });
     mkdirSync(join(out, 'stations'), { recursive: true });
     writeFileSync(join(out, 'stations', `${b.id}.mjs`), await bundleSource(WRAPPERS.stations(b.id)));
     files++;
   }
   writeFileSync(join(out, 'tickets.mjs'), await bundleSource(WRAPPERS.tickets(DEFAULT_COURSE)));
+  mkdirSync(join(out, 'legacy'), { recursive: true });
+  copyFileSync(sourceFileOfLegacyStation(), join(out, 'legacy', LEGACY_CREATE_PR));
   // B-95's worked example, beside the stubs: init writes it into .baton/ as leg-wrapper.example.
   copyFileSync(join(packageRoot(), '.baton', WRAPPER_EXAMPLE), join(out, WRAPPER_EXAMPLE));
   writeFileSync(join(dist, 'build.json'), `${JSON.stringify(changedStubInputs(build.commit) ? { ...build, dirty: true } : build, null, 2)}\n`);
-  return files + 3;
+  return files + 4;
 }

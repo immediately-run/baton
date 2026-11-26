@@ -1,0 +1,17 @@
+{
+  "id": "review-pr",
+  "version": 2,
+  "min_runner_version": 2,
+  "skill": "baton-review-pr",
+  "step_kinds": [
+    "review",
+    "conclude",
+    "approved-by-hand",
+    "reconcile"
+  ],
+  "branch_pattern": "claude/{ticket}-*",
+  "protocol_files": [],
+  "facts": [
+    "prs"
+  ]
+}

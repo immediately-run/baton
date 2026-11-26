@@ -5,6 +5,7 @@
 // children (tickets naming the request as `parent`) make `verify` wait on `children` until every
 // one closes; a verification that files a fix child waits again, and one that passes reaches
 // `shipped`. Node only: it writes a real repository and runs git.
+import { GitRepo } from '../lib/gitRepo';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -19,18 +20,14 @@ const T0 = Date.parse('2026-10-18T12:00:00Z');
 // No --pin: the CLI pins its own commit, the one its courses' sources name (B-33).
 const init = (root: string, ...argv: string[]) => initMain(argv, { root, log: () => {} });
 
-class Repo {
-  readonly dir = mkdtempSync(join(tmpdir(), 'baton-s107-'));
+class BuildAppCourse extends GitRepo {
   /** The remote a leg's close pushes its ticket write to. */
-  readonly remote = mkdtempSync(join(tmpdir(), 'baton-s107-remote-'));
+  get remote(): string { return this.bare; }
   constructor() {
-    execFileSync('git', ['init', '-q', '--bare', '-b', 'main', this.remote], { stdio: 'ignore' });
-    for (const a of [['init', '-q', '-b', 'main'], ['config', 'user.email', 's107@test'], ['config', 'user.name', 's107'], ['remote', 'add', 'origin', this.remote]]) execFileSync('git', ['-C', this.dir, ...a], { stdio: 'ignore' });
+    super('baton-107-', { origin: true });
     mkdirSync(join(this.dir, 'tickets'), { recursive: true });
   }
-  write(path: string, text: string): void {
-    writeFileSync(join(this.dir, path), text);
-  }
+
   /** One close, as a marker course's `close` commits it (R-BTN-83, B-100): the leg's machine
    *  state written into the ticket's own frontmatter, committed alone under `baton:close`. */
   marker(ticket: string, leg: string, reached: string, next: string | null): void {
@@ -40,10 +37,7 @@ class Repo {
     execFileSync('git', ['-C', this.dir, 'add', '-A'], { stdio: 'ignore' });
     execFileSync('git', ['-C', this.dir, 'commit', '-qm', `baton:close ${ticket} ${leg}`], { stdio: 'ignore' });
   }
-  commit(): void {
-    execFileSync('git', ['-C', this.dir, 'add', '-A'], { stdio: 'ignore' });
-    execFileSync('git', ['-C', this.dir, 'commit', '--allow-empty', '-qm', 'step'], { stdio: 'ignore' });
-  }
+  commit(message = 'step'): string { return super.commit(message); }
   /** One sync through the local host; `facts` false passes no recorded facts (and no forge token). */
   async sync(facts = true): Promise<void> {
     const extra: string[] = [];
@@ -58,17 +52,17 @@ class Repo {
   }
 }
 
-let repo: Repo;
+let repo: BuildAppCourse;
 let minutes = 0;
 /** Each sync takes an observation number; the next is refused until ten minutes pass (R-BTN-62). */
 const later = () => setClock(T0 + (minutes += 11) * 60_000);
 beforeEach(async () => {
   minutes = 0;
   await setClock(T0);
-  repo = new Repo();
+  repo = new BuildAppCourse();
 });
 afterEach(() => {
-  rmSync(repo.dir, { recursive: true, force: true });
+  repo.dispose();
   rmSync(repo.remote, { recursive: true, force: true });
 });
 

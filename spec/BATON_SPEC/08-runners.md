@@ -52,16 +52,15 @@ section that are not built are in [the proposal page](../proposals/checks-and-ex
   | `fenced` | `[{claim_id, terminated: true}]`, one entry per fenced claim (R-BTN-19) |
   | `transcripts` | at most 50 transcript paths (R-BTN-20) |
   | `couriers` | the repositories and `asks` it delivers notices for |
-  | `protection` | `[{repository, matched, reading_hash}]`, the protection checker's readings (R-BTN-180) |
   | `test_harness` | R-BTN-32 |
 
   - A runner holding one claim may send `session_url`, `leg_finished` and one `fenced` object in
     place of the three lists. Spooled activities go in their own call before the beat (§9.9).
-  - A refused `transcripts`, `couriers` or `protection` entry and a dropped session link
+  - A refused `transcripts` or `couriers` entry and a dropped session link
     (R-BTN-113) are named in the answer and never refuse the heartbeat, since a refused heartbeat
     would get a live runner reaped. A malformed `session_urls` or `legs_finished` entry is dropped
-    unnamed. A malformed `protection` is `invalid-params`, as is a `transcripts`, `couriers` or
-    `protection` list over its bound and a malformed `fenced`.
+    unnamed. A `transcripts` or `couriers` list over its bound, and a malformed `fenced`, is
+    `invalid-params`.
   - **The answer** carries `runner_id`, `incarnation`, `lease_timeout_s` (as clamped),
     `grant: {capabilities}` (R-BTN-72), `claims`, `messages`, `bars` (the owner bars in force,
     R-BTN-67), `stale_courses` (R-BTN-22), `mode` (per repository `shadow` or `cut-over`;
@@ -112,20 +111,19 @@ section that are not built are in [the proposal page](../proposals/checks-and-ex
   (credential kind `runner`, SSH) may, on each repository where it holds a grant (R-BTN-146),
   with ordinary signed requests:
   - **work** (R-BTN-58);
+  - **sync** — `/v1/sync/*` with `?repository=<id>` in the signed query, role `sync` only, no
+    runner secret;
   - **report readings** (R-BTN-101).
 
-  **Sync is not built for machine keys.** The proposed input would use `/v1/sync/*` with
-  `?repository=<id>` in the signed query, an active grant, role `sync` only, no runner secret,
-  and require `machine` in `inputs.board` (R-BTN-188). Listing `machine` does not currently
-  authorize a runner key to sync.
+  **Sync is not built for machine keys.** The **sync** input above is specified, with an
+  active grant; a runner key does not yet sync.
 
   Every snapshot records its credential (`board_snapshots.posted_by`). A machine key is never an
   owner or administrator key, and neither is a machine key. API-key runners (R-BTN-159) work
-  and report readings but never sync. One machine key per tenant (R-BTN-137).
+  and report readings but never sync.
 - **R-BTN-146 (a repository's grants).** `status: built` A grant is in force from its creation until it is
   revoked. `GET /v1/owner/{repository}/grants` lists the grants in force on the repository. The
-  holder's acceptance of a grant, and the per-repository sync opt-in of a key granted on several
-  repositories (its span), are not built
+  holder's acceptance of a grant is not built
   ([proposal](../proposals/checks-and-executors.md)).
 - **R-BTN-117 (registration tokens).** `status: specified B-8` Not built. The design, an owner-minted token with which
   a session that has no key registers one, is in
@@ -231,14 +229,24 @@ section that are not built are in [the proposal page](../proposals/checks-and-ex
     channel it arrived on; the leg's session finds its address in `BATON_SOCKET`. The interface
     names an address, not a transport: the transport is the executor's (R-BTN-107). It carries
     JSON lines, wrapped by the CLI's `baton leg` verbs, which act on that leg only and exit 2
-    "not inside a leg" elsewhere. The verbs built are `raise` (`baton leg raise`, R-BTN-160) and `done`,
-    the posted ending of a session that does not exit by itself (R-BTN-107), which has no CLI
-    command; anything else sent
-    on the channel is refused, a raw `advance` or `end` included. The other verbs are
-    in [the proposal page](../proposals/checks-and-executors.md). A script may return its result
-    directly instead.
+    "not inside a leg" elsewhere. `status` returns the leg, station, declared capabilities,
+    deadline and whether it can refresh. `output <name> --uri <uri> [--digest <digest>]` or
+    `output <name> --value <json>` stages or replaces the named output using its declared schema.
+    `done --reached <station> [--next <leg>]`, `suspend --reached <station> [--next <leg>]` and
+    `release --reason <reason>` report one ending; a valid ending consumes the channel's result
+    slot. `raise` reports a condition (R-BTN-160). Raw `advance` and `end` are not channel verbs.
+    A script may return its result directly instead. Further verbs are in
+    [the proposal page](../proposals/checks-and-executors.md).
+  - **A bounded run.** `baton runner start --legs <leg,…> [--max-legs <n>] [--until <instant>]`
+    claims and chains into only the named legs. `legs` on an unnamed claim narrows its normal
+    selection to the listed queued leg names atomically (one to fifty names). A runner starts at
+    most `n` legs per claim (default 8), and none at or after `until`. A move outside these bounds
+    suspends at `reached` with the hand-off and the finished leg's outputs. The runner passes
+    `until` as `start_before` (Unix milliseconds) on an advance; Baton refuses without recording
+    a start if its clock has reached that instant. The runner checks its own clock before dispatch
+    too. Local queue orders do not supersede a leg list.
   - **The session never talks to Baton**; the runner makes every Baton call.
-  - **The runner checks each move** as it checks a script's result: `reached` an outcome of the
+  - **The runner checks each channel move** using the same graph checks as for a script's result: `reached` an outcome of the
     leg, `next` a leg leaving it, each output valid against its schema, every entry requirement
     of `reached` met (R-BTN-109). A failing move is answered on the channel with the reason and
     may be corrected until the leg's deadline; nothing reaches Baton until it passes. Then
@@ -266,7 +274,9 @@ section that are not built are in [the proposal page](../proposals/checks-and-ex
   - **The interface**, `executor_api: 1`:
     - `start({brief, executor, inputs, channel}) → handle` starts a session. `brief` holds the
       session's kind, the ticket, the leg, the checkout and the paths the session reads, the
-      leg environment (R-BTN-144), and, as hints, whether the leg is `autonomous` (R-BTN-195)
+      leg environment (R-BTN-144), the claim's scope (§12.9), the ticket's branches — its
+      course's `branch_pattern` with the ticket's id in place, and its leg-state branch
+      (R-BTN-190) — and, as hints, whether the leg is `autonomous` (R-BTN-195)
       and `reads_only` (R-BTN-183). The claim id and runner secret are not brief fields;
       credential inheritance is governed by R-BTN-144. `channel` is the address of the leg's
       channel (R-BTN-106). A handle may name
@@ -422,6 +432,13 @@ section that are not built are in [the proposal page](../proposals/checks-and-ex
     it from a leg running as the same user with access to that path. Output masking does not
     limit file access.
 
+    This is the environment the runner hands its executor (R-BTN-107). Under `builtin` it reaches
+    the leg as listed. An executor that keeps §12.8's duty passes the leg none of the runner's
+    credentials but the `credential:` values listed, which the owner chose to hand that leg: in
+    place of the kept ones it gives the leg credentials confined to the claim's
+    `scope` and `branches` that end with the leg. A trusted leg requires no `credential:`
+    capability (R-BTN-182), so no `credential:` row ever carries a trusted runner's credential;
+    under `builtin` the kept row can, and does, which is one reason Baton promises nothing there.
     **Not built:** `BATON_ACTIVITY` for child activities (R3-1214, §9.9), `BATON_RESUME` for a
     path to earlier claimants' text, and scoping `credential:<NAME>` variables to the leg's
     `requires` ([B-46](../../tickets/B-46.mdx)). The latter includes refusing course declarations

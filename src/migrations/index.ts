@@ -1,5 +1,9 @@
+import { DROP_TIERS_MIGRATION } from '../core/deprecated';
+import dropTiers from './0142_drop_tiers.sql';
 // The numbered schema migrations, applied in order before the object serves (BATON_SPEC §3).
 // A migration is never edited once merged: a change is a new file and a new entry here.
+import backfillPostedHead from './0084_backfill_posted_head.sql';
+import postedHead from './0083_posted_head.sql';
 import init from './0001_init.sql';
 import workers from './0002_workers.sql';
 import claims from './0003_claims.sql';
@@ -75,6 +79,7 @@ import accessSignIn from './0071_access_sign_in.sql';
 import sessionLinkSecrets from './0079_session_link_secrets.sql';
 import interactionDeliveryGrant from './0080_interaction_delivery_grant.sql';
 import sessionLinkIncarnation from './0081_session_link_incarnation.sql';
+import outsideWork from './0120_outside_work.sql';
 import harnessNames from './0141_harness_names.sql';
 import conditionRecords from './0085_condition_records.sql';
 import syncLimits from './0104_sync_limits.sql';
@@ -238,6 +243,9 @@ export const MIGRATIONS: Migration[] = [
   { id: 80, sql: interactionDeliveryGrant },
   { id: 81, sql: sessionLinkIncarnation },
   { id: 82, sql: legTimeoutFence },
+  { id: 83, sql: postedHead },
+  { id: 84, sql: backfillPostedHead },
+  { id: 120, sql: outsideWork },
   { id: 85, sql: conditionRecords },
   { id: 100, sql: legContracts },
   { id: 101, sql: pinnedContracts },
@@ -252,4 +260,5 @@ export const MIGRATIONS: Migration[] = [
   { id: 125, sql: readyRequirements },
   { id: 126, sql: readyLegBlocks },
   { id: 123, sql: leaseRecovery },
+  { id: DROP_TIERS_MIGRATION, sql: dropTiers },
 ];

@@ -1,6 +1,6 @@
 import { env } from 'cloudflare:test';
 import { expect, it, vi } from 'vitest';
-import { rows, setClock, tick, withCore } from '../helpers';
+import { addEventRow, rows, setClock, setMirrorAcked, tick, withCore } from '../helpers';
 import type { Ports } from '../../src/core/ports';
 
 it('S-BTN-244 archives through the real R2 binding, appends to the daily key, and keeps the batch on a rejected write', async () => {
@@ -14,10 +14,9 @@ it('S-BTN-244 archives through the real R2 binding, appends to the daily key, an
     ports.scheduler = { get: async () => Date.now() + 3_600_000, set: async () => {} };
   });
   await setClock(t0 + 92 * day);
-  const add = async (at: number) => (await rows<{ seq: number }>(`INSERT INTO events
-    (at, kind, actor, detail_json, repository_id) VALUES (?, 'admin', 'test', '{}', 'docs') RETURNING seq`, at))[0];
+  const add = (at: number) => addEventRow({ at, kind: 'admin', actor: 'test', detail_json: '{}', repository_id: 'docs' });
   const present = () => rows<{ seq: number }>(`SELECT seq FROM events WHERE actor = 'test' AND at < ? ORDER BY seq`, t0 + 2 * day);
-  const ack = () => rows(`UPDATE repositories SET mirror_acked_seq = (SELECT MAX(seq) FROM events)`);
+  const ack = () => setMirrorAcked(null, 'max');
   const first = await add(t0);
   await add(t0 + 92 * day);
   await ack();

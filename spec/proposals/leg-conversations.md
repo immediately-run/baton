@@ -42,7 +42,7 @@ sees who is speaking; and the conversation steers that leg only.
 5. **Who may steer is a policy, decided explicitly.** Every product surveyed makes this choice
    (Cursor's owner-only vs "Team follow-ups"; Claude in Slack's "anyone in the thread"; Amp's
    invite with a one-week expiry). Baton needs the same, per repository: any member, the ticket's
-   owners, a named group; and whether review legs (which judge another domain's work, R-BTN-180)
+   owners, a named group; and whether review legs (which judge another run's work, R-BTN-183)
    may be steered at all.
 6. **Baton carries no conversation.** R-BTN-195: "everything they and the agent say passes there
    [the harness's own UI], never through Baton." A design that relays messages does it outside

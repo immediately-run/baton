@@ -105,7 +105,7 @@ export function acceptsUnattestedHumanKey(minimum: HumanKeyMinimum): boolean {
   return minimum === 'any';
 }
 /** An attestation's or reading's writer class (R-BTN-181). */
-export type WriterClass = 'human' | 'owner' | 'baton' | 'runner' | 'instrument' | 'admin' | `service:${string}`;
+export type WriterClass = 'human' | 'owner' | 'baton' | 'runner' | 'instrument' | 'admin' | 'sync' | `service:${string}`;
 
 /** One outbox route's knob (R-BTN-171): who delivers, at what trust, and whether a release is
  *  minimally verified. `min_release` waits on B-64's deliverer; the knob carries it. */
@@ -316,9 +316,14 @@ export function validatePolicyDocument(input: unknown, opts: { forge: Forge }): 
     if (!ATTESTATION_TYPE.test(type)) bad(`policy.attestations.${type}`, 'must be a schema id, <std:|course:>type@n');
     // R-BTN-181: for a type merge or a trusted leg acts on — the `std:` types — only `human`,
     // `baton` and `service:` keys are admitted (a `service:` key's roles are the store's check).
-    const list = checkWriters(writers, `policy.attestations.${type}`);
+    const list = type === 'std:arrival@1' || type === 'std:evidence@1'
+      ? (Array.isArray(writers) && writers.length && writers.length <= ENTRIES_MAX
+        ? writers.map((w, i) => w === 'sync' ? w as WriterClass : checkWriters([w], `policy.attestations.${type}[${i}]`)[0])
+        : checkWriters(writers, `policy.attestations.${type}`))
+      : checkWriters(writers, `policy.attestations.${type}`);
     if (type.startsWith('std:')) {
       for (const w of list) {
+        if ((type === 'std:arrival@1' && (w === 'runner' || w === 'sync')) || (type === 'std:evidence@1' && w === 'sync')) continue;
         if (w !== 'human' && w !== 'baton' && !w.startsWith('service:')) {
           bad(`policy.attestations.${type}`, `admits ${w}: a std: type merge or a trusted leg acts on takes only human, baton and service: writers (R-BTN-181)`);
         }
@@ -411,7 +416,8 @@ export const COOPERATIVE: PolicyDocument = {
   inputs: { board: ['sync-key', 'ci-identity', 'machine'], answers: 'git' },
   // R-BTN-181's standard writers, `std:checks@1` alone absent until the owner names the trusted
   // executor's `service:` key.
-  attestations: { 'std:wrote@1': ['baton'], 'std:ran@1': ['baton'], 'std:review@1': ['baton'], 'std:approval@1': ['human'], 'std:branch-deletion@1': ['baton'] },
+  attestations: { 'std:wrote@1': ['baton'], 'std:ran@1': ['baton'], 'std:review@1': ['baton'], 'std:approval@1': ['human'], 'std:branch-deletion@1': ['baton'],
+    'std:arrival@1': ['runner', 'sync'], 'std:evidence@1': ['sync'] },
   readings: { '*': { writers: ['admin', 'instrument', 'runner'] } },
 };
 
@@ -435,6 +441,7 @@ export const PROTECTED: PolicyDocument = {
     'forge-check': { deliverers: ['courier'], trust: 'trusted' },
   },
   inputs: { board: ['sync-key', 'ci-identity'], answers: 'attestation' },
+  attestations: { ...COOPERATIVE.attestations, 'std:arrival@1': ['runner'] },
 };
 
 /** The `protected-signed` column: `protected` except `human_key` and `authorship`. */

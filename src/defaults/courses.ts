@@ -184,7 +184,8 @@ const ADJUDICATE: AgentLeg = { ask: { name: 'adjudication', values: ['merge', 'o
 
 const CREATE_PR: BuiltIn = {
   id: 'create-pr',
-  version: 2,
+  // 5: B-311's reconcile leg (min_runner_version 3).
+  version: 5,
   summary: 'implement a ticket in a PR, gate every review round behind its tests, review it in up to three blind rounds, fix, hand the third round\'s blockers to the owner, merge',
   course: CREATE_PR_COURSE,
   reads: 'prs',
@@ -229,6 +230,8 @@ const CREATE_PR: BuiltIn = {
     // merged, none open. On 2026-11-23 B-259's merge agent rightly refused PR #357 over red CI and
     // exited 0; the leg said `merged` and Baton ended the claim done with the PR open.
     merge: { position: { reached: 'merged', next: null }, verify: 'merged' },
+    archive: { position: { reached: 'archived', next: null }, archive: true },
+    reconcile: { reconcile: true },
   },
   skill: 'baton-create-pr',
 };
@@ -237,6 +240,7 @@ export const BUILT_INS: BuiltIn[] = [
   CREATE_PR,
   {
     id: 'review-pr',
+    version: 2,
     summary: "review a PR someone else opened, in rounds, and conclude with a summary",
     course: REVIEW_PR_COURSE,
     reads: 'prs',
@@ -247,6 +251,7 @@ export const BUILT_INS: BuiltIn[] = [
         approve: { reached: 'approved', next: null },
         changes: { reached: 'changes-requested', next: 'review', suspend: true },
       } },
+      reconcile: { reconcile: true },
       conclude: { position: { reached: 'concluded', next: null } },
     },
     skill: 'baton-review-pr',
@@ -321,6 +326,7 @@ export const BUILT_INS: BuiltIn[] = [
   },
   {
     id: 'create-spec',
+    version: 2,
     summary: 'design a specification in conversation with the owner, review it adversarially, address blocking findings in conversation, merge',
     course: CREATE_SPEC_COURSE,
     reads: 'prs',
@@ -342,6 +348,7 @@ export const BUILT_INS: BuiltIn[] = [
       // the claim suspends until they do.
       adjudicate: ADJUDICATE,
       merge: { position: { reached: 'merged', next: null } },
+      reconcile: { reconcile: true },
     },
     skill: 'baton-create-spec',
   },
