@@ -2,9 +2,7 @@
 // tickets that exist here, and carries none of the scrubbed terms; every test/integration/ file
 // named for a scenario names one §15 defines and not one the history retired (B-71).
 import { describe, expect, it } from 'vitest';
-// @ts-expect-error a plain .mjs script, no types
 import { check, definedIds, lineage, retiredIds, retiredScenarioIds, RULES_LINE_SINCE, scenarioIds, unnamedEntries } from '../../scripts/check-spec.mjs';
-// @ts-expect-error a plain .mjs script, no types
 import { impact, patchNotes, render, units } from '../../scripts/spec-tools.mjs';
 
 const SPEC = [

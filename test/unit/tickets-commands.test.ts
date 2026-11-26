@@ -17,7 +17,6 @@ import { checkTickets } from '../../src/defaults/tickets-check';
 import { accepts, readTicketSettings } from '../../src/defaults/tickets-config';
 import { PAGE_NAME, ticketsPage } from '../../src/defaults/tickets-page';
 import { courseStart, ticketCommitMessage } from '../../src/defaults/tickets';
-// @ts-expect-error a plain .mjs script, no types
 import { unnamedEntries } from '../../scripts/check-spec.mjs';
 import { appendStatus, entryIds, filingDate, firstCommit, firstCommits, historyEntries, missingSections, rereadNote, rereads, ruleIds, rulesConfig, sectionGaps, sectionsDate, staleRules } from '../../src/defaults/tickets-rules';
 import { parseFrontmatter } from '../../src/defaults/tickets-markdown';

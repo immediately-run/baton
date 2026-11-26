@@ -13,6 +13,15 @@ import { branchMatches, latestHeadVerdict, matchPatterns, ticketOwns, verdictOf,
 import { mappedMerges } from './outside-work';
 import { parseFrontmatter } from './tickets-markdown';
 
+type ReconcilePr = {
+  number: number; head: { ref: string }; base: { ref: string }; state: string;
+  merged_at: string | null; merge_commit_sha?: string;
+};
+type ReconcileReview = {
+  user?: { login: string } | null; body?: string; html_url?: string;
+  state: PrFact['reviews'][number]['state']; commit_id?: string; submitted_at?: string | null; created_at?: string;
+};
+
 export function reconcileAnswer(out: string, ask: PrOpenAsk & {
   ticketText: string | null; from: string; displaced: string; to: Record<string, string | null>; branch: string;
 }, run: PrExec) {
@@ -24,10 +33,10 @@ export function reconcileAnswer(out: string, ask: PrOpenAsk & {
   const ticket = { id: bareId(ask.ticket), repos: ask.repositories ?? [], course: { prs: Array.isArray(prs) ? prs : [] } };
   const owns = (number: number, head: string, repository: string) => ticketOwns(ticket, { number, head, repository }, matchPatterns(ask.branchPatterns), home);
   const apiRun = (host: string, repo: string, path: string) => run('gh', ['api', '--hostname', host, `repos/${repo}${path ? `/${path}` : ''}`], ask.checkout);
-  const list = (host: string, repo: string, path: string): any[] => {
-    const pages = JSON.parse(run('gh', ['api', '--hostname', host, '--paginate', '--slurp', `repos/${repo}/${path}`], ask.checkout));
+  const list = <T>(host: string, repo: string, path: string): T[] => {
+    const pages: unknown = JSON.parse(run('gh', ['api', '--hostname', host, '--paginate', '--slurp', `repos/${repo}/${path}`], ask.checkout));
     if (!Array.isArray(pages) || pages.some((p) => !Array.isArray(p))) throw new Error('forge did not return a complete PR reading');
-    return pages.flat();
+    return (pages as T[][]).flat();
   };
   const readPr = (ref: string, owned: boolean) => {
     const m = /^https:\/\/([\w.-]+)\/([\w.-]+\/[\w.-]+)\/pull\/(\d+)(?:#(issuecomment|pullrequestreview)-(\d+))?$/.exec(ref);
@@ -64,7 +73,7 @@ export function reconcileAnswer(out: string, ask: PrOpenAsk & {
     const mapped = [...new Set(repos.filter((r): r is string => r != null))].flatMap((repository) => {
       const defaultBranch = JSON.parse(apiRun(m[1], repository, '')).default_branch;
       if (typeof defaultBranch !== 'string' || !defaultBranch) throw new Error('cannot verify the default branch');
-      return list(m[1], repository, 'pulls?state=all&per_page=100').filter((p) => owns(p.number, p.head.ref, repository))
+      return list<ReconcilePr>(m[1], repository, 'pulls?state=all&per_page=100').filter((p) => owns(p.number, p.head.ref, repository))
         .map((p) => ({ repository, state: p.merged_at ? 'merged' as const : p.state === 'open' ? 'open' as const : 'closed' as const,
           base: p.base.ref, defaultBranch, mergeSha: p.merge_commit_sha, number: p.number }));
     });
@@ -75,9 +84,9 @@ export function reconcileAnswer(out: string, ask: PrOpenAsk & {
   }
   if (['reviewed', 'approved', 'changes-requested'].includes(station)) {
     if (m[4] !== 'pullrequestreview') throw new Error('name a review on the current PR head');
-    const mapped = (r: any, comment = false): PrFact['reviews'][number] => ({ author: r.user?.login ?? '',
+    const mapped = (r: ReconcileReview, comment = false): PrFact['reviews'][number] => ({ author: r.user?.login ?? '',
       body: r.body, state: comment ? 'COMMENTED' : r.state, headSha: comment ? undefined : r.commit_id,
-      submittedAt: Date.parse(comment ? r.created_at : r.submitted_at), url: r.html_url });
+      submittedAt: Date.parse((comment ? r.created_at : r.submitted_at) ?? ''), url: r.html_url });
     const permissions = new Map<string, boolean>();
     const counts = (r: PrFact['reviews'][number]) => {
       if (!verdictOf(r) || !/^[\w-]+$/.test(r.author)) return false;
@@ -86,12 +95,12 @@ export function reconcileAnswer(out: string, ask: PrOpenAsk & {
       }
       return permissions.get(r.author);
     };
-    const native = list(m[1], m[2], `pulls/${m[3]}/reviews?per_page=100`).map((r) => mapped(r)).filter(counts);
+    const native = list<ReconcileReview>(m[1], m[2], `pulls/${m[3]}/reviews?per_page=100`).map((r) => mapped(r)).filter(counts);
     const named = native.find((r) => r.url === at[2] && r.headSha === pr.headRefOid);
     if (!named) throw new Error('review is not a qualifying verdict on the current PR head');
     // Even without a ref update timestamp, any unbound comment newer than a submitted
     // review of this exact SHA can supersede it. Never authorize from an unbound comment.
-    const comments = list(m[1], m[2], `issues/${m[3]}/comments?per_page=100`).map((r) => mapped(r, true)).filter((r) => r.submittedAt >= named.submittedAt).filter(counts);
+    const comments = list<ReconcileReview>(m[1], m[2], `issues/${m[3]}/comments?per_page=100`).map((r) => mapped(r, true)).filter((r) => r.submittedAt >= named.submittedAt).filter(counts);
     const latest = latestHeadVerdict({ headSha: pr.headRefOid, reviews: [...native, ...comments] }, named.submittedAt - 1);
     if (latest?.url !== at[2] || verdictOf(latest) !== (station === 'changes-requested' ? 'changes' : 'approve')) {
       throw new Error('review is not the latest qualifying verdict on the current PR head');

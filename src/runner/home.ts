@@ -321,7 +321,7 @@ export function legNeeds(home: string, sha: string, course: string): string[] {
   }
 }
 
-function needsOf(parsed: { capability_roles?: unknown; legs?: Record<string, any> }): string[] {
+function needsOf(parsed: { capability_roles?: unknown; legs?: Record<string, { requires?: unknown } | null | undefined> }): string[] {
   const out: string[] = [];
   for (const leg of Object.values(parsed.legs ?? {})) out.push(...legCapabilities(leg?.requires, parsed.capability_roles));
   return out;

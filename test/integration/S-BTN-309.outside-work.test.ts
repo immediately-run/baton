@@ -30,7 +30,10 @@ it('validates the standard graphs and rejects a fact or reconcile as start or ne
   for (const graph of [CREATE_PR_COURSE, CREATE_SPEC_COURSE, REVIEW_PR_COURSE]) expect(validateCourse(graph)).toEqual([]);
   expect(validateCourse({ ...CREATE_PR_COURSE, start_leg: 'opened-by-hand' })).not.toEqual([]);
   expect(validateCourse({ ...CREATE_PR_COURSE, start_leg: 'reconcile' })).not.toEqual([]);
-  const graph = () => structuredClone(CREATE_PR_COURSE) as { legs: Record<string, Record<string, any>> };
+  type MutableLeg = { to?: unknown; max_runs?: number };
+  const graph = () => structuredClone(CREATE_PR_COURSE) as {
+    legs: Record<string, MutableLeg> & { 'opened-by-hand': MutableLeg & { arrives: { next: string } } };
+  };
   for (const mutate of [
     (ls: ReturnType<typeof graph>['legs']) => { ls['opened-by-hand'].to = ['pr-open', 'fixed']; },
     (ls: ReturnType<typeof graph>['legs']) => { ls['opened-by-hand'].arrives.next = 'reconcile'; },

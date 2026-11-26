@@ -706,7 +706,7 @@ function reconcileAnswer(out, ask, run2) {
       body: r.body,
       state: comment ? "COMMENTED" : r.state,
       headSha: comment ? void 0 : r.commit_id,
-      submittedAt: Date.parse(comment ? r.created_at : r.submitted_at),
+      submittedAt: Date.parse((comment ? r.created_at : r.submitted_at) ?? ""),
       url: r.html_url
     });
     const permissions = /* @__PURE__ */ new Map();
