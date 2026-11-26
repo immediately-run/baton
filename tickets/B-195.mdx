@@ -3,7 +3,7 @@ title: "B-195 — The condition reads and the session's answer: GET …/conditio
 id: B-195
 project: baton-ui-v2
 status: available
-updated: 2026-11-16
+updated: 2026-11-23
 repos:
   - baton
 tags:
@@ -69,11 +69,14 @@ The §14 rows first, then the code.
    session whose repositories hold the id answers `302` to
    `/repositories/{r}/conditions/{id}`; otherwise the shell is served, which shows sign-in or
    `not-found` (B-191, R-BTN-163). The lookup runs within the session's repositories only.
-4. **A session writes an owner attestation.** `POST /v1/repositories/{repository}/attestations`
-   accepts a dashboard session — the front resolves the cookie on it under R-BTN-16's checks,
-   as B-192 does for GETs — with the writer recorded as `owner` (the session's minting key's
-   owner role, R-BTN-181); an administrator's session is refused here (it is no owner, and
-   R-BTN-185 keeps `human` from a session). The route's existing key path is unchanged. A
+4. **A session writes an owner's or member's attestation.** `POST
+   /v1/repositories/{repository}/attestations` accepts a dashboard session — the front resolves
+   the cookie and the tab's `Baton-Session` on it under R-BTN-16's checks, as B-192 does for
+   GETs — with the writers recorded as `human` and its key's role, `owner` or `member`
+   (R-BTN-181, R-BTN-185: a person using the dashboard is a human; a member's only for a
+   `std:decision@1` whose leg's `asks` label it holds, R-BTN-204, with B-338); an
+   administrator's session is refused a person's answer (R-BTN-181). R-BTN-185's
+   security-key touch under `hardware` is B-340's. The route's existing key path is unchanged. A
    session's `std:decision@1` for a queued person leg is the person leg's answer (R-BTN-116).
    Not a confirmed action (R-BTN-155).
 
@@ -90,7 +93,7 @@ The §14 rows first, then the code.
   are untrusted text validated on the raise (R-BTN-160, §12.3).
 - **`answerable` and `allowed`** — computed by `authorize` with the session as principal; hints
   for drawing, decided again on the call.
-- **The session's attestation** — the cookie under R-BTN-16's checks; writer `owner`, bounded by
+- **The session's attestation** — the cookie under R-BTN-16's checks; writers `human` and `owner` or `member` (R-BTN-185), bounded by
   the policy's writer list; `type`, `subject` and `value` validated as any attestation.
 - **The redirect** — a lookup within the session's repositories; a miss serves the shell, and
   nothing outside them is revealed.
@@ -98,7 +101,7 @@ The §14 rows first, then the code.
 ### Invariants
 
 - **R-BTN-163**: severity then age; one-step resolving. **R-BTN-116**: an answer is a
-  `std:decision@1`. **R-BTN-185**: a session writes as `owner`, never `human`.
+  `std:decision@1`. **R-BTN-185**: a session writes as `human` and as its key's role.
 - **R-BTN-155**: nothing here is confirmed. **An owner's session, its repositories**.
   **Both hosts** (R-BTN-55).
 
@@ -136,3 +139,10 @@ extends it for sessions and adds the Needs-you view B-219 needs. B-55's remainin
 re-read against B-234 before either is claimed._
 
 _(2026-11-16: rules re-read: R-BTN-163)_
+
+_(2026-11-23: R-BTN-181 and §14 now list `POST …/attestations` for an owner's or member's session,
+writer `owner` or `member`. Item 4 builds the session path for both roles; a member's write is
+judged by its `answers` (R-BTN-204, B-338). The rest of this ticket shipped with the V2 dashboard
+(`664cd2b`); item 4 did not — the route still takes only a signature or a bearer.)_
+
+_(2026-11-23: rules re-read: R-BTN-181, R-BTN-155, R-BTN-116)_

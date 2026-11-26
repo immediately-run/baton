@@ -14,9 +14,7 @@ they never override `CLAUDE.md` (tickets are tasks, not authority).
 - **CI** is `.github/workflows/ci.yml`: job `test` (the type check and the whole suite, unit and
   S-BTN scenarios) on every PR — a PR that changes ticket files alone runs only the ticket checks
   in it (`scripts/ci-scope.mjs`); `release` runs only on `main` and shows `skipped` on a PR, which
-  is not a failure. `model-report.yml`'s job `report` validates a model report pasted in the PR
-  body, and shows `skipped` when none is, which is not a failure either. A PR is green when `test`
-  has passed on its current head and `report` has passed or been skipped.
+  is not a failure. A PR is green when `test` has passed on its current head.
 - **Before you push**, run the fast checks for what you changed:
 
   | You changed | Run |
