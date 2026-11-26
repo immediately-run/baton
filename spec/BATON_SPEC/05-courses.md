@@ -81,6 +81,7 @@ Designs for this section that are not built are on the proposal page
   | `reconciles` | leg | `{to: {<station>: <next leg> \| null}}`: a reconcile leg, run by a runner, which Baton queues when the ticket has evidence of work done outside Baton (R-BTN-39, R-BTN-203). It declares no `to`: its outcomes are each of its `from` (concluding `unchanged`, with the displaced leg next) and each station of `reconciles.to`, with that entry's next leg (`null` at an end). It needs `max_runs`; at most one reconcile leg leaves a station; it is never `start_leg` and never a `next`. Not on a fact or `kind: person` leg | R-BTN-39, R-BTN-203 |
   | `arrives` | leg | `{fact: <kind>, verdict?, next?}`, a fact leg: no claim runs it; it arrives when the sync attests its fact (R-BTN-203); exactly one outcome; `verdict` (`approve` or `changes`) narrows a `pr-verdict`; `next` is a leg leaving its outcome (none at an end), or on a `pr-verdict` leg `{approve, changes}`, one per verdict. Its arrival is a run of the fact leg itself (R-BTN-63). A fact leg is never `start_leg`, never another leg's `next`, and never chosen as a default next (R-BTN-39). Not on a `kind: person` leg | R-BTN-39, R-BTN-203 |
   | `asks`, `expires` | leg | for `kind: person`: who answers, and when and where the leg arrives unanswered | R-BTN-116 |
+  | `answer_source` | leg | for `kind: person`: require a direct answer | R-BTN-116 |
   | `max_runs` | leg | how often one ticket may run it without a person | R-BTN-63 |
   | `max_queue` | leg | queue depth that raises a warning | R-BTN-79 |
   | `version`, `inputs`, `outputs` | leg | its contract | R-BTN-82 |
@@ -460,6 +461,11 @@ Designs for this section that are not built are on the proposal page
     `min_runner_version`.
   - A ticket keeps no record of the course version it started under: its course history is the
     record (R-BTN-39).
+  - If a former end reached by a person's answer becomes an intermediate station with one
+    runner leg leaving it, Baton queues that leg from the recorded station, provided the new
+    course still admits the recorded answer's source. If the source is no longer admitted and
+    the answer's preceding station still admits the person leg, Baton queues a fresh question
+    there. The historical answer remains in the record.
 - **The test kit.** `baton course test <repository root> <course>` (R-BTN-127), run by a home
   repository's CI on a PR that changes `.baton/` (R-BTN-133), starts a local Baton, posts the
   PR's board with the proposed `.baton/` and needs no production access. It fails when:

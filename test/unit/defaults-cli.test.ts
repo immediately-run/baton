@@ -13,7 +13,11 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { courseSchemas, githubFacts, initMain, parseSyncArgs, plainGitRemote, remoteSlug, syncMain, syncWorkflow } from '../../src/defaults/cli';
-import type { Transport } from '../../src/runner/api';
+import { BatonApi, type Transport } from '../../src/runner/api';
+import { Runner } from '../../src/runner/runner';
+import { call as hostCall } from '#host';
+import { advance, claimItem, claimRow, cutover, endClaim, keyCall, ORIGIN, register, rows, setAdminKeys, setClock, syncToken, TOKENS } from '../helpers';
+import { makeKey } from '../lib/sshKeys';
 import { readOnlyHarness, readOnlyVersionSupported, selectHarness } from '../../src/runner/harness';
 import { validateCourse } from '../../src/core/course';
 import { createHash } from 'node:crypto';
@@ -61,11 +65,94 @@ const PIN = `${SELF.slug}@${SELF.sha}`;
 const OTHER_PIN = 'immediately-run/baton@abababababababababababababababababababab';
 const sourceOf = (course: string) => `github/${SELF.slug}/${SELF.sha}/${course}`;
 const load = async (file: string) => import(`${pathToFileURL(file).href}?t=${Math.random()}`);
+/** A stand-in for the pinned dibber (B-326): the archive leg's BATON_DIBBER in these tests. */
+const DIBBER_STAND_IN = join(ROOT, 'test', 'lib', 'dibberStandIn.mjs');
 
 /** A scaffolded leg stub's text: which close it routes to is what the stub's source says. */
 const stubSourceOf = (root: string, course: string, leg: string): string =>
   readFileSync(join(root, '.baton', 'courses', course, 'legs', `${leg}.mjs`), 'utf8');
 
+it('S-BTN-232: an owner returns a delivery, then confirms the next one; the runner pushes and sync closes it', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'baton-s232-'));
+  const root = join(dir, 'home');
+  const remote = join(dir, 'origin');
+  const factsFile = join(dir, 'facts.json');
+  const g = (...args: string[]) => execFileSync('git', ['-C', root, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+  const logs: string[] = [];
+  // B-326: the archive's status write is the pinned dibber's — here a stand-in, as the host's BATON_DIBBER.
+  const env = { BATON_DIBBER: process.env.BATON_DIBBER, DIBBER_LOG: process.env.DIBBER_LOG };
+  process.env.BATON_DIBBER = `node ${JSON.stringify(DIBBER_STAND_IN)}`;
+  process.env.DIBBER_LOG = join(dir, 'dibber.log');
+  try {
+    gitInit(root);
+    execFileSync('git', ['init', '-q', '--bare', '-b', 'main', remote]);
+    g('remote', 'add', 'origin', remote);
+    for (const file of ['.baton/baton.json', '.baton/courses/create-pr/course.json', '.baton/courses/create-pr/legs/archive.mjs']) {
+      mkdirSync(dirname(join(root, file)), { recursive: true });
+      copyFileSync(join(ROOT, file), join(root, file));
+    }
+    mkdirSync(join(root, 'tickets/nested'), { recursive: true });
+    writeFileSync(join(root, 'tickets/nested/B-1.md'), '---\nid: B-1\ntitle: Delivery\nstatus: available\n---\nSee [work](../../evidence.txt).\n');
+    writeFileSync(factsFile, '[]');
+    const first = commitAll(root);
+    g('push', '-q', 'origin', 'HEAD:refs/heads/main');
+    const admin = await makeKey('ssh-ed25519', 'admin');
+    const owner = await makeKey('ssh-ed25519', 'owner');
+    await setClock(Date.now() - 1_000);
+    await setAdminKeys(admin);
+    expect((await keyCall(admin, '/v1/admin/repositories', { id: 'docs', owner_keys_add: [owner.publicKey] })).status).toBe(200);
+    const sync = async () => expect(await syncMain({ root, url: ORIGIN, token: await syncToken(), latest: 'main', factsFile,
+      transport: hostCall, log: (line) => logs.push(line),
+    }), logs.join('\n')).toBe(0);
+    await sync();
+    await cutover();
+    const w = await register('vm-a', { courses: [{ repository: 'docs', course: 'create-pr', version: 4 }] });
+    const delivered = async (sha: string) => {
+      const { json: c } = await claimItem('vm-a', w.secret, { ticket_id: 'docs:B-1' });
+      expect(c).toMatchObject({ station: 'filed', legs: ['implement'] });
+      expect((await advance('vm-a', w.secret, c.claim_id, { leg: 'implement' })).status).toBe(200);
+      expect((await endClaim('vm-a', w.secret, c.claim_id, { end_reason: 'suspended:delivered', reached: 'delivered', next: 'confirm', ended_at_sha: sha,
+        detail: `delivered at ${sha.slice(0, 10)}: verified work`,
+      })).status).toBe(200);
+      await sync();
+    };
+    const answer = (option: string) => keyCall(owner, '/v1/repositories/docs/attestations', { type: 'std:decision@1', subject: { ticket: 'B-1' }, value: { option } });
+    await delivered(first);
+    expect((await answer('filed')).status).toBe(200);
+    expect(g('ls-remote', 'origin', 'refs/heads/main')).toContain(first);
+    expect(await rows('SELECT closed_as FROM closed_tickets WHERE ticket_id = ?', 'docs:B-1')).toEqual([]);
+    writeFileSync(join(root, 'evidence.txt'), 'Second delivery\n');
+    const second = commitAll(root);
+    g('push', '-q', 'origin', 'HEAD:refs/heads/main');
+    await sync();
+    await delivered(second);
+    expect((await answer('confirmed')).status).toBe(200);
+    const api = new BatonApi({ url: ORIGIN, transport: hostCall, client: 'baton/0.1.5',
+      auth: (_method, _url, _body, secret) => ({ Authorization: `Bearer ${TOKENS['vm-b']}`, ...(secret ? { 'X-Runner-Secret': secret } : {}) }),
+    });
+    const runner = new Runner({ api, home: root, repository: 'docs', hostname: 'vm-b', harness: 'opencode', session: 's232-archive',
+      courses: [{ course: 'create-pr', version: 4 }], stateFile: join(dir, 'runner.json'), clonesDir: join(dir, 'clones'),
+      beatEvery: 60_000, log: (line) => logs.push(line),
+    });
+    const outcome = await runner.runOnce();
+    expect(outcome, logs.join('\n')).toMatchObject({ ticket: 'docs:B-1', end_reason: 'done' });
+    const archive = g('ls-remote', 'origin', 'refs/heads/main').split(/\s/)[0];
+    expect(g('rev-parse', `${archive}^`)).toBe(second);
+    expect(g('show', '-s', '--format=%B', archive)).toBe(`tickets: B-1 done (archived)\n\nDelivered by: ${second}`);
+    // Dibber wrote the status; git moved the file, its content otherwise as filed.
+    expect(g('show', `${archive}:tickets/archive/nested/B-1.md`)).toBe('---\nid: B-1\ntitle: Delivery\nstatus: done\n---\nSee [work](../../evidence.txt).');
+    expect(readFileSync(join(dir, 'dibber.log'), 'utf8').trim().split('\n').map((l) => JSON.parse(l) as string[]).map((a) => a.slice(0, 2))).toEqual([['done', 'B-1']]);
+    const [claim] = await rows<{ id: number; ended_at_sha: string; confirmed_at: number | null }>(
+      `SELECT id, ended_at_sha, confirmed_at FROM claims WHERE ticket_id = ? AND end_reason = 'done'`, 'docs:B-1');
+    expect(claim).toMatchObject({ ended_at_sha: archive, confirmed_at: null });
+    await sync();
+    expect(await rows('SELECT closed_as FROM closed_tickets WHERE ticket_id = ?', 'docs:B-1')).toEqual([{ closed_as: 'done' }]);
+    expect((await claimRow(claim.id)).confirmed_at).not.toBeNull();
+  } finally {
+    for (const [k, v] of Object.entries(env)) if (v === undefined) delete process.env[k]; else process.env[k] = v;
+    rmSync(dir, { recursive: true, force: true });
+  }
+}, 30_000);
 describe('S-BTN-320: reads_only agent runs', () => {
   const realHarness = process.env.BATON_TEST_OPENCODE;
   async function review(probe?: string) {
@@ -735,7 +822,7 @@ describe('baton repo init, through the built CLI', () => {
     expect(settings.agent_command).not.toMatch(/[<>|]/);
     expect(splitWords(settings.agent_command).at(0)).toBe('opencode');
     expect(settings).toMatchObject({ items: 'tickets', default_course: 'create-pr' });
-    expect(settings.courses).toEqual([{ id: 'create-pr', version: 2, min_runner_version: 1, skill: 'baton-create-pr', step_kinds: ['implement', 'run-tests', 'review', 'fix', 'adjudicate', 'merge', 'confirm'], branch_pattern: 'claude/{ticket}-*', protocol_files: [], source: sourceOf('create-pr') }]);
+    expect(settings.courses).toEqual([{ id: 'create-pr', version: 4, min_runner_version: 2, skill: 'baton-create-pr', step_kinds: ['implement', 'run-tests', 'review', 'fix', 'adjudicate', 'merge', 'confirm', 'archive'], branch_pattern: 'claude/{ticket}-*', protocol_files: [], source: sourceOf('create-pr') }]);
     expect(JSON.parse(readFileSync(join(root, '.baton', 'courses', 'create-pr', 'course.json'), 'utf8'))).toEqual(JSON.parse(JSON.stringify(CREATE_PR_COURSE)));
     const workflow = readFileSync(join(root, '.github', 'workflows', 'baton-sync.yml'), 'utf8');
     expect(workflow).toBe(syncWorkflow(PIN));
@@ -848,7 +935,7 @@ describe('baton repo init, through the built CLI', () => {
   it('each leg stub imports only Node built-ins, so a scratch copy runs as the runner loads it', async () => {
     // A stub and its instructions per leg (R-BTN-131); the runner and the kit read only the .mjs.
     const files = readdirSync(join(root, '.baton', 'courses', 'create-pr', 'legs')).sort();
-    const legNames = ['adjudicate', 'fix', 'implement', 'merge', 'review', 'run-tests'];
+    const legNames = ['adjudicate', 'archive', 'fix', 'implement', 'merge', 'review', 'run-tests'];
     expect(files).toEqual(legNames.flatMap((l) => [`${l}.md`, `${l}.mjs`]));
     const legs = files.filter((f) => f.endsWith('.mjs'));
     for (const leg of legs) {
@@ -863,7 +950,7 @@ describe('baton repo init, through the built CLI', () => {
     // non-interactive — the same bound and environment the close uses, injected at generation.
     for (const leg of legs) {
       const text2 = readFileSync(join(root, '.baton', 'courses', 'create-pr', 'legs', leg), 'utf8');
-      expect(text2, leg).toContain('timeout: GIT_BOUND_MS');
+      expect(text2, leg).toContain(leg === 'archive.mjs' ? 'timeoutMs = GIT_TIMEOUT_MS' : 'timeout: GIT_BOUND_MS');
       expect(text2, leg).toContain('killSignal');
       expect(text2, leg).toContain('GIT_TERMINAL_PROMPT');
     }
@@ -906,6 +993,95 @@ describe('baton repo init, through the built CLI', () => {
       rmSync(fakeBin, { recursive: true, force: true });
       writeFileSync(settingsFile, scaffolded);
       commitAll(root);
+    }
+  });
+
+  it.each([false, true])('archives only an owner-confirmed delivery, its status written by dibber (legacy truncation: %s, S-BTN-232, B-326)', async (legacy) => {
+    const dir = mkdtempSync(join(tmpdir(), 'baton-archive-fixture-'));
+    const env = { BATON_DIBBER: process.env.BATON_DIBBER, DIBBER_LOG: process.env.DIBBER_LOG };
+    const dibberLog = join(dir, 'dibber.log');
+    const dibberCalls = () => existsSync(dibberLog) ? readFileSync(dibberLog, 'utf8').trim().split('\n').map((l) => (JSON.parse(l) as string[]).slice(0, 2)) : [];
+    process.env.BATON_DIBBER = `node ${JSON.stringify(DIBBER_STAND_IN)}`;
+    process.env.DIBBER_LOG = dibberLog;
+    const origin = join(dir, 'origin');
+    const checkout = join(dir, 'checkout');
+    mkdirSync(checkout);
+    gitInit(checkout);
+    const g = (...a: string[]) => execFileSync('git', ['-C', checkout, ...a], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+    try {
+      execFileSync('git', ['init', '-q', '--bare', '-b', 'main', origin]);
+      g('remote', 'add', 'origin', origin);
+      mkdirSync(join(checkout, '.baton'));
+      writeFileSync(join(checkout, '.baton/baton.json'), JSON.stringify({ items: 'tickets', ticket_prefix: 'B' }));
+      const first = commitAll(checkout);
+      mkdirSync(join(checkout, 'tickets/nested'), { recursive: true });
+      const path = 'tickets/nested/B-1.md';
+      const archived = 'tickets/archive/nested/B-1.md';
+      writeFileSync(join(checkout, path), '---\nid: B-1\ntitle: Delivery\nstatus: available\n---\nSee [work](../../evidence.txt).\n');
+      const second = commitAll(checkout);
+      const commits = [first, second];
+      for (let i = 2; legacy && i < 16; i++) {
+        g('commit', '--allow-empty', '-qm', `Delivery ${i}`);
+        commits.push(g('rev-parse', 'HEAD'));
+      }
+      const head = commits.at(-1)!;
+      const commitList = `delivered at ${commits.map((x) => x.slice(0, 10)).join(', ')}`;
+      g('push', '-q', 'origin', 'HEAD:refs/heads/main');
+      const stub = await load(join(root, '.baton/courses/create-pr/legs/archive.mjs'));
+      const ctx = {
+        checkout, default_branch: 'main', snapshot: { sha: second }, ticket: { id: 'home:B-1', path },
+        leg: 'archive', claim: { station: 'confirmed' },
+        person_answer: { leg: 'confirm', option: 'confirmed', answered_by: 'owner:test', answered_at: 2 },
+        previous_attempts: [
+          { end_reason: 'released:cannot-finish:transient', legs: [] },
+          { end_reason: 'suspended:delivered', ended_at: 1, ended_at_sha: first,
+            detail: legacy ? `${commitList.slice(0, 199)}…` : `${commitList}: tests passed`,
+            legs: [{ leg: 'implement', reached: 'delivered', outcome: 'finished' }] },
+        ],
+      };
+      const result = await stub.run(ctx);
+      expect(decide(result, graphOf(CREATE_PR_COURSE), 'archive', 'confirmed')).toMatchObject({ kind: 'done', reached: 'archived' });
+      for (const answer of [undefined, { ...ctx.person_answer, option: 'filed' }, { ...ctx.person_answer, answered_by: 'sync' }]) {
+        await expect(Promise.resolve().then(() => stub.close({ ...ctx, person_answer: answer }, result))).rejects.toThrow('applied confirmed answer');
+        expect(g('ls-remote', 'origin', 'refs/heads/main')).toContain(head);
+      }
+      if (!legacy) {
+        // Dibber finds a ticket by its canonical name: a file named otherwise is refused, unwritten.
+        g('mv', path, 'tickets/nested/Delivery [1].MD');
+        const renamed = commitAll(checkout);
+        g('push', '-q', 'origin', 'HEAD:refs/heads/main');
+        await expect(Promise.resolve().then(() => stub.close({ ...ctx, ticket: { ...ctx.ticket, path: 'tickets/nested/Delivery [1].MD' } }, result))).rejects.toThrow('is not named B-1.md or B-1.mdx, so Dibber cannot write it');
+        expect(g('ls-remote', 'origin', 'refs/heads/main')).toContain(renamed);
+        g('revert', '--no-edit', renamed);
+        g('push', '-q', 'origin', 'HEAD:refs/heads/main');
+        writeFileSync(join(checkout, path), `---\nid: B-1\ntitle: Delivery\nstatus: available\nstatus: in-progress\n---\n`);
+        const duplicate = commitAll(checkout);
+        g('push', '-q', 'origin', 'HEAD:refs/heads/main');
+        await expect(Promise.resolve().then(() => stub.close(ctx, result))).rejects.toThrow('duplicate status fields');
+        expect(g('ls-remote', 'origin', 'refs/heads/main')).toContain(duplicate);
+        g('revert', '--no-edit', duplicate);
+        g('push', '-q', 'origin', 'HEAD:refs/heads/main');
+      }
+      const beforeArchive = g('rev-parse', 'HEAD');
+      const sha = await stub.close(ctx, result);
+      expect(g('ls-remote', 'origin', 'refs/heads/main')).toContain(sha);
+      expect(g('rev-parse', `${sha}^`)).toBe(beforeArchive);
+      const note = legacy ? '\n\nDelivery evidence incomplete: the legacy end record was truncated; unrecorded commits are not listed.' : '';
+      expect(g('log', '-1', '--format=%B', sha)).toBe(`tickets: B-1 done (archived)\n\nDelivered by: ${commits.slice(0, 15).join(', ')}${note}`);
+      // Dibber wrote the status, in place; git moved the file. Nothing else of it changed.
+      expect(g('show', `${sha}:${archived}`)).toBe('---\nid: B-1\ntitle: Delivery\nstatus: done\n---\nSee [work](../../evidence.txt).');
+      expect(dibberCalls()).toEqual([['done', 'B-1']]);
+      expect(g('--literal-pathspecs', 'ls-tree', sha, '--', path)).toBe('');
+      expect(g('rev-parse', 'HEAD')).toBe(beforeArchive);
+      g('switch', '--detach', sha);
+      writeFileSync(join(checkout, archived), `${g('show', `${sha}:${archived}`)}\nA later edit.\n`);
+      commitAll(checkout);
+      g('push', '-q', 'origin', 'HEAD:refs/heads/main');
+      expect(await stub.close(ctx, result)).toBe(sha);
+      expect(dibberCalls()).toEqual([['done', 'B-1']]);
+    } finally {
+      for (const [k, v] of Object.entries(env)) if (v === undefined) delete process.env[k]; else process.env[k] = v;
+      rmSync(dir, { recursive: true, force: true });
     }
   });
 
@@ -2015,7 +2191,7 @@ writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));
       baton(root, 'repo', 'init', '--pin', PIN, '--force');
       const forced = JSON.parse(readFileSync(settingsFile, 'utf8'));
       expect(forced).toMatchObject({ repos: { docs: 'o/docs' }, agent_command: 'my-agent', default_course: 'create-pr' });
-      expect(forced.courses.map((c: { id: string; version: number }) => [c.id, c.version])).toEqual([['create-pr', 2], ['bug-report', 1]]);
+      expect(forced.courses.map((c: { id: string; version: number }) => [c.id, c.version])).toEqual([['create-pr', 4], ['bug-report', 1]]);
       expect(readFileSync(stub, 'utf8')).not.toContain('// edited by hand');
     } finally {
       writeFileSync(settingsFile, settings);
@@ -2898,7 +3074,7 @@ describe('course sources and leg overrides (B-33)', () => {
     try {
       expect(baton(root, 'repo', 'init', '--pin', PIN)).toContain(`create-pr now from ${SELF.sha.slice(0, 10)}`);
       const moved = JSON.parse(readFileSync(settingsFile, 'utf8'));
-      expect(moved).toMatchObject({ agent_command: 'mine', courses: [{ id: 'create-pr', version: 1, source: sourceOf('create-pr') }] });
+      expect(moved).toMatchObject({ agent_command: 'mine', courses: [{ id: 'create-pr', version: 4, source: sourceOf('create-pr') }] });
       expect(JSON.parse(readFileSync(graph, 'utf8'))).toEqual(CREATE_PR_COURSE);
       expect(readFileSync(stub, 'utf8')).toContain('.baton/courses/create-pr/legs/fix.run.mjs'); // the current leg script, bundled
       for (const file of instructions) expect(readFileSync(file, 'utf8')).toBe('<!-- home-owned instructions -->\n');
@@ -2919,7 +3095,7 @@ describe('course sources and leg overrides (B-33)', () => {
         }
         baton(root, 'repo', 'init', '--pin', PIN);
         expect(JSON.parse(readFileSync(settingsFile, 'utf8'))).toMatchObject({
-          agent_command: expect.stringMatching(/^mine .*harness's question tool/), courses: [{ version: 2 }],
+          agent_command: expect.stringMatching(/^mine .*harness's question tool/), courses: [{ version: 4 }],
         });
         for (const file of instructions) {
           expect(readFileSync(file, 'utf8')).toMatch(/^<!-- home-owned instructions -->[\s\S]*Ask the owner only when blocked/);

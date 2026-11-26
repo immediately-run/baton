@@ -39,7 +39,7 @@ describe('S-BTN-23 resume from a hand-off document', () => {
     expect(r).toMatchObject({ ticket_id: 'docs:T-1', station: 'reviewed', legs: ['fix'], handoff_url: HANDOFF,
       next: [{ leg: 'fix', state: 'ready' }, { leg: 'merge', state: 'waiting', waiting_on: 'findings' }] });
     expect(r.previous_attempts).toEqual([{
-      claim_id: c.claim_id, status: 'completed', end_reason: 'suspended:reviewed', detail: 'context-spent', ended_at: T0,
+      claim_id: c.claim_id, status: 'completed', end_reason: 'suspended:reviewed', detail: 'context-spent', ended_at: T0, ended_at_sha: HANDOFF,
       // Each leg run carries its run id (B-185, R-BTN-63).
       legs: [{ leg: 'implement', run_id: expect.stringMatching(/^r_[0-9A-HJKMNP-TV-Z]{26}$/), from: 'filed', reached: 'pr-open', outcome: 'finished' },
         { leg: 'review', run_id: expect.stringMatching(/^r_[0-9A-HJKMNP-TV-Z]{26}$/), from: 'pr-open', reached: 'reviewed', outcome: 'finished' }],
