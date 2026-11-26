@@ -91,6 +91,17 @@ Baton: protecting a person's own session is the harness's work (its permission p
 Baton's. Baton's part is the record, so the act is found afterwards, and a warning where a person
 connects an agent to it: a fresh session that holds nothing else is strongly advised.
 
+## 6. People
+
+A person is an entity of its own: an id, the keys they authenticate with, and the identities
+linked to them (forge accounts, emails, tracker accounts, contact identifiers). **Roles belong to
+people**, per repository — owner, and contributor for everyone else who starts courses, claims,
+answers and is notified — and **keys prove who is acting**. Several people may each declare a
+forge identity no agent uses, and a person's session claims have no ceiling beyond the lock (the
+owner, 2026-11-26; [people, roles and identities](../../spec/proposals/people-and-dashboard.md#5-people-roles-and-identities)).
+A person's secrets are sealed on their own machine and never readable by Baton
+([personal secrets](../../spec/proposals/personal-secrets.md)).
+
 ## What is built and what is proposed
 
 - **Built:** runner keys and their grants; owner and administrator keys; dashboard sessions; the
@@ -99,7 +110,9 @@ connects an agent to it: a fresh session that holds nothing else is strongly adv
   ([people and dashboard](../../spec/proposals/people-and-dashboard.md)); session claims held by an
   interactive key, and creating then claiming a ticket in one session
   ([ticket ownership](../../spec/proposals/ticket-ownership.md)); interventions split by driver
-  ([intervention sessions](../../spec/proposals/intervention-sessions.md)).
+  ([intervention sessions](../../spec/proposals/intervention-sessions.md)); people as entities,
+  with roles and linked identities ([people and dashboard §5](../../spec/proposals/people-and-dashboard.md#5-people-roles-and-identities));
+  sealed personal secrets and notification preferences ([personal secrets](../../spec/proposals/personal-secrets.md)).
 - **To amend when built:** R-BTN-186 (tighten-only binds autonomous delegated keys, not
   interactive ones), R-BTN-189's guarantees that read "a human" (they mean a human-driven act at
   the proof the policy names), and the [vocabulary](vocabulary.mdx)'s *Delegated key*,
