@@ -17,7 +17,7 @@
 import { isLive } from '../runnerLiveness';
 import { runnerLatest } from '../runnerLatest';
 import { BatonError } from '../http';
-import { CLAIM_LEASE_END_SQL } from '../runnerLiveness';
+import { CLAIM_LEASE_END_SQL } from '../claims';
 import { transcriptUrl, type SessionLinkView } from '../links';
 import { graphOf, type Graph } from '../graph';
 import { grantedKeySql } from '../validate';

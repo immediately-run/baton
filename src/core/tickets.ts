@@ -6,7 +6,8 @@
 // `ticketDetail` adds what one ticket's page draws. Filter fields only (R-BTN-33): no body, note
 // or exit criterion is read. Nothing here writes, and the clock is the caller's `now`.
 import type { SessionLinkView } from './links';
-import { CLAIM_LEASE_END_SQL, claimFleetSql, isClaimLeaseLive } from './runnerLiveness';
+import { CLAIM_LEASE_END_SQL } from './claims';
+import { claimFleetSql, isClaimLeaseLive } from './runnerLiveness';
 import { ATTEMPTS_HOLD_AT } from './attempts';
 import { STALLED_MS } from './claims';
 import { fileUrl, type Forge } from './links';

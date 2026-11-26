@@ -4,7 +4,7 @@
 // stale claim (R-BTN-35). The lock is the two partial unique indexes: a claim inserts and lets
 // SQLite refuse a second holder, never check-then-insert without them (R-BTN-4).
 import type { AdvanceAnswer, ClaimAnswer, NextLegs } from '../shared/runner-wire';
-import { CLAIM_LEASE_END_SQL, expiredClaimFenceSql, expiredLeaseSql, isClaimLeaseLive, liveDeclaringRunnerSql, liveRunnerSql, type Lease } from './runnerLiveness';
+import { expiredClaimFenceSql, expiredLeaseSql, isClaimLeaseLive, liveDeclaringRunnerSql, liveRunnerSql, type Lease } from './runnerLiveness';
 import { BatonError } from './http';
 import { runnerKeyAllowed } from './runnerKeyPolicy';
 import { sessionLinkWhy, transcriptUrl, type SessionLinkView } from './links';
@@ -43,6 +43,10 @@ const RELEASE_ACK_MS = 2 * 3_600_000; // §9: a delivered release unacknowledged
 const LEG_TIMEOUT_ACK_MS = 15 * 60_000; // R-BTN-90, S-BTN-52
 export const UNCONFIRMED_FLAG_MS = 6 * 3_600_000; // §6.7
 export const STALLED_MS = 2 * 3_600_000; // §14 Running: alive but no activity for 2 h
+/** §9.5: grace changes the silence-reap deadline, not the runner's last heartbeat. */
+const RECOVERED_LEASE_END_SQL = 'MAX(w.last_seen_at, COALESCE(c.lease_recovered_at, w.last_seen_at)) + w.lease_timeout_ms';
+/** Recovery never extends a deadline frozen by API-key policy. */
+export const CLAIM_LEASE_END_SQL = `COALESCE(c.api_lease_cap_at, ${RECOVERED_LEASE_END_SQL})`;
 /** §7.5 R-BTN-90: what a `leg_finished` heartbeat re-arms a still-armed deadline to — now plus
  *  40 minutes, once per leg run, so finishing is never the end. */
 const LEG_FINISH_REARM_MS = 40 * 60_000;
