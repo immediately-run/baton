@@ -9,7 +9,10 @@
 //   3. an administrator's session reads what the key reads.
 // Runs on both hosts.
 import { describe, it, expect, beforeEach } from 'vitest';
-import { adminSession, claimItem, cutover, Git, keyCall, ORIGIN, register, rows, sessionCall, setAdminKeys, setClock, withCore } from '../helpers';
+import {
+  adminSession, claimItem, cutover, Git, keyCall, ORIGIN, register, rows, sessionCall, setAdminKeys, setClock,
+  withCore, seedClaimSeat,
+} from '../helpers';
 import { makeKey, signedRequest, type TestKey } from '../lib/sshKeys';
 import { call as hostCall } from '#host';
 
@@ -50,7 +53,7 @@ describe('S-BTN-297 the capacities read (B-202)', () => {
     const w = await register('vm-a');
     const claim = await claimItem('vm-a', w.secret, { ticket_id: 'docs:T-1' });
     expect(claim.status).toBe(200);
-    await rows('INSERT INTO claim_seats (claim_id, capability) VALUES (?, ?)', claim.json.claim_id, CAP);
+    await seedClaimSeat({ claim_id: claim.json.claim_id, capability: CAP });
     const { json } = await read(admin, '/v1/admin/capacities');
     const lab = (json.capacities as Row[]).find((c) => c.capability === CAP)!;
     expect([lab.capacity, lab.held]).toEqual([2, 1]);

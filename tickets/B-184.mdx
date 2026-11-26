@@ -173,8 +173,8 @@ B-186 (below).
 10. **Retire the isolation vocabulary Baton already has.** Core's per-leg `isolation` gate
    (`src/core/gates.ts`, `graph.ts`; `course.ts` still accepts the field §5.2 says is refused),
    `runners.isolation`, R-BTN-3's "`vm` (Firecracker)" (the host `kind` stays a descriptive
-   label no rule reads), R-BTN-180's domain as "the host or VM" (a label, meaning the
-   deployment's), and the "containers" wording of §9.2 and `no_chain_from` (said of credentials
+   label no rule reads), ~~R-BTN-180's domain as "the host or VM" (a label, meaning the
+   deployment's),~~ and the "containers" wording of §9.2 and `no_chain_from` (said of credentials
    instead). Two places need a replacement, not only a deletion, and the spec PR decides both:
    - **Check legs require `runner:session`** (§10, R-BTN-107; S-BTN-64, G-BTN-90). With the
      built-in capability retired, a check leg requires a capability name its course declares and a
@@ -190,7 +190,7 @@ B-186 (below).
      run through the runner's executor like every other (item 4), with no sandbox named and no
      refusal where none exists; it may still only add refusals, R-BTN-183 applied afterwards. Under
      `builtin` it runs beside the merge runner's credential, so a repository relying on
-     `no-runner-lands` relies on its deployment's executor for this — §12.8's list of what the
+     ~~`no-runner-lands`~~ any guarantee relies on its deployment's executor for this — §12.8's list of what the
      deployment must make true says so. Written into the spec in baton#197 (supersedes the
      2026-11-08 choice of (b)).
    Live tickets that build what this retires get a dated note mapping each item: B-70
@@ -314,3 +314,7 @@ _(2026-11-20: the last sentence of the note of 2026-11-19 is struck: the spec si
 _(2026-11-20: the spec simplification of 2026-11-19 (baton#299; `spec/BATON_SPEC_HISTORY.md`, that date) moved the unbuilt parts of the design this ticket builds out of the section files, with their rule ids, to proposal pages: the executor's Baton-side declaration, the `home` source, salvage, the shipped `session` and `attached` executors, executor data and the run's record are part 2 of [the checks-and-executors proposal](../spec/proposals/checks-and-executors.md); the built part of the rule stays in the section file. Each rule keeps its id and a line in its section, which links the page. The pull request that builds this ticket moves the rules it builds back into the section files, and the scenarios and gates it makes pass back into [the verification section](../spec/BATON_SPEC/15-verification.md#sec-15), in the same change. The plan above is otherwise as the earlier note of this day leaves it.)_
 
 _(2026-11-20: rules re-read: R-BTN-107)_
+
+_(2026-11-24: B-189's spec PR (`spec/BATON_SPEC_HISTORY.md`, the entry of 2026-11-24), on the owner's rulings of 2026-11-09 and 2026-11-24 (runners trusted, legs not) retires grant domains and the guarantee `no-runner-lands`; item 10's domain clause is struck (there is no domain to reword), and the override's dependence on the executor is stated of every guarantee, which §12.8 now rests on the deployment's duty. Item 4's brief gains the claim's `scope` and `branches` (R-BTN-107), which B-189 item 5 builds.)_
+
+_(2026-11-24: rules re-read: R-BTN-107, R-BTN-180, R-BTN-189)_

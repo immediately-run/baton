@@ -33,6 +33,5 @@ is that map and the rule that only a command's exit status reaches the station m
   So an agent's result, which carries no `exit_status`, reaches only the `failure` and
   `timed_out` stations. An `advance` arriving at a station the map does not name is not
   constrained.
-- **R-BTN-115 (the forge-check deliverer and `forge-check` entries).** `status: retiring B-140` To be removed with its code. Baton queues no `forge-check` entry and no runner delivers one. Built are the
-  policy's `outbox.forge-check` knob (R-BTN-188) and the instance setting `check_app_id`
-  (§12.7), which nothing reads.
+- **R-BTN-115 (the forge-check deliverer and `forge-check` entries).** `status: retiring B-140` To be removed with its code. Baton queues no `forge-check` entry and no runner delivers one. Built is the
+  instance setting `check_app_id` (§12.7), which nothing reads.

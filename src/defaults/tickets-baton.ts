@@ -126,6 +126,28 @@ export function checkKey(keyFile: string): void {
   }
 }
 
+/** Read terminal positions and explicit done closures for the informational ticket check. */
+export async function readDoneTickets(o: { url: string; keyFile: string; repository: string; fetchImpl?: typeof fetch }): Promise<Set<string>> {
+  checkKey(o.keyFile);
+  const done = new Set<string>();
+  const cursors = new Set<string>();
+  let cursor = '';
+  do {
+    const path = `/v1/repositories/${encodeURIComponent(o.repository)}/tickets?state=closed${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`;
+    const page = await getJson({ ...o, path, which: `closed tickets of ${o.repository}` });
+    const prefix = `${o.repository}:`;
+    if (!Array.isArray(page?.tickets)) throw new Undetermined(path, 'invalid ticket list');
+    for (const row of page.tickets) {
+      if (typeof row?.ticket_id === 'string' && row.ticket_id.startsWith(prefix)
+        && (row.detail?.end === 'done' || (row.detail?.at === null && typeof row.detail?.end === 'string'))) done.add(row.ticket_id.slice(prefix.length));
+    }
+    cursor = typeof page.next_cursor === 'string' ? page.next_cursor : '';
+    if (cursor && cursors.has(cursor)) throw new Undetermined(path, 'repeated pagination cursor');
+    cursors.add(cursor);
+  } while (cursor);
+  return done;
+}
+
 /** Read where Baton holds `ticket` (a local id) in `repository` (Baton's id for it), with
  *  `start` its course's start station (`courseStart`: the checkout's course file, else the
  *  standard course's) — the takeover witness compares the current position with it, and a

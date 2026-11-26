@@ -16,7 +16,12 @@
 // consents, ticket timers, the outbox) extend this file with their own cases.
 // Runs on both hosts.
 import { describe, it, expect, beforeEach } from 'vitest';
-import { adminSession, captureDispatches, claimItem, claimRow, course, ORIGIN, placed, register, rows, sessionCall, setAdminKeys, setClock, setHumanKeys, sha256, syncCall, tick, ticket, withCore, webhookCall, runnerCall } from '../helpers';
+import {
+  adminSession, captureDispatches, claimItem, claimRow, course, ORIGIN, placed, register, rows, sessionCall,
+  setAdminKeys, setClock, setHumanKeys, sha256, syncCall, tick, ticket, withCore, webhookCall, runnerCall,
+  seedInstanceServes, seedInstanceState, seedResource, seedResourceInstance, seedUnblockedDispatch,
+  upsertWebhookDispatch, seedWebhookSync,
+} from '../helpers';
 import { makeKey, signedRequest, sshsig, type TestKey } from '../lib/sshKeys';
 import { call as hostCall } from '#host';
 
@@ -47,8 +52,7 @@ let claimId: number;
 
 /** The granted runner's heartbeat body: a checkout of ops' course. */
 const beatBody = (over: Record<string, unknown> = {}) => ({
-  hostname: 'ops-vm', session_name: 's-ops', harness: 'opencode', kind: 'vm', capabilities: ['agent-venue'],
-  tier_ceiling: 'critical', lease_timeout_s: 900, courses: [{ repository: 'ops', course: 'roadmap-pr', version: 3 }], ...over,
+  hostname: 'ops-vm', session_name: 's-ops', harness: 'opencode', kind: 'vm', capabilities: ['agent-venue'], lease_timeout_s: 900, courses: [{ repository: 'ops', course: 'roadmap-pr', version: 3 }], ...over,
 });
 const beat = (over: Record<string, unknown> = {}) => signed(runner, '/v1/runner/heartbeat', beatBody(over), { 'X-Runner-Secret': secret });
 
@@ -78,13 +82,13 @@ async function aLiveRepository(): Promise<void> {
   claimId = ((await claim.json()) as { claim_id: number }).claim_id;
   // The rows retirement deletes: a stale webhook stamp, a pending trailing dispatch, a pending
   // unblocked dispatch, and an account instance listing the repository (R-BTN-73, R-BTN-77, R-BTN-76).
-  await rows(`INSERT INTO webhook_syncs (repository_id, last_dispatch_at) VALUES ('ops', ?)`, T0 - 11 * 60_000);
-  await rows(`INSERT INTO webhook_dispatch (repository_id, last_dispatch_at, trailing_at) VALUES ('ops', ?, ?)`, T0 - 60_000, T0 + 30_000);
-  await rows(`INSERT INTO unblocked_dispatch (repository_id, pending_json, due_at) VALUES ('ops', ?, ?)`, JSON.stringify([{ ticket: 'ops:T-1', cleared: [] }]), T0 + 30_000);
-  await rows(`INSERT INTO external_resources (name, scope, detail_schema) VALUES ('acme', 'account', '{}')`);
-  await rows(`INSERT INTO resource_instances (name, repositories) VALUES ('acme', ?)`, JSON.stringify(['ops', 'docs']));
-  await rows(`INSERT INTO instance_serves (instance, resource) VALUES ('acme', 'acme')`);
-  await rows(`INSERT INTO instance_states (instance, state, changed_at) VALUES ('acme', 'unknown', ?)`, T0);
+  await seedWebhookSync({ repository_id: 'ops', last_dispatch_at: T0 - 11 * 60_000 });
+  await upsertWebhookDispatch({ repository_id: 'ops', last_dispatch_at: T0 - 60_000, trailing_at: T0 + 30_000 });
+  await seedUnblockedDispatch({ repository_id: 'ops', pending_json: JSON.stringify([{ ticket: 'ops:T-1', cleared: [] }]), due_at: T0 + 30_000 });
+  await seedResource({ name: 'acme', scope: 'account', detail_schema: '{}' });
+  await seedResourceInstance({ name: 'acme', repositories: JSON.stringify(['ops', 'docs']) });
+  await seedInstanceServes({ instance: 'acme', resource: 'acme' });
+  await seedInstanceState({ instance: 'acme', state: 'unknown', changed_at: T0 });
 }
 
 /** Retire ops, confirmed (§12.2), at the clock's now. */

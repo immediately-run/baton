@@ -13,6 +13,7 @@ import { fileURLToPath } from 'node:url';
 // prerequisites, depth 5 on `small` takes about 10 hours; B-37 brings 5 back.
 export const SIZES = { samples: '10000', traces: '1000', depth: '4' };
 const TRACES = 'scenario traces (npm run traces)';
+/** @param {typeof SIZES} sizes */
 export const labels = ({ samples, traces, depth }) =>
   [`npm run model (${samples} samples)`, `model-based tests (${traces} traces)`, `npm run model:verify (depth ${depth})`, TRACES];
 /** The two reports (owner, 2026-10-20: "3 hours is absurdly long. We can run that maybe once a
@@ -37,17 +38,22 @@ const CHECKED = /^(model\/|src\/(core|shared|vendor|migrations)\/|test\/model\/|
 /** The environment each `model:full` step runs in: the caller's, less the knobs that would cut a
  * step down without its label saying so — `REPLAY_ONLY`, which replays only the traces it names
  * and skips the coverage floor (baton#48 round 3, 3-r3-0) — plus the step's own sizes. */
+/** @param {NodeJS.ProcessEnv} env @param {NodeJS.ProcessEnv} own */
 export const stepEnv = (env, own) => {
   const { REPLAY_ONLY: _only, ...base } = env;
   return { ...base, ...own };
 };
 
 /** Whether a PR changing `files` must carry a report. */
+/** @param {readonly string[]} files */
 export const needsReport = (files) => files.some((f) => CHECKED.test(f));
 
 /**
  * The report for `head`, as Markdown, and whether it passes: every check passed, at full size, on
  * a clean tree. `rows` are [label, passed, minutes]; `dirty` is `git status --porcelain`'s output.
+ */
+/** @param {{kind?: 'full' | 'pr', head: string, dirty: string, quintVersion: string,
+ * platform: string, rows: readonly (readonly [label: string, passed: boolean, minutes: number])[]}} input
  */
 export function renderReport({ kind = 'full', head, dirty, quintVersion, platform, rows }) {
   const { heading, checks } = REPORTS[kind];
@@ -64,6 +70,7 @@ export function renderReport({ kind = 'full', head, dirty, quintVersion, platfor
 
 /** The verdict on a PR body for `head`: null when it carries a passing report of either kind
  *  for it, else why not. */
+/** @param {string | null | undefined} body @param {string} head */
 export function reportProblem(body, head) {
   // a body edited on github.com comes back with CRLF line ends
   body = (body ?? '').replace(/\r\n/g, '\n');

@@ -1,9 +1,9 @@
 // S-BTN-296 the registry read (B-202; BATON_SPEC §3.1 R-BTN-47, §11.2 R-BTN-58, §14): `GET
 // /v1/admin/repositories` (`admin.repo.list`) answers an administrator's key as it did and an
 // administrator's session the same JSON, each row with the registry's own fields. Must hold:
-//   1. the key's answer keeps every field of every row and `seed_owners` (additions only), and
+//   1. the key's answer keeps the registry fields other than retired tiers and `seed_owners`, and
 //      a row is still `GET /v1/admin/state`'s repository row beside the new fields;
-//   2. each row carries `tiers`, `sync_keys: [{fingerprint, role}]` (unrevoked), `ci_identity`
+//   2. each row carries `sync_keys: [{fingerprint, role}]` (unrevoked), `ci_identity`
 //      and `retired_at` (null while live);
 //   3. a retired repository is listed only with `?retired=1`, marked by `retired_at`;
 //   4. an administrator's session reads what the key reads;
@@ -38,8 +38,8 @@ beforeEach(async () => {
   syncKey = await makeKey('ssh-ed25519', 'sync');
   await setAdminKeys(admin);
   expect((await keyCall(admin, '/v1/admin/repositories', {
-    id: 'ops', github: 'immediately-run/ops', default_branch: 'main', tiers: ['routine', 'careful'],
-    sync_workflow: '.github/workflows/baton-sync.yml', mirror_workflow: '.github/workflows/baton-mirror.yml', owner_keys: [opsOwner.publicKey],
+    id: 'ops', github: 'immediately-run/ops', default_branch: 'main',
+    sync_workflow: '.github/workflows/baton-sync.yml', mirror_workflow: '.github/workflows/baton-mirror.yml', owner_keys: [opsOwner.publicKey], tiers: 'invalid-old-ladder',
   })).status).toBe(200);
   expect((await keyCall(admin, '/v1/admin/repositories', { id: 'docs', owner_keys_add: [docsOwner.publicKey], sync_keys_add: [{ public_key: syncKey.publicKey, role: 'sync' }] })).status).toBe(200);
   expect((await new Git().add('T-1').post()).status).toBe(200);
@@ -48,7 +48,7 @@ beforeEach(async () => {
 });
 
 describe('S-BTN-296 the registry read (B-202)', () => {
-  it('answers the key every field it answered, and the registry’s fields beside them', async () => {
+  it('answers the key with registry fields, not the retired tier ladder', async () => {
     const view = JSON.parse(JSON.stringify(await withCore((c) => c.adminView()))) as Row;
     const state = (await read(admin, '/v1/admin/state')).json;
     const { status, json } = await read(admin, '/v1/admin/repositories');
@@ -58,16 +58,15 @@ describe('S-BTN-296 the registry read (B-202)', () => {
     expect((json.repositories as Row[]).map((r) => r.id)).toEqual(['baton', 'docs', 'ops']);
     for (const old of view.repositories as Row[]) {
       const row = rowOf(json, old.id);
+      expect(row).not.toHaveProperty('tiers');
       expect(row).toMatchObject(old);
       expect(row).toMatchObject(rowOf(state, old.id));
-      expect(Object.keys(row).sort()).toEqual([...Object.keys(old), 'ci_identity', 'retired_at', 'sync_keys', 'tiers'].sort());
+      expect(Object.keys(row).sort()).toEqual([...Object.keys(old), 'ci_identity', 'retired_at', 'sync_keys'].sort());
     }
     const docs = rowOf(json, 'docs');
     expect(docs.sync_keys).toEqual([{ fingerprint: syncKey.fingerprint, role: 'sync' }]);
     expect(docs.retired_at).toBeNull();
-    expect(docs.tiers).toEqual((await withCore((c) => c.registry.get('docs')))!.tiers);
     expect(docs.ci_identity).toEqual((await withCore((c) => c.registry.get('docs')))!.ci_identity);
-    expect(rowOf(json, 'ops').tiers).toEqual(['routine', 'careful']);
     expect(rowOf(json, 'ops').sync_keys).toEqual([]);
 
     // 4. The session's JSON is the key's.

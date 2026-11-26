@@ -1,6 +1,7 @@
 import type { PostedAttestation } from '../../core/board';
 import type { Forge, PrForge } from '../../core/forges';
 import type { CodeRepoEntry, PrFact } from '../course-pr';
+import type { OutsideRecord } from '../outside-work';
 
 /** Coordinates come from a registered repository, not an agent's answer URL. */
 export interface ForgeRegistration {
@@ -39,6 +40,9 @@ export interface FactContext {
   outputEvidence?: PostedAttestation[];
   ownsOutput?: (ticket: string, pr: Parameters<FactContext['owns']>[0]) => boolean;
   pushers: { host: string; id: string }[];
+  /** B-311: the outside-work record the sync reads trusted merges and head pushes against. */
+  outside?: OutsideRecord;
+  mentionSince?: number | null;
 }
 export interface ForgeClient {
   openPr(pr: OpenPr): Promise<string>;

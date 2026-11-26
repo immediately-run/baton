@@ -17,7 +17,6 @@ import { checkTickets } from '../../src/defaults/tickets-check';
 import { accepts, readTicketSettings } from '../../src/defaults/tickets-config';
 import { PAGE_NAME, ticketsPage } from '../../src/defaults/tickets-page';
 import { courseStart, ticketCommitMessage } from '../../src/defaults/tickets';
-// @ts-expect-error a plain .mjs script, no types
 import { unnamedEntries } from '../../scripts/check-spec.mjs';
 import { appendStatus, entryIds, filingDate, firstCommit, firstCommits, historyEntries, missingSections, rereadNote, rereads, ruleIds, rulesConfig, sectionGaps, sectionsDate, staleRules } from '../../src/defaults/tickets-rules';
 import { parseFrontmatter } from '../../src/defaults/tickets-markdown';
@@ -771,7 +770,7 @@ async function fakeBaton(state: {
     if (req.method !== 'GET') return reply(405, { ok: false, code: 'not-found', message: 'the reads are GETs' });
     if (url.pathname === '/v1/repositories/baton/board') {
       if (state.boardStatus != null) return reply(state.boardStatus, { ok: false, code: state.boardStatus === 403 ? 'forbidden' : 'unauthenticated', message: 'not this key' });
-      return reply(200, { repository: { id: 'baton' }, ready: state.ready ?? [], ready_by_tier: {}, holders: state.holders ?? [], granted_capabilities: null, server_time: state.serverTime ?? 0 });
+      return reply(200, { repository: { id: 'baton' }, ready: state.ready ?? [], holders: state.holders ?? [], granted_capabilities: null, server_time: state.serverTime ?? 0 });
     }
     if (/^\/v1\/repositories\/baton\/tickets\/([^/]+)\/history$/.test(url.pathname)) {
       return reply(200, { rows: state.history ?? [], ...(state.resume === undefined ? {} : { resume: state.resume }) });

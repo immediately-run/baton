@@ -11,7 +11,10 @@
 // and each runner's own verification of the named commits) is test/unit/signed-control.test.ts
 // and S-BTN-219.
 import { describe, it, expect, beforeEach } from 'vitest';
-import { Git, adminSession, course, cutover, keyCall, observe, payload, register, rows, sessionCall, setAdminKeys, setClock, syncCall, ticket, placed, runnerCall, withCore } from '../helpers';
+import {
+  Git, adminSession, course, cutover, keyCall, observe, payload, register, rows, sessionCall, setAdminKeys,
+  setClock, syncCall, ticket, placed, runnerCall, withCore, replaceClaimControl, seedHumanKey,
+} from '../helpers';
 import { makeKey, type TestKey } from '../lib/sshKeys';
 
 const T0 = Date.parse('2026-11-06T12:00:00Z');
@@ -47,7 +50,7 @@ beforeEach(async () => {
   // B-136's register as far as it is built: the owner key marked in the tenant's human-only
   // register is what B-127's signing keys are.
   ownerLine = owner.publicKey.split(' ').slice(0, 2).join(' ');
-  await rows('INSERT INTO human_keys (fingerprint, public_key, added_by, added_at) VALUES (?, ?, ?, ?)', owner.fingerprint, owner.publicKey, 'admin:test', T0);
+  await seedHumanKey({ fingerprint: owner.fingerprint, public_key: owner.publicKey, added_by: 'admin:test', added_at: T0 });
 });
 
 describe(`S-BTN-218 owner-signed briefs and the signed-control record`, () => {
@@ -248,7 +251,7 @@ describe(`S-BTN-218 owner-signed briefs and the signed-control record`, () => {
     expect(again.control!.register_moved).toBeUndefined();
     // A record computed under another register (here, another key's fingerprint) is said to
     // be: the runner releases on a refusal unpenalised rather than charge the claim's attempt.
-    await rows('UPDATE claims SET control_json = ? WHERE id = ?', JSON.stringify(control()), firstJson.claim_id);
+    await replaceClaimControl(firstJson.claim_id, JSON.stringify(control()));
     const moved = (await (await claim()).json()) as typeof firstJson;
     expect(moved.control).toMatchObject({ required: true, register_moved: true });
     expect(await rows('SELECT status, failed_attempt FROM claims WHERE id = ?', firstJson.claim_id)).toEqual([{ status: 'active', failed_attempt: 0 }]);

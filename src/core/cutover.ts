@@ -26,8 +26,8 @@ export function importLegacyClaim(sql: Store, now: number,
   sql.exec(`INSERT INTO credentials (id, hostname, allowed_capabilities, kind) VALUES ('legacy', 'legacy', '[]', 'legacy') ON CONFLICT (id) DO NOTHING`);
   const session = o.preferred && SESSION_NAME.test(o.preferred) && !taken(o.preferred) ? o.preferred
     : !taken(`item-${localOf(o.item)}`) ? `item-${localOf(o.item)}` : `item-${localOf(o.item)}-${o.nonce}`;
-  const { id: runnerId } = sql.exec<{ id: number }>(`INSERT INTO runners (hostname, session_name, secret_hash, credential_id, harness, kind, tier_ceiling, lease_timeout_ms, settings_hash, first_seen_at, last_seen_at)
-            VALUES ('legacy', ?, ?, 'legacy', 'claude-code', 'legacy', 'critical', 0, '', ?, ?) RETURNING id`, session, randomHex(32), now, now).one();
+  const { id: runnerId } = sql.exec<{ id: number }>(`INSERT INTO runners (hostname, session_name, secret_hash, credential_id, harness, kind, lease_timeout_ms, settings_hash, first_seen_at, last_seen_at)
+            VALUES ('legacy', ?, ?, 'legacy', 'claude-code', 'legacy', 0, '', ?, ?) RETURNING id`, session, randomHex(32), now, now).one();
   // R-BTN-62: the counter's value now, as for any claim.
   // §4: a legacy claim starts at the station the sync posts for its ticket at the import.
   const { id: claimId } = sql.exec<{ id: number }>(`INSERT INTO claims (ticket_id, runner_id, request_id, nonce, snapshot_sha, claimed_at, status, reap_after, claim_observation, station, start_path, course_id)

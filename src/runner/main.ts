@@ -36,7 +36,6 @@ export interface RunArgs {
   session: string;
   repository: string;
   hostname: string;
-  tier: string;
   /** B-86: `--capabilities`, which narrows. Null when the flag is absent — the runner then
    *  declares what the grant allows (`grant.capabilities` on its first answer). */
   capabilities: string[] | null;
@@ -63,11 +62,12 @@ export interface RunArgs {
    *  1 to 32, default 1 (one claim in the home checkout, as before); each claim beside another
    *  works in a clone of its own. */
   concurrency: number;
+  bounds?: { legs?: string[]; maxLegs?: number; until?: number };
   restartWhenBehind: boolean;
 }
 
 /** `baton run [--harness opencode|claude-code] [--home <checkout|home name>] [--url <url>] [--session <id>]
- * [--repository <id>] [--hostname <name>] [--tier <tier>] [--capabilities a,b] [--beat-every <ms>]
+ * [--repository <id>] [--hostname <name>] [--capabilities a,b] [--beat-every <ms>]
  * [--course <id>] [--lock <capability>=<path>]… [--test-harness] [--verbose]`.
  * Unknown flags are refused, never dropped. `--capabilities` narrows the grant: without it the
  * runner declares what the grant allows (B-86). `--home` keeps R-BTN-131's meaning for a
@@ -79,7 +79,7 @@ export function parseRunArgs(argv: string[], env: NodeJS.ProcessEnv = process.en
     home: env.BATON_HOME ?? process.cwd(), url: env.BATON_URL ?? DEFAULT_URL,
     session: env.BATON_SESSION ?? `run-${Math.random().toString(16).slice(2, 10)}`,
     repository: env.BATON_REPOSITORY ?? 'docs', hostname: env.BATON_HOSTNAME ?? hostname(),
-    tier: 'critical', capabilities: null, beatEvery: 2 * 60_000, testHarness: false, verbose: false, locks: {},
+    capabilities: null, beatEvery: 2 * 60_000, testHarness: false, verbose: false, locks: {},
     executor: env.BATON_EXECUTOR ?? 'builtin', concurrency: 1, restartWhenBehind: false,
   };
   for (let i = 0; i < argv.length; i++) {
@@ -99,9 +99,22 @@ export function parseRunArgs(argv: string[], env: NodeJS.ProcessEnv = process.en
     else if (a === '--session') out.session = value();
     else if (a === '--repository') out.repository = value();
     else if (a === '--hostname') out.hostname = value();
-    else if (a === '--tier') out.tier = value();
     else if (a === '--course') out.course = value();
     else if (a === '--executor') out.executor = value();
+    else if (a === '--legs') {
+      const legs = [...new Set(value().split(',').map((leg) => leg.trim()))];
+      if (legs.length > 50 || legs.some((leg) => !/^[a-z][a-z0-9-]{0,39}$/.test(leg))) throw new Error('--legs: 1 to 50 comma-separated leg names');
+      (out.bounds ??= {}).legs = legs;
+    } else if (a === '--max-legs') {
+      const n = Number(value());
+      if (!Number.isSafeInteger(n) || n < 1) throw new Error('--max-legs: a positive integer');
+      (out.bounds ??= {}).maxLegs = n;
+    } else if (a === '--until') {
+      const instant = value();
+      const until = Date.parse(instant);
+      if (!Number.isFinite(until) || !/(?:Z|[+-]\d\d:\d\d)$/i.test(instant)) throw new Error('--until: an ISO timestamp with a time zone');
+      (out.bounds ??= {}).until = until;
+    }
     else if (a === '--concurrency') {
       const n = Number(value());
       if (!Number.isInteger(n) || n < 1 || n > 32) throw new Error('--concurrency: an integer from 1 to 32 (R-BTN-4)');
@@ -136,7 +149,7 @@ export function parseRunArgs(argv: string[], env: NodeJS.ProcessEnv = process.en
  * Printed before any credential or network work, and the exit is 0. */
 export const RUN_USAGE = [
   'usage: baton runner start (or baton run) [--harness opencode|claude-code] [--home <checkout|home name>] [--url <url>] [--session <id>]',
-  '                 [--repository <id>] [--hostname <name>] [--tier <tier>] [--capabilities a,b]',
+  '                 [--repository <id>] [--hostname <name>] [--capabilities a,b]',
   '                 [--beat-every <ms>] [--course <id>] [--executor <source>] [--concurrency <k>]',
   '                 [--config FILE] [--test-harness] [--verbose] [--restart-when-behind]',
   '',
@@ -149,6 +162,9 @@ export const RUN_USAGE = [
   '                      serve the grant. A machine without a browser narrows, e.g. llm-call,create-pr.',
   '  --course <id>       narrows the courses served to this one, of those the home declares.',
   '                      Absent, the runner serves and declares every course the home declares.',
+  '  --legs a,b         claims and chains into only these named legs.',
+  '  --max-legs <n>     suspends before running more than n legs in one claim (default 8).',
+  '  --until <instant>  stops starting legs at this timestamp (ISO with time zone).',
   '  --executor <source> how legs run (R-BTN-107): builtin (the default — child processes) or',
   '                      pinned:<dir>@sha256:<digest>, a host bundle loaded only when its digest',
   '                      matches. Also BATON_EXECUTOR; never read from the repository.',
@@ -531,7 +547,7 @@ export async function runMain(argv: string[], io: { log?: (l: string) => void; f
     ...(hostAdapter ? { agentActivity: (checkout: string) => ({
       command: hostAdapter.agentCommand, paths: harnessActivityPaths(checkout, [hostAdapter]),
     }) } : {}),
-    tierCeiling: a.tier, ...(a.capabilities ? { capabilities: a.capabilities } : {}),
+    ...(a.capabilities ? { capabilities: a.capabilities } : {}),
     capabilityChecks: checks,
     courses,
     readCourses,
@@ -563,11 +579,13 @@ export async function runMain(argv: string[], io: { log?: (l: string) => void; f
     ...(a.testHarness ? { testHarness: true } : {}),
     ...(maskEnv ? { maskEnv } : {}),
     ...(a.concurrency !== 1 ? { concurrency: a.concurrency } : {}),
+    ...(a.bounds ? { bounds: a.bounds } : {}),
   });
   try {
     const result = await runner.work();
     if (!exitCode) exitCode = result;
   } finally {
+    runner.stop();
     process.off('SIGINT', onSignal);
     process.off('SIGTERM', onSignal);
     process.off('SIGHUP', onSignal);

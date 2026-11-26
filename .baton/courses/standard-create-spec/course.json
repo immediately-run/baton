@@ -1,0 +1,117 @@
+{
+  "start": "requested",
+  "start_leg": "converse",
+  "end": [
+    "merged"
+  ],
+  "starts_from": "request",
+  "short_waits": [
+    "ci"
+  ],
+  "stations": {
+    "requested": {
+      "label": "Requested, no PR yet"
+    },
+    "spec-open": {
+      "label": "Spec PR open"
+    },
+    "reviewed": {
+      "label": "Reviewed"
+    },
+    "adjudicated": {
+      "label": "Open findings adjudicated"
+    },
+    "merged": {
+      "label": "Merged"
+    }
+  },
+  "legs": {
+    "converse": {
+      "from": [
+        "requested"
+      ],
+      "to": "spec-open",
+      "label": "Design the specification with the owner"
+    },
+    "review": {
+      "from": [
+        "spec-open"
+      ],
+      "to": "reviewed",
+      "max_runs": 4,
+      "label": "Adversarial review round"
+    },
+    "address": {
+      "from": [
+        "reviewed"
+      ],
+      "to": "spec-open",
+      "max_runs": 3,
+      "label": "Address the blocking findings with the owner"
+    },
+    "adjudicate": {
+      "from": [
+        "reviewed"
+      ],
+      "to": "adjudicated",
+      "label": "Reproduce the findings left open"
+    },
+    "merge": {
+      "from": [
+        "reviewed",
+        "adjudicated"
+      ],
+      "to": "merged",
+      "label": "Merge and close the ticket"
+    },
+    "opened-by-hand": {
+      "from": [
+        "requested"
+      ],
+      "to": "spec-open",
+      "arrives": {
+        "fact": "pr-opened",
+        "next": "review"
+      }
+    },
+    "pushed-by-hand": {
+      "from": [
+        "reviewed"
+      ],
+      "to": "spec-open",
+      "max_runs": 3,
+      "arrives": {
+        "fact": "pr-pushed",
+        "next": "review"
+      }
+    },
+    "merged-by-hand": {
+      "from": [
+        "requested",
+        "spec-open",
+        "reviewed",
+        "adjudicated"
+      ],
+      "to": "merged",
+      "arrives": {
+        "fact": "pr-merged"
+      }
+    },
+    "reconcile": {
+      "from": [
+        "requested",
+        "spec-open",
+        "reviewed",
+        "adjudicated"
+      ],
+      "max_runs": 3,
+      "reconciles": {
+        "to": {
+          "spec-open": "review",
+          "reviewed": "merge",
+          "merged": null
+        }
+      }
+    }
+  }
+}

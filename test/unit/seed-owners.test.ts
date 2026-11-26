@@ -8,7 +8,10 @@ import { checkRegistration } from '../../src/core/registry';
 import { parseSshKey } from '../../src/core/auth';
 import type { Config } from '../../src/core/ports';
 import type { Admin } from '../../src/core/admin';
-import { keyCall, rows, setAdminKeys, withCore } from '../helpers';
+import {
+  keyCall, rows, setAdminKeys, withCore, removeRepositoryOwner, removeRepositoryOwners, removeRepositoryOwnersIn,
+  seedCredential, seedRepositoryOwner, seedRepositoryOwnerIn,
+} from '../helpers';
 import { makeKey, type TestKey } from '../lib/sshKeys';
 
 const OPS = { id: 'ops', github: 'immediately-run/ops', default_branch: 'trunk', sync_workflow: '.github/workflows/sync.yml' };
@@ -49,7 +52,7 @@ describe('the seed’s owner keys (R-BTN-47, R-BTN-58)', () => {
       await expect(c.admin.readSeedOwners(seeded([{ ...OPS, owner_keys: ['not a key'] }]))).rejects.toMatchObject({ code: 'invalid-params' });
       await expect(seedOwners(c, seeded([{ ...OPS, owner_keys: [admin.publicKey] }]))).rejects.toMatchObject({ code: 'conflict' });
       // A key of another role (R-BTN-57): a runner's.
-      await rows(`INSERT INTO credentials (id, hostname, allowed_capabilities, kind, public_key, created_by) VALUES (?, 'h', '[]', 'runner', ?, 'seed')`, runner.fingerprint, runner.publicKey);
+      await seedCredential({ id: runner.fingerprint, hostname: 'h', allowed_capabilities: '[]', kind: 'runner', public_key: runner.publicKey, created_by: 'seed' });
       await expect(seedOwners(c, seeded([{ ...OPS, owner_keys: [runner.publicKey] }]))).rejects.toMatchObject({ code: 'conflict' });
       // A right-shaped line whose base64 is no key stops the start as a malformed seed does.
       await expect(seedOwners(c, seeded([{ ...OPS, owner_keys: ['ssh-ed25519 AAAA'] }]))).rejects.toMatchObject({ code: 'invalid-params' });
@@ -84,8 +87,8 @@ describe('the seed’s owner keys (R-BTN-47, R-BTN-58)', () => {
       // entry is checked all the same — one `wrangler.toml` starts on no instance and stops on
       // another (round two, 1).
       c.registry.register(OPS);
-      await rows(`INSERT INTO repository_owners (repository_id, public_key, fingerprint, added_by, added_at) VALUES ('ops', ?, ?, 'admin:test', 1)`, another.publicKey, another.fingerprint);
-      await rows(`INSERT INTO credentials (id, hostname, allowed_capabilities, kind, public_key, created_by) VALUES (?, 'h', '[]', 'runner', ?, 'seed')`, runner.fingerprint, runner.publicKey);
+      await seedRepositoryOwner({ repository_id: 'ops', public_key: another.publicKey, fingerprint: another.fingerprint, added_by: 'admin:test', added_at: 1 });
+      await seedCredential({ id: runner.fingerprint, hostname: 'h', allowed_capabilities: '[]', kind: 'runner', public_key: runner.publicKey, created_by: 'seed' });
       for (const keys of [
         [admin.publicKey], // an administrator's key (R-BTN-57)
         [runner.publicKey], // a runner's
@@ -143,17 +146,17 @@ describe('the seed’s owner keys (R-BTN-47, R-BTN-58)', () => {
     const syncKey = await makeKey('ssh-ed25519', 'seed-as-sync');
     await withCore(async (c) => {
       c.registry.register(OPS);
-      await rows(`INSERT INTO repository_owners (repository_id, public_key, fingerprint, added_by, added_at) VALUES ('ops', ?, ?, 'admin:test', 1)`, another.publicKey, another.fingerprint);
+      await seedRepositoryOwner({ repository_id: 'ops', public_key: another.publicKey, fingerprint: another.fingerprint, added_by: 'admin:test', added_at: 1 });
       const config = seeded([{ ...OPS, owner_keys: [owner.publicKey] }]);
       await seedOwners(c, config);
       expect(await live()).toEqual([another.publicKey]);
       // Its only owner removed (by an owner, not revoked): the next start owns it from the entry again.
-      await rows('UPDATE repository_owners SET removed_at = 2 WHERE fingerprint = ?', another.fingerprint);
+      await removeRepositoryOwner(another.fingerprint, 2);
       await seedOwners(c, config);
       expect(await live()).toEqual([owner.publicKey.split(' ').slice(0, 2).join(' ')]);
       // An entry naming a key that is a sync key holds two roles (R-BTN-57): the start stops, nothing written.
       await c.registry.registerWithKeys({ ...OPS, id: 'heat', github: 'immediately-run/heat', sync_keys: [{ public_key: syncKey.publicKey, role: 'sync' }] }, 'admin:t', []);
-      await rows('UPDATE repository_owners SET removed_at = 3 WHERE repository_id = ?', 'ops');
+      await removeRepositoryOwners('ops', 3);
       await expect(seedOwners(c, seeded([{ ...OPS, owner_keys: [syncKey.publicKey] }]))).rejects.toMatchObject({ code: 'conflict' });
       expect(await live()).toEqual([]);
     });
@@ -168,7 +171,7 @@ describe('a seed-only registration is named in a read (B-90, B-91)', () => {
     await setAdminKeys(admin);
     await withCore(async (c) => {
       // docs as production has it: registered by hand, its owner added after.
-      await rows(`INSERT INTO repository_owners (repository_id, public_key, fingerprint, added_by, added_at) VALUES ('docs', ?, ?, 'admin:test', 1)`, instanceOwner.publicKey, instanceOwner.fingerprint);
+      await seedRepositoryOwner({ repository_id: 'docs', public_key: instanceOwner.publicKey, fingerprint: instanceOwner.fingerprint, added_by: 'admin:test', added_at: 1 });
       // ops as a rebuilt instance has it: from the seed, its owner the seed's.
       const config = seeded([{ ...OPS, owner_keys: [owner.publicKey] }]);
       c.registry.seed(config);
@@ -190,14 +193,14 @@ describe('a seed-only registration is named in a read (B-90, B-91)', () => {
     await setAdminKeys(admin);
     await withCore(async (c) => {
       // docs as production has it: registered by hand, its owner added after.
-      await rows(`INSERT INTO repository_owners (repository_id, public_key, fingerprint, added_by, added_at) VALUES ('docs', ?, ?, 'admin:test', 1)`, added.publicKey, added.fingerprint);
+      await seedRepositoryOwner({ repository_id: 'docs', public_key: added.publicKey, fingerprint: added.fingerprint, added_by: 'admin:test', added_at: 1 });
       const config = seeded([{ ...OPS, owner_keys: [owner.publicKey] }]);
       c.registry.seed(config);
       await seedOwners(c, config);
       // Every key of ops is the seed's; docs has an owner a person added. Exactly so.
       expect((await keyCall(admin, '/v1/admin/repositories')).json.seed_owners).toEqual(['baton', 'ops']);
       // An owner an administrator adds beside the seed's: the repository no longer leans on the deploy alone.
-      await rows(`INSERT INTO repository_owners (repository_id, public_key, fingerprint, added_by, added_at) VALUES ('ops', ?, ?, 'admin:test', 3)`, added.publicKey, added.fingerprint);
+      await seedRepositoryOwner({ repository_id: 'ops', public_key: added.publicKey, fingerprint: added.fingerprint, added_by: 'admin:test', added_at: 3 });
       expect((await keyCall(admin, '/v1/admin/repositories')).json.seed_owners).toEqual(['baton']);
       // The added one removed again, the seed's left: all of the owners are the seed's, and it is named.
       await rows(`UPDATE repository_owners SET removed_at = 4 WHERE repository_id = 'ops' AND added_by = 'admin:test'`);
@@ -221,8 +224,8 @@ describe('a seed-only registration is named in a read (B-90, B-91)', () => {
     expect((await keyCall(stranger, '/v1/admin/repositories')).status).toBe(401);
     // The owner the seed wrote is replaced by one an administrator added: no longer the seed's.
     await withCore((c) => {
-      c.store.exec(`UPDATE repository_owners SET removed_at = 2 WHERE repository_id = 'ops'`);
-      c.store.exec(`INSERT INTO repository_owners (repository_id, public_key, fingerprint, added_by, added_at) VALUES ('ops', ?, ?, 'admin:test', 3)`, instanceOwner.publicKey, instanceOwner.fingerprint);
+      removeRepositoryOwnersIn(c.store, 'ops', 2);
+      seedRepositoryOwnerIn(c.store, { repository_id: 'ops', public_key: instanceOwner.publicKey, fingerprint: instanceOwner.fingerprint, added_by: 'admin:test', added_at: 3 });
     });
     const after = await keyCall(admin, '/v1/admin/repositories');
     // baton and docs, seeded with none in the test bindings, still lean on the deploy.

@@ -1,5 +1,6 @@
 import { outputAttestation, TICKET_OUTPUT_WITNESS } from '../output-evidence';
-import type { CodeRepoEntry, PrFact } from '../course-pr';
+import { verdictOf, type CodeRepoEntry, type PrFact } from '../course-pr';
+import { pushChangesWork } from '../push-work';
 import type { BranchCommit } from '../pr-markers';
 import type { FactContext, FactRead, ForgeRepo } from './types';
 import { sameRepository } from './rest';
@@ -38,13 +39,48 @@ const PR_COMMENTS = `pageInfo { hasNextPage endCursor } nodes { ${COMMENT_FIELDS
 const PR_DETAIL = `fragment D on PullRequest {
   head: commits(last: 1) { nodes { commit { oid checkSuites(first: 10) { pageInfo { hasNextPage } nodes { checkRuns(first: 100, filterBy: { checkType: LATEST }) { pageInfo { hasNextPage } nodes { status conclusion } } } } } } }
   commits(first: 100) { pageInfo { hasNextPage } nodes { commit { oid committedDate message tree { oid } parents(first: 1) { nodes { oid tree { oid } } } } } }
-  reviews(first: 100) { pageInfo { hasNextPage } nodes { author { login } authorAssociation state submittedAt body } }
+  reviews(first: 100) { pageInfo { hasNextPage } nodes { author { login } authorAssociation state submittedAt body url commit { oid } } }
   comments(first: 100) { ${PR_COMMENTS} }
 }`;
 
 /** The GraphQL query reading `numbers`' detail in one repository, each PR under alias `p<n>`. */
 const detailQuery = (numbers: number[]): string =>
   `query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { ${numbers.map((n) => `p${n}: pullRequest(number: ${n}) { ...D }`).join(' ')} } }\n${PR_DETAIL}`;
+
+type GithubRepository<T> = { repository?: T | null };
+type GithubConnection<T> = { nodes: T[]; pageInfo: { hasNextPage: boolean; endCursor?: string | null } };
+type GithubActor = { login: string; id?: number; databaseId?: number | null };
+type GithubCheck = { status: string; conclusion?: string | null };
+type GithubRef = { ref: string; repo?: { id?: number; node_id?: string } | null };
+type GithubPr = {
+  number: number; head: GithubRef & { sha: string }; base?: Partial<GithubRef>; state: string; merged_at: string | null;
+  user?: GithubActor | null; author_association?: string; html_url?: string; merge_commit_sha?: string | null;
+  title?: string; body?: string | null;
+};
+type GithubReviewState = PrFact['reviews'][number]['state'];
+type GithubReview = {
+  user?: GithubActor | null; author_association?: string; state: GithubReviewState; submitted_at?: string | null;
+  body?: string | null; html_url?: string; commit_id?: string;
+};
+type GithubComment = {
+  author?: GithubActor | null; authorAssociation?: string; body: string; lastEditedAt?: string | null;
+  includesCreatedEdit?: boolean; createdAt: string; url?: string;
+};
+type GithubComments = GithubConnection<GithubComment | null>;
+type GithubCommentCommit = { oid: string; comments: GithubComments };
+type GithubCommit = {
+  sha: string; commit: { committer: { date: string }; message: string; tree?: { sha: string } }; parents?: { sha: string }[];
+};
+type GithubPrDetail = {
+  head?: { nodes?: ({ commit?: { oid: string; checkSuites?: GithubConnection<{ checkRuns?: GithubConnection<GithubCheck> | null } | null> | null } } | null)[] } | null;
+  commits: GithubConnection<{ commit: { oid: string; committedDate: string; message: string; tree?: { oid: string }; parents?: { nodes?: { oid: string; tree?: { oid: string } }[] } } }>;
+  reviews: GithubConnection<{ author?: GithubActor | null; authorAssociation?: string; state: GithubReviewState; submittedAt?: string | null; body?: string | null; url?: string; commit?: { oid: string } | null }>;
+  comments: GithubComments;
+};
+
+/** Whether a PR's head and base are the same repository, by GitHub's immutable ids. */
+const identity = (pr: GithubPr): boolean => sameRepository(pr.head?.repo?.id, pr.base?.repo?.id) ||
+  (typeof pr.head?.repo?.node_id === 'string' && pr.head.repo.node_id !== '' && pr.head.repo.node_id === pr.base?.repo?.node_id);
 
 /** The existing GraphQL detail reader, with one budget and permission cache per sync. */
 export function githubFactReader({ log, owns, pushers: listedPushers, ...obs }: FactContext) {
@@ -74,10 +110,10 @@ export function githubFactReader({ log, owns, pushers: listedPushers, ...obs }: 
    *  hold Checks, so on a private repository GitHub answers everything else and refuses those.
    *  Such an answer is returned with `checksRefused` set, and the caller reads the checks from
    *  the head's workflow runs instead. Every error names its path, so a refusal says what. */
-  const graphql = async (conn: { host: string; graphql: string; token: string }, query: string, variables: Record<string, unknown>): Promise<{ data: any; checksRefused: boolean }> => {
+  const graphql = async <T>(conn: { host: string; graphql: string; token: string }, query: string, variables: Record<string, unknown>): Promise<{ data?: T | null; checksRefused: boolean }> => {
     spend(conn.host);
     const res = checked(await fetch(conn.graphql, { method: 'POST', headers: { Authorization: `Bearer ${conn.token}`, 'Content-Type': 'application/json', 'User-Agent': 'baton-sync' }, body: JSON.stringify({ query, variables }), redirect: 'error', signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) }), `${conn.graphql} (${String(variables.owner)}/${String(variables.name)})`);
-    const body = (await res.json()) as { data?: any; errors?: { message?: string; type?: string; path?: (string | number)[] }[] };
+    const body = (await res.json()) as { data?: T | null; errors?: { message?: string; type?: string; path?: (string | number)[] }[] };
     const errors = body.errors ?? [];
     const checksRefused = errors.length > 0 && body.data != null && errors.every((e) => e.type === 'FORBIDDEN' && (e.path ?? []).includes('checkSuites'));
     if (errors.length && !checksRefused) {
@@ -94,7 +130,7 @@ export function githubFactReader({ log, owns, pushers: listedPushers, ...obs }: 
    *  Actions: read), the sync fails naming both permissions. */
   const actionChecks = async (conn: { host: string; rest: string; token: string }, repo: string, sha: string): Promise<(string | null)[]> => {
     try {
-      const runs = await all<any>(conn, `/repos/${repo}/actions/runs?head_sha=${sha}`, (b) => b.workflow_runs);
+      const runs = await all<GithubCheck>(conn, `/repos/${repo}/actions/runs?head_sha=${sha}`, (b) => (b as { workflow_runs: GithubCheck[] }).workflow_runs);
       return runs.map((r) => (r.status === 'completed' && r.conclusion ? String(r.conclusion) : null));
     } catch (e) {
       const { status, limited } = e as { status?: number; limited?: boolean };
@@ -103,7 +139,7 @@ export function githubFactReader({ log, owns, pushers: listedPushers, ...obs }: 
     }
   };
   /** Every item of a paged list; `pick` takes a page's items from its body. */
-  const all = async <T>(conn: { host: string; rest: string; token: string }, path: string, pick: (body: any) => T[] = (b) => b as T[]): Promise<T[]> => {
+  const all = async <T>(conn: { host: string; rest: string; token: string }, path: string, pick: (body: unknown) => T[] = (b) => b as T[]): Promise<T[]> => {
     const out: T[] = [];
     let url: string | null = `${conn.rest}${path}${path.includes('?') ? '&' : '?'}per_page=100`;
     for (let page = 0; url != null; page++) {
@@ -191,18 +227,18 @@ export function githubFactReader({ log, owns, pushers: listedPushers, ...obs }: 
     }
     return out;
   };
-  const commentNodes = async (page: any, next: (after: string) => Promise<any>): Promise<any[]> => {
-    const out: any[] = [];
+  const commentNodes = async (page: GithubComments | null | undefined, next: (after: string) => Promise<GithubComments | null | undefined>): Promise<GithubComment[]> => {
+    const out: GithubComment[] = [];
     for (let i = 0; ; i++) {
       if (!Array.isArray(page?.nodes) || typeof page.pageInfo?.hasNextPage !== 'boolean') throw new Error('GitHub did not return the comment connection');
-      out.push(...page.nodes);
+      out.push(...page.nodes.filter((node) => node != null));
       if (!page.pageInfo.hasNextPage) return out;
       const after = page.pageInfo.endCursor;
       if (i + 1 >= MAX_PAGES || typeof after !== 'string' || !after) throw new Error('GitHub cannot page all comments — refusing a truncated reading');
       page = await next(after);
     }
   };
-  const unedited = (node: any): boolean => node.lastEditedAt === null && node.includesCreatedEdit === false;
+  const unedited = (node: GithubComment): boolean => node.lastEditedAt === null && node.includesCreatedEdit === false;
   return async (target: ForgeRepo, read: FactRead, token: string, endpoints: { rest: string; graphql: string }): Promise<PrFact[]> => {
     const conn = { ...endpoints, host: new URL(target.webBase).host, token };
     if (read.ticketOutputs && read.ticketOutputs?.length) {
@@ -212,15 +248,15 @@ export function githubFactReader({ log, owns, pushers: listedPushers, ...obs }: 
       for (let i = 0; i < read.ticketOutputs.length; i += GRAPHQL_BATCH) {
         const batch = read.ticketOutputs.slice(i, i + GRAPHQL_BATCH);
         const objects = batch.map((a, j) => `c${j}: object(oid: ${JSON.stringify(a.ref)}) { ... on Commit { ${fields()} } }`).join(' ');
-        const first = (await graphql(conn, `query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { ${objects} } }`, { owner, name })).data?.repository;
+        const first = (await graphql<GithubRepository<Record<`c${number}`, GithubCommentCommit | null>>>(conn, `query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { ${objects} } }`, { owner, name })).data?.repository;
         for (const [j, a] of batch.entries()) {
           const commit = first?.[`c${j}`];
           if (!commit || commit.oid !== a.ref) continue;
           const comments = await commentNodes(commit.comments, async (after) => {
-            const next = (await graphql(conn, query, { owner, name, sha: a.ref, after })).data?.repository?.object;
-            return next?.oid === a.ref ? next.comments : null;
+            const next = (await graphql<GithubRepository<{ object: GithubCommentCommit | null }>>(conn, query, { owner, name, sha: a.ref, after })).data?.repository?.object;
+            return next && next.oid === a.ref ? next.comments : null;
           });
-          const witnesses = comments.filter((c) => c?.body === TICKET_OUTPUT_WITNESS && unedited(c))
+          const witnesses = comments.filter((c) => c.body === TICKET_OUTPUT_WITNESS && unedited(c))
             .map((c) => ({ login: c.author?.login, userId: c.author?.databaseId, association: c.authorAssociation }));
           if ((await trustedOnly(conn, target.path, witnesses)).length) obs.outputEvidence?.push(a);
         }
@@ -235,63 +271,91 @@ export function githubFactReader({ log, owns, pushers: listedPushers, ...obs }: 
     // B-182 (R-BTN-138): the ids decide at every read. The forge's own ids for the repository
     // are compared with the entry's; a mismatch — a path re-created by someone else — fails the
     // sync naming the entry, so the re-created path never gains reach.
+    let defaultBranch: string | undefined;
     if (entry != null) {
-      const res = (await (await get(conn, `${conn.rest}/repos/${repo}`)).json()) as { id?: unknown; owner?: { id?: unknown } };
+      const res = (await (await get(conn, `${conn.rest}/repos/${repo}`)).json()) as { id?: unknown; owner?: { id?: unknown }; default_branch?: string };
+      defaultBranch = res.default_branch;
       const seen = `${String(res.id ?? '?')}/${String(res.owner?.id ?? '?')}`;
       if (String(res.id ?? '') !== entry.repo_id || String(res.owner?.id ?? '') !== entry.owner_id) {
         throw new Error(`GitHub (${entry.host}) reports ids ${seen} for ${repo}, but its code_repos entry holds ${entry.repo_id}/${entry.owner_id} — the path was re-created or moved; the sync fails rather than read the wrong repository (R-BTN-138: the ids decide)`);
       }
     }
     const listed = await list(conn, repo, tickets);
+    if (obs.outside && !entry && listed.some((pr) => pr.base?.ref != null)) {
+      defaultBranch = ((await (await get(conn, `${conn.rest}/repos/${repo}`)).json()) as { default_branch?: string }).default_branch;
+    }
     // Only a PR a live ticket owns needs its detail read; any other PR places no ticket and is
     // recorded from the list alone, so the requests a run makes grow with the live tickets, not
     // with the repository's history. A closed unmerged PR a live ticket owns is read too:
     // `create-pr` counts it as none (R-BTN-74), but `review-pr` concludes on it, and reads its
     // conclusion line from its comments.
-    const identity = (pr: any) => sameRepository(pr.head?.repo?.id, pr.base?.repo?.id) ||
-      (typeof pr.head?.repo?.node_id === 'string' && pr.head.repo.node_id !== '' && pr.head.repo.node_id === pr.base?.repo?.node_id);
     const owned = listed.filter((pr) => owns({ number: pr.number, head: pr.head.ref, repository: repo, sameRepository: identity(pr) }));
     const detail = new Map<number, Omit<PrFact, 'number' | 'head' | 'state' | 'repository'>>();
     // The owned PRs' detail, GRAPHQL_BATCH to a query (B-35): one request where REST took four a PR.
     for (let i = 0; i < owned.length; i += GRAPHQL_BATCH) {
       const batch = owned.slice(i, i + GRAPHQL_BATCH);
       const [owner, name] = repo.split('/');
-      const { data, checksRefused } = await graphql(conn, detailQuery(batch.map((pr) => pr.number)), { owner, name });
+      const { data, checksRefused } = await graphql<GithubRepository<Record<`p${number}`, GithubPrDetail | null>>>(conn, detailQuery(batch.map((pr) => pr.number)), { owner, name });
       if (checksRefused && !checksFromActions.has(repo.toLowerCase())) {
         checksFromActions.add(repo.toLowerCase());
         log(`baton: ${repo}: this token cannot read check runs (a fine-grained token holds no Checks) — its PRs' checks are their heads' workflow runs (B-226)`);
       }
       for (const pr of batch) detail.set(pr.number, await detailOf(conn, repo, pr, data?.repository?.[`p${pr.number}`]));
     }
-    return listed.map((pr) => {
+    return Promise.all(listed.map(async (pr) => {
       const state: PrFact['state'] = pr.merged_at ? 'merged' : pr.state === 'closed' ? 'closed' : 'open';
-      return { number: pr.number, head: pr.head.ref, state, ...(detail.get(pr.number) ?? { pushedAt: 0, checks: [], reviews: [] }), sameRepository: identity(pr), repository: repo, ...(typeof pr.html_url === 'string' ? { url: pr.html_url } : {}) };
-    });
+      const fact: PrFact = { number: pr.number, head: pr.head.ref, state, ...(detail.get(pr.number) ?? { pushedAt: 0, checks: [], reviews: [] }), sameRepository: identity(pr), repository: repo, ...(typeof pr.html_url === 'string' ? { url: pr.html_url } : {}) };
+      if (obs.outside) {
+        const mergedAt = Date.parse(pr.merged_at ?? '');
+        const mention = obs.mentionSince != null && mergedAt > obs.mentionSince && mergedAt <= obs.outside.observed_at;
+        const same = pr.head.repo != null && identity(pr);
+        const trusted = same && pr.base?.ref != null && pr.base.ref === defaultBranch && (detail.has(pr.number) || mention)
+          && (await trustedOnly(conn, repo, [{ login: pr.user?.login, userId: pr.user?.id, association: pr.author_association }])).length > 0;
+        Object.assign(fact, { pusher: trusted, author: pr.user?.login, headSha: pr.head.sha, base: pr.base?.ref, defaultBranch, mergeSha: trusted ? pr.merge_commit_sha : undefined,
+          mergedAt, title: pr.title, body: pr.body });
+        if (state === 'open' && trusted && obs.outside.runner_pushers?.length && fact.reviews.some((v) => verdictOf(v))) {
+          const ref = `refs/heads/${pr.head.ref}`;
+          const res = await get(conn, `${conn.rest}/repos/${repo}/activity?ref=${encodeURIComponent(ref)}&direction=desc&per_page=1`);
+          const [event] = (await res.json()) as { ref: string; before: string; after: string; timestamp: string; activity_type: string; actor?: GithubActor | null }[];
+          const actor = event?.actor?.login;
+          const at = Date.parse(event?.timestamp ?? '');
+          if (event?.ref === ref && event.after === fact.headSha && ['push', 'force_push', 'branch_creation', 'pr_merge', 'merge_queue_merge'].includes(event.activity_type)
+            && typeof actor === 'string' && /^[\w-]+(?:\[bot\])?$/.test(actor) && at <= obs.outside.observed_at) {
+            const changes = fact.reviews.some((v) => verdictOf(v) === 'changes' && v.submittedAt < at);
+            const latest = fact.reviews.some((v) => verdictOf(v) && v.submittedAt >= at && (!v.headSha || v.headSha === fact.headSha));
+            const hand = !obs.outside.runner_pushers.some((r) => r.toLowerCase() === actor.toLowerCase());
+            fact.headPush = { actor, at, changesWork: changes && !latest && hand
+              && pushChangesWork(conn, repo, defaultBranch!, event.before, event.after) };
+          }
+        }
+      }
+      return fact;
+    }));
   }
 
   /** One PR's facts from its GraphQL node, mapped exactly as the REST lists are; a connection
    *  whose first page overflows, or a head the batch read at another commit, is read over REST. */
-  async function detailOf(conn: { host: string; rest: string; graphql: string; token: string }, repo: string, pr: any, node: any): Promise<Omit<PrFact, 'number' | 'head' | 'state' | 'repository'>> {
+  async function detailOf(conn: { host: string; rest: string; graphql: string; token: string }, repo: string, pr: GithubPr, node: GithubPrDetail | null | undefined): Promise<Omit<PrFact, 'number' | 'head' | 'state' | 'repository'>> {
     if (node == null) throw new Error(`GitHub GraphQL (${repo}): no pull request #${pr.number}, though the list has it`);
     const head = node.head?.nodes?.[0]?.commit;
     const suites = head?.checkSuites;
-    const overflow = suites?.pageInfo?.hasNextPage || (suites?.nodes ?? []).some((cs: any) => cs?.checkRuns?.pageInfo?.hasNextPage);
+    const overflow = suites?.pageInfo?.hasNextPage || (suites?.nodes ?? []).some((cs) => cs?.checkRuns?.pageInfo?.hasNextPage);
     const checks = checksFromActions.has(repo.toLowerCase())
       ? await actionChecks(conn, repo, pr.head.sha)
       : head?.oid !== pr.head.sha || overflow
-      ? (await all<any>(conn, `/repos/${repo}/commits/${pr.head.sha}/check-runs`, (b) => b.check_runs)).map((c) => c.conclusion ?? null)
+      ? (await all<GithubCheck>(conn, `/repos/${repo}/commits/${pr.head.sha}/check-runs`, (b) => (b as { check_runs: GithubCheck[] }).check_runs)).map((c) => c.conclusion ?? null)
       // A run not yet completed has no conclusion: null, as the REST list gives it.
-      : (suites?.nodes ?? []).flatMap((cs: any) => cs?.checkRuns?.nodes ?? []).map((c: any) => (c.status === 'COMPLETED' && c.conclusion ? String(c.conclusion).toLowerCase() : null));
+      : (suites?.nodes ?? []).flatMap((cs) => cs?.checkRuns?.nodes ?? []).map((c) => (c.status === 'COMPLETED' && c.conclusion ? String(c.conclusion).toLowerCase() : null));
     // A push is read from its commits' own dates, never `updated_at`, which a comment moves.
     // B-110: the commits themselves too — sha, first parent, whether the tree changed, message —
     // for the run-tests gate's markers, which the station function counts only as the evidence
     // Baton recorded (a counted marker is no push; anything else is, whatever its message).
     type CommitNode = { oid: string; at: string; message: string; tree: string | null; parent: string | null; parentTree: string | null };
     const commitNodes: CommitNode[] = node.commits.pageInfo.hasNextPage
-      ? (await all<any>(conn, `/repos/${repo}/pulls/${pr.number}/commits`)).map((c: any) => ({
+      ? (await all<GithubCommit>(conn, `/repos/${repo}/pulls/${pr.number}/commits`)).map((c) => ({
         oid: c.sha, at: c.commit.committer.date, message: c.commit.message, tree: c.commit.tree?.sha ?? null, parent: c.parents?.[0]?.sha ?? null, parentTree: null,
       }))
-      : node.commits.nodes.map((c: any) => ({
+      : node.commits.nodes.map((c) => ({
         oid: c.commit.oid, at: c.commit.committedDate, message: c.commit.message, tree: c.commit.tree?.oid ?? null,
         parent: c.commit.parents?.nodes?.[0]?.oid ?? null, parentTree: c.commit.parents?.nodes?.[0]?.tree?.oid ?? null,
       }));
@@ -306,32 +370,31 @@ export function githubFactReader({ log, owns, pushers: listedPushers, ...obs }: 
     // immutable id is the owners' `pushers`' other way to count, consulted before any
     // collaborator read (the GraphQL mapping has no numeric id to carry; `idOf` reads it).
     const reviews = (await trustedOnly(conn, repo, node.reviews.pageInfo.hasNextPage
-      ? (await all<any>(conn, `/repos/${repo}/pulls/${pr.number}/reviews`)).map((r) => ({ login: r.user?.login, userId: r.user?.id, association: r.author_association, state: r.state, at: r.submitted_at, body: r.body }))
-      : node.reviews.nodes.map((r: any) => ({ login: r.author?.login, association: r.authorAssociation, state: r.state, at: r.submittedAt, body: r.body }))))
-      .map((r: any) => ({ author: r.login ?? '?', state: r.state, submittedAt: Date.parse(r.at), body: r.body ?? '' }));
+      ? (await all<GithubReview>(conn, `/repos/${repo}/pulls/${pr.number}/reviews`)).map((r) => ({ login: r.user?.login, userId: r.user?.id, association: r.author_association, state: r.state, at: r.submitted_at, body: r.body, url: r.html_url, headSha: r.commit_id }))
+      : node.reviews.nodes.map((r) => ({ login: r.author?.login, association: r.authorAssociation, state: r.state, at: r.submittedAt, body: r.body, url: r.url, headSha: r.commit?.oid }))))
+      .map((r) => ({ author: r.login ?? '?', state: r.state, submittedAt: Date.parse(r.at ?? ''), body: r.body ?? '', ...(obs.outside ? { url: r.url, headSha: r.headSha } : {}) }));
     const [owner, name] = repo.split('/');
     const query = `query($owner: String!, $name: String!, $number: Int!, $after: String!) { repository(owner: $owner, name: $name) { pullRequest(number: $number) { comments(first: 100, after: $after) { ${PR_COMMENTS} } } } }`;
-    const nodes = await commentNodes(node.comments, async (after) => (await graphql(conn, query, { owner, name, number: pr.number, after })).data?.repository?.pullRequest?.comments);
-    const verifiedComments = await trustedOnly(conn, repo, nodes.filter(Boolean).map((c) => ({ login: c.author?.login, userId: c.author?.databaseId, association: c.authorAssociation, at: c.createdAt, body: c.body, url: c.url, unedited: unedited(c) })));
+    const nodes = await commentNodes(node.comments, async (after) => (await graphql<GithubRepository<{ pullRequest: { comments: GithubComments } | null }>>(conn, query, { owner, name, number: pr.number, after })).data?.repository?.pullRequest?.comments);
+    const verifiedComments = await trustedOnly(conn, repo, nodes.map((c) => ({ login: c.author?.login, userId: c.author?.databaseId, association: c.authorAssociation, at: c.createdAt, body: c.body, url: c.url, unedited: unedited(c) })));
     for (const c of verifiedComments) {
       if (!c.unedited || typeof c.url !== 'string' || typeof c.body !== 'string') continue;
       const a = outputAttestation(c.body, c.url);
-      const same = sameRepository(pr.head?.repo?.id, pr.base?.repo?.id) ||
-         (typeof pr.head?.repo?.node_id === 'string' && pr.head.repo.node_id !== '' && pr.head.repo.node_id === pr.base?.repo?.node_id);
+      const same = identity(pr);
       if (a && obs.ownsOutput?.(a.ticket, { number: pr.number, head: pr.head.ref, repository: repo, sameRepository: same })) obs.outputEvidence?.push(a);
     }
-    const comments = verifiedComments.map((c: any) => ({ author: c.login ?? '?', state: 'COMMENTED' as const, submittedAt: Date.parse(c.at), body: c.body ?? '' }));
+    const comments = verifiedComments.map((c) => ({ author: c.login ?? '?', state: 'COMMENTED' as const, submittedAt: Date.parse(c.at), body: c.body ?? '', ...(obs.outside ? { url: c.url } : {}) }));
     return { pushedAt: Math.max(0, ...pushes), pushes, checks, reviews: [...reviews, ...comments], commits };
   }
 
   /** A repository's PRs. A named repository whose list GitHub refuses (403) or does not find
    *  (404) fails the whole sync — no partial reading — naming the tickets whose `repos:` name it;
    *  any other failure, as a timeout, a 5xx, a rate limit or the budget, is passed through as it is. */
-  async function list(conn: { host: string; rest: string; graphql: string; token: string }, repo: string, tickets: string[]): Promise<any[]> {
+  async function list(conn: { host: string; rest: string; graphql: string; token: string }, repo: string, tickets: string[]): Promise<GithubPr[]> {
     try {
       const author = process.env.BATON_PR_AUTHOR;
-      if (author) return await byAuthor(conn, repo, author);
-      return await all<any>(conn, `/repos/${repo}/pulls?state=all`);
+      if (author && !obs.outside) return await byAuthor(conn, repo, author);
+      return await all<GithubPr>(conn, `/repos/${repo}/pulls?state=all`);
     } catch (e) {
       const { status, limited } = e as { status?: number; limited?: boolean };
       if (!tickets.length || limited || (status !== 403 && status !== 404)) throw e;
@@ -342,23 +405,24 @@ export function githubFactReader({ log, owns, pushers: listedPushers, ...obs }: 
   /** `BATON_PR_AUTHOR`: only that login's PRs, for a repository whose full PR list is longer than
    *  the sync reads (MAX_PAGES). The leg agents open PRs as the operator, so a PR a ticket owns is
    *  among them. GraphQL search, 100 a request, mapped to the REST fields `repoFacts` reads. */
-  async function byAuthor(conn: { host: string; rest: string; graphql: string; token: string }, repo: string, author: string): Promise<any[]> {
+  async function byAuthor(conn: { host: string; rest: string; graphql: string; token: string }, repo: string, author: string): Promise<GithubPr[]> {
+    type Search = { search?: GithubConnection<{ number: number; url?: string; headRefName: string; headRefOid: string; headRepository?: { id: string } | null; baseRepository?: { id: string } | null; state: string; mergedAt: string | null } | null> & { issueCount: number } };
     const query = `query($q: String!, $after: String) { search(query: $q, type: ISSUE, first: 100, after: $after) {
       issueCount pageInfo { hasNextPage endCursor }
       nodes { ... on PullRequest { number url headRefName headRefOid headRepository { id } baseRepository { id } state mergedAt } } } }`;
     const [owner, name] = repo.split('/');
-    const out: any[] = [];
+    const out: GithubPr[] = [];
     let after: string | null = null;
     for (;;) {
-      const s: any = (await graphql(conn, query, { q: `repo:${repo} is:pr author:${author}`, after, owner, name })).data?.search;
+      const s: Search['search'] = (await graphql<Search>(conn, query, { q: `repo:${repo} is:pr author:${author}`, after, owner, name })).data?.search;
       // Search answers at most 1000 results: past that the reading would be truncated.
-      if ((s?.issueCount ?? 0) > 1000) throw new Error(`GitHub search (${repo}, author ${author}): ${s.issueCount} PRs, past search's 1000 — the sync will not post a truncated reading`);
+      if (s && s.issueCount > 1000) throw new Error(`GitHub search (${repo}, author ${author}): ${s.issueCount} PRs, past search's 1000 — the sync will not post a truncated reading`);
       for (const n of s?.nodes ?? []) {
         if (n?.number == null) continue;
         out.push({ number: n.number, html_url: n.url, head: { ref: n.headRefName, sha: n.headRefOid, repo: { node_id: n.headRepository?.id } }, base: { repo: { node_id: n.baseRepository?.id } }, state: n.state === 'OPEN' ? 'open' : 'closed', merged_at: n.mergedAt });
       }
       if (!s?.pageInfo?.hasNextPage) return out;
-      after = s.pageInfo.endCursor;
+      after = s.pageInfo.endCursor ?? null;
     }
   }
 }

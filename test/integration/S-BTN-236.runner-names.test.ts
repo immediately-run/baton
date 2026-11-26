@@ -3,7 +3,10 @@
 // storage and replies use runner names. An old spelling records the last time that runner used
 // one; disagreeing aliases are refused rather than guessed.
 import { beforeEach, describe, expect, it } from 'vitest';
-import { call, course, Git, hbBody, HOST, payload, register, rows, runnerCall, setClock, syncCall, TOKENS } from '../helpers';
+import {
+  call, course, Git, hbBody, HOST, payload, register, rows, runnerCall, setClock, syncCall, TOKENS,
+  seedRunnerGrant,
+} from '../helpers';
 
 const T0 = Date.parse('2026-11-18T12:00:00Z');
 const A = 'a'.repeat(40);
@@ -38,8 +41,7 @@ describe(`S-BTN-236 runner names (${HOST})`, () => {
   it('accepts runner=me and worker=me alike, recording the old query spelling', async () => {
     expect((await new Git().add('T-404').post()).status).toBe(200);
     const runner = await register('vm-a');
-    await rows(`INSERT INTO runner_grants (credential_id, repository_id, capabilities, granted_by, granted_at)
-                VALUES ('vm-a', 'docs', '["agent-venue"]', 'test', ?)`, T0);
+    await seedRunnerGrant({ credential_id: 'vm-a', repository_id: 'docs', capabilities: '["agent-venue"]', granted_by: 'test', granted_at: T0 });
     const current = await runnerCall('/v1/repositories/docs/tickets/T-404/blocks?runner=me', { secret: runner.secret });
     const legacy = await runnerCall('/v1/repositories/docs/tickets/T-404/blocks?worker=me', { secret: runner.secret });
     expect(current.status).toBe(200);

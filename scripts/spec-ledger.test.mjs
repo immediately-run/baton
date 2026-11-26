@@ -59,11 +59,33 @@ describe('spec ledger (R-BTN-30)', () => {
       'S-BTN-907 no longer needs a pending entry; remove it',
     ]);
     expect(ledgerProblems(ledger, new Set(), new Set(['S-BTN-908']), base)).toEqual([
-      'S-BTN-908 adds to the shrink-only pending list',
+      'S-BTN-908 adds to the pending list without a ticket; a new entry is { "id", "ticket" } naming the open ticket that builds it',
     ]);
     evidence[2][1] = "it('S-BTN-908 checks the result', () => {})";
     expect(ledgerProblems(ruleLedger(SPEC, evidence), new Set(), new Set(), base)).toEqual([]);
     expect(ruleLedger(SPEC, evidence).rules.get('R-BTN-1').tests).toEqual(['test/unit/one.test.ts']);
+  });
+
+  it('lets the pending list grow only by an entry naming an open ticket (owner ruling 2026-11-26)', () => {
+    const ledger = ruleLedger(SPEC, [['src/one.ts', 'R-BTN-1']]);
+    const base = new Set(['S-BTN-907']);
+    const open = new Set(['B-338']);
+    const tagged = pendingIds('["S-BTN-907", { "id": "S-BTN-908", "ticket": "B-338" }]');
+    expect(tagged).toEqual(new Map([['S-BTN-907', null], ['S-BTN-908', 'B-338']]));
+    expect(ledgerProblems(ledger, new Set(), tagged, base, open)).toEqual([]);
+    expect(ledgerProblems(ledger, new Set(), pendingIds('["S-BTN-907", "S-BTN-908"]'), base, open)).toEqual([
+      'S-BTN-908 adds to the pending list without a ticket; a new entry is { "id", "ticket" } naming the open ticket that builds it',
+    ]);
+    for (const ticket of ['B-1', 'B-9999']) { // a done ticket and a missing one are both absent from `open`
+      expect(ledgerProblems(ledger, new Set(), pendingIds(`["S-BTN-907", { "id": "S-BTN-908", "ticket": "${ticket}" }]`), base, open)).toEqual([
+        `S-BTN-908 adds to the pending list naming ${ticket}, which is not an open ticket in tickets/`,
+      ]);
+    }
+    // An entry already on the default branch keeps its place, tagged or not.
+    expect(ledgerProblems(ledger, new Set(), tagged, new Set(['S-BTN-907', 'S-BTN-908']))).toEqual([]);
+    for (const raw of ['[{ "id": "S-BTN-908" }]', '[{ "id": "S-BTN-908", "ticket": "B-338", "x": 1 }]', '["S-BTN-908", { "id": "S-BTN-908", "ticket": "B-338" }]']) {
+      expect(() => pendingIds(raw)).toThrow('unique scenario ids');
+    }
   });
 
   it('gives the same ledger before and after generated dashboard output appears', () => {

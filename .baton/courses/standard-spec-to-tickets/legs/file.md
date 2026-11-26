@@ -1,0 +1,49 @@
+# spec-to-tickets · file — commit the checked tickets as children
+
+You are running the `file` leg of the `spec-to-tickets` course. The ticket's file is
+`$BATON_TICKET_FILE`; it carries the checked drafts. When you finish, every draft is a
+ticket file on the board, a child of the request, and the request is closed. Baton's closing
+marker is written for you after you return; do not write it.
+
+> **How the stub runs you** — Baton's contract for the `agent_command` author: your command
+> line splits into words as `sh` would (quotes honoured, no substitutions) and executes
+> **without a shell**, with the ticket id, the leg and the checkout appended as arguments.
+> Stdin is never an open pipe: nothing to read, and a read ends at once. Stdout and stderr are
+> captured pipes, and the course reads stdout's last line. Your process's exit **is** your
+> completion: a harness that is a client of a background service must keep its session in
+> process (`opencode run --standalone`, or the equivalent) — a client that can exit before its
+> work ends leaves truncated output and an orphaned session posting to a claim that no longer
+> exists (B-84). Your completion is your exit **or your silence** (B-108): the stub stops waiting at the earliest of your exit, fifteen minutes of quiet on every activity signal it can see — your stdout, the wrapper’s log, the harness’s own store — and five hours of the leg, its ceiling; the stdout you left is judged as any exit’s is. A repository's `agent_wrapper` in `.baton/baton.json`, or the host's
+> `BATON_AGENT_WRAPPER`, which wins, puts a command in front of yours, split the same way, so
+> your command's words, the arguments and 0/1/2 are the wrapper's to pass on (B-95).
+
+## File them as checked
+
+File the set as `check` left it; do not re-decompose it. If a draft cannot be filed as written
+(it names something the spec no longer has), stop with an error naming it, so a person looks.
+If the request's `status:` is `withdrawn`, the owner decided against filing: file nothing,
+write nothing, and stop.
+
+For each draft, file a ticket with `$BATON_DIBBER` (the `dibber` your stub pins: run it exactly as that variable says, never another):
+`$BATON_DIBBER new --title "…" --body-file <the draft's body, in a file outside the checkout>`,
+with the options below. Never write a ticket file by hand.
+
+- **id** Dibber's: it takes the next number from Baton's sequence through `.dibber/config.json`'s
+  coordinator, never a scan (R-BTN-131). If it refuses because Baton gave no number, stop and say
+  so — never `--offline`, never an id of your own.
+- **parent** this ticket's id (`--parent`): every filed ticket is a child of the request.
+- **depends_on** (`--depends-on`) the drafts' dependencies, by their filed ids.
+- **order** (`--order`) the draft's order, so the board takes them in the spec's order.
+- **tags** (`--tags OP`) where the draft marks a person's ticket, so no agent claims it.
+- **course** (`--field course=<id>`) only when the draft names a course other than the
+  repository's `default_course` that the checkout's `.baton/baton.json` lists; never this course.
+- **The body** the draft's, verbatim, with its `### Trust` (every new input it adds, who may write it and how it is verified, or "no new input") and `### Invariants` (the rules it must not break, by id, and how the design keeps each) — write them if the draft lacks them — and ending in `## Status` with `_filed <today, YYYY-MM-DD>.`.
+
+Then add a `## file` section to the request naming each child, set the request's `status:` to `done`
+with `$BATON_DIBBER done <its id>`, and commit the children and the request together, with explicit paths, to the default branch.
+
+Your work lands under the ticket's own `## file` heading — write it if it is not there; the close checks it is.
+
+## Do not
+
+- Re-plan the set, edit the spec, or leave a draft unfiled.

@@ -1,6 +1,6 @@
 // B-244 extends S-BTN-47's retries queue and S-BTN-44's owner dispatch on both hosts.
 import { expect, it } from 'vitest';
-import { Git, course, cutover, keyCall, setAdminKeys, setClock, syncToken, tick, withCore } from '../helpers';
+import { Git, course, cutover, keyCall, seedUnblockedDispatchIn, setAdminKeys, setClock, syncToken, tick, withCore } from '../helpers';
 import { grantedRunner } from '../lib/fleet';
 import { makeKey } from '../lib/sshKeys';
 import { idleFixture } from '../lib/idleFixture';
@@ -16,7 +16,7 @@ it('reports the grant and retry gates, raises one idle dispatch, then claims aft
   expect({ code, message }).toEqual({ code: 'no-eligible-ticket', message: 'no ready ticket fits this runner' });
   expect(detail).toEqual({ repositories: [{ repository: 'docs', gates: [
     { gate: 'attempts-exhausted', count: 1, tickets: ['docs:RETRY'] },
-    { gate: 'grant-max-tier', limit: 'judgement', count: 1, tickets: ['docs:HIGH'] },
+    { gate: 'missing-capability', count: 1, tickets: ['docs:HIGH'], capabilities: ['human-operator'] },
   ] }] });
   expect((await w.call('/v1/runner/next', undefined, 'GET')).json.detail).toEqual(detail);
   expect((await take(3)).json.detail).toEqual(detail);
@@ -72,7 +72,7 @@ it('keeps the stale-skills refusal and queues the retries alert behind a full un
   const sent: Workflow[] = [];
   await withCore((c) => {
     c.dispatcher = async (wf) => { if (wf.kind === 'unblocked') sent.push(wf); return true; };
-    c.store.exec('INSERT INTO unblocked_dispatch (repository_id, pending_json, due_at) VALUES (?, ?, ?)', 'docs', JSON.stringify(batch), due);
+    seedUnblockedDispatchIn(c.store, { repository_id: 'docs', pending_json: JSON.stringify(batch), due_at: due });
   });
   expect(await take(3)).toMatchObject(refusal);
   await tick();
@@ -119,15 +119,15 @@ it('counts only granted repositories and caps ticket samples independently of th
     sync_workflow: '.github/workflows/baton-sync.yml', mirror_workflow: '.github/workflows/baton-mirror.yml' }));
   const privateToken = await syncToken({ repository: 'immediately-run/private', ref: 'refs/heads/main',
     job_workflow_ref: 'immediately-run/private/.github/workflows/baton-sync.yml@refs/heads/main' });
-  expect((await new Git(privateToken).add('SECRET', { tier: 'critical' }).post()).status).toBe(200);
+  expect((await new Git(privateToken).add('SECRET', { requires: ['human-operator'] }).post()).status).toBe(200);
   await cutover(start, 'private');
   const git = new Git();
-  for (let n = 1; n <= 7; n++) git.add(`HIGH-${n}`, { tier: 'critical' });
+  for (let n = 1; n <= 7; n++) git.add(`HIGH-${n}`, { requires: ['human-operator'] });
   expect((await git.post()).status).toBe(200);
   await cutover(start);
   const w = await grantedRunner(owner, 'docs', 'scoped', ['agent-venue']);
-  expect((await w.beat({ tier_ceiling: 'judgement' })).status).toBe(200);
+  expect((await w.beat()).status).toBe(200);
   const refusal = await w.call('/v1/runner/next', undefined, 'GET');
-  expect(refusal.json.detail).toEqual({ repositories: [{ repository: 'docs', gates: [{ gate: 'declared-tier-ceiling',
-    limit: 'judgement', count: 7, tickets: [1, 2, 3, 4, 5].map((n) => `docs:HIGH-${n}`) }] }] });
+  expect(refusal.json.detail).toEqual({ repositories: [{ repository: 'docs', gates: [{ gate: 'missing-capability',
+    count: 7, tickets: [1, 2, 3, 4, 5].map((n) => `docs:HIGH-${n}`), capabilities: ['human-operator'] }] }] });
 });

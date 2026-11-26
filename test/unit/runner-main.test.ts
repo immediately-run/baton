@@ -40,11 +40,11 @@ describe('parseRunArgs', () => {
     expect(legacy.session).not.toBe('old');
     expect(legacy.hostname).not.toBe('vm-old');
     // B-86: no --capabilities is null, never a default: the grant's capabilities are declared.
-    expect(a).toMatchObject({ harness: { name: 'opencode' }, home: '/h', url: 'https://b', session: 's', repository: 'docs', hostname: 'vm-x', tier: 'critical', capabilities: null, testHarness: false, verbose: false });
+    expect(a).toMatchObject({ harness: { name: 'opencode' }, home: '/h', url: 'https://b', session: 's', repository: 'docs', hostname: 'vm-x', capabilities: null, testHarness: false, verbose: false });
   });
   it('takes its flags, refusing the unknown and the malformed', () => {
-    const a = parseRunArgs(['--harness', 'claude-code', '--home', '/x', '--url', 'https://u', '--session', 's2', '--repository', 'ops', '--tier', 'routine', '--capabilities', 'a,b', '--beat-every', '5000'], {});
-    expect(a).toMatchObject({ harness: { name: 'claude-code' }, home: '/x', url: 'https://u', session: 's2', repository: 'ops', tier: 'routine', capabilities: ['a', 'b'], beatEvery: 5000 });
+    const a = parseRunArgs(['--harness', 'claude-code', '--home', '/x', '--url', 'https://u', '--session', 's2', '--repository', 'ops', '--capabilities', 'a,b', '--beat-every', '5000'], {});
+    expect(a).toMatchObject({ harness: { name: 'claude-code' }, home: '/x', url: 'https://u', session: 's2', repository: 'ops', capabilities: ['a', 'b'], beatEvery: 5000 });
     expect(() => parseRunArgs(['--nope'], {})).toThrow('not a flag of baton run');
     expect(() => parseRunArgs(['--harness', 'vim'], {})).toThrow('opencode or claude-code');
     expect(() => parseRunArgs(['--beat-every', '10'], {})).toThrow('at least 50 ms');
@@ -346,7 +346,7 @@ describe('the grant\'s declaration (B-86)', () => {
 });
 
 describe('loadCourse (R-BTN-72)', () => {
-  it('extracts each leg\'s script and never a repository\'s <leg>.run.mjs override, which the script loads itself (B-33)', () => {
+  it('extracts each leg\'s script and never a repository\'s <leg>.run.mjs override, which the script loads itself (B-33)', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'baton-main-'));
     try {
       const git = (...args: string[]) => execFileSync('git', ['-C', dir, ...args], { encoding: 'utf8' }).trim();
@@ -358,7 +358,7 @@ describe('loadCourse (R-BTN-72)', () => {
       writeFileSync(join(legs, 'go.run.mjs'), 'export async function run(ctx, standard) { return standard(ctx); }\n');
       git('add', '-A');
       git('-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-qm', 'relay');
-      const loaded = loadCourse(dir, git('rev-parse', 'HEAD'), 'relay');
+      const loaded = await loadCourse(dir, git('rev-parse', 'HEAD'), 'relay');
       expect([...loaded.scripts.keys()]).toEqual(['go']);
       dropCourse(loaded.scratch);
     } finally {

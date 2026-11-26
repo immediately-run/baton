@@ -16,7 +16,11 @@
 // Runs on both hosts.
 import { describe, it, expect, beforeEach } from 'vitest';
 import roadmapPr from '../fixtures/courses/roadmap-pr/course.json';
-import { adminSession, claimItem, course, cutover, Git, keyCall, ORIGIN, placed, register, rows, sessionCall, setAdminKeys, setClock, withCore } from '../helpers';
+import {
+  adminSession, claimItem, course, cutover, Git, keyCall, ORIGIN, placed, register, rows, sessionCall,
+  setAdminKeys, setClock, withCore, setClosedTicketTime, setRunnerLastActivity, setTicketBlockedSince, seedClaim,
+  seedCondition, seedTicketBlock, seedTicketOverride,
+} from '../helpers';
 import { makeKey, signedRequest, type TestKey } from '../lib/sshKeys';
 import { call as hostCall } from '#host';
 
@@ -62,7 +66,7 @@ beforeEach(async () => {
 /** The fixture repository of the scenario; returns the runners and claims it made. */
 async function fixture() {
   git.add('R', { rank: 1 });
-  git.add('K', { rank: 2, tier: 'critical' });
+  git.add('K', { rank: 2 }, placed('filed', [], [['implement', 'ready']], { bars: { implement: ['family:test'] } }));
   git.add('N', { rank: 12, requires: ['real-iphone'] });
   git.add('RUN1', { rank: 3 });
   git.add('RUN2', { rank: 4 });
@@ -70,36 +74,42 @@ async function fixture() {
   git.add('B', { rank: 6 });
   git.add('BO', { rank: 7 });
   git.add('U', { rank: 8 });
-  git.add('S', { rank: 9, tier: 'critical' }, placed('pr-open', [['implement', 'pr-open']], [['review', 'waiting', 'ci']]));
+  git.add('S', { rank: 9 }, placed('pr-open', [['implement', 'pr-open']], [['review', 'waiting', 'ci']]));
   git.add('P', { rank: 10, question: { id: 'q-1', severity: 'high', options: [{ id: 'ship', reached: 'adjudicated' }] } }, placed('reviewed', REVIEWED, [['decide', 'ready']]));
   git.add('C', { rank: 11 });
   expect((await git.post()).status).toBe(200);
   git.close('C', 'done');
   expect((await git.post()).status).toBe(200);
 
-  // Every runner's ceiling is `routine`: none may take the critical K.
-  const a = await register('vm-a', { tier_ceiling: 'routine' });
-  const b = await register('vm-b', { tier_ceiling: 'routine' });
-  const idle = await register('mac', { tier_ceiling: 'routine' });
+  // Every runner carries a tag barred on K's ready leg.
+  const a = await register('vm-a', { tags: ['family:test'] });
+  const b = await register('vm-b', { tags: ['family:test'] });
+  const idle = await register('mac', { tags: ['family:test'] });
   const run1 = await claimItem('vm-a', a.secret, { ticket_id: 'docs:RUN1' });
   const run2 = await claimItem('vm-b', b.secret, { ticket_id: 'docs:RUN2' });
   expect([run1.status, run2.status]).toEqual([200, 200]);
   // RUN1's runner is alive and silent for three hours: stalled. RUN2's leg waits on a condition.
-  await rows('UPDATE runners SET last_activity_at = ? WHERE id = ?', T0 - 3 * HOUR, a.id);
-  await rows(`INSERT INTO conditions (repository_id, ticket_id, claim_id, run_id, leg, type, disposition, severity, restarts_json, raised_at, outcome)
-              VALUES ('docs', 'docs:RUN2', ?, 'r_1', 'implement', 'x.wait', 'interrupt', 'normal', '{}', ?, 'open')`, run2.json.claim_id, T0);
+  await setRunnerLastActivity(a.id, T0 - 3 * HOUR);
+  await seedCondition({
+    repository_id: 'docs', ticket_id: 'docs:RUN2', claim_id: run2.json.claim_id, run_id: 'r_1', leg: 'implement',
+    type: 'x.wait', disposition: 'interrupt', severity: 'normal', restarts_json: '{}', raised_at: T0,
+    outcome: 'open',
+  });
   const waits = (await rows<{ id: number }>(`SELECT id FROM conditions WHERE ticket_id = 'docs:RUN2'`))[0].id;
   // HB is held by the owner and blocked on another ticket; B is blocked alone.
   const hold = await sessionCall(cookie, `/v1/ui/overrides/${encodeURIComponent('docs:HB')}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ hold: true }) });
   expect(hold.status).toBe(200);
   for (const t of ['docs:HB', 'docs:B']) {
-    await rows(`INSERT INTO ticket_blocks (repository_id, ticket_id, leg, kind, ref, since) VALUES ('docs', ?, '', 'ticket', 'docs:R', ?)`, t, T0 - HOUR);
-    await rows('UPDATE tickets SET blocked_since = ? WHERE id = ?', T0 - HOUR, t);
+    await seedTicketBlock({ repository_id: 'docs', ticket_id: t, leg: '', kind: 'ticket', ref: 'docs:R', since: T0 - HOUR });
+    await setTicketBlockedSince(t, T0 - HOUR);
   }
   // BO backs off for an hour; U's completion is not confirmed.
-  await rows(`INSERT INTO ticket_overrides (ticket_id, expedite, hold, hold_reason, retry_after, set_by, set_at) VALUES ('docs:BO', 0, 0, NULL, ?, 'baton', ?)`, T0 + HOUR, T0);
-  await rows(`INSERT INTO claims (ticket_id, runner_id, request_id, nonce, snapshot_sha, claimed_at, status, ended_at, end_reason, ended_at_sha)
-              VALUES ('docs:U', ?, 'seed:U', 'abc123', '', ?, 'completed', ?, 'done', ?)`, idle.id, T0 - HOUR, T0 - 60_000, 'c'.repeat(40));
+  await seedTicketOverride({ ticket_id: 'docs:BO', expedite: 0, hold: 0, hold_reason: null, retry_after: T0 + HOUR, set_by: 'baton', set_at: T0 });
+  await seedClaim({
+    ticket_id: 'docs:U', runner_id: idle.id, request_id: 'seed:U', nonce: 'abc123', snapshot_sha: '',
+    claimed_at: T0 - HOUR, status: 'completed', ended_at: T0 - 60_000, end_reason: 'done',
+    ended_at_sha: 'c'.repeat(40),
+  });
   return { a, b, idle, run1: run1.json.claim_id as number, run2: run2.json.claim_id as number, waits };
 }
 
@@ -126,8 +136,8 @@ describe('S-BTN-260 the tickets list (B-194)', () => {
     expect(state('C')).toEqual(['closed', []]);
 
     const r = byId(answer, 'R');
-    expect(Object.keys(r).sort()).toEqual(['course', 'detail', 'eligible_runners', 'expedite', 'failed_rule', 'order', 'parent', 'position', 'reasons', 'requires', 'requires_unmet', 'state', 'tags', 'ticket_id', 'tier', 'title']);
-    expect([r.title, r.course, r.tier, r.position]).toEqual(['R — a fixture ticket', 'roadmap-pr', 'routine', { station: 'filed', path_len: 0, next_leg: 'implement' }]);
+    expect(Object.keys(r).sort()).toEqual(['course', 'detail', 'eligible_runners', 'expedite', 'failed_rule', 'order', 'parent', 'position', 'reasons', 'requires', 'requires_unmet', 'state', 'tags', 'ticket_id', 'title']);
+    expect([r.title, r.course, r.position]).toEqual(['R — a fixture ticket', 'roadmap-pr', { station: 'filed', path_len: 0, next_leg: 'implement' }]);
 
     const run1 = byId(answer, 'RUN1').detail;
     expect(run1).toMatchObject({ claim_id: f.run1, runner_id: f.a.id, hostname: 'vm-a', session_name: 's-vm-a', leg: 'implement', since: T0, alive: true, stalled: true, condition_wait: null, last_activity_at: T0 - 3 * HOUR });
@@ -154,7 +164,7 @@ describe('S-BTN-260 the tickets list (B-194)', () => {
     expect(ids(answer).slice(0, 2)).toEqual((board.ready as Row[]).map((t) => t.local_id).filter((id) => id === 'R' || id === 'K'));
 
     // A closure older than a day is no longer listed.
-    await rows(`UPDATE closed_tickets SET closed_at = ? WHERE ticket_id = 'docs:C'`, T0 - 25 * HOUR);
+    await setClosedTicketTime('docs:C', T0 - 25 * HOUR);
     const later = await tickets();
     expect(ids(later)).not.toContain('C');
     expect(later.counts.closed).toBe(0);
@@ -168,7 +178,7 @@ describe('S-BTN-260 the tickets list (B-194)', () => {
     expect(r.failed_rule).toBeNull();
     expect(r.eligible_runners).toContainEqual({ runner_id: f.idle.id, hostname: 'owner-mac', session_name: 's-mac' });
     const k = byId(answer, 'K');
-    expect([k.eligible_runners, k.failed_rule]).toEqual([[], 'above-tier-ceiling']);
+    expect([k.eligible_runners, k.failed_rule]).toEqual([[], 'barred-tag']);
     // A row that is not ready carries neither field.
     expect('eligible_runners' in byId(await tickets(), 'HB')).toBe(false);
     // With no live runner at all the list is empty and the word says so.
@@ -177,7 +187,7 @@ describe('S-BTN-260 the tickets list (B-194)', () => {
     expect([none.eligible_runners, none.failed_rule]).toEqual([[], 'no-runner']);
   });
 
-  it('filters by state word, tab, text and tier; counts ignore the filters; a bad query is refused', async () => {
+  it('filters by state word, tab, text; counts ignore the filters; a bad query is refused', async () => {
     await fixture();
     const all = await tickets();
     const blocked = await tickets('?state=blocked');
@@ -192,17 +202,10 @@ describe('S-BTN-260 the tickets list (B-194)', () => {
     expect(ids(await tickets('?q=run'))).toEqual(['RUN1', 'RUN2']);
     expect(ids(await tickets(`?q=${encodeURIComponent('BO — a fixture')}`))).toEqual(['BO']);
     expect(ids(await tickets(`?q=${encodeURIComponent('%')}`))).toEqual([]);
-    // `tier`: a ceiling — the critical ticket is above `routine`; a row with no ticket fits none.
-    const routine = await tickets('?tier=routine');
-    expect(ids(routine)).not.toContain('S');
-    expect(ids(routine)).not.toContain('K');
-    expect(ids(routine)).not.toContain('C');
-    expect(ids(routine)).toContain('R');
-    expect(ids(await tickets('?tier=critical'))).toContain('S');
-    expect(routine.counts).toEqual(all.counts);
-    expect(ids(await tickets('?state=blocked&q=b&tier=routine')).sort()).toEqual(['B', 'BO', 'HB']);
+    expect(ids(await tickets('?tier=nonsense'))).toEqual(ids(all));
+    expect(ids(await tickets('?state=blocked&q=b')).sort()).toEqual(['B', 'BO', 'HB']);
 
-    for (const bad of ['?state=nope', '?tier=zzz', '?bogus=1', '?q=', '?cursor=garbage']) {
+    for (const bad of ['?state=nope', '?bogus=1', '?q=', '?cursor=garbage']) {
       const res = await get(`/v1/repositories/docs/tickets${bad}`);
       expect([bad, res.status, res.json.code]).toEqual([bad, 400, 'invalid-params']);
     }

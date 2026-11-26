@@ -31,7 +31,7 @@ export function declarationFrom(held: string[]): string[] {
 }
 
 type SidecarOptions = Pick<RunnerOptions, 'api' | 'apiFor' | 'stateFile' | 'hostname' | 'session' |
-  'harness' | 'activityPaths' | 'capabilities' | 'capabilityChecks' | 'tierCeiling' | 'profile' | 'testHarness' | 'courses' | 'readCourses' | 'repository' | 'legNeeds'> & {
+  'harness' | 'activityPaths' | 'capabilities' | 'capabilityChecks' | 'profile' | 'testHarness' | 'courses' | 'readCourses' | 'repository' | 'legNeeds'> & {
   beatEvery: number;
   concurrency: number;
   now: () => number;
@@ -210,7 +210,9 @@ export class Sidecar {
   private declaringList(): string[] {
     const base = (this.declared ?? this.o.capabilities ?? []).filter((name) => this.o.capabilityChecks?.passes(name) ?? true);
     const locks = this.locks;
-    return locks ? base.filter((c) => !locks.manages(c) || locks.holds(c)) : base;
+    const held = locks ? base.filter((c) => !locks.manages(c) || locks.holds(c)) : base;
+    return this.courses().some((c) => c.course === 'create-pr' && c.version >= 4)
+      ? [...new Set([...held, 'runner:claim-evidence'])] : held;
   }
 
   private async beatOnce(): Promise<void> {
@@ -242,7 +244,7 @@ export class Sidecar {
     const courses = this.courses();
     const body: Record<string, unknown> = {
       hostname: this.o.hostname, session_name: this.o.session, harness: this.o.harness, kind: 'vm',
-      capabilities: declaring, tier_ceiling: this.o.tierCeiling ?? 'critical',
+      capabilities: declaring,
       // B-253 (R-BTN-72): the runner's own statement about itself, opaque — the CLI's pinning
       // under `cli`, on every beat.
       ...(this.o.profile ? { profile: this.o.profile } : {}),
@@ -303,7 +305,7 @@ export class Sidecar {
       if (this.pendingEnds.size) await this.retryEnd();
     } catch (e) {
       appendFileSync(this.state.spool, `${[...spool.transcripts, ...leftover].map((t) => JSON.stringify(t)).join('\n')}\n`);
-      rmSync(spool.taken, { force: true }); // back in the spool; the taken copy is spent
+      for (const path of spool.taken) rmSync(path, { force: true }); // back in the spool
       throw e;
     }
     let answer: BeatAnswer;
@@ -316,7 +318,7 @@ export class Sidecar {
     } catch (e) {
       // The transcripts never landed: back to the spool for the next beat.
       appendFileSync(this.state.spool, `${[...spool.transcripts, ...leftover].map((t) => JSON.stringify(t)).join('\n')}\n`);
-      rmSync(spool.taken, { force: true }); // back in the spool; the taken copy is spent
+      for (const path of spool.taken) rmSync(path, { force: true }); // back in the spool
       if (e instanceof BatonRefusal && ['session-taken', 'runner-reaped', 'worker-reaped', 'forbidden'].includes(e.code)) {
         // §6.3: a refused heartbeat marks the lease lost exactly as a missed timeout does; a
         // reaped runner re-keys on the beat after (R-BTN-14).
@@ -344,7 +346,7 @@ export class Sidecar {
       }
       throw e;
     }
-    rmSync(spool.taken, { force: true });
+    for (const path of spool.taken) rmSync(path, { force: true });
     return { answer, sentAt };
   }
 
@@ -614,18 +616,20 @@ export class Sidecar {
    * there into transcript pointers and activity rows. Overflow beyond a call's bound carries to
    * the next beat; only what is neither shape is dropped, loudly. The renamed file lives until
    * the beat landed (the caller removes it), so nothing is lost to a dropped request. */
-  private takeSpool(): { transcripts: unknown[]; overflowTranscripts: unknown[]; activities: unknown[]; overflowActivities: unknown[]; taken: string } {
-    const taken = `${this.state.spool}.taken`;
-    let text: string;
-    try {
-      renameSync(this.state.spool, taken);
-      text = readFileSync(taken, 'utf8');
-    } catch {
-      return { transcripts: [], overflowTranscripts: [], activities: [], overflowActivities: [], taken };
+  private takeSpool(): { transcripts: unknown[]; overflowTranscripts: unknown[]; activities: unknown[]; overflowActivities: unknown[]; taken: string[] } {
+    const taken: string[] = [];
+    const chunks: string[] = [];
+    for (const source of [this.state.spool, `${this.state.view}.spool.jsonl`]) {
+      const path = `${source}.taken`;
+      try {
+        renameSync(source, path);
+        chunks.push(readFileSync(path, 'utf8'));
+        taken.push(path);
+      } catch { /* no spool from this source on this beat */ }
     }
     const transcripts: unknown[] = [];
     const activities: unknown[] = [];
-    for (const line of text.split('\n')) {
+    for (const line of chunks.join('\n').split('\n')) {
       if (!line) continue;
       try {
         const parsed = JSON.parse(line) as Record<string, unknown>;

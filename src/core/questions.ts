@@ -282,6 +282,7 @@ export class Questions {
     if (!g || leg == null || !def?.person) {
       return bad(value.leg ? `the answer names ${value.leg}, which is not a person leg of ${where.course}` : `${id} has no queued leg to answer`);
     }
+    if (who.by === 'sync' && def.answerSource === 'person') return aside('this leg requires an answer directly from a person');
     const stored = this.rows<QuestionRow>('SELECT * FROM ticket_questions WHERE ticket_id = ?', id)[0] ?? null;
     // The row holds one ask at a time; its answer closes the ask it names. A row closed over a
     // previous leg does not close this one — the ticket queued this leg after that answer.
@@ -445,15 +446,15 @@ export class Questions {
     }
     // The legs leaving the outcome it reached, in the file's order: the ticket waits at the
     // station, `next_source: baton` (R-BTN-83), and the next snapshot places it properly.
-    const next = [...g.legs.entries()].filter(([, l]) => l.from.includes(option.reached)).map(([name]) => name);
+    const next = [...g.legs.entries()].filter(([, l]) => !l.arrives && !l.reconciles && l.from.includes(option.reached)).map(([name]) => name);
     // §6.4: the expiry instant is set when the person leg becomes the queued leg — a Baton move
     // is one of the ways it becomes queued ("at a route that queues it", R-BTN-83), so a settle
     // that queues another person leg with `expires` arms its clock itself, counting from this
     // moment; any other queued leg has none.
     const nextDef = next[0] != null ? g.legs.get(next[0]) : undefined;
     const expiresAt = nextDef?.person && nextDef.expires != null ? now + nextDef.expires.afterS * 1000 : null;
-    this.exec(`UPDATE ticket_stations SET station = ?, path = ?, path_len = ?, to_end = ?, next_leg = ?, next_source = 'baton', person_expires_at = ?
-               WHERE ticket_id = ?`, option.reached, JSON.stringify(path), path.length, g.toEnd.get(option.reached) ?? 0, next[0] ?? null, expiresAt, id);
+    this.exec(`UPDATE ticket_stations SET station = ?, path = ?, path_len = ?, to_end = ?, next_leg = ?, next_source = 'baton', person_expires_at = ?, changed_at = ?
+               WHERE ticket_id = ?`, option.reached, JSON.stringify(path), path.length, g.toEnd.get(option.reached) ?? 0, next[0] ?? null, expiresAt, now, id);
     this.exec('DELETE FROM ticket_next_legs WHERE ticket_id = ?', id);
     for (const name of next) {
       const wait = ticketInputs(this.c.store, id, g, name).wait;
@@ -479,6 +480,7 @@ export class Questions {
       this.c.history.record(id, { kind: 'fact-arrival', leg, reached: option.reached, next_leg: next[0] ?? null, detail: { option: option.id, answered_by: meta.by, ...(meta.ref ? { ref: meta.ref } : {}) } });
       this.c.history.record(id, { kind: 'question-answered', leg, detail: { option: option.id, answered_by: meta.by } });
     }
+    if (next[0] === leg) this.exec('DELETE FROM ticket_questions WHERE ticket_id = ?', id);
     if (next.length || g.ends.has(option.reached)) this.c.closeMissingNext(id, now);
     this.c.queued(id);
     this.c.reevaluate(id);

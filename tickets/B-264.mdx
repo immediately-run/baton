@@ -56,8 +56,8 @@ The spec is the authority; where this list and a rule differ, the rule wins.
 5. **The `out-of-course` finding (§12.9, R-BTN-73).** Everything its bullet says: the paths
    judged by the floor's outright globs with R-BTN-184's match grammar; accounting only by a
    record naming the delivery's head, for a ticket whose scope covers the repository, in
-   either order — a trusted leg's `ended_at_sha` from a runner granted `trusted-runner` on the
-   pushed repository, or a `pr-merged` arrival from the fact reader that repository's policy
+   either order — a trusted leg's `ended_at_sha` from a runner ~~granted `trusted-runner` on the
+   pushed repository~~ whose grant on the pushed repository admits the capability that leg requires (R-BTN-182), or a `pr-merged` arrival from the fact reader that repository's policy
    names; one finding per head, open or closed; the truncated delivery; what the row stores
    (sixteen paths and a count, the commit ids); `resolved_by` `baton`; an owner's resolve
    refused `not-found` until listed; the 15 minutes from `raised_at` by `this.now` at the
@@ -88,7 +88,7 @@ The spec is the authority; where this list and a rule differ, the rule wins.
   its own push names only by changing them, which is what the finding reports.
 - **`pr-merged` arrivals and a trusted leg's reported end**: written by the fact reader's
   `service:` key the owner named (R-BTN-192) and by a trusted runner's claim (R-BTN-182); a
-  `sync`-written arrival accounts for nothing. Only a runner granted `trusted-runner` on the pushed repository, and the fact reader its
+  `sync`-written arrival accounts for nothing. Only a runner ~~granted `trusted-runner`~~ whose grant on the pushed repository admits a trusted leg's capability, and the fact reader its
   own policy names, account for its pushes: another home's trusted runner does not. A
   compromised fact reader or merge runner of the repository can account a finding away; that
   is inside §12.8's
@@ -118,3 +118,7 @@ _(2026-11-20: the spec simplification of 2026-11-19 (baton#299; `spec/BATON_SPEC
 _(2026-11-20: the spec simplification of 2026-11-19 (baton#299; `spec/BATON_SPEC_HISTORY.md`, that date) moved the unbuilt parts of the design this ticket builds out of the section files, with their rule ids, to proposal pages: the policy's dry run, the floor's entries and glob grammar, and the `out-of-course` finding are parts 1, 9 and 12 of [the security proposal](../spec/proposals/security.md). S-BTN-239 and S-BTN-240 are no longer rows of the verification section: they are in [the proposals' scenarios](../spec/proposals/scenarios.md), under "The repository policy's enforcement". Each rule keeps its id and a line in its section, which links the page. The pull request that builds this ticket moves the rules it builds back into the section files, and the scenarios and gates it makes pass back into [the verification section](../spec/BATON_SPEC/15-verification.md#sec-15), in the same change. The plan above is otherwise as the earlier note of this day leaves it.)_
 
 _(2026-11-20: rules re-read: R-BTN-188, R-BTN-107)_
+
+_(2026-11-24: B-189's spec PR (`spec/BATON_SPEC_HISTORY.md`, the entry of 2026-11-24), on the owner's rulings of 2026-11-09 and 2026-11-24 (runners trusted, legs not) retires the trusted-runner grant role: a trusted leg is routed by a capability its course requires, which the owner admits only on the grants of runners whose host holds its credential (R-BTN-180, R-BTN-182); [the security proposal](../spec/proposals/security.md), part 12, accounts by that grant. Items 5's and Trust's role clauses are rewritten accordingly.)_
+
+_(2026-11-24: rules re-read: R-BTN-180, R-BTN-182)_

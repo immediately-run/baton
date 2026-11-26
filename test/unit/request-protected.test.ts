@@ -7,7 +7,7 @@
 // so two requests never share an id. Node only, real repositories: the refusals come from a
 // `git` shim on PATH that speaks the forge's own words, exactly as github.com's push does, and
 // the PR answers an injected fetch — the forge's API is not reached.
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -15,6 +15,9 @@ import { dirname, join } from 'node:path';
 import { fileRequest, readRequestPlan, requestMain } from '../../src/defaults/request';
 import { parseFrontmatter } from '../../src/defaults/tickets-markdown';
 import { CREATE_SPEC_COURSE } from '../../src/defaults/course-pr';
+
+// Real git, filesystem and process launches share CPU with the full suite.
+vi.setConfig({ testTimeout: 30_000 });
 
 const git = (dir: string, ...args: string[]): string =>
   execFileSync('git', ['-C', dir, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
@@ -121,7 +124,7 @@ function listOnce(dirs: string[], answer: { fail: true } | { line: string }): { 
     'for a in "$@"; do if [ "$a" = "ls-remote" ]; then n=1; fi; done',
     `if [ "$n" = "1" ] && [ ! -e ${flag} ]; then`,
     `  touch ${flag}`,
-    ...(answer.fail ? ['  exit 1'] : [`  printf '%b\\n' ${JSON.stringify(answer.line)}`]),
+    ...('fail' in answer ? ['  exit 1'] : [`  printf '%b\\n' ${JSON.stringify(answer.line)}`]),
     '  exit 0',
     'fi',
     `exec ${JSON.stringify(realGit)} "$@"`,

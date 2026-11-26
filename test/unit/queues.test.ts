@@ -5,7 +5,10 @@
 // the leg stays over.
 import { describe, it, expect, beforeEach } from 'vitest';
 import roadmapPr from '../fixtures/courses/roadmap-pr/course.json';
-import { Git, adminSession, advance, beat, claimItem, course, cutover, endClaim, keyCall, placed, refresh, register, rows, sessionCall, setAdminKeys, setClock, withCore } from '../helpers';
+import {
+  Git, adminSession, advance, beat, claimItem, course, cutover, endClaim, keyCall, placed, refresh, register,
+  rows, sessionCall, setAdminKeys, setClock, withCore, seedLegQueue,
+} from '../helpers';
 import { makeKey, type TestKey } from '../lib/sshKeys';
 
 const T0 = Date.parse('2026-10-20T09:00:00Z');
@@ -159,7 +162,7 @@ describe('R-BTN-79: the bound, as a warning', () => {
   });
 
   it('a course no longer in the registry takes its queues and their notices with it (1-A-3)', async () => {
-    await rows(`INSERT INTO leg_queues (repository_id, course_id, leg, depth, max_queue) VALUES ('docs', 'gone', 'work', 0, 1)`);
+    await seedLegQueue({ repository_id: 'docs', course_id: 'gone', leg: 'work', depth: 0, max_queue: 1 });
     await rows(`INSERT INTO notices (id, credential_id, repository_id, ticket_id, kind, ref, state, attempts, not_before, payload_json, updated_at, created_at)
                 VALUES ('${'e'.repeat(32)}', ?, 'docs', NULL, 'queue-over', 'gone:work', 'queued', 0, 0, '{}', 0, 0)`, cli.fingerprint);
     expect((await git.post()).status).toBe(200);

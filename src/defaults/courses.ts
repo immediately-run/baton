@@ -60,6 +60,8 @@ export interface LegStub {
   /** B-110: the deterministic test gate — no agent runs; the stub itself executes the course's
    *  `test_script` on the PR's head and the close pushes the branch's `Baton-Tests` marker. */
   tests?: true;
+  /** Archive in close, from Baton's recorded answer and delivery evidence, without an agent. */
+  archive?: true;
   /** B-231: a leg that answers the gate's red — run from `pr-open` or `fixed` — must push. The
    *  stub reads the ticket's PR branch heads before and after the agent; unchanged, it fails the
    *  leg rather than report a fix of a tree the gate already tested red. */
@@ -227,7 +229,8 @@ const VERDICT: Ask = { name: 'verdict', values: ['approve', 'changes'] };
 
 const CREATE_PR: BuiltIn = {
   id: 'create-pr',
-  version: 2,
+  // 5: B-311's reconcile leg (min_runner_version 3).
+  version: 5,
   summary: 'implement a ticket in a PR, gate every review round behind its tests, review it in up to three blind rounds, fix, hand the third round\'s blockers to the owner, merge',
   course: CREATE_PR_COURSE,
   reads: 'prs',
@@ -262,10 +265,10 @@ const CREATE_PR: BuiltIn = {
     // (`baton owner resolve … merge|owner|round`). No agent reproduces anything, so no runner is
     // offered the leg: the position below is what a holder would report if one ever ran it by hand.
     adjudicate: { ask: { name: 'adjudication', values: ['merge', 'owner'] }, position: "{ ...(answer === 'owner' ? { suspend: true } : {}), reached: 'adjudicated', next: 'merge', adjudication: answer }" },
-    // R-BTN-131: the stub reads the forge before it reports `merged` — every PR of the ticket
-    // merged, none open. On 2026-11-23 B-259's merge agent rightly refused PR #357 over red CI and
-    // exited 0; the leg said `merged` and Baton ended the claim done with the PR open.
+    // R-BTN-131: the stub reads the forge before it reports `merged`.
     merge: { position: "{ reached: 'merged', next: null }", verify: 'merged' },
+    archive: { position: "{ reached: 'archived', next: null }", archive: true },
+    reconcile: { position: 'null' },
   },
   skill: 'baton-create-pr',
 };
@@ -274,6 +277,7 @@ export const BUILT_INS: BuiltIn[] = [
   CREATE_PR,
   {
     id: 'review-pr',
+    version: 2,
     summary: "review a PR someone else opened, in rounds, and conclude with a summary",
     course: REVIEW_PR_COURSE,
     reads: 'prs',
@@ -281,6 +285,7 @@ export const BUILT_INS: BuiltIn[] = [
     legs: {
       // Changes: the next round waits on the author's push, so the claim suspends.
       review: { ask: VERDICT, position: "{ ...(answer === 'approve' ? {} : { suspend: true }), reached: answer === 'approve' ? 'approved' : 'changes-requested', next: answer === 'approve' ? null : 'review', verdict: answer }" },
+      reconcile: { position: 'null' },
       conclude: { position: "{ reached: 'concluded', next: null }" },
     },
     skill: 'baton-review-pr',
@@ -349,6 +354,7 @@ export const BUILT_INS: BuiltIn[] = [
   },
   {
     id: 'create-spec',
+    version: 2,
     summary: 'design a specification in conversation with the owner, review it adversarially, address blocking findings in conversation, merge',
     course: CREATE_SPEC_COURSE,
     reads: 'prs',
@@ -367,6 +373,7 @@ export const BUILT_INS: BuiltIn[] = [
       // the claim suspends until they do.
       adjudicate: { ask: { name: 'adjudication', values: ['merge', 'owner'] }, position: "{ ...(answer === 'owner' ? { suspend: true } : {}), reached: 'adjudicated', next: 'merge', adjudication: answer }" },
       merge: { position: "{ reached: 'merged', next: null }" },
+      reconcile: { position: 'null' },
     },
     skill: 'baton-create-spec',
   },

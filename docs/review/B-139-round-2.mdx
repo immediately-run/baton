@@ -1,0 +1,27 @@
+---
+title: B-139 review round 2
+description: Disposition of the sourced-course portability, override dispatch, legacy pin, rollout and coverage findings on PR 333.
+---
+
+The [forge review](https://github.com/immediately-run/baton/pull/333#pullrequestreview-6009608348)
+asked for changes on `0d1ee7f066d6c2d1f26d5ade22cac33cee811693`.
+
+| Finding | Disposition |
+| --- | --- |
+| Standard pins failed on another build. | All eight standard courses have committed portable trees, distinct from the home course IDs. The packaged check compares `review-pr` from a matching build with the same pin fetched by a non-matching build through a local Git URL rewrite. |
+| The historical pin depended on home copies. | After ancestry verification, the adapter for `17ae8cce1411b71c413a123e54e4030b967a6e13` supplies its station function and lets its stubs use source instructions, the source's gate settings, and snapshot overrides. Prune still compares original blobs. The regression uses the actual pin when it is present in local history. |
+| Matching and fetched pins disagreed on run overrides. | Both paths use the runner wrapper for `.mjs`, `.js`, and `.cjs`; sync rejects unsupported extensions and multiple overrides before posting. Source `close` is unchanged. |
+| The successful entry-only run did not exercise real claims on both hosts. | The `decision` regression posts a board and runs a claim against both the local server and the Cloudflare Worker in Miniflare. Section 15 extends S-BTN-110 for this behavior; S-BTN-310 already covers session-link capabilities. |
+| The four-home migration was incomplete. | Still open. No live workflows, pins, or home files changed in this round. |
+
+## Rollout handoff
+
+Baton's current main defines a home-owned `create-pr` v3, without a source pin. Its historical
+graph, six generated leg stubs, and six instructions differ from the legacy pin and must not
+be pruned as identical. Decide whether to keep the home-owned course or port the intended
+differences to an approved source and supported overrides; do not replace the graph silently.
+
+The observed `docs`, `fieldhouse`, and `hq` pins are older and are not the bridged pin. The
+owner needs to coordinate sync and runner compatibility, select reviewed portable pins, and
+review each migration before dropping home copies. Use `repo init --prune` only where the
+existing pin resolves; it reports differing files for manual review and does not move pins.

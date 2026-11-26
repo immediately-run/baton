@@ -9,7 +9,7 @@ import type { FactContext, FactRead, ForgeRegistration, ForgeRepo } from './type
 
 export async function readForgeFacts(root: string, log: FactContext['log'], owns: FactContext['owns'],
   siblings: { repository: string; tickets: string[] }[] = [],
-  obs: { home?: ForgeRegistration; code_repos?: CodeRepoEntry[]; codeRepos?: CodeRepoEntry[]; pushers?: FactContext['pushers']; outputEvidence?: PostedAttestation[]; ticketOutputEvidence?: PostedAttestation[]; readPrs?: boolean; ownsOutput?: FactContext['ownsOutput'] } = {}): Promise<PrFact[]> {
+  obs: { home?: ForgeRegistration; code_repos?: CodeRepoEntry[]; codeRepos?: CodeRepoEntry[]; pushers?: FactContext['pushers']; outputEvidence?: PostedAttestation[]; ticketOutputEvidence?: PostedAttestation[]; readPrs?: boolean; ownsOutput?: FactContext['ownsOutput']; outside?: FactContext['outside']; mentionSince?: FactContext['mentionSince'] } = {}): Promise<PrFact[]> {
   const slug = obs.home?.path ?? remoteSlug(root);
   if (!slug) throw new Error(`${root} has no origin remote to read PRs from — pass --facts <file> for recorded facts`);
   const fallback = (path: string, host: string) => prRepo({ forge: inferForge(host) ?? DEFAULT_FORGE, path, webBase: `https://${host}/${path}` })!;
@@ -29,7 +29,7 @@ export async function readForgeFacts(root: string, log: FactContext['log'], owns
     else log(`baton: ${s.repository} not in code_repos — its PRs are not read (R-BTN-140)`);
   }
   const out: PrFact[] = [];
-  const client = forgeReader({ log, owns, outputEvidence: obs.outputEvidence, ownsOutput: obs.ownsOutput, pushers: obs.pushers ?? [] });
+  const client = forgeReader({ log, owns, outputEvidence: obs.outputEvidence, ownsOutput: obs.ownsOutput, pushers: obs.pushers ?? [], outside: obs.outside, mentionSince: obs.mentionSince });
   if (!home && reads.length) log(`baton: the home is a plain git repository, not on a forge — reading only the repositories tickets name in repos: (${reads.length})`);
   for (const { repo, read } of reads) out.push(...await client(repo).facts(read));
   return out;
