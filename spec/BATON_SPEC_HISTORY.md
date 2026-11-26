@@ -53,10 +53,11 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
     legacy cases are B-293's.
   - **A session proves a human only as strongly as its sign-in.** Review round one found the
     gap above. The owner sent it, 2026-11-26, to the session writing the human-intent page
-    (baton#449, `docs/context/human-intent.mdx`). That page splits who drives a session (the
-    dashboard is always a person; the owner, 2026-11-26, as that session records it: "Human
-    drive (policy may dictate hardware-key proof of this, but the assumption is that this is
-    always a person)") from how strongly that is proven, which is the credential's, and implied
+    (its principle written in `docs/context/human-intent.mdx`, baton#449). That work splits who
+    drives a session (the dashboard is always a person; the owner, 2026-11-26, in that session:
+    "Baton Dashboard UI: Human drive (policy may dictate hardware-key proof of this, but the
+    assumption is that this is always a person)") from how strongly that is proven, which is the
+    credential's, and implied
     the narrowing: R-BTN-185 counts a session as `human` only when Cloudflare Access or a
     `human_only` key's code opened it; an ordinary key's one-time link or code proves only that
     key's role and satisfies no human-only list; a sign-in path not named, the proposed forge
