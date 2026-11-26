@@ -14,7 +14,7 @@ import { dirname, isAbsolute, join, relative } from 'node:path';
 import { DEFAULT_URL } from '../client/config.mjs';
 import { checkDeclaredCourses } from '../core/validate';
 import { BatonApi, envAuth } from './api';
-import { HARNESS_AGENTS, type Harness } from './harness';
+import { HARNESS_ADAPTERS, harnessActivityPaths, selectHarness, type HarnessAdapter } from './harness';
 import { advanceHome, holdHome, legNeeds, readHead } from './home';
 import { cliBehind, cliPinLines, cliProfile, readCliPin } from './cliPin';
 import { Runner, stampLine, withTimestamps, type RunnerOptions } from './runner';
@@ -30,7 +30,7 @@ const LEG_WRAPPER = fileURLToPath(new URL('./legProcess.mjs', import.meta.url));
 
 export interface RunArgs {
   config?: string;
-  harness: Harness;
+  harness: HarnessAdapter;
   home: string;
   url: string;
   session: string;
@@ -63,6 +63,7 @@ export interface RunArgs {
    *  1 to 32, default 1 (one claim in the home checkout, as before); each claim beside another
    *  works in a clone of its own. */
   concurrency: number;
+  bounds?: { legs?: string[]; maxLegs?: number; until?: number };
   restartWhenBehind: boolean;
 }
 
@@ -73,9 +74,10 @@ export interface RunArgs {
  * runner declares what the grant allows (B-86). `--home` keeps R-BTN-131's meaning for a
  * checkout path; a name resolves to its home's `checkout` (B-121). `--help` prints this,
  * before any credential. */
-export function parseRunArgs(argv: string[], env: NodeJS.ProcessEnv = process.env): RunArgs {
-  const out: RunArgs = {
-    harness: 'opencode', home: env.BATON_HOME ?? process.cwd(), url: env.BATON_URL ?? DEFAULT_URL,
+export function parseRunArgs(argv: string[], env: NodeJS.ProcessEnv = process.env, adapters = HARNESS_ADAPTERS): RunArgs {
+  let harness = 'opencode';
+  const out: Omit<RunArgs, 'harness'> = {
+    home: env.BATON_HOME ?? process.cwd(), url: env.BATON_URL ?? DEFAULT_URL,
     session: env.BATON_SESSION ?? `run-${Math.random().toString(16).slice(2, 10)}`,
     repository: env.BATON_REPOSITORY ?? 'docs', hostname: env.BATON_HOSTNAME ?? hostname(),
     tier: 'critical', capabilities: null, beatEvery: 2 * 60_000, testHarness: false, verbose: false, locks: {},
@@ -88,11 +90,8 @@ export function parseRunArgs(argv: string[], env: NodeJS.ProcessEnv = process.en
       if (v === undefined) throw new Error(`${a} needs a value`);
       return v;
     };
-    if (a === '--harness') {
-      const v = value();
-      if (v !== 'opencode' && v !== 'claude-code') throw new Error('--harness: opencode or claude-code');
-      out.harness = v;
-    } else if (a === '--test-harness') out.testHarness = true;
+    if (a === '--harness') harness = value();
+    else if (a === '--test-harness') out.testHarness = true;
     else if (a === '--verbose') out.verbose = true;
     else if (a === '--restart-when-behind') out.restartWhenBehind = true;
     else if (a === '--home') out.home = value();
@@ -104,6 +103,20 @@ export function parseRunArgs(argv: string[], env: NodeJS.ProcessEnv = process.en
     else if (a === '--tier') out.tier = value();
     else if (a === '--course') out.course = value();
     else if (a === '--executor') out.executor = value();
+    else if (a === '--legs') {
+      const legs = [...new Set(value().split(',').map((leg) => leg.trim()))];
+      if (legs.length > 50 || legs.some((leg) => !/^[a-z][a-z0-9-]{0,39}$/.test(leg))) throw new Error('--legs: 1 to 50 comma-separated leg names');
+      (out.bounds ??= {}).legs = legs;
+    } else if (a === '--max-legs') {
+      const n = Number(value());
+      if (!Number.isSafeInteger(n) || n < 1) throw new Error('--max-legs: a positive integer');
+      (out.bounds ??= {}).maxLegs = n;
+    } else if (a === '--until') {
+      const instant = value();
+      const until = Date.parse(instant);
+      if (!Number.isFinite(until) || !/(?:Z|[+-]\d\d:\d\d)$/i.test(instant)) throw new Error('--until: an ISO timestamp with a time zone');
+      (out.bounds ??= {}).until = until;
+    }
     else if (a === '--concurrency') {
       const n = Number(value());
       if (!Number.isInteger(n) || n < 1 || n > 32) throw new Error('--concurrency: an integer from 1 to 32 (R-BTN-4)');
@@ -126,7 +139,9 @@ export function parseRunArgs(argv: string[], env: NodeJS.ProcessEnv = process.en
       out.beatEvery = n;
     } else throw new Error(`${a}: not a flag of baton run`);
   }
-  return out;
+  const adapter = selectHarness(harness, adapters);
+  if (!adapter) throw new Error(`--harness: ${adapters.map((entry) => entry.name).join(' or ')}`);
+  return { ...out, harness: adapter };
 }
 
 /** B-86: `baton run --help` (and `-h`) — the usage `parseRunArgs` reads, and what the ticket's
@@ -149,6 +164,9 @@ export const RUN_USAGE = [
   '                      serve the grant. A machine without a browser narrows, e.g. llm-call,create-pr.',
   '  --course <id>       narrows the courses served to this one, of those the home declares.',
   '                      Absent, the runner serves and declares every course the home declares.',
+  '  --legs a,b         claims and chains into only these named legs.',
+  '  --max-legs <n>     suspends before running more than n legs in one claim (default 8).',
+  '  --until <instant>  stops starting legs at this timestamp (ISO with time zone).',
   '  --executor <source> how legs run (R-BTN-107): builtin (the default — child processes) or',
   '                      pinned:<dir>@sha256:<digest>, a host bundle loaded only when its digest',
   '                      matches. Also BATON_EXECUTOR; never read from the repository.',
@@ -371,7 +389,7 @@ export const syncLogStamped = (verbose: boolean, l: string): void => syncLog(ver
  * permanent listener. One slot: the previous hook comes off before the next goes on. */
 let exitHookFn: ((code: number | undefined) => void) | null = null;
 
-export async function runMain(argv: string[], io: { log?: (l: string) => void; fetch?: (home: string) => void; transport?: (req: Request) => Promise<Response>; env?: NodeJS.ProcessEnv } = {}): Promise<number> {
+export async function runMain(argv: string[], io: { log?: (l: string) => void; fetch?: (home: string) => void; transport?: (req: Request) => Promise<Response>; env?: NodeJS.ProcessEnv; harnesses?: readonly HarnessAdapter[] } = {}): Promise<number> {
   // §6.13: a leg session never claims — the runner that started it does. A nested `baton run`
   // is exactly that session trying, so it is refused before anything else. BATON_PARENT is the
   // runner's name for it (B-97: the transition's IR_BATON_PARENT is gone).
@@ -386,7 +404,7 @@ export async function runMain(argv: string[], io: { log?: (l: string) => void; f
     (io.log ?? ((l: string) => process.stdout.write(`${l}\n`)))(RUN_USAGE);
     return 0;
   }
-  const a = parseRunArgs(argv);
+  const a = parseRunArgs(argv, process.env, io.harnesses);
   // B-121: `--home`/`BATON_HOME` may name a home of ~/.config/baton/homes.json rather than a
   // checkout path — a name resolves to its checkout, refused naming the home when the home has
   // none. A path (a value with `/` or naming an existing directory) keeps R-BTN-131's meaning.
@@ -419,8 +437,9 @@ export async function runMain(argv: string[], io: { log?: (l: string) => void; f
   // B-83: `--harness` drives — the home's settings name no agent_command, so the legs run the
   // harness the flag names (the snapshot's settings stay authoritative when they name one: the
   // stub prefers them, and BATON_AGENT_COMMAND only ever fills an absence).
-  const agentCommand = named === '' && !a.testHarness ? HARNESS_AGENTS[a.harness] : undefined;
-  if (agentCommand) say(`baton: .baton/baton.json names no agent_command — the legs will run the ${a.harness} command (--harness); \`baton repo init --agent ${a.harness}\` names it in the settings`);
+  const agentCommand = named === '' && !a.testHarness ? a.harness.agentCommand : undefined;
+  const hostAdapter = !HARNESS_ADAPTERS.includes(a.harness) ? a.harness : undefined;
+  if (agentCommand) say(`baton: .baton/baton.json names no agent_command — the legs will run the ${a.harness.name} command (--harness)`);
   // B-253 (R-BTN-72): the CLI says what its own code is — its commit, and whether a push moves
   // it — before any credential is read, so an operator starting a runner whose key is missing
   // still learns the code is unpinned. The same statement rides every heartbeat as
@@ -525,7 +544,11 @@ export async function runMain(argv: string[], io: { log?: (l: string) => void; f
     api: new BatonApi({ url: a.url, transport, auth }, say),
     // B-229: the earlier sessions' claims are ended through an API of their own runner's.
     apiFor: (secret: string) => { const other = new BatonApi({ url: a.url, transport, auth }, say); other.setSecret(secret); return other; },
-    home, repository: a.repository, hostname: a.hostname, harness: a.harness, session: a.session,
+    home, repository: a.repository, hostname: a.hostname, harness: a.harness.name, session: a.session,
+    activityPaths: (checkout) => harnessActivityPaths(checkout, io.harnesses),
+    ...(hostAdapter ? { agentActivity: (checkout: string) => ({
+      command: hostAdapter.agentCommand, paths: harnessActivityPaths(checkout, [hostAdapter]),
+    }) } : {}),
     tierCeiling: a.tier, ...(a.capabilities ? { capabilities: a.capabilities } : {}),
     capabilityChecks: checks,
     courses,
@@ -558,11 +581,13 @@ export async function runMain(argv: string[], io: { log?: (l: string) => void; f
     ...(a.testHarness ? { testHarness: true } : {}),
     ...(maskEnv ? { maskEnv } : {}),
     ...(a.concurrency !== 1 ? { concurrency: a.concurrency } : {}),
+    ...(a.bounds ? { bounds: a.bounds } : {}),
   });
   try {
     const result = await runner.work();
     if (!exitCode) exitCode = result;
   } finally {
+    runner.stop();
     process.off('SIGINT', onSignal);
     process.off('SIGTERM', onSignal);
     process.off('SIGHUP', onSignal);

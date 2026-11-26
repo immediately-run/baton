@@ -3,6 +3,8 @@ import { hbBody, keyCall, adminSession, sessionCall, ORIGIN, payload, cutover, s
 import { makeKey, signedRequest, type TestKey } from '../lib/sshKeys';
 import { call } from '#host';
 import type { Config } from '../../src/core/ports';
+import { forgeScope } from '../../src/core/forgeScope';
+import type { BatonError } from '../../src/core/http';
 
 const board = inject('board');
 const now = Date.parse('2026-11-21T12:00:00Z');
@@ -77,9 +79,17 @@ it('S-BTN-310: only the holder can prove a run; only the broker can read its liv
     expect((await runnerCall(broker, scope)).status).toBe(200);
     await setClock(now + 899_000);
     expect((await runnerCall(runner, proof)).status).toBe(204);
-    await setClock(now + 901_000);
-    expect((await runnerCall(broker, scope)).status).toBe(404);
-    await setClock(now + 1000);
+    // Past the lease the scope is gone. Read in the object at that instant rather than by moving
+    // the clock there: the fake clock is behind the real one, so an armed alarm is overdue and
+    // workerd may run it in the background, reaping the claim before the end below.
+    expect(await withCore((core) => {
+      try {
+        forgeScope(core.store, now + 901_000, run_id);
+        return 'found';
+      } catch (e) {
+        return (e as BatonError).code;
+      }
+    })).toBe('not-found');
     expect((await runnerCall(runner, `/v1/runner/claims/${claim_id}/end`, { end_reason: 'released:requested' })).status).toBe(200);
     expect((await runnerCall(broker, scope)).status).toBe(404);
   } finally {

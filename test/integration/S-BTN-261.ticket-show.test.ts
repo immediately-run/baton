@@ -12,7 +12,10 @@
 // Owner sessions do not exist yet (B-76): the approver's branch of `allowed` is written and not
 // reachable here. Runs on both hosts.
 import { describe, it, expect, beforeEach } from 'vitest';
-import { adminSession, claimItem, cutover, Git, keyCall, ORIGIN, register, rows, sessionCall, setAdminKeys, setClock, withCore } from '../helpers';
+import {
+  adminSession, claimItem, cutover, Git, keyCall, ORIGIN, register, rows, sessionCall, setAdminKeys, setClock,
+  withCore, setTicketRetry, seedClaimLeg, seedCondition, seedScopeFinding,
+} from '../helpers';
 import { makeKey, signedRequest, type TestKey } from '../lib/sshKeys';
 import { call as hostCall } from '#host';
 
@@ -80,12 +83,21 @@ describe('S-BTN-261 the ticket’s read (B-218)', () => {
     const claim = first.json.claim_id as number;
     // Before its first advance the claim names the leg it was offered, and no run.
     expect((await show('T-1')).json.claim).toMatchObject({ leg: 'implement', run_id: null, session_url: null, log_dir: null });
-    await rows(`INSERT INTO claim_legs (claim_id, seq, run_id, leg, from_station, bars, started_at, started_observation, session_url, leg_log_dir)
-                VALUES (?, 1, 'r_01TESTRUN', 'implement', 'filed', '[]', ?, 1, 'https://claude.ai/code/session_1', '/var/log/baton/T-1/implement')`, claim, T0);
-    await rows(`INSERT INTO conditions (repository_id, ticket_id, claim_id, run_id, leg, type, disposition, severity, restarts_json, raised_at, outcome)
-                VALUES ('docs', 'docs:T-1', ?, 'r_1', 'implement', 'x.wait', 'interrupt', 'high', '{"retry":"Run it again","park":"Leave it"}', ?, 'open')`, claim, T0);
-    await rows(`INSERT INTO scope_findings (repository_id, ticket_id, claim_id, kind, target, detail_json, raised_at, updated_at)
-                VALUES ('docs', 'docs:T-1', ?, 'scope-exceeded', 'immediately-run/other', '{"kind":"push","ref":"refs/heads/x","claim":1}', ?, ?)`, claim, T0, T0);
+    await seedClaimLeg({
+      claim_id: claim, seq: 1, run_id: 'r_01TESTRUN', leg: 'implement', from_station: 'filed', bars: '[]',
+      started_at: T0, started_observation: 1, session_url: 'https://claude.ai/code/session_1',
+      leg_log_dir: '/var/log/baton/T-1/implement',
+    });
+    await seedCondition({
+      repository_id: 'docs', ticket_id: 'docs:T-1', claim_id: claim, run_id: 'r_1', leg: 'implement', type: 'x.wait',
+      disposition: 'interrupt', severity: 'high', restarts_json: '{"retry":"Run it again","park":"Leave it"}',
+      raised_at: T0, outcome: 'open',
+    });
+    await seedScopeFinding({
+      repository_id: 'docs', ticket_id: 'docs:T-1', claim_id: claim, kind: 'scope-exceeded',
+      target: 'immediately-run/other', detail_json: '{"kind":"push","ref":"refs/heads/x","claim":1}', raised_at: T0,
+      updated_at: T0,
+    });
     expect((await post(`/v1/ui/overrides/${encodeURIComponent('docs:T-1')}`, { expedite: true })).status).toBe(200);
 
     const live = (await show('T-1')).json;
@@ -125,7 +137,7 @@ describe('S-BTN-261 the ticket’s read (B-218)', () => {
     expect((await post(`/v1/ui/overrides/${encodeURIComponent('docs:T-3')}`, { hold: false })).status).toBe(200);
     expect((await show('T-3')).json.allowed).toEqual([]);
     // A backoff shows on the detail while it lasts.
-    await rows(`UPDATE ticket_overrides SET retry_after = ? WHERE ticket_id = 'docs:T-3'`, T0 + HOUR);
+    await setTicketRetry('docs:T-3', T0 + HOUR);
     expect((await show('T-3')).json.detail).toEqual({ attempt: 0, max_runs: 3, until: T0 + HOUR });
   });
 

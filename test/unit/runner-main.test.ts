@@ -11,7 +11,7 @@ import { capabilitiesOf } from '../../src/shared/vocabulary.mjs';
 import { asksHelp, declareCourses, fetchMain, hostMaskEnv, parseRunArgs, runMain, servedCourses } from '../../src/runner/main';
 import { drainLines, Runner, withTimestamps } from '../../src/runner/runner';
 import { BatonApi, BatonRefusal } from '../../src/runner/api';
-import { HARNESS_AGENTS, AGENT_PROMPT } from '../../src/runner/harness';
+import { HARNESS_ADAPTERS, AGENT_PROMPT, selectHarness } from '../../src/runner/harness';
 import { splitWords } from '../../src/defaults/agent-words';
 import { envAuth } from '../../src/runner/api';
 import { advanceHome, courseOf, dropCourse, freshSecret, holdHome, legNeeds, loadCourse, readHead } from '../../src/runner/home';
@@ -40,11 +40,11 @@ describe('parseRunArgs', () => {
     expect(legacy.session).not.toBe('old');
     expect(legacy.hostname).not.toBe('vm-old');
     // B-86: no --capabilities is null, never a default: the grant's capabilities are declared.
-    expect(a).toMatchObject({ harness: 'opencode', home: '/h', url: 'https://b', session: 's', repository: 'docs', hostname: 'vm-x', tier: 'critical', capabilities: null, testHarness: false, verbose: false });
+    expect(a).toMatchObject({ harness: { name: 'opencode' }, home: '/h', url: 'https://b', session: 's', repository: 'docs', hostname: 'vm-x', tier: 'critical', capabilities: null, testHarness: false, verbose: false });
   });
   it('takes its flags, refusing the unknown and the malformed', () => {
     const a = parseRunArgs(['--harness', 'claude-code', '--home', '/x', '--url', 'https://u', '--session', 's2', '--repository', 'ops', '--tier', 'routine', '--capabilities', 'a,b', '--beat-every', '5000'], {});
-    expect(a).toMatchObject({ harness: 'claude-code', home: '/x', url: 'https://u', session: 's2', repository: 'ops', tier: 'routine', capabilities: ['a', 'b'], beatEvery: 5000 });
+    expect(a).toMatchObject({ harness: { name: 'claude-code' }, home: '/x', url: 'https://u', session: 's2', repository: 'ops', tier: 'routine', capabilities: ['a', 'b'], beatEvery: 5000 });
     expect(() => parseRunArgs(['--nope'], {})).toThrow('not a flag of baton run');
     expect(() => parseRunArgs(['--harness', 'vim'], {})).toThrow('opencode or claude-code');
     expect(() => parseRunArgs(['--beat-every', '10'], {})).toThrow('at least 50 ms');
@@ -164,9 +164,19 @@ describe('the agent_command a runner runs (B-83)', () => {
     expect(AGENT_PROMPT).toContain('Never exit with work pending');
     expect(AGENT_PROMPT).not.toContain('never waiting for further input');
     // The briefing rides inside the command's double quotes and now carries double quotes of
-    // its own: escaped in HARNESS_AGENTS, the no-shell split (B-84) still spawns it whole.
-    expect(splitWords(HARNESS_AGENTS.opencode).at(-1)).toBe(AGENT_PROMPT);
-    expect(splitWords(HARNESS_AGENTS['claude-code']).at(-1)).toBe(AGENT_PROMPT);
+    // its own: escaped in the adapter commands, the no-shell split (B-84) spawns it whole.
+    for (const adapter of HARNESS_ADAPTERS) expect(splitWords(adapter.agentCommand).at(-1)).toBe(AGENT_PROMPT);
+  });
+
+  it('built-in adapters normalize usage from their respective transcript formats (B-284)', () => {
+    const claude = JSON.stringify({ type: 'assistant', message: { id: 'c', model: 'sonnet', usage: { input_tokens: 3 } } });
+    const opencode = JSON.stringify({ messages: [{ type: 'assistant', id: 'o', model: { id: 'glm', providerID: 'zai' }, tokens: { input: 5 } }] });
+    expect(selectHarness('claude-code')?.usage(claude, 'sub:writer')).toMatchObject({
+      records: [{ id: 'c', model: 'sonnet', input: 3, scope: 'sub:writer' }], children: [],
+    });
+    expect(selectHarness('opencode')?.usage(opencode)).toMatchObject({
+      records: [{ id: 'o', model: 'zai/glm', input: 5, scope: 'main' }], children: [],
+    });
   });
 
   it('leaves completion criteria to the leg instructions in both briefings (B-317)', () => {
@@ -193,7 +203,7 @@ describe('the agent_command a runner runs (B-83)', () => {
       await expect(runMain(['--home', none, '--harness', 'claude-code'], { log: (l) => lines.push(l) })).rejects.toThrow(/no credential/);
       expect(lines.join('\n')).toContain('names no agent_command');
       expect(lines.join('\n')).toContain('claude-code');
-      expect(HARNESS_AGENTS['claude-code']).toContain('--permission-mode bypassPermissions');
+      expect(selectHarness('claude-code')?.agentCommand).toContain('--permission-mode bypassPermissions');
       lines.length = 0;
       await expect(runMain(['--home', named], { log: (l) => lines.push(l) })).rejects.toThrow(/no credential/);
       expect(lines.join('\n')).not.toContain('names no agent_command');
@@ -336,7 +346,7 @@ describe('the grant\'s declaration (B-86)', () => {
 });
 
 describe('loadCourse (R-BTN-72)', () => {
-  it('extracts each leg\'s script and never a repository\'s <leg>.run.mjs override, which the script loads itself (B-33)', () => {
+  it('extracts each leg\'s script and never a repository\'s <leg>.run.mjs override, which the script loads itself (B-33)', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'baton-main-'));
     try {
       const git = (...args: string[]) => execFileSync('git', ['-C', dir, ...args], { encoding: 'utf8' }).trim();
@@ -348,7 +358,7 @@ describe('loadCourse (R-BTN-72)', () => {
       writeFileSync(join(legs, 'go.run.mjs'), 'export async function run(ctx, standard) { return standard(ctx); }\n');
       git('add', '-A');
       git('-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-qm', 'relay');
-      const loaded = loadCourse(dir, git('rev-parse', 'HEAD'), 'relay');
+      const loaded = await loadCourse(dir, git('rev-parse', 'HEAD'), 'relay');
       expect([...loaded.scripts.keys()]).toEqual(['go']);
       dropCourse(loaded.scratch);
     } finally {

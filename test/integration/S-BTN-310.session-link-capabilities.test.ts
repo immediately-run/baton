@@ -1,6 +1,6 @@
 // S-BTN-310 session-link capabilities (BATON_SPEC §15, R-BTN-33, R-BTN-113, R-BTN-195), both hosts.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { course, keyCall, ORIGIN, rows, sessionCall, withCore } from '../helpers';
+import { course, keyCall, ORIGIN, rows, seedLegacyEvent, seedTicketHistory, sessionCall, withCore } from '../helpers';
 import { claimAndStart, fleet, grantedRunner, heartbeat, signed, type Fleet, type Granted, type Json } from '../lib/runnerFleet';
 import roadmapPr from '../fixtures/courses/roadmap-pr/course.json';
 import { MIGRATIONS } from '../../src/migrations';
@@ -209,11 +209,11 @@ describe('S-BTN-310 session-link capabilities', () => {
     const interaction = JSON.stringify({ type: 'interact.review', url: LINK });
     const ordinary = JSON.stringify({ type: 'ask.owner', url: 'https://example.test/question' });
     for (const detail of [interaction, ordinary]) {
-      await rows("INSERT INTO events (at, kind, actor, detail_json) VALUES (?, 'condition', 'baton', ?)", AT, detail);
-      await rows("INSERT INTO ticket_history (repository_id, ticket_id, at, kind, detail_json) VALUES ('docs', 'docs:T-1', ?, 'condition', ?)", AT, detail);
+      await seedLegacyEvent(AT, 'condition', detail);
+      await seedTicketHistory('docs', 'docs:T-1', AT, 'condition', detail);
     }
-    await rows("INSERT INTO events (at, kind, actor, detail_json) VALUES (?, 'discrepancy', 'baton', ?)", AT, JSON.stringify({ sub: 'session-url', why: `its host ${TOKEN}`, url: LINK }));
-    await rows("INSERT INTO ticket_history (repository_id, ticket_id, at, kind, detail_json) VALUES ('docs', 'docs:T-1', ?, 'leg-finished', ?)", AT, JSON.stringify({ evidence: 'commit', session_url: LINK }));
+    await seedLegacyEvent(AT, 'discrepancy', JSON.stringify({ sub: 'session-url', why: `its host ${TOKEN}`, url: LINK }));
+    await seedTicketHistory('docs', 'docs:T-1', AT, 'leg-finished', JSON.stringify({ evidence: 'commit', session_url: LINK }));
     await withCore((core) => core.store.transaction(() => core.store.script(MIGRATIONS.find((m) => m.id === 79)!.sql)));
     for (const table of ['events', 'ticket_history']) {
       const values = (await rows<{ detail_json: string }>(`SELECT detail_json FROM ${table}`)).map((r) => r.detail_json);

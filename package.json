@@ -30,15 +30,15 @@
     "baton": "dist/baton.mjs"
   },
   "scripts": {
-    "test": "BATON_SKIP_QUINT=1 vitest run && npm run model:links && npm run check:api && npm run check:spec && npm run check:wiki && node scripts/link-spec-refs.mjs --check",
+    "test": "npm run lint && BATON_SKIP_QUINT=1 vitest run && npm run model:links && npm run check:api && npm run check:spec && npm run check:wiki && node scripts/link-spec-refs.mjs --check",
     "pretest": "npm run build:ui",
     "test:full": "rm -rf test/.traces && vitest run && npm run model:links && npm run traces && npm run model:quick",
     "test:baton": "vitest run",
     "pretest:baton": "npm run build:ui",
     "test:load": "npm run build:ui && BATON_SKIP_QUINT=1 BATON_LOAD_TEST=1 vitest run test/load/ --project local",
-    "test:no-quint": "BATON_SKIP_QUINT=1 vitest run && npm run model:links",
+    "test:no-quint": "npm run lint && BATON_SKIP_QUINT=1 vitest run && npm run model:links",
     "pretest:no-quint": "npm run build:ui",
-    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.local.json && tsc --noEmit -p tsconfig.dashboard.json",
+    "typecheck": "node scripts/typecheck.mjs",
     "pretypecheck": "npm run build:ui",
     "build:ui": "node scripts/build-ui.mjs",
     "build:cli": "node scripts/build-cli.mjs",
@@ -63,7 +63,8 @@
     "spec:impact": "node scripts/spec-tools.mjs impact",
     "spec:index": "node scripts/spec-files.mjs",
     "check:spec": "npm run check:standalone && node scripts/check-spec.mjs",
-    "check:standalone": "node --test scripts/check-standalone.self-test.mjs && node scripts/check-standalone.mjs"
+    "check:standalone": "node --test scripts/check-standalone.self-test.mjs && node scripts/check-standalone.mjs",
+    "lint": "eslint ."
   },
   "dependencies": {
     "jose": "^6.2.12"
@@ -80,10 +81,12 @@
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
     "esbuild": "0.28.2",
+    "eslint": "10.15.0",
     "jsdom": "31.0.1",
     "react": "19.3.1",
     "react-dom": "19.3.1",
     "typescript": "^5.9.3",
+    "typescript-eslint": "8.73.0",
     "vitest": "4.1.11",
     "wrangler": "^4.150.0",
     "yaml": "2.9.1"

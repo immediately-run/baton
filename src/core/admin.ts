@@ -9,14 +9,14 @@ import { BatonError, PENDING_COOKIE, SESSION_COOKIE } from './http';
 import { logEvent, randomHex } from './db';
 import { adminFingerprints, API_KEY_FINGERPRINT, KEY_FINGERPRINT, parseApiKeyLine, parseSshKey, sshPublicLine, verifyNamespacedSignature, type SshKey } from './auth';
 import { capabilitiesOf } from '../shared/vocabulary.mjs';
-import { COURSE_ID, HOSTNAME, INSTANCE_NAME, SESSION_TOKEN, TAG, checkAsks, checkConfirm, checkDeliverInteractions, checkLogin, checkRepositoryId, HOLDING_TYPE, MAX_CLAIMS_CAP, parseAccessIdentities } from './validate';
+import { COURSE_ID, HOSTNAME, INSTANCE_NAME, SESSION_TOKEN, TAG, checkAsks, checkConfirm, checkDeliverInteractions, checkLogin, checkUnblockedTrigger, checkRepositoryId, HOLDING_TYPE, MAX_CLAIMS_CAP, parseAccessIdentities } from './validate';
 import { REMIND_AFTER_S, type Notices } from './notices';
 import { parseTranscriptRepo } from './links';
 import { checkCodeRepos, checkPushers, codeReposOf, crossHostEntries, homeForgeOf, pushersOf, writeCodeRepos, type CodeRepo } from './codeRepos';
 import { checkRegistration, retiredPath, seedEntries, tierPosition, type Registration, type Registry } from './registry';
 import { graphOf, resolveLeg, type Graph } from './graph';
 import { humanOnlyList, type ApproverEntry, type ApproverFacts, type Policies } from './policy';
-import type { Config, Store } from './ports';
+import type { Config, Row, Store } from './ports';
 import { sha256Hex } from './runnerApi';
 
 /** A one-time link lives 5 minutes; a session 12 hours (R-BTN-57). */
@@ -35,7 +35,7 @@ const BACKOFFS_MAX = 8;
 /** R-BTN-114: check courses a repository's `checks` map may name. */
 const CHECKS_MAX = 200;
 /** A registered repository's fields §11's change form may set besides weight, tiers and keys. */
-const LINK_FIELDS = ['remote', 'web_base', 'ci_identity', 'sync_workflow', 'mirror_workflow'] as const;
+const LINK_FIELDS = ['remote', 'web_base', 'ci_identity', 'sync_workflow', 'mirror_workflow', 'dispatch'] as const;
 /** A capability or role name, as a heartbeat declares one. */
 const CAPABILITY = /^[a-z0-9][a-z0-9-]{0,63}$/;
 const LABEL = /^[A-Za-z0-9][A-Za-z0-9 ._:@/-]{0,99}$/;
@@ -152,11 +152,16 @@ export class Admin {
     humanBreakGlass: () => Promise<Map<string, string>>;
   }) {}
 
+  private dispatchSetting(repository: string): import('./ports').ForgeDispatch | null {
+    const row = this.rows<{ dispatch: string | null }>('SELECT dispatch FROM repositories WHERE id = ?', repository)[0];
+    return row?.dispatch ? JSON.parse(row.dispatch) : null;
+  }
+
   private rows<T = Record<string, unknown>>(q: string, ...p: unknown[]): T[] {
     return this.c.store.exec<T>(q, ...p).toArray();
   }
-  private exec(q: string, ...p: unknown[]) {
-    return this.c.store.exec(q, ...p);
+  private exec<T = Row>(q: string, ...p: unknown[]) {
+    return this.c.store.exec<T>(q, ...p);
   }
   /** Rows the last statement changed (SQLite's `changes()`, the same on both hosts). */
   private changed(): number {
@@ -413,7 +418,7 @@ export class Admin {
         ...add,
       ];
       const current = { id, github: cur.github, forge: cur.forge, remote: cur.remote, ...(cur.web_base != null ? { web_base: cur.web_base } : {}), ci_identity: cur.ci_identity,
-        default_branch: cur.default_branch, sync_workflow: cur.sync_workflow || null, mirror_workflow: cur.mirror_workflow, sync_keys: keys };
+        dispatch: this.dispatchSetting(id), default_branch: cur.default_branch, sync_workflow: cur.sync_workflow || null, mirror_workflow: cur.mirror_workflow, sync_keys: keys };
       linked = checkRegistration({ ...current, ...Object.fromEntries(LINK_FIELDS.filter((k) => b[k] !== undefined).map((k) => [k, b[k]])) }, 'body');
     }
     // Every check before any write: the sync keys commit in transactions of their own, so a
@@ -458,8 +463,7 @@ export class Admin {
       if (linked) {
         this.exec('UPDATE repositories SET remote = ?, web_base = ?, ci_identity = ?, sync_workflow = ?, mirror_workflow = ?, dispatch = ? WHERE id = ?',
           linked.remote, linked.web_base, linked.ci_identity ? JSON.stringify(linked.ci_identity) : null, linked.sync_workflow, linked.mirror_workflow,
-          // The App serves github.com alone, as at registration.
-          linked.forge === 'github' && linked.web_base?.toLowerCase() === `https://github.com/${linked.github.toLowerCase()}` ? '{"kind":"github-app"}' : null, id);
+          linked.dispatch ? JSON.stringify(linked.dispatch) : null, id);
       }
       this.event(actor, { act: 'repository-changed', repository: id, ...(weight !== undefined ? { weight } : {}), ...(tiers ? { tiers } : {}),
         ...(add.length ? { sync_keys_added: add.length } : {}), ...(remove.length ? { sync_keys_removed: remove } : {}),
@@ -1021,9 +1025,8 @@ export class Admin {
       if (this.rows('SELECT 1 FROM owner_bars WHERE repository_id = ? AND lifted_at IS NULL AND (ends_at IS NULL OR ends_at > ?)', repository, now).length >= BARS_MAX) {
         bad('body', `a repository has at most ${BARS_MAX} bars in force or scheduled`);
       }
-      this.exec(`INSERT INTO owner_bars (repository_id, course, tag, legs, applies, starts_at, ends_at, release_holders, reason, set_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        repository, course, tag, JSON.stringify(legs), applies, startsAt, endsAt, b.release_holders === true ? 1 : 0, reason, actor);
-      const id = this.rows<{ id: number }>('SELECT last_insert_rowid() AS id')[0].id;
+      const { id } = this.exec<{ id: number }>(`INSERT INTO owner_bars (repository_id, course, tag, legs, applies, starts_at, ends_at, release_holders, reason, set_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
+        repository, course, tag, JSON.stringify(legs), applies, startsAt, endsAt, b.release_holders === true ? 1 : 0, reason, actor).one();
       this.event(actor, { act: 'bar-set', id, repository, course, tag, legs, applies, starts_at: startsAt, ends_at: endsAt, release_holders: b.release_holders === true, reason }, repository);
       this.c.dispatchSync(repository);
       return { id };
@@ -1112,7 +1115,12 @@ export class Admin {
         ? b.transcript_repos : bad('transcript_repos', 'must be at most 20 repositories, each a GitHub owner/name or <forge>:<web_base>');
       sets.push(['transcript_repos', JSON.stringify(t)]);
     }
-    if (b.unblocked_trigger !== undefined) sets.push(['unblocked_trigger', b.unblocked_trigger === null ? null : JSON.stringify(checkTrigger(b.unblocked_trigger))]);
+    if (b.unblocked_trigger !== undefined) {
+      const repo = this.c.registry.live(repository)!;
+      const dispatch = this.dispatchSetting(repository);
+      const trigger = b.unblocked_trigger === null ? null : checkUnblockedTrigger(b.unblocked_trigger, repo.forge, repo.default_branch, dispatch);
+      sets.push(['unblocked_trigger', trigger === null ? null : JSON.stringify(trigger)]);
+    }
     if (b.remind_after !== undefined) {
       const r = Number.isInteger(b.remind_after) && (b.remind_after as number) >= REMIND_AFTER_S.min && (b.remind_after as number) <= REMIND_AFTER_S.max
         ? (b.remind_after as number) : bad('remind_after', `must be whole seconds from ${REMIND_AFTER_S.min} to ${REMIND_AFTER_S.max}`);
@@ -1424,25 +1432,4 @@ export function checkRetry(v: unknown): RetryPolicy {
     ? (b.backoff_ms as number[]) : bad('retry.backoff_ms', `must be 1 to ${BACKOFFS_MAX} backoffs of 1 minute to 30 days`);
   const max = Number.isInteger(b.max_failed) && (b.max_failed as number) >= 1 && (b.max_failed as number) <= 10 ? (b.max_failed as number) : bad('retry.max_failed', 'must be an integer from 1 to 10');
   return { backoff_ms: backoff, max_failed: max };
-}
-
-/** R-BTN-94's dispatch shape for `unblocked_trigger` (R-BTN-77, B-168: a GitHub workflow on the
- *  default branch, a GitLab trigger or Gitea's — Baton never reads the workflow file; a forge
- *  that refuses the dispatch is logged with its reason). */
-function checkTrigger(v: unknown): Record<string, unknown> {
-  if (!isObj(v) || typeof v.kind !== 'string') bad('unblocked_trigger', 'must be a dispatch {kind, …}');
-  const t = v as Record<string, unknown>;
-  if (t.kind === 'github-app') {
-    only(t, ['kind', 'workflow'], 'unblocked_trigger');
-    if (typeof t.workflow !== 'string' || !/^\.github\/workflows\/[A-Za-z0-9._-]{1,100}\.ya?ml$/.test(t.workflow)) bad('unblocked_trigger.workflow', 'must be a path under .github/workflows/');
-  } else if (t.kind === 'gitlab-trigger') {
-    only(t, ['kind', 'project_id', 'ref'], 'unblocked_trigger');
-    if (!Number.isSafeInteger(t.project_id) || typeof t.ref !== 'string' || !/^[A-Za-z0-9._/-]{1,100}$/.test(t.ref)) bad('unblocked_trigger', 'needs project_id and ref');
-  } else if (t.kind === 'gitea') {
-    only(t, ['kind', 'workflow', 'ref'], 'unblocked_trigger');
-    if (typeof t.workflow !== 'string' || !/^[A-Za-z0-9._/-]{1,200}$/.test(t.workflow) || typeof t.ref !== 'string' || !/^[A-Za-z0-9._/-]{1,100}$/.test(t.ref)) bad('unblocked_trigger', 'needs workflow and ref');
-  } else {
-    bad('unblocked_trigger.kind', 'must be github-app, gitlab-trigger or gitea');
-  }
-  return t;
 }

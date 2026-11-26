@@ -1,0 +1,18 @@
+{
+  "id": "create-spec",
+  "version": 1,
+  "min_runner_version": 1,
+  "skill": "baton-create-spec",
+  "step_kinds": [
+    "converse",
+    "review",
+    "address",
+    "adjudicate",
+    "merge"
+  ],
+  "branch_pattern": "claude/{ticket}-*",
+  "protocol_files": [],
+  "facts": [
+    "prs"
+  ]
+}

@@ -9,6 +9,8 @@
 // `--against <sha>`; stops on a current source whose version moved since the run, running only
 // with `--accept-moved` (the report says so); replays a pinned source at the recorded version;
 // and fails a tampered input by its digest. The contracts' input/output half is B-39's.
+import { runnerApi, testRunner } from '../lib/runnerRig';
+import { GitRepo } from '../lib/gitRepo';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -18,12 +20,17 @@ import { createHash } from 'node:crypto';
 import { call as hostCall } from '#host';
 import { initMain, parseSyncArgs, syncMain } from '../../src/defaults/cli';
 import { Runner } from '../../src/runner/runner';
-import { BatonApi } from '../../src/runner/api';
 import { replayMain } from '../../src/runner/replay';
 import { closeTicket, exec } from '../../src/defaults/ticket-state';
 import { TICKET_OUTPUT_WITNESS } from '../../src/defaults/output-evidence';
 import { githubFake } from '../githubFake';
-import { call, ORIGIN, TOKENS, advance, claimItem, cutover, endClaim, makeApiKey, register, rows, setAdminKeys, setClock, syncToken } from '../helpers';
+import {
+  call, ORIGIN, TOKENS, advance, claimItem, cutover, endClaim, makeApiKey, register, rows, setAdminKeys, setClock,
+  syncToken, replaceClaimSnapshot, replaceRecordedInputDigest,
+} from '../helpers';
+
+// Replay uses real git checkouts and starts leg processes, even under a loaded CI run.
+vi.setConfig({ testTimeout: 30_000 });
 
 const T0 = Date.parse('2026-11-13T12:00:00Z');
 const sha256 = (text: string) => `sha256:${createHash('sha256').update(text, 'utf8').digest('hex')}`;
@@ -60,30 +67,23 @@ export default {
  *  the github spelling a `git:` input names, and an `insteadOf` rewrite sends its fetches to the
  *  bare clone beside it — so R-BTN-143's one bounded fetch into `refs/baton/<repository>/default`
  *  runs exactly as it would against the forge. */
-class Repo {
-  readonly dir: string;
+class ReplayCheckout extends GitRepo {
   readonly store: string;
   private readonly tracker: boolean;
   /** What the leg script writes into its checkout, and what it reports of its environment. */
   scriptVersion = 'one';
   constructor(tracker: boolean) {
+    super('baton-48-', { origin: true });
     this.tracker = tracker;
-    this.dir = mkdtempSync(join(tmpdir(), tracker ? 'baton-s48t-' : 'baton-s48m-'));
-    const origin = mkdtempSync(join(tmpdir(), 'baton-s48-origin-'));
-    execFileSync('git', ['init', '-q', '--bare', '-b', 'main', origin], { stdio: 'ignore' });
-    const g = (...a: string[]) => execFileSync('git', ['-C', this.dir, ...a], { encoding: 'utf8', stdio: 'ignore' });
-    g('init', '-q', '-b', 'main');
-    g('config', 'user.email', 'relay@test');
-    g('config', 'user.name', 'relay test');
-    g('remote', 'add', 'origin', 'https://github.com/immediately-run/docs.git');
-    g('config', `url.${origin}.insteadOf`, 'https://github.com/immediately-run/docs.git');
+    this.git('remote', 'set-url', 'origin', 'https://github.com/immediately-run/docs.git');
+    this.git('config', `url.${this.bare}.insteadOf`, 'https://github.com/immediately-run/docs.git');
     mkdirSync(join(this.dir, 'tickets'), { recursive: true });
-    this.store = join(mkdtempSync(join(tmpdir(), 'baton-s48-store-')), 'store.json');
+    this.store = join(this.root, 'store.json');
   }
 
   /** `baton repo init`, the fixture source and the runnable leg: everything after the tree. */
-  async setup(o: { unsafe?: boolean } = {}): Promise<Repo> {
-    expect(await initMain([], { root: this.dir, log: () => {} })).toBe(0);
+  async setup(o: { unsafe?: boolean } = {}): Promise<ReplayCheckout> {
+    expect(await initMain(['--own'], { root: this.dir, log: () => {} })).toBe(0);
     if (this.tracker) {
       writeFileSync(join(this.dir, '.baton', 'tickets.mjs'), trackerSource(this.store));
       this.writeStore({ rev: 5, tickets: [{ id: 'T-1', key: 'C-1', title: 'The tracked ticket', body: 'As first filed.', rank: 0 }] });
@@ -128,18 +128,12 @@ export async function close() { return 'https://example.test/close'; }
     return JSON.parse(readFileSync(this.store, 'utf8')) as { rev: number; tickets: Record<string, unknown>[] };
   }
   commit(message = 'wiki'): string {
-    const g = (...a: string[]) => execFileSync('git', ['-C', this.dir, ...a], { encoding: 'utf8', stdio: 'ignore' });
-    g('add', '-A');
-    g('commit', '--allow-empty', '-qm', message);
-    g('push', '-q', 'origin', 'main');
-    return execFileSync('git', ['-C', this.dir, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+    const sha = super.commit(message);
+    this.git('push', '-q', 'origin', 'main');
+    return sha;
   }
-  blob(path: string): string {
-    return execFileSync('git', ['-C', this.dir, 'rev-parse', `HEAD:${path}`], { encoding: 'utf8' }).trim();
-  }
-  head(): string {
-    return execFileSync('git', ['-C', this.dir, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
-  }
+
+  head(): string { return this.sha(); }
   /** One sync: no facts, the harness's sync credential, the local host's transport. */
   async sync(): Promise<void> {
     const facts = join(this.dir, '.baton', 'facts.json');
@@ -151,21 +145,16 @@ export async function close() { return 'https://example.test/close'; }
   }
   /** The runner over this home, as S-BTN-207's: one session, one credential. */
   runner(session: string, transport: (req: Request) => Promise<Response> = hostCall): Runner {
-    const api = new BatonApi({
-      url: ORIGIN,
-      transport,
-      auth: (_m, _u, _b, secret) => ({ Authorization: `Bearer ${TOKENS['vm-a']}`, ...(secret ? { 'X-Runner-Secret': secret } : {}) }),
-    });
-    return new Runner({
-      api, home: this.dir, repository: 'docs', hostname: 'vm-a', harness: 'opencode', session,
-      courses: [{ course: 'create-pr', version: 1 }], stateFile: join(tmpdir(), `baton-s48-${session}.json`),
-      beatEvery: 60_000, log: () => {},
-    });
+    const api = runnerApi({ transport });
+    return testRunner({
+      api, home: this.dir, session,
+      courses: [{ course: 'create-pr', version: 2 }], stateFile: join(tmpdir(), `baton-s48-${session}.json`),
+      beatEvery: 60_000, });
   }
 }
 
-let repo: Repo;
-const repos: Repo[] = [];
+let repo: ReplayCheckout;
+const repos: ReplayCheckout[] = [];
 /** The administrator's API key replay reads the runs with, and its file. */
 let key: { key: string; line: string };
 let keyFile: string;
@@ -184,7 +173,7 @@ afterEach(() => {
   vi.unstubAllEnvs();
   for (const w of work) rmSync(w, { recursive: true, force: true });
   work.length = 0;
-  for (const r of repos) rmSync(r.dir, { recursive: true, force: true });
+  for (const r of repos) r.dispose();
   repos.length = 0;
 });
 
@@ -204,12 +193,14 @@ async function replay(args: string[], env: Record<string, string> = {}, leg = 'i
 
 describe('S-BTN-48 replay: a recorded run re-run without a claim', () => {
   it('replays the pinned script using either name after a rename between offer and start', async () => {
-    repo = new Repo(false);
+    repo = new ReplayCheckout(false);
     repos.push(repo);
     await repo.setup();
     const configPath = join(repo.dir, '.baton', 'baton.json');
     const config = JSON.parse(readFileSync(configPath, 'utf8'));
     delete config.courses[0].source;
+    config.courses[0].version = 1;
+    config.courses[0].min_runner_version = 1;
     writeFileSync(configPath, JSON.stringify(config));
     const dir = join(repo.dir, '.baton', 'courses', 'create-pr');
     const graph = (name: string, extras = {}) => ({ start: 'filed', start_leg: name, end: ['done'], stations: { filed: {}, done: {} }, legs: { [name]: { from: ['filed'], to: 'done', ...extras } } });
@@ -238,13 +229,15 @@ describe('S-BTN-48 replay: a recorded run re-run without a claim', () => {
   });
 
   it('recovers a GitHub ticket close after claim loss only with an unedited pusher witness', async () => {
-    repo = new Repo(false);
+    repo = new ReplayCheckout(false);
     repos.push(repo);
     await repo.setup();
     const g = (...args: string[]) => exec('git', args, repo.dir);
     const configPath = join(repo.dir, '.baton', 'baton.json');
     const config = JSON.parse(readFileSync(configPath, 'utf8'));
     delete config.courses[0].source;
+    config.courses[0].version = 1;
+    config.courses[0].min_runner_version = 1;
     writeFileSync(configPath, JSON.stringify(config));
     const dir = join(repo.dir, '.baton', 'courses', 'create-pr');
     writeFileSync(join(dir, 'course.json'), JSON.stringify({ start: 'filed', start_leg: 'implement', end: ['done'], stations: { filed: {}, planned: {}, done: {} }, legs: {
@@ -255,8 +248,12 @@ describe('S-BTN-48 replay: a recorded run re-run without a claim', () => {
     repo.commit('output contract');
     await repo.sync();
     const { secret } = await register('vm-a', { courses: [{ repository: 'docs', course: 'create-pr', version: 1 }] });
-    const offered = (await claimItem('vm-a', secret, { ticket_id: 'docs:T-1' })).json;
-    const started = (await advance('vm-a', secret, offered.claim_id, { leg: 'implement' })).json;
+    const offer = await claimItem('vm-a', secret, { ticket_id: 'docs:T-1' });
+    expect(offer.status).toBe(200);
+    const offered = offer.json;
+    const start = await advance('vm-a', secret, offered.claim_id, { leg: 'implement' });
+    expect(start.status).toBe(200);
+    const started = start.json;
     const ghCalls: string[][] = [];
     const origin = g('config', 'remote.origin.url');
     const localRemote = g('remote', 'get-url', 'origin');
@@ -290,7 +287,7 @@ describe('S-BTN-48 replay: a recorded run re-run without a claim', () => {
   });
 
   it.each(['valid', 'bad-output', 'bad-input'])('checks envelopes before run or close (%s)', async (mode) => {
-    repo = new Repo(false);
+    repo = new ReplayCheckout(false);
     repos.push(repo);
     await repo.setup();
     const dir = join(repo.dir, '.baton', 'courses', 'create-pr');
@@ -356,7 +353,7 @@ export function handoff() { return null; }
     }
   });
   it('the runner records each run\'s inputs — the ticket\'s version, its read\'s digest and the head — and replay runs the run writing nothing to Baton', async () => {
-    repo = new Repo(false);
+    repo = new ReplayCheckout(false);
     repos.push(repo);
     await repo.setup();
     await repo.sync();
@@ -397,7 +394,7 @@ export function handoff() { return null; }
   });
 
   it('R-BTN-144\'s replay environment: no write credential reaches the leg, and the masked report carries nothing it would leak', async () => {
-    repo = new Repo(false);
+    repo = new ReplayCheckout(false);
     repos.push(repo);
     await repo.setup();
     await repo.sync();
@@ -416,7 +413,7 @@ export function handoff() { return null; }
   });
 
   it('a leg marked replay_safe: false is refused', async () => {
-    repo = new Repo(false);
+    repo = new ReplayCheckout(false);
     repos.push(repo);
     await repo.setup({ unsafe: true });
     await repo.sync();
@@ -428,7 +425,7 @@ export function handoff() { return null; }
   });
 
   it('--against <sha> compares the scripts at that sha on the same inputs: the same sha agrees, a changed script differs', async () => {
-    repo = new Repo(false);
+    repo = new ReplayCheckout(false);
     repos.push(repo);
     await repo.setup();
     await repo.sync();
@@ -450,7 +447,7 @@ export function handoff() { return null; }
   });
 
   it('a current source whose version moved since the run stops the replay; --accept-moved runs it and the report says so', async () => {
-    repo = new Repo(true);
+    repo = new ReplayCheckout(true);
     repos.push(repo);
     await repo.setup();
     await repo.sync();
@@ -475,7 +472,7 @@ export function handoff() { return null; }
   });
 
   it('a pinned source replays at the recorded version: the file may have moved on the branch, the recorded bytes did not', async () => {
-    repo = new Repo(false);
+    repo = new ReplayCheckout(false);
     repos.push(repo);
     await repo.setup();
     await repo.sync();
@@ -491,7 +488,7 @@ export function handoff() { return null; }
   });
 
   it('a tampered input fails its digest; an honest one passes it', async () => {
-    repo = new Repo(false);
+    repo = new ReplayCheckout(false);
     repos.push(repo);
     await repo.setup();
     await repo.sync();
@@ -500,7 +497,7 @@ export function handoff() { return null; }
     writeFileSync(join(repo.dir, 'plan.txt'), 'the plan as the run read it\n');
     const planSha = repo.commit('the plan');
     const uri = `git:immediately-run/docs@${planSha}:plan.txt`;
-    const { secret } = await register('vm-a', { courses: [{ repository: 'docs', course: 'create-pr', version: 1 }] });
+    const { secret } = await register('vm-a', { courses: [{ repository: 'docs', course: 'create-pr', version: 2 }] });
     const claim = await claimItem('vm-a', secret, { ticket_id: 'docs:T-1' });
     const started = await advance('vm-a', secret, claim.json.claim_id, {
       leg: 'implement',
@@ -517,7 +514,7 @@ export function handoff() { return null; }
     expect(honest.report.inputs).toEqual([{ name: 'plan', uri, digest: sha256('the plan as the run read it\n'), ok: true }]);
 
     // Tampered: the recorded digest names bytes the pointer does not hold — a substitution.
-    await rows("UPDATE leg_run_inputs SET digest = ? WHERE name = 'plan'", sha256('something else entirely\n'));
+    await replaceRecordedInputDigest('plan', sha256('something else entirely\n'));
     const tampered = await replay([]);
     expect(tampered.code).toBe(1);
     expect(tampered.report.refused).toMatch(/failed its digest/);
@@ -526,7 +523,7 @@ export function handoff() { return null; }
   });
 
   it('the runs read is an owner\'s or an administrator\'s: a runner\'s key is refused, and the record names what replay needs', async () => {
-    repo = new Repo(false);
+    repo = new ReplayCheckout(false);
     repos.push(repo);
     await repo.setup();
     await repo.sync();
@@ -544,7 +541,7 @@ export function handoff() { return null; }
   });
 
   it('the recorded snapshot must be code the default branch holds (R-BTN-143): an off-branch sha is refused, --against excepted', async () => {
-    repo = new Repo(false);
+    repo = new ReplayCheckout(false);
     repos.push(repo);
     await repo.setup();
     await repo.sync();
@@ -558,7 +555,7 @@ export function handoff() { return null; }
     g('commit', '-qm', 'off the default branch');
     const side = execFileSync('git', ['-C', repo.dir, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
     g('checkout', '-q', 'main');
-    await rows('UPDATE claims SET snapshot_sha = ? WHERE ticket_id = ?', side, 'docs:T-1');
+    await replaceClaimSnapshot('docs:T-1', side);
     const out = await replay([]);
     expect(out.code).toBe(1);
     expect(out.report.refused).toMatch(/not code the default branch main holds/);

@@ -1,0 +1,45 @@
+{
+  "start": "reading",
+  "start_leg": "decompose",
+  "end": [
+    "filed"
+  ],
+  "starts_from": "request",
+  "stations": {
+    "reading": {
+      "label": "Reading the spec"
+    },
+    "drafted": {
+      "label": "Child tickets drafted"
+    },
+    "checked": {
+      "label": "Set checked against the spec"
+    },
+    "filed": {
+      "label": "Children filed"
+    }
+  },
+  "legs": {
+    "decompose": {
+      "from": [
+        "reading"
+      ],
+      "to": "drafted",
+      "label": "Draft one child ticket per spec section"
+    },
+    "check": {
+      "from": [
+        "drafted"
+      ],
+      "to": "checked",
+      "label": "Check the set against the spec"
+    },
+    "file": {
+      "from": [
+        "checked"
+      ],
+      "to": "filed",
+      "label": "File the children, close the request"
+    }
+  }
+}
