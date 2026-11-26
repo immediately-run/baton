@@ -35,6 +35,7 @@ import { COMMENTING_LEGS } from './pr-close';
 import { DEFAULT_FORGE, FORGE_SHAPES, PR_URL as PR_URL_RE } from '../core/forges';
 import { evidenceReader, prRepo, registration, witnessed } from './forges';
 import { fromRemote } from './forges/targets';
+import { hostOf } from './forges/remote';
 import type { ForgeRepo } from './forges/types';
 import { GIT_SHA, isSourceBranch } from '../core/validate';
 import type { BoardPayload } from '../core/board';
@@ -437,13 +438,18 @@ async function readBoard(root: string, at: string, batonJson: BatonJson, args: S
   // history is the authority, never the working tree). No second input, no shared file: a
   // checkout git cannot answer for has no close history, and its frontmatter state stands.
   const origin = originSlug != null ? gitText(root, 'remote', 'get-url', 'origin') : null;
-  const plain = record?.home ? FORGE_SHAPES[record.home.forge].pr === null : origin != null && plainGitRemote(origin);
+  // A checkout whose origin is a local path (a `file://` URL or a directory) reads its history
+  // from git alone, whatever forge the home is registered on: no forge is read for it, so a
+  // repository on the marker courses alone syncs with no forge token, as before B-273.
+  const localOrigin = origin != null && hostOf(origin) === null;
+  const forgeHome = localOrigin ? undefined : record?.home;
+  const plain = localOrigin || (forgeHome ? FORGE_SHAPES[forgeHome.forge].pr === null : origin != null && plainGitRemote(origin));
   // R-BTN-82: a forge home's close outputs count only with a pusher's witness on the close
   // commit, read by the home's forge adapter — on a forge whose adapter reads none, they do not.
   let witnessHome = false;
   if (!plain && origin != null) {
     try {
-      witnessHome = witnessed(record?.home ? prRepo(record.home) : fromRemote(origin));
+      witnessHome = witnessed(forgeHome ? prRepo(forgeHome) : fromRemote(origin));
     } catch {
       witnessHome = false;
     }
@@ -464,7 +470,7 @@ async function readBoard(root: string, at: string, batonJson: BatonJson, args: S
 
   const mentionSince = outside ? args.backfillMentions ?? outside.head_accepted_at : null;
   const facts: PrFact[] = args.factsFile ? (JSON.parse(readFileSync(args.factsFile, 'utf8')) as PrFact[]) : readsPrs || ticketOutputEvidence.length ? await readForgeFacts(root, log, owns, [...siblings.values()], {
-    ...record, outputEvidence, ticketOutputEvidence, readPrs: readsPrs, outside, mentionSince,
+    ...record, home: forgeHome, outputEvidence, ticketOutputEvidence, readPrs: readsPrs, outside, mentionSince,
     ownsOutput: (ticket, pr) => owners.some((o) => o.tickets.some((t) => t.id === ticket && ticketOwns(t, pr, o.patterns, repository))),
   }) : [];
   const commits: MentionCommit[] = [];
