@@ -161,7 +161,7 @@ the [tail](#ending):
 | `finding` | the §12.9 finding | an owner resolves it (`scope-resolved`) | diagnose only: no request; the acknowledgement stays the owner's |
 
 A security condition (`baton.oauth-replay`, `baton.sign-in-burst`, `baton.admin-key-conflict`,
-`baton.bearer-over-http`, `baton.unprotected` and their kind) is a `condition` entry, but
+`baton.bearer-over-http` and their kind) is a `condition` entry, but
 diagnose-only as a finding is. Tenant-level conditions take no intervention: the subject is always
 within one repository.
 
@@ -260,9 +260,8 @@ else is a request.
     ticket, or on the repository for a runner, batch or repository subject; the intervention
     ends at expiry unless the file is restored. Beyond that check, the leg form's runner and the
     course read only `intervention_context`, never the ticket's body.
-  - **Who can deliver it.** On the markdown source, a deliverer `outbox.git` admits: `runner`
-    under `cooperative`; `trusted-runner` under `protected`, where `tickets.created: proposed`
-    makes it a proposal that lands only when a human lands it. A custom source needs an
+  - **Who can deliver it.** On the markdown source, any `git` deliverer; under `protected`,
+    `tickets.created: proposed` makes it a proposal that lands only when a human lands it. A custom source needs an
     `outbox.source` deliverer, which `protected` admits none of — and R-BTN-188 already refuses a
     policy with an ejected source and none. So under `protected`, or whenever the deliverer, the
     sync or the runners are the broken part, the leg form waits, and **the MCP form is the path**:
@@ -372,8 +371,8 @@ A delegated key in R-BTN-186's sense, minted per intervention and dying with it.
 
 - **Who claims: one gate.** A new gate, rule `intervention` (§6.6), admits a claim of a leg of
   `interventions.ticket_id` only from the runner `interventions.claimant` names, by key
-  fingerprint, or — where the claimant is `intervener` — from a runner whose grant carries the
-  mark `intervener`, which an approver on `approvers.roles` sets (R-BTN-180); every other runner
+  fingerprint, or — where the claimant is `intervener` — from a runner whose grant admits the
+  capability `intervener` (R-BTN-174); every other runner
   is refused, whatever the ticket file says. It always refuses the subject runner, and every
   runner that ran one of the subject ticket's failed attempts in the last 24 hours, matched by key
   fingerprint and by hostname. It refuses all of them while the posted ticket mismatches Baton's
@@ -620,7 +619,7 @@ What building this changes, each in its owning place:
   `baton.runner-starved` (at the runner's next granted claim, or when it is no longer live).
 - **The snapshot (R-BTN-74)**: the intervention ticket's `extra` flag.
 - **R-BTN-12 (§6.8)**: `hold_reason` `intervention:<id>`. **§6.6**: the gate rule `intervention`.
-  **R-BTN-180**: the grant mark `intervener` under `approvers.roles`. **R-BTN-66**: the setting
+  **R-BTN-174**: the capability `intervener`, which a grant admits. **R-BTN-66**: the setting
   `intervention_courses`.
 - **§12.1 and R-BTN-158**: the principal's row; `bint_` among the bearer secrets and the bearers
   that crossing `http` revokes. **R-BTN-144**: the intervention key in the one list of what is
