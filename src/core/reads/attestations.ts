@@ -72,7 +72,7 @@ export const ATTESTATION_READS: ReadRoute[] = [
             FROM tickets t JOIN ticket_history h ON h.ticket_id = t.id
             WHERE t.repository_id = ? AND h.kind = 'fact-arrival' AND json_extract(h.detail_json, '$.outside') = 1
           UNION ALL
-          SELECT e.rowid * 3 + 2, e.found_at, e.ticket_id, 'sync', json_object('ref', e.ref, 'kind', e.kind, 'leg', e.leg), '${EVIDENCE_TYPE}'
+          SELECT e.insertion_order * 3 + 2, e.found_at, e.ticket_id, 'sync', json_object('ref', e.ref, 'kind', e.kind, 'leg', e.leg), '${EVIDENCE_TYPE}'
             FROM tickets t JOIN ticket_evidence e ON e.ticket_id = t.id WHERE t.repository_id = ?
         ) WHERE ${where.join(' AND ')} ORDER BY at DESC, seq DESC LIMIT ?`, ...params, limit + 1);
       const p = pageOf(cx, call, rows, (last) => [last.at, last.seq], limit);

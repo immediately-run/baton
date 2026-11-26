@@ -26,6 +26,9 @@ import { fileURLToPath } from 'node:url';
 import { patchNotes } from './spec-tools.mjs';
 import { joinParts, layoutProblems, specParts } from './spec-files.mjs';
 import { stripFrontmatter } from './lib/stripFrontmatter.mjs';
+import { basePending, citedIds, codeTexts, definedIds, fileScenario, ledgerProblems, PENDING, pendingBaseRef, pendingIds, ruleLedger, scenarioIds } from './spec-ledger.mjs';
+
+export { citedIds, definedIds, fileScenario, scenarioIds };
 import { exceptionProblems, newExceptionProblems, priorExceptions } from './lib/check-exceptions.mjs';
 import { readSpecCode } from './lib/spec-code.mjs';
 
@@ -43,29 +46,11 @@ export const EXAMPLE_TICKETS = ['R3-9'];
  *  spec, which stays in docs: the code that serves that course may cite them. */
 export const COURSE_IDS = ['R-BTN-21', 'R-BTN-27', 'R-BTN-42', 'R-BTN-43', 'R-BTN-49'];
 
-/** The requirement ids the spec defines: each `**R-BTN-n` that opens a rule, and each bold rule
- *  title followed by its id (`- **The runner declares its own lease timeout** (R-BTN-9)`). */
-export function definedIds(spec) {
-  return new Set([
-    ...[...spec.matchAll(/\*\*(R-BTN-\d+)\b/g)].map((m) => m[1]),
-    ...[...spec.matchAll(/\*\*R-BTN-\d+((?: \/ R-BTN-\d+)+)/g)]
-      .flatMap((m) => [...m[1].matchAll(/R-BTN-\d+/g)].map((n) => n[0])),
-    ...[...spec.matchAll(/^\s*- \*\*[^*\n]+\*\* \((R-BTN-\d+)\)/gm)].map((m) => m[1]),
-  ]);
-}
-
 /** The retired requirement ids: the first cell of each row of the history file's
  *  `## Retired requirements` table. */
 export function retiredIds(history) {
   const section = history.split(/^## /m).find((s) => s.startsWith('Retired requirements')) ?? '';
   return new Set([...section.matchAll(/^\| *(R-BTN-\d+)\b/gm)].map((m) => m[1]));
-}
-
-/** The scenario ids the spec's §15 scenario table defines: the first cell of each row of its
- *  `### Scenarios` table (ids named in a row's other cells, or by a gate, are not rows). */
-export function scenarioIds(spec) {
-  const table = spec.split(/^### /m).find((s) => s.startsWith('Scenarios')) ?? '';
-  return new Set([...table.matchAll(/^\| *(S-BTN-\d+)\b/gm)].map((m) => m[1]));
 }
 
 /** The retired scenario ids: the S-BTN ids of the history's `## Retired scenarios and gates`
@@ -80,11 +65,6 @@ export function retiredScenarioIds(history) {
  *  S-BTN-147 with the ontology and route choices, the spec restructure's part 4.) B-263 deletes
  *  S-BTN-218 and S-BTN-219 with signed control, retired 2026-11-19. */
 export const RETIRED_TESTS_ALLOWED = ['S-BTN-46', 'S-BTN-60', 'S-BTN-218', 'S-BTN-219'];
-
-/** The scenario a test file is named for (`S-BTN-2.silent-runner.test.ts` → `S-BTN-2`), if any. */
-export function fileScenario(name) {
-  return /^(S-BTN-\d+)\./.exec(name)?.[1] ?? null;
-}
 
 /** Rules that carried an italic patch note when the check was added (B-150 folds each into its
  *  rule's body). Only shrinks: a new patch note fails, and so does a listed rule that no longer
@@ -139,11 +119,6 @@ export function lineage(spec) {
     if (dated || quoted) out.push({ line: i + 1, text: text.trim().slice(0, 80) });
   });
   return out;
-}
-
-/** Every `R-BTN-n` in a text. */
-export function citedIds(text) {
-  return new Set([...text.matchAll(/\bR-BTN-(\d+)\b/g)].map((m) => `R-BTN-${m[1]}`));
 }
 
 /** The problems with a spec, given the code's texts by path, the ticket ids that exist, the
@@ -215,8 +190,9 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const spec = joinParts(parts);
   const code = readSpecCode(REPO);
   const read = (p) => readFileSync(join(REPO, p), 'utf8');
-  const tickets = new Set(['tickets', 'tickets/archive'].flatMap((d) => readdirSync(join(REPO, d)))
-    .filter((n) => n.endsWith('.mdx')).map((n) => n.slice(0, -4)));
+  const ticketIds = (dir) => readdirSync(join(REPO, dir)).filter((n) => n.endsWith('.mdx')).map((n) => n.slice(0, -4));
+  const archived = new Set(ticketIds('tickets/archive'));
+  const tickets = new Set([...ticketIds('tickets'), ...archived]);
   const historyPath = join(REPO, 'spec', 'BATON_SPEC_HISTORY.md');
   // The history is a page of the spec bundle (B-180): its body, past the frontmatter.
   const history = existsSync(historyPath) ? stripFrontmatter(readFileSync(historyPath, 'utf8')) : '';
@@ -227,7 +203,16 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const problems = check(spec, code, tickets, history, testNames, PATCH_NOTES_ALLOWED, exceptions);
   // check() owns citation matching; validate against the independently committed ceiling here.
   problems.push(...newExceptionProblems('retired rule citation', exceptions, priorExceptions(REPO, file)));
-  problems.push(...layoutProblems(REPO));
+  // B-276: the rule ledger — each rule's status token and each scenario's evidence.
+  const ledger = ruleLedger(spec, codeTexts(REPO));
+  try {
+    const pending = pendingIds(readFileSync(join(REPO, PENDING), 'utf8'));
+    const baseline = basePending(REPO, pendingBaseRef(REPO), 'spec/BATON_SPEC/15-verification.md');
+    problems.push(...ledgerProblems(ledger, archived, pending, baseline));
+  } catch (e) {
+    problems.push(`could not check the pending list against the default-branch baseline: ${e.message}`);
+  }
+  problems.push(...layoutProblems(REPO, undefined, undefined, ledger));
   const pages = ['README.md', 'AGENTS.md', ...defaultPages(REPO)].map((p) => [p, read(p)]);
   const pairs = sectionPairDifferences([...code, ...pages, ['spec/BATON_SPEC/', spec]], specTargets(REPO));
   problems.push(...exceptionProblems('section does not own rule', pairs, JSON.parse(read('scripts/section-pair-exceptions.json'))));
@@ -236,5 +221,5 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     console.error(`check-spec: ${problems.length} problem(s)`);
     process.exit(1);
   }
-  console.log(`check-spec OK — ${definedIds(spec).size} requirements; ${code.length} code files checked for rule citations; ${testNames.filter((n) => fileScenario(n)).length} scenario test files checked`);
+  console.log(`check-spec OK — ${ledger.rules.size} rules; ${ledger.covered.size} scenarios named by tests, ${ledger.scenarios.size - ledger.covered.size} pending`);
 }

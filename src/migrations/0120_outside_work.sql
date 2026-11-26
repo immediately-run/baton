@@ -8,6 +8,8 @@ CREATE TABLE ticket_evidence (
   found_at INTEGER NOT NULL,
   claim_id INTEGER,
   weighed_at INTEGER,
+  -- The read's cursor tiebreak, as 0140's insertion_order (B-278: no rowid).
+  insertion_order INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (ticket_id, ref)
 );
 CREATE INDEX evidence_unweighed ON ticket_evidence(ticket_id) WHERE weighed_at IS NULL;

@@ -2,7 +2,7 @@
 title: "13. Data model"
 description: "One SQLite database per tenant, in the tenant's Durable Object (or the local host's file)."
 ---
-## 13. Data model *(proposal)*
+## 13. Data model
 
 One SQLite database per tenant, in the tenant's Durable Object (or the local host's file).
 The numbered, append-only migrations in `src/migrations/` reach the schema, each new one's

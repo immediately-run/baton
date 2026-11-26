@@ -43,7 +43,7 @@ export class OutsideWork {
   }
 
   private keep(ticket: string, ref: string, kind: EvidenceKind, leg: string | null = null) {
-    this.c.store.exec(`INSERT INTO ticket_evidence (ticket_id, ref, kind, leg, found_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT DO NOTHING`,
+    this.c.store.exec(`INSERT INTO ticket_evidence (ticket_id, ref, kind, leg, found_at, insertion_order) VALUES (?, ?, ?, ?, ?, (SELECT COALESCE(MAX(insertion_order), 0) + 1 FROM ticket_evidence)) ON CONFLICT DO NOTHING`,
       ticket, ref, kind, leg, this.c.now());
   }
 
