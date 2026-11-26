@@ -15,20 +15,15 @@ import { validateCourse } from '../../src/core/course';
 import { graphOf, onGraph, type Step } from '../../src/core/graph';
 import { checkCourse, shortestRoute, type KitInput } from '../../src/local/testCourse';
 import { APPROVAL_STAGES, BUILT_INS, DEFAULT_COURSE, SPEC_TO_TICKETS_COURSE, buildAppWaits, builtIn, scaffoldable } from '../../src/defaults/courses';
-import { BUG_FIX_COURSE, CREATE_PR_COURSE, CREATE_SPEC_COURSE, NEW_FEATURE_COURSE, stationsSpec, type PrFact, type PrGraph } from '../../src/defaults/course-pr';
+import { CREATE_SPEC_COURSE, stationsSpec, type PrFact, type PrGraph } from '../../src/defaults/course-pr';
 import { ticketsMarkdown, type SourceTicket } from '../../src/defaults/tickets-markdown';
 
 const instructionsDir = (id: string) => join(__dirname, '..', '..', 'src', 'defaults', 'courses', id);
-/** The course whose shipped `<leg>.md` a course's leg uses: its own, or its `instructionsFrom`'s
- *  where it ships none (`bug-fix` and `new-feature` run `create-pr`'s legs). */
-const instructionsOwner = (b: (typeof BUILT_INS)[number], leg: string): string =>
-  existsSync(join(instructionsDir(b.id), `${leg}.md`)) || b.instructionsFrom == null ? b.id : b.instructionsFrom;
-const instructionsFile = (b: (typeof BUILT_INS)[number], leg: string): string => join(instructionsDir(instructionsOwner(b, leg)), `${leg}.md`);
 const tosOf = (to: string | string[]): string[] => (Array.isArray(to) ? to : [to]);
 
 describe('the standard courses (R-BTN-131)', () => {
-  it('are create-pr, review-pr, bug-report, draft-ticket, decision, build-app, create-spec, spec-to-tickets, bug-fix and new-feature; create-pr is the default', () => {
-    expect(BUILT_INS.map((b) => b.id)).toEqual(['create-pr', 'review-pr', 'bug-report', 'draft-ticket', 'decision', 'build-app', 'create-spec', 'spec-to-tickets', 'bug-fix', 'new-feature']);
+  it('are create-pr, review-pr, bug-report, draft-ticket, decision, build-app, create-spec and spec-to-tickets; create-pr is the default', () => {
+    expect(BUILT_INS.map((b) => b.id)).toEqual(['create-pr', 'review-pr', 'bug-report', 'draft-ticket', 'decision', 'build-app', 'create-spec', 'spec-to-tickets']);
     expect(DEFAULT_COURSE).toBe('create-pr');
   });
 
@@ -40,16 +35,11 @@ describe('the standard courses (R-BTN-131)', () => {
 
       it('every leg has a stub and shipped instructions, and nothing else is shipped', () => {
         // A person's leg (R-BTN-116; create-pr's `confirm`, B-257) is answered, never run: no
-        // stub, and no instructions — unless a person works it in conversation (bug-fix's
-        // `describe`, new-feature's `specify`), which ships the instructions their session follows.
+        // stub, no instructions.
         const legs = Object.entries(b.course.legs as Record<string, { kind?: string }>).filter(([, l]) => l.kind !== 'person').map(([l]) => l).sort();
-        const conversations = [...(b.conversations ?? [])].sort();
-        for (const l of conversations) expect((b.course.legs as Record<string, { kind?: string }>)[l]?.kind, `${b.id}/${l}`).toBe('person');
         expect(Object.keys(b.legs).sort()).toEqual(legs);
-        // A course that runs another's legs (`instructionsFrom`) ships only its conversations'.
-        const own = b.instructionsFrom == null ? [...legs, ...conversations].sort() : conversations;
-        expect(readdirSync(instructionsDir(b.id)).sort()).toEqual(own.map((l) => `${l}.md`));
-        for (const l of [...legs, ...conversations]) expect(readFileSync(instructionsFile(b, l), 'utf8')).toMatch(new RegExp(`^# ${instructionsOwner(b, l)} · ${l} — `));
+        expect(readdirSync(instructionsDir(b.id)).sort()).toEqual(legs.map((l) => `${l}.md`));
+        for (const l of legs) expect(readFileSync(join(instructionsDir(b.id), `${l}.md`), 'utf8')).toMatch(new RegExp(`^# ${b.id} · ${l} — `));
       });
 
       it('every stub returns an edge for every answer: reached is one of the leg\'s outcomes, next leaves it, null only at an end', () => {
@@ -92,7 +82,7 @@ describe('the standard courses (R-BTN-131)', () => {
             const pos = new Function('answer', 'ctx', `return (${stub.position});`)(answer, { run: 1 }) as { reached: string };
             return b.course.end.includes(pos.reached);
           });
-          if (ends) expect(readFileSync(instructionsFile(b, leg), 'utf8'), `${b.id}/${leg}`).toMatch(/`?status:`? to `?done`?/);
+          if (ends) expect(readFileSync(join(instructionsDir(b.id), `${leg}.md`), 'utf8'), `${b.id}/${leg}`).toMatch(/`?status:`? to `?done`?/);
         }
       });
 
@@ -114,8 +104,6 @@ describe('the standard courses (R-BTN-131)', () => {
       // create-spec's two interactive legs: the owner's session is run by the owner, so the claim
       // ends where the leg starts and the ticket waits for the work it produces.
       'create-spec converse', 'create-spec address', 'create-spec adjudicate owner',
-      // bug-fix and new-feature run create-pr's legs from `filed` on.
-      'bug-fix adjudicate owner', 'new-feature adjudicate owner',
     ]);
     for (const b of BUILT_INS) {
       for (const [leg, stub] of Object.entries(b.legs)) {
@@ -184,10 +172,9 @@ describe('the standard courses (R-BTN-131)', () => {
     expect(readdirSync(root).filter((d) => existsSync(join(root, d, '.'))).sort()).toEqual(BUILT_INS.map((b) => b.id).sort());
   });
 
-  it('create-spec, build-app, spec-to-tickets, bug-fix and new-feature carry starts_from: request, and no other course does (B-98, B-99)', () => {
-    const requested = ['build-app', 'create-spec', 'spec-to-tickets', 'bug-fix', 'new-feature'];
-    expect(BUILT_INS.filter((b) => b.course.starts_from !== undefined).map((b) => [b.id, b.course.starts_from])).toEqual(requested.map((id) => [id, 'request']));
-    for (const b of BUILT_INS) if (!requested.includes(b.id)) expect(b.course).not.toHaveProperty('starts_from');
+  it('create-spec, build-app and spec-to-tickets carry starts_from: request, and no other course does (B-98, B-99)', () => {
+    expect(BUILT_INS.filter((b) => b.course.starts_from !== undefined).map((b) => [b.id, b.course.starts_from])).toEqual([['build-app', 'request'], ['create-spec', 'request'], ['spec-to-tickets', 'request']]);
+    for (const b of BUILT_INS) if (b.id !== 'build-app' && b.id !== 'create-spec' && b.id !== 'spec-to-tickets') expect(b.course).not.toHaveProperty('starts_from');
     // The course file a repository scaffolds is the built-in's own JSON, so the key is in the file
     // `baton request` reads from the checkout.
     expect(JSON.parse(JSON.stringify(CREATE_SPEC_COURSE))).toMatchObject({ starts_from: 'request', start: 'requested', start_leg: 'converse' });
@@ -206,67 +193,15 @@ describe('the standard courses (R-BTN-131)', () => {
   it('pr names create-pr for a repository scaffolded before, and is no longer scaffolded', () => {
     expect(builtIn('pr')?.id).toBe('create-pr');
     expect(() => scaffoldable('pr')).toThrow('--course pr: renamed create-pr');
-    expect(() => scaffoldable('epic')).toThrow('the CLI scaffolds create-pr, review-pr, bug-report, draft-ticket, decision, build-app, create-spec, spec-to-tickets, bug-fix, new-feature');
+    expect(() => scaffoldable('epic')).toThrow('the CLI scaffolds create-pr, review-pr, bug-report, draft-ticket, decision, build-app, create-spec, spec-to-tickets');
     expect(builtIn('epic')).toBeUndefined();
   });
 
   it('create-pr\'s implement stub verifies its PR on the forge before claiming it, and no other leg or course does (B-81)', () => {
-    // bug-fix and new-feature run create-pr's own legs, its implement stub included.
-    const createPr = builtIn('create-pr')!.legs;
     for (const b of BUILT_INS) {
       for (const [leg, stub] of Object.entries(b.legs)) {
-        expect(stub.verify, `${b.id}/${leg}`).toBe(b.legs === createPr && leg === 'implement' ? 'pr' : undefined);
+        expect(stub.verify, `${b.id}/${leg}`).toBe(b.id === 'create-pr' && leg === 'implement' ? 'pr' : undefined);
       }
-    }
-  });
-
-  describe('bug-fix and new-feature: a person\'s conversation, then create-pr (R-BTN-131, R-BTN-116)', () => {
-    const courses = [
-      { id: 'bug-fix', course: BUG_FIX_COURSE, start: 'reported', leg: 'describe', asks: 'reporter' },
-      { id: 'new-feature', course: NEW_FEATURE_COURSE, start: 'requested', leg: 'specify', asks: 'requester' },
-    ];
-    const ticket = (depends_on: string[] = []): SourceTicket =>
-      ({ id: 'B-7', course_id: 'bug-fix', blocked_by: [], depends_on, course: {} }) as unknown as SourceTicket;
-    const pr: PrFact = { number: 3, head: 'claude/B-7-fix', state: 'open', pushedAt: 10, checks: [], reviews: [] };
-
-    for (const c of courses) {
-      describe(c.id, () => {
-        const b = builtIn(c.id)!;
-        const g = graphOf(b.course);
-        const place = (facts: PrFact[], depends_on: string[] = [], legs: { ticket: string; leg: string; claim_nonce: string; evidence: string; reached: string }[] = []) =>
-          b.stations({ tickets: [ticket(depends_on)], closed: new Set(), done: new Set(), facts, branchPatterns: ['claude/{ticket}-*'], repository: null, graph: b.course, baton: { legs } }).stations['B-7'];
-
-        it('is create-pr\'s graph with one person leg in front of filed: no runner is offered it, a request enters it', () => {
-          expect(b.course).toMatchObject({ start: c.start, start_leg: c.leg, starts_from: 'request', end: CREATE_PR_COURSE.end });
-          expect(g.legs.get(c.leg)).toMatchObject({ person: true, asks: c.asks, from: [c.start], to: ['filed'] });
-          for (const [leg, def] of Object.entries(CREATE_PR_COURSE.legs)) expect(b.course.legs[leg], leg).toEqual(def);
-          for (const [st, def] of Object.entries(CREATE_PR_COURSE.stations)) expect(b.course.stations[st], st).toEqual(def);
-          expect(Object.keys(b.course.legs).sort()).toEqual([c.leg, ...Object.keys(CREATE_PR_COURSE.legs)].sort());
-          // The runner legs are create-pr's own stubs; the conversation has none.
-          expect(b.legs).toBe(builtIn('create-pr')!.legs);
-          expect(b.conversations).toEqual([c.leg]);
-          expect(readFileSync(instructionsFile(b, c.leg), 'utf8')).toContain(`npx baton decision answer -i <their owner key> <repository>:<ID> filed`);
-        });
-
-        it('a ticket with no PR waits at the start on the person leg, ready whatever its dependencies', () => {
-          for (const deps of [[], ['B-1']]) {
-            expect(place([], deps), deps.join()).toMatchObject({ station: c.start, path: [], next_leg: c.leg, next: [{ leg: c.leg, state: 'ready', waiting_on: null }] });
-          }
-        });
-
-        it('a PR shows the conversation done: create-pr\'s placement with the person leg\'s step in front, on the graph from its start', () => {
-          const st = place([pr]);
-          expect(st.station).toBe('pr-open');
-          expect(st.path).toEqual([{ leg: c.leg, reached: 'filed' }, { leg: 'implement', reached: 'pr-open' }]);
-          expect(onGraph(g, st.path as Step[])).toBe(true);
-        });
-
-        it('a delivered pass is placed after the conversation, confirm queued', () => {
-          const st = place([], [], [{ ticket: 'B-7', leg: 'implement', claim_nonce: 'n', evidence: 'abc', reached: 'delivered' }]);
-          expect(st).toMatchObject({ station: 'delivered', path: [{ leg: c.leg, reached: 'filed' }, { leg: 'implement', reached: 'delivered' }], next_leg: 'confirm' });
-          expect(onGraph(g, st.path as Step[])).toBe(true);
-        });
-      });
     }
   });
 

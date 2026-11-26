@@ -1,13 +1,13 @@
 ---
 title: The standard courses
-description: The ten courses Baton's CLI ships — create-pr, review-pr, bug-report, draft-ticket, decision, build-app, create-spec, spec-to-tickets, bug-fix and new-feature — what each does, and how a repository adopts and changes one.
+description: The eight courses Baton's CLI ships — create-pr, review-pr, bug-report, draft-ticket, decision, build-app, create-spec and spec-to-tickets — what each does, and how a repository adopts and changes one.
 tags: [concepts]
 order: 15
 ---
 
 A course is the route a ticket takes: its stations, and the legs an agent runs between them. A
 repository can write its own, as the docs repository did with `roadmap-pr`, but most need one of
-a handful of routes. Baton's CLI ships ten, and a repository adopts each with one command.
+a handful of routes. Baton's CLI ships eight, and a repository adopts each with one command.
 BATON_SPEC [R-BTN-131](../spec/BATON_SPEC/05-courses.md#sec-5-8) says what a standard course is
 and what binds every course; this page and each course's own files are the courses' contract.
 Each course's stations and edges are its course file: `.baton/courses/<course>/course.json` once
@@ -26,8 +26,6 @@ rely on it.
 | `build-app` | takes a one-line request to a verified application: a product definition, a design with mock-ups, an architecture and a plan, each approved by the owner, then the plan's tickets on `create-pr`, and a verification against the definition | define, design, architect, plan, file, verify | `shipped` |
 | `create-spec` | designs a specification in conversation with the owner, reviews it adversarially, addresses blocking findings in a second conversation, adjudicates what three rounds leave open, merges | converse, review, address, adjudicate, merge | `merged` |
 | `spec-to-tickets` | takes a merged specification a one-sentence request names, decomposes it into child tickets — one per section, each with tests and exit criteria from the spec's words — checks the set against the spec's coverage, and files the children under the request | decompose, check, file | `filed` |
-| `bug-fix` | the reporter and an agent reproduce and describe a bug in the reporter's own interactive session, at once — no runner first — then `create-pr` fixes it | the person leg describe, then `create-pr`'s | `merged`, `confirmed` |
-| `new-feature` | the requester and an agent specify a feature in the requester's own interactive session, at once — no runner first — then `create-pr` builds it | the person leg specify, then `create-pr`'s | `merged`, `confirmed` |
 
 `create-pr` is the default. It replaced the `pr` course, which a repository scaffolded before
 keeps until it switches.
@@ -78,52 +76,6 @@ CI are both green. With no PR branch at home and a `repos:` naming another repos
 runs nothing and leaves no marker: it suspends with `review` next, and the sync places the ticket
 from that CI. Only a ticket with several PRs at home, which the gate cannot choose between,
 waits on the owner as `run-tests-unreachable`, whose `skip` waives the gate for it.
-
-## `bug-fix` and `new-feature`: starting in conversation
-
-Both courses start with a person, not a runner. Their first leg — `describe` on `bug-fix`,
-`specify` on `new-feature` — is a **person leg** (BATON_SPEC
-[R-BTN-116](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-4)): no runner is offered it
-or may claim it, so the conversation never waits for a runner to pick it up and hand it back. The
-person who has the bug or the idea starts it themselves, in their own interactive agent session,
-the moment the ticket exists:
-
-```
-npx baton request "The board loses a ticket's hold after a sync" --course bug-fix
-# baton request: filed B-41 (course bug-fix) — describe waits on you at reported — no runner takes it
-#   start it now: pull the default branch, then give your interactive agent this prompt —
-#   Follow .baton/courses/bug-fix/legs/describe.md in this checkout for ticket B-41.
-```
-
-Already in an agent session? Ask it to follow `.baton/courses/bug-fix/legs/describe.md` (or
-`new-feature/legs/specify.md`) and say what is broken or wanted: with no ticket yet, the
-instructions have it file the request with `baton request` and carry on in the same session.
-Either way the agent follows the leg's instructions — these two are the only person legs that ship
-any: it reproduces the bug (or reads the code the feature joins),
-asks only what the person alone knows, and rewrites the ticket's body as it goes into a ticket
-`implement` can run from — for a bug: symptom, reproduction, expected and actual, the cause where
-it is found, and a regression test among the exit criteria; for a feature: what and for whom,
-behaviour, what is out of scope, the decisions taken, and numbered acceptance criteria. On the
-person's yes it commits the ticket alone to the default branch and hands them the answer to give:
-
-```
-npx baton decision answer -i <owner key> <repository>:B-41 filed
-```
-
-The answer is the person's own act, through Baton, never a line in git and never the agent's: it
-moves the ticket to `filed` and queues `implement` for the next runner. From there everything is
-`create-pr`'s — its legs, stubs, instructions, test gate, review rounds, `delivered` and `confirm`.
-A conversation that stops early leaves what it found in the ticket's body; the ticket waits at the
-start, under Needs you, for the next session. A report that turns out to be a duplicate, or a
-feature already asked for, is withdrawn (`status: withdrawn`), a ticket status rather than a
-station.
-
-`bug-report` is the other bug course: it files a fix ticket from a report without a conversation,
-and fixes nothing. `bug-fix` fixes, and starts from the person who saw the bug.
-
-Until Baton launches interactive sessions itself ([B-34](../tickets/B-34.mdx)), a person who is
-not at a terminal learns of the waiting leg from Needs you, as for any person leg; the
-conversation is still theirs to start.
 
 ## A ticket already delivered
 
@@ -238,8 +190,8 @@ Some courses' product *is* a ticket: `create-spec` designs a specification, `bui
 application, `spec-to-tickets` decomposes one, and none has anything to work on until someone
 says, in a sentence, what it is. For those, the entry is a **request**: one ticket, `course:`
 naming the course, saying what to do — filed by a command instead of written by hand. A course
-opts in by carrying `starts_from: request` in its course file; `create-spec`, `build-app`,
-`spec-to-tickets`, `bug-fix` and `new-feature` do, and an ordinary course keeps its hand-filed tickets.
+opts in by carrying `starts_from: request` in its course file; `create-spec`, `build-app` and
+`spec-to-tickets` do, and an ordinary course keeps its hand-filed tickets.
 
 ```
 npx baton request "Decide the export format, so two implementations agree" --course create-spec
@@ -261,9 +213,7 @@ ticket and pushes it:
 It is a repository command, not an API call: the developer running it has the checkout, the push
 triggers the sync, the board places the ticket at the course's start station with its start leg
 ready, and the next claim starts the course — `converse` on `create-spec`, `define` on
-`build-app`, `decompose` on `spec-to-tickets`. Nothing else is needed to begin. On `bug-fix` and
-`new-feature` no claim starts it: the start leg is a person's, and the command prints the prompt
-that starts the conversation now ([above](#bug-fix-and-new-feature-starting-in-conversation)). It refuses a course the checkout's `.baton/baton.json`
+`build-app`, `decompose` on `spec-to-tickets`. Nothing else is needed to begin. It refuses a course the checkout's `.baton/baton.json`
 does not list (the sync would refuse the ticket), and a course without `starts_from: request`. The
 board's own form, for the owner role, is this same command.
 

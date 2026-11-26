@@ -63,9 +63,6 @@ export interface RequestPlan {
   /** The course file's start and start leg, for the command's line. */
   start: string;
   startLeg: string;
-  /** Whether the start leg is a person's (R-BTN-116; `bug-fix`'s `describe`): no claim runs it,
-   *  so the command's line says how to start it now rather than that a claim will. */
-  startPerson?: boolean;
 }
 
 /** A request as the command writes the file: the id it took at the head it is filed on. */
@@ -74,7 +71,6 @@ export interface Filed {
   course: string;
   start: string;
   startLeg: string;
-  startPerson?: boolean;
   id: string;
   /** The file's content, as the markdown source reads it (tickets-markdown.ts §2f). */
   text: string;
@@ -244,7 +240,7 @@ export function readRequestPlan(root: string, course: string, sentence: string, 
   }
   const courseFile = join(at, '.baton', 'courses', course, 'course.json');
   if (!existsSync(courseFile)) throw new Error(`${site}: .baton/courses/${course}/course.json is missing — run \`baton repo init --course ${course}\``);
-  let graph: { starts_from?: unknown; start?: unknown; start_leg?: unknown; legs?: Record<string, { kind?: unknown } | undefined> };
+  let graph: { starts_from?: unknown; start?: unknown; start_leg?: unknown };
   try {
     graph = JSON.parse(readFileSync(courseFile, 'utf8')) as typeof graph;
   } catch (e) {
@@ -259,8 +255,7 @@ export function readRequestPlan(root: string, course: string, sentence: string, 
     throw new Error(`.baton/courses/${course}/course.json names no start and start_leg`);
   }
   const items = settings.items ?? 'tickets';
-  const startPerson = graph.legs?.[graph.start_leg]?.kind === 'person';
-  return { root: at, sentence, course, items, prefix: ticketPrefix(at, items), start: graph.start, startLeg: graph.start_leg, startPerson };
+  return { root: at, sentence, course, items, prefix: ticketPrefix(at, items), start: graph.start, startLeg: graph.start_leg };
 }
 
 /** The branch a request lands on: `--branch`, else the checkout's `origin/HEAD`, else `main`. */
@@ -346,7 +341,7 @@ export async function fileRequest(plan: RequestPlan, opts: RequestOptions = {}):
       git(dir, 'commit', '-q', '-m', message);
       try {
         git(dir, 'push', '-q', remote, `HEAD:refs/heads/${branch()}`);
-        return { id, text, message, course: atHead.course, start: atHead.start, startLeg: atHead.startLeg, startPerson: atHead.startPerson };
+        return { id, text, message, course: atHead.course, start: atHead.start, startLeg: atHead.startLeg };
       } catch (e) {
         const detail = stderrOf(e);
         // B-174 (R-BTN-131): a refusal the forge's own words say is protection — the CLI's
@@ -431,7 +426,6 @@ async function fileOnRequestBranch(
     course: atHead.course,
     start: atHead.start,
     startLeg: atHead.startLeg,
-    startPerson: atHead.startPerson,
     onBranch: on,
   };
   const token = (opts.env ?? process.env)[tokenOf(forge)];
@@ -607,17 +601,10 @@ export async function requestMain(
     const cause = lines.filter((l) => /^(fatal|error):/.test(l));
     throw new Error(`git in ${resolve(root)}: ${(cause.length ? cause : lines).join('; ') || 'failed'}`);
   }
-  // A person's start leg (R-BTN-116) is never a claim's: the ticket waits on the person from the
-  // moment the board places it, and they start the conversation themselves, now.
-  const waits = `${filed.startLeg} waits on you at ${filed.start} — no runner takes it`;
   if (filed.pr != null) {
-    log(`baton request: filed ${filed.id} (course ${filed.course}) on ${filed.onBranch} — the default branch refused the push as protected; PR ${filed.pr}; ${filed.startPerson ? `once it merges, ${waits}` : `its merge starts ${filed.startLeg} at ${filed.start}`}`);
+    log(`baton request: filed ${filed.id} (course ${filed.course}) on ${filed.onBranch} — the default branch refused the push as protected; PR ${filed.pr}; its merge starts ${filed.startLeg} at ${filed.start}`);
   } else {
-    log(`baton request: filed ${filed.id} (course ${filed.course}) — ${filed.startPerson ? waits : `the next claim starts ${filed.startLeg} at ${filed.start}`}`);
-  }
-  if (filed.startPerson) {
-    log(`  start it now: pull the default branch, then give your interactive agent this prompt —`);
-    log(`  Follow .baton/courses/${filed.course}/legs/${filed.startLeg}.md in this checkout for ticket ${filed.id}.`);
+    log(`baton request: filed ${filed.id} (course ${filed.course}) — the next claim starts ${filed.startLeg} at ${filed.start}`);
   }
   return 0;
 }
