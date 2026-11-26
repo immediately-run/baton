@@ -19,8 +19,8 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
 ## Changelog
 
 - **2026-11-26 — Two human gates, `protected` claims the custody one, `exec` streams, and "mark" leaves the vocabulary (R-BTN-189, R-BTN-185, R-BTN-107).**
-  Rules changed: R-BTN-189, R-BTN-185, R-BTN-107, R-BTN-145, R-BTN-186, R-BTN-57, §12.1; S-BTN-185,
-  S-BTN-190, S-BTN-192, S-BTN-299; one Decisions entry; the linked proposals (people and
+  Rules changed: R-BTN-189, R-BTN-185, R-BTN-188, R-BTN-107, R-BTN-145, R-BTN-186, R-BTN-57,
+  §12.1; S-BTN-324, S-BTN-185, S-BTN-190, S-BTN-192, S-BTN-299; one Decisions entry; the linked proposals (people and
   dashboard, intervention sessions, conditions, data model and API, scenarios: S-BTN-100,
   S-BTN-197). From the code-against-spec review of 2026-11-24
   (`docs/review/code-vs-spec-review-2026-11-24.mdx`), whose owner decisions these are.
@@ -51,6 +51,20 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
     custody-only gates; computing `human-gates` from the lists again is B-189's item 2, which already reads them,
     with `human-gates-hardware` held `false` until B-136's attestation is built; S-BTN-190's
     legacy cases are B-293's.
+  - **A session proves a human only as strongly as its sign-in.** Review round one found the
+    gap above. The owner sent it, 2026-11-26, to the session writing the human-intent page
+    (baton#449, `docs/context/human-intent.mdx`). That page splits who drives a session (the
+    dashboard is always a person; the owner, 2026-11-26, as that session records it: "Human
+    drive (policy may dictate hardware-key proof of this, but the assumption is that this is
+    always a person)") from how strongly that is proven, which is the credential's, and implied
+    the narrowing: R-BTN-185 counts a session as `human` only when Cloudflare Access or a
+    `human_only` key's code opened it; an ordinary key's one-time link or code proves only that
+    key's role and satisfies no human-only list; a sign-in path not named, the proposed forge
+    sign-in among them, proves no human until the owner rules on it. R-BTN-188's `human` entry,
+    R-BTN-57's administrator line and S-BTN-324 follow. B-340 builds it (its item 5); until
+    then every session acts as `human`. Rejected: keeping the rule and naming custody of every
+    ordinary key that can open a session, which the split exists to avoid; and sessions never
+    satisfying human-only lists, against "the dashboard is always a person".
   - **The protection checker.** The owner, 2026-11-26, chose a grant role over a mark. B-189's
     amendment of 2026-11-24 had already retired the protection checker, grant roles and the
     checker mark, so nothing changes here.

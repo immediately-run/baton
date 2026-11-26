@@ -443,7 +443,8 @@ confines a leg's credentials; a compromised forge; and a compromised Baton.
     - `owner`: any owner key of the repository, and its session; an administrator's key or
       session (R-BTN-57) matches an `owner` entry on every repository;
     - `human`: any `human_only` key that is an owner of the repository and meets `human_key`; and
-      any dashboard session — an administrator's, an owner's or a member's — for an action its
+      any dashboard session that acts as `human` (R-BTN-185) — an administrator's, an owner's or
+      a member's — for an action its
       role may take, carrying R-BTN-185's security-key touch where `human_key` is `hardware`;
     - `key:<fingerprint>`: that one key while it is an owner of the repository, meeting
       `human_key` when it is a `human_only` key, and a session of that key.
@@ -660,7 +661,8 @@ confines a leg's credentials; a compromised forge; and a compromised Baton.
 - **R-BTN-185 (human-only credentials and human sessions).** `status: partly B-136 B-340` A human gate — a `human`
   attestation or its revocation, and every action whose approver list in the repository's policy
   is human-only (R-BTN-188) — is satisfied by a human-only key's own signature, or by a person's
-  dashboard session: a person using the dashboard is a human. A human's merge is the forge's,
+  dashboard session that proves a human (below): a person using the dashboard is a human, and
+  the sign-in that opened the session says how strongly. A human's merge is the forge's,
   recognised by the policy's `human_identity`.
   - **The human-only key** is an SSH key registered `human_only` and used for nothing else. A
     tenant's first is a line of the host's `BATON_HUMAN_KEYS` configuration, as administrators
@@ -676,15 +678,20 @@ confines a leg's credentials; a compromised forge; and a compromised Baton.
     verified (R-BTN-189).
   - Until FIDO attestation verification is built, no key, including a break-glass line, meets
     the repository's `hardware` minimum. A stored attestation marker alone is not evidence.
-  - **A session is a human.** Every administrator's, owner's and member's session (R-BTN-155)
-    acts as `human` beside its key's role: its attestations are recorded with writer `human` and
-    its role, and whether the act carried the touch below; a policy entry admitting either
+  - **A session is a human, as strongly as its sign-in proves.** An administrator's, owner's or
+    member's session (R-BTN-155) opened through Cloudflare Access, or by a code a `human_only` key
+    binds, acts as `human` beside its key's role. One opened by an ordinary key's one-time link or
+    sign-in code carries only that key's proof: it acts as its key's role, never as `human`, and
+    satisfies no human-only list. A sign-in path not named here proves no human. A session that
+    acts as `human` has its attestations recorded with writer `human` and its role, and whether
+    the act carried the touch below; a policy entry admitting either
     counts them, an untouched one as `human` only while the repository's `human_key` is `any`.
     Which approver entries it matches is R-BTN-188's. It gains no action its role lacks.
     Baton cannot tell a browser a person drives from one an agent drives, so whoever can open a
-    session — through Cloudflare Access, a one-time link, or a code a key binds — can act as a
-    human; under `any` that is a promise about the deployment's sign-in, as a human-only key's
-    custody is.
+    session through Cloudflare Access or with a `human_only` key can act as a human; under `any`
+    that is a promise about the deployment's sign-in, as a human-only key's custody is.
+    **Not built** (B-340): Baton recording which sign-in opened a session; until it does, every
+    session acts as `human`.
   - **Under `hardware`**, a session's human act — one that counts only because the session is
     `human` — also carries a WebAuthn assertion; without a valid one it is refused `forbidden`.
     - **The credential** is registered for one key of a person role by a human-only key's
