@@ -1,4 +1,9 @@
-import { boundedJson } from './validate';
+import { boundedJson, GIT_SHA, isSourceBranch } from './validate';
+
+/** The owner's ruling (2026-11-26, R-BTN-134): a branch source has no trust model, and wherever
+ *  Baton shows one it says so. `repository` is named where the reader knows it. */
+export const unpinnedSourceWarning = (course: string, s: { branch: string; sha?: string; repository?: string }): string =>
+  `course ${course} follows branch ${s.branch}${s.repository ? ` of ${s.repository}` : ''}${s.sha ? ` (resolved to ${s.sha.slice(0, 10)})` : ''}: unpinned, no trust check — for development only; pin a commit for production`;
 // board.ts — what a board snapshot becomes in the `tickets` cache (BATON_SPEC §4, §7.1,
 // R-BTN-33/35). Pure: the core does the SQL, on either host. Only filter fields survive — an item's
 // body, Status notes, exit criteria and PR list never reach Baton; the dashboard links each
@@ -157,6 +162,8 @@ export interface BoardPayload {
   course_data?: Record<string, unknown>;
   /** The course registry (R-BTN-48, §7.1); absent, the courses in force stay. */
   registry?: RegistryEntry[];
+  /** R-BTN-131: branch-backed courses and the exact source commits used by this reading. */
+  course_sources?: Record<string, { branch: string; sha: string }>;
   /** §6.8: the transcript repositories from `baton.json`; absent, the defaults stand. */
   transcript_repos?: string[];
   /** §4.4 (R-BTN-191): the sync's attestations, this run's observation. Only `std:decision@1` —
@@ -339,6 +346,15 @@ export function checkPayload(body: unknown, repo?: string): BoardPayload {
     if (!isObj(p.course_data)) throw new BatonError('invalid-params', 'course_data must be keyed by course');
     boundedJson(p.course_data, 'course_data', 65_536);
   }
+  if (p.course_sources !== undefined) {
+    if (!isObj(p.course_sources)) throw new BatonError('invalid-params', 'course_sources must be keyed by course');
+    boundedJson(p.course_sources, 'course_sources', 65_536);
+    for (const [id, v] of Object.entries(p.course_sources)) {
+      if (!COURSE_ID.test(id) || !isObj(v) || Object.keys(v).length !== 2 || !isSourceBranch(v.branch) || typeof v.sha !== 'string' || !GIT_SHA.test(v.sha)) {
+        throw new BatonError('invalid-params', `course_sources: expected a course id and {branch, sha} with a valid branch and a full commit`);
+      }
+    }
+  }
   if (p.tickets !== undefined) {
     if (p.state !== undefined || p.ready !== undefined) throw new BatonError('invalid-params', 'a post is either the normative tickets or the interim state.items, not both');
     checkNormative(p, repo);
@@ -425,7 +441,11 @@ export function checkPayload(body: unknown, repo?: string): BoardPayload {
       if (u.fields !== undefined && (!Array.isArray(u.fields) || !u.fields.every((x) => x === 'EXPEDITE'))) badControl(`${at}.fields`, 'may name only EXPEDITE');
     }
   }
-  return p.registry === undefined ? p : { ...p, registry: checkRegistry(p.registry) };
+  const registry = p.registry === undefined ? undefined : checkRegistry(p.registry);
+  if (Object.keys(p.course_sources ?? {}).some((id) => !registry?.some((e) => e.id === id))) {
+    throw new BatonError('invalid-params', 'every course_sources entry needs a matching registry entry');
+  }
+  return registry === undefined ? p : { ...p, registry };
 }
 
 /** A forge path as `repos` carries it (R-BTN-92): `owner/name`, a GitLab `group/…/name`; docs'

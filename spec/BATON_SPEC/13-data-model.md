@@ -99,7 +99,7 @@ checked in the transaction that adds or first accepts a key (§12.1).
 
 | Table | Key | Columns | Purpose |
 |---|---|---|---|
-| `board_snapshots` | `(repository_id, sha)` | `parent_sha`, `received_at`, `ticket_count`, `posted_by` | Accepted posts (R-BTN-11, R-BTN-102) |
+| `board_snapshots` | `(repository_id, sha)` | `parent_sha`, `received_at`, `ticket_count`, `posted_by`, `course_sources_json` | Accepted posts (R-BTN-11, R-BTN-102, R-BTN-134) |
 | `board_head` | `repository_id` | `fleet_version`, `course_data` (opaque JSON by course), `sha`, `observation`, `last_handed_out`, `observation_issued_at`, `stations_observation` (the latest accepted snapshot to post stations), `source_kind`, `source_versions` (the last accepted post's ticket-source declaration) | The head and the observation counter (R-BTN-11, R-BTN-62, R-BTN-70, R-BTN-74, R-BTN-150) |
 | `sync_quota` | `(issuer, kind)` | `hour`, `used` | Each sync issuer's posts this hour, by kind; a refused post uses the quota too (R-BTN-62, R-BTN-187) |
 | `sync_lapses` | `(repository_id, issuer)` | `day`, `lapses`, `at` | Observations an issuer let expire, counted per day, for Needs you; a revoked sync key's row goes (R-BTN-62, R-BTN-187) |

@@ -397,16 +397,35 @@ Each course `init` scaffolds names its source in `.baton/baton.json`, in immedia
 form: provider, owner, repository, commit, then the course.
 
 ```
-"source": "github/immediately-run/baton/<commit>/create-pr"
+"source": "github/immediately-run/baton/<commit>/standard-create-pr"
 ```
 
-The commit is the CLI's own, the one that wrote the files, so the name always means one graph.
-The sync holds the course to it: if `.baton/courses/create-pr/course.json` differs from that
-commit's, nothing is posted until `npx baton repo init --course create-pr --force` restores it.
-Upgrading is re-running `init` with a newer CLI: it moves the workflow's pin and every course's
-source together, rewriting the course files and leg scripts and keeping your instructions and
-overrides. For now a source names the CLI's own repository; a course from another repository is
-refused as not supported yet.
+The default pin names the CLI's commit, so the name always means one graph. Sync and the runner
+load the course from its source, not from a home copy. Re-running `init` with a newer CLI moves
+the workflow and pinned standard sources without overwriting instructions or overrides.
+
+During development a source may name a branch instead of a commit:
+`baton repo init --course create-pr --source-branch main` writes
+`github/immediately-run/baton/main/standard-create-pr`, and a hand-written entry may name a branch
+of any repository. Each sync uses the committed selection to resolve the branch anew and loads
+`.baton/courses/<course>/` at that exact commit; the Sync read shows the branch and commit used.
+Claims keep their original resolved commit and fail closed if it is no longer reachable from the
+branch. If the course's graph or required facts change, advance the home commit so Baton can
+accept the new registry.
+
+There is no trust model for a branch source: no default-branch ancestry is checked, and the
+course runs whatever anyone who can push to that branch puts there. So every reader says so —
+`init`, `baton course show`, each sync and each claim:
+
+```
+baton: warning: course create-pr follows branch main of immediately-run/baton (resolved to 1a2b3c4d5e): unpinned, no trust check — for development only; pin a commit for production
+```
+
+The sync workflow turns the line into an annotation, and the Sync read carries the same warning
+beside the branch and commit. Branch fetches work with public sources by default; a private
+source needs separate Git read access configured outside the checkout. The sync's forge API token
+and the CLI checkout's local credentials are not reused. Pin a commit for production, and always
+for a protected home.
 
 Run `baton repo init --check` with the CLI built from the recorded source commit (or a source
 checkout with unmodified build inputs) to compare the generated leg scripts in the working tree.

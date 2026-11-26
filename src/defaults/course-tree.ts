@@ -4,15 +4,23 @@ import { createHash, randomBytes } from 'node:crypto';
 import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { COURSE_ID } from '../core/course';
+import { GIT_SHA } from '../core/validate';
 import { GIT_NONINTERACTIVE_ENV } from '../client/git-env.mjs';
 import type { CourseSource } from './course-source';
 
 const gitEnv = () => ({ ...process.env, ...GIT_NONINTERACTIVE_ENV, GIT_NO_REPLACE_OBJECTS: '1' });
-const options = () => ({ env: gitEnv(), maxBuffer: 16 << 20, killSignal: 'SIGKILL' as const });
+function isolatedGitEnv() {
+  const env = gitEnv();
+  for (const name of execFileSync('git', ['rev-parse', '--local-env-vars'], { encoding: 'utf8' }).trim().split('\n')) {
+    delete (env as NodeJS.ProcessEnv)[name];
+  }
+  return { ...env, GIT_NO_REPLACE_OBJECTS: '1' };
+}
+const options = (env = gitEnv()) => ({ env, maxBuffer: 16 << 20, killSignal: 'SIGKILL' as const });
 
-function git(cwd: string | undefined, ...args: string[]): Promise<string> {
+function git(env: ReturnType<typeof gitEnv>, cwd: string | undefined, ...args: string[]): Promise<string> {
   return new Promise((resolve, reject) => {
-    execFile('git', args, { ...options(), cwd, timeout: 120_000 }, (err, stdout, stderr) => {
+    execFile('git', args, { ...options(env), cwd, timeout: 120_000 }, (err, stdout, stderr) => {
       if (err) reject(new Error(`git ${args[0]}: ${stderr.trim() || err.message}`));
       else resolve(stdout);
     });
@@ -30,10 +38,10 @@ export interface CourseFile {
   read(): Buffer;
 }
 
-export function courseFiles(root: string, sha: string, id: string): CourseFile[] {
+export function courseFiles(root: string, sha: string, id: string, env?: ReturnType<typeof gitEnv>): CourseFile[] {
   const base = coursePath(id);
   const prefix = `${base}/`;
-  const call = (...args: string[]) => execFileSync('git', ['-C', root, ...args], { ...options(), timeout: 30_000, stdio: ['ignore', 'pipe', 'pipe'] });
+  const call = (...args: string[]) => execFileSync('git', ['-C', root, ...args], { ...options(env), timeout: 30_000, stdio: ['ignore', 'pipe', 'pipe'] });
   return call('ls-tree', '-rz', sha, '--', base).toString('utf8').split('\0').filter(Boolean).map((line) => {
     const tab = line.indexOf('\t');
     const [mode, , object] = line.slice(0, tab).split(' ');
@@ -47,7 +55,10 @@ export const isOverride = (path: string): boolean => /^legs\/[a-z][a-z0-9-]*(?:\
 
 /** One bare object cache per upstream. Resolve HEAD afresh, fetch by branch (never by id),
  * and prove the pin against the head returned by that very fetch. No tree is reused. */
-export async function fetchCourse(src: CourseSource, cache: string): Promise<CourseFile[]> {
+export async function fetchCourse(src: CourseSource, cache: string, resolved?: string): Promise<{ files: CourseFile[]; sha: string }> {
+  if (resolved !== undefined && !GIT_SHA.test(resolved)) throw new Error('invalid resolved course commit');
+  const env = src.pinned ? gitEnv() : isolatedGitEnv();
+  const run = (cwd: string, ...args: string[]) => git(env, cwd, ...args);
   const slug = `${src.namespace}/${src.repository}`.toLowerCase();
   const url = `https://github.com/${slug}.git`;
   const repo = join(cache, ...slug.split('/'));
@@ -55,26 +66,29 @@ export async function fetchCourse(src: CourseSource, cache: string): Promise<Cou
     mkdirSync(dirname(repo), { recursive: true, mode: 0o700 });
     const tmp = mkdtempSync(join(dirname(repo), '.init-'));
     try {
-      await git(tmp, 'init', '--bare', '-q');
+      await run(tmp, 'init', '--bare', '-q');
       try { renameSync(tmp, repo); } catch (e) { if (!existsSync(repo)) throw e; }
     } finally {
       rmSync(tmp, { recursive: true, force: true });
     }
   }
-  const remoteHead = await git(repo, 'ls-remote', '--symref', url, 'HEAD');
-  const branch = /^ref: (refs\/heads\/[^\t\n]+)\tHEAD$/m.exec(remoteHead)?.[1];
+  const branch = src.pinned
+    ? /^ref: (refs\/heads\/[^\t\n]+)\tHEAD$/m.exec(await run(repo, 'ls-remote', '--symref', url, 'HEAD'))?.[1]
+    : `refs/heads/${src.ref}`;
   if (!branch) throw new Error(`${slug}: the remote did not name a default branch`);
   // An isolated ref allows concurrent claims to validate against their own fetch.
   const ref = `refs/baton/fetch/${randomBytes(12).toString('hex')}`;
   try {
-    await git(repo, 'fetch', '-q', '--no-tags', '--no-write-fetch-head', url, `+${branch}:${ref}`);
-    if ((await git(repo, 'cat-file', '-t', src.ref)).trim() !== 'commit') throw new Error(`${src.ref} is not a commit`);
-    await git(repo, 'merge-base', '--is-ancestor', src.ref, ref).catch(() => {
-      throw new Error(`${src.ref} is not an ancestor of ${slug}'s ${branch}`);
+    await run(repo, 'fetch', '-q', '--no-tags', '--no-write-fetch-head', url, `+${branch}:${ref}`);
+    const requested = src.pinned ? src.ref : resolved;
+    const sha = requested ?? (await run(repo, 'rev-parse', '--verify', `${ref}^{commit}`)).trim();
+    if ((await run(repo, 'cat-file', '-t', sha)).trim() !== 'commit') throw new Error(`${sha} is not a commit`);
+    if (requested) await run(repo, 'merge-base', '--is-ancestor', sha, ref).catch(() => {
+      throw new Error(`${sha} is not an ancestor of ${slug}'s ${branch}`);
     });
-    return courseFiles(repo, src.ref, src.course);
+    return { files: courseFiles(repo, sha, src.course, env), sha };
   } finally {
-    await git(repo, 'update-ref', '-d', ref);
+    await run(repo, 'update-ref', '-d', ref);
   }
 }
 

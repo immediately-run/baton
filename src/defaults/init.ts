@@ -5,7 +5,8 @@ import { dirname, join, relative } from 'node:path';
 import { DEFAULT_URL } from '../client/config.mjs';
 import { HARNESS_ADAPTERS, selectHarness } from '../runner/harness';
 import { DEFAULT_BRANCH_PATTERN, DEFAULT_CREATE_PR_REVIEW_ROUNDS, REVIEW_DEFAULTS_PATH } from './course-pr';
-import { parseSource, printSource } from './course-source';
+import { parseSource, printSource, unpinnedWarning } from './course-source';
+import { isSourceBranch } from '../core/validate';
 import { DEFAULT_COURSE, builtIn, scaffoldable, type BuiltIn } from './courses';
 import { cliPin, cliSelf, cliVersion, courseEntry, courseFileText, parsePin, sameRepo, type BatonJson, type CourseEntry } from './repo-source';
 import { OVERRIDE_SUFFIX } from './stub-config';
@@ -122,6 +123,7 @@ async function checkStubs(root: string, settings: BatonJson | null, named: strin
 export async function initMain(argv: string[], io: { root?: string; log?: (l: string) => void } = {}): Promise<number> {
   const log = io.log ?? ((l: string) => process.stdout.write(`${l}\n`));
   let named: string | null = null;
+  let sourceBranch: string | null = null;
   let eject: 'tickets' | 'stations' | null = null;
   let pin: string | null = null;
   let force = false;
@@ -141,6 +143,7 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
       return v;
     };
     if (a === '--course') named = value();
+    else if (a === '--source-branch') sourceBranch = value();
     else if (a === '--pin') pin = value();
     else if (a === '--force') force = true;
     else if (a === '--check') check = true;
@@ -204,6 +207,10 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
   const own = cliSelf();
   const pinned = pin ? parsePin(pin) : null;
   const self = own ?? pinned;
+  if (sourceBranch !== null) {
+    if (!isSourceBranch(sourceBranch)) throw new Error('--source-branch: expected a valid branch name, not a commit');
+    if (!named || !self || ownCourse || prune || eject) throw new Error('--source-branch requires a sourced --course and cannot be combined with --own, --prune or --eject');
+  }
   const sourceOf = (id: string): string | null => (self ? printSource({ provider: 'github', namespace: self.namespace, repository: self.repository, ref: self.sha, course: `standard-${id}` }) : null);
   const kept: string[] = [];
   /** Write `rel` when it is missing, or when `rewrite` (Baton's file, and its course is being
@@ -236,7 +243,7 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
     if (!c.source || !self) return false;
     const src = parseSource(c.source);
     // An entry whose source names another course than its id is the sync's to refuse, not init's to move.
-    return sameRepo(src, self) && src.ref !== self.sha && [c.id, `standard-${c.id}`].includes(src.course) && builtIn(c.id) != null;
+    return src.pinned && sameRepo(src, self) && src.ref !== self.sha && [c.id, `standard-${c.id}`].includes(src.course) && builtIn(c.id) != null;
   };
   const moveSource = (c: CourseEntry): CourseEntry => {
     const source = sourceOf(c.id)!;
@@ -276,7 +283,9 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
   for (const leg of [...overrides, ...instructions]) {
     if (!runnerLegs(b).includes(leg)) throw new Error(`${overrides.includes(leg) ? '--override' : '--instructions'} ${leg}: ${b.id} has no such leg — its legs are ${runnerLegs(b).join(', ')}`);
   }
-  const entry = { ...courseEntry(b), ...(!ownCourse && sourceOf(b.id) ? { source: sourceOf(b.id)! } : {}) };
+  const pinSource = sourceOf(b.id);
+  const selected = pinSource && sourceBranch !== null ? printSource({ ...parseSource(pinSource), ref: sourceBranch }) : pinSource;
+  const entry = { ...courseEntry(b), ...(!ownCourse && selected ? { source: selected } : {}) };
   let settings: BatonJson;
   let changed: string | null = null;
   let commandMoved = false;
@@ -286,8 +295,10 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
     // `--force` this course's own entry is replaced — never the file, which holds the others.
     const courses = existing.courses ?? [{ id: existing.default_course ?? DEFAULT_COURSE, version: 1 }];
     const listed = courses.some((c) => c.id === b.id);
+    const followsBranch = sourceBranch !== null && courses.some((c) => c.id === b.id && c.source !== selected);
     const next = courses.map((c) => {
       if (c.id === b.id && force) return entry;
+      if (c.id === b.id && followsBranch) return { ...c, source: selected! };
       if (moves(c)) {
         moved.push(c.id);
         return moveSource(c);
@@ -304,9 +315,9 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
     const now = agentCommand ?? (agentNamed || was === 'echo' ? agent.agentCommand : null);
     if (now != null && now !== was) settings.agent_command = now;
     commandMoved = now != null && now !== was;
-    if (!listed || force || moved.length || commandMoved) {
+    if (!listed || force || followsBranch || moved.length || commandMoved) {
       changed = [
-        !listed || force || moved.length ? `baton: .baton/baton.json lists course ${b.id}${listed ? (force ? ' afresh' : '') : ' now'}${moved.length ? `; ${moved.join(', ')} now from ${self!.sha.slice(0, 10)}` : ''}` : null,
+        !listed || force || followsBranch || moved.length ? `baton: .baton/baton.json lists course ${b.id}${listed ? (force ? ' afresh' : '') : ' now'}${moved.length ? `; ${moved.join(', ')} now from ${self!.sha.slice(0, 10)}` : ''}` : null,
         commandMoved ? `baton: agent_command ${was === 'echo' ? '"echo" — the no-op stub — ' : ''}is now ${agentCommand != null ? 'the command --agent-command named' : `the ${agent} command`}` : null,
       ].filter(Boolean).join('; ');
     } else kept.push('.baton/baton.json');
@@ -322,6 +333,10 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
   }
   refusePin(settings.courses ?? []);
   if (changed) log(changed);
+  // B-315 (R-BTN-134): every branch source this home names, said at every init.
+  for (const c of settings.courses ?? []) {
+    if (c.source && !parseSource(c.source).pinned) log(unpinnedWarning(c.id, parseSource(c.source)));
+  }
   if (!kept.includes('.baton/baton.json')) {
     mkdirSync(dirname(settingsPath), { recursive: true });
     writeFileSync(settingsPath, `${JSON.stringify(settings, null, 2)}\n`);
@@ -382,7 +397,7 @@ async function pruneCourses(root: string, courses: CourseEntry[], log: (line: st
   try {
     for (const entry of courses) {
       if (entry.source === undefined) continue;
-      const src = await resolveSource(entry.id, entry.source, scratch);
+      const src = await resolveSource(entry.id, entry.source, scratch, undefined, log);
       const dir = join(root, coursePath(entry.id));
       // Do not follow links when deciding what to delete.
       if (!['.baton', '.baton/courses', coursePath(entry.id)].every((p) =>
@@ -427,7 +442,7 @@ export async function showCourseMain(argv: string[], root = process.env.BATON_HO
   if (!entry) throw new Error(`.baton/baton.json does not list ${id}`);
   const scratch = mkdtempSync(join(tmpdir(), 'baton-show-'));
   try {
-    const src = entry.source === undefined ? null : await resolveSource(id, entry.source, scratch);
+    const src = entry.source === undefined ? null : await resolveSource(id, entry.source, scratch, undefined, log);
     const show = (path: string, text: string) => log(`--- ${path} ---\n${text.trimEnd()}`);
     if (src?.standard) {
       if (!leg) show('course.json', src.graph);
@@ -511,6 +526,12 @@ jobs:
           node .baton-cli/cli/baton.mjs repo sync --latest main 2>&1 | tee sync.log
         env:
           GITHUB_TOKEN: \${{ secrets.GITHUB_TOKEN }}
+      - name: Annotate unpinned course sources
+        if: \${{ !cancelled() }}
+        run: |
+          if [ -f sync.log ]; then
+            grep -E '^baton: warning: course [a-z0-9-]+ follows branch ' sync.log | sed 's/^baton: warning: /::warning title=unpinned course source::/' || true
+          fi
       # B-89: a run that posted nothing is an annotation, never a green check — a held board
       # from another run's reading in flight (\`busy\`), or any failed post. The step above
       # fails on a failed post, so this runs even then (\`!cancelled()\`).

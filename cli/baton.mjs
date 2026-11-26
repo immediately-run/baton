@@ -113,7 +113,7 @@
 //                its leg without a claim only while Baton is unreachable, reported on its return
 //
 //   baton repo sync [--root DIR] [--url URL] [--latest BRANCH] [--facts FILE] [--sync-key FILE] [--busy-retry S]
-//   baton repo init [--course C] [--agent opencode|claude-code] [--agent-command CMD] [--override LEG]…
+//   baton repo init [--course C] [--source-branch BRANCH] [--agent opencode|claude-code] [--agent-command CMD] [--override LEG]…
 //                   [--eject tickets|stations] [--pin owner/name@commit] [--force]
 //   baton repo init --check [--course C]   — compare generated leg stubs to their pinned source
 //   baton repo migrate-markers [--root DIR]   — the one-time fold of the retired .baton/markers.jsonl into the tickets (B-100)

@@ -11,7 +11,8 @@ import { DEFAULT_URL } from '../client/config.mjs';
 import { API_KEY, signingKey } from '../client/sign.mjs';
 import { DEFAULT_BRANCH_PATTERN, DEFAULT_CREATE_PR_REVIEW_ROUNDS, REVIEW_DEFAULTS_PATH, readReviewDefault, matchPatterns, sameRepo as sameRepoName, ticketOwns, type BatonRecord, type CodeRepoEntry, type PrFact, type StationsResult } from './course-pr';
 import { commitsOf, type BranchCommit } from './pr-markers';
-import { parseSource } from './course-source';
+import { parseSource, unpinnedWarning } from './course-source';
+import type { BoardPayload } from '../core/board';
 import { stampMarkdownVersions } from './ticket-versions';
 import { closeTicket, closesByTicket, closesOfCommits, exec, machineOf, setMachineKeys, stationsTickets, ticketsBranch, CLOSE_TIMEOUT_MS } from './ticket-state';
 
@@ -224,6 +225,7 @@ async function readBoard(root: string, at: string, batonJson: BatonJson, args: S
   // with no station function fails the sync — nothing is posted).
   const homeEntries = batonJson.courses ?? [{ id: batonJson.default_course ?? DEFAULT_COURSE, version: 1 }];
   const sources = new Map<string, Awaited<ReturnType<typeof resolveSource>>>();
+  const courseSources: NonNullable<BoardPayload['course_sources']> = Object.create(null);
   const courses: CourseEntry[] = [];
   for (const c of homeEntries) {
     if (c.source === undefined) { courses.push(c); continue; }
@@ -234,7 +236,8 @@ async function readBoard(root: string, at: string, batonJson: BatonJson, args: S
       if (run && runs.has(run)) throw new Error(`${coursePath(c.id)}/${f.path}: multiple run overrides for ${run}`);
       if (run) runs.add(run);
     }
-    const source = await resolveSource(c.id, c.source, args.sourceCache!);
+    const source = await resolveSource(c.id, c.source, args.sourceCache!, undefined, log);
+    if (source.resolution) courseSources[c.id] = source.resolution;
     sources.set(c.id, source);
     courses.push({ ...source.entry, ...c });
   }
@@ -441,6 +444,7 @@ async function readBoard(root: string, at: string, batonJson: BatonJson, args: S
       // their raw markers may be promoted to a std:git.output attestation here.
       registry, tickets: result.tickets.map((t) => sourceKind === 'markdown' && t.depends_at ? { ...t, depends_on: [] } : t),
       closed: result.closed, stations, markers, course_data: courseData, ...controlField,
+      ...(Object.keys(courseSources).length ? { course_sources: courseSources } : {}),
       ...(attestations.length ? { attestations } : {}),
     },
     outputEvidence,
@@ -453,7 +457,7 @@ export class CourseSourceUnavailable extends Error {}
 export function builtInSource(id: string, source: string): BuiltIn | undefined {
   const src = parseSource(source);
   const self = cliSelf();
-  if (!self || !sameRepo(src, self) || src.ref.toLowerCase() !== self.sha) return;
+  if (!src.pinned || !self || !sameRepo(src, self) || src.ref !== self.sha) return;
   const b = builtIn(src.course.replace(/^standard-/, ''));
   return b?.id === id ? b : undefined;
 }
@@ -467,18 +471,26 @@ function packagedSource(dir: string, prefix = ''): CourseFile[] {
   });
 }
 
-export async function resolveSource(id: string, source: string, cache: string): Promise<{
+/** Where a branch source's warning goes when the caller names no log: stderr, never silence. */
+const warnOnStderr = (line: string): void => { process.stderr.write(`${line}\n`); };
+
+/** A course from its source (R-BTN-134). A branch source (B-315) is read at `resolved`, or at the
+ * branch's head, with no trust check: `warn` says so each time, naming the commit read. */
+export async function resolveSource(id: string, source: string, cache: string, resolved?: string, warn: (line: string) => void = warnOnStderr): Promise<{
   graph: string; entry: Partial<CourseEntry> & { facts?: string[] }; standard?: BuiltIn; files?: CourseFile[]; legacy?: true;
+  resolution?: { branch: string; sha: string };
 }> {
   const pin = parseSource(source);
   const standard = builtInSource(id, source);
   if (standard && pin.course === id) return { graph: courseFileText(standard), entry: {}, standard };
   try {
+    const fetched = standard ? null : await fetchCourse(pin, cache, resolved);
+    if (!pin.pinned && fetched) warn(unpinnedWarning(id, pin, fetched.sha));
     const files = standard
       ? fromSource()
         ? courseFiles(packageRoot(), pin.ref, pin.course)
         : packagedSource(prebuilt('sources', pin.course))
-      : await fetchCourse(pin, cache);
+      : fetched!.files;
     const text = (path: string): string | undefined => files.find((f) => f.path === path && f.regular)?.read().toString('utf8');
     const graph = text('course.json');
     if (graph === undefined) throw new Error(`${coursePath(parseSource(source).course)}/course.json is missing`);
@@ -490,9 +502,11 @@ export async function resolveSource(id: string, source: string, cache: string): 
       files.push({ path: 'sync.mjs', regular: true, read: () => readFileSync(file) });
       return { graph, entry: { facts: ['prs'] }, files, legacy: true };
     }
-    return { graph, entry: JSON.parse(text('entry.json') ?? '{}'), files };
+    return { graph, entry: JSON.parse(text('entry.json') ?? '{}'), files,
+      ...(!pin.pinned && fetched ? { resolution: { branch: pin.ref, sha: fetched.sha } } : {}) };
   } catch (e) {
-    throw new CourseSourceUnavailable(`cannot load ${source}; CLI commit ${cliSelf()?.sha ?? '(unknown)'}: ${(e as Error).message}`);
+    const detail = pin.pinned ? `cannot load ${source}; CLI commit ${cliSelf()?.sha ?? '(unknown)'}` : `cannot load course source branch ${pin.ref} (${source})`;
+    throw new CourseSourceUnavailable(`${detail}: ${(e as Error).message}`);
   }
 }
 
