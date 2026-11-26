@@ -33,7 +33,7 @@ The channel says nothing about it:
 
 | Channel | Who drives |
 |---|---|
-| The dashboard | always a person: someone signed in. A session acts as `human` only as strongly as its sign-in proves a person (R-BTN-185); a forge sign-in proves none unless the owner rules otherwise (§2). |
+| The dashboard | always a person: someone signed in. For a human-only list, a session counts as `human` only as strongly as its sign-in proves a person (R-BTN-185): under `human_key: any`, only one Cloudflare Access opened or a `human_only` key's code opened, never an ordinary key's link or code, nor a forge sign-in unless the owner rules otherwise; under `hardware`, every session, each act with its touch (§2). |
 | The CLI | the key's: a person's own SSH key is human-driven; a runner's key, in a sandbox or anywhere, is agent-driven. |
 | MCP | the credential's: a person's **interactive grant** is human-driven; a key minted for an agent's purpose is agent-driven. |
 
@@ -76,7 +76,7 @@ every agent's reach, and the policy may require that key to be a hardware key.
 
 | Credential | The proof it carries |
 |---|---|
-| a dashboard session | the sign-in that opened it |
+| a dashboard session | the sign-in that opened it; under `hardware`, a touch for each act |
 | a request the CLI signs with an SSH key | that key; a hardware key, a touch for each signature |
 | an MCP bearer or OAuth token | the token alone: whose credential it is, never that the person was present |
 
@@ -152,8 +152,7 @@ team is a pull from Needs you, or one push to a channel the team already shares.
 - **Built:** runner keys and their grants; owner and administrator keys; dashboard sessions for
   administrators, and in part for owners and members (R-BTN-155; members, R-BTN-204, specified); the `human-operator` capability; `human_only` keys and the policy's human-only lists;
   `human_identity`.
-- **Proposed:** owners' dashboard sessions and MCP
-  ([people and dashboard](../../spec/proposals/people-and-dashboard.md)), with interactive grants
+- **Proposed:** MCP ([people and dashboard](../../spec/proposals/people-and-dashboard.md)), with interactive grants
   and agent-driven keys; people, their linked identities and the roster
   ([§5](../../spec/proposals/people-and-dashboard.md#5-people-identities-and-the-roster)); session
   claims, and creating then claiming a ticket at once
