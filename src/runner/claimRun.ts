@@ -10,7 +10,8 @@ import { checkRaise, dispositionOf, errorClassOf, raiseRestarts, SEVERITIES, typ
 import type { ScopeAction } from '../core/scope';
 import { BatonRefusal, batonUnreachable } from './api';
 import { outsideScope, pushesBetween, readRefState, type RefState } from './audit';
-import { advanceHome, claimScratch, courseOf, dropCourse, ensureSha, extractTicketSource, loadCourse, prepareClone, readHead, type CourseLoad } from './home';
+import { CourseSourceUnavailable } from '../defaults/cli';
+import { sourceContext, advanceHome, claimScratch, courseOf, dropCourse, ensureSha, extractTicketSource, loadCourse, prepareClone, readHead, type CourseLoad } from './home';
 import type { ExecOptions, Executor, Handle, Running, SessionKind } from './executor';
 import { LegChannel, channelPath, type ChannelAnswer, type ChannelRequest } from './channel';
 import { MIN_SECRET_BYTES, createLegMasker, failureDetail, maskLegOutput, namesASecret, secretValues } from './mask';
@@ -708,7 +709,8 @@ export class ClaimRun {
       // unpenalised): an unsigned course change keeps the last signed course in force, and a
       // course no owner signed does not run.
       const courseSha = typeof signedControl.course === 'string' && signedControl.course !== '' ? signedControl.course : claim.snapshot_sha as string;
-      course = loadCourse(this.o.home, courseSha, this.claimCourse(claim));
+      const settingsSha = signedControl.agent_command || String(claim.snapshot_sha);
+      course = await loadCourse(this.o.home, courseSha, this.claimCourse(claim), settingsSha);
       // B-228: the legs start from the snapshot's code — the home fast-forwarded to it when it
       // can be; otherwise it runs as it stands, and the log says why. A reattached leg's tree is
       // its running session's, and a claim in a clone of its own is put there below (B-188).
@@ -724,6 +726,10 @@ export class ClaimRun {
       }
     } catch (e) {
       this.o.log(`baton: the claim's course would not load (${msg(e)})`);
+      if (e instanceof CourseSourceUnavailable) {
+        const detail = (failureDetail(msg(e), this.legSecrets) ?? 'course source unavailable').replace(/[<>{}]/g, ' ').slice(0, 200);
+        return await this.finish(claimId, { end_reason: 'released:cannot-finish:capability', reached: claim.station, detail, ...(claim.legs?.[0] ? { next: claim.legs[0] } : {}) }, null);
+      }
       return await this.finish(claimId, { end_reason: 'released:stale-board', reached: claim.station, ...(claim.legs?.[0] ? { next: claim.legs[0] } : {}) }, null);
     }
     // R-BTN-72 (B-188): a claim beside others works in a clone of its own — its own git dir, put
@@ -908,6 +914,7 @@ export class ClaimRun {
       claim: { id: claimId, nonce: claim.nonce, station: at },
       leg: legName, run, ...(runId ? { run_id: runId } : {}),
       snapshot: { sha: claim.snapshot_sha, path: gitPath, next: nextLegs },
+      ...sourceContext(course),
       // B-127: the owner-signed commits a verified board post named — where the repository
       // requires signed control, the legs read `agent_command` and the overrides at these
       // (and the course itself — the graph, these scripts — loaded at the `course` one),
@@ -1771,6 +1778,7 @@ export class ClaimRun {
         local_order: { by: order.by, ran_at: ranAt },
         leg, run: runNumber(course.graph, [], leg, []),
         snapshot: { sha, path: [], next: [] },
+        ...sourceContext(course),
         handoff: null, resume: null, advice: null,
         checkout: this.o.home, session: null,
         state: this.state.view, runner: this.state.get().runner_id,
