@@ -28,6 +28,9 @@ export default defineConfig([
     '**/dist/', '.wrangler/', '.local/', '_apalache-out/', 'test/.traces/', 'test/fixtures/',
     // Checked-in esbuild bundles: lint the source that produces them.
     '.baton/tickets.mjs', '.baton/courses/create-pr/legs/*.mjs',
+    // B-139's published standard courses: bundled the same way, from src/defaults/.
+    '.baton/courses/standard-*/sync.mjs', '.baton/courses/standard-*/legs/*.mjs',
+    'src/defaults/legacy/*.mjs',
   ]),
   {
     files: ['**/*.{js,mjs,cjs,jsx,ts,mts,cts,tsx}'],

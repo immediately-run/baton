@@ -1,4 +1,14 @@
 {
+  "cli/default-url.d.mts": {
+    "baton/file-name": {
+      "count": 1
+    }
+  },
+  "cli/default-url.mjs": {
+    "baton/file-name": {
+      "count": 1
+    }
+  },
   "scripts/check-standalone.self-test.mjs": {
     "baton/file-name": {
       "count": 1
