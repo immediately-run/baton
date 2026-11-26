@@ -8,6 +8,7 @@ import { boardView } from '../views';
 import type { SessionLinkView } from '../links';
 import type { ReadPrincipal } from '../reads/kit';
 import { liveRepoParam, pathSegment, requireGrant, runnerSecret, ticketOf } from './kit';
+import { requireRunnerKeyPolicy } from '../runnerKeyPolicy';
 import { authenticated } from './principal';
 import { forgeCoordinates } from '../registry';
 
@@ -77,6 +78,7 @@ export async function sequenceRoute(core: Parameters<typeof authenticated>[0] & 
     }
   }
   const take = checkSequenceTake(body);
+  if (runnerKey) requireRunnerKeyPolicy(core.store, cred, repo);
   const home = core.registry.get(repo)!;
   return json({ ...core.sequences.next(repo, kind, take.floor, actor, take.forTicket), home: forgeCoordinates(home) });
 }

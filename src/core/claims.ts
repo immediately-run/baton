@@ -6,8 +6,9 @@
 import { codeReposOf } from './codeRepos';
 import type { Forge } from './forges';
 import type { AdvanceAnswer, ClaimAnswer, CourseResolution, NextLegs } from '../shared/runner-wire';
-import { expiredLeaseSql, isClaimLeaseLive, liveDeclaringRunnerSql, liveRunnerSql, type Lease } from './runnerLiveness';
+import { expiredClaimFenceSql, expiredLeaseSql, isClaimLeaseLive, liveDeclaringRunnerSql, liveRunnerSql, type Lease } from './runnerLiveness';
 import { BatonError } from './http';
+import { runnerKeyAllowed } from './runnerKeyPolicy';
 import { sessionLinkWhy, transcriptUrl, type SessionLinkView } from './links';
 import { groupBy, isUniqueViolation, logEvent, mintRunId, randomHex, type Random } from './db';
 import type { Deprecated } from './deprecated';
@@ -45,7 +46,9 @@ const LEG_TIMEOUT_ACK_MS = 15 * 60_000; // R-BTN-90, S-BTN-52
 export const UNCONFIRMED_FLAG_MS = 6 * 3_600_000; // §6.7
 export const STALLED_MS = 2 * 3_600_000; // §14 Running: alive but no activity for 2 h
 /** §9.5: grace changes the silence-reap deadline, not the runner's last heartbeat. */
-export const CLAIM_LEASE_END_SQL = 'MAX(w.last_seen_at, COALESCE(c.lease_recovered_at, w.last_seen_at)) + w.lease_timeout_ms';
+const RECOVERED_LEASE_END_SQL = 'MAX(w.last_seen_at, COALESCE(c.lease_recovered_at, w.last_seen_at)) + w.lease_timeout_ms';
+/** Recovery never extends a deadline frozen by API-key policy. */
+export const CLAIM_LEASE_END_SQL = `COALESCE(c.api_lease_cap_at, ${RECOVERED_LEASE_END_SQL})`;
 /** §7.5 R-BTN-90: what a `leg_finished` heartbeat re-arms a still-armed deadline to — now plus
  *  40 minutes, once per leg run, so finishing is never the end. */
 const LEG_FINISH_REARM_MS = 40 * 60_000;
@@ -421,6 +424,7 @@ export class Claims {
        WHERE c.credential_id = ? AND g.revoked_at IS NULL`, credential), 'repository_id');
     return Object.fromEntries(this.rows<{ repository_id: string; max_claims: number }>(
       'SELECT repository_id, max_claims FROM runner_grants WHERE credential_id = ? AND revoked_at IS NULL', credential)
+      .filter((g) => runnerKeyAllowed(this.c.store, credential, g.repository_id))
       .map((g) => [g.repository_id, { capabilities: (patterns.get(g.repository_id) ?? []).map((c) => c.capability_pattern as string), max_claims: g.max_claims }]));
   }
 
@@ -2584,14 +2588,14 @@ export class Claims {
   // @model forceReap sha256:d1ff28fc20e8
   forceReap(owner: string, claimId: number, body: unknown) {
     checkConfirm(body);
-    const c = this.rows<{ id: number; ticket_id: string; runner_id: number; status: string }>('SELECT id, ticket_id, runner_id, status FROM claims WHERE id = ?', claimId)[0];
+    const c = this.rows<{ id: number; ticket_id: string; runner_id: number; status: string; api_lease_cap_at: number | null }>('SELECT id, ticket_id, runner_id, status, api_lease_cap_at FROM claims WHERE id = ?', claimId)[0];
     if (!c) throw new BatonError('not-found', 'no such claim');
     if (c.status !== 'active') throw new BatonError('claim-ended', 'the claim already ended');
     const w = this.runner(c.runner_id);
     const now = this.c.now();
-    const alive = isClaimLeaseLive(w, now);
+    const alive = isClaimLeaseLive({ ...w, api_lease_cap_at: c.api_lease_cap_at }, now);
     this.finish(c.id, c.ticket_id, 'reaped', 'reaped:owner', `owner:${owner}`, { fence: alive ? { incarnation: w.incarnation } : null });
-    if (!alive) this.markRunnerReaped(w.id, now);
+    if (!isClaimLeaseLive(w, now)) this.markRunnerReaped(w.id, now);
     return { ok: true, fence_pending: alive };
   }
 
@@ -2627,13 +2631,13 @@ export class Claims {
    *  this runs, so the ends record no want (R-BTN-94). */
   retireReaps(repository: string, actor: string) {
     const now = this.c.now();
-    for (const c of this.rows<{ id: number; ticket_id: string; runner_id: number; kind: string; incarnation: number; last_seen_at: number; lease_timeout_ms: number }>(
-      `SELECT c.id, c.ticket_id, c.runner_id, w.kind, w.incarnation, w.last_seen_at, w.lease_timeout_ms FROM claims c
+    for (const c of this.rows<{ id: number; ticket_id: string; runner_id: number; kind: string; incarnation: number; last_seen_at: number; lease_timeout_ms: number; api_lease_cap_at: number | null }>(
+      `SELECT c.id, c.ticket_id, c.runner_id, w.kind, w.incarnation, w.last_seen_at, w.lease_timeout_ms, c.api_lease_cap_at FROM claims c
        JOIN runners w ON w.id = c.runner_id
        WHERE c.status = 'active' AND substr(c.ticket_id, 1, length(?) + 1) = ? || ':' ORDER BY c.id`, repository, repository)) {
       const alive = isClaimLeaseLive(c, now);
       this.finish(c.id, c.ticket_id, 'reaped', 'reaped:owner', actor, { fence: alive ? { incarnation: c.incarnation } : null });
-      if (!alive) this.markRunnerReaped(c.runner_id, now);
+      if (!isClaimLeaseLive({ ...c, api_lease_cap_at: null }, now)) this.markRunnerReaped(c.runner_id, now);
     }
   }
 
@@ -3063,27 +3067,28 @@ export class Claims {
     this.deadlineDue(now);
     // Silent runners: reaped at their clamped timeout (R-BTN-9), measured from recovery
     // or their last contact, whichever is later.
-    const silent = this.rows<{ id: number; ticket_id: string; runner_id: number; kind: string }>(
-      `SELECT c.id, c.ticket_id, c.runner_id, w.kind FROM claims c JOIN runners w ON w.id = c.runner_id
+    const silent = this.rows<{ id: number; ticket_id: string; runner_id: number; kind: string; runner_expired: number }>(
+      `SELECT c.id, c.ticket_id, c.runner_id, w.kind, (${expiredLeaseSql}) AS runner_expired
+       FROM claims c JOIN runners w ON w.id = c.runner_id
        WHERE c.status = 'active' AND ((w.kind != 'legacy' AND ${CLAIM_LEASE_END_SQL} <= ?)
-                                      OR (w.kind = 'legacy' AND c.reap_after IS NOT NULL AND c.reap_after <= ?))`, now, now);
+                                      OR (w.kind = 'legacy' AND c.reap_after IS NOT NULL AND c.reap_after <= ?))`, now, now, now);
     for (const c of silent) {
       each(c.id, c.ticket_id, () => {
         this.finish(c.id, c.ticket_id, 'reaped', c.kind === 'legacy' ? 'reaped:legacy' : 'reaped:silent', 'alarm', {});
-        this.markRunnerReaped(c.runner_id, now);
+        if (c.kind === 'legacy' || c.runner_expired) this.markRunnerReaped(c.runner_id, now);
       });
     }
     this.reapUnacknowledged(now, each);
     // A deadline fence cannot be shortened by silence or extended by another heartbeat.
     // Other reaps keep their existing clearance path until B-79.
-    const lapsed = this.rows<{ id: number; ticket_id: string; runner_id: number; fence_deadline: number | null }>(
-      `SELECT c.id, c.ticket_id, c.runner_id, c.fence_deadline FROM claims c JOIN runners w ON w.id = c.runner_id
+    const lapsed = this.rows<{ id: number; ticket_id: string; runner_id: number; fence_deadline: number | null; runner_expired: number }>(
+      `SELECT c.id, c.ticket_id, c.runner_id, c.fence_deadline, (${expiredLeaseSql}) AS runner_expired FROM claims c JOIN runners w ON w.id = c.runner_id
        WHERE c.status = 'reaped' AND c.fence_pending = 1
-         AND (c.fence_deadline <= ? OR (c.fence_deadline IS NULL AND ${expiredLeaseSql}))`, now, now);
+         AND (c.fence_deadline <= ? OR (c.fence_deadline IS NULL AND ${expiredClaimFenceSql}))`, now, now, now);
     for (const c of lapsed) {
       this.exec('UPDATE claims SET fence_pending = 0 WHERE id = ?', c.id);
       this.exec('DELETE FROM claim_seats WHERE claim_id = ?', c.id);
-      if (c.fence_deadline == null) this.markRunnerReaped(c.runner_id, now);
+      if (c.fence_deadline == null && c.runner_expired) this.markRunnerReaped(c.runner_id, now);
       this.event('fence-cleared', 'alarm', c.fence_deadline == null ? { by: 'timeout' } : { deadline: true }, c.ticket_id, c.id);
       this.c.blocks.held(c.ticket_id, false);
     }
@@ -3145,9 +3150,9 @@ export class Claims {
   // ── the dashboard (§14: Running, Timeline, Needs you) ───────────────────────────────────
 
   running(now: number) {
-    const active = this.rows<Row & Lease & { kind: string }>(
+    const active = this.rows<Row & Lease & { kind: string; api_lease_cap_at: number | null }>(
       `SELECT c.id, c.ticket_id, c.runner_id, c.claimed_at, c.nonce, w.hostname, w.session_name, w.last_seen_at, w.last_activity_at,
-              w.lease_timeout_ms, w.kind, wi.title, CASE WHEN w.kind != 'legacy' THEN ${CLAIM_LEASE_END_SQL} END AS reap_at,
+              w.lease_timeout_ms, w.kind, c.api_lease_cap_at, wi.title, CASE WHEN w.kind != 'legacy' THEN ${CLAIM_LEASE_END_SQL} END AS reap_at,
               (SELECT l.leg FROM claim_legs l WHERE l.claim_id = c.id AND l.finished_at IS NULL AND l.abandoned_at IS NULL
                 ORDER BY l.seq DESC LIMIT 1) AS leg,
               NULL AS session_url,
@@ -3163,8 +3168,9 @@ export class Claims {
     const activities = groupBy(this.forIds(ids,
       `SELECT claim_id, id, kind, label, started_at, ended_at, outcome, parent_id FROM activities
        WHERE claim_id IN (SELECT value FROM json_each(?)) ORDER BY claim_id, started_at, insertion_order`, ids));
-    return active.map(({ has_session_link, ...c }) => {
-      const alive = isClaimLeaseLive(c, now);
+    return active.map(({ api_lease_cap_at, has_session_link, ...c }) => {
+      const lease = { ...c, api_lease_cap_at };
+      const alive = isClaimLeaseLive(lease, now);
       return {
         ...c,
         session_link: !!has_session_link,

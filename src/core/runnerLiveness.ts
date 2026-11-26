@@ -1,7 +1,7 @@
 // Server-side liveness only: the sidecar's earlier, local fence is R-BTN-6's last_ok rule.
 export type Lease = { last_seen_at: number; lease_timeout_ms: number };
 type Runner = Lease & { reaped_at: number | null };
-type ClaimRunner = Lease & { kind: string };
+type ClaimRunner = Lease & { kind: string; api_lease_cap_at?: number | null };
 
 export function leaseEndsAt(runner: Lease): number {
   return runner.last_seen_at + runner.lease_timeout_ms;
@@ -17,7 +17,11 @@ export function isLive(runner: Runner, now: number): boolean {
  *  claim views. The active claim's runner row supplies the lease, not the roster's reap flag;
  *  imported claims have a separate reap_after, not a heartbeat lease (R-BTN-28). */
 export function isClaimLeaseLive(runner: ClaimRunner, now: number): boolean {
-  return runner.kind !== 'legacy' && now < leaseEndsAt(runner);
+  return runner.kind !== 'legacy' && now < claimLeaseEndsAt(runner);
+}
+
+export function claimLeaseEndsAt(claim: ClaimRunner): number {
+  return claim.api_lease_cap_at ?? leaseEndsAt(claim);
 }
 
 // Keep the lease sum identical to the expression in the partial runners_live index (0061).
@@ -44,3 +48,6 @@ export const unreapedCapacityRunnerSql = `reaped_at IS NULL AND kind != 'legacy'
 /** R-BTN-19: the alarm expires the heartbeat lease at equality, even if the runner has
  *  already been marked reaped. Callers handle the imported claim's timer separately. */
 export const expiredLeaseSql = `${leaseEndSql('w.')} <= ?`;
+
+// An already-ended claim's fence does not get recovery grace.
+export const expiredClaimFenceSql = `COALESCE(c.api_lease_cap_at, ${leaseEndSql('w.')}) <= ?`;

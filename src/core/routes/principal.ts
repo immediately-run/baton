@@ -22,6 +22,7 @@ export async function verifySigned(core: SignedCore, req: Request, lookup: (fp: 
   // Another request ran meanwhile: the key may have been revoked since it was read.
   if (!lookup(v.keyid)) throw new BatonError('unauthenticated', 'the key is not registered or is revoked');
   core.runners.acceptNonce(v.keyid, v.nonce, now);
+  core.runners.useCredential(v.keyid);
   return { req: withBody(req, v.body), cred: v.keyid };
 }
 
@@ -30,7 +31,11 @@ export async function verifySigned(core: SignedCore, req: Request, lookup: (fp: 
 export async function authenticated(core: SignedCore, req: Request, lookup?: (fp: string) => string | null): Promise<{ req: Request; cred: string }> {
   const apiKey = req.headers.get('X-Baton-Api-Key');
   if (apiKey == null) return verifySigned(core, req, lookup);
-  return { req, cred: await verifyApiKey(apiKey, lookup ?? ((fp) => core.runners.publicKey(fp))) };
+  const find = lookup ?? ((fp: string) => core.runners.publicKey(fp));
+  const cred = await verifyApiKey(apiKey, find);
+  if (!find(cred)) throw new BatonError('unauthenticated', 'the API key is not registered or is revoked');
+  core.runners.useCredential(cred);
+  return { req, cred };
 }
 
 /** B-192: who reads — the one resolution of a read's caller into a principal. A signed

@@ -291,7 +291,7 @@ noticed (R-BTN-46), and the next claimant re-reads git before it writes (R-BTN-2
   - Baton closes the socket when the runner is reaped, re-keys, stops being alive, or its key is
     revoked, and when the Baton seals.
 
-## 5. Grant acceptance and registration tokens (R-BTN-146, R-BTN-117, proposed)
+## 5. Grant acceptance (R-BTN-146, proposed)
 
 Built: a grant is active from its creation, and `GET /v1/owner/{repository}/grants` lists a
 repository's grants.
@@ -309,22 +309,9 @@ repository's grants.
     revoke; revoking other grants never activates a pending one.
   - `GET /v1/owner/{repository}/grants` lists each key's hostname and other repositories
     (pending marked).
-- R-BTN-117 (proposed): registration tokens. A repository owner mints a token for a session that has
-  no key yet: `baton owner token create <repository> --role runner [--capabilities …]
-  [--ttl <d>] [--uses <n>]` (R-BTN-127).
-  - `--uses` default 1, at most 100; TTL default 7 days, at most 30 days. Shown once as
-    `brt_<id>_<secret>` (256 random bits), stored as its SHA-256 with its scope, valid in the
-    minting tenant only (R-BTN-137), revoked with `baton owner token revoke`.
-  - `baton runner register --token <t> --name <name> [--key ssh | --key api]` creates a runner
-    credential with a grant inside the token's scope, never wider.
-    `--key ssh` (default) generates an Ed25519 key in the session and registers its public half;
-    `--key api` returns an API key (R-BTN-159). A name bound to another live credential is
-    `conflict`; renewing one's own name is a re-key, spends no use, and must be signed by the
-    name's current credential. Each registration is an `admin` event; more than 10 registrations
-    by one token in 24 h raises `baton.token-burst`.
-  - A token-registered credential lasts until the token's `grant_ttl` (default: the token's TTL)
-    or 7 days without an authenticated call, whichever is first; revoking the token revokes every
-    credential it registered. The dashboard shows each runner's credential kind and token.
+
+Registration tokens are in [R-BTN-117](../BATON_SPEC/08-runners.md#sec-8-2). Showing a runner's
+registration token id in the dashboard is proposed.
 
 
 ## 6. Further leg channel verbs (R-BTN-106, proposed)

@@ -416,7 +416,7 @@ S-BTN-130, S-BTN-131 and S-BTN-222; the handler case remains proposed.
 | G-BTN-55 | Every keyed call is a signed request by a registered key within R-BTN-13's bounds, or the holder's API key (R-BTN-159) | S-BTN-30, -126 |
 | G-BTN-57 | One role per key; owners act only on their repository and never remove the last owner; members only read and answer their labels on theirs; a dashboard session acts only as its key's role on its key's repositories (R-BTN-57, R-BTN-58, R-BTN-204, R-BTN-155) | S-BTN-32, -124, -313, -314 |
 | G-BTN-117 | Every command the specification names is in R-BTN-127's tree, signing as the first role its caller holds a key for | S-BTN-97 |
-| G-BTN-144 | A delegated key loosens only what it tightened (R-BTN-186); a session goes only to a browser its key's holder bound, or to one an email `ACCESS_IDENTITIES` binds to the key signed in from, and dies with its key's role or its line (R-BTN-155); registration tokens register runners only (R-BTN-117) | S-BTN-124, S-BTN-308 |
+| G-BTN-144 | A delegated key loosens only what it tightened (R-BTN-186); a session goes only to a browser its key's holder bound, or to one an email `ACCESS_IDENTITIES` binds to the key signed in from, and dies with its key's role or its line (R-BTN-155); registration tokens register runners only (R-BTN-117) | S-BTN-124, S-BTN-308, S-BTN-69 |
 | G-BTN-155 | An API key never syncs or reports as a probe (R-BTN-159) | S-BTN-126 |
 | G-BTN-174 | Every surface carries every person role: each action an administrator, an owner or a member may call with its key, a session of that key's role may call through the dashboard, unless the registry names a mechanical reason or a key-only act; no session takes a key-only act (R-BTN-186, R-BTN-155) | S-BTN-323 |
 | **§12** | | |

@@ -1,11 +1,13 @@
 import type { BatonCore } from '../baton';
-import { BatonError, errorResponse } from '../http';
+import { BatonError, errorResponse, json, readJson } from '../http';
 import { dispatchRead } from '../reads';
 import { adminRoute } from './admin';
 import { attestationRoute, dashboardSessionRoute, dashboardWriteRoute, humanKeysRoute, ownerRoute } from './owner';
-import { dashboardPrincipal, personPrincipal } from './principal';
+import { authenticated, dashboardPrincipal, personPrincipal } from './principal';
 import { publicRoute, sequenceRoute } from './public';
 import { courierRoute, forgeScopeRoute, probeRoute, runnerPrincipal, runnerRoute } from './runner';
+import { RegistrationTokens } from '../registrationTokens';
+import { requireOwnerWrite } from './kit';
 import { syncPrincipal, syncRoute } from './sync';
 
 export async function dispatchRoute(core: BatonCore, req: Request, url: URL): Promise<Response> {
@@ -21,7 +23,7 @@ export async function dispatchRoute(core: BatonCore, req: Request, url: URL): Pr
     // mirrors catch up before the seal. A person's attestation is an owner's write.
     if (core.ownerState.frozenAt() != null) {
       const ownerWrite = (req.method === 'POST' || req.method === 'PUT')
-        && (url.pathname.startsWith('/v1/owner/') || /^\/v1\/repositories\/[^/]+\/attestations$/.test(url.pathname));
+        && (url.pathname === '/v1/register' || url.pathname.startsWith('/v1/owner/') || /^\/v1\/repositories\/[^/]+\/attestations$/.test(url.pathname));
       if (ownerWrite) throw new BatonError('frozen', 'this Baton is frozen for a move: owner writes are refused until it is unfrozen or sealed (R-BTN-88)');
     }
 
@@ -52,6 +54,15 @@ export async function dispatchRoute(core: BatonCore, req: Request, url: URL): Pr
     const sequence = await sequenceRoute(core, req, url);
     if (sequence) return sequence;
     if (path.startsWith('/v1/courier/')) return await courierRoute(core, req, url);
+    if (req.method === 'POST' && url.pathname === '/v1/register') {
+      const auth = req.headers.get('Authorization') ?? '';
+      const renewal = req.headers.has('X-Baton-Signed') || req.headers.has('X-Baton-Api-Key');
+      const token = renewal ? req.headers.get('Baton-Registration-Token') : /^Baton-Token (.+)$/.exec(auth)?.[1];
+      if (!token) throw new BatonError('unauthenticated', 'a registration token is required');
+      const caller = renewal ? await authenticated(core, req) : { req, cred: null };
+      const body = await readJson(caller.req);
+      return json(await new RegistrationTokens(core.store, () => core.now()).register(token, body, caller.cred, await core.admin.registrationKeyInUse(), () => requireOwnerWrite(core.ownerState)));
+    }
     if (req.method === 'GET' && path.startsWith('/v1/forge-scope/')) return await forgeScopeRoute(core, req, path);
     const probe = await probeRoute(core, req, url);
     if (probe) return probe;

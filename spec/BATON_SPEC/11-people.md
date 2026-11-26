@@ -256,7 +256,7 @@ built; their design is [the people and dashboard proposal](../proposals/people-a
   | `repo spool <repository>` | local | R-BTN-105 |
   | `course test <root> <course> [--base <ref>] [--board <file>]` | local: tests a course | R-BTN-69 |
   | `runner start [--delivers git,forge-check,source]` | runs a runner | R-BTN-72, R-BTN-171 |
-  | `runner register --token <t> --name <name> [--key ssh\|api]` | registers with a token (proposed: [checks and executors](../proposals/checks-and-executors.md)) | R-BTN-117 |
+  | `runner register --token <t> --name <name> [--key ssh\|api] [--out <file>]` | registers with a token; `-i <current-key>` re-keys | R-BTN-117 |
   | `runner accept-grant <repository> [--confirm]`, `runner decline-grant <repository>` | accepts or declines a grant | R-BTN-146 |
   | `key create <file>` | local: makes an API key | R-BTN-159 |
   | `home list`, `home use <name>`, `home add [<name>] --repository <id> [--origin <url>] [--checkout <path>]`, `home remove <name>`, `home show` | local: the homes file | R-BTN-127 |
@@ -272,7 +272,7 @@ built; their design is [the people and dashboard proposal](../proposals/people-a
   | `owner consent add <repository> <home>`, `owner consent withdraw <repository> <home>` | a `code_repos` consent (proposed: [data model and API](../proposals/data-model-and-api.md)) | R-BTN-140 |
   | `owner sync-key add <repository> <pub> --role sync\|mirror`, `owner sync-key revoke <repository> <fingerprint>` | sync and mirror keys | R-BTN-93 |
   | `owner sync want <repository>` | records a sync want | R-BTN-105 |
-  | `owner token create <repository> --role runner [--capabilities …] [--ttl <d>] [--uses <n>]`, `owner token revoke <repository> <id>` | registration tokens (proposed: [checks and executors](../proposals/checks-and-executors.md)) | R-BTN-117 |
+  | `owner token create --repo <repository> --role runner [--capabilities …] [--ttl <d>] [--uses <n>]`, `owner token revoke <repository> <id> --confirm` | registration tokens | R-BTN-117 |
   | `owner check-runner add <repository> <pub> --name <hostname> [--capabilities …]`, `owner check-runner revoke <repository> <fingerprint>` | check-runners (proposed: [checks and executors](../proposals/checks-and-executors.md)) | R-BTN-114 |
   | `admin repo list` | the registry | R-BTN-179 |
   | `admin repo add <forge path> --owner-key <pub>`, `admin repo set <id>`, `admin repo retire <id>` | registers, changes or retires a repository | R-BTN-47, R-BTN-138 |

@@ -29,7 +29,7 @@ stated once, in the rule it cites.
 | Forge notification | `POST /v1/forges/{repository}/notify` | the forge's verifier under `BATON_FORGE_SECRETS` (R-BTN-95) | record a sync want for its own repository (R-BTN-156) |
 | GitHub App webhook | `POST /v1/github/webhook` | `X-Hub-Signature-256` by the App's webhook secret (R-BTN-73) | trigger a sync dispatch; Baton reads only R-BTN-73's fields |
 | Instrument (probe) | `/v1/probe/*` | SSH-signed | post readings of any registered instance (R-BTN-101) |
-| Registration token (proposed, R-BTN-117) | `POST /v1/register` | `Authorization: Baton-Token <token>` | register one credential within its scope (R-BTN-117, R-BTN-157) |
+| Registration token | `POST /v1/register` | `Authorization: Baton-Token <token>` | register credentials within its scope (R-BTN-117) |
 | Administrator | `/v1/admin/*`; any claim's leg runs | a `BATON_ADMIN_KEYS` line, SSH-signed or API key | R-BTN-57 |
 | Dashboard session | `/v1/ui/*`, and the key routes of the actions its role may call (R-BTN-155) | the session cookie with the tab's `Baton-Session`, and no key (R-BTN-155) | as `session` carrying its key's role (R-BTN-129): an administrator's, an owner's or a member's, each every action §14 lists a session of its role on, on its key's scope, but R-BTN-186's key-only acts; an authority-changing act waits for its key's confirmation (R-BTN-155); and as a human (R-BTN-185). Owners' and members' sessions are not built (B-76, B-338); confirmation codes are proposed ([people and dashboard, §3](../proposals/people-and-dashboard.md#3-sign-in-sessions-and-confirmed-actions)) |
 | Repository member | the repository's reads; `POST …/attestations` as writer `member` | a member key, SSH-signed or API key | R-BTN-204 |

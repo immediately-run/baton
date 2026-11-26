@@ -71,7 +71,9 @@ checked in the transaction that adds or first accepts a key (§12.1).
 
 | Table | Key | Columns | Purpose |
 |---|---|---|---|
-| `credentials` | `id` (fingerprint) | `kind` (`runner` — a machine key; `probe` — an instrument key), `public_key` (an SSH public key or an API key's public line; unique), `label`, `hostname` (machine keys; unique among live ones), `expires_at`, `last_used_at`, `created_by`, `revoked_at` | Every key but owners', members', sync keys and administrators' (R-BTN-13, R-BTN-102, R-BTN-117, R-BTN-159) |
+| `credentials` | `id` (fingerprint) | `kind` (`runner` — a machine key; `probe` — an instrument key), `public_key` (an SSH public key or an API key's public line; unique), `label`, `hostname` (machine keys; unique among live ones), `registration_token_id`, `expires_at`, `last_used_at`, `created_by`, `revoked_at` | Every key but owners', members', sync keys and administrators' (R-BTN-13, R-BTN-102, R-BTN-117, R-BTN-159) |
+| `registration_tokens` | `id` | `repository_id`, `secret_hash`, `capabilities`, `uses_left`, `grant_ttl_s`, `expires_at`, `created_by`, `created_at`, `revoked_at` | Runner enrollment (R-BTN-117) |
+| `token_registrations` | — | `token_id`, `at` | Recent registrations, for burst detection (R-BTN-117) |
 | `repository_owners` | `(repository_id, fingerprint)` | `public_key`, `human_only`, `fido_attestation`, `added_by`, `added_at`, `removed_at` | Owner keys (R-BTN-58, R-BTN-185) |
 | `repository_members` | `(repository_id, fingerprint)` | `public_key`, `answers` JSON (the `asks` labels it answers), `added_by`, `added_at`, `changed_by`, `changed_at`, `removed_at` | Member keys (R-BTN-204); not built (B-338) |
 | `runner_grants` | `(credential_id, repository_id)` | `capabilities` JSON (expanded), `max_claims`, `granted_by`, `granted_at`, `accepted_at` (NULL while pending), `revoked_at` | What a machine key may do where (R-BTN-4, R-BTN-58, R-BTN-146) |

@@ -165,17 +165,8 @@ Design: [the declaration and the run's record](checks-and-executors.md#26-the-de
 
 ## Registration tokens
 
-Design: registration tokens beside keys (R-BTN-117, R-BTN-157; B-8). `credentials` gains
-`token_id`.
-
-| Table | Key | Columns | Purpose |
-|---|---|---|---|
-| `registration_tokens` | `id` (of `brt_<id>_<secret>`) | `repository_id`, `secret_hash`, `role` (`runner`), `capabilities` JSON, `uses_left`, `grant_ttl_s`, `expires_at`, `created_by`, `created_at`, `revoked_at` | R-BTN-117, R-BTN-157 |
-
-| Route | Caller | Body or query | Response | Rules |
-|---|---|---|---|---|
-| `POST /v1/owner/{repository}/tokens`, `…/tokens/{id}/revoke` | owner | `{role: "runner", capabilities?, ttl_s?, uses?, grant_ttl_s?}`; revoke `{confirm: true}` | `{id, token}`, the token once; revoking revokes every credential it registered | R-BTN-117, R-BTN-157 |
-| `POST /v1/register` | `Authorization: Baton-Token <token>` | `{name, public_key}` or `{name, api_key: true}` | `{credential_id, grant}`, and `{api_key}` once for the second form; `forbidden` beyond the token's scope; `unauthenticated` for a spent, expired or revoked token; `conflict` | R-BTN-117 |
+See [§13.2](../BATON_SPEC/13-data-model.md#sec-13-2) for the tables and
+[§14](../BATON_SPEC/14-api.md#sec-14) for the routes (R-BTN-117).
 
 ## Attestations, roles and fact legs
 

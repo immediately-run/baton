@@ -1,3 +1,4 @@
+import type { OwnerState } from '../ownerState';
 import { BatonError, type ErrorCode } from '../http';
 import type { Registry } from '../registry';
 import type { Store } from '../ports';
@@ -59,4 +60,9 @@ export function holderTicket(registry: Pick<Registry, 'get'>, raw: string): stri
   const { id, repository } = qualifiedTicket(raw);
   if (!registry.get(repository)) throw new BatonError('invalid-params', qualifiedTicketError);
   return id;
+}
+export function requireOwnerWrite(ownerState: Pick<OwnerState, 'sealedAt' | 'frozenAt'>): void {
+  const sealedAt = ownerState.sealedAt();
+  if (sealedAt != null) throw new BatonError('sealed', `this Baton was sealed at ${new Date(sealedAt).toISOString()} for its move; an administrator's reads alone are served (R-BTN-88)`);
+  if (ownerState.frozenAt() != null) throw new BatonError('frozen', 'this Baton is frozen for a move: owner writes are refused until it is unfrozen or sealed (R-BTN-88)');
 }

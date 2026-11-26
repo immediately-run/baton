@@ -5,12 +5,13 @@ import { checkAccept, checkAttestation, checkResync } from '../validate';
 import { consentRoute } from '../dependencies';
 import { logEvent } from '../db';
 import { acceptsUnattestedHumanKey } from '../policy';
-import { liveRepoParam, pathSegment, qualifiedTicket, ticketOf } from './kit';
+import { RegistrationTokens } from '../registrationTokens';
+import { requireOwnerWrite, liveRepoParam, pathSegment, qualifiedTicket, ticketOf } from './kit';
 import { authenticated, verifySigned, type PersonPrincipal } from './principal';
 
 const RESYNC_WINDOW_MS = 30_000; // B-201: a session's resync, once per repository per R-BTN-73's dispatch window
 
-type OwnerCore = Pick<BatonCore, 'registry' | 'admin' | 'store' | 'now' | 'policies' | 'claims' | 'humanBreakGlass' | 'questions' | 'blocks' | 'requestSync'>;
+type OwnerCore = Pick<BatonCore, 'registry' | 'admin' | 'store' | 'now' | 'policies' | 'claims' | 'humanBreakGlass' | 'questions' | 'blocks' | 'requestSync' | 'ownerState'>;
 
 export async function ownerRoute(core: OwnerCore, req: Request, url: URL, principal: PersonPrincipal): Promise<Response | null> {
   const { cred: fp, administrator } = principal;
@@ -29,6 +30,25 @@ export async function ownerRoute(core: OwnerCore, req: Request, url: URL, princi
   if (!core.admin.owns(fp, repo)) throw new BatonError('forbidden', `this key does not own ${repo}`);
   const actor = `owner:${fp}`;
   const rest = o[2];
+  if (m === 'POST' && rest === 'tokens') {
+    const b = await body();
+    const authorize = await core.admin.tokenAuthorizer(repo, fp);
+    return json(await new RegistrationTokens(core.store, () => core.now()).mint(repo, actor, b, () => {
+      requireOwnerWrite(core.ownerState);
+      authorize();
+      const repository = core.registry.get(repo);
+      if (!repository || repository.retired_at != null) throw new BatonError('not-found', `no repository ${repo}`);
+    }));
+  }
+  const token = /^tokens\/([^/]+)\/revoke$/.exec(rest);
+  if (m === 'POST' && token) {
+    const b = await body();
+    const authorize = await core.admin.tokenAuthorizer(repo, fp);
+    return json(new RegistrationTokens(core.store, () => core.now()).revoke(repo, seg(token[1]), actor, b, () => {
+      requireOwnerWrite(core.ownerState);
+      authorize();
+    }));
+  }
   // B-90: the repository's grants and settings — and the policy's log below — are read in
   // src/core/reads/repository.ts (B-192: a session's reads too).
   // B-127: the repository's owner signing keys — public keys of its human-only owners — the

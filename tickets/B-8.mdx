@@ -10,11 +10,12 @@ tags:
   - roadmap-item
 order: 1111
 tier: critical
-description: "Owners mint scoped, expiring, revocable registration tokens for runners; a session registers an SSH key or an API key with one; the owners' `api_keys: false` refuses API-key runners and MCP keys; today's bearer and seed keys become API-key runner credentials with explicit grants, each raised for its owners (BATON_SPEC R-BTN-117, R-BTN-159, R-BTN-146); S-BTN-69, G-BTN-94, G-BTN-144. Requires: none."
+description: "Owners mint scoped, expiring, revocable registration tokens for runners; a session registers an SSH key or an API key with one; the owners' `api_keys: false` refuses API-key runners for their repository; today's bearer and seed keys become API-key runner credentials with explicit grants, each raised for its owners (BATON_SPEC R-BTN-117, R-BTN-159, R-BTN-146); S-BTN-69, G-BTN-94, G-BTN-144. Requires: none."
 topics:
   - baton
 owns: {}
-prs: []
+prs:
+  - https://github.com/immediately-run/baton/pull/321
 depends_on: []
 ---
 
@@ -48,10 +49,12 @@ Registration tokens let the owner scope what such a session may become; R-BTN-15
    use. Each registration is an `admin` event; more than 10 by one token in 24 hours raises
    `baton.token-burst`. The credential lasts until the token's `grant_ttl` or 7 days without an
    authenticated call; revoking the token revokes every credential it registered.
-3. **API-key runners.** Bearers work on the push and stream upgrades as on every other
-   `/v1/runner/*` route. The repository setting `api_keys: false` (R-BTN-66, default `true`)
-   refuses an API-key runner at its next call, and MCP keys (B-25). An API-key runner credential
-   lives at most 90 days.
+3. **API-key runners.** Bearers work on the implemented runner routes that admit API keys
+   (R-BTN-159). The repository setting `api_keys: false` (R-BTN-66, default `true`) refuses an
+   API-key runner's next call for that repository. An API-key runner credential lives at most
+   90 days. Bearer support for the push upgrade belongs to the proposed
+   [R-BTN-91 doorbell](../spec/proposals/checks-and-executors.md#3-the-push-doorbell); the stream
+   upgrade was retired with R-BTN-118. Refusing MCP keys belongs to B-25, which builds those keys.
 4. **The migration** (history, "Bearer-key migration"): the bearer tokens and `BATON_KEYS` seed
    keys the code accepts become API-key runner credentials, granted on each repository they
    heartbeated or claimed on in the 30 days before, with the capabilities they declared there
@@ -91,5 +94,12 @@ _(2026-11-03: R-BTN-47's *Retirement* (B-173's spec half) reaches the store this
 _(2026-11-20: the spec simplification of 2026-11-19 (baton#299; `spec/BATON_SPEC_HISTORY.md`, that date) moved the unbuilt parts of the design this ticket builds out of the section files, with their rule ids, to proposal pages: registration tokens, grant acceptance and a key's span are part 5 of [the checks-and-executors proposal](../spec/proposals/checks-and-executors.md), with their tables and routes under "Registration tokens" and "Grant acceptance and the sync flag" in [the tables-and-routes proposal](../spec/proposals/data-model-and-api.md). Each rule keeps its id and a line in its section, which links the page. The pull request that builds this ticket moves the rules it builds back into the section files, and the scenarios and gates it makes pass back into [the verification section](../spec/BATON_SPEC/15-verification.md#sec-15), in the same change. The plan above is unchanged.)_
 
 _(2026-11-20: rules re-read: R-BTN-117, R-BTN-146)_
+
+_(2026-11-21: PR #321 remains partial. Item 3's push upgrade belongs to the proposed
+[R-BTN-91 doorbell](../spec/proposals/checks-and-executors.md#3-the-push-doorbell); the runner
+stream was retired with R-BTN-118. Neither has an endpoint to extend here. The MCP half of
+`api_keys: false` belongs with the MCP key implementation (B-25). Item 4 remains open: the
+seed stores SSH public keys, so retiring seed authentication without a separate holder cutover
+would strand existing runners. This PR does not perform or verify that migration.)_
 
 _2026-11-23 — tiers retired (spec/retire-tiers: [BATON_SPEC §6.6](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-6) gate 5, [R-BTN-66](../spec/BATON_SPEC/01-what-baton-is.md#sec-1)): the struck tier clauses are gone from the spec — no ticket tier, runner ceiling, grant `max_tier`, ladder, `ready_by_tier` or `?tier=`. Build the rest without them._

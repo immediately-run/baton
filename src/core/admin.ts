@@ -10,7 +10,7 @@ import { BatonError, PENDING_COOKIE, SESSION_COOKIE } from './http';
 import { logEvent, randomHex } from './db';
 import { adminFingerprints, API_KEY_FINGERPRINT, KEY_FINGERPRINT, parseApiKeyLine, parseSshKey, sshPublicLine, verifyNamespacedSignature, type SshKey } from './auth';
 import { capabilitiesOf } from '../shared/vocabulary.mjs';
-import { COURSE_ID, HOSTNAME, INSTANCE_NAME, SESSION_TOKEN, TAG, checkAsks, checkConfirm, checkDeliverInteractions, checkLogin, checkUnblockedTrigger, checkRepositoryId, HOLDING_TYPE, MAX_CLAIMS_CAP, parseAccessIdentities } from './validate';
+import { COURSE_ID, DAY_MS, HOSTNAME, INSTANCE_NAME, SESSION_TOKEN, TAG, checkAsks, checkConfirm, checkDeliverInteractions, checkLogin, checkUnblockedTrigger, checkRepositoryId, HOLDING_TYPE, MAX_CLAIMS_CAP, parseAccessIdentities } from './validate';
 import { REMIND_AFTER_S, type Notices } from './notices';
 import { parseTranscriptRepo } from './links';
 import { checkCodeRepos, checkPushers, codeReposOf, crossHostEntries, homeForgeOf, pushersOf, writeCodeRepos, type CodeRepo } from './codeRepos';
@@ -299,6 +299,20 @@ export class Admin {
     throw new BatonError('forbidden', `this credential is not an approver on approvers.members (${list.join(', ')}) (R-BTN-188)`);
   }
 
+  async tokenAuthorizer(repository: string, fp: string) {
+    const breakGlass = await this.breakGlassSet();
+    return () => {
+      if (!this.owns(fp, repository)) throw new BatonError('forbidden', `this key does not own ${repository}`);
+      this.requireMembersApprover(repository, fp, 'owner', breakGlass);
+    };
+  }
+
+  async registrationKeyInUse() {
+    const admins = await this.adminFingerprints();
+    const humans = await this.breakGlassSet();
+    return (fp: string) => Boolean(this.roleOf(fp, admins) || humans.has(fp) || this.humanKeyLine(fp) || this.revokedOwner(fp));
+  }
+
   /** R-BTN-188's no-gate-without-a-key, on removing an owner or revoking a key: EVERY list in
    *  force — `approvers.members`, `approvers.trust`, `approvers.policy` — and every floor's
    *  `remove_by` must be left with a live credential to satisfy it, now (G-BTN-163: no list is
@@ -487,6 +501,7 @@ export class Admin {
       // R-BTN-93, R-BTN-58: its sync and mirror keys and its runner grants.
       this.exec('UPDATE sync_keys SET revoked_at = ? WHERE repository_id = ? AND revoked_at IS NULL', now, id);
       this.exec('UPDATE runner_grants SET revoked_at = ? WHERE repository_id = ? AND revoked_at IS NULL', now, id);
+      this.exec('UPDATE registration_tokens SET uses_left = 0 WHERE repository_id = ?', id);
       // R-BTN-19: each active claim on its tickets, as an administrator's force-reap reaps one.
       this.c.reapForRetire(id, actor);
       // B-234's store (R-BTN-160): the reaps above have ended its runs, so their open
@@ -747,15 +762,19 @@ export class Admin {
     return this.c.store.transaction(() => {
       const role = this.roleOf(key.fingerprint, admins);
       if (role && role !== 'runner') throw new BatonError('conflict', `this key is already a ${role} key (R-BTN-57: one role per key)`);
-      const cred = this.rows<{ hostname: string; revoked_at: number | null }>('SELECT hostname, revoked_at FROM credentials WHERE id = ?', key.fingerprint)[0];
+      const cred = this.rows<{ hostname: string; revoked_at: number | null; registration_token_id: string | null }>('SELECT hostname, revoked_at, registration_token_id FROM credentials WHERE id = ?', key.fingerprint)[0];
       if (cred?.revoked_at != null) throw new BatonError('conflict', 'this key was revoked; the machine needs a new key');
+      if (cred?.registration_token_id) throw new BatonError('conflict', 'a token-registered key stays within its token grant');
       if (!cred) {
         if (!hostname) bad('hostname', 'the first grant of a key names its hostname');
         if (this.rows(`SELECT 1 FROM credentials WHERE hostname = ? AND revoked_at IS NULL AND kind IN ('runner','token')`, hostname).length) {
           throw new BatonError('conflict', `${hostname} already has a key in force`);
         }
-        this.exec(`INSERT INTO credentials (id, hostname, allowed_capabilities, kind, public_key, created_by, label) VALUES (?, ?, '[]', 'runner', ?, ?, ?)`,
-          key.fingerprint, hostname, key.line, actor, label);
+        const api = parseApiKeyLine(key.line);
+        const now = this.c.now();
+        this.exec(`INSERT INTO credentials (id, hostname, allowed_capabilities, kind, public_key, created_by, label, expires_at, last_used_at)
+          VALUES (?, ?, '[]', 'runner', ?, ?, ?, ?, ?)`,
+          key.fingerprint, hostname, key.line, actor, label, api ? now + 90 * DAY_MS : null, api ? now : null);
       } else if (this.rows(`SELECT 1 FROM credentials WHERE id = ? AND created_by = 'seed'`, key.fingerprint).length) {
         // A BATON_KEYS key reaches every repository until grants bind it; binding it would cut it
         // off from the others, which owning one repository never may (R-BTN-58; round 1, 1-B-0).
@@ -771,11 +790,12 @@ export class Admin {
       }
       const prior = this.rows<{ capabilities: string; revoked_at: number | null }>('SELECT capabilities, revoked_at FROM runner_grants WHERE credential_id = ? AND repository_id = ?', key.fingerprint, repository)[0];
       const caps = expanded;
-      this.exec(`INSERT INTO runner_grants (credential_id, repository_id, capabilities, max_claims, granted_by, granted_at, deliver_interactions) VALUES (?, ?, ?, ?, ?, ?, ?)
+      this.exec(`INSERT INTO runner_grants (credential_id, repository_id, capabilities, max_claims, granted_by, granted_at, deliver_interactions, accepted_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                  ON CONFLICT (credential_id, repository_id) DO UPDATE SET capabilities = excluded.capabilities,
                    max_claims = excluded.max_claims, granted_by = excluded.granted_by, granted_at = excluded.granted_at,
-                   deliver_interactions = excluded.deliver_interactions, revoked_at = NULL`,
-        key.fingerprint, repository, JSON.stringify(caps), maxClaims, actor, this.c.now(), Number(deliverInteractions));
+                   deliver_interactions = excluded.deliver_interactions,
+                   accepted_at = CASE WHEN runner_grants.revoked_at IS NULL THEN runner_grants.accepted_at ELSE excluded.accepted_at END, revoked_at = NULL`,
+        key.fingerprint, repository, JSON.stringify(caps), maxClaims, actor, this.c.now(), Number(deliverInteractions), this.c.now());
       this.event(actor, { act: 'grant', key: key.fingerprint, repository, capabilities: caps, max_claims: maxClaims, deliver_interactions: deliverInteractions }, repository);
       if (!prior || prior.revoked_at != null) this.c.dependencyVisibilityChanged();
       this.c.fleetChanged();
@@ -1054,7 +1074,7 @@ export class Admin {
   async setSettings(actor: string, repository: string, body: unknown) {
     if (!isObj(body)) bad('body', 'must be a JSON object');
     const b = body as Record<string, unknown>;
-    only(b, ['required_bars', 'retry', 'transcript_repos', 'artifact_buckets', 'unblocked_trigger', 'remind_after', 'scope_policy', 'runner_pushers', 'code_repos', 'pushers', 'require_signed_control', 'checks'], 'body');
+    only(b, ['required_bars', 'retry', 'transcript_repos', 'artifact_buckets', 'unblocked_trigger', 'remind_after', 'scope_policy', 'runner_pushers', 'code_repos', 'pushers', 'require_signed_control', 'checks', 'api_keys'], 'body');
     if (!Object.keys(b).length) bad('body', 'names at least one setting');
     // R-BTN-114: a check's conclusion decides what branch protection sees, so the map is the
     // owners', not an agent's — refused here, before the approver question, whichever it changes.
@@ -1104,6 +1124,10 @@ export class Admin {
       if (typeof b.require_signed_control !== 'boolean') bad('require_signed_control', 'must be a boolean (R-BTN-66, B-127)');
       sets.push(['require_signed_control', b.require_signed_control ? '1' : '0']);
     }
+    if (b.api_keys !== undefined) {
+      if (typeof b.api_keys !== 'boolean') bad('api_keys', 'must be a boolean');
+      sets.push(['api_keys', b.api_keys ? '1' : '0']);
+    }
     if (b.transcript_repos !== undefined) {
       const t = Array.isArray(b.transcript_repos) && b.transcript_repos.length <= 20 && b.transcript_repos.every((x) => typeof x === 'string' && parseTranscriptRepo(x) !== null)
         ? b.transcript_repos : bad('transcript_repos', 'must be at most 20 repositories, each a GitHub owner/name or <forge>:<web_base>');
@@ -1142,17 +1166,23 @@ export class Admin {
     // `success` — is any owner key's, as every owner route is (`/v1/owner/…` refuses a key that
     // does not own the repository, and a delegated key above); a LOOSENING needs an approver on
     // `approvers.policy` as it stands, the same gate R-BTN-188 puts on an R-BTN-66 setting.
-    if (this.loosensSettings(repository, sets, codeRepos)) {
+    const breakGlass = await this.breakGlassSet();
+    return this.c.store.transaction(() => {
       const policies = this.c.policies;
       const cur = policies.current(repository);
-      if (cur) {
-        const facts = policies.facts(repository, await this.breakGlassSet());
+      if (cur && this.loosensSettings(repository, sets, codeRepos)) {
+        const facts = policies.facts(repository, breakGlass);
         if (!policies.entryMatches(cur.policy.approvers.policy, actor.slice(actor.indexOf(':') + 1), facts, cur.policy.human_key)) {
           throw new BatonError('forbidden', 'loosening an R-BTN-66 setting needs an approver on approvers.policy (R-BTN-186, R-BTN-188)');
         }
       }
-    }
-    return this.c.store.transaction(() => {
+      if (b.api_keys === false) {
+        // Capture the last authorized lease before heartbeats on other repositories move it.
+        this.exec(`UPDATE claims AS c SET api_lease_cap_at = w.last_seen_at + w.lease_timeout_ms
+          FROM runners w WHERE w.id = c.runner_id AND w.credential_id GLOB 'bak_*'
+          AND substr(c.ticket_id, 1, length(?) + 1) = ? || ':' AND c.api_lease_cap_at IS NULL
+          AND (c.status = 'active' OR (c.status = 'reaped' AND c.fence_pending = 1))`, repository, repository);
+      }
       for (const [k, v] of sets) this.exec(`UPDATE repositories SET ${k} = ? WHERE id = ?`, v, repository);
       if (codeRepos != null) writeCodeRepos(this.c.store, repository, codeRepos, actor, this.c.now());
       this.event(actor, { act: 'settings', repository, ...Object.fromEntries(sets.map(([k, v]) => [k === 'remind_after_s' ? 'remind_after' : k, v == null ? null : settingValue(v)])), ...(codeRepos != null ? { code_repos: codeRepos } : {}) }, repository);
@@ -1172,6 +1202,8 @@ export class Admin {
    *  `checks` loosens when a station moves toward `success` or a course's map loses one, and
    *  tightens otherwise. */
   private loosensSettings(repository: string, sets: [string, string | null][], codeRepos: CodeRepo[] | null = null): boolean {
+    if (sets.some(([k, v]) => k === 'api_keys' && v === '1') &&
+        this.rows('SELECT 1 FROM repositories WHERE id = ? AND api_keys = 0', repository).length) return true;
     // R-BTN-114 before the flat knobs: a map that governs nothing and is given is no change,
     // and one that adds a course is a tightening whatever the flat settings beside it do.
     const checks = sets.find(([k]) => k === 'checks');
@@ -1373,8 +1405,9 @@ export class Admin {
       // §14: probes too, with the instances each may report on (round 3, 3-A-3).
       probes: this.rows(`SELECT id AS fingerprint, label, allowed_instances, created_by FROM credentials WHERE kind = 'probe' AND revoked_at IS NULL ORDER BY label`),
       bars: this.bars(null, now, true),
-      settings: this.rows<Record<string, unknown>>('SELECT id AS repository_id, forge, web_base, required_bars, retry, transcript_repos, unblocked_trigger, remind_after_s AS remind_after, scope_policy, runner_pushers, pushers, require_signed_control FROM repositories WHERE retired_at IS NULL ORDER BY id').map((s) => ({
+      settings: this.rows<Record<string, unknown>>('SELECT id AS repository_id, forge, web_base, required_bars, retry, transcript_repos, unblocked_trigger, remind_after_s AS remind_after, scope_policy, runner_pushers, pushers, require_signed_control, api_keys FROM repositories WHERE retired_at IS NULL ORDER BY id').map((s) => ({
         ...s,
+        api_keys: Boolean(s.api_keys),
         // B-182: the home's code repositories beside the column settings — its own table's rows,
         // as the observation hands them to the sync, so the CLI and the dashboard read one shape.
         code_repos: codeReposOf(this.c.store, String(s.repository_id)),

@@ -7,6 +7,7 @@ import { BatonError } from '../http';
 import { keyCaller, sessionCaller, type Action, type Caller, type SessionRole } from '../actions';
 import { checkCursor, mintCursor, page, PAGE_DEFAULT, type CursorBinding } from '../cursor';
 import { liveness } from '../stateVersion';
+import { runnerKeyAllowed } from '../runnerKeyPolicy';
 import type { BatonCore } from '../baton';
 import type { Config, Row, Store } from '../ports';
 
@@ -95,7 +96,7 @@ export function canRead(cx: ReadCtx, principal: ReadPrincipal, repository: strin
   }
   if (principal.role === 'admin') return true;
   if (principal.role === 'owner') return cx.core.admin.owns(principal.cred, repository);
-  return hasGrant(cx.store, principal.cred, repository);
+  return runnerKeyAllowed(cx.store, principal.cred, repository) && hasGrant(cx.store, principal.cred, repository);
 }
 
 /** `canRead`, or the one refusal. */

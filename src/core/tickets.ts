@@ -6,9 +6,10 @@
 // `ticketDetail` adds what one ticket's page draws. Filter fields only (R-BTN-33): no body, note
 // or exit criterion is read. Nothing here writes, and the clock is the caller's `now`.
 import type { SessionLinkView } from './links';
+import { CLAIM_LEASE_END_SQL } from './claims';
 import { claimFleetSql, isClaimLeaseLive } from './runnerLiveness';
 import { ATTEMPTS_HOLD_AT } from './attempts';
-import { CLAIM_LEASE_END_SQL, STALLED_MS } from './claims';
+import { STALLED_MS } from './claims';
 import { fileUrl, type Forge } from './links';
 import type { BatonCore } from './baton';
 import type { Row } from './ports';
@@ -118,7 +119,7 @@ const list = (json: unknown): string[] => {
 
 type Held = {
   id: number; ticket_id: string; runner_id: number; status: string; claimed_at: number; ended_at: number | null; hostname: string; session_name: string;
-  kind: string; last_seen_at: number; last_activity_at: number | null; lease_timeout_ms: number; lease_ends_at: number | null; leg: string | null; session_url: string | null; session_incarnation: number | null;
+  kind: string; last_seen_at: number; last_activity_at: number | null; lease_timeout_ms: number; api_lease_cap_at: number | null; lease_ends_at: number | null; leg: string | null; session_url: string | null; session_incarnation: number | null;
 };
 
 /** Every row of the repository, in the list's order: the ready ones in Baton's matching order
@@ -151,7 +152,7 @@ export function ticketRows(cx: TicketsCtx, repo: string, sessionLink?: SessionLi
   const held = new Set(cx.sql<{ capability: string }>('SELECT capability FROM fleet_capabilities WHERE repository_id = ? AND runners > 0', repo).map((r) => r.capability));
   const claims = new Map<string, { active?: Held; unconfirmed?: Held }>();
   for (const c of cx.sql<Held>(
-    `SELECT c.id, c.ticket_id, c.runner_id, c.status, c.claimed_at, c.ended_at, w.hostname, w.session_name, w.kind, w.last_seen_at, w.last_activity_at, w.lease_timeout_ms,
+    `SELECT c.id, c.ticket_id, c.runner_id, c.status, c.claimed_at, c.ended_at, w.hostname, w.session_name, w.kind, w.last_seen_at, w.last_activity_at, w.lease_timeout_ms, c.api_lease_cap_at,
             CASE WHEN w.kind != 'legacy' THEN ${CLAIM_LEASE_END_SQL} END AS lease_ends_at,
             COALESCE(l.leg, c.offered_leg) AS leg, ${sessionLink ? 'l.session_url' : 'NULL'} AS session_url, l.session_incarnation
      FROM claims c JOIN runners w ON w.id = c.runner_id
@@ -295,9 +296,9 @@ export function ticketDetail(cx: TicketsCtx, repo: string, id: string, path: str
     'SELECT expedite, hold, hold_reason, retry_after, set_by, set_at FROM ticket_overrides WHERE ticket_id = ?', id)[0] ?? null;
   const live = cx.sql<{
     id: number; runner_id: number; claimed_at: number; deadline_at: number | null; hostname: string; session_name: string; kind: string; last_seen_at: number;
-    last_activity_at: number | null; lease_timeout_ms: number; lease_ends_at: number | null; offered_leg: string | null;
+    last_activity_at: number | null; lease_timeout_ms: number; api_lease_cap_at: number | null; lease_ends_at: number | null; offered_leg: string | null;
   }>(
-    `SELECT c.id, c.runner_id, c.claimed_at, c.deadline_at, c.offered_leg, w.hostname, w.session_name, w.kind, w.last_seen_at, w.last_activity_at, w.lease_timeout_ms,
+    `SELECT c.id, c.runner_id, c.claimed_at, c.deadline_at, c.offered_leg, w.hostname, w.session_name, w.kind, w.last_seen_at, w.last_activity_at, w.lease_timeout_ms, c.api_lease_cap_at,
             CASE WHEN w.kind != 'legacy' THEN ${CLAIM_LEASE_END_SQL} END AS lease_ends_at
      FROM claims c JOIN runners w ON w.id = c.runner_id WHERE c.ticket_id = ? AND c.status = 'active'`, id)[0] ?? null;
   const leg = live ? cx.sql<{ leg: string; run_id: string | null; session_url: string | null; session_incarnation: number | null; leg_log_dir: string | null; started_at: number }>(

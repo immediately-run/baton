@@ -231,6 +231,13 @@ async function route(req: Request, env: Config, to: Forward, hasAdmin: () => Pro
   // a bearer is that key's, and its cookie decides nothing. R-BTN-16's checks of every session
   // request apply. `/v1/ui/*` keeps its own branch below.
   const read = (req.method === 'GET' || req.method === 'HEAD') && !pathname.startsWith('/v1/ui/');
+  if (pathname === '/v1/register' && req.method === 'POST') {
+    return under('private', async () => {
+      if (isSigned(req)) return forwardSigned(req, env, to);
+      const apiKey = apiKeyOf(req);
+      return forward(req, to, apiKey ? { 'X-Baton-Api-Key': apiKey } : {});
+    });
+  }
   if (read && sessionReadable(pathname) && !isSigned(req) && !req.headers.has('Authorization') && cookie(req, SESSION_COOKIE)) {
     return under('private', async () => {
       checkSessionRequest(req, env);

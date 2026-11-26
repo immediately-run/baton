@@ -11,6 +11,7 @@ import { holderTicket, liveRepoParam, requireGrant, runnerSecret } from './kit';
 import { noteIdle, type IdleDetail } from '../idleReasons';
 import { parseAdminKeys, parseSshKey } from '../auth';
 import { forgeScope } from '../forgeScope';
+import { requireRunnerKeyPolicy, runnerKeyAllowed } from '../runnerKeyPolicy';
 import { sha256Hex } from '../runnerApi';
 
 type RunnerAuthCore = Parameters<typeof authenticated>[0] & Pick<BatonCore, 'admin'>;
@@ -52,7 +53,7 @@ export async function runnerRoute(core: RunnerCore, req: Request, url: URL, prin
     const view = p.slice('/v1/runner/'.length);
     if (m === 'GET' && (view === 'fleet' || view === 'instances' || view === 'launch-candidates')) {
       const credential = core.runners.credential(cred);
-      if (credential.kind !== 'runner' || !req.headers.has('X-Baton-Signed')) throw new BatonError('forbidden', 'the view requires a machine key');
+      if (credential.kind !== 'runner' || !(req.headers.has('X-Baton-Signed') || req.headers.has('X-Baton-Api-Key'))) throw new BatonError('forbidden', 'the view requires a machine key');
       const scope = core.claims.viewScope(cred);
       const repository = view === 'fleet' ? checkRepositoryId(url.searchParams.get('repository')) : null;
       if (repository) requireFleetScope(repository, scope);
@@ -65,6 +66,7 @@ export async function runnerRoute(core: RunnerCore, req: Request, url: URL, prin
       // §11: `?repository=` — each repository cuts over on its own (R-BTN-28). R-BTN-47
       // (B-173): a retired one is as one never registered.
       const { id: repo } = liveRepoParam(core.registry, url.searchParams.get('repository'), () => ['invalid-params', 'repository: must be a registered repository id']);
+      requireRegistrationScope(core, cred, [repo]);
       return json(core.runners.mode(repo));
     }
     if (m === 'GET' && p === '/v1/runner/branch-holder') {
@@ -76,13 +78,16 @@ export async function runnerRoute(core: RunnerCore, req: Request, url: URL, prin
       if (!GIT_REPO.test(gitRepo)) throw new BatonError('invalid-params', 'repo: must be owner/name');
       if (!GIT_BRANCH.test(branch)) throw new BatonError('invalid-params', 'branch: must be a branch name');
       const caller = secret ? await core.runners.authRunner(cred, secret, client, legacyName) : null;
-      return json(core.claims.branchHolder(caller, gitRepo, branch));
+      const result = core.claims.branchHolder(caller, gitRepo, branch);
+      requireRegistrationScope(core, cred, result.tickets.map(repositoryOf));
+      return json(result);
     }
     const holder = /^\/v1\/runner\/tickets\/([^/]+)\/holder$/.exec(p);
     if (m === 'GET' && holder) {
       // R-BTN-7: callable with the token alone (the witness has no sidecar); with a secret, the
       // caller's own claim is not "another".
       const item = holderTicket(core.registry, holder[1]);
+      requireRegistrationScope(core, cred, [repositoryOf(item)]);
       const caller = secret ? await core.runners.authRunner(cred, secret, client, legacyName) : null;
       return json(core.claims.holder(caller, item));
     }
@@ -103,6 +108,7 @@ export async function runnerRoute(core: RunnerCore, req: Request, url: URL, prin
         const a = core.claims.claim(runnerId, body);
         const ticket = String(a.ticket_id ?? '');
         if (ticket.includes(':')) {
+          requireClaimKeyPolicy(core, cred, runnerId, Number(a.claim_id));
           const standing = core.sql<{ control_json: string }>('SELECT control_json FROM signed_control WHERE repository_id = ?', repositoryOf(ticket))[0];
           // Set once: a replay keeps the pairing the claim was made with, never the moved
           // board's (an empty string is the no-record shape, never NULL). Round 4: stored on
@@ -127,15 +133,19 @@ export async function runnerRoute(core: RunnerCore, req: Request, url: URL, prin
     const advance = /^\/v1\/runner\/claims\/(\d+)\/advance$/.exec(p);
     if (m === 'POST' && advance) {
       const body = await readJson(req);
-      return json(tx(() => core.claims.advance(runnerId, Number(advance[1]), body)));
+      return json(tx(() => {
+        requireClaimKeyPolicy(core, cred, runnerId, Number(advance[1]));
+        return core.claims.advance(runnerId, Number(advance[1]), body);
+      }));
     }
     if (m === 'POST' && p === '/v1/runner/adopt') {
       const body = await readJson(req);
-      return json(tx(() => core.cutover.adopt(runnerId, body)));
+      return json(tx(() => core.cutover.adopt(runnerId, body, (repo) => requireRegistrationScope(core, cred, [repo]))));
     }
     const end = /^\/v1\/runner\/claims\/(\d+)\/end$/.exec(p);
     if (m === 'POST' && end) {
       const body = await readJson(req);
+      requireClaimKeyPolicy(core, cred, runnerId, Number(end[1]));
       // R-BTN-126 (round 1 B9, round 2 r2-5): a blocked end's ref must be a well-formed
       // capability the runner declares — judged before the request's transaction, so the
       // invalid end's recording (a failed attempt, ended transient) commits whether or not
@@ -158,7 +168,10 @@ export async function runnerRoute(core: RunnerCore, req: Request, url: URL, prin
     const conditions = /^\/v1\/runner\/claims\/(\d+)\/conditions$/.exec(p);
     if (m === 'POST' && conditions) {
       const body = await readJson(req);
-      return json(tx(() => core.conditions.report(runnerId, Number(conditions[1]), body)));
+      return json(tx(() => {
+        requireClaimKeyPolicy(core, cred, runnerId, Number(conditions[1]));
+        return core.conditions.report(runnerId, Number(conditions[1]), body);
+      }));
     }
     if (m === 'POST' && p === '/v1/runner/readings') {
       // R-BTN-76, R-BTN-101: what a leg met — on its own runner instances and on any account
@@ -229,11 +242,28 @@ export async function courierRoute(core: Pick<BatonCore, 'admin' | 'config' | 'n
 
 /** The repositories a runner key works on (R-BTN-58), or null for a key no owner or
  *  administrator granted — a bearer token or a seed key, which reaches every one. */
-function grantedRepos(core: Pick<BatonCore, 'runners' | 'sql'>, cred: string): string[] | null {
+function grantedRepos(core: Pick<BatonCore, 'runners' | 'sql' | 'store'>, cred: string): string[] | null {
   if (!core.runners.credential(cred).granted) return null;
-  return core.sql<{ repository_id: string }>('SELECT repository_id FROM runner_grants WHERE credential_id = ? AND revoked_at IS NULL', cred).map((r) => r.repository_id);
+  return core.sql<{ repository_id: string }>('SELECT repository_id FROM runner_grants WHERE credential_id = ? AND revoked_at IS NULL', cred).map((r) => r.repository_id).filter((repo) => runnerKeyAllowed(core.store, cred, repo));
 }
 
+
+function requireRegistrationScope(core: RunnerCore, cred: string, repositories: string[]): void {
+  for (const repo of repositories) requireRunnerKeyPolicy(core.store, cred, repo);
+  if (!core.sql('SELECT 1 FROM credentials WHERE id = ? AND registration_token_id IS NOT NULL', cred).length) return;
+  const grants = grantedRepos(core, cred) ?? [];
+  if (repositories.some((repo) => !grants.includes(repo))) throw new BatonError('forbidden', 'outside this registration grant');
+}
+
+function requireClaimKeyPolicy(core: RunnerCore, cred: string, runner: number, claim: number): void {
+  const row = core.sql<{ ticket_id: string; api_lease_cap_at: number | null }>(
+    'SELECT ticket_id, api_lease_cap_at FROM claims WHERE id = ? AND runner_id = ?', claim, runner)[0];
+  if (!row) return;
+  requireRunnerKeyPolicy(core.store, cred, repositoryOf(row.ticket_id));
+  if (row.api_lease_cap_at !== null && row.api_lease_cap_at <= core.now()) {
+    throw new BatonError('claim-ended', 'the claim lease expired');
+  }
+}
 
 /** B-127: the signed-control record a claim answer carries while its repository requires
  *  signed control — the setting and the owner keys from Baton itself, the groups from the
