@@ -25,6 +25,7 @@ const claim = shape({
   leg_state: optional((v) => v === 'forge' || v === 'branch'), scope: optional(strings),
   ticket_source: optional(nullable(shape({ kind: text, versions: nullable(text) }))),
   brief: optional(shape({ signed: bool, signer: optional(text), commit: text })),
+  displaced: optional(text), evidence: optional(array(shape({ ref: text, kind: text }))),
   last_written_by: optional(shape({ pusher: text, pusher_id: optional(number), commit: text, at: number })),
   control: optional(shape({ required: bool, keys: strings, register_moved: optional(bool) })),
   previous_attempts: optional(array(shape({

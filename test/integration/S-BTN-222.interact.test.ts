@@ -16,7 +16,7 @@
 // unjoined one's `leg-timeout` — is S-BTN-222.runner-half.test.ts.
 import { describe, it, expect, beforeEach } from 'vitest';
 import roadmapPr from '../fixtures/courses/roadmap-pr/course.json';
-import { advance, claimItem, course, cutover, endClaim, Git, keyCall, ORIGIN, placed, register, rows, setAdminKeys, setClock, tick, withCore, runnerCall } from '../helpers';
+import { advance, claimItem, course, cutover, endClaim, Git, keyCall, ORIGIN, placed, register, rows, seedCoreConditionIn, setAdminKeys, setClock, tick, withCore, runnerCall } from '../helpers';
 import { beat } from '../helpers';
 import { makeKey, signedRequest, type TestKey } from '../lib/sshKeys';
 import { call as hostCall } from '#host';
@@ -307,9 +307,8 @@ describe('S-BTN-222: an interaction request (R-BTN-195)', () => {
 
   it('S-BTN-131: one open core condition per repository, type, ticket and ref, even without a ticket', async () => {
     await withCore((core) => {
-      const insert = (ticket: string | null, ref: string, outcome = 'open') => core.store.exec(
-        `INSERT INTO conditions(repository_id, ticket_id, ref, type, disposition, raised_at, outcome)
-         VALUES ('docs', ?, ?, 'baton.stalled', 'notify', ?, ?)`, ticket, ref, T0, outcome);
+      const insert = (ticket: string | null, ref: string, outcome = 'open') => seedCoreConditionIn(core.store,
+        { repository_id: 'docs', ticket_id: ticket, ref, type: 'baton.stalled', disposition: 'notify', raised_at: T0, outcome });
       for (const ticket of ['docs:A', null]) {
         insert(ticket, 'x');
         expect(() => insert(ticket, 'x')).toThrow(/UNIQUE/i);

@@ -9,7 +9,7 @@
 // body says so. Runs on both hosts.
 import { describe, it, expect, beforeEach, inject } from 'vitest';
 import { call as hostCall } from '#host';
-import { keyCall, ORIGIN, rows, setAdminKeys, setClock, setHumanKeys, withCore } from '../helpers';
+import { keyCall, ORIGIN, rows, setAdminKeys, setClock, setHumanKeys, setOwnerAttestation, withCore } from '../helpers';
 import { makeKey, sshsig, signedRequest, type TestKey } from '../lib/sshKeys';
 
 const board = inject('board');
@@ -63,7 +63,7 @@ describe('S-BTN-192 approver lists', () => {
   it('S-BTN-185: a stored marker and a configured break-glass key do not prove hardware custody', async () => {
     await humanOwner(a, breakGlass);
     expect((await as(b, '/v1/owner/ops/owners', { public_key: breakGlass.publicKey })).status).toBe(200);
-    await rows('UPDATE repository_owners SET fido_attestation = ? WHERE fingerprint = ?', 'opaque-marker', a.fingerprint);
+    await setOwnerAttestation(a.fingerprint, 'opaque-marker');
     const { version, doc } = await current();
     const hardware = { ...doc, human_key: 'hardware' };
     for (const entry of ['human', `key:${a.fingerprint}`]) {

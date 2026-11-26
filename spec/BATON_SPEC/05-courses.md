@@ -24,22 +24,28 @@ Designs for this section that are not built are on the proposal page
   - **A source** is `courses[].source` = `<provider>/<namespace>/<repository>/<commit>/<course>`:
     `<commit>` is all 40 hex characters, never a branch or tag, and `github` is the only
     provider. The short `id` is the name tickets, rows, rule 9 and branch patterns use. A course
-    with no `source` is the repository's own. A source names the CLI's own repository; any other
-    is refused.
-  - **A sourced course keeps its graph.** The sync posts nothing while the home's `course.json`
-    differs from the source commit's, or while the home has a `sync.mjs` for the course. The
-    home changes a sourced course only through its leg instructions and leg overrides
-    (R-BTN-131).
+    with no `source` is the repository's own. A fetched source's course directory is
+    `.baton/courses/<course>/` in the source repository. A CLI may use its own bundled standard
+    course when the repository and commit match exactly. Otherwise the reader fetches the
+    source's default branch and verifies that the pin is a commit on its ancestry, including
+    when the reader already has the commit. It never fetches by commit id.
+  - **A sourced course keeps its graph.** The sync reads the source's files, with the home's
+    entry fields taking precedence over defaults in `.baton/courses/<course>/entry.json` in the
+    source repository. The home changes a sourced course only through its leg instructions and
+    leg overrides (R-BTN-131). Any
+    other file in the home's sourced course directory fails the sync, naming the path.
   - **Every reader goes through the snapshot.** The sync reads `.baton/` at the commit it posts
     (R-BTN-105), the runner at the claim's `snapshot_sha` (see R-BTN-143), and
     re-verification at the commit it verifies (R-BTN-5), so all three use the same bytes.
     Station functions and ticket sources run through the wrapper (R-BTN-133) in a read-only
     worktree of that commit, never in `ctx.checkout`.
-  - **`baton repo init`** (R-BTN-127) scaffolds a standard course: its files, its `courses[]`
-    entry with the source at the CLI's own commit, and the sync workflow, which pins the CLI by
-    version. Re-run with a newer CLI it moves the pin and each source together. It never
-    overwrites the home's leg instructions or overrides. With no `--course` it takes
-    `default_course`, else `create-pr`.
+  - **`baton repo init`** (R-BTN-127) writes a standard course's `courses[]` entry with the source
+    at the CLI's own commit, and the sync workflow, which pins the CLI by version. Re-run with
+    a newer CLI it moves the pin and each source together, and rewrites none of a sourced
+    course's files in the home: the newer course arrives through its source. It writes a home override only when
+    requested (`--override` or `--instructions`), never overwriting one. `--prune` compares
+    existing files against the current pins, removes identical copies and reports differing
+    files without changing the pins. With no `--course` it takes `default_course`, else `create-pr`.
   - **Trust.** Naming a source adopts its code with the rights of where it runs: the station
     function in the sync job's environment, leg scripts on runners (R-BTN-133).
 
@@ -81,6 +87,7 @@ Designs for this section that are not built are on the proposal page
   | `reconciles` | leg | `{to: {<station>: <next leg> \| null}}`: a reconcile leg, run by a runner, which Baton queues when the ticket has evidence of work done outside Baton (R-BTN-39, R-BTN-203). It declares no `to`: its outcomes are each of its `from` (concluding `unchanged`, with the displaced leg next) and each station of `reconciles.to`, with that entry's next leg (`null` at an end). It needs `max_runs`; at most one reconcile leg leaves a station; it is never `start_leg` and never a `next`. Not on a fact or `kind: person` leg | R-BTN-39, R-BTN-203 |
   | `arrives` | leg | `{fact: <kind>, verdict?, next?}`, a fact leg: no claim runs it; it arrives when the sync attests its fact (R-BTN-203); exactly one outcome; `verdict` (`approve` or `changes`) narrows a `pr-verdict`; `next` is a leg leaving its outcome (none at an end), or on a `pr-verdict` leg `{approve, changes}`, one per verdict. Its arrival is a run of the fact leg itself (R-BTN-63). A fact leg is never `start_leg`, never another leg's `next`, and never chosen as a default next (R-BTN-39). Not on a `kind: person` leg | R-BTN-39, R-BTN-203 |
   | `asks`, `expires` | leg | for `kind: person`: who answers, and when and where the leg arrives unanswered | R-BTN-116 |
+  | `answer_source` | leg | for `kind: person`: require a direct answer | R-BTN-116 |
   | `max_runs` | leg | how often one ticket may run it without a person | R-BTN-63 |
   | `max_queue` | leg | queue depth that raises a warning | R-BTN-79 |
   | `version`, `inputs`, `outputs` | leg | its contract | R-BTN-82 |
@@ -460,6 +467,11 @@ Designs for this section that are not built are on the proposal page
     `min_runner_version`.
   - A ticket keeps no record of the course version it started under: its course history is the
     record (R-BTN-39).
+  - If a former end reached by a person's answer becomes an intermediate station with one
+    runner leg leaving it, Baton queues that leg from the recorded station, provided the new
+    course still admits the recorded answer's source. If the source is no longer admitted and
+    the answer's preceding station still admits the person leg, Baton queues a fresh question
+    there. The historical answer remains in the record.
 - **The test kit.** `baton course test <repository root> <course>` (R-BTN-127), run by a home
   repository's CI on a PR that changes `.baton/` (R-BTN-133), starts a local Baton, posts the
   PR's board with the proposed `.baton/` and needs no production access. It fails when:

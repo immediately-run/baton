@@ -1,3 +1,4 @@
+/// <reference path="./provided.d.ts" />
 // Build the fixture git history in Node before the Workers and local tests (R-BTN-29).
 import type { TestProject } from 'vitest/node';
 import { readFileSync, rmSync } from 'node:fs';

@@ -19,7 +19,8 @@ import { checkPayload, DEFAULT_COURSE } from '../core/board';
 import { baseChain, checkSchemaSet, parseSchemaId, POST_STATES_MAX, refinementGaps, type Schema } from '../shared/schema.mjs';
 import { stdSchema } from '../shared/std.mjs';
 import { builtIn } from '../defaults/courses';
-import { courseSchemas } from '../defaults/cli';
+import { instructionsOf, resolveSource, runnerLegs, schemasIn, writeStub } from '../defaults/cli';
+import { coursePath, isOverride, writeCourseTree } from '../defaults/course-tree';
 import { parseSource } from '../defaults/course-source';
 import { LocalHost } from './host';
 import { openStore } from './store';
@@ -55,6 +56,7 @@ export interface KitInput {
   /** The repository root the kit read (readInputs); null over constructed inputs. The no-op run
    * (B-81) needs it to import the working tree's leg scripts. */
   root?: string | null;
+  sourceDir?: string;
   /** The course entry's `source` (B-33), when .baton/baton.json names one: the standard course
    * whose files the repository scaffolds — how the kit tells a PR course filed under another id
    * (docs' `roadmap-pr`, sourced from `create-pr`) from the marker courses. */
@@ -142,8 +144,8 @@ export function staticViolations(k: KitInput): KitViolation[] {
     const all = asRecord(asRecord(k.proposed).legs);
     const legs = Object.keys(all);
     const scripts = k.legScripts.map((x) => x.name);
-    // A person's leg (R-BTN-116) is answered, never run: it needs no script (B-257's `confirm`).
-    const runs = legs.filter((x) => asRecord(all[x]).kind !== 'person');
+    // Person and fact legs are answered or applied by core, never run by a script.
+    const runs = legs.filter((x) => asRecord(all[x]).kind !== 'person' && !asRecord(all[x]).arrives);
     for (const l of runs.filter((x) => !scripts.includes(x))) out.push({ rule: 'legs-scripts', message: `leg ${l} has no legs/${l}.mjs` });
     for (const s of scripts.filter((x) => !legs.includes(x))) out.push({ rule: 'legs-scripts', message: `legs/${s}.mjs is no leg of the course` });
     // §6.13: "The test kit fails a script without all three" (round 1, 1-A-9).
@@ -390,7 +392,7 @@ export function shortestRoute(g: Graph): Step[] | null {
       for (const [leg, l] of [...g.legs].sort(([a], [b]) => (a < b ? -1 : 1))) {
         // A person's leg is answered, never advanced into (R-BTN-116, rule person): the generic
         // run is a runner's, so its route takes runner legs alone (B-257's `confirm`).
-        if (!l.from.includes(s) || l.person) continue;
+        if (!l.from.includes(s) || l.person || l.arrives || l.reconciles) continue;
         for (const to of l.to) if (!prev.has(to)) { prev.set(to, { from: s, step: { leg, reached: to } }); next.push(to); }
       }
     }
@@ -532,8 +534,9 @@ export async function noopViolations(k: KitInput): Promise<KitViolation[]> {
     standard = undefined; // a source that is not a name: the sync's to refuse, not the kit's
   }
   if (standard?.reads !== 'prs') return [];
-  const startLeg = graphOf(k.proposed).startLeg;
-  const script = join(k.root, '.baton', 'courses', k.course, 'legs', `${startLeg}.mjs`);
+  const graph = graphOf(k.proposed);
+  const startLeg = graph.startLeg;
+  const script = join(k.sourceDir ?? join(k.root, coursePath(k.course)), 'legs', `${startLeg}.mjs`);
   if (!existsSync(script)) return []; // a missing script is the legs-scripts rule's own failure
   const dir = mkdtempSync(join(tmpdir(), 'baton-kit-noop-'));
   try {
@@ -553,6 +556,9 @@ export async function noopViolations(k: KitInput): Promise<KitViolation[]> {
     if (typeof run !== 'function') return []; // a script that exports no run is the legs-scripts rule's
     try {
       const result = await (run as (ctx: unknown) => Promise<unknown>)({ ticket: { id: `${REPO}:KIT-1`, home: REPO }, leg: startLeg, checkout: dir, snapshot: { sha } });
+      // Create-spec can wait for the owner to finish the conversation without claiming a PR opened.
+      const answer = asRecord(result);
+      if (standard.id === 'create-spec' && answer.suspend === true && answer.reached === graph.start && answer.next === startLeg) return [];
       return [{ rule: 'no-op', message: `legs/${startLeg}.mjs returned ${JSON.stringify(result)} for an agent_command that exits 0 with no PR — the course opens PRs, so its start leg must verify one on the forge before returning its position, failing the leg naming what it looked for (B-81)` }];
     } catch {
       return []; // the leg refused the no-op: what B-81 asks
@@ -578,7 +584,7 @@ export async function ticketViolations(k: KitInput): Promise<KitViolation[]> {
   }
   if (standard?.reads !== 'markers') return [];
   const startLeg = graphOf(k.proposed).startLeg;
-  const script = join(k.root, '.baton', 'courses', k.course, 'legs', `${startLeg}.mjs`);
+  const script = join(k.sourceDir ?? join(k.root, coursePath(k.course)), 'legs', `${startLeg}.mjs`);
   if (!existsSync(script)) return []; // a missing script is the legs-scripts rule's own failure
   const dir = mkdtempSync(join(tmpdir(), 'baton-kit-ticket-'));
   // A local bare origin the close can really fetch (round 1, finding 5): the rule must reach
@@ -655,32 +661,74 @@ export async function checkCourse(k: KitInput): Promise<KitViolation[]> {
  *  live tickets from a board payload file, and each leg script's exports (imported: the kit runs
  *  in the repository's own CI, on its own code). */
 export async function readInputs(root: string, course: string, opts: { base?: string | null; board?: string | null } = {}): Promise<KitInput> {
-  const dir = join(root, '.baton', 'courses', course);
-  const file = join(dir, 'course.json');
-  if (!existsSync(file)) throw new Error(`${file}: no such course file`);
-  const proposed = JSON.parse(readFileSync(file, 'utf8'));
+  return readFrom(root, course, opts);
+}
+
+/** Keep the materialized source alive for the kit's probe runs, then discard it. */
+export async function checkCheckout(root: string, course: string, opts: { base?: string | null; board?: string | null }) {
+  const scratch = mkdtempSync(join(tmpdir(), 'baton-kit-source-'));
+  try {
+    const input = await readFrom(root, course, opts, scratch);
+    return { input, violations: await checkCourse(input) };
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
+}
+
+async function readFrom(root: string, course: string, opts: { base?: string | null; board?: string | null }, scratch?: string): Promise<KitInput> {
+  const dir = join(root, coursePath(course));
   const versionsOf = (json: unknown, id: string): Versions | null => {
     const c = (asRecord(json).courses as unknown[] | undefined)?.map(asRecord).find((x) => x.id === id);
     return c && Number.isInteger(c.version) && Number.isInteger(c.min_runner_version) ? { version: c.version, min_runner_version: c.min_runner_version } : null;
   };
   const batonJson = join(root, '.baton', 'baton.json');
   const settings = existsSync(batonJson) ? asRecord(JSON.parse(readFileSync(batonJson, 'utf8'))) : {};
-  const proposedVersions = versionsOf(settings, course);
+  const entries = (settings.courses as unknown[] | undefined)?.map(asRecord) ?? [];
+  const entry = entries.find((x) => x.id === course);
+  const courseSource = typeof entry?.source === 'string' ? entry.source : null;
+  const source = courseSource && scratch ? await resolveSource(course, courseSource, scratch) : null;
+  let sourceDir: string | undefined;
+  if (source) {
+    sourceDir = mkdtempSync(join(scratch!, 'course-'));
+    const checkCopies = (sub: string) => {
+      if (!existsSync(join(dir, sub))) return;
+      for (const f of readdirSync(join(dir, sub), { withFileTypes: true })) {
+        const path = sub ? `${sub}/${f.name}` : f.name;
+        if (f.isDirectory()) checkCopies(path);
+        else if (!f.isFile() || !isOverride(path)) throw new Error(`${coursePath(course)}/${path}: not an override of a sourced course`);
+      }
+    };
+    checkCopies('');
+    if (source.standard) {
+      mkdirSync(join(sourceDir, 'legs'));
+      for (const leg of runnerLegs(source.standard)) {
+        await writeStub(source.standard, leg, join(sourceDir, 'legs', `${leg}.mjs`));
+        writeFileSync(join(sourceDir, 'legs', `${leg}.md`), instructionsOf(course, leg));
+      }
+    } else if (source.files) writeCourseTree(sourceDir, source.files, false);
+  }
+  const file = join(dir, 'course.json');
+  if (!source && !existsSync(file)) throw new Error(`${file}: no such course file`);
+  const proposed = JSON.parse(source?.graph ?? readFileSync(file, 'utf8'));
+  const proposedVersions = versionsOf({ courses: [{ ...source?.entry, ...entry }] }, course);
   // B-52 (R-BTN-134, R-BTN-108): the course's schemas, from `schemas/` of its course directory
   // through the same `courseSchemas` the sync's post spreads in — one reader, one path — and
   // the repository's other listed courses beside it, whose files, schemas and versions the
   // spawns check, the signature print and the kit's own registry post read. A sourced course's
   // schemas sit in its source's directory, which B-43 wires to `courseSchemas`.
-  const schemas = courseSchemas(root, course).schemas ?? null;
-  const others = ((settings.courses as unknown[] | undefined) ?? []).map(asRecord).map((x) => x.id).filter((id): id is string => typeof id === 'string')
-    .filter((id) => id !== course).map((id) => {
-      const otherFile = join(root, '.baton', 'courses', id, 'course.json');
-      return { id, file: existsSync(otherFile) ? JSON.parse(readFileSync(otherFile, 'utf8')) : null, schemas: courseSchemas(root, id).schemas ?? [], versions: versionsOf(settings, id) };
-    });
-  // The course entry's source (B-33), where it names one: the standard course whose files the
-  // repository scaffolds, however the course is filed here.
-  const entry = (settings.courses as unknown[] | undefined)?.map(asRecord).find((x) => x.id === course);
-  const courseSource = typeof entry?.source === 'string' ? entry.source : null;
+  const schemas = schemasIn(sourceDir ?? dir, course).schemas ?? null;
+  const others: NonNullable<KitInput['others']> = [];
+  for (const other of entries) {
+    const id = other.id;
+    if (typeof id !== 'string' || id === course) continue;
+    const otherDir = join(root, coursePath(id));
+    const otherFile = join(otherDir, 'course.json');
+    const src = typeof other.source === 'string' && scratch ? await resolveSource(id, other.source, scratch) : null;
+    const schemaDir = src ? mkdtempSync(join(scratch!, 'schemas-')) : otherDir;
+    if (src?.files) writeCourseTree(schemaDir, src.files.filter((f) => f.path.startsWith('schemas/')), false);
+    others.push({ id, file: src ? JSON.parse(src.graph) : existsSync(otherFile) ? JSON.parse(readFileSync(otherFile, 'utf8')) : null,
+      schemas: schemasIn(schemaDir, id).schemas ?? [], versions: versionsOf({ courses: [{ ...src?.entry, ...other }] }, id) });
+  }
   const gitAtRoot = (...args: string[]) => runGit(root, args);
   let base: unknown = null;
   let baseVersions: Versions | null = null;
@@ -700,20 +748,28 @@ export async function readInputs(root: string, course: string, opts: { base?: st
       }
       return JSON.parse(gitAtRoot('show', `${opts.base}:${path}`));
     };
-    base = show(`.baton/courses/${course}/course.json`);
-    baseVersions = versionsOf(show('.baton/baton.json'), course);
+    const baseSettings = asRecord(show('.baton/baton.json'));
+    const baseEntry = (baseSettings.courses as unknown[] | undefined)?.map(asRecord).find((x) => x.id === course);
+    const src = typeof baseEntry?.source === 'string' && scratch ? await resolveSource(course, baseEntry.source, scratch) : null;
+    base = src ? JSON.parse(src.graph) : show(`${coursePath(course)}/course.json`);
+    baseVersions = versionsOf({ courses: [{ ...src?.entry, ...baseEntry }] }, course);
   }
-  const legsDir = join(dir, 'legs');
+  const legsDir = join(sourceDir ?? dir, 'legs');
+  const homeLegs = join(dir, 'legs');
   let legScripts: KitInput['legScripts'] = null;
   const instructions: { name: string; text: string }[] = [];
   const overrides: NonNullable<KitInput['overrides']> = [];
   if (existsSync(legsDir)) {
     legScripts = [];
-    for (const f of readdirSync(legsDir).filter((x) => x.endsWith('.md')).sort()) {
+    const prompts = new Set(readdirSync(legsDir).filter((x) => x.endsWith('.md')));
+    if (sourceDir && existsSync(homeLegs)) for (const f of readdirSync(homeLegs).filter((x) => x.endsWith('.md'))) prompts.add(f);
+    for (const f of [...prompts].sort()) {
       const name = f.slice(0, -'.md'.length);
-      instructions.push({ name, text: readFileSync(join(legsDir, f), 'utf8') });
+      instructions.push({ name, text: readFileSync(join(existsSync(join(homeLegs, f)) ? homeLegs : legsDir, f), 'utf8') });
     }
-    for (const f of readdirSync(legsDir).filter((x) => x.endsWith('.mjs')).sort()) {
+    const scripts = readdirSync(legsDir).filter((x) => x.endsWith('.mjs') && (!sourceDir || !x.endsWith('.run.mjs')));
+    if (sourceDir && existsSync(homeLegs)) scripts.push(...readdirSync(homeLegs).filter((x) => x.endsWith('.run.mjs')));
+    for (const f of scripts.sort()) {
       const override = f.endsWith('.run.mjs');
       const name = f.slice(0, override ? -'.run.mjs'.length : -'.mjs'.length);
       const into = override ? overrides : legScripts;
@@ -721,7 +777,7 @@ export async function readInputs(root: string, course: string, opts: { base?: st
         // An override runs only through a leg script that looks it up: one from before overrides does not.
         // The script must name this course's own override path: a copy of another course's reads that one's.
         const loaded = override ? (existsSync(join(legsDir, `${name}.mjs`)) && readFileSync(join(legsDir, `${name}.mjs`), 'utf8').includes(`.baton/courses/${course}/legs/${name}.run.mjs`)) : undefined;
-        into.push({ name, exports: legExports(await import(pathToFileURL(join(legsDir, f)).href)), ...(override ? { loaded } : {}) });
+        into.push({ name, exports: legExports(await import(pathToFileURL(join(override ? homeLegs : legsDir, f)).href)), ...(override ? { loaded } : {}) });
       } catch (e) {
         into.push({ name, exports: [], error: (e as Error).message.split('\n')[0] });
       }
@@ -734,5 +790,5 @@ export async function readInputs(root: string, course: string, opts: { base?: st
     live = Object.entries(asRecord(b.stations)).filter(([id]) => (courseOf.get(id) ?? course) === course)
       .map(([id, st]) => ({ id, path: (asRecord(st).path as Step[] | undefined) ?? [] }));
   }
-  return { course, proposed, base, proposedVersions, baseVersions, root, source: courseSource, legScripts, overrides, instructions, schemas, others, live };
+  return { course, proposed, base, proposedVersions, baseVersions, root, sourceDir, source: courseSource, legScripts, overrides, instructions, schemas, others, live };
 }

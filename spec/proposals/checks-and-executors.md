@@ -327,29 +327,15 @@ repository's grants.
     credential it registered. The dashboard shows each runner's credential kind and token.
 
 
-## 6. The leg's channel verbs and the bounded run (R-BTN-106, proposed)
+## 6. Further leg channel verbs (R-BTN-106, proposed)
 
-Built: the CLI command `baton leg raise`, and `done` as an op on the channel with no CLI command. The full set:
+The built verbs and bounded runs are in R-BTN-106. The remaining verbs are:
 
-wrapped by the CLI. Verbs act on that leg only and exit 2 "not inside a leg" elsewhere:
-`baton leg status` (leg, grant, deadline, `refresh`);
-`baton leg output <name> --uri <uri> [--digest …] | --value <json>`;
-exactly one ending — `baton leg done --reached <station> --next <leg>`,
-`baton leg suspend --reached <station>`, `baton leg release --reason <reason>`, or
-`baton leg release --blocked --kind <kind> --ref <ref> […]` (R-BTN-126);
-`baton leg yield [--context <fraction>]` (R-BTN-123);
-`baton leg raise`, `baton leg await` (R-BTN-160, R-BTN-162);
-`baton leg events`, `baton leg ticket` (R-BTN-198);
-`baton leg next` (the `attached` executor, R-BTN-107).
-A script may return its result directly instead. The channel carries these verbs and nothing
-else: a raw `advance` or `end`, or a run's `executor_digest`,
-`environment` or `instance` (R-BTN-107) sent on it is refused — the runner reports those
-itself.
-
-- **A bounded run.** `baton runner start --legs <leg,…> [--max-legs <n>] [--until <instant>]`
-  claims only tickets whose queued leg is named, chains only into named legs, runs at most
-  `n` legs per claim (default 8) and starts none after `until`. A move outside the grant
-  suspends at `reached`. This is the runner's discipline, not a Baton gate.
+- `baton leg release --blocked --kind <kind> --ref <ref> […]` (R-BTN-126).
+- `baton leg yield [--context <fraction>]` (R-BTN-123).
+- `baton leg await` (R-BTN-162).
+- `baton leg events`, `baton leg ticket` (R-BTN-198).
+- `baton leg next` (the `attached` executor, R-BTN-107).
 
 ## 7. The launcher (R-BTN-201, proposed)
 

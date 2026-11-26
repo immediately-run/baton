@@ -106,3 +106,46 @@ export async function raiseMain(argv: string[], env: NodeJS.ProcessEnv = process
   process.stdout.write(`baton: ${what.join(', ')} — the raise returned at once; nothing waits on it (R-BTN-160)\n`);
   return 0;
 }
+
+const MOVE_FLAGS: Record<string, readonly string[]> = {
+  status: [], output: ['uri', 'digest', 'value'], done: ['reached', 'next'],
+  suspend: ['reached', 'next'], release: ['reason'],
+};
+
+export async function legMain(argv: string[], env: NodeJS.ProcessEnv = process.env): Promise<number> {
+  const [op, ...args] = argv;
+  if (op === 'raise') return raiseMain(args, env);
+  const socket = env.BATON_SOCKET;
+  if (!socket) {
+    process.stderr.write('baton: not inside a leg (R-BTN-106)\n');
+    return 2;
+  }
+  try {
+    const allowed = MOVE_FLAGS[op];
+    if (!Object.hasOwn(MOVE_FLAGS, op)) throw new Error('usage: baton leg status | output | done | suspend | release | raise');
+    const req: Record<string, unknown> & { op: string } = { op };
+    let i = 0;
+    if (op === 'output') {
+      req.name = args[i++];
+      if (typeof req.name !== 'string' || req.name.startsWith('-')) throw new Error('output needs a name');
+    }
+    for (; i < args.length; i += 2) {
+      const flag = args[i];
+      const key = flag.slice(2);
+      const value = args[i + 1];
+      if (!flag.startsWith('--') || !allowed.includes(key) || Object.hasOwn(req, key) || value == null) {
+        throw new Error(`${flag}: unexpected or missing value for baton leg ${op}`);
+      }
+      req[key] = key === 'value' ? JSON.parse(value) : value;
+    }
+    if ((op === 'done' || op === 'suspend') && !req.reached) throw new Error('--reached is required');
+    if (op === 'release' && !req.reason) throw new Error('--reason is required');
+    const answer = await callChannel(socket, req);
+    if (!answer.ok) throw new Error(answer.error);
+    process.stdout.write(`${JSON.stringify(answer)}\n`);
+    return 0;
+  } catch (e) {
+    process.stderr.write(`baton: ${e instanceof Error ? e.message : String(e)}\n`);
+    return 1;
+  }
+}

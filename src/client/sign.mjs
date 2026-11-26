@@ -39,6 +39,7 @@ function reason(r) {
  * key file"). No probe reads the private half: `-y` decrypts the file itself, never the agent,
  * so it would refuse the agent-held keys the spec prescribes. A key that cannot sign is named at
  * the first signature, by `-Y sign`'s own reason (round 4, 4-r0-1). */
+/** @param {string} file */
 export function signingKey(file, keygen = KEYGEN) {
   const listing = run(['-l', '-E', 'sha256', '-f', file], {}, keygen);
   const fingerprint = listing.status === 0 ? /\b(SHA256:[A-Za-z0-9+/]{43})\b/.exec(listing.stdout)?.[1] ?? null : null;
@@ -54,6 +55,9 @@ export const API_KEY = /^bak_[0-9a-f]{16}_[0-9a-f]{64}$/;
 /** The credential a key file holds, as a request sends it: an API key (R-BTN-159) as a bearer,
  *  `{bearer}`, else an SSH key that signs (R-BTN-13), `{key}` from `signingKey` — which throws
  *  for a file that is neither. The one dispatch `send` and the ticket commands' key check share. */
+/** @param {string} file
+ * @returns {{bearer: string, key?: never} | {bearer?: never, key: ReturnType<typeof signingKey>}}
+ */
 export function requestCredential(file, keygen = KEYGEN) {
   const text = readFileSync(file, 'utf8').trim();
   return API_KEY.test(text) ? { bearer: text } : { key: signingKey(file, keygen) };
@@ -65,6 +69,7 @@ export function contentDigest(body = '') {
 }
 
 /** The RFC 9421 signature base Baton rebuilds. */
+/** @param {{method: string, url: string | URL, digest: string, params: string}} input */
 export function signatureBase({ method, url, digest, params }) {
   const u = new URL(url);
   return [
@@ -78,6 +83,7 @@ export function signatureBase({ method, url, digest, params }) {
 }
 
 /** The headers that sign one request with `key`. `now` is epoch milliseconds. */
+/** @param {{method: string, url: string | URL, body?: string | null, key: ReturnType<typeof signingKey>, now?: number}} input */
 export function signHeaders({ method, url, body, key, now = Date.now() }, keygen = KEYGEN) {
   const digest = contentDigest(body ?? '');
   const nonce = randomBytes(16).toString('base64url');

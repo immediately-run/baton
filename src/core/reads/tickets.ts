@@ -99,6 +99,7 @@ function ticketAnswer(cx: ReadCtx, call: ReadCall) {
       ...(row.eligible_runners ? { eligible_runners: row.eligible_runners, failed_rule: row.failed_rule ?? null } : {}),
     } : {}),
     ...detail,
+    evidence: cx.sql('SELECT ref, kind FROM ticket_evidence WHERE ticket_id = ? AND weighed_at IS NULL ORDER BY found_at, ref', id),
     allowed: allowedOn(cx, call.principal, repo, detail.overrides.hold),
     server_time: cx.now(),
   };

@@ -25,17 +25,22 @@ export interface ClaimAnswer {
   /** B-39: where the leg's declared pointers may reach (R-BTN-109). */
   pointer_reach?: PointerReach;
   brief?: { signed: boolean; signer?: string; commit: string };
+  /** B-311: a reconcile leg's displaced leg and the evidence Baton captured for it. */
+  displaced?: string;
+  evidence?: { ref: string; kind: string }[];
   last_written_by?: LastWrittenBy;
   default_branch?: string;
   handoff_url?: string;
   control?: { required: boolean; keys: string[]; register_moved?: boolean; [group: string]: unknown };
   advice?: unknown;
+  person_answer?: { leg: string; option: string; answered_at: number; answered_by: string };
   previous_attempts?: {
     claim_id: number;
     status: string;
     end_reason: string | null;
     detail: string | null;
     ended_at: number | null;
+    ended_at_sha?: string;
     resume: unknown;
     legs: { leg: string; run_id?: string; from: string; reached: string | null; outcome: string }[];
   }[];
