@@ -18,6 +18,12 @@ import { deliveredDetail, findDelivered, reconcileAnswer, ticketPrRefs, ticketRe
 import { positionOf, type AgentLeg, type StubConfig } from './stub-config';
 import { bareTicketId, closeTicket, execRaw, RUN_TESTS_TIMEOUT_MS, ticketsBranch } from './ticket-state';
 import type { BatonJson, CourseEntry } from './repo-source';
+import { remoteSlug } from './remote-slug';
+
+/** The checkout's own repository (`owner/name`), or null when its origin names none. */
+function homeSlug(checkout: string): string | null {
+  try { return remoteSlug(checkout); } catch { return null; }
+}
 
 const OUTPUT_MAX = 64 * 1024 * 1024;
 const AGENT_IDLE_MS = 900_000;
@@ -185,7 +191,13 @@ async function runAgent(ctx: LegCtx, { course, leg, names, spec, readsOnly, ship
   const redEdge = ctx.claim?.station === 'pr-open' || ctx.claim?.station === 'fixed';
   const prHeads = () => matchingHeads(ctx, entry).heads.sort().join('\n');
   // B-231, B-255: a fix of a red head must push, unless its PRs may be in other repositories.
-  const headsBefore = pushes && redEdge && ticketRepositories(ticketText, settings.repos).length === 0 ? prHeads() : '';
+  // `repos:` naming the home itself is not another repository: nearly every Baton ticket names
+  // `baton`, which once switched the check off, so a fix that pushed nothing looped with its
+  // run-tests gate until the gate's 30 runs were spent (B-322, B-8, 2026-11-26).
+  const homeRepos = new Set([homeSlug(ctx.checkout), ctx.ticket.home ? settings.repos?.[ctx.ticket.home] ?? null : null]
+    .filter((r): r is string => typeof r === 'string' && r !== '').map((r) => r.toLowerCase()));
+  const otherRepos = ticketRepositories(ticketText, settings.repos).filter((r) => !homeRepos.has(r.toLowerCase()));
+  const headsBefore = pushes && redEdge && otherRepos.length === 0 ? prHeads() : '';
   // B-127: instructions and settings use their respective owner-signed commits when required.
   const signedCourse = ctx.signed_control?.course;
   const courseSha = typeof signedCourse === 'string' && signedCourse !== '' ? signedCourse : sha;

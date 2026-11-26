@@ -1578,6 +1578,14 @@ exit 0
       const ticketFile = join(scratch, 'A-1.md');
       writeFileSync(ticketFile, '---\nid: A-1\ntitle: Also in the monorepo\nrepos: [acme/monorepo]\n---\n');
       expect(await stub.run({ ...ctx('fixed', quiet), ticket: { id: 'A-1', file: ticketFile } })).toEqual({ reached: 'fixed', next: 'run-tests' });
+      // …but `repos:` naming the home itself is no other repository (2026-11-26: nearly every Baton
+      // ticket names `baton`, and a fix that pushed nothing looped with its gate for 30 runs).
+      writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(scaffolded), agent_command: 'true', repos: { home: 'acme/home' } }));
+      const homeNamed = { sha: commitAll(root) };
+      writeFileSync(ticketFile, '---\nid: A-1\ntitle: Names its home\nrepos: [home]\n---\n');
+      await expect(stub.run({ ...ctx('fixed', homeNamed), ticket: { id: 'A-1', home: 'home', file: ticketFile } })).rejects.toThrow('the fix leg pushed nothing');
+      writeFileSync(ticketFile, '---\nid: A-1\ntitle: Names its home and another\nrepos: [home, acme/monorepo]\n---\n');
+      expect(await stub.run({ ...ctx('fixed', homeNamed), ticket: { id: 'A-1', home: 'home', file: ticketFile } })).toEqual({ reached: 'fixed', next: 'run-tests' });
     } finally {
       g('reset', '-q', '--hard', main);
       g('remote', 'remove', 'origin');
