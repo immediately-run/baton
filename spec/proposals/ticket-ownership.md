@@ -188,7 +188,9 @@ and version, with four rules added:
 - **Baton-owned keys are not read**: the legacy `station`, `next_leg` and `claim`, and the held
   statuses.
 - **Absence.** An **unwritten** ticket missing from a post stays. A ticket Baton has already
-  closed may leave the store as it likes (a file tidied into `archive/` and later removed). Any
+  closed may leave the store as it likes (a Dibber file is closed in place, by its `status`, and
+  never moves — [R-DIB-2](https://github.com/immediately-run/dibber/blob/main/SPEC.md) — but another
+  store may drop a closed ticket). Any
   other ticket the store **had** and a post no longer shows raises the ticket condition
   `baton.ticket-missing`, which holds it — no runner works a ticket whose content has vanished —
   and a claim on it is released `stale-board`, as today (§9.4). Its one restart is `wait`: the
@@ -364,9 +366,9 @@ changes is whom Baton believes, in three steps, each releasable alone:
    `build-app`, `spec-to-tickets`) have no reconcile leg yet, so a hand-closed ticket on one of
    them waits as evidence until it gets one.
 3. **Baton-owned keys stop being read**, and the git-lock commands that claim by pushing a status
-   (`baton tickets claim`, `set`) retire with them (R-BTN-193 already marks them legacy). Moving a
-   closed ticket's file to `archive/` stays a store-side tidy-up the closing leg does; Baton never
-   depends on it.
+   (`baton tickets claim`, `set`) retire with them (R-BTN-193 already marks them legacy). How the
+   store shows a ticket closed stays the store's: a Dibber ticket's `status`, set in place (Dibber's
+   R-DIB-2), which the closing leg writes and Baton reads only as evidence.
 
 ## When Baton's state is lost
 
