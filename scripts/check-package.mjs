@@ -7,9 +7,9 @@
 //   node scripts/check-package.mjs        (CI runs it before the release job may publish)
 import { git } from '../src/defaults/git.mjs';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 
 const ROOT = resolve(import.meta.dirname, '..');
 const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'));
@@ -92,6 +92,20 @@ export function handoff(ctx) { return ctx.ticket; }
     }
     if (!readFileSync(join(repo, '.github', 'workflows', 'baton-sync.yml'), 'utf8').includes(`ref: ${build.commit}`)) fail('the sync workflow does not pin the commit the package was built from');
     if (existsSync(join(repo, '.baton/courses/create-pr'))) fail('the installed init copied a sourced course into the home');
+    // B-281's `--check`, re-scoped to B-139 (the owner, 2026-11-26): the installed CLI, at the
+    // home's pin, finds no home copy beside an entry-only course, and reports one read-only.
+    const check = () => spawnSync(join(app, 'node_modules', '.bin', 'baton'), ['repo', 'init', '--check'], { cwd: repo, env, encoding: 'utf8' });
+    const clean = check();
+    if (clean.status !== 0 || !/1 sourced course holds no home copies/.test(clean.stdout)) fail(`the installed CLI did not check its sourced course:\n${clean.stdout}${clean.stderr}`);
+    const copy = join(repo, '.baton', 'courses', 'create-pr', 'legs', 'implement.mjs');
+    const edited = 'throw new Error("the check must not execute this");\n';
+    mkdirSync(dirname(copy), { recursive: true });
+    writeFileSync(copy, edited);
+    const drift = check();
+    if (drift.status !== 1 || !/implement\.mjs differs from github\//.test(drift.stdout) || readFileSync(copy, 'utf8') !== edited) {
+      fail(`the installed CLI did not report a home copy read-only:\n${drift.stdout}${drift.stderr}`);
+    }
+    rmSync(join(repo, '.baton', 'courses', 'create-pr'), { recursive: true });
     execFileSync('git', ['-C', repo, 'add', '.baton']);
     execFileSync('git', ['-C', repo, '-c', 'user.name=Package check', '-c', 'user.email=package@example.test', 'commit', '-qm', 'course entry']);
     const show = spawnSync(join(app, 'node_modules', '.bin', 'baton'), ['course', 'show', 'create-pr'], { cwd: repo, env, encoding: 'utf8' });

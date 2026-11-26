@@ -46,8 +46,8 @@ export interface CloseCtx {
   default_branch?: string | null;
 }
 
-/** A pull-request URL a leg may name for its line (B-29); the stubs build their check from its
- * source. (`prRefs` reads `prs:` entries more loosely: a `/files` or `#…` tail is still the PR.) */
+/** A pull-request URL a leg may name for its line (B-29).
+ * (`prRefs` reads `prs:` entries more loosely: a `/files` or `#…` tail is still the PR.) */
 export const PR_URL = /^https?:\/\/[^\s/]+\/[^\s/]+\/[^\s/]+\/pull\/\d+$/;
 
 /** The legs whose close writes a line on a PR — `commentLine`'s — and so may name the PR. */

@@ -779,6 +779,10 @@ var answered = (t) => {
 };
 var ticketStations = (waits) => (ctx) => stationsTickets({ tickets: ctx.tickets, closed: ctx.closed, done: ctx.done, graph: ctx.graph, waits });
 var VERDICT2 = { name: "verdict", values: ["approve", "changes"] };
+var ADJUDICATE = { ask: { name: "adjudication", values: ["merge", "owner"] }, positions: {
+  merge: { reached: "adjudicated", next: "merge" },
+  owner: { reached: "adjudicated", next: "merge", suspend: true }
+} };
 var CREATE_PR = {
   id: "create-pr",
   // 5: B-311's reconcile leg (min_runner_version 3).
@@ -795,32 +799,40 @@ var CREATE_PR = {
     // B-257: an agent that finds the ticket already on the default branch answers `delivered
     // <sha> <evidence>`; the stub checks the commit is there and returns `delivered`, where the
     // person leg `confirm` waits — no PR, no note branch, no failed attempt.
-    implement: { position: "{ reached: 'pr-open', next: 'run-tests' }", verify: "pr", delivered: true },
+    implement: { position: { reached: "pr-open", next: "run-tests" }, verify: "pr", delivered: true },
     // B-110: the deterministic gate — no agent. The stub runs `npm run <test_script>` itself on
     // the PR branch's fetched head, bounded, and returns the station it ran from (the claim's,
     // pr-open or fixed): green advances to review, red routes to fix — never back to implement —
     // wherever the push came from, naming the failing script's last lines in the marker it
     // makes on the tested head and the close pushes.
-    "run-tests": { position: "station", tests: true },
+    "run-tests": { tests: true },
     // The verdict decides what the review queues: merge for approve, fix for changes — until the
     // rounds run out (B-110: the run that reaches the file's `max_runs`, or one the owner granted
     // past it): then changes queue `adjudicate`, waiting on the owner, so the claim suspends
     // there rather than spend a fix the owner has not asked for (round 1, finding 6).
-    review: { ask: VERDICT2, reviewBound: true, position: "{ ...(answer !== 'approve' && roundsSpent ? { suspend: true } : {}), reached: 'reviewed', next: answer === 'approve' ? 'merge' : roundsSpent ? 'adjudicate' : 'fix', verdict: answer }" },
+    review: { ask: VERDICT2, positions: {
+      approve: { reached: "reviewed", next: "merge" },
+      changes: { reached: "reviewed", next: "fix", atRun: {
+        min: "review-limit",
+        position: { reached: "reviewed", next: "adjudicate", suspend: true }
+      } }
+    } },
     // B-110: a fix's push re-opens the gate, so what follows fix is run-tests again — the next
     // round waits on a green head, never on the fix's own word for it.
     // B-231: from the gate's red (pr-open, fixed) a fix that pushed nothing is no fix — the stub
     // fails the leg rather than send the unchanged tree back to the gate, up to 30 times.
-    fix: { position: "{ reached: 'fixed', next: 'run-tests' }", pushes: "after-red" },
+    fix: { position: { reached: "fixed", next: "run-tests" }, pushes: "after-red" },
     // B-110: the third round's blockers are the owner's — the leg waits on them (the sync posts
     // the `review-rounds-<n>` decision carrying their question) until they answer through Baton
     // (`baton owner resolve … merge|owner|round`). No agent reproduces anything, so no runner is
     // offered the leg: the position below is what a holder would report if one ever ran it by hand.
-    adjudicate: { ask: { name: "adjudication", values: ["merge", "owner"] }, position: "{ ...(answer === 'owner' ? { suspend: true } : {}), reached: 'adjudicated', next: 'merge', adjudication: answer }" },
-    // R-BTN-131: the stub reads the forge before it reports `merged`.
-    merge: { position: "{ reached: 'merged', next: null }", verify: "merged" },
-    archive: { position: "{ reached: 'archived', next: null }", archive: true },
-    reconcile: { position: "null" }
+    adjudicate: ADJUDICATE,
+    // R-BTN-131: the stub reads the forge before it reports `merged` — every PR of the ticket
+    // merged, none open. On 2026-11-23 B-259's merge agent rightly refused PR #357 over red CI and
+    // exited 0; the leg said `merged` and Baton ended the claim done with the PR open.
+    merge: { position: { reached: "merged", next: null }, verify: "merged" },
+    archive: { position: { reached: "archived", next: null }, archive: true },
+    reconcile: { reconcile: true }
   },
   skill: "baton-create-pr"
 };
@@ -835,9 +847,12 @@ var BUILT_INS = [
     stations: (ctx) => stationsReviewPr({ tickets: ctx.tickets, facts: ctx.facts, closed: ctx.closed, done: ctx.done, repository: ctx.repository, graph: ctx.graph }),
     legs: {
       // Changes: the next round waits on the author's push, so the claim suspends.
-      review: { ask: VERDICT2, position: "{ ...(answer === 'approve' ? {} : { suspend: true }), reached: answer === 'approve' ? 'approved' : 'changes-requested', next: answer === 'approve' ? null : 'review', verdict: answer }" },
-      reconcile: { position: "null" },
-      conclude: { position: "{ reached: 'concluded', next: null }" }
+      review: { ask: VERDICT2, positions: {
+        approve: { reached: "approved", next: null },
+        changes: { reached: "changes-requested", next: "review", suspend: true }
+      } },
+      reconcile: { reconcile: true },
+      conclude: { position: { reached: "concluded", next: null } }
     },
     skill: "baton-review-pr"
   },
@@ -848,12 +863,15 @@ var BUILT_INS = [
     reads: "markers",
     stations: ticketStations(),
     legs: {
-      trace: { position: "{ reached: 'traced', next: 'origin' }" },
-      origin: { position: "{ reached: 'explained', next: 'dedupe' }" },
-      dedupe: { ask: { name: "outcome", values: ["new-cause", "duplicate"] }, position: "{ reached: answer, next: answer === 'duplicate' ? 'fold' : 'file' }" },
-      file: { position: "{ reached: 'ticketed', next: 'prevent' }" },
-      fold: { position: "{ reached: 'folded', next: 'prevent' }" },
-      prevent: { position: "{ reached: 'closed', next: null }" }
+      trace: { position: { reached: "traced", next: "origin" } },
+      origin: { position: { reached: "explained", next: "dedupe" } },
+      dedupe: { ask: { name: "outcome", values: ["new-cause", "duplicate"] }, positions: {
+        "new-cause": { reached: "new-cause", next: "file" },
+        duplicate: { reached: "duplicate", next: "fold" }
+      } },
+      file: { position: { reached: "ticketed", next: "prevent" } },
+      fold: { position: { reached: "folded", next: "prevent" } },
+      prevent: { position: { reached: "closed", next: null } }
     },
     skill: "baton-bug-report"
   },
@@ -864,9 +882,9 @@ var BUILT_INS = [
     reads: "markers",
     stations: ticketStations(),
     legs: {
-      research: { position: "{ reached: 'researched', next: 'draft' }" },
-      draft: { position: "{ reached: 'drafted', next: 'check' }" },
-      check: { position: "{ reached: 'filed', next: null }" }
+      research: { position: { reached: "researched", next: "draft" } },
+      draft: { position: { reached: "drafted", next: "check" } },
+      check: { position: { reached: "filed", next: null } }
     },
     skill: "baton-draft-ticket"
   },
@@ -879,8 +897,8 @@ var BUILT_INS = [
     stations: ticketStations((t, leg) => leg === "carry-out" && !answered(t) ? "owner" : null),
     legs: {
       // The packet is written; carry-out waits on the owner's answer, so the claim suspends.
-      prepare: { position: "{ suspend: true, reached: 'asked', next: 'carry-out' }" },
-      "carry-out": { position: "{ reached: 'decided', next: null }" }
+      prepare: { position: { suspend: true, reached: "asked", next: "carry-out" } },
+      "carry-out": { position: { reached: "decided", next: null } }
     },
     skill: "baton-decision"
   },
@@ -892,14 +910,17 @@ var BUILT_INS = [
     stations: ticketStations(buildAppWaits),
     legs: {
       // Each drafted document waits on the owner's approval, so the claim suspends.
-      define: { position: "{ suspend: true, reached: 'defined', next: 'design' }" },
-      design: { position: "{ suspend: true, reached: 'designed', next: 'architect' }" },
-      architect: { position: "{ suspend: true, reached: 'architected', next: 'plan' }" },
-      plan: { position: "{ suspend: true, reached: 'planned', next: 'file' }" },
+      define: { position: { suspend: true, reached: "defined", next: "design" } },
+      design: { position: { suspend: true, reached: "designed", next: "architect" } },
+      architect: { position: { suspend: true, reached: "architected", next: "plan" } },
+      plan: { position: { suspend: true, reached: "planned", next: "file" } },
       // The filed tickets are children: verify waits on them.
-      file: { position: "{ suspend: true, reached: 'building', next: 'verify' }" },
+      file: { position: { suspend: true, reached: "building", next: "verify" } },
       // `building`: fix tickets were filed, and the next verification waits on them.
-      verify: { ask: { name: "outcome", values: ["shipped", "building"] }, position: "{ ...(answer === 'building' ? { suspend: true } : {}), reached: answer, next: answer === 'shipped' ? null : 'verify' }" }
+      verify: { ask: { name: "outcome", values: ["shipped", "building"] }, positions: {
+        shipped: { reached: "shipped", next: null },
+        building: { reached: "building", next: "verify", suspend: true }
+      } }
     },
     skill: "baton-build-app"
   },
@@ -914,17 +935,20 @@ var BUILT_INS = [
       // The design conversation is the owner's session, which Baton neither runs nor waits for:
       // the leg writes its marker at `requested`, ends the claim, and the ticket waits there —
       // on the owner, the sync reading the marker — until the conversation's work lands as a PR.
-      converse: { position: "{ suspend: true, reached: 'requested', next: 'converse' }" },
+      converse: { position: { suspend: true, reached: "requested", next: "converse" } },
       // The verdict decides what the review queues: merge for approve, address for changes (once
       // the address rounds run out the sync queues adjudicate instead, and a refused fix suspends).
-      review: { ask: VERDICT2, position: "{ reached: 'reviewed', next: answer === 'approve' ? 'merge' : 'address', verdict: answer }" },
+      review: { ask: VERDICT2, positions: {
+        approve: { reached: "reviewed", next: "merge" },
+        changes: { reached: "reviewed", next: "address" }
+      } },
       // The owner's second conversation: the findings are answered, suspended like `converse`.
-      address: { position: "{ suspend: true, reached: 'reviewed', next: 'address' }" },
+      address: { position: { suspend: true, reached: "reviewed", next: "address" } },
       // `merge`: no open blocking finding reproduced; `owner`: one did, and the owner decides —
       // the claim suspends until they do.
-      adjudicate: { ask: { name: "adjudication", values: ["merge", "owner"] }, position: "{ ...(answer === 'owner' ? { suspend: true } : {}), reached: 'adjudicated', next: 'merge', adjudication: answer }" },
-      merge: { position: "{ reached: 'merged', next: null }" },
-      reconcile: { position: "null" }
+      adjudicate: ADJUDICATE,
+      merge: { position: { reached: "merged", next: null } },
+      reconcile: { reconcile: true }
     },
     skill: "baton-create-spec"
   },
@@ -935,9 +959,9 @@ var BUILT_INS = [
     reads: "markers",
     stations: ticketStations(),
     legs: {
-      decompose: { position: "{ reached: 'drafted', next: 'check' }" },
-      check: { position: "{ reached: 'checked', next: 'file' }" },
-      file: { position: "{ reached: 'filed', next: null }" }
+      decompose: { position: { reached: "drafted", next: "check" } },
+      check: { position: { reached: "checked", next: "file" } },
+      file: { position: { reached: "filed", next: null } }
     },
     skill: "baton-spec-to-tickets"
   }
@@ -949,8 +973,8 @@ function builtIn(id) {
 }
 var DEFAULT_COURSE = CREATE_PR.id;
 
-// baton-default.ts
-var baton_default_default = {
+// baton-default-entry.ts
+var baton_default_entry_default = {
   // The same signature the sync calls a repository's own function with: edit freely. ctx carries
   // the course's tickets, the PR facts, the closing markers and the course file. Returns
   // {stations, markers, course_data} (R-BTN-74).
@@ -959,5 +983,5 @@ var baton_default_default = {
   }
 };
 export {
-  baton_default_default as default
+  baton_default_entry_default as default
 };

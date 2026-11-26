@@ -8,5 +8,5 @@ type GitOptions = Pick<ExecFileSyncOptions, 'cwd' | 'input' | 'stdio' | 'maxBuff
 export const GIT_TIMEOUT_MS: number;
 export function git(root: string | null, args: string[], options?: GitOptions): string;
 export function gitText(root: string, ...args: string[]): string;
-export function gitBuffer(root: string, args: string[]): Buffer;
+export function gitBuffer(root: string, args: string[], options?: Pick<GitOptions, 'maxBuffer' | 'timeoutMs'>): Buffer;
 export function gitAsync(root: string | null, args: string[], timeoutMs: number): Promise<string>;

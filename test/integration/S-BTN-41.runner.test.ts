@@ -24,7 +24,7 @@ import { BatonApi, BatonRefusal } from '../../src/runner/api';
 import { Runner, legActivity, newestWrite } from '../../src/runner/runner';
 import { runMain } from '../../src/runner/main';
 import { HARNESS_ADAPTERS, type HarnessAdapter } from '../../src/runner/harness';
-import { stubSource } from '../../src/defaults/cli';
+import { stubSource } from '../../src/defaults/stubs';
 import { builtIn } from '../../src/defaults/courses';
 import { legNeeds, readHead } from '../../src/runner/home';
 import { capabilitiesOf } from '../../src/shared/vocabulary.mjs';
@@ -173,12 +173,23 @@ describe('S-BTN-41 the runner', () => {
       console.log('built');`);
     const standard = stubSource({
       ...builtIn('draft-ticket')!, id: 'relay',
-      legs: { build: { ask: { name: 'outcome', values: ['built'] }, position: "{ suspend: true, reached: answer, next: 'check' }" } },
-    }, 'relay', 'build');
-    expect(standard).toContain('AGENT_IDLE_MS = 900000');
+      legs: { build: { ask: { name: 'outcome', values: ['built'] }, positions: { built: { suspend: true, reached: 'built', next: 'check' } } } },
+    }, 'build');
+    // B-281: the stub is compiled from the typed runtime; this copy shortens its idle bound.
+    const idle = 'const AGENT_IDLE_MS = 900_000;';
     const bundle = await build({
-      stdin: { contents: standard.replace('AGENT_IDLE_MS = 900000', 'AGENT_IDLE_MS = 1000'), resolveDir: process.cwd() },
+      stdin: { contents: standard, resolveDir: process.cwd() },
       bundle: true, platform: 'node', format: 'esm', write: false,
+      plugins: [{
+        name: 'short-idle',
+        setup(b) {
+          b.onLoad({ filter: /stub-runtime\.ts$/ }, (args) => {
+            const text = readFileSync(args.path, 'utf8');
+            expect(text).toContain(idle);
+            return { contents: text.replace(idle, 'const AGENT_IDLE_MS = 1000;'), loader: 'ts' };
+          });
+        },
+      }],
     });
     home.write('.baton/courses/relay/legs/standard.mjs', bundle.outputFiles[0].text);
     home.write('.baton/courses/relay/legs/build.mjs', `${legFile(null)}\nexport { run } from './standard.mjs';\n`);

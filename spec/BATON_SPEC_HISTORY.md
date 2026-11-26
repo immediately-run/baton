@@ -18,6 +18,16 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
 
 ## Changelog
 
+- **2026-11-26 — `baton repo init --check` re-scoped to sourced courses (R-BTN-134, S-BTN-105).**
+  Rules changed: R-BTN-134 (*`baton repo init`* gains `--check`). B-281 built `--check` to
+  compare a home's committed leg stubs (`.baton/courses/<id>/legs/<leg>.mjs`) with what the
+  pinned CLI builds; B-139 then removed those home copies — a sourced course's home holds only its
+  overrides, and the sync refuses any other file — so the check had nothing to compare. The
+  owner's ruling, 2026-11-26: "Re-scope to B-139". `--check` now reports each file in a sourced
+  standard course's home directory that is not a leg override, against the pinned source (a copy
+  that differs, or an identical one `--prune` removes), and each committed
+  `.baton/courses/standard-<id>/` source tree that differs from what the checkout builds.
+
 - **2026-11-26 — Ticketed growth of the pending and inventory lists (R-BTN-30).**
   Rules changed: R-BTN-30; §90's account of `npm run check:api` (B-277 gave that check no rule of
   its own). The owner's ruling, 2026-11-26, "Allow ticketed growth": a spec PR may add a pending
