@@ -122,6 +122,10 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   - **Tracker identities**, the owner, 2026-11-26: a tracker account is verified by the tracker's
     own OAuth sign-in where it offers one, and otherwise linked by an owner of the arena; a
     matching email or a mapping the sync reads never verifies one.
+  - **The last two open decisions**, the owner, 2026-11-26: `baton.ticket-missing` holds the
+    ticket, with no legs working from the content they last read; and the courses that commit to
+    the default branch gain reconcile legs before closure flips. The tracker writer (R-BTN-171) is
+    recorded as a dependency of tracker sources, not a decision.
 
 - **2026-11-26 — A protected repository accepts a branch course source (R-BTN-134).**
   Rules changed: R-BTN-134 (*A branch source*). #395 left open whether a protected repository

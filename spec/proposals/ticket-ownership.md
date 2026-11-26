@@ -192,8 +192,8 @@ and version, with four rules added:
   never moves — [R-DIB-2](https://github.com/immediately-run/dibber/blob/main/SPEC.md) — but another
   store may drop a closed ticket). Any
   other ticket the store **had** and a post no longer shows raises the ticket condition
-  `baton.ticket-missing`, which holds it — no runner works a ticket whose content has vanished —
-  and a claim on it is released `stale-board`, as today (§9.4). Its one restart is `wait`: the
+  `baton.ticket-missing`, which holds it — no runner works a ticket whose content has vanished, not
+  even from the content it last read (the owner, 2026-11-26) — and a claim on it is released `stale-board`, as today (§9.4). Its one restart is `wait`: the
   hold lifts when the store shows the ticket again, and a ticket that reappears needs approval
   again where the policy wants approval. Withdrawing it is the store's act, not Baton's (decision
   2). R-BTN-10's confirmation of `done` by the ticket being absent becomes confirmation by its end
@@ -365,8 +365,9 @@ changes is whom Baton believes, in three steps, each releasable alone:
 2. **Closure flips.** An end station closes a ticket; the store's *done* becomes evidence; a
    ticket missing from its store raises `baton.ticket-missing`. Today the two almost always agree.
    The courses that commit to the default branch (`bug-report`, `draft-ticket`, `decision`,
-   `build-app`, `spec-to-tickets`) have no reconcile leg yet, so a hand-closed ticket on one of
-   them waits as evidence until it gets one.
+   `build-app`, `spec-to-tickets`) have no reconcile leg yet; each gains one ([R-BTN-203](../BATON_SPEC/04-tickets-syncs-board.md#sec-4-2)), so a
+   hand-closed ticket on one of them is placed like one on a PR course rather than waiting (the
+   owner, 2026-11-26). Closure flips only once they have it.
 3. **Baton-owned keys stop being read**, and the git-lock commands that claim by pushing a status
    (`baton tickets claim`, `set`) retire with them (R-BTN-193 already marks them legacy). How the
    store shows a ticket closed stays the store's: a Dibber ticket's `status`, set in place (Dibber's
@@ -439,11 +440,11 @@ issue kept (decision 3).
   rule; one in §4 for originating, importing and absence; one in §9 for session claims; and
   `course.start` with R-BTN-131.
 
-## Open decisions
+## Not built yet
 
-- **`baton.ticket-missing`'s hold:** a hold as above, or only a notice while legs go on reading
-  the content they last had.
-- **Reconcile legs for the courses that commit to the default branch**, so a hand-closed ticket on
-  one of them is placed rather than waiting.
-- **The tracker writer and its deliverer** (R-BTN-171), needed for `course.start` and import on a
-  tracker, not on Dibber.
+- **The tracker writer and its deliverer** ([R-BTN-171](../BATON_SPEC/07-conditions.md#sec-7-8),
+  specified, not built). This is a dependency, not a decision: `course.start` and import on a
+  tracker need it, Dibber does not. Until it is built, `course.start` on an arena whose source is
+  a tracker is refused, loudly, as the CLI is when Baton is unreachable.
+
+No open decisions are left from this proposal's review.
