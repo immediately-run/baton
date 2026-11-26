@@ -1,10 +1,12 @@
 ---
 title: "Proposal — personal secrets and notification preferences"
-description: "A recommendation, not built: a person seals a secret — an ntfy topic, a webhook — on their own machine, signed with their SSH key and encrypted with age to the repository's notifier keys; Baton stores the ciphertext and lets its owner overwrite it, never read it; a notifier in the deployment decrypts, checks the signature and the version, and delivers. Preferences and non-secret contact identifiers are the person's to edit, self-serve."
+description: "A recommendation, not built: a person seals a secret — an ntfy topic, a webhook — on their own machine, signed with their SSH key and encrypted with age to the arena's notifier keys; Baton stores the ciphertext and lets its owner overwrite it, never read it; a notifier in the deployment decrypts, checks the signature and the version, and delivers. Preferences and non-secret contact identifiers are the person's to edit, self-serve."
 ---
 # Proposal — personal secrets and notification preferences
 
-**Status:** recommendation, not built and not scheduled. The owner settled its design on
+**Status:** recommendation, not built and not scheduled. An **arena** is the unit Baton
+coordinates ([vocabulary](../../docs/context/vocabulary.mdx)); the spec and the API still write
+it `repository`. The owner settled its design on
 2026-11-26 ([The owner's decisions](#the-owners-decisions)), after a survey of how others keep
 secrets out of a control plane ([Prior art](#prior-art)). It relies on people as Baton knows them
 ([people, roles and identities](people-and-dashboard.md#5-people-roles-and-identities)) and on
@@ -37,12 +39,14 @@ Settled 2026-11-26; not reopened by a review.
    recipients at once.
 4. **Notifiers re-encrypt on rotation.** A notifier that can decrypt a secret re-encrypts the
    same signed bundle to the new set of keys; the person re-enters nothing.
-5. **Owners set a repository's notifier keys**, an `approvers.members` act
+5. **Owners set an arena's notifier keys**, an `approvers.members` act
    ([R-BTN-188](../BATON_SPEC/12-security.md#sec-12-8)); under `protected`, only trusted runner
    hosts may hold one.
 6. **A version check against rollback**, and no key pinning for now.
-7. **CLI first.** Sealing in the browser can follow; key handling there needs more care.
-8. **A compromised Baton can forge a person's secret, and Baton does not guarantee against it**
+7. **Notifier keys are per arena** (2026-11-26), following owners' authority; a person on several
+   arenas seals once for each, which the CLI does in one command.
+8. **CLI first.** Sealing in the browser can follow; key handling there needs more care.
+9. **A compromised Baton can forge a person's secret, and Baton does not guarantee against it**
    ([Accepted risk](#accepted-risk)): it is documented, not defended.
 
 ## Prior art
@@ -61,28 +65,28 @@ Settled 2026-11-26; not reopened by a review.
 |---|---|---|
 | **Person** | someone Baton knows, with SSH keys and linked identities ([people](people-and-dashboard.md#5-people-roles-and-identities)) | Baton |
 | **Notifier** | a delivery runner (R-BTN-163) holding a **notifier key**: an SSH key pair whose private half never leaves its host | the deployment, beside the team's channel credentials |
-| **Notifier keys** | each repository's list of notifier public keys, set by its owners | Baton |
-| **Sealed secret** | a person's secret for one repository: its name, purpose, version and recipients in the clear, its value in age ciphertext | Baton, ciphertext only |
+| **Notifier keys** | each arena's list of notifier public keys, set by its owners | Baton |
+| **Sealed secret** | a person's secret for one arena: its name, purpose, version and recipients in the clear, its value in age ciphertext | Baton, ciphertext only |
 | **Preferences** | which events reach the person on which channels, and when | Baton, plain text |
 | **Team channel credentials** | the Slack bot token, SMTP, an ntfy sender account | the notifier's host; never Baton |
 
 ## Sealing a secret
 
 `baton secret set <name> --purpose <purpose>` reads the value from stdin — never from the command
-line, where a shell keeps it — and for each repository the person has a role on (or the one
+line, where a shell keeps it — and for each arena the person has a role on (or the one
 `--repo` names):
 
-1. **Builds the bundle**, canonical JSON: `{v: 1, person, repository, name, purpose, version,
+1. **Builds the bundle**, canonical JSON: `{v: 1, person, arena, name, purpose, version,
    value, signed_at}`. `version` is one more than the version Baton holds for that name, or 1.
 2. **Signs it** with the person's SSH key, `ssh-keygen -Y sign -n baton-secret` (through
    `ssh-agent` where the key is there), so a signature made for anything else does not verify.
-3. **Encrypts bundle and signature together** with age to every notifier key the repository
+3. **Encrypts bundle and signature together** with age to every notifier key the arena
    lists, ASCII-armoured.
 4. **Uploads** `{name, purpose, version, recipients, ciphertext}`, the request signed with the
    person's key as every request is (R-BTN-13).
 
 Baton refuses an upload whose `version` is not greater than the one it holds, and one whose
-`recipients` are not exactly the repository's current notifier keys. It stores the rest as given.
+`recipients` are not exactly the arena's current notifier keys. It stores the rest as given.
 It cannot check the signature or the contents: they are inside the ciphertext.
 
 `baton secret list` shows each name, purpose, version, recipients and update time; `baton secret
@@ -94,10 +98,10 @@ A notifier reads Needs you (R-BTN-163), resolves each entry's recipients (the ti
 by the person's linked identities, [ticket ownership](ticket-ownership.md), decision 5), reads
 their preferences, and for a channel that needs a secret:
 
-1. **Fetches** the person's sealed secret for that repository.
+1. **Fetches** the person's sealed secret for that arena.
 2. **Decrypts** it with its notifier key.
 3. **Checks the signature** against the person's SSH keys as Baton lists them, and checks every
-   field: the person and the repository are the ones it fetched for, the name is the channel's,
+   field: the person and the arena are the ones it fetched for, the name is the channel's,
    the purpose admits notifications, and the version is **not lower than the highest it has seen**
    for that person and name. A failed check drops the secret, sends nothing on that channel and
    reports it.
@@ -130,8 +134,8 @@ No one else edits them; an owner sees whom an entry will reach, not how to reach
 
 ## Rotation
 
-- **Adding a notifier key.** An owner adds it to the repository's list. A notifier holding a
-  current key fetches each of the repository's secrets, decrypts it, and re-encrypts **the same
+- **Adding a notifier key.** An owner adds it to the arena's list. A notifier holding a
+  current key fetches each of the arena's secrets, decrypts it, and re-encrypts **the same
   signed bundle** to the new list; the person's signature stays valid inside, and `version` does
   not change. Baton accepts a re-encryption only from a notifier key on the current list, records
   it as a `rewrapped` event, and keeps it only when its recipients are the new list.
@@ -142,8 +146,8 @@ No one else edits them; an owner sees whom an entry will reach, not how to reach
 ## Who reads what
 
 - **The person**: their own secrets' metadata; their preferences; their channels.
-- **A notifier key on the repository's list**: the ciphertext of the people with a role on that
-  repository, and their preferences and channel identifiers.
+- **A notifier key on the arena's list**: the ciphertext of the people with a role on that
+  arena, and their preferences and channel identifiers.
 - **Owners and administrators**: who an entry will reach and on which kinds of channel; never an
   identifier, never ciphertext.
 - **No runner key, no other person, no delegated key** reads any of it.
@@ -168,7 +172,7 @@ then sees as a version they did not set.
 
 ## Not in this proposal
 
-- **Sealing in the browser**, for a dashboard page that sets secrets (decision 7).
+- **Sealing in the browser**, for a dashboard page that sets secrets (decision 8).
 - **Secrets used to act as the person** — their own model subscription, a token that acts as them
   at a forge. The same sealing serves them, but a leg using one is an autonomous act *on behalf
   of* the person ([human intent](../../docs/context/human-intent.mdx)), which needs its own design:
@@ -181,7 +185,7 @@ then sees as a version they did not set.
 
 - **R-BTN-163 (§7.3)**: a delivery runner may be a **notifier**, holding a notifier key; what it
   reads (above) and how it resolves recipients.
-- **R-BTN-188 (§12.8)**: `approvers.members` gains a repository's notifier keys; under `protected`
+- **R-BTN-188 (§12.8)**: `approvers.members` gains an arena's notifier keys; under `protected`
   only a trusted runner's host holds one.
 - **R-BTN-127**: the nouns `secret` (`set`, `list`, `rm`) and `notify` (`prefs`, `verify`, `test`);
   **R-BTN-129**: their actions, and a notifier's reads; **§13**: the tables for sealed secrets,
@@ -190,9 +194,6 @@ then sees as a version they did not set.
 
 ## Open decisions
 
-- **Notifier keys per repository or per tenant.** Per repository follows owners' authority, so a
-  person on several repositories seals once for each (the CLI does it in one command); per tenant
-  would seal once, but needs an administrator's act.
 - **Delivery records.** Whether a notifier attests each delivery — the entry, the person, the
   channel kind, the time, no content — so Needs you can show who was told.
 - **A person leaving.** Whether removing a person's last role deletes their sealed secrets, or

@@ -45,7 +45,7 @@ capability is: a statement Baton records and matches and never verifies ([values
 ## 2. How strongly intent is proven is a separate axis
 
 Who drives decides how Baton **behaves**. How much proof an act needs that a human made it — a
-dashboard sign-in, a `human_only` key, a hardware key — is the repository's **policy**, per action
+dashboard sign-in, a `human_only` key, a hardware key — is the arena's **policy**, per action
 ([BATON_SPEC §12.8](../../spec/BATON_SPEC/12-security.md#sec-12-8)). The two never stand in for
 each other: no rule reads a proof level as the driver, and no rule reads the driver as a proof.
 Under `cooperative` the identity a credential carries is enough; a stricter policy may ask a
@@ -95,7 +95,7 @@ connects an agent to it: a fresh session that holds nothing else is strongly adv
 
 A person is an entity of its own: an id, the keys they authenticate with, and the identities
 linked to them (forge accounts, emails, tracker accounts, contact identifiers). **Roles belong to
-people**, per repository — owner, and contributor for everyone else who starts courses, claims,
+people**, per arena — owner, and contributor for everyone else who starts courses, claims,
 answers and is notified — and **keys prove who is acting**. Several people may each declare a
 forge identity no agent uses, and a person's session claims have no ceiling beyond the lock (the
 owner, 2026-11-26; [people, roles and identities](../../spec/proposals/people-and-dashboard.md#5-people-roles-and-identities)).

@@ -19,6 +19,14 @@ in [`spec/BATON_SPEC_HISTORY.md`](../BATON_SPEC_HISTORY.md).
 > `R-BTN-n`, scenario ids `S-BTN-n` and gate ids `G-BTN-n` are stable: code, tests and the
 > Quint model cite them.
 
+> **Terminology: arena.** The unit Baton coordinates — one ticket source, its configuration and
+> everything Baton owns about its tickets — is an **arena** in the
+> [vocabulary](../../docs/context/vocabulary.mdx). This spec still writes
+> it a **repository** (a registered repository, `/v1/repositories/{repository}`), and the CLI's
+> chosen one a **home**; the rename comes in stages, the old names accepted meanwhile. Where this
+> spec means a git repository — a code repository, the repository a ticket store lives in — it
+> says so.
+
 ## Contents
 
 | § | Title | What it settles |

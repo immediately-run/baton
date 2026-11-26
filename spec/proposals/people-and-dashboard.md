@@ -304,7 +304,7 @@ BATON_SPEC's sections are named with a rule or as `§11.3`, `§12.2`.
 
 The owner's decisions of 2026-11-26, resting on
 [human intent and autonomy](../../docs/context/human-intent.mdx). Baton today knows keys, not
-people: administrators are keys, owners are keys per repository, a dashboard session is one key's,
+people: administrators are keys, owners are keys per arena (written `repository` in the spec), a dashboard session is one key's,
 and the identities a person has — an Access email, a forge account, the policy's one
 `human_identity` — are not tied to each other. Nothing here is built.
 
@@ -319,7 +319,7 @@ and the identities a person has — an Access email, a forge account, the policy
   A credential bound to a person is human-driven; its proof is the credential's own (a session,
   a key, a `human_only` key, a hardware key) — two axes, never one
   ([human intent](../../docs/context/human-intent.mdx) §1–§2).
-- **Roles belong to people, per repository; keys prove who is acting.**
+- **Roles belong to people, per arena; keys prove who is acting.**
   - **Owner** (R-BTN-58): what an owner key may do today, now a person's role.
   - **Contributor** (new): may start a course (`course.start`), hold session claims, answer person
     legs, approve ticket content where the policy lets a contributor, and be a ticket's assignee
@@ -331,16 +331,16 @@ and the identities a person has — an Access email, a forge account, the policy
 - **Several people's forge identities.** The policy's single `human_identity` becomes each
   person's own: a person who lands work by hand declares a forge identity no agent uses — the
   custody promise a `human_only` key makes (R-BTN-185) — and `last_written_by.human` (R-BTN-194)
-  is true when the pusher is such an identity of a person with a role on the repository.
+  is true when the pusher is such an identity of a person with a role on the arena.
 - **No ceiling on a person's claims.** A person's session claims (ticket ownership,
   *Session claims*) count against nothing but the lock: one holder per ticket. `max_claims` bounds
   runners' grants, which are autonomous.
 - **Self-serve, by the person's own key.** A person adds and removes their own keys (signed by a
   key they already hold, as `baton human-key add` is), their linked identities, their channels and
-  preferences, and their sealed secrets. An owner adds a person to a repository, gives or takes
+  preferences, and their sealed secrets. An owner adds a person to an arena, gives or takes
   their role, and removes them (`approvers.members`).
 - **Migration.** Each owner key becomes a person holding it, with the role owner on its
-  repositories; each `ACCESS_IDENTITIES` line becomes an email linked to its key's person;
+  arenas; each `ACCESS_IDENTITIES` line becomes an email linked to its key's person;
   administrator keys become administrators' people. No key changes, and no request a key signs
   today is refused afterwards.
 

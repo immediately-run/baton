@@ -18,6 +18,23 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
 
 ## Changelog
 
+- **2026-11-26 — Terminology: the arena; the session's proposals (no rule changed).**
+  Rules changed: none.
+  The front gains a terminology note: the unit Baton coordinates — one ticket source, its
+  configuration and everything Baton owns about its tickets — is an **arena** in the vocabulary
+  (the owner, 2026-11-26: "repository" made Baton read as if it could serve only git-held
+  tickets, while a ticket source may be a tracker such as Linear; "home", the CLI's word, was
+  retired with it). The spec keeps writing it `repository` until a rename of its own, staged with
+  the API's and the CLI's names, the old names accepted meanwhile. Recorded beside it, as
+  proposals and context, not rules: [human intent and autonomy](../docs/context/human-intent.mdx)
+  (who drives an act is the acting credential's; Baton constrains autonomy, not people, never the
+  lock or the record), [ticket ownership](proposals/ticket-ownership.md),
+  [personal secrets](proposals/personal-secrets.md), people as entities
+  ([people and dashboard §5](proposals/people-and-dashboard.md#5-people-roles-and-identities)) and
+  interventions split by driver ([intervention sessions](proposals/intervention-sessions.md)).
+  Dibber, the git-native ticket format, moved to its own repository,
+  [immediately-run/dibber](https://github.com/immediately-run/dibber).
+
 - **2026-11-21 — Sign-in through Cloudflare Access (R-BTN-155, R-BTN-57, S-BTN-308).**
   Rules changed: R-BTN-155, R-BTN-57, R-BTN-16, R-BTN-149, R-BTN-185, R-BTN-188; G-BTN-144, S-BTN-124. The
   owner approved it on 2026-11-21: a person Cloudflare Access has verified reaches a dashboard

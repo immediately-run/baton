@@ -11,7 +11,9 @@ design choices on 2026-11-21, after two adversarial reviews ([The owner's
 decisions](#the-owners-decisions)); [Open decisions](#open-decisions) holds only what is still
 open. **Amended 2026-11-26** by [human intent and autonomy](../../docs/context/human-intent.mdx):
 what an intervention may do now depends on who drives it ([Who drives](#who-drives-two-kinds-of-intervention));
-the design below the amendment is the autonomous kind's.
+the design below the amendment is the autonomous kind's. It writes the unit Baton coordinates as
+a `repository`, as the spec and the API still do; the [vocabulary](../../docs/context/vocabulary.mdx)
+now calls it an **arena**.
 
 **Its home when built:** one new rule, **R-BTN-n (interventions)**, in
 [§7.3](../BATON_SPEC/07-conditions.md#sec-7-3) beside R-BTN-163, holding the start, one

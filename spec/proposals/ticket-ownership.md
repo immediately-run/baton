@@ -4,7 +4,10 @@ description: "A recommendation, not built: one owner per ticket field across eve
 ---
 # Proposal — who owns a ticket: Baton its course state, the store the work
 
-**Status:** recommendation, not built and not scheduled. The owner settled its choices from
+**Status:** recommendation, not built and not scheduled. An **arena** is the unit Baton
+coordinates — one ticket source, its configuration and everything Baton owns about its tickets
+([vocabulary](../../docs/context/vocabulary.mdx)); the spec and the API still write it
+`repository`, as the route below does. The owner settled its choices from
 2026-11-22 to 2026-11-26 ([The owner's decisions](#the-owners-decisions)). It rests on
 [human intent and autonomy](../../docs/context/human-intent.mdx), which says what changes when a
 person, not an autonomous agent, drives an act. Nothing here changes a rule yet; every rule and
@@ -127,7 +130,7 @@ open world, extended from the position to every Baton-owned fact.
   placed at its course's start, as a first post is today (R-BTN-39): a Dibber ticket under the id
   its file already carries, a tracker's issue under a new Baton id that is then written back to
   the issue. Who may create tickets that way is the store's concern; whether Baton admits the
-  import is the repository's policy.
+  import is the arena's policy.
 
 ## The sync, in each direction
 
@@ -194,7 +197,7 @@ start with `start_leg` queued, and answers `{ticket, leg, claim?}`. A course opt
 
 | Caller | May start | May claim what it started |
 |---|---|---|
-| human-driven: an owner's key or session, an interactive delegated key, a `human-operator` runner | any course the repository lists | yes, with `claim: true` |
+| human-driven: an owner's key or session, an interactive delegated key, a `human-operator` runner | any course the arena lists | yes, with `claim: true` |
 | autonomous: a runner, an autonomous delegated key | only children of the ticket its purpose names (`parent`), which `tickets.created: proposed` makes proposals where the policy says so | never |
 
 **The three ways in:**
