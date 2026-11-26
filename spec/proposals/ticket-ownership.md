@@ -68,8 +68,8 @@ Not reopened by a review.
    onto another issue. A name that reads as both a Baton id and a store key is refused as
    ambiguous: the arena's prefix is reserved, and a tracker key in it is never accepted as a name.
 4. **Course and tier are the store's** (2026-11-22). They are properties of the work, written by
-   whoever files the ticket and changed where the store changes things. `requires` is taken to be
-   the same kind, as a gate input like tier; the owner has not ruled on it separately.
+   whoever files the ticket and changed where the store changes things. So is `requires`, a gate
+   input like tier (the owner, 2026-11-26).
 5. **The assignee is the store's** (2026-11-22). Who an interaction request reaches is derived
    from it, and Baton may hold an override of its own.
 6. **A ticket that disappears from its store raises a condition** (2026-11-25), never a closure:
@@ -272,7 +272,9 @@ fields?, claim?}`.
   first; `forbidden` for a person neither on the roster nor an owner, or an agent-driven caller
   outside its claim; `unavailable` while the roster is stale; `conflict` as above.
 - **The CLI.** `baton course start <course> "<title>"`; `baton ticket request` (R-BTN-131) becomes
-  its client and pushes nothing.
+  its client and pushes nothing. With Baton unreachable it fails loudly, naming Baton and the
+  error, and exits non-zero: it never falls back to filing in git under a scanned id, the legacy
+  mechanics R-BTN-193 retires (the owner, 2026-11-26).
 
 **Who may call it, by driver** ([human intent](../../docs/context/human-intent.mdx)):
 
@@ -329,7 +331,7 @@ human-driven: its acts are the person's ([human intent](../../docs/context/human
     holder's report of where its leg reached is an `std:arrival@1` written as `person`. The lease
     is renewed by every call on the claim and by `claim.renew {claim_id}`; every reply
     carries the claim's state and its pending messages (a release, a stop), as a heartbeat's reply
-    does. Its length is within R-BTN-9's bounds; the default is open.
+    does. Its length is within R-BTN-9's bounds, 15 minutes by default (the owner, 2026-11-26).
 - **A lapsed claim cannot collide unnoticed.** Either form's lapsed claim is reaped as any other,
   and its leg requeued the same way. An MCP session runs no `pre-push` fence, so for it the design
   makes a late push visible instead of impossible:
@@ -439,13 +441,9 @@ issue kept (decision 3).
 
 ## Open decisions
 
-- **The MCP session claim's default lease**, within R-BTN-9's bounds.
 - **`baton.ticket-missing`'s hold:** a hold as above, or only a notice while legs go on reading
   the content they last had.
-- **`requires`:** store-owned with course and tier (assumed above), or Baton's.
 - **Reconcile legs for the courses that commit to the default branch**, so a hand-closed ticket on
   one of them is placed rather than waiting.
 - **The tracker writer and its deliverer** (R-BTN-171), needed for `course.start` and import on a
   tracker, not on Dibber.
-- **`baton ticket request` offline:** whether it keeps today's git path, filing with a scanned id,
-  when Baton does not answer.

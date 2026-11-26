@@ -54,6 +54,11 @@ Settled 2026-11-26; not reopened by a review.
 10. **Notifying a team is not per person.** Baton keeps no groups and never fans one entry out to
     each member of a team: a team pulls from Needs you, or one notification goes to a channel the
     team already shares, whose membership is the channel's ([Later](#not-in-this-proposal)).
+11. **An entry with no one to notify is shown, not sent** (2026-11-26): a ticket with no
+    assignee, or one whose assignee is not among the arena's people, is listed on the dashboard's
+    Needs you and notifies nobody.
+12. **Removing a person deletes their sealed secrets** (2026-11-26), with their channels and
+    preferences; the tombstones of their versions stay, so nothing older is accepted again.
 
 ## Prior art
 
@@ -108,8 +113,10 @@ From #300, unchanged in substance:
 
 - **Each Needs-you entry carries its recipients**: the person a ticket's assignee resolves to
   through their verified linked identities (decision 5 of [ticket ownership](ticket-ownership.md)),
-  when that person is on the arena's roster or one of its owners; else the arena's owners' people.
-  So whoever can edit an assignee can route an entry only to the arena's own people.
+  when that person is on the arena's roster or one of its owners. An entry with no such
+  recipient — no assignee, or one outside the arena's people — notifies nobody: it is shown on the
+  dashboard's Needs you only (decision 11). So whoever can edit an assignee can route an entry only
+  to the arena's own people.
 - **One read, no cursor.** `GET /v1/needs-you?due=1` answers, across the arenas the notifier
   serves, every open entry that no notifier has yet attested, with its recipients, their verified
   channels and their preferences, resolved as the read is made. A notifier keeps no cursor: it
@@ -258,7 +265,5 @@ nothing; and read the events for notifier keys and person keys added that nobody
 
 ## Open decisions
 
-- **A person leaving.** Whether removing a person deletes their sealed secrets, or only stops their
-  delivery.
-- **Recipients when a ticket has no assignee**: the arena's owners' people, as above, or nobody but
-  Needs you.
+- None left from this proposal's review; the deferred measures are in the
+  [hardening proposal](hardening.md).

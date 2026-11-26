@@ -114,6 +114,11 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
     never proves a human: "a forge signin doesn't prove human intent, because autonomous agents can
     also use forge credentials". Dibber's R-DIB-2 now closes a ticket in place, which ticket
     ownership follows.
+  - **The owner's answers to the open decisions**, 2026-11-26: an entry with no assignee notifies
+    nobody and is shown on the dashboard only; removing a person deletes their sealed secrets; an
+    MCP session claim's lease is 15 minutes by default; `requires` is store-owned, like course and
+    tier; and `baton ticket request` with Baton unreachable fails loudly, never falling back to
+    git-only legacy mechanics.
 
 - **2026-11-26 — A protected repository accepts a branch course source (R-BTN-134).**
   Rules changed: R-BTN-134 (*A branch source*). #395 left open whether a protected repository
