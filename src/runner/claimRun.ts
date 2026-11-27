@@ -1034,12 +1034,9 @@ export class ClaimRun {
       // output — masked the same way and bounded to §9.4's detail, so Baton's record of a leg
       // that exited 0 with nothing done says what the agent said, after the sandbox is gone.
       const detail = failureDetail(outcome.error, this.legSecrets);
-      if (typeof outcome.errorType === 'string') {
-        const answer = await this.onChannel({ op: 'raise', type: outcome.errorType, subject: 'The leg threw a LegError.' }, course, legName, ctx, detail ?? 'The leg failed.');
-        if (!answer.ok) this.o.log(`baton: the typed error was refused (${maskLegOutput(answer.error, this.legSecrets)})`);
-        const release = this.abortSignal();
-        if (release) return await this.finish(claimId, { end_reason: release.reason ?? `suspended:${at}`, reached: at, next: legName, ...(release.error ? { error: release.error } : {}) }, await this.callHandoff(script, ctx));
-      }
+      await this.reportLegError(outcome.errorType, detail, course, legName, ctx);
+      const release = this.abortSignal();
+      if (release) return await this.finish(claimId, { end_reason: release.reason ?? `suspended:${at}`, reached: at, next: legName, ...(release.error ? { error: release.error, detail: release.error.message } : {}) }, await this.callHandoff(script, ctx));
       return await this.finish(claimId, { end_reason: 'released:cannot-finish:transient', reached: at, next: legName, error: { type: 'error.transient', message: detail ?? 'The leg failed.' }, ...(detail != null ? { detail } : {}) }, await this.callHandoff(script, ctx));
     }
     const result = outcome.result;
@@ -1058,9 +1055,12 @@ export class ClaimRun {
       const detail = failureDetail(msg(e), this.legSecrets);
       return await this.finish(claimId, { end_reason: 'released:cannot-finish:contract-output', reached: at, next: legName, ...(detail ? { detail } : {}) }, await this.callHandoff(script, ctx));
     }
-    const closed = pre ? pre.closed : await this.callClose(script, ctx, result);
+    const closed = pre ? pre.closed : await this.callClose(script, ctx, result, (type, error) =>
+      this.reportLegError(type, failureDetail(error, this.legSecrets), course, legName, ctx));
     if (closed === undefined) {
-      return await this.finish(claimId, { end_reason: 'released:cannot-finish:transient', reached: at, next: legName }, await this.callHandoff(script, ctx));
+      const release = this.abortSignal();
+      return await this.finish(claimId, { end_reason: release?.reason ?? 'released:cannot-finish:transient', reached: at, next: legName,
+        ...(release?.error ? { error: release.error, detail: release.error.message } : {}) }, await this.callHandoff(script, ctx));
     }
     if (verdict.kind === 'done') {
       // A done end carries no hand-off (R-BTN-44 writes one for suspensions and releases);
@@ -1653,10 +1653,17 @@ export class ClaimRun {
     return { ok: true, condition_id: answer.condition_id, disposition: answer.disposition ?? disposition, ...(severity !== 'normal' ? { severity } : {}), ...(end != null ? { end } : {}) };
   }
 
+  private async reportLegError(type: unknown, detail: string | null, course: CourseLoad, leg: string, ctx: Record<string, unknown>): Promise<boolean> {
+    if (typeof type !== 'string') return false;
+    const answer = await this.onChannel({ op: 'raise', type, subject: 'The leg threw a LegError.' }, course, leg, ctx, detail ?? 'The leg failed.');
+    if (!answer.ok) this.o.log(`baton: the typed error was refused (${maskLegOutput(answer.error, this.legSecrets)})`);
+    return answer.ok;
+  }
+
   /** `close(ctx, result)`: the closing marker from the validated result (R-BTN-83), retried
    * twice; when it cannot write, nothing is reported for the leg (§6.13) — `undefined`.
    * §6.13's default-export shape and the named-export shape both serve. */
-  private async callClose(script: string | null, ctx: Record<string, unknown>, result: unknown): Promise<string | null | undefined> {
+  private async callClose(script: string | null, ctx: Record<string, unknown>, result: unknown, reportError?: (type: unknown, error: string) => Promise<boolean>): Promise<string | null | undefined> {
     if (script == null) return null;
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
@@ -1665,7 +1672,11 @@ export class ClaimRun {
         if (!handle || this.claimLost()) return undefined;
         const out = wrapperOutcome((await this.wrapperCall(handle, 'close', script, [ctx, result], 120).result).stdout);
         if (out == null) throw new Error('the close wrote no outcome');
-        if (!out.ok) throw new Error(out.error ?? 'the close failed');
+        if (!out.ok) {
+          const error = out.error ?? 'the close failed';
+          if (await reportError?.(out.errorType, error)) return undefined;
+          throw new Error(error);
+        }
         return typeof out.result === 'string' ? out.result : null;
       } catch (e) {
         this.o.log(`baton: the leg's close failed (${maskLegOutput(msg(e), this.legSecrets)}), attempt ${attempt + 1} of 3`);

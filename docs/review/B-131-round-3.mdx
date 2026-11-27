@@ -1,0 +1,23 @@
+---
+title: B-131 follow-up review
+description: Disposition of the cross-repository credential broker findings after Baton PR 329 merged.
+---
+
+The [review on Fieldhouse #49](https://github.com/immediately-run/fieldhouse/pull/49#pullrequestreview-6076856364)
+requested changes on Fieldhouse `7996644c` and Baton `e7cf47e0`. Baton #329 was already merged.
+
+| Finding | Disposition |
+| --- | --- |
+| A deadline consumed by the alarm could restore forge scope. | Persist the elapsed bound on the run. The regression exercises both signed readers after the tick on both hosts. |
+| Baton does not notify the broker on an unobserved server-side end, reap or fence. | Still blocking the broker rollout. The deadline change is not a notification path. |
+| A deferred handoff loses the prior sandbox's state after advance. | Still open. Preserving the VM without independently revoking its old credential would widen the credential's lifetime. Fix the runner regression with independent session retirement or state preservation. |
+| S-BTN-310 collides with the session-link scenario. | Still open for the broker scenario. Allocate and register a distinct ID with the selected design; the deadline regression exercises the existing S-BTN-52 transition. |
+| Two sandbox diagnostics assumed a credential was present. | Fieldhouse checks absence in the unclaimed sandbox and uses a synthetic bearer to exercise terminal and archive masking. The live sandbox diagnostics were not run. |
+
+## Rollout hold
+
+The landed Fieldhouse R-FH-3, R-FH-11 and R-FH-90 prescribe the limited user's token in stage 1
+and a host-only forge gate for stage 2 (FLDH-60 and FLDH-61). Fieldhouse #49 proposes a different
+stage-1 credential. Do not deploy the broker on the strength of this fix. The open owner decision
+is whether to approve that interim exception or continue only with the specified gate. No live
+credentials, host configuration or deployment were used or changed in this leg.

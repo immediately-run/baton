@@ -476,7 +476,7 @@ describe('S-BTN-219 require_signed_control', () => {
     // course has, and round 2's blocking finding: the .md files belonged to no group, loaded
     // from the agent_command group's signed tree, where a signed .md change never took effect
     // and an unsigned one rode into force with the next signed settings change.
-    write('agent.mjs', "import { appendFileSync, readFileSync } from 'node:fs';\nappendFileSync('ran-agent.txt', 'INSTRUCTIONS:' + (process.env.BATON_INSTRUCTIONS ? readFileSync(process.env.BATON_INSTRUCTIONS, 'utf8') : '<none>') + '\\n');\n");
+    write('agent.mjs', "import { appendFileSync, readFileSync } from 'node:fs';\nappendFileSync('ran-agent.txt', 'INSTRUCTIONS:' + (process.env.BATON_INSTRUCTIONS ? readFileSync(process.env.BATON_INSTRUCTIONS, 'utf8') : '<none>') + '\\n');\nprocess.exitCode = 1;\n");
     commit(null, 'the agent records the instructions it was served');
     await tick();
     expect((await keyCall(ownerHttp, '/v1/owner/docs/settings', { require_signed_control: true }, 'PUT')).status).toBe(200);

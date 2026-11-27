@@ -6,7 +6,9 @@
 // 6 h. On bering, 2026-11-23–24, 47 review suspensions waited on a git path that no longer carries
 // positions. Runs on both hosts.
 import { describe, it, expect, beforeEach } from 'vitest';
-import { advance, claimItem, claimRow, cutover, endClaim, Git, observe, placed, recommended, register, setClock, stateView } from '../helpers';
+import { adminSession, advance, claimItem, claimRow, cutover, endClaim, Git, observe, placed, recommended, register, setAdminKeys, setClock, stateView } from '../helpers';
+import { readSession } from '../lib/needsYouFixture';
+import { makeKey } from '../lib/sshKeys';
 
 const T0 = Date.parse('2026-10-16T12:00:00Z');
 const H = 3_600_000;
@@ -79,5 +81,32 @@ describe('S-BTN-18 git wins', () => {
   it('a malformed std:git.evidence@1 refuses the post', async () => {
     const bad = { attestations: [{ type: 'std:git.evidence@1', ticket: 'T-1', value: { claim: 1, evidence: 'x', found: 'yes' } }] };
     expect(await git.refresh(bad)).toMatchObject({ status: 400, code: 'invalid-params' });
+  });
+
+  it('warns on the first old-sync refresh that was asked for evidence, without using declarations to confirm', async () => {
+    const admin = await makeKey('ssh-ed25519', 'admin');
+    await setAdminKeys(admin);
+    const cookie = await adminSession(admin);
+    const client = async () => (await readSession(cookie, '/v1/repositories/docs/sync')).json.sync_client;
+    const source = { kind: 'markdown', cli: '0.1.4' };
+    // Seed the identical refresh with no unconfirmed ends. A declaration is not needed yet.
+    expect(await git.refresh({ source })).toMatchObject({ status: 200 });
+    expect(await client()).toMatchObject({ version: '0.1.4', recommended: '0.1.5', behind: true, missing_evidence: false });
+
+    const w = await register('vm-a', { lease_timeout_s: 86_400 });
+    const { json: c } = await claimItem('vm-a', w.secret);
+    await advance('vm-a', w.secret, c.claim_id, { leg: 'review' });
+    const url = 'https://github.com/o/r/pull/7#issuecomment-123';
+    await endClaim('vm-a', w.secret, c.claim_id, { end_reason: 'suspended:reviewed', reached: 'reviewed', ended_at_sha: url });
+    const { json: observation } = await observe();
+    expect(observation).toMatchObject({ required_features: ['evidence'], unconfirmed: [{ claim: c.claim_id }] });
+    expect(await git.refresh({ source, observation: observation.observation })).toMatchObject({ status: 200, confirmed: 0 });
+    expect(await client()).toMatchObject({ version: '0.1.4', missing_evidence: true });
+
+    expect(await git.refresh({ source, sync_features: [] })).toMatchObject({ status: 200, confirmed: 0 });
+    expect(await client()).toMatchObject({ version: '0.1.4', missing_evidence: true });
+    expect(await git.refresh({ source, sync_features: ['evidence'] })).toMatchObject({ status: 200, confirmed: 0 });
+    expect(await client()).toMatchObject({ version: '0.1.4', missing_evidence: false });
+    expect((await claimRow(c.claim_id)).confirmed_at).toBeNull();
   });
 });
