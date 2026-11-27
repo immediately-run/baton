@@ -31,21 +31,29 @@ beforeEach(async () => {
 });
 
 /** `builtin`, with every start, exec and stop recorded. */
-function recording(): { executor: Executor; log: { op: string; session: string; kind?: string; argv?: string[] }[] } {
+function recording(useForgeProof: boolean): { executor: Executor; log: { op: string; session: string; kind?: string; argv?: string[] }[] } {
   const inner = builtinExecutor();
   const log: { op: string; session: string; kind?: string; argv?: string[] }[] = [];
+  const live = new Set<string>();
   const executor: Executor = {
     ...inner,
     source: 'pinned', digest: 'test',
     async start(o) {
       log.push({ op: 'start', session: o.brief.session_id, kind: o.brief.kind });
+      if (useForgeProof && o.forgeProof) {
+        o.forgeProof();
+        log.push({ op: 'proof', session: o.brief.session_id });
+      }
+      live.add(o.brief.session_id);
       return await inner.start(o);
     },
     exec(h, argv, o) {
+      expect(live.has(h.session_id)).toBe(true);
       log.push({ op: 'exec', session: h.session_id, argv });
       return inner.exec(h, argv, o);
     },
     async stop(h, reason) {
+      live.delete(h.session_id);
       log.push({ op: 'stop', session: h.session_id, kind: reason });
       await inner.stop(h, reason);
     },
@@ -77,7 +85,7 @@ describe('S-BTN-210: repository code runs only through the executor (R-BTN-107)'
     }
   });
 
-  it('each leg starts a session keyed by its run id; run and close are wrapper calls in it, never in the runner\'s process', async () => {
+  it.each(['run', 'wait', 'scoped-wait'] as const)('routes run, close and handoff through the right session (successor: %s)', async (successor) => {
     const dir = mkdtempSync(join(tmpdir(), 'baton-210-'));
     const stateFile = join(tmpdir(), `baton-210-${process.pid}.json`);
     try {
@@ -108,19 +116,54 @@ export async function handoff(ctx) { note(ctx, 'handoff'); return 'https://examp
 
       const api = new BatonApi({
         url: 'https://baton.test',
-        transport: (req) => hostCall(req),
+        transport: async (req) => {
+          const res = await hostCall(req);
+          if (successor === 'run' || !res.ok || !new URL(req.url).pathname.endsWith('/advance')) return res;
+          const answer = await res.json() as Record<string, unknown>;
+          return Response.json(answer.station === 'pr-open'
+            ? { ...answer, next: [{ leg: 'review', state: 'waiting', waiting_on: 'findings' }] }
+            : answer);
+        },
         auth: (_m, _u, _b, secret) => ({ Authorization: `Bearer ${TOKENS['vm-a']}`, ...(secret ? { 'X-Runner-Secret': secret } : {}) }),
       });
-      const { executor, log } = recording();
+      const { executor, log } = recording(successor === 'scoped-wait');
       const runner = new Runner({
         api, home: dir, repository: 'docs', hostname: 'vm-a', harness: 'opencode', capabilities: ['key:zai'], executor,
         session: 'b184-exec', courses: [{ course: 'roadmap-pr', version: 3 }], stateFile, beatEvery: 60_000, log: () => {},
       });
-      expect(await runner.runOnce()).not.toBeNull();
+      const outcome = await runner.runOnce();
       runner.stop();
+      expect(outcome).not.toBeNull();
 
       const runIds = (await rows<{ leg: string; run_id: string }>('SELECT leg, run_id FROM claim_legs ORDER BY id'));
       expect(runIds.map((r) => r.leg)).toEqual(['implement', 'review']);
+      if (successor === 'scoped-wait') {
+        const old = `${runIds[0].run_id}.r0`;
+        const fallback = log.find((e) => e.op === 'start' && e.session !== old)?.session;
+        expect(fallback).toMatch(/^leg-/);
+        expect(log.filter((e) => e.op === 'proof')).toEqual([{ op: 'proof', session: old }]);
+        expect(log.map((e) => [e.op, e.session, e.argv?.[2] ?? e.kind])).toEqual([
+          ['start', old, 'leg'], ['proof', old, undefined], ['exec', old, 'run'], ['exec', old, 'close'],
+          ['stop', old, 'next-leg'], ['start', fallback, 'leg'], ['exec', fallback, 'handoff'],
+          ['stop', fallback, 'claim-ended'],
+        ]);
+        expect(outcome).toMatchObject({ end_reason: 'suspended:pr-open', handoff: 'https://example.test/handoff' });
+        return;
+      }
+      if (successor === 'wait') {
+        expect(outcome).toMatchObject({ end_reason: 'suspended:pr-open', handoff: 'https://example.test/handoff' });
+        const first = `${runIds[0].run_id}.r0`;
+        // An isolated executor would lose guest-only state on stop. The original handle
+        // must still be live for handoff, and no replacement or review session may start.
+        expect(log).toEqual([
+          { op: 'start', session: first, kind: 'leg' },
+          ...['run', 'close', 'handoff'].map((call) => ({ op: 'exec', session: first,
+            argv: [expect.any(String), expect.any(String), call, expect.stringMatching(/implement\.mjs$/)],
+          })),
+          { op: 'stop', session: first, kind: 'claim-ended' },
+        ]);
+        return;
+      }
       // Each leg's session starts keyed by its run id's first session, of kind `leg`…
       const starts = log.filter((e) => e.op === 'start');
       expect(starts).toEqual(runIds.map((r) => ({ op: 'start', session: `${r.run_id}.r0`, kind: 'leg' })));

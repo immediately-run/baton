@@ -1,0 +1,18 @@
+---
+title: B-131 review follow-up
+description: Disposition of the latest findings on the Fieldhouse broker prototype and merged Baton work.
+---
+
+The [review](https://github.com/immediately-run/fieldhouse/pull/49#pullrequestreview-6087954528)
+requested changes on Fieldhouse `73371cbe` and rechecked the merged Baton work on `0917e3c4`.
+
+| Finding | Disposition |
+| --- | --- |
+| [Stage-1 policy](https://github.com/immediately-run/fieldhouse/pull/49#discussion_r4718764011) | Remove the prototype from the stage-1 executor and its live checks. The host prototype stays separate and is not for rollout. |
+| [Server-side revocation](https://github.com/immediately-run/fieldhouse/pull/49#discussion_r4710525422) | An unobserved end, reap or fence still depends on reconciliation in the detached prototype. Durable notification and a test that does not rely on executor stop remain rollout prerequisites. |
+| [Deferred handoff](https://github.com/immediately-run/baton/pull/329#discussion_r4656213251) | For the supported executor path, preserve the previous session through the successor's wait and close its old control channel. S-BTN-210 tests advance followed by suspension, with handoff on the same handle. A prototype that requests forge proof still gets stopped on advance; a fallback handoff cannot borrow the successor's scope. Giving a future broker separate grant retirement and state preservation remains a prerequisite to wiring it in. |
+| [Scenario collision](https://github.com/immediately-run/baton/pull/329#discussion_r4655265397) | Remove incorrect references from the ticket and fake tests. Register the separate end-to-end scenario with an approved design; neither the fake forge nor the signed-scope tests demonstrate GitHub enforcement. |
+
+R-FH-3, R-FH-11 and R-FH-90 still prescribe the limited user's credential in stage 1 and a
+host-only forge gate in stage 2 (FLDH-60 and FLDH-61). This fix does not satisfy B-131's
+first-host cutover or standing-credential retirement criteria. No live change or test was made.

@@ -208,6 +208,7 @@ export class ClaimRun {
   /** R-BTN-107 (B-184): the session of the leg that ran last — its `close` and `handoff` run in
    *  it, and it is stopped when the next leg starts or the claim ends. */
   session: { handle: Handle; checkout: string } | null = null;
+  private readonly forgeProofs = new WeakMap<Handle, { requested: boolean }>();
   /** R-BTN-144 class 7 (B-170): the last leg's masked set, from the environment it was given. */
   legSecrets: readonly string[] = [];
   /** R-BTN-6 (B-188): Baton's answer no longer lists this claim — it is fenced alone: its leg
@@ -351,12 +352,17 @@ export class ClaimRun {
   /** Start a session of `kind` on the executor the host chose. */
   private async startSession(kind: SessionKind, o: { session_id: string; run_id?: string; ticket?: string; leg?: string; snapshot_sha?: string; paths: string[]; env: Record<string, string>; channel?: string | null; autonomous?: boolean; reads_only?: boolean }): Promise<Handle> {
     const run = kind === 'leg' ? o.run_id : undefined;
+    const proof = { requested: false };
     try {
       const handle = await this.executor.start({
         brief: { kind, ...o, checkout: this.checkout, wrapper: LEG_PROCESS, ...(o.autonomous ? { autonomous: true } : {}) },
-        ...(run && this.executor.source === 'pinned' ? { forgeProof: () => this.o.api.forgeProof(run) } : {}),
+        ...(run && this.executor.source === 'pinned' ? { forgeProof: () => {
+          proof.requested = true;
+          return this.o.api.forgeProof(run);
+        } } : {}),
         executor: null, inputs: [], channel: o.channel ?? null,
       });
+      if (run && this.executor.source === 'pinned') this.forgeProofs.set(handle, proof);
       if (kind === 'leg' && !this.placedLeg) {
         this.placedLeg = true;
         this.host.legPlaced?.();
@@ -370,7 +376,7 @@ export class ClaimRun {
 
   /** The session `close` and `handoff` run in: the last leg's, or — a hand-off with no leg run
    *  in this claim yet — a fresh `leg` session over the claim's course scripts. */
-  private async legSession(ctx: Record<string, unknown>, run = typeof ctx.run_id === 'string' ? ctx.run_id : undefined): Promise<Handle | null> {
+  private async legSession(ctx: Record<string, unknown>, run: string | null | undefined = typeof ctx.run_id === 'string' ? ctx.run_id : undefined): Promise<Handle | null> {
     if (this.claimLost()) return null;
     if (this.session) return this.session.handle;
     const paths = this.inflight ? [this.inflight.course.scratch] : [];
@@ -870,19 +876,21 @@ export class ClaimRun {
   }
 
   private async beforeLeg(claimId: number, course: CourseLoad, state: LegProgress): Promise<ClaimOutcome | null> {
-    const { at, legName, nextLegs, ranScript, ranCtx, handoffUrl, runId } = state;
+    const { at, legName, nextLegs, ranScript, ranCtx, handoffUrl } = state;
+    // This hook belongs to the finished leg, never to the queued run's forge scope.
+    const handoff = async () => await this.callHandoff(ranScript, ranCtx ?? {}, undefined, null) ?? handoffUrl;
     if (this.claimLost()) return await this.finish(claimId, { end_reason: 'released:lease-lost', reached: at, next: legName }, null);
     // A drain (2026-10-24): the leg that ran is complete; the claim ends here with its
     // hand-off and the runner exits without claiming again — SIGTERM's graceful path.
     if (this.host.isDraining()) {
-      return await this.finish(claimId, { end_reason: 'released:requested', reached: at, next: legName }, await this.callHandoff(ranScript, ranCtx ?? {}, undefined, runId ?? undefined) ?? handoffUrl);
+      return await this.finish(claimId, { end_reason: 'released:requested', reached: at, next: legName }, await handoff());
     }
     // A signal that landed while no leg was running (a short wait, or the steps between
     // legs) ends the claim just the same — a release is never dropped (§6.13).
     const whileWaiting = this.abortSignal();
     if (whileWaiting) {
       const reason = whileWaiting.reason ?? `suspended:${at}`;
-      return await this.finish(claimId, { end_reason: reason, reached: at, next: legName }, await this.callHandoff(ranScript, ranCtx ?? {}, undefined, runId ?? undefined) ?? handoffUrl);
+      return await this.finish(claimId, { end_reason: reason, reached: at, next: legName }, await handoff());
     }
     // §6.13: a leg the latest snapshot shows waiting suspends — unless its wait is one of the
     // course's short_waits, when the claim is kept and the station is re-read each beat for
@@ -896,7 +904,7 @@ export class ClaimRun {
       if (out === 'abort') {
         const signal = this.abortSignal()!;
         const reason = signal.reason ?? `suspended:${at}`;
-        return await this.finish(claimId, { end_reason: reason, reached: at, next: legName }, await this.callHandoff(ranScript, ranCtx ?? {}, undefined, runId ?? undefined) ?? handoffUrl);
+        return await this.finish(claimId, { end_reason: reason, reached: at, next: legName }, await handoff());
       }
       if (out === 'lost') {
         // The lease went while the wait held it: stop at once, no hand-off (R-BTN-24).
@@ -906,8 +914,7 @@ export class ClaimRun {
     }
     if (held === 'suspend') {
       // §6.13: the hand-off of the leg that ran comes before the suspension (R-BTN-44).
-      const url = await this.callHandoff(ranScript, ranCtx ?? {}, undefined, runId ?? undefined) ?? handoffUrl;
-      return await this.finish(claimId, { end_reason: `suspended:${at}`, reached: at, next: legName }, url);
+      return await this.finish(claimId, { end_reason: `suspended:${at}`, reached: at, next: legName }, await handoff());
     }
     if (this.closedDone) return await this.finish(claimId, { end_reason: 'done', reached: at }, handoffUrl);
     return null;
@@ -1011,7 +1018,7 @@ export class ClaimRun {
     if (outcome.kind === 'past-deadline') {
       const end_reason = this.abortSignal()?.reason ?? `suspended:${at}`;
       return await this.finish(claimId, { end_reason, reached: at, next: legName },
-        await this.callHandoff(state.ranScript, state.ranCtx ?? {}) ?? state.handoffUrl);
+        await this.callHandoff(state.ranScript, state.ranCtx ?? {}, undefined, null) ?? state.handoffUrl);
     }
     if (outcome.kind === 'missing') {
       this.o.log(`baton: the snapshot has no legs/${legName}.mjs — a script bug the test kit owns (§2d)`);
@@ -1161,10 +1168,17 @@ export class ClaimRun {
     state.advice = answer.advice ?? state.advice;
     state.resolvedInputs = answer.inputs ?? [];
     state.runId = typeof answer.run_id === 'string' ? answer.run_id : null;
-    // The previous run has ended in Baton, even if the next leg waits before executing.
-    await this.stopSession('next-leg');
+    // Retire the old run's control channel and link, not its checkout. A wait or drain
+    // before the next leg starts still calls handoff in this session (S-BTN-210).
+    this.legChannel?.close();
+    this.legChannel = null;
+    this.legSessionUrl = null;
+    this.sessionLinkLanded = false;
     state.run = typeof answer.run === 'number' ? answer.run : null;
     this.legSeq = typeof answer.seq === 'number' ? answer.seq : null;
+    // A prototype executor that requested a scoped credential still couples retirement to
+    // stop. Keep its old teardown behavior until such an executor can revoke independently.
+    if (this.session && this.forgeProofs.get(this.session.handle)?.requested) await this.stopSession('next-leg');
     state.legName = verdict.leg;
     state.handoffUrl = null;
     state.resume = null;
@@ -1267,6 +1281,7 @@ export class ClaimRun {
   private async runLeg(course: CourseLoad, leg: string, ctx: Record<string, unknown>, scratch: string): Promise<LegOutcome> {
     const script = course.scripts.get(leg);
     if (script == null) return { kind: 'missing' };
+    if (this.pastRunDeadline()) return { kind: 'past-deadline' };
     if (course.graph?.legs.get(leg)?.readsOnly) {
       ctx.reads_only = true;
       ctx.review_store = this.o.home;
@@ -1713,7 +1728,7 @@ export class ClaimRun {
 
   /** `handoff(ctx)` (R-BTN-38, R-BTN-44): before any suspension or release; its failure is logged and the
    * resume record covers the rest. */
-  private async callHandoff(script: string | null, ctx: Record<string, unknown>, why?: string, liveRun?: string): Promise<string | null> {
+  private async callHandoff(script: string | null, ctx: Record<string, unknown>, why?: string, liveRun?: string | null): Promise<string | null> {
     if (script == null) return null;
     try {
       // R-BTN-107/R-BTN-133 (B-184): through the executor, in the leg's session, bounded at 2 minutes.
