@@ -58,14 +58,17 @@ away on the strip, and each screen is one entity.
 ## What it does
 
 Expedite, hold, cancel (a hold plus a release message), stop a leg, request a runner's status,
-resync a repository, resolve a condition and answer a person's leg (where the policy admits an
-`owner` writer; else the entry names `baton decision answer`) — an owner's session on its
-repositories, an administrator's everywhere; force-reap (with confirmation), confirm an adoption,
+resync a repository and resolve a condition — an owner's session on its repositories, an
+administrator's everywhere; answer a person's leg — an owner's session, or a member's holding the
+leg's `asks` label, where the policy admits its writer ([R-BTN-181](../../spec/BATON_SPEC/12-security.md#sec-12-8)), the
+`baton decision answer` line drawn beside the buttons; force-reap (with confirmation), confirm an adoption,
 confirm or release an unconfirmed completion, force a resync onto a rewritten head, and cut over a
 repository — an administrator's only (BATON_SPEC [R-BTN-155](../../spec/BATON_SPEC/11-people.md#sec-11-4)). Every control is a registry action
-behind the same `authorize` as the CLI and the API ([R-BTN-129](../../spec/BATON_SPEC/11-people.md#sec-11-3)). Repositories, owners, grants,
-probes, owner bars and required bars are shown read-only, each screen naming the CLI command
-that changes it.
+behind the same `authorize` as the CLI and the API ([R-BTN-129](../../spec/BATON_SPEC/11-people.md#sec-11-3)). Every screen draws the controls
+its session's role may call, as the CLI offers them ([R-BTN-186](../../spec/BATON_SPEC/12-security.md#sec-12-8)), each also naming its CLI command:
+repositories, owners, members, grants, probes and bars included. Opening sessions, confirming,
+minting bearer credentials and export stay with the key, and authority-changing acts wait for the
+key's confirmation ([R-BTN-155](../../spec/BATON_SPEC/11-people.md#sec-11-4)).
 
 ## Constraints a design must keep
 
@@ -114,14 +117,14 @@ TypeScript, built by `npm run build:ui` into the one bundle both hosts serve at
 
 - **The screens.** `src/core/screens.ts` is the one table of them — id, path and the session
   role that may open each — read by the front, the client's router and `check:actions`.
-  `src/dashboard/screens/` holds one folder per entity (`tickets/`, `runners/`, `courses/`,
-  `conditions/`, `sync/`, `credentials/`, `governance/`, `attestations/`, `goals/`, `tenant/`,
-  `board/`, `root/`), registered in `screens/index.ts`; `screens/README.md` is the contract a
+  `src/dashboard/screens/` holds one folder per entity (`src/dashboard/screens/tickets/`, `src/dashboard/screens/runners/`, `src/dashboard/screens/courses/`,
+  `src/dashboard/screens/conditions/`, `src/dashboard/screens/sync/`, `src/dashboard/screens/credentials/`, `src/dashboard/screens/governance/`, `src/dashboard/screens/attestations/`, `src/dashboard/screens/goals/`, `src/dashboard/screens/tenant/`,
+  `src/dashboard/screens/board/`, `src/dashboard/screens/root/`), registered in `src/dashboard/screens/index.ts`; `src/dashboard/screens/README.md` is the contract a
   screen keeps. The frame, the router, the sign-in and the controls are `src/dashboard/app/`;
   the shared pieces (`Text`, `View`, the polling store, the link rule) `src/dashboard/lib/`.
 - **The data.** Every screen draws its entity's reads and nothing else: the entries of
   `src/core/actions.ts` with `effect: 'read'`, served by `src/core/reads/` (one module per
-  domain; `reads/index.ts` says how to add one) and listed in
+  domain; `src/core/reads/index.ts` says how to add one) and listed in
   [BATON_SPEC §14](../../spec/BATON_SPEC/14-api.md#sec-14). A screen's controls are the entries
   whose `ui.view` names it, as `GET /v1/actions` lists them to the session — never a button the
   screen knows of itself. `npm run check:actions` holds the two tables together.

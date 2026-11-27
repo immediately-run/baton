@@ -1,3 +1,4 @@
+import { outputLine, syncAttestationBatch } from '../../src/defaults/output-evidence';
 // defaults-cli.test.ts — `baton repo sync`'s argument parser, `baton repo init`'s scaffolding
 // and `close` (BATON_SPEC §2f R-BTN-74, R-BTN-83; R3-1249): the flags; the scaffold's every
 // file, run through the BUILT CLI (the esbuild bundle production runs, not the source); the leg
@@ -7,24 +8,32 @@
 // Node only: init writes a real tree and runs git.
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest';
 import { execFile, execFileSync, spawnSync } from 'node:child_process';
-import { chmodSync, copyFileSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { courseSchemas, githubFacts, initMain, parseSyncArgs, plainGitRemote, remoteSlug, syncMain, syncWorkflow } from '../../src/defaults/cli';
-import type { Transport } from '../../src/runner/api';
-import { HARNESS_AGENTS } from '../../src/runner/harness';
+import { BatonApi, type Transport } from '../../src/runner/api';
+import { Runner } from '../../src/runner/runner';
+import { call as hostCall } from '#host';
+import { advance, claimItem, claimRow, cutover, endClaim, keyCall, ORIGIN, register, rows, setAdminKeys, setClock, syncToken, TOKENS } from '../helpers';
+import { makeKey } from '../lib/sshKeys';
+import { readOnlyHarness, readOnlyVersionSupported, selectHarness } from '../../src/runner/harness';
+import { validateCourse } from '../../src/core/course';
 import { createHash } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { githubFake } from '../githubFake';
+import { changedBeyondBase } from '../../src/defaults/push-work';
 import { graphOf } from '../../src/core/graph';
 import { decide } from '../../src/runner/protocol';
-import { CREATE_PR_COURSE, stationsPr, stationsReviewPr, type PrFact } from '../../src/defaults/course-pr';
+import { replayMain } from '../../src/runner/replay';
+import { CREATE_PR_COURSE, stationsPr, stationsReviewPr, ticketOwns, type PrFact } from '../../src/defaults/course-pr';
+import { forgeReader } from '../../src/defaults/forges';
 import { prClose, verdictLine, type Exec } from '../../src/defaults/pr-close';
 import { splitWords } from '../../src/defaults/agent-words';
 import { ticketsMarkdown } from '../../src/defaults/tickets-markdown';
 import { stampMarkdownVersions } from '../../src/defaults/ticket-versions';
-import { syncOnce } from '../../src/shared/batonSync.mjs';
+import { syncOnce, type Unconfirmed } from '../../src/shared/batonSync.mjs';
 
 const ROOT = resolve(import.meta.dirname, '../..');
 const CLI = join(ROOT, 'cli', 'baton.mjs');
@@ -35,7 +44,9 @@ const REAL_GIT = execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8'
  * resolve; a child process reads it where git's stderr would print. */
 mkdirSync(join(ROOT, '.local'), { recursive: true });
 const BUNDLE = join(mkdtempSync(join(ROOT, '.local', 'baton-cli-bundle-')), 'baton-cli.mjs');
-const baton = (cwd: string, ...args: string[]) => execFileSync('node', [CLI, ...args], { cwd, encoding: 'utf8', env: { ...process.env, BATON_HOME: cwd } });
+// `course show` prints every leg's bundled stub: past Node's 1 MiB default once the stubs carry
+// the forge clients (B-273), so the buffer is the control walks' 16 MiB.
+const baton = (cwd: string, ...args: string[]) => execFileSync('node', [CLI, ...args], { cwd, encoding: 'utf8', env: { ...process.env, BATON_HOME: cwd }, maxBuffer: 16 * 1024 * 1024 });
 const gitInit = (dir: string) => {
   execFileSync('git', ['init', '-q', '-b', 'main', dir], { stdio: 'ignore' });
   execFileSync('git', ['-C', dir, 'config', 'user.email', 't@t'], { stdio: 'ignore' });
@@ -56,12 +67,230 @@ const SELF = { slug: remoteSlug(ROOT), sha: execFileSync('git', ['-C', ROOT, 're
 const PIN = `${SELF.slug}@${SELF.sha}`;
 /** A pin of another commit: refused for a scaffold, taken by the legacy `pr` path, which writes no source. */
 const OTHER_PIN = 'immediately-run/baton@abababababababababababababababababababab';
-const sourceOf = (course: string) => `github/${SELF.slug}/${SELF.sha}/${course}`;
+const sourceOf = (course: string) => `github/${SELF.slug}/${SELF.sha}/standard-${course}`;
 const load = async (file: string) => import(`${pathToFileURL(file).href}?t=${Math.random()}`);
+/** A stand-in for the pinned dibber (B-326): the archive leg's BATON_DIBBER in these tests. */
+const DIBBER_STAND_IN = join(ROOT, 'test', 'lib', 'dibberStandIn.mjs');
 
 /** A scaffolded leg stub's text: which close it routes to is what the stub's source says. */
 const stubSourceOf = (root: string, course: string, leg: string): string =>
   readFileSync(join(root, '.baton', 'courses', course, 'legs', `${leg}.mjs`), 'utf8');
+
+it('S-BTN-232: an owner returns a delivery, then confirms the next one; the runner pushes and sync closes it', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'baton-s232-'));
+  const root = join(dir, 'home');
+  const remote = join(dir, 'origin');
+  const factsFile = join(dir, 'facts.json');
+  const g = (...args: string[]) => execFileSync('git', ['-C', root, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+  const logs: string[] = [];
+  // B-326: the archive's status write is the pinned dibber's — here a stand-in, as the host's BATON_DIBBER.
+  const env = { BATON_DIBBER: process.env.BATON_DIBBER, DIBBER_LOG: process.env.DIBBER_LOG };
+  process.env.BATON_DIBBER = `node ${JSON.stringify(DIBBER_STAND_IN)}`;
+  process.env.DIBBER_LOG = join(dir, 'dibber.log');
+  try {
+    gitInit(root);
+    execFileSync('git', ['init', '-q', '--bare', '-b', 'main', remote]);
+    g('remote', 'add', 'origin', remote);
+    for (const file of ['.baton/baton.json', '.baton/courses/create-pr/course.json', '.baton/courses/create-pr/legs/archive.mjs']) {
+      mkdirSync(dirname(join(root, file)), { recursive: true });
+      copyFileSync(join(ROOT, file), join(root, file));
+    }
+    mkdirSync(join(root, 'tickets/nested'), { recursive: true });
+    writeFileSync(join(root, 'tickets/nested/B-1.md'), '---\nid: B-1\ntitle: Delivery\nstatus: available\n---\nSee [work](../../evidence.txt).\n');
+    writeFileSync(factsFile, '[]');
+    const first = commitAll(root);
+    g('push', '-q', 'origin', 'HEAD:refs/heads/main');
+    const admin = await makeKey('ssh-ed25519', 'admin');
+    const owner = await makeKey('ssh-ed25519', 'owner');
+    await setClock(Date.now() - 1_000);
+    await setAdminKeys(admin);
+    expect((await keyCall(admin, '/v1/admin/repositories', { id: 'docs', owner_keys_add: [owner.publicKey] })).status).toBe(200);
+    const sync = async () => expect(await syncMain({ root, url: ORIGIN, token: await syncToken(), latest: 'main', factsFile,
+      transport: hostCall, log: (line) => logs.push(line),
+    }), logs.join('\n')).toBe(0);
+    await sync();
+    await cutover();
+    const w = await register('vm-a', { courses: [{ repository: 'docs', course: 'create-pr', version: 4 }] });
+    const delivered = async (sha: string) => {
+      const { json: c } = await claimItem('vm-a', w.secret, { ticket_id: 'docs:B-1' });
+      expect(c).toMatchObject({ station: 'filed', legs: ['implement'] });
+      expect((await advance('vm-a', w.secret, c.claim_id, { leg: 'implement' })).status).toBe(200);
+      expect((await endClaim('vm-a', w.secret, c.claim_id, { end_reason: 'suspended:delivered', reached: 'delivered', next: 'confirm', ended_at_sha: sha,
+        detail: `delivered at ${sha.slice(0, 10)}: verified work`,
+      })).status).toBe(200);
+      await sync();
+    };
+    const answer = (option: string) => keyCall(owner, '/v1/repositories/docs/attestations', { type: 'std:decision@1', subject: { ticket: 'B-1' }, value: { option } });
+    await delivered(first);
+    expect((await answer('filed')).status).toBe(200);
+    expect(g('ls-remote', 'origin', 'refs/heads/main')).toContain(first);
+    expect(await rows('SELECT closed_as FROM closed_tickets WHERE ticket_id = ?', 'docs:B-1')).toEqual([]);
+    writeFileSync(join(root, 'evidence.txt'), 'Second delivery\n');
+    const second = commitAll(root);
+    g('push', '-q', 'origin', 'HEAD:refs/heads/main');
+    await sync();
+    await delivered(second);
+    expect((await answer('confirmed')).status).toBe(200);
+    const api = new BatonApi({ url: ORIGIN, transport: hostCall, client: 'baton/0.1.5',
+      auth: (_method, _url, _body, secret) => ({ Authorization: `Bearer ${TOKENS['vm-b']}`, ...(secret ? { 'X-Runner-Secret': secret } : {}) }),
+    });
+    const runner = new Runner({ api, home: root, repository: 'docs', hostname: 'vm-b', harness: 'opencode', session: 's232-archive',
+      courses: [{ course: 'create-pr', version: 4 }], stateFile: join(dir, 'runner.json'), clonesDir: join(dir, 'clones'),
+      beatEvery: 60_000, log: (line) => logs.push(line),
+    });
+    const outcome = await runner.runOnce();
+    expect(outcome, logs.join('\n')).toMatchObject({ ticket: 'docs:B-1', end_reason: 'done' });
+    const archive = g('ls-remote', 'origin', 'refs/heads/main').split(/\s/)[0];
+    expect(g('rev-parse', `${archive}^`)).toBe(second);
+    expect(g('show', '-s', '--format=%B', archive)).toBe(`tickets: B-1 done (archived)\n\nDelivered by: ${second}`);
+    // Dibber wrote the status; git moved the file, its content otherwise as filed.
+    expect(g('show', `${archive}:tickets/archive/nested/B-1.md`)).toBe('---\nid: B-1\ntitle: Delivery\nstatus: done\n---\nSee [work](../../evidence.txt).');
+    expect(readFileSync(join(dir, 'dibber.log'), 'utf8').trim().split('\n').map((l) => JSON.parse(l) as string[]).map((a) => a.slice(0, 2))).toEqual([['done', 'B-1']]);
+    const [claim] = await rows<{ id: number; ended_at_sha: string; confirmed_at: number | null }>(
+      `SELECT id, ended_at_sha, confirmed_at FROM claims WHERE ticket_id = ? AND end_reason = 'done'`, 'docs:B-1');
+    expect(claim).toMatchObject({ ended_at_sha: archive, confirmed_at: null });
+    await sync();
+    expect(await rows('SELECT closed_as FROM closed_tickets WHERE ticket_id = ?', 'docs:B-1')).toEqual([{ closed_as: 'done' }]);
+    expect((await claimRow(claim.id)).confirmed_at).not.toBeNull();
+  } finally {
+    for (const [k, v] of Object.entries(env)) if (v === undefined) delete process.env[k]; else process.env[k] = v;
+    rmSync(dir, { recursive: true, force: true });
+  }
+}, 30_000);
+describe('S-BTN-320: reads_only agent runs', () => {
+  const realHarness = process.env.BATON_TEST_OPENCODE;
+  async function review(probe?: string) {
+    const tmp = mkdtempSync(join(tmpdir(), 'baton-b141-'));
+    const root = join(tmp, 'home');
+    const checkout = join(tmp, 'claim');
+    const bin = join(tmp, 'bin');
+    const facts = join(tmp, 'facts.json');
+    const marker = join(tmp, 'plugin-loaded');
+    try {
+      gitInit(root);
+      const g = (...args: string[]) => execFileSync('git', ['-C', root, ...args], { stdio: 'ignore' });
+      g('remote', 'add', 'origin', 'https://github.com/immediately-run/baton.git');
+      expect(await initMain(['--own', '--agent', 'opencode'], { root, log: () => {} })).toBe(0);
+      const settings = join(root, '.baton', 'baton.json');
+      const course = join(root, '.baton', 'courses', 'create-pr');
+      const graph = JSON.parse(readFileSync(join(course, 'course.json'), 'utf8'));
+      graph.legs.review.reads_only = true;
+      expect(validateCourse(graph)).toEqual([]);
+      expect(graphOf(graph).legs.get('review')?.readsOnly).toBe(true);
+      expect(validateCourse({ ...graph, legs: { ...graph.legs, review: { ...graph.legs.review, reads_only: 'yes' } } }))
+        .toEqual(expect.arrayContaining([expect.objectContaining({ path: 'legs.review.reads_only' })]));
+      writeFileSync(join(course, 'course.json'), JSON.stringify(graph));
+      const initial = JSON.parse(readFileSync(settings, 'utf8'));
+      writeFileSync(settings, JSON.stringify({ ...initial, agent_command: 'opencode run --auto --model snapshot/model "old prompt"', agent_wrapper: '/not-used' }));
+      writeFileSync(join(course, 'legs', 'review.md'), 'trusted snapshot instructions');
+      mkdirSync(join(root, 'tickets'), { recursive: true });
+      writeFileSync(join(root, 'tickets', 'A-1.md'), 'trusted ticket');
+      writeFileSync(join(root, 'opencode.jsonc'), '{ // snapshot settings\n "default_agent": "reviewer", "agents": {"reviewer": {"description": "Snapshot reviewer", "mode": "primary"}}, "providers": {"anthropic": {"name": "Snapshot provider"}}, }');
+      const sha = commitAll(root);
+      execFileSync('git', ['clone', '-q', '--no-local', root, checkout]);
+      g('switch', '-qc', 'review-head');
+      for (const path of ['.opencode/plugins/probe.mjs', '.claude/settings.json', 'opencode.json', 'opencode.jsonc', 'AGENTS.md', 'CLAUDE.md', '.mcp.json', 'nested/AGENTS.md']) {
+        mkdirSync(dirname(join(root, path)), { recursive: true });
+        writeFileSync(join(root, path), 'branch configuration');
+      }
+      writeFileSync(join(root, '.opencode/plugins/probe.mjs'), `import { writeFileSync } from 'node:fs';\nexport default { id: 'baton-review-probe', setup() { writeFileSync(${JSON.stringify(marker)}, 'loaded'); } };\n`);
+      writeFileSync(join(root, 'changed.js'), 'changed blob');
+      chmodSync(join(root, 'changed.js'), 0o755);
+      symlinkSync('../outside', join(root, 'branch-link'));
+      writeFileSync(settings, JSON.stringify({ ...initial, agent_command: 'opencode run --model branch/model' }));
+      writeFileSync(join(course, 'legs', 'review.md'), 'branch instructions');
+      writeFileSync(join(root, 'tickets', 'A-1.md'), 'branch ticket');
+      const head = commitAll(root);
+      g('switch', '-q', 'main'); // The reviewed commit is never the agent's working checkout.
+      g('branch', '-D', 'review-head'); // The review object exists only in the home store, without a ref.
+      expect(spawnSync('git', ['-C', checkout, 'cat-file', '-t', head], { stdio: 'ignore' }).status).not.toBe(0);
+      const ticketFile = join(tmp, 'verified.md');
+      writeFileSync(ticketFile, 'verified ticket from custom source');
+      mkdirSync(bin);
+      writeFileSync(join(bin, 'opencode'), `#!${process.execPath}
+const { execFileSync } = require('node:child_process');
+const { readFileSync, readdirSync, statSync, writeFileSync, mkdirSync } = require('node:fs');
+if (process.argv[2] === '--version') { console.log('vv2.2.5-test'); process.exit(); }
+const files = readdirSync('.', { recursive: true });
+const probe = ${JSON.stringify(probe ?? null)};
+let live;
+if (probe) {
+  const home = ${JSON.stringify(join(tmp, 'probe-home'))};
+  mkdirSync(home);
+  const env = { HOME: home, PATH: process.env.PATH, OPENCODE_CONFIG_CONTENT: process.env.OPENCODE_CONFIG_CONTENT };
+  const get = (path) => JSON.parse(execFileSync(probe, ['api', '--standalone', 'GET', path], { encoding: 'utf8', timeout: 10000, env }));
+  live = { sources: get('/api/config'), plugins: get('/api/plugin'), agents: get('/api/agent') };
+}
+writeFileSync(${JSON.stringify(facts)}, JSON.stringify({
+  argv: process.argv.slice(2), cwd: process.cwd(), files,
+  policy: JSON.parse(process.env.OPENCODE_CONFIG_CONTENT).policies,
+  config: JSON.parse(process.env.OPENCODE_CONFIG_CONTENT), live,
+  diff: readFileSync('review.diff', 'utf8'), change: readFileSync('changes/changed.js', 'utf8'),
+  executable: Boolean(statSync('changes/changed.js').mode & 0o111),
+  instructions: readFileSync(process.env.BATON_INSTRUCTIONS, 'utf8'), ticket: readFileSync(process.env.BATON_TICKET_FILE, 'utf8'),
+}));
+console.log('approve');
+`, { mode: 0o700 });
+      const legacy = { ticket: { id: 'A-1', path: 'tickets/A-1.md' }, checkout, snapshot: { sha } };
+      const context = { ...legacy, ticket: { ...legacy.ticket, version: 'source-v1', file: ticketFile }, review_store: root, reads_only: true };
+      const stub = join(course, 'legs', 'review.mjs');
+      const wrapper = join(ROOT, 'src', 'runner', 'legProcess.mjs');
+      const run = (input: object, script = stub) => {
+        const call = spawnSync(process.execPath, [wrapper, 'run', script], {
+          cwd: checkout, input: JSON.stringify([input]) + '\n', encoding: 'utf8', timeout: 35_000,
+          env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, BATON_AGENT_WRAPPER: '/not-used' },
+        });
+        if (call.error) throw call.error;
+        return JSON.parse(call.stdout.trim());
+      };
+      expect(run(context)).toMatchObject({ ok: false, error: expect.stringContaining('exact review commit') });
+      expect(run({ ...legacy, review_head: head })).toMatchObject({ ok: false, error: expect.stringContaining('runner cannot enforce reads_only') });
+      expect(existsSync(facts)).toBe(false);
+      const oldStub = join(tmp, 'old.mjs');
+      writeFileSync(oldStub, 'export const run = () => { throw new Error("old stub ran"); };');
+      expect(run({ ...context, review_head: head }, oldStub)).toMatchObject({ ok: false, error: expect.stringContaining('stub that supports reads_only') });
+      expect(run({ ...context, review_head: head })).toMatchObject({ ok: true, result: { reached: 'reviewed', verdict: 'approve' } });
+      const seen = JSON.parse(readFileSync(facts, 'utf8'));
+      expect(seen.argv.slice(0, -1)).toEqual(['run', '--standalone', '--model', 'snapshot/model', '--']);
+      expect(seen.cwd).not.toBe(checkout);
+      expect(seen.files).toEqual(expect.arrayContaining(['review.diff', 'instructions.md', 'ticket.md', 'changes/changed.js']));
+      expect(seen.files.join('\n')).not.toMatch(/(?:\.opencode|\.claude|\.git|opencode\.json|AGENTS\.md|CLAUDE\.md|\.mcp\.json|branch-link)/);
+      expect(seen.policy.filter((p: { action: string }) => p.action === 'tool.use').map((p: { effect: string; resource: string }) => `${p.effect}:${p.resource}`))
+        .toEqual(['deny:*', 'allow:read:*', 'allow:glob:*', 'allow:grep:*']);
+      expect(seen).toMatchObject({ change: 'changed blob', executable: false, instructions: 'trusted snapshot instructions', ticket: 'verified ticket from custom source' });
+      expect(seen.config).toMatchObject({ default_agent: 'reviewer', providers: { anthropic: { name: 'Snapshot provider' } } });
+      if (probe) {
+        expect(seen.live.sources).toEqual(expect.arrayContaining([expect.objectContaining({ info: expect.objectContaining({ policies: seen.policy, default_agent: 'reviewer' }) })]));
+        const reviewer = seen.live.agents.data.find((agent: { id: string }) => agent.id === 'reviewer');
+        expect(reviewer).toBeDefined();
+        for (const [action, effect] of [['read', 'allow'], ['glob', 'allow'], ['grep', 'allow'], ['shell', 'deny'], ['edit', 'deny'], ['subagent', 'deny']]) {
+          expect(reviewer.permissions.findLast((rule: { action: string; resource: string }) =>
+            (rule.action === action || rule.action === '*') && rule.resource === '*')?.effect).toBe(effect);
+        }
+        expect(JSON.stringify(seen.live.plugins)).not.toContain('baton-review-probe');
+      }
+      expect(seen.diff).toContain('+changed blob');
+      expect(existsSync(marker)).toBe(false);
+      expect(existsSync(seen.cwd)).toBe(false);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  }
+  it('runs the stub on diff data with snapshot settings and a read-only tool policy', () => review());
+  it.skipIf(!realHarness)('loads the policy in an installed standalone OpenCode without discovering the branch plugin', () => {
+    expect(readOnlyVersionSupported(execFileSync(realHarness!, ['--version'], { encoding: 'utf8' }))).toBe(true);
+    return review(realHarness);
+  }, 40_000);
+
+  it('builds a Claude read-tool allowlist and rejects unknown commands', () => {
+    const { argv } = readOnlyHarness(['claude', '-p', '--permission-mode', 'bypassPermissions', '--model', 'sonnet'], 'review');
+    expect(argv).toEqual(['claude', '--print', '--bare', '--setting-sources', '', '--strict-mcp-config', '--mcp-config', '{}',
+      '--tools', 'Read,Glob,Grep', '--allowedTools', 'Read,Glob,Grep', '--permission-mode', 'dontAsk', '--model', 'sonnet', '--', 'review']);
+    expect(() => readOnlyHarness(['node', 'agent.mjs'], 'review')).toThrow('reads_only supports only');
+    const configured = readOnlyHarness(['claude', '-p'], 'review', () => JSON.stringify({ model: 'sonnet', language: 'English', hooks: {} }));
+    expect(configured.argv).toContain('{"model":"sonnet","language":"English"}');
+  });
+});
 
 
 describe('parseSyncArgs', () => {
@@ -437,7 +666,7 @@ describe('the sync reads a course floor spelled either way (B-68’s window)', (
     mkdirSync(join(dir, 'tickets'), { recursive: true });
     writeFileSync(join(dir, 'tickets', 'one.mdx'), '---\nid: T-1\ntitle: One\n---\n');
     execFileSync('git', ['-C', dir, 'remote', 'add', 'origin', 'https://github.com/immediately-run/docs.git'], { stdio: 'ignore' });
-    expect(await initMain([], { root: dir, log: () => {} })).toBe(0);
+    expect(await initMain(['--own'], { root: dir, log: () => {} })).toBe(0);
     commitAll(dir);
     writeFileSync(join(dir, '.baton', 'facts.json'), '[]');
     return dir;
@@ -463,9 +692,11 @@ describe('the sync reads a course floor spelled either way (B-68’s window)', (
     // The old spelling alone: without the window the entry would silently post `version` (3) as
     // its floor, changing rule 9's minimum hands-up on the next sync.
     writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(readFileSync(settingsFile, 'utf8')), courses: [{ id: 'create-pr', version: 3, min_worker_version: 2 }] }));
+    commitAll(dir);
     expect(await registryOf(dir)).toMatchObject([{ id: 'create-pr', version: 3, min_runner_version: 2 }]);
     // Both spellings: the new one wins, as the server's own dual read resolves them (courses.ts).
     writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(readFileSync(settingsFile, 'utf8')), courses: [{ id: 'create-pr', version: 3, min_runner_version: 1, min_worker_version: 2 }] }));
+    commitAll(dir);
     expect(await registryOf(dir)).toMatchObject([{ id: 'create-pr', version: 3, min_runner_version: 1 }]);
   }, 120_000);
 });
@@ -473,7 +704,7 @@ describe('the sync reads a course floor spelled either way (B-68’s window)', (
 describe('syncOnce’s confirm-only re-post (B-183, review round 1)', () => {
   /** `syncOnce` with every effect injected (the module is pure): a head, a payload and an
    * ancestry the test scripts, recording the one board post. */
-  const run = async (over: { head: string; next: string; ancestor?: boolean; unconfirmed?: unknown[] }) => {
+  const run = async (over: { head: string; next: string; ancestor?: boolean; unconfirmed?: Unconfirmed[] }) => {
     const posts: Record<string, unknown>[] = [];
     const out = await syncOnce(over.next, {
       observe: async () => ({ sha: over.head, observation: 7 }),
@@ -481,7 +712,7 @@ describe('syncOnce’s confirm-only re-post (B-183, review round 1)', () => {
       readHead: async () => ({ sha: over.head, unconfirmed: over.unconfirmed ?? [] }),
       post: async (body: Record<string, unknown>) => {
         posts.push(body);
-        return { ok: true };
+        return { ok: true } as const;
       },
       // `next` is the head, an ancestor of it (the checkout behind), or ahead of it, as scripted.
       isAncestor: async (a: string, b: string) => (over.ancestor ? a !== over.head || b === over.head : a === over.head),
@@ -581,23 +812,185 @@ describe('baton repo init, through the built CLI', () => {
   beforeAll(() => {
     root = mkdtempSync(join(tmpdir(), 'baton-init-'));
     gitInit(root);
-    baton(root, 'repo', 'init', '--pin', PIN);
+    baton(root, 'repo', 'init', '--own', '--pin', PIN);
     commitAll(root);
   }, 120_000);
   afterAll(() => rmSync(root, { recursive: true, force: true }));
+
+  // B-281's `--check`, re-scoped to B-139 by the owner (2026-11-26): a sourced home holds only
+  // overrides, so the check reports any other file there — against the source it names — and
+  // compares the committed `standard-<id>` source trees with what this checkout builds.
+  it('checks sourced homes read-only: overrides pass, a home copy is reported as differing or identical (S-BTN-105)', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'baton-check-stubs-'));
+    try {
+      baton(dir, 'repo', 'init', '--override', 'implement');
+      baton(dir, 'repo', 'init', '--course', 'decision');
+      const legs = join(dir, '.baton/courses/create-pr/legs');
+      writeFileSync(join(legs, 'implement.run.mjs'), 'throw new Error("check must not load overrides");\n');
+      expect(baton(dir, 'repo', 'init', '--check')).toContain('2 sourced courses hold no home copies (1 override, yours, not compared)');
+      const changed = 'throw new Error("check must not load stubs");\n';
+      writeFileSync(join(legs, 'implement.mjs'), changed);
+      copyFileSync(join(ROOT, '.baton/courses/standard-create-pr/legs/run-tests.mjs'), join(legs, 'run-tests.mjs'));
+
+      const log: string[] = [];
+      const workflow = join(dir, '.github/workflows/baton-sync.yml');
+      const workflowBefore = readFileSync(workflow);
+      const settings = join(dir, '.baton/baton.json');
+      const settingsBefore = readFileSync(settings);
+      expect(await initMain(['--check'], { root: dir, log: (line) => log.push(line) })).toBe(1);
+      expect(log).toEqual([
+        `baton: .baton/courses/create-pr/legs/implement.mjs differs from ${sourceOf('create-pr')}`,
+        `baton: .baton/courses/create-pr/legs/run-tests.mjs is an identical copy of ${sourceOf('create-pr')} — the sync refuses it; \`baton repo init --prune\` removes it`,
+      ]);
+      expect(readFileSync(join(legs, 'implement.mjs'), 'utf8')).toBe(changed);
+      expect(readFileSync(workflow)).toEqual(workflowBefore);
+      expect(readFileSync(settings)).toEqual(settingsBefore);
+      expect(baton(dir, 'repo', 'init', '--check', '--course', 'decision')).toContain('1 sourced course holds no home copies');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 30_000);
+
+  it('checks the committed standard-<id> source trees against what this checkout builds (S-BTN-105)', async () => {
+    expect(baton(ROOT, 'repo', 'init', '--check')).toContain(`${readdirSync(join(ROOT, '.baton/courses')).filter((d) => d.startsWith('standard-')).length} standard course source trees match this checkout's build`);
+    const dir = mkdtempSync(join(tmpdir(), 'baton-check-trees-'));
+    try {
+      const tree = join(dir, '.baton/courses/standard-decision');
+      mkdirSync(dirname(tree), { recursive: true });
+      execFileSync('cp', ['-R', join(ROOT, '.baton/courses/standard-decision'), tree]);
+      mkdirSync(join(dir, '.baton/courses/standard-nonesuch'));
+      const log: string[] = [];
+      const check = () => initMain(['--check'], { root: dir, log: (line) => log.push(line) });
+      expect(await check()).toBe(1);
+      expect(log).toEqual(['baton: .baton/courses/standard-nonesuch names no standard course this CLI builds']);
+      rmSync(join(dir, '.baton/courses/standard-nonesuch'), { recursive: true });
+      log.length = 0;
+      expect(await check()).toBe(0);
+      expect(log).toEqual(["baton: 1 standard course source tree matches this checkout's build"]);
+
+      writeFileSync(join(tree, 'course.json'), '{}\n');
+      rmSync(join(tree, 'sync.mjs'));
+      writeFileSync(join(tree, 'legs/extra.mjs'), '');
+      log.length = 0;
+      expect(await check()).toBe(1);
+      expect(log).toEqual([
+        "baton: .baton/courses/standard-decision/course.json differs from this checkout's build",
+        'baton: .baton/courses/standard-decision/legs/extra.mjs is not part of the source this checkout builds',
+        'baton: .baton/courses/standard-decision/sync.mjs is missing (this checkout builds it)',
+      ]);
+      expect(readFileSync(join(tree, 'course.json'), 'utf8')).toBe('{}\n');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 60_000);
+
+  it('asks for the pinned CLI instead of claiming drift against a different commit (S-BTN-105)', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'baton-check-pin-'));
+    try {
+      mkdirSync(join(dir, '.baton'));
+      const source = `github/${OTHER_PIN.replace('@', '/')}/create-pr`;
+      writeFileSync(join(dir, '.baton/baton.json'), JSON.stringify({ courses: [{ id: 'create-pr', version: 1, source }] }));
+      const log: string[] = [];
+      expect(await initMain(['--check'], { root: dir, log: (line) => log.push(line) })).toBe(1);
+      expect(log).toEqual([`baton: cannot check create-pr against ${source} — use the CLI at that pin if it supports --check; older pins cannot be checked until upgraded`]);
+      expect(existsSync(join(dir, '.baton/courses'))).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses to write or check pinned stubs from modified CLI build inputs (S-BTN-105)', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'baton-check-inputs-'));
+    try {
+      const checkout = join(dir, 'cli');
+      const home = join(dir, 'home');
+      execFileSync('git', ['clone', '-q', '--shared', ROOT, checkout]);
+      execFileSync('git', ['-C', checkout, 'remote', 'set-url', 'origin', `https://github.com/${SELF.slug}.git`]);
+      symlinkSync(join(ROOT, 'node_modules'), join(checkout, 'node_modules'), 'dir');
+      mkdirSync(home);
+      const run = (...args: string[]) => spawnSync('node', [join(checkout, 'cli/baton.mjs'), 'repo', 'init', ...args], {
+        cwd: home, encoding: 'utf8', env: { ...process.env, BATON_HOME: home },
+      });
+      expect(run('--course', 'decision').status).toBe(0);
+      expect(run('--check').stdout).toContain('1 sourced course holds no home copies');
+      const settings = join(home, '.baton/baton.json');
+      const before = readFileSync(settings, 'utf8');
+      const runtime = join(checkout, 'src/defaults/stub-runtime.ts');
+      writeFileSync(runtime, readFileSync(runtime, 'utf8').replaceAll('BATON_INSTRUCTIONS', 'EXAMPLE_INSTRUCTIONS'));
+      const refuses = () => {
+        for (const args of [['--course', 'decision', '--force', '--pin', PIN], ['--check']]) {
+          const result = run(...args);
+          expect(result.stderr).toContain('CLI checkout has modified build inputs');
+          expect(result.status).toBe(2); // CLI usage/error exit, not a reported drift finding.
+        }
+      };
+      refuses();
+      execFileSync('git', ['-C', checkout, 'update-index', '--assume-unchanged', 'src/defaults/stub-runtime.ts']);
+      expect(execFileSync('git', ['-C', checkout, 'status', '--porcelain', '--', 'src/defaults/stub-runtime.ts'], { encoding: 'utf8' })).toBe('');
+      refuses();
+      execFileSync('npm', ['run', 'build:cli'], { cwd: checkout, stdio: 'pipe', timeout: 30_000 });
+      expect(JSON.parse(readFileSync(join(checkout, 'dist/build.json'), 'utf8'))).toMatchObject({ commit: SELF.sha, dirty: true });
+      expect(readFileSync(settings, 'utf8')).toBe(before);
+      expect(existsSync(join(home, '.baton/courses/decision'))).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 60_000);
+
+  it('reports nested names and links in a sourced home even when their target bytes match (S-BTN-105)', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'baton-check-paths-'));
+    try {
+      baton(dir, 'repo', 'init', '--course', 'decision');
+      const source = sourceOf('decision');
+      const legs = join(dir, '.baton/courses/decision/legs');
+      const nested = join(legs, 'z/nested');
+      mkdirSync(nested, { recursive: true });
+      copyFileSync(join(ROOT, '.baton/courses/standard-decision/legs/prepare.mjs'), join(nested, 'prepare.mjs'));
+      const log: string[] = [];
+      const check = () => initMain(['--check'], { root: dir, log: (line) => log.push(line) });
+      expect(await check()).toBe(1);
+      expect(log).toEqual([`baton: .baton/courses/decision/legs/z/nested/prepare.mjs is not an override of ${source}, nor part of it`]);
+
+      rmSync(join(legs, 'z'), { recursive: true });
+      const target = join(dir, 'same-bytes.mjs');
+      writeFileSync(target, 'export async function run() {}\n');
+      symlinkSync(target, join(legs, 'prepare.run.mjs'));
+      log.length = 0;
+      expect(await check()).toBe(1);
+      expect(log).toEqual([`baton: .baton/courses/decision/legs/prepare.run.mjs is not a regular file — not an override of ${source}`]);
+
+      rmSync(join(legs, 'prepare.run.mjs'));
+      const moved = join(dir, 'moved-legs');
+      renameSync(legs, moved);
+      symlinkSync(moved, legs, 'dir');
+      log.length = 0;
+      expect(await check()).toBe(1);
+      expect(log).toEqual([`baton: .baton/courses/decision/legs is not a regular file — not an override of ${source}`]);
+
+      rmSync(legs);
+      const course = join(dir, '.baton/courses/decision');
+      renameSync(course, join(dir, 'moved-course'));
+      symlinkSync(join(dir, 'moved-course'), course, 'dir');
+      log.length = 0;
+      expect(await check()).toBe(1);
+      expect(log).toEqual([`baton: .baton/courses/decision is not a regular directory (pinned to ${source})`]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 30_000);
 
   it('writes the settings with every R-BTN-51 course field, the course file, the pinned workflow and the tickets directory', () => {
     const settings = JSON.parse(readFileSync(join(root, '.baton', 'baton.json'), 'utf8'));
     // B-83: a fresh scaffold names a real agent — the opencode command by default, never the
     // bare `echo` stub.
-    expect(settings.agent_command).toBe(HARNESS_AGENTS.opencode);
+    expect(settings.agent_command).toBe(selectHarness('opencode')?.agentCommand);
     // B-84: the command runs with no shell — it names the BATON_* environment the stub sets
     // (nothing expands), carries no redirection, and splits into the argv the stub spawns.
     expect(settings.agent_command).toContain('BATON_INSTRUCTIONS');
     expect(settings.agent_command).not.toMatch(/[<>|]/);
     expect(splitWords(settings.agent_command).at(0)).toBe('opencode');
     expect(settings).toMatchObject({ items: 'tickets', default_course: 'create-pr' });
-    expect(settings.courses).toEqual([{ id: 'create-pr', version: 1, min_runner_version: 1, skill: 'baton-create-pr', step_kinds: ['implement', 'run-tests', 'review', 'fix', 'adjudicate', 'merge', 'confirm'], branch_pattern: 'claude/{ticket}-*', protocol_files: [], source: sourceOf('create-pr') }]);
+    expect(settings.courses).toEqual([{ id: 'create-pr', version: 5, min_runner_version: 3, skill: 'baton-create-pr', step_kinds: ['implement', 'run-tests', 'review', 'fix', 'adjudicate', 'merge', 'confirm', 'archive', 'opened-by-hand', 'reviewed-by-hand', 'fixed-by-hand', 'merged-by-hand', 'reconcile'], branch_pattern: 'claude/{ticket}-*', protocol_files: [] }]);
     expect(JSON.parse(readFileSync(join(root, '.baton', 'courses', 'create-pr', 'course.json'), 'utf8'))).toEqual(JSON.parse(JSON.stringify(CREATE_PR_COURSE)));
     const workflow = readFileSync(join(root, '.github', 'workflows', 'baton-sync.yml'), 'utf8');
     expect(workflow).toBe(syncWorkflow(PIN));
@@ -647,7 +1040,7 @@ describe('baton repo init, through the built CLI', () => {
     const scaffold = (...flags: string[]): { dir: string; command: string; said: string } => {
       const dir = mkdtempSync(join(tmpdir(), 'baton-agent-'));
       gitInit(dir);
-      const said = baton(dir, 'repo', 'init', '--pin', PIN, ...flags);
+      const said = baton(dir, 'repo', 'init', '--own', '--pin', PIN, ...flags);
       const command = (JSON.parse(readFileSync(join(dir, '.baton', 'baton.json'), 'utf8')) as { agent_command: string }).agent_command;
       return { dir, command, said };
     };
@@ -656,7 +1049,7 @@ describe('baton repo init, through the built CLI', () => {
     // BATON_* environment (no shell expands it, B-84) — and init prints it for the unfamiliar.
     const def = scaffold();
     try {
-      expect(def.command).toBe(HARNESS_AGENTS.opencode);
+      expect(def.command).toBe(selectHarness('opencode')?.agentCommand);
       expect(def.command).toContain('--model zai-coding-plan/glm-5.3');
       expect(def.command).toContain('BATON_INSTRUCTIONS');
       expect(def.command).not.toMatch(/[<>|]/); // no redirection: the stub closes stdin itself
@@ -666,7 +1059,7 @@ describe('baton repo init, through the built CLI', () => {
     }
     const cc = scaffold('--agent', 'claude-code');
     try {
-      expect(cc.command).toBe(HARNESS_AGENTS['claude-code']);
+      expect(cc.command).toBe(selectHarness('claude-code')?.agentCommand);
       expect(cc.command).toContain('--permission-mode bypassPermissions');
       expect(cc.said).toContain(cc.command);
     } finally {
@@ -691,15 +1084,15 @@ describe('baton repo init, through the built CLI', () => {
     const old = scaffold('--agent-command', 'echo');
     try {
       const command = (): string => (JSON.parse(readFileSync(join(old.dir, '.baton', 'baton.json'), 'utf8')) as { agent_command: string }).agent_command;
-      const replaced = baton(old.dir, 'repo', 'init', '--pin', PIN);
-      expect(command()).toBe(HARNESS_AGENTS.opencode);
+      const replaced = baton(old.dir, 'repo', 'init', '--own', '--pin', PIN);
+      expect(command()).toBe(selectHarness('opencode')?.agentCommand);
       expect(replaced).toContain('no-op stub');
-      expect(replaced).toContain(HARNESS_AGENTS.opencode);
-      baton(old.dir, 'repo', 'init', '--pin', PIN, '--agent', 'claude-code');
-      expect(command()).toBe(HARNESS_AGENTS['claude-code']);
-      baton(old.dir, 'repo', 'init', '--pin', PIN, '--agent-command', 'mine');
+      expect(replaced).toContain(selectHarness('opencode')?.agentCommand);
+      baton(old.dir, 'repo', 'init', '--own', '--pin', PIN, '--agent', 'claude-code');
+      expect(command()).toBe(selectHarness('claude-code')?.agentCommand);
+      baton(old.dir, 'repo', 'init', '--own', '--pin', PIN, '--agent-command', 'mine');
       expect(command()).toBe('mine');
-      const kept = baton(old.dir, 'repo', 'init', '--pin', PIN);
+      const kept = baton(old.dir, 'repo', 'init', '--own', '--pin', PIN);
       expect(command()).toBe('mine');
       expect(kept).toContain('kept .baton/baton.json');
     } finally {
@@ -710,7 +1103,7 @@ describe('baton repo init, through the built CLI', () => {
   it('each leg stub imports only Node built-ins, so a scratch copy runs as the runner loads it', async () => {
     // A stub and its instructions per leg (R-BTN-131); the runner and the kit read only the .mjs.
     const files = readdirSync(join(root, '.baton', 'courses', 'create-pr', 'legs')).sort();
-    const legNames = ['adjudicate', 'fix', 'implement', 'merge', 'review', 'run-tests'];
+    const legNames = ['adjudicate', 'archive', 'fix', 'implement', 'merge', 'reconcile', 'review', 'run-tests'];
     expect(files).toEqual(legNames.flatMap((l) => [`${l}.md`, `${l}.mjs`]));
     const legs = files.filter((f) => f.endsWith('.mjs'));
     for (const leg of legs) {
@@ -722,10 +1115,10 @@ describe('baton repo init, through the built CLI', () => {
     // scaffold's agent_command is B-83's real opencode command — which must not run mid-test —
     // so the settings name a no-op, committed at the snapshot the stub reads.
     // B-94 (review round 1): every git and gh call the generated stub makes is bounded and
-    // non-interactive — the same bound and environment the close uses, injected at generation.
+    // non-interactive — the same bounded command helper the close uses.
     for (const leg of legs) {
       const text2 = readFileSync(join(root, '.baton', 'courses', 'create-pr', 'legs', leg), 'utf8');
-      expect(text2, leg).toContain('timeout: GIT_BOUND_MS');
+      expect(text2, leg).toContain('timeout: opts.timeoutMs ?? CLOSE_TIMEOUT_MS');
       expect(text2, leg).toContain('killSignal');
       expect(text2, leg).toContain('GIT_TERMINAL_PROMPT');
     }
@@ -748,7 +1141,7 @@ describe('baton repo init, through the built CLI', () => {
       expect(typeof stub.close).toBe('function');
       const ctx = { ticket: { id: 'A-1' }, checkout: root, snapshot };
       // An open PR on a branch the pattern maps to A-1: the stub returns its position.
-      writeFileSync(answer, JSON.stringify([{ number: 9, headRefName: 'claude/A-1-kit', headRefOid: '0123456789abcdef0123456789abcdef01234567' }]));
+      writeFileSync(answer, JSON.stringify([{ number: 9, headRefName: 'claude/A-1-kit', headRefOid: '0123456789abcdef0123456789abcdef01234567', isCrossRepository: false }]));
       expect(await stub.run(ctx)).toEqual({ reached: 'pr-open', next: 'run-tests' });
       // No such PR: the leg fails naming the pattern it looked for, not trusting exit 0 (B-81).
       writeFileSync(answer, '[]');
@@ -761,10 +1154,233 @@ describe('baton repo init, through the built CLI', () => {
       await expect(stub.run(explained)).rejects.toThrow(/no open PR on a branch matching claude\/A-1-\*[^\n]*; the agent's last output:\n {2}working\n {2}A-1 is already delivered on main, so no PR\n {2}provider said: insufficient balance$/);
       // A forge that cannot be read fails the leg naming that, too.
       writeFileSync(join(fakeBin, 'gh'), '#!/bin/sh\necho "no git remotes found" >&2\nexit 1\n');
-      await expect(stub.run(ctx)).rejects.toThrow('cannot verify A-1’s PR — no repository the ticket reads could be read: the checkout’s repository (gh pr list --state open --limit 300 --json number,headRefName,headRefOid failed: no git remotes found)');
+      await expect(stub.run(ctx)).rejects.toThrow('cannot verify A-1’s PR — no repository the ticket reads could be read: the checkout’s repository (gh pr list --state open --limit 300 --json number,headRefName,headRefOid,isCrossRepository,state failed: no git remotes found)');
     } finally {
       process.env.PATH = path;
       rmSync(scratch, { recursive: true, force: true });
+      rmSync(fakeBin, { recursive: true, force: true });
+      writeFileSync(settingsFile, scaffolded);
+      commitAll(root);
+    }
+  });
+
+  it('S-BTN-230, S-BTN-115: create-pr reads red CI, its successful retry and the posted verdict on Gitea without gh', async () => {
+    const settingsFile = join(root, '.baton', 'baton.json');
+    const scaffolded = readFileSync(settingsFile, 'utf8');
+    const bin = mkdtempSync(join(tmpdir(), 'baton-no-gh-'));
+    const realGit = execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim();
+    writeFileSync(join(bin, 'git'), `#!/bin/sh\nexec ${JSON.stringify(realGit)} "$@"\n`, { mode: 0o755 });
+    writeFileSync(join(bin, 'agent'), `#!/bin/bash
+if [ "$BATON_LEG" = fix ]; then
+  instructions=$(< "$BATON_INSTRUCTIONS")
+  [[ "$instructions" == *"registered forge's web UI"* ]] || exit 1
+  [[ "$instructions" != *"gh pr checks"* ]] || exit 1
+fi
+exit 0
+`, { mode: 0o755 });
+    const page = 'https://tea.example/o/r/pulls/9';
+    const fetchFake = vi.fn<typeof fetch>();
+    let exists = false, fork = true, green = false, merged = false, reused = false, permission = 200;
+    const branch = 'claude/A-1-kit';
+    const posted: unknown[] = [];
+    const pr = () => ({ number: 9, state: merged ? 'closed' : 'open', merged, html_url: page,
+      head: { label: branch, ref: merged ? 'refs/pull/9/head' : branch, sha: 'a'.repeat(40), repo_id: fork ? 18 : 17 }, base: { repo_id: 17 } });
+    fetchFake.mockImplementation(async (url, init) => {
+      expect(new Headers(init?.headers).get('Authorization')).toBe('token fake');
+      const u = new URL(String(url));
+      if (u.pathname.endsWith('/issues/9/comments')) {
+        expect(u.search).toBe(''); // Gitea 1.24 returns the entire discussion.
+        if (init?.method === 'POST') {
+          posted.push({ body: JSON.parse(String(init.body)).body, user: { id: 34, login: 'collaborator' }, created_at: '2026-11-22T22:00:00Z' });
+          return Response.json({ id: 12 });
+        }
+        return Response.json([...Array.from({ length: 51 }, () => ({})), ...posted]);
+      }
+      if (u.pathname.endsWith('/pulls/9/commits') || u.pathname.endsWith('/pulls/9/reviews')) return Response.json([]);
+      if (u.pathname.endsWith('/status')) return Response.json({ statuses: [{ status: green ? 'success' : 'failure' }] });
+      if (u.pathname.endsWith('/collaborators/collaborator/permission')) return permission === 200
+        ? Response.json({ permission: 'write', user: { id: 34 } })
+        : Response.json({ message: 'token does not have the required scope' }, { status: permission });
+      expect(u.pathname).toBe('/api/v1/repos/o/r/pulls');
+      if (!exists) return Response.json([]);
+      if (u.searchParams.get('page') === '1') return Response.json([{ ...pr(), number: 8, html_url: page.replace(/9$/, '8'), head: { ...pr().head, label: 'unrelated' } }], {
+        headers: { Link: '<https://other.example/never-follow>; rel="next"' },
+      });
+      return Response.json([pr(), ...(reused ? [{ ...pr(), number: 10, html_url: page.replace(/9$/, '10') }] : [])]);
+    });
+    try {
+      writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(scaffolded), agent_command: 'agent' }));
+      const snapshot = { sha: commitAll(root) };
+      vi.stubEnv('PATH', bin);
+      vi.stubEnv('GITEA_TOKEN', 'fake');
+      vi.stubGlobal('fetch', fetchFake);
+      const ctx = { ticket: { id: 'A-1' }, checkout: root, snapshot, forge_home: { forge: 'gitea' as const, path: 'o/r', webBase: 'https://tea.example/o/r' }, scope: ['o/r'] };
+      const stub = await load(join(root, '.baton', 'courses', 'create-pr', 'legs', 'implement.mjs'));
+      await expect(stub.run(ctx)).rejects.toThrow(/no open PR/);
+      exists = true;
+      await expect(stub.run(ctx)).rejects.toThrow(/no open PR/);
+      const [ticket] = ticketsMarkdown([{ path: 'A-1.md', text: '---\nid: A-1\nrepos: o/r\n---\n' }]).tickets;
+      const owns = (p: Pick<PrFact, 'number' | 'head' | 'repository' | 'sameRepository'>) => ticketOwns(ticket, p, ['claude/{ticket}-*'], 'o/home');
+      const lines: string[] = [];
+      const facts = () => forgeReader({ owns, log: (line) => lines.push(line), pushers: [] })(ctx.forge_home).facts({ tickets: ['A-1'] });
+      const place = async () => stationsPr({ repository: 'o/home', tickets: [ticket], facts: await facts(), closed: new Set(), graph: CREATE_PR_COURSE }).stations['A-1'];
+      expect(await place()).toMatchObject({ station: 'filed' });
+      expect(ticketOwns({ ...ticket, course: { prs: [page] } }, (await facts()).find((f) => f.number === 9)!, ['claude/{ticket}-*'], 'o/home')).toBe(true);
+      const explicit = join(bin, 'A-1-explicit.md');
+      writeFileSync(explicit, `---\nid: A-1\nprs: [${page}]\n---\n`);
+      expect(await stub.run({ ...ctx, ticket: { ...ctx.ticket, file: explicit } })).toEqual({ reached: 'pr-open', next: 'run-tests' });
+      fork = false;
+      expect(await stub.run(ctx)).toEqual({ reached: 'pr-open', next: 'run-tests' });
+      expect(await place()).toMatchObject({ next_leg: 'fix' });
+      const fix = await load(join(root, '.baton', 'courses', 'create-pr', 'legs', 'fix.mjs'));
+      const ticketFile = join(bin, 'A-1.md');
+      writeFileSync(ticketFile, '---\nid: A-1\nrepos: o/r\n---\n');
+      expect(await fix.run({ ...ctx, ticket: { ...ctx.ticket, file: ticketFile }, claim: { station: 'pr-open' } })).toEqual({ reached: 'fixed', next: 'run-tests' });
+      green = true;
+      expect(await place()).toMatchObject({ next_leg: 'review' });
+      const review = await load(join(root, '.baton', 'courses', 'create-pr', 'legs', 'review.mjs'));
+      await expect(review.close({ ...ctx, leg: 'review' }, { verdict: 'approve', pr: page })).resolves.toBe(`${page}#issuecomment-12`);
+      await expect(review.close({ ...ctx, leg: 'review' }, { verdict: 'approve', pr: page.replace('tea.example', 'other.example') })).rejects.toThrow(/registered forge repository/);
+      expect(await place()).toMatchObject({ station: 'reviewed', next_leg: 'merge' });
+      permission = 403;
+      expect(await place()).toMatchObject({ next_leg: 'review' });
+      expect(lines).toEqual([expect.stringContaining('baton.pushers-degraded')]);
+      permission = 503;
+      await expect(place()).rejects.toThrow('push permission read failed (503)');
+      permission = 200;
+      merged = true;
+      expect(await place()).toMatchObject({ station: 'merged' });
+      await expect(prClose({ ...ctx, leg: 'conclude' }, {}, (cmd, args) => {
+        if (cmd === 'git' && args[0] === 'branch') return branch;
+        throw new Error(`unexpected command ${cmd}`);
+      })).resolves.toBe(`${page}#issuecomment-12`);
+      reused = true;
+      await expect(prClose({ ...ctx, leg: 'conclude' }, { pr: page })).resolves.toBe(`${page}#issuecomment-12`);
+    } finally {
+      vi.unstubAllGlobals();
+      vi.unstubAllEnvs();
+      writeFileSync(settingsFile, scaffolded);
+      commitAll(root);
+      rmSync(bin, { recursive: true, force: true });
+    }
+  });
+
+  it.each([false, true])('archives only an owner-confirmed delivery, its status written by dibber (legacy truncation: %s, S-BTN-232, B-326)', async (legacy) => {
+    const dir = mkdtempSync(join(tmpdir(), 'baton-archive-fixture-'));
+    const env = { BATON_DIBBER: process.env.BATON_DIBBER, DIBBER_LOG: process.env.DIBBER_LOG };
+    const dibberLog = join(dir, 'dibber.log');
+    const dibberCalls = () => existsSync(dibberLog) ? readFileSync(dibberLog, 'utf8').trim().split('\n').map((l) => (JSON.parse(l) as string[]).slice(0, 2)) : [];
+    process.env.BATON_DIBBER = `node ${JSON.stringify(DIBBER_STAND_IN)}`;
+    process.env.DIBBER_LOG = dibberLog;
+    const origin = join(dir, 'origin');
+    const checkout = join(dir, 'checkout');
+    mkdirSync(checkout);
+    gitInit(checkout);
+    const g = (...a: string[]) => execFileSync('git', ['-C', checkout, ...a], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+    try {
+      execFileSync('git', ['init', '-q', '--bare', '-b', 'main', origin]);
+      g('remote', 'add', 'origin', origin);
+      mkdirSync(join(checkout, '.baton'));
+      writeFileSync(join(checkout, '.baton/baton.json'), JSON.stringify({ items: 'tickets', ticket_prefix: 'B' }));
+      const first = commitAll(checkout);
+      mkdirSync(join(checkout, 'tickets/nested'), { recursive: true });
+      const path = 'tickets/nested/B-1.md';
+      const archived = 'tickets/archive/nested/B-1.md';
+      writeFileSync(join(checkout, path), '---\nid: B-1\ntitle: Delivery\nstatus: available\n---\nSee [work](../../evidence.txt).\n');
+      const second = commitAll(checkout);
+      const commits = [first, second];
+      for (let i = 2; legacy && i < 16; i++) {
+        g('commit', '--allow-empty', '-qm', `Delivery ${i}`);
+        commits.push(g('rev-parse', 'HEAD'));
+      }
+      const head = commits.at(-1)!;
+      const commitList = `delivered at ${commits.map((x) => x.slice(0, 10)).join(', ')}`;
+      g('push', '-q', 'origin', 'HEAD:refs/heads/main');
+      const stub = await load(join(root, '.baton/courses/create-pr/legs/archive.mjs'));
+      const ctx = {
+        checkout, default_branch: 'main', snapshot: { sha: second }, ticket: { id: 'home:B-1', path },
+        leg: 'archive', claim: { station: 'confirmed' },
+        person_answer: { leg: 'confirm', option: 'confirmed', answered_by: 'owner:test', answered_at: 2 },
+        previous_attempts: [
+          { end_reason: 'released:cannot-finish:transient', legs: [] },
+          { end_reason: 'suspended:delivered', ended_at: 1, ended_at_sha: first,
+            detail: legacy ? `${commitList.slice(0, 199)}…` : `${commitList}: tests passed`,
+            legs: [{ leg: 'implement', reached: 'delivered', outcome: 'finished' }] },
+        ],
+      };
+      const result = await stub.run(ctx);
+      expect(decide(result, graphOf(CREATE_PR_COURSE), 'archive', 'confirmed')).toMatchObject({ kind: 'done', reached: 'archived' });
+      for (const answer of [undefined, { ...ctx.person_answer, option: 'filed' }, { ...ctx.person_answer, answered_by: 'sync' }]) {
+        await expect(Promise.resolve().then(() => stub.close({ ...ctx, person_answer: answer }, result))).rejects.toThrow('applied confirmed answer');
+        expect(g('ls-remote', 'origin', 'refs/heads/main')).toContain(head);
+      }
+      if (!legacy) {
+        // Dibber finds a ticket by its canonical name: a file named otherwise is refused, unwritten.
+        g('mv', path, 'tickets/nested/Delivery [1].MD');
+        const renamed = commitAll(checkout);
+        g('push', '-q', 'origin', 'HEAD:refs/heads/main');
+        await expect(Promise.resolve().then(() => stub.close({ ...ctx, ticket: { ...ctx.ticket, path: 'tickets/nested/Delivery [1].MD' } }, result))).rejects.toThrow('is not named B-1.md or B-1.mdx, so Dibber cannot write it');
+        expect(g('ls-remote', 'origin', 'refs/heads/main')).toContain(renamed);
+        g('revert', '--no-edit', renamed);
+        g('push', '-q', 'origin', 'HEAD:refs/heads/main');
+        writeFileSync(join(checkout, path), `---\nid: B-1\ntitle: Delivery\nstatus: available\nstatus: in-progress\n---\n`);
+        const duplicate = commitAll(checkout);
+        g('push', '-q', 'origin', 'HEAD:refs/heads/main');
+        await expect(Promise.resolve().then(() => stub.close(ctx, result))).rejects.toThrow('duplicate status fields');
+        expect(g('ls-remote', 'origin', 'refs/heads/main')).toContain(duplicate);
+        g('revert', '--no-edit', duplicate);
+        g('push', '-q', 'origin', 'HEAD:refs/heads/main');
+      }
+      const beforeArchive = g('rev-parse', 'HEAD');
+      const sha = await stub.close(ctx, result);
+      expect(g('ls-remote', 'origin', 'refs/heads/main')).toContain(sha);
+      expect(g('rev-parse', `${sha}^`)).toBe(beforeArchive);
+      const note = legacy ? '\n\nDelivery evidence incomplete: the legacy end record was truncated; unrecorded commits are not listed.' : '';
+      expect(g('log', '-1', '--format=%B', sha)).toBe(`tickets: B-1 done (archived)\n\nDelivered by: ${commits.slice(0, 15).join(', ')}${note}`);
+      // Dibber wrote the status, in place; git moved the file. Nothing else of it changed.
+      expect(g('show', `${sha}:${archived}`)).toBe('---\nid: B-1\ntitle: Delivery\nstatus: done\n---\nSee [work](../../evidence.txt).');
+      expect(dibberCalls()).toEqual([['done', 'B-1']]);
+      expect(g('--literal-pathspecs', 'ls-tree', sha, '--', path)).toBe('');
+      expect(g('rev-parse', 'HEAD')).toBe(beforeArchive);
+      g('switch', '--detach', sha);
+      writeFileSync(join(checkout, archived), `${g('show', `${sha}:${archived}`)}\nA later edit.\n`);
+      commitAll(checkout);
+      g('push', '-q', 'origin', 'HEAD:refs/heads/main');
+      expect(await stub.close(ctx, result)).toBe(sha);
+      expect(dibberCalls()).toEqual([['done', 'B-1']]);
+    } finally {
+      for (const [k, v] of Object.entries(env)) if (v === undefined) delete process.env[k]; else process.env[k] = v;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('the merge stub reports merged only when the forge shows the ticket\'s PR merged: an agent that exits 0 with the PR open fails the leg (R-BTN-131, S-BTN-231)', async () => {
+    const settingsFile = join(root, '.baton', 'baton.json');
+    const scaffolded = readFileSync(settingsFile, 'utf8');
+    // A gh answering `--state open` and `--state merged` from the files beside it.
+    const fakeBin = mkdtempSync(join(tmpdir(), 'baton-fakegh-'));
+    writeFileSync(join(fakeBin, 'gh'), '#!/bin/sh\ncase "$*" in *"--state open"*) cat "$(dirname "$0")/open" ;; *) cat "$(dirname "$0")/merged" ;; esac\n');
+    chmodSync(join(fakeBin, 'gh'), 0o755);
+    const path = process.env.PATH;
+    process.env.PATH = `${fakeBin}:${path}`;
+    try {
+      // The B-259 shape (2026-11-23): the agent refuses to merge over red CI, says so, exits 0.
+      writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(scaffolded), agent_command: 'sh -c "echo CI is red twice on S-BTN-41, not merging PR 9"' }));
+      const snapshot = { sha: commitAll(root) };
+      const stub = await load(join(root, '.baton', 'courses', 'create-pr', 'legs', 'merge.mjs'));
+      const ctx = { ticket: { id: 'A-1' }, leg: 'merge', checkout: root, snapshot };
+      writeFileSync(join(fakeBin, 'open'), JSON.stringify([{ number: 9, headRefName: 'claude/A-1-kit', headRefOid: '0123456789abcdef0123456789abcdef01234567', isCrossRepository: false }]));
+      writeFileSync(join(fakeBin, 'merged'), '[]');
+      await expect(stub.run(ctx)).rejects.toThrow(/the merge agent exited 0, but A-1’s PR #9 \(claude\/A-1-kit\) is still open — not merged[^\n]*; the agent's last output:\n {2}CI is red twice on S-BTN-41, not merging PR 9$/);
+      // Merged, none open: the position.
+      writeFileSync(join(fakeBin, 'open'), '[]');
+      writeFileSync(join(fakeBin, 'merged'), JSON.stringify([{ number: 9, headRefName: 'claude/A-1-kit', headRefOid: '0123456789abcdef0123456789abcdef01234567', isCrossRepository: false }]));
+      expect(await stub.run(ctx)).toEqual({ reached: 'merged', next: null });
+      // Nothing merged and nothing open: no merge to report.
+      writeFileSync(join(fakeBin, 'merged'), '[]');
+      await expect(stub.run(ctx)).rejects.toThrow(/no merged PR on a branch matching claude\/A-1-\* for ticket A-1/);
+    } finally {
+      process.env.PATH = path;
       rmSync(fakeBin, { recursive: true, force: true });
       writeFileSync(settingsFile, scaffolded);
       commitAll(root);
@@ -962,6 +1578,14 @@ describe('baton repo init, through the built CLI', () => {
       const ticketFile = join(scratch, 'A-1.md');
       writeFileSync(ticketFile, '---\nid: A-1\ntitle: Also in the monorepo\nrepos: [acme/monorepo]\n---\n');
       expect(await stub.run({ ...ctx('fixed', quiet), ticket: { id: 'A-1', file: ticketFile } })).toEqual({ reached: 'fixed', next: 'run-tests' });
+      // …but `repos:` naming the home itself is no other repository (2026-11-26: nearly every Baton
+      // ticket names `baton`, and a fix that pushed nothing looped with its gate for 30 runs).
+      writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(scaffolded), agent_command: 'true', repos: { home: 'acme/home' } }));
+      const homeNamed = { sha: commitAll(root) };
+      writeFileSync(ticketFile, '---\nid: A-1\ntitle: Names its home\nrepos: [home]\n---\n');
+      await expect(stub.run({ ...ctx('fixed', homeNamed), ticket: { id: 'A-1', home: 'home', file: ticketFile } })).rejects.toThrow('the fix leg pushed nothing');
+      writeFileSync(ticketFile, '---\nid: A-1\ntitle: Names its home and another\nrepos: [home, acme/monorepo]\n---\n');
+      expect(await stub.run({ ...ctx('fixed', homeNamed), ticket: { id: 'A-1', home: 'home', file: ticketFile } })).toEqual({ reached: 'fixed', next: 'run-tests' });
     } finally {
       g('reset', '-q', '--hard', main);
       g('remote', 'remove', 'origin');
@@ -1009,6 +1633,127 @@ describe('baton repo init, through the built CLI', () => {
       commitAll(root);
     }
   });
+
+  it('uses the course in force for the adjudication bound in both scaffolded and checked-in review stubs (S-BTN-43, B-324)', async () => {
+    const courseDir = join('.baton', 'courses', 'create-pr');
+    const courseFile = join(root, courseDir, 'course.json');
+    const defaultsFile = join(root, courseDir, 'review-defaults.json');
+    const settingsFile = join(root, '.baton', 'baton.json');
+    const before = readFileSync(courseFile, 'utf8');
+    const defaults = readFileSync(defaultsFile, 'utf8');
+    const settings = readFileSync(settingsFile, 'utf8');
+    const shipped = JSON.parse(readFileSync(join(ROOT, courseDir, 'course.json'), 'utf8'));
+    const bound = shipped.legs.review.max_runs;
+    const scratch = mkdtempSync(join(tmpdir(), 'baton-review-legs-'));
+    try {
+      const agent = join(scratch, 'agent.sh');
+      writeFileSync(agent, '#!/bin/sh\necho changes\n', { mode: 0o755 });
+      writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(settings), agent_command: agent }));
+      writeFileSync(courseFile, JSON.stringify(shipped));
+      const snapshot = { sha: commitAll(root) };
+      const omitted = structuredClone(shipped);
+      delete omitted.legs.review.max_runs;
+      writeFileSync(courseFile, JSON.stringify(omitted));
+      const withoutLimit = { sha: commitAll(root) };
+      writeFileSync(defaultsFile, JSON.stringify({ rounds: 5 }));
+      const alternateDefault = { sha: commitAll(root) };
+      const ctx = { ticket: { id: 'A-1' }, checkout: root, snapshot };
+      const changes = { reached: 'reviewed', next: 'fix', verdict: 'changes' };
+      const adjudicate = { ...changes, suspend: true, next: 'adjudicate' };
+      for (const [name, repo] of [['scaffolded', root], ['checked-in', ROOT]] as const) {
+        for (const leg of readdirSync(join(repo, courseDir, 'legs')).filter((f) => f.endsWith('.mjs'))) {
+          expect(readFileSync(join(repo, courseDir, 'legs', leg), 'utf8'), `${name} ${leg}`).not.toMatch(/\b(?:max_runs\s*:|DEFAULT_CREATE_PR_REVIEW_ROUNDS\s*=)\s*\d/);
+        }
+        const file = join(scratch, `${name}.mjs`);
+        copyFileSync(join(repo, courseDir, 'legs', 'review.mjs'), file);
+        const stub = await load(file);
+        expect(await stub.run({ ...ctx, run: 3 }), name).toEqual(changes);
+        expect(await stub.run({ ...ctx, run: bound - 1 }), name).toEqual(changes);
+        expect(await stub.run({ ...ctx, run: bound }), name).toEqual(adjudicate);
+        expect(await stub.run({ ...ctx, snapshot: withoutLimit, run: 3 }), name).toEqual(adjudicate);
+        expect(await stub.run({ ...ctx, snapshot: alternateDefault, run: 4 }), name).toEqual(changes);
+        expect(await stub.run({ ...ctx, snapshot: alternateDefault, run: 5 }), name).toEqual(adjudicate);
+        for (const graph of [CREATE_PR_COURSE, graphOf(CREATE_PR_COURSE)]) {
+          expect(await stub.run({ ...ctx, graph, run: 3 }), name).toEqual(adjudicate);
+        }
+      }
+    } finally {
+      writeFileSync(courseFile, before);
+      writeFileSync(defaultsFile, defaults);
+      writeFileSync(settingsFile, settings);
+      commitAll(root);
+      rmSync(scratch, { recursive: true, force: true });
+    }
+  });
+
+  it('sync, signed review and comparison replay agree on graph-only updates (S-BTN-43, S-BTN-219, S-BTN-48, B-324)', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'baton-signed-review-'));
+    const scratch = mkdtempSync(join(tmpdir(), 'baton-signed-fixtures-'));
+    try {
+      gitInit(dir);
+      const git = (...a: string[]) => execFileSync('git', ['-C', dir, ...a], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+      const key = join(scratch, 'owner');
+      execFileSync('ssh-keygen', ['-q', '-t', 'ed25519', '-N', '', '-f', key]);
+      const public_key = readFileSync(`${key}.pub`, 'utf8').trim();
+      const fingerprint = execFileSync('ssh-keygen', ['-lf', `${key}.pub`], { encoding: 'utf8' }).split(' ')[1];
+      const sign = (message: string) => {
+        git('add', '-A');
+        git('-c', 'gpg.format=ssh', '-c', `user.signingkey=${key}`, 'commit', '-S', '-qm', message);
+        return git('rev-parse', 'HEAD');
+      };
+      const agent = join(scratch, 'agent.sh');
+      writeFileSync(agent, '#!/bin/sh\necho changes\n', { mode: 0o755 });
+      await initMain(['--own', '--agent-command', agent], { root: dir, log: () => {} });
+      const settingsFile = join(dir, '.baton', 'baton.json');
+      const settings = JSON.parse(readFileSync(settingsFile, 'utf8'));
+      delete settings.courses[0].source;
+      writeFileSync(settingsFile, JSON.stringify(settings));
+      const courseDir = join('.baton', 'courses', 'create-pr');
+      const courseFile = join(dir, courseDir, 'course.json');
+      const graph = JSON.parse(readFileSync(courseFile, 'utf8'));
+      const original = sign('scaffold');
+      graph.legs.review.max_runs = 8;
+      writeFileSync(courseFile, JSON.stringify(graph));
+      const updated = sign('change only the graph');
+      const facts = join(scratch, 'facts.json');
+      writeFileSync(facts, '[]');
+      const posted: Record<string, any>[] = [];
+      const transport: Transport = async (req) => {
+        const path = new URL(req.url).pathname;
+        if (path.endsWith('/observation')) return Response.json({ sha: null, observation: 1, signing_keys: [{ public_key, fingerprint }], require_signed_control: true });
+        if (path.endsWith('/head')) return Response.json({ sha: null });
+        posted.push(await req.json() as Record<string, unknown>);
+        return Response.json({ outcome: 'accepted' });
+      };
+      expect(await syncMain({ root: dir, url: 'https://baton.test', factsFile: facts, token: 'test', transport, log: () => {} })).toBe(0);
+      expect(posted[0]).toMatchObject({
+        registry: [{ course: { legs: { review: { max_runs: 8 } } } }],
+        control: { groups: { course: { read: original, key: fingerprint } } },
+      });
+      const stub = await load(join(dir, courseDir, 'legs', 'review.mjs'));
+      const ctx = { ticket: { id: 'A-1' }, checkout: dir, snapshot: { sha: updated }, signed_control: { course: posted[0].control.groups.course.read } };
+      expect(await stub.run({ ...ctx, run: 3 })).toMatchObject({ next: 'fix' });
+      expect(await stub.run({ ...ctx, run: 8 })).toMatchObject({ suspend: true, next: 'adjudicate' });
+
+      git('update-ref', 'refs/baton/test/default', updated);
+      const bearer = join(scratch, 'replay.key');
+      writeFileSync(bearer, `bak_${'0'.repeat(16)}_${'0'.repeat(64)}`);
+      const report = join(scratch, 'report.json');
+      const code = await replayMain(['test:A-1', 'review', '-i', bearer, '--home', dir, '--report', report, '--against', updated], {
+        transport: async () => Response.json({ default_branch: 'main', runs: [{ run: 3, claim: 1, started_at: 1, snapshot_sha: original, course: 'create-pr', inputs: [] }] }),
+        log: () => {},
+      });
+      expect(code).toBe(0);
+      expect(JSON.parse(readFileSync(report, 'utf8'))).toMatchObject({
+        checked_out_at: original,
+        ran: { ok: true, result: { suspend: true, next: 'adjudicate' } },
+        against: { same: false, ran: { ok: true, result: { next: 'fix' } } },
+      });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(scratch, { recursive: true, force: true });
+    }
+  }, 120_000);
 
   it('the stub runs BATON_AGENT_COMMAND — what baton run --harness chose — when the snapshot’s settings name no agent_command; the settings win; neither names the fix (B-83)', async () => {
     const agent = join(root, 'agent.sh');
@@ -1105,7 +1850,7 @@ describe('baton repo init, through the built CLI', () => {
     // gh the verification's own test uses; the spawn facts it reads are the agent's, not gh's.
     const fakeBin = mkdtempSync(join(tmpdir(), 'baton-fakegh-'));
     writeFileSync(join(fakeBin, 'gh'), '#!/bin/sh\ncat "$(dirname "$0")/answer"\n');
-    writeFileSync(join(fakeBin, 'answer'), JSON.stringify([{ number: 4, headRefName: 'claude/B-1-kit', headRefOid: '0123456789abcdef0123456789abcdef01234567' }]));
+    writeFileSync(join(fakeBin, 'answer'), JSON.stringify([{ number: 4, headRefName: 'claude/B-1-kit', headRefOid: '0123456789abcdef0123456789abcdef01234567', isCrossRepository: false }]));
     chmodSync(join(fakeBin, 'gh'), 0o755);
     const path = process.env.PATH;
     process.env.PATH = `${fakeBin}:${path}`;
@@ -1419,7 +2164,7 @@ describe('baton repo init, through the built CLI', () => {
     // gh the spawn-contract test uses; the conclusion changes nothing about the gate.
     const fakeBin = mkdtempSync(join(tmpdir(), 'baton-fakegh-'));
     writeFileSync(join(fakeBin, 'gh'), '#!/bin/sh\ncat "$(dirname "$0")/answer"\n');
-    writeFileSync(join(fakeBin, 'answer'), JSON.stringify([{ number: 7, headRefName: 'claude/B-1-b108', headRefOid: '0123456789abcdef0123456789abcdef01234567' }]));
+    writeFileSync(join(fakeBin, 'answer'), JSON.stringify([{ number: 7, headRefName: 'claude/B-1-b108', headRefOid: '0123456789abcdef0123456789abcdef01234567', isCrossRepository: false }]));
     chmodSync(join(fakeBin, 'gh'), 0o755);
     const path = process.env.PATH;
     const err = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
@@ -1447,6 +2192,87 @@ describe('baton repo init, through the built CLI', () => {
       commitAll(root);
     }
   }, 60_000);
+
+  it.each(['implement', 'fix'])('%s: a joinable run survives idle, but stops on release or the hard ceiling without using partial output (S-BTN-222)', async (leg) => {
+    const settingsFile = join(root, '.baton', 'baton.json');
+    const before = readFileSync(settingsFile, 'utf8');
+    const stub = join(root, '.baton', 'courses', 'create-pr', 'legs', `${leg}.mjs`);
+    const restore = shrinkBounds(stub, 500, 2_500);
+    const pidFile = join(root, 'asking.pid');
+    const agent = join(root, 'asking.mjs');
+    writeFileSync(agent, `import { writeFileSync } from 'node:fs';
+console.log('work pushed, awaiting owner');
+writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));
+setInterval(() => {}, 60_000);
+`);
+    try {
+      writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(before), agent_command: `"${process.execPath}" "${agent}"` }));
+      const snapshot = { sha: commitAll(root) };
+      const run = (await load(stub)).run;
+      const ctx = { ticket: { id: 'B-1' }, checkout: root, snapshot, can_interact: true };
+      const abort = new AbortController();
+      // Release well after the idle cutoff, but before the ceiling. A stub that incorrectly
+      // takes the quiet path would settle before the release, not with the release reason.
+      const release = setTimeout(() => abort.abort('leg-timeout'), 1_250);
+      try {
+        await expect(run({ ...ctx, signal: abort.signal })).rejects.toThrow('the agent was stopped: leg-timeout');
+      } finally {
+        clearTimeout(release);
+      }
+      expect(await agentGone(pidFile)).toBe(true);
+      rmSync(pidFile);
+      await expect(run(ctx)).rejects.toThrow('the agent was stopped: the leg reached its hard ceiling');
+      expect(await agentGone(pidFile)).toBe(true);
+    } finally {
+      restore();
+      writeFileSync(settingsFile, before);
+      rmSync(agent, { force: true });
+      rmSync(pidFile, { force: true });
+      commitAll(root);
+    }
+  }, 30_000);
+
+  it('a joinable run fails at the ceiling even when a descendant holds the exited wrapper’s pipes (S-BTN-222)', async () => {
+    const settingsFile = join(root, '.baton', 'baton.json');
+    const before = readFileSync(settingsFile, 'utf8');
+    const stub = join(root, '.baton', 'courses', 'create-pr', 'legs', 'implement.mjs');
+    const restore = shrinkBounds(stub, 500, 1_500);
+    const wrapper = join(root, 'pipe-wrapper.mjs');
+    const release = join(root, 'pipe-release');
+    const closed = join(root, 'pipe-closing');
+    const pidFile = join(root, 'pipe-wrapper.pid');
+    const descendant = `
+import { existsSync, writeFileSync } from 'node:fs';
+const limit = Date.now() + 5000;
+const watch = setInterval(() => {
+  if (Date.now() < limit && !existsSync(${JSON.stringify(release)})) return;
+  clearInterval(watch);
+  writeFileSync(${JSON.stringify(closed)}, 'closing');
+}, 25);`;
+    writeFileSync(wrapper, `import { spawn } from 'node:child_process';
+import { writeFileSync } from 'node:fs';
+spawn(process.execPath, ['--input-type=module', '-e', ${JSON.stringify(descendant)}], { stdio: 'inherit' }).unref();
+writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));
+`);
+    try {
+      writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(before), agent_command: `"${process.execPath}" "${wrapper}"` }));
+      const snapshot = { sha: commitAll(root) };
+      const run = (await load(stub)).run;
+      await expect(run({ ticket: { id: 'B-1' }, checkout: root, snapshot, can_interact: true }))
+        .rejects.toThrow('the agent was stopped: the leg reached its hard ceiling');
+      expect(await agentGone(pidFile)).toBe(true);
+      expect(existsSync(closed), 'failure does not wait for inherited pipes to close').toBe(false);
+    } finally {
+      if (existsSync(pidFile)) {
+        writeFileSync(release, 'release');
+        await vi.waitFor(() => expect(existsSync(closed)).toBe(true), { timeout: 5000 });
+      }
+      restore();
+      writeFileSync(settingsFile, before);
+      for (const file of [wrapper, release, closed, pidFile]) rmSync(file, { force: true });
+      commitAll(root);
+    }
+  }, 30_000);
 
   it('the stub prepends the agent_wrapper — the host’s BATON_AGENT_WRAPPER over the file — and the example wrapper passes the answer through with a byte-identical log (B-95)', async () => {
     // A wrapper sees the whole leg command as its arguments. Here it hands them to a reporter
@@ -1478,7 +2304,7 @@ describe('baton repo init, through the built CLI', () => {
       const fakeBin = mkdtempSync(join(tmpdir(), 'baton-fakegh-'));
       fakeGh = fakeBin;
       writeFileSync(join(fakeBin, 'gh'), '#!/bin/sh\ncat "$(dirname "$0")/answer"\n');
-      writeFileSync(join(fakeBin, 'answer'), JSON.stringify([{ number: 5, headRefName: 'claude/A-1-wrapper', headRefOid: '0123456789abcdef0123456789abcdef01234567' }]));
+      writeFileSync(join(fakeBin, 'answer'), JSON.stringify([{ number: 5, headRefName: 'claude/A-1-wrapper', headRefOid: '0123456789abcdef0123456789abcdef01234567', isCrossRepository: false }]));
       chmodSync(join(fakeBin, 'gh'), 0o755);
       process.env.PATH = `${fakeBin}:${path}`;
       unsetRemote = () => execFileSync('git', ['-C', root, 'remote', 'remove', 'origin'], { stdio: 'ignore' });
@@ -1639,14 +2465,14 @@ describe('baton repo init, through the built CLI', () => {
       // --force rewrites the course's files and its own entry; the repository's settings stay.
       const edited = JSON.parse(readFileSync(settingsFile, 'utf8'));
       writeFileSync(settingsFile, JSON.stringify({ ...edited, agent_command: 'my-agent', courses: [{ ...edited.courses[0], version: 9 }, { id: 'bug-report', version: 1 }] }));
-      baton(root, 'repo', 'init', '--pin', PIN, '--force');
+      baton(root, 'repo', 'init', '--own', '--pin', PIN, '--force');
       const forced = JSON.parse(readFileSync(settingsFile, 'utf8'));
       expect(forced).toMatchObject({ repos: { docs: 'o/docs' }, agent_command: 'my-agent', default_course: 'create-pr' });
-      expect(forced.courses.map((c: { id: string; version: number }) => [c.id, c.version])).toEqual([['create-pr', 1], ['bug-report', 1]]);
+      expect(forced.courses.map((c: { id: string; version: number }) => [c.id, c.version])).toEqual([['create-pr', 5], ['bug-report', 1]]);
       expect(readFileSync(stub, 'utf8')).not.toContain('// edited by hand');
     } finally {
       writeFileSync(settingsFile, settings);
-      baton(root, 'repo', 'init', '--pin', PIN, '--force');
+      baton(root, 'repo', 'init', '--own', '--pin', PIN, '--force');
       commitAll(root);
     }
   }, 120_000);
@@ -1681,7 +2507,6 @@ describe('baton repo init, through the built CLI', () => {
   it('--eject stations writes a standalone function returning {stations, markers, course_data}, the default’s answer — for a course that names no source', async () => {
     const settingsFile = join(root, '.baton', 'baton.json');
     // A sourced course is placed by its source's function: ejecting it is refused (B-33).
-    expect(() => baton(root, 'repo', 'init', '--eject', 'stations')).toThrow(/names a source, whose station function places its tickets/);
     const settings = JSON.parse(readFileSync(settingsFile, 'utf8'));
     writeFileSync(settingsFile, JSON.stringify({ ...settings, courses: settings.courses.map(({ source: _source, ...c }: { source?: string }) => c) }, null, 2));
     baton(root, 'repo', 'init', '--eject', 'stations');
@@ -1895,10 +2720,56 @@ describe('githubFacts (R-BTN-96’s GitHub adapter) against a recorded GitHub', 
     vi.unstubAllGlobals();
     calls.length = 0;
   });
-  const pr = (number: number, head: string, state: string, merged = false) => ({ number, head: { ref: head, sha: `s${number}` }, state, merged_at: merged ? '2026-10-01T00:00:00Z' : null, html_url: `https://github.com/o/r/pull/${number}` });
+  const pr = (number: number, head: string, state: string, merged = false) => ({ number, head: { ref: head, sha: `s${number}`, repo: { id: 17 } }, base: { repo: { id: 17 } }, state, merged_at: merged ? '2026-10-01T00:00:00Z' : null, html_url: `https://github.com/o/r/pull/${number}` });
   const who = (author_association: string, body: string, at: string, login = 'x') => ({ user: { login }, author_association, body, created_at: at, submitted_at: at, state: 'COMMENTED' });
   /** R-BTN-139: what the forge says `login` may do in `repo` — the read that decides a verdict's author. */
   const may = (repo: string, login: string, permission: string) => ({ [`/repos/${repo}/collaborators/${login}/permission`]: { permission } });
+
+  it('uses GitHub ref activity, not the committer, to identify a current-head push (S-BTN-309)', async () => {
+    const at = '2026-10-04T00:00:00Z';
+    const ref = 'refs/heads/work/A-1';
+    const pull = { ...pr(1, 'work/A-1', 'open'), user: { login: 'author' },
+      head: { ref: 'work/A-1', sha: 's1', repo: { id: 1 } }, base: { ref: 'main', repo: { id: 1 } } };
+    serve({
+      '/repos/o/r': { default_branch: 'main' },
+      '/repos/o/r/pulls?state=all': [pull],
+      '/repos/o/r/commits/s1/check-runs': { check_runs: [] },
+      '/repos/o/r/pulls/1/commits': [{ sha: 's1', committer: { login: 'not-the-pusher' }, commit: { committer: { date: '2026-10-01T00:00:00Z' } } }],
+      '/repos/o/r/pulls/1/reviews': [],
+      '/repos/o/r/issues/1/comments': [who('MEMBER', '<!-- baton:verdict approve -->', '2026-10-05T00:00:00Z')],
+      [`/repos/o/r/activity?ref=${encodeURIComponent(ref)}&direction=desc`]: [{ ref, after: 's1', actor: { login: 'pushed-branch' }, timestamp: at, activity_type: 'push' }],
+      ...may('o/r', 'x', 'write'), ...may('o/r', 'author', 'write'),
+    });
+    const [fact] = await githubFacts(dir, () => {}, () => true, [], { outside: { sha: null, observed_at: Date.parse('2026-10-06T00:00:00Z'),
+      head_accepted_at: null, runner_pushers: ['runner'], positions: {}, verdict_refs: {}, claim_prs: {}, claim_shas: {}, merge_refs: {} } });
+    expect(fact.headPush).toEqual({ actor: 'pushed-branch', at: Date.parse(at), changesWork: false });
+    expect(fact.pushedAt).toBe(Date.parse('2026-10-01T00:00:00Z'));
+  });
+
+  it('S-BTN-48: emits closing outputs only from pusher-verified comments on the ticket PR', async () => {
+    const base = pr(1, 'claude/A-1-x', 'open');
+    const body = outputLine({ ticket: { id: 'docs:A-1' }, leg: 'review', run_id: 'r_test', claim: { nonce: 'nonce' } },
+      [{ name: 'report', schema: 'std:git.commit@1', value: { sha: 'a'.repeat(40) } }])!;
+    const comment = (id: number, login: string) => ({ ...who('MEMBER', body, '2026-10-04T00:00:00Z', login), html_url: `${base.html_url}#issuecomment-${id}` });
+    serve({
+      '/repos/o/r/pulls?state=all': [{ ...base, head: { ...base.head, repo: { id: 10 } }, base: { repo: { id: 10 } } }],
+      '/repos/o/r/issues/1/comments': [...Array.from({ length: 100 }, () => who('NONE', 'unrelated', '2026-10-04T00:00:00Z', 'outsider')), comment(1, 'x'), comment(2, 'outsider'), { ...comment(3, 'x'), last_edited_at: '2026-10-05T00:00:00Z' }],
+      ...may('o/r', 'x', 'write'), ...may('o/r', 'outsider', 'read'),
+    });
+    const outputEvidence: NonNullable<Parameters<typeof githubFacts>[4]>['outputEvidence'] = [];
+    await githubFacts(dir, () => {}, () => true, [], { outputEvidence, ownsOutput: (id, p) => id === 'A-1' && p.number === 1 && p.sameRepository === true });
+    expect(outputEvidence).toEqual([expect.objectContaining({ type: 'std:git.output@1', ticket: 'A-1', ref: `${base.html_url}#issuecomment-1` })]);
+  });
+
+  it('S-BTN-48: successive observations post beyond a full historical output prefix', () => {
+    const confirmation = [{ type: 'std:git.evidence@1', ticket: 'A-1', value: {} }];
+    const outputs = Array.from({ length: 101 }, (_, i) => ({ type: 'std:git.output@1', ticket: 'A-1', ref: `ref-${i}`, value: {} }));
+    const first = syncAttestationBatch(confirmation, outputs, 1);
+    const second = syncAttestationBatch(confirmation, outputs, 2);
+    expect(first).toHaveLength(100);
+    expect(first).not.toContain(outputs.at(-1));
+    expect(second).toEqual([...confirmation, ...outputs.slice(99)]);
+  });
 
   it('pages the PR list, reads detail only for PRs a live ticket owns — closed unmerged ones too — and keeps verdicts from people with a say', async () => {
     serve({
@@ -2071,7 +2942,7 @@ describe('githubFacts (R-BTN-96’s GitHub adapter) against a recorded GitHub', 
       '/repos/o/r/collaborators/x/permission', '/repos/o/r/collaborators/y/permission', 'graphql o/r 26,27,28,29,30']);
     expect(facts).toHaveLength(31);
     expect(facts[0]).toEqual({
-      number: 1, head: 'claude/A-1-x', state: 'open', repository: 'o/r', url: 'https://github.com/o/r/pull/1', commits: expect.any(Array),
+      number: 1, head: 'claude/A-1-x', state: 'open', repository: 'o/r', sameRepository: true, url: 'https://github.com/o/r/pull/1', commits: expect.any(Array),
       checks: ['success', 'timed_out', null], pushes: [Date.parse('2026-10-02T00:00:00Z')], pushedAt: Date.parse('2026-10-02T00:00:00Z'),
       reviews: [
         { author: 'x', state: 'APPROVED', submittedAt: Date.parse('2026-10-03T00:00:00Z'), body: '<!-- baton:verdict approve -->' },
@@ -2080,10 +2951,10 @@ describe('githubFacts (R-BTN-96’s GitHub adapter) against a recorded GitHub', 
     });
     // An owned PR with no checks, commits or reviews; an unowned PR from the list alone.
     expect(facts[1]).toMatchObject({ checks: [], pushes: [], pushedAt: 0, reviews: [] });
-    expect(facts[30]).toEqual({ number: 99, head: 'feature/other', state: 'open', pushedAt: 0, checks: [], reviews: [], repository: 'o/r', url: 'https://github.com/o/r/pull/99' });
+    expect(facts[30]).toEqual({ number: 99, head: 'feature/other', state: 'open', sameRepository: true, pushedAt: 0, checks: [], reviews: [], repository: 'o/r', url: 'https://github.com/o/r/pull/99' });
   });
 
-  it('reads over REST, in full, a connection that overflows its first page, and the checks of a head the batch read at another commit (B-35)', async () => {
+  it('pages comments with their edit metadata and reads checks of a head the batch read at another commit (B-35)', async () => {
     const many = Array.from({ length: 150 }, (_, i) => who('MEMBER', `c${i}`, '2026-10-05T00:00:00Z'));
     serve({
       '/repos/o/r/pulls?state=all': [pr(1, 'claude/A-1-x', 'open')],
@@ -2094,14 +2965,14 @@ describe('githubFacts (R-BTN-96’s GitHub adapter) against a recorded GitHub', 
     });
     const [fact] = await githubFacts(dir, () => {}, () => true);
     expect(fact.reviews.map((r) => r.body)).toEqual(many.map((c) => c.body));
-    expect(calls).toEqual(['/repos/o/r/pulls?state=all', 'graphql o/r 1', '/repos/o/r/issues/1/comments', '/repos/o/r/issues/1/comments?page=2', '/repos/o/r/collaborators/x/permission']);
+    expect(calls).toEqual(['/repos/o/r/pulls?state=all', 'graphql o/r 1', 'graphql o/r comments 1 after 100', '/repos/o/r/collaborators/x/permission']);
     // The list's head moved on after the batch read the PR: its checks are read at the list's head.
     const routes = { '/repos/o/r/pulls?state=all': [pr(1, 'claude/A-1-x', 'open')], '/repos/o/r/commits/s1/check-runs': { check_runs: [{ conclusion: 'failure' }] } };
     const real = githubFake(routes);
     vi.stubGlobal('fetch', async (url: string, init?: { body?: string }) => {
       const res = await real(url, init);
       if (!url.endsWith('/graphql')) return res;
-      const body = await res.json();
+      const body: { data: { repository: { p1: { head: { nodes: { commit: unknown }[] } } } } } = await res.json();
       body.data.repository.p1.head.nodes[0].commit = { oid: 'older', checkSuites: null };
       return Response.json(body);
     });
@@ -2229,7 +3100,7 @@ describe('githubFacts (R-BTN-96’s GitHub adapter) against a recorded GitHub', 
     const [fact] = await githubFacts(dir, () => {}, () => true);
     // A deleted user's verdict cannot be asked of the forge, so it does not count (R-BTN-139).
     expect(fact).toEqual({
-      number: 4, head: 'claude/A-4-x', state: 'open', repository: 'o/r', url: 'https://github.com/o/r/pull/4', commits: expect.any(Array),
+      number: 4, head: 'claude/A-4-x', state: 'open', repository: 'o/r', sameRepository: true, url: 'https://github.com/o/r/pull/4', commits: expect.any(Array),
       checks: ['success', null, 'action_required'],
       pushes: [Date.parse('2026-10-07T10:00:00Z'), Date.parse('2026-10-07T09:00:00Z')], pushedAt: Date.parse('2026-10-07T10:00:00Z'),
       reviews: [
@@ -2301,8 +3172,8 @@ describe('baton repo init --course, the standard courses (R-BTN-131)', () => {
   beforeAll(() => {
     root = mkdtempSync(join(tmpdir(), 'baton-courses-'));
     gitInit(root);
-    baton(root, 'repo', 'init', '--pin', PIN);
-    for (const c of ['bug-report', 'decision', 'review-pr', 'draft-ticket', 'spec-to-tickets']) baton(root, 'repo', 'init', '--course', c, '--pin', PIN);
+    baton(root, 'repo', 'init', '--own', '--pin', PIN);
+    for (const c of ['bug-report', 'decision', 'review-pr', 'draft-ticket', 'spec-to-tickets', 'create-spec']) baton(root, 'repo', 'init', '--own', '--course', c, '--pin', PIN);
     commitAll(root);
   }, 240_000);
   afterAll(() => rmSync(root, { recursive: true, force: true }));
@@ -2310,10 +3181,10 @@ describe('baton repo init --course, the standard courses (R-BTN-131)', () => {
   it('a second course joins the first: its entry is added to baton.json, the default stays, its files are written', () => {
     const settings = JSON.parse(readFileSync(join(root, '.baton', 'baton.json'), 'utf8'));
     expect(settings.default_course).toBe('create-pr');
-    expect(settings.courses.map((c: { id: string }) => c.id)).toEqual(['create-pr', 'bug-report', 'decision', 'review-pr', 'draft-ticket', 'spec-to-tickets']);
-    expect(settings.courses[1]).toEqual({ id: 'bug-report', version: 1, min_runner_version: 1, skill: 'baton-bug-report', step_kinds: ['trace', 'origin', 'dedupe', 'file', 'fold', 'prevent'], branch_pattern: 'claude/{ticket}-*', protocol_files: [], source: sourceOf('bug-report') });
-    expect(settings.courses[5]).toEqual({ id: 'spec-to-tickets', version: 1, min_runner_version: 1, skill: 'baton-spec-to-tickets', step_kinds: ['decompose', 'check', 'file'], branch_pattern: 'claude/{ticket}-*', protocol_files: [], source: sourceOf('spec-to-tickets') });
-    for (const [course, legs] of [['bug-report', 6], ['decision', 2], ['review-pr', 2], ['draft-ticket', 3], ['spec-to-tickets', 3]] as const) {
+    expect(settings.courses.map((c: { id: string }) => c.id)).toEqual(['create-pr', 'bug-report', 'decision', 'review-pr', 'draft-ticket', 'spec-to-tickets', 'create-spec']);
+    expect(settings.courses[1]).toEqual({ id: 'bug-report', version: 1, min_runner_version: 1, skill: 'baton-bug-report', step_kinds: ['trace', 'origin', 'dedupe', 'file', 'fold', 'prevent'], branch_pattern: 'claude/{ticket}-*', protocol_files: [] });
+    expect(settings.courses[5]).toEqual({ id: 'spec-to-tickets', version: 1, min_runner_version: 1, skill: 'baton-spec-to-tickets', step_kinds: ['decompose', 'check', 'file'], branch_pattern: 'claude/{ticket}-*', protocol_files: [] });
+    for (const [course, legs] of [['bug-report', 6], ['decision', 2], ['review-pr', 3], ['draft-ticket', 3], ['spec-to-tickets', 3]] as const) {
       expect(readdirSync(join(root, '.baton', 'courses', course, 'legs')).length, course).toBe(legs * 2);
     }
     expect(JSON.parse(readFileSync(join(root, '.baton', 'courses', 'bug-report', 'course.json'), 'utf8')).start).toBe('reported');
@@ -2370,10 +3241,6 @@ describe('baton repo init --course, the standard courses (R-BTN-131)', () => {
       expect(await conclude.run({ ticket: { id: 'R-1' }, checkout: root, snapshot })).toEqual({ reached: 'concluded', next: null, pr: 'https://github.com/o/site/pull/7' });
       process.env.OUTCOME = 'summary posted';
       expect(await conclude.run({ ticket: { id: 'R-1' }, checkout: root, snapshot })).toEqual({ reached: 'concluded', next: null });
-      // A marker course's stub closes through markerClose; a PR course's through prClose (the
-      // stub wraps either to hand the default branch in, so the source is what names it).
-      expect(stubSourceOf(root, 'bug-report', 'trace')).toContain('closeTicket(closeCtx2(');
-      expect(stubSourceOf(root, 'review-pr', 'conclude')).toContain('prClose(closeCtx2(');
     } finally {
       delete process.env.OUTCOME;
       writeFileSync(instructions, shipped);
@@ -2383,7 +3250,7 @@ describe('baton repo init --course, the standard courses (R-BTN-131)', () => {
   });
 
   it('the course test kit passes on each scaffolded course: its file, its stubs, one generic run to its end', () => {
-    for (const c of ['create-pr', 'review-pr', 'bug-report', 'draft-ticket', 'decision', 'spec-to-tickets']) {
+    for (const c of ['create-pr', 'review-pr', 'create-spec', 'bug-report', 'draft-ticket', 'decision', 'spec-to-tickets']) {
       expect(baton(root, 'test-course', root, c, '--base', 'none'), c).toContain('✓ no violations');
     }
   }, 240_000);
@@ -2430,11 +3297,12 @@ describe('a repository still on pr beside a sourced course (B-33)', () => {
       expect(readFileSync(settingsFile, 'utf8')).toBe(before);
       expect(readFileSync(join(legacy, '.github', 'workflows', 'baton-sync.yml'), 'utf8')).toBe(workflow);
       const script = join(legacy, '.baton', 'courses', 'create-pr', 'legs', 'review.mjs');
+      mkdirSync(join(legacy, '.baton', 'courses', 'create-pr', 'legs'), { recursive: true });
       writeFileSync(script, '// an older release\n');
       expect(baton(legacy, 'repo', 'init')).toContain(`create-pr now from ${SELF.sha.slice(0, 10)}`);
       const moved = JSON.parse(readFileSync(settingsFile, 'utf8'));
       expect(moved).toMatchObject({ default_course: 'pr', courses: [{ id: 'pr' }, { id: 'create-pr', source: sourceOf('create-pr') }] });
-      expect(readFileSync(script, 'utf8')).toContain('.baton/courses/create-pr/legs/review.run.mjs');
+      expect(readFileSync(script, 'utf8')).toBe('// an older release\n');
     } finally {
       rmSync(legacy, { recursive: true, force: true });
     }
@@ -2449,7 +3317,7 @@ describe('course sources and leg overrides (B-33)', () => {
   beforeAll(() => {
     root = mkdtempSync(join(tmpdir(), 'baton-override-'));
     gitInit(root);
-    baton(root, 'repo', 'init', '--pin', PIN, '--override', 'review');
+    baton(root, 'repo', 'init', '--own', '--pin', PIN, '--override', 'review');
     commitAll(root);
   }, 120_000);
   afterAll(() => rmSync(root, { recursive: true, force: true }));
@@ -2457,9 +3325,7 @@ describe('course sources and leg overrides (B-33)', () => {
   it('--override seeds legs/<leg>.run.mjs calling the course’s own run; a leg the course lacks is refused before anything is written', () => {
     const seeded = readFileSync(join(legs(), 'review.run.mjs'), 'utf8');
     expect(seeded).toContain('export async function run(ctx, standard) {\n  return standard(ctx);\n}');
-    // B-110 round 1: a changes verdict on the last round (the file's `max_runs`, or one the owner
-    // granted past it) queues the owner's adjudicate and suspends, never a fix.
-    expect(seeded).toContain("{ ...(answer !== 'approve' && (ctx.run ?? 1) >= 3 ? { suspend: true } : {}), reached: 'reviewed', next: answer === 'approve' ? 'merge' : (ctx.run ?? 1) >= 3 ? 'adjudicate' : 'fix', verdict: answer }");
+    expect(seeded).toContain('where `answer` is the verdict: approve or changes');
     expect(() => baton(root, 'repo', 'init', '--pin', PIN, '--override', 'deploy')).toThrow(/--override deploy: create-pr has no such leg — its legs are implement, run-tests, review, fix, adjudicate, merge/);
     expect(existsSync(join(legs(), 'deploy.run.mjs'))).toBe(false);
   });
@@ -2473,7 +3339,7 @@ describe('course sources and leg overrides (B-33)', () => {
       writeFileSync(stub, `${before[0]}\n// edited\n`);
       writeFileSync(md, `${before[1]}\n<!-- ours -->\n`);
       writeFileSync(override, `${before[2]}\n// ours\n`);
-      baton(root, 'repo', 'init', '--pin', PIN, '--course', 'create-pr', '--force', '--override', 'review');
+      baton(root, 'repo', 'init', '--pin', PIN, '--course', 'create-pr', '--own', '--force', '--override', 'review');
       expect(readFileSync(stub, 'utf8')).not.toContain('// edited');
       expect(readFileSync(md, 'utf8')).toContain('<!-- ours -->');
       expect(readFileSync(override, 'utf8')).toContain('// ours');
@@ -2482,25 +3348,85 @@ describe('course sources and leg overrides (B-33)', () => {
     }
   }, 120_000);
 
-  it('init moves a course’s source to this CLI’s commit, rewriting its course file and leg scripts and keeping the repository’s files', () => {
+  it('init moves a course’s source to this CLI’s commit and leaves the course’s files alone: the upgrade arrives through the source (B-139)', () => {
+    // The owner's ruling on #333 (2026-11-26), "hands off": a sourced course comes from its
+    // pinned source, so init rewrites none of its local files — not the course file, not a leg
+    // script, not an instruction. Moving the pin is the carry-over.
     const settingsFile = join(root, '.baton', 'baton.json');
     const stub = join(legs(), 'fix.mjs');
+    const graph = join(legs(), '..', 'course.json');
+    const instructions = ['implement', 'fix'].map((leg) => join(legs(), `${leg}.md`));
+    const override = join(legs(), 'review.run.mjs');
+    const before = [stub, graph, override, ...instructions].map((file) => readFileSync(file, 'utf8'));
     const settings = JSON.parse(readFileSync(settingsFile, 'utf8'));
     const old = `github/${SELF.slug}/${'1'.repeat(40)}/create-pr`;
-    writeFileSync(settingsFile, JSON.stringify({ ...settings, agent_command: 'mine', courses: [{ ...settings.courses[0], source: old, version: 4 }] }, null, 2));
+    writeFileSync(settingsFile, JSON.stringify({ ...settings, agent_command: 'mine', courses: [{ ...settings.courses[0], source: old, version: 1 }] }, null, 2));
     writeFileSync(stub, '// an older release\n');
-    writeFileSync(join(legs(), 'review.run.mjs'), '// ours\nexport async function run(ctx, standard) { return standard(ctx); }\n');
+    const legacy = JSON.parse(before[1]);
+    for (const leg of Object.values(legacy.legs) as Record<string, unknown>[]) {
+      delete leg.max_duration;
+      delete leg.autonomous;
+    }
+    writeFileSync(graph, JSON.stringify(legacy));
+    for (const file of instructions) writeFileSync(file, '<!-- home-owned instructions -->\n');
+    writeFileSync(override, '// ours\nexport async function run(ctx, standard) { return standard(ctx); }\n');
+    const local = () => [stub, graph, override, ...instructions].map((file) => readFileSync(file, 'utf8'));
+    const untouched = local();
     try {
       expect(baton(root, 'repo', 'init', '--pin', PIN)).toContain(`create-pr now from ${SELF.sha.slice(0, 10)}`);
       const moved = JSON.parse(readFileSync(settingsFile, 'utf8'));
-      expect(moved).toMatchObject({ agent_command: 'mine', courses: [{ id: 'create-pr', version: 4, source: sourceOf('create-pr') }] });
-      expect(readFileSync(stub, 'utf8')).toContain('.baton/courses/create-pr/legs/fix.run.mjs'); // the current leg script, bundled
-      expect(readFileSync(join(legs(), 'review.run.mjs'), 'utf8')).toContain('// ours');
+      expect(moved).toMatchObject({ agent_command: 'mine', courses: [{ id: 'create-pr', version: 5, source: sourceOf('create-pr') }] });
+      expect(local()).toEqual(untouched);
+
+      // Through the source: the course in force is the source's graph and leg script, with the
+      // home's instructions and run override laid over the source's as overrides.
+      commitAll(root);
+      const shown = baton(root, 'course', 'show', 'create-pr');
+      const parts = shown.split(/^--- (.+) ---\n/m);
+      const blocks = new Map(parts.slice(1).flatMap((part, k, all) => (k % 2 ? [] : [[part, all[k + 1].trimEnd()] as const])));
+      const block = (name: string) => blocks.get(name);
+      expect(JSON.parse(block('course.json')!)).toEqual(CREATE_PR_COURSE);
+      expect(block('legs/fix.mjs')).not.toContain('// an older release');
+      expect(block('legs/fix.mjs')).toContain('.baton/courses/create-pr/legs/fix.run.mjs'); // the current leg script, bundled
+      expect(block('legs/fix.md')).toContain('Ask the owner only when blocked');
+      expect(block('home override: legs/fix.md')).toBe('<!-- home-owned instructions -->');
+      expect(block('home override: legs/review.run.mjs')).toContain('// ours');
+
+      // init moves the settings entry with the source (its version, B-258); what else the home
+      // owns it carries over itself — its agent's briefing, taken from a scratch home's defaults —
+      // and a home-owned instruction keeps the source's standard text it wants. init keeps all of it, and still writes none of the course's files.
+      const fresh = mkdtempSync(join(tmpdir(), 'baton-create-pr-v2-'));
+      try {
+        gitInit(fresh);
+        baton(fresh, 'repo', 'init', '--course', 'create-pr');
+        const defaults = JSON.parse(readFileSync(join(fresh, '.baton', 'baton.json'), 'utf8'));
+        moved.courses[0].version = defaults.courses[0].version;
+        moved.agent_command += ` ${defaults.agent_command.slice(defaults.agent_command.indexOf(' "You are a Baton leg agent.'))}`;
+        writeFileSync(settingsFile, JSON.stringify(moved));
+        for (const file of instructions) {
+          // The standard text is the source's, as the course shows it; the home owns its copy.
+          const standard = `${block(`legs/${file.split('/').at(-1)!}`)!}\n`;
+          writeFileSync(file, readFileSync(file, 'utf8') + standard);
+        }
+        const carried = local();
+        baton(root, 'repo', 'init', '--pin', PIN);
+        expect(JSON.parse(readFileSync(settingsFile, 'utf8'))).toMatchObject({
+          agent_command: expect.stringMatching(/^mine .*harness's question tool/),
+          courses: [{ version: defaults.courses[0].version, source: sourceOf('create-pr') }],
+        });
+        expect(local()).toEqual(carried);
+        for (const file of instructions) {
+          expect(readFileSync(file, 'utf8')).toMatch(/^<!-- home-owned instructions -->[\s\S]*Ask the owner only when blocked/);
+        }
+      } finally {
+        rmSync(fresh, { recursive: true, force: true });
+      }
     } finally {
       writeFileSync(settingsFile, `${JSON.stringify(settings, null, 2)}\n`);
+      [stub, graph, override, ...instructions].forEach((file, i) => writeFileSync(file, before[i]));
       commitAll(root);
     }
-  }, 120_000);
+  }, 180_000);
 
   it('the leg script runs the override at the claim’s snapshot, keeping its own close; one only in the working tree is not run; one with no run fails the leg', async () => {
     const agent = join(root, 'agent.sh');
@@ -2525,17 +3451,17 @@ export async function run(ctx, standard) {
   writeFileSync(join(ctx.checkout, 'override.ran'), ctx.leg);
   return { ...(await standard(ctx)), reached: 'reviewed' };
 }
+export async function close() { throw new Error('override close must not run'); }
 `);
       const snapshot = { sha: commitAll(root) };
       rmSync(join(root, 'override.ran'), { force: true });
       const stub = await load(script);
       expect(await stub.run({ ticket: { id: 'A-1' }, checkout: root, snapshot, leg: 'review' })).toEqual({ reached: 'reviewed', next: 'fix', verdict: 'changes' });
       expect(readFileSync(join(root, 'override.ran'), 'utf8')).toBe('review');
-      // The course's close is what the stub exports, whatever the override adds: the stub
-      // wraps it to hand the default branch in (so its name is 'close'), and the override's
-      // own close is not it.
-      expect(typeof stub.close).toBe('function');
-      expect(readFileSync(script, 'utf8')).toContain('prClose(closeCtx2(');
+      // The PR close still owns verification, even when the override exports a close.
+      await expect(stub.close({ ticket: { id: 'A-1' }, checkout: root, leg: 'review' }, {
+        reached: 'reviewed', next: 'fix', verdict: 'changes', pr: 'not a PR URL',
+      })).rejects.toThrow('the review leg named no PR URL to write on');
       // An override exporting no run fails the leg, naming the file.
       writeFileSync(override, 'export const nothing = 1;\n');
       const broken = { sha: commitAll(root) };
@@ -2552,7 +3478,10 @@ export async function run(ctx, standard) {
     const workflowFile = join(root, '.github', 'workflows', 'baton-sync.yml');
     const settingsFile = join(root, '.baton', 'baton.json');
     const workflow = readFileSync(workflowFile, 'utf8');
-    const settings = readFileSync(settingsFile, 'utf8');
+    const ownSettings = readFileSync(settingsFile, 'utf8');
+    const parsedSettings = JSON.parse(ownSettings);
+    const settings = JSON.stringify({ ...parsedSettings, courses: parsedSettings.courses.map((c: { id: string }) => ({ ...c, source: sourceOf(c.id) })) });
+    writeFileSync(settingsFile, settings);
     expect(() => baton(root, 'repo', 'init', '--pin', OTHER_PIN)).toThrow(`--pin names immediately-run/baton@${'ab'.repeat(5)}, but this CLI is ${SELF.slug}@${SELF.sha.slice(0, 10)}, which the courses' sources name`);
     // A refused init reports no change it did not make.
     let said = '';
@@ -2573,7 +3502,7 @@ export async function run(ctx, standard) {
       baton(root, 'repo', 'init', '--pin', OTHER_PIN);
       expect(readFileSync(workflowFile, 'utf8')).toContain(`ref: ${'ab'.repeat(20)}`);
     } finally {
-      writeFileSync(settingsFile, settings);
+      writeFileSync(settingsFile, ownSettings);
       writeFileSync(workflowFile, workflow);
     }
   }, 120_000);
@@ -2582,6 +3511,7 @@ export async function run(ctx, standard) {
     const settingsFile = join(root, '.baton', 'baton.json');
     const settings = readFileSync(settingsFile, 'utf8');
     const script = join(legs(), 'review.mjs');
+    const original = readFileSync(script);
     try {
       const parsed = JSON.parse(settings);
       writeFileSync(settingsFile, JSON.stringify({ ...parsed, courses: parsed.courses.map(({ source: _s, ...c }: { source?: string }) => c) }, null, 2));
@@ -2590,11 +3520,12 @@ export async function run(ctx, standard) {
       expect(readFileSync(script, 'utf8')).toContain('.baton/courses/create-pr/legs/review.run.mjs');
     } finally {
       writeFileSync(settingsFile, settings);
+      writeFileSync(script, original);
       commitAll(root);
     }
   }, 120_000);
 
-  it('init moves every course from this CLI’s repository: a second course’s source and leg scripts move too', () => {
+  it('init moves every course from this CLI’s repository: a second course’s source moves without rewriting its scripts', () => {
     const settingsFile = join(root, '.baton', 'baton.json');
     const before = readFileSync(settingsFile, 'utf8');
     try {
@@ -2605,10 +3536,11 @@ export async function run(ctx, standard) {
       const stray = { id: 'docs-pr', version: 1, source: old('create-pr') };
       writeFileSync(settingsFile, JSON.stringify({ ...two, courses: [...two.courses.map((c: { id: string }) => ({ ...c, source: old(c.id) })), stray] }, null, 2));
       const trace = join(root, '.baton', 'courses', 'bug-report', 'legs', 'trace.mjs');
+      mkdirSync(join(root, '.baton', 'courses', 'bug-report', 'legs'), { recursive: true });
       writeFileSync(trace, '// an older release\n');
       expect(baton(root, 'repo', 'init', '--pin', PIN, '--course', 'create-pr')).toContain(`create-pr, bug-report now from ${SELF.sha.slice(0, 10)}`);
       expect(JSON.parse(readFileSync(settingsFile, 'utf8')).courses.map((c: { source: string }) => c.source)).toEqual([sourceOf('create-pr'), sourceOf('bug-report'), old('create-pr')]);
-      expect(readFileSync(trace, 'utf8')).toContain('.baton/courses/bug-report/legs/trace.run.mjs');
+      expect(readFileSync(trace, 'utf8')).toBe('// an older release\n');
     } finally {
       writeFileSync(settingsFile, before);
       rmSync(join(root, '.baton', 'courses', 'bug-report'), { recursive: true, force: true });
@@ -2718,9 +3650,10 @@ describe('readBoard resolves qualified dependencies against their boards (B-113)
   };
   /** A transport answering the sync's four calls, remembering the dependencies asked for and the
    *  stations posted; `done` decides the dependency's standing on its own board. */
-  const answering = (done: boolean): { transport: Transport; asked: string[][]; stations: () => Record<string, { next: { leg: string; state: string; waiting_on?: string }[] }> } => {
+  const answering = (done: boolean): { transport: Transport; asked: string[][]; tickets: () => Record<string, unknown>[]; stations: () => Record<string, { next: { leg: string; state: string; waiting_on?: string }[] }> } => {
     const asked: string[][] = [];
     let posted: Record<string, { next: { leg: string; state: string; waiting_on?: string }[] }> = {};
+    let tickets: Record<string, unknown>[] = [];
     let observation = 0;
     const transport: Transport = async (req) => {
       const path = new URL(req.url).pathname;
@@ -2731,15 +3664,18 @@ describe('readBoard resolves qualified dependencies against their boards (B-113)
         : path === '/v1/sync/dependencies' ? { dependencies: (body.ids as string[]).map((t) => ({ ticket: t, done })) }
         : { ok: true, upserted: 1, deleted: 0, confirmed: 0, stale_released: 0 };
       if (path === '/v1/sync/dependencies') asked.push(body.ids as string[]);
-      if (path === '/v1/sync/board') posted = (body as { stations: typeof posted }).stations;
+      if (path === '/v1/sync/board') {
+        posted = (body as { stations: typeof posted }).stations;
+        tickets = body.tickets as typeof tickets;
+      }
       return new Response(JSON.stringify(answer), { status: 200, headers: { 'Content-Type': 'application/json' } });
     };
-    return { transport, asked, stations: () => posted };
+    return { transport, asked, tickets: () => tickets, stations: () => posted };
   };
   let dir: string;
   afterEach(() => { if (dir) rmSync(dir, { recursive: true, force: true }); dir = undefined as unknown as string; });
 
-  it('a dependency not done on its board leaves the leg waiting on dependencies; done there readies it here', async () => {
+  it('S-BTN-72: the Markdown source posts only open dependencies bound to the start leg', async () => {
     dir = await scaffold();
     const waiting = answering(false);
     const facts = join(dir, 'facts.json');
@@ -2747,10 +3683,12 @@ describe('readBoard resolves qualified dependencies against their boards (B-113)
     const args = parseSyncArgs(['--root', dir, '--url', 'https://baton.test', '--facts', facts, '--token', 't1'], {});
     expect(await syncMain({ ...args, transport: waiting.transport, log: () => {} })).toBe(0);
     expect(waiting.asked).toEqual([['baton:T-9']]);
-    expect(waiting.stations()['T-1'].next).toEqual([{ leg: 'implement', state: 'waiting', waiting_on: 'dependencies' }]);
-    // Ready, the waiting_on field is posted as null (stationOf fills it), never left out.
+    expect(waiting.stations()['T-1'].next).toEqual([{ leg: 'implement', state: 'ready', waiting_on: null }]);
+    expect(waiting.tickets()).toMatchObject([{ id: 'T-1', depends_on: [], depends_at: [{ ticket: 'baton:T-9', leg: 'implement', done: true }] }]);
+    // The source stops posting the edge once the target is done.
     const ready = answering(true);
     expect(await syncMain({ ...args, transport: ready.transport, log: () => {} })).toBe(0);
+    expect(ready.tickets()).toMatchObject([{ id: 'T-1', depends_at: [] }]);
     expect(ready.stations()['T-1'].next).toEqual([{ leg: 'implement', state: 'ready', waiting_on: null }]);
   }, 30_000);
 
@@ -2793,7 +3731,8 @@ describe('readBoard resolves qualified dependencies against their boards (B-113)
     const open = answering(false);
     expect(await syncMain({ ...args, transport: open.transport, log: () => {} })).toBe(0);
     expect(open.asked).toEqual([]);
-    expect(open.stations()['T-1'].next).toEqual([{ leg: 'implement', state: 'waiting', waiting_on: 'dependencies' }]);
+    expect(open.tickets()).toContainEqual(expect.objectContaining({ id: 'T-1', depends_at: [{ ticket: 'docs:T-9', leg: 'implement', done: true }] }));
+    expect(open.stations()['T-1'].next).toEqual([{ leg: 'implement', state: 'ready', waiting_on: null }]);
     // T-9 closed done in this checkout's own reading: its qualified spelling is done here — the
     // read's answer (still not done, one post behind) is never asked for.
     writeFileSync(join(dir, 'tickets', 'T-9.mdx'), '---\nid: T-9\ntitle: Nine\nstatus: done\n---\n');
@@ -2803,4 +3742,38 @@ describe('readBoard resolves qualified dependencies against their boards (B-113)
     expect(done.asked).toEqual([]);
     expect(done.stations()['T-1'].next).toEqual([{ leg: 'implement', state: 'ready', waiting_on: null }]);
   }, 30_000);
+});
+
+// S-BTN-309: an ordinary base merge is not implementation work; an edited merge can be.
+it('compares the full push to the tree from just merging the base', () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'baton-push-test-'));
+  const git = (...args: string[]) => execFileSync('git', ['-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', '-c', 'commit.gpgsign=false', ...args],
+    { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+  const write = (file: string, content: string) => { writeFileSync(join(cwd, file), content); git('add', file); };
+  try {
+    git('init', '-b', 'main');
+    git('commit', '--allow-empty', '-m', 'initial');
+    git('branch', 'work');
+    write('base', 'new base content');
+    git('commit', '-m', 'base change');
+    git('switch', 'work');
+    write('implementation', 'first draft');
+    git('commit', '-m', 'implementation');
+    const before = git('rev-parse', 'HEAD');
+    git('merge', '--no-ff', 'main', '-m', 'base only');
+    expect(changedBeyondBase(git, before, 'HEAD', 'main')).toBe(false);
+    const merged = git('rev-parse', 'HEAD');
+    git('commit', '--allow-empty', '-m', 'no tree change');
+    expect(changedBeyondBase(git, merged, 'HEAD', 'main')).toBe(false);
+    write('implementation', 'fix after the merge, in the same push');
+    git('commit', '-m', 'fix');
+    expect(changedBeyondBase(git, before, 'HEAD', 'main')).toBe(true);
+    git('switch', '-c', 'edited-merge', before);
+    git('merge', '--no-ff', '--no-commit', 'main');
+    write('implementation', 'fix in the merge itself');
+    git('commit', '-m', 'base plus fix');
+    expect(changedBeyondBase(git, before, 'HEAD', 'main')).toBe(true);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
 });

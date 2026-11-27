@@ -8,7 +8,7 @@
 // accept it. A rejected trace is a step the implementation took that the checked model forbids.
 //
 // What the model abstracts (model/README.md, "Not modelled": other repositories, other
-// courses, course changes, held histories, tiers and grants) the recorder already leaves out
+// courses, course changes, held histories and grants) the recorder already leaves out
 // of the projection. A step the model has no action for — a claim the harness wrote itself, a
 // course file that is not the model's, a required bar changed under a run — ends the part of
 // the trace the model can judge; the checked prefix and the reason are printed for every trace,
@@ -17,9 +17,10 @@
 //
 //   node scripts/check-traces.mjs [trace files or directories]   (default: test/.traces)
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { stripVTControlCharacters } from 'node:util';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const OUT = join(ROOT, 'test', '.traces', '.qnt');
@@ -36,8 +37,13 @@ const TIMEOUT = 4;
 const OBSERVATION_TTL_MS = 10 * 60_000;
 const stationOf = (path) => path.reduce((_, l) => TO[l], START);
 const COURSE = JSON.parse(readFileSync(join(ROOT, 'test', 'fixtures', 'courses', 'roadmap-pr', 'course.json'), 'utf8'));
+// Deadlines do not change the model's graph. The trace maps their wall-clock intervals to ticks.
+const withoutDeadlines = ({ legs, ...course }) => ({ ...course, legs: Object.fromEntries(Object.entries(legs)
+  .map(([name, { max_duration, deadline_s, ...leg }]) => [name, leg])) });
+const COURSE_SHAPE = JSON.stringify(withoutDeadlines(COURSE));
 
 // ── ITF back to JSON ─────────────────────────────────────────────────────────────────────
+/** @param {unknown} v @returns {unknown} */
 export function fromItf(v) {
   if (Array.isArray(v)) return v.map(fromItf);
   if (v && typeof v === 'object') {
@@ -49,6 +55,9 @@ export function fromItf(v) {
   return v;
 }
 
+/** @typedef {{kind: import('../test/integration/trace').Step['kind'], now: number, method?: string, path?: string, status?: number, body?: unknown, response?: unknown, state: import('../test/integration/trace').Projection}} TraceStep */
+/** @typedef {{scenario: string, test: string, steps: TraceStep[]}} Trace */
+/** @param {string} file @returns {Trace} */
 export function readTrace(file) {
   const t = JSON.parse(readFileSync(file, 'utf8'));
   return { scenario: t['#meta']?.source ?? basename(dirname(file)), test: t['#meta']?.description ?? basename(file), steps: t.states.map((s) => ({ ...s['#meta'], state: fromItf(s.baton) })) };
@@ -61,11 +70,13 @@ const qSet = (xs) => (xs.length ? `Set(${[...new Set(xs)].sort().map(q).join(', 
 const sameSet = (a, b) => JSON.stringify([...new Set(a)].sort()) === JSON.stringify([...new Set(b)].sort());
 
 /** The model's `kind` for an end reason (§6.5). */
+/** @param {string | null | undefined} endReason */
 export function kindOf(endReason) {
   if (endReason == null) return '';
   if (endReason === 'done') return 'done';
   if (endReason.startsWith('suspended:')) return 'suspended';
   if (endReason === 'released:stale-board') return 'stale';
+  if (endReason === 'released:leg-timeout') return 'timeout';
   if (endReason.startsWith('released:')) return 'release';
   if (endReason.startsWith('reaped:')) return 'reap';
   return `?${endReason}`;
@@ -105,6 +116,10 @@ function requiredLegs(required) {
  * expect: [[name, expr]] }], end: { index, reason } | null }`: `end` is the first step the model
  * has no action for; the steps before it are the trace's checked part.
  */
+/** @typedef {{index: number, label: string, actions: string[], expect: string[][]}} ModelStep */
+/** @typedef {{index: number, reason: string}} Stop */
+/** @typedef {{consts: Record<string, string | number>, steps: ModelStep[], end: Stop | null, reject?: Stop & {label: string}, total: number}} Translation */
+/** @param {{steps: readonly TraceStep[]}} trace @returns {Translation} */
 export function translate(trace) {
   const states = trace.steps.map((s) => s.state);
   const empty = { counter: 0, lastAccepted: 0, outstanding: false, tickets: {}, claims: {}, held: {}, ownerBars: [], runners: {}, required: [], courseFile: null };
@@ -170,6 +185,8 @@ export function translate(trace) {
   // ids the model hands out.
   const env = {
     git: Object.fromEntries(T.map((t) => [t, []])),
+    deps: Object.fromEntries(T.map((t) => [t, []])),
+    checkedDeps: Object.fromEntries(T.map((t) => [t, new Map()])),
     withdrawn: Object.fromEntries(T.map((t) => [t, false])),
     posted: Object.fromEntries(T.map((t) => [t, []])),
     gone: Object.fromEntries(T.map((t) => [t, false])),
@@ -181,7 +198,6 @@ export function translate(trace) {
     slots: { 1: { phase: 'idle', obs: 0, voided: false, at: 0 }, 2: { phase: 'idle', obs: 0, voided: false, at: 0 } },
     ids: {},
     nextId: 1,
-    claimTier: {}, // each claim's ticket tier when it was made (R-BTN-35's re-tier)
   };
   const out = [];
   let prev = empty;
@@ -204,7 +220,8 @@ function translateStep(step, P, env, k) {
   const acts = [];
   const path = step.path ?? '';
   const origin = step.kind === 'request' ? path.replace(/\?.*$/, '') : step.kind;
-  if (Q.courseFile && JSON.stringify(JSON.parse(Q.courseFile)) !== JSON.stringify(COURSE)) return { end: 'a roadmap-pr course file other than the model’s (R-BTN-64, course changes: not modelled)' };
+  const course = Q.courseFile && JSON.parse(Q.courseFile);
+  if (course && (!course.legs || JSON.stringify(withoutDeadlines(course)) !== COURSE_SHAPE)) return { end: 'a roadmap-pr course file other than the model’s (R-BTN-64, course changes: not modelled)' };
   if (Object.keys(Q.claims).length && JSON.stringify(Q.required) !== JSON.stringify(k.required)) return { end: 'the required bar changed under a run (the model’s REQUIRED is constant)' };
   // A runner's tags matter to the model only at its own claims and advances (rule 8, R-BTN-67):
   // there they must be the tags it first claimed with.
@@ -217,15 +234,15 @@ function translateStep(step, P, env, k) {
   };
   for (const [id, d] of Object.entries(Q.claims)) {
     const c = P.claims[id];
-    // R-BTN-35's other "taken away": a re-tier since the claim, or docs' interim status at one
+    // R-BTN-35's other "taken away": docs' interim status at one
     // that ends the item (claims.ts GIT_ENDS) — only when the post shows one (round 1, 1-A-3).
     // The status may have been posted earlier, by a reading not numbered after the claim.
     if (c?.status === 'active' && d.endReason === 'released:stale-board' && Q.tickets[d.ticket]?.present) {
       const after = Q.tickets[d.ticket];
-      if (GIT_ENDS.includes(after.status) || (id in env.claimTier && env.claimTier[id] !== after.tier)) {
-        return { end: `claim ${id} released stale on its ticket's re-tier or interim status (R-BTN-35; tiers are not modelled)` };
+      if (GIT_ENDS.includes(after.status)) {
+        return { end: `claim ${id} released stale on its ticket's interim status (R-BTN-35; interim statuses are not modelled)` };
       }
-      return { reject: `claim ${id} released stale with its ticket still posted, neither withdrawn nor re-tiered` };
+      return { reject: `claim ${id} released stale with its ticket still posted with no ending status` };
     }
     // docs' interim confirmation by the post's own list, naming this claim (round 1, 1-A-3)
     if (c && !c.confirmed && d.confirmed && origin === '/v1/sync/board' && step.body?.state
@@ -305,7 +322,6 @@ function translateStep(step, P, env, k) {
       if (!sameTags(d.runner)) return { end: `runner ${d.runner} claims with other tags than at its first claim (the model’s TAGS are constant)` };
       if (d.leg !== '' || d.finished.length || d.status !== 'active') return { reject: `claim ${id} created already advanced or ended` };
       env.ids[id] = env.nextId++;
-      env.claimTier[id] = Q.tickets[d.ticket]?.tier ?? null;
       acts.push(`heartbeat(${w})`, `claim(${w}, ${q(d.ticket)})`);
       continue;
     }
@@ -320,7 +336,9 @@ function translateStep(step, P, env, k) {
       if (!sameSet(sent, d.legBars)) return { reject: `claim ${id}'s leg stored bars ${JSON.stringify(d.legBars)}, not the ${JSON.stringify(sent)} the holder sent` };
       acts.push(`heartbeat(${w})`);
       if (c.leg !== '') acts.push(`pushEvidence(${w}, false)`);
-      acts.push(`advance(${w}, ${q(d.leg)}, ${qSet(sent)})`);
+      const deadlineS = course?.legs?.[d.leg]?.deadline_s ?? course?.legs?.[d.leg]?.max_duration;
+      if (deadlineS != null && d.deadlineAt !== step.now + deadlineS * 1000) return { reject: `claim ${id}'s advance armed the wrong deadline` };
+      acts.push(deadlineS == null ? `advance(${w}, ${q(d.leg)}, ${qSet(sent)})` : `advanceRun(${w}, ${q(d.leg)}, ${qSet(sent)}, 2)`);
     } else if (c.status === 'active' && d.status !== 'active' && /\/end$/.test(origin)) {
       const reached = d.finished.length > c.finished.length;
       acts.push(`heartbeat(${w})`);
@@ -328,7 +346,12 @@ function translateStep(step, P, env, k) {
       acts.push(`endClaim(${w}, ${q(kindOf(d.endReason))}, ${reached})`);
     } else if (c.status === 'active' && d.status === 'reaped') {
       if (origin === 'alarm' && d.endReason === 'reaped:release-unacknowledged') return { end: `claim ${id} reaped on an unacknowledged release (§9; messages are not modelled)` };
-      if (origin === 'alarm') {
+      if (origin === 'alarm' && d.endReason === 'reaped:leg-timeout') {
+        const deliveredAt = c.timeoutRelease?.deliveredAt;
+        if (deliveredAt == null || step.now < deliveredAt + 900_000 || silent(d.runner)) return { reject: `claim ${id} reaped before the leg-timeout grace elapsed or after lease loss` };
+        if (!d.fencePending || d.fenceDeadline !== step.now + Q.liveness?.[d.runner]?.lease) return { reject: `claim ${id} reaped for leg-timeout without its fixed fence (R-BTN-90)` };
+        acts.push(`heartbeat(${w})`, 'tick', 'tick', `timeoutReap(${m})`);
+      } else if (origin === 'alarm') {
         // the lease ran out by Baton's clock (round 1, 1-A-0)
         if (!silent(d.runner)) return { reject: `claim ${id} reaped by the alarm before runner ${d.runner}'s lease ran out` };
         tick();
@@ -346,10 +369,30 @@ function translateStep(step, P, env, k) {
     } else if (c.status !== d.status && !(c.status === 'active' && origin === '/v1/sync/board')) {
       return { reject: `claim ${id} went ${c.status} → ${d.status} by ${origin}, which no model action does` };
     }
+    if (c.status === 'active' && d.status === 'active' && d.leg === c.leg && d.finished.length === c.finished.length) {
+      if (!c.timeoutRelease && d.timeoutRelease) {
+        if (origin !== 'alarm' || c.deadlineAt == null || step.now < c.deadlineAt) return { reject: `claim ${id} queued a leg-timeout before its deadline` };
+        acts.push('4.reps(_ => tick)', `queueTimeout(${m})`);
+      } else if ((c.timeoutRelease && !d.timeoutRelease) || d.deadlineAt !== c.deadlineAt) {
+        if (origin !== '/v1/runner/heartbeat') return { reject: `claim ${id}'s deadline changed outside a finishing beat` };
+        const finished = step.body?.legs_finished;
+        const namedRun = Array.isArray(finished) && finished.some((f) => Number.isInteger(f?.claim_id) && f.claim_id === Number(id) && f.seq === c.runningSeq);
+        const loneRun = step.body?.leg_finished === c.runningSeq && Object.values(P.claims)
+          .filter((x) => x.runner === c.runner && x.status === 'active').length === 1;
+        if (c.runningSeq == null || !(namedRun || loneRun)) return { reject: `claim ${id}'s finishing beat did not name its current run` };
+        if (d.deadlineAt !== c.deadlineAt && (c.deadlineAt == null || d.deadlineAt !== step.now + 40 * 60_000)) {
+          return { reject: `claim ${id}'s finishing beat re-armed the wrong deadline` };
+        }
+        acts.push(`legFinished(${w})`);
+      } else if (c.timeoutRelease?.deliveredAt == null && d.timeoutRelease?.deliveredAt != null) {
+        if (origin !== '/v1/runner/heartbeat' || d.timeoutRelease.deliveredAt !== step.now) return { reject: `claim ${id} delivered a leg-timeout outside a heartbeat` };
+        acts.push(`deliverTimeout(${w})`);
+      }
+    }
     if (c.fencePending && !d.fencePending) {
       if (origin === '/v1/runner/heartbeat') acts.push(`fenceCleared(${w})`);
       else if (origin === 'alarm') {
-        if (!silent(d.runner)) return { reject: `claim ${id}'s fence timed out while runner ${d.runner} was heard from` };
+        if (d.fenceDeadline != null ? step.now < d.fenceDeadline : !silent(d.runner)) return { reject: `claim ${id}'s fence timed out before its expiry` };
         tick();
         acts.push(`fenceTimeout(${m})`);
       } else if (/\/fence-clear$/.test(origin)) acts.push(`adminFenceClear(${m})`);
@@ -411,6 +454,21 @@ function applyPost(Q, env, k) {
     env.posted[t] = g;
     env.gone[t] = env.withdrawn[t];
     if (v?.present) env.seen[t] = true;
+    const deps = (Q.dependencies?.[t]?.entries ?? []).map((e) => {
+      const mode = ['at', 'reached', 'done', 'withdrawn', 'closed'].find((m) => m in e);
+      const other = e.ticket.includes(':') ? e.ticket : `docs:${e.ticket}`;
+      if (!Q.tickets[other]) return null; // visibility, consent and unknown targets are not modelled
+      const stations = [...new Set(Array.isArray(e[mode]) ? e[mode] : [])].sort();
+      const leg = e.leg ?? '';
+      const ref = `${other}@${mode}${stations.length ? `:${stations.join(',')}` : ''}`;
+      return { leg, ref, expr: `{ leg: ${q(leg)}, other: ${q(other)}, mode: ${q(mode)}, stations: ${qSet(stations)} }` };
+    }).filter(Boolean);
+    const old = new Set(env.deps[t].map((d) => d.expr));
+    const next = new Set(deps.map((d) => d.expr));
+    for (const d of old) if (!next.has(d)) acts.push(`gitDepends(${q(t)}, ${d}, false)`);
+    for (const d of next) if (!old.has(d)) acts.push(`gitDepends(${q(t)}, ${d}, true)`);
+    env.deps[t] = deps;
+    for (const d of deps) env.checkedDeps[t].set(d.expr, d);
   }
   return { acts };
 }
@@ -434,6 +492,10 @@ function expectations(Q, env, T, W) {
     e.push([`postedBars ${t}`, `st.postedBars.get(${q(t)}) == ${qSet(env.bars[t])}`]);
     if (env.queued[t] != null) e.push([`queued ${t}`, `st.queued.get(${q(t)}) == ${q(env.queued[t])}`]);
     e.push([`held ${t}`, `st.held.get(${q(t)}) == ${!!Q.held[t]}`]);
+    for (const d of env.checkedDeps[t].values()) {
+      const blocked = (Q.dependencies?.[t]?.blocks ?? []).some((b) => b.ref === d.ref && b.leg === d.leg);
+      e.push([`ticket block ${t} ${d.leg} ${d.ref}`, `ticketRowsIn(st, ${q(t)}).contains(${d.expr}) == ${blocked}`]);
+    }
   }
   const bars = [...new Set(Q.ownerBars.map((b) => `{ tag: ${q(b.tag)}, applies: ${q(b.applies)} }`))];
   e.push(['ownerBars', bars.length ? `st.ownerBars == Set(${bars.join(', ')})` : 'st.ownerBars.size() == 0']);
@@ -467,8 +529,19 @@ function expectations(Q, env, T, W) {
 
 // ── Quint ────────────────────────────────────────────────────────────────────────────────
 
+/** Group translated traces by every constant in the model import, not by scenario or test name. */
+export function groupTraces(traces) {
+  const groups = new Map();
+  for (const t of traces) {
+    const key = JSON.stringify(Object.entries(t.consts).sort());
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(t);
+  }
+  return [...groups.values()];
+}
+
 const header = (consts) => `module replay {
-  import baton(${Object.entries(consts).map(([k, v]) => `${k} = ${v}`).join(', ')}).* from "../../../model/baton"
+  import baton(${Object.entries(consts).map(([k, v]) => `${k} = ${v}`).join(', ')}).* from "../../../../model/baton"
   action start: bool = initWith(RUNNERS.mapBy(w => 0))
 `;
 const chain = (steps, upto, withExpect = true) => {
@@ -480,9 +553,10 @@ const chain = (steps, upto, withExpect = true) => {
   return s;
 };
 
-/** The Quint module that replays `t` (translate's result) whole. */
-export function quintModule(t) {
-  return `${header(t.consts)}  run traceTest =\n${chain(t.steps, t.steps.length)}\n}\n`;
+const testName = (i) => `trace${i}Test`;
+
+function batchModule(group) {
+  return header(group[0].consts) + group.map((t, i) => `  run ${testName(i)} =\n${chain(t.steps, t.steps.length)}\n`).join('') + '}\n';
 }
 
 /** On a rejection: the run of the first `k` steps — the checker searches for the smallest `k`
@@ -500,46 +574,82 @@ function stepModule(t, i, only) {
 
 function quintTest(file) {
   return new Promise((done) => {
-    const p = spawn('npx', ['quint', 'test', file, '--main=replay', '--backend=typescript', '--max-samples=1'], { cwd: ROOT });
-    let out = '';
-    p.stdout.on('data', (d) => (out += d));
-    p.stderr.on('data', (d) => (out += d));
-    p.on('close', (code) => done({ ok: code === 0, out }));
+    const p = spawn('npx', ['quint', 'test', relative(ROOT, file), '--main=replay', '--backend=typescript', '--max-samples=1', '--verbosity=2'], { cwd: ROOT });
+    let stdout = '';
+    let stderr = '';
+    p.stdout.on('data', (d) => (stdout += d));
+    p.stderr.on('data', (d) => (stderr += d));
+    p.on('error', (e) => (stderr += e.message));
+    p.on('close', (code) => done({ code, stdout: stripVTControlCharacters(stdout), stderr: stripVTControlCharacters(stderr) }));
   });
 }
 
-/** Check one trace file: `{ok, checked, total, end, failure}`. */
-export async function checkTrace(file, tag = basename(file).replace(/\W+/g, '_').slice(0, 60)) {
-  const trace = readTrace(file);
-  const t = translate(trace);
-  // a step no model action explains rejects the trace whatever the run before it (round 1, 1-A-2)
-  if (t.reject) {
-    return { file, scenario: trace.scenario, test: trace.test, checked: t.steps.length, total: t.total, end: null, ok: false,
-      failure: { step: t.reject.index, label: t.reject.label, actions: [], actionRefused: true, fields: [], reason: t.reject.reason } };
-  }
+/** Only retry compile errors located in generated runs, not in the shared import or model. */
+function isRunCompileError(stderr, file) {
+  if (!/^error: (?:parsing|typechecking) failed$/m.test(stderr)) return false;
+  const locations = [...stderr.matchAll(/^  at (.+):(\d+):\d+$/gm)];
+  return locations.length > 0 && locations.every(([, source, line]) =>
+    resolve(ROOT, source) === file && Number(line) > header({}).split('\n').length - 1);
+}
+
+async function checkGroup(group, report) {
   mkdirSync(OUT, { recursive: true });
-  const qnt = join(OUT, `${tag}.qnt`);
-  writeFileSync(qnt, quintModule(t));
-  const r = await quintTest(relative(ROOT, qnt));
-  const res = { file, scenario: trace.scenario, test: trace.test, checked: t.steps.length, total: t.total, end: t.end, ok: r.ok };
-  if (r.ok) return res;
-  if (!/failed/.test(r.out)) return { ...res, failure: { error: r.out.slice(-1500) } };
-  // name the step (the shortest failing prefix), the action and the field
-  const dq = join(OUT, `${tag}.prefix.qnt`);
+  const dir = mkdtempSync(join(OUT, 'batch-'));
+  try {
+    const file = join(dir, 'batch.qnt');
+    writeFileSync(file, batchModule(group));
+    const { code, stdout, stderr } = await quintTest(file);
+    // Quint 0.33 reports a line per executed test. Missing, ignored or duplicate results
+    // (e.g. a batch that did not compile) must not pass or be bisected as model rejections.
+    const runs = [...stdout.matchAll(/^    (?:ok (trace\d+Test) passed|\d+\) (trace\d+Test) failed after) \d+ test\(s\)$/gm)];
+    const passed = new Map(runs.map(([, ok, failed]) => [ok ?? failed, !!ok]));
+    if (runs.length !== group.length || !group.every((_, i) => passed.has(testName(i))) ||
+        code !== ([...passed.values()].every(Boolean) ? 0 : 1)) {
+      const runCompileError = code === 1 && runs.length === 0 && isRunCompileError(stderr, file);
+      if (runCompileError && group.length > 1) {
+        const mid = Math.floor(group.length / 2);
+        // Keep retries inside the worker's slot; only branches that fail to compile split again.
+        await checkGroup(group.slice(0, mid), report);
+        await checkGroup(group.slice(mid), report);
+        return;
+      }
+      const summary = runCompileError ? 'Quint could not compile the generated trace run'
+        : 'Quint returned incomplete or inconsistent batch results';
+      const error = `${summary} (exit ${code})\n${(stdout + stderr).slice(-1500)}`;
+      for (const t of group) {
+        t.result.failure = { error };
+        report(t.result);
+      }
+      return;
+    }
+    for (const [i, t] of group.entries()) {
+      if (passed.get(testName(i))) t.result.ok = true;
+      else t.result.failure = await diagnose(t, join(dir, `trace${i}`));
+      report(t.result);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+/** Name the step (the shortest failing prefix), the action and the field. */
+async function diagnose(t, path) {
+  if (!t.steps.length) return { error: 'Quint rejected the initial state (no trace steps)' };
+  const dq = `${path}.prefix.qnt`;
   let lo = 0;
   let hi = t.steps.length;
   while (hi - lo > 1) {
     const mid = (lo + hi) >> 1;
     writeFileSync(dq, prefixModule(t, mid));
-    if ((await quintTest(relative(ROOT, dq))).ok) lo = mid;
+    if ((await quintTest(dq)).code === 0) lo = mid;
     else hi = mid;
   }
   const first = hi - 1;
   const st = t.steps[first];
-  const fq = join(OUT, `${tag}.step.qnt`);
+  const fq = `${path}.step.qnt`;
   const holds = async (only) => {
     writeFileSync(fq, stepModule(t, first, only));
-    return (await quintTest(relative(ROOT, fq))).ok;
+    return (await quintTest(fq)).code === 0;
   };
   const actionRefused = !(await holds([]));
   // the failing expectations, by halving
@@ -550,16 +660,39 @@ export async function checkTrace(file, tag = basename(file).replace(/\W+/g, '_')
     return [...(await failing(js.slice(0, mid))), ...(await failing(js.slice(mid)))];
   };
   const fields = actionRefused ? [] : (await failing(st.expect.map((_, j) => j))).map((j) => st.expect[j][0]);
-  return { ...res, failure: { step: st.index, label: st.label, actions: st.actions, actionRefused, fields } };
+  return { step: st.index, label: st.label, actions: st.actions, actionRefused, fields };
+}
+
+/** Check trace files in instance batches; return one report per file, in input order. */
+export async function checkTraces(files, report = () => {}) {
+  const traces = files.map((file) => {
+    const trace = readTrace(file);
+    const t = translate(trace);
+    const result = { file, scenario: trace.scenario, test: trace.test, checked: t.steps.length, total: t.total, end: t.end, ok: false };
+    // A translation rejection stands on its own (round 1, 1-A-2); no Quint run is needed.
+    if (t.reject) {
+      result.failure = { step: t.reject.index, label: t.reject.label, actions: [], actionRefused: true, fields: [], reason: t.reject.reason };
+      report(result);
+    }
+    return { ...t, result };
+  });
+  await pool(groupTraces(traces.filter((t) => !t.reject)), Number(process.env.TRACE_JOBS ?? 4), (group) => checkGroup(group, report));
+  return traces.map((t) => t.result);
+}
+
+export async function checkTrace(file) {
+  const [result] = await checkTraces([file]);
+  return result;
 }
 
 async function pool(items, n, fn) {
-  const out = [];
+  if (!Number.isInteger(n) || n < 1) throw new Error('TRACE_JOBS must be a positive integer');
   let i = 0;
-  await Promise.all(Array.from({ length: Math.min(n, items.length) }, async () => {
-    while (i < items.length) { const k = i++; out[k] = await fn(items[k], k); }
+  const workers = await Promise.allSettled(Array.from({ length: Math.min(n, items.length) }, async () => {
+    while (i < items.length) await fn(items[i++]);
   }));
-  return out;
+  const failed = workers.find((r) => r.status === 'rejected');
+  if (failed) throw failed.reason;
 }
 
 function traceFiles(args) {
@@ -581,7 +714,10 @@ function traceFiles(args) {
 export const SCOPE = join(ROOT, 'test', 'integration', 'trace-scope.json');
 const keyOf = (r) => `${r.scenario} › ${r.test}`;
 
-/** The scope errors for accepted results against the allowlist; `whole` also checks stale entries. */
+/** The scope errors for accepted results against the allowlist; `whole` also checks stale entries.
+ * @param {readonly {scenario: string, test: string, ok: boolean, checked: number, end?: {index: number, reason: string} | null}[]} results
+ * @param {Record<string, {at: number, reason: string}>} scope
+ */
 export function scopeErrors(results, scope, whole = true) {
   const errors = [];
   const seen = new Set();
@@ -604,16 +740,12 @@ async function main(args) {
   args = args.filter((a) => a !== '--write-scope');
   const files = traceFiles(args);
   if (!files.length) {
-    console.error('check-traces: no traces — run the scenarios first (npm test writes test/.traces/)');
+    console.error('check-traces: no traces — run the scenarios with trace recording enabled (see model/full.mjs)');
     return 1;
   }
   let bad = 0;
   let full = 0;
-  const results = await pool(files, Number(process.env.TRACE_JOBS ?? 4), async (f, k) => {
-    const r = await checkTrace(f, `${process.pid}-t${k}`);
-    report(r);
-    return r;
-  });
+  const results = await checkTraces(files, report);
   function report(r) {
     const where = `${r.scenario} › ${r.test}`;
     if (!r.ok) {
@@ -627,7 +759,6 @@ async function main(args) {
     if (!r.end) full++;
     console.log(`✓ ${where} — ${r.checked}/${r.total} steps${r.end ? `; step ${r.end.index} on is outside the model: ${r.end.reason}` : ''}`);
   }
-  for (const f of readdirSync(OUT)) if (f.startsWith(`${process.pid}-`)) rmSync(join(OUT, f), { force: true });
   console.log(`\n${results.length} traces: ${results.length - bad} accepted (${full} whole), ${bad} rejected`);
   if (writeScope) {
     const scope = Object.fromEntries(results.filter((r) => r.ok && r.end).map((r) => [keyOf(r), { at: r.end.index, reason: r.end.reason }]).sort(([a], [b]) => (a < b ? -1 : 1)));

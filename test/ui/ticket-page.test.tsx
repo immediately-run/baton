@@ -4,7 +4,7 @@
 // hostile title is text. The controls are the registry's: an owner's entries draw hold, Stop
 // and the acknowledgement and no force-reap; an administrator's draw force-reap, the fence
 // clear and the completion's confirm and release too; unhold only where the read's `allowed`
-// names it; Stop is one click with `to_runner_id`; a destructive entry opens the confirm dialog.
+// names it; Stop confirms with `to_runner_id`; a destructive entry opens the confirm dialog.
 import { afterEach, describe, expect, it } from 'vitest';
 import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { ACTIONS, actionsFor } from '../../src/core/actions';
@@ -24,8 +24,7 @@ afterEach(() => {
 });
 
 const show = (over: Partial<TicketShow> = {}): TicketShow => ({
-  ticket_id: 'docs:T-1', repository: 'docs', course_id: 'course-a', course: 'course-a', title: 'The first ticket', path: 'tickets/T-1.mdx', tier: 'routine',
-  requires: ['cap-a', 'cap-x'], requires_unmet: ['cap-x'], tags: ['tag-a'], order: null, parent: 'docs:T-0', expedite: false,
+  ticket_id: 'docs:T-1', repository: 'docs', course_id: 'course-a', course: 'course-a', title: 'The first ticket', path: 'tickets/T-1.mdx', requires: ['cap-a', 'cap-x'], requires_unmet: ['cap-x'], tags: ['tag-a'], order: null, parent: 'docs:T-0', expedite: false,
   children: [{ ticket_id: 'docs:T-2', station: 'station-a' }],
   station: { station: 'station-b', path: [{ leg: 'leg-a', reached: 'station-b' }], next_leg: 'leg-b', to_end: 2 },
   position: { station: 'station-b', path_len: 1, next_leg: 'leg-b', next_source: 'course' },
@@ -108,7 +107,7 @@ describe('the ticket page’s sections (B-210)', () => {
     expect(claim.querySelector('.lease')!.getAttribute('aria-label')).toMatch(/^lease: (1 h|60 min) left$/);
     expect(claim.textContent).toContain('2 of 3');
     // R-BTN-113: a session link on session_hosts is a link; R-BTN-128: a log directory is text.
-    expect(within(claim).getByRole('link', { name: /claude\.ai\/code\/session_1/ }).getAttribute('href')).toBe('https://claude.ai/code/session_1');
+    expect(within(claim).getByRole('link', { name: /Open leg page/ }).getAttribute('href')).toBe('https://claude.ai/code/session_1');
     expect(claim.textContent).toContain('/var/log/baton/T-1/leg-b');
     expect([...claim.querySelectorAll('a')].some((a) => (a.getAttribute('href') ?? '').includes('/var/log'))).toBe(false);
     expect([...claim.querySelectorAll('code.cli')].map((c) => c.textContent)).toEqual(['baton leg log T-1 leg-b']);
@@ -142,8 +141,8 @@ describe('the ticket page’s sections (B-210)', () => {
 
     const runs = await screen.findByRole('table', { name: 'Leg runs' });
     await waitFor(() => expect(runs.querySelectorAll('tbody tr').length).toBe(2));
-    // A session link off session_hosts is text; the log directory and the transcript are text.
-    expect(runs.textContent).toContain('https://evil.example/session');
+    // A session link off session_hosts is a neutral label; the log directory and transcript are text.
+    expect(runs.textContent).not.toContain('https://evil.example/session');
     expect([...runs.querySelectorAll('a')].map((a) => a.getAttribute('href')).filter((h) => h?.startsWith('http'))).toEqual(['https://claude.ai/code/session_1']);
     expect(runs.textContent).toContain('/var/log/baton/T-1/leg-a');
     expect(runs.textContent).toContain('example-org/sessions:a/b.jsonl');
@@ -230,14 +229,16 @@ describe('the ticket page’s controls (B-222)', () => {
     expect(controlNames().join(' | ')).not.toMatch(/Lift a ticket’s hold|Confirm an unconfirmed|Clear a fenced/);
   });
 
-  it('Stop is one click, with to_runner_id and no dialog', async () => {
+  it('Stop confirms with to_runner_id', async () => {
     const { calls } = serve(show(), 'owner', { 'POST /v1/ui/messages': { ok: true } });
     renderApp('/repositories/docs/tickets/T-1');
     await screen.findByRole('heading', { level: 1 });
-    fireEvent.click(await screen.findByRole('button', { name: 'Stop' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Stop…' }));
+    expect(calls.some((c) => c.method === 'POST')).toBe(false);
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Stop' }));
     await waitFor(() => expect(calls.some((c) => c.method === 'POST')).toBe(true));
     const sent = calls.find((c) => c.method === 'POST')!;
-    expect([sent.path, sent.body]).toEqual(['/v1/ui/messages', { to_runner_id: 1, kind: 'release', payload: { ticket_id: 'docs:T-1', reason: 'requested' } }]);
+    expect([sent.path, sent.body]).toEqual(['/v1/ui/messages', { to_runner_id: 1, kind: 'release', confirm: true, payload: { ticket_id: 'docs:T-1', reason: 'requested' } }]);
     expect(screen.queryByRole('dialog')).toBeNull();
   });
 

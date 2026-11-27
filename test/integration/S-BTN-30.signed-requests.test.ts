@@ -10,11 +10,13 @@
 // a reading outside the instances it was registered with is accepted; a key in another role is
 // refused at the probe's route.
 import { describe, it, expect, beforeEach } from 'vitest';
-import { HOST, ORIGIN, call, hbBody, keyCall, register, setAdminKeys, rows, setClock, sha256, signedCall, SSH_KEYS, withCore } from '../helpers';
+import {
+  HOST, ORIGIN, call, hbBody, keyCall, register, setAdminKeys, rows, setClock, sha256, signedCall, SSH_KEYS,
+  withCore, revokeCredential, seedCredentialIn,
+} from '../helpers';
 import { makeKey, signedRequest } from '../lib/sshKeys';
-import { RunnerApi } from '../../src/core/runnerApi';
+import { runnerAuth } from '../lib/runnerAuth';
 import { call as hostCall, config } from '#host';
-import { Deprecated } from '../../src/core/deprecated';
 
 const T0 = Date.parse('2026-10-15T12:00:00Z');
 const NAMES = ['vm-ed', 'vm-p256', 'vm-sk-ed', 'vm-sk-p256'] as const;
@@ -73,7 +75,7 @@ describe(`S-BTN-30 signed requests (${HOST})`, () => {
   it('a request by a revoked key is refused, and its runner stops at its next call', async () => {
     const secret = 'secret-revoked';
     expect((await signedCall('vm-sk-ed', '/v1/runner/heartbeat', { body: await keyBeat('vm-sk-ed', secret) })).res.status).toBe(200);
-    await rows(`UPDATE credentials SET revoked_at = ? WHERE id = ?`, T0, SSH_KEYS['vm-sk-ed'].fingerprint);
+    await revokeCredential(SSH_KEYS['vm-sk-ed'].fingerprint, T0);
     const { res } = await signedCall('vm-sk-ed', '/v1/runner/heartbeat', { secret, body: hbBody('vm-a', { hostname: 'vm-sk-ed', session_name: 's-vm-sk-ed' }) });
     expect(res.status).toBe(401);
     expect(await code(res)).toBe('unauthenticated');
@@ -134,7 +136,7 @@ describe(`S-BTN-30 signed requests (${HOST})`, () => {
     const { id, secret } = await register('vm-a');
     const key = await makeKey('ecdsa-sha2-nistp256', 'vm-a');
     await withCore(async (c) => {
-      const w = new RunnerApi({ store: c.store, deprecated: new Deprecated(c.store), config: { ...config, BATON_KEYS: JSON.stringify([{ key: key.publicKey, name: 'vm-a', allowed_capabilities: ['agent-venue'] }]) } as never, now: () => T0 });
+      const w = runnerAuth({ store: c.store, config: { ...config, BATON_KEYS: JSON.stringify([{ key: key.publicKey, name: 'vm-a', allowed_capabilities: ['agent-venue'] }]) }, now: () => T0 });
       await w.seedKeys();
     });
     const beat = (k: typeof key, body: unknown) => signedRequest(k, `${ORIGIN}/v1/runner/heartbeat`, { created: T0 / 1000, headers: { 'X-Runner-Secret': secret }, body: JSON.stringify(body) });
@@ -147,7 +149,7 @@ describe(`S-BTN-30 signed requests (${HOST})`, () => {
 
   it('a session under a key the seed revoked continues under its new key; nothing moves it back, and a token never takes it (round 2, 2-A-3)', async () => {
     const seed = (k: Awaited<ReturnType<typeof makeKey>>) => withCore(async (c) => {
-      await new RunnerApi({ store: c.store, deprecated: new Deprecated(c.store), config: { ...config, BATON_KEYS: JSON.stringify([{ key: k.publicKey, name: 'vm-a', allowed_capabilities: ['agent-venue'] }]) }, now: () => T0 }).seedKeys();
+      await runnerAuth({ store: c.store, config: { ...config, BATON_KEYS: JSON.stringify([{ key: k.publicKey, name: 'vm-a', allowed_capabilities: ['agent-venue'] }]) }, now: () => T0 }).seedKeys();
     });
     const beat = async (k: Awaited<ReturnType<typeof makeKey>>, secret: string, body: unknown) =>
       hostCall(await signedRequest(k, `${ORIGIN}/v1/runner/heartbeat`, { created: T0 / 1000, headers: secret ? { 'X-Runner-Secret': secret } : {}, body: JSON.stringify(body) }));
@@ -171,7 +173,7 @@ describe(`S-BTN-30 signed requests (${HOST})`, () => {
   it('a session never moves between two bearer tokens, even for one name (round 2, 2-A-3)', async () => {
     const { secret } = await register('vm-a');
     await withCore((c) => {
-      c.store.exec(`INSERT INTO credentials (id, hostname, allowed_capabilities) VALUES ('vm-a-2', 'vm-a', '["agent-venue"]')`);
+      seedCredentialIn(c.store, { id: 'vm-a-2', hostname: 'vm-a', allowed_capabilities: '["agent-venue"]' });
       return expect(c.runners.heartbeat('vm-a-2', secret, hbBody('vm-a'))).rejects.toMatchObject({ code: 'forbidden' });
     });
     expect(await rows('SELECT credential_id FROM runners')).toEqual([{ credential_id: 'vm-a' }]);

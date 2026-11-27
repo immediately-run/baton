@@ -35,7 +35,7 @@ describe('cursor', () => {
     expect(refused(() => checkCursor(KEY, bind({ action: 'runner.list' }), cursor))).toBe('invalid-params');
     expect(refused(() => checkCursor(KEY, bind({ query: { state: 'blocked', limit: '50' } }), cursor))).toBe('invalid-params');
     expect(refused(() => checkCursor(KEY, bind({ query: { state: 'ready' } }), cursor))).toBe('invalid-params');
-    expect(refused(() => checkCursor(KEY, bind({ query: { state: 'ready', limit: '50', tier: 'routine' } }), cursor))).toBe('invalid-params');
+    expect(refused(() => checkCursor(KEY, bind({ query: { state: 'ready', limit: '50', q: 'other' } }), cursor))).toBe('invalid-params');
     expect(refused(() => checkCursor('b'.repeat(64), bind(), cursor))).toBe('invalid-params');
   });
 

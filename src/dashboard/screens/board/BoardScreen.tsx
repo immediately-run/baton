@@ -1,15 +1,16 @@
 // BoardScreen.tsx — `/repositories/{r}/board` (B-209 item 1): the repository as it stands. Two
 // sections, each one filtered `repo.tickets` read followed to its end by cursor: Ready — in
-// Baton's matching order (R-BTN-61), each row its tier, requires, the eligible live runners by
+// Baton's matching order (R-BTN-61), each row its requirements, the eligible live runners by
 // name, and for a ticket none can take the failed rule as text — and Running — the live claims
 // as holders: runner, leg, running for, the lease as a bar with now marked, `stalled` and the
 // condition a leg waits on, as the read says them. Above Ready, `GET …/board`'s
-// `ready_by_tier` in one line; below, the capabilities the read names as granted. No control
+// The capabilities the read names as granted. No control
 // (a ticket's are on its page), no order and no state computed here. Rows are cards at 375 px.
 import type { ReactNode } from 'react';
 import { ReadGate } from '../../app/Refusal';
 import { Link, pathOrNull } from '../../app/router';
 import { span } from '../../lib/format';
+import { ExtLink } from '../../lib/links';
 import { useRead } from '../../lib/reads';
 import { Text } from '../../lib/Text';
 import { Empty, ErrorNote, Loading, PageHeader, Section, StatusMark, useClock } from '../../lib/ui';
@@ -34,7 +35,6 @@ function ReadyRow({ row, repository }: { row: TicketRow; repository: string }) {
   return (
     <tr className="tk-row">
       <th scope="row" className="tk-id"><TicketCell row={row} repository={repository} />{row.expedite ? <span className="chip tk-flag">expedite</span> : null}</th>
-      <td data-label="Tier">{row.tier != null ? <Text value={row.tier} /> : <span className="mut">—</span>}</td>
       <td data-label="Requires"><Chips names={row.requires ?? []} unmet={row.requires_unmet} empty="none" /></td>
       <td data-label="Who can take it">
         {runners === null ? <span className="mut">—</span>
@@ -56,6 +56,9 @@ function RunningRow({ row, repository }: { row: TicketRow; repository: string })
       <th scope="row" className="tk-id"><TicketCell row={row} repository={repository} /></th>
       <td data-label="Runner"><RunnerLink runner={{ runner_id: d.runner_id as number, hostname: d.hostname as string, session_name: d.session_name as string }} repository={repository} /></td>
       <td data-label="Leg">{d.leg != null ? <Text mono value={d.leg} /> : <span className="mut">—</span>}</td>
+      <td data-label="Leg page">{d.session_url
+        ? <ExtLink kind="session" href={d.session_url} showHost />
+        : <span className="mut">{d.session_link === true ? 'Link unavailable' : 'No leg page reported'}</span>}</td>
       <td data-label="Running for">{since !== null ? span(Math.max(0, now - since)) : <span className="mut">—</span>}</td>
       <td data-label="Lease"><LeaseBar from={d.since} to={d.lease_ends_at} /></td>
       <td data-label="Notes">
@@ -72,21 +75,6 @@ function Gate({ pages, children }: { pages: Pages; children: (first: TicketsAnsw
   return <ReadGate<TicketsAnswer> read={pages.first} entity="ticket list">{children}</ReadGate>;
 }
 
-/** `ready_by_tier` in one line: each tier ceiling of the repository's ladder with how many
- *  ready tickets a runner under it is offered. */
-function ByTier({ board }: { board: BoardAnswer | undefined }) {
-  const tiers = board?.ready_by_tier;
-  if (!tiers || typeof tiers !== 'object') return null;
-  const entries = Object.entries(tiers).filter(([, ids]) => Array.isArray(ids));
-  if (entries.length === 0) return null;
-  return (
-    <p className="bd-tiers">
-      <span className="mut">Ready under each tier ceiling: </span>
-      {entries.map(([tier, ids], i) => <span key={tier}>{i ? ' · ' : ''}<Text value={tier} /> <span className="mono">{(ids as unknown[]).length}</span></span>)}
-    </p>
-  );
-}
-
 export function BoardScreen({ params }: ScreenProps) {
   const repo = params.repository;
   const base = `/v1/repositories/${encodeURIComponent(repo)}`;
@@ -98,12 +86,12 @@ export function BoardScreen({ params }: ScreenProps) {
     <>
       <PageHeader title="Board" sub="The repository as it stands: what is running, and what is ready, in Baton’s order." />
       <Section title="Ready" count={ready.first.data ? ready.rows.length : undefined} hint="In the order Baton offers them">
-        {board.error && !board.data ? <ErrorNote error={board.error} what="The board read" /> : <ByTier board={board.data} />}
+        {board.error && !board.data ? <ErrorNote error={board.error} what="The board read" /> : null}
         <Gate pages={ready}>
           {() => (ready.rows.length === 0 ? <Empty>No ticket is ready.</Empty> : (
             <div className="table-wrap tk-wrap">
               <table className="table tk-table bd-ready" aria-label="Ready tickets">
-                <thead><tr><th scope="col">Ticket</th><th scope="col">Tier</th><th scope="col">Requires</th><th scope="col">Who can take it</th></tr></thead>
+                <thead><tr><th scope="col">Ticket</th><th scope="col">Requires</th><th scope="col">Who can take it</th></tr></thead>
                 <tbody>{ready.rows.map((row) => <ReadyRow key={row.ticket_id} row={row} repository={repo} />)}</tbody>
               </table>
             </div>
@@ -116,7 +104,7 @@ export function BoardScreen({ params }: ScreenProps) {
           {() => (running.rows.length === 0 ? <Empty>No ticket is claimed.</Empty> : (
             <div className="table-wrap tk-wrap">
               <table className="table tk-table bd-running" aria-label="Running tickets">
-                <thead><tr><th scope="col">Ticket</th><th scope="col">Runner</th><th scope="col">Leg</th><th scope="col">Running for</th><th scope="col">Lease</th><th scope="col">Notes</th></tr></thead>
+                <thead><tr><th scope="col">Ticket</th><th scope="col">Runner</th><th scope="col">Leg</th><th scope="col">Leg page</th><th scope="col">Running for</th><th scope="col">Lease</th><th scope="col">Notes</th></tr></thead>
                 <tbody>{running.rows.map((row) => <RunningRow key={row.ticket_id} row={row} repository={repo} />)}</tbody>
               </table>
             </div>

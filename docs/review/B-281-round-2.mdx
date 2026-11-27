@@ -1,0 +1,14 @@
+---
+title: "B-281 review, round 2"
+description: "Disposition of the pin-integrity and diagnostic findings on PR 375."
+---
+
+[Review](https://github.com/immediately-run/baton/pull/375#pullrequestreview-6016314056) of
+`28c5258d62a89f6faf6c5f80c85b3231fbd0fffc`: changes requested.
+
+- [Blocking: source changes omitted by Git status](https://github.com/immediately-run/baton/pull/375#discussion_r4661597538).
+  Fixed: compare the actual build-input bytes to Git blobs without trusting the index's
+  change detection. A regression covers both source init and the prebuilt package manifest.
+- [Should-fix: misleading dirty-package diagnostic](https://github.com/immediately-run/baton/pull/375#discussion_r4661597541).
+  Fixed: init and its check explicitly require a clean build. The installed-package check
+  covers an explicit pin and verifies that it does not override the refusal.

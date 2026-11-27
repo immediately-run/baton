@@ -114,7 +114,6 @@ R-BTN-69 (proposed). Each of these is refused as an unknown field today.
   | `executor` | leg | executor data: a JSON object Baton never reads, passed to the runner's executor | R-BTN-107 |
   | `check_command` | leg | a check course's verdict command: an argv, with `timeout_s` (default 1800, ≤ 7200) | R-BTN-153 |
 | `kind: call` | leg | files children of its `spawns` courses and waits for them; its `to` is a completion table | R-BTN-165 |
-| `requires.tickets`, `requires.resources` | leg | prerequisites other than capabilities | R-BTN-120 |
 
 The validation these fields would add, with the field names an earlier schema used:
 
@@ -378,8 +377,7 @@ R-BTN-142 (proposed).
 
 ## 7. Runner capability checks
 
-R-BTN-121 (proposed). Today a runner declares capabilities with `--capabilities` and a
-machine-exclusive one with `--lock`.
+R-BTN-121: account-instance reporting and confirmation of a blocked end remain proposed.
 
 - **The runner declares what it has** in its configuration (`baton runner start --config`,
   default `~/.config/baton/runner.json`): `{origin, capabilities: [{name, check?: [<argv>…],
@@ -438,10 +436,10 @@ On a `git` repository:
   validator refuses one that does), so
   no reader of `branch_pattern` — a station function, R-BTN-25's continuation, the PR courses'
   mapping, the branch-holder query — ever sees it, and no work branch's name collides with it.
-  `runner`, `trusted-runner` and `human` may push it, a constant no policy changes (R-BTN-180).
+  Every runner and the human may push it, a constant no policy changes (R-BTN-180).
 - **Not a work branch.** A push to it is no write in R-BTN-183's sense: it reports no range, is
   exempt from continuity and foreign-commit resets, and does not make a leg a writing leg
-  (`std:wrote@1`, `std:ran@1`), so a review leg that writes its round stays independent.
+  (`std:wrote@1`), so a review leg that writes its round stays a reader.
 - **Its layout.** Its tree holds only `.baton-legs/<ticket id>/<leg>/<claim nonce>/…`, the
   ticket id byte-equal to the branch's. Each segment below `.baton-legs/<ticket id>/` matches
   `^[a-z0-9][a-z0-9._-]{0,63}$` and none case-folds to a harness configuration file R-BTN-184's
@@ -474,10 +472,8 @@ Under either value:
 - **Detected if it lands anyway.** Such a segment anywhere in the default branch's tree raises
   `baton.leg-state-landed`, a `notify` condition whose `detail` holds the count of entries and the
   ids of the repository's existing tickets among their subdirectory names, never paths or other
-  text. Where the repository has a protection checker (R-BTN-180), only its reading, reported in
-  its heartbeat's `protection` as `legs: {count, tickets}`, raises and closes the condition;
-  elsewhere the sync's reading, posted with the board as `legs_landed: {count, tickets}`, does,
-  and the condition is advisory, since any holder of the sync key can post. The check reads the
+  text. The sync's reading, posted with the board as `legs_landed: {count, tickets}`, raises
+  and closes it, and the condition is advisory, since any holder of the sync key can post. The check reads the
   tree, not history. On plain git, `baton repo protect --print` adds a `pre-receive` rule refusing
   default-branch updates that add such a segment.
 

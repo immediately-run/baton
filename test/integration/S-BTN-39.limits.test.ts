@@ -2,21 +2,21 @@
 // R3-1240): docs' owner sets an owner bar on `account:go_plus` (every course, claims only, from
 // +1 h), an owner bar on `family:x` for the course `chore` only, the required bar
 // `{course: roadmap-pr, leg: *, except: [implement, review, adjudicate], tag_prefix: family:}`,
-// `retry` of one backoff, and a grant `max_tier` of routine; an agent then commits a sync that
-// drops every `family:` bar, a `baton.json` with no backoff, and a ticket re-tiered `routine` from
-// `critical`. Must hold: from +1 h Go runners are refused new claims `barred-tag` while a held Go
+// `retry` of one backoff; an agent then commits a sync that drops every `family:` bar and
+// a `baton.json` with no backoff. Must hold: from +1 h Go runners are refused new claims `barred-tag` while a held Go
 // claim still advances; the `chore` bar bars no `roadmap-pr` leg; the next snapshot's `fix` and
 // `merge` legs are stored `waiting` on `policy` and listed under Needs you; the retry policy is
-// the owner's; the re-tiered ticket is offered to the routine-capped key (a ticket's tier is
-// git's), which the dashboard shows beside the commit that changed it. Runs on both hosts.
+// the owner's. Runs on both hosts.
 import { describe, it, expect, beforeEach } from 'vitest';
 import roadmapPr from '../fixtures/courses/roadmap-pr/course.json';
 import chore from '../fixtures/courses/chore/course.json';
-import { adminSession, advance, beat, captureDispatches, claimItem, course, cutover, endClaim, Git, hbBody, keyCall, ORIGIN, placed, register, rows, sessionCall, setAdminKeys, setClock, sha256, tick, withCore } from '../helpers';
+import { adminSession, advance, beat, captureDispatches, claimItem, course, cutover, endClaim, Git, hbBody, keyCall, ORIGIN, placed, register, rows, sessionCall, setAdminKeys, setClock, setMigrationAppliedAt, sha256, tick, withCore } from '../helpers';
 import { makeKey, signedRequest, type TestKey } from '../lib/sshKeys';
 import { call as hostCall } from '#host';
+import { DAY_MS, DROP_TIERS_MIGRATION } from '../../src/core/deprecated';
 
-const T0 = Date.parse('2026-10-16T12:00:00Z');
+// Drive time explicitly; do not let a real workerd alarm race a simulated clock jump.
+const T0 = Date.parse('2030-10-16T12:00:00Z');
 const H = 3_600_000;
 const M10 = 10 * 60_000;
 const REVIEWED: [string, string][] = [['implement', 'pr-open'], ['review', 'reviewed']];
@@ -38,6 +38,7 @@ async function runnerAs(key: TestKey, path: string, body?: unknown, secret?: str
 
 beforeEach(async () => {
   await setClock(T0);
+  await setMigrationAppliedAt(DROP_TIERS_MIGRATION, T0);
   admin = await makeKey('ssh-ed25519', 'admin');
   owner = await makeKey('ssh-ed25519', 'docs-owner');
   await setAdminKeys(admin);
@@ -47,13 +48,63 @@ beforeEach(async () => {
     .add('T-1', { rank: 1 })
     .add('T-2', { rank: 2 })
     .add('T-3', { rank: 3 }, AT_REVIEWED({ fix: ['family:glm'], merge: ['family:glm'] }))
-    .add('T-4', { rank: 4, tier: 'critical' });
+    .add('T-4', { rank: 4 });
   await git.post();
   await cutover();
   expect((await keyCall(admin, '/v1/admin/repositories', { id: 'docs', owner_keys_add: [owner.publicKey] })).status).toBe(200);
 });
 
 describe('S-BTN-39 limits agents cannot change', () => {
+  it('ignores legacy ceilings and ticket tiers without limiting or releasing a claim', async () => {
+    const k = await makeKey('ssh-ed25519', 'legacy-grant-client');
+    const secret = 'tier-test';
+    const grant = { public_key: k.publicKey, hostname: 'k-host', capabilities: ['agent-venue'], max_tier: 'judgement' };
+    expect((await own('/grants', grant)).status).toBe(200);
+    const legacy = { tier_ceiling: 'nonsense', tier_ceilings: [false, {}] };
+    const hb = hbBody('vm-a', { hostname: 'k-host', session_name: 'k', secret_hash: await sha256(secret) });
+    expect((await runnerAs(k, '/v1/runner/heartbeat', { ...hb, ...legacy })).status).toBe(200);
+    git.tickets.get('T-1')!.tier = 'normal';
+    expect((await git.post()).status).toBe(200);
+    const claimed = await runnerAs(k, '/v1/runner/claim', { request_id: 'tier-test', ticket_id: 'docs:T-1' }, secret);
+    expect(claimed.status).toBe(200);
+    git.tickets.get('T-1')!.tier = 'critical';
+    expect((await git.post()).status).toBe(200);
+    expect((await runnerAs(k, '/v1/runner/heartbeat', { ...hb, ...legacy }, secret)).json.messages).toEqual([]);
+    expect(await rows('SELECT status FROM claims WHERE id = ?', claimed.json.claim_id)).toEqual([{ status: 'active' }]);
+    const events = () => rows(`SELECT json_extract(detail_json, '$.field') AS field FROM events WHERE kind = 'deprecated-field' ORDER BY field`);
+    expect(await events()).toEqual(['grant.max_tier', 'heartbeat.tier_ceiling', 'heartbeat.tier_ceilings', 'ticket.tier'].map((field) => ({ field })));
+    await setClock(T0 + DAY_MS);
+    expect((await runnerAs(k, '/v1/runner/heartbeat', { ...hb, ...legacy }, secret)).status).toBe(200);
+    expect(await events()).toHaveLength(6);
+  });
+
+  it('expires 30 days after the last sighting, including a same-day repeat', async () => {
+    const change = () => keyCall(admin, '/v1/admin/repositories', { id: 'docs', tiers: false });
+    expect((await change()).status).toBe(200);
+    await setClock(T0 + H);
+    expect((await change()).status).toBe(200);
+    expect(await rows("SELECT seen_at FROM deprecated_fields WHERE field = 'repository.tiers'")).toEqual([{ seen_at: T0 + H }]);
+    await setClock(T0 + 30 * DAY_MS);
+    expect((await change()).status).toBe(200);
+    await setClock(T0 + 60 * DAY_MS);
+    expect(await change()).toMatchObject({ status: 400, json: { code: 'invalid-params' } });
+    expect((await keyCall(admin, '/v1/admin/repositories', { id: 'docs', weight: 100 })).status).toBe(200);
+  });
+
+  it('keeps the tickets ETag when an ignored filter is seen again (R-BTN-196)', async () => {
+    const path = ORIGIN + '/v1/repositories/docs/tickets?tier=ignored';
+    const read = async (etag?: string) => hostCall(await signedRequest(owner, path, {
+      created: T0 / 1000, headers: etag ? { 'If-None-Match': etag } : {},
+    }));
+    const first = await read();
+    expect(first.status).toBe(200);
+    const etag = first.headers.get('ETag');
+    expect(etag).toBeTruthy();
+    expect((await read(etag!)).status).toBe(304);
+    await setClock(T0 + 1_000);
+    expect((await read(etag!)).status).toBe(304);
+    expect(await rows("SELECT seen_at FROM deprecated_fields WHERE field = 'tickets.tier'")).toEqual([{ seen_at: T0 + 1_000 }]);
+  });
   it('an owner bar on every course, claims only, from +1 h: new Go claims are refused, a held one still advances', async () => {
     expect((await own('/bars', { course: '*', tag: 'account:go_plus', applies: 'claim', starts_at: T0 + H, reason: 'go-quota' })).status).toBe(200);
     // Scheduled, not yet in force: the observation shows it, and a Go runner still claims.
@@ -133,21 +184,6 @@ describe('S-BTN-39 limits agents cannot change', () => {
     expect(await rows(`SELECT hold, hold_reason FROM ticket_overrides WHERE ticket_id = 'docs:T-1'`)).toEqual([{ hold: 1, hold_reason: 'attempts-exhausted' }]);
   });
 
-  it('a ticket re-tiered in git is offered to the routine-capped key, beside the commit that changed it', async () => {
-    const k = await makeKey('ssh-ed25519', 'k');
-    expect((await own('/grants', { public_key: k.publicKey, hostname: 'k-host', capabilities: ['agent-venue'], max_tier: 'routine' })).status).toBe(200);
-    const secret = 'secret-k';
-    expect((await runnerAs(k, '/v1/runner/heartbeat', hbBody('vm-a', { hostname: 'k-host', session_name: 'k', secret_hash: await sha256(secret), tier_ceiling: 'critical' }))).json).toMatchObject({ runner_id: expect.any(Number) });
-    expect((await runnerAs(k, '/v1/runner/claim', { request_id: 'req-k-critical', ticket_id: 'docs:T-4' }, secret)).json).toMatchObject({ code: 'not-eligible', rule: 5 });
-    // An agent re-tiers T-4 in git: the tier is git's, and the grant's cap now admits it.
-    git.add('T-4', { rank: 4, tier: 'routine' });
-    expect(await git.post()).toMatchObject({ status: 200 });
-    const state = await wholeState();
-    expect(state.ready.find((t: { id: string }) => t.id === 'docs:T-4')).toMatchObject({ tier: 'routine', changed_in: git.head });
-    // The dashboard's limits show the grant's cap by name.
-    expect(state.limits.grants).toEqual([expect.objectContaining({ repository_id: 'docs', hostname: 'k-host', max_tier: 'routine' })]);
-    expect((await runnerAs(k, '/v1/runner/claim', { request_id: 'req-k-routine', ticket_id: 'docs:T-4' }, secret)).json).toMatchObject({ ticket_id: 'docs:T-4' });
-  });
   it('a bar that releases holders sends each tagged holder one release, once; the end it asks for is no failed attempt', async () => {
     const dispatched = await captureDispatches();
     const go = await register('vm-a', { tags: ['account:go_plus'] });

@@ -96,7 +96,7 @@ describe('B-169 the security review’s corrections', () => {
     expect([under.status, (await under.json() as Record<string, unknown>).code]).toEqual([401, 'unauthenticated']);
   });
 
-  it('a checks map names exactly one success, one failure and at most one timed_out', async () => {
+  it('S-BTN-68: a checks map names exactly one success, one failure and at most one timed_out', async () => {
     const good = { check: { name: 'baton check', conclusions: PASS } };
     expect((await as(owner, '/v1/owner/ops/settings', { checks: good }, 'PUT')).status).toBe(200);
     const two: Record<string, 'success' | 'failure' | 'timed_out'> = { passed: 'success', failed: 'success' };
@@ -169,7 +169,7 @@ describe('B-169 the security review’s corrections', () => {
     expect(await stored()).toEqual({ check: { conclusions: { passed: 'success', failed: 'failure' } } });
   });
 
-  it('every answer a credential or a session authorizes carries Cache-Control: no-store, and a public page does not', async () => {
+  it('S-BTN-124: a session signs in and reads with Cache-Control: no-store, as other credentials do; public pages do not', async () => {
     // A dashboard session's read (S-BTN-124), and the sign-in that hands out the cookie.
     const cookie = await adminSession(admin);
     const state = await sessionCall(cookie, '/v1/repositories');

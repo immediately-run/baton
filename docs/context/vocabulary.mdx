@@ -9,19 +9,29 @@ tags: [context]
 <Lede>These are core's words. A word not on this page — pull request, review, model, provider —
 belongs to a course, and Baton passes it through unread.</Lede>
 
-**Repository.** A git repository registered with Baton. Its `.baton/` folder describes its
-courses; its sync tells Baton where every ticket is.
+**Arena.** What one Baton coordinates as a unit: one **ticket source**; one Baton configuration
+(`.baton/`), kept in a git repository, the arena's **config repository**; everything Baton owns
+about those tickets — where each stands in its course, its history, claims and attestations; and
+the arena's owners, its policy and its grants (and, proposed, its roster and its notifier
+keys). Its sync tells Baton which tickets its source holds and what git shows of them; where each
+stands is Baton's own record (R-BTN-39). One Baton serves many arenas. What an arena
+covers is its owners' choice (the owner, 2026-11-26). **The spec, the API, the CLI and the
+dashboard still write an arena as a `repository`** — `/v1/repositories/{repository}`, `--repo`,
+the screens `repository/…`, `repository_owners` — **and the arena a CLI command acts on as its
+home** (`--home`, `BATON_HOME`, "the home in force"); those names change in stages, the old ones
+accepted meanwhile.
 
-**Home, code repository.** Every ticket lives in one repository, its **home**, which holds its
-board, its courses and its owners. The repositories a ticket's work changes are its **code
-repositories**: the home's owners list them in `code_repos`
-(a home that lists none reaches them by name where its policy's `repos.unlisted` allows,
-R-BTN-140), and they hold no tickets of their own. What a home covers is its owners' choice; Baton has no word for it.
+**Repository, config repository, code repository.** A repository is a git repository, and nothing
+else. An arena's configuration lives in its config repository; a Dibber ticket store usually lives
+there too. The repositories an arena's tickets' work changes are its **code repositories**: its
+owners list them in `code_repos` (an arena that lists none reaches them by name where its policy's
+`repos.unlisted` allows, R-BTN-140). A code repository holds no tickets, unless it is also the
+arena's config repository.
 
-**Ticket.** A unit of work, filed in its repository's ticket source. Baton knows its id, course,
-tier and requirements, never its body.
+**Ticket.** A unit of work, filed in its arena's ticket source. Baton knows its id, course
+and requirements, never its body.
 
-**Ticket source, reader, writer.** The repository's code that reads its tickets from their store
+**Ticket source, reader, writer.** The arena's code that reads its tickets from their store
 and posts them in each sync — the **reader** — and may write to that store: a new ticket, a
 withdrawal — the **writer**. The default is the
 markdown source, the store a git folder (R-BTN-74). A writer that Baton drives, and one that
@@ -52,7 +62,7 @@ outcomes are the station it left and each station of its `reconciles.to` (R-BTN-
 **course history**, which git never writes.
 
 **Runner.** An agent session on a machine, identified by its key. It declares capabilities,
-a tier ceiling, tags and the courses it can run.
+tags and the courses it can run.
 
 **Capability.** A name a runner declares (`key:anthropic`, `capability:code-generation-llm`) and
 a leg requires; Baton matches the two by name and derives nothing. What the keys and tools a
@@ -60,12 +70,12 @@ runner holds amount to is the runner's own statement, and which model and key a 
 course's choice, in its ranking code and instructions (R-BTN-174, §6.10).
 
 **Executor, provides.** The module a CLI runner starts every leg and runs every call into
-repository code through — `builtin` (child processes, the default), the home's own, or one pinned
-on the host — chosen by the runner's host, never by a repository; it names the capabilities it
+repository code through — `builtin` (child processes, the default), the arena's own, or one pinned
+on the host — chosen by the runner's host, never by an arena; it names the capabilities it
 **provides**, which Baton matches by name like any declared capability and never judges
 (R-BTN-107).
 
-**Executor data.** The JSON object a course or home may give a leg for its executor, which Baton
+**Executor data.** The JSON object a course or arena may give a leg for its executor, which Baton
 passes through and never reads or stores (R-BTN-107).
 
 **Capacity, seat.** A capability with a capacity has that many seats: a claim holds one, fixed when
@@ -79,19 +89,19 @@ the leg's), and a claim past capacity is refused (R-BTN-178). Not the tenant's c
 **Lease, heartbeat, reap, fence.** A claim lives while its runner heartbeats. A silent runner
 is **reaped** at its lease; a **fence** stops a revived runner from writing.
 
-**Gate.** A rule Baton enforces for safety: one holder, capabilities and their capacity, tier, grants, barred
+**Gate.** A rule Baton enforces for safety: one holder, capabilities and their capacity, grants, barred
 tags. Everything else is **advice**.
 
 **Tag, barred tag.** Short strings a course gives runners (`family:glm`). A leg can bar tags,
 so some runners may not run it.
 
-**Owner bar, required bar.** Limits a repository's owners set in Baton, which no push changes:
+**Owner bar, required bar.** Limits an arena's owners set in Baton, which no push changes:
 tags barred across courses, and bars every leg must carry. Under `cooperative` they, like every
 position and count Baton owns, are a **coordination record** for runners that cooperate — a
 pusher can re-file a ticket or edit its course and Baton does not try to notice; under
 `protected` the forge and the trusted runners make the same state a boundary (R-BTN-66).
 
-**Sync, snapshot, observation.** The repository's sync reads git and posts a **snapshot**.
+**Sync, snapshot, observation.** The arena's sync reads its ticket source and git and posts a **snapshot**.
 Each carries an **observation** number, so a stale reading never overrules a newer one.
 
 **Confirmation.** A completion counts once a later snapshot shows its evidence; its position
@@ -133,60 +143,60 @@ course that handles a leg's condition (R-BTN-160, R-BTN-161). A **leg event** go
 cancelled; Baton alone queues it, and the ticket is withdrawn when it ends (R-BTN-168;
 [proposed, not built](../../spec/proposals/conditions.md)).
 
-**Administrator, owner, grant.** Administrators run the instance; each repository's owners
-grant runner keys access to it.
+**Administrator, owner, member, grant.** Administrators run the instance; each arena's owners
+grant runner keys access to it; its members read it and answer the person legs whose `asks`
+labels they hold (R-BTN-204). Each is a person's key, and the CLI and the dashboard carry all
+three (R-BTN-186); MCP carries an owner's alone so far (an open question).
 
 **Action, registry.** Everything a credential can ask Baton to do is one action in one registry,
 named `<noun>.<verb>`, with the principals that may call it; the API, the CLI, the dashboard and
 MCP are generated from it and checked by one `authorize`. The CLI is `baton <noun> <verb>`, and
 its help comes from the registry (R-BTN-127, R-BTN-129).
 
-**Session.** A dashboard sign-in of an administrator's or owner's key, opened by its link or a
-code its holder confirms, or by an email Cloudflare Access verified that `ACCESS_IDENTITIES`
-binds to the key; one principal, carrying its key's role, an owner's reaching only the
-repositories the key still owns (R-BTN-155).
+**Session.** A dashboard sign-in of one administrator's, owner's or member's key, for one browser
+tab, opened by its link or a code its holder confirms, or by an email Cloudflare Access verified
+that `ACCESS_IDENTITIES` binds to the key — the person picking the key after authenticating
+where they hold several; one principal, carrying its key's role and able to do what that key
+can, an owner's or member's reaching only the arenas the key still holds (R-BTN-155). A
+person using the dashboard is a human: a session acts as `human` beside its role, under
+`human_key: any` only when Cloudflare Access or a `human_only` key opened it (R-BTN-185).
 
-**Screen.** One entity's page of the dashboard — sign in, pick a repository, one entity per
+**Screen.** One entity's page of the dashboard — sign in, pick an arena, one entity per
 screen — named `root`, `tenant/<segment>` or `repository/<segment>[/{param}]`; what it draws is
 that entity's REST reads, and its controls the registry actions whose `ui.view` names it
 (R-BTN-129, §11.4).
 
-**Overview strip.** The line every repository screen carries — running now · ready · needs you —
-linking to Board, Tickets and Conditions, with the repository's mode where it is not cut over
+**Overview strip.** The line every arena's screen carries — running now · ready · needs you —
+linking to Board, Tickets and Conditions, with the arena's mode where it is not cut over
 (§11.4).
 
 **Delegated key.** An MCP key: a bearer an owner's tool holds, acting as an owner of one
-repository for the actions listed when it was minted. It may tighten (hold, bar, stop,
+arena for the actions listed when it was minted. It may tighten (hold, bar, stop,
 cancel) and undo its own tightenings, never loosen another's, route, adopt, resolve, answer a person's leg or
 touch credentials or the policy (R-BTN-186, R-BTN-130). No delegated key can be minted yet:
 MCP is [proposed, not built](../../spec/proposals/people-and-dashboard.md).
 
-**Policy, preset, guarantee, floor.** A repository's policy is the one versioned document of
-every rule about authority and trust — who lands on which refs, who approves what, whose
+**Policy, preset, guarantee, floor.** An arena's policy is the one versioned document of
+every rule about authority and trust — who lands what, who approves what, whose
 attestations count — held in Baton, never in git. A preset (`cooperative`, `protected`,
 `protected-hardware`) is a set of values an owner applies and then tunes. A guarantee is a named
 condition over the policy; `floors` is the knob listing the guarantees Baton refuses to let any
 change break (§12.8). Baton's own server is trusted: a compromised Baton is recovered, not
 resisted, so nothing is signed for a verifier outside it.
 
-**Role, domain.** What a grant says about its runner's trust: its role (`runner`, or
-`trusted-runner` for the legs marked `trusted`) and its domain, a label whose meaning is the
-deployment's, both set by the policy's `approvers.roles` approver. Two reviews count as independent when
-their domains differ. Baton compares the labels and verifies nothing about them (R-BTN-180).
-
 **Run id.** The opaque id Baton mints for every leg run at its start (`r_` and a ULID), carried
 by the history, the resume record and leg logs (R-BTN-63).
 
 **Pusher.** A forge author whose words count — a verdict, a marker, an approval — because the
 forge reports they can push the PR's base, or the owners list them in `pushers`. The one sense in
-which a forge author is trusted; "trusted" otherwise names the runner role (R-BTN-139).
+which a forge author is trusted; "trusted" otherwise names a leg property and the runner that runs such a leg (R-BTN-139, R-BTN-182).
 
 **Attestation, reading.** Everything Baton is told about the world: a typed statement it records —
 a review, a check run, a human's approval or answer, a runner's report of where its leg reached,
 a fact the sync read from git, a deliverer's delivery (the outbox is proposed, not built), a provider's remaining funds — about a ticket
 or commit, or about a resource instance (a **reading**). Attestations differ only in who wrote
 them. A leg's course says which attestations it requires and whether a missing one blocks the leg
-or only steers advice; the repository's policy says whose count.
+or only steers advice; the arena's policy says whose count.
 
 **Command.** A request to change Baton's own state — a claim, an advance or end, a heartbeat, an
 owner's or administrator's action. Baton accepts or refuses it by its gates; it is not evidence. A
@@ -194,7 +204,7 @@ command may carry an attestation: an advance moves the lease and reports where t
 
 **Outbox, deliverer** ([proposed, not built](../../spec/proposals/conditions.md)). Every git write, check run and ticket-store write Baton intends — a
 ticket's withdrawal, a merge check, the status a ticket store shows — is an outbox entry; a deliverer, a runner whose host holds the credential the effect
-needs and whose grant role the policy admits, delivers it, and Baton confirms it by reading it
+needs, delivers it, and Baton confirms it by reading it
 back. Baton itself holds no credential that writes git, posts a check or writes a ticket store; a workflow dispatch is
 its own call, made with the App key it holds (R-BTN-94, R-BTN-171).
 
@@ -202,13 +212,53 @@ its own call, made with the App key it holds (R-BTN-94, R-BTN-171).
 read. The fourth noun: Baton **learns** through attestations, **is asked** through commands,
 **acts** through deliverers and its own dispatches, and **answers** in replies.
 
-**Trusted runner.** A runner that claims only legs marked `trusted`, runs no repository code, and
-acts on attestations alone; the merge runner is the first
-([proposed, not built](../../spec/proposals/security.md)).
+**Trusted runner.** A runner whose host holds the credential a leg marked `trusted` needs and
+whose grant names that leg's capability; the merge runner is the first
+([proposed, not built](../../spec/proposals/security.md)). Runners are trusted and legs are not
+([BATON_SPEC §12.8](../../spec/BATON_SPEC/12-security.md#sec-12-8)).
 
 **Protected path.** A path whose changes a trusted runner never merges alone: a computed floor
 (`.baton/`, workflows, agent configuration, tickets) plus the owners' own; control paths land
 only by a human ([proposed, not built](../../spec/proposals/security.md)).
 
-**Human-only key.** A key used for nothing else and kept out of every agent's reach; only it
-satisfies a human gate.
+**Human-only key.** A key used for nothing else and kept out of every agent's reach; only it,
+or a dashboard session that acts as `human` (R-BTN-185), satisfies a human gate.
+
+**Human-driven, agent-driven.** Who drives an act is decided by the credential that makes it, never
+by the channel: one that carries a person is **human-driven**, one that carries a runner and a
+purpose is **agent-driven**. A runner is always agent-driven, `human-operator` included; a forge
+identity never says who drives. A human-driven act may relax the safeguards made for agent-driven
+work, never the lock or the record; how strongly a person must prove an act is the policy's, a
+separate axis ([human intent](human-intent.mdx)). An agent leg a person joins stays agent-driven.
+Not to be confused with an **autonomous leg**, which never asks for a person (R-BTN-195).
+
+**Person, roster** ([proposed, not built](../../spec/proposals/people-and-dashboard.md#5-people-identities-and-the-roster)).
+A person is the tenant's record of someone, for accountability and notification: their own keys
+and the identities linked to them, a forge account verified by signing in with the forge. A
+person confers no authority; roles stay on keys. An arena's **roster** is the people who may start
+a course or hold a session claim there: those whose linked forge account can push to its config
+repository, or who belong to the forge organisation that owns it, as the arena chooses
+(`roster.source`); the arena's sync reads it from the forge and posts it.
+
+**Interactive grant** ([proposed, not built](../../spec/proposals/people-and-dashboard.md#5-people-identities-and-the-roster)).
+A person's MCP credential: an OAuth grant they approve for their own agent, short-lived and ended
+by idleness, human-driven, acting with the role of the session it was approved from within the
+grant's consent and at the proof a token carries. It is not a delegated key: it writes as the
+person (the writer `person`).
+
+**Session claim** ([proposed, not built](../../spec/proposals/ticket-ownership.md)). A claim held
+by a person's own session rather than a runner: over MCP with an interactive grant, or from the
+person's CLI (`baton session claim`), which holds the lease and the `pre-push` fence and runs no
+queued legs. One claim like any other, leased; fenced where the CLI holds it; a lapsed MCP one
+is requeued onto a fresh branch.
+
+**Unwritten ticket** ([proposed, not built](../../spec/proposals/ticket-ownership.md)). A ticket
+Baton started (`course.start`) that its ticket source does not hold yet. Baton keeps its start
+text, at most 1,024 Unicode code points, until the store's first read of it, which makes its store-owned
+fields the store's.
+
+**Notifier, sealed secret** ([proposed, not built](../../spec/proposals/personal-secrets.md)). A
+**notifier** is a deliverer of notifications with a notifier key of its own, a principal that
+holds no runner key and runs no legs; a **sealed secret** is a person's
+secret signed with their SSH key and encrypted with age to an arena's notifier keys, which Baton
+stores and the person who set it may overwrite, never read.

@@ -1,5 +1,5 @@
 ---
-title: "B-146 — Attestations and readings: one record, and each requirement chooses gate or advice (R-BTN-181, R-BTN-76, R-BTN-75)"
+title: "B-146 — Work attestations and typed requirements (R-BTN-181, R-BTN-191)"
 id: B-146
 project: baton
 status: available
@@ -10,7 +10,7 @@ tags:
   - roadmap-item
 order: 1165
 tier: critical
-description: "Build R-BTN-181 as amended 2026-10-30: the attestation store and routes, writers recorded from the credential, SSHSIG signatures, supersession by attested key, `once` consumption by compare-and-swap, Baton's own `std:wrote@1`/`std:ran@1`/`std:review@1`; readings as attestations about a resource instance; `requires.attestations` and `requires.resources` with `binds: gate|advice`, `missing: block|allow` and `where` (`eq`, `in`, `glob`, `superset-of`, `gte`, `lte`); the `attestation` block kind and `ticket_blocks.binds`; rule 1 refusing gate-binding rows. S-BTN-181, S-BTN-24, G-BTN-70. Requires: none."
+description: "Work attestation storage, request-authenticated writers, subject binding and typed work prerequisites remain proposed. Do not build requires.resources or make resource rows gates. Requirements on readings (the instance form) are deferred; reconcile the sync-authentication proposal text before implementation."
 topics:
   - baton
 owns: {}
@@ -23,11 +23,11 @@ depends_on:
 generalized into a single thing", and "Why not leave this up to the course to decide what the gate
 should be for the leg? It could actually depend on a reading if we want (eg: account funds)."
 Recorded in `spec/BATON_SPEC_HISTORY.md` (baton#145).
-**Spec:** R-BTN-181 (attestations: shape, writers, signatures, supersession, the prerequisite,
-standard types, records not git), R-BTN-76 (readings as attestations about an instance, read per
-repository), R-BTN-75 (block kinds, `binds`), R-BTN-120 (prerequisites), §6.6 rule 1, R-BTN-88
+**Spec:** R-BTN-181 (attestations: shape, credential-derived writers, request authentication,
+supersession, the prerequisite, standard types, records not git), R-BTN-76 (readings as attestations about an instance, read per
+repository; requirements on them deferred, item 6), R-BTN-75 (block kinds, `binds`), R-BTN-120 (prerequisites), §6.6 rule 1, R-BTN-88
 (export), R-BTN-188's `attestations` and `readings` knobs; §13 `attestations`, `ticket_blocks`,
-`instance_readings`; §14 the attestation and reading routes; S-BTN-181, S-BTN-24, G-BTN-70.
+`instance_readings` (deferred, item 6); §14 the attestation routes (the reading routes deferred); S-BTN-181, S-BTN-24, G-BTN-70.
 **Depends on:** B-145 (the policy's `attestations` and `readings` entries say whose count).
 **Used by:** B-213 (the attestations read and screen list this store).
 
@@ -37,71 +37,58 @@ None: a checkout and a terminal.
 
 ### Why
 
-Today a leg can require a review or an approval only through course-specific state, and a reading
-only advises. The amended spec makes both one record a requirement reads, gate or advice by the
-requirement's choice; B-140's merge runner, B-141's harness and every trusted leg act on it.
+Work attestations let a leg require evidence under repository policy. The November 19 ruling
+cut the resource prerequisite and block, which [B-291](B-291.mdx) removes with its code, and kept
+readings as advice (R-BTN-76); the unbuilt `requires.resources` short form is not part of this work.
 
-### What to build
+### What remains to build
 
-1. **Schema.** A new numbered migration adds `attestations` (§13: `repository_id`, `ticket_id`,
-   `type`, `subject_json`, `value_json` ≤ 4 KB, `writer_class`, `writer_key`, `nonce`, `uses`,
-   `lapses_at`, `signature`, `at`, `revoked_at`, `used_by_claim`, `superseded_by`), `binds` on
-   `ticket_blocks` and `attestation` in its kind CHECK, and `writer`, `signature`, `nonce` on
-   `instance_readings`.
-2. **Core module `src/core/attestations.ts`.**
-   - `POST /v1/repositories/{repository}/attestations` and `DELETE …/{id}` (`baton attest`): the
-     writer class recorded from the credential (`human`, `owner`, `baton`, `instrument`, `runner`,
-     `admin`, and `service:<fingerprint>` for its own key); work attested only by `human`, `owner`,
-     `service` and `baton`; the SSHSIG signature over the RFC 8785 canonical JSON in namespace
-     `baton-attestation@1`; revoking a `human` attestation a human gate.
-   - Supersession only when type, subject, writer and attested key match; a `once` attestation
-     consumed by compare-and-swap.
-   - Baton writes `std:wrote@1`, `std:ran@1` and `std:review@1` at the `advance` or end that earns
-     them, signed with its attestation key; the subject from values Baton holds, never a runner's
-     output.
-3. **Readings as attestations.** A reading's `type` is its resource's schema id and its value
-   `{available?, until?, detail}`. The reading routes accept `nonce` and `signature`; an API-key
-   reading is unsigned. What a repository's requirement reads is the state and fields computed from
-   only the readings its policy's `readings` entry admits, and only signed ones for a gate under
-   `signed: true` (R-BTN-76).
-4. **Requirements.** `requires.attestations: [{type, subject, writers?, where?, count?, distinct?,
-   binds?, missing?}]` and `requires.resources` with `binds`, `missing` and `writers`, evaluated in
-   `src/core/blocks.ts`: `writers` only narrows the policy's entry; `where` ops `eq`, `in`, `glob`,
-   `superset-of`, `gte`, `lte` over the value (`available` or `detail.<path>` for a reading);
-   `binds: gate` (default for attestations) or `advice` (default for resources); `missing: block`
-   or `allow`. Unmet, an `attestation` block with `why` `missing`, `other-subject`,
-   `writer-not-allowed`, `consumed`, `lapsed`, `revoked` or `failed-where`; `ticket_blocks.binds`
-   from the requirement.
-5. **Rule 1** refuses a claim or advance on a `resource` or `attestation` row binding as a gate
-   (`src/core/gates.ts`), and `isEligible` in the vendored decision library matches (docs first,
-   then `npm run vendor`).
-6. **The course validator** refuses a `trusted: true` leg whose requirement binds as `advice` or
-   takes `missing: allow`.
-7. **Export.** Attestations about work are exported with the owner state and dropped on import;
-   in-flight work re-attests (R-BTN-88).
-
-8. **The sync's supersession** (R-BTN-191, *Superseded per writer class*): the sync's
-   attestations supersede by type and subject across every credential that posts the board — a
-   sync key, the CI identity and a machine key alike — so a machine key's post replaces the CI
-   sync's facts as fully as the CI sync's replaces its. (Moved from B-169, 2026-11-03.)
-
-### Do not
-
-- Read an attestation from git or the forge.
-- Let a course's `writers` widen what the policy admits.
-- Count an unsigned reading toward a trusted leg or a `signed: true` gate.
+1. **Store and routes.** Use the work-attestation shape, request authentication, nonce
+   idempotency, revocation and attested-key supersession in the
+   [security proposal](../spec/proposals/security.md) and its
+   [tables and routes](../spec/proposals/data-model-and-api.md). Bind by subject, not by use
+   count. Do not add record signatures, a second signing key or consumption state. Preserve the
+   built person-answer path. Keep the writer classes data, not code: #449's proposals add a
+   writer `person` (a person's interactive grant;
+   [ticket ownership](../spec/proposals/ticket-ownership.md)), a content hash in
+   `std:approval@1`'s value, and `std:notified@1`
+   ([personal secrets](../spec/proposals/personal-secrets.md)). They are proposals, not this
+   ticket's work, but the store must take them without a migration of its shape.
+2. **Standard work records.** Record `std:wrote@1` with the range and runner key, and
+   `std:review@1` only for a run that finishes at the review leg's approving outcome. Use the
+   subject Baton holds, not a caller-supplied subject. A review names its run id and only
+   supersedes a review of the same run (R-BTN-63, R-BTN-183).
+3. **Work requirements.** Evaluate `requires.attestations` on a `work` subject only (item 6
+   defers `subject: instance` and the `requires.resources` short form) per the security proposal, including
+   `where`, `count`, `distinct`, `binds` and `missing`. Course writers may only narrow policy.
+   Store unmet requirements as `attestation` rows; rule 1 returns the blocking rows when
+   refusing a claim or advance. The validator refuses a trusted leg whose requirement binds as
+   advice or takes `missing: allow`. Keep `isEligible` in Baton's shared source in parity with
+   rule 1 (R-BTN-37); consumers pin Baton, not the reverse.
+4. **Export.** Export work records with owner state and drop them on import (R-BTN-88).
+5. **Sync.** Supersede facts by type and subject across credentials authorized to post those
+   facts. Reconcile the proposal's machine-key supersession text with R-BTN-203 before changing
+   who can post fact arrivals or outside-work evidence. Permission to post a board is not, by
+   itself, permission to post those facts.
+6. **Readings: deferred (the owner, 2026-11-26).** B-291 owns removal of the existing fleet
+   advice prerequisite and block. The `requires.attestations` instance form (`subject: instance`,
+   a requirement on readings) is not built here: it stays on the proposal page, with S-BTN-181's
+   funds, `count: 2` and latest-per-writer cases, until a course needs it, and is ruled on then.
+   Do not add a reading signature, a reading nonce, or a `signed` policy knob. A leg that should
+   wait on a reading (a rate limit, host memory) does so through its course's selector
+   ([B-351](B-351.mdx)), not through a requirement core evaluates.
 
 ### Tests
 
-- **S-BTN-181** on both hosts, including the funds leg (`instance: account-funds`, `where
-  detail.balance_usd gte 50`) and a reading posted for another repository's runners never moving it.
-- **S-BTN-24**'s gate case: a `requires.resources` entry binding `gate` refused `blocked` under a
-  fleet block that only advises otherwise. G-BTN-70.
-- Unit: supersession by attested key; `once` compare-and-swap; each `where` op; the signature.
+- **S-BTN-181**'s work-attestation cases on both hosts. The funds
+  predicate and per-instance cases are deferred with the instance form (item 6).
+- **S-BTN-24** and **G-BTN-70** remain regressions for advice versus existing gates and for
+  stored block transitions respectively; neither requires a new resource gate.
+- Unit: nonce idempotency, supersession by attested key, subject binding and each `where` op.
 
 ### Exit criteria
 
-- [ ] S-BTN-181 and S-BTN-24 pass on both hosts; G-BTN-70 holds
+- [ ] S-BTN-181's work-attestation cases and S-BTN-24 pass on both hosts; G-BTN-70 holds
 - [ ] `npm test`, `npm run typecheck` and `npm run check:spec` green; merged under the review gate
 
 ## Status
@@ -111,8 +98,26 @@ gate-or-advice requirement.)_
 
 _(2026-11-02: the spec restructure's part 3 (B-166, the PR `spec-restructure-handoff`, [#163](https://github.com/immediately-run/baton/pull/163)): `baton attest` is `baton attestation add`, or `baton decision answer` for a person leg's answer (R-BTN-127).)_
 - 2026-11-02: the spec restructure's part 4 (B-166, B-165's review default): readings carry no `nonce` or signature and `readings` entries have no `signed` (R-BTN-76, R-BTN-188; B-168); the trusted-leg check of R-BTN-181 admits writers only. Build the attestations without the signed-reading paths.
-- 2026-11-02: the spec restructure's part 4, review rounds two and three (B-166): the *Do not* line on unsigned readings is void — no reading is signed, and an admitted reading counts toward a trusted leg's requirement. A full requirement on an instance reads as R-BTN-76 now says: the instance's state is ignored; for each usable instance and admitted writer's key, that writer's latest reading in force is one attestation (an older one of the same writer never counts); `missing` means none; `count` counts the distinct writers' keys that pass unless `distinct` names another field. S-BTN-181's new reading cases are this ticket's.
+- ~~2026-11-02: the spec restructure's part 4, review rounds two and three (B-166): the *Do not* line on unsigned readings is void — no reading is signed, and an admitted reading counts toward a trusted leg's requirement. A full requirement on an instance reads as R-BTN-76 now says: the instance's state is ignored; for each usable instance and admitted writer's key, that writer's latest reading in force is one attestation (an older one of the same writer never counts); `missing` means none; `count` counts the distinct writers' keys that pass unless `distinct` names another field. S-BTN-181's new reading cases are this ticket's.~~ _(2026-11-27: struck: the reading cases are deferred, item 6; R-BTN-76's instance text is on the security proposal page, §13.)_
 
-- 2026-11-03: item 8 added — R-BTN-191's supersession across all three posters, corrected by the 2026-11-02 security review (PR #165) and moved here from B-169, which has no store to build it on.
+- ~~2026-11-03: item 8 added — R-BTN-191's supersession across all three posters, corrected by the 2026-11-02 security review (PR #165) and moved here from B-169, which has no store to build it on.~~ _(2026-11-27: struck: the items were renumbered; the sync supersession is item 5.)_
 
-_(2026-11-20: the spec simplification of 2026-11-19 (baton#299; `spec/BATON_SPEC_HISTORY.md`, that date) moved the unbuilt parts of the design this ticket builds out of the section files, with their rule ids, to proposal pages: attestations beyond a person's answer, and the sync's and the holder's attestations, are parts 4 and 5 of [the security proposal](../spec/proposals/security.md), with their tables and routes under "Attestations, roles and fact legs" in [the tables-and-routes proposal](../spec/proposals/data-model-and-api.md). S-BTN-181 is no longer a row of the verification section: it is in [the proposals' scenarios](../spec/proposals/scenarios.md), under "The repository policy's enforcement". Each rule keeps its id and a line in its section, which links the page. The pull request that builds this ticket moves the rules it builds back into the section files, and the scenarios and gates it makes pass back into [the verification section](../spec/BATON_SPEC/15-verification.md#sec-15), in the same change. The plan above is unchanged.)_
+_(2026-11-20: the spec simplification of 2026-11-19 (baton#299; `spec/BATON_SPEC_HISTORY.md`, that date) moved the unbuilt parts of the design this ticket builds out of the section files, with their rule ids, to proposal pages: attestations beyond a person's answer, and the sync's and the holder's attestations, are parts 4 and 5 of [the security proposal](../spec/proposals/security.md), with their tables and routes under "Attestations, roles and fact legs" in [the tables-and-routes proposal](../spec/proposals/data-model-and-api.md). S-BTN-181 is no longer a row of the verification section: it is in [the proposals' scenarios](../spec/proposals/scenarios.md), under "The repository policy's enforcement". Each rule keeps its id and a line in its section, which links the page. The pull request that builds this ticket moves the rules it builds back into the section files, and the scenarios and gates it makes pass back into [the verification section](../spec/BATON_SPEC/15-verification.md#sec-15), in the same change.)_
+
+_(2026-11-22: PR #335 withdrew its short-form resource gates after review. The plan above
+uses the current work-attestation proposal and leaves the unresolved instance and sync scope
+for a decision before implementation. The attestation exit criteria are still open.)_
+
+_(2026-11-24: `std:ran@1` is struck: B-189's spec PR (`spec/BATON_SPEC_HISTORY.md`, the entry of 2026-11-24), on the owner's rulings of 2026-11-09 and 2026-11-24 (runners trusted, legs not) retires it with writer domains; `std:wrote@1` carries the range and the runner key, no domain, and `std:review@1` the review run's run id, by which R-BTN-183 counts each review as its own run of the exact head ([the security proposal](../spec/proposals/security.md), part 4).)_
+
+_(2026-11-24: rules re-read: R-BTN-181, R-BTN-183)_
+
+_(2026-11-24: B-189's spec PR (`spec/BATON_SPEC_HISTORY.md`, the entry of 2026-11-24), review round two: a `std:review@1` supersedes only one of its own run id, so two review runs by one runner key at one head both count; it names its run id and is written only for a run that finished at the leg's approving outcome (`approves: <station>`, or `to`'s first station for `true`). Description and item 2 updated.)_
+
+_(2026-11-24: rules re-read: R-BTN-181, R-BTN-183)_
+
+_(2026-11-26: the owner deferred the instance form: "Theoretically, it makes sense for readings
+to be an input to leg decisions, but I also don't think we'll need this for a while still." Item 6
+and the tests say so; `spec/BATON_SPEC_HISTORY.md` records it.)_
+
+_(2026-11-27: #335 lands as the re-scope only, at the owner's request to make it mergeable; B-146 stays `available` for the store, the records, the requirements, export and sync above. Item 1 notes #449's proposed writer `person` and approval hash; item 6 points at B-351's selector.)_

@@ -9,6 +9,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { keyCall, payload, course, rows, setAdminKeys, setClock, syncCall, cutover, TOKENS } from '../helpers';
 import { makeKey } from '../lib/sshKeys';
+import { testRunner } from '../lib/runnerRig';
 import { Runner } from '../../src/runner/runner';
 import { BatonApi } from '../../src/runner/api';
 import roadmapPr from '../fixtures/courses/roadmap-pr/course.json';
@@ -57,14 +58,9 @@ export async function close() { return 'https://example.test/close'; }
         registry: [course(3, 3)], state: { items: [{ ...base, id: 'R3-9904', requires: ['none'] }] }, ready: ['R3-9904'],
       }))).status).toBe(200);
 
-      const api = new BatonApi({
-        url: 'https://baton.test',
-        transport: (req) => hostCall(req),
-        auth: (_m, _u, _b, secret) => ({ Authorization: `Bearer ${TOKENS['vm-a']}`, ...(secret ? { 'X-Runner-Secret': secret } : {}) }),
-      });
-      const runner = new Runner({
-        api, home: dir, repository: 'docs', hostname: 'vm-a', harness: 'opencode', capabilities: ['key:zai'],
-        session: 'b185-run-ids', courses: [{ course: 'roadmap-pr', version: 3 }], stateFile, beatEvery: 60_000, log: () => {},
+      const runner = testRunner({
+        home: dir, capabilities: ['key:zai'],
+        session: 'b185-run-ids', courses: [{ course: 'roadmap-pr', version: 3 }], stateFile, beatEvery: 60_000,
       });
       expect(await runner.runOnce()).not.toBeNull();
       runner.stop();
@@ -84,4 +80,74 @@ export async function close() { return 'https://example.test/close'; }
       rmSync(`${stateFile}.spool.jsonl`, { force: true });
     }
   });
+
+  // B-335 (R-BTN-63): the leg's run number is Baton's, from the advance reply; against a server
+  // that does not send it, the runner's own count — git's runs, which already hold the claim's
+  // finished legs — counts each once. Before B-335 it added the claim's legs again: 1, 3, 5.
+  for (const reply of ['the advance reply\'s', 'the fallback\'s'] as const) {
+    it(`B-335: a claim's review rounds are numbered 1, 2, 3 in ctx.run — ${reply} number`, async () => {
+      const dir = mkdtempSync(join(tmpdir(), 'baton-335-'));
+      const stateFile = join(tmpdir(), `baton-335-${process.pid}.json`);
+      try {
+        const g = (...a: string[]) => execFileSync('git', ['-C', dir, ...a], { encoding: 'utf8' });
+        g('init', '-q', '-b', 'main');
+        const write = (path: string, text: string) => {
+          mkdirSync(dirname(join(dir, path)), { recursive: true });
+          writeFileSync(join(dir, path), text);
+        };
+        write('.baton/courses/roadmap-pr/course.json', `${JSON.stringify(roadmapPr, null, 2)}\n`);
+        write('.baton/baton.json', `${JSON.stringify({ courses: [{ id: 'roadmap-pr', version: 3 }] }, null, 2)}\n`);
+        // Each leg records the run number it was handed; review asks for changes until its third run.
+        const leg = (name: string, result: string) => write(`.baton/courses/roadmap-pr/legs/${name}.mjs`, `import { appendFileSync } from 'node:fs';
+export async function run(ctx) {
+  appendFileSync([ctx.checkout, '.baton', 'runs.jsonl'].join('/'), JSON.stringify({ leg: ${JSON.stringify(name)}, run: ctx.run }) + '\\n');
+  return ${result};
+}
+export async function close() { return 'https://example.test/close'; }
+`);
+        leg('implement', `{ reached: 'pr-open', next: 'review' }`);
+        leg('review', `ctx.run >= 3 ? { end: 'done', reached: 'reviewed' } : { reached: 'reviewed', next: 'fix' }`);
+        leg('fix', `{ reached: 'fixed', next: 'review' }`);
+        g('add', '-A');
+        g('-c', 'user.email=b335@test', '-c', 'user.name=b335 test', 'commit', '--no-gpg-sign', '-qm', 'courses');
+        const sha = g('rev-parse', 'HEAD').trim();
+        const base = structuredClone((board.states.A.state.items as Record<string, unknown>[]).find((i) => i.id === 'R3-9001')) as Record<string, unknown>;
+        expect((await syncCall('/v1/sync/board', payload(sha, null, board.states.A, {
+          registry: [course(3, 3)], state: { items: [{ ...base, id: 'R3-9905', requires: ['none'] }] }, ready: ['R3-9905'],
+        }))).status).toBe(200);
+
+        // The fallback's case: a server that predates B-335 — its advance replies carry no `run`.
+        const transport = reply === 'the advance reply\'s' ? (req: Request) => hostCall(req) : async (req: Request) => {
+          const res = await hostCall(req);
+          if (!/\/advance$/.test(new URL(req.url).pathname) || res.status !== 200) return res;
+          const body = (await res.json()) as Record<string, unknown>;
+          delete body.run;
+          return new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
+        };
+        const api = new BatonApi({
+          url: 'https://baton.test',
+          transport,
+          auth: (_m, _u, _b, secret) => ({ Authorization: `Bearer ${TOKENS['vm-a']}`, ...(secret ? { 'X-Runner-Secret': secret } : {}) }),
+        });
+        const runner = new Runner({
+          api, home: dir, repository: 'docs', hostname: 'vm-a', harness: 'opencode', capabilities: ['key:zai'],
+          session: 'b335-run-numbers', courses: [{ course: 'roadmap-pr', version: 3 }], stateFile, beatEvery: 60_000, log: () => {},
+        });
+        expect(await runner.runOnce()).not.toBeNull();
+        runner.stop();
+
+        const runs = readFileSync(join(dir, '.baton', 'runs.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l) as { leg: string; run: number });
+        expect(runs).toEqual([
+          { leg: 'implement', run: 1 },
+          { leg: 'review', run: 1 }, { leg: 'fix', run: 1 },
+          { leg: 'review', run: 2 }, { leg: 'fix', run: 2 },
+          { leg: 'review', run: 3 },
+        ]);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+        rmSync(stateFile, { force: true });
+        rmSync(`${stateFile}.spool.jsonl`, { force: true });
+      }
+    });
+  }
 }, 120_000);

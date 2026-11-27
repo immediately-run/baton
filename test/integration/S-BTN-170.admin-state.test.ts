@@ -9,7 +9,7 @@
 // carries a section, the case is a named `todo`, never a faked equality:
 //   repositories    repo.list's row (the fields both carry), admin.repo.list's (a superset)
 //                   and repo.board's `repository` (exactly)
-//   ready           repo.board's `ready` and `ready_by_tier` (exactly); repo.tickets?state=ready
+//   ready           repo.board's `ready` (exactly); repo.tickets?state=ready
 //                   is the stricter word — the rows nothing outranks — so: a subset, the rest
 //                   listed under the word that outranks `ready`
 //   running         repo.tickets' rows whose state or reasons say `running`, by claim
@@ -53,7 +53,7 @@ describe('S-BTN-170 the state in one request equals the entity reads (B-216)', (
     // `baton` is the instance's own registration (wrangler.toml), with no board: the empty case.
     expect(f.repositories).toEqual(['baton', 'docs', 'ops']);
     expect(state.server_time).toBe(f.now);
-    expect(Object.keys(state).sort()).toEqual(['blocked', 'capacity', 'discrepancies', 'held', 'instance', 'limits', 'needs_you', 'ready', 'ready_by_tier', 'repositories',
+    expect(Object.keys(state).sort()).toEqual(['blocked', 'capacity', 'discrepancies', 'held', 'instance', 'limits', 'needs_you', 'ready', 'repositories',
       'resources', 'runners', 'running', 'server_time', 'timeline']);
     for (const section of ['repositories', 'ready', 'running', 'runners', 'held', 'blocked']) expect([section, (state[section] as unknown[]).length > 0]).toEqual([section, true]);
     expect(state.timeline.lanes.length).toBeGreaterThan(0);
@@ -88,12 +88,11 @@ describe('S-BTN-170 the state in one request equals the entity reads (B-216)', (
     }
   });
 
-  it('ready and ready_by_tier: the board’s, exactly; the tickets list’s `ready` is the rows nothing outranks', async () => {
+  it('ready: the board’s, exactly; the tickets list’s `ready` is the rows nothing outranks', async () => {
     for (const r of f.repositories) {
       const sync = (state.ready as Json[]).filter((t) => t.repository_id === r);
       const board = await read(f, `/v1/repositories/${r}/board`);
       expect(board.ready).toEqual(sync);
-      expect(board.ready_by_tier).toEqual(Object.fromEntries(Object.entries(state.ready_by_tier as Record<string, string[]>).map(([tier, ids]) => [tier, ids.filter(ofRepository(r))])));
       // repo.tickets gives each ticket ONE state word by precedence: a ticket the sync posts
       // ready that is also held, blocked, claimed or a person's is listed under that word. So
       // `?state=ready` is a subset of the section, and the rest is found under a word above it.
@@ -103,8 +102,8 @@ describe('S-BTN-170 the state in one request equals the entity reads (B-216)', (
       for (const t of ready) {
         const s = sync.find((x) => x.id === t.ticket_id);
         expect([t.ticket_id, s !== undefined]).toEqual([t.ticket_id, true]);
-        expect({ title: t.title, tier: t.tier, requires: t.requires, station: t.position.station, leg: t.position.next_leg })
-          .toEqual({ title: s!.title, tier: s!.tier, requires: s!.requires, station: s!.station, leg: s!.leg });
+        expect({ title: t.title, requires: t.requires, station: t.position.station, leg: t.position.next_leg })
+          .toEqual({ title: s!.title, requires: s!.requires, station: s!.station, leg: s!.leg });
       }
       for (const s of sync.filter((x) => !ready.some((t) => t.ticket_id === x.id))) {
         const row = all.find((t) => t.ticket_id === s.id);
@@ -152,7 +151,7 @@ describe('S-BTN-170 the state in one request equals the entity reads (B-216)', (
         seen.add(w.runner_id);
         const s = (state.runners as Json[]).find((x) => x.id === w.runner_id)!;
         expect([w.runner_id, s !== undefined]).toEqual([w.runner_id, true]);
-        const shared = ['hostname', 'session_name', 'harness', 'kind', 'isolation', 'tier_ceilings', 'last_seen_at', 'last_activity_at', 'reaped_at', 'alive', 'transcript_url'];
+        const shared = ['hostname', 'session_name', 'harness', 'kind', 'isolation', 'last_seen_at', 'last_activity_at', 'reaped_at', 'alive', 'transcript_url'];
         expect(pick(w, shared)).toEqual(pick(s, shared));
         expect(w.capabilities).toEqual((s.capabilities as Json[]).map((c) => pick(c, ['capability', 'declared'])));
         // The state lists every repository's courses and claims; the read, this repository's.
@@ -190,7 +189,7 @@ describe('S-BTN-170 the state in one request equals the entity reads (B-216)', (
         window.forEach((c, i) => {
           // The window's runs and activities carry more (a run's id and log, an activity's
           // source and detail); the fields both carry are equal, in the same order.
-          expect((c.runs as Json[]).map((x) => pick(x, ['leg', 'started_at', 'ended_at', 'session_url']))).toEqual(mine[i].runs);
+          expect((c.runs as Json[]).map((x) => ({ ...pick(x, ['leg', 'started_at', 'ended_at', 'session_link']), session_url: null }))).toEqual(mine[i].runs);
           const fields = ['id', 'kind', 'label', 'started_at', 'ended_at', 'outcome', 'parent_id'];
           expect((c.activities as Json[]).map((a) => pick(a, fields))).toEqual((mine[i].activities as Json[]).map((a) => pick(a, fields)));
           compared += 1;
@@ -232,7 +231,7 @@ describe('S-BTN-170 the state in one request equals the entity reads (B-216)', (
       owners.forEach((o, i) => expect(grants.owners[i]).toMatchObject(o));
       const granted = of(state.limits.grants);
       expect((grants.grants as Json[]).length).toBe(granted.length);
-      const fields = ['credential_id', 'hostname', 'label', 'repository_id', 'capabilities', 'max_tier', 'max_claims', 'granted_by', 'granted_at'];
+      const fields = ['credential_id', 'hostname', 'label', 'repository_id', 'capabilities', 'max_claims', 'granted_by', 'granted_at'];
       granted.forEach((g, i) => expect(pick(grants.grants[i], fields)).toEqual(pick(g, fields)));
       expect(grants.settings).toEqual((state.limits.settings as Json[]).find((s) => s.repository_id === r) ?? null);
       const bars = of(state.limits.bars);

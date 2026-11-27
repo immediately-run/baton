@@ -127,7 +127,7 @@ export const ACTIONS: Action[] = [
 
   // ── the repository reads a session shares with the keys (B-192, B-217) ──
   {
-    id: 'repo.board', summary: 'One repository as the dashboard lists it: its ready tickets, the per-tier order and the live claims’ holders.',
+    id: 'repo.board', summary: 'One repository as the dashboard lists it: its ready tickets and the live claims’ holders.',
     effect: 'read', http: { method: 'GET', path: '/v1/repositories/{repository}/board' },
     callers: REPOSITORY_READERS, input: NONE,
   },
@@ -153,7 +153,7 @@ export const ACTIONS: Action[] = [
     callers: REPOSITORY_READERS, input: NONE,
   },
   {
-    id: 'repo.conditions', summary: 'The repository’s raised conditions, open ones first.',
+    id: 'condition.list', summary: 'The repository’s raised conditions, open ones first.',
     effect: 'read', http: { method: 'GET', path: '/v1/repositories/{repository}/conditions' },
     callers: REPOSITORY_READERS,
     input: { type: 'object', properties: {
@@ -184,6 +184,12 @@ export const ACTIONS: Action[] = [
     effect: 'read', http: { method: 'GET', path: '/v1/repositories/{repository}/tickets/{ticket}/blocks' },
     callers: REPOSITORY_READERS,
     input: { type: 'object', properties: { runner: { type: 'string', const: 'me', description: 'A runner session’s own answer; needs its secret.' } } },
+  },
+  {
+    id: 'leg.why', summary: 'Why a leg cannot start.',
+    effect: 'read', http: { method: 'GET', path: '/v1/repositories/{repository}/tickets/{ticket}/prerequisites' },
+    callers: REPOSITORY_READERS,
+    input: { type: 'object', properties: { leg: { type: 'string' }, runner: { type: 'string', const: 'me' } } },
   },
   {
     id: 'ticket.history', summary: 'One ticket’s history, newest first, with the ended claims’ branches and pull requests.',
@@ -228,9 +234,10 @@ export const ACTIONS: Action[] = [
     id: 'leg.stop', summary: 'Stop: ask the runner to release the ticket it holds.',
     effect: 'destructive', http: { method: 'POST', path: '/v1/ui/messages', match: { kind: 'release' } },
     callers: [SESSION_ANY],
-    input: { type: 'object', required: ['to_runner_id', 'kind', 'payload'], properties: {
+    input: { type: 'object', required: ['to_runner_id', 'kind', 'payload', 'confirm'], properties: {
       to_runner_id: RUNNER_ID,
       kind: { type: 'string', const: 'release' },
+      confirm: CONFIRM,
       payload: { type: 'object', required: ['ticket_id', 'reason'], properties: {
         ticket_id: { type: 'string', description: 'The qualified ticket the runner holds.' },
         reason: { type: 'string', enum: ['requested', 'owner-cancel', 'provider-suspended'] },
@@ -343,7 +350,6 @@ export const ACTIONS: Action[] = [
     input: { type: 'object', properties: {
       state: { type: 'string', enum: ['unconfirmed', 'running', 'waiting-person', 'held', 'blocked', 'backing-off', 'suspended', 'ready', 'closed', 'closed-today'], description: 'One state word, or a tab: blocked groups held, blocked, waiting-person, backing-off and suspended; closed-today is closed.' },
       q: { type: 'string', description: 'A case-insensitive substring of the id or the title.' },
-      tier: { type: 'string', description: 'A tier ceiling of the repository’s ladder.' },
       cursor: { type: 'string', description: 'The next_cursor a page gave.' },
     } },
   },
@@ -405,7 +411,7 @@ export const ACTIONS: Action[] = [
   },
   // tenant: the tenant screens' reads
   {
-    id: 'admin.repo.list', summary: 'The registry: every registered repository’s row, its tiers, sync keys and CI identity, and the retired ones on request.',
+    id: 'admin.repo.list', summary: 'The registry: every registered repository’s row, its sync keys and CI identity, and the retired ones on request.',
     effect: 'read', http: { method: 'GET', path: '/v1/admin/repositories' }, callers: [ADMIN, SESSION_ADMIN],
     input: { type: 'object', properties: { retired: { type: 'string', const: '1', description: 'List the retired repositories too.' } } },
   },

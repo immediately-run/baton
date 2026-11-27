@@ -52,10 +52,10 @@ and walks each rule.
    after a run of failures, backoffs, refusals for one reason — has a multi-select and a bulk
    control. A filter by reason ("held: attempts exhausted") is enough to select them all. One
    confirmation covers the batch, and the result names each ticket that did not change, and why.
-3. **Every domain word on screen explains itself.** A tier (`critical`, `judgement`, `routine`), a
-   station, a leg, a gate code (`awaiting-sync`, `above-tier-ceiling`), a condition kind:
-   each carries its one-sentence meaning from [the vocabulary](vocabulary.mdx), inline or on
-   hover, and where it matters, its consequence ("only runners whose ceiling is critical take
+3. **Every domain word on screen explains itself.** A capability, a station, a leg, a gate code
+   (`awaiting-sync`, `missing-capability`), a condition kind: each carries its one-sentence
+   meaning from [the vocabulary](vocabulary.mdx), inline or on hover, and where it matters, its
+   consequence ("only runners that declare and are granted `credential:DEPLOY_TOKEN` take
    it"). An internal code is never the only text.
 4. **Every blocked state says why, who can clear it, and offers the control.** "Held — three
    failed attempts (gateway unreachable). You can lift it: [Lift]", not "held". "Waiting for a
@@ -70,7 +70,7 @@ and walks each rule.
 7. **A running agentic leg is one click from its live session, on both sides.** A ticket whose
    leg is running opens the leg's agent session from the ticket's own page and its row on the
    Board. A runner running such a leg opens the same session from the runner's page and its row
-   on Runners. The link is the claim's `session_url` (R-BTN-113), labelled "Open session" with
+   on Runners. The link is the claim's `session_url` (R-BTN-113), labelled "Open leg page" with
    its host. Where none is reported, the page says so, and it never shows a stale one once the
    leg ends.
 8. **Answers are counted, not left for a person to compute.** Throughput, progress, and age
@@ -87,11 +87,22 @@ Each gap needs its own ticket; these rules alone do not close them.
   lifted one ticket page at a time (rule 2). On 2026-11-21 the owner lifted 31
   `attempts-exhausted` holds with a pasted console script.
 - **Throughput (question 4):** no read or screen counts finished work over time.
-- **Explaining terms (rule 3):** tiers, stations and gate codes are drawn as bare codes.
-- **Signing in (rule 1):** only an administrator's one-time link exists, minted from the CLI
-  (R-BTN-57). The owner's sign-in (B-76) is not built, and an identity Cloudflare Access has
-  verified does not open a session. Accepting that identity is a security-model decision for
-  the owner: a spec rule tying the Access identity to an owner key.
+- **Explaining terms (rule 3):** capabilities, stations and gate codes are drawn as bare codes.
+- **Signing in (rule 1):** an administrator signs in through Cloudflare Access or a one-time
+  link (R-BTN-155). Owners' and members' sessions, the key chosen after authenticating and one
+  session per tab are specified but not built (B-76, B-338).
+- **Answering a person leg (question 2, rule 1):** the Conditions screen draws each option with
+  its `baton decision answer` line and "This page cannot answer it": no session today is an
+  owner's or a member's, and no session can write the answer (B-76, B-195, B-219, B-338).
+  A person's session that acts as `human` (R-BTN-185: under `any`, one Cloudflare Access or a
+  `human_only` key's code opened) is a human, so it answers where
+  the policy counts only a human's answer too; under `human_key: hardware` each such answer also takes a security-key touch
+  (B-340).
+- **Session-only acts (rule 1, the other way):** force-reap, clearing a fence, confirming or
+  releasing a completion, confirming an adoption, resolving a scope finding, accepting a held
+  post, cutover, dispatching a resync, and a runner's status request or wind-down have a
+  dashboard route and no CLI command; hold, unhold, expedite and Stop have commands in
+  R-BTN-127's table but only a dashboard route (R-BTN-186, B-339).
 - **A ticket's history (question 5):** a ticket's page draws its history and attempts, with the
   recorded end reason. But no screen jumps to a ticket by id, and a failed leg's agent's last
   message is only in the host's leg archive.

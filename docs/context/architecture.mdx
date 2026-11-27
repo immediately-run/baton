@@ -25,7 +25,7 @@ doorbell. Today Baton's only outbound act is a workflow dispatch, and runners wr
 
 - **One inbound path for facts.** A review, a human's answer, a runner's report of where its leg
   reached, a fact the sync read from git, a deliverer's delivery and a provider's quota are all
-  attestations, differing only in writer; the repository's policy decides whose count. So there
+  attestations, differing only in writer; the arena's policy decides whose count. So there
   is one place to ask "who may tell Baton this?".
 - **Commands are not evidence.** A claim or an owner's setting asks Baton to change its own state,
   and Baton's gates decide; a command may carry an attestation (an advance carries the holder's
@@ -41,17 +41,17 @@ doorbell. Today Baton's only outbound act is a workflow dispatch, and runners wr
 ## The ledger and the cache
 
 - **Git is the ledger for the work's evidence, the ticket source for tickets; Baton owns what
-  no push may decide.** Every ticket and its body live in the repository's ticket source — its
+  no push may decide.** Every ticket and its body live in the arena's ticket source — its
   git folder by default, or a store such as an issue tracker (BATON_SPEC
   [R-BTN-74](../../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-2)) — and the work's evidence
-  lives in the repository; Baton's board is a cache of both, rebuilt by each sync (the owner,
+  lives in its repositories; Baton's board is a cache of both, rebuilt by each sync (the owner,
   2026-11-19). Baton owns the rest: claims and leases, each ticket's course history (B-120),
   attestations (BATON_SPEC [R-BTN-181](../../spec/BATON_SPEC/12-security.md#sec-12-8)), owner settings and grants. Some of it is duplicated in
   git for people to read; some of it is in git nowhere, because a push must not be able to
   write it. Losing it fails closed: work is reviewed and approved again, never restored from
   git (the owner, 2026-10-28).
-- **One Baton serves a repository.** Two boards for one repository drift and contradict
-  (the owner's decision, 2026-10-21); there is no staging instance — every home repository
+- **One Baton serves an arena.** Two boards for one arena drift and contradict
+  (the owner's decision, 2026-10-21); there is no staging instance — every arena's config repository
   binds to production, so a second deployment would hold nothing and test nothing (the owner,
   2026-11-09, B-224).
 
@@ -59,15 +59,15 @@ doorbell. Today Baton's only outbound act is a workflow dispatch, and runners wr
 
 - **Baton holds the lock; it does not police the work.** A refusal keeps cooperating runners
   from colliding; a capability, `human-operator` included, is a runner's own statement; Baton's
-  permissions cover only its own state — who takes a repository's leases, who changes its
+  permissions cover only its own state — who takes an arena's leases, who changes its
   settings (values 12). A threat that needs a runner stopped belongs to the deployment, the
   forge or the credential proxy, not here.
-  A repository's policy may declare one exception: Baton's trusted runners decide what lands,
+  An arena's policy may declare one exception: Baton's trusted runners decide what lands,
   and the forge lets only them and the human-only identity land it ([BATON_SPEC §12.8](../../spec/BATON_SPEC/12-security.md#sec-12-8)).
   The policy holds and reports those values today; the trusted runners that enforce them are
   [proposed, not built](../../spec/proposals/security.md).
 - **Policy, not modes.** Every rule about authority and trust is a knob of one versioned policy
-  document per repository, held in Baton (BATON_SPEC [R-BTN-188](../../spec/BATON_SPEC/12-security.md#sec-12-8)). Presets such as `cooperative`
+  document per arena, held in Baton (BATON_SPEC [R-BTN-188](../../spec/BATON_SPEC/12-security.md#sec-12-8)). Presets such as `cooperative`
   and `protected` fill it; no rule reads a preset. A deployment requires named guarantees, which
   are conditions over the policy, and Baton enforces the policy's `floors` ([R-BTN-189](../../spec/BATON_SPEC/12-security.md#sec-12-8)); what Baton
   cannot observe stays the deployment's.
@@ -119,8 +119,8 @@ doorbell. Today Baton's only outbound act is a workflow dispatch, and runners wr
 ## Where code lives
 
 - **Course code never core.** `src/defaults/` (the standard courses, the CLI's sync and
-  init) is exempt from the boundary test and core imports nothing from it: what a
-  repository does with its tickets is that repository's code, shippable and versioned
+  init) is exempt from the boundary test and core imports nothing from it: what an
+  arena does with its tickets is that arena's code, shippable and versioned
   apart from the engine.
 - **One core, both hosts.** `src/core/` runs unchanged on the Durable Object and the
   local host (R-BTN-55); migrations are append-only; every behaviour change names its
@@ -139,14 +139,14 @@ doorbell. Today Baton's only outbound act is a workflow dispatch, and runners wr
 
 - **The agent seam** (`agent_command`): spawned without a shell, stdin never an open
   pipe, the process's exit the agent's completion (B-84's contract); result-dependent
-  legs' answers are machine-read last lines; the model configuration is the repository's
-  choice (`baton.json`), the wrapper hook the repository's freedom (B-95).
+  legs' answers are machine-read last lines; the model configuration is the arena's
+  choice (`.baton/baton.json`), the wrapper hook the arena's freedom (B-95).
 - **The state seam** (B-100, B-149): the ticket is the record — one heading per leg for the
   work, on the ticket's branch, schema-checked at the boundary; where the ticket is, is Baton's
   course history. Every course that records work is one ticket, one PR, one merge.
 - **The conversation seam** (PR courses, B-101): review rounds live in the forge's PR
   conversation; on plain `git`, which has none, as files on an orphan per-ticket branch,
-  `baton-legs/<ticket>`, which nothing merges. The repository's `forge` decides, not a policy knob (BATON_SPEC [R-BTN-190](../../spec/BATON_SPEC/05-courses.md#sec-5-8)).
+  `baton-legs/<ticket>`, which nothing merges. The arena's `forge` decides, not a policy knob (BATON_SPEC [R-BTN-190](../../spec/BATON_SPEC/05-courses.md#sec-5-8)).
 - **The entry seam** (B-98): a course whose product is tickets or specs starts from a
   request — one sentence, filed by a command — never ticket-less.
 

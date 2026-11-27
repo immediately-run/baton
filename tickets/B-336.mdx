@@ -1,0 +1,55 @@
+---
+title: B-336 — A runner whose executor cannot place a sandbox stops claiming until it can, and the failed claim costs the ticket nothing
+id: B-336
+project: baton
+status: available
+updated: 2026-11-25
+repos:
+  - baton
+tags:
+  - roadmap-item
+tier: judgement
+course: create-pr
+description: On 2026-11-25 E2B refused 47 sandboxes for lack of memory and the runner claimed and released 43 tickets in minutes (39 mislabelled stale-board, 4 spending a retry); a placement failure should stop the runner claiming until a probe placement succeeds, the failed claim should end with a host reason that spends no retry, and the executor should report placement health.
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the owner, 2026-11-25 (in a Claude Code session on bering, after the incident below): "The runner should not advertise its ability to start an e2b sandbox if it turns out that it lacks sufficient memory."
+
+**Spec:** [BATON_SPEC §9.1](../spec/BATON_SPEC/09-claims.md#sec-9-1) ([R-BTN-4](../spec/BATON_SPEC/09-claims.md#sec-9-1): a runner's `concurrency` is "the runner's own statement of what its host can run"; Baton counts claims, never a host's resources), [R-BTN-45](../spec/BATON_SPEC/01-what-baton-is.md#sec-1) (the runner decides whether to claim), [R-BTN-122](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-8) (retries), [R-BTN-35](../spec/BATON_SPEC/01-what-baton-is.md#sec-1) (`stale-board` is git taking a ticket away).
+
+**Depends on:** none.
+
+### What went wrong
+
+On 2026-11-25, 11:30–12:47 UTC, bering ran short of memory (`docs/interventions.mdx`, *2026-11-25 11:30–12:47*; `docs/lessons.mdx`, *a runner that cannot place a sandbox empties the queue in minutes*). E2B refused every sandbox: "Failed to place sandbox: this node cannot map 4096 MiB of guest memory: its memory pool is too small or in use by running sandboxes" (47 times). The runner kept claiming: each claim failed at once, was released, and the next ready ticket was claimed. In minutes 43 tickets were released — 39 as `released:stale-board` ("ticket moved under the claim", though nothing moved) and 4 as `released:cannot-finish:transient` (B-141, B-279, B-30, B-60), each spending a retry — and all 43 then waited for a sync.
+
+### What to build
+
+1. **A placement failure stops the runner claiming.** When the executor cannot place a sandbox for a host reason (E2B's placement or memory errors, a sandbox API 5xx naming placement), the runner takes no new claim until a placement succeeds again: it probes placement on a backoff (for example a minimal sandbox started and killed at once, or the executor's own capacity check) and resumes when the probe succeeds. Its claims in flight are not touched. While it waits it logs the reason once, and its heartbeat says it is not taking work (R-BTN-4's `concurrency` is the runner's statement; if lowering it to zero needs the spec's 1–32 range widened, amend R-BTN-4 in the same PR, else stop claiming on the runner's side, R-BTN-45).
+2. **The failed claim is named for what it was and costs the ticket nothing.** A claim whose leg or source sandbox could not be placed ends released at its `from` station with a reason that names the host (not `stale-board`, which is git's, R-BTN-35, and not `cannot-finish:transient`, which counts against the ticket's retries, R-BTN-122). Add the reason to the spec's end reasons if none fits.
+3. **The executor says what it can run.** The E2B executor reports placement health (and, where the API exposes it, free capacity) to the runner, so the runner can decline before claiming rather than after.
+
+### Exit criteria
+
+- With the executor's placement failing, the runner makes at most one failing claim, then stops claiming and probes; with placement restored it resumes on its own.
+- The failed claim's ticket keeps its retries and is not reported as moved.
+- `npm test` and `npm run typecheck` green; the behaviour named in a scenario (take its number with `baton tickets next scenario`).
+
+### Trust
+
+No new input from a writer. The placement signal is the executor's own (the runner's process, reach 3 only through a compromised host) and only makes the runner claim less; it grants nothing.
+
+### Invariants
+
+- R-BTN-4: Baton still counts claims, never resources; the runner's statement of capacity stays the runner's.
+- R-BTN-122: a host failure does not spend a ticket's retries.
+- R-BTN-35: `stale-board` keeps meaning git took the ticket away.
+
+## Status
+
+_filed 2026-11-25; the `create-pr` course._

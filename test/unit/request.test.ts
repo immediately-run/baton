@@ -174,19 +174,9 @@ describe('baton request: the ticket it files (B-98)', () => {
     // source splits a field on its FIRST `: ` and reads a `#` on the line as text (1-A-4).
     expect(text).toContain(`title: B-1 — ${sentence}`);
   });
-
-  it('the tier rides when given, and not otherwise', async () => {
-    const dir = repo();
-    expect((await request(dir, ['--course', 'create-spec', SENTENCE, '--tier', 'routine'])).code).toBe(0);
-    const dir2 = repo();
-    expect((await request(dir2, ['--course', 'create-spec', SENTENCE])).code).toBe(0);
-    expect(parseFrontmatter(atOrigin(dir, 'tickets/B-1.mdx')!)!).toMatchObject({ tier: 'routine' });
-    expect(parseFrontmatter(atOrigin(dir2, 'tickets/B-1.mdx')!)!).not.toHaveProperty('tier');
-  });
-
   it('every key the request writes is one the item schema admits, and the ticket-shaped ones are there', async () => {
     const schema = JSON.parse(readFileSync(join(ROOT, 'tickets', 'item.schema.json'), 'utf8')) as { required: string[]; propertyNames: { enum: string[] } };
-    const fm = parseFrontmatter(requestFile('B-9', 'create-spec', SENTENCE, 'routine', '2026-10-28'))!;
+    const fm = parseFrontmatter(requestFile('B-9', 'create-spec', SENTENCE, '2026-10-28'))!;
     // The ticket's own required keys are Baton's wiki's, not every repository's: a request
     // carries what the markdown source reads (id, title, description, status, course, tags).
     for (const key of ['title', 'id', 'status', 'description', 'course']) expect(Object.keys(fm), key).toContain(key);
@@ -195,7 +185,7 @@ describe('baton request: the ticket it files (B-98)', () => {
   });
 
   it('round 2, finding 3: the file carries the _filed Status line new writes, and the check exempts it as a request', async () => {
-    const text = requestFile('B-9', 'create-spec', SENTENCE, 'routine', '2026-10-28');
+    const text = requestFile('B-9', 'create-spec', SENTENCE, '2026-10-28');
     expect(filedDate(text)).toBe('2026-10-28');
     expect(text.trimEnd().endsWith('## Status\n\n_filed 2026-10-28._')).toBe(true);
     expect(sectionsExempt(parseFrontmatter(text))).toBe('request');
@@ -232,6 +222,34 @@ describe('baton request: what it refuses (B-98)', () => {
     const plain = tmp('baton-b98-plain-');
     expect((await request(plain, ['--course', 'create-spec', SENTENCE])).threw).toMatch(/is not a git checkout/);
     expect((await request(dir, ['--course', 'create-spec', SENTENCE, '--bogus', 'x'])).threw).toBe('--bogus: not a flag of baton request');
+  });
+});
+
+describe('baton request: commit provenance (B-251)', () => {
+  it('appends the supplied trailers after a blank line without changing the returned subject', async () => {
+    const dir = repo();
+    const trailers = 'Claude-Session: test-session\nCo-Authored-By: Test <test@example.com>';
+    const filed = await fileRequest(readRequestPlan(dir, 'create-spec', SENTENCE), {
+      env: { TICKET_TRAILERS: trailers, TICKET_REQUIRE_TRAILERS: '1' },
+    });
+    const subject = requestMessage('B-1', 'create-spec', SENTENCE);
+    expect(filed.message).toBe(subject);
+    expect(git(originOf(dir), 'log', '-1', '--format=%B', 'main')).toBe(`${subject}\n\n${trailers}`);
+  });
+
+  it('commits only the subject when no trailers are supplied or required', async () => {
+    const dir = repo();
+    const filed = await fileRequest(readRequestPlan(dir, 'create-spec', SENTENCE), { env: {} });
+    expect(git(originOf(dir), 'log', '-1', '--format=%B', 'main')).toBe(filed.message);
+  });
+
+  it('refuses required but empty trailers without pushing any refs', async () => {
+    const dir = repo();
+    const before = git(originOf(dir), 'show-ref');
+    await expect(fileRequest(readRequestPlan(dir, 'create-spec', SENTENCE), {
+      env: { TICKET_TRAILERS: ' \n', TICKET_REQUIRE_TRAILERS: '1' },
+    })).rejects.toThrow('TICKET_REQUIRE_TRAILERS=1, but TICKET_TRAILERS is empty');
+    expect(git(originOf(dir), 'show-ref')).toBe(before);
   });
 });
 

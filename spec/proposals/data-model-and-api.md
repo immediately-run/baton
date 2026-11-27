@@ -21,7 +21,7 @@ the MCP tools are generated from the registry, and `npm run check:actions` keeps
 and §14's table equal.
 
 - Caller *delegated*: an MCP key, as `owner` within R-BTN-186 (R-BTN-130, proposed). An *owner*
-  row admits one wherever the registry marks the action `true` or `own`.
+  row admits one wherever the action's `delegated` value is `true` or `own`.
 - An actor column also holds `mcp:<id>`, an MCP key's immutable id, never its reusable name.
   `ticket_overrides.hold_reason` also holds `mcp:<name>`.
 - `GET /v1/owner/{repository}/grants` also answers
@@ -42,6 +42,12 @@ and §14's table equal.
 
 Design: [sign-in, sessions and confirmed actions](people-and-dashboard.md#3-sign-in-sessions-and-confirmed-actions)
 (B-206).
+
+BATON_SPEC R-BTN-155, R-BTN-185, R-BTN-204 and §13.2 govern where they and this section differ:
+sessions of three roles (members too), one per tab under one rotating cookie
+(`dashboard_cookies`), repositories read on every request rather than stored, sign-in codes
+with no role (the binding key's role is the session's), a session's attestation carrying writer
+classes `human` and its role, and the confirmed acts R-BTN-155 names.
 
 - `dashboard_sessions` gains `role` (`administrator`\|`owner`) and `repositories` JSON (an
   owner's: those its key owned at binding).
@@ -124,7 +130,7 @@ Runners drain the outbox through the two routes below, never through a claim.
 
 | Route | Caller | Body or query | Response | Rules |
 |---|---|---|---|---|
-| `POST /v1/runner/outbox/claim` | machine, SSH-signed, on a grant whose role the repository policy's `outbox` admits | `{limit?}` (≤ 50) | `{entries: [{repository, id, kind, ticket, fields}]}` of the classes it declared, each leased 10 minutes; a ticket's entries of one class together, in `id` order | R-BTN-171, R-BTN-115 |
+| `POST /v1/runner/outbox/claim` | machine, SSH-signed, on an accepted grant (a source entry only where the policy's `outbox.source` admits `runner`) | `{limit?}` (≤ 50) | `{entries: [{repository, id, kind, ticket, fields}]}` of the classes it declared, each leased 10 minutes; a ticket's entries of one class together, in `id` order | R-BTN-171, R-BTN-115 |
 | `POST /v1/runner/outbox/{repository}/{id}` | the entry's claimer | `{state: "delivered", ref}` (recorded as its `std:effect@1` attestation, R-BTN-191) or `{state: "failed", reason: "transient" \| "refused"}` | `{ok: true}`; `forbidden` for another runner's entry | R-BTN-171 |
 
 ## Checks
@@ -139,11 +145,11 @@ Design: BATON_SPEC §10's check courses and check-runners (B-5).
 
 | Table | Key | Columns | Purpose |
 |---|---|---|---|
-| `check_runners` | `(credential_id, repository_id)` | `capabilities` JSON (expanded), `max_tier`, `added_by`, `added_at`, `revoked_at` | Check-runner keys; the row stands in for a grant (R-BTN-114) |
+| `check_runners` | `(credential_id, repository_id)` | `capabilities` JSON (expanded), `added_by`, `added_at`, `revoked_at` | Check-runner keys; the row stands in for a grant (R-BTN-114) |
 
 | Route | Caller | Body or query | Response | Rules |
 |---|---|---|---|---|
-| `POST /v1/owner/{repository}/check-runners`, `…/check-runners/{fingerprint}/revoke` | owner | `{public_key, name, capabilities?, max_tier?}`; revoke `{confirm: true}` | `{ok: true}` | R-BTN-114 |
+| `POST /v1/owner/{repository}/check-runners`, `…/check-runners/{fingerprint}/revoke` | owner | `{public_key, name, capabilities?}`; revoke `{confirm: true}` | `{ok: true}` | R-BTN-114 |
 
 ## The executor's run record and leg logs
 
@@ -164,11 +170,11 @@ Design: registration tokens beside keys (R-BTN-117, R-BTN-157; B-8). `credential
 
 | Table | Key | Columns | Purpose |
 |---|---|---|---|
-| `registration_tokens` | `id` (of `brt_<id>_<secret>`) | `repository_id`, `secret_hash`, `role` (`runner`), `capabilities` JSON, `max_tier`, `uses_left`, `grant_ttl_s`, `expires_at`, `created_by`, `created_at`, `revoked_at` | R-BTN-117, R-BTN-157 |
+| `registration_tokens` | `id` (of `brt_<id>_<secret>`) | `repository_id`, `secret_hash`, `role` (`runner`), `capabilities` JSON, `uses_left`, `grant_ttl_s`, `expires_at`, `created_by`, `created_at`, `revoked_at` | R-BTN-117, R-BTN-157 |
 
 | Route | Caller | Body or query | Response | Rules |
 |---|---|---|---|---|
-| `POST /v1/owner/{repository}/tokens`, `…/tokens/{id}/revoke` | owner | `{role: "runner", capabilities?, max_tier?, ttl_s?, uses?, grant_ttl_s?}`; revoke `{confirm: true}` | `{id, token}`, the token once; revoking revokes every credential it registered | R-BTN-117, R-BTN-157 |
+| `POST /v1/owner/{repository}/tokens`, `…/tokens/{id}/revoke` | owner | `{role: "runner", capabilities?, ttl_s?, uses?, grant_ttl_s?}`; revoke `{confirm: true}` | `{id, token}`, the token once; revoking revokes every credential it registered | R-BTN-117, R-BTN-157 |
 | `POST /v1/register` | `Authorization: Baton-Token <token>` | `{name, public_key}` or `{name, api_key: true}` | `{credential_id, grant}`, and `{api_key}` once for the second form; `forbidden` beyond the token's scope; `unauthenticated` for a spent, expired or revoked token; `conflict` | R-BTN-117 |
 
 ## Attestations, roles and fact legs
@@ -188,7 +194,6 @@ Design: BATON_SPEC §12.8's unbuilt parts (B-136, B-146, B-147).
 |---|---|---|---|---|
 | `POST /v1/repositories/{repository}/attestations` | also an owner session (writer `owner`) or a `service` key | as §14 | `{id}` | R-BTN-181 |
 | `DELETE /v1/repositories/{repository}/attestations/{id}` | its writer; for a `human` type, a `human_only` key | `{confirm: true}` | `{ok: true}` | R-BTN-181, R-BTN-185 |
-| `PUT /v1/owner/{repository}/grants/{fingerprint}/role` | an approver on `approvers.roles` | `{role: "runner" \| "trusted-runner", domain?, checker?}` | `{ok: true}`; `invalid-params` for `trusted-runner` on an API key, or a `checker` mark R-BTN-180 refuses | R-BTN-180, R-BTN-188 |
 | `GET /v1/repositories/{repository}/fact-legs` | a trusted runner whose `service:` key the policy names for `std:arrival@1` (the fact reader) | — | `{tickets: [{ticket, station, path_len, leg, fact, waiting_since}]}` | R-BTN-192 |
 
 ## The doorbell
@@ -205,7 +210,7 @@ Design: R-BTN-146 (proposed). The heartbeat response carries `pending_grants[]`.
 
 | Route | Caller | Body or query | Response | Rules |
 |---|---|---|---|---|
-| `POST /v1/runner/grants/{repository}/accept`, `…/decline` | machine alone | accept: `{confirm_span?}` | `{ok, span}`; an acceptance that raises the span without `confirm_span` is `conflict` listing the repositories that would lose sync | R-BTN-146 |
+| `POST /v1/runner/grants/{repository}/accept`, `…/decline` | machine alone | — | `{ok}` | R-BTN-146 |
 | `PUT /v1/owner/{repository}/grants/{fingerprint}/flags` | owner | `{sync}` | `{ok: true}` | R-BTN-146, R-BTN-186 |
 
 ## Code-repository consents
@@ -260,10 +265,8 @@ Design: [admission limits within a tenant](multi-tenancy.md#admission-limits-wit
 
 ## The policy's dry run
 
-Design: [the policy's dry run](security.md#1-the-policys-dry-run-r-btn-188-proposed).
-`PUT /v1/owner/{repository}/policy` also takes `dry_run?` beside `policy` or `preset`, and with
-it answers `{changed[], guarantees, stops: {grants[], legs[], tickets[], runners[], unreached[]}}`
-and writes nothing.
+The built policy route and its preview are specified in [§14](../BATON_SPEC/14-api.md)
+and R-BTN-188. See [the proposed additional stop predictions](security.md#1-extending-the-policys-dry-run-r-btn-188-proposed).
 
 ## A control path changed outside a course
 
@@ -307,7 +310,7 @@ surfaces of actions the dashboard or the heartbeat serves today.
   - exhausts its registration tokens; the credentials those tokens registered are not revoked
     (R-BTN-117);
   - drops its `queued`, `claimed` and `delivered` outbox entries, logging each; a deliverer's
-    later mark of one is ignored (R-BTN-171);
+    later report on one is ignored (R-BTN-171);
   - deletes its sync wants, its ticket timers and every consent row it gave or was given
     (R-BTN-94, R-BTN-167, R-BTN-140).
 - **Consent (R-BTN-140).** A `code_repos` entry whose `{host, repo_id}` is a registered

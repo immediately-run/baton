@@ -10,8 +10,9 @@ export type Row = Record<string, SqlValue>;
 export interface Cursor<T> {
   toArray(): T[];
   one(): T;
-  /** The rows a writing statement changed, once drained (the Durable Object's `rowsWritten`);
-   *  absent where the host cannot say, which counts as a change (B-237's state version). */
+  /** Host write count once the cursor is drained. Durable Object SQLite counts index writes;
+   *  Node SQLite counts directly changed table rows. Absent where the host cannot say, which
+   *  counts as a change (B-237's state version). */
   readonly rowsWritten?: number;
 }
 
@@ -34,6 +35,14 @@ export interface Scheduler {
   set(at: number): Promise<void>;
 }
 
+/** R-BTN-149: resolve only when every part of the event batch is durable. */
+export type EventArchive = (parts: readonly EventArchivePart[]) => Promise<void>;
+export interface EventArchivePart {
+  repository: string;
+  day: string;
+  ndjson: string;
+}
+
 /** Baton's clock (R-BTN-32): epoch milliseconds. Core reads time only through its `now`;
  *  without one the core uses the system clock, on both hosts alike. */
 export type Clock = () => number;
@@ -42,6 +51,11 @@ export type Clock = () => number;
  *  `--admin-keys` names. One OpenSSH public key per entry. */
 export interface AdminKeys {
   list(): string[];
+}
+
+/** R-BTN-155: the deployment's email-to-key bindings, read afresh on each call. */
+export interface AccessIdentities {
+  read(): string;
 }
 
 /** R-BTN-185 (B-145): the host's human-only keys — `BATON_HUMAN_KEYS`, the same shape as the
@@ -60,8 +74,14 @@ export interface Workflow {
   own?: boolean;
   tickets?: unknown[];
 }
+export type ForgeDispatch = { kind: 'github-app' } | { kind: 'gitlab-trigger'; project_id: number; ref: string }
+  | { kind: 'gitea'; workflow: string; ref: string };
+
 export interface DispatchTarget {
-  github: string;
+  path: string;
+  repository?: string;
+  origin?: string;
+  adapter?: ForgeDispatch;
   /** The workflow file's name, as `actions/workflows/{workflow}/dispatches` takes it. */
   workflow: string;
   ref: string;
@@ -79,6 +99,8 @@ export interface Dispatch {
 /** The instance's settings (§3a): wrangler.toml's vars and the Worker secrets on Cloudflare,
  *  the start-up options and `--config` file locally. */
 export interface Config {
+  /** B-244: seconds idle before dispatching the repository's owner trigger (default 1800). */
+  BATON_IDLE_NOTIFY_AFTER_S?: string;
   BATON_ORIGIN: string;
   OIDC_ISSUER: string;
   OIDC_JWKS_URL: string;
@@ -86,9 +108,8 @@ export interface Config {
    *  array of `POST /v1/admin/repositories` bodies less their owner keys. Each binds its own
    *  sync and mirror workflow to its board (R-BTN-15). */
   BATON_REPOSITORIES?: string;
-  /** R-BTN-16, as amended 2026-10-20: Access is hardening in front of the dashboard that Baton
-   *  never reads, and no deployment sets these (R3-1208's provision sets none). B-46 removes
-   *  the one read that remains. */
+  /** R-BTN-155: verify Access assertions at sign-in. OWNER_EMAILS applies only to the
+   *  legacy Access-only dashboard path when there are no administrator keys. */
   ACCESS_TEAM_DOMAIN?: string;
   ACCESS_AUD?: string;
   OWNER_EMAILS?: string;
@@ -100,12 +121,9 @@ export interface Config {
    *  allowed_capabilities}` — `key` an OpenSSH public key line, `name` the one hostname it may
    *  register. Seeded into `credentials` at start until R3-1240's owner grants replace it. */
   BATON_KEYS?: string;
-  /** §10.3: a fine-grained token, Actions: write on docs only, for workflow_dispatch. Absent,
-   *  the two workflows run on their 15-minute schedules. */
-  GITHUB_DISPATCH_TOKEN?: string;
-  /** R-BTN-94: per repository, `{forge, gitlab_issuer?, webhook?, dispatch?}` as JSON — what the
-   *  Runner knows of each repository's forge before the object, and its forge secrets (R3-1262
-   *  reads `gitlab_issuer`; R3-1263 and R3-1264 the rest). */
+  BATON_GITHUB_APP_ID?: string;
+  BATON_GITHUB_APP_KEY?: string;
+  /** R-BTN-94: per repository, `{forge, gitlab_issuer?, webhook?, trigger_token?}` as JSON. */
   BATON_FORGE_SECRETS?: string;
   /** R-BTN-73: the GitHub App's webhook secret. Absent, every delivery is refused. */
   BATON_GITHUB_WEBHOOK_SECRET?: string;
@@ -113,6 +131,8 @@ export interface Config {
    *  deployment's root of trust, set outside Baton. A key in it satisfies every `human` entry
    *  of every repository on the instance, and it is the only recovery from a lost key. */
   BATON_HUMAN_KEYS?: string;
+  /** B-131: host broker OpenSSH public keys, one per line; forge-scope reads only. */
+  BATON_FORGE_BROKER_KEYS?: string;
   /** R-BTN-113 (B-234): the hosts whose session links the instance accepts — `session_hosts`,
    *  a comma- or JSON-separated list. An administrator's setting, as the human keys are; the
    *  default is `claude.ai` alone. */
@@ -147,9 +167,12 @@ export interface Gate {
 export interface Ports {
   store: Store;
   scheduler: Scheduler;
+  /** Without a host-configured archive, event retention never deletes. */
+  archiveEvents?: EventArchive;
   config: Config;
   dispatch: Dispatch;
   adminKeys: AdminKeys;
+  accessIdentities?: AccessIdentities;
   /** R-BTN-185 (B-145): the host's human-only keys; absent, `BATON_HUMAN_KEYS` in the config. */
   humanKeys?: HumanKeys;
   /** Absent on Cloudflare, where the input gate needs nothing. */

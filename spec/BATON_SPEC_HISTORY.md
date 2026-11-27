@@ -18,6 +18,600 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
 
 ## Changelog
 
+- **2026-11-26 — Gating on a reading deferred (R-BTN-76, R-BTN-181).**
+  Rules changed: none; the Decisions line on readings (§91) now says they are served as advice
+  and that gating on one is deferred, where it said gate or advice was the requirement's choice.
+  The 2026-10-30 brief let a course gate a leg on a reading ("eg: account funds"); the 2026-11-19
+  ruling cut the `resource` prerequisite ("cut them"; R-BTN-76's lineage in this file: "readings
+  stay, served as advice"), and did not say whether
+  R-BTN-181's `requires.attestations` instance form, the same requirement written in full, may
+  still bind as a gate (B-146's review round two, `docs/review/B-146-round-2.mdx`, raised it).
+  The owner's ruling, 2026-11-26, in a Claude Code session on bering, answered that question:
+  "Theoretically, it makes sense for readings to be an input to leg
+  decisions, but I also don't think we'll need this for a while still." The instance form stays on
+  the security proposal page, unbuilt, with S-BTN-181's funds, `count: 2` and latest-per-writer
+  cases; B-146 builds work attestations only. It is ruled on when a course first needs it. Still
+  true, and left as it is: R-BTN-181's built check of a policy's `readings` entries, which
+  validates policy and gates no leg: it constrains a `readings` entry for the case a requirement on
+  a reading would create, so nothing reaches past it if that is ruled in later.
+  - **Review** (2026-11-27, PR #335): one fresh reviewer given the diff. Every finding verified
+    against the text. Fixed: this Decisions line; the 2026-11-19 entry's silence, which the
+    first wording called an open question; the quote's source; B-146's *Why*, which called the
+    `resource` prerequisite removed while its code stands (B-291 removes it); a 2026-11-02 status line this ruling contradicts and a 2026-11-03 one the renumbered items
+    made wrong, struck; item 3's reach, now work subjects
+    only; the round-two review page's "returned changes", a comment review.
+  - **Review round two** (2026-11-27, PR #335): one fresh reviewer over the fixes. Fixed: the
+    2026-11-19 entry quoted, not inferred; "answered", not "asked"; why R-BTN-181's `readings`
+    check stays; B-146's stale description and **Spec:** line; `prs:` emptied, since #335 lands
+    the re-scope, not the work.
+- **2026-11-26 — Two human gates, `protected` claims the custody one, `exec` streams, and "mark" leaves the vocabulary (R-BTN-189, R-BTN-185, R-BTN-107).**
+  Rules changed: R-BTN-189, R-BTN-185, R-BTN-188, R-BTN-155, R-BTN-107, R-BTN-145, R-BTN-186,
+  R-BTN-57, §12.1, §12.8; S-BTN-324, S-BTN-278, S-BTN-321, S-BTN-185, S-BTN-190, S-BTN-192, S-BTN-299; one Decisions entry; the linked proposals (people and
+  dashboard, intervention sessions, conditions, data model and API, scenarios: S-BTN-100,
+  S-BTN-197). From the code-against-spec review of 2026-11-24
+  (`docs/review/code-vs-spec-review-2026-11-24.mdx`), whose owner decisions these are.
+  - **Two human gates.** The owner, 2026-11-24, asked whether `human-gates` keeps a variant
+    without hardware keys: "yes"; and, 2026-11-26, whether the `protected` preset claims it:
+    "yes". R-BTN-189 again names two guarantees: `human-gates` (`approvers.members` and
+    `approvers.policy` human-only, any `human_key`), resting on the custody §12.8 lists as not
+    observed, as every guarantee rests on what that list excludes; and `human-gates-hardware`
+    (the same, `human_key: hardware`, and a key that can meet it), which holds nowhere until
+    FIDO attestation verification is built (R-BTN-185, B-136). `protected` holds all but
+    `human-gates-hardware`; `protected-hardware` all six once a key can meet `hardware`.
+    Legacy `human-gates` and `human-gates-hardware` compare by name, and a floor keeps its
+    guarantee's name. This reverses the restructure's part 2 of 2026-11-02 (B-164: "Only
+    protected-signed", `human-gates-hardware` absorbed into `human-gates`), the legacy
+    comparison B-293's spec half wrote on 2026-11-22 ("Legacy `human-gates` (the weaker
+    condition) … no migration successor"), and R-BTN-185's "no guarantee claims it as a human
+    gate". What it loosens: under `human_key: any`, `protected` now claims a human gate that any
+    agent session defeats which can use a human-only key or open a dashboard session (one Access or a
+    `human_only` key's code opened, R-BTN-185): driving a signed-in browser; and, before the narrowing below, an
+    administrator's one-time link minted with an administrator key, or, once owners' sessions are
+    built (B-76), a sign-in code bound with an ordinary owner key. Baton cannot tell, which is why the promise names
+    custody. A floor on `human-gates`, which from 2026-11-02 pinned `human_key: hardware`, now
+    pins only the two lists: an `approvers.policy` approver can lower `hardware` to `any` without
+    `floor-violated`, so a deployment that relied on the hardware meaning floors
+    `human-gates-hardware` instead. Fieldhouse's R-FH-3 does (`FIELDHOUSE_SPEC.md`, its human
+    gates), and follows in its own repository. The code is behind: B-136 (#331,
+    2026-11-24) returns `false` for both guarantees (`src/core/policy.ts`), refusing
+    custody-only gates; computing `human-gates` from the lists again is B-189's item 2, which already reads them,
+    with `human-gates-hardware` held `false` until B-136's attestation is built; S-BTN-190's
+    legacy cases are B-293's.
+  - **Under `any`, a session proves a human only as strongly as its sign-in.** Review round one
+    found the gap above. The owner first sent it, 2026-11-26, to the session writing the
+    human-intent page (its principle in `docs/context/human-intent.mdx`, baton#449), which splits
+    who drives a session (the owner, 2026-11-26, in that session: "Baton Dashboard UI: Human
+    drive (policy may dictate hardware-key proof of this, but the assumption is that this is
+    always a person)") from how strongly that is proven, and read it as the narrowing. Round two
+    found that the narrowing revised the owner's ruling of 2026-11-23 (B-340: every person's
+    session "however it was opened", with a per-act key touch under `hardware`). Asked with the
+    three rulings side by side, the owner chose, 2026-11-26, "Narrow under `any` only": under
+    `human_key: any` a session acts as `human` only when Cloudflare Access opened it (either of
+    R-BTN-155's Access modes) or a code a `human_only` key binds; an ordinary key's one-time link
+    or code proves only that key's role and satisfies no human-only list; a sign-in path not
+    named proves no human, the proposed forge sign-in included (the owner, 2026-11-26, as
+    baton#449 records it: "a forge signin doesn't prove human intent, because autonomous agents can
+    also use forge credentials").
+    Under `hardware` the ruling of 2026-11-23 stands: every session, each act with its touch.
+    R-BTN-188's `human` entry and its session sentence, R-BTN-155, R-BTN-57, §12.1's rows, §12.8's
+    custody bullet, S-BTN-278, S-BTN-321 and S-BTN-324 follow. No session acts as `human` today
+    (`src/core/policy.ts`: a `human` entry matches only `human_only` owners and break-glass
+    lines); B-340 builds it, its item 5 the sign-in's proof, and B-195 writes no `human` writer
+    before it. Rejected: every session however opened, with `human-gates` under `any` resting
+    on custody of every key that can open a session; and `protected` not claiming `human-gates`.
+  - **The protection checker.** The owner, 2026-11-26, chose a grant role over a mark. B-189's
+    amendment of 2026-11-24 had already retired the protection checker, grant roles and the
+    checker mark, so nothing changes here.
+  - **"Mark" is not a noun of Baton's.** The owner, 2026-11-26: "Marks are not present on the
+    dashboard and cli. Is this a bit of vocabulary baton truly needs?", and, offered dropping
+    it: "yes, drop it". The spec and the proposals called six things a mark, G-BTN-172's retired "brief mark" among them: a key's `human_only` (§12.1, R-BTN-57), the registry's `delegated` value (R-BTN-186,
+    the people-and-dashboard and intervention-sessions proposals, S-BTN-100), whether the
+    tenant is frozen (S-BTN-299), an outbox delivery report (the conditions and data-model
+    proposals) and a grant's admitting the capability `intervener` (the intervention-sessions
+    proposal). Each now names the property, value or report; none changes. A mark as a glyph on the
+    dashboard (the tickets' "mode mark" and "state mark") is a different sense and stays: the owner,
+    2026-11-26, "this is fine, let them stay". The verb ("marks the lease lost") stays.
+  - **`exec` streams.** The owner, 2026-11-24, asked whether R-BTN-107's `exec` returns
+    `{status, stdout, stderr}` or the streaming object the code returns: "streaming needs to be
+    supported". `exec(handle, argv, {cwd, timeout_s, stdin, env, onStderr}) → {result, write,
+    kill}`, as `src/runner/executor.ts` and Fieldhouse's E2B executor implement it; no executor
+    implements the old shape, so `executor_api` stays 1.
+  - **Review, round one**: two fresh reviewers given the diff and the impact list. Found: under
+    `human_key: any` a session is a human, and a session can be opened by an administrator's
+    one-time link today and, once B-76 builds it, by a code an ordinary owner key binds, so an
+    agent holding no human-only key could pass `[human]` lists, a loosening the entry did not
+    name (named above; how to close it is put to the owner); `human-gates-hardware` said it rested
+    on no custody; "a key can meet `hardware`" had three readings (now a `human_only` owner key
+    of the repository) and "held" read the policy's values only (now the whole cell, at the
+    moment of computing); the *Decisions in full* entry still stated the reversed choice; floors
+    on `human-gates` changing meaning, Fieldhouse's R-FH-3 among them; no "Not built" for
+    `human-gates` while the code returns `false` (B-189 builds it; S-BTN-185 and S-BTN-190 say
+    so); B-164's title and description, `docs/hardware-policy-upgrade.mdx`, and the vocabulary
+    and product pages' "only a human-only key"; the custody list restated in a cell;
+    `intervener`, a capability a grant admits, called a setting; five more noun uses of "mark";
+    `exec`'s `status` on a kill or timeout, `env` overriding past R-BTN-144's filter, R-BTN-145's
+    "the leg call returning", and the leg-log proposal reading a stdout `exec` does not stream;
+    strikes that re-added the struck word. Each was checked against the text and fixed.
+  - **Review, round two**: one fresh reviewer given the whole diff, round one's fixes and the
+    impact list. Every round-one item was found fixed. Found: R-BTN-185's "Not built" said every
+    session acts as `human` until B-340, where today none does; the narrowing revised the owner's
+    2026-11-23 ruling without quoting a new one (put to the owner, who chose it for `any` only,
+    above); restatements of "a session is a human" in R-BTN-188, R-BTN-155, §12.1, §12.8's
+    custody bullet, S-BTN-278, S-BTN-321, the open questions, the security proposal and the
+    context pages; B-195 writing `human` for every session before B-340 decides which act as
+    one, an interim hole once B-76 builds owner sign-in codes, and B-213, B-338 and B-340's title
+    and description; "over the policy" and `held` reading the policy's values only; this
+    entry's loosening paragraph listing paths the narrowing closes; `exec`'s held stdin lines and
+    the leg-log proposal's `onStdout` against `executor_api`; S-BTN-324 having no test; and
+    G-BTN-172 missing from the mark count. Each was checked against the text and fixed.
+  - **Review, round three** (the last): one fresh reviewer given the whole diff, round two's
+    fixes and the impact list. Every round-two item was found fixed. Found: under `hardware` a
+    `human_only` owner key's session matched `[human]` through its key, so no act it took needed
+    the touch `human-gates-hardware` promises (now every act a `human` or human-only `key:` entry
+    admits carries it); an ordinary key's session under `hardware` left untouched `human`
+    attestations that would count after a lowering to `any` (now recorded with its role only);
+    the touch's credential not bound to the act's repository (now its signing human-only key must
+    own it at the act); "either Access mode", though the keyless mode opens no session (now only
+    the `ACCESS_IDENTITIES` sign-in, the keyless mode acting as no `human`); "where its sign-in
+    proves one" and §12.8's custody bullet false under `hardware`; the Decisions line,
+    `docs/security-model.mdx`, the UX page, the intervention-sessions proposal and B-195's
+    invariant; S-BTN-324 lacking the new cases; and this entry's "a session is a human" and
+    missing §12.8. Each was checked against the text and fixed. Three rounds being the most a spec
+    PR runs, round three's fixes were not reviewed again; the PR says so.
+
+- **2026-11-26 — Terminology: the arena; the session's proposals (no rule changed).**
+  Rules changed: none.
+  The front gains a terminology note: the unit Baton coordinates — one ticket source, its
+  configuration and everything Baton owns about its tickets — is an **arena** in the vocabulary
+  (the owner, 2026-11-26: "repository" made Baton read as if it could serve only git-held
+  tickets, while a ticket source may be a tracker such as Linear; "home" retires with it). The
+  spec keeps writing it a registered repository, and a ticket's arena its home, until a rename of
+  its own, staged with the API's and the CLI's names, the old names accepted meanwhile.
+  Recorded beside it, as proposals and context, not rules:
+  [human intent and autonomy](../docs/context/human-intent.mdx) (the key decides who drives,
+  never the channel; Baton constrains agent-driven work, not people, never the lock or the
+  record), [ticket ownership](proposals/ticket-ownership.md),
+  [personal secrets and notification](proposals/personal-secrets.md), people for accountability and
+  notification ([people and dashboard §5](proposals/people-and-dashboard.md#5-people-identities-and-the-roster)),
+  interventions split by driver ([intervention sessions](proposals/intervention-sessions.md)), and
+  what waits for unattended operation ([hardening](proposals/hardening.md)). Dibber, the git-native
+  ticket format, lives in its own repository, [immediately-run/dibber](https://github.com/immediately-run/dibber).
+  - **Round one** (2026-11-26, PR #449): three fresh reviewers — consistency, security,
+    executability — given the diff and the impact list. Every finding checked against the text.
+    - Found in all three: `human-operator` is a runner's own statement, so making such a runner
+      human-driven let an agent create and claim at once. The owner: a runner is always
+      agent-driven.
+    - The session claim had no fence (the `pre-push` hook is a runner's) and its lease no runner
+      row: an MCP session claim is requeued onto a fresh branch, a late push is outside work, and
+      the CLI's attached-runner mode is the second form.
+    - An unwritten ticket contradicted §9.1, R-BTN-5/34 and R-BTN-33: the owner allows Baton the
+      start text, at most 1,024 characters, until the store has it; the claim answer carries it;
+      under `tickets-approved` no leg runs before its hash is approved.
+    - Whoever controls the notifier key list could read every secret, against the proposal's
+      claim: stated as an accepted risk, its fix parked in the hardening proposal (the owner:
+      premature before Baton runs unattended). Versions never reset; a re-encryption keeps the
+      inner hash; channels are verified per secret version; secrets are set only by SSH keys.
+    - "Interactive keys never satisfy the approver lists" was withdrawn: the owner ruled the key
+      decides, never the channel; a token's proof is what a `human_only` or hardware list refuses.
+      Interactive grants are short-lived OAuth grants, designed now rather than left to hardening.
+    - A forge identity cannot say who drives (the owner): linked forge accounts attribute only;
+      `human_identity` stays as the spec has it, and "several people's forge identities" was
+      dropped.
+    - People carry no authority (the owner: no RBAC in Baton, leave it to the forge): the
+      contributor role became the roster, read from the forge; no groups, no `answerers`, no
+      escalation steps. From the earlier users-and-groups proposal (#300, closed) the notifier's
+      due read, `std:notified@1`, `baton.notifier-silent` and the attach code were kept.
+    - Text: "autonomous" for credentials became **agent-driven** (an autonomous leg is R-BTN-195's);
+      "dashboard sessions" built only for administrators; the terminology note on "home"; the
+      Amends lists extended (R-BTN-53, R-BTN-130, R-BTN-163, R-BTN-5/34, §9).
+  - **Round two** (2026-11-26): two fresh reviewers — consistency with executability, and
+    security. Every finding checked against the text.
+    - Both found the CLI form of a session claim was a runner, hence agent-driven by the page's own
+      rule, and that its `ssh-agent` would hand queued legs the person's key. The owner: it is
+      `baton session claim`, which holds the lease and the `pre-push` fence and runs no queued
+      legs; a runner on a person's machine keeping its legs from the person's keys is hardening.
+    - The interactive grant contradicted BATON_MCP_OAUTH_SPEC (a grant is an MCP key, as long-lived
+      as one, approved only by owners): its §5, §7, §8 and G-BTN-157 are named as amended; an hour's
+      token, a twelve-hour refresh cap, an hour idle; the consent's ticks a ceiling.
+    - The roster could not be computed by a server that holds no forge credential, and a non-owner
+      had no credential at all. The owner: people sign in with the forge, which verifies their
+      account; the roster's source is the arena's choice (`roster.source`: `repo-writers` or
+      `org-members`), read and posted by the sync as `std:roster@1`, fresh within 24 hours,
+      re-checked at every start, claim and renewal; on plain git, the owners' people.
+    - The owner kept "the key decides": governance acts outliving a session, and a person's key in
+      an unwatched agent, are stated as accepted risk, and a key-signed proof level for governance
+      acts goes to hardening.
+    - Fixed in the text: approval is always a recorded `std:approval@1` of a defined hash, and
+      `claim: true` is refused until it exists; an unwritten ticket's provenance carries no `human`; how an MCP
+      session claim moves, which gates bind a person, the branch recorded per claim; agent-driven
+      starts name their claim; ambiguous ids refused and a recovered id confirmed by an owner; one
+      person per forge account, never a runner's; a notifier is a principal of its own, alone
+      attesting deliveries, on a host that runs no legs; recipients limited to the arena's people;
+      verification codes and webhook limits; replay to a fresh notifier and an administrator's
+      first-key code stated as accepted risk.
+  - **Round three** (2026-11-26, the last): one fresh reviewer over everything, after the branch
+    took in main (members, R-BTN-204; owners' and members' sessions, R-BTN-155). Every finding was
+    within the owner's rulings and is fixed in the text:
+    - A forge sign-in's session carries no key's role — the roster's acts and their reads only —
+      so taking over a forge account takes over no owner key; a person is created only for an
+      account on some arena's roster or one an owner names; the forge OAuth is named a new outbound
+      call and secret.
+    - A ticket an agent-driven credential starts runs nowhere before a human approves its text
+      wherever `tickets.created` is `proposed`, whatever the guarantees.
+    - An interactive grant is not a delegated key: it writes as the new writer `person`; a session
+      claim is bound to the person, so a fresh grant continues it; an approval names a written
+      ticket's posted version or an unwritten one's text hash.
+    - The CLI's `baton session claim` renews by `claim.renew`, and the `pre-push` holder query
+      asked with a person's key answers for their own claims; a lapsed claim of either form is
+      requeued the same way.
+    - `std:roster@1` is written by the sync key or CI identity alone, never a runner's.
+    - A runner's legs on a machine holding a person's keys can act as that person today: stated as
+      accepted risk, its fix in hardening.
+    - Smaller: owners' and members' sessions are not roster-gated; the notifier condition, the
+      channels it reads for codes, rate limits on every channel; the intervention tail.
+  - **After round three**, the owner's rulings: a session counts as `human` for a human-only list
+    as R-BTN-185 is to rule once [#451](https://github.com/immediately-run/baton/pull/451) lands
+    (under `human_key: any`, only one Cloudflare Access or a `human_only` key's
+    code opened; under `hardware`, every session, each act with its touch), and a forge sign-in
+    never proves a human: "a forge signin doesn't prove human intent, because autonomous agents can
+    also use forge credentials". Dibber's R-DIB-2 now closes a ticket in place, which ticket
+    ownership follows.
+  - **The owner's answers to the open decisions**, 2026-11-26: an entry with no assignee notifies
+    nobody and is shown on the dashboard only; removing a person deletes their sealed secrets; an
+    MCP session claim's lease is 15 minutes by default; `requires` is store-owned, like course and
+    tier; and `baton ticket request` with Baton unreachable fails loudly, never falling back to
+    git-only legacy mechanics.
+  - **Tracker identities**, the owner, 2026-11-26: a tracker account is verified by the tracker's
+    own OAuth sign-in where it offers one, and otherwise linked by an owner of the arena; a
+    matching email or a mapping the sync reads never verifies one.
+  - **The last two open decisions**, the owner, 2026-11-26: `baton.ticket-missing` holds the
+    ticket, with no legs working from the content they last read; and the courses that commit to
+    the default branch gain reconcile legs before closure flips. The tracker writer (R-BTN-171) is
+    recorded as a dependency of tracker sources, not a decision.
+  - **Round four**, at the owner's request beyond the three-round cap: two fresh reviewers given the
+    diff, one for consistency and executability, one for security. Every finding was verified
+    against the text. Fixed:
+    - R-BTN-185's narrowing is cited as [#451](https://github.com/immediately-run/baton/pull/451)'s
+      amendment, not today's rule, and R-BTN-185 and R-BTN-188's `human` entry join the amends;
+    - tiers, retired on 2026-11-23, are gone from ticket ownership;
+    - an interactive grant never exceeds the session it came from: its authority-changing acts wait
+      for the key's confirmation (R-BTN-155), it takes no key-only act, and it writes as its
+      session's role where an entry names that role;
+    - a human-driven intervention starts through `course.start` with a session claim; the leftover
+      "no session satisfies a human-only list" lines follow R-BTN-185;
+    - who holds a session claim (the roster, or an owner's or member's key), and rule 4 binding a
+      session claim;
+    - approval by a human-driven session's act: its advance carries the approval naming the blob id,
+      bound once a post shows that version;
+    - a reappearing ticket keeps an approval of its version; the unwritten ticket's hash covers its
+      course and fields; `started_by` outlives the first write;
+    - agent-driven starts are limited per claim, as R-BTN-187 limits a sync; human-driven starts are
+      not, nor a person's claims (no ceiling, the owner);
+    - a key is never both a person's and an agent's; every key attached is announced; each roster
+      change is an event naming its poster;
+    - an `unreachable` recipient is due again; webhooks connect only to the address checked;
+    - anchors, `runner_pushers`' and the board's citations, the built list, the notifier's wording.
+    Deferred to hardening: confirming accounts a roster adds, and revoking a first key attached from
+    a forge session. Put to the owner: what a person on an `org-members` roster who cannot push to
+    the config repository may do. The owner, 2026-11-27: everything the roster admits, unnarrowed;
+    choosing `org-members` is the owners' statement that they trust every member that far.
+
+- **2026-11-26 — A protected repository accepts a branch course source (R-BTN-134).**
+  Rules changed: R-BTN-134 (*A branch source*). #395 left open whether a protected repository
+  (R-BTN-188) should refuse branch sources. The owner's ruling, 2026-11-26: "No, the #395 warning
+  is correct. The reason: even protected mode requires iterative course development, making this
+  artificially difficult by requiring pinning to commits during development is counterproductive
+  and invites worse workarounds or sidestepping baton." A branch source is accepted under every
+  policy; the unpinned warning is the safeguard.
+- **2026-11-26 — `baton repo init --check` re-scoped to sourced courses (R-BTN-134, S-BTN-105).**
+  Rules changed: R-BTN-134 (*`baton repo init`* gains `--check`). B-281 built `--check` to
+  compare a home's committed leg stubs (`.baton/courses/<id>/legs/<leg>.mjs`) with what the
+  pinned CLI builds; B-139 then removed those home copies — a sourced course's home holds only its
+  overrides, and the sync refuses any other file — so the check had nothing to compare. The
+  owner's ruling, 2026-11-26: "Re-scope to B-139". `--check` now reports each file in a sourced
+  standard course's home directory that is not a leg override, against the pinned source (a copy
+  that differs, or an identical one `--prune` removes), and each committed
+  `.baton/courses/standard-<id>/` source tree that differs from what the checkout builds.
+
+- **2026-11-26 — Ticketed growth of the pending and inventory lists (R-BTN-30).**
+  Rules changed: R-BTN-30; §90's account of `npm run check:api` (B-277 gave that check no rule of
+  its own). The owner's ruling, 2026-11-26, "Allow ticketed growth": a spec PR may add a pending
+  scenario (`spec/scenarios-pending.json`) or an API inventory exception
+  (`scripts/check-api-exceptions.json`) "when the new entry names an open ticket that builds it",
+  and "the entry is removed when that ticket's code lands". Until then both lists only shrank
+  against the default branch (B-276, B-277), so a spec-only PR adding scenarios, routes or tables
+  built by later tickets could not pass `check:spec` or `check:api`. A new pending entry is
+  `{ "id": "S-BTN-<n>", "ticket": "B-<n>" }`; an inventory entry already maps to its ticket. An
+  open ticket is a file in `tickets/`, not `tickets/archive/`, whose status is not `done`,
+  `superseded` or `withdrawn`. Untagged growth still fails, as does a removal left undone.
+
+- **2026-11-26 — A course source may follow a branch, with no trust check (R-BTN-134, S-BTN-317, S-BTN-325).**
+  Rules changed: R-BTN-134 (*A source*, a new *A branch source* bullet, *`baton repo init`*);
+  §4.4's `course_sources`; §13's `board_snapshots`; S-BTN-317; S-BTN-325 is new. B-315 asked for
+  a branch in place of a pin (the owner, 2026-11-22: "it should be possible to specify a branch
+  instead of a specific commit for the pin, which should trigger a warning but should be okay"),
+  first built on the model B-139 replaced; B-139 made a source any repository, read from its own
+  `.baton/courses/<course>/` at a pin verified on the default branch's ancestry. The owner,
+  2026-11-26, on the two together: "As you say, there is no trust model when course is pinned to
+  a branch. This is useful during development for fast iteration and should trigger a warning
+  saying so." So a branch source of any repository is read at the branch's head with no
+  default-branch ancestry check, every reader prints one warning saying it is unpinned and
+  unchecked, and the sync records the commit it read (a claim keeps its own). B-315's
+  CLI-repository-only rule, its home copy of the graph and its build of the branch's standard
+  registry are gone. Pins keep B-139's rules.
+
+- **2026-11-25 — Ticket files are Dibber's to write (R-BTN-74, R-BTN-199, S-BTN-189, S-BTN-234).**
+  Rules changed: R-BTN-74, R-BTN-199, R-BTN-193 (its legacy list: the git-lock ticket commands are
+  gone); §11's CLI table; S-BTN-189, S-BTN-199, S-BTN-234, S-BTN-241;
+  the Decisions entry for `baton ticket new`. The owner, 2026-11-24: "the baton cli should not write
+  ticket files, thats dibber's job", and in the same session: `baton tickets` keeps `next` and
+  `check`, and the course legs that file or mark tickets go through `dibber` too (B-326). Dibber
+  0.4.0 (DIB-33) takes a filing's number from a coordinator command, writes a whole ticket and a
+  reader's own keys. `baton ticket new`, `claim`, `set` and `done`, with the PR filing,
+  `--direct` and the `**Used by:**` reverse lines, are retired. What `claim` checked first —
+  Baton's position (B-129), the holders, the dependencies and the rules re-read guard — is
+  `baton ticket check <id> --claimable`, which writes nothing; a `rules re-read` note may be
+  Dibber's Status line. `baton repo init` writes `.dibber/config.json` with Baton as its
+  coordinator (`baton tickets next ticket-<prefix> --coordinator`: Baton's number or a refusal,
+  never a scan), and a leg's `dibber` is the one its stub pins. A marker leg's close keeps
+  writing its own keys: Dibber 0.4.0 cannot remove `next_leg` at an end, nor write a legacy-prefix
+  ticket, so that move waits on Dibber.
+
+- **2026-11-24 — The advance reply names the run's number (R-BTN-63, S-BTN-204).**
+  Rules changed: R-BTN-63, §14's advance row; S-BTN-204. The owner, 2026-11-24, on the
+  supervisor's report that the runner numbered a claim's runs 1, 3, 5: "Yes, fix now, and also
+  think of ways we can systematically prevent these errors from happening in the first place."
+  The runner handed each leg `ctx.run` from its own count — the earlier attempts' legs plus the
+  claim's own — while each leg the claim finished had already joined the first list, so a
+  claim's second review round reached 3 and the create-pr stub suspended it for `adjudicate`
+  (B-322 and B-324 on 2026-11-24, Baton's history showing run 2). Baton already counted the
+  runs, for `max_runs`, from its own record; the count had two homes. Now the `advance` that
+  starts a run answers `run`, counted as `max_runs` counts it, and the holder hands that to the
+  leg; a run an earlier claim abandoned is not one of them, as it never was for `max_runs`
+  (the history row's `run`, R-BTN-81, still counts every row). B-335.
+- **2026-11-24 — Trusted runners, untrusted legs: the runner-distrust machinery retires (R-BTN-180, R-BTN-189, §12.8; B-189).**
+  Rules changed: R-BTN-180 (retitled *what lands on the default branch*), R-BTN-182, R-BTN-187,
+  R-BTN-188, R-BTN-189, R-BTN-93, R-BTN-102, R-BTN-107, R-BTN-115, R-BTN-137, R-BTN-144,
+  R-BTN-146, §12.1,
+  §12.8's preamble and lists, §12.9, §3.2, §6.6 rule `floor`, §11's CLI table, §13, §14; S-BTN-55,
+  S-BTN-190, S-BTN-295, G-BTN-87;
+  nine Decisions entries (one merged into another); the linked proposals (security, checks and executors, conditions,
+  courses, data model and API, intervention sessions, scenarios: S-BTN-120, S-BTN-136,
+  S-BTN-180, S-BTN-182, S-BTN-183, S-BTN-187, S-BTN-191, S-BTN-193, S-BTN-197, S-BTN-237,
+  G-BTN-140, G-BTN-156, G-BTN-165, G-BTN-166; leg conversations; rule `trusted`); the context
+  pages product and vocabulary; `docs/security-model.mdx`. The owner, 2026-11-09: "no-runner-lands
+  is a vestigial structure from when the runner was assumed to be untrusted because it executed
+  repository code unsandboxed. This is not the case any longer, as we have transitioned to
+  keeping the runner outside the sandbox"; and, of the forge, "responsibility of securing the
+  forge also belongs to the Fieldhouse owner. Fieldhouse providing tooling goes above and beyond
+  its own responsibility. It should not try to claim ownership for forge policy"; and, offered
+  that plain Baton under `builtin` makes no security promise, "Ok". The owner, 2026-11-24, on
+  review independence by domain: "This provision seems to be a vestigal structure from the time
+  when baton's runner was executing within the sanbox. The runner is now a trusted component,
+  executing on the host, and all course legs including implement and review are sandboxed (each
+  leg receiving a blank-state separate sandbox). In addition, each leg receives transient
+  local-only git and llm api keys which they can use to communicate with the local proxy backed
+  by llm providers and the git forge. The contamination risk is therefore no longer something
+  that warrants any extra complexity"; and, asked whether those proxies replace forge actions a
+  runner performs for a leg, "Proxy replaces it"; and "if we have git and LLM proxies, I don't
+  think reviews need a separate 3rd party api key. Every leg should get leg-duration keys to be
+  used by sandboxed code." §12.8 assumed a runner may be compromised because it ran repository
+  code in its own trust boundary. With every call into repository code going through an
+  executor (R-BTN-107) and each leg holding only credentials confined to its claim, nothing a
+  push or a leg writes reaches a runner's key or the merge credential, so the machinery that
+  guarded against a runner goes. Retired: the guarantee `no-runner-lands`; the `refs.*`,
+  `approvers.roles`, `outbox.git`, `outbox.forge-check` and `inputs.board` knobs and the refusals
+  that read them; grant roles, domains and the checker mark, with *How runs compare*,
+  `runner_grants.role`, `checker`, `domain` and `set_by`, and `claim_legs.domain`; the
+  protection checker, its heartbeat `protection`, `repositories.protection_json` and
+  `baton.unprotected`; `std:ran@1` and writer domains; the key span, a grant's `sync` flag,
+  `baton.span-changed`, `--confirm-span` and `owner grant flags`; `baton.machine-post`; and §2's
+  one machine key per tenant. What replaces them: §12.8 states the deployment's duty (no
+  repository code in a runner's trust boundary; no leg credential reaching past its claim;
+  every leg starting afresh; the forge admitting only the merge credential and the human
+  identity to the default branch and tags), and says that under `builtin` Baton makes no
+  security promise; the guarantees rest on a landing condition (`merge.trusted`,
+  `tickets.created: proposed`, `paths.control` not `any`) in place of `no-runner-lands`;
+  `independent-review` counts reviews, each its own `reads_only` run of the exact head, and
+  compares no runner, key or domain; a trusted leg goes only to an SSH key's grant naming its
+  capability exactly (rule `trusted`, proposed), which the owner names only where the host
+  holds the leg's credential; `paths.control`'s `trusted-runner` value is
+  renamed `approval`; R-BTN-107's brief carries the claim's scope and the ticket's branches, so
+  an executor can confine a leg's forge reach; `baton repo protect --print | --check` is a tool
+  a person runs, which no rule reads. `no_chain_from` stays a course rule no guarantee requires.
+  The built code still has the retired knobs, `no-runner-lands` and the report store; B-189
+  removes them, following every stored policy version whose `floors` names `no-runner-lands`
+  with a new version logged `admin`. Decisions superseded, their text as it stood: "Chose that a
+  domain that runs a branch's code is one of its writers, so reviewers read the change and never
+  run it"; "Chose a grant's role and a domain label as the whole of a grant's trust, over a
+  separate trust level, a model family or a separate-domain guarantee"; "Chose a separate
+  protection checker, a trusted runner that merges nothing, over the merge runner holding a
+  credential that can rewrite rulesets"; and the git proxy rejected in "Chose a protected
+  default branch that only a deterministic merge runner and humans update, over a git proxy,
+  per-worker forks or verified signatures", which a deployment may now run to confine its legs.
+  Loosenings the change makes, each named per repository by B-189's migration: machine keys
+  post the board where `inputs.board` excluded them; `refs.*` statements, which only the forge
+  enforced, go; a floor on `no-runner-lands` is dropped; a repository floored on a guarantee
+  that included it, broken today for want of a checker report, resumes claims if its landing
+  condition holds; a policy whose `approvers.roles` was stricter than `approvers.members`
+  loses the difference; `independent-review` keeps its name but no longer requires distinct
+  domains, so a deployment floored on it accepts one key writing and reviewing; and with
+  `outbox.git` gone any runner declaring the class delivers git entries. Review, round one: two fresh reviewers given the diff found R-BTN-144
+  handing a leg the runner's credentials (now the executor's to replace, and a trusted leg
+  requires no `credential:`); trusted legs routable through a wildcard, a `runner:`
+  capability, a token's grant or an API key (rule `trusted` re-defined over capabilities); the
+  forge clause of the duty unconditional while `cooperative` needs runners on the default
+  branch (now under `merge.trusted`, and `merge.trusted` with `tickets.created: filed`
+  refused); the guarantees no longer requiring `paths.control` not `any` or proposed tickets
+  (the landing condition restores both); review supersession by runner key making a count of
+  two unreachable for one key, and re-sampling a head (supersession by run id; a rejection at a
+  head voids its approvals); forge jobs a leg's push starts left outside the duty; the
+  no-promise statement limited to `builtin`; option 17 wrongly marked superseded; stale
+  scenarios (S-BTN-55, S-BTN-182, S-BTN-183, S-BTN-193, G-BTN-87, G-BTN-156, G-BTN-166) and role,
+  domain, span and refs text in §3, §14, five proposals and the context pages; an unknown floor
+  name with no rule refusing it; and the placeholder this replaces. Each was checked against the
+  text and fixed; the security model's dated supersession notes are kept, the page being a
+  context page with dated rulings throughout. Round two, one fresh reviewer given the diff:
+  rule `trusted` had no builder and two homes (B-140 builds it; R-BTN-180 cites the proposal);
+  "ended without approving" could not be read from Baton's record and counted a crashed run
+  (`approves: <station>` names the approving outcome; abandoned, released and reaped runs void
+  nothing; "whose run started at `H`"); the migration named `repositories.protection_json`
+  and `worker_grants` for the code's `protection_reports` and `runner_grants` and missed
+  `model_family`; B-189 and this history disagreed on the heartbeat's `protection` (a 30-day
+  sunset); three loosenings unlisted (above); R-BTN-182 and the dry run said "admits" for
+  "names exactly"; R-BTN-159's SSH-only list lacked trusted legs; R-BTN-144 claimed no trusted
+  credential reaches a leg under `builtin`; an ejected markdown source's deliveries writing the
+  default branch under `merge.trusted` (now refused, and the duty's first clause names a source
+  delivery's store credential); stale lines in B-137, B-141, B-146, B-147, B-163, B-199 and B-297;
+  and S-BTN-182 cases that tested nothing. Each was checked and fixed. Round three, one fresh
+  reviewer: the ejected-source refusal could not be built (Baton cannot tell an ejected source's
+  store; replaced by a statement of the consequence); the duty's source exception did not cover
+  a source's reads; `credential:` values a course requires were forbidden by the duty and handed
+  over by R-BTN-144 (now the duty's named exception); part 7 did not hold a `runner:`-only
+  trusted leg S-BTN-182 expects held; `reads_only` and `approves` had no home or builder (part 4,
+  B-140); B-146 kept use-once consumption and SSHSIG signatures; R-BTN-182's absolute claim
+  under `builtin`; and stale "admits" and "rewriting" wording. Each was checked and fixed.
+
+- **2026-11-24 — Access sign-in refusals name the failed check (R-BTN-155, S-BTN-318).**
+  Previously missing settings, missing or unverifiable assertions, and missing administrator
+  bindings all drew the same message. Missing Worker settings caused the 2026-11-23 sign-in
+  failure (B-319). The front now answers verification refusals itself; both binding failures
+  still share one answer to avoid revealing whether the verified email has a line.
+
+- **2026-11-23 — Every person role on the dashboard: members, sessions per role and per tab, a
+  person on the dashboard a human (R-BTN-155, R-BTN-204, R-BTN-186, R-BTN-185).**
+  Rules changed: R-BTN-155 (rewritten), R-BTN-186, R-BTN-181, R-BTN-116, R-BTN-129, R-BTN-127,
+  R-BTN-57, R-BTN-159, R-BTN-16, the policy table's `attestations` default, §11's preamble,
+  §12.1, §13.2, §14; S-BTN-308, G-BTN-57. Added: R-BTN-204, S-BTN-321, S-BTN-322, S-BTN-323,
+  G-BTN-174, S-BTN-324; four open questions; one Decisions entry added. Also changed: S-BTN-124,
+  S-BTN-185, S-BTN-250, S-BTN-270, S-BTN-276, S-BTN-278, S-BTN-279, R-BTN-185, R-BTN-188,
+  R-BTN-191, §12.2, §12.8's deployment list, `human-gates`, three Decisions entries changed and
+  one replaced, the linked proposals (people and dashboard, data model and API, security) and
+  `docs/security-model.mdx`. The new ids and B-338–B-340 were taken by R-BTN-199's offline scan,
+  the session holding no Baton key; the duplicate check at merge is their guard. The
+  owner, 2026-11-23, on finding that the dashboard could not answer a person leg ("This page cannot
+  answer it — an administrator's session answers no person leg"): "this is fundamentally
+  incompatible with Baton's promise that MCP, CLI and the dashboard UI are all equivalent baton
+  interfaces each self-sufficient and capable of accomplishing baton-related tasks", and "the
+  dashboard should also be available for repo owners and regular users as well (naturally only
+  allowing the actions these user types may perform)". The owner chose the regular user to be a
+  repository member — a key an owner adds, which reads the repository and answers the person legs
+  whose `asks` labels it holds — over a read-only viewer, forge read access and a runner
+  operator; and chose "one session per browser tab / window — you should be able to sign in as a
+  different role in a different tab. If you have several roles then you should need to pick one
+  during the sign-in process (post authentication)", over one session holding every role. The
+  promise was already R-BTN-186's first sentence; what broke it was that the dashboard carried
+  only an administrator's key, so R-BTN-186 now says a surface carries each person's role and a
+  role it cannot carry is a defect. One cookie stays (R-BTN-16): the browser's sessions are bound
+  to it and each tab names its own in a header, which a cross-origin page cannot send. Replaced:
+  the Decisions entry "a session's controls narrower than the CLI's: the tenant screens
+  read-only, `ticket.route` and `ticket.adopt` the CLI's", which R-BTN-186 contradicts. Left open
+  for the owner: human-only acts from a session and over MCP, confirmations without a terminal,
+  members' Access lines, and MCP for administrators and members. Found and left to tickets: ten
+  session routes have no key route and no CLI command — force-reap, clearing a fence, confirming
+  or releasing a completion, confirming an adoption, resolving a scope finding, accepting a held
+  post, cutover, a resync dispatch, a status request and wind-down — the same defect the other
+  way (B-339). Review, round one: two fresh reviewers given the diff, one for consistency, one
+  for security. Security found that "a session may do what its key may" let a session mint
+  sessions, confirm its own acts, and mint API, registration and MCP credentials that outlive it,
+  and take the tenant's export; that authority-changing acts lost their confirmation; that a
+  cookie set once and a tab listing the browser's sessions let one tab reach another's role; that
+  logout left the browser's other sessions; that `approvers.members` did not list members; and
+  that a member's reach follows the course file's `asks` label. Fixed: R-BTN-186's key-only acts
+  (opening or confirming a session, minting a bearer credential, export and import); R-BTN-155's
+  confirmation of authority-changing acts by the key through another channel, CLI-only until one
+  is built; a new cookie value at every sign-in, no session listing, `logout {all: true}`, and the
+  browser named the security unit; the `approvers.members` row; R-BTN-204's statement that the
+  label is as strong as the course file. Consistency found that the rules let a session do its
+  key's writes but routed it only to `/v1/ui/*` and reads; that §14's *session* left six rows with
+  no caller; S-BTN-270, S-BTN-278 and S-BTN-279 contradicting the amendment; the header rule
+  breaking the condition redirect's page load; no sign-in for a member but Access; §12.2, R-BTN-191,
+  `human-gates`, §13.2 and the design brief behind; facts stated in several places; and three
+  more session-only acts. Fixed: R-BTN-155's *Where a session calls* (a session calls an action at
+  its key route), with R-BTN-16, §12.1 and §14 rewritten to match; the header rule scoped to
+  `/v1/` requests; each of the rest. The key-only acts and the key's confirmation of authority-changing
+  session acts narrow the owner's promise, to keep a stolen session from outliving its key; asked
+  whether to accept both, and whether to run a second review round, the owner answered "Yes and
+  yes" (2026-11-23).
+  The owner, 2026-11-23, on the open question of human-only acts from the dashboard: "I think a
+  human using the dashboard should be considered a human." Asked which sessions, the owner chose
+  every person's session — administrator's, owner's and member's, however it was opened — over a
+  human-only key's session alone and over Access sign-ins alone, accepting that an agent holding
+  an owner key and a browser can open a session by code and act as the human; and, where a
+  repository's `human_key` is `hardware`, a security-key touch per human act, over the session
+  alone, so `human-gates` stays true. R-BTN-185 now says so; R-BTN-181's `human` writer, R-BTN-188's
+  `human` approver entry, R-BTN-57, §12.1, S-BTN-278, S-BTN-321, the Decisions entry on human-only
+  credentials and the open question (now MCP's alone) follow; S-BTN-324 added; B-340 builds it.
+  Review, round two (the owner: "yes" to a second round): the same two kinds of fresh reviewer, on
+  the whole branch. Security found that the hardware touch could come from a software
+  authenticator registered by any human-only key, was replayable and bound to no person, and that
+  untouched `human` attestations would count after a switch to `hardware`; that §14 set the
+  cookie only for a browser with none; that a cookie thief could rotate the victim out; that an
+  administrator's session could freeze and seal the tenant unconfirmed; that id-taking `/v1/ui`
+  routes had no repository scope; a stale administrator clause; and an existence oracle in the
+  condition redirect. Fixed: the credential registered for one person's key by an owning
+  human-only key meeting `human_key`, with attestation; a one-time two-minute challenge Baton
+  issues (`POST /v1/ui/human-challenge`) with origin and relying-party checks; `touched`
+  recorded, an untouched `human` counting only under `any`; a new cookie value at every sign-in
+  and a replaced value in use ending the browser's sessions (`dashboard_cookies`); freeze, unfreeze
+  and seal confirmed; id-taking `/v1/ui` routes scoped and foreign ids answered as unknown; the
+  redirect only for `Sec-Fetch-Site` `same-origin` or `none`. Consistency found three scenarios the
+  diff had not touched (S-BTN-185, S-BTN-276, S-BTN-250), approver entries patched rather than
+  rewritten, a member reading grants through the new *session* default, three designs of the
+  touch, the replaced cookie value specified two ways, B-76 contradicting itself, proposals
+  behind, one writer class for two writers, revocation from a session, four more acts with
+  commands but no key route (hold, unhold, expedite, Stop), the security model page, facts in
+  several homes, and S-BTN-124's trigger. Fixed: each, R-BTN-188 now the one home of which session
+  matches which approver entry and R-BTN-155 of when a request is a session's. A member reads the
+  repository reads, the board and a leg's runs, but not the owners' grants or policy log — narrower
+  than "reads everything" in the option the owner chose; asked, the owner accepted it ("your
+  proposal is accepted on this", 2026-11-23).
+
+- **2026-11-23 — Tiers retired (§6.6 gate 5, R-BTN-66).**
+  Rules changed: R-BTN-5, R-BTN-9, R-BTN-34, R-BTN-35, R-BTN-50, R-BTN-58, R-BTN-66, R-BTN-74,
+  R-BTN-114, R-BTN-117, R-BTN-127, R-BTN-159, R-BTN-179, R-BTN-196, the board post (§4.4), §6.6,
+  §13.1–§13.4, §14; S-BTN-24, S-BTN-39, S-BTN-69, S-BTN-260, S-BTN-296, G-BTN-66; two Decisions
+  entries; the linked proposals (checks and executors, data model and API, conditions, people
+  and dashboard, scenarios); the context pages product, ux and vocabulary. The owner,
+  2026-11-23: "If possible, I would like to get rid of tiers entirely." A tier (`routine`,
+  `judgement`, `critical`, R3-1193) routed a ticket to a runner on a strong enough model line:
+  gate 5 refused a runner whose ceiling, the lower of its declared `tier_ceiling` and its
+  grant's `max_tier`, sat below the ticket's place on the repository's ladder. Every runner
+  declared the default ceiling, `critical`; the runbook grants keys `--max-tier judgement`
+  (`scripts/start-runner.sh`); no course read a tier. On 2026-11-23 six tickets filed as
+  `normal` or `high`, off the ladder, showed "nobody can take it — above-tier-ceiling" until
+  #388 moves them to `judgement`. Removed: gate 5 and its code `above-tier-ceiling`, the
+  repository's `tiers` ladder, the heartbeat's `tier_ceiling` and `tier_ceilings`, the grant's
+  and the proposed tokens' and check-runners' `max_tier`, a ticket's `tier` in the board post,
+  in `ready_tickets` and in every read, the tickets list's `?tier=` filter, the board's
+  `ready_by_tier`, staleness by a re-tier, and the runner's tier check at re-verification. A
+  ticket sent to particular runners requires a capability, of a type a course declares
+  (R-BTN-121), that those runners declare and are granted (§6.6 rule 4); declaring a new type
+  is a course-file change, a control path (R-BTN-184). A `requires` clause is written in git
+  like the tier was and binds as strongly as git does (R-BTN-66); the retired Decisions entry's
+  condition, no runner above the VM level serving a repository that runners below it push,
+  was the price of an unprotected tier and lapses with it. Removing `max_tier` widens every
+  grant that set one below the top: such a key may take every ticket its capabilities fit. Gate
+  numbers are stable, so 5 is left unused, as 6 and 12 are. Once the shipped sources stop
+  posting it, a markdown ticket's `tier:` line is one of the fields its source ignores
+  (R-BTN-74) and needs no edit. Review: two fresh reviewers given the diff (round one) found a
+  surviving `tier_position` column, tier text in five linked proposals, an invalid capability
+  in the ux example, a migration entry that described runner code that does not exist and
+  named no order or end, the grants `max_tier` widens, and missing rule ids; each was checked
+  against the text and code, and fixed.
+
+- **2026-11-22 — Dashboard headers and destructive actions (B-300).**
+  Rules changed: R-BTN-16, R-BTN-158, R-BTN-159; S-BTN-124, S-BTN-125, S-BTN-311, G-BTN-145. The shared front's session checks apply to API
+  requests, not public navigations. The local host keeps `--host`; B-46 still owns the unbuilt
+  network and file-mode protections. Stop now asks for confirmation rather than sending on the
+  first click (supersedes Decision 3a for Stop). §12.2 lists the live confirmed actions and
+  separates the unbuilt ones.
+- **2026-11-22 — Owner-state moves and board posts (B-302).**
+  Rules changed: R-BTN-88, R-BTN-11. Moves preserve repository policy chains, floors, the
+  human-key register and other owner settings; both hosts previously accepted a move that left
+  the policy read at `not-found`. §4.4 names the built station payload and §16.4 identifies the
+  interim post. R-BTN-11 states the existing held-post alarm and the separate head update.
+
 - **2026-11-21 — Sign-in through Cloudflare Access (R-BTN-155, R-BTN-57, S-BTN-308).**
   Rules changed: R-BTN-155, R-BTN-57, R-BTN-16, R-BTN-149, R-BTN-185, R-BTN-188; G-BTN-144, S-BTN-124. The
   owner approved it on 2026-11-21: a person Cloudflare Access has verified reaches a dashboard
@@ -3900,6 +4494,43 @@ The simplification of 2026-11-19 moved the scenarios and gates of unbuilt design
 Each entry is a transition the specification no longer describes. The code keeps the old form
 working until the stated condition holds, then removes it.
 
+- **Runner-distrust state (2026-11-24, B-189).** A heartbeat's `protection` is accepted and
+  ignored, never refused, until no request has carried it for 30 days, then refused
+  `invalid-params`. A migration drops the `protection_reports` table (the spec's
+  `repositories.protection_json`), closes every open `baton.unprotected` with a logged reason,
+  and drops `runner_grants`' `trust_level`, `trust_domain`, `role`, `trust_set_by` and
+  `model_family` after one release in which nothing reads them (the couriers' go with B-293's
+  removal of couriers); an owner-state import accepts an older export carrying a
+  grant's role, domain or mark and ignores them. Every floor naming `no-runner-lands` or the
+  code's `trusted-domain-separate`, in a `policy_floors` row or a version's `floors`, is dropped
+  by one new policy version per repository, made by the migration rather than an approver,
+  logged `admin` with both hashes, the knobs dropped, and whether the repository's floors were
+  broken before and hold after; stored versions and their hashes are never rewritten. A stored
+  version with `merge.trusted` and `tickets.created: filed` stays in force but is named in that event, and the next change to it must
+  fix it, the refusal applying then. Stored
+  `paths.control: trusted-runner` reads as `approval`, and the retired knobs in a stored
+  version are ignored when it is read, until the next version drops them.
+
+- **Tier fields from older clients (2026-11-23).** The server changes first: gate 5, the
+  re-tier release in `staleBoard` and the tier reads go before any CLI or sync stops sending a
+  tier, since an old server counts an untiered ticket as the top tier and refuses it to a capped
+  grant. A board post's ticket `tier`, a heartbeat's `tier_ceiling` and `tier_ceilings`, a
+  grant's `max_tier`, a repository registration's or change's `tiers` and the tickets list's
+  `?tier=` are then accepted and ignored, never validated (a refused heartbeat would get a live
+  runner reaped), each logging one `deprecated-field` event per credential and field per day.
+  Stop when no request has carried one for 30 days: they are then refused `invalid-params`. The
+  stored `max_tier` values are dropped, widening those grants (the changelog entry); an owner
+  who relied on one re-scopes the key by capability before the deploy. A migration drops
+  every tier column: the repository's `tiers`, the grant's `max_tier`, the runner's
+  `tier_ceiling` and `tier_ceilings`, the ticket's `tier` and `tier_position`, and
+  `ready_tickets.tier_position`. What still carries the
+  rule goes with it: the vendored decision library's rule 5 (`isEligible`, `fitsTier`, `TIERS`,
+  docs-owned, then `npm run vendor`), `src/core/gates.ts`, the failed-rule order in
+  `src/core/claims.ts`, the trace checker's re-tier release, `ticketPr.mjs`'s `tier` control
+  field, the Quint model's rules 4–7, the `--tier`, `--max-tier` and `--tiers` flags,
+  `scripts/start-runner.sh`'s grant line, and the README's and `docs/security-model.mdx`'s tier
+  text.
+
 - **One claim per runner on the heartbeat (B-188, 2026-11-17).** The heartbeat answer keeps
   `claim` — the runner's oldest active claim, or null — beside `claims`, and reads the bare
   `session_url`, `leg_finished: <seq>` and a single `fenced` object as the runner's one claim's
@@ -4021,8 +4652,6 @@ working until the stated condition holds, then removes it.
   `refused_couriers`, the `pool` credential, `worker_couriers`, the grant's and token's
   `courier` flag and role), and `GET /v1/courier/decisions`. After it they are dropped; only
   `forge-check` notices remain.
-- **Hook residue (R-BTN-98).** The code still carries the `HookRunner` port and cites R-BTN-52 and
-  R-BTN-59; `hook-failed` survives only in a CHECK constraint. Remove when next touched.
 - **The docs deployment's own migration** of `skills_version` to each course's `version`, with
   the `Skills-Version:` trailer as an alias (R-BTN-22), belongs to docs' `BATON_DOCS_DEPLOYMENT`.
   Cutover itself — shadow reports, the legacy-claim import and adoption — stays in the
@@ -5391,7 +6020,9 @@ so in its last sentence; several entries here may stand behind one line there.
   owner's agent sessions hold that account (R-BTN-185). Chose that `human-gates` is claimed only
   where `human_key` is `hardware`, so `protected` does not claim it and `protected-hardware` holds
   it, over a guarantee that holds by definition over the policy while a human-only key sits where
-  an agent can use it (R-BTN-189).
+  an agent can use it (R-BTN-189). Reversed by the owner on 2026-11-24 and 2026-11-26: two human
+  gates, `human-gates` resting on custody and claimed by `protected`, and `human-gates-hardware`
+  on a verified key (this file's changelog, 2026-11-26).
 - **Chose to require of a human-only key only that it is used for nothing else and kept where no
   agent session can use it** (2026-10-29; R-BTN-185). Leaving hardware backing, PIN and touch,
   attestation and the derived code to a deployment's `human_key: hardware` policy, over requiring
@@ -8107,4 +8738,3 @@ asserting signatures Baton cannot see (N10); F1 and N1 stated as the deployment'
 Fieldhouse does (R-FH-3; review legs without command execution, VM resets); the host repository
 writable by the human-only identity only (N2, fieldhouse#7); the rest recorded under Open
 questions.)*
-

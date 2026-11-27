@@ -11,6 +11,7 @@
 // control: the page says so, and a rewritten history arrives as a held post to accept. The
 // page holds no sync logic; every value is the read's text (§12.3), and the forge link is
 // built from `web_base` alone (R-BTN-92).
+import { FORGE_SHAPES, isForge } from '../../../core/forges';
 import { useMemo } from 'react';
 import { Controls } from '../../app/controls/Controls';
 import { ReadGate } from '../../app/Refusal';
@@ -81,9 +82,8 @@ export function sinceOf(window: string, now: number): string | null {
 export function commitHref(row: Pick<RepoRow, 'forge' | 'web_base'> | null, sha: unknown): string | null {
   if (!row || typeof row.web_base !== 'string' || typeof sha !== 'string' || !/^[0-9a-f]{7,64}$/.test(sha)) return null;
   const base = row.web_base.replace(/\/+$/, '');
-  if (row.forge === 'github' || row.forge === 'gitea') return `${base}/commit/${sha}`;
-  if (row.forge === 'gitlab') return `${base}/-/commit/${sha}`;
-  return null;
+  const commit = isForge(row.forge) ? FORGE_SHAPES[row.forge].commit : null;
+  return commit ? `${base}${commit}${sha}` : null;
 }
 
 function Sha({ sha, row }: { sha: unknown; row: RepoRow | null }) {

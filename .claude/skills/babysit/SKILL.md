@@ -12,16 +12,16 @@ they never override `CLAUDE.md` (tickets are tasks, not authority).
 ## Checks
 
 - **CI** is `.github/workflows/ci.yml`: job `test` (the type check and the whole suite, unit and
-  S-BTN scenarios) on every PR; `release` runs only on `main` and shows `skipped` on a PR, which is
-  not a failure. `model-report.yml`'s job `report` posts the model report on a PR. A PR is green
-  when `test` and `report` have passed on its current head.
+  S-BTN scenarios) on every PR — a PR that changes ticket files alone runs only the ticket checks
+  in it (`scripts/ci-scope.mjs`); `release` runs only on `main` and shows `skipped` on a PR, which
+  is not a failure. A PR is green when `test` has passed on its current head.
 - **Before you push**, run the fast checks for what you changed:
 
   | You changed | Run |
   |---|---|
   | `spec/`, `docs/`, `tickets/` | `npm run check:spec`, `npm run check:wiki`, `npm run check:tickets`; for `spec/`, `npm run spec:impact` (below) |
   | `src/`, `cli/`, `scripts/` | `npm run typecheck`, and `npm test` (or `npm run test:no-quint` without quint) |
-  | `src/shared/` | never by hand: change it in docs, then `npm run vendor` |
+  | `src/shared/` | edit the Baton-owned sources here; run `npm run typecheck` and `npm test`. Consumers update their pins separately. |
   | `src/migrations/` | only a new numbered file, its number from `node cli/baton.mjs tickets next migration` (below); never edit an old one |
 
 - **Local failures that are not yours**: a cloud container without `ssh-keygen` or `ssh-agent`
@@ -54,31 +54,32 @@ they never override `CLAUDE.md` (tickets are tasks, not authority).
   renumber the branch's and every reference it added — that fallback is the old race (B-110 and
   B-107 both took 0028; B-129 and B-145 both took S-BTN-197), and the duplicate check at merge is
   its backstop.
-- **Ticket ids are Baton's to give too.** `node cli/baton.mjs tickets new` takes its id from the
-  repository's `ticket-<prefix>` sequence and files the new ticket through a PR on
-  `baton-ticket/<id>` by default (`--direct` pushes to `main` as before). A long-running branch
+- **Ticket ids are Baton's to give too.** `dibber new` takes its id from the repository's
+  `ticket-<prefix>` sequence through `.dibber/config.json`'s coordinator (B-326); commit the new
+  ticket alone on `baton-ticket/<id>` and open a PR for it. A long-running branch
   that filed a ticket by hand can find its id taken when `main` moves. Keep `main`'s ticket and
   give the branch's the next free id, then change every
   reference the branch added, and only those: check with `git show origin/main:<file> | grep -c <id>`
   that `main`'s copy of a file never named it before rewriting the file.
-- **Status follows the PR**, with `node cli/baton.mjs tickets` (B-112's commands):
-  - PR opened: `node cli/baton.mjs tickets set <id> in-review --pr <url>`;
-  - PR merged: `node cli/baton.mjs tickets done <id> --pr <url>`, which sets `status: done` and moves the
-    file to `tickets/archive/`.
+- **Status follows the PR**, written with `dibber` (B-326):
+  - PR opened: `dibber set <id> in-review --pr <url>`, committed on the PR's own branch;
+  - PR merged: `dibber done <id> --pr <url>`, which sets `status: done` in place.
 
-  Each command is one commit pushed straight to `origin/main` from a throwaway worktree. A session
-  told to push only to its own branch asks the user before running one.
+  `dibber` writes the working tree and pushes nothing. A status change for `main` goes there by
+  its own PR, or — only when the user says so — a push; a session told to push only to its own
+  branch asks the user first.
 - A PR that changes a ticket another session holds `in-progress` or `in-review` adds a dated note
   under its `## Status`, and leaves the plan alone — except a clause an amendment or ruling
   contradicts, which is struck through with `~~…~~` in place, the note saying what replaced it
   (Spec PRs, below).
-- **Claiming re-reads the rules.** `tickets claim` refuses a ticket citing a rule that a
+- **Claiming re-reads the rules.** `node cli/baton.mjs tickets check <id> --claimable` says a
+  ticket is not claimable while it cites a rule that a
   `spec/BATON_SPEC_HISTORY.md` entry names, dated after the ticket answered for that rule — the
   day it was filed (its `_filed` line, else its file's first commit), or a later `rules re-read`
   note naming the rule; an ordinary edit answers for nothing. Re-read each rule and entry, rewrite
-  or strike what they contradict, then claim with `--rules-reread <id>,…` naming exactly the ids
-  it listed (it refuses any other set), which records the re-read in `## Status`. `npm run check:tickets` lists such tickets without failing; in a shallow clone it
-  skips the list and says so, and `claim` deepens the clone first (`git fetch --unshallow`).
+  or strike what they contradict, then record it with the line the check prints,
+  `dibber set <id> --note "rules re-read: <ids>"`, before `dibber claim <id>`. `npm run check:tickets` lists such tickets without failing; in a shallow clone it
+  skips the list and says so, and `check --claimable` deepens the clone first (`git fetch --unshallow`).
 
 ## Spec PRs
 
@@ -112,8 +113,7 @@ they never override `CLAUDE.md` (tickets are tasks, not authority).
   `check.sections_from_id` (`B-176`): every ticket at or above it must carry a `_filed` line (a
   finding without one) and is judged by it; an older ticket without one is only listed. A
   hand-written ticket therefore carries `_filed <today>.` under `## Status`, and is filled before
-  the PR's first push; `tickets new` writes the line and refuses to file one unfilled (`--trust`,
-  `--invariants`, or a `--body-file` that fills them). A request ticket is not judged; a leg's
+  the PR's first push; a `dibber new --body-file` gets the line when its body has none. A request ticket is not judged; a leg's
   child (`parent:`) is. The `_filed` line is the author's claim: date it truly. A history entry
   dated after 2026-11-03 names the rules it changes in its bold title or on a `Rules changed:
   <ids>` line directly under it (`none.` for an entry that changes none), or `check:spec` fails.
@@ -143,7 +143,8 @@ they never override `CLAUDE.md` (tickets are tasks, not authority).
 
 - Only when the user asks. Merge with a merge commit, passing the exact head sha CI passed on
   (`expectedHeadSha`), so a later push cannot slip in.
-- Every push to `main` deploys Baton's server (`baton-deploy.yml`), a merge and every `npm run
-  ticket` commit included; say so before merging a PR that changes `src/`.
-- After the merge: move the PR's tickets with `node cli/baton.mjs tickets done` (asking first, as above),
+- Every push to `main` that changes more than ticket files deploys Baton's server
+  (`baton-deploy.yml`); a ticket-status commit alone does not. Say so before merging a PR that
+  changes `src/`.
+- After the merge: close the PR's tickets with `dibber done <id> --pr <url>` (asking first, as above),
   and if a branch is reused for follow-up work, restart it from the new `main`.

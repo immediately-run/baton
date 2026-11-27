@@ -1,0 +1,58 @@
+---
+title: "B-346 — Contract checks between parts that ship separately: the server flags a sync that cannot answer its protocol, and CI flags a lagging sync pin"
+id: B-346
+project: baton
+status: available
+updated: 2026-11-26
+repos:
+  - baton
+tags:
+  - roadmap-item
+tier: judgement
+description: "The sync declares the protocol features it answers (evidence first); the server raises a visible condition when it lists unconfirmed ends and the post comes from a sync that does not answer them; a CI check fails when the sync workflow's pinned ref predates a change to the sync protocol's files; the dashboard shows a repository's sync version beside the recommended one. Warns, never refuses a post. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the owner, 2026-11-26 (in a Claude Code session on bering), asked for the supervisor's replacement checks for the Quint model as tickets under a meta-ticket. This is the third: "Contract checks between parts that ship separately: the sync's pinned code against the server's protocol. #415's pin is the example. A 'the pin lags main's sync protocol' check would have flagged it."
+
+**Spec:** [BATON_SPEC §9.6](../spec/BATON_SPEC/09-claims.md#sec-9-6) [R-BTN-10](../spec/BATON_SPEC/09-claims.md#sec-9-6) (the observation's `unconfirmed` list and the sync's `std:git.evidence@1`), [§12.8](../spec/BATON_SPEC/12-security.md#sec-12-8) [R-BTN-191](../spec/BATON_SPEC/12-security.md#sec-12-8).
+
+**Depends on:** none.
+
+### Why
+
+#415 changed both sides of the sync protocol: the observation now lists unconfirmed ends, and the sync attests them. It was merged and deployed, but `.github/workflows/baton-sync.yml` checks the sync's CLI out at a pinned commit (`17ae8cce`) from before #415. For ten hours the server waited for attestations no sync sent, and 54 ends stayed unconfirmed until #417 moved the pin (`docs/interventions.mdx`, 2026-11-24 20:00; `docs/lessons.mdx`, 2026-11-25). The same gap exists for every pin a repository holds: the sync CLI, the course source in `.baton/baton.json`, and a runner's CLI.
+
+### What to build
+
+1. **The server says what it expects of a sync.** Name the protocol features a sync must answer, `evidence` (the `unconfirmed` list) first. Two parts:
+   - The sync declares which it answers, alongside its version, on the observation or the post.
+   - When the observation lists unconfirmed ends and the post comes from a sync that does not declare `evidence`, the server raises a condition the dashboard shows (or logs one the owner sees), naming the repository and the sync's version. The ticket's implementer picks which, in the spec PR. Today such a post is accepted in silence.
+2. **A CI check of the repository's own pins:** in this repository, a check (`npm run check:pins` or a part of an existing check) that fails when the sync workflow's pinned `ref:` predates the newest commit on `main` that changed a file defining the sync protocol. The files are the sync CLI (`src/defaults/cli.ts`, `src/defaults/evidence.ts`) and the observation's answer. The list of protocol files lives in one place, beside the check.
+3. **The pin's lag on the dashboard:** a repository's sync CLI version as its last post reported it, beside the version the server recommends (`Baton recommends 0.1.5` today), so a lagging pin is visible without reading logs.
+
+### Trust
+
+The sync's declared features are the sync's word, read only to warn. They never change what the server accepts or confirms. A sync that declares `evidence` and posts none confirms nothing, as today.
+
+### Invariants
+
+- No post is refused for a missing feature: the server warns, it never blocks a sync.
+- Changing the pin itself stays the owner's, since it is a `.github/` edit. The check only reports.
+
+### Tests
+
+- A scenario: a sync declaring no `evidence` posts while ends are listed, and the condition or log appears. A sync that declares it posts, and nothing appears.
+- The pin check fails on a fixture workflow whose `ref:` predates a protocol-file commit, and passes on one that does not.
+
+### Exit criteria
+
+- With the pin at `17ae8cce` and #415 deployed, the server would have flagged the first sync after the deploy, and the CI check would have failed on the commit that changed the protocol.
+
+## Status
+
+_filed 2026-11-26._

@@ -1,13 +1,12 @@
 ---
 title: "Baton — the work's live state, off git"
 description: "BATON_SPEC's front: its title, status, companions and contents."
-status: proposal
 updated: 2026-11-19
 ---
 
 # Baton — the work's live state, off git
 
-**Status:** proposal — Baton's specification as it stands. How it got here — dated
+Each rule records its implementation status. How the specification got here — dated
 amendments, rationale, retired requirement ids and the map from the old section numbers — is
 in [`spec/BATON_SPEC_HISTORY.md`](../BATON_SPEC_HISTORY.md).
 
@@ -18,6 +17,15 @@ in [`spec/BATON_SPEC_HISTORY.md`](../BATON_SPEC_HISTORY.md).
 > core. Tickets cited as `R3-n` and `B-n` are in [`tickets/`](../../tickets/). Requirement ids
 > `R-BTN-n`, scenario ids `S-BTN-n` and gate ids `G-BTN-n` are stable: code, tests and the
 > Quint model cite them.
+
+> **Terminology: arena.** The unit Baton coordinates — one ticket source, its configuration and
+> everything Baton owns about its tickets — is an **arena** in the
+> [vocabulary](../../docs/context/vocabulary.mdx). This spec still writes it a **registered
+> repository**, and a ticket's arena its **home** (§3); the CLI's chosen one is "the home in
+> force". Where the spec names a registered repository's or a home's path, forge, host, commits,
+> branches, files or checkout, it means the arena's **config repository**, the git repository its
+> `.baton/` lives in; a code repository it names as one. The rename of these words comes in
+> stages, with the old names accepted meanwhile.
 
 ## Contents
 
@@ -42,4 +50,3 @@ in [`spec/BATON_SPEC_HISTORY.md`](../BATON_SPEC_HISTORY.md).
 | — | Decisions | each decision still in force, one line |
 | — | Open questions | what is not yet settled |
 | — | Load-bearing assumptions | what `check:spec` checks |
-

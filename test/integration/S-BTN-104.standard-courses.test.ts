@@ -8,6 +8,7 @@
 // queued leg the marker's `next`; the decision's `carry-out` waits on the
 // owner until `answer:` is set; a repository on the marker courses alone syncs with no forge
 // facts at all. Node only: it writes a real repository and runs git.
+import { GitRepo } from '../lib/gitRepo';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -22,18 +23,14 @@ const T0 = Date.parse('2026-10-18T12:00:00Z');
 // No --pin: the CLI pins its own commit, the one its courses' sources name (B-33).
 const init = (root: string, ...argv: string[]) => initMain(argv, { root, log: () => {} });
 
-class Repo {
-  readonly dir = mkdtempSync(join(tmpdir(), 'baton-s104-'));
+class StandardCourses extends GitRepo {
   /** The remote a leg's close pushes its marker to. */
-  readonly remote = mkdtempSync(join(tmpdir(), 'baton-s104-remote-'));
+  get remote(): string { return this.bare; }
   constructor() {
-    execFileSync('git', ['init', '-q', '--bare', '-b', 'main', this.remote], { stdio: 'ignore' });
-    for (const a of [['init', '-q', '-b', 'main'], ['config', 'user.email', 's104@test'], ['config', 'user.name', 's104'], ['remote', 'add', 'origin', this.remote]]) execFileSync('git', ['-C', this.dir, ...a], { stdio: 'ignore' });
+    super('baton-104-', { origin: true });
     mkdirSync(join(this.dir, 'tickets'), { recursive: true });
   }
-  write(path: string, text: string): void {
-    writeFileSync(join(this.dir, path), text);
-  }
+
   /** One close, as a marker course's `close` commits it (R-BTN-83, B-100): the leg's machine
    *  state written into the ticket's own frontmatter, committed alone under `baton:close`. */
   close(file: string, ticket: string, leg: string, reached: string, next: string | null): void {
@@ -52,10 +49,7 @@ class Repo {
     execFileSync('git', ['-C', this.dir, 'add', '-A'], { stdio: 'ignore' });
     execFileSync('git', ['-C', this.dir, 'commit', '-qm', `baton:close ${ticket} ${leg}`], { stdio: 'ignore' });
   }
-  commit(): void {
-    execFileSync('git', ['-C', this.dir, 'add', '-A'], { stdio: 'ignore' });
-    execFileSync('git', ['-C', this.dir, 'commit', '--allow-empty', '-qm', 'step'], { stdio: 'ignore' });
-  }
+  commit(message = 'step'): string { return super.commit(message); }
   /** The checkout as a sync sees it: main, including what a real close pushed there. */
   pull(): void {
     execFileSync('git', ['-C', this.dir, 'fetch', '-q', 'origin'], { stdio: 'ignore' });
@@ -75,17 +69,17 @@ class Repo {
   }
 }
 
-let repo: Repo;
+let repo: StandardCourses;
 let minutes = 0;
 /** Each sync takes an observation number; the next is refused until ten minutes pass (R-BTN-62). */
 const later = () => setClock(T0 + (minutes += 11) * 60_000);
 beforeEach(async () => {
   minutes = 0;
   await setClock(T0);
-  repo = new Repo();
+  repo = new StandardCourses();
 });
 afterEach(() => {
-  rmSync(repo.dir, { recursive: true, force: true });
+  repo.dispose();
   rmSync(repo.remote, { recursive: true, force: true });
 });
 

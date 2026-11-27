@@ -27,11 +27,11 @@ describe('the tenant screens, part one (B-214)', () => {
   it('/repositories lists the registry, marking seed_owners and retired rows', async () => {
     const { calls } = mockFetch({ '/v1/admin/repositories?retired=1': {
       repositories: [
-        { id: 'docs', github: 'example-org/docs', forge: 'github', web_base: 'https://github.com/example-org/docs', default_branch: 'main', weight: 2, tiers: ['routine', 'careful'],
+        { id: 'docs', github: 'example-org/docs', forge: 'github', web_base: 'https://github.com/example-org/docs', default_branch: 'main', weight: 2,
           head: { sha: 'cabec94c0123456789abcdef0123456789abcdef', received_at: T }, mode: { mode: 'cut-over' }, courses: [{ id: 'course-a', version: 3 }],
           sync_keys: [{ fingerprint: FP, role: 'sync' }], ci_identity: { kind: 'github-actions' }, retired_at: null },
-        { id: 'ops', github: HOSTILE, forge: 'git', web_base: 'javascript:alert(1)', default_branch: 'main', weight: 1, tiers: [], head: null, mode: { mode: 'shadow' }, courses: [], sync_keys: [], ci_identity: null, retired_at: null },
-        { id: 'old', github: '~retired/old', forge: 'github', web_base: 'https://github.com/example-org/old', default_branch: 'main', weight: 1, tiers: [], head: null, mode: 'shadow', courses: [], sync_keys: [], ci_identity: null, retired_at: T },
+        { id: 'ops', github: HOSTILE, forge: 'git', web_base: 'javascript:alert(1)', default_branch: 'main', weight: 1, head: null, mode: { mode: 'shadow' }, courses: [], sync_keys: [], ci_identity: null, retired_at: null },
+        { id: 'old', github: '~retired/old', forge: 'github', web_base: 'https://github.com/example-org/old', default_branch: 'main', weight: 1, head: null, mode: 'shadow', courses: [], sync_keys: [], ci_identity: null, retired_at: T },
       ],
       seed_owners: ['ops'],
     } });
@@ -39,8 +39,8 @@ describe('the tenant screens, part one (B-214)', () => {
     await screen.findByRole('table', { name: 'The registry' });
     const rows = tableText(container, 'The registry');
     expect(rows.map((r) => r[0])).toEqual(['docs', 'opsSEED OWNERS', 'oldRETIRED 1 min ago']);
-    expect(rows[0].slice(1, 6)).toEqual(['example-org/docs (github.com)', 'github', 'main', '2', 'routinecareful']);
-    expect([rows[0][7], rows[0][8], rows[0][10], rows[1][6], rows[1][9]]).toEqual(['cut-over', 'course-a', 'github-actions', 'no board yet', 'none']);
+    expect(rows[0].slice(1, 5)).toEqual(['example-org/docs (github.com)', 'github', 'main', '2']);
+    expect([rows[0][6], rows[0][7], rows[0][9], rows[1][5], rows[1][8]]).toEqual(['cut-over', 'course-a', 'github-actions', 'no board yet', 'none']);
     // A live repository opens its board; a retired one opens nothing and links no forge.
     expect(within(container).getByRole('link', { name: 'docs' }).getAttribute('href')).toBe('/repositories/docs/board');
     expect(within(container).queryByRole('link', { name: 'old' })).toBeNull();

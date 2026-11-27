@@ -1,6 +1,7 @@
 // cutover.ts — the one-way switch (BATON_SPEC §13 step 3, R-BTN-28; R3-1217): the owner's
 // cutover, the legacy import that runs in the same transaction, and adoption of a legacy claim
 // by the session that was working it, which moves only on the owner's confirmation.
+import { isLive, liveRunnerSql } from './runnerLiveness';
 import { BatonError } from './http';
 import { checkConfirm, checkRepositoryId, SESSION_NAME, TICKET_ID } from './validate';
 import { localOf, repositoryOf } from './registry';
@@ -25,17 +26,15 @@ export function importLegacyClaim(sql: Store, now: number,
   sql.exec(`INSERT INTO credentials (id, hostname, allowed_capabilities, kind) VALUES ('legacy', 'legacy', '[]', 'legacy') ON CONFLICT (id) DO NOTHING`);
   const session = o.preferred && SESSION_NAME.test(o.preferred) && !taken(o.preferred) ? o.preferred
     : !taken(`item-${localOf(o.item)}`) ? `item-${localOf(o.item)}` : `item-${localOf(o.item)}-${o.nonce}`;
-  sql.exec(`INSERT INTO runners (hostname, session_name, secret_hash, credential_id, harness, kind, tier_ceiling, lease_timeout_ms, settings_hash, first_seen_at, last_seen_at)
-            VALUES ('legacy', ?, ?, 'legacy', 'claude-code', 'legacy', 'critical', 0, '', ?, ?)`, session, randomHex(32), now, now);
-  const runnerId = sql.exec('SELECT last_insert_rowid() AS id').one().id as number;
+  const { id: runnerId } = sql.exec<{ id: number }>(`INSERT INTO runners (hostname, session_name, secret_hash, credential_id, harness, kind, lease_timeout_ms, settings_hash, first_seen_at, last_seen_at)
+            VALUES ('legacy', ?, ?, 'legacy', 'claude-code', 'legacy', 0, '', ?, ?) RETURNING id`, session, randomHex(32), now, now).one();
   // R-BTN-62: the counter's value now, as for any claim.
   // §4: a legacy claim starts at the station the sync posts for its ticket at the import.
-  sql.exec(`INSERT INTO claims (ticket_id, runner_id, request_id, nonce, snapshot_sha, claimed_at, status, reap_after, claim_observation, station, start_path, course_id)
+  const { id: claimId } = sql.exec<{ id: number }>(`INSERT INTO claims (ticket_id, runner_id, request_id, nonce, snapshot_sha, claimed_at, status, reap_after, claim_observation, station, start_path, course_id)
             VALUES (?, ?, ?, ?, ?, ?, 'active', ?, COALESCE((SELECT last_handed_out FROM board_head WHERE repository_id = ?), 0),
                     COALESCE((SELECT station FROM ticket_stations WHERE ticket_id = ?), ''), COALESCE((SELECT path FROM ticket_stations WHERE ticket_id = ?), '[]'),
-                    (SELECT course_id FROM tickets WHERE id = ?))`,
-    o.item, runnerId, o.requestId, o.nonce, o.sha, o.claimedAt, o.claimedAt + LEGACY_REAP_MS, repositoryOf(o.item), o.item, o.item, o.item);
-  const claimId = sql.exec('SELECT last_insert_rowid() AS id').one().id as number;
+                    (SELECT course_id FROM tickets WHERE id = ?)) RETURNING id`,
+    o.item, runnerId, o.requestId, o.nonce, o.sha, o.claimedAt, o.claimedAt + LEGACY_REAP_MS, repositoryOf(o.item), o.item, o.item, o.item).one();
   logEvent(sql, now, 'claimed', 'baton', { legacy: true, session, ...(o.detail ?? {}) }, o.item, claimId);
   return { claimId, session };
 }
@@ -44,7 +43,7 @@ export interface Ctx {
   store: Store;
   now: () => number;
   /** R-BTN-75: an imported claim holds its ticket; a claim's start changes `blocked_since` silently. */
-  held?: (ticketId: string) => void;
+  held: (ticketId: string) => void;
 }
 
 export class Cutover {
@@ -108,7 +107,7 @@ export class Cutover {
         item: it.id, preferred: it.holder, nonce: randomHex(3), sha, requestId: `legacy:${it.id}`,
         claimedAt: it.since ? Date.parse(`${it.since}T00:00:00Z`) : now, detail: { since: it.since },
       });
-      this.c.held?.(it.id);
+      this.c.held(it.id);
       out.push(it.id);
     }
     return out;
@@ -152,7 +151,7 @@ export class Cutover {
     // the alarm would reap it at once, as a failed attempt (§6.10).
     const asker = this.rows<{ reaped_at: number | null; last_seen_at: number; lease_timeout_ms: number }>(
       'SELECT reaped_at, last_seen_at, lease_timeout_ms FROM runners WHERE id = ?', a.runner_id)[0];
-    if (!asker || asker.reaped_at != null || this.c.now() - asker.last_seen_at >= asker.lease_timeout_ms) {
+    if (!asker || !isLive(asker, this.c.now())) {
       throw new BatonError('not-eligible', 'the session that asked is no longer alive; it must ask again', { rule: 'requester-silent' });
     }
     // A legacy session holds one item: 0001's per-runner index once refused a second, and B-188
@@ -171,7 +170,7 @@ export class Cutover {
     return this.rows(`SELECT a.ticket_id, a.claim_id, a.runner_id, a.requested_at, w.hostname, w.session_name, l.session_name AS legacy_session
                       FROM adoptions a JOIN runners w ON w.id = a.runner_id JOIN claims c ON c.id = a.claim_id
                       JOIN runners l ON l.id = c.runner_id
-                      WHERE c.status = 'active' AND l.kind = 'legacy' AND w.reaped_at IS NULL AND w.last_seen_at + w.lease_timeout_ms > ?
+                      WHERE c.status = 'active' AND l.kind = 'legacy' AND ${liveRunnerSql('w.')}
                       ORDER BY a.requested_at`, this.c.now());
   }
 }

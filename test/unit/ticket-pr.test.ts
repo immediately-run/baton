@@ -3,8 +3,8 @@
 // fields (control fields named), whether a body or brief changed (with a bounded diff), each
 // path's commits, and the status-only label. A PR whose own description claims "status-only"
 // that its diff contradicts is a FINDING: the label is the check's, never the description's.
-// The pure view is the vendored library (src/shared/ticketPr.mjs, tested in docs beside its
-// source); this drives the CLI flag over real fixture git repositories. Node only.
+// The pure view is in src/shared/ticketPr.mjs; this drives the CLI flag over real fixture
+// git repositories. Node only.
 import { describe, it, expect, afterEach } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -19,7 +19,7 @@ afterEach(() => {
 
 const BODY = '**Brief:** the original brief.\n\n### What to build\n\n- the thing\n';
 const ticket = (over: Record<string, string> = {}, body = BODY): string => {
-  const fm = { id: 'B-1', status: 'in-progress', prs: '[]', updated: '2026-10-27', tier: 'judgement', EXPEDITE: 'false', depends_on: '[]', ...over };
+  const fm = { id: 'B-1', status: 'in-progress', prs: '[]', updated: '2026-10-27', EXPEDITE: 'false', depends_on: '[]', ...over };
   return `---\ntitle: "B-1 — a ticket"\n${Object.entries(fm).map(([k, v]) => `${k}: ${v}`).join('\n')}\n---\n\n${body}`;
 };
 

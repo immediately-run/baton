@@ -9,15 +9,115 @@
 // what is pushed. What cannot be verified fails the leg naming what was looked for; the stub
 // reports, never retries (R-BTN-131). Pure over injected commands, so tests drive it with no
 // forge; the stub binds `gh` and `git`. Course code in the CLI, never core (§2b).
-import { branchMatches, matchPatterns } from './course-pr';
-import { parseFrontmatter } from './tickets-markdown';
+import { forgeClient, listCli } from './forges';
+import { targetOf, type RegisteredTargets } from './forges/targets';
+import { latestHeadVerdict, matchPatterns, ticketOwns, verdictOf, type PrFact } from './course-pr';
+import { mappedMerges } from './outside-work';
+import type { OpenPrRef } from './forges/types';
+import { parseFrontmatter, resolveTicketRepo, strList } from './tickets-markdown';
+
+type ReconcilePr = {
+  number: number; head: { ref: string }; base: { ref: string }; state: string;
+  merged_at: string | null; merge_commit_sha?: string;
+};
+type ReconcileReview = {
+  user?: { login: string } | null; body?: string; html_url?: string;
+  state: PrFact['reviews'][number]['state']; commit_id?: string; submitted_at?: string | null; created_at?: string;
+};
+
+export function reconcileAnswer(out: string, ask: PrOpenAsk & {
+  ticketText: string | null; from: string; displaced: string; to: Record<string, string | null>; branch: string;
+}, run: PrExec) {
+  const line = out.trim().split('\n').at(-1)?.trim() ?? '';
+  if (/^unchanged\s+\S/.test(line)) return { end: 'done', reached: ask.from, next: ask.displaced };
+  const home = originSlug(run, ask.checkout);
+  const repos = [home, ...(ask.repositories ?? [])].map((r) => r?.toLowerCase());
+  const prs = parseFrontmatter(ask.ticketText ?? '')?.prs;
+  const ticket = { id: bareId(ask.ticket), repos: ask.repositories ?? [], course: { prs: Array.isArray(prs) ? prs : [] } };
+  const owns = (number: number, head: string, repository: string) => ticketOwns(ticket, { number, head, repository }, matchPatterns(ask.branchPatterns), home);
+  const apiRun = (host: string, repo: string, path: string) => run('gh', ['api', '--hostname', host, `repos/${repo}${path ? `/${path}` : ''}`], ask.checkout);
+  const list = <T>(host: string, repo: string, path: string): T[] => {
+    const pages: unknown = JSON.parse(run('gh', ['api', '--hostname', host, '--paginate', '--slurp', `repos/${repo}/${path}`], ask.checkout));
+    if (!Array.isArray(pages) || pages.some((p) => !Array.isArray(p))) throw new Error('forge did not return a complete PR reading');
+    return (pages as T[][]).flat();
+  };
+  const readPr = (ref: string, owned: boolean) => {
+    const m = /^https:\/\/([\w.-]+)\/([\w.-]+\/[\w.-]+)\/pull\/(\d+)(?:#(issuecomment|pullrequestreview)-(\d+))?$/.exec(ref);
+    if (!m || !repos.includes(m[2].toLowerCase())) throw new Error('name a PR in the ticket repositories');
+    const remote = run('git', ['remote', 'get-url', 'origin'], ask.checkout);
+    const host = /^(?:https?:\/\/|ssh:\/\/(?:[^@/]+@)?|[^@/]+@)([\w.-]+)[/:]/.exec(remote)?.[1];
+    if (m[1] !== host) throw new Error('PR is not on the checkout forge');
+    const repo = `${m[1]}/${m[2]}`;
+    const api = (path: string) => JSON.parse(apiRun(m[1], m[2], path));
+    const pr = JSON.parse(run('gh', ['pr', 'view', m[3], '--repo', repo, '--json', 'state,headRefName,headRefOid,baseRefName,mergeCommit,updatedAt'], ask.checkout));
+    if (pr.baseRefName !== api('').default_branch) throw new Error('PR does not target the default branch');
+    if (owned && !owns(Number(m[3]), pr.headRefName, m[2])) throw new Error('PR is not mapped to this ticket');
+    return { pr, m, api };
+  };
+  const delivered = /^delivered\s+(\S+)\s+(\S.*)$/.exec(line);
+  if (delivered && ask.to.delivered === 'confirm') {
+    const shas = delivered[1].split(',').map((ref) => {
+      if (/^[a-f0-9]{7,40}$/i.test(ref)) return ref;
+      const { pr, m } = readPr(ref, false);
+      if (m[4] || pr.state !== 'MERGED' || !pr.mergeCommit?.oid) throw new Error('delivered requires a merged PR or commit');
+      if (m[2].toLowerCase() !== home?.toLowerCase()) return null; // The sibling's forge verified its default-branch merge.
+      return String(pr.mergeCommit.oid);
+    }).filter((sha): sha is string => sha != null);
+    const checked = shas.length ? verifyDelivered({ checkout: ask.checkout, branch: ask.branch, shas }, run) : [];
+    return { end: 'done', reached: 'delivered', next: 'confirm', detail: deliveredDetail(checked.length ? checked : delivered[1].split(','), delivered[2]) };
+  }
+  const at = /^at\s+(\S+)\s+(\S+)/.exec(line);
+  if (!at || !Object.hasOwn(ask.to, at[1]) || at[1] === 'delivered') throw new Error('expected unchanged <reason>, at <station> <ref>, or delivered <refs> <evidence>');
+  const station = at[1];
+  const { pr, m, api } = readPr(at[2], true);
+  if (station === 'merged' ? pr.state !== 'MERGED' : station !== 'concluded' && pr.state !== 'OPEN') throw new Error(`PR does not support ${station}`);
+  if (station === 'concluded' && pr.state === 'OPEN') throw new Error('PR is still open');
+  if (station === 'merged') {
+    const mapped = [...new Set(repos.filter((r): r is string => r != null))].flatMap((repository) => {
+      const defaultBranch = JSON.parse(apiRun(m[1], repository, '')).default_branch;
+      if (typeof defaultBranch !== 'string' || !defaultBranch) throw new Error('cannot verify the default branch');
+      return list<ReconcilePr>(m[1], repository, 'pulls?state=all&per_page=100').filter((p) => owns(p.number, p.head.ref, repository))
+        .map((p) => ({ repository, state: p.merged_at ? 'merged' as const : p.state === 'open' ? 'open' as const : 'closed' as const,
+          base: p.base.ref, defaultBranch, mergeSha: p.merge_commit_sha, number: p.number }));
+    });
+    const { complete, merged } = mappedMerges(mapped, ticket.repos, home);
+    if (m[4] || !complete || !merged.some((p) => p.repository === m[2].toLowerCase() && p.number === Number(m[3]))) {
+      throw new Error('not all mapped repositories have merged PRs, or a mapped PR is still open');
+    }
+  }
+  if (['reviewed', 'approved', 'changes-requested'].includes(station)) {
+    if (m[4] !== 'pullrequestreview') throw new Error('name a review on the current PR head');
+    const mapped = (r: ReconcileReview, comment = false): PrFact['reviews'][number] => ({ author: r.user?.login ?? '',
+      body: r.body, state: comment ? 'COMMENTED' : r.state, headSha: comment ? undefined : r.commit_id,
+      submittedAt: Date.parse((comment ? r.created_at : r.submitted_at) ?? ''), url: r.html_url });
+    const permissions = new Map<string, boolean>();
+    const counts = (r: PrFact['reviews'][number]) => {
+      if (!verdictOf(r) || !/^[\w-]+$/.test(r.author)) return false;
+      if (!permissions.has(r.author)) {
+        permissions.set(r.author, ['write', 'maintain', 'admin'].includes(api(`collaborators/${r.author}/permission`).permission));
+      }
+      return permissions.get(r.author);
+    };
+    const native = list<ReconcileReview>(m[1], m[2], `pulls/${m[3]}/reviews?per_page=100`).map((r) => mapped(r)).filter(counts);
+    const named = native.find((r) => r.url === at[2] && r.headSha === pr.headRefOid);
+    if (!named) throw new Error('review is not a qualifying verdict on the current PR head');
+    // Even without a ref update timestamp, any unbound comment newer than a submitted
+    // review of this exact SHA can supersede it. Never authorize from an unbound comment.
+    const comments = list<ReconcileReview>(m[1], m[2], `issues/${m[3]}/comments?per_page=100`).map((r) => mapped(r, true)).filter((r) => r.submittedAt >= named.submittedAt).filter(counts);
+    const latest = latestHeadVerdict({ headSha: pr.headRefOid, reviews: [...native, ...comments] }, named.submittedAt - 1);
+    if (latest?.url !== at[2] || verdictOf(latest) !== (station === 'changes-requested' ? 'changes' : 'approve')) {
+      throw new Error('review is not the latest qualifying verdict on the current PR head');
+    }
+  }
+  return { end: 'done', reached: station, next: ask.to[station] };
+}
 
 /** What the verification runs: `git` and `gh` in the checkout, answering trimmed stdout and
  * throwing on any non-zero exit — `course-markers`' `exec` shape, bound by the stub. */
 export type PrExec = (cmd: 'git' | 'gh', args: string[], cwd: string) => string;
 
 /** What `verifyPrOpen` is asked: where to look, and for whose PR. */
-export interface PrOpenAsk {
+export interface PrOpenAsk extends RegisteredTargets {
   checkout: string;
   /** The claim's ticket, its id repository-qualified (`docs:B-1`, R-BTN-51). */
   ticket: { id: string; home?: string | null };
@@ -25,6 +125,7 @@ export interface PrOpenAsk {
   branchPatterns?: string[];
   /** The repositories the ticket's `repos:` names, already resolved (`ticketRepositories`). */
   repositories?: string[];
+  prRefs?: string[];
 }
 
 /** The bare ticket id the patterns map, as `course-markers`' marker writes it: `docs:B-1` → `B-1`. */
@@ -42,11 +143,17 @@ const msg = (e: unknown): string => (e instanceof Error ? e.message : String(e))
  * the file; this reads the checkout as the agent left it. */
 export function ticketRepositories(text: string | null, reposMap?: Record<string, string>): string[] {
   const fm = text == null ? null : parseFrontmatter(text);
-  const names = Array.isArray(fm?.repos) ? fm!.repos : fm?.repos == null || fm!.repos === '' ? [] : [fm!.repos];
-  return names
-    .map((r) => (typeof r === 'string' && /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(r) ? r : reposMap?.[r]))
-    .filter((r): r is string => typeof r === 'string' && r !== '');
+  return strList(fm?.repos).map((r) => resolveTicketRepo(r, reposMap)).filter((r): r is string => r !== null);
 }
+
+export function ticketPrRefs(text: string | null): string[] {
+  return strList(text == null ? undefined : parseFrontmatter(text)?.prs);
+}
+
+const owns = (ask: PrOpenAsk, home: string | null, repo: string | null, pr: OpenPrRef): boolean =>
+  ticketOwns({ id: bareId(ask.ticket), repos: ask.repositories ?? [], course: { prs: ask.prRefs } },
+    { number: pr.number, head: pr.headRefName, repository: repo ?? home ?? undefined, sameRepository: pr.sameRepository === true },
+    matchPatterns(ask.branchPatterns), home);
 
 /** The checkout's repository as its origin names it (`owner/name`), for the failure that names
  * where the stub looked; null when there is no origin to read. */
@@ -65,11 +172,7 @@ function originSlug(run: PrExec, checkout: string): string | null {
 }
 
 /** One PR as `gh pr list --json` answers it. */
-interface PrListItem {
-  number?: unknown;
-  headRefName?: unknown;
-  headRefOid?: unknown;
-}
+type PrListItem = OpenPrRef;
 
 /** Whether git knows `oid` in the checkout (`cat-file -e`): a comparison over an object the
  * checkout never saw — a PR head someone else pushed — is skipped, never guessed. */
@@ -100,10 +203,10 @@ const ancestor = (a: string, b: string, run: PrExec, checkout: string): boolean 
  * forge nothing answers fails the leg: what cannot be verified is not reported. Reading the
  * forge over `gh` — the credentials the agent itself opened the PR with — this is course code's
  * own read of the forge, never core's (§2b). */
-export function verifyPrOpen(ask: PrOpenAsk, run: PrExec): void {
+export async function verifyPrOpen(ask: PrOpenAsk, run: PrExec): Promise<void> {
   const id = bareId(ask.ticket);
   const patterns = matchPatterns(ask.branchPatterns).map((p) => p.replace(/\{ticket\}/g, id));
-  const slug = originSlug(run, ask.checkout);
+  const slug = ask.forge_home?.path ?? originSlug(run, ask.checkout);
   // A `repos:` entry naming the checkout's own repository is the home, read first below — not a
   // sibling read twice and named twice ("exists in immediately-run/baton or immediately-run/baton",
   // 2026-11-16's failures, B-256).
@@ -111,32 +214,20 @@ export function verifyPrOpen(ask: PrOpenAsk, run: PrExec): void {
   const label = (repo: string | null): string => repo ?? slug ?? 'the checkout’s repository';
   /** One repository's matching open PRs, or the error that says it could not be read (the
    * command's own message: `gh pr list …` is the only call this makes). */
-  const of = (repo: string | null): PrListItem[] => {
-    const args = ['pr', 'list', '--state', 'open', '--limit', '300', '--json', 'number,headRefName,headRefOid', ...(repo ? ['--repo', repo] : [])];
-    let text: string;
-    try {
-      text = run('gh', args, ask.checkout);
-    } catch (e) {
-      throw new Error(msg(e));
-    }
-    let prs: unknown;
-    try {
-      prs = JSON.parse(text);
-    } catch {
-      prs = null;
-    }
-    if (!Array.isArray(prs)) throw new Error(`gh pr list${repo ? ` --repo ${repo}` : ''} answered no PR list: ${text.slice(0, 200)}`);
-    return prs.filter((p): p is PrListItem => p != null && typeof p === 'object' && typeof (p as PrListItem).headRefName === 'string' && patterns.some((pat) => branchMatches(pat, (p as PrListItem).headRefName as string)));
+  const of = async (repo: string | null): Promise<PrListItem[]> => {
+    const target = targetOf(ask, repo ?? undefined);
+    const prs = target
+      ? await forgeClient(target, { run, checkout: ask.checkout }).listOpenPrs()
+      : ask.forge_home
+        ? [] // Plain git, or outside the registry's effective code repositories.
+        : listCli((args) => run('gh', args, ask.checkout), repo ?? undefined);
+    return prs.filter((p) => owns(ask, slug, repo, p));
   };
-  // Every repository the ticket reads, home first: its PR is the usual one, and the checkout
-  // comparison below reads only it. A repository that cannot be read is named, never guessed.
-  const found = [null, ...siblings].map((repo) => {
-    try {
-      return { repo, prs: of(repo) as PrListItem[] | null, error: null as string | null };
-    } catch (e) {
-      return { repo, prs: null as PrListItem[] | null, error: msg(e) as string | null };
-    }
-  });
+  const found: { repo: string | null; prs: PrListItem[] | null; error: string | null }[] = [];
+  for (const repo of [null, ...siblings]) {
+    try { found.push({ repo, prs: await of(repo), error: null }); }
+    catch (e) { found.push({ repo, prs: null, error: msg(e) }); }
+  }
   // The checkout's branch, when it feeds a matching home PR, is the head that PR shows — equal,
   // or behind a PR that moved past it; a head the PR does not contain is work the forge lacks
   // (B-81: the review reads what is pushed).
@@ -154,7 +245,7 @@ export function verifyPrOpen(ask: PrOpenAsk, run: PrExec): void {
       head = null;
     }
     for (const pr of found[0].prs ?? []) {
-      if (pr.headRefName !== branch || typeof pr.headRefOid !== 'string' || pr.headRefOid === '' || head == null) continue;
+      if (pr.sameRepository !== true || pr.headRefName !== branch || typeof pr.headRefOid !== 'string' || pr.headRefOid === '' || head == null) continue;
       if (head === pr.headRefOid) continue;
       if (!known(pr.headRefOid, run, ask.checkout)) continue; // never an object here: nothing to compare
       if (!ancestor(head, pr.headRefOid, run, ask.checkout)) {
@@ -169,6 +260,62 @@ export function verifyPrOpen(ask: PrOpenAsk, run: PrExec): void {
     throw new Error(`cannot verify ${id}’s PR — no repository the ticket reads could be read: ${unread.map((f) => `${label(f.repo)} (${f.error})`).join('; ')}`);
   }
   throw new Error(`the implement agent exited 0, but no open PR on a branch matching ${patterns.join(' or ')} for ticket ${id} exists in ${read.join(' or ')}${unread.length ? ` — ${unread.map((f) => label(f.repo)).join(' or ')} could not be read` : ''} — open one from a matching branch with its head pushed, or the leg fails here`);
+}
+
+/** One repository's read for `verifyPrsMerged`: the ticket's open and merged PRs there, or why
+ * the forge did not answer. */
+interface MergedRead {
+  repo: string | null;
+  open: PrListItem[] | null;
+  merged: PrListItem[] | null;
+  error: string | null;
+}
+
+/** Verify what the merge leg is about to claim (R-BTN-131: a stub whose leg claims a PR verifies
+ * it on the forge before it reports a position): every PR of the ticket — on a branch the
+ * course's patterns map to it, in the checkout's repository and each one its `repos:` names — is
+ * merged, none still open, at least one merged. The stub returned `merged` for any merge agent
+ * that exited 0; on 2026-11-23 B-259's agent rightly refused to merge PR #357 over red CI, said
+ * so and exited 0, and the leg reported `merged` with the PR open. A PR still open, no merged PR,
+ * or a repository the forge does not answer for fails the leg, naming it; a PR closed unmerged
+ * counts as none, as the station function reads it. Returns the merged PRs, `#n` or
+ * `owner/name#n`. */
+export async function verifyPrsMerged(ask: PrOpenAsk, run: PrExec): Promise<string[]> {
+  const id = bareId(ask.ticket);
+  const patterns = matchPatterns(ask.branchPatterns).map((p) => p.replace(/\{ticket\}/g, id));
+  const slug = ask.forge_home?.path ?? originSlug(run, ask.checkout);
+  const siblings = (ask.repositories ?? []).filter((r, i, all) => all.indexOf(r) === i && (slug == null || r.toLowerCase() !== slug.toLowerCase()));
+  const label = (repo: string | null): string => repo ?? slug ?? 'the checkout’s repository';
+  const found: MergedRead[] = [];
+  for (const repo of [null, ...siblings]) {
+    try {
+      const target = targetOf(ask, repo ?? undefined);
+      const eligible = (prs: PrListItem[]) => prs.filter((pr) => owns(ask, slug, repo, pr));
+      if (target || ask.forge_home) {
+        const prs = eligible(target ? await forgeClient(target, { run, checkout: ask.checkout }).listPrs() : []);
+        found.push({ repo, open: prs.filter((p) => p.state === 'open'), merged: prs.filter((p) => p.state === 'merged'), error: null });
+      } else {
+        const list = (state: string) => eligible(listCli((args) => run('gh', args, ask.checkout), repo ?? undefined, state));
+        found.push({ repo, open: list('open'), merged: list('merged'), error: null });
+      }
+    } catch (e) {
+      found.push({ repo, open: null, merged: null, error: msg(e) });
+    }
+  }
+  const name = (f: MergedRead, p: PrListItem): string => `${f.repo ? f.repo : ''}#${String(p.number)} (${String(p.headRefName)})`;
+  const unread = found.filter((f) => f.error != null);
+  if (unread.length > 0) {
+    throw new Error(`cannot verify ${id}’s PRs merged — ${unread.map((f) => `${label(f.repo)} (${f.error})`).join('; ')} could not be read: the leg reports merged only when the forge shows every PR merged`);
+  }
+  const open = found.flatMap((f) => (f.open ?? []).map((p) => name(f, p)));
+  if (open.length > 0) {
+    throw new Error(`the merge agent exited 0, but ${id}’s PR ${open.join(', ')} is still open — not merged; the leg reports merged only when every PR of the ticket is`);
+  }
+  const merged = found.flatMap((f) => (f.merged ?? []).map((p) => `${f.repo ? f.repo : ''}#${String(p.number)}`));
+  if (merged.length === 0) {
+    throw new Error(`the merge agent exited 0, but no merged PR on a branch matching ${patterns.join(' or ')} for ticket ${id} exists in ${found.map((f) => label(f.repo)).join(' or ')} — the leg reports merged only when the forge shows one`);
+  }
+  return merged;
 }
 
 /** B-257: an implement agent's answer that the ticket is already delivered — the commits it
@@ -232,15 +379,22 @@ export function verifyDelivered(ask: DeliveredAsk, run: PrExec): string[] {
   } catch (e) {
     throw new Error(`cannot verify the delivered answer — fetching ${branch} from origin failed: ${msg(e)}`);
   }
-  return ask.shas.map((sha) => {
+  return resolveDelivered(ask.shas, tracking, ask.checkout, run);
+}
+
+/** Check the delivery evidence against a fetched ref, or the transaction's detached HEAD. */
+export function resolveDelivered(shas: string[], ref: string, checkout: string, run: PrExec): string[] {
+  return shas.map((sha) => {
+    if (!/^[0-9a-f]{7,40}$/.test(sha)) throw new Error('invalid delivered commit id');
     let full: string;
     try {
-      full = run('git', ['rev-parse', '--verify', '--quiet', `${sha}^{commit}`], ask.checkout).trim();
+      full = run('git', ['rev-parse', '--verify', '--quiet', `${sha}^{commit}`], checkout).trim();
     } catch {
       throw new Error(`the implement agent answered delivered at ${sha}, which names no commit this checkout knows — refused`);
     }
-    if (!/^[0-9a-f]{40}$/.test(full)) throw new Error(`the implement agent answered delivered at ${sha}, which names no commit this checkout knows — refused`);
-    if (!ancestor(full, tracking, run, ask.checkout)) {
+    if (!/^[0-9a-f]{40}$/.test(full) || !full.startsWith(sha)) throw new Error(`the implement agent answered delivered at ${sha}, which names no commit this checkout knows — refused`);
+    if (!ancestor(full, ref, run, checkout)) {
+      const branch = ref.replace(/^refs\/remotes\/origin\//, '');
       throw new Error(`the implement agent answered delivered at ${sha}, which is not on ${branch} — refused: the commit a delivered answer names is on the default branch`);
     }
     return full;
@@ -251,6 +405,7 @@ export function verifyDelivered(ask: DeliveredAsk, run: PrExec): string[] {
  *  commits, shortened, and the agent's evidence with every character free text refuses blanked. */
 export function deliveredDetail(shas: string[], evidence: string): string {
   const head = `delivered at ${shas.map((s) => s.slice(0, 10)).join(', ')}`;
+  if (head.length > 198) throw new Error('too many delivered commits to record in the end detail');
   const said = evidence.replace(/[\u0000-\u001f\u007f-\u009f<>{}]/g, ' ').replace(/\s+/g, ' ').trim();
   const text = said === '' ? head : `${head}: ${said}`;
   return text.length <= 200 ? text : `${text.slice(0, 199)}…`;

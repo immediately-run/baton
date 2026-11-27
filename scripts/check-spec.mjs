@@ -1,14 +1,13 @@
 #!/usr/bin/env node
 // check-spec.mjs — the spec and the code agree on what the spec defines (R3-1252).
 //
-//   npm run check:spec        check spec/BATON_SPEC/ (its parts joined, B-179) against src/, test/, model/ and cli/ (the
+//   npm run check:spec        check spec/BATON_SPEC/ (its parts joined, B-179) against src/, test/, model/, cli/ and scripts/ (the
 //                             requirement ids they cite) and tickets/ (the tickets it cites)
 //
 // - every requirement id (`R-BTN-n`) the code cites is defined in the spec — as a bold
 //   `**R-BTN-n` rule heading (`**R-BTN-n / R-BTN-m (…)**` defines both) or a bold rule followed
 //   by `(R-BTN-n)` — or is one of the `roadmap-pr` course's own (COURSE_IDS), whose spec stays in
-//   docs; a citation of a retired id (spec/BATON_SPEC_HISTORY.md's Retired requirements table) is
-//   a warning, so the code that still names it can be cleaned up without breaking the check;
+//   docs; retired ids fail except for existing, shrink-only path/id exceptions (B-277);
 // - every ticket the spec cites (`R3-n`, `B-n`) is a ticket in tickets/ or tickets/archive/;
 // - none of the scrub's terms (SCRUBBED) is in the spec: the repository is public;
 // - every test/integration/ file named for a scenario (`S-BTN-n.*.test.ts`) names one §15's
@@ -21,12 +20,20 @@
 // - every dated history entry after RULES_LINE_SINCE names the rule ids it amended — in its bold
 //   title, or on a `Rules changed: <ids>` line (or `Rules changed: none.`) directly under the line
 //   the title closes on — since the stale-rule guard reads only those (R-BTN-74).
-import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
-import { join, relative, dirname, resolve } from 'node:path';
+// - every scenario has a test or a spec/scenarios-pending.json entry (R-BTN-30, B-276); the list
+//   only shrinks against the default branch, except that a new entry may be
+//   `{ "id": "S-BTN-n", "ticket": "B-n" }` naming an open ticket in tickets/ that builds it.
+import { readFileSync, readdirSync, existsSync } from 'node:fs';
+import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { patchNotes } from './spec-tools.mjs';
 import { joinParts, layoutProblems, specParts } from './spec-files.mjs';
 import { stripFrontmatter } from './lib/stripFrontmatter.mjs';
+import { basePending, citedIds, codeTexts, definedIds, fileScenario, ledgerProblems, PENDING, pendingBaseRef, pendingIds, ruleLedger, scenarioIds } from './spec-ledger.mjs';
+
+export { citedIds, definedIds, fileScenario, scenarioIds };
+import { exceptionProblems, newExceptionProblems, openTickets, priorExceptions } from './lib/check-exceptions.mjs';
+import { readSpecCode } from './lib/spec-code.mjs';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -42,29 +49,11 @@ export const EXAMPLE_TICKETS = ['R3-9'];
  *  spec, which stays in docs: the code that serves that course may cite them. */
 export const COURSE_IDS = ['R-BTN-21', 'R-BTN-27', 'R-BTN-42', 'R-BTN-43', 'R-BTN-49'];
 
-/** The requirement ids the spec defines: each `**R-BTN-n` that opens a rule, and each bold rule
- *  title followed by its id (`- **The runner declares its own lease timeout** (R-BTN-9)`). */
-export function definedIds(spec) {
-  return new Set([
-    ...[...spec.matchAll(/\*\*(R-BTN-\d+)\b/g)].map((m) => m[1]),
-    ...[...spec.matchAll(/\*\*R-BTN-\d+((?: \/ R-BTN-\d+)+)/g)]
-      .flatMap((m) => [...m[1].matchAll(/R-BTN-\d+/g)].map((n) => n[0])),
-    ...[...spec.matchAll(/^\s*- \*\*[^*\n]+\*\* \((R-BTN-\d+)\)/gm)].map((m) => m[1]),
-  ]);
-}
-
 /** The retired requirement ids: the first cell of each row of the history file's
  *  `## Retired requirements` table. */
 export function retiredIds(history) {
   const section = history.split(/^## /m).find((s) => s.startsWith('Retired requirements')) ?? '';
   return new Set([...section.matchAll(/^\| *(R-BTN-\d+)\b/gm)].map((m) => m[1]));
-}
-
-/** The scenario ids the spec's §15 scenario table defines: the first cell of each row of its
- *  `### Scenarios` table (ids named in a row's other cells, or by a gate, are not rows). */
-export function scenarioIds(spec) {
-  const table = spec.split(/^### /m).find((s) => s.startsWith('Scenarios')) ?? '';
-  return new Set([...table.matchAll(/^\| *(S-BTN-\d+)\b/gm)].map((m) => m[1]));
 }
 
 /** The retired scenario ids: the S-BTN ids of the history's `## Retired scenarios and gates`
@@ -79,11 +68,6 @@ export function retiredScenarioIds(history) {
  *  S-BTN-147 with the ontology and route choices, the spec restructure's part 4.) B-263 deletes
  *  S-BTN-218 and S-BTN-219 with signed control, retired 2026-11-19. */
 export const RETIRED_TESTS_ALLOWED = ['S-BTN-46', 'S-BTN-60', 'S-BTN-218', 'S-BTN-219'];
-
-/** The scenario a test file is named for (`S-BTN-2.silent-runner.test.ts` → `S-BTN-2`), if any. */
-export function fileScenario(name) {
-  return /^(S-BTN-\d+)\./.exec(name)?.[1] ?? null;
-}
 
 /** Rules that carried an italic patch note when the check was added (B-150 folds each into its
  *  rule's body). Only shrinks: a new patch note fails, and so does a listed rule that no longer
@@ -140,27 +124,23 @@ export function lineage(spec) {
   return out;
 }
 
-/** Every `R-BTN-n` in a text. */
-export function citedIds(text) {
-  return new Set([...text.matchAll(/\bR-BTN-(\d+)\b/g)].map((m) => `R-BTN-${m[1]}`));
-}
-
 /** The problems with a spec, given the code's texts by path, the ticket ids that exist, the
  *  history file and the names of test/integration/'s files. */
-export function check(spec, code, tickets, history = '', testNames = [], allowed = []) {
+/** @returns {string[] & {warnings: string[]}} */
+export function check(spec, code, tickets, history = '', testNames = [], allowed = [], retiredAllowed = {}) {
   const problems = [];
-  const warnings = [];
+  const retiredCitations = [];
   const defined = new Set([...definedIds(spec), ...COURSE_IDS]);
   const retired = retiredIds(history);
   const scenarios = scenarioIds(spec);
   const retiredScenarios = retiredScenarioIds(history);
   for (const [path, text] of code) {
     for (const id of citedIds(text)) {
-      if (defined.has(id)) continue;
-      if (retired.has(id)) warnings.push(`${path} cites ${id}, which is retired (spec/BATON_SPEC_HISTORY.md)`);
-      else problems.push(`${path} cites ${id}, which the spec does not define`);
+      if (retired.has(id)) retiredCitations.push(`${path} ${id}`);
+      else if (!defined.has(id)) problems.push(`${path} cites ${id}, which the spec does not define`);
     }
   }
+  problems.push(...exceptionProblems('retired rule citation', retiredCitations, retiredAllowed));
   for (const name of testNames) {
     const id = fileScenario(name);
     if (!id || RETIRED_TESTS_ALLOWED.includes(id)) continue;
@@ -186,39 +166,64 @@ export function check(spec, code, tickets, history = '', testNames = [], allowed
   for (const term of SCRUBBED) {
     if (spec.toLowerCase().includes(term)) problems.push(`the spec contains the scrubbed term "${term}"`);
   }
-  Object.defineProperty(problems, 'warnings', { value: warnings, enumerable: false });
   return problems;
 }
 
-function files(dir) {
-  if (!existsSync(dir)) return [];
-  return readdirSync(dir).flatMap((name) => {
-    if (name === 'node_modules' || name.startsWith('.')) return [];
-    const path = join(dir, name);
-    return statSync(path).isDirectory() ? files(path) : /\.(ts|mjs|js|qnt|sql|md)$/.test(name) ? [path] : [];
-  });
+/** A section-wide citation may point to a rule in one of its subsections, not another section. */
+export function sectionPairDifferences(files, targets) {
+  const differences = new Set();
+  for (const [path, text] of files) {
+    const visible = text.replace(/\[([^\][\n]*)\]\([^\n)]*\)/g, '$1').replace(/[`*_]/g, '');
+    // Strip source comment leaders so a wrapped pair in code is checked like one in prose.
+    const prose = visible.replace(/\r?\n[ \t]*(?:\/\/+[ \t]*)?/g, '\n');
+    for (const [, section, rule] of prose.matchAll(/§(\d+[a-z]?(?:\.\d+[a-z]?)*)\b(?=[ \t\n(])[ \t]*(?:\n[ \t]*)?(?:\([ \t]*(?:\n[ \t]*)?)?(R-BTN-\d+)\b/g)) {
+      const at = targets.get(section);
+      const ruleAt = targets.get(rule);
+      if (!at || !ruleAt || (at !== ruleAt && (section.includes('.') || at.file !== ruleAt.file))) {
+        differences.add(`${path} §${section} ${rule}`);
+      }
+    }
+  }
+  return differences;
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  const { defaultPages, specTargets } = await import('./link-spec-refs.mjs');
   // The spec is spec/BATON_SPEC/'s parts joined (B-179); spec/BATON_SPEC.md is their generated index.
   const parts = specParts(REPO);
   const spec = joinParts(parts);
-  const code = ['src', 'test', 'model', 'cli'].flatMap((d) => files(join(REPO, d)))
-    .map((p) => [relative(REPO, p), readFileSync(p, 'utf8')]);
-  const tickets = new Set(['tickets', 'tickets/archive'].flatMap((d) => readdirSync(join(REPO, d)))
-    .filter((n) => n.endsWith('.mdx')).map((n) => n.slice(0, -4)));
+  const code = readSpecCode(REPO);
+  const read = (p) => readFileSync(join(REPO, p), 'utf8');
+  const ticketIds = (dir) => readdirSync(join(REPO, dir)).filter((n) => n.endsWith('.mdx')).map((n) => n.slice(0, -4));
+  const archived = new Set(ticketIds('tickets/archive'));
+  const tickets = new Set([...ticketIds('tickets'), ...archived]);
   const historyPath = join(REPO, 'spec', 'BATON_SPEC_HISTORY.md');
   // The history is a page of the spec bundle (B-180): its body, past the frontmatter.
   const history = existsSync(historyPath) ? stripFrontmatter(readFileSync(historyPath, 'utf8')) : '';
   const integration = join(REPO, 'test', 'integration');
   const testNames = existsSync(integration) ? readdirSync(integration) : [];
-  const problems = check(spec, code, tickets, history, testNames, PATCH_NOTES_ALLOWED);
-  problems.push(...layoutProblems(REPO));
-  for (const w of problems.warnings) console.warn(`! ${w}`);
+  const file = 'scripts/retired-rule-exceptions.json';
+  const exceptions = JSON.parse(read(file));
+  const problems = check(spec, code, tickets, history, testNames, PATCH_NOTES_ALLOWED, exceptions);
+  // check() owns citation matching; validate against the independently committed ceiling here.
+  problems.push(...newExceptionProblems('retired rule citation', exceptions, priorExceptions(REPO, file)));
+  // B-276: the rule ledger — each rule's status token and each scenario's evidence.
+  const ledger = ruleLedger(spec, codeTexts(REPO));
+  try {
+    const pending = pendingIds(readFileSync(join(REPO, PENDING), 'utf8'));
+    const baseline = basePending(REPO, pendingBaseRef(REPO), 'spec/BATON_SPEC/15-verification.md');
+    problems.push(...ledgerProblems(ledger, archived, pending, baseline, openTickets(REPO)));
+  } catch (e) {
+    problems.push(`could not check the pending list against the default-branch baseline: ${e.message}`);
+  }
+  problems.push(...layoutProblems(REPO, undefined, undefined, ledger));
+  const pages = ['README.md', 'AGENTS.md', ...defaultPages(REPO)].map((p) => [p, read(p)]);
+  const pairs = sectionPairDifferences([...code, ...pages, ['spec/BATON_SPEC/', spec]], specTargets(REPO));
+  problems.push(...exceptionProblems('section does not own rule', pairs, JSON.parse(read('scripts/section-pair-exceptions.json'))));
   if (problems.length) {
     for (const p of problems) console.error(`✗ ${p}`);
     console.error(`check-spec: ${problems.length} problem(s)`);
     process.exit(1);
   }
-  console.log(`check-spec OK — ${definedIds(spec).size} requirements; ${code.length} code files cite only those; ${testNames.filter((n) => fileScenario(n)).length} scenario test files each name a §15 row`);
+  console.log(`check-spec OK — ${ledger.rules.size} rules; ${ledger.covered.size} scenarios named by tests, ${ledger.scenarios.size - ledger.covered.size} pending`);
 }

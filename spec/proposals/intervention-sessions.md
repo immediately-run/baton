@@ -1,6 +1,6 @@
 ---
 title: "Proposal — intervention sessions: an agent a person starts on one Needs-you entry"
-description: "A recommendation, not built: a person selects a Needs-you entry and starts an intervention — a ticket filed on a course the repository adopts, worked by a sandboxed leg or by an existing agent over MCP — holding a key scoped to one subject that reads, may only tighten, and files every other act as a pinned request an approver confirms on Baton's page."
+description: "A recommendation, not built: a person selects a Needs-you entry and starts an intervention — a ticket filed on a course the repository adopts, worked by a sandboxed leg or by an agent over MCP. An agent-driven session holds a key scoped to one subject that reads, may only tighten, and files every other act as a pinned request an approver confirms; a session a person drives acts directly with that person's own credential, every act recorded against the intervention."
 ---
 # Proposal — intervention sessions: an agent a person starts on one Needs-you entry
 
@@ -9,7 +9,11 @@ description: "A recommendation, not built: a person selects a Needs-you entry an
 rule; every rule or proposal it would change is in [Amends](#amends). The owner settled its four
 design choices on 2026-11-21, after two adversarial reviews ([The owner's
 decisions](#the-owners-decisions)); [Open decisions](#open-decisions) holds only what is still
-open.
+open. **Amended 2026-11-26** by [human intent and autonomy](../../docs/context/human-intent.mdx):
+what an intervention may do now depends on who drives it ([Who drives](#who-drives-two-kinds-of-intervention));
+the design below the amendment is the agent-driven kind's. It writes the unit Baton coordinates as
+a `repository`, as the spec and the API still do; the [vocabulary](../../docs/context/vocabulary.mdx)
+now calls it an **arena**.
 
 **Its home when built:** one new rule, **R-BTN-n (interventions)**, in
 [§7.3](../BATON_SPEC/07-conditions.md#sec-7-3) beside R-BTN-163, holding the start, one
@@ -41,27 +45,36 @@ handle these interventions through MCP."
 
 Settled 2026-11-21; not reopened by a review.
 
-1. **Authority: diagnose and request.** The session reads, and may tighten or stop. Every
-   loosening (lifting another credential's hold, `retry` on a non-retryable hold), every route,
-   adopt, expedite and merge is a **request** the session files, which an approver on the list
-   that governs that act ([R-BTN-188](../BATON_SPEC/12-security.md#sec-12-8)) confirms on
-   Baton's own page — never by a code handed to the agent. What a delegated key may do is
+1. **Authority: by who drives** (2026-11-21; amended 2026-11-26). An **agent-driven** session — the
+   leg form, or an agent over MCP with an agent-driven key — **diagnoses and requests**: it reads,
+   and may tighten or stop. Every loosening (lifting another credential's hold, `retry` on a
+   non-retryable hold), every route, adopt, expedite and merge is a **request** the session files,
+   which an approver on the list that governs that act
+   ([R-BTN-188](../BATON_SPEC/12-security.md#sec-12-8)) confirms on Baton's own page, reached
+   from the page or from a delivery runner's channel (ntfy, Slack) — never by a code handed to
+   the agent. A **human-driven** session — a person's own agent, over MCP with their interactive
+   grant, or their own CLI — **acts directly**, within what the person's role admits at the proof the credential
+   carries: no request, no confirmation step, every act recorded against the intervention
+   ([Who drives](#who-drives-two-kinds-of-intervention)). For the agent-driven kind: What a delegated key may do is
    unchanged: the intervention key's powers are a subset of
    [R-BTN-186](../BATON_SPEC/12-security.md#sec-12-8)'s, and a confirmation is the approver's own
    act under R-BTN-188, so neither rule's powers change, nor Fieldhouse's R-FH-92–94. What does
    change is wording that says a delegated key *is* an MCP key (R-BTN-186's definition, people
    and dashboard §1, the vocabulary): see [Amends](#amends).
-2. **Record: a ticket in git.** An intervention is a ticket filed through the ticket source, as
-   R-BTN-161's handler tickets are ([conditions proposal, §2](conditions.md#2-handlers)), on a
-   course the repository adopts — never a course core ships (values #3) — and claimed by a runner
-   like any ticket. Baton adds no claim kind.
+2. **Record: a ticket in the arena's ticket source** (2026-11-21; amended 2026-11-26). An
+   intervention is a ticket filed through the ticket source, as R-BTN-161's handler tickets are
+   ([conditions proposal, §2](conditions.md#2-handlers)), on a course the arena adopts — never a
+   course core ships (values #3). An agent-driven intervention is claimed by a runner like any
+   ticket; a human-driven one is held by the person's own session, a session claim
+   ([ticket ownership](ticket-ownership.md#session-claims)): a claim like any other, held by a
+   person's session rather than a runner.
 3. **MCP: accept the risk, and warn.** The owner: "Accept the risk. If there is a way to issue a
    warning to the user that a fresh session is strongly advised we should do so but it's
    ultimately up to the user's judgement. MCP connections should be possible as repo owner or
    admin (the latter being reserved for major emergencies only)." Any agent may connect; every
    start warns and records the person's acknowledgement ([The MCP form](#the-mcp-form)); an
    administrator starts one only as an emergency ([Emergencies](#emergencies)). Confirmation of
-   every request stays on Baton's page.
+   every request stays on Baton's page; a human-driven session files none (decision 1).
 4. **Batches: yes, per type.** A person may start one intervention over every open entry of one
    type with one cause (every `baton.retries` holding `attempts-exhausted` after the same error,
    say): it diagnoses once and settles each ticket. Every act is still per ticket and confirmed;
@@ -76,9 +89,10 @@ Settled 2026-11-21; not reopened by a review.
 - **Not automatic.** A person starts each one. Binding conditions to handlers that start by
   themselves is R-BTN-161's (proposed); an intervention could later be started by such a binding
   as a handler course (an [open decision](#open-decisions)).
-- **Not a way around the course or the approvers.** The session's own powers only tighten. What
-  moves a ticket on — a restart, an unhold, a route, an adopt — is the act it already is, by the
-  credential that already may take it, at the session's request.
+- **Not a way around the course or the approvers.** An agent-driven session's own powers only
+  tighten. What moves a ticket on — a restart, an unhold, a route, an adopt — is the act it
+  already is, by the credential that already may take it, at the session's request. A
+  human-driven session takes those acts itself, because its credential already may.
 
 ## What exists today (2026-11-21)
 
@@ -113,7 +127,7 @@ Settled 2026-11-21; not reopened by a review.
   `baton.stalled`: [R-BTN-167](../BATON_SPEC/07-conditions.md#sec-7-5)'s stalled time counts only
   while the sync attests the leg `waiting`. A leg posted `ready` that no runner can take raises at
   most `baton.capability-missing` (R-BTN-75, a capability no live runner declares) or
-  `baton.queue-over` (R-BTN-79), and often nothing — a tier ceiling, a barred tag or
+  `baton.queue-over` (R-BTN-79), and often nothing — a barred tag or
   `awaiting-sync` raise no condition. It needs a new ticket condition, **`baton.unclaimable`**,
   owned by R-BTN-75 beside `baton.capability-missing`
   ([§6.2](../BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-2), with §6.6's gates): a leg
@@ -139,6 +153,34 @@ Settled 2026-11-21; not reopened by a review.
 
 ## The design
 
+### Who drives: two kinds of intervention
+
+Who drives an intervention is decided by the credential its session acts with, never by the
+channel ([human intent and autonomy](../../docs/context/human-intent.mdx) §1): MCP serves both
+kinds.
+
+| | Agent-driven | Human-driven |
+|---|---|---|
+| **Its session** | the leg form; or an agent over MCP with an agent-driven key | a person's own agent over MCP, with the person's interactive grant, or the person's own CLI |
+| **Its key** | the intervention key below, minted for the intervention, scoped to its subject, dying with it | the person's own credential; Baton mints nothing for the intervention |
+| **What it may do** | read and tighten; everything else is a [request](#requests) | whatever the person's role admits at the proof the credential carries, directly |
+| **Its acts are recorded** | as `intervention:<id>` | as the person's, each tagged with the intervention's id, so the intervention's page and the subject's history list them together |
+| **Confirmation** | each request by an approver of the act, on Baton's page, reached from the page or a delivery channel's link | none: the person is driving |
+| **Claims** | the leg form holds its own ticket's claim | the session claim on its own ticket; it never takes a claim another holds |
+
+Everything else is shared: the entry it starts from, one intervention per subject and takeover,
+the warning at the start, the intervention ticket as its record, reports and the end. The
+read-only tail after an entry closes binds the agent-driven kind's key; a human-driven
+intervention's acts stop being tagged to it when it ends, and the person's credential is
+otherwise untouched. The
+sections below are written for the agent-driven kind; where they constrain the session's powers —
+[the intervention key](#the-intervention-key), [requests](#requests), a batch's confirmation —
+they do not apply to a human-driven one. A policy may require a stronger proof for some acts (a
+`human_only` or hardware key): that is the policy's per action, and an act without it is refused,
+not turned into a request. The reach this gives an injected instruction in a human-driven session
+is an accepted risk ([human intent](../../docs/context/human-intent.mdx) §5; its narrowing is in
+the [hardening proposal](hardening.md)).
+
 ### The parts
 
 | Part | What it is | Where it lives |
@@ -161,7 +203,7 @@ the [tail](#ending):
 | `finding` | the §12.9 finding | an owner resolves it (`scope-resolved`) | diagnose only: no request; the acknowledgement stays the owner's |
 
 A security condition (`baton.oauth-replay`, `baton.sign-in-burst`, `baton.admin-key-conflict`,
-`baton.bearer-over-http`, `baton.unprotected` and their kind) is a `condition` entry, but
+`baton.bearer-over-http` and their kind) is a `condition` entry, but
 diagnose-only as a finding is. Tenant-level conditions take no intervention: the subject is always
 within one repository.
 
@@ -175,14 +217,20 @@ On a Needs-you entry the dashboard draws **Start an intervention**: the registry
    entry such as `baton.no-runner` or `baton.queue-over`) — or the **batch** of every open ticket
    entry of its type and cause ([Batches](#batches));
 2. **the agent**: a **sandboxed leg** ([The leg form](#the-leg-form)), naming the runner that will
-   claim it or leaving it to any runner whose grant carries the mark `intervener`; or **an
+   claim it or leaving it to any runner whose grant admits the capability `intervener` (R-BTN-174); or **an
    existing agent over MCP** ([The MCP form](#the-mcp-form)).
 
 There is no powers menu: what the key may do is fixed by the subject's kind (below); everything
 else is a request.
 
-- **Who starts, by path.** Starting mints a credential, so it is an `approvers.members` act
-  (R-BTN-188), as minting an MCP key is.
+- **A human-driven one is started as a course is.** The person calls `course.start` on the
+  arena's intervention course with `claim: true` ([ticket ownership](ticket-ownership.md#starting-a-course)),
+  under its gates: on the roster or holding an owner's or member's key. The ticket is unwritten
+  until its first leg writes it, and the person's session holds its start leg as a session claim
+  (the intervention course's legs say `sessions: allow`). Nothing is minted and no outbox entry
+  files it. What follows is the agent-driven kind's.
+- **Who starts, by path.** Starting an agent-driven one mints a credential, so it is an
+  `approvers.members` act (R-BTN-188), as minting an MCP key is.
 
   | Path | Starter | `starter_role` | `starter_human_only` |
   |---|---|---|---|
@@ -192,8 +240,9 @@ else is a request.
   | an administrator's dashboard session, under `emergency` only ([Emergencies](#emergencies)) | the session's administrator key | `administrator` | false |
 
   An administrator key signs no `/v1/owner/*` route (§12.1), so an administrator starts only from
-  a session. Where `approvers.members` is human-only (`protected`), no session satisfies it
-  (R-BTN-185): only the second row starts one. `emergency` from anyone but an administrator's
+  a session. Where `approvers.members` is human-only (`protected`), a session satisfies it only
+  where it acts as `human` (R-BTN-185, [human intent](../../docs/context/human-intent.mdx) §1);
+  otherwise only the second row starts one. `emergency` from anyone but an administrator's
   session is `invalid-params`.
 - **The warning, on every path.** Before the start is sent, the page shows — and the CLI prints —
   "A fresh agent session is strongly advised: one that holds no owner key and no owner forge
@@ -251,7 +300,7 @@ else is a request.
     again), the intervention ends `file-conflict`, and `baton.intervention-mismatch` names it.
     Nothing overwrites the file. R-BTN-171's `outbox-refused` hold applies to no ticket here: the
     intervention ticket is not on the board, and the subject is not the entry's ticket; a
-    `refused` mark (the deliverer's credential refused) holds nothing and raises
+    `refused` report (the deliverer's credential refused) holds nothing and raises
     `baton.outbox-late`.
   - **A mismatch.** While the posted ticket's `course`, `intervenes` or `baton_write` differ from
     Baton's row, or the snapshot's `extra: true` flag says the file carries a body or a field
@@ -260,9 +309,8 @@ else is a request.
     ticket, or on the repository for a runner, batch or repository subject; the intervention
     ends at expiry unless the file is restored. Beyond that check, the leg form's runner and the
     course read only `intervention_context`, never the ticket's body.
-  - **Who can deliver it.** On the markdown source, a deliverer `outbox.git` admits: `runner`
-    under `cooperative`; `trusted-runner` under `protected`, where `tickets.created: proposed`
-    makes it a proposal that lands only when a human lands it. A custom source needs an
+  - **Who can deliver it.** On the markdown source, any `git` deliverer; under `protected`,
+    `tickets.created: proposed` makes it a proposal that lands only when a human lands it. A custom source needs an
     `outbox.source` deliverer, which `protected` admits none of — and R-BTN-188 already refuses a
     policy with an ejected source and none. So under `protected`, or whenever the deliverer, the
     sync or the runners are the broken part, the leg form waits, and **the MCP form is the path**:
@@ -280,14 +328,14 @@ A delegated key in R-BTN-186's sense, minted per intervention and dying with it.
 - **Principal and scope.** It authorizes as a new principal, `intervention`, with a new scope,
   `subject`: the intervention's subject and what it references (R-BTN-129), and `own` stretched
   to its own intervention's requests and reports. An action admits
-  `{principal: "intervention", scope: "subject"}` only where its `delegated` mark (people and
+  `{principal: "intervention", scope: "subject"}` only where its `delegated` value (people and
   dashboard §1) is `true` or `own` and the table below lists it. The actions on its own
-  intervention (`intervention.context`, `.request`, `.report`) carry a mark of their own,
+  intervention (`intervention.context`, `.request`, `.report`) carry a value of their own,
   `delegated: "intervention"`, which `check:actions` exempts from R-BTN-186's derivation and
   admits for no MCP key. The table below is a machine-readable allowlist in the registry
   (`src/shared/actions.mjs`, `interventionPowers: {ticket, runner, batch, repository}`, each a list
   of action ids); `check:actions` fails an `intervention` caller on any entry whose `delegated`
-  mark is `false`, and on any entry that no list of the allowlist names.
+  value is `false`, and on any entry that no list of the allowlist names.
 - **Its own powers, by subject** — always within `interventions.repository`:
 
   | Subject | Reads | Tightens (and undoes its own) |
@@ -358,8 +406,8 @@ A delegated key in R-BTN-186's sense, minted per intervention and dying with it.
 
   **Deny** closes the request. Both are `delegated: false`, and no `intervention` or delegated
   principal is among their callers; `check:actions` fails an entry that admits one.
-- **Under a human-only list** no session confirms (R-BTN-185): the page names the CLI command and
-  the request id for a `human_only` key; the command prints the same effect statement and pins.
+- **Under a human-only list** only a session that acts as `human` confirms (R-BTN-185); for any
+  other the page names the CLI command and the request id for a `human_only` key; the command prints the same effect statement and pins.
 - **A merge is informational.** `action: "pr.merge"` names no registry action: its `targets` name
   one PR of the subject's own — its head repository the home, its head branch matching the
   repository's branch pattern for the subject ticket — pinned to its head SHA. An owner or
@@ -372,8 +420,8 @@ A delegated key in R-BTN-186's sense, minted per intervention and dying with it.
 
 - **Who claims: one gate.** A new gate, rule `intervention` (§6.6), admits a claim of a leg of
   `interventions.ticket_id` only from the runner `interventions.claimant` names, by key
-  fingerprint, or — where the claimant is `intervener` — from a runner whose grant carries the
-  mark `intervener`, which an approver on `approvers.roles` sets (R-BTN-180); every other runner
+  fingerprint, or — where the claimant is `intervener` — from a runner whose grant admits the
+  capability `intervener` (R-BTN-174); every other runner
   is refused, whatever the ticket file says. It always refuses the subject runner, and every
   runner that ran one of the subject ticket's failed attempts in the last 24 hours, matched by key
   fingerprint and by hostname. It refuses all of them while the posted ticket mismatches Baton's
@@ -577,13 +625,16 @@ for a condition.
 
 What building this changes, each in its owning place:
 
+- **[Human intent and autonomy](../../docs/context/human-intent.mdx)** (2026-11-26) is the
+  ground for the split by driver: R-BTN-186's tighten-only powers bind agent-driven delegated keys,
+  the intervention key among them, and not a person's interactive grant.
 - **A new R-BTN-n (interventions), §7.3**: the whole of [The design](#the-design), with
   `baton.intervention-emergency` and `baton.intervention-mismatch`.
 - **R-BTN-75 (§6.2)**: `baton.unclaimable` and `baton.no-runner`. **§8.3**: `baton.runner-starved`.
 - **R-BTN-186 (§12.8)**: its definition "a delegated key (an MCP key, R-BTN-130)" names the
   intervention key too; its powers do not change. **People and dashboard §1**: "a delegated key is
   no principal of its own" gains the `intervention` principal; the `delegated: "intervention"`
-  mark and `check:actions`' two checks. **The vocabulary**'s "Delegated key" ("An MCP key: …")
+  value and `check:actions`' two checks. **The vocabulary**'s "Delegated key" ("An MCP key: …")
   likewise, and "intervention" lands as a core word (spec-writing, rule 7).
 - **R-BTN-129 (§11.3)**: the principal `intervention`, the scope `subject`, and `own` covering an
   intervention's own requests and reports.
@@ -620,7 +671,7 @@ What building this changes, each in its owning place:
   `baton.runner-starved` (at the runner's next granted claim, or when it is no longer live).
 - **The snapshot (R-BTN-74)**: the intervention ticket's `extra` flag.
 - **R-BTN-12 (§6.8)**: `hold_reason` `intervention:<id>`. **§6.6**: the gate rule `intervention`.
-  **R-BTN-180**: the grant mark `intervener` under `approvers.roles`. **R-BTN-66**: the setting
+  **R-BTN-174**: the capability `intervener`, which a grant admits. **R-BTN-66**: the setting
   `intervention_courses`.
 - **§12.1 and R-BTN-158**: the principal's row; `bint_` among the bearer secrets and the bearers
   that crossing `http` revokes. **R-BTN-144**: the intervention key in the one list of what is
@@ -699,6 +750,8 @@ G-BTN-149 (Baton files the intervention ticket through the outbox); S-BTN-275 an
 5. Whether R-BTN-161 bindings may later start interventions with no person — for example a
    diagnose-only intervention on every `baton.retries`.
 6. A subject-scoped, masked export of the leg archive and the runner's log for the leg form.
+7. How a human-driven session's acts are tied to its intervention: a parameter on each call,
+   or the person's MCP session bound to the intervention when it starts.
 
 ## Where to start when this is picked up
 
@@ -709,4 +762,4 @@ G-BTN-149 (Baton files the intervention ticket through the outbox); S-BTN-275 an
 - The pieces it needs, roughly in order: B-312; the registry (B-25, B-124); owners' sessions and
   confirmed actions (B-76, B-207); the outbox (R-BTN-171); the MCP endpoint (B-25) and OAuth
   (B-73); then the new parts — the record and key, requests, the outbox kind, the gate rule and
-  grant mark, the screen, the new conditions, and a course template.
+  the `intervener` capability, the screen, the new conditions, and a course template.

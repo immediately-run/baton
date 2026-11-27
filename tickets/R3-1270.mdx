@@ -3,7 +3,7 @@ title: "R3-1270 — Baton machine-key sync: a granted runner key posts its repos
 id: R3-1270
 project: baton
 status: available
-updated: 2026-10-31
+updated: 2026-11-23
 repos:
   - baton
 tags:
@@ -11,7 +11,7 @@ tags:
   - roadmap-item
 order: 1101
 tier: critical
-description: "verifySync accepts a machine key granted on the repository in the sync role (never the mirror) with ?repository=, unless the owners set machine_sync false; every board post records posted_by, and a machine-key post that closes another runner's ticket, drops a posted bar or loosens an author's gate raises baton.machine-post (BATON_SPEC §8.2 R-BTN-102); S-BTN-59. Requires: none."
+description: "verifySync accepts a machine key granted on the repository in the sync role (never the mirror) with ?repository=, every board post records posted_by (BATON_SPEC §8.2 R-BTN-102); S-BTN-59. Requires: none."
 topics:
   - baton
 owns: {}
@@ -22,7 +22,7 @@ depends_on:
 ---
 
 **Brief:** the Baton project; the owner, 2026-10-16: runners are fully trusted to sync the tickets from git, none of it required of them.
-**Spec:** [BATON_SPEC §8.2](../spec/BATON_SPEC/08-runners.md#sec-8-2) [R-BTN-102](../spec/BATON_SPEC/08-runners.md#sec-8-2) (sync under a machine key, `posted_by`, `baton.machine-post`) and [R-BTN-146](../spec/BATON_SPEC/08-runners.md#sec-8-2) (active grants, span), [§3.2](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-2) [R-BTN-93](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-2) (one verifier for sync routes), [§12.1](../spec/BATON_SPEC/12-security.md#sec-12-1) (principals), [§13](../spec/BATON_SPEC/13-data-model.md#sec-13) (`board_snapshots.posted_by`, `repositories.machine_sync`), [§14](../spec/BATON_SPEC/14-api.md#sec-14), [§15](../spec/BATON_SPEC/15-verification.md#sec-15) [S-BTN-59](../spec/BATON_SPEC/15-verification.md#scenarios)
+**Spec:** [BATON_SPEC §8.2](../spec/BATON_SPEC/08-runners.md#sec-8-2) [R-BTN-102](../spec/BATON_SPEC/08-runners.md#sec-8-2) (sync under a machine key, `posted_by`) and [R-BTN-146](../spec/BATON_SPEC/08-runners.md#sec-8-2) (active grants), [§3.2](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-2) [R-BTN-93](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-2) (one verifier for sync routes), [§12.1](../spec/BATON_SPEC/12-security.md#sec-12-1) (principals), [§13](../spec/BATON_SPEC/13-data-model.md#sec-13) (`board_snapshots.posted_by`, `repositories.machine_sync`), [§14](../spec/BATON_SPEC/14-api.md#sec-14), [§15](../spec/BATON_SPEC/15-verification.md#sec-15) [S-BTN-59](../spec/BATON_SPEC/15-verification.md#scenarios)
 **Depends on:** R3-1263 (pulled syncs: `/v1/sync/want` and `/v1/sync/wanted`), R3-1269 (the migration this extends)
 
 ### Requires
@@ -41,22 +41,22 @@ critical — authentication.
 ### What to build
 
 1. `/v1/sync/observation`, `/v1/sync/board`, `/v1/sync/want` and `/v1/sync/wanted` accept a request signed by a machine key (credential kind `runner`, still `worker` in the code until B-68) with `?repository=<id>` in the signed query, no runner secret, role `sync` only; `/v1/sync/events` and the mirror's routes refuse it `forbidden`.
-2. Refused `forbidden` when the key holds no unrevoked grant on the repository, or the repository policy's `inputs.board` excludes `machine` (R-BTN-93, R-BTN-188), read through `src/core/policy.ts` (B-145; until it lands, `inputs.board` defaults to the `cooperative` preset's, which admits `machine`).
-3. No settings route: whether a machine key may post is a policy change, made by an approver on `approvers.policy` (B-145).
+2. Refused `forbidden` when the key holds no unrevoked grant on the repository ~~, or the repository policy's `inputs.board` excludes `machine` (R-BTN-93, R-BTN-188), read through `src/core/policy.ts` (B-145; until it lands, `inputs.board` defaults to the `cooperative` preset's, which admits `machine`)~~ .
+3. No settings route ~~: whether a machine key may post is a policy change, made by an approver on `approvers.policy` (B-145)~~ and no policy knob: a granted machine key may post.
 4. Every accepted or held board post stores `posted_by` (the credential's fingerprint, or the CI identity), and its `snapshot-accepted` event names it.
-5. A machine-key post that closes a ticket another runner holds, drops a posted bar, lowers a tier, drops a `requires` clause (or, during R-BTN-132's window, `operator_only`), or removes a `ticket` block or a decision raises `baton.machine-post` naming the tickets and the key — through today's `needsYou()` path if this lands before B-57, which converts it.
+5. ~~A machine-key post that closes a ticket another runner holds, drops a posted bar, drops a `requires` clause (or, during R-BTN-132's window, `operator_only`), or removes a `ticket` block or a decision raises `baton.machine-post` naming the tickets and the key — through today's `needsYou()` path if this lands before B-57, which converts it.~~
 
 ### Architecture — the decisions, named
 
 - **One verifier still answers every sync route**: extend the existing path that turns a sync request into `{repository, role}` so a machine key is one more credential kind it tries; no route checks keys itself (R-BTN-93's rule).
-- **The loosening check is a pure function** `loosenedBy(before, after)` in `src/core/board.ts`, comparing the outgoing and incoming `TicketRow`s the snapshot transaction already holds; it returns the ticket ids and what loosened. The transaction calls it only when the poster is a machine key.
+- ~~**The loosening check is a pure function** `loosenedBy(before, after)` in `src/core/board.ts`, comparing the outgoing and incoming `TicketRow`s the snapshot transaction already holds; it returns the ticket ids and what loosened. The transaction calls it only when the poster is a machine key.~~
 - **Owner and administrator keys stay out**: a key that is both granted as a runner and listed in `repository_owners` or `BATON_ADMIN_KEYS` is already impossible (R-BTN-57); do not relax that check.
 - **Do not**: let a machine key mirror; accept `?repository=` from an unsigned part of the request; refuse a loosening post (it is raised, by the owner's decision); require a runner secret on sync routes.
 
 ### Tests
 
-- `test/unit/auth.test.ts`: a machine key with a grant passes as `sync` for that repository and fails for another; with `machine` out of the policy's `inputs.board` it fails; at `/v1/sync/events` it fails.
-- `test/unit/board.test.ts` (new): `loosenedBy` over fixture rows built from the real `rowForTicket`, one case per loosening and one that tightens (no entry).
+- `test/unit/auth.test.ts`: a machine key with a grant passes as `sync` for that repository and fails for another; ~~with `machine` out of the policy's `inputs.board` it fails;~~ at `/v1/sync/events` it fails.
+- ~~`test/unit/board.test.ts` (new): `loosenedBy` over fixture rows built from the real `rowForTicket`, one case per loosening and one that tightens (no entry).~~
 - Integration: `test/integration/S-BTN-59.passive-plain-server.test.ts` — the board-posting half (the `ls-remote` trigger half is R3-1272's); S-BTN-55 still green.
 
 ### Exit criteria
@@ -69,4 +69,10 @@ critical — authentication.
 
 _(filed 2026-10-16)_
 
-_(2026-10-30: `machine_sync` is retired as a setting: whether a machine key may post the board is the repository policy's `inputs.board` (`machine`), R-BTN-188, built by B-145. Read it through `src/core/policy.ts` once B-145 lands.)_
+~~_(2026-10-30: `machine_sync` is retired as a setting: whether a machine key may post the board is the repository policy's `inputs.board` (`machine`), R-BTN-188, built by B-145. Read it through `src/core/policy.ts` once B-145 lands.)_~~
+
+_2026-11-23 — tiers retired (spec/retire-tiers: [BATON_SPEC §6.6](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-6) gate 5, [R-BTN-66](../spec/BATON_SPEC/01-what-baton-is.md#sec-1)): the struck tier clauses are gone from the spec — no ticket tier, runner ceiling, grant `max_tier`, ladder, `ready_by_tier` or `?tier=`. Build the rest without them._
+
+_(2026-11-24: the note of 2026-10-30 is struck: B-189's spec PR (`spec/BATON_SPEC_HISTORY.md`, the entry of 2026-11-24) retires the policy's `inputs.board` on the owner's rulings of 2026-11-09 and 2026-11-24 (runners trusted, legs not). A machine key granted on a repository posts its board as any sync credential does (R-BTN-93, R-BTN-102); no knob governs it. Item 5's `baton.machine-post` and its `loosenedBy` check go with it (the spec PR removes the condition), and the span is out of R-BTN-146)_
+
+_(2026-11-24: rules re-read: R-BTN-93, R-BTN-102, R-BTN-188)_
