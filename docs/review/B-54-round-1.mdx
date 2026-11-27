@@ -1,0 +1,25 @@
+---
+title: B-54 review round 1
+description: Findings and disposition for the first review of the declarative view renderers, all fixed before the next round.
+---
+
+Reviewed [Baton #178](https://github.com/immediately-run/baton/pull/178) at `8ff40a1e`
+([review](https://github.com/immediately-run/baton/pull/178#pullrequestreview-5772526655), [verdict comment](https://github.com/immediately-run/baton/pull/178#issuecomment-6636969390)). The
+verdict was changes: two blind reviewers and the round's orchestrator, who reproduced each
+mechanism against `src/shared/view.mjs` with `node`, found three blocking findings, three
+should-fix and three nits. CI's `test` was green and its `report` job red.
+
+The author fixed the code findings in `e677853` and `4a818a7` and replied on each thread;
+round two re-verified every fix.
+
+| Finding | Disposition |
+|---|---|
+| Blocking (PR body): the R-BTN-68 model-checks report is missing and the `report` job is red | Still open at round two; closed there by the body edit. |
+| [Blocking: the `link_hosts` branch returns the raw URL, skipping `cleanUrl`'s as-written checks](https://github.com/immediately-run/baton/pull/178#discussion_r4470721351) | Fixed in `e677853`: the branch routes through `cleanUrl(url, true)`, with the backslash, scheme-only and tab forms tested. |
+| [Blocking: `renderPlain` emits raw control characters, so a value can draw an OSC 8 link or forge lines](https://github.com/immediately-run/baton/pull/178#discussion_r4470721376) | Fixed in `e677853`: C0, C1 and bidi controls draw inert, and S-BTN-76's plain arm carries the case. |
+| [Should-fix: a field's `pointer` is not checked as a pointer, so `a` renders the whole value](https://github.com/immediately-run/baton/pull/178#discussion_r4470721390) | Fixed in `e677853`: the template's `POINTER` grammar applies. |
+| [Should-fix: the ticket still read `available` with its PR open](https://github.com/immediately-run/baton/pull/178#discussion_r4470721404) | Fixed in `4a818a7`: `in-review`. |
+| [Should-fix: a second `Resolve` type beside the one in `schema.d.mts`, and Fit answer 3 denies duplication](https://github.com/immediately-run/baton/pull/178#discussion_r4470721418) | Fixed in `e677853` (the type); the Fit answer was corrected in the body edit after round two. |
+| [Should-fix: the ui node's `style` key is dropped by today's `el()`, though the comment claims the same shape](https://github.com/immediately-run/baton/pull/178#discussion_r4470721429) | Fixed in `e677853`: the comments say B-56/B-57 must extend `el()`. |
+| [Nit: the generic rendering opens an object's objects but not an array's](https://github.com/immediately-run/baton/pull/178#discussion_r4470721438) | Fixed in `e677853`. |
+| [Nit: RFC 6901 empty tokens, an unresolved `number` drawing empty, and a bare `:` for a labelless table](https://github.com/immediately-run/baton/pull/178#discussion_r4470721446) | Fixed in `e677853`. |

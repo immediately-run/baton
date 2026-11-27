@@ -1,0 +1,29 @@
+---
+title: B-129 review round 1
+description: Findings and disposition for the first review of the claim that asks Baton first, all fixed before the next round.
+---
+
+Reviewed [Baton #160](https://github.com/immediately-run/baton/pull/160) at `e3710df` ([verdict comment](https://github.com/immediately-run/baton/pull/160#issuecomment-6598857504)). The
+verdict was changes: two blind reviewers and a matcher found two blocking findings, nine
+should-fix and four nits; CI's `test` was green on that head.
+
+The author closed every finding in `52c3e59`, `d711bee`, `abcfd8c` and `db7a436`
+([closure comment](https://github.com/immediately-run/baton/pull/160#issuecomment-6602960783)), and round two checked them.
+
+| Finding | Disposition |
+|---|---|
+| Blocking: a takeover skips every frontmatter status and `depends_on` check, so two git-lock sessions can both take over a ticket | Fixed by head `db7a436`: a takeover overrides only a false `available`. |
+| Blocking: `holdersOf` filters out legacy claims, contrary to its comment and type | Fixed by head `db7a436`: legacy claims are listed with a null lease. |
+| Should-fix: `pastStart` is true if any history row ever reached a station | Fixed by head `db7a436`: judged from the board's ready station, else the newest `reached` row. |
+| Should-fix: `resume` reads only the newest ended claim and loses an earlier PR | Fixed by head `db7a436`: branches and PRs are unioned across ended claims. |
+| Should-fix: the release hand-off has no "what is left" | Fixed by head `db7a436`: `set --note` writes it. |
+| Should-fix: a missing key file is reported as Baton unreachable | Fixed by head `db7a436`: the key is checked first and named. |
+| Should-fix: the drop-a-PR guard checks readiness, not that the PR is open, and blocks `done` | Fixed by head `db7a436`: the refusal says only what is known; `done` is never refused. |
+| Should-fix: R-BTN-127's CLI tree lacks the claim flags R-BTN-74 states | Fixed by head `db7a436`: the row cites R-BTN-74. |
+| Should-fix: R-BTN-24 says the resume record reaches readers only two ways | Fixed by head `db7a436`. |
+| Should-fix: R-BTN-85's lead says Baton adopts git's value, and the ticket wants the discrepancy on Needs you against a 2026-11-01 Decision | Answered by the owner (2026-11-03, "Keep your Decision"): listed among discrepancies only, adopts nothing. |
+| Should-fix: `position-disagrees` fires on every legitimate release | Fixed by head `db7a436`, then reverted in round two (core may not read `prs`); the owner accepted the extra entries. |
+| Nit: a stray `)` in the board row | Fixed by head `db7a436`. |
+| Nit: the dedup reads the newest discrepancy of any sub | Fixed by head `db7a436`. |
+| Nit: the holder refusal says the lease has not ended even after it has | Fixed by head `db7a436`. |
+| Nit: no test feeds the real core's answers to `readTicketPosition` | Fixed by head `db7a436`: S-BTN-199 does. |

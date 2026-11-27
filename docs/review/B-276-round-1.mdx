@@ -1,0 +1,20 @@
+---
+title: B-276 review round 1
+description: Findings and disposition for the first review of the generated spec rule ledger, all fixed before the next round.
+---
+
+Reviewed [Baton #367](https://github.com/immediately-run/baton/pull/367) at `180480b4`
+([review](https://github.com/immediately-run/baton/pull/367#pullrequestreview-6014460613), [verdict comment](https://github.com/immediately-run/baton/pull/367#issuecomment-7085575685)). The
+verdict was changes: the reviewer found four blocking findings and two should-fix, verified with
+`npm run check:spec` and in-memory checks against the head.
+
+Every finding was fixed in `699905e4`, with a reply on each thread, and round two checked them.
+
+| Finding | Disposition |
+|---|---|
+| [Blocking: the scanner reads ignored build output, so the ledger cites `src/dashboard/dist/app.js` and `check:spec` fails on a clean checkout](https://github.com/immediately-run/baton/pull/367#discussion_r4659961963) | Fixed in `699905e4`: only Git-tracked files are read. |
+| [Blocking: an incidental id mention counts as a scenario test (S-BTN-62, S-BTN-131, S-BTN-197, S-BTN-223)](https://github.com/immediately-run/baton/pull/367#discussion_r4659961968) | Fixed in `699905e4`: coverage comes from a scenario filename or a literal test or suite title, and the four are pending. |
+| [Blocking: the checker requires a trailing pipe the index parser does not, so a row without one escapes the coverage check](https://github.com/immediately-run/baton/pull/367#discussion_r4659961972) | Fixed in `699905e4`: one shared row parser. |
+| [Blocking: the status token hides an opening italic patch note from `check-spec`'s guard](https://github.com/immediately-run/baton/pull/367#discussion_r4659961976) | Fixed in `699905e4`: the guard skips status tokens. |
+| [Should-fix: on a push to `main` the pending list is compared with itself](https://github.com/immediately-run/baton/pull/367#discussion_r4659961979) | Fixed in `699905e4`: the push event's previous SHA is the base. |
+| [Should-fix: R-BTN-83 is marked `built` though its Route clause is not built](https://github.com/immediately-run/baton/pull/367#discussion_r4659961980) | Fixed in `699905e4`: `partly`. |

@@ -1,0 +1,16 @@
+---
+title: B-49 review round 2
+description: Findings and disposition for the second review of one evaluation per transaction, both fixed before the next round.
+---
+
+Reviewed [Baton #67](https://github.com/immediately-run/baton/pull/67) at `6d53994c` ([review](https://github.com/immediately-run/baton/pull/67#pullrequestreview-5579543152)). No verdict
+comment was posted; one reviewer verified every round-one fix, by mutation where it mattered, and
+found one blocking finding and one nit.
+
+Both were fixed, the code in `2760c552` and the body by an edit
+([comment](https://github.com/immediately-run/baton/pull/67#issuecomment-6280797815)), and round three checked them.
+
+| Finding | Disposition |
+|---|---|
+| [Blocking: round one's widening silences a real unblocking when a lost row on a leg that is not queued clears in the same evaluation](https://github.com/immediately-run/baton/pull/67#discussion_r4320404682) | Fixed in `2760c552`: only a lost row on the queued leg makes the transition silent, with both shapes as tests. |
+| Nit (PR body): a sentence still describes the removed netting | Fixed in the PR body. |

@@ -1,0 +1,23 @@
+---
+title: B-113 review round 1
+description: Findings and disposition for the first review of qualified cross-repository dependencies, all fixed before the next round.
+---
+
+Reviewed [Baton #279](https://github.com/immediately-run/baton/pull/279) at `3f939333`
+([review](https://github.com/immediately-run/baton/pull/279#pullrequestreview-5962057114), [verdict comment](https://github.com/immediately-run/baton/pull/279#issuecomment-6986718053)). The
+verdict was changes: two blind reviewers, merged and re-verified by the coordinator, found one
+blocking finding, four should-fix and two nits, reproducing the blocking one with standalone
+probes; the five touched test files and the spec checks passed.
+
+Every finding was fixed in `a4dd6c7e`, with a reply on each thread, and round two verified all
+seven.
+
+| Finding | Disposition |
+|---|---|
+| [Blocking: a one-board cycle with a self-qualified edge escapes both cycle checks](https://github.com/immediately-run/baton/pull/279#discussion_r4618386237) | Fixed in `a4dd6c7e`: `checkPayload` reads a self-qualified edge as local. |
+| [Should-fix: `BOARDS_MAX` is never thrown, so a graph over the bound is truncated or walked past it](https://github.com/immediately-run/baton/pull/279#discussion_r4618386254) | Fixed in `a4dd6c7e`: the walk refuses at the bound, naming the board. |
+| [Should-fix: the read guesses a closed target's `url`, which 404s](https://github.com/immediately-run/baton/pull/279#discussion_r4618386265) | Fixed in `a4dd6c7e`: a closed target answers `url: null`. |
+| [Should-fix: a self-qualified id is local only when the repos map names the own forge path exactly](https://github.com/immediately-run/baton/pull/279#discussion_r4618386292) | Fixed in `a4dd6c7e`: a shared `ownRepositoryId` normalises both sides, and the read answers a self-qualified id. |
+| [Should-fix: the claim clones its own remote for a self-qualified id](https://github.com/immediately-run/baton/pull/279#discussion_r4618386306) | Fixed in `a4dd6c7e`: answered by `isDoneLocal`. |
+| [Nit: `check-wiki` skips every colon-bearing entry's shape check](https://github.com/immediately-run/baton/pull/279#discussion_r4618386315) | Fixed in `a4dd6c7e`. |
+| [Nit: the known-ticket check skips the own repository's qualified spelling](https://github.com/immediately-run/baton/pull/279#discussion_r4618386335) | Fixed in `a4dd6c7e`. |

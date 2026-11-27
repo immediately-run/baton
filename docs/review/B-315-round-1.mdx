@@ -1,0 +1,23 @@
+---
+title: B-315 review round 1
+description: Findings and disposition for the first review of branch course sources resolved per sync, all fixed before the next round.
+---
+
+Reviewed [Baton #395](https://github.com/immediately-run/baton/pull/395) at `4858a203`
+([review](https://github.com/immediately-run/baton/pull/395#pullrequestreview-6026033189), [verdict comment](https://github.com/immediately-run/baton/pull/395#issuecomment-7108378740)). The
+verdict was changes: the reviewer found four blocking findings and two should-fix. S-BTN-317,
+S-BTN-105, the parser tests, typecheck and the spec and wiki checks passed; the full suite timed
+out locally. The dependency review found `esbuild@0.28.2` and its optional packages moved from
+development to runtime with no version change.
+
+Every finding was fixed or documented in `a1eea3d6`, with a reply on each thread. Round two
+(archived in [`B-315-round-2`](B-315-round-2.mdx)) found the first and third fixes incomplete.
+
+| Finding | Disposition |
+|---|---|
+| [Blocking: an uncommitted pin-to-branch edit can run the branch's station function under a home SHA that never opted in](https://github.com/immediately-run/baton/pull/395#discussion_r4669262475) | Fixed in `a1eea3d6`: configuration and graph are checked against the posted home SHA; round two found the reverse direction open. |
+| [Blocking: the scratch Git repository inherits `GIT_DIR` and `GIT_WORK_TREE` and can act on the caller's checkout](https://github.com/immediately-run/baton/pull/395#discussion_r4669262487) | Fixed in `a1eea3d6`: repository-local variables are stripped, with a regression. |
+| [Blocking: a same-home refresh keeps obsolete `courses.facts` while accepting new branch provenance](https://github.com/immediately-run/baton/pull/395#discussion_r4669262498) | Fixed in `a1eea3d6` for same-home refreshes; round two found the held and behind-home paths open. |
+| [Blocking: S-BTN-317 takes no claim, so it cannot show a claim keeps its graph](https://github.com/immediately-run/baton/pull/395#discussion_r4669262509) | Fixed in `a1eea3d6`: the scenario holds a live claim across branch movement. |
+| [Should-fix: a private source readable by the pinned checkout becomes unreadable as a branch](https://github.com/immediately-run/baton/pull/395#discussion_r4669262521) | Answered in `a1eea3d6`: documented that private sources need Git read access configured outside the checkout; the forge token is not reused. |
+| [Should-fix: the parser now accepts uppercase pins](https://github.com/immediately-run/baton/pull/395#discussion_r4669262533) | Fixed in `a1eea3d6`: pins require lowercase hex, tested. |

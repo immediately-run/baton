@@ -1,0 +1,17 @@
+---
+title: B-49 review round 3
+description: Findings and disposition for the third and last review of one evaluation per transaction, all fixed before merge.
+---
+
+Reviewed [Baton #67](https://github.com/immediately-run/baton/pull/67) at `2760c552` ([review](https://github.com/immediately-run/baton/pull/67#pullrequestreview-5579583355)), the gate's
+last round. No verdict comment was posted; the reviewer verified round two's fixes by mutation
+and raised one should-fix and two nits.
+
+All three were fixed in `9fd666a`, with a reply on each thread. No further review ran, since
+three rounds is the gate's cap. The PR was merged on 2026-10-20 with no finding open.
+
+| Finding | Disposition |
+|---|---|
+| [Should-fix: a logged `unblocked` names a lost row from another leg in `cleared`](https://github.com/immediately-run/baton/pull/67#discussion_r4320438902) | Fixed in `9fd666a`: lost rows are left out of a logged transition's `cleared`, asserted in the test. |
+| [Nit: a fourth copy of the queued-leg query](https://github.com/immediately-run/baton/pull/67#discussion_r4320439154) | Fixed in `9fd666a`: `queuedLeg(id)`. |
+| [Nit: the CHANGELOG row describes round one's predicate](https://github.com/immediately-run/baton/pull/67#discussion_r4320439398) | Fixed in `9fd666a`. |

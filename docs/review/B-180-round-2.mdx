@@ -1,0 +1,17 @@
+---
+title: B-180 review round 2
+description: Findings and disposition for the second review of the spec bundle and its section links, both fixed before the next round.
+---
+
+Reviewed [Baton #176](https://github.com/immediately-run/baton/pull/176) at `95cd8c51` ([review](https://github.com/immediately-run/baton/pull/176#pullrequestreview-5768756007)). No
+verdict comment was posted; one reviewer found all four of round one's findings closed, checked
+all 1390 new links with an independent script, and raised two should-fix findings and nothing
+blocking.
+
+Both were fixed in `7848b5c9`, which also restored four pages a mistaken intermediate push had
+reverted, and round three checked them.
+
+| Finding | Disposition |
+|---|---|
+| [Should-fix: the span-settling loop counts its own replacements, so a second `spec/BATON_SPEC.md` span is renamed](https://github.com/immediately-run/baton/pull/176#discussion_r4467807128) | Fixed in `7848b5c9`: B-73:64 restored, with a two-span test. |
+| [Should-fix: a span naming the index file is renamed because an unrelated later citation was linked](https://github.com/immediately-run/baton/pull/176#discussion_r4467807135) | Fixed in `7848b5c9`: renamed only when the next citation was linked, except on a `**Spec:**` line. |
