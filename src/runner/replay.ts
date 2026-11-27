@@ -34,7 +34,6 @@ import { createHash } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { DEFAULT_URL } from '../client/config.mjs';
 import { requestCredential, signHeaders } from '../client/sign.mjs';
 import { bareTicketId } from '../defaults/ticket-state';
@@ -44,11 +43,10 @@ import { gitBytes, readArtifact } from './contracts';
 import type { PointerReach } from '../core/contractPointers';
 import { resolveLeg } from '../core/graph';
 import { stdSchema } from '../shared/std.mjs';
-import { loadExecutor, type Executor, type Handle } from './executor';
+import { LEG_PROCESS, loadExecutor, type Executor, type Handle } from './executor';
 import { maskLegOutput, readMaskEnv, runnerConfigPath, secretValues } from './mask';
 
 /** The wrapper (R-BTN-133) every call into repository code runs, as the runner passes it. */
-const LEG_PROCESS = fileURLToPath(new URL('./legProcess.mjs', import.meta.url));
 
 /** A replay's bound: no lease fences it, so the call itself is bounded — an hour by default,
  *  `--timeout-s` to change (a real agent leg's replay is the operator's own judgement). */

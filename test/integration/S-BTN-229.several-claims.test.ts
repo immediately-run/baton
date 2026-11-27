@@ -36,6 +36,10 @@ describe('S-BTN-229: a runner holds several claims, up to R-BTN-4\'s bound', () 
     const told = await beat('vm-a', a.secret, { concurrency: 3, capabilities: CAPS });
     expect(told.json.claims.map((c: { id: number }) => c.id)).toEqual([first.json.claim_id, second.json.claim_id]);
     expect(told.json.claim).toMatchObject({ id: first.json.claim_id });
+    const paused = await beat('vm-a', a.secret, { concurrency: 0, capabilities: CAPS });
+    expect(paused.json.claims.map((c: { id: number }) => c.id)).toEqual([first.json.claim_id, second.json.claim_id]);
+    expect(await claimItem('vm-a', a.secret)).toMatchObject({ status: 409, json: { rule: 'max-claims', held: 2, concurrency: 0 } });
+    await beat('vm-a', a.secret, { concurrency: 3, capabilities: CAPS });
     // A bare session_url names no claim among several: dropped, never a refused beat.
     expect((await beat('vm-a', a.secret, { concurrency: 3, capabilities: CAPS, session_url: 'https://claude.ai/code/x' })).json.session_url_dropped).toMatch(/several/);
 
@@ -51,7 +55,8 @@ describe('S-BTN-229: a runner holds several claims, up to R-BTN-4\'s bound', () 
     expect((await claimItem('vm-a', a.secret)).status).toBe(200);
     expect((await claimItem('vm-a', a.secret)).json.rule).toBe('max-claims');
     const b = await register('vm-b', { concurrency: 0 });
-    expect(await rows('SELECT concurrency FROM runners WHERE id = ?', b.id)).toEqual([{ concurrency: 1 }]);
+    expect(await rows('SELECT concurrency FROM runners WHERE id = ?', b.id)).toEqual([{ concurrency: 0 }]);
+    expect(await claimItem('vm-b', b.secret)).toMatchObject({ status: 409, json: { rule: 'max-claims', held: 0, concurrency: 0 } });
   });
 
   it('one claim\'s force-reap fences that claim alone; the fenced list clears it; silence reaps every claim', async () => {

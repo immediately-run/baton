@@ -60,6 +60,7 @@ interface ClaimRegistry {
   pendingRequests: number;
   epoch: number;
   persisted: readonly PersistedClaim[];
+  placementPaused?: boolean;
 }
 
 export class Sidecar {
@@ -111,6 +112,7 @@ export class Sidecar {
    * `stray` never applied. This is the promise `waitForBeat` waits on. */
   private booting: Promise<void> | null = null;
   private answerClaims: Set<number> | null = null;
+  private sentPlacementPaused = false;
 
   constructor(
     private readonly o: SidecarOptions,
@@ -152,6 +154,7 @@ export class Sidecar {
 
   private courses(): RunnerOptions['courses'] { return this.o.readCourses?.() ?? this.o.courses; }
   get coursesSettled(): boolean { return this.sentCourses === this.courses(); }
+  get placementSettled(): boolean { return this.sentPlacementPaused === Boolean(this.claims().placementPaused); }
 
   clearLeaseLoss(): void {
     this.lostLease = false;
@@ -241,6 +244,7 @@ export class Sidecar {
     // One claim at a time keeps the shapes a Baton before B-188 reads: the bare `session_url`
     // and `leg_finished`, and a `fenced` object.
     const one = this.o.concurrency === 1;
+    const placementPaused = Boolean(this.claims().placementPaused);
     const courses = this.courses();
     const body: Record<string, unknown> = {
       hostname: this.o.hostname, session_name: this.o.session, harness: this.o.harness, kind: 'vm',
@@ -251,7 +255,7 @@ export class Sidecar {
       ...(this.o.testHarness ? { test_harness: true } : {}),
       lease_timeout_s: s.lease_timeout_s ?? 900,
       // R-BTN-4 (B-188): how many claims this runner holds at once.
-      concurrency: this.o.concurrency,
+      concurrency: placementPaused ? 0 : this.o.concurrency,
       courses: courses.map((c) => ({ repository: this.o.repository, course: c.course, version: c.version })),
       // R-BTN-113 (B-234, B-188): the running legs' session links, kept on their runs' rows
       // (latest wins while each runs); Baton drops and logs one that fails the link rule.
@@ -268,6 +272,7 @@ export class Sidecar {
     const result = await this.sendHeartbeat(body, spool);
     if (!result) return;
     this.sentCourses = courses;
+    this.sentPlacementPaused = placementPaused;
     const { answer, sentAt } = result;
     // R-BTN-113 (B-234): the answer's word on each link — Baton holds a run's session link when
     // the beat carried it and the answer kept it (not dropped: a dropped link failed the rule

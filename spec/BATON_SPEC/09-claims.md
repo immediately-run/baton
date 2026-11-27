@@ -13,8 +13,8 @@ is `active` until it ends `completed`, `released` or `reaped`.
 - **R-BTN-4 (the lock).** `status: built` At most one `active` claim per ticket, enforced by a partial unique
   index. A claim holds one ticket through a run of its legs. A runner holds at most the lower of two
   numbers at once, counting its active claims across every repository:
-  - its **`concurrency`**, which its heartbeat declares (§8.1): an integer from 1 to 32, default
-    1, the runner's own statement of what its host can run;
+  - its **`concurrency`**, which its heartbeat declares (§8.1): an integer from 0 to 32, default
+    1, the runner's own statement of what its host can run. Zero takes no new claims;
   - the claiming repository's grant's **`max_claims`**, the owner's ceiling, set with the grant
     itself (`owner grant add` and `admin grant add`, `--max-claims`, R-BTN-58): 1 to 32, default
     1, and a re-grant that names none sets 1. A key no grant binds (a bearer or seed key) has 1.
@@ -150,7 +150,8 @@ A claim ends with `POST /v1/runner/claims/{id}/end`. Its body, stated here once:
 | `done` | `completed` | the course's last leg is done: the ticket is at an end station, or the latest snapshot shows it closed as done | no |
 | `suspended:<station>` | `completed` | the holder stops at the station reached (R-BTN-40, R-BTN-71) | no |
 | `released:stale-board` | `released` | re-verification from git fails (R-BTN-5, R-BTN-34); the ticket was withdrawn or dropped from the board (R-BTN-147) | no |
-| `released:cannot-finish:transient` | `released` | the environment failed; also an untyped exception, a retryable course `interrupt` type, a `close` that failed three times (R-BTN-72), a session that could not start or be reattached, an invalid blocked end (R-BTN-126) | yes |
+| `released:host-placement` | `released` | the executor could not place the leg or source session (R-BTN-107); the claim rests where the leg started | no |
+| `released:cannot-finish:transient` | `released` | the environment failed; also an untyped exception, a retryable course `interrupt` type, a `close` that failed three times (R-BTN-72), a session that failed to start for a reason other than host placement or could not be reattached, an invalid blocked end (R-BTN-126) | yes |
 | `released:cannot-finish:contract-output` | `released` | a leg's output failed its schema or its station's entry (R-BTN-82, R-BTN-109) | yes |
 | `released:cannot-finish:capability` | `released` | the ticket needs what no eligible runner holds; the ticket is held at once, `non-retryable:capability` | yes |
 | `released:cannot-finish:spec` | `released` | the ticket or its course contradicts itself; also a non-retryable course `interrupt` type; held at once, `non-retryable:spec` | yes |

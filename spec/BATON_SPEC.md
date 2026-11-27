@@ -509,6 +509,7 @@ is stale. Never edit it by hand.
 | S-BTN-323 | a session is as capable as its key | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-324 | a person on the dashboard is a human | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-325 | the unpinned warning | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-327 | executor placement | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 
 ## Gates
 

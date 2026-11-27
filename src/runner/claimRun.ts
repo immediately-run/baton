@@ -3,7 +3,7 @@ import { git } from '../defaults/git.mjs';
 import { randomBytes } from 'node:crypto';
 import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { pathToFileURL } from 'node:url';
 import { verifySignedCommit, nodeKeygen } from '../shared/commitSign.mjs';
 import { controlGroupsOf, groupUnchangedAt } from '../defaults/signed-control';
 import { checkRaise, dispositionOf, errorClassOf, raiseRestarts, SEVERITIES, type ConditionDeclaration } from '../core/conditionTypes';
@@ -12,7 +12,8 @@ import { BatonRefusal, batonUnreachable } from './api';
 import { outsideScope, pushesBetween, readRefState, type RefState } from './audit';
 import { CourseSourceUnavailable } from '../defaults/cli';
 import { sourceContext, advanceHome, claimScratch, courseOf, dropCourse, ensureSha, extractTicketSource, loadCourse, prepareClone, readHead, type CourseLoad } from './home';
-import type { ExecOptions, Executor, Handle, Running, SessionKind } from './executor';
+import { LEG_PROCESS, type ExecOptions, type Executor, type Handle, type Running, type SessionKind } from './executor';
+import { HOST_PLACEMENT_END, isPlacementFailure } from './placement';
 import { LegChannel, channelPath, type ChannelAnswer, type ChannelRequest } from './channel';
 import { MIN_SECRET_BYTES, createLegMasker, failureDetail, maskLegOutput, namesASecret, secretValues } from './mask';
 import { checkEnd, type Output } from '../core/validate';
@@ -33,7 +34,6 @@ import type { PointerReach } from '../core/contractPointers';
 
 const NO_REACH: PointerReach = { git: [], web: [], buckets: [] };
 
-const LEG_PROCESS = fileURLToPath(new URL('./legProcess.mjs', import.meta.url));
 /** B-234 (R-BTN-195, R-BTN-145): the default grace a released leg gets to take its safe point
  * and exit by itself before its still-running session is treated as joinable-and-stuck — the
  * stop ladder's own bound. */
@@ -124,7 +124,9 @@ interface LegProgress {
   ranCtx: Record<string, unknown> | null;
 }
 
-type LegOutcome = { kind: 'contract-input'; detail: string | null } | { kind: 'ok'; result: unknown } | { kind: 'crashed'; error: string; errorType?: unknown } | { kind: 'missing' } | { kind: 'lease-lost' } | { kind: 'past-deadline' };
+type LegOutcome = { kind: 'contract-input'; detail: string | null } | { kind: 'ok'; result: unknown } | { kind: 'crashed'; error: string; errorType?: unknown } | { kind: 'missing' } | { kind: 'lease-lost' } | { kind: 'past-deadline' } | { kind: 'host-placement' };
+
+type TicketVersionCheck = { why: string | null; read: { version: string; read_digest: string } | null; ticket?: unknown; placementFailed?: true };
 
 interface LegExecution {
   outcome: LegOutcome;
@@ -150,6 +152,8 @@ interface ClaimHost {
   isStopping(): boolean;
   isDraining(): boolean;
   homeAdvanced?(): void;
+  placementFailed?(): void;
+  legPlaced?(): void;
 }
 
 /** R-BTN-4: a fresh run owns all of its mutable claim state, including when reattached. */
@@ -212,6 +216,8 @@ export class ClaimRun {
   lost = false;
   /** The claim's end has been sent: nothing is judged against the answer for it any more. */
   ended = false;
+  /** Do not dispatch another fresh sandbox claim while this one's first leg is placing. */
+  placedLeg = false;
   /** The release messages routed to this claim, acknowledged when it ends. */
   private readonly toAck: number[] = [];
   /** B-188: the clone this claim holds (`<clonesDir>/<n>`), null in the home checkout. */
@@ -345,11 +351,21 @@ export class ClaimRun {
   /** Start a session of `kind` on the executor the host chose. */
   private async startSession(kind: SessionKind, o: { session_id: string; run_id?: string; ticket?: string; leg?: string; snapshot_sha?: string; paths: string[]; env: Record<string, string>; channel?: string | null; autonomous?: boolean; reads_only?: boolean }): Promise<Handle> {
     const run = kind === 'leg' ? o.run_id : undefined;
-    return await this.executor.start({
-      brief: { kind, ...o, checkout: this.checkout, wrapper: LEG_PROCESS, ...(o.autonomous ? { autonomous: true } : {}) },
-      ...(run && this.executor.source === 'pinned' ? { forgeProof: () => this.o.api.forgeProof(run) } : {}),
-      executor: null, inputs: [], channel: o.channel ?? null,
-    });
+    try {
+      const handle = await this.executor.start({
+        brief: { kind, ...o, checkout: this.checkout, wrapper: LEG_PROCESS, ...(o.autonomous ? { autonomous: true } : {}) },
+        ...(run && this.executor.source === 'pinned' ? { forgeProof: () => this.o.api.forgeProof(run) } : {}),
+        executor: null, inputs: [], channel: o.channel ?? null,
+      });
+      if (kind === 'leg' && !this.placedLeg) {
+        this.placedLeg = true;
+        this.host.legPlaced?.();
+      }
+      return handle;
+    } catch (e) {
+      if (isPlacementFailure(e)) this.host.placementFailed?.();
+      throw e;
+    }
   }
 
   /** The session `close` and `handoff` run in: the last leg's, or — a hand-off with no leg run
@@ -461,7 +477,7 @@ export class ClaimRun {
    *  B-190 (R-BTN-84): a read that succeeded is also the claim's recorded read — its digest
    *  joins the run's inputs (`leg_run_inputs`), so replay re-reads the same way and compares.
    *  B-252: the read's `ticket` rides back too, for a pathless ticket's leg file (below). */
-  private async verifyTicketVersion(claim: ClaimAnswer, scratch: string): Promise<{ why: string | null; read: { version: string; read_digest: string } | null; ticket?: unknown }> {
+  private async verifyTicketVersion(claim: ClaimAnswer, scratch: string): Promise<TicketVersionCheck> {
     const version = typeof claim.version === 'string' ? claim.version : '';
     const how = (claim.ticket_source ?? null) as { versions?: string | null } | null;
     if (version === '' || how?.versions == null) return { why: null, read: null };
@@ -493,11 +509,12 @@ export class ClaimRun {
 
   /** §4.5 (R-BTN-74) through the executor: the source's `versions` and `read`, each a wrapper call
    *  in one `source` session, stopped when the check ends. Same answers as the in-process check. */
-  private async verifyBySource(file: string, claim: ClaimAnswer, version: string, scratch: string): Promise<{ why: string | null; read: { version: string; read_digest: string } | null; ticket?: unknown }> {
+  private async verifyBySource(file: string, claim: ClaimAnswer, version: string, scratch: string): Promise<TicketVersionCheck> {
     let handle: Handle;
     try {
       handle = await this.startSession('source', { session_id: `source-${randomBytes(6).toString('hex')}`, snapshot_sha: String(claim.snapshot_sha ?? ''), paths: [scratch], env: this.baseEnv() });
     } catch (e) {
+      if (isPlacementFailure(e)) return { why: null, read: null, placementFailed: true };
       return { why: `the executor could not start the ticket source's session (${msg(e)})`, read: null };
     }
     try {
@@ -753,7 +770,12 @@ export class ClaimRun {
     // file-less cases (check tickets, a `cancel` claim) carry no version and are re-verified
     // against Baton's record as before. B-190: a read that succeeded is the claim's recorded
     // read — its digest joins every run's inputs (R-BTN-84), reported on each advance.
-    const versionCheck = reattached ? { why: null, read: null } as Awaited<ReturnType<ClaimRun['verifyTicketVersion']>> : await this.verifyTicketVersion(claim, course.scratch);
+    const versionCheck: TicketVersionCheck = reattached ? { why: null, read: null } : await this.verifyTicketVersion(claim, course.scratch);
+    if (versionCheck.placementFailed) {
+      dropCourse(course.scratch);
+      rmSync(scratch, { recursive: true, force: true });
+      return await this.finish(claimId, { end_reason: HOST_PLACEMENT_END, reached: claim.station, ...(claim.legs?.[0] ? { next: claim.legs[0] } : {}) }, null);
+    }
     if (versionCheck.why != null) {
       this.o.log(`baton: ${ticket}'s ticket moved under the claim — ${versionCheck.why}`);
       dropCourse(course.scratch);
@@ -1025,6 +1047,9 @@ export class ClaimRun {
     }
     if (outcome.kind === 'contract-input') {
       return await this.finish(claimId, { end_reason: 'released:cannot-finish:contract-input', reached: at, next: legName, ...(outcome.detail ? { detail: outcome.detail } : {}) }, null);
+    }
+    if (outcome.kind === 'host-placement') {
+      return await this.finish(claimId, { end_reason: HOST_PLACEMENT_END, reached: at, next: legName }, null);
     }
     if (outcome.kind === 'crashed') {
       // R-BTN-144 (B-170): the leg's own error text leaves masked — a provider-auth message
@@ -1332,6 +1357,7 @@ export class ClaimRun {
       // The leg's own failure text leaves masked, whatever of it the executor quoted.
       channel?.close();
       if (this.legChannel === channel) this.legChannel = null;
+      if (isPlacementFailure(e)) return { kind: 'host-placement' };
       return { kind: 'crashed', error: maskLegOutput(`the executor could not start the leg's session (${msg(e)})`, legSecrets) };
     }
     // R-BTN-113: an executor whose handle names its session's link — the runner reports it on

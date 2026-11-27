@@ -300,9 +300,18 @@ section that are not built are in [the proposal page](../proposals/checks-and-ex
     - `salvage(handle)` returns null.
     - `reattach(saved) → handle | null`, optional, reconnects to a session a runner started
       before it restarted (R-BTN-72).
+    - `placementHealth() → {ready, freeSlots?}`, optional, reports whether the host can place
+      another session before the runner claims. A reported zero free slots also means no
+      placement capacity. Use a fresh capacity check or representative placement to confirm
+      recovery. A `start` failure for host placement may carry `code: 'HOST_PLACEMENT'`.
 
     A leg session's handle is keyed by its session id (R-BTN-123), and any other session's by one
     the runner mints, `<kind>-<random>`, recorded only in the runner's log.
+  - **Placement health (B-336).** A placement failure (including a known sandbox placement or
+    memory refusal from a legacy executor), or an unavailable placement check, stops new claims.
+    The runner logs the pause once, declares zero concurrency (R-BTN-4), and probes on backoff
+    until placement recovers. Without the optional hook, the recovery probe starts and stops a
+    source session without running repository code. Other held claims are not stopped.
   - **The source is the runner host's choice**: `runner.json` `executor`, or `baton runner start
     --executor <source>`, never a repository file.
     - **`builtin`** (the default, no configuration): every call is a detached child of the
