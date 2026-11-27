@@ -57,7 +57,7 @@ One line per decision in force; the reasoning and the rejected alternatives in f
 - Chose a `version` per course, with `min_runner_version` and a test kit, over a fleet-wide skills version (R-BTN-22, R-BTN-65).
 - Chose a runner that runs one script per leg in a worktree at the claim's commit over one per-course runner module (R-BTN-72, R-BTN-133).
 - Chose one runner per checkout serving every course it declares over one runner and one clone per course (R-BTN-72).
-- Chose a leg that names the station it reached and the leg it queues over inferring the next leg (R-BTN-81, R-BTN-83).
+- Chose a leg that names the station it reached and the leg it queues over inferring the next leg (R-BTN-81, R-BTN-83); replaced when B-351 is built by the course's selector (R-BTN-205).
 - Chose pointers and digests of leg inputs and outputs, validated by the runner, over Baton storing or validating content (R-BTN-82, R-BTN-84).
 - Chose validation against a schema and its base, with a conservative static refinement check, over full JSON Schema (R-BTN-108).
 - Chose entry requirements on stations over requirements on legs (R-BTN-109).
@@ -127,7 +127,7 @@ One line per decision in force; the reasoning and the rejected alternatives in f
 - Chose one approver list in the policy, `approvers.policy`, for every policy change, over classifying each change as a tightening or a loosening (R-BTN-188).
 - Chose that Baton stops a repository whose floored guarantee breaks, over runners that refuse to claim when told so (R-BTN-189).
 - Chose to keep deployment duties Baton cannot observe out of the policy and out of Baton's guarantees (§12.8).
-- Chose three sources of a queued leg, one retry policy under the owners' ceiling and floor, and two clocks on a leg with a person leg's `expires` (R-BTN-83, R-BTN-122, R-BTN-167, R-BTN-90).
+- Chose three sources of a queued leg (the holder's becoming the selector's when B-351 is built, R-BTN-205), one retry policy under the owners' ceiling and floor, and two clocks on a leg with a person leg's `expires` (R-BTN-83, R-BTN-122, R-BTN-167, R-BTN-90).
 - Not adopted: BPMN tokens and parallel gateways inside one ticket, BPMN as a file format or engine, and Lisp dynamic variables beyond condition bindings (R-BTN-160–R-BTN-168).
 
 **Runners, people and surfaces**
@@ -191,6 +191,7 @@ One line per decision in force; the reasoning and the rejected alternatives in f
 - Chose leg events, typed events Baton tells a running leg, over reusing conditions for the inbound direction or letting every edit end the claim (R-BTN-198, R-BTN-35, R-BTN-119).
 - Chose a launcher outside Baton that ranks `launch-candidates` and starts sessions by its host's own means, over launches queued in Baton's outbox (R-BTN-201, R-BTN-45, R-BTN-98, R-BTN-107).
 - Chose a runner-side queue of the host user's orders, run without a claim only while Baton is unreachable and reported through an ordinary claim on its return, over a git lock beside it or runners idle through an outage (R-BTN-202, R-BTN-193, R-BTN-72).
+- Chose one selector per course, a pure function a runner runs over Baton's record, as what chooses a ticket's next leg (specified, not built: B-351), over the holder's `next` and the station function's readiness, the gates staying the only refusal (R-BTN-205).
 - Chose proposal pages for unbuilt designs, the course's own pages for a shipped course's contract, and this specification for the reference runner and the CLI ([the simplification review](../../docs/review/spec-simplification-review-2026-11-19.mdx)).
 - Chose a Cloudflare Access sign-in by an explicit click, bound per email to one or more keys of any person role by the deployment's secret, over a terminal-minted link for every sign-in, accepting the Access configuration as a second root of trust and the risk of an agent driving a signed-in browser (R-BTN-155, R-BTN-57).
 - Chose repository members — keys an owner adds, which read one repository and answer the person legs whose `asks` labels they hold — as the dashboard's everyday users, over read-only viewers, forge read access and runner operators (R-BTN-204).

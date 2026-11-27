@@ -35,6 +35,7 @@
   "spec/BATON_SPEC/04-tickets-syncs-board.md tickets.mjs": "B-277",
   "spec/BATON_SPEC/05-courses.md course.json": "B-277",
   "spec/BATON_SPEC/05-courses.md rank.mjs": "B-277",
+  "spec/BATON_SPEC/05-courses.md select.mjs": "B-351",
   "spec/BATON_SPEC/05-courses.md sync.mjs": "B-277",
   "spec/BATON_SPEC/06-prerequisites-blocks-advice.md rank.mjs": "B-277",
   "spec/BATON_SPEC/08-runners.md executor.mjs": "B-277",

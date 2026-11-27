@@ -143,9 +143,12 @@ Designs for this section that are not built are on the proposal page
 
 ### 5.3 Where a ticket is, and how it moves
 
-- **R-BTN-70 (where a ticket is, and what it may do next).** `status: built` Baton holds every ticket's
+- **R-BTN-70 (where a ticket is, and what it may do next).** `status: partly B-351` Baton holds every ticket's
   **station**, **path** and **queued leg** with its `next_source` (R-BTN-39, R-BTN-83). A ticket
-  at an end station is done. For every live ticket the sync attests, from its station function,
+  at an end station is done. **Not built (B-351):** the queued leg is chosen by the course's
+  selector (R-BTN-205), and its stored verdict takes the place of readiness: the sync posts no
+  readiness, and core offers the leg a `run` verdict queued. Until then, for every live ticket the
+  sync attests, from its station function,
   `std:git.readiness@1` (R-BTN-191): for each leg leaving Baton's station that the ticket may
   still run, `ready` or `waiting` (with a `waiting_on` label). With the ticket it posts the
   barred tags of each leg it knows them for (`ticket_bars`, per leg name). Core keeps the
@@ -155,7 +158,13 @@ Designs for this section that are not built are on the proposal page
   discarded until the next run. Core recommends a `ready` leg and never computes readiness. The
   claim response, every heartbeat and every `advance` response show the holder Baton's station,
   path and queued leg, and the latest snapshot's readiness.
-- **R-BTN-83 (a leg ends in a position: the station it reached and the leg it queues).** `status: partly`
+- **R-BTN-83 (a leg ends in a position: the station it reached and the leg it queues).** `status: partly B-351`
+  - **Not built (B-351): the station, not the pair.** A finishing leg reports the station it
+    `reached`, one of its outcomes, and its outputs (R-BTN-82), and names no `next`. The queued
+    leg is the course's selector's (R-BTN-205), `next_source: selector`. A suspension or release
+    queues its own leg again, at the station it rests at, with no selection. An owner's route pins
+    a leg over the selector until the ticket's station changes. The pair, the holder's `next` and
+    `next_source: holder` below are what is built until then.
   - **Outcomes.** A leg's `to` lists its possible outcomes; which one a run reached is the
     holder's report, its evidence in git.
   - **The pair.** Every finishing leg reports a **position** `(reached, next)`: `reached` one
@@ -173,11 +182,12 @@ Designs for this section that are not built are on the proposal page
     accepts the request. No snapshot confirms or replaces it (R-BTN-39); evidence in git is for
     people, never read as a position.
   - **`next_source`** says who chose the queued leg: `holder` (its `advance`, end or
-    suspension), `baton` (a transition of Baton's own, under the rule that makes it) or `owner`
-    (a route, or an adopt, R-BTN-39). The reason is in the position's history row. An owner's
+    suspension), `baton` (a transition of Baton's own, under the rule that makes it), `owner`
+    (a route, or an adopt, R-BTN-39) or, not built, `selector` (R-BTN-205). The reason is in the position's history row. An owner's
     route, a retry policy's `exhausted` leg (R-BTN-122) and a person leg's expiry (R-BTN-116)
     stay queued until the ticket's station changes, whatever readiness a later snapshot posts.
-  - **Missing from a snapshot.** If a board post places a ticket at a non-end station with no
+  - **Missing from a snapshot** (retired by B-351 with posted positions; R-BTN-205's
+    conditions take its place). If a board post places a ticket at a non-end station with no
     queued leg, Baton accepts the post and places its other tickets as usual. The affected ticket
     is not claimable and Baton raises `baton.missing-next` on it (R-BTN-163). The condition closes
     when a later post supplies a queued leg, places the ticket at an end, or no longer places it.
@@ -194,6 +204,56 @@ Designs for this section that are not built are on the proposal page
     on `course-changed` and raises `baton.course-changed`. A ticket with no claim at a station
     the new file lacks waits `course-changed` the same way, until the owner adopts it
     (R-BTN-39). A leg added later changes no queued leg.
+- **R-BTN-205 (the selector chooses the next leg).** `status: specified B-351` Not built. Which leg
+  a ticket runs next, from the station Baton holds, is one function of the course's, judged over
+  Baton's record. Who may claim or advance it stays the gates' (§7.2); a verdict is never a gate.
+  - **The selector.** `select.mjs` in the course directory (own or the source's, R-BTN-134)
+    default-exports `select(ctx)` → a verdict. It is pure: it reads `ctx` alone, with no network,
+    no write and no clock but `ctx.now`, and runs through the wrapper (R-BTN-133) in a read-only
+    worktree of the course's snapshot. A course with none uses the CLI's **default selector**: the
+    first leg leaving the station, in course order, with the `needs` that leg declares in
+    `course.json`; with no leg leaving it, `attention`.
+  - **Its input is Baton's record.** Core builds `ctx`; nothing in it is read from git by the
+    selector. `position` (the station, the path, the runs of each leg, R-BTN-63); `outputs` (each
+    earlier run's outputs, R-BTN-82 and R-BTN-108: inline values, and pointers Baton never
+    fetches); `facts` (what fact sources attested of the ticket, R-BTN-191, the git sync among
+    them); `readings` (those the course's `course.json` names under `selector.readings`, in
+    force, R-BTN-76); `dependencies` (the stations of the tickets it depends on); `fleet` (per
+    runner class, the capabilities and `needs` dimensions live runners declare, R-BTN-174); and
+    `now` (R-BTN-32). What decides a branch is an inline output: a pointer's content is outside
+    the selector's reach.
+  - **The verdict** is one of:
+    - `{run: <leg>, needs?}`: `leg` leaves the station; `needs` is what a runner must have to
+      take it (R-BTN-174);
+    - `{wait: {until?, on?}}`: when to ask again, at `until` or when one of `on` changes (an
+      output, a fact type, a reading, a dependency); a `wait` naming neither is recorded as a
+      failed selection;
+    - `{attention: <reason>}`: no leg can be chosen without a person.
+
+    Each carries `because`: JSON, a list of the checks made, each `{check, ok, reason?, url?}` —
+    `check` an identifier, `reason` simple text, `url` a pointer to a reason file in R-BTN-82's
+    schemes, checked and never fetched. It is bounded as an inline value is (R-BTN-108) and shown
+    as text (§10.4).
+  - **Core checks and records it.** Core records each verdict with the digest of its `ctx`, the
+    course version and the key of the runner that posted it, and acts on it in the transaction
+    that accepts it: a `run` queues its leg, `next_source: selector`; a `wait` is a stored wait,
+    asked again when its time or a trigger comes; an `attention` raises
+    `baton.selection-attention` with its reason. A `run` whose leg does not leave the station,
+    a malformed verdict, a crash or a timeout is a failed selection and raises
+    `baton.selection-failed`. Either condition closes when a later verdict queues a leg.
+  - **A runner runs it.** Core runs no repository code. The runner that finishes a leg runs the
+    selector over the `ctx` Baton hands it with the claim's last answer and sends the verdict
+    with its `advance` or end. Any other cause — a fact, a reading, a dependency, an `until` —
+    makes a **selection want** for the ticket, carrying its `ctx`, which any live runner granted
+    on the repository that declares the course takes; it posts the verdict in a signed request.
+    A want no runner takes within the untaken time shows as awaiting selection, with its age.
+  - **Budget.** A call is bounded at 10 seconds and 256 MB, and a want is untaken after 15
+    minutes. These are provisional starting values: B-351 measures the standard selectors
+    and replaces them.
+  - **Seeing why.** `baton ticket why <ticket>` (R-BTN-127) prints the stored verdict, its
+    `because`, its `until` and triggers or its `needs`, the course version and the posting key;
+    `--replay` runs the selector locally on the recorded `ctx` and says whether the verdict is the
+    same. The ticket's dashboard view shows the same, and the board each ticket's verdict kind.
 - **R-BTN-63 (an advance follows an edge, on the holder's word).** `status: built B-185 B-274` A claim **is at** a station
   — the last one it reached — and may be **running** one leg.
   - When claimed, it is at the ticket's station as Baton holds it (recorded as `start_path`) and
@@ -222,11 +282,13 @@ Designs for this section that are not built are on the proposal page
     `bars-mismatch` (R-BTN-85) and raises `baton.bars-mismatch`; the sync's reading binds from
     then on.
   - Baton does not check a leg's state: which leg comes next is the holder's judgement of
-    git's facts. An `advance` is checked against the newest snapshot's course file.
+    git's facts (not built, B-351: the selector's, R-BTN-205). An `advance` is checked against
+    the newest snapshot's course file.
 - **R-BTN-71 (a suspension rests at a station).** `status: built` A claim that stops ends
   `suspended:<station>`: the outcome its running leg reached if that leg finished, else the
-  leg's `from`; any other station is refused. The end carries the queued leg `next` (R-BTN-83),
-  which Baton records as the ticket's position at once; the end is confirmed as R-BTN-10 says.
+  leg's `from`; any other station is refused. The end carries the queued leg `next` (R-BTN-83;
+  not built, B-351: its own leg, with no `next`, R-BTN-205), which Baton records as the ticket's
+  position at once; the end is confirmed as R-BTN-10 says.
   The next claimant starts at Baton's station.
 - **Disagreement, not movement.** A ticket moves only along edges. A snapshot whose facts
   disagree with Baton's position moves nothing: its arrival is recorded unapplied (R-BTN-39),
@@ -584,11 +646,14 @@ Designs for this section that are not built are on the proposal page
 
 ### 5.9 Capabilities are the runner's statement
 
-- **R-BTN-174 (capabilities are matched by name; what a runner has is its own statement).** `status: built` Core
+- **R-BTN-174 (capabilities are matched by name; what a runner has is its own statement).** `status: partly B-351` Core
   matches the capabilities a ticket and its leg require against what a runner declares, by name
   (R-BTN-121); a grant's `<type>:*` admits every value of the type. A runner's capabilities for
   a repository are its declared ones and its executor's `provides` (R-BTN-107) that its grant
   there admits (R-BTN-58), together with its declared `runner:` capabilities (R-BTN-133). Rule
   4 reads them (§6.6), `fleet_capabilities` counts them (R-BTN-75), and the model (R-BTN-68)
   receives them. Baton checks no declaration: a runner that declares a capability it lacks is
-  only offered legs it cannot finish (R-BTN-66).
+  only offered legs it cannot finish (R-BTN-66). **Not built (B-351):** a `run` verdict's `needs`
+  (R-BTN-205) are matched the same way, against the dimensions a runner declares in its
+  heartbeat (`memory_mb` and the like); a want no live runner meets is waiting for capacity, and
+  one no registered runner has declared enough for raises `baton.selection-attention`.

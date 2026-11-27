@@ -18,6 +18,32 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
 
 ## Changelog
 
+- **2026-11-27 — The selector chooses the next leg, specified (R-BTN-205; B-351).**
+  Rules added: R-BTN-205, `specified B-351`. Rules changed, their new parts marked not built:
+  R-BTN-83 (a finishing leg reports the station and its outputs, no `next`; `next_source:
+  selector`; a suspension or release re-queues its own leg; an owner's route pins over the
+  selector), R-BTN-70 (the verdict takes the place of readiness), R-BTN-74 (a station function
+  returns no readiness), R-BTN-133 (the wrapper's `select` call), R-BTN-174 (a verdict's `needs`
+  matched like capabilities), R-BTN-63 (which leg comes next) and R-BTN-127 (`baton ticket why`).
+  `baton.missing-next` retires with posted positions; R-BTN-205 raises `baton.selection-failed`
+  and `baton.selection-attention`. From the owner, 2026-11-26, in a Claude Code session on bering:
+  "I feel this is a key mechanic which is too challenging to grasp right now", and the
+  constraints: "the logic for selecting the next leg of a ticket based on its current station
+  should be entirely customizable."; "The leg may depend on many different prerequisites being
+  met, some of which can be conveniently expressed as baton metrics readings. For example, we
+  should not start a leg requiring a sandbox with more memory than what the host can allocate. we
+  should not start a leg that requires access to the GitHub API if we have been rate limited
+  temporarily."; "Like all custom logic, it should be straightforward how to sandbox this when
+  Baton is being used in a more secure setup like the one Fieldhouse implements."; "it should be
+  possible for a user to see why a particular leg was chosen in the dashboard or using the
+  CLI."; "where no lag can commence, it should be clear when the next action of the ticket may be
+  determined, or that the ticket needs human attention because the next leg cannot be
+  calculated."; "the station function should not assume that Git is the communication channel
+  between legs. This may often be the case, but this is definitely not guaranteed." Its rulings
+  on the proposal's questions: a default selector, "Yes"; the `because` format, "JSON, can
+  contain url to reason file or simple text in "reason " field"; the selector's budget, "not
+  sure" — the 10-second, 256 MB and 15-minute values in R-BTN-205 are provisional, to be replaced
+  by B-351's measurements. Asked "Ready to draft spec changes?", this amendment is the draft.
 - **2026-11-26 — A protected repository accepts a branch course source (R-BTN-134).**
   Rules changed: R-BTN-134 (*A branch source*). #395 left open whether a protected repository
   (R-BTN-188) should refuse branch sources. The owner's ruling, 2026-11-26: "No, the #395 warning

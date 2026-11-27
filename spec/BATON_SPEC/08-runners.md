@@ -388,11 +388,12 @@ section that are not built are in [the proposal page](../proposals/checks-and-ex
     `released:off-branch` (§9.4).
   - **Not built:** the `baton.off-branch` condition ([B-46](../../tickets/B-46.mdx)) and the
     off-branch sync want ([B-57](../../tickets/B-57.mdx), R-BTN-94).
-- **R-BTN-133 (repository code runs through the wrapper).** `status: built B-42` R-BTN-143 governs snapshot reads. No repository
+- **R-BTN-133 (repository code runs through the wrapper).** `status: partly B-42 B-351` R-BTN-143 governs snapshot reads. No repository
   code loads in the runner's process.
   - **The wrapper** `legProcess.mjs`, the CLI's own, which the executor makes available where
     its sessions run, runs every call into a script — `run`, `close`, `handoff`, a ticket
-    source's exports (R-BTN-74) and R-BTN-134's `tickets`, `stations`, `rank` — as `node
+    source's exports (R-BTN-74) and R-BTN-134's `tickets`, `stations`, `rank`, and, not built
+    (B-351), a selector's `select` (R-BTN-205) — as `node
     legProcess.mjs <call> <script>`, `<call>` naming the export it calls, by the executor's
     `exec` (R-BTN-107). It reads `ctx` as JSON from the first line of stdin (under `run`, each
     later line is an abort reason for `ctx.signal`) and writes `{ok, result | ref | url, error?,

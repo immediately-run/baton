@@ -57,7 +57,7 @@ numbers.
 
 ### 4.2 What a sync runs
 
-- **R-BTN-74 (the ticket source and the station function, with defaults).** `status: built B-112` `baton repo sync`
+- **R-BTN-74 (the ticket source and the station function, with defaults).** `status: partly B-112 B-351` `baton repo sync`
   builds the board post from two pieces of repository code. `course.json` is always the
   commit's own (or its source's): the sync posts and `baton runner start` loads the same file.
   - **The ticket source**, `.baton/tickets.mjs`, reads one ticket store — a git folder, an
@@ -96,7 +96,9 @@ numbers.
     (R-BTN-96) and `ctx.positions` (§4.3). It never returns a position (R-BTN-39). The CLI adds
     R-BTN-203's arrivals and evidence for every ticket itself, whatever the station function. The sync
     posts bars, the question and `not_before` with the ticket, the rest as its attestations
-    (R-BTN-191), and `course_data` keyed by course id.
+    (R-BTN-191), and `course_data` keyed by course id. **Not built (B-351):** a station
+    function returns no readiness; the course's selector (R-BTN-205) chooses the leg, and the
+    sync posts facts, outputs, bars, the question and `not_before` only.
   - **CLI default ticket sources** (`src/defaults/`), used when the repository has no
     `tickets.mjs`: **markdown** (below) and **`changes`**, one check ticket per open change
     (R-BTN-114). `baton repo init --eject tickets` copies the markdown source into `.baton/`.
