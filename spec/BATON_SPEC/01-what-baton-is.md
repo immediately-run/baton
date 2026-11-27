@@ -48,7 +48,7 @@ resumed by a **restart** (§7). "Workflow" means only a CI workflow; "activity" 
     (§16); and every passage elsewhere that serves only one of these. A collision one still produces is caught by the sync's duplicate-id
     refusal (R-BTN-74, R-BTN-147) or at merge.
 
-- **R-BTN-33 (Baton holds filter fields, never content).** `status: built` Per live ticket Baton stores what
+- **R-BTN-33 (Baton holds filter fields, never content).** `status: partly B-352` Per live ticket Baton stores what
   matching (§6) and the dashboard's lists read (the `tickets` columns, §13), the position it holds
   (R-BTN-39), and an opaque `display` object of which core reads only `project`, for the ticket's
   row, and `status`, by equality (R-BTN-85). It never stores a body, Status notes, exit
@@ -62,6 +62,10 @@ resumed by a **restart** (§7). "Workflow" means only a CI workflow; "activity" 
     profiles, reports, `rationale`, a reading's `detail`. Core never reads them, so it cannot stop
     a course from putting prose in one; doing so breaks this rule, and the CLI's default sources
     and standard station functions post none.
+  - **The one exception: a verdict's reasons.** A selection verdict's `because` reasons and an
+    `attention`'s reason (R-BTN-205) are stored text, at most 128 characters each, shown only as
+    text (§10.4), so that a person can see why a leg was chosen or why none can be. A selector
+    that puts ticket content there breaks this rule as an opaque blob's prose does.
 - **R-BTN-35 (Baton wins about what it owns; the ticket source and git about the rest).** `status: built` Baton
   owns each ticket's course history and position (R-BTN-39), claims and leases, attestations
   (R-BTN-181) and owner state (R-BTN-66). Every other ticket fact it holds (existence, filter
@@ -73,20 +77,20 @@ resumed by a **restart** (§7). "Workflow" means only a CI workflow; "activity" 
   - **Staleness.** A snapshot observed after a claim's latest claim or `advance` (R-BTN-62) that
     shows the held ticket `closed` as `withdrawn` ends the claim `released:stale-board` with a
     `release` to the holder. A held ticket dropped without `closed` is R-BTN-147's.
-  - **Progress is not staleness.** Facts lagging the holder, readiness the latest snapshot has not
-    caught up with, a station or leg the course file lacks (R-BTN-64) and a new version of a held
+  - **Progress is not staleness.** Facts lagging the holder, a verdict over facts the latest snapshot has
+    not caught up with, a station or leg the course file lacks (R-BTN-64) and a new version of a held
     ticket (R-BTN-198) leave the claim alone.
   - A ticket gone from its source loses its `tickets` row; its claims, events and course history
     stay.
-- **R-BTN-39 (where a ticket is: Baton's course history).** `status: built` Baton is the one authority on a
+- **R-BTN-39 (where a ticket is: Baton's course history).** `status: partly B-352` Baton is the one authority on a
   ticket's course history (R-BTN-81) and on its position: its station, its path (the legs run,
   each with the station it reached) and its queued leg (R-BTN-83). No ticket file, marker, PR or
   snapshot places a ticket; a note a leg adds to its ticket is evidence for people, never a
   position. A leg's runs and a ticket's arrivals are counted from this record (R-BTN-63).
   - **Where a ticket starts.** A ticket a snapshot posts for the first time stands at its course's
-    `start` with `start_leg` queued (R-BTN-83), unless an import holds its position
-    (R-BTN-88), placed in the transaction that accepts the post, before that post's attestations
-    are judged.
+    `start`, unless an import holds its position (R-BTN-88), placed in the transaction that
+    accepts the post, before that post's attestations are judged; a selection want is made for it
+    (R-BTN-205), where the default selector takes `start_leg`.
   - **Who moves a ticket.** Only these, each along an edge of the course file from Baton's current
     station: the holder's arrival, carried by its `advance` or end (R-BTN-63, R-BTN-71,
     R-BTN-83); a fact arrival; and Baton's own settlements and the legs it queues (R-BTN-116,
@@ -101,8 +105,8 @@ resumed by a **restart** (§7). "Workflow" means only a CI workflow; "activity" 
     in the transaction that accepts the attestation when all hold: the policy admits its writer
     for the type (R-BTN-191); the leg leaves Baton's current station, queued or not; `reached` is one of its
     outcomes; no claim is active on the ticket; and Baton holds the ticket for nothing else (§7).
-    Its `next` is the attestation's, else the first leg the course file lists leaving `reached`
-    with runs left (R-BTN-63) that is neither a fact leg nor a reconcile leg. Baton logs a `fact-arrival` history row and keeps the `ref`.
+    It makes a selection want (R-BTN-205) whose `ctx` names the attestation's `next`, which the
+    default selector takes. Baton logs a `fact-arrival` history row and keeps the `ref`.
     - An arrival whose `ref` Baton has applied for this ticket is accepted and moves nothing.
     - An arrival that fails only because a claim is active or Baton holds the ticket is kept with
       its `ref` and applied when the hold ends, if it still meets every other condition — except
@@ -130,8 +134,9 @@ resumed by a **restart** (§7). "Workflow" means only a CI workflow; "activity" 
     runs left, or ended `exhausted` by its retries, puts the displaced leg back and clears the
     record. History row `reconcile-queued`.
     The reconcile leg runs like any leg. Its finishing position is one of its outcomes (R-BTN-69):
-    `unchanged` at the station it left, with the displaced leg as `next` and no other; or a station
-    of its `reconciles.to`, the one it left included, with that entry's `next`. A conclusion naming
+    `unchanged` at the station it left, which queues the displaced leg again (`next_source:
+    baton`); or a station of its `reconciles.to`, the one it left included, which makes a
+    selection want naming that entry's leg (R-BTN-205). A conclusion naming
     a merge or a verdict is checked by its stub as the fact leg's fact would be (the PR is the
     ticket's, merged, on the default branch; the verdict is on its head). Only that finishing
     position marks the evidence its claim carried as weighed and clears the record; a claim ending
@@ -169,12 +174,12 @@ resumed by a **restart** (§7). "Workflow" means only a CI workflow; "activity" 
   learned outside Baton by a runner or an instrument key with its own secrets and posted as
   readings (R-BTN-101). Secrets never enter Baton. A reading nobody renews lapses to `unknown`,
   which blocks only a requirement with `missing: block` (R-BTN-76, R-BTN-181).
-- **R-BTN-50 (core acts only on its own vocabulary).** `status: built` `src/core/` may name only:
+- **R-BTN-50 (core acts only on its own vocabulary).** `status: partly B-352` `src/core/` may name only:
 
   | Concept | Core |
   |---|---|
   | repository, ticket, course id and version | registers, keys, matches declaring runners |
-  | station, leg, a ticket's station and path, leg state and `waiting_on`, run count; timer, call leg, person leg, cancel leg | validates course files, leases a run of legs, checks edges, recommends, arms, settles, fires |
+  | station, leg, a ticket's station and path, its selection verdict and `waiting_on`, run count; timer, call leg, person leg, cancel leg | validates course files, leases a run of legs, checks edges, recommends, arms, settles, fires |
   | runner, capability, tag; lease, fence, reap, attempt, backoff, hold, expedite, suspension | the safety gates and the default order |
   | grant, owner, administrator, credential | who may do what |
   | block, `depends_at`, resource, instance, a reading's envelope, a leg's `needs` | keeps rows, answers queries, gates or advises (R-BTN-75) |

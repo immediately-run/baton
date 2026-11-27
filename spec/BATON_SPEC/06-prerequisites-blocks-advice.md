@@ -19,7 +19,7 @@ Not built, each a design its rule below still states:
 
 ### 6.1 Prerequisites
 
-- **R-BTN-120 / R-BTN-132 (a leg's prerequisites, one way in for each kind).** `status: partly B-10` `status: partly B-41` A leg can start
+- **R-BTN-120 / R-BTN-132 (a leg's prerequisites, one way in for each kind).** `status: partly B-10 B-352` `status: partly B-41` A leg can start
   when every prerequisite holds. This is the one list of prerequisite and block kinds:
 
   | Kind | Declared by | Holds when | Block `ref` | `why` when unmet |
@@ -64,10 +64,10 @@ Not built, each a design its rule below still states:
     stored. `human-operator` is an ordinary capability in `ticket_requires`, which a runner
     declares and a grant admits (R-BTN-121); a source translates its own word for it into the
     clause. The ticket's clause and a leg's `requires.capabilities` join for that leg.
-  - **`waiting_on`** names only a wait no kind covers (an author's push, CI's `short_waits`, a
-    forge effect), shown under `other`. The snapshot validator refuses `dependencies`,
-    `children`, `owner` and `policy`, naming the ticket. Baton stores a posted label prefixed
-    `course:` and reserves `time`, `not-before-invalid`, `input-missing`, `input-version`,
+  - **`waiting_on`** names only a wait no kind covers: the failing `check` ids of a `wait`
+    verdict (R-BTN-205) — an author's push, CI's `short_waits`, a forge effect — shown under
+    `other`. A verdict naming `dependencies`, `children`, `owner` or `policy` as a check is a
+    failed selection. Baton stores a verdict's label prefixed `course:` and reserves `time`, `not-before-invalid`, `input-missing`, `input-version`,
     `course-changed`, and `policy` for an unmet required bar (R-BTN-67).
   - **Why a leg cannot start.** `GET
     /v1/repositories/{repository}/tickets/{ticket}/prerequisites[?leg=<leg>][&runner=me]`
@@ -80,7 +80,7 @@ Not built, each a design its rule below still states:
 
 ### 6.2 Blocks
 
-- **R-BTN-75 (blocks are stored, not recomputed).** `status: built` A block is one unmet prerequisite, a row of
+- **R-BTN-75 (blocks are stored, not recomputed).** `status: partly B-352` A block is one unmet prerequisite, a row of
   `ticket_blocks` (repository, ticket, leg or `''` for the whole ticket, `kind`, `ref`, `since`,
   `until`, `found`, `provisional`, `binds`) written in the transaction that causes it, so asking
   reads one repository-scoped index. The kinds and their `ref` are R-BTN-120's table.
@@ -107,10 +107,11 @@ Not built, each a design its rule below still states:
     replaces it with what it shows; a row not so confirmed within 1 hour, or not shown, is
     dropped and logged `prerequisite-unconfirmed`.
   - **Not blocks.** `other` lists what else keeps a ticket from being offered: a hold (§6.8)
-    with its `hold_reason`, a `waiting_on` label, a `time` wait, a queued person leg with its
+    with its `hold_reason`, a `wait` verdict (its `waiting_on` labels or its time), awaiting
+    selection (R-BTN-205), a queued person leg with its
     question (R-BTN-116), owner bars on every live runner's tags (R-BTN-67), an unconfirmed end
     (R-BTN-10), and `no-instance` (R-BTN-76). Core's `baton.retries`, `baton.contract` and
-    `baton.stalled` (R-BTN-163) write no row: a hold or the posted wait already keeps the ticket.
+    `baton.stalled` (R-BTN-163) write no row: a hold or the verdict's wait already keeps the ticket.
   - **Capability rows follow a count.** `fleet_capabilities` counts, per (repository,
     capability), the live runners that declare and are granted it (R-BTN-174); a `runner:`
     capability needs the declaration only (R-BTN-133). Rows are rewritten only when a count
@@ -192,14 +193,17 @@ Not built, each a design its rule below still states:
 
 ### 6.3 External resources and readings
 
-- **R-BTN-76 / R-BTN-101 / R-BTN-151 (external resources, their instances and readings).** `status: built` `status: built` `status: built` A
+- **R-BTN-76 / R-BTN-101 / R-BTN-151 (external resources, their instances and readings).** `status: partly B-352` `status: built` `status: built` A
   resource is anything outside Baton that a course reads the state of: a provider's capacity, an
   API's rate limit, disk on a shared server. A **reading** is an attestation about one of its
   instances: R-BTN-181 owns its writers and authentication, and this rule adds what is particular
   to resources. A reading's `type` is its resource's schema id and its value is `{available?,
   until?, detail}`. Readings are stored once per tenant; a repository reads only those its
-  policy's `readings` entry admits (R-BTN-188). A requirement over an instance's readings is
-  proposed in the [security proposal](../proposals/security.md).
+  policy's `readings` entry admits (R-BTN-188). Readings are advice to core: no gate reads one.
+  A course makes a leg wait on one through its selector, which is handed the readings its
+  `selector.readings` names and may return a `wait` (R-BTN-205). A requirement over an
+  instance's readings that core would evaluate is proposed in the
+  [security proposal](../proposals/security.md).
   - **Registered** by an administrator: `baton admin resource add <name> --scope
     account|service --schema <file>` (R-BTN-127), `name` matching `^[a-z][a-z0-9:._/-]{0,79}$`,
     the schema (R-BTN-108's subset) its readings' `detail` must satisfy. The schema may name a
@@ -274,7 +278,7 @@ Not built, each a design its rule below still states:
 
 ### 6.4 People
 
-- **R-BTN-116 (a person's leg: the one way a course waits on a person).** `status: built` A leg may be `"kind":
+- **R-BTN-116 (a person's leg: the one way a course waits on a person).** `status: partly B-352` A leg may be `"kind":
   "person"` with `"asks": <label>` (who answers; matches `^[a-z][a-z0-9-]{0,31}$`). No runner is
   offered it or may claim or advance into it (rule `person`), and no claim ever runs it: the ticket
   waits unheld while it is queued, and the leg may also arrive while another leg is queued
@@ -310,12 +314,12 @@ Not built, each a design its rule below still states:
     as an input, `required: false` where a route can skip the person leg. Baton logs
     `question-answered` with the option and `answered_by`, and the question is closed.
   - **Expiry.** A person's leg may carry `"expires": {"after_s": <n>, "reached": <outcome>}`
-    (60 s–30 d). The instant is set when the person leg becomes the queued leg — at the ticket's
-    arrival at the station, a new ticket's placement at `start` included, or at a route that
-    queues it (R-BTN-83) — that moment, by Baton's clock, plus `after_s`; a person leg that is
+    (60 s–30 d). The instant is set when the person leg becomes the queued leg — at the verdict
+    that queues it (R-BTN-205), or at a route that queues it (R-BTN-83) — that moment, by Baton's clock, plus `after_s`; a person leg that is
     not the queued leg has no instant, and a route that queues another leg clears it. It restarts
     as R-BTN-167 says. At the instant, if the leg is still queued and unanswered, Baton applies
-    the arrival at `reached` itself (`next_source: baton`, R-BTN-83) under R-BTN-39's rules —
+    the arrival at `reached` itself (R-BTN-83) under R-BTN-39's rules, a selection want following
+    it (R-BTN-205) —
     deferred while a claim is active or Baton holds the ticket, applied when the hold ends — and
     logs `question-expired`; an answer attested after the expiry applied is unapplied
     (R-BTN-39).
@@ -325,29 +329,24 @@ Not built, each a design its rule below still states:
 
 ### 6.5 Waiting for a time
 
-- **R-BTN-89 (a queued leg may wait for a time).** `status: built` A queued leg may carry `not_before`, an
-  instant before which it is not offered.
-  - **From git.** After a leg, its closing marker's `not_before=` (from the result's
-    `not_before?`, R-BTN-72), posted by `locate` with the ticket as `not_before` (§4.4); the runner
-    also reports `not_before?` on a suspending or releasing `end`, so the provisional queued leg
-    waits at once. For a ticket at `start` with an empty path, the ticket file's
-    `tickets[].not_before` (R-BTN-74) applies when the station posts none. Baton never computes
-    one; a schedule is the leg script's.
+- **R-BTN-89 (a ticket may wait for a time).** `status: partly B-352 B-353` A ticket's selection may wait
+  until an instant: a `wait` verdict's `until` (R-BTN-205), before which no leg is queued.
+  - **Where a time comes from.** A selector decides it. It sees a leg result's `not_before?`
+    (R-BTN-72), which the runner reports with the arrival on an `advance` or a suspending or
+    releasing `end`, and, for a ticket at `start` with an empty path, the ticket file's
+    `tickets[].not_before` (R-BTN-74), both as `ctx.position.not_before`; the default selector
+    waits until it. Baton never computes one; a schedule is the leg script's or the selector's.
   - **Validated, failing closed.** RFC 3339 with `Z` or a numeric offset, at most 400 days after
-    `now` (R-BTN-32) at acceptance. A failing value is logged `not-before-invalid`; a leg posted
-    `ready` is stored `waiting` on `not-before-invalid` and raises `baton.not-before-invalid`
-    until git is valid; a leg posted `waiting` on another label keeps it; no snapshot is
-    refused. A value at or before `now` is stored NULL.
-  - **Stored.** The queued leg is stored `waiting` on `time` exactly when posted `ready` and
-    `now < not_before`; a posted `waiting` on another label wins, `not_before` kept beside it.
-    At `not_before` the alarm sets the leg `ready` with `ready_since = not_before`. A `time` wait
-    raises no condition; the dashboard shows "waiting until …" and lists pending waits on
-    **Courses**.
-  - **Offered at the instant.** Recommendations leave a `time` wait out and rule 1 refuses its
-    claim. Claim, heartbeat and advance responses carry each next leg's `not_before`; the runner
-    suspends unless it is within 30 minutes, then waits under the claim. At `not_before` Baton
-    queues R-BTN-77's `unblocked` message with `cleared: [{kind: "time", ref: <not_before>}]`
-    and rings it, but calls no trigger.
+    `now` (R-BTN-32) at acceptance. A failing result `not_before` is logged `not-before-invalid`,
+    raises `baton.not-before-invalid` and is not handed to the selector; a failing `until` is a
+    failed selection (R-BTN-205). A value at or before `now` is no wait.
+  - **Stored.** The verdict's `until` is stored with it. A time wait raises no condition; the
+    dashboard shows "waiting until …" and lists pending waits on **Courses**.
+  - **Asked again at the instant.** Recommendations have no leg to offer while it waits. Claim,
+    heartbeat and advance responses carry the verdict's `until`; a holder whose verdict waits
+    suspends unless `until` is within 30 minutes, then waits under the claim and selects again.
+    At `until` the alarm makes a selection want, queues R-BTN-77's `unblocked` message with
+    `cleared: [{kind: "time", ref: <until>}]` and rings it, but calls no trigger.
   - **Recurring jobs.** The design of a series, a ticket whose children are a job's runs, is in
     the [conditions proposal](../proposals/conditions.md).
 
@@ -361,7 +360,7 @@ never refuses, and acting against it is accepted and recorded `advice-overridden
 
   | Rule | Holds when | At | Refusal |
   |---|---|---|---|
-  | 1 | Claim: the queued leg (R-BTN-83, or a route override) is `ready` as posted (R-BTN-70), a snapshot was accepted after the ticket's last end (R-BTN-10), and no row that refuses (R-BTN-75) is on that leg or the whole ticket. Advance: the new leg is an edge from the claim's station within its run limit (R-BTN-63), with no row that refuses on it or the whole ticket | claim, advance | `blocked` with the blocks; else rule 1 (`not-ready`, or R-BTN-63's codes) |
+  | 1 | Claim: a leg is queued (R-BTN-83: a `run` verdict, a route or Baton's own transition), the runner meets its verdict's `host` (R-BTN-174), a snapshot was accepted after the ticket's last end (R-BTN-10), and no row that refuses (R-BTN-75) is on that leg or the whole ticket. Advance: the new leg is the ticket's queued leg or the `run` of the verdict the advance carries (R-BTN-63, R-BTN-205), an edge from the claim's station within its run limit, with no row that refuses on it or the whole ticket | claim, advance | `blocked` with the blocks; else rule 1 (`not-ready`, `not-selected`, or R-BTN-63's codes) |
   | 2 | *(advice)* expedite lane: while 2 active claims hold expedited tickets, other expedited tickets lose their expedite place and carry `expedite-bound` | — | — |
   | 3 | No other active, completed-unconfirmed or fence-pending claim on the ticket; no hold (§6.8) | claim; advance: the hold only | `claimed`, `held` |
   | 4 | `capabilitiesOf(ticket.requires ∪ leg.requires.capabilities) ⊆ declared ∩ grant(repository)`, matched by name (R-BTN-174); `runner:` counts once declared (R-BTN-133); no clause is met by all | claim, advance | `missing-capability` |
@@ -401,7 +400,7 @@ never refuses, and acting against it is accepted and recorded `advice-overridden
 
 ### 6.7 What a runner ranks from
 
-- **R-BTN-99 (the views a runner ranks from).** `status: built` Read-only, signed by a machine key alone (no
+- **R-BTN-99 (the views a runner ranks from).** `status: partly B-352` Read-only, signed by a machine key alone (no
   runner secret). Each answers with an `ETag`, so an unchanged poll costs a `304`. The tag
   uses the view versions, the key's grant set and UTC hour, and changes at relevant lapses,
   backoff deadlines and bar starts or ends.
@@ -422,7 +421,7 @@ never refuses, and acting against it is accepted and recorded `advice-overridden
     claims holding its seats, fence-pending ones included (leg, `claimed_at`, repository; hostname
     and ticket only where the key is granted).
   - **`GET /v1/runner/launch-candidates`**: per granted repository, the legs passing the gates no
-    runner decides (lease, readiness, holds, backoff, blocks, a full capability), in the default
+    runner decides (lease, selection, holds, backoff, blocks, a full capability), in the default
     order with their course fields, for a launcher's `rank` with `runner: null` (R-BTN-98).
 
 - **R-BTN-152 (what a view serves is data).** `status: partly` Profiles, reports, readings' `detail`, course

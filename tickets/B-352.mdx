@@ -1,0 +1,69 @@
+---
+id: B-352
+status: available
+topics: [courses, scheduling]
+owns: {}
+prs: []
+title: "B-352 — Leg selection in core: verdicts, selection wants, binding and the selection conditions"
+depends_on: [B-120]
+parent: B-351
+tags: [roadmap-item]
+project: baton
+repos: [baton]
+description: "Core holds each ticket's selection verdict: builds the selector's ctx from Baton's record, makes and leases selection wants, binds a verdict to its input, acts on it and raises the selection conditions."
+---
+
+**Brief:** the owner, 2026-11-27 (in a Claude Code session on bering): "Since these proposals are necessary to get baton into a generally useable state, I would like you to include the changes in the specs and draft the necessary tickets for implementing them." The selector is specified as [R-BTN-205](../spec/BATON_SPEC/05-courses.md#sec-5-3); the owner's constraints and rulings are quoted in `spec/BATON_SPEC_HISTORY.md` (2026-11-27). Part of [B-351](B-351.mdx).
+
+**Spec:** [R-BTN-205](../spec/BATON_SPEC/05-courses.md#sec-5-3) (*Its input*, *The verdict*, *Bound to its input*, *Core acts on it*, *Who runs it*), [R-BTN-70](../spec/BATON_SPEC/05-courses.md#sec-5-3), [R-BTN-83](../spec/BATON_SPEC/05-courses.md#sec-5-3), [R-BTN-71](../spec/BATON_SPEC/05-courses.md#sec-5-3), [R-BTN-39](../spec/BATON_SPEC/01-what-baton-is.md#sec-1) (a new ticket, a fact arrival, a reconcile conclusion), [R-BTN-33](../spec/BATON_SPEC/01-what-baton-is.md#sec-1) (the verdict-reason exception), [R-BTN-89](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-5), [R-BTN-167](../spec/BATON_SPEC/07-conditions.md#sec-7-5), [R-BTN-163](../spec/BATON_SPEC/07-conditions.md#sec-7-3), rule 1 of [§6.6](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-6), [R-BTN-4](../spec/BATON_SPEC/09-claims.md#sec-9-1) (the claim response), [§13](../spec/BATON_SPEC/13-data-model.md#sec-13) (`selection_verdicts`, `selection_wants`) and [§14](../spec/BATON_SPEC/14-api.md#sec-14) (the `select` and `selections` routes).
+
+**Depends on:** B-120 (the sync stops posting positions).
+
+### Why
+
+Core must hold each ticket's verdict, make and lease selection wants, bind a verdict to the input it answers, and act on it, so that every other piece of B-351 has a record to read and write.
+
+### What to build
+
+1. **Migrations** for `selection_verdicts` and `selection_wants` (§13), numbers from `node cli/baton.mjs tickets next migration`.
+2. **`ctx` building** from the ticket's own repository's record only: position (with the last arrival's leg, `not_before` and an arrival entry's named leg), outputs, facts, the readings `selector.readings` names, dependencies, fleet totals per `host` dimension and capability (never a runner), `now`. Its digest and record position are kept.
+3. **Verdict validation and binding:** a `run` leaves the station; `wait` has `until` (≤ 400 days) or `on`; `because` ≤ 4 KB, each `reason` and an `attention`'s reason ≤ 128 characters, `url`s pass R-BTN-92's link rule; refuse a digest mismatch, a verdict answering nothing open, a second verdict for one cause. Malformed or off-graph is a failed selection.
+4. **Acting on it:** `run` queues the leg (`next_source: selector`); `wait` stored and asked again at `until` (the alarm) or on a trigger; `attention` raises `baton.selection-attention`; failed raises `baton.selection-failed` and retries on the course's backoff; both close on a queued leg, an owner route or an end. A `wait` past the stalled time raises `baton.stalled`.
+5. **Wants:** made for a new ticket, a fact arrival, Baton's own settlement, a claim that released without a verdict, a course change, a `wait`'s time or trigger. Offered to one runner at a time on a 60-second lease, to runners granted on the repository whose declared courses include the ticket's, and under `protected` only the policy's trusted runner class. Untaken for 15 minutes shows as awaiting selection.
+6. **Routes:** the finishing `advance`/`end` answers with `ctx`; `POST …/claims/{id}/select`; `POST /v1/runner/selections` and `…/{want}`; the claim response's `verdict` and `ctx`; the ticket read's `verdict`.
+7. **Rule 1** reads a queued leg instead of posted readiness; the advance refuses `not-selected`.
+
+### Trust
+
+- **New inputs:** a verdict, from the holder's runner (with its arrival, signed by the claim's request) or from a want's lessee (signed by its key). Who may post one is R-BTN-205's: a runner granted on the repository with the course declared, under `protected` only the trusted class. A verdict is a claim: it can steer which leg is queued, never pass a gate.
+- **Denial of service.** A false `wait` or `attention` can only park the ticket visibly: `until` is capped, a long wait raises `baton.stalled`, `attention` raises a condition, and the owner's route overrides either.
+- **Text.** `because` reasons are the one stored text (R-BTN-33's exception); validated and bounded on write, shown with `textContent` only.
+
+### Invariants
+
+- **Core runs no repository code** ([R-BTN-133](../spec/BATON_SPEC/08-runners.md#sec-8-4)): core builds `ctx` and checks verdicts; it never runs a selector.
+- **Baton holds every position** ([R-BTN-39](../spec/BATON_SPEC/01-what-baton-is.md#sec-1)): a verdict queues a leg; it never moves a ticket off the graph.
+- **Gates are the only refusal** (§7.2): no verdict admits what `gatesFor` refuses.
+- **Validate before you write** (CLAUDE.md): every verdict field through `src/core/validate.ts` before any SQL, in one transaction with its effect.
+- **One clock** ([R-BTN-32](../spec/BATON_SPEC/02-deployments.md#sec-2-1)): `until`, leases and the stalled clock read `this.now`.
+
+### Tests
+
+New S-BTN scenarios on both hosts, numbered with `node cli/baton.mjs tickets next scenario` when written:
+- a verdict bound to a stale digest, a second verdict for one want, and a verdict for no open want are refused;
+- `wait` until an instant: the alarm makes a want at the instant; a `wait` with neither field, or `until` past 400 days, is a failed selection;
+- a forged `attention` raises `baton.selection-attention`, and an owner route closes it;
+- a want's lease lapses and the next runner takes it; under `protected`, a runner outside the trusted class is refused;
+- a `because` reason over 128 characters is refused.
+
+Update S-BTN-47 and S-BTN-312's tests to their amended rows.
+
+### Exit criteria
+
+- [ ] Verdicts and wants stored, bound, leased and acted on as R-BTN-205 says, on both hosts.
+- [ ] The two selection conditions open and close as specified; a long `wait` raises `baton.stalled`.
+- [ ] S-BTN-47, S-BTN-312 and the new scenarios pass; `npm test`, `npm run typecheck` and `npm run check:spec` green; merged under the review gate.
+
+## Status
+
+_filed 2026-11-27._

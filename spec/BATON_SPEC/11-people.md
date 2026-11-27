@@ -183,7 +183,7 @@ built; their design is [the people and dashboard proposal](../proposals/people-a
     [the proposal, §1](../proposals/people-and-dashboard.md#1-the-action-registry). Until it
     is, §14 lists each route with its callers and R-BTN-127's table each command.
 
-- **R-BTN-127 (the CLI is a tree of nouns and verbs).** `status: built B-22 B-23`
+- **R-BTN-127 (the CLI is a tree of nouns and verbs).** `status: partly B-22 B-23 B-353 B-355`
   - **Grammar.** Every command is `baton <noun> <verb> [<arguments>] [<flags>]`; the only
     top-level verbs are `help` and `version`. Under `owner` and `admin`, a verb that acts on a
     kind of thing is two words, `<thing> <act>`, the thing singular (`owner policy apply`,
@@ -236,10 +236,10 @@ built; their design is [the people and dashboard proposal](../proposals/people-a
   | `leg runs <ticket> [<leg>]` | a leg's runs | R-BTN-128 |
   | `leg replay <ticket> <leg> [--run <n>] [--against <sha>]` | `leg.runs`, then replays locally | R-BTN-84 |
    | `leg stop <ticket>` | *proposed* ([B-9](../../tickets/B-9.mdx)) | R-BTN-119 |
-  | `leg status`, `output`, `done`, `suspend`, `release`, `next`, `yield`, `raise` | the local channel, inside a leg; `leg await`, `events` and `ticket` are proposed ([conditions](../proposals/conditions.md)) | R-BTN-106, R-BTN-160 |
+  | `leg status`, `output`, `done`, `suspend`, `release`, `yield`, `raise` | the local channel, inside a leg; `leg await`, `events` and `ticket` are proposed ([conditions](../proposals/conditions.md)) | R-BTN-106, R-BTN-160 |
   | `ticket blocked [<ticket>] [--on <kind>:<ref>]` | a ticket's or the repository's blocks (`repo.blocked`) | R-BTN-75 |
   | `ticket history <ticket>` | a ticket's history | R-BTN-81 |
-  | `ticket why <ticket> [--replay]` | the stored selection verdict and why (not built, B-351) | R-BTN-205 |
+  | `ticket why <ticket> [--replay]` | the latest selection verdict and why | R-BTN-205 |
   | `ticket hold <ticket>`, `ticket unhold <ticket>`, `ticket expedite <ticket> [--clear]`, `ticket cancel <ticket>` | the overrides | R-BTN-12, R-BTN-186 |
   | `ticket route <ticket> <leg> \| --clear` | queues or clears a leg (proposed: [data model and API](../proposals/data-model-and-api.md#other-reads-and-owner-routes)) | R-BTN-83 |
   | `ticket adopt <ticket> [--at <station>] [--next <leg>] [--ran <leg>,…]` | places a ticket on its course (proposed: [ticket adopt](../proposals/ticket-adopt.md)) | R-BTN-39 |

@@ -10,7 +10,7 @@ is `active` until it ends `completed`, `released` or `reaped`.
 
 ### 9.1 The lock and claiming
 
-- **R-BTN-4 (the lock).** `status: built` At most one `active` claim per ticket, enforced by a partial unique
+- **R-BTN-4 (the lock).** `status: partly B-352` At most one `active` claim per ticket, enforced by a partial unique
   index. A claim holds one ticket through a run of its legs. A runner holds at most the lower of two
   numbers at once, counting its active claims across every repository:
   - its **`concurrency`**, which its heartbeat declares (§8.1): an integer from 1 to 32, default
@@ -35,7 +35,8 @@ is `active` until it ends `completed`, `released` or `reaped`.
     `request_id` from the same runner returns the original result, so a lost response never
     yields a second ticket; idempotency is keyed by `(runner_id, request_id)`.
   - **The response**, stated here once, carries `claim_id`, `ticket_id`, `course_id`,
-    `course_version`, `station`, `legs` (the queued leg, R-BTN-83), `next`, `path`, `nonce` (6
+    `course_version`, `station`, `legs` (the queued leg, R-BTN-83), `verdict` (the selection
+    verdict that queued it, if any) and the `ctx` to re-verify it by (R-BTN-205), `path`, `nonce` (6
     hex, public: written in markers, R-BTN-17), `snapshot_sha`, `default_branch` (R-BTN-143),
     the ticket's `version`, `ticket_source?` and `last_written_by?` (R-BTN-194),
     `brief?` (R-BTN-194), `scope` (§12.9), `leg_state?` (R-BTN-188), `handoff_url?`, `previous_attempts`
@@ -131,7 +132,7 @@ is `active` until it ends `completed`, `released` or `reaped`.
 ### 9.4 Ending a claim
 
 A claim ends with `POST /v1/runner/claims/{id}/end`. Its body, stated here once: `end_reason`,
-`reached`, `next` (required unless `reached` is an end station, R-BTN-83), and as applicable
+`reached`, `verdict?` (the holder's selection verdict for that arrival, R-BTN-205), and as applicable
 `spawned` (R-BTN-86), `outputs`, `detail`, `ended_at_sha` (R-BTN-8; a completed end's only),
 `prerequisite` (R-BTN-126), `exit_status` (R-BTN-153), `scope_exceeded` (§12.9), `session_url`
 (R-BTN-113) and `local_order` (R-BTN-202).
@@ -227,9 +228,9 @@ A claim ends with `POST /v1/runner/claims/{id}/end`. Its body, stated here once:
 
 ### 9.6 Confirming an end
 
-- **R-BTN-10 (confirmation by observation).** `status: built` A completed end is **unconfirmed** until a
-  snapshot observed after it is accepted (R-BTN-62), so the next claim's readiness is computed
-  from facts read after the end. The end's position stands from the moment Baton records it
+- **R-BTN-10 (confirmation by observation).** `status: partly B-352` A completed end is **unconfirmed** until a
+  snapshot observed after it is accepted (R-BTN-62), so the next selection is made over facts
+  read after the end. The end's position stands from the moment Baton records it
   (R-BTN-39); confirmation checks its evidence, not where it put the ticket. It is confirmed by
   the first accepted snapshot whose observation began after the end and that:
   - for an end that named `ended_at_sha` (R-BTN-8), a commit or a URL, carries the sync's

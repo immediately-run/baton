@@ -1,0 +1,66 @@
+---
+id: B-353
+status: available
+topics: [courses, scheduling]
+owns: {}
+prs: []
+title: "B-353 — Leg selection on the runner: running a selector, the default selector, chaining and re-verification"
+depends_on: [B-352]
+parent: B-351
+tags: [roadmap-item]
+project: baton
+repos: [baton]
+description: "The runner runs a course's selector, or the default one, through the wrapper after each arrival, chains into the verdict's leg, takes selection wants and re-verifies a claim's selection; results carry no next."
+---
+
+**Brief:** the owner, 2026-11-27 (in a Claude Code session on bering): "Since these proposals are necessary to get baton into a generally useable state, I would like you to include the changes in the specs and draft the necessary tickets for implementing them." The selector is specified as [R-BTN-205](../spec/BATON_SPEC/05-courses.md#sec-5-3); the owner's constraints and rulings are quoted in `spec/BATON_SPEC_HISTORY.md` (2026-11-27). Part of [B-351](B-351.mdx).
+
+**Spec:** [R-BTN-205](../spec/BATON_SPEC/05-courses.md#sec-5-3) (*The selector*, *The default selector*, *Who runs it*), [R-BTN-72](../spec/BATON_SPEC/08-runners.md#sec-8-3) (the result shapes, *Selecting*, the bounded run), [R-BTN-106](../spec/BATON_SPEC/08-runners.md#sec-8-3) (the channel verbs), [R-BTN-133](../spec/BATON_SPEC/08-runners.md#sec-8-4) (the wrapper's `select` call), [R-BTN-63](../spec/BATON_SPEC/05-courses.md#sec-5-3) (an advance starts only the verdict's leg), [R-BTN-71](../spec/BATON_SPEC/05-courses.md#sec-5-3), [R-BTN-5 / R-BTN-34](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-5) (re-verification of the selection), [R-BTN-89](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-5) (a result's `not_before`), [R-BTN-134](../spec/BATON_SPEC/05-courses.md#sec-5-1) and [R-BTN-127](../spec/BATON_SPEC/11-people.md#sec-11-3).
+
+**Depends on:** B-352 (the verdict routes and the `ctx` core answers with).
+
+### Why
+
+The runner is where a selector runs, through its executor, so that sandboxing is the host's choice (the owner, 2026-11-26: "Like all custom logic, it should be straightforward how to sandbox this when Baton is being used in a more secure setup like the one Fieldhouse implements.").
+
+### What to build
+
+1. **The `select` call** in `legProcess.mjs` (R-BTN-133), with the 10-second and 256 MB bound, run in a read-only worktree of the course's snapshot.
+2. **The default selector**, the CLI's own code run through the wrapper: claimable legs only (no fact, reconcile or person leg, none with `max_runs` used); after a fact or reconcile arrival the entry's leg; `start_leg` at `start`; a `not_before` as a `wait`; else the first in course order with its `host`; none, `attention`.
+3. **Selecting after each arrival:** run the selector over the `ctx` core's answer carries; chain into the verdict's `run` with the next `advance` inside `--legs`/`--max-legs`/`--until`; else post it with `select` and suspend or end. Wait out a `short_waits`-only `wait` under the claim.
+4. **Taking selection wants** when idle: lease, run, post; give up a lapsed lease.
+5. **The result shapes** without `next`; a result's `next` is ignored and logged. `decide()` (`src/runner/protocol.ts`) checks only `reached`. The channel's `done` and `suspend` drop `--next`; the `leg next` verb goes.
+6. **Re-verification at a claim:** re-run the selector over the claim response's `ctx`; anything but `run` of the offered leg releases `stale-board` with the verdict.
+7. **`baton repo init`** scaffolds no `select.mjs` for a course the default selector serves.
+
+### Trust
+
+- **New input:** `select.mjs`, repository code under the course directory: a control path (R-BTN-184), run only through the executor, never in the runner's process.
+- **What the runner sends:** a verdict over the `ctx` core built, never one over its own reading of git.
+
+### Invariants
+
+- **No repository code in the runner's process** ([R-BTN-133](../spec/BATON_SPEC/08-runners.md#sec-8-4)).
+- **Separate tickets never share a write target**: selecting writes nothing to git.
+- **A leg's evidence first** (R-BTN-8): `close` runs before the verdict is posted, as before the arrival.
+
+### Tests
+
+New S-BTN scenarios on both hosts, numbered with `node cli/baton.mjs tickets next scenario`:
+- a branching station: a review leg's inline output `{verdict: "changes-requested"}` selects `fix`; `approved` with CI green selects `merge`; no git marker is read;
+- a claim chains into the verdict's leg; an `advance` naming another leg is refused `not-selected`;
+- a selector that throws, times out or names a leg not leaving the station: a failed selection;
+- re-verification: a changed fact between offer and claim releases `stale-board`;
+- the default selector at `start`, after a fact arrival and with a `not_before`.
+
+Update the tests of S-BTN-47 and G-BTN-73 that assert the holder's `next`.
+
+### Exit criteria
+
+- [ ] Every course selects through its `select.mjs` or the default selector, run by the runner through the wrapper.
+- [ ] No result, channel verb or end body carries a `next`; `decide()` checks `reached` only.
+- [ ] The new scenarios pass on both hosts; `npm test`, `npm run typecheck` and `npm run check:spec` green; merged under the review gate.
+
+## Status
+
+_filed 2026-11-27._

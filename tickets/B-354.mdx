@@ -1,0 +1,55 @@
+---
+id: B-354
+status: available
+topics: [courses, scheduling]
+owns: {}
+prs: []
+title: "B-354 — Host matching: a verdict's host against the dimensions runners declare"
+depends_on: [B-352]
+parent: B-351
+tags: [roadmap-item]
+project: baton
+repos: [baton]
+description: "Core matches a run verdict's host requirements (memory, capabilities) against what runners declare, and tells waiting for capacity from no registered runner being able to take the leg."
+---
+
+**Brief:** the owner, 2026-11-27 (in a Claude Code session on bering): "Since these proposals are necessary to get baton into a generally useable state, I would like you to include the changes in the specs and draft the necessary tickets for implementing them." The selector is specified as [R-BTN-205](../spec/BATON_SPEC/05-courses.md#sec-5-3); the owner's constraints and rulings are quoted in `spec/BATON_SPEC_HISTORY.md` (2026-11-27). Part of [B-351](B-351.mdx).
+
+**Spec:** [R-BTN-174](../spec/BATON_SPEC/05-courses.md#sec-5-9) (*A verdict's `host`*), [R-BTN-69](../spec/BATON_SPEC/05-courses.md#sec-5-2) (the leg's `host` field), [R-BTN-205](../spec/BATON_SPEC/05-courses.md#sec-5-3) (`fleet` in `ctx`), rule 1 of [§6.6](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-6), [R-BTN-61](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-1).
+
+**Depends on:** B-352.
+
+### Why
+
+The owner, 2026-11-26: "we should not start a leg requiring a sandbox with more memory than what the host can allocate." A verdict's `host` says what a runner must have; core matches it at the offer.
+
+### What to build
+
+1. **Heartbeat dimensions:** a runner declares numeric `host` dimensions (`memory_mb` first), validated in `src/core/validate.ts`.
+2. **Matching at the offer:** `host.capabilities` by name as R-BTN-174 matches capabilities; each numeric dimension by "declared at least asked". Rule 1 refuses a runner that does not meet it.
+3. **Capacity versus impossibility:** a leg no live runner meets waits for capacity, shown with the largest value live runners declare; one no registered runner granted on the repository meets raises `baton.selection-attention`.
+4. **`fleet` totals** for `ctx`: per dimension and per capability, live and registered counts at or above each value — never a runner's identity.
+5. **The course file's leg `host`**, read by the default selector.
+
+### Trust
+
+- **New input:** a runner's declared dimensions, its own statement, unchecked, as its capabilities are (R-BTN-66): a runner that overstates is only offered legs it cannot finish.
+- **No exposure:** `fleet` carries totals only.
+
+### Invariants
+
+- **Capabilities are the runner's statement** ([R-BTN-174](../spec/BATON_SPEC/05-courses.md#sec-5-9)): no new check of a declaration.
+- **Filter fields only** ([R-BTN-33](../spec/BATON_SPEC/01-what-baton-is.md#sec-1)): a dimension is a number.
+
+### Tests
+
+New S-BTN scenarios, numbered with `node cli/baton.mjs tickets next scenario`: `host.memory_mb` above every live runner's but within a registered one's waits for capacity; above every registered runner's raises `baton.selection-attention`; a runner declaring enough is offered the leg.
+
+### Exit criteria
+
+- [ ] `host` matched at the offer on both hosts; capacity and impossibility told apart and shown.
+- [ ] The scenarios pass; `npm test`, `npm run typecheck` and `npm run check:spec` green; merged under the review gate.
+
+## Status
+
+_filed 2026-11-27._

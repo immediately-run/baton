@@ -46,8 +46,14 @@ between them. Defined in `course.json`; changed by a commit.
 **Station.** A place a ticket rests between legs (`filed`, `reviewed`, `merged`). An **end
 station** finishes the ticket.
 
-**Leg.** One edge of the course (`implement`, `review`, `merge`). A leg is **ready** or
-**waiting** on something named.
+**Leg.** One edge of the course (`implement`, `review`, `merge`). The ticket's **queued leg** is
+the one it runs next.
+
+**Selector, verdict, selection want.** A course's **selector** (`select.mjs`, or the runner's
+default one) is the pure function that chooses a ticket's next leg from Baton's record; a runner
+runs it. Its **verdict** is `run` a leg, `wait` until a time or a change, or `attention`, with the
+checks that decided it. A **selection want** is Baton asking any runner to run the selector for a
+ticket when no holder did.
 
 **Fact leg.** A leg no runner runs, for a hand act done outside Baton (`merged-by-hand`): it
 arrives when the sync attests its forge fact, along the edge the course file gives it (R-BTN-203).

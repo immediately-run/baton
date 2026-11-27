@@ -18,32 +18,92 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
 
 ## Changelog
 
-- **2026-11-27 — The selector chooses the next leg, specified (R-BTN-205; B-351).**
-  Rules added: R-BTN-205, `specified B-351`. Rules changed, their new parts marked not built:
-  R-BTN-83 (a finishing leg reports the station and its outputs, no `next`; `next_source:
-  selector`; a suspension or release re-queues its own leg; an owner's route pins over the
-  selector), R-BTN-70 (the verdict takes the place of readiness), R-BTN-74 (a station function
-  returns no readiness), R-BTN-133 (the wrapper's `select` call), R-BTN-174 (a verdict's `needs`
-  matched like capabilities), R-BTN-63 (which leg comes next) and R-BTN-127 (`baton ticket why`).
-  `baton.missing-next` retires with posted positions; R-BTN-205 raises `baton.selection-failed`
-  and `baton.selection-attention`. From the owner, 2026-11-26, in a Claude Code session on bering:
-  "I feel this is a key mechanic which is too challenging to grasp right now", and the
-  constraints: "the logic for selecting the next leg of a ticket based on its current station
-  should be entirely customizable."; "The leg may depend on many different prerequisites being
-  met, some of which can be conveniently expressed as baton metrics readings. For example, we
-  should not start a leg requiring a sandbox with more memory than what the host can allocate. we
-  should not start a leg that requires access to the GitHub API if we have been rate limited
-  temporarily."; "Like all custom logic, it should be straightforward how to sandbox this when
-  Baton is being used in a more secure setup like the one Fieldhouse implements."; "it should be
-  possible for a user to see why a particular leg was chosen in the dashboard or using the
-  CLI."; "where no lag can commence, it should be clear when the next action of the ticket may be
-  determined, or that the ticket needs human attention because the next leg cannot be
-  calculated."; "the station function should not assume that Git is the communication channel
-  between legs. This may often be the case, but this is definitely not guaranteed." Its rulings
-  on the proposal's questions: a default selector, "Yes"; the `because` format, "JSON, can
-  contain url to reason file or simple text in "reason " field"; the selector's budget, "not
-  sure" — the 10-second, 256 MB and 15-minute values in R-BTN-205 are provisional, to be replaced
-  by B-351's measurements. Asked "Ready to draft spec changes?", this amendment is the draft.
+- **2026-11-27 — The selector chooses the next leg (R-BTN-205; B-351).**
+  Rules changed: R-BTN-205 (added, `specified B-352 B-353 B-354 B-355 B-356`), R-BTN-70,
+  R-BTN-83, R-BTN-63, R-BTN-71, R-BTN-79, R-BTN-69, R-BTN-134, R-BTN-131, R-BTN-110, R-BTN-174,
+  R-BTN-74, R-BTN-51, R-BTN-5 / R-BTN-34, R-BTN-88, R-BTN-39, R-BTN-33, R-BTN-50, R-BTN-61,
+  R-BTN-76, R-BTN-75, R-BTN-120, R-BTN-99, R-BTN-116, R-BTN-89, R-BTN-163, R-BTN-167, R-BTN-9,
+  R-BTN-72, R-BTN-106, R-BTN-133, R-BTN-4, R-BTN-10, R-BTN-127, R-BTN-184; §12.3's links, §13's
+  `selection_verdicts` and `selection_wants`, §14's selection routes; S-BTN-47, S-BTN-312,
+  S-BTN-174, S-BTN-188, G-BTN-42 and G-BTN-73; three Decisions lines.
+  What a ticket runs next is one function of its course's, the selector, which a runner runs
+  through its executor over Baton's record and whose stored verdict — `run`, `wait` or
+  `attention`, with the checks that decided it — takes the place of the holder's `next`, the
+  station function's readiness, posted next legs and `not_before`, and `baton.missing-next`.
+  Every rule that stated the old mechanism now states the new one; the status tokens name the
+  tickets that build it.
+  - **The owner's brief and constraints**, 2026-11-26, in a Claude Code session on bering: "I
+    feel this is a key mechanic which is too challenging to grasp right now", and: "the logic for
+    selecting the next leg of a ticket based on its current station should be entirely
+    customizable."; "The leg may depend on many different prerequisites being met, some of which
+    can be conveniently expressed as baton metrics readings. For example, we should not start a
+    leg requiring a sandbox with more memory than what the host can allocate. we should not start
+    a leg that requires access to the GitHub API if we have been rate limited temporarily.";
+    "Like all custom logic, it should be straightforward how to sandbox this when Baton is being
+    used in a more secure setup like the one Fieldhouse implements."; "it should be possible for
+    a user to see why a particular leg was chosen in the dashboard or using the CLI."; "where no
+    lag can commence, it should be clear when the next action of the ticket may be determined, or
+    that the ticket needs human attention because the next leg cannot be calculated."; "the
+    station function should not assume that Git is the communication channel between legs. This
+    may often be the case, but this is definitely not guaranteed."
+  - **The owner's rulings on the design**, 2026-11-26: a default selector, "Yes"; the `because`
+    format, "JSON, can contain url to reason file or simple text in "reason " field"; the
+    selector's budget, "not sure" — R-BTN-205 states 10 seconds, 256 MB, a 60-second want lease
+    and 15 minutes untaken as its defaults, and B-357 measures them.
+  - **The owner's rulings of 2026-11-27.** On where the design lives: "Since these proposals are
+    necessary to get baton into a generally useable state, I would like you to include the
+    changes in the specs and draft the necessary tickets for implementing them. Except of course
+    spec provisions explicitly states as proposals whose implementation is deferred - these should
+    be live outside from the spec along with other proposals." Nothing of this design is deferred,
+    so the proposal page `spec/proposals/leg-selection.md` is removed and its scenarios moved
+    into the tickets. On a verdict's reasons beside R-BTN-33: "Bounded text, an exception" —
+    R-BTN-33 admits a verdict's `because` reasons and an `attention`'s reason, at most 128
+    characters each, shown only as text. The owner had asked, the same day, "Ready to draft spec
+    changes?"; the first draft (PR #462) wrote the design beside the old rules as "not built"
+    notes, which review round one found against the spec-writing rules, and these two rulings
+    answered the questions that raised.
+  - **Readings.** R-BTN-76's advice-only reading binds core's gates: no gate reads a reading. A
+    course makes a leg wait on one only through its selector's `wait`, which is the owner's second
+    constraint above; the B-146 deferral of a requirement core would evaluate stands.
+  - **Decided here, not by the owner** — the conservative reading of the constraints, for the
+    owner's review in the PR: the default selector's rules (claimable legs only, an arrival
+    entry's leg, `start_leg`, a result's `not_before`, then course order); chaining in a claim only
+    into the verdict's `run`; the response to a finishing arrival carrying the `ctx`; binding by
+    the answered cause and the `ctx` digest, first valid verdict winning; a want leased to one
+    runner for 60 seconds, under `protected` only to the trusted runner class; `ctx` limited to
+    the ticket's own repository and to fleet totals; `host` (renamed from `needs`, which R-BTN-76
+    already uses) with "declared at least asked"; `wait.until` capped at 400 days and a long
+    `wait` raising `baton.stalled`; replay from the record position while the record is retained,
+    through the local executor; re-verification at a claim by re-running the selector.
+  - **Review round one** (2026-11-27): two fresh reviewers, one over PR #462 and one over PR #455
+    after its merge, each given the diff. Every finding verified against the text and the code.
+    Fixed:
+    - in-claim chaining and the `ctx` timing, which left the finishing runner without its own
+      arrival;
+    - unbound verdicts: digest checks, first-wins, a want lease, the `until` cap and the
+      stalled notice; the protected-path and trusted-class requirement in the rule and R-BTN-184;
+    - every rule still stating the old mechanism — R-BTN-39's fact arrivals and reconcile
+      conclusions, `reconciles.to` and `arrives.next`, R-BTN-72's result shapes and chaining,
+      R-BTN-106's checks and verbs, the claim response's and the end body's `next`, the heartbeat's
+      `git` view, R-BTN-79, rule 1, R-BTN-89, R-BTN-167, R-BTN-99, R-BTN-61, R-BTN-88, the board
+      post's `stations` and the §15 rows;
+    - the suspension rule, which queued a finished leg off the graph;
+    - the sync, which the first draft told to post less than R-BTN-203, R-BTN-76 and `course_data`
+      need;
+    - `baton.selection-attention` defined twice, and conditions that never closed;
+    - free text against R-BTN-33 and R-BTN-163, and `because` urls outside §12.3's links (the
+      owner's ruling above);
+    - the course file's missing `selector` and `host` fields, numeric matching, a default selector
+      that could pick fact, reconcile or person legs, cross-repository exposure through `ctx`;
+    - the MCP session claim wording, and statuses that did not match the text;
+    - patch notes and plan text in rule bodies and Decisions; the vocabulary;
+    - in B-351: its account of today's sources (the owner's route and adopt are not built; the
+      exhausted retry seen today is the sync's `waiting_on: exhausted`; `inferred` is accepted but
+      never produced; `not_before` was missing), its anchors (R-BTN-133 is §8.4), its Trust,
+      Invariants and exit criteria, and the rulings it presented as the owner's.
+
+    Not taken as found: that a `wait` reverses the advice-only ruling on readings — the owner's
+    second constraint asks for exactly that, through the selector, and R-BTN-76 now says so.
 - **2026-11-26 — Terminology: the arena; the session's proposals (no rule changed).**
   Rules changed: none.
   The front gains a terminology note: the unit Baton coordinates — one ticket source, its
