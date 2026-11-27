@@ -508,8 +508,9 @@ The fingerprint stores no ticket content and is an optimization, never authority
     (R-BTN-205). Its verdict must be `run` of the offered leg, leaving the claim's station as
     Baton holds it (the claim response's station, `path_len` and queued leg, R-BTN-39); the
     ticket's position never comes from the source. A ticket closed or archived, or any other
-    verdict, releases `stale-board`, the verdict answering the offered position posted with the
-    release, which core acts on (R-BTN-205). A queued leg an owner or Baton's own transition
+    verdict, releases `stale-board`, the verdict posted with the release (§9.4). Core acts on no
+    verdict posted that way: it records it and makes a selection want for the ticket
+    (R-BTN-205). A queued leg an owner or Baton's own transition
     chose is checked against the station and course file alone.
   - After this check, a version that moves under the claim is read again as R-BTN-198 says.
   - **A ticket Baton has not seen cannot be claimed.** A claim naming it is `not-eligible`

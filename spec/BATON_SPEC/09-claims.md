@@ -134,13 +134,20 @@ is `active` until it ends `completed`, `released` or `reaped`.
 ### 9.4 Ending a claim
 
 A claim ends with `POST /v1/runner/claims/{id}/end`. Its body, stated here once: `end_reason`,
-`reached`, `verdict?` (the holder's selection verdict answering the claim's last arrival, or
-the claim's offered position on a `stale-board` release, with its `answers` and `ctx_digest`,
-R-BTN-205), and as applicable
-`spawned` (R-BTN-86), `outputs`, `detail`, `ended_at_sha` (R-BTN-8; a completed end's only),
+`reached`, `verdict?`, and as applicable `spawned` (R-BTN-86), `outputs` (an `end: done`
+finishing its running leg at an end station only), `detail`, `ended_at_sha` (R-BTN-8; a completed end's only),
 `prerequisite` (R-BTN-126), `exit_status` (R-BTN-153), `scope_exceeded` (§12.9), `session_url`
 (R-BTN-113) and `local_order` (R-BTN-202).
 
+- **An end records no arrival that needs a selection** (R-BTN-83). A suspension or release
+  rests at the running leg's `from`, or at the station the claim's last finishing `advance`
+  reached; an `end: done` finishes the running leg at an end station, or follows a finishing
+  `advance` that reached one.
+- **`verdict`** is how a holder posts a selection verdict before it lets the ticket go, the one
+  way (R-BTN-205, R-BTN-72): on a suspension or release at an outcome, the verdict answering the
+  last arrival; on a `stale-board` release at the claim's re-check, the verdict answering the
+  offered position, which core records and acts on by a want (R-BTN-5 / R-BTN-34). Each carries
+  its `answers` and `ctx_digest`. An `end: done` at an end station carries none.
 - `detail` is free text of at most 200 characters under the untrusted-text rule (§12), stored
   and shown, never read. A claim the runner releases `cannot-finish:transient` because its leg
   failed carries the failure's last line — for an agent's leg, the agent's own last line of

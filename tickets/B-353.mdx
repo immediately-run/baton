@@ -31,9 +31,10 @@ The runner is where a selector runs, through its executor, so that sandboxing is
 4. **Waiting under the claim** only when every failing check of a `wait` is in the course's `short_waits` (R-BTN-72): renew the lease, `reselect` when a check may have changed or `until` comes, and select again.
 5. **Taking selection wants** when idle: lease, run, post; give up a lapsed lease.
 6. **The result shapes** without `next`; a result's `next` is ignored and logged. `decide()` (`src/runner/protocol.ts`) checks only `reached`. The channel's `done` and `suspend` drop `--next`; the `leg next` verb goes.
-7. **Re-verification at a claim:** re-run the selector, in the verified tree at the claim's commit, over the claim response's `ctx`; anything but `run` of the offered leg releases `stale-board` with the verdict, which answers the offered position.
-8. **`baton repo init`** scaffolds no `select.mjs` for a course the default selector serves.
-9. **The course file** (`src/core/course.ts`): validate `selector.readings` and each leg's `host`, and read `short_waits` as `check` ids, no longer `waiting_on` labels (R-BTN-69).
+7. **Re-verification at a claim:** re-run the selector, in the verified tree at the claim's commit, over the claim response's `ctx`; anything but `run` of the offered leg releases `stale-board` with the verdict in the end body, which core records and answers with a want (R-BTN-5 / R-BTN-34).
+8. **Ends:** suspend or release at an outcome only after the finishing `advance`, the verdict in the end body (§9.4, the one way); never send an `end` that records an arrival needing a selection; ask `POST /v1/runner/selections` before each unnamed claim attempt and when the heartbeat's `selection_wants` is above zero (R-BTN-72).
+9. **`baton repo init`** scaffolds no `select.mjs` for a course the default selector serves.
+10. **The course file** (`src/core/course.ts`): validate `selector.readings` and each leg's `host`, and read `short_waits` as `check` ids, no longer `waiting_on` labels (R-BTN-69).
 
 ### Trust
 
@@ -48,9 +49,9 @@ The runner is where a selector runs, through its executor, so that sandboxing is
 
 ### Tests
 
-New S-BTN scenarios on both hosts, numbered with `node cli/baton.mjs tickets next scenario`:
-- a branching station: a review leg's inline output `{verdict: "changes-requested"}` selects `fix`; `approved` with CI green selects `merge`; no git marker is read;
-- a claim chains into the verdict's leg; an `advance` naming another leg is refused `not-selected`;
+On both hosts:
+- **S-BTN-331** chaining through the split `advance`, pending under this ticket in `spec/scenarios-pending.json`;
+- and, numbered with `node cli/baton.mjs tickets next scenario` when written: a branching station: a review leg's inline output `{verdict: "changes-requested"}` selects `fix`; `approved` with CI green selects `merge`; no git marker is read;
 - a selector that throws, times out or names a leg not leaving the station: a failed selection;
 - re-verification: a changed fact between offer and claim releases `stale-board`;
 - the default selector at `start`, after a fact arrival and with a `not_before`.

@@ -62,10 +62,11 @@ resumed by a **restart** (§7). "Workflow" means only a CI workflow; "activity" 
     profiles, reports, `rationale`, a reading's `detail`. Core never reads them, so it cannot stop
     a course from putting prose in one; doing so breaks this rule, and the CLI's default sources
     and standard station functions post none.
-  - **The one exception: a verdict's reasons.** A selection verdict's `because` reasons and an
-    `attention`'s reason (R-BTN-205) are stored text, at most 128 characters each, shown only as
-    text (§10.4), so that a person can see why a leg was chosen or why none can be. A selector
-    that puts ticket content there breaks this rule as an opaque blob's prose does.
+  - **The exceptions: short stated reasons.** Two kinds of text are stored, each bounded and
+    shown only as text (§10.4): an end's `detail`, at most 200 characters (§9.4); and a selection
+    verdict's `because` reasons and an `attention`'s reason (R-BTN-205), at most 128 characters
+    each, so that a person can see why a leg was chosen or why none can be. A selector or a
+    runner that puts ticket content there breaks this rule as an opaque blob's prose does.
 - **R-BTN-35 (Baton wins about what it owns; the ticket source and git about the rest).** `status: built` Baton
   owns each ticket's course history and position (R-BTN-39), claims and leases, attestations
   (R-BTN-181) and owner state (R-BTN-66). Every other ticket fact it holds (existence, filter
@@ -92,7 +93,8 @@ resumed by a **restart** (§7). "Workflow" means only a CI workflow; "activity" 
     accepts the post, before that post's attestations are judged; a selection want is made for it
     (R-BTN-205), where the default selector takes `start_leg`.
   - **Who moves a ticket.** Only these, each along an edge of the course file from Baton's current
-    station: the holder's arrival, carried by its `advance` or end (R-BTN-63, R-BTN-71,
+    station: the holder's arrival, carried by its finishing `advance` or an `end: done` at an end
+    station (R-BTN-63, R-BTN-71,
     R-BTN-83); a fact arrival; and Baton's own settlements and the legs it queues (R-BTN-116,
     R-BTN-122, §7), the reconcile leg it queues (below). The owner's route (R-BTN-83) is not built.
   - **The station function** (R-BTN-74) is handed each live ticket's position as Baton holds it

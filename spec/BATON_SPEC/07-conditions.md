@@ -221,7 +221,7 @@ Not built either, each a design its rule below still states:
   - **State.** Attempts are counted **per ticket and leg**, with §9's rules for what counts as a
     failed attempt, in `leg_attempts`: repository, ticket, leg, `attempts`, `retry_after` and
     `last_error_type`. The row resets — `attempts` to 0, `retry_after` cleared — when a run of the
-    leg reaches one of its outcomes (an `advance` or end reporting it, or a fact arrival of it)
+    leg reaches one of its outcomes (a finishing `advance` or an `end: done` reporting it, or a fact arrival of it)
     and when a hold is lifted.
   - **Policy.** A leg may carry a retry policy:
 

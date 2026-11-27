@@ -510,6 +510,13 @@ is stale. Never edit it by hand.
 | S-BTN-323 | a session is as capable as its key | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-324 | a person on the dashboard is a human | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-325 | the unpinned warning | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-327 | selection verdict binding | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-328 | a want's lease lapses | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-329 | reselect | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-330 | a course change withdraws a want | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-331 | chaining through the split advance | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-332 | a re-check release makes a want | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-333 | core bounds a wait under a claim | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 
 ## Gates
 

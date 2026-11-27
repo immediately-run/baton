@@ -23,9 +23,11 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   R-BTN-83, R-BTN-63, R-BTN-71, R-BTN-79, R-BTN-69, R-BTN-134, R-BTN-131, R-BTN-110, R-BTN-174,
   R-BTN-74, R-BTN-51, R-BTN-5 / R-BTN-34, R-BTN-88, R-BTN-39, R-BTN-33, R-BTN-50, R-BTN-61,
   R-BTN-76, R-BTN-75, R-BTN-120, R-BTN-99, R-BTN-116, R-BTN-89, R-BTN-163, R-BTN-167, R-BTN-9,
-  R-BTN-72, R-BTN-106, R-BTN-133, R-BTN-4, R-BTN-10, R-BTN-127, R-BTN-184, R-BTN-64, R-BTN-40; §12.3's links, §13's
+  R-BTN-72, R-BTN-106, R-BTN-133, R-BTN-4, R-BTN-10, R-BTN-127, R-BTN-184, R-BTN-64, R-BTN-40;
+  §9.4's end body; §12.3's links, §13's
   `selection_verdicts` and `selection_wants`, §14's selection routes; S-BTN-47, S-BTN-312,
-  S-BTN-174, S-BTN-188, G-BTN-42, G-BTN-43 and G-BTN-73; four Decisions lines.
+  S-BTN-174, S-BTN-188, G-BTN-42, G-BTN-43 and G-BTN-73; S-BTN-327 to S-BTN-333 added; four
+  Decisions lines.
   What a ticket runs next is one function of its course's, the selector, which a runner runs
   through its executor over Baton's record and whose stored verdict — `run`, `wait` or
   `attention`, with the checks that decided it — takes the place of the holder's `next`, the
@@ -62,9 +64,10 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
     changes?"; the first draft (PR #462) wrote the design beside the old rules as "not built"
     notes, which review round one found against the spec-writing rules, and these two rulings
     answered the questions that raised.
-  - **Readings.** R-BTN-76's advice-only reading binds core's gates: no gate reads a reading. A
-    course makes a leg wait on one only through its selector's `wait`, which is the owner's second
-    constraint above; the B-146 deferral of a requirement core would evaluate stands.
+  - **Readings.** R-BTN-76's advice-only reading binds core's gates: no gate reads a reading. The
+    owner's second constraint says a leg may wait on prerequisites that readings express; that it
+    does so only through its selector's `wait` is this design's reading of the constraint, not
+    the owner's words. The B-146 deferral of a requirement core would evaluate stands.
   - **Decided here, not by the owner** — the conservative reading of the constraints, for the
     owner's review in the PR: the default selector's rules (claimable legs only, an arrival
     entry's leg, `start_leg`, a result's `not_before`, then course order); chaining in a claim only
@@ -146,6 +149,54 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
     - **A migrated queued leg is `next_source: baton`**, the migration being Baton's own rule.
     - **A finishing `advance` and a starting one are separate requests**, the cost of one round
       trip per leg for a holder that sees its own arrival's `ctx` before choosing.
+  - **Review round three** (2026-11-27): a fresh reviewer over PR #462 at `221e47d6`, which found
+    the merge still blocked. The owner's rulings the same day, in a Claude Code session on bering:
+    asked "After fixing them, what should happen?", "Fix, then a round four (Recommended)" — a
+    round four beyond the three-round cap, at the owner's request, as #449 had; and asked "A
+    claimant releasing at the claim-time re-check can post any verdict … How should that verdict
+    be treated?", "It makes a want (Recommended)", the option reading "The release verdict
+    replaces nothing; it makes a leased selection want with a fresh ctx, offered under `protected`
+    to the trusted class only. Core also times waits under a claim and ends a claim at 30
+    minutes." Every finding verified against the text. Fixed:
+    - an `end` records no arrival that needs a selection: a holder finishing at an outcome sends
+      the finishing `advance` first, then starts, suspends or releases with the verdict, or ends
+      `done` at an end station (R-BTN-83, R-BTN-71, R-BTN-89, §9.4, §14); the end body's
+      `verdict` is the one way to post a verdict before letting go, and `…/select` is removed;
+    - the want lifecycle: one open want per ticket, withdrawn and remade on a new cause, withdrawn
+      by a claim, a lapsed lease re-offering it with its `ctx` rebuilt; `selection_wants` state,
+      `course_version`, `snapshot_sha` and the lease's `request_id`; when a runner asks for one
+      (R-BTN-72, the heartbeat's `selection_wants`);
+    - what a verdict answers, for all three causes, with `selection_handouts` keeping each
+      cause's current digest, record position and admitted count;
+    - the owner's release ruling, in R-BTN-205, R-BTN-5 / R-BTN-34, §9.4 and B-352/B-353, and
+      core's own 30-minute bound on a wait under a claim (R-BTN-72), which no longer relies on
+      the runner;
+    - one refusal code, `not-eligible` with `rule_code` `not-selected`, in R-BTN-63 and R-BTN-72,
+      and the verdict codes in §14's errors; an arrival clears the queued leg;
+    - `waiting_on`'s labels owned by R-BTN-120 alone, §13 citing it;
+    - the default selector at `start`: a `not_before` still ahead wins, then `start_leg`;
+    - the holder's verdict bound by its claim's gates and core's 30-minute bound, stated in
+      R-BTN-205;
+    - R-BTN-33's exceptions, both stated text (an end's `detail` and a verdict's reasons), with
+      the 128-character limit stated there once;
+    - numbered rows S-BTN-327 to S-BTN-333, pending under B-352 and B-353 in
+      `spec/scenarios-pending.json`, as R-BTN-30 admits for an open ticket that builds them;
+    - this entry's *Readings* bullet, which put the design's reading in the owner's mouth.
+
+    Nothing was rejected.
+
+    Decided here, not by the owner, for the owner's review:
+    - **Causes are deferred to the holder during a claim**, so a holder and a want never race.
+    - **`reselect`**, a request that hands out a fresh `ctx` and admits one more verdict for the
+      same arrival, so a holder waiting under its claim can select again.
+    - **One open want per ticket**, so two verdicts from two runners never race for one ticket.
+    - **Core's bound counts from the last arrival**, not from a first `short_waits` wait core
+      cannot see: a claim that has neither started a leg nor ended 30 minutes after its last
+      arrival is ended `released:short-wait`.
+    - **While a re-check release's want is open, the queued leg is not offered**, so no runner
+      reclaims into the same refusal; the release verdict itself is the owner's ruling above.
+    - **`selection_handouts`**, one table for every `ctx` handed out, rather than columns on each
+      cause's own table.
 - **2026-11-26 — Gating on a reading deferred (R-BTN-76, R-BTN-181).**
   Rules changed: none; the Decisions line on readings (§91) now says they are served as advice
   and that gating on one is deferred, where it said gate or advice was the requirement's choice.

@@ -332,8 +332,8 @@ Not built, each a design its rule below still states:
 - **R-BTN-89 (a ticket may wait for a time).** `status: partly B-352 B-353` A ticket's selection may wait
   until an instant: a `wait` verdict's `until` (R-BTN-205), before which no leg is queued.
   - **Where a time comes from.** A selector decides it. It sees a leg result's `not_before?`
-    (R-BTN-72), which the runner reports with the arrival on an `advance` or a suspending or
-    releasing `end`, and, for a ticket at `start` with an empty path, the ticket file's
+    (R-BTN-72), which the runner reports with the arrival on the finishing `advance` (R-BTN-63),
+    and, for a ticket at `start` with an empty path, the ticket file's
     `tickets[].not_before` (R-BTN-74), both as `ctx.position.not_before`; the default selector
     waits until it. Baton never computes one; a schedule is the leg script's or the selector's.
   - **Validated, failing closed.** RFC 3339 with `Z` or a numeric offset, at most 400 days after

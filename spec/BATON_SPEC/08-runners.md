@@ -64,7 +64,7 @@ section that are not built are in [the proposal page](../proposals/checks-and-ex
   - **The answer** carries `runner_id`, `incarnation`, `lease_timeout_s` (as clamped),
     `grant: {capabilities}` (R-BTN-72), `claims`, `messages`, `bars` (the owner bars in force,
     R-BTN-67), `stale_courses` (R-BTN-22), `mode` (per repository `shadow` or `cut-over`;
-    legacy, removed with its code, R-BTN-193) and `server_time`.
+    legacy, removed with its code, R-BTN-193), `selection_wants` (how many open selection wants it may take, R-BTN-205) and `server_time`.
     - `claims` lists the runner's active claims, empty when it holds none — each with its id,
       ticket, station, leg, nonce, `deadline_at`, Baton's position (`station`, `path`,
       `next_leg`), the ticket as the latest accepted snapshot holds it (`version`,
@@ -141,7 +141,9 @@ section that are not built are in [the proposal page](../proposals/checks-and-ex
   With room for another claim — fewer held than R-BTN-4's bound, and the host's own judgement
   that it can start one — it attempts an unnamed claim when a heartbeat carries `unblocked`, else
   at its own interval (R-BTN-77). Each attempt is one claim request and reads no
-  recommendations, which are for a caller choosing work (§6.6). A claim that waits (R-BTN-40, R-BTN-195) holds only
+  recommendations, which are for a caller choosing work (§6.6). Before each unnamed claim
+  attempt, and when a heartbeat answer's `selection_wants` count is above zero, it asks `POST
+  /v1/runner/selections` for a selection want (R-BTN-205) and answers one before it claims. A claim that waits (R-BTN-40, R-BTN-195) holds only
   its own place, never the runner's other claims.
   - **Restart requested.** With `--restart-when-behind`, at a claim boundary with no claims
     held, the runner compares its loaded CLI checkout commit with its branch's local tracking ref.
@@ -175,7 +177,8 @@ section that are not built are in [the proposal page](../proposals/checks-and-ex
     an abort reason. Apart from that signal it is JSON: it carries no
     function, and a leg raises a condition on its channel (R-BTN-106).
   - **First leg** is the queued leg the claim response names (R-BTN-83), started by the first
-    `advance`; a first `advance` into any other leg is refused `not-eligible`, rule `not-queued`.
+    `advance`; a first `advance` into any other leg is refused `not-eligible`, `rule_code`
+    `not-selected` (R-BTN-63).
   - **The result** always carries where the leg rests: `{reached, not_before?, outputs?,
     session?, bars?}`, `{suspend: true, reached, detail?}`, `{end: 'done', reached, detail?}` or
     `{release: <reason>, reached}`. `reached` is an outcome station of the leg, or its `from`
@@ -187,13 +190,15 @@ section that are not built are in [the proposal page](../proposals/checks-and-ex
     `advance` answered with (R-BTN-63), and sends the verdict itself: the next leg is never left
     to a want while the claim is active. A `run` it may take — within its bounds, every gate and
     the verdict's `host` met — is started with `advance {leg, verdict}`; any other `run`, an
-    `attention`, or a `wait` it does not wait out goes with the suspension or end at `reached`.
+    `attention`, or a `wait` it does not wait out goes with the suspension or release at
+    `reached`, in the end body (§9.4).
   - **Waiting under the claim.** A holder waits under its claim, rather than suspending
     (R-BTN-40), only when every failing check of a `wait` verdict is one of the course's
-    `short_waits` (R-BTN-69), and for at most **30 minutes**. It renews its lease meanwhile and,
-    each heartbeat or when the wait's `until` comes, asks `reselect` (R-BTN-63) and selects again
-    over the fresh `ctx`. Every other `wait`, and one still waiting after 30 minutes, ends the
-    claim at `reached`, the verdict posted with it.
+    `short_waits` (R-BTN-69). It renews its lease meanwhile and, each heartbeat or when the wait's
+    `until` comes, asks `reselect` (R-BTN-63) and selects again over the fresh `ctx`. Every other
+    `wait` ends the claim at `reached`, the verdict in the end body (§9.4). Core bounds the wait:
+    a claim that has neither started a leg nor ended **30 minutes** after its last arrival is
+    ended by core, `released:short-wait`, and the arrival's selection is a want (R-BTN-205).
   - **The runner writes nothing to git itself.** The leg's `close` writes the closing marker and
     the leg leaves its own evidence (R-BTN-8). On a suspension or release the runner calls
     `close`, then `handoff`, so the hand-off can cite the position. A failing `close` is retried
