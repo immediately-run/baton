@@ -8,7 +8,7 @@ repos:
   - baton
 tags:
   - roadmap-item
-order: 1188
+order: 218
 tier: judgement
 description: "§12.8 assumed a runner may be compromised because it ran repository code in its own trust boundary. With every call into repository code going through an executor (B-184), and each leg holding only leg-duration credentials confined to its claim (the deployment's proxies, never Baton's), the machinery that guarded against runners retires: the guarantee no-runner-lands, the refs.*, approvers.roles, outbox.git, outbox.forge-check and inputs.board knobs, grant roles, domains and the checker mark, and the protection report. Independent review counts reviews, each its own reads_only run of the exact head, comparing no domain or key. The guarantees rest on merge.trusted and a deployment duty Baton states and cannot observe; under builtin Baton makes no security promise. The executor brief gains the claim's scope and branches. Requires: B-184."
 topics:

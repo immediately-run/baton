@@ -15,6 +15,7 @@ owns: {}
 prs:
   - https://github.com/immediately-run/baton/pull/353
 depends_on: []
+order: 80
 ---
 
 **What:** Baton's own downtime must not count against a claim's lease. On 2026-11-15 the Durable Object quota ran out at 14:12Z; vltava2's runner held baton:B-176, finished its fix leg during the outage, and has retried the end every beat since ("the end of baton:B-176 did not reach Baton (internal error)"). When the quota resets at 00:00Z the alarm's reaper runs again and can reap the claim — its last heartbeat ~10 h old — before the runner's next beat delivers the end, discarding a finished leg.

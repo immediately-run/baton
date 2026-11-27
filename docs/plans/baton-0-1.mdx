@@ -64,12 +64,10 @@ Two things this table shows:
 
 ## The work, in order
 
-The first column is the rank each ticket's `order` should carry; lower ranks are offered first.
-New tickets are filed with theirs. An existing ticket keeps its old `order`, or has none, until
-D7 is answered: Dibber 0.4.0 refuses to change `order` after filing ("`--field` cannot write
-Dibber-owned key `order`"), and has no command that does. Until then the existing 0.1 tickets
-without an `order` (B-324, B-244, B-318, B-336, B-347, B-337, B-249, B-352 to B-357) sort after
-every ranked ticket. Tickets the same number of legs from an end are offered by rank (*The default
+The first column is each ticket's `order`; lower ranks are offered first. New tickets are filed
+with theirs. The existing tickets ranked here carry theirs from this plan's PR, set by hand once
+(D7): Dibber 0.4.0 refuses to change `order` after filing ("`--field` cannot write Dibber-owned
+key `order`"), and N6 gives it a command that can. Tickets the same number of legs from an end are offered by rank (*The default
 order*, [BATON_SPEC §6.6](../../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-6)).
 Tickets marked N are new in this PR.
 
@@ -145,9 +143,10 @@ Each has a default that this plan assumes until answered.
 - **D6 — While phase A is open, the 61 available tickets that cite a design in `spec/proposals/`.**
   - (a) Leave their ranks as they are: they sort after every rank above. **Default.**
   - (b) Mark them `deprioritized`, so no runner takes one before 0.1.
-- **D7 — Re-ranking existing tickets**, which Dibber 0.4.0 cannot do.
-  - (a) The owner authorizes a one-off hand edit of `order:` on the tickets ranked here, in this plan's PR. Dibber gains a re-rank command afterwards (a Dibber ticket). **Default.**
-  - (b) Wait for the Dibber command, and accept that the existing 0.1 tickets sort last until it exists.
+- **D7 — Re-ranking existing tickets**, which Dibber 0.4.0 cannot do. **Answered**, the owner,
+  2026-11-27: "Yes, hand-edit once". This plan's PR sets `order:` by hand on the 25 existing tickets
+  ranked here (phases A and B, and *Simpler* below); `dibber check` reports nothing new. N6 gets
+  Dibber a re-rank command.
 
 ## Housekeeping found on the way
 
