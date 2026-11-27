@@ -422,8 +422,8 @@ that tail before retrying the rows.
 ## Moving a Baton (R-BTN-88)
 
 Owner state — the settings, keys, grants, bars, holds and closed tickets git does not hold —
-moves between Batons as one file; the tickets and readiness rebuild from git at the target's
-first sync. The tenant's administrator drives it (BATON_SPEC §4.8):
+moves between Batons as one file; the tickets and the sync's facts rebuild from git at the
+target's first sync, and each ticket's selector is asked again. The tenant's administrator drives it (BATON_SPEC §4.8):
 
 1. `baton admin -i KEY freeze` — new claims and owner writes are refused `frozen`; the work
    holding claims drains, its lease upkeep untouched. `baton admin -i KEY unfreeze` undoes it

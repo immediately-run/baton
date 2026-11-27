@@ -129,9 +129,9 @@ Every value below is validated on write; a value over its cap is refused `invali
   home draws its code repositories' links while none of its own — or names a host an
   administrator allowed:
   `link_hosts` for a view's `link` (R-BTN-112), `session_hosts` for a session link
-  (R-BTN-113). A person leg's question `url` (R-BTN-116) and a condition's `url` (R-BTN-160) are the
-  only links they carry; one that fails the rule is dropped, so no `javascript:` link reaches a
-  screen. `needs` names follow R-BTN-76.
+  (R-BTN-113). A person leg's question `url` (R-BTN-116), a condition's `url` (R-BTN-160) and a
+  selection verdict's `because` `url`s (R-BTN-205) are the only links they carry; one that fails
+  the rule is dropped, so no `javascript:` link reaches a screen. `needs` names follow R-BTN-76.
 - **URIs** (R-BTN-82), at most 1 KB, are one of:
   - `git:<owner>/<name>@<40-hex>:<path>` or `git:<owner>/<name>#blob=<40-hex>`, where the path is
     relative, at most 512 characters of `[A-Za-z0-9._/-]`, with no empty, `.` or `..` segment;
@@ -656,7 +656,8 @@ confines a leg's credentials; a compromised forge; and a compromised Baton.
     not an OS sandbox: the deployment must trust the installed harness, host configuration
     and snapshot course code, and must not grant higher-precedence tool policy overrides.
 - **R-BTN-184 (protected paths).** `status: partly B-140 B-189` The policy's `paths.protected`, beside a floor Baton computes
-  that no course or owner removes, in two classes: **control paths** — courses, workflows, agent
+  that no course or owner removes, in two classes: **control paths** — courses (their `course.json`, station functions and
+  selectors, R-BTN-205), workflows, agent
   configuration, the ticket source and what the owner declares — and **tickets and goals**. The
   floor's entries, its glob grammar, how each class lands and a leg's own progress lines are
   [proposed](../proposals/security.md) (B-140).

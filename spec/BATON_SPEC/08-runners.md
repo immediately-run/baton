@@ -23,7 +23,7 @@ section that are not built are in [the proposal page](../proposals/checks-and-ex
   - **Alive** = `reaped_at IS NULL AND now − last_seen_at < lease_timeout_ms`. A reaped runner
     (§9.5) is dead: its calls are refused `runner-reaped` until it re-keys (R-BTN-14), which
     starts a new incarnation of the same runner holding no claim.
-- **R-BTN-9 (the runner declares its lease timeout).** `status: built` `lease_timeout_s` on each heartbeat,
+- **R-BTN-9 (the runner declares its lease timeout).** `status: partly B-352` `lease_timeout_s` on each heartbeat,
   clamped to [900, 86400], default 900. The sidecar fences (R-BTN-6, R-BTN-26) on the lowest of
   the value in force at `last_ok` and every value it has declared since, so a heartbeat that
   lowers the timeout and loses its response never leaves Baton reaping on a shorter lease than
@@ -40,6 +40,7 @@ section that are not built are in [the proposal page](../proposals/checks-and-ex
   | `kind` | `vm`, `local` or `cloud`: a label no rule reads |
   | `model_id` | optional; a label no rule reads |
   | `capabilities` | the declared capabilities, roles and holdings (R-BTN-121, R-BTN-174) |
+  | `host` | optional: `{memory_mb?}`, the numeric dimensions the runner declares for a verdict's `host` (R-BTN-174); a dimension left out meets no requirement on it |
   | `tags` | optional (R-BTN-60) |
   | `lease_timeout_s` | R-BTN-9 |
   | `concurrency` | R-BTN-4 |
@@ -64,12 +65,12 @@ section that are not built are in [the proposal page](../proposals/checks-and-ex
   - **The answer** carries `runner_id`, `incarnation`, `lease_timeout_s` (as clamped),
     `grant: {capabilities}` (R-BTN-72), `claims`, `messages`, `bars` (the owner bars in force,
     R-BTN-67), `stale_courses` (R-BTN-22), `mode` (per repository `shadow` or `cut-over`;
-    legacy, removed with its code, R-BTN-193) and `server_time`.
+    legacy, removed with its code, R-BTN-193), `selection_wants` (how many open selection wants it may take, R-BTN-205) and `server_time`.
     - `claims` lists the runner's active claims, empty when it holds none — each with its id,
       ticket, station, leg, nonce, `deadline_at`, Baton's position (`station`, `path`,
       `next_leg`), the ticket as the latest accepted snapshot holds it (`version`,
-      `snapshot_sha`, `last_written_by`, R-BTN-194), that snapshot's `git` view (`next` legs with
-      state, `waiting_on` and `not_before`; or `closed: done | withdrawn`; or `unknown`) and its
+      `snapshot_sha`, `last_written_by`, R-BTN-194), the ticket's latest selection verdict
+      (R-BTN-205), that snapshot's `git` view (`closed: done | withdrawn`, or `unknown`) and its
       current `activity` (§9.9). A listed claim the runner's state does not hold is ended by the
       runner `released:lease-lost`, never left to idle (R-BTN-6).
     - `messages` are the pending messages (§6), marked `delivered` in the same transaction, and
@@ -131,7 +132,7 @@ section that are not built are in [the proposal page](../proposals/checks-and-ex
 
 ### 8.3 The runner
 
-- **R-BTN-72 (the runner).** `status: built B-47 B-274` `baton runner start` is a generic runner loop. It hosts the
+- **R-BTN-72 (the runner).** `status: partly B-47 B-274 B-352 B-353` `baton runner start` is a generic runner loop. It hosts the
   sidecar, heartbeats, claims up to R-BTN-4's bound, and runs each
   claim's legs one at a time, claims side by side, each leg by **the script for that leg**; then
   it advances, suspends or ends as the script's result, the course file, R-BTN-40 and the end
@@ -141,7 +142,9 @@ section that are not built are in [the proposal page](../proposals/checks-and-ex
   With room for another claim — fewer held than R-BTN-4's bound, and the host's own judgement
   that it can start one — it attempts an unnamed claim when a heartbeat carries `unblocked`, else
   at its own interval (R-BTN-77). Each attempt is one claim request and reads no
-  recommendations, which are for a caller choosing work (§6.6). A claim that waits (R-BTN-40, R-BTN-195) holds only
+  recommendations, which are for a caller choosing work (§6.6). Before each unnamed claim
+  attempt, and when a heartbeat answer's `selection_wants` count is above zero, it asks `POST
+  /v1/runner/selections` for a selection want (R-BTN-205) and answers one before it claims. A claim that waits (R-BTN-40, R-BTN-195) holds only
   its own place, never the runner's other claims.
   - **Restart requested.** With `--restart-when-behind`, at a claim boundary with no claims
     held, the runner compares its loaded CLI checkout commit with its branch's local tracking ref.
@@ -156,6 +159,7 @@ section that are not built are in [the proposal page](../proposals/checks-and-ex
       course.json            # stations and legs
       sync.mjs               # run by the repository's sync
       rank.mjs               # optional; run on the runner (R-BTN-98)
+      select.mjs             # optional; the selector, run on the runner (R-BTN-205)
       legs/<leg>.mjs         # one script per leg
       legs/<leg>.run.mjs     # optional repository replacement for the leg's run (R-BTN-131)
     ```
@@ -168,22 +172,34 @@ section that are not built are in [the proposal page](../proposals/checks-and-ex
   - **`ctx`** carries: the ticket (id, path, home repository, and a pathless ticket's `file`,
     R-BTN-74); the claim (id, nonce, the station the leg leaves); the leg and its run number;
     `replay` (R-BTN-84); the newest hand-off document and the resume record (R-BTN-24); advice;
-    Baton's position and the latest snapshot's readiness; `checkout` (working directory); the
+    Baton's position and the ticket's latest selection verdict (R-BTN-205); `checkout` (working directory); the
     `session` token the previous leg returned; and an `AbortSignal` whose reason is `release`
     (including a course change) or `regressed`. A lost lease stops the session without sending
     an abort reason. Apart from that signal it is JSON: it carries no
     function, and a leg raises a condition on its channel (R-BTN-106).
   - **First leg** is the queued leg the claim response names (R-BTN-83), started by the first
-    `advance`; a first `advance` into any other leg is refused `not-eligible`, rule `not-queued`.
-  - **The result** always carries a position: `{reached, next, not_before?, outputs?, session?,
-    bars?}`, `{suspend: true, reached, next, detail?}`, `{end: 'done', reached, detail?}` or
-    `{release: <reason>, reached, next}`. `reached` is an outcome station of the leg, or its
-    `from` when given up; the script names `next` and any `bars` it chose (R-BTN-63). A `reached`
-    that is not an outcome of the leg, or a `next` that does not leave it, is a script bug: the
-    runner suspends at the leg's `from`. Outputs are validated against their schemas before
-    anything is reported (R-BTN-82, R-BTN-108). A `detail` on a suspension or a done end is the
-    end's `detail` (§9.4), stored on the claim and on the finished run's history row beside its
-    evidence (R-BTN-81).
+    `advance`; a first `advance` into any other leg is refused `not-eligible`, `rule_code`
+    `not-selected` (R-BTN-63).
+  - **The result** always carries where the leg rests: `{reached, not_before?, outputs?,
+    session?, bars?}`, `{suspend: true, reached, detail?}`, `{end: 'done', reached, detail?}` or
+    `{release: <reason>, reached}`. `reached` is an outcome station of the leg, or its `from`
+    when given up; the script names any `bars` it chose (R-BTN-63) and no next leg: a `next` a
+    result carries is ignored and logged. A `reached` that is not an outcome of the leg is a
+    script bug: the runner suspends at the leg's `from`.
+  - **Selecting.** After each arrival the runner runs the course's selector — its `select.mjs`,
+    or the default selector (R-BTN-205) — through the wrapper over the `ctx` the finishing
+    `advance` answered with (R-BTN-63), and sends the verdict itself: the next leg is never left
+    to a want while the claim is active. A `run` it may take — within its bounds, every gate and
+    the verdict's `host` met — is started with `advance {leg, verdict}`; any other `run`, an
+    `attention`, or a `wait` it does not wait out goes with the suspension or release at
+    `reached`, in the end body (§9.4).
+  - **Waiting under the claim.** A holder waits under its claim, rather than suspending
+    (R-BTN-40), only when every failing check of a `wait` verdict is one of the course's
+    `short_waits` (R-BTN-69). It renews its lease meanwhile and, each heartbeat or when the wait's
+    `until` comes, asks `reselect` (R-BTN-63) and selects again over the fresh `ctx`. Every other
+    `wait` ends the claim at `reached`, the verdict in the end body (§9.4). Core bounds the wait:
+    a claim that has neither started a leg nor ended **30 minutes** after its last arrival is
+    ended by core, `released:short-wait`, and the arrival's selection is a want (R-BTN-205).
   - **The runner writes nothing to git itself.** The leg's `close` writes the closing marker and
     the leg leaves its own evidence (R-BTN-8). On a suspension or release the runner calls
     `close`, then `handoff`, so the hand-off can cite the position. A failing `close` is retried
@@ -224,7 +240,7 @@ section that are not built are in [the proposal page](../proposals/checks-and-ex
     its scripts from the claim's `snapshot_sha` (R-BTN-143), so a course change reaches every
     runner at its next claim without a restart. `min_runner_version` (R-BTN-65) covers harness
     skills; the runner's own features are gated by `runner:` capabilities (R-BTN-133).
-- **R-BTN-106 (a session reports to its runner; the runner checks every move).** `status: built B-47`
+- **R-BTN-106 (a session reports to its runner; the runner checks every move).** `status: partly B-47 B-353`
   - **The leg's channel.** The runner serves one channel per leg and authenticates a call by the
     channel it arrived on; the leg's session finds its address in `BATON_SOCKET`. The interface
     names an address, not a transport: the transport is the executor's (R-BTN-107). It carries
@@ -232,7 +248,7 @@ section that are not built are in [the proposal page](../proposals/checks-and-ex
     "not inside a leg" elsewhere. `status` returns the leg, station, declared capabilities,
     deadline and whether it can refresh. `output <name> --uri <uri> [--digest <digest>]` or
     `output <name> --value <json>` stages or replaces the named output using its declared schema.
-    `done --reached <station> [--next <leg>]`, `suspend --reached <station> [--next <leg>]` and
+    `done --reached <station>`, `suspend --reached <station>` and
     `release --reason <reason>` report one ending; a valid ending consumes the channel's result
     slot. `raise` reports a condition (R-BTN-160). Raw `advance` and `end` are not channel verbs.
     A script may return its result directly instead. Further verbs are in
@@ -240,14 +256,15 @@ section that are not built are in [the proposal page](../proposals/checks-and-ex
   - **A bounded run.** `baton runner start --legs <leg,…> [--max-legs <n>] [--until <instant>]`
     claims and chains into only the named legs. `legs` on an unnamed claim narrows its normal
     selection to the listed queued leg names atomically (one to fifty names). A runner starts at
-    most `n` legs per claim (default 8), and none at or after `until`. A move outside these bounds
+    most `n` legs per claim (default 8), and none at or after `until`. A verdict whose `run` is
+    outside these bounds
     suspends at `reached` with the hand-off and the finished leg's outputs. The runner passes
     `until` as `start_before` (Unix milliseconds) on an advance; Baton refuses without recording
     a start if its clock has reached that instant. The runner checks its own clock before dispatch
     too. Local queue orders do not supersede a leg list.
   - **The session never talks to Baton**; the runner makes every Baton call.
   - **The runner checks each channel move** using the same graph checks as for a script's result: `reached` an outcome of the
-    leg, `next` a leg leaving it, each output valid against its schema, every entry requirement
+    leg, each output valid against its schema, every entry requirement
     of `reached` met (R-BTN-109). A failing move is answered on the channel with the reason and
     may be corrected until the leg's deadline; nothing reaches Baton until it passes. Then
     `close`, `handoff` where it suspends or releases, and `advance` or `end`. A blocked release
@@ -397,11 +414,12 @@ section that are not built are in [the proposal page](../proposals/checks-and-ex
     `released:off-branch` (§9.4).
   - **Not built:** the `baton.off-branch` condition ([B-46](../../tickets/B-46.mdx)) and the
     off-branch sync want ([B-57](../../tickets/B-57.mdx), R-BTN-94).
-- **R-BTN-133 (repository code runs through the wrapper).** `status: built B-42` R-BTN-143 governs snapshot reads. No repository
+- **R-BTN-133 (repository code runs through the wrapper).** `status: partly B-42 B-353` R-BTN-143 governs snapshot reads. No repository
   code loads in the runner's process.
   - **The wrapper** `legProcess.mjs`, the CLI's own, which the executor makes available where
     its sessions run, runs every call into a script — `run`, `close`, `handoff`, a ticket
-    source's exports (R-BTN-74) and R-BTN-134's `tickets`, `stations`, `rank` — as `node
+    source's exports (R-BTN-74), R-BTN-134's `tickets`, `stations`, `rank`, and a selector's
+    `select` (R-BTN-205) — as `node
     legProcess.mjs <call> <script>`, `<call>` naming the export it calls, by the executor's
     `exec` (R-BTN-107). It reads `ctx` as JSON from the first line of stdin (under `run`, each
     later line is an abort reason for `ctx.signal`) and writes `{ok, result | ref | url, error?,
