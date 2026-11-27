@@ -96,8 +96,6 @@ async function protectedWithSignedAuthorship() {
   }));
   expect(registered.status).toBe(200);
   await as(owner, '/v1/owner/ops/owners', { public_key: human.publicKey });
-  // Enroll break-glass as an owner too, so it can call the owner routes.
-  expect((await keyCall(admin, '/v1/admin/repositories', { id: 'ops', owner_keys_add: [breakGlass.publicKey] })).status).toBe(200);
   await makeChecker();
   const { version } = await current();
   const out = await as(human, '/v1/owner/ops/policy', { base_version: version, policy: { ...PROTECTED, human_identity: '42', authorship: 'signed' } }, 'PUT');
@@ -182,7 +180,7 @@ describe('S-BTN-190 guarantees and floors', () => {
     const again = await as(breakGlass, '/v1/owner/ops/policy/floors', { name: 'fieldhouse', guarantees: ['independent-review'] });
     expect(again.status).toBe(409);
     expect(again.json.code).toBe('conflict');
-    // Removal: an owner key is refused (remove_by: human), a human_only key accepted.
+    // Removal: an owner key is refused; the configured key can recover without owning ops.
     const byOwner = await as(owner, '/v1/owner/ops/policy/floors', { name: 'fieldhouse', remove: true, confirm: true });
     expect(byOwner.status).toBe(403);
     const byHuman = await as(breakGlass, '/v1/owner/ops/policy/floors', { name: 'fieldhouse', remove: true, confirm: true });

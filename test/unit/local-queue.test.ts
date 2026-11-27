@@ -249,7 +249,8 @@ describe('a local start', () => {
     expect(() => localConfig({ BATON_TEST_BINDINGS: 'true' }, 'http://127.0.0.1:8787')).toThrow(/test bindings/);
     expect(() => localConfig({ TEST_OIDC_JWKS: '{}' }, 'http://127.0.0.1:8787')).toThrow(/test bindings/);
     expect(() => localConfig({ TOKEN_HASHES: {} }, 'http://127.0.0.1:8787')).toThrow(/string/);
-    const c = localConfig({ OWNER_EMAILS: 'a@example.com' }, 'http://127.0.0.1:8787');
+    const c = localConfig({ OWNER_EMAILS: 'a@example.com', BATON_HUMAN_KEY: 'hardware' }, 'http://127.0.0.1:8787');
+    expect(c.BATON_HUMAN_KEY).toBe('hardware');
     expect(c).toMatchObject({ BATON_ORIGIN: 'http://127.0.0.1:8787', OWNER_EMAILS: 'a@example.com' });
     expect(c.BATON_TEST_BINDINGS).toBeUndefined();
   });
