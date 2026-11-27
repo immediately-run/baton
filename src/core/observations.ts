@@ -44,7 +44,7 @@ export class Observations {
     });
   }
 
-  /** R-BTN-10: record what this observation actually listed, before sending its reply. */
+  /** Record the evidence requirement (§9.6) before sending this observation's reply. */
   expectEvidence(repo: string, n: number): void {
     nonScheduling(this.c.store, () => this.c.store.exec('UPDATE board_head SET observation_expects_evidence = 1 WHERE repository_id = ? AND last_handed_out = ? AND handed_out_at IS NOT NULL', repo, n));
   }

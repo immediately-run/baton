@@ -61,10 +61,10 @@ export async function syncRoute(core: SyncCore, req: Request, url: URL, principa
       // reads each repository by, and whose words count there.
       const observation = core.observations.observe(repo, issuer);
       const record = core.claims.syncRecord(repo);
-      const required_features = record.unconfirmed.length ? [SYNC_EVIDENCE] : [];
-      if (record.unconfirmed.length) core.observations.expectEvidence(repo, observation.observation);
+      const expectsEvidence = record.unconfirmed.length > 0;
+      if (expectsEvidence) core.observations.expectEvidence(repo, observation.observation);
       const home = core.registry.get(repo)!;
-      return json({ ...observation, home: forgeCoordinates(home), ...(request?.outside_work === true ? outsideWorkRecord(core, repo, observation.sha) : {}), bars: core.admin.bars([repo], core.now(), true).map(({ repository_id: _r, ...b }) => b), code_repos: codeReposOf(core.store, repo), pushers: pushersOf(core.store, repo), ...record, required_features, versions: ticketVersions(core, repo), signing_keys: await core.admin.signingKeys(repo), require_signed_control: !!core.sql<{ flag: number }>('SELECT require_signed_control AS flag FROM repositories WHERE id = ?', repo)[0]?.flag });
+      return json({ ...observation, home: forgeCoordinates(home), ...(request?.outside_work === true ? outsideWorkRecord(core, repo, observation.sha) : {}), bars: core.admin.bars([repo], core.now(), true).map(({ repository_id: _r, ...b }) => b), code_repos: codeReposOf(core.store, repo), pushers: pushersOf(core.store, repo), ...record, ...(expectsEvidence ? { required_features: [SYNC_EVIDENCE] } : {}), versions: ticketVersions(core, repo), signing_keys: await core.admin.signingKeys(repo), require_signed_control: !!core.sql<{ flag: number }>('SELECT require_signed_control AS flag FROM repositories WHERE id = ?', repo)[0]?.flag });
     }
     if (req.method === 'POST' && url.pathname === '/v1/sync/board') {
       const { repo, req: signed, issuer, actor } = await principal('sync');
