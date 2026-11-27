@@ -90,12 +90,13 @@ describe('S-BTN-262 the completion’s confirm and release (B-222)', () => {
     expect((await post(`/v1/ui/claims/${claim}/nonsense`, { confirm: true })).status).toBe(404);
   });
 
-  it('both are the registry’s entries on the ticket’s page, with the fence clear', async () => {
+  it('both are registry entries on the ticket’s page and list; the fence clear is page-only', async () => {
     const res = await sessionCall(cookie, '/v1/actions');
     const actions = ((await res.json()) as { actions: Row[] }).actions;
     const entry = (id: string) => actions.find((a) => a.id === id)!;
     for (const [id, path] of [['claim.confirm', '/v1/ui/claims/{claim}/confirm'], ['claim.release', '/v1/ui/claims/{claim}/release'], ['claim.fence-clear', '/v1/ui/claims/{claim}/fence-clear']]) {
-      expect([id, entry(id).ui.route, entry(id).effect, entry(id).ui.view]).toEqual([id, { method: 'POST', path }, 'destructive', ['repository/tickets/{ticket}']]);
+      const views = id === 'claim.fence-clear' ? ['repository/tickets/{ticket}'] : ['repository/tickets/{ticket}', 'repository/tickets'];
+      expect([id, entry(id).ui.route, entry(id).effect, entry(id).ui.view]).toEqual([id, { method: 'POST', path }, 'destructive', views]);
       expect(entry(id).callers).toEqual([{ principal: 'session', roles: ['administrator'], scope: 'instance' }]);
     }
   });

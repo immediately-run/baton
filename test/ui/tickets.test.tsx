@@ -6,6 +6,7 @@
 // lease bar, `stalled` and the condition a leg waits on.
 import { afterEach, describe, expect, it } from 'vitest';
 import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { actionsFor } from '../../src/core/actions';
 import { STATE_MARKS } from '../../src/dashboard/screens/tickets/parts';
 import { tabCount, TICKET_TABS } from '../../src/dashboard/screens/tickets/TicketsScreen';
 import type { TicketRow } from '../../src/dashboard/screens/tickets/types';
@@ -105,6 +106,27 @@ describe('the Tickets table (B-209 item 2)', () => {
     expect(document.querySelector('img')).toBeNull();
     expect(rowOf('HELD').querySelector('.tk-title')!.textContent).toBe(` ${HOSTILE}`);
     expect(bandOf('HELD').textContent).toBe(`Held by owner:abc: ${HOSTILE} · 2 h ago`);
+  });
+
+  it.each(['confirm', 'release'])('S-BTN-326 offers both actions for a dropped ticket and can %s its claim', async (action) => {
+    const claim = 47;
+    const path = `/v1/ui/claims/${claim}/${action}`;
+    const view = `${LIST}?state=unconfirmed`;
+    let resolved = false;
+    const { calls } = serve({
+      '/v1/actions': { actions: actionsFor('administrator', { ownsRepository: true }) },
+      [view]: () => ({ body: { tickets: resolved ? [] : [row('GONE', 'unconfirmed', { title: null, course: null, position: null, detail: { claim_id: claim } })] } }),
+      [`POST ${path}`]: () => { resolved = true; return { body: { ok: true } }; },
+    });
+    renderApp('/repositories/docs/tickets?state=unconfirmed');
+    const controls = within(await screen.findByRole('group', { name: 'The unconfirmed completion' }));
+    expect(within(rowOf('GONE')).queryByRole('link')).toBeNull();
+    expect(controls.getAllByRole('button').map((b) => b.textContent)).toEqual(['Confirm an unconfirmed completion…', 'Release an unconfirmed completion…']);
+    fireEvent.click(controls.getByRole('button', { name: new RegExp(`^${action} `, 'i') }));
+    const dialog = within(screen.getByRole('dialog'));
+    fireEvent.click(dialog.getAllByRole('button').find((b) => !/cancel/i.test(b.textContent ?? ''))!);
+    await screen.findByText('No ticket matches this view.');
+    expect(calls.filter((c) => c.method === 'POST')).toMatchObject([{ path, body: { confirm: true } }]);
   });
 
   it('the tabs carry the read’s counts and set ?state=; ?q= round-trip through the URL', async () => {

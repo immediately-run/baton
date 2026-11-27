@@ -42,6 +42,7 @@ import { hostOf } from './forges/remote';
 import { git, gitText } from './git.mjs';
 import { attestEvidence, type EvidenceAttestation, type EvidencePorts, type UnconfirmedEnd } from './evidence';
 import { outputAttestation, syncAttestationBatch } from './output-evidence';
+import { SYNC_EVIDENCE } from '../shared/syncProtocol';
 
 const MARKERS_FILE_RETIRED = join('.baton', 'markers.jsonl');
 /** The control walks' git (B-127): untrimmed — a commit object's bytes are what its SSHSIG
@@ -816,7 +817,7 @@ async function syncWithSources(args: SyncArgs & { sourceCache: string }): Promis
     buildPayload: async () => {
       const outputs = board!.outputEvidence.toSorted((a, b) => a.ticket.localeCompare(b.ticket) || a.ref!.localeCompare(b.ref!));
       const attestations = syncAttestationBatch(evidence, outputs, observation);
-      return attestations.length ? { ...board!.payload, attestations } : board!.payload;
+      return { ...board!.payload, sync_features: [SYNC_EVIDENCE], ...(attestations.length ? { attestations } : {}) };
     },
     statusOf: (id: string) => board!.statusOf(id),
     sleep,

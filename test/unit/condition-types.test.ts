@@ -40,14 +40,13 @@ describe('the standard condition types (R-BTN-160)', () => {
     expect(dispositionOf('unheard-of.deep', declared)).toBeNull();
   });
 
-  it('errorClassOf names core\'s classes by their type (§6.5: `cannot-finish` classes are the `error.<class>` types), never as `spec`', () => {
-    expect(errorClassOf('error.capability', declared)).toBe('capability');
-    expect(errorClassOf('error.contract-input', declared)).toBe('contract-input');
-    expect(errorClassOf('error.contract-output', declared)).toBe('contract-output');
-    expect(errorClassOf('error.spec', declared)).toBe('spec');
-    expect(errorClassOf('error.needs-person', declared)).toBe('spec'); // non-retryable, no class of its own (R-BTN-195)
-    expect(errorClassOf('error.transient', declared)).toBe('transient');
-    expect(errorClassOf('error', declared)).toBe('transient'); // an untyped exception is error.transient (R-BTN-122)
+  it.each([
+    ['error.capability', 'capability'], ['error.contract-input', 'contract-input'],
+    ['error.contract-output', 'contract-output'], ['error.spec', 'spec'],
+    ['error.needs-person', 'spec'], ['error.transient', 'transient'], ['error', 'transient'],
+    ['error.blocked', 'blocked'], ['error.blocked.refused', 'blocked'],
+  ])('maps %s to %s', (type, cls) => {
+    expect(errorClassOf(type, declared)).toBe(cls);
   });
 
   it('keeps the built-in transient class when a course declares restart options', () => {
@@ -80,7 +79,7 @@ describe('the standard condition types (R-BTN-160)', () => {
 
   it('every class errorClassOf can name forms a released:cannot-finish:<class> reason §6.5 admits', async () => {
     const { RELEASE_END_REASONS } = await import('../../src/core/validate');
-    for (const type of ['error.transient', 'error.capability', 'error.spec', 'error.contract-output', 'error.contract-input', 'error.needs-person', 'error.db-down', 'error.licence']) {
+    for (const type of ['error.transient', 'error.capability', 'error.spec', 'error.blocked', 'error.contract-output', 'error.contract-input', 'error.needs-person', 'error.db-down', 'error.licence']) {
       expect([type, RELEASE_END_REASONS.includes(`cannot-finish:${errorClassOf(type, declared)}` as never)]).toEqual([type, true]);
     }
   });

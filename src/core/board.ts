@@ -150,6 +150,8 @@ export interface BoardPayload {
    *  (`versions`: `pinned` at a version, `current` as it is now) and the CLI that posted. Absent:
    *  an older CLI's post, read as none of it. */
   source?: { kind: 'markdown' | 'custom'; versions?: 'pinned' | 'current'; cli?: string } | null;
+  /** R-BTN-10: advisory protocol feature names, ignored by confirmation. */
+  sync_features?: string[];
   /** The interim post (docs until R3-1233): factory-state's items and the `rankReady` order. */
   state?: { items: StateItem[] };
   /** The ready items in `rankReady` order (lib/factoryState.mjs), computed by the sync. */
@@ -327,6 +329,9 @@ export function checkPayload(body: unknown, repo?: string): BoardPayload {
   if (!body || typeof body !== 'object') throw new BatonError('invalid-params', 'a JSON object is required');
   // Older syncs still post these; neither hooks nor reviewer routing data belongs in core.
   const { hooks: _hooks, matrix: _matrix, reviewers: _reviewers, ...p } = body as BoardPayload & { hooks?: unknown; matrix?: unknown; reviewers?: unknown };
+  // A malformed declaration has the same advisory meaning as no declaration.
+  if (!Array.isArray(p.sync_features) || p.sync_features.length > 32 ||
+      !p.sync_features.every((name) => typeof name === 'string' && /^[a-z][a-z0-9-]{0,63}$/.test(name))) delete p.sync_features;
   if (typeof p.sha !== 'string' || !SHA.test(p.sha)) throw new BatonError('invalid-params', 'sha must be a 40-hex commit');
   if (p.parent_sha !== null && (typeof p.parent_sha !== 'string' || !SHA.test(p.parent_sha))) throw new BatonError('invalid-params', 'parent_sha must be a 40-hex commit or null');
   if (p.read_sha !== undefined && p.read_sha !== null && (typeof p.read_sha !== 'string' || !SHA.test(p.read_sha))) throw new BatonError('invalid-params', 'read_sha must be a 40-hex commit or null (the commit the tickets were read at, B-183)');

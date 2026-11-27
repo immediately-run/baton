@@ -47,10 +47,11 @@ ticket rather than leaving this one open.
 
 ## When you do not merge
 
-If a check is red, a blocking finding is open or the merge is refused, do not merge: end with
-lines that say which PR and why. The stub reads the forge after you exit and reports `merged`
-only when every PR of the ticket is merged and none is open; otherwise the leg fails, quoting
-your last lines, and the ticket stays where it was.
+If a required check is red, the PR conflicts, a blocking finding is open, or the forge refuses
+merge, do not merge. Exit 0 with the PR and the concrete reason on your last line. The stub
+independently reads the forge: a PR still open ends the attempt without an automatic retry.
+If a forge request failed (for example, a timeout or service outage) and you cannot tell whether
+merge was refused or completed, report that request failure and exit nonzero.
 
 ## Do not
 

@@ -2,7 +2,7 @@ import type { BatonCore } from '../baton';
 import { BatonError, errorResponse } from '../http';
 import { dispatchRead } from '../reads';
 import { adminRoute } from './admin';
-import { attestationRoute, dashboardSessionRoute, humanKeysRoute, ownerRoute } from './owner';
+import { admitsBreakGlass, attestationRoute, dashboardSessionRoute, humanKeysRoute, ownerRoute } from './owner';
 import { operatorRoute } from './operator';
 import { dashboardPrincipal, personPrincipal } from './principal';
 import { publicRoute, sequenceRoute } from './public';
@@ -33,7 +33,8 @@ export async function dispatchRoute(core: BatonCore, req: Request, url: URL): Pr
     const read = await dispatchRead({ core, store: core.store, sql: (q, ...p) => core.sql(q, ...p), now: () => core.now(), config: core.config }, req, url);
     if (read) return read;
     if (path.startsWith('/v1/admin/') || path.startsWith('/v1/owner/')) {
-      const principal = await personPrincipal(core, req);
+      const breakGlass = admitsBreakGlass(req.method, path) && req.headers.has('X-Baton-Signed') ? await core.humanBreakGlass() : undefined;
+      const principal = await personPrincipal(core, req, breakGlass);
       const operator = await operatorRoute(core, principal.req, url, principal.cred, principal.administrator ? 'administrator' : 'owner');
       if (operator) return operator;
       const res = path.startsWith('/v1/admin/')
