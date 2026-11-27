@@ -1,0 +1,25 @@
+---
+title: B-258 review round 1
+description: Findings and disposition for the first review of the archive leg after an owner's confirmation; every finding was fixed before merge.
+---
+
+Reviewed [Baton #356](https://github.com/immediately-run/baton/pull/356) at `df9a53c1`
+([review](https://github.com/immediately-run/baton/pull/356#pullrequestreview-6013182871)). The
+verdict was changes: the reviewer ran 154 focused tests across six suites, S-BTN-232 on both hosts
+included, and found that the new course can strand tickets before or after confirmation (answer
+handling, rollout, supported ticket paths and the acceptance scenario).
+
+The PR was merged on 2026-11-26. Every finding of this round was fixed in `fdd84a12`; round 2
+([`B-258-round-2.mdx`](./B-258-round-2.mdx)) reviewed that head. The PR body records that the
+archive was later reworked onto Dibber (`src/defaults/tickets-transaction.ts` removed), after
+which a ticket whose file is not named after its id is refused unwritten.
+
+| Finding | Disposition |
+|---|---|
+| [Blocking: a sync-authored `confirmed` settles the question, then the close refuses it](https://github.com/immediately-run/baton/pull/356#discussion_r4658865698) | Fixed in `fdd84a12`. |
+| [Blocking: tickets already confirmed under B-257 are stranded by the course change](https://github.com/immediately-run/baton/pull/356#discussion_r4658865700) | Fixed in `fdd84a12`. |
+| [Blocking: a pre-change runner qualifies and fails the new close](https://github.com/immediately-run/baton/pull/356#discussion_r4658865702) | Fixed in `fdd84a12`. |
+| [Blocking: a ticket file with a noncanonical name or path can never be archived](https://github.com/immediately-run/baton/pull/356#discussion_r4658865704) | Fixed in `fdd84a12`; the later Dibber rework refuses such a file again, unwritten, as the PR body records. |
+| [Blocking: after `filed`, the next owner's `confirmed` is refused as already answered](https://github.com/immediately-run/baton/pull/356#discussion_r4658865708) | Fixed in `fdd84a12`. |
+| [Blocking: the scenario never runs a real owner answer through to a pushed archive](https://github.com/immediately-run/baton/pull/356#discussion_r4658865710) | Fixed in `fdd84a12`. |
+| [Should-fix: a retry reports the latest commit on the path, not the archive commit](https://github.com/immediately-run/baton/pull/356#discussion_r4658865711) | Fixed in `fdd84a12`. |

@@ -1,0 +1,18 @@
+---
+title: B-173 review round 3
+description: Findings and disposition for the third review of repository retirement after main moved under it; all three findings were fixed before merge.
+---
+
+Reviewed [Baton #230](https://github.com/immediately-run/baton/pull/230) at `e8ee9585`
+([review](https://github.com/immediately-run/baton/pull/230#pullrequestreview-5910364517)). The
+verdict was changes: the diff had not moved, but `main` had taken migrations 0043 to 0048 and
+B-234's conditions store, so the PR conflicted and, by the ticket's lands-second rule, had to carry
+the conditions store's retirement step. The reviewer re-ran the suite and checks.
+
+The PR was merged on 2026-11-15. Every finding of this round was fixed before merge.
+
+| Finding | Disposition |
+|---|---|
+| [Blocking: the retirement migration's number collides with main's 0043](https://github.com/immediately-run/baton/pull/230#discussion_r4578104507) | Fixed in `26596cae` (renumbered, conflicts merged keeping both sides). |
+| [Should-fix: B-234's conditions route answers `forbidden` for a retired repository](https://github.com/immediately-run/baton/pull/230#discussion_r4578104509) | Fixed in `26596cae`. |
+| [Should-fix: a retired repository's open conditions never close](https://github.com/immediately-run/baton/pull/230#discussion_r4578104511) | Fixed in `26596cae`. |
