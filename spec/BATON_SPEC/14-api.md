@@ -193,13 +193,25 @@ here; every other cause is its rule's.
 | `POST /v1/ui/human-challenge` | session | `{action, params}` | `{challenge, expires_at}`: a WebAuthn challenge for that session, action and parameters, used once, valid two minutes; not built (B-340) | R-BTN-185 |
 | `POST /v1/ui/logout` | session | `{}` or `{all: true}` | `{ok: true}`; the tab's own session ends (`ui.logout`), and the cookie is cleared when no session of the browser remains; `all` ends every session bound to the cookie and clears it (not built: B-76) | R-BTN-155 |
 | `POST /v1/ui/messages` | session (administrator, owner) | `{to_runner_id, kind: "release" \| "status_request" \| "wind-down", payload}`; Stop is `{kind: "release", payload: {ticket_id, reason: "requested"}, confirm: true}` | `{id}`; `forbidden` for a `release` whose ticket `to_runner_id` does not hold; any other kind `invalid-params` | §6, §12.2, R-BTN-119 |
+| `POST /v1/admin/messages` | administrator | `{to_runner_id, kind: "release" \| "status_request" \| "wind-down", payload}`; Stop is `{kind: "release", payload: {ticket_id, reason: "requested"}, confirm: true}` | `{id}`; `forbidden` for a `release` whose ticket `to_runner_id` does not hold; any other kind `invalid-params` | §6, §12.2, R-BTN-119 |
+| `POST /v1/owner/{repository}/messages` | owner | `{to_runner_id, kind: "release" \| "status_request" \| "wind-down", payload}`; Stop is `{kind: "release", payload: {ticket_id, reason: "requested"}, confirm: true}` | `{id}`; `forbidden` for a `release` whose ticket `to_runner_id` does not hold; any other kind `invalid-params` Stop names a ticket here; status and wind-down require ownership of every repository the runner is granted on or holds a claim in. | §6, §12.2, R-BTN-119 |
 | `POST /v1/ui/overrides/{ticket}` | session (administrator, owner) | `{expedite}` or `{hold}` | `{ok: true}` | §6 |
+| `POST /v1/admin/overrides/{ticket}` | administrator | `{expedite}` or `{hold}` | `{ok: true}` | §6 |
+| `POST /v1/owner/{repository}/overrides/{ticket}` | owner | `{expedite}` or `{hold}` | `{ok: true}` The ticket must be in this repository. | §6 |
 | `POST /v1/ui/board/accept` | session (administrator) | `{repository, sha}` | `{ok: true}` (`repo.accept-post`); `not-found` for no such held history | R-BTN-11 |
+| `POST /v1/admin/board/accept` | administrator | `{repository, sha}` | `{ok: true}` (`repo.accept-post`); `not-found` for no such held history | R-BTN-11 |
 | `POST /v1/ui/resync` | session (administrator, owner) | `{repository}` | `{ok: true}` (`repo.resync`): the repository's sync workflow is dispatched, as a delivery dispatches it; `conflict` within 30 seconds of the last one or with no sync workflow registered; `invalid-params` for `force` or `sha` | R-BTN-73, R-BTN-94 |
+| `POST /v1/admin/resync` | administrator | `{repository}` | `{ok: true}` (`repo.resync`): the repository's sync workflow is dispatched, as a delivery dispatches it; `conflict` within 30 seconds of the last one or with no sync workflow registered; `invalid-params` for `force` or `sha` | R-BTN-73, R-BTN-94 |
+| `POST /v1/owner/{repository}/resync` | owner | `{repository}` | `{ok: true}` (`repo.resync`): the repository's sync workflow is dispatched, as a delivery dispatches it; `conflict` within 30 seconds of the last one or with no sync workflow registered; `invalid-params` for `force` or `sha` The body must name this repository. | R-BTN-73, R-BTN-94 |
 | `POST /v1/ui/scope/{id}/resolve` | session (administrator, owner) | `{}` | `{ok: true}`; `not-found` for none open | §12.9 |
+| `POST /v1/admin/scope/{id}/resolve` | administrator | `{}` | `{ok: true}`; `not-found` for none open | §12.9 |
+| `POST /v1/owner/{repository}/scope/{id}/resolve` | owner | `{}` | `{ok: true}`; `not-found` for none open The finding must be in this repository. | §12.9 |
 | `POST /v1/ui/claims/{id}/reap` | session (administrator) | `{confirm: true}` | `{ok: true}` | §9 |
+| `POST /v1/admin/claims/{id}/reap` | administrator | `{confirm: true}` | `{ok: true}` | §9 |
 | `POST /v1/ui/claims/{id}/fence-clear` | session (administrator) | `{confirm: true}` | `{ok: true}`; `conflict` when the claim's fence is not pending | R-BTN-19 |
+| `POST /v1/admin/claims/{id}/fence-clear` | administrator | `{confirm: true}` | `{ok: true}`; `conflict` when the claim's fence is not pending | R-BTN-19 |
 | `POST /v1/ui/claims/{id}/confirm`, `…/release` | session (an administrator's) | `{confirm: true}` | `{ok: true}`; `not-found` for a claim that is no unconfirmed completion. Each acts at once, as `…/reap` does: the confirmation code of R-BTN-155 is not built (B-76) | R-BTN-10 |
+| `POST /v1/admin/claims/{id}/confirm`, `…/release` | administrator | `{confirm: true}` | `{ok: true}`; `not-found` for a claim that is no unconfirmed completion. Each acts at once, as `…/reap` does: the confirmation code of R-BTN-155 is not built (B-76) | R-BTN-10 |
 
 **Legacy, removed with its code (R-BTN-193).** The mirror and the cutover (§16, R-BTN-28) add
 the routes below, and: the caller *mirror*, a mirror key or the mirror's CI identity; the code
@@ -215,4 +227,6 @@ webhook ignores; and lagging mirrors among what a seal's `conflict` names.
 | `POST /v1/runner/shadow-report` | machine | `{transition: "claim" \| "set", ticket_id, status, nonce, at}` | `{ok}`, or a logged `shadow-conflict` |
 | `GET /v1/sync/events` | mirror | `?after=<seq>`, which acknowledges up to the lesser of `after` and the last `seq` a read returned to the mirror | `{events[], next}` |
 | `POST /v1/ui/cutover` | session (administrator) | `{repository, confirm: true}` | `{ok: true}` |
-| `POST /v1/ui/adoptions/{claim}/confirm` | session (administrator) | `{runner_id}` | `{ok: true}` |
+| `POST /v1/admin/cutover` | administrator | same as the session route above | same as the session route above |
+| `POST /v1/ui/adoptions/{ticket}/confirm` | session (administrator) | `{confirm: true}` | `{ok: true}` |
+| `POST /v1/admin/adoptions/{ticket}/confirm` | administrator | same as the session route above | same as the session route above |

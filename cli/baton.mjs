@@ -279,7 +279,7 @@ function workingTreeRefusal(argv) {
  *  the owner and administrator commands' value-less flags (parseArgs booleans) are named here so
  *  `--yes --dev` still counts. An unknown boolean is read as value-taking, which refuses rather
  *  than bypasses — the safe direction. */
-const NO_VALUE_FLAGS = new Set(['transitive', 'cut-over', 'available', 'unavailable', 'clear', 'yes', 'release-holders', 'no-required-bars', 'require-signed-control', 'no-require-signed-control', 'watch', 'all', 'dry-run']);
+const NO_VALUE_FLAGS = new Set(['transitive', 'cut-over', 'available', 'unavailable', 'clear', 'yes', 'json', 'admin', 'release-holders', 'no-required-bars', 'require-signed-control', 'no-require-signed-control', 'watch', 'all', 'dry-run']);
 function devFlagPositions(argv) {
   const at = [];
   for (let i = 1; i < argv.length; i++) {
@@ -305,10 +305,60 @@ function devFlagPositions(argv) {
  * @param {(path: string) => string} [readKey]
  * @param {(path: string) => string} [readJson]
  * @param {{repository: string | null, names: string[]} | null} [home]
- * @returns {{method: string, path: string, body?: Record<string, unknown>, file?: string, readFile?: string, confirm?: {question: string, yes: boolean}, preflight?: {method: string, path: string, question: string}, yes?: boolean, resolveCodeRepos?: {repository: string, offline: {repo_id: string, owner_id: string} | null}}}
+ * @returns {{method: string, path: string, body?: Record<string, unknown>, file?: string, readFile?: string, confirm?: {question: string, yes: boolean}, stopLookup?: string, preflight?: {method: string, path: string, question: string}, yes?: boolean, resolveCodeRepos?: {repository: string, offline: {repo_id: string, owner_id: string} | null}}}
  */
 export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? p : readFileSync(p, 'utf8').trim()), readJson = (p) => readFileSync(p, 'utf8'), home = null) {
   const [cmd, ...rest] = argv;
+  const enc = encodeURIComponent;
+  const owner = (repo) => `/v1/owner/${enc(repo)}`;
+  const admin = '/v1/admin';
+  const ask = (question, yes) => ({ question, yes: !!yes });
+  const numericId = (value, label) => {
+    if (!/^[1-9]\d*$/.test(value ?? '') || !Number.isSafeInteger(Number(value))) throw new Error(`${label} must be a positive integer`);
+    return Number(value);
+  };
+  if ((role === 'ticket' && ['hold', 'unhold', 'expedite'].includes(cmd)) || (role === 'leg' && cmd === 'stop')) {
+    const stop = role === 'leg';
+    const { flags, positional } = parseArgs(rest, ['json', 'admin', ...(stop ? ['yes'] : cmd === 'expedite' ? ['clear'] : [])], [], 1);
+    const { repository, local } = ticketArg(need(positional[0], 'the ticket'), home);
+    const ticket = `${repository}:${local}`;
+    const prefix = flags.admin ? admin : owner(repository);
+    if (stop) return {
+      method: 'POST', path: `${prefix}/messages`, body: { kind: 'release', payload: { ticket_id: ticket, reason: 'requested' }, confirm: true },
+      stopLookup: `/v1/repositories/${enc(repository)}/tickets/${enc(local)}`, confirm: ask(`stop the leg on ${ticket}?`, flags.yes),
+    };
+    return { method: 'POST', path: `${prefix}/overrides/${enc(flags.admin ? ticket : local)}`,
+      body: cmd === 'expedite' ? { expedite: !flags.clear } : { hold: cmd === 'hold' } };
+  }
+  if (role === 'runner' && (cmd === 'status' || cmd === 'wind-down')) {
+    const { flags, positional } = parseArgs(rest, ['json'], ['repository'], 1);
+    return { method: 'POST', path: `${flags.repository ? owner(flags.repository) : admin}/messages`,
+      body: { to_runner_id: numericId(positional[0], 'runner id'), kind: cmd === 'status' ? 'status_request' : 'wind-down' } };
+  }
+  const [verb, ...targets] = rest;
+  if (role === 'admin' && cmd === 'claim' && ['reap', 'fence-clear', 'confirm', 'release'].includes(verb)) {
+    const { flags, positional } = parseArgs(targets, ['json', 'yes'], [], 1);
+    const id = numericId(positional[0], 'claim id');
+    return { method: 'POST', path: `${admin}/claims/${id}/${verb}`, body: { confirm: true }, confirm: ask(`${verb} claim ${id}?`, flags.yes) };
+  }
+  if (role === 'admin' && cmd === 'adoption' && verb === 'confirm') {
+    const { flags, positional } = parseArgs(targets, ['json', 'yes'], [], 1);
+    const { repository, local } = ticketArg(need(positional[0], 'the ticket'), home);
+    const ticket = `${repository}:${local}`;
+    return { method: 'POST', path: `${admin}/adoptions/${enc(ticket)}/confirm`, body: { confirm: true }, confirm: ask(`confirm adoption of ${ticket}?`, flags.yes) };
+  }
+  if ((role === 'owner' || role === 'admin') && cmd === 'scope' && verb === 'resolve') {
+    const { positional } = parseArgs(targets, ['json'], [], role === 'owner' ? 2 : 1);
+    const prefix = role === 'owner' ? owner(need(positional[0], 'the repository')) : admin;
+    return { method: 'POST', path: `${prefix}/scope/${numericId(positional[role === 'owner' ? 1 : 0], 'finding id')}/resolve`, body: {} };
+  }
+  if (cmd === 'repo' && (role === 'admin' && ['accept-post', 'cutover', 'resync'].includes(verb) || role === 'owner' && verb === 'resync')) {
+    const { flags, positional } = parseArgs(targets, ['json', ...(verb === 'cutover' ? ['yes'] : [])], [], verb === 'accept-post' ? 2 : 1);
+    const repository = repoOrHome(positional[0], home);
+    if (verb === 'accept-post') return { method: 'POST', path: `${admin}/board/accept`, body: { repository, sha: need(positional[1], 'the held post SHA') } };
+    if (verb === 'cutover') return { method: 'POST', path: `${admin}/cutover`, body: { repository, confirm: true }, confirm: ask(`cut over ${repository}?`, flags.yes) };
+    return { method: 'POST', path: `${role === 'owner' ? owner(repository) : admin}/resync`, body: { repository } };
+  }
   if (role === 'leg' && cmd === 'why') {
     const { positional } = parseArgs(rest, [], [], 2);
     const { repository, local } = ticketArg(need(positional[0], 'the ticket, <repository>:<id>'), home);
@@ -1092,7 +1142,9 @@ export async function main(argv) {
   // takes one is a pinned release — never a git working tree, whose code a push (a branch a leg
   // checks out) changes. `--dev` is the override for this repository's own development; the
   // other roles (the reads, the runner, the repository commands) run from a checkout still.
-  if (argv[0] === 'admin' || argv[0] === 'owner') {
+  const writeVerbs = { ticket: ['hold', 'unhold', 'expedite'], leg: ['stop'], runner: ['status', 'wind-down'] };
+  const verb = argv.slice(1).find((arg, i) => !['-i', '--url', '--home'].includes(argv[i]) && !arg.startsWith('-'));
+  if (argv[0] === 'admin' || argv[0] === 'owner' || (Object.hasOwn(writeVerbs, argv[0]) && writeVerbs[argv[0]].includes(verb))) {
     const dev = devFlagPositions(argv);
     const end = argv.indexOf('--') === -1 ? argv.length : argv.indexOf('--');
     if (dev.length > 0 && dev.length === argv.slice(0, end).reduce((n, a) => n + (a === '--dev' ? 1 : 0), 0)) {
@@ -1296,7 +1348,20 @@ export async function main(argv) {
   }
   // §12.2: a destructive action with no preflight read — retiring a repository — asks the same
   // way: --yes answers beforehand, a terminal decides, a pipe refuses.
-  if (p.confirm && !(await confirmAsk(p.confirm.question, p.confirm.yes, process.stdout, process.stdin))) return 1;
+  if (p.confirm && !(await confirmAsk(p.confirm.question, p.confirm.yes, args.includes('--json') ? process.stderr : process.stdout, process.stdin))) return 1;
+  if (p.stopLookup) {
+    const read = await send(url, { method: 'GET', path: p.stopLookup }, keyFile);
+    if (!(read.status >= 200 && read.status < 300)) {
+      process.stdout.write(`${JSON.stringify(read.json)}\n`);
+      return 1;
+    }
+    const runner = read.json?.claim?.runner_id;
+    if (!Number.isSafeInteger(runner) || runner <= 0) {
+      process.stdout.write(`${JSON.stringify({ ok: false, code: 'not-found', message: 'the ticket has no running claim' })}\n`);
+      return 1;
+    }
+    p.body.to_runner_id = runner;
+  }
   // R-BTN-88 (§4.8, R3-1258): `admin import FILE` — the export file is the request's body, read
   // and parsed here (a file that is not JSON is the caller's error, in the CLI's words).
   if (p.readFile) {

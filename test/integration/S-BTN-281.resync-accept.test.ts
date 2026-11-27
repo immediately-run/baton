@@ -10,7 +10,7 @@
 //      sent; an unknown field, a missing repository and a repository that does not exist are
 //      refused;
 //   4. without a session it is `unauthenticated`; a request from another origin is `forbidden`
-//      (R-BTN-16); a key is not a caller;
+//      (R-BTN-16); a key does not use the UI path;
 //   5. both actions are the Sync screen's controls in the registry, an administrator's
 //      session's; accept takes the held post, which the sync's next post then makes the head.
 // Runs on both hosts.
@@ -83,10 +83,11 @@ describe('S-BTN-281 a session’s resync and accept (B-201)', () => {
     expect(sent).toEqual([]);
   });
 
-  it('resync and accept are the Sync screen’s controls; accept takes the held post', async () => {
+  it.each(['ui', 'admin'])('resync and accept are Sync controls; %s accepts the held post', async (surface) => {
+    const accept = (body: object) => surface === 'admin' ? keyCall(f.admin, '/v1/admin/board/accept', body) : postSession(f.cookie, '/v1/ui/board/accept', body);
     const by = new Map(ACTIONS.map((a) => [a.id, a]));
     for (const id of ['repo.resync', 'repo.accept-post']) {
-      expect([id, by.get(id)!.ui?.view, by.get(id)!.effect, by.get(id)!.callers]).toEqual([id, ['repository/sync'], 'write', [{ principal: 'session', roles: ['administrator'], scope: 'instance' }]]);
+      expect([id, by.get(id)!.ui?.view, by.get(id)!.effect, by.get(id)!.callers.filter((c) => c.principal === 'session')]).toEqual([id, ['repository/sync'], 'write', [{ principal: 'session', roles: id === 'repo.resync' ? ['administrator', 'owner'] : ['administrator'], scope: id === 'repo.resync' ? 'repository' : 'instance' }]]);
     }
     const listed = ((await readSession(f.cookie, '/v1/actions')).json.actions as Json[]).filter((a) => a.ui?.view?.includes('repository/sync')).map((a) => a.id).sort();
     expect(listed).toEqual(['adoption.confirm', 'repo.accept-post', 'repo.cutover', 'repo.resync']);
@@ -95,8 +96,8 @@ describe('S-BTN-281 a session’s resync and accept (B-201)', () => {
     expect(((await f.git.post({ force: true })) as Json).code).toBe('snapshot-rejected');
     const held = (await readSession(f.cookie, '/v1/repositories/docs/sync')).json.held as Json[];
     expect(held.map((h) => h.accepted_at)).toEqual([null]);
-    expect((await postSession(f.cookie, '/v1/ui/board/accept', { repository: 'docs', sha: 'f'.repeat(40) })).json.code).toBe('not-found');
-    const accepted = await postSession(f.cookie, '/v1/ui/board/accept', { repository: 'docs', sha: held[0].sha });
+    expect((await accept({ repository: 'docs', sha: 'f'.repeat(40) })).json.code).toBe('not-found');
+    const accepted = await accept({ repository: 'docs', sha: held[0].sha });
     expect([accepted.status, accepted.json]).toEqual([200, { ok: true }]);
     const after = (await readSession(f.cookie, '/v1/repositories/docs/sync')).json;
     expect(after.held.map((h: Json) => h.accepted_at)).toEqual([T0 + MIN]);
