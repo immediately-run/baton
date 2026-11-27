@@ -12,7 +12,7 @@
 // B-76: no confirmation code and no owner session exist, so the routes act at once for the
 // only session there is, as `claim.force-reap` does. Runs on both hosts.
 import { describe, it, expect, beforeEach } from 'vitest';
-import { adminSession, claimRow, cutover, Git, ORIGIN, register, rows, sessionCall, setAdminKeys, setClock, seedClaim } from '../helpers';
+import { adminSession, claimRow, cutover, Git, keyCall, ORIGIN, register, rows, sessionCall, setAdminKeys, setClock, seedClaim } from '../helpers';
 import { makeKey, type TestKey } from '../lib/sshKeys';
 import { call as hostCall } from '#host';
 
@@ -49,14 +49,15 @@ beforeEach(async () => {
 });
 
 describe('S-BTN-262 the completion’s confirm and release (B-222)', () => {
-  it('confirm confirms an unconfirmed completion', async () => {
+  it.each(['ui', 'admin'])('confirm confirms an unconfirmed completion via %s', async (surface) => {
+    const send = (path: string, body: unknown) => surface === 'admin' ? keyCall(admin, path.replace('/ui/', '/admin/'), body) : post(path, body);
     const claim = await completion('T-1');
     const before = await stateOf('T-1');
     expect([before.state, before.detail.claim_id]).toEqual(['unconfirmed', claim]);
     // It names its own confirmation (§12.2).
-    expect((await post(`/v1/ui/claims/${claim}/confirm`, {})).status).toBe(400);
+    expect((await send(`/v1/ui/claims/${claim}/confirm`, {})).status).toBe(428);
     expect((await claimRow(claim)).confirmed_at).toBeNull();
-    const done = await post(`/v1/ui/claims/${claim}/confirm`, { confirm: true });
+    const done = await send(`/v1/ui/claims/${claim}/confirm`, { confirm: true });
     expect([done.status, done.json]).toEqual([200, { ok: true }]);
     expect(await claimRow(claim)).toMatchObject({ status: 'completed', confirmed_at: T0 });
     const logged = await events(claim);
@@ -64,14 +65,15 @@ describe('S-BTN-262 the completion’s confirm and release (B-222)', () => {
     expect(logged[0].actor.startsWith('owner:')).toBe(true);
     expect((await stateOf('T-1')).state).not.toBe('unconfirmed');
     // Once confirmed it is no unconfirmed completion: neither route finds it.
-    expect((await post(`/v1/ui/claims/${claim}/confirm`, { confirm: true })).status).toBe(404);
-    expect((await post(`/v1/ui/claims/${claim}/release`, { confirm: true })).status).toBe(404);
+    expect((await send(`/v1/ui/claims/${claim}/confirm`, { confirm: true })).status).toBe(404);
+    expect((await send(`/v1/ui/claims/${claim}/release`, { confirm: true })).status).toBe(404);
   });
 
-  it('release releases one, and the ticket is offered again', async () => {
+  it.each(['ui', 'admin'])('release releases one via %s, and the ticket is offered again', async (surface) => {
+    const send = (path: string, body: unknown) => surface === 'admin' ? keyCall(admin, path.replace('/ui/', '/admin/'), body) : post(path, body);
     const claim = await completion('T-2');
-    expect((await post(`/v1/ui/claims/${claim}/release`, { confirm: false })).status).toBe(400);
-    const done = await post(`/v1/ui/claims/${claim}/release`, { confirm: true });
+    expect((await send(`/v1/ui/claims/${claim}/release`, { confirm: false })).status).toBe(428);
+    const done = await send(`/v1/ui/claims/${claim}/release`, { confirm: true });
     expect([done.status, done.json]).toEqual([200, { ok: true }]);
     expect(await claimRow(claim)).toMatchObject({ status: 'released', end_reason: 'released:requested', confirmed_at: null });
     expect((await events(claim)).map((e) => e.kind)).toEqual(['released']);
@@ -93,7 +95,7 @@ describe('S-BTN-262 the completion’s confirm and release (B-222)', () => {
     const actions = ((await res.json()) as { actions: Row[] }).actions;
     const entry = (id: string) => actions.find((a) => a.id === id)!;
     for (const [id, path] of [['claim.confirm', '/v1/ui/claims/{claim}/confirm'], ['claim.release', '/v1/ui/claims/{claim}/release'], ['claim.fence-clear', '/v1/ui/claims/{claim}/fence-clear']]) {
-      expect([id, entry(id).http, entry(id).effect, entry(id).ui.view]).toEqual([id, { method: 'POST', path }, 'destructive', ['repository/tickets/{ticket}']]);
+      expect([id, entry(id).ui.route, entry(id).effect, entry(id).ui.view]).toEqual([id, { method: 'POST', path }, 'destructive', ['repository/tickets/{ticket}']]);
       expect(entry(id).callers).toEqual([{ principal: 'session', roles: ['administrator'], scope: 'instance' }]);
     }
   });

@@ -4,7 +4,9 @@
 // marker and git fallback are R3-1219's.
 import { describe, it, expect, inject, beforeEach } from 'vitest';
 import {
-  beat, claimItem, claimRow, ORIGIN, ownerCall, payload, register, rows, setClock, syncCall, tick, runnerCall, stateView } from '../helpers';
+  beat, claimItem, claimRow, ORIGIN, keyCall, ownerCall, payload, register, rows, setAdminKeys, setClock, syncCall, tick, runnerCall, stateView } from '../helpers';
+
+import { makeKey } from '../lib/sshKeys';
 
 const board = inject('board');
 const sha = board.shas;
@@ -73,11 +75,17 @@ describe('S-BTN-16 cutover (server)', () => {
     expect((await owner('/v1/ui/cutover', { repository: 'docs', confirm: true })).status).toBe(200);
   });
 
-  it('G-BTN-19: the session the note names asks to adopt; the claim moves only when the owner confirms', async () => {
+  it.each(['ui', 'admin'])('G-BTN-19 / S-BTN-323: cut over and move the legacy claim by %s', async (surface) => {
+    const admin = surface === 'admin' ? await makeKey('ssh-ed25519', 'admin') : null;
+    if (admin) await setAdminKeys(admin);
+    const post = async (suffix: string, body: object) => admin
+      ? (await keyCall(admin, `/v1/admin/${suffix}`, body)).status
+      : (await owner(`/v1/ui/${suffix}`, body)).status;
     const mine = await register('vm-a'); // session s-vm-a
     const other = await register('vm-b');
     await syncCall('/v1/sync/board', boardB('s-vm-a'));
-    await owner('/v1/ui/cutover', { repository: 'docs', confirm: true });
+    expect(await post('cutover', { repository: 'docs' })).toBe(428);
+    expect(await post('cutover', { repository: 'docs', confirm: true })).toBe(200);
     expect(await rows(`SELECT session_name FROM runners WHERE kind = 'legacy'`)).toEqual([{ session_name: 's-vm-a' }]);
     const legacy = (await rows<{ id: number; nonce: string }>(`SELECT id, nonce FROM claims`))[0];
 
@@ -89,10 +97,11 @@ describe('S-BTN-16 cutover (server)', () => {
     const state = (await stateView()) as { needs_you: { adoptions: { ticket_id: string; session_name: string }[] } };
     expect(state.needs_you.adoptions).toEqual([expect.objectContaining({ ticket_id: 'docs:R3-9001', session_name: 's-vm-a', legacy_session: 's-vm-a' })]);
 
-    expect((await owner('/v1/ui/adoptions/docs:R3-9001/confirm', { confirm: true })).status).toBe(200);
+    expect(await post('adoptions/docs:R3-9001/confirm', {})).toBe(428);
+    expect(await post('adoptions/docs:R3-9001/confirm', { confirm: true })).toBe(200);
     expect((await beat('vm-a', mine.secret)).json.claim).toMatchObject({ id: legacy.id, ticket_id: 'docs:R3-9001', nonce: legacy.nonce });
     expect(await rows(`SELECT reap_after FROM claims WHERE id = ?`, legacy.id)).toEqual([{ reap_after: null }]);
-    expect(await rows(`SELECT kind, actor FROM events WHERE kind = 'adopted'`)).toEqual([{ kind: 'adopted', actor: 'owner:owner@example.com' }]);
+    expect(await rows(`SELECT kind, actor FROM events WHERE kind = 'adopted'`)).toEqual([{ kind: 'adopted', actor: `owner:${admin?.fingerprint ?? 'owner@example.com'}` }]);
     // Adopted, it is an ordinary claim: no legacy reap, and it counts toward R-BTN-4's bound (B-188).
     expect((await claimItem('vm-a', mine.secret)).json.rule).toBe('max-claims');
   });

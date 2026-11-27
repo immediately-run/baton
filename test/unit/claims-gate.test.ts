@@ -198,7 +198,7 @@ describe('§6.7: the owner resolves an unconfirmed completion', () => {
 
   it('confirm: the item is confirmed by the owner', async () => {
     const id = await unconfirmed();
-    expect((await owner(`/v1/ui/claims/${id}/confirm`, {})).status).toBe(400); // names its confirmation
+    expect((await owner(`/v1/ui/claims/${id}/confirm`, {})).status).toBe(428);
     expect((await owner(`/v1/ui/claims/${id}/confirm`, { confirm: true })).status).toBe(200);
     expect((await claimRow(id)).confirmed_at).toBe(T0);
     expect(await rows(`SELECT actor FROM events WHERE kind = 'confirmed'`)).toEqual([{ actor: 'owner:owner@example.com' }]);

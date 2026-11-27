@@ -668,9 +668,25 @@ export class RunnerApi {
   /** `POST /v1/ui/messages`: a release (`requested`, `owner-cancel`, `provider-suspended`), a
    *  status request, or a wind-down (B-109: the runner drains — its current leg completes, then
    *  it exits without claiming again), from the owner to one runner. */
-  sendMessage(owner: string, body: unknown) {
+  sendMessage(owner: string, body: unknown, scope?: { repository: string; owns: (id: string) => boolean }) {
     const m = checkMessage(body);
     if (!this.rows('SELECT 1 FROM runners WHERE id = ?', m.to_runner_id).length) throw new BatonError('not-found', 'no such runner');
+    if (m.kind === 'release') {
+      const held = this.rows<{ repository_id: string }>(
+        `SELECT t.repository_id FROM claims c JOIN tickets t ON t.id = c.ticket_id
+         WHERE c.runner_id = ? AND c.ticket_id = ? AND c.status = 'active'`, m.to_runner_id, m.payload?.ticket_id as string)[0];
+      if (!held || (scope && held.repository_id !== scope.repository)) throw new BatonError('forbidden', 'the runner does not hold this ticket in scope');
+    } else if (scope) {
+      // These messages affect the whole runner, not just work on the repository in the URL.
+      const repos = this.rows<{ repository_id: string }>(
+        `SELECT g.repository_id FROM runner_grants g JOIN runners w ON w.credential_id = g.credential_id
+         WHERE w.id = ? AND g.revoked_at IS NULL
+         UNION SELECT t.repository_id FROM claims c JOIN tickets t ON t.id = c.ticket_id
+         WHERE c.runner_id = ? AND c.status = 'active'`, m.to_runner_id, m.to_runner_id);
+      if (!repos.some((r) => r.repository_id === scope.repository) || repos.some((r) => !scope.owns(r.repository_id))) {
+        throw new BatonError('forbidden', 'the runner is outside this owner’s scope');
+      }
+    }
     return this.exec<{ id: number }>(`INSERT INTO messages (kind, payload_json, from_principal, to_runner_id, sent_at, status)
       VALUES (?, ?, ?, ?, ?, 'pending') RETURNING id`,
       m.kind, m.payload ? JSON.stringify(m.payload) : null, `owner:${owner}`, m.to_runner_id, this.c.now()).one();

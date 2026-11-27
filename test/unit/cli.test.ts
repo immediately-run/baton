@@ -11,6 +11,7 @@ import { answerPlan, confirmAsk, confirmCapacity, createApiKey, duration, main, 
 import { formatDecision, listOnce, plain, watch, WATCH_EVERY_MS } from '../../cli/decisions.mjs';
 import { Git, ORIGIN, setAdminKeys, setClock } from '../helpers';
 import type { TestKey } from '../lib/sshKeys';
+import { ACTIONS, listsSession, matchAction } from '../../src/core/actions';
 import { call as hostCall } from '#host';
 
 const PUB = 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOwner';
@@ -26,6 +27,39 @@ const fakeIn = (line?: string) => {
 };
 
 describe('plan: one request per command', () => {
+  it('S-BTN-323: every operator CLI write selects its key route and body', () => {
+    const commands = [
+      ...['reap', 'fence-clear', 'confirm', 'release'].map((verb, i) => [
+        `claim.${['force-reap', 'fence-clear', 'confirm', 'release'][i]}`, 'admin', 'claim', verb, '1', '--yes',
+      ]),
+      ['adoption.confirm', 'admin', 'adoption', 'confirm', 'docs:A', '--yes'],
+      ['repo.cutover', 'admin', 'repo', 'cutover', 'docs', '--yes'],
+      ['scope.resolve', 'admin', 'scope', 'resolve', '1'],
+      ['scope.resolve', 'owner', 'scope', 'resolve', 'docs', '1'],
+      ['repo.accept-post', 'admin', 'repo', 'accept-post', 'docs', 'a'.repeat(40)],
+      ['repo.resync', 'admin', 'repo', 'resync', 'docs'],
+      ['repo.resync', 'owner', 'repo', 'resync', 'docs'],
+      ['runner.status-request', 'runner', 'status', '7'],
+      ['runner.wind-down', 'runner', 'wind-down', '7', '--repository', 'docs'],
+      ['leg.stop', 'leg', 'stop', 'docs:A', '--yes'],
+      ['ticket.hold', 'ticket', 'hold', 'docs:A'],
+      ['ticket.unhold', 'ticket', 'unhold', 'docs:A', '--admin'],
+      ['ticket.expedite', 'ticket', 'expedite', 'docs:A', '--clear'],
+    ];
+    const ids = ACTIONS.filter((a) => listsSession(a) && a.effect !== 'read' && !a.sessionOnly).map((a) => a.id);
+    expect([...new Set(commands.map(([id]) => id))].sort()).toEqual(ids.sort());
+    for (const [id, role, ...args] of commands) {
+      const p = plan(role, [...args, '--json']);
+      const hit = matchAction(p.method, p.path, p.body);
+      expect(hit?.action.id).toBe(id);
+      if (hit?.action.effect === 'destructive') expect(p).toMatchObject({ body: { confirm: true }, confirm: { yes: true } });
+    }
+    expect(plan('leg', ['stop', 'docs:A'])).toMatchObject({ stopLookup: '/v1/repositories/docs/tickets/A', confirm: { yes: false } });
+    expect(() => plan('admin', ['repo', 'resync', 'docs', '--force'])).toThrow('not a flag');
+    expect(() => plan('runner', ['status', 'NaN'])).toThrow('positive integer');
+    expect(() => plan('owner', ['scope', 'resolve', 'docs'])).toThrow('positive integer');
+  });
+
   it('admin commands', () => {
     expect(plan('admin', ['repo', 'add', 'immediately-run/ops', '--id', 'ops', '--owner-key', PUB, '--weight', '2', '--cut-over'], key)).toEqual({
       method: 'POST', path: '/v1/admin/repositories',

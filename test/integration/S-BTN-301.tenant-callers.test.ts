@@ -76,7 +76,7 @@ describe('S-BTN-301 the tenant reads’ callers (B-202)', () => {
       expect([id, sessionCaller(entry, 'administrator') != null, sessionCaller(entry, 'owner')]).toEqual([id, true, null]);
       expect([id, entry.callers.map((c) => c.principal).sort()]).toEqual([id, ['administrator', 'session']]);
     }
-    expect(ACTIONS.filter((a) => a.http.path.startsWith('/v1/admin/')).map((a) => a.id).sort()).toEqual([...IDS].sort());
+    expect(ACTIONS.filter((a) => a.effect === 'read' && a.http.path.startsWith('/v1/admin/')).map((a) => a.id).sort()).toEqual([...IDS].sort());
     const listed = (await (await sessionCall(cookie, '/v1/actions')).json()) as { actions: { id: string }[] };
     for (const id of IDS) expect([id, listed.actions.some((a) => a.id === id)]).toEqual([id, true]);
     // `GET /v1/admin/state` admits no cookie (B-203 and B-216 settle it).

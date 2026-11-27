@@ -1,14 +1,11 @@
 import type { BatonCore } from '../baton';
 import { BatonError, json, readJson } from '../http';
 import { SESSION_COOKIE } from '../admin';
-import { checkAccept, checkAttestation, checkResync } from '../validate';
+import { checkAttestation } from '../validate';
 import { consentRoute } from '../dependencies';
-import { logEvent } from '../db';
 import { acceptsUnattestedHumanKey } from '../policy';
-import { liveRepoParam, pathSegment, qualifiedTicket, ticketOf } from './kit';
+import { liveRepoParam, pathSegment, ticketOf } from './kit';
 import { authenticated, verifySigned, type PersonPrincipal } from './principal';
-
-const RESYNC_WINDOW_MS = 30_000; // B-201: a session's resync, once per repository per R-BTN-73's dispatch window
 
 type OwnerCore = Pick<BatonCore, 'registry' | 'admin' | 'store' | 'now' | 'policies' | 'claims' | 'humanBreakGlass' | 'questions' | 'blocks' | 'requestSync'>;
 
@@ -90,100 +87,6 @@ export async function dashboardSessionRoute(core: Pick<BatonCore, 'admin'>, req:
     const res = json({ ok: true });
     res.headers.set('Set-Cookie', `${SESSION_COOKIE}=; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=0`);
     return res;
-  }
-
-  return null;
-}
-
-export async function dashboardWriteRoute(core: Pick<BatonCore, 'store' | 'runners' | 'claims' | 'cutover' | 'registry' | 'scope' | 'sql' | 'now' | 'queueSync'>, req: Request, url: URL, owner: string): Promise<Response | null> {
-  const p = url.pathname;
-  if (!p.startsWith('/v1/ui/') || req.method !== 'POST') return null;
-  const tx = <T>(f: () => T): T => core.store.transaction(f);
-  if (p === '/v1/ui/messages') {
-    const body = await readJson(req);
-    return json(tx(() => core.runners.sendMessage(owner, body)));
-  }
-  const reap = /^\/v1\/ui\/claims\/(\d+)\/reap$/.exec(p);
-  if (reap) {
-    const body = await readJson(req);
-    return json(tx(() => core.claims.forceReap(owner, Number(reap[1]), body)));
-  }
-  // R-BTN-19: an administrator's fence clear, in one transaction with its seats' release
-  // (R-BTN-178) and its event. A dashboard session's principal is an administrator's — the
-  // only key a session is minted from — so the route itself needs no further check.
-  const fenceClear = /^\/v1\/ui\/claims\/(\d+)\/fence-clear$/.exec(p);
-  if (fenceClear) {
-    const body = await readJson(req);
-    return json(tx(() => core.claims.fenceClear(owner, Number(fenceClear[1]), body)));
-  }
-  // B-222 (R-BTN-10, §9.6): the completion's confirm and its release, each a route of its
-  // own over `claims.resolve`. V1's one route taking `{action}` is retired (B-203).
-  const completion = /^\/v1\/ui\/claims\/(\d+)\/(confirm|release)$/.exec(p);
-  if (completion) {
-    const body = await readJson(req);
-    // `confirm` is the caller's own word (§12.2): `checkResolve` refuses a body without it.
-    const confirm = (body as { confirm?: unknown } | null)?.confirm;
-    return json(tx(() => core.claims.resolve(owner, Number(completion[1]), { action: completion[2], confirm })));
-  }
-  if (p === '/v1/ui/cutover') {
-    const body = await readJson(req);
-    return json(tx(() => core.cutover.cutover(owner, body)));
-  }
-  const adoption = /^\/v1\/ui\/adoptions\/([^/]+)\/confirm$/.exec(p);
-  if (adoption) {
-    const { id: ticket, repository } = qualifiedTicket(adoption[1]);
-    const body = await readJson(req);
-    return json(tx(() => {
-      liveRepoParam(core.registry, repository);
-      return core.cutover.confirmAdoption(owner, ticket, body);
-    }));
-  }
-  const override = /^\/v1\/ui\/overrides\/([^/]+)$/.exec(p);
-  if (override) {
-    const { id: ticket, repository } = qualifiedTicket(override[1]);
-    const body = await readJson(req);
-    return json(tx(() => {
-      liveRepoParam(core.registry, repository);
-      return core.claims.setOverride(owner, ticket, body);
-    }));
-  }
-  // B-134: an owner resolves a scope finding — the acknowledgement that it was looked at.
-  // In the transaction, like every neighbouring `/v1/ui` mutation, so the resolution and
-  // its `scope-resolved` event land together.
-  const finding = /^\/v1\/ui\/scope\/(\d+)\/resolve$/.exec(p);
-  if (finding) {
-    const id = Number(finding[1]);
-    return json(tx(() => {
-      if (!core.scope.resolve(id, `owner:${owner}`)) throw new BatonError('not-found', `no open scope finding ${id}`);
-      return { ok: true };
-    }));
-  }
-  if (p === '/v1/ui/board/accept') {
-    const input = checkAccept(await readJson(req));
-    return json(tx(() => {
-      liveRepoParam(core.registry, input.repository);
-      return core.claims.acceptHeld(owner, input);
-    }));
-  }
-  // B-201 (`repo.resync`; R-BTN-73): a session asks the repository's sync to run now — the
-  // dispatch a webhook delivery sends, logged with who asked, at most one per repository per
-  // dispatch window. Nothing of the board moves here: the sync posts, and R-BTN-11 judges
-  // its post. A forced resync is not built and is refused by name (`checkResync`).
-  if (p === '/v1/ui/resync') {
-    const { repository } = checkResync(await readJson(req));
-    liveRepoParam(core.registry, repository, () => ['forbidden', 'this repository is not yours or does not exist']);
-    tx(() => {
-      const now = core.now();
-      // The request is an `admin` event (`act: resync`), as an administrator's other acts are:
-      // the window reads the last one, so no new event kind and no table is needed.
-      const last = core.sql<{ at: number }>(
-        `SELECT at FROM events WHERE kind = 'admin' AND at > ? AND repository_id = ? AND json_extract(detail_json, '$.act') = 'resync' ORDER BY at DESC, seq DESC LIMIT 1`,
-        now - RESYNC_WINDOW_MS, repository)[0];
-      if (last) throw new BatonError('conflict', `a resync of ${repository} was asked for under ${RESYNC_WINDOW_MS / 1000} seconds ago`);
-      core.queueSync({ repository, kind: 'sync', own: true });
-      logEvent(core.store, now, 'admin', `owner:${owner}`, { act: 'resync' }, null, null, repository);
-    });
-    return json({ ok: true });
   }
 
   return null;

@@ -83,7 +83,8 @@ These actions take `confirm: true` in the body, or are refused `confirm-required
 CLI offers the action it asks or takes `--yes`; where the dashboard offers it its dialog sends
 the confirmation. Confirmation does not grant authority to perform the action.
 
-- `leg.stop`, `claim.force-reap`, `claim.fence-clear`;
+- `leg.stop`, `claim.force-reap`, `claim.fence-clear`, `claim.confirm`, `claim.release`;
+- `repo.cutover`, `adoption.confirm` (legacy, R-BTN-28);
 - `owner.owner.remove`, `owner.grant.revoke`, `human-key.revoke`;
 - removal of a policy floor (R-BTN-189);
 - `admin.key.revoke`, `admin.repo.retire`.
