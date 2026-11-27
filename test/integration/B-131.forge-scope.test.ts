@@ -1,15 +1,16 @@
 import { expect, inject, it } from 'vitest';
-import { hbBody, keyCall, adminSession, sessionCall, ORIGIN, payload, cutover, setAdminKeys, setClock, sha256, syncCall, withCore } from '../helpers';
+import { hbBody, keyCall, adminSession, sessionCall, ORIGIN, payload, course, cutover, setAdminKeys, setClock, sha256, syncCall, tick, withCore } from '../helpers';
 import { makeKey, signedRequest, type TestKey } from '../lib/sshKeys';
 import { call } from '#host';
 import type { Config } from '../../src/core/ports';
 import { forgeScope } from '../../src/core/forgeScope';
 import type { BatonError } from '../../src/core/http';
+import roadmapPr from '../fixtures/courses/roadmap-pr/course.json';
 
 const board = inject('board');
 const now = Date.parse('2026-11-21T12:00:00Z');
 
-it('S-BTN-310: only the holder can prove a run; only the broker can read its live, owner-listed scope', async () => {
+async function checkScope(armed: boolean) {
   await setClock(now);
   const [admin, owner, runner, other, broker] = await Promise.all(['admin', 'owner', 'runner', 'other', 'broker'].map((name) => makeKey('ssh-ed25519', name)));
   const setBroker = (line?: string) => withCore((core) => {
@@ -25,7 +26,10 @@ it('S-BTN-310: only the holder can prove a run; only the broker can read its liv
     ] }, 'PUT')).status).toBe(200);
     const snapshot = structuredClone(board.states.A);
     Object.assign(snapshot.state.items[0] as Record<string, unknown>, { repos: ['fieldhouse', 'baton'] });
-    expect((await syncCall('/v1/sync/board', payload(board.shas.A, null, snapshot))).status).toBe(200);
+    const registry = armed ? [course(3, 3, { course: {
+      ...roadmapPr, legs: { ...roadmapPr.legs, implement: { ...roadmapPr.legs.implement, max_duration: 300 } },
+    } })] : [course()];
+    expect((await syncCall('/v1/sync/board', payload(board.shas.A, null, snapshot, { registry }))).status).toBe(200);
     await cutover(1, 'docs');
     const secret = 'secret-k';
     const runnerCall = async (key: TestKey, path: string, body?: unknown, session: string | null = secret) => {
@@ -65,7 +69,16 @@ it('S-BTN-310: only the holder can prove a run; only the broker can read its liv
     expect(read.headers.get('Cache-Control')).toBe('no-store');
     expect(await read.json()).toEqual({ repositories: [
       { path: 'immediately-run/docs', id: null }, { path: 'immediately-run/fieldhouse', id: '123' },
-    ], valid_until: expect.any(Number) });
+    ], valid_until: armed ? now + 300_000 : expect.any(Number) });
+    if (armed) {
+      await setClock(now + 300_000);
+      await tick();
+      expect(await withCore((core) => core.store.exec('SELECT status, deadline_at FROM claims WHERE id = ?', claim_id).one()))
+        .toMatchObject({ status: 'active', deadline_at: null });
+      expect((await runnerCall(broker, scope)).status).toBe(404);
+      expect((await runnerCall(runner, proof)).status).toBe(404);
+      return;
+    }
     const requested = await sessionCall(await adminSession(admin), '/v1/ui/messages', { method: 'POST',
       headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind: 'release', confirm: true, to_runner_id: runnerId,
         payload: { ticket_id: 'docs:R3-9001', reason: 'requested' } }) });
@@ -95,4 +108,8 @@ it('S-BTN-310: only the holder can prove a run; only the broker can read its liv
   } finally {
     await setBroker();
   }
-});
+}
+
+// B-131's historical ID is retained pending registration of a separate broker scenario.
+it('S-BTN-310: only the holder can prove a run; only the broker can read its live, owner-listed scope', () => checkScope(false));
+it('B-131: the timeout tick does not restore broker scope or runner proof', () => checkScope(true));

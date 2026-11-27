@@ -2695,6 +2695,7 @@ export class Claims {
         JSON.stringify({ ticket_id: c.ticket_id, reason: 'leg-timeout', deadline_at: c.deadline_at }), c.runner_id, now);
       // The claim's deadline is spent: one release, never one a tick (the claim's end clears
       // the column too, and a new run's advance arms its own).
+      this.exec('UPDATE claim_legs SET forge_deadline_at = ? WHERE claim_id = ? AND finished_at IS NULL AND abandoned_at IS NULL', c.deadline_at, c.id);
       this.exec('UPDATE claims SET deadline_at = NULL WHERE id = ?', c.id);
       this.event('leg-timeout', 'alarm', { deadline_at: c.deadline_at }, c.ticket_id, c.id);
     }
