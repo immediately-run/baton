@@ -55,6 +55,7 @@ import coreConditions from './0075_core_conditions.sql';
 import retireReviewerSettings from './0076_retire_reviewer_settings.sql';
 import legTimeoutFence from './0082_leg_timeout_fence.sql';
 import courseSourceResolutions from './0143_course_source_resolutions.sql';
+import syncProtocol from './0144_sync_protocol.sql';
 import eventLookups from './0049_event_lookups.sql';
 import alarmIndexes from './0052_alarm_indexes.sql';
 import retention from './0053_retention.sql';
@@ -263,4 +264,5 @@ export const MIGRATIONS: Migration[] = [
   { id: 123, sql: leaseRecovery },
   { id: DROP_TIERS_MIGRATION, sql: dropTiers },
   { id: 143, sql: courseSourceResolutions },
+  { id: 144, sql: syncProtocol },
 ];

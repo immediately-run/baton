@@ -242,6 +242,12 @@ A claim ends with `POST /v1/runner/claims/{id}/end`. Its body, stated here once:
   - for `done`, shows the ticket closed as done (`closed_tickets`) or absent, whatever it named.
 
   Baton sets `confirmed_at` and logs `confirmed`; the sync posts nothing extra.
+  An observation lists `evidence` in `required_features` when its `unconfirmed` list is nonempty.
+  The sync declares the protocol features it answers in the post's `sync_features`, beside its
+  version (`source.cli`). Missing or malformed declarations are read as none. The repository's
+  Sync screen shows the last recorded post's CLI version (or that it was not reported) beside
+  Baton's recommendation (R-BTN-197). It warns if that post answered an observation requiring
+  `evidence` without declaring it. The declaration never affects acceptance or confirmation.
 - **Claimable again** (unnumbered). A ticket is claimable only after a snapshot observed after
   its last claim ended (`end_observation`), and never while a completion is unconfirmed. A
   completion unconfirmed 6 hours after `ended_at` (its named evidence attested `found: false`
