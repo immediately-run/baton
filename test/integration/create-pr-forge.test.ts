@@ -162,7 +162,7 @@ async function review(verdict: 'approve' | 'changes') {
   expect(await station()).toEqual({ station: 'reviewed', next_leg: verdict === 'approve' ? 'merge' : 'fix' });
 }
 
-describe('S-BTN-12 shipped create-pr against a fake forge', () => {
+describe('shipped create-pr against a fake forge', () => {
   it('confirms the review comment URL through the forge evidence read', async () => {
     await review('approve');
     expect(forge!.calls).toContain(`/repos/${CODE_REPO}/issues/comments/${forge!.comments[0].id}`);
