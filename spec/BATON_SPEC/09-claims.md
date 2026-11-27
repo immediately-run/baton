@@ -166,9 +166,10 @@ finishing its running leg at an end station only), `detail`, `ended_at_sha` (R-B
 | `suspended:<station>` | `completed` | the holder stops at the station reached (R-BTN-40, R-BTN-71) | no |
 | `released:stale-board` | `released` | re-verification from git fails (R-BTN-5, R-BTN-34); the ticket was withdrawn or dropped from the board (R-BTN-147) | no |
 | `released:cannot-finish:transient` | `released` | the environment failed; also an untyped exception, a retryable course `interrupt` type, a `close` that failed three times (R-BTN-72), a session that could not start or be reattached, an invalid blocked end (R-BTN-126) | yes |
-| `released:cannot-finish:contract-output` | `released` | a leg's output failed its schema or its station's entry (R-BTN-82, R-BTN-109) | yes |
+| `released:cannot-finish:contract-output` | `released` | a leg's output failed its schema, its station's entry (R-BTN-82, R-BTN-109), or its course's output contract; held at once | yes |
 | `released:cannot-finish:capability` | `released` | the ticket needs what no eligible runner holds; the ticket is held at once, `non-retryable:capability` | yes |
 | `released:cannot-finish:spec` | `released` | the ticket or its course contradicts itself; also a non-retryable course `interrupt` type; held at once, `non-retryable:spec` | yes |
+| `released:cannot-finish:blocked` | `released` | the leg reports a refusal it cannot remedy by retrying; held at once (R-BTN-122) | yes |
 | `released:cannot-finish:contract-input` | `released` | an input failed its schema; held at once, raises `baton.contract` (R-BTN-82) | no |
 | `released:lease-lost` | `released` | the holder's lease lapsed (R-BTN-6) | yes, once per distinct runner per ticket and leg |
 | `released:blocked` | `released` | a prerequisite failed during the leg (R-BTN-126) | no; counts toward `max_blocked` (R-BTN-126) |
