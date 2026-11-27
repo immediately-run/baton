@@ -26,7 +26,7 @@ depends_on:
 
 **Spec:** [BATON_SPEC §12.8](../spec/BATON_SPEC/12-security.md#sec-12-8) ([R-BTN-181](../spec/BATON_SPEC/12-security.md#sec-12-8):
 attestations, their writers, lapses, `attestation.add` and `attestation.revoke`; [R-BTN-185](../spec/BATON_SPEC/12-security.md#sec-12-8):
-a session writes as `human` beside its key's role; ~~[R-BTN-180](../spec/BATON_SPEC/12-security.md#sec-12-8):
+a session that acts as `human` writes as `human` beside its key's role; ~~[R-BTN-180](../spec/BATON_SPEC/12-security.md#sec-12-8):
 the grant's domain~~), [§11.4](../spec/BATON_SPEC/11-people.md#sec-11-4) (the `allowed` rule as
 B-191 amends it; [R-BTN-155](../spec/BATON_SPEC/11-people.md#sec-11-4): an attestation is not a confirmed action), [§5.5](../spec/BATON_SPEC/05-courses.md#sec-5-5)
 ([R-BTN-112](../spec/BATON_SPEC/05-courses.md#sec-5-5): a value with a view is drawn by the `ui`
@@ -86,7 +86,7 @@ The §14 row first, then the code.
 
 ### Invariants
 
-- **A session writes as `human` beside its key's role** (R-BTN-185); **an attestation is not confirmed**
+- **A session that acts as `human` writes as `human` beside its key's role** (R-BTN-185); **an attestation is not confirmed**
   (R-BTN-155).
 - **Text, never markup** (§12.3); **an owner's session, its repositories** (R-BTN-155); **both
   hosts** (R-BTN-55).
@@ -128,3 +128,5 @@ _(2026-11-23: rules re-read: R-BTN-185, R-BTN-188)_
 _(2026-11-24: the domain column and field are struck: B-189's spec PR (`spec/BATON_SPEC_HISTORY.md`, the entry of 2026-11-24), on the owner's rulings of 2026-11-09 and 2026-11-24 (runners trusted, legs not) retires grant domains (R-BTN-180); an attestation's writer is its credential and class alone.)_
 
 _(2026-11-24: rules re-read: R-BTN-180, R-BTN-181)_
+
+_(2026-11-26: rules re-read: R-BTN-185. Under `human_key: any` a session acts as `human` only when Cloudflare Access or a `human_only` key's code opened it (the owner, 2026-11-26; `spec/BATON_SPEC_HISTORY.md`); the clauses that said every session are rewritten or struck in place.)_

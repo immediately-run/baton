@@ -69,11 +69,12 @@ leg-duration keys to its own git/forge proxy and LLM proxy, which Baton neither 
    `invalid-params` naming it, and so is `merge.trusted` with `tickets.created: filed`, a new
    refusal of R-BTN-188's.
 2. **The guarantees rebase; `no-runner-lands` retires.** `guaranteesFor` computes R-BTN-189's
-   five: each but `human-gates` rests on the landing condition (`merge.trusted`,
+   ~~five~~ six: each but `human-gates` and `human-gates-hardware` rests on the landing condition (`merge.trusted`,
    `tickets.created: proposed`, `paths.control` not `any`) where it named `no-runner-lands`; `independent-review`
    holds on `merge.reviews.count` ≥ 2 and `attestations` admitting only `baton` for
    `std:review@1` and `std:wrote@1`; `human-gates` reads `approvers.members` and
-   `approvers.policy`; `board-from-trusted` reads `attestations` alone. A floor naming
+   `approvers.policy`, and `human-gates-hardware` stays `false` until B-136's attestation lets a
+   `human_only` owner key meet `hardware` (2026-11-26); `board-from-trusted` reads `attestations` alone. A floor naming
    `no-runner-lands` (or the code's `trusted-domain-separate`) is dropped by the migration in
    whichever form it is stored when this lands — a `policy_floors` row (the built form, while
    B-293 has not landed) or a version's `floors` (after it) — by a new version without the name, logged `admin` with both hashes and naming the
@@ -161,7 +162,7 @@ leg-duration keys to its own git/forge proxy and LLM proxy, which Baton neither 
 ### Tests
 
 - Every preset's document validates and yields R-BTN-189's guarantees: `protected` holds all
-  but `human-gates`, `protected-hardware` all five, with no grant role, checker or report.
+  but ~~`human-gates`~~ `human-gates-hardware`, `protected-hardware` ~~all five~~ the same until a key can meet `hardware`, with no grant role, checker or report.
 - A `PUT …/policy` naming `refs.default_branch`, `approvers.roles`, `inputs.board`,
   `outbox.git` or `paths.control: trusted-runner` is `invalid-params` naming it, as is a new
   `merge.trusted` with `tickets.created: filed`; a stored one stays in force and is named.
@@ -191,3 +192,5 @@ _(2026-11-20: rules re-read: R-BTN-180)_
 _(2026-11-24: rewritten on the owner's rulings of 2026-11-24, quoted in the brief. The 11-20 note's open question is answered: review independence compares no domain or key — each review is its own `reads_only` run of the exact head, every leg starting afresh — so one runner credential suffices. The plan's forge actions (old item 6) are dropped: the deployment confines a leg's ordinary `git` and `gh` through leg-duration keys to its own proxies, and Baton only hands the executor the claim's scope and branches (item 5). The machine-key span, `baton.machine-post` and R-BTN-143's never-posted clause were unbuilt and leave the spec in the spec PR; nothing here builds them.)_
 
 _(2026-11-24: rules re-read: R-BTN-107, R-BTN-180, R-BTN-182, R-BTN-183, R-BTN-187, R-BTN-188, R-BTN-189)_
+
+_(2026-11-26: rules re-read: R-BTN-189. The amendment of that date (`spec/BATON_SPEC_HISTORY.md`) is written into this plan: six guarantees, `protected` claiming `human-gates`; the clauses it contradicts are struck in place.)_

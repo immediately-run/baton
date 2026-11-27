@@ -159,7 +159,7 @@ Not built either, each a design its rule below still states:
 
 ### 7.3 The debugger and Baton's own conditions
 
-- **R-BTN-163 (the debugger: unhandled conditions, waiting people, and core's own).** `status: partly B-56 B-57 B-195`
+- **R-BTN-163 (the debugger: unhandled conditions, waiting people, and core's own).** `status: partly B-56 B-57 B-195 B-352`
   - **Needs you is the debugger.** **Needs you**, which the dashboard's Conditions screen draws
     (§11.4), lists, until each closes:
     - every open condition, with its type, restarts, default, detail and `url`;
@@ -178,7 +178,7 @@ Not built either, each a design its rule below still states:
       |---|---|---|---|
       | `baton.retries` | the retry policy holds the ticket (R-BTN-122), or a leg's blocked ends are exhausted (R-BTN-126) | clears the hold and the backoff | closes the condition and keeps the hold; nothing is raised again while it stands |
       | `baton.contract` | a leg's input fails its schema, holding the ticket `non-retryable:contract-input` (R-BTN-82); its producer is re-run in git, then `retry` | as above | as above |
-      | `baton.stalled` | a leg has been posted `waiting` for the stalled time (R-BTN-167); it closes by itself when the leg is posted `ready` | closes it and restarts the clock | sets an owner hold `hold_reason: parked` and closes it |
+      | `baton.stalled` | a ticket's selection has waited (a `wait` verdict, R-BTN-205) for the stalled time (R-BTN-167); it closes by itself when a verdict queues a leg | closes it and restarts the clock | sets an owner hold `hold_reason: parked` and closes it |
 
       Any owner act that clears the hold under a `baton.retries` or `baton.contract` condition
       closes the condition, R-BTN-12's unhold included.
@@ -223,7 +223,7 @@ Not built either, each a design its rule below still states:
   - **State.** Attempts are counted **per ticket and leg**, with §9's rules for what counts as a
     failed attempt, in `leg_attempts`: repository, ticket, leg, `attempts`, `retry_after` and
     `last_error_type`. The row resets — `attempts` to 0, `retry_after` cleared — when a run of the
-    leg reaches one of its outcomes (an `advance` or end reporting it, or a fact arrival of it)
+    leg reaches one of its outcomes (a finishing `advance` or an `end: done` reporting it, or a fact arrival of it)
     and when a hold is lifted.
   - **Policy.** A leg may carry a retry policy:
 
@@ -274,16 +274,16 @@ Not built either, each a design its rule below still states:
 
 ### 7.5 Deadlines
 
-- **R-BTN-167 (two clocks on a leg: a deadline on its run, and the stalled notice).** `status: partly B-60 B-61`
+- **R-BTN-167 (two clocks on a leg: a deadline on its run, and the stalled notice).** `status: partly B-60 B-61 B-352`
   - **`deadline_s`**, optional on a leg (60 s to 604,800 s): how long one run may take. The clock
     starts at the `advance` that starts the run, by Baton's clock, and the instant is the claim's
     `deadline_at` (R-BTN-90). A leg with no `deadline_s` has no deadline: Baton relies on the
     lease (R-BTN-9) and the owner's Stop (R-BTN-119). A person leg carries none.
-  - **The stalled time** is 72 hours, a constant: how long a leg may be posted `waiting`
-    (R-BTN-70) before Baton raises `baton.stalled` on the ticket (R-BTN-163). The clock counts
-    from the ticket's arrival at the leg's `from` station, only while the sync's readiness attests
-    the leg `waiting` — not while Baton itself holds the leg waiting, a `time` wait holds it or a
-    claim runs it — and restarts when the ticket's station changes.
+  - **The stalled time** is 72 hours, a constant: how long a ticket's selection may wait (a
+    `wait` verdict, R-BTN-205) before Baton raises `baton.stalled` on the ticket (R-BTN-163). The
+    clock counts from the first `wait` verdict at the ticket's station, only while its latest
+    verdict is a `wait` — not while Baton itself holds the ticket or a claim runs it — and
+    restarts when the ticket's station changes.
   - **A person leg's `expires`** (R-BTN-116) is the one other instant Baton holds per leg; a
     person leg has no stalled time.
   - Baton fires the `stalled` and `expires` instants from the alarm, once each. They are owner

@@ -1,0 +1,50 @@
+---
+id: B-357
+status: available
+topics: [courses, scheduling]
+owns: {}
+prs: []
+title: B-357 — Measure the selector's budget and propose its values
+depends_on: [B-353, B-356]
+parent: B-351
+tags: [roadmap-item]
+project: baton
+repos: [baton]
+description: "Measure the selector's call time, memory and want latency on the standard courses, and propose R-BTN-205's values for the owner to rule on."
+---
+
+**Brief:** the owner, 2026-11-27 (in a Claude Code session on bering): "Since these proposals are necessary to get baton into a generally useable state, I would like you to include the changes in the specs and draft the necessary tickets for implementing them." The selector is specified as [R-BTN-205](../spec/BATON_SPEC/05-courses.md#sec-5-3); the owner's constraints and rulings are quoted in `spec/BATON_SPEC_HISTORY.md` (2026-11-27). Part of [B-351](B-351.mdx).
+
+**Spec:** [R-BTN-205](../spec/BATON_SPEC/05-courses.md#sec-5-3) (the 10-second and 256 MB bound on a call, a want's 60-second lease, the 15 minutes before a want shows untaken).
+
+**Depends on:** B-353, B-356 (the selectors to measure).
+
+### Why
+
+The owner, asked for the selector's budget, 2026-11-26: "not sure". R-BTN-205 states defaults; this ticket measures them.
+
+### What to build
+
+1. Measure the standard courses' selectors and the default selector — time and memory per call — on the local host and on a sandboxed executor (Fieldhouse's E2B, or another VM-backed one).
+2. Measure how long a want waits for a runner on a fleet of the usual size.
+3. Propose values from the measurements in a spec PR amending R-BTN-205, quoting them, for the owner to rule on.
+
+### Trust
+
+No new input: measurement only.
+
+### Invariants
+
+- **The bound stays a bound**: a call over it is a failed selection, whatever the values become.
+
+### Tests
+
+The measurement script is committed under `scripts/` with its results in the PR body.
+
+### Exit criteria
+
+- [ ] Measurements recorded; a spec PR proposing values opened for the owner.
+
+## Status
+
+_filed 2026-11-27._

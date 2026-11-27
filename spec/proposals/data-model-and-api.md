@@ -21,7 +21,7 @@ the MCP tools are generated from the registry, and `npm run check:actions` keeps
 and §14's table equal.
 
 - Caller *delegated*: an MCP key, as `owner` within R-BTN-186 (R-BTN-130, proposed). An *owner*
-  row admits one wherever the registry marks the action `true` or `own`.
+  row admits one wherever the action's `delegated` value is `true` or `own`.
 - An actor column also holds `mcp:<id>`, an MCP key's immutable id, never its reusable name.
   `ticket_overrides.hold_reason` also holds `mcp:<name>`.
 - `GET /v1/owner/{repository}/grants` also answers
@@ -310,7 +310,7 @@ surfaces of actions the dashboard or the heartbeat serves today.
   - exhausts its registration tokens; the credentials those tokens registered are not revoked
     (R-BTN-117);
   - drops its `queued`, `claimed` and `delivered` outbox entries, logging each; a deliverer's
-    later mark of one is ignored (R-BTN-171);
+    later report on one is ignored (R-BTN-171);
   - deletes its sync wants, its ticket timers and every consent row it gave or was given
     (R-BTN-94, R-BTN-167, R-BTN-140).
 - **Consent (R-BTN-140).** A `code_repos` entry whose `{host, repo_id}` is a registered
