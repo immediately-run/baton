@@ -100,6 +100,8 @@ const SESSION_ADMIN: Caller = { principal: 'session', roles: ['administrator'], 
 const RUNNER: Caller = { principal: 'runner', scope: 'repository' };
 const OWNER: Caller = { principal: 'owner', scope: 'repository' };
 const ADMIN: Caller = { principal: 'administrator', scope: 'instance' };
+const OWNER_INSTANCE: Caller = { principal: 'owner', scope: 'instance' };
+const RUNNER_INSTANCE: Caller = { principal: 'runner', scope: 'instance' };
 /** The repository reads' principals (§14): a key granted on the repository, an owner of it, an
  *  administrator — and a session (B-192). Later reads of the same reach reuse this. */
 export const REPOSITORY_READERS: Caller[] = [RUNNER, OWNER, ADMIN, SESSION_REPO];
@@ -117,12 +119,16 @@ export const ACTIONS: Action[] = [
   {
     id: 'repo.list', summary: 'The caller’s repositories, each with its head, mode and the counts the sidebar and the strip draw.',
     effect: 'read', http: { method: 'GET', path: '/v1/repositories' },
-    callers: [ADMIN, { principal: 'owner', scope: 'instance' }, SESSION_ANY], input: NONE,
+    callers: [ADMIN, OWNER_INSTANCE, SESSION_ANY], input: NONE,
   },
   {
-    id: 'actions.list', summary: 'The actions the calling session may take, with their inputs and the screens that draw them.',
+    id: 'actions.list', summary: 'The caller’s actions, with their inputs and the screens that draw them.',
     effect: 'read', http: { method: 'GET', path: '/v1/actions' },
-    callers: [SESSION_ANY], input: NONE,
+    callers: [ADMIN, OWNER_INSTANCE, RUNNER_INSTANCE, SESSION_ANY], input: NONE,
+  },
+  {
+    id: 'admin.freeze', summary: 'Freeze new claims and owner writes before moving the instance.',
+    effect: 'write', http: { method: 'POST', path: '/v1/admin/freeze' }, callers: [ADMIN], input: NONE,
   },
 
   // ── the repository reads a session shares with the keys (B-192, B-217) ──
@@ -534,6 +540,19 @@ export function keyCaller(action: Action, principal: Principal): Caller | null {
   return action.callers.find((c) => c.principal === principal) ?? null;
 }
 
+/** The caller category after authentication. Key roles and session roles are distinct. */
+export type ActionPrincipal =
+  | { kind: 'session'; role: SessionRole }
+  | { kind: 'key'; role: 'admin' | 'owner' | 'runner' };
+
+/** The caller the action admits. A repository-scoped caller must also pass the target check
+ *  when invoking a route; discovery uses whether any eligible target exists. */
+export function callerFor(action: Action, principal: ActionPrincipal, repositoryAllowed = true): Caller | null {
+  const caller = principal.kind === 'session' ? sessionCaller(action, principal.role)
+    : keyCaller(action, principal.role === 'admin' ? 'administrator' : principal.role);
+  return caller && (caller.scope !== 'repository' || repositoryAllowed) ? caller : null;
+}
+
 /** Is `GET pathname` a read a session may call (B-192)? What the front asks before it turns a
  *  cookie into a principal. */
 export function sessionReadable(pathname: string, table: readonly Action[] = ACTIONS): boolean {
@@ -551,11 +570,14 @@ export function keyReadable(pathname: string, table: readonly Action[] = ACTIONS
  *  administrator's sees every entry listing its role. Never per target (B-204): a
  *  target-dependent control is gated by its read's `allowed` word. */
 export function actionsFor(role: SessionRole, opts: { ownsRepository?: boolean } = {}, table: readonly Action[] = ACTIONS): ListedAction[] {
+  return listActions({ kind: 'session', role }, role === 'administrator' || opts.ownsRepository === true, table);
+}
+
+export function listActions(principal: ActionPrincipal, repositoryAllowed: boolean, table: readonly Action[] = ACTIONS): ListedAction[] {
   const out: ListedAction[] = [];
   for (const a of table) {
-    const caller = sessionCaller(a, role);
+    const caller = callerFor(a, principal, repositoryAllowed);
     if (!caller) continue;
-    if (role === 'owner' && caller.scope === 'repository' && !opts.ownsRepository) continue;
     const { delegated: _delegated, ...entry } = a;
     out.push({ ...entry, callers: [caller] });
   }
@@ -575,6 +597,9 @@ export function checkActions(table: readonly Action[], screenIds: readonly strin
     if (seen.has(a.id)) errors.push(`${a.id}: the id is listed twice`);
     seen.add(a.id);
     if (!a.callers.length) errors.push(`${a.id}: no caller`);
+    if (a.effect === 'destructive' && (a.input.properties.confirm?.const !== true || !a.input.required?.includes('confirm'))) {
+      errors.push(`${a.id}: destructive actions must require confirm: true`);
+    }
     if (!a.ui) continue;
     if (!listsSession(a)) errors.push(`${a.id}: ui.view is set on an entry whose callers list no session`);
     for (const v of a.ui.view) {

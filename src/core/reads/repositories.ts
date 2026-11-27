@@ -1,9 +1,8 @@
 // reads/repositories.ts — the two reads the shell itself needs (B-204): `GET /v1/repositories`
 // (`repo.list`), the caller's repositories with the counts the sidebar and the strip draw, and
-// `GET /v1/actions` (`actions.list`), a session's own registry entries.
+// `GET /v1/actions` (`actions.list`), the caller's own registry entries.
 import { liveRunnerSql } from '../runnerLiveness';
-import { BatonError } from '../http';
-import { actionsFor } from '../actions';
+import { listActions } from '../actions';
 import { DISCREPANCY_WINDOW_MS } from '../history';
 import { countStates, ticketRows } from '../tickets';
 import { readableRepositories, type ReadCtx, type ReadPrincipal, type ReadRoute } from './kit';
@@ -117,13 +116,13 @@ export const SHELL_READS: ReadRoute[] = [
   // `runners_alive` and the 7-day window are the clock's.
   { action: 'repo.list', clock: true, run: (cx, call) => repositoriesAnswer(cx, call.principal) },
   {
-    // R-BTN-129's "what can I do", to a session: its entries as the table holds them, minus
-    // `delegated`, with `ui` — never per target (B-204).
+    // R-BTN-129's "what can I do": entries as the table holds them, minus `delegated`.
     action: 'actions.list',
     run(cx, call) {
       const p = call.principal;
-      if (p.kind !== 'session') throw new BatonError('forbidden', 'actions.list answers a dashboard session');
-      return { actions: actionsFor(p.role, { ownsRepository: readableRepositories(cx, p).length > 0 }), session: { role: p.role } };
+      const administrator = p.role === (p.kind === 'session' ? 'administrator' : 'admin');
+      const actions = listActions(p, administrator || readableRepositories(cx, p).length > 0);
+      return { actions, session: p.kind === 'session' ? { role: p.role } : null };
     },
   },
 ];

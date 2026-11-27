@@ -12,6 +12,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { builtinExecutor, type ExecOptions } from '../../src/runner/executor';
+import { KEY_HOLD } from '../../src/shared/mask.mjs';
 import {
   FAILURE_DETAIL_MAX, MIN_SECRET_BYTES, SECRET_NAME_EXACT, SECRET_NAME_SUFFIXES, createLegMasker, failureDetail, holdLiteralTail,
   maskLegOutput, namesASecret, readMaskEnv, runnerConfigPath, secretValues, underBatonDirectory,
@@ -303,6 +304,32 @@ describe('class 7 by name (R-BTN-144; S-BTN-98, redaction slice)', () => {
       expect(sink.flush()).toBe('');
       expect(maskLegOutput([begin, body, end, after].join('\n'), [secret])).toBe(`***\n***\n***\n${after}`);
     }
+  });
+
+  it.each(['-synthetic-fixture', 'OPENSSH PRIVATE'])('S-BTN-119: key banners survive literal matching with %s', (literal) => {
+    const sink = createLegMasker([literal]);
+    expect(sink.push('key: -----BEGIN OPENSSH PRIVATE KEY-----')).toBe('key:');
+    expect(sink.push('synthetic-key-body')).toBe('');
+    expect(sink.push('-----END OPENSSH PRIVATE KEY-----')).toBe('***');
+    expect(sink.push('after the key')).toBe('after the key');
+    expect(sink.flush()).toBe('');
+  });
+
+  it('S-BTN-119: masking a block does not break a literal that extends past it', () => {
+    const end = '-----END OPENSSH PRIVATE KEY-----';
+    const sink = createLegMasker(['-----\ncontinuation']);
+    expect(sink.push('-----BEGIN OPENSSH PRIVATE KEY-----')).toBe('');
+    expect(sink.push(end)).toBe('***');
+    expect(sink.push('continuation done')).toBe('*** done');
+  });
+
+  it('S-BTN-119: visible text before the banner does not spend the key hold budget', () => {
+    const sink = createLegMasker([]);
+    const prefix = 'x'.repeat(KEY_HOLD);
+    expect(sink.push(`${prefix} -----BEGIN OPENSSH PRIVATE KEY-----`)).toBe(prefix);
+    expect(sink.push('synthetic-key-body')).toBe('');
+    expect(sink.push('-----END OPENSSH PRIVATE KEY-----')).toBe('***');
+    expect(sink.push('after')).toBe('after');
   });
 });
 

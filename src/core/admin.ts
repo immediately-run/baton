@@ -400,7 +400,7 @@ export class Admin {
    *  its sync keys, and — for a repository registered before owners existed (BATON_REPOSITORIES'
    *  seed; spec-silent, recorded on R3-1240) — owner keys. Everything else is its registration's. */
   private async changeRepository(actor: string, id: string, b: Record<string, unknown>) {
-    only(b, ['id', 'weight', 'sync_keys_add', 'sync_keys_remove', 'owner_keys_add', ...LINK_FIELDS], 'body');
+    only(b, ['id', 'weight', 'sync_keys_add', 'sync_keys_remove', 'confirm', 'owner_keys_add', ...LINK_FIELDS], 'body');
     // A change names something to change; an empty one is a caller's mistake (round 3, 3-A-1).
     if (Object.keys(b).length === 1) bad('body', 'a change names at least one field besides id');
     const newOwners = b.owner_keys_add === undefined ? [] : await this.ownerKeys(b.owner_keys_add, 'owner_keys_add');
@@ -412,6 +412,8 @@ export class Admin {
       ? (b.sync_keys_add as { public_key: string; role: 'sync' | 'mirror' }[]) : bad('sync_keys_add', 'must be at most 4 {public_key, role: sync|mirror}');
     const remove = b.sync_keys_remove === undefined ? [] : Array.isArray(b.sync_keys_remove) && b.sync_keys_remove.length <= 4
       ? b.sync_keys_remove.map((f, i) => fingerprintOf(f, `sync_keys_remove[${i}]`)) : bad('sync_keys_remove', 'must be at most 4 fingerprints');
+    if (remove.length && b.confirm !== true) throw new BatonError('confirm-required', 'revoking sync keys takes confirm: true');
+    if (!remove.length && b.confirm !== undefined) bad('confirm', 'only with sync_keys_remove');
     // §11's remote, web_base, ci_identity and workflows: the whole registration they leave behind is
     // checked as a registration is — never the forge or forge path (R-BTN-92; round 2, 2-A-4).
     let linked: Registration | null = null;
@@ -584,6 +586,7 @@ export class Admin {
     // The pool's reserved credential has no key to revoke (R-BTN-103).
     if (fingerprint === 'pool') bad('fingerprint', 'pool is reserved for runner couriers’ pool copies, not a key');
     checkConfirm(body);
+    if (isObj(body)) only(body, ['confirm'], 'body');
     // Judged over the live repositories the key owns only (R-BTN-47): a retired repository's
     // policy blocks no revocation — its rows stay, read-only, and no route can change it again.
     for (const { repository_id } of this.rows<{ repository_id: string }>(
@@ -789,6 +792,7 @@ export class Admin {
     // B-145 item 12: revoking a runner key is an `approvers.members` action too.
     this.requireMembersApprover(repository, actor.slice(actor.indexOf(':') + 1), 'owner', await this.breakGlassSet());
     checkConfirm(body);
+    if (isObj(body)) only(body, ['confirm'], 'body');
     return this.c.store.transaction(() => {
       this.exec('UPDATE runner_grants SET revoked_at = ? WHERE credential_id = ? AND repository_id = ? AND revoked_at IS NULL', this.c.now(), fingerprint, repository);
       if (!this.changed()) throw new BatonError('not-found', `no grant of ${fingerprint} on ${repository}`);

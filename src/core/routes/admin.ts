@@ -1,4 +1,6 @@
 import type { BatonCore } from '../baton';
+import { matchAction } from '../actions';
+import { authorizeAction } from '../reads/kit';
 import { BatonError, json, readJson } from '../http';
 import { checkRepositoryId } from '../validate';
 import { stateView } from '../views';
@@ -42,7 +44,11 @@ export async function adminRoute(core: AdminCore, req: Request, url: URL, princi
   // R-BTN-88 (§4.8, R3-1258): the move — freeze, unfreeze, seal, export, import. An
   // administrator's alone, and the writes a freeze refuses do not touch them: the
   // administrator drives the move through it.
-  if (m === 'POST' && p === '/v1/admin/freeze') return json(core.store.transaction(() => core.ownerState.freeze(actor)));
+  const action = matchAction(m, p)?.action;
+  if (action?.id === 'admin.freeze') {
+    authorizeAction({ kind: 'key', role: 'admin' }, action);
+    return json(core.store.transaction(() => core.ownerState.freeze(actor)));
+  }
   if (m === 'POST' && p === '/v1/admin/unfreeze') return json(core.store.transaction(() => core.ownerState.unfreeze(actor)));
   if (m === 'POST' && p === '/v1/admin/seal') {
     // §4.8: a refused seal still dispatches the lagging mirrors' workflows (R-BTN-94) — the

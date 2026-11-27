@@ -283,7 +283,7 @@ describe('B-191’s scenario, the DOM half (B-207 item 6)', () => {
     // completion's confirm and release on this screen too; the ticket's page draws those
     // against their own claims).
     expect(names().indexOf('Force-reap a live claim…')).toBeGreaterThan(names().indexOf('Hold a ticket'));
-    expect(names().slice(names().indexOf('Stop…')).every((n) => n === 'Stop…' || n!.endsWith('…'))).toBe(true);
+    expect(names().slice(names().indexOf('Stop…')).every((n) => n!.endsWith('…'))).toBe(true);
   });
 
   it('an allowed list without ticket.unhold hides unhold, and draws only what it names', () => {

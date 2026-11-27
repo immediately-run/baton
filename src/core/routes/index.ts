@@ -41,11 +41,13 @@ export async function dispatchRoute(core: BatonCore, req: Request, url: URL): Pr
     }
     const open = await publicRoute(core, req, url, { accessEmail: req.headers.get('X-Baton-Access-Email') });
     if (open) return open;
-    let owner: string | null = null;
     if (path.startsWith('/v1/ui/')) {
-      owner = await dashboardPrincipal(core.admin, req);
+      const owner = await dashboardPrincipal(core.admin, req);
       const session = await dashboardSessionRoute(core, req, url, owner);
       if (session) return session;
+      const write = await dashboardWriteRoute(core, req, url, owner);
+      if (write) return write;
+      throw new BatonError('not-found', `no route ${req.method} ${path}`);
     }
     const attestation = await attestationRoute(core, req, url);
     if (attestation) return attestation;
@@ -56,9 +58,7 @@ export async function dispatchRoute(core: BatonCore, req: Request, url: URL): Pr
     const probe = await probeRoute(core, req, url);
     if (probe) return probe;
     const runner = await runnerPrincipal(core, req);
-    const res = owner === null
-      ? await runnerRoute(core, runner.req, url, runner)
-      : await dashboardWriteRoute(core, runner.req, url, owner);
+    const res = await runnerRoute(core, runner.req, url, runner);
     if (res) return res;
     throw new BatonError('not-found', `no route ${req.method} ${path}`);
   } catch (e) {

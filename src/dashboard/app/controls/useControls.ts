@@ -16,8 +16,7 @@ export interface Control {
   label: string;
   /** `effect: destructive` (§12.2). */
   destructive: boolean;
-  /** A destructive entry whose input takes `confirm`: the dialog sends `confirm: true`. A
-   *  destructive entry whose input has no `confirm` is one click (Decision 3a: Stop). */
+  /** A destructive entry whose input takes `confirm`: the dialog sends `confirm: true`. */
   dialog: boolean;
   form: FormSpec;
   method: string;

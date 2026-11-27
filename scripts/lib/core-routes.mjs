@@ -77,6 +77,34 @@ export function routeKey(method, path) {
   return `${method} ${path.replace(/\{[^}]*\}/g, '{}')}`;
 }
 
+/** Collect registered writes from the branches that actually dispatch them. A registry
+ *  declaration alone is not evidence of a handler. */
+export function writeActionIds(source) {
+  const file = ts.createSourceFile('baton.ts', source, ts.ScriptTarget.Latest, true);
+  const ids = new Set();
+  function visit(node, router) {
+    if (ts.isMethodDeclaration(node) || ts.isFunctionDeclaration(node)) router = node.name?.getText(file);
+    if (router === 'dashboardWriteRoute' && ts.isSwitchStatement(node) && node.expression.getText(file) === 'hit.action.id') {
+      for (const clause of node.caseBlock.clauses) {
+        if (!ts.isCaseClause(clause)) continue;
+        if (!ts.isStringLiteral(clause.expression)) throw new Error('unsupported dashboard write action id');
+        ids.add(clause.expression.text);
+      }
+    }
+    if (router === 'adminRoute' && ts.isIfStatement(node)) {
+      const test = unwrap(node.expression);
+      if (ts.isBinaryExpression(test) && test.operatorToken.kind === ts.SyntaxKind.EqualsEqualsEqualsToken
+        && test.left.getText(file) === 'action?.id') {
+        if (!ts.isStringLiteral(test.right)) throw new Error('unsupported administrator write action id');
+        ids.add(test.right.text);
+      }
+    }
+    ts.forEachChild(node, (child) => { visit(child, router); });
+  }
+  visit(file);
+  return ids;
+}
+
 /** Read dispatch guards, not comments, frontend forwarding prefixes or action declarations. */
 export function legacyRoutes(source) {
   const file = ts.createSourceFile('baton.ts', source, ts.ScriptTarget.Latest, true);

@@ -4,13 +4,13 @@
 // the dashboard's controls. Must hold: an administrator's session is answered every entry
 // listing its role, `ticket.hold` and `claim.force-reap` with their `ui.view` among them, each
 // `view` a screen of `screens.ts`, `delegated` on none; every entry it is shown is one whose
-// route admits the session; a key — an administrator's, an owner's, a runner's — is
-// `forbidden`, an unknown one `unauthenticated`. An owner's session (B-76) is covered by
+// route admits the session. S-BTN-100: SSH and API keys see their own entries; unknown keys
+// are `unauthenticated`. An owner's session (B-76) is covered by
 // test/unit/actions.test.ts, which filters the table by role. Runs on both hosts.
 import { describe, it, expect, beforeEach } from 'vitest';
 import { ACTIONS, actionsFor, type ListedAction } from '../../src/core/actions';
 import { SCREENS } from '../../src/core/screens';
-import { adminSession, keyCall, makeApiKey, ORIGIN, sessionCall, setAdminKeys, setClock, TOKENS, withCore } from '../helpers';
+import { adminSession, apiKeyCall, keyCall, makeApiKey, ORIGIN, sessionCall, setAdminKeys, setClock, TOKENS, withCore } from '../helpers';
 import { makeKey, signedRequest, type TestKey } from '../lib/sshKeys';
 import { call as hostCall } from '#host';
 
@@ -77,17 +77,59 @@ describe('S-BTN-255 the session’s actions (B-204)', () => {
     }
   });
 
-  it('a key is not answered: forbidden for a known one, unauthenticated for an unknown one', async () => {
-    for (const key of [admin, owner]) {
-      const res = await read(key, '/v1/actions');
-      expect([res.status, res.json.code]).toEqual([403, 'forbidden']);
+  it('S-BTN-100: a signed key sees its role’s entries, never session-only or other roles’ entries', async () => {
+    const a = await read(admin, '/v1/actions');
+    const o = await read(owner, '/v1/actions');
+    expect(a.status).toBe(200);
+    expect(o.status).toBe(200);
+    expect(a.json.actions.map((entry: ListedAction) => entry.id)).toContain('admin.repo.list');
+    expect(a.json.actions.map((entry: ListedAction) => entry.id)).toContain('admin.freeze');
+    expect(o.json.actions.map((entry: ListedAction) => entry.id)).toContain('condition.list');
+    expect(o.json.actions.map((entry: ListedAction) => entry.id)).not.toContain('admin.repo.list');
+    expect(o.json.actions.map((entry: ListedAction) => entry.id)).not.toContain('admin.freeze');
+    for (const [result, principal] of [[a, 'administrator'], [o, 'owner']] as const) {
+      expect(result.json.session).toBeNull();
+      for (const entry of result.json.actions as ListedAction[]) {
+        expect(entry.callers).toEqual([expect.objectContaining({ principal })]);
+      }
     }
+  });
+
+  it('S-BTN-100: the owner API key lists the same actions until removed', async () => {
+    const api = await makeApiKey();
+    expect((await keyCall(owner, '/v1/owner/docs/owners', { public_key: api.line })).status).toBe(200);
+    const signed = await read(owner, '/v1/actions');
+    const bearer = await apiKeyCall(api.key, '/v1/actions');
+    expect(bearer).toEqual(signed);
+    const remove = { fingerprint: api.fingerprint, remove: true };
+    expect(await keyCall(owner, '/v1/owner/docs/owners', remove)).toMatchObject({ status: 428, json: { code: 'confirm-required' } });
+    expect(await keyCall(owner, '/v1/owner/docs/owners', { ...remove, confirm: 'true' })).toMatchObject({ status: 428, json: { code: 'confirm-required' } });
+    expect(await apiKeyCall(api.key, '/v1/actions')).toEqual(bearer);
+    expect((await keyCall(owner, '/v1/owner/docs/owners', { ...remove, confirm: true })).status).toBe(200);
+    expect(await apiKeyCall(api.key, '/v1/actions')).toMatchObject({ status: 401, json: { code: 'unauthenticated' } });
+  });
+
+  it('rejects legacy runner tokens and unauthenticated requests', async () => {
     const token = await hostCall(new Request(`${ORIGIN}/v1/actions`, { headers: { Authorization: `Bearer ${TOKENS['vm-a']}` } }));
     expect(token.status).toBe(403);
-    // A bearer Baton does not know — what a delegated key is until B-124 builds one (R-BTN-130).
+    // An unknown bearer must be rejected; the delegated bearer of R-BTN-130 is not built.
     const api = await makeApiKey();
     expect((await hostCall(new Request(`${ORIGIN}/v1/actions`, { headers: { Authorization: `Bearer ${api.key}` } }))).status).toBe(401);
     expect((await read(await makeKey('ssh-ed25519', 'stranger'), '/v1/actions')).status).toBe(401);
     expect((await hostCall(new Request(`${ORIGIN}/v1/actions`))).status).toBe(401);
+  });
+
+  it('S-BTN-100: the dashboard dispatches one registered action and enforces its confirmation', async () => {
+    const post = async (path: string, body: unknown) => {
+      const res = await sessionCall(cookie, path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      return [res.status, (await res.json() as { code: string }).code];
+    };
+    expect(await post('/v1/ui/unregistered-action', {})).toEqual([404, 'not-found']);
+    expect(await post('/v1/ui/overrides/docs:T-1', { hold: true, expedite: true })).toEqual([400, 'invalid-params']);
+    expect(await post('/v1/ui/overrides/docs:T-1', { hold: true, cancel: true })).toEqual([400, 'invalid-params']);
+    const stop = { to_runner_id: 1, kind: 'release', payload: { ticket_id: 'docs:T-1', reason: 'requested' } };
+    expect(await post('/v1/ui/messages', stop)).toEqual([428, 'confirm-required']);
+    expect(await post('/v1/ui/messages', { ...stop, confirm: 'true' })).toEqual([428, 'confirm-required']);
+    expect(await post('/v1/ui/messages', { ...stop, confirm: true })).toEqual([404, 'not-found']);
   });
 });

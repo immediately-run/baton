@@ -255,7 +255,7 @@ describe('plan: one request per command', () => {
     expect(plan('admin', ['repo', 'add', 'o/r', '--sync-key', PUB, '--owner-key', PUB], key).body?.sync_keys).toEqual([{ public_key: PUB, role: 'sync' }]);
     expect(plan('admin', ['repo', 'set', 'docs', '--remote', 'git@github.com:o/r.git', '--sync-workflow', 'none', '--ci-identity', 'none', '--add-owner-key', PUB,
       '--add-sync-key', PUB, '--remove-sync-key', 'SHA256:x'], key).body).toEqual({
-      id: 'docs', remote: 'git@github.com:o/r.git', sync_workflow: null, ci_identity: null, owner_keys_add: [PUB], sync_keys_add: [{ public_key: PUB, role: 'sync' }], sync_keys_remove: ['SHA256:x'],
+      id: 'docs', remote: 'git@github.com:o/r.git', sync_workflow: null, ci_identity: null, owner_keys_add: [PUB], sync_keys_add: [{ public_key: PUB, role: 'sync' }], sync_keys_remove: ['SHA256:x'], confirm: true,
     });
     expect(() => plan('admin', ['repo', 'set', 'docs'], key)).toThrow('at least one change');
     expect(() => plan('admin', ['repo', 'set', 'docs', '--remot', 'x'], key)).toThrow('--remot: not a flag');
@@ -361,6 +361,51 @@ describe('send: signed with a key file, verified by Baton', () => {
     expect(ok.status).toBe(200);
     // The owner-key flag reads the public line from its file, as it reads an SSH public key.
     expect(plan('admin', ['repo', 'add', 'o/r', '--owner-key', `${file}.pub`]).body?.owner_keys).toEqual([line]);
+  });
+
+  it('S-BTN-126: send attaches a bearer only over HTTPS or loopback HTTP', async () => {
+    const file = join(dir, 'transport.key');
+    createApiKey(file);
+    const request = { method: 'GET', path: '/v1/actions' };
+    const transport = vi.fn(async (_url: string, _init: RequestInit) => new Response('{}'));
+    await expect(send('http://baton.example.test', request, file, transport)).rejects.toThrow('API keys require HTTPS');
+    expect(transport).not.toHaveBeenCalled();
+    for (const origin of ['https://baton.example.test', 'http://localhost:8787', 'http://127.0.0.1:8787', 'http://[::1]:8787']) {
+      await expect(send(origin, request, file, transport)).resolves.toMatchObject({ status: 200 });
+      expect(transport).toHaveBeenLastCalledWith(`${origin}${request.path}`, expect.objectContaining({
+        headers: expect.objectContaining({ Authorization: expect.stringMatching(/^Bearer bak_/) }),
+      }));
+    }
+  });
+
+  it('S-BTN-100: baton help with an API key prints the server’s action list', async () => {
+    const file = join(dir, 'help.key');
+    await setAdminKeys(createApiKey(file, 'help'));
+    const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation((url, init) => hostCall(new Request(url, init)));
+    const write = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    try {
+      await expect(main(['help', '-i', join(dir, 'missing'), '--url', ORIGIN])).rejects.toThrow('released CLI only');
+      await expect(main(['help', '--identity', '--dev', '--url', ORIGIN])).rejects.toThrow('released CLI only');
+      expect(fetch).not.toHaveBeenCalled();
+      expect(await main(['help', '-i', file, '--url', ORIGIN, '--dev'])).toBe(0);
+      expect(write.mock.calls.map(([text]) => String(text)).join('')).toContain('admin.repo.list');
+      expect(write.mock.calls.map(([text]) => String(text)).join('')).not.toContain('owner.grant.list');
+      write.mockClear();
+      expect(await main(['help', '--json', '--dev', '-i', file, '--url', ORIGIN])).toBe(0);
+      expect(JSON.parse(String(write.mock.calls[0][0])).actions).toEqual(expect.arrayContaining([expect.objectContaining({ id: 'admin.repo.list' })]));
+      fetch.mockClear();
+      write.mockClear();
+      expect(await main(['help'])).toBe(0);
+      expect(await main(['help', 'ticket'])).toBe(0);
+      expect(write.mock.calls.map(([text]) => String(text)).join('')).toContain('baton ticket history TICKET | show TICKET');
+      write.mockClear();
+      expect(await main(['help', '--json'])).toBe(0);
+      expect(JSON.parse(String(write.mock.calls[0][0])).topics).toHaveProperty('ticket');
+      expect(fetch).not.toHaveBeenCalled();
+    } finally {
+      write.mockRestore();
+      fetch.mockRestore();
+    }
   });
 });
 

@@ -56,7 +56,7 @@ beforeEach(async () => {
   expect((await keyCall(admin, '/v1/admin/repositories', { id: 'docs', owner_keys_add: [docsOwner.publicKey] })).status).toBe(200);
   expect((await keyCall(admin, '/v1/admin/repositories', { id: 'docs', sync_keys_add: [
     { public_key: syncKey.publicKey, role: 'sync' }, { public_key: mirrorKey.publicKey, role: 'mirror' }, { public_key: revokedSync.publicKey, role: 'sync' }] })).status).toBe(200);
-  expect((await keyCall(admin, '/v1/admin/repositories', { id: 'docs', sync_keys_remove: [revokedSync.fingerprint] })).status).toBe(200);
+  expect((await keyCall(admin, '/v1/admin/repositories', { id: 'docs', sync_keys_remove: [revokedSync.fingerprint], confirm: true })).status).toBe(200);
   // A second owner: a person's API key (R-BTN-159).
   api = await makeApiKey('a person');
   expect((await keyCall(docsOwner, '/v1/owner/docs/owners', { public_key: api.line })).status).toBe(200);

@@ -279,7 +279,7 @@ function workingTreeRefusal(argv) {
  *  the owner and administrator commands' value-less flags (parseArgs booleans) are named here so
  *  `--yes --dev` still counts. An unknown boolean is read as value-taking, which refuses rather
  *  than bypasses — the safe direction. */
-const NO_VALUE_FLAGS = new Set(['transitive', 'cut-over', 'available', 'unavailable', 'clear', 'yes', 'release-holders', 'no-required-bars', 'require-signed-control', 'no-require-signed-control', 'watch', 'all', 'dry-run']);
+const NO_VALUE_FLAGS = new Set(['transitive', 'cut-over', 'available', 'unavailable', 'clear', 'yes', 'release-holders', 'no-required-bars', 'require-signed-control', 'no-require-signed-control', 'watch', 'all', 'dry-run', 'json']);
 function devFlagPositions(argv) {
   const at = [];
   for (let i = 1; i < argv.length; i++) {
@@ -309,6 +309,10 @@ function devFlagPositions(argv) {
  */
 export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? p : readFileSync(p, 'utf8').trim()), readJson = (p) => readFileSync(p, 'utf8'), home = null) {
   const [cmd, ...rest] = argv;
+  if (role === 'help') {
+    parseArgs(argv, [], [], 0);
+    return { method: 'GET', path: '/v1/actions' };
+  }
   if (role === 'leg' && cmd === 'why') {
     const { positional } = parseArgs(rest, [], [], 2);
     const { repository, local } = ticketArg(need(positional[0], 'the ticket, <repository>:<id>'), home);
@@ -374,7 +378,7 @@ export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? 
         } };
       }
       if (sub === 'set') {
-        const { flags } = parseArgs(more, [], ['weight', 'remote', 'web-base', 'sync-workflow', 'mirror-workflow', 'ci-identity',
+        const { flags } = parseArgs(more, ['yes'], ['weight', 'remote', 'web-base', 'sync-workflow', 'mirror-workflow', 'ci-identity',
           'add-owner-key', 'add-sync-key', 'add-mirror-key', 'remove-sync-key'], 0);
         const add = [...(list(flags['add-sync-key']) ?? []).map((k) => ({ public_key: readKey(k), role: 'sync' })), ...(list(flags['add-mirror-key']) ?? []).map((k) => ({ public_key: readKey(k), role: 'mirror' }))];
         const workflow = (v) => (v === 'none' ? null : v);
@@ -387,7 +391,9 @@ export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? 
           ...(flags['remove-sync-key'] ? { sync_keys_remove: list(flags['remove-sync-key']) } : {}),
         };
         if (Object.keys(body).length === 1) throw new Error('baton admin repo set ID names at least one change');
-        return { method: 'POST', path: '/v1/admin/repositories', body };
+        const remove = body.sync_keys_remove;
+        return { method: 'POST', path: '/v1/admin/repositories', body: remove?.length ? { ...body, confirm: true } : body,
+          ...(remove?.length ? { confirm: { question: `revoke sync keys ${remove.join(', ')} on ${body.id}?`, yes: flags.yes === true } } : {}) };
       }
       if (sub === 'retire') {
         const { flags } = parseArgs(more, ['yes'], [], 0);
@@ -538,6 +544,7 @@ export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? 
     if (cmd === 'owners') {
       const { flags, positional } = parseArgs(rest, ['yes'], ['add', 'remove'], 1);
       const repo = repoOrHome(positional[0], home);
+      if (flags.add && flags.remove) throw new Error('choose either --add or --remove');
       if (flags.add) return { method: 'POST', path: `/v1/owner/${repo}/owners`, body: { public_key: readKey(flags.add) } };
       if (flags.remove) return {
         method: 'POST', path: `/v1/owner/${repo}/owners`, body: { fingerprint: flags.remove, remove: true, confirm: true },
@@ -1083,6 +1090,51 @@ async function homesContext(flag, explicitUrl = null) {
   return resolveHomes({ flag, env: process.env, explicitUrl });
 }
 
+// Local fallback for the current CLI. The generated command tree is B-157's.
+const HELP_TOPICS = {
+  admin: 'repos | repo | grant | probe | resource | instance | capacity | settings | revoke | open | state | freeze | unfreeze | seal | export | import',
+  owner: 'grants | grant | revoke | owners | bar | settings | courier | resolve | policy | sign | verify-config',
+  ticket: 'history TICKET | show TICKET',
+  tickets: 'new | claim | set | done | check | next',
+  leg: 'raise | replay | log',
+  decision: 'list | answer',
+  repo: 'sync | init | migrate-markers',
+  home: 'list | use | add | remove | show',
+  queue: 'add | list | remove',
+  key: 'create FILE',
+  board: 'REPOSITORY',
+  blocked: 'TICKET | --repository REPO --on KIND:REF',
+  run: '[--home HOME]',
+  'test-course': '[--help]',
+};
+
+async function helpMain(argv) {
+  const { flags, positional: [noun, verb] } = parseArgs(argv, ['json'], ['identity', 'url', 'home'], 2);
+  if (noun || flags.identity === undefined) {
+    if (noun && !Object.hasOwn(HELP_TOPICS, noun)) throw new Error(`unknown help topic ${noun}; try baton help`);
+    const usage = verb && HELP_TOPICS[noun].split(' | ').find((line) => line.split(' ')[0] === verb);
+    if (verb && !usage) throw new Error(`unknown help topic ${noun} ${verb}; try baton help ${noun}`);
+    const topics = noun ? { [noun]: usage || HELP_TOPICS[noun] } : HELP_TOPICS;
+    if (flags.json) process.stdout.write(`${JSON.stringify({ topics })}\n`);
+    else {
+      if (!noun) process.stdout.write('Usage: baton help [NOUN] | baton help -i KEY [--json]\n');
+      for (const [name, usage] of Object.entries(topics)) process.stdout.write(`  baton ${name} ${usage}\n`);
+    }
+    return 0;
+  }
+  const homes = await homesContext(flags.home, flags.url ?? process.env.BATON_URL ?? null);
+  const url = flags.url ?? process.env.BATON_URL ?? homes.inForce?.home.origin ?? DEFAULT_URL;
+  const { status, json, text } = await send(url, plan('help', []), need(flags.identity, '-i KEY'));
+  if (status < 200 || status >= 300) {
+    process.stdout.write(`${json === null ? arrived(text) : JSON.stringify(json)}\n`);
+    return 1;
+  }
+  if (!Array.isArray(json?.actions)) throw new Error('Baton did not return an action list');
+  if (flags.json) process.stdout.write(`${JSON.stringify(json)}\n`);
+  else for (const { id, summary } of json.actions) process.stdout.write(`${id} — ${summary}\n`);
+  return 0;
+}
+
 /** The one management path's exit: 0 when Baton answered its JSON, 1 when the answer was not
  *  Baton's — a refusal, or a 2xx body that is not JSON (B-80) — and any error thrown up to the
  *  caller (the CLI prints `baton: …` and exits 2). Exported for the tests of that contract. */
@@ -1092,7 +1144,9 @@ export async function main(argv) {
   // takes one is a pinned release — never a git working tree, whose code a push (a branch a leg
   // checks out) changes. `--dev` is the override for this repository's own development; the
   // other roles (the reads, the runner, the repository commands) run from a checkout still.
-  if (argv[0] === 'admin' || argv[0] === 'owner') {
+  // Keyed help cannot know a key's role before reading it. Apply the release guard to any
+  // explicit identity, rather than inspecting an owner or administrator secret first.
+  if (argv[0] === 'admin' || argv[0] === 'owner' || (argv[0] === 'help' && argv.some((a) => a === '-i' || a === '--identity'))) {
     const dev = devFlagPositions(argv);
     const end = argv.indexOf('--') === -1 ? argv.length : argv.indexOf('--');
     if (dev.length > 0 && dev.length === argv.slice(0, end).reduce((n, a) => n + (a === '--dev' ? 1 : 0), 0)) {
@@ -1101,6 +1155,7 @@ export async function main(argv) {
       throw new Error(workingTreeRefusal(argv));
     }
   }
+  if (argv[0] === 'help') return helpMain(argv.slice(1));
   if (argv[0] === 'test-course') return testCourse(argv.slice(1));
   if (argv[0] === 'course' && argv[1] === 'show' && !argv.slice(2).some((a) => a.startsWith('-'))) {
     const { showCourseMain } = (await import('../scripts/baton-cli.mjs')).default;

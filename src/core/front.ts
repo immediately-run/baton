@@ -248,6 +248,7 @@ async function route(req: Request, env: Config, to: Forward, hasAdmin: () => Pro
       if (apiKey) return forward(req, to, { 'X-Baton-Api-Key': apiKey });
       // The transition (R3-1239): a bearer token still serves until every runner signs.
       const credential = await verifyRunner(req, env);
+      if (pathname === '/v1/actions') throw new BatonError('forbidden', 'actions.list requires an SSH signature or API key');
       return forward(req, to, { 'X-Baton-Credential': credential });
     });
   }

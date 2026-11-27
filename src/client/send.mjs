@@ -27,7 +27,13 @@ let saidClientVersions = false;
  */
 export async function send(url, p, keyFile, fetchImpl = fetch, client = clientVersion()) {
   const cred = requestCredential(keyFile);
-  const target = new URL(p.path, url).toString();
+  const destination = new URL(p.path, url);
+  const loopback = destination.hostname === 'localhost' || destination.hostname === '[::1]' ||
+    /^127(?:\.\d{1,3}){3}$/.test(destination.hostname);
+  if (cred.bearer && destination.protocol !== 'https:' && !(destination.protocol === 'http:' && loopback)) {
+    throw new Error('API keys require HTTPS or a loopback HTTP origin');
+  }
+  const target = destination.toString();
   // A GET carries no body; its digest is of the empty one.
   const body = p.method === 'GET' ? undefined : JSON.stringify(p.body ?? {});
   const auth = cred.bearer !== undefined ? { Authorization: `Bearer ${cred.bearer}` } : signHeaders({ method: p.method, url: target, body, key: cred.key });

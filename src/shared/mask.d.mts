@@ -8,7 +8,13 @@ export declare const KEY_HOLD: number;
 
 /** `text` with every class-6 key block masked whole, then every class-5 token. */
 export declare function maskKeys(text: string): string;
+export declare function maskBearerTokens(text: string): string;
 export declare function maskSecrets(text: string): string;
+
+export declare function createKeyBoundary(): {
+  push(line: string): { prefix: number | undefined; marker: boolean };
+  flush(): boolean;
+};
 
 export interface Masker {
   /** One line in; the lines that may leave now, joined by `\n` (`''` while a block is held). */

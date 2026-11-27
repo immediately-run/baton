@@ -82,7 +82,10 @@ describe('R-BTN-57: administrators', () => {
   it('revoking an unknown key is not-found; a revoked key is never granted again', async () => {
     expect(await code(adm('/keys/SHA256%3Annnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn/revoke', { confirm: true }))).toBe('not-found');
     await own('/grants', { public_key: runner.publicKey, hostname: 'w-host', capabilities: [] });
-    expect(await code(adm(`/keys/${encodeURIComponent(runner.fingerprint)}/revoke`, { confirm: true }))).toBe(200);
+    const fp = encodeURIComponent(runner.fingerprint);
+    expect(await code(adm(`/keys/${fp}/revoke`, {}))).toBe('confirm-required');
+    expect(await code(own(`/grants/${fp}/revoke`, { confirm: false }))).toBe('confirm-required');
+    expect(await code(adm(`/keys/${fp}/revoke`, { confirm: true }))).toBe(200);
     expect(await code(own('/grants', { public_key: runner.publicKey, capabilities: [] }))).toBe('conflict');
   });
 

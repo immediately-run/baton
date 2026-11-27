@@ -44,12 +44,38 @@ export function maskKeys(text) {
   return lines.join('\n');
 }
 
-/** `text`, with every class-5 and class-6 occurrence replaced by `***`. */
-export function maskSecrets(text) {
+/** `text`, with every class-5 occurrence replaced by `***`. */
+export function maskBearerTokens(text) {
   // A fresh pattern per call, so nothing a previous replacement left in a shared `lastIndex` can
   // move where this one starts.
   const tokens = new RegExp(BEARER_TOKEN.source, 'g');
-  return maskKeys(text).replace(tokens, '***');
+  return text.replace(tokens, '***');
+}
+
+/** `text`, with every class-5 and class-6 occurrence replaced by `***`. */
+export function maskSecrets(text) {
+  return maskBearerTokens(maskKeys(text));
+}
+
+/** Classify original stream lines before another masker can change a key banner.
+ *  `prefix` limits visible text on a key line; `marker` closes the masked run. */
+export function createKeyBoundary() {
+  let bytes = 0;
+  return {
+    push(line) {
+      const prefix = bytes > 0 ? 0 : line.search(KEY_BEGIN);
+      if (prefix < 0) return { prefix: undefined, marker: false };
+      bytes += line.length - prefix + 1;
+      const marker = KEY_END.test(line.slice(prefix)) || bytes >= KEY_HOLD;
+      if (marker) bytes = 0;
+      return { prefix, marker };
+    },
+    flush() {
+      const marker = bytes > 0;
+      bytes = 0;
+      return marker;
+    },
+  };
 }
 
 /** R-BTN-144 class 6 across a stream, which a line-at-a-time sink cannot do: from a `BEGIN`
@@ -59,35 +85,16 @@ export function maskSecrets(text) {
  *  block is held); `flush` returns `***` for a block the stream ended inside of. Class 5 is
  *  masked on every line as it leaves, and a token never spans a line. */
 export function createMasker() {
-  const out = [];
-  let held = false;
-  let bytes = 0;
-  const release = () => {
-    out.push('***');
-    held = false;
-    bytes = 0;
-  };
+  const key = createKeyBoundary();
   return {
     push(line) {
-      if (held) {
-        bytes += line.length + 1;
-        if (KEY_END.test(line) || bytes >= KEY_HOLD) release();
-      } else {
-        const open = line.search(KEY_BEGIN);
-        if (open < 0) out.push(maskSecrets(line));
-        else {
-          // What is not key material on the `BEGIN` line (`key: …`) leaves with it, and the
-          // block holds from that line on, never answered now.
-          if (open > 0) out.push(maskSecrets(line.slice(0, open)).replace(/\s+$/, ''));
-          held = true;
-          bytes = line.length;
-        }
-      }
-      return out.length ? out.splice(0).join('\n') : '';
+      const { prefix, marker } = key.push(line);
+      if (prefix === undefined) return maskBearerTokens(line);
+      const before = maskBearerTokens(line.slice(0, prefix)).trimEnd();
+      return marker ? (before ? `${before}\n***` : '***') : before;
     },
     flush() {
-      if (held) release();
-      return out.splice(0).join('\n');
+      return key.flush() ? '***' : '';
     },
   };
 }
