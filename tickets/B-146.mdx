@@ -49,7 +49,12 @@ removed the resource prerequisite and block and kept readings as advice (R-BTN-7
    [security proposal](../spec/proposals/security.md) and its
    [tables and routes](../spec/proposals/data-model-and-api.md). Bind by subject, not by use
    count. Do not add record signatures, a second signing key or consumption state. Preserve the
-   built person-answer path.
+   built person-answer path. Keep the writer classes data, not code: #449's proposals add a
+   writer `person` (a person's interactive grant;
+   [ticket ownership](../spec/proposals/ticket-ownership.md)), a content hash in
+   `std:approval@1`'s value, and `std:notified@1`
+   ([personal secrets](../spec/proposals/personal-secrets.md)). They are proposals, not this
+   ticket's work, but the store must take them without a migration of its shape.
 2. **Standard work records.** Record `std:wrote@1` with the range and runner key, and
    `std:review@1` only for a run that finishes at the review leg's approving outcome. Use the
    subject Baton holds, not a caller-supplied subject. A review names its run id and only
@@ -69,7 +74,9 @@ removed the resource prerequisite and block and kept readings as advice (R-BTN-7
    advice prerequisite and block. The `requires.attestations` instance form (`subject: instance`,
    a requirement on readings) is not built here: it stays on the proposal page, with S-BTN-181's
    funds, `count: 2` and latest-per-writer cases, until a course needs it, and is ruled on then.
-   Do not add a reading signature, a reading nonce, or a `signed` policy knob.
+   Do not add a reading signature, a reading nonce, or a `signed` policy knob. A leg that should
+   wait on a reading (a rate limit, host memory) does so through its course's selector
+   ([B-351](B-351.mdx)), not through a requirement core evaluates.
 
 ### Tests
 
@@ -112,3 +119,5 @@ _(2026-11-24: rules re-read: R-BTN-181, R-BTN-183)_
 _(2026-11-26: the owner deferred the instance form: "Theoretically, it makes sense for readings
 to be an input to leg decisions, but I also don't think we'll need this for a while still." Item 6
 and the tests say so; `spec/BATON_SPEC_HISTORY.md` records it.)_
+
+_(2026-11-27: #335 lands as the re-scope only, at the owner's request to make it mergeable; B-146 stays `available` for the store, the records, the requirements, export and sync above. Item 1 notes #449's proposed writer `person` and approval hash; item 6 points at B-351's selector.)_
