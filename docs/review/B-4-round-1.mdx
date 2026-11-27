@@ -1,0 +1,19 @@
+---
+title: B-4 review round 1
+description: Findings and disposition for the only review of session links and the instance settings, merged with one blocking finding open.
+---
+
+Reviewed [Baton #242](https://github.com/immediately-run/baton/pull/242) at `60845449`
+([review](https://github.com/immediately-run/baton/pull/242#pullrequestreview-5910892752), [verdict comment](https://github.com/immediately-run/baton/pull/242#issuecomment-6894841551)). The
+verdict was changes: two blind passes, merged and each verified against the code, found one
+blocking defect in clearing `link_hosts` and two nits; S-BTN-77 (both halves), the CLI unit tests,
+`npm run typecheck` and `npm run check:spec` passed.
+
+The PR was merged on 2026-11-15 with this round's findings open. No fix leg ran after this round;
+the one later commit merged `main`. The open finding is carried by FOLLOWUP-B-4.
+
+| Finding | Disposition |
+|---|---|
+| [Blocking: clearing `link_hosts` stores the text `null` instead of SQL NULL, so the state read serves `link_hosts: null` and the dashboard's `.join` throws](https://github.com/immediately-run/baton/pull/242#discussion_r4578525695) | Open on `main`: `InstanceSettings.set` still writes `JSON.stringify(link)` for a null, and `view()` answers `null` against its type. The new dashboard reads it with `?? []`, so the crash is gone; the stored value and the untested branch are carried by FOLLOWUP-B-4. |
+| [Nit: `linkHosts()` and `checkAppId()` have no caller; `view()` re-implements them](https://github.com/immediately-run/baton/pull/242#discussion_r4578525698) | Partly fixed on `main` since: `checkAppId()` is called from `routes/public.ts`; `linkHosts()` still has none. Not carried (nit). |
+| [Nit: the `Claims` fallback reads `SESSION_HOSTS.of({})` while `workerApi.ts` reads the deploy's config](https://github.com/immediately-run/baton/pull/242#discussion_r4578525699) | Fixed on `main` since: `Claims` takes a required `sessionHosts` callback and has no fallback of its own. |

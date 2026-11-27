@@ -1,0 +1,16 @@
+---
+title: B-275 review round 2
+description: Findings and disposition for the second review of logging refused workflow dispatches, merged with one blocking finding open.
+---
+
+Reviewed [Baton #366](https://github.com/immediately-run/baton/pull/366) at `784fb1ef`
+([review](https://github.com/immediately-run/baton/pull/366#pullrequestreview-6014320195)). The
+verdict was changes: the reviewer rechecked round 1's four fixes (they hold), ran typecheck and 57
+focused tests, and found that a response of an unsupported declared type is stored as payload.
+
+The PR was merged on 2026-11-24 at the reviewed head, with this round's finding open. No fix leg
+ran after this round. The open finding is carried by FOLLOWUP-B-275.
+
+| Finding | Disposition |
+|---|---|
+| [Blocking: an unsupported response type is logged as payload, not a refusal reason](https://github.com/immediately-run/baton/pull/366#discussion_r4659848039) (an `application/xml` 422's metadata lands in the stored message) | Open on `main` (`dispatchRefusal` in `src/core/dispatch.ts` still keeps the body of any non-JSON type, stripped of tags). Carried by FOLLOWUP-B-275. |
