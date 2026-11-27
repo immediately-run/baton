@@ -10,12 +10,11 @@ tags:
   - roadmap-item
 order: 1165
 tier: critical
-description: "Work attestation storage, request-authenticated writers, subject binding and typed work prerequisites remain proposed. Do not build requires.resources or make resource rows gates. Reconcile the remaining instance-reading and sync-authentication proposal text before implementation."
+description: "Work attestation storage, request-authenticated writers, subject binding and typed work prerequisites remain proposed. Do not build requires.resources or make resource rows gates. Requirements on readings (the instance form) are deferred; reconcile the sync-authentication proposal text before implementation."
 topics:
   - baton
 owns: {}
-prs:
-  - https://github.com/immediately-run/baton/pull/335
+prs: []
 depends_on:
   - B-145
 ---
@@ -26,9 +25,9 @@ should be for the leg? It could actually depend on a reading if we want (eg: acc
 Recorded in `spec/BATON_SPEC_HISTORY.md` (baton#145).
 **Spec:** R-BTN-181 (attestations: shape, credential-derived writers, request authentication,
 supersession, the prerequisite, standard types, records not git), R-BTN-76 (readings as attestations about an instance, read per
-repository), R-BTN-75 (block kinds, `binds`), R-BTN-120 (prerequisites), §6.6 rule 1, R-BTN-88
+repository; requirements on them deferred, item 6), R-BTN-75 (block kinds, `binds`), R-BTN-120 (prerequisites), §6.6 rule 1, R-BTN-88
 (export), R-BTN-188's `attestations` and `readings` knobs; §13 `attestations`, `ticket_blocks`,
-`instance_readings`; §14 the attestation and reading routes; S-BTN-181, S-BTN-24, G-BTN-70.
+`instance_readings` (deferred, item 6); §14 the attestation routes (the reading routes deferred); S-BTN-181, S-BTN-24, G-BTN-70.
 **Depends on:** B-145 (the policy's `attestations` and `readings` entries say whose count).
 **Used by:** B-213 (the attestations read and screen list this store).
 
