@@ -281,8 +281,17 @@ section that are not built are in [the proposal page](../proposals/checks-and-ex
       credential inheritance is governed by R-BTN-144. `channel` is the address of the leg's
       channel (R-BTN-106). A handle may name
       the session's link, which the runner reports as R-BTN-113 says.
-    - `exec(handle, argv, {cwd, timeout_s, stdin}) → {status, stdout, stderr}` runs a command
-      where the session runs; the call's stdin stays open for further lines until it ends.
+    - `exec(handle, argv, {cwd, timeout_s, stdin, env, onStderr}) → {result, write, kill}` runs
+      a command where the session runs and returns at once, while it runs: `result` resolves to
+      `{status, stdout, stderr}` when it ends, `status` null when the call did not exit by itself
+      (killed, past `timeout_s`, or never started); `write(line)` adds a line to its stdin after
+      the `stdin` text, stdin staying open until the call ends (an executor that cannot stream
+      stdin may hold the lines, which then never reach the command, and R-BTN-119's stop ends
+      the call by `kill()`; a `write` after the end is ignored); `kill()` stops the call's
+      processes; `onStderr(line, frame?)` receives each stderr line as it arrives, `frame` the
+      line ending when supplied; `env` sets variables over the session's for this call, part of
+      what the runner hands the executor (R-BTN-144), filtered as the brief's environment is,
+      naming no variable outside the leg environment.
     - `stop(handle, reason)` stops the session. The executor chooses how to stop it;
       R-BTN-145 governs the total time, including the runner's handling before this call.
     - `end(handle) → {status, result}` waits for the session's end. A session that does not exit
@@ -471,7 +480,7 @@ section that are not built are in [the proposal page](../proposals/checks-and-ex
     `replay_clone_credential` if configured, and names in `runner.json` `replay_env` or `--env`.
 - **R-BTN-145 (every process a leg starts is stopped with it).** `status: partly B-184 B-9` Every process the leg started
   must be gone within 30 s of the runner receiving a stop or release or detecting a lost lease,
-  or of the runner exiting or the leg call returning. This is an end-to-end bound, including
+  or of the runner exiting or the leg call ending (its `result` resolving). This is an end-to-end bound, including
   any grace period and executor cleanup (R-BTN-107). The `builtin` executor kills the call's
   process group on exit or when asked to stop. **Not built:** enforcement of the end-to-end
   bound for release and for processes outside the call's group (B-184, B-9).

@@ -94,8 +94,9 @@ Each gap needs its own ticket; these rules alone do not close them.
 - **Answering a person leg (question 2, rule 1):** the Conditions screen draws each option with
   its `baton decision answer` line and "This page cannot answer it": no session today is an
   owner's or a member's, and no session can write the answer (B-76, B-195, B-219, B-338).
-  A person's session is a human (R-BTN-185), so it answers where the policy counts only a human's
-  answer too; under `human_key: hardware` each such answer also takes a security-key touch
+  A person's session that acts as `human` (R-BTN-185: under `any`, one Cloudflare Access or a
+  `human_only` key's code opened) is a human, so it answers where
+  the policy counts only a human's answer too; under `human_key: hardware` each such answer also takes a security-key touch
   (B-340).
 - **Session-only acts (rule 1, the other way):** force-reap, clearing a fence, confirming or
   releasing a completion, confirming an adoption, resolving a scope finding, accepting a held

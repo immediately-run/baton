@@ -44,6 +44,121 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
     2026-11-19 entry quoted, not inferred; "answered", not "asked"; why R-BTN-181's `readings`
     check stays; B-146's stale description and **Spec:** line; `prs:` emptied, since #335 lands
     the re-scope, not the work.
+- **2026-11-26 — Two human gates, `protected` claims the custody one, `exec` streams, and "mark" leaves the vocabulary (R-BTN-189, R-BTN-185, R-BTN-107).**
+  Rules changed: R-BTN-189, R-BTN-185, R-BTN-188, R-BTN-155, R-BTN-107, R-BTN-145, R-BTN-186,
+  R-BTN-57, §12.1, §12.8; S-BTN-324, S-BTN-278, S-BTN-321, S-BTN-185, S-BTN-190, S-BTN-192, S-BTN-299; one Decisions entry; the linked proposals (people and
+  dashboard, intervention sessions, conditions, data model and API, scenarios: S-BTN-100,
+  S-BTN-197). From the code-against-spec review of 2026-11-24
+  (`docs/review/code-vs-spec-review-2026-11-24.mdx`), whose owner decisions these are.
+  - **Two human gates.** The owner, 2026-11-24, asked whether `human-gates` keeps a variant
+    without hardware keys: "yes"; and, 2026-11-26, whether the `protected` preset claims it:
+    "yes". R-BTN-189 again names two guarantees: `human-gates` (`approvers.members` and
+    `approvers.policy` human-only, any `human_key`), resting on the custody §12.8 lists as not
+    observed, as every guarantee rests on what that list excludes; and `human-gates-hardware`
+    (the same, `human_key: hardware`, and a key that can meet it), which holds nowhere until
+    FIDO attestation verification is built (R-BTN-185, B-136). `protected` holds all but
+    `human-gates-hardware`; `protected-hardware` all six once a key can meet `hardware`.
+    Legacy `human-gates` and `human-gates-hardware` compare by name, and a floor keeps its
+    guarantee's name. This reverses the restructure's part 2 of 2026-11-02 (B-164: "Only
+    protected-signed", `human-gates-hardware` absorbed into `human-gates`), the legacy
+    comparison B-293's spec half wrote on 2026-11-22 ("Legacy `human-gates` (the weaker
+    condition) … no migration successor"), and R-BTN-185's "no guarantee claims it as a human
+    gate". What it loosens: under `human_key: any`, `protected` now claims a human gate that any
+    agent session defeats which can use a human-only key or open a dashboard session (one Access or a
+    `human_only` key's code opened, R-BTN-185): driving a signed-in browser; and, before the narrowing below, an
+    administrator's one-time link minted with an administrator key, or, once owners' sessions are
+    built (B-76), a sign-in code bound with an ordinary owner key. Baton cannot tell, which is why the promise names
+    custody. A floor on `human-gates`, which from 2026-11-02 pinned `human_key: hardware`, now
+    pins only the two lists: an `approvers.policy` approver can lower `hardware` to `any` without
+    `floor-violated`, so a deployment that relied on the hardware meaning floors
+    `human-gates-hardware` instead. Fieldhouse's R-FH-3 does (`FIELDHOUSE_SPEC.md`, its human
+    gates), and follows in its own repository. The code is behind: B-136 (#331,
+    2026-11-24) returns `false` for both guarantees (`src/core/policy.ts`), refusing
+    custody-only gates; computing `human-gates` from the lists again is B-189's item 2, which already reads them,
+    with `human-gates-hardware` held `false` until B-136's attestation is built; S-BTN-190's
+    legacy cases are B-293's.
+  - **Under `any`, a session proves a human only as strongly as its sign-in.** Review round one
+    found the gap above. The owner first sent it, 2026-11-26, to the session writing the
+    human-intent page (its principle in `docs/context/human-intent.mdx`, baton#449), which splits
+    who drives a session (the owner, 2026-11-26, in that session: "Baton Dashboard UI: Human
+    drive (policy may dictate hardware-key proof of this, but the assumption is that this is
+    always a person)") from how strongly that is proven, and read it as the narrowing. Round two
+    found that the narrowing revised the owner's ruling of 2026-11-23 (B-340: every person's
+    session "however it was opened", with a per-act key touch under `hardware`). Asked with the
+    three rulings side by side, the owner chose, 2026-11-26, "Narrow under `any` only": under
+    `human_key: any` a session acts as `human` only when Cloudflare Access opened it (either of
+    R-BTN-155's Access modes) or a code a `human_only` key binds; an ordinary key's one-time link
+    or code proves only that key's role and satisfies no human-only list; a sign-in path not
+    named proves no human, the proposed forge sign-in included (the owner, 2026-11-26, as
+    baton#449 records it: "a forge signin doesn't prove human intent, because autonomous agents can
+    also use forge credentials").
+    Under `hardware` the ruling of 2026-11-23 stands: every session, each act with its touch.
+    R-BTN-188's `human` entry and its session sentence, R-BTN-155, R-BTN-57, §12.1's rows, §12.8's
+    custody bullet, S-BTN-278, S-BTN-321 and S-BTN-324 follow. No session acts as `human` today
+    (`src/core/policy.ts`: a `human` entry matches only `human_only` owners and break-glass
+    lines); B-340 builds it, its item 5 the sign-in's proof, and B-195 writes no `human` writer
+    before it. Rejected: every session however opened, with `human-gates` under `any` resting
+    on custody of every key that can open a session; and `protected` not claiming `human-gates`.
+  - **The protection checker.** The owner, 2026-11-26, chose a grant role over a mark. B-189's
+    amendment of 2026-11-24 had already retired the protection checker, grant roles and the
+    checker mark, so nothing changes here.
+  - **"Mark" is not a noun of Baton's.** The owner, 2026-11-26: "Marks are not present on the
+    dashboard and cli. Is this a bit of vocabulary baton truly needs?", and, offered dropping
+    it: "yes, drop it". The spec and the proposals called six things a mark, G-BTN-172's retired "brief mark" among them: a key's `human_only` (§12.1, R-BTN-57), the registry's `delegated` value (R-BTN-186,
+    the people-and-dashboard and intervention-sessions proposals, S-BTN-100), whether the
+    tenant is frozen (S-BTN-299), an outbox delivery report (the conditions and data-model
+    proposals) and a grant's admitting the capability `intervener` (the intervention-sessions
+    proposal). Each now names the property, value or report; none changes. A mark as a glyph on the
+    dashboard (the tickets' "mode mark" and "state mark") is a different sense and stays: the owner,
+    2026-11-26, "this is fine, let them stay". The verb ("marks the lease lost") stays.
+  - **`exec` streams.** The owner, 2026-11-24, asked whether R-BTN-107's `exec` returns
+    `{status, stdout, stderr}` or the streaming object the code returns: "streaming needs to be
+    supported". `exec(handle, argv, {cwd, timeout_s, stdin, env, onStderr}) → {result, write,
+    kill}`, as `src/runner/executor.ts` and Fieldhouse's E2B executor implement it; no executor
+    implements the old shape, so `executor_api` stays 1.
+  - **Review, round one**: two fresh reviewers given the diff and the impact list. Found: under
+    `human_key: any` a session is a human, and a session can be opened by an administrator's
+    one-time link today and, once B-76 builds it, by a code an ordinary owner key binds, so an
+    agent holding no human-only key could pass `[human]` lists, a loosening the entry did not
+    name (named above; how to close it is put to the owner); `human-gates-hardware` said it rested
+    on no custody; "a key can meet `hardware`" had three readings (now a `human_only` owner key
+    of the repository) and "held" read the policy's values only (now the whole cell, at the
+    moment of computing); the *Decisions in full* entry still stated the reversed choice; floors
+    on `human-gates` changing meaning, Fieldhouse's R-FH-3 among them; no "Not built" for
+    `human-gates` while the code returns `false` (B-189 builds it; S-BTN-185 and S-BTN-190 say
+    so); B-164's title and description, `docs/hardware-policy-upgrade.mdx`, and the vocabulary
+    and product pages' "only a human-only key"; the custody list restated in a cell;
+    `intervener`, a capability a grant admits, called a setting; five more noun uses of "mark";
+    `exec`'s `status` on a kill or timeout, `env` overriding past R-BTN-144's filter, R-BTN-145's
+    "the leg call returning", and the leg-log proposal reading a stdout `exec` does not stream;
+    strikes that re-added the struck word. Each was checked against the text and fixed.
+  - **Review, round two**: one fresh reviewer given the whole diff, round one's fixes and the
+    impact list. Every round-one item was found fixed. Found: R-BTN-185's "Not built" said every
+    session acts as `human` until B-340, where today none does; the narrowing revised the owner's
+    2026-11-23 ruling without quoting a new one (put to the owner, who chose it for `any` only,
+    above); restatements of "a session is a human" in R-BTN-188, R-BTN-155, §12.1, §12.8's
+    custody bullet, S-BTN-278, S-BTN-321, the open questions, the security proposal and the
+    context pages; B-195 writing `human` for every session before B-340 decides which act as
+    one, an interim hole once B-76 builds owner sign-in codes, and B-213, B-338 and B-340's title
+    and description; "over the policy" and `held` reading the policy's values only; this
+    entry's loosening paragraph listing paths the narrowing closes; `exec`'s held stdin lines and
+    the leg-log proposal's `onStdout` against `executor_api`; S-BTN-324 having no test; and
+    G-BTN-172 missing from the mark count. Each was checked against the text and fixed.
+  - **Review, round three** (the last): one fresh reviewer given the whole diff, round two's
+    fixes and the impact list. Every round-two item was found fixed. Found: under `hardware` a
+    `human_only` owner key's session matched `[human]` through its key, so no act it took needed
+    the touch `human-gates-hardware` promises (now every act a `human` or human-only `key:` entry
+    admits carries it); an ordinary key's session under `hardware` left untouched `human`
+    attestations that would count after a lowering to `any` (now recorded with its role only);
+    the touch's credential not bound to the act's repository (now its signing human-only key must
+    own it at the act); "either Access mode", though the keyless mode opens no session (now only
+    the `ACCESS_IDENTITIES` sign-in, the keyless mode acting as no `human`); "where its sign-in
+    proves one" and §12.8's custody bullet false under `hardware`; the Decisions line,
+    `docs/security-model.mdx`, the UX page, the intervention-sessions proposal and B-195's
+    invariant; S-BTN-324 lacking the new cases; and this entry's "a session is a human" and
+    missing §12.8. Each was checked against the text and fixed. Three rounds being the most a spec
+    PR runs, round three's fixes were not reviewed again; the PR says so.
+
 - **2026-11-26 — Terminology: the arena; the session's proposals (no rule changed).**
   Rules changed: none.
   The front gains a terminology note: the unit Baton coordinates — one ticket source, its
@@ -5905,7 +6020,9 @@ so in its last sentence; several entries here may stand behind one line there.
   owner's agent sessions hold that account (R-BTN-185). Chose that `human-gates` is claimed only
   where `human_key` is `hardware`, so `protected` does not claim it and `protected-hardware` holds
   it, over a guarantee that holds by definition over the policy while a human-only key sits where
-  an agent can use it (R-BTN-189).
+  an agent can use it (R-BTN-189). Reversed by the owner on 2026-11-24 and 2026-11-26: two human
+  gates, `human-gates` resting on custody and claimed by `protected`, and `human-gates-hardware`
+  on a verified key (this file's changelog, 2026-11-26).
 - **Chose to require of a human-only key only that it is used for nothing else and kept where no
   agent session can use it** (2026-10-29; R-BTN-185). Leaving hardware backing, PIN and touch,
   attestation and the derived code to a deployment's `human_key: hardware` policy, over requiring

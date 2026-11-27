@@ -4,9 +4,11 @@ description: Operator preflight for B-136's fail-closed handling of unverified h
 ---
 
 Baton cannot yet verify hardware custody. A repository minimum of `any` allows the existing
-custody-based approvals, but does not establish `human-gates`. A minimum of `hardware` does not
-accept an unverified key, including a host-configured break-glass key. Both `human-gates` and the
-legacy `human-gates-hardware` name are reported broken. A floor naming either still stops claims.
+custody-based approvals; this release (B-136) reports `human-gates` broken there, which the spec
+amendment of 2026-11-26 changes: `human-gates` rests on custody and holds on human-only lists, as
+B-189 builds. A minimum of `hardware` does not accept an unverified key, including a
+host-configured break-glass key. This release reports both `human-gates` and
+`human-gates-hardware` broken. A floor naming either still stops claims.
 
 Before installing the release, the operator should inspect `baton owner -i KEY policy show REPO` for every
 registered repository. Flag every policy with `human_key: hardware` and every floor containing

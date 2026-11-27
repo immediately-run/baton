@@ -14,7 +14,7 @@ One line per decision in force; the reasoning and the rejected alternatives in f
 - Chose a protected default branch that only the merge credential and humans update, over per-worker forks or verified signatures, the forge's setup and what confines a leg's forge reach being the deployment's (R-BTN-180, R-BTN-182, R-BTN-183, §12.8).
 - Chose to keep Baton cooperative on one trusted machine and leave enforcement to the deployment (R-BTN-180).
 - Chose that courses and leg logic change by a human's push or merge, and that tickets land only with a human approval (R-BTN-184).
-- Chose human-only credentials or a person's dashboard session for every human gate, the credentials used for nothing else and kept from agent sessions, a session's human act under `hardware` carrying a security key's touch; `human-gates` is claimed only where `human_key` is `hardware` (R-BTN-185, R-BTN-189, R-BTN-155).
+- Chose human-only credentials or a person's dashboard session for every human gate (under `any`, only a session Cloudflare Access or a `human_only` key's code opened, over every session however opened), the credentials used for nothing else and kept from agent sessions, a session's human act under `hardware` carrying a security key's touch; `human-gates` is claimed on human-only lists, resting on that custody, and `human-gates-hardware` only where a verified key meets `hardware` (R-BTN-185, R-BTN-189, R-BTN-155).
 - Chose two forge identities, a human-only one that administers protected repositories and an everyday one for the owner's agent sessions (R-BTN-185's `human_identity`; keeping the two apart is the deployment's, §12.8).
 - Chose authority by credential, not channel: a delegated key may tighten and undo its own tightenings, and only loosening a limit needs a human (R-BTN-186).
 - Chose to run a sourced course's code from its source, the home referring to Baton's legs rather than copying them (R-BTN-134).
@@ -141,7 +141,7 @@ One line per decision in force; the reasoning and the rejected alternatives in f
 - Chose stopping a leg through the authenticated release path over control from a viewer's stream (R-BTN-119).
 - Chose a noun-verb CLI renamed outright over aliases, in one tree whose help is generated from the registry's command table (R-BTN-127).
 - Chose each leg run's output as create-only chunks in an owners' bucket or local directory, over a git transcript repository or relaying through Baton (R-BTN-128).
-- Chose one action registry from which REST, the CLI, the dashboard and the MCP endpoint derive, an MCP key being a delegated key marked per action (R-BTN-129, R-BTN-130, R-BTN-186).
+- Chose one action registry from which REST, the CLI, the dashboard and the MCP endpoint derive, an MCP key being a delegated key that each action's `delegated` value admits or refuses (R-BTN-129, R-BTN-130, R-BTN-186).
 - Chose a leg that waits on an effect git or the forge shows over waiting on "sent" (R-BTN-116).
 - Chose check courses whose verdict is a command's exit status, the forge's own check runs being enough for `merge.checks: required` (R-BTN-114, R-BTN-153, R-BTN-183).
 - Chose either an SSH key or an API key for every administrator, owner and runner, over one kind per role (R-BTN-13, R-BTN-159).
