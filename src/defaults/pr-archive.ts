@@ -9,7 +9,9 @@ import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { dibberWords } from './dibber';
 import { gitText } from './git.mjs';
+import { LegError } from '../runner/legClient.mjs';
 import type { CloseCtx } from './pr-close';
+import { pushFailure } from './push-failure';
 import { resolveDelivered } from './pr-verify';
 import { readItems } from './read-items';
 import { bareTicketId, ticketsBranch } from './ticket-state';
@@ -34,7 +36,7 @@ export function archiveClose(ctx: ArchiveCtx, result: { reached?: string }): str
   const answer = ctx.person_answer;
   if (ctx.leg !== 'archive' || ctx.claim?.station !== 'confirmed' || result?.reached !== 'archived' ||
       answer?.leg !== 'confirm' || answer.option !== 'confirmed' || !/^(owner|human):/.test(answer.answered_by)) {
-    throw new Error("archive requires the owner's applied confirmed answer");
+    throw new LegError('error.spec', "archive requires the owner's applied confirmed answer");
   }
   // An archive retry can follow a failed archive attempt. Use the latest completed delivery,
   // not simply the most recent claim. A filed answer followed by a new delivery uses the new end.
@@ -46,12 +48,12 @@ export function archiveClose(ctx: ArchiveCtx, result: { reached?: string }): str
   const legacy = /^delivered at ((?:[0-9a-f]{10}, ){14}[0-9a-f]{10}), [0-9a-f]{6}…$/.exec(detail);
   const commits = (legacy?.[1] ?? /^delivered at ([0-9a-f]{10}(?:, [0-9a-f]{10})*)(?:: |$)/.exec(detail)?.[1])?.split(', ');
   if (!end || end.ended_at == null || end.ended_at > answer.answered_at || !first || !/^[0-9a-f]{40}$/.test(first) || commits?.[0] !== first.slice(0, 10)) {
-    throw new Error("archive requires the confirmed delivery's end evidence");
+    throw new LegError('error.spec', "archive requires the confirmed delivery's end evidence");
   }
-  if (!ctx.ticket.path) throw new Error('archive requires a ticket file in git');
+  if (!ctx.ticket.path) throw new LegError('error.spec', 'archive requires a ticket file in git');
   const branch = ticketsBranch(ctx.checkout, ctx.default_branch);
   const pin = ctx.signed_control?.agent_command ?? ctx.snapshot?.sha;
-  if (!pin || !/^[0-9a-f]{40}$/.test(pin)) throw new Error('archive requires its snapshot to read the Dibber pin');
+  if (!pin || !/^[0-9a-f]{40}$/.test(pin)) throw new LegError('error.spec', 'archive requires its snapshot to read the Dibber pin');
   const settings = JSON.parse(gitText(ctx.checkout, 'show', `${pin}:.baton/baton.json`));
   return archiveTicket(ctx.checkout, branch, bareTicketId(ctx.ticket), {
     path: ctx.ticket.path, shas: [first, ...commits.slice(1)], truncated: legacy != null, dibber: dibberWords(settings),
@@ -64,12 +66,12 @@ const movedOnPush = (detail: string): boolean => /non-fast-forward|fetch first|s
 /** Never descend through a git symlink, including a dangling link at the destination. */
 function regularDirs(root: string, path: string, missingOk = false): void {
   const parts = path.split('/');
-  if (parts.some((part) => !part || part === '.' || part === '..' || part.toLowerCase() === '.git')) throw new Error(`invalid ticket directory: ${path}`);
+  if (parts.some((part) => !part || part === '.' || part === '..' || part.toLowerCase() === '.git')) throw new LegError('error.spec', `invalid ticket directory: ${path}`);
   for (const part of parts) {
     root = join(root, part);
     const stat = lstatSync(root, { throwIfNoEntry: false });
     if (!stat && missingOk) return;
-    if (!stat?.isDirectory()) throw new Error(`not a regular ticket directory: ${path}`);
+    if (!stat?.isDirectory()) throw new LegError('error.spec', `not a regular ticket directory: ${path}`);
   }
 }
 
@@ -78,7 +80,7 @@ function regularDirs(root: string, path: string, missingOk = false): void {
  *  git moves it under `archive/`, and the commit is pushed — retried when the branch moved. A
  *  retry that finds this delivery's archive already pushed returns that commit. */
 export function archiveTicket(root: string, branch: string, id: string, delivered: { path: string; shas: string[]; truncated: boolean; dibber: string[] }): string {
-  if (!/^[A-Za-z0-9]+-[A-Za-z0-9]+$/.test(id)) throw new Error(`${id}: invalid archive ticket id`);
+  if (!/^[A-Za-z0-9]+-[A-Za-z0-9]+$/.test(id)) throw new LegError('error.spec', `${id}: invalid archive ticket id`);
   const describe = `${id} → done`;
   for (let attempt = 1; attempt <= TRIES; attempt++) {
     gitText(root, 'fetch', '-q', 'origin', branch);
@@ -90,17 +92,14 @@ export function archiveTicket(root: string, branch: string, id: string, delivere
       if ('existing' in done) return done.existing;
       // The host's provenance trailers (B-16), as every ticket commit carries them.
       const trailers = (process.env.TICKET_TRAILERS ?? '').trim();
-      if (!trailers && process.env.TICKET_REQUIRE_TRAILERS === '1') throw new Error(`${describe}: TICKET_REQUIRE_TRAILERS=1, but TICKET_TRAILERS is empty`);
+      if (!trailers && process.env.TICKET_REQUIRE_TRAILERS === '1') throw new LegError('error.spec', `${describe}: TICKET_REQUIRE_TRAILERS=1, but TICKET_TRAILERS is empty`);
       gitText(dir, 'commit', '-q', '-m', trailers ? `${done.message}\n\n${trailers}` : done.message);
       try {
         gitText(dir, 'push', '-q', 'origin', `HEAD:refs/heads/${branch}`);
         return gitText(dir, 'rev-parse', 'HEAD');
       } catch (e) {
         const detail = String((e as { stderr?: string }).stderr || (e as Error).message);
-        if (!movedOnPush(detail)) {
-          const why = detail.trim().split('\n').map((l) => l.trim()).filter((l) => l !== '' && !/^To /.test(l) && !/failed to push some refs/.test(l));
-          throw new Error(`${describe}: the push was refused: ${why.join('; ') || 'no reason given'}`);
-        }
+        if (!movedOnPush(detail)) throw pushFailure(e);
         if (attempt === TRIES) throw new Error(`${describe}: push refused ${TRIES} times: ${detail.trim().split('\n').at(-1)}`);
       }
     } finally {
@@ -111,7 +110,7 @@ export function archiveTicket(root: string, branch: string, id: string, delivere
       }
     }
   }
-  throw new Error(`${describe}: no archive attempt completed`);
+  throw new LegError('error.spec', `${describe}: no archive attempt completed`);
 }
 
 /** One attempt in the worktree `dir`: the staged archive and its message, or the commit that
@@ -121,21 +120,21 @@ function archiveIn(dir: string, branch: string, id: string, delivered: { path: s
   const items = (settings.items ?? 'tickets').replace(/\/$/, '');
   regularDirs(dir, items, true);
   const matches = readItems(dir, items).filter((f) => /\.mdx?$/i.test(f.path) && parseFrontmatter(f.text)?.id === id);
-  if (!matches.length) throw new Error(`${id}: no ${items}/${id}.mdx on origin/${branch}`);
-  if (matches.length !== 1) throw new Error(`${id}: archive cannot identify a single ticket file`);
+  if (!matches.length) throw new LegError('error.spec', `${id}: no ${items}/${id}.mdx on origin/${branch}`);
+  if (matches.length !== 1) throw new LegError('error.spec', `${id}: archive cannot identify a single ticket file`);
   const { path, text } = matches[0];
   const archived = path.startsWith('archive/');
   const from = `${items}/${path}`;
   const to = `${items}/archive/${path}`;
   if (delivered.path !== (archived ? `${items}/${path.slice('archive/'.length)}` : from)) {
-    throw new Error(`${id}: archive requires the markdown source's current ticket path`);
+    throw new LegError('error.spec', `${id}: archive requires the markdown source's current ticket path`);
   }
   const shas = resolveDelivered(delivered.shas, 'HEAD', dir, (_cmd, args, cwd) => gitText(cwd, ...args));
   const subject = `tickets: ${id} done (archived)`;
   const delivery = `Delivered by: ${shas.join(', ')}`;
   const limitation = 'Delivery evidence incomplete: the legacy end record was truncated; unrecorded commits are not listed.';
   if (archived) {
-    if (parseFrontmatter(text)?.status !== 'done') throw new Error(`${id} is archived (done)`);
+    if (parseFrontmatter(text)?.status !== 'done') throw new LegError('error.spec', `${id} is archived (done)`);
     // Inspect the addition, not the latest edit. The exact evidence distinguishes our push
     // from a manual archive or another delivery that happened to use the same ticket path.
     const existing = gitText(dir, '--literal-pathspecs', 'log', '-1', '--first-parent', '--no-renames', '--diff-filter=A', '--format=%H', '--', from);
@@ -143,16 +142,16 @@ function archiveIn(dir: string, branch: string, id: string, delivered: { path: s
       const [first, , third, , note] = gitText(dir, 'show', '-s', '--format=%B', existing).split('\n');
       if (first === subject && third === delivery && (note === limitation) === delivered.truncated) return { existing };
     }
-    throw new Error(`${id}: the archive does not record this delivery`);
+    throw new LegError('error.spec', `${id}: the archive does not record this delivery`);
   }
   // Dibber finds a ticket by its canonical file name, `<id>.md` or `<id>.mdx`, anywhere in the store.
   if (!new RegExp(`^${id}\\.mdx?$`).test(basename(path))) {
-    throw new Error(`${id}: ${from} is not named ${id}.md or ${id}.mdx, so Dibber cannot write it — rename it, then archive again`);
+    throw new LegError('error.spec', `${id}: ${from} is not named ${id}.md or ${id}.mdx, so Dibber cannot write it — rename it, then archive again`);
   }
   regularDirs(dir, dirname(to), true);
-  if (lstatSync(join(dir, to), { throwIfNoEntry: false })) throw new Error(`${id}: archive destination already exists`);
+  if (lstatSync(join(dir, to), { throwIfNoEntry: false })) throw new LegError('error.spec', `${id}: archive destination already exists`);
   const frontmatter = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text)?.[1] ?? '';
-  if ((frontmatter.match(/^status:/gm) ?? []).length > 1) throw new Error(`${id}: duplicate status fields; archive refused`);
+  if ((frontmatter.match(/^status:/gm) ?? []).length > 1) throw new LegError('error.spec', `${id}: duplicate status fields; archive refused`);
   // The status is Dibber's to write, in place; the move after it is git's.
   const [cmd, ...args] = delivered.dibber;
   let said: { id?: unknown; file?: unknown; status?: unknown };
@@ -162,10 +161,12 @@ function archiveIn(dir: string, branch: string, id: string, delivered: { path: s
     })) as typeof said;
   } catch (e) {
     const why = String((e as { stderr?: string }).stderr || (e as Error).message).trim().split('\n').at(-1);
-    throw new Error(`${id}: dibber done failed: ${why}`);
+    const message = `${id}: dibber done failed: ${why}`;
+    if ((e as NodeJS.ErrnoException).code === 'ENOENT') throw new LegError('error.spec', message);
+    throw new Error(message);
   }
   if (said?.id !== id || said.file !== from || said.status !== 'done' || parseFrontmatter(readFileSync(join(dir, from), 'utf8'))?.status !== 'done') {
-    throw new Error(`${id}: Dibber did not mark ${from} done`);
+    throw new LegError('error.spec', `${id}: Dibber did not mark ${from} done`);
   }
   mkdirSync(dirname(join(dir, to)), { recursive: true });
   gitText(dir, '--literal-pathspecs', 'mv', from, to);

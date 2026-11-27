@@ -39,7 +39,7 @@ Not built either, each a design its rule below still states:
     | `hitl` | `suspend` | any leg |
     | `warning` | `notify` | any leg |
     | `interact` | `notify` | a leg (R-BTN-195) |
-    | `error` | `interrupt` | any leg; core's classes are `error.transient`, `error.capability`, `error.spec`, `error.contract-output`, `error.contract-input` and `error.needs-person` (R-BTN-195) |
+    | `error` | `interrupt` | any leg; core's classes are `error.transient`, `error.capability`, `error.spec`, `error.blocked`, `error.contract-output`, `error.contract-input` and `error.needs-person` (R-BTN-195) |
     | `baton` | per sub (R-BTN-163) | core only |
 
     Any leg may raise a standard type, or a subtype of one, without declaring it. `baton` and
@@ -67,7 +67,9 @@ Not built either, each a design its rule below still states:
     receives the answer or an exception with the refusal. The options are `subject`, `body?`,
     `restarts?`, `default?` and `severity?`. A script can also throw `LegError(type, message)`
     from `@immediately-run/baton/leg` to raise an `interrupt` type, with the message on the end
-    rather than in the report. The runner checks a raise as it checks a move:
+    rather than in the report. This works in `run` or `close`; a typed close interrupt stops
+    closing without retrying it or reporting the proposed position. The runner checks a raise as
+    it checks a move:
     - the type is well formed, standard or declared, and allowed to the leg;
     - the leg's `autonomous` and the `interact` checks pass (R-BTN-195);
     - `restarts` map ids to descriptions. The raise takes the restarts from the nearest
@@ -245,7 +247,8 @@ Not built either, each a design its rule below still states:
   - **Exhaustion.** When the failed attempts reach `max_attempts`, or when the type is
     non-retryable:
     - Baton holds the ticket (`hold_reason` `attempts-exhausted` or `non-retryable:<class>`),
-      logs the reason and raises `baton.retries` (R-BTN-163).
+      logs the reason and raises `baton.retries` (R-BTN-163). For a non-retryable failure, the
+      decision shows the validated end detail or error message, falling back to the class.
     - When the policy names `exhausted`, Baton instead queues that leg (`next_source: baton`),
       held until the station changes (R-BTN-83), and raises nothing. A non-retryable type always
       holds.

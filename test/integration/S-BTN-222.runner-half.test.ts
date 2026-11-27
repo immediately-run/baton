@@ -17,7 +17,7 @@ import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import roadmapPr from '../fixtures/courses/roadmap-pr/course.json';
-import { course as courseEntry, cutover, Git, keyCall, placed, register, rows, setAdminKeys, setClock, syncCall, tick, ticket } from '../helpers';
+import { claimItem, course as courseEntry, cutover, Git, keyCall, placed, register, rows, setAdminKeys, setClock, syncCall, tick, ticket } from '../helpers';
 import { makeKey } from '../lib/sshKeys';
 import { runnerApi, testRunner, until } from '../lib/runnerRig';
 import type { BatonApi } from '../../src/runner/api';
@@ -141,7 +141,7 @@ export async function run(ctx) {
 }
 
 /** A scratch home checkout: both courses, their leg scripts, the settings naming them. */
-function writeHome(scripts: Record<string, string>, graph = COURSE): { home: string; sha: string } {
+function writeHome(scripts: Record<string, string>, graph = COURSE, agent_command?: string): { home: string; sha: string } {
   const home = mkdtempSync(join(tmpdir(), 'baton-222-'));
   const g = (...a: string[]) => execFileSync('git', ['-C', home, ...a], { encoding: 'utf8' });
   g('init', '-q', '-b', 'main');
@@ -151,7 +151,7 @@ function writeHome(scripts: Record<string, string>, graph = COURSE): { home: str
   };
   write('.baton/courses/roadmap-pr/course.json', `${JSON.stringify(graph, null, 2)}\n`);
   write('.baton/courses/timeout-pr/course.json', `${JSON.stringify(TIMEOUT_COURSE, null, 2)}\n`);
-  write('.baton/baton.json', `${JSON.stringify({ courses: [{ id: 'roadmap-pr', version: 3 }, { id: 'timeout-pr', version: 1 }] }, null, 2)}\n`);
+  write('.baton/baton.json', `${JSON.stringify({ agent_command, courses: [{ id: 'roadmap-pr', version: 3 }, { id: 'timeout-pr', version: 1 }] }, null, 2)}\n`);
   for (const [name, text] of Object.entries(scripts)) write(`.baton/courses/roadmap-pr/legs/${name}.mjs`, text);
   if (scripts.linger != null) write('.baton/courses/timeout-pr/legs/linger.mjs', scripts.linger);
   g('add', '-A');
@@ -161,6 +161,7 @@ function writeHome(scripts: Record<string, string>, graph = COURSE): { home: str
 
 let git: Git;
 let stateFile: string;
+let repoOwner: Awaited<ReturnType<typeof makeKey>>;
 /** The board's head is the home checkout's own commit — the runner loads the claim's course
  *  from it (R-BTN-34), so a post's sha must be one the home holds. */
 let boardSha: string | null = null;
@@ -179,7 +180,7 @@ async function postBoard(tickets: { id: string; course_id?: string }[], stations
 beforeEach(async () => {
   await setClock(T0);
   const admin = await makeKey('ssh-ed25519', 'admin');
-  const owner = await makeKey('ssh-ed25519', 'docs-owner');
+  const owner = repoOwner = await makeKey('ssh-ed25519', 'docs-owner');
   await setAdminKeys(admin);
   expect((await keyCall(admin, '/v1/admin/repositories', { id: 'docs', owner_keys_add: [owner.publicKey] })).status).toBe(200);
   git = new Git();
@@ -584,6 +585,65 @@ describe('S-BTN-222 (the runner half): the channel checks a raise (R-BTN-160, R-
       expect(await rows(`SELECT json_extract(detail_json, '$.error.type') AS type,
                                 json_extract(detail_json, '$.error.message') AS message
                          FROM events WHERE kind = 'released' AND ticket_id = 'docs:A'`)).toEqual([{ type, message }]);
+    } finally {
+      r.stop();
+      cleanup(home);
+    }
+  }, 240_000);
+
+  it('S-BTN-231: a conflicting open PR abandons merge once and waits for the owner', async () => {
+    const reason = 'PR #364 conflicts with main; merge refused';
+    const { home, sha } = writeHome({ merge: `
+      import { run as merge } from ${JSON.stringify(join(ROOT, '.baton/courses/standard-create-pr/legs/merge.mjs'))};
+      export async function run(ctx) {
+        process.env.PATH = ctx.checkout + ':' + process.env.PATH;
+        return merge({ ...ctx, forge_home: undefined });
+      }
+    ` }, COURSE, `sh -c 'echo "${reason}"'`);
+    boardSha = sha;
+    mkdirSync(join(home, 'content', 'roadmap'), { recursive: true });
+    writeFileSync(join(home, 'content', 'roadmap', 'A-1.mdx'), '---\nid: A-1\n---\n');
+    writeFileSync(join(home, 'gh'), `#!/bin/sh
+case "$*" in
+  *"--state open"*) echo '[{"number":364,"headRefName":"claude/A-1-conflict","headRefOid":"0123456789abcdef0123456789abcdef01234567","isCrossRepository":false}]' ;;
+  *) echo '[]' ;;
+esac
+`, { mode: 0o755 });
+    await postBoard([{ id: 'A-1' }], { 'A-1': placed('reviewed', [], [['merge', 'ready']]) });
+    const r = newRunner(home, () => {});
+    try {
+      expect(await r.runOnce()).toMatchObject({ ticket: 'docs:A-1', end_reason: 'released:cannot-finish:blocked' });
+      expect(await rows("SELECT station, failed_attempt, end_detail FROM claims WHERE ticket_id = 'docs:A-1'"))
+        .toEqual([{ station: 'reviewed', failed_attempt: 1, end_detail: reason }]);
+      expect(await rows("SELECT decision_id, question FROM ticket_decisions WHERE ticket_id = 'docs:A-1'"))
+        .toEqual([{ decision_id: 'baton:retries', question: reason }]);
+      await setClock(T0 + 8 * 3_600_000);
+      await postBoard([{ id: 'A-1' }], { 'A-1': placed('reviewed', [], [['merge', 'ready']]) });
+      const b = await register('vm-b');
+      const claim = () => claimItem('vm-b', b.secret, { ticket_id: 'docs:A-1' });
+      expect((await claim()).json).toMatchObject({ code: 'not-eligible' });
+      expect((await keyCall(repoOwner, '/v1/owner/docs/tickets/docs%3AA-1/resolve', { decision: 'baton:retries', answer: 'retry' })).status).toBe(200);
+      expect((await claim()).json).toMatchObject({ ticket_id: 'docs:A-1', legs: ['merge'] });
+    } finally {
+      r.stop();
+      cleanup(home);
+    }
+  }, 240_000);
+
+  it('S-BTN-231: a typed close refusal is reported without retrying close or advancing', async () => {
+    const { home, sha } = writeHome({ implement: `
+      import { LegError } from '@immediately-run/baton/leg';
+      export function run() { return { reached: 'pr-open', suspend: true }; }
+      export function close() { throw new LegError('error.blocked', 'push refused by branch protection'); }
+    ` });
+    boardSha = sha;
+    await postBoard([{ id: 'A' }], { A: placed('filed', [], [['implement', 'ready']]) });
+    const r = newRunner(home, () => {});
+    try {
+      expect(await r.runOnce()).toMatchObject({ end_reason: 'released:cannot-finish:blocked' });
+      expect(await conditionRows('docs:A')).toMatchObject([{ type: 'error.blocked' }]);
+      expect(await rows("SELECT station, failed_attempt, end_detail FROM claims WHERE ticket_id = 'docs:A'"))
+        .toEqual([{ station: 'filed', failed_attempt: 1, end_detail: 'push refused by branch protection' }]);
     } finally {
       r.stop();
       cleanup(home);

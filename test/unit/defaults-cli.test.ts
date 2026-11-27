@@ -1372,6 +1372,9 @@ exit 0
       writeFileSync(join(fakeBin, 'open'), JSON.stringify([{ number: 9, headRefName: 'claude/A-1-kit', headRefOid: '0123456789abcdef0123456789abcdef01234567', isCrossRepository: false }]));
       writeFileSync(join(fakeBin, 'merged'), '[]');
       await expect(stub.run(ctx)).rejects.toThrow(/the merge agent exited 0, but A-1’s PR #9 \(claude\/A-1-kit\) is still open — not merged[^\n]*; the agent's last output:\n {2}CI is red twice on S-BTN-41, not merging PR 9$/);
+      await expect(stub.run(ctx)).rejects.toMatchObject({ type: 'error.blocked' });
+      rmSync(join(fakeBin, 'open'));
+      await expect(stub.run(ctx)).rejects.toMatchObject({ name: 'Error', message: expect.stringContaining('could not be read') });
       // Merged, none open: the position.
       writeFileSync(join(fakeBin, 'open'), '[]');
       writeFileSync(join(fakeBin, 'merged'), JSON.stringify([{ number: 9, headRefName: 'claude/A-1-kit', headRefOid: '0123456789abcdef0123456789abcdef01234567', isCrossRepository: false }]));

@@ -579,7 +579,7 @@ describe('the implement stub\'s PR verification (B-81)', () => {
     // One repository read and empty, one unreadable: the failure names both, never guesses the unread one.
     const { run: partial } = bound({ '': '[]' }); // the sibling's read fails
     await expect(verifyPrOpen(ask({ repositories: ['immediately-run/site'] }), partial)).rejects.toThrow(
-      'no open PR on a branch matching claude/B-81-* for ticket B-81 exists in immediately-run/baton — immediately-run/site could not be read',
+      'not all repositories the ticket reads could be read: immediately-run/site (gh: cannot read immediately-run/site)',
     );
   });
 

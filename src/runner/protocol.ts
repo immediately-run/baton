@@ -22,7 +22,7 @@ export type LegResult =
 /** The `released:` reasons a script may choose itself (§6.5): the runner's own are
  * `lease-lost` and `course-changed`, the server's are `owner-cancel` and `provider-suspended`,
  * and an owner bar's reason is the bar's, never a script's guess. */
-export const SCRIPT_RELEASE_REASONS = ['stale-board', 'cannot-finish:transient', 'cannot-finish:capability', 'cannot-finish:spec',
+export const SCRIPT_RELEASE_REASONS = ['stale-board', 'cannot-finish:transient', 'cannot-finish:capability', 'cannot-finish:spec', 'cannot-finish:blocked',
   'requested', 'provider-exhausted'] as const;
 
 /** What the runner does with a validated result. */

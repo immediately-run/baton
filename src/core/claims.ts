@@ -2185,7 +2185,7 @@ export class Claims {
     else if (reason === 'released:cannot-finish:contract-input') {
       this.hold(ticketId, 'non-retryable:contract-input', 'baton', { claim_id: claimId, detail: opts.detail ?? null });
       this.c.blocks?.raise(ticketId, 'baton.contract', opts.detail ?? null);
-    } else this.applyRetryPolicy(claimId, ticketId, reason, run?.leg);
+    } else this.applyRetryPolicy(claimId, ticketId, reason, run?.leg, opts.detail ?? opts.error?.message);
     this.c.outsideWork?.pending(undefined, ticketId);
   }
 
@@ -2229,7 +2229,7 @@ export class Claims {
   /** §6.10, after a claim ends other than completed: mark the failed attempt, then back off, or
    *  hold — non-retryable at once, attempts-exhausted at the third. (`awaiting-review-capacity`
    *  is retired: a review with no capacity is simply not ready, §6.5.) */
-  private applyRetryPolicy(claimId: number, item: string, reason: string, leg?: string) {
+  private applyRetryPolicy(claimId: number, item: string, reason: string, leg?: string, detail?: string) {
     const ended = this.endedSince(item, this.lastLift(item));
     const c = this.rows<{ runner_id: number; course_id: string | null }>('SELECT runner_id, course_id FROM claims WHERE id = ?', claimId)[0];
     const repo = repositoryOf(item);
@@ -2250,7 +2250,7 @@ export class Claims {
         this.hold(item, `non-retryable:${cls}`, 'baton', { claim_id: claimId, attempts: failed });
         // R-BTN-78: the hold is put to the owner as Baton's own decision (a `contract-input`
         // class, from B-39, raises `baton:contract` instead).
-        this.c.blocks.raise(item, 'baton:retries');
+        this.c.blocks.raise(item, 'baton:retries', detail ?? `Non-retryable failure: ${cls}`);
         return;
       }
       const next = afterFailure(failed.length, this.c.admin.retry(repo));

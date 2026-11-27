@@ -27,12 +27,14 @@
 //   the sync counts only as the evidence Baton recorded for the claim. No comment anywhere: the
 //   marker is git's, so a plain-git repository reads the same gate with no forge at all.
 // `baton repo init` bundles this into each leg stub, so a stub imports nothing at run time.
+import { LegError } from '../runner/legClient.mjs';
 import { PR_URL } from '../core/forges';
 import { forgeClient } from './forges';
 import { targetOf, targetPr, type RegisteredTargets } from './forges/targets';
 import { outputLine } from './output-evidence';
 export { PR_URL };
 import { closeTicket, exec } from './ticket-state';
+import { pushFailure } from './push-failure';
 
 /** What `close` runs: `git` or `gh`, in the checkout, answering stdout. Tests inject it. */
 export type Exec = (cmd: 'git' | 'gh', args: string[], cwd: string) => string;
@@ -61,13 +63,13 @@ export const verdictLine = (verdict: 'approve' | 'changes'): string => `<!-- bat
 function commentLine(leg: string, result: { verdict?: unknown; adjudication?: unknown }): string | null {
   if (leg === 'review') {
     if (result?.verdict !== 'approve' && result?.verdict !== 'changes') {
-      throw new Error(`the review returned no verdict (approve or changes), got ${JSON.stringify(result?.verdict)}`);
+      throw new LegError('error.contract-output', `the review returned no verdict (approve or changes), got ${JSON.stringify(result?.verdict)}`);
     }
     return verdictLine(result.verdict);
   }
   if (leg === 'adjudicate') {
     if (result?.adjudication !== 'merge' && result?.adjudication !== 'owner') {
-      throw new Error(`the adjudication returned neither merge nor owner, got ${JSON.stringify(result?.adjudication)}`);
+      throw new LegError('error.contract-output', `the adjudication returned neither merge nor owner, got ${JSON.stringify(result?.adjudication)}`);
     }
     return `<!-- baton:adjudicated ${result.adjudication} -->`;
   }
@@ -91,30 +93,30 @@ export async function prClose(ctx: CloseCtx, result: { reached?: string; next?: 
     const body = [comment, `baton: ${ctx.ticket.id} ${ctx.leg}, claim ${ctx.claim?.nonce ?? '?'}`, marker].filter(Boolean).join('\n');
     // On the PR the agent named (B-29: a ticket's PRs may be in other repositories, and its home
     // may have none); else `gh pr comment` with no number, on the checkout branch's PR.
-    if (result?.pr != null && !(typeof result.pr === 'string' && PR_URL.test(result.pr))) throw new Error(`the ${ctx.leg} leg named no PR URL to write on, got ${JSON.stringify(result.pr)}`);
+    if (result?.pr != null && !(typeof result.pr === 'string' && PR_URL.test(result.pr))) throw new LegError('error.contract-output', `the ${ctx.leg} leg named no PR URL to write on, got ${JSON.stringify(result.pr)}`);
     if (ctx.forge_home) {
       const opts = { run, checkout: ctx.checkout };
       if (typeof result.pr === 'string') {
         const named = targetPr(ctx, result.pr);
-        if (!named) throw new Error('the named PR does not belong to a registered forge repository');
+        if (!named) throw new LegError('error.contract-output', 'the named PR does not belong to a registered forge repository');
         return forgeClient(named.repo, opts).comment(named.number, body);
       }
       const repo = targetOf(ctx);
-      if (!repo) throw new Error('the checkout’s repository has no PR conversation');
+      if (!repo) throw new LegError('error.contract-output', 'the checkout’s repository has no PR conversation');
       const client = forgeClient(repo, opts);
       const branch = run('git', ['branch', '--show-current'], ctx.checkout);
       const prs = ctx.leg === 'conclude' ? await client.listPrs() : await client.listOpenPrs();
       const matches = prs.filter((p) => p.sameRepository !== false && branch !== '' && p.headRefName === branch);
-      if (matches.length !== 1) throw new Error('the checkout branch does not name exactly one eligible PR; name its URL explicitly');
+      if (matches.length !== 1) throw new LegError('error.contract-output', 'the checkout branch does not name exactly one eligible PR; name its URL explicitly');
       return client.comment(matches[0].number, body);
     }
     return run('gh', ['pr', 'comment', ...(typeof result?.pr === 'string' ? [result.pr] : []), '--body', body], ctx.checkout);
   }
-  if (typeof result?.reached !== 'string' || result.reached === '') throw new Error(`the ${ctx.leg} leg returned no station reached`);
+  if (typeof result?.reached !== 'string' || result.reached === '') throw new LegError('error.contract-output', `the ${ctx.leg} leg returned no station reached`);
   // B-257: `implement` found the ticket already delivered — no branch, no PR, nothing to push.
   // The evidence is the commit on the default branch the stub verified, which the end records.
   if (ctx.leg === 'implement' && result.reached === 'delivered') {
-    if (typeof result.delivered !== 'string' || !/^[0-9a-f]{40}$/.test(result.delivered)) throw new Error(`the implement leg reached delivered naming no verified commit, got ${JSON.stringify(result.delivered)}`);
+    if (typeof result.delivered !== 'string' || !/^[0-9a-f]{40}$/.test(result.delivered)) throw new LegError('error.contract-output', `the implement leg reached delivered naming no verified commit, got ${JSON.stringify(result.delivered)}`);
     return result.delivered;
   }
   // Only the legs whose station function READS a marker (B-96): create-spec's interactive
@@ -155,17 +157,21 @@ export function testsClose(
   // home): nothing was tested here, so there is no marker to push and no evidence — the claim
   // suspends at its station and the sync reads that CI.
   if (result?.tests === 'ci') {
-    if (result.next !== 'review' || typeof result.reached !== 'string' || result.reached === '') throw new Error('the run-tests gate deferred to CI without suspending at its station');
+    if (result.next !== 'review' || typeof result.reached !== 'string' || result.reached === '') throw new LegError('error.contract-output', 'the run-tests gate deferred to CI without suspending at its station');
     return null;
   }
   if (result?.tests !== 'green' && result?.tests !== 'red') {
-    throw new Error(`the run-tests gate returned neither green nor red, got ${JSON.stringify(result?.tests)}`);
+    throw new LegError('error.contract-output', `the run-tests gate returned neither green nor red, got ${JSON.stringify(result?.tests)}`);
   }
-  if (typeof result?.reached !== 'string' || result.reached === '') throw new Error('the run-tests gate returned no station reached');
+  if (typeof result?.reached !== 'string' || result.reached === '') throw new LegError('error.contract-output', 'the run-tests gate returned no station reached');
   const sha = /^[0-9a-f]{40}$/;
-  if (typeof result.branch !== 'string' || result.branch === '' || result.branch.startsWith('-')) throw new Error('the run-tests gate returned no PR branch it tested');
-  if (typeof result.tested !== 'string' || !sha.test(result.tested)) throw new Error('the run-tests gate returned no tested head');
-  if (typeof result.marker !== 'string' || !sha.test(result.marker)) throw new Error('the run-tests gate returned no marker commit');
-  run('git', ['push', 'origin', `${result.marker}:refs/heads/${result.branch}`], ctx.checkout);
+  if (typeof result.branch !== 'string' || result.branch === '' || result.branch.startsWith('-')) throw new LegError('error.contract-output', 'the run-tests gate returned no PR branch it tested');
+  if (typeof result.tested !== 'string' || !sha.test(result.tested)) throw new LegError('error.contract-output', 'the run-tests gate returned no tested head');
+  if (typeof result.marker !== 'string' || !sha.test(result.marker)) throw new LegError('error.contract-output', 'the run-tests gate returned no marker commit');
+  try {
+    run('git', ['push', 'origin', `${result.marker}:refs/heads/${result.branch}`], ctx.checkout);
+  } catch (e) {
+    throw pushFailure(e);
+  }
   return result.marker;
 }
