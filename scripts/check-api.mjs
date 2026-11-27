@@ -86,6 +86,10 @@ async function run() {
   const routeFiles = ['src/core/baton.ts', ...readdirSync(resolve(ROOT, 'src/core/routes')).filter((f) => f.endsWith('.ts')).sort().map((f) => `src/core/routes/${f}`)];
   const routes = new Set(routeFiles.flatMap((path) => [...legacyRoutes(read(path))]));
   for (const route of registeredReadRoutes(ACTIONS, READS, readMethods(read('src/core/reads/index.ts')))) routes.add(route);
+  // operatorRoute takes its paths from matchActions, including the session and owner aliases.
+  for (const action of ACTIONS.filter((a) => a.http.method === 'POST' && a.ui?.route)) {
+    for (const route of [action.http, action.ui.route, action.ownerHttp].filter(Boolean)) routes.add(routeKey(route.method, route.path));
+  }
   const tables = migratedTables(MIGRATIONS);
   const specRoutes = specifiedRoutes(read('spec/BATON_SPEC/14-api.md'));
   const specTables = specifiedTables(read('spec/BATON_SPEC/13-data-model.md'));

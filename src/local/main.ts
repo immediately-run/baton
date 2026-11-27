@@ -58,6 +58,8 @@ export function localConfig(file: Record<string, unknown>, origin: string): Conf
     TOKEN_HASHES: opt('TOKEN_HASHES'),
     CREDENTIALS: opt('CREDENTIALS'),
     BATON_KEYS: opt('BATON_KEYS'),
+    BATON_HUMAN_KEYS: opt('BATON_HUMAN_KEYS'),
+    BATON_HUMAN_KEY: opt('BATON_HUMAN_KEY'),
     BATON_FORGE_BROKER_KEYS: opt('BATON_FORGE_BROKER_KEYS'),
     BATON_SESSION_HOSTS: opt('BATON_SESSION_HOSTS'),
     BATON_IDLE_NOTIFY_AFTER_S: opt('BATON_IDLE_NOTIFY_AFTER_S'),

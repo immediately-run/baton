@@ -14,6 +14,7 @@
     "test/unit/boundary-host.test.ts",
     "test/unit/cli.test.ts",
     "test/model/replay.test.ts",
+    "test/model/core-interleavings.test.ts",
     "test/unit/check-traces.test.ts",
     "test/unit/runner-main.test.ts",
     "test/unit/runner-clipin.test.ts",

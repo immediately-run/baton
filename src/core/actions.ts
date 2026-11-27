@@ -78,6 +78,10 @@ export type Action = {
   callers: Caller[];
   input: InputSchema;
   ui?: ActionUi;
+  /** Repository-scoped key route where an administrator has a separate instance route. */
+  ownerHttp?: ActionHttp;
+  /** Why a session write has no key equivalent. */
+  sessionOnly?: string;
   /** R-BTN-186's mark for a delegated key — B-124's; unset here, never served to a session. */
   delegated?: boolean | 'own';
 };
@@ -232,8 +236,9 @@ export const ACTIONS: Action[] = [
   // ── a session's writes (the `/v1/ui/*` POSTs; R-BTN-155's table says what each takes) ──
   {
     id: 'leg.stop', summary: 'Stop: ask the runner to release the ticket it holds.',
-    effect: 'destructive', http: { method: 'POST', path: '/v1/ui/messages', match: { kind: 'release' } },
-    callers: [SESSION_ANY],
+    effect: 'destructive', http: { method: 'POST', path: '/v1/admin/messages', match: { kind: 'release' } },
+    ownerHttp: { method: 'POST', path: '/v1/owner/{repository}/messages' },
+    callers: [ADMIN, OWNER, SESSION_ANY],
     input: { type: 'object', required: ['to_runner_id', 'kind', 'payload', 'confirm'], properties: {
       to_runner_id: RUNNER_ID,
       kind: { type: 'string', const: 'release' },
@@ -243,101 +248,107 @@ export const ACTIONS: Action[] = [
         reason: { type: 'string', enum: ['requested', 'owner-cancel', 'provider-suspended'] },
       } },
     } },
-    ui: { view: ['repository/tickets/{ticket}', 'repository/runners/{runner}'] },
+    ui: { route: { method: 'POST', path: '/v1/ui/messages' }, view: ['repository/tickets/{ticket}', 'repository/runners/{runner}'] },
   },
   {
     id: 'runner.status-request', summary: 'Status: ask the runner what it is doing; its reply is a status report.',
-    effect: 'write', http: { method: 'POST', path: '/v1/ui/messages', match: { kind: 'status_request' } },
-    callers: [SESSION_ANY],
+    effect: 'write', http: { method: 'POST', path: '/v1/admin/messages', match: { kind: 'status_request' } },
+    ownerHttp: { method: 'POST', path: '/v1/owner/{repository}/messages' },
+    callers: [ADMIN, OWNER, SESSION_ANY],
     input: { type: 'object', required: ['to_runner_id', 'kind'], properties: { to_runner_id: RUNNER_ID, kind: { type: 'string', const: 'status_request' } } },
-    ui: { view: ['repository/runners/{runner}'] },
+    ui: { route: { method: 'POST', path: '/v1/ui/messages' }, view: ['repository/runners/{runner}'] },
   },
   {
     id: 'runner.wind-down', summary: 'Wind down: the runner completes its leg, then exits without claiming again.',
-    effect: 'write', http: { method: 'POST', path: '/v1/ui/messages', match: { kind: 'wind-down' } },
-    callers: [SESSION_ANY],
+    effect: 'write', http: { method: 'POST', path: '/v1/admin/messages', match: { kind: 'wind-down' } },
+    ownerHttp: { method: 'POST', path: '/v1/owner/{repository}/messages' },
+    callers: [ADMIN, OWNER, SESSION_ANY],
     input: { type: 'object', required: ['to_runner_id', 'kind'], properties: { to_runner_id: RUNNER_ID, kind: { type: 'string', const: 'wind-down' } } },
-    ui: { view: ['repository/runners/{runner}'] },
+    ui: { route: { method: 'POST', path: '/v1/ui/messages' }, view: ['repository/runners/{runner}'] },
   },
   {
     id: 'ticket.hold', summary: 'Hold a ticket: nothing claims it until the hold is lifted.',
-    effect: 'write', http: { method: 'POST', path: '/v1/ui/overrides/{ticket}', match: { hold: true } },
-    callers: [SESSION_ANY],
+    effect: 'write', http: { method: 'POST', path: '/v1/admin/overrides/{ticket}', match: { hold: true } },
+    ownerHttp: { method: 'POST', path: '/v1/owner/{repository}/overrides/{ticket}' },
+    callers: [ADMIN, OWNER, SESSION_ANY],
     input: { type: 'object', required: ['hold'], properties: { hold: { type: 'boolean', const: true } } },
-    ui: { view: ['repository/tickets/{ticket}'] },
+    ui: { route: { method: 'POST', path: '/v1/ui/overrides/{ticket}' }, view: ['repository/tickets/{ticket}'] },
   },
   {
     id: 'ticket.unhold', summary: 'Lift a ticket’s hold.',
-    effect: 'write', http: { method: 'POST', path: '/v1/ui/overrides/{ticket}', match: { hold: false } },
-    callers: [SESSION_ANY],
+    effect: 'write', http: { method: 'POST', path: '/v1/admin/overrides/{ticket}', match: { hold: false } },
+    ownerHttp: { method: 'POST', path: '/v1/owner/{repository}/overrides/{ticket}' },
+    callers: [ADMIN, OWNER, SESSION_ANY],
     input: { type: 'object', required: ['hold'], properties: { hold: { type: 'boolean', const: false } } },
-    ui: { view: ['repository/tickets/{ticket}'] },
+    ui: { route: { method: 'POST', path: '/v1/ui/overrides/{ticket}' }, view: ['repository/tickets/{ticket}'] },
   },
   {
     id: 'ticket.expedite', summary: 'Set or clear a ticket’s expedite: the expedite lane is offered first.',
-    effect: 'write', http: { method: 'POST', path: '/v1/ui/overrides/{ticket}', match: { expedite: [true, false] } },
-    callers: [SESSION_ANY],
+    effect: 'write', http: { method: 'POST', path: '/v1/admin/overrides/{ticket}', match: { expedite: [true, false] } },
+    ownerHttp: { method: 'POST', path: '/v1/owner/{repository}/overrides/{ticket}' },
+    callers: [ADMIN, OWNER, SESSION_ANY],
     input: { type: 'object', required: ['expedite'], properties: { expedite: { type: 'boolean', description: 'true sets it, false clears it.' } } },
-    ui: { view: ['repository/tickets/{ticket}'] },
+    ui: { route: { method: 'POST', path: '/v1/ui/overrides/{ticket}' }, view: ['repository/tickets/{ticket}'] },
   },
   {
     id: 'claim.force-reap', summary: 'Force-reap a live claim: its lease ends now.',
-    effect: 'destructive', http: { method: 'POST', path: '/v1/ui/claims/{claim}/reap' },
-    callers: [SESSION_ADMIN],
+    effect: 'destructive', http: { method: 'POST', path: '/v1/admin/claims/{claim}/reap' },
+    callers: [ADMIN, SESSION_ADMIN],
     input: { type: 'object', required: ['confirm'], properties: { confirm: CONFIRM } },
-    ui: { view: ['repository/tickets/{ticket}'] },
+    ui: { route: { method: 'POST', path: '/v1/ui/claims/{claim}/reap' }, view: ['repository/tickets/{ticket}'] },
   },
   {
     // B-222 places it on the ticket's page, drawn where the read names a pending fence.
     id: 'claim.fence-clear', summary: 'Clear a fenced claim, releasing its seats.',
-    effect: 'destructive', http: { method: 'POST', path: '/v1/ui/claims/{claim}/fence-clear' },
-    callers: [SESSION_ADMIN],
+    effect: 'destructive', http: { method: 'POST', path: '/v1/admin/claims/{claim}/fence-clear' },
+    callers: [ADMIN, SESSION_ADMIN],
     input: { type: 'object', required: ['confirm'], properties: { confirm: CONFIRM } },
-    ui: { view: ['repository/tickets/{ticket}'] },
+    ui: { route: { method: 'POST', path: '/v1/ui/claims/{claim}/fence-clear' }, view: ['repository/tickets/{ticket}'] },
   },
   {
     // B-222: a route of its own over `claims.resolve`; V1's one route taking `{action,
     // confirm}` is retired (B-203).
     id: 'claim.confirm', summary: 'Confirm an unconfirmed completion.',
-    effect: 'destructive', http: { method: 'POST', path: '/v1/ui/claims/{claim}/confirm' },
-    callers: [SESSION_ADMIN],
+    effect: 'destructive', http: { method: 'POST', path: '/v1/admin/claims/{claim}/confirm' },
+    callers: [ADMIN, SESSION_ADMIN],
     input: { type: 'object', required: ['confirm'], properties: { confirm: CONFIRM } },
-    ui: { view: ['repository/tickets/{ticket}'] },
+    ui: { route: { method: 'POST', path: '/v1/ui/claims/{claim}/confirm' }, view: ['repository/tickets/{ticket}', 'repository/tickets'] },
   },
   {
     id: 'claim.release', summary: 'Release an unconfirmed completion: the ticket is offered again.',
-    effect: 'destructive', http: { method: 'POST', path: '/v1/ui/claims/{claim}/release' },
-    callers: [SESSION_ADMIN],
+    effect: 'destructive', http: { method: 'POST', path: '/v1/admin/claims/{claim}/release' },
+    callers: [ADMIN, SESSION_ADMIN],
     input: { type: 'object', required: ['confirm'], properties: { confirm: CONFIRM } },
-    ui: { view: ['repository/tickets/{ticket}'] },
+    ui: { route: { method: 'POST', path: '/v1/ui/claims/{claim}/release' }, view: ['repository/tickets/{ticket}', 'repository/tickets'] },
   },
   {
     id: 'scope.resolve', summary: 'Resolve a scope finding: the acknowledgement that it was looked at.',
-    effect: 'write', http: { method: 'POST', path: '/v1/ui/scope/{finding}/resolve' },
-    callers: [SESSION_ANY], input: NONE,
-    ui: { view: ['repository/tickets/{ticket}'] },
+    effect: 'write', http: { method: 'POST', path: '/v1/admin/scope/{finding}/resolve' },
+    ownerHttp: { method: 'POST', path: '/v1/owner/{repository}/scope/{finding}/resolve' },
+    callers: [ADMIN, OWNER, SESSION_ANY], input: NONE,
+    ui: { route: { method: 'POST', path: '/v1/ui/scope/{finding}/resolve' }, view: ['repository/tickets/{ticket}'] },
   },
   {
     id: 'repo.cutover', summary: 'Cut a repository over: Baton allocates its work from now on.',
-    effect: 'destructive', http: { method: 'POST', path: '/v1/ui/cutover' },
-    callers: [SESSION_ADMIN],
+    effect: 'destructive', http: { method: 'POST', path: '/v1/admin/cutover' },
+    callers: [ADMIN, SESSION_ADMIN],
     input: { type: 'object', required: ['repository', 'confirm'], properties: { repository: { type: 'string', description: 'The repository’s id.' }, confirm: CONFIRM } },
-    ui: { view: ['repository/sync'] },
+    ui: { route: { method: 'POST', path: '/v1/ui/cutover' }, view: ['repository/sync'] },
   },
   {
     id: 'adoption.confirm', summary: 'Confirm an adoption: a legacy claim passes to the session that asked for it.',
-    effect: 'destructive', http: { method: 'POST', path: '/v1/ui/adoptions/{ticket}/confirm' },
-    callers: [SESSION_ADMIN],
+    effect: 'destructive', http: { method: 'POST', path: '/v1/admin/adoptions/{ticket}/confirm' },
+    callers: [ADMIN, SESSION_ADMIN],
     input: { type: 'object', required: ['confirm'], properties: { confirm: CONFIRM } },
-    ui: { view: ['repository/sync'] },
+    ui: { route: { method: 'POST', path: '/v1/ui/adoptions/{ticket}/confirm' }, view: ['repository/sync'] },
   },
   {
     // B-201 (Decision 5a): the held post's Accept is the Sync screen's, one click (R-BTN-11).
     id: 'repo.accept-post', summary: 'Accept a held board post.',
-    effect: 'write', http: { method: 'POST', path: '/v1/ui/board/accept' },
-    callers: [SESSION_ADMIN],
+    effect: 'write', http: { method: 'POST', path: '/v1/admin/board/accept' },
+    callers: [ADMIN, SESSION_ADMIN],
     input: { type: 'object', required: ['repository', 'sha'], properties: { repository: { type: 'string' }, sha: { type: 'string', description: 'The held post’s commit.' } } },
-    ui: { view: ['repository/sync'] },
+    ui: { route: { method: 'POST', path: '/v1/ui/board/accept' }, view: ['repository/sync'] },
   },
 
   // ── entries the later tickets append, one block per domain (Edit tool, below its line) ──
@@ -404,10 +415,11 @@ export const ACTIONS: Action[] = [
     // action. An administrator's session until B-76 builds the owner's, which reaches its own
     // repositories. A forced resync onto a rewritten head (R-BTN-11) is not built and no entry.
     id: 'repo.resync', summary: 'Resync: ask the repository’s sync workflow to run now.',
-    effect: 'write', http: { method: 'POST', path: '/v1/ui/resync' },
-    callers: [SESSION_ADMIN],
+    effect: 'write', http: { method: 'POST', path: '/v1/admin/resync' },
+    ownerHttp: { method: 'POST', path: '/v1/owner/{repository}/resync' },
+    callers: [ADMIN, OWNER, SESSION_REPO],
     input: { type: 'object', required: ['repository'], properties: { repository: { type: 'string', description: 'The repository’s id.' } } },
-    ui: { view: ['repository/sync'] },
+    ui: { route: { method: 'POST', path: '/v1/ui/resync' }, view: ['repository/sync'] },
   },
   // tenant: the tenant screens' reads
   {
@@ -461,17 +473,18 @@ export const ACTIONS: Action[] = [
     id: 'ui.logout', summary: 'Log out: end the calling session.',
     effect: 'write', http: { method: 'POST', path: '/v1/ui/logout' },
     callers: [SESSION_ANY], input: NONE,
+    sessionOnly: 'Ends the calling browser session; a key has no session to end.',
   },
 ];
 
 // ── pure helpers ─────────────────────────────────────────────────────────────────────────
 
-const patterns = new WeakMap<Action, { re: RegExp; names: string[] }>();
-function patternOf(a: Action): { re: RegExp; names: string[] } {
+const patterns = new WeakMap<ActionHttp, { re: RegExp; names: string[] }>();
+function patternOf(a: ActionHttp): { re: RegExp; names: string[] } {
   let p = patterns.get(a);
   if (!p) {
     const names: string[] = [];
-    const source = a.http.path.split('/').map((seg) => {
+    const source = a.path.split('/').map((seg) => {
       if (seg.startsWith('{') && seg.endsWith('}')) {
         names.push(seg.slice(1, -1));
         return '([^/]+)';
@@ -493,8 +506,10 @@ export function matchActions(method: string, pathname: string, table: readonly A
   const m = method === 'HEAD' ? 'GET' : method;
   const out: Matched[] = [];
   for (const action of table) {
-    if (action.http.method !== m) continue;
-    const { re, names } = patternOf(action);
+    const route = pathname.startsWith('/v1/ui/') ? action.ui?.route ?? action.http
+      : pathname.startsWith('/v1/owner/') ? action.ownerHttp ?? action.http : action.http;
+    if (route.method !== m) continue;
+    const { re, names } = patternOf(route);
     const hit = re.exec(pathname);
     if (hit) out.push({ action, params: Object.fromEntries(names.map((n, i) => [n, hit[i + 1]])) });
   }
@@ -575,6 +590,9 @@ export function checkActions(table: readonly Action[], screenIds: readonly strin
     if (seen.has(a.id)) errors.push(`${a.id}: the id is listed twice`);
     seen.add(a.id);
     if (!a.callers.length) errors.push(`${a.id}: no caller`);
+    if (listsSession(a) && a.effect !== 'read' && !a.sessionOnly && (!a.ui?.route || !keyCaller(a, 'administrator') && !keyCaller(a, 'owner'))) {
+      errors.push(`${a.id}: session write has no key route or session-only reason`);
+    }
     if (!a.ui) continue;
     if (!listsSession(a)) errors.push(`${a.id}: ui.view is set on an entry whose callers list no session`);
     for (const v of a.ui.view) {

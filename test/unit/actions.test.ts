@@ -18,7 +18,7 @@ describe('the action table', () => {
   });
 
   it('check:actions fails a view naming no screen, and a view on an entry no session can call', () => {
-    const nowhere: Action = { ...byId('ticket.hold'), id: 'fixture.nowhere', ui: { view: ['repository/nowhere'] } };
+    const nowhere: Action = { ...byId('ticket.hold'), id: 'fixture.nowhere', ui: { ...byId('ticket.hold').ui, view: ['repository/nowhere'] } };
     const keyed: Action = { ...byId('ticket.hold'), id: 'fixture.keyed', callers: [{ principal: 'owner', scope: 'repository' }], ui: { view: ['repository/board'] } };
     expect(checkActions([nowhere], SCREEN_IDS).errors).toEqual(['fixture.nowhere: ui.view names no screen: repository/nowhere']);
     expect(checkActions([keyed], SCREEN_IDS).errors).toEqual(['fixture.keyed: ui.view is set on an entry whose callers list no session']);

@@ -199,9 +199,9 @@ export class Scope {
    *  finding waits on. The resolution is one event (`scope-resolved`), in the caller's
    *  transaction, like every neighbouring `/v1/ui` mutation leaves its row. Returns whether
    *  there was an open one to resolve. */
-  resolve(id: number, by: string): boolean {
+  resolve(id: number, by: string, repository?: string): boolean {
     const row = this.rows<{ repository_id: string }>('SELECT repository_id FROM scope_findings WHERE id = ? AND resolved_at IS NULL', id)[0];
-    if (!row) return false;
+    if (!row || (repository !== undefined && row.repository_id !== repository)) return false;
     const now = this.c.now();
     this.c.store.exec('UPDATE scope_findings SET resolved_at = ?, resolved_by = ? WHERE id = ?', now, by, id);
     logEvent(this.c.store, now, 'scope-resolved', by, { id }, null, null, row.repository_id);

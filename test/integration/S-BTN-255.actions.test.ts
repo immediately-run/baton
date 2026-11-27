@@ -44,7 +44,7 @@ describe('S-BTN-255 the session’s actions (B-204)', () => {
     expect(body.actions).toEqual(JSON.parse(JSON.stringify(actionsFor('administrator'))));
     const by = new Map(body.actions.map((a) => [a.id, a]));
     expect(by.get('ticket.hold')).toMatchObject({
-      effect: 'write', http: { method: 'POST', path: '/v1/ui/overrides/{ticket}', match: { hold: true } },
+      effect: 'write', http: { method: 'POST', path: '/v1/admin/overrides/{ticket}', match: { hold: true } },
       callers: [{ principal: 'session', scope: 'instance' }], ui: { view: ['repository/tickets/{ticket}'] },
     });
     expect(by.get('claim.force-reap')).toMatchObject({ effect: 'destructive', ui: { view: ['repository/tickets/{ticket}'] } });

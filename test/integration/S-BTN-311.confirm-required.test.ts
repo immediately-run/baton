@@ -1,6 +1,6 @@
 // §12.2: a confirmation is a second refusal, not authority. Run on both hosts.
 import { expect, it } from 'vitest';
-import { adminSession, keyCall, register, rows, seedClaim, seedPolicyFloor, sessionCall, setAdminKeys, setClock, setHumanKeys } from '../helpers';
+import { adminSession, Git, keyCall, register, rows, seedClaim, seedPolicyFloor, sessionCall, setAdminKeys, setClock, setHumanKeys } from '../helpers';
 import { makeKey, sshsig } from '../lib/sshKeys';
 
 it('S-BTN-311: every live destructive action in §12.2 requires literal true and otherwise leaves its target unchanged', async () => {
@@ -23,6 +23,7 @@ it('S-BTN-311: every live destructive action in §12.2 requires literal true and
   await call(owner, '/v1/human-keys', { public_key: human.publicKey, signature: btoa(String.fromCharCode(...signature)) });
   // A pre-existing floor with an owner as remove_by; S-BTN-190 covers registration and guarantees.
   await seedPolicyFloor({ repository_id: 'docs', name: 'my-floor', guarantees: '["human-gates"]', remove_by: 'owner', added_by: owner.fingerprint, added_at: now });
+  expect((await new Git().add('T-1').post()).status).toBe(200);
   const runner = await register();
   const claim = await seedClaim(runner.id, 'docs:T-1', now);
   const cookie = await adminSession(admin);

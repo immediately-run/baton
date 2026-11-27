@@ -26,6 +26,10 @@ const FINDING = ['scope.resolve'];
  *  is no runner to send to, and the form would ask for one. */
 const NEEDS_CLAIM = ['leg.stop'];
 
+export function CompletionControls({ claim, repository, ticket, view = TICKET_VIEW }: { claim: number; repository: string; ticket: string; view?: string }) {
+  return <Controls view={view} target={{ repository, ticket_id: ticket, claim, claim_id: claim }} allowed={COMPLETION} label="The unconfirmed completion" />;
+}
+
 /** The ids `Controls` may draw in the ticket's own row: every entry the session holds for the
  *  view, less the ones with a row of their own, less `ticket.unhold` unless the read allows
  *  it, less the claim's while no claim is live. Pure, so a test reads it without React. */
@@ -54,7 +58,7 @@ export function TicketControls({ ticket, repository }: { ticket: TicketShow; rep
   return (
     <div className="tp-controls">
       <Controls view={TICKET_VIEW} target={target} allowed={ticketRowIds(viewIds, ticket)} label="Ticket actions" />
-      {unconfirmed !== null ? <Controls view={TICKET_VIEW} target={{ repository, ticket_id: id, claim: unconfirmed, claim_id: unconfirmed }} allowed={COMPLETION} label="The unconfirmed completion" /> : null}
+      {unconfirmed !== null ? <CompletionControls claim={unconfirmed} repository={repository} ticket={id} /> : null}
       {fenced !== null ? <Controls view={TICKET_VIEW} target={{ repository, ticket_id: id, claim: fenced, claim_id: fenced }} allowed={FENCE} label="The pending fence" /> : null}
     </div>
   );

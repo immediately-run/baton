@@ -25,8 +25,10 @@ export function countsAsFailed(endReason: string, leaseLostBefore = false): bool
   return false;
 }
 
-/** §6.10: `capability` and `spec` are non-retryable — another claimant would hit the same wall. */
-export function nonRetryableClass(endReason: string): 'capability' | 'spec' | null {
+/** These failed attempts need an owner decision before another try. */
+export function nonRetryableClass(endReason: string): 'capability' | 'spec' | 'blocked' | 'contract-output' | null {
+  if (endReason === 'released:cannot-finish:blocked') return 'blocked';
+  if (endReason === 'released:cannot-finish:contract-output') return 'contract-output';
   if (endReason === 'released:cannot-finish:capability') return 'capability';
   if (endReason === 'released:cannot-finish:spec') return 'spec';
   return null;

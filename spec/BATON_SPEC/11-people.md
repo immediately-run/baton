@@ -226,7 +226,7 @@ built; their design is [the people and dashboard proposal](../proposals/people-a
   - **Help.** `baton help [<noun> [<verb>]]`, `--help` on a noun or a command, and an unknown
     verb print that level: a noun's verbs with their summaries, or one command's arguments,
     flags, summary and example. An unknown word suggests the nearest name. Every command that
-    reads a route takes `--json` and prints the route's JSON as is; `leg log --json` prints
+    reads a route takes `--json` and prints the route's JSON as is; the operator writes in the table also take `--json`; `leg log --json` prints
     frames as JSON lines.
 
   | Command | What it does | Rule |
@@ -235,12 +235,12 @@ built; their design is [the people and dashboard proposal](../proposals/people-a
   | `leg log <ticket> [<leg>] [--run <n>] [-f] [--transcripts] [--json]` | `leg.runs`, then reads the log directory | R-BTN-128 |
   | `leg runs <ticket> [<leg>]` | a leg's runs | R-BTN-128 |
   | `leg replay <ticket> <leg> [--run <n>] [--against <sha>]` | `leg.runs`, then replays locally | R-BTN-84 |
-   | `leg stop <ticket>` | *proposed* ([B-9](../../tickets/B-9.mdx)) | R-BTN-119 |
+  | `leg stop <ticket> [--admin] [--yes]` | asks the current holder to release the ticket | R-BTN-119 |
   | `leg status`, `output`, `done`, `suspend`, `release`, `yield`, `raise` | the local channel, inside a leg; `leg await`, `events` and `ticket` are proposed ([conditions](../proposals/conditions.md)) | R-BTN-106, R-BTN-160 |
   | `ticket blocked [<ticket>] [--on <kind>:<ref>]` | a ticket's or the repository's blocks (`repo.blocked`) | R-BTN-75 |
   | `ticket history <ticket>` | a ticket's history | R-BTN-81 |
   | `ticket why <ticket> [--replay]` | the latest selection verdict and why | R-BTN-205 |
-  | `ticket hold <ticket>`, `ticket unhold <ticket>`, `ticket expedite <ticket> [--clear]`, `ticket cancel <ticket>` | the overrides | R-BTN-12, R-BTN-186 |
+  | `ticket hold <ticket>`, `ticket unhold <ticket>`, `ticket expedite <ticket> [--clear]` (each `[--admin]`), `ticket cancel <ticket>` | the overrides | R-BTN-12, R-BTN-186 |
   | `ticket route <ticket> <leg> \| --clear` | queues or clears a leg (proposed: [data model and API](../proposals/data-model-and-api.md#other-reads-and-owner-routes)) | R-BTN-83 |
   | `ticket adopt <ticket> [--at <station>] [--next <leg>] [--ran <leg>,…]` | places a ticket on its course (proposed: [ticket adopt](../proposals/ticket-adopt.md)) | R-BTN-39 |
   | `ticket resolve <ticket> <restart> [--condition <id>]` | resolves a condition | R-BTN-163 |
@@ -277,6 +277,12 @@ built; their design is [the people and dashboard proposal](../proposals/people-a
   | `owner check-runner add <repository> <pub> --name <hostname> [--capabilities …]`, `owner check-runner revoke <repository> <fingerprint>` | check-runners (proposed: [checks and executors](../proposals/checks-and-executors.md)) | R-BTN-114 |
   | `admin repo list` | the registry | R-BTN-179 |
   | `admin repo add <forge path> --owner-key <pub>`, `admin repo set <id>`, `admin repo retire <id>` | registers, changes or retires a repository | R-BTN-47, R-BTN-138 |
+  | `admin claim reap <id>`, `admin claim fence-clear <id>`, `admin claim confirm <id>`, `admin claim release <id>` (each `[--yes]`) | force-reaps, clears a fence, or resolves an unconfirmed completion | R-BTN-19, R-BTN-10 |
+  | `admin adoption confirm <ticket> [--yes]`, `admin repo cutover <repository> [--yes]` | confirms a legacy adoption or cuts over a repository | R-BTN-28 |
+  | `owner scope resolve <repository> <id>`, `admin scope resolve <id>` | acknowledges an open scope finding | §12.9 |
+  | `admin repo accept-post <repository> <sha>` | accepts a held board post | R-BTN-11 |
+  | `admin repo resync <repository>`, `owner repo resync <repository>` | dispatches the sync without forcing its post | R-BTN-73 |
+  | `runner status <id>`, `runner wind-down <id>` (each `[--repository <id>]` for an owner key) | asks for a status report or requests a drain | §6.9 |
   | `admin repo resync <repository> --force [<sha>]` | forces a resync (proposed: [tickets and sources](../proposals/tickets-and-sources.md)) | R-BTN-11 |
   | `admin grant add <repository> --key <pub> --capabilities <a,b> [--max-claims <n>]` | grants a runner key | R-BTN-57, R-BTN-188 |
   | `admin key revoke <fingerprint>`, `admin key hostname <fingerprint> <hostname>` | revokes a key; changes its hostname | R-BTN-57 |

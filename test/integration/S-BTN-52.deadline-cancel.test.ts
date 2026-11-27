@@ -1,6 +1,6 @@
 // S-BTN-52, G-BTN-80 (R-BTN-90): run deadlines and the fence before re-issue, on both hosts.
 import { beforeEach, describe, expect, it } from 'vitest';
-import { advance, beat, claimItem, course, cutover, endClaim, Git, hbBody, ORIGIN, ownerCall, register, rows, runnerCall, setClock, sha256, tick } from '../helpers';
+import { advance, beat, claimItem, course, cutover, endClaim, Git, hbBody, ORIGIN, ownerCall, register, rows, runnerCall, seedMessage, setClock, sha256, tick } from '../helpers';
 import roadmapPr from '../fixtures/courses/roadmap-pr/course.json';
 
 const T0 = Date.parse('2026-11-14T09:00:00Z');
@@ -107,18 +107,20 @@ describe('S-BTN-52: a run deadline', () => {
   it('expires other releases for the reaped ticket, but not releases for another ticket', async () => {
     const { a, id } = await start();
     await alarmAt(DUE);
-    const requestRelease = async (ticketId: string) => {
+    const requestRelease = async () => {
       const response = await ownerCall('/v1/ui/messages', {
         method: 'POST', headers: { 'Content-Type': 'application/json', Origin: ORIGIN },
-        body: JSON.stringify({ kind: 'release', to_runner_id: a.id, payload: { ticket_id: ticketId, reason: 'requested' }, confirm: true }),
+        body: JSON.stringify({ kind: 'release', to_runner_id: a.id, payload: { ticket_id: ticket, reason: 'requested' }, confirm: true }),
       });
       expect(response.status).toBe(200);
     };
-    await requestRelease(ticket);
-    await requestRelease('docs:B');
+    await requestRelease();
+    // Simulate an old mailbox entry: Stop no longer queues a release for a ticket the runner does not hold.
+    await seedMessage({ kind: 'release', to_runner_id: a.id, from_principal: 'owner:test', sent_at: DUE, status: 'pending',
+      payload_json: JSON.stringify({ ticket_id: 'docs:B', reason: 'requested' }) });
     const delivery = (await beat('vm-a', a.secret, LEASE)).json.messages;
     expect(delivery).toHaveLength(3);
-    await requestRelease(ticket); // A second request is still pending at reap time.
+    await requestRelease(); // A second request is still pending at reap time.
     await alarmAt(DUE + 15 * MIN);
     expect(await claimRow(id)).toMatchObject({ end_reason: 'reaped:leg-timeout' });
     expect((await beat('vm-a', a.secret, LEASE)).json.messages).toEqual([delivery[2]]);

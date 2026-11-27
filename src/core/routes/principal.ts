@@ -56,14 +56,14 @@ export async function readPrincipal(core: SignedCore & Pick<BatonCore, 'admin'>,
 }
 
 
-export async function personPrincipal(core: SignedCore & Pick<BatonCore, 'admin'>, req: Request) {
+export async function personPrincipal(core: SignedCore & Pick<BatonCore, 'admin'>, req: Request, breakGlass?: ReadonlyMap<string, string>) {
   const apiKey = req.headers.get('X-Baton-Api-Key');
   if (!req.headers.has('X-Baton-Signed') && apiKey == null) throw new BatonError('unauthenticated', 'sign with an administrator or owner key, or send its API key');
   const admins = await core.admin.adminFingerprints();
-  const lookup = (fp: string) => admins.get(fp) ?? core.admin.ownerKey(fp);
+  const lookup = (fp: string) => admins.get(fp) ?? core.admin.ownerKey(fp) ?? (apiKey == null ? breakGlass?.get(fp) ?? null : null);
   // R-BTN-159: a person's API key, checked against its public line, in place of a signature.
   const signed = await authenticated(core, req, lookup);
-  return { ...signed, administrator: admins.has(signed.cred) };
+  return { ...signed, administrator: admins.has(signed.cred), breakGlass: apiKey == null && !!breakGlass?.has(signed.cred) };
 }
 
 export type PersonPrincipal = Awaited<ReturnType<typeof personPrincipal>>;

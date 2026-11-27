@@ -2,7 +2,8 @@ import type { BatonCore } from '../baton';
 import { BatonError, errorResponse } from '../http';
 import { dispatchRead } from '../reads';
 import { adminRoute } from './admin';
-import { attestationRoute, dashboardSessionRoute, dashboardWriteRoute, humanKeysRoute, ownerRoute } from './owner';
+import { admitsBreakGlass, attestationRoute, dashboardSessionRoute, humanKeysRoute, ownerRoute } from './owner';
+import { operatorRoute } from './operator';
 import { dashboardPrincipal, personPrincipal } from './principal';
 import { publicRoute, sequenceRoute } from './public';
 import { courierRoute, forgeScopeRoute, probeRoute, runnerPrincipal, runnerRoute } from './runner';
@@ -32,7 +33,10 @@ export async function dispatchRoute(core: BatonCore, req: Request, url: URL): Pr
     const read = await dispatchRead({ core, store: core.store, sql: (q, ...p) => core.sql(q, ...p), now: () => core.now(), config: core.config }, req, url);
     if (read) return read;
     if (path.startsWith('/v1/admin/') || path.startsWith('/v1/owner/')) {
-      const principal = await personPrincipal(core, req);
+      const breakGlass = admitsBreakGlass(req.method, path) && req.headers.has('X-Baton-Signed') ? await core.humanBreakGlass() : undefined;
+      const principal = await personPrincipal(core, req, breakGlass);
+      const operator = await operatorRoute(core, principal.req, url, principal.cred, principal.administrator ? 'administrator' : 'owner');
+      if (operator) return operator;
       const res = path.startsWith('/v1/admin/')
         ? await adminRoute(core, principal.req, url, principal)
         : await ownerRoute(core, principal.req, url, principal);
@@ -41,11 +45,13 @@ export async function dispatchRoute(core: BatonCore, req: Request, url: URL): Pr
     }
     const open = await publicRoute(core, req, url, { accessEmail: req.headers.get('X-Baton-Access-Email') });
     if (open) return open;
-    let owner: string | null = null;
     if (path.startsWith('/v1/ui/')) {
-      owner = await dashboardPrincipal(core.admin, req);
+      const owner = await dashboardPrincipal(core.admin, req);
       const session = await dashboardSessionRoute(core, req, url, owner);
       if (session) return session;
+      const operator = await operatorRoute(core, req, url, owner, 'session');
+      if (operator) return operator;
+      throw new BatonError('not-found', `no route ${req.method} ${path}`);
     }
     const attestation = await attestationRoute(core, req, url);
     if (attestation) return attestation;
@@ -56,9 +62,7 @@ export async function dispatchRoute(core: BatonCore, req: Request, url: URL): Pr
     const probe = await probeRoute(core, req, url);
     if (probe) return probe;
     const runner = await runnerPrincipal(core, req);
-    const res = owner === null
-      ? await runnerRoute(core, runner.req, url, runner)
-      : await dashboardWriteRoute(core, runner.req, url, owner);
+    const res = await runnerRoute(core, runner.req, url, runner);
     if (res) return res;
     throw new BatonError('not-found', `no route ${req.method} ${path}`);
   } catch (e) {

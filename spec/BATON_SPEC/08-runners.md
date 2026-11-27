@@ -521,7 +521,7 @@ section that are not built are in [the proposal page](../proposals/checks-and-ex
     There is no separate signal ladder for `requested`, `owner-cancel` or `floor`.
   - If Baton has already ended the claim, the lost-claim path stops the leg without a hand-off
     (R-BTN-6). Otherwise the runner settles the release (§9.4).
-  - **Not built:** `baton leg stop` ([B-9](../../tickets/B-9.mdx)).
+  - The owner or administrator requests Stop with `baton leg stop` (R-BTN-127) or from the dashboard.
 
 ### 8.5 A running leg's output
 
