@@ -1,0 +1,16 @@
+---
+title: B-270 review round 1
+description: Findings and disposition for the first review of bounding the Runners view's history reads to live runners.
+---
+
+Reviewed [Baton #390](https://github.com/immediately-run/baton/pull/390) at `5ce5cb37`
+([review](https://github.com/immediately-run/baton/pull/390#pullrequestreview-6024541365)). The
+verdict was changes: the reviewer found two blocking gaps that the existing fixtures did not cover,
+after a focused Cloudflare and local run of B-240, B-250, S-BTN-170 and S-BTN-285 passed.
+
+A fix leg answered both findings in `d272f11d`. Round 2 reviewed that head.
+
+| Finding | Disposition |
+|---|---|
+| [Blocking: the repository runners route still feeds the seven-day unreaped set to the history lookups, so it disagrees with admin state at lease expiry](https://github.com/immediately-run/baton/pull/390#discussion_r4668062687) | Fixed in `d272f11d`. |
+| [Blocking: the history reads are bounded per live runner, not by the constant per poll the ticket states](https://github.com/immediately-run/baton/pull/390#discussion_r4668062695) | Answered: `d272f11d` restated the ticket's Target and the API as a per-live-runner budget. Round 2 kept it open (see round 2). |

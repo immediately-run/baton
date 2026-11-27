@@ -1,0 +1,18 @@
+---
+title: B-284 review round 2
+description: Findings and disposition for the second review of runner harness adapters, merged with a blocking finding and a should-fix open.
+---
+
+Reviewed [Baton #377](https://github.com/immediately-run/baton/pull/377) at `7c826862`
+([review](https://github.com/immediately-run/baton/pull/377#pullrequestreview-6016946823), [verdict comment](https://github.com/immediately-run/baton/pull/377#issuecomment-7092458096)). The
+verdict was changes: the reviewer confirmed round one's fixes and ran the generated stub to show
+two cases where a custom adapter's store-only activity is still missed; the 228 focused tests,
+typecheck, package check and spec check passed.
+
+The PR was merged on 2026-11-25 with this round's findings open. No fix leg ran after this round;
+the later commits only merged `main`. The open findings are carried by FOLLOWUP-B-284.
+
+| Finding | Disposition |
+|---|---|
+| [Blocking: the watchdog compares raw command strings while the stub launches parsed argv, so a differently spaced or quoted command that launches the same argv loses the adapter's paths](https://github.com/immediately-run/baton/pull/377#discussion_r4662128252) | Open on `main`: `src/defaults/stub-runtime.ts` still compares the trimmed strings. Carried by FOLLOWUP-B-284. |
+| [Should-fix: custom activity paths resolve in the runner's environment, not the executor's where the leg runs](https://github.com/immediately-run/baton/pull/377#discussion_r4662128258) | Open on `main`: `src/runner/main.ts` still resolves the host adapter's paths runner-side. Carried by FOLLOWUP-B-284. |

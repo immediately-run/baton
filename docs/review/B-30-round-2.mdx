@@ -1,0 +1,20 @@
+---
+title: B-30 review round 2
+description: Findings and disposition for the second review of independent create-pr reviewers, merged with the self-loop end's two findings open.
+---
+
+Reviewed [Baton #347](https://github.com/immediately-run/baton/pull/347) at `91f15db9`
+([review](https://github.com/immediately-run/baton/pull/347#pullrequestreview-6011741718)). The
+verdict was changes: round 1's findings were resolved on the normal hand-off path, but a local check
+confirmed that a course change can strand the new self-loop end; 133 targeted tests passed.
+
+The PR was merged on 2026-11-25 at `36d5f72d`, whose changes after this round are merges of `main`,
+with this round's findings open. No fix leg ran after this round. On 2026-11-25 the owner lifted the
+`no_chain_from: [implement, fix]` on `review` (`tickets/B-30.mdx`, Status), but the
+`finished_self_loop` end this PR added is still sent on every suspension after a closed self-loop
+(`src/runner/claimRun.ts`). The open findings are carried by FOLLOWUP-B-30.
+
+| Finding | Disposition |
+|---|---|
+| [Blocking: if a sync drops the self-loop between the refusal and the end, core refuses `finished_self_loop` with `invalid-params` and the runner drops its slot while Baton keeps the claim active](https://github.com/immediately-run/baton/pull/347#discussion_r4657713642) | Open on `main` (`src/core/claims.ts` still refuses the flag against a graph without the loop; no regression covers the course change). Carried by FOLLOWUP-B-30. |
+| [Should-fix: `finished_self_loop` is a public `/end` field missing from the spec's payload list](https://github.com/immediately-run/baton/pull/347#discussion_r4657713647) | Open on `main` (`spec/BATON_SPEC/09-claims.md` does not name it). Carried by FOLLOWUP-B-30. |

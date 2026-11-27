@@ -1,0 +1,18 @@
+---
+title: B-324 review round 1
+description: Findings and disposition for the first review of reading create-pr's review round bound from the course in force, all three fixed in one fix leg.
+---
+
+Reviewed [Baton #408](https://github.com/immediately-run/baton/pull/408) at `e863d50b`
+([review](https://github.com/immediately-run/baton/pull/408#pullrequestreview-6036154361)). The
+verdict was changes: the ordinary snapshot path passed the round-3 and round-8 cases, but the
+signed-control and comparison-replay paths could pick another bound; focused tests and typecheck
+passed.
+
+A fix leg answered all three findings in `761bff17`. Round 2 reviewed that head.
+
+| Finding | Disposition |
+|---|---|
+| [Blocking: a graph-only change of `max_runs` does not move the signed course pin, so the stub reads the old bound](https://github.com/immediately-run/baton/pull/408#discussion_r4677512283) | Fixed in `761bff17` (the stub takes the limit from the posted snapshot graph). |
+| [Blocking: `baton leg replay --against` reads the recorded bound, not the comparison commit's](https://github.com/immediately-run/baton/pull/408#discussion_r4677512291) | Fixed in `761bff17`. |
+| [Blocking: the generated stub still embeds the fallback round count](https://github.com/immediately-run/baton/pull/408#discussion_r4677512300) | Fixed in `761bff17` (the fallback moves to `review-defaults.json`). |

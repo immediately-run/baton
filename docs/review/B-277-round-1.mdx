@@ -1,0 +1,22 @@
+---
+title: B-277 review round 1
+description: Findings and disposition for the first review of the spec-copy checks, eight blocking gaps all fixed in one fix leg.
+---
+
+Reviewed [Baton #370](https://github.com/immediately-run/baton/pull/370) at `d59f9b11`
+([review](https://github.com/immediately-run/baton/pull/370#pullrequestreview-6014850232)). The
+verdict was changes: the new checks passed on the branch, but the reviewer built cases of drift they
+do not catch; `npm test` (3,067 tests), `npm run typecheck` and `check:actions` passed.
+
+A fix leg answered all eight findings in `4d197e79`. Round 2 reviewed that head.
+
+| Finding | Disposition |
+|---|---|
+| [Blocking: exceptions are checked against the same checkout, so a new discrepancy and its exception pass together](https://github.com/immediately-run/baton/pull/370#discussion_r4660320869) | Fixed in `4d197e79` (the lists are compared with the target branch). Round 2 found the push-run base still open. |
+| [Blocking: `HEAD` on registered reads is served but inventoried nowhere](https://github.com/immediately-run/baton/pull/370#discussion_r4660320873) | Fixed in `4d197e79`. |
+| [Blocking: a method disjunction keeps only one method](https://github.com/immediately-run/baton/pull/370#discussion_r4660320874) | Fixed in `4d197e79`. Round 2 found the guard validation still partial. |
+| [Blocking: table rows with other padding drop out of both comparisons](https://github.com/immediately-run/baton/pull/370#discussion_r4660320877) | Fixed in `4d197e79`. Round 2 found rows without an opening pipe still dropped. |
+| [Blocking: parenthesized and wrapped section/rule pairs are not checked](https://github.com/immediately-run/baton/pull/370#discussion_r4660320878) | Fixed in `4d197e79`. Round 2 found the comma form still unchecked. |
+| [Blocking: `scripts/` is left out of the citation inventory](https://github.com/immediately-run/baton/pull/370#discussion_r4660320881) | Fixed in `4d197e79`. |
+| [Blocking: `npm run` names split by inline markup or a line wrap are not checked](https://github.com/immediately-run/baton/pull/370#discussion_r4660320887) | Fixed in `4d197e79`. |
+| [Blocking: code-span link labels and extensionless filenames are not checked as paths](https://github.com/immediately-run/baton/pull/370#discussion_r4660320889) | Fixed in `4d197e79`. Round 2 found other suffixes still skipped. |

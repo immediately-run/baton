@@ -1,0 +1,17 @@
+---
+title: B-55 review round 3
+description: Findings and disposition for the third review of typed condition raises; the callback import was fixed, the verification-table promotion stayed open.
+---
+
+Reviewed [Baton #316](https://github.com/immediately-run/baton/pull/316) at `f265a2c1`
+([review](https://github.com/immediately-run/baton/pull/316#pullrequestreview-6006370633)). The
+verdict was changes: the claim index and the scratch `run` path were fixed, but the public import
+still failed for the other leg callbacks and the verification ids were still not indexed; 50 focused
+tests and the package, typecheck, spec and wiki checks passed.
+
+A fix leg answered the findings in `f129f047` and `852cd8d0`. Round 4 reviewed that head.
+
+| Finding | Disposition |
+|---|---|
+| [Blocking: `close` and `handoff` cannot import the public leg module from an extracted leg](https://github.com/immediately-run/baton/pull/316#discussion_r4653455897) | Fixed in `f129f047`. |
+| [Blocking: the built cases are still prose in §15 and absent from the index](https://github.com/immediately-run/baton/pull/316#discussion_r4653455903) | Not taken: the fix leg could not edit the shared index. Open at merge; carried by FOLLOWUP-B-55. |

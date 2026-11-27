@@ -1,0 +1,20 @@
+---
+title: B-239 review round 1
+description: Findings and disposition for the first review of the materialized eligibility inputs and bounded candidate reads.
+---
+
+Reviewed [Baton #359](https://github.com/immediately-run/baton/pull/359) at `bb708323`
+([review](https://github.com/immediately-run/baton/pull/359#pullrequestreview-6017376645)). The
+verdict was changes: the reviewer found that automatic and named claims disagree after a runner
+loses part of a role, and that two production-sized Cloudflare fixtures (an idle runner with no
+match, and a full expedite lane) read well over the 300-row target; the read-efficiency and
+migration suites passed (36 tests).
+
+A fix leg answered every thread at `ed16f1d1`, and round 2 reviewed the result. The PR was merged
+on 2026-11-25.
+
+| Finding | Disposition |
+|---|---|
+| [Blocking: Rule 4 disagrees between automatic and named claims after partial role loss](https://github.com/immediately-run/baton/pull/359#discussion_r4662461396) | Fixed in `ed16f1d1` (the named-claim gate reads the expanded holdings rows); round 2 confirmed it closed. |
+| [Blocking: an idle runner with no eligible ticket still scans the whole ready queue](https://github.com/immediately-run/baton/pull/359#discussion_r4662461403) | Fixed in `ed16f1d1` (the covering index carries the requirement clause); round 2 confirmed it closed. |
+| [Blocking: a full expedite lane bypasses the small batches, 643 and 1,081 rows](https://github.com/immediately-run/baton/pull/359#discussion_r4662461409) | Fixed in part in `ed16f1d1`; round 2 found a distribution still over budget ([B-239 round 2](B-239-round-2.mdx)). |

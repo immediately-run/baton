@@ -1,0 +1,24 @@
+---
+title: B-278 review round 2
+description: Findings and disposition for the second review of the SQL dialect lint, merged with two blocking gaps in the lint open.
+---
+
+Reviewed [Baton #371](https://github.com/immediately-run/baton/pull/371) at `42ac7c9f`
+([review](https://github.com/immediately-run/baton/pull/371#pullrequestreview-6015837021), [verdict comment](https://github.com/immediately-run/baton/pull/371#issuecomment-7089738454)). The
+verdict was changes: the reviewer verified round one's fixes, found that the PR's runner-masking
+change regressed multiline credential redaction, found two more forms of SQLite-only SQL the lint
+misses, and asked for the unrelated executor change to be split out; local `npm test` passed on
+both hosts (3,093 tests). Before the round, the supervising agent posted a scope note asking for
+the out-of-scope runner and shared files to be restored to `main`.
+
+The PR was merged on 2026-11-25 with this round's lint findings open. No fix leg ran after this
+round; the merge of `main` in `fb3c2f85` took `main`'s versions of the masking and executor
+files. The open findings are carried by FOLLOWUP-B-278.
+
+| Finding | Disposition |
+|---|---|
+| [Should-fix (scope note): restore `src/runner/mask.ts`, `src/shared/mask.*` and `src/runner/executor.ts` to `main`](https://github.com/immediately-run/baton/pull/371#issuecomment-7089476044) | Fixed in `fb3c2f85`: the merge took `main`'s versions of all four files. |
+| [Blocking: suppressing the literal masker inside a key block lets a multiline credential's suffix through](https://github.com/immediately-run/baton/pull/371#discussion_r4661199781) | Fixed in `fb3c2f85`: `main`'s masker replaced the PR's change. |
+| [Blocking: a static fragment held in a local constant (`const conflict = "OR IGNORE"`) is dropped from the scanned template](https://github.com/immediately-run/baton/pull/371#discussion_r4661199783) | Open on `main` (`scripts/lib/sql-dialect.mjs` resolves only inline fragments). Carried by FOLLOWUP-B-278. |
+| [Blocking: `t.'rowid'`, `_rowid_` and `oid` read the implicit row id and are not flagged](https://github.com/immediately-run/baton/pull/371#discussion_r4661199785) | Open on `main` (the matcher compares the identifier to `ROWID` alone). Carried by FOLLOWUP-B-278. |
+| [Should-fix: the executor's exit and close handling is a separate runner change and belongs in its own PR](https://github.com/immediately-run/baton/pull/371#discussion_r4661199786) | Fixed in `fb3c2f85`: `main`'s executor replaced the PR's change. |

@@ -1,0 +1,17 @@
+---
+title: B-284 review round 1
+description: Findings and disposition for the first review of runner harness adapters, both fixed before the next round.
+---
+
+Reviewed [Baton #377](https://github.com/immediately-run/baton/pull/377) at `e6da5baf`
+([review](https://github.com/immediately-run/baton/pull/377#pullrequestreview-6016746154), [verdict comment](https://github.com/immediately-run/baton/pull/377#issuecomment-7091987298)). The
+verdict was changes: the reviewer reproduced one blocking finding and one should-fix in how the
+standard stub's watchdog learns an adapter's activity paths; the 228 tests in the five changed
+test files passed, and the full suite did not finish within the review run.
+
+Both findings were fixed in `a8b5bbc4`, with a reply on each thread, and round two verified them.
+
+| Finding | Disposition |
+|---|---|
+| [Blocking: the standard watchdog sees only the adapters embedded at scaffold time, so an adapter registered through `runMain` that writes only to its store is killed as idle](https://github.com/immediately-run/baton/pull/377#discussion_r4661969253) | Fixed in `a8b5bbc4`: the runner passes the selected adapter's resolved paths, and S-BTN-41 runs the generated watchdog with a store-only third harness. |
+| [Should-fix: serialising `activityPaths.toString()` breaks the generated map for a method-syntax adapter](https://github.com/immediately-run/baton/pull/377#discussion_r4661969256) | Fixed in `a8b5bbc4`: the scaffolder bundles the built-in lookup as an import instead of serialising callbacks. |

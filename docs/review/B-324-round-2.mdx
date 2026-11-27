@@ -1,0 +1,17 @@
+---
+title: B-324 review round 2
+description: Findings and disposition for the second review of reading create-pr's review round bound from the course in force, merged with one finding open.
+---
+
+Reviewed [Baton #408](https://github.com/immediately-run/baton/pull/408) at `41d96cb8`
+([review](https://github.com/immediately-run/baton/pull/408#pullrequestreview-6036538504)). The
+verdict was changes: round 1's three findings were closed, but the omitted-limit path still reads its
+fallback from two places; 67 focused tests, typecheck and the diff check passed.
+
+The PR was merged on 2026-11-25 at `2b45a021`, whose changes after this round are merges of `main`,
+with this round's finding open. No fix leg ran after this round. The open finding is carried by
+FOLLOWUP-B-324.
+
+| Finding | Disposition |
+|---|---|
+| [Blocking: with `review.max_runs` omitted, sync reads the fallback from the working tree while the stub reads it from the posted commit, so an uncommitted edit makes them disagree](https://github.com/immediately-run/baton/pull/408#discussion_r4677818348) | Open on `main` (`src/defaults/sync.ts` still reads `review-defaults.json` from the working tree; `src/defaults/stub-runtime.ts` reads it from the commit). Carried by FOLLOWUP-B-324. |

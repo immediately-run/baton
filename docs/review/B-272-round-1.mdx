@@ -1,0 +1,22 @@
+---
+title: B-272 review round 1
+description: Findings and disposition for the first review of moving the routes, the board post and the read model out of baton.ts, with two criterion findings answered and raised again.
+---
+
+Reviewed [Baton #363](https://github.com/immediately-run/baton/pull/363) at `ece92757`
+([review](https://github.com/immediately-run/baton/pull/363#pullrequestreview-6013636737), [verdict comment](https://github.com/immediately-run/baton/pull/363#issuecomment-7083272521)). The
+verdict was changes: the reviewer read the three extractions together, found two pre-existing
+retired-repository gaps on dashboard writes, two mismatches with the ticket's criteria, a
+model-link should-fix and a nit; `npm test` (3,049 tests) and `npm run typecheck` passed.
+
+The fix leg fixed four findings in `08a526fc` and answered the two criterion findings without a
+change; round two raised both again.
+
+| Finding | Disposition |
+|---|---|
+| [Blocking: `qualifiedTicket` uses `Registry.get`, so a retired repository still reaches the override write](https://github.com/immediately-run/baton/pull/363#discussion_r4659281625) | Fixed in `08a526fc`: override and adoption confirmation check `liveRepoParam` inside the write transaction; the holder route keeps its tombstone-aware lookup. |
+| [Blocking: `acceptHeld` checks only for a held snapshot, not that the repository is live](https://github.com/immediately-run/baton/pull/363#discussion_r4659281628) | Fixed in `08a526fc`: a live repository is required before the held snapshot is read or written. |
+| [Blocking: runner mode answers a retired repository `invalid-params` and registered reads `forbidden`, where the ticket says `not-found`](https://github.com/immediately-run/baton/pull/363#discussion_r4659281636) | Answered: both already refuse retired repositories and S-BTN-198 pins those codes; normalising them is an API change outside a move-only PR. Raised again in round two. |
+| [Blocking: two tests change more than imports, against the import-only criterion](https://github.com/immediately-run/baton/pull/363#discussion_r4659281639) | Answered: the retargets follow the moved code without weakening coverage, and the PR body states the exception. Raised again in round two. |
+| [Should-fix: the model link points at a forwarding method rather than the moved `syncPost` decisions](https://github.com/immediately-run/baton/pull/363#discussion_r4659281641) | Fixed in `08a526fc`: `syncPost` links to `sync.ts#boardPost` as well as its entry point. |
+| [Nit: a new blank line at the end of `views.ts`](https://github.com/immediately-run/baton/pull/363#discussion_r4659281646) | Fixed in `08a526fc`. |

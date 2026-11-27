@@ -1,0 +1,26 @@
+---
+title: B-7 review round 1
+description: Findings and disposition for the first review of person legs, whose ten findings were all fixed before the owner's bypass merge.
+---
+
+Reviewed [Baton #181](https://github.com/immediately-run/baton/pull/181) at `9960defd`
+([review](https://github.com/immediately-run/baton/pull/181#pullrequestreview-5778583965)). The
+verdict was changes: two blind reviewers and a verifying pass found four blocking lifecycle defects
+in what happens after a first answer or under a hold, reproduced with scratch tests on the branch.
+
+A fix leg answered all ten findings in `7dc78d39`; no later round reviewed that head. The PR was
+merged on 2026-11-06 by neumark, by the owner's bypass of the model `report` check, which could not
+complete on the runner's machines (the report gate became advisory the same day, `docs/lessons.mdx`).
+
+| Finding | Disposition |
+|---|---|
+| [Blocking: an answered question row never reopens, so a second person leg can never be answered](https://github.com/immediately-run/baton/pull/181#discussion_r4475565712) | Fixed in `7dc78d39`. |
+| [Blocking: re-attesting an applied answer logs `arrival-unapplied` on every sync](https://github.com/immediately-run/baton/pull/181#discussion_r4475565720) | Fixed in `7dc78d39`. |
+| [Blocking: the alarm re-fires back to back while a due expiry cannot be applied](https://github.com/immediately-run/baton/pull/181#discussion_r4475565728) | Fixed in `7dc78d39`. |
+| [Blocking: after a Baton-side answer git can never move the ticket, and a live claim is marked regressed](https://github.com/immediately-run/baton/pull/181#discussion_r4475565738) | Fixed in `7dc78d39`. |
+| [Should-fix: a human-only key cannot authenticate on the attestations route](https://github.com/immediately-run/baton/pull/181#discussion_r4475565742) | Fixed in `7dc78d39`. |
+| [Should-fix: the route ignores the repository policy's `inputs.answers`](https://github.com/immediately-run/baton/pull/181#discussion_r4475565746) | Fixed in `7dc78d39`. |
+| [Should-fix: a held ticket's answer is refused instead of deferred](https://github.com/immediately-run/baton/pull/181#discussion_r4475565751) | Fixed in `7dc78d39` (deferred arrival built, migration 0032). |
+| [Should-fix: `settle` clears the expiry instant of a newly queued person leg](https://github.com/immediately-run/baton/pull/181#discussion_r4475565757) | Fixed in `7dc78d39`. |
+| [Should-fix: the expiry clock restarts on any row change, not only a station change](https://github.com/immediately-run/baton/pull/181#discussion_r4475565766) | Fixed in `7dc78d39`. |
+| [Nit: a snapshot the guard ignores can still log `off-graph`](https://github.com/immediately-run/baton/pull/181#discussion_r4475565771) | Fixed in `7dc78d39`. |

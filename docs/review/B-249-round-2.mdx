@@ -1,0 +1,20 @@
+---
+title: B-249 review round 2
+description: Findings and disposition for the second review of the lease grace after Baton's own downtime, merged with two findings open.
+---
+
+Reviewed [Baton #353](https://github.com/immediately-run/baton/pull/353) at `8622d30e`
+([review](https://github.com/immediately-run/baton/pull/353#pullrequestreview-6013018725)). The
+verdict was changes: separate regression checks reproduced a real outage just over one lease
+going unprotected, a masking regression in the PR's own redaction change, and a board read that
+advertises the expired lease on the first request after an outage; the targeted suite passed (43
+passed, 1 skipped) and so did the model links.
+
+The PR was merged on 2026-11-25, with this round's findings open. No fix leg ran after this round:
+the later commits merge `main`. The open findings are carried by FOLLOWUP-B-249.
+
+| Finding | Disposition |
+|---|---|
+| [Blocking: subtracting a full sampling period leaves an outage just over a lease unprotected](https://github.com/immediately-run/baton/pull/353#discussion_r4658716467) | Open on `main` (`recordServing` in `src/core/baton.ts` still passes `now − last − ALARM_EVERY_MS` to `recoverLeases`). Carried by FOLLOWUP-B-249. |
+| [Blocking: the strict overlap filter in `mask.ts` can emit a multiline secret unredacted](https://github.com/immediately-run/baton/pull/353#discussion_r4658716470) | Not taken: moot, since merge `58b71a79` dropped the PR's `mask.ts` change for `main`'s matcher (#354). |
+| [Should-fix: a board read that is the first request after an outage serializes holders before grace applies](https://github.com/immediately-run/baton/pull/353#discussion_r4658716473) | Open on `main` (`fetch` in `src/core/baton.ts` calls `recordServing` only after `dispatchRoute` has built the response). Carried by FOLLOWUP-B-249. |

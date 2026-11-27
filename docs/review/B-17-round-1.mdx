@@ -1,0 +1,19 @@
+---
+title: B-17 review round 1
+description: Findings and disposition for the only review of the dashboard design ticket's note-only PR, merged with no blocking finding.
+---
+
+Reviewed [Baton #177](https://github.com/immediately-run/baton/pull/177) at `7df25ef9`
+([review](https://github.com/immediately-run/baton/pull/177#pullrequestreview-5775904220)). The
+round posted no verdict marker; two blind reviewers and a coordinator checked the PR body's claims
+against the repository, re-ran `check:wiki` and `check:tickets` on the branch (both green), and
+raised one should-fix and one nit, with no blocking finding.
+
+The PR was merged by `neumark` on 2026-11-05 with both findings open; no fix leg ran after this
+round. The ticket's remaining work (the owner's agreed design and its implementation tickets)
+landed on `main` later, as the ticket's status note of 2026-11-09 records. Nothing is carried.
+
+| Finding | Disposition |
+|---|---|
+| [Should-fix: the PR-recording commit leaves `status: available`, so the ticket is offered again to runners that cannot do the operator step](https://github.com/immediately-run/baton/pull/177#discussion_r4473419868) | Fixed on `main` since: the ticket stands at `in-review`, set with the design handover of 2026-11-09. |
+| [Nit: the note says the PR is "in `prs:` below", but `prs:` is frontmatter above it](https://github.com/immediately-run/baton/pull/177#discussion_r4473419881) | Open on `main`; not carried (nit). |

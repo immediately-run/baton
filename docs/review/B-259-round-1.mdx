@@ -1,0 +1,21 @@
+---
+title: B-259 review round 1
+description: Findings and disposition for the first review of archiving events before retention deletes them; all six findings were fixed before merge.
+---
+
+Reviewed [Baton #357](https://github.com/immediately-run/baton/pull/357) at `62c57740`
+([review](https://github.com/immediately-run/baton/pull/357#pullrequestreview-6013181424)). The
+verdict was changes: the reviewer ran the focused retention, alarm read-budget, mirror and archive
+suites and typecheck, and found that the local archive could alias SQLite, could stall the request
+queue, and that the R2 layout and its test did not match the ticket.
+
+The PR was merged on 2026-11-25. Every finding of this round was fixed on the branch before merge.
+
+| Finding | Disposition |
+|---|---|
+| [Blocking: the local archive can be the live SQLite file](https://github.com/immediately-run/baton/pull/357#discussion_r4658864353) (path comparison misses aliases; a WAL checkpoint overwrote the acknowledged append) | Fixed in `9f157a91`. |
+| [Blocking: archive I/O runs while holding the request queue](https://github.com/immediately-run/baton/pull/357#discussion_r4658864358) | Fixed in `9f157a91`. |
+| [Blocking: R2 writes one object per batch, not per repository and day](https://github.com/immediately-run/baton/pull/357#discussion_r4658864359) | Fixed in `9f157a91`. |
+| [Blocking: the Workerd test bypasses the real R2 binding](https://github.com/immediately-run/baton/pull/357#discussion_r4658864365) | Fixed in `9f157a91`. |
+| [Should-fix: an existing archive file is not checked for privacy](https://github.com/immediately-run/baton/pull/357#discussion_r4658864371) | Fixed in `9f157a91`. |
+| [Should-fix: a partial final record stays as invalid NDJSON](https://github.com/immediately-run/baton/pull/357#discussion_r4658864374) | Fixed in `9f157a91`. |

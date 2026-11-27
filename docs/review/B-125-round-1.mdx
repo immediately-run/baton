@@ -1,0 +1,22 @@
+---
+title: B-125 review round 1
+description: Findings and disposition for the first review of the compromised-runner runbook and its drill, merged with one blocking and two should-fix findings open.
+---
+
+Reviewed [Baton #248](https://github.com/immediately-run/baton/pull/248) at `5592c46a`
+([review](https://github.com/immediately-run/baton/pull/248#pullrequestreview-5915241164)). The
+verdict was changes: two blind reviewers checked every command, flag and JSON path the runbook
+names, ran `npm run check:wiki` and ran the drill end to end against a scratch repository (it
+passed), and found that the runbook's step-1 policy block fails when followed literally.
+
+The PR was merged on 2026-11-16 (by `neumark`) at the reviewed head, with this round's findings
+open. No fix leg ran after this round. The open findings are carried by FOLLOWUP-B-125.
+
+| Finding | Disposition |
+|---|---|
+| [Blocking: the step-1 policy block fails as written](https://github.com/immediately-run/baton/pull/248#discussion_r4582131946): `policy show` prints the whole read, `policy diff` compares against its inner `.policy`, and `policy set` sends the file as the document, which the server refuses as an unknown field; the drill quietly extracts `.policy` instead | Open on `main` (`docs/runbooks/compromised-runner.mdx` still pipes `policy show` straight into `policy set`). Carried by FOLLOWUP-B-125. |
+| [Should-fix: the drill's worker calls cannot fail on an HTTP refusal](https://github.com/immediately-run/baton/pull/248#discussion_r4582131953): `worker.mjs` exits 0 on any status, so the ack, end and resume claim pass even when refused, and a refused end makes the bar probe pass for the wrong reason | Open on `main` (`scripts/drill-compromise.sh`'s `call()` still only prints the status). Carried by FOLLOWUP-B-125. |
+| [Should-fix: the graceful stop is pointed at the wrong view](https://github.com/immediately-run/baton/pull/248#discussion_r4582131957): the runbook says to stop a leg from the Running view's Stop leg, which does not exist there | Open on `main`: the page still names "the dashboard's Running view (Stop leg, R-BTN-119)", and the current dashboard has no such view. Carried by FOLLOWUP-B-125. |
+| [Nit: the bar's cooperating-runners property is cited as R-BTN-66](https://github.com/immediately-run/baton/pull/248#discussion_r4582131963); it is R-BTN-46 | Not carried (nit). |
+| [Nit: the claimable-again rule is cited as §6.7](https://github.com/immediately-run/baton/pull/248#discussion_r4582131965); it is §9.6 | Not carried (nit). |
+| [Nit: the home-half attack's `tags:` sed is a no-op](https://github.com/immediately-run/baton/pull/248#discussion_r4582131966): the scaffolded ticket has no `tags:` line | Not carried (nit). |

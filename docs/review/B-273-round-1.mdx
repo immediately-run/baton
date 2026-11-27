@@ -1,0 +1,30 @@
+---
+title: B-273 review round 1
+description: Findings and disposition for the first review of the forge clients, every finding fixed by the fix leg or after round 2.
+---
+
+Reviewed [Baton #369](https://github.com/immediately-run/baton/pull/369) at `1c5873c5`
+([review](https://github.com/immediately-run/baton/pull/369#pullrequestreview-6014833099)). The verdict was changes: the reviewer found the
+forge adapters still missing course transitions on Gitea and GitLab and the two-table and
+no-`gh` exit criteria unmet, and ran 220 focused tests, typecheck, model links and the
+whitespace check; the full suite exceeded its timeout.
+
+A fix leg answered every thread at `19636e38`, and round 2 reviewed the result
+([B-273 round 2](B-273-round-2.mdx)). The PR was merged on 2026-11-26. No finding of this round
+was left open.
+
+| Finding | Disposition |
+|---|---|
+| [Blocking: GitLab run-tests cannot turn a home PR green (no tree SHA)](https://github.com/immediately-run/baton/pull/369#discussion_r4660304724) | Fixed in `19636e38`. |
+| [Blocking: a verdict from a collaborator who can push is dropped unless their id is configured](https://github.com/immediately-run/baton/pull/369#discussion_r4660304727) | Fixed in `19636e38` (forge-reported push permission, `baton.pushers-degraded` on a scope refusal). |
+| [Blocking: the REST reader drops head and base identity, so a fork PR is attributed by branch alone](https://github.com/immediately-run/baton/pull/369#discussion_r4660304730) | Fixed in `19636e38`; round 2 found verification still disagreeing with sync, fixed in `9f4086c9`. |
+| [Blocking: Gitea's synthetic `head.ref` after branch deletion loses a merged PR](https://github.com/immediately-run/baton/pull/369#discussion_r4660304735) | Fixed in `19636e38`. |
+| [Blocking: Gitea's historical statuses keep a retried PR red](https://github.com/immediately-run/baton/pull/369#discussion_r4660304738) | Fixed in `19636e38` (the combined status endpoint). |
+| [Blocking: Gitea issue comments ignore `limit` and `page`](https://github.com/immediately-run/baton/pull/369#discussion_r4660304741) | Fixed in `19636e38`. |
+| [Blocking: a short page is taken as proof of exhaustion](https://github.com/immediately-run/baton/pull/369#discussion_r4660304746) | Fixed in `19636e38` (Link, `X-Next-Page`, `X-Total-Count`). |
+| [Blocking: a bare `review-pr` conclusion cannot find a closed or merged PR](https://github.com/immediately-run/baton/pull/369#discussion_r4660304749) | Fixed in `19636e38`. |
+| [Blocking: a literal GitLab subgroup path passes verification but not the sync reader](https://github.com/immediately-run/baton/pull/369#discussion_r4660304751) | Fixed in `19636e38` (one shared path resolver). |
+| [Blocking: the policy's `leg_state` override still beats the forge's placement](https://github.com/immediately-run/baton/pull/369#discussion_r4660304757) | Fixed in `19636e38`. |
+| [Blocking: the no-`gh` test skips the standard create-pr loop, and `fix.md` still names `gh pr checks`](https://github.com/immediately-run/baton/pull/369#discussion_r4660304759) | Fixed in `19636e38`. |
+| [Blocking: the two-table criterion is unmet (GitHub API origins and dispatch kinds selected by literal)](https://github.com/immediately-run/baton/pull/369#discussion_r4660304762) | Fixed in part in `19636e38`; round 2 found literals left, fixed in `9f4086c9`. |
+| [Should-fix: request fallback reads the raw remote URL, not the resolved one](https://github.com/immediately-run/baton/pull/369#discussion_r4660304767) | Fixed in `19636e38`. |

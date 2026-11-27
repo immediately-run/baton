@@ -1,0 +1,17 @@
+---
+title: B-30 review round 1
+description: Findings and disposition for the first review of independent create-pr reviewers, both fixed in one fix leg.
+---
+
+Reviewed [Baton #347](https://github.com/immediately-run/baton/pull/347) at `cc7caf42`
+([review](https://github.com/immediately-run/baton/pull/347#pullrequestreview-6011566537)). The
+verdict was changes: the credential exclusion worked, but a green home test gate did not hand off to
+review; 183 targeted tests passed on both hosts, and the reviewer noted that a separate credential
+does not establish model independence.
+
+A fix leg answered both findings in `ef9ca1c1`. Round 2 reviewed that head.
+
+| Finding | Disposition |
+|---|---|
+| [Blocking: a green `run-tests` result is refused into `review`, the runner suspends without the marker, and sync offers `run-tests` again](https://github.com/immediately-run/baton/pull/347#discussion_r4657588353) | Fixed in `ef9ca1c1` (the suspension carries the marker and records the completed self-loop). |
+| [Should-fix: the instructions must say the review model is chosen before launch](https://github.com/immediately-run/baton/pull/347#discussion_r4657588357) | Fixed in `ef9ca1c1`. |

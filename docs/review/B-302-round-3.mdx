@@ -1,0 +1,19 @@
+---
+title: B-302 review round 3
+description: Findings and disposition for the third review of the owner-state move, merged with both of its blockers open.
+---
+
+Reviewed [Baton #340](https://github.com/immediately-run/baton/pull/340) at `d799d2f2`
+([review](https://github.com/immediately-run/baton/pull/340#pullrequestreview-6011443714)). The verdict was changes: the omitted-placement case
+and the normal restore paths passed (55 focused tests, S-BTN-50 on Node and Cloudflare), but
+tracing the station write and the pending-row lifecycle showed held and off-graph placements
+still breaking a restore.
+
+This was the third round to find blockers. The PR was merged on 2026-11-25, with this round's
+findings open; no adjudication by the owner is recorded on the PR. No fix leg ran after this
+round: the later commits merge `main`. The open findings are carried by FOLLOWUP-B-302.
+
+| Finding | Disposition |
+|---|---|
+| [Blocking: a held post still passes its placement to `Stations.apply` while the imported position is pending](https://github.com/immediately-run/baton/pull/340#discussion_r4657473706) | Open on `main` (`refreshStations` in `src/core/sync.ts` skips `applyPending` on a held history but still calls `core.stations.apply` with its stations, so a later accepted placement can insert a second `ticket_stations` row and roll back). Carried by FOLLOWUP-B-302. |
+| [Blocking: a station-map entry consumes the pending row even when it does not place the ticket](https://github.com/immediately-run/baton/pull/340#discussion_r4657473709) | Open on `main` (`applyPending` in `src/core/ownerState.ts` deletes the pending row whenever the post names the ticket, before any course-name check, so an unknown station leaves nothing to restore). Carried by FOLLOWUP-B-302. |

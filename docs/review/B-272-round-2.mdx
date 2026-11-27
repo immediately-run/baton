@@ -1,0 +1,20 @@
+---
+title: B-272 review round 2
+description: Findings and disposition for the second review of making baton.ts wiring only, merged with an executor finding and two criterion questions open.
+---
+
+Reviewed [Baton #363](https://github.com/immediately-run/baton/pull/363) at `dc067129`
+([review](https://github.com/immediately-run/baton/pull/363#pullrequestreview-6013949073), [verdict comment](https://github.com/immediately-run/baton/pull/363#issuecomment-7084233215)). The
+verdict was changes: the reviewer confirmed the dashboard write guards, the model link and the
+whitespace fix, found that the new executor change (`6cf38149`) can overrun its timeout, and held
+the two criterion findings open; typecheck, model links, `git diff --check` and 42 focused tests
+passed.
+
+The PR was merged on 2026-11-25 with this round's findings open. No fix leg ran after this round;
+the later commits only merged `main`. The open findings are carried by FOLLOWUP-B-272.
+
+| Finding | Disposition |
+|---|---|
+| [Blocking: the result now waits for `close`, so a helper outside the process group that holds a pipe keeps the call past its timeout](https://github.com/immediately-run/baton/pull/363#discussion_r4659560398) | Bounded on `main` since `16959c4e` (B-316), which the merge took: output drains for at most one second after exit. No test covers a helper holding the pipes; the test is carried by FOLLOWUP-B-272. |
+| [Blocking (still open): retired repositories answer `invalid-params` and `forbidden`, not the ticket's literal `not-found`](https://github.com/immediately-run/baton/pull/363#discussion_r4659560405) | Open: the codes are unchanged on `main` and S-BTN-198 and S-BTN-250 pin them. Carried by FOLLOWUP-B-272 as a decision for the owner. |
+| [Blocking (still open): the source-scan and webhook test retargets are not import-only, and the ticket's criterion was not amended](https://github.com/immediately-run/baton/pull/363#discussion_r4659560409) | Open: the retargets stand on `main`. Carried by FOLLOWUP-B-272 as a decision for the owner. |
