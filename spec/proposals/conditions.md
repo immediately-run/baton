@@ -389,11 +389,11 @@ a `suspend` would. Only the runner knows the binding, so it reports the raise wi
       earlier entry of that ticket and class is `claimed` or `delivered`. Entries of different
       tickets or classes are unordered.
     - `POST /v1/runner/outbox/{repository}/{id}` marks one: `delivered` with its `ref`, or
-      `failed` with `transient` or `refused`. `failed` is a mark, not a state: the entry returns to
+      `failed` with `transient` or `refused`. `failed` is a report, not a state: the entry returns to
       `queued`, after a backoff for `transient` and, for a git or forge-check entry, with its
       ticket held for `refused`, as for a source `withdraw`; a `source-show` or `source-note` marked
       `refused` is R-BTN-200's.
-    - A lapsed lease re-queues the entry. A mark arriving after its lease lapsed is accepted. A mark
+    - A lapsed lease re-queues the entry. A report arriving after its lease lapsed is accepted. A report
       from any credential but the claimer is `forbidden`. An entry the claimer leaves unmarked goes
       back to `queued` when its lease lapses.
     - `transient` re-queues the entry after 1, 5 and 30 minutes, then hourly.
@@ -424,7 +424,7 @@ a `suspend` would. Only the runner knows the binding, so it reports the raise wi
     the transaction that records that leg's end (R-BTN-168). A `withdraw` entry whose ticket a snapshot shows
     withdrawn or closed before any deliverer claimed it is `dropped`, and so is a source entry
     whose ticket closed before its delivery. Retiring a repository drops
-    every `queued`, `claimed` or `delivered` entry of it, and a later mark is ignored (R-BTN-47).
+    every `queued`, `claimed` or `delivered` entry of it, and a later report on one is ignored (R-BTN-47).
   - **Records.**
     - Queuing, delivering and confirming each log an `outbox {id, kind, state}` event in the
       ticket's history.

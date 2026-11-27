@@ -28,8 +28,8 @@ description: "BATON_SPEC — Open questions."
   `sk-` user-presence flag? Refusing closes that gap; it locks out holders who chose an API key,
   which R-BTN-159 makes their trade. Until it is decided, any key of the session's role confirms.
 
-- **A human act over MCP (R-BTN-185, R-BTN-186).** A dashboard session is a human; a delegated
-  key never is, so where the policy counts a person's answer from `human` alone (`protected`), or
+- **A human act over MCP (R-BTN-185, R-BTN-186).** A dashboard session can be a human (R-BTN-185); a
+  delegated key never is, so where the policy counts a person's answer from `human` alone (`protected`), or
   an `approvers.*` list is human-only, MCP cannot take the act. R-BTN-186 makes that a defect
   unless it is mechanical. The recommendation: MCP hands such an act to the person — a dashboard
   page that shows it and takes it as a session does, with R-BTN-185's security-key touch under

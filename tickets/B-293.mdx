@@ -42,7 +42,7 @@ the code disagree*).
 | floors as rows of `policy_floors` (`name`, `guarantees`, `remove_by`), written by `POST …/policy/floors` | `floors`, a knob of the document listing guarantees by name |
 | `policy_pins` and `PolicyPin` (a runner's pinned hash and floors hash) | "a trusted runner pins nothing" |
 | absent | `outbox.source`, `repos.unlisted`, ~~`approvers.roles`,~~ the `floors` knob |
-| nine guarantee names (`GUARANTEE_NAMES`, `src/core/policy.ts:465-468`): the spec's six and `signed-authorship`, `trusted-domain-separate`, `human-gates-hardware` | ~~six~~ five guarantees in R-BTN-189's table (`no-runner-lands` retired, B-189) |
+| nine guarantee names (`GUARANTEE_NAMES`, `src/core/policy.ts:465-468`): the spec's six and `signed-authorship`, `trusted-domain-separate`, `human-gates-hardware` | ~~six~~ ~~five~~ six guarantees in R-BTN-189's table (`no-runner-lands` retired, B-189; `human-gates-hardware` back, 2026-11-26) |
 | the policy read is signed: Ed25519 over `baton-policy@1` and the canonical fields, with `kid`, `signature`, `guarantees_hash`, `floors_hash` and `valid_until` (`src/core/baton.ts:866-893`) | "Baton signs no outbox entry and no policy read and publishes no signing key" (§12.8's opening); §14's row lists none of those fields |
 | a preset apply stores the preset's whole document (`policy.ts:751-754`: the document is `policyForPreset`, a clone of `PRESETS[name]`) | *Applying a preset* writes only the knobs the preset has a value for, never `floors` or `human_identity`, and keeps the document's `service:` entries in `attestations` |
 | an owner key's answer to a person leg is refused where `inputs.answers` is `attestation` (`baton.ts:774-778`) | R-BTN-181 and R-BTN-191 put that refusal on the `attestations` entry for `std:decision@1`; there is no `inputs.answers` |
@@ -69,8 +69,8 @@ code that day.
      leg-state design used; that design is on `spec/proposals/courses.md`.
    - **`authorship`**: signed authorship was retired with signed control (B-263), and the
      guarantee `signed-authorship` goes with it.
-   - **the guarantees.** `trusted-domain-separate` and `human-gates-hardware` are in the code
-     and not in R-BTN-189's table. A floor may name either today (`POST …/policy/floors`
+   - **the guarantees.** `trusted-domain-separate` ~~and `human-gates-hardware` are~~ is in the code
+     and not in R-BTN-189's table; `human-gates-hardware` is in the table again (2026-11-26). A floor may name either today (`POST …/policy/floors`
      validates against `GUARANTEE_NAMES`), so removing a name needs the stored floors read
      first. Use R-BTN-189's successor mapping and refusal rules; a floor without a successor
      stops the migration.
@@ -153,3 +153,5 @@ code disagree* (PR #299). Related: B-264 (`repos.unlisted`), B-165 (constant kno
 _(2026-11-24: B-189's spec PR (`spec/BATON_SPEC_HISTORY.md`, the entry of 2026-11-24) rules on these rows, on the owner's rulings of 2026-11-09 and 2026-11-24 (runners trusted, legs not): `approvers.trust`/`approvers.roles`, the `grants.*` knobs, every `refs.*` knob (`refs.baton` and `refs.legs` included), `courier` and the role-based outbox routes (`outbox.git`, `outbox.forge-check`), `inputs.board`, `merge.reviews.distinct`, the grants' role, domain and mark columns, and the guarantees `no-runner-lands` and `trusted-domain-separate` all retire; `paths.control`'s `trusted-runner` value becomes `approval`. The struck cells said otherwise. B-293's projection drops each retired knob, translating none (B-189 item 1). A stored floor naming `no-runner-lands` or `trusted-domain-separate` is dropped by a new version logged `admin` — the owner's ruling for those two names, not a migration stop; the no-successor stop applies to every other name (B-189 item 2). The ticket's PR, baton#337, is held by another session: only clauses are struck here, and the PR's spec half (its `approvers.roles` rename and the comparison of `no-runner-lands`) must rebase on B-189's.)_
 
 _(2026-11-24: rules re-read: R-BTN-180, R-BTN-188, R-BTN-189)_
+
+_(2026-11-26: rules re-read: R-BTN-189. The amendment of that date (`spec/BATON_SPEC_HISTORY.md`) is written into this plan: `human-gates-hardware` is in R-BTN-189's table again, and legacy guarantees compare by name.)_

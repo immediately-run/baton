@@ -1,5 +1,5 @@
 ---
-title: "B-164 — The guarantees table claims only what holds: human-gates under protected, signed-authorship without a host signer, independent-review's cost"
+title: "B-164 — The guarantees table claims only what holds: signed-authorship without a host signer, independent-review's cost (human-gates: settled 2026-11-26)"
 id: B-164
 project: baton
 status: available
@@ -10,7 +10,7 @@ tags:
   - roadmap-item
 order: 1109
 tier: judgement
-description: "R-BTN-189 says protected holds human-gates while §12.8 says a human-only key an agent session can use is always possible while human_key is any, which protected sets. signed-authorship signs with a key a compromised leg can read until a host-side signer exists, and its foreign-commit reset is a denial-of-service lever. independent-review is honestly not a security gate but carries trust levels, model families and std:ran@1 as if it were. Make the table claim only what holds."
+description: "(Its human-gates item is settled the other way: on 2026-11-26 the owner ruled that protected claims human-gates, which rests on custody, and human-gates-hardware names the verified promise.) signed-authorship signs with a key a compromised leg can read until a host-side signer exists, and its foreign-commit reset is a denial-of-service lever. independent-review is honestly not a security gate but carries trust levels, model families and std:ran@1 as if it were. Make the table claim only what holds."
 topics:
   - baton
 owns: {}
@@ -35,7 +35,9 @@ Review F2, F5, F6 and the guarantee table (section 3.1).
 **Rulings of 2026-11-01** (the owner, answering each question in the session that continued
 immediately-run/baton#150; the restructure, B-166, writes them into the spec):
 
-- **Human gates:** "Only protected-signed": `protected` stops claiming `human-gates`.
+- **Human gates:** ~~"Only protected-signed": `protected` stops claiming `human-gates`.~~ Reversed by the owner on
+  2026-11-24 and 2026-11-26: `human-gates` keeps a variant without hardware keys, which `protected` claims;
+  `human-gates-hardware` is the hardware one (R-BTN-189).
 - **Signing:** "Remove until designed": `signed-authorship` and `authorship: signed` leave the
   spec until a host-side signer is designed; continuity ranges stay.
 
@@ -43,8 +45,9 @@ immediately-run/baton#150; the restructure, B-166, writes them into the spec):
 
 1. **A spec PR first**, under the babysit skill's *Spec PRs*: two fresh reviewers, the impact list,
    every rule restating the same fact changed with it.
-2. `human-gates` held only by `protected-signed`, or `human_key: hardware` part of
-   `protected`.
+2. ~~`human-gates` held only by `protected-signed`, or `human_key: hardware` part of
+   `protected`.~~ Done otherwise by the 2026-11-26 amendment: `protected` holds `human-gates`, and
+   `human-gates-hardware` needs `human_key: hardware` and a verified key.
 3. `signed-authorship` either specified with a host-side signer or removed until one is
    designed; continuity ranges kept.
 4. `independent-review`'s machinery cut to what it needs: a review count ~~and a domain label~~ (each review its own `reads_only` run of the exact head).
@@ -64,3 +67,5 @@ immediately-run/baton#150; the restructure, B-166, writes them into the spec):
 _(2026-11-24: item 4 is done in the spec by B-189's spec PR (`spec/BATON_SPEC_HISTORY.md`, the entry of 2026-11-24), on the owner's rulings of 2026-11-09 and 2026-11-24 (runners trusted, legs not): `independent-review` is `merge.reviews.count` reviews of the exact head, each its own `reads_only` run, with no domain label, key comparison or `std:ran@1` (R-BTN-183, R-BTN-189); the struck clause said otherwise.)_
 
 _(2026-11-24: rules re-read: R-BTN-183, R-BTN-189)_
+
+_(2026-11-26: rules re-read: R-BTN-189, R-BTN-185. The amendment of that date (`spec/BATON_SPEC_HISTORY.md`) reverses this ticket's human-gates ruling of 2026-11-01: two human gates, `protected` claiming `human-gates`; the clauses it contradicts are struck in place.)_

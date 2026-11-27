@@ -166,12 +166,12 @@ route, with the events and fields the table lists for it, is
     The unbuilt administrative changes would record `repo-path-changed` or `repo-identified`
     (actor the administrator) for manual path changes and re-identifications, respectively.
 
-- **R-BTN-61 (merging courses and repositories).** `status: built` Recommendations order each (repository,
+- **R-BTN-61 (merging courses and repositories).** `status: partly B-352` Recommendations order each (repository,
   course) group by the default order (§6), then merge the groups by: (1) expedited first
   (R-BTN-12); (2) the home repository's `weight` (default 100), higher first; (3) the
-  candidate's place in its own group; (4) fewer legs to an end; (5) `ready_since`, oldest
-  first; (6) ticket id. The matching query reads at most 50 candidates per group after posted
-  bars and, when owner bars or readiness leave a group short, the group's next page, at most 4
+  candidate's place in its own group; (4) fewer legs to an end; (5) `ready_since`, when its leg was queued,
+  oldest first; (6) ticket id. The matching query reads at most 50 candidates per group after posted
+  bars and, when owner bars or a runner's unmet `host` (R-BTN-174) leave a group short, the group's next page, at most 4
   pages per group per request. The answer is the one checking every candidate gives. `?limit=`
   applies after the merge. A ticket is offered only for its queued leg (R-BTN-83), named in
   `legs`, a list of one.
