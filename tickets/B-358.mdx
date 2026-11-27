@@ -1,0 +1,97 @@
+---
+id: B-358
+status: available
+topics: [vocabulary, api, cli]
+owns: {}
+prs: []
+title: B-358 — Rename registered repository and home to arena, in stages, the old names accepted meanwhile
+depends_on: []
+tags: [roadmap-item]
+project: baton
+repos: [baton]
+description: "The spec, API, CLI, dashboard and stored names move from registered repository and home to arena, in stages, with every old name still accepted until the owner retires it."
+---
+
+**Brief:** the owner, 2026-11-27 (in a Claude Code session on bering): "If the rename to arena has not yet taken place, please draft a ticket for thos." The term was adopted on 2026-11-26 (`spec/BATON_SPEC_HISTORY.md`, the entry "Terminology: the arena", PR #449): "repository" made Baton read as if it could serve only git-held tickets, while a ticket source may be a tracker such as Linear, and "home" retires with it. The spec's front ([BATON_SPEC §0](../spec/BATON_SPEC/00-front.md)) says: "The rename of these words comes in stages, with the old names accepted meanwhile." This ticket is that rename.
+
+**Spec:** the front's terminology note ([BATON_SPEC §0](../spec/BATON_SPEC/00-front.md)) and the vocabulary's **Arena** and **Repository, config repository, code repository** entries ([vocabulary](../docs/context/vocabulary.mdx)), which list the names that change. The routes are in [§14](../spec/BATON_SPEC/14-api.md#sec-14), the CLI's flags and its home in force in [R-BTN-127](../spec/BATON_SPEC/11-people.md#sec-11-3) and [§3](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3), and `repository_owners` in [§13](../spec/BATON_SPEC/13-data-model.md#sec-13). Run `npm run spec:impact -- --term "registered repository" --term "home in force" --term "/v1/repositories" --term "--home" --term "BATON_HOME" --term "repository_owners"` before each stage.
+
+**Depends on:** none. Each stage lands as its own pull request, merged under the review gate. Stage 1 comes first, because the later stages build to it.
+
+### Why
+
+On main today the old words are spread widely. Counted in `src/` and `cli/`, `spec/`, `docs/` and `test/`:
+
+| Name | src/, cli/ | spec/ | docs/ | test/ |
+|---|---|---|---|---|
+| `/v1/repositories` | 81 | 64 | 9 | 426 |
+| `--home` | 51 | 11 | 7 | 68 |
+| `--repo` | 28 | 2 | 4 | 40 |
+| `BATON_HOME` | 26 | 3 | 2 | 43 |
+| `repository_owners` | 36 | 11 | 3 | 29 |
+| `'repository/` (dashboard screens) | 135 | 0 | 0 | 96 |
+| "registered repository" | 27 | 22 | 14 | 17 |
+
+A single rename would break every pinned CLI, runner, sync workflow and MCP client at once. Doing it in stages, with the old names accepted alongside the new, keeps every deployed client working until the owner retires the old names.
+
+### What to build
+
+1. **The spec and the docs (no behaviour change).**
+   - Write "arena" for a registered repository, and "the arena" for a ticket's home and the CLI's home in force.
+   - Write "config repository" wherever the text means the git repository `.baton/` lives in.
+   - Keep "repository" for a git repository and "code repository" for one that `code_repos` lists.
+   - Shrink the front's terminology note to the names still waiting for later stages, and update the vocabulary entry to match.
+   - Rule, scenario and gate ids don't change.
+   - Leave dated history pages as they are: `docs/plans/`, `docs/review/`, `docs/interventions.mdx`, `spec/BATON_SPEC_HISTORY.md` entries before this one.
+2. **The API.**
+   - Serve `/v1/arenas/{arena}/…` beside `/v1/repositories/{repository}/…`. Both go through one handler table, so an alias can never reach a route whose authorization differs.
+   - Responses name the field `arena`, and keep `repository` with the same value until stage 5.
+   - The MCP tools gain `arena` parameters, still accepting `repository`.
+3. **The CLI and the runner.**
+   - Add `--arena` beside `--repo` and `--home`, and `BATON_ARENA` beside `BATON_HOME`. If both names are given, they must agree; otherwise the command refuses, naming both.
+   - Messages say "arena". "The home in force" becomes "the arena in force".
+   - `baton repo …` gains the alias `baton arena …`.
+   - The generated sync workflow and leg stubs write the new names. `baton repo init --check` reports stubs that still use the old ones.
+4. **The dashboard and stored names.**
+   - Screens move to `arena/…`, and old `repository/…` links redirect to them.
+   - Labels say "arena".
+   - Rename the owner tables (`repository_owners` and the like) only where the name is visible outside core, in an API, a screen or an export. A rename is a new numbered migration (append-only). An export keeps importing under both names (R-BTN-88).
+   - Internal SQL names that no one outside core sees may stay as they are. The ticket records which stayed and why.
+5. **Retire the old names, only on the owner's ruling.**
+   - Each old name logs a deprecation line when used, from stage 2 onward.
+   - Removing them is a separate change after the owner rules, with `min_runner_version` raised to a version that writes only the new names.
+   - Until that ruling, both names stay.
+
+### Trust
+
+No new input carries authority. The new names are aliases of existing ones:
+- A route alias resolves to the same handler and the same authorization as its old path.
+- A flag or variable alias resolves to the same value, and conflicting names are refused, not reconciled.
+- No alias is read from a ticket, a branch or repository data. The generated workflow and stubs come from the CLI's fixed templates, as now (R-BTN-134).
+
+### Invariants
+
+- **Old clients keep working until the owner retires the old names.** Every old route, flag, variable and screen link answers as before, and the tests pin it.
+- **One authorization path per act.** An alias never gets a check of its own, so the two names can't drift apart. A test sends every route under both prefixes and compares the authorization outcomes.
+- **Migrations are append-only** (CLAUDE.md). A renamed table is a new numbered file, never an edit of an old one.
+- **Stable ids.** No `R-BTN`, `S-BTN` or `G-BTN` id changes, and code keeps citing them.
+- **Text, never markup** (§10.4): the dashboard's new labels go through `textContent`, like the old ones.
+
+### Tests
+
+- **Stage 2:** every route under `/v1/arenas/` and `/v1/repositories/` gives the same status, body and authorization outcome, on both hosts.
+- **Stage 3:** `--arena` and `--repo`/`--home` are equivalent, `BATON_ARENA` and `BATON_HOME` are equivalent, and conflicting names are refused. A runner pinned to the last release before stage 3 still claims and finishes a leg.
+- **Stage 4:** old screen links redirect. An export taken before the migration imports after it.
+- Name each behaviour change's scenario, with numbers from `node cli/baton.mjs tickets next scenario`.
+
+### Exit criteria
+
+- [ ] Stage 1 merged: the spec and docs write "arena" and "config repository", and `npm run check:spec` and `npm run check:wiki` are green.
+- [ ] Stages 2–4 merged: the new names are served, accepted and shown, and the old ones still work, with the tests above on both hosts.
+- [ ] Every old name logs a deprecation line when used.
+- [ ] The owner's ruling on retiring the old names is asked for and recorded in `spec/BATON_SPEC_HISTORY.md`. Retiring them is filed as a ticket of its own.
+- [ ] `npm test` and `npm run typecheck` green at each stage.
+
+## Status
+
+_filed 2026-11-27._

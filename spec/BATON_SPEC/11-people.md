@@ -93,8 +93,8 @@ built; their design is [the people and dashboard proposal](../proposals/people-a
     functions the entity reads use (R-BTN-179), with no session. Each act is an `admin` event.
   - **Grants and owners.** Making or changing a grant, changing a key's hostname and adding an
     owner are `approvers.members` actions (R-BTN-188). An administrator key's request is
-    `forbidden` where that list is human-only, since it carries no `human_only` mark (§12.1); an
-    administrator's session is a human (R-BTN-185).
+    `forbidden` where that list is human-only, since an administrator key is never `human_only` (§12.1); an
+    administrator's session that acts as `human` is a human (R-BTN-185).
   - **Revocation.** An administrator revokes any key at once but an administrator's. Revoking
     an owner key removes it from every repository it owns, the last owner included (an
     administrator then adds one with `owner_keys_add`), and revoking a member key removes it
@@ -183,7 +183,7 @@ built; their design is [the people and dashboard proposal](../proposals/people-a
     [the proposal, §1](../proposals/people-and-dashboard.md#1-the-action-registry). Until it
     is, §14 lists each route with its callers and R-BTN-127's table each command.
 
-- **R-BTN-127 (the CLI is a tree of nouns and verbs).** `status: built B-22 B-23`
+- **R-BTN-127 (the CLI is a tree of nouns and verbs).** `status: partly B-22 B-23 B-353 B-355`
   - **Grammar.** Every command is `baton <noun> <verb> [<arguments>] [<flags>]`; the only
     top-level verbs are `help` and `version`. Under `owner` and `admin`, a verb that acts on a
     kind of thing is two words, `<thing> <act>`, the thing singular (`owner policy apply`,
@@ -236,9 +236,10 @@ built; their design is [the people and dashboard proposal](../proposals/people-a
   | `leg runs <ticket> [<leg>]` | a leg's runs | R-BTN-128 |
   | `leg replay <ticket> <leg> [--run <n>] [--against <sha>]` | `leg.runs`, then replays locally | R-BTN-84 |
    | `leg stop <ticket>` | *proposed* ([B-9](../../tickets/B-9.mdx)) | R-BTN-119 |
-  | `leg status`, `output`, `done`, `suspend`, `release`, `next`, `yield`, `raise` | the local channel, inside a leg; `leg await`, `events` and `ticket` are proposed ([conditions](../proposals/conditions.md)) | R-BTN-106, R-BTN-160 |
+  | `leg status`, `output`, `done`, `suspend`, `release`, `yield`, `raise` | the local channel, inside a leg; `leg await`, `events` and `ticket` are proposed ([conditions](../proposals/conditions.md)) | R-BTN-106, R-BTN-160 |
   | `ticket blocked [<ticket>] [--on <kind>:<ref>]` | a ticket's or the repository's blocks (`repo.blocked`) | R-BTN-75 |
   | `ticket history <ticket>` | a ticket's history | R-BTN-81 |
+  | `ticket why <ticket> [--replay]` | the latest selection verdict and why | R-BTN-205 |
   | `ticket hold <ticket>`, `ticket unhold <ticket>`, `ticket expedite <ticket> [--clear]`, `ticket cancel <ticket>` | the overrides | R-BTN-12, R-BTN-186 |
   | `ticket route <ticket> <leg> \| --clear` | queues or clears a leg (proposed: [data model and API](../proposals/data-model-and-api.md#other-reads-and-owner-routes)) | R-BTN-83 |
   | `ticket adopt <ticket> [--at <station>] [--next <leg>] [--ran <leg>,…]` | places a ticket on its course (proposed: [ticket adopt](../proposals/ticket-adopt.md)) | R-BTN-39 |
@@ -331,7 +332,7 @@ built; their design is [the people and dashboard proposal](../proposals/people-a
     same scope, but R-BTN-186's key-only acts, and no other (R-BTN-129). An owner's or member's
     session reaches only
     the repositories its key still owns or is a member of. A session is also a human
-    (R-BTN-185).
+    where it acts as `human` (R-BTN-185).
   - **Authentication first, then one role.** A sign-in authenticates the person, then opens a
     session for one key the person holds. Where the person holds keys of more than one role, or
     of one role more than once, the page asks which after authenticating and before any session

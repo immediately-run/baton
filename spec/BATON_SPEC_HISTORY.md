@@ -18,6 +18,501 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
 
 ## Changelog
 
+- **2026-11-27 — The selector chooses the next leg (R-BTN-205; B-351).**
+  Rules changed: R-BTN-205 (added, `specified B-352 B-353 B-354 B-355 B-356`), R-BTN-70,
+  R-BTN-83, R-BTN-63, R-BTN-71, R-BTN-79, R-BTN-69, R-BTN-134, R-BTN-131, R-BTN-110, R-BTN-174,
+  R-BTN-74, R-BTN-51, R-BTN-5 / R-BTN-34, R-BTN-88, R-BTN-39, R-BTN-33, R-BTN-50, R-BTN-61,
+  R-BTN-76, R-BTN-75, R-BTN-120, R-BTN-99, R-BTN-116, R-BTN-89, R-BTN-163, R-BTN-167, R-BTN-9,
+  R-BTN-72, R-BTN-106, R-BTN-133, R-BTN-4, R-BTN-10, R-BTN-127, R-BTN-184, R-BTN-64, R-BTN-40;
+  §9.4's end body; §12.3's links, §13's
+  `selection_verdicts` and `selection_wants`, §14's selection routes; S-BTN-47, S-BTN-312,
+  S-BTN-174, S-BTN-188, G-BTN-42, G-BTN-43 and G-BTN-73; S-BTN-327 to S-BTN-333 added; four
+  Decisions lines.
+  What a ticket runs next is one function of its course's, the selector, which a runner runs
+  through its executor over Baton's record and whose stored verdict — `run`, `wait` or
+  `attention`, with the checks that decided it — takes the place of the holder's `next`, the
+  station function's readiness, posted next legs and `not_before`, and `baton.missing-next`.
+  Every rule that stated the old mechanism now states the new one; the status tokens name the
+  tickets that build it.
+  - **The owner's brief and constraints**, 2026-11-26, in a Claude Code session on bering: "I
+    feel this is a key mechanic which is too challenging to grasp right now", and: "the logic for
+    selecting the next leg of a ticket based on its current station should be entirely
+    customizable."; "The leg may depend on many different prerequisites being met, some of which
+    can be conveniently expressed as baton metrics readings. For example, we should not start a
+    leg requiring a sandbox with more memory than what the host can allocate. we should not start
+    a leg that requires access to the GitHub API if we have been rate limited temporarily.";
+    "Like all custom logic, it should be straightforward how to sandbox this when Baton is being
+    used in a more secure setup like the one Fieldhouse implements."; "it should be possible for
+    a user to see why a particular leg was chosen in the dashboard or using the CLI."; "where no
+    lag can commence, it should be clear when the next action of the ticket may be determined, or
+    that the ticket needs human attention because the next leg cannot be calculated."; "the
+    station function should not assume that Git is the communication channel between legs. This
+    may often be the case, but this is definitely not guaranteed."
+  - **The owner's rulings on the design**, 2026-11-26: a default selector, "Yes"; the `because`
+    format, "JSON, can contain url to reason file or simple text in "reason " field"; the
+    selector's budget, "not sure" — R-BTN-205 states 10 seconds, 256 MB, a 60-second want lease
+    and 15 minutes untaken as its defaults, decided here (below), and B-357 measures them.
+  - **The owner's rulings of 2026-11-27.** On where the design lives: "Since these proposals are
+    necessary to get baton into a generally useable state, I would like you to include the
+    changes in the specs and draft the necessary tickets for implementing them. Except of course
+    spec provisions explicitly states as proposals whose implementation is deferred - these should
+    be live outside from the spec along with other proposals." Nothing of this design is deferred,
+    so the proposal page `spec/proposals/leg-selection.md` is removed and its scenarios moved
+    into the tickets. On a verdict's reasons beside R-BTN-33: "Bounded text, an exception" —
+    R-BTN-33 admits a verdict's `because` reasons and an `attention`'s reason, at most 128
+    characters each, shown only as text. The owner had asked, the same day, "Ready to draft spec
+    changes?"; the first draft (PR #462) wrote the design beside the old rules as "not built"
+    notes, which review round one found against the spec-writing rules, and these two rulings
+    answered the questions that raised.
+  - **Readings.** R-BTN-76's advice-only reading binds core's gates: no gate reads a reading. The
+    owner's second constraint says a leg may wait on prerequisites that readings express; that it
+    does so only through its selector's `wait` is this design's reading of the constraint, not
+    the owner's words. The B-146 deferral of a requirement core would evaluate stands.
+  - **Decided here, not by the owner** — the conservative reading of the constraints, for the
+    owner's review in the PR: the default selector's rules (claimable legs only, an arrival
+    entry's leg, `start_leg`, a result's `not_before`, then course order); chaining in a claim only
+    into the verdict's `run`; the response to a finishing arrival carrying the `ctx`; binding by
+    the answered cause and the `ctx` digest, first valid verdict winning; a want leased to one
+    runner for 60 seconds, under `protected` only to the trusted runner class; `ctx` limited to
+    the ticket's own repository and to fleet totals; `host` (renamed from `needs`, which R-BTN-76
+    already uses) with "declared at least asked"; `wait.until` capped at 400 days and a long
+    `wait` raising `baton.stalled`; replay from the record position while the record is retained,
+    through the local executor; re-verification at a claim by re-running the selector.
+  - **Review round one** (2026-11-27): two fresh reviewers, one over PR #462 and one over PR #455
+    after its merge, each given the diff. Every finding verified against the text and the code.
+    Fixed:
+    - in-claim chaining and the `ctx` timing, which left the finishing runner without its own
+      arrival;
+    - unbound verdicts: digest checks, first-wins, a want lease, the `until` cap and the
+      stalled notice; the protected-path and trusted-class requirement in the rule and R-BTN-184;
+    - every rule still stating the old mechanism — R-BTN-39's fact arrivals and reconcile
+      conclusions, `reconciles.to` and `arrives.next`, R-BTN-72's result shapes and chaining,
+      R-BTN-106's checks and verbs, the claim response's and the end body's `next`, the heartbeat's
+      `git` view, R-BTN-79, rule 1, R-BTN-89, R-BTN-167, R-BTN-99, R-BTN-61, R-BTN-88, the board
+      post's `stations` and the §15 rows;
+    - the suspension rule, which queued a finished leg off the graph;
+    - the sync, which the first draft told to post less than R-BTN-203, R-BTN-76 and `course_data`
+      need;
+    - `baton.selection-attention` defined twice, and conditions that never closed;
+    - free text against R-BTN-33 and R-BTN-163, and `because` urls outside §12.3's links (the
+      owner's ruling above);
+    - the course file's missing `selector` and `host` fields, numeric matching, a default selector
+      that could pick fact, reconcile or person legs, cross-repository exposure through `ctx`;
+    - the MCP session claim wording, and statuses that did not match the text;
+    - patch notes and plan text in rule bodies and Decisions; the vocabulary;
+    - in B-351: its account of today's sources (the owner's route and adopt are not built; the
+      exhausted retry seen today is the sync's `waiting_on: exhausted`; `inferred` is accepted but
+      never produced; `not_before` was missing), its anchors (R-BTN-133 is §8.4), its Trust,
+      Invariants and exit criteria, and the rulings it presented as the owner's.
+
+    Not taken as found: that a `wait` reverses the advice-only ruling on readings — the owner's
+    second constraint asks for exactly that, through the selector, and R-BTN-76 now says so.
+  - **Review round two** (2026-11-27): a fresh reviewer over PR #462 at `57bc7c00`. Every finding
+    verified against the text. Fixed:
+    - chaining: R-BTN-63's `advance` now either finishes (`{reached, outputs}`, answered with the
+      arrival's `ctx`) or starts (`{leg, verdict}`, the verdict's `run` with its `answers` and
+      digest), so the holder selects before it starts the next leg; §9.1's bodies, the end
+      body, R-BTN-71 and R-BTN-72's *Selecting* follow, and in-claim arrivals never fall to a want;
+    - the claim-time re-check: the verdict posted with a `stale-board` release answers the
+      offered position and is acted on;
+    - waiting under a claim has one home, R-BTN-72 (with R-BTN-40's 30-minute bound moved into it),
+      which R-BTN-40 and R-BTN-89 cite; `reselect` hands out a
+      fresh `ctx` and admits one more verdict for the same arrival;
+    - R-BTN-64's inference from one runner leg leaving a former end, now a want; open wants are
+      withdrawn and remade on a course change;
+    - `host` checked at the claim and the starting `advance` too, a missing declaration failing
+      it, and the `host` case of `baton.selection-attention` closing when a runner that meets it
+      registers or a later verdict replaces it;
+    - no wants while a claim is active: causes are deferred to the holder, or become a want when
+      the claim ends;
+    - reconcile conclusions are holder arrivals (R-BTN-39);
+    - `lease-lost` among R-BTN-205's refusals, the lessee wording in B-351's Trust, R-BTN-83's
+      `next_source: baton` list completed, one selector tree (the verified tree at the claim's or
+      want's commit) in R-BTN-205 and R-BTN-5 / R-BTN-34, §13's `ticket_next_legs` rewritten to
+      the queued leg and core-held waits, S-BTN-312's leftover reopening sentence, B-352 on
+      R-BTN-63, `selector`, `host` and `short_waits` validation in R-BTN-69 with B-353 owning
+      `src/core/course.ts`;
+    - B-120, which no session holds: its contradicted clauses rewritten in place rather than
+      struck, and a migrated queued leg recorded `next_source: baton`, not `selector`.
+
+    Main's #335 entry is kept below this one, and the Decisions line on readings now says both:
+    advice to core's gates, a selector may wait on one, a requirement core evaluates deferred.
+    Nothing was rejected.
+
+    Decided here, not by the owner, for the owner's review in the PR:
+    - **Waiting under a claim by `short_waits` alone**, not by a time window: the course declares
+      which waits are short, and a window would let a selector hold a claim with a run of
+      near-term `until`s.
+    - **Holder verdicts are bound by the gates their claim passed**; the trusted-class
+      requirement under `protected` applies to selection wants' lessees only, since a holder has
+      already passed every gate to hold the claim.
+    - **A migrated queued leg is `next_source: baton`**, the migration being Baton's own rule.
+    - **A finishing `advance` and a starting one are separate requests**, the cost of one round
+      trip per leg for a holder that sees its own arrival's `ctx` before choosing.
+  - **Review round three** (2026-11-27): a fresh reviewer over PR #462 at `221e47d6`, which found
+    the merge still blocked. The owner's rulings the same day, in a Claude Code session on bering:
+    asked "After fixing them, what should happen?", "Fix, then a round four (Recommended)" — a
+    round four beyond the three-round cap, at the owner's request, as #449 had; and asked "A
+    claimant releasing at the claim-time re-check can post any verdict … How should that verdict
+    be treated?", "It makes a want (Recommended)", the option reading "The release verdict
+    replaces nothing; it makes a leased selection want with a fresh ctx, offered under `protected`
+    to the trusted class only. Core also times waits under a claim and ends a claim at 30
+    minutes." Every finding verified against the text. Fixed:
+    - an `end` records no arrival that needs a selection: a holder finishing at an outcome sends
+      the finishing `advance` first, then starts, suspends or releases with the verdict, or ends
+      `done` at an end station (R-BTN-83, R-BTN-71, R-BTN-89, §9.4, §14); the end body's
+      `verdict` is the one way to post a verdict before letting go, and `…/select` is removed;
+    - the want lifecycle: one open want per ticket, withdrawn and remade on a new cause, withdrawn
+      by a claim, a lapsed lease re-offering it with its `ctx` rebuilt; `selection_wants` state,
+      `course_version`, `snapshot_sha` and the lease's `request_id`; when a runner asks for one
+      (R-BTN-72, the heartbeat's `selection_wants`);
+    - what a verdict answers, for all three causes, with `selection_handouts` keeping each
+      cause's current digest, record position and admitted count;
+    - the owner's release ruling, in R-BTN-205, R-BTN-5 / R-BTN-34, §9.4 and B-352/B-353, and
+      core's own 30-minute bound on a wait under a claim (R-BTN-72), which no longer relies on
+      the runner;
+    - one refusal code, `not-eligible` with `rule_code` `not-selected`, in R-BTN-63 and R-BTN-72,
+      and the verdict codes in §14's errors; an arrival clears the queued leg;
+    - `waiting_on`'s labels owned by R-BTN-120 alone, §13 citing it;
+    - the default selector at `start`: a `not_before` still ahead wins, then `start_leg`;
+    - the holder's verdict bound by its claim's gates and core's 30-minute bound, stated in
+      R-BTN-205;
+    - R-BTN-33's exceptions, both stated text (an end's `detail` and a verdict's reasons), with
+      the 128-character limit stated there once;
+    - numbered rows S-BTN-327 to S-BTN-333, pending under B-352 and B-353 in
+      `spec/scenarios-pending.json`, as R-BTN-30 admits for an open ticket that builds them;
+    - this entry's *Readings* bullet, which put the design's reading in the owner's mouth.
+
+    Nothing was rejected.
+
+    Decided here, not by the owner, for the owner's review:
+    - **Causes are deferred to the holder during a claim**, so a holder and a want never race.
+    - **`reselect`**, a request that hands out a fresh `ctx` and admits one more verdict for the
+      same arrival, so a holder waiting under its claim can select again.
+    - **One open want per ticket**, so two verdicts from two runners never race for one ticket.
+    - **Core's bound counts from the last arrival**, not from a first `short_waits` wait core
+      cannot see: a claim that has neither started a leg nor ended 30 minutes after its last
+      arrival is ended `released:short-wait`.
+    - **While a re-check release's want is open, the queued leg is not offered**, so no runner
+      reclaims into the same refusal; the release verdict itself is the owner's ruling above.
+    - **`selection_handouts`**, one table for every `ctx` handed out, rather than columns on each
+      cause's own table.
+  - **Review round four** (2026-11-27, at the owner's request beyond the three-round cap): a fresh
+    reviewer over PR #462 at `aec7fefa`, finding no security hole. Every finding verified against
+    the text. Fixed:
+    - `released:short-wait` in §9.4's one list of end reasons, not a failed attempt;
+    - `reselect` replaces, not banks: each handout admits exactly one verdict, a `reselect` or a
+      re-offered lease voids the cause's handout (§13's `state` `voided` and `voided_by`), and a
+      verdict over a voided one is `stale-selection` (R-BTN-205, R-BTN-63, §14, S-BTN-329);
+    - a fact arrival's next leg has one source, the course file's `arrives.next`: the sync's
+      `std:arrival@1` names none (R-BTN-39, R-BTN-203; B-356 removes the attestation's `next`);
+    - R-BTN-83's `next_source: baton` list without a person leg's expiry, which R-BTN-116 applies
+      as an arrival followed by a want;
+    - the heartbeat's `host` dimensions in §8.1's body table and §14's heartbeat row;
+    - the open re-check release want is a gate: rule 1's `selection-pending`, `ready_tickets`'
+      exclusions, and no claim withdrawing that want;
+    - `not-queued` renamed `not-selected` under R-BTN-63 among the gates rule 1 lists;
+    - §9.4's rule for an `end: done` covers a ticket the latest snapshot shows closed as done;
+    - a suspension at `from` whose leg's `max_runs` is used makes a selection want instead of
+      re-queueing it (R-BTN-71, R-BTN-83);
+    - R-BTN-205's refusal order, `lease-lost` first, matching S-BTN-328;
+    - R-BTN-72's status gains B-352; R-BTN-5 / R-BTN-34's second token names B-352 and B-353
+      for the claim response's `ctx` and `verdict` and the runner's re-check;
+    - the sentence on a suspension's or done end's `detail`, dropped in round one, restored in
+      §9.4;
+    - B-355's copy of the owner's "no lag can commence" made verbatim;
+    - R-BTN-83's *Course changes* folded into R-BTN-64, its one home, which R-BTN-83 cites.
+
+    Nothing was rejected.
+
+    Decided here, not by the owner:
+    - **The 128-character bound** on a verdict's reasons: the owner ruled "Bounded text, an
+      exception" and named no length.
+    - **The 10-second, 256 MB, 60-second and 15-minute defaults**: the owner said "not sure"; B-357
+      measures them.
+    - **A suspension at `from` with `max_runs` used makes a want**, rather than raising a condition
+      of its own, so the course's selector decides as it does elsewhere.
+  - **The vocabulary**, the owner's review, 2026-11-27: "vocab is mostly OK execpt home, which has
+    been renamed to arena". The **Arena** entry names the arena a CLI command acts on the arena in
+    force and keeps `--home` and `BATON_HOME` only as CLI names awaiting B-358's rename.
+- **2026-11-26 — Gating on a reading deferred (R-BTN-76, R-BTN-181).**
+  Rules changed: none; the Decisions line on readings (§91) now says they are served as advice
+  and that gating on one is deferred, where it said gate or advice was the requirement's choice.
+  The 2026-10-30 brief let a course gate a leg on a reading ("eg: account funds"); the 2026-11-19
+  ruling cut the `resource` prerequisite ("cut them"; R-BTN-76's lineage in this file: "readings
+  stay, served as advice"), and did not say whether
+  R-BTN-181's `requires.attestations` instance form, the same requirement written in full, may
+  still bind as a gate (B-146's review round two, `docs/review/B-146-round-2.mdx`, raised it).
+  The owner's ruling, 2026-11-26, in a Claude Code session on bering, answered that question:
+  "Theoretically, it makes sense for readings to be an input to leg
+  decisions, but I also don't think we'll need this for a while still." The instance form stays on
+  the security proposal page, unbuilt, with S-BTN-181's funds, `count: 2` and latest-per-writer
+  cases; B-146 builds work attestations only. It is ruled on when a course first needs it. Still
+  true, and left as it is: R-BTN-181's built check of a policy's `readings` entries, which
+  validates policy and gates no leg: it constrains a `readings` entry for the case a requirement on
+  a reading would create, so nothing reaches past it if that is ruled in later.
+  - **Review** (2026-11-27, PR #335): one fresh reviewer given the diff. Every finding verified
+    against the text. Fixed: this Decisions line; the 2026-11-19 entry's silence, which the
+    first wording called an open question; the quote's source; B-146's *Why*, which called the
+    `resource` prerequisite removed while its code stands (B-291 removes it); a 2026-11-02 status line this ruling contradicts and a 2026-11-03 one the renumbered items
+    made wrong, struck; item 3's reach, now work subjects
+    only; the round-two review page's "returned changes", a comment review.
+  - **Review round two** (2026-11-27, PR #335): one fresh reviewer over the fixes. Fixed: the
+    2026-11-19 entry quoted, not inferred; "answered", not "asked"; why R-BTN-181's `readings`
+    check stays; B-146's stale description and **Spec:** line; `prs:` emptied, since #335 lands
+    the re-scope, not the work.
+- **2026-11-26 — Two human gates, `protected` claims the custody one, `exec` streams, and "mark" leaves the vocabulary (R-BTN-189, R-BTN-185, R-BTN-107).**
+  Rules changed: R-BTN-189, R-BTN-185, R-BTN-188, R-BTN-155, R-BTN-107, R-BTN-145, R-BTN-186,
+  R-BTN-57, §12.1, §12.8; S-BTN-324, S-BTN-278, S-BTN-321, S-BTN-185, S-BTN-190, S-BTN-192, S-BTN-299; one Decisions entry; the linked proposals (people and
+  dashboard, intervention sessions, conditions, data model and API, scenarios: S-BTN-100,
+  S-BTN-197). From the code-against-spec review of 2026-11-24
+  (`docs/review/code-vs-spec-review-2026-11-24.mdx`), whose owner decisions these are.
+  - **Two human gates.** The owner, 2026-11-24, asked whether `human-gates` keeps a variant
+    without hardware keys: "yes"; and, 2026-11-26, whether the `protected` preset claims it:
+    "yes". R-BTN-189 again names two guarantees: `human-gates` (`approvers.members` and
+    `approvers.policy` human-only, any `human_key`), resting on the custody §12.8 lists as not
+    observed, as every guarantee rests on what that list excludes; and `human-gates-hardware`
+    (the same, `human_key: hardware`, and a key that can meet it), which holds nowhere until
+    FIDO attestation verification is built (R-BTN-185, B-136). `protected` holds all but
+    `human-gates-hardware`; `protected-hardware` all six once a key can meet `hardware`.
+    Legacy `human-gates` and `human-gates-hardware` compare by name, and a floor keeps its
+    guarantee's name. This reverses the restructure's part 2 of 2026-11-02 (B-164: "Only
+    protected-signed", `human-gates-hardware` absorbed into `human-gates`), the legacy
+    comparison B-293's spec half wrote on 2026-11-22 ("Legacy `human-gates` (the weaker
+    condition) … no migration successor"), and R-BTN-185's "no guarantee claims it as a human
+    gate". What it loosens: under `human_key: any`, `protected` now claims a human gate that any
+    agent session defeats which can use a human-only key or open a dashboard session (one Access or a
+    `human_only` key's code opened, R-BTN-185): driving a signed-in browser; and, before the narrowing below, an
+    administrator's one-time link minted with an administrator key, or, once owners' sessions are
+    built (B-76), a sign-in code bound with an ordinary owner key. Baton cannot tell, which is why the promise names
+    custody. A floor on `human-gates`, which from 2026-11-02 pinned `human_key: hardware`, now
+    pins only the two lists: an `approvers.policy` approver can lower `hardware` to `any` without
+    `floor-violated`, so a deployment that relied on the hardware meaning floors
+    `human-gates-hardware` instead. Fieldhouse's R-FH-3 does (`FIELDHOUSE_SPEC.md`, its human
+    gates), and follows in its own repository. The code is behind: B-136 (#331,
+    2026-11-24) returns `false` for both guarantees (`src/core/policy.ts`), refusing
+    custody-only gates; computing `human-gates` from the lists again is B-189's item 2, which already reads them,
+    with `human-gates-hardware` held `false` until B-136's attestation is built; S-BTN-190's
+    legacy cases are B-293's.
+  - **Under `any`, a session proves a human only as strongly as its sign-in.** Review round one
+    found the gap above. The owner first sent it, 2026-11-26, to the session writing the
+    human-intent page (its principle in `docs/context/human-intent.mdx`, baton#449), which splits
+    who drives a session (the owner, 2026-11-26, in that session: "Baton Dashboard UI: Human
+    drive (policy may dictate hardware-key proof of this, but the assumption is that this is
+    always a person)") from how strongly that is proven, and read it as the narrowing. Round two
+    found that the narrowing revised the owner's ruling of 2026-11-23 (B-340: every person's
+    session "however it was opened", with a per-act key touch under `hardware`). Asked with the
+    three rulings side by side, the owner chose, 2026-11-26, "Narrow under `any` only": under
+    `human_key: any` a session acts as `human` only when Cloudflare Access opened it (either of
+    R-BTN-155's Access modes) or a code a `human_only` key binds; an ordinary key's one-time link
+    or code proves only that key's role and satisfies no human-only list; a sign-in path not
+    named proves no human, the proposed forge sign-in included (the owner, 2026-11-26, as
+    baton#449 records it: "a forge signin doesn't prove human intent, because autonomous agents can
+    also use forge credentials").
+    Under `hardware` the ruling of 2026-11-23 stands: every session, each act with its touch.
+    R-BTN-188's `human` entry and its session sentence, R-BTN-155, R-BTN-57, §12.1's rows, §12.8's
+    custody bullet, S-BTN-278, S-BTN-321 and S-BTN-324 follow. No session acts as `human` today
+    (`src/core/policy.ts`: a `human` entry matches only `human_only` owners and break-glass
+    lines); B-340 builds it, its item 5 the sign-in's proof, and B-195 writes no `human` writer
+    before it. Rejected: every session however opened, with `human-gates` under `any` resting
+    on custody of every key that can open a session; and `protected` not claiming `human-gates`.
+  - **The protection checker.** The owner, 2026-11-26, chose a grant role over a mark. B-189's
+    amendment of 2026-11-24 had already retired the protection checker, grant roles and the
+    checker mark, so nothing changes here.
+  - **"Mark" is not a noun of Baton's.** The owner, 2026-11-26: "Marks are not present on the
+    dashboard and cli. Is this a bit of vocabulary baton truly needs?", and, offered dropping
+    it: "yes, drop it". The spec and the proposals called six things a mark, G-BTN-172's retired "brief mark" among them: a key's `human_only` (§12.1, R-BTN-57), the registry's `delegated` value (R-BTN-186,
+    the people-and-dashboard and intervention-sessions proposals, S-BTN-100), whether the
+    tenant is frozen (S-BTN-299), an outbox delivery report (the conditions and data-model
+    proposals) and a grant's admitting the capability `intervener` (the intervention-sessions
+    proposal). Each now names the property, value or report; none changes. A mark as a glyph on the
+    dashboard (the tickets' "mode mark" and "state mark") is a different sense and stays: the owner,
+    2026-11-26, "this is fine, let them stay". The verb ("marks the lease lost") stays.
+  - **`exec` streams.** The owner, 2026-11-24, asked whether R-BTN-107's `exec` returns
+    `{status, stdout, stderr}` or the streaming object the code returns: "streaming needs to be
+    supported". `exec(handle, argv, {cwd, timeout_s, stdin, env, onStderr}) → {result, write,
+    kill}`, as `src/runner/executor.ts` and Fieldhouse's E2B executor implement it; no executor
+    implements the old shape, so `executor_api` stays 1.
+  - **Review, round one**: two fresh reviewers given the diff and the impact list. Found: under
+    `human_key: any` a session is a human, and a session can be opened by an administrator's
+    one-time link today and, once B-76 builds it, by a code an ordinary owner key binds, so an
+    agent holding no human-only key could pass `[human]` lists, a loosening the entry did not
+    name (named above; how to close it is put to the owner); `human-gates-hardware` said it rested
+    on no custody; "a key can meet `hardware`" had three readings (now a `human_only` owner key
+    of the repository) and "held" read the policy's values only (now the whole cell, at the
+    moment of computing); the *Decisions in full* entry still stated the reversed choice; floors
+    on `human-gates` changing meaning, Fieldhouse's R-FH-3 among them; no "Not built" for
+    `human-gates` while the code returns `false` (B-189 builds it; S-BTN-185 and S-BTN-190 say
+    so); B-164's title and description, `docs/hardware-policy-upgrade.mdx`, and the vocabulary
+    and product pages' "only a human-only key"; the custody list restated in a cell;
+    `intervener`, a capability a grant admits, called a setting; five more noun uses of "mark";
+    `exec`'s `status` on a kill or timeout, `env` overriding past R-BTN-144's filter, R-BTN-145's
+    "the leg call returning", and the leg-log proposal reading a stdout `exec` does not stream;
+    strikes that re-added the struck word. Each was checked against the text and fixed.
+  - **Review, round two**: one fresh reviewer given the whole diff, round one's fixes and the
+    impact list. Every round-one item was found fixed. Found: R-BTN-185's "Not built" said every
+    session acts as `human` until B-340, where today none does; the narrowing revised the owner's
+    2026-11-23 ruling without quoting a new one (put to the owner, who chose it for `any` only,
+    above); restatements of "a session is a human" in R-BTN-188, R-BTN-155, §12.1, §12.8's
+    custody bullet, S-BTN-278, S-BTN-321, the open questions, the security proposal and the
+    context pages; B-195 writing `human` for every session before B-340 decides which act as
+    one, an interim hole once B-76 builds owner sign-in codes, and B-213, B-338 and B-340's title
+    and description; "over the policy" and `held` reading the policy's values only; this
+    entry's loosening paragraph listing paths the narrowing closes; `exec`'s held stdin lines and
+    the leg-log proposal's `onStdout` against `executor_api`; S-BTN-324 having no test; and
+    G-BTN-172 missing from the mark count. Each was checked against the text and fixed.
+  - **Review, round three** (the last): one fresh reviewer given the whole diff, round two's
+    fixes and the impact list. Every round-two item was found fixed. Found: under `hardware` a
+    `human_only` owner key's session matched `[human]` through its key, so no act it took needed
+    the touch `human-gates-hardware` promises (now every act a `human` or human-only `key:` entry
+    admits carries it); an ordinary key's session under `hardware` left untouched `human`
+    attestations that would count after a lowering to `any` (now recorded with its role only);
+    the touch's credential not bound to the act's repository (now its signing human-only key must
+    own it at the act); "either Access mode", though the keyless mode opens no session (now only
+    the `ACCESS_IDENTITIES` sign-in, the keyless mode acting as no `human`); "where its sign-in
+    proves one" and §12.8's custody bullet false under `hardware`; the Decisions line,
+    `docs/security-model.mdx`, the UX page, the intervention-sessions proposal and B-195's
+    invariant; S-BTN-324 lacking the new cases; and this entry's "a session is a human" and
+    missing §12.8. Each was checked against the text and fixed. Three rounds being the most a spec
+    PR runs, round three's fixes were not reviewed again; the PR says so.
+
+- **2026-11-26 — Terminology: the arena; the session's proposals (no rule changed).**
+  Rules changed: none.
+  The front gains a terminology note: the unit Baton coordinates — one ticket source, its
+  configuration and everything Baton owns about its tickets — is an **arena** in the vocabulary
+  (the owner, 2026-11-26: "repository" made Baton read as if it could serve only git-held
+  tickets, while a ticket source may be a tracker such as Linear; "home" retires with it). The
+  spec keeps writing it a registered repository, and a ticket's arena its home, until a rename of
+  its own, staged with the API's and the CLI's names, the old names accepted meanwhile.
+  Recorded beside it, as proposals and context, not rules:
+  [human intent and autonomy](../docs/context/human-intent.mdx) (the key decides who drives,
+  never the channel; Baton constrains agent-driven work, not people, never the lock or the
+  record), [ticket ownership](proposals/ticket-ownership.md),
+  [personal secrets and notification](proposals/personal-secrets.md), people for accountability and
+  notification ([people and dashboard §5](proposals/people-and-dashboard.md#5-people-identities-and-the-roster)),
+  interventions split by driver ([intervention sessions](proposals/intervention-sessions.md)), and
+  what waits for unattended operation ([hardening](proposals/hardening.md)). Dibber, the git-native
+  ticket format, lives in its own repository, [immediately-run/dibber](https://github.com/immediately-run/dibber).
+  - **Round one** (2026-11-26, PR #449): three fresh reviewers — consistency, security,
+    executability — given the diff and the impact list. Every finding checked against the text.
+    - Found in all three: `human-operator` is a runner's own statement, so making such a runner
+      human-driven let an agent create and claim at once. The owner: a runner is always
+      agent-driven.
+    - The session claim had no fence (the `pre-push` hook is a runner's) and its lease no runner
+      row: an MCP session claim is requeued onto a fresh branch, a late push is outside work, and
+      the CLI's attached-runner mode is the second form.
+    - An unwritten ticket contradicted §9.1, R-BTN-5/34 and R-BTN-33: the owner allows Baton the
+      start text, at most 1,024 characters, until the store has it; the claim answer carries it;
+      under `tickets-approved` no leg runs before its hash is approved.
+    - Whoever controls the notifier key list could read every secret, against the proposal's
+      claim: stated as an accepted risk, its fix parked in the hardening proposal (the owner:
+      premature before Baton runs unattended). Versions never reset; a re-encryption keeps the
+      inner hash; channels are verified per secret version; secrets are set only by SSH keys.
+    - "Interactive keys never satisfy the approver lists" was withdrawn: the owner ruled the key
+      decides, never the channel; a token's proof is what a `human_only` or hardware list refuses.
+      Interactive grants are short-lived OAuth grants, designed now rather than left to hardening.
+    - A forge identity cannot say who drives (the owner): linked forge accounts attribute only;
+      `human_identity` stays as the spec has it, and "several people's forge identities" was
+      dropped.
+    - People carry no authority (the owner: no RBAC in Baton, leave it to the forge): the
+      contributor role became the roster, read from the forge; no groups, no `answerers`, no
+      escalation steps. From the earlier users-and-groups proposal (#300, closed) the notifier's
+      due read, `std:notified@1`, `baton.notifier-silent` and the attach code were kept.
+    - Text: "autonomous" for credentials became **agent-driven** (an autonomous leg is R-BTN-195's);
+      "dashboard sessions" built only for administrators; the terminology note on "home"; the
+      Amends lists extended (R-BTN-53, R-BTN-130, R-BTN-163, R-BTN-5/34, §9).
+  - **Round two** (2026-11-26): two fresh reviewers — consistency with executability, and
+    security. Every finding checked against the text.
+    - Both found the CLI form of a session claim was a runner, hence agent-driven by the page's own
+      rule, and that its `ssh-agent` would hand queued legs the person's key. The owner: it is
+      `baton session claim`, which holds the lease and the `pre-push` fence and runs no queued
+      legs; a runner on a person's machine keeping its legs from the person's keys is hardening.
+    - The interactive grant contradicted BATON_MCP_OAUTH_SPEC (a grant is an MCP key, as long-lived
+      as one, approved only by owners): its §5, §7, §8 and G-BTN-157 are named as amended; an hour's
+      token, a twelve-hour refresh cap, an hour idle; the consent's ticks a ceiling.
+    - The roster could not be computed by a server that holds no forge credential, and a non-owner
+      had no credential at all. The owner: people sign in with the forge, which verifies their
+      account; the roster's source is the arena's choice (`roster.source`: `repo-writers` or
+      `org-members`), read and posted by the sync as `std:roster@1`, fresh within 24 hours,
+      re-checked at every start, claim and renewal; on plain git, the owners' people.
+    - The owner kept "the key decides": governance acts outliving a session, and a person's key in
+      an unwatched agent, are stated as accepted risk, and a key-signed proof level for governance
+      acts goes to hardening.
+    - Fixed in the text: approval is always a recorded `std:approval@1` of a defined hash, and
+      `claim: true` is refused until it exists; an unwritten ticket's provenance carries no `human`; how an MCP
+      session claim moves, which gates bind a person, the branch recorded per claim; agent-driven
+      starts name their claim; ambiguous ids refused and a recovered id confirmed by an owner; one
+      person per forge account, never a runner's; a notifier is a principal of its own, alone
+      attesting deliveries, on a host that runs no legs; recipients limited to the arena's people;
+      verification codes and webhook limits; replay to a fresh notifier and an administrator's
+      first-key code stated as accepted risk.
+  - **Round three** (2026-11-26, the last): one fresh reviewer over everything, after the branch
+    took in main (members, R-BTN-204; owners' and members' sessions, R-BTN-155). Every finding was
+    within the owner's rulings and is fixed in the text:
+    - A forge sign-in's session carries no key's role — the roster's acts and their reads only —
+      so taking over a forge account takes over no owner key; a person is created only for an
+      account on some arena's roster or one an owner names; the forge OAuth is named a new outbound
+      call and secret.
+    - A ticket an agent-driven credential starts runs nowhere before a human approves its text
+      wherever `tickets.created` is `proposed`, whatever the guarantees.
+    - An interactive grant is not a delegated key: it writes as the new writer `person`; a session
+      claim is bound to the person, so a fresh grant continues it; an approval names a written
+      ticket's posted version or an unwritten one's text hash.
+    - The CLI's `baton session claim` renews by `claim.renew`, and the `pre-push` holder query
+      asked with a person's key answers for their own claims; a lapsed claim of either form is
+      requeued the same way.
+    - `std:roster@1` is written by the sync key or CI identity alone, never a runner's.
+    - A runner's legs on a machine holding a person's keys can act as that person today: stated as
+      accepted risk, its fix in hardening.
+    - Smaller: owners' and members' sessions are not roster-gated; the notifier condition, the
+      channels it reads for codes, rate limits on every channel; the intervention tail.
+  - **After round three**, the owner's rulings: a session counts as `human` for a human-only list
+    as R-BTN-185 is to rule once [#451](https://github.com/immediately-run/baton/pull/451) lands
+    (under `human_key: any`, only one Cloudflare Access or a `human_only` key's
+    code opened; under `hardware`, every session, each act with its touch), and a forge sign-in
+    never proves a human: "a forge signin doesn't prove human intent, because autonomous agents can
+    also use forge credentials". Dibber's R-DIB-2 now closes a ticket in place, which ticket
+    ownership follows.
+  - **The owner's answers to the open decisions**, 2026-11-26: an entry with no assignee notifies
+    nobody and is shown on the dashboard only; removing a person deletes their sealed secrets; an
+    MCP session claim's lease is 15 minutes by default; `requires` is store-owned, like course and
+    tier; and `baton ticket request` with Baton unreachable fails loudly, never falling back to
+    git-only legacy mechanics.
+  - **Tracker identities**, the owner, 2026-11-26: a tracker account is verified by the tracker's
+    own OAuth sign-in where it offers one, and otherwise linked by an owner of the arena; a
+    matching email or a mapping the sync reads never verifies one.
+  - **The last two open decisions**, the owner, 2026-11-26: `baton.ticket-missing` holds the
+    ticket, with no legs working from the content they last read; and the courses that commit to
+    the default branch gain reconcile legs before closure flips. The tracker writer (R-BTN-171) is
+    recorded as a dependency of tracker sources, not a decision.
+  - **Round four**, at the owner's request beyond the three-round cap: two fresh reviewers given the
+    diff, one for consistency and executability, one for security. Every finding was verified
+    against the text. Fixed:
+    - R-BTN-185's narrowing is cited as [#451](https://github.com/immediately-run/baton/pull/451)'s
+      amendment, not today's rule, and R-BTN-185 and R-BTN-188's `human` entry join the amends;
+    - tiers, retired on 2026-11-23, are gone from ticket ownership;
+    - an interactive grant never exceeds the session it came from: its authority-changing acts wait
+      for the key's confirmation (R-BTN-155), it takes no key-only act, and it writes as its
+      session's role where an entry names that role;
+    - a human-driven intervention starts through `course.start` with a session claim; the leftover
+      "no session satisfies a human-only list" lines follow R-BTN-185;
+    - who holds a session claim (the roster, or an owner's or member's key), and rule 4 binding a
+      session claim;
+    - approval by a human-driven session's act: its advance carries the approval naming the blob id,
+      bound once a post shows that version;
+    - a reappearing ticket keeps an approval of its version; the unwritten ticket's hash covers its
+      course and fields; `started_by` outlives the first write;
+    - agent-driven starts are limited per claim, as R-BTN-187 limits a sync; human-driven starts are
+      not, nor a person's claims (no ceiling, the owner);
+    - a key is never both a person's and an agent's; every key attached is announced; each roster
+      change is an event naming its poster;
+    - an `unreachable` recipient is due again; webhooks connect only to the address checked;
+    - anchors, `runner_pushers`' and the board's citations, the built list, the notifier's wording.
+    Deferred to hardening: confirming accounts a roster adds, and revoking a first key attached from
+    a forge session. Put to the owner: what a person on an `org-members` roster who cannot push to
+    the config repository may do. The owner, 2026-11-27: everything the roster admits, unnarrowed;
+    choosing `org-members` is the owners' statement that they trust every member that far.
+
 - **2026-11-26 — A protected repository accepts a branch course source (R-BTN-134).**
   Rules changed: R-BTN-134 (*A branch source*). #395 left open whether a protected repository
   (R-BTN-188) should refuse branch sources. The owner's ruling, 2026-11-26: "No, the #395 warning
@@ -5742,7 +6237,9 @@ so in its last sentence; several entries here may stand behind one line there.
   owner's agent sessions hold that account (R-BTN-185). Chose that `human-gates` is claimed only
   where `human_key` is `hardware`, so `protected` does not claim it and `protected-hardware` holds
   it, over a guarantee that holds by definition over the policy while a human-only key sits where
-  an agent can use it (R-BTN-189).
+  an agent can use it (R-BTN-189). Reversed by the owner on 2026-11-24 and 2026-11-26: two human
+  gates, `human-gates` resting on custody and claimed by `protected`, and `human-gates-hardware`
+  on a verified key (this file's changelog, 2026-11-26).
 - **Chose to require of a human-only key only that it is used for nothing else and kept where no
   agent session can use it** (2026-10-29; R-BTN-185). Leaving hardware backing, PIN and touch,
   attestation and the derived code to a deployment's `human_key: hardware` policy, over requiring

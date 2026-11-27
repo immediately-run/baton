@@ -60,7 +60,7 @@ rule wins.
    `std:decision@1` for a person leg whose `asks` label is in its `answers` (R-BTN-116 says
    which legs take an answer), as writer `member`; another label, or any other type, is `forbidden`. The `cooperative` and default
    policies admit `member` for `std:decision@1`; `protected` admits `human` alone (R-BTN-188's
-   table), which a member's session meets and a member key does not (R-BTN-185). The conditions read's `answerable` (`src/core/reads/conditions.ts`, `answerWord`)
+   table), which a member's session that acts as `human` meets and a member key does not (R-BTN-185). The conditions read's `answerable` (`src/core/reads/conditions.ts`, `answerWord`)
    says yes for such a member and names the label otherwise.
 5. **Revocation.** `admin key revoke` of a member key removes it from every repository in the
    same transaction and ends its sessions (R-BTN-57).
@@ -106,3 +106,5 @@ _filed 2026-11-23._
 
 _(Filed with the spec PR that adds R-BTN-204. Number taken by the offline scan: the
 filing session held no Baton key.)_
+
+_(2026-11-26: rules re-read: R-BTN-185, R-BTN-188. Under `human_key: any` a session acts as `human` only when Cloudflare Access or a `human_only` key's code opened it (the owner, 2026-11-26; `spec/BATON_SPEC_HISTORY.md`); the clauses that said every session are rewritten or struck in place.)_
