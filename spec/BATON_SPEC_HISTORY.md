@@ -18,6 +18,32 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
 
 ## Changelog
 
+- **2026-11-26 — Gating on a reading deferred (R-BTN-76, R-BTN-181).**
+  Rules changed: none; the Decisions line on readings (§91) now says they are served as advice
+  and that gating on one is deferred, where it said gate or advice was the requirement's choice.
+  The 2026-10-30 brief let a course gate a leg on a reading ("eg: account funds"); the 2026-11-19
+  ruling cut the `resource` prerequisite ("cut them"; R-BTN-76's lineage in this file: "readings
+  stay, served as advice"), and did not say whether
+  R-BTN-181's `requires.attestations` instance form, the same requirement written in full, may
+  still bind as a gate (B-146's review round two, `docs/review/B-146-round-2.mdx`, raised it).
+  The owner's ruling, 2026-11-26, in a Claude Code session on bering, answered that question:
+  "Theoretically, it makes sense for readings to be an input to leg
+  decisions, but I also don't think we'll need this for a while still." The instance form stays on
+  the security proposal page, unbuilt, with S-BTN-181's funds, `count: 2` and latest-per-writer
+  cases; B-146 builds work attestations only. It is ruled on when a course first needs it. Still
+  true, and left as it is: R-BTN-181's built check of a policy's `readings` entries, which
+  validates policy and gates no leg: it constrains a `readings` entry for the case a requirement on
+  a reading would create, so nothing reaches past it if that is ruled in later.
+  - **Review** (2026-11-27, PR #335): one fresh reviewer given the diff. Every finding verified
+    against the text. Fixed: this Decisions line; the 2026-11-19 entry's silence, which the
+    first wording called an open question; the quote's source; B-146's *Why*, which called the
+    `resource` prerequisite removed while its code stands (B-291 removes it); a 2026-11-02 status line this ruling contradicts and a 2026-11-03 one the renumbered items
+    made wrong, struck; item 3's reach, now work subjects
+    only; the round-two review page's "returned changes", a comment review.
+  - **Review round two** (2026-11-27, PR #335): one fresh reviewer over the fixes. Fixed: the
+    2026-11-19 entry quoted, not inferred; "answered", not "asked"; why R-BTN-181's `readings`
+    check stays; B-146's stale description and **Spec:** line; `prs:` emptied, since #335 lands
+    the re-scope, not the work.
 - **2026-11-26 — Two human gates, `protected` claims the custody one, `exec` streams, and "mark" leaves the vocabulary (R-BTN-189, R-BTN-185, R-BTN-107).**
   Rules changed: R-BTN-189, R-BTN-185, R-BTN-188, R-BTN-155, R-BTN-107, R-BTN-145, R-BTN-186,
   R-BTN-57, §12.1, §12.8; S-BTN-324, S-BTN-278, S-BTN-321, S-BTN-185, S-BTN-190, S-BTN-192, S-BTN-299; one Decisions entry; the linked proposals (people and
