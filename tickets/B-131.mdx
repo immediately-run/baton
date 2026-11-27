@@ -61,7 +61,10 @@ R-FH-11 (what a VM holds) and Axiom 6; `docs/security-model.mdx` (OWASP mapping,
 
 ### Tests
 
-- S-BTN-310: a runner with a claim on a `fieldhouse` ticket gets a
+- S-BTN-210: a deferred handoff after advance runs in the prior executor session when
+  the successor waits, without receiving the successor's forge scope.
+- Proposed broker scenario (unregistered; S-BTN-310 is already assigned to session links):
+  a runner with a claim on a `fieldhouse` ticket gets a
   token that can push `fieldhouse` and is refused on `baton`; after the claim ends the token is
   revoked; a runner with no claim gets nothing; the token cannot change a workflow file.
 

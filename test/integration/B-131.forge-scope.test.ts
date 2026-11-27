@@ -110,6 +110,5 @@ async function checkScope(armed: boolean) {
   }
 }
 
-// B-131's historical ID is retained pending registration of a separate broker scenario.
-it('S-BTN-310: only the holder can prove a run; only the broker can read its live, owner-listed scope', () => checkScope(false));
+it('B-131: only the holder can prove a run; only the broker can read its live, owner-listed scope', () => checkScope(false));
 it('B-131: the timeout tick does not restore broker scope or runner proof', () => checkScope(true));
