@@ -53,7 +53,7 @@ export class Observations {
    *  outstanding one, under 10 minutes old, and above the last accepted reading's — else the
    *  post is refused `stale-observation`. Committed before the post is judged, so a number is
    *  used once even when the post is then refused (head-moved, held, invalid). */
-  // @model syncPost sha256:7c0efc930fe7
+  // @model syncPost sha256:de22f143bc15
   // @model syncVoid sha256:1d9a44f9c30e
   use(repo: string, n: number, issuer: string | null = null): { expectsEvidence: boolean } {
     const verdict = this.c.store.transaction(() => {

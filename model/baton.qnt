@@ -1079,12 +1079,13 @@ module baton {
       // suspension by its evidence, never by where git puts the ticket — its position is Baton's
       // (R-BTN-39): one that named none by the snapshot's acceptance alone, one that named a
       // commit by the sync's `std:git.evidence@1` found (R-BTN-10): the commit its holder pushed,
-      // found while the push landed; one that never landed stays for the owner. A withdrawn
-      // ticket is not listed, so it confirms no named suspension
+      // found while the push landed. Closure or absence releases, rather than confirming, a
+      // suspension and its hold.
       val ok = if (c.kind == "done") atEnd(snap) or gone
                else if (not(c.named)) true
                else c.found and not(gone)
-      if (ok) c.with("confirmed", true).with("confirmObs", obs) else c
+      if (c.kind == "suspended" and gone) c.with("status", "released").with("kind", "release")
+      else if (ok) c.with("confirmed", true).with("confirmObs", obs) else c
     } else if (c.status == "completed" and not(c.confirmed) and c.kind == "done"
                and obs > c.claimObs and atEnd(snap)) {
       c.with("confirmed", true).with("confirmObs", obs)

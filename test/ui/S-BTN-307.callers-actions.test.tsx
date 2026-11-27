@@ -9,8 +9,8 @@
 //      administrator's), and neither is drawn an entry the other alone holds;
 //   3. a session listed no entry is drawn no control, on any screen — the reads' `allowed`
 //      words alone draw nothing;
-//   4. the screens no entry names — Conditions, the Resolve page, Attestations, the Tickets
-//      table, `/instances` — draw no control for any caller.
+//   4. the screens no entry names — Conditions, the Resolve page, Attestations, `/instances`
+//      — draw no control for any caller.
 // The registry is the real one (src/core/actions.ts): an entry added to a screen is covered
 // here without an edit.
 import { afterEach, describe, expect, it } from 'vitest';
@@ -32,8 +32,8 @@ const VIEW: Record<PageId, string> = {
   'repository/sync': 'repository/sync',
   'tenant/instances': 'tenant/instances',
 };
-const WITH_CONTROLS: PageId[] = ['repository/tickets/{ticket}', 'repository/runners', 'repository/runners/{runner}', 'repository/sync'];
-const WITHOUT: PageId[] = ['repository/tickets', 'repository/conditions', 'repository/conditions/{condition}', 'repository/attestations', 'tenant/instances'];
+const WITH_CONTROLS: PageId[] = ['repository/tickets', 'repository/tickets/{ticket}', 'repository/runners', 'repository/runners/{runner}', 'repository/sync'];
+const WITHOUT: PageId[] = ['repository/conditions', 'repository/conditions/{condition}', 'repository/attestations', 'tenant/instances'];
 
 const CALLERS: [string, 'administrator' | 'owner', ListedAction[]][] = [
   ['an administrator’s session', 'administrator', actionsFor('administrator')],
@@ -76,7 +76,11 @@ describe('S-BTN-307 a screen draws only its caller’s actions (B-191, B-216)', 
     const held = new Map(actions.map((a) => [a.id, a]));
     for (const page of WITH_CONTROLS) {
       const ids = await drawn(page, role, actions);
-      expect([page, ids.length > 0]).toEqual([page, role === 'administrator' || ids.length > 0]);
+      if (page === 'repository/tickets') {
+        expect(ids).toEqual(role === 'administrator' ? ['claim.confirm', 'claim.release'] : []);
+      } else {
+        expect([page, ids.length > 0]).toEqual([page, role === 'administrator' || ids.length > 0]);
+      }
       for (const id of ids) {
         expect([page, id, held.has(id)]).toEqual([page, id, true]);
         expect([page, id, held.get(id)!.ui?.view.includes(VIEW[page])]).toEqual([page, id, true]);

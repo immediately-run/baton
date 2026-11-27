@@ -599,7 +599,7 @@ export class BatonCore {
 
   private rowsFor = rowsFor;
 
-  // @model syncPost sha256:7c0efc930fe7
+  // @model syncPost sha256:de22f143bc15
   async board(repo: Repository, p: BoardPayload, issuer: string | null = null) {
     return board(this, repo, p, this.rowsFor, issuer);
   }

@@ -4,8 +4,8 @@
 // requires as chips with one no live runner declares marked. The tabs carry the read's `counts`;
 // the tab and the text filter are `?state=` and `?q=` in the URL,
 // so a view is a link. "Showing n of total" and a load-more follow the read's cursor. No sort
-// control: the order is Baton's (R-BTN-61). No control and nothing computed here: the state,
-// its reasons and the counts are the read's. At phone width each row is a card, state first.
+// control: the order is Baton's (R-BTN-61). Unconfirmed ends without a ticket page can be
+// resolved inline. At phone width each row is a card, state first.
 import { useEffect, useRef, useState } from 'react';
 import { ReadGate } from '../../app/Refusal';
 import { navigate, useSearch } from '../../app/router';
@@ -14,6 +14,7 @@ import { Text } from '../../lib/Text';
 import { Band, Empty, FilterInput, PageHeader, Tabs, useClock, type Tab } from '../../lib/ui';
 import type { ScreenProps } from '../contract';
 import { Chips, RunnerLink, StateMark, TicketLink, reasonOf, reasonTone, useTicketPages } from './parts';
+import { CompletionControls } from './TicketControls';
 import type { TicketRow, TicketsAnswer } from './types';
 import './tickets.css';
 
@@ -80,14 +81,16 @@ function Position({ row, repository }: { row: TicketRow; repository: string }) {
 
 function Row({ row, repository }: { row: TicketRow; repository: string }) {
   const reason = reasonOf(row, repository);
+  const missing = row.state === 'unconfirmed' && row.title == null && row.position == null && row.course == null;
+  const claim = missing ? n(row.detail?.claim_id) : null;
   return (
     <>
-      <tr className={reason ? 'tk-row tk-has-band' : 'tk-row'}>
+      <tr className={reason || missing ? 'tk-row tk-has-band' : 'tk-row'}>
         <th scope="row" className="tk-id">
-          <TicketLink id={row.ticket_id} repository={repository}>
+          {missing ? <Text mono value={row.ticket_id} /> : <TicketLink id={row.ticket_id} repository={repository}>
             <Text mono value={row.ticket_id} />
             {row.title != null ? <span className="tk-title"> <Text value={row.title} /></span> : null}
-          </TicketLink>
+          </TicketLink>}
           {row.expedite ? <span className="chip tk-flag">expedite</span> : null}
         </th>
         <td className="tk-state" data-label="State">
@@ -97,9 +100,12 @@ function Row({ row, repository }: { row: TicketRow; repository: string }) {
         <td data-label="Position"><Position row={row} repository={repository} /></td>
         <td data-label="Requires"><Chips names={row.requires ?? []} unmet={row.requires_unmet} empty="none" /></td>
       </tr>
-      {reason ? (
+      {reason || missing ? (
         <tr className={`tk-band tk-band-${reasonTone(row)}`}>
-          <td colSpan={5}>{reason}</td>
+          <td colSpan={4}>
+            {missing ? <div>Ticket is no longer on the board. An administrator can resolve its unconfirmed completion.</div> : reason}
+            {claim !== null ? <CompletionControls claim={claim} repository={repository} ticket={row.ticket_id} view="repository/tickets" /> : null}
+          </td>
         </tr>
       ) : null}
     </>

@@ -247,8 +247,15 @@ finishing its running leg at an end station only), `detail`, `ended_at_sha` (R-B
 - **R-BTN-10 (confirmation by observation).** `status: partly B-352` A completed end is **unconfirmed** until a
   snapshot observed after it is accepted (R-BTN-62), so the next selection is made over facts
   read after the end. The end's position stands from the moment Baton records it
-  (R-BTN-39); confirmation checks its evidence, not where it put the ticket. It is confirmed by
-  the first accepted snapshot whose observation began after the end and that:
+  (R-BTN-39); confirmation checks its evidence, not where it put the ticket. The first accepted
+  ticket-source snapshot observed after a suspension that shows its ticket closed (any `closed_as`)
+  or dropped releases the still-unconfirmed suspension, regardless of evidence. Baton records
+  `released:ticket-closed` and logs `released` by `sync` with the observation and original end's
+  reason and evidence. This does not count as a failed attempt. A held rewrite or a confirm-only
+  re-post does not decide ticket membership.
+
+  Otherwise the end is confirmed by the first accepted snapshot whose observation began after
+  the end and that:
   - for an end that named `ended_at_sha` (R-BTN-8), a commit or a URL, carries the sync's
     `std:git.evidence@1` for that claim and that evidence with `found: true` — the
     observation's `unconfirmed` list (§4.3) tells the sync which ends wait and what each named.
@@ -268,8 +275,8 @@ finishing its running leg at an end station only), `detail`, `ended_at_sha` (R-B
 - **Claimable again** (unnumbered). A ticket is claimable only after a snapshot observed after
   its last claim ended (`end_observation`), and never while a completion is unconfirmed. A
   completion unconfirmed 6 hours after `ended_at` (its named evidence attested `found: false`
-  or never attested) raises `baton.unconfirmed` and is never confirmed automatically; an
-  administrator confirms or releases it from the dashboard (R-BTN-155).
+  or never attested) raises `baton.unconfirmed`. An administrator may confirm or release it from
+  the dashboard (R-BTN-155); a row without a ticket page offers those controls in the list itself.
 
 ### 9.7 Attempts
 

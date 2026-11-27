@@ -18,6 +18,17 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
 
 ## Changelog
 
+- **2026-11-27 — A closed or dropped ticket releases its unconfirmed suspension (R-BTN-10; B-337).**
+  Rules changed: R-BTN-10; §4.3's observation; G-BTN-44; S-BTN-18, S-BTN-262; S-BTN-326 added.
+  The first accepted ticket-source snapshot observed after a suspension that shows its ticket
+  closed (any `closed_as`) or dropped releases the still-unconfirmed suspension as
+  `released:ticket-closed`, without counting a failed attempt; closure is never taken as proof of
+  the suspended work, so it releases rather than confirms. A held rewrite or a confirm-only
+  re-post does not decide ticket membership.
+  - **The owner's ruling**, 2026-11-27, in a Claude Code session asked whether closure should
+    release or confirm such a suspension, chose "Release on closure", the option described as
+    "closure never counts as proof of the work", and asked for the PR (#456) to be merged.
+
 - **2026-11-27 — The selector chooses the next leg (R-BTN-205; B-351).**
   Rules changed: R-BTN-205 (added, `specified B-352 B-353 B-354 B-355 B-356`), R-BTN-70,
   R-BTN-83, R-BTN-63, R-BTN-71, R-BTN-79, R-BTN-69, R-BTN-134, R-BTN-131, R-BTN-110, R-BTN-174,
