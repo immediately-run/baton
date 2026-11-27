@@ -232,6 +232,9 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
       measures them.
     - **A suspension at `from` with `max_runs` used makes a want**, rather than raising a condition
       of its own, so the course's selector decides as it does elsewhere.
+  - **The vocabulary**, the owner's review, 2026-11-27: "vocab is mostly OK execpt home, which has
+    been renamed to arena". The **Arena** entry names the arena a CLI command acts on the arena in
+    force and keeps `--home` and `BATON_HOME` only as CLI names awaiting B-358's rename.
 - **2026-11-26 — Gating on a reading deferred (R-BTN-76, R-BTN-181).**
   Rules changed: none; the Decisions line on readings (§91) now says they are served as advice
   and that gating on one is deferred, where it said gate or advice was the requirement's choice.
