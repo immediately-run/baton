@@ -15,11 +15,12 @@ about those tickets — where each stands in its course, its history, claims and
 the arena's owners, its policy and its grants (and, proposed, its roster and its notifier
 keys). Its sync tells Baton which tickets its source holds and what git shows of them; where each
 stands is Baton's own record (R-BTN-39). One Baton serves many arenas. What an arena
-covers is its owners' choice (the owner, 2026-11-26). **The spec, the API, the CLI and the
-dashboard still write an arena as a `repository`** — `/v1/repositories/{repository}`, `--repo`,
-the screens `repository/…`, `repository_owners` — **and the arena a CLI command acts on as its
-home** (`--home`, `BATON_HOME`, "the home in force"); those names change in stages, the old ones
-accepted meanwhile.
+covers is its owners' choice (the owner, 2026-11-26). The arena a CLI command acts on is
+**the arena in force**. **The spec, the API, the CLI and the dashboard still write an arena as a
+`repository`** — `/v1/repositories/{repository}`, `--repo`, the screens `repository/…`,
+`repository_owners` — and the CLI still names the arena in force with `--home` and `BATON_HOME`;
+those names change in stages (ticket B-358), the old ones accepted meanwhile.
+"Home" is not a word of Baton's vocabulary.
 
 **Repository, config repository, code repository.** A repository is a git repository, and nothing
 else. An arena's configuration lives in its config repository; a Dibber ticket store usually lives
