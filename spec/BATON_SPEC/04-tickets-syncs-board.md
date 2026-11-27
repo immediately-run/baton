@@ -12,7 +12,7 @@ numbers.
 
 ### 4.1 The `.baton/` folder and the registry
 
-- **R-BTN-51 (the `.baton/` folder).** `status: built` A registered repository describes itself in one folder
+- **R-BTN-51 (the `.baton/` folder).** `status: partly B-353` A registered repository describes itself in one folder
   at its root:
 
   ```
@@ -28,6 +28,7 @@ numbers.
       course.json       # the course file (R-BTN-69)
       sync.mjs          # the station function (R-BTN-74); an own course's; a standard course has a default (R-BTN-134)
       rank.mjs          # optional ranking code (R-BTN-98)
+      select.mjs        # optional selector; absent, the default selector (R-BTN-205)
       legs/<leg>.<ext>      # one per leg; ext mjs, js, cjs, mts, ts or cts (R-BTN-133)
       legs/<leg>.run.<ext>  # optional run override (R-BTN-131)
       legs/<leg>.md         # leg instructions (R-BTN-131)
@@ -57,7 +58,7 @@ numbers.
 
 ### 4.2 What a sync runs
 
-- **R-BTN-74 (the ticket source and the station function, with defaults).** `status: built B-112` `baton repo sync`
+- **R-BTN-74 (the ticket source and the station function, with defaults).** `status: partly B-112 B-356` `baton repo sync`
   builds the board post from two pieces of repository code. `course.json` is always the
   commit's own (or its source's): the sync posts and `baton runner start` loads the same file.
   - **The ticket source**, `.baton/tickets.mjs`, reads one ticket store — a git folder, an
@@ -90,13 +91,15 @@ numbers.
       version; a source whose store can tell a stale read refuses to post a ticket whose version
       it judges older, failing the run.
   - **Each course's station function**, `sync.mjs` in its course directory (own or the
-    source's, R-BTN-134), default-exports `stations(ctx)` → `stations` (per ticket: readiness,
-    fact arrivals, implied station, outputs, bars, the queued person leg's question,
-    `not_before`) and that course's opaque `course_data`, from git, the fact adapter's PR facts
+    source's, R-BTN-134), default-exports `stations(ctx)` → `stations` (per ticket: fact
+    arrivals, implied station, outputs, bars, the queued person leg's question) and that
+    course's opaque `course_data`, from git, the fact adapter's PR facts
     (R-BTN-96) and `ctx.positions` (§4.3). It never returns a position (R-BTN-39). The CLI adds
     R-BTN-203's arrivals and evidence for every ticket itself, whatever the station function. The sync
-    posts bars, the question and `not_before` with the ticket, the rest as its attestations
-    (R-BTN-191), and `course_data` keyed by course id.
+    posts bars and the question with the ticket, the rest as its attestations (R-BTN-191), the
+    `needs` R-BTN-76 reads, and `course_data` keyed by course id. It posts no readiness and no
+    time to wait: which leg runs next, and when, is the course's selector's (R-BTN-205), over
+    what the sync attested.
   - **CLI default ticket sources** (`src/defaults/`), used when the repository has no
     `tickets.mjs`: **markdown** (below) and **`changes`**, one check ticket per open change
     (R-BTN-114). `baton repo init --eject tickets` copies the markdown source into `.baton/`.
@@ -232,7 +235,8 @@ numbers.
     a runner's act cannot be told from a person's (Baton serves the logins with `positions`,
     §4.3). The sync posts one
     `std:arrival@1` as writer `sync` per fact that a fact leg leaving Baton's station takes, with
-    that `ref` and the leg's `next` for it. A `pr-merged` no fact leg leaving the station takes is
+    that `ref`; it names no next leg, which is the course file's `arrives.next` as the default
+    selector reads it (R-BTN-205). A `pr-merged` no fact leg leaving the station takes is
     `merged-early` evidence (below); any other fact no fact leg takes is posted as nothing.
   - **Other evidence is weighed by the course's reconcile leg.** The sync also posts an
     `std:evidence@1` (`{ref, kind}`) per piece of evidence that a ticket may have moved outside
@@ -403,20 +407,19 @@ The fingerprint stores no ticket content and is an optimization, never authority
                course: <opaque> }],
   closed:   [{ id, as: 'done' | 'withdrawn' }],                  -- tickets that left the board
   stations?: { <local ticket id>: {                             -- R-BTN-70
-    station, path: [{ leg, reached }], next_leg: <leg> | null,
-    next_source: 'course' | 'marker' | 'inferred' | 'holder', handoff_url: <url> | null,
-    next: [{ leg, state: 'ready' | 'waiting', waiting_on: <label> | null, needs?: [<resource>] }],
+    station, path: [{ leg, reached }], handoff_url: <url> | null,
+    needs?: { <leg>: [<resource>] },                             -- R-BTN-76
     bars: { <leg>: [<tag>] }, decisions?: [{ id, asks, leg?, url?, question?, options? }] } },
   attestations: [{ type, ticket, ref?, value }],                 -- the sync's attestations, this run's observation (R-BTN-191)
   course_data: { <course>: <opaque> } }
 ```
 
 - Core reads every generic field and stores each `<opaque>` verbatim. `stations` supplies
-  placements and readiness (R-BTN-70); a new-head post does not offer a ticket it does not place.
+  placements (R-BTN-70) and no queued leg or readiness: the selector chooses (R-BTN-205); a
+  new-head post does not offer a ticket it does not place.
   For the interim post see §16.4. Every station and leg
   named must be in the course file. Each attestation is validated by its type's schema and
-  accepted with the post (R-BTN-191): readiness whose `at` is not Baton's station is discarded,
-  and an arrival Baton does not apply is recorded unapplied (R-BTN-39). Confirmations are not
+  accepted with the post (R-BTN-191), and an arrival Baton does not apply is recorded unapplied (R-BTN-39). Confirmations are not
   posted; Baton derives them from the run's attestations (R-BTN-10).
 - **The source declaration.** `source` names the ticket source — `markdown`, the CLI's
   default, or `custom`, the repository's own — and its `versions`, when it declares one
@@ -481,7 +484,7 @@ The fingerprint stores no ticket content and is an optimization, never authority
 
 ### 4.5 Reading the ticket
 
-- **R-BTN-5 / R-BTN-34 (the runner reads and re-verifies the ticket from git, by its version).** `status: built B-46` `status: built`
+- **R-BTN-5 / R-BTN-34 (the runner reads and re-verifies the ticket from git, by its version).** `status: built B-46` `status: partly B-352 B-353`
   - The claim response names the ticket's `path`, the `snapshot_sha` it was decided on, its
     `version` as the board holds it, and how its source reads (`ticket_source`: `{kind,
     versions}`; absent when the board declared no source, and `version` is `''` when the board
@@ -500,13 +503,16 @@ The fingerprint stores no ticket content and is an optimization, never authority
     **current** source reads it as the store holds it now (`read(id, {})`), and a different
     version releases `stale-board`. A source that declares `versions` and exports no `read`
     releases `stale-board` too. A source that declares neither is not re-verified by version.
-  - **Re-verification of readiness.** The runner then runs the course's `sync.mjs` (through the
-    wrapper, from a verified tree at the claim's commit, R-BTN-133) on the ticket and its PRs
-    at the fetched head. Its readiness must show the offered leg leaving the claim's station as Baton holds it (the claim response's
-    station, `path_len` and queued leg, R-BTN-39); the ticket's position never comes from the
-    source. A ticket closed or archived, or the leg not offered there, releases
-    `stale-board`. A ticket with no file — a `changes` check ticket (R-BTN-114) — is
-    re-verified against the claim response's station and queued leg instead.
+  - **Re-verification of the selection.** The runner then runs the course's selector (through
+    the wrapper, in the verified tree at the claim's commit, R-BTN-133, R-BTN-143) over the
+    `ctx` the claim response carries for the offered position, built from Baton's record now
+    (R-BTN-205). Its verdict must be `run` of the offered leg, leaving the claim's station as
+    Baton holds it (the claim response's station, `path_len` and queued leg, R-BTN-39); the
+    ticket's position never comes from the source. A ticket closed or archived, or any other
+    verdict, releases `stale-board`, the verdict posted with the release (§9.4). Core acts on no
+    verdict posted that way: it records it and makes a selection want for the ticket
+    (R-BTN-205). A queued leg an owner or Baton's own transition
+    chose is checked against the station and course file alone.
   - After this check, a version that moves under the claim is read again as R-BTN-198 says.
   - **A ticket Baton has not seen cannot be claimed.** A claim naming it is `not-eligible`
     (`unknown-ticket`, §9.1), until the first accepted post that names it.
@@ -580,8 +586,9 @@ The fingerprint stores no ticket content and is an optimization, never authority
 
 ### 4.8 Owner state
 
-- **R-BTN-88 (owner state and course history are exportable; the ticket source and git hold the work).** `status: built` Baton
-  rebuilds tickets and readiness from the ticket source and git. **Owner state** and **course
+- **R-BTN-88 (owner state and course history are exportable; the ticket source and git hold the work).** `status: partly B-352` Baton
+  rebuilds tickets and the sync's facts from the ticket source and git, and asks each live
+  ticket's selector again (R-BTN-205). **Owner state** and **course
   history** live only in Baton's store (R-BTN-66, R-BTN-39); the tenant's administrator exports
   them and imports them into another Baton.
   - **Format** `baton.owner-state/v1`: `{format, schema_version (highest applied migration),

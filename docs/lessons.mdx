@@ -539,3 +539,18 @@ branch history (markers with nothing between them) or the agents' own "nothing t
 it. What changed: #447, with a test for a ticket naming its home. A supervisor seeing
 `run-tests … next fix (run N of 30)` climb should read the branch's commits before the agents'
 code.
+
+## 2026-11-26 — a wrapper that works beside its sibling fails where it is shipped alone
+
+Evidence: [interventions, 2026-11-26 14:20–15:18](interventions.mdx);
+`runner-run-20261126-154536-r1.log` on bering ("describe wrote no outcome", 14 times);
+fieldhouse `sandbox/e2b/executor/executor.mjs` (`sbx.files.write(brief.wrapper, …)`).
+
+**Test a component where it runs, not where it is built: the leg wrapper is shipped into the
+sandbox as one file, so a sibling import it gained (B-55's `./legClient.mjs`) breaks every call
+there while every test — run from the source tree, sibling beside it — stays green.** The
+failure surfaced only as a ticket-source check "writing no outcome", read by the runner as a
+moved ticket. What changed: bering's CLI rolled back to `d78f5339`; the fix makes the wrapper
+self-contained and adds a test that runs it from an otherwise empty directory. Before moving a
+runner's CLI, run one source check by hand against it (`echo '[]' | node <wrapper> describe
+<home>/.baton/tickets.mjs` from a directory holding only the wrapper).
