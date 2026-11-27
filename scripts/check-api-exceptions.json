@@ -3,6 +3,9 @@
     "specifiedOnly": {
       "POST /v1/forges/{}/notify": "B-277",
       "POST /v1/owner/{}/members": "B-338",
+      "POST /v1/runner/claims/{}/reselect": "B-352",
+      "POST /v1/runner/selections": "B-352",
+      "POST /v1/runner/selections/{}": "B-352",
       "POST /v1/ui/human-challenge": "B-340"
     },
     "builtOnly": {
@@ -25,6 +28,9 @@
       "human_challenges": "B-340",
       "leg_attempts": "B-277",
       "repository_members": "B-338",
+      "selection_handouts": "B-352",
+      "selection_verdicts": "B-352",
+      "selection_wants": "B-352",
       "ticket_depends": "B-277",
       "webauthn_credentials": "B-340"
     },

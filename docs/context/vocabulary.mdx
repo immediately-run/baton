@@ -15,11 +15,12 @@ about those tickets — where each stands in its course, its history, claims and
 the arena's owners, its policy and its grants (and, proposed, its roster and its notifier
 keys). Its sync tells Baton which tickets its source holds and what git shows of them; where each
 stands is Baton's own record (R-BTN-39). One Baton serves many arenas. What an arena
-covers is its owners' choice (the owner, 2026-11-26). **The spec, the API, the CLI and the
-dashboard still write an arena as a `repository`** — `/v1/repositories/{repository}`, `--repo`,
-the screens `repository/…`, `repository_owners` — **and the arena a CLI command acts on as its
-home** (`--home`, `BATON_HOME`, "the home in force"); those names change in stages, the old ones
-accepted meanwhile.
+covers is its owners' choice (the owner, 2026-11-26). The arena a CLI command acts on is
+**the arena in force**. **The spec, the API, the CLI and the dashboard still write an arena as a
+`repository`** — `/v1/repositories/{repository}`, `--repo`, the screens `repository/…`,
+`repository_owners` — and the CLI still names the arena in force with `--home` and `BATON_HOME`;
+those names change in stages ([B-358](../../tickets/B-358.mdx)), the old ones accepted meanwhile.
+"Home" is not a word of Baton's vocabulary.
 
 **Repository, config repository, code repository.** A repository is a git repository, and nothing
 else. An arena's configuration lives in its config repository; a Dibber ticket store usually lives
@@ -46,8 +47,14 @@ between them. Defined in `course.json`; changed by a commit.
 **Station.** A place a ticket rests between legs (`filed`, `reviewed`, `merged`). An **end
 station** finishes the ticket.
 
-**Leg.** One edge of the course (`implement`, `review`, `merge`). A leg is **ready** or
-**waiting** on something named.
+**Leg.** One edge of the course (`implement`, `review`, `merge`). The ticket's **queued leg** is
+the one it runs next.
+
+**Selector, verdict, selection want.** A course's **selector** (`select.mjs`, or the runner's
+default one) is the pure function that chooses a ticket's next leg from Baton's record; a runner
+runs it. Its **verdict** is `run` a leg, `wait` until a time or a change, or `attention`, with the
+checks that decided it. A **selection want** is Baton asking any runner to run the selector for a
+ticket when no holder did.
 
 **Fact leg.** A leg no runner runs, for a hand act done outside Baton (`merged-by-hand`): it
 arrives when the sync attests its forge fact, along the edge the course file gives it (R-BTN-203).

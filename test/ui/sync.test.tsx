@@ -73,6 +73,12 @@ describe('the Sync screen (B-220)', () => {
     await waitFor(() => expect(calls.filter((c) => c.method === 'GET' && c.path === PATH).length).toBeGreaterThan(1));
   });
 
+  it('shows the reported sync version beside the recommendation and explains the evidence warning', async () => {
+    draw(view({ sync_client: { version: '0.1.4', recommended: '0.1.5', behind: true, missing_evidence: true } }));
+    expect((await screen.findByText('Behind recommendation')).closest('p')?.textContent).toContain('Sync CLI: 0.1.4 · Baton recommends 0.1.5');
+    expect(screen.getByText(/did not declare evidence support/).textContent).toContain('docs’s sync CLI (0.1.4) did not declare evidence support');
+  });
+
   it('a refused resync is drawn as its code and message, as text', async () => {
     draw(view(), { 'POST /v1/ui/resync': () => refuse('conflict', `a resync was asked ${HOSTILE}`) });
     fireEvent.click(await screen.findByRole('button', { name: 'Resync' }));

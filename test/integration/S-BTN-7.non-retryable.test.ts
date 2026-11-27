@@ -12,7 +12,7 @@ beforeEach(async () => {
 });
 
 describe('S-BTN-7 non-retryable failure', () => {
-  it.each(['spec', 'capability'])('cannot-finish:%s holds the item at once, with no backoff', async (cls) => {
+  it.each(['spec', 'capability', 'contract-output', 'blocked'])('cannot-finish:%s holds the item at once, with no backoff', async (cls) => {
     const a = await register('vm-a');
     const b = await register('vm-b');
     const c = (await claimItem('vm-a', a.secret, { ticket_id: 'docs:R3-9001' })).json;

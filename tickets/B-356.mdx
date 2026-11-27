@@ -1,0 +1,56 @@
+---
+id: B-356
+status: available
+topics: [courses, scheduling]
+owns: {}
+prs: []
+title: B-356 — The standard courses' selectors, and removing readiness, the holder's next and baton.missing-next
+depends_on: [B-352, B-353, B-120]
+parent: B-351
+tags: [roadmap-item]
+project: baton
+repos: [baton]
+description: "The branching standard courses ship selectors over their legs' inline outputs; readiness, the holder's next, posted next legs and baton.missing-next are removed."
+---
+
+**Brief:** the owner, 2026-11-27 (in a Claude Code session on bering): "Since these proposals are necessary to get baton into a generally useable state, I would like you to include the changes in the specs and draft the necessary tickets for implementing them." The selector is specified as [R-BTN-205](../spec/BATON_SPEC/05-courses.md#sec-5-3); the owner's constraints and rulings are quoted in `spec/BATON_SPEC_HISTORY.md` (2026-11-27). Part of [B-351](B-351.mdx).
+
+**Spec:** [R-BTN-131](../spec/BATON_SPEC/05-courses.md#sec-5-8) (*Their selectors*), [R-BTN-74](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-2) (a station function returns no readiness and no `not_before`), [R-BTN-70](../spec/BATON_SPEC/05-courses.md#sec-5-3), [R-BTN-83](../spec/BATON_SPEC/05-courses.md#sec-5-3), [R-BTN-110](../spec/BATON_SPEC/05-courses.md#sec-5-5) (`std:git.readiness@1` retired), [§4.4](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-4) (the board post's `stations`), [R-BTN-76](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-3).
+
+**Depends on:** B-352, B-353, B-120; B-291 removes the `resource` advice prerequisite and block.
+
+### Why
+
+The owner, 2026-11-26: "the station function should not assume that Git is the communication channel between legs. This may often be the case, but this is definitely not guaranteed." The standard courses decide their branches from their legs' inline outputs, and the mechanisms the selector replaces go.
+
+### What to build
+
+1. **Selectors for the branching standard courses**, create-pr first (`pr-open` → run-tests, review or fix; `reviewed` → review, fix, adjudicate or merge), then review-pr, create-spec and any other with a station of more than one leg out. Each branching leg returns its verdict as an inline output (R-BTN-108) its selector reads.
+2. **Station functions** return no readiness and no `not_before`; `std:git.readiness@1` and the board post's `next_leg`, `next_source` and `next` go; the sync posts facts, bars, the question, `needs` and `course_data`.
+3. **Remove what the selector replaced:** the holder's `next` in `decide()` and the leg scripts; the `next` the sync's `std:arrival@1` carries for a fact leg (R-BTN-203), the course file's `arrives.next` being the one source; `baton.missing-next`; `next_source` `course`, `marker`, `inferred` and `holder` (a migration); readiness rows.
+4. **Docs:** `docs/standard-courses.mdx` gains each course's selector; `docs/context/vocabulary.mdx` already names `selector`, `verdict` and `selection want`.
+
+### Trust
+
+- **No new input.** Branch verdicts move from git markers to inline outputs the holder reports with its arrival (R-BTN-82): the same holder's word, bounded and schema-checked.
+
+### Invariants
+
+- **No snapshot sets a position** ([R-BTN-39](../spec/BATON_SPEC/01-what-baton-is.md#sec-1)): with readiness and posted next legs gone, nothing the sync posts queues a leg.
+- **The standard courses need no course code** (G-BTN-123): their selectors ship with the CLI.
+
+### Tests
+
+- S-BTN-104, S-BTN-174 and S-BTN-17/-18 (G-BTN-42) on the amended rows, on both hosts.
+- A ticket source that is not git: an issue-tracker fact moves the selection, and the sync posts no readiness for that ticket.
+- The rate limit: a reading of 0 remaining, named in a course's `selector.readings`, selects `wait` until its reset; at the reset the want is taken and the leg queued.
+
+### Exit criteria
+
+- [ ] Every standard course selects through its selector or the default one; no git marker or posted readiness sets a queued leg.
+- [ ] `std:git.readiness@1`, the holder's `next`, `baton.missing-next` and the retired `next_source` values are gone from code and tests.
+- [ ] The scenarios pass; `npm test`, `npm run typecheck` and `npm run check:spec` green; merged under the review gate.
+
+## Status
+
+_filed 2026-11-27._

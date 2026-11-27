@@ -8,12 +8,17 @@
 // delegated key is no approver) waits for B-124's MCP keys — none are registered yet; the PR
 // body says so. Runs on both hosts.
 import { describe, it, expect, beforeEach, inject } from 'vitest';
-import { call as hostCall } from '#host';
+import { call as hostCall, config } from '#host';
 import { keyCall, ORIGIN, rows, setAdminKeys, setClock, setHumanKeys, setOwnerAttestation, withCore } from '../helpers';
 import { makeKey, sshsig, signedRequest, type TestKey } from '../lib/sshKeys';
+import { BatonCore } from '../../src/core/baton';
+import { front } from '../../src/core/front';
+import { RECOMMENDED_CLIENT } from '../../src/core/http';
 
 const board = inject('board');
 const T0 = Date.parse('2026-10-30T12:00:00Z');
+const POLICY = '/v1/owner/ops/policy';
+const OWNERS = '/v1/owner/ops/owners';
 let admin: TestKey;
 let b: TestKey;
 let a: TestKey;
@@ -48,6 +53,17 @@ async function humanOwner(key: TestKey, by: TestKey) {
   expect((await rows<{ human_only: number }>('SELECT human_only FROM repository_owners WHERE fingerprint = ?', key.fingerprint))[0].human_only).toBe(1);
 }
 
+function restart(c: BatonCore, floor: string) {
+  const settings = { ...config, BATON_REPOSITORIES: undefined, BATON_HUMAN_KEYS: breakGlass.publicKey, BATON_HUMAN_KEY: floor };
+  const core = new BatonCore({
+    config: settings, store: c.store, clock: () => c.now(),
+    adminKeys: { list: () => [admin.publicKey] },
+    scheduler: { get: async () => null, set: async () => {} },
+    dispatch: { send: async () => {}, defer: () => {} },
+  });
+  return { core, handle: (req: Request) => front(req, settings, (r) => core.fetch(r)) };
+}
+
 beforeEach(async () => {
   await setClock(T0);
   admin = await makeKey('ssh-ed25519', 'admin');
@@ -60,6 +76,53 @@ beforeEach(async () => {
 });
 
 describe('S-BTN-192 approver lists', () => {
+  it.each(['any', 'hardware'] as const)('admits configured policy and ownership recovery only if the repository minimum %s permits it', async (human_key) => {
+    const { version, doc } = await current();
+    // Configuration alone grants neither owner authority nor a live owner for proposed lists.
+    expect((await as(breakGlass, POLICY, { base_version: version, policy: doc }, 'PUT')).status).toBe(403);
+    expect((await as(b, POLICY, { base_version: version, policy: { ...doc, approvers: { ...doc.approvers, policy: ['human'] } } }, 'PUT')).json)
+      .toMatchObject({ code: 'unsatisfiable-approvers', list: 'approvers.policy' });
+    const approvers = { ...doc.approvers, policy: ['owner', 'human'], members: ['owner', 'human'] };
+    const policy = { ...doc, human_key, approvers };
+    expect((await as(b, POLICY, { base_version: version, policy }, 'PUT')).status).toBe(200);
+    const expected = human_key === 'any' ? 200 : 403;
+    const revised = { ...policy, paths: { ...policy.paths, protected: ['spec/**'] } };
+    expect((await as(breakGlass, POLICY, { base_version: version + 1, policy: revised }, 'PUT')).status).toBe(expected);
+    expect((await as(breakGlass, OWNERS, { public_key: a.publicKey })).status).toBe(expected);
+    expect((await as(breakGlass, '/v1/owner/ops/sync-want', {})).status).toBe(401);
+    expect((await current()).version).toBe(version + (expected === 200 ? 2 : 1));
+    expect(await rows('SELECT fingerprint FROM repository_owners WHERE repository_id = ? AND fingerprint = ?', 'ops', a.fingerprint))
+      .toEqual(expected === 200 ? [{ fingerprint: a.fingerprint }] : []);
+  });
+
+  it('enforces instance hardware without rewriting a repository policy set to any', async () => {
+    const { version, doc } = await current();
+    const policy = { ...doc, approvers: { ...doc.approvers, policy: ['owner', 'human'] } };
+    expect((await as(b, POLICY, { base_version: version, policy }, 'PUT')).status).toBe(200);
+    await withCore(async (c) => {
+      const { core, handle } = restart(c, 'hardware');
+      await core.start();
+      const put = async (key: TestKey) => handle(await signedRequest(key, ORIGIN + POLICY, {
+        created: T0 / 1000, method: 'PUT', headers: { 'Baton-Client': `baton/${RECOMMENDED_CLIENT}` }, body: JSON.stringify({ base_version: version + 1, policy }),
+      }));
+      expect((await put(breakGlass)).status).toBe(403);
+      expect((await put(b)).status).toBe(200);
+    });
+    expect((await current()).doc.human_key).toBe('any');
+  });
+
+  it('refuses an invalid startup floor and an instance raise that strands an existing list', async () => {
+    await humanOwner(a, breakGlass);
+    const { version, doc } = await current();
+    const policy = { ...doc, approvers: { ...doc.approvers, policy: ['human'] } };
+    expect((await as(b, POLICY, { base_version: version, policy }, 'PUT')).status).toBe(200);
+    await withCore(async (c) => {
+      expect(() => restart(c, '')).toThrow(/BATON_HUMAN_KEY/);
+      await expect(restart(c, 'hardware').core.start()).rejects.toMatchObject({ code: 'unsatisfiable-approvers', extra: { list: 'approvers.policy' } });
+    });
+    expect((await current()).doc).toEqual(policy);
+  });
+
   it('S-BTN-185: a stored marker and a configured break-glass key do not prove hardware custody', async () => {
     await humanOwner(a, breakGlass);
     expect((await as(b, '/v1/owner/ops/owners', { public_key: breakGlass.publicKey })).status).toBe(200);

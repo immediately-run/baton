@@ -5,56 +5,71 @@ topics: [courses, scheduling]
 owns: {}
 prs: []
 title: "B-351 — Leg selection: one selector per course, run by a runner, with a stored verdict that says why"
-depends_on: [B-120]
+depends_on: [B-120, B-352, B-353, B-354, B-355, B-356, B-357]
 tags: [roadmap-item]
 project: baton
 repos: [baton]
-description: "A course-owned selector chooses each ticket's next leg from Baton's record, run by a runner through its executor; a stored verdict says why, what it waits for, or that a person must act."
+description: "Umbrella for R-BTN-205: a course-owned selector chooses each ticket's next leg from Baton's record, run by a runner through its executor; a stored verdict says why, what it waits for, or that a person must act."
 ---
 
-**Brief:** the owner, 2026-11-26 (in a Claude Code session on bering), on how Baton chooses a ticket's next leg: "I feel this is a key mechanic which is too challenging to grasp right now." The owner's constraints from the same session are quoted in full in [the proposal](../spec/proposals/leg-selection.md#2-the-owners-constraints): the selection is entirely customizable; a leg may wait on prerequisites that readings express (host memory, a GitHub rate limit); it sandboxes like any custom logic, as in Fieldhouse; the dashboard and CLI say why a leg was chosen; and where none can start, they say when the next decision comes or that a person must act. Git is not assumed to be the channel between legs. The owner's answer to "write this up as the proposal page and ticket": "Yes".
+**Brief:** the owner, 2026-11-26 (in a Claude Code session on bering), on how Baton chooses a ticket's next leg: "I feel this is a key mechanic which is too challenging to grasp right now." The owner's constraints from the same session, the rulings on the design and the ruling to specify it now ("Since these proposals are necessary to get baton into a generally useable state, I would like you to include the changes in the specs and draft the necessary tickets for implementing them.", 2026-11-27) are quoted in `spec/BATON_SPEC_HISTORY.md` (2026-11-27). This ticket is the umbrella; its children build it.
 
-**Spec:** [the leg-selection proposal](../spec/proposals/leg-selection.md). It would change [R-BTN-83](../spec/BATON_SPEC/05-courses.md#sec-5-3) (the position a leg reports, and who queues the next leg), [R-BTN-70](../spec/BATON_SPEC/05-courses.md#sec-5-3) (readiness), [R-BTN-74](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-2) (the station function) and [R-BTN-133](../spec/BATON_SPEC/08-runners.md#sec-8-3) (the wrapper's calls), and add two conditions to [R-BTN-163](../spec/BATON_SPEC/07-conditions.md#sec-7-3). Run `npm run spec:impact` on each.
+**Spec:** [R-BTN-205](../spec/BATON_SPEC/05-courses.md#sec-5-3) (the selector), with the rules it changed: [R-BTN-70, R-BTN-83, R-BTN-63, R-BTN-71](../spec/BATON_SPEC/05-courses.md#sec-5-3), [R-BTN-174](../spec/BATON_SPEC/05-courses.md#sec-5-9), [R-BTN-74](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-2), [R-BTN-72, R-BTN-106](../spec/BATON_SPEC/08-runners.md#sec-8-3), [R-BTN-133](../spec/BATON_SPEC/08-runners.md#sec-8-4), [R-BTN-39 and R-BTN-33](../spec/BATON_SPEC/01-what-baton-is.md#sec-1), [R-BTN-89](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-5), [R-BTN-167](../spec/BATON_SPEC/07-conditions.md#sec-7-5), [R-BTN-163](../spec/BATON_SPEC/07-conditions.md#sec-7-3) and the others the 2026-11-27 history entry lists.
 
-**Depends on:** B-120 (the sync stops posting positions).
+**Depends on:** B-120 (the sync stops posting positions), B-352, B-353, B-354, B-355, B-356, B-357.
 
 ### Why
 
-Today five things set a ticket's queued leg (the finishing leg's `next`, the sync's board post, Baton's own transitions, the owner's route, `start_leg`) and two more filter it (the station function's readiness, core's gates). The proposal replaces the choosing part with one course-owned function and one stored verdict.
+What sets a ticket's queued leg today, in the code:
+
+- the finishing leg's `next`, checked by `decide()` (`src/runner/protocol.ts`);
+- the sync's board post, folding git markers (`next_source` `marker` or `course`; `inferred` is accepted by `src/core/board.ts` but no station function produces it), written by `src/core/stations.ts`;
+- the sync's `waiting_on: exhausted` (`src/defaults/course-pr.ts`), which `src/core/stations.ts` turns into a switch of the queued leg — the retry policy's `exhausted` leg that R-BTN-122 gives Baton is not built (B-11);
+- a person leg's answer or expiry (`src/core/questions.ts`, `next_source: baton`);
+- a new ticket's `start_leg`.
+
+The owner's route and adopt are not built (R-BTN-83, R-BTN-39; B-120). Three things then filter the queued leg: the station function's readiness, a `not_before` from the sync or the result (R-BTN-89), and core's gates and blocks. R-BTN-205 replaces the choosing and the readiness with one course-owned function and one stored verdict.
 
 ### What to build
 
-1. **Settle the proposal first.** The owner ruled on two of its §9 questions on 2026-11-26: a built-in default selector ("Yes"), and `because` as JSON ("JSON, can contain url to reason file or simple text in "reason" field"). The third, the selector's budget and an untaken want's timeout, the owner left open ("not sure"): measure the standard selectors and propose values in the spec PR. Amend the spec by pull request before any code.
-2. **The selector and its verdict.** `select.mjs` per course, `select(ctx)` through the wrapper (R-BTN-133). Core builds `ctx` from Baton's record alone: position, outputs, facts, subscribed readings, dependencies, fleet and `now`. It checks the verdict (`run`, `wait`, `attention`) and stores it with the input digest, the course version and the runner key.
-3. **Selection by runners.** The finishing runner selects with its `advance` or end over the `ctx` core hands it. Otherwise a selection want is offered to any live runner granted for the repository and course.
-4. **`needs` matching.** Core matches a `run` verdict's `needs` against runners' declared dimensions when offering the leg, and distinguishes waiting for capacity from no registered runner being able to take it.
-5. **Seeing why.** `baton ticket why <id>` with `--replay`, the ticket's dashboard view, and each ticket's verdict kind on the board.
-6. **The standard courses' selectors**, with create-pr first, since it branches most: `pr-open` leads to run-tests, review or fix, and `reviewed` to review, fix, adjudicate or merge. Their branching verdicts become inline leg outputs.
-7. **Remove what it replaces**: the holder's `next` in `decide()`, readiness posting, `baton.missing-next` and the `resource` advice rows.
+The children:
+
+1. **B-352** — core: verdicts, selection wants, binding, the conditions, `ctx`, the routes and the data model.
+2. **B-353** — the runner: running a selector, the default selector, chaining, re-verification, results without `next`.
+3. **B-354** — host matching: a verdict's `host` against runners' declared dimensions.
+4. **B-355** — seeing why: `baton ticket why`, `--replay`, the dashboard and the board.
+5. **B-356** — the standard courses' selectors, and removing readiness, the holder's `next`, `baton.missing-next` and the retired `next_source` values.
+6. **B-357** — measuring the selector's budget.
 
 ### Trust
 
-A verdict is a claim, like a holder's `next` today. Nothing that protects something may move from `gatesFor` into a selector. Under `protected`, `select.mjs` is a protected path (R-BTN-184).
+- **A verdict is a claim**, from a holder's runner or a want's lessee. It can steer which leg is queued, never pass a gate: nothing that protects work moves from `gatesFor` into a selector.
+- **Who posts one.** The holder, for every arrival in its claim and for the position it was offered, bound by the gates its claim passed; and a selection want's lessee — a runner granted on the repository with the course declared, under `protected` only the policy's trusted runner class (R-BTN-182). Each verdict is bound to the cause and the `ctx` digest it answers; a lessee whose lease lapsed is refused, and only the first valid verdict counts (one more after a `reselect`).
+- **Denial of service** by a false `wait` or `attention` is visible and bounded: `until` at most 400 days, `baton.stalled` after the stalled time, `baton.selection-attention` at once, and the owner's route over either.
+- **`select.mjs`** is a control path (R-BTN-184), run only through a runner's executor.
 
 ### Invariants
 
-- **Core runs no repository code** ([R-BTN-133](../spec/BATON_SPEC/08-runners.md#sec-8-3)): the selector runs only through a runner's executor; core builds its input and checks its output.
-- **Baton holds every position** ([R-BTN-39](../spec/BATON_SPEC/01-what-baton-is.md#sec-1), [R-BTN-83](../spec/BATON_SPEC/05-courses.md#sec-5-3)): a verdict queues a leg through a signed request; no snapshot of git sets one.
-- **Gates are the only refusal** (§7.2): a verdict never admits what `gatesFor` refuses, and nothing that protects something moves into a selector.
-- **Filter fields only** ([R-BTN-33](../spec/BATON_SPEC/01-what-baton-is.md#sec-1)): `because` is bounded like an inline value, and no ticket text is stored.
-- **One clock** ([R-BTN-32](../spec/BATON_SPEC/02-deployments.md#sec-2-1)): the selector reads `ctx.now`, never its own.
+- **Core runs no repository code** ([R-BTN-133](../spec/BATON_SPEC/08-runners.md#sec-8-4)).
+- **Baton holds every position** ([R-BTN-39](../spec/BATON_SPEC/01-what-baton-is.md#sec-1)): no snapshot sets one, and a verdict only queues a leg leaving Baton's station.
+- **Gates are the only refusal** (§7.2).
+- **Filter fields only, with one stated exception** ([R-BTN-33](../spec/BATON_SPEC/01-what-baton-is.md#sec-1)): a verdict's reasons, at most 128 characters each, shown as text.
+- **One clock** ([R-BTN-32](../spec/BATON_SPEC/02-deployments.md#sec-2-1)).
 
 ### Tests
 
-The scenarios in the proposal's §10, numbered with `baton tickets next scenario` when the spec amendment lands, on both hosts.
+Each child names its scenarios; B-351 closes when they pass on both hosts.
 
 ### Exit criteria
 
-- [ ] The proposal's open questions are ruled on and the spec is amended by PR.
-- [ ] Every standard course selects through its selector, and no git marker sets a queued leg.
-- [ ] `baton ticket why` and the dashboard show every live ticket's verdict, and `--replay` reproduces it.
+- [ ] B-352, B-353, B-354, B-355, B-356 and B-357 done.
+- [ ] Every standard course selects through its selector or the default one, and no git marker, posted readiness or holder's `next` sets a queued leg.
+- [ ] `host` matching, selection wants and the two selection conditions work on both hosts.
+- [ ] `baton ticket why` and the dashboard show every live ticket's verdict; `--replay` reproduces any verdict whose record is still retained.
 - [ ] `npm test`, `npm run typecheck` and `npm run check:spec` green; merged under the review gate.
 
 ## Status
 
 _filed 2026-11-26._
+
+_(2026-11-27: rewritten as the umbrella after the owner's ruling to specify the selector now; the proposal page is gone, its design in R-BTN-205 and its scenarios in the children; the description of today's sources corrected after the post-merge review of #455.)_

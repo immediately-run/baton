@@ -41,7 +41,7 @@ export function screenRoutes(text: string, url: string, actions: unknown[] = [],
     '/v1/repositories': repoList([repoRow('docs')], role),
     '/v1/actions': { actions },
 
-    // The Tickets table: a held row with its reason, and a running one.
+    // The Tickets table: held, running, and a dropped ticket with an unconfirmed claim.
     '/v1/repositories/docs/tickets': {
       tickets: [
         { ticket_id: 'docs:HELD', title: text, course: 'course-a', requires: [], requires_unmet: [], tags: [text], order: null, parent: null, expedite: false,
@@ -49,8 +49,10 @@ export function screenRoutes(text: string, url: string, actions: unknown[] = [],
         { ticket_id: 'docs:T-1', title: text, course: 'course-a', requires: [], requires_unmet: [], tags: [], order: null, parent: null, expedite: false,
           position: { station: 'station-b', path_len: 1, next_leg: 'leg-b' }, state: 'running', reasons: [],
           detail: { claim_id: 7, runner_id: 3, hostname: 'host-a', session_name: text, leg: 'leg-b', since: now - HOUR, lease_ends_at: now + HOUR, last_activity_at: now - MIN, alive: true, stalled: false, condition_wait: null } },
+        { ticket_id: 'docs:GONE', title: null, course: null, requires: [], requires_unmet: [], tags: [], order: null, parent: null, expedite: false,
+          position: null, state: 'unconfirmed', reasons: [], detail: { claim_id: 47 } },
       ],
-      counts: { held: 1, running: 1, total: 2 }, matched: 2, server_time: now,
+      counts: { held: 1, running: 1, unconfirmed: 1, total: 3 }, matched: 3, server_time: now,
     },
 
     // The ticket's page and the reads it gathers.

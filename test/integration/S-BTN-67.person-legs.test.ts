@@ -102,16 +102,16 @@ it('the owner answers with baton decision answer: the same arrival through the a
   expect(await answerRow('C')).toEqual([{ option: 'ship', answered_by: `owner:${owner.fingerprint}` }]);
 });
 
-it('under protected a human key can answer the person leg, but the sync and ordinary owner cannot', async () => {
+it('with attestation-only answers a configured key can answer without owning the repository, but the sync and ordinary owner cannot', async () => {
   atDecide('P');
   expect((await git.post()).status).toBe(200);
   const human = await makeKey('ssh-ed25519', 'human');
   await setHumanKeys(human);
-  expect((await keyCall(owner, '/v1/owner/docs/owners', { public_key: human.publicKey })).status).toBe(200);
-  const preview = await keyCall(owner, '/v1/owner/docs/policy', { base_version: 1, preset: 'protected', dry_run: true }, 'PUT');
+  const candidate = await attestationOnly();
+  const preview = await keyCall(owner, '/v1/owner/docs/policy', { ...candidate, dry_run: true }, 'PUT');
   expect(preview.status).toBe(200);
   expect(preview.json.stops).toEqual({ legs: [], tickets: [] });
-  expect((await keyCall(owner, '/v1/owner/docs/policy', { base_version: 1, preset: 'protected' }, 'PUT')).status).toBe(200);
+  expect((await keyCall(owner, '/v1/owner/docs/policy', candidate, 'PUT')).status).toBe(200);
 
   expect((await git.post({ attestations: [decision('P', 'ship', 'f'.padEnd(40, '1'))] })).status).toBe(200);
   expect(await station('P')).toEqual([{ station: 'reviewed', next_leg: 'decide', next_source: 'marker' }]);
@@ -137,9 +137,10 @@ it('S-BTN-197: preview identifies person legs that lose both answer paths, even 
   expect(await needsYou('A')).toBeUndefined();
   const path = '/v1/owner/docs/policy';
   const candidate = await attestationOnly();
+  candidate.policy.human_key = 'hardware';
   const preview = await keyCall(owner, path, { ...candidate, dry_run: true }, 'PUT');
   expect(preview.status).toBe(200);
-  expect(preview.json.changed).toEqual(['inputs.answers']);
+  expect(preview.json.changed).toEqual(['human_key', 'inputs.answers']);
   expect(preview.json.stops).toEqual({
     legs: [{ ticket_id: 'docs:A', leg: 'decide' }, { ticket_id: 'docs:B', leg: 'decide' }, { ticket_id: 'docs:P', leg: 'decide' }],
     tickets: ['docs:A', 'docs:B', 'docs:P'],
@@ -151,7 +152,7 @@ it('S-BTN-197: preview identifies person legs that lose both answer paths, even 
   const p = answerPlan('docs:P', 'ship');
   expect((await keyCall(owner, p.path, p.body)).json.code).toBe('forbidden');
   expect((await answerBesideFix(owner, 'A')).json.code).toBe('forbidden');
-  expect((await answerBesideFix(breakGlass, 'A')).json.code).toBe('unauthenticated');
+  expect((await answerBesideFix(breakGlass, 'A')).json.code).toBe('forbidden');
   const syncAnswer = decision('A', 'ship', 'f'.padEnd(40, '3'));
   syncAnswer.value.option = 'adjudicated'; // With no posted question, the station is the option.
   expect((await git.post({ attestations: [decision('P', 'ship', 'f'.padEnd(40, '2')), syncAnswer] })).status).toBe(200);

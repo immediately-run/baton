@@ -17,6 +17,7 @@ import { isAdministrator } from './conditions';
 import { queryOf, type ReadCall, type ReadCtx, type ReadRoute } from './kit';
 import type { Row } from '../ports';
 import { unpinnedSourceWarning } from '../board';
+import { compareVersions } from '../../shared/versions.mjs';
 
 /** `?since=` reaches back at most this far (B-201). */
 export const SYNC_SINCE_MAX_MS = 30 * 86_400_000;
@@ -69,8 +70,10 @@ export const SYNC_READS: ReadRoute[] = [
       const administrator = isAdministrator(call.principal);
 
       const h = cx.sql<{ sha: string | null; observation: number; last_handed_out: number; handed_out_at: number | null; source_kind: string | null; source_versions: string | null;
+        sync_cli_version: string | null; sync_missing_evidence: number;
         parent_sha: string | null; received_at: number | null; ticket_count: number | null; course_sources_json: string | null }>(
-        `SELECT h.sha, h.observation, h.last_handed_out, h.handed_out_at, h.source_kind, h.source_versions, s.parent_sha, s.received_at, s.ticket_count, s.course_sources_json
+        `SELECT h.sha, h.observation, h.last_handed_out, h.handed_out_at, h.source_kind, h.source_versions, h.sync_cli_version, h.sync_missing_evidence,
+           s.parent_sha, s.received_at, s.ticket_count, s.course_sources_json
          FROM board_head h LEFT JOIN board_snapshots s ON s.repository_id = h.repository_id AND s.sha = h.sha WHERE h.repository_id = ?`, repository)[0] ?? null;
       const head = h?.sha
         ? { sha: h.sha, parent_sha: h.parent_sha, received_at: h.received_at, ticket_count: h.ticket_count, observation: h.observation,
@@ -125,8 +128,11 @@ export const SYNC_READS: ReadRoute[] = [
         .map((r) => [r.sub ?? 'unknown', r.n]));
       const refused = rows.find((r) => (r as Record<string, unknown>).kind === 'dispatch-refused') as (Record<string, unknown> & { at: number }) | undefined;
 
+      const recommended = cx.core.instance.recommendedClient();
+      const version = h?.sync_cli_version ?? null;
       return {
         repository,
+        sync_client: { version, recommended, behind: version !== null && compareVersions(version, recommended) < 0, missing_evidence: !!h?.sync_missing_evidence },
         head,
         observation: { last: h?.observation ?? 0, last_handed_out: h?.last_handed_out ?? 0, outstanding },
         last_post,

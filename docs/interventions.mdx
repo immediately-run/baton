@@ -1025,3 +1025,42 @@ Entry shape: **When** · **Host** · **Tickets** · **Why it was needed** · **R
     rounds. *No ticket yet.*
   - Generated stubs that lag their source by thousands of lines should fail a check. *No ticket
     yet.*
+
+## 2026-11-26 14:20–15:18 — two runner restarts: #450's stubs, then a CLI that failed every claim
+
+- **Host:** bering
+- **Tickets:** B-8 and B-25 (drained), then 14 tickets released by the new CLI (B-131, B-136,
+  B-146, B-42, B-318, B-336 to B-347 among them)
+- **Why it was needed:**
+  - **The first restart.** #450 regenerated this repository's create-pr stubs, so that a fix
+    that pushes nothing fails again (#447). A claim runs its own snapshot's stubs, so B-8 and
+    B-25 (run-tests 21 and 12 of 30) kept the old ones. At the owner's word the runner was
+    drained (SIGTERM to its process, found by its command line; both claims ended
+    `released:requested`, no retry spent) and restarted at 14:45 on CLI `f938afdc`, the tip
+    `start-runner.sh` requires.
+  - **The second.** From then on every claim failed its ticket-source check: "the ticket source
+    at the snapshot would not load (the ticket source's describe wrote no outcome)", reported
+    as "ticket moved under the claim" and released `stale-board` — 14 in half an hour, each then
+    waiting for a sync.
+  - **The cause.** B-55 (#316, merged 2026-11-25 23:04) made `src/runner/legProcess.mjs`, the
+    wrapper every source, leg and close call runs through, import `./legClient.mjs` beside it.
+    The runner's bundle step copies both into `.local/`, but the fieldhouse E2B executor writes
+    only the one wrapper file into the sandbox (`sbx.files.write(brief.wrapper, …)`). In the
+    sandbox the import fails before the wrapper prints anything. Run locally, beside its client,
+    the same wrapper answers `describe` correctly — so no test saw it, and CLI `d78f5339` (before
+    B-55) still works with `main`'s ticket source.
+- **Resolution:**
+  - At the owner's word the runner was drained again (15:17, no claims held) and restarted at
+    15:18 on CLI `d78f5339`, pinned by a scratchpad copy of `start-runner.sh` that sets
+    `BATON_CLI_PIN` after `runner.env` (which sets `branch:main`). The home, and so #450's stubs,
+    stay at `main`.
+  - The fix (the wrapper self-contained, with a test that runs it alone) follows in its own PR;
+    until it lands, bering's CLI must not move past `d78f5339`.
+- **Autonomous handling:**
+  - A test that runs the built wrapper from a directory holding nothing else, as the executor
+    does — the contract between the CLI and any executor is "one wrapper file". *In the fix's
+    PR.*
+  - A runner that fails the same check on every claim should stop claiming and say so, not
+    release ticket after ticket (B-336 covers sandbox placement; this is the same shape).
+  - A source-check failure is not "ticket moved under the claim"; it should not be released
+    `stale-board`. *No ticket yet.*

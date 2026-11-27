@@ -34,7 +34,7 @@ stated once, in the rule it cites.
 | Dashboard session | `/v1/ui/*`, and the key routes of the actions its role may call (R-BTN-155) | the session cookie with the tab's `Baton-Session`, and no key (R-BTN-155) | as `session` carrying its key's role (R-BTN-129): an administrator's, an owner's or a member's, each every action §14 lists a session of its role on, on its key's scope, but R-BTN-186's key-only acts; an authority-changing act waits for its key's confirmation (R-BTN-155); and as a human where it acts as `human` (R-BTN-185). Owners' and members' sessions are not built (B-76, B-338); confirmation codes are proposed ([people and dashboard, §3](../proposals/people-and-dashboard.md#3-sign-in-sessions-and-confirmed-actions)) |
 | Repository member | the repository's reads; `POST …/attestations` as writer `member` | a member key, SSH-signed or API key | R-BTN-204 |
 | Repository owner | `/v1/owner/{repository}/*`; the repository's reads and leg runs | an owner key, SSH-signed or API key | R-BTN-58 |
-| Human-only key | `POST /v1/human-keys`; `POST`, `DELETE …/attestations` as writer `human`; as an owner, or as a break-glass line on every repository it satisfies (R-BTN-188), the owner's routes | an SSH key registered `human_only` (R-BTN-185), on an owner key or a key of no other role | open human gates (R-BTN-185), `human-key.add` and `human-key.revoke` among them; as an owner, R-BTN-58; its session is a human, as one a `human_only` key opens always is (R-BTN-185) |
+| Human-only key | `POST /v1/human-keys`; `POST`, `DELETE …/attestations` as writer `human`; as an owner, the owner's routes; as a break-glass line, the routes R-BTN-188 admits | an SSH key registered `human_only` (R-BTN-185), on an owner key or a key of no other role | open human gates (R-BTN-185), `human-key.add` and `human-key.revoke` among them; as an owner, R-BTN-58; its session is a human, as one a `human_only` key opens always is (R-BTN-185) |
 | MCP key (a delegated key; proposed, [people and dashboard, §2](../proposals/people-and-dashboard.md#2-mcp)) | `POST /v1/mcp` only | bearer `bmcp_…` | as `owner` on one repository, narrowed to the ids listed at minting: R-BTN-186, R-BTN-130 |
 | Public | `POST /v1/login`, the dashboard shell's three assets — its page, its one script, its one stylesheet | none, or on `POST /v1/login` a verified Cloudflare Access assertion (R-BTN-155) | start a sign-in |
 
@@ -129,9 +129,9 @@ Every value below is validated on write; a value over its cap is refused `invali
   home draws its code repositories' links while none of its own — or names a host an
   administrator allowed:
   `link_hosts` for a view's `link` (R-BTN-112), `session_hosts` for a session link
-  (R-BTN-113). A person leg's question `url` (R-BTN-116) and a condition's `url` (R-BTN-160) are the
-  only links they carry; one that fails the rule is dropped, so no `javascript:` link reaches a
-  screen. `needs` names follow R-BTN-76.
+  (R-BTN-113). A person leg's question `url` (R-BTN-116), a condition's `url` (R-BTN-160) and a
+  selection verdict's `because` `url`s (R-BTN-205) are the only links they carry; one that fails
+  the rule is dropped, so no `javascript:` link reaches a screen. `needs` names follow R-BTN-76.
 - **URIs** (R-BTN-82), at most 1 KB, are one of:
   - `git:<owner>/<name>@<40-hex>:<path>` or `git:<owner>/<name>#blob=<40-hex>`, where the path is
     relative, at most 512 characters of `[A-Za-z0-9._/-]`, with no empty, `.` or `..` segment;
@@ -466,10 +466,13 @@ confines a leg's credentials; a compromised forge; and a compromised Baton.
     Baton refuses removing an owner, revoking or suspending a key, and an instance switch of
     `human_key`, when a list would be left with no live credential to satisfy it
     (`unsatisfiable-approvers`, naming the list).
-  - **Break-glass.** A key in the host's `BATON_HUMAN_KEYS` configuration satisfies every `human`
-    entry of every repository on the instance whose `human_key` it meets; a line that does not
-    meet `hardware` satisfies nothing on a repository that requires it. It is set outside Baton
-    and is the only recovery from a lost key.
+  - **Break-glass.** A verified signature by a key in the host's `BATON_HUMAN_KEYS` configuration
+    can satisfy a `human` entry on policy, floor and ownership changes, and can sign person
+    answers, of a repository whose effective minimum it meets (R-BTN-185); a line that does not
+    meet `hardware` satisfies nothing on a repository that requires it. Configuration alone does
+    not make it an owner or count toward keeping an approver list satisfiable. No other owner
+    route admits a key by its break-glass status. These lines are set outside Baton and are the
+    only recovery from a lost key.
 - **R-BTN-189 (guarantees and floors).** `status: partly B-145 B-147 B-189`
   - **A guarantee** is a named condition over the policy and the facts its cells name, defined here, and held or broken for
     each version. A deployment defines its own guarantees in its own specification, out of these
@@ -656,7 +659,8 @@ confines a leg's credentials; a compromised forge; and a compromised Baton.
     not an OS sandbox: the deployment must trust the installed harness, host configuration
     and snapshot course code, and must not grant higher-precedence tool policy overrides.
 - **R-BTN-184 (protected paths).** `status: partly B-140 B-189` The policy's `paths.protected`, beside a floor Baton computes
-  that no course or owner removes, in two classes: **control paths** — courses, workflows, agent
+  that no course or owner removes, in two classes: **control paths** — courses (their `course.json`, station functions and
+  selectors, R-BTN-205), workflows, agent
   configuration, the ticket source and what the owner declares — and **tickets and goals**. The
   floor's entries, its glob grammar, how each class lands and a leg's own progress lines are
   [proposed](../proposals/security.md) (B-140).
@@ -671,10 +675,11 @@ confines a leg's credentials; a compromised forge; and a compromised Baton.
     are (R-BTN-57), never registered over the API; each later one is registered with a signature
     by an existing one (`baton human-key add`, R-BTN-127; `POST /v1/human-keys`), and any is
     revoked only with a `human_only` key, within R-BTN-188's *No gate without a key*.
-  - **`human_key: any | hardware`** is an instance setting, default `any`, which a repository's
-    policy may raise for itself (R-BTN-188). Switching to `hardware` suspends every `human_only`
-    key registered before the switch that does not meet it; what meets it, and what the CLI
-    shows before a signature, are [proposed](../proposals/security.md) (B-136). Under `any` a
+  - **`BATON_HUMAN_KEY`** is an instance setting, read at start, default `any`. The only other
+    value is `hardware`; an invalid value refuses startup. The effective minimum is the
+    stricter of this floor and the repository policy's `human_key` (R-BTN-188). A `human_only`
+    key that does not meet the effective minimum cannot satisfy it; what meets `hardware`, and
+    what the CLI shows before a signature, are [proposed](../proposals/security.md) (B-136). Under `any` a
     human-only list is a custody promise: Baton cannot tell a key an agent session can use, so
     `human-gates` rests on that custody, and only `human-gates-hardware` claims a key Baton has
     verified (R-BTN-189).

@@ -10,7 +10,7 @@ is `active` until it ends `completed`, `released` or `reaped`.
 
 ### 9.1 The lock and claiming
 
-- **R-BTN-4 (the lock).** `status: built` At most one `active` claim per ticket, enforced by a partial unique
+- **R-BTN-4 (the lock).** `status: partly B-352` At most one `active` claim per ticket, enforced by a partial unique
   index. A claim holds one ticket through a run of its legs. A runner holds at most the lower of two
   numbers at once, counting its active claims across every repository:
   - its **`concurrency`**, which its heartbeat declares (§8.1): an integer from 1 to 32, default
@@ -35,23 +35,28 @@ is `active` until it ends `completed`, `released` or `reaped`.
     `request_id` from the same runner returns the original result, so a lost response never
     yields a second ticket; idempotency is keyed by `(runner_id, request_id)`.
   - **The response**, stated here once, carries `claim_id`, `ticket_id`, `course_id`,
-    `course_version`, `station`, `legs` (the queued leg, R-BTN-83), `next`, `path`, `nonce` (6
+    `course_version`, `station`, `legs` (the queued leg, R-BTN-83), `verdict` (the selection
+    verdict that queued it, if any), and the `ctx` for the offered position with its `answers`
+    and `ctx_digest`, to re-verify it by (R-BTN-205), `path`, `nonce` (6
     hex, public: written in markers, R-BTN-17), `snapshot_sha`, `default_branch` (R-BTN-143),
     the ticket's `version`, `ticket_source?` and `last_written_by?` (R-BTN-194),
     `brief?` (R-BTN-194), `scope` (§12.9), `leg_state?` (R-BTN-188), `handoff_url?`, `previous_attempts`
     (R-BTN-24), and on a reconcile leg `evidence: [{ref, kind}]` and `displaced` (R-BTN-39).
   - The runner then reads the ticket from git and re-verifies it (R-BTN-34, R-BTN-5).
 - **One claim runs a run of legs** (unnumbered). A claim runs as many legs as it can. Each leg
-  starts with `POST /v1/runner/claims/{id}/advance` naming it (R-BTN-63): Baton checks the edge
-  and the gates in one transaction and moves the claim on (event `advanced`, a new `claim_legs`
-  row with its run number, `run_id`, `started_at` and `head_sha`) or refuses.
-  - The body carries `leg`, and for the leg it finishes `reached`, `evidence`, `outputs`,
-    `scope_exceeded` (§12.9), `exit_status` (R-BTN-153), `session_url` (R-BTN-113) and
-    `local_order` (R-BTN-202); for the run it starts, `bars` (the tags the holder bars from
-    it), `head_sha` and `run_inputs` (R-BTN-84); and `course`, at most 4 KB, which Baton
+  finishes with `POST /v1/runner/claims/{id}/advance` naming where it reached, and the next
+  starts with another naming it (R-BTN-63): Baton checks the edge and the gates in one
+  transaction and moves the claim on (event `advanced`, a new `claim_legs` row with its run
+  number, `run_id`, `started_at` and `head_sha`) or refuses.
+  - A finishing body carries `reached`, `evidence`, `outputs`, `scope_exceeded` (§12.9),
+    `exit_status` (R-BTN-153), `session_url` (R-BTN-113) and `local_order` (R-BTN-202). A
+    starting body carries `leg`, and after an arrival `verdict` (with its `answers` and
+    `ctx_digest`, R-BTN-205); for the run it starts, `bars` (the tags the holder bars from it),
+    `head_sha` and `run_inputs` (R-BTN-84). Either carries `course`, at most 4 KB, which Baton
     accepts and never reads.
-  - The reply carries the run's `run_id`, the leg's resolved inputs (R-BTN-82) and Baton's
-    advice flags; the course's own advice is `rank.mjs`'s (R-BTN-98).
+  - A finishing reply carries the `ctx` for the arrival with its `answers` and `ctx_digest`
+    (R-BTN-205). A starting reply carries the run's `run_id`, the leg's resolved inputs
+    (R-BTN-82) and Baton's advice flags; the course's own advice is `rank.mjs`'s (R-BTN-98).
 - **R-BTN-38 (legs are stateless at their boundaries).** `status: built` Each leg reads its input from, and
   leaves its output in, the ticket's repositories and their changes. Nothing a leg needs travels
   through a session's context, so any session can run any leg whose input is in place. What git
@@ -108,14 +113,12 @@ is `active` until it ends `completed`, `released` or `reaped`.
 
 ### 9.3 Suspending and handing off
 
-- **R-BTN-40 (suspend, don't wait on the lease).** `status: built B-47 B-274` The holder decides whether to go on. It
+- **R-BTN-40 (suspend, don't wait on the lease).** `status: partly B-47 B-274 B-353` The holder decides whether to go on. It
   **suspends** at the station it reached — writes the hand-off, makes sure its last leg left its
   evidence, ends `suspended:<station>` (R-BTN-71) — when a gate or `max_runs` refuses its
   `advance`, when advice says a line the next leg needs is short and it has no better evidence,
-  when the latest snapshot observed after its leg shows every leg leaving its station `waiting`
-  on something not in the course file's `short_waits`, or when it must stop for its own
-  reasons. On a leg `waiting` on a `short_waits` entry it may keep the claim, re-reading the
-  station each heartbeat, for up to **30 minutes**, then suspends. The ticket then waits unheld
+  when its selection verdict is not a `run` it may take and R-BTN-72 does not let it wait under
+  the claim, or when it must stop for its own reasons. The ticket then waits unheld
   and is recommended again, to any eligible runner. A suspension is a completed end, never a
   failed attempt.
 - **R-BTN-44 (the hand-off document).** `status: built` Every suspension or release — except a lost lease —
@@ -131,13 +134,25 @@ is `active` until it ends `completed`, `released` or `reaped`.
 ### 9.4 Ending a claim
 
 A claim ends with `POST /v1/runner/claims/{id}/end`. Its body, stated here once: `end_reason`,
-`reached`, `next` (required unless `reached` is an end station, R-BTN-83), and as applicable
-`spawned` (R-BTN-86), `outputs`, `detail`, `ended_at_sha` (R-BTN-8; a completed end's only),
+`reached`, `verdict?`, and as applicable `spawned` (R-BTN-86), `outputs` (an `end: done`
+finishing its running leg at an end station only), `detail`, `ended_at_sha` (R-BTN-8; a completed end's only),
 `prerequisite` (R-BTN-126), `exit_status` (R-BTN-153), `scope_exceeded` (§12.9), `session_url`
 (R-BTN-113) and `local_order` (R-BTN-202).
 
+- **An end records no arrival that needs a selection** (R-BTN-83). A suspension or release
+  rests at the running leg's `from`, or at the station the claim's last finishing `advance`
+  reached; an `end: done` finishes the running leg at an end station, follows a finishing
+  `advance` that reached one, or ends a claim on a ticket the latest snapshot shows closed as
+  done (R-BTN-10).
+- **`verdict`** is how a holder posts a selection verdict before it lets the ticket go, the one
+  way (R-BTN-205, R-BTN-72): on a suspension or release at an outcome, the verdict answering the
+  last arrival; on a `stale-board` release at the claim's re-check, the verdict answering the
+  offered position, which core records and acts on by a want (R-BTN-5 / R-BTN-34). Each carries
+  its `answers` and `ctx_digest`. An `end: done` at an end station carries none.
 - `detail` is free text of at most 200 characters under the untrusted-text rule (§12), stored
-  and shown, never read. A claim the runner releases `cannot-finish:transient` because its leg
+  and shown, never read; R-BTN-33 names it among its exceptions. A `detail` on a suspension or a
+  done end is the end's `detail`, stored on the claim and on the finished run's history row
+  beside its evidence (R-BTN-81). A claim the runner releases `cannot-finish:transient` because its leg
   failed carries the failure's last line — for an agent's leg, the agent's own last line of
   output — masked (R-BTN-144).
 - Repeating the same end is answered `ok`; a different end on an ended claim is refused
@@ -151,9 +166,10 @@ A claim ends with `POST /v1/runner/claims/{id}/end`. Its body, stated here once:
 | `suspended:<station>` | `completed` | the holder stops at the station reached (R-BTN-40, R-BTN-71) | no |
 | `released:stale-board` | `released` | re-verification from git fails (R-BTN-5, R-BTN-34); the ticket was withdrawn or dropped from the board (R-BTN-147) | no |
 | `released:cannot-finish:transient` | `released` | the environment failed; also an untyped exception, a retryable course `interrupt` type, a `close` that failed three times (R-BTN-72), a session that could not start or be reattached, an invalid blocked end (R-BTN-126) | yes |
-| `released:cannot-finish:contract-output` | `released` | a leg's output failed its schema or its station's entry (R-BTN-82, R-BTN-109) | yes |
+| `released:cannot-finish:contract-output` | `released` | a leg's output failed its schema, its station's entry (R-BTN-82, R-BTN-109), or its course's output contract; held at once | yes |
 | `released:cannot-finish:capability` | `released` | the ticket needs what no eligible runner holds; the ticket is held at once, `non-retryable:capability` | yes |
 | `released:cannot-finish:spec` | `released` | the ticket or its course contradicts itself; also a non-retryable course `interrupt` type; held at once, `non-retryable:spec` | yes |
+| `released:cannot-finish:blocked` | `released` | the leg reports a refusal it cannot remedy by retrying; held at once (R-BTN-122) | yes |
 | `released:cannot-finish:contract-input` | `released` | an input failed its schema; held at once, raises `baton.contract` (R-BTN-82) | no |
 | `released:lease-lost` | `released` | the holder's lease lapsed (R-BTN-6) | yes, once per distinct runner per ticket and leg |
 | `released:blocked` | `released` | a prerequisite failed during the leg (R-BTN-126) | no; counts toward `max_blocked` (R-BTN-126) |
@@ -165,6 +181,7 @@ A claim ends with `POST /v1/runner/claims/{id}/end`. Its body, stated here once:
 | `released:provider-exhausted` | `released` | the leg reports that its provider account was exhausted | no |
 | `released:<bar reason>` | `released` | an owner bar that releases holders, with that bar's `reason` (R-BTN-67) | no |
 | `released:course-changed` | `released` | the leg left the course under the claim: an `off-graph` refusal or a heartbeat `station: unknown` (R-BTN-64) | no |
+| `released:short-wait` | `released` | core ended a claim that neither started a leg nor ended 30 minutes after its last arrival (R-BTN-72); the arrival's selection becomes a want (R-BTN-205) | no |
 | `released:off-branch` | `released` | not built: the claim's sha is not on the default branch (R-BTN-143) | no |
 | reaped, actor `alarm` | `reaped` | the runner was silent past its lease timeout (§9.5) | yes |
 | reaped, actor `admin:<fingerprint>` | `reaped` | an administrator's force-reap | no |
@@ -227,11 +244,18 @@ A claim ends with `POST /v1/runner/claims/{id}/end`. Its body, stated here once:
 
 ### 9.6 Confirming an end
 
-- **R-BTN-10 (confirmation by observation).** `status: built` A completed end is **unconfirmed** until a
-  snapshot observed after it is accepted (R-BTN-62), so the next claim's readiness is computed
-  from facts read after the end. The end's position stands from the moment Baton records it
-  (R-BTN-39); confirmation checks its evidence, not where it put the ticket. It is confirmed by
-  the first accepted snapshot whose observation began after the end and that:
+- **R-BTN-10 (confirmation by observation).** `status: partly B-352` A completed end is **unconfirmed** until a
+  snapshot observed after it is accepted (R-BTN-62), so the next selection is made over facts
+  read after the end. The end's position stands from the moment Baton records it
+  (R-BTN-39); confirmation checks its evidence, not where it put the ticket. The first accepted
+  ticket-source snapshot observed after a suspension that shows its ticket closed (any `closed_as`)
+  or dropped releases the still-unconfirmed suspension, regardless of evidence. Baton records
+  `released:ticket-closed` and logs `released` by `sync` with the observation and original end's
+  reason and evidence. This does not count as a failed attempt. A held rewrite or a confirm-only
+  re-post does not decide ticket membership.
+
+  Otherwise the end is confirmed by the first accepted snapshot whose observation began after
+  the end and that:
   - for an end that named `ended_at_sha` (R-BTN-8), a commit or a URL, carries the sync's
     `std:git.evidence@1` for that claim and that evidence with `found: true` — the
     observation's `unconfirmed` list (§4.3) tells the sync which ends wait and what each named.
@@ -242,11 +266,17 @@ A claim ends with `POST /v1/runner/claims/{id}/end`. Its body, stated here once:
   - for `done`, shows the ticket closed as done (`closed_tickets`) or absent, whatever it named.
 
   Baton sets `confirmed_at` and logs `confirmed`; the sync posts nothing extra.
+  An observation lists `evidence` in `required_features` when its `unconfirmed` list is nonempty.
+  The sync declares the protocol features it answers in the post's `sync_features`, beside its
+  version (`source.cli`). Missing or malformed declarations are read as none. The repository's
+  Sync screen shows the last recorded post's CLI version (or that it was not reported) beside
+  Baton's recommendation (R-BTN-197). It warns if that post answered an observation requiring
+  `evidence` without declaring it. The declaration never affects acceptance or confirmation.
 - **Claimable again** (unnumbered). A ticket is claimable only after a snapshot observed after
   its last claim ended (`end_observation`), and never while a completion is unconfirmed. A
   completion unconfirmed 6 hours after `ended_at` (its named evidence attested `found: false`
-  or never attested) raises `baton.unconfirmed` and is never confirmed automatically; an
-  administrator confirms or releases it from the dashboard (R-BTN-155).
+  or never attested) raises `baton.unconfirmed`. An administrator may confirm or release it from
+  the dashboard (R-BTN-155); a row without a ticket page offers those controls in the list itself.
 
 ### 9.7 Attempts
 

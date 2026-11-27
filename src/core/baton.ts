@@ -125,7 +125,7 @@ export class BatonCore {
     this.registry = new Registry({ store, now: () => this.now(), secretForge: (repository) => forgeSecrets(ports.config)[repository]?.forge, ensurePolicy: (repository, forge) => this.policies.ensure(repository, forge) });
     // §12.8 (B-145): the policy store, before everything that reads a knob — the claims' floor
     // rule, the heartbeat's reports and pins, the owner routes' approver checks.
-    this.policies = new Policies({ store, now: () => this.now(), releaseForFloor: (repository) => this.claims.releaseForFloor(repository) });
+    this.policies = new Policies({ store, now: () => this.now(), releaseForFloor: (repository) => this.claims.releaseForFloor(repository) }, ports.config.BATON_HUMAN_KEY);
     // R3-1258: the capacity envelope (R-BTN-87) and owner state (R-BTN-88).
     this.capacity = new Capacity({ store, now: () => this.now(), config: ports.config });
     this.syncWants = new SyncWants({ store, now: () => this.now() });
@@ -237,7 +237,11 @@ export class BatonCore {
     await this.seedKeys();
     // §12.8 (B-145): every repository's version 1 — the cooperative preset on a forge,
     // plain-git where the forge is git — so every reader finds one.
-    this.store.transaction(() => this.policies.seedAll());
+    const breakGlass = new Set((await this.humanBreakGlass()).keys());
+    this.store.transaction(() => {
+      this.policies.seedAll();
+      this.policies.checkInstanceHumanKeyFloor(breakGlass);
+    });
     await this.keepAlarm();
     // A trailing webhook dispatch owed from before a restart keeps its time (round 1, 1-A-4);
     // so do a trailing unblocked dispatch and the next reading to lapse (R-BTN-76, R-BTN-77).
@@ -595,7 +599,7 @@ export class BatonCore {
 
   private rowsFor = rowsFor;
 
-  // @model syncPost sha256:7c0efc930fe7
+  // @model syncPost sha256:de22f143bc15
   async board(repo: Repository, p: BoardPayload, issuer: string | null = null) {
     return board(this, repo, p, this.rowsFor, issuer);
   }
