@@ -1,0 +1,49 @@
+---
+id: B-388
+status: available
+topics: [baton]
+owns: {}
+prs: []
+title: B-388 — Keep git clone non-interactive inside a checkout with core.sshCommand, and reject contradictory heartbeat lease views
+depends_on: []
+order: 103
+tags: [roadmap-item]
+project: baton
+description: "B-280's SSH probe reads the caller's checkout config even for git clone, dropping BatchMode, and its heartbeat validator accepts claims: [] beside a non-null claim, which makes the sidecar fence a held slot."
+repos: [baton]
+---
+
+**Found by:** the review of B-280's PR, round 2 ([`docs/review/B-280-round-2.mdx`](../docs/review/B-280-round-2.mdx)). #373 was merged on 2026-11-25 with these findings open. This is a defect report, not an owner brief.
+
+**Spec:** [BATON_SPEC §8.1](../spec/BATON_SPEC/08-runners.md#sec-8-1) ([R-BTN-3](../spec/BATON_SPEC/08-runners.md#sec-8-1), the heartbeat and its answer), [BATON_SPEC §8.3](../spec/BATON_SPEC/08-runners.md#sec-8-3) ([R-BTN-72](../spec/BATON_SPEC/08-runners.md#sec-8-3), the runner).
+
+**Depends on:** none.
+
+### What is open
+
+1. `sshProbe` in `src/defaults/git.mjs` reads `core.sshCommand` from the caller's checkout before every git call and, when it is set there, leaves out the default `BatchMode=yes` transport. `git clone` does not use the calling checkout's local config, so a clone run from inside a checkout with a local `core.sshCommand` (qualified dependencies in `src/defaults/tickets.ts`, for one) uses default SSH without batch mode and can prompt; reproduced with a fake SSH ([thread](https://github.com/immediately-run/baton/pull/373#discussion_r4661208224)).
+2. `isBeatAnswer` in `src/runner/replies.ts` accepts a reply with `claims: []` and a non-null `claim`. The server derives `claim` from `claims[0]`, so such a reply is contradictory, yet the sidecar records it as a success and treats the empty list as authoritative, fencing the slot the reply says is held ([thread](https://github.com/immediately-run/baton/pull/373#discussion_r4661208227)).
+
+### What to build
+
+1. Probe the configuration the actual command will use: for `clone` (and any command run outside a checkout), the global and system config and the command's own `-c` overrides, not the caller's local config. Cover `clone` as well as `ls-remote` in the fixture test.
+2. Refuse a heartbeat answer whose `claims` and `claim` disagree (an empty or different `claims[0]` beside a non-null `claim`), keeping the legacy `claim`-only answer valid; test that the sidecar does not act on the refused reply.
+
+### Exit criteria
+
+- A fake-SSH clone run from inside a checkout with a local `core.sshCommand` still runs with `BatchMode=yes`.
+- A heartbeat answer with `claims: []` and a non-null `claim` is rejected at the boundary, and a `claim`-only answer is still accepted.
+- `npm test`, `npm run typecheck` and `npm run check:package` green.
+
+### Trust
+
+The heartbeat answer comes from Baton but is checked at the runner's boundary, as B-280's invariant requires; the git change only decides which transport options a non-interactive call carries, and never reads a credential.
+
+### Invariants
+
+- Every git call stays bounded and non-interactive by default, and a configured transport is still honoured where git would honour it.
+- A runner acts only on a heartbeat answer that passed its boundary check.
+
+## Status
+
+_filed 2026-11-27._

@@ -1,0 +1,64 @@
+---
+title: "B-345 — Property tests over the real core: random interleavings of claims, heartbeats, syncs and owner actions, asserting replay.qnt's invariants"
+id: B-345
+project: baton
+status: done
+updated: 2026-11-27
+repos:
+  - baton
+tags:
+  - roadmap-item
+tier: judgement
+description: "A fast-check property test on the local host drives the core through random interleavings (claim, heartbeat, advance, end, sync observe and post, lease and fence time-outs, reap, owner hold, confirm and release) and checks after every step the invariants model/replay.qnt and the safety set of properties.qnt check today, with oneClaimPerRunner as R-BTN-4 now says it. Runs in npm test under 60 s. Replaces the Quint-drawn replay before B-271 retires it. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: [https://github.com/immediately-run/baton/pull/458]
+depends_on: []
+---
+
+**Brief:** the owner, 2026-11-26 (in a Claude Code session on bering), deciding to retire the Quint model (B-271 re-scoped): "I don't think the quint model as currently implemented really helps." They asked for the supervisor's replacement checks as tickets under a meta-ticket; this is the first: "Property tests over the real core on the local host: random interleavings of claims, heartbeats, syncs and owner actions, asserting the invariants replay.qnt checks today. They test the code itself, run in seconds, and can't drift from it."
+
+**Spec:** [BATON_SPEC §15](../../spec/BATON_SPEC/15-verification.md#sec-15) [R-BTN-31](../../spec/BATON_SPEC/15-verification.md#sec-15) (every behaviour change names its scenario), [§9.1](../../spec/BATON_SPEC/09-claims.md#sec-9-1) [R-BTN-4](../../spec/BATON_SPEC/09-claims.md#sec-9-1) (a runner's claims), [§9.5](../../spec/BATON_SPEC/09-claims.md#sec-9-5) [R-BTN-19](../../spec/BATON_SPEC/09-claims.md#sec-9-5) (fences), [§9.6](../../spec/BATON_SPEC/09-claims.md#sec-9-6) [R-BTN-10](../../spec/BATON_SPEC/09-claims.md#sec-9-6) (confirmation).
+
+**Depends on:** none.
+
+### Why
+
+`test/model/replay.test.ts` (R3-1244) drives the real core with traces drawn by `quint run --mbt` from `model/replay.qnt`. `npm test` sets `BATON_SKIP_QUINT=1`, so it runs nowhere in CI. The traces also come from a model that has drifted from the spec. Its invariants are still the right ones; the generator should be TypeScript that drives the core directly. The re-scoped B-271 retires `model/replay.qnt` and this test only after this ticket lands.
+
+### What to build
+
+1. **A generator of interleavings** over the local host (`test/hosts/local.ts`, fake clock): several runners and tickets, and a random sequence of the actions the harness can make the core take. Those are claim, heartbeat, advance, end (done, suspended, released), sync observe and post, clock ticks past leases and fences, reap, and the owner's hold, confirm and release. Use `fast-check` (or an equivalent with shrinking and a printed seed), added as a dev dependency.
+2. **The invariants**, checked after every step against the store:
+   - every invariant `model/replay.qnt` and `model/properties.qnt`'s safety set check today, read from those files and listed in the test with the rule each enforces;
+   - `oneClaimPerRunner` as R-BTN-4 now says it: at most the grant's `max_claims`, not one.
+
+   The PR lists each invariant it carries over and each it drops, with the reason.
+3. **Budget:** the default run finishes in under 60 seconds in `npm test`. An env var raises the run count for a local soak.
+4. **Shrinking pays:** a failure prints the seed and the shrunk action list, and a test reruns a given seed.
+
+### Trust
+
+No new input: test code only.
+
+### Invariants
+
+- No change under `src/`, unless the test finds a defect. Then each defect gets its own scenario (R-BTN-31) in the same PR, or its own ticket if it is not small.
+
+### Tests
+
+The test is the deliverable. Take its scenario number with `baton tickets next scenario`.
+
+### Exit criteria
+
+- `npm test` runs the property test, green, under its 60-second budget.
+- Every invariant of `replay.qnt` and of `properties.qnt`'s safety set is checked or listed as dropped with a reason.
+
+## Status
+
+_filed 2026-11-26._
+
+_2026-11-27: available, https://github.com/immediately-run/baton/pull/458._
+
+_2026-11-27: closed in the 2026-11-27 sweep of tickets Baton held at merged with their files still open: #458 merged and the ticket file was never closed; the PR had no review rounds to archive, https://github.com/immediately-run/baton/pull/458._

@@ -1,0 +1,51 @@
+---
+id: B-392
+status: available
+topics: [baton]
+owns: {}
+prs: []
+title: B-392 — Give operators a released CLI that sends B-300's confirmations, and complete the B-300 history entry
+depends_on: []
+order: 107
+tags: [roadmap-item]
+project: baton
+description: "Findings left open when B-300's PR merged: the runbooks require a CLI release that does not exist while the server refuses unconfirmed revocations, the history line omits R-BTN-138, and an owner question went unanswered."
+repos: [baton]
+---
+
+**Found by:** the review of B-300's PR, round 2 ([`docs/review/B-300-round-2.mdx`](../docs/review/B-300-round-2.mdx)). #341 was merged on 2026-11-25 with these findings open. This is a defect report, not an owner brief.
+
+**Spec:** [BATON_SPEC §12.2](../spec/BATON_SPEC/12-security.md#sec-12-2) (destructive actions and `confirm: true`); [§12.5](../spec/BATON_SPEC/12-security.md#sec-12-5) ([R-BTN-158](../spec/BATON_SPEC/12-security.md#sec-12-5)); [§3.1](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-1) ([R-BTN-138](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-1), named in the history line).
+
+**Depends on:** none.
+
+### What is open
+
+1. The server now refuses unconfirmed revocations with `confirm-required`, and the incident runbooks (`docs/runbooks/compromised-runner.mdx`, `docs/runbooks/owner-key-loss.mdx`) require an exact pinned CLI release containing B-300 through `BATON_CONFIRM_CLI_VERSION`. No such release exists (`package.json` is 0.1.4, which the CI publish step skips), and production deploys on pushes to `main`, so emergency revocation has no supported client ([thread](https://github.com/immediately-run/baton/pull/341#discussion_r4657364373)).
+2. The 2026-11-22 entry of `spec/BATON_SPEC_HISTORY.md` (B-300) names R-BTN-16, R-BTN-158 and R-BTN-159 on its `Rules changed:` line but not R-BTN-138, which the PR also amended, so the stale-rule guard misses it ([thread](https://github.com/immediately-run/baton/pull/341#discussion_r4657364376)).
+3. The PR asked the owner whether the clients' refusal to send a bearer to a non-loopback `http` origin, and a local-host startup guard requiring an `https` `--origin` on a non-loopback `--host`, should come forward ahead of B-46; it was not answered before merge.
+
+### What to build
+
+1. **For the owner (not this ticket's leg):** publish a CLI release containing B-300 and set the runbooks' version. The leg does not publish or deploy; it prepares the version bump and the runbook text naming that version, in this ticket's PR, for the owner to release.
+2. Add R-BTN-138 to the B-300 history entry's `Rules changed:` line and run `npm run spec:index`.
+3. Put to the owner as a one-letter decision in this ticket's PR: (a) build the two small refusals now, here; or (b) leave them to B-46 as marked. Build what the owner picks.
+
+### Exit criteria
+
+- `node scripts/link-spec-refs.mjs --check` and `npm run check:spec` green, and the stale-rule guard reads R-BTN-138 from the B-300 entry.
+- The runbooks name one exact release version that sends `confirm: true` (the owner publishes it).
+- `npm test` and `npm run typecheck` green.
+
+### Trust
+
+No new input from this ticket's code; publishing and deploying stay the owner's acts, and no leg runs them.
+
+### Invariants
+
+- A confirmation is a second refusal after the action's own authorisation, never a way in (R-BTN-129).
+- The CLI's requests keep working without `Origin` or `Sec-Fetch-Site` (R-BTN-197).
+
+## Status
+
+_filed 2026-11-27._

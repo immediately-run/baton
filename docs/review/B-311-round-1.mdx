@@ -11,7 +11,7 @@ a partial merge that can close a ticket, and disagreement between the sync's and
 stub's merge and verdict checks.
 
 The PR was merged on 2026-11-26. Ten findings were fixed in `4dda82f1`; the machine-key case
-stayed open as an owner decision, which round 2 repeated and FOLLOWUP-B-311 carries.
+stayed open as an owner decision, which round 2 repeated and B-394 carries.
 
 | Finding | Disposition |
 |---|---|
@@ -23,6 +23,6 @@ stayed open as an owner decision, which round 2 repeated and FOLLOWUP-B-311 carr
 | [Blocking: an older push can undo a newer hand approval](https://github.com/immediately-run/baton/pull/348#discussion_r4657717281) | Fixed in `4dda82f1`; round 2 found the guard now too broad. |
 | [Blocking: a partial merge suppresses valid hand facts on an open PR](https://github.com/immediately-run/baton/pull/348#discussion_r4657717284) | Fixed in `4dda82f1`. |
 | [Blocking: commit metadata does not identify who pushed or when](https://github.com/immediately-run/baton/pull/348#discussion_r4657717287) | Fixed in `4dda82f1`. |
-| [Blocking: S-BTN-309's machine-key accept-and-strip case is not implemented](https://github.com/immediately-run/baton/pull/348#discussion_r4657717291) | Answered: an owner decision (R-BTN-93's grant-scoped wording against the runner and sync authorization tests); the existing boundary is kept. Open; carried by FOLLOWUP-B-311 as a question for the owner. |
+| [Blocking: S-BTN-309's machine-key accept-and-strip case is not implemented](https://github.com/immediately-run/baton/pull/348#discussion_r4657717291) | Answered: an owner decision (R-BTN-93's grant-scoped wording against the runner and sync authorization tests); the existing boundary is kept. Open; carried by B-394 as a question for the owner. |
 | [Blocking: more than 100 attestations stall every board update](https://github.com/immediately-run/baton/pull/348#discussion_r4657717293) | Fixed in `4dda82f1`; round 2 found the same stall at the 1 MiB bound. |
 | [Blocking: the scenario misses several required branches](https://github.com/immediately-run/baton/pull/348#discussion_r4657717295) | Fixed in `4dda82f1`. |

@@ -10,9 +10,9 @@ two cases where a custom adapter's store-only activity is still missed; the 228 
 typecheck, package check and spec check passed.
 
 The PR was merged on 2026-11-25 with this round's findings open. No fix leg ran after this round;
-the later commits only merged `main`. The open findings are carried by FOLLOWUP-B-284.
+the later commits only merged `main`. The open findings are carried by B-390.
 
 | Finding | Disposition |
 |---|---|
-| [Blocking: the watchdog compares raw command strings while the stub launches parsed argv, so a differently spaced or quoted command that launches the same argv loses the adapter's paths](https://github.com/immediately-run/baton/pull/377#discussion_r4662128252) | Open on `main`: `src/defaults/stub-runtime.ts` still compares the trimmed strings. Carried by FOLLOWUP-B-284. |
-| [Should-fix: custom activity paths resolve in the runner's environment, not the executor's where the leg runs](https://github.com/immediately-run/baton/pull/377#discussion_r4662128258) | Open on `main`: `src/runner/main.ts` still resolves the host adapter's paths runner-side. Carried by FOLLOWUP-B-284. |
+| [Blocking: the watchdog compares raw command strings while the stub launches parsed argv, so a differently spaced or quoted command that launches the same argv loses the adapter's paths](https://github.com/immediately-run/baton/pull/377#discussion_r4662128252) | Open on `main`: `src/defaults/stub-runtime.ts` still compares the trimmed strings. Carried by B-390. |
+| [Should-fix: custom activity paths resolve in the runner's environment, not the executor's where the leg runs](https://github.com/immediately-run/baton/pull/377#discussion_r4662128258) | Open on `main`: `src/runner/main.ts` still resolves the host adapter's paths runner-side. Carried by B-390. |

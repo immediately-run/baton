@@ -13,12 +13,12 @@ the out-of-scope runner and shared files to be restored to `main`.
 
 The PR was merged on 2026-11-25 with this round's lint findings open. No fix leg ran after this
 round; the merge of `main` in `fb3c2f85` took `main`'s versions of the masking and executor
-files. The open findings are carried by FOLLOWUP-B-278.
+files. The open findings are carried by B-386.
 
 | Finding | Disposition |
 |---|---|
 | [Should-fix (scope note): restore `src/runner/mask.ts`, `src/shared/mask.*` and `src/runner/executor.ts` to `main`](https://github.com/immediately-run/baton/pull/371#issuecomment-7089476044) | Fixed in `fb3c2f85`: the merge took `main`'s versions of all four files. |
 | [Blocking: suppressing the literal masker inside a key block lets a multiline credential's suffix through](https://github.com/immediately-run/baton/pull/371#discussion_r4661199781) | Fixed in `fb3c2f85`: `main`'s masker replaced the PR's change. |
-| [Blocking: a static fragment held in a local constant (`const conflict = "OR IGNORE"`) is dropped from the scanned template](https://github.com/immediately-run/baton/pull/371#discussion_r4661199783) | Open on `main` (`scripts/lib/sql-dialect.mjs` resolves only inline fragments). Carried by FOLLOWUP-B-278. |
-| [Blocking: `t.'rowid'`, `_rowid_` and `oid` read the implicit row id and are not flagged](https://github.com/immediately-run/baton/pull/371#discussion_r4661199785) | Open on `main` (the matcher compares the identifier to `ROWID` alone). Carried by FOLLOWUP-B-278. |
+| [Blocking: a static fragment held in a local constant (`const conflict = "OR IGNORE"`) is dropped from the scanned template](https://github.com/immediately-run/baton/pull/371#discussion_r4661199783) | Open on `main` (`scripts/lib/sql-dialect.mjs` resolves only inline fragments). Carried by B-386. |
+| [Blocking: `t.'rowid'`, `_rowid_` and `oid` read the implicit row id and are not flagged](https://github.com/immediately-run/baton/pull/371#discussion_r4661199785) | Open on `main` (the matcher compares the identifier to `ROWID` alone). Carried by B-386. |
 | [Should-fix: the executor's exit and close handling is a separate runner change and belongs in its own PR](https://github.com/immediately-run/baton/pull/371#discussion_r4661199786) | Fixed in `fb3c2f85`: `main`'s executor replaced the PR's change. |

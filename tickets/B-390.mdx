@@ -1,0 +1,48 @@
+---
+id: B-390
+status: available
+topics: [baton]
+owns: {}
+prs: []
+title: B-390 — A runtime harness adapter's activity reaches the standard watchdog whatever the command's quoting and wherever the leg runs
+depends_on: []
+order: 105
+tags: [roadmap-item]
+project: baton
+description: "Two findings left open when B-284's PR merged: the stub matches adapter commands as raw strings, and resolves adapter activity paths in the runner's environment rather than the executor's."
+repos: [baton]
+---
+
+**Found by:** the review of B-284's PR, round 2 ([`docs/review/B-284-round-2.mdx`](../docs/review/B-284-round-2.mdx)). #377 was merged on 2026-11-25 with these findings open. This is a defect report, not an owner brief.
+
+**Spec:** [BATON_SPEC §8.1](../spec/BATON_SPEC/08-runners.md#sec-8-1) (the harness a runner declares); [§8.4](../spec/BATON_SPEC/08-runners.md#sec-8-4) (where a leg runs, its executor).
+
+**Depends on:** none.
+
+### What is open
+
+1. The standard stub uses a runtime adapter's activity paths only when `ctx.agent_activity.command` equals the repository's agent command as a trimmed string (`src/defaults/stub-runtime.ts`), while it launches the parsed argv. `node .baton/a.mjs` and `node  ".baton/a.mjs"` launch the same argv, but the watchdog ignored the adapter's store and killed the agent after 8 of 18 writes ([thread](https://github.com/immediately-run/baton/pull/377#discussion_r4662128252)).
+2. The host adapter's paths are resolved in the runner's environment (`src/runner/main.ts`, `agentActivity`), not where the leg runs. With a pinned executor whose store location differs, the watchdog polls the runner's path and stops a live agent ([thread](https://github.com/immediately-run/baton/pull/377#discussion_r4662128258)).
+
+### What to build
+
+1. Compare the two commands as split argument arrays (`splitWords`), element by element, and cover the spacing and quoting case in S-BTN-41.
+2. Resolve a runtime adapter's activity paths in the leg's own environment (the stub resolves them from the adapter's declared inputs where it runs), or state in §8.1 that runtime adapter paths must be stable across executors and refuse an adapter on an executor where they are not. Cover a store location that differs between runner and executor.
+
+### Exit criteria
+
+- S-BTN-41 runs a store-only third harness through the generated watchdog with a differently quoted command, and with a different executor store location, and the agent completes.
+- `npm test` and `npm run typecheck` green.
+
+### Trust
+
+No new input: the adapter table is runner code and the command is the repository's setting; only how the stub matches and resolves them changes.
+
+### Invariants
+
+- Core derives nothing from a harness name; matching stays in the runner and the stub.
+- The watchdog never treats a working agent as idle because its activity was looked for in the wrong place.
+
+## Status
+
+_filed 2026-11-27._

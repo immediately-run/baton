@@ -1,0 +1,50 @@
+---
+title: B-248 — A runner keeps a local work queue, and local orders run while Baton is unreachable
+id: B-248
+project: baton
+status: done
+updated: 2026-11-27
+repos:
+  - baton
+tags:
+  - roadmap-item
+description: "A runner-side queue of a host administrator's orders, started without Baton only while it is down, and their ends meet the gates on return"
+topics:
+  - baton
+owns: {}
+prs: [https://github.com/immediately-run/baton/pull/296]
+depends_on: []
+---
+
+**What:** each runner keeps a local work queue, and a local administrator can add orders to it that run without waiting for Baton. Owner direction, 2026-11-15, after the second day the Durable Object quota (5M rows_read/day) took Baton down and every runner sat idle on "no recommendation (internal error)" for ~10 hours.
+
+- **The queue.** ~~Recommendations the runner receives are kept as an ordered local queue (persisted beside the runner's state), not discarded after one claim attempt. Only a claimed entry may start; an unclaimed entry is a hint the claim re-checks (R-BTN-72), so a stale entry costs one refused claim, as today. A runner holding a non-empty queue does not need to ask for recommendations every beat — fewer reads.~~ (2026-11-19: dropped — B-287's runner reads no recommendations; the queue holds the orders, persisted beside the runner's state.)
+- **Local orders.** `baton queue add <repo>:<ticket>[@leg]` (and `list`, `remove`), run as the user who runs the runner on its host, adds an *order*. Never writable from inside a leg (sandboxed legs cannot reach the host; keep it so).
+- **"Unconditional" means "does not wait for Baton", never "skips the gates"** (owner ruling). While Baton answers, an order is a strong preference: it goes first, through the normal claim and every gate. Only while Baton is unreachable does the runner start an order without a claim.
+- **The work runs unconditionally; its result does not** (owner ruling). When Baton is back, the runner reports the leg as worked under a local order, naming who gave it (provenance + an audit event). The end then meets the gates in force at that moment and the course continues as usual (review, CI, confirm). A refused end leaves the PR in place; nothing is lost.
+- **Safeguards** (owner accepted):
+  - the runner refuses an order its last Baton snapshot shows held by another worker, on hold, or ~~outside its grant's tier/capabilities~~;
+  - before starting an order offline it pushes a git lock — the same claim marker `baton tickets claim --offline` writes — so a second runner's push fails;
+  - if two still collide, Baton keeps the first end and fences the other on reconnect (R-BTN-19).
+
+**Done when:** a scenario where Baton returns errors shows a runner idle on recommendations, then working an order added locally, then reporting its end on recovery, with the end gated as usual; a second scenario shows the git lock refusing a second runner; a third shows an order with Baton up going through the normal claim and being refused by a gate. Spec amended (§6.13 runner, §9 claims) with a decisions entry.
+
+### Trust
+
+New input: a local order — a ticket id and optional leg written by the runner host's user through `baton queue add`. It grants no authority Baton would refuse: while Baton is up it only reorders the runner's own attempts; while Baton is down it starts a leg whose end Baton gates on return. The reported provenance (who ordered it) is recorded, not trusted for any decision.
+
+### Invariants
+
+- R-BTN-72 (recommend then claim) and rule 3 (one claim per ticket): with Baton up, an order is only a claim attempt.
+- R-BTN-67 (owner bars), ~~tiers~~ and holds: never overridden by an order; checked from the last snapshot offline and by Baton on return.
+- R-BTN-19 (fencing): a collision is resolved by Baton on reconnect; the git lock is a best-effort guard, not the authority.
+
+## Status
+
+_filed 2026-11-15._
+- 2026-11-19 — built on `claude/B-248-runner-local-queue`: [BATON_SPEC §8.3](../../spec/BATON_SPEC/08-runners.md#sec-8-3) ([R-BTN-202](../../spec/BATON_SPEC/08-runners.md#sec-8-3)), scenario [S-BTN-242](../../spec/BATON_SPEC/15-verification.md#scenarios). The owner's rulings of 2026-11-19 change the safeguards above: **no git lock** — the runner warns that nothing guarantees another runner is not running the same leg and keeps asking Baton ([R-BTN-193](../../spec/BATON_SPEC/01-what-baton-is.md) stands) — and the result is reported through an ordinary claim and advance, no new route. The last-snapshot refusals are Baton's claim on return.
+- 2026-11-19 — merged `main` with B-287 (#297), whose runner claims in one unnamed request and reads no recommendations: ~~recommendations kept as a runner-side queue~~ is dropped, the queue holds only orders, an order is claimed by name, and an offline order runs only with `@leg`, from the leg's only station.
+
+_2026-11-23 — tiers retired (spec/retire-tiers: [BATON_SPEC §6.6](../../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-6) gate 5, [R-BTN-66](../../spec/BATON_SPEC/01-what-baton-is.md#sec-1)): the struck tier clauses are gone from the spec — no ticket tier, runner ceiling, grant `max_tier`, ladder, `ready_by_tier` or `?tier=`. Build the rest without them._
+
+_2026-11-27: closed in the 2026-11-27 sweep of tickets Baton held at merged with their files still open: #296 merged and the ticket file was never closed; the PR had no review rounds to archive, https://github.com/immediately-run/baton/pull/296._

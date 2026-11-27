@@ -11,10 +11,10 @@ tests (S-BTN-229, replay, protected requests), typecheck and the whitespace chec
 
 The PR was merged on 2026-11-26, with this round's findings open. No fix leg ran after this round:
 the later commits merge `main` and record the test gate. The open findings are carried by
-FOLLOWUP-B-279.
+B-387.
 
 | Finding | Disposition |
 |---|---|
-| [Blocking: adjacent literals and constant template substitutions hide a write](https://github.com/immediately-run/baton/pull/372#discussion_r4660825862) | Open on `main` (`test/lib/scenarioSource.ts` scans each literal alone and replaces every substitution with a placeholder). Carried by FOLLOWUP-B-279. |
-| [Blocking: a leading U+FEFF is swallowed into the `UPDATE` token](https://github.com/immediately-run/baton/pull/372#discussion_r4660825865) | Open on `main` (the scanner's identifier class spans `\u0080-\uffff`, the byte-order mark included). Carried by FOLLOWUP-B-279. |
-| [Should-fix: the suggested recovery does not recover a depth-one, single-branch checkout](https://github.com/immediately-run/baton/pull/372#discussion_r4660825870) | Open on `main` (`test/lib/scenarioSqlBudget.ts` still tells the reader to run `git fetch origin main`, which leaves `refs/remotes/origin/main` unset there). Carried by FOLLOWUP-B-279. |
+| [Blocking: adjacent literals and constant template substitutions hide a write](https://github.com/immediately-run/baton/pull/372#discussion_r4660825862) | Open on `main` (`test/lib/scenarioSource.ts` scans each literal alone and replaces every substitution with a placeholder). Carried by B-387. |
+| [Blocking: a leading U+FEFF is swallowed into the `UPDATE` token](https://github.com/immediately-run/baton/pull/372#discussion_r4660825865) | Open on `main` (the scanner's identifier class spans `\u0080-\uffff`, the byte-order mark included). Carried by B-387. |
+| [Should-fix: the suggested recovery does not recover a depth-one, single-branch checkout](https://github.com/immediately-run/baton/pull/372#discussion_r4660825870) | Open on `main` (`test/lib/scenarioSqlBudget.ts` still tells the reader to run `git fetch origin main`, which leaves `refs/remotes/origin/main` unset there). Carried by B-387. |

@@ -1,0 +1,47 @@
+---
+id: B-383
+status: available
+topics: [baton]
+owns: {}
+prs: []
+title: B-383 — A refused dispatch with an unsupported response type records only its HTTP status, not the forge's payload
+depends_on: []
+order: 98
+tags: [roadmap-item]
+project: baton
+description: B-275's dispatch-refused reason keeps the tag-stripped body of any non-JSON response, so an XML 422 stores forge metadata; record the status alone for types other than text/plain and JSON.
+repos: [baton]
+---
+
+**Found by:** the review of B-275's PR, round 2 ([`docs/review/B-275-round-2.mdx`](../docs/review/B-275-round-2.mdx)). #366 was merged on 2026-11-24 with this finding open. This is a defect report, not an owner brief.
+
+**Spec:** [BATON_SPEC §3.3](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-3) ([R-BTN-94](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-3), a refused dispatch is a discrepancy an owner can read), [BATON_SPEC §1](../spec/BATON_SPEC/01-what-baton-is.md#sec-1) ([R-BTN-33](../spec/BATON_SPEC/01-what-baton-is.md#sec-1), filter fields only).
+
+**Depends on:** none.
+
+### What is open
+
+1. `dispatchRefusal` (`src/core/dispatch.ts`) reads `message` only from a JSON body; for any other declared type it keeps the body, strips tags and clips it to 500 characters. A stubbed `application/xml` 422 stores both the error and unrelated XML metadata in the `dispatch-refused` discrepancy, which breaks B-275's invariant that the stored reason is a short status text, not a payload ([thread](https://github.com/immediately-run/baton/pull/366#discussion_r4659848039)).
+
+### What to build
+
+1. Keep a body as the reason only for declared `text/plain` and for JSON's `message`; for any other declared type, record the HTTP status alone. Add a regression case for an `application/xml` (and an `text/html`) 422.
+
+### Exit criteria
+
+- A test drives `dispatchWorkflow` against a stubbed `application/xml` 422 and reads a `dispatch-refused` discrepancy whose message is `HTTP 422` alone.
+- The existing plain-text, JSON, oversized, stalled and redaction cases still pass.
+- `npm test` and `npm run typecheck` green.
+
+### Trust
+
+The response body is written by a forge Baton does not control; the fix narrows what of it is stored, and the request's credential stays redacted.
+
+### Invariants
+
+- A refused dispatch never fails the request that wanted it.
+- The stored reason is short text, never a payload, and is rendered as text.
+
+## Status
+
+_filed 2026-11-27._

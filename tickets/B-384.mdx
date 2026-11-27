@@ -1,0 +1,51 @@
+---
+id: B-384
+status: available
+topics: [baton]
+owns: {}
+prs: []
+title: B-384 — Spec ledger counts only real Vitest test titles and reads scenarios only from the scenario table
+depends_on: []
+order: 99
+tags: [roadmap-item]
+project: baton
+description: "Three findings left open when B-276's rule ledger merged: a local it() counts as a test, it.each and it.runIf titles do not, and rows outside the scenario table overwrite a scenario's rules."
+repos: [baton]
+---
+
+**Found by:** the review of B-276's PR, round 2 ([`docs/review/B-276-round-2.mdx`](../docs/review/B-276-round-2.mdx)). #367 was merged on 2026-11-25 with these findings open. This is a defect report, not an owner brief.
+
+**Spec:** [BATON_SPEC §15](../spec/BATON_SPEC/15-verification.md#sec-15) ([R-BTN-30](../spec/BATON_SPEC/15-verification.md#sec-15): scenarios are tested or pending by name).
+
+**Depends on:** none.
+
+### What is open
+
+1. `testScenarios` in `scripts/spec-ledger.mjs` counts any call whose callee is an identifier spelled `test`, `it` or `describe`, so a fixture such as `const it = x => x; it('S-BTN-999')` in a test file marks a scenario covered while registering no test ([thread](https://github.com/immediately-run/baton/pull/367#discussion_r4660085743)).
+2. Literal titles on parameterised and conditional Vitest tests (`it.each([1])('S-BTN-999 case %d', …)`, `it.runIf(true)('S-BTN-999', …)`) do not count, though `test/unit/runner-main.test.ts` already uses the first form for S-BTN-21 ([thread](https://github.com/immediately-run/baton/pull/367#discussion_r4660085749)).
+3. `scenarioRules` parses every line of the spec, so a row outside §15's scenario table (a fenced example under Gates repeating a scenario id) overwrites that scenario's cited rules, and the ledger credits its test to the wrong rule ([thread](https://github.com/immediately-run/baton/pull/367#discussion_r4660085755)).
+
+### What to build
+
+1. Count a title only when the callee resolves to Vitest's `test`, `it` or `describe` (imported from `vitest`, or the global when the file imports none), never a local binding of that name.
+2. Accept the Vitest member and chained forms (`it.each(...)(title)`, `it.runIf(...)(title)`, `it.skipIf`, `describe.each`, `.only`, `.concurrent`) whose title is a literal.
+3. Read scenario definitions only from the rows of §15's `Scenarios` table, keeping the shared row parser.
+
+### Exit criteria
+
+- `scripts/spec-ledger.test.mjs` covers a local `it` fixture (not counted), `it.each` and `it.runIf` titles (counted), and a fenced example row under Gates (ignored).
+- `npm run check:spec` passes with the regenerated index and an unchanged or shrunk pending list.
+- `npm test` and `npm run typecheck` green.
+
+### Trust
+
+The ledger is evidence the checks rely on; a matcher that counts a non-test as coverage lets a scenario leave the pending list untested.
+
+### Invariants
+
+- The pending list only shrinks (R-BTN-30, R-BTN-31).
+- `spec/BATON_SPEC.md` is written only by `npm run spec:index`.
+
+## Status
+
+_filed 2026-11-27._

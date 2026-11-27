@@ -1,0 +1,21 @@
+---
+title: R3-1263 review round 3
+description: Findings and disposition for the third review of pulled syncs and the forge dispatch adapters, merged with three blocking and one should-fix finding open.
+---
+
+Reviewed [Baton #311](https://github.com/immediately-run/baton/pull/311) at `c07df195`
+([review](https://github.com/immediately-run/baton/pull/311#pullrequestreview-6054818330)). The
+verdict was changes: the reviewer ran typecheck, the model links and 73 focused tests on both
+hosts, reproduced three blocking paths against an in-memory core, and found an owner-state round
+trip that fails, a trailing hint that opens a window, and polling that is still not nonce-only.
+
+The PR was merged on 2026-11-26 with this round's findings open; the commits after this round are
+merges of `main` and test repairs. No fix leg ran after this round. The open findings are carried
+by B-400.
+
+| Finding | Disposition |
+|---|---|
+| [Blocking: an untouched same-version export is refused on import](https://github.com/immediately-run/baton/pull/311#discussion_r4692749466) (setting `dispatch: null` leaves an `unblocked_trigger` that import then rejects) | Open on `main` (`Admin.change` still clears no `unblocked_trigger` when `dispatch` changes, and `src/core/ownerState.ts` validates it on import). Carried by B-400. |
+| [Blocking: a skipped trailing hint still advances both send timestamps](https://github.com/immediately-run/baton/pull/311#discussion_r4692749478), so a fresh webhook waits another window | Open on `main` (`dueTrailing` in `src/core/webhook.ts` stamps every due repository before the want is checked). Carried by B-400. |
+| [Blocking: polling can still arm the alarm](https://github.com/immediately-run/baton/pull/311#discussion_r4692749482): `keepAlarm(true)` runs before the polling guard, so a poll with no alarm persists a change | Open on `main` (`fetch` in `src/core/baton.ts` calls `keepAlarm(true)` for every request). Carried by B-400, with the spec question it raises. |
+| [Should-fix: the README and the registration runbook still configure `GITHUB_DISPATCH_TOKEN`](https://github.com/immediately-run/baton/pull/311#discussion_r4692749488) | Open on `main` (`README.md` and `docs/runbooks/register-baton.mdx` still name it). Carried by B-400. |

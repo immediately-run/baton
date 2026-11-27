@@ -1,0 +1,51 @@
+---
+id: B-382
+status: available
+topics: [baton]
+owns: {}
+prs: []
+title: B-382 — Cover the executor's bounded drain with a test and settle B-272's retired-repository codes and test-retarget criterion
+depends_on: []
+order: 97
+tags: [roadmap-item]
+project: baton
+description: "Three findings left open when B-272's PR merged: no test for a helper holding the executor's pipes, and two mismatches between the ticket's criteria and the merged code that the owner decides."
+repos: [baton]
+---
+
+**Found by:** the review of B-272's PR, round 2 ([`docs/review/B-272-round-2.mdx`](../docs/review/B-272-round-2.mdx)). #363 was merged on 2026-11-25 with these findings open. This is a defect report, not an owner brief.
+
+**Spec:** [BATON_SPEC §3.1](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-1) ([R-BTN-47](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-1): every route naming a repository refuses a retired one); [§8.4](../spec/BATON_SPEC/08-runners.md#sec-8-4) (a call's end is its process group's end).
+
+**Depends on:** none.
+
+### What is open
+
+1. The builtin executor reports a call's result on `close`, after the group kill at `exit`. A helper that left the process group and still holds stdout or stderr keeps the result waiting; `main` caps that wait at one second (`src/runner/executor.ts`, since `16959c4e`), but no test covers it, and the review measured a 200 ms timeout returning after about a second ([thread](https://github.com/immediately-run/baton/pull/363#discussion_r4659560398)).
+2. B-272's invariant says a route naming a retired repository answers `not-found`; runner mode answers `invalid-params` and registered reads `forbidden`, and S-BTN-198 and S-BTN-250 pin those codes. Neither serves retired state. The ticket and the API contract disagree ([thread](https://github.com/immediately-run/baton/pull/363#discussion_r4659560405)).
+3. B-272's done-when allowed only import changes in tests; `test/unit/retired-routes.test.ts` now scans `routes/admin.ts`, and `test/unit/webhook-merge-sync.test.ts` calls the extracted delivery function. The criterion was not amended ([thread](https://github.com/immediately-run/baton/pull/363#discussion_r4659560409)).
+
+### What to build
+
+1. A unit test in `test/unit/executor.test.ts`: a command with a timeout spawns a helper outside its group that holds the pipes and outlives the call; the result arrives within the timeout plus the drain cap, with the output read so far.
+2. Put to the owner as a one-letter decision in this ticket's PR: (a) R-BTN-47's `not-found` holds for every route, and runner mode and registered reads change their codes with S-BTN-198 and S-BTN-250; or (b) R-BTN-47 states that runner mode and registered reads refuse a retired repository with the codes they give an unknown one. Build what the owner picks.
+3. Put to the owner as a one-letter decision in the same PR: (a) accept the two test retargets as part of the move, recorded on B-272's archive; or (b) restore import-only tests by giving the moved code a seam the old tests can reach. Build what the owner picks.
+
+### Exit criteria
+
+- The executor test passes and fails if the drain cap is removed.
+- R-BTN-47's text and the retired-repository scenarios agree with the codes the routes answer.
+- `npm test` and `npm run typecheck` green.
+
+### Trust
+
+No new input: the change is a test, and either a spec sentence or the codes two existing refusals answer.
+
+### Invariants
+
+- A route naming a retired repository never serves or writes its state (R-BTN-47), whichever code it answers.
+- A call's end is its whole group's end; the result is never held open by a process outside the group.
+
+## Status
+
+_filed 2026-11-27._

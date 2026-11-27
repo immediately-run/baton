@@ -1,0 +1,39 @@
+---
+title: "B-249 — Baton's own downtime does not count against a claim's lease"
+id: B-249
+project: baton
+status: done
+updated: 2026-11-27
+repos:
+  - baton
+tags:
+  - roadmap-item
+description: After an outage longer than a lease, the reaper excuses the gap so a runner can deliver an end it finished while Baton was down
+topics:
+  - baton
+owns: {}
+prs: [https://github.com/immediately-run/baton/pull/353]
+depends_on: []
+---
+
+**What:** Baton's own downtime must not count against a claim's lease. On 2026-11-15 the Durable Object quota ran out at 14:12Z; vltava2's runner held baton:B-176, finished its fix leg during the outage, and has retried the end every beat since ("the end of baton:B-176 did not reach Baton (internal error)"). When the quota resets at 00:00Z the alarm's reaper runs again and can reap the claim — its last heartbeat ~10 h old — before the runner's next beat delivers the end, discarding a finished leg.
+
+- Baton records when it was last able to serve (e.g. the alarm's last successful tick or last successful request) and, on the first tick after a gap longer than a lease, extends every active lease by the gap (or treats `last_seen_at` as no earlier than the gap's end) before reaping.
+- Equivalently acceptable: a grace of one lease after any gap before the reaper may reap.
+- The runner's end retry already exists; the fix is server-side.
+
+**Done when:** a test stops the alarm and requests for longer than a lease, resumes, and shows a held claim is not reaped before its runner's next beat delivers the end; and a genuinely dead runner is still reaped one lease after recovery.
+
+### Trust
+
+No new input: the gap is measured from Baton's own clock and its own records.
+
+### Invariants
+
+- R-BTN-19 (fencing) and the reaper's lease rule: a runner that stays silent a full lease after Baton recovers is still reaped; only Baton's own downtime is excused.
+
+## Status
+
+_filed 2026-11-15._
+
+_2026-11-27: closed in the 2026-11-27 sweep of tickets Baton held at merged with their files still open: #353 merged and the ticket file was never closed; review rounds archived in docs/review/B-249-round-*.mdx; findings open at merge carried by B-380, https://github.com/immediately-run/baton/pull/353._

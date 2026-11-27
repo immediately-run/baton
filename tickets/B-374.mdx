@@ -1,0 +1,62 @@
+---
+id: B-374
+status: available
+topics: [baton]
+owns: {}
+prs: []
+title: B-374 — A PR merged outside create-pr's merge leg leaves its ticket open, and a merged filing, spec or partial PR is taken for delivery
+depends_on: []
+order: 18
+tags: [roadmap-item]
+project: baton
+description: "On 2026-11-27 Baton held 93 tickets at merged whose files said open: 56 were delivered and never closed because only the merge leg closes a ticket, and 33 were never delivered but sit at merged where no runner is offered them. Close merged tickets with a leg of their own, and stop taking a filing, spec or partial PR for delivery."
+repos: [baton]
+---
+
+**Brief:** the owner, 2026-11-27 (in a Claude Code session), choosing option (a) of decision D8 in the Baton 0.1 plan ([#468](https://github.com/immediately-run/baton/pull/468), `docs/plans/baton-0-1.mdx`): close the tickets Baton holds at `merged` whose files still say open, "and file a ticket for the cause".
+
+**Spec:** [BATON_SPEC §4.2](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-2) ([R-BTN-74](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-2): what the sync posts; [R-BTN-203](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-2): outside moves), [BATON_SPEC §5.3](../spec/BATON_SPEC/05-courses.md#sec-5-3) (where a ticket is, and how it moves); `create-pr`'s merge leg, *Close the ticket* (`.baton/courses/create-pr/legs/merge.md`).
+
+**Depends on:** none.
+
+**Related:** B-268 (where the archive commit is made), B-311 (outside work placed back on the course), the ticket-ownership proposal's ruling that courses committing to the default branch gain reconcile legs (`spec/proposals/ticket-ownership.md`).
+
+### What went wrong
+
+On 2026-11-27 Baton held 93 tickets at `create-pr`'s end station `merged` whose files in `tickets/` still said `available`, `in-review` or `in-progress`. Each PR had been merged outside the merge leg: by a person (13 at once on 2026-11-24), by the merge queue, or by a leg of another ticket. Only the merge leg closes a ticket's file ("Set the ticket file's `status:` to `done`", with the review rounds archived first), so none of these was closed.
+
+Baton saw every one: the sync recorded a `position-disagrees` discrepancy for each (Baton `merged`, git `available`). Nothing acted on it. The cost:
+
+- People and Dibber read them as open work. The 0.1 plan ranked six of them as phase A work before finding they had merged.
+- Their review rounds went unarchived, and findings that were still open at merge went unfiled until a person swept them up by hand (B-314, B-316 and the D8 sweep).
+- Their stale ranks distort the order B-362 shows.
+
+The sweep that closed them (this ticket's PR) found a second fault: **33 of the 89 were never delivered**, yet Baton holds them at `merged` too. Their merged PR was a filing PR (B-358's #463), a spec or ruling PR whose build is another ticket (B-260's #270, B-351's #462, B-146's #335), or a PR its own body calls partial (B-47's #320, B-135's #330, B-336's #464). So Baton offers this open work to no runner: it is invisible to criterion 1 of the 0.1 release. The PR lists all 33.
+
+### What to build
+
+1. **A merged ticket's close is a leg, not a side effect of the merge leg.** Give `create-pr` a `close` leg from `merged` to a new end station `closed`, and make `merged` a resting station (an owner decision, below). The `close` leg does what the merge leg's *Close the ticket* does today: archive every review round not yet in `docs/review/`, file each finding still open at merge as its own ticket (with Dibber, numbered by Baton), close the ticket with `dibber done`, and move it to `tickets/archive/` in a commit of its own (B-268's shape). The merge leg ends at `merged` and no longer closes the ticket itself.
+2. **The sync queues it whatever merged the PR.** A ticket that reaches `merged` by any path (the merge leg, a fact arrival, a reconcile conclusion) gets its `close` leg queued, so a hand merge is closed by the course like any other.
+3. **A disagreement on an end station is visible.** A `position-disagrees` discrepancy where Baton holds an end or closing station and the store says open raises one repository condition, `baton.store-behind`, listing the tickets, until the store catches up.
+4. **A merged PR is not always a delivered ticket.** A `close` leg (or the script of option b) closes a ticket only when its PRs delivered it: it reads each PR's body for a partial marker (the runner's "Partial delivery", "do not close") and checks the ticket's exit criteria the same way the sweep did, and otherwise raises a person leg asking whether to close or to return the ticket to `filed`. The sync must stop placing a ticket at `merged` from a PR that only files or specifies it (a PR whose diff touches only `tickets/` or `spec/`, where the course's implement leg has not run).
+5. **Put the 33 back on the course.** Each of them goes back to the station its work actually reached (for most, `filed`). That is an owner act today (the adopt command is proposed, not built), so this ticket's PR lists them and the owner moves them, or the adopt command is built first.
+6. **Owner decision, in this ticket's PR:** (a) `merged` becomes a resting station and `closed` the end, as above; or (b) `merged` stays the end, and the sync instead raises `baton.store-behind`, with a standard script that closes the listed tickets the same way (run by an operator).
+
+### Exit criteria
+
+- With B-343's fake forge: a PR merged outside the merge leg leaves its ticket closed in `tickets/archive/`, with its review rounds archived and an open finding filed as a ticket, with no person acting (option a); or listed by `baton.store-behind` until the script runs (option b).
+- The merge leg no longer writes the ticket file.
+- `docs/standard-courses.mdx` states the new station and leg; `npm test` and `npm run typecheck` green.
+
+### Trust
+
+The `close` leg writes only ticket and review-archive files, as the merge leg's close does today. Its inputs are the forge's reviews, quoted as data.
+
+### Invariants
+
+- A ticket is closed in its store only after Baton holds it at `merged`, and only when its PRs delivered it.
+- No finding open at merge is dropped: it is archived and, if not fixed, filed.
+
+## Status
+
+_filed 2026-11-27._

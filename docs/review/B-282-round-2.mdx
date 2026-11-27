@@ -10,9 +10,9 @@ checked-in test projects still overlap; typecheck and the focused lint and cover
 
 The PR was merged on 2026-11-26 at `b22a9adc`, after merges of `main` and CI fixes that do not
 touch these findings, with this round's findings open. No fix leg ran after this round. The open
-findings are carried by FOLLOWUP-B-282.
+findings are carried by B-389.
 
 | Finding | Disposition |
 |---|---|
-| [Blocking: `tsconfig.test.json` still includes Node-only roots that `tsconfig.test-node.json` owns, and the coverage test hides the overlap by filtering in memory](https://github.com/immediately-run/baton/pull/374#discussion_r4661826490) | Open on `main` (`tsconfig.test.json` still includes all of `test` but `test/ui`). Carried by FOLLOWUP-B-282. |
-| [Should-fix: `expect` is typed `string[][]`, so a label-only entry type-checks and renders an `.expect()` with no predicate](https://github.com/immediately-run/baton/pull/374#discussion_r4661826493) | Open on `main` (`scripts/check-traces.mjs`'s `ModelStep` typedef unchanged). Carried by FOLLOWUP-B-282. |
+| [Blocking: `tsconfig.test.json` still includes Node-only roots that `tsconfig.test-node.json` owns, and the coverage test hides the overlap by filtering in memory](https://github.com/immediately-run/baton/pull/374#discussion_r4661826490) | Open on `main` (`tsconfig.test.json` still includes all of `test` but `test/ui`). Carried by B-389. |
+| [Should-fix: `expect` is typed `string[][]`, so a label-only entry type-checks and renders an `.expect()` with no predicate](https://github.com/immediately-run/baton/pull/374#discussion_r4661826493) | Open on `main` (`scripts/check-traces.mjs`'s `ModelStep` typedef unchanged). Carried by B-389. |

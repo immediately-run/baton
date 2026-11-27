@@ -11,10 +11,10 @@ scenario-title matcher and one should-fix in the row parser, each verified in me
 
 No fix leg ran after this round; the later commits only merged `main` and updated the pending
 list. The PR was merged on 2026-11-25 with this round's findings open. The open findings are
-carried by FOLLOWUP-B-276.
+carried by B-384.
 
 | Finding | Disposition |
 |---|---|
-| [Blocking: the matcher checks the callee's spelling, so a fixture calling a local `it` counts as a scenario test](https://github.com/immediately-run/baton/pull/367#discussion_r4660085743) | Open on `main` (`testScenarios` in `scripts/spec-ledger.mjs` matches any identifier named `test`, `it` or `describe`). Carried by FOLLOWUP-B-276. |
-| [Blocking: literal titles on `it.each(...)` and `it.runIf(...)` tests do not count, though S-BTN-21 already uses the first form](https://github.com/immediately-run/baton/pull/367#discussion_r4660085749) | Open on `main` (only a bare identifier callee is read). Carried by FOLLOWUP-B-276. |
-| [Should-fix: a row outside the scenario table, such as a fenced example under Gates, overwrites a scenario's cited rules](https://github.com/immediately-run/baton/pull/367#discussion_r4660085755) | Open on `main` (`scenarioRules` parses every line of the spec). Carried by FOLLOWUP-B-276. |
+| [Blocking: the matcher checks the callee's spelling, so a fixture calling a local `it` counts as a scenario test](https://github.com/immediately-run/baton/pull/367#discussion_r4660085743) | Open on `main` (`testScenarios` in `scripts/spec-ledger.mjs` matches any identifier named `test`, `it` or `describe`). Carried by B-384. |
+| [Blocking: literal titles on `it.each(...)` and `it.runIf(...)` tests do not count, though S-BTN-21 already uses the first form](https://github.com/immediately-run/baton/pull/367#discussion_r4660085749) | Open on `main` (only a bare identifier callee is read). Carried by B-384. |
+| [Should-fix: a row outside the scenario table, such as a fenced example under Gates, overwrites a scenario's cited rules](https://github.com/immediately-run/baton/pull/367#discussion_r4660085755) | Open on `main` (`scenarioRules` parses every line of the spec). Carried by B-384. |

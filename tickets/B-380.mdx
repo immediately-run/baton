@@ -1,0 +1,49 @@
+---
+id: B-380
+status: available
+topics: [baton]
+owns: {}
+prs: []
+title: B-380 — Recovery grace protects an outage just over one lease, and the first read after an outage shows the recovered deadline
+depends_on: []
+order: 95
+tags: [roadmap-item]
+project: baton
+description: "Two open findings from B-249's second review: subtracting a full sampling period leaves a gap just over a lease unprotected, and a board read that is the first request after an outage serves the expired lease."
+repos: [baton]
+---
+
+**Found by:** the review of B-249's PR, round 2 ([`docs/review/B-249-round-2.mdx`](../docs/review/B-249-round-2.mdx)). #353 was merged on 2026-11-25 with these findings open. This is a defect report, not an owner brief.
+
+**Spec:** [BATON_SPEC §9.5](../spec/BATON_SPEC/09-claims.md#sec-9-5) (reaping and the fence: recovery grace after a service gap).
+
+**Depends on:** none.
+
+### What is open
+
+1. Recovery subtracts a full sampling period from the measured gap before comparing it with the lease (`recordServing` in `src/core/baton.ts` passes `now − last − ALARM_EVERY_MS` to `recoverLeases`). That closes the false grace round 1 found, but a real outage just over one lease is now unprotected: with a 15-minute lease and no service in between, a first alarm at 15m30s reaps the claim and the queued end gets `409 runner-reaped` ([thread](https://github.com/immediately-run/baton/pull/353#discussion_r4658716467)).
+2. When a board read is the first request after a long outage, the route builds its holders before `recordServing` applies the grace (it runs after `dispatchRoute`), so that response shows the expired lease although the same request commits a new deadline ([thread](https://github.com/immediately-run/baton/pull/353#discussion_r4658716473)).
+
+### What to build
+
+1. Record the last service time precisely enough to decide both sides of the boundary, or apply the uncertainty so that a gap just over a lease is protected while a sub-lease gap is not; keep the sampling bound on writes.
+2. Apply recovery before a request's route reads holders, so the first response after an outage reports the effective deadline.
+
+### Exit criteria
+
+- `test/integration/B-249.lease-recovery.test.ts` (S-BTN-2) gains a case where an outage just over one lease, with no service in between, still lets the queued end land, beside the existing sampled-stamp case that grants no grace.
+- A case where a board read is the first request after the outage serves the recovered `lease_ends_at`.
+- `npm test` and `npm run typecheck` green.
+
+### Trust
+
+No new input: the gap is measured from Baton's own clock and its own records.
+
+### Invariants
+
+- R-BTN-19 and the reaper's lease rule: a runner silent a full lease after recovery is still reaped; only Baton's own downtime is excused.
+- Recovery records no heartbeat and changes no pending fence.
+
+## Status
+
+_filed 2026-11-27._

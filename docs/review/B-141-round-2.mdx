@@ -10,9 +10,9 @@ S-BTN-310 tests, including the installed OpenCode probe, and the typecheck passe
 
 The PR was merged on 2026-11-25 with this round's findings open. No fix leg ran after this round;
 the later commits only merged `main` (the scenario became S-BTN-320). The open findings are
-carried by FOLLOWUP-B-141.
+carried by B-377.
 
 | Finding | Disposition |
 |---|---|
-| [Blocking: a versioned ticket with a path loses its verified text when the runner restarts during an ordinary leg and reattaches before a `reads_only` leg](https://github.com/immediately-run/baton/pull/334#discussion_r4656383689) | Open on `main`: the ordinary leg's persisted context still omits `ticket.file`, and a reattach skips the source read (`src/runner/claimRun.ts`). Carried by FOLLOWUP-B-141. |
-| [Blocking: the snapshot settings merge replaces a whole agent (and provider) that appears in two config files, so a review can run on a different model](https://github.com/immediately-run/baton/pull/334#discussion_r4656383693) | Open on `main`: `readOnlyHarness` in `src/runner/harness.ts` still spreads agents and providers per entry. Carried by FOLLOWUP-B-141. |
+| [Blocking: a versioned ticket with a path loses its verified text when the runner restarts during an ordinary leg and reattaches before a `reads_only` leg](https://github.com/immediately-run/baton/pull/334#discussion_r4656383689) | Open on `main`: the ordinary leg's persisted context still omits `ticket.file`, and a reattach skips the source read (`src/runner/claimRun.ts`). Carried by B-377. |
+| [Blocking: the snapshot settings merge replaces a whole agent (and provider) that appears in two config files, so a review can run on a different model](https://github.com/immediately-run/baton/pull/334#discussion_r4656383693) | Open on `main`: `readOnlyHarness` in `src/runner/harness.ts` still spreads agents and providers per entry. Carried by B-377. |

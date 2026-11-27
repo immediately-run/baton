@@ -10,9 +10,9 @@ typecheck and 141 targeted tests, and found two blocking edge cases, one in the 
 in the heartbeat validator.
 
 The PR was merged on 2026-11-25 with this round's findings open; the commits after this round
-are merges of `main`. The open findings are carried by FOLLOWUP-B-280.
+are merges of `main`. The open findings are carried by B-388.
 
 | Finding | Disposition |
 |---|---|
-| [Blocking: the SSH probe reads the current checkout's `core.sshCommand`, which `git clone` does not use](https://github.com/immediately-run/baton/pull/373#discussion_r4661208224), so a clone from inside such a checkout loses `BatchMode=yes` | Open on `main` (`sshProbe` in `src/defaults/git.mjs` still probes the caller's checkout for every command). Carried by FOLLOWUP-B-280. |
-| [Blocking: the heartbeat validator accepts `claims: []` beside a non-null `claim`](https://github.com/immediately-run/baton/pull/373#discussion_r4661208227), and the sidecar then fences a slot the same reply says is held | Open on `main` (`isBeatAnswer` in `src/runner/replies.ts` checks each field alone). Carried by FOLLOWUP-B-280. |
+| [Blocking: the SSH probe reads the current checkout's `core.sshCommand`, which `git clone` does not use](https://github.com/immediately-run/baton/pull/373#discussion_r4661208224), so a clone from inside such a checkout loses `BatchMode=yes` | Open on `main` (`sshProbe` in `src/defaults/git.mjs` still probes the caller's checkout for every command). Carried by B-388. |
+| [Blocking: the heartbeat validator accepts `claims: []` beside a non-null `claim`](https://github.com/immediately-run/baton/pull/373#discussion_r4661208227), and the sidecar then fences a slot the same reply says is held | Open on `main` (`isBeatAnswer` in `src/runner/replies.ts` checks each field alone). Carried by B-388. |

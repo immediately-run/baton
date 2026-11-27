@@ -1,0 +1,56 @@
+---
+id: B-394
+status: available
+topics: [baton]
+owns: {}
+prs: []
+title: B-394 — Close the outside-work gaps B-311's last review left open, and put the machine-key board case to the owner
+depends_on: []
+order: 109
+tags: [roadmap-item]
+project: baton
+description: Fork PRs count by branch in the reconcile stub, the stale-push guard drops usable fixes, closed PRs stay at review, pre-start failures hold the ticket, a 1 MiB evidence window stalls the board, and S-BTN-309's machine-key case awaits an owner ruling.
+repos: [baton]
+---
+
+**Found by:** the review of B-311's PR, round 2 ([`docs/review/B-311-round-2.mdx`](../docs/review/B-311-round-2.mdx)), with one finding first raised in round 1 ([`docs/review/B-311-round-1.mdx`](../docs/review/B-311-round-1.mdx)). #348 was merged on 2026-11-26 with these findings open. This is a defect report, not an owner brief.
+
+**Spec:** [BATON_SPEC §4.2](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-2) ([R-BTN-203](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-2), work done outside Baton), [BATON_SPEC §3.4](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-4) ([R-BTN-139](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-4), which PRs a ticket owns), [BATON_SPEC §3.2](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-2) ([R-BTN-93](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-2), who may post a board), [BATON_SPEC §1](../spec/BATON_SPEC/01-what-baton-is.md#sec-1) ([R-BTN-39](../spec/BATON_SPEC/01-what-baton-is.md#sec-1), the displaced leg restored), [BATON_SPEC §5.8](../spec/BATON_SPEC/05-courses.md#sec-5-8) (the standard courses' fact and reconcile legs).
+
+**Depends on:** none.
+
+### What is open
+
+1. The reconcile stub's PR mapping (`owns` in `src/defaults/pr-verify.ts`) passes only the PR number, head branch and repository to `ticketOwns`, so a fork's PR can count toward merge completeness by branch name alone; R-BTN-139 needs a same-repository head by immutable id, and a fork an explicit `prs:` entry, as the sync already checks ([thread](https://github.com/immediately-run/baton/pull/348#discussion_r4657908430)).
+2. The stale-push guard in `src/defaults/outside-work.ts` (and the CLI's `changesWork`) drops a qualifying hand push whenever a later verdict exists, even when that verdict cannot move the ticket: in `create-spec` at `reviewed`, changes then a hand fix then an approval emits neither fact ([thread](https://github.com/immediately-run/baton/pull/348#discussion_r4657908433)).
+3. `stationsReviewPr` (`src/defaults/course-pr.ts`) returns an inferred `approved` before it checks whether the PR closed, and the outside classifier skips closed PRs, so a closed PR with a prior approval Baton never applied stays queued for `review` instead of offering `conclude` ([thread](https://github.com/immediately-run/baton/pull/348#discussion_r4657908435)).
+4. A transient checkout-preparation failure before the reconcile leg starts still exhausts into a ticket-wide hold: no `claim_legs` row is running, the retry path ignores `claims.offered_leg`, and the displaced leg is not restored ([thread](https://github.com/immediately-run/baton/pull/348#discussion_r4657908438)).
+5. A valid ordinary evidence window over 1 MiB is refused by `src/core/board.ts`; the accepted head does not move, so every later observation rereads the same (or a larger) window and the board stalls indefinitely ([thread](https://github.com/immediately-run/baton/pull/348#discussion_r4657908440)).
+6. S-BTN-309's machine-key case (a board posted with a runner's machine key is accepted with its outside-work attestations stripped) is not implemented: `verifySync` refuses a runner key before reading the board, which matches R-BTN-93's sync authorization and S-BTN-55/S-BTN-156 but not S-BTN-309 ([round 1](https://github.com/immediately-run/baton/pull/348#discussion_r4657717291), [round 2](https://github.com/immediately-run/baton/pull/348#discussion_r4657908442)). Put to the owner as a one-letter decision in this ticket's PR: (a) amend S-BTN-309 to keep machine keys refused, or (b) widen R-BTN-93 so a granted machine key may post a board whose outside-work attestations are stripped.
+
+### What to build
+
+1. Give the reconcile stub the sync's eligibility rule (same-repository head by immutable id; forks only through `prs:`) before it counts a merge, and test a fork PR on a matching branch.
+2. Suppress an older push only when the newer fact can actually be applied by the ticket's course; test the `create-spec` sequence.
+3. Check for a closed PR before inferring `approved` in `stationsReviewPr`, so the closed case reaches `conclude`; test a closed PR with an unapplied approval.
+4. Classify pre-start failures by the claim's `offered_leg` for current and historical attempts, so reconcile exhaustion restores the displaced leg; test claiming the displaced leg after that path.
+5. Let the sync make progress across the transport bound without dropping evidence (split the window across posts the server accepts in order, or advance a cursor per accepted part); test a window over 1 MiB.
+6. Carry out the owner's answer to item 6: either amend S-BTN-309 and its test, or implement the accept-and-strip path with the spec change beside it.
+
+### Exit criteria
+
+- S-BTN-309's test file covers items 1 to 5, and the machine-key case as the owner rules.
+- `npm test` and `npm run typecheck` green; `node cli/baton.mjs test-course . create-pr` reports no violations.
+
+### Trust
+
+PR states, verdicts, pushes and mentions are forge data read by the sync and judged by Baton, as in B-311; none of the fixes widens who may post a board unless the owner rules (b) in item 6.
+
+### Invariants
+
+- The sync finds and Baton places: no sync sets a position (R-BTN-35, R-BTN-39, R-BTN-50).
+- A partial reading is never posted, and evidence is never silently dropped (R-BTN-96).
+
+## Status
+
+_filed 2026-11-27._

@@ -1,0 +1,49 @@
+---
+id: B-379
+status: available
+topics: [baton]
+owns: {}
+prs: []
+title: B-379 — The automatic claim's short prefix matches the reference order, and a saturated expedite lane stays inside its read budget
+depends_on: []
+order: 94
+tags: [roadmap-item]
+project: baton
+description: "Two open findings from B-239's second review: the one-result claim prefix can pick a different ticket than the 50-result reference, and a full lane of 50 expedited tickets reads 507 rows on a cold claim."
+repos: [baton]
+---
+
+**Found by:** the review of B-239's PR, round 2 ([`docs/review/B-239-round-2.mdx`](../docs/review/B-239-round-2.mdx)). #359 was merged on 2026-11-25 with these findings open. This is a defect report, not an owner brief.
+
+**Spec:** [BATON_SPEC §6.6](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-6) (matching: gates and advice, the candidate order and its page bound).
+
+**Depends on:** none.
+
+### What is open
+
+1. The automatic claim's short prefix can claim a different ticket from the one the 50-result reference picks. `decide` (`src/core/claims.ts`) treats the one-result recommendation as conclusive unless a group's whole first page is expedited, so a page of 49 expedited rows and one ordinary row that then fails resource advice still concludes: on the 180-ticket Cloudflare fixture with ranks 132–180 expedited and T-1 resource-blocked, the API claimed `docs:T-132` where the reference chose `docs:T-2` ([thread](https://github.com/immediately-run/baton/pull/359#discussion_r4662911156)).
+2. With the expedite lane full and 50 expedited tickets on page one, the one-result probe defers to `recommend(w, 50)`, which gates all 50; a cold automatic claim read 507 `rows_read` against B-239's ~300 target ([thread](https://github.com/immediately-run/baton/pull/359#discussion_r4662911167)).
+
+### What to build
+
+1. Conclude from the short prefix only when no later ordinary row can outrank the winner after the final checks; otherwise continue paging as the reference does. Add parity coverage where an ordinary row on the first page fails the final checks.
+2. Bound the fallback path's reads for a saturated lane without changing which ticket is selected, and add the 50-expedited distribution to the workerd budget test in `test/integration/S-BTN-243.read-efficiency.test.ts`.
+
+### Exit criteria
+
+- A test on both hosts claims the same ticket as the 50-result reference for the 49-expedited-plus-one-blocked distribution.
+- On the Cloudflare host, a cold automatic claim with 50 expedited tickets on page one reads at most 300 rows, and the existing S-BTN-243 budgets still hold.
+- `npm test` and `npm run typecheck` green.
+
+### Trust
+
+No new input: reads and orders over rows Baton already stores; nothing a writer supplies changes.
+
+### Invariants
+
+- The claim gates stay authoritative: a projection or prefix never admits a claim the gates refuse (R-BTN-196's projections authorize nothing).
+- The selected ticket equals the reference ordering's choice in every distribution the tests cover.
+
+## Status
+
+_filed 2026-11-27._

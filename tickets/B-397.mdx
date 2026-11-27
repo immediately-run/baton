@@ -1,0 +1,50 @@
+---
+id: B-397
+status: available
+topics: [baton]
+owns: {}
+prs: []
+title: "B-397 — View renderers: parse only RFC 3339 times, draw U+061C inert, and sanitise renderEvent's slot"
+depends_on: []
+order: 112
+tags: [roadmap-item]
+project: baton
+description: "Three findings left open when B-54's view renderers merged: a time field that trusts Date.parse, a missing bidi control, and an unsanitised event slot."
+repos: [baton]
+---
+
+**Found by:** the review of B-54's PR, round 2 ([`docs/review/B-54-round-2.mdx`](../docs/review/B-54-round-2.mdx)). #178 was merged on 2026-11-06 with these findings open. This is a defect report, not an owner brief.
+
+**Spec:** [BATON_SPEC §5.5](../spec/BATON_SPEC/05-courses.md#sec-5-5) ([R-BTN-112](../spec/BATON_SPEC/05-courses.md#sec-5-5): declarative views), [§12.3](../spec/BATON_SPEC/12-security.md#sec-12-3) (untrusted text).
+
+**Depends on:** none.
+
+### What is open
+
+1. The `time` field parses its value with `Date.parse`, which accepts far more than RFC 3339. A timestamp with no offset is drawn relative to the host's time zone, so the CLI, the Worker and another machine show different times for one stored value, and `"12"` draws as a date in 2001 ([thread](https://github.com/immediately-run/baton/pull/178#discussion_r4471984881)).
+2. The plain channel's `CONTROL` set misses U+061C (ARABIC LETTER MARK), a bidi control, so a value carrying it still reorders adjacent text in a terminal; `safeText` in `src/core/courses.ts` shares the gap ([thread](https://github.com/immediately-run/baton/pull/178#discussion_r4471984897)).
+3. `renderEvent` appends its `slot` raw: the sanitising its comment promises is left to the caller, and the test passes a raw string ([thread](https://github.com/immediately-run/baton/pull/178#discussion_r4471984963)).
+
+### What to build
+
+1. Gate the `time` parse on an RFC 3339 pattern with a required offset; anything else falls through to the draw-as-text branch.
+2. Add U+061C (and, if the invariant is meant to cover them, U+2028 and U+2029) to the plain channel's control set and to `safeText`'s.
+3. In `renderEvent`, pass the slot through `inert(clip(slot))`, which is idempotent for `renderPlain` output.
+
+### Exit criteria
+
+- S-BTN-76's tests in `test/unit/view.test.ts` cover an offset-less timestamp and a non-time drawn as text, the same output under two `TZ` values, `x؜y` drawn inert, and a raw hostile slot drawn inert.
+- `npm test` and `npm run typecheck` green.
+
+### Trust
+
+The renderers draw values written by courses and workers, which are untrusted; each fix narrows what such a value can make a reader see.
+
+### Invariants
+
+- Every renderer fails closed: a value it cannot check is drawn as inert text.
+- No markup string is built for the dashboard (`textContent` only).
+
+## Status
+
+_filed 2026-11-27._

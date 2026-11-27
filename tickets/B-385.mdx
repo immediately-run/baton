@@ -1,0 +1,58 @@
+---
+id: B-385
+status: available
+topics: [baton]
+owns: {}
+prs: []
+title: "B-385 — Close the spec-copy checks' remaining gaps: push baselines, section-pair ceilings, route guards, tables, comma pairs"
+depends_on: []
+order: 100
+tags: [roadmap-item]
+project: baton
+description: B-277's second review found seven cases the merged check:api, check:spec and check:wiki still miss, among them exceptions a push can add and table rows that silently drop out.
+repos: [baton]
+---
+
+**Found by:** the review of B-277's PR, round 2 ([`docs/review/B-277-round-2.mdx`](../docs/review/B-277-round-2.mdx)). #370 was merged on 2026-11-25 with these findings open. This is a defect report, not an owner brief.
+
+**Spec:** [BATON_SPEC §14](../spec/BATON_SPEC/14-api.md#sec-14) (the GET/HEAD sentence), [§15](../spec/BATON_SPEC/15-verification.md#sec-15) ([R-BTN-30](../spec/BATON_SPEC/15-verification.md#sec-15), shrink-only lists).
+
+**Depends on:** none.
+
+### What is open
+
+1. On a hosted `push` run, `priorExceptions` (`scripts/lib/check-exceptions.mjs`) takes HEAD's first parent as the baseline, which is not the previously published tip: a two-commit push that adds an exception in its first commit passes ([thread](https://github.com/immediately-run/baton/pull/370#discussion_r4660463442)).
+2. `scripts/section-pair-exceptions.json` has no prior ceiling: `check:spec` validates it with `exceptionProblems`, so a new mismatched pair and its exception can land together ([thread](https://github.com/immediately-run/baton/pull/370#discussion_r4660463445)).
+3. `scripts/lib/core-routes.mjs` validates only the top-level `||` of an early-return method guard and the count of recognised inequalities; an extra method check leaves the inventory silently partial ([thread](https://github.com/immediately-run/baton/pull/370#discussion_r4660463446)).
+4. `scripts/check-api.mjs` matches table lines, so a Markdown table without an opening pipe drops out of both inventories, and pipe rows inside fenced examples are read as routes ([thread](https://github.com/immediately-run/baton/pull/370#discussion_r4660463448)).
+5. The section/rule pair check does not recognise the comma-separated form in source (`§13.1, R-BTN-113` in `src/core/baton.ts`) ([thread](https://github.com/immediately-run/baton/pull/370#discussion_r4660463451)).
+6. `scripts/lib/wiki-references.mjs` checks a code-span filename only when its suffix is on a fixed list, so `manifest.txt` is never checked ([thread](https://github.com/immediately-run/baton/pull/370#discussion_r4660463455)).
+7. §14 says every GET/HEAD row answers `HEAD` with the same status as `GET`, but the sealed gate in `src/core/baton.ts` runs before read dispatch and answers `HEAD` with `503 sealed` where an administrator's `GET` proceeds ([thread](https://github.com/immediately-run/baton/pull/370#discussion_r4660463458)).
+
+### What to build
+
+1. Use the push event's `before` SHA as the baseline on `push` runs, with explicit handling for a new branch (all zeros), and keep the first parent for `pull_request` only if it is the base tip.
+2. Apply `newExceptionProblems` with `priorExceptions` to the section-pair list, as the retired-citation list has it.
+3. Validate the whole guard shape in `core-routes.mjs` and throw on any predicate it does not model.
+4. Read §13's and §14's tables as Markdown table cells (through the MDX processor the wiki check already uses), skipping code blocks.
+5. Accept a comma between the section and the rule in the pair regex; record or fix the mismatches it then finds.
+6. Check every code-span value that looks like a repository filename, whatever its suffix, or define and document one checked-path convention that covers them.
+7. Qualify §14's sentence to read dispatch (or make the sealed gate treat `HEAD` as it treats `GET`), and test the chosen behaviour.
+
+### Exit criteria
+
+- A fixture test for each item above fails before its fix and passes after: a two-commit push adding an exception, a new section-pair exception, an extra method predicate, a pipe-less table and a fenced pipe row, a comma pair, a `.txt` code span, and the sealed `HEAD`.
+- `npm test` and `npm run typecheck` green.
+
+### Trust
+
+No new input: every check reads the repository's own files and git history. Each allowlist stays shrink-only, its entries naming their open ticket.
+
+### Invariants
+
+- One home per statement: the spec's tables and the code's routes and migrations are compared, not copied.
+- [R-BTN-31](../spec/BATON_SPEC/15-verification.md#sec-15): the checks stay in `npm test`, which stays green.
+
+## Status
+
+_filed 2026-11-27._

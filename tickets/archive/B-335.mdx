@@ -1,0 +1,62 @@
+---
+title: "B-335 — The runner counts each leg's earlier runs on a claim twice; the advance reply names the run's number"
+id: B-335
+project: baton
+status: done
+updated: 2026-11-27
+repos:
+  - baton
+tags:
+  - roadmap-item
+tier: judgement
+course: create-pr
+description: "ctx.run counts gitPath plus the claim's own legs, but gitPath already holds the claim's finished legs, so a claim's runs are numbered 1, 3, 5 and the create-pr review stub suspends for adjudicate at the second round; Baton's advance reply names the run's number from its own record (the count max_runs is enforced on), the runner uses it and its fallback counts once."
+topics:
+  - baton
+owns: {}
+prs: [https://github.com/immediately-run/baton/pull/412]
+depends_on: []
+---
+
+**Found by:** the supervising session, 2026-11-24, on B-324 and B-322 (both ended `suspended:reviewed`, next `adjudicate`, after their second review round while Baton's history records review run 2 of 8). A defect report, not an owner brief.
+
+**Spec:** [BATON_SPEC §5.3](../../spec/BATON_SPEC/05-courses.md#sec-5-3) [R-BTN-63](../../spec/BATON_SPEC/05-courses.md#sec-5-3) (Baton's traversal record counts; `max_runs` reads those counts), [§14](../../spec/BATON_SPEC/14-api.md#sec-14) (the advance reply), [S-BTN-204](../../spec/BATON_SPEC/15-verification.md#scenarios).
+
+**Depends on:** none.
+
+**Related:** B-324 (the review stub's bound read from the course file); together they let a create-pr ticket use the rounds its course grants.
+
+### What is wrong
+
+The runner hands each leg's stub `ctx.run`, the leg's run number, and the stubs act on it (the create-pr review stub suspends for `adjudicate` once `ctx.run` reaches its bound). The runner computes it itself in `src/runner/claimRun.ts` as `runNumber(graph, gitPath, leg, own)`: the earlier attempts' legs plus the legs this claim started, plus one. But each leg this claim finishes is also appended to `gitPath` (the advance trail, `state.gitPath = [...state.gitPath, …]`), so within one claim every earlier run of a leg is counted twice: a claim's runs of a leg are numbered 1, 3, 5, …. The bug predates B-274 (`runner.ts` had the same pair).
+
+Effects: on one claim the second review round that asks for changes reaches `ctx.run` 3 and suspends for adjudication; every bound a stub reads from `ctx.run` runs out at about half its size; the runner's log ("run 3 of 8") disagrees with Baton's history (run 2).
+
+The root cause is two homes for one count. Baton already counts a ticket's runs of a leg from its own record (`start_path` plus the claim's `claim_legs`) to enforce `max_runs` at the advance; the runner recounts from what it remembers.
+
+### What to build
+
+1. **The advance reply names the run's number.** The advance that starts a run answers `run`: the ticket's runs of that leg counted as the `max_runs` check counts them, this run included. The runner uses it for `ctx.run`.
+2. **The runner's fallback counts once.** Against a server that does not send `run`, the runner counts `gitPath` alone (it already holds this claim's finished legs), never `gitPath` plus the claim's own legs. A reattached leg keeps its persisted `ctx.run` as today.
+3. **Tests.** A claim whose review rounds alternate with fixes hands them `ctx.run` 1, 2, 3, from the reply and from the fallback; the reply's `run` is the count the `max_runs` refusal reads, and a run an earlier claim abandoned is not one of them (as for `max_runs`; the history row's `run` still counts every row).
+
+### Exit criteria
+
+- On one claim, the second review run gets `ctx.run` 2, and the runner's log says "run 2 of 8".
+- The advance reply's `run` matches the count `max_runs` is enforced on.
+- `npm test` and `npm run typecheck` green.
+
+### Trust
+
+No new input from a writer: `run` is minted by Baton from its own record and read by the holder; the runner trusts it as it trusts the reply's `run_id` and `seq`.
+
+### Invariants
+
+- R-BTN-63: Baton's traversal record counts; the runner now reads the count rather than recomputing it, so the stub's bound and the server's `max_runs` check read one number.
+- R-BTN-32: the server computes `run` from stored rows, no clock read.
+
+## Status
+
+_filed 2026-11-24; the `create-pr` course._
+
+_2026-11-27: closed in the 2026-11-27 sweep of tickets Baton held at merged with their files still open: #412 merged and the ticket file was never closed; the PR had no review rounds to archive, https://github.com/immediately-run/baton/pull/412._

@@ -1,0 +1,48 @@
+---
+id: B-396
+status: available
+topics: [baton]
+owns: {}
+prs: []
+title: B-396 — Clearing the instance's link_hosts stores an empty list, not the text null
+depends_on: []
+order: 111
+tags: [roadmap-item]
+project: baton
+description: "A blocking finding left open when B-4's PR merged: clearing link_hosts writes the text null, so the state read answers null where a list is typed."
+repos: [baton]
+---
+
+**Found by:** the review of B-4's PR, round 1 ([`docs/review/B-4-round-1.mdx`](../docs/review/B-4-round-1.mdx)). #242 was merged on 2026-11-15 with this finding open. This is a defect report, not an owner brief.
+
+**Spec:** [BATON_SPEC §13.1](../spec/BATON_SPEC/13-data-model.md#sec-13-1) (`instance_settings`); [§8.3](../spec/BATON_SPEC/08-runners.md#sec-8-3) ([R-BTN-113](../spec/BATON_SPEC/08-runners.md#sec-8-3)); [§14](../spec/BATON_SPEC/14-api.md#sec-14) (`PUT /v1/admin/settings`).
+
+**Depends on:** none.
+
+### What is open
+
+1. `PUT /v1/admin/settings` with `link_hosts: null` (what `baton admin settings set --link-hosts none` sends) stores `JSON.stringify(null)`, the four-character text `null`, in `instance_settings.link_hosts` (`src/core/instanceSettings.ts`, `set`), where the neighbouring `session_hosts` update stores SQL NULL. `view()` then parses it to `null` and answers `link_hosts: null` where its type says `string[]`. The new dashboard reads it with `?? []`, but any other reader of the state read gets `null`, and the branch has no test ([thread](https://github.com/immediately-run/baton/pull/242#discussion_r4578525695)).
+
+### What to build
+
+1. Clearing `link_hosts` stores its column's default (an empty list, the column is NOT NULL) so that a cleared setting reads `[]`, as the setter's own comment says ("`null` clears it back to what stands without it").
+2. `view()` and `linkHosts()` read a stored `null` (left by an instance that ran the old code) as `[]`; let `view()` go through `linkHosts()` rather than re-parsing the row.
+3. A test in S-BTN-77 that clears `link_hosts` through the route and reads `instance.link_hosts` as `[]` on both hosts.
+
+### Exit criteria
+
+- S-BTN-77 covers clearing `link_hosts`, on both hosts.
+- `npm test` and `npm run typecheck` green.
+
+### Trust
+
+No new input: the administrator's existing setting route; only how a cleared value is stored and read changes.
+
+### Invariants
+
+- An administrator's key alone sets the instance settings (R-BTN-57).
+- Validate before you write: the body still passes `checkInstanceSettings` before any SQL.
+
+## Status
+
+_filed 2026-11-27._

@@ -1,0 +1,58 @@
+---
+title: "B-281 — The leg stub is a module, not a string: makeLeg in stub-runtime.ts, and defaults/cli.ts split in four"
+id: B-281
+project: baton
+status: done
+updated: 2026-11-27
+tags:
+  - roadmap-item
+description: "About 515 lines of JavaScript emitted from template literals become a type-checked src/defaults/stub-runtime.ts; the generated entry is imports and a config literal; cli.ts splits into sync, facts, stubs and init"
+topics:
+  - baton
+owns: []
+prs: [https://github.com/immediately-run/baton/pull/375]
+depends_on: []
+---
+
+**What:** `stubSource` and `testsStubSource` in `src/defaults/cli.ts` emit about 515 lines of
+JavaScript from template literals. No compiler or test reads that code as code, and `gitRun` and
+`newestWrite` are defined again inside it.
+
+From the architecture review of 2026-11-19 (`docs/review/architecture-review-2026-11-19.mdx`, on the branch `review/architecture-2026-11-19` until it lands).
+
+### What to build
+
+1. `src/defaults/stub-runtime.ts` exports `makeLeg(config)`: a real, type-checked module.
+2. The generated entry is imports and a config literal.
+3. In the same change, split `defaults/cli.ts` into its four parts: sync, facts, stubs, init.
+4. `baton repo init --check` reports what differs from its source, as B-139 lays the courses
+   out (the owner's ruling, 2026-11-26: "Re-scope to B-139"): each committed
+   `.baton/courses/standard-<id>/` source tree that differs from what this checkout builds, and
+   each file in a sourced course's home directory that is not an override the course declares —
+   a copy that differs from its pinned source, or an identical one `--prune` removes.
+
+**Done when:** generated stubs behave identically on the existing tests, and the templates total
+under 40 lines.
+
+### Trust
+
+A leg stub runs in the repository's checkout with the runner's credentials, and anyone who can
+push can edit it. That does not change. What changes is that the logic is in a pinned module the
+package ships, so `init --check` can say when a committed source tree, or a home copy the sync would refuse,
+has drifted from its source.
+
+### Invariants
+
+- Course code never core: the runtime is under `src/defaults/`, and core imports nothing from
+  it.
+- `baton repo init` from the published package works with no checkout and no esbuild, and pins
+  the commit the package was built from.
+- Verification at the boundary: the stub still checks what the agent wrote before it reports.
+
+## Status
+
+_filed 2026-11-19._
+
+_2026-11-26: The owner re-scoped exit criterion 4 to B-139, 2026-11-26 ("Re-scope to B-139"): `baton repo init --check` compares the committed `standard-<id>` source trees with this checkout's build and reports home copies in a sourced course._
+
+_2026-11-27: closed in the 2026-11-27 sweep of tickets Baton held at merged with their files still open: #375 merged and the ticket file was never closed; review rounds archived in docs/review/B-281-round-*.mdx, https://github.com/immediately-run/baton/pull/375._
