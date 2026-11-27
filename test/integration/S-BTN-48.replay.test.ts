@@ -256,6 +256,10 @@ describe('S-BTN-48 replay: a recorded run re-run without a claim', () => {
     expect(start.status).toBe(200);
     const started = start.json;
     const ghCalls: string[][] = [];
+    // The close must take the injected `gh`, which it does only with no forge token in the
+    // environment: an inherited GH_TOKEN or GITHUB_TOKEN would select REST and post for real.
+    vi.stubEnv('GH_TOKEN', '');
+    vi.stubEnv('GITHUB_TOKEN', '');
     const origin = g('config', 'remote.origin.url');
     const localRemote = g('remote', 'get-url', 'origin');
     const close = await closeTicket({ checkout: repo.dir, ticket: { id: 'docs:T-1', path: 'tickets/one.mdx', home: 'docs' }, leg: 'implement', claim: offered, run_id: started.run_id }, {
