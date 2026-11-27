@@ -43,7 +43,7 @@ runners ran. Grouped by criterion:
 | 3, capacity | Runners idle with work on the board, and nothing saying why: tiers, holds, unconfirmed ends, `awaiting-sync`, a course rule no runner could meet | 9 | Tiers retired (B-322). B-244 partly (#352). B-361 |
 | 3, capacity | A host check failing every claim, the runner claiming on (wrapper, gateway key, executor pin, placement) | 6 | Placement only: B-336 (#464). B-365 |
 | 3, capacity | No sync between pushes to `main`, so ends waited for confirmation | 4 | No. B-318 |
-| 2, course | The review stub's round bound baked in as 3 while the course file says 8. Runs counted twice | 3 | B-324 merged (#408). B-335 in review |
+| 2, course | The review stub's round bound baked in as 3 while the course file says 8. Runs counted twice | 3 | B-324 (#408) and B-335 (#412) merged |
 | 2, course | PRs left conflicting with `main`, then merged by the owner by hand (13 on 2026-11-24, of 51 open) | 3 | No. B-364 |
 | 2, course | Ends that named evidence nothing attested; 44 parked tickets | 2 | #415, and B-337 (#456) for closed tickets |
 | 2, course | Flaky tests or a red `main` | 8 | Mostly, by #295 and #392 |
@@ -87,7 +87,7 @@ B-359 to B-371 are new in this PR.
 | 70 | B-364 | 2 | `create-pr` keeps its PRs mergeable and tests what would land |
 | 75 | B-368 | all | `baton report soak`: the check that decides the release |
 
-B-335 (runs counted twice) is already in review and needs no rank.
+B-335 (runs counted twice) merged (#412) and is closed in #469.
 
 **Already merged.** Six tickets this plan first ranked here had PRs merged before it was written,
 with their files still `available`. The sweep of D8 ([#469](https://github.com/immediately-run/baton/pull/469))
