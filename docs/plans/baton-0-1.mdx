@@ -40,7 +40,7 @@ runners ran. Grouped by criterion:
 | Criterion | What broke it | Entries | Fixed? |
 |---|---|---|---|
 | 3, capacity | Faults on the host or at the provider charged to every ticket they touched, ending in `attempts-exhausted` holds only a person could lift | 10 | Partly: B-336 (#464) and B-347 (#460) merged. B-359, B-360 |
-| 3, capacity | Runners idle with work on the board, and nothing saying why: tiers, holds, unconfirmed ends, `awaiting-sync`, a course rule no runner could meet | 9 | Tiers retired (B-322). B-244 merged (#352). B-361 |
+| 3, capacity | Runners idle with work on the board, and nothing saying why: tiers, holds, unconfirmed ends, `awaiting-sync`, a course rule no runner could meet | 9 | Tiers retired (B-322). B-244 partly (#352). B-361 |
 | 3, capacity | A host check failing every claim, the runner claiming on (wrapper, gateway key, executor pin, placement) | 6 | Placement only: B-336 (#464). B-365 |
 | 3, capacity | No sync between pushes to `main`, so ends waited for confirmation | 4 | No. B-318 |
 | 2, course | The review stub's round bound baked in as 3 while the course file says 8. Runs counted twice | 3 | B-324 merged (#408). B-335 in review |
@@ -77,20 +77,28 @@ B-359 to B-371 are new in this PR.
 |---|---|---|---|
 | 15 | B-359 | 3 | A burst of failures on one runner is the runner's fault: the tickets keep their attempts, the runner backs off |
 | 20 | B-360 | 3 | Holds settle themselves: lifted when the ticket closes, one automatic retry after a day, many answered at once |
+| 25 | B-244 | 3 | An idle runner says why: the rest, after #352 (rule 4's failed-check attribution, with B-245) |
 | 30 | B-361 | 3 | Baton notices unclaimable work itself (`baton.unclaimable`, `baton.runner-starved`, `baton.no-runner`), and the ready list names the right gate |
 | 35 | B-318 | 3 | Suspended tickets get their next leg without a push to `main` (PR #384 open) |
 | 40 | B-362 | 1 | Every open ticket has a rank, and anyone can see the order Baton offers |
 | 45 | B-363 | 1 | A ticket waiting on something outside (a release, a person) is blocked, not offered |
+| 50 | B-336 | 3 | A runner that cannot place a sandbox stops claiming: the executor's placement report, after #464 |
 | 55 | B-365 | 3 | B-336's pause for any repeated host failure; rotated keys re-read without a restart |
 | 70 | B-364 | 2 | `create-pr` keeps its PRs mergeable and tests what would land |
 | 75 | B-368 | all | `baton report soak`: the check that decides the release |
 
 B-335 (runs counted twice) is already in review and needs no rank.
 
-**Already merged.** Six tickets this plan first ranked here had merged before it was written, and
-their ticket files still said `available`: B-324 (#408), B-244 (#352) and B-249 (#353) on
-2026-11-25, B-337 (#456), B-347 (#460) and B-336 (#464) since. Their ranks are harmless and stay
-until they are closed (D8). B-311 (#348) in phase B is the same.
+**Already merged.** Six tickets this plan first ranked here had PRs merged before it was written,
+with their files still `available`. The sweep of D8 ([#469](https://github.com/immediately-run/baton/pull/469))
+read each against its PRs:
+- **delivered and closed:** B-324 (#408), B-249 (#353), B-337 (#456) and B-347 (#460), with
+  their open findings filed as B-395 (B-324's) and B-380 (B-249's);
+- **partial, still open:** B-244 (#352; rule 4's failed-check attribution waits on B-245) and
+  B-336 (#464; the E2B executor's placement report waits on a Fieldhouse change). Both stay
+  phase A work at ranks 25 and 50.
+
+B-311 (#348) in phase B is closed the same way, its open findings filed as B-394.
 
 After phase A has merged and deployed, B-366's **rehearsal**: 72 hours on bering, with every
 intervention logged and `baton report soak` read at the end. It releases nothing. Whatever it finds
@@ -145,9 +153,12 @@ Each has a default that this plan assumes until answered.
   2026-11-27: "Yes, hand-edit once". This plan's PR sets `order:` by hand on the 25 existing tickets
   ranked here (phases A and B, and *Simpler* below); `dibber check` reports nothing new. B-362 gets
   Dibber a re-rank command.
-- **D8 — The 91 tickets Baton holds at `merged` whose files say they are open.**
-  - (a) Close the 66 whose PRs have all merged in one PR, as B-314 and B-316 were closed here: each review round archived, `dibber done`, moved to `tickets/archive/`, and every finding a review left open filed as its own ticket. Check the 23 with no PR one by one against `main`. Leave the two waiting on docs PRs. And file a ticket for the cause: a ticket the course ends at `merged` outside the merge leg (a hand merge, the merge queue) is never closed in its store (B-268 is nearest). **Default.**
-  - (b) Close them without archiving the review rounds, and accept losing what those rounds found.
+- **D8 — The 91 tickets Baton holds at `merged` whose files say they are open.** **Answered**, the
+  owner, 2026-11-27: (a), in its own PR. [#469](https://github.com/immediately-run/baton/pull/469)
+  closes the 56 that were delivered, with their review rounds archived and 26 follow-ups (B-375 to
+  B-400) for the findings left open, and files B-374 for the cause. The other 33 were never
+  delivered (a filing, spec or partial PR merged), yet Baton holds them at `merged`, so no runner is
+  offered them: B-374 asks for them to be put back on the course.
 
 ## Housekeeping found on the way
 
@@ -161,7 +172,7 @@ window. Do them before one starts.
   and the findings still open go to two new tickets: B-372 (a stale `origin/HEAD`, a removed
   declaration that returns after a restart, §8.1's `courses` row) and B-373 (two stderr paths that
   mask without the raw CRLF frame, and B-316's unanswered owner decision on short disproved holds).
-- **The same defect, 91 more times (D8).** On 2026-11-27 Baton holds 93 tickets at `merged`, its
+- **The same defect, 91 more times (D8, answered: see #469).** On 2026-11-27 Baton holds 93 tickets at `merged`, its
   end station, whose files still say `available`, `in-review` or `in-progress`. B-314 and B-316
   were two of them. Of the other 91: 66 list PRs that have all merged, 2 wait on an open docs PR
   (B-68 on docs#229, R3-1268 on docs#234), and 23 list no PR at all (among them B-336, B-337 and B-347,
