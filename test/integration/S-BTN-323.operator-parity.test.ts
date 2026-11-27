@@ -1,7 +1,7 @@
 // S-BTN-323 / G-BTN-174 (R-BTN-186): key equivalents of session writes on both hosts.
 import { beforeEach, describe, expect, it } from 'vitest';
 import { ACTIONS, keyCaller, listsSession, matchAction } from '../../src/core/actions';
-import { captureDispatches, claimRow, keyCall, register, rows, withCore } from '../helpers';
+import { captureDispatches, claimRow, keyCall, register, rows, seedScopeFinding } from '../helpers';
 import { grantedRunner } from '../lib/fleet';
 import { fixture, postSession, readSession, running, T0, type Fixture } from '../lib/needsYouFixture';
 
@@ -79,10 +79,9 @@ describe('S-BTN-323 session writes have key equivalents', () => {
   });
 
   it.each(['ui', 'admin', 'owner'])('resolves only a finding in scope via %s', async (surface) => {
-    await withCore((c) => {
-      c.store.exec(`INSERT INTO scope_findings (id, repository_id, kind, target, detail_json, raised_at, updated_at)
-        VALUES (1, 'docs', 'unclaimed-write', 'docs', '{}', ?, ?)`, T0, T0);
-    });
+    const { claimId } = await running();
+    await seedScopeFinding({ repository_id: 'docs', ticket_id: 'docs:A', claim_id: claimId,
+      kind: 'unclaimed-write', target: 'docs', detail_json: '{}', raised_at: T0, updated_at: T0 });
     expect((await keyCall(f.opsOwner, '/v1/owner/ops/scope/1/resolve', {})).json.code).toBe('not-found');
     expect((await send(surface, 'scope/1/resolve', {})).status).toBe(200);
     expect((await send(surface, 'scope/1/resolve', {})).json.code).toBe('not-found');
