@@ -112,7 +112,7 @@ export function isOwnerBarReason(r: unknown): r is string {
 }
 /** §6.5's closed release reasons, which an owner bar's never is. `provider-suspended` is not one:
  *  R-BTN-67 gives it as an owner bar's own reason (round 2, 2-A-0). */
-const CLOSED_RELEASE_REASONS = ['done', 'stale-board', 'cannot-finish', 'lease-lost', 'requested', 'owner-cancel', 'course-changed', 'leg-timeout', 'awaiting-review-capacity', 'provider-exhausted'] as const;
+const CLOSED_RELEASE_REASONS = ['done', 'stale-board', 'cannot-finish', 'lease-lost', 'requested', 'owner-cancel', 'course-changed', 'leg-timeout', 'awaiting-review-capacity', 'provider-exhausted', 'host-placement'] as const;
 
 /** Whether `tags` meet a required bar: one of them starts with its prefix (R-BTN-67). */
 export const meetsRequiredBar = (bar: RequiredBar, tags: string[]) => tags.some((t) => t.startsWith(bar.tag_prefix));

@@ -16,6 +16,7 @@ import { MachineLocks } from './machineLocks';
 import { ageWords, msg, sleep, stampLine, withTimestamps } from './log';
 import { maskLegOutput } from './mask';
 import { idleReason } from './idle';
+import { Placement } from './placement';
 
 export { BEAT_MS, declarationFrom } from './sidecar';
 export { SIGNAL_GRACE_MS, type ClaimOutcome } from './claimRun';
@@ -136,6 +137,7 @@ export class Runner {
   private readonly sidecar: Sidecar;
   private readonly slots = new Set<ClaimRun>();
   private readonly concurrency: number;
+  private readonly placement: Placement;
   /** Claim requests out, unanswered: a beat built or answered meanwhile cannot tell a claim
    *  Baton just granted from one this runner does not hold. */
   private claimsOut = 0;
@@ -170,6 +172,7 @@ export class Runner {
     this.executor = options.executor ?? builtinExecutor();
     this.log = this.verbose ? withTimestamps(options.log ?? (() => {})) : (options.log ?? (() => {}));
     this.now = options.now ?? batonNow;
+    this.placement = new Placement(this.executor, this.now, this.log);
     this.state = new StateFile(options.stateFile);
     if (!this.state.get().secret) this.state.set({ secret: freshSecret() });
     this.o.api.setSecret(this.state.get().secret);
@@ -190,7 +193,7 @@ export class Runner {
     }
     this.startedInLease = was.last_ok != null && !leaseLostFrom(was, this.now());
     this.sidecar = new Sidecar({ ...this.o, readCourses: () => this.o.courses, concurrency: k, now: this.now, log: this.log }, this.state, this.locks,
-      () => ({ live: [...this.slots], persisted: this.persisted, epoch: this.epoch, pendingRequests: this.claimsOut }),
+      () => ({ live: [...this.slots], persisted: this.persisted, epoch: this.epoch, pendingRequests: this.claimsOut, placementPaused: this.placement.paused }),
       (why) => this.drain(why));
   }
 
@@ -401,7 +404,7 @@ export class Runner {
   /** The idle wait: a beat long, unless an `unblocked` message ends it early. */
   private async idleWait(): Promise<void> {
     const until = this.now() + this.o.beatEvery;
-    while (!this.stopped && !this.draining && !this.pastRunDeadline() && !this.sidecar.takeUnblocked() && !this.roomMade && this.now() < until) await sleep(Math.min(50, this.o.beatEvery));
+    while (!this.stopped && !this.draining && !this.pastRunDeadline() && !this.sidecar.takeUnblocked() && !this.roomMade && this.now() < Math.min(until, this.placement.nextProbe)) await sleep(Math.min(50, this.o.beatEvery));
     this.roomMade = false;
   }
 
@@ -462,6 +465,18 @@ export class Runner {
     }
     // R-BTN-4 (B-188): no room — the runner holds its bound.
     if (this.slots.size >= this.concurrency) return null;
+    const sandboxed = this.executor.source !== 'builtin' || this.executor.placementHealth != null;
+    const placing = sandboxed && [...this.slots].some((slot) => !slot.ended && !slot.placedLeg);
+    if (placing && !this.placement.paused) return null;
+    if (sandboxed) {
+      if (!await this.placement.canClaim(this.o.home)) {
+        if (!this.sidecar.placementSettled) await this.tick();
+        return null;
+      }
+      // Restore the declared concurrency before asking Baton for another claim.
+      if (!this.sidecar.placementSettled) await this.tick();
+      if (!this.sidecar.placementSettled || placing) return null;
+    }
     await this.o.capabilityChecks?.refresh(() => this.now(), true);
     // B-86: the claim goes out only on the declaration the server holds — `sent` is the list the
     // last answered beat carried, which is what `rewriteSettings` recorded. A runner whose grant
@@ -477,7 +492,7 @@ export class Runner {
     // out on what this runner named.
     // Only an attempt that began unregistered can receive a registration's stray refusal.
     if (await this.sidecar.settleDeclaration()) beating = !registered;
-    if (!this.sidecar.coursesSettled || this.stopped || this.draining) return null;
+    if (!this.sidecar.coursesSettled || this.placement.paused || this.stopped || this.draining || this.pastRunDeadline()) return null;
     // An empty declaration is not "nothing to do" (finding 5): rule 4 passes any declaration for
     // a ticket with no `Requires:` clause, so it still claims — the line below explains what it
     // can never take, once, since every idle attempt returns here.
@@ -611,7 +626,7 @@ export class Runner {
    *  reported through an ordinary claim when Baton answers again; nothing else is decided here. */
   private async runOffline(why: string): Promise<boolean> {
     const q = this.o.queue;
-    if (!q) return false;
+    if (!q || this.placement.paused) return false;
     const d = q.read();
     const wait = (ticket: string, reason: string) => {
       if (this.saidOffline.get(ticket) === reason) return;
@@ -694,6 +709,7 @@ export class Runner {
   /** B-188: one claim's whole run, bound to its slot — the slot is let go, its clone freed and
    *  the state file's claims rewritten when it ends, whatever ended it. */
   private async runInSlot(claim: ClaimAnswer, slot: ClaimRun, resume?: Resume): Promise<ClaimOutcome> {
+    if (resume) slot.placedLeg = true;
     try {
       return await slot.runClaim(claim, resume);
     } finally {
@@ -838,6 +854,11 @@ export class Runner {
     return new ClaimRun(checkout, { ...this.o, now: this.now, verbose: this.verbose, log: this.log },
       this.state, this.executor, this.sidecar, {
         homeAdvanced: () => this.refreshCourses(),
+        placementFailed: () => {
+          this.placement.unavailable('the executor could not place a sandbox on its host');
+          this.roomMade = true;
+        },
+        legPlaced: () => { if (this.concurrency > 1 && this.executor.source !== 'builtin') this.roomMade = true; },
         ensureLegLocks: (run, leg, course) => this.ensureLegLocks(run, leg, course),
         savePlace: (run) => { if (this.slots.has(run)) this.writeClaims(); },
         retire: (run) => {

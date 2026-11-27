@@ -23,6 +23,9 @@ import { StringDecoder } from 'node:string_decoder';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 export const EXECUTOR_API = 1;
+export const LEG_PROCESS = fileURLToPath(new URL('./legProcess.mjs', import.meta.url));
+
+export type PlacementHealth = { ready: false } | { ready: true; freeSlots?: number };
 
 /** The kinds of session a runner starts (R-BTN-107): a leg's, and the calls with no leg. */
 export type SessionKind = 'leg' | 'rank' | 'source' | 'sync' | 'install';
@@ -106,6 +109,8 @@ export interface Executor {
   source: string;
   digest: string;
   provides: string[];
+  /** Host placement only. A recovery check must be fresh and representative of a leg. */
+  placementHealth?(): Promise<PlacementHealth>;
   start(o: StartOptions): Promise<Handle>;
   exec(h: Handle, argv: string[], o: ExecOptions): Running;
   stop(h: Handle, reason: string): Promise<void>;
@@ -322,5 +327,6 @@ export async function loadExecutor(source: string, host: ExecutorHost): Promise<
     if (typeof p !== 'string' || p.startsWith('runner:')) throw new Error(`the executor provides ${JSON.stringify(p)}: a provides name is a capability name and never starts runner: (R-BTN-107)`);
   }
   return { ...ex, source: 'pinned', digest, provides: [...(ex.provides ?? [])], start: ex.start.bind(ex), exec: ex.exec.bind(ex), stop: ex.stop.bind(ex), end: ex.end.bind(ex), salvage: (ex.salvage ?? (async () => null)).bind(ex),
+    ...(typeof ex.placementHealth === 'function' ? { placementHealth: ex.placementHealth.bind(ex) } : {}),
     ...(typeof ex.reattach === 'function' ? { reattach: ex.reattach.bind(ex) } : {}) };
 }

@@ -18,7 +18,7 @@ import { HARNESS_ADAPTERS, harnessActivityPaths, selectHarness, type HarnessAdap
 import { advanceHome, holdHome, legNeeds, readHead } from './home';
 import { cliBehind, cliPinLines, cliProfile, readCliPin } from './cliPin';
 import { Runner, stampLine, withTimestamps, type RunnerOptions } from './runner';
-import { loadExecutor } from './executor';
+import { LEG_PROCESS as LEG_WRAPPER, loadExecutor } from './executor';
 import { readMaskEnv, runnerConfigPath, underBatonDirectory } from './mask';
 import { runnerHome } from '../defaults/homes';
 import { LocalQueue, queueMain, queuePath } from './queue';
@@ -26,7 +26,6 @@ import { fileURLToPath } from 'node:url';
 import { capabilityChecks } from './capabilityChecks';
 
 /** The CLI's wrapper (R-BTN-133), which every executor runs. */
-const LEG_WRAPPER = fileURLToPath(new URL('./legProcess.mjs', import.meta.url));
 
 export interface RunArgs {
   config?: string;

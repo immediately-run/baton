@@ -259,9 +259,9 @@ export const clampLease = (s: unknown) => (typeof s === 'number' && Number.isFin
 
 /** R-BTN-4 (B-188): the most claims a runner may declare it runs at once, and a grant allow. */
 export const MAX_CLAIMS_CAP = 32;
-/** R-BTN-4: the runner's declared `concurrency`, clamped to [1, 32], default 1 — clamped, never
+/** R-BTN-4: the runner's declared `concurrency`, clamped to [0, 32], default 1 — clamped, never
  *  refused, since a refused heartbeat would stop `last_seen_at` and get a live runner reaped. */
-export const clampConcurrency = (n: unknown) => (isInt(n) ? Math.min(MAX_CLAIMS_CAP, Math.max(1, n as number)) : 1);
+export const clampConcurrency = (n: unknown) => (isInt(n) ? Math.min(MAX_CLAIMS_CAP, Math.max(0, n as number)) : 1);
 
 /** R-BTN-107: the isolation modes a heartbeat may declare. */
 export const ISOLATIONS: readonly Heartbeat['isolation'][] = ['attached', 'process', 'session'];
@@ -558,7 +558,7 @@ export function checkOwnerStateStation(row: Record<string, unknown>, path: unkno
 }
 /** §6.5: the `released:` reasons, exactly. */
 export const RELEASE_END_REASONS = ['blocked', 'stale-board', 'cannot-finish:transient', 'cannot-finish:capability', 'cannot-finish:spec', 'cannot-finish:blocked', 'cannot-finish:contract-output', 'cannot-finish:contract-input',
-  'lease-lost', 'requested', 'owner-cancel', 'provider-suspended', 'provider-exhausted', 'course-changed', 'leg-timeout'] as const;
+  'lease-lost', 'requested', 'owner-cancel', 'provider-suspended', 'provider-exhausted', 'course-changed', 'leg-timeout', 'host-placement'] as const;
 
 /** A claim's request (§6.2). `bills` is retired (B-168: a `prefer` entry bills no account once
  *  route choices are gone, R-BTN-100): a request carrying one is read as if it did not, the

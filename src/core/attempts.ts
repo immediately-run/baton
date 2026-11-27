@@ -14,7 +14,7 @@ export const ATTEMPTS_HOLD_AT = 3;
  * `deadline_s` took back (`leg-timeout`, R-BTN-90 — the ask of R-BTN-195 ends this way when
  * nobody joins). Nothing else — not an owner's force-reap, the unacknowledged-release reap, a
  * legacy reap, nor stale-board, requested, owner-cancel, provider-suspended,
- * provider-exhausted, course-changed or any completion, suspensions included.
+ * provider-exhausted, host-placement, course-changed or any completion, suspensions included.
  */
 export function countsAsFailed(endReason: string, leaseLostBefore = false): boolean {
   if (endReason === 'released:cannot-finish:contract-input') return false;

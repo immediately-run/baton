@@ -2100,6 +2100,14 @@ export class Claims {
    */
   private restingAt(c: HeldClaim, e: End): { reached: string; finished: boolean } {
     const g = c.course_id ? this.stations.graph(repositoryOf(c.ticket_id), c.course_id) : null;
+    if (e.end_reason === 'released:host-placement') {
+      const canonical = (station: string) => (g ? resolveStation(g, station) : null) ?? station;
+      const station = canonical(c.station);
+      if (e.reached != null && canonical(e.reached) !== station) {
+        throw new BatonError('invalid-params', 'host-placement: the claim must rest where the leg started');
+      }
+      return { reached: station, finished: false };
+    }
     const run = this.runningLeg(c.id);
     // A course no longer in force: nothing to check against; a named outcome finishes the leg.
     if (!g) {
