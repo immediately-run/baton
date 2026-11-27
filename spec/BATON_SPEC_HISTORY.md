@@ -23,9 +23,9 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   R-BTN-83, R-BTN-63, R-BTN-71, R-BTN-79, R-BTN-69, R-BTN-134, R-BTN-131, R-BTN-110, R-BTN-174,
   R-BTN-74, R-BTN-51, R-BTN-5 / R-BTN-34, R-BTN-88, R-BTN-39, R-BTN-33, R-BTN-50, R-BTN-61,
   R-BTN-76, R-BTN-75, R-BTN-120, R-BTN-99, R-BTN-116, R-BTN-89, R-BTN-163, R-BTN-167, R-BTN-9,
-  R-BTN-72, R-BTN-106, R-BTN-133, R-BTN-4, R-BTN-10, R-BTN-127, R-BTN-184; §12.3's links, §13's
+  R-BTN-72, R-BTN-106, R-BTN-133, R-BTN-4, R-BTN-10, R-BTN-127, R-BTN-184, R-BTN-64, R-BTN-40; §12.3's links, §13's
   `selection_verdicts` and `selection_wants`, §14's selection routes; S-BTN-47, S-BTN-312,
-  S-BTN-174, S-BTN-188, G-BTN-42 and G-BTN-73; three Decisions lines.
+  S-BTN-174, S-BTN-188, G-BTN-42, G-BTN-43 and G-BTN-73; four Decisions lines.
   What a ticket runs next is one function of its course's, the selector, which a runner runs
   through its executor over Baton's record and whose stored verdict — `run`, `wait` or
   `attention`, with the checks that decided it — takes the place of the holder's `next`, the
@@ -104,6 +104,48 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
 
     Not taken as found: that a `wait` reverses the advice-only ruling on readings — the owner's
     second constraint asks for exactly that, through the selector, and R-BTN-76 now says so.
+  - **Review round two** (2026-11-27): a fresh reviewer over PR #462 at `57bc7c00`. Every finding
+    verified against the text. Fixed:
+    - chaining: R-BTN-63's `advance` now either finishes (`{reached, outputs}`, answered with the
+      arrival's `ctx`) or starts (`{leg, verdict}`, the verdict's `run` with its `answers` and
+      digest), so the holder selects before it starts the next leg; §9.1's bodies, the end
+      body, R-BTN-71 and R-BTN-72's *Selecting* follow, and in-claim arrivals never fall to a want;
+    - the claim-time re-check: the verdict posted with a `stale-board` release answers the
+      offered position and is acted on;
+    - waiting under a claim has one home, R-BTN-72 (with R-BTN-40's 30-minute bound moved into it),
+      which R-BTN-40 and R-BTN-89 cite; `reselect` hands out a
+      fresh `ctx` and admits one more verdict for the same arrival;
+    - R-BTN-64's inference from one runner leg leaving a former end, now a want; open wants are
+      withdrawn and remade on a course change;
+    - `host` checked at the claim and the starting `advance` too, a missing declaration failing
+      it, and the `host` case of `baton.selection-attention` closing when a runner that meets it
+      registers or a later verdict replaces it;
+    - no wants while a claim is active: causes are deferred to the holder, or become a want when
+      the claim ends;
+    - reconcile conclusions are holder arrivals (R-BTN-39);
+    - `lease-lost` among R-BTN-205's refusals, the lessee wording in B-351's Trust, R-BTN-83's
+      `next_source: baton` list completed, one selector tree (the verified tree at the claim's or
+      want's commit) in R-BTN-205 and R-BTN-5 / R-BTN-34, §13's `ticket_next_legs` rewritten to
+      the queued leg and core-held waits, S-BTN-312's leftover reopening sentence, B-352 on
+      R-BTN-63, `selector`, `host` and `short_waits` validation in R-BTN-69 with B-353 owning
+      `src/core/course.ts`;
+    - B-120, which no session holds: its contradicted clauses rewritten in place rather than
+      struck, and a migrated queued leg recorded `next_source: baton`, not `selector`.
+
+    Main's #335 entry is kept below this one, and the Decisions line on readings now says both:
+    advice to core's gates, a selector may wait on one, a requirement core evaluates deferred.
+    Nothing was rejected.
+
+    Decided here, not by the owner, for the owner's review in the PR:
+    - **Waiting under a claim by `short_waits` alone**, not by a time window: the course declares
+      which waits are short, and a window would let a selector hold a claim with a run of
+      near-term `until`s.
+    - **Holder verdicts are bound by the gates their claim passed**; the trusted-class
+      requirement under `protected` applies to selection wants' lessees only, since a holder has
+      already passed every gate to hold the claim.
+    - **A migrated queued leg is `next_source: baton`**, the migration being Baton's own rule.
+    - **A finishing `advance` and a starting one are separate requests**, the cost of one round
+      trip per leg for a holder that sees its own arrival's `ctx` before choosing.
 - **2026-11-26 — Gating on a reading deferred (R-BTN-76, R-BTN-181).**
   Rules changed: none; the Decisions line on readings (§91) now says they are served as advice
   and that gating on one is deferred, where it said gate or advice was the requirement's choice.

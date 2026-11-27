@@ -503,13 +503,14 @@ The fingerprint stores no ticket content and is an optimization, never authority
     version releases `stale-board`. A source that declares `versions` and exports no `read`
     releases `stale-board` too. A source that declares neither is not re-verified by version.
   - **Re-verification of the selection.** The runner then runs the course's selector (through
-    the wrapper, from a verified tree at the claim's commit, R-BTN-133) over the `ctx` the claim
-    response carries, built from Baton's record now (R-BTN-205). Its verdict must be `run` of
-    the offered leg, leaving the claim's station as Baton holds it (the claim response's
-    station, `path_len` and queued leg, R-BTN-39); the ticket's position never comes from the
-    source. A ticket closed or archived, or any other verdict, releases `stale-board`, the
-    verdict posted with the release. A queued leg an owner or Baton's own transition chose is
-    checked against the station and course file alone.
+    the wrapper, in the verified tree at the claim's commit, R-BTN-133, R-BTN-143) over the
+    `ctx` the claim response carries for the offered position, built from Baton's record now
+    (R-BTN-205). Its verdict must be `run` of the offered leg, leaving the claim's station as
+    Baton holds it (the claim response's station, `path_len` and queued leg, R-BTN-39); the
+    ticket's position never comes from the source. A ticket closed or archived, or any other
+    verdict, releases `stale-board`, the verdict answering the offered position posted with the
+    release, which core acts on (R-BTN-205). A queued leg an owner or Baton's own transition
+    chose is checked against the station and course file alone.
   - After this check, a version that moves under the claim is read again as R-BTN-198 says.
   - **A ticket Baton has not seen cannot be claimed.** A claim naming it is `not-eligible`
     (`unknown-ticket`, §9.1), until the first accepted post that names it.

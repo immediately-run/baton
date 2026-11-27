@@ -26,8 +26,8 @@ The owner, 2026-11-26: "we should not start a leg requiring a sandbox with more 
 ### What to build
 
 1. **Heartbeat dimensions:** a runner declares numeric `host` dimensions (`memory_mb` first), validated in `src/core/validate.ts`.
-2. **Matching at the offer:** `host.capabilities` by name as R-BTN-174 matches capabilities; each numeric dimension by "declared at least asked". Rule 1 refuses a runner that does not meet it.
-3. **Capacity versus impossibility:** a leg no live runner meets waits for capacity, shown with the largest value live runners declare; one no registered runner granted on the repository meets raises `baton.selection-attention`.
+2. **Matching at the offer, the claim and the starting `advance`:** `host.capabilities` by name as R-BTN-174 matches capabilities; each numeric dimension by "declared at least asked", a runner that declares no value for a dimension failing any requirement on it. Rule 1 refuses a runner that does not meet it, at claim and at advance.
+3. **Capacity versus impossibility:** a leg no live runner meets waits for capacity, shown with the largest value live runners declare; one no registered runner granted on the repository meets raises `baton.selection-attention`, which closes when a runner that meets it registers or a later verdict replaces it.
 4. **`fleet` totals** for `ctx`: per dimension and per capability, live and registered counts at or above each value — never a runner's identity.
 5. **The course file's leg `host`**, read by the default selector.
 

@@ -135,8 +135,9 @@ resumed by a **restart** (§7). "Workflow" means only a CI workflow; "activity" 
     record. History row `reconcile-queued`.
     The reconcile leg runs like any leg. Its finishing position is one of its outcomes (R-BTN-69):
     `unchanged` at the station it left, which queues the displaced leg again (`next_source:
-    baton`); or a station of its `reconciles.to`, the one it left included, which makes a
-    selection want naming that entry's leg (R-BTN-205). A conclusion naming
+    baton`); or a station of its `reconciles.to`, the one it left included, an arrival in the
+    claim that the holder selects for as for any (R-BTN-205), its `ctx` naming that entry's leg,
+    which the default selector takes. A conclusion naming
     a merge or a verdict is checked by its stub as the fact leg's fact would be (the PR is the
     ticket's, merged, on the default branch; the verdict is on its head). Only that finishing
     position marks the evidence its claim carried as weighed and clears the record; a claim ending

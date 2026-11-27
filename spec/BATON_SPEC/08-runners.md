@@ -183,15 +183,17 @@ section that are not built are in [the proposal page](../proposals/checks-and-ex
     result carries is ignored and logged. A `reached` that is not an outcome of the leg is a
     script bug: the runner suspends at the leg's `from`.
   - **Selecting.** After each arrival the runner runs the course's selector — its `select.mjs`,
-    or the default selector (R-BTN-205) — through the wrapper over the `ctx` core's answer to
-    that arrival carries. It chains into the verdict's `run` with the next `advance` when its
-    bounds allow and every gate holds, and otherwise posts the verdict with a `select` request
-    before it suspends or ends. A `wait` whose failing checks are all the course's `short_waits`
-    is waited out under the claim and selected again; any other `wait` or an `attention` ends
-    the claim at `reached`. Outputs are validated against their schemas before
-    anything is reported (R-BTN-82, R-BTN-108). A `detail` on a suspension or a done end is the
-    end's `detail` (§9.4), stored on the claim and on the finished run's history row beside its
-    evidence (R-BTN-81).
+    or the default selector (R-BTN-205) — through the wrapper over the `ctx` the finishing
+    `advance` answered with (R-BTN-63), and sends the verdict itself: the next leg is never left
+    to a want while the claim is active. A `run` it may take — within its bounds, every gate and
+    the verdict's `host` met — is started with `advance {leg, verdict}`; any other `run`, an
+    `attention`, or a `wait` it does not wait out goes with the suspension or end at `reached`.
+  - **Waiting under the claim.** A holder waits under its claim, rather than suspending
+    (R-BTN-40), only when every failing check of a `wait` verdict is one of the course's
+    `short_waits` (R-BTN-69), and for at most **30 minutes**. It renews its lease meanwhile and,
+    each heartbeat or when the wait's `until` comes, asks `reselect` (R-BTN-63) and selects again
+    over the fresh `ctx`. Every other `wait`, and one still waiting after 30 minutes, ends the
+    claim at `reached`, the verdict posted with it.
   - **The runner writes nothing to git itself.** The leg's `close` writes the closing marker and
     the leg leaves its own evidence (R-BTN-8). On a suspension or release the runner calls
     `close`, then `handoff`, so the hand-off can cite the position. A failing `close` is retried

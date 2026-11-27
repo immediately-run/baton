@@ -27,11 +27,13 @@ The runner is where a selector runs, through its executor, so that sandboxing is
 
 1. **The `select` call** in `legProcess.mjs` (R-BTN-133), with the 10-second and 256 MB bound, run in a read-only worktree of the course's snapshot.
 2. **The default selector**, the CLI's own code run through the wrapper: claimable legs only (no fact, reconcile or person leg, none with `max_runs` used); after a fact or reconcile arrival the entry's leg; `start_leg` at `start`; a `not_before` as a `wait`; else the first in course order with its `host`; none, `attention`.
-3. **Selecting after each arrival:** run the selector over the `ctx` core's answer carries; chain into the verdict's `run` with the next `advance` inside `--legs`/`--max-legs`/`--until`; else post it with `select` and suspend or end. Wait out a `short_waits`-only `wait` under the claim.
-4. **Taking selection wants** when idle: lease, run, post; give up a lapsed lease.
-5. **The result shapes** without `next`; a result's `next` is ignored and logged. `decide()` (`src/runner/protocol.ts`) checks only `reached`. The channel's `done` and `suspend` drop `--next`; the `leg next` verb goes.
-6. **Re-verification at a claim:** re-run the selector over the claim response's `ctx`; anything but `run` of the offered leg releases `stale-board` with the verdict.
-7. **`baton repo init`** scaffolds no `select.mjs` for a course the default selector serves.
+3. **Selecting after each arrival:** finish with `advance {reached, outputs}`, run the selector over the `ctx` it answers with, then start the verdict's `run` with `advance {leg, verdict}` inside `--legs`/`--max-legs`/`--until`, after checking its own declaration meets the verdict's `host`; else post the verdict with the suspension, end or `select`. In-claim arrivals never fall to a want.
+4. **Waiting under the claim** only when every failing check of a `wait` is in the course's `short_waits` (R-BTN-72): renew the lease, `reselect` when a check may have changed or `until` comes, and select again.
+5. **Taking selection wants** when idle: lease, run, post; give up a lapsed lease.
+6. **The result shapes** without `next`; a result's `next` is ignored and logged. `decide()` (`src/runner/protocol.ts`) checks only `reached`. The channel's `done` and `suspend` drop `--next`; the `leg next` verb goes.
+7. **Re-verification at a claim:** re-run the selector, in the verified tree at the claim's commit, over the claim response's `ctx`; anything but `run` of the offered leg releases `stale-board` with the verdict, which answers the offered position.
+8. **`baton repo init`** scaffolds no `select.mjs` for a course the default selector serves.
+9. **The course file** (`src/core/course.ts`): validate `selector.readings` and each leg's `host`, and read `short_waits` as `check` ids, no longer `waiting_on` labels (R-BTN-69).
 
 ### Trust
 

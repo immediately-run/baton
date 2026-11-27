@@ -343,9 +343,9 @@ Not built, each a design its rule below still states:
   - **Stored.** The verdict's `until` is stored with it. A time wait raises no condition; the
     dashboard shows "waiting until …" and lists pending waits on **Courses**.
   - **Asked again at the instant.** Recommendations have no leg to offer while it waits. Claim,
-    heartbeat and advance responses carry the verdict's `until`; a holder whose verdict waits
-    suspends unless `until` is within 30 minutes, then waits under the claim and selects again.
-    At `until` the alarm makes a selection want, queues R-BTN-77's `unblocked` message with
+    heartbeat and advance responses carry the verdict's `until`; whether a holder waits under its
+    claim is R-BTN-72's. At `until` the alarm makes a selection want, or, under an active claim, leaves it to the holder
+    (R-BTN-205), queues R-BTN-77's `unblocked` message with
     `cleared: [{kind: "time", ref: <until>}]` and rings it, but calls no trigger.
   - **Recurring jobs.** The design of a series, a ticket whose children are a job's runs, is in
     the [conditions proposal](../proposals/conditions.md).
@@ -360,7 +360,7 @@ never refuses, and acting against it is accepted and recorded `advice-overridden
 
   | Rule | Holds when | At | Refusal |
   |---|---|---|---|
-  | 1 | Claim: a leg is queued (R-BTN-83: a `run` verdict, a route or Baton's own transition), the runner meets its verdict's `host` (R-BTN-174), a snapshot was accepted after the ticket's last end (R-BTN-10), and no row that refuses (R-BTN-75) is on that leg or the whole ticket. Advance: the new leg is the ticket's queued leg or the `run` of the verdict the advance carries (R-BTN-63, R-BTN-205), an edge from the claim's station within its run limit, with no row that refuses on it or the whole ticket | claim, advance | `blocked` with the blocks; else rule 1 (`not-ready`, `not-selected`, or R-BTN-63's codes) |
+  | 1 | Claim: a leg is queued (R-BTN-83: a `run` verdict, a route or Baton's own transition), the runner meets its verdict's `host` (R-BTN-174), a snapshot was accepted after the ticket's last end (R-BTN-10), and no row that refuses (R-BTN-75) is on that leg or the whole ticket. Advance: the new leg is the ticket's queued leg or the `run` of the verdict the advance carries (R-BTN-63, R-BTN-205), an edge from the claim's station within its run limit, the runner meets that verdict's `host` (R-BTN-174), with no row that refuses on it or the whole ticket | claim, advance | `blocked` with the blocks; else rule 1 (`not-ready`, `not-selected`, or R-BTN-63's codes) |
   | 2 | *(advice)* expedite lane: while 2 active claims hold expedited tickets, other expedited tickets lose their expedite place and carry `expedite-bound` | — | — |
   | 3 | No other active, completed-unconfirmed or fence-pending claim on the ticket; no hold (§6.8) | claim; advance: the hold only | `claimed`, `held` |
   | 4 | `capabilitiesOf(ticket.requires ∪ leg.requires.capabilities) ⊆ declared ∩ grant(repository)`, matched by name (R-BTN-174); `runner:` counts once declared (R-BTN-133); no clause is met by all | claim, advance | `missing-capability` |

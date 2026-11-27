@@ -36,23 +36,27 @@ is `active` until it ends `completed`, `released` or `reaped`.
     yields a second ticket; idempotency is keyed by `(runner_id, request_id)`.
   - **The response**, stated here once, carries `claim_id`, `ticket_id`, `course_id`,
     `course_version`, `station`, `legs` (the queued leg, R-BTN-83), `verdict` (the selection
-    verdict that queued it, if any) and the `ctx` to re-verify it by (R-BTN-205), `path`, `nonce` (6
+    verdict that queued it, if any), and the `ctx` for the offered position with its `answers`
+    and `ctx_digest`, to re-verify it by (R-BTN-205), `path`, `nonce` (6
     hex, public: written in markers, R-BTN-17), `snapshot_sha`, `default_branch` (R-BTN-143),
     the ticket's `version`, `ticket_source?` and `last_written_by?` (R-BTN-194),
     `brief?` (R-BTN-194), `scope` (§12.9), `leg_state?` (R-BTN-188), `handoff_url?`, `previous_attempts`
     (R-BTN-24), and on a reconcile leg `evidence: [{ref, kind}]` and `displaced` (R-BTN-39).
   - The runner then reads the ticket from git and re-verifies it (R-BTN-34, R-BTN-5).
 - **One claim runs a run of legs** (unnumbered). A claim runs as many legs as it can. Each leg
-  starts with `POST /v1/runner/claims/{id}/advance` naming it (R-BTN-63): Baton checks the edge
-  and the gates in one transaction and moves the claim on (event `advanced`, a new `claim_legs`
-  row with its run number, `run_id`, `started_at` and `head_sha`) or refuses.
-  - The body carries `leg`, and for the leg it finishes `reached`, `evidence`, `outputs`,
-    `scope_exceeded` (§12.9), `exit_status` (R-BTN-153), `session_url` (R-BTN-113) and
-    `local_order` (R-BTN-202); for the run it starts, `bars` (the tags the holder bars from
-    it), `head_sha` and `run_inputs` (R-BTN-84); and `course`, at most 4 KB, which Baton
+  finishes with `POST /v1/runner/claims/{id}/advance` naming where it reached, and the next
+  starts with another naming it (R-BTN-63): Baton checks the edge and the gates in one
+  transaction and moves the claim on (event `advanced`, a new `claim_legs` row with its run
+  number, `run_id`, `started_at` and `head_sha`) or refuses.
+  - A finishing body carries `reached`, `evidence`, `outputs`, `scope_exceeded` (§12.9),
+    `exit_status` (R-BTN-153), `session_url` (R-BTN-113) and `local_order` (R-BTN-202). A
+    starting body carries `leg`, and after an arrival `verdict` (with its `answers` and
+    `ctx_digest`, R-BTN-205); for the run it starts, `bars` (the tags the holder bars from it),
+    `head_sha` and `run_inputs` (R-BTN-84). Either carries `course`, at most 4 KB, which Baton
     accepts and never reads.
-  - The reply carries the run's `run_id`, the leg's resolved inputs (R-BTN-82) and Baton's
-    advice flags; the course's own advice is `rank.mjs`'s (R-BTN-98).
+  - A finishing reply carries the `ctx` for the arrival with its `answers` and `ctx_digest`
+    (R-BTN-205). A starting reply carries the run's `run_id`, the leg's resolved inputs
+    (R-BTN-82) and Baton's advice flags; the course's own advice is `rank.mjs`'s (R-BTN-98).
 - **R-BTN-38 (legs are stateless at their boundaries).** `status: built` Each leg reads its input from, and
   leaves its output in, the ticket's repositories and their changes. Nothing a leg needs travels
   through a session's context, so any session can run any leg whose input is in place. What git
@@ -109,14 +113,12 @@ is `active` until it ends `completed`, `released` or `reaped`.
 
 ### 9.3 Suspending and handing off
 
-- **R-BTN-40 (suspend, don't wait on the lease).** `status: built B-47 B-274` The holder decides whether to go on. It
+- **R-BTN-40 (suspend, don't wait on the lease).** `status: partly B-47 B-274 B-353` The holder decides whether to go on. It
   **suspends** at the station it reached — writes the hand-off, makes sure its last leg left its
   evidence, ends `suspended:<station>` (R-BTN-71) — when a gate or `max_runs` refuses its
   `advance`, when advice says a line the next leg needs is short and it has no better evidence,
-  when the latest snapshot observed after its leg shows every leg leaving its station `waiting`
-  on something not in the course file's `short_waits`, or when it must stop for its own
-  reasons. On a leg `waiting` on a `short_waits` entry it may keep the claim, re-reading the
-  station each heartbeat, for up to **30 minutes**, then suspends. The ticket then waits unheld
+  when its selection verdict is not a `run` it may take and R-BTN-72 does not let it wait under
+  the claim, or when it must stop for its own reasons. The ticket then waits unheld
   and is recommended again, to any eligible runner. A suspension is a completed end, never a
   failed attempt.
 - **R-BTN-44 (the hand-off document).** `status: built` Every suspension or release — except a lost lease —
@@ -132,7 +134,9 @@ is `active` until it ends `completed`, `released` or `reaped`.
 ### 9.4 Ending a claim
 
 A claim ends with `POST /v1/runner/claims/{id}/end`. Its body, stated here once: `end_reason`,
-`reached`, `verdict?` (the holder's selection verdict for that arrival, R-BTN-205), and as applicable
+`reached`, `verdict?` (the holder's selection verdict answering the claim's last arrival, or
+the claim's offered position on a `stale-board` release, with its `answers` and `ctx_digest`,
+R-BTN-205), and as applicable
 `spawned` (R-BTN-86), `outputs`, `detail`, `ended_at_sha` (R-BTN-8; a completed end's only),
 `prerequisite` (R-BTN-126), `exit_status` (R-BTN-153), `scope_exceeded` (§12.9), `session_url`
 (R-BTN-113) and `local_order` (R-BTN-202).
