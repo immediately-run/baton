@@ -1,0 +1,57 @@
+---
+id: B-368
+status: available
+topics: [baton]
+owns: {}
+prs: []
+title: "B-368 — The release gate measures itself: baton report soak reports interventions, order inversions, course deviations and idle capacity over a window"
+depends_on: []
+order: 75
+tags: [roadmap-item]
+project: baton
+description: "A read in the registry and on the dashboard: owner and administrator acts and hand moves counted as interventions, claims that skipped a higher-ranked claimable ticket, tickets moved off their course or looping or stale, and runner slot-minutes idle while work passed every gate; PASS or FAIL against thresholds the owner sets."
+repos: [baton]
+---
+
+**Brief:** the owner, 2026-11-27 (in a Claude Code session): Baton's 0.1 release criterion is that "the runner can execute tasks without interventions for 3 days such that: 1. It is working on the correct issues (most important first) 2. It follow the course as expected 3. It operates at full capacity". This ticket builds the instrument that decides it; the plan is [Baton 0.1](../docs/plans/baton-0-1.mdx).
+
+**Spec:** [BATON_SPEC §11.3](../spec/BATON_SPEC/11-people.md#sec-11-3) ([R-BTN-127](../spec/BATON_SPEC/11-people.md#sec-11-3): the action registry and CLI), [BATON_SPEC §11.4](../spec/BATON_SPEC/11-people.md#sec-11-4) (the dashboard), [BATON_SPEC §6.6](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-6) (the default order; `advice-overridden`), [BATON_SPEC §9.4](../spec/BATON_SPEC/09-claims.md#sec-9-4) (end reasons).
+
+**Depends on:** none.
+
+**Related:** Its third measure reads B-361's (`baton.unclaimable`'s) per-leg refusal counts; until B-361 lands, it computes idle slots from claims and the ready list alone, and says so in its output.
+
+### Why
+
+Today "did the runner need an intervention?" is answered by a supervisor writing `docs/interventions.mdx` by hand, and "was it at full capacity?" by reading logs. The release criterion should be decided by a check, not by judgement. Baton already holds almost everything the check needs: every claim and its end, every owner and administrator act as an event, every refusal, the default order at each claim.
+
+### What to build
+
+`baton report soak <repository> [--from T] [--to T] [--json]`, a read in the registry, and the same report on the dashboard's repository overview. Over the window it reports, per day and in total:
+
+1. **Interventions** (the gate: zero). Every act in Baton's record that `AGENTS.md`'s *The supervising agent* counts as an intervention: an owner's or administrator's `resolve`, `hold`/`unhold`, `expedite`, `force-reap`, fence clear, completion `confirm`/`release`, grant or setting change, policy change, and every ticket move the sync attributes to a hand act (a fact leg, `merged-by-hand`, a ticket closed outside its course). Not counted: answering a person leg or an approval the course asked for, and filing tickets. Each line names the act, its key, the time and the ticket.
+2. **Order** (criterion 1). Each claim of a new ticket, with its position in the default order computed for that runner at that moment (the order the recommendations read would have returned). A claim of anything but the first gate-passing candidate is an **inversion**, listed with the candidates it skipped, unless it was a recorded `advice-overridden` with a reason.
+3. **Course** (criterion 2). Tickets that reached a station by an edge their course does not have (a reconcile or fact arrival, a hand move); legs run past `max_runs`; tickets whose last two runs of the same leg ended the same way with no push between them (a loop); tickets with no arrival for 24 hours that are neither waiting on a person nor blocked by a declared prerequisite.
+4. **Capacity** (criterion 3). Per runner, slot-minutes: the time its declared `concurrency` was not fully used while at least one queued leg passed every gate for it, and the codes of what kept the rest away. Reported as minutes and as a share of the runner's live time.
+
+The thresholds are inputs, `--max-idle-share` (default 5%) and `--max-stale-hours` (default 24), so the owner can set them (decision D3 in the plan). The report's last line is `PASS` or `FAIL` with the failing measures.
+
+### Exit criteria
+
+- On a fixture replaying 2026-11-23 21:57's state (one claimable ticket among 77 ready), the report shows the idle slot-minutes and the refusal codes.
+- An owner `resolve` in the window appears as an intervention. A person-leg answer does not.
+- A claim of the second candidate while the first was claimable is an inversion; the same claim recorded `advice-overridden` is not.
+- `baton report soak --json` is stable enough for a scheduled check to read; each measure named in a scenario; `npm test` and `npm run typecheck` green.
+
+### Trust
+
+A read over Baton's own record, served to keys that may read the repository. It names keys by fingerprint and tickets by id, never ticket text (R-BTN-33).
+
+### Invariants
+
+- Advice never refuses: an inversion is reported, never prevented.
+- One clock (R-BTN-32): every window is computed with `this.now`.
+
+## Status
+
+_filed 2026-11-27._

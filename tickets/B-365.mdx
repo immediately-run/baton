@@ -1,0 +1,60 @@
+---
+id: B-365
+status: available
+topics: [baton]
+owns: {}
+prs: []
+title: B-365 — A runner stops claiming on any repeated host failure, and re-reads rotated keys without a restart
+depends_on: [B-336]
+order: 55
+tags: [roadmap-item]
+project: baton
+description: "B-336's pattern for every host-side check: two consecutive claims failing the source check, the wrapper, the executor start or provider authentication stop new claims until a probe passes; those claims end with a host reason, never stale-board or a spent retry; a 401 re-reads the key files once; a pin mismatch names the fix."
+repos: [baton]
+---
+
+**Brief:** the owner, 2026-11-27 (in a Claude Code session): Baton's 0.1 release criterion is that "the runner can execute tasks without interventions for 3 days such that: 1. It is working on the correct issues (most important first) 2. It follow the course as expected 3. It operates at full capacity". This ticket is part of criterion 3; the plan is [Baton 0.1](../docs/plans/baton-0-1.mdx).
+
+**Spec:** [BATON_SPEC §8.3](../spec/BATON_SPEC/08-runners.md#sec-8-3) ([R-BTN-72](../spec/BATON_SPEC/08-runners.md#sec-8-3), [R-BTN-107](../spec/BATON_SPEC/08-runners.md#sec-8-3): the executor), [BATON_SPEC §9.1](../spec/BATON_SPEC/09-claims.md#sec-9-1) ([R-BTN-4](../spec/BATON_SPEC/09-claims.md#sec-9-1): the runner's own statement of what its host can run), [R-BTN-35](../spec/BATON_SPEC/01-what-baton-is.md#sec-1) (`stale-board` is git taking a ticket away).
+
+**Depends on:** B-336.
+
+**Related:** B-336 builds the pattern below for one cause (a sandbox that cannot be placed); this ticket applies it to every host-side check.
+
+### What went wrong
+
+Each of these failed every claim the runner took, and the runner kept claiming:
+
+- 2026-11-26 14:20 (`docs/interventions.mdx`): after B-55 the built leg wrapper was not self-contained, so every claim failed its ticket-source check and was released `stale-board` ("ticket moved under the claim", though nothing moved). The runner was drained and restarted by hand.
+- 2026-11-24 10:19–13:50: the gateway key file was rewritten under a running runner. The executor reads it once at start, so every leg failed 401 until a person restarted the runner. One ticket spent its third retry on it.
+- 2026-11-18 09:19 and 2026-11-21 13:58/18:35: the executor's pin refused the start after the checkout moved, and was re-pinned by hand three times.
+
+The runner already knows these failures are its host's: they happen before any leg code runs, or they are the same error on every leg.
+
+### What to build
+
+1. **The runner stops claiming on a repeated host failure.** A failure before the leg's own code runs (the source check, the wrapper, the executor's start, the gateway's or provider's authentication) that repeats on two consecutive claims stops new claims: the runner logs the cause once, says in its heartbeat that it is not taking work, and probes on a backoff (re-running the same check without claiming) until it passes. Claims in flight are left alone. This is B-336's mechanism with any host check in place of placement.
+2. **Such a claim ends with a host reason.** It ends `released` at its `from` station with a reason naming the host (B-336's, extended if needed), never `stale-board` and never a failed attempt.
+3. **Credentials are re-read, not cached.** On an authentication failure (401 or 403 from the gateway or a provider), the executor re-reads the key files it was configured with and retries the request once before failing the leg. A key rotated under a running runner then needs no restart.
+4. **A pin mismatch says how to fix it.** When the executor's digest does not match its pin, the refusal names the commit whose build has the pinned digest, if the checkout has one, and the command that re-pins.
+
+### Exit criteria
+
+- With the wrapper or source check made to fail, the runner makes at most two failing claims, then stops and probes; when the check passes again it resumes on its own.
+- Those claims are not reported as `stale-board` and spend no retry.
+- With the gateway key file rewritten during a run, the next leg succeeds without a restart.
+- Each behaviour named in a scenario; `npm test` and `npm run typecheck` green.
+
+### Trust
+
+All inputs are the runner's own process and host. The change only makes the runner claim less, or re-read a file its operator already named; it grants nothing.
+
+### Invariants
+
+- R-BTN-4: Baton counts claims, never resources.
+- R-BTN-35: `stale-board` keeps meaning git took the ticket away.
+- No credential value is logged: the log names the file and the status code only (R-BTN-144's masking).
+
+## Status
+
+_filed 2026-11-27._

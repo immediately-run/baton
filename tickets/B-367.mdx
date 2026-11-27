@@ -1,0 +1,62 @@
+---
+id: B-367
+status: available
+topics: [baton]
+owns: {}
+prs: []
+title: "B-367 — A first install in two commands: the server ships in the package, baton init local sets everything up, baton up runs it"
+depends_on: []
+order: 250
+tags: [roadmap-item]
+project: baton
+description: baton serve from the published package; baton init local makes the keys (building R-BTN-137's keys.json and origins.json), a plain-git home, the registration, grant and runner.json in process; baton up runs server, sync loop and runner together; one default for the repository; docs/install.mdx.
+repos: [baton]
+---
+
+**Brief:** the owner, 2026-11-24 (in a Claude Code session): "The installation story is completely missing. Running locally on nodejs with a local sqlite db and on cloudflare are both supported, but the process for installing baton is so complex that I wouldn't even attempt it without an agent to assist me in the process. The requirements are non-obvious." The plan is [Baton 0.1](../docs/plans/baton-0-1.mdx), *After 0.1*.
+
+**Spec:** [BATON_SPEC §2](../spec/BATON_SPEC/02-deployments.md) ([R-BTN-137](../spec/BATON_SPEC/02-deployments.md#sec-2-2): `~/.config/baton/keys.json` and `origins.json`, specified and not built), [BATON_SPEC §4.4](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-4) (`baton repo init`), [BATON_SPEC §11.2](../spec/BATON_SPEC/11-people.md#sec-11-2) (one management path, `src/core/admin.ts`).
+
+**Depends on:** none.
+
+### What is wrong today
+
+`docs/runbooks/local-home.mdx` is the only local install guide. It takes about 18 commands, three hand edits, four SSH keys, a fine-grained GitHub token and three long-running processes that nothing supervises (server, a shell `while` loop for the sync, the runner). Beyond its length:
+
+- The published package has no server command: `scripts/build-cli.mjs` bundles nothing from `src/local` but `testCourse`, so a person needs a source checkout, `npm ci` and esbuild to run the server.
+- `repo init` scaffolds GitHub Actions, which a plain-git home must delete by hand, and `.baton/baton.json` must be edited by hand afterwards.
+- `admin repo add` requires an `ssh://` `--remote` that the local path never uses.
+- The runner's defaults point at production with the repository `docs` (`src/runner/main.ts`, `cli/baton.mjs`), while `scripts/start-runner.sh` defaults to `baton` and `scripts/cloud-runner.sh` reads it from the origin: three defaults for one value.
+- The runbooks pin 0.1.3 and say "until 0.1.3 publishes", while `package.json` is at 0.1.4.
+
+### What to build
+
+1. **The server ships in the package.** `baton serve --db <file> [--port N]` runs the local host (`src/local/main.ts`) from the published package.
+2. **`baton init local [--dir D] [--code-repo URL]…`** does the runbook in one command and prints what it did:
+   - generates the administrator, owner, sync and runner keys under `~/.config/baton/<origin>/`, recording them in R-BTN-137's `keys.json` and `origins.json` (building that rule);
+   - creates the home as a plain git repository with `repo init --no-ci`, writing `baton_url`, `repos` and the prefix itself;
+   - registers it, grants the runner key (hostname from the machine), and sets `code_repos`, in process through `src/core/admin.ts`, with no HTTP round trip;
+   - writes the runner's `runner.json` with `origin` and `repository`, so no production default applies;
+   - files one example ticket with Dibber.
+3. **`baton up`** starts the server, a sync loop and one runner for that home in one process tree, stops them together on Ctrl-C, and can print systemd units (`--print-units`) for a machine that should keep them running.
+4. **One default for the repository.** The runner, the CLI and both scripts take the repository from `runner.json` or the home's `baton.json`, never a built-in name. A missing one is an error that names the file to write.
+5. **`docs/install.mdx`**, one page: the local path in three commands, then links to the Cloudflare runbook. Fix the stale version pins in the runbooks.
+
+### Exit criteria
+
+- On a machine with Node and git only, `npx @immediately-run/baton@<this release> init local` then `baton up` runs a ticket through the `standard-create-pr` course against a local bare repository, in a test CI runs (no network beyond the package registry).
+- `local-home.mdx` is replaced by, or reduced to a pointer to, `docs/install.mdx`.
+- R-BTN-137 is built (its status token updated); `npm test` and `npm run typecheck` green.
+
+### Trust
+
+Keys are generated on the person's machine and never leave it. `init` acts as the administrator and owner it has just created, through the same validated functions every other path uses.
+
+### Invariants
+
+- One management path (R-BTN-58's *One management path*): `init` calls `src/core/admin.ts`, no new write path.
+- One codebase, two hosts: `baton serve` is the same local host the tests run.
+
+## Status
+
+_filed 2026-11-27._

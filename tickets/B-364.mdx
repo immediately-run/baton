@@ -1,0 +1,59 @@
+---
+id: B-364
+status: available
+topics: [baton]
+owns: {}
+prs: []
+title: "B-364 — create-pr keeps its PRs mergeable: fix merges the default branch first, run-tests tests what would land, a merged PR is not tested again"
+depends_on: []
+order: 70
+tags: [roadmap-item]
+project: baton
+description: fix merges the default branch into the PR's branch before its agent runs; run-tests tests the PR merged with the default branch and sends a conflict to fix, installing the PR's own lockfile when it differs (decision D4); both stop when the forge shows every PR merged; the stubs are regenerated.
+repos: [baton]
+---
+
+**Brief:** the owner, 2026-11-27 (in a Claude Code session): Baton's 0.1 release criterion is that "the runner can execute tasks without interventions for 3 days such that: 1. It is working on the correct issues (most important first) 2. It follow the course as expected 3. It operates at full capacity". This ticket is part of criterion 2; the plan is [Baton 0.1](../docs/plans/baton-0-1.mdx).
+
+**Spec:** none changes: this is `create-pr`'s own behaviour, whose contract lives in [`docs/standard-courses.mdx`](../docs/standard-courses.mdx) and the course's directory (the owner's ruling 2 of 2026-11-19, `docs/review/spec-simplification-review-2026-11-19.mdx`).
+
+**Depends on:** none.
+
+**Related:** When B-356 gives `create-pr` a selector, that selector should also send a conflicting PR to `fix` before it waits on anyone (see the plan). This ticket makes the legs able to clear a conflict when they get one.
+
+### What went wrong
+
+`create-pr` resolves a conflict with the default branch only inside a `merge` leg ("A conflict is resolved by merging the default branch into the PR's branch", `legs/merge.md`). Neither `fix` nor `run-tests` merges the default branch first. So a PR parked anywhere — waiting on a review round, an adjudication, a hold — falls further behind `main` with every merge, and its next `run-tests` tests a tree that is no longer what would land:
+
+- 2026-11-24 (`docs/interventions.mdx`, *the owner merged every mergeable PR*): of 51 open PRs, about 30 runner PRs were already conflicting, and six more that were clean became conflicting while the owner merged 13 by hand.
+- 2026-11-24 19:10: "33 conflicting PRs …; every runner PR among them also ends on a `changes` verdict."
+- 2026-11-22 13:20: B-282 changed `package-lock.json`, but `run-tests` links the home checkout's `node_modules` (installed from `main`'s lockfile) into the tested tree (`legs/run-tests.mjs`), so the test ran against the wrong dependencies.
+- 2026-11-26: B-322's and B-8's `run-tests` ↔ `fix` loops ran on branches whose work had already merged.
+
+A course that leaves its PRs unmergeable needs a person to rebase or merge them: not following the course (criterion 2).
+
+### What to build
+
+1. **`fix` starts from the default branch.** Before its agent runs, the `fix` stub merges the default branch into the PR's branch (never a rebase). On a conflict, the agent's instructions say to resolve it first, regenerating lock and generated files with the repository's own tooling. A merge with no conflict is committed and pushed before the agent's own changes.
+2. **`run-tests` tests what would land.** The stub tests the PR's head merged with the current default branch, in a scratch tree. When that merge conflicts, the leg ends at the outcome that sends the ticket to `fix` (its "failed" outcome), with "conflicts with the default branch" as the reason. When the tested tree's lockfile differs from the home checkout's, the stub runs the repository's install (`npm ci` here) in the tested tree instead of linking the home's `node_modules`. This last part waits on decision D4 in the plan; if the owner declines it, leave it out and say so in the PR.
+3. **A merged PR is not tested again.** `run-tests` and `fix` first ask the forge whether every PR of the ticket has merged. If they have, they end at the outcome the merge would have reached, with the forge's answer as evidence, instead of testing or fixing.
+4. **Regenerate this repository's stubs** in the same PR (`baton repo init --check` clean afterwards).
+
+### Exit criteria
+
+- With B-343's fake forge: a PR behind the default branch with no conflict gets the default branch merged by `fix` and pushed; a conflicting one sends the ticket to `fix` from `run-tests` with the reason; an already-merged PR ends `run-tests` without a test run.
+- A PR that changes `package-lock.json` is tested with its own lockfile installed (if D4 is accepted).
+- `docs/standard-courses.mdx` states the new behaviour in `create-pr`'s section; `npm test` and `npm run typecheck` green.
+
+### Trust
+
+The default branch is the repository's own reviewed history. Merging it into a PR adds nothing a pusher controls that the PR did not already contain. The forge's "merged" answer is read with the leg's existing forge credential.
+
+### Invariants
+
+- History on a PR branch is never rewritten (`merge.md`'s rule).
+- The merge leg still never merges red.
+
+## Status
+
+_filed 2026-11-27._

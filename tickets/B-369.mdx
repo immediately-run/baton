@@ -1,0 +1,56 @@
+---
+id: B-369
+status: available
+topics: [baton]
+owns: {}
+prs: []
+title: "B-369 — Secrets without hand propagation: R-BTN-136's sink built, baton secrets list, and rotations that change both sides"
+depends_on: []
+order: 260
+tags: [roadmap-item]
+project: baton
+description: Build the secret sink and its admin commands; list every secret a deployment or host uses with fingerprint and last-set time, never a value; one-command rotations for the administrator key, a runner key, the webhook secret (with an overlap window) and owner keys with their seed; a rotation runbook.
+repos: [baton]
+---
+
+**Brief:** the owner, 2026-11-24 (in a Claude Code session): "Credential propagation is completely manual for now, making it challenging to eg: rotate keys." The plan is [Baton 0.1](../docs/plans/baton-0-1.mdx), *After 0.1*.
+
+**Spec:** [BATON_SPEC §2.2](../spec/BATON_SPEC/02-deployments.md#sec-2-2) ([R-BTN-136](../spec/BATON_SPEC/02-deployments.md#sec-2-2): the secret sink, `wrangler` or `file`; `baton admin keys set`, `forge-secrets set`, `github-app create`), [BATON_SPEC §11.2](../spec/BATON_SPEC/11-people.md#sec-11-2) (key revocation).
+
+**Depends on:** none.
+
+### What is wrong today
+
+Baton and a runner host together hold about twenty secrets (the plan lists them), and every one reaches its consumer by hand: `wrangler secret put` of a whole value, a pull request that copies an owner key into `wrangler.toml`, a file written on the host. Nothing lists what a deployment or a host holds, nothing knows when a secret was last rotated, and some secrets must change in two places at once (the GitHub webhook secret, in GitHub's App settings and in Baton).
+
+R-BTN-136 already specifies a secret sink and the commands that write through it. None of them is built.
+
+### What to build
+
+1. **Build R-BTN-136's sink and commands**: `baton admin keys set`, `baton admin forge-secrets set`, and `baton admin github-app create`, writing through `wrangler` or `file` as the rule says.
+2. **An inventory.** `baton secrets list [--host]` prints every secret the deployment or the local host is configured to use: its name, its consumer, where it is stored, its fingerprint or a hash prefix, and when it was last set (the sink records the time; nothing else). Never a value.
+3. **Rotations that change both sides.**
+   - `baton admin keys rotate`: adds the new administrator key, confirms it works, then removes the old.
+   - `baton owner grant --replace <old-fingerprint>`: rotates a runner's key in one command, keeping the grant's fields.
+   - `baton admin webhook-secret rotate`: writes the new secret to Baton and to the GitHub App in one command, ordered so no delivery is refused in between (Baton accepts both for a short overlap).
+   - An owner key added or removed updates the database and the deployment's seed in one command, retiring the hand-copied pull request (`docs/runbooks/register-baton.mdx`).
+4. **Runbook.** `docs/runbooks/rotate-secrets.mdx`: for each secret, the one command that rotates it.
+
+### Exit criteria
+
+- `baton secrets list` on a local deployment lists every secret `docs/runbooks/local-home.mdx` creates, with no value printed.
+- Each rotate command is tested against the local host, including the overlap window for the webhook secret.
+- R-BTN-136's status token updated; `npm test` and `npm run typecheck` green.
+
+### Trust
+
+Every command acts with an administrator's or owner's own key, through the same validated functions as today (`src/core/admin.ts`). Values go only to the sink, never to the terminal, a log or a repository file.
+
+### Invariants
+
+- Baton never holds a credential that writes git or posts to the forge for a runner (values 12); this ticket adds none.
+- No secret value is printed or stored anywhere but its sink.
+
+## Status
+
+_filed 2026-11-27._
