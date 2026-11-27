@@ -9,6 +9,7 @@
 // what is pushed. What cannot be verified fails the leg naming what was looked for; the stub
 // reports, never retries (R-BTN-131). Pure over injected commands, so tests drive it with no
 // forge; the stub binds `gh` and `git`. Course code in the CLI, never core (§2b).
+import { LegError } from '../runner/legClient.mjs';
 import { forgeClient, listCli } from './forges';
 import { targetOf, type RegisteredTargets } from './forges/targets';
 import { latestHeadVerdict, matchPatterns, ticketOwns, verdictOf, type PrFact } from './course-pr';
@@ -43,15 +44,15 @@ export function reconcileAnswer(out: string, ask: PrOpenAsk & {
   };
   const readPr = (ref: string, owned: boolean) => {
     const m = /^https:\/\/([\w.-]+)\/([\w.-]+\/[\w.-]+)\/pull\/(\d+)(?:#(issuecomment|pullrequestreview)-(\d+))?$/.exec(ref);
-    if (!m || !repos.includes(m[2].toLowerCase())) throw new Error('name a PR in the ticket repositories');
+    if (!m || !repos.includes(m[2].toLowerCase())) throw new LegError('error.contract-output', 'name a PR in the ticket repositories');
     const remote = run('git', ['remote', 'get-url', 'origin'], ask.checkout);
     const host = /^(?:https?:\/\/|ssh:\/\/(?:[^@/]+@)?|[^@/]+@)([\w.-]+)[/:]/.exec(remote)?.[1];
-    if (m[1] !== host) throw new Error('PR is not on the checkout forge');
+    if (m[1] !== host) throw new LegError('error.contract-output', 'PR is not on the checkout forge');
     const repo = `${m[1]}/${m[2]}`;
     const api = (path: string) => JSON.parse(apiRun(m[1], m[2], path));
     const pr = JSON.parse(run('gh', ['pr', 'view', m[3], '--repo', repo, '--json', 'state,headRefName,headRefOid,baseRefName,mergeCommit,updatedAt'], ask.checkout));
-    if (pr.baseRefName !== api('').default_branch) throw new Error('PR does not target the default branch');
-    if (owned && !owns(Number(m[3]), pr.headRefName, m[2])) throw new Error('PR is not mapped to this ticket');
+    if (pr.baseRefName !== api('').default_branch) throw new LegError('error.contract-output', 'PR does not target the default branch');
+    if (owned && !owns(Number(m[3]), pr.headRefName, m[2])) throw new LegError('error.contract-output', 'PR is not mapped to this ticket');
     return { pr, m, api };
   };
   const delivered = /^delivered\s+(\S+)\s+(\S.*)$/.exec(line);
@@ -59,7 +60,7 @@ export function reconcileAnswer(out: string, ask: PrOpenAsk & {
     const shas = delivered[1].split(',').map((ref) => {
       if (/^[a-f0-9]{7,40}$/i.test(ref)) return ref;
       const { pr, m } = readPr(ref, false);
-      if (m[4] || pr.state !== 'MERGED' || !pr.mergeCommit?.oid) throw new Error('delivered requires a merged PR or commit');
+      if (m[4] || pr.state !== 'MERGED' || !pr.mergeCommit?.oid) throw new LegError('error.contract-output', 'delivered requires a merged PR or commit');
       if (m[2].toLowerCase() !== home?.toLowerCase()) return null; // The sibling's forge verified its default-branch merge.
       return String(pr.mergeCommit.oid);
     }).filter((sha): sha is string => sha != null);
@@ -67,11 +68,11 @@ export function reconcileAnswer(out: string, ask: PrOpenAsk & {
     return { end: 'done', reached: 'delivered', next: 'confirm', detail: deliveredDetail(checked.length ? checked : delivered[1].split(','), delivered[2]) };
   }
   const at = /^at\s+(\S+)\s+(\S+)/.exec(line);
-  if (!at || !Object.hasOwn(ask.to, at[1]) || at[1] === 'delivered') throw new Error('expected unchanged <reason>, at <station> <ref>, or delivered <refs> <evidence>');
+  if (!at || !Object.hasOwn(ask.to, at[1]) || at[1] === 'delivered') throw new LegError('error.contract-output', 'expected unchanged <reason>, at <station> <ref>, or delivered <refs> <evidence>');
   const station = at[1];
   const { pr, m, api } = readPr(at[2], true);
-  if (station === 'merged' ? pr.state !== 'MERGED' : station !== 'concluded' && pr.state !== 'OPEN') throw new Error(`PR does not support ${station}`);
-  if (station === 'concluded' && pr.state === 'OPEN') throw new Error('PR is still open');
+  if (station === 'merged' ? pr.state !== 'MERGED' : station !== 'concluded' && pr.state !== 'OPEN') throw new LegError('error.contract-output', `PR does not support ${station}`);
+  if (station === 'concluded' && pr.state === 'OPEN') throw new LegError('error.contract-output', 'PR is still open');
   if (station === 'merged') {
     const mapped = [...new Set(repos.filter((r): r is string => r != null))].flatMap((repository) => {
       const defaultBranch = JSON.parse(apiRun(m[1], repository, '')).default_branch;
@@ -82,11 +83,11 @@ export function reconcileAnswer(out: string, ask: PrOpenAsk & {
     });
     const { complete, merged } = mappedMerges(mapped, ticket.repos, home);
     if (m[4] || !complete || !merged.some((p) => p.repository === m[2].toLowerCase() && p.number === Number(m[3]))) {
-      throw new Error('not all mapped repositories have merged PRs, or a mapped PR is still open');
+      throw new LegError('error.contract-output', 'not all mapped repositories have merged PRs, or a mapped PR is still open');
     }
   }
   if (['reviewed', 'approved', 'changes-requested'].includes(station)) {
-    if (m[4] !== 'pullrequestreview') throw new Error('name a review on the current PR head');
+    if (m[4] !== 'pullrequestreview') throw new LegError('error.contract-output', 'name a review on the current PR head');
     const mapped = (r: ReconcileReview, comment = false): PrFact['reviews'][number] => ({ author: r.user?.login ?? '',
       body: r.body, state: comment ? 'COMMENTED' : r.state, headSha: comment ? undefined : r.commit_id,
       submittedAt: Date.parse((comment ? r.created_at : r.submitted_at) ?? ''), url: r.html_url });
@@ -100,13 +101,13 @@ export function reconcileAnswer(out: string, ask: PrOpenAsk & {
     };
     const native = list<ReconcileReview>(m[1], m[2], `pulls/${m[3]}/reviews?per_page=100`).map((r) => mapped(r)).filter(counts);
     const named = native.find((r) => r.url === at[2] && r.headSha === pr.headRefOid);
-    if (!named) throw new Error('review is not a qualifying verdict on the current PR head');
+    if (!named) throw new LegError('error.contract-output', 'review is not a qualifying verdict on the current PR head');
     // Even without a ref update timestamp, any unbound comment newer than a submitted
     // review of this exact SHA can supersede it. Never authorize from an unbound comment.
     const comments = list<ReconcileReview>(m[1], m[2], `issues/${m[3]}/comments?per_page=100`).map((r) => mapped(r, true)).filter((r) => r.submittedAt >= named.submittedAt).filter(counts);
     const latest = latestHeadVerdict({ headSha: pr.headRefOid, reviews: [...native, ...comments] }, named.submittedAt - 1);
     if (latest?.url !== at[2] || verdictOf(latest) !== (station === 'changes-requested' ? 'changes' : 'approve')) {
-      throw new Error('review is not the latest qualifying verdict on the current PR head');
+      throw new LegError('error.contract-output', 'review is not the latest qualifying verdict on the current PR head');
     }
   }
   return { end: 'done', reached: station, next: ask.to[station] };
@@ -249,17 +250,17 @@ export async function verifyPrOpen(ask: PrOpenAsk, run: PrExec): Promise<void> {
       if (head === pr.headRefOid) continue;
       if (!known(pr.headRefOid, run, ask.checkout)) continue; // never an object here: nothing to compare
       if (!ancestor(head, pr.headRefOid, run, ask.checkout)) {
-        throw new Error(`the checkout’s branch ${branch} is at ${head.slice(0, 10)}, but its open PR #${String(pr.number)} is at ${pr.headRefOid.slice(0, 10)} — push the branch: the review reads what is pushed`);
+        throw new LegError('error.contract-output', `the checkout’s branch ${branch} is at ${head.slice(0, 10)}, but its open PR #${String(pr.number)} is at ${pr.headRefOid.slice(0, 10)} — push the branch: the review reads what is pushed`);
       }
     }
   }
   if (found.some((f) => (f.prs ?? []).length > 0)) return;
   const unread = found.filter((f) => f.error != null);
   const read = found.filter((f) => f.prs != null).map((f) => label(f.repo));
-  if (read.length === 0) {
-    throw new Error(`cannot verify ${id}’s PR — no repository the ticket reads could be read: ${unread.map((f) => `${label(f.repo)} (${f.error})`).join('; ')}`);
+  if (unread.length > 0) {
+    throw new Error(`cannot verify ${id}’s PR — ${read.length ? 'not all repositories the ticket reads could be read' : 'no repository the ticket reads could be read'}: ${unread.map((f) => `${label(f.repo)} (${f.error})`).join('; ')}`);
   }
-  throw new Error(`the implement agent exited 0, but no open PR on a branch matching ${patterns.join(' or ')} for ticket ${id} exists in ${read.join(' or ')}${unread.length ? ` — ${unread.map((f) => label(f.repo)).join(' or ')} could not be read` : ''} — open one from a matching branch with its head pushed, or the leg fails here`);
+  throw new LegError('error.contract-output', `the implement agent exited 0, but no open PR on a branch matching ${patterns.join(' or ')} for ticket ${id} exists in ${read.join(' or ')} — open one from a matching branch with its head pushed, or the leg fails here`);
 }
 
 /** One repository's read for `verifyPrsMerged`: the ticket's open and merged PRs there, or why
@@ -299,6 +300,7 @@ export async function verifyPrsMerged(ask: PrOpenAsk, run: PrExec): Promise<stri
         found.push({ repo, open: list('open'), merged: list('merged'), error: null });
       }
     } catch (e) {
+      if (e instanceof LegError) throw e;
       found.push({ repo, open: null, merged: null, error: msg(e) });
     }
   }
@@ -309,11 +311,11 @@ export async function verifyPrsMerged(ask: PrOpenAsk, run: PrExec): Promise<stri
   }
   const open = found.flatMap((f) => (f.open ?? []).map((p) => name(f, p)));
   if (open.length > 0) {
-    throw new Error(`the merge agent exited 0, but ${id}’s PR ${open.join(', ')} is still open — not merged; the leg reports merged only when every PR of the ticket is`);
+    throw new LegError('error.blocked', `the merge agent exited 0, but ${id}’s PR ${open.join(', ')} is still open — not merged; the leg reports merged only when every PR of the ticket is`);
   }
   const merged = found.flatMap((f) => (f.merged ?? []).map((p) => `${f.repo ? f.repo : ''}#${String(p.number)}`));
   if (merged.length === 0) {
-    throw new Error(`the merge agent exited 0, but no merged PR on a branch matching ${patterns.join(' or ')} for ticket ${id} exists in ${found.map((f) => label(f.repo)).join(' or ')} — the leg reports merged only when the forge shows one`);
+    throw new LegError('error.blocked', `the merge agent exited 0, but no merged PR on a branch matching ${patterns.join(' or ')} for ticket ${id} exists in ${found.map((f) => label(f.repo)).join(' or ')} — the leg reports merged only when the forge shows one`);
   }
   return merged;
 }
@@ -347,7 +349,7 @@ export function findDelivered(out: string): DeliveredAnswer | null {
     const m = DELIVERED_LINE.exec(lines[i]);
     if (m == null) continue;
     const evidence = (m[2] ?? '').trim();
-    if (evidence === '') throw new Error(`the implement agent answered ${JSON.stringify(lines[i])} with no evidence — the line is \`delivered <sha> <what you ran to find it delivered>\``);
+    if (evidence === '') throw new LegError('error.contract-output', `the implement agent answered ${JSON.stringify(lines[i])} with no evidence — the line is \`delivered <sha> <what you ran to find it delivered>\``);
     return { shas: [...new Set(m[1].split(','))], evidence, line: lines[i] };
   }
   return null;
@@ -370,9 +372,9 @@ export interface DeliveredAsk {
  * person confirms it (the course's `confirm` leg).
  */
 export function verifyDelivered(ask: DeliveredAsk, run: PrExec): string[] {
-  if (ask.shas.length === 0) throw new Error('the implement agent answered delivered naming no commit');
+  if (ask.shas.length === 0) throw new LegError('error.contract-output', 'the implement agent answered delivered naming no commit');
   const branch = ask.branch;
-  if (!/^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(branch) || branch.includes('..')) throw new Error(`cannot verify the delivered answer — ${JSON.stringify(branch)} is no branch name`);
+  if (!/^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(branch) || branch.includes('..')) throw new LegError('error.contract-output', `cannot verify the delivered answer — ${JSON.stringify(branch)} is no branch name`);
   const tracking = `refs/remotes/origin/${branch}`;
   try {
     run('git', ['fetch', '-q', 'origin', `+refs/heads/${branch}:${tracking}`], ask.checkout);
@@ -385,17 +387,17 @@ export function verifyDelivered(ask: DeliveredAsk, run: PrExec): string[] {
 /** Check the delivery evidence against a fetched ref, or the transaction's detached HEAD. */
 export function resolveDelivered(shas: string[], ref: string, checkout: string, run: PrExec): string[] {
   return shas.map((sha) => {
-    if (!/^[0-9a-f]{7,40}$/.test(sha)) throw new Error('invalid delivered commit id');
+    if (!/^[0-9a-f]{7,40}$/.test(sha)) throw new LegError('error.contract-output', 'invalid delivered commit id');
     let full: string;
     try {
       full = run('git', ['rev-parse', '--verify', '--quiet', `${sha}^{commit}`], checkout).trim();
     } catch {
-      throw new Error(`the implement agent answered delivered at ${sha}, which names no commit this checkout knows — refused`);
+      throw new LegError('error.contract-output', `the implement agent answered delivered at ${sha}, which names no commit this checkout knows — refused`);
     }
-    if (!/^[0-9a-f]{40}$/.test(full) || !full.startsWith(sha)) throw new Error(`the implement agent answered delivered at ${sha}, which names no commit this checkout knows — refused`);
+    if (!/^[0-9a-f]{40}$/.test(full) || !full.startsWith(sha)) throw new LegError('error.contract-output', `the implement agent answered delivered at ${sha}, which names no commit this checkout knows — refused`);
     if (!ancestor(full, ref, run, checkout)) {
       const branch = ref.replace(/^refs\/remotes\/origin\//, '');
-      throw new Error(`the implement agent answered delivered at ${sha}, which is not on ${branch} — refused: the commit a delivered answer names is on the default branch`);
+      throw new LegError('error.contract-output', `the implement agent answered delivered at ${sha}, which is not on ${branch} — refused: the commit a delivered answer names is on the default branch`);
     }
     return full;
   });
@@ -405,7 +407,7 @@ export function resolveDelivered(shas: string[], ref: string, checkout: string, 
  *  commits, shortened, and the agent's evidence with every character free text refuses blanked. */
 export function deliveredDetail(shas: string[], evidence: string): string {
   const head = `delivered at ${shas.map((s) => s.slice(0, 10)).join(', ')}`;
-  if (head.length > 198) throw new Error('too many delivered commits to record in the end detail');
+  if (head.length > 198) throw new LegError('error.contract-output', 'too many delivered commits to record in the end detail');
   const said = evidence.replace(/[\u0000-\u001f\u007f-\u009f<>{}]/g, ' ').replace(/\s+/g, ' ').trim();
   const text = said === '' ? head : `${head}: ${said}`;
   return text.length <= 200 ? text : `${text.slice(0, 199)}…`;

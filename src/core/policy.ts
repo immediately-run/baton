@@ -588,12 +588,21 @@ export function checkFloorGuarantees(value: unknown): GuaranteeName[] {
 export const PROTECTION_WINDOW_MS = 24 * 3_600_000;
 
 export class Policies {
+  private readonly humanKeyFloor: HumanKeyMinimum;
+
   constructor(private readonly c: {
     store: Store;
     now: () => number;
     /** R-BTN-189: a broken floor releases the running claims on tickets that reach it. */
     releaseForFloor: (repository: string) => void;
-  }) {}
+  }, humanKeyFloor = 'any') {
+    if (humanKeyFloor !== 'any' && humanKeyFloor !== 'hardware') throw new Error("BATON_HUMAN_KEY: must be 'any' or 'hardware'");
+    this.humanKeyFloor = humanKeyFloor;
+  }
+
+  effectiveHumanKey(minimum: HumanKeyMinimum = 'any'): HumanKeyMinimum {
+    return this.humanKeyFloor === 'hardware' ? 'hardware' : minimum;
+  }
 
   private rows<T = Record<string, unknown>>(q: string, ...p: unknown[]): T[] {
     return this.c.store.exec<T>(q, ...p).toArray() as T[];
@@ -606,6 +615,25 @@ export class Policies {
    *  where `forge` is `git` (R-BTN-188). Idempotent, like `ensure`. */
   seedAll(): void {
     for (const r of this.rows<{ id: string; forge: Forge }>('SELECT id, forge FROM repositories')) this.ensure(r.id, r.forge);
+  }
+
+  /** R-BTN-188: a startup floor may not strand a live approver list. */
+  checkInstanceHumanKeyFloor(breakGlass: ReadonlySet<string>): void {
+    if (this.humanKeyFloor === 'any') return;
+    for (const { id } of this.rows<{ id: string }>('SELECT id FROM repositories WHERE retired_at IS NULL')) {
+      const policy = this.current(id)?.policy;
+      if (!policy || policy.human_key === 'hardware') continue;
+      const facts = this.facts(id, breakGlass);
+      const lists: [string, ApproverEntry[]][] = [
+        ...Object.entries(policy.approvers).map(([name, list]): [string, ApproverEntry[]] => [`approvers.${name}`, list]),
+        ...this.floors(id).map((floor): [string, ApproverEntry[]] => [`floor:${floor.name}`, [floor.remove_by]]),
+      ];
+      for (const [name, list] of lists) {
+        if (!this.listSatisfiable(list, facts, policy.human_key) && [...facts.owners.keys()].some((fp) => this.matchesApprover(list, fp, facts, 'any'))) {
+          throw new BatonError('unsatisfiable-approvers', `${id}: BATON_HUMAN_KEY would leave ${name} without a live approver (R-BTN-188)`, { list: name });
+        }
+      }
+    }
   }
 
   /** The repository's first version, if it has none — written `server`, the preset named in the
@@ -692,6 +720,10 @@ export class Policies {
    *  it is a `human_only` key. A delegated key (R-BTN-130) matches no entry — none is
    *  registered yet (B-124 builds them); when one is, its class answers before this runs. */
   entryMatches(list: ApproverEntry[], credential: string, facts: ApproverFacts, humanKey: HumanKeyMinimum): boolean {
+    return this.matchesApprover(list, credential, facts, this.effectiveHumanKey(humanKey));
+  }
+
+  private matchesApprover(list: ApproverEntry[], credential: string, facts: ApproverFacts, humanKey: HumanKeyMinimum): boolean {
     const humanAllowed = acceptsUnattestedHumanKey(humanKey);
     const owner = facts.owners.get(credential);
     return list.some((e) => {
@@ -729,7 +761,7 @@ export class Policies {
    *  its `admin` event. A dry run returns before the writes. `breakGlass` is BATON_HUMAN_KEYS'
    *  fingerprints (R-BTN-185). */
   put(repository: string, input: unknown, forge: Forge, actor: { credential: string; label: string },
-    { breakGlass, personAnswerStops }: { breakGlass: ReadonlySet<string>; personAnswerStops: () => { ticket_id: string; leg: string }[] }) {
+    { breakGlass, personAnswerStops }: { breakGlass: ReadonlySet<string>; personAnswerStops: (minimum: HumanKeyMinimum) => { ticket_id: string; leg: string }[] }) {
     const body: Record<string, unknown> = isObj(input) ? input : bad('body', 'must be a JSON object');
     only(body, ['base_version', 'policy', 'preset', 'dry_run'], 'body');
     if (Object.hasOwn(body, 'dry_run') && typeof body.dry_run !== 'boolean') bad('dry_run', 'must be true or false');
@@ -737,6 +769,10 @@ export class Policies {
     if (body.policy !== undefined && body.preset !== undefined) bad('body', 'carries either a policy or a preset, not both');
     const cur = this.current(repository);
     if (!cur) throw new BatonError('not-found', `${repository} has no policy yet`);
+    // Check reach before exposing the current version or repository-specific validation.
+    const factsNow = this.facts(repository, breakGlass);
+    const approver = cur.policy.approvers.policy.find((e) => this.entryMatches([e], actor.credential, factsNow, cur.policy.human_key));
+    if (!approver) throw new BatonError('forbidden', 'this credential is not an approver on approvers.policy as it stands (R-BTN-188)');
     if (body.base_version !== cur.version) throw new BatonError('conflict', `base_version ${body.base_version} is stale: the policy is at version ${cur.version}`);
 
     let doc: PolicyDocument;
@@ -759,14 +795,6 @@ export class Policies {
         throw new BatonError('invalid-params', `policy.human_identity: ${repository} holds the code repository ${cross.path} on ${cross.host}, another host than the home's — no human identity across hosts yet (B-182); per-host identities are a later ticket`);
       }
     }
-
-    // The list in force decides (R-BTN-188): every change, in any direction, needs an approver
-    // on `approvers.policy` as it stands before the change.
-    const factsNow = this.facts(repository, breakGlass);
-    if (!this.entryMatches(cur.policy.approvers.policy, actor.credential, factsNow, cur.policy.human_key)) {
-      throw new BatonError('forbidden', 'this credential is not an approver on approvers.policy as it stands (R-BTN-188)');
-    }
-    const approver = cur.policy.approvers.policy.find((e) => this.entryMatches([e], actor.credential, factsNow, cur.policy.human_key)) ?? 'owner';
 
     // No gate without a key to open it (R-BTN-188, R-BTN-185): the new lists must be
     // satisfiable, under the new `human_key` for their `human` entries.
@@ -823,7 +851,7 @@ export class Policies {
     const changed = diffPolicies(cur.policy, doc);
     const guarantees = guaranteesOf(doc, { protection: this.protectionOk(repository) });
     if (body.dry_run === true) {
-      const legs = cur.policy.inputs.answers === 'git' && doc.inputs.answers === 'attestation' ? personAnswerStops() : [];
+      const legs = cur.policy.inputs.answers === 'git' && doc.inputs.answers === 'attestation' ? personAnswerStops(this.effectiveHumanKey(doc.human_key)) : [];
       // Core cannot predict effects of gates it doesn't enforce. Name those gaps rather than
       // guessing which legs merge by their names or whether external checks would pass.
       return {

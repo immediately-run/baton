@@ -2,7 +2,7 @@ import type { BatonCore } from '../baton';
 import { BatonError, errorResponse } from '../http';
 import { dispatchRead } from '../reads';
 import { adminRoute } from './admin';
-import { attestationRoute, dashboardSessionRoute, dashboardWriteRoute, humanKeysRoute, ownerRoute } from './owner';
+import { admitsBreakGlass, attestationRoute, dashboardSessionRoute, dashboardWriteRoute, humanKeysRoute, ownerRoute } from './owner';
 import { dashboardPrincipal, personPrincipal } from './principal';
 import { publicRoute, sequenceRoute } from './public';
 import { courierRoute, forgeScopeRoute, probeRoute, runnerPrincipal, runnerRoute } from './runner';
@@ -32,7 +32,8 @@ export async function dispatchRoute(core: BatonCore, req: Request, url: URL): Pr
     const read = await dispatchRead({ core, store: core.store, sql: (q, ...p) => core.sql(q, ...p), now: () => core.now(), config: core.config }, req, url);
     if (read) return read;
     if (path.startsWith('/v1/admin/') || path.startsWith('/v1/owner/')) {
-      const principal = await personPrincipal(core, req);
+      const breakGlass = admitsBreakGlass(req.method, path) && req.headers.has('X-Baton-Signed') ? await core.humanBreakGlass() : undefined;
+      const principal = await personPrincipal(core, req, breakGlass);
       const res = path.startsWith('/v1/admin/')
         ? await adminRoute(core, principal.req, url, principal)
         : await ownerRoute(core, principal.req, url, principal);

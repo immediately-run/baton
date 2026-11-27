@@ -212,7 +212,7 @@ export class Admin {
   hasHumanDecisionWriter(breakGlass: ReadonlySet<string>, admins: ReadonlyMap<string, string>): boolean {
     const registered = this.rows<{ fingerprint: string }>('SELECT fingerprint FROM human_keys WHERE revoked_at IS NULL');
     return registered.some(({ fingerprint }) => !admins.has(fingerprint)) ||
-      [...breakGlass].some((fp) => !admins.has(fp) && this.decisionKeyLine(fp) != null);
+      [...breakGlass].some((fp) => !admins.has(fp));
   }
 
   /** R-BTN-185: whether the fingerprint counts as a human-only key — registered here, or a

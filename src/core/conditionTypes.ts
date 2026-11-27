@@ -75,8 +75,9 @@ export interface StandardType {
  *  declaration says `retryable`, `spec` otherwise), then the standard entry's own `retryable`
  *  (a bare `error` and `error.transient` are `transient`); a subtype takes the nearest declared
  *  or standard ancestor's class. */
-export function errorClassOf(type: string, declared: Map<string, ConditionDeclaration>): 'transient' | 'capability' | 'spec' | 'contract-input' | 'contract-output' {
+export function errorClassOf(type: string, declared: Map<string, ConditionDeclaration>): 'transient' | 'capability' | 'spec' | 'contract-input' | 'contract-output' | 'blocked' {
   if (type === 'error' || type === 'error.transient') return 'transient';
+  if (type === 'error.blocked') return 'blocked';
   if (type === 'error.capability') return 'capability';
   if (type === 'error.contract-input') return 'contract-input';
   if (type === 'error.contract-output') return 'contract-output';
@@ -104,7 +105,8 @@ export const STANDARD_CONDITION_TYPES: ReadonlyMap<string, StandardType> = new M
   ['error.transient', { disposition: 'interrupt', retryable: true }],
   ['error.capability', { disposition: 'interrupt', retryable: false }],
   ['error.spec', { disposition: 'interrupt', retryable: false }],
-  ['error.contract-output', { disposition: 'interrupt' }],
+  ['error.contract-output', { disposition: 'interrupt', retryable: false }],
+  ['error.blocked', { disposition: 'interrupt', retryable: false }],
   ['error.contract-input', { disposition: 'interrupt', retryable: false }],
   // R-BTN-195: an autonomous leg that cannot go on without a person fails, it never asks.
   ['error.needs-person', { disposition: 'interrupt', retryable: false }],

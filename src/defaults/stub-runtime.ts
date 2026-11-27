@@ -4,6 +4,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync, unlinkSync,
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { LegError } from '../runner/legClient.mjs';
 import { newestWrite } from '../runner/log';
 import { builtinAgentActivityPaths, readOnlyHarness, readOnlyVersionSupported } from '../runner/harness';
 import { dibberWords } from './dibber';
@@ -74,7 +75,10 @@ function hasPath(checkout: string, sha: string, rel: string): boolean {
 
 function ticketTextOf({ ticket, checkout }: LegCtx): string | null {
   try { return ticket.file ? readFileSync(ticket.file, 'utf8') : ticket.path ? readFileSync(join(checkout, ticket.path), 'utf8') : null; }
-  catch { return null; }
+  catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e;
+    throw new LegError('error.spec', `the leg cannot read its ticket file: ${(e as Error).message}`);
+  }
 }
 
 function courseEntry(settings: BatonJson, course: string): Partial<CourseEntry> {
@@ -97,9 +101,13 @@ const legRun: PrExec = (cmd, args, cwd) => {
   catch (e) {
     const stderr = (e as { stderr?: string } | null)?.stderr;
     const why = (typeof stderr === 'string' ? stderr.trim().split('\n')[0] : '') || (e instanceof Error ? e.message : String(e));
-    throw new Error(`${cmd} ${args.join(' ')} failed: ${why}`);
+    const message = `${cmd} ${args.join(' ')} failed: ${why}`;
+    if (missingTool(e)) throw new LegError('error.spec', message);
+    throw new Error(message);
   }
 };
+
+const missingTool = (error: unknown) => ['ENOENT', 'EACCES'].includes((error as NodeJS.ErrnoException | null)?.code ?? '');
 
 /** Load only the override's snapshot bytes; the standard close always stays in force. */
 export function makeLeg({ course, leg, reads, spec, overridePath, shipped }: StubConfig) {
@@ -124,12 +132,12 @@ export function makeLeg({ course, leg, reads, spec, overridePath, shipped }: Stu
     standard,
     async run(ctx: LegCtx) {
       const sha = ctx.snapshot?.sha;
-      if (typeof sha !== 'string' || sha === '') throw new Error('the leg has no snapshot to read its override at');
+      if (typeof sha !== 'string' || sha === '') throw new LegError('error.spec', 'the leg has no snapshot to read its override at');
       const graphSha = ctx.signed_control?.course || sha;
       const graphPath = `.baton/courses/${course}/course.json`;
       if (!spec.tests && (!ctx.reads_only || !ctx.review_store) && hasPath(ctx.checkout, graphSha, graphPath)
         && JSON.parse(show(ctx.checkout, graphSha, graphPath)).legs?.[leg]?.reads_only === true) {
-        throw new Error('this runner cannot enforce reads_only (R-BTN-183)');
+        throw new LegError('error.spec', 'this runner cannot enforce reads_only (R-BTN-183)');
       }
       const overrideSha = ctx.signed_control?.overrides;
       const readSha = !spec.tests && typeof overrideSha === 'string' && overrideSha !== '' ? overrideSha : sha;
@@ -139,7 +147,7 @@ export function makeLeg({ course, leg, reads, spec, overridePath, shipped }: Stu
         const file = join(dir, basename(overridePath));
         writeFileSync(file, show(ctx.checkout, readSha, overridePath));
         const mod: { run?: (ctx: LegCtx, standard: (ctx: LegCtx) => Promise<unknown>) => unknown } = await import(pathToFileURL(file).href);
-        if (typeof mod.run !== 'function') throw new Error(overridePath + ' exports no run(ctx, standard)');
+        if (typeof mod.run !== 'function') throw new LegError('error.spec', overridePath + ' exports no run(ctx, standard)');
         return await mod.run(ctx, standard);
       } finally {
         rmSync(dir, { recursive: true, force: true });
@@ -158,8 +166,8 @@ async function runAgent(ctx: LegCtx, { course, leg, names, spec, readsOnly, ship
   const { ask, verify, pushes, delivered, reconcile } = spec;
   const heading = `baton: ${course}/${leg} ticket ${ctx.ticket.id}: `;
   const sha = ctx.snapshot?.sha;
-  if (typeof sha !== 'string' || sha === '') throw new Error('the leg has no snapshot to read .baton/baton.json at');
-  if (ctx.reads_only && (!readsOnly || !ctx.review_store)) throw new Error('reads_only requires a compatible runner and non-writing stub (R-BTN-183)');
+  if (typeof sha !== 'string' || sha === '') throw new LegError('error.spec', 'the leg has no snapshot to read .baton/baton.json at');
+  if (ctx.reads_only && (!readsOnly || !ctx.review_store)) throw new LegError('error.spec', 'reads_only requires a compatible runner and non-writing stub (R-BTN-183)');
   // S-BTN-222 (B-325): an open harness question can be silent and the stub cannot tell
   // it from idle, or learn when it was answered. For a run allowed to raise interact, use
   // Baton's deadline and release rather than inferring completion from silence.
@@ -173,7 +181,7 @@ async function runAgent(ctx: LegCtx, { course, leg, names, spec, readsOnly, ship
   // B-83: the snapshot's settings stay authoritative; BATON_AGENT_COMMAND — the harness command
   // `baton run --harness` chose — fills their absence, never overrides their choice.
   const settingsCommand = typeof settings.agent_command === 'string' && settings.agent_command !== '' ? settings.agent_command : process.env.BATON_AGENT_COMMAND ?? '';
-  if (settingsCommand === '') throw new Error('.baton/baton.json names no agent_command — run `baton repo init --agent opencode` (or --agent claude-code, or --agent-command <cmd>); baton run --harness <harness> runs its command when the settings name none');
+  if (settingsCommand === '') throw new LegError('error.spec', '.baton/baton.json names no agent_command — run `baton repo init --agent opencode` (or --agent claude-code, or --agent-command <cmd>); baton run --harness <harness> runs its command when the settings name none');
   // R-BTN-131 (B-167): the course's choice of model is the repository's own — the
   // words `agent_command` carries, run exactly as written. Baton delivers no advice and core
   // resolves no route; a repository that picks its model at run time writes a leg override
@@ -228,7 +236,7 @@ async function runAgent(ctx: LegCtx, { course, leg, names, spec, readsOnly, ship
     (path) => {
       const entry = gitAt(reviewStore, ['--no-replace-objects', '--literal-pathspecs', 'ls-tree', settingsSha, '--', path]);
       if (!entry) return null;
-      if (!/^100(?:644|755) blob /.test(entry)) throw new Error(`invalid reads_only snapshot configuration: ${path}`);
+      if (!/^100(?:644|755) blob /.test(entry)) throw new LegError('error.spec', `invalid reads_only snapshot configuration: ${path}`);
       return gitAt(reviewStore, ['--no-replace-objects', 'show', `${settingsSha}:${path}`], { maxBuffer: OUTPUT_MAX });
     });
   const workspace = reviewStore ? readOnlyWorkspace({ ...ctx, snapshot: { sha }, review_store: reviewStore, ticket: { ...ctx.ticket, file: ctx.ticket.file ?? undefined } }, text,
@@ -245,20 +253,20 @@ async function runAgent(ctx: LegCtx, { course, leg, names, spec, readsOnly, ship
     // the command's exit is the agent's completion, which its own contract (the leg .md's header)
     // requires it to mean.
     const [command, ...words] = agentWords;
-    if (command === undefined) throw new Error('.baton/baton.json names no agent_command to run');
+    if (command === undefined) throw new LegError('error.spec', '.baton/baton.json names no agent_command to run');
     // B-95: the repository's `agent_wrapper` — a host's BATON_AGENT_WRAPPER first, else the
     // snapshot's setting — is one more command, split the same way, whose words go in front of the
     // agent's argv. Baton only composes it; what it does with stdio, time or the log is its own.
     const envWrapper = process.env.BATON_AGENT_WRAPPER;
     const wrapper = ctx.reads_only ? null : typeof envWrapper === 'string' && envWrapper.trim() !== '' ? envWrapper : settings.agent_wrapper;
-    if (wrapper != null && (typeof wrapper !== 'string' || wrapper.trim() === '')) throw new Error('.baton/baton.json\'s agent_wrapper is not a command');
+    if (wrapper != null && (typeof wrapper !== 'string' || wrapper.trim() === '')) throw new LegError('error.spec', '.baton/baton.json\'s agent_wrapper is not a command');
     const [wrapped, ...wrapping] = wrapper == null ? [] : splitWords(wrapper);
     const argv = (restricted ? restricted.argv : null) ?? (wrapped === undefined
       ? [command, ...words, ctx.ticket.id, leg, ctx.checkout]
       : [wrapped, ...wrapping, command, ...words, ctx.ticket.id, leg, ctx.checkout]);
     if (restricted && command === 'opencode') {
       const version = execFileSync(command, ['--version'], { cwd, env: restricted.env, encoding: 'utf8', timeout: 5000, killSignal: 'SIGKILL', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
-      if (!readOnlyVersionSupported(version)) throw new Error('reads_only requires OpenCode v2.2.3 or newer in the v2 series (R-BTN-183)');
+      if (!readOnlyVersionSupported(version)) throw new LegError('error.spec', 'reads_only requires OpenCode v2.2.3 or newer in the v2 series (R-BTN-183)');
     }
     // Verbose (B-23's slice): the runner asked, so say on stderr — which it drains into its log —
     // the one line an operator needs: the local command actually completing this leg, resolved
@@ -308,11 +316,14 @@ async function runAgent(ctx: LegCtx, { course, leg, names, spec, readsOnly, ship
       child.stdout.on('data', (c) => {
         lastOut = new Date().getTime();
         so += c;
-        if (so.length > OUTPUT_MAX) { if (watch != null) clearInterval(watch); child.kill('SIGKILL'); reject(new Error(`the agent printed more than ${OUTPUT_MAX} bytes`)); return; }
+        if (so.length > OUTPUT_MAX) { if (watch != null) clearInterval(watch); child.kill('SIGKILL'); reject(new LegError('error.spec', `the agent printed more than ${OUTPUT_MAX} bytes`)); return; }
         if (echo) process.stderr.write(c);
       });
       child.stderr.on('data', (c) => { if (se.length < 2048) se = (se + String(c)).slice(-2048); if (echo) process.stderr.write(c); });
-      child.on('error', (e) => { if (watch != null) clearInterval(watch); reject(e); });
+      child.on('error', (e) => {
+        if (watch != null) clearInterval(watch);
+        reject(missingTool(e) ? new LegError('error.spec', e.message) : e);
+      });
       // B-227: a release (the runner's abort line, `ctx.signal`) stops the agent at once — its
       // TERM, then KILL after a grace — so the leg reaches its safe point inside the runner's
       // immediate-stop window and the claim is released with its hand-off, not left to the reaper.
@@ -381,13 +392,17 @@ async function runAgent(ctx: LegCtx, { course, leg, names, spec, readsOnly, ship
         if (conclusion != null) return; // a bound concluded; the kill's own close changes nothing
         if (code === 0) { resolve({ text: so, stderr: se, conclusion: null }); return; }
         // The failure names its cause with a tail, not a single line (2026-10-24).
-        reject(new Error('the agent exited ' + (code != null ? 'with code ' + code : 'on signal ' + sig) + '; its last output:\n  ' + lastOutput(so, se)));
+        const message = 'the agent exited ' + (code != null ? 'with code ' + code : 'on signal ' + sig) + '; its last output:\n  ' + lastOutput(so, se);
+        reject(code === 126 || code === 127 ? new LegError('error.spec', message) : new Error(message));
       });
     });
     const { text: out, stderr, conclusion } = received;
     const said = lastOutput(out, stderr);
-    const failed = (e: unknown) => new Error((e instanceof Error ? e.message : String(e))
-      + (said !== '' ? `; the agent's last output:\n  ${said}` : '; the agent printed nothing'));
+    const failed = (e: unknown) => {
+      const reason = e instanceof Error ? e.message : String(e);
+      const message = reason + (said !== '' ? `; the agent's last output:\n  ${said}` : '; the agent printed nothing');
+      return e instanceof LegError ? new LegError(e.type, message) : new Error(message);
+    };
     if (reconcile) {
       try {
         const graph = JSON.parse(show(ctx.checkout, courseSha, `.baton/courses/${course}/course.json`));
@@ -397,10 +412,12 @@ async function runAgent(ctx: LegCtx, { course, leg, names, spec, readsOnly, ship
     }
     if (headsBefore !== '' && prHeads() === headsBefore) {
       const heads = headsBefore.split('\n').map((line) => line.split('\t')[1].slice('refs/heads/'.length) + ' at ' + line.slice(0, 10));
-      throw failed(`the ${leg} leg pushed nothing: ${heads.join(', ')} is the head the run-tests gate tested red, unchanged — no fix, no position (B-231)`);
+      throw failed(new LegError('error.blocked', `the ${leg} leg pushed nothing: ${heads.join(', ')} is the head the run-tests gate tested red, unchanged — no fix, no position (B-231)`));
     }
     try {
-      const answer = ask ? requireAnswer(out, ask, leg) : null;
+      let answer;
+      try { answer = ask ? requireAnswer(out, ask, leg) : null; }
+      catch (e) { throw new LegError('error.contract-output', (e as Error).message); }
       const last = names && !ask ? lastLine(out) : '';
       const on = names ? answer?.pr ?? (PR_URL.test(last) ? last : null) : null;
       const concluded = conclusion ? { conclusion } : {};
@@ -450,7 +467,8 @@ function verdictOf(cwd: string, script: string): { tests: 'green' } | { tests: '
     // dependency's bin) and npm's missing script fail the leg naming that, as npm that cannot
     // start does; so does the bound: per-test timeouts catch a hung test as a failure the script
     // reports, so a whole run that outlives the bound says the environment or the bound is short.
-    const setup = (why: string) => new Error('npm run ' + script + ' ' + why + ' — the tests never ran: no verdict, no marker' + (tail ? '; its last lines:\n' + tail : ''));
+    const setup = (why: string) => new LegError('error.spec', 'npm run ' + script + ' ' + why + ' — the tests never ran: no verdict, no marker' + (tail ? '; its last lines:\n' + tail : ''));
+    if (missingTool(e)) throw setup(e?.message ?? 'could not start');
     if (e?.code === 'ETIMEDOUT') throw setup('outlived the gate’s bound of ' + Math.round(RUN_TESTS_TIMEOUT_MS / 1000) + ' s (a suite that needs longer raises it in its own copy of this leg)');
     if (e?.code === 'ENOBUFS') return named('printed more than ' + OUTPUT_MAX + ' bytes');
     if (e?.status === 126 || e?.status === 127) throw setup('exited ' + e.status + ', a command its script names could not be run (not found, or not executable)');
@@ -464,10 +482,10 @@ function verdictOf(cwd: string, script: string): { tests: 'green' } | { tests: '
 function runTests(ctx: LegCtx, course: string, leg: string, shipped: StubConfig['shipped']) {
   const station = ctx.claim?.station;
   if (station !== 'pr-open' && station !== 'fixed') {
-    throw new Error('the run-tests gate runs at pr-open or fixed, not ' + JSON.stringify(station ?? null));
+    throw new LegError('error.spec', 'the run-tests gate runs at pr-open or fixed, not ' + JSON.stringify(station ?? null));
   }
   const sha = ctx.snapshot?.sha;
-  if (typeof sha !== 'string' || sha === '') throw new Error('the leg has no snapshot to read the course file at');
+  if (typeof sha !== 'string' || sha === '') throw new LegError('error.spec', 'the leg has no snapshot to read the course file at');
   const readAt = (rel: string) => show(ctx.checkout, sha, rel, 1024 * 1024);
   const git = (...args: string[]) => gitAt(ctx.checkout, args);
   const heading = `baton: ${course}/${leg} ticket ${ctx.ticket.id}: `;
@@ -499,7 +517,7 @@ function runTests(ctx: LegCtx, course: string, leg: string, shipped: StubConfig[
     }
   }
   if (branches.length !== 1) {
-    throw new Error(branches.length
+    throw new LegError('error.blocked', branches.length
       ? 'the run-tests gate tests one PR branch; ' + id + ' has ' + branches.join(', ') + ' in the home repository'
       : 'no branch matching ' + wanted.join(' or ') + ' in the home repository for ' + id + ' — the gate tests the PR branch it can reach');
   }
@@ -522,7 +540,7 @@ function runTests(ctx: LegCtx, course: string, leg: string, shipped: StubConfig[
     try { pkg = JSON.parse(readFileSync(join(tree, 'package.json'), 'utf8')); } catch { /* no package.json: npm says so */ }
     const declared = [pkg?.dependencies, pkg?.devDependencies].some((deps) => deps !== null && typeof deps === 'object' && Object.keys(deps).length > 0);
     if (declared && !existsSync(join(tree, 'node_modules'))) {
-      throw new Error('npm run ' + script + ' cannot run: ' + branch + ' declares dependencies and neither the tested tree nor the home checkout has node_modules — install them where the leg runs (npm ci); the tests never ran: no verdict, no marker');
+      throw new LegError('error.spec', 'npm run ' + script + ' cannot run: ' + branch + ' declares dependencies and neither the tested tree nor the home checkout has node_modules — install them where the leg runs (npm ci); the tests never ran: no verdict, no marker');
     }
     verdict = verdictOf(tree, script);
   } finally {

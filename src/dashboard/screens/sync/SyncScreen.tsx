@@ -28,6 +28,7 @@ import { CardTable, queryOf, TicketLink, withQuery } from '../conditions/kit';
 /** `repo.sync` (B-201). Every field is a read's value, untrusted beyond its shape. */
 export interface SyncView {
   repository: string;
+  sync_client?: { version: string | null; recommended: string; behind: boolean; missing_evidence: boolean };
   head: { sha: string; parent_sha: string | null; received_at: number | null; ticket_count: number | null; observation: number; source: { kind: string; versions: string | null } | null } | null;
   observation: { last: number; last_handed_out: number; outstanding: { number: number; handed_out_at: number; age_s: number; void: boolean } | null };
   last_post: { at: number; sha: string | null; accepted: boolean; code?: string } | null;
@@ -138,6 +139,13 @@ function Body({ data, repository, row, window, onWindow }: { data: SyncView; rep
           </span>
           <Controls view="repository/sync" allowed={only(data.allowed, 'repo.resync')} target={{ repository }} label="Resync" />
         </div>
+        {data.sync_client ? <p>
+          Sync CLI: <Text mono value={data.sync_client.version ?? 'not reported'} /> · Baton recommends <Text mono value={data.sync_client.recommended} />
+          {data.sync_client.behind ? <> · <Badge tone="warn">Behind recommendation</Badge></> : null}
+        </p> : null}
+        {data.sync_client?.missing_evidence ? <Band tone="warn">
+          <Text mono value={repository} />’s sync CLI (<Text mono value={data.sync_client.version ?? 'version unknown'} />) did not declare evidence support when Baton listed completions to verify. The post was not blocked by this warning. Ask a repository owner to update the sync workflow’s CLI pin, then resync.
+        </Band> : null}
         {d.sync_workflow ? null : <p className="mut">This repository registers no sync workflow: Baton has nothing to dispatch, and its sync runs where it is run.</p>}
         <p className="mut">
           Forcing the head onto a rewritten history is not built (<Mono>{data.not_built?.force_resync ?? 'R-BTN-11'}</Mono>): a rewritten history arrives below as a held post, and is accepted there.

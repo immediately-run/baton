@@ -70,6 +70,7 @@ process for development and CI. Nothing crosses a tenant.
   | `AdminKeys` (R-BTN-57) | secret `BATON_ADMIN_KEYS` | `--admin-keys <file>` |
   | `AccessIdentities` (R-BTN-155), read on every request like `AdminKeys` | secret `ACCESS_IDENTITIES`, with variables `ACCESS_TEAM_DOMAIN`, `ACCESS_AUD` and secret `OWNER_EMAILS` | `--access-identities <file>` |
   | `HumanKeys` (R-BTN-185) | secret `BATON_HUMAN_KEYS` | `--human-keys <file>` |
+  | Human-key floor (R-BTN-185) | variable `BATON_HUMAN_KEY` | `BATON_HUMAN_KEY` in `--config` |
   | `ForgeSecrets` — per-repository webhook secret and dispatch token (R-BTN-94, R-BTN-95) | secret `BATON_FORGE_SECRETS` | `--forge-secrets <file>` |
   | `GitHubApp` (optional, §12.7) | `BATON_GITHUB_APP_ID`, secrets `BATON_GITHUB_WEBHOOK_SECRET` and `BATON_GITHUB_APP_KEY` | `--github-app-id`, `--github-webhook-secret`, `--github-app-key <file>` |
   | `CursorKey` (not built, R-BTN-130) | secret `BATON_CURSOR_KEY` | `--cursor-key <file>` |

@@ -22,16 +22,17 @@ export const config: Config = inject('localConfig');
 /** The request or alarm tick whose code is running, for the trace's steps. */
 const origins = new AsyncLocalStorage<Origin>();
 
-async function fresh(): Promise<LocalHost> {
+async function fresh(trace = true) {
   let h: LocalHost | null = null;
-  const store = recordingStore(openStore(':memory:').store, () => origins.getStore() ?? null, () => h?.core.now() ?? 0);
+  const { db, store: sqlite } = openStore(':memory:');
+  const store = trace ? recordingStore(sqlite, () => origins.getStore() ?? null, () => h?.core.now() ?? 0) : sqlite;
   h = new LocalHost({ store, config, alarm: 'manual' });
   await h.start();
   beginTrace(h.core.store, h.core.now());
-  return h;
+  return { host: h, db };
 }
 
-let host = await fresh();
+let { host, db } = await fresh();
 
 /** The host under test, for tests that drive it directly. */
 export const current = () => host;
@@ -94,9 +95,10 @@ export function tick(): Promise<void> {
 }
 
 /** Every test starts from an empty Baton: a new in-memory database. */
-export async function reset(): Promise<void> {
+export async function reset({ trace = true } = {}): Promise<void> {
   await host.stop();
-  host = await fresh();
+  db.close();
+  ({ host, db } = await fresh(trace));
 }
 
 /** Write the test's steps as its scenario's trace (R3-1244): test/.traces/<scenario>/<test>.itf.json,

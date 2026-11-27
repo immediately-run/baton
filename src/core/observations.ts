@@ -13,13 +13,13 @@ export const SYNC_HOURLY_LIMIT = 60;
 const HOUR_MS = 3_600_000;
 const DAY_MS = 24 * HOUR_MS;
 
-interface HeadRow { sha: string | null; observation: number; last_handed_out: number; handed_out_at: number | null; observation_issuer: string | null }
+interface HeadRow { sha: string | null; observation: number; last_handed_out: number; handed_out_at: number | null; observation_issuer: string | null; observation_expects_evidence: number }
 
 export class Observations {
   constructor(private readonly c: { store: Store; now: () => number }) {}
 
   private row(repo: string): HeadRow {
-    const r = this.c.store.exec<HeadRow>('SELECT sha, observation, last_handed_out, handed_out_at, observation_issuer FROM board_head WHERE repository_id = ?', repo).toArray()[0];
+    const r = this.c.store.exec<HeadRow>('SELECT sha, observation, last_handed_out, handed_out_at, observation_issuer, observation_expects_evidence FROM board_head WHERE repository_id = ?', repo).toArray()[0];
     if (!r) throw new BatonError('forbidden', `${repo} has no board`);
     return r;
   }
@@ -39,9 +39,14 @@ export class Observations {
       if (issuer !== null) this.charge(issuer, 'observation');
       this.expire(repo, h, now);
       const n = h.last_handed_out + 1;
-      nonScheduling(this.c.store, () => this.c.store.exec('UPDATE board_head SET last_handed_out = ?, handed_out_at = ?, observation_issuer = ? WHERE repository_id = ?', n, now, issuer, repo));
+      nonScheduling(this.c.store, () => this.c.store.exec('UPDATE board_head SET last_handed_out = ?, handed_out_at = ?, observation_issuer = ?, observation_expects_evidence = 0 WHERE repository_id = ?', n, now, issuer, repo));
       return { sha: h.sha, observation: n, bars: [] };
     });
+  }
+
+  /** Record the evidence requirement (§9.6) before sending this observation's reply. */
+  expectEvidence(repo: string, n: number): void {
+    nonScheduling(this.c.store, () => this.c.store.exec('UPDATE board_head SET observation_expects_evidence = 1 WHERE repository_id = ? AND last_handed_out = ? AND handed_out_at IS NOT NULL', repo, n));
   }
 
   /** Use the number a board post carries, whatever becomes of the post: it must be the
@@ -50,7 +55,7 @@ export class Observations {
    *  used once even when the post is then refused (head-moved, held, invalid). */
   // @model syncPost sha256:de22f143bc15
   // @model syncVoid sha256:1d9a44f9c30e
-  use(repo: string, n: number, issuer: string | null = null): void {
+  use(repo: string, n: number, issuer: string | null = null): { expectsEvidence: boolean } {
     const verdict = this.c.store.transaction(() => {
       const now = this.c.now();
       const h = this.row(repo);
@@ -59,9 +64,10 @@ export class Observations {
       if (!outstanding) return `observation ${n} is not outstanding for this credential`;
       if (this.expire(repo, h, now)) return `observation ${n} was handed out over 10 minutes ago and is void`;
       this.clear(repo);
-      return null;
+      return { expectsEvidence: !!h.observation_expects_evidence };
     });
-    if (verdict) throw new BatonError('stale-observation', `${verdict}; take a new number and retry (R-BTN-62)`);
+    if (typeof verdict === 'string') throw new BatonError('stale-observation', `${verdict}; take a new number and retry (R-BTN-62)`);
+    return verdict;
   }
 
   /** A refused post's number, used without judging it: it is no longer outstanding. */
@@ -127,13 +133,14 @@ export class Observations {
   }
 
   /** Record an accepted reading's number (the post's own transaction). */
-  accept(repo: string, n: number): void {
+  accept(repo: string, n: number, sync: { version: string | null; missingEvidence: boolean }): void {
     const prior = this.row(repo).observation;
     // Only a crossing of an ended claim's observation can change the freshness gate. Check
     // all ends, including tickets currently held/blocked: those may be reoffered in this sync.
     const changed = this.c.store.exec(`SELECT 1 FROM claims INDEXED BY claims_end_observation WHERE end_observation >= ? AND end_observation < ?
       AND ticket_id >= ? || ':' AND ticket_id < ? || ';' LIMIT 1`, prior, n, repo, repo).toArray().length > 0;
-    const write = () => this.c.store.exec('UPDATE board_head SET observation = ? WHERE repository_id = ? AND observation < ?', n, repo, n);
+    const write = () => this.c.store.exec('UPDATE board_head SET observation = ?, sync_cli_version = ?, sync_missing_evidence = ? WHERE repository_id = ? AND observation < ?',
+      n, sync.version, Number(sync.missingEvidence), repo, n);
     if (changed) write(); else nonScheduling(this.c.store, write);
   }
 }
