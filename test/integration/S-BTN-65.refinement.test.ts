@@ -45,7 +45,7 @@ describe('S-BTN-65 refinement', () => {
     // The runner gives the leg up (protocol.refusalKind): a failed attempt under the retry policy.
     expect((await endClaim('vm-a', w.secret, c.claim_id, { end_reason: 'released:cannot-finish:contract-output' })).status).toBe(200);
     expect(await claimRow(c.claim_id)).toMatchObject({ status: 'released', end_reason: 'released:cannot-finish:contract-output' });
-    // An invalid output counts, but does not retry until an owner decides.
+    // An invalid output counts (R-BTN-82, R-BTN-23), but waits for an owner decision.
     expect(await rows(`SELECT hold_reason, retry_after FROM ticket_overrides WHERE ticket_id = 'docs:T-1'`))
       .toEqual([{ hold_reason: 'non-retryable:contract-output', retry_after: null }]);
   });
