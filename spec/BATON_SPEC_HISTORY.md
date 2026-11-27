@@ -152,7 +152,8 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
     - anchors, `runner_pushers`' and the board's citations, the built list, the notifier's wording.
     Deferred to hardening: confirming accounts a roster adds, and revoking a first key attached from
     a forge session. Put to the owner: what a person on an `org-members` roster who cannot push to
-    the config repository may do.
+    the config repository may do. The owner, 2026-11-27: everything the roster admits, unnarrowed;
+    choosing `org-members` is the owners' statement that they trust every member that far.
 
 - **2026-11-26 — A protected repository accepts a branch course source (R-BTN-134).**
   Rules changed: R-BTN-134 (*A branch source*). #395 left open whether a protected repository

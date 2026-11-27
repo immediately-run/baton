@@ -405,7 +405,10 @@ and Baton does not do access control the forge already does (the owner, 2026-11-
   and hold a session claim. It is read from the forge, never kept by Baton:
   - **Its source** is the arena's setting `roster.source` (R-BTN-66): `repo-writers`, the default,
     the forge accounts that can push to the config repository; or `org-members`, the members of the
-    forge organisation that owns it.
+    forge organisation that owns it. Choosing `org-members` is the owners' statement that they trust
+    every member of the organisation as far as the roster reaches — creating and claiming at once,
+    non-proposal starts, setting `requires` and the assignee — whether or not that member can push
+    to the config repository; no act is narrowed for them (the owner, 2026-11-27).
   - **The sync posts it.** Baton's server holds no forge read credential, so the arena's sync,
     which does, reads the list and posts it as an attestation, `std:roster@1`
     (`{host, source, members: [<forge user id>]}`). Its standard writer is the arena's sync key or
