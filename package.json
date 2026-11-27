@@ -83,6 +83,7 @@
     "@types/react-dom": "19.3.0",
     "esbuild": "0.28.2",
     "eslint": "10.15.0",
+    "fast-check": "4.11.0",
     "jsdom": "31.0.1",
     "react": "19.3.1",
     "react-dom": "19.3.1",
