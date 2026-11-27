@@ -1,0 +1,19 @@
+---
+title: B-314 review round 1
+description: Findings and disposition for the first review of runner course refresh without restart.
+---
+
+Reviewed [Baton #394](https://github.com/immediately-run/baton/pull/394) at `09221924`
+([review](https://github.com/immediately-run/baton/pull/394#pullrequestreview-6025128048)). The
+verdict was changes: four blocking findings and two should-fix. The reviewer passed
+`npm run typecheck` and 60 focused tests; the full suite hit the command limit, and no live
+check on bering ran.
+
+| Finding | Disposition |
+|---|---|
+| [Blocking: check for restart after the idle refresh, before another claim](https://github.com/immediately-run/baton/pull/394#discussion_r4668533615) | Fixed in `d8a8db2c`: the idle refresh runs before the restart check; S-BTN-313 covers a shared home and CLI checkout. |
+| [Blocking: resolve the default branch when `origin/HEAD` is missing](https://github.com/immediately-run/baton/pull/394#discussion_r4668533628) | Fixed in `d8a8db2c`: a bounded Git query for origin's default branch. A stale `origin/HEAD` stayed open (round 2). |
+| [Blocking: removing the last declaration falls back to directory discovery](https://github.com/immediately-run/baton/pull/394#discussion_r4668533634) | Fixed in `d8a8db2c` for the current reader. A fresh reader stayed open (round 2). |
+| [Blocking: validate the refreshed list against the heartbeat rules](https://github.com/immediately-run/baton/pull/394#discussion_r4668533642) | Fixed in `d8a8db2c`: the heartbeat's validator runs before the list is adopted. |
+| [Should-fix: read the full branch ref before the upstream lookup](https://github.com/immediately-run/baton/pull/394#discussion_r4668533647) | Fixed in `d8a8db2c`. |
+| [Should-fix: the Conditions screen's rule 9 guidance](https://github.com/immediately-run/baton/pull/394#discussion_r4668533657) | Fixed in `d8a8db2c`. |

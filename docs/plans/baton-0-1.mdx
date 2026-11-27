@@ -39,17 +39,17 @@ runners ran. Grouped by criterion:
 
 | Criterion | What broke it | Entries | Fixed? |
 |---|---|---|---|
-| 3, capacity | Faults on the host or at the provider charged to every ticket they touched, ending in `attempts-exhausted` holds only a person could lift | 10 | No. B-359, B-360, B-336, B-347 |
-| 3, capacity | Runners idle with work on the board, and nothing saying why: tiers, holds, unconfirmed ends, `awaiting-sync`, a course rule no runner could meet | 9 | Tiers retired (B-322). B-244, B-361 |
-| 3, capacity | A host check failing every claim, the runner claiming on (wrapper, gateway key, executor pin, placement) | 6 | No. B-336, B-365 |
+| 3, capacity | Faults on the host or at the provider charged to every ticket they touched, ending in `attempts-exhausted` holds only a person could lift | 10 | Partly: B-336 (#464) and B-347 (#460) merged. B-359, B-360 |
+| 3, capacity | Runners idle with work on the board, and nothing saying why: tiers, holds, unconfirmed ends, `awaiting-sync`, a course rule no runner could meet | 9 | Tiers retired (B-322). B-244 merged (#352). B-361 |
+| 3, capacity | A host check failing every claim, the runner claiming on (wrapper, gateway key, executor pin, placement) | 6 | Placement only: B-336 (#464). B-365 |
 | 3, capacity | No sync between pushes to `main`, so ends waited for confirmation | 4 | No. B-318 |
-| 2, course | The review stub's round bound baked in as 3 while the course file says 8. Runs counted twice | 3 | B-335 in review. B-324 open (the regenerated `merge.mjs` still carries `"reviewMaxRuns": 3`) |
+| 2, course | The review stub's round bound baked in as 3 while the course file says 8. Runs counted twice | 3 | B-324 merged (#408). B-335 in review |
 | 2, course | PRs left conflicting with `main`, then merged by the owner by hand (13 on 2026-11-24, of 51 open) | 3 | No. B-364 |
-| 2, course | Ends that named evidence nothing attested; 44 parked tickets | 2 | #415. B-337 for closed tickets |
+| 2, course | Ends that named evidence nothing attested; 44 parked tickets | 2 | #415, and B-337 (#456) for closed tickets |
 | 2, course | Flaky tests or a red `main` | 8 | Mostly, by #295 and #392 |
 | 1, order | A ticket claimed that could not move: an unreleased dependency, an npm approval | 3 | No. B-363 |
 | 1, order | Importance missing: 67 of 216 available tickets carry no `order`, almost every ticket filed since 2026-11-22 among them. B-240 and B-250 sit at `order` 2 and 3, above everything | — | No. B-362 |
-| — | Baton itself down (read quota, migration 0061): about 62 hours | 3 | Fixed in place. B-249 |
+| — | Baton itself down (read quota, migration 0061): about 62 hours | 3 | Fixed in place. B-249 merged (#353) |
 
 Two things this table shows:
 
@@ -75,23 +75,22 @@ B-359 to B-371 are new in this PR.
 
 | Rank | Ticket | Criterion | What it ends |
 |---|---|---|---|
-| 10 | B-324 | 2 | The review stub reads the round bound from the course file (PR #408 open) |
 | 15 | B-359 | 3 | A burst of failures on one runner is the runner's fault: the tickets keep their attempts, the runner backs off |
 | 20 | B-360 | 3 | Holds settle themselves: lifted when the ticket closes, one automatic retry after a day, many answered at once |
-| 25 | B-244 | 3 | An idle runner says why in its own log (PR #352 open) |
 | 30 | B-361 | 3 | Baton notices unclaimable work itself (`baton.unclaimable`, `baton.runner-starved`, `baton.no-runner`), and the ready list names the right gate |
 | 35 | B-318 | 3 | Suspended tickets get their next leg without a push to `main` (PR #384 open) |
 | 40 | B-362 | 1 | Every open ticket has a rank, and anyone can see the order Baton offers |
 | 45 | B-363 | 1 | A ticket waiting on something outside (a release, a person) is blocked, not offered |
-| 50 | B-336 | 3 | A runner that cannot place a sandbox stops claiming |
-| 55 | B-365 | 3 | The same for any repeated host failure; rotated keys re-read without a restart |
-| 60 | B-347 | 3 | A refusal a retry cannot fix is not retried until held |
-| 65 | B-337 | 2 | Unconfirmed ends on closed tickets settle |
+| 55 | B-365 | 3 | B-336's pause for any repeated host failure; rotated keys re-read without a restart |
 | 70 | B-364 | 2 | `create-pr` keeps its PRs mergeable and tests what would land |
 | 75 | B-368 | all | `baton report soak`: the check that decides the release |
-| 80 | B-249 | 3 | Baton's own downtime does not cost a claim its lease |
 
 B-335 (runs counted twice) is already in review and needs no rank.
+
+**Already merged.** Six tickets this plan first ranked here had merged before it was written, and
+their ticket files still said `available`: B-324 (#408), B-244 (#352) and B-249 (#353) on
+2026-11-25, B-337 (#456), B-347 (#460) and B-336 (#464) since. Their ranks are harmless and stay
+until they are closed (D8). B-311 (#348) in phase B is the same.
 
 After phase A has merged and deployed, B-366's **rehearsal**: 72 hours on bering, with every
 intervention logged and `baton report soak` read at the end. It releases nothing. Whatever it finds
@@ -113,7 +112,6 @@ owner ruled the same day that it is needed for Baton to be generally usable. Whe
 | 115 | B-355 | `baton ticket why`, `--replay`, and the dashboard's "why this leg" |
 | 120 | B-354 | Host matching (the sandbox-memory case in the owner's brief) |
 | 125 | B-357 | The selector's budget, measured |
-| 130 | B-311 | Work done outside Baton, placed back on the course (fact and reconcile legs) |
 
 ### Phase C — the release
 
@@ -147,14 +145,28 @@ Each has a default that this plan assumes until answered.
   2026-11-27: "Yes, hand-edit once". This plan's PR sets `order:` by hand on the 25 existing tickets
   ranked here (phases A and B, and *Simpler* below); `dibber check` reports nothing new. B-362 gets
   Dibber a re-rank command.
+- **D8 — The 91 tickets Baton holds at `merged` whose files say they are open.**
+  - (a) Close the 66 whose PRs have all merged in one PR, as B-314 and B-316 were closed here: each review round archived, `dibber done`, moved to `tickets/archive/`, and every finding a review left open filed as its own ticket. Check the 23 with no PR one by one against `main`. Leave the two waiting on docs PRs. And file a ticket for the cause: a ticket the course ends at `merged` outside the merge leg (a hand merge, the merge queue) is never closed in its store (B-268 is nearest). **Default.**
+  - (b) Close them without archiving the review rounds, and accept losing what those rounds found.
 
 ## Housekeeping found on the way
 
-These are not done in this PR. Each is a hand act on the ticket store, so each is an intervention
-if done during a soak window. Do them before one starts.
+Each item is a hand act on the ticket store, so each is an intervention if done during a soak
+window. Do them before one starts.
 
-- B-314 (#394) and B-316 (#398) have merged, but their tickets still say `available` with no
-  close. A runner may claim them again.
+- **Done in this PR: B-314 and B-316 closed.** Both merged on 2026-11-24 at the owner's word
+  (#394, #398) with their last review round still asking for changes, and their tickets stayed
+  `available`. Their review rounds are archived (`docs/review/B-314-round-1.mdx` to
+  `B-316-round-2.mdx`), each ticket is closed with `dibber done` and moved to `tickets/archive/`,
+  and the findings still open go to two new tickets: B-372 (a stale `origin/HEAD`, a removed
+  declaration that returns after a restart, §8.1's `courses` row) and B-373 (two stderr paths that
+  mask without the raw CRLF frame, and B-316's unanswered owner decision on short disproved holds).
+- **The same defect, 91 more times (D8).** On 2026-11-27 Baton holds 93 tickets at `merged`, its
+  end station, whose files still say `available`, `in-review` or `in-progress`. B-314 and B-316
+  were two of them. Of the other 91: 66 list PRs that have all merged, 2 wait on an open docs PR
+  (B-68 on docs#229, R3-1268 on docs#234), and 23 list no PR at all (among them B-336, B-337 and B-347,
+  whose PRs are on `main` all the same). Baton offers none of them to a runner, but people and
+  Dibber read them as open work, and their stale ranks confuse B-362's order.
 - B-220 builds the Sync screen's Cut over and Confirm adoption buttons that B-288 deletes. One of
   them should be withdrawn.
 - About 30 runner PRs conflict with `main` (2026-11-24). Once B-364 lands, the course clears them.
