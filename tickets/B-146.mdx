@@ -39,8 +39,8 @@ None: a checkout and a terminal.
 ### Why
 
 Work attestations let a leg require evidence under repository policy. The November 19 ruling
-removed the resource prerequisite and block and kept readings as advice (R-BTN-76 and
-[B-291](B-291.mdx)); the unbuilt `requires.resources` short form is not part of this work.
+cut the resource prerequisite and block, which [B-291](B-291.mdx) removes with its code, and kept
+readings as advice (R-BTN-76); the unbuilt `requires.resources` short form is not part of this work.
 
 ### What remains to build
 
@@ -59,7 +59,8 @@ removed the resource prerequisite and block and kept readings as advice (R-BTN-7
    `std:review@1` only for a run that finishes at the review leg's approving outcome. Use the
    subject Baton holds, not a caller-supplied subject. A review names its run id and only
    supersedes a review of the same run (R-BTN-63, R-BTN-183).
-3. **Work requirements.** Evaluate `requires.attestations` per the security proposal, including
+3. **Work requirements.** Evaluate `requires.attestations` on a `work` subject only (item 6
+   defers `subject: instance` and the `requires.resources` short form) per the security proposal, including
    `where`, `count`, `distinct`, `binds` and `missing`. Course writers may only narrow policy.
    Store unmet requirements as `attestation` rows; rule 1 returns the blocking rows when
    refusing a claim or advance. The validator refuses a trusted leg whose requirement binds as
@@ -98,9 +99,9 @@ gate-or-advice requirement.)_
 
 _(2026-11-02: the spec restructure's part 3 (B-166, the PR `spec-restructure-handoff`, [#163](https://github.com/immediately-run/baton/pull/163)): `baton attest` is `baton attestation add`, or `baton decision answer` for a person leg's answer (R-BTN-127).)_
 - 2026-11-02: the spec restructure's part 4 (B-166, B-165's review default): readings carry no `nonce` or signature and `readings` entries have no `signed` (R-BTN-76, R-BTN-188; B-168); the trusted-leg check of R-BTN-181 admits writers only. Build the attestations without the signed-reading paths.
-- 2026-11-02: the spec restructure's part 4, review rounds two and three (B-166): the *Do not* line on unsigned readings is void — no reading is signed, and an admitted reading counts toward a trusted leg's requirement. A full requirement on an instance reads as R-BTN-76 now says: the instance's state is ignored; for each usable instance and admitted writer's key, that writer's latest reading in force is one attestation (an older one of the same writer never counts); `missing` means none; `count` counts the distinct writers' keys that pass unless `distinct` names another field. S-BTN-181's new reading cases are this ticket's.
+- ~~2026-11-02: the spec restructure's part 4, review rounds two and three (B-166): the *Do not* line on unsigned readings is void — no reading is signed, and an admitted reading counts toward a trusted leg's requirement. A full requirement on an instance reads as R-BTN-76 now says: the instance's state is ignored; for each usable instance and admitted writer's key, that writer's latest reading in force is one attestation (an older one of the same writer never counts); `missing` means none; `count` counts the distinct writers' keys that pass unless `distinct` names another field. S-BTN-181's new reading cases are this ticket's.~~ _(2026-11-27: struck: the reading cases are deferred, item 6; R-BTN-76's instance text is on the security proposal page, §13.)_
 
-- 2026-11-03: item 8 added — R-BTN-191's supersession across all three posters, corrected by the 2026-11-02 security review (PR #165) and moved here from B-169, which has no store to build it on.
+- ~~2026-11-03: item 8 added — R-BTN-191's supersession across all three posters, corrected by the 2026-11-02 security review (PR #165) and moved here from B-169, which has no store to build it on.~~ _(2026-11-27: struck: the items were renumbered; the sync supersession is item 5.)_
 
 _(2026-11-20: the spec simplification of 2026-11-19 (baton#299; `spec/BATON_SPEC_HISTORY.md`, that date) moved the unbuilt parts of the design this ticket builds out of the section files, with their rule ids, to proposal pages: attestations beyond a person's answer, and the sync's and the holder's attestations, are parts 4 and 5 of [the security proposal](../spec/proposals/security.md), with their tables and routes under "Attestations, roles and fact legs" in [the tables-and-routes proposal](../spec/proposals/data-model-and-api.md). S-BTN-181 is no longer a row of the verification section: it is in [the proposals' scenarios](../spec/proposals/scenarios.md), under "The repository policy's enforcement". Each rule keeps its id and a line in its section, which links the page. The pull request that builds this ticket moves the rules it builds back into the section files, and the scenarios and gates it makes pass back into [the verification section](../spec/BATON_SPEC/15-verification.md#sec-15), in the same change.)_
 

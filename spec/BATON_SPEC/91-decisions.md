@@ -115,7 +115,7 @@ One line per decision in force; the reasoning and the rejected alternatives in f
 - Chose a deadline enforced by a release and then a fence, a timeout being a failed attempt, over stopping a runner from Baton (R-BTN-90, R-BTN-167).
 - Chose one outbox for git writes, check runs and ticket-store writes, delivered by runners, over a git credential in Baton or a courier key role (R-BTN-171, R-BTN-115).
 - Chose that Baton holds the GitHub App key and the forge trigger tokens and dispatches workflows itself, over a dispatch courier and signed entries (R-BTN-94, R-BTN-171, §12.7).
-- Chose readings as attestations about a resource instance, authenticated by the request that posts them, gate or advice being the requirement's choice (R-BTN-181, R-BTN-76, R-BTN-188).
+- Chose readings as attestations about a resource instance, authenticated by the request that posts them, served as advice; a requirement that gates on a reading is deferred until a course needs one (R-BTN-181, R-BTN-76, R-BTN-188).
 - Chose two resource scopes, `service` and `account`, over `runner` and `host` scopes and an administrator's overriding reading (R-BTN-76, R-BTN-40).
 - Chose one versioned policy document per repository, whose knobs presets fill, over landing modes Baton hard-codes (R-BTN-188).
 - Chose guarantees as named conditions over the policy, enforced through the policy's own `floors` list (R-BTN-189).

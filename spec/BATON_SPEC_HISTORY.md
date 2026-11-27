@@ -19,13 +19,25 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
 ## Changelog
 
 - **2026-11-26 — Gating on a reading deferred (R-BTN-76, R-BTN-181).**
-  No rule changed. The 2026-10-30 brief let a course gate a leg on a reading ("eg: account
-  funds"); the 2026-11-19 ruling cut the `resource` prerequisite and kept readings as advice, and
-  left open whether R-BTN-181's `requires.attestations` instance form may bind as a gate. The
-  owner's ruling, 2026-11-26: "Theoretically, it makes sense for readings to be an input to leg
+  Rules changed: none; the Decisions line on readings (§91) now says they are served as advice
+  and that gating on one is deferred, where it said gate or advice was the requirement's choice.
+  The 2026-10-30 brief let a course gate a leg on a reading ("eg: account funds"); the 2026-11-19
+  ruling cut the `resource` prerequisite and kept readings as advice, and did not say whether
+  R-BTN-181's `requires.attestations` instance form, the same requirement written in full, may
+  still bind as a gate (B-146's review round two, `docs/review/B-146-round-2.mdx`, raised it).
+  The owner's ruling, 2026-11-26, in a Claude Code session on bering, asked that question:
+  "Theoretically, it makes sense for readings to be an input to leg
   decisions, but I also don't think we'll need this for a while still." The instance form stays on
   the security proposal page, unbuilt, with S-BTN-181's funds, `count: 2` and latest-per-writer
-  cases; B-146 builds work attestations only. It is ruled on when a course first needs it.
+  cases; B-146 builds work attestations only. It is ruled on when a course first needs it. Still
+  true, and left as it is: R-BTN-181's built check of a policy's `readings` entries, which
+  validates policy and gates no leg.
+  - **Review** (2026-11-27, PR #335): one fresh reviewer given the diff. Every finding verified
+    against the text. Fixed: this Decisions line; the 2026-11-19 entry's silence, which the
+    first wording called an open question; the quote's source; B-146's *Why*, which called the
+    `resource` prerequisite removed while its code stands (B-291 removes it); two 2026-11-02 and
+    2026-11-03 status lines a later ruling contradicts, struck; item 3's reach, now work subjects
+    only; the round-two review page's "returned changes", a comment review.
 - **2026-11-26 — Terminology: the arena; the session's proposals (no rule changed).**
   Rules changed: none.
   The front gains a terminology note: the unit Baton coordinates — one ticket source, its
