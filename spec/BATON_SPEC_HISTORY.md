@@ -44,6 +44,143 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   contain url to reason file or simple text in "reason " field"; the selector's budget, "not
   sure" — the 10-second, 256 MB and 15-minute values in R-BTN-205 are provisional, to be replaced
   by B-351's measurements. Asked "Ready to draft spec changes?", this amendment is the draft.
+- **2026-11-26 — Terminology: the arena; the session's proposals (no rule changed).**
+  Rules changed: none.
+  The front gains a terminology note: the unit Baton coordinates — one ticket source, its
+  configuration and everything Baton owns about its tickets — is an **arena** in the vocabulary
+  (the owner, 2026-11-26: "repository" made Baton read as if it could serve only git-held
+  tickets, while a ticket source may be a tracker such as Linear; "home" retires with it). The
+  spec keeps writing it a registered repository, and a ticket's arena its home, until a rename of
+  its own, staged with the API's and the CLI's names, the old names accepted meanwhile.
+  Recorded beside it, as proposals and context, not rules:
+  [human intent and autonomy](../docs/context/human-intent.mdx) (the key decides who drives,
+  never the channel; Baton constrains agent-driven work, not people, never the lock or the
+  record), [ticket ownership](proposals/ticket-ownership.md),
+  [personal secrets and notification](proposals/personal-secrets.md), people for accountability and
+  notification ([people and dashboard §5](proposals/people-and-dashboard.md#5-people-identities-and-the-roster)),
+  interventions split by driver ([intervention sessions](proposals/intervention-sessions.md)), and
+  what waits for unattended operation ([hardening](proposals/hardening.md)). Dibber, the git-native
+  ticket format, lives in its own repository, [immediately-run/dibber](https://github.com/immediately-run/dibber).
+  - **Round one** (2026-11-26, PR #449): three fresh reviewers — consistency, security,
+    executability — given the diff and the impact list. Every finding checked against the text.
+    - Found in all three: `human-operator` is a runner's own statement, so making such a runner
+      human-driven let an agent create and claim at once. The owner: a runner is always
+      agent-driven.
+    - The session claim had no fence (the `pre-push` hook is a runner's) and its lease no runner
+      row: an MCP session claim is requeued onto a fresh branch, a late push is outside work, and
+      the CLI's attached-runner mode is the second form.
+    - An unwritten ticket contradicted §9.1, R-BTN-5/34 and R-BTN-33: the owner allows Baton the
+      start text, at most 1,024 characters, until the store has it; the claim answer carries it;
+      under `tickets-approved` no leg runs before its hash is approved.
+    - Whoever controls the notifier key list could read every secret, against the proposal's
+      claim: stated as an accepted risk, its fix parked in the hardening proposal (the owner:
+      premature before Baton runs unattended). Versions never reset; a re-encryption keeps the
+      inner hash; channels are verified per secret version; secrets are set only by SSH keys.
+    - "Interactive keys never satisfy the approver lists" was withdrawn: the owner ruled the key
+      decides, never the channel; a token's proof is what a `human_only` or hardware list refuses.
+      Interactive grants are short-lived OAuth grants, designed now rather than left to hardening.
+    - A forge identity cannot say who drives (the owner): linked forge accounts attribute only;
+      `human_identity` stays as the spec has it, and "several people's forge identities" was
+      dropped.
+    - People carry no authority (the owner: no RBAC in Baton, leave it to the forge): the
+      contributor role became the roster, read from the forge; no groups, no `answerers`, no
+      escalation steps. From the earlier users-and-groups proposal (#300, closed) the notifier's
+      due read, `std:notified@1`, `baton.notifier-silent` and the attach code were kept.
+    - Text: "autonomous" for credentials became **agent-driven** (an autonomous leg is R-BTN-195's);
+      "dashboard sessions" built only for administrators; the terminology note on "home"; the
+      Amends lists extended (R-BTN-53, R-BTN-130, R-BTN-163, R-BTN-5/34, §9).
+  - **Round two** (2026-11-26): two fresh reviewers — consistency with executability, and
+    security. Every finding checked against the text.
+    - Both found the CLI form of a session claim was a runner, hence agent-driven by the page's own
+      rule, and that its `ssh-agent` would hand queued legs the person's key. The owner: it is
+      `baton session claim`, which holds the lease and the `pre-push` fence and runs no queued
+      legs; a runner on a person's machine keeping its legs from the person's keys is hardening.
+    - The interactive grant contradicted BATON_MCP_OAUTH_SPEC (a grant is an MCP key, as long-lived
+      as one, approved only by owners): its §5, §7, §8 and G-BTN-157 are named as amended; an hour's
+      token, a twelve-hour refresh cap, an hour idle; the consent's ticks a ceiling.
+    - The roster could not be computed by a server that holds no forge credential, and a non-owner
+      had no credential at all. The owner: people sign in with the forge, which verifies their
+      account; the roster's source is the arena's choice (`roster.source`: `repo-writers` or
+      `org-members`), read and posted by the sync as `std:roster@1`, fresh within 24 hours,
+      re-checked at every start, claim and renewal; on plain git, the owners' people.
+    - The owner kept "the key decides": governance acts outliving a session, and a person's key in
+      an unwatched agent, are stated as accepted risk, and a key-signed proof level for governance
+      acts goes to hardening.
+    - Fixed in the text: approval is always a recorded `std:approval@1` of a defined hash, and
+      `claim: true` is refused until it exists; an unwritten ticket's provenance carries no `human`; how an MCP
+      session claim moves, which gates bind a person, the branch recorded per claim; agent-driven
+      starts name their claim; ambiguous ids refused and a recovered id confirmed by an owner; one
+      person per forge account, never a runner's; a notifier is a principal of its own, alone
+      attesting deliveries, on a host that runs no legs; recipients limited to the arena's people;
+      verification codes and webhook limits; replay to a fresh notifier and an administrator's
+      first-key code stated as accepted risk.
+  - **Round three** (2026-11-26, the last): one fresh reviewer over everything, after the branch
+    took in main (members, R-BTN-204; owners' and members' sessions, R-BTN-155). Every finding was
+    within the owner's rulings and is fixed in the text:
+    - A forge sign-in's session carries no key's role — the roster's acts and their reads only —
+      so taking over a forge account takes over no owner key; a person is created only for an
+      account on some arena's roster or one an owner names; the forge OAuth is named a new outbound
+      call and secret.
+    - A ticket an agent-driven credential starts runs nowhere before a human approves its text
+      wherever `tickets.created` is `proposed`, whatever the guarantees.
+    - An interactive grant is not a delegated key: it writes as the new writer `person`; a session
+      claim is bound to the person, so a fresh grant continues it; an approval names a written
+      ticket's posted version or an unwritten one's text hash.
+    - The CLI's `baton session claim` renews by `claim.renew`, and the `pre-push` holder query
+      asked with a person's key answers for their own claims; a lapsed claim of either form is
+      requeued the same way.
+    - `std:roster@1` is written by the sync key or CI identity alone, never a runner's.
+    - A runner's legs on a machine holding a person's keys can act as that person today: stated as
+      accepted risk, its fix in hardening.
+    - Smaller: owners' and members' sessions are not roster-gated; the notifier condition, the
+      channels it reads for codes, rate limits on every channel; the intervention tail.
+  - **After round three**, the owner's rulings: a session counts as `human` for a human-only list
+    as R-BTN-185 is to rule once [#451](https://github.com/immediately-run/baton/pull/451) lands
+    (under `human_key: any`, only one Cloudflare Access or a `human_only` key's
+    code opened; under `hardware`, every session, each act with its touch), and a forge sign-in
+    never proves a human: "a forge signin doesn't prove human intent, because autonomous agents can
+    also use forge credentials". Dibber's R-DIB-2 now closes a ticket in place, which ticket
+    ownership follows.
+  - **The owner's answers to the open decisions**, 2026-11-26: an entry with no assignee notifies
+    nobody and is shown on the dashboard only; removing a person deletes their sealed secrets; an
+    MCP session claim's lease is 15 minutes by default; `requires` is store-owned, like course and
+    tier; and `baton ticket request` with Baton unreachable fails loudly, never falling back to
+    git-only legacy mechanics.
+  - **Tracker identities**, the owner, 2026-11-26: a tracker account is verified by the tracker's
+    own OAuth sign-in where it offers one, and otherwise linked by an owner of the arena; a
+    matching email or a mapping the sync reads never verifies one.
+  - **The last two open decisions**, the owner, 2026-11-26: `baton.ticket-missing` holds the
+    ticket, with no legs working from the content they last read; and the courses that commit to
+    the default branch gain reconcile legs before closure flips. The tracker writer (R-BTN-171) is
+    recorded as a dependency of tracker sources, not a decision.
+  - **Round four**, at the owner's request beyond the three-round cap: two fresh reviewers given the
+    diff, one for consistency and executability, one for security. Every finding was verified
+    against the text. Fixed:
+    - R-BTN-185's narrowing is cited as [#451](https://github.com/immediately-run/baton/pull/451)'s
+      amendment, not today's rule, and R-BTN-185 and R-BTN-188's `human` entry join the amends;
+    - tiers, retired on 2026-11-23, are gone from ticket ownership;
+    - an interactive grant never exceeds the session it came from: its authority-changing acts wait
+      for the key's confirmation (R-BTN-155), it takes no key-only act, and it writes as its
+      session's role where an entry names that role;
+    - a human-driven intervention starts through `course.start` with a session claim; the leftover
+      "no session satisfies a human-only list" lines follow R-BTN-185;
+    - who holds a session claim (the roster, or an owner's or member's key), and rule 4 binding a
+      session claim;
+    - approval by a human-driven session's act: its advance carries the approval naming the blob id,
+      bound once a post shows that version;
+    - a reappearing ticket keeps an approval of its version; the unwritten ticket's hash covers its
+      course and fields; `started_by` outlives the first write;
+    - agent-driven starts are limited per claim, as R-BTN-187 limits a sync; human-driven starts are
+      not, nor a person's claims (no ceiling, the owner);
+    - a key is never both a person's and an agent's; every key attached is announced; each roster
+      change is an event naming its poster;
+    - an `unreachable` recipient is due again; webhooks connect only to the address checked;
+    - anchors, `runner_pushers`' and the board's citations, the built list, the notifier's wording.
+    Deferred to hardening: confirming accounts a roster adds, and revoking a first key attached from
+    a forge session. Put to the owner: what a person on an `org-members` roster who cannot push to
+    the config repository may do. The owner, 2026-11-27: everything the roster admits, unnarrowed;
+    choosing `org-members` is the owners' statement that they trust every member that far.
+
 - **2026-11-26 — A protected repository accepts a branch course source (R-BTN-134).**
   Rules changed: R-BTN-134 (*A branch source*). #395 left open whether a protected repository
   (R-BTN-188) should refuse branch sources. The owner's ruling, 2026-11-26: "No, the #395 warning
