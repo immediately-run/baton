@@ -1,0 +1,20 @@
+---
+title: B-280 review round 1
+description: Findings and disposition for the first review of the client layer, the bounded git helper and the shared runner wire types; all five findings were fixed on the branch.
+---
+
+Reviewed [Baton #373](https://github.com/immediately-run/baton/pull/373) at `eeb78577`
+([review](https://github.com/immediately-run/baton/pull/373#pullrequestreview-6015675080)). The
+verdict was changes: on Node 24 the reviewer ran `npm run check:package`, typecheck and 74 focused
+boundary, git, bundle and runner tests, and found that the checkout CLI fails on the Node 22.13
+floor, the git helper drops a configured SSH transport and runner replies are not checked.
+
+The PR was merged on 2026-11-25. Every finding of this round was fixed in `21de4087`.
+
+| Finding | Disposition |
+|---|---|
+| [Blocking: an eager `.ts` import breaks the checkout CLI on Node 22.13](https://github.com/immediately-run/baton/pull/373#discussion_r4661057735) | Fixed in `21de4087`. |
+| [Blocking: the git helper replaces a configured `GIT_SSH_COMMAND` or `core.sshCommand`](https://github.com/immediately-run/baton/pull/373#discussion_r4661057738) | Fixed in `21de4087`. |
+| [Blocking: any 2xx body is accepted as a runner answer](https://github.com/immediately-run/baton/pull/373#discussion_r4661057743) | Fixed in `21de4087`. |
+| [Blocking: the wire type cannot represent an `unblocked` heartbeat message](https://github.com/immediately-run/baton/pull/373#discussion_r4661057746) | Fixed in `21de4087`. |
+| [Should-fix: a missing dispatch export compiles and passes the package smoke checks](https://github.com/immediately-run/baton/pull/373#discussion_r4661057748) | Fixed in `21de4087`. |

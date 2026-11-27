@@ -1,0 +1,19 @@
+---
+title: B-60 review round 2
+description: Findings and disposition for the second review of the leg-deadline reap, both fixed before the next round.
+---
+
+Reviewed [Baton #307](https://github.com/immediately-run/baton/pull/307) at `e3311e50`
+([review](https://github.com/immediately-run/baton/pull/307#pullrequestreview-6004507067), [verdict comment](https://github.com/immediately-run/baton/pull/307#issuecomment-7060944028)). The
+verdict was changes: the reviewer confirmed the successor refusal and the release cleanup, and
+found the runner's handling of that refusal untested and replay not checking the finishing run's
+sequence; 72 focused tests, including S-BTN-52 on both hosts, model links, typecheck, spec and
+wiki checks passed.
+
+Both findings were fixed in `7560a965`, with a reply on each thread, and round three verified
+them.
+
+| Finding | Disposition |
+|---|---|
+| [Blocking: the runner's handling of a `leg-timeout` refusal on the successor advance has no regression](https://github.com/immediately-run/baton/pull/307#discussion_r4651892987) | Fixed in `7560a965`: a runner test sends the refusal and checks the hand-off and `released:leg-timeout`, with no successor run. |
+| [Should-fix: replay emits `legFinished` without checking that the beat names the claim's current run](https://github.com/immediately-run/baton/pull/307#discussion_r4651892989) | Fixed in `7560a965`: replay requires the current claim and run sequence, with stale-sequence and wrong-claim regressions. |

@@ -1,0 +1,18 @@
+---
+title: B-60 review round 3
+description: Findings and disposition for the third review of the leg-deadline reap, both fixed before the next round.
+---
+
+Reviewed [Baton #307](https://github.com/immediately-run/baton/pull/307) at `6e862f4f`
+([review](https://github.com/immediately-run/baton/pull/307#pullrequestreview-6054495822), [verdict comment](https://github.com/immediately-run/baton/pull/307#issuecomment-7157687456)). The
+verdict was changes: the reviewer confirmed the successor-advance regression and the stale-sequence
+replay check, and found a terminal end that can discard a delivered timeout and a replay that
+accepts a string claim id; 83 focused tests, typecheck, spec and wiki checks, model links and
+`model:quick` passed.
+
+Both findings were fixed in `bb70a0db`, with a reply on each thread, and round four verified them.
+
+| Finding | Disposition |
+|---|---|
+| [Blocking: a terminal end sent after a timeout was delivered is accepted and expires the timeout, recording no failed attempt](https://github.com/immediately-run/baton/pull/307#discussion_r4692501411) | Fixed in `bb70a0db`: an active claim with a delivered timeout refuses any other runner end, and the runner retries as `released:leg-timeout`. |
+| [Should-fix: replay accepts a string claim id the live heartbeat drops](https://github.com/immediately-run/baton/pull/307#discussion_r4692501416) | Fixed in `bb70a0db`: replay requires an integer claim id. |

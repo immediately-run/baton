@@ -1,0 +1,19 @@
+---
+title: B-60 review round 4
+description: Findings and disposition for the fourth review of the leg-deadline reap, merged with a blocking finding and a should-fix open.
+---
+
+Reviewed [Baton #307](https://github.com/immediately-run/baton/pull/307) at `b3c6ad18`
+([review](https://github.com/immediately-run/baton/pull/307#pullrequestreview-6056445041), [verdict comment](https://github.com/immediately-run/baton/pull/307#issuecomment-7160592910)). The
+verdict was changes: the reviewer confirmed round three's fixes and found, with an in-memory
+sidecar probe, that a parked end can still lose a delivered timeout, plus a replay that reads more
+of `legs_finished` than the live validator; 85 focused tests, including S-BTN-52 on both hosts,
+and model links passed.
+
+The PR was merged on 2026-11-25 at this head, with this round's findings open. No fix leg ran
+after this round. The open findings are carried by FOLLOWUP-B-60.
+
+| Finding | Disposition |
+|---|---|
+| [Blocking: a terminal end that never reached Baton is parked and retried unchanged after the `leg-timeout` refusal, then succeeds as `done` with no hand-off or failed attempt](https://github.com/immediately-run/baton/pull/307#discussion_r4693970076) | Open on `main`: the sidecar's `retryEnd` still resends the parked body unchanged (`src/runner/sidecar.ts`). Carried by FOLLOWUP-B-60. |
+| [Should-fix: replay searches the whole `legs_finished` array, while the validator keeps only the first 32 entries](https://github.com/immediately-run/baton/pull/307#discussion_r4693970089) | Open on `main` (`scripts/check-traces.mjs`). Carried by FOLLOWUP-B-60. |
