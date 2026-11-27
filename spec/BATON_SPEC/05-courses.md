@@ -243,8 +243,10 @@ Designs for this section that are not built are on the proposal page
     `baton.selection-failed`. Either condition closes when a later verdict queues a leg.
   - **A runner runs it.** Core runs no repository code. The runner that finishes a leg runs the
     selector over the `ctx` Baton hands it with the claim's last answer and sends the verdict
-    with its `advance` or end. Any other cause — a fact, a reading, a dependency, an `until` —
-    makes a **selection want** for the ticket, carrying its `ctx`, which any live runner granted
+    with its `advance` or end. An arrival that carries no verdict — a fact arrival, Baton's own
+    settlement, or an advance by a holder that runs no legs, such as a person's session claim
+    ([ticket ownership](../proposals/ticket-ownership.md), proposed) — and any other cause — a
+    fact, a reading, a dependency, an `until` — makes a **selection want** for the ticket, carrying its `ctx`, which any live runner granted
     on the repository that declares the course takes; it posts the verdict in a signed request.
     A want no runner takes within the untaken time shows as awaiting selection, with its age.
   - **Budget.** A call is bounded at 10 seconds and 256 MB, and a want is untaken after 15
