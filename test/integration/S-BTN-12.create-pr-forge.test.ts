@@ -1,4 +1,4 @@
-// S-BTN-327 (R-BTN-10): shipped create-pr scripts, real runner and git, fake GitHub.
+// Exercise S-BTN-12 completion confirmation through the shipped create-pr course (R-BTN-10).
 import { execFileSync } from 'node:child_process';
 import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -34,7 +34,7 @@ function identity(root: string) {
 beforeEach(async () => {
   time = Date.now();
   await setClock(time);
-  dir = mkdtempSync(join(tmpdir(), 'baton-s327-'));
+  dir = mkdtempSync(join(tmpdir(), 'baton-create-pr-forge-'));
   home = join(dir, 'home');
   mirror = join(dir, 'sync');
   remote = join(dir, 'remote.git');
@@ -126,7 +126,7 @@ async function sync() {
 
 async function run(leg: string) {
   const log: string[] = [];
-  const runner = testRunner({ home, repository: 'home', session: 's327', courses: courseReader(home, 'home')(),
+  const runner = testRunner({ home, repository: 'home', session: 'create-pr-forge', courses: courseReader(home, 'home')(),
     stateFile: join(dir, 'runner.json'), now: () => time, bounds: { legs: [leg], maxLegs: 1 }, log: (line) => log.push(line) });
   try {
     const outcome = await runner.runOnce();
@@ -162,7 +162,7 @@ async function review(verdict: 'approve' | 'changes') {
   expect(await station()).toEqual({ station: 'reviewed', next_leg: verdict === 'approve' ? 'merge' : 'fix' });
 }
 
-describe('S-BTN-327 shipped create-pr against a fake forge', () => {
+describe('S-BTN-12 shipped create-pr against a fake forge', () => {
   it('confirms the review comment URL through the forge evidence read', async () => {
     await review('approve');
     expect(forge!.calls).toContain(`/repos/${CODE_REPO}/issues/comments/${forge!.comments[0].id}`);
