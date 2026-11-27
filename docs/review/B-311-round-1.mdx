@@ -1,0 +1,28 @@
+---
+title: B-311 review round 1
+description: Findings and disposition for the first review of outside work reconciled through courses; ten were fixed on the branch and the machine-key case went to the owner.
+---
+
+Reviewed [Baton #348](https://github.com/immediately-run/baton/pull/348) at `6f77b925`
+([review](https://github.com/immediately-run/baton/pull/348#pullrequestreview-6011749366)). The
+verdict was changes: two independent passes ran `npm test`, typecheck and `test-course` for the
+checkout and the three fresh course fixtures, and found a reconcile continuation that cannot run,
+a partial merge that can close a ticket, and disagreement between the sync's and the reconcile
+stub's merge and verdict checks.
+
+The PR was merged on 2026-11-26. Ten findings were fixed in `4dda82f1`; the machine-key case
+stayed open as an owner decision, which round 2 repeated and FOLLOWUP-B-311 carries.
+
+| Finding | Disposition |
+|---|---|
+| [Blocking: a nonterminal reconciliation leaves the ticket held](https://github.com/immediately-run/baton/pull/348#discussion_r4657717262) | Fixed in `4dda82f1`. |
+| [Blocking: `review-pr` can no longer switch to `conclude`](https://github.com/immediately-run/baton/pull/348#discussion_r4657717265) | Fixed in `4dda82f1`; round 2 found a remaining closed-PR case. |
+| [Blocking: `at merged` can close a multi-repo ticket on a partial merge](https://github.com/immediately-run/baton/pull/348#discussion_r4657717270) | Fixed in `4dda82f1`; round 2 found the PR mapping feeding it still too loose. |
+| [Blocking: a superseded verdict on the current head still passes](https://github.com/immediately-run/baton/pull/348#discussion_r4657717273) | Fixed in `4dda82f1`. |
+| [Blocking: retry exhaustion does not restore the displaced leg](https://github.com/immediately-run/baton/pull/348#discussion_r4657717277) | Fixed in `4dda82f1`; round 2 found a pre-start failure path still holding the ticket. |
+| [Blocking: an older push can undo a newer hand approval](https://github.com/immediately-run/baton/pull/348#discussion_r4657717281) | Fixed in `4dda82f1`; round 2 found the guard now too broad. |
+| [Blocking: a partial merge suppresses valid hand facts on an open PR](https://github.com/immediately-run/baton/pull/348#discussion_r4657717284) | Fixed in `4dda82f1`. |
+| [Blocking: commit metadata does not identify who pushed or when](https://github.com/immediately-run/baton/pull/348#discussion_r4657717287) | Fixed in `4dda82f1`. |
+| [Blocking: S-BTN-309's machine-key accept-and-strip case is not implemented](https://github.com/immediately-run/baton/pull/348#discussion_r4657717291) | Answered: an owner decision (R-BTN-93's grant-scoped wording against the runner and sync authorization tests); the existing boundary is kept. Open; carried by FOLLOWUP-B-311 as a question for the owner. |
+| [Blocking: more than 100 attestations stall every board update](https://github.com/immediately-run/baton/pull/348#discussion_r4657717293) | Fixed in `4dda82f1`; round 2 found the same stall at the 1 MiB bound. |
+| [Blocking: the scenario misses several required branches](https://github.com/immediately-run/baton/pull/348#discussion_r4657717295) | Fixed in `4dda82f1`. |
