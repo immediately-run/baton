@@ -18,8 +18,7 @@ import { Runner } from '../../src/runner/runner';
 import type { BatonApi } from '../../src/runner/api';
 import { declareCourses, servedCourses } from '../../src/runner/main';
 import { capabilitiesOf } from '../../src/shared/vocabulary.mjs';
-import { call as hostCall } from '#host';
-import { course, cutover, placed, rows, setClock, syncCall, ticket, TOKENS } from '../helpers';
+import { course, cutover, placed, rows, setClock, syncCall, ticket } from '../helpers';
 import roadmapPr from '../fixtures/courses/roadmap-pr/course.json';
 import chore from '../fixtures/courses/chore/course.json';
 
@@ -89,7 +88,7 @@ const runners: Runner[] = [];
 
 /** A runner against this test's Baton, heartbeating as credential vm-a, serving `courses`. */
 function makeRunner(courses: { course: string; version: number }[], over: Record<string, unknown> = {}): Runner {
-  const api = runnerApi({ url: 'https://baton.test' });
+  const api = runnerApi();
   const runner = testRunner({
     api, home: home.dir,     // B-86: vm-a's grant expands `agent-venue` to the capabilities whose roles it carries, so the
     // declaration is what the grant allows (the legs here require nothing; the grant is realistic).

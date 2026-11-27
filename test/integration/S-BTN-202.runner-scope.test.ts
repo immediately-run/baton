@@ -270,7 +270,7 @@ let runner: Runner | null = null;
 
 function makeRunner(): Runner {
   const stateFile = join(tmpdir(), `baton-s202-runner-${process.pid}-${++n}.json`);
-  const api = runnerApi({ url: 'https://baton.test' });
+  const api = runnerApi();
   runner = testRunner({
     api, home: home.dir, session: `s202-${n}`, courses: [{ course: 'relay', version: 3 }],
     stateFile, beatEvery: 40, now: () => clock.now, });

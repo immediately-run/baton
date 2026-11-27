@@ -20,7 +20,7 @@ import { Runner } from '../../src/runner/runner';
 import { LocalQueue, queueMain, queuePath } from '../../src/runner/queue';
 import { checkAdvance, checkEnd } from '../../src/core/validate';
 import { call as hostCall } from '#host';
-import { course, cutover, placed, rows, setClock, syncCall, ticket, TOKENS } from '../helpers';
+import { course, cutover, placed, rows, setClock, syncCall, ticket } from '../helpers';
 import relay from '../fixtures/courses/relay/course.json';
 
 const T0 = Date.parse('2026-11-19T12:00:00Z');
@@ -92,7 +92,7 @@ const lines: string[] = [];
 const runners: Runner[] = [];
 
 function makeRunner(bounds?: { legs: string[] }): Runner {
-  const api = runnerApi({ url: 'https://baton.test', transport: (req) => down
+  const api = runnerApi({ transport: (req) => down
       ? Promise.resolve(new Response(JSON.stringify({ code: 'internal', message: 'internal error' }), { status: 500, headers: { 'Content-Type': 'application/json' } }))
       : hostCall(req) });
   const runner = testRunner({

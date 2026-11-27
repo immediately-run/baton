@@ -7,6 +7,7 @@ import { BatonCore } from '../core/baton';
 import { sendForgeDispatch } from '../core/dispatch';
 import { parseAdminKeys } from '../core/auth';
 import type { Cursor, EventArchive, Row, SqlValue, Store } from '../core/ports';
+import { acceptTenant, admitTenantAlarm, prepareTenantStore, TENANT_ID } from '../shell/tenant';
 
 /** `ctx.storage` as the core's Store: the same synchronous SQLite, unchanged. */
 export function durableStore(storage: DurableObjectStorage): Store {
@@ -68,9 +69,10 @@ export class Baton extends DurableObject<Env> {
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
+    const store = durableStore(ctx.storage);
     const archive = env.BATON_EVENT_ARCHIVE;
     this.core = new BatonCore({
-      store: durableStore(ctx.storage),
+      store,
       scheduler: { get: () => ctx.storage.getAlarm(), set: (at) => ctx.storage.setAlarm(at) },
       archiveEvents: archive && r2EventArchive(archive),
       config: env,
@@ -79,14 +81,21 @@ export class Baton extends DurableObject<Env> {
       accessIdentities: { read: () => env.ACCESS_IDENTITIES ?? '' },
     });
     // The object refuses to serve until every migration is applied (§3), and keeps one alarm.
-    ctx.blockConcurrencyWhile(() => this.core.start());
+    ctx.blockConcurrencyWhile(async () => {
+      prepareTenantStore(store, () => this.core.migrate());
+      await this.core.start();
+    });
   }
 
-  fetch(req: Request): Promise<Response> {
+  async fetch(req: Request): Promise<Response> {
+    const admission = acceptTenant(this.core.store, req, TENANT_ID);
+    if (admission instanceof Response) return admission;
+    // An alarm that fired before the first handshake did no work. Run it once bound.
+    if (admission === 'new' && await this.ctx.storage.getAlarm() === null) await this.ctx.storage.setAlarm(this.core.now());
     return this.core.fetch(req);
   }
 
   alarm(): Promise<void> {
-    return this.core.alarm();
+    return admitTenantAlarm(this.core.store) ? this.core.alarm() : Promise.resolve();
   }
 }

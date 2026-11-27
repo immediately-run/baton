@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import roadmapPr from '../fixtures/courses/roadmap-pr/course.json';
-import { course as courseEntry, cutover, Git, keyCall, placed, register, rows, setAdminKeys, setClock, syncCall, ticket, TOKENS } from '../helpers';
+import { ORIGIN, course as courseEntry, cutover, Git, keyCall, placed, register, rows, setAdminKeys, setClock, syncCall, ticket, TOKENS } from '../helpers';
 import { makeKey } from '../lib/sshKeys';
 import { Runner } from '../../src/runner/runner';
 import { BatonApi } from '../../src/runner/api';
@@ -101,7 +101,7 @@ describe('S-BTN-77 (the runner half): the finishing calls carry the run\'s link 
       const ends: Record<string, any>[] = [];
       const r = new Runner({
         api: new BatonApi({
-          url: 'https://baton.test',
+          url: ORIGIN,
           transport: async (req) => {
             const p = new URL(req.url).pathname;
             if (p.endsWith('/advance')) advances.push(await req.clone().json() as Record<string, any>);

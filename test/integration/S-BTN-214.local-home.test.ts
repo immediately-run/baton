@@ -14,6 +14,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { once } from 'node:events';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { request } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { call as hostCall } from '#host';
@@ -36,11 +37,21 @@ it('S-BTN-311: the local listener distinguishes an empty API-key POST from malfo
     if (!address || typeof address === 'string') throw new Error('expected a listening TCP socket');
     const url = `http://127.0.0.1:${address.port}/v1/admin/keys/${target.fingerprint}/revoke`;
     for (const [body, status, code] of [['', 428, 'confirm-required'], ['{', 400, 'invalid-params']] as const) {
-      const res = await fetch(url, {
-        method: 'POST', body,
-        headers: { Authorization: `Bearer ${admin.key}`, 'Content-Type': 'application/json', 'Baton-Client': `baton/${RECOMMENDED_CLIENT}` },
+      const reply = await new Promise<{ status: number | undefined; body: string }>((resolve, reject) => {
+        const req = request(url, {
+          method: 'POST',
+          headers: { Host: new URL(ORIGIN).host, Authorization: `Bearer ${admin.key}`, 'Content-Type': 'application/json',
+            'Content-Length': Buffer.byteLength(body), 'Baton-Client': `baton/${RECOMMENDED_CLIENT}` },
+        }, (res) => {
+          let text = '';
+          res.setEncoding('utf8').on('data', (chunk) => { text += chunk; });
+          res.on('error', reject);
+          res.on('end', () => resolve({ status: res.statusCode, body: text }));
+        });
+        req.on('error', reject);
+        req.end(body);
       });
-      expect({ status: res.status, json: await res.json() }).toMatchObject({ status, json: { code } });
+      expect({ status: reply.status, json: JSON.parse(reply.body) }).toMatchObject({ status, json: { code } });
     }
     expect(await rows('SELECT 1 FROM credentials WHERE id = ?', target.fingerprint)).toEqual([]);
   } finally {

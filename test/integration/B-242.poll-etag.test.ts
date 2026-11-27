@@ -184,9 +184,9 @@ describe.runIf(HOST === 'cloudflare')('B-242 an unchanged poll reads about one r
     // (the cloudflare host's own header says it may), and its reads land in one window alone.
     // One row more than the retired state read's five: a repository's read authorizes against
     // the registry's row of that repository before the tag is compared (S-BTN-252 measures the
-    // same row on the board).
+    // same row on the board). The shell's tenant binding adds one indexed settings read.
     expect(unchanged.read).toBeGreaterThan(0);
-    expect(unchanged.read).toBeLessThanOrEqual(6);
+    expect(unchanged.read).toBeLessThanOrEqual(7);
     expect(later.read).toBeLessThan(full.read / 4);
     expect(full.read).toBeGreaterThan(unchanged.read * 100);
 

@@ -9,6 +9,7 @@ export function withCore<T>(fn: (core: BatonCore) => T | Promise<T>): Promise<T>
 export function withStore<T>(fn: (store: Store) => T): Promise<T>;
 export function reset(): Promise<void>;
 export function tick(): Promise<void>;
+export function tickHost(): Promise<void>;
 export function writeTrace(testPath: string, test: string): Promise<void>;
 
 export type AssertHost<T extends typeof import('./contract')> = T;

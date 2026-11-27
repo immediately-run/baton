@@ -114,7 +114,7 @@ const stateFiles = new Map<Runner, string>();
 /** A runner against this test's Baton (the local host), heartbeating as credential vm-a. */
 function makeRunner(over: Record<string, unknown> = {}, transport: (req: Request) => Promise<Response> = hostCall): Runner {
   const stateFile = join(tmpdir(), `baton-runner-${process.pid}-${++n}.json`);
-  const api = runnerApi({ url: 'https://baton.test', transport });
+  const api = runnerApi({ transport });
   const runner = testRunner({
     api, home: home.dir, session: `runner-${n}`, courses: [{ course: 'relay', version: 3 }],
     stateFile, beatEvery: 40, now: () => clock.now,     ...over,
@@ -209,7 +209,7 @@ describe('S-BTN-41 the runner', () => {
     let finished = false;
     const running = runMain([
       '--harness', third.name, '--home', home.dir, '--hostname', 'vm-a', '--session', 'third-harness',
-      '--url', 'https://baton.test', '--repository', 'docs', '--executor', 'builtin', '--beat-every', '50',
+      '--url', ORIGIN, '--repository', 'docs', '--executor', 'builtin', '--beat-every', '50',
     ], { harnesses: [...HARNESS_ADAPTERS, third], transport: hostCall, fetch: () => {}, log: () => {} })
       .then((code) => ({ code }), (error: unknown) => ({ error }))
       .finally(() => { finished = true; });
@@ -919,7 +919,7 @@ describe('S-BTN-41 the runner', () => {
     const sibling = await seedSessionClaim('sibling', 'T-2');
     const lines: string[] = [];
     const apiFor = (secret: string) => {
-      const other = runnerApi({ url: 'https://baton.test' });
+      const other = runnerApi();
       other.setSecret(secret);
       return other;
     };

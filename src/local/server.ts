@@ -4,6 +4,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { BatonError, errorResponse, withSecurityHeaders } from '../core/http';
 import type { LocalHost } from './host';
+import { matchesAuthority } from '../shell/tenant';
 
 export const MAX_BODY = 8 * 1024 * 1024;
 
@@ -46,9 +47,13 @@ async function send(res: ServerResponse, out: Response) {
 
 /** Serve `host` at `origin` (the instance's own, R-BTN-56). */
 export function serve(host: LocalHost, origin: string): Server {
+  const configured = new URL(origin);
   return createServer((req, res) => {
-    toRequest(req, origin)
-      .then((r) => host.handle(r))
+    const target = req.url ?? '/';
+    const request = matchesAuthority(req.headers.host, configured)
+      ? toRequest(req, origin).then((r) => host.handle(r))
+      : Promise.resolve(host.refuseHost(target.startsWith('/') ? new URL(configured.origin + target).pathname : '/'));
+    request
       .catch((e) => {
         // What the front never saw: a target or body this server refused, or a client gone.
         if (e instanceof BatonError) return errorResponse(e.code, e.message, e.extra);

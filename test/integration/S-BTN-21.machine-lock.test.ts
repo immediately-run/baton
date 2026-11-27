@@ -106,7 +106,7 @@ const logs: string[][] = [];
 /** A runner against this test's Baton, on credential `cred`, configured for the machine lock. */
 function makeRunner(cred: keyof typeof TOKENS, over: Partial<RunnerOptions> = {}): Runner {
   const stateFile = join(tmpdir(), `baton-s21l-${process.pid}-${++n}.json`);
-  const api = runnerApi({ url: 'https://baton.test', credential: cred });
+  const api = runnerApi({ credential: cred });
   const log: string[] = [];
   logs.push(log);
   const runner = testRunner({

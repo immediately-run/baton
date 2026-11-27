@@ -86,7 +86,7 @@ async function post(ids: string[]): Promise<void> {
 }
 
 function makeRunner(over: Record<string, unknown> = {}, beats?: Record<string, any>[]): Runner {
-  const api = runnerApi({ url: 'https://baton.test', transport: async (req) => {
+  const api = runnerApi({ transport: async (req) => {
       if (down) throw new Error('the network is down');
       const beat = new URL(req.url).pathname === '/v1/runner/heartbeat';
       if (beats && beat) beats.push(await req.clone().json() as Record<string, any>);

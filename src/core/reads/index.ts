@@ -34,7 +34,7 @@ import { checkRepositoryId } from '../validate';
 import { authorizeAction, authorizeRepository, callerKey, type ReadCall, type ReadCtx, type ReadRoute } from './kit';
 import { REPOSITORY_READS } from './repository';
 import { SHELL_READS } from './repositories';
-import { TENANT_READS } from './tenant';
+import { INSTANCE_READS } from './tenant';
 import { COURSE_READS } from './courses';
 import { TICKET_READS } from './tickets';
 import { RUNNER_READS } from './runners';
@@ -46,7 +46,7 @@ import { ATTESTATION_READS } from './attestations';
 /** Every read served through here. A later domain appends its list — one line. */
 export const READS: ReadRoute[] = [
   ...SHELL_READS,
-  ...TENANT_READS,
+  ...INSTANCE_READS,
   ...REPOSITORY_READS,
   ...COURSE_READS,
   ...TICKET_READS,
