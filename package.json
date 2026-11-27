@@ -45,6 +45,7 @@
     "prebuild:cli": "npm run build:ui",
     "prepack": "npm run build:cli",
     "check:package": "node scripts/check-package.mjs",
+    "check:pins": "node scripts/check-pins.mjs",
     "dev": "wrangler dev",
     "predev": "npm run build:ui",
     "start:local": "node scripts/start-local.mjs",
