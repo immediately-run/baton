@@ -1,4 +1,4 @@
-// S-BTN-327: replay.qnt's core-side assertions and properties.qnt's safety set.
+// S-BTN-334: replay.qnt's core-side assertions and properties.qnt's safety set.
 // Each oracle reads committed rows, or compares them with the inputs at the boundary.
 import { expect } from 'vitest';
 import { course, withCore } from '../helpers';

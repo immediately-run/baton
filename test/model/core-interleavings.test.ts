@@ -1,4 +1,4 @@
-// B-345 / S-BTN-327 (R-BTN-31): the real local core, without Quint or a second state machine.
+// B-345 / S-BTN-334 (R-BTN-31): the real local core, without Quint or a second state machine.
 // Soak with BATON_PROPERTY_RUNS; reproduce a failure with BATON_PROPERTY_SEED and
 // BATON_PROPERTY_PATH (the seed and shrink path printed by fast-check).
 import { expect, it } from 'vitest';
@@ -209,7 +209,7 @@ function maxRuns(leg: Leg) {
   return 'max_runs' in def ? def.max_runs : Infinity;
 }
 
-it('S-BTN-327: the local core preserves safety through random interleavings', async () => {
+it('S-BTN-334: the local core preserves safety through random interleavings', async () => {
   const admin = await makeKey('ssh-ed25519', 'property-admin');
   await fc.assert(fc.asyncProperty(actions, async (list) => { await play(list, admin); }), {
     numRuns: Number(process.env.BATON_PROPERTY_RUNS ?? 32),
@@ -217,7 +217,7 @@ it('S-BTN-327: the local core preserves safety through random interleavings', as
   });
 }, process.env.BATON_PROPERTY_RUNS ? 0 : 60_000);
 
-it('S-BTN-327: exercises the rare branches and both claim ceilings', async () => {
+it('S-BTN-334: exercises the rare branches and both claim ceilings', async () => {
   const admin = await makeKey('ssh-ed25519', 'property-admin');
   const a = (kind: Action['kind'], ticket = 0, runner = 0, choice = 0): Action => ({ kind, ticket, runner, choice });
   const sync = [a('observe'), a('post')];
@@ -242,7 +242,7 @@ it('S-BTN-327: exercises the rare branches and both claim ceilings', async () =>
   ]));
 });
 
-it('S-BTN-327: the same seed reproduces the shrunk action list', () => {
+it('S-BTN-334: the same seed reproduces the shrunk action list', () => {
   // Deliberately fail the same arbitrary without depending on a defect in the core.
   const property = fc.property(actions, (list) => !list.some((a) => a.kind === 'claim' && a.ticket === 4));
   const first = fc.check(property, { seed: 327, numRuns: 32 });
