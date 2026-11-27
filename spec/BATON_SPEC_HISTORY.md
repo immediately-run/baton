@@ -18,6 +18,223 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
 
 ## Changelog
 
+- **2026-11-27 — The selector chooses the next leg (R-BTN-205; B-351).**
+  Rules changed: R-BTN-205 (added, `specified B-352 B-353 B-354 B-355 B-356`), R-BTN-70,
+  R-BTN-83, R-BTN-63, R-BTN-71, R-BTN-79, R-BTN-69, R-BTN-134, R-BTN-131, R-BTN-110, R-BTN-174,
+  R-BTN-74, R-BTN-51, R-BTN-5 / R-BTN-34, R-BTN-88, R-BTN-39, R-BTN-33, R-BTN-50, R-BTN-61,
+  R-BTN-76, R-BTN-75, R-BTN-120, R-BTN-99, R-BTN-116, R-BTN-89, R-BTN-163, R-BTN-167, R-BTN-9,
+  R-BTN-72, R-BTN-106, R-BTN-133, R-BTN-4, R-BTN-10, R-BTN-127, R-BTN-184, R-BTN-64, R-BTN-40;
+  §9.4's end body; §12.3's links, §13's
+  `selection_verdicts` and `selection_wants`, §14's selection routes; S-BTN-47, S-BTN-312,
+  S-BTN-174, S-BTN-188, G-BTN-42, G-BTN-43 and G-BTN-73; S-BTN-327 to S-BTN-333 added; four
+  Decisions lines.
+  What a ticket runs next is one function of its course's, the selector, which a runner runs
+  through its executor over Baton's record and whose stored verdict — `run`, `wait` or
+  `attention`, with the checks that decided it — takes the place of the holder's `next`, the
+  station function's readiness, posted next legs and `not_before`, and `baton.missing-next`.
+  Every rule that stated the old mechanism now states the new one; the status tokens name the
+  tickets that build it.
+  - **The owner's brief and constraints**, 2026-11-26, in a Claude Code session on bering: "I
+    feel this is a key mechanic which is too challenging to grasp right now", and: "the logic for
+    selecting the next leg of a ticket based on its current station should be entirely
+    customizable."; "The leg may depend on many different prerequisites being met, some of which
+    can be conveniently expressed as baton metrics readings. For example, we should not start a
+    leg requiring a sandbox with more memory than what the host can allocate. we should not start
+    a leg that requires access to the GitHub API if we have been rate limited temporarily.";
+    "Like all custom logic, it should be straightforward how to sandbox this when Baton is being
+    used in a more secure setup like the one Fieldhouse implements."; "it should be possible for
+    a user to see why a particular leg was chosen in the dashboard or using the CLI."; "where no
+    lag can commence, it should be clear when the next action of the ticket may be determined, or
+    that the ticket needs human attention because the next leg cannot be calculated."; "the
+    station function should not assume that Git is the communication channel between legs. This
+    may often be the case, but this is definitely not guaranteed."
+  - **The owner's rulings on the design**, 2026-11-26: a default selector, "Yes"; the `because`
+    format, "JSON, can contain url to reason file or simple text in "reason " field"; the
+    selector's budget, "not sure" — R-BTN-205 states 10 seconds, 256 MB, a 60-second want lease
+    and 15 minutes untaken as its defaults, decided here (below), and B-357 measures them.
+  - **The owner's rulings of 2026-11-27.** On where the design lives: "Since these proposals are
+    necessary to get baton into a generally useable state, I would like you to include the
+    changes in the specs and draft the necessary tickets for implementing them. Except of course
+    spec provisions explicitly states as proposals whose implementation is deferred - these should
+    be live outside from the spec along with other proposals." Nothing of this design is deferred,
+    so the proposal page `spec/proposals/leg-selection.md` is removed and its scenarios moved
+    into the tickets. On a verdict's reasons beside R-BTN-33: "Bounded text, an exception" —
+    R-BTN-33 admits a verdict's `because` reasons and an `attention`'s reason, at most 128
+    characters each, shown only as text. The owner had asked, the same day, "Ready to draft spec
+    changes?"; the first draft (PR #462) wrote the design beside the old rules as "not built"
+    notes, which review round one found against the spec-writing rules, and these two rulings
+    answered the questions that raised.
+  - **Readings.** R-BTN-76's advice-only reading binds core's gates: no gate reads a reading. The
+    owner's second constraint says a leg may wait on prerequisites that readings express; that it
+    does so only through its selector's `wait` is this design's reading of the constraint, not
+    the owner's words. The B-146 deferral of a requirement core would evaluate stands.
+  - **Decided here, not by the owner** — the conservative reading of the constraints, for the
+    owner's review in the PR: the default selector's rules (claimable legs only, an arrival
+    entry's leg, `start_leg`, a result's `not_before`, then course order); chaining in a claim only
+    into the verdict's `run`; the response to a finishing arrival carrying the `ctx`; binding by
+    the answered cause and the `ctx` digest, first valid verdict winning; a want leased to one
+    runner for 60 seconds, under `protected` only to the trusted runner class; `ctx` limited to
+    the ticket's own repository and to fleet totals; `host` (renamed from `needs`, which R-BTN-76
+    already uses) with "declared at least asked"; `wait.until` capped at 400 days and a long
+    `wait` raising `baton.stalled`; replay from the record position while the record is retained,
+    through the local executor; re-verification at a claim by re-running the selector.
+  - **Review round one** (2026-11-27): two fresh reviewers, one over PR #462 and one over PR #455
+    after its merge, each given the diff. Every finding verified against the text and the code.
+    Fixed:
+    - in-claim chaining and the `ctx` timing, which left the finishing runner without its own
+      arrival;
+    - unbound verdicts: digest checks, first-wins, a want lease, the `until` cap and the
+      stalled notice; the protected-path and trusted-class requirement in the rule and R-BTN-184;
+    - every rule still stating the old mechanism — R-BTN-39's fact arrivals and reconcile
+      conclusions, `reconciles.to` and `arrives.next`, R-BTN-72's result shapes and chaining,
+      R-BTN-106's checks and verbs, the claim response's and the end body's `next`, the heartbeat's
+      `git` view, R-BTN-79, rule 1, R-BTN-89, R-BTN-167, R-BTN-99, R-BTN-61, R-BTN-88, the board
+      post's `stations` and the §15 rows;
+    - the suspension rule, which queued a finished leg off the graph;
+    - the sync, which the first draft told to post less than R-BTN-203, R-BTN-76 and `course_data`
+      need;
+    - `baton.selection-attention` defined twice, and conditions that never closed;
+    - free text against R-BTN-33 and R-BTN-163, and `because` urls outside §12.3's links (the
+      owner's ruling above);
+    - the course file's missing `selector` and `host` fields, numeric matching, a default selector
+      that could pick fact, reconcile or person legs, cross-repository exposure through `ctx`;
+    - the MCP session claim wording, and statuses that did not match the text;
+    - patch notes and plan text in rule bodies and Decisions; the vocabulary;
+    - in B-351: its account of today's sources (the owner's route and adopt are not built; the
+      exhausted retry seen today is the sync's `waiting_on: exhausted`; `inferred` is accepted but
+      never produced; `not_before` was missing), its anchors (R-BTN-133 is §8.4), its Trust,
+      Invariants and exit criteria, and the rulings it presented as the owner's.
+
+    Not taken as found: that a `wait` reverses the advice-only ruling on readings — the owner's
+    second constraint asks for exactly that, through the selector, and R-BTN-76 now says so.
+  - **Review round two** (2026-11-27): a fresh reviewer over PR #462 at `57bc7c00`. Every finding
+    verified against the text. Fixed:
+    - chaining: R-BTN-63's `advance` now either finishes (`{reached, outputs}`, answered with the
+      arrival's `ctx`) or starts (`{leg, verdict}`, the verdict's `run` with its `answers` and
+      digest), so the holder selects before it starts the next leg; §9.1's bodies, the end
+      body, R-BTN-71 and R-BTN-72's *Selecting* follow, and in-claim arrivals never fall to a want;
+    - the claim-time re-check: the verdict posted with a `stale-board` release answers the
+      offered position and is acted on;
+    - waiting under a claim has one home, R-BTN-72 (with R-BTN-40's 30-minute bound moved into it),
+      which R-BTN-40 and R-BTN-89 cite; `reselect` hands out a
+      fresh `ctx` and admits one more verdict for the same arrival;
+    - R-BTN-64's inference from one runner leg leaving a former end, now a want; open wants are
+      withdrawn and remade on a course change;
+    - `host` checked at the claim and the starting `advance` too, a missing declaration failing
+      it, and the `host` case of `baton.selection-attention` closing when a runner that meets it
+      registers or a later verdict replaces it;
+    - no wants while a claim is active: causes are deferred to the holder, or become a want when
+      the claim ends;
+    - reconcile conclusions are holder arrivals (R-BTN-39);
+    - `lease-lost` among R-BTN-205's refusals, the lessee wording in B-351's Trust, R-BTN-83's
+      `next_source: baton` list completed, one selector tree (the verified tree at the claim's or
+      want's commit) in R-BTN-205 and R-BTN-5 / R-BTN-34, §13's `ticket_next_legs` rewritten to
+      the queued leg and core-held waits, S-BTN-312's leftover reopening sentence, B-352 on
+      R-BTN-63, `selector`, `host` and `short_waits` validation in R-BTN-69 with B-353 owning
+      `src/core/course.ts`;
+    - B-120, which no session holds: its contradicted clauses rewritten in place rather than
+      struck, and a migrated queued leg recorded `next_source: baton`, not `selector`.
+
+    Main's #335 entry is kept below this one, and the Decisions line on readings now says both:
+    advice to core's gates, a selector may wait on one, a requirement core evaluates deferred.
+    Nothing was rejected.
+
+    Decided here, not by the owner, for the owner's review in the PR:
+    - **Waiting under a claim by `short_waits` alone**, not by a time window: the course declares
+      which waits are short, and a window would let a selector hold a claim with a run of
+      near-term `until`s.
+    - **Holder verdicts are bound by the gates their claim passed**; the trusted-class
+      requirement under `protected` applies to selection wants' lessees only, since a holder has
+      already passed every gate to hold the claim.
+    - **A migrated queued leg is `next_source: baton`**, the migration being Baton's own rule.
+    - **A finishing `advance` and a starting one are separate requests**, the cost of one round
+      trip per leg for a holder that sees its own arrival's `ctx` before choosing.
+  - **Review round three** (2026-11-27): a fresh reviewer over PR #462 at `221e47d6`, which found
+    the merge still blocked. The owner's rulings the same day, in a Claude Code session on bering:
+    asked "After fixing them, what should happen?", "Fix, then a round four (Recommended)" — a
+    round four beyond the three-round cap, at the owner's request, as #449 had; and asked "A
+    claimant releasing at the claim-time re-check can post any verdict … How should that verdict
+    be treated?", "It makes a want (Recommended)", the option reading "The release verdict
+    replaces nothing; it makes a leased selection want with a fresh ctx, offered under `protected`
+    to the trusted class only. Core also times waits under a claim and ends a claim at 30
+    minutes." Every finding verified against the text. Fixed:
+    - an `end` records no arrival that needs a selection: a holder finishing at an outcome sends
+      the finishing `advance` first, then starts, suspends or releases with the verdict, or ends
+      `done` at an end station (R-BTN-83, R-BTN-71, R-BTN-89, §9.4, §14); the end body's
+      `verdict` is the one way to post a verdict before letting go, and `…/select` is removed;
+    - the want lifecycle: one open want per ticket, withdrawn and remade on a new cause, withdrawn
+      by a claim, a lapsed lease re-offering it with its `ctx` rebuilt; `selection_wants` state,
+      `course_version`, `snapshot_sha` and the lease's `request_id`; when a runner asks for one
+      (R-BTN-72, the heartbeat's `selection_wants`);
+    - what a verdict answers, for all three causes, with `selection_handouts` keeping each
+      cause's current digest, record position and admitted count;
+    - the owner's release ruling, in R-BTN-205, R-BTN-5 / R-BTN-34, §9.4 and B-352/B-353, and
+      core's own 30-minute bound on a wait under a claim (R-BTN-72), which no longer relies on
+      the runner;
+    - one refusal code, `not-eligible` with `rule_code` `not-selected`, in R-BTN-63 and R-BTN-72,
+      and the verdict codes in §14's errors; an arrival clears the queued leg;
+    - `waiting_on`'s labels owned by R-BTN-120 alone, §13 citing it;
+    - the default selector at `start`: a `not_before` still ahead wins, then `start_leg`;
+    - the holder's verdict bound by its claim's gates and core's 30-minute bound, stated in
+      R-BTN-205;
+    - R-BTN-33's exceptions, both stated text (an end's `detail` and a verdict's reasons), with
+      the 128-character limit stated there once;
+    - numbered rows S-BTN-327 to S-BTN-333, pending under B-352 and B-353 in
+      `spec/scenarios-pending.json`, as R-BTN-30 admits for an open ticket that builds them;
+    - this entry's *Readings* bullet, which put the design's reading in the owner's mouth.
+
+    Nothing was rejected.
+
+    Decided here, not by the owner, for the owner's review:
+    - **Causes are deferred to the holder during a claim**, so a holder and a want never race.
+    - **`reselect`**, a request that hands out a fresh `ctx` and admits one more verdict for the
+      same arrival, so a holder waiting under its claim can select again.
+    - **One open want per ticket**, so two verdicts from two runners never race for one ticket.
+    - **Core's bound counts from the last arrival**, not from a first `short_waits` wait core
+      cannot see: a claim that has neither started a leg nor ended 30 minutes after its last
+      arrival is ended `released:short-wait`.
+    - **While a re-check release's want is open, the queued leg is not offered**, so no runner
+      reclaims into the same refusal; the release verdict itself is the owner's ruling above.
+    - **`selection_handouts`**, one table for every `ctx` handed out, rather than columns on each
+      cause's own table.
+  - **Review round four** (2026-11-27, at the owner's request beyond the three-round cap): a fresh
+    reviewer over PR #462 at `aec7fefa`, finding no security hole. Every finding verified against
+    the text. Fixed:
+    - `released:short-wait` in §9.4's one list of end reasons, not a failed attempt;
+    - `reselect` replaces, not banks: each handout admits exactly one verdict, a `reselect` or a
+      re-offered lease voids the cause's handout (§13's `state` `voided` and `voided_by`), and a
+      verdict over a voided one is `stale-selection` (R-BTN-205, R-BTN-63, §14, S-BTN-329);
+    - a fact arrival's next leg has one source, the course file's `arrives.next`: the sync's
+      `std:arrival@1` names none (R-BTN-39, R-BTN-203; B-356 removes the attestation's `next`);
+    - R-BTN-83's `next_source: baton` list without a person leg's expiry, which R-BTN-116 applies
+      as an arrival followed by a want;
+    - the heartbeat's `host` dimensions in §8.1's body table and §14's heartbeat row;
+    - the open re-check release want is a gate: rule 1's `selection-pending`, `ready_tickets`'
+      exclusions, and no claim withdrawing that want;
+    - `not-queued` renamed `not-selected` under R-BTN-63 among the gates rule 1 lists;
+    - §9.4's rule for an `end: done` covers a ticket the latest snapshot shows closed as done;
+    - a suspension at `from` whose leg's `max_runs` is used makes a selection want instead of
+      re-queueing it (R-BTN-71, R-BTN-83);
+    - R-BTN-205's refusal order, `lease-lost` first, matching S-BTN-328;
+    - R-BTN-72's status gains B-352; R-BTN-5 / R-BTN-34's second token names B-352 and B-353
+      for the claim response's `ctx` and `verdict` and the runner's re-check;
+    - the sentence on a suspension's or done end's `detail`, dropped in round one, restored in
+      §9.4;
+    - B-355's copy of the owner's "no lag can commence" made verbatim;
+    - R-BTN-83's *Course changes* folded into R-BTN-64, its one home, which R-BTN-83 cites.
+
+    Nothing was rejected.
+
+    Decided here, not by the owner:
+    - **The 128-character bound** on a verdict's reasons: the owner ruled "Bounded text, an
+      exception" and named no length.
+    - **The 10-second, 256 MB, 60-second and 15-minute defaults**: the owner said "not sure"; B-357
+      measures them.
+    - **A suspension at `from` with `max_runs` used makes a want**, rather than raising a condition
+      of its own, so the course's selector decides as it does elsewhere.
+  - **The vocabulary**, the owner's review, 2026-11-27: "vocab is mostly OK execpt home, which has
+    been renamed to arena". The **Arena** entry names the arena a CLI command acts on the arena in
+    force and keeps `--home` and `BATON_HOME` only as CLI names awaiting B-358's rename.
 - **2026-11-26 — Gating on a reading deferred (R-BTN-76, R-BTN-181).**
   Rules changed: none; the Decisions line on readings (§91) now says they are served as advice
   and that gating on one is deferred, where it said gate or advice was the requirement's choice.

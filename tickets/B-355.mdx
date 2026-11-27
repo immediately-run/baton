@@ -1,0 +1,59 @@
+---
+id: B-355
+status: available
+topics: [courses, scheduling]
+owns: {}
+prs: []
+title: "B-355 — Seeing why a leg was chosen: baton ticket why, --replay, and the dashboard"
+depends_on: [B-352, B-353]
+parent: B-351
+tags: [roadmap-item]
+project: baton
+repos: [baton]
+description: "baton ticket why, --replay over Baton's retained record, and the dashboard and board showing each ticket's selection verdict and why."
+---
+
+**Brief:** the owner, 2026-11-27 (in a Claude Code session on bering): "Since these proposals are necessary to get baton into a generally useable state, I would like you to include the changes in the specs and draft the necessary tickets for implementing them." The selector is specified as [R-BTN-205](../spec/BATON_SPEC/05-courses.md#sec-5-3); the owner's constraints and rulings are quoted in `spec/BATON_SPEC_HISTORY.md` (2026-11-27). Part of [B-351](B-351.mdx).
+
+**Spec:** [R-BTN-205](../spec/BATON_SPEC/05-courses.md#sec-5-3) (*Seeing why*), [R-BTN-127](../spec/BATON_SPEC/11-people.md#sec-11-3) (`ticket why`), [R-BTN-33](../spec/BATON_SPEC/01-what-baton-is.md#sec-1) (the verdict-reason exception), [R-BTN-88](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-8) (retention), §10.4 (text, never markup), [§12.3](../spec/BATON_SPEC/12-security.md#sec-12-3) (`because` urls), [§14](../spec/BATON_SPEC/14-api.md#sec-14) (the ticket read's `verdict`).
+
+**Depends on:** B-352, B-353 (replay runs the selector through the local executor).
+
+### Why
+
+The owner, 2026-11-26: "it should be possible for a user to see why a particular leg was chosen in the dashboard or using the CLI", and "where no lag can commence, it should be clear when the next action of the ticket may be determined, or that the ticket needs human attention because the next leg cannot be calculated."
+
+### What to build
+
+1. **`baton ticket why <ticket>`**: the latest verdict, its `because` lines, its `until` and triggers or its `host`, the course version and the posting key.
+2. **`--replay`**: rebuild the `ctx` from Baton's record at the verdict's record position, while that record is retained (R-BTN-88), run the selector through the local CLI's executor, and say whether the verdict matches; a record no longer retained says so.
+3. **The dashboard:** the ticket view shows the verdict and why; the board shows each ticket's verdict kind — queued, waiting (until when, on what), awaiting selection (with its age), needs attention. Text only (`textContent`); `because` urls as links after §12.3's link rule.
+4. **Needs you** lists the two selection conditions, each linking its verdict.
+
+### Trust
+
+- **What is shown:** course-written text (`reason`) and links (`url`), both untrusted: text through `textContent`, links only after the link rule.
+- **Replay** runs repository code: only through the local executor, never in the CLI's process.
+
+### Invariants
+
+- **Text, never markup** (§10.4, CLAUDE.md): no `innerHTML`.
+- **Replay never writes**: it compares and prints; it posts no verdict.
+
+### Tests
+
+- `ticket why` prints a `run`, a `wait` and an `attention` verdict.
+- `--replay` reproduces a verdict whose record is retained; a verdict posted with a changed outcome does not reproduce, and a gate still refuses the merge it would have queued.
+- Dashboard: a `because` reason containing markup renders as text.
+
+New S-BTN scenarios for these, numbered with `node cli/baton.mjs tickets next scenario`.
+
+### Exit criteria
+
+- [ ] `baton ticket why` and the dashboard show every live ticket's verdict and why.
+- [ ] `--replay` reproduces any verdict whose record is still retained.
+- [ ] The scenarios pass; `npm test`, `npm run typecheck` and `npm run check:spec` green; merged under the review gate.
+
+## Status
+
+_filed 2026-11-27._

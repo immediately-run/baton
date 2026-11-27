@@ -60,7 +60,7 @@ async function setup(executor: Executor, log: (line: string) => void, source = f
 const concurrency = async () => (await rows<{ concurrency: number }>('SELECT concurrency FROM runners'))[0]?.concurrency;
 const claims = () => rows<{ end_reason: string | null; failed_attempt: number; station: string }>('SELECT end_reason, failed_attempt, station FROM claims ORDER BY id');
 
-describe('S-BTN-327 executor placement', () => {
+describe('S-BTN-335 executor placement', () => {
   it.each<SessionKind>(['leg', 'source'])('pauses after one failed %s placement and recovers through a backed-off probe', async (kind) => {
     const builtin = builtinExecutor();
     let down = true;
