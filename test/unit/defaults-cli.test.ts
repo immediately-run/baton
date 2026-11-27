@@ -364,6 +364,7 @@ describe('syncMain’s sync key (B-88, R-BTN-93)', () => {
       vi.unstubAllEnvs();
     }
     expect(calls(seen)).toEqual(['POST /v1/sync/observation', 'GET /v1/sync/head', 'POST /v1/sync/board']);
+    expect(await seen[2].json()).toMatchObject({ sync_features: ['evidence'], source: { cli: expect.stringMatching(/^\d+\.\d+\.\d+/) } });
     for (const req of seen) {
       // Each call is signed in the baton-request namespace, and none carries a bearer.
       expect(req.headers.get('Signature-Input')).toMatch(/^sig1=\("@method" "@authority" "@path" "@query" "content-digest"\);created=\d+;nonce="[^"]+";keyid="SHA256:[A-Za-z0-9+/]{43}";tag="baton-request"$/);
