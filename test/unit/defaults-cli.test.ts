@@ -1493,7 +1493,7 @@ exit 0
       // a kill the gate did not send, or npm that cannot start, is no verdict at all.
       execFileSync('ln', ['-s', execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim(), join(bin, 'git')]);
       process.env.PATH = bin;
-      await expect(stub.run(ctx('fixed'))).rejects.toThrow('npm run test could not run (ENOENT) — no verdict, no marker');
+      await expect(stub.run(ctx('fixed'))).rejects.toMatchObject({ type: 'error.spec', message: expect.stringMatching(/npm run test .*ENOENT.*no verdict, no marker/) });
       writeFileSync(join(bin, 'npm'), '#!/bin/sh\necho "two failed"\nexit 2\n');
       chmodSync(join(bin, 'npm'), 0o755);
       const exited = await stub.run(ctx('fixed'));

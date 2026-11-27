@@ -591,7 +591,7 @@ describe('S-BTN-222 (the runner half): the channel checks a raise (R-BTN-160, R-
     }
   }, 240_000);
 
-  it('S-BTN-231: a conflicting open PR abandons merge once and waits for the owner', async () => {
+  it('a conflicting open PR abandons merge once and waits for the owner', async () => {
     const reason = 'PR #364 conflicts with main; merge refused';
     const { home, sha } = writeHome({ merge: `
       import { run as merge } from ${JSON.stringify(join(ROOT, '.baton/courses/standard-create-pr/legs/merge.mjs'))};
@@ -630,7 +630,7 @@ esac
     }
   }, 240_000);
 
-  it('S-BTN-231: a typed close refusal is reported without retrying close or advancing', async () => {
+  it('a typed close refusal is reported without retrying close or advancing', async () => {
     const { home, sha } = writeHome({ implement: `
       import { LegError } from '@immediately-run/baton/leg';
       export function run() { return { reached: 'pr-open', suspend: true }; }
