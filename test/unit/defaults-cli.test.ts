@@ -364,6 +364,7 @@ describe('syncMain’s sync key (B-88, R-BTN-93)', () => {
       vi.unstubAllEnvs();
     }
     expect(calls(seen)).toEqual(['POST /v1/sync/observation', 'GET /v1/sync/head', 'POST /v1/sync/board']);
+    expect(await seen[2].json()).toMatchObject({ sync_features: ['evidence'], source: { cli: expect.stringMatching(/^\d+\.\d+\.\d+/) } });
     for (const req of seen) {
       // Each call is signed in the baton-request namespace, and none carries a bearer.
       expect(req.headers.get('Signature-Input')).toMatch(/^sig1=\("@method" "@authority" "@path" "@query" "content-digest"\);created=\d+;nonce="[^"]+";keyid="SHA256:[A-Za-z0-9+/]{43}";tag="baton-request"$/);
@@ -1372,6 +1373,9 @@ exit 0
       writeFileSync(join(fakeBin, 'open'), JSON.stringify([{ number: 9, headRefName: 'claude/A-1-kit', headRefOid: '0123456789abcdef0123456789abcdef01234567', isCrossRepository: false }]));
       writeFileSync(join(fakeBin, 'merged'), '[]');
       await expect(stub.run(ctx)).rejects.toThrow(/the merge agent exited 0, but A-1’s PR #9 \(claude\/A-1-kit\) is still open — not merged[^\n]*; the agent's last output:\n {2}CI is red twice on S-BTN-41, not merging PR 9$/);
+      await expect(stub.run(ctx)).rejects.toMatchObject({ type: 'error.blocked' });
+      rmSync(join(fakeBin, 'open'));
+      await expect(stub.run(ctx)).rejects.toMatchObject({ name: 'Error', message: expect.stringContaining('could not be read') });
       // Merged, none open: the position.
       writeFileSync(join(fakeBin, 'open'), '[]');
       writeFileSync(join(fakeBin, 'merged'), JSON.stringify([{ number: 9, headRefName: 'claude/A-1-kit', headRefOid: '0123456789abcdef0123456789abcdef01234567', isCrossRepository: false }]));
@@ -1490,7 +1494,7 @@ exit 0
       // a kill the gate did not send, or npm that cannot start, is no verdict at all.
       execFileSync('ln', ['-s', execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim(), join(bin, 'git')]);
       process.env.PATH = bin;
-      await expect(stub.run(ctx('fixed'))).rejects.toThrow('npm run test could not run (ENOENT) — no verdict, no marker');
+      await expect(stub.run(ctx('fixed'))).rejects.toMatchObject({ type: 'error.spec', message: expect.stringMatching(/npm run test .*ENOENT.*no verdict, no marker/) });
       writeFileSync(join(bin, 'npm'), '#!/bin/sh\necho "two failed"\nexit 2\n');
       chmodSync(join(bin, 'npm'), 0o755);
       const exited = await stub.run(ctx('fixed'));

@@ -179,5 +179,5 @@ try {
     : await fn.apply(owner, args);
   finish({ ok: true, result: result === undefined ? null : result }, 0);
 } catch (e) {
-  finish({ ok: false, error: e instanceof Error ? e.message : String(e), errorType: call === 'run' ? legErrorType(e) : undefined, aborted: stop.signal.reason === undefined ? null : String(stop.signal.reason) }, stop.signal.reason === undefined ? 4 : 5);
+  finish({ ok: false, error: e instanceof Error ? e.message : String(e), errorType: call === 'run' || call === 'close' ? legErrorType(e) : undefined, aborted: stop.signal.reason === undefined ? null : String(stop.signal.reason) }, stop.signal.reason === undefined ? 4 : 5);
 }

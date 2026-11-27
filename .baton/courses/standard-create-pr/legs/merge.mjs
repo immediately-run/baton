@@ -5,6 +5,17 @@ import { tmpdir as tmpdir3 } from "node:os";
 import { basename as basename3, join as join8 } from "node:path";
 import { pathToFileURL } from "node:url";
 
+// src/runner/legClient.mjs
+var typed = /* @__PURE__ */ Symbol.for("@immediately-run/baton.LegError");
+var LegError = class extends Error {
+  constructor(type, message) {
+    super(message);
+    this.name = "LegError";
+    this.type = type;
+    this[typed] = true;
+  }
+};
+
 // src/runner/log.ts
 import { readdirSync as readdirSync2, statSync } from "node:fs";
 import { join as join2 } from "node:path";
@@ -614,6 +625,13 @@ import { execFileSync as execFileSync3 } from "node:child_process";
 import { lstatSync as lstatSync2, mkdirSync as mkdirSync2, mkdtempSync as mkdtempSync2, readFileSync as readFileSync4, rmSync as rmSync3 } from "node:fs";
 import { tmpdir as tmpdir2 } from "node:os";
 import { basename as basename2, dirname as dirname2, join as join7 } from "node:path";
+
+// src/defaults/push-failure.ts
+function pushFailure(error) {
+  const stderr = error?.stderr ?? "";
+  const refusal = stderr.split("\n").find((line) => /\[(?:remote )?rejected\]|Permission denied|Authentication failed|returned error: 40[13]\b/i.test(line));
+  return refusal ? new LegError("error.blocked", `git push refused: ${refusal.trim()}`) : error;
+}
 
 // src/shared/links.mjs
 function cleanUrl(text, allowQuery) {
@@ -1344,15 +1362,15 @@ function reconcileAnswer(out, ask, run2) {
   };
   const readPr = (ref, owned) => {
     const m2 = /^https:\/\/([\w.-]+)\/([\w.-]+\/[\w.-]+)\/pull\/(\d+)(?:#(issuecomment|pullrequestreview)-(\d+))?$/.exec(ref);
-    if (!m2 || !repos.includes(m2[2].toLowerCase())) throw new Error("name a PR in the ticket repositories");
+    if (!m2 || !repos.includes(m2[2].toLowerCase())) throw new LegError("error.contract-output", "name a PR in the ticket repositories");
     const remote = run2("git", ["remote", "get-url", "origin"], ask.checkout);
     const host = /^(?:https?:\/\/|ssh:\/\/(?:[^@/]+@)?|[^@/]+@)([\w.-]+)[/:]/.exec(remote)?.[1];
-    if (m2[1] !== host) throw new Error("PR is not on the checkout forge");
+    if (m2[1] !== host) throw new LegError("error.contract-output", "PR is not on the checkout forge");
     const repo = `${m2[1]}/${m2[2]}`;
     const api2 = (path) => JSON.parse(apiRun(m2[1], m2[2], path));
     const pr2 = JSON.parse(run2("gh", ["pr", "view", m2[3], "--repo", repo, "--json", "state,headRefName,headRefOid,baseRefName,mergeCommit,updatedAt"], ask.checkout));
-    if (pr2.baseRefName !== api2("").default_branch) throw new Error("PR does not target the default branch");
-    if (owned && !owns2(Number(m2[3]), pr2.headRefName, m2[2])) throw new Error("PR is not mapped to this ticket");
+    if (pr2.baseRefName !== api2("").default_branch) throw new LegError("error.contract-output", "PR does not target the default branch");
+    if (owned && !owns2(Number(m2[3]), pr2.headRefName, m2[2])) throw new LegError("error.contract-output", "PR is not mapped to this ticket");
     return { pr: pr2, m: m2, api: api2 };
   };
   const delivered = /^delivered\s+(\S+)\s+(\S.*)$/.exec(line);
@@ -1360,7 +1378,7 @@ function reconcileAnswer(out, ask, run2) {
     const shas = delivered[1].split(",").map((ref) => {
       if (/^[a-f0-9]{7,40}$/i.test(ref)) return ref;
       const { pr: pr2, m: m2 } = readPr(ref, false);
-      if (m2[4] || pr2.state !== "MERGED" || !pr2.mergeCommit?.oid) throw new Error("delivered requires a merged PR or commit");
+      if (m2[4] || pr2.state !== "MERGED" || !pr2.mergeCommit?.oid) throw new LegError("error.contract-output", "delivered requires a merged PR or commit");
       if (m2[2].toLowerCase() !== home?.toLowerCase()) return null;
       return String(pr2.mergeCommit.oid);
     }).filter((sha2) => sha2 != null);
@@ -1368,11 +1386,11 @@ function reconcileAnswer(out, ask, run2) {
     return { end: "done", reached: "delivered", next: "confirm", detail: deliveredDetail(checked.length ? checked : delivered[1].split(","), delivered[2]) };
   }
   const at = /^at\s+(\S+)\s+(\S+)/.exec(line);
-  if (!at || !Object.hasOwn(ask.to, at[1]) || at[1] === "delivered") throw new Error("expected unchanged <reason>, at <station> <ref>, or delivered <refs> <evidence>");
+  if (!at || !Object.hasOwn(ask.to, at[1]) || at[1] === "delivered") throw new LegError("error.contract-output", "expected unchanged <reason>, at <station> <ref>, or delivered <refs> <evidence>");
   const station = at[1];
   const { pr, m, api } = readPr(at[2], true);
-  if (station === "merged" ? pr.state !== "MERGED" : station !== "concluded" && pr.state !== "OPEN") throw new Error(`PR does not support ${station}`);
-  if (station === "concluded" && pr.state === "OPEN") throw new Error("PR is still open");
+  if (station === "merged" ? pr.state !== "MERGED" : station !== "concluded" && pr.state !== "OPEN") throw new LegError("error.contract-output", `PR does not support ${station}`);
+  if (station === "concluded" && pr.state === "OPEN") throw new LegError("error.contract-output", "PR is still open");
   if (station === "merged") {
     const mapped = [...new Set(repos.filter((r) => r != null))].flatMap((repository) => {
       const defaultBranch2 = JSON.parse(apiRun(m[1], repository, "")).default_branch;
@@ -1388,11 +1406,11 @@ function reconcileAnswer(out, ask, run2) {
     });
     const { complete, merged } = mappedMerges(mapped, ticket.repos, home);
     if (m[4] || !complete || !merged.some((p) => p.repository === m[2].toLowerCase() && p.number === Number(m[3]))) {
-      throw new Error("not all mapped repositories have merged PRs, or a mapped PR is still open");
+      throw new LegError("error.contract-output", "not all mapped repositories have merged PRs, or a mapped PR is still open");
     }
   }
   if (["reviewed", "approved", "changes-requested"].includes(station)) {
-    if (m[4] !== "pullrequestreview") throw new Error("name a review on the current PR head");
+    if (m[4] !== "pullrequestreview") throw new LegError("error.contract-output", "name a review on the current PR head");
     const mapped = (r, comment = false) => ({
       author: r.user?.login ?? "",
       body: r.body,
@@ -1411,11 +1429,11 @@ function reconcileAnswer(out, ask, run2) {
     };
     const native = list(m[1], m[2], `pulls/${m[3]}/reviews?per_page=100`).map((r) => mapped(r)).filter(counts);
     const named = native.find((r) => r.url === at[2] && r.headSha === pr.headRefOid);
-    if (!named) throw new Error("review is not a qualifying verdict on the current PR head");
+    if (!named) throw new LegError("error.contract-output", "review is not a qualifying verdict on the current PR head");
     const comments = list(m[1], m[2], `issues/${m[3]}/comments?per_page=100`).map((r) => mapped(r, true)).filter((r) => r.submittedAt >= named.submittedAt).filter(counts);
     const latest = latestHeadVerdict({ headSha: pr.headRefOid, reviews: [...native, ...comments] }, named.submittedAt - 1);
     if (latest?.url !== at[2] || verdictOf(latest) !== (station === "changes-requested" ? "changes" : "approve")) {
-      throw new Error("review is not the latest qualifying verdict on the current PR head");
+      throw new LegError("error.contract-output", "review is not the latest qualifying verdict on the current PR head");
     }
   }
   return { end: "done", reached: station, next: ask.to[station] };
@@ -1500,17 +1518,17 @@ async function verifyPrOpen(ask, run2) {
       if (head === pr.headRefOid) continue;
       if (!known(pr.headRefOid, run2, ask.checkout)) continue;
       if (!ancestor(head, pr.headRefOid, run2, ask.checkout)) {
-        throw new Error(`the checkout\u2019s branch ${branch} is at ${head.slice(0, 10)}, but its open PR #${String(pr.number)} is at ${pr.headRefOid.slice(0, 10)} \u2014 push the branch: the review reads what is pushed`);
+        throw new LegError("error.contract-output", `the checkout\u2019s branch ${branch} is at ${head.slice(0, 10)}, but its open PR #${String(pr.number)} is at ${pr.headRefOid.slice(0, 10)} \u2014 push the branch: the review reads what is pushed`);
       }
     }
   }
   if (found.some((f) => (f.prs ?? []).length > 0)) return;
   const unread = found.filter((f) => f.error != null);
   const read = found.filter((f) => f.prs != null).map((f) => label(f.repo));
-  if (read.length === 0) {
-    throw new Error(`cannot verify ${id}\u2019s PR \u2014 no repository the ticket reads could be read: ${unread.map((f) => `${label(f.repo)} (${f.error})`).join("; ")}`);
+  if (unread.length > 0) {
+    throw new Error(`cannot verify ${id}\u2019s PR \u2014 ${read.length ? "not all repositories the ticket reads could be read" : "no repository the ticket reads could be read"}: ${unread.map((f) => `${label(f.repo)} (${f.error})`).join("; ")}`);
   }
-  throw new Error(`the implement agent exited 0, but no open PR on a branch matching ${patterns.join(" or ")} for ticket ${id} exists in ${read.join(" or ")}${unread.length ? ` \u2014 ${unread.map((f) => label(f.repo)).join(" or ")} could not be read` : ""} \u2014 open one from a matching branch with its head pushed, or the leg fails here`);
+  throw new LegError("error.contract-output", `the implement agent exited 0, but no open PR on a branch matching ${patterns.join(" or ")} for ticket ${id} exists in ${read.join(" or ")} \u2014 open one from a matching branch with its head pushed, or the leg fails here`);
 }
 async function verifyPrsMerged(ask, run2) {
   const id = bareId(ask.ticket);
@@ -1531,6 +1549,7 @@ async function verifyPrsMerged(ask, run2) {
         found.push({ repo, open: list("open"), merged: list("merged"), error: null });
       }
     } catch (e) {
+      if (e instanceof LegError) throw e;
       found.push({ repo, open: null, merged: null, error: msg(e) });
     }
   }
@@ -1541,11 +1560,11 @@ async function verifyPrsMerged(ask, run2) {
   }
   const open = found.flatMap((f) => (f.open ?? []).map((p) => name(f, p)));
   if (open.length > 0) {
-    throw new Error(`the merge agent exited 0, but ${id}\u2019s PR ${open.join(", ")} is still open \u2014 not merged; the leg reports merged only when every PR of the ticket is`);
+    throw new LegError("error.blocked", `the merge agent exited 0, but ${id}\u2019s PR ${open.join(", ")} is still open \u2014 not merged; the leg reports merged only when every PR of the ticket is`);
   }
   const merged = found.flatMap((f) => (f.merged ?? []).map((p) => `${f.repo ? f.repo : ""}#${String(p.number)}`));
   if (merged.length === 0) {
-    throw new Error(`the merge agent exited 0, but no merged PR on a branch matching ${patterns.join(" or ")} for ticket ${id} exists in ${found.map((f) => label(f.repo)).join(" or ")} \u2014 the leg reports merged only when the forge shows one`);
+    throw new LegError("error.blocked", `the merge agent exited 0, but no merged PR on a branch matching ${patterns.join(" or ")} for ticket ${id} exists in ${found.map((f) => label(f.repo)).join(" or ")} \u2014 the leg reports merged only when the forge shows one`);
   }
   return merged;
 }
@@ -1556,15 +1575,15 @@ function findDelivered(out) {
     const m = DELIVERED_LINE.exec(lines[i]);
     if (m == null) continue;
     const evidence = (m[2] ?? "").trim();
-    if (evidence === "") throw new Error(`the implement agent answered ${JSON.stringify(lines[i])} with no evidence \u2014 the line is \`delivered <sha> <what you ran to find it delivered>\``);
+    if (evidence === "") throw new LegError("error.contract-output", `the implement agent answered ${JSON.stringify(lines[i])} with no evidence \u2014 the line is \`delivered <sha> <what you ran to find it delivered>\``);
     return { shas: [...new Set(m[1].split(","))], evidence, line: lines[i] };
   }
   return null;
 }
 function verifyDelivered(ask, run2) {
-  if (ask.shas.length === 0) throw new Error("the implement agent answered delivered naming no commit");
+  if (ask.shas.length === 0) throw new LegError("error.contract-output", "the implement agent answered delivered naming no commit");
   const branch = ask.branch;
-  if (!/^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(branch) || branch.includes("..")) throw new Error(`cannot verify the delivered answer \u2014 ${JSON.stringify(branch)} is no branch name`);
+  if (!/^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(branch) || branch.includes("..")) throw new LegError("error.contract-output", `cannot verify the delivered answer \u2014 ${JSON.stringify(branch)} is no branch name`);
   const tracking = `refs/remotes/origin/${branch}`;
   try {
     run2("git", ["fetch", "-q", "origin", `+refs/heads/${branch}:${tracking}`], ask.checkout);
@@ -1575,24 +1594,24 @@ function verifyDelivered(ask, run2) {
 }
 function resolveDelivered(shas, ref, checkout, run2) {
   return shas.map((sha2) => {
-    if (!/^[0-9a-f]{7,40}$/.test(sha2)) throw new Error("invalid delivered commit id");
+    if (!/^[0-9a-f]{7,40}$/.test(sha2)) throw new LegError("error.contract-output", "invalid delivered commit id");
     let full;
     try {
       full = run2("git", ["rev-parse", "--verify", "--quiet", `${sha2}^{commit}`], checkout).trim();
     } catch {
-      throw new Error(`the implement agent answered delivered at ${sha2}, which names no commit this checkout knows \u2014 refused`);
+      throw new LegError("error.contract-output", `the implement agent answered delivered at ${sha2}, which names no commit this checkout knows \u2014 refused`);
     }
-    if (!/^[0-9a-f]{40}$/.test(full) || !full.startsWith(sha2)) throw new Error(`the implement agent answered delivered at ${sha2}, which names no commit this checkout knows \u2014 refused`);
+    if (!/^[0-9a-f]{40}$/.test(full) || !full.startsWith(sha2)) throw new LegError("error.contract-output", `the implement agent answered delivered at ${sha2}, which names no commit this checkout knows \u2014 refused`);
     if (!ancestor(full, ref, run2, checkout)) {
       const branch = ref.replace(/^refs\/remotes\/origin\//, "");
-      throw new Error(`the implement agent answered delivered at ${sha2}, which is not on ${branch} \u2014 refused: the commit a delivered answer names is on the default branch`);
+      throw new LegError("error.contract-output", `the implement agent answered delivered at ${sha2}, which is not on ${branch} \u2014 refused: the commit a delivered answer names is on the default branch`);
     }
     return full;
   });
 }
 function deliveredDetail(shas, evidence) {
   const head = `delivered at ${shas.map((s) => s.slice(0, 10)).join(", ")}`;
-  if (head.length > 198) throw new Error("too many delivered commits to record in the end detail");
+  if (head.length > 198) throw new LegError("error.contract-output", "too many delivered commits to record in the end detail");
   const said = evidence.replace(/[\u0000-\u001f\u007f-\u009f<>{}]/g, " ").replace(/\s+/g, " ").trim();
   const text = said === "" ? head : `${head}: ${said}`;
   return text.length <= 200 ? text : `${text.slice(0, 199)}\u2026`;
@@ -1860,7 +1879,7 @@ function prefixesOf(prefixes, legacy, allocating) {
 function archiveClose(ctx, result) {
   const answer = ctx.person_answer;
   if (ctx.leg !== "archive" || ctx.claim?.station !== "confirmed" || result?.reached !== "archived" || answer?.leg !== "confirm" || answer.option !== "confirmed" || !/^(owner|human):/.test(answer.answered_by)) {
-    throw new Error("archive requires the owner's applied confirmed answer");
+    throw new LegError("error.spec", "archive requires the owner's applied confirmed answer");
   }
   const end = ctx.previous_attempts?.find((p) => p.end_reason === "suspended:delivered" && p.legs.some((l) => l.reached === "delivered" && l.outcome === "finished"));
   const first = end?.ended_at_sha;
@@ -1868,12 +1887,12 @@ function archiveClose(ctx, result) {
   const legacy = /^delivered at ((?:[0-9a-f]{10}, ){14}[0-9a-f]{10}), [0-9a-f]{6}…$/.exec(detail);
   const commits = (legacy?.[1] ?? /^delivered at ([0-9a-f]{10}(?:, [0-9a-f]{10})*)(?:: |$)/.exec(detail)?.[1])?.split(", ");
   if (!end || end.ended_at == null || end.ended_at > answer.answered_at || !first || !/^[0-9a-f]{40}$/.test(first) || commits?.[0] !== first.slice(0, 10)) {
-    throw new Error("archive requires the confirmed delivery's end evidence");
+    throw new LegError("error.spec", "archive requires the confirmed delivery's end evidence");
   }
-  if (!ctx.ticket.path) throw new Error("archive requires a ticket file in git");
+  if (!ctx.ticket.path) throw new LegError("error.spec", "archive requires a ticket file in git");
   const branch = ticketsBranch(ctx.checkout, ctx.default_branch);
   const pin = ctx.signed_control?.agent_command ?? ctx.snapshot?.sha;
-  if (!pin || !/^[0-9a-f]{40}$/.test(pin)) throw new Error("archive requires its snapshot to read the Dibber pin");
+  if (!pin || !/^[0-9a-f]{40}$/.test(pin)) throw new LegError("error.spec", "archive requires its snapshot to read the Dibber pin");
   const settings = JSON.parse(gitText(ctx.checkout, "show", `${pin}:.baton/baton.json`));
   return archiveTicket(ctx.checkout, branch, bareTicketId(ctx.ticket), {
     path: ctx.ticket.path,
@@ -1886,16 +1905,16 @@ var TRIES = 6;
 var movedOnPush = (detail) => /non-fast-forward|fetch first|stale info/.test(detail);
 function regularDirs(root, path, missingOk = false) {
   const parts = path.split("/");
-  if (parts.some((part) => !part || part === "." || part === ".." || part.toLowerCase() === ".git")) throw new Error(`invalid ticket directory: ${path}`);
+  if (parts.some((part) => !part || part === "." || part === ".." || part.toLowerCase() === ".git")) throw new LegError("error.spec", `invalid ticket directory: ${path}`);
   for (const part of parts) {
     root = join7(root, part);
     const stat = lstatSync2(root, { throwIfNoEntry: false });
     if (!stat && missingOk) return;
-    if (!stat?.isDirectory()) throw new Error(`not a regular ticket directory: ${path}`);
+    if (!stat?.isDirectory()) throw new LegError("error.spec", `not a regular ticket directory: ${path}`);
   }
 }
 function archiveTicket(root, branch, id, delivered) {
-  if (!/^[A-Za-z0-9]+-[A-Za-z0-9]+$/.test(id)) throw new Error(`${id}: invalid archive ticket id`);
+  if (!/^[A-Za-z0-9]+-[A-Za-z0-9]+$/.test(id)) throw new LegError("error.spec", `${id}: invalid archive ticket id`);
   const describe = `${id} \u2192 done`;
   for (let attempt = 1; attempt <= TRIES; attempt++) {
     gitText(root, "fetch", "-q", "origin", branch);
@@ -1905,7 +1924,7 @@ function archiveTicket(root, branch, id, delivered) {
       const done = archiveIn(dir, branch, id, delivered);
       if ("existing" in done) return done.existing;
       const trailers = (process.env.TICKET_TRAILERS ?? "").trim();
-      if (!trailers && process.env.TICKET_REQUIRE_TRAILERS === "1") throw new Error(`${describe}: TICKET_REQUIRE_TRAILERS=1, but TICKET_TRAILERS is empty`);
+      if (!trailers && process.env.TICKET_REQUIRE_TRAILERS === "1") throw new LegError("error.spec", `${describe}: TICKET_REQUIRE_TRAILERS=1, but TICKET_TRAILERS is empty`);
       gitText(dir, "commit", "-q", "-m", trailers ? `${done.message}
 
 ${trailers}` : done.message);
@@ -1914,10 +1933,7 @@ ${trailers}` : done.message);
         return gitText(dir, "rev-parse", "HEAD");
       } catch (e) {
         const detail = String(e.stderr || e.message);
-        if (!movedOnPush(detail)) {
-          const why = detail.trim().split("\n").map((l) => l.trim()).filter((l) => l !== "" && !/^To /.test(l) && !/failed to push some refs/.test(l));
-          throw new Error(`${describe}: the push was refused: ${why.join("; ") || "no reason given"}`);
-        }
+        if (!movedOnPush(detail)) throw pushFailure(e);
         if (attempt === TRIES) throw new Error(`${describe}: push refused ${TRIES} times: ${detail.trim().split("\n").at(-1)}`);
       }
     } finally {
@@ -1928,42 +1944,42 @@ ${trailers}` : done.message);
       }
     }
   }
-  throw new Error(`${describe}: no archive attempt completed`);
+  throw new LegError("error.spec", `${describe}: no archive attempt completed`);
 }
 function archiveIn(dir, branch, id, delivered) {
   const settings = readTicketSettings(dir, dir);
   const items = (settings.items ?? "tickets").replace(/\/$/, "");
   regularDirs(dir, items, true);
   const matches2 = readItems(dir, items).filter((f) => /\.mdx?$/i.test(f.path) && parseFrontmatter(f.text)?.id === id);
-  if (!matches2.length) throw new Error(`${id}: no ${items}/${id}.mdx on origin/${branch}`);
-  if (matches2.length !== 1) throw new Error(`${id}: archive cannot identify a single ticket file`);
+  if (!matches2.length) throw new LegError("error.spec", `${id}: no ${items}/${id}.mdx on origin/${branch}`);
+  if (matches2.length !== 1) throw new LegError("error.spec", `${id}: archive cannot identify a single ticket file`);
   const { path, text } = matches2[0];
   const archived = path.startsWith("archive/");
   const from = `${items}/${path}`;
   const to = `${items}/archive/${path}`;
   if (delivered.path !== (archived ? `${items}/${path.slice("archive/".length)}` : from)) {
-    throw new Error(`${id}: archive requires the markdown source's current ticket path`);
+    throw new LegError("error.spec", `${id}: archive requires the markdown source's current ticket path`);
   }
   const shas = resolveDelivered(delivered.shas, "HEAD", dir, (_cmd, args2, cwd) => gitText(cwd, ...args2));
   const subject = `tickets: ${id} done (archived)`;
   const delivery = `Delivered by: ${shas.join(", ")}`;
   const limitation = "Delivery evidence incomplete: the legacy end record was truncated; unrecorded commits are not listed.";
   if (archived) {
-    if (parseFrontmatter(text)?.status !== "done") throw new Error(`${id} is archived (done)`);
+    if (parseFrontmatter(text)?.status !== "done") throw new LegError("error.spec", `${id} is archived (done)`);
     const existing = gitText(dir, "--literal-pathspecs", "log", "-1", "--first-parent", "--no-renames", "--diff-filter=A", "--format=%H", "--", from);
     if (existing) {
       const [first, , third, , note] = gitText(dir, "show", "-s", "--format=%B", existing).split("\n");
       if (first === subject && third === delivery && note === limitation === delivered.truncated) return { existing };
     }
-    throw new Error(`${id}: the archive does not record this delivery`);
+    throw new LegError("error.spec", `${id}: the archive does not record this delivery`);
   }
   if (!new RegExp(`^${id}\\.mdx?$`).test(basename2(path))) {
-    throw new Error(`${id}: ${from} is not named ${id}.md or ${id}.mdx, so Dibber cannot write it \u2014 rename it, then archive again`);
+    throw new LegError("error.spec", `${id}: ${from} is not named ${id}.md or ${id}.mdx, so Dibber cannot write it \u2014 rename it, then archive again`);
   }
   regularDirs(dir, dirname2(to), true);
-  if (lstatSync2(join7(dir, to), { throwIfNoEntry: false })) throw new Error(`${id}: archive destination already exists`);
+  if (lstatSync2(join7(dir, to), { throwIfNoEntry: false })) throw new LegError("error.spec", `${id}: archive destination already exists`);
   const frontmatter = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text)?.[1] ?? "";
-  if ((frontmatter.match(/^status:/gm) ?? []).length > 1) throw new Error(`${id}: duplicate status fields; archive refused`);
+  if ((frontmatter.match(/^status:/gm) ?? []).length > 1) throw new LegError("error.spec", `${id}: duplicate status fields; archive refused`);
   const [cmd, ...args] = delivered.dibber;
   let said;
   try {
@@ -1976,10 +1992,12 @@ function archiveIn(dir, branch, id, delivered) {
     }));
   } catch (e) {
     const why = String(e.stderr || e.message).trim().split("\n").at(-1);
-    throw new Error(`${id}: dibber done failed: ${why}`);
+    const message = `${id}: dibber done failed: ${why}`;
+    if (e.code === "ENOENT") throw new LegError("error.spec", message);
+    throw new Error(message);
   }
   if (said?.id !== id || said.file !== from || said.status !== "done" || parseFrontmatter(readFileSync4(join7(dir, from), "utf8"))?.status !== "done") {
-    throw new Error(`${id}: Dibber did not mark ${from} done`);
+    throw new LegError("error.spec", `${id}: Dibber did not mark ${from} done`);
   }
   mkdirSync2(dirname2(join7(dir, to)), { recursive: true });
   gitText(dir, "--literal-pathspecs", "mv", from, to);
@@ -1997,13 +2015,13 @@ var verdictLine = (verdict) => `<!-- baton:verdict ${verdict} -->`;
 function commentLine(leg, result) {
   if (leg === "review") {
     if (result?.verdict !== "approve" && result?.verdict !== "changes") {
-      throw new Error(`the review returned no verdict (approve or changes), got ${JSON.stringify(result?.verdict)}`);
+      throw new LegError("error.contract-output", `the review returned no verdict (approve or changes), got ${JSON.stringify(result?.verdict)}`);
     }
     return verdictLine(result.verdict);
   }
   if (leg === "adjudicate") {
     if (result?.adjudication !== "merge" && result?.adjudication !== "owner") {
-      throw new Error(`the adjudication returned neither merge nor owner, got ${JSON.stringify(result?.adjudication)}`);
+      throw new LegError("error.contract-output", `the adjudication returned neither merge nor owner, got ${JSON.stringify(result?.adjudication)}`);
     }
     return `<!-- baton:adjudicated ${result.adjudication} -->`;
   }
@@ -2016,28 +2034,28 @@ async function prClose(ctx, result, run2 = exec) {
   const comment = commentLine(ctx.leg, result);
   if (comment != null || marker && !MARKER_LEGS.has(ctx.leg)) {
     const body = [comment, `baton: ${ctx.ticket.id} ${ctx.leg}, claim ${ctx.claim?.nonce ?? "?"}`, marker].filter(Boolean).join("\n");
-    if (result?.pr != null && !(typeof result.pr === "string" && PR_URL.test(result.pr))) throw new Error(`the ${ctx.leg} leg named no PR URL to write on, got ${JSON.stringify(result.pr)}`);
+    if (result?.pr != null && !(typeof result.pr === "string" && PR_URL.test(result.pr))) throw new LegError("error.contract-output", `the ${ctx.leg} leg named no PR URL to write on, got ${JSON.stringify(result.pr)}`);
     if (ctx.forge_home) {
       const opts = { run: run2, checkout: ctx.checkout };
       if (typeof result.pr === "string") {
         const named = targetPr(ctx, result.pr);
-        if (!named) throw new Error("the named PR does not belong to a registered forge repository");
+        if (!named) throw new LegError("error.contract-output", "the named PR does not belong to a registered forge repository");
         return forgeClient(named.repo, opts).comment(named.number, body);
       }
       const repo = targetOf(ctx);
-      if (!repo) throw new Error("the checkout\u2019s repository has no PR conversation");
+      if (!repo) throw new LegError("error.contract-output", "the checkout\u2019s repository has no PR conversation");
       const client = forgeClient(repo, opts);
       const branch = run2("git", ["branch", "--show-current"], ctx.checkout);
       const prs = ctx.leg === "conclude" ? await client.listPrs() : await client.listOpenPrs();
       const matches2 = prs.filter((p) => p.sameRepository !== false && branch !== "" && p.headRefName === branch);
-      if (matches2.length !== 1) throw new Error("the checkout branch does not name exactly one eligible PR; name its URL explicitly");
+      if (matches2.length !== 1) throw new LegError("error.contract-output", "the checkout branch does not name exactly one eligible PR; name its URL explicitly");
       return client.comment(matches2[0].number, body);
     }
     return run2("gh", ["pr", "comment", ...typeof result?.pr === "string" ? [result.pr] : [], "--body", body], ctx.checkout);
   }
-  if (typeof result?.reached !== "string" || result.reached === "") throw new Error(`the ${ctx.leg} leg returned no station reached`);
+  if (typeof result?.reached !== "string" || result.reached === "") throw new LegError("error.contract-output", `the ${ctx.leg} leg returned no station reached`);
   if (ctx.leg === "implement" && result.reached === "delivered") {
-    if (typeof result.delivered !== "string" || !/^[0-9a-f]{40}$/.test(result.delivered)) throw new Error(`the implement leg reached delivered naming no verified commit, got ${JSON.stringify(result.delivered)}`);
+    if (typeof result.delivered !== "string" || !/^[0-9a-f]{40}$/.test(result.delivered)) throw new LegError("error.contract-output", `the implement leg reached delivered naming no verified commit, got ${JSON.stringify(result.delivered)}`);
     return result.delivered;
   }
   if (!MARKER_LEGS.has(ctx.leg)) return run2("git", ["rev-parse", "HEAD"], ctx.checkout);
@@ -2045,18 +2063,22 @@ async function prClose(ctx, result, run2 = exec) {
 }
 function testsClose(ctx, result, run2 = exec) {
   if (result?.tests === "ci") {
-    if (result.next !== "review" || typeof result.reached !== "string" || result.reached === "") throw new Error("the run-tests gate deferred to CI without suspending at its station");
+    if (result.next !== "review" || typeof result.reached !== "string" || result.reached === "") throw new LegError("error.contract-output", "the run-tests gate deferred to CI without suspending at its station");
     return null;
   }
   if (result?.tests !== "green" && result?.tests !== "red") {
-    throw new Error(`the run-tests gate returned neither green nor red, got ${JSON.stringify(result?.tests)}`);
+    throw new LegError("error.contract-output", `the run-tests gate returned neither green nor red, got ${JSON.stringify(result?.tests)}`);
   }
-  if (typeof result?.reached !== "string" || result.reached === "") throw new Error("the run-tests gate returned no station reached");
+  if (typeof result?.reached !== "string" || result.reached === "") throw new LegError("error.contract-output", "the run-tests gate returned no station reached");
   const sha2 = /^[0-9a-f]{40}$/;
-  if (typeof result.branch !== "string" || result.branch === "" || result.branch.startsWith("-")) throw new Error("the run-tests gate returned no PR branch it tested");
-  if (typeof result.tested !== "string" || !sha2.test(result.tested)) throw new Error("the run-tests gate returned no tested head");
-  if (typeof result.marker !== "string" || !sha2.test(result.marker)) throw new Error("the run-tests gate returned no marker commit");
-  run2("git", ["push", "origin", `${result.marker}:refs/heads/${result.branch}`], ctx.checkout);
+  if (typeof result.branch !== "string" || result.branch === "" || result.branch.startsWith("-")) throw new LegError("error.contract-output", "the run-tests gate returned no PR branch it tested");
+  if (typeof result.tested !== "string" || !sha2.test(result.tested)) throw new LegError("error.contract-output", "the run-tests gate returned no tested head");
+  if (typeof result.marker !== "string" || !sha2.test(result.marker)) throw new LegError("error.contract-output", "the run-tests gate returned no marker commit");
+  try {
+    run2("git", ["push", "origin", `${result.marker}:refs/heads/${result.branch}`], ctx.checkout);
+  } catch (e) {
+    throw pushFailure(e);
+  }
   return result.marker;
 }
 
@@ -2110,8 +2132,9 @@ function hasPath(checkout, sha2, rel) {
 function ticketTextOf({ ticket, checkout }) {
   try {
     return ticket.file ? readFileSync5(ticket.file, "utf8") : ticket.path ? readFileSync5(join8(checkout, ticket.path), "utf8") : null;
-  } catch {
-    return null;
+  } catch (e) {
+    if (e.code !== "ENOENT") throw e;
+    throw new LegError("error.spec", `the leg cannot read its ticket file: ${e.message}`);
   }
 }
 function courseEntry(settings, course) {
@@ -2132,9 +2155,12 @@ var legRun = (cmd, args, cwd) => {
   } catch (e) {
     const stderr = e?.stderr;
     const why = (typeof stderr === "string" ? stderr.trim().split("\n")[0] : "") || (e instanceof Error ? e.message : String(e));
-    throw new Error(`${cmd} ${args.join(" ")} failed: ${why}`);
+    const message = `${cmd} ${args.join(" ")} failed: ${why}`;
+    if (missingTool(e)) throw new LegError("error.spec", message);
+    throw new Error(message);
   }
 };
+var missingTool = (error) => ["ENOENT", "EACCES"].includes(error?.code ?? "");
 function makeLeg({ course, leg, reads, spec, overridePath, shipped }) {
   if (spec.archive) {
     const position = spec.position;
@@ -2156,11 +2182,11 @@ function makeLeg({ course, leg, reads, spec, overridePath, shipped }) {
     standard: standard2,
     async run(ctx) {
       const sha2 = ctx.snapshot?.sha;
-      if (typeof sha2 !== "string" || sha2 === "") throw new Error("the leg has no snapshot to read its override at");
+      if (typeof sha2 !== "string" || sha2 === "") throw new LegError("error.spec", "the leg has no snapshot to read its override at");
       const graphSha = ctx.signed_control?.course || sha2;
       const graphPath = `.baton/courses/${course}/course.json`;
       if (!spec.tests && (!ctx.reads_only || !ctx.review_store) && hasPath(ctx.checkout, graphSha, graphPath) && JSON.parse(show(ctx.checkout, graphSha, graphPath)).legs?.[leg]?.reads_only === true) {
-        throw new Error("this runner cannot enforce reads_only (R-BTN-183)");
+        throw new LegError("error.spec", "this runner cannot enforce reads_only (R-BTN-183)");
       }
       const overrideSha = ctx.signed_control?.overrides;
       const readSha = !spec.tests && typeof overrideSha === "string" && overrideSha !== "" ? overrideSha : sha2;
@@ -2170,7 +2196,7 @@ function makeLeg({ course, leg, reads, spec, overridePath, shipped }) {
         const file = join8(dir, basename3(overridePath));
         writeFileSync2(file, show(ctx.checkout, readSha, overridePath));
         const mod = await import(pathToFileURL(file).href);
-        if (typeof mod.run !== "function") throw new Error(overridePath + " exports no run(ctx, standard)");
+        if (typeof mod.run !== "function") throw new LegError("error.spec", overridePath + " exports no run(ctx, standard)");
         return await mod.run(ctx, standard2);
       } finally {
         rmSync4(dir, { recursive: true, force: true });
@@ -2189,13 +2215,13 @@ async function runAgent(ctx, { course, leg, names, spec, readsOnly: readsOnly2, 
   const { ask, verify, pushes, delivered, reconcile } = spec;
   const heading = `baton: ${course}/${leg} ticket ${ctx.ticket.id}: `;
   const sha2 = ctx.snapshot?.sha;
-  if (typeof sha2 !== "string" || sha2 === "") throw new Error("the leg has no snapshot to read .baton/baton.json at");
-  if (ctx.reads_only && (!readsOnly2 || !ctx.review_store)) throw new Error("reads_only requires a compatible runner and non-writing stub (R-BTN-183)");
+  if (typeof sha2 !== "string" || sha2 === "") throw new LegError("error.spec", "the leg has no snapshot to read .baton/baton.json at");
+  if (ctx.reads_only && (!readsOnly2 || !ctx.review_store)) throw new LegError("error.spec", "reads_only requires a compatible runner and non-writing stub (R-BTN-183)");
   const canInteract = course === "create-pr" && (leg === "implement" || leg === "fix") && ctx.can_interact === true;
   const settingsSha = typeof ctx.signed_control?.agent_command === "string" && ctx.signed_control.agent_command !== "" ? ctx.signed_control.agent_command : sha2;
   const settings = JSON.parse(show(ctx.checkout, settingsSha, ".baton/baton.json"));
   const settingsCommand = typeof settings.agent_command === "string" && settings.agent_command !== "" ? settings.agent_command : process.env.BATON_AGENT_COMMAND ?? "";
-  if (settingsCommand === "") throw new Error(".baton/baton.json names no agent_command \u2014 run `baton repo init --agent opencode` (or --agent claude-code, or --agent-command <cmd>); baton run --harness <harness> runs its command when the settings name none");
+  if (settingsCommand === "") throw new LegError("error.spec", ".baton/baton.json names no agent_command \u2014 run `baton repo init --agent opencode` (or --agent claude-code, or --agent-command <cmd>); baton run --harness <harness> runs its command when the settings name none");
   const agentWords = splitWords(settingsCommand);
   const agentCommand = agentWords.join(" ");
   const dibberCommand = process.env.BATON_DIBBER?.trim() || dibberWords(settings).join(" ");
@@ -2229,7 +2255,7 @@ Claim context (references only): ${JSON.stringify({ station: ctx.claim?.station,
     (path) => {
       const entry2 = gitAt(reviewStore, ["--no-replace-objects", "--literal-pathspecs", "ls-tree", settingsSha, "--", path]);
       if (!entry2) return null;
-      if (!/^100(?:644|755) blob /.test(entry2)) throw new Error(`invalid reads_only snapshot configuration: ${path}`);
+      if (!/^100(?:644|755) blob /.test(entry2)) throw new LegError("error.spec", `invalid reads_only snapshot configuration: ${path}`);
       return gitAt(reviewStore, ["--no-replace-objects", "show", `${settingsSha}:${path}`], { maxBuffer: OUTPUT_MAX });
     }
   );
@@ -2245,15 +2271,15 @@ Claim context (references only): ${JSON.stringify({ station: ctx.claim?.station,
   try {
     if (dir != null && text != null) writeFileSync2(instructions, text);
     const [command, ...words] = agentWords;
-    if (command === void 0) throw new Error(".baton/baton.json names no agent_command to run");
+    if (command === void 0) throw new LegError("error.spec", ".baton/baton.json names no agent_command to run");
     const envWrapper = process.env.BATON_AGENT_WRAPPER;
     const wrapper = ctx.reads_only ? null : typeof envWrapper === "string" && envWrapper.trim() !== "" ? envWrapper : settings.agent_wrapper;
-    if (wrapper != null && (typeof wrapper !== "string" || wrapper.trim() === "")) throw new Error(".baton/baton.json's agent_wrapper is not a command");
+    if (wrapper != null && (typeof wrapper !== "string" || wrapper.trim() === "")) throw new LegError("error.spec", ".baton/baton.json's agent_wrapper is not a command");
     const [wrapped, ...wrapping] = wrapper == null ? [] : splitWords(wrapper);
     const argv2 = (restricted ? restricted.argv : null) ?? (wrapped === void 0 ? [command, ...words, ctx.ticket.id, leg, ctx.checkout] : [wrapped, ...wrapping, command, ...words, ctx.ticket.id, leg, ctx.checkout]);
     if (restricted && command === "opencode") {
       const version = execFileSync4(command, ["--version"], { cwd, env: restricted.env, encoding: "utf8", timeout: 5e3, killSignal: "SIGKILL", stdio: ["ignore", "pipe", "pipe"] }).trim();
-      if (!readOnlyVersionSupported(version)) throw new Error("reads_only requires OpenCode v2.2.3 or newer in the v2 series (R-BTN-183)");
+      if (!readOnlyVersionSupported(version)) throw new LegError("error.spec", "reads_only requires OpenCode v2.2.3 or newer in the v2 series (R-BTN-183)");
     }
     if (process.env.BATON_VERBOSE) process.stderr.write(heading + "agent_command: " + agentCommand + (wrapper != null ? "; wrapper: " + wrapper : "") + "; argv: " + argv2.join(" ") + "\n");
     const startedAt = (/* @__PURE__ */ new Date()).getTime();
@@ -2287,7 +2313,7 @@ Claim context (references only): ${JSON.stringify({ station: ctx.claim?.station,
         if (so.length > OUTPUT_MAX) {
           if (watch != null) clearInterval(watch);
           child.kill("SIGKILL");
-          reject(new Error(`the agent printed more than ${OUTPUT_MAX} bytes`));
+          reject(new LegError("error.spec", `the agent printed more than ${OUTPUT_MAX} bytes`));
           return;
         }
         if (echo) process.stderr.write(c);
@@ -2298,7 +2324,7 @@ Claim context (references only): ${JSON.stringify({ station: ctx.claim?.station,
       });
       child.on("error", (e) => {
         if (watch != null) clearInterval(watch);
-        reject(e);
+        reject(missingTool(e) ? new LegError("error.spec", e.message) : e);
       });
       let stopped = null;
       let conclusion2 = null;
@@ -2365,13 +2391,18 @@ Claim context (references only): ${JSON.stringify({ station: ctx.claim?.station,
           resolve({ text: so, stderr: se, conclusion: null });
           return;
         }
-        reject(new Error("the agent exited " + (code != null ? "with code " + code : "on signal " + sig) + "; its last output:\n  " + lastOutput(so, se)));
+        const message = "the agent exited " + (code != null ? "with code " + code : "on signal " + sig) + "; its last output:\n  " + lastOutput(so, se);
+        reject(code === 126 || code === 127 ? new LegError("error.spec", message) : new Error(message));
       });
     });
     const { text: out, stderr, conclusion } = received;
     const said = lastOutput(out, stderr);
-    const failed = (e) => new Error((e instanceof Error ? e.message : String(e)) + (said !== "" ? `; the agent's last output:
-  ${said}` : "; the agent printed nothing"));
+    const failed = (e) => {
+      const reason = e instanceof Error ? e.message : String(e);
+      const message = reason + (said !== "" ? `; the agent's last output:
+  ${said}` : "; the agent printed nothing");
+      return e instanceof LegError ? new LegError(e.type, message) : new Error(message);
+    };
     if (reconcile) {
       try {
         const graph = JSON.parse(show(ctx.checkout, courseSha, `.baton/courses/${course}/course.json`));
@@ -2392,10 +2423,15 @@ Claim context (references only): ${JSON.stringify({ station: ctx.claim?.station,
     }
     if (headsBefore !== "" && prHeads() === headsBefore) {
       const heads = headsBefore.split("\n").map((line) => line.split("	")[1].slice("refs/heads/".length) + " at " + line.slice(0, 10));
-      throw failed(`the ${leg} leg pushed nothing: ${heads.join(", ")} is the head the run-tests gate tested red, unchanged \u2014 no fix, no position (B-231)`);
+      throw failed(new LegError("error.blocked", `the ${leg} leg pushed nothing: ${heads.join(", ")} is the head the run-tests gate tested red, unchanged \u2014 no fix, no position (B-231)`));
     }
     try {
-      const answer = ask ? requireAnswer(out, ask, leg) : null;
+      let answer;
+      try {
+        answer = ask ? requireAnswer(out, ask, leg) : null;
+      } catch (e) {
+        throw new LegError("error.contract-output", e.message);
+      }
       const last = names && !ask ? lastLine(out) : "";
       const on = names ? answer?.pr ?? (PR_URL.test(last) ? last : null) : null;
       const concluded = conclusion ? { conclusion } : {};
@@ -2432,7 +2468,8 @@ function verdictOf2(cwd, script) {
     const e = error;
     const tail = [String(e?.stdout ?? ""), String(e?.stderr ?? "")].join("\n").split("\n").map((l) => l.trimEnd()).filter((l) => l.trim() !== "").slice(-20).join("\n");
     const named = (why) => ({ tests: "red", tail: "npm run " + script + " " + why + (tail ? "; its last lines:\n" + tail : "; it printed nothing") });
-    const setup = (why) => new Error("npm run " + script + " " + why + " \u2014 the tests never ran: no verdict, no marker" + (tail ? "; its last lines:\n" + tail : ""));
+    const setup = (why) => new LegError("error.spec", "npm run " + script + " " + why + " \u2014 the tests never ran: no verdict, no marker" + (tail ? "; its last lines:\n" + tail : ""));
+    if (missingTool(e)) throw setup(e?.message ?? "could not start");
     if (e?.code === "ETIMEDOUT") throw setup("outlived the gate\u2019s bound of " + Math.round(RUN_TESTS_TIMEOUT_MS / 1e3) + " s (a suite that needs longer raises it in its own copy of this leg)");
     if (e?.code === "ENOBUFS") return named("printed more than " + OUTPUT_MAX + " bytes");
     if (e?.status === 126 || e?.status === 127) throw setup("exited " + e.status + ", a command its script names could not be run (not found, or not executable)");
@@ -2445,10 +2482,10 @@ function verdictOf2(cwd, script) {
 function runTests(ctx, course, leg, shipped) {
   const station = ctx.claim?.station;
   if (station !== "pr-open" && station !== "fixed") {
-    throw new Error("the run-tests gate runs at pr-open or fixed, not " + JSON.stringify(station ?? null));
+    throw new LegError("error.spec", "the run-tests gate runs at pr-open or fixed, not " + JSON.stringify(station ?? null));
   }
   const sha2 = ctx.snapshot?.sha;
-  if (typeof sha2 !== "string" || sha2 === "") throw new Error("the leg has no snapshot to read the course file at");
+  if (typeof sha2 !== "string" || sha2 === "") throw new LegError("error.spec", "the leg has no snapshot to read the course file at");
   const readAt = (rel) => show(ctx.checkout, sha2, rel, 1024 * 1024);
   const git2 = (...args) => gitAt(ctx.checkout, args);
   const heading = `baton: ${course}/${leg} ticket ${ctx.ticket.id}: `;
@@ -2474,7 +2511,7 @@ function runTests(ctx, course, leg, shipped) {
     }
   }
   if (branches.length !== 1) {
-    throw new Error(branches.length ? "the run-tests gate tests one PR branch; " + id + " has " + branches.join(", ") + " in the home repository" : "no branch matching " + wanted.join(" or ") + " in the home repository for " + id + " \u2014 the gate tests the PR branch it can reach");
+    throw new LegError("error.blocked", branches.length ? "the run-tests gate tests one PR branch; " + id + " has " + branches.join(", ") + " in the home repository" : "no branch matching " + wanted.join(" or ") + " in the home repository for " + id + " \u2014 the gate tests the PR branch it can reach");
   }
   const branch = branches[0];
   git2("fetch", "-q", "--no-tags", "origin", "refs/heads/" + branch);
@@ -2494,7 +2531,7 @@ function runTests(ctx, course, leg, shipped) {
     }
     const declared = [pkg?.dependencies, pkg?.devDependencies].some((deps) => deps !== null && typeof deps === "object" && Object.keys(deps).length > 0);
     if (declared && !existsSync3(join8(tree, "node_modules"))) {
-      throw new Error("npm run " + script + " cannot run: " + branch + " declares dependencies and neither the tested tree nor the home checkout has node_modules \u2014 install them where the leg runs (npm ci); the tests never ran: no verdict, no marker");
+      throw new LegError("error.spec", "npm run " + script + " cannot run: " + branch + " declares dependencies and neither the tested tree nor the home checkout has node_modules \u2014 install them where the leg runs (npm ci); the tests never ran: no verdict, no marker");
     }
     verdict = verdictOf2(tree, script);
   } finally {
@@ -2519,7 +2556,7 @@ function runTests(ctx, course, leg, shipped) {
 }
 
 // baton-default-entry.ts
-var { run, close, handoff, readsOnly, standard } = makeLeg({ "course": "create-pr", "leg": "merge", "reads": "prs", "spec": { "position": { "reached": "merged", "next": null }, "verify": "merged" }, "overridePath": ".baton/courses/create-pr/legs/merge.run.mjs", "shipped": { "instructions": "# create-pr \xB7 merge \u2014 land the PR and close the ticket\n\nYou are running the `merge` leg of the `create-pr` course. The ticket's PR was approved, or\nadjudicated with nothing reproduced. The ticket's file is `$BATON_TICKET_FILE`. When you finish,\nthe PR's change is on the default branch and the ticket is closed.\n\n> **How the stub runs you** \u2014 Baton's contract for the `agent_command` author: your command\n> line splits into words as `sh` would (quotes honoured, no substitutions) and executes\n> **without a shell**, with the ticket id, the leg and the checkout appended as arguments.\n> Stdin is never an open pipe: nothing to read, and a read ends at once. Stdout and stderr are\n> captured pipes, and the course reads stdout's last line. Your process's exit **is** your\n> completion: a harness that is a client of a background service must keep its session in\n> process (`opencode run --standalone`, or the equivalent) \u2014 a client that can exit before its\n> work ends leaves truncated output and an orphaned session posting to a claim that no longer\n> exists (B-84). Your completion is your exit **or your silence** (B-108): the stub stops waiting at the earliest of your exit, fifteen minutes of quiet on every activity signal it can see \u2014 your stdout, the wrapper\u2019s log, the harness\u2019s own store \u2014 and five hours of the leg, its ceiling; the stdout you left is judged as any exit\u2019s is. A repository's `agent_wrapper` in `.baton/baton.json`, or the host's\n> `BATON_AGENT_WRAPPER`, which wins, puts a command in front of yours, split the same way, so\n> your command's words, the arguments and 0/1/2 are the wrapper's to pass on (B-95). Never end\n> with work in flight: the process is the session, and nothing resumes it \u2014 wait, in the\n> foreground, on every job you started before printing your final line.\n\n## Before merging\n\n- **Never merge red.** Every required check on the PR's current head has concluded and passed. A\n  check still running is not a pass; wait for it, or stop and say so.\n- No blocking finding is open on the PR.\n- The PR is mergeable. A conflict is resolved by merging the default branch into the PR's branch,\n  never by rewriting its history. Regenerate lock files and generated files with the repository's\n  own tooling. Run the checks again after resolving.\n\n## Merge\n\n- Merge the way the repository merges (its settings or its contributing guide); a merge commit\n  when it says nothing.\n- **Check the change was delivered:** the merge commit is an ancestor of the default branch\n  (`git merge-base --is-ancestor <merge commit> origin/<default branch>`). A PR merged into\n  another feature branch reports merged and is nowhere near the default branch.\n- Stacked PRs: retarget each to the default branch and merge from the bottom up.\n- A ticket with PRs in several repositories (its `repos:`) merges every one, each delivered to\n  its own default branch; the ticket is merged only when all are.\n\n## Close the ticket\n\nSet the ticket file's `status:` to `done` and commit that to the default branch, unless the\nrepository closes tickets another way. If an exit criterion turned out to need something this\nticket cannot do, such as a live check or a step only a person can take, file it as its own\nticket rather than leaving this one open.\n\n## When you do not merge\n\nIf a check is red, a blocking finding is open or the merge is refused, do not merge: end with\nlines that say which PR and why. The stub reads the forge after you exit and reports `merged`\nonly when every PR of the ticket is merged and none is open; otherwise the leg fails, quoting\nyour last lines, and the ticket stays where it was.\n\n## Do not\n\n- Merge with a reproduced blocking finding the owner has not decided.\n", "reviewMaxRuns": 3, "testScript": "test" } });
+var { run, close, handoff, readsOnly, standard } = makeLeg({ "course": "create-pr", "leg": "merge", "reads": "prs", "spec": { "position": { "reached": "merged", "next": null }, "verify": "merged" }, "overridePath": ".baton/courses/create-pr/legs/merge.run.mjs", "shipped": { "instructions": "# create-pr \xB7 merge \u2014 land the PR and close the ticket\n\nYou are running the `merge` leg of the `create-pr` course. The ticket's PR was approved, or\nadjudicated with nothing reproduced. The ticket's file is `$BATON_TICKET_FILE`. When you finish,\nthe PR's change is on the default branch and the ticket is closed.\n\n> **How the stub runs you** \u2014 Baton's contract for the `agent_command` author: your command\n> line splits into words as `sh` would (quotes honoured, no substitutions) and executes\n> **without a shell**, with the ticket id, the leg and the checkout appended as arguments.\n> Stdin is never an open pipe: nothing to read, and a read ends at once. Stdout and stderr are\n> captured pipes, and the course reads stdout's last line. Your process's exit **is** your\n> completion: a harness that is a client of a background service must keep its session in\n> process (`opencode run --standalone`, or the equivalent) \u2014 a client that can exit before its\n> work ends leaves truncated output and an orphaned session posting to a claim that no longer\n> exists (B-84). Your completion is your exit **or your silence** (B-108): the stub stops waiting at the earliest of your exit, fifteen minutes of quiet on every activity signal it can see \u2014 your stdout, the wrapper\u2019s log, the harness\u2019s own store \u2014 and five hours of the leg, its ceiling; the stdout you left is judged as any exit\u2019s is. A repository's `agent_wrapper` in `.baton/baton.json`, or the host's\n> `BATON_AGENT_WRAPPER`, which wins, puts a command in front of yours, split the same way, so\n> your command's words, the arguments and 0/1/2 are the wrapper's to pass on (B-95). Never end\n> with work in flight: the process is the session, and nothing resumes it \u2014 wait, in the\n> foreground, on every job you started before printing your final line.\n\n## Before merging\n\n- **Never merge red.** Every required check on the PR's current head has concluded and passed. A\n  check still running is not a pass; wait for it, or stop and say so.\n- No blocking finding is open on the PR.\n- The PR is mergeable. A conflict is resolved by merging the default branch into the PR's branch,\n  never by rewriting its history. Regenerate lock files and generated files with the repository's\n  own tooling. Run the checks again after resolving.\n\n## Merge\n\n- Merge the way the repository merges (its settings or its contributing guide); a merge commit\n  when it says nothing.\n- **Check the change was delivered:** the merge commit is an ancestor of the default branch\n  (`git merge-base --is-ancestor <merge commit> origin/<default branch>`). A PR merged into\n  another feature branch reports merged and is nowhere near the default branch.\n- Stacked PRs: retarget each to the default branch and merge from the bottom up.\n- A ticket with PRs in several repositories (its `repos:`) merges every one, each delivered to\n  its own default branch; the ticket is merged only when all are.\n\n## Close the ticket\n\nSet the ticket file's `status:` to `done` and commit that to the default branch, unless the\nrepository closes tickets another way. If an exit criterion turned out to need something this\nticket cannot do, such as a live check or a step only a person can take, file it as its own\nticket rather than leaving this one open.\n\n## When you do not merge\n\nIf a required check is red, the PR conflicts, a blocking finding is open, or the forge refuses\nmerge, do not merge. Exit 0 with the PR and the concrete reason on your last line. The stub\nindependently reads the forge: a PR still open ends the attempt without an automatic retry.\nIf a forge request failed (for example, a timeout or service outage) and you cannot tell whether\nmerge was refused or completed, report that request failure and exit nonzero.\n\n## Do not\n\n- Merge with a reproduced blocking finding the owner has not decided.\n", "reviewMaxRuns": 3, "testScript": "test" } });
 export {
   close,
   handoff,

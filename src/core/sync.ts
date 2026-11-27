@@ -14,6 +14,7 @@ import { DispatchTransportError } from './dispatch';
 import { adjustCounts } from './capacity';
 import type { ClosingPosition, Seen } from './stations';
 import { isOutsideWork } from './outsideWork';
+import { SYNC_EVIDENCE } from '../shared/syncProtocol';
 
 const HELD_AUTO_ACCEPT_MS = 24 * 3_600_000; // R-BTN-11: measured from the first post of the held history.
 
@@ -61,7 +62,11 @@ async function boardPost(core: BoardPostCore, repo: Repository, p: BoardPayload,
   // R-BTN-62: the post's number is used first, whatever becomes of the post; an older reading
   // than the last accepted one, or a void or used number, is refused whole here.
   const n = p.observation;
-  core.observations.use(r, n, issuer);
+  const { expectsEvidence } = core.observations.use(r, n, issuer);
+  const acceptObservation = () => core.observations.accept(r, n, {
+    version: p.source?.cli || null,
+    missingEvidence: expectsEvidence && !p.sync_features?.includes(SYNC_EVIDENCE),
+  });
   // B-183 (§4.4, R-BTN-184): the `tickets-approved` guarantee is defined over a ticket file's
   // approval — a source that reads only as it is now has no file to approve, so its post to a
   // repository whose policy's floors include the guarantee is refused, naming it. What approval
@@ -88,7 +93,7 @@ async function boardPost(core: BoardPostCore, repo: Repository, p: BoardPayload,
     // staleness do not stall for the hold's 24 hours. Its interim confirmations likewise.
     core.store.transaction(() => {
       requireBranchRegistryInForce(core, r, p);
-      core.observations.accept(r, n);
+      acceptObservation();
       core.syncWants.posted(r, n, p.sha);
       const seen = normative ? refreshStations(core, r, p, n, at, null, true) : new Map<string, Seen>();
       core.claims.confirm(confirmations, n);
@@ -114,7 +119,7 @@ async function boardPost(core: BoardPostCore, repo: Repository, p: BoardPayload,
   // B-287: hash the validated reading, not its observation number. A tracker can change at
   // the same Git head. The scheduling version also invalidates this shortcut after any
   // server-side matching/position change. No incoming digest is trusted.
-  const { observation: _observation, ...snapshotInputs } = p;
+  const { observation: _observation, sync_features: _features, ...snapshotInputs } = p;
   const fingerprint = sha256HexSync(JSON.stringify(snapshotInputs));
   const remember = () => core.store.exec(`INSERT INTO sync_fingerprints (repository_id, digest, scheduling_v)
     VALUES (?, ?, ?) ON CONFLICT(repository_id) DO UPDATE SET digest = excluded.digest, scheduling_v = excluded.scheduling_v
@@ -124,7 +129,7 @@ async function boardPost(core: BoardPostCore, repo: Repository, p: BoardPayload,
     const prior = core.sql<{ digest: string; scheduling_v: number }>('SELECT digest, scheduling_v FROM sync_fingerprints WHERE repository_id = ?', r)[0];
     if (prior?.digest === fingerprint && prior.scheduling_v === schedulingVersion(core.store)) {
       return core.store.transaction(() => {
-        core.observations.accept(r, n);
+        acceptObservation();
         core.syncWants.posted(r, n, p.sha);
         // The snapshot is identical but a later observation may now confirm a completion
         // or judge a run whose observation equalled the previous snapshot's. Read only those
@@ -179,7 +184,7 @@ async function boardPost(core: BoardPostCore, repo: Repository, p: BoardPayload,
       if (!core.observations.newest(r, n)) throw new BatonError('stale-observation', `a newer reading than ${n} was accepted while this post was judged; take a new number and retry (R-BTN-62)`);
       if (headOf(core, r) !== head) throw new BatonError('head-moved', `the head moved to ${headOf(core, r) ?? 'unset'} while this post was judged; re-read it and retry`);
       requireBranchRegistryInForce(core, r, p);
-      core.observations.accept(r, n);
+      acceptObservation();
       core.syncWants.posted(r, n, p.sha);
       if (readAtHead) {
         rememberSource(core, r, p);
@@ -305,7 +310,7 @@ async function boardPost(core: BoardPostCore, repo: Repository, p: BoardPayload,
     // push chain. Neither gates the post or relies on what the sync says changed.
     const control = core.policies.current(r)?.policy.paths.control;
     core.provenance.advance(repo, head, p.sha, at, rows.map(({ row }) => row), new Set(upserted.map((id) => id.slice(r.length + 1))), control != null && control !== 'any');
-    core.observations.accept(r, n);
+    acceptObservation();
     core.syncWants.posted(r, n, p.sha);
     const confirmed = core.claims.confirm(confirmations, n);
     // R-BTN-10, R-BTN-35, §2e: git confirms ends, takes tickets away and goes backwards.
