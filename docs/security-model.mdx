@@ -45,7 +45,8 @@ Two corrections from the adversarial review (2026-10-27, *Review* below) bound t
   approval, environment approval, an owner pusher, an owner signature) is passable by an
   injected session (reach 3). A gate is human only when it needs a credential no agent session
   holds: a touch-required hardware key and an approval identity in no session (B-136). Since
-  2026-11-23 a person's dashboard session is a human to Baton (R-BTN-185), so under `human_key:
+  2026-11-23 a person's dashboard session is a human to Baton (R-BTN-185; since 2026-11-26, under
+  `human_key: any`, only one Cloudflare Access or a `human_only` key's code opened), so under `human_key:
   any` a gate a session meets is human only as far as the dashboard's sign-in keeps agents out;
   under `hardware` each such act also takes a security key's touch, which keeps it human. On this
   page, "owner-approved" means that human-only identity; "owner-signed" names the commit signatures

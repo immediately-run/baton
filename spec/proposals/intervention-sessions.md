@@ -217,7 +217,7 @@ On a Needs-you entry the dashboard draws **Start an intervention**: the registry
    entry such as `baton.no-runner` or `baton.queue-over`) — or the **batch** of every open ticket
    entry of its type and cause ([Batches](#batches));
 2. **the agent**: a **sandboxed leg** ([The leg form](#the-leg-form)), naming the runner that will
-   claim it or leaving it to any runner whose grant carries the mark `intervener`; or **an
+   claim it or leaving it to any runner whose grant admits the capability `intervener` (R-BTN-174); or **an
    existing agent over MCP** ([The MCP form](#the-mcp-form)).
 
 There is no powers menu: what the key may do is fixed by the subject's kind (below); everything
@@ -300,7 +300,7 @@ else is a request.
     again), the intervention ends `file-conflict`, and `baton.intervention-mismatch` names it.
     Nothing overwrites the file. R-BTN-171's `outbox-refused` hold applies to no ticket here: the
     intervention ticket is not on the board, and the subject is not the entry's ticket; a
-    `refused` mark (the deliverer's credential refused) holds nothing and raises
+    `refused` report (the deliverer's credential refused) holds nothing and raises
     `baton.outbox-late`.
   - **A mismatch.** While the posted ticket's `course`, `intervenes` or `baton_write` differ from
     Baton's row, or the snapshot's `extra: true` flag says the file carries a body or a field
@@ -328,14 +328,14 @@ A delegated key in R-BTN-186's sense, minted per intervention and dying with it.
 - **Principal and scope.** It authorizes as a new principal, `intervention`, with a new scope,
   `subject`: the intervention's subject and what it references (R-BTN-129), and `own` stretched
   to its own intervention's requests and reports. An action admits
-  `{principal: "intervention", scope: "subject"}` only where its `delegated` mark (people and
+  `{principal: "intervention", scope: "subject"}` only where its `delegated` value (people and
   dashboard §1) is `true` or `own` and the table below lists it. The actions on its own
-  intervention (`intervention.context`, `.request`, `.report`) carry a mark of their own,
+  intervention (`intervention.context`, `.request`, `.report`) carry a value of their own,
   `delegated: "intervention"`, which `check:actions` exempts from R-BTN-186's derivation and
   admits for no MCP key. The table below is a machine-readable allowlist in the registry
   (`src/shared/actions.mjs`, `interventionPowers: {ticket, runner, batch, repository}`, each a list
   of action ids); `check:actions` fails an `intervention` caller on any entry whose `delegated`
-  mark is `false`, and on any entry that no list of the allowlist names.
+  value is `false`, and on any entry that no list of the allowlist names.
 - **Its own powers, by subject** — always within `interventions.repository`:
 
   | Subject | Reads | Tightens (and undoes its own) |
@@ -634,7 +634,7 @@ What building this changes, each in its owning place:
 - **R-BTN-186 (§12.8)**: its definition "a delegated key (an MCP key, R-BTN-130)" names the
   intervention key too; its powers do not change. **People and dashboard §1**: "a delegated key is
   no principal of its own" gains the `intervention` principal; the `delegated: "intervention"`
-  mark and `check:actions`' two checks. **The vocabulary**'s "Delegated key" ("An MCP key: …")
+  value and `check:actions`' two checks. **The vocabulary**'s "Delegated key" ("An MCP key: …")
   likewise, and "intervention" lands as a core word (spec-writing, rule 7).
 - **R-BTN-129 (§11.3)**: the principal `intervention`, the scope `subject`, and `own` covering an
   intervention's own requests and reports.
@@ -762,4 +762,4 @@ G-BTN-149 (Baton files the intervention ticket through the outbox); S-BTN-275 an
 - The pieces it needs, roughly in order: B-312; the registry (B-25, B-124); owners' sessions and
   confirmed actions (B-76, B-207); the outbox (R-BTN-171); the MCP endpoint (B-25) and OAuth
   (B-73); then the new parts — the record and key, requests, the outbox kind, the gate rule and
-  grant mark, the screen, the new conditions, and a course template.
+  the `intervener` capability, the screen, the new conditions, and a course template.
