@@ -360,7 +360,7 @@ never refuses, and acting against it is accepted and recorded `advice-overridden
 
   | Rule | Holds when | At | Refusal |
   |---|---|---|---|
-  | 1 | Claim: a leg is queued (R-BTN-83: a `run` verdict, a route or Baton's own transition), the runner meets its verdict's `host` (R-BTN-174), a snapshot was accepted after the ticket's last end (R-BTN-10), and no row that refuses (R-BTN-75) is on that leg or the whole ticket. Advance: the new leg is the ticket's queued leg or the `run` of the verdict the advance carries (R-BTN-63, R-BTN-205), an edge from the claim's station within its run limit, the runner meets that verdict's `host` (R-BTN-174), with no row that refuses on it or the whole ticket | claim, advance | `blocked` with the blocks; else rule 1 (`not-ready`, `not-selected`, or R-BTN-63's codes) |
+  | 1 | Claim: a leg is queued (R-BTN-83: a `run` verdict, a route or Baton's own transition), the runner meets its verdict's `host` (R-BTN-174), a snapshot was accepted after the ticket's last end (R-BTN-10), no selection want a re-check release made is open on the ticket (`selection-pending`, R-BTN-205), and no row that refuses (R-BTN-75) is on that leg or the whole ticket. Advance: the new leg is the ticket's queued leg or the `run` of the verdict the advance carries (R-BTN-63, R-BTN-205), an edge from the claim's station within its run limit, the runner meets that verdict's `host` (R-BTN-174), with no row that refuses on it or the whole ticket | claim, advance | `blocked` with the blocks; else rule 1 (`not-ready`, `not-selected`, `selection-pending`, or R-BTN-63's codes) |
   | 2 | *(advice)* expedite lane: while 2 active claims hold expedited tickets, other expedited tickets lose their expedite place and carry `expedite-bound` | — | — |
   | 3 | No other active, completed-unconfirmed or fence-pending claim on the ticket; no hold (§6.8) | claim; advance: the hold only | `claimed`, `held` |
   | 4 | `capabilitiesOf(ticket.requires ∪ leg.requires.capabilities) ⊆ declared ∩ grant(repository)`, matched by name (R-BTN-174); `runner:` counts once declared (R-BTN-133); no clause is met by all | claim, advance | `missing-capability` |
@@ -373,8 +373,8 @@ never refuses, and acting against it is accepted and recorded `advice-overridden
   | `person` | The leg is not a person's (R-BTN-116) | claim, advance | `person` |
   | `floor` | Every guarantee a floor names holds on every repository the ticket reaches: its home and each `repos:` entry with reach (R-BTN-140, R-BTN-189) | claim, advance | `floor-broken` |
 
-  Rules `chain` (R-BTN-106), `isolation` (R-BTN-107), `entry` (R-BTN-109) and `not-queued`
-  (R-BTN-72) are gates too; `trusted` is proposed (R-BTN-182). `isEligible`, in the shared decision
+  Rules `chain` (R-BTN-106), `isolation` (R-BTN-107), `entry` (R-BTN-109), `not-selected`
+  (R-BTN-63) and `selection-pending` (R-BTN-205) are gates too; `trusted` is proposed (R-BTN-182). `isEligible`, in the shared decision
   library (R-BTN-37), is the reference for every rule; the SQL is tested against it (G-BTN-40).
 
 - **Matching** reads only `tickets` and Baton's tables (R-BTN-33). Candidates are one row per

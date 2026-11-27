@@ -141,15 +141,18 @@ finishing its running leg at an end station only), `detail`, `ended_at_sha` (R-B
 
 - **An end records no arrival that needs a selection** (R-BTN-83). A suspension or release
   rests at the running leg's `from`, or at the station the claim's last finishing `advance`
-  reached; an `end: done` finishes the running leg at an end station, or follows a finishing
-  `advance` that reached one.
+  reached; an `end: done` finishes the running leg at an end station, follows a finishing
+  `advance` that reached one, or ends a claim on a ticket the latest snapshot shows closed as
+  done (R-BTN-10).
 - **`verdict`** is how a holder posts a selection verdict before it lets the ticket go, the one
   way (R-BTN-205, R-BTN-72): on a suspension or release at an outcome, the verdict answering the
   last arrival; on a `stale-board` release at the claim's re-check, the verdict answering the
   offered position, which core records and acts on by a want (R-BTN-5 / R-BTN-34). Each carries
   its `answers` and `ctx_digest`. An `end: done` at an end station carries none.
 - `detail` is free text of at most 200 characters under the untrusted-text rule (§12), stored
-  and shown, never read. A claim the runner releases `cannot-finish:transient` because its leg
+  and shown, never read; R-BTN-33 names it among its exceptions. A `detail` on a suspension or a
+  done end is the end's `detail`, stored on the claim and on the finished run's history row
+  beside its evidence (R-BTN-81). A claim the runner releases `cannot-finish:transient` because its leg
   failed carries the failure's last line — for an agent's leg, the agent's own last line of
   output — masked (R-BTN-144).
 - Repeating the same end is answered `ok`; a different end on an ended claim is refused
@@ -177,6 +180,7 @@ finishing its running leg at an end station only), `detail`, `ended_at_sha` (R-B
 | `released:provider-exhausted` | `released` | the leg reports that its provider account was exhausted | no |
 | `released:<bar reason>` | `released` | an owner bar that releases holders, with that bar's `reason` (R-BTN-67) | no |
 | `released:course-changed` | `released` | the leg left the course under the claim: an `off-graph` refusal or a heartbeat `station: unknown` (R-BTN-64) | no |
+| `released:short-wait` | `released` | core ended a claim that neither started a leg nor ended 30 minutes after its last arrival (R-BTN-72); the arrival's selection becomes a want (R-BTN-205) | no |
 | `released:off-branch` | `released` | not built: the claim's sha is not on the default branch (R-BTN-143) | no |
 | reaped, actor `alarm` | `reaped` | the runner was silent past its lease timeout (§9.5) | yes |
 | reaped, actor `admin:<fingerprint>` | `reaped` | an administrator's force-reap | no |

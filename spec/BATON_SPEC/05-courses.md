@@ -179,10 +179,10 @@ Designs for this section that are not built are on the proposal page
     accepts the request. No snapshot confirms or replaces it (R-BTN-39); evidence in git is for
     people, never read as a position.
   - **`next_source`** says who queued the leg: `selector` (a `run` verdict, R-BTN-205), `baton`
-    (a transition of Baton's own, under the rule that makes it: a suspension at a leg's `from`,
-    R-BTN-71; a reconcile leg and its `unchanged` conclusion's displaced leg, R-BTN-39; a fresh
-    question, R-BTN-64; a retry policy's `exhausted` leg, R-BTN-122; a person leg's expiry,
-    R-BTN-116) or `owner` (a route, or an adopt, R-BTN-39). The
+    (a transition of Baton's own, under the rule that makes it: a suspension at a leg's `from`
+    with runs left, R-BTN-71; a reconcile leg and its `unchanged` conclusion's displaced leg,
+    R-BTN-39; a fresh question, R-BTN-64; a retry policy's `exhausted` leg, R-BTN-122) or
+    `owner` (a route, or an adopt, R-BTN-39). The
     reason is in the position's history row. An owner's route and Baton's own transitions stay
     queued until the ticket's station changes, whatever a later verdict says.
   - **Route** (not built: [the proposal](../proposals/data-model-and-api.md#other-reads-and-owner-routes)).
@@ -193,11 +193,7 @@ Designs for this section that are not built are on the proposal page
     (R-BTN-79), and matching rule 1 offers that leg alone. A queue is not a reservation: whoever
     claims passes every gate then. A person leg (R-BTN-116) may arrive while another leg is
     queued; it is never claimed.
-  - **Course changes.** A renamed queued leg resolves through `renamed_from` (R-BTN-64). A
-    queued leg that the course in force does not have leaving that station is unqueued, raises
-    `baton.course-changed` and makes a selection want under the new course. A ticket with no
-    claim at a station the new file lacks waits `course-changed`, with no selection, until the
-    owner adopts it (R-BTN-39). A leg added later changes no queued leg.
+  - **Course changes** to a queued leg and an open want are R-BTN-64's.
 - **R-BTN-205 (the selector chooses the next leg).** `status: specified B-352 B-353 B-354 B-355 B-356`
   Which leg a ticket runs next, from the station Baton holds, is one function of the course's,
   judged over Baton's record. Who may claim or advance it stays the gates' (§7.2): a verdict is
@@ -244,12 +240,14 @@ Designs for this section that are not built are on the proposal page
     shown as R-BTN-33's exception says; the list is at most 4 KB.
   - **What a verdict answers.** Core hands out a `ctx` for one **cause**, and the verdict names
     it in `answers` with the `ctx` digest: an arrival (its history row's id), a claim's offered
-    position (the claim's id), or a selection want (its id). Per cause core keeps the digest it
-    handed out, the record position the `ctx` was built at, and how many verdicts it admits — one,
-    and one more for each `reselect` (R-BTN-63). It refuses a verdict whose digest is not the
-    cause's current one (`stale-selection`); one for a cause that is not open, withdrawn or
-    answered (`not-open`); one beyond what the cause admits (`duplicate`); and a want's verdict
-    from a runner not holding its lease (`lease-lost`). The first valid verdict wins. A `run`
+    position (the claim's id), or a selection want (its id). Each `ctx` handed out is a
+    **handout**, which admits exactly one verdict; core keeps its digest and the record position
+    it was built at. A `reselect` (R-BTN-63), or a want's lease re-offered, voids the cause's
+    handout and issues a new one. Core checks a verdict in this order and refuses the first that
+    fails: a want's verdict from a runner not holding its lease (`lease-lost`); a cause that is
+    withdrawn or answered (`not-open`); a digest that is not the cause's current handout's,
+    a voided one's included (`stale-selection`); a handout already answered (`duplicate`). The
+    first valid verdict wins. A `run`
     whose leg does not leave the station, a malformed verdict, a crash or a timeout is a
     **failed selection**.
   - **Core acts on it** in the transaction that accepts it, recording the verdict, its cause, its
@@ -272,7 +270,8 @@ Designs for this section that are not built are on the proposal page
     - **At a claim**, the claim response carries the `ctx` for the offered position, for the
       runner's re-check (R-BTN-5 / R-BTN-34). A verdict posted with the `stale-board` release
       that the re-check causes replaces nothing: core records it and makes a selection want for
-      the ticket with a fresh `ctx`, and while that want is open the queued leg is not offered.
+      the ticket with a fresh `ctx`. While that want is open no claim of the ticket is accepted
+      (§6.6 rule 1, `selection-pending`), and no claim withdraws it.
     - **A selection want** is made for every cause outside a claim: a new ticket, a fact
       arrival, Baton's own settlement, a course change (R-BTN-64), a `wait`'s time or trigger, a
       session claim whose client ran no selector
@@ -280,7 +279,7 @@ Designs for this section that are not built are on the proposal page
       (above), and, when a claim ends, an arrival it left without a verdict or a cause deferred
       after its last one. A ticket has at most one open want: a new cause while one is open
       withdraws it and makes a new one with a new `ctx`, and a claim starting on the ticket
-      withdraws it.
+      withdraws it — except a re-check release's want, which no claim can start under (above).
     - **The want's lease.** A want is offered to one runner at a time, for a lease of 60 seconds:
       a live runner granted on the repository whose declared courses include the ticket's, and
       under `protected` one of the policy's trusted runner class (R-BTN-182). A lease that lapses
@@ -316,8 +315,8 @@ Designs for this section that are not built are on the proposal page
 
     Every leg a claim runs has its own starting `advance`. Baton records each leg a claim starts
     and finishes (`claim_legs`).
-  - **`reselect`** (`POST …/claims/{id}/reselect`) answers the claim's last arrival with a fresh
-    `ctx`, and admits one more verdict for it (R-BTN-205); a holder waiting under its claim
+  - **`reselect`** (`POST …/claims/{id}/reselect`) answers the claim's last arrival with a new
+    handout and a fresh `ctx`, voiding the earlier one (R-BTN-205); a holder waiting under its claim
     (R-BTN-72) asks it when it selects again.
   - **Every run has a run id.** The `advance` that starts a run, and an adoption that adds one,
     mints its `run_id` through the core's clock (R-BTN-32) and random source (`r_` and a
@@ -344,7 +343,9 @@ Designs for this section that are not built are on the proposal page
   `suspended:<station>`: the outcome its running leg reached if that leg finished, else the
   leg's `from`; any other station is refused. Baton records the station as the ticket's position
   at once; the end is confirmed as R-BTN-10 says. A suspension at the leg's `from` records no
-  arrival and queues that leg again (`next_source: baton`). A suspension at an outcome follows
+  arrival and queues that leg again (`next_source: baton`) if the ticket has runs of it left
+  (R-BTN-63); with its `max_runs` used, it makes a selection want instead, so a verdict decides
+  (R-BTN-205). A suspension at an outcome follows
   that arrival's finishing `advance` (R-BTN-63) and carries the holder's verdict for it (§9.4);
   without one, the arrival's selection is a want when the claim ends (R-BTN-205).
   The next claimant starts at Baton's station.
@@ -617,9 +618,13 @@ Designs for this section that are not built are on the proposal page
     recorded answer's source. If the source is no longer admitted and the answer's preceding
     station still admits the person leg, Baton queues a fresh question there (`next_source:
     baton`). The historical answer remains in the record.
-  - **Open wants.** A selection want open when the new file is accepted is withdrawn, and a new
-    one made under the new course; a verdict answering the withdrawn want is refused
-    `not-open`.
+  - **Queued legs and open wants.** A renamed queued leg resolves through `renamed_from`. A
+    queued leg that the course in force does not have leaving that station is unqueued, raises
+    `baton.course-changed` and makes a selection want under the new course (R-BTN-205). A ticket
+    with no claim at a station the new file lacks waits `course-changed`, with no selection,
+    until the owner adopts it (R-BTN-39). A leg added later changes no queued leg. A selection
+    want open when the new file is accepted is withdrawn, and a new one made under the new
+    course; a verdict answering the withdrawn want is refused `not-open`.
 - **The test kit.** `baton course test <repository root> <course>` (R-BTN-127), run by a home
   repository's CI on a PR that changes `.baton/` (R-BTN-133), starts a local Baton, posts the
   PR's board with the proposed `.baton/` and needs no production access. It fails when:

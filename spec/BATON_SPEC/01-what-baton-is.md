@@ -107,8 +107,8 @@ resumed by a **restart** (§7). "Workflow" means only a CI workflow; "activity" 
     in the transaction that accepts the attestation when all hold: the policy admits its writer
     for the type (R-BTN-191); the leg leaves Baton's current station, queued or not; `reached` is one of its
     outcomes; no claim is active on the ticket; and Baton holds the ticket for nothing else (§7).
-    It makes a selection want (R-BTN-205) whose `ctx` names the attestation's `next`, which the
-    default selector takes. Baton logs a `fact-arrival` history row and keeps the `ref`.
+    It makes a selection want (R-BTN-205); the fact leg's next leg is the course file's
+    `arrives.next`, which the default selector takes, and an attestation names none. Baton logs a `fact-arrival` history row and keeps the `ref`.
     - An arrival whose `ref` Baton has applied for this ticket is accepted and moves nothing.
     - An arrival that fails only because a claim is active or Baton holds the ticket is kept with
       its `ref` and applied when the hold ends, if it still meets every other condition — except

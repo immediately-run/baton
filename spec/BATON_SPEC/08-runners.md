@@ -40,6 +40,7 @@ section that are not built are in [the proposal page](../proposals/checks-and-ex
   | `kind` | `vm`, `local` or `cloud`: a label no rule reads |
   | `model_id` | optional; a label no rule reads |
   | `capabilities` | the declared capabilities, roles and holdings (R-BTN-121, R-BTN-174) |
+  | `host` | optional: `{memory_mb?}`, the numeric dimensions the runner declares for a verdict's `host` (R-BTN-174); a dimension left out meets no requirement on it |
   | `tags` | optional (R-BTN-60) |
   | `lease_timeout_s` | R-BTN-9 |
   | `concurrency` | R-BTN-4 |
@@ -131,7 +132,7 @@ section that are not built are in [the proposal page](../proposals/checks-and-ex
 
 ### 8.3 The runner
 
-- **R-BTN-72 (the runner).** `status: partly B-47 B-274 B-353` `baton runner start` is a generic runner loop. It hosts the
+- **R-BTN-72 (the runner).** `status: partly B-47 B-274 B-352 B-353` `baton runner start` is a generic runner loop. It hosts the
   sidecar, heartbeats, claims up to R-BTN-4's bound, and runs each
   claim's legs one at a time, claims side by side, each leg by **the script for that leg**; then
   it advances, suspends or ends as the script's result, the course file, R-BTN-40 and the end

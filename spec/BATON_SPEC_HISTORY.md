@@ -51,7 +51,7 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   - **The owner's rulings on the design**, 2026-11-26: a default selector, "Yes"; the `because`
     format, "JSON, can contain url to reason file or simple text in "reason " field"; the
     selector's budget, "not sure" — R-BTN-205 states 10 seconds, 256 MB, a 60-second want lease
-    and 15 minutes untaken as its defaults, and B-357 measures them.
+    and 15 minutes untaken as its defaults, decided here (below), and B-357 measures them.
   - **The owner's rulings of 2026-11-27.** On where the design lives: "Since these proposals are
     necessary to get baton into a generally useable state, I would like you to include the
     changes in the specs and draft the necessary tickets for implementing them. Except of course
@@ -197,6 +197,41 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
       reclaims into the same refusal; the release verdict itself is the owner's ruling above.
     - **`selection_handouts`**, one table for every `ctx` handed out, rather than columns on each
       cause's own table.
+  - **Review round four** (2026-11-27, at the owner's request beyond the three-round cap): a fresh
+    reviewer over PR #462 at `aec7fefa`, finding no security hole. Every finding verified against
+    the text. Fixed:
+    - `released:short-wait` in §9.4's one list of end reasons, not a failed attempt;
+    - `reselect` replaces, not banks: each handout admits exactly one verdict, a `reselect` or a
+      re-offered lease voids the cause's handout (§13's `state` `voided` and `voided_by`), and a
+      verdict over a voided one is `stale-selection` (R-BTN-205, R-BTN-63, §14, S-BTN-329);
+    - a fact arrival's next leg has one source, the course file's `arrives.next`: the sync's
+      `std:arrival@1` names none (R-BTN-39, R-BTN-203; B-356 removes the attestation's `next`);
+    - R-BTN-83's `next_source: baton` list without a person leg's expiry, which R-BTN-116 applies
+      as an arrival followed by a want;
+    - the heartbeat's `host` dimensions in §8.1's body table and §14's heartbeat row;
+    - the open re-check release want is a gate: rule 1's `selection-pending`, `ready_tickets`'
+      exclusions, and no claim withdrawing that want;
+    - `not-queued` renamed `not-selected` under R-BTN-63 among the gates rule 1 lists;
+    - §9.4's rule for an `end: done` covers a ticket the latest snapshot shows closed as done;
+    - a suspension at `from` whose leg's `max_runs` is used makes a selection want instead of
+      re-queueing it (R-BTN-71, R-BTN-83);
+    - R-BTN-205's refusal order, `lease-lost` first, matching S-BTN-328;
+    - R-BTN-72's status gains B-352; R-BTN-5 / R-BTN-34's second token names B-352 and B-353
+      for the claim response's `ctx` and `verdict` and the runner's re-check;
+    - the sentence on a suspension's or done end's `detail`, dropped in round one, restored in
+      §9.4;
+    - B-355's copy of the owner's "no lag can commence" made verbatim;
+    - R-BTN-83's *Course changes* folded into R-BTN-64, its one home, which R-BTN-83 cites.
+
+    Nothing was rejected.
+
+    Decided here, not by the owner:
+    - **The 128-character bound** on a verdict's reasons: the owner ruled "Bounded text, an
+      exception" and named no length.
+    - **The 10-second, 256 MB, 60-second and 15-minute defaults**: the owner said "not sure"; B-357
+      measures them.
+    - **A suspension at `from` with `max_runs` used makes a want**, rather than raising a condition
+      of its own, so the course's selector decides as it does elsewhere.
 - **2026-11-26 — Gating on a reading deferred (R-BTN-76, R-BTN-181).**
   Rules changed: none; the Decisions line on readings (§91) now says they are served as advice
   and that gating on one is deferred, where it said gate or advice was the requirement's choice.

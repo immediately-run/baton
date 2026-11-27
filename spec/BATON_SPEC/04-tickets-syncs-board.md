@@ -235,7 +235,8 @@ numbers.
     a runner's act cannot be told from a person's (Baton serves the logins with `positions`,
     §4.3). The sync posts one
     `std:arrival@1` as writer `sync` per fact that a fact leg leaving Baton's station takes, with
-    that `ref` and the leg's `next` for it, which the default selector takes (R-BTN-205). A `pr-merged` no fact leg leaving the station takes is
+    that `ref`; it names no next leg, which is the course file's `arrives.next` as the default
+    selector reads it (R-BTN-205). A `pr-merged` no fact leg leaving the station takes is
     `merged-early` evidence (below); any other fact no fact leg takes is posted as nothing.
   - **Other evidence is weighed by the course's reconcile leg.** The sync also posts an
     `std:evidence@1` (`{ref, kind}`) per piece of evidence that a ticket may have moved outside
@@ -483,7 +484,7 @@ The fingerprint stores no ticket content and is an optimization, never authority
 
 ### 4.5 Reading the ticket
 
-- **R-BTN-5 / R-BTN-34 (the runner reads and re-verifies the ticket from git, by its version).** `status: built B-46` `status: partly B-353`
+- **R-BTN-5 / R-BTN-34 (the runner reads and re-verifies the ticket from git, by its version).** `status: built B-46` `status: partly B-352 B-353`
   - The claim response names the ticket's `path`, the `snapshot_sha` it was decided on, its
     `version` as the board holds it, and how its source reads (`ticket_source`: `{kind,
     versions}`; absent when the board declared no source, and `version` is `''` when the board

@@ -27,7 +27,7 @@ The owner, 2026-11-26: "the station function should not assume that Git is the c
 
 1. **Selectors for the branching standard courses**, create-pr first (`pr-open` → run-tests, review or fix; `reviewed` → review, fix, adjudicate or merge), then review-pr, create-spec and any other with a station of more than one leg out. Each branching leg returns its verdict as an inline output (R-BTN-108) its selector reads.
 2. **Station functions** return no readiness and no `not_before`; `std:git.readiness@1` and the board post's `next_leg`, `next_source` and `next` go; the sync posts facts, bars, the question, `needs` and `course_data`.
-3. **Remove what the selector replaced:** the holder's `next` in `decide()` and the leg scripts; `baton.missing-next`; `next_source` `course`, `marker`, `inferred` and `holder` (a migration); readiness rows.
+3. **Remove what the selector replaced:** the holder's `next` in `decide()` and the leg scripts; the `next` the sync's `std:arrival@1` carries for a fact leg (R-BTN-203), the course file's `arrives.next` being the one source; `baton.missing-next`; `next_source` `course`, `marker`, `inferred` and `holder` (a migration); readiness rows.
 4. **Docs:** `docs/standard-courses.mdx` gains each course's selector; `docs/context/vocabulary.mdx` already names `selector`, `verdict` and `selection want`.
 
 ### Trust
