@@ -49,7 +49,7 @@ BATON_SPEC's sections are named with a rule or as `§11.3`, `§12.2`.
       undoing of the key's own tightening, `false` for everything else, and for an action absent
       from MCP for a mechanical reason the entry names (the WebSocket upgrade; `GET
       /v1/actions`, whose answer over MCP is `tools/list`). `check:actions` fails an entry whose
-      mark differs from the one R-BTN-186 gives.
+      `delegated` value differs from the one R-BTN-186 gives.
   - **The CLI's commands** are a second table in the same file. Each names the action ids it
     calls (`leg log` calls `leg.runs` and reads the log directory itself), or `local` for one that
     calls none, with its arguments, its flags, a one-line summary and one example; a noun may
@@ -62,12 +62,12 @@ BATON_SPEC's sections are named with a rule or as `§11.3`, `§12.2`.
       are not actions.
     - A dashboard session authorizes as `session` with its minting key's role (§3); a
       delegated key authorizes as `owner` on its one repository, narrowed to its listed ids and
-      their `delegated` marks (§2).
+      their `delegated` values (§2).
   - **Generated surfaces.** The router comes from `http`, the CLI tree and every `help` from the
     command table, and an MCP key's tool list from `delegated` and the key's ids; the API table
     (§14) documents the registry. `npm run check:actions` fails when a route, command or API row
     has no entry, an entry has neither a route nor a command, an id breaks the grammar, a
-    `delegated` mark disagrees with R-BTN-186, or a command's example does not parse against its
+    `delegated` value disagrees with R-BTN-186, or a command's example does not parse against its
     arguments.
   - **What can I do.** `GET /v1/actions` answers the caller's own entries, each with its `input`
     schema — to a session, its entries as the registry holds them, minus `delegated`, with `ui`
@@ -85,7 +85,7 @@ BATON_SPEC's sections are named with a rule or as `§11.3`, `§12.2`.
     grant instead. An OAuth grant scoped to an intervention (the intervention-sessions proposal) is
     agent-driven too. The rest of this section describes the `bmcp_` key.
   - **The MCP key is a delegated key** (R-BTN-186): an owner of one repository, for the action
-    ids listed at its minting, within the registry's `delegated` marks (§1).
+    ids listed at its minting, within the registry's `delegated` values (§1).
   - **Minting.** An approver on the repository's `approvers.members` (R-BTN-188) mints one:
     `baton owner mcp-key create <repository> --name <name> [--actions read | <id>,…] [--ttl
     <days>]` (`POST /v1/owner/{repository}/mcp-keys`). A key has an immutable `id`, never
@@ -99,9 +99,9 @@ BATON_SPEC's sections are named with a rule or as `§11.3`, `§12.2`.
       §12.1, and mints none), the action
       ids resolved at minting, expiry, last use (written at most once a minute) and revocation.
       An MCP key is not a `credentials` row.
-    - `read` means every action whose `delegated` mark is `true`, whose `effect` is `read` and
+    - `read` means every action whose `delegated` value is `true`, whose `effect` is `read` and
       that exists at minting, so a later release never widens a key. A write is included only
-      when listed by id. An id whose mark is `false`, or an action the minter could not take
+      when listed by id. An id whose `delegated` value is `false`, or an action the minter could not take
       itself, is refused at minting (`invalid-params`).
     - It lives at most 90 days (default 30) and ends after 7 days without a call, when the
       credential that minted it is removed or revoked, or when its repository is retired
@@ -111,8 +111,8 @@ BATON_SPEC's sections are named with a rule or as `§11.3`, `§12.2`.
       and listed with the repository's credentials, with its minter (`GET
       /v1/owner/{repository}/grants`' `mcp_keys`, `baton owner grant list`).
   - **Authorization.** `authorize` treats an MCP key as `owner` on its one repository, narrowed
-    to its stored ids and their `delegated` marks; an id whose mark has since become `false` is
-    refused. An `own`-marked action succeeds only on what the key itself set: a hold or a bar
+    to its stored ids and their `delegated` values; an id whose value has since become `false` is
+    refused. An action whose value is `own` succeeds only on what the key itself set: a hold or a bar
     whose `set_by` is `mcp:<id>` (a hold set over MCP is a `held` event with `hold_reason:
     mcp:<name>`; on a ticket already held it changes nothing, so it never replaces another
     reason). The actor is recorded as `mcp:<id>` in history and release messages, shown with its
@@ -126,7 +126,7 @@ BATON_SPEC's sections are named with a rule or as `§11.3`, `§12.2`.
       Any other method is JSON-RPC `-32601`; a batch array is `-32600`.
     - No `Mcp-Session-Id`. `GET /v1/mcp` is `405`. A missing or unknown key is `401` with
       `WWW-Authenticate: Bearer`. A foreign `Origin` is `403`.
-  - **Tools.** `tools/list` returns the key's stored ids whose `delegated` mark still stands,
+  - **Tools.** `tools/list` returns the key's stored ids whose `delegated` value still admits them,
     named by the id with `.` as `_`, with `inputSchema` the entry's `input` and `readOnlyHint` or
     `destructiveHint` from `effect`. `tools/call` runs the route's core function and returns the
     output as `structuredContent` and as text through the `plain` renderer (R-BTN-112).

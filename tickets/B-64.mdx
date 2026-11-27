@@ -86,7 +86,7 @@ and check runs travel through a second queue (`notices`, R3-1256) that does the 
      per forge courier of the repository.
    - **Dropping.** A `handler` entry still `queued` when its condition closes, and never claimed,
      is `dropped`, its provisional row deleted, and no withdrawal follows; a claimed or delivered
-     one is dropped and followed by a `withdraw` entry, the claimed one's row kept until its mark
+     one is dropped and followed by a `withdraw` entry, the claimed one's row kept until its report
      or its lease lapse.
    - **Confirming.** In the snapshot transaction (`src/core/board.ts`), a git entry whose
      `delivered_ref` the accepted snapshot contains, and which the snapshot shows, turns
