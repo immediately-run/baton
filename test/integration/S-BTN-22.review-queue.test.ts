@@ -74,7 +74,8 @@ describe('S-BTN-22 review queue bound', () => {
       expect(board[i]).toMatchObject({ id, rank: expected[i].order.rank, ready_position: i + 1 });
       expect(tickets[i]).toMatchObject({ ticket_id: id, rank: expected[i].order.rank, ready_position: i + 1 });
     }
-    expect(tickets.find((r: { ticket_id: string }) => r.ticket_id === 'docs:F-INELIGIBLE')).toMatchObject({ ready_position: null });
+    expect(tickets.find((r: { ticket_id: string }) => r.ticket_id === 'docs:F-INELIGIBLE')).toBeUndefined();
+    expect(board.find((r: { id: string }) => r.id === 'docs:F-INELIGIBLE')).toMatchObject({ ready_position: null });
   });
 
   it('age breaks a tie of station and rank: the leg ready longest first, then the id', async () => {

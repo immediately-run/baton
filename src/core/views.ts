@@ -90,9 +90,11 @@ export function boardView(core: Pick<BatonCore, 'now' | 'registry' | 'sql' | 'co
   const now = core.now();
   const repository = uiRepo(core, core.registry.get(repo)!);
   const offered = runnerId == null ? null : core.claims.offerOrder(runnerId);
-  const ready = readyRows(core, [repository], repo).map((row, i) => ({ ...row,
-    ready_position: offered ? offered.get(String(row.id))?.position ?? null : i + 1,
-  })).sort((a, b) => (a.ready_position ?? Infinity) - (b.ready_position ?? Infinity));
+  const ready = readyRows(core, [repository], repo);
+  if (offered) {
+    for (const row of ready) row.ready_position = offered.get(String(row.id))?.position ?? null;
+    ready.sort((a, b) => (a.ready_position ?? Infinity) - (b.ready_position ?? Infinity));
+  }
   return {
     repository,
     ready,
@@ -120,6 +122,12 @@ function readyRows(core: Pick<BatonCore, 'sql'>, repositories: ReturnType<typeof
   for (const r of core.sql<{ ticket_id: string; name: string }>('SELECT ticket_id, name FROM ticket_requires WHERE ticket_id IN (SELECT value FROM json_each(?)) ORDER BY name', JSON.stringify(items.map((t) => t.id)))) {
     requires.set(r.ticket_id, [...(requires.get(r.ticket_id) ?? []), r.name]);
   }
+  const positions = new Map<SqlValue, number>();
+  const repositoryPosition = (id: SqlValue): number | null => {
+    const position = (positions.get(id) ?? 0) + 1;
+    positions.set(id, position);
+    return position;
+  };
   return items.map((r) => ({
     id: r.id,
     repository_id: r.repository_id,
@@ -137,6 +145,7 @@ function readyRows(core: Pick<BatonCore, 'sql'>, repositories: ReturnType<typeof
     queue: r.queue,
     node: r.node,
     rank: r.rank,
+    ready_position: repositoryPosition(r.repository_id),
     station: r.station,
     leg: r.next_leg,
     rank_reason: r.node ? (r.node === 'ready-expedite' ? 'expedite lane' : `${r.queue} queue · order ${r.ord ?? '—'}`)

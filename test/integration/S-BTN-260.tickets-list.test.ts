@@ -136,7 +136,7 @@ describe('S-BTN-260 the tickets list (B-194)', () => {
     expect(state('C')).toEqual(['closed', []]);
 
     const r = byId(answer, 'R');
-    expect(Object.keys(r).sort()).toEqual(['course', 'detail', 'eligible_runners', 'expedite', 'failed_rule', 'order', 'parent', 'position', 'reasons', 'requires', 'requires_unmet', 'state', 'tags', 'ticket_id', 'title']);
+    expect(Object.keys(r).sort()).toEqual(['course', 'detail', 'eligible_runners', 'expedite', 'failed_rule', 'order', 'parent', 'position', 'rank', 'ready_position', 'ready_since', 'reasons', 'requires', 'requires_unmet', 'state', 'tags', 'ticket_id', 'title', 'to_end']);
     expect([r.title, r.course, r.position]).toEqual(['R — a fixture ticket', 'roadmap-pr', { station: 'filed', path_len: 0, next_leg: 'implement' }]);
 
     const run1 = byId(answer, 'RUN1').detail;
