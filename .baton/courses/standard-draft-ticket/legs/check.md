@@ -34,7 +34,7 @@ fix what fails:
 ## File
 
 - File each ticket with `$BATON_DIBBER` (the `dibber` your stub pins: run it exactly as that variable says, never another): `$BATON_DIBBER new --title "…" --body-file <the
-  draft's body, in a file outside the checkout>`, `--depends-on` for the chain, and
+  draft's body, in a file outside the checkout> --order N`, `--depends-on` for the chain, and
   `--field course=<id>` only when the ticket names a course other than the repository's default.
   Dibber takes the id from Baton's sequence through `.dibber/config.json`'s coordinator, never a
   scan (R-BTN-131); if it refuses because Baton gave no number, stop and say so — never
@@ -46,3 +46,6 @@ fix what fails:
 - Commit the new files and the request together to the default branch.
 
 Your work lands under the ticket's own `## check` heading — write it if it is not there; the close checks it is.
+
+Before filing, compute `N` in the ticket store checkout with `baton tickets filing-order`,
+passing the parent ticket id if the new ticket is a child.
