@@ -39,6 +39,13 @@ This is an operator ticket: a person runs it, no runner can.
 
 The release is a human act (B-135). No runner tags, publishes or changes a grant for this ticket.
 
+### Invariants
+
+- The release window holds the host, the grants and the course still. An intervention restarts
+  it; nothing is changed inside a window that is meant to pass.
+- The window passes only on `baton report soak` printing `PASS` and no intervention dated inside
+  it. Neither is waived, and the rehearsal releases nothing.
+
 ## Status
 
 _filed 2026-11-27._
