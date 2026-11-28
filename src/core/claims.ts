@@ -34,6 +34,7 @@ import { clampLease, REPORT_HORIZON_MS } from './validate';
 import type { Blocks } from './blocks';
 import type { Conditions } from './conditions';
 import type { History } from './history';
+import type { RunnerFaults } from './runnerFaults';
 import type { IdleDetail, IdleGate } from './idleReasons';
 const EXPEDITE_BOUND = 2; // §7.2 rule 2, advice
 /** §2e: a claim regressed this long is listed under Needs you. */
@@ -84,6 +85,7 @@ export interface Ctx {
   /** B-234 (R-BTN-160, R-BTN-195): the raised conditions — an open `interact` of a run closes
    *  in the transactions that end the run (the advance that finishes it, the claim's end). */
   conditions: Pick<Conditions, 'runEnded'>;
+  runnerFaults: Pick<RunnerFaults, 'until' | 'record' | 'remember' | 'outcome'>;
   /** B-4 (R-BTN-113): the instance's session-host allowlist, `instance_settings` first, else the
    *  deploy's BATON_SESSION_HOSTS. */
   sessionHosts: () => string[];
@@ -1259,6 +1261,9 @@ export class Claims {
   /** `GET /v1/runner/recommendations` (R-BTN-45): the sorted legs this runner may take, without
    *  claiming; `?limit=` applies after the merge (R-BTN-61). */
   recommendations(runnerId: number, limit = 10, all = false) {
+    if (this.c.runnerFaults.until(runnerId) != null) {
+      return all ? { recommendations: [], truncated: false } : { recommendations: [] };
+    }
     if (all) {
       const entries = this.cached(() => this.recommend(this.runner(runnerId), 501, undefined, true));
       return { recommendations: entries.slice(0, 500), truncated: entries.length > 500 };
@@ -1325,6 +1330,7 @@ export class Claims {
 
   /** `GET /v1/runner/next`: the first recommendation, or `no-eligible-ticket`. */
   next(runnerId: number) {
+    this.refuseRunnerBackoff(runnerId);
     const idle = this.idleHit(runnerId);
     if (idle?.refusal) throw idle.refusal;
     const version = schedulingVersion(this.c.store);
@@ -1356,6 +1362,7 @@ export class Claims {
     // R-BTN-4 (B-188): up to the runner's bound — its `concurrency` here, each repository's grant
     // in `decide` — never one claim per runner.
     const w = this.runner(runnerId);
+    this.refuseRunnerBackoff(runnerId);
     this.refuseFull(w, null);
     // B-237 (R-BTN-196): an idle runner asking again with nothing changed gets the same refusal.
     const idle = b.ticket_id || b.prefer || b.legs ? null : this.idleHit(runnerId);
@@ -1719,6 +1726,7 @@ export class Claims {
     }
     if (run) {
       this.exec('UPDATE claim_legs SET to_station = ?, finished_at = ?, evidence = ? WHERE claim_id = ? AND seq = ?', at, now, b.evidence, claimId, run.seq);
+      this.c.runnerFaults.outcome(advancing.credential_id);
       // B-234 (R-BTN-195): the finished run's open `interact` closes with it — the ask was for
       // that session, and the run is done.
       if (run.run_id != null) this.c.conditions.runEnded(claimId, run.run_id);
@@ -2144,11 +2152,13 @@ export class Claims {
   private finish(claimId: number, ticketId: string, status: 'completed' | 'released' | 'reaped', reason: string, actor: string,
     opts: { ended_at_sha?: string | null; fence?: { incarnation: number; deadline?: number } | null; detail?: string | null; error?: End['error']; reached?: string | null; finished?: boolean; evidence?: string | null; next?: string | null; localOrder?: { leg: string | null; by: string; ran_at: string } | null } = {}) {
     const now = this.c.now();
-    const c = this.rows<{ station: string; runner_id: number; regressed_since: number | null }>('SELECT station, runner_id, regressed_since FROM claims WHERE id = ?', claimId)[0];
+    const c = this.rows<{ station: string; runner_id: number; regressed_since: number | null; credential_id: string }>(
+      `SELECT c.station, c.runner_id, c.regressed_since, r.credential_id FROM claims c JOIN runners r ON r.id = c.runner_id WHERE c.id = ?`, claimId)[0];
     const run = this.runningLeg(claimId);
     const reached = opts.reached ?? c.station;
     if (run && opts.finished) {
       this.exec('UPDATE claim_legs SET to_station = ?, finished_at = ?, evidence = ? WHERE claim_id = ? AND seq = ?', reached, now, opts.evidence ?? null, claimId, run.seq);
+      this.c.runnerFaults.outcome(c.credential_id);
     } else if (run) {
       // A reap, a stale-board release or an end at the leg's `from`: the leg was given up.
       this.exec('UPDATE claim_legs SET abandoned_at = ?, evidence = ? WHERE claim_id = ? AND seq = ?', now, opts.evidence ?? null, claimId, run.seq);
@@ -2193,11 +2203,63 @@ export class Claims {
     else if (reason === 'released:cannot-finish:contract-input') {
       this.hold(ticketId, 'non-retryable:contract-input', 'baton', { claim_id: claimId, detail: opts.detail ?? null });
       this.c.blocks?.raise(ticketId, 'baton.contract', opts.detail ?? null);
-    } else this.applyRetryPolicy(claimId, ticketId, reason, run?.leg, opts.detail ?? opts.error?.message);
+    } else {
+      const retryable = !opts.finished && reason === 'released:cannot-finish:transient';
+      const attributed = retryable && this.c.runnerFaults.record({ claim: claimId, ticket: ticketId,
+        credential: c.credential_id, repository: repositoryOf(ticketId), reason, errorType: opts.error?.type ?? null },
+      (sample, burst) => this.undoBurstCharge(sample, burst));
+      if (!attributed) {
+        const before = retryable ? this.retryOverride(ticketId) : null;
+        this.applyRetryPolicy(claimId, ticketId, reason, run?.leg, opts.detail ?? opts.error?.message);
+        if (retryable) this.c.runnerFaults.remember(claimId, { before, after: this.retryOverride(ticketId) });
+      }
+    }
     this.c.outsideWork?.pending(undefined, ticketId);
   }
 
   // ── attempts, retries and holds (§6.10, §8; R3-1217) ────────────────────────────────────
+
+  private refuseRunnerBackoff(runnerId: number) {
+    const until = this.c.runnerFaults.until(runnerId);
+    if (until != null) throw new BatonError('runner-backing-off', `this runner is backing off until ${new Date(until).toISOString()}`, { until });
+  }
+
+  private retryOverride(ticket: string) {
+    return this.rows<{ hold: number; hold_reason: string | null; retry_after: number | null }>(
+      'SELECT hold, hold_reason, retry_after FROM ticket_overrides WHERE ticket_id = ?', ticket)[0]
+      ?? { hold: 0, hold_reason: null, retry_after: null };
+  }
+
+  private undoBurstCharge(sample: { claim_id: number; ticket_id: string; undo_json: string | null }, burst: number) {
+    const { claim_id: claim, ticket_id: ticket, undo_json } = sample;
+    let lifted = false;
+    if (undo_json) {
+      const { before, after } = JSON.parse(undo_json) as Record<'before' | 'after', ReturnType<Claims['retryOverride']>>;
+      // An owner lift or later charge is not ours to undo. Ignore previous burst corrections;
+      // the original override and end events remain in the log.
+      const writer = (field: 'hold' | 'retry_after') => this.rows<{ claim_id: number | null }>(`SELECT e.claim_id FROM events e
+        WHERE e.ticket_id = ? AND e.kind = 'override' AND NOT EXISTS (SELECT 1 FROM events b
+          WHERE b.claim_id = e.claim_id AND b.kind = 'override' AND json_type(b.detail_json, '$.burst') IS NOT NULL)
+          AND (json_type(e.detail_json, ?) IS NOT NULL OR json_extract(e.detail_json, '$.hold') = 0)
+        ORDER BY e.seq DESC LIMIT 1`, ticket, `$.${field}`)[0]?.claim_id;
+      // record() tags the sample after the callback, so its writes still count here.
+      if (before.retry_after !== after.retry_after && writer('retry_after') === claim) {
+        this.exec('UPDATE ticket_overrides SET retry_after = ? WHERE ticket_id = ?', before.retry_after, ticket);
+      }
+      if (after.hold_reason === 'attempts-exhausted' && before.hold_reason !== after.hold_reason && writer('hold') === claim) {
+        this.exec('UPDATE ticket_overrides SET hold = ?, hold_reason = ? WHERE ticket_id = ?', before.hold, before.hold_reason, ticket);
+        if (!before.hold) this.c.blocks.answer(ticket, 'baton:retries');
+        lifted = !before.hold;
+        this.c.dispatch('mirror', ticket);
+      }
+    }
+    this.exec('UPDATE claims SET failed_attempt = 0 WHERE id = ?', claim);
+    this.event('override', 'baton', { burst, attempt_restored: !!undo_json, hold_lifted: lifted }, ticket, claim);
+    if (undo_json) {
+      this.c.outsideWork?.pending(undefined, ticket);
+      this.c.blocks.held(ticket, false);
+    }
+  }
 
   /** The event-log position of the newest hold-lift on the item: the count of failed attempts
    *  starts after it (§6.10). Ordered by the log, never by time — a lift and an end can share a

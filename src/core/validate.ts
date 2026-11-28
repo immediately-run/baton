@@ -9,6 +9,16 @@ import { CONDITION_TYPE, CONDITION_TYPE_MAX, RESTART_ID, SEVERITIES, isCoreOnly,
 import { parseSchemaId, VALUE_MAX_BYTES } from '../shared/schema.mjs';
 import { CLIENT_VERSION_MAX, compareVersions, parseVersion } from '../shared/versions.mjs';
 import type { ForgeDispatch } from './ports';
+import { MAX_FAULT_WINDOW_S } from './attempts';
+
+export function checkRunnerFaults(value: unknown) {
+  const field = 'runner_faults';
+  if (!isObj(value) || Object.keys(value).some((k) => k !== 'tickets' && k !== 'window_s')) bad(field, 'must be {tickets, window_s}');
+  const { tickets, window_s } = value as Record<string, unknown>;
+  if (typeof tickets !== 'number' || !Number.isInteger(tickets) || tickets < 2 || tickets > 100) bad(`${field}.tickets`, 'must be an integer from 2 to 100');
+  if (typeof window_s !== 'number' || !Number.isInteger(window_s) || window_s < 1 || window_s > MAX_FAULT_WINDOW_S) bad(`${field}.window_s`, `must be an integer from 1 to ${MAX_FAULT_WINDOW_S}`);
+  return { tickets, window_s };
+}
 
 export const DISPATCH_WORKFLOW = /^\.github\/workflows\/[A-Za-z0-9._-]{1,100}\.ya?ml$/;
 const GITEA_DISPATCH_WORKFLOW = /^\.gitea\/workflows\/[A-Za-z0-9._-]{1,100}\.ya?ml$/;

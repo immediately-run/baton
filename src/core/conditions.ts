@@ -53,6 +53,7 @@ interface ConditionRow {
   raised_at: number;
   outcome: string;
   reraised: number;
+  detail_json: string | null;
 }
 
 /** An entry of the Needs-you list and the conditions route. */
@@ -69,7 +70,14 @@ export interface ConditionEntry {
   session_link?: boolean;
   restarts: Record<string, string> | null;
   default: string | null;
-  detail?: { reraised: number };
+  detail?: Record<string, unknown>;
+}
+
+export function coreConditionDetail(row: { detail_json: string | null; reraised: number }) {
+  return row.detail_json || row.reraised ? { detail: {
+    ...(row.detail_json ? JSON.parse(row.detail_json) as Record<string, unknown> : {}),
+    ...(row.reraised ? { reraised: row.reraised } : {}),
+  } } : {};
 }
 
 export function isInteraction(type: string): boolean {
@@ -264,6 +272,30 @@ export class Conditions {
     }
   }
 
+  /** R-BTN-163: refresh an open repository/runner notice or reopen its recent entry. */
+  notifyCore(repo: string, type: string, ref: string | null, detail: Record<string, unknown>) {
+    const now = this.c.now();
+    const prior = this.rows<{ id: number; outcome: string }>(`SELECT id, outcome FROM conditions
+      WHERE repository_id = ? AND type = ? AND ticket_id IS NULL AND ref IS ?
+        AND (outcome = 'open' OR closed_at >= ?) ORDER BY outcome = 'open' DESC, closed_at DESC, id DESC LIMIT 1`,
+    repo, type, ref, now - HOUR)[0];
+    const json = JSON.stringify(detail);
+    if (prior?.outcome === 'open') {
+      this.exec('UPDATE conditions SET detail_json = ? WHERE id = ?', json, prior.id);
+      return;
+    }
+    if (prior) this.exec(`UPDATE conditions SET outcome = 'open', raised_at = ?, closed_at = NULL, closed_how = NULL,
+      detail_json = ?, reraised = reraised + 1 WHERE id = ?`, now, json, prior.id);
+    else this.exec(`INSERT INTO conditions (repository_id, type, ref, disposition, raised_at, detail_json)
+      VALUES (?, ?, ?, 'notify', ?, ?)`, repo, type, ref, now, json);
+    logEvent(this.c.store, now, 'condition', 'baton', { type, ref, disposition: 'notify' }, null, null, repo);
+  }
+
+  closeCore(repo: string, type: string, ref: string | null) {
+    this.exec(`UPDATE conditions SET outcome = 'closed', closed_at = ?, closed_how = 'cause-ended'
+      WHERE repository_id = ? AND type = ? AND ticket_id IS NULL AND ref IS ? AND outcome = 'open'`, this.c.now(), repo, type, ref);
+  }
+
   // ── the reads (R-BTN-163: Needs you, and the list a delivery runner polls) ───────────────
 
   private entry(r: ConditionRow, disclose: boolean): ConditionEntry {
@@ -276,7 +308,7 @@ export class Conditions {
       condition_id: r.id, ticket_id: r.ticket_id, leg: r.leg, run_id: r.run_id, type: r.type,
       disposition: r.disposition, severity: r.severity, raised_at: r.raised_at, ...conditionLink(r.type, r.url, disclose),
       restarts, default: r.default_restart,
-      ...(r.reraised ? { detail: { reraised: r.reraised } } : {}),
+      ...coreConditionDetail(r),
     };
   }
 
@@ -287,7 +319,7 @@ export class Conditions {
    */
   needsYou(): ConditionEntry[] {
     return this.rows<ConditionRow>(
-      `SELECT id, repository_id, ticket_id, run_id, leg, type, disposition, severity, url, restarts_json, default_restart, raised_at, reraised
+      `SELECT id, repository_id, ticket_id, run_id, leg, type, disposition, severity, url, restarts_json, default_restart, raised_at, reraised, detail_json
        FROM conditions WHERE outcome = 'open'
        ORDER BY CASE severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 ELSE 2 END, raised_at, id`,
     ).map((r) => this.entry(r, false));
@@ -321,7 +353,7 @@ export class Conditions {
     where.push('id > ?');
     params.push(after);
     const rows = this.rows<ConditionRow & { id: number }>(
-      `SELECT id, repository_id, ticket_id, run_id, leg, type, disposition, severity, url, restarts_json, default_restart, raised_at, reraised
+      `SELECT id, repository_id, ticket_id, run_id, leg, type, disposition, severity, url, restarts_json, default_restart, raised_at, reraised, detail_json
        FROM conditions WHERE ${where.join(' AND ')} ORDER BY id LIMIT ${CONDITIONS_PAGE_MAX + 1}`, ...params);
     const page = rows.slice(0, CONDITIONS_PAGE_MAX).map((r) => this.entry(r, disclose));
     return { conditions: page, cursor: rows.length > CONDITIONS_PAGE_MAX ? String(page[page.length - 1].condition_id) : null };

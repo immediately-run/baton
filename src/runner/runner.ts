@@ -561,7 +561,7 @@ export class Runner {
       }
       // R-BTN-4 (B-188): `max-claims` among them — the runner is at its bound for now.
       // B-244: the idle reason, said once on entry and again only when it changes.
-      if (e instanceof BatonRefusal && (e.code === 'not-eligible' || e.code === 'no-eligible-ticket' || (e.code === 'stale-skills' && e.detail != null))) {
+      if (e instanceof BatonRefusal && (e.code === 'not-eligible' || e.code === 'no-eligible-ticket' || e.code === 'runner-backing-off' || (e.code === 'stale-skills' && e.detail != null))) {
         if (!this.slots.size) {
           const line = maskLegOutput(`baton: idle — ${e.code}: ${idleReason(e)}`, []);
           if (line !== this.idle?.line) {

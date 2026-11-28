@@ -65,6 +65,7 @@ here; every other cause is its rule's.
 | `stale-selection`, `not-open`, `duplicate`, `lease-lost` | | a verdict refused (R-BTN-205) |
 | `blocked` | | R-BTN-75 |
 | `backing-off` | `until` | R-BTN-122 |
+| `runner-backing-off` | `until` | R-BTN-122 |
 | `barred-tag` | | R-BTN-60, R-BTN-67 |
 | `stale-skills` | | R-BTN-65 |
 | `no-eligible-ticket` | | §9.1 |

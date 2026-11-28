@@ -153,8 +153,9 @@ export class OutsideWork {
     const alreadyQueued = leg != null && pos.next_leg === leg && displaced?.station === pos.station;
     if (displaced && !alreadyQueued) sql.exec('DELETE FROM reconcile_displaced WHERE ticket_id = ?', id);
     if (!leg) return;
-    const exhausted = this.runCapReached(id, leg, max) || this.rows(`SELECT 1 FROM events WHERE ticket_id = ? AND kind = 'attempts-exhausted'
-      AND json_extract(detail_json, '$.reconcile') = ? AND json_extract(detail_json, '$.course') = ? LIMIT 1`, id, leg, pos.course_id).length > 0;
+    const exhausted = this.runCapReached(id, leg, max) || this.rows(`SELECT 1 FROM events e LEFT JOIN claims c ON c.id = e.claim_id
+      WHERE e.ticket_id = ? AND e.kind = 'attempts-exhausted' AND COALESCE(c.failed_attempt, 1) = 1
+        AND json_extract(e.detail_json, '$.reconcile') = ? AND json_extract(e.detail_json, '$.course') = ? LIMIT 1`, id, leg, pos.course_id).length > 0;
     if (alreadyQueued && exhausted && !this.c.held(id)) this.restore(id, leg, true);
     const displacedDef = pos.next_leg == null ? undefined : g.legs.get(pos.next_leg);
     if (alreadyQueued || exhausted || !pos.next_leg || !displacedDef || this.held(id) || pos.handoff_url

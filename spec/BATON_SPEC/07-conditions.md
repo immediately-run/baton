@@ -189,6 +189,11 @@ Not built either, each a design its rule below still states:
       - It closes when its cause ends. One raised within an hour of an earlier one of the same
         `(type, ticket, ref)` closing is the same entry, its `detail` counting the raises
         (`reraised`).
+      - `baton.runner-faulting` is one notice per runner key in the repository where it bursts
+        (R-BTN-122). `baton.fleet-faulting` is one notice on that repository when at least two
+        unresolved runner bursts overlap the same burst window. It closes when that cohort no
+        longer contains two keys. Their detail groups validated end reasons and error types,
+        most frequent first; it never includes runners' error messages.
   - **Resolving.** A `baton.*` condition is answered only through Baton's own authenticated
     surfaces: `baton ticket resolve <ticket> <restart>` (R-BTN-127), or an owner's or
     administrator's dashboard session on the condition's resolve page,
@@ -254,6 +259,18 @@ Not built either, each a design its rule below still states:
       holds.
     - `contract-input` holds at once, is not an attempt and raises `baton.contract`.
     - `lease-lost` counts once per distinct runner.
+  - **Runner faults (S-BTN-6).** The repository's `runner_faults` owner setting (R-BTN-66)
+    is `{tickets, window_s}` (2 to 100 distinct tickets, 1 to 86400 seconds); `null` or no
+    setting uses 3 tickets in 900 seconds. When retryable `released:cannot-finish:*` ends on
+    that many distinct tickets share a runner key, repository and window, they are a burst.
+    Baton keeps the ends in history but removes their charges, restores the retry backoff and
+    lifts any exhaustion hold the burst created, recording the burst on the correction.
+    Non-retryable failures retain their normal handling. Until the runner backoff expires,
+    new claims on that key are refused `runner-backing-off` with `until`; existing claims may
+    continue. Further ends from the same burst are credited without extending the backoff.
+    The first burst backs off for five minutes, each new burst doubles it up to one hour.
+    An accepted leg outcome on the key resets the backoff and clears its burst history for
+    attribution. The notices follow R-BTN-163.
   - **Owners' bounds.** The owners' `retry` setting, a Baton setting (R-BTN-66), bounds every
     policy: `{max_attempts, backoff_s}`, a ceiling on the first and a floor under the second,
     applied field by field as the stricter of the course's policy and the owners' bound. The

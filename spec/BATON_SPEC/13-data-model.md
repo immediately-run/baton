@@ -52,6 +52,7 @@ behaviour, bounds and defaults. The tables of designs not built yet are in
 | `transcript_repos` JSON | `[]` | R-BTN-20 |
 | `artifact_buckets` JSON | `[]` | R-BTN-82 |
 | `retry` JSON | NULL (core defaults) | R-BTN-122 |
+| `runner_faults` JSON | NULL (core defaults) | R-BTN-122 |
 | `required_bars` JSON `[{course, leg, except?, tag_prefix}]` | `[]` | R-BTN-67 |
 | `unblocked_trigger` JSON (the `dispatch` shape) | NULL | R-BTN-77, R-BTN-94 |
 | `pushers` JSON (forge user ids) | `[]` | R-BTN-139 |
@@ -156,6 +157,9 @@ or one of the event kinds §13.8 marks as history rows.
 | `ticket_dependents` | `(ticket_id, leg, ref, selector)` | `on_ticket`, `predicate`, `target_course`, `skip_withdrawn`, `allow_empty`, `why` (null when met), `station`, `cycle` | Each indexed `ticket` prerequisite of a leg or the whole ticket (`leg` `''`), by the ticket it waits on, and its last verdict; what the prerequisites read reports (R-BTN-120, R-BTN-75) |
 | `leg_needs` | `(ticket_id, leg, resource)` | `repository_id`, `source` (`posted`\|`end`), `added_at`, `found_at` | Resources a next leg needs (R-BTN-76, R-BTN-126) |
 | `leg_attempts` | `(ticket_id, leg)` | `repository_id`, `attempts`, `retry_after`, `last_error_type` | Retry state per ticket and leg (R-BTN-122) |
+| `runner_fault_samples` | `claim_id` | `repository_id`, `credential_id`, `ticket_id`, `ended_at`, `reason`, `error_type`, `burst`, `undo_json` | Recent ends and their provisional retry effects (R-BTN-122) |
+| `runner_fault_episodes` | `(repository_id, credential_id)` | `burst`, `started_at` | Most recent unresolved burst per key in a repository (R-BTN-122, R-BTN-163) |
+| `runner_fault_backoff` | `credential_id` | `until_at`, `delay_ms` | Runner key admission deadline and repeated burst backoff (R-BTN-122) |
 | `ticket_overrides` | `ticket_id` | `expedite`, `hold`, `hold_reason`, `route_leg`, `route_station`, `override_kind` (`owner`\|`baton`), `set_by`, `set_at` | Expedite and hold (§6), and the queued leg Baton or the owner chose, held until the station changes (R-BTN-12, R-BTN-83, R-BTN-116, R-BTN-122) |
 | `ticket_evidence` | `(ticket_id, ref)` | `kind` (`merged-early`, `mention`, `fact`), `leg` (for `fact`), `found_at`, `claim_id` (the reconcile leg's claim that carried it), `weighed_at` (NULL until that leg's finishing position) | Evidence of work done outside Baton (R-BTN-203, R-BTN-39) |
 | `reconcile_displaced` | `ticket_id` | `leg`, `station`, `recorded_at` | The leg a queued reconcile leg displaced, at the station it was queued; cleared as R-BTN-39 says (R-BTN-39) |

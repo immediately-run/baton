@@ -2,6 +2,7 @@
 // and applies the answer.
 
 export const HOUR = 3_600_000;
+export const MAX_FAULT_WINDOW_S = 86_400;
 /** R-BTN-23: the backoff after the first and the second failed attempt. */
 export const BACKOFF_MS = [1 * HOUR, 4 * HOUR] as const;
 /** R-BTN-23: the failed attempt that holds the item `attempts-exhausted`. */
