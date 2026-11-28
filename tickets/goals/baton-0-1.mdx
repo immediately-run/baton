@@ -1,0 +1,75 @@
+---
+title: Baton 0.1 — three days unattended
+id: baton-0-1
+status: active
+priority: 1
+needs:
+  - B-366
+  - B-374
+tags:
+  - goal
+description: The runner works three days without an intervention, on the right tickets in order, following the course, at full capacity, and 0.1 is released on that evidence — B-366, the open work it depends on, and B-374.
+kind: goal
+nav: Goal
+order: 1
+---
+
+_Goal, written 2026-11-28 at the owner's request ("create a goal prioritizing reaching 0.1
+status"). Baton does not read goals yet (B-122); until it does, this page is the plan's summary
+and its tickets are steered by their `order` (below)._
+
+**The objective:** the owner's 0.1 release criterion, 2026-11-27: "the runner can execute tasks
+without interventions for 3 days such that: 1. It is working on the correct issues (most
+important first) 2. It follow the course as expected 3. It operates at full capacity. That is in
+order of importance, most important first." The plan is
+[Baton 0.1](../../docs/plans/baton-0-1.mdx).
+
+`needs` names two tickets:
+
+- **B-366**, the operator ticket that runs the 72-hour soak and makes the release. Its
+  `depends_on` carries phases A and B of the plan, so the goal's open work is that list.
+- **B-374**, which B-366 does not yet list: Baton takes a merged filing, spec or partial PR for
+  delivery, so 33 tickets sit at `merged` that no runner is offered. That is criterion 1 failing
+  before the soak starts.
+
+## The open work
+
+| Rank | Ticket | Criterion | What it ends |
+|---|---|---|---|
+| 15 | B-359 | 3 | A burst of failures charged to every ticket it touched |
+| 18 | B-374 | 1, 2 | Merged tickets left open, and undelivered tickets held at `merged` |
+| 20 | B-360 | 3 | Holds that wait forever on a person |
+| 25 | B-244 | 3 | An idle runner that cannot say why (the rest, after #352) |
+| 30 | B-361 | 3 | Unclaimable work nobody notices, and the wrong gate in the ready list |
+| 35 | B-318 | 3 | Suspended tickets waiting for a push to `main` |
+| 40 | B-362 | 1 | Missing and invisible ranks |
+| 45 | B-363 | 1 | Tickets offered that cannot move |
+| 50 | B-336 | 3 | A host that cannot place a sandbox (the executor's report, after #464) |
+| 55 | B-365 | 3 | Any repeated host failure; rotated keys |
+| 70 | B-364 | 2 | PRs left conflicting with `main` |
+| 75 | B-368 | all | `baton report soak`, the check that decides the release |
+| 100–125 | B-352, B-353, B-356, B-355, B-354, B-357 | 2 | Phase B: one selector per course, with a verdict that says why |
+| 150 | B-366 | all | The rehearsal, the release soak and the 0.1 tag |
+
+B-359 to B-365 and B-368 can run in parallel; B-366's rehearsal follows phase A, and its release
+soak follows phase B (decision D2 of the plan, default (a)). B-324, B-249, B-337, B-347 and
+B-311 in B-366's `depends_on` are delivered and close with
+[#469](https://github.com/immediately-run/baton/pull/469).
+
+## Deliberately outside the goal
+
+- **The follow-ups of the D8 sweep** (B-372, B-373, B-375 to B-400) carry review findings left
+  open at merge. They rank 85 to 115, after phase A. One is an exception the owner should weigh:
+  B-392 says no published CLI sends B-300's `confirm: true`, so emergency key revocations from
+  the released CLI may be refused today. That is a release (an owner act), not runner work.
+- **After 0.1** (the plan's last section): the removals (ranks 200–220), installation (B-367,
+  B-370, B-369) and people and notification (B-371).
+
+## Steering it before Baton reads goals
+
+The `order` of every ticket above already puts this work first; only expedite and `to_end`
+(fewest legs to an end) come before it in the default order. Two things still compete:
+
+- **B-240 and B-250** at `order` 2 and 3 (decision D5, default (a): move them after phase A).
+- **B-122**, which builds goals, is itself one of the 33 tickets Baton holds at `merged` without
+  delivery, so no runner will build it until B-374's item 5 puts it back on the course.
