@@ -1,0 +1,58 @@
+---
+id: B-371
+status: available
+topics: [baton]
+owns: {}
+prs: []
+title: "B-371 — People and notification into the spec: people section 5 and personal secrets move from the proposals into BATON_SPEC, with their build tickets"
+depends_on: []
+order: 270
+tags: [roadmap-item]
+project: baton
+description: "A spec ticket under the owner's 2026-11-27 ruling: move both proposals' rules into their owning sections, put the one open question (a labelled person leg on a ticket with no assignee) to the owner, and file the build tickets for people, the roster, channels and preferences, the notifier and the CLI."
+repos: [baton]
+---
+
+**Brief:** the owner, 2026-11-24 (in a Claude Code session): "user management is not thought through which makes it difficult both to claim 'ticket leg X is waiting on input from user Y or user group Z' and also to provide per-user notification preferences on how baton should signal input requests from legs." The owner's design rulings of 2026-11-26 and 2026-11-27 answer most of it in two proposals. On 2026-11-27 the owner also ruled: "Since these proposals are necessary to get baton into a generally useable state, I would like you to include the changes in the specs and draft the necessary tickets for implementing them" (`spec/BATON_SPEC_HISTORY.md`, *The selector chooses the next leg*). The plan is [Baton 0.1](../docs/plans/baton-0-1.mdx), *After 0.1*.
+
+**Spec:** the proposals [people and dashboard §5](../spec/proposals/people-and-dashboard.md#5-people-identities-and-the-roster) (people, linked identities, the roster) and [personal secrets and notification](../spec/proposals/personal-secrets.md) (channels, preferences, the notifier), with their *Amends* lists; [R-BTN-204](../spec/BATON_SPEC/11-people.md#sec-11-2) (members and the labels they answer); [R-BTN-116](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-4) (person legs).
+
+**Depends on:** none.
+
+**Related:** B-338 (members) builds who may answer a labelled person leg; this ticket does not change it.
+
+### What is decided, and what is not
+
+Decided by the owner (the proposals, *The owner's decisions*):
+
+- **A person is for accountability and notification, never authority.** Roles stay on keys. Baton keeps no groups.
+- **Who may answer** a person leg is the keys holding its labels (R-BTN-204's members), or an owner. A label is the nearest thing to "group Z": it says who may answer, not who is told.
+- **Who is told** is the ticket's assignee, resolved to a person through verified linked identities. "An entry with no one to notify is shown, not sent." A team is told by pulling Needs you, or by one notification to a channel the team already shares.
+- **Preferences** are a person's own: which events go to which channels, and quiet hours.
+
+Not decided, and to be put to the owner as one question in this ticket's PR: **how a person leg waiting on a label reaches anyone, when its ticket has no assignee**. The proposals' answer today is "nobody is told; it is shown on Needs you". Two alternatives the PR should lay out:
+
+- (a) keep that answer;
+- (b) an arena maps a label to one shared channel (a team's Slack channel or ntfy topic), notified once per entry. This is not a group: no membership is kept, and it confers no authority.
+
+### What to do
+
+This is a spec ticket: its PR changes the spec and files tickets, and builds nothing.
+
+1. Move people §5 and the personal-secrets proposal into BATON_SPEC: each rule into the section file that owns it, following each proposal's *Amends* list, with `npm run spec:index`. Their hardening items stay on `spec/proposals/hardening.md`.
+2. Put the open question above to the owner as a decision packet in the PR, and write the chosen answer into the spec.
+3. File the build tickets the moved rules need, at least: people and linked identities with forge sign-in; the roster (`std:roster@1`); channels, preferences and verification; the notifier and `std:notified@1`; the CLI `baton notify …` commands. Each names the rules it builds and its scenarios.
+
+### Exit criteria
+
+- The two proposals' rules are in BATON_SPEC with `not built` status tokens naming their build tickets; the proposal pages are removed or reduced to their hardening and deferred parts.
+- `npm run check:spec`, `npm run check:wiki` and `node scripts/link-spec-refs.mjs --check` green.
+- The build tickets are filed with Dibber, each with an `order`.
+
+### Trust
+
+A spec change. Nothing is built here.
+
+## Status
+
+_filed 2026-11-27._

@@ -2,8 +2,8 @@
 title: "B-314 — Runners pick up course version changes without a restart, and may restart themselves at a claim boundary"
 id: B-314
 project: baton
-status: available
-updated: 2026-11-23
+status: done
+updated: 2026-11-27
 tier: judgement
 repos:
   - baton
@@ -13,8 +13,7 @@ description: "The runner reads the course versions it declares once at startup, 
 topics:
   - baton
 owns: {}
-prs:
-  - https://github.com/immediately-run/baton/pull/394
+prs: [https://github.com/immediately-run/baton/pull/394]
 depends_on: []
 ---
 
@@ -26,7 +25,7 @@ depends_on: []
 - **The declared versions.** The runner reads the course versions it declares (`courses`, §14) once, at startup (`servedCourses`, `src/runner/main.ts`), and sends that list on every heartbeat. When a change raises `min_runner_version`, Rule 9 refuses the runner new claims (`stale-skills`) until a person restarts it.
 - **The runner's own code.** A change to the CLI, or to the executor pin in the host's environment, takes effect only in a new process.
 
-**Spec:** [BATON_SPEC §5.7](../spec/BATON_SPEC/05-courses.md#sec-5-7) ([R-BTN-22](../spec/BATON_SPEC/05-courses.md#sec-5-7), Rule 9), [§8.3](../spec/BATON_SPEC/08-runners.md#sec-8-3) ([R-BTN-72](../spec/BATON_SPEC/08-runners.md#sec-8-3)), [§4](../spec/BATON_SPEC/04-tickets-syncs-board.md) ([R-BTN-34](../spec/BATON_SPEC/04-tickets-syncs-board.md)).
+**Spec:** [BATON_SPEC §5.7](../../spec/BATON_SPEC/05-courses.md#sec-5-7) ([R-BTN-22](../../spec/BATON_SPEC/05-courses.md#sec-5-7), Rule 9), [§8.3](../../spec/BATON_SPEC/08-runners.md#sec-8-3) ([R-BTN-72](../../spec/BATON_SPEC/08-runners.md#sec-8-3)), [§4](../../spec/BATON_SPEC/04-tickets-syncs-board.md) ([R-BTN-34](../../spec/BATON_SPEC/04-tickets-syncs-board.md)).
 
 ## Plan
 
@@ -60,3 +59,5 @@ The versions come from the home checkout the runner already trusts for the cours
 ## Status
 
 _filed 2026-11-22._
+
+_2026-11-27: merged 2026-11-24 (#394) at the owner's word with round two's findings open; review rounds archived in docs/review/B-314-round-1.mdx and -2; open findings carried by B-372, https://github.com/immediately-run/baton/pull/394._

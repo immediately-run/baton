@@ -1,0 +1,20 @@
+---
+title: B-314 review round 2
+description: Findings and disposition for the second review of runner course refresh without restart, merged with three findings open.
+---
+
+Reviewed [Baton #394](https://github.com/immediately-run/baton/pull/394) at `e396b5e8`
+([review](https://github.com/immediately-run/baton/pull/394#pullrequestreview-6025677057)). The
+verdict was changes: round one's six cases were fixed as reproduced, and two related edge cases
+remained blocking. The reviewer passed 74 focused tests, typecheck, the spec and wiki checks and
+`git diff --check`; full CI was pending, and no live check on bering ran.
+
+The PR was merged on 2026-11-24 at the owner's word, with this round's findings open
+(`docs/interventions.mdx`, *2026-11-24 — the owner merged every mergeable PR*). No fix leg ran
+after this round. The open findings are carried by B-372.
+
+| Finding | Disposition |
+|---|---|
+| [Blocking: a stale `origin/HEAD` is still trusted](https://github.com/immediately-run/baton/pull/394#discussion_r4668979360) | Open on `main` (`src/runner/main.ts` still reads `refs/remotes/origin/HEAD` first). Carried by B-372. |
+| [Blocking: removing the final declaration works only for the current reader](https://github.com/immediately-run/baton/pull/394#discussion_r4668979369) | Open. Carried by B-372. |
+| [Should-fix: the heartbeat table says courses are read at session start](https://github.com/immediately-run/baton/pull/394#discussion_r4668979380) | Open (`spec/BATON_SPEC/08-runners.md`'s `courses` row). Carried by B-372. |

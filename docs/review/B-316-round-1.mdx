@@ -1,0 +1,17 @@
+---
+title: B-316 review round 1
+description: Findings and disposition for the first review of runner masking across line and byte boundaries.
+---
+
+Reviewed [Baton #398](https://github.com/immediately-run/baton/pull/398) at `bf9607fd`
+([review](https://github.com/immediately-run/baton/pull/398#pullrequestreview-6027595703)). The
+verdict was changes. The reviewer checked the full diff against `main` and the Fit claims, and
+passed the 26 focused tests (the seeded fuzz and the periodic budget among them) and typecheck;
+the local full suite timed out and CI was pending.
+
+| Finding | Disposition |
+|---|---|
+| [Blocking: stripping CR before the masker sees the boundary](https://github.com/immediately-run/baton/pull/398#discussion_r4670489111) | Fixed in `35966b3f` for the main leg sink: the raw frame reaches the masker. Two other consumers stayed open (round 2). |
+| [Blocking: the owner's answer on (c) is not recorded](https://github.com/immediately-run/baton/pull/398#discussion_r4670489129) | Open: the leg kept the conservative policy (a disproved short hold stays masked) and asked the owner. Carried by B-373. |
+| [Blocking (test gap): no deterministic stdout split](https://github.com/immediately-run/baton/pull/398#discussion_r4670489146) | Fixed in `35966b3f`. |
+| [Blocking (test gap): the forced drain path is untested](https://github.com/immediately-run/baton/pull/398#discussion_r4670489159) | Fixed in `35966b3f`. |

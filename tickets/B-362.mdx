@@ -1,0 +1,58 @@
+---
+id: B-362
+status: available
+topics: [baton]
+owns: {}
+prs: []
+title: B-362 — Every open ticket has a rank, and anyone can see the order Baton offers work in
+depends_on: []
+order: 40
+tags: [roadmap-item]
+project: baton
+description: An unranked open ticket raises baton.unranked; the board and baton tickets order show each ticket's rank and its place in the default order; create-pr legs file tickets with an order; Dibber gains a re-rank command; the default order (to_end before rank) is written where priorities are set.
+repos: [baton]
+---
+
+**Brief:** the owner, 2026-11-27 (in a Claude Code session): Baton's 0.1 release criterion is that "the runner can execute tasks without interventions for 3 days such that: 1. It is working on the correct issues (most important first) 2. It follow the course as expected 3. It operates at full capacity". This ticket is part of criterion 1, the most important; the plan is [Baton 0.1](../docs/plans/baton-0-1.mdx).
+
+**Spec:** [BATON_SPEC §6.6](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-6) (*The default order*: expedite, then `to_end`, then the sync's `rank`, then `ready_since`, then ticket id), [BATON_SPEC §4.2](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-2) ([R-BTN-74](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-2): the markdown source ranks by `order`, then id; unranked tickets follow ranked ones).
+
+**Depends on:** none.
+
+### What went wrong
+
+"Most important first" is only as good as the importance Baton is told. Today, in this repository on `main` at `de6f7375`:
+
+- 67 of the 216 `available` tickets carry no `order`. That includes almost every ticket filed since 2026-11-22 (B-244, B-318, B-324, B-336, B-337, B-347, B-351 to B-358). Unranked tickets go after every ranked one, so the newest and most urgent work is offered last.
+- `order` values were assigned by whoever filed a ticket, with no check. B-240 and B-250 (dashboard query counts) sit at `order: 2` and `3`, above everything else.
+- A rank cannot be corrected: Dibber 0.4.0 sets `order` only at `dibber new`, and refuses it afterwards ("`--field` cannot write Dibber-owned key `order`").
+- Nothing shows a ticket's rank on the dashboard or in `baton board`, so a wrong order is invisible until someone asks why the runner took what it took.
+- Among tickets the same number of legs from an end, `to_end` decides before rank does. That is intended: finishing in-flight work first keeps PRs from going stale. But it is not written down anywhere a person deciding priorities would read it.
+
+### What to build
+
+1. **An unranked open ticket is a warning, not a silence.** The markdown source's reader reports each open ticket with no `order` in the sync's output. Baton raises one repository condition, `baton.unranked`, listing their count and ids (at most 50), closing when none is left. Unranked tickets are still offered, after ranked ones, as today.
+2. **The rank is visible.** The ticket list, the board and `baton board` show each ticket's rank and, for a ready ticket, its position in the default order for the runner asking. The CLI gets `baton tickets order [--ready]`, which prints the default order as Baton computes it, with each key's value, so a person can see why one ticket comes before another.
+3. **Dibber files with an order.** The `create-pr` course's legs that file tickets (`dibber new`) pass `--order`: the parent ticket's order for a child, otherwise the median of the open tickets' orders. A ticket filed by hand without one is caught by item 1.
+4. **A rank can be changed.** File the Dibber ticket for a re-rank command (`dibber set <id> --order N`, or a `dibber order` that renumbers a list), in immediately-run/dibber, and pin the release that has it. That repository is outside this ticket's `repos:`: the PR names the Dibber ticket and the pin waits for its release.
+5. **The default order is written where priorities are set.** `docs/standard-courses.mdx` and the Tickets screen's help say, in one sentence each, what the default order is and that `to_end` comes before rank.
+
+### Exit criteria
+
+- A sync over a store with an unranked open ticket raises `baton.unranked` naming it; ranking it closes the condition.
+- `baton tickets order --ready` prints the same order `GET /v1/runner/recommendations?all=1` returns, with the keys that decided it.
+- A ticket filed by a `create-pr` leg carries an `order`.
+- Each behaviour named in a scenario; `npm test` and `npm run typecheck` green.
+
+### Trust
+
+`order` is ticket-source text and stays advice (R-BTN-45): a writer who can push can reorder work, as today. The condition only reports.
+
+### Invariants
+
+- The default order's keys and their sequence are unchanged unless the owner rules otherwise (see the plan's decision D1).
+- Advice never refuses: an unranked ticket is still offered.
+
+## Status
+
+_filed 2026-11-27._

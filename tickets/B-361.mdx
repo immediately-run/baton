@@ -1,0 +1,59 @@
+---
+id: B-361
+status: available
+topics: [baton]
+owns: {}
+prs: []
+title: "B-361 — Baton notices unclaimable work itself: baton.unclaimable, baton.runner-starved and baton.no-runner, and the ready list names the gate that really refused"
+depends_on: []
+order: 30
+tags: [roadmap-item]
+project: baton
+description: Fix eligibility()'s precedence list, which omits held, blocked, awaiting-sync and person, so the ready list stops showing another runner's refusal; move three conditions from the intervention-sessions proposal into the spec and build them; give awaiting-sync a state word and show the last sync's failure.
+repos: [baton]
+---
+
+**Brief:** the owner, 2026-11-27 (in a Claude Code session): Baton's 0.1 release criterion is that "the runner can execute tasks without interventions for 3 days such that: 1. It is working on the correct issues (most important first) 2. It follow the course as expected 3. It operates at full capacity". This ticket is part of criterion 3; the plan is [Baton 0.1](../docs/plans/baton-0-1.mdx). On 2026-11-27 the owner also ruled that the proposals needed to make Baton generally usable move into the spec, with tickets to build them (`spec/BATON_SPEC_HISTORY.md`, *The selector chooses the next leg*). This ticket moves three conditions out of the intervention-sessions proposal on that basis.
+
+**Spec:** [BATON_SPEC §6.2](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-2) ([R-BTN-75](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-2): `baton.capability-missing`), [BATON_SPEC §6.6](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-6) (the gates), [BATON_SPEC §7.3](../spec/BATON_SPEC/07-conditions.md#sec-7-3) ([R-BTN-163](../spec/BATON_SPEC/07-conditions.md#sec-7-3)), [BATON_SPEC §8.3](../spec/BATON_SPEC/08-runners.md#sec-8-3); the proposal [intervention sessions](../spec/proposals/intervention-sessions.md), *The owner's three examples, against today's conditions* (`baton.unclaimable`, `baton.runner-starved`, `baton.no-runner`).
+
+**Depends on:** none.
+
+**Related:** B-244 makes the idle runner say why in its own log. This ticket makes Baton notice the same thing without anyone reading a log.
+
+### What went wrong
+
+Nine interventions between 2026-11-15 and 2026-11-26 began the same way: runners idle while the board showed work, and a supervisor reading logs and source to find which gate kept the work away. The causes were tiers (retired by B-322), `attempts-exhausted` holds, unconfirmed ends, `awaiting-sync` after a failed sync, and a course rule no registered runner could satisfy: on 2026-11-25 `no_chain_from: [implement, fix]` with one runner key refused every review after a fix, and "the runner's log said only 'next the end'".
+
+None of these raised a condition. `baton.capability-missing` covers only a capability no live runner declares.
+
+The one read that tries to explain it is wrong. `eligibility()` in `src/core/claims.ts` keeps, for each ready ticket, the refusal of "the runner that came closest" by an order list (`const order = ['not-ready', 'claimed', 'not-granted', …]`). The list leaves out `held`, `blocked`, `awaiting-sync` and `person`, so `indexOf` gives them `-1` and any other runner's code overwrites them. On 2026-11-21 that is how 23 `awaiting-sync` tickets were shown as `above-tier-ceiling`.
+
+### What to build
+
+1. **Fix the precedence.** Every code a gate can return gets a place in `eligibility()`'s order, with a test that enumerates the gates' codes and fails when one is missing. The ready-ticket read also applies the filters `recommend` applies (resource advice, intake closed, a stopped repository), so a runner listed as eligible is one that would be offered the ticket.
+2. **Three conditions, moved into the spec** from the intervention-sessions proposal, owned by R-BTN-75 and §8.3 as it proposes:
+   - `baton.unclaimable` (ticket): a leg queued for 15 minutes during which at least one live runner granted on the repository asked and every one that asked was refused it. Its `detail` is the rule codes, most frequent first. Baton counts, per queued leg, the gate that excluded it from each untargeted claim, reset when the leg is claimed or leaves the queue.
+   - `baton.runner-starved` (runner): a live runner whose claims received only refusals for 15 minutes while its granted repositories had legs queued. Its `detail` is the codes.
+   - `baton.no-runner` (repository): legs queued for 15 minutes while no runner granted on the repository is live.
+   Each closes when its cause does.
+3. **`awaiting-sync` has a state word.** A ticket refused only by rule 1's snapshot clause is drawn as waiting for a sync, not `ready`, and Needs you shows the repository's last sync time and, where the sync reported one, its failure.
+
+### Exit criteria
+
+- A test enumerating every gate code fails if `eligibility()`'s order omits one; the 2026-11-21 case (one ticket `awaiting-sync`, another runner refused `missing-capability`) reports `awaiting-sync`.
+- Scenarios for the three conditions: the 2026-11-25 `no_chain_from` case raises `baton.unclaimable` naming `chain`; a runner refused for 15 minutes raises `baton.runner-starved`; no live runner raises `baton.no-runner`. Each closes when its cause clears.
+- The proposal's text for the three conditions is removed from `spec/proposals/intervention-sessions.md` and stated in its owning rules, with `npm run spec:index` run; `npm test` and `npm run typecheck` green.
+
+### Trust
+
+Every input is Baton's own record of claims and refusals. A condition grants nothing and refuses nothing.
+
+### Invariants
+
+- Advice never refuses: the conditions are reports, and no gate reads them.
+- R-BTN-33: a condition's `detail` holds rule codes and counts, never ticket text.
+
+## Status
+
+_filed 2026-11-27._

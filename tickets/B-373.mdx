@@ -1,0 +1,50 @@
+---
+id: B-373
+status: available
+topics: [baton]
+owns: {}
+prs: []
+title: "B-373 — B-316's open review findings: the verbose drain and replay mask without the raw CRLF frame, and the owner's decision on short disproved holds"
+depends_on: []
+order: 86
+tags: [roadmap-item]
+project: baton
+description: "#398 merged with findings open: two stderr consumers mask the CR-stripped line alone and can miss a secret ending in a literal CR; exit criterion (c), whether a disproved hold shorter than MIN_SECRET_BYTES may go out in clear, still waits on the owner."
+repos: [baton]
+---
+
+**Found by:** the review of B-316's PR, rounds one and two ([`docs/review/B-316-round-1.mdx`](../docs/review/B-316-round-1.mdx), [`docs/review/B-316-round-2.mdx`](../docs/review/B-316-round-2.mdx)). #398 was merged on 2026-11-24 at the owner's word with these findings open, and no fix leg ran after it. This is a defect report, not an owner brief.
+
+**Spec:** [BATON_SPEC §8.3](../spec/BATON_SPEC/08-runners.md#sec-8-3) (the runner masks leg output; [S-BTN-119](../spec/BATON_SPEC/15-verification.md#scenarios)).
+
+**Depends on:** none.
+
+### What is open
+
+B-316 made the runner's masker hold across line and byte boundaries (#398). Two things were left open:
+
+1. **Two consumers still mask without the raw frame.** The executor now strips the CR from a CRLF-terminated stderr `line` and passes the raw frame beside it. The main leg sink uses the frame, but the verbose wrapper drain (`src/runner/claimRun.ts`, its verbose `onStderr`) and replay (`src/runner/replay.ts`) mask the line alone. Their exact-match maskers can now miss a value ending in a literal CR that matched before #398. ([thread](https://github.com/immediately-run/baton/pull/398#discussion_r4670713388))
+2. **An owner decision was asked and never answered.** B-316's exit criterion (c) needs the owner's answer recorded: *may a disproved hold shorter than `MIN_SECRET_BYTES` go out in clear, or should it continue to be masked?* The code keeps the conservative policy (it stays masked). ([thread](https://github.com/immediately-run/baton/pull/398#discussion_r4670603128))
+
+### What to build
+
+1. Pass the raw frame through masking in the verbose drain and in replay, as the main sink does, with a regression for each consumer (a secret ending in a literal CR, and CRLF framing).
+2. Put question (c) to the owner as a one-letter decision in this ticket's PR: (a) keep masking a disproved short hold (the current policy), or (b) let it go out in clear. Record the answer in `docs/standard-courses.mdx` or the masker's own doc comment, and change the code only if the answer is (b).
+
+### Exit criteria
+
+- Both consumers' regressions pass, and the existing S-BTN-119 tests stay green.
+- The owner's answer to (c) is recorded in the PR and in the code's documentation.
+- `npm test` and `npm run typecheck` green.
+
+### Trust
+
+Masking is a safety measure: a change here may only mask more, unless the owner answers (b).
+
+### Invariants
+
+- No secret value reaches a log, a replay or the terminal in clear (S-BTN-119).
+
+## Status
+
+_filed 2026-11-27._
