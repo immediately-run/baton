@@ -63,7 +63,7 @@ describe('S-BTN-22 review queue bound', () => {
     const ids = ['docs:M-1', 'docs:X-1', 'docs:F-1', 'docs:F-2', 'docs:F-3', 'docs:F-NO-RANK'];
     expect(expected.map((r: { ticket_id: string }) => r.ticket_id)).toEqual(ids);
     const lines: string[] = [];
-    expect(await printTicketOrder(plan('tickets', ['order', '--ready']), ({ path }: { path: string }) => runner.call(path, undefined, 'GET'), (line: string) => lines.push(line))).toBe(0);
+    expect(await printTicketOrder(plan('tickets', ['order', '--ready']), ({ path }: { path: string }) => runner.call(path, undefined, 'GET'), (line: string) => { lines.push(line); return true; })).toBe(0);
     expect(lines.slice(1).map((line) => line.split('\t')[0])).toEqual(ids);
     expect(lines[1].split('\t')).toEqual(['docs:M-1', '1', 'false', '1', '40', String(T0), 'roadmap-pr', '100', '1', 'ready']);
     expect(lines.at(-1)?.split('\t')[4]).toBe('-');
