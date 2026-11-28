@@ -1,0 +1,56 @@
+---
+id: B-360
+status: available
+topics: [baton]
+owns: {}
+prs: []
+title: "B-360 — Holds settle themselves: a closed ticket's hold lifts, an exhausted ticket retries once after a day, and many retries are answered at once"
+depends_on: []
+order: 20
+tags: [roadmap-item]
+project: baton
+description: A hold on a ticket the snapshot shows closed is lifted; an attempts-exhausted hold is lifted once after exhausted_retry_s (default 24 hours) and the leg queued, holding for good on a second exhaustion; owner resolve --all answers many baton:retries decisions in one request, with a dry run. An owner's own hold is never lifted by Baton.
+repos: [baton]
+---
+
+**Brief:** the owner, 2026-11-27 (in a Claude Code session): Baton's 0.1 release criterion is that "the runner can execute tasks without interventions for 3 days such that: 1. It is working on the correct issues (most important first) 2. It follow the course as expected 3. It operates at full capacity". This ticket is part of criterion 3; the plan is [Baton 0.1](../docs/plans/baton-0-1.mdx).
+
+**Spec:** [BATON_SPEC §6.8](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-8) ([R-BTN-12](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-8): holds), [BATON_SPEC §7.4](../spec/BATON_SPEC/07-conditions.md#sec-7-4) ([R-BTN-122](../spec/BATON_SPEC/07-conditions.md#sec-7-4): exhaustion holds and the `exhausted` leg), [BATON_SPEC §4.2](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-2) (what a snapshot says a ticket is).
+
+**Depends on:** none.
+
+### What went wrong
+
+An `attempts-exhausted` hold waits for an owner's `baton:retries` answer, however old it gets and whatever happens to the ticket meanwhile:
+
+- 2026-11-24 (`docs/plans/supervisor-handover-2026-11-24.mdx`, *Waiting on the owner*): 36 held tickets. 26 were held at `filed` after transient `implement` failures in one window; 9 were held at `merged`, with holds from 2026-11-02 to 2026-11-16 that git's later "merged" never cleared.
+- 2026-11-21 08:00: 31 holds were lifted by a script pasted into the browser console, because there is no way to answer many at once.
+- 2026-11-23: B-259's held children waited on a console script the owner had not yet run.
+
+A hold is the right answer to a ticket that keeps failing. But a hold nobody looks at for a week is the same as a lost ticket, and a hold on a ticket that has since closed is noise on Needs you.
+
+### What to build
+
+1. **A closed ticket's hold ends itself.** When an accepted snapshot shows a held ticket closed (done, withdrawn or superseded in its source) or at an end station, the hold is lifted and the decision closed, recorded as an event naming the snapshot. This applies to every hold reason except an owner's own `hold`, which stays until the owner lifts it.
+2. **Exhaustion retries once more, later, by itself.** An `attempts-exhausted` hold becomes a long backoff: after `exhausted_retry_s` (default 24 hours, a repository setting under R-BTN-66) Baton lifts it, resets the attempts and queues the leg once more, recorded as an event. If that attempt fails too, the ticket is held again, and this time the hold stays until a person answers. The `baton:retries` decision stays open the whole time, so an owner may still answer `retry` or `park` early.
+3. **Answer many at once.** `baton owner resolve <repository> --decision baton:retries --all [--station S] [--since T] retry|park` answers every open decision that matches, as one action in the registry (R-BTN-127), with a dry run (`--dry-run`) that lists them. The dashboard's Needs you offers the same as one control on the grouped entry.
+
+### Exit criteria
+
+- A held ticket that the next snapshot shows closed is no longer held, and its decision is closed.
+- An `attempts-exhausted` hold older than `exhausted_retry_s` is lifted once and the leg queued; a second exhaustion stays held.
+- `baton owner resolve … --all --dry-run` lists what it would answer; without `--dry-run` it answers them in one request.
+- R-BTN-12 and R-BTN-122 amended in the same PR; each behaviour named in a scenario; `npm test` and `npm run typecheck` green.
+
+### Trust
+
+The snapshot is the sync's word, which already decides whether a ticket is closed. Lifting a hold on a closed ticket only lets a closed ticket go; it starts no leg. The bulk answer is an owner act with the same authority as the single one.
+
+### Invariants
+
+- An owner's own `hold` is never lifted by Baton.
+- A ticket that fails again after its automatic retry is held until a person answers: Baton retries by itself at most once per exhaustion.
+
+## Status
+
+_filed 2026-11-27._

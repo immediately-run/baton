@@ -1,0 +1,231 @@
+---
+title: "Plan — Baton 0.1: three days unattended"
+description: The owner's 0.1 release criterion (three days without an intervention, the runner working on the right tickets in order, following the course, at full capacity), the evidence of what still breaks it, the work in order with every ticket ranked, the decisions it needs from the owner, and what follows 0.1.
+tags: [plans]
+order: 63
+---
+
+# Plan — Baton 0.1: three days unattended
+
+<Lede>Written 2026-11-27, against `main` at `de6f7375`, from a read of the spec, its history since
+2026-11-24, the proposals, the tickets, and every entry in
+[the interventions log](../interventions.mdx) and [lessons](../lessons.mdx).</Lede>
+
+## The criterion
+
+The owner, 2026-11-27: "Baton's 0.1 release criteria is that the runner can execute tasks without
+interventions for 3 days such that:
+
+1. It is working on the correct issues (most important first)
+2. It follow the course as expected
+3. It operates at full capacity
+
+That is in order of importance, most important first."
+
+What counts as an intervention is already written down: `AGENTS.md`, *The supervising agent* —
+"anything you or the owner, through you, had to do before the runners could make progress".
+Answering a question the course asks (a person leg, an `adjudicate`, an approval) is following the
+course, not an intervention. Filing tickets is not one either.
+
+The criterion is decided by a check, not by judgement. B-368 builds `baton report soak`, which reads
+Baton's own record over a window and reports the four measures: interventions, order inversions,
+course deviations and idle capacity. The window passes when it prints `PASS` and the log has no
+entry inside it. B-366 is the operator ticket that runs the window and makes the release.
+
+## Where it stands
+
+The log has 49 entries between 2026-11-15 and 2026-11-26, and at least one on every day the
+runners ran. Grouped by criterion:
+
+| Criterion | What broke it | Entries | Fixed? |
+|---|---|---|---|
+| 3, capacity | Faults on the host or at the provider charged to every ticket they touched, ending in `attempts-exhausted` holds only a person could lift | 10 | Partly: B-336 (#464) and B-347 (#460) merged. B-359, B-360 |
+| 3, capacity | Runners idle with work on the board, and nothing saying why: tiers, holds, unconfirmed ends, `awaiting-sync`, a course rule no runner could meet | 9 | Tiers retired (B-322). B-244 partly (#352). B-361 |
+| 3, capacity | A host check failing every claim, the runner claiming on (wrapper, gateway key, executor pin, placement) | 6 | Placement only: B-336 (#464). B-365 |
+| 3, capacity | No sync between pushes to `main`, so ends waited for confirmation | 4 | No. B-318 |
+| 2, course | The review stub's round bound baked in as 3 while the course file says 8. Runs counted twice | 3 | B-324 (#408) and B-335 (#412) merged |
+| 2, course | PRs left conflicting with `main`, then merged by the owner by hand (13 on 2026-11-24, of 51 open) | 3 | No. B-364 |
+| 2, course | Ends that named evidence nothing attested; 44 parked tickets | 2 | #415, and B-337 (#456) for closed tickets |
+| 2, course | Flaky tests or a red `main` | 8 | Mostly, by #295 and #392 |
+| 1, order | A ticket claimed that could not move: an unreleased dependency, an npm approval | 3 | No. B-363 |
+| 1, order | Importance missing: 67 of 216 available tickets carry no `order`, almost every ticket filed since 2026-11-22 among them. B-240 and B-250 sit at `order` 2 and 3, above everything | — | No. B-362 |
+| — | Baton itself down (read quota, migration 0061): about 62 hours | 3 | Fixed in place. B-249 merged (#353) |
+
+Two things this table shows:
+
+- **Criterion 3 has the most entries**, and its fixes come first in the order below even though it
+  is the least important criterion. A runner that is stuck works on no ticket at all, in order or
+  not. Each fix also removes a recurring job from the supervising agent, which frees the runner to
+  build the rest itself.
+- **Criterion 1 is mostly data.** Baton's default order already puts expedited work first, then
+  work closest to an end, then the ticket's `order`. What fails is that the order is missing or
+  wrong, and that a ticket which cannot move is offered at all. B-362 and B-363 are small tickets. The
+  ranks below fix the order for this plan's own tickets now.
+
+## The work, in order
+
+The first column is each ticket's `order`; lower ranks are offered first. New tickets are filed
+with theirs. The existing tickets ranked here carry theirs from this plan's PR, set by hand once
+(D7): Dibber 0.4.0 refuses to change `order` after filing ("`--field` cannot write Dibber-owned
+key `order`"), and B-362 gives it a command that can. Tickets the same number of legs from an end are offered by rank (*The default
+order*, [BATON_SPEC §6.6](../../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-6)).
+B-359 to B-371 are new in this PR.
+
+### Phase A — the runner keeps running, and takes the right work
+
+| Rank | Ticket | Criterion | What it ends |
+|---|---|---|---|
+| 15 | B-359 | 3 | A burst of failures on one runner is the runner's fault: the tickets keep their attempts, the runner backs off |
+| 20 | B-360 | 3 | Holds settle themselves: lifted when the ticket closes, one automatic retry after a day, many answered at once |
+| 25 | B-244 | 3 | An idle runner says why: the rest, after #352 (rule 4's failed-check attribution, with B-245) |
+| 30 | B-361 | 3 | Baton notices unclaimable work itself (`baton.unclaimable`, `baton.runner-starved`, `baton.no-runner`), and the ready list names the right gate |
+| 35 | B-318 | 3 | Suspended tickets get their next leg without a push to `main` (PR #384 open) |
+| 40 | B-362 | 1 | Every open ticket has a rank, and anyone can see the order Baton offers |
+| 45 | B-363 | 1 | A ticket waiting on something outside (a release, a person) is blocked, not offered |
+| 50 | B-336 | 3 | A runner that cannot place a sandbox stops claiming: the executor's placement report, after #464 |
+| 55 | B-365 | 3 | B-336's pause for any repeated host failure; rotated keys re-read without a restart |
+| 70 | B-364 | 2 | `create-pr` keeps its PRs mergeable and tests what would land |
+| 75 | B-368 | all | `baton report soak`: the check that decides the release |
+
+B-335 (runs counted twice) merged (#412) and is closed in #469.
+
+**Already merged.** Six tickets this plan first ranked here had PRs merged before it was written,
+with their files still `available`. The sweep of D8 ([#469](https://github.com/immediately-run/baton/pull/469))
+read each against its PRs:
+- **delivered and closed:** B-324 (#408), B-249 (#353), B-337 (#456) and B-347 (#460), with
+  their open findings filed as B-395 (B-324's) and B-380 (B-249's);
+- **partial, still open:** B-244 (#352; rule 4's failed-check attribution waits on B-245) and
+  B-336 (#464; the E2B executor's placement report waits on a Fieldhouse change). Both stay
+  phase A work at ranks 25 and 50.
+
+B-311 (#348) in phase B is closed the same way, its open findings filed as B-394.
+
+After phase A has merged and deployed, B-366's **rehearsal**: 72 hours on bering, with every
+intervention logged and `baton report soak` read at the end. It releases nothing. Whatever it finds
+becomes a ticket ranked before phase B's remaining work.
+
+### Phase B — the course says one thing
+
+The selector design (R-BTN-205, B-351) landed in the spec on 2026-11-27. It replaces the
+mechanisms that disagreed with each other in phase A's evidence (the station function's readiness,
+the holder's `next`, posted next legs), with one function per course whose verdict says why. The
+owner ruled the same day that it is needed for Baton to be generally usable. Whether it belongs to
+0.1 is decision D2.
+
+| Rank | Ticket | What it does |
+|---|---|---|
+| 100 | B-352 | Selection in core: verdicts, wants, binding |
+| 105 | B-353 | Selection on the runner: the default selector, chaining, re-checks |
+| 110 | B-356 | The standard courses' selectors; readiness and the holder's `next` removed. Its `create-pr` selector should also send a conflicting PR to `fix` before it waits on anyone (B-364's follow-on; add this when it is claimed) |
+| 115 | B-355 | `baton ticket why`, `--replay`, and the dashboard's "why this leg" |
+| 120 | B-354 | Host matching (the sandbox-memory case in the owner's brief) |
+| 125 | B-357 | The selector's budget, measured |
+
+### Phase C — the release
+
+| Rank | Ticket | What it does |
+|---|---|---|
+| 150 | B-366 | [OP] The release soak: a fresh 72-hour window, `PASS`, then the 0.1 tag as B-135 says |
+
+## Decisions for the owner
+
+Each has a default that this plan assumes until answered.
+
+- **D1 — The default order.** Today `to_end` (fewest legs to an end) decides before `order`.
+  - (a) Keep it, and write it down (B-362, item 5). **Default.** Finishing in-flight work first keeps PRs from going stale.
+  - (b) Put `order` first, so the most important ticket always goes first, even over finishing one that is nearly merged.
+- **D2 — Is the selector (phase B) in 0.1?**
+  - (a) Yes. The release soak runs on the mechanism 0.1 ships, and phase A's rehearsal is the cheap early signal. **Default.**
+  - (b) No. Release on phase A alone, and the selector is 0.2's.
+- **D3 — The pass thresholds for `baton report soak`.**
+  - (a) Zero interventions, zero inversions, zero course deviations, idle capacity at most 5% of each runner's live time, no ticket stale for more than 24 hours. **Default.**
+  - (b) Other numbers.
+- **D4 — `run-tests` installs a PR's own lockfile.** Asked in the 2026-11-22 13:20 entry and not answered.
+  - (a) Yes, when the PR's lockfile differs from the home's (B-364, item 2). **Default.**
+  - (b) No: B-364 leaves it out.
+- **D5 — B-240 and B-250** (dashboard query counts) are at `order` 2 and 3, ahead of all of phase A.
+  - (a) Move them after phase A (ranks 85 and 86). **Default.** This plan's PR does not move them until answered.
+  - (b) Keep them first. Choose this if their read cost threatens the soak, as the 2026-11-15 read-quota outage did.
+- **D6 — While phase A is open, the 61 available tickets that cite a design in `spec/proposals/`.**
+  - (a) Leave their ranks as they are: they sort after every rank above. **Default.**
+  - (b) Mark them `deprioritized`, so no runner takes one before 0.1.
+- **D7 — Re-ranking existing tickets**, which Dibber 0.4.0 cannot do. **Answered**, the owner,
+  2026-11-27: "Yes, hand-edit once". This plan's PR sets `order:` by hand on the 25 existing tickets
+  ranked here (phases A and B, and *Simpler* below); `dibber check` reports nothing new. B-362 gets
+  Dibber a re-rank command.
+- **D8 — The 91 tickets Baton holds at `merged` whose files say they are open.** **Answered**, the
+  owner, 2026-11-27: (a), in its own PR. [#469](https://github.com/immediately-run/baton/pull/469)
+  closes the 56 that were delivered, with their review rounds archived and 26 follow-ups (B-375 to
+  B-400) for the findings left open, and files B-374 for the cause. The other 33 were never
+  delivered (a filing, spec or partial PR merged), yet Baton holds them at `merged`, so no runner is
+  offered them: B-374 asks for them to be put back on the course.
+
+## Housekeeping found on the way
+
+Each item is a hand act on the ticket store, so each is an intervention if done during a soak
+window. Do them before one starts.
+
+- **Done in this PR: B-314 and B-316 closed.** Both merged on 2026-11-24 at the owner's word
+  (#394, #398) with their last review round still asking for changes, and their tickets stayed
+  `available`. Their review rounds are archived (`docs/review/B-314-round-1.mdx` to
+  `B-316-round-2.mdx`), each ticket is closed with `dibber done` and moved to `tickets/archive/`,
+  and the findings still open go to two new tickets: B-372 (a stale `origin/HEAD`, a removed
+  declaration that returns after a restart, §8.1's `courses` row) and B-373 (two stderr paths that
+  mask without the raw CRLF frame, and B-316's unanswered owner decision on short disproved holds).
+- **The same defect, 91 more times (D8, answered: see #469).** On 2026-11-27 Baton holds 93 tickets at `merged`, its
+  end station, whose files still say `available`, `in-review` or `in-progress`. B-314 and B-316
+  were two of them. Of the other 91: 66 list PRs that have all merged, 2 wait on an open docs PR
+  (B-68 on docs#229, R3-1268 on docs#234), and 23 list no PR at all (among them B-336, B-337 and B-347,
+  whose PRs are on `main` all the same). Baton offers none of them to a runner, but people and
+  Dibber read them as open work, and their stale ranks confuse B-362's order.
+- B-220 builds the Sync screen's Cut over and Confirm adoption buttons that B-288 deletes. One of
+  them should be withdrawn.
+- About 30 runner PRs conflict with `main` (2026-11-24). Once B-364 lands, the course clears them.
+  Until then they stay parked.
+
+## After 0.1
+
+The owner named three more reasons Baton is not ready for others (2026-11-24): it is too complex,
+it has no installation story, and it has no model of users. 0.1's criterion does not need them,
+so they follow it. Their tickets are ranked after phase C.
+
+### Simpler
+
+Removal tickets were filed by the 2026-11-19 reviews, and none has landed. Ranked in this order,
+from 200: B-288 (mirror and adoption), B-289 (what is left of the git lock), B-290 (checks), B-291
+(the resource prerequisite), B-263 (signed control), B-67 (notices), B-161 (one way to ask a
+person), B-165 (constant knobs), B-293 (the policy document against §12.8), B-189 (the
+runner-distrust knobs), B-157 (one CLI command tree). B-220 is housekeeping, above.
+
+### Installable
+
+| Rank | Ticket | What it does |
+|---|---|---|
+| 250 | B-367 | The server in the package; `baton init local` and `baton up`: a first install in two commands |
+| 255 | B-370 | `baton doctor`: one preflight per role, every declared capability checked |
+| 260 | B-369 | R-BTN-136's secret sink built; `baton secrets list`; rotations that change both sides |
+
+The Cloudflare path (a templated `wrangler.toml` instead of immediately.run's own, Workers Paid
+and the Access bypass written down) is the next ticket after B-367, once B-367's shape is settled.
+
+### People
+
+The owner's message of 2026-11-24 asked for "ticket leg X is waiting on input from user Y or
+user group Z", and for per-user notification preferences. The owner's rulings of 2026-11-26 and
+2026-11-27, in
+[people and dashboard §5](../../spec/proposals/people-and-dashboard.md#5-people-identities-and-the-roster)
+and [personal secrets and notification](../../spec/proposals/personal-secrets.md), answer most of
+it:
+
+- **Who may answer** a person leg: the keys holding its labels (R-BTN-204's members, B-338), or
+  an owner. A label is "group Z" for answering.
+- **Who is told:** the ticket's assignee, resolved to a person. Baton keeps no groups, and a
+  person carries no authority.
+- **How:** each person's own channels and preferences, sent by a notifier outside Baton that
+  never shows Baton a plaintext secret.
+
+One gap is left. A person leg waiting on a label, on a ticket with no assignee, reaches nobody: it
+is shown on Needs you and not sent. B-371 (rank 270) moves both proposals into the spec under the
+owner's 2026-11-27 ruling, files their build tickets, and puts that gap to the owner as one
+question: keep it, or let an arena map a label to one shared channel (no membership, no
+authority).

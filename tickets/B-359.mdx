@@ -1,0 +1,65 @@
+---
+id: B-359
+status: available
+topics: [baton]
+owns: {}
+prs: []
+title: "B-359 — A burst of failures on one runner is the runner's fault: the tickets keep their attempts, the runner backs off, and one condition names the cause"
+depends_on: []
+order: 15
+tags: [roadmap-item]
+project: baton
+description: When one runner ends three or more claims cannot-finish on distinct tickets within fifteen minutes, Baton restores those tickets' attempts and lifts the holds the burst made, backs off the runner instead, and raises baton.runner-faulting (baton.fleet-faulting when two runners burst together). A ticket failing alone is still held as R-BTN-122 says.
+repos: [baton]
+---
+
+**Brief:** the owner, 2026-11-27 (in a Claude Code session): Baton's 0.1 release criterion is that "the runner can execute tasks without interventions for 3 days such that: 1. It is working on the correct issues (most important first) 2. It follow the course as expected 3. It operates at full capacity". This ticket is part of criterion 3; the plan is [Baton 0.1](../docs/plans/baton-0-1.mdx).
+
+**Spec:** [BATON_SPEC §7.4](../spec/BATON_SPEC/07-conditions.md#sec-7-4) ([R-BTN-122](../spec/BATON_SPEC/07-conditions.md#sec-7-4): attempts per ticket and leg; exhaustion holds), [BATON_SPEC §9.4](../spec/BATON_SPEC/09-claims.md#sec-9-4) (what counts as a failed attempt), [BATON_SPEC §7.3](../spec/BATON_SPEC/07-conditions.md#sec-7-3) ([R-BTN-163](../spec/BATON_SPEC/07-conditions.md#sec-7-3): Baton's own conditions).
+
+**Depends on:** none.
+
+**Related:** Complements B-336 (a sandbox that cannot be placed) and B-347 (a refusal a retry cannot fix): those classify one known cause; this catches every cause neither names.
+
+### What went wrong
+
+R-BTN-122 counts attempts per ticket and leg. A fault on the host or at the provider, which fails every leg the runner starts, is therefore charged to each ticket it touches, and the third charge holds the ticket until an owner answers `baton:retries`. Every outage so far turned into a wave of holds that only a person could lift:
+
+- 2026-11-18 11:02: the GLM plan's 5-hour usage limit; 36 tickets spent an attempt, then six idle hours (`docs/interventions.mdx`).
+- 2026-11-21 06:36: the gateway's fence dropped the host's replies; 61 failed implements, 31 tickets held, lifted by a console script at 08:00.
+- 2026-11-21 07:45: agents stopping on a CLAUDE.md rule; 9 failed attempts.
+- 2026-11-24: B-322's third `cannot-finish:transient` came from a gateway key re-issued under a running runner (every leg 401).
+- 2026-11-25 11:30: E2B could not place sandboxes; 43 tickets churned in minutes (B-336).
+
+In each case the failures shared a runner, a window and a cause, and were spread over many tickets. No ticket was at fault.
+
+### What to build
+
+1. **A burst is the runner's fault, not the tickets'.** When one runner ends at least `N` claims `released:cannot-finish:*` on at least `N` distinct tickets within `T` (defaults `N = 3`, `T = 15 minutes`, as repository settings under R-BTN-66), Baton:
+   - stops counting those ends as failed attempts: it restores each ticket's `leg_attempts` row as it stood before the burst's first end, and lifts any `attempts-exhausted` hold the burst created, as an event naming the burst;
+   - backs off the runner rather than the tickets: claims from that runner key are refused with a new code, `runner-backing-off`, with `until`, doubling from 5 minutes up to 1 hour while bursts repeat, reset by a leg that reaches an outcome;
+   - raises one runner condition, `baton.runner-faulting`, its `detail` the end reasons and error types, most frequent first. It closes when a leg of that runner reaches an outcome.
+2. **A fleet-wide burst is the provider's or Baton's.** When at least two runners are in a burst within the same `T`, Baton raises `baton.fleet-faulting` on the repository too, so one Needs-you entry names the common cause instead of one hold per ticket.
+3. **Nothing new to configure.** The defaults hold with no setting. A course whose leg must count every failure keeps doing so by declaring a non-retryable type (R-BTN-160), which this rule does not touch.
+
+### Exit criteria
+
+- A scenario where one runner ends 10 claims `cannot-finish:transient` on 10 tickets within 5 minutes leaves every ticket's attempts as they were, holds none, refuses that runner's next claim `runner-backing-off`, and raises one `baton.runner-faulting`.
+- After the runner's next leg reaches an outcome, its claims are accepted and the condition is closed.
+- Two runners bursting together raise `baton.fleet-faulting` once.
+- One ticket failing three times alone (no burst) is still held as R-BTN-122 says.
+- R-BTN-122 and R-BTN-163 amended in the same PR; each behaviour named in a scenario (take numbers with `baton tickets next scenario`); `npm test` and `npm run typecheck` green.
+
+### Trust
+
+The inputs are the runner's own end reasons, which it already reports. A runner can now avoid charging tickets by failing many at once; it gains nothing by doing so (the runner is backed off), and the ends stay in the history.
+
+### Invariants
+
+- R-BTN-122 still holds a ticket that fails on its own.
+- Backing off a runner is advice the gates enforce only for that key; other runners still claim the same tickets.
+- One clock (R-BTN-32): the window is measured with `this.now`.
+
+## Status
+
+_filed 2026-11-27._

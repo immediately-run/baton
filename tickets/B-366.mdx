@@ -1,0 +1,44 @@
+---
+id: B-366
+status: available
+topics: [baton]
+owns: {}
+prs: []
+title: "B-366 — [OP] Baton 0.1: a 72-hour rehearsal after phase A, then a 72-hour release soak that baton report soak passes, then the 0.1 tag"
+depends_on: [B-324, B-359, B-360, B-244, B-361, B-318, B-362, B-363, B-336, B-365, B-347, B-337, B-364, B-368, B-249, B-352, B-353, B-356, B-355, B-354, B-357, B-311]
+order: 150
+tags: [roadmap-item]
+project: baton
+description: An operator ticket. Rehearse after phase A and file what it finds; run a fresh 72-hour window with no change to host, grants or course once phases A and B have landed; release when baton report soak prints PASS and no intervention is logged, as B-135 says releases are made.
+repos: [baton]
+---
+
+**Brief:** the owner, 2026-11-27 (in a Claude Code session): "Baton's 0.1 release criteria is that the runner can execute tasks without interventions for 3 days such that: 1. It is working on the correct issues (most important first) 2. It follow the course as expected 3. It operates at full capacity. That is in order of importance, most important first." The plan is [Baton 0.1](../docs/plans/baton-0-1.mdx).
+
+**Spec:** none changes.
+
+**Depends on:** B-324, B-359, B-360, B-244, B-361, B-318, B-362, B-363, B-336, B-365, B-347, B-337, B-364, B-368, B-249, B-352, B-353, B-356, B-355, B-354, B-357, B-311.
+
+**Related:** these are phases A and B of the plan; phase B is in the release only while decision D2 stands at (a), its default.
+
+### What to do
+
+This is an operator ticket: a person runs it, no runner can.
+
+1. **Rehearsal.** Once phase A has merged and deployed, start a 72-hour window on bering with the runner at its normal concurrency, and log every intervention in `docs/interventions.mdx` as `AGENTS.md` says. At the end run `baton report soak baton --from <start> --to <end>`. The rehearsal does not release anything. It shows what phase B and any new tickets must fix: file each failure as a ticket, ranked before the remaining work.
+2. **Release soak.** When the tickets this ticket depends on have merged and deployed, start a fresh 72-hour window with no change to the host, the grants or the course during it. Any intervention restarts the window, once its cause has a fix merged.
+3. **Decide.** The window passes when `baton report soak` prints `PASS` with the thresholds the owner set (decision D3), and `docs/interventions.mdx` has no entry dated inside it.
+4. **Release.** Tag and publish 0.1 the way B-135 says production releases are made (a human act). Record the soak report's output and the window in the release notes.
+
+### Exit criteria
+
+- A 72-hour window with `baton report soak` printing `PASS` and no intervention logged.
+- The 0.1 tag and npm release, with the soak report attached to its notes.
+
+### Trust
+
+The release is a human act (B-135). No runner tags, publishes or changes a grant for this ticket.
+
+## Status
+
+_filed 2026-11-27._

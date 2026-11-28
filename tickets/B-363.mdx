@@ -1,0 +1,60 @@
+---
+id: B-363
+status: available
+topics: [baton]
+owns: {}
+prs: []
+title: "B-363 — A ticket waiting on something outside the repository is blocked, not offered: needs as prerequisites"
+depends_on: []
+order: 45
+tags: [roadmap-item]
+project: baton
+description: "The markdown source reads needs: (a package release, or a person's act an owner marks met) and posts each as an R-BTN-120 prerequisite, so a ticket that cannot move is not claimed; the implement leg asks for a need instead of failing; open tickets with a Needs line or [OP] get needs: in the PR."
+repos: [baton]
+---
+
+**Brief:** the owner, 2026-11-27 (in a Claude Code session): Baton's 0.1 release criterion is that "the runner can execute tasks without interventions for 3 days such that: 1. It is working on the correct issues (most important first) 2. It follow the course as expected 3. It operates at full capacity". This ticket is part of criterion 1; the plan is [Baton 0.1](../docs/plans/baton-0-1.mdx).
+
+**Spec:** [BATON_SPEC §6.1](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-1) ([R-BTN-120](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-1): prerequisites a ticket declares), [BATON_SPEC §4.2](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-2) ([R-BTN-74](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-2): what the markdown source posts).
+
+**Depends on:** none.
+
+### What went wrong
+
+A ticket that cannot be done yet is still offered, and claiming it costs an attempt:
+
+- 2026-11-24 19:10 (`docs/interventions.mdx`): B-326 was claimed at once and failed `implement`. Its agent found that Dibber's DIB-30, which the ticket's **Needs:** line names, was not released, and opened no PR. "The ticket declares no dependency, so Baton will offer it until it is held."
+- 2026-11-17 20:18 and 2026-11-18 04:18: B-193's and B-174's merge legs waited on an npm release approval that only a person gives.
+- Tickets whose prose says "after the owner rules on …" or "needs a human operator" are offered to autonomous runners like any other.
+
+These are working on the wrong issue (criterion 1): a runner spends a claim on a ticket that cannot move, while a ticket that could waits.
+
+### What to build
+
+1. **An outside need is a prerequisite.** The markdown source reads a `needs:` frontmatter list. Each entry is one of:
+   - `release:<package>@<version>`, met when the registry serves that version (the sync checks; for npm, `npm view`);
+   - `person:<text>`, at most 128 characters, met only when an owner marks it met (`baton owner need met <repository> <ticket> <index>`).
+   Another ticket stays a `depends_on` entry, as today. The sync posts each need as a prerequisite R-BTN-120 already knows how to block on, with the unmet ones' text as the block's reason.
+2. **A blocked ticket is not offered.** It is drawn `blocked` with its needs, like a dependency, and no runner claims it.
+3. **The filing legs write it.** `create-pr`'s implement leg instructions say: when a ticket cannot proceed because of something outside the repository, end the leg asking for the need to be declared (an `interact` or a person leg, as the course allows), rather than failing it. The ticket template in Dibber's skill names `needs:`.
+4. **Migrate the prose.** A one-off script, run in this ticket's PR, lists open tickets whose body has a **Needs:** line or `[OP]` in the title, so the PR can add `needs:` to each (the list goes in the PR, not into Baton).
+
+### Exit criteria
+
+- A ticket with `needs: [release:@immediately-run/dibber@9.9.9]` is blocked until the registry serves that version, then offered.
+- A `person:` need is blocked until an owner marks it met.
+- The PR adds `needs:` to every open ticket the script lists, or says why not for each one left out.
+- R-BTN-74 and R-BTN-120 amended; each behaviour named in a scenario; `npm test` and `npm run typecheck` green.
+
+### Trust
+
+`needs:` is ticket text, which any pusher writes. It can only keep a ticket from being offered: a pusher could already do that by changing the ticket's status. Marking a `person:` need met is an owner act. The registry check is a read the sync makes with no credential.
+
+### Invariants
+
+- R-BTN-33: Baton stores the need's kind and its 128-character text, no other ticket body.
+- Webhooks only trigger syncs: the registry is read by the sync, never pushed to Baton.
+
+## Status
+
+_filed 2026-11-27._

@@ -1,0 +1,52 @@
+---
+id: B-372
+status: available
+topics: [baton]
+owns: {}
+prs: []
+title: "B-372 — B-314's open review findings: a stale origin/HEAD is trusted, removing the last course declaration does not survive a restart, and the heartbeat row says courses are read at start"
+depends_on: []
+order: 85
+tags: [roadmap-item]
+project: baton
+description: "#394 merged with round two's findings open: the runner trusts a stale origin/HEAD and keeps declaring an old course version; a fresh reader re-advertises a removed course; section 8.1's courses row still says the list is read at session start."
+repos: [baton]
+---
+
+**Found by:** the review of B-314's PR, round two ([`docs/review/B-314-round-2.mdx`](../docs/review/B-314-round-2.mdx)). #394 was merged on 2026-11-24 at the owner's word with these findings open, and no fix leg ran after it. This is a defect report, not an owner brief.
+
+**Spec:** [BATON_SPEC §5.7](../spec/BATON_SPEC/05-courses.md#sec-5-7) (rule 9, [R-BTN-22](../spec/BATON_SPEC/05-courses.md#sec-5-7): a runner's declared courses), [BATON_SPEC §8.1](../spec/BATON_SPEC/08-runners.md#sec-8-1) (the heartbeat's `courses` row), [BATON_SPEC §8.3](../spec/BATON_SPEC/08-runners.md#sec-8-3) ([R-BTN-72](../spec/BATON_SPEC/08-runners.md#sec-8-3)).
+
+**Depends on:** none.
+
+### What is open
+
+B-314 made a running runner refresh its declared courses without a restart (#394). Round two of its review found three cases that still fail, each verified by the reviewer:
+
+1. **A stale `origin/HEAD` is trusted.** A clean home tracking `origin/trunk`, after the remote switched its default branch from `main` to `trunk`, kept declaring v1: the runner rejected `trunk` as the wrong branch. Deleting the stale symref let it refresh at once. `src/runner/main.ts` still reads `refs/remotes/origin/HEAD` first. ([thread](https://github.com/immediately-run/baton/pull/394#discussion_r4668979360))
+2. **Removing the last declaration holds only for the current reader.** Deleting `courses` while leaving `skills_version` and the course's directory makes the running reader return an empty list, but a fresh reader advertises the removed course again, even with `--course`. The shared-checkout exit-75 path can restart before the empty declaration is sent. ([thread](https://github.com/immediately-run/baton/pull/394#discussion_r4668979369))
+3. **The spec still says courses are read at session start.** §8.1's heartbeat table describes `courses` as "read from the runner's checkout at session start"; it should cite rule 9 for when the list is read. ([thread](https://github.com/immediately-run/baton/pull/394#discussion_r4668979380))
+
+### What to build
+
+1. Resolve the registered default branch (or revalidate a cached `origin/HEAD` against the remote) before trusting the symref, and cover a stale symref as well as a missing one in S-BTN-313.
+2. Make removal of the last explicit declaration hold across a restart: a fresh reader that finds `skills_version` but no `courses` field after an explicit declaration was seen does not fall back to directory discovery. Cover the fresh-reader case.
+3. Amend §8.1's `courses` row to cite rule 9.
+
+### Exit criteria
+
+- S-BTN-313 covers a stale `origin/HEAD` and a fresh reader after the last declaration was removed; both pass.
+- §8.1's row cites rule 9, with `npm run spec:index` run.
+- `npm test` and `npm run typecheck` green.
+
+### Trust
+
+No new input. The runner reads its own checkout and its remote.
+
+### Invariants
+
+- Rule 9: the runner declares only courses its checkout holds, at the versions it holds.
+
+## Status
+
+_filed 2026-11-27._

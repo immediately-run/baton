@@ -2,8 +2,8 @@
 title: "B-316 — Runner masker follow-ups after #354: line-crossing secrets, split characters, over-masking, a stray mask and a slow hold"
 id: B-316
 project: baton
-status: available
-updated: 2026-11-23
+status: done
+updated: 2026-11-27
 tier: judgement
 repos:
   - baton
@@ -15,14 +15,13 @@ topics:
   - baton
   - security
 owns: {}
-prs:
-  - https://github.com/immediately-run/baton/pull/398
+prs: [https://github.com/immediately-run/baton/pull/398]
 depends_on: []
 ---
 
 **Brief:** the owner, 2026-11-22, approved filing this ticket ("OK for me to … file the four tickets" — "Yes"). The facts are from that day's supervision on host bering. PR #354 (merged as `44080032`, after two rounds of adversarial review) fixed `createLegMasker` and `maskLiterals` in `src/runner/mask.ts`. Before the fix, part of a secret could reach the runner log and the leg log in clear; FLDH-64 rotates bering's credentials for that. The second review round left the findings below. The reviewer's fuzz harnesses (`fuzz3.mts`, `fuzz4.mts`) lived in that session's scratchpad and are not in the repository, so this ticket adds a fuzz test of its own to the suite.
 
-**Spec:** [BATON_SPEC §8.4](../spec/BATON_SPEC/08-runners.md#sec-8-4) ([R-BTN-144](../spec/BATON_SPEC/08-runners.md#sec-8-4), class 7: the masked literals), [§8.3](../spec/BATON_SPEC/08-runners.md#sec-8-3) ([R-BTN-107](../spec/BATON_SPEC/08-runners.md#sec-8-3), the executor's stream). Scenario: [S-BTN-119](../spec/BATON_SPEC/15-verification.md#sec-15) (environment and masking), extended.
+**Spec:** [BATON_SPEC §8.4](../../spec/BATON_SPEC/08-runners.md#sec-8-4) ([R-BTN-144](../../spec/BATON_SPEC/08-runners.md#sec-8-4), class 7: the masked literals), [§8.3](../../spec/BATON_SPEC/08-runners.md#sec-8-3) ([R-BTN-107](../../spec/BATON_SPEC/08-runners.md#sec-8-3), the executor's stream). Scenario: [S-BTN-119](../../spec/BATON_SPEC/15-verification.md#sec-15) (environment and masking), extended.
 
 ## Plan
 
@@ -87,3 +86,5 @@ The masker is what keeps a leg's printed credentials out of the runner log and t
 ## Status
 
 _filed 2026-11-22._
+
+_2026-11-27: merged 2026-11-24 (#398) at the owner's word with findings open; review rounds archived in docs/review/B-316-round-1.mdx and -2; open findings and the owner decision (c) carried by B-373, https://github.com/immediately-run/baton/pull/398._

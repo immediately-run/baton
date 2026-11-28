@@ -1,0 +1,18 @@
+---
+title: B-316 review round 2
+description: Findings and disposition for the second review of runner masking across line and byte boundaries, merged with two findings open.
+---
+
+Reviewed [Baton #398](https://github.com/immediately-run/baton/pull/398) at `89baa595`
+([review](https://github.com/immediately-run/baton/pull/398#pullrequestreview-6027877971)). The
+verdict was changes. The deterministic stdout split and forced-drain tests closed round one's test
+gaps. The reviewer passed 101 focused runner tests and typecheck; full CI was pending.
+
+The PR was merged on 2026-11-24 at the owner's word, with this round's findings open
+(`docs/interventions.mdx`, *2026-11-24 — the owner merged every mergeable PR*). No fix leg ran
+after this round. The open findings are carried by B-373.
+
+| Finding | Disposition |
+|---|---|
+| [Blocking: the verbose wrapper drain and replay still drop CRLF framing before masking](https://github.com/immediately-run/baton/pull/398#discussion_r4670713388) | Open on `main`: `src/runner/claimRun.ts`'s verbose `onStderr` masks the line without its frame. Carried by B-373. |
+| Round one's owner decision on (c) | Still open: no owner answer is recorded. Carried by B-373. |

@@ -1,0 +1,62 @@
+---
+id: B-370
+status: available
+topics: [baton]
+owns: {}
+prs: []
+title: "B-370 — baton doctor: one preflight per role, every declared capability checked by its own check"
+depends_on: []
+order: 255
+tags: [roadmap-item]
+project: baton
+description: "A pass or fail line per check for admin, owner, runner and sync: versions, keys, each granted capability checked by the executor's provides check or reported unchecked, executor pin, masking, sync freshness, webhook probe, required settings by name. The runner scripts call it instead of their own checks."
+repos: [baton]
+---
+
+**Brief:** the owner, 2026-11-24 (in a Claude Code session): "The requirements are non-obvious. Managing the fleet of server-side services (litellm, git proxy, local e2b api) is somewhat ad-hoc still and undocumented." The plan is [Baton 0.1](../docs/plans/baton-0-1.mdx), *After 0.1*.
+
+**Spec:** [BATON_SPEC §8.3](../spec/BATON_SPEC/08-runners.md#sec-8-3) ([R-BTN-107](../spec/BATON_SPEC/08-runners.md#sec-8-3): the executor and what it provides), [BATON_SPEC §6.2](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-2) ([R-BTN-126](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-2): a capability confirmed by its own check).
+
+**Depends on:** none.
+
+**Related:** B-245 builds capability checks inside the runner's claim path; this ticket runs the same kind of check on demand, before anything is claimed. Where B-245 has landed, `doctor` calls its checks rather than writing its own.
+
+### What is wrong today
+
+The checks that tell an operator whether a host can run legs are scattered:
+
+- `scripts/start-runner.sh --check` warns only that the agent binary is missing.
+- `scripts/cloud-runner.sh --check` probes `claude -p` and a push dry run.
+- `docs/runbooks/register-baton.mdx` has a webhook probe and an `owner_keys` fingerprint diff to run by hand.
+- Fieldhouse's gateway and E2B checks are `host-setup.sh` and `tests/executor-sandbox.mjs` in another repository.
+
+A runner declares `key:*` and other capabilities by hand in its grant, and nothing checks them. Several interventions were a host that could not do what it declared: a gateway that could not be reached (2026-11-21 06:36), a key rotated under a runner (2026-11-24 10:19), an executor pin that no longer matched (2026-11-18 09:19), sandboxes that could not be placed (2026-11-25).
+
+### What to build
+
+`baton doctor [--role admin|owner|runner|sync] [--json]`: one preflight, a pass or fail line per check, a non-zero exit if any fails, and for each failure the command or page that fixes it.
+
+- **Every role:** the CLI version against the server's recommended one, the origin reachable, the key file readable and known to Baton in the role asked.
+- **runner:** each capability its grant admits, checked by the executor's own `provides` check where one exists (the agent harness answers a one-line prompt; `gh auth status`; a push dry run to a scratch ref; the gateway's `/v1/models` with the configured key; a sandbox placed and killed), and a capability with no check reported as `unchecked`, not passed. The executor's pin matches its digest. Masking (`runner.json` `mask_env`) covers every secret-shaped variable the runner's environment holds.
+- **owner:** the repository's sync has posted within its interval; the webhook, where one is configured, answers its probe; the policy's floors hold.
+- **admin:** the deployment's required settings are present (by name, never value), and the owner keys a seed file names match the database's.
+
+`start-runner.sh` and `cloud-runner.sh` call `baton doctor --role runner` instead of their own checks.
+
+### Exit criteria
+
+- On a host with the gateway key wrong, `baton doctor --role runner` fails the gateway line and names the key file, without printing the key.
+- A capability with no check is reported `unchecked`.
+- The two scripts' `--check` paths are replaced by `doctor`; `npm test` and `npm run typecheck` green.
+
+### Trust
+
+`doctor` runs on the operator's own machine with the credentials it already holds. It prints no secret value: only names, fingerprints and status codes (R-BTN-144's masking applies to everything it prints).
+
+### Invariants
+
+- A capability stays the runner's own statement (values 12): `doctor` reports, Baton does not refuse a grant because of it.
+
+## Status
+
+_filed 2026-11-27._
