@@ -5,7 +5,11 @@
 // (`to_end`), rank, age, id — nothing is flagged, and a runner that claims against the order is
 // accepted without recording an override. Runs on both hosts.
 import { describe, it, expect, beforeEach } from 'vitest';
-import { claimItem, cutover, Git, placed, register, rows, setClock, runnerCall } from '../helpers';
+import { claimItem, cutover, Git, placed, register, rows, setClock, runnerCall, keyCall, setAdminKeys } from '../helpers';
+
+import { grantedRunner } from '../lib/fleet';
+import { makeKey } from '../lib/sshKeys';
+import { plan, printTicketOrder } from '../../cli/baton.mjs';
 
 const T0 = Date.parse('2026-10-16T12:00:00Z');
 let git: Git;
@@ -43,6 +47,34 @@ describe('S-BTN-22 review queue bound', () => {
     expect(c.status).toBe(200);
     expect(await rows(`SELECT 1 FROM events WHERE kind = 'advice-overridden' AND claim_id = ?`, c.json.claim_id))
       .toEqual([]);
+  });
+
+  it('prints the served offer order and keys, and exposes the same runner positions on the board and tickets', async () => {
+    const admin = await makeKey('ssh-ed25519', 'admin');
+    const owner = await makeKey('ssh-ed25519', 'owner');
+    await setAdminKeys(admin);
+    expect((await keyCall(admin, '/v1/admin/repositories', { id: 'docs', owner_keys_add: [owner.publicKey] })).status).toBe(200);
+    git.add('F-NO-RANK', { rank: null });
+    git.add('F-INELIGIBLE', { rank: 0, requires: ['never-declared'] });
+    await git.post();
+    const runner = await grantedRunner(owner, 'docs', 'ordered', ['agent-venue']);
+    const endpoint = '/v1/runner/recommendations?all=1';
+    const expected = (await runner.call(endpoint, undefined, 'GET')).json.recommendations;
+    const ids = ['docs:M-1', 'docs:X-1', 'docs:F-1', 'docs:F-2', 'docs:F-3', 'docs:F-NO-RANK'];
+    expect(expected.map((r: { ticket_id: string }) => r.ticket_id)).toEqual(ids);
+    const lines: string[] = [];
+    expect(await printTicketOrder(plan('tickets', ['order', '--ready']), ({ path }: { path: string }) => runner.call(path, undefined, 'GET'), (line: string) => lines.push(line))).toBe(0);
+    expect(lines.slice(1).map((line) => line.split('\t')[0])).toEqual(ids);
+    expect(lines[1].split('\t')).toEqual(['docs:M-1', '1', 'false', '1', '40', String(T0), 'roadmap-pr', '100', '1', 'ready']);
+    expect(lines.at(-1)?.split('\t')[4]).toBe('-');
+
+    const board = (await runner.call('/v1/repositories/docs/board', undefined, 'GET')).json.ready;
+    const tickets = (await runner.call('/v1/repositories/docs/tickets?state=ready', undefined, 'GET')).json.tickets;
+    for (const [i, id] of ids.entries()) {
+      expect(board[i]).toMatchObject({ id, rank: expected[i].order.rank, ready_position: i + 1 });
+      expect(tickets[i]).toMatchObject({ ticket_id: id, rank: expected[i].order.rank, ready_position: i + 1 });
+    }
+    expect(tickets.find((r: { ticket_id: string }) => r.ticket_id === 'docs:F-INELIGIBLE')).toMatchObject({ ready_position: null });
   });
 
   it('age breaks a tie of station and rank: the leg ready longest first, then the id', async () => {

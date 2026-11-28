@@ -100,16 +100,7 @@ export function resolveTicketRepo(name: string, aliases?: Record<string, string>
 
 const CLOSED: Record<string, 'done' | 'withdrawn'> = { done: 'done', withdrawn: 'withdrawn', superseded: 'withdrawn', deferred: 'withdrawn' };
 
-/** The markdown source over `files` (S-BTN-43, [DIB-12](https://github.com/immediately-run/dibber/blob/main/tickets/DIB-12.md)): the board's `tickets` and `closed`. A duplicate `id`, or
- * a `repos` short name with no mapping, throws naming the file — the sync fails, nothing is
- * posted. Unknown frontmatter fields are ignored, so an existing wiki needs no rewrite. */
-export function ticketsMarkdown(files: MarkdownFile[], settings: MarkdownSettings = {}): TicketsResult {
-  const itemsDir = settings.items ?? 'tickets';
-  const defaultCourse = settings.default_course ?? 'create-pr';
-  const tickets: SourceTicket[] = [];
-  const closed: { id: string; as: 'done' | 'withdrawn' }[] = [];
-  const byId = new Map<string, string>(); // id → file, for duplicate detection
-  const openChildren = new Map<string, string[]>(); // parent id → its live children (R-BTN-86)
+function* markdownEntries(files: MarkdownFile[]) {
   for (const f of files) {
     // Every `*.md` or `*.mdx` file (R-BTN-74), the extension in any case: a space or a non-ASCII
     // letter in the name is still a ticket.
@@ -123,9 +114,38 @@ export function ticketsMarkdown(files: MarkdownFile[], settings: MarkdownSetting
     const order = fm.order == null || fm.order === '' ? null
       : typeof fm.order === 'string' && /^-?\d+(\.\d+)?$/.test(fm.order) ? Number(fm.order) : Number.NaN;
     if (order != null && !Number.isFinite(order)) throw new Error(`${f.path}: order ${JSON.stringify(fm.order)} is not a number`);
+    const status = str(fm.status) ?? '';
+    yield { f, fm, id, order, as: Object.hasOwn(CLOSED, status) ? CLOSED[status] : undefined };
+  }
+}
+
+/** Inherit an explicitly ranked parent; otherwise use the median of the ranked open files. */
+export function filingOrder(files: MarkdownFile[], parent?: string): number {
+  const orders: number[] = [];
+  for (const entry of markdownEntries(files)) {
+    if (entry.order == null) continue;
+    if (entry.id === parent) return entry.order;
+    if (!entry.as) orders.push(entry.order);
+  }
+  orders.sort((a, b) => a - b);
+  const mid = Math.floor(orders.length / 2);
+  if (!orders.length) return 0;
+  return orders.length % 2 ? orders[mid] : orders[mid - 1] / 2 + orders[mid] / 2;
+}
+
+/** The markdown source over `files` (S-BTN-43, [DIB-12](https://github.com/immediately-run/dibber/blob/main/tickets/DIB-12.md)): the board's `tickets` and `closed`. A duplicate `id`, or
+ * a `repos` short name with no mapping, throws naming the file — the sync fails, nothing is
+ * posted. Unknown frontmatter fields are ignored, so an existing wiki needs no rewrite. */
+export function ticketsMarkdown(files: MarkdownFile[], settings: MarkdownSettings = {}): TicketsResult {
+  const itemsDir = settings.items ?? 'tickets';
+  const defaultCourse = settings.default_course ?? 'create-pr';
+  const tickets: SourceTicket[] = [];
+  const closed: { id: string; as: 'done' | 'withdrawn' }[] = [];
+  const byId = new Map<string, string>(); // id → file, for duplicate detection
+  const openChildren = new Map<string, string[]>(); // parent id → its live children (R-BTN-86)
+  for (const { f, fm, id, order, as } of markdownEntries(files)) {
     if (byId.has(id)) throw new Error(`${f.path}: id ${id} already appears in ${byId.get(id)}`);
     byId.set(id, f.path);
-    const as = CLOSED[str(fm.status) ?? ''];
     if (as) {
       closed.push({ id, as });
       continue;

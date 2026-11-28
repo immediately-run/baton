@@ -24,6 +24,7 @@ export const DAILY_CONDITIONS_MAX = 200;
 /** R-BTN-163: the list route pages 100 at a time. */
 export const CONDITIONS_PAGE_MAX = 100;
 const MISSING_NEXT = 'baton.missing-next';
+const UNRANKED = 'baton.unranked';
 const HOUR = 3_600_000;
 
 export interface Ctx {
@@ -53,6 +54,7 @@ interface ConditionRow {
   raised_at: number;
   outcome: string;
   reraised: number;
+  unranked_json: string | null;
 }
 
 /** An entry of the Needs-you list and the conditions route. */
@@ -69,7 +71,12 @@ export interface ConditionEntry {
   session_link?: boolean;
   restarts: Record<string, string> | null;
   default: string | null;
-  detail?: { reraised: number };
+  detail?: ReturnType<typeof conditionDetail>;
+}
+
+export function conditionDetail(r: Pick<ConditionRow, 'reraised' | 'unranked_json'>) {
+  if (r.unranked_json != null) return { ...JSON.parse(r.unranked_json) as { count: number; ids: string[] }, ...(r.reraised ? { reraised: r.reraised } : {}) };
+  return r.reraised ? { reraised: r.reraised } : undefined;
 }
 
 export function isInteraction(type: string): boolean {
@@ -89,6 +96,28 @@ export class Conditions {
   }
   private exec(q: string, ...p: unknown[]) {
     return this.c.store.exec(q, ...p);
+  }
+
+  /** R-BTN-74: reconcile one advisory notice from the accepted markdown snapshot. */
+  unranked(repo: string, ids: string[], at: number): void {
+    const open = this.rows<{ id: number }>(`SELECT id FROM conditions WHERE repository_id = ? AND type = ? AND outcome = 'open'`, repo, UNRANKED)[0];
+    if (!ids.length) {
+      if (open) this.exec(`UPDATE conditions SET outcome = 'closed', closed_at = ?, closed_how = 'cause-ended' WHERE id = ?`, at, open.id);
+      return;
+    }
+    const detail = { count: ids.length, ids: ids.sort().slice(0, 50) };
+    const data = JSON.stringify(detail);
+    if (open) {
+      this.exec(`UPDATE conditions SET unranked_json = ? WHERE id = ? AND unranked_json IS NOT ?`, data, open.id, data);
+    } else {
+      const recent = this.rows<{ id: number }>(
+        `SELECT id FROM conditions WHERE repository_id = ? AND type = ? AND outcome = 'closed' AND closed_at >= ?
+         ORDER BY closed_at DESC, id DESC LIMIT 1`, repo, UNRANKED, at - HOUR)[0];
+      if (recent) this.exec(`UPDATE conditions SET outcome = 'open', raised_at = ?, closed_at = NULL, closed_how = NULL,
+         reraised = reraised + 1, unranked_json = ? WHERE id = ?`, at, data, recent.id);
+      else this.exec(`INSERT INTO conditions (repository_id, type, disposition, raised_at, unranked_json) VALUES (?, ?, 'notify', ?, ?)`, repo, UNRANKED, at, data);
+      logEvent(this.c.store, at, 'condition', 'baton', { type: UNRANKED, disposition: 'notify', ...detail }, null, null, repo);
+    }
   }
 
   /** R-BTN-83/R-BTN-163: settle the repository's missing-next notices in the snapshot transaction. */
@@ -272,11 +301,12 @@ export class Conditions {
       const parsed = JSON.parse(r.restarts_json) as Record<string, string>;
       if (Object.keys(parsed).length) restarts = parsed;
     } catch { /* an unreadable list is no list */ }
+    const detail = conditionDetail(r);
     return {
       condition_id: r.id, ticket_id: r.ticket_id, leg: r.leg, run_id: r.run_id, type: r.type,
       disposition: r.disposition, severity: r.severity, raised_at: r.raised_at, ...conditionLink(r.type, r.url, disclose),
       restarts, default: r.default_restart,
-      ...(r.reraised ? { detail: { reraised: r.reraised } } : {}),
+      ...(detail ? { detail } : {}),
     };
   }
 
@@ -287,7 +317,7 @@ export class Conditions {
    */
   needsYou(): ConditionEntry[] {
     return this.rows<ConditionRow>(
-      `SELECT id, repository_id, ticket_id, run_id, leg, type, disposition, severity, url, restarts_json, default_restart, raised_at, reraised
+      `SELECT id, repository_id, ticket_id, run_id, leg, type, disposition, severity, url, restarts_json, default_restart, raised_at, reraised, unranked_json
        FROM conditions WHERE outcome = 'open'
        ORDER BY CASE severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 ELSE 2 END, raised_at, id`,
     ).map((r) => this.entry(r, false));
@@ -321,7 +351,7 @@ export class Conditions {
     where.push('id > ?');
     params.push(after);
     const rows = this.rows<ConditionRow & { id: number }>(
-      `SELECT id, repository_id, ticket_id, run_id, leg, type, disposition, severity, url, restarts_json, default_restart, raised_at, reraised
+      `SELECT id, repository_id, ticket_id, run_id, leg, type, disposition, severity, url, restarts_json, default_restart, raised_at, reraised, unranked_json
        FROM conditions WHERE ${where.join(' AND ')} ORDER BY id LIMIT ${CONDITIONS_PAGE_MAX + 1}`, ...params);
     const page = rows.slice(0, CONDITIONS_PAGE_MAX).map((r) => this.entry(r, disclose));
     return { conditions: page, cursor: rows.length > CONDITIONS_PAGE_MAX ? String(page[page.length - 1].condition_id) : null };

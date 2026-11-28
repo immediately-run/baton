@@ -88,7 +88,7 @@ export async function sequenceRoute(core: Parameters<typeof authenticated>[0] & 
  * runner session's own answer, so it needs the session's secret. B-192: served through
  * src/core/reads/repository.ts, for a session beside those keys.
  */
-export async function repositoryRead(core: Parameters<typeof boardView>[0] & Pick<BatonCore, 'policies' | 'instance' | 'blocks' | 'history'>, req: Request, url: URL, repo: string, who: ReadPrincipal, sessionLink: SessionLinkView): Promise<Response | null> {
+export async function repositoryRead(core: Parameters<typeof boardView>[0] & Pick<BatonCore, 'policies' | 'instance' | 'blocks' | 'history'>, req: Request, url: URL, repo: string, who: ReadPrincipal, sessionLink: SessionLinkView, runnerId?: number): Promise<Response | null> {
   const blocks = /^\/v1\/repositories\/([^/]+)\/tickets\/([^/]+)\/(blocks|prerequisites)$/.exec(url.pathname);
   const blocked = /^\/v1\/repositories\/([^/]+)\/blocked$/.exec(url.pathname);
   // R-BTN-81: a ticket's history, read by the principals that may read its blocks (§11).
@@ -126,7 +126,7 @@ export async function repositoryRead(core: Parameters<typeof boardView>[0] & Pic
       ? [...new Set(core.runners.grantedCapabilities(cred, repo))].filter((x) => x !== 'none').sort()
       : null;
   }
-  if (boardRead) return json(boardView(core, repo, granted, sessionLink));
+  if (boardRead) return json(boardView(core, repo, granted, sessionLink, runnerId));
   if (policy) return policyRead(core, repo);
   if (show) {
     const id = ticketOf(repo, show[2]);

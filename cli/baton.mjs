@@ -81,7 +81,8 @@
 //   baton owner -i KEY resolve REPO TICKET DECISION OPTION   — a sync-posted decision's answer (B-110: review-rounds-3 round)
 //   baton admin -i KEY repos                                         (B-90: the registry — one signed request, one JSON answer)
 //   baton owner -i KEY grants REPO                    (B-90: the repository's owners, grants and settings, and the bars in force)
-//   baton board -i KEY REPO                    (B-90: the dashboard's view of one repository — its courses, head, mode, ready tickets)
+//   baton tickets order [REPO | --ready] [-i KEY] [--runner-state FILE]
+//   baton board -i KEY REPO [--runner-state FILE]                    (B-90: the dashboard's view of one repository — its courses, head, mode, ready tickets)
 //   baton run [--home <checkout|home name>] [--repository ID] [--course ID] [--capabilities a,b] [--beat-every MS]
 //             [--harness opencode|claude-code] [--verbose]   (R-BTN-72: the runner loop; a home
 //             name resolves to its checkout, B-121)
@@ -394,12 +395,20 @@ export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? 
     }
     throw new Error('baton ticket history TICKET [--before ID] [--limit N] | baton ticket show TICKET');
   }
+  if (role === 'tickets' && cmd === 'order') {
+    const { flags, positional } = parseArgs(rest, ['ready'], ['runner-state'], 1);
+    if (flags.ready && positional.length) throw new Error('--ready lists the runner’s offers across all its repositories');
+    return { method: 'GET', path: flags.ready ? '/v1/runner/recommendations?all=1'
+      : `/v1/repositories/${encodeURIComponent(repoOrHome(positional[0], home))}/tickets`,
+      runnerState: flags['runner-state'], ticketOrder: flags.ready ? 'ready' : 'repository' };
+  }
   if (role === 'board') {
     // B-90: the board of one repository, as the dashboard reads it — a GET any key granted on the
     // repository, an owner of it or an administrator signs. B-121: the repository may come from
     // the home in force.
-    parseArgs(argv, [], [], 1);
-    return { method: 'GET', path: `/v1/repositories/${encodeURIComponent(repoOrHome(cmd, home))}/board` };
+    const { flags, positional } = parseArgs(argv, [], ['runner-state'], 1);
+    return { method: 'GET', path: `/v1/repositories/${encodeURIComponent(repoOrHome(positional[0], home))}/board`,
+      ...(flags['runner-state'] ? { runnerState: flags['runner-state'] } : {}) };
   }
   if (role === 'admin') {
     if (cmd === 'repos') {
@@ -1300,7 +1309,7 @@ export async function main(argv) {
     if (argv[1] === 'migrate-markers') return migrateMarkersMain(argv.slice(2));
     return initMain(argv.slice(2));
   }
-  if (argv[0] === 'tickets') {
+  if (argv[0] === 'tickets' && argv[1] !== 'order') {
     // B-111's check, and B-112's ticket commands: repository commands in the defaults beside
     // `repo sync` (src/defaults/tickets.ts), each writing one commit pushed to the default branch.
     const { ticketsMain } = (await import('../scripts/baton-cli.mjs')).default;
@@ -1372,6 +1381,15 @@ export async function main(argv) {
       throw new Error(`${p.readFile} is not JSON: the import posts a baton.owner-state/v1 export`);
     }
   }
+  if (p.runnerState || p.ticketOrder === 'ready') {
+    if (!p.runnerState) throw new Error('tickets order --ready requires --runner-state FILE (the runner’s private state file)');
+    let state;
+    try { state = JSON.parse(readFileSync(p.runnerState, 'utf8')); }
+    catch { throw new Error('could not read the runner state file'); }
+    if (typeof state?.secret !== 'string' || !state.secret) throw new Error('the runner state has no secret; use the private file of a running runner');
+    p.runnerSecret = state.secret;
+  }
+  if (p.ticketOrder) return printTicketOrder(p, (request) => send(url, request, keyFile));
   const { status, json, text } = await send(url, p, keyFile);
   // A 2xx whose body is not JSON — an intermediary's login page, an HTML error, an empty body —
   // is a refusal, never success (B-80): the command fails, showing what arrived.
@@ -1398,6 +1416,42 @@ export async function main(argv) {
   }
   else process.stdout.write(`${JSON.stringify(json)}\n`);
   return status >= 200 && status < 300 ? 0 : 1;
+}
+
+/** Print Baton's order as rows, not a second ranking algorithm. */
+export async function printTicketOrder(p, request, write = (line) => process.stdout.write(`${line}\n`), warn = (line) => process.stderr.write(`${line}\n`)) {
+  const show = (id, o, course, state) => write([id, o.position, o.expedite, o.to_end, o.rank, o.ready_since, course, o.weight, o.group_position, state]
+    .map((v) => v ?? '-').join('\t'));
+  let cursor;
+  let header = false;
+  do {
+    const result = await request({ ...p, path: cursor ? `${p.path}?cursor=${encodeURIComponent(cursor)}` : p.path });
+    if (result.status < 200 || result.status >= 300 || !result.json) {
+      warn(JSON.stringify(result.json ?? { status: result.status, message: 'Baton answered no JSON' }));
+      return 1;
+    }
+    const body = result.json;
+    if (!header) {
+      write('ticket\tposition\texpedite\tto_end\trank\tready_since\tcourse\tweight\tgroup_position\tstate');
+      header = true;
+    }
+    if (p.ticketOrder === 'ready') {
+      if (!Array.isArray(body.recommendations) || body.recommendations.some((r) => r.order == null)) {
+        warn('Baton did not return offer-order keys; update the server');
+        return 1;
+      }
+      for (const r of body.recommendations) show(r.ticket_id, r.order, r.course.id, 'ready');
+      if (body.truncated) warn('Baton returned only its first 500 offers');
+      return 0;
+    }
+    if (!Array.isArray(body.tickets)) {
+      warn('Baton did not return a ticket list');
+      return 1;
+    }
+    for (const r of body.tickets) show(r.ticket_id, r.offer_order ?? { ...r, position: r.ready_position }, r.course, r.state);
+    cursor = body.next_cursor;
+  } while (cursor);
+  return 0;
 }
 
 // A pipe's write is asynchronous and `process.exit()` flushes nothing, so the command's final

@@ -186,6 +186,7 @@ export interface Recommendation {
   legs: string[];
   course: { id: string; data: unknown };
   reasons: string[];
+  order?: { position: number; group_position: number; weight: number; expedite: boolean; to_end: number; rank: number | null; ready_since: number | null };
   flags: string[];
   handoff_url: string | null;
   /** B-126 (R-BTN-194): who last pushed the ticket's body, when Baton has a record of it. */
@@ -915,11 +916,13 @@ export class Claims {
     });
     merged.sort((a, b) => Number(b.lane) - Number(a.lane) || b.weight - a.weight || a.place - b.place
       || a.to_end - b.to_end || (a.ready_since ?? 0) - (b.ready_since ?? 0) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
-    return merged.slice(0, limit).map((r) => ({
+    return merged.slice(0, limit).map((r, i) => ({
       ticket_id: r.id,
       station: r.item.station!.station,
       legs: [r.item.station!.next_leg!],
       course: { id: r.item.course, data: opaque(r.item.courseFields) },
+      ...(all ? { order: { position: i + 1, group_position: r.place + 1, weight: r.weight, expedite: r.lane,
+        to_end: r.to_end, rank: r.rank, ready_since: r.ready_since } } : {}),
       reasons: [...(r.lane ? ['expedite lane'] : []), `${r.to_end} leg${r.to_end === 1 ? '' : 's'} to an end`, `rank ${r.item.rank ?? '—'} in ${r.repository_id}`],
       flags: r.waits ? ['expedite-bound'] : [],
       handoff_url: r.item.station!.handoff_url,
@@ -1268,6 +1271,11 @@ export class Claims {
     const recommendations = this.cached(() => this.recommend(this.runner(runnerId), limit));
     if (limit >= 1 && !recommendations.length) this.idleNote(runnerId, version, null);
     return { recommendations };
+  }
+
+  /** Positions as offered to the authenticated runner, before any repository filter. */
+  offerOrder(runnerId: number) {
+    return new Map(this.recommendations(runnerId, undefined, true).recommendations.flatMap((r) => r.order ? [[r.ticket_id, r.order] as const] : []));
   }
 
   // ── the idle memo (B-237, R-BTN-196) ───────────────────────────────────────────────────

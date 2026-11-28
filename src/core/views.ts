@@ -86,10 +86,13 @@ export function grantsView(core: Pick<BatonCore, 'admin' | 'now'>, repo: string)
  *  for a key no grant binds and for an owner's or an administrator's key. `holders` (B-129) is
  *  the repository's live claims with each holder and its lease's end — the lock a session
  *  claiming through git reads with the same request (R-BTN-179's one-answer rule). */
-export function boardView(core: Pick<BatonCore, 'now' | 'registry' | 'sql' | 'courses' | 'queues' | 'runners' | 'claims'>, repo: string, granted: string[] | null = null, sessionLink = hiddenSessionLink) {
+export function boardView(core: Pick<BatonCore, 'now' | 'registry' | 'sql' | 'courses' | 'queues' | 'runners' | 'claims'>, repo: string, granted: string[] | null = null, sessionLink = hiddenSessionLink, runnerId?: number) {
   const now = core.now();
   const repository = uiRepo(core, core.registry.get(repo)!);
-  const ready = readyRows(core, [repository], repo);
+  const offered = runnerId == null ? null : core.claims.offerOrder(runnerId);
+  const ready = readyRows(core, [repository], repo).map((row, i) => ({ ...row,
+    ready_position: offered ? offered.get(String(row.id))?.position ?? null : i + 1,
+  })).sort((a, b) => (a.ready_position ?? Infinity) - (b.ready_position ?? Infinity));
   return {
     repository,
     ready,
@@ -110,7 +113,8 @@ function readyRows(core: Pick<BatonCore, 'sql'>, repositories: ReturnType<typeof
      FROM tickets t JOIN repositories p ON p.id = t.repository_id
      JOIN ticket_stations s ON s.ticket_id = t.id
      JOIN ticket_next_legs a ON a.ticket_id = t.id AND a.leg = s.next_leg AND a.state = 'ready'
-     WHERE p.retired_at IS NULL${repository_id ? ' AND t.repository_id = ?' : ''} ORDER BY p.weight DESC, t.expedite DESC, s.to_end, t.rank IS NULL, t.rank, t.repository_id, t.id`,
+     LEFT JOIN ticket_overrides o ON o.ticket_id = t.id
+     WHERE p.retired_at IS NULL${repository_id ? ' AND t.repository_id = ?' : ''} ORDER BY p.weight DESC, (t.expedite OR COALESCE(o.expedite, 0)) DESC, s.to_end, t.rank IS NULL, t.rank, a.ready_since, t.repository_id, t.id`,
     ...(repository_id ? [repository_id] : []));
   const requires = new Map<string, string[]>();
   for (const r of core.sql<{ ticket_id: string; name: string }>('SELECT ticket_id, name FROM ticket_requires WHERE ticket_id IN (SELECT value FROM json_each(?)) ORDER BY name', JSON.stringify(items.map((t) => t.id)))) {

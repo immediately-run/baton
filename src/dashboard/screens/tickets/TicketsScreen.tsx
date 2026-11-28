@@ -97,12 +97,13 @@ function Row({ row, repository }: { row: TicketRow; repository: string }) {
           <StateMark state={row.state} />
           {row.reasons?.length ? <span className="tk-also mut"> also {row.reasons.map((r, i) => <span key={r}>{i ? ', ' : ''}<Text value={r} /></span>)}</span> : null}
         </td>
+        <td data-label="Rank"><Text value={row.rank ?? 'Unranked'} />{row.ready_position != null ? <> · ready #{row.ready_position}</> : null}</td>
         <td data-label="Position"><Position row={row} repository={repository} /></td>
         <td data-label="Requires"><Chips names={row.requires ?? []} unmet={row.requires_unmet} empty="none" /></td>
       </tr>
       {reason || missing ? (
         <tr className={`tk-band tk-band-${reasonTone(row)}`}>
-          <td colSpan={4}>
+          <td colSpan={5}>
             {missing ? <div>Ticket is no longer on the board. An administrator can resolve its unconfirmed completion.</div> : reason}
             {claim !== null ? <CompletionControls claim={claim} repository={repository} ticket={row.ticket_id} view="repository/tickets" /> : null}
           </td>
@@ -130,7 +131,7 @@ export function TicketsScreen({ params }: ScreenProps) {
   const tabs: Tab[] = TICKET_TABS.map((t) => ({ id: t.id, label: t.label, count: tabCount(counts.current, t.states) ?? undefined }));
   return (
     <>
-      <PageHeader title="Tickets" sub="Every ticket under its one state, in Baton’s order." />
+      <PageHeader title="Tickets" sub="The default order is expedite, then fewer legs to an end (to_end) before rank, then oldest ready time, then ticket id." />
       <div className="tk-bar">
         <Tabs label="Ticket states" tabs={tabs} value={TICKET_TABS.some((t) => t.id === query.state) ? query.state : ''} onChange={(id) => query.set({ state: id })} />
         <div className="tk-filters">
@@ -152,6 +153,7 @@ export function TicketsScreen({ params }: ScreenProps) {
                       <tr>
                         <th scope="col">Ticket</th>
                         <th scope="col">State</th>
+                        <th scope="col">Rank</th>
                         <th scope="col">Position</th>
 
                         <th scope="col">Requires</th>

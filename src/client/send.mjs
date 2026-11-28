@@ -20,7 +20,7 @@ const redirectAnswered = (target, status, to) => new Error(
 let saidClientVersions = false;
 /** @typedef {(url: string, init: RequestInit) => Promise<Response>} BatonFetch */
 /** @param {string} url
- * @param {{path: string, method: string, body?: unknown}} p
+ * @param {{path: string, method: string, body?: unknown, runnerSecret?: string}} p
  * @param {string} keyFile
  * @param {BatonFetch} [fetchImpl]
  * @returns {Promise<{status: number, json: unknown, text: string}>}
@@ -31,7 +31,7 @@ export async function send(url, p, keyFile, fetchImpl = fetch, client = clientVe
   // A GET carries no body; its digest is of the empty one.
   const body = p.method === 'GET' ? undefined : JSON.stringify(p.body ?? {});
   const auth = cred.bearer !== undefined ? { Authorization: `Bearer ${cred.bearer}` } : signHeaders({ method: p.method, url: target, body, key: cred.key });
-  const headers = { 'Baton-Client': client, ...(body === undefined ? {} : { 'Content-Type': 'application/json' }), ...auth };
+  const headers = { 'Baton-Client': client, ...(body === undefined ? {} : { 'Content-Type': 'application/json' }), ...auth, ...(p.runnerSecret ? { 'X-Runner-Secret': p.runnerSecret } : {}) };
   // A Baton that does not answer in 30 seconds is reported, never waited on for ever (round 3, 3-A-5).
   let res;
   try {

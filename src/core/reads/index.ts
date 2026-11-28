@@ -125,7 +125,7 @@ export async function dispatchRead(cx: ReadCtx, req: Request, url: URL): Promise
     && repository !== null && (open === '1' || open === 'true') && url.searchParams.get('type') === 'interact'
     && cx.sql(`SELECT 1 FROM runner_grants WHERE credential_id = ? AND repository_id = ?
                AND revoked_at IS NULL AND deliver_interactions = 1`, principal.cred, repository).length > 0;
-  const call: ReadCall = { action: hit.action, principal, caller, repository, params, url, req: who.req, sessionLink, showInteractionLinks: principal.kind === 'session' || deliverInteractions };
+  const call: ReadCall = { action: hit.action, principal, caller, repository, params, url, req: who.req, sessionLink, runnerId: runner?.id, showInteractionLinks: principal.kind === 'session' || deliverInteractions };
   const conditional = route.etag === undefined ? true : route.etag === false ? false : route.etag(call);
   const etag = conditional ? etagOf(cx, call, route, runner) : null;
   if (etag && ifNoneMatch(req, etag)) return noStore(new Response(null, { status: 304, headers: { ETag: etag } }));

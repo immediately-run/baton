@@ -187,7 +187,7 @@ async function boardPost(core: BoardPostCore, repo: Repository, p: BoardPayload,
       acceptObservation();
       core.syncWants.posted(r, n, p.sha);
       if (readAtHead) {
-        rememberSource(core, r, p);
+        rememberSource(core, r, p, at);
         if (p.course_sources) core.store.exec(`UPDATE board_snapshots SET course_sources_json = ?
           WHERE repository_id = ? AND sha = ? AND course_sources_json IS NOT ?`,
           JSON.stringify(p.course_sources), r, p.sha, JSON.stringify(p.course_sources));
@@ -297,7 +297,7 @@ async function boardPost(core: BoardPostCore, repo: Repository, p: BoardPayload,
     // Needs you, naming the paths and the commits. A refresh carries the record again and
     // raises nothing new: the head it would name has not moved.
     applyControl(core, r, p, at, head);
-    rememberSource(core, r, p);
+    rememberSource(core, r, p, at);
     // A hold is against one head (R3-1223): when the head moves — an accepted rewrite or a
     // plain fast-forward — every row held against the head it leaves is retired, answered or
     // not. Left in place, an accepted row would accept a NEW rewrite silently whenever the
@@ -558,7 +558,13 @@ function requireBranchRegistryInForce(core: BoardPostCore, r: string, p: BoardPa
 /** B-183: the last accepted post's ticket-source declaration, kept on the head for the claim
  *  answer (§4.5: the runner re-verifies by the source's own way of reading). A post that
  *  declares none keeps what stood — an older CLI's post undeclares nothing. */
-function rememberSource(core: Pick<BatonCore, 'store'>, r: string, p: BoardPayload): void {
+function rememberSource(core: Pick<BatonCore, 'store' | 'conditions'>, r: string, p: BoardPayload, at: number): void {
+  // Only a reading that replaces the ticket rows can change this notice.
+  if (p.source && p.tickets) {
+    const closed = new Set(p.closed?.map((c) => c.id));
+    core.conditions.unranked(r, p.source.kind === 'markdown'
+      ? p.tickets.filter((t) => t.rank == null && !closed.has(t.id)).map((t) => t.id) : [], at);
+  }
   if (p.course_data !== undefined) core.store.exec('UPDATE board_head SET course_data = ? WHERE repository_id = ?', JSON.stringify(p.course_data), r);
   if (!p.source) return;
   core.store.exec('UPDATE board_head SET source_kind = ?, source_versions = ? WHERE repository_id = ?', p.source.kind, p.source.versions ?? null, r);

@@ -20,6 +20,7 @@ export interface Condition {
   closed_how?: string | null;
   resolve_url?: string;
   allowed?: string[];
+  detail?: { count?: number; ids?: string[] };
 }
 
 /** `condition.show`: the condition with its ticket's position and what waits on its ticket. */

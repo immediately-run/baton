@@ -8,7 +8,7 @@
 import type { SessionLinkView } from './links';
 import { claimFleetSql, isClaimLeaseLive } from './runnerLiveness';
 import { ATTEMPTS_HOLD_AT } from './attempts';
-import { CLAIM_LEASE_END_SQL, STALLED_MS } from './claims';
+import { CLAIM_LEASE_END_SQL, STALLED_MS, type Recommendation } from './claims';
 import { fileUrl, type Forge } from './links';
 import type { BatonCore } from './baton';
 import type { Row } from './ports';
@@ -90,6 +90,11 @@ export interface TicketRow {
   requires_unmet: string[];
   tags: string[];
   order: string | null;
+  rank: number | null;
+  to_end?: number | null;
+  ready_since?: number | null;
+  ready_position?: number | null;
+  offer_order?: Recommendation['order'];
   parent: string | null;
   expedite: boolean;
   /** R-BTN-83: where the head snapshot places it; null where it places it nowhere. */
@@ -130,17 +135,17 @@ export function ticketRows(cx: TicketsCtx, repo: string, sessionLink?: SessionLi
   const lo = `${repo}:`;
   const hi = `${repo};`;
   const tickets = cx.sql<{
-    id: string; title: string; course_id: string; tags: string; ord: string | null; parent: string | null; expedite: number; blocked_since: number | null;
+    id: string; title: string; course_id: string; tags: string; ord: string | null; rank: number | null; to_end: number | null; ready_since: number | null; parent: string | null; expedite: number; blocked_since: number | null;
     station: string | null; path_len: number | null; next_leg: string | null; leg_state: string | null; waiting_on: string | null;
     hold: number | null; hold_reason: string | null; retry_after: number | null; set_by: string | null; set_at: number | null; o_expedite: number | null;
   }>(
-    `SELECT t.id, t.title, t.course_id, t.tags, t.ord, t.parent, t.expedite, t.blocked_since,
+    `SELECT t.id, t.title, t.course_id, t.tags, t.ord, t.rank, s.to_end, a.ready_since, t.parent, t.expedite, t.blocked_since,
             s.station, s.path_len, s.next_leg, a.state AS leg_state, a.waiting_on,
             o.hold, o.hold_reason, o.retry_after, o.set_by, o.set_at, o.expedite AS o_expedite
      FROM tickets t LEFT JOIN ticket_stations s ON s.ticket_id = t.id
      LEFT JOIN ticket_next_legs a ON a.ticket_id = t.id AND a.leg = s.next_leg
      LEFT JOIN ticket_overrides o ON o.ticket_id = t.id
-     WHERE t.repository_id = ? ORDER BY t.expedite DESC, s.to_end, t.rank IS NULL, t.rank, t.id`, repo);
+     WHERE t.repository_id = ? ORDER BY (t.expedite OR COALESCE(o.expedite, 0)) DESC, s.to_end, t.rank IS NULL, t.rank, a.ready_since, t.id`, repo);
   const requires = new Map<string, string[]>();
   for (const r of cx.sql<{ ticket_id: string; name: string }>(
     'SELECT ticket_id, name FROM ticket_requires WHERE ticket_id >= ? AND ticket_id < ? ORDER BY ticket_id, name', lo, hi)) {
@@ -226,7 +231,7 @@ export function ticketRows(cx: TicketsCtx, repo: string, sessionLink?: SessionLi
     const req = requires.get(t.id) ?? [];
     rows.push({
       ticket_id: t.id, title: t.title, course: t.course_id, requires: req, requires_unmet: req.filter((r) => !held.has(r)),
-      tags: list(t.tags), order: t.ord, parent: t.parent, expedite: !!t.expedite || !!t.o_expedite,
+      tags: list(t.tags), order: t.ord, rank: t.rank, to_end: t.to_end, ready_since: t.ready_since, parent: t.parent, expedite: !!t.expedite || !!t.o_expedite,
       position: t.station == null ? null : { station: t.station, path_len: t.path_len ?? 0, next_leg: t.next_leg },
       state, reasons, detail,
     });
@@ -237,18 +242,18 @@ export function ticketRows(cx: TicketsCtx, repo: string, sessionLink?: SessionLi
     seen.add(id);
     const state: TicketState = c.unconfirmed ? 'unconfirmed' : 'running';
     rows.push({
-      ticket_id: id, title: null, course: null, requires: [], requires_unmet: [], tags: [], order: null, parent: null, expedite: false, position: null,
+      ticket_id: id, title: null, course: null, requires: [], requires_unmet: [], tags: [], order: null, rank: null, parent: null, expedite: false, position: null,
       state, reasons: c.unconfirmed && c.active ? ['running'] : [], detail: c.unconfirmed ? unconfirmed(c.unconfirmed) : running(c.active!),
     });
   }
   const rank = (s: TicketState) => TICKET_STATES.indexOf(s);
-  const ready = rows.filter((r) => r.state === 'ready');
+  const ready = rows.filter((r) => r.state === 'ready').map((r, i) => ({ ...r, ready_position: i + 1 }));
   const rest = rows.filter((r) => r.state !== 'ready').sort((a, b) => rank(a.state) - rank(b.state) || (a.ticket_id < b.ticket_id ? -1 : a.ticket_id > b.ticket_id ? 1 : 0));
   const closed: TicketRow[] = cx.sql<{ ticket_id: string; closed_as: string; closed_at: number; parent: string | null }>(
     'SELECT ticket_id, closed_as, closed_at, parent FROM closed_tickets WHERE ticket_id >= ? AND ticket_id < ? AND closed_at > ? ORDER BY closed_at DESC, ticket_id', lo, hi, now - CLOSED_LISTED_MS)
     .filter((c) => !seen.has(c.ticket_id))
     .map((c) => ({
-      ticket_id: c.ticket_id, title: null, course: null, requires: [], requires_unmet: [], tags: [], order: null, parent: c.parent, expedite: false, position: null,
+      ticket_id: c.ticket_id, title: null, course: null, requires: [], requires_unmet: [], tags: [], order: null, rank: null, parent: c.parent, expedite: false, position: null,
       state: 'closed' as const, reasons: [], detail: { at: c.closed_at, end: c.closed_as },
     }));
   return [...ready, ...rest, ...closed];
