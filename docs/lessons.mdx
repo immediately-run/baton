@@ -554,3 +554,21 @@ moved ticket. What changed: bering's CLI rolled back to `d78f5339`; the fix make
 self-contained and adds a test that runs it from an otherwise empty directory. Before moving a
 runner's CLI, run one source check by hand against it (`echo '[]' | node <wrapper> describe
 <home>/.baton/tickets.mjs` from a directory holding only the wrapper).
+
+## 2026-11-27 — `merged` in Baton is not "delivered", and an open ticket file is not open work
+
+Evidence: [interventions, 2026-11-27](interventions.mdx) (93 tickets);
+[#468](https://github.com/immediately-run/baton/pull/468) (the 0.1 plan, corrected after it
+ranked merged tickets); [#469](https://github.com/immediately-run/baton/pull/469) (the sweep and
+its list of 33); B-374.
+
+**Neither the ticket file nor Baton's station alone says whether work is done: a file stays
+`available` after any merge but the merge leg's, and Baton reaches `merged` from a PR that only
+filed, specified or partly built the ticket.** The two disagreed on 93 tickets; Baton recorded a
+`position-disagrees` for each and nothing acted on it. The file view put six finished tickets
+into the 0.1 plan's first phase; Baton's view hid 33 unfinished ones from every runner, B-122
+among them. What changed: before ranking or claiming from the ticket files, ask Baton
+(`baton tickets check <id> --claimable`, or `GET /v1/repositories/<repository>/tickets` for its
+station), and before trusting Baton's `merged`, read the PR the ticket merged on (a filing or
+spec PR, or a body that says partial, is not delivery). #469 closed the 56 delivered; B-374
+fixes both halves. *Still true* until B-374 lands.
