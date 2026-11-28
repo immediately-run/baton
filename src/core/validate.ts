@@ -9,7 +9,8 @@ import { CONDITION_TYPE, CONDITION_TYPE_MAX, RESTART_ID, SEVERITIES, isCoreOnly,
 import { parseSchemaId, VALUE_MAX_BYTES } from '../shared/schema.mjs';
 import { CLIENT_VERSION_MAX, compareVersions, parseVersion } from '../shared/versions.mjs';
 import type { ForgeDispatch } from './ports';
-import { MAX_FAULT_WINDOW_S } from './attempts';
+
+export const MAX_FAULT_WINDOW_S = 86_400;
 
 export function checkRunnerFaults(value: unknown) {
   const field = 'runner_faults';

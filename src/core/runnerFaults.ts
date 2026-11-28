@@ -1,7 +1,8 @@
 // S-BTN-6: attribute correlated retryable ends to a runner key.
 import type { Store } from './ports';
 import type { Conditions } from './conditions';
-import { HOUR, MAX_FAULT_WINDOW_S } from './attempts';
+import { HOUR } from './attempts';
+import { MAX_FAULT_WINDOW_S } from './validate';
 
 const FIRST_DELAY = 5 * 60_000;
 const DEFAULT_RUNNER_FAULTS = { tickets: 3, window_s: 900 };
