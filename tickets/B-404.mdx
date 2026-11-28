@@ -1,0 +1,49 @@
+---
+id: B-404
+status: available
+topics: [baton]
+owns: {}
+prs: []
+title: B-404 — create-pr gains a merged-by-hand fact leg and a reconcile leg, so a merge outside the merge leg arrives on the course
+depends_on: [B-401]
+order: 82
+tags: [roadmap-item]
+project: baton
+description: Declare merged-by-hand (arrives on pr-merged) from every station a PR exists at, and a reconcile leg for other evidence, in create-pr and standard-create-pr, so a PR a person merges at the forge moves its ticket to merged with no claim and no adopt.
+repos: [baton]
+---
+
+**Brief:** the owner, 2026-11-28 (in a Claude Code session), on merges that bypass the proxy: "By design, this should be infrequent, but it does happen even when the whole team uses baton eg: to merge PRs changing course leg logic." And the owner's ruling of 2026-11-26 in the ticket-ownership proposal: the courses that commit to the default branch gain reconcile legs before closure flips. The plan is [Baton 0.1](../docs/plans/baton-0-1.mdx), phase B.
+
+**Spec:** [R-BTN-69](../spec/BATON_SPEC/05-courses.md#sec-5-2) (`arrives`, `reconciles`), [R-BTN-203](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-2) (fact legs and the reconcile leg), [R-BTN-39](../spec/BATON_SPEC/01-what-baton-is.md#sec-1); `create-pr`'s contract in `docs/standard-courses.mdx`.
+
+**Depends on:** B-401.
+
+### Why
+
+`create-pr`'s course file declares no fact leg and no reconcile leg. So even once no snapshot places a ticket (B-120), a PR merged outside the merge leg has no edge to arrive on: its arrival is logged `arrival-unapplied` and the ticket stays where it was, until an owner adopts it. The core mechanism exists (`src/core/outsideWork.ts`, B-311); no course uses it.
+
+### What to build
+
+1. **A fact leg `merged-by-hand`** from every station a PR exists at (`pr-open`, `fixed`, `reviewed`, `adjudicated`) to `merged`, `arrives: {kind: "pr-merged"}`, its next leg the course's close (B-374's `close`, or none where `merged` stays the end).
+2. **A reconcile leg** from those stations, `reconciles: {to: [merged, …]}`, for evidence the fact leg does not take (a PR merged while its claim was active; a commit naming the ticket); its agent weighs the evidence and ends at the station the work reached.
+3. **The stubs and `standard-create-pr`** carry both, and this repository's `create-pr` course is regenerated (`baton repo init --check` clean).
+4. **`docs/standard-courses.mdx`** states the two legs.
+
+### Exit criteria
+
+- With B-343's fake forge and an attested `pr-merged`: a ticket at `reviewed` whose PR was merged by a person arrives at `merged` along `merged-by-hand`, with no claim.
+- Evidence that the fact leg does not take queues the reconcile leg, whose end places the ticket.
+- `npm test` and `npm run typecheck` green; each behaviour named in a scenario.
+
+### Trust
+
+The arrival's writer is whoever the policy names for `std:arrival@1`: the proxy's key once B-403 lands, the sync before it.
+
+### Invariants
+
+- A ticket moves only along an edge of its course file (R-BTN-39).
+
+## Status
+
+_filed 2026-11-28._

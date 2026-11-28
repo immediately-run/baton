@@ -1,0 +1,47 @@
+---
+id: B-403
+status: available
+topics: [baton]
+owns: {}
+prs: []
+title: "B-403 — The git proxy reads what merged: a cursor walk over each default branch, verified with the forge, attests pr-merged"
+depends_on: [B-401, B-402]
+order: 81
+tags: [roadmap-item]
+project: baton
+description: The proxy walks new default-branch commits from a stored cursor, finds each commit's PR by ancestry, message reference or the forge's lookup, verifies the merge with the forge, and attests std:arrival@1 as its service key; a filing PR or a commit with no PR attests nothing.
+repos: [baton]
+---
+
+**Brief:** the owner, 2026-11-28 (in a Claude Code session), on how Baton learns of a merge that bypasses the proxy: "inspecting git tree state - post merge, the changes are on main after all", and "If even squashed merges refer to their PRs in the merge commit message (a reference baton / fieldhouse can verify with the forge), then do we need all 3 layers?" The one-layer design is B-401's; the plan is [Baton 0.1](../docs/plans/baton-0-1.mdx), phase B.
+
+**Spec:** [R-BTN-192](../spec/BATON_SPEC/12-security.md#sec-12-8) (the fact reader, as B-401 rewrites it), [R-BTN-203](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-2) (`std:arrival@1` and `std:evidence@1`), [R-BTN-39](../spec/BATON_SPEC/01-what-baton-is.md#sec-1) (fact arrivals), [R-BTN-191](../spec/BATON_SPEC/12-security.md#sec-12-8) (which writers count).
+
+**Depends on:** B-401, B-402.
+
+### What to build
+
+1. **The cursor walk.** For each registered repository, the proxy stores the last default-branch commit it processed. About once a minute it reads the default branch's head; when it moved, it walks the new commits in order and advances the cursor only past commits it has finished with.
+2. **Finding a commit's PR**, in order: (a) the commit's ancestry contains a branch head B-402 relayed under a claim's grant; (b) the message's PR reference (`Merge pull request #N`, or a squash title's `(#N)`); (c) the forge's commit-to-PR lookup (GitHub: `GET /repos/{owner}/{repo}/commits/{sha}/pulls`; the GitLab and Gitea equivalents in the forge table). On plain git, (a) alone.
+3. **Verifying it with the forge.** The PR merged; its merge commit is this commit (or, for a rebase merge, this commit is among the PR's landed commits); its base is the default branch; its head is a branch a claim pushed for a live ticket. Any check failing: attest nothing, and log the commit and why.
+4. **Attesting.** One `std:arrival@1` of kind `pr-merged` for the ticket, `ref` the PR, written as the proxy's `service:` key (R-BTN-181), which the policy's `attestations` entry names. R-BTN-39 applies it along the course's fact leg, or keeps it as evidence for the reconcile leg.
+5. **Restart and outage.** A proxy that was down resumes from its cursor; a cursor that is no longer an ancestor of the default branch's head (a rewritten history, which the deployment's duty forbids) raises a repository condition and attests nothing until an owner resets it.
+
+### Exit criteria
+
+- With B-343's fake forge: a merge commit, a squash with `(#N)`, a squash whose message was edited, and a rebase merge each produce one `pr-merged` arrival for the right ticket; a filing PR on a `baton-ticket/*` branch and a commit with no PR produce none.
+- A proxy stopped across three merges attests all three, once each, when it restarts.
+- `npm test` and `npm run typecheck` green; each behaviour named in a scenario.
+
+### Trust
+
+Git and the commit message are hints of where to look; only the forge's answer, read with the proxy's credential, becomes an attestation (values #6). The arrival counts only as the key the policy names.
+
+### Invariants
+
+- An arrival is attested at most once per PR (R-BTN-39's `ref` rule).
+- No commit's message alone moves a ticket.
+
+## Status
+
+_filed 2026-11-28._

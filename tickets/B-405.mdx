@@ -1,0 +1,45 @@
+---
+id: B-405
+status: available
+topics: [baton]
+owns: {}
+prs: []
+title: "B-405 — Retire the sync's forge half: the sync reads the ticket store only, and Baton stops dispatching forge syncs"
+depends_on: [B-403, B-404, B-120]
+order: 83
+tags: [roadmap-item]
+project: baton
+description: Once the proxy reads what merged, baton repo sync stops running the fact adapter and posting forge facts, R-BTN-94's forge dispatches and R-BTN-73's notifications go, and this repository's sync workflow shrinks to the ticket store (its .github edit is the owner's).
+repos: [baton]
+---
+
+**Brief:** the owner, 2026-11-28 (in a Claude Code session): "The plan is to drop git forge sync which become unnecessary once we have the git proxy in place. This should be included in 0.1", the forge half only. The design is B-401's; the plan is [Baton 0.1](../docs/plans/baton-0-1.mdx), phase B.
+
+**Spec:** [R-BTN-74](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-2) (the sync), [R-BTN-139](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-4) (the fact adapter), [R-BTN-94](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-3) and [R-BTN-73](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-3), as B-401 amends them.
+
+**Depends on:** B-403, B-404, B-120.
+
+### What to build
+
+1. **The sync reads the ticket store only.** `baton repo sync` posts the ticket source's tickets and closures; it no longer runs the fact adapter, reads PRs, reviews or `baton:` markers, or posts `std:arrival@1` or `std:evidence@1`. The station function's forge reads go with it (its placement is B-120's to remove).
+2. **Baton stops asking for forge syncs.** R-BTN-94's dispatches for forge reasons and the forge notifications that triggered them (R-BTN-73) are removed, with their routes, settings and tests. A ticket-store change still triggers a sync.
+3. **This repository's sync workflow** shrinks to the ticket store: no forge read token, no schedule beyond what the ticket store needs. Editing `.github/workflows/baton-sync.yml` is the owner's act: the PR carries the new file as a proposal under `docs/` and says so.
+4. **The fact adapter's code** moves to the proxy (B-403 uses it) or is deleted; nothing in the sync imports it.
+
+### Exit criteria
+
+- A sync over this repository posts tickets and closures and no forge fact; `grep` finds no fact-adapter import in the sync's code.
+- The dispatch and notification routes are gone, with their tests; `npm run check:api` green.
+- `npm test` and `npm run typecheck` green; the scenarios that tested the removed behaviour retired in `spec/BATON_SPEC_HISTORY.md`.
+
+### Trust
+
+Removes a writer: the sync's key no longer writes forge facts, so the policy's `attestations` entries for `std:arrival@1` and `std:evidence@1` name the proxy's key alone.
+
+### Invariants
+
+- Tickets still reach Baton from their store, as R-BTN-74 says.
+
+## Status
+
+_filed 2026-11-28._

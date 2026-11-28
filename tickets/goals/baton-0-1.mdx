@@ -6,9 +6,15 @@ priority: 1
 needs:
   - B-366
   - B-374
+  - B-120
+  - B-401
+  - B-402
+  - B-403
+  - B-404
+  - B-405
 tags:
   - goal
-description: The runner works three days without an intervention, on the right tickets in order, following the course, at full capacity, and 0.1 is released on that evidence — B-366, the open work it depends on, and B-374.
+description: The runner works three days without an intervention, on the right tickets in order, following the course, at full capacity, and 0.1 is released on that evidence — B-366, the open work it depends on, B-374, and phase B's git proxy (B-120, B-401 to B-405).
 kind: goal
 nav: Goal
 order: 1
@@ -24,13 +30,18 @@ important first) 2. It follow the course as expected 3. It operates at full capa
 order of importance, most important first." The plan is
 [Baton 0.1](../../docs/plans/baton-0-1.mdx).
 
-`needs` names two tickets:
+`needs` names:
 
 - **B-366**, the operator ticket that runs the 72-hour soak and makes the release. Its
-  `depends_on` carries phases A and B of the plan, so the goal's open work is that list.
-- **B-374**, which B-366 does not yet list: Baton takes a merged filing, spec or partial PR for
-  delivery, so 33 tickets sit at `merged` that no runner is offered. That is criterion 1 failing
-  before the soak starts.
+  `depends_on` carries phase A and the selector phase, so the goal's open work starts with that
+  list.
+- **Phase B, the git proxy** (the owner, 2026-11-28: "drop git forge sync … once we have the git
+  proxy in place. This should be included in 0.1"): B-401 to B-405 and B-120. B-366 does not list
+  them yet (the plan's D9), so the goal names them itself. They make Baton's record the one
+  place a ticket's position comes from, as R-BTN-39 already says.
+- **B-374**: a ticket Baton holds at `merged` is closed in its store, and the 33 tickets Baton
+  holds at `merged` without delivery go back on the course. Until then, open work is offered to
+  no runner: criterion 1 failing before the soak starts.
 
 ## The open work
 
@@ -48,11 +59,19 @@ order of importance, most important first." The plan is
 | 55 | B-365 | 3 | Any repeated host failure; rotated keys |
 | 70 | B-364 | 2 | PRs left conflicting with `main` |
 | 75 | B-368 | all | `baton report soak`, the check that decides the release |
-| 100–125 | B-352, B-353, B-356, B-355, B-354, B-357 | 2 | Phase B: one selector per course, with a verdict that says why |
+| 76 | B-401 | 2 | Specify the git proxy: relay, cursor walk, the sync's forge half retired |
+| 78 | B-120 | 1, 2 | Snapshots placing tickets (rank pending D9) |
+| 79 | B-402 | 2 | Forge credentials in legs: the proxy's relay and per-claim tokens |
+| 81 | B-403 | 2 | Merges Baton misses or misreads: the cursor walk, verified with the forge |
+| 82 | B-404 | 2 | Hand merges with no edge in `create-pr`: a fact leg and a reconcile leg |
+| 83 | B-405 | 2 | The sync's forge half |
+| 100–125 | B-352, B-353, B-356, B-355, B-354, B-357 | 2 | Phase C: one selector per course, with a verdict that says why |
 | 150 | B-366 | all | The rehearsal, the release soak and the 0.1 tag |
 
-B-359 to B-365 and B-368 can run in parallel; B-366's rehearsal follows phase A, and its release
-soak follows phase B (decision D2 of the plan, default (a)). B-324, B-249, B-337, B-347 and
+B-359 to B-365 and B-368 can run in parallel; B-401 starts phase B, and phase C (the selector)
+follows it, so a selector reads facts from the proxy, never from the sync's forge half. B-366's
+rehearsal follows phase A; its release soak follows phases B and C (C by decision D2 of the plan,
+default (a)). B-324, B-249, B-337, B-347 and
 B-311 in B-366's `depends_on` are delivered and close with
 [#469](https://github.com/immediately-run/baton/pull/469).
 
@@ -72,4 +91,5 @@ The `order` of every ticket above already puts this work first; only expedite an
 
 - **B-240 and B-250** at `order` 2 and 3 (decision D5, default (a): move them after phase A).
 - **B-122**, which builds goals, is itself one of the 33 tickets Baton holds at `merged` without
-  delivery, so no runner will build it until B-374's item 5 puts it back on the course.
+  delivery, so no runner will build it until B-374 puts it back on the course.
+- **B-120** still sorts at `order` 1095 until D9 moves it to 78.
