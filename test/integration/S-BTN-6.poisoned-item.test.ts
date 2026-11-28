@@ -2,7 +2,7 @@
 // lease-lost, cannot-finish:transient. Must hold: held attempts-exhausted (the mirror's note and
 // the owner-inbox report are R3-1218's and the witness's); lifting the hold resets the count.
 import { describe, it, expect, inject, beforeEach } from 'vitest';
-import { advance, beat, claimItem, cutover, endClaim, Git, grantRunnerConcurrency, ORIGIN, ownerCall, payload, refresh, register, rows, setClock, syncCall, tick, stateView } from '../helpers';
+import { advance, beat, claimItem, cutover, endClaim, Git, grantRunnerConcurrency, ORIGIN, ownerCall, payload, refresh, register, rows, seedRetryPolicy, setClock, syncCall, tick, stateView } from '../helpers';
 
 const board = inject('board');
 const T0 = Date.parse('2026-10-13T12:00:00Z');
@@ -94,7 +94,7 @@ const notices = () => rows<{ id: number; type: string; detail_json: string }>(
 it('S-BTN-6 restores ten tickets, lifts only burst holds, and recovers on a leg outcome', async () => {
   const git = await faultBoard(12);
   // A one-attempt repository exercises the retroactive hold/decision removal.
-  await rows('UPDATE repositories SET retry = ? WHERE id = ?', JSON.stringify({ backoff_ms: [minute], max_failed: 1 }), 'docs');
+  await seedRetryPolicy({ backoff_ms: [minute], max_failed: 1 });
   const a = await runner('vm-a');
   const b = await runner('vm-b');
   const ids = await take(a, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9);
@@ -145,7 +145,7 @@ it('S-BTN-6 deduplicates fleet and runner notices and doubles a repeated backoff
 
 it('S-BTN-6 keeps a solitary ticket exhausted and non-retryable ends out of a burst', async () => {
   const git = await faultBoard(4);
-  await rows('UPDATE repositories SET retry = ? WHERE id = ?', JSON.stringify({ backoff_ms: [minute], max_failed: 3 }), 'docs');
+  await seedRetryPolicy({ backoff_ms: [minute], max_failed: 3 });
   const a = await runner('vm-a');
   for (let i = 0; i < 3; i++) {
     await setClock(start + i * minute);

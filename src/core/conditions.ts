@@ -276,9 +276,9 @@ export class Conditions {
   notifyCore(repo: string, type: string, ref: string | null, detail: Record<string, unknown>) {
     const now = this.c.now();
     const prior = this.rows<{ id: number; outcome: string }>(`SELECT id, outcome FROM conditions
-      WHERE repository_id = ? AND type = ? AND ticket_id IS NULL AND ref IS ?
+      WHERE repository_id = ? AND type = ? AND ticket_id IS NULL AND COALESCE(ref, '') = ?
         AND (outcome = 'open' OR closed_at >= ?) ORDER BY outcome = 'open' DESC, closed_at DESC, id DESC LIMIT 1`,
-    repo, type, ref, now - HOUR)[0];
+    repo, type, ref ?? '', now - HOUR)[0];
     const json = JSON.stringify(detail);
     if (prior?.outcome === 'open') {
       this.exec('UPDATE conditions SET detail_json = ? WHERE id = ?', json, prior.id);
@@ -293,7 +293,7 @@ export class Conditions {
 
   closeCore(repo: string, type: string, ref: string | null) {
     this.exec(`UPDATE conditions SET outcome = 'closed', closed_at = ?, closed_how = 'cause-ended'
-      WHERE repository_id = ? AND type = ? AND ticket_id IS NULL AND ref IS ? AND outcome = 'open'`, this.c.now(), repo, type, ref);
+      WHERE repository_id = ? AND type = ? AND ticket_id IS NULL AND COALESCE(ref, '') = ? AND outcome = 'open'`, this.c.now(), repo, type, ref ?? '');
   }
 
   // ── the reads (R-BTN-163: Needs you, and the list a delivery runner polls) ───────────────

@@ -209,6 +209,11 @@ let requests = 0;
 /** A fresh client-generated `request_id`. */
 export const requestId = () => `req-${++requests}-${Math.random().toString(16).slice(2, 10)}`;
 
+/** Seed a retry setting for scenarios testing failure handling, not settings authorization. */
+export function seedRetryPolicy(policy: { backoff_ms: number[]; max_failed: number }, repository = 'docs') {
+  return rows('UPDATE repositories SET retry = ? WHERE id = ?', JSON.stringify(policy), repository);
+}
+
 /** `POST /v1/runner/claim`; returns the status and the body. */
 export async function claimItem(cred: keyof typeof TOKENS, secret: string, body: Record<string, unknown> = {}, client?: string) {
   const res = await runnerCall('/v1/runner/claim', { cred, secret, body: { request_id: requestId(), ...body }, ...(client ? { client } : {}) });
