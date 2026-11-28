@@ -1054,7 +1054,7 @@ export class Admin {
   async setSettings(actor: string, repository: string, body: unknown) {
     if (!isObj(body)) bad('body', 'must be a JSON object');
     const b = body as Record<string, unknown>;
-    only(b, ['required_bars', 'retry', 'transcript_repos', 'artifact_buckets', 'unblocked_trigger', 'remind_after', 'scope_policy', 'runner_pushers', 'code_repos', 'pushers', 'require_signed_control', 'checks'], 'body');
+    only(b, ['required_bars', 'retry', 'exhausted_retry_s', 'transcript_repos', 'artifact_buckets', 'unblocked_trigger', 'remind_after', 'scope_policy', 'runner_pushers', 'code_repos', 'pushers', 'require_signed_control', 'checks'], 'body');
     if (!Object.keys(b).length) bad('body', 'names at least one setting');
     // R-BTN-114: a check's conclusion decides what branch protection sees, so the map is the
     // owners', not an agent's — refused here, before the approver question, whichever it changes.
@@ -1098,6 +1098,11 @@ export class Admin {
     }
     if (b.required_bars !== undefined) sets.push(['required_bars', JSON.stringify(this.checkRequiredBars(repository, b.required_bars))]);
     if (b.retry !== undefined) sets.push(['retry', b.retry === null ? null : JSON.stringify(checkRetry(b.retry))]);
+    if (b.exhausted_retry_s !== undefined) {
+      const s = b.exhausted_retry_s;
+      if (typeof s !== 'number' || !Number.isInteger(s) || s < 1 || s > 30 * 86400) bad('exhausted_retry_s', 'must be whole seconds from 1 to 2592000');
+      sets.push(['exhausted_retry_s', String(s)]);
+    }
     // B-127 (R-BTN-66 as amended): whether the repository's control inputs count only at
     // owner-signed commits. Turning it on tightens (any owner may); off is a loosening below.
     if (b.require_signed_control !== undefined) {
@@ -1192,6 +1197,7 @@ export class Admin {
     }
     const flat = ['retry', 'transcript_repos', 'artifact_buckets'];
     for (const [k, v] of sets) {
+      if (k === 'exhausted_retry_s' && Number(v) < this.rows<{ s: number }>('SELECT exhausted_retry_s AS s FROM repositories WHERE id = ?', repository)[0].s) return true;
       if (flat.includes(k)) {
         const old = k === 'retry' ? this.retry(repository) : null;
         const before = k === 'transcript_repos' || k === 'artifact_buckets' ? JSON.parse(this.rows<{ v: string | null }>(`SELECT ${k} AS v FROM repositories WHERE id = ?`, repository)[0]?.v ?? 'null') : old;
@@ -1373,7 +1379,7 @@ export class Admin {
       // §14: probes too, with the instances each may report on (round 3, 3-A-3).
       probes: this.rows(`SELECT id AS fingerprint, label, allowed_instances, created_by FROM credentials WHERE kind = 'probe' AND revoked_at IS NULL ORDER BY label`),
       bars: this.bars(null, now, true),
-      settings: this.rows<Record<string, unknown>>('SELECT id AS repository_id, forge, web_base, required_bars, retry, transcript_repos, unblocked_trigger, remind_after_s AS remind_after, scope_policy, runner_pushers, pushers, require_signed_control FROM repositories WHERE retired_at IS NULL ORDER BY id').map((s) => ({
+      settings: this.rows<Record<string, unknown>>('SELECT id AS repository_id, forge, web_base, required_bars, retry, exhausted_retry_s, transcript_repos, unblocked_trigger, remind_after_s AS remind_after, scope_policy, runner_pushers, pushers, require_signed_control FROM repositories WHERE retired_at IS NULL ORDER BY id').map((s) => ({
         ...s,
         // B-182: the home's code repositories beside the column settings — its own table's rows,
         // as the observation hands them to the sync, so the CLI and the dashboard read one shape.

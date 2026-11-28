@@ -302,13 +302,13 @@ describe('S-BTN-206 opaque ticket versions', () => {
     await seedTicketOverride({ ticket_id: 'docs:T-2', hold: 1, hold_reason: 'two', retry_after: T0 + 7_200_000, set_by: 'owner:y', set_at: T0 });
     // The post drops T-1 while the SURVIVING T-2 takes its key: the move the spec names is a
     // post that ADDS a ticket at the key of one it drops (R-BTN-147) — T-2 was already on the
-    // board, so nothing moves: no event, and each keeps its own hold.
+    // board, so nothing moves: no renumbering event, and T-2 keeps its own hold.
     git.close('T-1', 'withdrawn');
     git.tickets.set('T-2', tracked('T-2', 'rev-2:dddddddd', { key: 'linear:issue-T-1' }));
     const res = await git.post(CURRENT) as Record<string, any>;
     expect(res.renumbered).toBeUndefined();
     expect(await rows('SELECT ticket_id, hold_reason FROM ticket_overrides ORDER BY ticket_id')).toEqual([
-      { ticket_id: 'docs:T-1', hold_reason: 'one' },
+      { ticket_id: 'docs:T-1', hold_reason: null }, // B-360: the withdrawal settles this hold.
       { ticket_id: 'docs:T-2', hold_reason: 'two' },
     ]);
     expect(await rows(`SELECT 1 FROM events WHERE kind = 'renumbered'`)).toEqual([]);

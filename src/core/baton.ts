@@ -433,6 +433,7 @@ export class BatonCore {
         lapse = this.blocks.batch(() => {
           const next = this.resources.alarm();
           if (this.blocks.liveChanged()) this.blocks.recount();
+          if (this.ownerState.frozenAt() == null) this.claims.retryExhausted(this.now());
           this.blocks.raiseStalled(this.now());
           return next;
         });

@@ -442,8 +442,15 @@ export class Blocks {
     this.exec('DELETE FROM ticket_blocks WHERE ticket_id = ?', id);
     this.exec('DELETE FROM leg_needs WHERE ticket_id = ?', id);
     // Its decisions close with it, and so do their notices (R-BTN-80).
-    this.c.decisions.closed(id, this.rows<{ decision_id: string }>('SELECT decision_id FROM ticket_decisions WHERE ticket_id = ?', id).map((d) => d.decision_id));
+    this.closeDecisions(id, false);
+  }
+
+  closeDecisions(id: string, refresh = true) {
+    const ids = this.rows<{ decision_id: string }>('SELECT decision_id FROM ticket_decisions WHERE ticket_id = ?', id).map((d) => d.decision_id);
+    if (!ids.length) return;
+    this.c.decisions.closed(id, ids);
     this.exec('DELETE FROM ticket_decisions WHERE ticket_id = ?', id);
+    if (refresh) this.write([id], ['decision']);
   }
 
   // ── Baton's own decisions (R-BTN-78) ─────────────────────────────────────────────────────

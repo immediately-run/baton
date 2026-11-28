@@ -41,7 +41,7 @@ describe('S-BTN-306 the cutover’s retired routes (B-203)', () => {
 
   it('the session’s write surface stands, each a registry entry a session may call', async () => {
     const kept = ['/v1/ui/messages', '/v1/ui/overrides/{ticket}', '/v1/ui/resync', '/v1/ui/board/accept', '/v1/ui/scope/{finding}/resolve', '/v1/ui/claims/{claim}/reap',
-      '/v1/ui/claims/{claim}/fence-clear', '/v1/ui/claims/{claim}/confirm', '/v1/ui/claims/{claim}/release', '/v1/ui/cutover', '/v1/ui/adoptions/{ticket}/confirm', '/v1/ui/logout'];
+      '/v1/ui/claims/{claim}/fence-clear', '/v1/ui/claims/{claim}/confirm', '/v1/ui/claims/{claim}/release', '/v1/ui/cutover', '/v1/ui/adoptions/{ticket}/confirm', '/v1/ui/logout', '/v1/ui/repositories/{repository}/resolve'];
     const posts = ACTIONS.filter((a) => a.http.method === 'POST' && (a.ui?.route ?? a.http).path.startsWith('/v1/ui/'));
     expect([...new Set(posts.map((a) => (a.ui?.route ?? a.http).path))].sort()).toEqual([...kept].sort());
     for (const a of posts) expect([a.id, listsSession(a)]).toEqual([a.id, true]);

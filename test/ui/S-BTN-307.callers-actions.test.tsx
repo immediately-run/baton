@@ -9,7 +9,7 @@
 //      administrator's), and neither is drawn an entry the other alone holds;
 //   3. a session listed no entry is drawn no control, on any screen — the reads' `allowed`
 //      words alone draw nothing;
-//   4. the screens no entry names — Conditions, the Resolve page, Attestations, `/instances`
+//   4. the screens no entry names — the Resolve page, Attestations, `/instances`
 //      — draw no control for any caller.
 // The registry is the real one (src/core/actions.ts): an entry added to a screen is covered
 // here without an edit.
@@ -32,8 +32,8 @@ const VIEW: Record<PageId, string> = {
   'repository/sync': 'repository/sync',
   'tenant/instances': 'tenant/instances',
 };
-const WITH_CONTROLS: PageId[] = ['repository/tickets', 'repository/tickets/{ticket}', 'repository/runners', 'repository/runners/{runner}', 'repository/sync'];
-const WITHOUT: PageId[] = ['repository/conditions', 'repository/conditions/{condition}', 'repository/attestations', 'tenant/instances'];
+const WITH_CONTROLS: PageId[] = ['repository/tickets', 'repository/tickets/{ticket}', 'repository/runners', 'repository/runners/{runner}', 'repository/sync', 'repository/conditions'];
+const WITHOUT: PageId[] = ['repository/conditions/{condition}', 'repository/attestations', 'tenant/instances'];
 
 const CALLERS: [string, 'administrator' | 'owner', ListedAction[]][] = [
   ['an administrator’s session', 'administrator', actionsFor('administrator')],
@@ -48,7 +48,11 @@ afterEach(() => {
 /** The registry entries behind the controls drawn: a control's button carries its entry's
  *  summary as its description (`title`), and nothing else on a screen is a `.control`. */
 async function drawn(page: PageId, role: 'administrator' | 'owner', actions: ListedAction[]): Promise<string[]> {
-  mockFetch(screenRoutes('a value', 'https://claude.ai/code/session_1', actions, role));
+  const routes = screenRoutes('a value', 'https://claude.ai/code/session_1', actions, role);
+  Object.assign(routes['/v1/repositories/docs/needs-you'] as object, {
+    retry_decisions: [{ ticket_id: 'docs:HELD', station: 'station-a' }],
+  });
+  mockFetch(routes);
   renderApp(PAGES[page]);
   // A tenant screen is an administrator's: an owner's session is shown no such page, and so
   // nothing of it.
@@ -78,6 +82,8 @@ describe('S-BTN-307 a screen draws only its caller’s actions (B-191, B-216)', 
       const ids = await drawn(page, role, actions);
       if (page === 'repository/tickets') {
         expect(ids).toEqual(role === 'administrator' ? ['claim.confirm', 'claim.release'] : []);
+      } else if (page === 'repository/conditions') {
+        expect(ids).toEqual(role === 'administrator' ? ['owner.resolve-all'] : []);
       } else {
         expect([page, ids.length > 0]).toEqual([page, role === 'administrator' || ids.length > 0]);
       }

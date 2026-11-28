@@ -16,7 +16,7 @@ export interface Control {
   label: string;
   /** `effect: destructive` (§12.2). */
   destructive: boolean;
-  /** A destructive entry whose input takes `confirm`: the dialog sends `confirm: true`. A
+  /** An entry whose input takes `confirm`: the dialog sends `confirm: true`. A
    *  destructive entry whose input has no `confirm` is one click (Decision 3a: Stop). */
   dialog: boolean;
   form: FormSpec;
@@ -41,7 +41,7 @@ export function controlsOf(actions: readonly Action[], view: string, context: Re
     const path = routeOf(route.path, context);
     if (path === null) continue; // the screen holds no target for it (no live claim, say)
     const destructive = entry.effect === 'destructive';
-    const dialog = destructive && entry.input?.properties?.confirm !== undefined;
+    const dialog = entry.input?.properties?.confirm !== undefined;
     out.push({ entry, label: labelOf(entry.summary, dialog), destructive, dialog, form: formOf(entry, context), method: route.method, path });
   }
   // The primary act first, destructive ones last (the mockup's rows); the registry's order within.

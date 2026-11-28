@@ -145,7 +145,7 @@ describe('G-BTN-31 through the server', () => {
     expect((await claimRow(c.json.claim_id)).status).toBe('active');
   });
 
-  it('lifting a hold resets the count, clears the backoff, and is the only way back', async () => {
+  it('manually lifting a hold before its automatic retry resets the count and clears the backoff', async () => {
     const a = await register('vm-a');
     for (let i = 0; i < 3; i++) {
       await setClock(T0 + i * 5 * H);
@@ -155,8 +155,8 @@ describe('G-BTN-31 through the server', () => {
       await endClaim('vm-a', a.secret, c.json.claim_id, { end_reason: 'released:cannot-finish:transient' });
     }
     expect((await override('docs:R3-9001'))!.hold).toBe(1);
-    // Nothing lifts it by itself.
-    await setClock(T0 + 30 * 24 * H);
+    // It stays held before the 24-hour delay.
+    await setClock(T0 + 33 * H);
     await tick();
     await beat('vm-a', a.secret);
     expect((await claimItem('vm-a', a.secret, { ticket_id: 'docs:R3-9001' })).json.rule).toBe(3);
@@ -167,7 +167,7 @@ describe('G-BTN-31 through the server', () => {
     expect(c.status).toBe(200);
     // One more failure after the lift is the first again: 1 h, not a hold.
     await endClaim('vm-a', a.secret, c.json.claim_id, { end_reason: 'released:cannot-finish:transient' });
-    expect(await override('docs:R3-9001')).toMatchObject({ hold: 0, retry_after: T0 + 30 * 24 * H + H });
+    expect(await override('docs:R3-9001')).toMatchObject({ hold: 0, retry_after: T0 + 34 * H });
   });
 
   it('the owner can hold and expedite through overrides; each change is an override event', async () => {

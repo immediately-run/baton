@@ -243,6 +243,7 @@ export const CONDITION_READS: ReadRoute[] = [
         repository,
         conditions,
         questions: questionsOf(cx, call.principal, repository),
+        retry_decisions: cx.core.claims.retryDecisions(repository),
         listings: listingsOf(cx, repository, now, isAdministrator(call.principal)),
         held_posts: cx.sql<{ n: number }>('SELECT COUNT(*) AS n FROM held_snapshots WHERE repository_id = ? AND accepted_at IS NULL', repository)[0].n,
         elsewhere: INSTANCE_LISTINGS,

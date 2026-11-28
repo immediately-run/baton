@@ -55,6 +55,7 @@ export interface NeedsYou {
   repository: string;
   conditions: Condition[];
   questions: Question[];
+  retry_decisions?: { ticket_id: string; station: string | null; opened_at: number | null }[];
   listings: Record<string, ListingRow[]>;
   held_posts: number;
   elsewhere: string[];
